@@ -12,7 +12,7 @@ namespace QuickER.Tests.Gui.Views;
 /// </summary>
 /// <remarks>
 /// <para>
-/// トグルとポップアップ開閉の同期・5 トグルの束縛先はいずれも XAML 配線（ElementName 束縛）で、
+/// トグルとポップアップ開閉の同期・6 トグルの束縛先はいずれも XAML 配線（ElementName 束縛）で、
 /// VM テストでは守れない（束縛先を間違えても WPF は無言で何も起きない）。
 /// </para>
 /// <para>
@@ -22,8 +22,8 @@ namespace QuickER.Tests.Gui.Views;
 /// </remarks>
 public class ViewGroupPopupTests
 {
-    /// <summary>トグルとポップアップの開閉同期・5 トグルの束縛・項目クリックで閉じないことを検証する</summary>
-    [Fact(DisplayName = "表示グループ: トグルで開閉・5 トグル束縛・項目クリックでは閉じない")]
+    /// <summary>トグルとポップアップの開閉同期・6 トグルの束縛・項目クリックで閉じないことを検証する</summary>
+    [Fact(DisplayName = "表示グループ: トグルで開閉・6 トグル束縛・項目クリックでは閉じない")]
     public void ViewGroup_TogglePopupAndItemWiring()
     {
         RunInIsolatedWindow(AssertViewGroup);
@@ -46,13 +46,14 @@ public class ViewGroupPopupTests
         var panel = (StackPanel)((Border)popup.Child!).Child!;
         var toggles = panel.Children.OfType<ToggleButton>().ToList();
 
-        // 並び順はツールボックス → プロパティパネル → 説明表示 → NULL 表示 → 簡易表示
-        toggles.Should().HaveCount(5);
+        // 並び順はツールボックス → プロパティパネル → 説明表示 → NULL 表示 → 簡易表示 → 全画面
+        toggles.Should().HaveCount(6);
         toggles[0].IsChecked.Should().Be(vm.IsToolboxVisible);
         toggles[1].IsChecked.Should().Be(vm.IsPropertyPanelVisible);
         toggles[2].IsChecked.Should().Be(vm.ShowColumnDescriptionsInDiagram);
         toggles[3].IsChecked.Should().Be(vm.ShowNullabilityInDiagram);
         toggles[4].IsChecked.Should().Be(vm.IsCompactViewInDiagram);
+        toggles[5].IsChecked.Should().Be(vm.IsFullScreen);
 
         // 各トグルが対応する VM プロパティへ双方向に束縛されている
         AssertTwoWay(toggles[0], () => vm.IsToolboxVisible, value => vm.IsToolboxVisible = value);
@@ -87,6 +88,12 @@ public class ViewGroupPopupTests
         groupToggle.IsChecked = false;
         DoEvents();
         popup.IsOpen.Should().BeFalse();
+
+        // 全画面だけは最後に確かめる。束縛は同じ双方向だが、切り替えるとポップアップが閉じる
+        // （ウィンドウの形が変わるため＝FullScreen_ClosesViewGroupPopup が固定）ので、
+        // 上の「閉じない」検証と同じ流れには置けない
+        AssertTwoWay(toggles[5], () => vm.IsFullScreen, value => vm.IsFullScreen = value);
+        vm.IsFullScreen.Should().BeFalse("検証の前後で全画面のままにしない");
     }
 
     /// <summary>トグルと VM プロパティが双方向に束縛されていることを、両方向へ動かして確かめる</summary>

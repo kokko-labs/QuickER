@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -227,6 +229,269 @@ public class PanelVisibilityTests
                 vm.SelectedEntity.Columns[0]
                     .Name.Should()
                     .Be("NewName", "セル編集中に畳んでも入力を捨ててはいけない");
+            }
+        );
+    }
+
+    /// <summary>
+    /// 全画面のときだけツールバー右端に終了ボタンが出て、押すとウィンドウが閉じることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 全画面ではタイトルバーごと隠れるため × が無い。その代わりを務めるので、押したときの経路は
+    /// <see cref="Window.Close"/>（＝自動保存を通る）に揃える。確認は出さない（元の × が出さないため）。
+    /// このテストは <c>Closing</c> を取り消して実際には閉じない（後始末はヘルパーに任せる）。
+    /// </remarks>
+    [Fact(DisplayName = "全画面表示: 終了ボタンは全画面のときだけ出て、押すと閉じる経路を通る")]
+    public void FullScreen_ExitButton_IsShownAndClosesWindow()
+    {
+        RunInIsolatedWindow(
+            (vm, window) =>
+            {
+                var exitButton = (Button)window.FindName("ExitAppButton")!;
+
+                exitButton
+                    .Visibility.Should()
+                    .Be(Visibility.Collapsed, "通常表示では × が出ている");
+
+                vm.IsFullScreen = true;
+                DoEvents();
+                exitButton.Visibility.Should().Be(Visibility.Visible);
+
+                var closing = 0;
+                void Cancel(object? sender, CancelEventArgs e)
+                {
+                    closing++;
+                    e.Cancel = true;
+                }
+
+                window.Closing += Cancel;
+
+                try
+                {
+                    exitButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent, exitButton));
+                    DoEvents();
+                }
+                finally
+                {
+                    window.Closing -= Cancel;
+                }
+
+                closing.Should().Be(1, "タイトルバーの × と同じく Closing（自動保存）を通る");
+
+                // タブ順には入れない。ツールバーへ Tab を入れた一撃目が「終了」になると、
+                // 確認を出さない設計と相まって Space / Enter でそのままアプリが終わる。
+                // タイトルバーの × はクライアント領域のタブ順に入らないので、そこへ揃える
+                exitButton.IsTabStop.Should().BeFalse();
+
+                var firstToolbarButton = FindVisualChildren<Button>(window)
+                    .First(button => ReferenceEquals(button.Command, vm.NewDiagramCommand));
+                firstToolbarButton.Focus();
+                DoEvents();
+                firstToolbarButton.MoveFocus(
+                    new TraversalRequest(FocusNavigationDirection.Previous)
+                );
+                DoEvents();
+
+                Keyboard
+                    .FocusedElement.Should()
+                    .NotBeSameAs(exitButton, "ツールバーの手前へ戻っても終了ボタンには止まらない");
+
+                vm.IsFullScreen = false;
+                DoEvents();
+                exitButton.Visibility.Should().Be(Visibility.Collapsed);
+            }
+        );
+    }
+
+    /// <summary>全画面の切替で「表示」グループのポップアップが閉じることを検証する。</summary>
+    /// <remarks>
+    /// ポップアップは開いた時点の画面座標に留まりウィンドウへ追従しない（実機で確認）。閉じないと、
+    /// ツールバーから全画面にした直後にポップアップだけが画面の真ん中へ取り残される。
+    /// 他の 5 トグルは連続操作のため開いたままにするので、ここだけ意図的に非対称。
+    /// </remarks>
+    [Fact(DisplayName = "全画面表示: 切り替えると表示グループのポップアップは閉じる")]
+    public void FullScreen_ClosesViewGroupPopup()
+    {
+        RunInIsolatedWindow(
+            (vm, window) =>
+            {
+                var groupToggle = (ToggleButton)window.FindName("ViewGroupToggle")!;
+                var popup = (Popup)window.FindName("ViewPopup")!;
+
+                groupToggle.IsChecked = true;
+                DoEvents();
+                popup.IsOpen.Should().BeTrue();
+
+                vm.IsFullScreen = true;
+                DoEvents();
+
+                popup.IsOpen.Should().BeFalse("ウィンドウの形が変わるので開いたままにしない");
+
+                vm.IsFullScreen = false;
+                DoEvents();
+            }
+        );
+    }
+
+    /// <summary>
+    /// 全画面へ入るときに「いったん通常サイズを経由してから最大化する」順序そのものを固定する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 最大化のまま枠だけ外すとタスクバーが前面に残る（実測＝クライアント領域が作業領域どまりの
+    /// 2562x1394 になり、経由ありの 2560x1440 と食い違う）。ところが<b>最終状態はどちらも
+    /// <c>None</c> / <c>Maximized</c> で同じ</b>なので、状態だけを見る表明では経由の有無を見分けられない。
+    /// </para>
+    /// <para>
+    /// <see cref="Window.StateChanged"/> は状態の代入に対して同期的に発火するため、その並びを
+    /// 表明すれば順序を固定できる。経由を省いた実装ではこのイベントが 1 度も起きない。
+    /// 画面の解像度に依存しないので CI でも成立する。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "全画面表示: 最大化からでも通常サイズを経由してから最大化する")]
+    public void FullScreen_FromMaximized_GoesThroughNormalState()
+    {
+        RunInIsolatedWindow(
+            (vm, window) =>
+            {
+                var originalStyle = window.WindowStyle;
+                var states = new List<(WindowState State, WindowStyle Style)>();
+                window.StateChanged += (_, _) =>
+                    states.Add((window.WindowState, window.WindowStyle));
+
+                window.WindowState = WindowState.Maximized;
+                DoEvents();
+                states.Clear();
+
+                vm.IsFullScreen = true;
+                DoEvents();
+
+                // 最大化のまま枠だけ外す実装だと StateChanged は 1 度も起きない
+                states
+                    .Should()
+                    .Equal(
+                        (WindowState.Normal, originalStyle),
+                        (WindowState.Maximized, WindowStyle.None)
+                    );
+            }
+        );
+    }
+
+    /// <summary>最小化しても全画面表示は解除されず、復帰すると全画面へ戻ることを検証する。</summary>
+    /// <remarks>
+    /// 外部要因での解除（<see cref="FullScreen_WhenRestoredExternally_ExitsAndRestoresChrome"/>）の条件を
+    /// 「最大化でない」で書くと最小化まで拾ってしまい、Win+D で一度デスクトップを見て戻っただけで
+    /// 全画面が解ける。最小化の意味は「いったん引っ込める」で、掴んで動かせないウィンドウも残らない。
+    /// </remarks>
+    [Fact(DisplayName = "全画面表示: 最小化では解除されず、復帰しても全画面のまま")]
+    public void FullScreen_WhenMinimized_StaysFullScreen()
+    {
+        RunInIsolatedWindow(
+            (vm, window) =>
+            {
+                vm.IsFullScreen = true;
+                DoEvents();
+
+                window.WindowState = WindowState.Minimized;
+                DoEvents();
+
+                vm.IsFullScreen.Should().BeTrue("最小化は「最大化をやめる」操作ではない");
+                window.WindowStyle.Should().Be(WindowStyle.None);
+
+                // 最小化からの復帰は最小化前の状態へ戻る（SW_RESTORE の意味論）。
+                // 二重起動時の Program.ActivateMainWindow は Normal を代入するので、その形で確かめる
+                // （ネイティブ側の復帰が先に解決するため StateChanged は Maximized で届き、
+                // ハンドラは Normal を一度も観測しない＝全画面が解けない）
+                window.WindowState = WindowState.Normal;
+                DoEvents();
+
+                vm.IsFullScreen.Should().BeTrue();
+                window.WindowStyle.Should().Be(WindowStyle.None);
+                window.WindowState.Should().Be(WindowState.Maximized);
+
+                vm.IsFullScreen = false;
+                DoEvents();
+            }
+        );
+    }
+
+    /// <summary>
+    /// 全画面中に外部要因で最大化が解けたら、枠を戻して全画面もやめることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// Win+Down やシステムメニューの「元のサイズに戻す」は <c>SC_RESTORE</c> を送るため全画面中でも
+    /// 最大化が解ける。放置すると枠が無いまま通常サイズ＝タイトルバーが無く掴んで動かせないウィンドウが
+    /// 残る。状態は利用者の操作結果（通常サイズ）を尊重し、戻すのは枠だけにする。
+    /// </remarks>
+    [Fact(DisplayName = "全画面表示: 外部要因で最大化が解けたら枠を戻して全画面もやめる")]
+    public void FullScreen_WhenRestoredExternally_ExitsAndRestoresChrome()
+    {
+        RunInIsolatedWindow(
+            (vm, window) =>
+            {
+                var originalStyle = window.WindowStyle;
+
+                vm.IsFullScreen = true;
+                DoEvents();
+                window.WindowStyle.Should().Be(WindowStyle.None);
+
+                // SC_RESTORE 相当（Win+Down・システムメニュー）
+                window.WindowState = WindowState.Normal;
+                DoEvents();
+
+                vm.IsFullScreen.Should().BeFalse("枠なしのまま通常サイズで取り残さない");
+                window.WindowStyle.Should().Be(originalStyle);
+                window.WindowState.Should().Be(WindowState.Normal, "最大化をやめる操作を覆さない");
+            }
+        );
+    }
+
+    /// <summary>全画面表示の切替が、ウィンドウの枠と状態へ届き、解除で元へ戻ることを検証する。</summary>
+    /// <remarks>
+    /// <para>
+    /// 全画面は ViewModel からは触れないウィンドウの枠の話で、コードビハインドが
+    /// <c>WindowStyle</c> / <c>WindowState</c> を当てる。束縛や配線ではないぶん、
+    /// 適用そのものが抜け落ちても VM テストでは緑のままになる。
+    /// </para>
+    /// <para>
+    /// すでに最大化されている状態から枠だけ外すとタスクバーが前面に残るため、実装は通常サイズを
+    /// 経由してから最大化する。最大化で入った場合に解除後も最大化へ戻ることを併せて固定する。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "全画面表示: 枠を外して最大化し、解除で元の枠と状態へ戻る")]
+    public void FullScreen_TogglesWindowChrome()
+    {
+        RunInIsolatedWindow(
+            (vm, window) =>
+            {
+                var originalStyle = window.WindowStyle;
+                window.WindowState.Should().Be(WindowState.Normal);
+
+                vm.IsFullScreen = true;
+                DoEvents();
+
+                window.WindowStyle.Should().Be(WindowStyle.None);
+                window.WindowState.Should().Be(WindowState.Maximized);
+
+                vm.IsFullScreen = false;
+                DoEvents();
+
+                window.WindowStyle.Should().Be(originalStyle);
+                window.WindowState.Should().Be(WindowState.Normal);
+
+                // 最大化した状態から入ったときは、解除で最大化へ戻る
+                window.WindowState = WindowState.Maximized;
+                DoEvents();
+
+                vm.IsFullScreen = true;
+                DoEvents();
+                window.WindowStyle.Should().Be(WindowStyle.None);
+                window.WindowState.Should().Be(WindowState.Maximized);
+
+                vm.IsFullScreen = false;
+                DoEvents();
+                window.WindowStyle.Should().Be(originalStyle);
+                window.WindowState.Should().Be(WindowState.Maximized);
             }
         );
     }

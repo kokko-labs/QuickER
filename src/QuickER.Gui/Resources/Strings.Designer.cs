@@ -418,6 +418,30 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Toolbar_FullScreen {
+            get {
+                return ResourceManager.GetString("Toolbar_FullScreen", resourceCulture);
+            }
+        }
+        
+        public static string Toolbar_FullScreenTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_FullScreenTooltip", resourceCulture);
+            }
+        }
+        
+        public static string Toolbar_ExitApp {
+            get {
+                return ResourceManager.GetString("Toolbar_ExitApp", resourceCulture);
+            }
+        }
+        
+        public static string Toolbar_ExitAppTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_ExitAppTooltip", resourceCulture);
+            }
+        }
+        
         public static string Toolbar_ViewGroup {
             get {
                 return ResourceManager.GetString("Toolbar_ViewGroup", resourceCulture);

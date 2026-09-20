@@ -38,6 +38,7 @@
     <!-- 左右パネルの表示切替（ER 図を広く見るために畳む） -->
     <KeyBinding Key="F9" Command="{Binding ToggleToolboxCommand}" />
     <KeyBinding Key="F10" Command="{Binding TogglePropertyPanelCommand}" />
+    <KeyBinding Key="F11" Command="{Binding ToggleFullScreenCommand}" />
 
     <!-- ズーム: Ctrl+0=100% / Ctrl+Shift+0=fit / Ctrl+Plus・Minus でズーム（OemPlus/Add・OemMinus/Subtract 両対応） -->
     <KeyBinding Key="D0" Modifiers="Control" Command="{Binding ResetZoomCommand}" />
@@ -568,445 +569,487 @@
       BorderBrush="{StaticResource DividerBrush}"
       BorderThickness="0,0,0,1"
     >
-      <!--
-        WrapPanel: 英語などキャプションが長い言語やモジュール全部入り構成でウィンドウ幅に収まらないとき、
-        ボタンを切らずに 2 段目へ折り返す（収まる幅では 1 段のまま）。
-      -->
-      <WrapPanel x:Name="ToolbarWrapPanel" Orientation="Horizontal" Margin="6,4">
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding NewDiagramCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_NewTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗒" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_New}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding OpenCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_OpenTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📂" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_Open}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding SaveCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_SaveTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_Save}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding SaveAsCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_SaveAsTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_SaveAs}"
-            />
-          </StackPanel>
-        </Button>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding UndoCommand}"
-          IsEnabled="{Binding UndoRedo.CanUndo}"
-          ToolTip="{x:Static resources:Strings.Toolbar_UndoTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↶" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_Undo}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding RedoCommand}"
-          IsEnabled="{Binding UndoRedo.CanRedo}"
-          ToolTip="{x:Static resources:Strings.Toolbar_RedoTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↷" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_Redo}"
-            />
-          </StackPanel>
-        </Button>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding DuplicateSelectedEntityCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_DuplicateTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_Duplicate}"
-            />
-          </StackPanel>
-        </Button>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+      <DockPanel>
         <!--
-          表示グループ: 表示トグル 5 種を 1 ボタンへ集約し、クリックで直下のポップアップに展開する
-          （ツールバー幅の節約）。整列グループと違い項目クリックでは閉じない＝状態のトグルを
-          続けて切り替えられるようにする（閉じるのはポップアップの外側のクリック。
-          キーボードフォーカスは本体に残るため Esc では閉じない＝整列グループと同じ）。
-          5 つとも効果が画面そのものに出る（カラム行の増減・パネルの有無）ため、
-          ツールバー上で ON / OFF を示さなくても現在の状態は分かる。
+          全画面表示ではタイトルバーが無いため、その × の代わりを右端へ置く（全画面のときだけ表示）。
+          右ドックなので設定ボタンとの間に余白が空き、誤って押しにくい。ただし DockPanel の最初の子＝
+          タブ順の先頭になってしまうため IsTabStop=False で外す（Tab を入れた一撃目が「終了」になるのは、
+          クライアント領域のタブ順に入らないタイトルバーの × と等価でない）。押したときの挙動は
+          タイトルバーの × と同じ（確認は出さず、Closing の自動保存を通って終了する）。
         -->
-        <ToggleButton
-          x:Name="ViewGroupToggle"
-          Style="{StaticResource ToolBarLabelToggleButton}"
-          MinWidth="54"
-          ToolTip="{x:Static resources:Strings.Toolbar_ViewGroupTooltip}"
+        <Button
+          x:Name="ExitAppButton"
+          DockPanel.Dock="Right"
+          Style="{StaticResource ToolBarLabelButton}"
+          IsTabStop="False"
+          VerticalAlignment="Top"
+          Margin="0,4,6,4"
+          Click="ExitAppButton_Click"
+          Visibility="{Binding IsFullScreen, Converter={StaticResource BoolToVisibilityConverter}}"
+          ToolTip="{x:Static resources:Strings.Toolbar_ExitAppTooltip}"
         >
           <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="◫" />
-            <TextBlock Style="{StaticResource ToolBarCaption}">
-              <Run Text="{x:Static resources:Strings.Toolbar_ViewGroup}" />
-              <Run Text=" ▾" />
-            </TextBlock>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="✕" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_ExitApp}"
+            />
           </StackPanel>
-        </ToggleButton>
-        <Popup
-          x:Name="ViewPopup"
-          IsOpen="{Binding IsChecked, ElementName=ViewGroupToggle, Mode=TwoWay}"
-          PlacementTarget="{Binding ElementName=ViewGroupToggle}"
-          Placement="Bottom"
-          StaysOpen="False"
-        >
-          <Border
-            Background="White"
-            BorderBrush="#D1D5DB"
-            BorderThickness="1"
-            CornerRadius="4"
-            Padding="2"
+        </Button>
+        <!--
+          WrapPanel: 英語などキャプションが長い言語やモジュール全部入り構成でウィンドウ幅に収まらないとき、
+          ボタンを切らずに 2 段目へ折り返す（収まる幅では 1 段のまま）。
+        -->
+        <WrapPanel x:Name="ToolbarWrapPanel" Orientation="Horizontal" Margin="6,4">
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding NewDiagramCommand}"
+            ToolTip="{x:Static resources:Strings.Toolbar_NewTooltip}"
           >
-            <StackPanel Orientation="Horizontal">
-              <!-- 左右パネルの表示トグル（ER 図を広く見るために畳む）。状態は次回起動時に復元される -->
-              <ToggleButton
-                Style="{StaticResource ToolBarLabelToggleButton}"
-                IsChecked="{Binding IsToolboxVisible, Mode=TwoWay}"
-                ToolTip="{x:Static resources:Strings.Toolbar_ToggleToolboxTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="◧" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_ToggleToolbox}"
-                  />
-                </StackPanel>
-              </ToggleButton>
-              <ToggleButton
-                Style="{StaticResource ToolBarLabelToggleButton}"
-                IsChecked="{Binding IsPropertyPanelVisible, Mode=TwoWay}"
-                ToolTip="{x:Static resources:Strings.Toolbar_TogglePropertyPanelTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="◨" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_TogglePropertyPanel}"
-                  />
-                </StackPanel>
-              </ToggleButton>
-              <ToggleButton
-                Style="{StaticResource ToolBarLabelToggleButton}"
-                IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
-                ToolTip="{x:Static resources:Strings.Toolbar_ShowDescriptionsTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_ShowDescriptions}"
-                  />
-                </StackPanel>
-              </ToggleButton>
-              <ToggleButton
-                Style="{StaticResource ToolBarLabelToggleButton}"
-                IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}"
-                ToolTip="{x:Static resources:Strings.Toolbar_ShowNullabilityTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_ShowNullability}"
-                  />
-                </StackPanel>
-              </ToggleButton>
-              <ToggleButton
-                Style="{StaticResource ToolBarLabelToggleButton}"
-                IsChecked="{Binding IsCompactViewInDiagram, Mode=TwoWay}"
-                ToolTip="{x:Static resources:Strings.Toolbar_CompactViewTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="▤" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_CompactView}"
-                  />
-                </StackPanel>
-              </ToggleButton>
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗒" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_New}"
+              />
             </StackPanel>
-          </Border>
-        </Popup>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <!-- 整列グループ: 整列 3 種＋幅自動を 1 ボタンへ集約し、クリックで直下のポップアップに展開する（ツールバー幅の節約） -->
-        <ToggleButton
-          x:Name="ArrangeGroupToggle"
-          Style="{StaticResource ToolBarLabelToggleButton}"
-          MinWidth="54"
-          ToolTip="{x:Static resources:Strings.Toolbar_ArrangeGroupTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
-            <TextBlock Style="{StaticResource ToolBarCaption}">
-              <Run Text="{x:Static resources:Strings.Toolbar_ArrangeGroup}" />
-              <Run Text=" ▾" />
-            </TextBlock>
-          </StackPanel>
-        </ToggleButton>
-        <Popup
-          x:Name="ArrangePopup"
-          IsOpen="{Binding IsChecked, ElementName=ArrangeGroupToggle, Mode=TwoWay}"
-          PlacementTarget="{Binding ElementName=ArrangeGroupToggle}"
-          Placement="Bottom"
-          StaysOpen="False"
-        >
-          <Border
-            Background="White"
-            BorderBrush="#D1D5DB"
-            BorderThickness="1"
-            CornerRadius="4"
-            Padding="2"
+          </Button>
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding OpenCommand}"
+            ToolTip="{x:Static resources:Strings.Toolbar_OpenTooltip}"
           >
-            <StackPanel Orientation="Horizontal">
-              <Button
-                Style="{StaticResource ToolBarLabelButton}"
-                Command="{Binding AutoLayoutGridCommand}"
-                Click="ArrangePopupItem_Click"
-                ToolTip="{x:Static resources:Strings.Toolbar_ArrangeGridTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_ArrangeGrid}"
-                  />
-                </StackPanel>
-              </Button>
-              <Button
-                Style="{StaticResource ToolBarLabelButton}"
-                Command="{Binding AutoLayoutTreeCommand}"
-                Click="ArrangePopupItem_Click"
-                ToolTip="{x:Static resources:Strings.Toolbar_ArrangeTreeTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_ArrangeTree}"
-                  />
-                </StackPanel>
-              </Button>
-              <Button
-                Style="{StaticResource ToolBarLabelButton}"
-                Command="{Binding AutoLayoutForceCommand}"
-                Click="ArrangePopupItem_Click"
-                ToolTip="{x:Static resources:Strings.Toolbar_ArrangeForceTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_ArrangeForce}"
-                  />
-                </StackPanel>
-              </Button>
-              <Button
-                Style="{StaticResource ToolBarLabelButton}"
-                Command="{Binding AutoFitEntityWidthsCommand}"
-                Click="ArrangePopupItem_Click"
-                ToolTip="{x:Static resources:Strings.Toolbar_AutoWidthTooltip}"
-              >
-                <StackPanel>
-                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
-                  <TextBlock
-                    Style="{StaticResource ToolBarCaption}"
-                    Text="{x:Static resources:Strings.Toolbar_AutoWidth}"
-                  />
-                </StackPanel>
-              </Button>
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="📂" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_Open}"
+              />
             </StackPanel>
-          </Border>
-        </Popup>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding PrintDiagramCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_PrintTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖨" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_Print}"
-            />
-          </StackPanel>
-        </Button>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding ExportDiagramCommand}"
-          CommandParameter="{Binding ElementName=DiagramCanvas}"
-          ToolTip="{x:Static resources:Strings.Toolbar_ExportTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📤" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_Export}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding ImportDiagramCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_ImportTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📥" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_Import}"
-            />
-          </StackPanel>
-        </Button>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
-          <TextBlock
-            Text="{x:Static resources:Strings.Toolbar_TargetDbLabel}"
-            VerticalAlignment="Center"
-            Foreground="#374151"
-            Margin="0,0,4,0"
-          />
-          <ComboBox
-            MinWidth="120"
-            VerticalAlignment="Center"
-            VerticalContentAlignment="Center"
-            Padding="6,3"
-            Background="White"
-            BorderBrush="#D1D5DB"
-            ItemsSource="{Binding AvailableProviders}"
-            SelectedItem="{Binding SelectedProvider}"
-            DisplayMemberPath="DisplayName"
-            ToolTip="{x:Static resources:Strings.Toolbar_TargetDbTooltip}"
-          />
-        </StackPanel>
-        <!--
-          フィーチャーモジュールが寄与するツールバーボタン群（DB 取込・DB 同期・AI チャット・モック生成・
-          コード生成など）の挿入位置アンカー。1 つの ItemsControl は WrapPanel 内で 1 塊として折り返される
-          ため、グループ区切り（BeginsGroup）のくくりを崩さず折り返せるよう、コードビハインドが
-          MainViewModel.FeatureToolbarItemGroups のグループごとに ItemsControl を生成し、この直後へ挿入する。
-          各グループの先頭ボタンは BeginsGroup=true で自前の区切りを描画する（全体先頭のみ App が false へ矯正）。
-          モジュール 0 個のときは何も描画されず、直後のセパレータも下の DataTrigger で畳まれる。
-        -->
-        <ContentControl x:Name="FeatureToolbarGroupsAnchor" Visibility="Collapsed" />
-        <!-- モジュールが 1 つも無いときはセパレータの二重表示を避けて畳む -->
-        <Rectangle>
-          <Rectangle.Style>
-            <Style TargetType="Rectangle" BasedOn="{StaticResource ToolBarSeparator}">
-              <Style.Triggers>
-                <DataTrigger Binding="{Binding FeatureToolbarItems.Count}" Value="0">
-                  <Setter Property="Visibility" Value="Collapsed" />
-                </DataTrigger>
-              </Style.Triggers>
-            </Style>
-          </Rectangle.Style>
-        </Rectangle>
-        <!--
-          設定: クリックで ContextMenu を開く。言語切替（サブメニュー）は選択で設定を保存し、
-          再起動反映方式のため「再起動後に反映」を通知する。更新確認トグルは次回起動から効く。
-          末尾の「バージョン情報」はダイアログを開くだけで設定は持たない。
-          キャプション・ツールチップは resx 参照。
-          ContextMenu は配置対象の DataContext（MainViewModel）を引き継いでチェック状態を束縛する。
-        -->
-        <Button
-          x:Name="SettingsButton"
-          Style="{StaticResource ToolBarLabelButton}"
-          Click="SettingsButton_Click"
-          ToolTip="{x:Static resources:Strings.Settings_Tooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⚙" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Settings_Caption}"
-            />
-          </StackPanel>
-          <Button.ContextMenu>
-            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-              <MenuItem
-                Header="{x:Static resources:Strings.Language_Caption}"
-                ToolTip="{x:Static resources:Strings.Language_Tooltip}"
-              >
-                <MenuItem
-                  Header="{x:Static resources:Strings.Language_English}"
-                  IsCheckable="True"
-                  IsChecked="{Binding LanguageSwitch.IsEnglishChecked, Mode=OneWay}"
-                  Command="{Binding LanguageSwitch.SelectLanguageCommand}"
-                  CommandParameter="en"
-                />
-                <MenuItem
-                  Header="{x:Static resources:Strings.Language_Japanese}"
-                  IsCheckable="True"
-                  IsChecked="{Binding LanguageSwitch.IsJapaneseChecked, Mode=OneWay}"
-                  Command="{Binding LanguageSwitch.SelectLanguageCommand}"
-                  CommandParameter="ja"
-                />
-              </MenuItem>
-              <Separator />
-              <!-- 起動時の更新確認（GitHub Releases への接続）。切り替えは即座に設定へ保存され、次回起動から効く -->
-              <MenuItem
-                Header="{x:Static resources:Strings.Settings_CheckUpdatesOnStartup}"
-                IsCheckable="True"
-                IsChecked="{Binding UpdateSettings.IsCheckOnStartupEnabled, Mode=TwoWay}"
+          </Button>
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding SaveCommand}"
+            ToolTip="{x:Static resources:Strings.Toolbar_SaveTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_Save}"
               />
-              <Separator />
-              <!-- バージョン情報（版・実行環境・著作権・リポジトリを示すダイアログ） -->
-              <MenuItem
-                Header="{x:Static resources:Strings.About_MenuItem}"
-                Command="{Binding ShowAboutCommand}"
+            </StackPanel>
+          </Button>
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding SaveAsCommand}"
+            ToolTip="{x:Static resources:Strings.Toolbar_SaveAsTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_SaveAs}"
               />
-            </ContextMenu>
-          </Button.ContextMenu>
-        </Button>
-      </WrapPanel>
+            </StackPanel>
+          </Button>
+          <Rectangle Style="{StaticResource ToolBarSeparator}" />
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding UndoCommand}"
+            IsEnabled="{Binding UndoRedo.CanUndo}"
+            ToolTip="{x:Static resources:Strings.Toolbar_UndoTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="↶" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_Undo}"
+              />
+            </StackPanel>
+          </Button>
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding RedoCommand}"
+            IsEnabled="{Binding UndoRedo.CanRedo}"
+            ToolTip="{x:Static resources:Strings.Toolbar_RedoTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="↷" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_Redo}"
+              />
+            </StackPanel>
+          </Button>
+          <Rectangle Style="{StaticResource ToolBarSeparator}" />
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding DuplicateSelectedEntityCommand}"
+            ToolTip="{x:Static resources:Strings.Toolbar_DuplicateTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_Duplicate}"
+              />
+            </StackPanel>
+          </Button>
+          <Rectangle Style="{StaticResource ToolBarSeparator}" />
+          <!--
+            表示グループ: 表示トグル 5 種を 1 ボタンへ集約し、クリックで直下のポップアップに展開する
+            （ツールバー幅の節約）。整列グループと違い項目クリックでは閉じない＝状態のトグルを
+            続けて切り替えられるようにする（閉じるのはポップアップの外側のクリック。
+            キーボードフォーカスは本体に残るため Esc では閉じない＝整列グループと同じ）。
+            5 つとも効果が画面そのものに出る（カラム行の増減・パネルの有無）ため、
+            ツールバー上で ON / OFF を示さなくても現在の状態は分かる。
+          -->
+          <ToggleButton
+            x:Name="ViewGroupToggle"
+            Style="{StaticResource ToolBarLabelToggleButton}"
+            MinWidth="54"
+            ToolTip="{x:Static resources:Strings.Toolbar_ViewGroupTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="◫" />
+              <TextBlock Style="{StaticResource ToolBarCaption}">
+                <Run Text="{x:Static resources:Strings.Toolbar_ViewGroup}" />
+                <Run Text=" ▾" />
+              </TextBlock>
+            </StackPanel>
+          </ToggleButton>
+          <Popup
+            x:Name="ViewPopup"
+            IsOpen="{Binding IsChecked, ElementName=ViewGroupToggle, Mode=TwoWay}"
+            PlacementTarget="{Binding ElementName=ViewGroupToggle}"
+            Placement="Bottom"
+            StaysOpen="False"
+          >
+            <Border
+              Background="White"
+              BorderBrush="#D1D5DB"
+              BorderThickness="1"
+              CornerRadius="4"
+              Padding="2"
+            >
+              <StackPanel Orientation="Horizontal">
+                <!-- 左右パネルの表示トグル（ER 図を広く見るために畳む）。状態は次回起動時に復元される -->
+                <ToggleButton
+                  Style="{StaticResource ToolBarLabelToggleButton}"
+                  IsChecked="{Binding IsToolboxVisible, Mode=TwoWay}"
+                  ToolTip="{x:Static resources:Strings.Toolbar_ToggleToolboxTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="◧" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_ToggleToolbox}"
+                    />
+                  </StackPanel>
+                </ToggleButton>
+                <ToggleButton
+                  Style="{StaticResource ToolBarLabelToggleButton}"
+                  IsChecked="{Binding IsPropertyPanelVisible, Mode=TwoWay}"
+                  ToolTip="{x:Static resources:Strings.Toolbar_TogglePropertyPanelTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="◨" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_TogglePropertyPanel}"
+                    />
+                  </StackPanel>
+                </ToggleButton>
+                <ToggleButton
+                  Style="{StaticResource ToolBarLabelToggleButton}"
+                  IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
+                  ToolTip="{x:Static resources:Strings.Toolbar_ShowDescriptionsTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_ShowDescriptions}"
+                    />
+                  </StackPanel>
+                </ToggleButton>
+                <ToggleButton
+                  Style="{StaticResource ToolBarLabelToggleButton}"
+                  IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}"
+                  ToolTip="{x:Static resources:Strings.Toolbar_ShowNullabilityTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_ShowNullability}"
+                    />
+                  </StackPanel>
+                </ToggleButton>
+                <ToggleButton
+                  Style="{StaticResource ToolBarLabelToggleButton}"
+                  IsChecked="{Binding IsCompactViewInDiagram, Mode=TwoWay}"
+                  ToolTip="{x:Static resources:Strings.Toolbar_CompactViewTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="▤" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_CompactView}"
+                    />
+                  </StackPanel>
+                </ToggleButton>
+                <!-- 全画面表示だけは永続化しない（枠の無い状態で起動すると原因が分からず戸惑うため） -->
+                <ToggleButton
+                  Style="{StaticResource ToolBarLabelToggleButton}"
+                  IsChecked="{Binding IsFullScreen, Mode=TwoWay}"
+                  ToolTip="{x:Static resources:Strings.Toolbar_FullScreenTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="⤢" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_FullScreen}"
+                    />
+                  </StackPanel>
+                </ToggleButton>
+              </StackPanel>
+            </Border>
+          </Popup>
+          <Rectangle Style="{StaticResource ToolBarSeparator}" />
+          <!-- 整列グループ: 整列 3 種＋幅自動を 1 ボタンへ集約し、クリックで直下のポップアップに展開する（ツールバー幅の節約） -->
+          <ToggleButton
+            x:Name="ArrangeGroupToggle"
+            Style="{StaticResource ToolBarLabelToggleButton}"
+            MinWidth="54"
+            ToolTip="{x:Static resources:Strings.Toolbar_ArrangeGroupTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
+              <TextBlock Style="{StaticResource ToolBarCaption}">
+                <Run Text="{x:Static resources:Strings.Toolbar_ArrangeGroup}" />
+                <Run Text=" ▾" />
+              </TextBlock>
+            </StackPanel>
+          </ToggleButton>
+          <Popup
+            x:Name="ArrangePopup"
+            IsOpen="{Binding IsChecked, ElementName=ArrangeGroupToggle, Mode=TwoWay}"
+            PlacementTarget="{Binding ElementName=ArrangeGroupToggle}"
+            Placement="Bottom"
+            StaysOpen="False"
+          >
+            <Border
+              Background="White"
+              BorderBrush="#D1D5DB"
+              BorderThickness="1"
+              CornerRadius="4"
+              Padding="2"
+            >
+              <StackPanel Orientation="Horizontal">
+                <Button
+                  Style="{StaticResource ToolBarLabelButton}"
+                  Command="{Binding AutoLayoutGridCommand}"
+                  Click="ArrangePopupItem_Click"
+                  ToolTip="{x:Static resources:Strings.Toolbar_ArrangeGridTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_ArrangeGrid}"
+                    />
+                  </StackPanel>
+                </Button>
+                <Button
+                  Style="{StaticResource ToolBarLabelButton}"
+                  Command="{Binding AutoLayoutTreeCommand}"
+                  Click="ArrangePopupItem_Click"
+                  ToolTip="{x:Static resources:Strings.Toolbar_ArrangeTreeTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_ArrangeTree}"
+                    />
+                  </StackPanel>
+                </Button>
+                <Button
+                  Style="{StaticResource ToolBarLabelButton}"
+                  Command="{Binding AutoLayoutForceCommand}"
+                  Click="ArrangePopupItem_Click"
+                  ToolTip="{x:Static resources:Strings.Toolbar_ArrangeForceTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_ArrangeForce}"
+                    />
+                  </StackPanel>
+                </Button>
+                <Button
+                  Style="{StaticResource ToolBarLabelButton}"
+                  Command="{Binding AutoFitEntityWidthsCommand}"
+                  Click="ArrangePopupItem_Click"
+                  ToolTip="{x:Static resources:Strings.Toolbar_AutoWidthTooltip}"
+                >
+                  <StackPanel>
+                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
+                    <TextBlock
+                      Style="{StaticResource ToolBarCaption}"
+                      Text="{x:Static resources:Strings.Toolbar_AutoWidth}"
+                    />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+            </Border>
+          </Popup>
+          <Rectangle Style="{StaticResource ToolBarSeparator}" />
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding PrintDiagramCommand}"
+            ToolTip="{x:Static resources:Strings.Toolbar_PrintTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖨" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_Print}"
+              />
+            </StackPanel>
+          </Button>
+          <Rectangle Style="{StaticResource ToolBarSeparator}" />
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding ExportDiagramCommand}"
+            CommandParameter="{Binding ElementName=DiagramCanvas}"
+            ToolTip="{x:Static resources:Strings.Toolbar_ExportTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="📤" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_Export}"
+              />
+            </StackPanel>
+          </Button>
+          <Button
+            Style="{StaticResource ToolBarLabelButton}"
+            Command="{Binding ImportDiagramCommand}"
+            ToolTip="{x:Static resources:Strings.Toolbar_ImportTooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="📥" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Toolbar_Import}"
+              />
+            </StackPanel>
+          </Button>
+          <Rectangle Style="{StaticResource ToolBarSeparator}" />
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+            <TextBlock
+              Text="{x:Static resources:Strings.Toolbar_TargetDbLabel}"
+              VerticalAlignment="Center"
+              Foreground="#374151"
+              Margin="0,0,4,0"
+            />
+            <ComboBox
+              MinWidth="120"
+              VerticalAlignment="Center"
+              VerticalContentAlignment="Center"
+              Padding="6,3"
+              Background="White"
+              BorderBrush="#D1D5DB"
+              ItemsSource="{Binding AvailableProviders}"
+              SelectedItem="{Binding SelectedProvider}"
+              DisplayMemberPath="DisplayName"
+              ToolTip="{x:Static resources:Strings.Toolbar_TargetDbTooltip}"
+            />
+          </StackPanel>
+          <!--
+            フィーチャーモジュールが寄与するツールバーボタン群（DB 取込・DB 同期・AI チャット・モック生成・
+            コード生成など）の挿入位置アンカー。1 つの ItemsControl は WrapPanel 内で 1 塊として折り返される
+            ため、グループ区切り（BeginsGroup）のくくりを崩さず折り返せるよう、コードビハインドが
+            MainViewModel.FeatureToolbarItemGroups のグループごとに ItemsControl を生成し、この直後へ挿入する。
+            各グループの先頭ボタンは BeginsGroup=true で自前の区切りを描画する（全体先頭のみ App が false へ矯正）。
+            モジュール 0 個のときは何も描画されず、直後のセパレータも下の DataTrigger で畳まれる。
+          -->
+          <ContentControl x:Name="FeatureToolbarGroupsAnchor" Visibility="Collapsed" />
+          <!-- モジュールが 1 つも無いときはセパレータの二重表示を避けて畳む -->
+          <Rectangle>
+            <Rectangle.Style>
+              <Style TargetType="Rectangle" BasedOn="{StaticResource ToolBarSeparator}">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding FeatureToolbarItems.Count}" Value="0">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Rectangle.Style>
+          </Rectangle>
+          <!--
+            設定: クリックで ContextMenu を開く。言語切替（サブメニュー）は選択で設定を保存し、
+            再起動反映方式のため「再起動後に反映」を通知する。更新確認トグルは次回起動から効く。
+            末尾の「バージョン情報」はダイアログを開くだけで設定は持たない。
+            キャプション・ツールチップは resx 参照。
+            ContextMenu は配置対象の DataContext（MainViewModel）を引き継いでチェック状態を束縛する。
+          -->
+          <Button
+            x:Name="SettingsButton"
+            Style="{StaticResource ToolBarLabelButton}"
+            Click="SettingsButton_Click"
+            ToolTip="{x:Static resources:Strings.Settings_Tooltip}"
+          >
+            <StackPanel>
+              <TextBlock Style="{StaticResource ToolBarIcon}" Text="⚙" />
+              <TextBlock
+                Style="{StaticResource ToolBarCaption}"
+                Text="{x:Static resources:Strings.Settings_Caption}"
+              />
+            </StackPanel>
+            <Button.ContextMenu>
+              <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                <MenuItem
+                  Header="{x:Static resources:Strings.Language_Caption}"
+                  ToolTip="{x:Static resources:Strings.Language_Tooltip}"
+                >
+                  <MenuItem
+                    Header="{x:Static resources:Strings.Language_English}"
+                    IsCheckable="True"
+                    IsChecked="{Binding LanguageSwitch.IsEnglishChecked, Mode=OneWay}"
+                    Command="{Binding LanguageSwitch.SelectLanguageCommand}"
+                    CommandParameter="en"
+                  />
+                  <MenuItem
+                    Header="{x:Static resources:Strings.Language_Japanese}"
+                    IsCheckable="True"
+                    IsChecked="{Binding LanguageSwitch.IsJapaneseChecked, Mode=OneWay}"
+                    Command="{Binding LanguageSwitch.SelectLanguageCommand}"
+                    CommandParameter="ja"
+                  />
+                </MenuItem>
+                <Separator />
+                <!-- 起動時の更新確認（GitHub Releases への接続）。切り替えは即座に設定へ保存され、次回起動から効く -->
+                <MenuItem
+                  Header="{x:Static resources:Strings.Settings_CheckUpdatesOnStartup}"
+                  IsCheckable="True"
+                  IsChecked="{Binding UpdateSettings.IsCheckOnStartupEnabled, Mode=TwoWay}"
+                />
+                <Separator />
+                <!-- バージョン情報（版・実行環境・著作権・リポジトリを示すダイアログ） -->
+                <MenuItem
+                  Header="{x:Static resources:Strings.About_MenuItem}"
+                  Command="{Binding ShowAboutCommand}"
+                />
+              </ContextMenu>
+            </Button.ContextMenu>
+          </Button>
+        </WrapPanel>
+      </DockPanel>
     </Border>
 
     <!-- 下部: ステータスバー -->

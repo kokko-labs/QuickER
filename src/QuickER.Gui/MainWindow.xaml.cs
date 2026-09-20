@@ -50,6 +50,9 @@ public partial class MainWindow : Window
         viewModel.Initialize();
         Closing += MainWindow_Closing;
 
+        // 全画面中に外部要因（Win+Down・システムメニュー）で最大化が解けたら全画面もやめる
+        StateChanged += OnWindowStateChanged;
+
         // フィーチャーモジュールのツールバーボタンを、グループ区切り単位の折返しで表示する
         BuildFeatureToolbarGroupHosts();
     }
@@ -150,6 +153,17 @@ public partial class MainWindow : Window
         Keyboard.Focus(DiagramScrollViewer);
     }
 
+    /// <summary>全画面表示中の終了ボタン。タイトルバーの × と同じくウィンドウを閉じる</summary>
+    /// <remarks>
+    /// 全画面ではタイトルバーごと隠れるため × が無い。閉じる経路は <see cref="Window.Close"/> に揃え、
+    /// <see cref="MainWindow_Closing"/> の自動保存を必ず通す。<b>確認は出さない</b>＝代わりを務める
+    /// タイトルバーの × が確認を出さないため（未保存の変更は自動保存と復旧に委ねる既存の設計）。
+    /// </remarks>
+    private void ExitAppButton_Click(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
     /// <summary>ウィンドウ終了時に自動保存を行う</summary>
     /// <remarks>
     /// フィーチャーモジュール（AI チャット・モック生成など）のモードレスウィンドウ後始末は、
@@ -218,9 +232,114 @@ public partial class MainWindow : Window
         return new Rect(minX, minY, maxX - minX, maxY - minY);
     }
 
+    /// <summary>全画面表示へ入る前のウィンドウの枠と状態（解除時にここへ戻す）</summary>
+    private (WindowStyle Style, WindowState State)? _beforeFullScreen;
+
+    /// <summary>全画面表示の適用中かどうか（自分が起こす状態変化を外部要因と取り違えないためのフラグ）</summary>
+    private bool _applyingFullScreen;
+
+    /// <summary>ウィンドウが外部要因で通常サイズへ戻されたら、全画面表示をやめる</summary>
+    /// <remarks>
+    /// <para>
+    /// Win+Down やシステムメニューの「元のサイズに戻す」は <c>SC_RESTORE</c> を送るため、
+    /// 全画面中でも最大化が解ける。そのまま放っておくと<b>枠が無いまま通常サイズ</b>という、
+    /// タイトルバーが無いので掴んで動かせないウィンドウが残る（ツールバーは残るので F11 や
+    /// 「表示」グループから戻せはする）。
+    /// </para>
+    /// <para>
+    /// 戻すのは枠だけで、状態は利用者の操作結果（通常サイズ）を尊重する＝退避した最大化へは戻さない。
+    /// Win+Down の意味そのものが「最大化をやめる」なので、そこを覆さない。
+    /// </para>
+    /// <para>
+    /// <b>最小化は対象にしない</b>（条件が「最大化でない」ではなく「通常サイズになった」である理由）。
+    /// 最小化の意味は「いったん引っ込める」で最大化をやめることではなく、引っ込んでいる間は
+    /// 掴んで動かせないウィンドウも残らない。Win+D で一度デスクトップを見て戻ったら全画面が
+    /// 解けていた、という挙動にしないため、最小化からの復帰では全画面のままにする。
+    /// </para>
+    /// </remarks>
+    private void OnWindowStateChanged(object? sender, EventArgs e)
+    {
+        if (
+            _applyingFullScreen
+            || _beforeFullScreen is not { } previous
+            || WindowState != WindowState.Normal
+        )
+        {
+            return;
+        }
+
+        // 先に枠を戻して退避を捨てる（この後の IsFullScreen 変更で ApplyFullScreen が二重に動かないように）
+        _beforeFullScreen = null;
+        WindowStyle = previous.Style;
+        _viewModel.IsFullScreen = false;
+    }
+
+    /// <summary>全画面表示の切替をウィンドウへ適用する</summary>
+    /// <remarks>
+    /// <para>
+    /// 枠なし（<see cref="WindowStyle.None"/>）＋最大化でタスクバーまで覆う。解除時に戻せるよう、
+    /// 入る前の枠と状態を退避する（通常サイズの位置・大きさは WPF の RestoreBounds が保持する）。
+    /// </para>
+    /// <para>
+    /// <b>すでに最大化されている状態から枠だけ外してもタスクバーが前面に残る</b>ため、いったん
+    /// <see cref="WindowState.Normal"/> へ戻してから枠を外し、改めて最大化する必要がある。
+    /// </para>
+    /// </remarks>
+    private void ApplyFullScreen(bool isFullScreen)
+    {
+        // ポップアップは開いた時点の画面座標に留まりウィンドウへ追従しないため、
+        // 「表示」グループから全画面にすると画面の真ん中へ取り残される（実機で確認）。
+        // 他の 5 トグルと違いウィンドウの形が変わる操作なので、ここだけは閉じる
+        ViewGroupToggle.IsChecked = false;
+
+        // 入る途中の「いったん通常サイズへ」を OnWindowStateChanged が外部要因と取り違えないようにする
+        _applyingFullScreen = true;
+
+        try
+        {
+            if (isFullScreen)
+            {
+                if (_beforeFullScreen is not null)
+                {
+                    return;
+                }
+
+                _beforeFullScreen = (WindowStyle, WindowState);
+
+                // 最大化のまま枠を外すとタスクバーが前面に残るので、通常サイズを経由する
+                WindowState = WindowState.Normal;
+                WindowStyle = WindowStyle.None;
+                WindowState = WindowState.Maximized;
+
+                return;
+            }
+
+            if (_beforeFullScreen is not { } previous)
+            {
+                return;
+            }
+
+            _beforeFullScreen = null;
+            WindowStyle = previous.Style;
+            WindowState = previous.State;
+        }
+        finally
+        {
+            _applyingFullScreen = false;
+        }
+    }
+
     /// <summary>ボタン・キー由来のズーム倍率変更をビューポート中央基準へ補正する</summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // 全画面表示はウィンドウの枠の話で ViewModel からは触れないため、ここで適用する
+        if (e.PropertyName == nameof(MainViewModel.IsFullScreen))
+        {
+            ApplyFullScreen(_viewModel.IsFullScreen);
+
+            return;
+        }
+
         // 検索オーバーレイが表示されたら検索ボックスへフォーカスし、既存クエリを全選択する
         if (e.PropertyName == nameof(MainViewModel.IsSearchOverlayVisible))
         {
