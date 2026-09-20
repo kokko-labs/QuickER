@@ -714,8 +714,9 @@
             <StackPanel>
               <TextBlock Style="{StaticResource ToolBarIcon}" Text="◫" />
               <TextBlock Style="{StaticResource ToolBarCaption}">
-                <Run Text="{x:Static resources:Strings.Toolbar_ViewGroup}" />
-                <Run Text=" ▾" />
+                <!-- 2 つの Run は改行で区切らない（XAML が要素間の空白を 1 つ差し込み、
+                     リテラル先頭の空白と重なって二重になる）。区切りはリテラル側の 1 つだけ -->
+                <Run Text="{x:Static resources:Strings.Toolbar_ViewGroup}" /><Run Text=" ▾" />
               </TextBlock>
             </StackPanel>
           </ToggleButton>
@@ -828,8 +829,9 @@
             <StackPanel>
               <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
               <TextBlock Style="{StaticResource ToolBarCaption}">
-                <Run Text="{x:Static resources:Strings.Toolbar_ArrangeGroup}" />
-                <Run Text=" ▾" />
+                <!-- 2 つの Run は改行で区切らない（XAML が要素間の空白を 1 つ差し込み、
+                     リテラル先頭の空白と重なって二重になる）。区切りはリテラル側の 1 つだけ -->
+                <Run Text="{x:Static resources:Strings.Toolbar_ArrangeGroup}" /><Run Text=" ▾" />
               </TextBlock>
             </StackPanel>
           </ToggleButton>

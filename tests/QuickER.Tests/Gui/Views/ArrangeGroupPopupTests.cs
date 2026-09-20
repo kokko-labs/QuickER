@@ -1,7 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using AwesomeAssertions;
+using QuickER.Resources;
 using QuickER.ViewModels;
 using static QuickER.Tests.TestSupport.WpfApplicationTestSupport;
 
@@ -59,5 +61,27 @@ public class ArrangeGroupPopupTests
         toggle.IsChecked = false;
         DoEvents();
         popup.IsOpen.Should().BeFalse();
+    }
+
+    /// <summary>キャプションの区切りが空白 1 つであることを検証する</summary>
+    /// <remarks>
+    /// <c>TextBlock</c> の中で <c>Run</c> を改行で区切ると、XAML が要素間の空白を 1 つへ畳んで
+    /// 出力する。リテラル側にも先頭の空白を書くと二重になるが、ビルドでも型検査でも出ず
+    /// 画面の見た目にしか現れない。描画後の文字列で固定する。
+    /// </remarks>
+    [Fact(DisplayName = "整列グループ: キャプションの区切りは空白 1 つ")]
+    public void ArrangeGroupToggleCaption_UsesSingleSpaceBeforeMarker()
+    {
+        RunInIsolatedWindow(
+            (_, window) =>
+            {
+                var groupToggle = (ToggleButton)window.FindName("ArrangeGroupToggle")!;
+                var caption = ((StackPanel)groupToggle.Content).Children.OfType<TextBlock>().Last();
+
+                var text = new TextRange(caption.ContentStart, caption.ContentEnd).Text;
+
+                text.Should().Be(Strings.Toolbar_ArrangeGroup + " ▾");
+            }
+        );
     }
 }
