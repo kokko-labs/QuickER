@@ -127,7 +127,7 @@ EC サイトの受注管理に必要なテーブルを設計して
 - Claude Code
 - Copilot（GitHub Copilot CLI）
 
-![AI チャットで受注管理のテーブル一式を生成した例（Claude Code 接続）](docs/images/ai-chat.ja.png)
+![AI チャットで受注管理のテーブル一式を生成した例（Claude Code 接続・早回し）](docs/images/ai-chat.ja.gif)
 
 設定方法は [AI チャットの設定](docs/ai-chat.ja.md) を参照してください。
 

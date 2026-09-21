@@ -127,7 +127,7 @@ Supported connection methods:
 - Claude Code
 - Copilot (GitHub Copilot CLI)
 
-![Generating a full set of order-management tables through AI chat (Claude Code connection)](docs/images/ai-chat.png)
+![Generating a full set of order-management tables through AI chat (Claude Code connection, sped up)](docs/images/ai-chat.gif)
 
 See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
 
