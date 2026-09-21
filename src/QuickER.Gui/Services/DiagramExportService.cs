@@ -156,7 +156,21 @@ internal sealed class DiagramExportService(
             case DiagramExportFormat.SchemaJson:
                 // 配置情報（layout）を持たないスキーマのみ文書。Layout = null で保存すると
                 // layout キー自体が出力されず、読込時に自動整列される可逆形式になる。
-                // 保存ダイアログで既存ファイルを選べるため、原子的に差し替えて上書き破損を防ぐ
+                // 保存ダイアログで既存ファイルを選べるため、原子的に差し替えて上書き破損を防ぐ。
+                // 選んだのが将来版の図なら、上書き保存と同じ確認を出す（保存ダイアログの上書き確認は
+                // 「ファイルがある」ことしか伝えず、この版が表現できないデータを失うことは伝えない）。
+                // キャンセルは何も書かず完了通知も出さない
+                if (
+                    JsonStorageService.IsNewerFormatFile(path)
+                    && !dialogs.ConfirmWarning(
+                        Strings.Confirm_OverwriteNewerFormat,
+                        Strings.Common_Confirm
+                    )
+                )
+                {
+                    return;
+                }
+
                 JsonStorageService.SaveAtomic(
                     path,
                     new DiagramDocument { Schema = host.BuildModel(), Layout = null }

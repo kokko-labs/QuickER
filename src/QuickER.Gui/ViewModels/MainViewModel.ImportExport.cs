@@ -830,7 +830,7 @@ public partial class MainViewModel : IDiagramTransferHost
     /// <list type="number">
     /// <item><b>将来版の書き戻し</b>は保存先がどのファイルでも確認する（相手のファイルにだけ残っている
     /// 未対応データを、この版の形式で書き潰すため。判定は
-    /// <see cref="JsonStorageService.TryReadFormatVersion"/>＝逆直列化を通さない軽い読み取り）。</item>
+    /// <see cref="JsonStorageService.IsNewerFormatFile"/>＝逆直列化を通さない軽い読み取り）。</item>
     /// <item><b>外部変更の上書き</b>は「いま開いているファイル」のときだけ確認する（最終既知ハッシュと
     /// いう比較対象を持つのがその 1 つだけのため）。クリーン時の自動再読込は破損 JSON・将来版・
     /// 型不一致では失敗して一時通知を残すだけで、文書はクリーン・最終既知ハッシュは旧値のまま残る。
@@ -855,7 +855,7 @@ public partial class MainViewModel : IDiagramTransferHost
             return true;
         }
 
-        if (IsNewerFormatOnDisk(path))
+        if (JsonStorageService.IsNewerFormatFile(path))
         {
             return _dialogs.ConfirmWarning(
                 Strings.Confirm_OverwriteNewerFormat,
@@ -874,16 +874,6 @@ public partial class MainViewModel : IDiagramTransferHost
             Strings.Common_Confirm
         );
     }
-
-    /// <summary>ディスク上のファイルを、この版の形式で書き戻すと情報を落とす相手として扱うか</summary>
-    /// <remarks>
-    /// 版を名乗っていないファイル（破損・JSON でない・<c>Version</c> キーなし）は対象外。
-    /// 版を名乗っているのに解釈できない値（<c>"2"</c>・<c>2.0</c> など、この版が書かない形）は
-    /// <b>確認する側へ倒す</b>＝別の版か手編集のファイルであり、黙って現行形式で書き潰さない。
-    /// </remarks>
-    private static bool IsNewerFormatOnDisk(string path) =>
-        JsonStorageService.TryReadFormatVersion(path, out var version)
-        && (version is null || version > DiagramDocument.CurrentVersion);
 
     /// <summary>指定パスが現在紐付いている文書と同じファイルか（フルパス正規化・大文字小文字を区別しない）</summary>
     /// <remarks>

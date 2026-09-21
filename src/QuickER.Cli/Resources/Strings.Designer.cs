@@ -468,6 +468,18 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_ReverseForce {
+            get {
+                return ResourceManager.GetString("Cli_Opt_ReverseForce", resourceCulture);
+            }
+        }
+
+        public static string Cli_ReverseNewerFormatRefused {
+            get {
+                return ResourceManager.GetString("Cli_ReverseNewerFormatRefused", resourceCulture);
+            }
+        }
+
         public static string Cli_Cmd_Mcp {
             get {
                 return ResourceManager.GetString("Cli_Cmd_Mcp", resourceCulture);

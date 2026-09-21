@@ -320,6 +320,19 @@ public static class JsonStorageService
         }
     }
 
+    /// <summary>ディスク上のファイルを、この版の形式で書き戻すと情報を落とす相手として扱うか</summary>
+    /// <remarks>
+    /// 図 JSON を既存ファイルへ書き出す全経路（GUI の上書き保存・Schema JSON エクスポート・CLI の
+    /// <c>reverse</c>）が共有する判定。版を名乗っていないファイル（不在・破損・JSON でない・
+    /// <c>Version</c> キーなし）は対象外。版を名乗っているのに解釈できない値（<c>"2"</c>・<c>2.0</c> など、
+    /// この版が書かない形）は<b>対象に含める</b>＝別の版か手編集のファイルであり、黙って現行形式で書き潰さない。
+    /// </remarks>
+    /// <param name="path">これから上書きするファイルパス</param>
+    /// <returns>確認なしに上書きしてはいけない場合は <c>true</c></returns>
+    public static bool IsNewerFormatFile(string path) =>
+        TryReadFormatVersion(path, out var version)
+        && (version is null || version > DiagramDocument.CurrentVersion);
+
     /// <summary>JSON 文字列を保存文書へ逆直列化し、非 null 契約を満たすよう正規化する</summary>
     /// <remarks><see cref="Load"/> と <see cref="TryLoad"/> で読込結果を完全に一致させるための共有ヘルパ</remarks>
     private static DiagramDocument Deserialize(string json) =>

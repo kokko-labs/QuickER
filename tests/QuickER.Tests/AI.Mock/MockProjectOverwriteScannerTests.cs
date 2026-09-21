@@ -1,4 +1,7 @@
 using System.IO;
+using System.Linq;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
 
@@ -141,6 +144,47 @@ public class MockProjectOverwriteScannerTests
         }
         finally
         {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 出力フォルダ自体が列挙を拒否していても、走査が例外にならないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 走査は生成コマンドの try の外（実行中フラグを立てる前）から呼ばれるため、ここで例外が出ると
+    /// コマンドの未処理例外になる。読めないものは上書きの衝突として挙げられないだけで、確認は妨げない。
+    /// 後片付けのために、判定後は必ず拒否 ACE を外してから削除する。
+    /// </remarks>
+    [Fact(DisplayName = "列挙を拒否する出力フォルダでも落ちない")]
+    public void Scan_OutputFolderDeniesListing_DoesNotThrow()
+    {
+        var folder = NewTempFolder();
+        Write(Path.Combine(folder, "Other.csproj"));
+        var rule = new FileSystemAccessRule(
+            WindowsIdentity.GetCurrent().User!,
+            FileSystemRights.ListDirectory,
+            AccessControlType.Deny
+        );
+        var info = new DirectoryInfo(folder);
+        var security = info.GetAccessControl();
+        security.AddAccessRule(rule);
+        info.SetAccessControl(security);
+
+        try
+        {
+            // 素の列挙は落ちる（＝オプションが解決している問題が実在することの確認）
+            var raw = () => Directory.EnumerateFiles(folder, "*.csproj").ToList();
+            raw.Should().Throw<UnauthorizedAccessException>();
+
+            var scan = () => MockProjectOverwriteScanner.Scan(folder, ProjectName);
+            scan.Should().NotThrow();
+        }
+        finally
+        {
+            var cleanupSecurity = info.GetAccessControl();
+            cleanupSecurity.RemoveAccessRule(rule);
+            info.SetAccessControl(cleanupSecurity);
             Cleanup(folder);
         }
     }

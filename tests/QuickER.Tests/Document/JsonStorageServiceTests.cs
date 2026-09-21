@@ -853,4 +853,38 @@ public class JsonStorageServiceTests
         JsonStorageService.Save(path, document);
         return path;
     }
+
+    /// <summary>
+    /// 上書き前の将来版判定（GUI の上書き保存・Schema JSON エクスポート・CLI reverse が共有）の境界を固定する。
+    /// </summary>
+    /// <remarks>
+    /// 版を名乗っていないもの（不在・JSON でない・Version キーなし）は対象外。版を名乗っているのに解釈できない値は
+    /// 別の版か手編集のファイルなので、確認する側へ倒す。
+    /// </remarks>
+    [Theory(DisplayName = "IsNewerFormatFile: 将来版と解釈できない版だけを上書き注意の対象にする")]
+    [InlineData(null, false)]
+    [InlineData("not json", false)]
+    [InlineData("{\"Schema\":{}}", false)]
+    [InlineData("{\"Version\":1}", false)]
+    [InlineData("{\"Version\":2}", true)]
+    [InlineData("{\"Version\":\"2\"}", true)]
+    [InlineData("{\"Version\":2.0}", true)]
+    public void IsNewerFormatFile_ClassifiesVersions(string? content, bool expected)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-version-{Guid.NewGuid()}.json");
+
+        if (content is not null)
+        {
+            File.WriteAllText(path, content);
+        }
+
+        try
+        {
+            JsonStorageService.IsNewerFormatFile(path).Should().Be(expected);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
