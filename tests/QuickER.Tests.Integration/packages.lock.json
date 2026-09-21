@@ -588,13 +588,13 @@
           "QuickER.Mcp": "[0.1.0, )",
           "QuickER.Mcp.Tools": "[0.1.0, )",
           "QuickER.Model": "[0.1.0, )",
-          "QuickER.MySql": "[0.1.0, )",
-          "QuickER.Oracle": "[0.1.0, )",
-          "QuickER.PostgreSql": "[0.1.0, )",
           "QuickER.Provider": "[0.1.0, )",
+          "QuickER.Provider.MySql": "[0.1.0, )",
+          "QuickER.Provider.Oracle": "[0.1.0, )",
+          "QuickER.Provider.PostgreSql": "[0.1.0, )",
+          "QuickER.Provider.SqlServer": "[0.1.0, )",
+          "QuickER.Provider.Sqlite": "[0.1.0, )",
           "QuickER.Settings": "[0.1.0, )",
-          "QuickER.SqlServer": "[0.1.0, )",
-          "QuickER.Sqlite": "[0.1.0, )",
           "System.CommandLine": "[2.0.12, )"
         }
       },
@@ -638,7 +638,14 @@
       "quicker.model": {
         "type": "Project"
       },
-      "quicker.mysql": {
+      "quicker.provider": {
+        "type": "Project",
+        "dependencies": {
+          "QuickER.CodeGen.CSharp": "[0.1.0, )",
+          "QuickER.Model": "[0.1.0, )"
+        }
+      },
+      "quicker.provider.mysql": {
         "type": "Project",
         "dependencies": {
           "MySqlConnector": "[2.6.2, )",
@@ -647,7 +654,7 @@
           "QuickER.Provider": "[0.1.0, )"
         }
       },
-      "quicker.oracle": {
+      "quicker.provider.oracle": {
         "type": "Project",
         "dependencies": {
           "Oracle.ManagedDataAccess.Core": "[23.26.301, )",
@@ -656,7 +663,7 @@
           "QuickER.Provider": "[0.1.0, )"
         }
       },
-      "quicker.postgresql": {
+      "quicker.provider.postgresql": {
         "type": "Project",
         "dependencies": {
           "Npgsql": "[10.0.3, )",
@@ -665,17 +672,7 @@
           "QuickER.Provider": "[0.1.0, )"
         }
       },
-      "quicker.provider": {
-        "type": "Project",
-        "dependencies": {
-          "QuickER.CodeGen.CSharp": "[0.1.0, )",
-          "QuickER.Model": "[0.1.0, )"
-        }
-      },
-      "quicker.settings": {
-        "type": "Project"
-      },
-      "quicker.sqlite": {
+      "quicker.provider.sqlite": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.12, )",
@@ -685,7 +682,7 @@
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )"
         }
       },
-      "quicker.sqlserver": {
+      "quicker.provider.sqlserver": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.SqlClient": "[7.0.3, )",
@@ -693,6 +690,9 @@
           "QuickER.Model": "[0.1.0, )",
           "QuickER.Provider": "[0.1.0, )"
         }
+      },
+      "quicker.settings": {
+        "type": "Project"
       },
       "Microsoft.CodeAnalysis.CSharp": {
         "type": "CentralTransitive",

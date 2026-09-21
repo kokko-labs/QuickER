@@ -175,7 +175,7 @@ public class ClaudeMdParityTests
 
         // 前方一致の誤検出（QuickER.Runtime が QuickER.Runtime.Sqlite の部分文字列として拾われる等）を
         // 避けるため、直後にプロジェクト名の続きが来ない出現を要求する。
-        // 方言プロバイダの並記（QuickER.SqlServer / PostgreSql / MySql / Oracle / Sqlite）は
+        // 方言プロバイダの並記（QuickER.Provider.SqlServer / PostgreSql / MySql / Oracle / Sqlite）は
         // 「/ 短縮名」の形も正とする
         var missing = projects
             .Where(name =>

@@ -1,6 +1,6 @@
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 

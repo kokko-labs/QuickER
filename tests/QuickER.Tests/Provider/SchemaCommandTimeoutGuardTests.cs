@@ -27,16 +27,16 @@ public class SchemaCommandTimeoutGuardTests
     /// <summary>検査対象（5 方言の取込＋同期実行器）</summary>
     private static readonly string[] TargetFiles =
     [
-        @"src\QuickER.SqlServer\SqlServerSchemaImporter.cs",
-        @"src\QuickER.SqlServer\SqlServerSchemaSyncExecutor.cs",
-        @"src\QuickER.PostgreSql\PostgreSqlSchemaImporter.cs",
-        @"src\QuickER.PostgreSql\PostgreSqlSchemaSyncExecutor.cs",
-        @"src\QuickER.MySql\MySqlSchemaImporter.cs",
-        @"src\QuickER.MySql\MySqlSchemaSyncExecutor.cs",
-        @"src\QuickER.Oracle\OracleSchemaImporter.cs",
-        @"src\QuickER.Oracle\OracleSchemaSyncExecutor.cs",
-        @"src\QuickER.Sqlite\SqliteSchemaImporter.cs",
-        @"src\QuickER.Sqlite\SqliteSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.SqlServer\SqlServerSchemaImporter.cs",
+        @"src\QuickER.Provider.SqlServer\SqlServerSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.PostgreSql\PostgreSqlSchemaImporter.cs",
+        @"src\QuickER.Provider.PostgreSql\PostgreSqlSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.MySql\MySqlSchemaImporter.cs",
+        @"src\QuickER.Provider.MySql\MySqlSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.Oracle\OracleSchemaImporter.cs",
+        @"src\QuickER.Provider.Oracle\OracleSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.Sqlite\SqliteSchemaImporter.cs",
+        @"src\QuickER.Provider.Sqlite\SqliteSchemaSyncExecutor.cs",
     ];
 
     /// <summary>ヘルパーを迂回するコマンド生成（このいずれかが現れたら失敗）</summary>

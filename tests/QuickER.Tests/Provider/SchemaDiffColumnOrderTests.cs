@@ -2,8 +2,8 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.SqlServer;
 using QuickER.Services;
-using QuickER.SqlServer;
 
 namespace QuickER.Tests.Provider;
 

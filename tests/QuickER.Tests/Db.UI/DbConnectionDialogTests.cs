@@ -4,7 +4,7 @@ using System.Windows.Controls;
 using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Db.UI;

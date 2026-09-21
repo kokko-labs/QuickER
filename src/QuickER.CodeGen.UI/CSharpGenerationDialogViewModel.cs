@@ -8,8 +8,8 @@ using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.UI.Resources;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 
 namespace QuickER.CodeGen.UI;
 

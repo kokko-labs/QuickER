@@ -105,9 +105,9 @@ public class CSharpGenerationDialogViewModelTests
     [Theory(
         DisplayName = "未対応方言でもQuickER 版 Repository ラジオは選択可・対象 DB チェックは両方 OFF から始まる"
     )]
-    [InlineData(typeof(QuickER.PostgreSql.PostgreSqlProvider))]
-    [InlineData(typeof(QuickER.MySql.MySqlProvider))]
-    [InlineData(typeof(QuickER.Oracle.OracleProvider))]
+    [InlineData(typeof(QuickER.Provider.PostgreSql.PostgreSqlProvider))]
+    [InlineData(typeof(QuickER.Provider.MySql.MySqlProvider))]
+    [InlineData(typeof(QuickER.Provider.Oracle.OracleProvider))]
     public void UnsupportedDialectProvider_StillAllowsRepositoryRadio_ButNoDialectPreselected(
         Type providerType
     )
@@ -127,8 +127,8 @@ public class CSharpGenerationDialogViewModelTests
     [Theory(
         DisplayName = "対応方言（SQL Server / SQLite）ではその方言のみ対象 DB チェックが初期 ON になる"
     )]
-    [InlineData(typeof(QuickER.SqlServer.SqlServerProvider))]
-    [InlineData(typeof(QuickER.Sqlite.SqliteProvider))]
+    [InlineData(typeof(QuickER.Provider.SqlServer.SqlServerProvider))]
+    [InlineData(typeof(QuickER.Provider.Sqlite.SqliteProvider))]
     public void SupportedDialectProvider_PreselectsItsDialect(Type providerType)
     {
         var provider = (QuickER.Provider.IDatabaseProvider)Activator.CreateInstance(providerType)!;
@@ -152,7 +152,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "ToOptions はチェックした対象 DB を固定順で RepositoryDialects に設定する")]
     public void ToOptions_SetsRepositoryDialects_InFixedOrder()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.Sqlite.SqliteProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.Sqlite.SqliteProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
@@ -171,7 +174,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(
             out _,
-            currentProvider: new QuickER.PostgreSql.PostgreSqlProvider()
+            currentProvider: new QuickER.Provider.PostgreSql.PostgreSqlProvider()
         );
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
@@ -207,7 +210,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(
             out var folder,
-            currentProvider: new QuickER.Sqlite.SqliteProvider()
+            currentProvider: new QuickER.Provider.Sqlite.SqliteProvider()
         );
 
         try
@@ -222,7 +225,7 @@ public class CSharpGenerationDialogViewModelTests
             // 次回はプロバイダを変えて再構築しても、保存された対象 DB（両方 ON）が優先して復元される
             var restored = new CSharpGenerationDialogViewModel(
                 new CSharpGenerationSettingsStore(folder),
-                currentProvider: new QuickER.SqlServer.SqlServerProvider()
+                currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
             );
 
             restored.TargetSqlServer.Should().BeTrue("保存値どおり SQL Server は ON");
@@ -307,7 +310,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "QuickER 版 Repository 選択ではパッケージ参照モードが結果へ反映される")]
     public void UseRuntimePackages_IsReflectedInResult_WhenRepositorySelected()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
@@ -476,7 +482,10 @@ public class CSharpGenerationDialogViewModelTests
     )]
     public void ExcludeUnboundedBinary_IsReflectedInResultOptions()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
@@ -499,7 +508,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "無制限バイナリ列の除外行はQuickER 版 Repository 選択時のみ表示")]
     public void ShowExcludeUnboundedBinary_TracksRepositorySelection()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
 
         vm.ShowExcludeUnboundedBinary.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
@@ -553,7 +565,10 @@ public class CSharpGenerationDialogViewModelTests
     )]
     public void GenerateRemoteContracts_IsReflectedInResultOptions()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
@@ -576,7 +591,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "リモート対応行は DB アクセス「なし」で非表示・Repository/EF Core で表示")]
     public void ShowRemoteContracts_TracksDbAccessSelection()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
 
         vm.ShowRemoteContracts.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
@@ -629,7 +647,10 @@ public class CSharpGenerationDialogViewModelTests
     )]
     public void GenerateRemoteServices_On_ImpliesRemoteContracts()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
@@ -658,7 +679,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "リモート面インターフェイス OFF で HTTP 実装も OFF に連動する")]
     public void GenerateRemoteContracts_Off_TurnsOffRemoteServices()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
         vm.DbAccessRepository = true;
 
@@ -678,7 +702,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "HTTP 実装の切替でプレビューに RemoteServer ファイルが連動する")]
     public void GenerateRemoteServices_TogglesRemoteServerFileInPreview()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Shop.g.cs";
         vm.DbAccessRepository = true;
@@ -808,7 +835,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "サーバー層フォルダ欄はリモートサービス生成 ON のときだけ表示される")]
     public void ShowServerLayerDirectory_TracksRemoteServices()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Acme.App";
         vm.DbAccessRepository = true;
 
@@ -833,7 +863,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "層別出力と層フォルダが生成オプションへ写像される")]
     public void LayeredOutput_AndDirectories_AreMappedToOptions()
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
+        );
         vm.RootNamespace = "Acme.App";
         vm.OutputPath = @"C:\out";
         vm.DbAccessRepository = true;
@@ -1792,7 +1825,7 @@ public class CSharpGenerationDialogViewModelTests
             var saveVm = new CSharpGenerationDialogViewModel(
                 store,
                 saveFiles,
-                currentProvider: new QuickER.SqlServer.SqlServerProvider()
+                currentProvider: new QuickER.Provider.SqlServer.SqlServerProvider()
             );
             saveVm.RootNamespace = "Acme.Roundtrip";
             saveVm.DbAccessRepository = true;
@@ -1809,7 +1842,7 @@ public class CSharpGenerationDialogViewModelTests
             var loadVm = new CSharpGenerationDialogViewModel(
                 store,
                 loadFiles,
-                currentProvider: new QuickER.Sqlite.SqliteProvider()
+                currentProvider: new QuickER.Provider.Sqlite.SqliteProvider()
             );
 
             loadVm.LoadSettingsFromCommand.Execute(null);

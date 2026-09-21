@@ -119,9 +119,9 @@
     <Project Path="src/QuickER.Mcp/QuickER.Mcp.csproj" />
     <Project Path="src/QuickER.Mcp.Tools/QuickER.Mcp.Tools.csproj" />
     <Project Path="src/QuickER.Model/QuickER.Model.csproj" />
-    <Project Path="src/QuickER.MySql/QuickER.MySql.csproj" />
-    <Project Path="src/QuickER.Oracle/QuickER.Oracle.csproj" />
-    <Project Path="src/QuickER.PostgreSql/QuickER.PostgreSql.csproj" />
+    <Project Path="src/QuickER.Provider.MySql/QuickER.Provider.MySql.csproj" />
+    <Project Path="src/QuickER.Provider.Oracle/QuickER.Provider.Oracle.csproj" />
+    <Project Path="src/QuickER.Provider.PostgreSql/QuickER.Provider.PostgreSql.csproj" />
     <Project Path="src/QuickER.Provider/QuickER.Provider.csproj" />
     <Project Path="src/QuickER.Runtime.AspNetCore/QuickER.Runtime.AspNetCore.csproj" />
     <Project Path="src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj" />
@@ -131,8 +131,8 @@
     <Project Path="src/QuickER.Runtime.Sync/QuickER.Runtime.Sync.csproj" />
     <Project Path="src/QuickER.Runtime/QuickER.Runtime.csproj" />
     <Project Path="src/QuickER.Settings/QuickER.Settings.csproj" />
-    <Project Path="src/QuickER.Sqlite/QuickER.Sqlite.csproj" />
-    <Project Path="src/QuickER.SqlServer/QuickER.SqlServer.csproj" />
+    <Project Path="src/QuickER.Provider.Sqlite/QuickER.Provider.Sqlite.csproj" />
+    <Project Path="src/QuickER.Provider.SqlServer/QuickER.Provider.SqlServer.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/QuickER.Tests/QuickER.Tests.csproj" />

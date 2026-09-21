@@ -4,8 +4,8 @@ using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.SqlServer;
 using QuickER.Services;
-using QuickER.SqlServer;
 using ProviderStrings = QuickER.Provider.Resources.Strings;
 
 namespace QuickER.Tests.Provider;

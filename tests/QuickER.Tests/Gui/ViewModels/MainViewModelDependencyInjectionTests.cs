@@ -3,8 +3,8 @@ using AwesomeAssertions;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.SqlServer;
 using QuickER.Services;
-using QuickER.SqlServer;
 using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
 

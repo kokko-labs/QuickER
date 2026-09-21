@@ -50,7 +50,7 @@
     <PackageVersion Include="Scriban" Version="7.4.0" />
     <!-- Microsoft.Data.Sqlite が推移的に持ち込む SQLitePCLRaw 2.1.11 には既知の脆弱性
          (GHSA-2m69-gcr7-jv3q) があるため、修正済みの版へ明示参照で上書きする（参照側＝
-         QuickER.Sqlite / QuickER.Runtime.Sqlite / サンプル。サンプルは CPM 外のため個別ピン） -->
+         QuickER.Provider.Sqlite / QuickER.Runtime.Sqlite / サンプル。サンプルは CPM 外のため個別ピン） -->
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <!-- Testcontainers の推移的依存（下限指定 [2025.1.0, )）の既定解決 2025.1.0 には
          GHSA-q939-rpr3-3284（ScpClient のパストラバーサル・High）があるため、修正済みの版へ

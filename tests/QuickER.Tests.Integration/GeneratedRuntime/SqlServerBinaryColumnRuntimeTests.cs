@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedSqlServerBinaryFixture;
 using QuickER.Tests.Integration;
 using Xunit;

@@ -1,7 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Sqlite;
+using QuickER.Provider.Sqlite;
 using Xunit;
 
 namespace QuickER.Tests.Provider;

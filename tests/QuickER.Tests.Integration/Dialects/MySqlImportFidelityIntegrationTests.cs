@@ -4,8 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using MySqlConnector;
-using QuickER.MySql;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
 using QuickER.Tests.Integration;
 
 namespace QuickER.Tests.Integration.Dialects;

@@ -1,9 +1,9 @@
 using AwesomeAssertions;
-using QuickER.MySql;
-using QuickER.Oracle;
-using QuickER.PostgreSql;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Oracle;
+using QuickER.Provider.PostgreSql;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using Xunit;
 
 namespace QuickER.Tests.Provider;

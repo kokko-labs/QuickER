@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using QuickER.Sqlite;
+using QuickER.Provider.Sqlite;
 using QuickER.Tests.GeneratedSqliteFixture;
 using QuickER.Tests.Integration;
 

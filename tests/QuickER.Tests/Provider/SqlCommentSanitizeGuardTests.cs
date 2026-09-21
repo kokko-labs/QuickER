@@ -35,11 +35,11 @@ public class SqlCommentSanitizeGuardTests
     private static readonly string[] TargetProjects =
     [
         "QuickER.Provider",
-        "QuickER.SqlServer",
-        "QuickER.PostgreSql",
-        "QuickER.MySql",
-        "QuickER.Oracle",
-        "QuickER.Sqlite",
+        "QuickER.Provider.SqlServer",
+        "QuickER.Provider.PostgreSql",
+        "QuickER.Provider.MySql",
+        "QuickER.Provider.Oracle",
+        "QuickER.Provider.Sqlite",
     ];
 
     /// <summary>

@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.GeneratedSyncVoFixture;
 

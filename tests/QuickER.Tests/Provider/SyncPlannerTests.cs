@@ -4,7 +4,7 @@ using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using Xunit;
 using ProviderStrings = QuickER.Provider.Resources.Strings;
 

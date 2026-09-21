@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using QuickER.Model;
-using QuickER.Sqlite;
+using QuickER.Provider.Sqlite;
 
 namespace QuickER.Tests.Integration;
 

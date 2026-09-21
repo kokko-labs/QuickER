@@ -2,10 +2,10 @@
 using QuickER.Db.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
-using QuickER.MySql;
 using QuickER.Provider;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestDoubles;
 using DbStrings = QuickER.Db.UI.Resources.Strings;
 

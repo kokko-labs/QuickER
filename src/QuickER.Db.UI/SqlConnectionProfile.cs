@@ -1,5 +1,5 @@
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 
 namespace QuickER.Db.UI;
 

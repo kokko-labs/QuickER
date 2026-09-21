@@ -4,8 +4,8 @@ using System.Linq;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using Xunit;
 
 namespace QuickER.Tests.CodeGen.CSharp;

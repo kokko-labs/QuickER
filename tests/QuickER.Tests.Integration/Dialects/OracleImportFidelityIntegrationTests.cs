@@ -2,8 +2,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using QuickER.Oracle;
 using QuickER.Provider;
+using QuickER.Provider.Oracle;
 using QuickER.Tests.Integration;
 
 namespace QuickER.Tests.Integration.Dialects;

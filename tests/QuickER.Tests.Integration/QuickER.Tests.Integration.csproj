@@ -18,12 +18,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\QuickER.Cli\QuickER.Cli.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Model\QuickER.Model.csproj" />
-    <ProjectReference Include="..\..\src\QuickER.MySql\QuickER.MySql.csproj" />
-    <ProjectReference Include="..\..\src\QuickER.Oracle\QuickER.Oracle.csproj" />
-    <ProjectReference Include="..\..\src\QuickER.PostgreSql\QuickER.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Provider.MySql\QuickER.Provider.MySql.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Provider.Oracle\QuickER.Provider.Oracle.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Provider.PostgreSql\QuickER.Provider.PostgreSql.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Provider\QuickER.Provider.csproj" />
-    <ProjectReference Include="..\..\src\QuickER.Sqlite\QuickER.Sqlite.csproj" />
-    <ProjectReference Include="..\..\src\QuickER.SqlServer\QuickER.SqlServer.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Provider.Sqlite\QuickER.Provider.Sqlite.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Provider.SqlServer\QuickER.Provider.SqlServer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

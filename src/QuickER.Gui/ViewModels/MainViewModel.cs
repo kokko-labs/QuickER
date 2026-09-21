@@ -9,9 +9,9 @@ using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.SqlServer;
 using QuickER.Resources;
 using QuickER.Services;
-using QuickER.SqlServer;
 using QuickER.UndoRedo;
 
 namespace QuickER.ViewModels;

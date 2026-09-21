@@ -1,7 +1,7 @@
 using QuickER.AI.Mock;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.AI.Mock;
 
