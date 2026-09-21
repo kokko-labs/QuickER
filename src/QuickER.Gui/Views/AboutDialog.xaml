@@ -4,7 +4,7 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:resources="clr-namespace:QuickER.Resources"
   Title="{x:Static resources:Strings.About_Title}"
-  Width="580"
+  Width="620"
   SizeToContent="Height"
   ResizeMode="NoResize"
   ShowInTaskbar="False"
@@ -16,56 +16,135 @@
   <Window.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
-        <!-- 配色・ボタンの共通スタイルは共有テーマ辞書から取り込む -->
+        <!-- 配色・カード・ボタンの共通スタイルは共有テーマ辞書から取り込む -->
         <ResourceDictionary Source="pack://application:,,,/QuickER.Gui.Common;component/Themes/DialogTheme.xaml" />
       </ResourceDictionary.MergedDictionaries>
+
+      <!-- このダイアログ固有: リンクはアクセント色・下線はホバー時のみ（カード内の文字リンク向け） -->
+      <Style x:Key="AccentHyperlink" TargetType="Hyperlink">
+        <Setter Property="Foreground" Value="{StaticResource Accent}" />
+        <Setter Property="TextDecorations" Value="{x:Null}" />
+        <Style.Triggers>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter Property="TextDecorations" Value="Underline" />
+          </Trigger>
+        </Style.Triggers>
+      </Style>
     </ResourceDictionary>
   </Window.Resources>
-  <StackPanel Margin="14">
-    <TextBlock Text="QuickER" FontSize="20" FontWeight="SemiBold" />
-    <TextBlock x:Name="VersionText" Margin="0,4,0,0" />
 
-    <TextBlock x:Name="RuntimeText" Margin="0,12,0,0" TextWrapping="Wrap" />
-    <TextBlock x:Name="CopyrightText" Margin="0,4,0,0" TextWrapping="Wrap" />
+  <DockPanel>
+    <!-- フッタ（下端固定・本文との境界に区切り線）: 他ダイアログの確定ボタン列と同じ流儀 -->
+    <Border
+      DockPanel.Dock="Bottom"
+      BorderBrush="{StaticResource Divider}"
+      BorderThickness="0,1,0,0"
+    >
+      <DockPanel Margin="18,10,18,14">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button
+            Content="{x:Static resources:Strings.About_CopyVersionInfo}"
+            MinWidth="80"
+            Margin="0,0,8,0"
+            Style="{StaticResource SecondaryButton}"
+            Click="OnCopyClick"
+          />
+          <Button
+            Content="{x:Static resources:Strings.Common_Close}"
+            MinWidth="80"
+            IsDefault="True"
+            IsCancel="True"
+            Style="{StaticResource PrimaryButton}"
+          />
+        </StackPanel>
+        <!-- コピー結果の一時表示（成功・失敗）。残り幅を占有する fill 要素として最後に置く -->
+        <TextBlock
+          x:Name="CopyStatusText"
+          Margin="0,0,12,0"
+          VerticalAlignment="Center"
+          TextWrapping="Wrap"
+          Foreground="{DynamicResource MutedText}"
+        />
+      </DockPanel>
+    </Border>
 
-    <!-- リポジトリとドキュメントの目次（クリックで既定のブラウザーで開く） -->
-    <TextBlock x:Name="RepositoryLine" Margin="0,12,0,0" TextWrapping="Wrap">
-      <Run Text="{x:Static resources:Strings.About_Repository}" />
-      <Hyperlink x:Name="RepositoryLink" RequestNavigate="OnLinkNavigate">
-        <Run x:Name="RepositoryLinkText" />
-      </Hyperlink>
-    </TextBlock>
-    <TextBlock x:Name="DocumentationLine" Margin="0,4,0,0" TextWrapping="Wrap">
-      <Run Text="{x:Static resources:Strings.About_Documentation}" />
-      <Hyperlink x:Name="DocumentationLink" RequestNavigate="OnLinkNavigate">
-        <Run x:Name="DocumentationLinkText" />
-      </Hyperlink>
-    </TextBlock>
+    <!-- 本文 -->
+    <StackPanel Margin="18,18,18,6">
+      <!-- ヒーロー: アプリアイコン＋アプリ名＋版のバッジ -->
+      <StackPanel Orientation="Horizontal" Margin="2,0,0,16">
+        <Image
+          Source="/Resources/quicker-icon-128.png"
+          Width="48"
+          Height="48"
+          VerticalAlignment="Center"
+          RenderOptions.BitmapScalingMode="HighQuality"
+        />
+        <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+          <TextBlock Text="QuickER" FontSize="22" FontWeight="SemiBold" Foreground="#1F2937" />
+          <!-- 版番号はアクセント色の淡いバッジで表示（内容はコードビハインドが設定） -->
+          <Border
+            Background="#E8F0FE"
+            CornerRadius="10"
+            Padding="10,3"
+            Margin="0,5,0,0"
+            HorizontalAlignment="Left"
+          >
+            <TextBlock
+              x:Name="VersionText"
+              FontSize="12"
+              FontWeight="SemiBold"
+              Foreground="{StaticResource Accent}"
+            />
+          </Border>
+        </StackPanel>
+      </StackPanel>
 
-    <DockPanel Margin="0,16,0,0" LastChildFill="False">
-      <!-- コピー結果の一時表示（成功・失敗）。ボタンの左に出す -->
-      <TextBlock
-        x:Name="CopyStatusText"
-        DockPanel.Dock="Left"
-        VerticalAlignment="Center"
-        Foreground="{DynamicResource MutedText}"
-      />
-      <Button
-        DockPanel.Dock="Right"
-        Content="{x:Static resources:Strings.Common_Close}"
-        MinWidth="80"
-        IsDefault="True"
-        IsCancel="True"
-        Style="{StaticResource PrimaryButton}"
-      />
-      <Button
-        DockPanel.Dock="Right"
-        Content="{x:Static resources:Strings.About_CopyVersionInfo}"
-        MinWidth="80"
-        Margin="0,0,8,0"
-        Style="{StaticResource SecondaryButton}"
-        Click="OnCopyClick"
-      />
-    </DockPanel>
-  </StackPanel>
+      <!-- 実行環境・著作権・リンクのカード -->
+      <Border Style="{StaticResource Card}">
+        <StackPanel>
+          <TextBlock
+            x:Name="RuntimeText"
+            Foreground="{StaticResource HeaderText}"
+            TextWrapping="Wrap"
+          />
+          <TextBlock
+            x:Name="CopyrightText"
+            Margin="0,4,0,0"
+            Foreground="{StaticResource MutedText}"
+            TextWrapping="Wrap"
+          />
+
+          <Border Height="1" Background="{StaticResource Divider}" Margin="0,12,0,12" />
+
+          <!-- リポジトリとドキュメントの目次（クリックで既定のブラウザーで開く） -->
+          <TextBlock x:Name="RepositoryLine" TextWrapping="Wrap">
+            <Run
+              Text="{x:Static resources:Strings.About_Repository}"
+              Foreground="{StaticResource MutedText}"
+            />
+            <Hyperlink
+              x:Name="RepositoryLink"
+              Style="{StaticResource AccentHyperlink}"
+              RequestNavigate="OnLinkNavigate"
+            >
+              <Run x:Name="RepositoryLinkText" />
+            </Hyperlink>
+          </TextBlock>
+          <TextBlock x:Name="DocumentationLine" Margin="0,6,0,0" TextWrapping="Wrap">
+            <Run
+              Text="{x:Static resources:Strings.About_Documentation}"
+              Foreground="{StaticResource MutedText}"
+            />
+            <Hyperlink
+              x:Name="DocumentationLink"
+              Style="{StaticResource AccentHyperlink}"
+              RequestNavigate="OnLinkNavigate"
+            >
+              <Run x:Name="DocumentationLinkText" />
+            </Hyperlink>
+          </TextBlock>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </DockPanel>
 </Window>
