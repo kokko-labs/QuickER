@@ -163,4 +163,81 @@ public class DiagramExportServiceTests
             .StartWith(Strings.Export_Failed);
         dialogs.InformationMessages.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// Schema JSON の出力先が将来版の図なら、上書き保存と同じ確認を出す。キャンセルは何も書かず完了通知も出さない。
+    /// </summary>
+    /// <remarks>
+    /// 保存ダイアログの上書き確認は「ファイルがある」ことしか伝えない。この版の形式で書き戻すと、
+    /// この版が表現できないデータを黙って消す（上書き保存の経路だけ確認していた抜け道）。
+    /// </remarks>
+    [Theory(DisplayName = "Schema JSON: 将来版の図へ書き出すときは確認し、キャンセルなら書かない")]
+    [InlineData("{\"Version\":2,\"Schema\":{\"Entities\":[]}}")]
+    [InlineData("{\"Version\":\"2\",\"Schema\":{\"Entities\":[]}}")]
+    public void SchemaJson_NewerFormatTarget_ConfirmsAndCancels(string existing)
+    {
+        var (service, host, dialogs) = Create();
+        dialogs.ConfirmResult = false;
+        host.Model = BuildModelWithOmission();
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-export-" + Guid.NewGuid().ToString("N") + ".json"
+        );
+        File.WriteAllText(path, existing);
+
+        try
+        {
+            service.SaveDiagram(DiagramExportFormat.SchemaJson, path, null);
+
+            dialogs
+                .WarningConfirmMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(Strings.Confirm_OverwriteNewerFormat);
+            File.ReadAllText(path).Should().Be(existing, "キャンセルでは書き戻さない");
+            dialogs.InformationMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>確認に続行すれば現行フォーマットで書き出し、現行版・新規の出力先では確認しない</summary>
+    [Fact(
+        DisplayName = "Schema JSON: 将来版の確認に続行すれば書き出し、現行版・新規では確認しない"
+    )]
+    public void SchemaJson_ConfirmsOnlyForNewerFormat()
+    {
+        var (service, host, dialogs) = Create();
+        host.Model = BuildModelWithOmission();
+        var dir = Directory
+            .CreateDirectory(
+                Path.Combine(Path.GetTempPath(), "quicker-export-" + Guid.NewGuid().ToString("N"))
+            )
+            .FullName;
+        var newer = Path.Combine(dir, "newer.json");
+        var current = Path.Combine(dir, "current.json");
+        var fresh = Path.Combine(dir, "fresh.json");
+        File.WriteAllText(newer, "{\"Version\":2,\"Schema\":{\"Entities\":[]}}");
+        File.WriteAllText(current, "{\"Version\":1,\"Schema\":{\"Entities\":[]}}");
+
+        try
+        {
+            service.SaveDiagram(DiagramExportFormat.SchemaJson, newer, null);
+            service.SaveDiagram(DiagramExportFormat.SchemaJson, current, null);
+            service.SaveDiagram(DiagramExportFormat.SchemaJson, fresh, null);
+
+            dialogs
+                .WarningConfirmMessages.Should()
+                .ContainSingle("確認は将来版の出力先の 1 回だけ");
+            File.ReadAllText(newer).Should().Contain("Customer");
+            File.ReadAllText(current).Should().Contain("Customer");
+            File.Exists(fresh).Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }

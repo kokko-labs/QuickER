@@ -385,4 +385,65 @@ public class CliReverseCommandTests
             }
         }
     }
+
+    /// <summary>
+    /// 出力先が将来版の図なら、--force なしでは何も書かず終了コード 2 で止まる（generate の「上書きを断った」と同じ値）。
+    /// </summary>
+    [Theory(DisplayName = "reverse は将来版の図を --force なしで上書きしない")]
+    [InlineData("{\"Version\":2,\"Schema\":{\"Entities\":[]}}")]
+    [InlineData("{\"Version\":\"2\",\"Schema\":{\"Entities\":[]}}")]
+    public async Task Reverse_NewerFormatOutput_RefusesWithoutForce(string existing)
+    {
+        var (sourcePath, outPath, root) = CreateGeneratedSource();
+        File.WriteAllText(outPath, existing);
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["reverse", "--source", sourcePath, "--out", outPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(GenerationExecutor.ModifiedFilesExitCode);
+            File.ReadAllText(outPath).Should().Be(existing, "断ったときは何も書かない");
+            stderr.ToString().Should().Contain(outPath).And.Contain("--force");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>--force を付ければ将来版の図も現行フォーマットで上書きする</summary>
+    [Fact(DisplayName = "reverse は --force で将来版の図を上書きする")]
+    public async Task Reverse_NewerFormatOutput_OverwritesWithForce()
+    {
+        var (sourcePath, outPath, root) = CreateGeneratedSource();
+        File.WriteAllText(outPath, "{\"Version\":2,\"Schema\":{\"Entities\":[]}}");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["reverse", "--source", sourcePath, "--out", outPath, "--force"],
+                new StringWriter(),
+                new StringWriter()
+            );
+
+            exit.Should().Be(0);
+            JsonStorageService.Load(outPath).Version.Should().Be(DiagramDocument.CurrentVersion);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }

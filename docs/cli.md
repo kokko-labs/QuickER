@@ -65,8 +65,9 @@ quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --p
 | `--source <file>` | ✅ | The input C# source file (the `.g.cs` holding the entities, generated with `IncludeDataAnnotations` enabled) |
 | `--out <file>` | ✅ | The output ER diagram JSON file (schema only; no `layout` key). Missing parent directories are created |
 | `--provider <name>` | | The dialect used to expand column types, and the `TargetDbms` recorded in the diagram. `sqlserver` (default) / `postgresql` / `mysql` / `oracle` / `sqlite` |
+| `--force` | | Overwrite the output file even if it is a diagram saved in a newer format than this version supports |
 
-The result is written as a new diagram; it is never merged into an existing one. Non-fatal findings are reported as warnings on standard error, and the command fails when the source contains no eligible class.
+The result is written as a new diagram; it is never merged into an existing one. If `--out` names a diagram saved in a newer format, `reverse` writes nothing and exits with code `2`, because writing it in this version's format would drop the data this version cannot represent. Non-fatal findings are reported as warnings on standard error, and the command fails when the source contains no eligible class.
 
 ## quicker mcp
 

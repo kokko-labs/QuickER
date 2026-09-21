@@ -434,14 +434,22 @@ public static class CliApp
             Required = true,
         };
         var provider = ProviderOption();
+        var force = new Option<bool>("--force") { Description = Strings.Cli_Opt_ReverseForce };
 
-        var command = new Command("reverse", Strings.Cli_Cmd_Reverse) { source, output, provider };
+        var command = new Command("reverse", Strings.Cli_Cmd_Reverse)
+        {
+            source,
+            output,
+            provider,
+            force,
+        };
 
         command.SetAction(parseResult =>
             RunReverse(
                 parseResult.GetValue(source)!,
                 parseResult.GetValue(output)!,
                 parseResult.GetValue(provider)!,
+                parseResult.GetValue(force),
                 stdout,
                 stderr
             )
@@ -455,6 +463,7 @@ public static class CliApp
         FileInfo sourceFile,
         FileInfo output,
         string providerName,
+        bool force,
         TextWriter stdout,
         TextWriter stderr
     )
@@ -467,6 +476,16 @@ public static class CliApp
             );
 
             return 1;
+        }
+
+        // 出力先が将来版の図なら、--force なしでは書かない（この版の形式で書き戻すと、この版が表現できない
+        // データを黙って消すため。GUI の上書き保存・Schema JSON エクスポートの確認と同じ判定）。
+        // 終了コードは generate の「上書きを断った」と同じ 2＝失敗一般（1）とスクリプトから区別できる
+        if (!force && JsonStorageService.IsNewerFormatFile(output.FullName))
+        {
+            stderr.WriteLine(string.Format(Strings.Cli_ReverseNewerFormatRefused, output.FullName));
+
+            return GenerationExecutor.ModifiedFilesExitCode;
         }
 
         IDatabaseProvider provider;

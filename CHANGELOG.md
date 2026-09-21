@@ -126,7 +126,7 @@ Highlights of this release:
 
 #### Diagram editing & files
 
-- **The open file's external changes are no longer missed or overwritten without asking** — saving now compares the disk content beforehand and asks if it changed externally, and asks as well before writing back over a file saved in a newer format. Also fixed: watching stopped after a burst of changes, and an external write landing right after a save could be missed
+- **The open file's external changes are no longer missed or overwritten without asking** — saving now compares the disk content beforehand and asks if it changed externally, and asks as well before writing back over a file saved in a newer format — including when a Schema JSON export targets one. Also fixed: watching stopped after a burst of changes, and an external write landing right after a save could be missed
 - **An external change arriving mid-drag no longer corrupts the diagram or the undo history** — an in-progress move, resize or rubber-band selection is now cancelled back to where it started. A dialog that is already open is not closed
 - **A diagram file with a duplicated table or column identifier is now refused instead of being loaded** — it used to load but could not be saved, and switching the target DBMS ended the application. The message names the table, the column and the duplicated identifier. A file that cannot be loaded now also reports what kind of problem it has (invalid JSON, for one)
 - **A file saved immediately before a power loss no longer comes back empty**
@@ -181,6 +181,7 @@ Highlights of this release:
 
 - **A failed MCP tool call is now returned as an error (`isError`)**
 - **`quicker reverse` now creates the output folder**
+- **`quicker reverse` no longer overwrites a diagram saved in a newer format** — it writes nothing and exits with code `2`; add `--force` to overwrite it anyway
 
 ## [0.1.0] - 2026-08-30
 
