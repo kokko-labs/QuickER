@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using Testcontainers.MsSql;
 
 namespace QuickER.Tests.Integration;

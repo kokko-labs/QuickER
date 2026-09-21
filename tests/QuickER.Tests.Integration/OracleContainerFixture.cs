@@ -3,8 +3,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Oracle.ManagedDataAccess.Client;
-using QuickER.Oracle;
 using QuickER.Provider;
+using QuickER.Provider.Oracle;
 using Testcontainers.Oracle;
 
 namespace QuickER.Tests.Integration;
@@ -210,7 +210,7 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     /// <summary>
     /// スクリプトを文単位に分割する。「/」のみの行を含むスクリプト（同期スクリプト）は
     /// <see cref="OracleSchemaSyncExecutor.SplitStatements"/> をそのまま呼び、
-    /// 「/」行が 1 つも含まれないスクリプト（<see cref="QuickER.Oracle.OracleDdlGenerator"/> の生出力等）は
+    /// 「/」行が 1 つも含まれないスクリプト（<see cref="QuickER.Provider.Oracle.OracleDdlGenerator"/> の生出力等）は
     /// 各行末の <c>;</c> を文の区切りとして扱う（PL/SQL ブロックは含まれない前提）。
     /// </summary>
     internal static List<string> SplitStatements(string script)
@@ -229,7 +229,7 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     /// <summary>
     /// 「/」区切りを含まないスクリプトを <c>;</c> 終端の文単位に分割する。
     /// コメント専用行（<c>--</c> 始まり）・空行は除去し、DECLARE / BEGIN ブロックは考慮しない
-    /// （<see cref="QuickER.Oracle.OracleDdlGenerator"/> は PL/SQL ブロックを出力しないため）。
+    /// （<see cref="QuickER.Provider.Oracle.OracleDdlGenerator"/> は PL/SQL ブロックを出力しないため）。
     /// </summary>
     private static List<string> SplitBySemicolon(string normalized)
     {

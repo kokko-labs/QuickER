@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.MySql;
+using QuickER.Provider.MySql;
 using QuickER.Tests.GeneratedPortableFixture;
 using QuickER.Tests.Integration;
 

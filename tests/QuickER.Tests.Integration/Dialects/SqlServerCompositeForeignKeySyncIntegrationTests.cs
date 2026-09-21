@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.Integration;
 
 namespace QuickER.Tests.Integration.Dialects;

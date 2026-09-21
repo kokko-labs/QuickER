@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedFixture;
 using QuickER.Tests.Integration;
 

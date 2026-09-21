@@ -1,8 +1,8 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Npgsql;
-using QuickER.PostgreSql;
 using QuickER.Provider;
+using QuickER.Provider.PostgreSql;
 using Testcontainers.PostgreSql;
 
 namespace QuickER.Tests.Integration;

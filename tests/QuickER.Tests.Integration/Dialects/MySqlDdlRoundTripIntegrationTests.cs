@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Model;
-using QuickER.MySql;
+using QuickER.Provider.MySql;
 using QuickER.Tests.Integration;
 
 namespace QuickER.Tests.Integration.Dialects;

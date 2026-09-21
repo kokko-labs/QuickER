@@ -1,0 +1,490 @@
+using AwesomeAssertions;
+using QuickER.Model;
+using QuickER.Provider.MySql;
+
+namespace QuickER.Tests.Provider.MySql;
+
+/// <summary><see cref="MySqlDdlGenerator"/> の DDL 生成（CREATE TABLE・複合 PK・FK・識別子クォート）を検証するテストクラス</summary>
+public class MySqlDdlGeneratorTests
+{
+    /// <summary>CREATE TABLE と PRIMARY KEY 制約が出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: CREATE TABLE と PRIMARY KEY が出力される")]
+    public void Build_EmitsCreateTableAndPk()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "users",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "name",
+                            DataType = "varchar(50)",
+                            IsNullable = true,
+                        },
+                    },
+                },
+            ],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("CREATE TABLE `users`");
+        sql.Should().Contain("`id` int NOT NULL");
+        sql.Should().Contain("CONSTRAINT `PK_users` PRIMARY KEY (`id`)");
+        sql.Should().Contain("`name` varchar(50) NULL");
+    }
+
+    /// <summary>ENGINE 句を出力しないことを検証する（8.0 既定 InnoDB）</summary>
+    [Fact(DisplayName = "Build: ENGINE 句を出力しない")]
+    public void Build_DoesNotEmitEngineClause()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "users",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+            ],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("ENGINE");
+    }
+
+    /// <summary>複合主キーが 1 つの PRIMARY KEY 制約へまとめて出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: 複合 PK は列を並べた PRIMARY KEY を生成する")]
+    public void Build_CompositePrimaryKey_EmitsCombinedConstraint()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "order_items",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "order_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                        new Column
+                        {
+                            Name = "line_no",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+            ],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("CONSTRAINT `PK_order_items` PRIMARY KEY (`order_id`, `line_no`)");
+    }
+
+    /// <summary>1 対多リレーションから FK 制約と参照アクションが生成されることを検証する</summary>
+    [Fact(DisplayName = "Build: 1対多リレーションが FOREIGN KEY と参照アクションを生成する")]
+    public void Build_OneToMany_EmitsForeignKeyWithActions()
+    {
+        var parent = new Entity
+        {
+            TableName = "parent",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+            },
+        };
+        var child = new Entity
+        {
+            TableName = "child",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                new Column { Name = "parent_id", DataType = "int" },
+            },
+        };
+        var diagram = new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
+                    ConstraintName = "FK_child_parent",
+                    OnDelete = ForeignKeyReferentialAction.Cascade,
+                    OnUpdate = ForeignKeyReferentialAction.SetNull,
+                },
+            ],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("ALTER TABLE `child` ADD CONSTRAINT `FK_child_parent`");
+        sql.Should().Contain("FOREIGN KEY (`parent_id`) REFERENCES `parent` (`id`)");
+        sql.Should().Contain("ON DELETE CASCADE");
+        sql.Should().Contain("ON UPDATE SET NULL");
+    }
+
+    /// <summary>schema.table 名が `schema`.`table` へ分割クォートされ、PK 制約名が安全化されることを検証する</summary>
+    [Fact(DisplayName = "Build: schema.table 形式は `schema`.`table` へ分割される")]
+    public void Build_SchemaQualifiedTableName_SplitsQuotes()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "shop.users",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+            ],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("CREATE TABLE `shop`.`users`");
+        sql.Should().Contain("CONSTRAINT `PK_shop_users` PRIMARY KEY (`id`)");
+    }
+
+    /// <summary>日本語テーブル名・列名がバッククォートでクォートされることを検証する</summary>
+    [Fact(DisplayName = "Build: 日本語テーブル名・列名がクォートされる")]
+    public void Build_JapaneseIdentifiers_AreQuoted()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "顧客",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "顧客ID",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+            ],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("CREATE TABLE `顧客`");
+        sql.Should().Contain("`顧客ID` int NOT NULL");
+        sql.Should().Contain("PRIMARY KEY (`顧客ID`)");
+    }
+
+    /// <summary>識別子に含まれるバッククォートが二重化エスケープされることを検証する</summary>
+    [Fact(DisplayName = "Build: 識別子に含まれる ` がエスケープされる")]
+    public void Build_IdentifierContainingBacktick_IsEscaped()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "wei`rd",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "co`l",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+            ],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("CREATE TABLE `wei``rd`");
+        sql.Should().Contain("`co``l` int NOT NULL");
+    }
+
+    /// <summary>テーブル説明が閉じ括弧後の COMMENT= 句、列説明が列定義インライン COMMENT で出力されることを検証する</summary>
+    [Fact(
+        DisplayName = "Build: テーブル説明は COMMENT= 句、列説明はインライン COMMENT で出力される"
+    )]
+    public void Build_EmitsTableAndColumnComments()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "User",
+                    Description = "利用者マスタ",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "Name",
+                            DataType = "varchar(50)",
+                            IsNullable = true,
+                            Description = "氏名",
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        // 列説明は列定義インラインの COMMENT（区切りカンマの前）
+        sql.Should().Contain("`Name` varchar(50) NULL COMMENT '氏名',");
+        // テーブル説明は閉じ括弧後の COMMENT= 句
+        sql.Should().Contain(") COMMENT='利用者マスタ';");
+    }
+
+    /// <summary>説明に含まれるシングルクォートが二重化エスケープされることを検証する</summary>
+    [Fact(DisplayName = "Build: 説明のシングルクォートがエスケープされる")]
+    public void Build_EscapesQuotesInComments()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "T",
+                    Description = "It's a table",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "C",
+                            DataType = "int",
+                            Description = "it's a column",
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("COMMENT 'it''s a column'");
+        sql.Should().Contain(") COMMENT='It''s a table';");
+    }
+
+    /// <summary>説明が無い図では COMMENT が一切出力されない（従来出力と不変）ことを検証する</summary>
+    [Fact(DisplayName = "Build: 説明なしの図では COMMENT を出力しない")]
+    public void Build_NoDescription_EmitsNoComment()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "T",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("COMMENT");
+    }
+
+    /// <summary>一意制約を持つエンティティの図を組み立てる</summary>
+    /// <param name="withPrimaryKey">主キー列を含めるかどうか（PK 行との区切りカンマ検証用）</param>
+    private static (ErDiagram Diagram, Entity Entity) BuildUniqueDiagram(bool withPrimaryKey = true)
+    {
+        var entity = new Entity { TableName = "shops" };
+
+        if (withPrimaryKey)
+        {
+            entity.Columns.Add(
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                }
+            );
+        }
+
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "code",
+                DataType = "varchar(20)",
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "region",
+                DataType = "varchar(10)",
+                IsNullable = false,
+            }
+        );
+
+        return (new ErDiagram { Entities = { entity } }, entity);
+    }
+
+    /// <summary>名前付き単一列の一意制約が PK 制約行の直後へ出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: 名前付き単一列 UNIQUE が PK の直後に出力される")]
+    public void Build_NamedSingleColumnUnique_EmitsConstraint()
+    {
+        var (diagram, entity) = BuildUniqueDiagram();
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "UQ_shops_code", ColumnIds = [entity.Columns[1].Id] }
+        );
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        // PK 行には後続制約があるため区切りカンマが付く
+        sql.Should().Contain("CONSTRAINT `PK_shops` PRIMARY KEY (`id`),");
+        sql.Should().Contain("CONSTRAINT `UQ_shops_code` UNIQUE (`code`)");
+        // 最後の制約行に余分なカンマは付かない
+        sql.Should().NotContain("UNIQUE (`code`),");
+    }
+
+    /// <summary>制約名なしの複合一意制約が合成名・宣言順で出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: 名前なし複合 UNIQUE は UQ_テーブル_列… の合成名になる")]
+    public void Build_UnnamedCompositeUnique_SynthesizesName()
+    {
+        var (diagram, entity) = BuildUniqueDiagram();
+        // 宣言順は region → code（列定義順とは逆）
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { ColumnIds = [entity.Columns[2].Id, entity.Columns[1].Id] }
+        );
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("CONSTRAINT `UQ_shops_region_code` UNIQUE (`region`, `code`)");
+    }
+
+    /// <summary>PK が無くても列定義の末尾カンマが一意制約行の有無で正しく付くことを検証する</summary>
+    [Fact(DisplayName = "Build: PK なしでも UNIQUE 行の前の列にカンマが付く")]
+    public void Build_WithoutPrimaryKey_KeepsCommaBeforeUnique()
+    {
+        var (diagram, entity) = BuildUniqueDiagram(withPrimaryKey: false);
+        entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [entity.Columns[0].Id] });
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("PRIMARY KEY");
+        sql.Should().Contain("`region` varchar(10) NOT NULL,");
+        sql.Should().Contain("CONSTRAINT `UQ_shops_code` UNIQUE (`code`)");
+    }
+
+    /// <summary>一意制約を持たない図では UNIQUE 行を 1 行も出力しないことを検証する</summary>
+    [Fact(DisplayName = "Build: 一意制約が無ければ UNIQUE を出力しない")]
+    public void Build_WithoutUniqueConstraints_EmitsNoUnique()
+    {
+        var (diagram, _) = BuildUniqueDiagram();
+
+        new MySqlDdlGenerator().Build(diagram).Should().NotContain("UNIQUE");
+    }
+
+    /// <summary>主キーの順序上書きが <c>PRIMARY KEY</c> 句の列順へ反映されることを検証する</summary>
+    [Fact(DisplayName = "Build: 複合 PK は PrimaryKeyColumnIds の順で出力される")]
+    public void Build_CompositePrimaryKey_FollowsPrimaryKeyColumnIds()
+    {
+        var a = new Column
+        {
+            Name = "a",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var b = new Column
+        {
+            Name = "b",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var entity = new Entity
+        {
+            TableName = "pair",
+            Columns = { a, b },
+            // 列宣言順（a → b）とは逆の主キー順
+            PrimaryKeyColumnIds = [b.Id, a.Id],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(new ErDiagram { Entities = { entity } });
+
+        sql.Should().Contain("PRIMARY KEY (`b`, `a`)");
+    }
+}

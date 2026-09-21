@@ -6,7 +6,7 @@ using QuickER.Mcp;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 
 namespace QuickER.Cli;
 

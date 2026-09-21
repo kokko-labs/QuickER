@@ -2,8 +2,8 @@ using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 

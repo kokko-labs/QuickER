@@ -16,7 +16,7 @@ csharpier format .                                       # 整形（グローバ
 ```
 
 - テストは 2 プロジェクト構成: `tests/QuickER.Tests`（net10.0-windows / WPF 依存＝**Windows でのみ実行可能**）と `tests/QuickER.Tests.Integration`（net10.0・WPF 非依存＝クロスプラットフォーム。実 DB 統合＋生成コードのランタイムテスト）。CI は windows-latest（全体ビルド＋全テスト）＋ubuntu-latest（Integration のみ・実コンテナ＝実 DB 検証の唯一の CI 経路）の 2 ジョブ
-- **テストのフォルダ構成は src のプロジェクト構成をミラー**する（`tests/QuickER.Tests/{Model|Document|Provider|SqlServer|PostgreSql|MySql|Oracle|Sqlite|CodeGen.CSharp|CodeGen.UI|CodeReverse.CSharp|Db.UI|AI|AI.UI|AI.Chat|AI.Mock|Extensibility|Settings|Gui|Gui.Common|Cli|Mcp|Mcp.Tools}/`＝SUT の所在プロジェクトに対応・namespace はフォルダ追従で `QuickER.Tests.{フォルダ}`。Gui/ 配下はさらに Behaviors/Services/ViewModels/Views/UndoRedo をミラー）。横断フォルダは `Docs/`（CLAUDE.md 整合ガード＝依存図・フォルダ一覧を実体と機械照合）・`GeneratedFixture/`（ドリフト検知＝パス不動・regen スクリプトが参照）・`PublicApi/`（ランタイムパッケージ公開 API 面の承認ファイル）・`Resources/`（resx パリティ）・`Samples/`・`TestDoubles/`（共有テストダブル）・`TestSupport/`（WPF/STA 起動ヘルパ）。実 DB 統合・ランタイムテストは別プロジェクト `QuickER.Tests.Integration`（次項）
+- **テストのフォルダ構成は src のプロジェクト構成をミラー**する（`tests/QuickER.Tests/{Model|Document|Provider|Provider.SqlServer|Provider.PostgreSql|Provider.MySql|Provider.Oracle|Provider.Sqlite|CodeGen.CSharp|CodeGen.UI|CodeReverse.CSharp|Db.UI|AI|AI.UI|AI.Chat|AI.Mock|Extensibility|Settings|Gui|Gui.Common|Cli|Mcp|Mcp.Tools}/`＝SUT の所在プロジェクトに対応・namespace はフォルダ追従で `QuickER.Tests.{フォルダ}`。Gui/ 配下はさらに Behaviors/Services/ViewModels/Views/UndoRedo をミラー）。横断フォルダは `Docs/`（CLAUDE.md 整合ガード＝依存図・フォルダ一覧を実体と機械照合）・`GeneratedFixture/`（ドリフト検知＝パス不動・regen スクリプトが参照）・`PublicApi/`（ランタイムパッケージ公開 API 面の承認ファイル）・`Resources/`（resx パリティ）・`Samples/`・`TestDoubles/`（共有テストダブル）・`TestSupport/`（WPF/STA 起動ヘルパ）。実 DB 統合・ランタイムテストは別プロジェクト `QuickER.Tests.Integration`（次項）
 - `tests/QuickER.Tests.Integration/` は実 DB テストの独立プロジェクト（net10.0・WPF 非依存＝ubuntu の CI ジョブで実行可能）で 2 サブフォルダに分かれる: `Dialects/`＝アプリ自身の DB 面サービス検証（`*IntegrationTests` 接尾辞。CommentSync / ConnectionStringFactory / DdlRoundTrip / SchemaSync）・`GeneratedRuntime/`＝生成コードの実行時挙動検証（`*RuntimeTests` 接尾辞。SaveHook / NamedQuery / BinaryColumn / Remote / EF Core 方言等）。共有フィクスチャ（*ContainerFixture / SqliteTempDatabase）はプロジェクト直下、`GeneratedFixture/` サブフォルダにはインメモリ系ランタイムテスト（`RuntimeTestMatrixTests` の走査規約＝「Generated* 名前空間の `*RuntimeTests`」を保つため名前空間ごと同居）。**生成フィクスチャ（.g.cs・*FixtureDefinition・manual partial）は `tests/QuickER.Tests/GeneratedFixture/` の実体を Compile リンクで二重コンパイル**する（実体パスは不動＝ドリフト検知・再生成は QuickER.Tests 側のまま。manual partial は生成側が契約宣言のみを出す設計のため .g.cs と同一アセンブリ必須）。SQL Server / PostgreSQL / MySQL / Oracle は Testcontainers の実コンテナを使い、**Docker 不在時は自動スキップ**される（フィクスチャが検出）・**厳格モード `QUICKER_REQUIRE_DOCKER=1` ではスキップへ変換せず失敗**する（壊れた Docker 構成がスキップ緑に化けない＝CI の ubuntu ジョブと Docker 稼働の開発機で設定する）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値。CI は ubuntu ジョブ（integration-tests-linux）が実コンテナ＋厳格モードで全件実行し、windows ジョブでは Linux コンテナが使えないためスキップされる。SQLite 系は実ファイル DB（SqliteTempDatabase）を使うため **Docker 不要＝両ジョブとも常時実行**される
 - **生成コードのランタイムテストは「共通基底 1＋バックエンド派生 N＋派生固有 Fact」の形に揃える**（2026-08-16 の再編）。バックエンド非依存のシナリオは基底の `[Fact]` が持ち、派生はリポジトリ生成・シード・「他者による更新」の作り方だけを差し込む（`SaveHookRuntimeTestsBase` / `ConcurrencyRuntimeTestsBase<TEntity, TConflictException>` / `NamedQueryRuntimeTestsBase` / `UniquenessCheckRuntimeTestsBase<TOrder>`）。**生成物はフィクスチャごとに別 namespace へ出る**ため `SaveConflictException` も `ConcurrencyMode` も `OrderEntity` も基底からは名指しできない＝エンティティ型・競合例外型だけを型引数で受け、値の読み書きは派生のアダプタへ委ねる（VO 有効の図と無効の図が同じシナリオを共有できる）。**バックエンドによって存在しない面（リモートの `Query()`・インメモリの生 SQL）は条件スキップでなくサブクラス階層で分ける**（`NamedQueryRawSqlRuntimeTestsBase` / `UniquenessCheckLocalRuntimeTestsBase<TOrder>`＝スキップ 0 の原則）。新しいバックエンドを足すときは派生を 1 つ書くだけで全共通シナリオが自動的に掛かる（＝機能×実装の網に穴が開かない）
 - Docker 必須テストには `[Trait("RequiresDocker", "true")]` が付与されており、`--filter "RequiresDocker=true"`（または `!=` で除外）で選別実行できる（例外: `Integration/Dialects/SqlServerSchemaSyncIntegrationTests` は localhost の実 SQL Server 接続＝Docker 不使用・接続不可時スキップの第 3 機構）
@@ -33,7 +33,7 @@ QuickER.CodeGen.CSharp    DB非依存のC#コード生成エンジン（Scriban�
   ▲
 QuickER.Provider     DB抽象化の共通基盤（DdlGeneratorBase、インポータ共有部品）
   ▲
-QuickER.SqlServer / PostgreSql / MySql / Oracle / Sqlite    方言プロバイダ（5実装で対称構造）
+QuickER.Provider.SqlServer / Provider.PostgreSql / Provider.MySql / Provider.Oracle / Provider.Sqlite    方言プロバイダ（5実装で対称構造）
   ▲
 QuickER.Gui (WPF) / QuickER.Cli                    合成ルート（全プロジェクトを参照）
 
@@ -51,8 +51,8 @@ QuickER.Gui.Abstractions  アプリ汎用 UI サービス抽象（IDialogService
 QuickER.AI.UI      → AI, Gui.Abstractions    AI 共有 UI 部品（接続パネル・添付・ApiKeyStore・WpfUiDispatcher）
 QuickER.AI.Chat    → AI, AI.UI, Extensibility, Gui.Abstractions, Gui.Common, Mcp, Mcp.Tools    チャット機能（ErDesign プロファイル・ER 設計ツール定義・チャットダイアログ・AiChatFeatureModule）
 QuickER.AI.Mock    → AI, AI.UI, Extensibility, Gui.Abstractions, Gui.Common, CodeGen.CSharp, Provider, Mcp    モック生成機能（モックフォルダ方式のセッション・ツール・ストア・プレビュー一式・単一 HTML バンドル出力・WPF モックプロジェクト生成・MockGenerationFeatureModule）
-QuickER.CodeGen.UI → CodeGen.CSharp, CodeReverse.CSharp, Extensibility, Gui.Abstractions, Gui.Common, Provider, Settings, SqlServer, Sqlite    C# コード生成／クエリ定義ダイアログ・CodeGenerationFeatureModule
-QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Settings, SqlServer, Sqlite    DB 取込／DB 同期ダイアログ・接続プロファイル（connections.json＋DPAPI シークレット）・DbToolsFeatureModule
+QuickER.CodeGen.UI → CodeGen.CSharp, CodeReverse.CSharp, Extensibility, Gui.Abstractions, Gui.Common, Provider, Settings, Provider.SqlServer, Provider.Sqlite    C# コード生成／クエリ定義ダイアログ・CodeGenerationFeatureModule
+QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Settings, Provider.SqlServer, Provider.Sqlite    DB 取込／DB 同期ダイアログ・接続プロファイル（connections.json＋DPAPI シークレット）・DbToolsFeatureModule
 ```
 
 押さえるべき設計判断：

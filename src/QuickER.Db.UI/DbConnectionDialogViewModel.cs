@@ -8,7 +8,7 @@ using QuickER.Db.UI.Resources;
 using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
 using QuickER.Provider;
-using QuickER.Sqlite;
+using QuickER.Provider.Sqlite;
 
 namespace QuickER.Db.UI;
 
@@ -162,7 +162,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
     /// <summary>認証方式を選択できるか（SQL Server のみ複数の認証方式を持つ）</summary>
     public bool ShowAuthMode =>
-        SelectedProvider?.Name == QuickER.SqlServer.SqlServerProvider.ProviderName;
+        SelectedProvider?.Name == QuickER.Provider.SqlServer.SqlServerProvider.ProviderName;
 
     /// <summary>ユーザー名入力欄を表示するか（Windows 認証以外・非 SQL Server は常に表示。SQLite では非表示）</summary>
     public bool ShowUserId => ShowServerFields && (!ShowAuthMode || AuthMode != DbAuthMode.Windows);

@@ -10,7 +10,7 @@ using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Sqlite;
+using QuickER.Provider.Sqlite;
 
 namespace QuickER.Db.UI;
 

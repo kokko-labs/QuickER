@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.Sqlite;
+using QuickER.Provider.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.Integration;
 

@@ -3,10 +3,10 @@ using System.IO;
 using AwesomeAssertions;
 using QuickER.Extensibility;
 using QuickER.Model;
-using QuickER.PostgreSql;
 using QuickER.Provider;
+using QuickER.Provider.PostgreSql;
+using QuickER.Provider.SqlServer;
 using QuickER.Services;
-using QuickER.SqlServer;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;

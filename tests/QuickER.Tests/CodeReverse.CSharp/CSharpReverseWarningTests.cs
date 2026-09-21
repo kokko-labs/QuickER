@@ -1,7 +1,7 @@
 using AwesomeAssertions;
 using QuickER.CodeReverse.CSharp;
 using QuickER.Model;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using ReverseStrings = QuickER.CodeReverse.CSharp.Resources.Strings;
 
 namespace QuickER.Tests.CodeReverse.CSharp;

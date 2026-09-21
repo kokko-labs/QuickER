@@ -84,13 +84,13 @@
     <ProjectReference Include="..\QuickER.Mcp\QuickER.Mcp.csproj" />
     <ProjectReference Include="..\QuickER.Mcp.Tools\QuickER.Mcp.Tools.csproj" />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
-    <ProjectReference Include="..\QuickER.MySql\QuickER.MySql.csproj" />
-    <ProjectReference Include="..\QuickER.Oracle\QuickER.Oracle.csproj" />
-    <ProjectReference Include="..\QuickER.PostgreSql\QuickER.PostgreSql.csproj" />
+    <ProjectReference Include="..\QuickER.Provider.MySql\QuickER.Provider.MySql.csproj" />
+    <ProjectReference Include="..\QuickER.Provider.Oracle\QuickER.Provider.Oracle.csproj" />
+    <ProjectReference Include="..\QuickER.Provider.PostgreSql\QuickER.Provider.PostgreSql.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
     <!-- generate_ddl の出力を原子的に書き出すための AtomicFile（原子的書き込みの単一正本） -->
     <ProjectReference Include="..\QuickER.Settings\QuickER.Settings.csproj" />
-    <ProjectReference Include="..\QuickER.Sqlite\QuickER.Sqlite.csproj" />
-    <ProjectReference Include="..\QuickER.SqlServer\QuickER.SqlServer.csproj" />
+    <ProjectReference Include="..\QuickER.Provider.Sqlite\QuickER.Provider.Sqlite.csproj" />
+    <ProjectReference Include="..\QuickER.Provider.SqlServer\QuickER.Provider.SqlServer.csproj" />
   </ItemGroup>
 </Project>

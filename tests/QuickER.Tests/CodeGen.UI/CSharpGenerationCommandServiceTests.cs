@@ -4,7 +4,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.UI;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestDoubles;
 using CodeGenStrings = QuickER.CodeGen.UI.Resources.Strings;
 

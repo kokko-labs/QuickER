@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedFixture;
 
 namespace QuickER.Tests.GeneratedMultiTargetFixture;

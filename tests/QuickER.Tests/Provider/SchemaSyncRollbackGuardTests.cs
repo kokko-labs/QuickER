@@ -30,19 +30,19 @@ public class SchemaSyncRollbackGuardTests
     /// </remarks>
     private static readonly string[] TargetFiles =
     [
-        @"src\QuickER.SqlServer\SqlServerSchemaSyncExecutor.cs",
-        @"src\QuickER.PostgreSql\PostgreSqlSchemaSyncExecutor.cs",
-        @"src\QuickER.MySql\MySqlSchemaSyncExecutor.cs",
-        @"src\QuickER.Oracle\OracleSchemaSyncExecutor.cs",
-        @"src\QuickER.Sqlite\SqliteSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.SqlServer\SqlServerSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.PostgreSql\PostgreSqlSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.MySql\MySqlSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.Oracle\OracleSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.Sqlite\SqliteSchemaSyncExecutor.cs",
     ];
 
     /// <summary>トランザクションを実際に持つ実行器（共有ヘルパーの使用を必須にする）</summary>
     private static readonly string[] TransactionalFiles =
     [
-        @"src\QuickER.SqlServer\SqlServerSchemaSyncExecutor.cs",
-        @"src\QuickER.PostgreSql\PostgreSqlSchemaSyncExecutor.cs",
-        @"src\QuickER.Sqlite\SqliteSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.SqlServer\SqlServerSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.PostgreSql\PostgreSqlSchemaSyncExecutor.cs",
+        @"src\QuickER.Provider.Sqlite\SqliteSchemaSyncExecutor.cs",
     ];
 
     /// <summary>ヘルパーを迂回する素のロールバック（現れたら失敗。<c>RollbackQuietlyAsync</c> は名前が異なるため一致しない）</summary>

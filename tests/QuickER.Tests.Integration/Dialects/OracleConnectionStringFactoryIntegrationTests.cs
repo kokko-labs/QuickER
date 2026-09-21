@@ -2,7 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Oracle.ManagedDataAccess.Client;
-using QuickER.Oracle;
+using QuickER.Provider.Oracle;
 using QuickER.Tests.Integration;
 
 namespace QuickER.Tests.Integration.Dialects;

@@ -3,7 +3,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using QuickER.Documents;
-using QuickER.Sqlite;
+using QuickER.Provider.Sqlite;
 using QuickER.Tests.GeneratedFixture;
 using Xunit;
 

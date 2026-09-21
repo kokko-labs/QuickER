@@ -223,10 +223,7 @@
           "QuickER.Model": "[0.1.0, )"
         }
       },
-      "quicker.settings": {
-        "type": "Project"
-      },
-      "quicker.sqlite": {
+      "quicker.provider.sqlite": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.12, )",
@@ -236,7 +233,7 @@
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )"
         }
       },
-      "quicker.sqlserver": {
+      "quicker.provider.sqlserver": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.SqlClient": "[7.0.3, )",
@@ -244,6 +241,9 @@
           "QuickER.Model": "[0.1.0, )",
           "QuickER.Provider": "[0.1.0, )"
         }
+      },
+      "quicker.settings": {
+        "type": "Project"
       },
       "Microsoft.CodeAnalysis.CSharp": {
         "type": "CentralTransitive",

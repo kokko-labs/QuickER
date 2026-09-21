@@ -7,14 +7,14 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
-using QuickER.MySql;
-using QuickER.Oracle;
-using QuickER.PostgreSql;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Oracle;
+using QuickER.Provider.PostgreSql;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using QuickER.Resources;
 using QuickER.Services;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
 using QuickER.ViewModels;
 
 namespace QuickER

@@ -2,12 +2,12 @@ using System.Collections.Generic;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
-using QuickER.MySql;
-using QuickER.Oracle;
-using QuickER.PostgreSql;
 using QuickER.Provider;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Oracle;
+using QuickER.Provider.PostgreSql;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using Xunit;
 
 namespace QuickER.Tests.Provider;

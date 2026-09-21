@@ -905,13 +905,13 @@
           "QuickER.Gui.Abstractions": "[0.1.0, )",
           "QuickER.Gui.Common": "[0.1.0, )",
           "QuickER.Model": "[0.1.0, )",
-          "QuickER.MySql": "[0.1.0, )",
-          "QuickER.Oracle": "[0.1.0, )",
-          "QuickER.PostgreSql": "[0.1.0, )",
           "QuickER.Provider": "[0.1.0, )",
+          "QuickER.Provider.MySql": "[0.1.0, )",
+          "QuickER.Provider.Oracle": "[0.1.0, )",
+          "QuickER.Provider.PostgreSql": "[0.1.0, )",
+          "QuickER.Provider.SqlServer": "[0.1.0, )",
+          "QuickER.Provider.Sqlite": "[0.1.0, )",
           "QuickER.Settings": "[0.1.0, )",
-          "QuickER.SqlServer": "[0.1.0, )",
-          "QuickER.Sqlite": "[0.1.0, )",
           "Velopack": "[1.2.0, )"
         }
       },
@@ -972,13 +972,13 @@
           "QuickER.Mcp": "[0.1.0, )",
           "QuickER.Mcp.Tools": "[0.1.0, )",
           "QuickER.Model": "[0.1.0, )",
-          "QuickER.MySql": "[0.1.0, )",
-          "QuickER.Oracle": "[0.1.0, )",
-          "QuickER.PostgreSql": "[0.1.0, )",
           "QuickER.Provider": "[0.1.0, )",
+          "QuickER.Provider.MySql": "[0.1.0, )",
+          "QuickER.Provider.Oracle": "[0.1.0, )",
+          "QuickER.Provider.PostgreSql": "[0.1.0, )",
+          "QuickER.Provider.SqlServer": "[0.1.0, )",
+          "QuickER.Provider.Sqlite": "[0.1.0, )",
           "QuickER.Settings": "[0.1.0, )",
-          "QuickER.SqlServer": "[0.1.0, )",
-          "QuickER.Sqlite": "[0.1.0, )",
           "System.CommandLine": "[2.0.12, )"
         }
       },
@@ -999,9 +999,9 @@
           "QuickER.Gui.Abstractions": "[0.1.0, )",
           "QuickER.Gui.Common": "[0.1.0, )",
           "QuickER.Provider": "[0.1.0, )",
-          "QuickER.Settings": "[0.1.0, )",
-          "QuickER.SqlServer": "[0.1.0, )",
-          "QuickER.Sqlite": "[0.1.0, )"
+          "QuickER.Provider.SqlServer": "[0.1.0, )",
+          "QuickER.Provider.Sqlite": "[0.1.0, )",
+          "QuickER.Settings": "[0.1.0, )"
         }
       },
       "quicker.codereverse.csharp": {
@@ -1020,9 +1020,9 @@
           "QuickER.Gui.Abstractions": "[0.1.0, )",
           "QuickER.Gui.Common": "[0.1.0, )",
           "QuickER.Provider": "[0.1.0, )",
-          "QuickER.Settings": "[0.1.0, )",
-          "QuickER.SqlServer": "[0.1.0, )",
-          "QuickER.Sqlite": "[0.1.0, )"
+          "QuickER.Provider.SqlServer": "[0.1.0, )",
+          "QuickER.Provider.Sqlite": "[0.1.0, )",
+          "QuickER.Settings": "[0.1.0, )"
         }
       },
       "quicker.document": {
@@ -1068,7 +1068,14 @@
       "quicker.model": {
         "type": "Project"
       },
-      "quicker.mysql": {
+      "quicker.provider": {
+        "type": "Project",
+        "dependencies": {
+          "QuickER.CodeGen.CSharp": "[0.1.0, )",
+          "QuickER.Model": "[0.1.0, )"
+        }
+      },
+      "quicker.provider.mysql": {
         "type": "Project",
         "dependencies": {
           "MySqlConnector": "[2.6.2, )",
@@ -1077,7 +1084,7 @@
           "QuickER.Provider": "[0.1.0, )"
         }
       },
-      "quicker.oracle": {
+      "quicker.provider.oracle": {
         "type": "Project",
         "dependencies": {
           "Oracle.ManagedDataAccess.Core": "[23.26.301, )",
@@ -1086,7 +1093,7 @@
           "QuickER.Provider": "[0.1.0, )"
         }
       },
-      "quicker.postgresql": {
+      "quicker.provider.postgresql": {
         "type": "Project",
         "dependencies": {
           "Npgsql": "[10.0.3, )",
@@ -1095,11 +1102,23 @@
           "QuickER.Provider": "[0.1.0, )"
         }
       },
-      "quicker.provider": {
+      "quicker.provider.sqlite": {
         "type": "Project",
         "dependencies": {
+          "Microsoft.Data.Sqlite": "[10.0.12, )",
           "QuickER.CodeGen.CSharp": "[0.1.0, )",
-          "QuickER.Model": "[0.1.0, )"
+          "QuickER.Model": "[0.1.0, )",
+          "QuickER.Provider": "[0.1.0, )",
+          "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )"
+        }
+      },
+      "quicker.provider.sqlserver": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.SqlClient": "[7.0.3, )",
+          "QuickER.CodeGen.CSharp": "[0.1.0, )",
+          "QuickER.Model": "[0.1.0, )",
+          "QuickER.Provider": "[0.1.0, )"
         }
       },
       "quicker.runtime": {
@@ -1147,25 +1166,6 @@
       },
       "quicker.settings": {
         "type": "Project"
-      },
-      "quicker.sqlite": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Data.Sqlite": "[10.0.12, )",
-          "QuickER.CodeGen.CSharp": "[0.1.0, )",
-          "QuickER.Model": "[0.1.0, )",
-          "QuickER.Provider": "[0.1.0, )",
-          "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )"
-        }
-      },
-      "quicker.sqlserver": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Data.SqlClient": "[7.0.3, )",
-          "QuickER.CodeGen.CSharp": "[0.1.0, )",
-          "QuickER.Model": "[0.1.0, )",
-          "QuickER.Provider": "[0.1.0, )"
-        }
       },
       "Anthropic": {
         "type": "CentralTransitive",

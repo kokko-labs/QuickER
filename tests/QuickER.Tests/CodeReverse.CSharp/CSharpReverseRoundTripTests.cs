@@ -3,7 +3,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.CodeReverse.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedFixture;
 
 namespace QuickER.Tests.CodeReverse.CSharp;

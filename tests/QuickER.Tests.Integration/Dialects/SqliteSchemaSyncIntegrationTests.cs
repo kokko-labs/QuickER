@@ -6,7 +6,7 @@ using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Sqlite;
+using QuickER.Provider.Sqlite;
 using QuickER.Tests.Integration;
 
 namespace QuickER.Tests.Integration.Dialects;

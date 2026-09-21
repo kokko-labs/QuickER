@@ -5,7 +5,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.CodeReverse.CSharp;
 

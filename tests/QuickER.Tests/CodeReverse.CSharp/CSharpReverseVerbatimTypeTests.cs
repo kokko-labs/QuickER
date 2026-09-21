@@ -3,7 +3,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.CodeReverse.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using CodeGenStrings = QuickER.CodeGen.CSharp.Resources.Strings;
 using ReverseStrings = QuickER.CodeReverse.CSharp.Resources.Strings;
 
@@ -135,7 +135,7 @@ public class CSharpReverseVerbatimTypeTests
     [Fact(DisplayName = "大小差だけの型表記には verbatim 引数を出さない")]
     public void Generate_CaseOnlyDifference_EmitsNoVerbatimArgument()
     {
-        var provider = new QuickER.Sqlite.SqliteProvider();
+        var provider = new QuickER.Provider.Sqlite.SqliteProvider();
         var generation = DiagramCodeGenerator.Generate(
             provider.TypeMapper,
             provider.TypeCatalog,
@@ -212,7 +212,7 @@ public class CSharpReverseVerbatimTypeTests
         // SQL Server の 'datetime' を PostgreSQL 方言でリバースする（PostgreSQL に datetime は無い）
         var result = new CSharpReverseParser().Parse(
             source,
-            new QuickER.PostgreSql.PostgreSqlTypeCatalog()
+            new QuickER.Provider.PostgreSql.PostgreSqlTypeCatalog()
         );
 
         result

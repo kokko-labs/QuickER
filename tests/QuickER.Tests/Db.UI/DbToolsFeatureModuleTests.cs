@@ -4,8 +4,8 @@ using QuickER.Db.UI;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestDoubles;
 using DbStrings = QuickER.Db.UI.Resources.Strings;
 

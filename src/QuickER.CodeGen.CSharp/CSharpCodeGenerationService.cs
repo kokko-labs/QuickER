@@ -27,7 +27,7 @@ public sealed class CSharpCodeGenerationService
     /// </summary>
     /// <param name="diagram">生成元の ER 図定義</param>
     /// <param name="columnTypes">カラム ID → 解決済み C# 型情報。生成器は DB 非依存のため、SQL 型の解決は
-    /// 呼び出し側（<c>QuickER.SqlServer</c> 等のプロバイダ）が行って渡す</param>
+    /// 呼び出し側（<c>QuickER.Provider.SqlServer</c> 等のプロバイダ）が行って渡す</param>
     /// <param name="options">生成対象や属性付与を制御するオプション</param>
     /// <returns>生成ファイルと診断情報。検証でエラーがあった場合はファイルを含まず診断のみを返す</returns>
     /// <remarks>

@@ -3,7 +3,7 @@ using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.SqlServer;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedBinaryFixture;
 using QuickER.Tests.GeneratedQueryFixture;
 using Xunit;

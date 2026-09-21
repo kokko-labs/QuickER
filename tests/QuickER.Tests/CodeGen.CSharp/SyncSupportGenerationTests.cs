@@ -5,8 +5,8 @@ using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
-using QuickER.Sqlite;
-using QuickER.SqlServer;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedSyncFixture;
 using Xunit;
 
