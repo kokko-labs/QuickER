@@ -68,7 +68,7 @@
 `Query()` には生成拡張が 2 つ乗ります。`IncludeGraph()` はグラフ保存がたどるのと同じ子方向カスケードを Include し（取得量を抑えるには `Where` や `GetByIdAsync` と組み合わせてください）、`GetByIdAsync(id)` はクエリチェーンの終端で主キー 1 件を取得します——`Query().IncludeGraph().GetByIdAsync(id)` で 1 つの集約をグラフごと読めます。
 {{~ if generate_value_objects }}
 
-値オブジェクトには `Create` / `TryCreate` 以外の入口もあります。`TryCreateFrom` / `CreateFrom` はモデル外の値（CSV のフィールド・表計算のセル）から生成します。static readonly フィールドへの `[DeclaredInstance]` は、型を宣言的に列挙型の値オブジェクトにします——JSON 復元・DB 読み出しを含む生成経路すべてが定義済みインスタンスを返し、集合外の値は拒否され、`GetDeclaredInstances()` が一覧を返し、`[Display]` の名前は `DeclaredDisplayName` で引けます。partial フック `GetDefinedInstance` は独自ロジックの引き当て向けに残っています（フック自体は未定義の値を弾きません——弾く `OnValidate` と対で書きます）。`ConvertCustomInput` は `TryCreateFrom` / `CreateFrom` だけが受け付ける入力の形を足し（名前で引く、など）、`ConvertAbsentInput` は空欄入力（null / DBNull / 空文字）を通常の null の結果でなく型自身の値として引き取ります。書き方は上記リンクのドキュメントを参照してください。
+値オブジェクトには `Create` / `TryCreate` 以外の入口もあります。`TryCreateFrom` / `CreateFrom` はモデル外の値（CSV のフィールド・表計算のセル）から生成します。static readonly フィールドへの `[DeclaredInstance]` は、型を宣言的に列挙型の値オブジェクトにします——JSON 復元・DB 読み出しを含む生成経路すべてが定義済みインスタンスを返し、集合外の値は拒否され、`GetDeclaredInstances()` が一覧を返し、`[Display]` の名前は `DeclaredDisplayName` で引けます。フィールドは `TryCreateFrom` / `CreateFrom` の入力表記も引き取れます——`InputText` は固定文字列 1 つ・`ClaimsAbsent` は空欄入力です。partial フック `GetDefinedInstance` は独自ロジックの引き当て向けに残っています（フック自体は未定義の値を弾きません——弾く `OnValidate` と対で書きます）。`ConvertCustomInput` は `TryCreateFrom` / `CreateFrom` だけが受け付ける入力の形を足し（名前で引く、など）、`ConvertAbsentInput` は空欄入力（null / DBNull / 空文字）を通常の null の結果でなく型自身の値として引き取ります。書き方は上記リンクのドキュメントを参照してください。
 {{~ end }}
 
 ## 使い方

@@ -190,6 +190,28 @@ The marked fields form the type's whole set of values:
 
 Two rules: the field must be `public static readonly` of the declaring type, and it must be initialized with the private constructor (`new(...)`, which the partial class can reach) rather than `Create` - `Create` validates, and validation consults the declared set that is still being built at that point. A field of any other shape, and a duplicate value, are reported on first use - with one undetectable exception: a field left **without an initializer** (permanently null) cannot be told apart from a field whose initialization is still running, so the set silently stays inactive and every creation rescans. The compiler flags such a field (CS8618 / CS0649); do not leave those warnings unresolved. The attribute works on a hand-written value object the same way, and it is not supported on a binary (`byte[]`) value object.
 
+A declared instance can also claim its input notation. `InputText` reads that exact string input as the instance, and `ClaimsAbsent` claims the absent input (null, `DBNull`, an empty string) - so a notation like "a mark or a blank cell" closes in two declarations, reading (input) and display (`[Display]`) together:
+
+```csharp
+// A flag column written as "○" or a blank cell: ○ → Marked, blank → Unmarked, display via [Display]
+public sealed partial class MarkValue
+{
+    [DeclaredInstance(InputText = "○"), Display(Name = "○")]
+    public static readonly MarkValue Marked = new(true);
+
+    [DeclaredInstance(ClaimsAbsent = true), Display(Name = "")]
+    public static readonly MarkValue Unmarked = new(false);
+
+    public override string DisplayValue => DeclaredDisplayName ?? base.DisplayValue;
+}
+```
+
+- Matching is **exact and ordinal** (no trimming, no case folding, no culture) and applies to **string inputs only**, ahead of the ordinary conversion. A non-string input (`true`, `9`) and a convertible string (`"True"` / `"9"`) take the ordinary conversion as before, and still resolve to the same declared instance
+- The notations apply to `TryCreateFrom` / `CreateFrom` only (an edit model's blank input and a database NULL are unchanged)
+- A `[Display]` name is display-only and is never read as input (an accepted notation is declared explicitly with `InputText`)
+- At most one field may declare `ClaimsAbsent`. A duplicate `InputText`, and an empty `InputText` (which can never match - an empty input is absent first; `ClaimsAbsent` is what was meant), are reported on first use
+- The hooks below (`ConvertCustomInput` / `ConvertAbsentInput`) win over the declared notations - normalization, aliases and anything an exact match cannot express stay their territory
+
 The hooks below remain for the shapes the attribute cannot express - a lookup with logic of its own (normalization, aliases) or a per-type error wording - and they compose with it: `GetDefinedInstance` is consulted ahead of the declared set, and an `OnValidate` runs in addition to the membership check. A generated type's `New` cannot be replaced and its `TryGetDefined` is already emitted as a bridge, so the extension goes into the partial methods the bridges consult - self-contained in the user's partial, no generator option involved:
 
 ```csharp
@@ -226,7 +248,7 @@ public sealed partial class ModeValue
 
 Like the attribute, the hooks sit on the `Create` / `TryCreate` side, so **a row read from the database and a value restored from JSON return the declared instance too** - an instance missing its extra state (`ModeName` here) never gets into circulation. A hand-written value object has no partial hooks; it implements the corresponding interface hooks directly - `GetDefinedInstance` ↔ `TryGetDefined`, `OnValidate` ↔ `ValidateCore` (that one is the validation body itself), and, below, `ConvertCustomInput` ↔ `TryConvertCustomInput` and `ConvertAbsentInput` ↔ `TryConvertAbsentInput`. Only the hook names differ; the content and the warnings are the same.
 
-To create from a name instead of the value, implement the `ConvertCustomInput` partial hook. `TryCreateFrom` / `CreateFrom` consult it ahead of the ordinary conversion - on every call shape, the generic import path and a call spelled with the concrete type name alike. Set the result to claim the value; anything left null falls through to the ordinary conversion, which keeps `2` working:
+To create from a name instead of the value, implement the `ConvertCustomInput` partial hook. `TryCreateFrom` / `CreateFrom` consult it ahead of the ordinary conversion - on every call shape, the generic import path and a call spelled with the concrete type name alike. Set the result to claim the value; anything left null falls through to the ordinary conversion, which keeps `2` working (for the fixed one-string-per-instance case, the declarative `InputText` above does the same without a hook - the hook is for matching that needs logic):
 
 ```csharp
 static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref ModeValue? result)
@@ -242,7 +264,7 @@ The generic import code from the previous section (`ReadCell<ModeValue>`) now ac
 
 Implement the hook only - never `TryCreateFrom` itself, on generated and hand-written types alike. Re-implementing `TryCreateFrom` compiles, but a call spelled with the concrete type name binds to the shared base implementation and silently skips it on that call shape - which is exactly why the extension point is the hook.
 
-An absent input (`null`, `DBNull`, an empty string) never reaches `ConvertCustomInput` - `TryCreateFrom` answers "success with a null result" before consulting it. A type whose notation writes one of its values as a blank - a flag written as a mark or nothing, say - claims the blank half of that notation through the `ConvertAbsentInput` partial hook instead (a hand-written type implements the interface hook `TryConvertAbsentInput` directly, the same split as above). The culture is passed for symmetry, but an absent input carries no text, so implementations usually ignore it:
+An absent input (`null`, `DBNull`, an empty string) never reaches `ConvertCustomInput` - `TryCreateFrom` answers "success with a null result" before consulting it. A type whose notation writes one of its values as a blank - a flag written as a mark or nothing, say - claims the blank half of that notation through the `ConvertAbsentInput` partial hook instead (a hand-written type implements the interface hook `TryConvertAbsentInput` directly, the same split as above; for a fixed blank-means-this-instance rule, the declarative `ClaimsAbsent` above does the same, and the hook wins when both are present). The culture is passed for symmetry, but an absent input carries no text, so implementations usually ignore it:
 
 ```csharp
 // The notation writes the flag as "○" or a blank cell: ConvertCustomInput claims the mark,

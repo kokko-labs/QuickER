@@ -190,6 +190,28 @@ public sealed partial class StatusValue
 
 規則は 2 つです。フィールドは宣言する型自身の `public static readonly` であること、そして初期化は `Create` でなく private コンストラクタ（`new(...)`——partial クラスなので届きます）で書くこと——`Create` は検証を通り、検証はまだ組み立て中の集合を照会するためです。形が違うフィールドと重複した値は、初回使用時に報告されます。ただし検出できない形が 1 つあります: **初期化子の無い**フィールド（恒久的に null）は初期化途中のフィールドと原理的に区別できないため、集合は無音で無効のままになり、生成のたびに再走査が走ります。コンパイラがこの形に警告（CS8618 / CS0649）を出すので、放置しないでください。属性は手書きの値オブジェクトにも同じように効きます。バイナリ（`byte[]`）の値オブジェクトには対応していません。
 
+入力の表記も宣言で引き取れます。`InputText` はその表記の文字列入力をそのインスタンスとして読み、`ClaimsAbsent` は空欄入力（null / `DBNull` / 空文字）を引き取ります——「○ か空欄か」のような記法は、読み（入力）と表示（`[Display]`）が宣言 2 行で閉じます。
+
+```csharp
+// 「○ か空欄か」で書かれるフラグ列: ○ → Marked・空欄 → Unmarked・表示は [Display] の名前
+public sealed partial class MarkValue
+{
+    [DeclaredInstance(InputText = "○"), Display(Name = "○")]
+    public static readonly MarkValue Marked = new(true);
+
+    [DeclaredInstance(ClaimsAbsent = true), Display(Name = "")]
+    public static readonly MarkValue Unmarked = new(false);
+
+    public override string DisplayValue => DeclaredDisplayName ?? base.DisplayValue;
+}
+```
+
+- 照合は **Ordinal 完全一致**（Trim なし・大小区別・カルチャ不参照）で、**文字列入力だけ**が対象。通常変換より先に効きます。非文字列（`true` や `9`）と変換可能な文字列（`"True"` / `"9"`）は従来どおり通常変換され、結果は同じ宣言済みインスタンスへ解決されます
+- 効くのは `TryCreateFrom` / `CreateFrom` だけです（EditModel の空欄入力・DB の NULL は変わりません）
+- `[Display]` の名前は表示専用で、入力としては受けません（受ける表記は `InputText` で明示します）
+- `ClaimsAbsent` は型につき 1 フィールドまで。`InputText` の重複と、空文字の `InputText`（空欄述語に先取りされ絶対に一致しない設定＝意図は `ClaimsAbsent`）は初回使用時に報告されます
+- 後述のフック（`ConvertCustomInput` / `ConvertAbsentInput`）は宣言表記より優先されます——正規化・別名・複数表記など、完全一致で書けない読み方はフックの領分です
+
 以下のフックは、属性では表せない形——独自ロジックの引き当て（正規化・別名）や型ごとのエラー文言——のために残っており、属性と併用できます。引き当ては `GetDefinedInstance` が定義済み集合より先に照会され、`OnValidate` はメンバーシップ検査に加えて走ります。生成側の `New` は差し替えられず `TryGetDefined` もブリッジとして出力済みなので、拡張はブリッジが照会する partial メソッドに書きます（利用者の partial だけで完結し、生成器のオプションは要りません）。
 
 ```csharp
@@ -225,7 +247,7 @@ public sealed partial class ModeValue
 
 フックも属性と同じく `Create` / `TryCreate` の側に割り込むため、**DB から読んだ行も JSON から復元した値も定義済みインスタンスになります**（`ModeName` のような付随する状態が欠けたインスタンスが出回りません）。手書きの値オブジェクトには partial フックが無いので、対応する interface のフックを直接実装します——`GetDefinedInstance` ↔ `TryGetDefined`・`OnValidate` ↔ `ValidateCore`（こちらは検証本体そのもの）・後述の `ConvertCustomInput` ↔ `TryConvertCustomInput`・`ConvertAbsentInput` ↔ `TryConvertAbsentInput`。フック名が違うだけで、中身も注意点も同じです。
 
-値の代わりに名前で作れるようにしたいときは partial フック `ConvertCustomInput` を実装します。`TryCreateFrom` / `CreateFrom` は通常の変換より先にこのフックを照会します——ジェネリックな取り込み経路でも、具象型名を書いた呼び出しでも同じです。受け付ける値には result を設定し、扱わない形は null のままにすれば通常の変換に落ちるため、`2` はそのまま動きます。
+値の代わりに名前で作れるようにしたいときは partial フック `ConvertCustomInput` を実装します。`TryCreateFrom` / `CreateFrom` は通常の変換より先にこのフックを照会します——ジェネリックな取り込み経路でも、具象型名を書いた呼び出しでも同じです。受け付ける値には result を設定し、扱わない形は null のままにすれば通常の変換に落ちるため、`2` はそのまま動きます（固定文字列 1 つ→インスタンスの定型なら、前述の `InputText` で宣言的に書けます。フックは照合にロジックが要るとき用です）。
 
 ```csharp
 static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref ModeValue? result)
@@ -241,7 +263,7 @@ static partial void ConvertCustomInput(object raw, IFormatProvider? provider, re
 
 実装するのはフックだけにしてください——`TryCreateFrom` 自体は、生成 VO でも手書き型でも実装してはいけません。再実装はコンパイルできますが、具象型名を書いた呼び出しは基底の共有実装へ静的束縛されるため、その呼び形でだけ再実装が黙って飛ばされます——差し替え点をフックにしているのはまさにこのためです。
 
-空欄入力（`null` / `DBNull` / 空文字）は `ConvertCustomInput` に届きません——`TryCreateFrom` はフックを照会する前に「成功＋null」で確定します。「○ か空欄か」のように空欄が値の片割れである記法を持つ型は、代わりに partial フック `ConvertAbsentInput` で空欄側を引き取ります（手書きの値オブジェクトは interface のフック `TryConvertAbsentInput` を直接実装します——上と同じ使い分けです）。カルチャは対称性のために渡されますが、空欄にテキストはないので実装では通常無視します。
+空欄入力（`null` / `DBNull` / 空文字）は `ConvertCustomInput` に届きません——`TryCreateFrom` はフックを照会する前に「成功＋null」で確定します。「○ か空欄か」のように空欄が値の片割れである記法を持つ型は、代わりに partial フック `ConvertAbsentInput` で空欄側を引き取ります（手書きの値オブジェクトは interface のフック `TryConvertAbsentInput` を直接実装します——上と同じ使い分けです。空欄→固定インスタンスだけなら前述の `ClaimsAbsent` でも宣言的に書け、フックはそれより優先されます）。カルチャは対称性のために渡されますが、空欄にテキストはないので実装では通常無視します。
 
 ```csharp
 // 記法が「○ または空欄」のフラグ: ○ は ConvertCustomInput が、空欄はこちらが引き取る

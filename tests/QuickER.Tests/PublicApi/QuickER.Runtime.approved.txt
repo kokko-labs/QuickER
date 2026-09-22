@@ -28,6 +28,8 @@ public sealed class QuickER.Runtime.DbTableMetaAttribute : System.Attribute
 
 public sealed class QuickER.Runtime.DeclaredInstanceAttribute : System.Attribute
     public .ctor()
+    public bool ClaimsAbsent { get; set; }
+    public string InputText { get; set; }
 
 public enum QuickER.Runtime.DuplicateErrorSource : int
     Database = 1
