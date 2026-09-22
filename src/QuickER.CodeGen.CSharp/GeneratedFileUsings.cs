@@ -222,6 +222,12 @@ internal static class GeneratedFileUsings
                     yield return "System.Globalization";
                 }
 
+                // 定義済みインスタンスのレジストリ（DeclaredInstanceRegistry）は [Display(Name = ...)] を読む
+                if (options.GenerateValueObjects)
+                {
+                    yield return "System.ComponentModel.DataAnnotations";
+                }
+
                 break;
 
             // 値オブジェクト（共通ルート・値の形ごとの基底・具象）: 外部型は BCL の基本のみ

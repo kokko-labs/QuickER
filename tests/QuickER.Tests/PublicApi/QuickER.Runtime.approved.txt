@@ -26,6 +26,9 @@ public sealed class QuickER.Runtime.DbTableMetaAttribute : System.Attribute
     public .ctor()
     public string Description { get; set; }
 
+public sealed class QuickER.Runtime.DeclaredInstanceAttribute : System.Attribute
+    public .ctor()
+
 public enum QuickER.Runtime.DuplicateErrorSource : int
     Database = 1
     Siblings = 0
@@ -628,10 +631,12 @@ public sealed class QuickER.Runtime.UniquenessViolation : System.IEquatable<Quic
 
 public abstract class QuickER.Runtime.ValueObjectBaseCore<TSelf, TValue> : QuickER.Runtime.IValueObjectCore, System.IEquatable<TSelf>, System.IFormattable
     protected .ctor(TValue value)
+    protected string DeclaredDisplayName { get; }
     public TValue Value { get; }
     public override bool Equals(object obj)
     public override int GetHashCode()
     public override string ToString()
+    public static System.Collections.Generic.IReadOnlyList<TSelf> GetDeclaredInstances()
     public static TSelf Create(TValue value)
     public static TSelf CreateFrom(object raw)
     public static TSelf CreateFrom(object raw, System.IFormatProvider provider)
@@ -691,6 +696,7 @@ public static class QuickER.Runtime.ValueObjectValidationMessages
     public static System.Func<string, int, string> ScaleExceeded { get; set; }
     public static System.Func<string, object, object, string> OutOfRange { get; set; }
     public static System.Func<string, object, string> InputNotConvertible { get; set; }
+    public static System.Func<string, object, string> ValueNotDeclared { get; set; }
     public static System.Func<string, string, string> InvalidCharacters { get; set; }
     public static System.Func<string, string> InvalidEmailAddress { get; set; }
     public static System.Func<string, string> ValueRequired { get; set; }

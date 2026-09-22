@@ -161,58 +161,46 @@ private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? cult
 
 ### Accepting only declared instances (enumeration-like value objects)
 
-A concept whose values are a closed set - a mode, a category, a status - can be a value object that only ever hands back the instances it declares as `static readonly`. Implement `TryGetDefined` and `Create` / `TryCreate` return the declared instance instead of building a new one.
+A concept whose values are a closed set - a mode, a category, a status - can be a value object that only ever hands back the instances it declares as `static readonly`. The declarative form is an attribute on the fields:
 
 ```csharp
-public sealed class DataAccessMode
-    : ValueObjectOrderedBase<DataAccessMode, int>,
-        IValueObject<DataAccessMode, int>
+// Extend the generated StatusValue (an int column) into an enumeration - no other code needed
+public sealed partial class StatusValue
 {
-    public static readonly DataAccessMode Web = new(1, "Web");
-    public static readonly DataAccessMode Database = new(2, "Database");
-    public static readonly DataAccessMode Fake = new(3, "Fake");
+    [DeclaredInstance, Display(Name = "Preparing")]
+    public static readonly StatusValue Preparing = new(1);
 
-    // Built once: the lookups below run on every creation (per column per row when rows are read), so keep them allocation-free
-    private static readonly Dictionary<int, DataAccessMode> Defined =
-        new[] { Web, Database, Fake }.ToDictionary(x => x.Value);
+    [DeclaredInstance, Display(Name = "In progress")]
+    public static readonly StatusValue InProgress = new(2);
 
-    private DataAccessMode(int value, string modeName) : base(value) => ModeName = modeName;
+    [DeclaredInstance, Display(Name = "Completed")]
+    public static readonly StatusValue Completed = new(9);
 
-    public string ModeName { get; }
-
-    public static IEnumerable<DataAccessMode> GetList() => Defined.Values;
-
-    static DataAccessMode IValueObject<DataAccessMode, int>.New(int value) => Defined[value];
-
-    static bool IValueObject<DataAccessMode, int>.TryGetDefined(int value, out DataAccessMode? defined) =>
-        Defined.TryGetValue(value, out defined);
-
-    // TryGetDefined alone does not reject an undefined value - it only falls through to New. Write the pair
-    static void IValueObject<DataAccessMode, int>.ValidateCore(int value, ref List<string>? errors)
-    {
-        if (!Defined.ContainsKey(value))
-        {
-            (errors ??= new List<string>()).Add($"Data access mode {value} is not defined.");
-        }
-    }
-
-    public override string DisplayValue => ModeName;
+    public override string DisplayValue => DeclaredDisplayName ?? base.DisplayValue;
 }
 ```
 
-> **Note**: `TryGetDefined` only decides what to return for a value that already passed validation. Always pair it with a check (`ValidateCore` or `OnValidate`) that rejects anything outside the set. Without one, a value outside the set quietly falls through to `New` and is built as an ordinary instance, and "only declared instances" no longer holds.
+The marked fields form the type's whole set of values:
 
-> **Note**: the hook runs on every creation, so look the value up in a table built once (the `Defined` dictionary above) rather than scanning with LINQ. And never call `Create` / `TryCreate` / `TryCreateFrom` from inside it: every creation path runs through the hook, so the call recurses with no way to catch the resulting stack overflow.
+- **Every creation path returns the declared instance itself** - `Create` / `TryCreate`, database reads and JSON restore alike
+- **Any other value is rejected as a validation error.** The wording is replaceable through `ValueObjectValidationMessages.ValueNotDeclared` (display name and the rejected value arrive as arguments, like every other message)
+- `StatusValue.GetDeclaredInstances()` lists the instances in declaration order - a ready-made source for a selection list
+- A `[Display(Name = ...)]` on the field is available as the protected `DeclaredDisplayName`, which makes the `DisplayValue` override above a one-liner
+- A convenience constant the set should not contain is simply left unmarked
 
-**A generated value object takes the same shape through a partial hook.** Its `New` cannot be replaced and its `TryGetDefined` is already emitted as a bridge, so the extension goes into `GetDefinedInstance` - the partial method that bridge consults - and stays self-contained, no generator option involved.
+Two rules: the field must be `public static readonly` of the declaring type, and it must be initialized with the private constructor (`new(...)`, which the partial class can reach) rather than `Create` - `Create` validates, and validation consults the declared set that is still being built at that point. A field of any other shape, and a duplicate value, are reported on first use - with one undetectable exception: a field left **without an initializer** (permanently null) cannot be told apart from a field whose initialization is still running, so the set silently stays inactive and every creation rescans. The compiler flags such a field (CS8618 / CS0649); do not leave those warnings unresolved. The attribute works on a hand-written value object the same way, and it is not supported on a binary (`byte[]`) value object.
+
+The hooks below remain for the shapes the attribute cannot express - a lookup with logic of its own (normalization, aliases) or a per-type error wording - and they compose with it: `GetDefinedInstance` is consulted ahead of the declared set, and an `OnValidate` runs in addition to the membership check. A generated type's `New` cannot be replaced and its `TryGetDefined` is already emitted as a bridge, so the extension goes into the partial methods the bridges consult - self-contained in the user's partial, no generator option involved:
 
 ```csharp
-// Extend the generated ModeValue (an int column) into an enumeration
+// Extend the generated ModeValue (an int column) into an enumeration through the hooks alone
+// (the table, the lookup and the rejection are all yours)
 public sealed partial class ModeValue
 {
     public static readonly ModeValue List = new(1) { ModeName = "List" };
     public static readonly ModeValue Edit = new(2) { ModeName = "Edit" };
 
+    // Built once: the hooks below run on every creation (per column per row when rows are read), so keep them allocation-free
     private static readonly Dictionary<int, ModeValue> Defined =
         new[] { List, Edit }.ToDictionary(x => x.Value);
 
@@ -223,6 +211,7 @@ public sealed partial class ModeValue
     static partial void GetDefinedInstance(int value, ref ModeValue? defined) =>
         defined = Defined.GetValueOrDefault(value);
 
+    // GetDefinedInstance alone does not reject an undefined value - it only falls through to New. Write the pair
     static partial void OnValidate(int value, ref List<string>? errors)
     {
         if (!Defined.ContainsKey(value))
@@ -233,7 +222,9 @@ public sealed partial class ModeValue
 }
 ```
 
-Because the hook sits in front of `New` rather than inside it, **a row read from the database and a value restored from JSON return the declared instance too**, so an instance missing its extra state (`ModeName` here) never gets into circulation.
+> **Note**: built from hooks, the rejection does not come for free - `GetDefinedInstance` only decides what to return for a value that already passed validation, so without the `OnValidate` above a value outside the set quietly falls through to `New` and "only declared instances" no longer holds. And never call `Create` / `TryCreate` / `TryCreateFrom` from inside a hook: every creation path runs through it, so the call recurses with no way to catch the resulting stack overflow.
+
+Like the attribute, the hooks sit on the `Create` / `TryCreate` side, so **a row read from the database and a value restored from JSON return the declared instance too** - an instance missing its extra state (`ModeName` here) never gets into circulation. A hand-written value object has no partial hooks; it implements the corresponding interface hooks directly - `GetDefinedInstance` ↔ `TryGetDefined`, `OnValidate` ↔ `ValidateCore` (that one is the validation body itself), and, below, `ConvertCustomInput` ↔ `TryConvertCustomInput` and `ConvertAbsentInput` ↔ `TryConvertAbsentInput`. Only the hook names differ; the content and the warnings are the same.
 
 To create from a name instead of the value, implement the `ConvertCustomInput` partial hook. `TryCreateFrom` / `CreateFrom` consult it ahead of the ordinary conversion - on every call shape, the generic import path and a call spelled with the concrete type name alike. Set the result to claim the value; anything left null falls through to the ordinary conversion, which keeps `2` working:
 
@@ -247,17 +238,7 @@ static partial void ConvertCustomInput(object raw, IFormatProvider? provider, re
 }
 ```
 
-The generic import code from the previous section (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`. A hand-written value object implements the interface hook `TryConvertCustomInput` directly instead. In either form, do not call `TryCreateFrom` / `CreateFrom` from inside (they consult the hook, so the call would recurse), and do not throw - `TryCreateFrom` reports failures through its return value, so an exception would ride straight through that contract:
-
-```csharp
-static bool IValueObject<DataAccessMode>.TryConvertCustomInput(
-    object raw, IFormatProvider? provider, out DataAccessMode? result)
-{
-    result = raw is string name ? GetList().FirstOrDefault(x => x.ModeName == name) : null;
-
-    return result is not null;
-}
-```
+The generic import code from the previous section (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`. A hand-written value object implements the interface hook `TryConvertCustomInput` directly, per the mapping above. In either form, do not call `TryCreateFrom` / `CreateFrom` from inside (they consult the hook, so the call would recurse), and do not throw - `TryCreateFrom` reports failures through its return value, so an exception would ride straight through that contract.
 
 Implement the hook only - never `TryCreateFrom` itself, on generated and hand-written types alike. Re-implementing `TryCreateFrom` compiles, but a call spelled with the concrete type name binds to the shared base implementation and silently skips it on that call shape - which is exactly why the extension point is the hook.
 
