@@ -152,7 +152,7 @@ private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? cult
 }
 ```
 
-- **A blank cell is not a violation.** `null`, `DBNull`, and an empty string mean "not filled in": the call returns `true` with a null result and adds no errors, matching the rule that a nullable column keeps the property itself null. Whether the field is required is the edit model's required check to decide
+- **A blank cell is not a violation.** `null`, `DBNull`, and an empty string mean "not filled in": the call returns `true` with a null result and adds no errors, matching the rule that a nullable column keeps the property itself null. Whether the field is required is the edit model's required check to decide. A type can claim absent inputs as a value of its own through the `ConvertAbsentInput` hook (described below), in which case the result is that instance instead of null. A whitespace-only string is not absent — it goes through the ordinary conversion
 - **The culture is the caller's.** `null` means the invariant culture. To read a date a person wrote (`28/08/2026`), pass the culture it was written in
 - **Numeric text may carry group separators.** A spreadsheet hands back `1,234` for a column formatted that way, so numeric targets are parsed with an explicit `NumberStyles`. An integral target still rejects a decimal point, so `1,234.5` does not pass as an `int`
 - Past the conversion this is the ordinary `TryCreate`, so the type's own validation - maximum length, precision, `OnValidate` - applies unchanged
@@ -260,6 +260,17 @@ static bool IValueObject<DataAccessMode>.TryConvertCustomInput(
 ```
 
 Implement the hook only - never `TryCreateFrom` itself, on generated and hand-written types alike. Re-implementing `TryCreateFrom` compiles, but a call spelled with the concrete type name binds to the shared base implementation and silently skips it on that call shape - which is exactly why the extension point is the hook.
+
+An absent input (`null`, `DBNull`, an empty string) never reaches `ConvertCustomInput` - `TryCreateFrom` answers "success with a null result" before consulting it. A type whose notation writes one of its values as a blank - a flag written as a mark or nothing, say - claims the blank half of that notation through the `ConvertAbsentInput` partial hook instead (a hand-written type implements the interface hook `TryConvertAbsentInput` directly, the same split as above). The culture is passed for symmetry, but an absent input carries no text, so implementations usually ignore it:
+
+```csharp
+// The notation writes the flag as "○" or a blank cell: ConvertCustomInput claims the mark,
+// and ConvertAbsentInput claims the blank - imported as False instead of null
+static partial void ConvertAbsentInput(IFormatProvider? provider, ref MarkValue? result) =>
+    result = False;
+```
+
+The hook applies to `TryCreateFrom` / `CreateFrom` only. An edit model's blank input still leaves the confirmed value null and is reported by its required check, and a database NULL still reads back as a null property - the hook decides what a blank import cell means, not what null means everywhere. The warnings above apply unchanged: never call `TryCreateFrom` / `CreateFrom` from inside, and do not let an exception escape.
 
 ### partial extension points
 
