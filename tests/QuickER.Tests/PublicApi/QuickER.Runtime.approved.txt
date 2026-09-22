@@ -290,6 +290,7 @@ public interface QuickER.Runtime.IValueObject<TSelf, TValue> : QuickER.Runtime.I
 
 public interface QuickER.Runtime.IValueObject<TSelf> : QuickER.Runtime.IValueObjectCore
     public static TSelf CreateFrom(object raw, System.IFormatProvider provider)
+    public static bool TryConvertAbsentInput(System.IFormatProvider provider, out TSelf result)
     public static bool TryConvertCustomInput(object raw, System.IFormatProvider provider, out TSelf result)
     public static bool TryCreateFrom(object raw, System.IFormatProvider provider, out TSelf result, out System.Collections.Generic.IReadOnlyList<string> errors)
 

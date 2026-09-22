@@ -152,7 +152,7 @@ private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? cult
 }
 ```
 
-- **空のセルは違反ではありません。** `null` / `DBNull` / 空文字は「未入力」として `true` ＋ `null` を返し、エラーを 1 件も積みません（NULL 許容列はプロパティ自体を null に保つ設計に合わせています）。必須かどうかは EditModel の必須チェックの担当です
+- **空のセルは違反ではありません。** `null` / `DBNull` / 空文字は「未入力」として `true` ＋ `null` を返し、エラーを 1 件も積みません（NULL 許容列はプロパティ自体を null に保つ設計に合わせています）。必須かどうかは EditModel の必須チェックの担当です。型が空欄を自分の値として引き取りたいときは `ConvertAbsentInput` フック（後述）を実装します——その場合の結果は null でなくフックが返したインスタンスです。空白だけの文字列は「空欄」ではなく、通常の変換に進みます
 - **カルチャは呼び出し側が決めます。** `null` はインバリアントです。人が書いた日付書式（`2026/08/28`）を読むなら、その書式のカルチャを渡してください
 - **数値は桁区切りを許します。** 表計算の書式付き数値を文字列で読むと `1,234` で届くため、数値型は `NumberStyles` を明示して解析します。整数型は小数点を許さないので `1,234.5` は `int` として通りません
 - 変換できたあとは通常の `TryCreate` と同じです。その型の検証（最大長・精度・`OnValidate`）がそのまま効きます
@@ -260,6 +260,17 @@ static bool IValueObject<DataAccessMode>.TryConvertCustomInput(
 ```
 
 実装するのはフックだけにしてください——`TryCreateFrom` 自体は、生成 VO でも手書き型でも実装してはいけません。再実装はコンパイルできますが、具象型名を書いた呼び出しは基底の共有実装へ静的束縛されるため、その呼び形でだけ再実装が黙って飛ばされます——差し替え点をフックにしているのはまさにこのためです。
+
+空欄入力（`null` / `DBNull` / 空文字）は `ConvertCustomInput` に届きません——`TryCreateFrom` はフックを照会する前に「成功＋null」で確定します。「○ か空欄か」のように空欄が値の片割れである記法を持つ型は、代わりに partial フック `ConvertAbsentInput` で空欄側を引き取ります（手書きの値オブジェクトは interface のフック `TryConvertAbsentInput` を直接実装します——上と同じ使い分けです）。カルチャは対称性のために渡されますが、空欄にテキストはないので実装では通常無視します。
+
+```csharp
+// 記法が「○ または空欄」のフラグ: ○ は ConvertCustomInput が、空欄はこちらが引き取る
+// （空欄セルを null でなく False として取り込む）
+static partial void ConvertAbsentInput(IFormatProvider? provider, ref MarkValue? result) =>
+    result = False;
+```
+
+このフックが効くのは `TryCreateFrom` / `CreateFrom` だけです。EditModel の空欄入力は従来どおり確定値 null（必須列なら必須チェックが報告）のままで、DB の NULL も null のプロパティとして読み戻されます——このフックが決めるのは「取り込みの空欄セルが何を意味するか」であって、null の意味全般ではありません。注意点は上と同じです: フックの中から `TryCreateFrom` / `CreateFrom` を呼ばない・例外を漏らさない。
 
 ### partial 拡張点
 
