@@ -1,8 +1,8 @@
 # QuickER Licensing Guide
 
-This page explains QuickER's license structure in plain language, with examples. It is an explanation, not the terms themselves: if anything here conflicts with [LICENSE](LICENSE) or [LICENSE-NC.md](LICENSE-NC.md), the license files control.
+*English | [日本語](LICENSING.ja.md)*
 
-日本語版は [LICENSING.ja.md](LICENSING.ja.md) を参照してください。
+This page explains QuickER's license structure in plain language, with examples. It is an explanation, not the terms themselves: if anything here conflicts with [LICENSE](LICENSE) or [LICENSE-NC.md](LICENSE-NC.md), the license files control.
 
 ## The short version
 

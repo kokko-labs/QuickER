@@ -1,8 +1,8 @@
 # QuickER ライセンスガイド
 
-このページは、QuickER のライセンス構成を具体例つきで平易に説明するものです。正式な条件そのものではありません。ここでの説明が [LICENSE](LICENSE) または [LICENSE-NC.md](LICENSE-NC.md) と矛盾する場合は、ライセンスファイルが優先されます。
+*[English](LICENSING.md) | 日本語*
 
-For the English version, see [LICENSING.md](LICENSING.md).
+このページは、QuickER のライセンス構成を具体例つきで平易に説明するものです。正式な条件そのものではありません。ここでの説明が [LICENSE](LICENSE) または [LICENSE-NC.md](LICENSE-NC.md) と矛盾する場合は、ライセンスファイルが優先されます。
 
 ## 要点
 
