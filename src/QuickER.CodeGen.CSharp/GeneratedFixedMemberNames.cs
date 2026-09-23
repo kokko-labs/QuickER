@@ -126,6 +126,19 @@ public static class GeneratedFixedMemberNames
     /// </remarks>
     public static IReadOnlySet<string> EntityDisplayNameReserved { get; } = Create("DisplayName");
 
+    /// <summary>
+    /// Entity / EditModel の両方で予約する、基底の状態管理メンバー名（<c>RowState</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 「基底クラスにしかない名前は名簿へ入れない」方針（クラス remarks）の意図的な例外。<c>RowState</c> は
+    /// Mapper の状態転送 <c>entity.RowState = editModel.RowState;</c> が**名前で**束縛するため、列由来プロパティが
+    /// この名前を取ると転送先が基底の状態から列プロパティへ静かに差し替わり、基底の <c>RowState</c> が更新されない
+    /// （NULL 許容列・string 列は代入互換でコンパイルが通り、既存行の編集が「変更なし」として保存から抜け落ちる。
+    /// 非 NULL 値型だけが CS0266 で止まる）。CS0108 の警告どまりで済まない実害があるため衝突は生成エラーにする。
+    /// 位置ヘルパーと同じく per-type の実宣言には出ない＝シンボル表検証にのみ登録し、名簿照合からは外す。
+    /// </remarks>
+    public static IReadOnlySet<string> StateTransferReserved { get; } = Create("RowState");
+
     /// <summary>序数比較の読み取り専用集合を組み立てる（メンバー名は識別子なので大文字小文字を区別する）</summary>
     private static IReadOnlySet<string> Create(params string[] names) =>
         new HashSet<string>(names, StringComparer.Ordinal);

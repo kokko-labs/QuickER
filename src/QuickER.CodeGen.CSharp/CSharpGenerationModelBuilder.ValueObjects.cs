@@ -405,25 +405,49 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
         }
 
-        // 同一グループの定義が食い違う場合は競合として警告（NULL 可否は競合に含めない）
+        // 同一グループの定義が食い違う場合は競合として扱う（NULL 可否は競合に含めない）。
+        // C# 型（内包値型）そのものが割れる食い違いは Error＝FK 統一側の「下地の C# 型が食い違うペアは
+        // 統一しない」と同じ線引きで、別の型を 1 つの VO へ畳むと行読み出しの InvalidCastException
+        // （byte[]×string）や等価・順序の意味の無音変化（int×string＝文字列比較化）になる。
+        // 型が同じで長さ・精度だけの食い違いは従来どおり Warning（PK 優先／最大定義で揃える）
         var signatures = members.Select(Signature).Distinct().ToList();
         if (signatures.Count > 1)
         {
             var locations = string.Join(
-                "、",
+                Strings.CodeGen_ListSeparator,
                 members.Select(member =>
                     $"{member.Entity.TableName}.{member.Column.Name} ({member.Column.DataType})"
                 )
             );
-            diagnostics.Add(
-                GenerationDiagnostic.Warning(
-                    string.Format(
-                        Strings.CodeGen_Warning_ValueObjectDefinitionMismatch,
-                        className,
-                        locations
+            var valueTypeNames = members
+                .Select(member => member.TypeInfo.TypeName)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (valueTypeNames.Count > 1)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_ValueObjectValueTypeConflict,
+                            className,
+                            locations
+                        )
                     )
-                )
-            );
+                );
+            }
+            else
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Warning_ValueObjectDefinitionMismatch,
+                            className,
+                            locations
+                        )
+                    )
+                );
+            }
         }
 
         return new CSharpValueObjectModel
@@ -570,7 +594,11 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return valueType switch
         {
+            // sbyte は MySQL の tinyint（表示幅なし）だけが生む（5 方言の型マッパーを走査済み。ushort 等は
+            // どの方言も生成しないため列挙しない）。落とすと比較演算子も IComparable も持たない VO になり
+            // OrderBy が実行時 InvalidOperationException になる
             "byte"
+            or "sbyte"
             or "short"
             or "int"
             or "long"

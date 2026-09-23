@@ -327,6 +327,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 return new CSharpMappingPropertyPair
                 {
                     PropertyName = property.PropertyName,
+                    // 削除行の列コピーで主キーだけ Required を維持するための判定材料（モデル定義側の remarks を参照）
+                    IsPrimaryKey = property.IsPrimaryKey,
                     EntityTypeName = property.TypeName,
                     EditModelTypeName = editModelProperty.TypeName,
                     EditModelIsNullable = editModelProperty.IsNullable,
@@ -950,7 +952,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             Initializer = nav.IsCollection
                 ? $" = new EditModelCollection<{targetEditModelTypeName}>();"
                 : (declaresNullable ? string.Empty : " = null!;"),
-            // EditModel 側も同じ属性へ載るため、Entity 側と同じ規則でエスケープする
+            // C# リテラルへ埋まる名前なので Entity 側と同じ規則でエスケープする
+            // （EditModel のナビゲーションに [NavigationReference] は出ない＝載る先は Entity 側の属性引数のみ）
             PrincipalTableName = EscapeNameForCSharpString(nav.PrincipalTableName),
             PrincipalColumnName = EscapeNameForCSharpString(nav.PrincipalColumnName),
             DependentTableName = EscapeNameForCSharpString(nav.DependentTableName),

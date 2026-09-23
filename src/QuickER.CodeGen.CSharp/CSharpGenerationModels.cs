@@ -539,6 +539,14 @@ internal sealed class CSharpMappingPropertyPair
     /// <summary>プロパティ名</summary>
     public required string PropertyName { get; init; }
 
+    /// <summary>主キー列かどうか</summary>
+    /// <remarks>
+    /// Mapper の ApplyToEntity は削除行（IsRemoved）の未入力値を Required で止めずスキップするが、
+    /// 主キーだけは削除行でも Required を維持する。キーを欠いた削除は照合先を失い、既定値のキーで
+    /// 別の行を消しかねないため（削除行は「キーだけが保存に参加する」＝キーは必ず要る）。
+    /// </remarks>
+    public required bool IsPrimaryKey { get; init; }
+
     /// <summary>Entity 側の型名</summary>
     public required string EntityTypeName { get; init; }
 

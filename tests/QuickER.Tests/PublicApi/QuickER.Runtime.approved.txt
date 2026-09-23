@@ -43,7 +43,9 @@ public abstract class QuickER.Runtime.EditModelBaseCore : System.ComponentModel.
     protected bool AcceptBindingInput(ref string field, string value, string bindingPropertyName, out string normalized)
     protected bool IsLoading { get; }
     protected bool IsReverting { get; }
+    protected static QuickER.Runtime.EditModelBaseCore.BindingConversion ConvertBinaryInput(string normalized, out byte[] converted)
     protected static QuickER.Runtime.EditModelBaseCore.BindingConversion ConvertBinaryValueObjectInput<TVo>(string normalized, out TVo converted, out string rejection)
+    protected static QuickER.Runtime.EditModelBaseCore.BindingConversion ConvertParsedInput<TValue>(string normalized, out TValue? converted)
     protected static QuickER.Runtime.EditModelBaseCore.BindingConversion ConvertParsedValueObjectInput<TVo, TValue>(string normalized, out TVo converted, out string rejection)
     protected static QuickER.Runtime.EditModelBaseCore.BindingConversion ConvertValueObjectInput<TVo>(string normalized, out TVo converted, out string rejection)
     protected static bool TryConvertBase64Input(string normalized, out byte[] bytes)

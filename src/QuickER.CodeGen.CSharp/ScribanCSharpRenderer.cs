@@ -228,7 +228,7 @@ internal sealed class ScribanCSharpRenderer
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
         // (2) 共通契約の EntitySaveMetadata / SqlQuery によるナビゲーション除外・Include 復元（リフレクション走査）、
-        // (3) EntityBase 自身（GetValueProperties のナビゲーション除外判定）の 3 箇所で参照される。
+        // (3) EntityBaseCore 自身（GetCascadeNavigations＝グラフ操作が辿る子方向ナビの走査）の 3 箇所で参照される。
         // (3) はエンティティ生成時に常に出力されるため、リレーション・契約の有無に依らず、
         // エンティティを 1 つでも生成するなら属性定義が必要（リレーションなし・契約なしの最小構成で
         // コンパイル不能になる不具合の修正。GuidKeyValueObjectExecutionTests が回帰を検知する）。

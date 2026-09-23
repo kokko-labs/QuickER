@@ -166,6 +166,12 @@
   <data name="CodeGen_Error_ValueObjectForeignKeyTypeConflict" xml:space="preserve">
     <value>列 '{0}' は複数のリレーションの外部キーですが、参照先の列が別々の値オブジェクト型（{1}）へ解決するため、この列の値型を 1 つに決められません。参照先の列が同じ値オブジェクト型を共有するようにするか、列を分けてください。</value>
   </data>
+  <data name="CodeGen_Error_ValueObjectValueTypeConflict" xml:space="preserve">
+    <value>値オブジェクト '{0}' に集約される同名列の C# 型が一致しないため、1 つの値オブジェクトへ畳めません。ER 図で列の型を揃えるか、別の列として扱えるよう列名を変えてください: {1}</value>
+  </data>
+  <data name="CodeGen_ListSeparator" xml:space="preserve">
+    <value>、</value>
+  </data>
   <data name="CodeGen_Error_SyncSupportRequiresDialects" xml:space="preserve">
     <value>同期支援は Repository の生成方言が 'sqlserver'（サーバー）と 'sqlite'（ローカル）のちょうど 2 つであることを要求します。現在の指定は '{0}' です。</value>
   </data>

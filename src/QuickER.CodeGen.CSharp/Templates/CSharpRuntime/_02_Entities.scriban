@@ -233,7 +233,9 @@ public abstract class EntityBaseCore
     /// <summary>Serializes this entity to a JSON string (used for passing data to a web API and so on).</summary>
     /// <remarks>
     /// Only public get/set properties are included (get-only derived flags such as IsAdded are not emitted; RowState is emitted).
-    /// Child navigations are included; parent-reference navigations carry [JsonIgnore] so no cycle occurs.
+    /// Child navigations are included; with the default configuration (IncludeJsonIgnoreOnParentNavigation) parent-reference
+    /// navigations carry [JsonIgnore] and are left out. Without the attribute they are emitted, and a cycle back to this
+    /// entity is nulled out by IgnoreCycles instead.
     /// </remarks>
     public string ToJson(bool writeIndented = false) =>
         JsonSerializer.Serialize(
@@ -244,7 +246,9 @@ public abstract class EntityBaseCore
 
     /// <summary>Creates a deep clone of this entity (via a JSON round-trip).</summary>
     /// <remarks>
-    /// Values, RowState, and child navigations are copied. Parent-reference navigations are not restored because of [JsonIgnore] (the clone does not point to a parent).
+    /// Values, RowState, and child navigations are copied. With the default configuration (IncludeJsonIgnoreOnParentNavigation)
+    /// parent-reference navigations are not restored (the clone does not point to a parent); without the attribute, restoring
+    /// them depends on how IgnoreCycles serialized the graph.
     /// To insert it as a separate record, reassign the primary key or call MarkAdded() after cloning. The returned instance has the same concrete type as the original.
     /// </remarks>
     public EntityBaseCore Clone()

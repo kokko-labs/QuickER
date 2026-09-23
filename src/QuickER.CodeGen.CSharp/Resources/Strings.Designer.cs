@@ -270,6 +270,18 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_ValueObjectValueTypeConflict {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_ValueObjectValueTypeConflict", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_ListSeparator {
+            get {
+                return ResourceManager.GetString("CodeGen_ListSeparator", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_SyncSupportRequiresDialects {
             get {
                 return ResourceManager.GetString("CodeGen_Error_SyncSupportRequiresDialects", resourceCulture);
