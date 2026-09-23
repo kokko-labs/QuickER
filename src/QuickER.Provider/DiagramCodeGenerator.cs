@@ -77,6 +77,14 @@ public static class DiagramCodeGenerator
         ArgumentNullException.ThrowIfNull(diagram);
         ArgumentNullException.ThrowIfNull(options);
 
+        // QuickER 版 Repository を生成しない構成（DB アクセスなし・EF Core 単独）では方言辞書が生成物に
+        // 影響してはならないため、方言別の型解決ごと行わず単一方言経路と同一の生成にする（サービス側も
+        // 同じ条件で方言辞書を無視する＝二重の締め）
+        if (!options.GenerateRepositories)
+        {
+            return Generate(primaryTypeMapper, primaryTypeCatalog, diagram, options);
+        }
+
         var primaryColumnTypes = primaryTypeMapper.ResolveColumnTypes(diagram);
         // DB 定義メタ属性用の方言中立トークンを主辞書へ付加する（共有 Entity 出力にのみ影響。マッパ実装は変更しない）
         primaryColumnTypes = CanonicalTypeTokenAttacher.Attach(

@@ -327,6 +327,37 @@ public class UniquenessGenerationTests
         content.Should().NotContain("ValidateUniqueAsync");
     }
 
+    /// <summary>
+    /// 値型（非 NULL・非参照型）の構成列は「未入力」を Entity へ写せないため、未入力のときは DB 照合を
+    /// 走らせず true を返すガードが ValidateUniqueAsync に出ることを検証する
+    /// （ガードが無いと CLR 既定値 0 のまま照合され、0 を持つ既存行との偽の重複を報告していた）。
+    /// 参照型の構成列（string）は null の組が照合対象外になるためガードは出ない
+    /// </summary>
+    [Fact(DisplayName = "値型の構成列が未入力なら DB 照合せず true を返すガードが出る")]
+    public void Generate_ValueTypeConstraintMember_EmitsUnsetGuard()
+    {
+        var qty = new Column
+        {
+            Name = "Qty",
+            DataType = "int",
+            IsNullable = false,
+        };
+        _order.Columns.Add(qty);
+
+        var diagram = CreateDiagram(
+            new UniqueConstraint { Name = "UQ_Order_Qty", ColumnIds = { qty.Id } },
+            new UniqueConstraint { Name = "UQ_Order_Code", ColumnIds = { _code.Id } }
+        );
+
+        var content = AllContent(Generate(diagram, CreateOptions()));
+
+        content.Should().Contain("if (Qty is null)");
+        content.Should().Contain("return Task.FromResult(true);");
+        content
+            .Should()
+            .NotContain("if (Code is null)", "参照型の構成列は null の組が照合対象外＝ガード不要");
+    }
+
     /// <summary>名前付きクエリが CheckUniqueness という名前を取ると予約名として拒否される</summary>
     [Fact(DisplayName = "名前付きクエリの CheckUniqueness は予約名として拒否される")]
     public void Generate_QueryNamedCheckUniqueness_IsRejected()

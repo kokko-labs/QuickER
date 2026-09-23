@@ -320,6 +320,10 @@ String matching in the mini DSL (`LIKE` / `CONTAINS` / `STARTSWITH` / `ENDSWITH`
 SQL's `LIKE` already drops `NULL` rows as UNKNOWN, so nothing changes on the SQL side.
 The in-memory backend, however, compiles the expression tree and actually evaluates it, where the missing premise would raise a `NullReferenceException` on a `NULL` row.
 
+In a DSL `LIKE` literal, only a leading or trailing `%` is read as a pattern (a `%` or `_` in the middle is a validation error).
+Character classes such as SQL Server's `[...]` get no special treatment: they match as strings that contain the brackets themselves.
+Write a raw SQL query when you need pattern syntax.
+
 #### Letter case, whitespace, and date parts
 
 How a string match treats letter case is left to the store, because the `LIKE` is emitted unqualified: no `LOWER`, no `COLLATE`.

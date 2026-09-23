@@ -234,6 +234,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Warning_EfCoreKeylessTableExcluded {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_EfCoreKeylessTableExcluded", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Info_ExcludedUnboundedBinaryColumns {
             get {
                 return ResourceManager.GetString("CodeGen_Info_ExcludedUnboundedBinaryColumns", resourceCulture);
@@ -510,6 +516,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Query_ReservedParameterName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ReservedParameterName", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Query_UnresolvedTypeToken {
             get {
                 return ResourceManager.GetString("CodeGen_Query_UnresolvedTypeToken", resourceCulture);
@@ -519,6 +531,24 @@ namespace QuickER.CodeGen.CSharp.Resources {
         public static string CodeGen_Query_ConditionInvalid {
             get {
                 return ResourceManager.GetString("CodeGen_Query_ConditionInvalid", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ConditionOrderedOperatorUnsupported {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ConditionOrderedOperatorUnsupported", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ConditionStringMatchUnsupported {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ConditionStringMatchUnsupported", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ConditionOperandTypeMismatch {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ConditionOperandTypeMismatch", resourceCulture);
             }
         }
 
@@ -564,6 +594,30 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Query_ProjectionFieldNotNullOverride {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ProjectionFieldNotNullOverride", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ConditionTooComplex {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ConditionTooComplex", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ConditionIgnoredForImplementation {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ConditionIgnoredForImplementation", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_OrderByIgnoredForImplementation {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_OrderByIgnoredForImplementation", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Query_OrderByColumnNotFound {
             get {
                 return ResourceManager.GetString("CodeGen_Query_OrderByColumnNotFound", resourceCulture);
@@ -579,6 +633,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
         public static string CodeGen_Query_InvalidFieldName {
             get {
                 return ResourceManager.GetString("CodeGen_Query_InvalidFieldName", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_FieldNameEqualsResultType {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_FieldNameEqualsResultType", resourceCulture);
             }
         }
 

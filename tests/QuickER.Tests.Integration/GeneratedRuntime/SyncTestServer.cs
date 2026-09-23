@@ -568,12 +568,19 @@ internal sealed class SyncTestOrderBinaryColumns(
 /// <remarks>
 /// 除外列のストリーミングエンドポイント（<c>GET/PUT/DELETE {prefix}/SyncOrder/Attachment</c>）はこの面を解決して
 /// 呼ぶため、blob の読み書きも版採番つきのアクセサ（<see cref="SyncTestOrderBinaryColumns"/>）へ通す。
+/// 名前付きクエリ（読み取り専用＝版採番と無関係）は素のリポジトリへ委譲する。
 /// </remarks>
 internal sealed class SyncTestOrderRemoteRepository(
     IRepository<SyncOrderEntity, int> inner,
+    ISyncOrderRepository queries,
     ISyncBinaryColumns<int> binaryColumns
 ) : SyncTestRemoteServerRepository<SyncOrderEntity, int>(inner), ISyncOrderRemoteRepository
 {
+    public Task<IReadOnlyList<SyncOrderHeadlineRow>> GetHeadlinesAsync(
+        int minOrderId,
+        CancellationToken cancellationToken = default
+    ) => queries.GetHeadlinesAsync(minOrderId, cancellationToken);
+
     public Task<bool> ReadAttachmentAsync(
         int id,
         Stream destination,

@@ -72,10 +72,15 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         // 除外列（無制限バイナリ列）とその C# プロパティ名・元カラム名を定義順に集める。
+        // 列名は XmlDoc の定型文（summary）にしか使わないため、ここで XML エスケープ＋改行畳み込み済みの
+        // 形にする（生のまま載せると名前の < で CS1570・行区切り文字で /// 行が壊れる）
         var columns = entity
             .Columns.Where(column => _columnTypes[column.Id].IsUnboundedBinary)
             .Select(column =>
-                (ColumnName: column.Name, PropertyName: _nameConverter.ToPropertyName(column.Name))
+                (
+                    ColumnNameXmlDoc: EscapeForXmlDocSummary(column.Name),
+                    PropertyName: _nameConverter.ToPropertyName(column.Name)
+                )
             )
             .ToList();
 
@@ -98,10 +103,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         var remoteClientMembers = new List<string>();
         var remoteServerMembers = new List<string>();
 
-        foreach (var (columnName, propertyName) in columns)
+        foreach (var (columnNameXmlDoc, propertyName) in columns)
         {
             contractMembers.Add(
-                BuildBinaryStreamContractMember(columnName, propertyName, keyTypeName)
+                BuildBinaryStreamContractMember(columnNameXmlDoc, propertyName, keyTypeName)
             );
             thinMembers.Add(
                 BuildBinaryStreamThinImplMember(entityClassName, propertyName, keyTypeName)
@@ -109,7 +114,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             efMembers.Add(BuildBinaryStreamEfImplMember(propertyName, keyTypeName));
             fileMethods.Add(
                 BuildBinaryStreamFileMethods(
-                    columnName,
+                    columnNameXmlDoc,
                     propertyName,
                     fileExtensionsTarget,
                     keyTypeName
@@ -138,7 +143,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>Stream アクセサの契約メンバー（全機能インターフェイス本体・Read/Write の 2 宣言）を構築する</summary>
     private static string BuildBinaryStreamContractMember(
-        string columnName,
+        string columnNameXmlDoc,
         string propertyName,
         string keyTypeName
     )
@@ -146,7 +151,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         var builder = new StringBuilder();
         builder
             .Append("    /// <summary>Reads the ")
-            .Append(columnName)
+            .Append(columnNameXmlDoc)
             .Append(
                 " column into the destination stream (unbounded binary column, O(chunk) streaming; true = written, false = no row or NULL).</summary>\n"
             )
@@ -157,7 +162,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append(" id, Stream destination, CancellationToken cancellationToken = default);\n\n");
         builder
             .Append("    /// <summary>Writes the ")
-            .Append(columnName)
+            .Append(columnNameXmlDoc)
             .Append(
                 " column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length; true = updated, false = no row).</summary>\n"
             )
@@ -235,7 +240,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>ファイル糖衣の 2 メソッド（Read...ToFile / Write...FromFile。拡張メソッド）を構築する</summary>
     private static string BuildBinaryStreamFileMethods(
-        string columnName,
+        string columnNameXmlDoc,
         string propertyName,
         string interfaceName,
         string keyTypeName
@@ -244,7 +249,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         var builder = new StringBuilder();
         builder
             .Append("    /// <summary>Reads the ")
-            .Append(columnName)
+            .Append(columnNameXmlDoc)
             .Append(
                 " column into a file (delegates to the Stream overload; true = written, false = no row or NULL).</summary>\n"
             )
@@ -267,7 +272,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("Async(id, destination, cancellationToken).ConfigureAwait(false);\n    }\n\n");
         builder
             .Append("    /// <summary>Writes the ")
-            .Append(columnName)
+            .Append(columnNameXmlDoc)
             .Append(
                 " column from a file (delegates to the Stream overload; true = updated, false = no row).</summary>\n"
             )

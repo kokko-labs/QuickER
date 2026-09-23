@@ -299,4 +299,98 @@ public sealed class MultiTargetRowVersionGenerationTests
             .Diagnostics.Should()
             .NotContain(d => d.Message.Contains("row_ver"), "統一していないので通知もしない");
     }
+
+    /// <summary>
+    /// QuickER 版 Repository を生成しない構成（EF Core 単独）では、渡された方言辞書が無視され、
+    /// 出力が単一方言経路とバイト同一になることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 従来は GUI が DB アクセスの選択に依らず <c>RepositoryDialects</c> を渡していたため、隠れた
+    /// 2 方言辞書が型統合（SQLite 図の <c>timestamp</c> が <c>byte[]</c> 行バージョン化）・Info 診断・
+    /// <c>[SqlColumnType]</c> 補完として効き、同じ図・同じ選択のフィクスチャ／CLI 出力と食い違っていた。
+    /// </remarks>
+    [Fact(
+        DisplayName = "Repository 非生成では方言辞書が無視され EF Core 単独の出力は単一方言と同一になる"
+    )]
+    public void Generate_EfCoreOnlyWithHiddenDialects_IgnoresDialectDictionaries()
+    {
+        var diagram = BuildTimestampSpellingDiagram();
+        var primary = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
+        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
+            StringComparer.OrdinalIgnoreCase
+        )
+        {
+            ["sqlserver"] = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram),
+            ["sqlite"] = primary,
+        };
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.EfOnly",
+            GenerateEfCoreRepositories = true,
+            RepositoryDialects = ["sqlserver", "sqlite"],
+        };
+
+        var withDialects = new CSharpCodeGenerationService().Generate(
+            diagram,
+            primary,
+            byDialect,
+            options
+        );
+        var single = new CSharpCodeGenerationService().Generate(diagram, primary, options);
+
+        withDialects.HasErrors.Should().BeFalse();
+        withDialects
+            .Files.Select(f => f.Content)
+            .Should()
+            .Equal(single.Files.Select(f => f.Content), "方言辞書は生成物に影響しないべき");
+
+        var content = withDialects.Files.Single().Content.ReplaceLineEndings("\n");
+
+        content.Should().Contain("public DateTime RowVer { get; set; }", "型統合は走らない");
+        content.Should().NotContain("[SqlColumnType(", "sqlserver 辞書からの補完も走らない");
+        withDialects
+            .Diagnostics.Should()
+            .NotContain(d => d.Message.Contains("row_ver"), "統一の Info 診断も出ない");
+    }
+
+    /// <summary>
+    /// 実生成経路（<see cref="DiagramCodeGenerator"/>）でも、Repository 非生成なら方言マッパ辞書つきの
+    /// 呼び出しが単一方言オーバーロードと同一出力になることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "実生成経路でも Repository 非生成なら方言マッパ辞書つき呼び出しは単一方言と同一出力になる"
+    )]
+    public void DiagramCodeGenerator_EfCoreOnlyWithDialectMappers_MatchesSingleDialect()
+    {
+        var diagram = BuildTimestampSpellingDiagram();
+        var sqlServer = new SqlServerProvider();
+        var sqlite = new SqliteProvider();
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.EfOnly2",
+            GenerateEfCoreRepositories = true,
+            RepositoryDialects = ["sqlserver", "sqlite"],
+        };
+
+        var multi = DiagramCodeGenerator.Generate(
+            sqlite.TypeMapper,
+            sqlite.TypeCatalog,
+            new Dictionary<string, IColumnTypeMapper>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["sqlserver"] = sqlServer.TypeMapper,
+                ["sqlite"] = sqlite.TypeMapper,
+            },
+            diagram,
+            options
+        );
+        var single = DiagramCodeGenerator.Generate(
+            sqlite.TypeMapper,
+            sqlite.TypeCatalog,
+            diagram,
+            options
+        );
+
+        multi.HasErrors.Should().BeFalse();
+        multi.Files.Select(f => f.Content).Should().Equal(single.Files.Select(f => f.Content));
+    }
 }

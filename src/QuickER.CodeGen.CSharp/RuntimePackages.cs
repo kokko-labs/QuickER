@@ -9,8 +9,8 @@ namespace QuickER.CodeGen.CSharp;
 /// <para>
 /// 生成コードのうちスキーマに依存しない固定部分（EntityBase・属性・VO 基底・JSON コンバータ・Repository 共通契約・
 /// 方言別エンジン・EF Core 共通部品・インメモリ基盤・リモートサーバー基盤）は <c>Templates/CSharpRuntime/*.scriban</c> から
-/// 出力される。これを 6 分割の NuGet パッケージ（コア＋QuickER の方言エンジン×方言数＋EF Core＋インメモリ＋
-/// ASP.NET Core）として配布できるようにするための ID を集約する。
+/// 出力される。これを 7 分割の NuGet パッケージ（コア＋QuickER の方言エンジン×方言数＋EF Core＋インメモリ＋
+/// ASP.NET Core＋同期エンジン）として配布できるようにするための ID を集約する。
 /// </para>
 /// <para>
 /// パッケージ ID は、パッケージ書き出し時のソースの名前空間と一致させる（<see cref="RuntimePackageSourceRenderer"/> が

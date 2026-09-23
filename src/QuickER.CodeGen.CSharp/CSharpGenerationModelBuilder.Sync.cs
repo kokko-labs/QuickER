@@ -276,7 +276,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             FormatKeyExpression = BuildFormatKey("key", keyColumn, keyValueObject),
             FormatKeyIdExpression = BuildFormatKey("id", keyColumn, keyValueObject),
             ParseKeyExpression = BuildParseKey(keyColumn, keyValueObject),
-            DecoratorDelegationBlock = BuildSyncDelegationBlock(entity, repository, options),
+            DecoratorDelegationBlock = BuildSyncDelegationBlock(repository),
             BinaryColumnPropertyNames = binaryColumns,
             BinaryAccessorsBlock = BuildSyncBinaryAccessorsBlock(
                 binaryColumns,
@@ -397,36 +397,35 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>ジャーナル記録デコレータへ追加する委譲メンバー（名前付きクエリ）を組み立てる</summary>
     /// <remarks>
     /// デコレータは <c>I{Entity}Repository</c> の全機能面を実装するため、契約へ載る追加メンバーもすべて素通しで
-    /// 実装しなければならない。名前付きクエリはクエリブロック側が同じシグネチャで組み立てたものを使う
-    /// （契約とのずれが構造的に起きない）。重複事前チェックはランタイム共通面へ上がったため、素通しは基底
+    /// 実装しなければならない。名前付きクエリは Repository 契約の構築時に組んだ委譲ブロック
+    /// （<see cref="CSharpRepositoryModel.QueryDelegationBlock"/>）をそのまま使う（契約とのずれが構造的に
+    /// 起きない。同じエンティティで <c>BuildQueryBlocks</c> を呼び直すと、ビルド全体で一意管理している
+    /// 射影 DTO 名の重複判定に 1 回目が引っかかり、射影クエリの委譲だけが黙って抜けて CS0535 になる）。
+    /// 重複事前チェックはランタイム共通面へ上がったため、素通しは基底
     /// <c>JournalingRepositoryBase</c> が 1 回だけ持つ＝ここでは出さない。
     /// </remarks>
-    private string BuildSyncDelegationBlock(
-        Entity entity,
-        CSharpRepositoryModel repository,
-        CodeGenerationOptions options
-    )
+    private static string BuildSyncDelegationBlock(CSharpRepositoryModel repository)
     {
         var members = new List<string>();
 
-        var queryBlocks = BuildQueryBlocks(
-            entity,
-            repository.InterfaceName[1..^"Repository".Length],
-            options,
-            []
-        );
-
-        if (!string.IsNullOrEmpty(queryBlocks.DelegationBlock))
+        if (!string.IsNullOrEmpty(repository.QueryDelegationBlock))
         {
-            members.Add(queryBlocks.DelegationBlock);
+            members.Add(repository.QueryDelegationBlock);
         }
 
         return string.Join("\n\n", members);
     }
 
-    /// <summary>ドット区切りのテーブル名を方言のクォートで分割クォートする（5 方言共通の規則に合わせる）</summary>
+    /// <summary>
+    /// ドット付きテーブル名を最初の <c>.</c> で 2 分割してクォートする（DDL・生成 CRUD の
+    /// <c>EntitySaveMetadata.QuoteTableName</c> と同じ規則）。
+    /// </summary>
+    /// <remarks>
+    /// 全ドット分割にすると <c>a.b.c</c> のような名前で DDL・CRUD と同期 SQL のクォート結果が食い違い、
+    /// 同じテーブルを指せなくなる（2 つ目以降のドットは名前の一部として扱う）。
+    /// </remarks>
     private static string QuoteQualified(string name, string open, string close) =>
-        string.Join(".", name.Split('.').Select(part => QuoteIdentifier(part, open, close)));
+        string.Join(".", name.Split('.', 2).Select(part => QuoteIdentifier(part, open, close)));
 
     /// <summary>SQL 識別子を方言のクォートで包む（終端クォート文字を二重化してクォートの脱出を防ぐ）</summary>
     /// <remarks>
@@ -500,6 +499,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             "Guid" => $"{access}.ToString()",
             "DateTime" or "DateTimeOffset" =>
                 $"{access}.ToString(\"o\", CultureInfo.InvariantCulture)",
+            // decimal はスケールを正規化する（G29＝末尾ゼロなし）。SQL Server は宣言スケールへ揃えて返し
+            // （decimal(10,2) の 1.5 は 1.50）、SQLite（Microsoft.Data.Sqlite）は書き込んだ綴りを保存する
+            // （1.5 のまま＝実測）ため、素の ToString だと同じ行のキー文字列がサーバーとローカルで食い違い、
+            // 削除伝搬・ack・pending の序数照合がすべて外れる
+            "decimal" => $"{access}.ToString(\"G29\", CultureInfo.InvariantCulture)",
             _ => $"{access}.ToString(CultureInfo.InvariantCulture)",
         };
     }

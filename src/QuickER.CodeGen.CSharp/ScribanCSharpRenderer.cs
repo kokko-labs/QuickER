@@ -394,14 +394,12 @@ internal sealed class ScribanCSharpRenderer
             // サーバー実装スペック（Sync バケットではなく RemoteServer バケット）で同期支援が有効なときだけ true＝
             // render_sync とは別軸（render_sync を立てると同期の固定エンジンごとサーバーファイルへ出てしまう）。
             ["render_sync_endpoints"] = scope.RemoteServer && options.GenerateSyncSupport,
-            // 同期対象テーブル（rowversion 列を持つテーブル）の per-entity 生成素材。FK トポロジカル順（親→子）。
+            // 同期対象テーブル（Repository 契約を持つ単一主キーのテーブル＝版なしも含む）の per-entity 生成素材。FK トポロジカル順（親→子）。
             ["sync_tables"] = model.SyncTables,
             // 版なし（rowversion 列なし）の同期対象テーブルが 1 つでもあるか。版なし専用のエンドポイント
             // マップ（MapVersionlessSyncEndpoints）は呼び出し側が 1 つも無ければ死蔵コードになるため、
             // このフラグで出し分ける（版ありだけの図の生成物からはメソッドごと消える）。
             ["has_versionless_sync_tables"] = model.SyncTables.Any(table => table.IsVersionless),
-            // グラフ保存のジャーナル記録クラス（SyncGraphRecorder）の整形済み全文（同期支援が無効なら空文字）。
-            // 分岐の多い再帰メソッド群のためビルダー側で組み立て、テンプレートは埋め込むだけにする（方言 SQL と同じ流儀）。
             // クエリ糖衣の静的クラス（SqlQueryExtensions＝IncludeGraph ＋ GetByIdAsync）の整形済み全文
             // （契約が出ない構成では空文字）。ツリーの組み立ては分岐と採番を伴うためビルダー側で行い、
             // テンプレートは埋め込むだけにする。
@@ -427,7 +425,6 @@ internal sealed class ScribanCSharpRenderer
             ["sql_parameter_type"] = dialect.ParameterType,
             ["sql_data_reader_type"] = dialect.DataReaderType,
             ["sql_transaction_type"] = dialect.TransactionType,
-            ["connection_factory_impl_type"] = dialect.ConnectionFactoryImplType,
             ["repository_base_class"] = dialect.RepositoryBaseClass,
             ["sql_query_executor_class"] = dialect.SqlQueryExecutorClass,
             // 方言の表示名（"SQL Server" / "SQLite"）。生成コードのコメント・DI 拡張の説明文で
@@ -457,7 +454,14 @@ internal sealed class ScribanCSharpRenderer
         // 関連する上限をすべて無効化（0 = 無制限）して全件を確実に出力する。
         //   - LoopLimit: ループ反復回数の上限（既定 1000）
         //   - LimitToString: レンダリング出力長の上限（既定 1MB = 1048576 文字。超過分は "..." で切り捨て）
-        var context = new TemplateContext { LoopLimit = 0, LimitToString = 0 };
+        //   - StrictVariables: 未定義変数の参照を例外にする（既定 false だと黙って空文字が出て、変数名の
+        //     打ち間違い・供給漏れが「その箇所だけ欠けた生成物」として静かに通る）
+        var context = new TemplateContext
+        {
+            LoopLimit = 0,
+            LimitToString = 0,
+            StrictVariables = true,
+        };
 
         context.PushGlobal(scriptObject);
         var rendered =
@@ -466,11 +470,200 @@ internal sealed class ScribanCSharpRenderer
 
         // 条件ブロック（{{ if }}）のスキップ時などに生じる連続空行を 1 行へ正規化する。
         // C# では 2 行以上連続する空行は不要で、CSharpier も 1 行へ畳むため、それに合わせる。
+        // ただし逐語文字列リテラル（@"..."＝自由 SQL の埋め込み）の内側は畳まない＝SQL の文字列リテラルに
+        // 連続空行を含むユーザーの SQL を黙って書き換えないため（範囲は FindVerbatimStringRanges）。
+        var verbatimRanges = FindVerbatimStringRanges(rendered);
+
         return Regex.Replace(
             rendered,
             $"(?:{Regex.Escape(Environment.NewLine)}){{3,}}",
-            Environment.NewLine + Environment.NewLine
+            match =>
+                verbatimRanges.Any(range => match.Index >= range.Start && match.Index < range.End)
+                    ? match.Value
+                    : Environment.NewLine + Environment.NewLine
         );
+    }
+
+    /// <summary>
+    /// C# ソーステキスト中の逐語文字列リテラル（<c>@"..."</c>・<c>$@"..."</c> / <c>@$"..."</c>）の
+    /// 範囲（開始・終了オフセット）を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// 連続空行の畳み込みから逐語リテラルの中身を除外するための軽量な字句走査。誤認しないために
+    /// 行コメント・ブロックコメント・文字リテラル・通常文字列（<c>\</c> エスケープ）・補間文字列
+    /// （穴 <c>{...}</c> の内側はコードとして再帰的に走査＝穴の中の文字列も正しく素通りする）を
+    /// 認識して読み飛ばす。逐語リテラル内の <c>""</c> はエスケープとして扱う。XmlDoc コメント内の
+    /// <c>@"</c>（説明由来）は行コメント扱いで素通りするので範囲にならない。
+    /// </remarks>
+    private static List<(int Start, int End)> FindVerbatimStringRanges(string text)
+    {
+        var ranges = new List<(int Start, int End)>();
+        // 補間文字列の穴の入れ子（$"...{ code }..."）をコードとして再帰走査するための波括弧深さスタック。
+        // 要素 1 つ＝補間文字列 1 段。値は現在の穴の波括弧深さ（0 = 文字列部分を走査中）
+        var interpolationHoles = new Stack<int>();
+        var i = 0;
+
+        while (i < text.Length)
+        {
+            var c = text[i];
+
+            // 補間文字列の文字列部分を走査中（穴の外）
+            if (interpolationHoles.Count > 0 && interpolationHoles.Peek() == 0)
+            {
+                if (c == '\\' && i + 1 < text.Length)
+                {
+                    i += 2;
+                    continue;
+                }
+
+                if (c == '{' && i + 1 < text.Length && text[i + 1] == '{')
+                {
+                    i += 2;
+                    continue;
+                }
+
+                if (c == '}' && i + 1 < text.Length && text[i + 1] == '}')
+                {
+                    i += 2;
+                    continue;
+                }
+
+                if (c == '{')
+                {
+                    // 穴の開始＝以降はコードとして走査する（深さ 1）
+                    interpolationHoles.Pop();
+                    interpolationHoles.Push(1);
+                    i++;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    interpolationHoles.Pop();
+                    i++;
+                    continue;
+                }
+
+                i++;
+                continue;
+            }
+
+            // 行コメント（/// の XmlDoc も含む）
+            if (c == '/' && i + 1 < text.Length && text[i + 1] == '/')
+            {
+                while (i < text.Length && text[i] != '\n')
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            // ブロックコメント
+            if (c == '/' && i + 1 < text.Length && text[i + 1] == '*')
+            {
+                i += 2;
+
+                while (i + 1 < text.Length && !(text[i] == '*' && text[i + 1] == '/'))
+                {
+                    i++;
+                }
+
+                i = Math.Min(i + 2, text.Length);
+                continue;
+            }
+
+            // 文字リテラル（'\'' などのエスケープを許す）
+            if (c == '\'')
+            {
+                i++;
+
+                while (i < text.Length && text[i] != '\'')
+                {
+                    i += text[i] == '\\' ? 2 : 1;
+                }
+
+                i++;
+                continue;
+            }
+
+            // 逐語文字列（@" / $@" / @$"）
+            var isVerbatim =
+                (c == '@' && i + 1 < text.Length && text[i + 1] == '"')
+                || (
+                    (c == '@' || c == '$')
+                    && i + 2 < text.Length
+                    && (text[i + 1] == '@' || text[i + 1] == '$')
+                    && text[i + 1] != c
+                    && text[i + 2] == '"'
+                );
+
+            if (isVerbatim)
+            {
+                var start = i;
+                i += text[i + 1] == '"' ? 2 : 3;
+
+                while (i < text.Length)
+                {
+                    if (text[i] == '"')
+                    {
+                        if (i + 1 < text.Length && text[i + 1] == '"')
+                        {
+                            i += 2;
+                            continue;
+                        }
+
+                        i++;
+                        break;
+                    }
+
+                    i++;
+                }
+
+                ranges.Add((start, i));
+                continue;
+            }
+
+            // 補間文字列の開始（$"。$@" は上の逐語側で処理済み）
+            if (c == '$' && i + 1 < text.Length && text[i + 1] == '"')
+            {
+                interpolationHoles.Push(0);
+                i += 2;
+                continue;
+            }
+
+            // 通常文字列（\ エスケープ）
+            if (c == '"')
+            {
+                i++;
+
+                while (i < text.Length && text[i] != '"')
+                {
+                    i += text[i] == '\\' ? 2 : 1;
+                }
+
+                i++;
+                continue;
+            }
+
+            // 補間文字列の穴の内側＝コードとしての波括弧の入れ子を追う（文字列・コメントの検出より後に
+            // 置く＝穴の中のリテラルに含まれる { } を深さとして数えない）。深さ 0 へ戻ったら文字列部分へ復帰
+            if (interpolationHoles.Count > 0)
+            {
+                if (c == '{')
+                {
+                    interpolationHoles.Push(interpolationHoles.Pop() + 1);
+                }
+                else if (c == '}')
+                {
+                    interpolationHoles.Push(interpolationHoles.Pop() - 1);
+                }
+            }
+
+            i++;
+        }
+
+        return ranges;
     }
 }
 
@@ -520,7 +713,6 @@ internal sealed class RepositoryDialectVariables
                 ParameterType = "SqliteParameter";
                 DataReaderType = "SqliteDataReader";
                 TransactionType = "SqliteTransaction";
-                ConnectionFactoryImplType = "SqliteConnectionFactory";
                 RepositoryBaseClass = "SqliteRepository";
                 SqlQueryExecutorClass = "SqliteSqlQueryExecutor";
                 DisplayName = "SQLite";
@@ -536,7 +728,6 @@ internal sealed class RepositoryDialectVariables
                 ParameterType = "SqlParameter";
                 DataReaderType = "SqlDataReader";
                 TransactionType = "SqlTransaction";
-                ConnectionFactoryImplType = "SqlConnectionFactory";
                 RepositoryBaseClass = "SqlServerRepository";
                 SqlQueryExecutorClass = "SqlServerSqlQueryExecutor";
                 DisplayName = "SQL Server";
@@ -576,9 +767,6 @@ internal sealed class RepositoryDialectVariables
 
     /// <summary>トランザクション型名（SQL Server: <c>SqlTransaction</c>）</summary>
     public string TransactionType { get; }
-
-    /// <summary>接続ファクトリ実装クラス名（SQL Server: <c>SqlConnectionFactory</c>）</summary>
-    public string ConnectionFactoryImplType { get; }
 
     /// <summary>
     /// Repository 基底クラス名（SQL Server: <c>SqlServerRepository</c>、SQLite: <c>SqliteRepository</c>）。

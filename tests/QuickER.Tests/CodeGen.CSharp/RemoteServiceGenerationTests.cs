@@ -252,11 +252,11 @@ public class RemoteServiceGenerationTests
         main.Should()
             .Contain("InvokeNullableAsync<OrderEntity?>(\"FindTop\", null, cancellationToken);");
 
-        // サーバー: リクエストレコード（PascalCase プロパティ）＋リモート面への委譲ハンドラ
+        // サーバー: リクエストレコード（PascalCase プロパティ・リポジトリ名と操作名は _ 区切り）＋リモート面への委譲ハンドラ
         server
             .Should()
             .Contain(
-                "private sealed record OrderGetByCustomerRequest(int CustomerId, int Take, int Skip);"
+                "private sealed record Order_GetByCustomerRequest(int CustomerId, int Take, int Skip);"
             );
         server.Should().Contain("\"Order/GetByCustomer\"");
 
@@ -275,7 +275,80 @@ public class RemoteServiceGenerationTests
 
         // パラメータなしクエリはリクエストレコードを作らず本文も読まない
         server.Should().Contain("\"Order/FindTop\"");
-        server.Should().NotContain("OrderFindTopRequest");
+        server.Should().NotContain("Order_FindTopRequest");
+    }
+
+    /// <summary>
+    /// リクエストレコード名がエンティティをまたいで衝突しないことを検証する。素の連結
+    /// （<c>{Repo}{Op}Request</c>）だと <c>Order</c>×<c>LineSummary</c> と <c>OrderLine</c>×<c>Summary</c> が
+    /// 同名 <c>OrderLineSummaryRequest</c> になり、同一静的クラス内の 2 宣言＝CS0102 でコンパイル不能だった
+    /// </summary>
+    [Fact(DisplayName = "リクエストレコード名はエンティティをまたいで衝突しない（_ 区切り）")]
+    public void Generate_RemoteServices_RequestRecordNamesDoNotCollideAcrossEntities()
+    {
+        var orderLine = new Entity { TableName = "OrderLine" };
+        orderLine.Columns.Add(
+            new Column
+            {
+                Name = "OrderLineId",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        orderLine.Columns.Add(
+            new Column
+            {
+                Name = "Quantity",
+                DataType = "int",
+                IsNullable = false,
+            }
+        );
+
+        var diagram = new ErDiagram { Entities = { _order, orderLine } };
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = _order.Id,
+                Name = "LineSummary",
+                Returns = QueryReturnShape.Count,
+                Parameters =
+                {
+                    new QueryParameter { Name = "customerId", Type = "int32" },
+                },
+                Condition = "CustomerId = @customerId",
+            }
+        );
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = orderLine.Id,
+                Name = "Summary",
+                Returns = QueryReturnShape.Count,
+                Parameters =
+                {
+                    new QueryParameter { Name = "quantity", Type = "int32" },
+                },
+                Condition = "Quantity = @quantity",
+            }
+        );
+
+        var result = Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var server = result.Files[1].Content;
+
+        server.Should().Contain("private sealed record Order_LineSummaryRequest(int CustomerId);");
+        server.Should().Contain("private sealed record OrderLine_SummaryRequest(int Quantity);");
+        server.Should().NotContain("record OrderLineSummaryRequest");
     }
 
     /// <summary>

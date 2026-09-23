@@ -4,7 +4,8 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// <remarks>
 /// ミニ DSL は「SQL（全方言）と EF Core の LINQ の両方へ翻訳できる」ことを目的とした
 /// パース可能なサブセット。文法は 比較（= &lt;&gt; != &lt; &lt;= &gt; &gt;=）・AND / OR / NOT・括弧・
-/// IS [NOT] NULL・[NOT] LIKE・[NOT] IN のみで、列参照と <c>@パラメータ</c>・数値/文字列リテラルを扱う。
+/// IS [NOT] NULL・[NOT] LIKE・[NOT] IN・[NOT]（CONTAINS | STARTSWITH | ENDSWITH）のみで、
+/// 列参照と <c>@パラメータ</c>・数値/文字列リテラルを扱う。
 /// これを超えるクエリは自由 SQL / manual モードの担当。
 /// </remarks>
 public abstract class ConditionNode { }
@@ -86,6 +87,13 @@ public enum StringMatchKind
 
     /// <summary>後方一致（EndsWith。<c>LIKE '%x'</c> / ENDSWITH）</summary>
     EndsWith,
+
+    /// <summary>
+    /// 完全一致（ワイルドカードなしの <c>NOT LIKE 'abc'</c>）。LIKE の一形態として NULL 前提の内側で
+    /// 否定するために使う（等値の <c>&lt;&gt;</c> と違い、NULL 行はどちらの向きでも一致しない）。
+    /// 肯定形（<c>LIKE 'abc'</c>）は素の等値比較（<see cref="ComparisonNode"/>）のままで、この種別は使わない。
+    /// </summary>
+    Exact,
 }
 
 /// <summary>IN 述語（列 [NOT] IN @リストパラメータ）</summary>

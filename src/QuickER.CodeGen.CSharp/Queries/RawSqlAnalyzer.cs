@@ -20,8 +20,13 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// <para>
 /// 走査の誤検知防止として、<c>'...'</c> 文字列リテラル（<c>''</c> エスケープ対応）・<c>--</c> 行コメント・
 /// <c>/* */</c> ブロックコメント・<c>[...]</c>（SQL Server 識別子）・<c>"..."</c>（標準識別子）の内側はスキップし、
-/// <c>@@</c> で始まるシステム変数（<c>@@ROWCOUNT</c> 等）はパラメータ扱いしない。パラメータ名と宣言の照合は
-/// 大文字小文字を区別しない。診断メッセージは CodeGen.CSharp の resx でローカライズ済み。
+/// <c>@@</c> で始まるシステム変数（<c>@@ROWCOUNT</c> 等）と、<c>DECLARE</c> で SQL 内に宣言された
+/// ローカル変数（<c>DECLARE @a INT, @b INT</c> の複数宣言・初期化子つきを含む）はパラメータ扱いしない
+/// （<c>;</c> の無い SQL では宣言リストの終端を確定できないため、まれに未宣言の報告が漏れることは
+/// 緩い側として許容する）。パラメータ名と宣言の照合は
+/// <b>大文字小文字を区別する</b>（実行時のパラメータ束縛と IN 展開の置換は Ordinal 照合のため、大小違いの
+/// 参照は「宣言はあるのに束縛・展開されない」形で必ず失敗する＝未宣言として報告する）。
+/// 診断メッセージは CodeGen.CSharp の resx でローカライズ済み。
 /// </para>
 /// </remarks>
 public static class RawSqlAnalyzer
@@ -51,7 +56,7 @@ public static class RawSqlAnalyzer
     /// 自由 SQL を走査し、未宣言パラメータ・未使用パラメータ・複文を検出して返す
     /// </summary>
     /// <param name="sql">対象の SQL 文字列（null / 空白のみは解析対象外＝空の結果）</param>
-    /// <param name="declaredParameters">宣言済みパラメータ名の一覧（大文字小文字は区別せず照合）</param>
+    /// <param name="declaredParameters">宣言済みパラメータ名の一覧（大文字小文字を区別して照合＝実行時の束縛・IN 展開と同じ規則）</param>
     /// <returns>検出結果の一覧（未宣言→未使用→複文の順。問題がなければ空）</returns>
     public static IReadOnlyList<RawSqlFinding> Analyze(
         string? sql,
@@ -60,9 +65,12 @@ public static class RawSqlAnalyzer
     {
         ArgumentNullException.ThrowIfNull(declaredParameters);
 
-        // 宣言一覧は順序（未使用の報告順）と照合の両方に使うため materialize する
+        // 宣言一覧は順序（未使用の報告順）と照合の両方に使うため materialize する。
+        // 照合は Ordinal＝実行時のパラメータ束縛と IN 展開の置換（(?<!...)@名(?!...) の Ordinal 一致）と
+        // 同じ規則にする（大小無視で受理すると @Ids／宣言 ids が検証を素通りし、実行時に
+        // 「Must declare the scalar variable @Ids」等で必ず失敗する）
         var declaredList = declaredParameters.ToList();
-        var declaredSet = new HashSet<string>(declaredList, StringComparer.OrdinalIgnoreCase);
+        var declaredSet = new HashSet<string>(declaredList, StringComparer.Ordinal);
 
         // 空・空白のみの SQL は解析対象外（宣言パラメータを一律「未使用」と誤検知するのを避ける）
         if (string.IsNullOrWhiteSpace(sql))
@@ -71,9 +79,21 @@ public static class RawSqlAnalyzer
         }
 
         var usedParameters = new List<string>(); // 出現順・重複排除済み
-        var usedSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedSet = new HashSet<string>(StringComparer.Ordinal);
         var multipleStatements = false;
         var semicolonSeen = false;
+
+        // DECLARE で SQL 内に宣言されたローカル変数（@total 等）はパラメータ扱いしない
+        // （未宣言として報告すると、正当な SQL のクエリが偽陽性でスキップされる）。
+        // 認識は「DECLARE の直後の @名前」＋「宣言リストの括弧深さ 0 のカンマに続く @名前」
+        // （DECLARE @a INT, @b INT の 2 つ目以降）。DECLARE cur CURSOR のように @ 以外の語が
+        // 続く形は宣言リストとして扱わない。文の終端は ; でだけ確定できるため、; の無い SQL では
+        // 宣言リストの判定が後続の文まで延び、まれに未宣言の報告が漏れる（緩い側＝従来どおり
+        // 実行時に失敗する）ことは許容する
+        var locallyDeclared = new HashSet<string>(StringComparer.Ordinal);
+        var inDeclareList = false;
+        var expectDeclaredName = false;
+        var parenDepth = 0;
 
         var i = 0;
         var length = sql.Length;
@@ -192,10 +212,12 @@ public static class RawSqlAnalyzer
                 continue;
             }
 
-            // ステートメント区切り
+            // ステートメント区切り（DECLARE の宣言リストもここで終わる）
             if (c == ';')
             {
                 semicolonSeen = true;
+                inDeclareList = false;
+                expectDeclaredName = false;
                 i++;
                 continue;
             }
@@ -227,7 +249,13 @@ public static class RawSqlAnalyzer
                     {
                         var name = sql[nameStart..j];
 
-                        if (usedSet.Add(name))
+                        if (expectDeclaredName)
+                        {
+                            // DECLARE 直後（または宣言リストのカンマ直後）＝SQL ローカル変数の宣言
+                            locallyDeclared.Add(name);
+                            expectDeclaredName = false;
+                        }
+                        else if (!locallyDeclared.Contains(name) && usedSet.Add(name))
                         {
                             usedParameters.Add(name);
                         }
@@ -249,7 +277,54 @@ public static class RawSqlAnalyzer
                 continue;
             }
 
-            // その他の意味のある文字（識別子・演算子・数値など）
+            // 語（キーワード・識別子）。DECLARE は SQL ローカル変数の宣言リストを開く
+            if (char.IsLetter(c) || c == '_')
+            {
+                var wordStart = i;
+
+                while (i < length && (char.IsLetterOrDigit(sql[i]) || sql[i] == '_'))
+                {
+                    i++;
+                }
+
+                if (
+                    sql.AsSpan(wordStart, i - wordStart)
+                        .Equals("DECLARE", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    inDeclareList = true;
+                    expectDeclaredName = true;
+                }
+                else if (expectDeclaredName)
+                {
+                    // DECLARE cur CURSOR のように @ 以外の語が続く形＝変数宣言ではない
+                    inDeclareList = false;
+                    expectDeclaredName = false;
+                }
+
+                if (semicolonSeen)
+                {
+                    multipleStatements = true;
+                }
+
+                continue;
+            }
+
+            // 括弧の深さ（宣言リストのカンマ判定は深さ 0 のみ＝DECLARE @t TABLE (a INT, b INT) の内側を除外）
+            if (c == '(')
+            {
+                parenDepth++;
+            }
+            else if (c == ')')
+            {
+                parenDepth = Math.Max(0, parenDepth - 1);
+            }
+            else if (c == ',' && inDeclareList && parenDepth == 0)
+            {
+                expectDeclaredName = true;
+            }
+
+            // その他の意味のある文字（演算子・数値など）
             if (semicolonSeen)
             {
                 multipleStatements = true;
@@ -270,7 +345,7 @@ public static class RawSqlAnalyzer
         }
 
         // 未使用（宣言済み・SQL 内で未使用。宣言順・重複排除）
-        var reportedUnused = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var reportedUnused = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var name in declaredList)
         {

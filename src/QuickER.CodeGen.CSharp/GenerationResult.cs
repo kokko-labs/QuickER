@@ -26,8 +26,9 @@ public sealed class GeneratedFile
 
     /// <summary>
     /// 出力ディレクトリからの相対サブディレクトリ（null＝出力ディレクトリ直下）。
-    /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）のときだけ層フォルダが入る
-    /// （API リファレンス Markdown はどの csproj にも属さないため常に null）。
+    /// <c>.g.cs</c> は層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）の層フォルダと
+    /// <see cref="CodeGenerationOptions.CodeSubdirectory"/> の結合値（どちらか一方だけも可）、
+    /// API リファレンス Markdown（<c>.g.md</c>）は <see cref="CodeGenerationOptions.ApiDocsSubdirectory"/> が入る。
     /// </summary>
     public string? RelativeDirectory { get; init; }
 

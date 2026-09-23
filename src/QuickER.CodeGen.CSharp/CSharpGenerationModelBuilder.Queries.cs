@@ -36,8 +36,22 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>ビルド全体で射影 DTO 名の重複を検出するための集合（namespace 単位で一意が必要）</summary>
     private readonly HashSet<string> _queryDtoNames = new(StringComparer.Ordinal);
 
-    /// <summary>標準 Repository メンバーと衝突するため名前付きクエリに使えないメソッド名</summary>
-    private static readonly HashSet<string> ReservedQueryMethodNames = new(StringComparer.Ordinal)
+    /// <summary>
+    /// 標準 Repository メンバー・リモートエンドポイントの操作名と衝突するため名前付きクエリに使えないメソッド名。
+    /// </summary>
+    /// <remarks>
+    /// C# メンバー名の衝突（コンパイルエラー）だけでなく、リモートサービスのルート
+    /// （<c>POST {prefix}/{エンティティ}/{操作}</c>）の衝突も対象にする。ルートが重なると同じパスへ
+    /// ハンドラが 2 本張られ、実行時に AmbiguousMatch の 500 になる（<c>SaveMany</c>＝保存の複数形・
+    /// <c>Ping</c>＝死活確認・<c>SyncCeiling</c> / <c>SyncChanges</c> / <c>SyncKeys</c> / <c>SyncPage</c>＝
+    /// 同期専用エンドポイント）。リモートを生成しない構成でも予約する（後からリモートを ON にした
+    /// 瞬間に既存クエリ名が壊れる非対称を作らない）。照合はルートの照合規則に合わせて大小無視
+    /// （ASP.NET Core のルートリテラルは大小を区別しないため、<c>Savemany</c> のような大小違いも
+    /// 同じパスへの 2 本目のハンドラになる）。
+    /// </remarks>
+    private static readonly HashSet<string> ReservedQueryMethodNames = new(
+        StringComparer.OrdinalIgnoreCase
+    )
     {
         "GetByIdAsync",
         "GetAllAsync",
@@ -46,6 +60,12 @@ internal sealed partial class CSharpGenerationModelBuilder
         "UpdateAsync",
         "DeleteAsync",
         "SaveAsync",
+        "SaveManyAsync",
+        "PingAsync",
+        "SyncCeilingAsync",
+        "SyncChangesAsync",
+        "SyncKeysAsync",
+        "SyncPageAsync",
         "Query",
         "QueryBySqlAsync",
         "ExecuteSqlAsync",
@@ -243,7 +263,12 @@ internal sealed partial class CSharpGenerationModelBuilder
         // 同期支援のジャーナル記録デコレータは I{Entity}Repository を実装するため、名前付きクエリも委譲メンバーとして
         // 実装しなければならない（読み取り専用なので記録はせず素通し）。契約と同じシグネチャを 1 箇所から出す。
         var delegationMembers = new List<string>();
-        var usedMethodNames = new HashSet<string>(ReservedQueryMethodNames, StringComparer.Ordinal);
+        // 予約名と同じく大小無視で照合する（大小だけ違うメソッド名は C# としては共存できるが、
+        // リモートのルートは大小を区別しないため同じパスへの 2 本目のハンドラになる）
+        var usedMethodNames = new HashSet<string>(
+            ReservedQueryMethodNames,
+            StringComparer.OrdinalIgnoreCase
+        );
 
         foreach (var query in queries)
         {
@@ -502,6 +527,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             StringComparer.OrdinalIgnoreCase
         );
 
+        // パラメータ名 → 生成メソッドの引数型（条件式の型整合検査用。エミッタと同じ解決結果を渡す）
+        var parameterTypes = new Dictionary<string, QueryConditionTypeChecker.ParameterTypeInfo>(
+            StringComparer.OrdinalIgnoreCase
+        );
+
         foreach (var parameter in query.Parameters)
         {
             if (!IsValidIdentifier(parameter.Name))
@@ -510,6 +540,24 @@ internal sealed partial class CSharpGenerationModelBuilder
                     GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Query_InvalidParameterName,
+                            query.Name,
+                            parameter.Name
+                        )
+                    )
+                );
+                hasError = true;
+                continue;
+            }
+
+            // 生成メソッドの本体は契約メンバー Query() の呼び出しで組み立てる。同名（大文字小文字まで一致）の
+            // 引数はメソッドグループを隠して Query() がコンパイル不能になるため名指しで拒否する
+            // （小文字の query は隠さないので合法のまま）
+            if (string.Equals(parameter.Name, "Query", StringComparison.Ordinal))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Query_ReservedParameterName,
                             query.Name,
                             parameter.Name
                         )
@@ -576,6 +624,12 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
+            parameterTypes[parameter.Name] = new QueryConditionTypeChecker.ParameterTypeInfo(
+                typeName,
+                parameterValueObjects.GetValueOrDefault(parameter.Name),
+                parameter.IsList
+            );
+
             // IN 展開のリストは IReadOnlyList<T>＝参照型（欠落すると転送先で null 参照になるため必須扱いの対象）
             var declaredType = parameter.IsList ? $"IReadOnlyList<{typeName}>" : typeName;
             parameterDecls.Add($"{declaredType} {parameter.Name}");
@@ -641,11 +695,82 @@ internal sealed partial class CSharpGenerationModelBuilder
             }
             else
             {
+                // 型整合検査（列の生成型 × 演算子 × オペランド）。違反はエミットされる C# が必ず
+                // コンパイルエラーになる組み合わせなので、Warning 診断＋このクエリだけスキップする
+                // （Guid 参照切れ・生 SQL の未宣言パラメータと同じ流儀＝他クエリと生成全体は無傷）
+                var violations = QueryConditionTypeChecker.Check(
+                    parsed.Root!,
+                    columnBindings,
+                    parameterTypes
+                );
+
+                if (violations.Count > 0)
+                {
+                    foreach (var violation in violations)
+                    {
+                        diagnostics.Add(
+                            GenerationDiagnostic.Warning(
+                                string.Format(
+                                    violation.Kind switch
+                                    {
+                                        QueryConditionTypeChecker
+                                            .ViolationKind
+                                            .OrderedOperatorUnsupported =>
+                                            Strings.CodeGen_Query_ConditionOrderedOperatorUnsupported,
+                                        QueryConditionTypeChecker
+                                            .ViolationKind
+                                            .StringMatchUnsupported =>
+                                            Strings.CodeGen_Query_ConditionStringMatchUnsupported,
+                                        _ => Strings.CodeGen_Query_ConditionOperandTypeMismatch,
+                                    },
+                                    query.Name,
+                                    violation.ColumnName,
+                                    violation.ColumnTypeText,
+                                    violation.Detail,
+                                    entity.TableName
+                                )
+                            )
+                        );
+                    }
+
+                    return null;
+                }
+
                 condition = QueryConditionCSharpEmitter.Emit(
                     parsed.Root!,
                     columnBindings,
                     lambdaNames,
                     parameterValueObjects
+                );
+            }
+        }
+
+        // ---- 生 SQL / 手動実装では条件・並び順が本体へ乗らないことを告げる（黙って無視しない） ----
+        // WHERE / ORDER BY は SQL 側（または手動実装側）の責務なので生成は続行する（警告のみ）。
+        // GUI で実装方式を切り替えたとき、残った条件・並び順が効いていると誤解されるのを防ぐ
+        if (query.Implementation != QueryImplementationKind.Dsl)
+        {
+            if (!string.IsNullOrWhiteSpace(query.Condition))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Query_ConditionIgnoredForImplementation,
+                            query.Name
+                        )
+                    )
+                );
+            }
+
+            if (query.OrderBy.Count > 0)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Query_OrderByIgnoredForImplementation,
+                            query.Name
+                        )
+                    )
                 );
             }
         }
@@ -1183,14 +1308,29 @@ internal sealed partial class CSharpGenerationModelBuilder
                 break;
 
             case QueryReturnShape.Single:
+                // ローカル名は引数名と衝突しない名前を選ぶ（クエリの引数が items だと CS0136。
+                // IN 持ち上げ変数の PickListVariable と同じ「衝突する限り _ を後置」の決定的規則）
+                var itemsVar = "items";
+
+                while (boundNames.Contains(itemsVar))
+                {
+                    itemsVar += "_";
+                }
+
                 AppendMethodHeader(builder, "public async ", plan)
-                    .Append("\n    {\n        var items = await QueryBySqlAsync(\n            ")
+                    .Append("\n    {\n        var ")
+                    .Append(itemsVar)
+                    .Append(" = await QueryBySqlAsync(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
                     .Append(args)
                     .Append(
-                        ",\n            cancellationToken\n        ).ConfigureAwait(false);\n        return items.Count > 0 ? items[0] : null;\n    }"
-                    );
+                        ",\n            cancellationToken\n        ).ConfigureAwait(false);\n        return "
+                    )
+                    .Append(itemsVar)
+                    .Append(".Count > 0 ? ")
+                    .Append(itemsVar)
+                    .Append("[0] : null;\n    }");
                 break;
 
             case QueryReturnShape.Count:
@@ -1262,6 +1402,22 @@ internal sealed partial class CSharpGenerationModelBuilder
                     GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Query_InvalidFieldName,
+                            query.Name,
+                            field.Name
+                        )
+                    )
+                );
+                hasError = true;
+                continue;
+            }
+
+            // DTO 型名と同名のプロパティは C# が禁止する（CS0542＝メンバー名は外側の型名と同じにできない）
+            if (string.Equals(field.Name, resultTypeName, StringComparison.Ordinal))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Query_FieldNameEqualsResultType,
                             query.Name,
                             field.Name
                         )
@@ -1371,15 +1527,44 @@ internal sealed partial class CSharpGenerationModelBuilder
                 return null;
             }
 
+            // NULL 許容の値型列を非 NULL（IsNullable=false 明示）のフィールドへ写す選択式は
+            // int? → int の暗黙変換が無く必ず CS0266 になる。エミットされる C# がコンパイル不能な
+            // 組み合わせなので、Warning＋このクエリだけスキップ（DSL の型整合検査と同じ流儀）。
+            // 参照型（string / VO）は null 許容性の警告どまりでコンパイルは通るため対象外
+            var fieldIsNullable = field.IsNullable ?? binding.IsNullable;
+            var isReference =
+                binding.ValueObjectClassName is not null || binding.IsUnderlyingReferenceType;
+
+            if (!fieldIsNullable && binding.IsNullable && !isReference)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Query_ProjectionFieldNotNullOverride,
+                            query.Name,
+                            field.Name,
+                            binding.PropertyName
+                        )
+                    )
+                );
+                return null;
+            }
+
             assignments.Add($"{field.Name} = {lambdaVar}.{binding.PropertyName}");
         }
 
         return $"{lambdaVar} => new {resultTypeName} {{ {string.Join(", ", assignments)} }}";
     }
 
-    /// <summary>C# 識別子として妥当か（先頭は文字か _、以降は文字・数字・_）</summary>
+    /// <summary>C# 識別子として妥当か（先頭は文字か _、以降は文字・数字・_。予約語は不可）</summary>
+    /// <remarks>
+    /// 生成器は識別子を <c>@</c> エスケープせずそのまま出力するため、予約語（<c>class</c> / <c>int</c> 等）を
+    /// 通すと引数宣言・DTO プロパティ宣言がコンパイル不能になる（判定表は名前空間検証と共有。
+    /// 文脈キーワードは識別子として合法なので対象にしない）
+    /// </remarks>
     private static bool IsValidIdentifier(string name) =>
         !string.IsNullOrEmpty(name)
         && (char.IsLetter(name[0]) || name[0] == '_')
-        && name.All(c => char.IsLetterOrDigit(c) || c == '_');
+        && name.All(c => char.IsLetterOrDigit(c) || c == '_')
+        && !CSharpNamespaceValidator.IsReservedKeyword(name);
 }

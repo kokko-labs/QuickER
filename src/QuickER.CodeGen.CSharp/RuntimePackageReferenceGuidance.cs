@@ -26,7 +26,7 @@ namespace QuickER.CodeGen.CSharp;
 ///     プロジェクトのみだが、案内は生成単位で出す）</item>
 ///   <item><see cref="CodeGenerationOptions.GenerateSyncSupport"/> 時: <see cref="RuntimePackages.Sync"/></item>
 /// </list>
-/// バージョンは呼び出し側から受け取る（版の実配線は後続タスク）。
+/// バージョンは呼び出し側から受け取る（ロックステップ運用＝<c>RuntimePackages.ResolveGuidanceVersion</c> がツール版から解決する）。
 /// </para>
 /// </remarks>
 public static class RuntimePackageReferenceGuidance
@@ -96,7 +96,7 @@ public static class RuntimePackageReferenceGuidance
     /// 参照すべきパッケージの <c>&lt;PackageReference Include="..." Version="..." /&gt;</c> 行を、指定バージョンで組み立てて返す。
     /// </summary>
     /// <param name="options">生成オプション</param>
-    /// <param name="version">全パッケージへ付与するバージョン文字列（ロックステップ運用。実配線は後続タスク）</param>
+    /// <param name="version">全パッケージへ付与するバージョン文字列（ロックステップ運用）</param>
     /// <returns>パッケージ ID 昇順ではなく <see cref="Compute"/> の安定順で並んだ PackageReference 行の一覧</returns>
     public static IReadOnlyList<string> BuildPackageReferenceLines(
         CodeGenerationOptions options,

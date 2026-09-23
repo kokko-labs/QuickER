@@ -9,7 +9,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </summary>
 /// <remarks>
 /// 文字列リテラル・コメント・角括弧/二重引用符識別子内の <c>@</c> 無視、<c>''</c> エスケープ、<c>@@</c> 除外、
-/// 大文字小文字非依存照合、複文検出（末尾セミコロンは複文でない）、未宣言・未使用の検出を検証する。
+/// 大文字小文字を区別する照合（実行時の束縛・IN 展開と同じ Ordinal）、複文検出（末尾セミコロンは複文でない）、
+/// 未宣言・未使用の検出を検証する。
 /// </remarks>
 public class RawSqlAnalyzerTests
 {
@@ -40,13 +41,26 @@ public class RawSqlAnalyzerTests
         findings.Should().BeEmpty();
     }
 
-    /// <summary>大文字小文字が違っても宣言と一致する（照合は大文字小文字非依存）</summary>
-    [Fact(DisplayName = "パラメータ照合は大文字小文字非依存")]
-    public void Analyze_CaseInsensitiveMatching()
+    /// <summary>
+    /// 大文字小文字が違う参照は未宣言として報告する。実行時のパラメータ束縛と IN 展開の置換は
+    /// Ordinal 照合のため、大小違いは「宣言はあるのに束縛・展開されない」形で必ず失敗する
+    /// （リスト引数なら SQL Server の「Must declare the scalar variable」）。宣言側は未使用として併記される
+    /// </summary>
+    [Fact(DisplayName = "パラメータ照合は大文字小文字を区別する（実行時の束縛と同じ規則）")]
+    public void Analyze_CaseSensitiveMatching()
     {
         var findings = Analyze("SELECT * FROM T WHERE X = @CustomerID", "customerId");
 
-        findings.Should().BeEmpty();
+        OfKind(findings, RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter)
+            .Should()
+            .ContainSingle()
+            .Which.ParameterName.Should()
+            .Be("CustomerID");
+        OfKind(findings, RawSqlAnalyzer.RawSqlIssueKind.UnusedParameter)
+            .Should()
+            .ContainSingle()
+            .Which.ParameterName.Should()
+            .Be("customerId");
     }
 
     /// <summary>null / 空白のみの SQL は解析対象外（未使用の誤検知を出さない）</summary>
@@ -199,6 +213,62 @@ public class RawSqlAnalyzerTests
             .Should()
             .Equal("b");
         OfKind(findings, RawSqlAnalyzer.RawSqlIssueKind.MultipleStatements).Should().HaveCount(1);
+    }
+
+    // ---------------- DECLARE（SQL ローカル変数） ----------------
+
+    /// <summary>DECLARE で宣言した SQL ローカル変数は未宣言パラメータとして報告しない</summary>
+    [Fact(DisplayName = "DECLARE のローカル変数は未宣言扱いしない")]
+    public void Analyze_DeclaredLocalVariable_NotReportedAsUndeclared()
+    {
+        var findings = Analyze(
+            "DECLARE @total int SELECT @total + @customerId FROM [Order]",
+            "customerId"
+        );
+
+        findings.Should().BeEmpty();
+    }
+
+    /// <summary>複数宣言（カンマ区切り）と初期化子つきの DECLARE も認識する</summary>
+    [Fact(DisplayName = "DECLARE の複数宣言・初期化子つきも認識する")]
+    public void Analyze_MultiDeclareWithInitializer_RecognizesAllLocals()
+    {
+        var findings = Analyze(
+            "DECLARE @a int = @customerId, @b int SELECT @a + @b + @ghost",
+            "customerId"
+        );
+
+        OfKind(findings, RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter)
+            .Should()
+            .ContainSingle()
+            .Which.ParameterName.Should()
+            .Be("ghost");
+    }
+
+    /// <summary>テーブル変数の列定義内のカンマは宣言リストの区切りとして数えない（括弧深さ 0 のみ）</summary>
+    [Fact(DisplayName = "DECLARE ... TABLE の内側のカンマは宣言の区切りでない")]
+    public void Analyze_TableVariableInnerCommas_DoNotExtendDeclareList()
+    {
+        var findings = Analyze("DECLARE @t TABLE (a int, b int) SELECT @missing");
+
+        OfKind(findings, RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter)
+            .Should()
+            .ContainSingle()
+            .Which.ParameterName.Should()
+            .Be("missing");
+    }
+
+    /// <summary>DECLARE cur CURSOR のように @ 以外の語が続く形は変数宣言と見なさない</summary>
+    [Fact(DisplayName = "DECLARE CURSOR は変数宣言と見なさない")]
+    public void Analyze_DeclareCursor_DoesNotSwallowNextParameter()
+    {
+        var findings = Analyze("DECLARE cur CURSOR FOR SELECT @ghost");
+
+        OfKind(findings, RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter)
+            .Should()
+            .ContainSingle()
+            .Which.ParameterName.Should()
+            .Be("ghost");
     }
 
     /// <summary>Describe はローカライズ済みの単文（パラメータ名を含む）を返す</summary>

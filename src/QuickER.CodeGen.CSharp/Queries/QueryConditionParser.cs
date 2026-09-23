@@ -313,6 +313,9 @@ public static class QueryConditionParser
         ["ENDSWITH"] = TokenKind.EndsWith,
     };
 
+    /// <summary>ASCII の数字か（数値リテラル用。<see cref="char.IsDigit(char)"/> と違い全角数字を受けない）</summary>
+    private static bool IsAsciiDigit(char c) => c is >= '0' and <= '9';
+
     /// <summary>条件式をトークン列へ分解する（エラーは診断へ追加して打ち切る）</summary>
     private static List<Token> Tokenize(string text, List<ConditionDiagnostic> diagnostics)
     {
@@ -492,11 +495,14 @@ public static class QueryConditionParser
                 continue;
             }
 
-            if (char.IsDigit(c))
+            // 数値リテラルは ASCII の数字だけを受ける。char.IsDigit は全角数字（５ 等）も真になるが、
+            // トークンは原文のまま C# の数値リテラルとしてエミットされるため、通すとコンパイル不能な
+            // 生成物になる（全角数字は下の「予期しない文字」診断へ落ちる）
+            if (IsAsciiDigit(c))
             {
                 var start = i;
 
-                while (i < text.Length && char.IsDigit(text[i]))
+                while (i < text.Length && IsAsciiDigit(text[i]))
                 {
                     i++;
                 }
@@ -505,12 +511,12 @@ public static class QueryConditionParser
                     i < text.Length
                     && text[i] == '.'
                     && i + 1 < text.Length
-                    && char.IsDigit(text[i + 1])
+                    && IsAsciiDigit(text[i + 1])
                 )
                 {
                     i++;
 
-                    while (i < text.Length && char.IsDigit(text[i]))
+                    while (i < text.Length && IsAsciiDigit(text[i]))
                     {
                         i++;
                     }
@@ -564,6 +570,35 @@ public static class QueryConditionParser
         /// <summary>すべて消費し終えたか（End のみ残っているか）</summary>
         public bool IsAtEnd => Current.Kind == TokenKind.End;
 
+        /// <summary>
+        /// 条件式の複雑さ（AND / OR / NOT / 括弧の合計）の上限。これを超える式は診断で打ち切る。
+        /// 上限が無いと、パーサ（NOT・括弧の再帰）だけでなく、組み上がった木を辿るエミッタ・型検査・
+        /// リネーム追従の再帰が深い木（数千連結の OR は左に伸びる木になる）で StackOverflow＝catch 不能で
+        /// プロセスごと落ちる。カウンタは非葉ノードの生成ごとに単調増加＝木の深さの上界を兼ねる
+        /// </summary>
+        private const int MaxComplexity = 200;
+
+        private int _complexity;
+
+        /// <summary>非葉ノードを 1 つ作る予算を消費する（上限超過は診断を積んで false）</summary>
+        private bool TryConsumeComplexity()
+        {
+            if (_complexity >= MaxComplexity)
+            {
+                result.Diagnostics.Add(
+                    new ConditionDiagnostic(
+                        new QueryDiagnosticText(nameof(Strings.CodeGen_Query_ConditionTooComplex)),
+                        Current.Position,
+                        Current.Length
+                    )
+                );
+                return false;
+            }
+
+            _complexity++;
+            return true;
+        }
+
         /// <summary>現在位置のトークンを「想定外」として診断に追加する</summary>
         public void ReportUnexpectedToken()
         {
@@ -613,7 +648,7 @@ public static class QueryConditionParser
                 _index++;
                 var right = ParseAnd();
 
-                if (right is null)
+                if (right is null || !TryConsumeComplexity())
                 {
                     return null;
                 }
@@ -639,7 +674,7 @@ public static class QueryConditionParser
                 _index++;
                 var right = ParseUnary();
 
-                if (right is null)
+                if (right is null || !TryConsumeComplexity())
                 {
                     return null;
                 }
@@ -660,6 +695,11 @@ public static class QueryConditionParser
         {
             if (Current.Kind == TokenKind.Not)
             {
+                if (!TryConsumeComplexity())
+                {
+                    return null;
+                }
+
                 _index++;
                 var operand = ParseUnary();
                 return operand is null ? null : new NotNode { Operand = operand };
@@ -673,6 +713,11 @@ public static class QueryConditionParser
         {
             if (Current.Kind == TokenKind.LeftParen)
             {
+                if (!TryConsumeComplexity())
+                {
+                    return null;
+                }
+
                 _index++;
                 var inner = ParseCondition();
 
@@ -910,14 +955,26 @@ public static class QueryConditionParser
                 };
             }
 
-            // ワイルドカードなしのリテラルは等値比較と同じ
-            var equality = new ComparisonNode
+            // ワイルドカードなしのリテラル: 肯定形は等値比較と同じ（NULL 行は一致しない＝LIKE と同じ結論）。
+            // 否定形は等値の <> と違い「NULL 行はどちらの向きでも一致しない」（LIKE の NULL 前提の内側）で
+            // なければならないため、完全一致の文字列一致（Exact）として持ち、エミッタが前提の内側で否定する
+            if (negated)
+            {
+                return new StringMatchNode
+                {
+                    Column = column,
+                    Negated = true,
+                    Kind = StringMatchKind.Exact,
+                    Operand = coreOperand,
+                };
+            }
+
+            return new ComparisonNode
             {
                 Column = column,
                 Operator = ComparisonOperator.Equal,
                 Operand = coreOperand,
             };
-            return negated ? new NotNode { Operand = equality } : equality;
         }
 
         /// <summary>IN の右辺（リストパラメータ）を読む</summary>

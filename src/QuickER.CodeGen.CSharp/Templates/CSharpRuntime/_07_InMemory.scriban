@@ -1189,10 +1189,63 @@ public sealed class InMemoryDataStore
     /// <summary>Compiles the plan's predicates into delegates.</summary>
     /// <remarks>
     /// Compiling an expression tree is expensive, and it is done before the store lock is taken on purpose: doing it inside
-    /// would serialize every read in the process behind one query's compilation.
+    /// would serialize every read in the process behind one query's compilation. Equality over <c>byte[]</c> is rewritten
+    /// to a byte-wise comparison first (see <see cref="ByteArrayEqualityRewriter"/>).
     /// </remarks>
     private static Func<TEntity, bool>[] CompilePredicates(SqlQueryPlan<TEntity> plan) =>
-        plan.Predicates.Select(predicate => (Func<TEntity, bool>)predicate.Compile()).ToArray();
+        plan.Predicates.Select(predicate =>
+                (Func<TEntity, bool>)
+                    ((LambdaExpression)ByteArrayEqualityRewriter.Instance.Visit(predicate)).Compile()
+            )
+            .ToArray();
+
+    /// <summary>Compares two byte arrays by value (two nulls are equal; one null never matches).</summary>
+    /// <remarks>
+    /// Same semantics as the binary value object's equality: the SQL backends compare the column's actual bytes,
+    /// so a null against a value never matches and two equal blobs always do.
+    /// </remarks>
+    private static bool AreBytesEqual(byte[]? left, byte[]? right) =>
+        left is null ? right is null : right is not null && left.AsSpan().SequenceEqual(right);
+
+    /// <summary>The <see cref="AreBytesEqual"/> method, resolved once for the rewriter.</summary>
+    private static readonly MethodInfo AreBytesEqualMethod = typeof(InMemoryQueryExecutor<TEntity>).GetMethod(
+        nameof(AreBytesEqual),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
+    /// <summary>
+    /// Rewrites <c>==</c> / <c>!=</c> over <c>byte[]</c> operands into a byte-wise comparison before the predicate
+    /// is compiled.
+    /// </summary>
+    /// <remarks>
+    /// C#'s <c>==</c> on arrays is reference equality, so a compiled predicate would treat two equal blobs as
+    /// different - the SQL backends compare the column's actual bytes, and the in-memory store hands out cloned
+    /// arrays by design, which makes reference equality never match. Value-object columns are unaffected (their
+    /// operators already compare by value), and other operand types keep their C# semantics untouched.
+    /// </remarks>
+    private sealed class ByteArrayEqualityRewriter : ExpressionVisitor
+    {
+        /// <summary>The shared stateless instance.</summary>
+        public static readonly ByteArrayEqualityRewriter Instance = new();
+
+        /// <inheritdoc />
+        protected override Expression VisitBinary(BinaryExpression node)
+        {
+            if (
+                node.NodeType is ExpressionType.Equal or ExpressionType.NotEqual
+                && node.Left.Type == typeof(byte[])
+                && node.Right.Type == typeof(byte[])
+            )
+            {
+                var call = Expression.Call(AreBytesEqualMethod, Visit(node.Left), Visit(node.Right));
+                return node.NodeType == ExpressionType.Equal
+                    ? call
+                    : Expression.Not(call);
+            }
+
+            return base.VisitBinary(node);
+        }
+    }
 
     /// <summary>Compiles the plan's ordering key selectors into delegates (paired with their direction). Called outside the store lock, for the same reason as <see cref="CompilePredicates"/>.</summary>
     private static (Func<TEntity, object?> KeySelector, bool Descending)[] CompileOrderings(

@@ -475,6 +475,47 @@ public class RuntimePackageModeCompilationTests
             }
         );
 
+        // 双方向同期×パッケージ参照モード（同期エンジンの固定部は QuickER.Runtime.Sync が提供し、
+        // 同期記述子・デコレータ・差分ソース・DI 登録は生成側に残る。同期は sqlserver+sqlite の
+        // マルチターゲット構成が前提）
+        foreach (var split in new[] { false, true })
+        {
+            data.Add(
+                $"同期支援 sqlserver+sqlite Split={split}",
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateRepositories = true,
+                    RepositoryDialects = ["sqlserver", "sqlite"],
+                    GenerateSyncSupport = true,
+                }
+            );
+        }
+
+        // 層別出力×パッケージ参照モード（層フォルダへの配置と名前空間導出はパッケージ参照でも
+        // 同じ生成テキストであること＝1 アセンブリへの一括コンパイルが通ることを固定する）
+        data.Add(
+            "層別 QuickER sqlserver",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                LayeredOutput = true,
+                GenerateRepositories = true,
+            }
+        );
+        data.Add(
+            "層別×同期 sqlserver+sqlite",
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                LayeredOutput = true,
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlserver", "sqlite"],
+                GenerateSyncSupport = true,
+            }
+        );
+
         return data;
     }
 
@@ -675,6 +716,17 @@ public class RuntimePackageModeCompilationTests
             references.Add(MetadataReference.CreateFromImage(image));
         }
 
+        if (packages.Contains(RuntimePackages.Sync))
+        {
+            var image = CompilePackageAssembly(
+                RuntimePackages.Sync,
+                [PackageRenderer.RenderCore(), PackageRenderer.RenderSync()],
+                RuntimeReferenceSet.Sync,
+                corePeImage: coreImage
+            );
+            references.Add(MetadataReference.CreateFromImage(image));
+        }
+
         if (packages.Contains(RuntimePackages.AspNetCore))
         {
             var image = CompilePackageAssembly(
@@ -857,6 +909,9 @@ internal sealed class RuntimeReferenceSet
 
     /// <summary>InMemory パッケージ: BCL のみ（ADO / EF Core / DI なし＝DB 非依存を参照集合で証明する）</summary>
     public static RuntimeReferenceSet InMemory { get; } = new(false, false, false, false);
+
+    /// <summary>Sync パッケージ: BCL のみ（ADO / EF Core / DI なし＝依存ゼロを参照集合で証明する）</summary>
+    public static RuntimeReferenceSet Sync { get; } = new(false, false, false, false);
 
     /// <summary>
     /// AspNetCore パッケージ: BCL（ASP.NET Core 共有フレームワークを含む）＋DI。ADO / EF Core は参照しない

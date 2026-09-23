@@ -42,6 +42,11 @@ public partial class QuickErDbContext : DbContext
     /// <summary>Configures the table, keys, columns, and relationships for each entity using the Fluent API.</summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+{{~ for ignored in ef_core.ignored_entity_class_names ~}}
+        // Excluded from the model: the table has no primary key, and EF Core requires a key on every mapped entity type.
+        // The explicit Ignore also keeps the type out of the model when another entity navigates to it.
+        modelBuilder.Ignore<{{ ignored }}>();
+{{~ end ~}}
 {{~ for cfg in ef_core.entities ~}}
 {{ if !for.first }}
 {{ end }}        modelBuilder.Entity<{{ cfg.entity_class_name }}>(entity =>
@@ -64,13 +69,19 @@ public partial class QuickErDbContext : DbContext
                 .HasMany(e => e.{{ rel.principal_navigation_name }})
                 .WithOne({{ if rel.dependent_navigation_name != "" }}e => e.{{ rel.dependent_navigation_name }}{{ end }})
                 .HasForeignKey(e => {{ if rel.foreign_key_property_names.size == 1 }}e.{{ rel.foreign_key_property_names[0] }}{{ else }}new { {{ for k in rel.foreign_key_property_names }}e.{{ k }}{{ if !for.last }}, {{ end }}{{ end }} }{{ end }})
-                .OnDelete({{ if rel.cascade_delete }}DeleteBehavior.Cascade{{ else }}DeleteBehavior.Restrict{{ end }});
+{{~ if rel.principal_key_property_names.size > 0 ~}}
+                .HasPrincipalKey(e => {{ if rel.principal_key_property_names.size == 1 }}e.{{ rel.principal_key_property_names[0] }}{{ else }}new { {{ for k in rel.principal_key_property_names }}e.{{ k }}{{ if !for.last }}, {{ end }}{{ end }} }{{ end }})
+{{~ end ~}}
+                .OnDelete(DeleteBehavior.{{ rel.delete_behavior }});
 {{~ else ~}}
             entity
                 .HasOne(e => e.{{ rel.principal_navigation_name }})
                 .WithOne({{ if rel.dependent_navigation_name != "" }}e => e.{{ rel.dependent_navigation_name }}{{ end }})
                 .HasForeignKey<{{ rel.dependent_class_name }}>(e => {{ if rel.foreign_key_property_names.size == 1 }}e.{{ rel.foreign_key_property_names[0] }}{{ else }}new { {{ for k in rel.foreign_key_property_names }}e.{{ k }}{{ if !for.last }}, {{ end }}{{ end }} }{{ end }})
-                .OnDelete({{ if rel.cascade_delete }}DeleteBehavior.Cascade{{ else }}DeleteBehavior.Restrict{{ end }});
+{{~ if rel.principal_key_property_names.size > 0 ~}}
+                .HasPrincipalKey<{{ cfg.entity_class_name }}>(e => {{ if rel.principal_key_property_names.size == 1 }}e.{{ rel.principal_key_property_names[0] }}{{ else }}new { {{ for k in rel.principal_key_property_names }}e.{{ k }}{{ if !for.last }}, {{ end }}{{ end }} }{{ end }})
+{{~ end ~}}
+                .OnDelete(DeleteBehavior.{{ rel.delete_behavior }});
 {{~ end ~}}
 {{~ end ~}}
         });

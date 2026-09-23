@@ -279,6 +279,71 @@ public class NameTrustBoundaryGenerationTests
         compilation.Success.Should().BeTrue(string.Join(" / ", compilation.Errors.Take(5)));
     }
 
+    /// <summary>
+    /// 無制限バイナリ列の Stream アクセサ（契約・ファイル糖衣）の XmlDoc 定型文も、列名を XML エスケープして
+    /// 載せることを検証する（生のまま載せると <c>&lt;</c> で CS1570）。
+    /// </summary>
+    [Fact(DisplayName = "Stream アクセサの XmlDoc は列名の < をエスケープする")]
+    public void AngleBracketInBinaryColumnName_IsEscapedInStreamAccessorXmlDoc()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "vaults",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Name = "vault_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "da<ta",
+                            DataType = "varbinary(max)",
+                            IsNullable = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                ExcludeUnboundedBinaryColumns = true,
+                IncludeDataAnnotations = true,
+            }
+        );
+
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+
+        var code = string.Join("\n", result.Files.Select(file => file.Content));
+
+        code.Should().Contain("Reads the da&lt;ta column");
+        code.Should().Contain("Writes the da&lt;ta column");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "NameTrustBoundaryStreamXmlDoc");
+
+        compilation
+            .Warnings.Should()
+            .NotContain(
+                diagnostic => diagnostic.Id == "CS1570",
+                "Stream アクセサの XmlDoc が不正な XML になってはいけない"
+            );
+        compilation.Success.Should().BeTrue(string.Join(" / ", compilation.Errors.Take(5)));
+    }
+
     /// <summary>名前に <c>&lt;</c> を含む最小の図（説明は付けずフォールバック文を通す）</summary>
     private static ErDiagram BuildAngleBracketNameDiagram()
     {
@@ -377,6 +442,62 @@ public class NameTrustBoundaryGenerationTests
             .Contain(diagnostic =>
                 diagnostic.Severity == GenerationDiagnosticSeverity.Error
                 && diagnostic.Message.Contains("COLUMN")
+            );
+    }
+
+    /// <summary>
+    /// 説明文の FORM FEED（U+000C）が生成コードの実改行へ化けないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// FF は C# 言語仕様の new-line ではないが、描画後の <c>ReplaceLineEndings</c> は FF も改行として
+    /// 正規化する。畳み込み（<c>FoldNewLines</c>）の対象から漏れると、説明 1 つで XmlDoc の
+    /// <c>///</c> 行や <c>[DbColumnMeta]</c> のリテラルが行をまたぎ、任意のメンバー宣言を挿入できる。
+    /// 名前と違い説明は入口検証で止めない（改行が正当な値）ため、畳み込みが唯一の防壁になる。
+    /// </remarks>
+    [Fact(DisplayName = "説明文の FORM FEED は空白へ畳まれ実改行にならない")]
+    public void FormFeedInDescription_IsFoldedNotBroken()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Name = "item_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                            Description = "x\fpublic static int Injected = 42; //",
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, FullOptions());
+
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+
+        var code = string.Join("\n", result.Files.Select(file => file.Content));
+
+        // FF は空白 1 つへ畳まれて 1 行のまま残る（XmlDoc summary と [DbColumnMeta] のリテラルの両方）
+        code.Should().Contain("x public static int Injected = 42; //");
+        code.Should().NotContain("\f", "FF が残ると描画後の ReplaceLineEndings が実改行へ変える");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "NameTrustBoundaryFormFeed");
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                "説明の FF がリテラルを行またぎに壊してはいけない: "
+                    + string.Join(" / ", compilation.Errors.Take(5))
             );
     }
 

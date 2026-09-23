@@ -781,6 +781,594 @@ public class QueryGenerationTests
         return end > start ? content[start..end] : content[start..];
     }
 
+    /// <summary>
+    /// NULL 許容の値型列への IN が、メソッド冒頭で NULL 許容型のリストへ持ち上げてから比較されることを
+    /// 検証する。素のままだと <c>IReadOnlyList&lt;int&gt;.Contains(int?)</c> の型推論が一致せず
+    /// CS1929 でコンパイルできない（VO リストの持ち上げと同じ経路。列が NULL の行は
+    /// <c>Contains(null)</c>＝false で SQL / EF Core と揃う）
+    /// </summary>
+    [Fact(DisplayName = "NULL 許容の値型列への IN は NULL 許容型リストへ持ち上げる")]
+    public void Generate_InOnNullableValueTypeColumn_LiftsToNullableList()
+    {
+        _order.Columns.Add(
+            new Column
+            {
+                Name = "Quantity",
+                DataType = "int",
+                IsNullable = true,
+            }
+        );
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetByQuantities",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter
+                    {
+                        Name = "quantities",
+                        Type = "int32",
+                        IsList = true,
+                    },
+                },
+                Condition = "Quantity IN @quantities",
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        content
+            .Should()
+            .Contain("var quantitiesValues = quantities.Cast<int?>().ToList();")
+            .And.Contain("quantitiesValues.Contains(e.Quantity)");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryNullableIn");
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                "NULL 許容値型列への IN はコンパイルできるべき: "
+                    + string.Join(" / ", compilation.Errors.Take(5))
+            );
+    }
+
+    /// <summary>
+    /// 否定 LIKE の等値形（ワイルドカードなしの <c>NOT LIKE 'abc'</c>）と前置 <c>NOT</c> の文字列一致が、
+    /// どちらも NULL 前提の内側で否定されることを検証する（docs の「NOT LIKE も NULL 前提の内側＝NULL 行は
+    /// どちらの向きでも一致しない」に一致させる）。従来は等値の <c>!=</c> 経路・<c>!(...)</c> 包みへ落ちて
+    /// NULL 行が一致に含まれ、<c>col NOT LIKE '%x%'</c> と結果が割れていた。肯定形の <c>LIKE 'abc'</c> は
+    /// 従来どおり素の等値比較（NULL 行は一致しない＝結論は同じ）
+    /// </summary>
+    [Fact(DisplayName = "否定 LIKE の等値形と前置 NOT も NULL 前提の内側で否定される")]
+    public void Generate_NegatedLike_StaysInsideNullPremise()
+    {
+        static QueryDefinition ListQuery(string name, string condition) =>
+            new()
+            {
+                Name = name,
+                Returns = QueryReturnShape.List,
+                Condition = condition,
+            };
+
+        _order.Columns.Add(
+            new Column
+            {
+                Name = "Code",
+                DataType = "nvarchar(20)",
+                IsNullable = false,
+            }
+        );
+        var diagram = CreateDiagram(
+            ListQuery("ExactNegated", "Memo NOT LIKE 'abc'"),
+            ListQuery("ExactNegatedNotNull", "Code NOT LIKE 'abc'"),
+            ListQuery("PrefixNot", "NOT Memo LIKE '%x%'"),
+            ListQuery("DoubleNot", "NOT Memo NOT LIKE '%x%'"),
+            ListQuery("ExactPositive", "Memo LIKE 'abc'")
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        // 等値形の否定: NULL 前提の内側（NULL 行はどちらの向きでも一致しない）
+        content.Should().Contain("(e.Memo != null && !(e.Memo == \"abc\"))");
+        // 非 NULL 列は前提が不要（従来どおり素の否定）
+        content.Should().Contain("!(e.Code == \"abc\")");
+        // 前置 NOT は Negated へ畳み込まれ、col NOT LIKE と同じ形になる
+        content.Should().Contain("(e.Memo != null && !(e.Memo!.Contains(\"x\")))");
+        // 二重否定は肯定形へ畳まれる（前提は保たれる）
+        content.Should().Contain("(e.Memo != null && e.Memo!.Contains(\"x\"))");
+        // 肯定形のワイルドカードなし LIKE は従来どおり素の等値比較
+        content
+            .Should()
+            .Contain("e.Memo == \"abc\"")
+            .And.NotContain("e.Memo != null && e.Memo == \"abc\"");
+    }
+
+    /// <summary>
+    /// VO 有効 × NULL 許容列への順序比較が「列が NULL でないこと」を AND した形へエミットされることを
+    /// 検証する（文字列一致の NULL 前提と同じ流儀）。VO の比較演算子は null を最小として順序付けるため、
+    /// 素のままだとインメモリ実行器だけが &lt; / &lt;= で NULL 行を返し、SQL・EF Core（UNKNOWN で脱落）と
+    /// 観測結果が割れていた。等値比較は従来どおりガードなし（null == 値 は C# でも false＝3 実装先で一致）
+    /// </summary>
+    [Fact(DisplayName = "VO 有効: NULL 許容列への順序比較は null ガードの内側にエミットされる")]
+    public void Generate_NullableVoOrderedComparison_EmitsNullGuard()
+    {
+        _order.Columns.Add(
+            new Column
+            {
+                Name = "Quantity",
+                DataType = "int",
+                IsNullable = true,
+            }
+        );
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetBelow",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = "limit", Type = "int32" },
+                },
+                Condition = "Quantity < @limit",
+            },
+            new QueryDefinition
+            {
+                Name = "GetExact",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = "exact", Type = "int32" },
+                },
+                Condition = "Quantity = @exact",
+            }
+        );
+
+        var result = Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                GenerateValueObjects = true,
+                IncludeDataAnnotations = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        content
+            .Should()
+            .Contain("(e.Quantity != null && e.Quantity < QuantityValue.Create(limit))");
+        content
+            .Should()
+            .Contain("e.Quantity == QuantityValue.Create(exact)")
+            .And.NotContain("e.Quantity != null && e.Quantity ==");
+    }
+
+    /// <summary>
+    /// リモートエンドポイントの操作名と衝突するクエリ名が予約名として拒否されることを検証する。
+    /// ルート（<c>POST {prefix}/{エンティティ}/{操作}</c>）が重なると同じパスへハンドラが 2 本張られ
+    /// 実行時に AmbiguousMatch の 500 になるため、C# メンバーと衝突しない名前も予約する
+    /// </summary>
+    [Theory(DisplayName = "リモート操作名と衝突するクエリ名は予約名として拒否される")]
+    [InlineData("SaveMany")]
+    [InlineData("Ping")]
+    [InlineData("SyncCeiling")]
+    [InlineData("SyncChanges")]
+    [InlineData("SyncKeys")]
+    [InlineData("SyncPage")]
+    [InlineData("savemany")] // ルートは大小を区別しないため、大小違いの綴りも同じパスに化ける
+    public void Generate_QueryNamedAfterRemoteOperation_IsRejected(string queryName)
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition { Name = queryName, Returns = QueryReturnShape.List }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains(queryName)
+            );
+    }
+
+    /// <summary>
+    /// 大小だけ違うクエリ名の 2 本目が重複として拒否されることを検証する。C# メンバーとしては共存できるが、
+    /// リモートのルートは大小を区別しないため同じパスへの 2 本目のハンドラになる
+    /// </summary>
+    [Fact(DisplayName = "大小だけ違うクエリ名は重複として拒否される")]
+    public void Generate_QueriesDifferingOnlyInCase_SecondIsRejected()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition { Name = "FindStuff", Returns = QueryReturnShape.List },
+            new QueryDefinition { Name = "findstuff", Returns = QueryReturnShape.List }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains("findstuff")
+            );
+    }
+
+    /// <summary>
+    /// C# の予約語のパラメータ名と、契約メンバー Query() を隠すパラメータ名「Query」が診断エラーで
+    /// 拒否されることを検証する。生成器は識別子を @ エスケープせずそのまま出力するため、予約語は
+    /// 引数宣言がコンパイル不能になり、Query（大文字小文字まで一致）は生成メソッド本体の Query() 呼び出しが
+    /// メソッドグループを隠されてコンパイル不能になる
+    /// </summary>
+    [Theory(DisplayName = "予約語・Query のパラメータ名は診断エラーで拒否される")]
+    [InlineData("class")]
+    [InlineData("int")]
+    [InlineData("Query")]
+    public void Generate_ReservedParameterName_IsRejected(string parameterName)
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "FindReserved",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = parameterName, Type = "int32" },
+                },
+                Condition = $"CustomerId = @{parameterName}",
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error
+                && d.Message.Contains(parameterName)
+            );
+    }
+
+    /// <summary>
+    /// 小文字の query は Query() メソッドグループを隠さないため従来どおり使えることを検証する
+    /// （拒否は大文字小文字まで一致する「Query」だけ＝文脈キーワードも予約語ではないので合法）
+    /// </summary>
+    [Fact(DisplayName = "小文字の query パラメータ名は従来どおり使える")]
+    public void Generate_LowercaseQueryParameterName_IsAccepted()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "FindByQueryWord",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = "query", Type = "string(50)" },
+                },
+                Condition = "Memo LIKE @query",
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryLowercaseParam");
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                "小文字の query は Query() を隠さずコンパイルできるべき: "
+                    + string.Join(" / ", compilation.Errors.Take(5))
+            );
+    }
+
+    /// <summary>
+    /// 射影 DTO の結果型名と同名のフィールドが診断エラーで拒否されることを検証する
+    /// （C# はメンバー名を外側の型名と同じにできない＝素通しすると CS0542 で生成物全体が壊れる）
+    /// </summary>
+    [Fact(DisplayName = "結果型名と同名の射影フィールドは診断エラーで拒否される")]
+    public void Generate_ProjectionFieldNamedAfterResultType_IsRejected()
+    {
+        var amount = _order.Columns.First(c => c.Name == "Amount");
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetClashRows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "ClashRow",
+                Fields =
+                {
+                    new ProjectionField
+                    {
+                        Name = "ClashRow",
+                        Type = "decimal(12,2)",
+                        SourceColumnId = amount.Id,
+                    },
+                },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains("ClashRow")
+            );
+    }
+
+    /// <summary>
+    /// IN の持ち上げリスト変数名（{パラメータ名}Values）が別のパラメータ名と衝突するとき、_ を後置して
+    /// 回避することを検証する（衝突したままだとローカル変数が引数を隠して CS0136 になる）
+    /// </summary>
+    [Fact(DisplayName = "IN の持ち上げ変数はパラメータ名との衝突を _ 後置で回避する")]
+    public void Generate_InLiftVariableCollidingWithParameter_IsRenamed()
+    {
+        _order.Columns.Add(
+            new Column
+            {
+                Name = "Quantity",
+                DataType = "int",
+                IsNullable = true,
+            }
+        );
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetByQuantitySet",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter
+                    {
+                        Name = "quantities",
+                        Type = "int32",
+                        IsList = true,
+                    },
+                    new QueryParameter { Name = "quantitiesValues", Type = "int32" },
+                },
+                Condition = "Quantity IN @quantities AND CustomerId = @quantitiesValues",
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        content
+            .Should()
+            .Contain("var quantitiesValues_ = quantities.Cast<int?>().ToList();")
+            .And.Contain("quantitiesValues_.Contains(e.Quantity)");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryLiftCollision");
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                "持ち上げ変数がリネームされてコンパイルできるべき: "
+                    + string.Join(" / ", compilation.Errors.Take(5))
+            );
+    }
+
+    /// <summary>
+    /// 生 SQL × 単一戻り形の本体ローカル（items）が、同名の引数と衝突せずリネームされることを検証する
+    /// （衝突したままだとローカルが引数を隠して CS0136）
+    /// </summary>
+    [Fact(DisplayName = "生 SQL 単一戻り形のローカルは引数名 items との衝突を回避する")]
+    public void Generate_RawSqlSingleWithItemsParameter_RenamesLocal()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "FindByItems",
+                Returns = QueryReturnShape.Single,
+                Implementation = QueryImplementationKind.Sql,
+                Parameters =
+                {
+                    new QueryParameter { Name = "items", Type = "int32" },
+                },
+                Sql = { ["sqlserver"] = "SELECT * FROM [Order] WHERE [CustomerId] = @items" },
+            }
+        );
+
+        // EF Core を外す（EF Core × 生 SQL は手動実装＝契約宣言のみで、素のコンパイル検証が CS0535 になるため）
+        var result = Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                IncludeDataAnnotations = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        content
+            .Should()
+            .Contain("var items_ = await QueryBySqlAsync(")
+            .And.Contain("return items_.Count > 0 ? items_[0] : null;");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryItemsParam");
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                "引数名 items の生 SQL 単一戻り形はコンパイルできるべき: "
+                    + string.Join(" / ", compilation.Errors.Take(5))
+            );
+    }
+
+    /// <summary>
+    /// 生 SQL 実装のクエリに残った条件・並び順が、黙って無視されず警告診断で告げられることを検証する
+    /// （WHERE / ORDER BY は SQL 側の責務＝生成は続行する）
+    /// </summary>
+    [Fact(DisplayName = "生 SQL 実装に残った条件・並び順は警告で告げられる")]
+    public void Generate_RawSqlWithConditionAndOrder_WarnsIgnored()
+    {
+        var amount = _order.Columns.First(c => c.Name == "Amount");
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "ListBigOrders",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Parameters =
+                {
+                    new QueryParameter { Name = "minAmount", Type = "decimal(12,2)" },
+                },
+                Condition = "Amount >= @minAmount",
+                OrderBy =
+                {
+                    new QueryOrdering { ColumnId = amount.Id, Descending = true },
+                },
+                Sql =
+                {
+                    ["sqlserver"] =
+                        "SELECT * FROM [Order] WHERE [Amount] >= @minAmount ORDER BY [Amount] DESC",
+                },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        result
+            .Diagnostics.Where(d =>
+                d.Severity == GenerationDiagnosticSeverity.Warning
+                && d.Message.Contains("ListBigOrders")
+            )
+            .Should()
+            .HaveCount(2, "条件と並び順の 2 件が別々に告げられる");
+
+        // 生成自体は続行し、SQL 実装が出る
+        AllContent(result).Should().Contain("ListBigOrdersAsync");
+    }
+
+    /// <summary>
+    /// DSL 射影で NULL 許容の値型列を非 NULL 指定のフィールドへ写す定義が、CS0266（int? → int 変換不能）で
+    /// 生成アセンブリ全体を壊さず、警告つきでそのクエリだけスキップされることを検証する
+    /// （参照型の列は null 許容性の警告どまりでコンパイルは通るため対象外）
+    /// </summary>
+    [Fact(DisplayName = "DSL 射影の非 NULL 上書き × NULL 許容値型列は警告＋クエリスキップ")]
+    public void Generate_ProjectionNotNullOverrideOnNullableValueColumn_SkipsWithWarning()
+    {
+        _order.Columns.Add(
+            new Column
+            {
+                Name = "Quantity",
+                DataType = "int",
+                IsNullable = true,
+            }
+        );
+        var quantity = _order.Columns.First(c => c.Name == "Quantity");
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetForcedRows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "ForcedRow",
+                Fields =
+                {
+                    new ProjectionField
+                    {
+                        Name = "Quantity",
+                        SourceColumnId = quantity.Id,
+                        IsNullable = false,
+                    },
+                },
+            },
+            new QueryDefinition { Name = "ListAll", Returns = QueryReturnShape.List }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Warning
+                && d.Message.Contains("GetForcedRows")
+                && d.Message.Contains("Quantity")
+            );
+
+        var content = AllContent(result);
+        content.Should().NotContain("GetForcedRowsAsync", "スキップされたクエリのメソッドは出ない");
+        content.Should().Contain("ListAllAsync", "他のクエリは従来どおり生成される");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryNotNullOverride");
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                "スキップ後の残存生成物はコンパイルできるべき: "
+                    + string.Join(" / ", compilation.Errors.Take(5))
+            );
+    }
+
+    /// <summary>
+    /// 生 SQL の逐語リテラル内の連続空行が、レンダラーの空行畳み込みに書き換えられないことを検証する
+    /// （SQL の文字列リテラルに連続空行を含むユーザーの SQL が黙って変わっていた）。
+    /// リテラルの外の連続空行は従来どおり 1 空行へ畳まれる
+    /// </summary>
+    [Fact(DisplayName = "生 SQL の逐語リテラル内の連続空行は畳まれない")]
+    public void Generate_RawSqlWithBlankLines_PreservesThemInsideVerbatimLiteral()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "FindByBlankMemo",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Sql =
+                {
+                    ["sqlserver"] = "SELECT * FROM [Order] WHERE [Memo] = 'first\n\n\nsecond'",
+                },
+            }
+        );
+
+        var result = Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                IncludeDataAnnotations = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+        var newline = Environment.NewLine;
+
+        // リテラルの中身は改行 3 連（空行 2 つ）のまま保たれる（EOL は環境改行へ正規化される）
+        content.Should().Contain($"'first{newline}{newline}{newline}second'");
+
+        // リテラルの外は従来どおり畳まれている＝3 連以上の改行はこのリテラル内の 1 箇所だけ
+        System
+            .Text.RegularExpressions.Regex.Matches(
+                content,
+                $"(?:{System.Text.RegularExpressions.Regex.Escape(newline)}){{3,}}"
+            )
+            .Count.Should()
+            .Be(1, "逐語リテラルの外の連続空行は 1 空行へ畳まれるべき");
+    }
+
     /// <summary>診断メッセージを失敗理由として整形する</summary>
     private static string FormatDiagnostics(CodeGenerationResult result) =>
         string.Join(" / ", result.Diagnostics.Select(d => d.Message));
