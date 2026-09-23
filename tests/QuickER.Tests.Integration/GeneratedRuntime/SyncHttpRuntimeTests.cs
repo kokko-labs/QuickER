@@ -58,7 +58,11 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
                 // アップロード（既存の CRUD／保存エンドポイント）が使う面。版採番ラッパーを噛ませる
                 // （版なしのメモは採番なし＝素のリポジトリへ委譲するだけのアダプタ）
                 services.AddScoped<ISyncOrderRemoteRepository>(
-                    _ => new SyncTestOrderRemoteRepository(ServerOrders, ServerOrderBlobs)
+                    _ => new SyncTestOrderRemoteRepository(
+                        ServerOrders,
+                        ServerOrdersRaw,
+                        ServerOrderBlobs
+                    )
                 );
                 services.AddScoped<ISyncOrderLineRemoteRepository>(
                     _ => new SyncTestOrderLineRemoteRepository(ServerLines)

@@ -8,7 +8,7 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// <param name="UnderlyingTypeName">素の C# 型名（値オブジェクトなら内包値の型。null 許容 <c>?</c> は含まない）</param>
 /// <param name="ValueObjectClassName">値オブジェクト列の VO クラス名（VO でなければ null）</param>
 /// <param name="IsNullable">NULL 許容列かどうか</param>
-/// <param name="IsUnderlyingReferenceType">素の C# 型が参照型か（射影 DTO の非 NULL プロパティ初期化子の要否判定用。条件エミットでは未使用）</param>
+/// <param name="IsUnderlyingReferenceType">素の C# 型が参照型か（射影 DTO の非 NULL プロパティ初期化子の要否判定と、NULL 許容値型列の IN リスト持ち上げ要否の判定に使う）</param>
 public sealed record QueryColumnBinding(
     string PropertyName,
     string UnderlyingTypeName,
@@ -69,7 +69,8 @@ public static class QueryConditionCSharpEmitter
                 columns,
                 prelude,
                 parameterValueObjects
-                    ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                parameterNames
             )
         );
         return new EmitResult($"{lambdaVar} => {body}", prelude);
@@ -94,18 +95,37 @@ public static class QueryConditionCSharpEmitter
         }
     }
 
-    /// <summary>エミット中の共有状態（ラムダ変数名・列情報・前置文の収集先・VO 型パラメータ）</summary>
+    /// <summary>エミット中の共有状態（ラムダ変数名・列情報・前置文の収集先・VO 型パラメータ・使用済み名）</summary>
     private sealed record Context(
         string LambdaVar,
         IReadOnlyDictionary<Guid, QueryColumnBinding> Columns,
         List<string> PreludeLines,
-        IReadOnlyDictionary<string, string> ParameterValueObjects
+        IReadOnlyDictionary<string, string> ParameterValueObjects,
+        IReadOnlyCollection<string> TakenNames
     )
     {
         /// <summary>パラメータが指定 VO クラスで型付けされているか（列参照型付けの直接比較判定）</summary>
         public bool IsParameterOfValueObject(string parameterName, string valueObjectClassName) =>
             ParameterValueObjects.TryGetValue(parameterName, out var vo)
             && vo == valueObjectClassName;
+
+        /// <summary>
+        /// IN の持ち上げリスト変数名（<c>{パラメータ名}Values</c>）を選ぶ。メソッド引数名と衝突するとき
+        /// （例: パラメータ <c>ids</c> と <c>idsValues</c> が同居する定義）は <c>_</c> を後置して回避する
+        /// （衝突したままだとローカル変数が引数を隠して CS0136 になる）。決定的なので同じパラメータの
+        /// 複数回出現は同じ名前へ解決され、前置文の重複排除がそのまま効く
+        /// </summary>
+        public string PickListVariable(string parameterName)
+        {
+            var candidate = parameterName + "Values";
+
+            while (TakenNames.Contains(candidate))
+            {
+                candidate += "_";
+            }
+
+            return candidate;
+        }
     }
 
     /// <summary>ノードを C# 式テキストへ変換する</summary>
@@ -113,7 +133,7 @@ public static class QueryConditionCSharpEmitter
         node switch
         {
             LogicalNode logical => VisitLogical(logical, context),
-            NotNode not => $"!({Visit(not.Operand, context)})",
+            NotNode not => VisitNot(not, context),
             ComparisonNode comparison => VisitComparison(comparison, context),
             NullCheckNode nullCheck => VisitNullCheck(nullCheck, context),
             StringMatchNode match => VisitStringMatch(match, context),
@@ -128,6 +148,41 @@ public static class QueryConditionCSharpEmitter
     {
         var op = node.Operator == LogicalOperator.And ? "&&" : "||";
         return $"({Visit(node.Left, context)} {op} {Visit(node.Right, context)})";
+    }
+
+    /// <summary>前置 NOT（文字列一致には Negated として畳み込み、それ以外は <c>!(...)</c> で包む）</summary>
+    /// <remarks>
+    /// <c>NOT col LIKE '%x%'</c> を <c>!(...)</c> で包むと NULL 前提の外側に出て、<c>col NOT LIKE '%x%'</c>
+    /// （前提の内側で否定＝NULL 行はどちらの向きでも一致しない）と結果が割れる。多重 NOT は偶奇で畳む。
+    /// 文字列一致以外（比較・IN・括弧つき複合条件）は従来どおり素直に包む（等値の反転・IN の畳み込みは
+    /// 実行時の SQL 翻訳器が担う既存の線を変えない）。
+    /// </remarks>
+    private static string VisitNot(NotNode node, Context context)
+    {
+        var negate = true;
+        ConditionNode operand = node.Operand;
+
+        while (operand is NotNode inner)
+        {
+            negate = !negate;
+            operand = inner.Operand;
+        }
+
+        if (operand is StringMatchNode match)
+        {
+            return VisitStringMatch(
+                new StringMatchNode
+                {
+                    Column = match.Column,
+                    Negated = match.Negated ^ negate,
+                    Kind = match.Kind,
+                    Operand = match.Operand,
+                },
+                context
+            );
+        }
+
+        return $"!({Visit(node.Operand, context)})";
     }
 
     /// <summary>比較（VO 列は VO 同士の比較に揃える）</summary>
@@ -145,7 +200,27 @@ public static class QueryConditionCSharpEmitter
             _ => throw new InvalidOperationException($"未知の比較演算子です: {node.Operator}"),
         };
         var operand = RenderOperand(node.Operand, column, context);
-        return $"{context.LambdaVar}.{column.PropertyName} {op} {operand}";
+        var access = $"{context.LambdaVar}.{column.PropertyName}";
+        var comparison = $"{access} {op} {operand}";
+
+        // NULL 許容の VO 列への順序比較は「列が NULL でないこと」を AND した形へエミットする（文字列一致の
+        // NULL 前提と同じ流儀）。VO の比較演算子は null を最小として順序付けるため、素のままだとインメモリ
+        // 実行器（式木をコンパイルして評価）だけが < / <= で NULL 行を返し、SQL・EF Core（UNKNOWN で脱落）と
+        // 観測結果が割れる。SQL 側は IS NOT NULL の連言が加わるだけで意味は変わらない。
+        // 素の NULL 許容値型列は C# の持ち上げ演算子（null は常に false）が SQL と一致するため対象外
+        var isOrdered =
+            node.Operator
+            is ComparisonOperator.Less
+                or ComparisonOperator.LessOrEqual
+                or ComparisonOperator.Greater
+                or ComparisonOperator.GreaterOrEqual;
+
+        if (isOrdered && column.ValueObjectClassName is not null && column.IsNullable)
+        {
+            return $"({access} != null && {comparison})";
+        }
+
+        return comparison;
     }
 
     /// <summary>null 判定（NULL 許容列であることはパーサ側の検証で保証済み）</summary>
@@ -160,6 +235,15 @@ public static class QueryConditionCSharpEmitter
     private static string VisitStringMatch(StringMatchNode node, Context context)
     {
         var column = Bind(node.Column, context);
+
+        // 完全一致（ワイルドカードなしの NOT LIKE）は等値比較を NULL 前提の内側で否定する。
+        // 等値の <> へ畳むと列側の IS NULL 補償で NULL 行が一致に含まれ、LIKE の意味論
+        // （NULL 行はどちらの向きでも一致しない）から外れる
+        if (node.Kind == StringMatchKind.Exact)
+        {
+            return VisitExactMatch(node, column, context);
+        }
+
         var method = node.Kind switch
         {
             StringMatchKind.Contains => "Contains",
@@ -193,6 +277,29 @@ public static class QueryConditionCSharpEmitter
         return column.IsNullable ? $"({access} != null && {matched})" : matched;
     }
 
+    /// <summary>完全一致（ワイルドカードなしの [NOT] LIKE リテラル）を NULL 前提の内側で組み立てる</summary>
+    private static string VisitExactMatch(
+        StringMatchNode node,
+        QueryColumnBinding column,
+        Context context
+    )
+    {
+        // Exact のオペランドは常に文字列リテラル（パーサが LIKE のリテラル分解からのみ作る）。
+        // VO 列は等値比較のため VO へ包む（文字列一致メソッドの string オーバーロードとは違う）
+        var literal = RenderStringLiteral(((StringOperand)node.Operand).Value);
+        var operand = column.ValueObjectClassName is { } voClass
+            ? $"{voClass}.Create({literal})"
+            : literal;
+
+        var access = $"{context.LambdaVar}.{column.PropertyName}";
+        var comparison = $"{access} == {operand}";
+        var matched = node.Negated ? $"!({comparison})" : comparison;
+
+        // NULL 許容列は「列が NULL でないこと」を前提に AND する（他の一致種別と同じ＝NULL 行は
+        // どちらの向きでも一致しない）。二重否定などで肯定形へ畳まれた場合も同じ前提の内側に置く
+        return column.IsNullable ? $"({access} != null && {matched})" : matched;
+    }
+
     /// <summary>IN（コレクション Contains。VO 列はリストを VO へ持ち上げてから比較する）</summary>
     private static string VisitIn(InNode node, Context context)
     {
@@ -206,8 +313,29 @@ public static class QueryConditionCSharpEmitter
         )
         {
             // 行ごとの VO 生成を避けるため、メソッド冒頭で一度だけ VO リストへ変換する
-            var listVar = parameter + "Values";
+            var listVar = context.PickListVariable(parameter);
             var prelude = $"var {listVar} = {parameter}.Select({voClass}.Create).ToList();";
+
+            if (!context.PreludeLines.Contains(prelude))
+            {
+                context.PreludeLines.Add(prelude);
+            }
+
+            call = $"{listVar}.Contains({context.LambdaVar}.{column.PropertyName})";
+        }
+        else if (
+            column.ValueObjectClassName is null
+            && column.IsNullable
+            && !column.IsUnderlyingReferenceType
+        )
+        {
+            // NULL 許容の値型列は、リスト（IReadOnlyList<T>）と列（T?）で Contains の型推論が
+            // 一致せずコンパイルできない（CS1929）。メソッド冒頭で一度だけ T? のリストへ
+            // 持ち上げる（VO リストの持ち上げと同じ経路）。列が NULL の行は Contains(null) が
+            // false になり、SQL / EF Core の「NULL は非 null 値のリストに含まれない」と揃う
+            var listVar = context.PickListVariable(parameter);
+            var prelude =
+                $"var {listVar} = {parameter}.Cast<{column.UnderlyingTypeName}?>().ToList();";
 
             if (!context.PreludeLines.Contains(prelude))
             {
@@ -267,6 +395,11 @@ public static class QueryConditionCSharpEmitter
         };
 
     /// <summary>C# の文字列リテラルとしてエスケープする</summary>
+    /// <remarks>
+    /// CR / LF に加えて、描画後のレンダラーの <c>ReplaceLineEndings</c> が実改行へ変える文字
+    /// （FORM FEED U+000C・NEL U+0085・LINE SEPARATOR U+2028・PARAGRAPH SEPARATOR U+2029）も
+    /// エスケープシーケンスで書く（生のまま出すとリテラルが行をまたいで壊れる）。
+    /// </remarks>
     private static string RenderStringLiteral(string value)
     {
         var builder = new StringBuilder("\"");
@@ -289,6 +422,18 @@ public static class QueryConditionCSharpEmitter
                     break;
                 case '\t':
                     builder.Append("\\t");
+                    break;
+                case '\f':
+                    builder.Append("\\f");
+                    break;
+                case '\u0085':
+                    builder.Append("\\u0085");
+                    break;
+                case '\u2028':
+                    builder.Append("\\u2028");
+                    break;
+                case '\u2029':
+                    builder.Append("\\u2029");
                     break;
                 default:
                     builder.Append(c);

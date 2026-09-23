@@ -145,7 +145,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     unifiedLines.Add(
                         $"  {entity.TableName}.{column.Name} → "
                             + $"{_nameConverter.ToValueObjectClassName(target.Column.Name)}"
-                            + $"（{target.Entity.TableName}.{target.Column.Name}）"
+                            + $" ({target.Entity.TableName}.{target.Column.Name})"
                     );
                 }
             }
@@ -594,25 +594,40 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return valueType switch
         {
-            // sbyte は MySQL の tinyint（表示幅なし）だけが生む（5 方言の型マッパーを走査済み。ushort 等は
-            // どの方言も生成しないため列挙しない）。落とすと比較演算子も IComparable も持たない VO になり
-            // OrderBy が実行時 InvalidOperationException になる
-            "byte"
-            or "sbyte"
-            or "short"
-            or "int"
-            or "long"
-            or "float"
-            or "double"
-            or "decimal"
-            or "TimeSpan"
-            or "DateTimeOffset" => $"ValueObjectOrderedBase<{className}, {valueType}>",
+            // 順序付き基底の対象は ValueObjectHasOrderingOperators が単一正本（DSL の型整合検査と共有）。
+            // DateTime は専用基底（ValueObjectDateTimeBase＝Ordered 派生）のため、ここでは先に除外して分岐する
+            "DateTime" => $"ValueObjectDateTimeBase<{className}>",
+            _ when ValueObjectHasOrderingOperators(valueType) =>
+                $"ValueObjectOrderedBase<{className}, {valueType}>",
             "string" => $"ValueObjectStringBase<{className}>",
             "bool" => $"ValueObjectBooleanBase<{className}>",
-            "DateTime" => $"ValueObjectDateTimeBase<{className}>",
             "byte[]" => $"ValueObjectBinaryBase<{className}>",
             // Guid など順序付けしない型は等価のみの基底
             _ => $"ValueObjectBase<{className}, {valueType}>",
         };
     }
+
+    /// <summary>
+    /// その内包値型の VO が比較演算子（&lt; &lt;= &gt; &gt;=）を持つか（＝順序付き基底へ派生するか）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BuildValueObjectBaseDeclaration"/> の派生規則と、DSL 条件の型整合検査
+    /// （<see cref="Queries.QueryConditionTypeChecker"/>）が共有する単一正本。sbyte は MySQL の
+    /// tinyint（表示幅なし）だけが生む（5 方言の型マッパーを走査済み。ushort 等はどの方言も生成しない
+    /// ため列挙しない）。落とすと比較演算子も IComparable も持たない VO になり OrderBy が実行時
+    /// InvalidOperationException になる。DateTime は専用基底（Ordered 派生）だが演算子は持つため真。
+    /// </remarks>
+    internal static bool ValueObjectHasOrderingOperators(string valueType) =>
+        valueType
+            is "byte"
+                or "sbyte"
+                or "short"
+                or "int"
+                or "long"
+                or "float"
+                or "double"
+                or "decimal"
+                or "TimeSpan"
+                or "DateTimeOffset"
+                or "DateTime";
 }

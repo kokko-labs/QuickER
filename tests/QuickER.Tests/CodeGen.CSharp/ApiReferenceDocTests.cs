@@ -169,6 +169,34 @@ public sealed class ApiReferenceDocTests
         MarkdownFile(result)!.FileName.Should().Be("Foo.g.md");
     }
 
+    /// <summary>
+    /// 表セルのテーブル名・説明が C# エスケープ済みの値でなく図の生の値（Markdown 安全化のみ）で
+    /// 載ることを検証する。従来はテーブル名セルへ [Table] 用の C# リテラルエスケープ（\"）が漏れ、
+    /// 説明セルも C# エスケープ済みの値を Markdown 安全化していた
+    /// </summary>
+    [Fact(DisplayName = ".g.md の表セルは生の名前・説明（Markdown 安全化のみ）で載る")]
+    public void Markdown_Cells_UseRawValuesWithMarkdownEscaping()
+    {
+        var diagram = BuildDiagram();
+        diagram.Entities[0].Description = "say \"hi\" | pipe";
+        diagram.Entities[1].TableName = "or\"ders";
+        diagram.Entities[0].Columns[1].Description = "col \"desc\" | pipe";
+
+        var result = Generate(diagram, new CodeGenerationOptions { GenerateApiDocs = true });
+
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+        var content = MarkdownFile(result)!.Content;
+
+        // テーブル名は生のまま（C# リテラルエスケープの \" が読者に見えない）
+        content.Should().Contain("or\"ders").And.NotContain("or\\\"ders");
+
+        // 説明は生の値へ Markdown 安全化（| のエスケープ）だけが掛かる
+        content.Should().Contain("say \"hi\" \\| pipe").And.NotContain("say \\\"hi\\\"");
+        content.Should().Contain("col \"desc\" \\| pipe").And.NotContain("col \\\"desc\\\"");
+    }
+
     [Fact(
         DisplayName = "分割生成では Markdown はカテゴリ別固定名と同じ流儀の固定名 ApiDocs.g.md / ApiDocs.ja.g.md になる"
     )]

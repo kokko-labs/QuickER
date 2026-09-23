@@ -302,9 +302,10 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// Entity クラスへ刻む <c>[UniqueConstraint(...)]</c> 属性行（制約なしは空文字）を構築する。
     /// </summary>
     /// <remarks>
-    /// 役割は <c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」で、実行時に読む機構は無い
-    /// （コレクション内重複検証は EditModel 側の生成コードが持つ制約テーブルを使う）。将来の C# → ErDiagram
-    /// リバースが列型・説明と同じ経路で UNIQUE 制約を復元できるようにするための布石でもある。
+    /// 役割は <c>[DbTableMeta]</c> / <c>[DbColumnMeta]</c> と同じ「DB 定義の自己記述」だが、インメモリ Repository の
+    /// 一意制約検査（<c>InMemoryUniqueConstraints.For</c>＝型ごとに 1 回リフレクションで読む）だけは実行時にこの
+    /// 属性を参照する（EditModel のコレクション内重複検証は属性でなく生成コードの制約テーブルを使う）。
+    /// C# → ErDiagram リバースは列型・説明と同じ経路で UNIQUE 制約をこの属性から復元する。
     /// </remarks>
     private string BuildEntityUniqueConstraintAttributes(Entity entity) =>
         string.Join(
@@ -472,11 +473,40 @@ internal sealed partial class CSharpGenerationModelBuilder
             "        CancellationToken cancellationToken = default",
             "    )",
             "    {",
-            "        // Only the columns the check reads are copied: the primary key (to exclude this row) and the constraint members.",
-            $"        var entity = new {entityClassName}();",
         };
 
-        // 未入力（null）の列は写さない＝Entity の初期値のまま。構成列に null を含む組は照合対象外なので判定へ影響しない
+        // 値型（NULL 許容でも参照型でもない）構成列は「未入力」を Entity へ写せない（プロパティが非 null 型の
+        // ため、写さずに置くと CLR 既定値 0 のまま照合されて偽の重複を報告する）。未入力ならクエリを出さずに
+        // true を返す（必須検証が保存を止めている状態の助言的チェックなので、照合しないのが安全側）
+        var unsetGuardMembers = constraints
+            .SelectMany(constraint => constraint.Members)
+            .Where(member => !member.IsNullable && !member.IsReferenceType)
+            .Select(member => member.PropertyName)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var propertyName in unsetGuardMembers)
+        {
+            lines.AddRange([
+                "        // A value-type constraint member with no input cannot carry its unset state onto the entity",
+                "        // (the entity property is not nullable), so the copy below would silently check the CLR default.",
+                "        // Withdraw the previous findings and answer true without querying; the required check blocks the save while the value is missing.",
+                $"        if ({propertyName} is null)",
+                "        {",
+                "            ClearDuplicateErrors(DuplicateErrorSource.Database);",
+                "            return Task.FromResult(true);",
+                "        }",
+                string.Empty,
+            ]);
+        }
+
+        lines.AddRange([
+            "        // Only the columns the check reads are copied: the primary key (to exclude this row) and the constraint members.",
+            $"        var entity = new {entityClassName}();",
+        ]);
+
+        // 未入力（null）の列は写さない＝Entity の初期値のまま。NULL 許容・参照型の構成列は null を含む組が
+        // 照合対象外になるため判定へ影響せず、値型の構成列は上のガードが未入力の照合そのものを止めている
         foreach (var column in entity.Columns)
         {
             var propertyName = _nameConverter.ToPropertyName(column.Name);

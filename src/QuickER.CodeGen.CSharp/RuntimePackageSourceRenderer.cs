@@ -8,7 +8,7 @@ namespace QuickER.CodeGen.CSharp;
 /// ソースの正本は <c>Templates/CSharpRuntime/*.scriban</c>（<see cref="ScribanCSharpRenderer"/> 経由）で、通常生成と同一。
 /// ここでは「空の ER 図＋全機能 ON＋<c>runtime_package_export=true</c>＋<c>infra_visibility="public"</c>」でレンダリングし、
 /// スキーマ依存物（Entity / EditModel / Mapper / I{Entity}Repository / DI 登録など）を一切含まない固定 infra だけを
-/// 6 パッケージ（<see cref="RuntimePackages"/>）のソースへ切り出す。
+/// 7 パッケージ（<see cref="RuntimePackages"/>）のソースへ切り出す。
 /// </para>
 /// <para>
 /// 分割規則:
@@ -17,12 +17,14 @@ namespace QuickER.CodeGen.CSharp;
 ///     JSON コンバータ）＋方言中立の Repository 共通契約（IRepositoryCore・ISqlExecutor・SqlQuery・RawSqlMapper 等）</item>
 ///   <item><b>SqlServer / Sqlite</b>: 方言エンジンの固定コード（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ・
 ///     方言別メタデータ）。<c>using QuickER.Runtime;</c> でコアの契約を参照する</item>
-///   <item><b>EfCore</b>: EF Core 共通部品（EF Core 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤）。
+///   <item><b>EntityFrameworkCore</b>: EF Core 共通部品（EF Core 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤）。
 ///     同じく <c>using QuickER.Runtime;</c> 付き</item>
 ///   <item><b>InMemory</b>: DB 非依存のインメモリエンジン（InMemoryDataStore・InMemoryRepositoryCore 基底・保存ステージング・
 ///     式木評価）。ADO も EF Core も参照せず、同じく <c>using QuickER.Runtime;</c> 付き</item>
 ///   <item><b>AspNetCore</b>: リモートサーバーの固定エンジン（RemoteServerEngine・エラー分類・詳細公開ポリシー・
 ///     バイナリ転送の補助型）。ASP.NET Core の FrameworkReference のみに依存し、同じく <c>using QuickER.Runtime;</c> 付き</item>
+///   <item><b>Sync</b>: 双方向同期エンジンの固定コード（SyncEngine・SyncJournal・SyncTable 基底階層・結果／競合レコード）。
+///     BCL のみ依存で、同じく <c>using QuickER.Runtime;</c> 付き</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -148,6 +150,7 @@ public sealed class RuntimePackageSourceRenderer
             {
                 DbSets = [],
                 Entities = [],
+                IgnoredEntityClassNames = [],
                 IgnoredBaseMembers = [],
             },
         };
@@ -444,7 +447,7 @@ public sealed class RuntimePackageSourceRenderer
         };
 
     /// <summary>
-    /// レンダリング結果の先頭へ「パッケージソース・手編集禁止」の日本語コメントを添える。
+    /// レンダリング結果の先頭へ「パッケージソース・手編集禁止」の由来コメント（英語＝生成物の中立言語）を添える。
     /// </summary>
     /// <remarks>
     /// 先頭行はレンダラーが出力する <c>// &lt;auto-generated /&gt;</c>。その直後に本ファイルの由来（Scriban 正本）を明記する。

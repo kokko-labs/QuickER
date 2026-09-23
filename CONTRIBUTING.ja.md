@@ -22,6 +22,7 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
 - コメント・コミットメッセージは日本語で書きます
 - コード修正後は `csharpier format .` を実行してください（グローバルツール）
 - `dotnet test QuickER.slnx` が緑であることを確認してください
+- 英語の文書は [Vale](https://vale.sh) で検査します。初回だけ `vale sync` を実行し、以降は `vale --glob='*.md' .` で確認してください（日本語の文書は対象外です。設定は [.vale.ini](.vale.ini)）
 - 生成テンプレート（`src/QuickER.CodeGen.CSharp/Templates/**/*.scriban`）を変更した場合は、固定フィクスチャ等の再生成が必要です。再生成 → 検証 → 差分表示までを次のスクリプトが行います:
 
   ```powershell

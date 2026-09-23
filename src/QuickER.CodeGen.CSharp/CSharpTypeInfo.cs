@@ -1,10 +1,13 @@
 namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
-/// SQL Server 型から解決された C# 型の情報
+/// DB の列型から解決された C# 型の情報
 /// </summary>
 /// <remarks>
-/// <para><see cref="SqlServerCSharpTypeMapper"/> が生成し、Nullable 注釈の付与や [MaxLength] 属性の判定に使う</para>
+/// <para>
+/// 各方言プロバイダの型マッパー（<c>*CSharpTypeMapper</c>＝5 方言）が生成し、Nullable 注釈の付与や
+/// [MaxLength] 属性の判定に使う（CodeGen.CSharp は DB 非依存＝解決済みの結果だけを受け取る）
+/// </para>
 /// <para>
 /// init-only の不変データキャリアであり、参照同一性に依存する箇所は無いため <c>record</c> とする。
 /// 一部の項目だけを差し替えた複製（<see cref="MultiDialectTypeReconciler"/> の <c>[SqlColumnType]</c> 補完・

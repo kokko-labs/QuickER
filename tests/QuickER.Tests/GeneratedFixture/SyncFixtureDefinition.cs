@@ -38,6 +38,11 @@ namespace QuickER.Tests.GeneratedSyncFixture;
 /// （アンカー導出の <c>MAX</c> からも自然に外れる）。
 /// </para>
 /// <para>
+/// <c>sync_orders</c> には射影クエリ（<c>GetHeadlines</c>＝DTO 生成を伴う）を 1 本置く。ジャーナル記録
+/// デコレータの委譲メンバーが契約構築時のクエリブロックを再利用すること（同一エンティティでの 2 回目の
+/// ビルドが射影 DTO 名の重複判定に引っかかり、委譲メソッドが抜けて CS0535 になる回帰）の固定用。
+/// </para>
+/// <para>
 /// VO・EditModel・Mapper・EF Core は交差の焦点でないため生成しない（EF Core はマルチターゲットと排他でもある）。
 /// </para>
 /// </remarks>
@@ -103,6 +108,7 @@ public static class SyncFixtureDefinition
     private static readonly Guid OrderNoteRelationshipId = new(
         "c1000000-0000-0000-0000-000000000041"
     );
+    private static readonly Guid QueryGetHeadlinesId = new("c1000000-0000-0000-0000-000000000051");
 
     /// <summary>同期支援の検証用 ER 図を決定的に構築する（型は SQL Server 表記）</summary>
     public static ErDiagram Build()
@@ -238,12 +244,41 @@ public static class SyncFixtureDefinition
             ColumnPairs = { new RelationshipColumnPair(OrderPkColId, NoteOrderColId) },
         };
 
-        return new ErDiagram
+        var diagram = new ErDiagram
         {
             TargetDbms = "sqlserver",
             Entities = { order, line, note },
             Relationships = { relationship, noteRelationship },
         };
+
+        // 射影クエリ（DTO 生成を伴う）を同期対象テーブルへ置く＝ジャーナル記録デコレータの委譲メンバーが
+        // 契約構築時のクエリブロックを再利用すること（同一エンティティでの 2 回目のビルドが DTO 名の
+        // 重複判定に引っかかり射影クエリの委譲だけが抜けて CS0535 になる回帰）をドリフト検知で固定する。
+        // パラメータ・フィールドとも列参照で型付けする（トークン型付けにすると、この図から生成する
+        // すべてのテストがクエリ型トークン辞書を要求するようになる）
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                Id = QueryGetHeadlinesId,
+                EntityId = OrderEntityId,
+                Name = "GetHeadlines",
+                Description = "Projects order headlines (id and customer name) above the given id",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "SyncOrderHeadlineRow",
+                Parameters =
+                {
+                    new QueryParameter { Name = "minOrderId", SourceColumnId = OrderPkColId },
+                },
+                Condition = "order_id > @minOrderId",
+                Fields =
+                {
+                    new ProjectionField { Name = "OrderId", SourceColumnId = OrderPkColId },
+                    new ProjectionField { Name = "CustomerName", SourceColumnId = OrderNameColId },
+                },
+            }
+        );
+
+        return diagram;
     }
 
     /// <summary>図を SQLite 方言へ変換した複製を返す（ローカル DB 側のスキーマ＝<c>rowversion</c> は BLOB）</summary>

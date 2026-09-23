@@ -52,7 +52,12 @@ public sealed record CodeGenerationOptions
     /// <list type="number">
     ///   <item><see cref="RepositoryDialects"/> が非空ならそれを、空/未指定なら既定 <c>"sqlserver"</c> の単一を採る</item>
     ///   <item>各要素を Trim し、空要素は除去する</item>
-    ///   <item>大文字小文字を無視して重複を除去する（初出の表記を保持し、指定順を維持する）</item>
+    ///   <item>
+    ///     大文字小文字を無視して照合し、<see cref="SupportedRepositoryDialects"/> 側の正規綴りへ置換して返す
+    ///     （原綴りのまま返すと、方言分岐は Ordinal 比較のため <c>"SQLite"</c> 指定で SQL Server 側の基底＋
+    ///     SQLite の using が混ざったコンパイル不能な出力が診断なしで出る）
+    ///   </item>
+    ///   <item>大文字小文字を無視して重複を除去する（指定順を維持する）</item>
     ///   <item>
     ///     未対応方言（<see cref="SupportedRepositoryDialects"/> 外）が含まれる場合、
     ///     <see cref="GenerateRepositories"/> が <c>true</c> なら <see cref="ArgumentException"/> を投げ、
@@ -101,7 +106,12 @@ public sealed record CodeGenerationOptions
 
                 if (seen.Add(value))
                 {
-                    resolved.Add(value);
+                    // 下流の方言分岐（テンプレート・クエリ計画）は Ordinal 比較のため、正規綴りへ置換して返す
+                    resolved.Add(
+                        SupportedRepositoryDialects.First(dialect =>
+                            string.Equals(dialect, value, StringComparison.OrdinalIgnoreCase)
+                        )
+                    );
                 }
             }
 
@@ -194,12 +204,14 @@ public sealed record CodeGenerationOptions
     /// <remarks>
     /// <para>
     /// <c>true</c> のとき、<see cref="RepositoryDialects"/> がちょうど <c>"sqlserver"</c> と <c>"sqlite"</c> の 2 方言で、
-    /// かつ <c>rowversion</c>（<c>timestamp</c>）列を持つテーブルが 1 つ以上あることを要求する（満たさない指定は生成時の診断エラー）。
-    /// 同期対象はその <c>rowversion</c> 列を持つテーブルだけで、「列の有無がそのままポリシー」という楽観排他と同じ流儀に従う。
+    /// かつ同期可能テーブル（Repository 契約を持つ単一主キーのテーブル）が 1 つ以上あることを要求する
+    /// （満たさない指定は生成時の診断エラー）。<c>rowversion</c>（<c>timestamp</c>）列の有無は対象でなく
+    /// モードを決める＝版あり＝増分ダウンロード＋競合検出／版なし＝後勝ち・全量スキャン。
     /// </para>
     /// <para>
-    /// サーバー側には追加スキーマを一切作らない。ローカル（SQLite）にだけ共有ジャーナル 1 テーブル
-    /// （<c>quicker_sync_journal</c>）を実行時に <c>CREATE TABLE IF NOT EXISTS</c> で用意し、オフライン編集を記録する。
+    /// サーバー側には追加スキーマを一切作らない。ローカル（SQLite）にだけ共有テーブル 2 つ
+    /// （オフライン編集のジャーナル <c>quicker_sync_journal</c>・受理記録 <c>quicker_sync_ack</c>）を
+    /// 実行時に <c>CREATE TABLE IF NOT EXISTS</c> で用意する。
     /// 差分の再開点（アンカー）は保存せず、ローカルのミラー版列の <c>MAX</c> から導出する。
     /// </para>
     /// <para>
@@ -250,7 +262,8 @@ public sealed record CodeGenerationOptions
     /// プレゼンテーション層＝EditModel / Mapper、
     /// インフラ層＝方言別実装 / EF Core / インメモリ / 同期 / HTTP クライアントと各固定 infra、
     /// サーバー層＝リモートサーバー実装＋ASP.NET Core 固定部。
-    /// API リファレンス Markdown（.g.md）はどの csproj にも属さないため出力ディレクトリ直下のまま。
+    /// API リファレンス Markdown（.g.md）はどの csproj にも属さないため既定では出力ディレクトリ直下のまま
+    /// （<see cref="ApiDocsSubdirectory"/> で任意のサブフォルダへ移せる）。
     /// </para>
     /// <para>
     /// 名前空間の既定も層フォルダへ追従する（層ルート＝フォルダパスの <c>/</c> を <c>.</c> へ変換した値。
@@ -303,19 +316,19 @@ public sealed record CodeGenerationOptions
     /// <summary>分割時の共有基盤（基底クラス・属性・VO 基底・JSON コンバータ）の名前空間。空なら <c>{RootNamespace}.Runtime</c> へフォールバックする</summary>
     public string? RuntimeNamespace { get; init; }
 
-    /// <summary>分割時の Entity クラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
+    /// <summary>分割時の Entity クラスの名前空間。空なら <c>{RootNamespace}.Entities</c>（層別出力では層ルート由来）へフォールバックする</summary>
     public string? EntityNamespace { get; init; }
 
-    /// <summary>分割時の EditModel クラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
+    /// <summary>分割時の EditModel クラスの名前空間。空なら <c>{RootNamespace}.EditModels</c>（層別出力では層ルート由来）へフォールバックする</summary>
     public string? EditModelNamespace { get; init; }
 
-    /// <summary>分割時の Mapper クラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
+    /// <summary>分割時の Mapper クラスの名前空間。空なら <c>{RootNamespace}.Mappers</c>（層別出力では層ルート由来）へフォールバックする</summary>
     public string? MapperNamespace { get; init; }
 
-    /// <summary>分割時の Repository クラス群の名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
+    /// <summary>分割時の Repository クラス群の名前空間。空なら <c>{RootNamespace}.Repositories</c>（層別出力では層ルート由来）へフォールバックする。非分割のマルチ方言レイアウトでも契約 namespace として使われる</summary>
     public string? RepositoryNamespace { get; init; }
 
-    /// <summary>分割時の値オブジェクトクラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
+    /// <summary>分割時の値オブジェクトクラスの名前空間。空なら <c>{RootNamespace}.ValueObjects</c>（層別出力では層ルート由来）へフォールバックする</summary>
     public string? ValueObjectNamespace { get; init; }
 
     /// <summary>
@@ -334,8 +347,10 @@ public sealed record CodeGenerationOptions
     /// （固定 infra を出力しないため）。必要なパッケージ参照は <see cref="RuntimePackageReferenceGuidance"/> が案内する。
     /// </para>
     /// <para>
-    /// 本モードは <see cref="GenerateEfCoreRepositories"/> とは併用できない（EF Core の <c>QuickErDbContext</c> がスキーマ依存で、
-    /// EF Core 固定 infra が同一アセンブリの具象 DbContext を参照するためパッケージ境界を跨げない）。併用指定は生成時に診断エラーになる。
+    /// <see cref="GenerateEfCoreRepositories"/>・<see cref="GenerateInMemoryRepositories"/>・
+    /// <see cref="GenerateSyncSupport"/>・リモート対応のいずれとも併用できる（EF Core 固定 infra は
+    /// <c>TContext : DbContext</c> のジェネリック化により具象 <c>QuickErDbContext</c> 非依存で、
+    /// <c>QuickErDbContext</c>・Fluent 構成・DI 登録は本モードでも常に生成側に出る）。
     /// </para>
     /// </remarks>
     public bool UseRuntimePackages { get; init; }

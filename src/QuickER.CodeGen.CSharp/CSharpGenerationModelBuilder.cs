@@ -100,7 +100,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             ValueObjectClasses = _valueObjects
                 .Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal)
                 .ToList(),
-            EfCore = BuildEfCoreModel(diagram, options),
+            EfCore = BuildEfCoreModel(diagram, options, diagnostics),
             // 同期対象テーブルは「行バージョン列を持ち Repository 契約が生成されるテーブル」で、FK トポロジカル順に並べる
             // （ダウンロードの適用は親→子・削除は子→親でなければ FK 制約に触れるため、順序そのものが生成物の一部）
             SyncTables = syncTables,
@@ -159,9 +159,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             TableName = EscapeNameForCSharpString(entity.TableName),
             // 説明が無いときの XmlDoc 定型文へ載せるため、XML としてエスケープした形も持つ
             TableNameXmlDoc = EscapeForXmlDocSummary(entity.TableName),
+            // API リファレンス（.g.md）の表セル用は未エスケープのまま（Markdown 側の安全化は EscapeCell の責務）
+            TableNameRaw = entity.TableName,
             // [DbTableMeta(Description = "...")] へ C# リテラルとして埋め込むためエスケープする（未エスケープだと " や \ でコンパイル不能になる）
             Description = EscapeForCSharpString(entity.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(entity.Description),
+            DescriptionRaw = entity.Description,
             // 表示名解決へ渡すテーブルの説明。無指定は null（override を出さず基底のクラス名フォールバックへ委ねる）
             DisplayNameDescription = string.IsNullOrWhiteSpace(entity.Description)
                 ? null
@@ -441,6 +444,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             QueryRemoteClientBlock = queryBlocks.RemoteClientBlock,
             QueryRemoteServerBlock = queryBlocks.RemoteServerBlock,
             QueryRemoteServerRecordsBlock = queryBlocks.RemoteServerRecordsBlock,
+            QueryDelegationBlock = queryBlocks.DelegationBlock,
             BinaryStreamContractBlock = binaryStreamBlocks.ContractBlock,
             BinaryStreamThinImplBlock = binaryStreamBlocks.ThinImplBlock,
             BinaryStreamEfImplBlock = binaryStreamBlocks.EfImplBlock,
@@ -509,6 +513,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             // [DbColumnMeta(..., Description = "...")] へ C# リテラルとして埋め込むためエスケープする（未エスケープだと " や \ でコンパイル不能になる）
             Description = EscapeForCSharpString(column.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
+            // API リファレンス（.g.md）の表セル用は未エスケープのまま（Markdown 側の安全化は EscapeCell の責務）
+            DescriptionRaw = column.Description,
             // 非 NULL の VO は妥当な空既定値を作れないため null! でロード前提を表明（NULL 許容 VO は初期化不要）
             Initializer = valueObject is not null
                 ? (column.IsNullable ? string.Empty : " = null!;")
@@ -1225,10 +1231,12 @@ internal sealed partial class CSharpGenerationModelBuilder
         // バックスラッシュを最初にエスケープする（後続の \" を二重エスケープしないため）
         FoldNewLines(text.Replace("\\", "\\\\").Replace("\"", "\\\""));
 
-    /// <summary>C# が改行とみなす文字をすべて空白 1 つへ畳む（1 行リテラル・1 行 summary 前提）</summary>
+    /// <summary>生成出力で改行になり得る文字をすべて空白 1 つへ畳む（1 行リテラル・1 行 summary 前提）</summary>
     /// <remarks>
-    /// CRLF / LF / CR に加えて NEL（U+0085）・LINE SEPARATOR（U+2028）・PARAGRAPH SEPARATOR（U+2029）も畳む。
-    /// これらは C# 言語仕様上の new-line であり、残すと通常リテラルや <c>///</c> コメントが行をまたいで壊れる。
+    /// 対象は <see cref="string.ReplaceLineEndings(string)"/> が改行として認識する集合＝CRLF / LF / CR に加えて
+    /// NEL（U+0085）・FORM FEED（U+000C）・LINE SEPARATOR（U+2028）・PARAGRAPH SEPARATOR（U+2029）。
+    /// 描画後のレンダラーが同メソッドで改行を正規化するため、C# 言語仕様の new-line 5 種だけを畳むと
+    /// FF が実改行へ化けて通常リテラルや <c>///</c> コメントが行をまたいで壊れる。
     /// </remarks>
     private static string FoldNewLines(string text)
     {
@@ -1254,7 +1262,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         return builder.ToString();
     }
 
-    /// <summary>C# 言語仕様の new-line 文字か（CR / LF / NEL / LINE SEPARATOR / PARAGRAPH SEPARATOR）</summary>
+    /// <summary>
+    /// 描画後の <see cref="string.ReplaceLineEndings(string)"/> が改行として認識する文字か
+    /// （CR / LF / NEL / FORM FEED / LINE SEPARATOR / PARAGRAPH SEPARATOR）
+    /// </summary>
     private static bool IsNewLine(char ch) =>
-        ch is '\r' or '\n' or (char)0x85 or (char)0x2028 or (char)0x2029;
+        ch is '\r' or '\n' or '\f' or (char)0x85 or (char)0x2028 or (char)0x2029;
 }

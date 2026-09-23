@@ -325,6 +325,57 @@ public class SyncSupportGenerationTests
     }
 
     /// <summary>
+    /// ドット付きテーブル名の同期 SQL が最初のドットだけで分割クォートされることを検証する
+    /// （DDL・生成 CRUD の <c>EntitySaveMetadata.QuoteTableName</c> と同じ規則）。
+    /// </summary>
+    /// <remarks>
+    /// 全ドット分割にすると <c>dbo.sync.orders</c> のような名前で <c>[dbo].[sync].[orders]</c> という
+    /// 存在しないオブジェクトを指し、DDL・CRUD が読み書きするテーブルと同期 SQL が食い違う。
+    /// </remarks>
+    [Fact(DisplayName = "ドット付きテーブル名の同期 SQL は最初のドットだけで分割クォートされる")]
+    public void SyncSql_DottedTableName_QuotesAtFirstDotOnly()
+    {
+        var diagram = Diagram();
+        diagram.Entities.First(e => e.TableName == "sync_orders").TableName = "dbo.sync.orders";
+
+        var (files, diagnostics) = Generate(diagram, SyncOptions());
+
+        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+
+        var content = string.Concat(files.Values);
+
+        content.Should().Contain("FROM [dbo].[sync.orders]");
+        content.Should().Contain("FROM \\\"dbo\\\".\\\"sync.orders\\\"");
+        content.Should().NotContain("[dbo].[sync].[orders]");
+    }
+
+    /// <summary>
+    /// decimal 主キーのジャーナルキー文字列化がスケールを正規化（G29＝末尾ゼロなし）することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は宣言スケールへ揃えて返し（decimal(10,2) の 1.5 は 1.50）、SQLite は書き込んだ綴りを
+    /// 保存する（1.5 のまま＝実測）。素の ToString だと同じ行のキー文字列がサーバーとローカルで食い違い、
+    /// 削除伝搬・ack・pending の序数照合がすべて外れる。
+    /// </remarks>
+    [Fact(DisplayName = "decimal 主キーのキー文字列化はスケールを正規化する（G29）")]
+    public void SyncKeyText_DecimalPrimaryKey_NormalizesScale()
+    {
+        var diagram = Diagram();
+        diagram
+            .Entities.First(e => e.TableName == "sync_orders")
+            .Columns.First(c => c.Name == "order_id")
+            .DataType = "decimal(10,2)";
+
+        var (files, diagnostics) = Generate(diagram, SyncOptions());
+
+        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+
+        var content = string.Concat(files.Values);
+
+        content.Should().Contain(".ToString(\"G29\", CultureInfo.InvariantCulture)");
+    }
+
+    /// <summary>
     /// DI 登録は FK トポロジカル順（親→子）でテーブルを並べる（エンジンはこの順で適用・逆順で削除する）。
     /// </summary>
     [Fact(

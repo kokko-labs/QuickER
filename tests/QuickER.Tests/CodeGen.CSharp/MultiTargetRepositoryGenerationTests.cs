@@ -138,7 +138,57 @@ public sealed class MultiTargetRepositoryGenerationTests
         {
             RepositoryDialects = ["SqlServer", "sqlite", "sqlserver"],
         };
-        options.EffectiveRepositoryDialects.Should().Equal("SqlServer", "sqlite");
+        options.EffectiveRepositoryDialects.Should().Equal("sqlserver", "sqlite");
+    }
+
+    /// <summary>
+    /// 大小違いの綴りが正規綴りへ置換されて返ることを検証する。原綴りのまま返すと、下流の方言分岐は
+    /// Ordinal 比較のため <c>"SQLite"</c> 指定で SQL Server 側の基底＋SQLite の using が混ざった
+    /// コンパイル不能な出力が診断なしで出る
+    /// </summary>
+    [Fact(DisplayName = "実効方言は正規綴り（SupportedRepositoryDialects 側）へ置換して返す")]
+    public void EffectiveDialects_NormalizesSpellingToCanonical()
+    {
+        var options = new CodeGenerationOptions { RepositoryDialects = ["SQLite", "SQLSERVER"] };
+        options.EffectiveRepositoryDialects.Should().Equal("sqlite", "sqlserver");
+    }
+
+    [Fact(DisplayName = "大小違いの方言指定は正規綴り指定とバイト同一の出力になる")]
+    public void Generate_CaseInsensitiveDialectSpelling_MatchesCanonicalOutput()
+    {
+        var diagram = BuildDiagram();
+        var types = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
+        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>
+        {
+            ["sqlite"] = types,
+        };
+
+        CodeGenerationOptions BuildOptions(string spelling) =>
+            new()
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                RepositoryDialects = [spelling],
+            };
+
+        var canonical = new CSharpCodeGenerationService().Generate(
+            diagram,
+            types,
+            byDialect,
+            BuildOptions("sqlite")
+        );
+        var mixedCase = new CSharpCodeGenerationService().Generate(
+            diagram,
+            types,
+            byDialect,
+            BuildOptions("SQLite")
+        );
+
+        canonical.HasErrors.Should().BeFalse();
+        mixedCase
+            .Files.Select(f => f.Content)
+            .Should()
+            .Equal(canonical.Files.Select(f => f.Content));
     }
 
     [Fact(DisplayName = "空要素・空白は除去される")]
@@ -214,6 +264,33 @@ public sealed class MultiTargetRepositoryGenerationTests
             );
     }
 
+    /// <summary>
+    /// 層別出力でも未対応方言が診断エラーへ変換される（例外を投げない）ことを検証する。
+    /// 層フォルダ検証がファイル計画経由で実効方言に触れるため、方言解決が検証より後だと
+    /// ArgumentException が診断でなく例外のまま呼び出し元へ抜けていた
+    /// </summary>
+    [Fact(DisplayName = "層別出力×未対応方言も診断エラーへ変換される（例外を投げない）")]
+    public void Generate_UnsupportedDialect_WithLayeredOutput_ReturnsErrorDiagnostic()
+    {
+        var diagram = BuildDiagram();
+        var primary = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
+        var options = new CodeGenerationOptions
+        {
+            GenerateRepositories = true,
+            RepositoryDialects = ["bogus"],
+            LayeredOutput = true,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, primary, options);
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error && d.Message.Contains("bogus")
+            );
+    }
+
     // ---- マルチ辞書 API: 単一方言と同等の出力（後方互換） ----
 
     [Fact(DisplayName = "単一方言のマルチ辞書呼び出しは 3 引数版と同じ出力になる（後方互換）")]
@@ -265,6 +342,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         var options = new CodeGenerationOptions
         {
             RootNamespace = "Sample.Domain",
+            GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
         };
 
@@ -302,6 +380,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         var options = new CodeGenerationOptions
         {
             RootNamespace = "Sample.Domain",
+            GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
         };
 
@@ -341,6 +420,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         var options = new CodeGenerationOptions
         {
             RootNamespace = "Sample.Domain",
+            GenerateRepositories = true,
             RepositoryDialects = ["sqlite", "sqlserver"],
         };
 
@@ -373,6 +453,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         var options = new CodeGenerationOptions
         {
             RootNamespace = "Sample.Domain",
+            GenerateRepositories = true,
             RepositoryDialects = ["sqlite"],
         };
 

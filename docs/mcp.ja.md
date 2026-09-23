@@ -2,11 +2,28 @@
 
 *[English](mcp.md) | 日本語*
 
-`quicker mcp` は、stdio トランスポート（標準入出力・JSON-RPC）の [Model Context Protocol](https://modelcontextprotocol.io) サーバを起動します。ER 図を編集し、コードを生成するツールを公開するため、外部の AI エージェント（Claude Code・Codex など）が自身のワークフローの一部として QuickER の図を構築・発展させられます。エージェントは `quicker mcp` を子プロセスとして起動し、標準入出力で通信します。
+`quicker mcp` は、stdio トランスポート（標準入出力・JSON-RPC）の [Model Context Protocol](https://modelcontextprotocol.io) サーバを起動します。
+ER 図を編集し、コードを生成するツールを公開するため、外部の AI エージェント（Claude Code・Codex など）が自身のワークフローの一部として QuickER の図を構築・発展させられます。
+エージェントは `quicker mcp` を子プロセスとして起動し、標準入出力で通信します。
 
-このサーバは**ステートレス**です。オプションを取らず、図をメモリに保持しません。ほぼすべてのツールが対象の図ファイルを `file` 引数で受け取りますが、そのファイルをどう扱うかはツールの種類によります。変更系ツールは 1 回の呼び出しで「読込 → 変更 → 保存」を完結させ、読み取り系ツール（`get_diagram_summary` / `list_queries`）は読み込むだけで保存せず、生成系ツール（`generate_csharp` / `generate_ddl`）は図を変更せず別の出力先へ書き出します（`create_diagram` は既存の図を読まずに新規ファイルを書き出します）。`get_generation_config_schema` だけは `file` も取りません。複数のエージェント（あるいは複数の図を扱う 1 エージェント）は、それぞれ異なる `file` パスを渡すだけです。
+このサーバは**ステートレス**です。
+オプションを取らず、図をメモリに保持しません。
+ほぼすべてのツールが対象の図ファイルを `file` 引数で受け取りますが、そのファイルをどう扱うかはツールの種類によります。
 
-ステートレスであることの代償は反対側に出ます＝**同じファイルを 2 者が書くと後勝ちです。** 各呼び出しはファイルを読み、指示された箇所を変更し、文書全体を書き戻します。ロックも版チェックも無いため、他者の保存より前にファイルを読み込んだ呼び出しは、その保存を丸ごと上書きします（相手の変更は失われ、そのことは報告されません）。上書きを拒むのは `create_diagram` だけで、それも「ファイルが存在してはいけない」という理由からです。サーバと GUI の間でも同じで、GUI は下で変更されたファイルを再読込します（自分側に未保存の変更が無ければ無確認で）。そのため、GUI で開いている図を同時に MCP から編集すると、先に保存した側の変更が失われ得ます。1 つの図に対する書き手は、常に 1 つにしてください。
+- **変更系ツール**：1 回の呼び出しで「読込 → 変更 → 保存」を完結させます（`create_diagram` だけは既存の図を読まずに新規ファイルを書き出します）。
+- **読み取り系ツール**（`get_diagram_summary` / `list_queries`）：読み込むだけで保存しません。
+- **生成系ツール**（`generate_csharp` / `generate_ddl`）：図を変更せず、別の出力先へ書き出します。
+
+`get_generation_config_schema` だけは `file` も取りません。
+複数のエージェント（あるいは複数の図を扱う 1 エージェント）は、それぞれ異なる `file` パスを渡すだけです。
+
+ステートレスであることの代償は反対側に出ます＝**同じファイルを 2 者が書くと後勝ちです。**
+各呼び出しはファイルを読み、指示された箇所を変更し、文書全体を書き戻します。
+ロックも版チェックも無いため、他者の保存より前にファイルを読み込んだ呼び出しは、その保存を丸ごと上書きします（相手の変更は失われ、そのことは報告されません）。
+上書きを拒むのは `create_diagram` だけで、それも「ファイルが存在してはいけない」という理由からです。
+サーバと GUI の間でも同じで、GUI は下で変更されたファイルを再読込します（自分側に未保存の変更が無ければ無確認で）。
+そのため、GUI で開いている図を同時に MCP から編集すると、先に保存した側の変更が失われ得ます。
+1 つの図に対する書き手は、常に 1 つにしてください。
 
 ## セットアップ
 
@@ -33,11 +50,18 @@ claude mcp add quicker -- quicker mcp
 
 ### その他の stdio クライアント
 
-stdio トランスポートに対応した MCP クライアントであれば利用できます。コマンド `quicker` を引数 `mcp` 1 つで起動するよう設定してください（例えば Codex も、独自の MCP サーバ設定で同じコマンド／引数の組を受け取ります）。これには `quicker` コマンドが `PATH` に通っている必要があります（[CLI のインストール](cli.ja.md)を参照）。ソースから動かす場合は、一度ビルドし（`dotnet build QuickER.slnx`）、ビルド済みアセンブリを指すよう設定してください（`command: "dotnet"`、`args: ["<リポジトリ>/src/QuickER.Cli/bin/Debug/net10.0/QuickER.Cli.dll", "mcp"]`）。`dotnet run` は使わないでください（ビルド出力が stdout＝JSON-RPC プロトコルのチャネルへ混入します）。
+stdio トランスポートに対応した MCP クライアントであれば利用できます。
+コマンド `quicker` を引数 `mcp` 1 つで起動するよう設定してください（例えば Codex も、独自の MCP サーバ設定で同じコマンド／引数の組を受け取ります）。
+これには `quicker` コマンドが `PATH` に通っている必要があります（[CLI のインストール](cli.ja.md)を参照）。
+ソースから動かす場合は、一度ビルドし（`dotnet build QuickER.slnx`）、ビルド済みアセンブリを指すよう設定してください（`command: "dotnet"`、`args: ["<リポジトリ>/src/QuickER.Cli/bin/Debug/net10.0/QuickER.Cli.dll", "mcp"]`）。
+`dotnet run` は使わないでください（ビルド出力が stdout＝JSON-RPC プロトコルのチャネルへ混入します）。
 
 ## ツール
 
-サーバは 19 個のツールを公開します。ER 図編集の 13 個・名前付きクエリの 3 個・コード生成の 3 個です。**`file` 引数はすべてのツールに必要**です（図 JSON のパス。GUI の保存形式＝`DiagramDocument`）。ただし唯一の情報系ツール `get_generation_config_schema` は例外で、引数を一切取りません。下表にはそれ以外の引数を挙げます。必須の引数には ✅ を付けています。
+サーバは 19 個のツールを公開します（ER 図編集の 13 個・名前付きクエリの 3 個・コード生成の 3 個）。
+**`file` 引数はすべてのツールに必要**です（図 JSON のパス。GUI の保存形式＝`DiagramDocument`）。
+ただし唯一の情報系ツール `get_generation_config_schema` は例外で、引数を一切取りません。
+下表にはそれ以外の引数を挙げます（必須の引数には ✅ を付けています）。
 
 ### ER 図編集
 
@@ -59,7 +83,8 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 ### 名前付きクエリ
 
-名前付きクエリは図に保存され、C# コード生成で Repository メソッドになります（[生成コードの使い方](code-generation.ja.md)を参照）。エンティティ・列は名前で指定し、ツール実行時に解決します。
+名前付きクエリは図に保存され、C# コード生成で Repository メソッドになります（[生成コードの使い方](code-generation.ja.md)を参照）。
+エンティティ・列は名前で指定し、ツール実行時に解決します。
 
 | ツール | 引数 | 説明 |
 |---|---|---|
@@ -69,15 +94,27 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 `set_query` のネスト引数:
 
-- `scalar_type` — `returns` = `scalar` のとき必須。方言中立の型トークン（例: `decimal(12,2)`）。
-- `condition` — 簡易 DSL の検索条件（比較・`AND`/`OR`/`NOT`・括弧・`IS [NOT] NULL`・`[NOT] LIKE`・`[NOT] IN`・`CONTAINS`/`STARTSWITH`/`ENDSWITH`）。`implementation` = `dsl` のとき使用（省略は無条件）。列名はテーブルの列を、`@名前` は宣言済みパラメータを指す。
-- `sql` — 方言名（`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`）→ 生 SQL 文字列の辞書。`implementation` = `sql` のとき使用。
-- `parameters` — `{ name` ✅ `, type, source_column, is_list }` の配列。`type`（方言中立トークン）と `source_column`（このテーブルの列。その生成型を使う）のどちらか一方を指定する。
-- `order_by` — `{ column` ✅ `, descending }` の配列（`returns` が `list` / `single` / `projection` のときのみ有効。`single` では並び替えて先頭 1 件を取得する）。
-- `paging` — 真偽値。真のとき `take` / `skip` 引数が追加される（`list` と `projection` に適用）。
-- `result_type_name` / `fields` — `returns` = `projection` のとき必須。`fields` は `{ name` ✅ `, type, source_column, is_nullable }` の配列（`type` / `source_column` はどちらか一方）。
+- `scalar_type`：`returns` = `scalar` のとき必須。方言中立の型トークン（例: `decimal(12,2)`）。
+- `condition`：簡易 DSL の検索条件（比較・`AND`/`OR`/`NOT`・括弧・`IS [NOT] NULL`・`[NOT] LIKE`・`[NOT] IN`・`CONTAINS`/`STARTSWITH`/`ENDSWITH`）。
+  `implementation` = `dsl` のとき使用（省略は無条件）。
+  列名はテーブルの列を、`@名前` は宣言済みパラメータを指す。
+- `sql`：方言名（`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`）→ 生 SQL 文字列の辞書。
+  `implementation` = `sql` のとき使用。
+- `parameters`：`{ name` ✅ `, type, source_column, is_list }` の配列。
+  `type`（方言中立トークン）と `source_column`（このテーブルの列。その生成型を使う）のどちらか一方を指定する。
+- `order_by`：`{ column` ✅ `, descending }` の配列（`returns` が `list` / `single` / `projection` のときのみ有効。`single` では並び替えて先頭 1 件を取得する）。
+- `paging`：真偽値。真のとき `take` / `skip` 引数が追加される（`list` と `projection` に適用）。
+- `result_type_name` / `fields`：`returns` = `projection` のとき必須。
+  `fields` は `{ name` ✅ `, type, source_column, is_nullable }` の配列（`type` / `source_column` はどちらか一方）。
 
-検証は「実行時に必ず失敗するもの」には厳格・「衛生上の警告」には寛容です。簡易 DSL の構文エラー・未知の列や未宣言の `@パラメータ`・生 SQL の未宣言パラメータ・構造の不整合（`scalar_type` / `fields` の欠落、パラメータの `type` / `source_column` の両方指定または両方欠落、`order_by` の誤用、未知の SQL 方言、`sql` の値が文字列でない）は保存を拒否します。未使用パラメータや複文の SQL は警告として報告し、保存は続行します。型トークンの内容はここでは検証せず、生成時に検証します。
+検証は「実行時に必ず失敗するもの」には厳格・「衛生上の警告」には寛容です。
+簡易 DSL の構文エラー・未知の列や未宣言の `@パラメータ`・生 SQL の未宣言パラメータ・構造の不整合（`scalar_type` / `fields` の欠落、パラメータの `type` / `source_column` の両方指定または両方欠落、`order_by` の誤用、未知の SQL 方言、`sql` の値が文字列でない）は保存を拒否します。
+未使用パラメータや複文の SQL は警告として報告し、保存は続行します。
+
+型トークンの内容はここでは検証せず、生成時に検証します。
+簡易 DSL の条件式と列の型整合（`name > 'M'` や数値列への `CONTAINS` など）も同じ扱いです。
+列が C# のどの型になるかの解決には方言の型マッパーが必要で、このファイルベースのサーバは意図的にそれを持たないためです。
+こうした条件はここでは保存され、生成時に検出されます（該当クエリはクエリ名を名指しした警告つきでスキップされ、他のクエリと生成全体には影響しません）。
 
 ### コード生成
 
@@ -87,26 +124,50 @@ stdio トランスポートに対応した MCP クライアントであれば利
 | `generate_ddl` | `out_file` ✅, `provider` | DDL（CREATE TABLE / 外部キー）の SQL スクリプトを生成し、`.sql` ファイルへ書き出す |
 | `get_generation_config_schema` | *(なし)* | 設定 JSON（`quicker.json`。`generate_csharp` の `config` はこのファイルへのパスを渡す）で有効な全キーを機械可読 JSON で返す。各キーの名前・型・既定値・分類・取り得る値・説明に加え、キー間のルールと例を含む。docs を参照せずに config を書けるようにするためのツール。`file` 引数を取らない唯一のツール |
 
-ファイルを対象にする 2 つの生成ツール（`generate_csharp` / `generate_ddl`）では `provider` は省略可能です。省略時は図の対象 DBMS（図に無ければ `sqlserver`）を使用します。指定できる値は `create_diagram` の `target_dbms` と同じ 5 方言です。`generate_ddl` は出力先を検証します。`out_file` は拡張子 `.sql` が必須で、親ディレクトリは実在している必要があり（ツールはディレクトリを作りません）、スクリプトは原子的に書き出されます。`generate_csharp` は意図的に非対称で、`out_dir` は従来どおり存在しなければ作成し、書き込みも原子的ではありません。
+ファイルを対象にする 2 つの生成ツール（`generate_csharp` / `generate_ddl`）では `provider` は省略可能です。
+省略時は図の対象 DBMS（図に無ければ `sqlserver`）を使用し、指定できる値は `create_diagram` の `target_dbms` と同じ 5 方言です。
+
+`generate_ddl` は出力先を検証します。
+`out_file` は拡張子 `.sql` が必須で、親ディレクトリは実在している必要があり（ツールはディレクトリを作りません）、スクリプトは原子的に書き出されます。
+`generate_csharp` は意図的に非対称で、`out_dir` は従来どおり存在しなければ作成し、書き込みも原子的ではありません。
 
 ## 典型フロー
 
-図はファイル単位の呼び出しを 1 つずつ重ねて構築します。例えば SQLite 向けに顧客／注文スキーマを設計し、その DDL と C# コードを生成する場合は次のようになります。
+図はファイル単位の呼び出しを 1 つずつ重ねて構築します。
+例えば SQLite 向けに顧客／注文スキーマを設計し、その DDL と C# コードを生成する場合は次のようになります。
 
-1. `create_diagram` — `file` = `shop.json`、`target_dbms` = `sqlite`
-2. `add_entity` — `table_name` = `Customer`。続いて `add_column` で `CustomerId`（`data_type` = `integer`、`is_primary_key` = true）と残りのカラムを追加
-3. `add_entity` — `table_name` = `Order`。続いて `add_column` で `OrderId`（主キー）、`CustomerId` などを追加
-4. `add_relationship` — `source_table` = `Customer`、`target_table` = `Order`、`relationship_type` = `OneToMany`、`source_columns` = `["CustomerId"]`、`target_columns` = `["CustomerId"]`
-5. `generate_ddl` — `out_file` = `shop.sql`、あるいは `generate_csharp` — `out_dir` = `./Generated`
+1. `create_diagram`：`file` = `shop.json`、`target_dbms` = `sqlite`
+2. `add_entity`：`table_name` = `Customer`。続いて `add_column` で `CustomerId`（`data_type` = `integer`、`is_primary_key` = true）と残りのカラムを追加
+3. `add_entity`：`table_name` = `Order`。続いて `add_column` で `OrderId`（主キー）、`CustomerId` などを追加
+4. `add_relationship`：`source_table` = `Customer`、`target_table` = `Order`、`relationship_type` = `OneToMany`、`source_columns` = `["CustomerId"]`、`target_columns` = `["CustomerId"]`
+5. `generate_ddl`：`out_file` = `shop.sql`（あるいは `generate_csharp` で `out_dir` = `./Generated`）
 
-途中で現在のテーブル・リレーションを読み返したいときは、`get_diagram_summary` を呼びます。`generate_csharp` の `config` を書く前には、`get_generation_config_schema` を呼んで利用可能なキーと既定値を確認できます。
+途中で現在のテーブル・リレーションを読み返したいときは、`get_diagram_summary` を呼びます。
+`generate_csharp` の `config` を書く前には、`get_generation_config_schema` を呼んで利用可能なキーと既定値を確認できます。
 
 ## 注意
 
-- **GUI は外部変更に追従します。** GUI で開いている図をサーバが書き換えると、GUI がそれを検知して追従します。GUI 側に未保存の変更がなく、書かれた内容が読み込めるものであれば、自動でファイルを再読込し（ズーム・スクロール位置は維持されます）、控えめなステータス通知を出します。取り込めない内容——不正な JSON・`DiagramDocument` でないもの・新しいフォーマット版——は読み込まず、現状を維持したうえで通知します。確認ダイアログが出るのは「GUI 側に未保存の変更がある状態で外部がファイルを書いた」場合のみで、そのときは再読込するか（未保存の変更は破棄されます）このまま編集を続けるかを確認ダイアログで選べます。進行中のマウス操作（テーブルの移動・リサイズ・範囲選択）は、いずれの経路でも操作開始時点の状態へ戻して打ち切ります。ただし**すでに開いているダイアログ（DB 同期・クエリ定義など）は閉じません**——それらは開いた時点の図を見ているため、再読込のあとに確定すると古い内容を前提とした操作になり得ます。変更をレビュー可能に保つため、図ファイルは git で管理することを引き続き推奨します。
-- **DiagramDocument の検証。** 編集系ツールは、存在しないファイル・`DiagramDocument` でない JSON（`Version` と `Schema` を持つオブジェクトが期待される）・このツールが対応するより新しいフォーマット版で保存された文書を拒否します（未知のデータを失わないため）。`get_diagram_summary` は、新しいフォーマットの文書でも警告付きで読み込みます。
-- **サーバ指針（instructions）による設計既定。** サーバは初期化時に、既定の設計指針を MCP の instructions として返します：ユーザーの指示がない限りテーブル名はパスカルケース単数形（既存の図があればその様式に合わせる）・主キー列は各テーブルにちょうど 1 つ（図と生成 DDL は複合主キーに対応しており、対応していないのは C# コード生成器だけ。ユーザーが複合主キーを求める場合は `set_primary_key` でその構成列と列順を宣言する）・外部キーの定義手順・一意制約は主キー以外の列（の組み合わせ）に対して定義するもの。instructions 対応クライアント（Claude Code など）はこれを自動でエージェントへ提示します。あくまで誘導であり強制ではないため、別の規則に従う図もツール上はそのまま扱えます。
-- **レイアウトはサーバが書きません。** 新規作成したファイルはスキーマのみ（座標なし）で、GUI で開くと全テーブルが自動整列されます。既存ファイルへ追加したテーブルは、次に GUI で開いたときに空き領域へ配置されます。既存テーブルへ追加したカラムはそのテーブルのカード内に表示されるだけで、テーブル自体の位置は変わりません。
+- **GUI は外部変更に追従します。**
+  GUI で開いている図をサーバが書き換えると、GUI がそれを検知して追従します。
+  GUI 側に未保存の変更がなく、書かれた内容が読み込めるものであれば、自動でファイルを再読込し（ズーム・スクロール位置は維持されます）、控えめなステータス通知を出します。
+  取り込めない内容（不正な JSON・`DiagramDocument` でないもの・新しいフォーマット版）は読み込まず、現状を維持したうえで通知します。
+  確認ダイアログが出るのは「GUI 側に未保存の変更がある状態で外部がファイルを書いた」場合のみで、そのときは再読込するか（未保存の変更は破棄されます）このまま編集を続けるかを選べます。
+  進行中のマウス操作（テーブルの移動・リサイズ・範囲選択）は、いずれの経路でも操作開始時点の状態へ戻して打ち切ります。
+  ただし**すでに開いているダイアログ（DB 同期・クエリ定義など）は閉じません**。
+  それらは開いた時点の図を見ているため、再読込のあとに確定すると古い内容を前提とした操作になり得ます。
+  変更をレビュー可能に保つため、図ファイルは git で管理することを引き続き推奨します。
+- **DiagramDocument の検証。**
+  編集系ツールは、存在しないファイル・`DiagramDocument` でない JSON（`Version` と `Schema` を持つオブジェクトが期待される）・このツールが対応するより新しいフォーマット版で保存された文書を拒否します（未知のデータを失わないため）。
+  `get_diagram_summary` は、新しいフォーマットの文書でも警告付きで読み込みます。
+- **サーバ指針（instructions）による設計既定。**
+  サーバは初期化時に、既定の設計指針を MCP の instructions として返します。
+  ユーザーの指示がない限りテーブル名はパスカルケース単数形（既存の図があればその様式に合わせる）・主キー列は各テーブルにちょうど 1 つ（図と生成 DDL は複合主キーに対応しており、対応していないのは C# コード生成器だけ。ユーザーが複合主キーを求める場合は `set_primary_key` でその構成列と列順を宣言する）・外部キーの定義手順・一意制約は主キー以外の列（の組み合わせ）に対して定義するもの、の 4 点です。
+  instructions 対応クライアント（Claude Code など）はこれを自動でエージェントへ提示します。
+  あくまで誘導であり強制ではないため、別の規則に従う図もツール上はそのまま扱えます。
+- **レイアウトはサーバが書きません。**
+  新規作成したファイルはスキーマのみ（座標なし）で、GUI で開くと全テーブルが自動整列されます。
+  既存ファイルへ追加したテーブルは、次に GUI で開いたときに空き領域へ配置されます。
+  既存テーブルへ追加したカラムはそのテーブルのカード内に表示されるだけで、テーブル自体の位置は変わりません。
 
 ## 関連
 
@@ -115,4 +176,9 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 ## ライセンス注記
 
-外部 MCP サーバは CLI（`QuickER.Cli`）の一部として提供され、ファイルベースのツール実行ホスト（`QuickER.Mcp.Tools`）にも同じく [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **＋追加許諾**が適用されます。この追加許諾により、**現行リリースは商用利用を含め全員無料**です。ツール定義カタログ・stdio ホスト基盤（`QuickER.Mcp`）は MIT です。NC 対象は全 8 プロジェクトで、対応の全体と提供方針は[ライセンスガイド](../LICENSING.ja.md)を参照してください。**これらのツールが生成したコードはあなたの成果物**であり、目的を問わず恒久的・取消不能に許諾され、クレジット表記も不要です。
+外部 MCP サーバは CLI（`QuickER.Cli`）の一部として提供され、ファイルベースのツール実行ホスト（`QuickER.Mcp.Tools`）にも同じく [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **＋追加許諾**が適用されます。
+この追加許諾により、**現行リリースは商用利用を含め全員無料**です。
+ツール定義カタログ・stdio ホスト基盤（`QuickER.Mcp`）は MIT です。
+NC 対象は全 8 プロジェクトで、対応の全体と提供方針は[ライセンスガイド](../LICENSING.ja.md)を参照してください。
+
+**これらのツールが生成したコードはあなたの成果物**であり、目的を問わず恒久的・取消不能に許諾され、クレジット表記も不要です。

@@ -109,9 +109,10 @@ public sealed class CSharpCodeGenerationService
         ArgumentNullException.ThrowIfNull(options);
 
         var diagnostics = new List<GenerationDiagnostic>();
-        Validate(diagram, options, diagnostics);
 
-        // 実効方言の解決（未対応方言の指定は ArgumentException になるため、診断へ変換して返す）
+        // 実効方言の解決（未対応方言の指定は ArgumentException になるため、診断へ変換して返す）。
+        // Validate より前に解決する＝層別出力の層フォルダ検証（ファイル計画経由）や名前空間検証も
+        // 実効方言へ触れるため、後にすると未対応方言が診断でなく例外のまま呼び出し元へ抜ける
         IReadOnlyList<string> effectiveDialects;
 
         try
@@ -123,6 +124,8 @@ public sealed class CSharpCodeGenerationService
             diagnostics.Add(GenerationDiagnostic.Error(ex.Message));
             return new CodeGenerationResult { Files = [], Diagnostics = diagnostics };
         }
+
+        Validate(diagram, options, diagnostics);
 
         // マルチ方言（実効方言 2 つ以上）レイアウトと EF Core 生成は併存できない。
         // マルチ方言では契約 namespace に ADO・方言 SQL を一切置かず、EntitySaveMetadata / EntityGraphSaver を
@@ -152,10 +155,14 @@ public sealed class CSharpCodeGenerationService
         // パッケージモードでも常に生成側に出力し、EF Core 固定 infra はパッケージ QuickER.Runtime.EntityFrameworkCore が担う。
         // なお EF Core と QuickER 版 Repository のマルチターゲット（実効方言 2 つ以上）の排他は別理由（契約の型同一性）で上に残す。
 
-        // マルチ辞書が渡されているときは方言間の C# 型不一致を検証し、[SqlColumnType] を sqlserver 辞書から補完する
+        // マルチ辞書が渡されているときは方言間の C# 型不一致を検証し、[SqlColumnType] を sqlserver 辞書から補完する。
+        // QuickER 版 Repository を生成しない構成（DB アクセスなし・EF Core 単独）では方言辞書を無視する＝
+        // 方言指定は生成物に影響しないという既定（EffectiveRepositoryDialects の未検証フォールバックと同じ線）を
+        // ここでも守る。無視しないと、呼び出し側が渡した隠れた 2 方言辞書が型統合（SQLite 図の timestamp が
+        // byte[] 行バージョン化）・Info 診断・[SqlColumnType] 補完として単一方言の出力と食い違いを生む
         var columnTypes = primaryColumnTypes;
 
-        if (columnTypesByDialect is not null)
+        if (columnTypesByDialect is not null && options.GenerateRepositories)
         {
             // 行バージョン列は方言によって型が食い違う（sqlserver: byte[] / sqlite: DateTime）が、統一先が
             // 一意に決まるため不一致エラーにせず、行バージョンとして解決した方言の型へ共有 Entity を寄せる
@@ -278,7 +285,7 @@ public sealed class CSharpCodeGenerationService
             var syncTableList = string.Join(
                 Environment.NewLine,
                 model.SyncTables.Select(table =>
-                    $"  {table.TableName}（{table.EntityClassName}）"
+                    $"  {table.TableName} ({table.EntityClassName})"
                     + (
                         table.IsVersionless
                             ? Strings.CodeGen_Info_SyncSupportVersionlessTableSuffix
@@ -1144,8 +1151,11 @@ public sealed class CSharpCodeGenerationService
     /// 同じ規則を効かせる。空白のオプションは既定値（<c>Generated</c> / <c>{root}.{接尾辞}</c>）へ
     /// フォールバックするため検証対象外。カテゴリ別名前空間は実際に使われる構成でのみ検証する
     /// ＝分割時（<see cref="CodeGenerationOptions.SplitFilesByCategory"/>）の有効バケットのみ。
-    /// ただし Repository 名前空間は非分割のマルチ方言レイアウトでも使われるため、
-    /// Repository バケットが有効なら分割の有無に依らず検証する。
+    /// ただし Repository 名前空間は非分割でも<b>マルチ方言レイアウト</b>（QuickER 版 Repository ×
+    /// 実効方言 2 つ以上＝契約 1 回＋方言別 namespace 実装へ展開する構成）で使われるため、
+    /// そのときだけ分割の有無に依らず検証する（条件は <see cref="GeneratedFilePlanner"/> の
+    /// 非分割マルチ方言レイアウト判定と同じ。単一方言の非分割では使われないので検証しない＝
+    /// 「名前空間導出に実際に使われる値だけ検証する」既存の一般則）。
     /// </remarks>
     private static void ValidateNamespaces(
         CodeGenerationOptions options,
@@ -1194,13 +1204,18 @@ public sealed class CSharpCodeGenerationService
             ),
         ];
 
+        // 非分割で Repository 名前空間が使われるのはマルチ方言レイアウトだけ（GeneratedFilePlanner の
+        // repositoryMultiDialectInlineLayout と同じ条件。単一方言の非分割では出力に現れない）
+        var repositoryUsedInline =
+            options.GenerateRepositories && options.EffectiveRepositoryDialects.Count >= 2;
+
         foreach (var target in categoryNamespaces)
         {
             var used =
                 activeBuckets.Contains(target.Bucket)
                 && (
                     options.EffectiveSplitFilesByCategory
-                    || target.Bucket == GenerationBucket.Repository
+                    || (target.Bucket == GenerationBucket.Repository && repositoryUsedInline)
                 );
 
             if (used)
@@ -1659,13 +1674,6 @@ public sealed class CSharpCodeGenerationService
     }
 
     /// <summary>
-    /// 無制限バイナリ列の除外対象一覧を <c>{EntityClass}.{Property}（{テーブル}.{列名}）</c> 形式の行で組み立てる。
-    /// </summary>
-    /// <remarks>
-    /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsUnboundedBinary"/> のものを対象にする
-    /// （マーカー属性 <c>[UnboundedBinaryColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
-    /// </remarks>
-    /// <summary>
     /// 型表記が中立トークン経由では復元できない列を「テーブル.列: 図の表記 -&gt; トークン経由で戻る表記」の
     /// 1 行ずつへ整形する（Info 診断専用）。
     /// </summary>
@@ -1691,13 +1699,20 @@ public sealed class CSharpCodeGenerationService
             )
             .ToList();
 
+    /// <summary>
+    /// 無制限バイナリ列の除外対象一覧を <c>{EntityClass}.{Property} ({テーブル}.{列名})</c> 形式の行で組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsUnboundedBinary"/> のものを対象にする
+    /// （マーカー属性 <c>[UnboundedBinaryColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
+    /// </remarks>
     private static IReadOnlyList<string> BuildExcludedColumnLines(CSharpGenerationModel model) =>
         model
             .EntityClasses.SelectMany(entity =>
                 entity
                     .Properties.Where(property => property.IsUnboundedBinary)
                     .Select(property =>
-                        $"{entity.ClassName}.{property.PropertyName}（{entity.TableName}.{property.ColumnName}）"
+                        $"{entity.ClassName}.{property.PropertyName} ({entity.TableName}.{property.ColumnName})"
                     )
             )
             .ToList();

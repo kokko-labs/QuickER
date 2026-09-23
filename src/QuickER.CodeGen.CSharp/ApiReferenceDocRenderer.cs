@@ -202,7 +202,7 @@ internal sealed class ApiReferenceDocRenderer
                 ["is_primary_key"] = property.IsPrimaryKey,
                 // 非 NULL（参照型なら「必須」の意味）を必須とみなす
                 ["is_required"] = !property.IsNullable,
-                ["description"] = EscapeCell(property.Description),
+                ["description"] = EscapeCell(property.DescriptionRaw),
             })
             .ToList();
 
@@ -221,8 +221,8 @@ internal sealed class ApiReferenceDocRenderer
         var view = new ScriptObject
         {
             ["class_name"] = entity.ClassName,
-            ["table_name"] = entity.TableName,
-            ["description"] = EscapeCell(entity.Description),
+            ["table_name"] = EscapeCell(entity.TableNameRaw),
+            ["description"] = EscapeCell(entity.DescriptionRaw),
             ["properties"] = properties,
             ["navigations"] = navigations,
         };

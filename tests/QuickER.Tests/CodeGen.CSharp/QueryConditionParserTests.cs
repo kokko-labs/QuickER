@@ -188,8 +188,13 @@ public class QueryConditionParserTests
         node.Operand.Should().BeOfType<StringOperand>().Which.Value.Should().Be("abc");
     }
 
-    /// <summary>ワイルドカードなしの LIKE リテラルは等値比較になることを検証する</summary>
-    [Fact(DisplayName = "ワイルドカードなしの LIKE は等値比較になる")]
+    /// <summary>
+    /// ワイルドカードなしの LIKE リテラルの扱いを検証する。肯定形は従来どおり等値比較
+    /// （NULL 行は一致しない＝結論が LIKE と同じで、生成物のバイト安定を保つ）。否定形は完全一致の
+    /// StringMatchNode（Exact・Negated）＝等値の &lt;&gt; へ畳むと列側の IS NULL 補償で NULL 行が
+    /// 一致に含まれ、LIKE の意味論（NULL 行はどちらの向きでも一致しない）から外れるため
+    /// </summary>
+    [Fact(DisplayName = "ワイルドカードなしの LIKE は肯定形＝等値・否定形＝完全一致ノードになる")]
     public void Parse_LikeWithoutWildcard_BecomesEquality()
     {
         ParseValid("Memo LIKE 'abc'")
@@ -198,11 +203,12 @@ public class QueryConditionParserTests
             .Which.Operator.Should()
             .Be(ComparisonOperator.Equal);
 
-        ParseValid("Memo NOT LIKE 'abc'")
+        var negated = ParseValid("Memo NOT LIKE 'abc'")
             .Root.Should()
-            .BeOfType<NotNode>()
-            .Which.Operand.Should()
-            .BeOfType<ComparisonNode>();
+            .BeOfType<StringMatchNode>()
+            .Which;
+        negated.Kind.Should().Be(StringMatchKind.Exact);
+        negated.Negated.Should().BeTrue();
     }
 
     /// <summary>LIKE @param は部分一致（Contains）に固定されることを検証する</summary>
@@ -259,6 +265,55 @@ public class QueryConditionParserTests
 
         result.Root.Should().BeNull();
         result.Diagnostics.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// 全角数字（U+FF15 等）が数値リテラルとして通らず診断になることを検証する。
+    /// <c>char.IsDigit</c> は全角数字も真になるが、トークンは原文のまま C# の数値リテラルとして
+    /// エミットされるため、通すとコンパイル不能な生成物になる（数値の字句は ASCII の数字に限る）
+    /// </summary>
+    [Theory(DisplayName = "全角数字は数値リテラルとして通らず診断になる")]
+    [InlineData("Amount > ５")]
+    [InlineData("Amount > 1５")]
+    public void Parse_FullWidthDigit_ReportsDiagnostic(string text)
+    {
+        var result = ParseValid(text);
+
+        result.Root.Should().BeNull();
+        result.Diagnostics.Should().NotBeEmpty();
+    }
+
+    /// <summary>
+    /// 極端に複雑な条件式（深い NOT・深い括弧・長大な OR 連結）が StackOverflow（catch 不能）でなく
+    /// 診断 1 件で打ち切られることを検証する。OR / AND の連結は左に伸びる木になるため、パーサの再帰だけ
+    /// でなく木を辿るエミッタ・型検査の再帰も深くなる＝複雑さの合計で一律に打ち切る
+    /// </summary>
+    [Theory(DisplayName = "極端に複雑な条件式は診断で打ち切られる")]
+    [InlineData("not")]
+    [InlineData("paren")]
+    [InlineData("or")]
+    public void Parse_TooComplexCondition_ReportsDiagnostic(string shape)
+    {
+        var text = shape switch
+        {
+            "not" => string.Concat(Enumerable.Repeat("NOT ", 300)) + "CustomerId = 1",
+            "paren" => new string('(', 300) + "CustomerId = 1" + new string(')', 300),
+            _ => string.Join(" OR ", Enumerable.Repeat("CustomerId = 1", 300)),
+        };
+
+        var result = ParseValid(text);
+
+        result.Root.Should().BeNull();
+        result.Diagnostics.Should().ContainSingle();
+    }
+
+    /// <summary>上限内の複雑さ（100 連結）は従来どおりパースできることを検証する</summary>
+    [Fact(DisplayName = "上限内の複雑さは従来どおりパースできる")]
+    public void Parse_ComplexButWithinLimit_Succeeds()
+    {
+        var text = string.Join(" OR ", Enumerable.Repeat("CustomerId = @customerId", 100));
+
+        ParseValid(text).Success.Should().BeTrue();
     }
 
     /// <summary>診断が原文内の位置を指すことを検証する</summary>

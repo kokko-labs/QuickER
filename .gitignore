@@ -377,3 +377,8 @@ ec-order.db
 
 # Claude Code のユーザーローカル設定（権限許可など個人環境の状態。スキルはコミット対象）
 .claude/settings.local.json
+
+# Vale のスタイルパッケージ。`vale sync` で取得する（取得元とバージョンは .vale.ini の Packages が決める）。
+# 語彙 .vale/styles/config/ だけをリポジトリで管理する。
+/.vale/styles/*
+!/.vale/styles/config/

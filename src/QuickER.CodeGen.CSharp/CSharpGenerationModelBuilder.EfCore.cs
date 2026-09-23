@@ -1,3 +1,4 @@
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.CSharp;
@@ -27,15 +28,42 @@ internal sealed partial class CSharpGenerationModelBuilder
     ];
 
     /// <summary>ER 図定義から EF Core（DbContext・Fluent 構成）の生成モデルを構築する（GenerateEfCoreRepositories が OFF のときは null）</summary>
-    private CSharpEfCoreModel? BuildEfCoreModel(ErDiagram diagram, CodeGenerationOptions options)
+    /// <remarks>
+    /// 主キーの無いテーブルは DbContext から除外する（DbSet・Fluent 構成を出さず、当該テーブルが絡む
+    /// リレーション構成もスキップし、<c>modelBuilder.Ignore&lt;T&gt;()</c> を明示・Warning で名指しする）。
+    /// EF Core はマップされる全エンティティ型にキーを要求するため、キーの無い型が 1 つでもモデルへ入ると
+    /// DbContext 全体が初回使用時に例外になる。keyless 型（HasNoKey）はリレーションの principal に
+    /// なれず keyless 型へのナビゲーションも持てないため、FK で子として参加する図では結局モデル検証
+    /// 例外へ戻る＝除外が QuickER 版 Repository のスキップ（単一主キーのみ）と同じ線で対称になる。
+    /// </remarks>
+    private CSharpEfCoreModel? BuildEfCoreModel(
+        ErDiagram diagram,
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
     {
         if (!options.GenerateEfCoreRepositories)
         {
             return null;
         }
 
-        var dbSets = diagram
-            .Entities.Select(entity => new CSharpEfCoreDbSetModel
+        var mappedEntities = diagram.Entities.Where(HasAnyPrimaryKey).ToList();
+        var keylessEntities = diagram.Entities.Where(entity => !HasAnyPrimaryKey(entity)).ToList();
+
+        foreach (var entity in keylessEntities)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Warning(
+                    string.Format(
+                        Strings.CodeGen_Warning_EfCoreKeylessTableExcluded,
+                        entity.TableName
+                    )
+                )
+            );
+        }
+
+        var dbSets = mappedEntities
+            .Select(entity => new CSharpEfCoreDbSetModel
             {
                 EntityClassName = _nameConverter.ToEntityClassName(entity.TableName),
                 PropertyName = _nameConverter.ToDbSetName(entity.TableName),
@@ -45,8 +73,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         // principal（親）エンティティ ID → その親が持つリレーション構成の対応を先に組み立てる
         var relationshipsByPrincipal = BuildEfCoreRelationships(diagram);
 
-        var entities = diagram
-            .Entities.Select(entity => new CSharpEfCoreEntityConfigModel
+        var entities = mappedEntities
+            .Select(entity => new CSharpEfCoreEntityConfigModel
             {
                 EntityClassName = _nameConverter.ToEntityClassName(entity.TableName),
                 // Fluent の ToTable("...") へ C# リテラルとして埋め込むためエスケープする（[Table] と同じ規則）
@@ -70,9 +98,16 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             DbSets = dbSets,
             Entities = entities,
+            IgnoredEntityClassNames = keylessEntities
+                .Select(entity => _nameConverter.ToEntityClassName(entity.TableName))
+                .ToList(),
             IgnoredBaseMembers = EntityBaseIgnoredMembers,
         };
     }
+
+    /// <summary>主キー列を 1 つ以上持つか（EF Core の DbContext へマップできるか）</summary>
+    private static bool HasAnyPrimaryKey(Entity entity) =>
+        entity.Columns.Any(column => column.IsPrimaryKey);
 
     /// <summary>カラム定義から EF Core のスカラープロパティ構成モデルを構築する</summary>
     private CSharpEfCorePropertyConfigModel BuildEfCorePropertyConfig(Column column)
@@ -126,6 +161,13 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
+            // 主キーの無いテーブルは DbContext から除外（Ignore）するため、そのテーブルが絡む
+            // リレーションの Fluent 構成も出さない（Ignore された型を参照する構成はモデル構築で落ちる）
+            if (!HasAnyPrimaryKey(source) || !HasAnyPrimaryKey(target))
+            {
+                continue;
+            }
+
             // 複合外部キーは対象外（診断はナビゲーション解決側が 1 度だけ出す）
             if (relationship.ColumnPairs.Count > 1)
             {
@@ -150,6 +192,13 @@ internal sealed partial class CSharpGenerationModelBuilder
             var isCollection = relationship.Type == RelationshipType.OneToMany;
             var isSelfReference = source.Id == target.Id;
 
+            // 親列集合が親の主キー集合と一致しないとき（UNIQUE 列参照・複合主キーの一部参照）は
+            // HasPrincipalKey を明示する。EF Core の既定は「FK は親の主キーへ結合」なので、
+            // 出さないと主キーへ黙って結合される（列ペアは単一ペアのみここへ来る）
+            var principalKeyColumns = source.GetPrimaryKeyColumnsInOrder();
+            var referencesPrimaryKey =
+                principalKeyColumns.Count == 1 && principalKeyColumns[0].Id == principalColumn.Id;
+
             var config = new CSharpEfCoreRelationshipConfigModel
             {
                 DependentClassName = _nameConverter.ToEntityClassName(target.TableName),
@@ -165,8 +214,22 @@ internal sealed partial class CSharpGenerationModelBuilder
                     : _nameConverter.ToNavigationName(source.TableName, collection: false),
                 IsCollection = isCollection,
                 ForeignKeyPropertyNames = [_nameConverter.ToPropertyName(dependentColumn.Name)],
-                // カスケード削除の有無はモデルの OnDelete に従う（Cascade のときのみ連鎖削除）
-                CascadeDelete = relationship.OnDelete == ForeignKeyReferentialAction.Cascade,
+                PrincipalKeyPropertyNames = referencesPrimaryKey
+                    ? []
+                    : [_nameConverter.ToPropertyName(principalColumn.Name)],
+                // 図の参照アクション → EF Core の DeleteBehavior（実挙動を観測して決めた写像）。
+                // NoAction / Restrict はクライアント挙動が同一（必須関係＝保存前に例外・任意関係＝
+                // 追跡中の子の FK を null 化）なので図の宣言どおり NoAction を出す。SetNull は EF が
+                // 追跡中の子を、DB の ON DELETE SET NULL が未追跡の子を、同じ結論へ揃える。
+                // SET DEFAULT だけは EF に対応値が無く、ClientNoAction（EF は子へ触れず DELETE だけ
+                // 送る）でないと EF が子の FK を null へ更新して DB の既定値設定を横取りする
+                DeleteBehavior = relationship.OnDelete switch
+                {
+                    ForeignKeyReferentialAction.Cascade => "Cascade",
+                    ForeignKeyReferentialAction.SetNull => "SetNull",
+                    ForeignKeyReferentialAction.SetDefault => "ClientNoAction",
+                    _ => "NoAction",
+                },
             };
 
             if (!result.TryGetValue(source.Id, out var list))

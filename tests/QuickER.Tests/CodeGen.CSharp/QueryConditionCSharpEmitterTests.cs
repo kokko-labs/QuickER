@@ -125,6 +125,18 @@ public class QueryConditionCSharpEmitterTests
             .Be("e => e.Memo == \"it's \\\"quoted\\\"\"");
     }
 
+    /// <summary>
+    /// レンダラーの <c>ReplaceLineEndings</c> が実改行へ変える文字（FORM FEED・NEL・行区切り・段落区切り）が
+    /// エスケープシーケンスで書かれることを検証する（生のまま出すとリテラルが行をまたいで壊れる）
+    /// </summary>
+    [Fact(DisplayName = "改行に化ける文字はエスケープシーケンスで書かれる")]
+    public void Emit_StringLiteral_EscapesLineBreakingCharacters()
+    {
+        Emit("Memo = 'a\fb\u0085c\u2028d\u2029e'", CreatePlainBindings())
+            .Lambda.Should()
+            .Be("e => e.Memo == \"a\\fb\\u0085c\\u2028d\\u2029e\"");
+    }
+
     /// <summary>LIKE / CONTAINS 系が文字列メソッド呼び出しになり、NULL 許容列では NULL 前提が AND されることを検証する</summary>
     /// <remarks>
     /// SQL の LIKE は NULL 行を UNKNOWN で落とすため <c>IS NOT NULL AND LIKE</c> は SQL 側で意味が変わらないが、
@@ -148,6 +160,22 @@ public class QueryConditionCSharpEmitterTests
         Emit("Memo STARTSWITH @keyword", CreatePlainBindings())
             .Lambda.Should()
             .Be("e => (e.Memo != null && e.Memo!.StartsWith(keyword))");
+    }
+
+    /// <summary>
+    /// 前置 NOT の連鎖（NOT NOT ...）が偶奇で畳まれることを検証する。偶数個は肯定形＝素の一致に戻り、
+    /// 奇数個は否定形＝NULL 前提の内側の否定になる（畳まずに 1 段ずつ包むと、否定が NULL 前提の外に出て
+    /// NOT LIKE と結果が割れる）
+    /// </summary>
+    [Fact(DisplayName = "前置 NOT の連鎖は偶奇で畳まれる")]
+    public void Emit_ChainedNot_FoldsByParity()
+    {
+        Emit("NOT NOT Memo LIKE '%x%'", CreatePlainBindings())
+            .Lambda.Should()
+            .Be("e => (e.Memo != null && e.Memo!.Contains(\"x\"))");
+        Emit("NOT NOT NOT Memo LIKE '%x%'", CreatePlainBindings())
+            .Lambda.Should()
+            .Be("e => (e.Memo != null && !(e.Memo!.Contains(\"x\")))");
     }
 
     /// <summary>NULL 非許容の文字列列には null 抑止（!）も NULL 前提も付かないことを検証する</summary>
@@ -200,6 +228,23 @@ public class QueryConditionCSharpEmitterTests
             .Which.Should()
             .Be("var idsValues = ids.Select(CustomerIdValue.Create).ToList();");
         emitted.Lambda.Should().Be("e => idsValues.Contains(e.CustomerId)");
+    }
+
+    /// <summary>
+    /// 持ち上げリスト変数名（{パラメータ名}Values）がメソッド引数名と衝突するとき、_ を後置して
+    /// 回避することを検証する（衝突したままだとローカル変数が引数を隠して CS0136 になる）
+    /// </summary>
+    [Fact(DisplayName = "持ち上げ変数は引数名との衝突を _ 後置で回避する")]
+    public void Emit_ValueObjectIn_AvoidsParameterNameCollision()
+    {
+        var emitted = Emit("CustomerId IN @ids", CreateVoBindings(), "idsValues");
+
+        emitted
+            .PreludeLines.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be("var idsValues_ = ids.Select(CustomerIdValue.Create).ToList();");
+        emitted.Lambda.Should().Be("e => idsValues_.Contains(e.CustomerId)");
     }
 
     /// <summary>VO 型で型付けされたパラメータ（列参照）は Create で包まず直接比較されることを検証する</summary>

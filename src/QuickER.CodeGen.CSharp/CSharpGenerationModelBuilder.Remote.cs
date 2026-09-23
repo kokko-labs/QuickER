@@ -204,9 +204,15 @@ internal sealed partial class CSharpGenerationModelBuilder
             + $"    private sealed record {RequestRecordName(shape, repositoryName)}({properties});";
     }
 
-    /// <summary>サーバー側リクエストレコード名（例 <c>OrderGetByCustomerRequest</c>）を返す</summary>
+    /// <summary>サーバー側リクエストレコード名（例 <c>Order_GetByCustomerRequest</c>）を返す</summary>
+    /// <remarks>
+    /// リポジトリ名と操作名の間に <c>_</c> を挟む。素の連結だとエンティティをまたいで衝突し得る
+    /// （<c>Order</c>×<c>LineSummary</c> と <c>OrderLine</c>×<c>Summary</c> が同名 CS0102）。
+    /// private record なのでワイヤ・公開 API 面には現れず、区切りは無条件（衝突時だけ別名にする方式は
+    /// 他エンティティの有無で名前が揺れ、出力の決定性を壊す）。
+    /// </remarks>
     private static string RequestRecordName(QueryMethodShape shape, string repositoryName) =>
-        $"{repositoryName}{TrimAsyncSuffix(shape.MethodName)}Request";
+        $"{repositoryName}_{TrimAsyncSuffix(shape.MethodName)}Request";
 
     /// <summary>戻り値型 <c>Task&lt;X&gt;</c> から内側の型 X を取り出す</summary>
     private static string StripTaskType(string returnTypeName) =>

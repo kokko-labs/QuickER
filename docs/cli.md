@@ -12,7 +12,8 @@ The QuickER CLI provides subcommands for generating code (`generate` / `scaffold
 
 The CLI display language follows the OS language setting (Japanese / English).
 
-Install it with `dotnet tool install --global QuickER.Cli`. To run from source instead:
+Install it with `dotnet tool install --global QuickER.Cli`.
+To run from source instead:
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate --schema diagram.json --out ./Generated
@@ -34,13 +35,25 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 | `--config <file>` | | Generation option settings file (quicker.json). See below |
 | `--force` | | Overwrite generated files even if they have been edited by hand since they were generated |
 
-In addition to these, **every key in the settings file (quicker.json) can be specified as a same-named kebab-case flag**, and such flags take precedence over the settings file (priority: **CLI flag > settings file > default**). A flag name is the mechanical kebab-case conversion of the key; for example `rootNamespace` → `--root-namespace`, `generateRepositories` → `--generate-repositories`, `splitFilesByCategory` → `--split-files-by-category`, `outputPath` → `--output-path`. There are exceptions to the mechanical conversion: the three API-reference keys and the code subfolder key use shorter spellings — `ApiDocsLanguage` → `--api-docs-lang`, `ApiDocsSubdirectory` → `--api-docs-subdir`, `ApiDocsFileName` → `--api-docs-file` — `CodeSubdirectory` → `--code-subdir` — and the canonical key `OutputFileName` has no flag of its own; use `--output-path` (only its file-name part is used). Bool keys are **three-valued**: `--flag` (no value) = `true`, `--flag false` = `false`, and omitting it = the value from the settings file. For the meaning of each key, see the "Settings file" table below (`--repository-dialects` is a comma-separated list of dialects; when omitted, a single dialect is derived from the `--provider` dialect).
+In addition to these, **every key in the settings file (quicker.json) can be specified as a same-named kebab-case flag**, and such flags take precedence over the settings file (priority: **CLI flag > settings file > default**).
+A flag name is the mechanical kebab-case conversion of the key; for example `rootNamespace` → `--root-namespace`, `generateRepositories` → `--generate-repositories`, `splitFilesByCategory` → `--split-files-by-category`, `outputPath` → `--output-path`.
+Bool keys are **three-valued**: `--flag` (no value) = `true`, `--flag false` = `false`, and omitting it = the value from the settings file.
+For the meaning of each key, see the "Settings file" table below (`--repository-dialects` is a comma-separated list of dialects; when omitted, a single dialect is derived from the `--provider` dialect).
 
-If a `.g.cs` about to be replaced has been edited by hand since it was generated, `generate` writes nothing, lists the edited files on stderr and exits with code `2` (other failures exit with `1`). Move the edits into a separate file, such as a `partial` class, or run again with `--force` to discard them. See [The generated file header](code-generation.md#the-generated-file-header) for what counts as an edit.
+The mechanical conversion has exceptions.
+
+- The three API-reference keys and the code subfolder key use shorter spellings.
+  `ApiDocsLanguage` → `--api-docs-lang`, `ApiDocsSubdirectory` → `--api-docs-subdir`, `ApiDocsFileName` → `--api-docs-file`, `CodeSubdirectory` → `--code-subdir`
+- The canonical key `OutputFileName` has no flag of its own; use `--output-path`, of which only the file-name part is used
+
+If a `.g.cs` about to be replaced has been edited by hand since it was generated, `generate` writes nothing, lists the edited files on stderr and exits with code `2` (other failures exit with `1`).
+Move the edits into a separate file, such as a `partial` class, or run again with `--force` to discard them.
+See [The generated file header](code-generation.md#the-generated-file-header) for what counts as an edit.
 
 ## quicker scaffold
 
-Connects directly to a database, imports the schema, and generates code. The options are shared with `generate`; instead of `--schema`, you specify `--connection`.
+Connects directly to a database, imports the schema, and generates code.
+The options are shared with `generate`; instead of `--schema`, you specify `--connection`.
 
 ```powershell
 quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;TrustServerCertificate=true" --out ./Generated --provider sqlserver
@@ -67,11 +80,15 @@ quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --p
 | `--provider <name>` | | The dialect used to expand column types, and the `TargetDbms` recorded in the diagram. `sqlserver` (default) / `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--force` | | Overwrite the output file even if it is a diagram saved in a newer format than this version supports |
 
-The result is written as a new diagram; it is never merged into an existing one. If `--out` names a diagram saved in a newer format, `reverse` writes nothing and exits with code `2`, because writing it in this version's format would drop the data this version cannot represent. Non-fatal findings are reported as warnings on standard error, and the command fails when the source contains no eligible class.
+The result is written as a new diagram; it is never merged into an existing one.
+If `--out` names a diagram saved in a newer format, `reverse` writes nothing and exits with code `2`, because writing it in this version's format would drop the data this version cannot represent.
+Non-fatal findings are reported as warnings on standard error, and the command fails when the source contains no eligible class.
 
 ## quicker mcp
 
-Starts a stdio MCP (Model Context Protocol) server that exposes ER diagram editing and code generation tools to AI agents (Claude Code, Codex, and so on). It takes no options and is stateless: each tool takes the target diagram file as its `file` argument — except `get_generation_config_schema`, the one information-only tool, which takes no `file`.
+Starts a stdio MCP (Model Context Protocol) server that exposes ER diagram editing and code generation tools to AI agents (Claude Code, Codex, and so on).
+It takes no options and is stateless.
+Each tool takes the target diagram file as its `file` argument, except `get_generation_config_schema`, the one information-only tool, which takes no `file`.
 
 ```powershell
 quicker mcp
@@ -108,29 +125,29 @@ Main keys (the default is in parentheses; category order):
 | `SplitFilesByCategory` (`false`) | Output each category in a separate file and namespace. You can specify namespaces individually with `EntityNamespace` / `RepositoryNamespace`, and so on |
 | `LayeredOutput` (`false`) | Sort the split files into layer subfolders (domain / presentation / infrastructure / server) under the output directory, so each layer can be its own project. Implies `SplitFilesByCategory` (see [Using the generated code](code-generation.md#layered-folder-output---layered-output)) |
 | `DomainLayerDirectory` / `PresentationLayerDirectory` / `InfrastructureLayerDirectory` / `ServerLayerDirectory` (`Domain` / `Presentation` / `Infrastructure` / `Server`) | The per-layer folders for `LayeredOutput`, as relative paths under the output directory; several segments are allowed (`MyApp.Domain/Generated`). With `LayeredOutput`, blank namespace keys also derive their defaults from these folders, keeping folders and namespaces aligned. Absolute paths, drive letters, and `..` are rejected as a generation error; a blank value falls back to the default. `ServerLayerDirectory` is used only with `GenerateRemoteServices` |
-| `CodeSubdirectory` (unspecified = no subfolder) | Output subfolder for the generated code (`*.g.cs`): one level below the layer folder with `LayeredOutput`, otherwise below the output directory (e.g. `Generated`; several segments allowed). Works in every output mode and **never affects namespaces**, so it does not have to be a valid C# identifier. Absolute paths and `..` are rejected. The API reference Markdown does not follow it (corresponds to the CLI's `--code-subdir`) |
+| `CodeSubdirectory` (unspecified = no subfolder) | Output subfolder for the generated code (`*.g.cs`): one level below the layer folder with `LayeredOutput`, otherwise below the output directory (for example `Generated`; several segments allowed). Works in every output mode and **never affects namespaces**, so it does not have to be a valid C# identifier. Absolute paths and `..` are rejected. The API reference Markdown does not follow it (corresponds to the CLI's `--code-subdir`) |
 | `RootNamespace` (`Generated`) | The root namespace of the generated code |
 | `GenerateEditModels` / `GenerateMappers` (both `true`) | Whether to generate each category. **Entity classes are always generated**, and there is no dedicated key for them |
 | `GenerateValueObjects` (`false`) | Generate a per-column value object type (such as `CustomerIdValue`) (see [Using the generated code](code-generation.md#value-objects-generatevalueobjects)) |
 | `UseGuidKeyForStringPrimaryKey` (`false`) | Make a string primary key a GUID value object (only when `GenerateValueObjects` is enabled) |
 | `GenerateRepositories` (`false`) | Generate a QuickER Repository (a lightweight mini-ORM). **By default, no DB-access code is generated** (the same default as the GUI) |
-| `RepositoryDialects` (unspecified) | The multi-target dialect list for the QuickER Repository (e.g. `["sqlserver", "sqlite"]`). Only `sqlserver` and `sqlite` are supported; combining any other dialect with `GenerateRepositories` fails before generation. When unspecified, the effective value is resolved in this order: `--repository-dialects` > this key in the settings file > a single dialect derived from `--provider` |
+| `RepositoryDialects` (unspecified) | The multi-target dialect list for the QuickER Repository (for example `["sqlserver", "sqlite"]`). Only `sqlserver` and `sqlite` are supported; combining any other dialect with `GenerateRepositories` fails before generation. When unspecified, the effective value is resolved in this order: `--repository-dialects` > this key in the settings file > a single dialect derived from `--provider` |
 | `ExcludeUnboundedBinaryColumns` (`false`) | Exclude unbounded binary columns from the QuickER Repository's SELECT / UPDATE (corresponds to the CLI's `--exclude-unbounded-binary-columns`; see [Using the generated code](code-generation.md#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns)) |
 | `GenerateEfCoreRepositories` (`false`) | Generate the `QuickErDbContext` for EF Core plus EF Core Repository implementations. Cannot be combined with multi-targeting (two or more effective dialects) |
 | `GenerateInMemoryRepositories` (`false`) | Generate an in-memory Repository implementation for testing |
-| `GenerateRemoteContracts` (`false`) | Additionally generate the remote-operation interface `I{Entity}RemoteRepository` (corresponds to the CLI's `--generate-remote-contracts`; requires a QuickER Repository, an EF Core Repository, or an in-memory Repository — that is, `GenerateRepositories`, `GenerateEfCoreRepositories`, or `GenerateInMemoryRepositories`; see [Using the generated code](code-generation.md)) |
+| `GenerateRemoteContracts` (`false`) | Additionally generate the remote-operation interface `I{Entity}RemoteRepository` (corresponds to the CLI's `--generate-remote-contracts`; requires a QuickER Repository, an EF Core Repository, or an in-memory Repository, that is `GenerateRepositories`, `GenerateEfCoreRepositories`, or `GenerateInMemoryRepositories`; see [Using the generated code](code-generation.md)) |
 | `GenerateRemoteServices` (`false`) | Generate HTTP client/server implementations for the remote surface (automatically implies `GenerateRemoteContracts`; corresponds to the CLI's `--generate-remote-services`; see [Using the generated code](code-generation.md)) |
 | `GenerateSyncSupport` (`false`) | Generate the bidirectional sync support for a server (SQL Server) plus local (SQLite) build. Requires `GenerateRepositories` with exactly the two dialects `sqlserver` and `sqlite`, and at least one table with a `rowversion` column. Can be combined with `ExcludeUnboundedBinaryColumns`, in which case the excluded columns are carried only when `SyncOptions.IncludeUnboundedBinary` is set (corresponds to the CLI's `--generate-sync-support`; see [Using the generated code](code-generation.md#bidirectional-sync-support---generate-sync-support)) |
 | `UseRuntimePackages` (`false`) | Do not emit the fixed runtime code; provide it via NuGet package references instead (see [Using the generated code](code-generation.md)) |
 | `GenerateApiDocs` (`false`) | Additionally output an API reference Markdown in the language chosen by `ApiDocsLanguage` (corresponds to the CLI's `--generate-api-docs`; see [Using the generated code](code-generation.md)) |
 | `ApiDocsLanguage` (`English`) | Language of the API reference Markdown: `English` writes `{base name}.g.md`, `Japanese` writes only `{base name}.ja.g.md`, `Both` writes the two. The value is a name and is case-insensitive (requires `GenerateApiDocs`; corresponds to the CLI's `--api-docs-lang`) |
-| `ApiDocsSubdirectory` (unspecified = the output directory itself) | Output subfolder for the API reference Markdown, relative to the output directory (e.g. `docs`; several segments allowed; absolute paths and `..` are rejected). Requires `GenerateApiDocs`; independent of `LayeredOutput` (corresponds to the CLI's `--api-docs-subdir`) |
+| `ApiDocsSubdirectory` (unspecified = the output directory itself) | Output subfolder for the API reference Markdown, relative to the output directory (for example `docs`; several segments allowed; absolute paths and `..` are rejected). Requires `GenerateApiDocs`; independent of `LayeredOutput` (corresponds to the CLI's `--api-docs-subdir`) |
 | `ApiDocsFileName` (unspecified = the derived name) | File name for the API reference Markdown (the extension is normalized to `.g.md`; the Japanese version reuses the base name as `.ja.g.md`). Unspecified means the derived name as before (the output file base name, or `ApiDocs.g.md` when files are split). Only a file name is accepted; path separators are rejected (the folder is `ApiDocsSubdirectory`'s job). Requires `GenerateApiDocs` (corresponds to the CLI's `--api-docs-file`) |
 | `IncludeDataAnnotations` (`true`) | Apply the documentation and validation attributes (`[Table]` / `[Key]` / `[Required]` / `[MaxLength]`) and the DB-definition meta attributes (`[DbTableMeta]` / `[DbColumnMeta]`). `[Column]` is outside this key and is always applied |
 | `IncludeJsonIgnoreOnParentNavigation` (`true`) | Apply `[JsonIgnore]` to parent-reference navigations (to guard against circular references during JSON serialization) |
-| `OutputFileName` (`QuickEREntities.g.cs`) — the alias `OutputPath` is also accepted | The file name for single-file output (`.g.cs` is appended when missing; ignored when `SplitFilesByCategory` is true). The canonical key is `OutputFileName`, which is what `get_generation_config_schema` reports; `OutputPath` is its alias, and only its file-name part is used (the output directory is always `--out`). In the GUI, `OutputPath` may hold the full output path (a file when not split, a folder when split), but the CLI interprets it by the same rule. **This is the one exception to "CLI flag > settings file"**: `--output-path` only takes effect when the settings file does not already define `OutputFileName`; if it does, the settings file's `OutputFileName` wins |
+| `OutputFileName` (`QuickEREntities.g.cs`; the alias `OutputPath` is also accepted) | The file name for single-file output (`.g.cs` is appended when missing; ignored when `SplitFilesByCategory` is true). The canonical key is `OutputFileName`, which is what `get_generation_config_schema` reports; `OutputPath` is its alias, and only its file-name part is used (the output directory is always `--out`). In the GUI, `OutputPath` may hold the full output path (a file when not split, a folder when split), but the CLI interprets it by the same rule. **This is the one exception to "CLI flag > settings file"**: `--output-path` only takes effect when the settings file does not already define `OutputFileName`; if it does, the settings file's `OutputFileName` wins |
 
-## Example — regenerating the sample bundled with the repository
+## Regenerating the bundled sample
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate `
@@ -141,8 +158,14 @@ dotnet run --project src/QuickER.Cli -- generate `
   --generate-api-docs
 ```
 
-With `--generate-api-docs`, an API reference Markdown named `EcOrder.g.md` (English canonical) is also produced alongside the generated code `EcOrder.g.cs`, sharing the same base name (checked in and subject to drift detection). To get the Japanese version `{base name}.ja.g.md` instead, add `--api-docs-lang Japanese`; `--api-docs-lang Both` writes both (either requires `--generate-api-docs`).
+With `--generate-api-docs`, an API reference Markdown named `EcOrder.g.md` (English canonical) is also produced alongside the generated code `EcOrder.g.cs`, sharing the same base name (checked in and subject to drift detection).
+To get the Japanese version `{base name}.ja.g.md` instead, add `--api-docs-lang Japanese`; `--api-docs-lang Both` writes both (either requires `--generate-api-docs`).
 
 ## License note
 
-The CLI (`QuickER.Cli`), the code generation engine, and the MCP tool-execution host (`QuickER.Mcp.Tools`) are licensed under [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **plus additional grants**; thanks to those grants, **the current releases are free for everyone, including commercial use**. The tool-definition catalog and stdio hosting project (`QuickER.Mcp`) is MIT. Eight projects in total are NC-covered — for the full mapping and the licensing and distribution policy, see the [licensing guide](../LICENSING.md). **Code that is generated is your work product**: [LICENSE-NC.md](../LICENSE-NC.md) grants everyone a perpetual, irrevocable license to use, modify, distribute, and sell generated output for any purpose, with no attribution required.
+The CLI (`QuickER.Cli`), the code generation engine, and the MCP tool-execution host (`QuickER.Mcp.Tools`) are licensed under [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **plus additional grants**; thanks to those grants, **the current releases are free for everyone, including commercial use**.
+The tool-definition catalog and stdio hosting project (`QuickER.Mcp`) is MIT.
+Eight projects in total are NC-covered; for the full mapping and the licensing and distribution policy, see the [licensing guide](../LICENSING.md).
+
+**Code that is generated is your work product.**
+[LICENSE-NC.md](../LICENSE-NC.md) grants everyone a perpetual, irrevocable license to use, modify, distribute, and sell generated output for any purpose, with no attribution required.

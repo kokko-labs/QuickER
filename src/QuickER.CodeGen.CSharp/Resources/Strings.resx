@@ -116,7 +116,7 @@
     <value>The '{0}' option has an invalid C# namespace: '{1}'. Each dot-separated segment must be a valid identifier (a letter or '_' first, then letters, digits, or '_') and must not be a C# keyword. Empty segments (a leading, trailing, or repeated '.') are not allowed.</value>
   </data>
   <data name="CodeGen_Warning_CompositeKey" xml:space="preserve">
-    <value>Table '{0}' has a composite primary key, so [Key] attribute generation is minimal. A single primary key is recommended for the MVP.</value>
+    <value>Table '{0}' has a composite primary key: [Key] is attached to each key column, but the attribute cannot express the key order (DDL, sync, and EF Core HasKey carry the full ordered key).</value>
   </data>
   <data name="CodeGen_Error_UnsupportedRepositoryDialect" xml:space="preserve">
     <value>Unsupported Repository dialect: '{0}'. Supported dialects: {1}</value>
@@ -147,6 +147,9 @@
   </data>
   <data name="CodeGen_Warning_RepositorySingleKeyOnly" xml:space="preserve">
     <value>The Repository for table '{0}' supports single primary keys only, so its generation was skipped.</value>
+  </data>
+  <data name="CodeGen_Warning_EfCoreKeylessTableExcluded" xml:space="preserve">
+    <value>Table '{0}' has no primary key, so it was excluded from the EF Core DbContext (EF Core requires a key on every mapped entity type; no DbSet is generated and navigations to this table are ignored).</value>
   </data>
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
     <value>Excluded unbounded binary columns from SELECT / UPDATE:{0}</value>
@@ -213,6 +216,12 @@
   </data>
   <data name="CodeGen_Query_UnexpectedToken" xml:space="preserve">
     <value>Unexpected '{0}' in the condition.</value>
+  </data>
+  <data name="CodeGen_Query_ConditionTooComplex" xml:space="preserve">
+    <value>The condition is too complex (more than 200 operators and parentheses combined); split it into simpler queries.</value>
+  </data>
+  <data name="CodeGen_Query_ProjectionFieldNotNullOverride" xml:space="preserve">
+    <value>Named query '{0}': field '{1}' is declared non-nullable but its source column '{2}' is nullable. The DSL selector cannot convert the nullable value (CS0266), so the query was skipped. Remove the non-null override, or use raw SQL.</value>
   </data>
   <data name="CodeGen_Query_UnexpectedEnd" xml:space="preserve">
     <value>The condition ends in the middle of an expression.</value>
@@ -286,11 +295,23 @@
   <data name="CodeGen_Query_DuplicateParameterName" xml:space="preserve">
     <value>Named query '{0}': parameter name '{1}' is duplicated.</value>
   </data>
+  <data name="CodeGen_Query_ReservedParameterName" xml:space="preserve">
+    <value>Named query '{0}': parameter name '{1}' hides the repository's Query() member and cannot be used.</value>
+  </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
     <value>Named query '{0}': the type token '{1}' could not be resolved.</value>
   </data>
   <data name="CodeGen_Query_ConditionInvalid" xml:space="preserve">
     <value>Named query '{0}', condition: {1}</value>
+  </data>
+  <data name="CodeGen_Query_ConditionOrderedOperatorUnsupported" xml:space="preserve">
+    <value>Named query '{0}' (table '{4}'): the condition applies '{3}' to column '{1}', but its generated type ({2}) has no ordering comparison, so the query was skipped. Use = / &lt;&gt; or a different column.</value>
+  </data>
+  <data name="CodeGen_Query_ConditionStringMatchUnsupported" xml:space="preserve">
+    <value>Named query '{0}' (table '{4}'): the condition applies a string match ({3}) to column '{1}', but its generated type ({2}) is not a string, so the query was skipped.</value>
+  </data>
+  <data name="CodeGen_Query_ConditionOperandTypeMismatch" xml:space="preserve">
+    <value>Named query '{0}' (table '{4}'): the condition compares column '{1}' ({2}) with {3}, which does not fit the generated C# types, so the query was skipped. Align the operand with the column's type (a typed @parameter usually works).</value>
   </data>
   <data name="CodeGen_Query_ScalarRequiresType" xml:space="preserve">
     <value>Named query '{0}': the scalar return shape requires a scalar type token.</value>
@@ -313,6 +334,12 @@
   <data name="CodeGen_Query_OrderByRequiresList" xml:space="preserve">
     <value>Named query '{0}': ordering can only be specified when the return shape is a list, a projection, or a single row.</value>
   </data>
+  <data name="CodeGen_Query_ConditionIgnoredForImplementation" xml:space="preserve">
+    <value>Named query '{0}': the DSL condition is ignored because the implementation is raw SQL or manual; write the WHERE clause in the SQL or the implementation.</value>
+  </data>
+  <data name="CodeGen_Query_OrderByIgnoredForImplementation" xml:space="preserve">
+    <value>Named query '{0}': the ordering is ignored because the implementation is raw SQL or manual; write the ORDER BY clause in the SQL or the implementation.</value>
+  </data>
   <data name="CodeGen_Query_OrderByColumnNotFound" xml:space="preserve">
     <value>Named query '{0}': an ordering references a column that does not exist on the entity.</value>
   </data>
@@ -321,6 +348,9 @@
   </data>
   <data name="CodeGen_Query_InvalidFieldName" xml:space="preserve">
     <value>Named query '{0}': field name '{1}' is not a valid C# identifier.</value>
+  </data>
+  <data name="CodeGen_Query_FieldNameEqualsResultType" xml:space="preserve">
+    <value>Named query '{0}': field name '{1}' is the same as the result type name (C# forbids a member named after its enclosing type).</value>
   </data>
   <data name="CodeGen_Query_FieldColumnNotFound" xml:space="preserve">
     <value>Named query '{0}': the source column referenced by field '{1}' does not exist on the entity.</value>

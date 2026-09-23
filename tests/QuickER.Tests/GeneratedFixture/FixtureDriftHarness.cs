@@ -108,11 +108,19 @@ internal static partial class FixtureDriftHarness
             diagram,
             new SqlServerTypeCatalog()
         );
+        // 名前付きクエリの型トークンも実生成経路と同じく図の方言（SQL Server）で解決する（クエリなしの図では空辞書＝出力不変）
+        var provider = new SqlServerProvider();
+        var queryParameterTypes = QueryParameterTypeResolver.Resolve(
+            diagram,
+            provider.TypeMapper,
+            provider.TypeCatalog
+        );
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
             primaryWithToken,
             columnTypesByDialect,
-            options
+            options,
+            queryParameterTypes
         );
 
         VerifyOrRegenerate(result, outputFileName, driftReason);
@@ -287,11 +295,19 @@ internal static partial class FixtureDriftHarness
             diagram,
             new SqlServerTypeCatalog()
         );
+        // 名前付きクエリの型トークンも実生成経路と同じく図の方言（SQL Server）で解決する（クエリなしの図では空辞書＝出力不変）
+        var provider = new SqlServerProvider();
+        var queryParameterTypes = QueryParameterTypeResolver.Resolve(
+            diagram,
+            provider.TypeMapper,
+            provider.TypeCatalog
+        );
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
             primaryWithToken,
             columnTypesByDialect,
-            options
+            options,
+            queryParameterTypes
         );
 
         result.HasErrors.Should().BeFalse("フィクスチャ図の生成でエラーが出てはならない");

@@ -97,6 +97,8 @@ public sealed class MultiDialectTypeReconcilerTests
             new CodeGenerationOptions
             {
                 RootNamespace = "Sample.Domain",
+                // 方言辞書は GenerateRepositories のときだけ消費される（Repository 非生成では無視＝単一方言と同一出力）
+                GenerateRepositories = true,
                 RepositoryDialects = dialects,
             }
         );

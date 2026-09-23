@@ -176,6 +176,17 @@ internal sealed class CSharpEfCoreModel
     /// <summary>エンティティごとの Fluent 構成一覧</summary>
     public required IReadOnlyList<CSharpEfCoreEntityConfigModel> Entities { get; init; }
 
+    /// <summary>
+    /// モデルから除外する Entity クラス名一覧（<c>modelBuilder.Ignore&lt;T&gt;()</c> 用）。
+    /// 主キーの無いテーブルが対象で、DbSet・Fluent 構成・当該テーブルが絡むリレーション構成も出さない。
+    /// </summary>
+    /// <remarks>
+    /// EF Core はマップされる全エンティティ型にキーを要求し、キーの無い型が 1 つでもモデルに入ると
+    /// DbContext 全体が初回使用時に例外になる。DbSet を出さないだけでは、親側エンティティの
+    /// ナビゲーションプロパティ経由の自動発見でモデルへ混入するため、Ignore の明示が必要。
+    /// </remarks>
+    public required IReadOnlyList<string> IgnoredEntityClassNames { get; init; }
+
     /// <summary>EntityBase の永続化対象外メンバー（Ignore する get/set 可能な公開プロパティ名）一覧</summary>
     public required IReadOnlyList<string> IgnoredBaseMembers { get; init; }
 }
@@ -262,8 +273,23 @@ internal sealed class CSharpEfCoreRelationshipConfigModel
     /// <summary>FK を構成する子側プロパティ名一覧（HasForeignKey 用）</summary>
     public required IReadOnlyList<string> ForeignKeyPropertyNames { get; init; }
 
-    /// <summary>親削除時にカスケード削除するかどうか（OnDelete の Cascade/Restrict 切り替え）</summary>
-    public required bool CascadeDelete { get; init; }
+    /// <summary>
+    /// FK が参照する親側プロパティ名一覧（HasPrincipalKey 用）。空なら親の主キーを参照する既定のまま
+    /// HasPrincipalKey を出さない。
+    /// </summary>
+    /// <remarks>
+    /// EF Core の既定は「FK は親の主キーへ結合」で、親列が主キーでない（UNIQUE 列参照・複合主キーの
+    /// 一部参照）リレーションは HasPrincipalKey を明示しないと主キーへ黙って結合される
+    /// （型が同じなら Include の結果が誤り、違えばモデル検証例外）。
+    /// </remarks>
+    public IReadOnlyList<string> PrincipalKeyPropertyNames { get; init; } = [];
+
+    /// <summary>
+    /// Fluent の <c>OnDelete(DeleteBehavior.{値})</c> へそのまま埋める EF Core の DeleteBehavior 名
+    /// （Cascade / SetNull / NoAction / ClientNoAction）。図の参照アクションからの写像は
+    /// <c>BuildRelationshipConfigs</c> が実挙動の観測に基づいて決める
+    /// </summary>
+    public required string DeleteBehavior { get; init; }
 }
 
 /// <summary>値オブジェクト（Value Object）クラスの生成モデル</summary>
@@ -333,11 +359,22 @@ internal sealed class CSharpClassModel
     /// </remarks>
     public required string TableNameXmlDoc { get; init; }
 
+    /// <summary>図のテーブル名そのまま（未エスケープ）。API リファレンス（.g.md）の表セルが使う</summary>
+    /// <remarks>
+    /// <see cref="TableName"/> は C# リテラルエスケープ済みのため、Markdown へそのまま載せると
+    /// <c>\"</c> のようなエスケープ痕が読者に見える。Markdown 側の安全化（<c>|</c>・改行）は
+    /// 描画側の <c>EscapeCell</c> が担う。
+    /// </remarks>
+    public required string TableNameRaw { get; init; }
+
     /// <summary>テーブルの説明（DB 定義メタ属性 [DbTableMeta] の Description 用）。空なら属性ごと省略する</summary>
     public required string Description { get; init; }
 
     /// <summary>XML doc summary へ埋め込むテーブルの説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
     public required string DescriptionXmlDoc { get; init; }
+
+    /// <summary>図のテーブル説明そのまま（未エスケープ）。API リファレンス（.g.md）の表セルが使う（<see cref="TableNameRaw"/> と同じ理由）</summary>
+    public required string DescriptionRaw { get; init; }
 
     /// <summary>
     /// <c>DefaultDisplayName</c> の override へ渡すテーブルの説明（C# 文字列リテラルへエスケープ済み）。
@@ -446,6 +483,9 @@ internal sealed class CSharpPropertyModel
 
     /// <summary>XML doc summary へ埋め込む列の説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
     public required string DescriptionXmlDoc { get; init; }
+
+    /// <summary>図の列説明そのまま（未エスケープ）。API リファレンス（.g.md）の表セルが使う（<see cref="Description"/> は C# リテラルエスケープ済み）</summary>
+    public required string DescriptionRaw { get; init; }
 
     /// <summary>フィールド初期化子の式</summary>
     public required string Initializer { get; init; }
@@ -678,6 +718,17 @@ internal sealed class CSharpRepositoryModel
 
     /// <summary>名前付きクエリのサーバー側リクエストレコード群（クラスレベルへ挿入。無ければ空文字）</summary>
     public string QueryRemoteServerRecordsBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 名前付きクエリの委譲メンバー群（ジャーナル記録デコレータへ挿入。無ければ空文字）。
+    /// </summary>
+    /// <remarks>
+    /// Repository 契約の構築時に組んだ 1 回目の <c>BuildQueryBlocks</c> の結果をここへ保持し、同期支援側は
+    /// 再構築せずこれを使う。同じエンティティで 2 回目を呼ぶと、ビルド全体で一意管理している射影 DTO 名の
+    /// 重複判定に自分の 1 回目が引っかかり、射影クエリだけが黙って落ちて委譲メソッドが抜ける
+    /// （＝デコレータが契約を実装しきれず CS0535）。
+    /// </remarks>
+    public string QueryDelegationBlock { get; init; } = string.Empty;
 
     /// <summary>
     /// 無制限バイナリ列の Stream アクセサの契約メンバー群（整形済み）。

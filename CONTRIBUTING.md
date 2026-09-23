@@ -22,6 +22,7 @@ QuickER is a solo-developed OSS project. Issues and pull requests are welcome, b
 - Comments and commit messages are written in Japanese
 - Run `csharpier format .` after code changes (global tool)
 - Make sure `dotnet test QuickER.slnx` is green
+- English documents are checked with [Vale](https://vale.sh). Run `vale sync` once, then `vale --glob='*.md' .` (Japanese documents are out of scope; the settings live in [.vale.ini](.vale.ini))
 - If you change the generation templates (`src/QuickER.CodeGen.CSharp/Templates/**/*.scriban`), the checked-in fixtures etc. must be regenerated. The following script performs regenerate → verify → show diff:
 
   ```powershell

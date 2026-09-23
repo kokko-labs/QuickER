@@ -3493,12 +3493,13 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// 非分割でも Repository 名前空間だけは検証されることを検証する（カテゴリ別名前空間の Repository 特例）
+    /// 非分割でもマルチ方言レイアウトなら Repository 名前空間が検証されることを検証する（Repository 特例）
     /// </summary>
     /// <remarks>
     /// 他のカテゴリ別名前空間は分割時にしか使われないが、Repository 名前空間は非分割の
-    /// マルチ方言レイアウトでも使われるため、分割の有無に依らず検証される。特例が消えると
-    /// 不正な名前空間が無警告でコンパイル不能な出力になるが、型検査には出ない。
+    /// マルチ方言レイアウト（契約 1 回＋方言別 namespace 実装）でも使われるため、そのときだけ
+    /// 分割の有無に依らず検証される。特例が消えると不正な名前空間が無警告でコンパイル不能な
+    /// 出力になるが、型検査には出ない。
     /// </remarks>
     [Fact]
     public void Generate_InvalidRepositoryNamespace_WithoutSplit_ShouldFailWithError()
@@ -3509,6 +3510,7 @@ public class CSharpCodeGenerationServiceTests
             SplitFilesByCategory = false,
             GenerateRepositories = true,
             IncludeDataAnnotations = true,
+            RepositoryDialects = ["sqlserver", "sqlite"],
             RepositoryNamespace = "123 bad",
         };
 
@@ -3523,6 +3525,31 @@ public class CSharpCodeGenerationServiceTests
                 && diagnostic.Message.Contains("RepositoryNamespace")
                 && diagnostic.Message.Contains("123 bad")
             );
+    }
+
+    /// <summary>
+    /// 非分割の単一方言では Repository 名前空間が出力へ現れないため検証されないことを検証する
+    /// （「名前空間導出に実際に使われる値だけ検証する」一般則。従来は使われない値でも生成が止まっていた）
+    /// </summary>
+    [Fact]
+    public void Generate_InvalidRepositoryNamespace_SingleDialectWithoutSplit_ShouldSucceed()
+    {
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Domain",
+            SplitFilesByCategory = false,
+            GenerateRepositories = true,
+            IncludeDataAnnotations = true,
+            RepositoryNamespace = "123 bad",
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+        result
+            .Diagnostics.Should()
+            .NotContain(diagnostic => diagnostic.Message.Contains("RepositoryNamespace"));
     }
 
     /// <summary>
@@ -5011,8 +5038,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain(".HasMany(e => e.Orders)");
         content.Should().Contain(".WithOne(e => e.Customer)");
         content.Should().Contain(".HasForeignKey(e => e.CustomerId)");
-        // OnDelete 既定（NoAction）はカスケードしないため Restrict
-        content.Should().Contain(".OnDelete(DeleteBehavior.Restrict);");
+        // OnDelete 既定（NoAction）は図の宣言どおり DeleteBehavior.NoAction を出す
+        // （クライアント挙動は Restrict と同一＝必須関係は保存前に例外・任意関係は追跡中の子の FK を null 化）
+        content.Should().Contain(".OnDelete(DeleteBehavior.NoAction);");
     }
 
     /// <summary>OnDelete=Cascade のリレーションでは OnDelete(DeleteBehavior.Cascade) が構成されることを検証する</summary>
@@ -5883,7 +5911,7 @@ public class CSharpCodeGenerationServiceTests
             .Diagnostics.Should()
             .ContainSingle(d => d.Severity == GenerationDiagnosticSeverity.Info)
             .Which.Message.Should()
-            .Contain("DocumentEntity.Photo（documents.photo）");
+            .Contain("DocumentEntity.Photo (documents.photo)");
     }
 
     /// <summary>
