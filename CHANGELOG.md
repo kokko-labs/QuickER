@@ -6,6 +6,8 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-24
+
 Highlights of this release:
 
 - A composite primary key now keeps its own column order across DB import, editing, DDL and generated code
@@ -248,5 +250,6 @@ Distributed as a GUI (Setup.exe and Portable zip, in a full self-contained chann
 
 The repository is mixed-license: the core is MIT, while the AI features, the code generation, the CLI, and the MCP tool-execution host (8 projects) are PolyForm Noncommercial 1.0.0 plus additional grants — currently free for everyone including commercial use, with commercial use of the basic code generation granted permanently. The terms are in [LICENSE-NC.md](LICENSE-NC.md); [LICENSING.md](LICENSING.md) explains them in plain language.
 
-[Unreleased]: https://github.com/kokko-labs/QuickER/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kokko-labs/QuickER/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.2.0
 [0.1.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.1.0

@@ -60,7 +60,7 @@ public static class RuntimePackages
     /// 版はツール版とロックステップ（パッケージ版＝ツール版）で運用する。<see cref="ResolveGuidanceVersion"/> が
     /// <c>QuickER.CodeGen.CSharp</c> アセンブリのバージョン情報から解決できなかった場合にのみ用いるフォールバック値。
     /// </remarks>
-    public const string DefaultVersion = "0.1.0";
+    public const string DefaultVersion = "0.2.0";
 
     /// <summary>
     /// パッケージ参照の案内（生成ヘッダ・GUI/CLI）に載せるバージョン文字列を解決する。

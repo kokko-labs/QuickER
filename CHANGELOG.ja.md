@@ -6,6 +6,8 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-24
+
 このリリースの要点:
 
 - 複合主キーの列順を、DB 取込・編集・DDL・生成コードのすべてで保つようになりました
@@ -248,5 +250,6 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 本リポジトリは混合ライセンスです。コアは MIT、AI 機能・コード生成・CLI・MCP ツール実行ホストの 8 プロジェクトは PolyForm Noncommercial 1.0.0 ＋追加許諾で、現在は商用利用を含め全員無料、基本コード生成の商用利用は恒久的に許諾されています。条文は [LICENSE-NC.md](LICENSE-NC.md)、平易な解説は [LICENSING.ja.md](LICENSING.ja.md) にあります。
 
-[Unreleased]: https://github.com/kokko-labs/QuickER/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kokko-labs/QuickER/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.2.0
 [0.1.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.1.0
