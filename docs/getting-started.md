@@ -2,7 +2,8 @@
 
 *English | [日本語](getting-started.ja.md)*
 
-Using the bundled EC order sample, this tutorial walks through one full loop: edit the diagram → output the DDL → generate the code → run the application. It uses a SQLite file database, so no external database is required.
+Using the bundled EC order sample, this tutorial walks through one full loop: edit the diagram → output the DDL → generate the code → run the app.
+It uses a SQLite file database, so you need no external database.
 
 ## Prerequisites
 
@@ -11,7 +12,8 @@ Using the bundled EC order sample, this tutorial walks through one full loop: ed
 
 ## 1. Install QuickER
 
-Get the Setup.exe (installer) or the Portable zip (extract and run `QuickER.exe`) from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases). For the difference between the channels, see [the Install section of the README](../README.md#install).
+Get the Setup.exe (installer) or the Portable zip (extract and run `QuickER.exe`) from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases).
+For the difference between the channels, see [the Install section of the README](../README.md#install).
 
 To run from source:
 
@@ -30,17 +32,20 @@ git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
 ```
 
-The repository contains the DDL and the C# code generated from the diagram (`EcOrder.json`), already checked in. Run it without changing anything.
+The repository contains the DDL and the C# code generated from the diagram (`EcOrder.json`), already checked in.
+Run it first without changing anything.
 
 ```powershell
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-At startup, the SQLite file DB is recreated from the DDL, and scenarios such as registration, graph save, and querying run in order. If it ends with "All scenarios succeeded.", it worked.
+At startup the sample recreates the SQLite file DB from the DDL, then runs scenarios such as registration, graph save, and querying in order.
+It worked if the run ends with "All scenarios succeeded."
 
 ## 3. Open the diagram
 
-Launch QuickER and open `samples/ec-order/EcOrder.json` with Ctrl+O. You will see an ER diagram of four tables: customers, products, orders, and order_lines.
+Launch QuickER and open `samples/ec-order/EcOrder.json` with Ctrl+O.
+The ER diagram holds four tables: customers, products, orders, and order_lines.
 
 ## 4. Edit the diagram
 
@@ -55,7 +60,8 @@ For the editing operations in detail, see [ER diagram editing](er-editor.md).
 
 ## 5. Output the DDL
 
-Choose the DDL from "Export" on the toolbar and save it over `samples/ec-order/EcOrder.sql`. The sample app recreates the database from this DDL every time it starts, so this alone propagates the schema change to the DB.
+Choose the DDL from "Export" on the toolbar and save it over `samples/ec-order/EcOrder.sql`.
+The sample app recreates the database from this DDL every time it starts, so this alone propagates the schema change to the DB.
 
 ## 6. Generate the code
 
@@ -69,7 +75,8 @@ dotnet run --project src/QuickER.Cli -- generate `
   --config samples/ec-order/quicker.json
 ```
 
-`Generated/EcOrder.g.cs` is updated, and you can confirm that the `products` Entity and EditModel gained a property for `stock`. For generating from the GUI's code-generation dialog and for the generation options in detail, see the [CLI reference](cli.md) and [Using the generated code](code-generation.md).
+`Generated/EcOrder.g.cs` changes, and the `products` Entity and EditModel gain a property for `stock`.
+For generating from the GUI's code-generation dialog and for the generation options in detail, see the [CLI reference](cli.md) and [Using the generated code](code-generation.md).
 
 ## 7. Run it again
 
@@ -77,7 +84,8 @@ dotnet run --project src/QuickER.Cli -- generate `
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-With the schema and the code now including the new column, the same scenarios succeed as before. You fixed the diagram in one place, and the DDL, the Entity, and the EditModel all followed.
+With the schema and the code now including the new column, the same scenarios succeed as before.
+You fixed the diagram in one place, and the DDL, the Entity, and the EditModel all followed.
 
 ## Next steps
 

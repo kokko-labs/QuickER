@@ -2,7 +2,8 @@
 
 *[English](getting-started.md) | 日本語*
 
-同梱の EC 注文サンプルを使って、「図を編集する → DDL を出す → コードを生成する → アプリを動かす」の一巡を体験します。SQLite のファイルデータベースを使うため、外部データベースの準備は不要です。
+同梱の EC 注文サンプルで、「図を編集する → DDL を出す → コードを生成する → アプリを動かす」の一巡をたどります。
+SQLite のファイルデータベースを使うため、外部データベースの準備は要りません。
 
 ## 前提
 
@@ -11,7 +12,8 @@
 
 ## 1. QuickER をインストールする
 
-[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe（インストーラー）または Portable zip（展開して `QuickER.exe` を実行）を入手します。チャンネルの違いは [README のインストール節](../README.ja.md#インストール)を参照してください。
+[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe（インストーラー）または Portable zip（展開して `QuickER.exe` を実行）を入手します。
+チャンネルの違いは [README のインストール節](../README.ja.md#インストール)を参照してください。
 
 ソースコードから起動する場合は次のとおりです。
 
@@ -30,17 +32,20 @@ git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
 ```
 
-リポジトリには、図（`EcOrder.json`）から生成した DDL と C# コードがチェックイン済みで含まれています。何も変更せずに動かしてみます。
+リポジトリには、図（`EcOrder.json`）から生成した DDL と C# コードがチェックイン済みで含まれています。
+まずは何も変更せずに動かします。
 
 ```powershell
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-起動時に DDL から SQLite ファイル DB が作り直され、登録・グラフ保存・検索などのシナリオが順に実行されます。最後に「All scenarios succeeded.」と表示されれば成功です（サンプルの出力は英語です）。
+起動時に DDL から SQLite ファイル DB が作り直され、登録・グラフ保存・検索などのシナリオが順に実行されます。
+最後に「All scenarios succeeded.」と表示されれば成功です（サンプルの出力は英語です）。
 
 ## 3. 図を開く
 
-QuickER を起動し、Ctrl+O で `samples/ec-order/EcOrder.json` を開きます。顧客（customers）、商品（products）、注文（orders）、注文明細（order_lines）の 4 テーブルからなる ER 図が表示されます。
+QuickER を起動し、Ctrl+O で `samples/ec-order/EcOrder.json` を開きます。
+顧客（customers）、商品（products）、注文（orders）、注文明細（order_lines）の 4 テーブルからなる ER 図が表示されます。
 
 ## 4. 図を編集する
 
@@ -55,7 +60,8 @@ QuickER を起動し、Ctrl+O で `samples/ec-order/EcOrder.json` を開きま�
 
 ## 5. DDL を出力する
 
-ツールバーの「出力」から DDL を選び、`samples/ec-order/EcOrder.sql` へ上書き保存します。サンプルアプリは起動のたびにこの DDL でデータベースを作り直すため、これだけで DB スキーマの変更が反映されます。
+ツールバーの「出力」から DDL を選び、`samples/ec-order/EcOrder.sql` へ上書き保存します。
+サンプルアプリは起動のたびにこの DDL でデータベースを作り直すため、これだけで DB スキーマの変更が反映されます。
 
 ## 6. コードを生成する
 
@@ -69,7 +75,8 @@ dotnet run --project src/QuickER.Cli -- generate `
   --config samples/ec-order/quicker.json
 ```
 
-`Generated/EcOrder.g.cs` が更新され、`products` の Entity と EditModel に `stock` に対応するプロパティが増えていることを確認できます。GUI のコード生成ダイアログから生成する方法や、生成オプションの詳細は [CLI リファレンス](cli.ja.md)と[生成コードの使い方](code-generation.ja.md)を参照してください。
+`Generated/EcOrder.g.cs` が更新され、`products` の Entity と EditModel に `stock` に対応するプロパティが増えます。
+GUI のコード生成ダイアログから生成する方法や、生成オプションの詳細は [CLI リファレンス](cli.ja.md)と[生成コードの使い方](code-generation.ja.md)を参照してください。
 
 ## 7. もう一度実行する
 
@@ -77,7 +84,8 @@ dotnet run --project src/QuickER.Cli -- generate `
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-新しい列を含むスキーマとコードで、同じシナリオがそのまま成功します。図を 1 か所直しただけで、DDL・Entity・EditModel が追従したことになります。
+新しい列を含むスキーマとコードで、同じシナリオがそのまま成功します。
+図を 1 か所直しただけで、DDL・Entity・EditModel が追従しました。
 
 ## 次のステップ
 

@@ -3,32 +3,33 @@
 *English | [日本語](overview.ja.md)*
 
 QuickER is a Windows tool that supports .NET development of business applications.
-It provides a GUI designer for ER diagrams, bidirectional synchronization with databases, and AI integration, all centered on the ER model.
-From that model, QuickER can generate DDL, C# code, screen mockups, table definition documents, and more.
+Built around a GUI designer for ER diagrams, it also synchronizes with databases in both directions and connects to AI.
+From the model it generates DDL, C# code, screen mockups, and table definition documents.
 
 Why make the ER model, rather than the code or the database, the source of truth?
 
 Business applications repeat the same schema information in many places.
 Define a single "customer," and its columns, keys, and relationships appear in the DDL, entity classes, screen-binding models, and design documents.
-When each representation is written by hand, small inconsistencies inevitably begin to appear.
+Write each of those by hand and small inconsistencies creep in.
 
 Code-first development addressed this problem by making the code the source of truth.
 That makes synchronization with the database easier, but reviewing the schema remains difficult.
 Broken normalization and missing relationships are not easy to spot by reading class definitions alone.
 Yet a representation for surveying an entire schema has existed for decades.
 It is the ER diagram: tables shown as boxes, relationships as lines, and keys visible at a glance.
-Putting the schema into a diagram makes design flaws easier for people to spot at a glance.
-An ER model based on a diagram that has passed human review is precisely what should serve as the source of truth.
+In a diagram, broken normalization and missing relationships show up as a distortion in the shape.
+An ER model backed by a diagram that people have reviewed can be trusted as the source of truth.
 
 A diagram or model, however, cannot be created once and then left alone.
-Unless every implementation-side change is reflected in it, the model gradually drifts from reality until no one trusts it.
+Leave implementation-side changes out of it and the model drifts from reality until no one looks at it.
 QuickER imposes two conditions to avoid this familiar failure.
 First, the model must round-trip with both the database and text formats.
 Second, artifacts derived from the model must be generated mechanically rather than copied by hand.
 When the model changes, its generated artifacts can always be rebuilt from it.
 Changes made outside the model can be brought back into it through QuickER's import features.
 
-QuickER's goal is to provide this model-centered development workflow so that teams stop writing the same schema information by hand in place after place, and build higher-quality business applications faster and at lower cost.
+QuickER's goal is to provide this model-centered development workflow.
+Teams stop writing the same schema information by hand in place after place, and build higher-quality business applications faster and at lower cost.
 
 ## Round-tripping ER models, databases, and text
 
@@ -40,7 +41,7 @@ QuickER also supports bidirectional import and export with other text formats, i
 You can work in the format you know best, import the result, and verify it visually in the diagram.
 
 Schema changes can round-trip with a live database in the same way.
-QuickER supports five dialects—SQL Server, PostgreSQL, MySQL, Oracle, and SQLite—and can import a schema from a database.
+QuickER supports five dialects (SQL Server, PostgreSQL, MySQL, Oracle, and SQLite) and can import a schema from a database.
 In the other direction, it can detect differences between the model and the database and generate a synchronization script to apply them.
 For an application developed code-first, the initial model can be imported from the existing database.
 
@@ -74,14 +75,15 @@ In QuickER's workflow, probabilistic AI work is limited to drafting the ER diagr
 People inspect each artifact and make any necessary corrections.
 Once the ER model has passed review, QuickER generates code derived from it with the same content every time.
 As long as the ER model is sound, this generated code does not unpredictably change from one day to the next.
-The division of labor is not to leave everything to AI, but to move development forward through checkpoints where people can inspect the results.
+Use AI, but decide first where people get to inspect the results.
+That is the division of labor.
 
 ## What the generated code takes on
 
 What code comes from an ER model that has passed review?
-QuickER generates code that can be determined mechanically from the model definition.
-Application-specific behavior remains clearly separated as the developer's responsibility.
-The generated code falls into three categories.
+QuickER generates only what the model definition determines mechanically.
+Application-specific behavior stays separated as the developer's responsibility.
+The generated code comes in three kinds.
 
 - **Schema definitions**: QuickER generates entity classes, per-column value objects, and validation code derived from the column definitions.
   With value objects, a customer ID and a product ID become different types, so mixing them up is caught at compile time.
@@ -98,9 +100,10 @@ The generated code falls into three categories.
 - **UI binding models**: QuickER generates an EditModel that can be bound directly to a screen and a Mapper that converts between the EditModel and its entity.
   The EditModel accepts screen input as strings, retains values that pass validation as confirmed values, and stores error information when validation fails.
   The Mapper applies only the EditModel's confirmed values and change state to the entity, preventing invalid input from entering it.
-  By handling the conversion, the Mapper also eliminates the need to repeat value conversion and copying logic for every screen.
+  Because the Mapper handles the conversion, there is no value-conversion or copying logic to rewrite for every screen.
 
-Generating this code frees developers from repeatedly writing data definitions and data-access code, allowing them to focus on production screen design and business logic.
+Generating this code frees developers from writing data definitions and data-access code over and over.
+That time goes into production screen design and business logic instead.
 
 ## Independence of the generated code
 
@@ -109,7 +112,7 @@ QuickER's generated code addresses that concern through the following design.
 
 - **UI-framework independent**: The generated code does not depend on a particular UI library and can be used in both desktop and web applications.
 - **Cross-platform**: QuickER itself is a Windows tool, but its generated code runs on .NET on Windows, macOS, and Linux.
-- **Self-contained**: By default, the runtime—the base classes and shared components used by the generated code—is inlined, allowing the generated code to stand on its own.
+- **Self-contained**: By default the runtime (the base classes and shared components that the generated code builds on) is inlined, so the generated code stands on its own.
   To minimize the amount of generated code, you can instead reference the runtime as a NuGet package.
 - **Extensible through partial classes**: You can add validation, change display names, and make other extensions in separate partial-class files without touching the generated files.
   Regenerating the code does not overwrite the partial-class code written by developers.
@@ -121,11 +124,11 @@ If the generated features are not enough, extend them freely through partial cla
 
 QuickER is developed as a Windows tool for .NET, and its current code-generation target is C#.
 The ER model itself consists of language-independent tables, columns, and relationships; C# generation is only one capability built on top of that model.
-Support for other languages is an area we intend to expand in future development.
+Support for other languages is an area for future development.
 
-Even without code generation, QuickER still provides value as an ER diagramming tool through its bidirectional synchronization with databases and text formats.
-There is room to make this workflow even easier to use in future development.
+Even without code generation, QuickER stands on its own as an ER diagramming tool that round-trips with databases and text formats.
+That side of the tool also has room to become easier to use.
 
 The QuickER repository includes a sample ([samples/ec-order](../samples/ec-order)) that walks through ER model design, code generation, and execution.
 It uses a SQLite file database, so with the .NET 10 SDK installed, you can run it immediately after cloning the repository.
-Start with this sample to experience QuickER's workflow for yourself.
+Start by running it.

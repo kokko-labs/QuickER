@@ -2,11 +2,27 @@
 
 *English | [日本語](mcp.ja.md)*
 
-`quicker mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io) server over the stdio transport (stdin/stdout, JSON-RPC). It exposes tools for editing ER diagrams and generating code, so an external AI agent (Claude Code, Codex, and so on) can build and evolve a QuickER diagram as part of its own workflow. The agent launches `quicker mcp` as a child process and talks to it over stdin/stdout.
+`quicker mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io) server over the stdio transport (stdin/stdout, JSON-RPC).
+It exposes tools for editing ER diagrams and generating code, so an external AI agent (Claude Code, Codex, and so on) can build and evolve a QuickER diagram as part of its own workflow.
+The agent launches `quicker mcp` as a child process and talks to it over stdin/stdout.
 
-The server is **stateless**: it takes no options and keeps no in-memory diagram. Nearly every tool takes the target diagram file as its `file` argument, and what a call does with that file depends on the kind of tool: an editing tool completes a whole "load → modify → save" cycle in the single call, a read-only tool (`get_diagram_summary` / `list_queries`) loads the file without saving it, a generation tool (`generate_csharp` / `generate_ddl`) leaves the diagram untouched and writes its output to a separate destination, and `create_diagram` writes a new file without reading an existing one. Only `get_generation_config_schema` takes no `file` at all. Concurrent agents (or a single agent working on several diagrams) simply pass different `file` paths.
+The server is **stateless**: it takes no options and keeps no in-memory diagram.
+Nearly every tool takes the target diagram file as its `file` argument, and what a call does with that file depends on the kind of tool.
 
-Statelessness has a price on the other side of that: **two writers on the same file are last-write-wins.** Each call reads the file, changes what it was asked to change, and writes the whole document back; there is no lock and no version check, so a call that loaded the file before someone else's save overwrites that save entirely — the other side's changes are gone, and nothing reports it. Only `create_diagram` refuses to overwrite, and only because the file must not already exist. The same applies between the server and the GUI: the GUI reloads a file changed underneath it, silently when it has no unsaved changes of its own, so a diagram open in the GUI and edited over MCP at the same time can lose whichever side saved first. Have one writer at a time on a given diagram.
+- **Editing tools** complete a whole "load → modify → save" cycle in the single call (`create_diagram` is the exception: it writes a new file without reading an existing one).
+- **Read-only tools** (`get_diagram_summary` / `list_queries`) load the file without saving it.
+- **Generation tools** (`generate_csharp` / `generate_ddl`) leave the diagram untouched and write their output to a separate destination.
+
+Only `get_generation_config_schema` takes no `file` at all.
+Concurrent agents (or a single agent working on several diagrams) simply pass different `file` paths.
+
+Statelessness has a price on the other side of that: **two writers on the same file are last-write-wins.**
+Each call reads the file, changes what it was asked to change, and writes the whole document back.
+Without a lock or a version check, a call that loaded the file before someone else's save overwrites that save entirely: the other side's changes are gone, and nothing reports it.
+Only `create_diagram` refuses to overwrite, and only because the file must not already exist.
+The same applies between the server and the GUI, which reloads a file changed underneath it, silently when it has no unsaved changes of its own.
+A diagram open in the GUI and edited over MCP at the same time can therefore lose whichever side saved first.
+Have one writer at a time on a given diagram.
 
 ## Setup
 
@@ -33,27 +49,34 @@ claude mcp add quicker -- quicker mcp
 
 ### Other stdio clients
 
-Any MCP client that supports the stdio transport can use the server. Configure it to launch the command `quicker` with the single argument `mcp` (Codex, for example, takes the same command/args pair in its own MCP-server configuration). This requires the `quicker` command to be on `PATH` — see [installing the CLI](cli.md). To run from source instead, build the CLI once (`dotnet build QuickER.slnx`) and point the command at the built assembly (`command: "dotnet"`, `args: ["<repo>/src/QuickER.Cli/bin/Debug/net10.0/QuickER.Cli.dll", "mcp"]`). Do not use `dotnet run` here: its build output goes to stdout, which is the JSON-RPC protocol channel.
+Any MCP client that supports the stdio transport can use the server.
+Configure it to launch the command `quicker` with the single argument `mcp` (Codex, for example, takes the same command/args pair in its own MCP-server configuration).
+This requires the `quicker` command to be on `PATH`, so see [installing the CLI](cli.md).
+To run from source instead, build the CLI once (`dotnet build QuickER.slnx`) and point the command at the built assembly (`command: "dotnet"`, `args: ["<repo>/src/QuickER.Cli/bin/Debug/net10.0/QuickER.Cli.dll", "mcp"]`).
+Do not use `dotnet run` here: its build output goes to stdout, which is the JSON-RPC protocol channel.
 
 ## Tools
 
-The server exposes 19 tools: 13 for ER diagram editing, 3 for named queries, and 3 for code generation. **Every tool requires a `file` argument** (the path to the diagram JSON, i.e. the GUI save format / `DiagramDocument`) — except `get_generation_config_schema`, the one information-only tool, which takes no arguments. The tables below list the other arguments. Required arguments are marked ✅.
+The server exposes 19 tools: 13 for ER diagram editing, 3 for named queries, and 3 for code generation.
+**Every tool requires a `file` argument** (the path to the diagram JSON, that is the GUI save format `DiagramDocument`).
+The one exception is `get_generation_config_schema`, the only information-only tool, which takes no arguments at all.
+The tables below list the other arguments, with required ones marked ✅.
 
 ### ER diagram editing
 
 | Tool | Arguments | Description |
 |---|---|---|
 | `create_diagram` | `target_dbms` ✅ (`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`) | Create a new, empty diagram file for the given target DBMS. Fails if the file already exists (this tool only creates new diagrams), and also if the parent directory does not exist (directories are never created) |
-| `get_diagram_summary` | — | Return a text listing of the tables, columns, unique constraints, and relationships in the diagram. Each relationship line shows its column pairs and constraint name — `Customer → Order (OneToMany, FK: (CustomerId → CustomerId)) [FK_Order_Customer]` — so a composite foreign key is listed with every pair in declaration order. When a composite primary key's own column order differs from the table's column order, the entity block adds a `Primary key order: …` line (omitted when the two agree) |
+| `get_diagram_summary` | — | Return a text listing of the tables, columns, unique constraints, and relationships in the diagram. Each relationship line shows its column pairs and constraint name (`Customer → Order (OneToMany, FK: (CustomerId → CustomerId)) [FK_Order_Customer]`), so a composite foreign key is listed with every pair in declaration order. When a composite primary key's own column order differs from the table's column order, the entity block adds a `Primary key order: …` line (omitted when the two agree) |
 | `add_entity` | `table_name` ✅, `description` | Add a new table (no columns are created) |
 | `remove_entity` | `table_name` ✅ | Remove a table, along with its relationships |
 | `add_column` | `table_name` ✅, `column_name` ✅, `data_type` ✅, `is_primary_key`, `is_nullable`, `description` | Add a column to a table. Give each table exactly one primary key column: the tool does not reject a second one, but the code generator does not support composite primary keys. A column added with `is_primary_key=true` is always NOT NULL, whatever `is_nullable` says. To declare a composite key, or to change the key of an existing table, use `set_primary_key` |
 | `remove_column` | `table_name` ✅, `column_name` ✅ | Remove a column from a table. A UNIQUE constraint that includes the column is removed together with it (a constraint is never silently narrowed to its remaining columns) |
 | `set_entity_property` | `table_name` ✅, `new_table_name`, `memo`, `description` | Change a table's name, memo, or description (specify at least one) |
-| `set_column_property` | `table_name` ✅, `column_name` ✅, `description`, `data_type`, `is_nullable` | Change a column's description, data type, or nullability (specify at least one). A primary key column stays NOT NULL whatever `is_nullable` says — same normalization as `add_column` and `set_primary_key`; take the column out of the key first if it really has to be nullable |
+| `set_column_property` | `table_name` ✅, `column_name` ✅, `description`, `data_type`, `is_nullable` | Change a column's description, data type, or nullability (specify at least one). A primary key column stays NOT NULL whatever `is_nullable` says (the same normalization as `add_column` and `set_primary_key`); take the column out of the key first if it really has to be nullable |
 | `add_relationship` | `source_table` ✅, `target_table` ✅, `relationship_type` ✅ (`OneToOne` / `OneToMany` / `ManyToMany`), `source_columns`, `target_columns` | Add a foreign key between two tables. `source_columns` and `target_columns` are parallel arrays of column names: entry *i* of `source_columns` (the parent's referenced column) is referenced by entry *i* of `target_columns` (the child's foreign key column), the two must have the same length, and their order is the declaration order of the foreign key. One entry each is the usual single-column foreign key; two or more entries define a composite one. Giving only one of the two arrays, a length mismatch, an unknown column name, or the same column twice is an error. **When both arrays are omitted**, every primary key column of the parent is paired with a child column inferred from the column names (same defaulting as the GUI's relationship-creation flow); a parent column whose counterpart cannot be inferred is simply left out, and the relationship can then be completed in the GUI. A many-to-many relationship never carries column pairs (it stands for a design that goes through a junction table) |
 | `remove_relationship` | `source_table` ✅, `target_table` ✅, `constraint_name` | Remove the relationship between two tables. Only one relationship is removed per call. When several relationships run in the same direction between the same pair of tables, pass `constraint_name` to pick one; without it the call fails and lists the candidate constraint names instead of silently removing the first match (`get_diagram_summary` shows the names too) |
-| `set_primary_key` | `table_name` ✅, `columns` ✅ (an array of column names, in key order) | Set the primary key of a table. Matched by `table_name` alone — a table has at most one primary key, so the call always replaces the current one: the listed columns become the key in the order given, and every other column of the table stops being part of it. Column order matters (unlike `set_unique_constraint`): it is the order of the generated `PRIMARY KEY` constraint, and `get_diagram_summary` reports it whenever it differs from the table's column order. The listed columns are made NOT NULL; a column dropped from the key keeps the nullability it had. Nothing is checked against relationships: dropping a column that a relationship references leaves that foreign key pointing at a column no key or unique constraint covers, and the generated DDL then fails when applied — keep such a column in the key, or cover it with `set_unique_constraint`. At least one column is required, so the tool cannot drop a table's primary key altogether |
+| `set_primary_key` | `table_name` ✅, `columns` ✅ (an array of column names, in key order) | Set the primary key of a table. Matched by `table_name` alone, because a table has at most one primary key, so the call always replaces the current one: the listed columns become the key in the order given, and every other column of the table stops being part of it. Column order matters (unlike `set_unique_constraint`): it is the order of the generated `PRIMARY KEY` constraint, and `get_diagram_summary` reports it whenever it differs from the table's column order. The listed columns are made NOT NULL; a column dropped from the key keeps the nullability it had. Nothing is checked against relationships: dropping a column that a relationship references leaves that foreign key pointing at a column no key or unique constraint covers, and the generated DDL then fails when applied, so keep such a column in the key or cover it with `set_unique_constraint`. At least one column is required, so the tool cannot drop a table's primary key altogether |
 | `set_unique_constraint` | `table_name` ✅, `columns` ✅ (an array of column names, in declaration order), `name` | Define or replace (upsert) a UNIQUE constraint on a table. Matched by (`table_name`, set of columns): if a constraint over the same columns exists it is redefined (its id is preserved; the name and column order come from this call), otherwise a new one is added. Column order and letter case affect neither the matching nor the meaning of the constraint. Omit `name` and the DDL generator synthesizes `UQ_{table}_{columns}`. The primary key already enforces uniqueness of its own columns, so a constraint over exactly those columns is normally unnecessary |
 | `remove_unique_constraint` | `table_name` ✅, `columns` ✅ | Remove a UNIQUE constraint, identified by its set of columns (order and letter case do not matter). Fails if the table has no constraint over exactly those columns |
 
@@ -69,15 +92,25 @@ Named queries are stored on the diagram and become Repository methods when C# co
 
 `set_query`'s nested arguments:
 
-- `scalar_type` — required when `returns` = `scalar`; a dialect-neutral type token (e.g. `decimal(12,2)`).
-- `condition` — a mini-DSL search condition (comparisons, `AND`/`OR`/`NOT`, parentheses, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] IN`, `CONTAINS`/`STARTSWITH`/`ENDSWITH`), used when `implementation` = `dsl` (omit for no filter). Column names refer to the table's columns; `@name` refers to a declared parameter.
-- `sql` — an object mapping a dialect name (`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`) to a raw SQL string, used when `implementation` = `sql`.
-- `parameters` — an array of `{ name` ✅ `, type, source_column, is_list }`. Give exactly one of `type` (a dialect-neutral token) or `source_column` (a column of this table, whose generated type is used).
-- `order_by` — an array of `{ column` ✅ `, descending }` (valid only when `returns` is `list`, `single`, or `projection`; with `single` it selects the first row).
-- `paging` — a boolean; when true, `take`/`skip` parameters are added (applies to `list` and `projection`).
-- `result_type_name` / `fields` — required when `returns` = `projection`. `fields` is an array of `{ name` ✅ `, type, source_column, is_nullable }` (again, exactly one of `type` or `source_column`).
+- `scalar_type`: required when `returns` = `scalar`; a dialect-neutral type token, for example `decimal(12,2)`.
+- `condition`: a mini-DSL search condition (comparisons, `AND`/`OR`/`NOT`, parentheses, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] IN`, `CONTAINS`/`STARTSWITH`/`ENDSWITH`), used when `implementation` = `dsl` (omit for no filter).
+  Column names refer to the table's columns; `@name` refers to a declared parameter.
+- `sql`: an object mapping a dialect name (`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`) to a raw SQL string, used when `implementation` = `sql`.
+- `parameters`: an array of `{ name` ✅ `, type, source_column, is_list }`.
+  Give exactly one of `type` (a dialect-neutral token) or `source_column` (a column of this table, whose generated type is used).
+- `order_by`: an array of `{ column` ✅ `, descending }` (valid only when `returns` is `list`, `single`, or `projection`; with `single` it selects the first row).
+- `paging`: a boolean; when true, `take`/`skip` parameters are added (applies to `list` and `projection`).
+- `result_type_name` / `fields`: required when `returns` = `projection`.
+  `fields` is an array of `{ name` ✅ `, type, source_column, is_nullable }` (again, exactly one of `type` or `source_column`).
 
-Validation is strict about anything that would fail at runtime and lenient about hygiene warnings: a mini-DSL syntax error, an unknown column or undeclared `@parameter`, an undeclared parameter in raw SQL, or a structural mismatch (missing `scalar_type`/`fields`, both or neither of a parameter's `type`/`source_column`, misused `order_by`, an unknown SQL dialect, or a `sql` value that is not a string) refuses the save; an unused parameter or a multi-statement SQL is reported as a warning and the save proceeds. Type-token contents are not checked here — they are validated at generation time.
+Validation is strict about anything that would fail at runtime and lenient about hygiene warnings.
+A mini-DSL syntax error, an unknown column or undeclared `@parameter`, an undeclared parameter in raw SQL, or a structural mismatch (missing `scalar_type`/`fields`, both or neither of a parameter's `type`/`source_column`, misused `order_by`, an unknown SQL dialect, or a `sql` value that is not a string) refuses the save.
+An unused parameter or a multi-statement SQL is reported as a warning and the save proceeds.
+
+Type-token contents are not checked here; they are validated at generation time.
+The same goes for the type consistency of a DSL condition against the columns (`name > 'M'`, a `CONTAINS` on a numeric column, and the like).
+Resolving what C# type a column becomes takes the dialect's type mapper, which this file-based server deliberately does not carry.
+Such a condition therefore saves here and is caught at generation time, where the query is skipped with a warning that names it (the other queries and the rest of the generation are unaffected).
 
 ### Code generation
 
@@ -93,20 +126,36 @@ For the two file-based generation tools (`generate_csharp` / `generate_ddl`), `p
 
 A diagram is built up one file-level call at a time. For example, to design a customer / order schema for SQLite and generate its DDL and C# code:
 
-1. `create_diagram` — `file` = `shop.json`, `target_dbms` = `sqlite`
-2. `add_entity` — `table_name` = `Customer`; then `add_column` for `CustomerId` (`data_type` = `integer`, `is_primary_key` = true) and the remaining columns
-3. `add_entity` — `table_name` = `Order`; then `add_column` for `OrderId` (PK), `CustomerId`, and so on
-4. `add_relationship` — `source_table` = `Customer`, `target_table` = `Order`, `relationship_type` = `OneToMany`, `source_columns` = `["CustomerId"]`, `target_columns` = `["CustomerId"]`
-5. `generate_ddl` — `out_file` = `shop.sql`, and/or `generate_csharp` — `out_dir` = `./Generated`
+1. `create_diagram`: `file` = `shop.json`, `target_dbms` = `sqlite`
+2. `add_entity`: `table_name` = `Customer`; then `add_column` for `CustomerId` (`data_type` = `integer`, `is_primary_key` = true) and the remaining columns
+3. `add_entity`: `table_name` = `Order`; then `add_column` for `OrderId` (PK), `CustomerId`, and so on
+4. `add_relationship`: `source_table` = `Customer`, `target_table` = `Order`, `relationship_type` = `OneToMany`, `source_columns` = `["CustomerId"]`, `target_columns` = `["CustomerId"]`
+5. `generate_ddl`: `out_file` = `shop.sql`, and/or `generate_csharp` with `out_dir` = `./Generated`
 
-Call `get_diagram_summary` at any point to read back the current tables and relationships. Before writing a `config` for `generate_csharp`, call `get_generation_config_schema` to discover the available keys and their defaults.
+Call `get_diagram_summary` at any point to read back the current tables and relationships.
+Before writing a `config` for `generate_csharp`, call `get_generation_config_schema` to discover the available keys and their defaults.
 
 ## Notes
 
-- **The GUI follows external changes.** When the server writes a diagram that is open in the GUI, the GUI detects the change and follows it: if the GUI has no unsaved edits and the new content is readable, it reloads the file automatically (zoom and scroll position are preserved) and shows a brief status note. Content it cannot load — malformed JSON, something that is not a `DiagramDocument`, or a newer format version — is not loaded: the GUI keeps what it has and reports the problem. The confirmation dialog appears only when the GUI itself has unsaved changes and something else writes the file; in that case the GUI asks whether to reload (discarding your unsaved edits) or keep editing. A mouse gesture in progress — moving or resizing a table, or a rubber-band selection — is cancelled back to where it started on either path. Dialogs that are already open (database sync, query definitions, and so on) are **not** closed, however: they still show the diagram as it was when they opened, so confirming one after a reload can act on stale content. Keeping diagram files under git is still recommended so changes stay reviewable.
-- **DiagramDocument validation.** The editing tools refuse a file that does not exist, JSON that is not a `DiagramDocument` (an object with `Version` and `Schema`), and documents saved in a newer format version than this tool supports (to avoid discarding unknown data). `get_diagram_summary` still reads a newer-format document, with a warning.
-- **Design defaults via server instructions.** On initialization the server sends MCP instructions carrying default design guidelines: PascalCase singular table names unless the user asks for a different convention (matching the existing diagram's style when there is one), exactly one primary-key column per table (the diagram and the generated DDL do support a composite key — only the C# code generator does not — and `set_primary_key` is how to declare one and its column order when the user asks for it), the foreign-key workflow, and the note that unique constraints are for columns other than the primary key. Clients that support instructions (e.g., Claude Code) surface these to the agent automatically. They are guidance, not enforcement — the tools still accept diagrams that follow other conventions.
-- **Layout is not written by the server.** A newly created file contains schema only (no coordinates), so opening it in the GUI auto-arranges all tables. Tables added to an existing file are placed in free space the next time it is opened in the GUI; columns added to an existing table simply appear inside that table's card, and the table itself is not moved.
+- **The GUI follows external changes.**
+  When the server writes a diagram that is open in the GUI, the GUI detects the change and follows it.
+  If the GUI has no unsaved edits and the new content is readable, it reloads the file automatically (zoom and scroll position are preserved) and shows a brief status note.
+  Content it cannot load (malformed JSON, something that is not a `DiagramDocument`, or a newer format version) is not loaded: the GUI keeps what it has and reports the problem.
+  The confirmation dialog appears only when the GUI itself has unsaved changes and something else writes the file; in that case the GUI asks whether to reload (discarding your unsaved edits) or keep editing.
+  A mouse gesture in progress (moving or resizing a table, or a rubber-band selection) is cancelled back to where it started on either path.
+  Dialogs that are already open (database sync, query definitions, and so on) are **not** closed, however: they still show the diagram as it was when they opened, so confirming one after a reload can act on stale content.
+  Keeping diagram files under git is still recommended so changes stay reviewable.
+- **DiagramDocument validation.**
+  The editing tools refuse a file that does not exist, JSON that is not a `DiagramDocument` (an object with `Version` and `Schema`), and documents saved in a newer format version than this tool supports (to avoid discarding unknown data).
+  `get_diagram_summary` still reads a newer-format document, with a warning.
+- **Design defaults via server instructions.**
+  On initialization the server sends MCP instructions carrying default design guidelines: PascalCase singular table names unless the user asks for a different convention (matching the existing diagram's style when there is one), exactly one primary-key column per table (the diagram and the generated DDL do support a composite key, and only the C# code generator does not; `set_primary_key` is how to declare one and its column order when the user asks for it), the foreign-key workflow, and the note that unique constraints are for columns other than the primary key.
+  Clients that support instructions, such as Claude Code, surface these to the agent automatically.
+  They are guidance, not enforcement: the tools still accept diagrams that follow other conventions.
+- **Layout is not written by the server.**
+  A newly created file contains schema only (no coordinates), so opening it in the GUI auto-arranges all tables.
+  Tables added to an existing file are placed in free space the next time it is opened in the GUI.
+  Columns added to an existing table simply appear inside that table's card, and the table itself is not moved.
 
 ## Related
 
@@ -115,4 +164,8 @@ Call `get_diagram_summary` at any point to read back the current tables and rela
 
 ## License note
 
-The external MCP server ships as part of the CLI (`QuickER.Cli`), and its file-based tool-execution host (`QuickER.Mcp.Tools`) is likewise covered by [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **plus additional grants**; thanks to those grants, **the current releases are free for everyone, including commercial use**. The `QuickER.Mcp` project, which contains the tool-definition catalog and the stdio host, is MIT-licensed. Eight projects in total are NC-covered — for the full mapping and the licensing and distribution policy, see the [licensing guide](../LICENSING.md). **Code that these tools generate is your work product**, granted to you perpetually and irrevocably for any purpose, with no attribution required.
+The external MCP server ships as part of the CLI (`QuickER.Cli`), and its file-based tool-execution host (`QuickER.Mcp.Tools`) is likewise covered by [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **plus additional grants**; thanks to those grants, **the current releases are free for everyone, including commercial use**.
+The `QuickER.Mcp` project, which contains the tool-definition catalog and the stdio host, is MIT-licensed.
+Eight projects in total are NC-covered; for the full mapping and the licensing and distribution policy, see the [licensing guide](../LICENSING.md).
+
+**Code that these tools generate is your work product**, granted to you perpetually and irrevocably for any purpose, with no attribution required.
