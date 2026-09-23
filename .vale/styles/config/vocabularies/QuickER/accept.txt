@@ -1,0 +1,124 @@
+# QuickER の英語文書が使う語彙。Vale.Spelling はここに挙げた語を綴り誤りとみなさない。
+#
+# 各行は正規表現で、大文字小文字は区別しない（namespace は Namespace も通す）。
+# ただし複数形は自動では通らないため、必要なものは s? を付けて 1 行にまとめる。
+# 所有格（'s）は基底形を載せれば通る。
+#
+# 語を足す前に、まず本文の側を直せないかを見ること。ここは「辞書に無いが正しい語」
+# のための場所であって、綴り誤りを黙らせる場所ではない。
+
+# 固有名詞（製品・ツール・ライブラリ）
+Authenticode
+Blazor
+CSharpier
+DBNull
+EZConnect
+MSBuild
+Npgsql
+Ollama
+Testcontainers
+Velopack
+
+# 地の文に現れる識別子・設定キー・型名
+camelCase
+csproj
+dotnet
+erDiagram
+mcp
+MS_Description
+npm
+order_lines
+rowid
+rowversion
+sp_addextendedproperty
+sqlite
+sqlserver
+usings
+workflow_dispatch
+
+# 略語。辞書は単数形しか持たないため、複数形も挙げる。
+APIs
+CLIs?
+DBML
+DBs?
+DTOs
+Esc
+FKs
+GUIDs
+LLMs
+PDFs
+POCOs
+SHAs
+
+# ソフトウェアの語彙。一般英語の辞書には無い。
+accessors?
+async
+bool(ean)?
+config
+dereferences?
+deserializes?
+distributables?
+formattable
+formatters?
+idempotency
+initializers?
+inlined
+inlines?
+interop
+introducers?
+journaled
+journaling
+keyless
+liveness
+minimap
+misconfiguration
+mockups?
+namespaces?
+navigations?
+nullability
+nullable
+nulling
+onwards
+ordinally
+parameterless
+plaintext
+rasterizes?
+recurses?
+remoting
+rescans?
+scaffolded
+stderr
+stdout
+subcommands?
+subfolders?
+sublicense
+substring
+subtree
+swappable
+syncable
+uncheck
+uncompilable
+undoable
+unencrypted
+unfetched
+unformatted
+unpartitioned
+unpushed
+unrestorable
+untrusted
+untyped
+upsert
+versionless
+viewport
+
+# 所有格（'s）だけが辞書に無い語。基底形を載せると所有格も通る。
+backend
+checkbox
+dialogs?
+else
+git
+IDE
+runtime
+serializer
+SQL
+upload
