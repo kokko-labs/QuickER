@@ -174,4 +174,40 @@ public sealed class EditModelInputFormatTests
                 parsed.Ticks.Should().Be(value.Ticks, text);
             }
         );
+
+    // ===== パターンキャッシュのキー（カルチャ名でなく実パターン） =====
+
+    [Fact(
+        DisplayName = "LongTimePattern を差し替えたクローンカルチャが元カルチャのキャッシュに潰されない"
+    )]
+    public void 差し替えたクローンカルチャの書式が反映される()
+    {
+        var previous = CultureInfo.CurrentCulture;
+
+        try
+        {
+            // 元カルチャのパターンを先にキャッシュへ載せる（en-US の長い時刻は 12 時間制 "h:mm:ss tt"）
+            var baseline = CultureInfo.GetCultureInfo("en-US");
+            CultureInfo.CurrentCulture = baseline;
+            _ = EditModelInputFormat.Format((DateTime?)WithFraction());
+
+            // CultureInfo の等値は実質 Name 比較なので、クローンはキャッシュのキーとして元と衝突し得る。
+            // キーが実パターンなら、差し替えた 24 時間制がそのまま効く
+            var clone = (CultureInfo)baseline.Clone();
+            clone.DateTimeFormat.LongTimePattern = "HH:mm:ss";
+            CultureInfo.CurrentCulture = clone;
+
+            var text = EditModelInputFormat.Format((DateTime?)WithFraction());
+
+            text.Should()
+                .Contain(
+                    "14:30:15.1234567",
+                    "クローンで差し替えた長い時刻パターンで書式化される（元カルチャのキャッシュ済みパターンに潰されない）"
+                );
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
 }

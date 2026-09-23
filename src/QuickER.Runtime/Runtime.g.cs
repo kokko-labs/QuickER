@@ -650,8 +650,8 @@ internal static class DeclaredInstanceRegistry<TSelf, TValue>
     /// <summary>The declared entries in declaration order, or null while unscanned (or while the type's static initialization is still running).</summary>
     private static Entry[]? _entries;
 
-    /// <summary>The declared instances handed out by All (built once from the published entries).</summary>
-    private static TSelf[]? _all;
+    /// <summary>The declared instances handed out by All (built once from the published entries, wrapped read-only so a cast back to an array cannot mutate the shared set).</summary>
+    private static IReadOnlyList<TSelf>? _all;
 
     /// <summary>True once a scan found no marked fields - the permanent fast path for an ordinary value object.</summary>
     private static bool _noDeclaredInstances;
@@ -675,13 +675,14 @@ internal static class DeclaredInstanceRegistry<TSelf, TValue>
 
             if (all is null)
             {
-                all = new TSelf[entries.Length];
+                var instances = new TSelf[entries.Length];
 
                 for (var i = 0; i < entries.Length; i++)
                 {
-                    all[i] = entries[i].Instance;
+                    instances[i] = entries[i].Instance;
                 }
 
+                all = Array.AsReadOnly(instances);
                 _all = all;
             }
 
@@ -938,6 +939,9 @@ public abstract class ValueObjectBaseCore<TSelf, TValue>
     /// <summary>Gets the underlying value (never reassigned; reference-typed values such as byte[] are not defensively copied — the binary value object base states that contract).</summary>
     public TValue Value { get; }
 
+    /// <summary>Whether TValue can hold null at all. Guards the null tests below so a value-typed TValue never evaluates them - the generic "is null" boxes the value in unoptimized code, and GetHashCode / ToString sit on hot paths (dictionary lookups, display).</summary>
+    private static readonly bool _valueIsNullable = default(TValue) is null;
+
     /// <summary>Initializes with an already-validated value (Create/TryCreate performs validation beforehand).</summary>
     protected ValueObjectBaseCore(TValue value) => Value = value;
 
@@ -1168,9 +1172,11 @@ public abstract class ValueObjectBaseCore<TSelf, TValue>
     /// <summary>Value-based equality (delegates to the typed overload; anything that is not this value object type is unequal).</summary>
     public override bool Equals(object? obj) => obj is TSelf other && Equals(other);
 
-    /// <summary>Value-based hash code (computed through <see cref="EqualityComparer{T}.Default"/>, so a struct value is not boxed).</summary>
+    /// <summary>Value-based hash code (computed through <see cref="EqualityComparer{T}.Default"/> behind a guarded null test, so a struct value is not boxed).</summary>
     public override int GetHashCode() =>
-        Value is null ? 0 : EqualityComparer<TValue>.Default.GetHashCode(Value);
+        _valueIsNullable && Value is null
+            ? 0
+            : EqualityComparer<TValue>.Default.GetHashCode(Value!);
 
     /// <summary>Value-based equality operator.</summary>
     public static bool operator ==(
@@ -1184,8 +1190,9 @@ public abstract class ValueObjectBaseCore<TSelf, TValue>
         ValueObjectBaseCore<TSelf, TValue>? right
     ) => !(left == right);
 
-    /// <summary>Returns the string representation of the underlying value.</summary>
-    public override string ToString() => Value?.ToString() ?? string.Empty;
+    /// <summary>Returns the string representation of the underlying value (a struct value is not boxed: the null test is guarded and the call is constrained).</summary>
+    public override string ToString() =>
+        _valueIsNullable && Value is null ? string.Empty : Value!.ToString() ?? string.Empty;
 
     /// <summary>Formats the underlying value with the given format string, using the current culture.</summary>
     /// <param name="format">The format string for the underlying value (for example "N2" on a decimal, "yyyy/MM/dd" on a date).</param>
@@ -1233,7 +1240,9 @@ public static class ValueObjectComparisons
     /// <summary>Orders two operands by their underlying values, treating null as the smallest value (two nulls are equal).</summary>
     /// <remarks>
     /// This is the body behind the ordering operators, which - unlike <see cref="IComparable{T}.CompareTo"/> - can be
-    /// handed a null on either side.
+    /// handed a null on either side. The order is the value type's own <see cref="IComparable{T}"/> total order, which for
+    /// <see cref="float"/> / <see cref="double"/> differs from the IEEE operators: NaN compares equal to NaN and sorts
+    /// below every other value instead of making every comparison false.
     /// </remarks>
     public static int CompareOrdered<TSelf, TValue>(
         ValueObjectBaseCore<TSelf, TValue>? left,
@@ -1695,6 +1704,8 @@ public static class ValueObjectDecimalRules
 /// that hands such a column back as text makes it throw <see cref="InvalidCastException"/> - which is what SQLite does for
 /// every one of them, since it stores them as TEXT. Those types are parsed from the string instead, with the invariant culture.
 /// SQL Server returns them already typed, so they take the pass-through above and never reach the parsing.
+/// Binary (<c>byte[]</c>) is the same case with Base64 as its text shape, so a binary value object can be created from a
+/// CSV field or a spreadsheet cell through <c>TryCreateFrom</c> / <c>CreateFrom</c> like every other value type.
 /// </para>
 /// <para>
 /// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
@@ -1777,6 +1788,13 @@ public static class RawValueConverter
             if (underlying == typeof(TimeOnly))
             {
                 return TimeOnly.Parse(text, provider);
+            }
+
+            if (underlying == typeof(byte[]))
+            {
+                // Base64 is the text shape of binary here - the same notation the edit models accept,
+                // so a CSV/spreadsheet import and the screen read binary input the same way
+                return Convert.FromBase64String(text);
             }
         }
 
@@ -2057,7 +2075,9 @@ public abstract class EntityBaseCore
     /// <summary>Serializes this entity to a JSON string (used for passing data to a web API and so on).</summary>
     /// <remarks>
     /// Only public get/set properties are included (get-only derived flags such as IsAdded are not emitted; RowState is emitted).
-    /// Child navigations are included; parent-reference navigations carry [JsonIgnore] so no cycle occurs.
+    /// Child navigations are included; with the default configuration (IncludeJsonIgnoreOnParentNavigation) parent-reference
+    /// navigations carry [JsonIgnore] and are left out. Without the attribute they are emitted, and a cycle back to this
+    /// entity is nulled out by IgnoreCycles instead.
     /// </remarks>
     public string ToJson(bool writeIndented = false) =>
         JsonSerializer.Serialize(
@@ -2068,7 +2088,9 @@ public abstract class EntityBaseCore
 
     /// <summary>Creates a deep clone of this entity (via a JSON round-trip).</summary>
     /// <remarks>
-    /// Values, RowState, and child navigations are copied. Parent-reference navigations are not restored because of [JsonIgnore] (the clone does not point to a parent).
+    /// Values, RowState, and child navigations are copied. With the default configuration (IncludeJsonIgnoreOnParentNavigation)
+    /// parent-reference navigations are not restored (the clone does not point to a parent); without the attribute, restoring
+    /// them depends on how IgnoreCycles serialized the graph.
     /// To insert it as a separate record, reassign the primary key or call MarkAdded() after cloning. The returned instance has the same concrete type as the original.
     /// </remarks>
     public EntityBaseCore Clone()
@@ -2241,11 +2263,36 @@ public abstract class EditModelBaseCore
     /// <summary>Marks this model for insertion (used to include a newly entered edit model in a save).</summary>
     public void MarkAdded() => RowState = RowState.Added;
 
+    /// <summary>Marks this model and its whole cascade subtree for insertion (used when the stored rows behind the subtree are gone).</summary>
+    /// <remarks>
+    /// <see cref="EditModelCollection{T}.AcceptRemoved"/> uses this for the set-aside elements: the saved deletion removed
+    /// their descendants with them (a graph delete cascades), so adding the instance back means inserting the graph it
+    /// still holds. Marking only the root would insert the parent and silently drop the children - a graph save does not
+    /// write Unchanged rows. Child collections release their own deletion tracking the same way, so what the subtree
+    /// still holds is exactly what a re-add will insert.
+    /// </remarks>
+    internal void MarkSubtreeAdded()
+    {
+        MarkAdded();
+
+        foreach (var link in ChildLinks)
+        {
+            link.MarkSubtreeAdded();
+        }
+    }
+
     /// <summary>Marks this model for deletion (it stays in the collection and is deleted on save).</summary>
     /// <remarks>
+    /// <para>
     /// From here on the model is out of scope for <see cref="Validate"/> and <see cref="CollectErrors(bool)"/>: only its key
     /// takes part in the save. Its own errors stay registered, so a per-row display keeps showing them and putting the row back
     /// brings them back into the validation.
+    /// </para>
+    /// <para>
+    /// After the save, <see cref="EditModelCollection{T}.AcceptChanges"/> takes a marked element out of its collection (it no
+    /// longer describes a stored row). A single cascade child has no collection to leave: it stays attached and stays Removed,
+    /// so set the parent's navigation property to null once the save is confirmed.
+    /// </para>
     /// </remarks>
     public void MarkRemoved() => RowState = RowState.Removed;
 
@@ -2389,6 +2436,49 @@ public abstract class EditModelBaseCore
             bytes = Array.Empty<byte>();
             return false;
         }
+    }
+
+    /// <summary>Converts a normalized input string to a parsable value (empty converts to null so a blank input clears the confirmed value; the required check decides whether null is acceptable).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="converted">The parsed value, or null for empty input or on failure.</param>
+    protected static BindingConversion ConvertParsedInput<TValue>(string normalized, out TValue? converted)
+        where TValue : struct, IParsable<TValue>
+    {
+        if (string.IsNullOrEmpty(normalized))
+        {
+            converted = null;
+            return BindingConversion.Converted;
+        }
+
+        if (TryParseInput<TValue>(normalized, out var parsed))
+        {
+            converted = parsed;
+            return BindingConversion.Converted;
+        }
+
+        converted = null;
+        return BindingConversion.Unparsable;
+    }
+
+    /// <summary>Converts a normalized input string to binary (empty converts to null so a blank input clears the confirmed value; the required check decides whether null is acceptable).</summary>
+    /// <param name="normalized">The normalized input string.</param>
+    /// <param name="converted">The converted bytes, or null for empty input or on failure.</param>
+    protected static BindingConversion ConvertBinaryInput(string normalized, out byte[]? converted)
+    {
+        if (string.IsNullOrEmpty(normalized))
+        {
+            converted = null;
+            return BindingConversion.Converted;
+        }
+
+        if (TryConvertBase64Input(normalized, out var bytes))
+        {
+            converted = bytes;
+            return BindingConversion.Converted;
+        }
+
+        converted = null;
+        return BindingConversion.Unparsable;
     }
 
     /// <summary>Converts a normalized input string to a string-valued value object (empty converts to null; a rejection carries the joined validation errors).</summary>
@@ -2804,7 +2894,7 @@ public abstract class EditModelBaseCore
         return errors;
     }
 
-    /// <summary>Resets the graph to the unchanged state after a save is confirmed (marks this model Unchanged and also clears children's deletion tracking).</summary>
+    /// <summary>Resets the graph to the unchanged state after a save is confirmed (marks this model Unchanged, takes saved deletions out of child collections, and clears their deletion tracking).</summary>
     /// <param name="includeChildren">True to recursively accept changes on cascade children as well.</param>
     public void AcceptChanges(bool includeChildren = true)
     {
@@ -2881,8 +2971,8 @@ public abstract class EditModelBaseCore
     protected void AddChild(string name, Func<EditModelBaseCore?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
-    /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it).</summary>
-    protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)
+    /// <summary>Registers a child collection into the cascade (the collection is resolved lazily so the latest instance is used, even after a mapper load replaces it). While the accessor returns null the link counts as empty, the same way a single child does.</summary>
+    protected void AddChildren<T>(string name, Func<EditModelCollection<T>?> accessor)
         where T : EditModelBaseCore =>
         (_childLinks ??= new()).Add(ChildLink.ForCollection(name, accessor));
 
@@ -2899,7 +2989,8 @@ public abstract class EditModelBaseCore
         private readonly Func<IEnumerable<EditModelBaseCore>> _items;
         private readonly Func<bool, bool> _validate;
         private readonly Func<bool, bool> _hasChanges;
-        private readonly Action _acceptRemoved;
+        private readonly Action<bool> _acceptChanges;
+        private readonly Action _markSubtreeAdded;
 
         private ChildLink(
             string name,
@@ -2907,7 +2998,8 @@ public abstract class EditModelBaseCore
             Func<IEnumerable<EditModelBaseCore>> items,
             Func<bool, bool> validate,
             Func<bool, bool> hasChanges,
-            Action acceptRemoved
+            Action<bool> acceptChanges,
+            Action markSubtreeAdded
         )
         {
             _name = name;
@@ -2915,10 +3007,17 @@ public abstract class EditModelBaseCore
             _items = items;
             _validate = validate;
             _hasChanges = hasChanges;
-            _acceptRemoved = acceptRemoved;
+            _acceptChanges = acceptChanges;
+            _markSubtreeAdded = markSubtreeAdded;
         }
 
         /// <summary>Creates a link that registers a single child reference.</summary>
+        /// <remarks>
+        /// Accepting changes skips a child marked Removed: its row has just been deleted, so accepting it would turn it
+        /// into an Unchanged ghost of a row that no longer exists. It has no collection to leave, so it stays attached
+        /// and stays Removed - the application sets the navigation property to null once the save is confirmed
+        /// (see <see cref="MarkRemoved"/>).
+        /// </remarks>
         public static ChildLink ForSingle(string name, Func<EditModelBaseCore?> accessor) =>
             new(
                 name,
@@ -2927,23 +3026,33 @@ public abstract class EditModelBaseCore
                 includeChildren => accessor() is not { } child || child.Validate(includeChildren),
                 includeChildren =>
                     accessor() is { } child && child.HasGraphChanges(includeChildren),
-                () => { }
+                includeChildren =>
+                {
+                    if (accessor() is { IsRemoved: false } child)
+                    {
+                        child.AcceptChanges(includeChildren);
+                    }
+                },
+                () => accessor()?.MarkSubtreeAdded()
             );
 
         /// <summary>Creates a link that registers a child collection.</summary>
         /// <remarks>
         /// Validation is delegated to <see cref="EditModelCollection{T}.Validate"/> rather than looping over the elements here,
-        /// so validating the parent also runs the duplicate check among the siblings.
+        /// so validating the parent also runs the duplicate check among the siblings. Accepting changes is delegated the same
+        /// way, so the collection's own handling of saved deletions (removing the marked elements) runs on the parent's
+        /// AcceptChanges too.
         /// </remarks>
-        public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>> accessor)
+        public static ChildLink ForCollection<T>(string name, Func<EditModelCollection<T>?> accessor)
             where T : EditModelBaseCore =>
             new(
                 name,
                 true,
-                () => accessor(),
-                includeChildren => accessor().Validate(includeChildren),
-                _ => accessor().HasChanges,
-                () => accessor().AcceptRemoved()
+                () => (IEnumerable<EditModelBaseCore>?)accessor() ?? Enumerable.Empty<EditModelBaseCore>(),
+                includeChildren => accessor() is not { } children || children.Validate(includeChildren),
+                _ => accessor() is { HasChanges: true },
+                includeChildren => accessor()?.AcceptChanges(includeChildren),
+                () => accessor()?.MarkSubtreeAdded()
             );
 
         /// <summary>Validates the registered children and returns true when they are all valid.</summary>
@@ -2966,16 +3075,11 @@ public abstract class EditModelBaseCore
             }
         }
 
-        /// <summary>Accepts changes on the registered children; for collections, also clears deletion tracking.</summary>
-        public void AcceptChanges(bool includeChildren)
-        {
-            foreach (var item in _items())
-            {
-                item.AcceptChanges(includeChildren);
-            }
+        /// <summary>Accepts changes on the registered children (collections delegate to their own AcceptChanges, which also handles saved deletions and clears deletion tracking).</summary>
+        public void AcceptChanges(bool includeChildren) => _acceptChanges(includeChildren);
 
-            _acceptRemoved();
-        }
+        /// <summary>Marks the registered children's subtrees for insertion (building block of <see cref="EditModelBaseCore.MarkSubtreeAdded"/>).</summary>
+        public void MarkSubtreeAdded() => _markSubtreeAdded();
 
         /// <summary>Returns whether the registered children have changes.</summary>
         public bool HasChanges(bool includeChildren) => _hasChanges(includeChildren);
@@ -3052,9 +3156,12 @@ public abstract class EditModelBaseCore
         OnErrorsChanged(propertyName);
     }
 
-    /// <summary>Raises the input-errors change notification.</summary>
-    protected void OnErrorsChanged(string propertyName) =>
+    /// <summary>Raises the input-errors change notification, and a PropertyChanged for <see cref="HasErrors"/> (it is derived from the same stores, so a binding to it - a save button's IsEnabled, say - updates together with the errors).</summary>
+    protected void OnErrorsChanged(string propertyName)
+    {
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
+        OnPropertyChanged(nameof(HasErrors));
+    }
 
     /// <summary>Clears every duplicate-value error, whichever check found it (input errors, which live in a separate store, are left untouched). Loading a new value into the model uses this.</summary>
     public void ClearDuplicateErrors() => ClearDuplicateErrorsCore(null);
@@ -3333,6 +3440,14 @@ public abstract class EditModelBaseCore
         CancelEditCore();
     }
 
+    /// <summary>Discards an in-progress row edit without restoring the snapshot (called by the mapper before loading).</summary>
+    /// <remarks>
+    /// A load replaces the confirmed values, so the snapshot <see cref="BeginEdit"/> took no longer describes a state worth
+    /// returning to: a <see cref="CancelEdit"/> arriving after the load must not roll the loaded values back to the stale
+    /// pre-load edit. Clearing the editing flag is enough - the snapshot storage is overwritten by the next BeginEdit.
+    /// </remarks>
+    internal void AbandonRowEdit() => _editing = false;
+
     /// <summary>Core logic of BeginEdit (<see cref="EditModelBaseCore{TSelf}"/> snapshots the confirmed values from the column table; a generated class adds its OnBeginEdit hook).</summary>
     protected virtual void BeginEditCore() { }
 
@@ -3436,9 +3551,11 @@ public sealed class EditModelUniquenessConstraint
 /// </summary>
 /// <remarks>
 /// It is schema-independent and does not bake in property names (each edit model declares its own constraints). It is called at the
-/// end of <see cref="EditModelCollection{T}.Validate"/>, and application code can call it directly for a root-level list. Semantics match the database check:
+/// end of <see cref="EditModelCollection{T}.Validate"/>, and application code can call it directly for a root-level list. The scope rules match the database check:
 /// value tuples that contain a null are out of scope (NULL collision semantics differ per dialect), deletion targets (RowState.Removed) are excluded, and every
-/// element of a duplicated group gets the error. Checking against rows already stored in the database is a separate concern (the repository's CheckUniquenessAsync).
+/// element of a duplicated group gets the error. The comparison itself is ordinal (structural equality on the CLR values), so a database whose collation is
+/// case- or accent-insensitive can still report a duplicate here as distinct - the database check (the repository's CheckUniquenessAsync) has the last word,
+/// and checking against rows already stored in the database is its separate concern.
 /// </remarks>
 public static class EditModelUniquenessValidator
 {
@@ -3592,8 +3709,8 @@ public sealed record EditModelError(string Path, string Property, string Message
 /// A value whose sub-second part is zero is rendered by its own <c>ToString()</c>, character for character - the culture's
 /// format is what the screen has always shown and there is nothing extra to carry. Only a value that does hold a sub-second
 /// part is rendered through a pattern that appends it, because otherwise the input string would not describe the value it was
-/// derived from: editing any other column of the row would commit the truncated instant back over the stored one, since the
-/// binding setter rebuilds the confirmed value from the text.
+/// derived from: the next commit of that field (its LostFocus re-parses the text through the binding setter) would write the
+/// truncated instant back over the stored one.
 /// </para>
 /// <para>
 /// The fraction is written with a literal <c>.</c> and no trailing zeros, whatever the culture's decimal separator is. It has
@@ -3603,9 +3720,13 @@ public sealed record EditModelError(string Path, string Property, string Message
 /// </remarks>
 public static class EditModelInputFormat
 {
-    /// <summary>Time patterns that carry a sub-second part, resolved once per culture from its long time pattern.</summary>
-    private static readonly ConcurrentDictionary<CultureInfo, string> _fractionalTimePatterns =
-        new();
+    /// <summary>Time patterns that carry a sub-second part, keyed by the long time pattern they were derived from.</summary>
+    /// <remarks>
+    /// The key is the pattern text rather than the <see cref="CultureInfo"/>: two CultureInfo instances compare equal by
+    /// name alone, so a clone whose <c>LongTimePattern</c> was customized would collapse onto the original's cached entry
+    /// and render with the wrong pattern.
+    /// </remarks>
+    private static readonly ConcurrentDictionary<string, string> _fractionalTimePatterns = new();
 
     /// <summary>Renders a <see cref="DateTime"/> confirmed value (null becomes an empty string).</summary>
     public static string Format(DateTime? value) =>
@@ -3657,8 +3778,8 @@ public static class EditModelInputFormat
     /// <summary>The culture's long time pattern with a sub-second part attached to its seconds.</summary>
     private static string FractionalTimePattern(CultureInfo culture) =>
         _fractionalTimePatterns.GetOrAdd(
-            culture,
-            static resolved => AttachFraction(resolved.DateTimeFormat.LongTimePattern)
+            culture.DateTimeFormat.LongTimePattern,
+            static pattern => AttachFraction(pattern)
         );
 
     /// <summary>Inserts a literal-dot, trailing-zero-free sub-second token right after the seconds of a time pattern.</summary>
@@ -4128,19 +4249,93 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>Clears deletion tracking after a save is confirmed.</summary>
-    public void AcceptRemoved() => _removed.Clear();
+    /// <summary>Clears deletion tracking after a save is confirmed. The set-aside elements become Added, subtree and all.</summary>
+    /// <remarks>
+    /// The stored rows these elements described are gone (a graph delete cascades over the descendants), so an instance
+    /// that is added back afterwards means a new graph: marking the whole subtree Added here makes that re-add insert it
+    /// (marking only the root would insert the parent and silently drop the children - a graph save does not write
+    /// Unchanged rows). Releasing the tracking list with the elements still Removed would recreate the untracked-Removed
+    /// shape <see cref="ClearItems"/> warns about - the re-added instance could no longer be matched by the tracking
+    /// list, so it would sit in the collection as a deletion target and never be saved.
+    /// </remarks>
+    public void AcceptRemoved()
+    {
+        foreach (var entry in _removed)
+        {
+            entry.Item.MarkSubtreeAdded();
+        }
+
+        _removed.Clear();
+    }
+
+    /// <summary>Marks every element's subtree for insertion and releases this collection's deletion tracking (building block of <see cref="EditModelBaseCore.MarkSubtreeAdded"/>).</summary>
+    internal void MarkSubtreeAdded()
+    {
+        foreach (var item in this)
+        {
+            item.MarkSubtreeAdded();
+        }
+
+        AcceptRemoved();
+    }
 
     /// <summary>Resets all elements (and cascade children) to the unchanged state after a save is confirmed, and also clears deletion tracking.</summary>
     /// <param name="includeChildren">True to recursively accept changes on each element's cascade children as well.</param>
+    /// <remarks>
+    /// Elements marked for deletion (<c>IsRemoved</c>, left in the collection by MarkRemoved) leave the collection here:
+    /// the save has just deleted their rows, so accepting them as ordinary elements would resurrect a deleted row on
+    /// screen (Unchanged) and hand it to the next save. They go out before the acceptance loop, without deletion
+    /// tracking, and stay Removed - the instance no longer describes a stored row.
+    /// </remarks>
     public void AcceptChanges(bool includeChildren = true)
     {
+        RemoveAcceptedDeletions();
+
         foreach (var item in this)
         {
             item.AcceptChanges(includeChildren);
         }
 
         AcceptRemoved();
+    }
+
+    /// <summary>Takes the elements whose deletion was just saved (IsRemoved) out of the collection without deletion tracking (they stay Removed).</summary>
+    /// <remarks>Each element raises its own CollectionChanged (and its own position notification) as usual; the position property notifications for the remaining elements are raised once at the end, the same way the range operations do.</remarks>
+    private void RemoveAcceptedDeletions()
+    {
+        var changed = false;
+
+        _rangeOperationDepth++;
+
+        try
+        {
+            for (var i = Count - 1; i >= 0; i--)
+            {
+                if (!this[i].IsRemoved)
+                {
+                    continue;
+                }
+
+                var item = this[i];
+                item.Owner = null;
+                item.SetParentModel(null);
+                // base.RemoveItem skips the deletion-tracking override: the deletion is already saved, so the
+                // element must not enter the tracking list (AcceptRemoved would turn it into an insertion target).
+                base.RemoveItem(i);
+                item.RaiseParentCollectionChanged();
+                item.RaisePositionChanged();
+                changed = true;
+            }
+        }
+        finally
+        {
+            _rangeOperationDepth--;
+        }
+
+        if (changed)
+        {
+            NotifyPositionsChanged();
+        }
     }
 
     /// <summary>Validates all elements in the collection (and their cascade children). Validates every element and returns true only if all are valid.</summary>
@@ -4440,14 +4635,19 @@ public abstract class MapperBaseCore<TEntity, TEditModel>
     /// <para>
     /// Child collections are rebuilt rather than merged: the previous collection instances are replaced by new ones, so
     /// anything held against them is dropped along with them - a selected item, a scroll position or any other view state
-    /// bound to the old instance, and the removals the old collection was tracking for the next save. Load into an edit
-    /// model that has pending child edits only when discarding them is what is meant.
+    /// bound to the old instance, and the removals the old collection was tracking for the next save. A row edit in
+    /// progress on the model itself (IEditableObject) is abandoned for the same reason: its snapshot predates the load,
+    /// so a CancelEdit arriving afterwards is a no-op instead of rolling the loaded values back. Load into an edit
+    /// model that has pending edits only when discarding them is what is meant.
     /// </para>
     /// </remarks>
     /// <param name="entity">The entity whose values are loaded.</param>
     /// <param name="editModel">The edit model to load the values into.</param>
     public void ApplyToEditModel(TEntity entity, TEditModel editModel)
     {
+        // A row edit in progress is abandoned, not canceled: its snapshot predates this load, so a CancelEdit
+        // arriving later must not roll the loaded values back to the stale pre-load edit.
+        editModel.AbandonRowEdit();
         editModel.BeginLoad();
 
         try
@@ -4484,7 +4684,9 @@ public abstract class MapperBaseCore<TEntity, TEditModel>
     /// <remarks>
     /// A confirmed value is nullable on the edit model even where the entity's column is not, because the model has to hold
     /// input that is still incomplete. Applying it to an entity is where that has to be resolved, and an absent value is an
-    /// error rather than something to write as null.
+    /// error rather than something to write as null. The one exception is a removed row: it takes part in the save through
+    /// its key alone, so the generated ApplyToEntity skips its absent non-key values instead of calling this (the key still
+    /// goes through here - a delete without its key would target the wrong row).
     /// </remarks>
     /// <param name="value">The confirmed value.</param>
     /// <param name="propertyName">The property's name, used in the exception message.</param>
@@ -4502,12 +4704,12 @@ public abstract class MapperBaseCore<TEntity, TEditModel>
     /// <summary>Applies the TEditModel's confirmed values to an existing TEntity (destructive update). Column copying is implemented by derived classes.</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
     /// <param name="entity">The existing entity to apply the values to.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items - collection elements and a single cascade child alike (false leaves a removed single child out as null). This argument is required: pass true for saving, false for report display and similar.</param>
     public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved);
 
     /// <summary>Creates a new TEntity with initial values set and the TEditModel's confirmed values applied.</summary>
     /// <param name="editModel">The edit model whose confirmed values are applied.</param>
-    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items - collection elements and a single cascade child alike (false leaves a removed single child out as null). This argument is required: pass true for saving, false for report display and similar.</param>
     public TEntity CreateEntity(TEditModel editModel, bool includeRemoved)
     {
         var entity = CreateEntity();
@@ -4517,7 +4719,7 @@ public abstract class MapperBaseCore<TEntity, TEditModel>
 
     /// <summary>Creates a list of TEntity from an EditModelCollection of TEditModel.</summary>
     /// <param name="editModels">The collection of edit models to create from.</param>
-    /// <param name="includeRemoved">Whether to also restore and include deletion-tracked (Removed) items. This argument is required: pass true for saving, false for report display and similar.</param>
+    /// <param name="includeRemoved">Whether to also restore and include deletion-tracked (Removed) items - collection elements and a single cascade child alike (false leaves a removed single child out as null). This argument is required: pass true for saving, false for report display and similar.</param>
     public List<TEntity> CreateEntities(
         EditModelCollection<TEditModel> editModels,
         bool includeRemoved

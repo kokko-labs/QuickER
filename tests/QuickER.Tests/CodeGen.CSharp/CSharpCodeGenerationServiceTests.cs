@@ -373,7 +373,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "protected void AddChildren<T>(string name, Func<EditModelCollection<T>> accessor)"
+                "protected void AddChildren<T>(string name, Func<EditModelCollection<T>?> accessor)"
             );
         content.Should().Contain("foreach (var link in ChildLinks)");
         // 子（カスケードナビ）を持つ EditModel は RegisterChildren を override し AddChildren で登録する
@@ -860,9 +860,10 @@ public class CSharpCodeGenerationServiceTests
         // バインディング用プロパティ (string)
         content.Should().Contain("public string BindingOrderId");
         content.Should().Contain("public string BindingAmount");
-        // TryParse 検証（基底の IParsable 総称ヘルパー経由＝型は型引数で運ぶ・意味は型自身の TryParse と同じ）
-        content.Should().Contain("TryParseInput<int>(normalized, out var parsed)");
-        content.Should().Contain("TryParseInput<decimal>(normalized, out var parsed)");
+        // TryParse 検証（基底の IParsable 総称ヘルパー経由＝型は型引数で運ぶ・意味は型自身の TryParse と同じ。
+        // 空欄→確定値 null の早期分岐込みの ConvertParsedInput を通る＝VO 有効時と同じ空欄規則）
+        content.Should().Contain("ConvertParsedInput<int>(normalized, out var parsed)");
+        content.Should().Contain("ConvertParsedInput<decimal>(normalized, out var parsed)");
         // エラーメッセージは中央リゾルバを直接呼び、安定キー（nameof）と表示名を渡す
         // （Description 無指定は null を渡し、ヘルパ側でプロパティ名へフォールバックする）
         content
@@ -4419,6 +4420,310 @@ public class CSharpCodeGenerationServiceTests
             .Content.Split("public sealed partial class NameValue")
             .Length.Should()
             .Be(2);
+    }
+
+    /// <summary>
+    /// 同名列の C# 型（内包値型）そのものが食い違う場合は Error になり生成されないことを検証する
+    /// （FK 統一側の「下地の C# 型が食い違うペアは統一しない」と同じ線引き。畳むと行読み出しの
+    /// InvalidCastException や比較意味の無音変化になるため）
+    /// </summary>
+    [Fact]
+    public void Generate_ValueObjects_SameNameColumnsWithDifferentClrTypes_ShouldError()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "documents",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "document_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "payload",
+                            DataType = "varbinary(max)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "archives",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "archive_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "payload",
+                            DataType = "nvarchar(20)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("PayloadValue")
+                && diagnostic.Message.Contains("documents.payload")
+                && diagnostic.Message.Contains("archives.payload")
+            );
+    }
+
+    /// <summary>
+    /// MySQL の tinyint（表示幅なし＝sbyte）列の値オブジェクトが、比較演算子と IComparable を持つ
+    /// Ordered 基底から派生することを検証する（sbyte を生む方言は MySQL のみ）
+    /// </summary>
+    [Fact]
+    public void Generate_ValueObjects_SByteColumn_ShouldDeriveOrderedBase()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "measures",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "measure_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "level",
+                            DataType = "tinyint",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var columnTypes = QuickER.Provider.MySql.MySqlCSharpTypeMapper.ResolveColumnTypes(diagram);
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            columnTypes,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("public sealed partial class LevelValue");
+        content
+            .Should()
+            .Contain(
+                "ValueObjectOrderedBase<LevelValue, sbyte>",
+                "sbyte を Ordered 分岐から落とすと比較演算子も IComparable も無い VO になり OrderBy が実行時例外になる"
+            );
+    }
+
+    /// <summary>
+    /// 列名 <c>foo</c> と <c>foo_snapshot</c> が同居する正当な図が生成できることを検証する
+    /// （行編集スナップショットは基底の <c>object?[] _valueSnapshot</c> 1 本で、per-EditModel に
+    /// <c>_fooSnapshot</c> は出ない＝存在しないメンバーを名簿が予約し続けて正当な図を弾かない）
+    /// </summary>
+    [Fact]
+    public void Generate_SnapshotSuffixColumn_ShouldGenerate()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "probes",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "probe_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "foo",
+                            DataType = "int",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "foo_snapshot",
+                            DataType = "int",
+                            IsNullable = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("public int? Foo");
+        content.Should().Contain("public int? FooSnapshot");
+    }
+
+    /// <summary>
+    /// 列の説明が確定値プロパティの XmlDoc summary にも載ることを検証する
+    /// （バインディングプロパティだけに載せると、コードから主に触る確定値側で説明が引けない）
+    /// </summary>
+    [Fact]
+    public void Generate_EditModel_ColumnDescription_ShouldAppearOnConfirmedProperty()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "accounts",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "account_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "balance",
+                            DataType = "decimal(10,2)",
+                            IsNullable = true,
+                            Description = "Account balance.",
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content
+            .Should()
+            .Contain(
+                "<summary>Account balance. - Confirmed value of Balance (written by the input conversion"
+            );
+        // 説明の無い列は従来の定型文のまま
+        content.Should().Contain("<summary>Confirmed value of AccountId (written by");
+    }
+
+    /// <summary>
+    /// 列名 <c>row_state</c> の図が名指しの生成エラーで止まることを検証する
+    /// （Mapper の状態転送 <c>entity.RowState = editModel.RowState;</c> が名前で束縛するため、列プロパティが
+    /// この名前を取ると基底の状態が更新されず、既存行の編集が「変更なし」として静かに保存から抜け落ちる）
+    /// </summary>
+    [Fact]
+    public void Generate_RowStateColumn_ShouldError()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "audit_rows",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "audit_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "row_state",
+                            DataType = "nvarchar(20)",
+                            IsNullable = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("RowState")
+            );
     }
 
     /// <summary>VO 生成テスト用の代表的なダイアグラム（PK/FK 共有・各種型を含む）</summary>

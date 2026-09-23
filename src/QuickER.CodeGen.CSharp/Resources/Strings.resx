@@ -166,6 +166,12 @@
   <data name="CodeGen_Error_ValueObjectForeignKeyTypeConflict" xml:space="preserve">
     <value>Column '{0}' is the foreign key of several relationships whose referenced columns resolve to different value object types ({1}), so no single value type can be chosen for it. Make the referenced columns share one value object type, or split the column.</value>
   </data>
+  <data name="CodeGen_Error_ValueObjectValueTypeConflict" xml:space="preserve">
+    <value>The same-named columns aggregated into value object '{0}' resolve to different C# value types, so they cannot share one value object. Align the column types in the ER diagram, or rename the columns so they stay apart: {1}</value>
+  </data>
+  <data name="CodeGen_ListSeparator" xml:space="preserve">
+    <value>, </value>
+  </data>
   <data name="CodeGen_Error_SyncSupportRequiresDialects" xml:space="preserve">
     <value>Sync support requires exactly the two repository dialects 'sqlserver' (the server) and 'sqlite' (the local database); the current selection is '{0}'.</value>
   </data>

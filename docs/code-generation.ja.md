@@ -66,7 +66,7 @@ var customer = await customers.GetByIdAsync(CustomerIdValue.Create(1));
 // orders.GetByIdAsync(customer.CustomerId) は OrderIdValue でないためコンパイルエラー
 ```
 
-同名列の定義（型・長さ・精度）が食い違う場合は Warning 診断を出し、主キーの定義を優先（主キーが無ければ最も広い定義）して 1 つの型に揃えます。
+同名列の定義が長さ・精度で食い違う場合は Warning 診断を出し、主キーの定義を優先（主キーが無ければ最も広い定義）して 1 つの型に揃えます。**C# 型（内包値型）そのものが食い違う場合（`varbinary` の列と `varchar` の列など）は生成時エラー**です——別の型を 1 つの値オブジェクトへ畳むことはできないため、ER 図で列の型を揃えるか、別の列として扱えるよう列名を変えてください。
 
 外部キー列は、**列名が参照先と違っていても参照先（親側）列の値オブジェクト型を共有**します（`orders.ship_customer_id` は `ShipCustomerIdValue` でなく `CustomerIdValue` になります）。「同じ識別子は同じ値型」を型で表すための規則で、EF Core が要求する「外部キーと参照先主キーの CLR 型一致」もこれで満たされます（自己参照テーブルの `parent_node_id → node_id` のような列名の違う外部キーは、列名ごとの別型のままだと EF Core のモデル検証が通りません）。外部キーの外部キーは参照をたどった先の型へ揃え、相互参照の循環に入った列は自分の列名由来の型のままです。型を共有した列は生成時に Info 診断で一覧されます（列名由来の型名が変わるため）。同一の列が「異なる型に解決される親」を複数参照している図は生成時エラー、親子で下地の C# 型が食い違う列ペアは共有せず列名由来の型のままです。
 
@@ -155,6 +155,7 @@ private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? cult
 - **空のセルは違反ではありません。** `null` / `DBNull` / 空文字は「未入力」として `true` ＋ `null` を返し、エラーを 1 件も積みません（NULL 許容列はプロパティ自体を null に保つ設計に合わせています）。必須かどうかは EditModel の必須チェックの担当です。型が空欄を自分の値として引き取りたいときは `ConvertAbsentInput` フック（後述）を実装します——その場合の結果は null でなくフックが返したインスタンスです。空白だけの文字列は「空欄」ではなく、通常の変換に進みます
 - **カルチャは呼び出し側が決めます。** `null` はインバリアントです。人が書いた日付書式（`2026/08/28`）を読むなら、その書式のカルチャを渡してください
 - **数値は桁区切りを許します。** 表計算の書式付き数値を文字列で読むと `1,234` で届くため、数値型は `NumberStyles` を明示して解析します。整数型は小数点を許さないので `1,234.5` は `int` として通りません
+- **バイナリの文字列は Base64 で読みます。** EditModel のバインディング入力と同じ記法なので、画面と取り込みで表記が割れません。`byte[]` の値はそのまま素通しです
 - 変換できたあとは通常の `TryCreate` と同じです。その型の検証（最大長・精度・`OnValidate`）がそのまま効きます
 - 変換自体に失敗したときのメッセージは `ValueObjectValidationMessages.InputNotConvertible` で差し替えられます
 - カルチャを省略するオーバーロード（`TryCreateFrom(raw, out var value, out var errors)` / `CreateFrom(raw)`）はインバリアントで解析します。機械が書いたデータ（直列化されたペイロード・書式が固定されたエクスポート）向けです。人が入力したテキストや表計算が書式付けた値はカルチャに属するので、`CreateFrom(raw, provider)` / `TryCreateFrom(raw, provider, …)` でカルチャを渡してください
@@ -325,7 +326,7 @@ EditModelMessages.ParseFailed = static (propertyName, displayName, inputValue, t
         : $"'{inputValue}' cannot be converted to {typeName}.";
 ```
 
-static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible`＝いずれも表示名が第 1 引数）、`EditModelMessages`（`Required` / `ParseFailed` / `DuplicateValue` / `JoinValueObjectErrors`＝前 3 つはいずれも確定値プロパティ名〔複合制約は名前の並び〕が第 1 引数）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` パッケージに収載されます。
+static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible` / `ValueNotDeclared`＝いずれも表示名が第 1 引数）、`EditModelMessages`（`Required` / `ParseFailed` / `DuplicateValue` / `JoinValueObjectErrors`＝前 3 つはいずれも確定値プロパティ名〔複合制約は名前の並び〕が第 1 引数）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` パッケージに収載されます。
 
 個別 partial: 値オブジェクト側は `OnValidate`（ほかに前述の `GetDefinedInstance` / `ConvertCustomInput`）、EditModel 側は意味系のみ（`OnValidate` / `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit` / `On{Property}Changing` / `Changed`＝文言と表示名は中央リゾルバで解決するため）、Entity 側は同じ理由で無し。Entity の `DisplayName` は `GeneratedDisplayNames.Resolve`（実行時クラス名とテーブル説明を受け取る）が解決するので、差し替えはそこでクラス名を分岐してください（`static (memberName, description) => memberName == nameof(CustomerEntity) ? "顧客" : description ?? memberName;`）。既定のリゾルバはテーブルの説明を優先するので、表示名は図の説明へ書くだけでも足ります。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。値オブジェクトは `IFormattable` も実装しており、`price.ToString("N2")`（culture 指定のオーバーロードあり）が内包値を書式化するほか、文字列補間・`string.Format`・WPF バインディングの StringFormat の書式指定子も同じ経路で内包値に届きます。書式指定子が無いときの結果は常に `ToString()` と同じです（`ToString()` の override〔手書きの override・バイナリ値オブジェクトの Base64 形〕が書式なしの補間にもそのまま効きます）。内包値が書式化できない型〔string・byte[]・bool〕も同様に書式を無視します。`DisplayValue` は「型が決めた表示」・`ToString(書式)` は「呼び出し側がその場で指定する書式」という使い分けです。
 
@@ -362,7 +363,7 @@ public sealed partial class QuantityValue
 | ルール | 弾くもの |
 |---|---|
 | `ValueObjectRules.ValidateRequired(value, displayName, ref errors)` | `null`。false を返すので呼び出し側は打ち切れる（以降の規則はすべて値を触るため） |
-| `ValueObjectStringRules.ValidateMaxLength(value, maxLength, displayName, ref errors)` | 文字数が上限を超える値 |
+| `ValueObjectStringRules.ValidateMaxLength(value, maxLength, displayName, ref errors)` | 長さ（UTF-16 コード単位＝`string.Length`）が上限を超える値。DB 側の単位（Oracle の BYTE 単位など）とは数え方が異なることがあります |
 | `ValueObjectStringRules.ValidateAsciiAlphanumeric(value, allowedSymbols, displayName, ref errors)` | ASCII の英字・数字と `allowedSymbols` の文字以外（記号を一切許さないなら `""`）。全角の英数字は弾く |
 | `ValueObjectStringRules.ValidateEmailAddress(value, displayName, ref errors)` | メールアドレスの形をしていない文字列（`@` がちょうど 1 つ・前後が非空・空白なし）。RFC 5322 の完全検証は意図的にしない。`MailAddress` を使わないのは、それが `Name <a@b>` 形式も解釈してしまうため |
 | `ValueObjectNumberRules.ValidateMaxDigits(value, maxDigits, displayName, ref errors)` | 桁数が上限を超える整数（符号は数えない・0 は 1 桁） |
@@ -598,7 +599,9 @@ editModel.AcceptChanges();
 
 `Clear()` だけは例外で、これは「削除」ではなく「表示の全消し」です＝**保留中の削除も一緒に消えます**（先の `Remove()` で退避された行は保存へ届かなくなります）。追跡リストだけを捨てる実装の方が危険で、退避された行が `Removed` のまま取り消す手段を失い、そのインスタンスを後から戻すと黙って削除対象がコレクションへ入ります。全行を削除したいときは、`Clear()` ではなく 1 行ずつ削除・マークしてください。
 
-削除される行が持ち込むのはキーだけなので、**削除マークされた行は `Validate()` / `CollectErrors()` と重複検証（兄弟間・DB 照合の両方）の対象外**になります（子孫も含めて部分木ごと）。ユーザーが消した行の入力途中・変換不能な値・重複した値が保存全体を止めることはありません。エラー自体は行に登録されたまま残るため、行単位の表示（`HasErrors` / `GetErrors` ＝ `INotifyDataErrorInfo`）には出続け、行を戻せばそのまま検証へ戻ってきます。
+削除される行が持ち込むのはキーだけなので、**削除マークされた行は `Validate()` / `CollectErrors()` と重複検証（兄弟間・DB 照合の両方）の対象外**になります（子孫も含めて部分木ごと）。ユーザーが消した行の入力途中・変換不能な値・重複した値が保存全体を止めることはありません（Mapper の変換も同じ規則で、削除行の未入力の非キー列は必須扱いにせずスキップします）。エラー自体は行に登録されたまま残るため、行単位の表示（`HasErrors` / `GetErrors` ＝ `INotifyDataErrorInfo`）には出続け、行を戻せばそのまま検証へ戻ってきます。
+
+保存が確定して `AcceptChanges()` を呼んだあとの後始末は自動です: `Remove()` で退避されていた行は追跡リストから解放されて**部分木ごと Added に戻り**（行の実体はカスケード子孫ごと消えたので、同じインスタンスを戻せばグラフ全体が新しい行の挿入になります）、`MarkRemoved()` でコレクションに残していた行は**コレクションから外れます**（削除済みの行を通常行として画面に復活させないためです。外れた行は `Removed` のままで、次の保存の削除対象にもなりません）。**単一のカスケード子だけは外す先がありません**——`MarkRemoved()` した単一子は受理後も `Removed` のままナビゲーションプロパティに残るので、保存確定後にアプリ側で null を代入してください（放置すると次の保存が同じ行の削除を再び試みます。行なし削除は QuickER 版 Repository では黙認・EF Core のグラフ保存では例外という既知の非対称があるため、null にしておくのが安全です）。
 
 ## QuickER 版 Repository
 
@@ -903,7 +906,7 @@ var valid = EditModelUniquenessValidator.Validate(models);
 
 エラーは登録したチェックの持ち物で、各チェックは自分が付けたものだけを付け外しします。
 
-- **バインディングのセッター**が変換エラー・値オブジェクトエラーを持ちます（`SetError`）。再生成できるのはセッターだけなので、他のチェックは消しません。
+- **バインディングのセッター**が変換エラー・値オブジェクトエラーを持ちます（`SetError`）。再生成できるのはセッターだけなので、他のチェックは消しません。**空欄は変換エラーにしません**——確定値を null にして自分のエラーを取り下げ、null を許すかは必須チェックが決めます。この規則は値オブジェクトの有無にも列の型（数値・日時・bool・バイナリ・文字列）にも依りません＝NULL 許容列は空欄入力で NULL へ戻せます。
 - **必須チェック**（生成される `ValidateSelf`）は、そのプロパティに他の入力エラーが無いときだけ未入力エラーを付けます（変換できない文字列が入っている欄を「必須です」で塗り潰しません）。値が入れば自分のエラーを消します（バインディング経由ではなく確定値へ直接代入した場合も同じ）。
 - **2 つの重複チェック**は、1 つのプロパティ上にそれぞれ専用のスロット（`DuplicateErrorSource`＝コレクション要素どうしの検証は `Siblings`、DB の既存行との照合は `Database`）を持ちます。互いのスロットを上書きもクリアもしないため、兄弟間でも DB でも重複している値は 2 つの所見をそのまま報告し、各所見はそれを見つけたチェックが報告しなくなった時点で消えます。保存前にグラフ全体を `Validate` しても、直前の DB 照合の結果が消えることはありません（逆も同様）。
 - **確定値を編集すると、その EditModel の `Database` 側の所見は取り下げられます。** 照合したのは編集前の値だからで、複合制約は構成列すべての組で判定しているため、1 列でも変われば同じモデルの DB 由来の所見はすべて対象です。`Siblings` 側は次の検証が判断するのでそのまま残ります。

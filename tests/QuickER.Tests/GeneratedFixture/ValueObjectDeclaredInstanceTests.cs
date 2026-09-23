@@ -359,4 +359,55 @@ public sealed class ValueObjectDeclaredInstanceTests
 
         delta.Should().Be(0, "宣言済みインスタンスの引き当てと検証は何も確保しない");
     }
+
+    [Fact(DisplayName = "[宣言済み] GetDeclaredInstances は内部配列を書き換え可能な形で公開しない")]
+    public void GetDeclaredInstancesは内部配列を公開しない()
+    {
+        var list = MeasureStatus.GetDeclaredInstances();
+
+        list.Should()
+            .NotBeAssignableTo<MeasureStatus[]>(
+                "配列で返すとキャストで共有集合を書き換えられ、以後の全引き当てが壊れる"
+            );
+        ((IList<MeasureStatus>)list).IsReadOnly.Should().BeTrue();
+        list.Should()
+            .Equal(
+                [MeasureStatus.Preparing, MeasureStatus.InProgress, MeasureStatus.Completed],
+                "宣言順の列挙は従来どおり（属性なしの Legacy は集合に入らない）"
+            );
+    }
+
+    [Fact(DisplayName = "GetHashCode は値型の内包値をボックス化しない（割り当てゼロ）")]
+    public void GetHashCodeは値型の内包値をボックス化しない()
+    {
+        var status = MeasureStatus.Create(2);
+
+        // ウォームアップ（JIT・tier-up を測定から追い出す）
+        for (var i = 0; i < 50_000; i++)
+        {
+            _ = status.GetHashCode();
+        }
+
+        long delta = 0;
+
+        // 測定中に tier-up が走った回を拾わないよう 3 ラウンド測り、最後のラウンドで表明する
+        for (var round = 0; round < 3; round++)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+
+            for (var i = 0; i < 10_000; i++)
+            {
+                _ = status.GetHashCode();
+            }
+
+            delta = GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        delta
+            .Should()
+            .Be(
+                0,
+                "null 判定は _valueIsNullable で短絡し、非制約ジェネリックの is null を評価しない"
+            );
+    }
 }

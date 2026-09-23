@@ -105,6 +105,13 @@ internal sealed partial class CSharpGenerationModelBuilder
                 yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
             }
         }
+
+        // 基底の状態管理メンバー（RowState）は Mapper の状態転送が名前で束縛するため予約する
+        // （理由の正本は GeneratedFixedMemberNames.StateTransferReserved の XmlDoc）
+        foreach (var name in GeneratedFixedMemberNames.StateTransferReserved)
+        {
+            yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
+        }
     }
 
     /// <summary>
@@ -116,19 +123,19 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 追加したらここと <see cref="GeneratedFixedMemberNames"/> も追随すること）:
     /// </para>
     /// <list type="bullet">
-    ///   <item><description>L970/L972 <c>private (型) (p.field_name)</c> ＝確定値のバッキングフィールド（_prop）</description></item>
-    ///   <item><description>L975 <c>private string (p.binding_field_name)</c> ＝バインディング文字列のフィールド（_bindingProp）</description></item>
-    ///   <item><description>L978 <c>public (型) (p.property_name)</c> ＝確定値プロパティ（Prop）</description></item>
-    ///   <item><description>L1010-L1019 <c>partial void On(p.property_name)Changing/Changed(...)</c> ＝値変更フック（4 本はシグネチャ違いのオーバーロード同士なので、名前は 2 つだけ登録する）</description></item>
-    ///   <item><description>L1022 <c>public string (p.binding_property_name)</c> ＝バインディングプロパティ（BindingProp）</description></item>
-    ///   <item><description>L1276 <c>private (型) (p.field_name)Snapshot</c> ＝行編集の確定値スナップショットフィールド</description></item>
-    ///   <item><description>L1157/L1181 <c>private (型) (navigation.field_name)</c> ＝カスケード子のバッキングフィールド（親参照ナビは field_name が空で発行されない）</description></item>
-    ///   <item><description>L1160/L1184/L1201 <c>public (型) (navigation.property_name)</c> ＝ナビゲーションプロパティ</description></item>
-    ///   <item><description>固定メンバー ＝ <see cref="GeneratedFixedMemberNames.EditModelAlways"/>（無条件。位置ヘルパー 4 名は EditModelBase&lt;TSelf&gt; 側の宣言で per-type には出ない）</description></item>
-    ///   <item><description>L1267 <c>RegisterChildren</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithCascadeNavigations"/>（カスケード子を持つときのみ）</description></item>
-    ///   <item><description>L1322 <c>ParentModel</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithTypedParentModel"/>（型付き親モデルがあるときのみ）</description></item>
+    ///   <item><description>L2667/L2669 <c>private (型) (p.field_name)</c> ＝確定値のバッキングフィールド（_prop）</description></item>
+    ///   <item><description>L2672 <c>private string (p.binding_field_name)</c> ＝バインディング文字列のフィールド（_bindingProp）</description></item>
+    ///   <item><description>L2675 <c>public (型) (p.property_name)</c> ＝確定値プロパティ（Prop）</description></item>
+    ///   <item><description>L2696-L2705 <c>partial void On(p.property_name)Changing/Changed(...)</c> ＝値変更フック（4 本はシグネチャ違いのオーバーロード同士なので、名前は 2 つだけ登録する）</description></item>
+    ///   <item><description>L2708 <c>public string (p.binding_property_name)</c> ＝バインディングプロパティ（BindingProp）</description></item>
+    ///   <item><description>L2796/L2805 <c>private (型) (navigation.field_name)</c> ＝カスケード子のバッキングフィールド（親参照ナビは field_name が空で発行されない）</description></item>
+    ///   <item><description>L2799/L2808/L2830 <c>public (型) (navigation.property_name)</c> ＝ナビゲーションプロパティ</description></item>
+    ///   <item><description>固定メンバー ＝ <see cref="GeneratedFixedMemberNames.EditModelAlways"/>（無条件。位置ヘルパー 4 名は EditModelBase&lt;TSelf&gt; 側の宣言で per-type には出ない。行編集スナップショットも基底の <c>object?[] _valueSnapshot</c> 1 本で per-type の派生名は無い）</description></item>
+    ///   <item><description>L2881 <c>RegisterChildren</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithCascadeNavigations"/>（カスケード子を持つときのみ）</description></item>
+    ///   <item><description>L2912 <c>ParentModel</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithTypedParentModel"/>（型付き親モデルがあるときのみ）</description></item>
     ///   <item><description><c>ValidateUniqueAsync</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithRepositoryFace"/>（Repository 契約面があるときのみ）</description></item>
     ///   <item><description><c>_uniquenessConstraints</c> / <c>UniquenessConstraints</c> ＝ <see cref="GeneratedFixedMemberNames.EditModelWithUniqueConstraints"/>（テーブルに UNIQUE 制約があるときのみ）</description></item>
+    ///   <item><description><c>RowState</c> ＝ <see cref="GeneratedFixedMemberNames.StateTransferReserved"/>（基底の状態管理メンバー。Mapper の状態転送が名前で束縛するため予約＝per-type には出ない）</description></item>
     /// </list>
     /// <para>
     /// 値オブジェクト経路（<c>BuildValueObjectEditModelProperty</c>）も同じ派生名規則で組み立てるため、
@@ -153,9 +160,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             yield return new GeneratedMemberName(property.FieldName, origin);
             yield return new GeneratedMemberName(property.BindingPropertyName, origin);
             yield return new GeneratedMemberName(property.BindingFieldName, origin);
-
-            // 行編集（IEditableObject）のスナップショットは確定値フィールド側に持つ
-            yield return new GeneratedMemberName(property.FieldName + "Snapshot", origin);
 
             // 値変更フックは 1 プロパティにつき Changing / Changed の 2 名だけ登録する
             // （各 2 本はシグネチャ違いのオーバーロードで、同名を 2 回入れると自分自身を重複と誤検知する）
@@ -184,6 +188,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         // EditModelBase<TSelf> が宣言する位置ヘルパーは per-type には出ないが、列由来プロパティが同名を
         // 取ると基底メンバを隠して型付きの面が壊れるため、予約名として衝突を生成エラーにする
         foreach (var name in GeneratedFixedMemberNames.EditModelPositionHelpers)
+        {
+            yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
+        }
+
+        // 基底の状態管理メンバー（RowState）は Mapper の状態転送が名前で束縛するため予約する
+        // （理由の正本は GeneratedFixedMemberNames.StateTransferReserved の XmlDoc）
+        foreach (var name in GeneratedFixedMemberNames.StateTransferReserved)
         {
             yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
         }

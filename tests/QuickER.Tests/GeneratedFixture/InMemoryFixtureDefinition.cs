@@ -22,6 +22,7 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 ///   <item>DB 照合順序の揺れを避けるため日本語識別子は使わない</item>
 ///   <item>名前付きクエリ（ミニ DSL の一覧＋ページング・単一・件数・射影）＝DSL 共有本体が
 ///     インメモリ実装にも出力されることの実行検証用</item>
+///   <item>空欄入力の意味論（VO 無効の parse / binary 列）検証用の独立テーブル <c>blank_probes</c></item>
 /// </list>
 /// namespace は既存フィクスチャと衝突させない専用 namespace を使う。
 /// </para>
@@ -74,6 +75,19 @@ public static class InMemoryFixtureDefinition
 
     private static readonly Guid RelCustomerOrders = new("dddddddd-1111-0000-0000-000000000001");
     private static readonly Guid RelCustomerProfile = new("dddddddd-1111-0000-0000-000000000002");
+
+    private static readonly Guid BlankProbeId = new("abababab-0000-0000-0000-000000000001");
+    private static readonly Guid BlankProbePkColId = new("abababab-0000-0000-0000-000000000002");
+    private static readonly Guid BlankProbeFlagColId = new("abababab-0000-0000-0000-000000000003");
+    private static readonly Guid BlankProbeSeenAtColId = new(
+        "abababab-0000-0000-0000-000000000004"
+    );
+    private static readonly Guid BlankProbeChunkColId = new("abababab-0000-0000-0000-000000000005");
+    private static readonly Guid BlankProbeRateColId = new("abababab-0000-0000-0000-000000000006");
+    private static readonly Guid BlankProbeLoggedAtColId = new(
+        "abababab-0000-0000-0000-000000000007"
+    );
+    private static readonly Guid BlankProbeStampColId = new("abababab-0000-0000-0000-000000000008");
 
     // 名前付きクエリの ID も決定的でなければならないため固定 GUID を用いる
     private static readonly Guid QueryGetByCustomer = new("99999999-0000-0000-0000-000000000001");
@@ -203,9 +217,71 @@ public static class InMemoryFixtureDefinition
             },
         };
 
+        // EditModel の空欄入力の意味論（VO 無効の parse / binary 列で空欄→確定値 null・必須は基底の
+        // 必須チェックへ委譲）を実行検証するための独立テーブル。リレーション・クエリを持たない純追加で、
+        // 既存テーブルのテストへは影響しない（EditModelBlankInputTests が使用）
+        var blankProbe = new Entity
+        {
+            Id = BlankProbeId,
+            TableName = "blank_probes",
+            Columns =
+            {
+                new Column
+                {
+                    Id = BlankProbePkColId,
+                    Name = "probe_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = BlankProbeFlagColId,
+                    Name = "flag",
+                    DataType = "bit",
+                    IsNullable = true,
+                },
+                new Column
+                {
+                    Id = BlankProbeSeenAtColId,
+                    Name = "seen_at",
+                    DataType = "datetime2",
+                    IsNullable = true,
+                },
+                new Column
+                {
+                    Id = BlankProbeChunkColId,
+                    Name = "chunk",
+                    DataType = "varbinary(16)",
+                    IsNullable = true,
+                },
+                new Column
+                {
+                    Id = BlankProbeRateColId,
+                    Name = "rate",
+                    DataType = "decimal(10,2)",
+                    IsNullable = true,
+                },
+                new Column
+                {
+                    Id = BlankProbeLoggedAtColId,
+                    Name = "logged_at",
+                    DataType = "datetime2",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = BlankProbeStampColId,
+                    Name = "stamp",
+                    DataType = "binary(8)",
+                    IsNullable = false,
+                },
+            },
+        };
+
         var diagram = new ErDiagram
         {
-            Entities = { customer, order, profile },
+            Entities = { customer, order, profile, blankProbe },
             Relationships =
             {
                 // 1対多: customers -> orders（ON DELETE CASCADE）
