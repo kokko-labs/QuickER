@@ -89,8 +89,8 @@ You fixed the diagram in one place, and the DDL, the Entity, and the EditModel a
 
 ## Next steps
 
-- [ER diagram editing](er-editor.md) — the editor feature reference
-- [Database round-tripping](database.md) — importing from an existing DB and diff sync
-- [Import and export](import-export.md) — interop with DBML / Mermaid / definition documents
-- [Configuring AI chat](ai-chat.md) — generating diagrams in conversation
-- [Why QuickER uses the ER model as the source of truth](overview.md) — the background of this workflow
+- [ER diagram editing](er-editor.md): the editor feature reference
+- [Database round-tripping](database.md): importing from an existing DB and diff sync
+- [Import and export](import-export.md): interop with DBML / Mermaid / definition documents
+- [Configuring AI chat](ai-chat.md): generating diagrams in conversation
+- [Why QuickER uses the ER model as the source of truth](overview.md): the background of this workflow

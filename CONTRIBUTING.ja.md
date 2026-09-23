@@ -35,7 +35,7 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
   ```
 
-- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください——[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**です。内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）。書き方は次のとおりです
+- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください。[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**です。内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）。書き方は次のとおりです
   - **見出し**: 種類の見出し（`### Breaking changes` / `### Added` / `### Changed` / `### Security` / `### Fixed` / `### Removed`。見出しは日本語版も英語のまま）の下を、分野の小見出し（`#### 図の編集・ファイル` / `#### DB 取込` / `#### DB 同期・DDL` / `#### C# コード取込` / `#### コード生成ダイアログ` / `#### 生成コード` / `#### 双方向同期` / `#### AI チャット・モック生成` / `#### CLI・MCP` / `#### 配布・設定` / `#### ライセンス` など）で分けます。無ければ作成します
   - **1 エントリの長さ**: 太字の要約と、1〜3 文の本文です。本文に書くのは「何が変わったか」と「利用者が何をすればよいか」だけで、理由や内部の仕組みは docs（利用者向け）か CLAUDE.md（開発者向け）へ書き、必要ならリンクします
   - **破壊的変更**: `### Breaking changes` にだけ書き（他の節へ重ねて書かない）、移行手順を 1〜2 文で添えます
@@ -62,7 +62,7 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
 
 リリースは**常に全配布物同時**（NuGet パッケージ＋GUI 配布物（Velopack: full / lite × Setup.exe / Portable zip）＋git タグ `v{版}`）。時期は任意で、頻度は約束しません。
 
-1. CHANGELOG の Unreleased 欄を確認し、版番号（上記ルールで minor / patch を判断）を決める。欄の見出しを版番号＋リリース日（`## [0.2.0] - 2026-09-01`）へ書き換え、その上に空の `## [Unreleased]` を新設する——**[CHANGELOG.md](CHANGELOG.md) と [CHANGELOG.ja.md](CHANGELOG.ja.md) の両方**
+1. CHANGELOG の Unreleased 欄を確認し、版番号（上記ルールで minor / patch を判断）を決める。欄の見出しを版番号＋リリース日（`## [0.2.0] - 2026-09-01`）へ書き換え、その上に空の `## [Unreleased]` を新設する（**[CHANGELOG.md](CHANGELOG.md) と [CHANGELOG.ja.md](CHANGELOG.ja.md) の両方**）
 2. `Directory.Build.props` の `VersionPrefix` を更新し、CHANGELOG の確定と合わせて 1 コミットにする
 3. コミットを push する。以降のワークフローは GitHub 上で push 済みの ref に対して動くため、push していないと 1 つ前の版が公開される
 4. publish.yml（NuGet パッケージ）を workflow_dispatch で実行する。`dry_run` の既定は true で、pack と検証（各パッケージが README とアイコンを宣言しているか・ツールパッケージへ `.pdb` が混入していないか・全パッケージの版が一致しているか）まで行い NuGet.org への push はしない。その実行を確認してから `dry_run=false` で本番実行する。シンボルパッケージ（`.snupkg`）は本体と同時に push され、NuGet.org 側で別途検証される（失敗はメールで通知される）

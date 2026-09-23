@@ -158,7 +158,7 @@ It leaves out the rows that are being tracked for deletion, so the resulting ent
 
 ### Removing rows: `Remove()` versus `MarkRemoved()`
 
-There are two ways to delete a child row, and they differ only in where the row lives afterwards:
+Deleting a child row takes one of two forms, which differ only in where the row lives afterwards:
 
 | Call | Where the row goes | Typical use |
 |---|---|---|
@@ -518,7 +518,7 @@ If `insertWhenUpdateMissing: true` and no update target is found so it switches 
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
 | EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
-| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. There is no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
+| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
 | Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
 
 ### Raw SQL escape hatch
@@ -575,7 +575,7 @@ Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
     TEntity entity, CancellationToken cancellationToken = default);
 ```
 
-For each UNIQUE constraint of the table it asks "does a row with the same value tuple already exist, excluding rows that share this entity's primary key?".
+For each UNIQUE constraint of the table it asks whether a row with the same value tuple already exists, excluding rows that share this entity's primary key.
 Because the same-key row is excluded, the same call is correct both before an insert and before an update.
 When the primary key can be null (a value object or `string` key) and has not been assigned yet, which is the normal state of a new row, the exclusion is left out entirely and the check really does search every row.
 Constraint member values that contain a `null` are skipped, since NULL collision semantics differ per dialect.
@@ -644,7 +644,7 @@ Every error is owned by the check that registered it, and a check only ever adds
   It is the only thing that can produce them again, so nothing else clears them.
   A blank input is never a conversion error: it sets the confirmed value to null and withdraws the setter's own error, and whether null is acceptable is the required check's call.
   This rule holds regardless of value objects and of the column's type (numeric, date/time, bool, binary, string), so a nullable column can be set back to NULL from the screen.
-- **The required-field check** (generated `ValidateSelf`) adds a missing-input error only when the property carries no other input error, so a field that holds unconvertible text is not silently relabelled "is required".
+- **The required-field check** (generated `ValidateSelf`) adds a missing-input error only when the property carries no other input error, so a field that holds unconvertible text never has its message silently relabelled to "is required" instead.
   It clears its own error as soon as the value is present, even when the value was assigned straight to the committed property rather than typed.
 - **The two uniqueness checks** each have their own slot on a property, addressed by `DuplicateErrorSource` (`Siblings` for the check among the elements of a collection, `Database` for the check against the stored rows).
   Neither overwrites nor clears the other's slot, so a value that is a duplicate both among its siblings and in the database reports both findings, each disappearing when its own check stops reporting it.
@@ -1350,7 +1350,7 @@ Every generated class offers two ways to customize messages and display names, a
 - **Bulk**: replace a static settable `Func` on the fixed infra at app startup.
   It applies everywhere.
 - **Per-type**: branch inside the replacement you installed.
-  Every value object message takes the value object's display name as its first argument, every edit model message takes the confirmed-value property name, and `GeneratedDisplayNames.Resolve` takes the member name, so one replacement covers both "all types" and "this type only".
+  Every value object message takes the value object's display name as its first argument, every edit model message takes the confirmed-value property name, and `GeneratedDisplayNames.Resolve` takes the member name, so one replacement covers both the "all types" case and the "this type only" case.
 
 ```csharp
 // Bulk, at startup: localize messages, and stop using descriptions for display names
@@ -1528,7 +1528,7 @@ The key behaviors are these.
   An excluded column is not in the SET clause of the update SQL.
   Running `UpdateAsync` / `SaveAsync` while an excluded column still holds a value throws a runtime exception rather than silently dropping data.
 - **INSERT / BulkInsert keep all columns**, so the first write can pass values as usual.
-- **Edit models and mappers treat an absent value as "keep what is there".**
+- **Edit models and mappers read an absent value as "keep what is there" rather than as a null.**
   An excluded column is left out of the required-input check, and the mapper writes it to the entity only when the edit model actually holds a value.
   An ordinary fetch leaves the column unfetched, so the usual round trip (fetch, edit the other columns, `ApplyToEntity`, save) passes validation, leaves the column out of the UPDATE, and keeps the stored blob.
   Fetching with `WithUnboundedBinary()` and then saving through the mapper still throws: the entity holds a real value, which is exactly what the UPDATE guard is there to catch.
@@ -1610,12 +1610,12 @@ Semantics:
   `Read` returns `true` once it has written to the destination, and an empty blob is also `true`; no row or a NULL column returns `false` and writes nothing to the destination.
   `Write` returns `true` if it could update, `false` if there is no row.
   This matches the bool convention of the existing `UpdateAsync`.
-- **`Write(id, null)`** sets the column to `NULL`, which is how an excluded column is reset to "unset".
+- **`Write(id, null)`** sets the column to `NULL`, which is how an excluded column returns to the "unset" state.
 - **Length.**
   It is automatic when `source` is `CanSeek` (`Length - Position`); otherwise the `length` argument is required, and an omission throws `ArgumentException`.
   SQLite's `zeroblob` requires the length before writing, and the contract is unified to be dialect-neutral.
 - **Optimistic concurrency (rowversion and the like) is out of scope**, since this is direct column manipulation on par with raw SQL.
-- **There is no INSERT-only method.**
+- **The generated code has no INSERT-only method.**
   Write a new row in two steps: INSERT with the blob left empty, then stream in the body with `Write{Column}Async`.
   On a nullable column, `null` is what "left empty" means.
   On a NOT NULL column it has to be an actual empty value (`ThumbValue.Create([])` with value objects, `[]` without them), because the database rejects a `null` insert, and that is also what the edit model's required check asks for while the row is new.
@@ -2082,7 +2082,7 @@ Nothing is lost by it, but a refresh is not something to run underneath a live s
   Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.
 - **The local side has no version guard**, as under [Row version columns in a multi-target build](#row-version-columns-in-a-multi-target-build).
   Two local writers still overwrite each other, and the engine's conflict detection is about the server's version, not theirs.
-- **There is one window a crash can still fall into**: between the server accepting an upload and the receipt being written for it.
+- **A crash can still fall into one window**: between the server accepting an upload and the receipt being written for it.
   The journal entry survives, and the next run replays it as a version-guarded update against a mirrored version the server has already moved past.
   It is reported as a conflict, with the row this device itself wrote on the other side of it.
   Resolving it with `LocalWins` sends the same local content again.
@@ -2249,7 +2249,7 @@ A request rejected by the server infrastructure (`BadHttpRequestException`, for 
 The generated client never produces the paging form of that 400.
 It rejects the same values up front, with the `ArgumentOutOfRangeException` a direct implementation raises (`SqlQuery.Skip` / `Take`, parameter `count`), so switching between the two implementations does not change the exception a caller catches.
 The server-side 400 remains for hand-written callers.
-The rejection applies to every named query with paging, whatever its implementation method: a raw-SQL or manually implemented query could reasonably treat `take: 0` as "no rows", but the remote surface answers 400 for it uniformly, exactly as the direct path raises `ArgumentOutOfRangeException` for it uniformly.
+The rejection applies to every named query with paging, whatever its implementation method: a raw-SQL or manually implemented query could reasonably read `take: 0` as a "no rows" request, but the remote surface answers 400 for it uniformly, exactly as the direct path raises `ArgumentOutOfRangeException` for it uniformly.
 
 **What a 400 covers is the shape of the request, not the content of the entity.**
 An entity body that deserializes cleanly is not validated on the way in.
@@ -2330,7 +2330,7 @@ Additional endpoints under the same prefix can also be mapped directly onto the 
 
 **The wire format is not promised to be stable while QuickER is at 0.x, so regenerate the client and the server together** and deploy them together.
 A server updated on its own does not report the mismatch as a version error: a request its newer endpoints no longer recognize comes back as an ordinary transport failure, a 404 or a 400.
-That is also why the binary endpoints mark the 404 they produce themselves (see below) instead of letting the client read every 404 as "no data".
+That is also why the binary endpoints mark the 404 they produce themselves (see below) instead of letting the client read every 404 as a "no data" answer.
 
 **Do not put an HTTP-level retry policy (Polly and the like) on the mutating operations**: `Insert`, `Update`, `Save`, `SaveMany`, `Delete`.
 They carry no idempotency key, so a request that in fact succeeded and lost its response on the way back would be applied a second time, producing a duplicate insert, or a second version bump that turns the next save into a spurious conflict.
@@ -2349,7 +2349,7 @@ The following three endpoints are generated per excluded column, where `{column}
 | `DELETE {prefix}/{entity}/{column}?id=` | Set the column to `NULL` (equivalent to `Write(id, null)`) | Success 204 / no row 404 / a missing or malformed `id` is **400** |
 
 - **The 404 these endpoints produce themselves carries a `RemoteError` body of type `"NotFound"`**, and only a 404 with that marker becomes `false` on the client.
-  A bare 404, from a base address or prefix that does not match the server's, a route that no longer exists, or a proxy answering on its own, would otherwise be indistinguishable from "no data".
+  A bare 404, from a base address or prefix that does not match the server's, a route that no longer exists, or a proxy answering on its own, would otherwise be indistinguishable from a "no data" answer.
   The client raises `RemoteRepositoryException` for it instead of hiding the misconfiguration behind an empty result.
   The 411 carries a `RemoteError` body as well, of type `"BadRequest"` like the other classified rejections.
 - **The key is carried in the URL query `?id=`**, because the body is used for the blob itself.
@@ -2494,7 +2494,7 @@ The value may have several segments (`Generated/QuickER`).
 Absolute paths, drive letters, and `..` are a generation error, but **it does not have to be a valid C# identifier** because it never reaches a namespace, so `generated-code` works.
 The API reference (`.g.md`) does not follow it, because the only thing that decides where the documentation goes is `--api-docs-subdir`.
 
-In the GUI it sits in the generation dialog's "Output destination" card, on the row right below the output path, as "Subfolder".
+In the GUI it sits in the generation dialog's "Output destination" card, on the row right below the output path, as the "Subfolder" box.
 It is independent of the output mode and the layered-output checkbox.
 
 Points worth knowing about layered output:
@@ -2545,7 +2545,7 @@ The file name can be changed with `--api-docs-file` (config key `ApiDocsFileName
 The extension is normalized to `.g.md`, so `Api`, `Api.md`, and `Api.g.md` all give the same result; overwriting is restricted to `.g.md` / `.g.cs`, so the extension is not left to the input.
 An explicit name wins in every output mode, and when it is blank you get the derived name as before: the output file base name, or `ApiDocs.g.md` when files are split.
 Only a file name is accepted, and a value containing path separators is a generation error, because choosing the folder is `--api-docs-subdir`'s job.
-In the GUI it is the "Output file name" box below "Output subfolder", and when the box is empty, the name that will actually be used is shown in grey, following the output file name, the output mode, and the language.
+In the GUI it is the "Output file name" box below the "Output subfolder" box, and when that box is empty, the name that will actually be used is shown in grey, following the output file name, the output mode, and the language.
 
 `.g.md` / `.ja.g.md` are auto-generated files.
 They are overwritten on regeneration, so do not edit them directly.

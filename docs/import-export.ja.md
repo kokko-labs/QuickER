@@ -208,5 +208,5 @@ Microsoft Print to PDF などの PDF プリンタを選べば、そのまま PDF
 
 ## 関連ページ
 
-- [データベース連携](database.ja.md) — 実 DB からの取込と差分同期
-- [ER 図の編集](er-editor.ja.md) — 図の保存形式（git 管理できる JSON）
+- [データベース連携](database.ja.md)：実 DB からの取込と差分同期
+- [ER 図の編集](er-editor.ja.md)：図の保存形式（git 管理できる JSON）

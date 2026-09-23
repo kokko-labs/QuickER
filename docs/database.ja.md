@@ -383,4 +383,4 @@ C# コード生成も同じ名前を生成前診断のエラーとして報告�
 
 - [チュートリアル（設計から実行まで）](getting-started.ja.md)
 - [インポートとエクスポート](import-export.ja.md)
-- [CLI リファレンス](cli.ja.md) — `quicker scaffold`（DB 直結でのコード生成）
+- [CLI リファレンス](cli.ja.md)：`quicker scaffold`（DB 直結でのコード生成）

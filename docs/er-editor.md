@@ -53,7 +53,7 @@ From then on, reordering columns in the grid no longer changes the key's order, 
 
 Below the column grid, the properties panel has a "Unique Constraints" card per table.
 The card body is collapsible: it opens automatically when the selected table has constraints (or when you add one) and stays collapsed otherwise, with a toggle in the header.
-Add a constraint with "+", then build it up one column row at a time.
+Add a constraint with the "+" button, then build it up one column row at a time.
 The "+" under the constraint appends an empty row, and picking a column from its drop-down commits it (one column makes that column unique, several make the combination unique, and the row order is the declaration order).
 A drop-down offers only the columns that the other rows of the same constraint do not already use, so you cannot pick the same column twice.
 "×" takes a row back out.
@@ -185,6 +185,6 @@ While a text box has focus, the control's standard behavior takes precedence.
 
 ## Related pages
 
-- [Database round-tripping](database.md) — DB import, diff sync, DDL generation, dialect switching
-- [Import and export](import-export.md) — DBML / Mermaid / definition documents / images / printing
-- [Configuring AI chat](ai-chat.md) — creating and editing diagrams in conversation
+- [Database round-tripping](database.md): DB import, diff sync, DDL generation, dialect switching
+- [Import and export](import-export.md): DBML / Mermaid / definition documents / images / printing
+- [Configuring AI chat](ai-chat.md): creating and editing diagrams in conversation

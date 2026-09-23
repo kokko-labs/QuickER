@@ -37,6 +37,7 @@ usings
 workflow_dispatch
 
 # 略語。辞書は単数形しか持たないため、複数形も挙げる。
+ANDs
 APIs
 CLIs?
 DBML
@@ -46,6 +47,8 @@ Esc
 FKs
 GUIDs
 LLMs
+NOTs
+ORs
 PDFs
 POCOs
 SHAs

@@ -2,18 +2,14 @@
 
 *[English](README.md) | 日本語*
 
-QuickER の「リモートサービス生成（GenerateRemoteServices）」で ER 図から生成したコードだけで、
-3 階層（クライアント → HTTP + JSON → サーバー → SQLite）を構成して動かす最小サンプルです。
-題材は [ec-order](../ec-order/README.ja.md) と同じ EC の注文ドメインで、基本の CRUD・グラフ保存・Include・生 SQL などの
-実演はそちらが担います。本サンプルのシナリオは、HTTP 越しであることが意味を持つ次の点だけに絞っています。
+QuickER の「リモートサービス生成（GenerateRemoteServices）」で ER 図から生成したコードだけで、3 階層（クライアント → HTTP + JSON → サーバー → SQLite）を構成して動かす最小サンプルです。
+題材は [ec-order](../ec-order/README.ja.md) と同じ EC の注文ドメインで、基本の CRUD・グラフ保存・Include・生 SQL などの実演はそちらが担います。
+本サンプルのシナリオは、HTTP 越しであることが意味を持つ次の点だけに絞っています。
 
-- **DI 登録 1 行での切り替え** — クライアントの呼び出しコードは DB 直結時と同一のインターフェイス
-  （`I{Entity}RemoteRepository`）のままで、DI 登録が `AddGeneratedHttpRemoteRepositories` の 1 行に変わっているだけです
-- **保存後の RowState 確定** — グラフ保存が成功すると、クライアント側でも `HasChanges` が直結時
-  （`EntityGraphSaver.AcceptChanges`）と同じ意味論で確定します
-- **名前付きクエリのリモート転送** — 射影 DTO（`OrderSummaryRow`）が JSON でクライアントまで届きます
-- **`SaveConflictException` の型復元** — サーバー側の楽観的競合が HTTP 409＋構造化 JSON を経て、
-  クライアント側でも同じ例外型で catch できます（直結時とまったく同じ `catch` が書けます）。
+- **DI 登録 1 行での切り替え**：クライアントの呼び出しコードは DB 直結時と同一のインターフェイス（`I{Entity}RemoteRepository`）のままで、DI 登録が `AddGeneratedHttpRemoteRepositories` の 1 行に変わっているだけです
+- **保存後の RowState 確定**：グラフ保存が成功すると、クライアント側でも `HasChanges` が直結時（`EntityGraphSaver.AcceptChanges`）と同じ意味論で確定します
+- **名前付きクエリのリモート転送**：射影 DTO（`OrderSummaryRow`）が JSON でクライアントまで届きます
+- **`SaveConflictException` の型復元**：サーバー側の楽観的競合が HTTP 409＋構造化 JSON を経て、クライアント側でも同じ例外型で catch できます（直結時とまったく同じ `catch` が書けます）。
   詳細（`Reason` / `EntityTypeName` / `Key`）もそのまま復元されます
 
 ## 構成
@@ -76,10 +72,9 @@ dotnet run --project src/QuickER.Cli -- generate `
   --config samples/ec-order-remote/quicker.json
 ```
 
-`GenerateRemoteServices` は `quicker.json` 側で指定済みで、本体生成物とサーバー生成物の 2 ファイルが同じ `--out` へ
-出力されます。ドリフトテストの再生成モードによる一括再生成の手順は [ec-order](../ec-order/README.ja.md) と共通です。
+`GenerateRemoteServices` は `quicker.json` 側で指定済みで、本体生成物とサーバー生成物の 2 ファイルが同じ `--out` へ出力されます。
+ドリフトテストの再生成モードによる一括再生成の手順は [ec-order](../ec-order/README.ja.md) と共通です。
 
 ## 詳細ドキュメント
 
-リモートサービス生成の仕様は [`docs/code-generation.ja.md`](../../docs/code-generation.ja.md) の
-「リモートサービス（--generate-remote-services）— 3 階層構成」節を参照してください。
+リモートサービス生成の仕様は[リモートサービス](../../docs/code-generation.ja.md#リモートサービス--generate-remote-services)を参照してください。

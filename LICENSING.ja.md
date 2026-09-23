@@ -16,11 +16,11 @@ For the English version, see [LICENSING.md](LICENSING.md).
 
 | プロジェクト | ライセンス |
 | --- | --- |
-| 下記以外のすべて——ER デザイナ、入出力、DDL 生成、DB 取込・同期、ランタイムパッケージなど | [MIT](LICENSE) |
-| `src/QuickER.AI`、`src/QuickER.AI.UI`、`src/QuickER.AI.Chat`、`src/QuickER.AI.Mock`——AI チャットと AI モック生成 | [PolyForm NC 1.0.0＋追加許諾](LICENSE-NC.md) |
-| `src/QuickER.CodeGen.CSharp`、`src/QuickER.CodeGen.UI`——C# コード生成 | [PolyForm NC 1.0.0＋追加許諾](LICENSE-NC.md) |
-| `src/QuickER.Cli`——CLI | [PolyForm NC 1.0.0＋追加許諾](LICENSE-NC.md) |
-| `src/QuickER.Mcp.Tools`——外部 MCP サーバのファイルベースのツール実行ホスト | [PolyForm NC 1.0.0＋追加許諾](LICENSE-NC.md) |
+| 下記以外のすべて（ER デザイナ、入出力、DDL 生成、DB 取込・同期、ランタイムパッケージなど） | [MIT](LICENSE) |
+| `src/QuickER.AI`、`src/QuickER.AI.UI`、`src/QuickER.AI.Chat`、`src/QuickER.AI.Mock`：AI チャットと AI モック生成 | [PolyForm NC 1.0.0＋追加許諾](LICENSE-NC.md) |
+| `src/QuickER.CodeGen.CSharp`、`src/QuickER.CodeGen.UI`：C# コード生成 | [PolyForm NC 1.0.0＋追加許諾](LICENSE-NC.md) |
+| `src/QuickER.Cli`：CLI | [PolyForm NC 1.0.0＋追加許諾](LICENSE-NC.md) |
+| `src/QuickER.Mcp.Tools`：外部 MCP サーバのファイルベースのツール実行ホスト | [PolyForm NC 1.0.0＋追加許諾](LICENSE-NC.md) |
 
 MCP のツール定義・stdio ホスト基盤プロジェクト `src/QuickER.Mcp` はこのリストに含まれず、MIT です。
 
@@ -33,7 +33,7 @@ GitHub のライセンスラベルは 1 つしか表示できないため「MIT�
 | GUI（Setup.exe / Portable zip） | MIT 部分＋NC 対象機能のアセンブリ（ライセンスファイルを配布物に同梱） |
 | CLI（NuGet パッケージ `QuickER.Cli`） | PolyForm NC＋追加許諾（ライセンスファイルをパッケージに同梱） |
 | ランタイム NuGet パッケージ（`QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.AspNetCore` / `.Sync`） | MIT |
-| QuickER が生成したコード・DDL・ドキュメント | 利用者のもの——QuickER のライセンスは一切適用されません |
+| QuickER が生成したコード・DDL・ドキュメント | 利用者のもの（QuickER のライセンスは一切適用されません） |
 
 GUI と CLI の配布物にはサードパーティのコンポーネント（データベースドライバ・テンプレートエンジンなど）も同梱されています。その帰属表示とライセンス全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にまとめており、これらの配布物にも同梱されます。
 
@@ -51,14 +51,14 @@ GUI と CLI の配布物にはサードパーティのコンポーネント（�
 
 ## 生成コード
 
-QuickER が図から生成するすべて——C# コード（インラインのランタイム部分を含む）、DDL スクリプト、ドキュメント、設定ファイル——は利用者の成果物です。[LICENSE-NC.md](LICENSE-NC.md) は、生成物を目的を問わず利用、複製、改変、配布、サブライセンス、販売できる恒久的で取消不能な許諾を全員に与えています。どこにも QuickER の名前を書く必要はありません。
+QuickER が図から生成するすべて（C# コード〔インラインのランタイム部分を含む〕、DDL スクリプト、ドキュメント、設定ファイル）は利用者の成果物です。[LICENSE-NC.md](LICENSE-NC.md) は、生成物を目的を問わず利用、複製、改変、配布、サブライセンス、販売できる恒久的で取消不能な許諾を全員に与えています。どこにも QuickER の名前を書く必要はありません。
 
 ## 将来の方針
 
 将来のバージョンでは、一部機能の有償ライセンス化（たとえば別ライセンスの有償 Pro 機能）を行う可能性があります。対象になり得るのは NC 対象プロジェクトのすべての機能で、C# コード生成機能と AI 機能を含みます。その場合も、次の 3 つの約束は変わりません。
 
 1. 既存機能の個人・非商用利用は無料のままです。
-2. 公開済みバージョンに付与した権利を遡って取り消すことはありません——いま使っているバージョンの許諾は永続します。
+2. 公開済みバージョンに付与した権利を遡って取り消すことはありません。いま使っているバージョンの許諾は永続します。
 3. 有償化する場合は事前に告知し、既存利用者には移行期間を設けます。
 
 ## FAQ

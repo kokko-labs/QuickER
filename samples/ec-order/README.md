@@ -3,13 +3,10 @@
 *English | [日本語](README.ja.md)*
 
 A minimal sample that lets you actually run the C# code QuickER generated from an ER diagram, with no external DB.
-The subject is an e-commerce order domain (customers, products, orders, order lines), and it demonstrates
-CRUD, graph save, Include, raw-SQL aggregation, and delete cascade against a SQLite file DB via the QuickER
-Repository (SQLite dialect), plus a screen-editing round trip through the EditModel and Mapper (input-string
-conversion-error detection, confirmed-value change tracking, and applying back to the entity).
+The subject is an e-commerce order domain (customers, products, orders, order lines), running against a SQLite file DB.
+It demonstrates CRUD, graph save, Include, raw-SQL aggregation, and delete cascade through the QuickER Repository (SQLite dialect), plus a screen-editing round trip through the EditModel and Mapper (input-string conversion-error detection, confirmed-value change tracking, and applying back to the entity).
 
-This sample covers the core features of the generated code; only the scenarios specific to the
-three-tier (HTTP + JSON) setup are covered separately by [ec-order-remote](../ec-order-remote/README.md).
+This sample covers the core features of the generated code; only the scenarios specific to the three-tier (HTTP + JSON) setup are covered separately by [ec-order-remote](../ec-order-remote/README.md).
 
 ## Structure
 
@@ -22,8 +19,7 @@ three-tier (HTTP + JSON) setup are covered separately by [ec-order-remote](../ec
 | `EcOrderSample/Generated/EcOrder.g.md` | The generated API reference Markdown (the bundled output of `--generate-api-docs`, checked in) |
 | `EcOrderSample/Program.cs` | A console app that creates the DB from the DDL and demonstrates CRUD |
 
-The console app does not reference any QuickER project; like a user's own project, it references
-only NuGet packages (`Microsoft.Data.Sqlite`, etc.).
+The console app does not reference any QuickER project; like a user's own project, it references only NuGet packages (`Microsoft.Data.Sqlite`, etc.).
 
 ## Run it
 
@@ -33,14 +29,13 @@ From the repository root, run the following (the .NET 10 SDK is required).
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-At startup it recreates a SQLite file DB (`ec-order.db`, created under the same `bin` folder as the executable)
-from the `EcOrder.sql` DDL and prints the result of each scenario. If a value differs from what is
-expected, it exits with an exception (a non-zero exit code).
+At startup it recreates a SQLite file DB (`ec-order.db`, created under the same `bin` folder as the executable) from the `EcOrder.sql` DDL and prints the result of each scenario.
+If a value differs from what is expected, it exits with an exception (a non-zero exit code).
 
 ## Open the diagram in the GUI
 
-`EcOrder.json` is exactly the save format of the GUI (QuickER.Gui). Launch the GUI and open
-`samples/ec-order/EcOrder.json` to view and edit the diagram.
+`EcOrder.json` is exactly the save format of the GUI (QuickER.Gui).
+Launch the GUI and open `samples/ec-order/EcOrder.json` to view and edit the diagram.
 
 ## Regenerate the generated code / DDL
 
@@ -55,14 +50,12 @@ dotnet run --project src/QuickER.Cli -- generate `
   --generate-api-docs
 ```
 
-Adding `--generate-api-docs` also outputs the API reference Markdown `EcOrder.g.md` with the same base name
-as `EcOrder.g.cs` (subject to the drift tests).
+Adding `--generate-api-docs` also outputs the API reference Markdown `EcOrder.g.md` with the same base name as `EcOrder.g.cs` (subject to the drift tests).
 
 ### Regenerate everything at once with the drift tests' regeneration mode
 
-`EcOrderSampleDriftTests` verifies that the checked-in generated artifacts are byte-identical to what the
-real CLI regenerates via the same path. After changing a template or the like, you can regenerate them with
-the same single command as the existing fixtures.
+`EcOrderSampleDriftTests` verifies that the checked-in generated artifacts are byte-identical to what the real CLI regenerates via the same path.
+After changing a template or the like, you can regenerate them with the same single command as the existing fixtures.
 
 ```powershell
 $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null

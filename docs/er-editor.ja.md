@@ -186,6 +186,6 @@ Ctrl+Z / Ctrl+Y（ツールバーの「元に戻す」「やり直す」）で�
 
 ## 関連ページ
 
-- [データベース連携](database.ja.md) — DB 取込・差分同期・DDL 生成・方言切替
-- [インポートとエクスポート](import-export.ja.md) — DBML / Mermaid / 定義書 / 画像 / 印刷
-- [AI チャットの設定](ai-chat.ja.md) — 対話による図の生成・編集
+- [データベース連携](database.ja.md)：DB 取込・差分同期・DDL 生成・方言切替
+- [インポートとエクスポート](import-export.ja.md)：DBML / Mermaid / 定義書 / 画像 / 印刷
+- [AI チャットの設定](ai-chat.ja.md)：対話による図の生成・編集

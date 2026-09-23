@@ -171,8 +171,8 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 ## 関連
 
-- [CLI リファレンス（generate / scaffold / reverse・quicker.json）](cli.ja.md) — コード生成ツールが再利用する `quicker generate` の経路
-- [AI チャットの設定](ai-chat.ja.md) — アプリ内蔵の AI チャット。現在開いている図を GUI 内で編集する（stdio でエージェントが駆動するこの外部 MCP サーバとは対照的）
+- [CLI リファレンス（generate / scaffold / reverse・quicker.json）](cli.ja.md)：コード生成ツールが再利用する `quicker generate` の経路
+- [AI チャットの設定](ai-chat.ja.md)：アプリ内蔵の AI チャット。現在開いている図を GUI 内で編集する（stdio でエージェントが駆動するこの外部 MCP サーバとは対照的）
 
 ## ライセンス注記
 

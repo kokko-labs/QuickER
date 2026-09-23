@@ -89,8 +89,8 @@ dotnet run --project samples/ec-order/EcOrderSample
 
 ## 次のステップ
 
-- [ER 図の編集](er-editor.ja.md) — エディタ機能のリファレンス
-- [データベース連携](database.ja.md) — 既存 DB からの取込と差分同期
-- [インポートとエクスポート](import-export.ja.md) — DBML / Mermaid / 定義書との相互運用
-- [AI チャットの設定](ai-chat.ja.md) — 対話による図の生成
-- [QuickER が ER モデルを正本にする理由](overview.ja.md) — このワークフローの背景
+- [ER 図の編集](er-editor.ja.md)：エディタ機能のリファレンス
+- [データベース連携](database.ja.md)：既存 DB からの取込と差分同期
+- [インポートとエクスポート](import-export.ja.md)：DBML / Mermaid / 定義書との相互運用
+- [AI チャットの設定](ai-chat.ja.md)：対話による図の生成
+- [QuickER が ER モデルを正本にする理由](overview.ja.md)：このワークフローの背景

@@ -26,10 +26,10 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 ### Specifying the connection
 
 - **Server-type DBMS**: specify the target DB, host, port (leave empty for the dialect's default), database name, user name, and password.
-  For SQL Server you can also choose the authentication mode (Windows / SQL Server) and "Trust the server certificate (TrustServerCertificate)".
+  For SQL Server you can also choose the authentication mode (Windows / SQL Server) and the "Trust the server certificate (TrustServerCertificate)" checkbox.
   For Oracle, the value of the database-name field is used as the service name (the connection is built as EZConnect `host:port/service`)
 - **Encryption (SSL Mode)**: for PostgreSQL and MySQL, how strongly the connection requires TLS.
-  It defaults to "Unspecified", which leaves the keyword off the connection string and the decision to the driver (see the note below).
+  It defaults to "Unspecified" mode, which leaves the keyword off the connection string and the decision to the driver (see the note below).
   It is saved per connection profile, and profiles written before this setting existed load as "Unspecified"
 - **SQLite**: specify the file path via "Browse" (import works on existing files only)
 - **Command timeout**: how long a single schema-import or sync statement may run.
@@ -85,7 +85,7 @@ For `quicker scaffold` against PostgreSQL or MySQL there is no separate option e
 
 ### Connection profiles
 
-Connection settings can be saved under a name and recalled later from "Saved Connections".
+Connection settings can be saved under a name and recalled later from the "Saved Connections" list.
 Profiles are stored in `%LOCALAPPDATA%\QuickER\connections.json`, and passwords are stored in separate files, **encrypted with Windows DPAPI (CurrentUser scope)**, only when the "Save" checkbox is on and never in plain text under the shipped configuration.
 The last-used connection is remembered automatically and restored on the next launch.
 
@@ -374,4 +374,4 @@ A type the dialect catalogue cannot parse is still carried as it is; it simply g
 
 - [Tutorial (from design to running code)](getting-started.md)
 - [Import and export](import-export.md)
-- [CLI reference](cli.md) — `quicker scaffold` (generating code directly from a DB)
+- [CLI reference](cli.md): `quicker scaffold` (generating code directly from a DB)

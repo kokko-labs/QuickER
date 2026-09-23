@@ -3,13 +3,10 @@
 *[English](README.md) | 日本語*
 
 QuickER が ER 図から生成した C# コードを、外部 DB なしで実際に動かせる最小サンプルです。
-題材は EC の注文ドメイン（顧客・商品・注文・注文明細）で、SQLite ファイル DB に対して
-QuickER 版 Repository（SQLite 方言）による CRUD・グラフ保存・Include・生 SQL 集計・
-削除カスケードに加え、EditModel と Mapper による画面編集の往復（入力文字列の変換エラー検知・
-確定値の変更追跡・エンティティへの書き戻し）を実演します。
+題材は EC の注文ドメイン（顧客・商品・注文・注文明細）で、相手は SQLite のファイル DB です。
+QuickER 版 Repository（SQLite 方言）による CRUD・グラフ保存・Include・生 SQL 集計・削除カスケードに加え、EditModel と Mapper による画面編集の往復（入力文字列の変換エラー検知・確定値の変更追跡・エンティティへの書き戻し）を実演します。
 
-生成コードの基本機能の実演はこのサンプルが担い、3 階層構成（HTTP + JSON）に固有のシナリオだけを
-[ec-order-remote](../ec-order-remote/README.ja.md) が別途担います。
+生成コードの基本機能の実演はこのサンプルが担い、3 階層構成（HTTP + JSON）に固有のシナリオだけを [ec-order-remote](../ec-order-remote/README.ja.md) が別途担います。
 
 ## 構成
 
@@ -22,8 +19,7 @@ QuickER 版 Repository（SQLite 方言）による CRUD・グラフ保存・Incl
 | `EcOrderSample/Generated/EcOrder.g.md` | 生成 API のリファレンス Markdown（`--generate-api-docs` の同梱出力・チェックイン済み） |
 | `EcOrderSample/Program.cs` | DDL で DB を作成し CRUD を実演するコンソールアプリ |
 
-コンソールアプリは QuickER 本体のプロジェクトを参照せず、利用者のプロジェクトと同じく
-NuGet パッケージ（`Microsoft.Data.Sqlite` など）のみを参照します。
+コンソールアプリは QuickER 本体のプロジェクトを参照せず、利用者のプロジェクトと同じく NuGet パッケージ（`Microsoft.Data.Sqlite` など）のみを参照します。
 
 ## 実行する
 
@@ -33,13 +29,13 @@ NuGet パッケージ（`Microsoft.Data.Sqlite` など）のみを参照しま�
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-起動時に `EcOrder.sql` の DDL で SQLite ファイル DB（`ec-order.db`。実行ファイルと同じ `bin` 配下に作成）を
-作り直し、各シナリオの結果を英語で表示します。期待値と異なる場合は例外で終了（終了コード非 0）します。
+起動時に `EcOrder.sql` の DDL で SQLite ファイル DB（`ec-order.db`。実行ファイルと同じ `bin` 配下に作成）を作り直し、各シナリオの結果を英語で表示します。
+期待値と異なる場合は例外で終了（終了コード非 0）します。
 
 ## 図を GUI で開く
 
-`EcOrder.json` は GUI（QuickER.Gui）の保存形式そのものです。GUI を起動し、
-`samples/ec-order/EcOrder.json` を開くと図を閲覧・編集できます。
+`EcOrder.json` は GUI（QuickER.Gui）の保存形式そのものです。
+GUI を起動し、`samples/ec-order/EcOrder.json` を開くと図を閲覧・編集できます。
 
 ## 生成コード・DDL を再生成する
 
@@ -54,13 +50,12 @@ dotnet run --project src/QuickER.Cli -- generate `
   --generate-api-docs
 ```
 
-`--generate-api-docs` を付けると `EcOrder.g.cs` と同じベース名で API リファレンス Markdown
-`EcOrder.g.md` も出力されます（ドリフトテストの検証対象）。
+`--generate-api-docs` を付けると、`EcOrder.g.cs` と同じベース名で API リファレンス Markdown `EcOrder.g.md` も出力されます（ドリフトテストの検証対象）。
 
 ### ドリフトテストの再生成モードで一括再生成する
 
-チェックイン済みの生成物は `EcOrderSampleDriftTests` が「実 CLI と同一経路の再生成物とバイト一致」を
-検証します。テンプレート等を変更したら、既存フィクスチャと同じ 1 コマンドで再生成できます。
+チェックイン済みの生成物は `EcOrderSampleDriftTests` が「実 CLI と同一経路の再生成物とバイト一致」を検証します。
+テンプレート等を変更したら、既存フィクスチャと同じ 1 コマンドで再生成できます。
 
 ```powershell
 $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null

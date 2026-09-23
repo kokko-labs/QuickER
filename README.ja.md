@@ -34,7 +34,8 @@ GUI や AI チャットで ER モデルを作成・編集し、データベー�
 
 ### 1. QuickER を起動して図を開く
 
-[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe または Portable zip を入手して起動します（詳細は[インストール](#インストール)。ソースコードから起動する場合は `dotnet run --project src/QuickER.Gui`）。
+[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe または Portable zip を入手して起動します（詳細は[インストール](#インストール)）。
+ソースコードから起動する場合は `dotnet run --project src/QuickER.Gui` です。
 
 リポジトリをクローンし、同梱サンプルの ER モデル `samples/ec-order/EcOrder.json` を開いてみてください（冒頭のスクリーンショットの図です）。
 
@@ -62,12 +63,13 @@ All scenarios succeeded.
 
 サンプルには、次のファイルが含まれています。
 
-- [EcOrder.json](samples/ec-order/EcOrder.json) — GUI で編集できる ER モデル
-- [EcOrder.sql](samples/ec-order/EcOrder.sql) — ER モデルから生成した SQLite DDL
-- [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs) — 生成された C# コード
-- [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — CRUD、グラフ保存、Include、EditModel / Mapper による編集、生 SQL、削除カスケードの実行例
+- [EcOrder.json](samples/ec-order/EcOrder.json)：GUI で編集できる ER モデル
+- [EcOrder.sql](samples/ec-order/EcOrder.sql)：ER モデルから生成した SQLite DDL
+- [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs)：生成された C# コード
+- [Program.cs](samples/ec-order/EcOrderSample/Program.cs)：CRUD、グラフ保存、Include、EditModel / Mapper による編集、生 SQL、削除カスケードの実行例
 
-詳しくは [EC 注文サンプル](samples/ec-order/README.ja.md) を参照してください。図の編集からコード生成までを手を動かして一巡するには、[チュートリアル](docs/getting-started.ja.md)へ進んでください。
+詳しくは [EC 注文サンプル](samples/ec-order/README.ja.md) を参照してください。
+図の編集からコード生成までを手を動かして一巡するには、[チュートリアル](docs/getting-started.ja.md)へ進んでください。
 
 ## ER モデルを視覚的に設計する
 
@@ -101,7 +103,8 @@ ER モデルとデータベースの差分を検出し、同期用 SQL を生成
 | Oracle     | ✅      | ✅    | ✅      | ✅    |
 | SQLite     | ✅      | ✅    | ✅      | ✅    |
 
-図ごとに対象 DBMS を保持し、途中で別の SQL 方言（DBMS ごとの型・構文の差異）へ切り替えることもできます。型は可能な範囲で自動変換され、変換できない型は警告されます。
+図ごとに対象 DBMS を保持し、途中で別の SQL 方言（DBMS ごとの型・構文の差異）へ切り替えることもできます。
+型は可能な範囲で自動変換され、変換できない型は警告されます。
 
 詳しくは [データベース連携](docs/database.ja.md) を参照してください。
 
@@ -140,7 +143,9 @@ ER モデルを読ませて、業務画面の Web モック（HTML）を対話�
 
 - 会話は「画面構成の提案 → 合意 → 生成」と進み、修正指示で作り込めます
 - 関係者への共有用に、全画面を 1 ファイルへまとめた単一 HTML と、画面一覧・遷移図・CRUD 表付きの設計書を出力できます
-- 生成したモックを土台に、WPF / Blazor のモックプロジェクトを生成する第 2 ステップもあります。データ層は ER モデルから機械的に生成し、画面の UI は AI が実装し、最後に QuickER が `dotnet build` で結果を確認します。この工程は PoC やプロトタイピングの補助という位置付けで、AI のモデルと接続方式によってはエラーが残ることがあります
+- 生成したモックを土台に、WPF / Blazor のモックプロジェクトを生成する第 2 ステップもあります。
+  データ層は ER モデルから機械的に生成し、画面の UI は AI が実装し、最後に QuickER が `dotnet build` で結果を確認します。
+  この工程は PoC やプロトタイピングの補助という位置付けで、AI のモデルと接続方式によってはエラーが残ることがあります
 
 接続方式は AI チャットと共通です。
 
@@ -188,7 +193,8 @@ ER モデルから、アプリケーション開発に必要な C# コードを�
 - EditModel
 - Entity と EditModel の Mapper
 
-DataAnnotations と DB 定義メタ属性（方言中立の型トークンと説明）は既定で付与されます。ランタイムがリフレクションで参照するため、Repository を生成する構成では必須です。
+DataAnnotations と DB 定義メタ属性（方言中立の型トークンと説明）は既定で付与されます。
+ランタイムがリフレクションで参照するため、Repository を生成する構成では必須です。
 
 オプション生成:
 
@@ -201,9 +207,11 @@ DataAnnotations と DB 定義メタ属性（方言中立の型トークンと説
 - ASP.NET Core Minimal API サーバー
 - SQL Server とローカル SQLite の双方向同期（高速な洗い替え付き）
 
-EditModel は画面からの入力値を文字列として受け取り、検証に成功した値だけを確定値として保持し、失敗した場合はエラー情報を保持します。Mapper はその確定値と変更状態だけをエンティティへ反映するため、不正な入力値がエンティティに入り込みません。
+EditModel は画面からの入力値を文字列として受け取り、検証に成功した値だけを確定値として保持し、失敗した場合はエラー情報を保持します。
+Mapper はその確定値と変更状態だけをエンティティへ反映するため、不正な入力値がエンティティに入り込みません。
 
-生成コードは特定の UI フレームワークに依存しません。WPF、Blazor、ASP.NET Core など、任意の .NET アプリケーションから利用できます。
+生成コードは特定の UI フレームワークに依存しません。
+WPF、Blazor、ASP.NET Core など、任意の .NET アプリケーションから利用できます。
 EditModel と Mapper の動きは、同梱サンプルの [Program.cs](samples/ec-order/EcOrderSample/Program.cs) を実行して確認できます。
 
 詳しくは [生成コードの使い方](docs/code-generation.ja.md) を参照してください。
@@ -229,7 +237,8 @@ QuickER 版 Repository は、次の機能を備えています。
 - グラフ保存時の競合検出（更新対象の行が存在しない場合。`rowversion` 比較による排他制御は対象外）
 - 生 SQL の実行
 
-QuickER 版 Repository と EF Core 版 Repository は、同じインターフェイスを実装します。アプリケーション側をインターフェイスに依存させることで、DI 登録を変更して実装を切り替えられます（GUI ではどちらか一方を生成します。両方を同時に生成するには CLI または設定ファイルを使用します）。
+QuickER 版 Repository と EF Core 版 Repository は、同じインターフェイスを実装します。
+アプリケーション側をインターフェイスに依存させることで、DI 登録を変更して実装を切り替えられます（GUI ではどちらか一方を生成します。両方を同時に生成するには CLI または設定ファイルを使用します）。
 
 ```csharp
 // QuickER 版 Repository
@@ -251,9 +260,11 @@ ProductIdValue productId;
 ```
 
 異なる種類の ID を誤って渡した場合は、コンパイルエラーになります。
-文字列型の主キーを表す値オブジェクトでは、`UseGuidKeyForStringPrimaryKey` を有効にするとキーを GUID で採番できます。採番ロジックを書かずに、Repository 生成の前提（アプリケーション側での採番）を満たせます。
+文字列型の主キーを表す値オブジェクトでは、`UseGuidKeyForStringPrimaryKey` を有効にするとキーを GUID で採番できます。
+採番ロジックを書かずに、Repository 生成の前提（アプリケーション側での採番）を満たせます。
 
-最大文字数や `decimal` の桁数など、列定義から判断できる検証コードも生成されます。追加の検証や表示名は partial クラスで拡張できます。
+最大文字数や `decimal` の桁数など、列定義から判断できる検証コードも生成されます。
+追加の検証や表示名は partial クラスで拡張できます。
 
 ## 名前付きクエリ
 
@@ -313,7 +324,11 @@ GitHub Releases では、次の形式を提供します。
 
 Portable 版は ZIP を展開し、`QuickER.exe` を実行してください。
 
-インストーラと更新パッケージには Authenticode 署名を付けていないため、Windows SmartScreen が「発行元不明」として警告します。「詳細情報」→「実行」で進めてください。インストール版は起動時に GitHub Releases（`api.github.com`）へ更新の有無を確認し、ダウンロードの前に必ず確認を出します。**設定 > 起動時に更新を確認する**で無効にできます。Portable 版は確認しません。
+インストーラと更新パッケージには Authenticode 署名を付けていないため、Windows SmartScreen が「発行元不明」として警告します。
+「詳細情報」→「実行」で進めてください。
+インストール版は起動時に GitHub Releases（`api.github.com`）へ更新の有無を確認し、ダウンロードの前に必ず確認を出します。
+**設定 > 起動時に更新を確認する**で無効にできます。
+Portable 版は確認しません。
 
 ソースコードから起動する場合:
 
@@ -364,7 +379,8 @@ dotnet run --project src/QuickER.Cli -- generate ...
 
 詳しくは [CLI リファレンス](docs/cli.ja.md) を参照してください。
 
-生成コードは既定で自己完結ですが、`--use-runtime-packages` を使うと固定ランタイム部分を NuGet パッケージ `QuickER.Runtime` 群の参照で賄えます — [ランタイムパッケージ参照モード](docs/code-generation.ja.md#ランタイムパッケージ参照モード--use-runtime-packages)を参照してください。
+生成コードは既定で自己完結ですが、`--use-runtime-packages` を使うと固定ランタイム部分を NuGet パッケージ `QuickER.Runtime` 群の参照で賄えます。
+[ランタイムパッケージ参照モード](docs/code-generation.ja.md#ランタイムパッケージ参照モード--use-runtime-packages)を参照してください。
 
 ## なぜ ER モデルを正本にするのか
 
@@ -396,7 +412,8 @@ dotnet build QuickER.slnx
 dotnet test QuickER.slnx
 ```
 
-SQL Server、PostgreSQL、MySQL、Oracle の統合テストには Docker を使用します。Docker が利用できない環境では、該当するテストは自動的にスキップされます。
+SQL Server、PostgreSQL、MySQL、Oracle の統合テストには Docker を使用します。
+Docker が利用できない環境では、該当するテストは自動的にスキップされます。
 SQLite のテストには実際のファイルデータベースを使用します。
 
 ## サポートとコントリビューション
@@ -404,7 +421,8 @@ SQLite のテストには実際のファイルデータベースを使用しま�
 QuickER は個人で開発しています。
 サポートはベストエフォートで行い、原則として最新版のみを対象とします。
 
-バグ報告や機能要望は GitHub Issues へお寄せください。日本語と英語のどちらでも受け付けています。
+バグ報告や機能要望は GitHub Issues へお寄せください。
+日本語と英語のどちらでも受け付けています。
 Pull Request を作成する場合は、事前に Issue で変更内容をご相談ください。
 
 - [コントリビューションガイド](CONTRIBUTING.ja.md)
@@ -412,18 +430,23 @@ Pull Request を作成する場合は、事前に Issue で変更内容をご相
 
 ## ライセンス
 
-QuickER が生成したコードは、インラインで生成されるランタイム部分を含めて利用者の成果物です。生成コードは、QuickER 本体のライセンスによる制限を受けず、商用を含めて自由に利用、改変、配布できます（[LICENSE-NC.md](LICENSE-NC.md) に明示的な許諾として条文化しています）。
+QuickER が生成したコードは、インラインで生成されるランタイム部分を含めて利用者の成果物です。
+生成コードは、QuickER 本体のライセンスによる制限を受けず、商用を含めて自由に利用、改変、配布できます（[LICENSE-NC.md](LICENSE-NC.md) に明示的な許諾として条文化しています）。
 
-QuickER 本体は、プロジェクトごとにライセンスが異なる混合ライセンスのリポジトリです。GitHub が表示する単一のライセンスラベルは、構成の全体を表していません。
+QuickER 本体は、プロジェクトごとにライセンスが異なる混合ライセンスのリポジトリです。
+GitHub が表示する単一のライセンスラベルは、構成の全体を表していません。
 
 | 対象                                       | ライセンス                                               |
 | ---------------------------------------- | --------------------------------------------------- |
 | ER デザイナ、入出力、DDL 生成、DB 取込・同期、ランタイムパッケージなど | [MIT License](LICENSE)                              |
 | AI 機能・コード生成関連プロジェクトと MCP ツール実行ホスト        | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) ＋追加許諾 |
 
-現行リリースは、公式 GUI・CLI の商用利用を含めて全員が無料で利用できます。ただし、追加許諾の対象は QuickER の**利用**です。対象ソースコードを商用目的で改変することや、改変版を再配布することは含まれません。
+現行リリースは、公式 GUI・CLI の商用利用を含めて全員が無料で利用できます。
+ただし、追加許諾の対象は QuickER の**利用**です。
+対象ソースコードを商用目的で改変することや、改変版を再配布することは含まれません。
 
-将来のバージョンでは、一部機能の有償ライセンス化（たとえば別ライセンスの有償 Pro 機能）を行う可能性があります。その場合も、次の約束は変わりません。
+将来のバージョンでは、一部機能の有償ライセンス化（たとえば別ライセンスの有償 Pro 機能）を行う可能性があります。
+その場合も、次の約束は変わりません。
 
 - 既存機能の個人・非商用利用は無料のままです。
 - 公開済みバージョンに付与した権利を遡って取り消すことはありません。
@@ -431,4 +454,5 @@ QuickER 本体は、プロジェクトごとにライセンスが異なる混合
 
 これらの約束は [LICENSE-NC.md](LICENSE-NC.md) の「Additional Grants（追加許諾）」節として条文化されており、現在の商用利用はライセンスファイル自体の許諾に基づきます。
 
-どの配布物にどのライセンスが適用されるか、何ができて何ができないかの平易な解説は [LICENSING.ja.md](LICENSING.ja.md) を参照してください。正式な条件については、必ず [LICENSE](LICENSE) と [LICENSE-NC.md](LICENSE-NC.md) を参照してください。
+どの配布物にどのライセンスが適用されるか、何ができて何ができないかの平易な解説は [LICENSING.ja.md](LICENSING.ja.md) を参照してください。
+正式な条件については、必ず [LICENSE](LICENSE) と [LICENSE-NC.md](LICENSE-NC.md) を参照してください。

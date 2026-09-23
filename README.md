@@ -34,9 +34,10 @@ This reduces the work of copying the same schema into entity classes, UI models,
 
 ### 1. Launch QuickER and open a diagram
 
-Get the Setup.exe or the Portable zip from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases) and launch it (see [Install](#install) for details; to run from source, use `dotnet run --project src/QuickER.Gui`).
+Get the Setup.exe or the Portable zip from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases) and launch it (see [Install](#install) for details).
+To run from source, use `dotnet run --project src/QuickER.Gui`.
 
-Clone the repository and open the bundled sample ER model `samples/ec-order/EcOrder.json` — the exact diagram in the screenshot above.
+Clone the repository and open the bundled sample ER model `samples/ec-order/EcOrder.json`, the exact diagram in the screenshot above.
 
 ```powershell
 git clone https://github.com/kokko-labs/QuickER.git
@@ -62,12 +63,13 @@ All scenarios succeeded.
 
 What's in the sample:
 
-- [EcOrder.json](samples/ec-order/EcOrder.json) — the ER model you can edit in the GUI
-- [EcOrder.sql](samples/ec-order/EcOrder.sql) — the SQLite DDL generated from the ER model
-- [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs) — the generated C# code
-- [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — runnable examples of CRUD, graph save, Include, editing through the EditModel / Mapper, raw SQL, and delete cascade
+- [EcOrder.json](samples/ec-order/EcOrder.json): the ER model you can edit in the GUI
+- [EcOrder.sql](samples/ec-order/EcOrder.sql): the SQLite DDL generated from the ER model
+- [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs): the generated C# code
+- [Program.cs](samples/ec-order/EcOrderSample/Program.cs): runnable examples of CRUD, graph save, Include, editing through the EditModel / Mapper, raw SQL, and delete cascade
 
-See [the EC order sample](samples/ec-order/README.md) for details. To walk through the loop from editing the diagram to generating code with your own hands, continue to the [tutorial](docs/getting-started.md).
+See [the EC order sample](samples/ec-order/README.md) for details.
+To walk through the loop from editing the diagram to generating code with your own hands, continue to the [tutorial](docs/getting-started.md).
 
 ## Design ER models visually
 
@@ -101,7 +103,8 @@ You can also detect the differences between the ER model and the database and ge
 | Oracle     | ✅ | ✅ | ✅ | ✅ |
 | SQLite     | ✅ | ✅ | ✅ | ✅ |
 
-Each diagram keeps its target DBMS, and you can switch to another SQL dialect at any time. Types are converted automatically where possible, and types that cannot be converted are flagged with a warning.
+Each diagram keeps its target DBMS, and you can switch to another SQL dialect at any time.
+Types are converted automatically where possible, and types that cannot be converted are flagged with a warning.
 
 See [Database round-tripping](docs/database.md) for details.
 
@@ -140,7 +143,9 @@ The generated files are written to a "mock folder" (mock.json + one HTML per scr
 
 - The conversation proceeds as "propose the screen structure → agree → generate," and you refine the screens with follow-up instructions
 - For sharing with stakeholders, export a single HTML that bundles every screen, and a design document with the screen list, a transition diagram, and a CRUD matrix
-- As a second step, you can generate a WPF / Blazor mock project from the mock folder: QuickER scaffolds the data layer from the ER model, the AI implements the screen UI, and QuickER checks the result by running `dotnet build`. This step is an aid for PoCs and prototyping — build errors may remain, depending on the AI model and the connection mode
+- As a second step, you can generate a WPF / Blazor mock project from the mock folder.
+  QuickER scaffolds the data layer from the ER model, the AI implements the screen UI, and QuickER checks the result by running `dotnet build`.
+  This step is an aid for PoCs and prototyping, so build errors may remain, depending on the AI model and the connection mode
 
 The connection methods are shared with the AI chat.
 
@@ -188,7 +193,8 @@ Always generated:
 - EditModel
 - The Mapper between Entity and EditModel
 
-DataAnnotations and DB definition metadata attributes (dialect-neutral type tokens and descriptions) are added by default; they are required whenever a Repository is generated, since the runtime reads them by reflection.
+DataAnnotations and DB definition metadata attributes (dialect-neutral type tokens and descriptions) are added by default.
+They are required whenever a Repository is generated, since the runtime reads them by reflection.
 
 Optionally generated:
 
@@ -201,9 +207,11 @@ Optionally generated:
 - An ASP.NET Core Minimal API server
 - Bidirectional sync between a SQL Server database and a local SQLite copy (with a fast full reload)
 
-The EditModel accepts screen input as strings, keeps values that pass validation as confirmed values, and holds error information for those that fail. The Mapper applies only the confirmed values and change state to the entity, preventing invalid input from entering the entity.
+The EditModel accepts screen input as strings, keeps values that pass validation as confirmed values, and holds error information for those that fail.
+The Mapper applies only the confirmed values and change state to the entity, preventing invalid input from entering the entity.
 
-The generated code does not depend on any particular UI framework; use it from any .NET application — WPF, Blazor, ASP.NET Core, and so on.
+The generated code does not depend on any particular UI framework.
+Use it from any .NET application: WPF, Blazor, ASP.NET Core, and so on.
 You can see the EditModel and Mapper in action by running the bundled sample's [Program.cs](samples/ec-order/EcOrderSample/Program.cs).
 
 See [Using the generated code](docs/code-generation.md) for details.
@@ -229,7 +237,8 @@ The QuickER Repository ships with:
 - Conflict detection on graph save (when the target row no longer exists; concurrency control by `rowversion` comparison is out of scope)
 - Raw SQL execution
 
-The QuickER Repository and the EF Core Repository implement the same interfaces. Keep your application code dependent on the interfaces, and you can switch implementations by changing the DI registration (the GUI generates one of the two; generating both at once is available through the CLI or a config file).
+The QuickER Repository and the EF Core Repository implement the same interfaces.
+Keep your application code dependent on the interfaces, and you can switch implementations by changing the DI registration (the GUI generates one of the two; generating both at once is available through the CLI or a config file).
 
 ```csharp
 // QuickER Repository
@@ -253,7 +262,8 @@ ProductIdValue productId;
 Passing the wrong kind of ID by mistake becomes a compile-time error.
 For a value object representing a string primary key, enabling `UseGuidKeyForStringPrimaryKey` mints new keys as GUIDs, which satisfies the application-assigned key prerequisite without any numbering logic of your own.
 
-Validation code that can be derived from the column definitions — maximum lengths, `decimal` precision, and so on — is generated as well. Add custom validation and display names through partial classes.
+Validation code that the column definitions imply, such as maximum lengths and `decimal` precision, is generated as well.
+Add custom validation and display names through partial classes.
 
 ## Named queries
 
@@ -313,7 +323,11 @@ GitHub Releases provides the following packages.
 
 For the Portable edition, extract the ZIP and run `QuickER.exe`.
 
-The installers and update packages are not Authenticode signed, so Windows SmartScreen reports an unknown publisher; choose "More info" and then "Run anyway" to proceed. The installed edition checks GitHub Releases (`api.github.com`) for a newer version at startup and asks before it downloads anything — turn that off under **Settings > Check for updates on startup**. The Portable edition never checks.
+The installers and update packages are not Authenticode signed, so Windows SmartScreen reports an unknown publisher.
+Choose "More info" and then "Run anyway" to proceed.
+The installed edition checks GitHub Releases (`api.github.com`) for a newer version at startup and asks before it downloads anything.
+Turn that off under **Settings > Check for updates on startup**.
+The Portable edition never checks.
 
 To run from source:
 
@@ -364,7 +378,8 @@ dotnet run --project src/QuickER.Cli -- generate ...
 
 See the [CLI reference](docs/cli.md) for details.
 
-Generated code is self-contained by default; with `--use-runtime-packages`, its fixed runtime code comes from the `QuickER.Runtime` NuGet packages instead — see [Runtime package reference mode](docs/code-generation.md#runtime-package-reference-mode---use-runtime-packages).
+Generated code is self-contained by default.
+With `--use-runtime-packages`, its fixed runtime code comes from the `QuickER.Runtime` NuGet packages instead; see [Runtime package reference mode](docs/code-generation.md#runtime-package-reference-mode---use-runtime-packages).
 
 ## Why the ER model is the source of truth
 
@@ -396,7 +411,8 @@ dotnet build QuickER.slnx
 dotnet test QuickER.slnx
 ```
 
-The integration tests for SQL Server, PostgreSQL, MySQL, and Oracle use Docker. In environments where Docker is not available, those tests are skipped automatically.
+The integration tests for SQL Server, PostgreSQL, MySQL, and Oracle use Docker.
+In environments where Docker is not available, those tests are skipped automatically.
 The SQLite tests use a real file database.
 
 ## Support & contributing
@@ -412,18 +428,22 @@ Before opening a pull request, please discuss the change in an Issue first.
 
 ## License
 
-Code that QuickER generates — including the inlined runtime portion — is your work product. Generated code is not restricted by QuickER's own licenses, and you may use, modify, and distribute it freely, commercially or otherwise (codified as an explicit grant in [LICENSE-NC.md](LICENSE-NC.md)).
+Code that QuickER generates, including the inlined runtime portion, is your work product.
+Generated code is not restricted by QuickER's own licenses, and you may use, modify, and distribute it freely, commercially or otherwise (codified as an explicit grant in [LICENSE-NC.md](LICENSE-NC.md)).
 
-QuickER itself is a mixed-license repository — the licenses apply per project, so the single license label GitHub displays does not tell the whole story.
+QuickER itself is a mixed-license repository.
+The licenses apply per project, so the single license label GitHub displays does not tell the whole story.
 
 | Scope | License |
 | ---------------------------------------- | --------------------------------------------------- |
 | The ER designer, import/export, DDL generation, DB import/sync, the runtime packages, and so on | [MIT License](LICENSE) |
 | The AI features, the code-generation projects, and the MCP tool-execution host | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) + additional grants |
 
-The current releases are free for everyone, including commercial use of the official GUI and CLI. Note that the additional grants cover **using** QuickER: modifying the covered source code or redistributing modified versions for commercial purposes is not included.
+The current releases are free for everyone, including commercial use of the official GUI and CLI.
+Note that the additional grants cover **using** QuickER: modifying the covered source code or redistributing modified versions for commercial purposes is not included.
 
-Future versions may introduce paid licensing for some features (for example, separately licensed Pro features). Whatever changes, the following commitments stand:
+Future versions may introduce paid licensing for some features (for example, separately licensed Pro features).
+Whatever changes, the following commitments stand:
 
 - Personal and non-commercial use of the existing features remains free.
 - Rights granted for a released version are never withdrawn retroactively.
@@ -431,4 +451,5 @@ Future versions may introduce paid licensing for some features (for example, sep
 
 These commitments are codified as the "Additional Grants" section of [LICENSE-NC.md](LICENSE-NC.md), and commercial use today rests on the grants in the license file itself.
 
-For a plain-language guide — which license applies to which download, and what you can and cannot do — see [LICENSING.md](LICENSING.md). For the formal terms, always refer to [LICENSE](LICENSE) and [LICENSE-NC.md](LICENSE-NC.md).
+For a plain-language guide on which license applies to which download, and what you can and cannot do, see [LICENSING.md](LICENSING.md).
+For the formal terms, always refer to [LICENSE](LICENSE) and [LICENSE-NC.md](LICENSE-NC.md).

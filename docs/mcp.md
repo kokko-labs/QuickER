@@ -159,8 +159,8 @@ Before writing a `config` for `generate_csharp`, call `get_generation_config_sch
 
 ## Related
 
-- [CLI reference (generate / scaffold / reverse, quicker.json)](cli.md) — the `quicker generate` pipeline that the code generation tools reuse
-- [Configuring AI chat](ai-chat.md) — the in-app AI chat, which edits the currently open diagram inside the GUI (in contrast to this external MCP server, which agents drive over stdio)
+- [CLI reference (generate / scaffold / reverse, quicker.json)](cli.md): the `quicker generate` pipeline that the code generation tools reuse
+- [Configuring AI chat](ai-chat.md): the in-app AI chat, which edits the currently open diagram inside the GUI (in contrast to this external MCP server, which agents drive over stdio)
 
 ## License note
 

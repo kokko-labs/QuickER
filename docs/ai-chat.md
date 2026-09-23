@@ -2,8 +2,8 @@
 
 *English | [日本語](ai-chat.ja.md)*
 
-From "AI Chat" on the toolbar, you can generate and edit ER diagrams through conversation, for example "Design the tables needed for order management on an e-commerce site" or "Add a shipping address to `orders`".
-The same connection settings also drive "AI Mock Generation", which turns the current ER diagram into web mockup screens (see [AI mock generation](#ai-mock-generation) below).
+From "AI Chat" on the toolbar, you can generate and edit ER diagrams by typing a prompt such as "Design the tables needed for order management on an e-commerce site" or "Add a shipping address to `orders`" into the chat box.
+The same connection settings also drive the "AI Mock Generation" feature, which turns the current ER diagram into web mockup screens (see [AI mock generation](#ai-mock-generation) below).
 
 This in-app chat edits the diagram currently open in the GUI.
 To instead let an external AI agent (Claude Code, Codex, and so on) drive QuickER as part of its own workflow, use the [MCP server](mcp.md).
