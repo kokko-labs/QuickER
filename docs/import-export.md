@@ -121,6 +121,13 @@ Choose a format from the "Export" button.
 
 Outputs the full set of CREATE statements in the diagram's target dialect.
 
+### Schema JSON (.json)
+
+Outputs the save format (see [ER diagram editing](er-editor.md)) minus the layout information (coordinates, colors, and so on), leaving only the schema definition and the named-query definitions (`{ "Version": 1, "Schema": { ... } }`; the keys start with an uppercase letter and are case-sensitive).
+With no layout, the diff stays stable, which suits reviewing and versioning the table definitions themselves.
+The file can be loaded with "Open" in QuickER; having no layout, the whole diagram is auto-arranged (the schema and the named-query definitions round-trip, but the coordinates and colors are not restored).
+Use it, separately from a normal save (a `.json` with layout), when you want to share just the schema without layout churn.
+
 ### DBML / Mermaid
 
 Writes out the text formats.
@@ -170,13 +177,6 @@ It can be viewed with nothing but a browser, which makes it a good handout for n
 
 Fix the diagram and re-export the documents, and they are up to date again.
 Build the re-export into your workflow and the state where "only the documentation is stale" becomes much easier to avoid.
-
-### Schema JSON (.json)
-
-Outputs the save format (see [ER diagram editing](er-editor.md)) minus the layout information (coordinates, colors, and so on), leaving only the schema definition and the named-query definitions (`{ "Version": 1, "Schema": { ... } }`; the keys start with an uppercase letter and are case-sensitive).
-With no layout, the diff stays stable, which suits reviewing and versioning the table definitions themselves.
-The file can be loaded with "Open" in QuickER; having no layout, the whole diagram is auto-arranged (the schema and the named-query definitions round-trip, but the coordinates and colors are not restored).
-Use it, separately from a normal save (a `.json` with layout), when you want to share just the schema without layout churn.
 
 ### PNG / SVG (images)
 

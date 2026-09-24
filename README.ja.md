@@ -29,22 +29,32 @@ GUI や AI チャットで ER モデルを作成・編集し、データベー�
 - DBML / Mermaid / Excel 定義書との入出力
 - git で差分を管理できる JSON 保存形式
 - GUI と CLI の両方から利用可能
+- オープンソースで、現行リリースは商用利用を含めて無料（[ライセンス](#ライセンス)）
+
+開発の経緯と機能の紹介は、Zenn の記事「[AIチャットで指示できるER図作成ツール＆コードジェネレーターを作った](https://zenn.dev/kokkolabs/articles/quicker-ai-chat-er-diagram)」に書いています。
 
 ## クイックスタート
 
-### 1. QuickER を起動して図を開く
+### 1. QuickER をインストールする
 
-[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe または Portable zip を入手して起動します（詳細は[インストール](#インストール)）。
+[Full 版のインストーラー](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-full-Setup.exe)をダウンロードして実行します（Portable 版と Lite 版は[インストール](#インストール)を参照）。
 ソースコードから起動する場合は `dotnet run --project src/QuickER.Gui` です。
 
-リポジトリをクローンし、同梱サンプルの ER モデル `samples/ec-order/EcOrder.json` を開いてみてください（冒頭のスクリーンショットの図です）。
+ここまでで ER モデルの作成と編集は始められます。
+以降は、同梱サンプルで生成コードまでを一巡する手順です。
+
+### 2. 同梱サンプルを開く
+
+サンプルはリポジトリに含まれるため、クローンします（インストーラー版を使う場合も必要です）。
 
 ```powershell
 git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
 ```
 
-### 2. 生成コードを動かす
+QuickER で `samples/ec-order/EcOrder.json` を開いてください（冒頭のスクリーンショットの図です）。
+
+### 3. 生成コードを動かす
 
 この図から生成した DDL と C# コードはチェックイン済みで、外部データベースなしでそのまま実行できます（.NET 10 SDK が必要です）。
 
@@ -151,25 +161,22 @@ ER モデルを読ませて、業務画面の Web モック（HTML）を対話�
 
 ## インポートとエクスポート
 
-### インポート
+| 形式 | 出力 | 取込 |
+| --- | --- | --- |
+| 実データベース | ✅ | ✅ |
+| SQL DDL | ✅ | — |
+| C# コード | ✅ | ✅ |
+| スキーマ JSON | ✅ | ✅ |
+| DBML | ✅ | ✅ |
+| Mermaid | ✅ | ✅ |
+| Excel 定義書 | ✅ | ✅ |
+| HTML 定義書 | ✅ | — |
+| PNG / SVG | ✅ | — |
+| 印刷 / PDF | ✅ | — |
 
-- 実データベース
-- DBML
-- Mermaid
-- Excel テーブル定義書
-- C# コード（IncludeDataAnnotations ON で生成した本体 .g.cs）
-
-### エクスポート
-
-- SQL DDL
-- DBML
-- Mermaid
-- Excel テーブル定義書
-- HTML テーブル定義書
-- スキーマ JSON（配置情報なし・再取込可能）
-- PNG
-- SVG
-- 印刷 / PDF
+実データベースへの出力は、差分同期による書き戻しです。
+C# コードの出力はコード生成機能が担い、取込の対象は `IncludeDataAnnotations` を ON にして生成した本体 `.g.cs` です。
+スキーマ JSON は配置情報を持たないため、取り込むと自動整列されます。
 
 ER モデルを修正してから定義書を再出力することで、設計とドキュメントの不一致を防げます。
 
@@ -189,23 +196,27 @@ ER モデルから、アプリケーション開発に必要な C# コードを�
 
 基本生成:
 
-- Entity
-- EditModel
-- Entity と EditModel の Mapper
-
-DataAnnotations と DB 定義メタ属性（方言中立の型トークンと説明）は既定で付与されます。
-ランタイムがリフレクションで参照するため、Repository を生成する構成では必須です。
+| 生成物 | 説明 |
+| --- | --- |
+| Entity | テーブルに対応する POCO クラス |
+| EditModel | 画面バインディング用のモデル（入力値と検証エラーを保持する） |
+| Mapper | Entity と EditModel を相互に変換する |
 
 オプション生成:
 
-- QuickER 版 Repository（ADO ベースの軽量実装）
-- EF Core の DbContext と EF Core 版 Repository
-- 列ごとの値オブジェクト
-- 名前付きクエリ
-- リモート用 Repository インターフェイス
-- HTTP + JSON クライアント
-- ASP.NET Core Minimal API サーバー
-- SQL Server とローカル SQLite の双方向同期（高速な洗い替え付き）
+| 生成物 | 説明 |
+| --- | --- |
+| QuickER 版 Repository | ADO ベースの軽量な Repository（SQL Server / SQLite） |
+| EF Core 版 Repository | DbContext と、内部で EF Core を使う Repository（対応する 5 DBMS） |
+| 値オブジェクト | 列ごとに専用の型を作り、種類の違う値の取り違えをコンパイルエラーにする |
+| 名前付きクエリ | 図に保存した検索条件・並び順・射影を、型付きの Repository メソッドにする |
+| リモート用 Repository インターフェイス | ネットワーク越しに呼べる操作だけを切り出した契約 |
+| HTTP + JSON クライアント | リモート契約を HTTP で呼ぶ実装 |
+| ASP.NET Core Minimal API サーバー | リモート契約を公開するエンドポイント |
+| 双方向同期 | サーバー（SQL Server）とローカル（SQLite）の同期。オフライン編集の再生・変更の差分取得・高速な洗い替え |
+
+DataAnnotations と DB 定義メタ属性（方言中立の型トークンと説明）は既定で付与されます。
+ランタイムがリフレクションで参照するため、Repository を生成する構成では必須です。
 
 EditModel は画面からの入力値を文字列として受け取り、検証に成功した値だけを確定値として保持し、失敗した場合はエラー情報を保持します。
 Mapper はその確定値と変更状態だけをエンティティへ反映するため、不正な入力値がエンティティに入り込みません。
@@ -213,6 +224,8 @@ Mapper はその確定値と変更状態だけをエンティティへ反映す�
 生成コードは特定の UI フレームワークに依存しません。
 WPF、Blazor、ASP.NET Core など、任意の .NET アプリケーションから利用できます。
 EditModel と Mapper の動きは、同梱サンプルの [Program.cs](samples/ec-order/EcOrderSample/Program.cs) を実行して確認できます。
+
+[データアクセス方式](#データアクセス方式)・[値オブジェクト](#値オブジェクト)・[名前付きクエリ](#名前付きクエリ)・[3 階層構成](#3-階層構成)は、以降の節で個別に説明します。
 
 詳しくは [生成コードの使い方](docs/code-generation.ja.md) を参照してください。
 
@@ -222,7 +235,7 @@ EditModel と Mapper の動きは、同梱サンプルの [Program.cs](samples/e
 
 | 選択肢                      | 対象 DB               | 用途                                                 |
 | ------------------------ | ------------------- | -------------------------------------------------- |
-| **なし**                   | —                   | Entity / EditModel / Mapper のみを生成し、データアクセスは独自に実装する |
+| **なし**                   | —                   | データアクセスは独自に実装する                      |
 | **QuickER 版 Repository** | SQL Server / SQLite | ADO ベースの軽量な Repository を使用する                       |
 | **EF Core 版 Repository** | 対応する 5 DBMS         | DbContext と LINQ を使用する                             |
 
@@ -315,12 +328,13 @@ Database
 
 ### GUI
 
-GitHub Releases では、次の形式を提供します。
+次のいずれかをダウンロードしてください。
+リンクは常に最新リリースを指します。
 
-| チャンネル        | Setup                        | Portable                        | 必要なランタイム                                     |
-| ------------ | ---------------------------- | ------------------------------- | -------------------------------------------- |
-| **Full**（推奨） | `QuickER-win-full-Setup.exe` | `QuickER-win-full-Portable.zip` | 不要                                           |
-| **Lite**     | `QuickER-win-lite-Setup.exe` | `QuickER-win-lite-Portable.zip` | .NET 10 Desktop Runtime、ASP.NET Core Runtime |
+| チャンネル | Setup | Portable | 必要なランタイム |
+| --- | --- | --- | --- |
+| **Full**（推奨） | [`QuickER-win-full-Setup.exe`](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-full-Setup.exe) | [`QuickER-win-full-Portable.zip`](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-full-Portable.zip) | 不要 |
+| **Lite** | [`QuickER-win-lite-Setup.exe`](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-lite-Setup.exe) | [`QuickER-win-lite-Portable.zip`](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-lite-Portable.zip) | .NET 10 Desktop Runtime、ASP.NET Core Runtime |
 
 Portable 版は ZIP を展開し、`QuickER.exe` を実行してください。
 

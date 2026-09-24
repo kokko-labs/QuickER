@@ -29,22 +29,32 @@ This reduces the work of copying the same schema into entity classes, UI models,
 - Import/export with DBML / Mermaid / Excel definition documents
 - A git-friendly JSON save format
 - Available from both the GUI and the CLI
+- Open source, and the current release is free for everyone, commercial use included ([License](#license))
+
+The background and a walkthrough with screenshots are in an [introductory article on Zenn](https://zenn.dev/kokkolabs/articles/quicker-ai-chat-er-diagram) (in Japanese).
 
 ## Quick start
 
-### 1. Launch QuickER and open a diagram
+### 1. Install QuickER
 
-Get the Setup.exe or the Portable zip from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases) and launch it (see [Install](#install) for details).
+Download and run the [Full installer](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-full-Setup.exe) (see [Install](#install) for the portable and lite builds).
 To run from source, use `dotnet run --project src/QuickER.Gui`.
 
-Clone the repository and open the bundled sample ER model `samples/ec-order/EcOrder.json`, the exact diagram in the screenshot above.
+That is all you need to start creating and editing ER models.
+The steps below take the bundled sample through to the generated code.
+
+### 2. Open the bundled sample
+
+The sample lives in the repository, so clone it first (the released build needs this too).
 
 ```powershell
 git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
 ```
 
-### 2. Run the generated code
+Open `samples/ec-order/EcOrder.json` in QuickER, the exact diagram in the screenshot above.
+
+### 3. Run the generated code
 
 The DDL and C# code generated from this diagram are checked in, and they run as-is with no external database (the .NET 10 SDK is required).
 
@@ -151,25 +161,22 @@ The connection methods are shared with the AI chat.
 
 ## Import and export
 
-### Import
+| Format | Export | Import |
+| --- | --- | --- |
+| Live databases | ✅ | ✅ |
+| SQL DDL | ✅ | — |
+| C# code | ✅ | ✅ |
+| Schema JSON | ✅ | ✅ |
+| DBML | ✅ | ✅ |
+| Mermaid | ✅ | ✅ |
+| Excel definition documents | ✅ | ✅ |
+| HTML definition documents | ✅ | — |
+| PNG / SVG | ✅ | — |
+| Print / PDF | ✅ | — |
 
-- Live databases
-- DBML
-- Mermaid
-- Excel table definition documents
-- C# code (a main `.g.cs` generated with `IncludeDataAnnotations` ON)
-
-### Export
-
-- SQL DDL
-- DBML
-- Mermaid
-- Excel table definition documents
-- HTML table definition documents
-- Schema JSON (layout-free, re-importable)
-- PNG
-- SVG
-- Print / PDF
+Export to a live database means writing the changes back through diff sync.
+C# code is exported by the code generation feature, and the import target is a main `.g.cs` generated with `IncludeDataAnnotations` ON.
+Schema JSON carries no layout, so an imported diagram is arranged automatically.
 
 Update the ER model and re-export the definition documents to keep the design and the documentation from drifting apart.
 
@@ -189,23 +196,27 @@ From the ER model, generate the C# code your application development needs.
 
 Always generated:
 
-- Entity
-- EditModel
-- The Mapper between Entity and EditModel
-
-DataAnnotations and DB definition metadata attributes (dialect-neutral type tokens and descriptions) are added by default.
-They are required whenever a Repository is generated, since the runtime reads them by reflection.
+| Output | Description |
+| --- | --- |
+| Entity | A POCO class per table |
+| EditModel | A model for screen binding that holds the raw input and its validation errors |
+| Mapper | Converts between an Entity and an EditModel |
 
 Optionally generated:
 
-- The QuickER Repository (a lightweight, ADO-based implementation)
-- An EF Core DbContext and the EF Core Repository implementation
-- Per-column value objects
-- Named queries
-- Remote Repository interfaces
-- An HTTP + JSON client
-- An ASP.NET Core Minimal API server
-- Bidirectional sync between a SQL Server database and a local SQLite copy (with a fast full reload)
+| Output | Description |
+| --- | --- |
+| QuickER Repository | A lightweight, ADO-based Repository (SQL Server / SQLite) |
+| EF Core Repository | A DbContext and a Repository backed by EF Core (all five supported databases) |
+| Value objects | A dedicated type per column, so passing the wrong kind of value fails to compile |
+| Named queries | Turns the search conditions, ordering, and projections saved in the diagram into typed Repository methods |
+| Remote Repository interfaces | A contract limited to the operations that can cross a network boundary |
+| HTTP + JSON client | An implementation that calls the remote contract over HTTP |
+| ASP.NET Core Minimal API server | Endpoints that expose the remote contract |
+| Bidirectional sync | Sync between a SQL Server database and a local SQLite copy: replaying offline edits, fetching server changes, and a fast full reload |
+
+DataAnnotations and DB definition metadata attributes (dialect-neutral type tokens and descriptions) are added by default.
+They are required whenever a Repository is generated, since the runtime reads them by reflection.
 
 The EditModel accepts screen input as strings, keeps values that pass validation as confirmed values, and holds error information for those that fail.
 The Mapper applies only the confirmed values and change state to the entity, preventing invalid input from entering the entity.
@@ -213,6 +224,8 @@ The Mapper applies only the confirmed values and change state to the entity, pre
 The generated code does not depend on any particular UI framework.
 Use it from any .NET application: WPF, Blazor, ASP.NET Core, and so on.
 You can see the EditModel and Mapper in action by running the bundled sample's [Program.cs](samples/ec-order/EcOrderSample/Program.cs).
+
+[Data access options](#data-access-options), [value objects](#value-objects), [named queries](#named-queries), and the [three-tier architecture](#three-tier-architecture) each get their own section below.
 
 See [Using the generated code](docs/code-generation.md) for details.
 
@@ -222,7 +235,7 @@ The generation dialog lets you choose the data-access layer from three options.
 
 | Option | Target DB | Use |
 |---|---|---|
-| **None** | — | Generate Entity / EditModel / Mapper only, and implement data access yourself |
+| **None** | — | Implement data access yourself |
 | **QuickER Repository** | SQL Server / SQLite | Use a lightweight ADO-based Repository |
 | **EF Core Repository** | The 5 supported DBMS | Use a DbContext and LINQ |
 
@@ -314,12 +327,13 @@ See [the three-tier sample](samples/ec-order-remote/README.md) for a working exa
 
 ### GUI
 
-GitHub Releases provides the following packages.
+Download one of the following.
+The links always point to the latest release.
 
 | Channel | Setup | Portable | Required runtime |
-| ------------ | ---------------------------- | ------------------------------- | -------------------------------------------- |
-| **Full** (recommended) | `QuickER-win-full-Setup.exe` | `QuickER-win-full-Portable.zip` | none |
-| **Lite**     | `QuickER-win-lite-Setup.exe` | `QuickER-win-lite-Portable.zip` | .NET 10 Desktop Runtime and ASP.NET Core Runtime |
+| --- | --- | --- | --- |
+| **Full** (recommended) | [`QuickER-win-full-Setup.exe`](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-full-Setup.exe) | [`QuickER-win-full-Portable.zip`](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-full-Portable.zip) | none |
+| **Lite** | [`QuickER-win-lite-Setup.exe`](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-lite-Setup.exe) | [`QuickER-win-lite-Portable.zip`](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-lite-Portable.zip) | .NET 10 Desktop Runtime and ASP.NET Core Runtime |
 
 For the Portable edition, extract the ZIP and run `QuickER.exe`.
 

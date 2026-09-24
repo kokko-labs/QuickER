@@ -18,6 +18,7 @@ Npgsql
 Ollama
 Testcontainers
 Velopack
+Zenn
 
 # 地の文に現れる識別子・設定キー・型名
 camelCase
@@ -113,6 +114,7 @@ untyped
 upsert
 versionless
 viewport
+walkthroughs?
 
 # 所有格（'s）だけが辞書に無い語。基底形を載せると所有格も通る。
 backend
