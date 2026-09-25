@@ -139,6 +139,9 @@
   <data name="Chat_Generating" xml:space="preserve">
     <value>Generating...</value>
   </data>
+  <data name="Chat_ToolLoopLimitReached" xml:space="preserve">
+    <value>The response was stopped because the tool round trips in one turn reached the limit ({0}).</value>
+  </data>
   <data name="ClaudeCode_Guidance_Pending" xml:space="preserve">
     <value>Press "Recheck" to verify the login status.</value>
   </data>
@@ -199,6 +202,9 @@
   <data name="ClaudeCode_ExitedWithError" xml:space="preserve">
     <value>Claude Code exited with an error (exit code: {0}).</value>
   </data>
+  <data name="ClaudeCode_ToolActivityNotifyFailed" xml:space="preserve">
+    <value>Failed to notify tool activity: {0}</value>
+  </data>
   <data name="Codex_NotConnected" xml:space="preserve">
     <value>Not connected</value>
   </data>
@@ -258,6 +264,12 @@
   </data>
   <data name="Codex_InterruptFailed" xml:space="preserve">
     <value>Failed to interrupt processing: {0}</value>
+  </data>
+  <data name="Codex_InterruptForcedStop" xml:space="preserve">
+    <value>The interrupt request failed, so the Codex App Server was stopped. The conversation context is gone; the next message starts a new conversation.</value>
+  </data>
+  <data name="Codex_Disconnected" xml:space="preserve">
+    <value>The connection to the Codex App Server was lost. The conversation context is gone; the next message starts a new conversation.</value>
   </data>
   <data name="Codex_ToolResponseSendFailed" xml:space="preserve">
     <value>Failed to send the tool response: {0}</value>

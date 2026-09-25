@@ -60,6 +60,7 @@
       </Style>
 
       <!-- ── セグメント風タブ ── -->
+      <!-- ターン実行中はタブ単位で無効化する（TabControl 全体を無効化すると選択中タブの設定パネルまで操作不能になるため） -->
       <Style TargetType="TabItem">
         <Setter Property="Foreground" Value="{StaticResource MutedText}" />
         <Setter Property="Template">
@@ -91,10 +92,18 @@
                   </MultiTrigger.Conditions>
                   <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
                 </MultiTrigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter TargetName="Bd" Property="Opacity" Value="0.5" />
+                </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
           </Setter.Value>
         </Setter>
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding IsTurnInProgress}" Value="True">
+            <Setter Property="IsEnabled" Value="False" />
+          </DataTrigger>
+        </Style.Triggers>
       </Style>
 
       <Style x:Key="SettingsTabs" TargetType="TabControl">
@@ -283,7 +292,12 @@
       SelectionChanged="BackendTabs_SelectionChanged"
     >
       <TabItem Header="{x:Static res:Strings.Chat_TabApiKey}">
-        <StackPanel Margin="16,14">
+        <!-- 設定はターンの次の往復から即座に効くため、実行中はパネルごと編集不可にする -->
+        <StackPanel
+          x:Name="ApiKeySettingsPanel"
+          Margin="16,14"
+          IsEnabled="{Binding CanEditConnectionSettings}"
+        >
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />

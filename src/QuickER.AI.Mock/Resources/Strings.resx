@@ -403,6 +403,9 @@ The AI wrote these files, which are not UI-layer sources or static assets:</valu
   <data name="Mock_CodexNotLoggedIn" xml:space="preserve">
     <value>Codex is not logged in.</value>
   </data>
+  <data name="Mock_CodexDisconnected" xml:space="preserve">
+    <value>The connection to the Codex App Server was lost, so the generation was aborted.</value>
+  </data>
   <data name="Mock_CopilotNotLoggedIn" xml:space="preserve">
     <value>GitHub Copilot is not logged in.</value>
   </data>

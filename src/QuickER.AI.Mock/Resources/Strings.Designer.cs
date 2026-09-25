@@ -678,6 +678,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_CodexDisconnected {
+            get {
+                return ResourceManager.GetString("Mock_CodexDisconnected", resourceCulture);
+            }
+        }
+
         public static string Mock_CopilotNotLoggedIn {
             get {
                 return ResourceManager.GetString("Mock_CopilotNotLoggedIn", resourceCulture);

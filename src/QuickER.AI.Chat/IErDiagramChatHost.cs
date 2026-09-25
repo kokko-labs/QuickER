@@ -8,7 +8,7 @@ namespace QuickER.AI.Chat;
 /// <remarks>
 /// <see cref="AiChatDialogViewModel"/> を巨大なアプリ本体の MainViewModel 具象から切り離し、
 /// スタブ注入による単体テストを可能にする。AI のツール実行は <see cref="IErDiagramToolHost"/> が担う。
-/// 具象アダプタ（MainViewModelChatHost）はアプリ本体（QuickER.Gui）に置く。
+/// 具象アダプタ（<c>ErDiagramHostChatAdapter</c>）は QuickER.AI.Chat に置く。
 /// </remarks>
 public interface IErDiagramChatHost
 {

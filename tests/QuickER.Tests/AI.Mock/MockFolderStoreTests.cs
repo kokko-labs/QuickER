@@ -136,6 +136,41 @@ public class MockFolderStoreTests : IDisposable
         act.Should().Throw<InvalidOperationException>().WithMessage("*version*");
     }
 
+    [Theory(DisplayName = "Open は不正な画面ファイル名を破損として拒否する")]
+    [InlineData("../evil.html")]
+    [InlineData("sub/evil.html")]
+    [InlineData("")]
+    [InlineData("bad:name.html")]
+    [InlineData("noext")]
+    public void Open_InvalidScreenFileName_Throws(string invalidFileName)
+    {
+        var store = CreateNew();
+        store.SaveScreen(
+            "OrderList.html",
+            "注文一覧",
+            "注文の一覧",
+            ScreenHtml("<h1>一覧</h1>"),
+            Array.Empty<MockTransition>(),
+            "note"
+        );
+
+        // mock.json を手編集で破損させたのと同じ状況を作る（"file" の値を不正なファイル名へ差し替える）。
+        // 保存経路（SaveScreen 等）はファイル名を検証するが、読み込み経路がここまで無検証だったため、
+        // 破損した mock.json をこの時点で拒否できることを固定する。
+        var manifestPath = Path.Combine(_folder, "mock.json");
+        var json = File.ReadAllText(manifestPath);
+        json.Should().Contain("OrderList.html");
+        File.WriteAllText(manifestPath, json.Replace("OrderList.html", invalidFileName));
+
+        var act = () => MockFolderStore.Open(_folder);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage("*画面ファイル名が不正です*")
+            .Which.InnerException.Should()
+            .BeOfType<ArgumentException>();
+    }
+
     [Fact(DisplayName = "SaveScreen は画面を追加し HTML を書き出す")]
     public void SaveScreen_AddsScreenAndWritesHtml()
     {

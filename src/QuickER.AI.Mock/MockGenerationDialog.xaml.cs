@@ -147,16 +147,24 @@ public partial class MockGenerationDialog : Window
         Hide();
     }
 
+    /// <summary>
+    /// アプリ終了時にエンジンの破棄を待つ上限。破棄は子プロセスの停止とハンドル解放までで通常 1 秒未満だが、
+    /// ハングしたときにアプリの終了を長く止めないため上限を設ける。
+    /// </summary>
+    private static readonly TimeSpan EngineShutdownTimeout = TimeSpan.FromSeconds(3);
+
     /// <summary>アプリ終了時などにウィンドウを実際に閉じる</summary>
     /// <remarks>
-    /// 閉じる前に実行中の処理を打ち切る（放置すると claude / codex / copilot / dotnet の子プロセスが
-    /// 孤児として残る）。中断はベストエフォートで、完了は待たない。
+    /// 閉じる前に、(1) 実行中の処理（モックプロジェクト生成・会話ターン）を打ち切り
+    /// (2) 会話中のエンジンを破棄して常駐する子プロセス（codex app-server・copilot ランタイム）まで止める。
+    /// 中断だけでは、処理を実行していない常駐プロセスが残るため、両方を通す。
     /// </remarks>
     public void ForceClose()
     {
         _isForceClosing = true;
         ViewModel.RequestInterrupt();
         ViewModel.SaveSettings();
+        ViewModel.ShutdownEngines(EngineShutdownTimeout);
         Close();
     }
 

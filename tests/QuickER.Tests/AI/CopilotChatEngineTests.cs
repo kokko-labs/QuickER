@@ -358,6 +358,88 @@ public class CopilotChatEngineTests
         await engine.DisposeAsync();
     }
 
+    /// <summary>
+    /// ツールホストが例外を投げても、失敗のツール結果として応答されターンが詰まらないことを検証する
+    /// （素通しすると fire-and-forget のタスク内で例外が消え、AI 側は結果を待ち続ける）。
+    /// </summary>
+    [Fact(DisplayName = "ツール実行の例外は失敗結果として応答されターンが詰まらない")]
+    public async Task ToolCallRequested_ToolHostThrows_RespondsWithFailureResult()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var toolHost = new ThrowingToolHost { Exception = new InvalidOperationException("boom") };
+        var engine = CreateEngine(client, toolHost);
+
+        var activities = new List<ErChatToolActivity>();
+        engine.ToolActivityReceived += (_, a) => activities.Add(a);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+
+        client.RaiseToolCall("req-1", "add_entity", "{}");
+
+        activities.Should().ContainSingle();
+        activities[0].Success.Should().BeFalse();
+        activities[0].Result.Should().Contain("boom");
+
+        client.ToolResponses.Should().ContainSingle();
+        client.ToolResponses[0].Success.Should().BeFalse();
+        client.ToolResponses[0].Result.Should().Contain("boom");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>ツール応答の送信に失敗した場合、その旨が StatusChanged で可視化されることを検証する</summary>
+    [Fact(DisplayName = "ツール応答の送信失敗はステータスへ可視化される")]
+    public async Task ToolCallRequested_RespondFails_ReportsStatus()
+    {
+        var client = new FakeCopilotRuntimeClient
+        {
+            RespondToolException = new InvalidOperationException("切断されました"),
+        };
+        var toolHost = new RecordingToolHost();
+        var engine = CreateEngine(client, toolHost);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+
+        // 会話開始そのものが StatusChanged を発火するため、購読は開始完了の後にする
+        var statuses = new List<string>();
+        engine.StatusChanged += (_, m) => statuses.Add(m);
+
+        client.RaiseToolCall("req-1", "add_entity", "{}");
+
+        statuses
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(string.Format(Strings.Copilot_ToolResponseSendFailed, "切断されました"));
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// ToolActivityReceived の購読側が例外を投げても、応答送信は必ず行われることを検証する
+    /// （軽微 b: 活動通知は応答送信より先に呼ばれるため、素通しすると AI が結果を待ち続ける）。
+    /// </summary>
+    [Fact(DisplayName = "活動通知の購読側の例外があっても応答送信は行われる")]
+    public async Task ToolCallRequested_ActivitySubscriberThrows_StillResponds()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var toolHost = new RecordingToolHost();
+        var engine = CreateEngine(client, toolHost);
+        engine.ToolActivityReceived += (_, _) => throw new InvalidOperationException("boom");
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+
+        client.RaiseToolCall("req-1", "add_entity", "{}");
+
+        client.ToolResponses.Should().ContainSingle();
+        client.ToolResponses[0].Success.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
+
     /// <summary>拒否した許可要求が会話へ活動として記録されることを検証する</summary>
     [Fact(DisplayName = "拒否した許可要求は活動として記録する")]
     public async Task PermissionDeclined_IsReportedAsActivity()

@@ -83,7 +83,8 @@ public sealed class MockFolderStore
     }
 
     /// <summary>
-    /// 既存のモックフォルダを開く。<c>mock.json</c> 不在・JSON 破損・新フォーマット（Version 超過）は
+    /// 既存のモックフォルダを開く。<c>mock.json</c> 不在・JSON 破損・新フォーマット（Version 超過）・
+    /// 画面ファイル名の不正（手編集による <c>".."</c> やパス区切りの混入等）は
     /// 呼び出し側でユーザー提示できる明確なメッセージの例外を投げる。
     /// </summary>
     /// <param name="folder">開くフォルダ</param>
@@ -135,6 +136,24 @@ public sealed class MockFolderStore
         manifest.Screens ??= new List<MockScreen>();
         manifest.Transitions ??= new List<MockTransition>();
         manifest.Revisions ??= new List<MockRevision>();
+
+        // 画面ファイル名は保存経路（SaveScreen/RemoveScreen/GetScreenHtml）と同じ規則で読み込み時にも検証し、
+        // ".." やパス区切りを含む不正な名前は破損として開いた時点で拒否する
+        // （後段のエクスポートが GetScreenHtml 経由の未処理例外で落ちる形にしないため）。
+        foreach (var screen in manifest.Screens)
+        {
+            try
+            {
+                ValidateScreenFileName(screen?.File ?? string.Empty);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new InvalidOperationException(
+                    $"モックの {MockManifest.ManifestFileName} の画面ファイル名が不正です（破損している可能性があります）: {ex.Message}",
+                    ex
+                );
+            }
+        }
 
         return new MockFolderStore(folder, manifest, clock ?? (() => DateTimeOffset.Now));
     }

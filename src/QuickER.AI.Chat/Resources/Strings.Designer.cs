@@ -228,6 +228,12 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+        public static string Chat_AttachmentsDroppedOnProviderSwitch {
+            get {
+                return ResourceManager.GetString("Chat_AttachmentsDroppedOnProviderSwitch", resourceCulture);
+            }
+        }
+
         public static string Chat_SwitchBackendConfirm {
             get {
                 return ResourceManager.GetString("Chat_SwitchBackendConfirm", resourceCulture);
@@ -237,6 +243,12 @@ namespace QuickER.AI.Chat.Resources {
         public static string Chat_SwitchBackendConfirmTitle {
             get {
                 return ResourceManager.GetString("Chat_SwitchBackendConfirmTitle", resourceCulture);
+            }
+        }
+
+        public static string Chat_SwitchBackendBlockedDuringTurn {
+            get {
+                return ResourceManager.GetString("Chat_SwitchBackendBlockedDuringTurn", resourceCulture);
             }
         }
 

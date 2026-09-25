@@ -931,7 +931,19 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        var html = MockBundleExporter.Export(_store);
+        string html;
+
+        try
+        {
+            // Open 検証が入口の防波堤だが、エクスポート実行時の読み取り失敗（画面 HTML の実体が
+            // 差し替えられている等）も同じ経路で拾い、未処理例外でアプリを落とさない。
+            html = MockBundleExporter.Export(_store);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = string.Format(Strings.Mock_HtmlSaveFailedFormat, ex.Message);
+            return;
+        }
 
         var picked = _files.PickSaveFile(
             Strings.Mock_HtmlFileFilter,
@@ -979,11 +991,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        var markdown = MockDesignDocExporter.Export(_store);
         var path = Path.Combine(_store.Folder, MockDesignDocExporter.FileName);
 
         try
         {
+            // Open 検証が入口の防波堤だが、エクスポート実行時の読み取り失敗（画面 HTML の実体が
+            // 差し替えられている等）も同じ経路で拾い、未処理例外でアプリを落とさない
+            // （RegenerateDesignDocIfPresent と同じ形）。
+            var markdown = MockDesignDocExporter.Export(_store);
             File.WriteAllText(
                 path,
                 markdown,
@@ -1305,6 +1320,51 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         if (IsTurnInProgress && _session is not null)
         {
             Forget(_session.InterruptAsync());
+        }
+    }
+
+    /// <summary>
+    /// アプリ終了などの同期的な終了経路から、会話中のセッションが抱えるエンジンを破棄する。
+    /// </summary>
+    /// <param name="timeout">
+    /// 破棄の完了を待つ上限。超過しても終了経路は続行する（停止はベストエフォート）
+    /// </param>
+    /// <remarks>
+    /// <see cref="RequestInterrupt"/> が止められるのは実行中のターンだけで、ターンを実行していない
+    /// 常駐プロセス（codex app-server・copilot ランタイム）は残る。
+    /// それらを確実に止める経路はエンジンの破棄だけなので、ウィンドウを閉じる前にここを通す。
+    /// 待ちに上限を設けるのは、破棄がハングしたときにアプリの終了を長く止めないため。
+    /// </remarks>
+    public void ShutdownEngines(TimeSpan timeout)
+    {
+        var session = _session;
+
+        if (session is null)
+        {
+            return;
+        }
+
+        // 破棄そのものは必ずスレッドプールで走らせる。終了経路は UI スレッドで、ここで完了を待つため、
+        // 破棄の途中に UI スレッドへのマーシャリングがあると待ちがデッドロックする
+        var shutdown = Task.Run(async () =>
+        {
+            try
+            {
+                await session.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // 終了経路のため、破棄の失敗は報告先が無い
+            }
+        });
+
+        try
+        {
+            shutdown.Wait(timeout);
+        }
+        catch (Exception)
+        {
+            // 破棄の失敗・待ちの打ち切りで終了処理を妨げない
         }
     }
 

@@ -33,6 +33,15 @@ public interface ICodexAppServerClient : IAsyncDisposable
     /// <summary>ターン完了通知（turn/completed）の受信時に発生する</summary>
     event EventHandler<CodexTurnCompletedNotification>? TurnCompleted;
 
+    /// <summary>予期しない接続断（stdout の EOF・受信ループの異常終了・プロセス終了）で発生する</summary>
+    /// <remarks>
+    /// 1 接続につき 1 回だけ発生する。意図的な停止（<see cref="StopAsync"/> /
+    /// <see cref="IAsyncDisposable.DisposeAsync"/> / ハンドシェイク失敗時の内部クリーンアップ）では発生しない。
+    /// 応答待ちのリクエストが無い状態（<c>turn/start</c> の応答後など）でプロセスが落ちると
+    /// 通知が二度と来ないため、購読側はこのイベントで実行中ターンを失敗完了させる必要がある
+    /// </remarks>
+    event EventHandler? Disconnected;
+
     /// <summary>Codex App Server プロセスが起動済みで通信可能かどうかを示す</summary>
     bool IsStarted { get; }
 
@@ -52,6 +61,14 @@ public interface ICodexAppServerClient : IAsyncDisposable
         string clientVersion,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>子プロセスと受信ループを止め、再接続できる状態（未起動と同じ状態）へ戻す</summary>
+    /// <remarks>
+    /// <see cref="IAsyncDisposable.DisposeAsync"/> と違い再利用可能＝再度 <see cref="StartAsync"/> を
+    /// 呼べば同じインスタンスで接続し直せる。応答待ちのリクエストは接続断エラーで即座に解消する
+    /// （タイムアウトまで待たせない）。意図的な停止のため <see cref="Disconnected"/> は発生しない
+    /// </remarks>
+    Task StopAsync();
 
     /// <summary>現在のアカウント状態を取得する</summary>
     /// <param name="refreshToken">認証トークンの更新を要求するかどうか</param>
@@ -199,6 +216,13 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>インスタンスが最終破棄済みかどうか（<see cref="DisposeAsync"/> の二重呼び出しを無害化する）</summary>
     private bool _disposed;
 
+    /// <summary>この接続で <see cref="Disconnected"/> を発火済みかどうか（0=未発火 / 1=発火済み）</summary>
+    /// <remarks>
+    /// 接続断は受信ループの終了とプロセスの終了イベントの両方から届き得るため、
+    /// <see cref="Interlocked"/> で 1 接続につき 1 回だけ通知されるようにする
+    /// </remarks>
+    private int _disconnectedRaised;
+
     /// <inheritdoc />
     public event EventHandler<CodexJsonRpcNotification>? NotificationReceived;
 
@@ -231,6 +255,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
     /// <inheritdoc />
     public event EventHandler<CodexApprovalRequest>? ApprovalRequested;
+
+    /// <inheritdoc />
+    public event EventHandler? Disconnected;
 
     /// <inheritdoc />
     public bool IsStarted => _process is { HasExited: false } && _stdin is not null;
@@ -287,6 +314,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
 
         _process = process;
+        // この接続の接続断通知はまだ出していない（再接続のたびに 1 回通知できるようにする）
+        Interlocked.Exchange(ref _disconnectedRaised, 0);
+        // stdout の EOF より先にプロセスの終了を掴めることがあるため、両方から接続断を検知する
+        process.Exited += OnProcessExited;
         _stdin = process.StandardInput;
         _stdin.NewLine = "\n";
         _stdin.AutoFlush = true;
@@ -536,6 +567,13 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         _writeLock.Dispose();
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// 公開 API としての停止。実体は内部クリーンアップ（<see cref="StopProcessAsync"/>）と同一で、
+    /// 冒頭で受信ループをキャンセルするため意図的な停止として扱われる（<see cref="Disconnected"/> は出ない）
+    /// </remarks>
+    public Task StopAsync() => StopProcessAsync();
+
     /// <summary>子プロセスと受信ループを停止し、再接続できる状態（未起動と同じ状態）へ戻す</summary>
     /// <remarks>
     /// <see cref="_writeLock"/> は破棄しない＝再度 <see cref="StartAsync"/> を呼べば同じインスタンスで再接続できる。
@@ -579,6 +617,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 // 既に終了している場合などの例外は破棄する
             }
 
+            // 破棄前に購読を解除する（意図的な停止なので接続断としては扱わない）
+            _process.Exited -= OnProcessExited;
             _process.Dispose();
             _process = null;
         }
@@ -763,6 +803,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
 
         FailPendingRequests();
+
+        // EOF（プロセス死・stdout の切断）で抜けた場合は接続断として通知する。
+        // 応答待ちが無ければ FailPendingRequests は誰にも伝わらず、購読側のターンが固着する
+        RaiseDisconnectedIfUnexpected();
     }
 
     /// <summary>応答待ちの全リクエストを接続断エラーで完了させ、待機側のハングを防ぐ</summary>
@@ -777,6 +821,35 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 );
             }
         }
+    }
+
+    /// <summary>子プロセスの終了イベントを接続断の検知点として扱う</summary>
+    private void OnProcessExited(object? sender, EventArgs e) => RaiseDisconnectedIfUnexpected();
+
+    /// <summary>予期しない接続断であれば応答待ちを解消したうえで <see cref="Disconnected"/> を 1 回だけ発火する</summary>
+    /// <remarks>
+    /// 受信ループの終了とプロセスの終了イベントの両方から呼ばれる。意図的な停止
+    /// （<see cref="StopProcessAsync"/> は冒頭で受信ループをキャンセルする）では発火させない
+    /// </remarks>
+    private void RaiseDisconnectedIfUnexpected()
+    {
+        // StopProcessAsync が _readerCts を null にする前にローカルへ取る
+        // （CancellationTokenSource.IsCancellationRequested は破棄後も読める）
+        var readerCts = _readerCts;
+
+        if (readerCts is null || readerCts.IsCancellationRequested)
+        {
+            // 未起動、または意図的な停止＝接続断として通知しない
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _disconnectedRaised, 1) == 1)
+        {
+            return;
+        }
+
+        FailPendingRequests();
+        Disconnected?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>レスポンスを応答待ちリクエストへ引き渡し、error なら例外、result なら値として完了させる</summary>

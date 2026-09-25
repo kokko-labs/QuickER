@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel;
 using System.IO;
+using System.Reflection;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Chat;
@@ -7,6 +8,7 @@ using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Tests.AI;
 using QuickER.Tests.TestDoubles;
+using ChatStrings = QuickER.AI.Chat.Resources.Strings;
 
 namespace QuickER.Tests.AI.Chat;
 
@@ -513,6 +515,86 @@ public class AiChatDialogViewModelTests
     }
 
     /// <summary>
+    /// ターン実行中はタブ切替を VM 側でも拒否し、確認ダイアログも出さないことを検証する
+    /// （C2: 旧エンジンの TurnCompleted 購読が切替で外れ IsTurnInProgress が固着する回帰の防止）。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中のタブ切替は拒否され確認も出ない")]
+    public void TryChangeBackend_DuringTurn_IsRejected_AndDoesNotConfirm()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, _, folder) = CreateVm(dialogs);
+
+        try
+        {
+            vm.IsTurnInProgress = true;
+
+            var result = vm.TryChangeBackend(ErChatBackendKind.Codex);
+
+            result.Should().BeFalse();
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.ApiKey);
+            dialogs.ConfirmMessages.Should().BeEmpty("ターン実行中は確認より前に拒否する");
+            vm.StatusMessage.Should().Be(ChatStrings.Chat_SwitchBackendBlockedDuringTurn);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// ターン実行中は「新しい会話」を開始できないことを検証する
+    /// （C2: 旧ターンが走り続けたまま新しい会話を始めると二重に走ってしまう回帰の防止）。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中は新しい会話を開始できない")]
+    public void CanStartConversation_DuringTurn_IsFalse()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            // API キー無しでも会話開始可能なローカル LLM で readiness を整える
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
+            vm.CanStartConversation.Should().BeTrue();
+            vm.StartConversationCommand.CanExecute(null).Should().BeTrue();
+
+            vm.IsTurnInProgress = true;
+
+            vm.CanStartConversation.Should().BeFalse();
+            vm.StartConversationCommand.CanExecute(null).Should().BeFalse();
+
+            vm.IsTurnInProgress = false;
+
+            vm.CanStartConversation.Should().BeTrue();
+            vm.StartConversationCommand.CanExecute(null).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// ターン実行中も中断コマンドは有効のままであることを検証する
+    /// （タブ・送信・新規会話を無効化しても中断だけは押せることの回帰固定）。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中も中断コマンドは有効のまま")]
+    public void InterruptCommand_DuringTurn_RemainsEnabled()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.IsTurnInProgress = true;
+
+            vm.InterruptCommand.CanExecute(null).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
     /// 子 <see cref="ChatConnectionSettingsViewModel.ApiKey"/> の変更で、親の
     /// <see cref="AiChatDialogViewModel.CanStartConversation"/> の PropertyChanged が発火することを検証する
     /// （Connection.PropertyChanged → 親ハンドラ → NotifyReadinessChanged の連鎖の取りこぼしを恒久検知する）。
@@ -553,7 +635,7 @@ public class AiChatDialogViewModelTests
     /// エンドツーエンドテストでカバーする（Chat VM には API キーエンジンの注入 seam が無いため）。
     /// </summary>
     [Fact(DisplayName = "Codex 成功ターンでは API モデル履歴を記録しない")]
-    public void CodexSuccessfulTurn_DoesNotRecordApiHistory()
+    public async Task CodexSuccessfulTurn_DoesNotRecordApiHistory()
     {
         var (vm, client, folder) = CreateVm();
 
@@ -565,7 +647,9 @@ public class AiChatDialogViewModelTests
             vm.Connection.ApiModel = "qwen3.6:35b";
             vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
 
-            // Codex エンジン経由で成功ターン完了を発火させる
+            // ターンを開始してから成功完了を発火させる（エンジンは実行中でないターンの完了を転送しない）
+            vm.UserInput = "やあ";
+            await vm.SendMessageCommand.ExecuteAsync(null);
             client.RaiseTurnCompleted("completed");
 
             // API 履歴には記録されない（ai-settings.json は作られない）
@@ -582,7 +666,7 @@ public class AiChatDialogViewModelTests
     /// 記録されることをエンドツーエンド（<see cref="FakeCodexAppServerClient.RaiseTurnCompleted"/> 経由）で検証する（正方向）。
     /// </summary>
     [Fact(DisplayName = "Codex×非 openai の成功ターンで使用モデルが履歴へ記録される")]
-    public void CodexSuccessfulTurn_NonOpenAiProvider_RecordsCodexHistory()
+    public async Task CodexSuccessfulTurn_NonOpenAiProvider_RecordsCodexHistory()
     {
         var (vm, client, folder) = CreateVm();
 
@@ -594,7 +678,9 @@ public class AiChatDialogViewModelTests
             vm.Connection.CodexModelProvider = "mru-e2e-provider";
             vm.Connection.CodexModel = "mru-e2e-model";
 
-            // Codex エンジン経由で成功ターン完了を発火させる
+            // ターンを開始してから成功完了を発火させる（エンジンは実行中でないターンの完了を転送しない）
+            vm.UserInput = "やあ";
+            await vm.SendMessageCommand.ExecuteAsync(null);
             client.RaiseTurnCompleted("completed");
 
             // プロバイダ別履歴へ記録され、候補にも × 付きで現れる
@@ -762,6 +848,207 @@ public class AiChatDialogViewModelTests
         var bytes = new byte[16];
         "%PDF-1.7"u8.CopyTo(bytes);
         return bytes;
+    }
+
+    /// <summary>
+    /// VM が内部で持つ API キーエンジン（<c>_apiKeyEngine</c>）の会話履歴（<c>_history</c>）へ、
+    /// 実ドライバ（実 HTTP 呼び出し）を経由せずに直接 1 件差し込む（C5 のテスト専用ヘルパー）。
+    /// 「既に送信済みの添付付きメッセージが会話履歴に残っている」状態を、ネットワークなしで再現する。
+    /// </summary>
+    private static void InjectApiKeyEngineHistoryItem(
+        AiChatDialogViewModel vm,
+        ChatHistoryItem item
+    )
+    {
+        var engineField = typeof(AiChatDialogViewModel).GetField(
+            "_apiKeyEngine",
+            BindingFlags.NonPublic | BindingFlags.Instance
+        )!;
+        var engine = (ChatTurnEngine)engineField.GetValue(vm)!;
+        var historyField = typeof(ChatTurnEngine).GetField(
+            "_history",
+            BindingFlags.NonPublic | BindingFlags.Instance
+        )!;
+        var history = (List<ChatHistoryItem>)historyField.GetValue(engine)!;
+        history.Add(item);
+    }
+
+    /// <summary>
+    /// 会話中に API キープロバイダーを切り替え、履歴中の添付（PDF）が切替先の対応範囲外になるとき、
+    /// 落ちることを告知するシステムメッセージが追加されることを検証する（C5）。
+    /// 実ドライバは呼ばない（HistoryHasAttachmentsBeyond の判定だけを配線として検証する）ため、
+    /// 履歴は <see cref="InjectApiKeyEngineHistoryItem"/> で直接差し込む。
+    /// </summary>
+    [Fact(DisplayName = "会話中のプロバイダー切替で対応範囲外の添付があれば告知する")]
+    public void SwitchApiProvider_DuringConversation_WithUnsupportedAttachment_Notifies()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.Claude;
+            vm.Connection.ApiKey = "sk-test";
+            vm.StartConversationCommand.Execute(null);
+
+            InjectApiKeyEngineHistoryItem(
+                vm,
+                new ChatHistoryItem(
+                    ChatHistoryRole.User,
+                    "見て",
+                    Attachments:
+                    [
+                        new ChatAttachment(
+                            "spec.pdf",
+                            ChatAttachmentKind.Pdf,
+                            "application/pdf",
+                            PdfBytes()
+                        ),
+                    ]
+                )
+            );
+
+            // Claude（PDF 対応）→ OpenAI（PDF 非対応）
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+
+            vm.Messages.Should()
+                .Contain(m =>
+                    m.Role == ErChatMessageRole.System
+                    && m.Content == ChatStrings.Chat_AttachmentsDroppedOnProviderSwitch
+                );
+            vm.StatusMessage.Should().Be(ChatStrings.Chat_AttachmentsDroppedOnProviderSwitch);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// ターン実行中のプロバイダー切替では添付の告知判定を行わないことを検証する
+    /// （XAML の設定パネル無効化との二重防御。実行中はエンジンのループがスレッドプール上で
+    /// 履歴へ追記するため、判定の列挙がコレクション変更例外になり得る）。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中のプロバイダー切替は添付の告知判定を行わない")]
+    public void SwitchApiProvider_DuringTurn_DoesNotNotify()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.Claude;
+            vm.Connection.ApiKey = "sk-test";
+            vm.StartConversationCommand.Execute(null);
+
+            InjectApiKeyEngineHistoryItem(
+                vm,
+                new ChatHistoryItem(
+                    ChatHistoryRole.User,
+                    "見て",
+                    Attachments:
+                    [
+                        new ChatAttachment(
+                            "spec.pdf",
+                            ChatAttachmentKind.Pdf,
+                            "application/pdf",
+                            PdfBytes()
+                        ),
+                    ]
+                )
+            );
+
+            vm.IsTurnInProgress = true;
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+
+            vm.Messages.Should()
+                .NotContain(m =>
+                    m.Role == ErChatMessageRole.System
+                    && m.Content == ChatStrings.Chat_AttachmentsDroppedOnProviderSwitch
+                );
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// ターン実行中は API キー接続の設定編集が不可になることを検証する
+    /// （XAML の設定パネルの IsEnabled が束縛する面）。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中は接続設定を編集できない")]
+    public void CanEditConnectionSettings_DuringTurn_IsFalse()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.CanEditConnectionSettings.Should().BeTrue();
+
+            vm.IsTurnInProgress = true;
+            vm.CanEditConnectionSettings.Should().BeFalse();
+
+            vm.IsTurnInProgress = false;
+            vm.CanEditConnectionSettings.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 会話中のプロバイダー切替でも、履歴中の添付が切替先の対応範囲内（またはそもそも添付が無い）なら
+    /// 告知しないことを検証する（過剰反応の否定側）。
+    /// </summary>
+    [Fact(DisplayName = "会話中のプロバイダー切替で添付が無ければ告知しない")]
+    public void SwitchApiProvider_DuringConversation_WithoutAttachments_DoesNotNotify()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.Claude;
+            vm.Connection.ApiKey = "sk-test";
+            vm.StartConversationCommand.Execute(null);
+
+            // Claude → OpenAI（添付が無いので落ちるものが無い）
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+
+            vm.Messages.Should()
+                .NotContain(m =>
+                    m.Role == ErChatMessageRole.System
+                    && m.Content == ChatStrings.Chat_AttachmentsDroppedOnProviderSwitch
+                );
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>会話開始前のプロバイダー切替は、履歴が無いため告知の判定自体が走らないことを検証する</summary>
+    [Fact(DisplayName = "会話開始前のプロバイダー切替は告知しない")]
+    public void SwitchApiProvider_BeforeConversationStarted_DoesNotNotify()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.Claude;
+
+            // 会話未開始のまま切り替える
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+
+            vm.Messages.Should()
+                .NotContain(m =>
+                    m.Role == ErChatMessageRole.System
+                    && m.Content == ChatStrings.Chat_AttachmentsDroppedOnProviderSwitch
+                );
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
     }
 
     // ── GitHub Copilot 接続タブ ──
@@ -1023,6 +1310,95 @@ public class AiChatDialogViewModelTests
         }
         finally
         {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>3 つの CLI バックエンドのクライアントをフェイクへ差し替えた VM を用意する（破棄の到達検証用）</summary>
+    private static (
+        AiChatDialogViewModel vm,
+        FakeCodexAppServerClient codex,
+        DisposeTrackingClaudeCodeClient claudeCode,
+        FakeCopilotRuntimeClient copilot,
+        string folder
+    ) CreateVmWithAllCliClients()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var codex = new FakeCodexAppServerClient();
+        var claudeCode = new DisposeTrackingClaudeCodeClient();
+        var copilot = new FakeCopilotRuntimeClient();
+        var keyStore = new InMemoryApiKeyStore();
+        var vm = new AiChatDialogViewModel(
+            host: null,
+            dispatcher: new SyncUiDispatcher(),
+            settingsStore: new AiSettingsStore(folder),
+            codexClient: codex,
+            claudeCodeClient: claudeCode,
+            copilotClient: copilot,
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
+        );
+
+        return (vm, codex, claudeCode, copilot, folder);
+    }
+
+    /// <summary>
+    /// アプリ終了時の破棄が全エンジンへ届くことを検証する
+    /// （中断はターン実行中しか効かないため、常駐プロセスはここでしか止まらない）。
+    /// </summary>
+    [Fact(DisplayName = "ShutdownEngines は全エンジンを破棄する")]
+    public void ShutdownEngines_DisposesAllEngines()
+    {
+        var (vm, codex, claudeCode, copilot, folder) = CreateVmWithAllCliClients();
+
+        try
+        {
+            vm.ShutdownEngines(TimeSpan.FromSeconds(5));
+
+            codex.DisposeCount.Should().Be(1, "codex app-server は常駐するため破棄が要る");
+            claudeCode.DisposeCount.Should().Be(1);
+            copilot.DisposeCount.Should().Be(1, "copilot ランタイムは常駐するため破棄が要る");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>破棄がハングしても待ち時間の上限で戻り、例外を投げないことを検証する</summary>
+    [Fact(DisplayName = "ShutdownEngines は破棄がハングしても上限で戻る")]
+    public void ShutdownEngines_HangingDispose_ReturnsWithinTimeout()
+    {
+        var (vm, codex, _, copilot, folder) = CreateVmWithAllCliClients();
+        var gate = new TaskCompletionSource();
+
+        try
+        {
+            codex.DisposeGate = gate.Task;
+
+            // 戻らない実装（上限なしの待ち）ではテストがハングするため、別スレッドで呼んで上限つきで観測する
+            var shutdown = Task.Run(
+                () => vm.ShutdownEngines(TimeSpan.FromMilliseconds(200)),
+                TestContext.Current.CancellationToken
+            );
+            var returned = false;
+            var wait = () =>
+            {
+                returned = shutdown.Wait(TimeSpan.FromSeconds(10));
+            };
+
+            wait.Should().NotThrow("終了経路はエンジンの破棄の失敗で妨げられない");
+            returned.Should().BeTrue("ハングした破棄でアプリの終了を止めない");
+
+            // ハングと並行して走った破棄の完了は、待ちの打ち切りより後になり得るため上限つきで待つ
+            SpinWait
+                .SpinUntil(() => copilot.DisposeCount == 1, TimeSpan.FromSeconds(10))
+                .Should()
+                .BeTrue("1 つのハングが他のエンジンの破棄を止めない");
+        }
+        finally
+        {
+            gate.SetResult();
             Cleanup(folder);
         }
     }

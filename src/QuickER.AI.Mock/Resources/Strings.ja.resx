@@ -403,6 +403,9 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="Mock_CodexNotLoggedIn" xml:space="preserve">
     <value>Codex が未ログインです。</value>
   </data>
+  <data name="Mock_CodexDisconnected" xml:space="preserve">
+    <value>Codex App Server との接続が失われたため、生成を中止しました。</value>
+  </data>
   <data name="Mock_CopilotNotLoggedIn" xml:space="preserve">
     <value>GitHub Copilot が未ログインです。</value>
   </data>

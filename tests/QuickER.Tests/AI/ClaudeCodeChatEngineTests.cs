@@ -206,6 +206,61 @@ public class ClaudeCodeChatEngineTests
         await engine.DisposeAsync();
     }
 
+    /// <summary>
+    /// ツールホストが例外を投げても、失敗のツール結果（Success=false）として返り、活動としても
+    /// 通知されることを検証する。ExecuteTool は MCP（DelegatingToolFunction 経由）からしか呼ばれず、
+    /// 素通しした例外の伝播先は MCP SDK 側の変換に委ねられる（実 MCP サーバー起動が要るため検証が重い）。
+    /// ここでは internal 化した ExecuteTool を直接呼び、Codex／Copilot と同じ「失敗のツール結果」の形で
+    /// 返すこと（例外を外へ伝播させないこと）だけを検証する。
+    /// </summary>
+    [Fact(DisplayName = "ツール実行の例外は失敗結果になる")]
+    public void ExecuteTool_ToolHostThrows_ReturnsFailureResult()
+    {
+        var client = new FakeClaudeCodeClient();
+        var toolHost = new ThrowingToolHost { Exception = new InvalidOperationException("boom") };
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        var activities = new List<ErChatToolActivity>();
+        engine.ToolActivityReceived += (_, a) => activities.Add(a);
+
+        var (result, success) = engine.ExecuteTool("add_entity", "{}");
+
+        success.Should().BeFalse();
+        result.Should().Contain("boom");
+        activities.Should().ContainSingle();
+        activities[0].ToolName.Should().Be("add_entity");
+        activities[0].Success.Should().BeFalse();
+        activities[0].Result.Should().Be(result);
+    }
+
+    /// <summary>
+    /// ToolActivityReceived の購読側が例外を投げても、実行結果（戻り値）は必ず返されることを検証する
+    /// （軽微 b: 活動通知は戻り値より先に呼ばれるため、素通しすると呼び出し元へ結果が返らずターンが詰まる）。
+    /// </summary>
+    [Fact(DisplayName = "活動通知の購読側の例外があっても実行結果は返される")]
+    public void ExecuteTool_ActivitySubscriberThrows_StillReturnsResult()
+    {
+        var client = new FakeClaudeCodeClient();
+        var toolHost = new RecordingToolHost();
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        engine.ToolActivityReceived += (_, _) => throw new InvalidOperationException("boom");
+
+        var (result, success) = engine.ExecuteTool("add_entity", "{}");
+
+        success.Should().BeTrue();
+        toolHost.Calls.Should().ContainSingle();
+    }
+
     /// <summary>検出済み・未プローブの初期状態は Pending（灰・未確認）であることを検証する</summary>
     [Fact(DisplayName = "初期状態は Pending（未確認）")]
     public async Task Initialize_WhenAvailable_IsPending()

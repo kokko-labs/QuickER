@@ -68,16 +68,24 @@ public partial class AiChatDialog : Window
         Hide();
     }
 
+    /// <summary>
+    /// アプリ終了時にエンジンの破棄を待つ上限。破棄は子プロセスの停止とハンドル解放までで通常 1 秒未満だが、
+    /// ハングしたときにアプリの終了を長く止めないため上限を設ける。
+    /// </summary>
+    private static readonly TimeSpan EngineShutdownTimeout = TimeSpan.FromSeconds(3);
+
     /// <summary>アプリ終了時などにウィンドウを実際に閉じる</summary>
     /// <remarks>
-    /// 閉じる前に実行中のターンを打ち切る（放置すると CLI バックエンドの子プロセスが孤児として残る）。
-    /// 中断はベストエフォートで、完了は待たない。
+    /// 閉じる前に、(1) 実行中のターンを打ち切り (2) エンジンを破棄して常駐する子プロセス
+    /// （codex app-server・copilot ランタイム）まで止める。中断だけではターンを実行していない
+    /// 常駐プロセスが残るため、両方を通す。
     /// </remarks>
     public void ForceClose()
     {
         _isForceClosing = true;
         ViewModel.RequestInterrupt();
         ViewModel.SaveSettings();
+        ViewModel.ShutdownEngines(EngineShutdownTimeout);
         Close();
     }
 

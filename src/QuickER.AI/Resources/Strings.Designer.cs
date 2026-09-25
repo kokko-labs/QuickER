@@ -216,6 +216,12 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Chat_ToolLoopLimitReached {
+            get {
+                return ResourceManager.GetString("Chat_ToolLoopLimitReached", resourceCulture);
+            }
+        }
+
         public static string ClaudeCode_Guidance_Pending {
             get {
                 return ResourceManager.GetString("ClaudeCode_Guidance_Pending", resourceCulture);
@@ -333,6 +339,12 @@ namespace QuickER.AI.Resources {
         public static string ClaudeCode_ExitedWithError {
             get {
                 return ResourceManager.GetString("ClaudeCode_ExitedWithError", resourceCulture);
+            }
+        }
+
+        public static string ClaudeCode_ToolActivityNotifyFailed {
+            get {
+                return ResourceManager.GetString("ClaudeCode_ToolActivityNotifyFailed", resourceCulture);
             }
         }
 
@@ -459,6 +471,18 @@ namespace QuickER.AI.Resources {
         public static string Codex_InterruptFailed {
             get {
                 return ResourceManager.GetString("Codex_InterruptFailed", resourceCulture);
+            }
+        }
+
+        public static string Codex_InterruptForcedStop {
+            get {
+                return ResourceManager.GetString("Codex_InterruptForcedStop", resourceCulture);
+            }
+        }
+
+        public static string Codex_Disconnected {
+            get {
+                return ResourceManager.GetString("Codex_Disconnected", resourceCulture);
             }
         }
 

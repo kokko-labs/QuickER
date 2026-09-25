@@ -57,7 +57,9 @@ public sealed class CodexChatEngine : IErChatEngine
 
     private string? _currentThreadId;
     private string? _currentTurnId;
-    private bool _turnInProgress;
+
+    /// <summary>ターン実行中フラグ（1=実行中・0=非実行。<see cref="TryCompleteTurn"/> と対で Interlocked 操作する）</summary>
+    private int _turnInProgress;
 
     /// <summary>スレッドの作業フォルダ（初回のスレッド開始時に作る一時フォルダ。破棄時に消す）</summary>
     private string _workingDirectory = string.Empty;
@@ -135,6 +137,7 @@ public sealed class CodexChatEngine : IErChatEngine
         _client.AccountUpdated += OnAccountUpdated;
         _client.LoginCompleted += OnLoginCompleted;
         _client.NotificationReceived += OnNotificationReceived;
+        _client.Disconnected += OnDisconnected;
     }
 
     /// <inheritdoc />
@@ -363,7 +366,7 @@ public sealed class CodexChatEngine : IErChatEngine
             return;
         }
 
-        _turnInProgress = true;
+        Interlocked.Exchange(ref _turnInProgress, 1);
         StatusChanged?.Invoke(this, Strings.Codex_Processing);
 
         try
@@ -373,12 +376,34 @@ public sealed class CodexChatEngine : IErChatEngine
                 .ConfigureAwait(false);
             _currentTurnId = turn.Id;
         }
+        catch (OperationCanceledException)
+        {
+            // 中断は失敗ではないため、他の 2 エンジン（ChatTurnEngine / ClaudeCodeChatEngine の
+            // IClaudeCodeClient.RunTurnAsync 契約）と同じく Success=false・Error=null へ畳む。
+            // 送信失敗と並行して接続断などが先にターンを完了させていたら、二重に通知しない
+            if (TryCompleteTurn())
+            {
+                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
+            }
+        }
         catch (Exception ex)
         {
-            _turnInProgress = false;
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            // 送信失敗と並行して接続断などが先にターンを完了させていたら、二重に通知しない
+            if (TryCompleteTurn())
+            {
+                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            }
         }
     }
+
+    /// <summary>実行中フラグを 1→0 へ落とせた（＝このターンの完了通知の権利を勝ち取った）ときだけ true を返す</summary>
+    /// <remarks>
+    /// 完了通知の発火点は、受信ループのスレッド（turn/completed・error 通知・接続断）と、
+    /// 中断失敗時の継続スレッド（強制停止）に分かれる。bool の「読んでから書く」では複数の発火点が
+    /// 同時に勝って <see cref="TurnCompleted"/> が二重に届く窓が残るため、Interlocked の交換で
+    /// 勝者を 1 つに絞る。ターンを完了させる全経路はこのメソッドを通ること。
+    /// </remarks>
+    private bool TryCompleteTurn() => Interlocked.Exchange(ref _turnInProgress, 0) == 1;
 
     /// <inheritdoc />
     /// <remarks>
@@ -400,6 +425,11 @@ public sealed class CodexChatEngine : IErChatEngine
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 中断要求そのものが届かない（無応答のタイムアウト・接続断）ときは、App Server を停止して
+    /// ターンを打ち切る（Claude Code 側の強制終了に相当する最終手段）。要求の失敗を報告するだけでは
+    /// ターンが実行中のまま残り、チャットが二度と送信できなくなる
+    /// </remarks>
     public async Task InterruptAsync(CancellationToken cancellationToken = default)
     {
         if (_currentThreadId is null || _currentTurnId is null)
@@ -416,6 +446,62 @@ public sealed class CodexChatEngine : IErChatEngine
         catch (Exception ex)
         {
             StatusChanged?.Invoke(this, string.Format(Strings.Codex_InterruptFailed, ex.Message));
+            await ForceStopAfterFailedInterruptAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>中断要求が届かなかったときの最終手段。App Server を止めて実行中ターンを失敗完了させる</summary>
+    /// <remarks>
+    /// 停止は意図的なので接続断イベントは発生しない（＝ここで自分の後始末をすべて行う）。
+    /// <see cref="IsStarted"/> は落とさない＝次の送信で <see cref="EnsureStartedAsync"/> が自動的に接続し直す
+    /// </remarks>
+    private async Task ForceStopAfterFailedInterruptAsync()
+    {
+        try
+        {
+            await _client.StopAsync().ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // 停止にも失敗したらそれ以上の手段が無い。せめて実行中表示だけは必ず解く
+        }
+
+        // サーバープロセス内のスレッド・ターンは失われる（次の送信は新しい会話になる）
+        _currentThreadId = null;
+        _currentTurnId = null;
+
+        if (TryCompleteTurn())
+        {
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, Strings.Codex_InterruptForcedStop)
+            );
+        }
+    }
+
+    /// <summary>予期しない接続断を受けて、実行中ターンを失敗完了させ会話の文脈喪失を伝える</summary>
+    /// <remarks>
+    /// スレッド・ターンはサーバープロセス内の状態なので、接続が切れた時点で失われている。
+    /// 黙って新しいスレッドで続けると、会話が続いているように見えたまま文脈だけが消えるため、
+    /// ターン非実行中でも会話が進んでいたならステータスで知らせる。
+    /// <see cref="IsStarted"/> は落とさない＝次の送信で <see cref="EnsureStartedAsync"/> が自動的に接続し直す
+    /// </remarks>
+    private void OnDisconnected(object? sender, EventArgs e)
+    {
+        // 会話が始まっていたかは、スレッドを捨てる前に控える
+        var hadConversation = _currentThreadId is not null;
+        _currentThreadId = null;
+        _currentTurnId = null;
+
+        if (TryCompleteTurn())
+        {
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, Strings.Codex_Disconnected));
+            return;
+        }
+
+        if (hadConversation)
+        {
+            StatusChanged?.Invoke(this, Strings.Codex_Disconnected);
         }
     }
 
@@ -588,9 +674,17 @@ public sealed class CodexChatEngine : IErChatEngine
         AssistantDeltaReceived?.Invoke(this, e.Delta);
 
     /// <summary>ターン完了通知を共通イベントへ変換する</summary>
+    /// <remarks>
+    /// エンジンが開始したターン（実行中フラグが立っているもの）の完了だけを通知する。
+    /// 完了の権利を勝ち取れなかった通知（強制停止・接続断が先に完了させたターンの turn/completed）を
+    /// 転送すると <see cref="TurnCompleted"/> が二重に届くため破棄する。
+    /// </remarks>
     private void OnTurnCompleted(object? sender, CodexTurnCompletedNotification e)
     {
-        _turnInProgress = false;
+        if (!TryCompleteTurn())
+        {
+            return;
+        }
 
         if (e.Turn.Status == "interrupted")
         {
@@ -606,10 +700,31 @@ public sealed class CodexChatEngine : IErChatEngine
         }
     }
 
-    /// <summary>dynamicTool 呼び出しを UI スレッドで実行し、結果を返送する</summary>
+    /// <summary>dynamicTool 呼び出しを受信し、ツール実行から応答送信までを監視する</summary>
     private void OnDynamicToolCallReceived(object? sender, CodexDynamicToolCallRequest e)
     {
-        _ = ExecuteAndRespondAsync(e);
+        _ = ObserveToolCallAsync(e);
+    }
+
+    /// <summary>
+    /// ツール呼び出しの一連の処理（実行→活動通知→応答送信）を実行し、拾いきれなかった例外を
+    /// StatusChanged へ可視化する。受信ループをツール実行でブロックしないよう fire-and-forget のまま
+    /// 呼ぶため、ここで拾わないと例外（応答送信の失敗・ToolActivityReceived 購読側の例外等）が無音で消え、
+    /// AI 側はツール結果を待ち続けてターンが詰まる
+    /// </summary>
+    private async Task ObserveToolCallAsync(CodexDynamicToolCallRequest request)
+    {
+        try
+        {
+            await ExecuteAndRespondAsync(request).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            StatusChanged?.Invoke(
+                this,
+                string.Format(Strings.Codex_ToolResponseSendFailed, ex.Message)
+            );
+        }
     }
 
     /// <summary>ツールを実行し、活動を通知しつつ JSON-RPC レスポンスを返す</summary>
@@ -626,22 +741,31 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         else
         {
-            var argumentsJson = request.Arguments.GetRawText();
-            (resultText, success) = _dispatcher.Invoke(() =>
-                _toolHost.Execute(request.Tool, argumentsJson)
-            );
+            try
+            {
+                var argumentsJson = request.Arguments.GetRawText();
+                (resultText, success) = _dispatcher.Invoke(() =>
+                    _toolHost.Execute(request.Tool, argumentsJson)
+                );
+            }
+            catch (Exception ex)
+            {
+                // ツール結果は AI へ返る機械向け文言のため英語で固定する。
+                // 例外を無音で消さず、Claude Code / Copilot と同じ「失敗のツール結果」の形で
+                // 返すことで、AI にも成否が正しく伝わりターンが詰まらない（3 エンジンで形を揃える）
+                resultText = $"The tool '{request.Tool}' threw an exception: {ex.Message}";
+                success = false;
+            }
         }
 
-        ToolActivityReceived?.Invoke(
-            this,
-            new ErChatToolActivity(request.Tool, resultText, success)
-        );
-
+        // 活動通知は応答送信より先に呼ぶが、購読側（UI）の例外で応答送信まで巻き込まれると
+        // AI がツール結果を待ち続けてターンが詰まる。通知だけを try で囲み、応答送信は必ず行う
         try
         {
-            await _client
-                .RespondToDynamicToolCallAsync(request.RequestId, resultText, success)
-                .ConfigureAwait(false);
+            ToolActivityReceived?.Invoke(
+                this,
+                new ErChatToolActivity(request.Tool, resultText, success)
+            );
         }
         catch (Exception ex)
         {
@@ -650,6 +774,10 @@ public sealed class CodexChatEngine : IErChatEngine
                 string.Format(Strings.Codex_ToolResponseSendFailed, ex.Message)
             );
         }
+
+        await _client
+            .RespondToDynamicToolCallAsync(request.RequestId, resultText, success)
+            .ConfigureAwait(false);
     }
 
     /// <summary>承認要求を拒否で応答する（approvalPolicy=never の保険）</summary>
@@ -759,9 +887,8 @@ public sealed class CodexChatEngine : IErChatEngine
             message = msgElement.GetString() ?? message;
         }
 
-        if (_turnInProgress)
+        if (TryCompleteTurn())
         {
-            _turnInProgress = false;
             TurnCompleted?.Invoke(this, new ErChatTurnResult(false, message));
         }
         else
@@ -780,6 +907,7 @@ public sealed class CodexChatEngine : IErChatEngine
         _client.AccountUpdated -= OnAccountUpdated;
         _client.LoginCompleted -= OnLoginCompleted;
         _client.NotificationReceived -= OnNotificationReceived;
+        _client.Disconnected -= OnDisconnected;
         await _client.DisposeAsync().ConfigureAwait(false);
 
         // 子プロセスを止めてから作業フォルダを消す（掴まれたままだと削除できない）

@@ -108,9 +108,21 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
             }
         }
 
+        // 接続断はターン完了通知が二度と来ないことを意味するため、待機中の完了ソースを失敗で解く
+        // （知らせる経路が無いと、共有オーケストレーターの全体タイムアウトまで待たされる）
+        void OnDisconnected(object? sender, EventArgs e) =>
+            turnCompletion?.TrySetResult(
+                new MockProjectAgentOutcome(
+                    false,
+                    Strings.Mock_CodexDisconnected,
+                    NotLoggedIn: false
+                )
+            );
+
         _client.AgentMessageDeltaReceived += OnDelta;
         _client.ItemStarted += OnItemStarted;
         _client.TurnCompleted += OnTurnCompleted;
+        _client.Disconnected += OnDisconnected;
 
         // キャンセル（タイムアウト・中断）で実行中ターンを中断し、OperationCanceledException を伝播させる
         using var registration = cancellationToken.Register(() =>
@@ -204,6 +216,7 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
             _client.AgentMessageDeltaReceived -= OnDelta;
             _client.ItemStarted -= OnItemStarted;
             _client.TurnCompleted -= OnTurnCompleted;
+            _client.Disconnected -= OnDisconnected;
             _currentThreadId = null;
             _currentTurnId = null;
 

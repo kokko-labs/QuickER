@@ -394,10 +394,31 @@ public sealed class CopilotChatEngine : IErChatEngine
     private void OnAssistantDelta(object? sender, string delta) =>
         AssistantDeltaReceived?.Invoke(this, delta);
 
-    /// <summary>ツール呼び出し要求を UI スレッドで実行し、結果を返送する</summary>
+    /// <summary>ツール呼び出し要求を受信し、ツール実行から応答送信までを監視する</summary>
     private void OnToolCallRequested(object? sender, CopilotToolCallRequest request)
     {
-        _ = ExecuteAndRespondAsync(request);
+        _ = ObserveToolCallAsync(request);
+    }
+
+    /// <summary>
+    /// ツール呼び出しの一連の処理（実行→活動通知→応答送信）を実行し、拾いきれなかった例外を
+    /// StatusChanged へ可視化する。受信ループをツール実行でブロックしないよう fire-and-forget のまま
+    /// 呼ぶため、ここで拾わないと例外（応答送信の失敗・ToolActivityReceived 購読側の例外等）が無音で消え、
+    /// AI 側はツール結果を待ち続けてターンが詰まる
+    /// </summary>
+    private async Task ObserveToolCallAsync(CopilotToolCallRequest request)
+    {
+        try
+        {
+            await ExecuteAndRespondAsync(request).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            StatusChanged?.Invoke(
+                this,
+                string.Format(Strings.Copilot_ToolResponseSendFailed, ex.Message)
+            );
+        }
     }
 
     /// <summary>ツールを実行し、活動を通知しつつ結果を返す</summary>
@@ -415,21 +436,30 @@ public sealed class CopilotChatEngine : IErChatEngine
         }
         else
         {
-            (resultText, success) = _dispatcher.Invoke(() =>
-                _toolHost.Execute(request.ToolName, request.ArgumentsJson)
-            );
+            try
+            {
+                (resultText, success) = _dispatcher.Invoke(() =>
+                    _toolHost.Execute(request.ToolName, request.ArgumentsJson)
+                );
+            }
+            catch (Exception ex)
+            {
+                // ツール結果は AI へ返る機械向け文言のため英語で固定する。
+                // 例外を無音で消さず、Claude Code / Codex と同じ「失敗のツール結果」の形で
+                // 返すことで、AI にも成否が正しく伝わりターンが詰まらない（3 エンジンで形を揃える）
+                resultText = $"The tool '{request.ToolName}' threw an exception: {ex.Message}";
+                success = false;
+            }
         }
 
-        ToolActivityReceived?.Invoke(
-            this,
-            new ErChatToolActivity(request.ToolName, resultText, success)
-        );
-
+        // 活動通知は応答送信より先に呼ぶが、購読側（UI）の例外で応答送信まで巻き込まれると
+        // AI がツール結果を待ち続けてターンが詰まる。通知だけを try で囲み、応答送信は必ず行う
         try
         {
-            await _client
-                .RespondToToolCallAsync(request.RequestId, resultText, success)
-                .ConfigureAwait(false);
+            ToolActivityReceived?.Invoke(
+                this,
+                new ErChatToolActivity(request.ToolName, resultText, success)
+            );
         }
         catch (Exception ex)
         {
@@ -438,6 +468,10 @@ public sealed class CopilotChatEngine : IErChatEngine
                 string.Format(Strings.Copilot_ToolResponseSendFailed, ex.Message)
             );
         }
+
+        await _client
+            .RespondToToolCallAsync(request.RequestId, resultText, success)
+            .ConfigureAwait(false);
     }
 
     /// <summary>アイドル復帰をターン完了へ変換する（ターン外のアイドルは無視する）</summary>

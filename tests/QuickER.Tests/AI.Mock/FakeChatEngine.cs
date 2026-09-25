@@ -90,5 +90,12 @@ internal sealed class FakeChatEngine : IErChatEngine
 
     public Task InterruptAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    /// <summary>DisposeAsync が呼ばれた回数（アプリ終了時のエンジン破棄の検証用）</summary>
+    public int DisposeCount { get; private set; }
+
+    public ValueTask DisposeAsync()
+    {
+        DisposeCount++;
+        return ValueTask.CompletedTask;
+    }
 }

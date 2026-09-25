@@ -145,11 +145,17 @@
   <data name="Chat_ConversationStarted" xml:space="preserve">
     <value>Conversation started. Talk to me about the ER diagram.</value>
   </data>
+  <data name="Chat_AttachmentsDroppedOnProviderSwitch" xml:space="preserve">
+    <value>Some attachments in this conversation (such as PDFs) are not supported by the selected provider and will not be resent.</value>
+  </data>
   <data name="Chat_SwitchBackendConfirm" xml:space="preserve">
     <value>Clear the current conversation and switch the connection method?</value>
   </data>
   <data name="Chat_SwitchBackendConfirmTitle" xml:space="preserve">
     <value>Clear Conversation</value>
+  </data>
+  <data name="Chat_SwitchBackendBlockedDuringTurn" xml:space="preserve">
+    <value>The connection method cannot be switched while a response is in progress. Interrupt the response first.</value>
   </data>
   <data name="Chat_SendFailedFormat" xml:space="preserve">
     <value>Failed to send: {0}</value>

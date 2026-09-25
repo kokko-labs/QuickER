@@ -6,6 +6,21 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+#### AI chat & mock generation
+
+- **Interrupting an AI chat response during a tool call no longer breaks the conversation** — with the API key method, an interrupted tool call left the history inconsistent and every later message failed until "New conversation". The calls that did not run are now recorded in the history as interrupted, so the AI also knows which of its changes reached the diagram
+- **The connection tabs, the API key connection settings and "New conversation" are disabled while a response is in progress** — switching tabs mid-response left the window unable to send anything, while the old response kept editing the diagram, and changing the provider, model, API key or endpoint took effect on the running response. Interrupt the response first; the "Interrupt" button stays available
+- **A Codex crash or an unanswered interrupt no longer leaves the chat stuck as processing** — when the Codex App Server exits or its connection is lost, the turn now fails with a message, and when an interrupt request goes unanswered or fails, the server is stopped by force. Both lose the conversation context, which the message states, and the next message starts a new conversation. Mock project generation on Codex now also fails right away instead of waiting out its 30-minute limit
+- **A hand-edited `mock.json` with an invalid screen file name no longer ends the application** — opening such a mock folder is now refused as corrupted, and a failure while producing the single-HTML bundle or the design document is reported in the status bar instead
+- **A runaway AI chat response now stops at 50 tool round trips** — with the API key method, a response that kept calling tools could only be stopped by hand; a response that reaches the limit now ends as a failed turn with a message
+- **A tool that throws no longer leaves a Codex, Claude Code or Copilot response waiting forever** — the error now goes back to the AI as a failed tool result, and a tool response that cannot be delivered is reported in the status bar
+- **The mock design document now survives awkward names** — a screen name containing a line break no longer breaks its heading, entity names differing only in case now share one CRUD column, and a screen file name containing parentheses no longer breaks its link
+- **Switching the API provider mid-conversation now announces attachments that would be dropped** — when the history holds an attachment kind the newly selected provider cannot resend (such as a PDF on OpenAI), the chat says so instead of dropping it silently
+- **Closing the application now shuts down the AI back ends** — the Codex App Server, the Copilot runtime and a running Claude Code process are disposed on exit, with a three-second cap so a hung shutdown cannot stall the application
+- **Interrupting Codex just as a turn starts is now reported as an interruption, not an error**
+
 ## [0.2.0] - 2026-09-24
 
 Highlights of this release:

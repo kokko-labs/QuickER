@@ -139,6 +139,9 @@
   <data name="Chat_Generating" xml:space="preserve">
     <value>生成中...</value>
   </data>
+  <data name="Chat_ToolLoopLimitReached" xml:space="preserve">
+    <value>1 回の応答でのツール実行の往復が上限（{0} 回）に達したため、応答を打ち切りました。</value>
+  </data>
   <data name="ClaudeCode_Guidance_Pending" xml:space="preserve">
     <value>「再確認」を押すとログイン状態を確認できます。</value>
   </data>
@@ -199,6 +202,9 @@
   <data name="ClaudeCode_ExitedWithError" xml:space="preserve">
     <value>Claude Code がエラー終了しました（終了コード: {0}）。</value>
   </data>
+  <data name="ClaudeCode_ToolActivityNotifyFailed" xml:space="preserve">
+    <value>ツール活動の通知に失敗しました: {0}</value>
+  </data>
   <data name="Codex_NotConnected" xml:space="preserve">
     <value>未接続</value>
   </data>
@@ -258,6 +264,12 @@
   </data>
   <data name="Codex_InterruptFailed" xml:space="preserve">
     <value>処理の中断に失敗しました: {0}</value>
+  </data>
+  <data name="Codex_InterruptForcedStop" xml:space="preserve">
+    <value>中断要求に失敗したため、Codex App Server を停止しました。会話の文脈は失われ、次の送信からは新しい会話になります。</value>
+  </data>
+  <data name="Codex_Disconnected" xml:space="preserve">
+    <value>Codex App Server との接続が失われました。会話の文脈は失われ、次の送信からは新しい会話になります。</value>
   </data>
   <data name="Codex_ToolResponseSendFailed" xml:space="preserve">
     <value>ツールレスポンスの送信に失敗しました: {0}</value>

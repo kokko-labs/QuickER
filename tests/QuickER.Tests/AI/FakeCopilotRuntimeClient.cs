@@ -45,11 +45,17 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     /// <summary>返送したツール結果の記録</summary>
     public List<(string RequestId, string Result, bool Success)> ToolResponses { get; } = new();
 
+    /// <summary>RespondToToolCallAsync が投げる例外（非 null なら応答送信の失敗を模擬する）</summary>
+    public Exception? RespondToolException { get; set; }
+
     /// <summary>中断要求の回数</summary>
     public int AbortCallCount { get; private set; }
 
     /// <summary>破棄済みか</summary>
     public bool Disposed { get; private set; }
+
+    /// <summary>DisposeAsync が呼ばれた回数（アプリ終了時のエンジン破棄の検証用）</summary>
+    public int DisposeCount { get; private set; }
 
     /// <inheritdoc />
     public bool IsStarted { get; private set; }
@@ -154,6 +160,12 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     )
     {
         ToolResponses.Add((requestId, result, success));
+
+        if (RespondToolException is not null)
+        {
+            throw RespondToolException;
+        }
+
         return Task.CompletedTask;
     }
 
@@ -185,6 +197,7 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     public ValueTask DisposeAsync()
     {
         Disposed = true;
+        DisposeCount++;
         IsStarted = false;
         HasSession = false;
         return ValueTask.CompletedTask;

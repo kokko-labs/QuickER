@@ -247,12 +247,15 @@ public static class MockDesignDocExporter
     /// <remarks>
     /// 宣言（<see cref="MockScreen.Entities"/>）が 1 件も無ければセクションごと省略する
     /// （既存フォルダの設計書に空表を出さない）。宣言のない画面も空セル行として出し、未宣言が見えるようにする。
+    /// 列の同定は <see cref="MockScreenEntity.Name"/> の XmlDoc（ER 図のテーブル名と大文字小文字無視で照合）に
+    /// 合わせ大文字小文字を無視する（綴り違いの宣言が別列へ分裂しない）。見出しに出す綴りは初出のものを使う。
     /// </remarks>
     private static void AppendCrudTable(StringBuilder sb, IReadOnlyList<MockScreen> screens)
     {
         // 列見出し＝宣言されたエンティティ名。マニフェスト順に画面を走査した初出順で決定的に並べる
+        // （大文字小文字無視＝綴り違いの宣言は同じ列へまとめ、見出しは初出の綴りのまま残す）
         var columns = new List<string>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var screen in screens)
         {
@@ -316,7 +319,10 @@ public static class MockDesignDocExporter
         }
     }
 
-    /// <summary>画面の指定エンティティ列に対する正規化済み操作文字列を返す（該当宣言が無ければ空文字）</summary>
+    /// <summary>
+    /// 画面の指定エンティティ列に対する正規化済み操作文字列を返す（該当宣言が無ければ空文字）。
+    /// 照合は列の同定と同じく大文字小文字無視（<see cref="AppendCrudTable"/> 参照）。
+    /// </summary>
     private static string FindEntityOperations(MockScreen screen, string entityName)
     {
         if (screen.Entities is null)
@@ -328,7 +334,7 @@ public static class MockDesignDocExporter
         {
             if (
                 entity is not null
-                && string.Equals(entity.Name, entityName, StringComparison.Ordinal)
+                && string.Equals(entity.Name, entityName, StringComparison.OrdinalIgnoreCase)
             )
             {
                 return entity.Operations ?? string.Empty;
@@ -348,7 +354,7 @@ public static class MockDesignDocExporter
     )
     {
         sb.Append('\n');
-        sb.Append("## ").Append(ScreenDisplayName(screen)).Append('\n');
+        sb.Append("## ").Append(FoldNewlines(ScreenDisplayName(screen))).Append('\n');
 
         // 説明（段落。表セルではないためエスケープ不要）
         if (!string.IsNullOrWhiteSpace(screen.Description))
@@ -897,12 +903,21 @@ public static class MockDesignDocExporter
     private static string ScreenDisplayName(MockScreen screen) =>
         string.IsNullOrWhiteSpace(screen.Name) ? screen.File : screen.Name.Trim();
 
-    /// <summary>画面へのフォルダ内相対リンク <c>[表示名](ファイル名)</c> を組み立てる</summary>
+    /// <summary>
+    /// 画面へのフォルダ内相対リンク <c>[表示名](&lt;ファイル名&gt;)</c> を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// リンク先は常に山括弧（<c>&lt;…&gt;</c>）で包む。ファイル名が <c>(</c> <c>)</c> を含むと素の
+    /// <c>](file)</c> 形式では Markdown リンクの区切りと誤認されるが、山括弧形式は括弧を含むパスを丸ごと
+    /// 1 つの宛先として読む。<c>&lt;</c> <c>&gt;</c> 自体は Windows のファイル名に使えない文字（
+    /// <see cref="MockFolderStore"/> の画面ファイル名検証が拒否する）なので、山括弧が画面ファイル名そのものと
+    /// 衝突することはない。
+    /// </remarks>
     private static string ScreenLink(MockScreen screen)
     {
         var text = EscapeLinkText(ScreenDisplayName(screen));
 
-        return "[" + text + "](" + screen.File + ")";
+        return "[" + text + "](<" + screen.File + ">)";
     }
 
     /// <summary>HTML 断片をプレーンテキスト化する（タグ除去・エンティティのデコード・空白正規化）</summary>
@@ -928,6 +943,12 @@ public static class MockDesignDocExporter
     /// &amp;nbsp; は U+00A0 になるが、後段の空白正規化（\s+）が通常スペースへ畳む）。
     /// </summary>
     private static string DecodeEntities(string value) => System.Net.WebUtility.HtmlDecode(value);
+
+    /// <summary>
+    /// 見出し等の 1 行テキスト向けに改行を空白 1 つへ畳む（<see cref="string.ReplaceLineEndings(string)"/> が
+    /// 改行と見なす CRLF / CR / LF / NEL / LS / PS / VT / FF の全てが対象。畳まないと Markdown 見出しの行が割れる）。
+    /// </summary>
+    private static string FoldNewlines(string value) => value.ReplaceLineEndings(" ").Trim();
 
     /// <summary>Markdown 表セル向けのエスケープ（改行を空白へ・パイプをエスケープ）</summary>
     private static string EscapeCell(string value)

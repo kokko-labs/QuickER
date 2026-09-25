@@ -18,6 +18,7 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     public event EventHandler<CodexItemStartedNotification>? ItemStarted;
     public event EventHandler<CodexItemCompletedNotification>? ItemCompleted;
     public event EventHandler<CodexApprovalRequest>? ApprovalRequested;
+    public event EventHandler? Disconnected;
 
     public bool IsStarted { get; private set; }
 
@@ -26,6 +27,18 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     /// <summary>StartAsync が呼ばれた回数（未検出時にプロセス起動を試みないことの検証用）</summary>
     public int StartCount { get; private set; }
+
+    /// <summary>StopAsync が呼ばれた回数（中断失敗時の強制停止の検証用）</summary>
+    public int StopCount { get; private set; }
+
+    /// <summary>StopAsync で投げる例外（非 null なら停止そのものの失敗を模擬する）</summary>
+    public Exception? StopException { get; set; }
+
+    /// <summary>InterruptTurnAsync で投げる例外（非 null なら中断要求の失敗を模擬する）</summary>
+    public Exception? InterruptException { get; set; }
+
+    /// <summary>StartThreadAsync が呼ばれた回数（接続断後に新しいスレッドを開き直すことの検証用）</summary>
+    public int StartThreadCount { get; private set; }
 
     public CodexAccountInfo NextAccountInfo { get; set; } = new();
 
@@ -38,6 +51,9 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     /// <summary>StartTurnAsync が呼ばれた回数（ナッジによる追加ターンの検証用）</summary>
     public int StartTurnCount { get; private set; }
+
+    /// <summary>StartTurnAsync で投げる例外（非 null ならターン送信そのものの失敗を模擬する）</summary>
+    public Exception? StartTurnException { get; set; }
 
     /// <summary>
     /// 非空なら StartTurnAsync がターン開始と同時に completed/failed 通知を自動発火する（先頭から 1 件ずつ消費）。
@@ -56,6 +72,12 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     public int RespondToolCount { get; private set; }
 
     public string? LastToolResult { get; private set; }
+
+    /// <summary>直近の RespondToDynamicToolCallAsync に渡された成否</summary>
+    public bool LastToolSuccess { get; private set; }
+
+    /// <summary>RespondToDynamicToolCallAsync が投げる例外（非 null なら応答送信の失敗を模擬する）</summary>
+    public Exception? RespondToolException { get; set; }
 
     public int InterruptTurnCount { get; private set; }
 
@@ -84,6 +106,20 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         }
 
         IsStarted = true;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>実クライアントと同じく「再接続できる停止」を模擬する（接続断イベントは出さない）</summary>
+    public Task StopAsync()
+    {
+        StopCount++;
+
+        if (StopException is not null)
+        {
+            throw StopException;
+        }
+
+        IsStarted = false;
         return Task.CompletedTask;
     }
 
@@ -129,6 +165,7 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     )
     {
         LastThreadStartOptions = options;
+        StartThreadCount++;
         return Task.FromResult(new CodexThreadInfo { Id = "thr_test", Preview = string.Empty });
     }
 
@@ -141,6 +178,11 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         LastTurnPrompt = prompt;
         TurnPrompts.Add(prompt);
         StartTurnCount++;
+
+        if (StartTurnException is not null)
+        {
+            throw StartTurnException;
+        }
 
         var info = new CodexTurnInfo { Id = "turn_test", Status = "inProgress" };
 
@@ -163,6 +205,12 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         InterruptTurnCount++;
         LastInterruptThreadId = threadId;
         LastInterruptTurnId = turnId;
+
+        if (InterruptException is not null)
+        {
+            throw InterruptException;
+        }
+
         return Task.CompletedTask;
     }
 
@@ -175,6 +223,13 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     {
         RespondToolCount++;
         LastToolResult = resultText;
+        LastToolSuccess = success;
+
+        if (RespondToolException is not null)
+        {
+            throw RespondToolException;
+        }
+
         return Task.CompletedTask;
     }
 
@@ -201,7 +256,21 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         return Task.CompletedTask;
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    /// <summary>DisposeAsync が呼ばれた回数（アプリ終了時のエンジン破棄の検証用）</summary>
+    public int DisposeCount { get; private set; }
+
+    /// <summary>非 null なら DisposeAsync がこのタスクの完了まで戻らない（破棄のハングを模擬する）</summary>
+    public Task? DisposeGate { get; set; }
+
+    public async ValueTask DisposeAsync()
+    {
+        DisposeCount++;
+
+        if (DisposeGate is not null)
+        {
+            await DisposeGate.ConfigureAwait(false);
+        }
+    }
 
     // ── テストからイベントを発火させるためのヘルパー ──
 
@@ -249,4 +318,7 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     public void RaiseApprovalRequested(CodexApprovalRequest request) =>
         ApprovalRequested?.Invoke(this, request);
+
+    /// <summary>予期しない接続断（プロセス死・stdout の EOF）を模擬する</summary>
+    public void RaiseDisconnected() => Disconnected?.Invoke(this, EventArgs.Empty);
 }

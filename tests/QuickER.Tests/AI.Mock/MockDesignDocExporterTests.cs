@@ -93,8 +93,8 @@ public class MockDesignDocExporterTests : IDisposable
         // 画面一覧（見出し＋リンク付きの表）
         doc.Should().Contain("## " + Strings.MockDoc_ScreenListHeading);
         doc.Should().Contain($"| {Strings.MockDoc_ColScreen} | {Strings.MockDoc_ColDescription} |");
-        doc.Should().Contain("| [注文一覧](OrderList.html) | 注文の一覧を表示する画面 |");
-        doc.Should().Contain("| [注文詳細](OrderDetail.html) |  |");
+        doc.Should().Contain("| [注文一覧](<OrderList.html>) | 注文の一覧を表示する画面 |");
+        doc.Should().Contain("| [注文詳細](<OrderDetail.html>) |  |");
 
         // 遷移図（mermaid・全画面ノード＋トリガー付きエッジ）
         doc.Should().Contain("## " + Strings.MockDoc_TransitionDiagramHeading);
@@ -111,9 +111,9 @@ public class MockDesignDocExporterTests : IDisposable
         // 括弧書式は UI 言語追従（resx）なので、期待値も同じ書式で組み立てる
         var trigger = string.Format(Strings.MockDoc_TriggerFormat, "行クリック");
         doc.Should()
-            .Contain($"- {Strings.MockDoc_TransitionTo}: [注文詳細](OrderDetail.html){trigger}");
+            .Contain($"- {Strings.MockDoc_TransitionTo}: [注文詳細](<OrderDetail.html>){trigger}");
         doc.Should()
-            .Contain($"- {Strings.MockDoc_TransitionFrom}: [注文一覧](OrderList.html){trigger}");
+            .Contain($"- {Strings.MockDoc_TransitionFrom}: [注文一覧](<OrderList.html>){trigger}");
     }
 
     [Fact(DisplayName = "同じ入力からは 2 回とも同一の Markdown を返す（決定的）")]
@@ -418,11 +418,11 @@ public class MockDesignDocExporterTests : IDisposable
             .And.Contain("| --- | --- | --- |");
 
         // 宣言画面のセル値（操作は正規化済み＝urc→CRU）
-        doc.Should().Contain("| [注文一覧](OrderList.html) | R |  |");
-        doc.Should().Contain("| [注文詳細](OrderDetail.html) | CRU | R |");
+        doc.Should().Contain("| [注文一覧](<OrderList.html>) | R |  |");
+        doc.Should().Contain("| [注文詳細](<OrderDetail.html>) | CRU | R |");
 
         // 未宣言画面は空セル行として現れる（未宣言が見える）
-        doc.Should().Contain("| [ヘルプ](Help.html) |  |  |");
+        doc.Should().Contain("| [ヘルプ](<Help.html>) |  |  |");
 
         // 位置: 遷移図の後・最初の画面セクション（## 注文一覧）の前
         var crudIndex = doc.IndexOf("## " + Strings.MockDoc_CrudHeading, StringComparison.Ordinal);
@@ -471,6 +471,95 @@ public class MockDesignDocExporterTests : IDisposable
         doc.Should().NotContain("## " + Strings.MockDoc_CrudHeading);
     }
 
+    [Fact(DisplayName = "画面名に改行が含まれても見出し行は1行に収まる")]
+    public void Export_FoldsNewlinesInScreenHeading()
+    {
+        var store = MockFolderStore.CreateNew(_folder, "t", "s");
+        store.SaveStylesheet("body{}", "css");
+        store.SaveScreen(
+            "A.html",
+            "注文\n一覧",
+            "",
+            Screen("<h1>a</h1>"),
+            Array.Empty<MockTransition>(),
+            "v1"
+        );
+
+        var doc = MockDesignDocExporter.Export(store);
+
+        // 改行が空白 1 つへ畳まれ、見出し行は 1 行に収まる（"## " で始まる行として現れる）
+        doc.Should().NotContain("注文\n一覧");
+        doc.Should().Contain("## 注文 一覧\n");
+    }
+
+    [Fact(
+        DisplayName = "エンティティ名は大文字小文字無視で同一列にまとめられ、見出しは初出の綴りを使う"
+    )]
+    public void Export_CrudTable_MergesEntityNamesCaseInsensitively()
+    {
+        var store = MockFolderStore.CreateNew(_folder, "t", "s");
+        store.SaveStylesheet("body{}", "css");
+
+        // 1 画面目が "Customer" を初出宣言し、2 画面目が綴り違いの "customer" を宣言する
+        store.SaveScreen(
+            "A.html",
+            "A",
+            "",
+            Screen("<h1>a</h1>"),
+            Array.Empty<MockTransition>(),
+            "v1",
+            entities: new[]
+            {
+                new MockScreenEntity { Name = "Customer", Operations = "R" },
+            }
+        );
+        store.SaveScreen(
+            "B.html",
+            "B",
+            "",
+            Screen("<h1>b</h1>"),
+            Array.Empty<MockTransition>(),
+            "v2",
+            entities: new[]
+            {
+                new MockScreenEntity { Name = "customer", Operations = "CRU" },
+            }
+        );
+
+        var doc = MockDesignDocExporter.Export(store);
+
+        // 列は 1 本にまとまり、見出しは初出の綴り "Customer"
+        doc.Should()
+            .Contain($"| {Strings.MockDoc_ColScreen} | Customer |")
+            .And.Contain("| --- | --- |");
+        doc.Should().NotContain("| customer |");
+
+        // 両画面のセルが同じ列に入る
+        doc.Should().Contain("| [A](<A.html>) | R |");
+        doc.Should().Contain("| [B](<B.html>) | CRU |");
+    }
+
+    [Fact(DisplayName = "ファイル名に括弧を含む画面へのリンクは山括弧形式になる")]
+    public void Export_ScreenLink_WrapsParenthesizedFileNameInAngleBrackets()
+    {
+        var store = MockFolderStore.CreateNew(_folder, "t", "s");
+        store.SaveStylesheet("body{}", "css");
+        store.SaveScreen(
+            "Order (v2).html",
+            "注文(v2)",
+            "",
+            Screen("<h1>a</h1>"),
+            Array.Empty<MockTransition>(),
+            "v1"
+        );
+
+        var doc = MockDesignDocExporter.Export(store);
+
+        // リンク先は <...> で包まれ、括弧が Markdown リンクの区切りと誤認されない
+        doc.Should().Contain("[注文(v2)](<Order (v2).html>)");
+        doc.Should().NotContain("](Order (v2).html)");
+    }
+
     [Fact(DisplayName = "説明に含まれるパイプは表セルでエスケープされる")]
     public void Export_EscapesPipeInDescriptionCell()
     {
@@ -488,6 +577,6 @@ public class MockDesignDocExporterTests : IDisposable
         var doc = MockDesignDocExporter.Export(store);
 
         // 画面一覧の説明セルでパイプがエスケープされる
-        doc.Should().Contain("| [A](A.html) | 一覧 \\| 詳細 |");
+        doc.Should().Contain("| [A](<A.html>) | 一覧 \\| 詳細 |");
     }
 }

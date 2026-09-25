@@ -84,6 +84,24 @@ public sealed class ChatTurnEngine : IErChatEngine
     private readonly List<ChatHistoryItem> _history = new();
     private CancellationTokenSource? _turnCts;
 
+    /// <summary>
+    /// 1 ターン（<see cref="SendAsync(string, CancellationToken)"/> 1 回）内で許容するツール往復回数の上限。
+    /// 1 往復（LLM 呼び出し 1 回）には複数のツール呼び出しが載り得るため、大きめの図の一括作成のような
+    /// 正当な利用でも実際の往復数は数十回以内に収まる。上限の目的は進展のない繰り返し（暴走）の打ち切りで、
+    /// 正当な利用を妨げないだけの大きさとして 50 とする。
+    /// </summary>
+    internal const int MaxToolRoundTripsPerTurn = 50;
+
+    /// <summary>
+    /// 中断・例外で未実行に終わったツール呼び出しへ補う合成結果の文言。
+    /// 中断とツール実行の例外のどちらでも使うため「実行されなかった」事実だけを述べる中立な表現にする
+    /// （AI がそのツールを再実行してよいかを判断する材料になるので、失敗と読める語を避ける）。
+    /// ツール結果として AI（LLM API）へそのまま返る機械向け文言のため、UI 言語に関わらず英語固定とする
+    /// （CodexChatEngine 等の同種の機械向けリテラルと同じ流儀）。
+    /// </summary>
+    private const string UnexecutedToolResultText =
+        "The tool call was not executed because the turn was aborted before it ran.";
+
     /// <inheritdoc />
     public event EventHandler<string>? AssistantDeltaReceived;
 
@@ -128,6 +146,20 @@ public sealed class ChatTurnEngine : IErChatEngine
 
     /// <inheritdoc />
     public AttachmentSupport AttachmentSupport => _attachmentSupport();
+
+    /// <summary>
+    /// これまでの会話履歴（User 項目）に、指定した対応範囲では扱えない添付が 1 件でも含まれるか。
+    /// API キー接続はステートレスで毎ターン全履歴を再送するため、プロバイダー切替後に再送すると
+    /// 対応範囲外の添付（例：Claude で送った PDF を OpenAI へ切替後）が黙って落ちる。
+    /// 呼び出し側（<see cref="AiChatDialogViewModel"/>）はこれを使って切替時に告知するかを判定する。
+    /// </summary>
+    /// <param name="support">切替先の添付対応範囲</param>
+    public bool HistoryHasAttachmentsBeyond(AttachmentSupport support) =>
+        _history.Any(item =>
+            item.Role == ChatHistoryRole.User
+            && item.Attachments is { Count: > 0 } attachments
+            && attachments.Any(a => !support.Allows(a.Kind))
+        );
 
     /// <inheritdoc />
     public Task InitializeAsync(CancellationToken cancellationToken = default) =>
@@ -220,12 +252,35 @@ public sealed class ChatTurnEngine : IErChatEngine
         return attachments.FirstOrDefault(a => !support.Allows(a.Kind));
     }
 
-    /// <summary>応答→ツール実行→再送信のループを、ツール要求が無くなるまで回す</summary>
+    /// <summary>
+    /// 応答→ツール実行→再送信のループを、ツール要求が無くなるまで回す。
+    /// 中断（<see cref="InterruptAsync"/>）や個々のツール実行の例外で途中終了した場合は、
+    /// 直前に積んだ Assistant 項目の ToolCalls のうち未実行の呼び出しへ合成 Tool 項目を補い、
+    /// 履歴の tool_use↔tool 結果対応を保ってから例外を再送出する
+    /// （API キー接続はステートレスで毎ターン全履歴を再送するため、対応が崩れると
+    /// 以後の送信が LLM API の構造検証で失敗し続け「新しい会話」まで回復しない）。
+    /// 往復数が <see cref="MaxToolRoundTripsPerTurn"/> を超えると、暴走（進展のない繰り返し）とみなして
+    /// 打ち切る。
+    /// </summary>
     private async Task RunAgenticLoopAsync(CancellationToken token)
     {
+        var roundTrips = 0;
+
         while (true)
         {
             token.ThrowIfCancellationRequested();
+
+            // 上限判定はドライバ呼び出しの「前」（＝次の往復を駆動する前）に行う。
+            // こうすると打ち切り時点の履歴は常に「直前の tool_use すべてに tool 結果が揃った」整合状態になり、
+            // 未実行呼び出しへの合成補完（中断・例外用の経路）を通らずに済む。
+            roundTrips++;
+
+            if (roundTrips > MaxToolRoundTripsPerTurn)
+            {
+                throw new InvalidOperationException(
+                    string.Format(Strings.Chat_ToolLoopLimitReached, MaxToolRoundTripsPerTurn)
+                );
+            }
 
             var turn = await _driver
                 .RunAsync(_history, delta => AssistantDeltaReceived?.Invoke(this, delta), token)
@@ -237,21 +292,52 @@ public sealed class ChatTurnEngine : IErChatEngine
                 return;
             }
 
-            foreach (var call in turn.ToolCalls)
-            {
-                token.ThrowIfCancellationRequested();
+            var executedCallIds = new HashSet<string>();
 
-                // ER 図操作（ObservableCollection 変更）は UI スレッドで実行する
-                var (result, success) = _dispatcher.Invoke(() =>
-                    _toolHost.Execute(call.Name, call.ArgumentsJson)
-                );
-                ToolActivityReceived?.Invoke(
-                    this,
-                    new ErChatToolActivity(call.Name, result, success)
-                );
-                _history.Add(
-                    new ChatHistoryItem(ChatHistoryRole.Tool, result, ToolCallId: call.Id)
-                );
+            try
+            {
+                foreach (var call in turn.ToolCalls)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    // ER 図操作（ObservableCollection 変更）は UI スレッドで実行する
+                    var (result, success) = _dispatcher.Invoke(() =>
+                        _toolHost.Execute(call.Name, call.ArgumentsJson)
+                    );
+                    ToolActivityReceived?.Invoke(
+                        this,
+                        new ErChatToolActivity(call.Name, result, success)
+                    );
+                    _history.Add(
+                        new ChatHistoryItem(ChatHistoryRole.Tool, result, ToolCallId: call.Id)
+                    );
+
+                    // 「実行済み」の記録は実結果を履歴へ積んだ後に行う（間の通知購読側が例外を投げても、
+                    // 実行済み扱いのまま tool 結果だけが欠ける形にしない）
+                    executedCallIds.Add(call.Id);
+                }
+            }
+            catch
+            {
+                // 未実行分は「実行していない」ことを AI が正しく認識できるよう合成結果で埋める。
+                // 実行済みのツール活動として ToolActivityReceived は発火しない（UI 上のツール活動表示は実行結果専用のため）
+                foreach (var call in turn.ToolCalls)
+                {
+                    if (executedCallIds.Contains(call.Id))
+                    {
+                        continue;
+                    }
+
+                    _history.Add(
+                        new ChatHistoryItem(
+                            ChatHistoryRole.Tool,
+                            UnexecutedToolResultText,
+                            ToolCallId: call.Id
+                        )
+                    );
+                }
+
+                throw;
             }
         }
     }

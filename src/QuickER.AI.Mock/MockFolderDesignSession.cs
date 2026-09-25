@@ -35,7 +35,7 @@ public sealed record MockStylesheetSavedEventArgs(
 /// エンジン生成はアプリ側の責務とし、本クラスは会話制御とツール実行に専念する。
 /// フォルダ（<see cref="MockFolderStore"/>）は呼び出し側（VM）が CreateNew / Open 済みのものを渡す。
 /// </remarks>
-public sealed class MockFolderDesignSession : IErDiagramToolHost
+public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposable
 {
     /// <summary>壊れたエンティティ宣言（名前が空）を読み飛ばした旨の警告（英語・機械検証と同列）</summary>
     private const string EntityNameEmptyWarning =
@@ -241,6 +241,13 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost
     /// <summary>実行中のターンを中断する</summary>
     public Task InterruptAsync(CancellationToken cancellationToken = default) =>
         _engine.InterruptAsync(cancellationToken);
+
+    /// <summary>このセッションが抱えるエンジンを破棄する（CLI バックエンドの常駐子プロセスを止める）</summary>
+    /// <remarks>
+    /// <see cref="InterruptAsync"/> が止められるのは実行中のターンだけで、ターンを実行していない
+    /// 常駐プロセス（codex app-server・copilot ランタイム）はエンジンの破棄でしか止まらない。
+    /// </remarks>
+    public ValueTask DisposeAsync() => _engine.DisposeAsync();
 
     /// <summary>ツール実行。4 ツール（save_screen / remove_screen / save_stylesheet / get_screen）を振り分ける</summary>
     public (string Result, bool Success) Execute(string toolName, string argumentsJson)

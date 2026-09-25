@@ -10,6 +10,10 @@ namespace QuickER.AI.Mock;
 /// 各画面の <c>&lt;body&gt;</c> 内容を <c>&lt;section data-screen="…"&gt;</c> として連結し、共有 CSS を
 /// <c>&lt;style&gt;</c> へインライン化する。相対リンク <c>href="Foo.html"</c> は <c>href="#Foo"</c> へ書き換え、
 /// <c>location.hash</c> で表示画面を切り替える小さな JS を埋め込む。完全な HTML パースは行わない（best effort）。
+/// 既知の制限: 画面 body 内に対応の取れていない生の <c>&lt;/section&gt;</c> があると、その画面用に開いた
+/// ラッパー <c>&lt;section data-screen&gt;</c> がそこで閉じてしまい、後続の内容が現在の表示画面の外（全画面共通）へ
+/// 漏れて表示される（結合後の見た目が乱れるだけで、script の実行範囲は変わらない＝結合後の script は元から
+/// 常に文書全体で実行される）。
 /// </remarks>
 public static class MockBundleExporter
 {

@@ -74,6 +74,66 @@ public class CodexChatEngineTests
     }
 
     /// <summary>
+    /// ツールホストが例外を投げても、失敗のツール結果として応答されターンが詰まらないことを検証する
+    /// （素通しすると fire-and-forget のタスク内で例外が消え、AI 側は結果を待ち続ける）。
+    /// </summary>
+    [Fact(DisplayName = "Codex のツール実行の例外は失敗結果として応答されターンが詰まらない")]
+    public void DynamicToolCall_ToolHostThrows_RespondsWithFailureResult()
+    {
+        var client = new FakeCodexAppServerClient();
+        var host = new ThrowingToolHost { Exception = new InvalidOperationException("boom") };
+        var engine = new CodexChatEngine(
+            client,
+            host,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var activities = new List<ErChatToolActivity>();
+        engine.ToolActivityReceived += (_, a) => activities.Add(a);
+
+        client.RaiseDynamicToolCall(BuildToolCall("add_entity", "{\"table_name\":\"Book\"}"));
+
+        activities.Should().ContainSingle();
+        activities[0].Success.Should().BeFalse();
+        activities[0].Result.Should().Contain("boom");
+        client.RespondToolCount.Should().Be(1);
+        client.LastToolSuccess.Should().BeFalse();
+        client.LastToolResult.Should().Contain("boom");
+    }
+
+    /// <summary>ツール応答の送信に失敗した場合、その旨が StatusChanged で可視化されることを検証する</summary>
+    [Fact(DisplayName = "Codex のツール応答の送信失敗はステータスへ可視化される")]
+    public void DynamicToolCall_RespondFails_ReportsStatus()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            RespondToolException = new InvalidOperationException("接続が切れました"),
+        };
+        var host = new RecordingToolHost();
+        var engine = new CodexChatEngine(
+            client,
+            host,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var statuses = new List<string>();
+        engine.StatusChanged += (_, m) => statuses.Add(m);
+
+        client.RaiseDynamicToolCall(BuildToolCall("add_entity", "{\"table_name\":\"Book\"}"));
+
+        statuses
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(
+                string.Format(
+                    QuickER.AI.Resources.Strings.Codex_ToolResponseSendFailed,
+                    "接続が切れました"
+                )
+            );
+    }
+
+    /// <summary>
     /// commandExecution / fileChange の承認要求は decision:"decline" で拒否され、その旨が活動として
     /// 可視化されることを検証する。ER 図の操作は dynamicTools 経路のため、自動承認する必要はない。
     /// </summary>
@@ -149,12 +209,15 @@ public class CodexChatEngineTests
         activity.Result.Should().Be(QuickER.AI.Resources.Strings.Codex_ApprovalDeclined);
     }
 
-    /// <summary>ターン完了通知が成否に応じた共通イベントへ変換されることを検証する</summary>
+    /// <summary>
+    /// エンジンが開始したターンの完了通知が、成否に応じた共通イベントへ変換されることを検証する
+    /// （エンジンが開始していないターンの完了通知は転送されない＝二重通知防止のゲートが前提）。
+    /// </summary>
     [Theory(DisplayName = "Codex のターン完了は成否に応じた結果へ変換される")]
     [InlineData("completed", true)]
     [InlineData("interrupted", false)]
     [InlineData("failed", false)]
-    public void TurnCompleted_IsTranslatedByStatus(string status, bool expectedSuccess)
+    public async Task TurnCompleted_IsTranslatedByStatus(string status, bool expectedSuccess)
     {
         var client = new FakeCodexAppServerClient();
         var engine = new CodexChatEngine(
@@ -166,10 +229,34 @@ public class CodexChatEngineTests
         ErChatTurnResult? result = null;
         engine.TurnCompleted += (_, r) => result = r;
 
+        // ターンを開始してから完了通知を発火する（実行中でないターンの完了は破棄される）
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
         client.RaiseTurnCompleted(status, status == "failed" ? "boom" : null);
 
         result.Should().NotBeNull();
         result!.Value.Success.Should().Be(expectedSuccess);
+    }
+
+    /// <summary>
+    /// エンジンが開始していないターンの完了通知（既に完了済み・エンジン外のターン）は
+    /// 転送されないことを検証する（強制停止・接続断と turn/completed の競合時の二重通知防止）。
+    /// </summary>
+    [Fact(DisplayName = "Codex の実行中でないターンの完了通知は転送されない")]
+    public void TurnCompleted_WithoutTurnInProgress_IsDropped()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var completions = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => completions.Add(r);
+
+        client.RaiseTurnCompleted("completed");
+
+        completions.Should().BeEmpty();
     }
 
     /// <summary>非 openai プロバイダーでは接続のみで送信可能（認証不要）になることを検証する</summary>
@@ -331,6 +418,258 @@ public class CodexChatEngineTests
         client.StartCount.Should().Be(1, "未接続なら接続からやり直す");
         engine.IsStarted.Should().BeTrue();
         engine.IsReady.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// ターン実行中に App Server との接続が切れたら、ターンを失敗完了させ（実行中表示のまま固着させない）、
+    /// 次の送信では新しいスレッドを開き直すことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>turn/start</c> の応答後にプロセスが落ちると応答待ちリクエストが無く、turn/completed 通知も
+    /// 二度と来ない。接続断の通知が無ければチャットは「実行中」のまま永久に止まる
+    /// </remarks>
+    [Fact(DisplayName = "ターン実行中の接続断はターンを失敗完了させ次の送信で新スレッドを開く")]
+    public async Task Disconnected_DuringTurn_FailsTurnAndStartsNewThread()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseDisconnected();
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0].Error.Should().Be(QuickER.AI.Resources.Strings.Codex_Disconnected);
+
+        // サーバー内の状態（スレッド・ターン）は失われているため、次の送信はスレッドから開き直す
+        await engine.SendAsync("もう一度", TestContext.Current.CancellationToken);
+        client.StartThreadCount.Should().Be(2);
+    }
+
+    /// <summary>
+    /// ターン非実行中の接続断は、ターン完了イベントを出さずステータスで文脈喪失だけを伝えることを検証する。
+    /// </summary>
+    /// <remarks>黙って新しいスレッドで続けると、会話が続いているように見えたまま文脈だけが消える</remarks>
+    [Fact(
+        DisplayName = "ターン非実行中の接続断は TurnCompleted を出さずステータスで文脈喪失を伝える"
+    )]
+    public async Task Disconnected_WithoutTurn_ReportsStatusOnly()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        var statuses = new List<string>();
+        engine.StatusChanged += (_, m) => statuses.Add(m);
+        client.RaiseDisconnected();
+
+        results.Should().BeEmpty();
+        statuses
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(QuickER.AI.Resources.Strings.Codex_Disconnected);
+    }
+
+    /// <summary>会話が始まっていない（スレッドが無い）接続断では何も通知しないことを検証する</summary>
+    /// <remarks>失われた文脈が無いので、利用者へ伝えることが無い</remarks>
+    [Fact(DisplayName = "会話前の接続断は何も通知しない")]
+    public async Task Disconnected_BeforeConversation_NotifiesNothing()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        var results = new List<ErChatTurnResult>();
+        var statuses = new List<string>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+        engine.StatusChanged += (_, m) => statuses.Add(m);
+        client.RaiseDisconnected();
+
+        results.Should().BeEmpty();
+        statuses.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 中断要求が失敗（無応答のタイムアウト等）したら App Server を停止し、実行中ターンを失敗完了させる
+    /// ことを検証する。停止までしないとターンが実行中のまま残る。
+    /// </summary>
+    [Fact(DisplayName = "中断要求の失敗はクライアントを停止しターンを失敗完了へ倒す")]
+    public async Task InterruptAsync_WhenRequestFails_StopsClientAndFailsTurn()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            InterruptException = new TimeoutException("応答がありません"),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
+
+        client.StopCount.Should().Be(1);
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0].Error.Should().Be(QuickER.AI.Resources.Strings.Codex_InterruptForcedStop);
+
+        // 停止したのでサーバー内の状態は失われている＝次の送信はスレッドから開き直す
+        await engine.SendAsync("もう一度", TestContext.Current.CancellationToken);
+        client.StartThreadCount.Should().Be(2);
+    }
+
+    /// <summary>強制停止そのものが失敗しても、ターンは必ず失敗完了させることを検証する</summary>
+    /// <remarks>停止に失敗した時点でそれ以上の手段が無いため、せめて実行中表示だけは解く</remarks>
+    [Fact(DisplayName = "中断失敗時の停止がさらに失敗してもターンは失敗完了する")]
+    public async Task InterruptAsync_WhenStopAlsoFails_StillFailsTurn()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            InterruptException = new TimeoutException("応答がありません"),
+            StopException = new InvalidOperationException("停止できません"),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
+
+        client.StopCount.Should().Be(1);
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0].Error.Should().Be(QuickER.AI.Resources.Strings.Codex_InterruptForcedStop);
+    }
+
+    /// <summary>接続断が二重に届いてもターン完了は 1 回だけであることを検証する（実行中フラグの回帰固定）</summary>
+    [Fact(DisplayName = "接続断の二重通知でも TurnCompleted は 1 回")]
+    public async Task Disconnected_RaisedTwice_CompletesTurnOnce()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseDisconnected();
+        client.RaiseDisconnected();
+
+        results.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// StartTurnAsync が <see cref="OperationCanceledException"/> を投げたら、中断として
+    /// Success=false・Error=null（ChatTurnEngine / <see cref="IClaudeCodeClient.RunTurnAsync"/> と
+    /// 同じ規約）で完了することを検証する（B4: 誤ってエラー扱いに畳まれていない回帰固定）。
+    /// </summary>
+    [Fact(DisplayName = "ターン送信の OperationCanceledException は中断として畳まれる")]
+    public async Task SendAsync_StartTurnThrowsOperationCanceledException_CompletesAsInterrupted()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            StartTurnException = new OperationCanceledException(),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0].Error.Should().BeNull();
+    }
+
+    /// <summary>対照: 一般例外は従来どおりメッセージ付きの失敗として完了することを検証する</summary>
+    [Fact(DisplayName = "ターン送信の一般例外はメッセージ付きの失敗として完了する")]
+    public async Task SendAsync_StartTurnThrowsGeneralException_CompletesWithErrorMessage()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            StartTurnException = new InvalidOperationException("boom"),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0].Error.Should().Be("boom");
+    }
+
+    /// <summary>
+    /// ToolActivityReceived の購読側が例外を投げても、応答送信は必ず行われることを検証する
+    /// （軽微 b: 活動通知は応答送信より先に呼ばれるため、素通しすると AI が結果を待ち続ける）。
+    /// </summary>
+    [Fact(DisplayName = "活動通知の購読側の例外があっても応答送信は行われる")]
+    public void DynamicToolCall_ActivitySubscriberThrows_StillResponds()
+    {
+        var client = new FakeCodexAppServerClient();
+        var host = new RecordingToolHost();
+        var engine = new CodexChatEngine(
+            client,
+            host,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        engine.ToolActivityReceived += (_, _) => throw new InvalidOperationException("boom");
+
+        client.RaiseDynamicToolCall(BuildToolCall("add_entity", "{\"table_name\":\"Book\"}"));
+
+        client.RespondToolCount.Should().Be(1);
+        client.LastToolSuccess.Should().BeTrue();
     }
 
     /// <summary>Codex は添付非対応（AttachmentSupport=None）であることを検証する</summary>

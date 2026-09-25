@@ -142,7 +142,7 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
     }
 
     /// <summary>中立な履歴項目を OpenAI SDK の ChatMessage へ変換する</summary>
-    private static ChatMessage ToChatMessage(ChatHistoryItem item) =>
+    internal static ChatMessage ToChatMessage(ChatHistoryItem item) =>
         item.Role switch
         {
             ChatHistoryRole.System => new SystemChatMessage(item.Text),

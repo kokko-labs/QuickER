@@ -145,11 +145,17 @@
   <data name="Chat_ConversationStarted" xml:space="preserve">
     <value>会話を開始しました。ER 図について話しかけてください。</value>
   </data>
+  <data name="Chat_AttachmentsDroppedOnProviderSwitch" xml:space="preserve">
+    <value>この会話の一部の添付（PDF など）は選択したプロバイダーが対応していないため、再送されません。</value>
+  </data>
   <data name="Chat_SwitchBackendConfirm" xml:space="preserve">
     <value>現在の会話をクリアして接続方式を切り替えますか？</value>
   </data>
   <data name="Chat_SwitchBackendConfirmTitle" xml:space="preserve">
     <value>会話のクリア</value>
+  </data>
+  <data name="Chat_SwitchBackendBlockedDuringTurn" xml:space="preserve">
+    <value>応答の実行中は接続方式を切り替えられません。先に中断してください。</value>
   </data>
   <data name="Chat_SendFailedFormat" xml:space="preserve">
     <value>送信に失敗しました: {0}</value>

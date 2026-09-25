@@ -46,13 +46,16 @@ The model candidates are enumerated at runtime after connecting, and which model
 Leaving the model empty uses the CLI's default.
 
 The connection tab you used last is remembered and selected automatically the next time you start.
+The connection tabs are disabled while a response is in progress.
+Interrupt the response before switching.
 
 ## What you can do
 
 - **Generate a diagram**: describe your requirements and it creates tables, columns, and relationships
 - **Edit a diagram**: add to, change, or delete from an existing diagram.
   Operations on tables, columns, and relationships go onto the Undo/Redo history, so you can revert them.
-  Named-query edits are applied directly and are not part of that history
+  Named-query edits are applied directly and are not part of that history.
+  A single response runs at most 50 rounds of tool calls, and a response that reaches the limit is stopped as a failure.
 - **Attachments**: attach files to pass existing design materials and the like as context.
   Each kind has its own size limit, and which kinds you can attach depends on the connection method.
   - **OpenAI-compatible**: images and text
@@ -70,6 +73,7 @@ Point the tool at an empty folder to start fresh, or at an existing mock folder 
 No chat log is kept: resuming restores from the folder contents alone, so it works the same on every backend.
 The screen-list sidebar lets you click through the screens, and the preview follows the links between them.
 You can export the whole mock as a single self-contained HTML file.
+A screen whose HTML contains a stray `</section>` tag can disrupt the screen boundaries in that export, letting content bleed into the screens after it.
 
 The mock folder also yields a screen design document (`README.md`: a screen list, a Mermaid transition diagram, a screen-by-entity CRUD table, and a per-screen item table), generated deterministically without any AI.
 Once exported it is rewritten automatically whenever a screen is saved or removed, and opening the folder on GitHub shows it as the folder's front page.

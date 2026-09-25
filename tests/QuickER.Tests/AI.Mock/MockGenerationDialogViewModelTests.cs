@@ -445,6 +445,37 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 画面ファイル名が不正な（手編集で壊れた）mock.json のフォルダ指定では、破損 mock.json と同じ経路で
+    /// ステータスにエラーを出し会話開始を抑止することを検証する（M1 対応：MockFolderStore.Open の検証）。
+    /// </summary>
+    [Fact(DisplayName = "画面ファイル名が不正な mock.json ではステータスにエラー・会話開始不可")]
+    public void SettingMockFolderWithInvalidScreenFileName_ShowsErrorStatus_AndBlocksStart()
+    {
+        var (vm, _, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram(), setMockFolder: false);
+
+        try
+        {
+            SeedMockFolder(mockFolder);
+
+            // mock.json を手編集で破損させる（"file" の値を不正なファイル名へ差し替える）
+            var manifestPath = Path.Combine(mockFolder, MockManifest.ManifestFileName);
+            var json = File.ReadAllText(manifestPath);
+            File.WriteAllText(manifestPath, json.Replace("OrderList.html", "../evil.html"));
+
+            vm.MockFolder = mockFolder;
+
+            vm.CanStartConversation.Should().BeFalse();
+            var fixedPart = MockStrings.Mock_MockFolderOpenFailedFormat.Split("{0}")[0];
+            vm.StatusMessage.Should().Contain(fixedPart);
+            vm.Screens.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>会話開始前は送信不可・開始後に入力ありで送信可能になることを検証する</summary>
     [Fact(DisplayName = "会話開始前は送信不可・開始後は入力ありで可能")]
     public void CanSendMessage_RequiresStartedConversationAndInput()
@@ -670,6 +701,76 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 単一 HTML 出力は、結合処理（画面 HTML の読み取り）が失敗してもアプリを落とさず
+    /// ステータスへ通知することを検証する（M1 対応：Export は try の外で呼ばれていたため未処理例外だった）。
+    /// </summary>
+    [Fact(DisplayName = "単一 HTML 出力は結合失敗をステータスへ通知しアプリを落とさない")]
+    public void ExportBundle_ExportFailure_NotifiesStatus_AndDoesNotThrow()
+    {
+        var baseFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+        var mockFolder = Path.Combine(baseFolder, "mock");
+        var outPath = Path.Combine(baseFolder, "out.html");
+        SeedMockFolder(mockFolder);
+
+        var files = new RecordingFileDialogService(new FileDialogResult(outPath, 1));
+        var dialogs = new StubDialogService();
+        var keyStore = new InMemoryApiKeyStore();
+
+        var vm = new MockGenerationDialogViewModel(
+            new StubDiagramSource(NonEmptyDiagram()),
+            new SyncUiDispatcher(),
+            files: files,
+            settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
+            apiKeyEngineFactory: null,
+            codexEngineFactory: null,
+            claudeCodeEngineFactory: null,
+            dialogService: dialogs,
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
+        );
+        vm.Connection.ApiProvider = AiProvider.LocalLlm;
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.CanExportBundle.Should().BeTrue();
+
+            // 画面 HTML の実体を排他ロックし、結合処理（GetScreenHtml → File.ReadAllText）を強制失敗させる
+            using (
+                new FileStream(
+                    Path.Combine(mockFolder, "OrderList.html"),
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None
+                )
+            )
+            {
+                var act = () => vm.ExportBundleCommand.Execute(null);
+
+                act.Should().NotThrow();
+            }
+
+            // フォーマット文字列の固定部分（{0} より前）を含むことで、書き込み失敗と同じ resx キーへ
+            // 落ちていることを確かめる（実際の例外メッセージは環境依存のため中身は問わない）
+            var fixedPart = MockStrings.Mock_HtmlSaveFailedFormat.Split("{0}")[0];
+            vm.StatusMessage.Should().Contain(fixedPart);
+
+            // 結合が失敗した時点で return しているため、ファイルピッカーへは到達しない
+            files.PickSaveFileCallCount.Should().Be(0);
+            File.Exists(outPath).Should().BeFalse();
+            dialogs.InformationMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>クリア（確認 OK）で会話・フォルダ選択・第2ステップ入力が初期状態へ戻ることを検証する</summary>
     [Fact(DisplayName = "クリアは確認後に画面全体を初期状態へ戻す")]
     public void Clear_ResetsEverything_WhenConfirmed()
@@ -866,6 +967,58 @@ public class MockGenerationDialogViewModelTests
                 .ContainSingle()
                 .Which.Should()
                 .Contain(readmePath);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 設計書出力は、生成処理（画面 HTML の読み取り）が失敗してもアプリを落とさず
+    /// ステータスへ通知することを検証する（M1 対応：Export は try の外で呼ばれていたため未処理例外だった）。
+    /// </summary>
+    [Fact(DisplayName = "設計書出力は生成失敗をステータスへ通知しアプリを落とさない")]
+    public void ExportDesignDoc_ExportFailure_NotifiesStatus_AndDoesNotThrow()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, _, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false,
+            dialogs
+        );
+        SeedMockFolder(mockFolder);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.ExportDesignDocCommand.CanExecute(null).Should().BeTrue();
+
+            var readmePath = Path.Combine(mockFolder, MockDesignDocExporter.FileName);
+
+            // 画面 HTML の実体を排他ロックし、生成処理（GetScreenHtml → File.ReadAllText）を強制失敗させる
+            using (
+                new FileStream(
+                    Path.Combine(mockFolder, "OrderList.html"),
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None
+                )
+            )
+            {
+                var act = () => vm.ExportDesignDocCommand.Execute(null);
+
+                act.Should().NotThrow();
+            }
+
+            // フォーマット文字列の固定部分（{0} より前）を含むことで、書き込み失敗と同じ resx キーへ
+            // 落ちていることを確かめる（実際の例外メッセージは環境依存のため中身は問わない）
+            var fixedPart = MockStrings.Mock_DesignDocSaveFailedFormat.Split("{0}")[0];
+            vm.StatusMessage.Should().Contain(fixedPart);
+
+            // 生成が失敗した時点で return しているため README.md は書き出されない
+            File.Exists(readmePath).Should().BeFalse();
+            dialogs.InformationMessages.Should().BeEmpty();
         }
         finally
         {
@@ -2329,7 +2482,50 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>選択済み結果を返し、初期ファイル名を記録するファイルダイアログスタブ</summary>
+    /// <summary>
+    /// アプリ終了時の破棄が、会話中のセッションが抱えるエンジンへ届くことを検証する
+    /// （中断はターン実行中しか効かないため、常駐プロセスはここでしか止まらない）。
+    /// </summary>
+    [Fact(DisplayName = "ShutdownEngines は会話中のエンジンを破棄する")]
+    public void ShutdownEngines_DisposesSessionEngine()
+    {
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.StartConversationCommand.Execute(null);
+            engineBox[0].DisposeCount.Should().Be(0, "会話中はまだ破棄されない");
+
+            vm.ShutdownEngines(TimeSpan.FromSeconds(5));
+
+            engineBox[0].DisposeCount.Should().Be(1);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>会話を開始していない状態でも終了経路が例外を投げないことを検証する</summary>
+    [Fact(DisplayName = "ShutdownEngines は会話未開始でも例外を投げない")]
+    public void ShutdownEngines_WithoutConversation_DoesNotThrow()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            var shutdown = () => vm.ShutdownEngines(TimeSpan.FromSeconds(5));
+
+            shutdown.Should().NotThrow();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>選択済み結果を返し、初期ファイル名・呼び出し回数を記録するファイルダイアログスタブ</summary>
     private sealed class RecordingFileDialogService : IFileDialogService
     {
         private readonly FileDialogResult? _saveResult;
@@ -2337,6 +2533,9 @@ public class MockGenerationDialogViewModelTests
         public RecordingFileDialogService(FileDialogResult? saveResult) => _saveResult = saveResult;
 
         public string? LastInitialFileName { get; private set; }
+
+        /// <summary>PickSaveFile が呼ばれた回数（未到達を確かめるためのカウンタ）</summary>
+        public int PickSaveFileCallCount { get; private set; }
 
         public FileDialogResult? PickOpenFile(string filter) => null;
 
@@ -2347,6 +2546,7 @@ public class MockGenerationDialogViewModelTests
             string? initialDirectory = null
         )
         {
+            PickSaveFileCallCount++;
             LastInitialFileName = initialFileName;
             return _saveResult;
         }

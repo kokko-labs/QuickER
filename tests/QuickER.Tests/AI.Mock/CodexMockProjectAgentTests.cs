@@ -441,6 +441,28 @@ public class CodexMockProjectAgentTests
         }
     }
 
+    /// <summary>
+    /// ターンの完了を待っている間に App Server との接続が切れたら、生成を失敗として即座に終えることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 接続断を知らせる経路が無いと、完了通知が二度と来ないまま共有オーケストレーターの
+    /// 全体タイムアウト（既定 30 分）まで待たされる
+    /// </remarks>
+    [Fact(DisplayName = "ターン待機中の接続断は生成を失敗として即完了させる")]
+    public async Task RunAsync_Disconnected_FailsImmediately()
+    {
+        var client = new FakeCodexAppServerClient();
+        var agent = new CodexMockProjectAgent(client);
+
+        var task = agent.RunAsync(Request(), _ => { }, TestContext.Current.CancellationToken);
+        client.RaiseDisconnected();
+        var outcome = await task;
+
+        outcome.Success.Should().BeFalse();
+        outcome.Error.Should().Be(MockStrings.Mock_CodexDisconnected);
+        outcome.NotLoggedIn.Should().BeFalse();
+    }
+
     /// <summary>可用性判定（codex CLI の PATH 解決）が例外なく行えることを検証する</summary>
     [Fact(DisplayName = "可用性判定は例外なく実行できる")]
     public void IsAvailable_DoesNotThrow()

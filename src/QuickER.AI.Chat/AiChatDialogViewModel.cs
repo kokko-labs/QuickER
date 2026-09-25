@@ -73,12 +73,23 @@ public partial class AiChatDialogViewModel : ObservableObject
                 InterruptCommand.NotifyCanExecuteChanged();
                 // ターン実行中は添付操作も禁止する（ボタン・削除の無効化に連動）
                 Attachments.IsTurnInProgress = value;
+                // ターン実行中は API キー接続の設定編集も禁止する（設定パネルの無効化に連動）
+                OnPropertyChanged(nameof(CanEditConnectionSettings));
+                // ターン実行中は「新しい会話」も禁止する（CanStartConversation の再評価）
+                NotifyReadinessChanged();
             }
         }
     }
 
-    /// <summary>新しい会話を開始できるか（接続・認証が整っているか）</summary>
-    public bool CanStartConversation => _engine.IsReady;
+    /// <summary>
+    /// API キー接続の設定（プロバイダー・モデル・エンドポイント・API キー）を編集できるか。
+    /// これらは実行中ターンの次の往復から即座に効き、プロバイダー変更は実行中ループが書き換える
+    /// 会話履歴の列挙（添付告知の判定）も伴うため、ターン実行中は編集不可にする。
+    /// </summary>
+    public bool CanEditConnectionSettings => !IsTurnInProgress;
+
+    /// <summary>新しい会話を開始できるか（接続・認証が整っており、かつターン実行中でないか）</summary>
+    public bool CanStartConversation => _engine.IsReady && !IsTurnInProgress;
 
     /// <summary>メッセージを送信できるか</summary>
     public bool CanSendMessage =>
@@ -342,14 +353,22 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     /// <summary>
     /// 接続方式を切り替える。会話中はクリア確認を出し、OK の場合は会話をクリアして切り替える。
+    /// ターン実行中は拒否する（旧エンジンの <see cref="IErChatEngine.TurnCompleted"/> 購読が
+    /// 切替で外れ、<see cref="IsTurnInProgress"/> が true のまま固着するため）。
     /// </summary>
     /// <param name="newBackend">切り替え先の接続方式</param>
-    /// <returns>切り替えた（または既に同じ）場合 true、ユーザーがキャンセルした場合 false</returns>
+    /// <returns>切り替えた（または既に同じ）場合 true、ユーザーがキャンセルまたはターン実行中で拒否した場合 false</returns>
     public bool TryChangeBackend(ErChatBackendKind newBackend)
     {
         if (newBackend == Connection.SelectedBackend)
         {
             return true;
+        }
+
+        if (IsTurnInProgress)
+        {
+            StatusMessage = Strings.Chat_SwitchBackendBlockedDuringTurn;
+            return false;
         }
 
         if (HasConversation)
@@ -452,6 +471,59 @@ public partial class AiChatDialogViewModel : ObservableObject
                 TaskContinuationOptions.OnlyOnFaulted,
                 TaskScheduler.Default
             );
+    }
+
+    /// <summary>
+    /// アプリ終了などの同期的な終了経路から、4 つのエンジンをすべて破棄する。
+    /// </summary>
+    /// <param name="timeout">
+    /// 破棄の完了を待つ上限。超過しても終了経路は続行する（停止はベストエフォート）
+    /// </param>
+    /// <remarks>
+    /// <see cref="RequestInterrupt"/> が止められるのは実行中のターンだけで、ターンを実行していない
+    /// 常駐プロセス（codex app-server・copilot ランタイム・Claude Code の実行中プロセス）は残る。
+    /// それらを確実に止める経路はエンジンの破棄だけなので、ウィンドウを閉じる前にここを通す。
+    /// 待ちに上限を設けるのは、破棄がハングしたときにアプリの終了を長く止めないため。
+    /// </remarks>
+    public void ShutdownEngines(TimeSpan timeout)
+    {
+        // 破棄そのものは必ずスレッドプールで走らせる。終了経路は UI スレッドで、ここで完了を待つため、
+        // 破棄の途中に UI スレッドへのマーシャリングがあると待ちがデッドロックする
+        var shutdown = Task.Run(() =>
+            Task.WhenAll(
+                DisposeEngineQuietlyAsync(_apiKeyEngine),
+                DisposeEngineQuietlyAsync(_codexEngine),
+                DisposeEngineQuietlyAsync(_claudeCodeEngine),
+                DisposeEngineQuietlyAsync(_copilotEngine)
+            )
+        );
+
+        try
+        {
+            shutdown.Wait(timeout);
+        }
+        catch (Exception)
+        {
+            // 破棄の失敗・待ちの打ち切りで終了処理を妨げない
+        }
+    }
+
+    /// <summary>エンジン 1 つを破棄する（失敗は握り潰す＝1 つの失敗で他のエンジンの破棄を止めない）</summary>
+    private static async Task DisposeEngineQuietlyAsync(IErChatEngine? engine)
+    {
+        if (engine is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await engine.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // 終了経路のため、個々の破棄の失敗は報告先が無い
+        }
     }
 
     // ── Codex 認証コマンド ──
@@ -667,6 +739,25 @@ public partial class AiChatDialogViewModel : ObservableObject
                 if (Connection.IsApiKeyBackend)
                 {
                     RefreshAttachmentSupport();
+
+                    // 会話中に切り替えると、履歴中の添付が新しいプロバイダーの対応範囲外なら
+                    // 毎ターン再送のときに黙って落ちる（API キー接続はステートレス）。
+                    // 会話クリア確認は添付の無い大半の切替に毎回確認を挟む過剰反応になるため、
+                    // 落ちる添付があるときだけ告知する。
+                    // ターン実行中は判定しない（XAML の設定パネル無効化との二重防御。実行中は
+                    // RunAgenticLoopAsync がスレッドプール上で履歴へ追記するため、ここで列挙すると
+                    // コレクション変更例外になり得る）。
+                    if (
+                        !IsTurnInProgress
+                        && _conversationStarted
+                        && _apiKeyEngine.HistoryHasAttachmentsBeyond(
+                            AttachmentSupportResolver.ForApiKeyProvider(Connection.ApiProvider)
+                        )
+                    )
+                    {
+                        AddSystemMessage(Strings.Chat_AttachmentsDroppedOnProviderSwitch);
+                        StatusMessage = Strings.Chat_AttachmentsDroppedOnProviderSwitch;
+                    }
                 }
 
                 NotifyReadinessChanged();
