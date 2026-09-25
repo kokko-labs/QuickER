@@ -1499,7 +1499,18 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         SendMessageCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>現在のセッションのイベント購読を解除する（新セッションへの差し替え・会話リセット時に呼ぶ）</summary>
+    /// <summary>
+    /// 現在のセッションのイベント購読を解除し、セッション（が抱えるエンジン）を破棄する
+    /// （新セッションへの差し替え・会話リセット時に呼ぶ）。
+    /// </summary>
+    /// <remarks>
+    /// 破棄しないと、会話を切り替えるたびに旧エンジン（CLI バックエンドなら codex app-server 等の
+    /// 常駐子プロセスを含む）がアプリ終了まで残り続ける。切替経路は UI の同期処理のため完了は
+    /// 待たず（破棄は子プロセスの停止を含む）、破棄は丸ごとスレッドプールで走らせる
+    /// （非 async の DisposeAsync 実装が同期区間で投げる例外も Task へ閉じ込め、
+    /// <see cref="Forget"/> が観測して握り潰す＝<see cref="ShutdownEngines"/> と同じ形）。
+    /// 購読解除を破棄より先に行い、破棄が誘発するイベント（中断のターン完了等）を UI へ流さない。
+    /// </remarks>
     private void DetachSession()
     {
         if (_session is null)
@@ -1507,13 +1518,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        _session.AssistantDeltaReceived -= OnAssistantDelta;
-        _session.ScreenSaved -= OnScreenSaved;
-        _session.ScreenRemoved -= OnScreenRemoved;
-        _session.StylesheetSaved -= OnStylesheetSaved;
-        _session.TurnCompleted -= OnTurnCompleted;
-        _session.StatusChanged -= OnStatus;
+        var session = _session;
+        session.AssistantDeltaReceived -= OnAssistantDelta;
+        session.ScreenSaved -= OnScreenSaved;
+        session.ScreenRemoved -= OnScreenRemoved;
+        session.StylesheetSaved -= OnStylesheetSaved;
+        session.TurnCompleted -= OnTurnCompleted;
+        session.StatusChanged -= OnStatus;
         _session = null;
+
+        Forget(Task.Run(() => session.DisposeAsync().AsTask()));
     }
 
     /// <summary>組み立て中のアシスタント吹き出し（差分追記先）</summary>

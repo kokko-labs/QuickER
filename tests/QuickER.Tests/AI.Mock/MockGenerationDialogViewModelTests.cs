@@ -2507,6 +2507,84 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// モックフォルダの変更（会話リセット）で、旧セッションが抱えるエンジンが破棄されることを検証する
+    /// （破棄しないと CLI バックエンドの常駐子プロセスを含む旧エンジンがアプリ終了まで残り続ける）。
+    /// </summary>
+    [Fact(DisplayName = "会話のリセットは旧セッションのエンジンを破棄する")]
+    public void ResetConversation_DisposesPreviousSessionEngine()
+    {
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.StartConversationCommand.Execute(null);
+            var oldEngine = engineBox[0];
+            oldEngine.DisposeCount.Should().Be(0, "会話中はまだ破棄されない");
+
+            // フォルダ変更は会話をリセットし、旧セッションを手放す
+            vm.MockFolder = Path.Combine(baseFolder, "mock2");
+
+            // 破棄はスレッドプールで走る（fire-and-forget）ため、到達を短い上限つきで待つ
+            WaitForDisposeCount(oldEngine, 1);
+            oldEngine.DisposeCount.Should().Be(1, "手放した旧セッションのエンジンは破棄されること");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 会話の作り直し（新しい会話の開始）で旧セッションのエンジンだけが破棄され、
+    /// 新しいセッションのエンジンは生きていることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "会話の作り直しは旧セッションのエンジンだけを破棄する")]
+    public void RestartConversation_DisposesOnlyPreviousSessionEngine()
+    {
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.StartConversationCommand.Execute(null);
+            var oldEngine = engineBox[0];
+
+            vm.StartConversationCommand.Execute(null);
+
+            // 破棄はスレッドプールで走る（fire-and-forget）ため、到達を短い上限つきで待つ
+            WaitForDisposeCount(oldEngine, 1);
+            oldEngine
+                .DisposeCount.Should()
+                .Be(1, "差し替えられた旧セッションのエンジンは破棄されること");
+            engineBox[0]
+                .Should()
+                .NotBeSameAs(oldEngine, "作り直しで新しいエンジンが生成されること");
+            engineBox[0]
+                .DisposeCount.Should()
+                .Be(0, "新しいセッションのエンジンは破棄されないこと");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// fire-and-forget の破棄（スレッドプール実行）が期待回数へ到達するまで短い上限つきで待つ
+    /// （フェイクの DisposeAsync 自体は同期完了だが、Task.Run 経由のため到達タイミングは非決定的）。
+    /// </summary>
+    private static void WaitForDisposeCount(FakeChatEngine engine, int expected)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        while (engine.DisposeCount < expected && stopwatch.ElapsedMilliseconds < 2000)
+        {
+            Thread.Sleep(10);
+        }
+    }
+
     /// <summary>会話を開始していない状態でも終了経路が例外を投げないことを検証する</summary>
     [Fact(DisplayName = "ShutdownEngines は会話未開始でも例外を投げない")]
     public void ShutdownEngines_WithoutConversation_DoesNotThrow()

@@ -20,6 +20,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Switching the API provider mid-conversation now announces attachments that would be dropped** — when the history holds an attachment kind the newly selected provider cannot resend (such as a PDF on OpenAI), the chat says so instead of dropping it silently
 - **Closing the application now shuts down the AI back ends** — the Codex App Server, the Copilot runtime and a running Claude Code process are disposed on exit, with a three-second cap so a hung shutdown cannot stall the application
 - **Interrupting Codex just as a turn starts is now reported as an interruption, not an error**
+- **Switching or resetting a mock-generation conversation now disposes the previous AI back end** — starting a new conversation, changing the mock folder or switching the connection method used to leave the old session's engine, including a CLI back end's resident child process, alive until the application closed
 
 ## [0.2.0] - 2026-09-24
 
