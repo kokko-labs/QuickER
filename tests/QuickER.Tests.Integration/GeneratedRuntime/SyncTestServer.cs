@@ -434,9 +434,12 @@ internal static class SyncTestServerSources
     /// <remarks>
     /// 除外列（<c>attachment</c>）を明示的に落とす＝生成側と同じ。"*" のままだと生 SQL の
     /// opportunistic マップで blob まで降りてきてしまい、「行の転送には載らない」という意味論が崩れる。
+    /// 計算列（<c>summary</c>）は逆に<b>載せる</b>＝生成側の差分 SQL と同じで、行としては転送され
+    /// （ローカルへ書かれるかどうかは INSERT 側の除外が決める）、生 SQL のエンティティ取得は
+    /// 除外列以外の全列を要求する。
     /// </remarks>
     public const string OrderChangesSql =
-        "SELECT \"order_id\", \"customer_name\", \"row_ver\" FROM \"sync_orders\" "
+        "SELECT \"order_id\", \"customer_name\", \"row_ver\", \"summary\" FROM \"sync_orders\" "
         + "WHERE (@anchor IS NULL OR \"row_ver\" > @anchor) "
         + "AND (@ceiling IS NULL OR \"row_ver\" < @ceiling) ORDER BY \"row_ver\" LIMIT @batchSize";
 

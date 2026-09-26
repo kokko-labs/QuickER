@@ -369,6 +369,55 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
             .NotBeNull("サーバーの版がミラー列へそのまま入る（次回のアンカーになる）");
     }
 
+    /// <summary>
+    /// NULL 許容の計算列を持つテーブルでもダウンロードが成立し、ミラー側の値は NULL のままになる。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 計算列は差分 SQL の SELECT には載る（行としては転送される）が、生成コードの INSERT からは
+    /// 方言に依らず外れるため、式を持たないローカルへは書かれない。つまりミラーの値は NULL のまま——
+    /// これは<b>NULL 許容だから成立する</b>のであって、同じ列が NOT NULL なら送られない列の
+    /// NOT NULL 制約でダウンロードが丸ごと落ちる。「NOT NULL の計算列は図で NULL 許容にする」という
+    /// 逃げ道が実際に機能することを、ここが端から端まで押さえる
+    /// （生成時 Warning <c>CodeGen_Warning_NotNullComputedColumns</c> が案内している逃げ道そのもの）。
+    /// </para>
+    /// <para>
+    /// サーバー側の値は生 SQL で入れる（リポジトリからは書けない列なので、書ける唯一の経路）。
+    /// SQL は SQLite / SQL Server のどちらのサーバー役でもそのまま通る形にしてある。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] NULL 許容の計算列は転送されても、ミラー側は NULL のまま取り込める")]
+    public async Task Download_WithNullableComputedColumn_SucceedsAndKeepsMirrorNull()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await ServerSql.ExecuteSqlAsync(
+            "UPDATE sync_orders SET summary = 'server-side summary' WHERE order_id = 1",
+            null,
+            Ct
+        );
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Downloaded.Should().Be(2, "注文 1 件＋明細 1 件が降りる");
+
+        var order = await LocalOrdersRaw.GetByIdAsync(1, Ct);
+        order.Should().NotBeNull();
+        order!.CustomerName.Should().Be("alice");
+        order.Summary.Should().BeNull("式を持たないミラーへは計算列が書かれない（NULL のまま）");
+
+        // サーバー側には値が在ったこと（＝転送すべき値が無かったから NULL なのではない）
+        (
+            await ServerSql.ExecuteScalarSqlAsync<string>(
+                "SELECT summary FROM sync_orders WHERE order_id = 1",
+                null,
+                Ct
+            )
+        )
+            .Should()
+            .Be("server-side summary");
+    }
+
     /// <summary>2 回目以降はミラー列の MAX から導出したアンカーより新しい行だけが降りてくる</summary>
     [Fact(DisplayName = "[Sync] 2 回目はアンカー（ミラー MAX）より新しい行だけを取り込む")]
     public async Task IncrementalSync_DownloadsOnlyNewerRows()

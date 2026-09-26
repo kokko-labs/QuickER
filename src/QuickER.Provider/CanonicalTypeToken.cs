@@ -83,6 +83,15 @@ public static partial class CanonicalTypeToken
     )]
     private static partial Regex TokenPattern();
 
+    /// <summary>指定の種別が長さ引数（<see cref="CanonicalType.Length"/>）を持つ文字列・バイナリ系かどうかを返す</summary>
+    /// <remarks>
+    /// 種別の集合は <see cref="LengthKinds"/> が単一の正本で、各方言の <see cref="ITypeCatalog.TryFormat"/> が
+    /// 「長さの無い canonical は書き出さない」判定に使う。方言側で集合を書き写すと、種別を足したときに
+    /// 写し漏れた方言だけが長さ無しの型名を出し続ける。
+    /// </remarks>
+    /// <param name="kind">判定する正規型の種別</param>
+    public static bool HasLengthArgument(CanonicalTypeKind kind) => LengthKinds.Contains(kind);
+
     /// <summary>正規型を中立トークン文字列へ整形する（例 <c>string(50)</c> / <c>decimal(10,2)</c> / <c>int32</c>）</summary>
     /// <param name="canonical">整形対象の正規型</param>
     /// <returns>トークン文字列</returns>

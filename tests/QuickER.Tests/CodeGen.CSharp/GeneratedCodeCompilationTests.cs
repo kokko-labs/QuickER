@@ -922,6 +922,19 @@ public class GeneratedCodeCompilationTests
                             DataType = "rowversion",
                             IsNullable = false,
                         },
+                        // NOT NULL の計算列（値型）。SQL Server のテンポラルテーブルの期間列がこの形で取り込まれる。
+                        // EditModel の確定値は値型なら常に Nullable<T> なので、Mapper の ApplyToEntity が
+                        // 「入力があるときだけ代入」の内側で素の代入を出すと CS0266 になる——
+                        // 行バージョン列・除外バイナリ列はいずれも byte[]（参照型）でこの経路を踏まないため、
+                        // 非 NULL の値型の計算列だけが型検査でしか出ない崩れ方を掘り当てる
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "valid_from",
+                            DataType = "datetime2",
+                            IsNullable = false,
+                            IsComputed = true,
+                        },
                     ],
                     // 単一列・複合の 2 本（Entity の [UniqueConstraint] 属性と EditModel の制約テーブルの両方を発火させる）
                     UniqueConstraints =

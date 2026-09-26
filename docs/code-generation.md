@@ -900,6 +900,21 @@ The generated entity property carries the marker attribute `[ComputedColumn]`, a
 
 Generation emits one Info diagnostic naming the excluded columns, because on the diagram they look no different from ordinary columns.
 
+### A NOT NULL computed column and the mirror database
+
+The diagram does not model expressions, so DDL generated from it creates an ordinary column on every dialect.
+On a database that does not evaluate the expression, generated code never writes that column, so **a NOT NULL column makes every insert into that table fail** (the error names the column).
+Adding the expression by hand fixes it, and the DDL carries a note next to the column saying so.
+
+This matters for a multi-target build (SQL Server as the server, SQLite locally) and for bidirectional sync.
+The mirror database holds the ordinary column QuickER's DDL created, and for something like a SQL Server temporal table the expression **cannot** be added by hand.
+Generation warns and names the affected columns. There are two ways out.
+
+- **Make the column nullable in the diagram.** The mirror keeps NULL for it and inserts succeed.
+  A computed column's nullability is left out of the sync comparison, so this never produces an `ALTER COLUMN` against the database the diagram came from.
+  The setting lives in the diagram, though, so **replacing the diagram through a DB import brings the original NOT NULL back** (set it again after re-importing)
+- **Leave the table out of synchronization.** It is then handled on the server side only
+
 ## Extending the generated base classes
 
 Every base the generated code inherits or implements comes in two layers, across entities, edit models, value objects, repository contracts, backend implementations, and mappers.

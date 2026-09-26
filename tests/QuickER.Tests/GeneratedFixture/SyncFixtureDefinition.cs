@@ -21,7 +21,7 @@ namespace QuickER.Tests.GeneratedSyncFixture;
 /// 足りず、版あり／版なしの混在＝後勝ちモードの検証には rowversion を持たないテーブルが要る）:
 /// </para>
 /// <list type="bullet">
-///   <item><c>sync_orders</c>: <c>order_id</c>（int・PK）／<c>customer_name</c>（nvarchar(50)）／<c>attachment</c>（varbinary(max)・NULL 許容）／<c>row_ver</c>（rowversion）</item>
+///   <item><c>sync_orders</c>: <c>order_id</c>（int・PK）／<c>customer_name</c>（nvarchar(50)）／<c>attachment</c>（varbinary(max)・NULL 許容）／<c>row_ver</c>（rowversion）／<c>summary</c>（nvarchar(60)・NULL 許容の<b>計算列</b>）</item>
 ///   <item><c>sync_order_lines</c>: <c>line_id</c>（int・PK）／<c>order_id</c>（int・FK）／<c>product</c>（nvarchar(50)）／<c>row_ver</c>（rowversion）</item>
 ///   <item><c>sync_notes</c>: <c>note_id</c>（int・PK）／<c>order_id</c>（int・FK）／<c>body</c>（nvarchar(100)）＝<b>rowversion なし</b>（後勝ち専用・キー順全量ダウンロード・版ありの親を参照する混在 FK トポロジ）</item>
 /// </list>
@@ -93,6 +93,7 @@ public static class SyncFixtureDefinition
     private static readonly Guid OrderNameColId = new("c1000000-0000-0000-0000-000000000003");
     private static readonly Guid OrderRowVerColId = new("c1000000-0000-0000-0000-000000000004");
     private static readonly Guid OrderAttachmentColId = new("c1000000-0000-0000-0000-000000000005");
+    private static readonly Guid OrderSummaryColId = new("c1000000-0000-0000-0000-000000000006");
     private static readonly Guid LineEntityId = new("c1000000-0000-0000-0000-000000000011");
     private static readonly Guid LinePkColId = new("c1000000-0000-0000-0000-000000000012");
     private static readonly Guid LineOrderColId = new("c1000000-0000-0000-0000-000000000013");
@@ -147,6 +148,17 @@ public static class SyncFixtureDefinition
                     Name = "row_ver",
                     DataType = "rowversion",
                     IsNullable = true,
+                },
+                // NULL 許容の計算列。同期のミラー（ローカル）には式が無いので値が入らないが、
+                // NULL 許容である限り行は書ける＝「NOT NULL の計算列はミラーへ書けない」問題の逃げ道が
+                // 実際に機能することを、ダウンロード経路まで含めて固定するための列
+                new Column
+                {
+                    Id = OrderSummaryColId,
+                    Name = "summary",
+                    DataType = "nvarchar(60)",
+                    IsNullable = true,
+                    IsComputed = true,
                 },
             },
         };

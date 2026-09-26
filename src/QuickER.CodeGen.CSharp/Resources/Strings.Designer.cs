@@ -737,5 +737,11 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("CodeGen_Info_ComputedColumns", resourceCulture);
             }
         }
+
+        public static string CodeGen_Warning_NotNullComputedColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_NotNullComputedColumns", resourceCulture);
+            }
+        }
     }
 }

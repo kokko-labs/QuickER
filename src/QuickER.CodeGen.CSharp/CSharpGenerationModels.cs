@@ -605,6 +605,20 @@ internal sealed class CSharpMappingPropertyPair
     /// <summary>EditModel 側プロパティが NULL 許容かどうか</summary>
     public required bool EditModelIsNullable { get; init; }
 
+    /// <summary>
+    /// 「入力があるときだけ代入」へ倒す列（行バージョン・計算列・除外された無制限バイナリ）で、
+    /// Entity へ書き戻すときに <c>.Value</c> による取り出しが要るかどうか。
+    /// </summary>
+    /// <remarks>
+    /// EditModel の確定値は値型なら常に <c>Nullable&lt;T&gt;</c> だが Entity 側は NOT NULL なら非 NULL 許容の
+    /// 値型なので、<c>is not null</c> の内側でも素の代入は CS0266（暗黙変換なし）になる。参照型
+    /// （<c>string</c> / <c>byte[]</c> / 値オブジェクト）は同じ条件でも <c>.Value</c> を持たないため対象外で、
+    /// <c>is not null</c> のフロー解析だけで素の代入が成立する。
+    /// 通常列は同条件で <c>Required(...)</c> を通すためこのフラグを見ない（必須検証を通す列と、
+    /// 未入力が正常な列とで意味論が違う）。
+    /// </remarks>
+    public required bool NullableValueNeedsUnwrap { get; init; }
+
     /// <summary>byte[] 系プロパティかどうか</summary>
     public required bool IsBinary { get; init; }
 

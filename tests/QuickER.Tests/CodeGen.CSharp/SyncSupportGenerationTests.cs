@@ -300,10 +300,11 @@ public class SyncSupportGenerationTests
         // サーバー側（SQL Server）: 昇順・上限つき・NULL アンカー/上限を「制約なし」として外す形。
         // 除外列（attachment）を持つ sync_orders は明示列挙になり、その列だけが落ちる
         // ＝「除外列は行の転送に載らない」という意味論はこの列挙で成立している。
+        // 計算列（summary）は逆に載る＝行としては転送され、ローカルへ書かれるかどうかは INSERT 側の除外が決める。
         content
             .Should()
             .Contain(
-                "\"SELECT TOP (@batchSize) [order_id], [customer_name], [row_ver] FROM [sync_orders] "
+                "\"SELECT TOP (@batchSize) [order_id], [customer_name], [row_ver], [summary] FROM [sync_orders] "
                     + "WHERE (@anchor IS NULL OR [row_ver] > CAST(@anchor AS binary(8))) "
                     + "AND (@ceiling IS NULL OR [row_ver] < CAST(@ceiling AS binary(8))) "
                     + "ORDER BY [row_ver]\""

@@ -521,6 +521,9 @@ public class RuntimeTestMatrixTests
         // --- 計算列・生成列 ---
         new("SqlServerComputedColumnRuntimeTests", "ComputedColumn", Backend.AdoSqlServer),
         new("SqliteComputedColumnRuntimeTests", "ComputedColumn", Backend.AdoSqlite),
+        // 「図から作った DDL」を当てた側（＝式を持たない普通の列になるミラー）の両アーム:
+        // NULL 許容なら書けて NULL のまま読める（逃げ道）／NOT NULL なら NOT NULL 制約で落ちる（正しい失敗）
+        new("SqliteComputedColumnDiagramDdlRuntimeTests", "ComputedColumn", Backend.AdoSqlite),
         new("SyncSqliteRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         // 同期支援 × 値オブジェクト（ミラー版・キーが VO 型になる経路）
         new("SyncVoRuntimeTests", "SyncSupport", Backend.AdoSqlite),

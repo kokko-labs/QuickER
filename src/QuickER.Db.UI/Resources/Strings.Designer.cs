@@ -689,5 +689,17 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string Db_ImportWarningDisabledConstraintExcluded {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningDisabledConstraintExcluded", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportWarningTemporalHistoryTableExcluded {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningTemporalHistoryTableExcluded", resourceCulture);
+            }
+        }
+
     }
 }

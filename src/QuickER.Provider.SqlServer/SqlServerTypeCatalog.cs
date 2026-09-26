@@ -176,6 +176,15 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
             return false;
         }
 
+        // 長さを要する文字列・バイナリ種別で長さが無い正規型は書き出さない（変換不能一覧に載せる）。
+        // SQL Server は長さを省いた varchar / nvarchar / binary / varbinary を CREATE TABLE で
+        // 黙って長さ 1 として作るため、true を返すと「1 文字しか入らない列」を無言で生む。
+        // 負のスケールと同じ「実行できない／意味の違う DDL を黙って作らない」線引き
+        if (CanonicalTypeToken.HasLengthArgument(canonical.Kind) && canonical.Length is null)
+        {
+            return false;
+        }
+
         switch (canonical.Kind)
         {
             case CanonicalTypeKind.Boolean:

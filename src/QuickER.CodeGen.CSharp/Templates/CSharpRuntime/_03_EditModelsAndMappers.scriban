@@ -2958,7 +2958,7 @@ public sealed partial class {{ mapper.class_name }}
         // The database generates this column, so an absent input keeps the entity's current value.
         if (editModel.{{ prop.property_name }} is not null)
         {
-            entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
+            entity.{{ prop.property_name }} = editModel.{{ prop.property_name }}{{ if prop.nullable_value_needs_unwrap }}.Value{{ end }};
         }
 
 {{ else if prop.is_computed }}
@@ -2966,7 +2966,7 @@ public sealed partial class {{ mapper.class_name }}
         // keeps the entity's current value (it is left out of INSERT and UPDATE either way).
         if (editModel.{{ prop.property_name }} is not null)
         {
-            entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
+            entity.{{ prop.property_name }} = editModel.{{ prop.property_name }}{{ if prop.nullable_value_needs_unwrap }}.Value{{ end }};
         }
 
 {{ else if prop.is_excluded_unbounded_binary }}
@@ -2974,7 +2974,7 @@ public sealed partial class {{ mapper.class_name }}
         // the unfetched state stays as it is and the update leaves the stored blob untouched.
         if (editModel.{{ prop.property_name }} is not null)
         {
-            entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
+            entity.{{ prop.property_name }} = editModel.{{ prop.property_name }}{{ if prop.nullable_value_needs_unwrap }}.Value{{ end }};
         }
 
 {{ else if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}{{ if prop.is_primary_key }}        entity.{{ prop.property_name }} = Required(editModel.{{ prop.property_name }}, nameof(editModel.{{ prop.property_name }}));

@@ -9,7 +9,7 @@ Because the diagram and the database round-trip in both directions, running an i
 
 | DBMS | Schema import | Diff sync | DDL generation | Dialect switch | Notes |
 |---|:-:|:-:|:-:|:-:|---|
-| SQL Server | ✅ | ✅ | ✅ | ✅ | Descriptions sync with extended properties (MS_Description) |
+| SQL Server | ✅ | ✅ | ✅ | ✅ | 2016 and later. Descriptions sync with extended properties (MS_Description) |
 | PostgreSQL | ✅ | ✅ | ✅ | ✅ | 13 and later. Descriptions sync with `COMMENT ON` |
 | MySQL | ✅ | ✅ | ✅ | ✅ | 8.0 and later (MariaDB is not supported). Descriptions sync with `COMMENT` clauses |
 | Oracle | ✅ | ✅ | ✅ | ✅ | 19c and later. Descriptions sync with `COMMENT ON` |
@@ -118,7 +118,11 @@ Each dialect imports one scope, and objects outside it are not visible to the im
 
 A foreign key that points outside this scope cannot become a relationship, because its parent table is not in the diagram.
 Such a key is skipped and reported (see below) rather than dropped silently.
-On Oracle, constraints that are `DISABLE`d are not imported either: a disabled constraint enforces nothing, so importing it would make the diagram claim a guarantee the database does not provide.
+SQLite does not check that a foreign key's parent table exists when the table is created, so a database can carry keys that point at a table that is not there; those are treated the same way.
+A dot in a SQLite table name is part of the name rather than a schema qualifier, because the import only ever looks at the single connected file.
+
+Constraints that are disabled are not imported either (`DISABLE` on Oracle, `NOCHECK CONSTRAINT` on SQL Server): a disabled constraint enforces nothing, so importing it would make the diagram claim a guarantee the database does not provide.
+A SQL Server foreign key added `WITH NOCHECK` but currently enabled *is* imported, because it is enforced from then on.
 
 #### Import warnings
 
@@ -127,7 +131,8 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
 
 - A PostgreSQL **domain type** column is imported as its base type.
   The diagram has no notion of domains, so the domain's `CHECK` constraint is lost
-- A **foreign key that points outside the imported scope** is skipped
+- A **foreign key that points outside the imported scope** is skipped (on SQLite this covers a key whose parent table does not exist)
+- A **disabled constraint** (`DISABLE` on Oracle, a foreign key turned off with `NOCHECK CONSTRAINT` on SQL Server) is not imported
 - A table whose **columns could not be read at all** is imported without columns
 - One of two tables whose **names differ only in letter case** is skipped, because the import cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, and SQL Server does in a database with a case-sensitive collation)
 - A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
@@ -135,6 +140,10 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
   Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))
 - A SQLite **virtual table** (FTS5, R*Tree and the like) is not imported.
   It cannot be represented as an ordinary table; its shadow tables are excluded along with it, and each virtual table is reported once
+- A SQL Server **temporal table** is imported as its current-data table only.
+  The history table is an attachment the system maintains for it rather than an entity of its own.
+  The current table's period columns (`GENERATED ALWAYS AS ROW START / END`) are values the database produces, so they are treated as computed columns, and a `HIDDEN` period column is imported the same way.
+  Generated code leaves those columns out of its writes, so inserts and updates against the current table work as they are (see [computed columns](code-generation.md#computed--generated-columns))
 - A column whose **data type cannot be written into SQL safely** is named, along with the type text.
   The import keeps it, but DDL generation and schema sync refuse the *whole diagram* until it is corrected, because a type is neither an identifier nor a string literal and there is nowhere to quote it (see [What a data type may contain](#what-a-data-type-may-contain)).
   SQLite stores whatever type text a table was declared with, and PostgreSQL reports a type name that needs quoting with the quotes attached, so either can produce one
@@ -320,6 +329,9 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - The switch and the type conversions are undone together with a single Undo
 - A `numeric(10,-2)` / `NUMBER(10,-2)` column (a scale that rounds to hundreds) converts only between PostgreSQL and Oracle.
   SQL Server and MySQL reject a negative scale outright, and SQLite's `DECIMAL` is an affinity that carries no rounding at all, so such a column is reported as unconvertible on those three rather than written out as DDL that will not run
+- A string or binary column declared without a length (PostgreSQL's `varchar`, SQLite's `TEXT` and the like) cannot move to SQL Server, MySQL or Oracle and is listed as well.
+  MySQL and Oracle reject a `varchar` / `VARCHAR2` with no length, and SQL Server quietly creates a **one-character** column when the length is omitted.
+  Give the column a length in the source diagram before switching
 - SQL Server's `rowversion` / `timestamp` becomes a plain `BLOB` on SQLite, and its NOT NULL is lifted at the same time (SQLite assigns nothing, so a locally created row has no version until a sync writes one).
   The conversion is one-way: converting that `BLOB` back to SQL Server yields `varbinary(max)`, not a row version.
   See [Multi-target repositories](code-generation.md#multi-target-repositories-sqlserver--sqlite) for what the column means on each side, and [Bidirectional sync support](code-generation.md#bidirectional-sync-support---generate-sync-support) for generating the code that keeps the two databases in step.

@@ -18,6 +18,12 @@ namespace QuickER.Provider;
 /// （<see cref="TableConstraintLineBuilder"/> が制約行に対して担うのと同じ役割）。
 /// </para>
 /// <para>
+/// NOT NULL の計算列だけは 1 文を足す。生成コードは計算列を INSERT の対象から外す（式が入るはずの列なので
+/// 正しい）ため、式を足すまでは<b>その列の NOT NULL 制約でそのテーブルへの追加が必ず失敗する</b>。
+/// 式のない普通の列として作った直後がいちばん踏みやすいので、DDL を読む時点で告げる。
+/// NULL 許容の計算列の出力は従来どおり（バイト不変）。
+/// </para>
+/// <para>
 /// 列名は DB 由来の任意文字列なので <see cref="SqlComment.Sanitize"/> を通す（コメント行の突き破り対策）。
 /// 文面は英語が正本（生成 SQL の固定文と同じ規則）。
 /// </para>
@@ -31,10 +37,21 @@ public static class ComputedColumnComment
     {
         ArgumentNullException.ThrowIfNull(column);
 
-        return column.IsComputed
-            ? $"-- Computed column '{SqlComment.Sanitize(column.Name)}': "
-                + "the expression is not part of the diagram; add it to the schema by hand."
-            : null;
+        if (!column.IsComputed)
+        {
+            return null;
+        }
+
+        var note =
+            $"-- Computed column '{SqlComment.Sanitize(column.Name)}': "
+            + "the expression is not part of the diagram; add it to the schema by hand.";
+
+        // NOT NULL のまま式を足さないと、生成コードの INSERT がこの列を送らないため追加が必ず失敗する
+        return column.IsNullable
+            ? note
+            : note
+                + " Until the expression is added, generated INSERT statements leave this column out"
+                + " and fail on its NOT NULL constraint.";
     }
 
     /// <summary>計算列なら注意コメント行を指定インデント付きで書き出す（そうでなければ何もしない）</summary>

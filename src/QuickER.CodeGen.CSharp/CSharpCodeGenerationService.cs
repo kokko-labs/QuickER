@@ -277,6 +277,8 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
+        AddNotNullComputedColumnWarning(model, options, diagnostics);
+
         // 型表記が中立トークン経由で復元できない列（[DbColumnMeta] へ元の表記も刻んだ列）を Info 診断で通知する。
         // 「同義だが綴りの違う型」は生成物を読んでも気づけず、コード取込の往復で図の型表記が変わる／変わらない
         // の分かれ目になるため、どの列が特別扱いなのかを生成時に一度だけ明示する。属性を出さない構成
@@ -1786,6 +1788,69 @@ public sealed class CSharpCodeGenerationService
     /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsComputed"/> のものを対象にする
     /// （マーカー属性 <c>[ComputedColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
     /// </remarks>
+    /// <summary>
+    /// NOT NULL の計算列を、式を評価しないエンジンへも書く構成（双方向同期支援・マルチターゲット）のときだけ
+    /// Warning 診断で名指しする。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 計算列は方言に依らず INSERT / UPDATE の対象から外れる（式が値を作るので正しい）。ところが式を持つのは
+    /// 取込元の DB だけで、ミラー（マルチターゲットのもう一方の方言）やローカル（双方向同期）には普通の列として
+    /// 作られる——そこへ行を追加すると、送られない列の NOT NULL 制約で<b>必ず</b>落ちる。生成物を読んでも
+    /// 気づけず実行時に初めて分かる乖離なので、生成時に予告する。
+    /// </para>
+    /// <para>
+    /// Error にはしない。ミラー側のスキーマを既定値や同じ式で整えてあれば正しく動く構成が実在し、
+    /// 図からはそれを判定できないため（生成を止めると正当な使い方まで塞ぐ）。
+    /// </para>
+    /// </remarks>
+    private static void AddNotNullComputedColumnWarning(
+        CSharpGenerationModel model,
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        // 「式を評価しないエンジンへも同じ行を書く」構成だけが対象。単一方言・同期なしの構成では、
+        // 計算列を持つ DB は式を持つ当の DB だけなので予告するものが無い。
+        // 同期支援は現状マルチターゲット（sqlserver+sqlite ちょうど 2 つ）でしか有効にならないため
+        // 第 1 項は第 2 項に含まれるが、2 つの理由を明示的に並べる（同期の前提が緩んだとき、
+        // 警告が黙って落ちるのを避ける）
+        var writesToMirror =
+            options.GenerateSyncSupport
+            || (options.GenerateRepositories && options.EffectiveRepositoryDialects.Count >= 2);
+
+        if (!writesToMirror)
+        {
+            return;
+        }
+
+        var lines = model
+            .EntityClasses.SelectMany(entity =>
+                entity
+                    .Properties.Where(property => property.IsComputed && !property.IsNullable)
+                    .Select(property =>
+                        $"{entity.ClassName}.{property.PropertyName} ({entity.TableName}.{property.ColumnName})"
+                    )
+            )
+            .ToList();
+
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる
+        diagnostics.Add(
+            GenerationDiagnostic.Warning(
+                string.Format(
+                    Strings.CodeGen_Warning_NotNullComputedColumns,
+                    Environment.NewLine
+                        + string.Join(Environment.NewLine, lines.Select(l => "  " + l))
+                )
+            )
+        );
+    }
+
     private static IReadOnlyList<string> BuildComputedColumnLines(CSharpGenerationModel model) =>
         model
             .EntityClasses.SelectMany(entity =>

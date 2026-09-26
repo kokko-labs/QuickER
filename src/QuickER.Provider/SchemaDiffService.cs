@@ -6,7 +6,16 @@ using QuickER.Provider.Resources;
 namespace QuickER.Provider;
 
 /// <summary>既存 DB スキーマと現在のダイアグラムを比較して <see cref="SchemaDiff"/> を生成するサービス</summary>
-/// <remarks>リネームは扱わず「同名 = 同一」を前提とする 名称が変われば削除＋追加として検出する</remarks>
+/// <remarks>
+/// <para>リネームは扱わず「同名 = 同一」を前提とする 名称が変われば削除＋追加として検出する</para>
+/// <para>
+/// 計算列（<see cref="Column.IsComputed"/>）だけは <b>NULL 許容の差を見ない</b>。実 DB の計算列の NULL 許容は
+/// 式から決まる性質で、図がそれを DB へ強制することはできない（意味モデルは式を持たない）。しかも
+/// 「NOT NULL の計算列はミラー側の DB へ書けない」問題の逃げ道が<b>図で NULL 許容にする</b>ことなので、
+/// 比較すると逃げ道を採った瞬間に取込元の DB へ偽の <c>ALTER COLUMN</c>（NOT NULL → NULL）が出る。
+/// 型など他の差は従来どおり検出する。
+/// </para>
+/// </remarks>
 public class SchemaDiffService
 {
     /// <summary>DB 現状とダイアグラムの目標状態を突き合わせて差分項目を計算する</summary>
@@ -200,10 +209,14 @@ public class SchemaDiffService
                 }
                 else
                 {
-                    if (
-                        !IsSameType(lcol.DataType, tcol.DataType)
-                        || lcol.IsNullable != tcol.IsNullable
-                    )
+                    // 計算列の NULL 許容は図が DB へ強制できる性質ではない（実 DB の NULL 許容は式が決める）。
+                    // 比較すると、NOT NULL の計算列を図側で NULL 許容へ逃がした瞬間に取込元の DB へ
+                    // 「NOT NULL → NULL」の偽 AlterColumn が出る。型など他の差は従来どおり見る
+                    var compareNullability = !tcol.IsComputed;
+                    var nullabilityChanged =
+                        compareNullability && lcol.IsNullable != tcol.IsNullable;
+
+                    if (!IsSameType(lcol.DataType, tcol.DataType) || nullabilityChanged)
                     {
                         var changeParts = new List<string>();
 
@@ -214,7 +227,7 @@ public class SchemaDiffService
                             );
                         }
 
-                        if (lcol.IsNullable != tcol.IsNullable)
+                        if (nullabilityChanged)
                         {
                             changeParts.Add(
                                 string.Format(

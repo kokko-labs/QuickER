@@ -383,4 +383,10 @@
   <data name="Db_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
     <value>{0}.{1}: 通常の列として取り込みました。図は生成列の式（{2}）を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
   </data>
+  <data name="Db_ImportWarningDisabledConstraintExcluded" xml:space="preserve">
+    <value>{0}: {2} 制約「{1}」は無効化されており何も強制しないため、取り込みませんでした。</value>
+  </data>
+  <data name="Db_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
+    <value>{0}: システムバージョニングされたテーブル「{1}」の履歴表のため取り込みませんでした。単独のエンティティとしては取り込みません。</value>
+  </data>
 </root>

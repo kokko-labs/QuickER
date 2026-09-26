@@ -299,7 +299,7 @@
     <value>Named query '{0}': parameter name '{1}' hides the repository's Query() member and cannot be used.</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
-    <value>Named query '{0}': the type token '{1}' could not be resolved.</value>
+    <value>Named query '{0}': the type token '{1}' could not be resolved. String and binary types need a length (for example 'string(50)' or 'fixedstring(10)').</value>
   </data>
   <data name="CodeGen_Query_ConditionInvalid" xml:space="preserve">
     <value>Named query '{0}', condition: {1}</value>
@@ -399,5 +399,8 @@
   </data>
   <data name="CodeGen_Info_ComputedColumns" xml:space="preserve">
     <value>Excluded computed columns from INSERT / UPDATE:{0}</value>
+  </data>
+  <data name="CodeGen_Warning_NotNullComputedColumns" xml:space="preserve">
+    <value>Computed columns that are NOT NULL cannot be written by engines that do not evaluate the expression (the mirror side of a multi-target build, and the local side of bidirectional sync), so inserting a row there fails on the NOT NULL constraint. Either make the column nullable in the diagram (the mirror then keeps NULL for it) or leave the table out of synchronization (that table is then not synchronized). Affected columns:{0}</value>
   </data>
 </root>

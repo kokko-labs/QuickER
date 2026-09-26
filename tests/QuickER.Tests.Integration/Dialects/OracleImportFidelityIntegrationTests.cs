@@ -158,6 +158,27 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
             .Columns.Single(c => c.Name == "ID")
             .IsPrimaryKey.Should()
             .BeTrue();
+
+        // 除外は無言ではなく、3 種の制約それぞれが DisabledConstraintExcluded として名指しされる
+        var disabledWarnings = result
+            .Warnings.Where(w => w.Kind == SchemaImportWarningKind.DisabledConstraintExcluded)
+            .ToList();
+        disabledWarnings.Should().HaveCount(3);
+        disabledWarnings
+            .Should()
+            .ContainSingle(w =>
+                w.TableName == "CHILD_T" && w.Subject == "PK_CHILD_T" && w.Detail == "PRIMARY KEY"
+            );
+        disabledWarnings
+            .Should()
+            .ContainSingle(w =>
+                w.TableName == "CHILD_T" && w.Subject == "UQ_CHILD_T" && w.Detail == "UNIQUE"
+            );
+        disabledWarnings
+            .Should()
+            .ContainSingle(w =>
+                w.TableName == "CHILD_T" && w.Subject == "FK_CHILD_T" && w.Detail == "FOREIGN KEY"
+            );
     }
 
     /// <summary>
