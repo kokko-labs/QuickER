@@ -17,6 +17,13 @@ namespace QuickER.Provider.Sqlite;
 /// 内部テーブルや <c>sqlite_</c> で始まるシステムテーブルは除外する。
 /// </para>
 /// <para>
+/// ビュー・仮想テーブル（FTS5 / R*Tree 等）・付属表（シャドウテーブル）は対象外。<c>sqlite_master</c> の
+/// <c>type</c> 列だけでは仮想テーブル本体も付属表も通常テーブルと同じ <c>'table'</c> として現れるため、
+/// <c>PRAGMA table_list</c>（SQLite 3.37 以降・本リポジトリの同梱 SQLitePCLRaw.bundle_e_sqlite3 3.0.5 が
+/// 満たす。実測 sqlite_version() = 3.53.4）が返す種別（<c>'table'</c> / <c>'view'</c> / <c>'shadow'</c> /
+/// <c>'virtual'</c>）で判別し、<c>'virtual'</c> は取込から除外して警告を積み、<c>'shadow'</c> は無言で除外する。
+/// </para>
+/// <para>
 /// 宣言型（例: <c>NVARCHAR(50)</c>）は verbatim に保持されるため、そのままモデルの
 /// <see cref="Column.DataType"/> に格納する（<see cref="SqliteTypeCatalog"/> が読み戻せる）。
 /// 参照先列集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する（共有部品に委譲）。
@@ -79,13 +86,23 @@ public class SqliteSchemaImporter : ISchemaImporter
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var (tables, tableCreateSql) = await LoadTablesAsync(conn, commandTimeoutSeconds, ct)
+        var (tables, tableCreateSql, tableWarnings) = await LoadTablesAsync(
+                conn,
+                commandTimeoutSeconds,
+                ct
+            )
             .ConfigureAwait(false);
 
-        // 各テーブルの列・主キーは PRAGMA table_info でまとめて取得する
+        // 各テーブルの列・主キーは PRAGMA table_xinfo でまとめて取得する
         foreach (var entry in tables.Values)
         {
-            await LoadColumnsAndPrimaryKeyAsync(conn, entry, commandTimeoutSeconds, ct)
+            await LoadColumnsAndPrimaryKeyAsync(
+                    conn,
+                    entry,
+                    tableWarnings,
+                    commandTimeoutSeconds,
+                    ct
+                )
                 .ConfigureAwait(false);
         }
 
@@ -98,8 +115,12 @@ public class SqliteSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
 
         // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
-        var warnings = SchemaImportWarnings
-            .DetectUnemittableColumnTypes(tables.Values.Select(entry => entry.Entity))
+        var warnings = tableWarnings
+            .Concat(
+                SchemaImportWarnings.DetectUnemittableColumnTypes(
+                    tables.Values.Select(entry => entry.Entity)
+                )
+            )
             .ToList();
 
         return new SchemaResult
@@ -117,7 +138,9 @@ public class SqliteSchemaImporter : ISchemaImporter
     /// <summary>通常テーブル一覧を取得するクエリ</summary>
     /// <remarks>
     /// type='table' の実テーブルのみを対象とし、SQLite 内部テーブル（<c>sqlite_</c> 接頭辞）を除外する。
-    /// ビュー・仮想テーブルは対象外。
+    /// ビューは <c>type='view'</c> のため元から対象外だが、仮想テーブル本体・付属表（シャドウテーブル）は
+    /// ここでは <c>type='table'</c> として一緒に取れてしまう（区別は <see cref="LoadTablesAsync"/> が
+    /// <c>PRAGMA table_list</c> 種別で行う）。
     /// </remarks>
     private const string TablesSql =
         @"
@@ -131,20 +154,50 @@ ORDER BY name;";
     /// <c>CREATE TABLE</c> 文の原文（<c>sqlite_master.sql</c>）も同時に持ち帰る。意味モデルには載らない
     /// 列レベル属性（<c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列）が
     /// テーブル再構築で失われることを、同期の実行前に警告するための材料になる。
+    /// <para>
+    /// <c>sqlite_master</c> 上では仮想テーブル本体・付属表（シャドウテーブル）も通常テーブルと同じ
+    /// <c>type='table'</c> で現れるため、先に取得した <see cref="LoadTableTypesAsync"/> の
+    /// <c>PRAGMA table_list</c> 種別で除外する。仮想テーブル本体は
+    /// <see cref="SchemaImportWarningKind.VirtualTableExcluded"/> で名指しし、付属表は無言で除外する
+    /// （付属表ごとの警告は本体の警告 1 件に代表させる）。
+    /// </para>
     /// </remarks>
     private static async Task<(
         Dictionary<string, SchemaTableEntry> Tables,
-        Dictionary<string, string> CreateSql
+        Dictionary<string, string> CreateSql,
+        List<SchemaImportWarning> Warnings
     )> LoadTablesAsync(SqliteConnection conn, int commandTimeoutSeconds, CancellationToken ct)
     {
+        var tableTypes = await LoadTableTypesAsync(conn, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
+
         var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
         var createSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var warnings = new List<SchemaImportWarning>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var name = reader.GetString(0);
+
+            if (tableTypes.TryGetValue(name, out var type))
+            {
+                if (string.Equals(type, "virtual", StringComparison.OrdinalIgnoreCase))
+                {
+                    warnings.Add(
+                        new SchemaImportWarning(SchemaImportWarningKind.VirtualTableExcluded, name)
+                    );
+                    continue;
+                }
+
+                if (string.Equals(type, "shadow", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 付属表は本体の VirtualTableExcluded 警告 1 件が代表するため無言で除外する
+                    continue;
+                }
+            }
+
             var entry = new SchemaTableEntry
             {
                 Key = name,
@@ -159,25 +212,74 @@ ORDER BY name;";
             }
         }
 
-        return (dict, createSql);
+        return (dict, createSql, warnings);
     }
 
-    /// <summary>1 テーブルの列定義と主キーを PRAGMA table_info から読み込む</summary>
+    /// <summary>
+    /// <c>PRAGMA table_list</c> から main スキーマの名前→種別（<c>table</c> / <c>view</c> / <c>shadow</c> /
+    /// <c>virtual</c>）の対応を読み込む。
+    /// </summary>
     /// <remarks>
-    /// table_info の列は cid / name / type（宣言型）/ notnull / dflt_value / pk（PK なら構成順の 1 始まり）。
+    /// <c>schema</c> 列は main / temp の 2 系統を返すため main に限定する（一時テーブルは取込対象外）。
+    /// </remarks>
+    private static async Task<Dictionary<string, string>> LoadTableTypesAsync(
+        SqliteConnection conn,
+        int commandTimeoutSeconds,
+        CancellationToken ct
+    )
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await using var cmd = DbCommands.Create(conn, "PRAGMA table_list;", commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var schema = reader.GetString(0);
+
+            if (!string.Equals(schema, "main", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var name = reader.GetString(1);
+            var type = reader.GetString(2);
+            result[name] = type;
+        }
+
+        return result;
+    }
+
+    /// <summary>1 テーブルの列定義と主キーを PRAGMA table_xinfo から読み込む</summary>
+    /// <remarks>
+    /// <para>
+    /// table_xinfo の列は cid / name / type（宣言型）/ notnull / dflt_value /
+    /// pk（PK なら構成順の 1 始まり）/ hidden。
     /// 宣言型はそのまま <see cref="Column.DataType"/> へ保持する（SQLite は verbatim に保存するため）。
     /// 行は cid（列定義順）で返るため、主キーの構成順は pk 値の昇順へ並べ替えてから記録する。
+    /// </para>
+    /// <para>
+    /// <c>table_info</c> ではなく <c>table_xinfo</c> を使うのは、前者が<b>生成列を 1 行も返さない</b>ため
+    /// （実測で確認）。生成列は hidden = 2（VIRTUAL）/ 3（STORED）として xinfo にだけ現れ、
+    /// <see cref="Column.IsComputed"/> を立てて取り込む。hidden = 1 は仮想テーブルの隠し列で、
+    /// 仮想テーブル自体を取り込まない（<see cref="SchemaImportWarningKind.VirtualTableExcluded"/>）以上
+    /// 通常は現れないが、通常テーブルの列でない以上ここでも取り込まない。
+    /// </para>
+    /// <para>
+    /// 生成列の式は PRAGMA からは取れない（<c>dflt_value</c> は NULL）ため、警告の
+    /// <c>Detail</c> は空になる。
+    /// </para>
     /// </remarks>
     private static async Task LoadColumnsAndPrimaryKeyAsync(
         SqliteConnection conn,
         SchemaTableEntry entry,
+        List<SchemaImportWarning> warnings,
         int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         await using var cmd = DbCommands.Create(
             conn,
-            $"PRAGMA table_info({SqliteIdentifier.Quote(entry.Key)});",
+            $"PRAGMA table_xinfo({SqliteIdentifier.Quote(entry.Key)});",
             commandTimeoutSeconds
         );
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -191,6 +293,16 @@ ORDER BY name;";
             var declaredType = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
             var notNull = reader.GetInt64(3) != 0;
             var pkOrdinal = reader.GetInt64(5);
+            var hidden = reader.GetInt64(6);
+
+            // hidden = 1 は仮想テーブルの隠し列＝通常テーブルの列ではないため取り込まない
+            if (hidden == 1)
+            {
+                continue;
+            }
+
+            // hidden = 2（VIRTUAL）/ 3（STORED）は生成列
+            var isComputed = hidden is 2 or 3;
 
             var col = new Column
             {
@@ -201,7 +313,19 @@ ORDER BY name;";
                 IsPrimaryKey = pkOrdinal > 0,
                 // PK 列は NULL 非許容へ補正する
                 IsNullable = pkOrdinal > 0 ? false : !notNull,
+                IsComputed = isComputed,
             };
+
+            if (isComputed)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ComputedColumnExpressionLost,
+                        entry.Entity.TableName,
+                        colName
+                    )
+                );
+            }
 
             entry.Entity.Columns.Add(col);
             entry.ColumnsByName[colName] = col;

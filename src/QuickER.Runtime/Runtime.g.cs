@@ -180,6 +180,28 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 }
 
 /// <summary>
+/// Marker attribute for computed / generated columns - columns the DB derives from an expression and that accept no explicit write
+/// (SQL Server's <c>AS (expression)</c>, the <c>GENERATED ALWAYS AS</c> columns of MySQL / PostgreSQL / SQLite, and Oracle's virtual columns).
+/// It is applied regardless of generation options, because being computed is a property of the column itself rather than of a dialect.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The QuickER Repository leaves such columns out of INSERT / BulkInsert / UPDATE on every dialect; they are still read by SELECT,
+/// so the derived value is available on the entity. Writing one explicitly fails at runtime (SQL Server reports that the column
+/// cannot be modified because it is either a computed column or the result of a UNION operator).
+/// </para>
+/// <para>
+/// The expression itself is not part of the diagram, so DDL generated from that diagram creates an ordinary column instead:
+/// the schema has to be given the expression by hand. The in-memory implementation does not compute anything either -
+/// the property keeps whatever value was assigned to it.
+/// </para>
+/// </remarks>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class ComputedColumnAttribute : Attribute
+{
+}
+
+/// <summary>
 /// Custom attribute that declares one UNIQUE constraint of the table on an entity class (a dialect-neutral definition metadata).
 /// The arguments are the entity property names that make up the constraint, in declaration order.
 /// It turns the generated entity into a self-describing document of the DB definition, allowing the constraint to be recovered via reflection.

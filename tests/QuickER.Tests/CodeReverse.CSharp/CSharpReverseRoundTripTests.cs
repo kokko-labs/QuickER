@@ -19,13 +19,14 @@ namespace QuickER.Tests.CodeReverse.CSharp;
 /// </remarks>
 public class CSharpReverseRoundTripTests
 {
-    /// <summary>比較用の列射影（名前・型・PK・NULL 許容・説明）</summary>
+    /// <summary>比較用の列射影（名前・型・PK・NULL 許容・説明・計算列）</summary>
     private sealed record ColumnProjection(
         string Name,
         string DataType,
         bool IsPrimaryKey,
         bool IsNullable,
-        string Description
+        string Description,
+        bool IsComputed
     );
 
     /// <summary>比較用の UNIQUE 制約射影（実効制約名・宣言順の構成列名）</summary>
@@ -259,6 +260,62 @@ public class CSharpReverseRoundTripTests
     }
 
     /// <summary>
+    /// 計算列・生成列（<see cref="Column.IsComputed"/>）が <c>[ComputedColumn]</c> として往復する。
+    /// </summary>
+    /// <remarks>
+    /// 往復しないと「コードから図へ戻した瞬間に計算列が普通の列に化け、次の生成物がその列へ書き込む」形で
+    /// 静かに壊れる。計算列でない列に属性が付かないこと（＝復元が false へ戻ること）も同じ図で確かめる。
+    /// </remarks>
+    [Fact(DisplayName = "計算列が [ComputedColumn] として往復で一致する")]
+    public void RoundTrip_ComputedColumn_Matches()
+    {
+        var itemsId = Guid.NewGuid();
+
+        var items = new Entity
+        {
+            Id = itemsId,
+            TableName = "items",
+            Columns =
+            {
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "item_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "qty",
+                    DataType = "int",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "total",
+                    DataType = "decimal(21,2)",
+                    IsNullable = true,
+                    IsComputed = true,
+                },
+            },
+        };
+
+        var diagram = new ErDiagram { TargetDbms = "sqlserver", Entities = { items } };
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Computed",
+            OutputFileName = "Computed.g.cs",
+            GenerateRepositories = true,
+            IncludeDataAnnotations = true,
+        };
+
+        AssertRoundTrips(diagram, options);
+    }
+
+    /// <summary>
     /// UNIQUE 制約（単一・複合／実名・名前なし）と外部キーメタデータ（制約名・ON DELETE / ON UPDATE）を
     /// 持つ図が往復する。制約は <c>[UniqueConstraint]</c>、参照アクションは <c>[NavigationReference]</c> の
     /// 名前付き引数として往復する。
@@ -457,7 +514,8 @@ public class CSharpReverseRoundTripTests
                 column.DataType,
                 column.IsPrimaryKey,
                 column.IsNullable,
-                column.Description
+                column.Description,
+                column.IsComputed
             ))
             .ToList();
 

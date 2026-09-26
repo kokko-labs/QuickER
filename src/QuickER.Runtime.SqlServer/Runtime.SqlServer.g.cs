@@ -2522,15 +2522,25 @@ public sealed class EntitySaveMetadata
         // A store-generated column doubles as the table's concurrency token; a table carries at most one of them
         var rowVersionProperty =
             storeGeneratedColumns.Count == 0 ? null : storeGeneratedColumns[0];
-        // INSERT / BulkInsert targets are all columns minus store-generated columns (identical to all columns when there are none)
-        var insertProperties =
-            storeGeneratedColumns.Count == 0
-                ? columns
-                : columns.Where(property => !storeGeneratedColumns.Contains(property)).ToList();
-        var nonKeyProperties = selectProperties
+        // Computed / generated columns (ComputedColumnAttribute) are excluded from INSERT / BulkInsert / UPDATE on every
+        // dialect: the database derives them from an expression and rejects an explicit write. Being computed is a property
+        // of the column itself, not of the dialect, so there is no capability gate here. They are still fetched by SELECT
+        var computedColumns = columns
             .Where(property =>
-                property != keyProperty && !storeGeneratedColumns.Contains(property)
+                property.GetCustomAttribute<ComputedColumnAttribute>() is not null
             )
+            .ToList();
+        // Columns the write statements must leave out: store-generated plus computed
+        var readOnlyColumns = storeGeneratedColumns.Count == 0
+            ? computedColumns
+            : storeGeneratedColumns.Concat(computedColumns).ToList();
+        // INSERT / BulkInsert targets are all columns minus those (identical to all columns when there are none)
+        var insertProperties =
+            readOnlyColumns.Count == 0
+                ? columns
+                : columns.Where(property => !readOnlyColumns.Contains(property)).ToList();
+        var nonKeyProperties = selectProperties
+            .Where(property => property != keyProperty && !readOnlyColumns.Contains(property))
             .ToList();
         var tableName = EntitySaveMetadata.QuoteTableName(tableAttribute.Name);
         var keyColumnName = GetColumnName(keyProperty);

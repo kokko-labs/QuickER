@@ -482,6 +482,9 @@ public sealed class CSharpReverseParser
             Description =
                 GetAttributeNamedArgument(property.AttributeLists, "DbColumnMeta", "Description")
                 ?? string.Empty,
+            // 計算列マーカーは属性の有無がそのまま正（付いていない＝計算列でない）。
+            // 生成側はオプションに依らず常に付けるため、フォールバックの推測は置かない
+            IsComputed = HasAttribute(property.AttributeLists, "ComputedColumn"),
         };
     }
 

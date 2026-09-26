@@ -61,6 +61,10 @@ public abstract class DdlGeneratorBase : IDdlGenerator
             for (var i = 0; i < entity.Columns.Count; i++)
             {
                 var col = entity.Columns[i];
+
+                // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
+                ComputedColumnComment.Append(sb, col, "    ");
+
                 // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する。
                 // 列定義の末尾には方言固有の句（MySQL のインライン COMMENT 等）を付ける
                 var line =

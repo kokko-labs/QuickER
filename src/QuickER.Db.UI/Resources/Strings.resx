@@ -374,4 +374,13 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportWarningPartitionDefinitionLost" xml:space="preserve">
     <value>{0}: imported as an ordinary table. The diagram does not model partitioning, so generated DDL creates it unpartitioned.</value>
   </data>
+  <data name="Db_ImportWarningVirtualTableExcluded" xml:space="preserve">
+    <value>{0}: excluded as a virtual table. It cannot be represented as an ordinary table, so its shadow tables were excluded along with it.</value>
+  </data>
+  <data name="Db_ImportWarningComputedColumnExpressionLost" xml:space="preserve">
+    <value>{0}.{1}: imported as an ordinary column. The diagram does not model the generated-column expression, so generated DDL creates a plain column and generated code leaves it out of INSERT / UPDATE.</value>
+  </data>
+  <data name="Db_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
+    <value>{0}.{1}: imported as an ordinary column. The diagram does not model the generated-column expression ({2}), so generated DDL creates a plain column and generated code leaves it out of INSERT / UPDATE.</value>
+  </data>
 </root>

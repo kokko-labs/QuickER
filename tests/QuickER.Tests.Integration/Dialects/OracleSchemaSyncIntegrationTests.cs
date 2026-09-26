@@ -508,6 +508,64 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
         result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
     }
 
+    /// <summary>
+    /// 計算列（<see cref="Column.IsComputed"/>）を含む AddColumn の同期スクリプトが実 DB へ適用されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// Oracle の <c>AppendAddColumn</c> は 1 文＝1 文字列で組み立てるため、計算列の注意コメントは
+    /// ALTER 文と同じ文字列へ<b>前置</b>される（他 4 方言の AppendLine 形と違う唯一の非対称）。
+    /// 実行器の <see cref="OracleSchemaSyncExecutor.SplitStatements"/> は「/」行で文を切り出すので、
+    /// コメント行は ALTER と同じ 1 文として ODP.NET へ渡る＝先頭に行コメントを持つ文が
+    /// そのまま実行できることをここで固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] C: 計算列の AddColumn はコメント前置のまま実 DB へ適用される"
+    )]
+    public async Task SchemaSync_AddComputedColumn_AppliesWithLeadingComment()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var settings = fixture.ToDbConnectionSettings();
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"calc_item\" (\"id\" NUMBER(10) NOT NULL, "
+                + "CONSTRAINT \"PK_calc_item\" PRIMARY KEY (\"id\"));",
+            Ct
+        );
+
+        // 計算列フラグ付きの AddColumn 差分を手組みする（式は図に載らない＝足されるのは普通の列）
+        var computed = Col("total", "NUMBER(21,2)", nullable: true);
+        computed.IsComputed = true;
+        var addColumn = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddColumn,
+            TableName = "calc_item",
+            ColumnName = "total",
+            Column = computed,
+            IsSelected = true,
+        };
+
+        var script = _builder.Build(
+            new SyncPlanner().BuildPlan(new[] { addColumn }, new SyncDialectCapabilities())
+        );
+        script
+            .Should()
+            .Contain("-- Computed column 'total'", "注意コメントが ALTER の直前へ前置される");
+
+        var result = await _executor.ExecuteAsync(settings, script, Ct);
+        result
+            .Committed.Should()
+            .BeTrue($"計算列の AddColumn に失敗: {result.Error}\nSQL:\n{script}");
+
+        // 再取込: 列は普通の列として追加されている（実 DB に式は無い＝IsComputed は立たない）
+        var live = await ImportAsync();
+        var added = live
+            .Entities.Single(e => e.TableName == "calc_item")
+            .Columns.Single(c => c.Name == "total");
+        added.IsComputed.Should().BeFalse();
+    }
+
     /// <summary>図に足した一意制約が実 DB へ追加され、外した一意制約が実 DB から消えることを検証する</summary>
     [Fact(DisplayName = "[Integration] C: 一意制約の追加・削除が実 DB へ反映される")]
     public async Task UniqueConstraintSync_AddsAndDrops()

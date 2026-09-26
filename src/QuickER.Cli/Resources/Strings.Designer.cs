@@ -526,5 +526,23 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_ImportWarningVirtualTableExcluded {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningVirtualTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string Cli_ImportWarningComputedColumnExpressionLost {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningComputedColumnExpressionLost", resourceCulture);
+            }
+        }
+
+        public static string Cli_ImportWarningComputedColumnExpressionLostWithExpression {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningComputedColumnExpressionLostWithExpression", resourceCulture);
+            }
+        }
+
     }
 }

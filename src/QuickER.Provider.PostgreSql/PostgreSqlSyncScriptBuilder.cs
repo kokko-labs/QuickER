@@ -50,6 +50,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         for (var i = 0; i < e.Columns.Count; i++)
         {
             var col = e.Columns[i];
+
+            // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
+            ComputedColumnComment.Append(sb, col, "    ");
             var line =
                 $"    {PgIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
@@ -71,6 +74,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     protected override void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
+
+        // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
+        ComputedColumnComment.Append(sb, col, string.Empty);
         sb.AppendLine(
             $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
                 + $"ADD COLUMN {PgIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"

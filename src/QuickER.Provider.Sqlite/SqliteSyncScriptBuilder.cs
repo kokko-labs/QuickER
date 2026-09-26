@@ -215,6 +215,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // 列定義。後続の列行または末尾制約行が続く場合はカンマで区切る
         for (var i = 0; i < definition.Columns.Count; i++)
         {
+            // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
+            ComputedColumnComment.Append(sb, definition.Columns[i], "    ");
+
             var line = SqliteDdlGenerator.BuildColumnDefinition(definition.Columns[i]);
             var hasMoreColumns = i < definition.Columns.Count - 1;
 
@@ -241,6 +244,10 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     protected override void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
+
+        // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
+        ComputedColumnComment.Append(sb, col, string.Empty);
+
         // 列定義の組み立ては DDL 生成と共有する（先頭インデントのみ除去してインライン化）
         var definition = SqliteDdlGenerator.BuildColumnDefinition(col).TrimStart();
         sb.AppendLine(

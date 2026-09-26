@@ -394,4 +394,10 @@
   <data name="ApiDoc_Di_InMemory" xml:space="preserve">
     <value>Registers the in-memory Repository with the DI container (for prototyping and testing).</value>
   </data>
+  <data name="CodeGen_Error_PrimaryKeyComputedColumn" xml:space="preserve">
+    <value>Column '{1}' of table '{0}' is both the primary key and a computed column. The database derives a computed column from an expression and accepts no explicit write, so it is left out of every INSERT and UPDATE the repositories issue: the generated INSERT would send no key at all, and the row's identity would rest on a value that changes whenever the columns behind the expression change. Give the primary key a column of its own.</value>
+  </data>
+  <data name="CodeGen_Info_ComputedColumns" xml:space="preserve">
+    <value>Excluded computed columns from INSERT / UPDATE:{0}</value>
+  </data>
 </root>

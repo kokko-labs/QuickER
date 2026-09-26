@@ -342,6 +342,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                     ),
                     // DB 採番の行バージョン列は「入力があるときだけ代入」へ倒す（未入力を欠落として例外にしない）
                     IsRowVersion = editModelProperty.IsRowVersion,
+                    // 計算列・生成列も同じく「入力があるときだけ代入」へ倒す（DB が式から作るため未入力が正常）
+                    IsComputed = editModelProperty.IsComputed,
                     // 除外された無制限バイナリ列も同じく「入力があるときだけ代入」へ倒す。
                     // 通常フェッチでは SELECT されず未取得状態のままなので、未入力を欠落として例外にすると
                     // 「取得 → 通常列だけ編集 → 保存」の往復が成立しない
@@ -504,6 +506,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             // store-generated 列（rowversion / timestamp 等）のマーカー（[StoreGeneratedColumn] 付与判定用）。
             // バグ修正のため付与はオプション非依存・常時（is_row_version 自体が判定材料）
             IsRowVersion = typeInfo.IsRowVersion,
+            // 計算列・生成列のマーカー（[ComputedColumn] 付与判定用）。列自身の事実なのでオプション・方言に依らず常時転記する
+            IsComputed = column.IsComputed,
             // DB 定義メタ属性（[DbColumnMeta]）用。方言中立トークンと列の説明（型解決とは独立にモデルから引く）
             CanonicalTypeToken = typeInfo.CanonicalTypeToken,
             // 中立トークンでは綴りが復元できない列だけに載る元の型表記。C# リテラルとして埋め込むためエスケープする
@@ -783,13 +787,16 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsBinary = isBytes,
             // Entity 側が非 NULL（必須）で EditModel 側は入力途中を許容して NULL 許容にした項目を必須とみなす。
             // ただし行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）。
+            // 計算列・生成列も同じく非 NULL でも入力必須にしない（DB が式から作るため未入力が正常）。
             // 除外された無制限バイナリ列も同じく非 NULL でも入力必須にしない（通常フェッチでは未取得が正常）
             IsRequired =
                 editModelIsNullable
                 && !column.IsNullable
                 && !typeInfo.IsRowVersion
+                && !column.IsComputed
                 && !isExcludedUnboundedBinary,
             IsRowVersion = typeInfo.IsRowVersion,
+            IsComputed = column.IsComputed,
             IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
             // NOT NULL の除外列だけは新規行（Added）で必須にする。未入力のまま INSERT すると DB の
             // NOT NULL 違反で必ず落ちるため、行が DB に無い間だけ画面で止める（rowversion 列は

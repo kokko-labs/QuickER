@@ -374,4 +374,13 @@
   <data name="Db_ImportWarningPartitionDefinitionLost" xml:space="preserve">
     <value>{0}: 通常テーブルとして取り込みました。図はパーティションを持たないため、生成 DDL はパーティションなしで作成します。</value>
   </data>
+  <data name="Db_ImportWarningVirtualTableExcluded" xml:space="preserve">
+    <value>{0}: 仮想テーブルのため取り込みませんでした。通常テーブルの形で写し取れないため、付属表（シャドウテーブル）も合わせて除外しています。</value>
+  </data>
+  <data name="Db_ImportWarningComputedColumnExpressionLost" xml:space="preserve">
+    <value>{0}.{1}: 通常の列として取り込みました。図は生成列の式を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
+  </data>
+  <data name="Db_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
+    <value>{0}.{1}: 通常の列として取り込みました。図は生成列の式（{2}）を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
+  </data>
 </root>

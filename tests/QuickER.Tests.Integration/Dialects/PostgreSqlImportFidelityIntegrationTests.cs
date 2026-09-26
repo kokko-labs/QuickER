@@ -467,4 +467,53 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
         warning.Subject.Should().Be("kind");
         warning.Detail.Should().Be("\"od;d\"");
     }
+
+    /// <summary>
+    /// 生成列（<c>GENERATED ALWAYS AS ... STORED</c>）が
+    /// <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、式の喪失が報告されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 普通の列として取り込むと、生成 Repository の INSERT / UPDATE がその列を書きに行き
+    /// 「生成列へは書き込めない」でそのテーブルへの全書き込みが失敗する。
+    /// 既定値（<c>DEFAULT</c>）を持つだけの普通の列が巻き込まれないことも同じ図で確かめる
+    /// （式は生成列も既定値も同じ <c>pg_attrdef</c> に載るため）。
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] PG: 生成列は IsComputed つきで取り込み、式の喪失を報告する")]
+    public async Task Import_GeneratedColumn_IsMarkedAndWarns()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE invoices (
+                invoice_id integer PRIMARY KEY,
+                qty integer NOT NULL,
+                price numeric(18,2) NOT NULL,
+                note text DEFAULT 'n/a',
+                total numeric(21,2) GENERATED ALWAYS AS (qty * price) STORED
+            );
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        entity.Columns.Where(c => c.IsComputed).Select(c => c.Name).Should().Equal("total");
+        // 既定値を持つだけの列は計算列ではない（式の置き場が同じでも巻き込まない）
+        entity.Columns.Single(c => c.Name == "note").IsComputed.Should().BeFalse();
+        // 型は従来どおり（運ぶのは「書き込めない」事実だけ）
+        entity.Columns.Single(c => c.Name == "total").DataType.Should().Be("numeric(21,2)");
+
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost)
+            .Subject;
+        warning.TableName.Should().Be("invoices");
+        warning.Subject.Should().Be("total");
+        // PostgreSQL は式を持ち帰れる
+        warning.Detail.Should().Contain("qty").And.Contain("price");
+    }
 }

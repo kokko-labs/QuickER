@@ -2961,6 +2961,14 @@ public sealed partial class {{ mapper.class_name }}
             entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
         }
 
+{{ else if prop.is_computed }}
+        // The database derives this column from an expression and accepts no explicit write, so an absent input
+        // keeps the entity's current value (it is left out of INSERT and UPDATE either way).
+        if (editModel.{{ prop.property_name }} is not null)
+        {
+            entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
+        }
+
 {{ else if prop.is_excluded_unbounded_binary }}
         // This column is left out of SELECT and UPDATE, so an absent input keeps the entity's current value:
         // the unfetched state stays as it is and the update leaves the stored blob untouched.

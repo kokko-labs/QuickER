@@ -209,6 +209,19 @@ public class DbImportCommandServiceTests
                     "\"od;d\""
                 ),
                 new SchemaImportWarning(SchemaImportWarningKind.PartitionDefinitionLost, "sales"),
+                new SchemaImportWarning(SchemaImportWarningKind.VirtualTableExcluded, "docs"),
+                // 式が取れた方言（括弧書きの文面）と取れない方言（式なしの文面）の両アーム
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.ComputedColumnExpressionLost,
+                    "invoices",
+                    "total",
+                    "([qty]*[price])"
+                ),
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.ComputedColumnExpressionLost,
+                    "ledger",
+                    "amount"
+                ),
                 // 名前に改行が混ざっても内訳の 1 行 1 件が崩れないこと
                 new SchemaImportWarning(
                     SchemaImportWarningKind.TableColumnsUnavailable,
@@ -244,6 +257,11 @@ public class DbImportCommandServiceTests
         details.Should().Contain("other_scope.vendor");
         details.Should().Contain("kind");
         details.Should().Contain("sales");
+        details.Should().Contain("docs");
+        // 計算列: 式が取れた方言は式まで、取れない方言は列名までが載る
+        details.Should().Contain("invoices.total");
+        details.Should().Contain("([qty]*[price])");
+        details.Should().Contain("ledger.amount");
 
         // 名前に混ざった改行は空白へ畳まれる（畳まないと 1 件が 2 行に割れて内訳が崩れる）
         details.Should().Contain("line break");
@@ -255,7 +273,7 @@ public class DbImportCommandServiceTests
         details
             .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
             .Should()
-            .HaveCount(5, "警告 5 件が 1 行 1 件で並ぶこと");
+            .HaveCount(8, "警告 8 件が 1 行 1 件で並ぶこと");
     }
 
     /// <summary>警告の整形で落ちても「取込に失敗しました」へは化けない（取込は既に成功している）</summary>

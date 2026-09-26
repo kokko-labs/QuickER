@@ -262,6 +262,23 @@ public sealed class DbImportCommandService
                 Strings.Db_ImportWarningPartitionDefinitionLost,
                 table
             ),
+            SchemaImportWarningKind.VirtualTableExcluded => string.Format(
+                Strings.Db_ImportWarningVirtualTableExcluded,
+                table
+            ),
+            // 式は取れない方言（SQLite）があるため、載せられるときだけ括弧書きの文面へ振り分ける
+            SchemaImportWarningKind.ComputedColumnExpressionLost => detail.Length == 0
+                ? string.Format(
+                    Strings.Db_ImportWarningComputedColumnExpressionLost,
+                    table,
+                    subject
+                )
+                : string.Format(
+                    Strings.Db_ImportWarningComputedColumnExpressionLostWithExpression,
+                    table,
+                    subject,
+                    detail
+                ),
             // 未知の種別を黙って空行にしない（ConcurrencyModes.Validated と同じ流儀）
             _ => throw new ArgumentOutOfRangeException(
                 nameof(warning),

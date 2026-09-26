@@ -74,7 +74,8 @@ public class OracleSchemaImporter : ISchemaImporter
         var warnings = new List<SchemaImportWarning>();
         var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
-        await LoadColumnsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         await LoadDescriptionsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
@@ -148,10 +149,22 @@ ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
     /// <c>char_used</c> は長さの単位（<c>'B'</c>=バイト / <c>'C'</c>=文字）。<c>VARCHAR2(50 CHAR)</c> と
     /// <c>VARCHAR2(50)</c> はマルチバイト文字セットでは別物なので、単位語まで含めて持ち帰る。
     /// </para>
+    /// <para>
+    /// 仮想列（<c>virtual_column = 'YES'</c>）を判別するため <c>user_tab_columns</c> ではなく
+    /// <c>user_tab_cols</c> を引く。両ビューの差は隠し列の有無だけ（<c>user_tab_columns</c> は
+    /// <c>hidden_column = 'NO'</c> の行だけを返す）なので、同じ条件を明示して<b>列集合は従来どおり</b>に保つ。
+    /// この条件は関数インデックスがテーブルへ足すシステム生成列（<c>SYS_NC…$</c>）も同時に除外する
+    /// ＝それらは隠し列かつ仮想列なので、外すと図に実在しない列が現れる。
+    /// </para>
+    /// <para>
+    /// 仮想列の式は <c>data_default</c>（LONG 型）。ODP.NET は既定（<c>InitialLONGFetchSize = 0</c>）では
+    /// LONG を取得しないため、呼び出し側でフェッチサイズを設定する。
+    /// </para>
     /// </remarks>
     private const string ColumnsSql =
-        @"SELECT table_name, column_name, data_type, data_precision, data_scale, char_length, nullable, column_id, data_length, char_used
-FROM user_tab_columns
+        @"SELECT table_name, column_name, data_type, data_precision, data_scale, char_length, nullable, column_id, data_length, char_used, virtual_column, data_default
+FROM user_tab_cols
+WHERE hidden_column = 'NO'
 ORDER BY table_name, column_id";
 
     /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>
@@ -314,11 +327,19 @@ ORDER BY c.constraint_name";
     private static async Task LoadColumnsAsync(
         OracleConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        List<SchemaImportWarning> warnings,
         int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
         await using var cmd = DbCommands.Create(conn, ColumnsSql, commandTimeoutSeconds);
+
+        // data_default（仮想列の式）は LONG 型。ODP.NET は既定では LONG を取得しない（空文字が返る）
+        if (cmd is OracleCommand oracleCommand)
+        {
+            oracleCommand.InitialLONGFetchSize = -1;
+        }
+
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -343,6 +364,10 @@ ORDER BY c.constraint_name";
             );
             int? dataLength = reader.IsDBNull(8) ? null : Convert.ToInt32(reader.GetValue(8));
             var charUsed = reader.IsDBNull(9) ? null : reader.GetString(9);
+            // virtual_column は 'YES' / 'NO'
+            var isComputed =
+                !reader.IsDBNull(10)
+                && string.Equals(reader.GetString(10), "YES", StringComparison.OrdinalIgnoreCase);
 
             var col = new Column
             {
@@ -356,7 +381,23 @@ ORDER BY c.constraint_name";
                     charUsed
                 ),
                 IsNullable = isNullable,
+                IsComputed = isComputed,
             };
+
+            if (isComputed)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ComputedColumnExpressionLost,
+                        entry.Entity.TableName,
+                        colName,
+                        // 式は警告文へそのまま載るため、行構造を壊さないよう制御文字を畳んでおく
+                        SqlComment.Sanitize(
+                            reader.IsDBNull(11) ? string.Empty : reader.GetString(11)
+                        )
+                    )
+                );
+            }
 
             entry.Entity.Columns.Add(col);
             entry.ColumnsByName[colName] = col;

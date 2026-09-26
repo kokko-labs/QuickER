@@ -285,4 +285,83 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
         warning.Subject.Should().Be("dup");
         warning.Detail.Should().Be("DUP");
     }
+
+    /// <summary>
+    /// 仮想列が <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、
+    /// 式の喪失が報告されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 仮想列を判別するため取込は <c>user_tab_columns</c> ではなく <c>user_tab_cols</c> を引く。
+    /// 両ビューの差は隠し列の有無だけなので <c>hidden_column = 'NO'</c> を明示して列集合を従来どおりに保つ
+    /// ——その担保は <see cref="Import_FunctionBasedIndex_DoesNotAddHiddenColumn"/> が固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] Oracle: 仮想列は IsComputed つきで取り込み、式の喪失を報告する"
+    )]
+    public async Task Import_VirtualColumn_IsMarkedAndWarns()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE invoices (
+                invoice_id NUMBER(10) PRIMARY KEY,
+                qty NUMBER(10) NOT NULL,
+                price NUMBER(18,2) NOT NULL,
+                total NUMBER(21,2) GENERATED ALWAYS AS (qty * price) VIRTUAL
+            )
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        entity.Columns.Where(c => c.IsComputed).Select(c => c.Name).Should().Equal("TOTAL");
+        entity.Columns.Single(c => c.Name == "QTY").IsComputed.Should().BeFalse();
+        // 型は従来どおり（運ぶのは「書き込めない」事実だけ）
+        entity.Columns.Single(c => c.Name == "TOTAL").DataType.Should().Be("NUMBER(21,2)");
+
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost)
+            .Subject;
+        warning.TableName.Should().Be("INVOICES");
+        warning.Subject.Should().Be("TOTAL");
+        // data_default は LONG 型。ODP.NET の既定では取得されない（空文字が返る）ため、
+        // 取込側で InitialLONGFetchSize を設定している——それが効いていることを式の中身で確かめる
+        warning.Detail.Should().Contain("QTY").And.Contain("PRICE");
+    }
+
+    /// <summary>
+    /// 関数インデックスがテーブルへ足すシステム生成の隠し列（<c>SYS_NC…$</c>）が取り込まれないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>user_tab_cols</c> は隠し列も返すため、<c>hidden_column = 'NO'</c> を外すと図に実在しない列が現れる
+    /// （しかもそれらは仮想列なので計算列として名指しされる）。
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] Oracle: 関数インデックスの隠し列は取り込まれない")]
+    public async Task Import_FunctionBasedIndex_DoesNotAddHiddenColumn()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE people (person_id NUMBER(10) PRIMARY KEY, name VARCHAR2(50))",
+            Ct
+        );
+        await fixture.ExecuteAsync("CREATE INDEX ix_people_upper ON people (UPPER(name))", Ct);
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        entity.Columns.Select(c => c.Name).Should().Equal("PERSON_ID", "NAME");
+        entity.Columns.Should().OnlyContain(c => !c.IsComputed);
+        result
+            .Warnings.Should()
+            .NotContain(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost);
+    }
 }

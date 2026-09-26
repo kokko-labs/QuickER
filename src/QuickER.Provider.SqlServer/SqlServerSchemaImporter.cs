@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -75,8 +76,11 @@ public class SqlServerSchemaImporter : ISchemaImporter
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
-        await LoadColumnsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        var warnings = new List<SchemaImportWarning>();
+        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
+        await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         await LoadDescriptionsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
@@ -86,9 +90,11 @@ public class SqlServerSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
 
         // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
-        var warnings = SchemaImportWarnings
-            .DetectUnemittableColumnTypes(tables.Values.Select(entry => entry.Entity))
-            .ToList();
+        warnings.AddRange(
+            SchemaImportWarnings.DetectUnemittableColumnTypes(
+                tables.Values.Select(entry => entry.Entity)
+            )
+        );
 
         return new SchemaResult
         {
@@ -102,6 +108,10 @@ public class SqlServerSchemaImporter : ISchemaImporter
 
     /// <summary>スキーマ・テーブル名からテーブルキー（<c>[schema].[name]</c> 形式）を組み立てる</summary>
     private static string TableKey(string schema, string name) => $"[{schema}].[{name}]";
+
+    /// <summary>スキーマ・テーブル名から表示名（<c>dbo</c> なら素の名前、他は <c>schema.name</c>）を組み立てる</summary>
+    private static string DisplayTableName(string schema, string name) =>
+        schema == "dbo" ? name : $"{schema}.{name}";
 
     /// <summary>ユーザー定義テーブル一覧を取得するクエリ</summary>
     /// <remarks>
@@ -123,15 +133,28 @@ WHERE t.is_ms_shipped = 0
         AND ep.minor_id = 0
         AND ep.name = N'microsoft_database_tools_support'
   )
-ORDER BY s.name, t.name;";
+-- COLLATE ... BIN2 で並べるのは、DB の既定照合順序次第で Dup と dup の順序が変わるため
+-- （衝突時にどちらを採るかを決定的にする。PostgreSQL の COLLATE C / Oracle の NLSSORT BINARY と同じ狙い）
+ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2;";
 
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
+    /// <remarks>
+    /// 計算列（<c>AS (式)</c>）は <c>INFORMATION_SCHEMA.COLUMNS</c> からは判別できないため
+    /// <c>sys.computed_columns</c> を左結合する。行の有無が計算列かどうかで、
+    /// <c>definition</c>（式）は <c>VIEW DEFINITION</c> 権限が無いと NULL になり得るので、
+    /// 判定には使わず <c>column_id</c> の有無で見る。
+    /// </remarks>
     private const string ColumnsSql =
         @"
-SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE,
-       CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE, ORDINAL_POSITION
-FROM INFORMATION_SCHEMA.COLUMNS
-ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;";
+SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE,
+       c.CHARACTER_MAXIMUM_LENGTH, c.NUMERIC_PRECISION, c.NUMERIC_SCALE, c.IS_NULLABLE, c.ORDINAL_POSITION,
+       CASE WHEN cc.column_id IS NULL THEN 0 ELSE 1 END AS IS_COMPUTED,
+       cc.definition AS COMPUTED_DEFINITION
+FROM INFORMATION_SCHEMA.COLUMNS c
+LEFT JOIN sys.computed_columns cc
+       ON cc.object_id = OBJECT_ID(QUOTENAME(c.TABLE_SCHEMA) + N'.' + QUOTENAME(c.TABLE_NAME))
+      AND cc.name = c.COLUMN_NAME
+ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION;";
 
     /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>
     private const string PrimaryKeysSql =
@@ -196,9 +219,16 @@ LEFT JOIN sys.columns c
 WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
     /// <summary>テーブル一覧を読み込み、テーブルキーをキーとするエントリ辞書を構築する</summary>
+    /// <remarks>
+    /// 辞書は 5 方言共通の大文字小文字非依存だが、SQL Server も大文字小文字を区別する照合順序
+    /// （例: <c>Latin1_General_100_CS_AS</c>）の DB では <c>Dup</c> と <c>dup</c> が共存する。
+    /// 黙って上書きすると 1 エンティティへ潰れて両テーブルの列が混ざるため、
+    /// 後着（<c>BIN2</c> 昇順で後ろ）を取り込まず警告として告げる。
+    /// </remarks>
     private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         SqlConnection conn,
         int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
         CancellationToken ct
     )
     {
@@ -210,26 +240,56 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         {
             var schema = reader.GetString(0);
             var name = reader.GetString(1);
-            var entry = new SchemaTableEntry
-            {
-                Key = TableKey(schema, name),
-                Entity = new Entity
-                {
-                    TableName = schema == "dbo" ? name : $"{schema}.{name}",
-                    Columns = new List<Column>(),
-                },
-            };
+            var key = TableKey(schema, name);
+            var displayName = DisplayTableName(schema, name);
 
-            dict[entry.Key] = entry;
+            if (dict.TryGetValue(key, out var existing))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.TableNameCollision,
+                        displayName,
+                        displayName,
+                        existing.Entity.TableName
+                    )
+                );
+                continue;
+            }
+
+            dict[key] = new SchemaTableEntry
+            {
+                Key = key,
+                Entity = new Entity { TableName = displayName, Columns = new List<Column>() },
+            };
         }
 
         return dict;
+    }
+
+    /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
+    /// <remarks>
+    /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
+    /// 列・主キー・説明・一意制約・外部キーが、採用したほうのエンティティへ吸い寄せられて混ざる。
+    /// カタログビューが返す名前はどのクエリでも同じ実体名なので、ここで序数一致まで求めても
+    /// 正当な行を取りこぼすことはない。
+    /// </remarks>
+    private static bool TryGetExactTable(
+        Dictionary<string, SchemaTableEntry> tables,
+        string schema,
+        string name,
+        [NotNullWhen(true)] out SchemaTableEntry? entry
+    )
+    {
+        var key = TableKey(schema, name);
+        return tables.TryGetValue(key, out entry)
+            && string.Equals(entry.Key, key, StringComparison.Ordinal);
     }
 
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         SqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        List<SchemaImportWarning> warnings,
         int commandTimeoutSeconds,
         CancellationToken ct
     )
@@ -241,9 +301,8 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         {
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
-            var key = TableKey(schema, table);
 
-            if (!tables.TryGetValue(key, out var entry))
+            if (!TryGetExactTable(tables, schema, table, out var entry))
             {
                 continue;
             }
@@ -259,12 +318,31 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 StringComparison.OrdinalIgnoreCase
             );
 
+            // 計算列は sys.computed_columns に行がある列＝式は図に載せず「書き込めない」事実だけを運ぶ
+            var isComputed = Convert.ToInt32(reader.GetValue(9)) != 0;
+
             var col = new Column
             {
                 Name = colName,
                 DataType = FormatDataType(dataType, maxLen, numPrec, numScale),
                 IsNullable = isNullable,
+                IsComputed = isComputed,
             };
+
+            if (isComputed)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ComputedColumnExpressionLost,
+                        entry.Entity.TableName,
+                        colName,
+                        // 式は警告文へそのまま載るため、行構造を壊さないよう制御文字を畳んでおく
+                        SqlComment.Sanitize(
+                            reader.IsDBNull(10) ? string.Empty : reader.GetString(10)
+                        )
+                    )
+                );
+            }
 
             entry.Entity.Columns.Add(col);
             entry.ColumnsByName[colName] = col;
@@ -287,9 +365,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var key = TableKey(reader.GetString(0), reader.GetString(1));
-
-            if (!tables.TryGetValue(key, out var entry))
+            if (!TryGetExactTable(tables, reader.GetString(0), reader.GetString(1), out var entry))
             {
                 continue;
             }
@@ -320,9 +396,8 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         {
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
-            var key = TableKey(schema, table);
 
-            if (!tables.TryGetValue(key, out var entry))
+            if (!TryGetExactTable(tables, schema, table, out var entry))
             {
                 continue;
             }
@@ -349,6 +424,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     /// <summary>外部キーを読み込み、複合列を集約してリレーションへ変換する</summary>
     /// <remarks>
     /// 参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する。
+    /// 衝突して捨てたテーブルが親・子どちらか一方でも該当する外部キーは取り込まない。
     /// </remarks>
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         SqlConnection conn,
@@ -365,9 +441,11 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var fkName = reader.GetString(0);
-            var parentKey = TableKey(reader.GetString(1), reader.GetString(2));
+            var parentSchema = reader.GetString(1);
+            var parentTable = reader.GetString(2);
             var parentCol = reader.GetString(3);
-            var refKey = TableKey(reader.GetString(4), reader.GetString(5));
+            var refSchema = reader.GetString(4);
+            var refTable = reader.GetString(5);
             var refCol = reader.GetString(6);
             var deleteAction = ForeignKeyReferentialActionHelper.Parse(
                 reader.IsDBNull(8) ? null : reader.GetString(8)
@@ -375,6 +453,18 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var updateAction = ForeignKeyReferentialActionHelper.Parse(
                 reader.IsDBNull(9) ? null : reader.GetString(9)
             );
+
+            // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
+            if (
+                !TryGetExactTable(tables, parentSchema, parentTable, out _)
+                || !TryGetExactTable(tables, refSchema, refTable, out _)
+            )
+            {
+                continue;
+            }
+
+            var parentKey = TableKey(parentSchema, parentTable);
+            var refKey = TableKey(refSchema, refTable);
 
             builder.Add(fkName, parentKey, parentCol, refKey, refCol, deleteAction, updateAction);
         }
@@ -397,7 +487,16 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                var key = TableKey(reader.GetString(0), reader.GetString(1));
+                var schema = reader.GetString(0);
+                var table = reader.GetString(1);
+
+                // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
+                if (!TryGetExactTable(tables, schema, table, out _))
+                {
+                    continue;
+                }
+
+                var key = TableKey(schema, table);
                 var constraintName = reader.GetString(2);
                 var col = reader.GetString(3);
                 builder.Add(key, constraintName, col, constraintName);

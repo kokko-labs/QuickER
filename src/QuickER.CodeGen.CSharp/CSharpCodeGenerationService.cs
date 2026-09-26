@@ -193,6 +193,9 @@ public sealed class CSharpCodeGenerationService
         // 無制限バイナリ列かどうかも型解決の結果（CSharpTypeInfo.IsUnboundedBinary）で決まるため同じ位置で検証する
         ValidateUnboundedBinaryPrimaryKeys(diagram, columnTypes, options, diagnostics);
 
+        // 計算列は型解決に依らず図（Column.IsComputed）で決まるが、診断の並びを揃えてここで検証する
+        ValidateComputedPrimaryKeys(diagram, diagnostics);
+
         // 同期支援の前提（方言構成・Repository 実装・行バージョン列の存在）も列型辞書が確定した後で検証する
         ValidateSyncSupport(diagram, columnTypes, options, effectiveDialects, diagnostics);
 
@@ -248,6 +251,27 @@ public sealed class CSharpCodeGenerationService
                     string.Format(
                         Strings.CodeGen_Info_ExcludedUnboundedBinaryColumns,
                         Environment.NewLine + excludedColumnList
+                    )
+                )
+            );
+        }
+
+        // 計算列・生成列を Info 診断で通知する（利用者へ「どの列が INSERT / UPDATE から外れたか」を明示）。
+        // オプションに依らず常に効く除外なので、除外の有無をここで一度だけ名指しする。
+        var computedColumnLines = BuildComputedColumnLines(model);
+
+        if (computedColumnLines.Count > 0)
+        {
+            // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる
+            var computedColumnList = string.Join(
+                Environment.NewLine,
+                computedColumnLines.Select(line => "  " + line)
+            );
+            diagnostics.Add(
+                GenerationDiagnostic.Info(
+                    string.Format(
+                        Strings.CodeGen_Info_ComputedColumns,
+                        Environment.NewLine + computedColumnList
                     )
                 )
             );
@@ -1021,6 +1045,44 @@ public sealed class CSharpCodeGenerationService
     }
 
     /// <summary>
+    /// 主キー列が計算列・生成列でないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 計算列は DB が式から値を作るため <c>[ComputedColumn]</c> が付き、
+    /// <c>EntitySaveMetadata</c> が INSERT / UPDATE の対象から外す。その列が主キーだと生成 INSERT は
+    /// キー列を送らず、しかも「行の同一性」がもとになった列の更新のたびに変わる値に乗る
+    /// （行バージョン列を主キーにしたときと同じ壊れ方）。DB 取込では自然に発生し得る構成なので、
+    /// 黙って生成せず生成時に止める。
+    /// </para>
+    /// <para>
+    /// 判定は図の <c>Column.IsComputed</c>＝<c>[ComputedColumn]</c> の付与条件と同一。
+    /// 方言にも生成オプションにも依らない（列自身の事実のため）。
+    /// </para>
+    /// </remarks>
+    private static void ValidateComputedPrimaryKeys(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        foreach (var entity in diagram.Entities)
+        {
+            foreach (var column in entity.Columns.Where(c => c.IsPrimaryKey && c.IsComputed))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_PrimaryKeyComputedColumn,
+                            entity.TableName,
+                            column.Name
+                        )
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>
     /// エンティティクラス名（テーブル名由来）が図の中で一意であることを検証する
     /// </summary>
     /// <remarks>
@@ -1711,6 +1773,24 @@ public sealed class CSharpCodeGenerationService
             .EntityClasses.SelectMany(entity =>
                 entity
                     .Properties.Where(property => property.IsUnboundedBinary)
+                    .Select(property =>
+                        $"{entity.ClassName}.{property.PropertyName} ({entity.TableName}.{property.ColumnName})"
+                    )
+            )
+            .ToList();
+
+    /// <summary>
+    /// 計算列・生成列の一覧を <c>{EntityClass}.{Property} ({テーブル}.{列名})</c> 形式の行で組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsComputed"/> のものを対象にする
+    /// （マーカー属性 <c>[ComputedColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
+    /// </remarks>
+    private static IReadOnlyList<string> BuildComputedColumnLines(CSharpGenerationModel model) =>
+        model
+            .EntityClasses.SelectMany(entity =>
+                entity
+                    .Properties.Where(property => property.IsComputed)
                     .Select(property =>
                         $"{entity.ClassName}.{property.PropertyName} ({entity.TableName}.{property.ColumnName})"
                     )

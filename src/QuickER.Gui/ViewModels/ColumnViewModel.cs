@@ -94,6 +94,13 @@ public partial class ColumnViewModel : ObservableObject
     [ObservableProperty]
     private string _description;
 
+    /// <summary>計算列・生成列かどうか（取込で確定し、GUI では編集しない）</summary>
+    /// <remarks>
+    /// 編集 UI を持たない純粋なパススルー。値を運ばないと「取込 → GUI で編集 → 保存」で
+    /// <see cref="Column.IsComputed"/> が黙って消え、生成コードが書き込み対象へ戻してしまう。
+    /// </remarks>
+    public bool IsComputed { get; }
+
     /// <summary>モデルから ViewModel を生成する</summary>
     /// <param name="model">コピー元の <see cref="Column"/> モデル</param>
     public ColumnViewModel(Column model)
@@ -105,6 +112,7 @@ public partial class ColumnViewModel : ObservableObject
         _isForeignKey = model.IsForeignKey;
         _isNullable = model.IsPrimaryKey ? false : model.IsNullable;
         _description = model.Description ?? string.Empty;
+        IsComputed = model.IsComputed;
     }
 
     /// <summary>IsPrimaryKey 変更直前に発火する（変更前スナップショット取得のためのフック）</summary>
@@ -149,5 +157,6 @@ public partial class ColumnViewModel : ObservableObject
             IsForeignKey = IsForeignKey,
             IsNullable = IsPrimaryKey ? false : IsNullable,
             Description = Description ?? string.Empty,
+            IsComputed = IsComputed,
         };
 }

@@ -394,4 +394,10 @@
   <data name="ApiDoc_Di_InMemory" xml:space="preserve">
     <value>インメモリ Repository を DI コンテナへ登録します（プロトタイピング・テスト向け）。</value>
   </data>
+  <data name="CodeGen_Error_PrimaryKeyComputedColumn" xml:space="preserve">
+    <value>テーブル '{0}' の列 '{1}' が主キーかつ計算列です。計算列は DB が式から値を作り明示の書き込みを受け付けないため、リポジトリが発行する INSERT / UPDATE の対象から常に外れます。その結果、生成される INSERT はキーを一切送らず、行の同一性が式のもとになった列の更新のたびに変わる値に乗ることになります。主キーには専用の列を与えてください。</value>
+  </data>
+  <data name="CodeGen_Info_ComputedColumns" xml:space="preserve">
+    <value>計算列を INSERT / UPDATE 対象から除外しました:{0}</value>
+  </data>
 </root>

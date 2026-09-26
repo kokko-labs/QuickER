@@ -132,6 +132,10 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         for (var i = 0; i < e.Columns.Count; i++)
         {
             var col = e.Columns[i];
+
+            // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
+            ComputedColumnComment.Append(sb, col, "    ");
+
             var line =
                 $"    {OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
@@ -159,7 +163,13 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var colDef = string.IsNullOrEmpty(nullClause)
             ? $"{OracleIdentifier.QuoteSimple(col.Name)} {col.DataType}"
             : $"{OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {nullClause}";
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD ({colDef});";
+        var statement = $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD ({colDef});";
+
+        // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
+        // （Oracle は 1 文＝1 文字列で組み立てるため、コメント行は同じ文字列の先頭へ前置する）
+        return ComputedColumnComment.Build(col) is { } note
+            ? note + Environment.NewLine + statement
+            : statement;
     }
 
     /// <summary>ALTER TABLE ... MODIFY（列定義変更）文を生成する</summary>
