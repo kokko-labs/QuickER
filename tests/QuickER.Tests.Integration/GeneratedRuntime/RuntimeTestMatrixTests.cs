@@ -301,6 +301,23 @@ public class RuntimeTestMatrixTests
                 )
             )
         ),
+        ["ComputedColumn"] = new(
+            "計算列・生成列（[ComputedColumn] による INSERT / UPDATE 除外・SELECT では読む）",
+            Row(
+                Covered(),
+                Covered(),
+                NotApplicable(
+                    "計算列フィクスチャはマルチターゲットで、EF Core とは生成時に排他。"
+                        + "Fluent の ValueGeneratedOnAddOrUpdate は生成テキストの両アームテストが固定する"
+                ),
+                NotApplicable(
+                    "インメモリは式を評価しない＝計算列も普通のプロパティとして値を保つ（意図的な割り切り）"
+                ),
+                Gap(
+                    "リモート面越しの専用テストは無い（除外は転送経路でなく EntitySaveMetadata の側で効く）"
+                )
+            )
+        ),
         ["SyncSupport"] = new(
             "双方向同期支援（差分ダウンロード・ジャーナル再生・削除伝搬・競合収集・ループ防止）",
             Row(
@@ -501,6 +518,9 @@ public class RuntimeTestMatrixTests
         new("MultiTargetRowVersionRuntimeTests", "MultiTargetRowVersion", Backend.AdoSqlServer),
         new("MultiTargetRowVersionRuntimeTests", "MultiTargetRowVersion", Backend.AdoSqlite),
         new("MultiTargetRowVersionSqliteRuntimeTests", "MultiTargetRowVersion", Backend.AdoSqlite),
+        // --- 計算列・生成列 ---
+        new("SqlServerComputedColumnRuntimeTests", "ComputedColumn", Backend.AdoSqlServer),
+        new("SqliteComputedColumnRuntimeTests", "ComputedColumn", Backend.AdoSqlite),
         new("SyncSqliteRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         // 同期支援 × 値オブジェクト（ミラー版・キーが VO 型になる経路）
         new("SyncVoRuntimeTests", "SyncSupport", Backend.AdoSqlite),

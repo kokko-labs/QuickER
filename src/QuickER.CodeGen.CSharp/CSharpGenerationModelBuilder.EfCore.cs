@@ -126,6 +126,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             Precision = valueObject is not null ? null : typeInfo.Precision,
             Scale = valueObject is not null ? null : typeInfo.Scale,
             IsRowVersion = typeInfo.IsRowVersion,
+            IsComputed = column.IsComputed,
             IsValueObject = valueObject is not null,
             ValueObjectClassName = valueObject?.ClassName ?? string.Empty,
         };

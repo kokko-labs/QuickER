@@ -167,4 +167,94 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
         warning.Subject.Should().Be("dup");
         warning.Detail.Should().Be("Dup");
     }
+
+    /// <summary>
+    /// 生成列（<c>GENERATED ALWAYS AS</c>）が <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、
+    /// 式が落ちることが警告として報告されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 判定は <c>GENERATION_EXPRESSION</c> が空でないこと。<c>EXTRA</c> の語彙判定にすると、部分一致は
+    /// MySQL 8 が式の既定値を持つ普通の列へ出す <c>DEFAULT_GENERATED</c> を誤検出し
+    /// （対照は <see cref="Import_DefaultGeneratedColumn_IsNotTreatedAsComputed"/> が固定）、
+    /// 完全一致は不可視の生成列（<c>VIRTUAL GENERATED INVISIBLE</c>）を取りこぼす
+    /// （このテストの <c>total_invisible</c> 列が固定）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] MySQL: 生成列は IsComputed つきで取り込み、式の喪失を報告する"
+    )]
+    public async Task Import_GeneratedColumn_IsMarkedAndWarns()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE invoices (
+                invoice_id int NOT NULL PRIMARY KEY,
+                qty int NOT NULL,
+                price decimal(18,2) NOT NULL,
+                total_virtual decimal(21,2) GENERATED ALWAYS AS (qty * price) VIRTUAL,
+                total_stored decimal(21,2) GENERATED ALWAYS AS (qty * price) STORED,
+                total_invisible decimal(21,2) GENERATED ALWAYS AS (qty * price) VIRTUAL INVISIBLE
+            );
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        entity
+            .Columns.Where(c => c.IsComputed)
+            .Select(c => c.Name)
+            .Should()
+            .BeEquivalentTo(["total_virtual", "total_stored", "total_invisible"]);
+
+        // 型は従来どおり（運ぶのは「書き込めない」事実だけ）
+        entity.Columns.Single(c => c.Name == "total_stored").DataType.Should().Be("decimal(21,2)");
+
+        var warnings = result
+            .Warnings.Where(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost)
+            .ToList();
+        warnings
+            .Select(w => w.Subject)
+            .Should()
+            .BeEquivalentTo(["total_virtual", "total_stored", "total_invisible"]);
+        // MySQL は式を持ち帰れる
+        warnings.Should().OnlyContain(w => w.Detail.Contains("qty"));
+    }
+
+    /// <summary>
+    /// 式の既定値（<c>DEFAULT CURRENT_TIMESTAMP</c>）を持つ普通の列が計算列扱いされないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// MySQL 8 はこの形の列へ <c>EXTRA = 'DEFAULT_GENERATED'</c> を出す。判定を部分一致にすると
+    /// 誤検出し、普通の列が INSERT / UPDATE から外れて<b>値を入れられなくなる</b>。
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] MySQL: DEFAULT CURRENT_TIMESTAMP の列は計算列にならない")]
+    public async Task Import_DefaultGeneratedColumn_IsNotTreatedAsComputed()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE events (
+                event_id int NOT NULL PRIMARY KEY,
+                created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            );
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Single().Columns.Should().OnlyContain(c => !c.IsComputed);
+        result
+            .Warnings.Should()
+            .NotContain(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost);
+    }
 }

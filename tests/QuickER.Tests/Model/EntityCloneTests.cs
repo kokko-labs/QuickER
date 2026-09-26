@@ -93,4 +93,35 @@ public class EntityCloneTests
         entity.Clone(preserveId: true).UniqueConstraints.Should().BeEmpty();
         entity.Clone(preserveId: false).UniqueConstraints.Should().BeEmpty();
     }
+
+    /// <summary>計算列フラグが ID 維持・新規採番のどちらの複製でも運ばれることを検証する</summary>
+    /// <remarks>
+    /// 落とすと「コピー＆ペーストしたテーブルだけ生成コードが計算列へ書き込む」形で静かに壊れる。
+    /// </remarks>
+    [Theory(DisplayName = "Clone: 計算列フラグが複製で運ばれる")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Clone_CarriesIsComputed(bool preserveId)
+    {
+        var entity = new Entity
+        {
+            TableName = "Items",
+            Columns =
+            {
+                new Column { Name = "qty", DataType = "int" },
+                new Column
+                {
+                    Name = "total",
+                    DataType = "decimal(21,2)",
+                    IsComputed = true,
+                },
+            },
+        };
+
+        entity
+            .Clone(preserveId)
+            .Columns.Select(column => column.IsComputed)
+            .Should()
+            .Equal(false, true);
+    }
 }

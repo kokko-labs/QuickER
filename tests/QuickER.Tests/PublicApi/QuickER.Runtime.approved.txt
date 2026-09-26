@@ -9,6 +9,9 @@ public sealed class QuickER.Runtime.CascadeNavigation : System.IEquatable<QuickE
     public string DependentColumn { get; init; }
     public string PrincipalColumn { get; init; }
 
+public sealed class QuickER.Runtime.ComputedColumnAttribute : System.Attribute
+    public .ctor()
+
 public enum QuickER.Runtime.ConcurrencyMode : int
     ForceOverwrite = 1
     Optimistic = 0

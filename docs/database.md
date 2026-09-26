@@ -129,7 +129,12 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
   The diagram has no notion of domains, so the domain's `CHECK` constraint is lost
 - A **foreign key that points outside the imported scope** is skipped
 - A table whose **columns could not be read at all** is imported without columns
-- One of two tables whose **names differ only in letter case** is skipped, because the import cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, and so does MySQL when `lower_case_table_names` is 0)
+- One of two tables whose **names differ only in letter case** is skipped, because the import cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, and SQL Server does in a database with a case-sensitive collation)
+- A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
+  The diagram does not model expressions, so generated DDL creates an ordinary column (with a comment asking for the expression to be added by hand).
+  Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))
+- A SQLite **virtual table** (FTS5, R*Tree and the like) is not imported.
+  It cannot be represented as an ordinary table; its shadow tables are excluded along with it, and each virtual table is reported once
 - A column whose **data type cannot be written into SQL safely** is named, along with the type text.
   The import keeps it, but DDL generation and schema sync refuse the *whole diagram* until it is corrected, because a type is neither an identifier nor a string literal and there is nowhere to quote it (see [What a data type may contain](#what-a-data-type-may-contain)).
   SQLite stores whatever type text a table was declared with, and PostgreSQL reports a type name that needs quoting with the quotes attached, so either can produce one

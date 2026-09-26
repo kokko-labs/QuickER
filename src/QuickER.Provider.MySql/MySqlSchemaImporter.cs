@@ -69,7 +69,8 @@ public class MySqlSchemaImporter : ISchemaImporter
         var warnings = new List<SchemaImportWarning>();
         var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
-        await LoadColumnsAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
+        await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
@@ -118,13 +119,22 @@ ORDER BY BINARY TABLE_NAME;";
 
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
+    /// <para>
     /// 型は COLUMN_TYPE（varchar(50) / tinyint(1) / decimal(10,2) 等）をそのまま採用する。
     /// information_schema のテーブル・カラム名は環境の照合順序次第で大文字小文字表記が揺れるため、
     /// 突き合わせ側の辞書は <see cref="StringComparer.OrdinalIgnoreCase"/> で受ける
+    /// </para>
+    /// <para>
+    /// 生成列の判定は <c>GENERATION_EXPRESSION</c> が空でないことで行う。<c>EXTRA</c> の語彙で
+    /// 判定してはいけない＝部分一致（<c>LIKE '%GENERATED%'</c>）は式の既定値を持つ普通の列の
+    /// <c>DEFAULT_GENERATED</c> を誤検出し、完全一致（<c>VIRTUAL GENERATED</c> / <c>STORED GENERATED</c>）は
+    /// 不可視の生成列（<c>VIRTUAL GENERATED INVISIBLE</c> のような組み合わせ語）を取りこぼす。
+    /// </para>
     /// </remarks>
     private const string ColumnsSql =
         @"
-SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_COMMENT, ORDINAL_POSITION
+SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_COMMENT, ORDINAL_POSITION,
+       GENERATION_EXPRESSION
 FROM information_schema.COLUMNS
 WHERE TABLE_SCHEMA = DATABASE()
 ORDER BY TABLE_NAME, ORDINAL_POSITION;";
@@ -260,6 +270,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     private static async Task LoadColumnsAsync(
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        List<SchemaImportWarning> warnings,
         int commandTimeoutSeconds,
         CancellationToken ct
     )
@@ -284,6 +295,10 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                 StringComparison.OrdinalIgnoreCase
             );
             var comment = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+            var generationExpression = reader.IsDBNull(6) ? string.Empty : reader.GetString(6);
+
+            // 生成列の判定は式の有無で行う（EXTRA の語彙判定は誤検出と取りこぼしの両方がある＝ColumnsSql の remarks）
+            var isComputed = generationExpression.Length > 0;
 
             var col = new Column
             {
@@ -291,7 +306,21 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                 DataType = columnType,
                 IsNullable = isNullable,
                 Description = comment,
+                IsComputed = isComputed,
             };
+
+            if (isComputed)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ComputedColumnExpressionLost,
+                        entry.Entity.TableName,
+                        colName,
+                        // 式は警告文へそのまま載るため、行構造を壊さないよう制御文字を畳んでおく
+                        SqlComment.Sanitize(generationExpression)
+                    )
+                );
+            }
 
             entry.Entity.Columns.Add(col);
             entry.ColumnsByName[colName] = col;

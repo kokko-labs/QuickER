@@ -346,10 +346,12 @@ public sealed class ValueObjectDefinedInstanceTests
             BioValue.Create("#defined");
         }
 
-        long delta = 0;
+        long delta = long.MaxValue;
 
-        // 測定中に tier-up が走った回を拾わないよう 3 ラウンド測り、最後のラウンドで表明する
-        for (var round = 0; round < 3; round++)
+        // tier-up の完了時期はプロセス全体の負荷（テスト件数）に左右されるため、固定ラウンド数の
+        // 「最後のラウンド」では tier-0 のまま測ってしまうことがある。ゼロのラウンドが観測できるまで
+        // 最大 10 ラウンド測る＝本当に確保する実装は全ラウンドで正になるので、網の強さは変わらない
+        for (var round = 0; round < 10 && delta != 0; round++)
         {
             var before = GC.GetAllocatedBytesForCurrentThread();
 

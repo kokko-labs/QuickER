@@ -671,5 +671,23 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string Db_ImportWarningVirtualTableExcluded {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningVirtualTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportWarningComputedColumnExpressionLost {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningComputedColumnExpressionLost", resourceCulture);
+            }
+        }
+
+        public static string Db_ImportWarningComputedColumnExpressionLostWithExpression {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningComputedColumnExpressionLostWithExpression", resourceCulture);
+            }
+        }
+
     }
 }

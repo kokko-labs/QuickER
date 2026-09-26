@@ -155,21 +155,20 @@ public sealed class MultiTargetRowVersionGenerationTests
         );
 
         // SQL Server 側: store-generated 列を INSERT / UPDATE の対象から外し、版ガード付き SQL を組み立てる
+        // （除外対象の集合は「store-generated ＋ 計算列」。計算列は方言に依らず常に外れる）
         sqlServer
             .Should()
-            .Contain(
-                "columns.Where(property => !storeGeneratedColumns.Contains(property)).ToList()"
-            )
+            .Contain("storeGeneratedColumns.Concat(computedColumns).ToList()")
             .And.Contain("@originalRowVersion")
             .And.Contain("UpdateVersionedSql");
 
-        // SQLite 側: 除外なし（通常列として INSERT / UPDATE が書き込む）・版ガード SQL は存在しない
-        sqlite.Should().Contain("var insertProperties = columns;");
+        // SQLite 側: store-generated の除外なし（通常列として INSERT / UPDATE が書き込む）・版ガード SQL は存在しない
+        sqlite.Should().Contain("var readOnlyColumns = computedColumns;");
         sqlite
             .Should()
             .NotContain(
-                "!storeGeneratedColumns.Contains(property)",
-                "SQLite では書き込み除外を行わない"
+                "storeGeneratedColumns.Concat(computedColumns)",
+                "SQLite では store-generated 列の書き込み除外を行わない"
             );
         sqlite.Should().NotContain("@originalRowVersion", "SQLite 側に版ガードは存在しない");
     }

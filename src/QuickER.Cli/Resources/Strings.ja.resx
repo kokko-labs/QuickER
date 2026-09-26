@@ -295,4 +295,13 @@
   <data name="Cli_ImportWarningColumnTypeNotEmittable" xml:space="preserve">
     <value>警告: {0}.{1} の型「{2}」は SQL へ安全に書き出せない表記です。直すまで、DDL 生成とスキーマ同期は図全体を拒否します。</value>
   </data>
+  <data name="Cli_ImportWarningVirtualTableExcluded" xml:space="preserve">
+    <value>警告: {0} は仮想テーブルのため取り込みませんでした。通常テーブルの形で写し取れないため、付属表（シャドウテーブル）も合わせて除外しています。</value>
+  </data>
+  <data name="Cli_ImportWarningComputedColumnExpressionLost" xml:space="preserve">
+    <value>警告: {0}.{1} は通常の列として取り込みました。図は生成列の式を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
+  </data>
+  <data name="Cli_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
+    <value>警告: {0}.{1} は通常の列として取り込みました。図は生成列の式（{2}）を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
+  </data>
 </root>

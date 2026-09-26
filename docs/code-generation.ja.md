@@ -18,6 +18,7 @@ QuickER が生成する C# コードの構成と、その使い方をまとめ�
 - [EF Core モード](#ef-core-モードgenerateefcorerepositories)
 - [テスト用インメモリ Repository](#テスト用インメモリ-repositorygenerateinmemoryrepositories)
 - [rowversion 列と楽観排他](#rowversion-列と楽観排他)
+- [計算列・生成列](#計算列生成列)
 - [生成される基底クラスの拡張](#生成される基底クラスの拡張)
 
 残りは生成オプションごとの参照です。
@@ -871,6 +872,35 @@ catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
   `DeleteAsync(id)` はエンティティではなくキーを受け取るため比較すべき版がなく、現在の版が何であれ行は削除されます。
   読んだ版で削除を守りたい場合は、エンティティを `MarkRemoved()` してグラフ保存してください（グラフ保存は削除もエンティティが読んだ版で守ります）。
 - 生 SQL（`ExecuteSqlAsync` 等）と無制限バイナリ列の Stream アクセサは直接操作のため、版では守られません。
+
+## 計算列・生成列
+
+DB 取込は、計算列（SQL Server）・生成列（MySQL / PostgreSQL / SQLite の `GENERATED ALWAYS AS`）・仮想列（Oracle）を「式を持たない読み取り専用の列」として図へ持ち帰ります（[取込の警告](database.ja.md#取込の警告)を参照）。
+生成 Entity のそのプロパティにはマーカー属性 `[ComputedColumn]` が付与され、次のように扱われます。
+
+- **書き込みでは触れません。**
+  DB が式から値を作るため、QuickER 版 Repository はどの方言でも INSERT / BulkInsert / UPDATE から除外します（明示書き込みは実 DB が拒否するためです）。
+  rowversion の除外と違い、方言には依りません
+- **SELECT では取得します。**
+  計算された値をエンティティで読めます。
+  ただし QuickER 版 Repository は INSERT / UPDATE の後に計算列を読み戻さないため、保存直後のエンティティのその列は保存前の値（新規なら既定値）のままです。
+  正しい値は次の取得で読めます（EF Core モードは `ValueGeneratedOnAddOrUpdate` が保存後に読み戻すため、この差が出ます）
+- **EF Core モードでは Fluent 構成に `ValueGeneratedOnAddOrUpdate()` が付きます。**
+  図は式を持たないため `HasComputedColumnSql` は出せません
+- **インメモリ Repository は計算しません。**
+  式が無いため、代入した値がそのまま残る普通の列です
+- **EditModel は入力必須にしません。**
+  未入力の保存はエンティティの現在値を保ちます（その列はどのみち書き込みに含まれません）
+- **主キーが計算列の図は生成時エラーです。**
+  生成 INSERT がキー列を送れず、行の同一性が式の結果に乗ってしまうためです
+- **C# リバースは `[ComputedColumn]` で往復します。**
+  DBML / Mermaid / Excel はこの情報を運びません
+- **マルチターゲットの SQLite ミラーへは値が運ばれません。**
+  ミラー側の列は（QuickER の DDL が作る）普通の列ですが、書き込み除外はどの方言でも効くため、双方向同期のダウンロードでも値は写りません。
+  必要なら生 SQL で書き込んでください
+
+生成時には、除外した列を名指しする Info 診断が 1 件出ます。
+どの列が書き込み対象から外れているかは、図の上では普通の列と見分けが付かないためです。
 
 ## 生成される基底クラスの拡張
 

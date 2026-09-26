@@ -162,15 +162,14 @@ public class StoreGeneratedCapabilityGenerationTests
         sqlServer.Should().Contain(AssigningDoc);
         sqlServer.Should().NotContain(NonAssigningDoc);
         // 挙動側（書き込み除外）も同じ能力フラグで分岐している
-        sqlServer
-            .Should()
-            .Contain(
-                "columns.Where(property => !storeGeneratedColumns.Contains(property)).ToList()"
-            );
+        // （書き込み除外の対象集合＝store-generated ＋ 計算列。計算列は方言に依らず常に外れる）
+        sqlServer.Should().Contain("storeGeneratedColumns.Concat(computedColumns).ToList()");
 
         var sqlite = files["Runtime.Sqlite.g.cs"];
         sqlite.Should().Contain(NonAssigningDoc);
-        sqlite.Should().Contain("var insertProperties = columns;");
+        // SQLite は store-generated を除外しない＝除外対象は計算列だけになる
+        sqlite.Should().Contain("var readOnlyColumns = computedColumns;");
+        sqlite.Should().NotContain("storeGeneratedColumns.Concat(computedColumns)");
     }
 
     /// <summary>EF Core 基盤の固定部は EF Core 自身が版ガードを行うことを述べる</summary>

@@ -143,6 +143,10 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         for (var i = 0; i < entity.Columns.Count; i++)
         {
             var col = entity.Columns[i];
+
+            // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
+            ComputedColumnComment.Append(sb, col, "    ");
+
             var line = BuildColumnDefinition(col);
 
             var hasMoreColumns = i < entity.Columns.Count - 1;

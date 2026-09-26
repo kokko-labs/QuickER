@@ -127,6 +127,35 @@ public class EntityViewModelTests
         roundTripped.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("b", "a");
     }
 
+    /// <summary>計算列フラグが ViewModel 往復（意味モデル → VM → 意味モデル）で保全されることを検証する</summary>
+    /// <remarks>
+    /// 編集 UI を持たないパススルーのため、読込値がそのまま書き戻らないと
+    /// 「DB 取込 → GUI で編集 → 保存」で計算列の指定が黙って消え、
+    /// 生成コードがその列を INSERT / UPDATE の対象へ戻してしまう。
+    /// </remarks>
+    [Fact(DisplayName = "ToModel: 計算列フラグが ViewModel 往復で保全される")]
+    public void ToModel_PreservesIsComputed()
+    {
+        var model = new Entity
+        {
+            TableName = "Items",
+            Columns =
+            {
+                new Column { Name = "qty", DataType = "int" },
+                new Column
+                {
+                    Name = "total",
+                    DataType = "decimal(21,2)",
+                    IsComputed = true,
+                },
+            },
+        };
+
+        var roundTripped = new EntityViewModel(model).ToModel();
+
+        roundTripped.Columns.Select(c => c.IsComputed).Should().Equal(false, true);
+    }
+
     /// <summary>主キー順表示のテスト用に「a, b の 2 列とも主キー」のエンティティを生成する</summary>
     /// <param name="reversePrimaryKeyOrder">true なら実効順を列宣言順の逆（b → a）へ上書きする</param>
     private static EntityViewModel NewCompositeKeyEntity(bool reversePrimaryKeyOrder = true)

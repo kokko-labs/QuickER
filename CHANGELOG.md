@@ -8,6 +8,12 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ### Fixed
 
+#### Database import & generated code
+
+- **Computed and generated columns are now imported as read-only and left out of generated writes** — a SQL Server computed column, a MySQL / PostgreSQL / SQLite generated column or an Oracle virtual column used to be imported as an ordinary column, so every INSERT / UPDATE the generated repository issued against that table failed at runtime. The import now marks the column and warns that the expression is not carried into the diagram, generated code excludes the column from INSERT / UPDATE on every backend (EF Core mode maps it as store-generated), generated DDL notes next to the column that the expression must be added by hand, and generation reports the excluded columns. A SQLite generated column used to be missing from the import entirely, and a diagram whose primary key is a computed column is now refused at generation time
+- **SQL Server tables whose names differ only in letter case no longer merge into one entity** — in a database with a case-sensitive collation, `Dup` and `dup` collapsed into a single entity with both tables' columns mixed together and no warning. One table is now kept and the other is skipped with a warning, the same way the other dialects already behaved
+- **SQLite virtual tables (FTS5, R*Tree and the like) are no longer imported as broken ordinary tables** — a virtual table and its shadow tables used to appear as entities full of BLOB columns. They are now excluded from the import, and each virtual table is reported once
+
 #### AI chat & mock generation
 
 - **Interrupting an AI chat response during a tool call no longer breaks the conversation** — with the API key method, an interrupted tool call left the history inconsistent and every later message failed until "New conversation". The calls that did not run are now recorded in the history as interrupted, so the AI also knows which of its changes reached the diagram

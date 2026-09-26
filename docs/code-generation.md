@@ -18,6 +18,7 @@ They cover what you need to use the generated code.
 - [EF Core mode](#ef-core-mode-generateefcorerepositories)
 - [In-memory repositories for tests](#in-memory-repositories-for-tests-generateinmemoryrepositories)
 - [rowversion columns and optimistic concurrency](#rowversion-columns-and-optimistic-concurrency)
+- [Computed / generated columns](#computed--generated-columns)
 - [Extending the generated base classes](#extending-the-generated-base-classes)
 
 The rest is reference material, one section per generation option.
@@ -870,6 +871,34 @@ Reload-and-reapply is the honest answer when the two edits can be merged.
   `DeleteAsync(id)` takes a key rather than an entity, so there is no version to compare it against and the row goes whatever its current version is.
   Where a delete has to lose the race it lost, mark the entity `MarkRemoved()` and save the graph, since a graph save guards its deletes with the version the entity was read with.
 - Raw SQL (`ExecuteSqlAsync` and friends) and the stream accessors for unbounded binary columns are direct operations and are not guarded.
+
+## Computed / generated columns
+
+DB import carries a computed column (SQL Server), a generated column (`GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite) or a virtual column (Oracle) into the diagram as a read-only column without its expression (see [import warnings](database.md#import-warnings)).
+The generated entity property carries the marker attribute `[ComputedColumn]`, and the column is treated as follows.
+
+- **Writes leave it alone.**
+  The database derives the value from an expression, so the QuickER Repository excludes the column from INSERT / BulkInsert / UPDATE on every dialect (a real database rejects an explicit write).
+  Unlike the rowversion exclusion, this does not depend on the dialect
+- **SELECT still fetches it.**
+  The derived value is readable on the entity.
+  The QuickER Repository does not read the column back after INSERT / UPDATE, though, so right after a save the entity still carries the value it had before the save (the default value for a new row).
+  The derived value arrives with the next fetch (EF Core mode does read it back through `ValueGeneratedOnAddOrUpdate`, so the backends differ here)
+- **EF Core mode adds `ValueGeneratedOnAddOrUpdate()` to the Fluent configuration.**
+  The diagram has no expression, so `HasComputedColumnSql` cannot be emitted
+- **The in-memory repository computes nothing.**
+  There is no expression, so the property is an ordinary column that keeps whatever value was assigned
+- **The edit model does not require an input.**
+  Saving without one keeps the entity's current value (the column is left out of the write either way)
+- **A diagram whose primary key is a computed column fails generation.**
+  The generated INSERT could not send the key column, and row identity would ride on the expression's result
+- **C# reverse engineering round-trips it through `[ComputedColumn]`.**
+  DBML / Mermaid / Excel do not carry this information
+- **A multi-target SQLite mirror never receives the value.**
+  The mirror column (created by QuickER's DDL) is an ordinary column, but the write exclusion applies on every dialect, so even a bidirectional-sync download does not copy it.
+  Write it with raw SQL when it is needed
+
+Generation emits one Info diagnostic naming the excluded columns, because on the diagram they look no different from ordinary columns.
 
 ## Extending the generated base classes
 

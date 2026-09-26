@@ -725,5 +725,17 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("ApiDoc_Di_InMemory", resourceCulture);
             }
         }
+
+        public static string CodeGen_Error_PrimaryKeyComputedColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_PrimaryKeyComputedColumn", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Info_ComputedColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_ComputedColumns", resourceCulture);
+            }
+        }
     }
 }

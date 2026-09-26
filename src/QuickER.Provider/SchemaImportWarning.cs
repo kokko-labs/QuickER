@@ -85,6 +85,30 @@ public enum SchemaImportWarningKind
     /// <c>Subject</c> / <c>Detail</c> ともに空。
     /// </remarks>
     PartitionDefinitionLost,
+
+    /// <summary>
+    /// 仮想テーブル（SQLite の FTS5 / R*Tree 等）を、付属表（シャドウテーブル）ともに取り込まなかった。
+    /// </summary>
+    /// <remarks>
+    /// 仮想テーブルは通常テーブルの形で写し取れないため取り込まない。付属表（例: FTS5 の
+    /// <c>{テーブル}_data</c> / <c>{テーブル}_idx</c>）も黙って一緒に除外し、この警告 1 件が代表する
+    /// （付属表ごとに警告を出すと本体の仮想テーブル 1 つに対して警告が何件も並んでしまうため）。
+    /// <c>Subject</c> / <c>Detail</c> ともに空。
+    /// </remarks>
+    VirtualTableExcluded,
+
+    /// <summary>
+    /// 計算列・生成列を取り込んだが、その式は意味モデルに載らなかった。
+    /// </summary>
+    /// <remarks>
+    /// 意味モデルは式を持たないため、列自体は普通の列として取り込み
+    /// 「書き込みを受け付けない」という事実だけを <see cref="Column.IsComputed"/> で運ぶ
+    /// （<see cref="DomainTypeFlattened"/> と同じ「基底の形へ落として取り込む」告知）。
+    /// 帰結として、この図から生成する DDL はその列を<b>普通の列</b>として作り直し、
+    /// 生成コードはその列を INSERT / UPDATE の対象から外す。
+    /// <c>Subject</c> = 列名 / <c>Detail</c> = 式（取得できない方言では空）。
+    /// </remarks>
+    ComputedColumnExpressionLost,
 }
 
 /// <summary>

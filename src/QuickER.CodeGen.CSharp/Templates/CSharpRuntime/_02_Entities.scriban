@@ -291,6 +291,7 @@ public abstract partial class EntityBase : EntityBaseCore { }
 {{ end }}{{ if emit_db_meta_attr && property.canonical_type_token }}    [DbColumnMeta("{{ property.canonical_type_token }}"{{ if property.verbatim_db_type }}, NativeType = "{{ property.verbatim_db_type }}"{{ end }}{{ if property.description != "" }}, Description = "{{ property.description }}"{{ end }})]
 {{ end }}{{ if exclude_unbounded_binary && property.is_unbounded_binary }}    [UnboundedBinaryColumn]
 {{ end }}{{ if property.is_row_version }}    [StoreGeneratedColumn]
+{{ end }}{{ if property.is_computed }}    [ComputedColumn]
 {{ end }}    public {{ if property.property_name == "DisplayName" }}new {{ end }}{{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
 {{ end }}{{ for navigation in item.navigations }}
     /// <summary>{{ navigation.property_name }} navigation property</summary>

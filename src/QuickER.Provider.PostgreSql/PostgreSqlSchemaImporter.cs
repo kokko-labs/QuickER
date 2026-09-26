@@ -163,6 +163,12 @@ ORDER BY c.relname COLLATE ""C"";";
     /// ドメインの配列（<c>typcategory = 'A'</c> かつ要素がドメイン）も要素を平坦化して <c>[]</c> を付け直す。
     /// 平坦化した列は呼び出し側が警告として告げる。
     /// </para>
+    /// <para>
+    /// 生成列（<c>GENERATED ALWAYS AS</c>）は <c>attgenerated</c> が空でない列。式は
+    /// <c>pg_get_expr(pg_attrdef.adbin, adrelid)</c> で取り出す（生成列の式は既定値と同じ
+    /// <c>pg_attrdef</c> に載る）。判定を <c>= 's'</c> に狭めないのは、将来の格納方式
+    /// （仮想生成列）も「書き込みを受け付けない」点では同じだから。
+    /// </para>
     /// </remarks>
     private const string ColumnsSql =
         @"
@@ -189,11 +195,16 @@ SELECT c.relname AS table_name,
          ELSE pg_catalog.format_type(a.atttypid, a.atttypmod)
        END AS data_type,
        COALESCE(dt.typname, et.typname) AS domain_name,
-       a.attnotnull AS not_null
+       a.attnotnull AS not_null,
+       a.attgenerated <> '' AS is_generated,
+       CASE WHEN a.attgenerated <> ''
+            THEN pg_catalog.pg_get_expr(ad.adbin, ad.adrelid)
+       END AS generation_expression
 FROM pg_catalog.pg_attribute a
 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
 LEFT JOIN dom_base db ON db.dom_oid = a.atttypid
 LEFT JOIN pg_catalog.pg_type dt ON dt.oid = db.dom_oid
 LEFT JOIN dom_base edb ON t.typcategory = 'A' AND edb.dom_oid = t.typelem
@@ -378,16 +389,32 @@ WHERE "
             var formatType = reader.GetString(2);
             var domainName = reader.IsDBNull(3) ? null : reader.GetString(3);
             var notNull = reader.GetBoolean(4);
+            var isGenerated = reader.GetBoolean(5);
 
             var col = new Column
             {
                 Name = colName,
                 DataType = NormalizeFormatType(formatType),
                 IsNullable = !notNull,
+                IsComputed = isGenerated,
             };
 
             entry.Entity.Columns.Add(col);
             entry.ColumnsByName[colName] = col;
+
+            // 生成列は式が意味モデルに載らない＝図から DDL を生成すると普通の列になる
+            if (isGenerated)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ComputedColumnExpressionLost,
+                        entry.Entity.TableName,
+                        colName,
+                        // 式は警告文へそのまま載るため、行構造を壊さないよう制御文字を畳んでおく
+                        SqlComment.Sanitize(reader.IsDBNull(6) ? string.Empty : reader.GetString(6))
+                    )
+                );
+            }
 
             // ドメイン型は基底型へ平坦化済み＝図から DDL を生成するとドメインではなく基底型の列になる
             if (domainName is not null)

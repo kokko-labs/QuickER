@@ -244,6 +244,9 @@ internal sealed class CSharpEfCorePropertyConfigModel
     /// <summary>行バージョン列（IsRowVersion 用）かどうか</summary>
     public required bool IsRowVersion { get; init; }
 
+    /// <summary>計算列・生成列（ValueGeneratedOnAddOrUpdate 用）かどうか</summary>
+    public required bool IsComputed { get; init; }
+
     /// <summary>値オブジェクト型かどうか（HasConversion 構成の要否判定）</summary>
     public required bool IsValueObject { get; init; }
 
@@ -468,6 +471,12 @@ internal sealed class CSharpPropertyModel
     public bool IsRowVersion { get; init; }
 
     /// <summary>
+    /// 計算列・生成列（DB が式から値を作り、明示の書き込みを受け付けない列）かどうか。オプション非依存で常にマーカー属性
+    /// [ComputedColumn] を付与する対象の識別に使う（判定は図の <c>Column.IsComputed</c>）。QuickER 版 Repository の INSERT / UPDATE 対象から除外される。
+    /// </summary>
+    public bool IsComputed { get; init; }
+
+    /// <summary>
     /// DB 定義メタ属性（[DbColumnMeta]）へ刻む方言中立の型トークン（例 "string(50)"）。型カタログで解析できない自由記述型は null で属性を省略する。
     /// </summary>
     public string? CanonicalTypeToken { get; init; }
@@ -617,6 +626,15 @@ internal sealed class CSharpMappingPropertyPair
     /// DB 採番のため新規行では未入力が正常であり、未入力を欠落として例外にすると新規保存が成立しない。
     /// </remarks>
     public required bool IsRowVersion { get; init; }
+
+    /// <summary>
+    /// 計算列・生成列かどうか。
+    /// </summary>
+    /// <remarks>
+    /// true のとき Mapper の Entity へのコピーは「入力があるときだけ代入」に切り替える。
+    /// DB が式から作るため新規行では未入力が正常であり、未入力を欠落として例外にすると新規保存が成立しない。
+    /// </remarks>
+    public required bool IsComputed { get; init; }
 
     /// <summary>
     /// 除外された無制限バイナリ列（<see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/> が
@@ -902,6 +920,7 @@ internal sealed record CSharpEditModelPropertyModel
     /// <summary>必須項目（Entity 側が非 NULL）かどうか</summary>
     /// <remarks>
     /// 行バージョン列（<see cref="IsRowVersion"/>）は DB 採番のため非 NULL でも必須にしない。
+    /// 計算列・生成列（<see cref="IsComputed"/>）も DB が式から作るため非 NULL でも必須にしない。
     /// 除外された無制限バイナリ列（<see cref="IsExcludedUnboundedBinary"/>）も通常フェッチでは未取得のため必須にしない
     /// （ただし NOT NULL の除外列は新規行のあいだだけ必須にする＝<see cref="IsRequiredWhenAdded"/>）。
     /// </remarks>
@@ -912,6 +931,12 @@ internal sealed record CSharpEditModelPropertyModel
     /// </summary>
     /// <remarks>必須検証の除外と、Mapper の「入力があるときだけ代入」への切り替えに使う。</remarks>
     public bool IsRowVersion { get; init; }
+
+    /// <summary>
+    /// 計算列・生成列かどうか。
+    /// </summary>
+    /// <remarks>必須検証の除外と、Mapper の「入力があるときだけ代入」への切り替えに使う。</remarks>
+    public bool IsComputed { get; init; }
 
     /// <summary>
     /// 除外された無制限バイナリ列（<see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/> が
