@@ -116,4 +116,20 @@ public sealed record CSharpTypeInfo
     /// 生成コードそのものには出ない（属性にもコメントにもならない）。
     /// </remarks>
     public bool IsFallbackType { get; init; }
+
+    /// <summary>
+    /// 配列型（PostgreSQL の <c>integer[]</c> 等）を要素型の配列（<c>int[]</c> 等）として解決したかどうか。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>byte[]</c>（バイナリ列）は配列ではなく単一のバイナリ値として扱うため <b>false</b>。
+    /// この印が立つのは「DB の配列型を C# の配列へ写した列」だけ。
+    /// </para>
+    /// <para>
+    /// 配列列は EditModel と値オブジェクトの対象外にするための判定に使う。EditModel は
+    /// 1 列＝1 テキスト入力の投影で配列を表す記法が無く、値オブジェクトの等値は
+    /// <c>EqualityComparer&lt;T&gt;.Default</c>＝配列では参照比較になり静かに壊れるため。
+    /// </para>
+    /// </remarks>
+    public bool IsArray { get; init; }
 }

@@ -2508,11 +2508,68 @@ public class MockGenerationDialogViewModelTests
     }
 
     /// <summary>
+    /// 会話を切り替えた直後にアプリを閉じても、旧セッションの破棄を待ってから終了することを検証する（RA1）。
+    /// </summary>
+    /// <remarks>
+    /// 切替の破棄はスレッドプールで走る（切替自体は UI の同期処理なので待たない）。参照を捨てていると
+    /// <c>ShutdownEngines</c> は現在のセッションしか見られず、旧エンジンの常駐子プロセスが孤児になる。
+    /// 遅い破棄を門で再現し、<c>ShutdownEngines</c> がそこで待っていることを確かめる。
+    /// </remarks>
+    [Fact(DisplayName = "ShutdownEngines は切り離し済みセッションの破棄も待つ")]
+    public async Task ShutdownEngines_WaitsForDetachedSessionDisposal()
+    {
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
+        using var gate = new ManualResetEventSlim(false);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.StartConversationCommand.Execute(null);
+            var oldEngine = engineBox[0];
+            oldEngine.DisposeGate = gate;
+
+            // 会話の作り直しで旧セッションを切り離す（破棄は門で止まったまま進む）
+            vm.StartConversationCommand.Execute(null);
+            oldEngine
+                .DisposeStarted.Wait(
+                    TimeSpan.FromSeconds(30),
+                    TestContext.Current.CancellationToken
+                )
+                .Should()
+                .BeTrue("切替で旧セッションの破棄が始まること");
+
+            var shutdown = Task.Run(
+                () => vm.ShutdownEngines(TimeSpan.FromSeconds(30)),
+                TestContext.Current.CancellationToken
+            );
+
+            // 門が開くまで終了処理は戻らない（＝旧セッションの破棄を待っている）
+            var finishedEarly = await Task.WhenAny(
+                shutdown,
+                Task.Delay(300, TestContext.Current.CancellationToken)
+            );
+            finishedEarly
+                .Should()
+                .NotBeSameAs(shutdown, "切り離し済みセッションの破棄が終わるまで待つこと");
+
+            gate.Set();
+            await shutdown;
+
+            oldEngine.DisposeCount.Should().Be(1, "切り離した旧セッションも破棄されること");
+        }
+        finally
+        {
+            gate.Set();
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
     /// モックフォルダの変更（会話リセット）で、旧セッションが抱えるエンジンが破棄されることを検証する
     /// （破棄しないと CLI バックエンドの常駐子プロセスを含む旧エンジンがアプリ終了まで残り続ける）。
     /// </summary>
     [Fact(DisplayName = "会話のリセットは旧セッションのエンジンを破棄する")]
-    public void ResetConversation_DisposesPreviousSessionEngine()
+    public async Task ResetConversation_DisposesPreviousSessionEngine()
     {
         var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
 
@@ -2526,8 +2583,12 @@ public class MockGenerationDialogViewModelTests
             // フォルダ変更は会話をリセットし、旧セッションを手放す
             vm.MockFolder = Path.Combine(baseFolder, "mock2");
 
-            // 破棄はスレッドプールで走る（fire-and-forget）ため、到達を短い上限つきで待つ
-            WaitForDisposeCount(oldEngine, 1);
+            // 破棄はスレッドプールで走るため、VM が保持している破棄タスクを待つ。
+            // 短い上限つきのポーリングで待つと、全スイートの並列実行でプールが飽和したときに
+            // 上限内へ入らず落ちる（実測: 飽和状態では自明な Task.Run すら 2 秒以内に開始しない）
+            vm.DetachedDisposalForTests.Should()
+                .NotBeNull("切替で旧セッションの破棄が始まること");
+            await vm.DetachedDisposalForTests!;
             oldEngine.DisposeCount.Should().Be(1, "手放した旧セッションのエンジンは破棄されること");
         }
         finally
@@ -2541,7 +2602,7 @@ public class MockGenerationDialogViewModelTests
     /// 新しいセッションのエンジンは生きていることを検証する。
     /// </summary>
     [Fact(DisplayName = "会話の作り直しは旧セッションのエンジンだけを破棄する")]
-    public void RestartConversation_DisposesOnlyPreviousSessionEngine()
+    public async Task RestartConversation_DisposesOnlyPreviousSessionEngine()
     {
         var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
 
@@ -2553,8 +2614,12 @@ public class MockGenerationDialogViewModelTests
 
             vm.StartConversationCommand.Execute(null);
 
-            // 破棄はスレッドプールで走る（fire-and-forget）ため、到達を短い上限つきで待つ
-            WaitForDisposeCount(oldEngine, 1);
+            // 破棄はスレッドプールで走るため、VM が保持している破棄タスクを待つ。
+            // 短い上限つきのポーリングで待つと、全スイートの並列実行でプールが飽和したときに
+            // 上限内へ入らず落ちる（実測: 飽和状態では自明な Task.Run すら 2 秒以内に開始しない）
+            vm.DetachedDisposalForTests.Should()
+                .NotBeNull("切替で旧セッションの破棄が始まること");
+            await vm.DetachedDisposalForTests!;
             oldEngine
                 .DisposeCount.Should()
                 .Be(1, "差し替えられた旧セッションのエンジンは破棄されること");
@@ -2568,20 +2633,6 @@ public class MockGenerationDialogViewModelTests
         finally
         {
             Cleanup(baseFolder);
-        }
-    }
-
-    /// <summary>
-    /// fire-and-forget の破棄（スレッドプール実行）が期待回数へ到達するまで短い上限つきで待つ
-    /// （フェイクの DisposeAsync 自体は同期完了だが、Task.Run 経由のため到達タイミングは非決定的）。
-    /// </summary>
-    private static void WaitForDisposeCount(FakeChatEngine engine, int expected)
-    {
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-        while (engine.DisposeCount < expected && stopwatch.ElapsedMilliseconds < 2000)
-        {
-            Thread.Sleep(10);
         }
     }
 

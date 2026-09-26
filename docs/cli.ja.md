@@ -38,7 +38,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 これらに加えて、**設定ファイル（quicker.json）の全キーは同名の kebab-case フラグとして指定でき**、設定ファイルより優先されます（優先順位: **CLI フラグ ＞ 設定ファイル ＞ 既定値**）。
 フラグ名はキーの機械的な kebab-case 変換で、例えば `rootNamespace` → `--root-namespace`、`generateRepositories` → `--generate-repositories`、`splitFilesByCategory` → `--split-files-by-category`、`outputPath` → `--output-path` です。
 bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。
-各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、未指定時は `--provider` の方言から単一導出します）。
+各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、オプションごと省略すると `--provider` の方言から単一導出します。値を書いて方言が 1 つも含まれない場合はエラーです）。
 
 機械的変換には例外があります。
 
@@ -137,7 +137,7 @@ quicker mcp
 | `GenerateValueObjects`（`false`） | 列ごとの値オブジェクト型（`CustomerIdValue` など）を生成する（[生成コードの使い方](code-generation.ja.md#値オブジェクトgeneratevalueobjects) 参照） |
 | `UseGuidKeyForStringPrimaryKey`（`false`） | string 主キーを GUID 値オブジェクトにする（`GenerateValueObjects` が有効な場合のみ） |
 | `GenerateRepositories`（`false`） | QuickER 版 Repository（軽量ミニ ORM）を生成する。**既定では DB アクセスコードを生成しない**（GUI と同じ既定） |
-| `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。対応方言は `sqlserver` と `sqlite` のみで、それ以外を `GenerateRepositories` と併用すると生成前にエラーになる。未指定時の実効値は `--repository-dialects` ＞ 設定ファイルの本キー ＞ `--provider` からの単一導出、の順で決まる |
+| `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。対応方言は `sqlserver` と `sqlite` のみで、それ以外を `GenerateRepositories` と併用すると生成前にエラーになる。未指定時の実効値は `--repository-dialects` ＞ 設定ファイルの本キー ＞ `--provider` からの単一導出、の順で決まる。設定ファイルの本キーが null・空配列なら導出へ回るが、`--repository-dialects` に「方言を 1 つも含まない値」（カンマや空白だけ）を渡した場合は導出せずエラーにする |
 | `ExcludeUnboundedBinaryColumns`（`false`） | 無制限バイナリ列を QuickER 版 Repository の SELECT / UPDATE から除外する（CLI の `--exclude-unbounded-binary-columns` に対応。[生成コードの使い方](code-generation.ja.md#無制限バイナリ列の除外excludeunboundedbinarycolumns) 参照） |
 | `GenerateEfCoreRepositories`（`false`） | EF Core 用の `QuickErDbContext` ＋ EF Core 版 Repository 実装を生成する。マルチターゲット（実効方言 2 つ以上）とは併用不可 |
 | `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する |

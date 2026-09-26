@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using QuickER.Model;
 
 namespace QuickER.Services;
@@ -10,7 +11,7 @@ namespace QuickER.Services;
 /// 一意制約は単一列のものだけを <c>UK</c> として出力し、複合制約は出力しない
 /// （<see cref="CollectSingleColumnUniqueMembers"/> 参照）。
 /// </remarks>
-public static class MermaidExporter
+public static partial class MermaidExporter
 {
     /// <summary>ER 図定義から Mermaid 文字列を生成する</summary>
     public static string Build(ErDiagram diagram)
@@ -23,11 +24,12 @@ public static class MermaidExporter
             builder.AppendLine($"    {Identifier(entity.TableName)} {{");
 
             var uniqueColumnIds = CollectSingleColumnUniqueMembers(entity);
+            var attributeNames = BuildAttributeNames(entity);
 
             foreach (var column in entity.Columns)
             {
                 builder.AppendLine(
-                    $"        {BuildColumnLine(column, uniqueColumnIds.Contains(column.Id))}"
+                    $"        {BuildColumnLine(column, uniqueColumnIds.Contains(column.Id), attributeNames[column.Id])}"
                 );
             }
 
@@ -116,9 +118,86 @@ public static class MermaidExporter
                 ExportOmissionKind.ReferentialAction
             ),
             (diagram.Queries.Count > 0, ExportOmissionKind.NamedQuery),
+            (
+                // 属性名として書けない文字を含む列名は書き換えて出す（黙って変えない）
+                diagram.Entities.Any(entity =>
+                    entity.Columns.Any(column =>
+                    {
+                        var sanitized = Identifier(column.Name);
+                        return NormalizeAttributeName(sanitized) != sanitized;
+                    })
+                ),
+                ExportOmissionKind.ColumnNameNormalized
+            ),
         };
 
         return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();
+    }
+
+    /// <summary>
+    /// テーブル内の列 ID → Mermaid の属性名の写像を作る（衝突したら決定的に連番を付ける）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mermaid の属性行は「型 名前 標識」を空白で区切るため、空白や記号を含む列名は後半が黙って消える。
+    /// 型が既に <see cref="NormalizeDataType"/> で <c>_</c> へ畳まれているのと同じ扱いにし、
+    /// 名前も畳む（畳んだことは <see cref="ExportOmissionKind.ColumnNameNormalized"/> で告知する）。
+    /// </para>
+    /// <para>
+    /// 畳んだ結果が同じテーブルの別の列とぶつかると、読み込み直したときに黙って 1 つへ潰れる。
+    /// <b>畳む必要のない名前を先に予約</b>してから、畳んだ名前に <c>_2</c>, <c>_3</c>, … を付けて空くまで進める
+    /// （既にある名前を動かさない・列の宣言順で決まるので出力は決定的）。
+    /// 畳む必要のある列が 1 つも無いテーブルの出力は従来どおり。
+    /// </para>
+    /// </remarks>
+    private static Dictionary<Guid, string> BuildAttributeNames(Entity entity)
+    {
+        var result = new Dictionary<Guid, string>();
+        var used = new HashSet<string>(StringComparer.Ordinal);
+
+        // 畳む必要のない名前を先に確定・予約する
+        foreach (var column in entity.Columns)
+        {
+            var sanitized = Identifier(column.Name);
+
+            if (NormalizeAttributeName(sanitized) == sanitized)
+            {
+                result[column.Id] = sanitized;
+                used.Add(sanitized);
+            }
+        }
+
+        foreach (var column in entity.Columns)
+        {
+            if (result.ContainsKey(column.Id))
+            {
+                continue;
+            }
+
+            var candidate = NormalizeAttributeName(Identifier(column.Name));
+            var unique = candidate;
+
+            for (var suffix = 2; !used.Add(unique); suffix++)
+            {
+                unique = $"{candidate}_{suffix}";
+            }
+
+            result[column.Id] = unique;
+        }
+
+        return result;
+    }
+
+    /// <summary>Mermaid の属性名に書けない文字（英数字とアンダースコア以外）に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"[^\w]+", RegexOptions.Compiled)]
+    private static partial Regex AttributeNamePattern();
+
+    /// <summary>Mermaid の属性名として書けない文字（空白・記号）を <c>_</c> へ畳む</summary>
+    /// <remarks>型トークンの正規化と同じ規則（連続する対象は 1 つの <c>_</c> へ・末尾の <c>_</c> は落とす）</remarks>
+    private static string NormalizeAttributeName(string sanitizedName)
+    {
+        var folded = AttributeNamePattern().Replace(sanitizedName, "_").Trim('_');
+        return folded.Length == 0 ? "_" : folded;
     }
 
     /// <summary>Mermaid の属性型トークン用に DataType を正規化する</summary>
@@ -152,12 +231,12 @@ public static class MermaidExporter
     /// <c>PK &gt; FK &gt; UK</c> の優先度で 1 つだけ出力する（GUI のキー標識
     /// <see cref="ColumnKeyMarkPalette"/> と同じ序列）
     /// </remarks>
-    private static string BuildColumnLine(Column column, bool isUnique)
+    private static string BuildColumnLine(Column column, bool isUnique, string attributeName)
     {
         var builder = new StringBuilder();
         builder.Append(NormalizeDataType(column.DataType));
         builder.Append(' ');
-        builder.Append(Identifier(column.Name));
+        builder.Append(attributeName);
 
         if (column.IsPrimaryKey)
         {

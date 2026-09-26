@@ -61,6 +61,14 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
     public CSharpTypeInfo Map(string dataType)
     {
         var normalized = Normalize(dataType);
+
+        // 配列型（integer[] / varchar(20)[] / 多次元表記）は要素型へ解決してから [] を足す。
+        // PostgreSQL の多次元配列は 1 次元と同じ型（Npgsql も要素型の 1 次元配列を返す）ため [] は 1 つへ畳む
+        if (ArraySuffixRegex().Match(normalized) is { Success: true } suffix)
+        {
+            return Array(Map(normalized[..suffix.Index]));
+        }
+
         var baseType = ResolveAlias(GetBaseType(normalized));
         var maxLength = TryGetLength(normalized);
         var (precision, scale) = TryGetPrecisionScale(normalized);
@@ -79,6 +87,9 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
                 ? Value("DateTimeOffset")
                 : Value("DateTime"),
             "time" => Value("TimeSpan"),
+            // timetz は「時刻＋オフセット」。Npgsql が返す CLR 型は DateTimeOffset で、
+            // TimeSpan で受けると読み取り自体が InvalidCastException になる（実 PG で実測）
+            "timetz" => Value("DateTimeOffset"),
             "uuid" => Value("Guid"),
             // bytea は長さ宣言を持たず上限が分からないため無制限バイナリ
             "bytea" => Reference("byte[]", isUnboundedBinary: true),
@@ -91,6 +102,28 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
             _ => Reference("string", isFallbackType: true),
         };
     }
+
+    /// <summary>要素型の型情報から、配列（<c>要素型[]</c>）の型情報を作成する</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>MaxLength</c> は引き継がない。<c>varchar(20)[]</c> の 20 は<b>要素の長さ</b>だが、
+    /// 生成コードの <c>[MaxLength]</c> は配列では<b>要素数</b>の意味になるため、誤った検証を宣言するより
+    /// 出さないほうが正しい（要素の長さは生成コードに載らない＝docs に明記）。
+    /// </para>
+    /// <para>
+    /// <c>IsUnboundedBinary</c> も引き継がない（ストリーミングアクセサは配列を扱えない）。
+    /// 要素型が解決できなかった場合（<c>geometry[]</c> 等）は要素側の <c>IsFallbackType</c> を引き継ぎ、
+    /// 生成時 Info で名指しされる。
+    /// </para>
+    /// </remarks>
+    private static CSharpTypeInfo Array(CSharpTypeInfo element) =>
+        new()
+        {
+            TypeName = element.TypeName + "[]",
+            IsReferenceType = true,
+            IsFallbackType = element.IsFallbackType,
+            IsArray = true,
+        };
 
     /// <summary>値型の型情報を作成する</summary>
     private static CSharpTypeInfo Value(string typeName) =>
@@ -130,11 +163,16 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
         WhitespaceRegex().Replace(dataType.Trim().ToLowerInvariant(), " ");
 
     /// <summary>長さ指定の括弧を除いた基本型名を取り出す（例: "varchar(50)" → "varchar"）</summary>
-    private static string GetBaseType(string normalizedDataType)
-    {
-        var parenIndex = normalizedDataType.IndexOf('(', StringComparison.Ordinal);
-        return parenIndex < 0 ? normalizedDataType : normalizedDataType[..parenIndex].Trim();
-    }
+    /// <remarks>
+    /// 括弧より後ろを切り捨てるのではなく<b>括弧の部分だけを取り除く</b>。PostgreSQL は
+    /// <c>timestamp(6) with time zone</c> / <c>time(3) with time zone</c> のように<b>括弧の後ろへ</b>
+    /// 時間帯の語を置くため、切り捨てると時間帯の情報ごと落ちて <c>timestamp</c> / <c>time</c> に見え、
+    /// 別名解決（<see cref="ResolveAlias"/>）が <c>timestamptz</c> / <c>timetz</c> へ到達できない。
+    /// </remarks>
+    private static string GetBaseType(string normalizedDataType) =>
+        WhitespaceRegex()
+            .Replace(TypeArgumentsRegex().Replace(normalizedDataType, " "), " ")
+            .Trim();
 
     /// <summary>PostgreSQL の型別名を代表表記へ解決する（例: <c>int4</c> → <c>integer</c>）</summary>
     private static string ResolveAlias(string baseType) =>
@@ -152,7 +190,7 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
             "timestamp without time zone" => "timestamp",
             "timestamp with time zone" => "timestamptz",
             "time without time zone" => "time",
-            "time with time zone" or "timetz" => "time",
+            "time with time zone" => "timetz",
             _ => baseType,
         };
 
@@ -210,6 +248,14 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
                 : null;
         return (precision, scale);
     }
+
+    /// <summary>型表記の末尾に続く配列の角括弧（多次元表記を含む）に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"(\s*\[\s*\])+\s*$", RegexOptions.CultureInvariant)]
+    private static partial Regex ArraySuffixRegex();
+
+    /// <summary>括弧の引数部（長さ・精度・空間型のパラメータ）を検出する正規表現</summary>
+    [GeneratedRegex(@"\([^)]*\)", RegexOptions.CultureInvariant)]
+    private static partial Regex TypeArgumentsRegex();
 
     /// <summary>連続する空白を検出する正規表現（複数語型名の畳み込みに使う）</summary>
     [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]

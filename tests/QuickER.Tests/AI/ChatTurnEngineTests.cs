@@ -58,6 +58,12 @@ public class ChatTurnEngineTests
         bool isReady = true
     ) => new(driver, host, new SyncUiDispatcher(), () => isReady, ErDesignProfile.ErDesign);
 
+    /// <summary>任意のツールホストでエンジンを生成する（例外を投げるフェイク等の検証用）</summary>
+    private static ChatTurnEngine CreateEngineFor(
+        ScriptedTurnDriver driver,
+        IErDiagramToolHost host
+    ) => new(driver, host, new SyncUiDispatcher(), () => true, ErDesignProfile.ErDesign);
+
     /// <summary>画像添付を受け付けるエンジンを生成する（添付履歴系テスト用）</summary>
     private static ChatTurnEngine CreateImageEngine(
         ScriptedTurnDriver driver,
@@ -127,6 +133,123 @@ public class ChatTurnEngineTests
         // 2 回目のドライバ呼び出し時点では、user＋assistant(tool)＋tool 結果が履歴へ積まれている
         driver.HistoryCountsAtCall.Should().HaveCount(2);
         driver.HistoryCountsAtCall[1].Should().BeGreaterThan(driver.HistoryCountsAtCall[0]);
+    }
+
+    /// <summary>
+    /// ツールが例外を投げても、失敗のツール結果へ畳んでターンが続くことを検証する（RA2）。
+    /// </summary>
+    /// <remarks>
+    /// 例外をそのまま伝播させると 1 件の失敗でターン全体が失敗し、後続のツールが実行されない。
+    /// Claude Code / Codex / Copilot の 3 エンジンは失敗結果を返して続行するため、API キー接続も揃える。
+    /// </remarks>
+    [Fact(DisplayName = "ツールの例外は失敗のツール結果になりターンは続く")]
+    public async Task SendAsync_ToolThrows_ReportsFailedResultAndContinues()
+    {
+        var driver = new ScriptedTurnDriver([
+            new ChatAssistantTurn(
+                string.Empty,
+                [
+                    new ChatToolCallRequest("call_1", "boom", "{}"),
+                    new ChatToolCallRequest("call_2", "add_entity", "{}"),
+                ]
+            ),
+            new ChatAssistantTurn("続行しました", []),
+        ]);
+        var host = new ThrowingToolHost("boom", "disk on fire");
+        var engine = CreateEngineFor(driver, host);
+
+        var activities = new List<ErChatToolActivity>();
+        ErChatTurnResult? completed = null;
+        engine.ToolActivityReceived += (_, a) => activities.Add(a);
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やって", TestContext.Current.CancellationToken);
+
+        // ターンは成功として完了し、後続のツールも実行されている
+        completed!.Value.Success.Should().BeTrue();
+        host.Calls.Select(call => call.Tool).Should().Equal("boom", "add_entity");
+
+        // 例外は「失敗のツール結果」として AI にも UI にも伝わる
+        activities.Should().HaveCount(2);
+        activities[0].Success.Should().BeFalse();
+        activities[0].Result.Should().Be("The tool 'boom' threw an exception: disk on fire");
+        activities[1].Success.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// ツールが例外を投げた後も、履歴の tool_use と tool 結果の対応（id の 1 対 1）が崩れないことを検証する（RA2）。
+    /// </summary>
+    [Fact(DisplayName = "ツールの例外の後も履歴の tool 結果対応は保たれる")]
+    public async Task SendAsync_ToolThrows_KeepsToolResultPairing()
+    {
+        var driver = new ScriptedTurnDriver([
+            new ChatAssistantTurn(
+                string.Empty,
+                [
+                    new ChatToolCallRequest("call_1", "boom", "{}"),
+                    new ChatToolCallRequest("call_2", "add_entity", "{}"),
+                ]
+            ),
+            new ChatAssistantTurn("完了", []),
+        ]);
+        var host = new ThrowingToolHost("boom", "disk on fire");
+        var engine = CreateEngineFor(driver, host);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やって", TestContext.Current.CancellationToken);
+
+        // 2 回目のドライバ呼び出し時点の履歴で、tool_use の id すべてに tool 結果が 1 対 1 で対応する
+        var history = driver.HistoriesAtCall[1];
+        var requestedIds = history
+            .Where(item => item.ToolCalls is not null)
+            .SelectMany(item => item.ToolCalls!)
+            .Select(call => call.Id)
+            .ToList();
+        var resultIds = history
+            .Where(item => item.Role == ChatHistoryRole.Tool)
+            .Select(item => item.ToolCallId)
+            .ToList();
+
+        requestedIds.Should().Equal("call_1", "call_2");
+        resultIds.Should().Equal("call_1", "call_2");
+    }
+
+    /// <summary>
+    /// ツールの例外は往復として数えない（失敗結果を返して同じ往復の中で続けるだけ）ことを検証する（RA2 × C3）。
+    /// </summary>
+    [Fact(DisplayName = "ツールの例外はツールループの往復数を増やさない")]
+    public async Task SendAsync_ToolThrows_DoesNotChangeRoundTripCount()
+    {
+        var driver = new ScriptedTurnDriver([
+            new ChatAssistantTurn(string.Empty, [new ChatToolCallRequest("call_1", "boom", "{}")]),
+            new ChatAssistantTurn("完了", []),
+        ]);
+        var engine = CreateEngineFor(driver, new ThrowingToolHost("boom", "x"));
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やって", TestContext.Current.CancellationToken);
+
+        // ドライバ呼び出しは 2 回（ツール要求ターン＋続きのターン）＝例外があっても往復の数え方は変わらない
+        driver.HistoryCountsAtCall.Should().HaveCount(2);
+    }
+
+    /// <summary>指定した名前のツールだけ例外を投げ、それ以外は成功を返すフェイクツールホスト</summary>
+    private sealed class ThrowingToolHost(string throwingTool, string message) : IErDiagramToolHost
+    {
+        public List<(string Tool, string Args)> Calls { get; } = new();
+
+        public (string Result, bool Success) Execute(string toolName, string argumentsJson)
+        {
+            Calls.Add((toolName, argumentsJson));
+
+            if (toolName == throwingTool)
+            {
+                throw new InvalidOperationException(message);
+            }
+
+            return ($"{toolName} 実行済み", true);
+        }
     }
 
     /// <summary>会話開始で履歴がシステムプロンプトのみにリセットされることを検証する</summary>

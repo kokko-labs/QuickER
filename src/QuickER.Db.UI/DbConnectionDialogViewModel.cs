@@ -408,9 +408,13 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     }
 
     /// <summary>プロファイル選択時に、その内容（必要なら復号パスワード）を入力欄へ反映する</summary>
+    partial void OnProfileNameChanged(string value) =>
+        RenameProfileCommand.NotifyCanExecuteChanged();
+
     partial void OnSelectedProfileItemChanged(ProfileListItem? value)
     {
         OnPropertyChanged(nameof(SelectedProfile));
+        RenameProfileCommand.NotifyCanExecuteChanged();
 
         if (value is null)
         {
@@ -553,6 +557,63 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             string.Format(Strings.DbConnection_OverwriteProfileConfirm, target.Name),
             Strings.Common_Confirm
         );
+    }
+
+    /// <summary>名前の変更を実行できるか（プロファイルを選んでいて、保存名が現在の名前と違う）</summary>
+    private bool CanRenameProfile() =>
+        SelectedProfile is { } profile
+        && !string.IsNullOrWhiteSpace(ProfileName)
+        && !string.Equals(ProfileName.Trim(), profile.Name, StringComparison.Ordinal);
+
+    /// <summary>選択中プロファイルの名前だけを、保存名の欄の値へ変更する</summary>
+    /// <remarks>
+    /// <para>
+    /// 保存ボタンは「現在の入力内容を保存名で保存する」＝名前がキーなので、名前を打ち替えて保存すると
+    /// 名前の変更ではなく複製になる。名前の変更はこちらの専用操作で行う。
+    /// </para>
+    /// <para>
+    /// 変えるのは名前だけで、接続の設定値には触れない（入力欄の編集内容は反映しない）。
+    /// Id が変わらないためパスワードの暗号ファイルはそのまま引き継がれ、古いファイルは生まれない。
+    /// 変更後の名前が別のプロファイルと衝突するときは、保存と同じ確認のうえでそちらを置き換える
+    /// （同じ名前のプロファイルが 2 つ並ぶと、名前で上書き先を決める保存がどちらを指すか決まらなくなる）。
+    /// </para>
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanRenameProfile))]
+    private void RenameProfile()
+    {
+        if (SelectedProfile is not { } target || !CanRenameProfile())
+        {
+            return;
+        }
+
+        var newName = ProfileName.Trim();
+        var conflict = Profiles
+            .Select(item => item.Profile)
+            .FirstOrDefault(profile =>
+                profile.Id != target.Id
+                && string.Equals(profile.Name, newName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(profile.Dbms, target.Dbms, StringComparison.OrdinalIgnoreCase)
+            );
+
+        if (!ConfirmOverwriteOtherProfile(conflict))
+        {
+            return;
+        }
+
+        if (conflict is not null)
+        {
+            _store.Delete(conflict.Id);
+        }
+
+        var oldName = target.Name;
+        // 保存済みのパスワードをそのまま書き戻す（Upsert は空パスワードだと暗号ファイルを消すため）
+        var password = target.SavePassword ? _store.LoadPassword(target.Id) : string.Empty;
+        target.Name = newName;
+        _store.Upsert(target, password);
+
+        ReloadProfiles();
+        SelectedProfileItem = Profiles.FirstOrDefault(item => item.Profile.Id == target.Id);
+        StatusMessage = string.Format(Strings.DbConnection_ProfileRenamed, oldName, newName);
     }
 
     /// <summary>選択中プロファイルを確認のうえ削除する</summary>

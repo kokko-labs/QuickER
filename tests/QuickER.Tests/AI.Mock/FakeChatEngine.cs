@@ -93,8 +93,16 @@ internal sealed class FakeChatEngine : IErChatEngine
     /// <summary>DisposeAsync が呼ばれた回数（アプリ終了時のエンジン破棄の検証用）</summary>
     public int DisposeCount { get; private set; }
 
+    /// <summary>破棄が始まったことを知らせる合図（遅い破棄を再現するテスト用）</summary>
+    public ManualResetEventSlim DisposeStarted { get; } = new(false);
+
+    /// <summary>破棄をここで止める門（<c>null</c> なら即座に完了する。遅い破棄を再現するテスト用）</summary>
+    public ManualResetEventSlim? DisposeGate { get; set; }
+
     public ValueTask DisposeAsync()
     {
+        DisposeStarted.Set();
+        DisposeGate?.Wait();
         DisposeCount++;
         return ValueTask.CompletedTask;
     }

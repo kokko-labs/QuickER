@@ -931,6 +931,128 @@ public class DbConnectionDialogViewModelTests : IDisposable
         store.LoadAll().Should().HaveCount(2);
     }
 
+    // ---------------- プロファイルの名前の変更（DU3） ----------------
+
+    /// <summary>
+    /// 名前の変更は、選択中のプロファイルの名前だけを変え、複製を作らないことを検証する（DU3）。
+    /// </summary>
+    /// <remarks>
+    /// 保存名がキーのため、名前を打ち替えて保存すると名前の変更ではなく複製になる。
+    /// Id が変わらないのでパスワードの暗号ファイルもそのまま引き継がれる。
+    /// </remarks>
+    [Fact(DisplayName = "名前の変更はプロファイルを複製せず名前だけを変える")]
+    public void RenameProfile_ChangesNameInPlace()
+    {
+        var store = CreateStore();
+        var id = SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService());
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.ProfileName = "本番DB（東京）";
+
+        vm.RenameProfileCommand.Execute(null);
+
+        var stored = store.LoadAll().Should().ContainSingle().Subject;
+        stored.Id.Should().Be(id);
+        stored.Name.Should().Be("本番DB（東京）");
+        // 接続の設定値は変わらない
+        stored.Server.Should().Be("prod.example.com");
+        // 保存済みのパスワードは引き継がれる（古い暗号ファイルも残らない＝Id が変わらないため）
+        store.LoadPassword(id).Should().Be("prod-secret");
+    }
+
+    /// <summary>入力欄の編集内容は名前の変更で保存されないことを検証する（DU3）</summary>
+    [Fact(DisplayName = "名前の変更は入力欄の編集内容を保存しない")]
+    public void RenameProfile_DoesNotSaveEditedFields()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService());
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.Host = "typo-host";
+        vm.ProfileName = "本番DB2";
+
+        vm.RenameProfileCommand.Execute(null);
+
+        store.LoadAll().Single().Server.Should().Be("prod.example.com");
+    }
+
+    /// <summary>名前を変えていない・未選択のときは名前の変更を実行できないことを検証する（DU3）</summary>
+    [Fact(DisplayName = "未選択または同名では名前の変更は実行できない")]
+    public void RenameProfile_RequiresSelectionAndDifferentName()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService());
+
+        // 未選択
+        vm.ProfileName = "別名";
+        vm.RenameProfileCommand.CanExecute(null).Should().BeFalse();
+
+        // 選択したが名前は同じ
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.RenameProfileCommand.CanExecute(null).Should().BeFalse();
+
+        // 名前を変えると実行できる
+        vm.ProfileName = "本番DB（東京）";
+        vm.RenameProfileCommand.CanExecute(null).Should().BeTrue();
+
+        // 空欄は実行できない
+        vm.ProfileName = "   ";
+        vm.RenameProfileCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 変更後の名前が別のプロファイルと衝突するときは確認を出し、続行するとそちらを置き換えることを検証する（DU3）。
+    /// </summary>
+    /// <remarks>
+    /// 同じ名前のプロファイルが 2 つ並ぶと、名前で上書き先を決める保存がどちらを指すか決まらなくなる。
+    /// </remarks>
+    [Fact(DisplayName = "名前の変更が別のプロファイルと衝突すると確認のうえ置き換える")]
+    public void RenameProfile_NameCollision_AsksThenReplaces()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var stagingId = SeedProfile(store, "検証DB", "staging.example.com", "staging-secret");
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = CreateVm(store, dialogs);
+        vm.SelectedProfileItem = vm.Profiles.Single(p => p.Profile.Name == "検証DB");
+        vm.ProfileName = "本番DB";
+
+        vm.RenameProfileCommand.Execute(null);
+
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(string.Format(Strings.DbConnection_OverwriteProfileConfirm, "本番DB"));
+
+        var stored = store.LoadAll().Should().ContainSingle().Subject;
+        stored.Id.Should().Be(stagingId);
+        stored.Name.Should().Be("本番DB");
+        stored.Server.Should().Be("staging.example.com");
+    }
+
+    /// <summary>衝突の確認をキャンセルすると何も変わらないことを検証する（DU3）</summary>
+    [Fact(DisplayName = "名前の変更の確認をキャンセルすると何も変わらない")]
+    public void RenameProfile_CancelledCollision_ChangesNothing()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        SeedProfile(store, "検証DB", "staging.example.com", "staging-secret");
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = CreateVm(store, dialogs);
+        vm.SelectedProfileItem = vm.Profiles.Single(p => p.Profile.Name == "検証DB");
+        vm.ProfileName = "本番DB";
+
+        vm.RenameProfileCommand.Execute(null);
+
+        store
+            .LoadAll()
+            .Select(profile => profile.Name)
+            .Should()
+            .BeEquivalentTo(["本番DB", "検証DB"]);
+    }
+
     /// <summary>全方言を登録した取込モードの ViewModel を生成する</summary>
     private DbConnectionDialogViewModel CreateAllDialectVm(SqlConnectionProfileStore store) =>
         new(RegistryWithAllDialects, DbConnectionDialogMode.Import, fixedProvider: null, store);

@@ -39,4 +39,7 @@ public enum ExportOmissionKind
 
     /// <summary>名前付きクエリ定義</summary>
     NamedQuery,
+
+    /// <summary>列名そのもの（形式の記法に合わせて書き換えられた）</summary>
+    ColumnNameNormalized,
 }

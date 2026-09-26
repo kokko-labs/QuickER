@@ -38,7 +38,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 In addition to these, **every key in the settings file (quicker.json) can be specified as a same-named kebab-case flag**, and such flags take precedence over the settings file (priority: **CLI flag > settings file > default**).
 A flag name is the mechanical kebab-case conversion of the key; for example `rootNamespace` → `--root-namespace`, `generateRepositories` → `--generate-repositories`, `splitFilesByCategory` → `--split-files-by-category`, `outputPath` → `--output-path`.
 Bool keys are **three-valued**: `--flag` (no value) = `true`, `--flag false` = `false`, and omitting it = the value from the settings file.
-For the meaning of each key, see the "Settings file" table below (`--repository-dialects` is a comma-separated list of dialects; when omitted, a single dialect is derived from the `--provider` dialect).
+For the meaning of each key, see the "Settings file" table below (`--repository-dialects` is a comma-separated list of dialects; omit the option to derive a single dialect from the `--provider` dialect, and note that giving it a value that names no dialect is an error).
 
 The mechanical conversion has exceptions.
 
@@ -131,7 +131,7 @@ Main keys (the default is in parentheses; category order):
 | `GenerateValueObjects` (`false`) | Generate a per-column value object type (such as `CustomerIdValue`) (see [Using the generated code](code-generation.md#value-objects-generatevalueobjects)) |
 | `UseGuidKeyForStringPrimaryKey` (`false`) | Make a string primary key a GUID value object (only when `GenerateValueObjects` is enabled) |
 | `GenerateRepositories` (`false`) | Generate a QuickER Repository (a lightweight mini-ORM). **By default, no DB-access code is generated** (the same default as the GUI) |
-| `RepositoryDialects` (unspecified) | The multi-target dialect list for the QuickER Repository (for example `["sqlserver", "sqlite"]`). Only `sqlserver` and `sqlite` are supported; combining any other dialect with `GenerateRepositories` fails before generation. When unspecified, the effective value is resolved in this order: `--repository-dialects` > this key in the settings file > a single dialect derived from `--provider` |
+| `RepositoryDialects` (unspecified) | The multi-target dialect list for the QuickER Repository (for example `["sqlserver", "sqlite"]`). Only `sqlserver` and `sqlite` are supported; combining any other dialect with `GenerateRepositories` fails before generation. When unspecified, the effective value is resolved in this order: `--repository-dialects` > this key in the settings file > a single dialect derived from `--provider`. A null or empty array in the settings file falls through to that derivation, but passing `--repository-dialects` a value that names no dialect (commas or spaces only) is an error rather than a fallback |
 | `ExcludeUnboundedBinaryColumns` (`false`) | Exclude unbounded binary columns from the QuickER Repository's SELECT / UPDATE (corresponds to the CLI's `--exclude-unbounded-binary-columns`; see [Using the generated code](code-generation.md#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns)) |
 | `GenerateEfCoreRepositories` (`false`) | Generate the `QuickErDbContext` for EF Core plus EF Core Repository implementations. Cannot be combined with multi-targeting (two or more effective dialects) |
 | `GenerateInMemoryRepositories` (`false`) | Generate an in-memory Repository implementation for testing |

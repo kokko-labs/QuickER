@@ -383,6 +383,24 @@ namespace QuickER.Db.UI.Resources {
                 return ResourceManager.GetString("DbConnection_ProfileSaved", resourceCulture);
             }
         }
+        
+        public static string DbConnection_ProfileRenamed {
+            get {
+                return ResourceManager.GetString("DbConnection_ProfileRenamed", resourceCulture);
+            }
+        }
+        
+        public static string DbConnection_RenameProfile {
+            get {
+                return ResourceManager.GetString("DbConnection_RenameProfile", resourceCulture);
+            }
+        }
+        
+        public static string DbConnection_RenameProfileTooltip {
+            get {
+                return ResourceManager.GetString("DbConnection_RenameProfileTooltip", resourceCulture);
+            }
+        }
 
         public static string DbConnection_SelectProfileToDelete {
             get {

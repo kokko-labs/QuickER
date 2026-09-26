@@ -149,7 +149,7 @@
     <value>Generate QuickER Repositories (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_RepositoryDialects" xml:space="preserve">
-    <value>Dialects for which to also generate QuickER Repositories (comma-separated, multiple allowed; e.g. sqlserver,sqlite). When omitted, a single dialect is derived from --provider. Overrides the settings file.</value>
+    <value>Dialects for which to also generate QuickER Repositories (comma-separated, multiple allowed; e.g. sqlserver,sqlite). Omit the option to derive a single dialect from --provider; giving it a value that names no dialect is an error. Overrides the settings file.</value>
   </data>
   <data name="Cli_Opt_ExcludeUnboundedBinaryColumns" xml:space="preserve">
     <value>Exclude unbounded binary columns (varbinary(max), BLOB without a length) from the generated Repository's SELECT/UPDATE; INSERT keeps all columns (overrides the settings file)</value>
@@ -213,6 +213,9 @@
   </data>
   <data name="Cli_ConfigRepositoryDialectsNotArray" xml:space="preserve">
     <value>The config file key 'RepositoryDialects' must be an array of strings (for example ["sqlserver", "sqlite"]): {0}</value>
+  </data>
+  <data name="Cli_RepositoryDialectsEmpty" xml:space="preserve">
+    <value>--repository-dialects was given but names no dialect. Write at least one (for example --repository-dialects sqlserver,sqlite), or omit the option to derive a single dialect from --provider.</value>
   </data>
   <data name="Cli_ConfigUnknownKeyWarning" xml:space="preserve">
     <value>Warning: the config file {0} contains unknown key(s); they are ignored: {1}</value>

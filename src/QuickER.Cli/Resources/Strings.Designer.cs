@@ -365,6 +365,12 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_ConfigRepositoryDialectsNotArray", resourceCulture);
             }
         }
+        
+        public static string Cli_RepositoryDialectsEmpty {
+            get {
+                return ResourceManager.GetString("Cli_RepositoryDialectsEmpty", resourceCulture);
+            }
+        }
 
         public static string Cli_ConfigUnknownKeyWarning {
             get {
