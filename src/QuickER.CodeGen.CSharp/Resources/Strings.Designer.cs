@@ -252,6 +252,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Info_FallbackTypeColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_FallbackTypeColumns", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Info_IncludeGraphSkippedNavigations {
             get {
                 return ResourceManager.GetString("CodeGen_Info_IncludeGraphSkippedNavigations", resourceCulture);

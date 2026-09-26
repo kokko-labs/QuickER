@@ -105,4 +105,15 @@ public sealed record CSharpTypeInfo
     /// 名指しする）のみで、生成コードには出ない。プロバイダ層が <see cref="VerbatimDbType"/> と同時に載せる。
     /// </remarks>
     public string? CanonicalRoundTripDbType { get; init; }
+
+    /// <summary>
+    /// 型カタログが DB 型表記を解析できず、安全側のフォールバックで <c>string</c> に決まったかどうか。
+    /// </summary>
+    /// <remarks>
+    /// 各方言の型マッパー（<c>*CSharpTypeMapper</c>）の switch 末尾（未知の型 → string）でのみ true になる。
+    /// 生成コードのプロパティ型が実際には解決できていないことを利用者が生成物から気づく手段が無いため、
+    /// 生成時の Info 診断（「テーブル.列（元の DB 型表記）」の一覧）で名指しするために運ぶだけの値で、
+    /// 生成コードそのものには出ない（属性にもコメントにもならない）。
+    /// </remarks>
+    public bool IsFallbackType { get; init; }
 }

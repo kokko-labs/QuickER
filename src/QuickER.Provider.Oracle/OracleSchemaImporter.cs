@@ -13,8 +13,13 @@ namespace QuickER.Provider.Oracle;
 /// <remarks>
 /// <para>
 /// 接続ユーザーの自スキーマ（<c>user_*</c> ビュー）のみを対象とする。
-/// <c>user_tables</c> / <c>user_tab_columns</c> / <c>user_constraints</c> / <c>user_cons_columns</c> /
+/// <c>user_tables</c> / <c>user_tab_cols</c> / <c>user_constraints</c> / <c>user_cons_columns</c> /
 /// <c>user_tab_comments</c> / <c>user_col_comments</c> を用い、複合主キーは順序を保持する。
+/// </para>
+/// <para>
+/// 取り込むのは ENABLE 済みの制約だけで、DISABLE された制約は除外したことを警告で告げる
+/// （無効な制約は何も強制しないので、取り込むと図が DB に無い保証を宣言することになる）。
+/// 仮想列は <see cref="Column.IsComputed"/> を立てて取り込む（式は意味モデルに載らないので警告で告げる）。
 /// </para>
 /// <para>
 /// 参照先列集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する
@@ -644,7 +649,7 @@ ORDER BY constraint_name";
     /// <summary>Oracle の型情報を <c>NUMBER(10,2)</c> / <c>VARCHAR2(50)</c> / <c>TIMESTAMP(6)</c> 等の表示形式へ整形する</summary>
     /// <remarks>
     /// <para>
-    /// <c>user_tab_columns</c> の <c>data_type</c> と <c>data_precision</c> / <c>data_scale</c> / <c>char_length</c> から
+    /// <c>user_tab_cols</c> の <c>data_type</c> と <c>data_precision</c> / <c>data_scale</c> / <c>char_length</c> から
     /// <see cref="OracleTypeCatalog"/> が解析できる表記を組み立てる。
     /// </para>
     /// <para>
@@ -689,7 +694,7 @@ ORDER BY constraint_name";
                     return dataScale is not null and not 0 ? $"NUMBER(*,{dataScale})" : "NUMBER";
                 }
 
-                // スケール 0 と未指定は user_tab_columns 上で区別できないため精度のみ。
+                // スケール 0 と未指定は user_tab_cols 上で区別できないため精度のみ。
                 // 負のスケール（NUMBER(10,-2) = 100 の倍数へ丸める）は宣言どおりに書き出す
                 return dataScale is not null and not 0
                     ? $"NUMBER({dataPrecision},{dataScale})"

@@ -556,5 +556,11 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_ImportWarningPrimaryKeyNullabilityAdjusted {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningPrimaryKeyNullabilityAdjusted", resourceCulture);
+            }
+        }
+
     }
 }

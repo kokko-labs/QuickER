@@ -438,6 +438,11 @@ public static class CliApp
                 table,
                 detail
             ),
+            SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted => string.Format(
+                Strings.Cli_ImportWarningPrimaryKeyNullabilityAdjusted,
+                table,
+                subject
+            ),
             // 未知の種別を黙って空行にしない（ConcurrencyModes.Validated と同じ流儀）
             _ => throw new ArgumentOutOfRangeException(
                 nameof(warning),

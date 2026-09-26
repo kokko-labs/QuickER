@@ -19,7 +19,7 @@ namespace QuickER.Provider.SqlServer;
 /// <item><description>uniqueidentifier → Guid</description></item>
 /// <item><description>binary / varbinary / image / rowversion / timestamp → byte[]（参照型）。image・varbinary(max) は無制限バイナリ、binary(n)/varbinary(n)/rowversion/timestamp は有界</description></item>
 /// <item><description>char / varchar / nchar / nvarchar / text / ntext / xml → string（長さ指定があれば MaxLength として保持）</description></item>
-/// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック）</description></item>
+/// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック。<c>CSharpTypeInfo.IsFallbackType</c> に true を刻む）</description></item>
 /// </list>
 /// 型名は大文字小文字を区別せず、"nvarchar(50)" のような長さ指定付き表記を受け付ける
 /// </remarks>
@@ -105,7 +105,7 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
                 declaredLength: TryGetDeclaredLength(normalized)
             ),
             // 未知の型は string として扱い、生成自体は継続させる（SqlDbTypeName は null のまま＝AddWithValue フォールバック）
-            _ => Reference("string", sqlDbTypeName: null),
+            _ => Reference("string", sqlDbTypeName: null, isFallbackType: true),
         };
     }
 
@@ -175,13 +175,15 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
     /// <param name="maxLength">文字列型の最大長。長さ指定なし・max 指定の場合は null</param>
     /// <param name="declaredLength">SqlParameter.Size 用の宣言長（n / max=-1 / 無指定=0）</param>
     /// <param name="isUnboundedBinary">無制限バイナリ（varbinary(max) / image 等）かどうか</param>
+    /// <param name="isFallbackType">型カタログが解析できず安全側の string フォールバックで決まったかどうか</param>
     private static CSharpTypeInfo Reference(
         string typeName,
         string? sqlDbTypeName,
         int? maxLength = null,
         int declaredLength = 0,
         bool isRowVersion = false,
-        bool isUnboundedBinary = false
+        bool isUnboundedBinary = false,
+        bool isFallbackType = false
     ) =>
         new()
         {
@@ -192,6 +194,7 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
             SqlDeclaredLength = declaredLength,
             IsRowVersion = isRowVersion,
             IsUnboundedBinary = isUnboundedBinary,
+            IsFallbackType = isFallbackType,
         };
 
     /// <summary>

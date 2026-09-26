@@ -54,6 +54,22 @@ public class SqlServerCSharpTypeMapperTests
         Mapper.Map("geography").SqlDbTypeName.Should().BeNull();
     }
 
+    [Theory(DisplayName = "未知の型は IsFallbackType が true になる")]
+    [InlineData("geometry")]
+    [InlineData("hierarchyid")]
+    [InlineData("sql_variant")]
+    public void Map_UnknownType_IsFallbackTypeIsTrue(string dataType)
+    {
+        Mapper.Map(dataType).IsFallbackType.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "解決できる型は IsFallbackType が false になる")]
+    public void Map_KnownType_IsFallbackTypeIsFalse()
+    {
+        Mapper.Map("int").IsFallbackType.Should().BeFalse();
+        Mapper.Map("nvarchar(50)").IsFallbackType.Should().BeFalse();
+    }
+
     [Theory(DisplayName = "宣言長は n / max=-1 / 無指定=0 の三値で解決される")]
     [InlineData("varchar(50)", 50)]
     [InlineData("nvarchar(max)", -1)]

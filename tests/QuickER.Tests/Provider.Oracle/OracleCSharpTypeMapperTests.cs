@@ -39,4 +39,19 @@ public class OracleCSharpTypeMapperTests
         Mapper.Map("varchar2(100)").IsUnboundedBinary.Should().BeFalse();
         Mapper.Map("number(10)").IsUnboundedBinary.Should().BeFalse();
     }
+
+    [Theory(DisplayName = "未知の型は IsFallbackType が true になる")]
+    [InlineData("SDO_GEOMETRY")]
+    [InlineData("BFILE")]
+    public void Map_UnknownType_IsFallbackTypeIsTrue(string dataType)
+    {
+        Mapper.Map(dataType).IsFallbackType.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "解決できる型は IsFallbackType が false になる")]
+    public void Map_KnownType_IsFallbackTypeIsFalse()
+    {
+        Mapper.Map("number(10)").IsFallbackType.Should().BeFalse();
+        Mapper.Map("varchar2(50)").IsFallbackType.Should().BeFalse();
+    }
 }

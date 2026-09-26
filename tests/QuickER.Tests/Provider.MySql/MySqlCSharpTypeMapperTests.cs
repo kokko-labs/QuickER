@@ -87,4 +87,19 @@ public class MySqlCSharpTypeMapperTests
     {
         Mapper.Map(dataType).TypeName.Should().Be("bool");
     }
+
+    [Theory(DisplayName = "未知の型は IsFallbackType が true になる")]
+    [InlineData("geometry")]
+    [InlineData("enum")]
+    public void Map_UnknownType_IsFallbackTypeIsTrue(string dataType)
+    {
+        Mapper.Map(dataType).IsFallbackType.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "解決できる型は IsFallbackType が false になる")]
+    public void Map_KnownType_IsFallbackTypeIsFalse()
+    {
+        Mapper.Map("int").IsFallbackType.Should().BeFalse();
+        Mapper.Map("varchar(255)").IsFallbackType.Should().BeFalse();
+    }
 }

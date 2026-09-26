@@ -372,4 +372,161 @@ CREATE TABLE orders (
         result.Relationships.Should().ContainSingle();
         result.Warnings.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// rowid 表の非 INTEGER 単一列主キーは NOT NULL へ補正され（従来どおり維持）、
+    /// 補正したことが <see cref="SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted"/> で報告される（SL3）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: rowid 表の TEXT 主キーは NOT NULL へ補正され警告される"
+    )]
+    public async Task Import_RowidTableWithTextPrimaryKey_WarnsAndAdjustsToNotNull()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE items (
+    code TEXT PRIMARY KEY,
+    name TEXT
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        var code = entity.Columns.Single(c => c.Name == "code");
+        code.IsPrimaryKey.Should().BeTrue();
+        // 補正自体は維持する（SQLite 自身は NULL を許すが、意味モデル・GUI は主キーを常に NOT NULL とする）
+        code.IsNullable.Should().BeFalse();
+
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted)
+            .Subject;
+        warning.TableName.Should().Be("items");
+        warning.Subject.Should().Be("code");
+    }
+
+    /// <summary>
+    /// <c>WITHOUT ROWID</c> 表は SQLite 自身が主キー列への NULL を拒否するため、
+    /// 補正したところで実質的な補正にならず、警告が出ない（SL3）。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] SQLite: WITHOUT ROWID 表の主キーは警告されない")]
+    public async Task Import_WithoutRowidTable_DoesNotWarn()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE items_wr (
+    code TEXT PRIMARY KEY,
+    name TEXT
+) WITHOUT ROWID;
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        entity.Columns.Single(c => c.Name == "code").IsNullable.Should().BeFalse();
+
+        result
+            .Warnings.Should()
+            .NotContain(w => w.Kind == SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted);
+    }
+
+    /// <summary>
+    /// 単一列 <c>INTEGER PRIMARY KEY</c>（rowid 別名）は NULL を取り得ないため警告されない（SL3・回帰なし）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 単一列 INTEGER PRIMARY KEY（rowid 別名）は警告されない"
+    )]
+    public async Task Import_SingleColumnIntegerPrimaryKey_DoesNotWarn()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE widgets_alias (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result
+            .Warnings.Should()
+            .NotContain(w => w.Kind == SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted);
+    }
+
+    /// <summary>
+    /// 宣言型 <c>INT</c> は <c>INTEGER</c> と綴りが違うため rowid 別名にならず、
+    /// NULL を許す普通の主キーとして警告される（SL3・境界ケース）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 単一列 INT PRIMARY KEY は rowid 別名にならず警告される"
+    )]
+    public async Task Import_SingleColumnIntPrimaryKey_Warns()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE widgets (
+    id INT PRIMARY KEY,
+    name TEXT
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted)
+            .Subject;
+        warning.TableName.Should().Be("widgets");
+        warning.Subject.Should().Be("id");
+    }
+
+    /// <summary>複合主キーは rowid 別名になり得ないため、非 INTEGER でなくても列ごとに警告される（SL3）。</summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 複合主キーは rowid 別名になり得ず列ごとに警告される"
+    )]
+    public async Task Import_CompositePrimaryKey_WarnsPerColumn()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE composite_pk (
+    a TEXT NOT NULL,
+    b TEXT NOT NULL,
+    PRIMARY KEY (a, b)
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        var warnings = result
+            .Warnings.Where(w => w.Kind == SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted)
+            .ToList();
+        warnings.Should().OnlyContain(w => w.TableName == "composite_pk");
+        warnings.Select(w => w.Subject).Should().BeEquivalentTo(["a", "b"]);
+    }
 }

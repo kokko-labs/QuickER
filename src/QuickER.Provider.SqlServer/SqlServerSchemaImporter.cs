@@ -15,6 +15,14 @@ namespace QuickER.Provider.SqlServer;
 /// <c>sys.tables</c> / <c>INFORMATION_SCHEMA</c> 系と <c>sys.foreign_keys</c> を用い、ユーザー定義テーブルのみ対象とする
 /// （<c>is_ms_shipped</c> と拡張プロパティ <c>microsoft_database_tools_support</c> で sysdiagrams 等のツール用テーブルを除外）
 /// 複合主キーは順序を保持する 多対多は中間テーブルとして 1 対多 × 2 の形で表現する
+/// <para>
+/// 次の 2 つも取り込まず、除外したことを警告で告げる:
+/// テンポラルテーブルの履歴表（<c>temporal_type = 1</c>・本表は取り込む）と、
+/// 無効化された外部キー（<c>is_disabled = 1</c>＝<c>NOCHECK CONSTRAINT</c>。
+/// <c>WITH NOCHECK</c> で追加されたが現在は有効な外部キーは取り込む）。
+/// 計算列と本表の期間列（<c>GENERATED ALWAYS AS ROW START / END</c>）は
+/// <see cref="Column.IsComputed"/> を立てて取り込む（式は意味モデルに載らないので警告で告げる）。
+/// </para>
 /// </remarks>
 public class SqlServerSchemaImporter : ISchemaImporter
 {

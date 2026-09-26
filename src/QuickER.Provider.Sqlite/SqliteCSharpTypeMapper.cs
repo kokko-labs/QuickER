@@ -24,7 +24,7 @@ namespace QuickER.Provider.Sqlite;
 /// <item><description>UNIQUEIDENTIFIER → Guid</description></item>
 /// <item><description>BINARY/VARBINARY/BLOB → byte[]（参照型）。長さ宣言なし（および (MAX)）は無制限バイナリ、BLOB(n) 等の長さ付きは有界</description></item>
 /// <item><description>CHAR/VARCHAR/NCHAR/NVARCHAR/TEXT/XML/JSON → string（長さ指定があれば MaxLength として保持）</description></item>
-/// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック）</description></item>
+/// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック。<c>CSharpTypeInfo.IsFallbackType</c> に true を刻む）</description></item>
 /// </list>
 /// 型名は大文字小文字を区別せず、"NVARCHAR(50)" のような長さ指定付き表記を受け付ける
 /// </remarks>
@@ -96,7 +96,7 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
                 maxLength
             ),
             // 未知の型は string として扱い、生成自体は継続させる
-            _ => Reference("string"),
+            _ => Reference("string", isFallbackType: true),
         };
     }
 
@@ -117,10 +117,12 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
     /// <summary>参照型の型情報を作成する</summary>
     /// <param name="maxLength">文字列型の最大長。長さ指定なし・MAX 指定の場合は null</param>
     /// <param name="isUnboundedBinary">無制限バイナリ（長さ宣言なし BLOB / varbinary(max) 等）かどうか</param>
+    /// <param name="isFallbackType">型カタログが解析できず安全側の string フォールバックで決まったかどうか</param>
     private static CSharpTypeInfo Reference(
         string typeName,
         int? maxLength = null,
-        bool isUnboundedBinary = false
+        bool isUnboundedBinary = false,
+        bool isFallbackType = false
     ) =>
         new()
         {
@@ -128,6 +130,7 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
             IsReferenceType = true,
             MaxLength = maxLength,
             IsUnboundedBinary = isUnboundedBinary,
+            IsFallbackType = isFallbackType,
         };
 
     /// <summary>データ型表記を前後空白除去と小文字化で正規化する</summary>

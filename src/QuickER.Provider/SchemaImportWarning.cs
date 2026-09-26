@@ -151,6 +151,19 @@ public enum SchemaImportWarningKind
     /// <c>Subject</c> は空 / <c>Detail</c> = 本表名。
     /// </remarks>
     TemporalHistoryTableExcluded,
+
+    /// <summary>
+    /// SQLite の rowid 表で、非 rowid-alias の主キー列を NOT NULL へ補正した。
+    /// </summary>
+    /// <remarks>
+    /// SQLite の rowid 表は、単一列かつ宣言型がちょうど <c>INTEGER</c>（rowid 別名＝暗黙の自動採番）の
+    /// 主キー以外、互換性のため主キー列へ NULL を許す（<c>PRIMARY KEY</c> は ANSI SQL と違い
+    /// <c>NOT NULL</c> を含意しない）。意味モデル・GUI は主キーを常に NOT NULL として扱うため、
+    /// 取込はこの列を NOT NULL へ補正する（補正自体は変えない・この警告は告知のみ）。
+    /// 既存行に NULL の主キーがあると、この図からの同期（テーブル再構築）でデータ移送が失敗し得る。
+    /// <c>Subject</c> = 列名 / <c>Detail</c> は空。
+    /// </remarks>
+    PrimaryKeyNullabilityAdjusted,
 }
 
 /// <summary>

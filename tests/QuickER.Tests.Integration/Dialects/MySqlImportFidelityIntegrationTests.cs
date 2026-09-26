@@ -257,4 +257,56 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
             .Warnings.Should()
             .NotContain(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost);
     }
+
+    /// <summary>
+    /// パーティション親テーブルは通常テーブルとして取り込まれ、パーティション定義の喪失が
+    /// 警告として報告されることを検証する（PostgreSQL の <c>PartitionDefinitionLost</c> と同一種別）。
+    /// </summary>
+    /// <remarks>
+    /// 判定は <c>information_schema.PARTITIONS</c> の <c>PARTITION_NAME IS NOT NULL</c>
+    /// （PostgreSQL の <c>relkind = 'p'</c> と同じ「カタログの事実で判定する」流儀。
+    /// <c>TABLES.CREATE_OPTIONS</c> の <c>partitioned</c> 部分一致は将来のオプション追加に弱いため採らない）。
+    /// 非パーティション表（<c>plain_sales</c>）は取り込むが警告しないことも合わせて確認する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] MY4: パーティション親テーブルは通常テーブルとして取り込み、喪失を警告する"
+    )]
+    public async Task Import_PartitionedTable_IsImportedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE sales (
+                id int NOT NULL,
+                PRIMARY KEY (id)
+            ) ENGINE=InnoDB
+            PARTITION BY RANGE (id) (
+                PARTITION p0 VALUES LESS THAN (100),
+                PARTITION p1 VALUES LESS THAN MAXVALUE
+            );
+            CREATE TABLE plain_sales (
+                id int NOT NULL PRIMARY KEY
+            ) ENGINE=InnoDB;
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("sales", "plain_sales");
+
+        // パーティション親の列・PK は普通に取り込まれる（意味モデルにパーティション定義が無いだけ）
+        result
+            .Entities.Single(e => e.TableName == "sales")
+            .Columns.Select(c => c.Name)
+            .Should()
+            .BeEquivalentTo(["id"]);
+
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.PartitionDefinitionLost);
+        warning.TableName.Should().Be("sales");
+    }
 }

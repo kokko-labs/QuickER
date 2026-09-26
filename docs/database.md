@@ -147,8 +147,11 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
 - A column whose **data type cannot be written into SQL safely** is named, along with the type text.
   The import keeps it, but DDL generation and schema sync refuse the *whole diagram* until it is corrected, because a type is neither an identifier nor a string literal and there is nowhere to quote it (see [What a data type may contain](#what-a-data-type-may-contain)).
   SQLite stores whatever type text a table was declared with, and PostgreSQL reports a type name that needs quoting with the quotes attached, so either can produce one
-- A **partitioned table** is imported as its parent, and the partitioning itself is not modelled.
+- A **partitioned table** (PostgreSQL, MySQL) is imported as its parent, and the partitioning itself is not modelled.
   Generated DDL creates the table unpartitioned
+- A SQLite **primary key that allows NULL** is imported as NOT NULL, and the adjusted columns are named.
+  In a rowid table, any primary key other than a single column declared exactly `INTEGER` can hold NULL, while the diagram and the editor always treat a primary key as NOT NULL.
+  If existing rows carry a NULL primary key, a sync from this diagram (which rebuilds the table) can fail while copying the data across
 
 When nothing is affected, the dialog is the usual one-line completion message.
 

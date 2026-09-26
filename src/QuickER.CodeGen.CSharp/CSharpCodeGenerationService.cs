@@ -303,6 +303,28 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
+        // 型カタログが DB 型表記を解析できず string へフォールバックした列（CSharpTypeInfo.IsFallbackType）を
+        // Info 診断で通知する。生成コードのプロパティ型が実際には解決できていないことに利用者が生成物を
+        // 読んだだけでは気づけないため、方言に依らず常に検証する（IncludeDataAnnotations には依存しない＝
+        // 属性の有無でなくプロパティ型そのものの話であるため）
+        var fallbackTypeLines = BuildFallbackTypeLines(diagram, columnTypes);
+
+        if (fallbackTypeLines.Count > 0)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Info(
+                    string.Format(
+                        Strings.CodeGen_Info_FallbackTypeColumns,
+                        Environment.NewLine
+                            + string.Join(
+                                Environment.NewLine,
+                                fallbackTypeLines.Select(line => "  " + line)
+                            )
+                    )
+                )
+            );
+        }
+
         // 同期支援が有効なとき、実際に同期対象になったテーブルを FK 順のまま Info 診断で通知する
         // （対象は「Repository 契約が生成される単一主キーのテーブル」という導出条件なので、どのテーブルが
         //   入ったかは生成物を読むまで分からない）。rowversion 列を持たないテーブルは後勝ち専用として名指しする
@@ -1760,6 +1782,29 @@ public sealed class CSharpCodeGenerationService
             )
             .Select(pair =>
                 $"{pair.entity.TableName}.{pair.column.Name}: {columnTypes[pair.column.Id].VerbatimDbType} -> {columnTypes[pair.column.Id].CanonicalRoundTripDbType}"
+            )
+            .ToList();
+
+    /// <summary>
+    /// 型カタログが解析できず string へフォールバックした列を「テーブル.列 (元の DB 型表記)」の
+    /// 1 行ずつへ整形する（Info 診断専用）。
+    /// </summary>
+    /// <remarks>
+    /// 判定材料は生成モデルではなく列型辞書（<see cref="CSharpTypeInfo.IsFallbackType"/>）で、
+    /// [DbColumnMeta] のトークン付加とは独立（未知の型はそもそもトークンを持たない）。列の並びは図の宣言順にする。
+    /// </remarks>
+    private static IReadOnlyList<string> BuildFallbackTypeLines(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes
+    ) =>
+        diagram
+            .Entities.SelectMany(entity =>
+                entity
+                    .Columns.Where(column =>
+                        columnTypes.TryGetValue(column.Id, out var typeInfo)
+                        && typeInfo.IsFallbackType
+                    )
+                    .Select(column => $"{entity.TableName}.{column.Name} ({column.DataType})")
             )
             .ToList();
 

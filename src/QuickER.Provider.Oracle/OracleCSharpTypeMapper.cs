@@ -18,7 +18,7 @@ namespace QuickER.Provider.Oracle;
 /// <item><description>NVARCHAR2 / VARCHAR2 / NCHAR / CHAR / NCLOB / CLOB / XMLTYPE → string（長さ指定があれば MaxLength として保持）</description></item>
 /// <item><description>RAW / BLOB / LONG RAW → byte[]（参照型）。BLOB・LONG RAW は無制限バイナリ、RAW(n) は有界</description></item>
 /// <item><description>DATE / TIMESTAMP → DateTime、TIMESTAMP WITH TIME ZONE → DateTimeOffset</description></item>
-/// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック）</description></item>
+/// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック。<c>CSharpTypeInfo.IsFallbackType</c> に true を刻む）</description></item>
 /// </list>
 /// 型名は大文字小文字を区別せず、"NUMBER(10,2)" のような指定付き表記や "TIMESTAMP WITH TIME ZONE" 等の複数語型名を受け付ける
 /// </remarks>
@@ -89,7 +89,7 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
             or "xmltype"
             or "long" => Reference("string", maxLength),
             // 未知の型は string として扱い、生成自体は継続させる
-            _ => Reference("string"),
+            _ => Reference("string", isFallbackType: true),
         };
     }
 
@@ -130,10 +130,12 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
     /// <summary>参照型の型情報を作成する</summary>
     /// <param name="maxLength">文字列型の最大長。長さ指定なしの場合は null</param>
     /// <param name="isUnboundedBinary">無制限バイナリ（BLOB / LONG RAW 等）かどうか</param>
+    /// <param name="isFallbackType">型カタログが解析できず安全側の string フォールバックで決まったかどうか</param>
     private static CSharpTypeInfo Reference(
         string typeName,
         int? maxLength = null,
-        bool isUnboundedBinary = false
+        bool isUnboundedBinary = false,
+        bool isFallbackType = false
     ) =>
         new()
         {
@@ -141,6 +143,7 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
             IsReferenceType = true,
             MaxLength = maxLength,
             IsUnboundedBinary = isUnboundedBinary,
+            IsFallbackType = isFallbackType,
         };
 
     /// <summary>データ型表記を前後空白除去・小文字化・空白畳み込みで正規化する</summary>

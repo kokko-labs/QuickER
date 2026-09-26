@@ -310,4 +310,7 @@
   <data name="Cli_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
     <value>警告: {0} はシステムバージョニングされたテーブル「{1}」の履歴表のため取り込みませんでした。単独のエンティティとしては取り込みません。</value>
   </data>
+  <data name="Cli_ImportWarningPrimaryKeyNullabilityAdjusted" xml:space="preserve">
+    <value>警告: {0}.{1} を主キー列として NOT NULL へ補正しました。SQLite の rowid 表は、単一列 INTEGER（rowid 別名）の主キー以外は NULL を許すため、既存行に NULL があると、この図からの同期（テーブル再構築）でデータ移送が失敗し得ます。</value>
+  </data>
 </root>
