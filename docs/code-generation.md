@@ -63,6 +63,19 @@ A DB type the type catalog cannot parse (`geometry`, `hierarchyid`, `sql_variant
 The generated code does not show that it happened, so generation names those columns in an information diagnostic as "table.column (original type text)".
 Change the column's type in the diagram if `string` is not what you meant.
 
+PostgreSQL array columns (`integer[]`, `varchar(20)[]` and the like) are generated as an array of the element type (`int[]`, `string[]`).
+They are **left out of edit models and value objects**, though.
+An edit model is one text input per column and has no notation for an array, and a value object would compare arrays by reference, so two arrays with the same contents would not be equal.
+**The length of an array's elements is not carried into the generated code either**: the 20 in `varchar(20)[]` is the length of an element, while `[MaxLength]` on an array means the number of elements, so no such (wrong) check is declared.
+Generation names the affected columns.
+Entity properties, EF Core, the in-memory repository and remote transfer handle them as usual.
+
+PostgreSQL's `time with time zone` (`timetz`) is generated as `DateTimeOffset`.
+**Writing a value whose offset is not UTC needs the column type spelled out.**
+QuickER does not generate EF Core's `HasColumnType` (EF Core is for connecting to an existing schema), so by default EF Core infers `timestamp with time zone` for a `DateTimeOffset` and Npgsql refuses any offset other than UTC.
+Spell the column type out in the generated `QuickErDbContext`'s `OnModelCreatingPartial` if you need it.
+Reading, and writing with a UTC offset, work as they are.
+
 For some columns the token does not reproduce the DB type spelling: `numeric` collapses onto `decimal`, and `datetime` onto `datetime2`.
 For those columns, `[DbColumnMeta]` also records the original text as `NativeType`, and an information diagnostic names them at generation time.
 That record is what lets C# reverse engineering restore the column type exactly as the diagram spelled it.

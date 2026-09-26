@@ -187,7 +187,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var className = _nameConverter.ToEditModelClassName(entity.TableName);
         var properties = entity
-            .Columns.Select(column => BuildEditModelProperty(column, options))
+            .Columns.Where(column => !IsArrayColumn(column))
+            .Select(column => BuildEditModelProperty(column, options))
             .ToList();
         var navigationModels = navigations.Select(BuildEditModelNavigation).ToList();
 
@@ -321,7 +322,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         var mapperClassName = _nameConverter.ToMapperClassName(entity.TableName);
 
         var scalarProperties = entity
-            .Columns.Select(column =>
+            .Columns.Where(column => !IsArrayColumn(column))
+            .Select(column =>
             {
                 var property = BuildProperty(column);
                 var editModelProperty = BuildEditModelProperty(column, options);
@@ -662,6 +664,12 @@ internal sealed partial class CSharpGenerationModelBuilder
                 return BuildSampleStringExpression(column, maxLength);
 
             default:
+                // 配列列は空配列で始める（default は null で、NOT NULL の列へ入れられない）
+                if (baseType.EndsWith("[]", StringComparison.Ordinal))
+                {
+                    return $"Array.Empty<{baseType[..^2]}>()";
+                }
+
                 // enum など未知の値型は既定値へフォールバックする（決定的・コンパイル可能）
                 return $"default({baseType})";
         }
@@ -731,6 +739,18 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// EditModel は入力途中の不正値も保持するため、値型・文字列・バイナリは原則 NULL 許容とし、
     /// 確定値プロパティと UI バインディング用文字列プロパティの両方の情報を組み立てる
     /// </remarks>
+    /// <summary>
+    /// その列が配列型（PostgreSQL の <c>integer[]</c> 等）として解決されたか
+    /// </summary>
+    /// <remarks>
+    /// 配列列は EditModel・Mapper・値オブジェクトの対象外にする。EditModel は 1 列＝1 テキスト入力の
+    /// 投影で、配列を表す記法が無い（載せると入力文字列を配列へ代入する形になりコンパイルできない）。
+    /// Entity のプロパティ・EF Core・インメモリ・リモート転送では通常どおり扱う。
+    /// 外した列は生成時 Info（<c>CodeGen_Info_ArrayColumnsNotEditable</c>）で名指しする。
+    /// </remarks>
+    private bool IsArrayColumn(Column column) =>
+        _columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsArray;
+
     private CSharpEditModelPropertyModel BuildEditModelProperty(
         Column column,
         CodeGenerationOptions options
@@ -886,6 +906,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (typeName == "byte[]" && !isNullable)
         {
             return " = Array.Empty<byte>();";
+        }
+
+        // 配列列（integer[] 等）も NOT NULL なら空配列で始める。EditModel に載らない列なので、
+        // EditModel から組み立てた Entity を挿入するときに null のまま DB の NOT NULL 違反へ行かせない
+        if (!isNullable && typeName.EndsWith("[]", StringComparison.Ordinal))
+        {
+            return $" = Array.Empty<{typeName[..^2]}>();";
         }
 
         return string.Empty;

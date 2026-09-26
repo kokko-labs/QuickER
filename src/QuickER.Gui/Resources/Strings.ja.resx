@@ -771,6 +771,9 @@
   <data name="ExportOmission_NamedQuery" xml:space="preserve">
     <value>名前付きクエリ定義</value>
   </data>
+  <data name="ExportOmission_ColumnNameNormalized" xml:space="preserve">
+    <value>この形式で書けない列名（空白・記号は「_」へ置き換わります）</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
   </data>

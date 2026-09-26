@@ -63,6 +63,19 @@ Entity には既定で DataAnnotations と DB 定義メタ属性（`[DbTableMeta
 意図した型でなければ、図の側で型を書き換えてください。
 生成コードは DB 定義の自己記述ドキュメントとしても機能します。
 
+PostgreSQL の配列列（`integer[]` / `varchar(20)[]` など）は、要素型の配列（`int[]` / `string[]`）として生成します。
+ただし **EditModel と値オブジェクトには載りません**。
+EditModel は 1 列＝1 テキスト入力の投影で配列を表す記法が無く、値オブジェクトにすると等値が参照比較になって同じ内容の配列が等しくならないためです。
+**配列の要素の長さも生成コードには載りません**（`varchar(20)[]` の 20 は要素の長さですが、`[MaxLength]` は配列では要素数の意味になるため、誤った検証を宣言しません）。
+該当する列は生成時の Info 診断で名指しします。
+エンティティのプロパティ・EF Core・インメモリ Repository・リモート転送では通常どおり扱えます。
+
+PostgreSQL の `time with time zone`（`timetz`）は `DateTimeOffset` として生成します。
+**UTC 以外のオフセットでの書き込みには列型の明示が必要です**。
+QuickER は EF Core の `HasColumnType` を生成しないため（EF Core は既存スキーマへの接続専用）、既定では EF Core が `DateTimeOffset` を `timestamp with time zone` と推論し、Npgsql が UTC 以外のオフセットを拒否します。
+必要な場合は、生成される `QuickErDbContext` の `OnModelCreatingPartial` で列型を明示してください。
+読み取りと、UTC オフセットでの書き込みは、そのままで通ります。
+
 型トークンでは DB 型の綴りを復元できない列があります（`numeric` は `decimal` へ、`datetime` は `datetime2` へ畳まれます）。
 その列については `[DbColumnMeta]` へ元の表記も `NativeType` として記録し、生成時に情報診断で名指しします。
 C# リバースが図どおりの型表記を復元できるのは、この記録によるものです。

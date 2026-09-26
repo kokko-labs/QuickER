@@ -177,7 +177,7 @@ public static class GenerationConfigSchema
             "string[]",
             null,
             "Data access",
-            "Dialects for which to emit the QuickER Repository (multi-target when two or more). When null or empty, a single dialect is derived from the provider / diagram target DBMS.",
+            "Dialects for which to emit the QuickER Repository (multi-target when two or more). When this key is null, absent or an empty array, a single dialect is derived from the provider / diagram target DBMS. The --repository-dialects option is stricter: giving it a value that names no dialect (commas or spaces only) is an error rather than a fallback.",
             AllowedValues: ["sqlserver", "sqlite"]
         ),
         new(

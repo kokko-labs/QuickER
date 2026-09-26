@@ -309,6 +309,30 @@ public sealed class CSharpCodeGenerationService
         // 属性の有無でなくプロパティ型そのものの話であるため）
         var fallbackTypeLines = BuildFallbackTypeLines(diagram, columnTypes);
 
+        // 配列列（PostgreSQL の integer[] 等）は EditModel・値オブジェクトに載らない。
+        // Entity・EF Core・インメモリ・リモート転送では通常どおり扱えるが、編集画面に出ない／
+        // 値オブジェクトにならないことは生成物を読んだだけでは気づけないため名指しする
+        if (options.GenerateEditModels || options.GenerateValueObjects)
+        {
+            var arrayColumnLines = BuildArrayColumnLines(diagram, columnTypes);
+
+            if (arrayColumnLines.Count > 0)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Info(
+                        string.Format(
+                            Strings.CodeGen_Info_ArrayColumnsNotEditable,
+                            Environment.NewLine
+                                + string.Join(
+                                    Environment.NewLine,
+                                    arrayColumnLines.Select(line => "  " + line)
+                                )
+                        )
+                    )
+                );
+            }
+        }
+
         if (fallbackTypeLines.Count > 0)
         {
             diagnostics.Add(
@@ -1782,6 +1806,26 @@ public sealed class CSharpCodeGenerationService
             )
             .Select(pair =>
                 $"{pair.entity.TableName}.{pair.column.Name}: {columnTypes[pair.column.Id].VerbatimDbType} -> {columnTypes[pair.column.Id].CanonicalRoundTripDbType}"
+            )
+            .ToList();
+
+    /// <summary>
+    /// 配列として解決した列を「テーブル.列 (元の DB 型表記)」の 1 行ずつへ整形する（Info 診断専用）。
+    /// </summary>
+    /// <remarks>
+    /// 判定材料は列型辞書（<see cref="CSharpTypeInfo.IsArray"/>）。列の並びは図の宣言順にする。
+    /// </remarks>
+    private static IReadOnlyList<string> BuildArrayColumnLines(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes
+    ) =>
+        diagram
+            .Entities.SelectMany(entity =>
+                entity
+                    .Columns.Where(column =>
+                        columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsArray
+                    )
+                    .Select(column => $"{entity.TableName}.{column.Name} ({column.DataType})")
             )
             .ToList();
 

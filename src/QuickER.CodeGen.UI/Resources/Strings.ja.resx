@@ -437,6 +437,15 @@
   <data name="QueryDialog_Status_RawSqlInvalid" xml:space="preserve">
     <value>生 SQL に未宣言のパラメータがあります。</value>
   </data>
+  <data name="QueryDialog_Status_DanglingOrderByColumn" xml:space="preserve">
+    <value>クエリ '{0}': 並び順が、すでに存在しない列を参照しています。行を削除するか、別の列を選び直してください。</value>
+  </data>
+  <data name="QueryDialog_Status_DanglingFieldColumn" xml:space="preserve">
+    <value>クエリ '{0}' の射影フィールド '{1}': 参照元の列がすでに存在しません。別の列を選ぶか、「なし」にして型を指定してください。</value>
+  </data>
+  <data name="QueryDialog_Status_DanglingParameterColumn" xml:space="preserve">
+    <value>クエリ '{0}' のパラメータ '{1}': 参照元の列がすでに存在しません。別の列を選ぶか、「なし」にして型を指定してください。</value>
+  </data>
   <data name="Common_Complete" xml:space="preserve">
     <value>完了</value>
   </data>

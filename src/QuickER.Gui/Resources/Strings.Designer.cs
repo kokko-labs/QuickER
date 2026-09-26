@@ -1705,6 +1705,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string ExportOmission_ColumnNameNormalized {
+            get {
+                return ResourceManager.GetString("ExportOmission_ColumnNameNormalized", resourceCulture);
+            }
+        }
+        
         public static string Import_ReplaceConfirm {
             get {
                 return ResourceManager.GetString("Import_ReplaceConfirm", resourceCulture);

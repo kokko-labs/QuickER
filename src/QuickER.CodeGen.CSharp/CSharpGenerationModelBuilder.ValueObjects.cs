@@ -62,6 +62,12 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             foreach (var column in entity.Columns)
             {
+                // 配列列は VO にしない（等値が参照比較になり、同じ内容の配列が等しくならない）
+                if (IsArrayColumn(column))
+                {
+                    continue;
+                }
+
                 var key = ResolveValueObjectKey(column);
                 if (!groups.TryGetValue(key, out var list))
                 {
@@ -476,7 +482,10 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// リレーションの子側の列は親側の VO へ寄っているため、引き当ては列名ではなく統一済みの VO キーで行う。
     /// </remarks>
     private CSharpValueObjectModel? ResolveValueObject(Column column) =>
-        _valueObjects.TryGetValue(ResolveValueObjectKey(column), out var model) ? model : null;
+        !IsArrayColumn(column)
+        && _valueObjects.TryGetValue(ResolveValueObjectKey(column), out var model)
+            ? model
+            : null;
 
     /// <summary>VO 化された列の EditModel プロパティ生成モデルを構築する（確定値は常に VO?、バインド setter は TryCreate で検証）</summary>
     private CSharpEditModelPropertyModel BuildValueObjectEditModelProperty(

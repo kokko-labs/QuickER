@@ -875,6 +875,56 @@ public class CliAppTests
     }
 
     /// <summary>
+    /// --repository-dialects の値が方言を 1 つも含まない（カンマ・空白だけ）とき、
+    /// 黙って導出や既定へ倒さず終了コード 1 のエラーになることを検証する（CL1）。
+    /// </summary>
+    /// <remarks>
+    /// 空配列のまま進めると「未指定なら図の方言で導出する」救済を通らず、後段が sqlserver へ
+    /// フォールバックして、<c>--provider sqlite</c> でも SQL Server 実装が無警告で出ていた。
+    /// CI のシェル変数の展開失敗で現実に踏める形。
+    /// </remarks>
+    [Theory(DisplayName = "--repository-dialects の中身が空ならエラーになる")]
+    [InlineData(",")]
+    [InlineData(" , ")]
+    [InlineData(",,")]
+    public async Task Generate_EmptyRepositoryDialects_Fails(string value)
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "sqlite",
+                "--config",
+                configPath,
+                "--repository-dialects",
+                value,
+            ]);
+
+            exit.Should().Be(1);
+
+            // 生成物は 1 つも書かれない（誤った方言のコードが残らない。出力先は作られてすらいない）
+            var written = Directory.Exists(outDir) ? Directory.GetFiles(outDir, "*.g.cs") : [];
+            written.Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// --repository-dialects に未対応方言（postgresql）を含めると、生成前に終了コード 1 でエラーになることを検証する
     /// </summary>
     [Fact(DisplayName = "--repository-dialects に未対応方言を含めるとエラーになる")]

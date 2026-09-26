@@ -223,6 +223,15 @@ internal static class GenerationConfigLoader
             var dialects = repositoryDialectsFlag
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList();
+
+            // カンマ・空白だけで中身が 0 件になった指定は、利用者の明確な誤り（CI のシェル変数の展開失敗など）。
+            // 空配列のまま進めると「未指定なら図の方言で導出する」救済を通らず、後段が sqlserver へ
+            // フォールバックして、--provider sqlite でも SQL Server 実装が無警告・終了コード 0 で出る
+            if (dialects.Count == 0)
+            {
+                throw new GenerationConfigException(Strings.Cli_RepositoryDialectsEmpty);
+            }
+
             SetNodeValue(
                 node,
                 "RepositoryDialects",

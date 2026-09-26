@@ -353,7 +353,10 @@ public sealed class InMemoryDataStore
             }
 {{~ end ~}}
 
-            property.SetValue(copy, value is byte[] bytes ? (byte[])bytes.Clone() : value);
+            // Copy arrays rather than share them: byte[] binary columns and array columns
+            // (such as PostgreSQL integer[]) would otherwise be the same instance in the store
+            // and in the caller's entity, so a later mutation would silently change the stored row.
+            property.SetValue(copy, value is Array array ? array.Clone() : value);
         }
 
         return copy;

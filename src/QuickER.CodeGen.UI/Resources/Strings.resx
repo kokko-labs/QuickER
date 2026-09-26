@@ -437,6 +437,15 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="QueryDialog_Status_RawSqlInvalid" xml:space="preserve">
     <value>The raw SQL references an undeclared parameter.</value>
   </data>
+  <data name="QueryDialog_Status_DanglingOrderByColumn" xml:space="preserve">
+    <value>Query '{0}': the sort order references a column that no longer exists. Remove the row or pick another column.</value>
+  </data>
+  <data name="QueryDialog_Status_DanglingFieldColumn" xml:space="preserve">
+    <value>Query '{0}', projection field '{1}': the source column no longer exists. Pick another column, or set it to "none" and give the field a type.</value>
+  </data>
+  <data name="QueryDialog_Status_DanglingParameterColumn" xml:space="preserve">
+    <value>Query '{0}', parameter '{1}': the source column no longer exists. Pick another column, or set it to "none" and give the parameter a type.</value>
+  </data>
   <data name="Common_Complete" xml:space="preserve">
     <value>Done</value>
   </data>

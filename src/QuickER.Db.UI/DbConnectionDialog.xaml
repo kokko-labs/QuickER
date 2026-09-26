@@ -97,6 +97,7 @@
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <TextBox
         Style="{StaticResource FormInput}"
@@ -110,6 +111,15 @@
         Content="{x:Static resources:Strings.DbConnection_SaveProfile}"
         Command="{Binding SaveProfileCommand}"
         ToolTip="{x:Static resources:Strings.DbConnection_SaveProfileTooltip}"
+      />
+      <Button
+        Grid.Column="2"
+        Margin="6,0,0,0"
+        MinWidth="60"
+        Style="{StaticResource SecondaryButton}"
+        Content="{x:Static resources:Strings.DbConnection_RenameProfile}"
+        Command="{Binding RenameProfileCommand}"
+        ToolTip="{x:Static resources:Strings.DbConnection_RenameProfileTooltip}"
       />
     </Grid>
 

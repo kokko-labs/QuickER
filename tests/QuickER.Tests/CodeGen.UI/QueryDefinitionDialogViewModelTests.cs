@@ -270,6 +270,91 @@ public class QueryDefinitionDialogViewModelTests
         originalDefinition.Name.Should().Be("GetByCustomer");
     }
 
+    /// <summary>
+    /// 図から列が消えた後のクエリ定義（存在しない列 ID への参照）を開いたとき、
+    /// 検証エラーになり OK が押せないことを検証する（CU1）。
+    /// </summary>
+    /// <remarks>
+    /// 参照の掃除はエンティティを切り替えたときだけ走るため、ダイアログの外で列が消えた図を開くと
+    /// 素通りしていた。生成時は当該クエリを警告つきで飛ばすので壊れたコードにはならないが、
+    /// 画面では気づけないまま確定できてしまう。
+    /// </remarks>
+    [Fact(DisplayName = "並び順の削除済み列参照は検証エラーになり OK を止める")]
+    public void DanglingOrderByColumn_BlocksOk()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        diagram.Queries[0].OrderBy.Add(new QueryOrdering { ColumnId = Guid.NewGuid() });
+
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        vm.StatusMessage.Should()
+            .Be(
+                string.Format(
+                    QuickER.CodeGen.UI.Resources.Strings.QueryDialog_Status_DanglingOrderByColumn,
+                    "GetByCustomer"
+                )
+            );
+    }
+
+    /// <summary>射影フィールドの削除済み列参照も検証エラーになることを検証する（CU1）</summary>
+    [Fact(DisplayName = "射影フィールドの削除済み列参照は検証エラーになり項目名を示す")]
+    public void DanglingProjectionField_BlocksOkAndNamesField()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var query = diagram.Queries[0];
+        query.Returns = QueryReturnShape.Projection;
+        query.ResultTypeName = "OrderRow";
+        query.Fields.Add(new ProjectionField { Name = "Total", SourceColumnId = Guid.NewGuid() });
+
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        vm.StatusMessage.Should()
+            .Be(
+                string.Format(
+                    QuickER.CodeGen.UI.Resources.Strings.QueryDialog_Status_DanglingFieldColumn,
+                    "GetByCustomer",
+                    "Total"
+                )
+            );
+    }
+
+    /// <summary>パラメータの削除済み列参照も検証エラーになることを検証する（CU1）</summary>
+    [Fact(DisplayName = "パラメータの削除済み列参照は検証エラーになり項目名を示す")]
+    public void DanglingParameterColumn_BlocksOkAndNamesParameter()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        diagram.Queries[0].Parameters[0].SourceColumnId = Guid.NewGuid();
+
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        vm.StatusMessage.Should()
+            .Be(
+                string.Format(
+                    QuickER.CodeGen.UI.Resources.Strings.QueryDialog_Status_DanglingParameterColumn,
+                    "GetByCustomer",
+                    "customerId"
+                )
+            );
+    }
+
+    /// <summary>参照がすべて生きているクエリは従来どおり確定できることを検証する（CU1・誤検出なし）</summary>
+    [Fact(DisplayName = "生きている列参照だけのクエリは確定できる")]
+    public void LiveColumnReferences_AllowOk()
+    {
+        var diagram = CreateDiagram(out _, out var customerColumnId, out var amountColumnId);
+        var query = diagram.Queries[0];
+        query.OrderBy.Add(new QueryOrdering { ColumnId = amountColumnId });
+        query.Parameters[0].SourceColumnId = customerColumnId;
+
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+
+        vm.StatusMessage.Should().BeEmpty();
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+    }
+
     /// <summary>射影フィールドの参照元列切替で型トークンが列由来になり、外すと編集可能へ戻ることを検証する（要件 e）</summary>
     [Fact(DisplayName = "射影フィールドの参照元列切替で型トークンが列由来になる")]
     public void ProjectionField_SourceColumn_DrivesTypeToken()

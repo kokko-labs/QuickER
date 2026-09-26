@@ -109,6 +109,12 @@
   <data name="DbConnection_SaveProfileTooltip" xml:space="preserve">
     <value>現在の入力内容を保存名で保存</value>
   </data>
+  <data name="DbConnection_RenameProfile" xml:space="preserve">
+    <value>名前の変更</value>
+  </data>
+  <data name="DbConnection_RenameProfileTooltip" xml:space="preserve">
+    <value>選択中のプロファイルの名前を保存名へ変更（接続の設定値は変えません）</value>
+  </data>
   <data name="DbConnection_TargetDb" xml:space="preserve">
     <value>対象DB</value>
   </data>
@@ -222,6 +228,9 @@
   </data>
   <data name="DbConnection_ProfileSaved" xml:space="preserve">
     <value>プロファイル '{0}' を保存しました。</value>
+  </data>
+  <data name="DbConnection_ProfileRenamed" xml:space="preserve">
+    <value>プロファイル '{0}' の名前を '{1}' に変更しました。</value>
   </data>
   <data name="DbConnection_SelectProfileToDelete" xml:space="preserve">
     <value>削除するプロファイルを選択してください。</value>

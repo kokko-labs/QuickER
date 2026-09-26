@@ -160,6 +160,9 @@
   <data name="CodeGen_Info_FallbackTypeColumns" xml:space="preserve">
     <value>次の列は型カタログが DB 型を認識できず、生成コードのプロパティが安全側のフォールバックとして string になっています（生成自体は失敗させないための既定値です）。意図した型かどうか確認し、違う場合は図の列の型表記を見直してください:{0}</value>
   </data>
+  <data name="CodeGen_Info_ArrayColumnsNotEditable" xml:space="preserve">
+    <value>次の列は配列型です。エンティティのプロパティとしては生成され（EF Core・インメモリ Repository・リモート転送でも扱えます）が、EditModel と値オブジェクトには載りません。EditModel は 1 列＝1 テキスト入力の投影で配列を表す記法が無く、値オブジェクトにすると配列が参照比較になるためです。配列の要素の長さも生成コードには載りません:{0}</value>
+  </data>
   <data name="CodeGen_Info_IncludeGraphSkippedNavigations" xml:space="preserve">
     <value>次のナビゲーションは、ルートからの経路に既に現れたテーブルへ戻る辺のため IncludeGraph では辿りません（Include ツリーは循環を表せません）。深さを決めて取得したい場合は Include / ThenInclude で明示してください:{0}</value>
   </data>

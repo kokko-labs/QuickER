@@ -109,6 +109,12 @@
   <data name="DbConnection_SaveProfileTooltip" xml:space="preserve">
     <value>Save the current input under the profile name</value>
   </data>
+  <data name="DbConnection_RenameProfile" xml:space="preserve">
+    <value>Rename</value>
+  </data>
+  <data name="DbConnection_RenameProfileTooltip" xml:space="preserve">
+    <value>Rename the selected profile to the name above (the connection settings are not changed)</value>
+  </data>
   <data name="DbConnection_TargetDb" xml:space="preserve">
     <value>Target DB</value>
   </data>
@@ -222,6 +228,9 @@
   </data>
   <data name="DbConnection_ProfileSaved" xml:space="preserve">
     <value>Saved profile '{0}'.</value>
+  </data>
+  <data name="DbConnection_ProfileRenamed" xml:space="preserve">
+    <value>Renamed profile '{0}' to '{1}'.</value>
   </data>
   <data name="DbConnection_SelectProfileToDelete" xml:space="preserve">
     <value>Select a profile to delete.</value>

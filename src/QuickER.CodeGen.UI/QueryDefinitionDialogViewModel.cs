@@ -171,6 +171,11 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
             {
                 return Strings.QueryDialog_Status_RawSqlInvalid;
             }
+
+            if (FindDanglingColumnReference(query) is { } dangling)
+            {
+                return dangling;
+            }
         }
 
         // 同一エンティティ内でのメソッド名重複（大文字小文字を区別しない）
@@ -184,6 +189,60 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
                 Strings.QueryDialog_Status_DuplicateName,
                 duplicate.First().Name.Trim()
             );
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// クエリが、対象エンティティに存在しない列を参照していれば、その内容を示すエラー文言を返す
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 判定は生成時診断（<c>CodeGen_Query_Dangling*</c>）と同じ「対象エンティティの列 ID 集合に無い参照」。
+    /// 生成時はそのクエリだけを警告つきで飛ばすため壊れたコードにはならないが、画面では気づけないまま
+    /// 確定できてしまう。
+    /// </para>
+    /// <para>
+    /// 参照を自動で外さずエラーにするのは、利用者が意図して選んだ参照を黙って解除しないため
+    /// （エンティティを切り替えたときの掃除＝<c>ClearStaleColumnReferences</c> は、参照先が丸ごと
+    /// 変わる操作なので別扱い）。列がダイアログの外で消えた図を開いた場合はこちらへ来る。
+    /// </para>
+    /// </remarks>
+    private static string? FindDanglingColumnReference(QueryItemViewModel query)
+    {
+        var validIds = query.AvailableColumns.Select(column => column.Id).ToHashSet();
+
+        if (query.OrderBy.Any(ordering => !validIds.Contains(ordering.ColumnId)))
+        {
+            return string.Format(Strings.QueryDialog_Status_DanglingOrderByColumn, query.Name);
+        }
+
+        foreach (var field in query.Fields)
+        {
+            if (field.SourceColumnId is { } fieldColumnId && !validIds.Contains(fieldColumnId))
+            {
+                return string.Format(
+                    Strings.QueryDialog_Status_DanglingFieldColumn,
+                    query.Name,
+                    field.Name
+                );
+            }
+        }
+
+        foreach (var parameter in query.Parameters)
+        {
+            if (
+                parameter.SourceColumnId is { } parameterColumnId
+                && !validIds.Contains(parameterColumnId)
+            )
+            {
+                return string.Format(
+                    Strings.QueryDialog_Status_DanglingParameterColumn,
+                    query.Name,
+                    parameter.Name
+                );
+            }
         }
 
         return null;

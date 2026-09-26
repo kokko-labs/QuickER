@@ -92,6 +92,9 @@ Saving is keyed on the profile name.
 A profile with the same name and the same DB kind is overwritten; otherwise a new profile is created.
 When the profile that would be overwritten is not the one selected in the list, QuickER asks first, because its connection settings and saved password would be replaced with no way back.
 Saving over the profile you loaded is not confirmed.
+Use the "Rename" button when all you want is a different name.
+It changes only the name of the selected profile to the one in the box, keeping its connection settings and its saved password.
+Typing a new name and pressing "Save" stores a separate profile instead of renaming.
 
 ### What gets imported
 

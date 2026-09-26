@@ -1338,8 +1338,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public void ShutdownEngines(TimeSpan timeout)
     {
         var session = _session;
+        // 会話を切り替えた直後に閉じた場合、旧セッションの破棄はまだ走っている可能性がある。
+        // 待たずに終了すると、その常駐子プロセス（codex app-server 等）が孤児になる
+        var detached = _detachedDisposal;
 
-        if (session is null)
+        if (session is null && detached is null)
         {
             return;
         }
@@ -1348,18 +1351,35 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // 破棄の途中に UI スレッドへのマーシャリングがあると待ちがデッドロックする
         var shutdown = Task.Run(async () =>
         {
-            try
+            if (session is not null)
             {
-                await session.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await session.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // 終了経路のため、破棄の失敗は報告先が無い
+                }
             }
-            catch (Exception)
+
+            if (detached is not null)
             {
-                // 終了経路のため、破棄の失敗は報告先が無い
+                try
+                {
+                    await detached.ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // 切り離し済みセッションの破棄の失敗も同様
+                }
             }
         });
 
         try
         {
+            // 現在のセッションと切り離し済みの破棄を合わせて 1 つの上限で待つ
+            // （ハングした破棄でアプリの終了を長く止めない）
             shutdown.Wait(timeout);
         }
         catch (Exception)
@@ -1527,8 +1547,30 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         session.StatusChanged -= OnStatus;
         _session = null;
 
-        Forget(Task.Run(() => session.DisposeAsync().AsTask()));
+        var disposal = Task.Run(() => session.DisposeAsync().AsTask());
+        _detachedDisposal = disposal;
+        Forget(disposal);
     }
+
+    /// <summary>
+    /// 直近に切り離したセッションの破棄タスク（未完了なら終了時にも待つ）
+    /// </summary>
+    /// <remarks>
+    /// 参照を捨てると、会話の切替直後にアプリを閉じたとき旧セッションの破棄を待てない
+    /// （<see cref="ShutdownEngines"/> は現在のセッションしか見られない）。切替は UI の同期処理なので
+    /// ここでは完了を待たず、終了時にだけ上限つきで待ち合わせる。
+    /// </remarks>
+    private Task? _detachedDisposal;
+
+    /// <summary>
+    /// 直近に切り離したセッションの破棄タスク（テストが完了を待つための口。未切替なら <c>null</c>）
+    /// </summary>
+    /// <remarks>
+    /// 破棄はスレッドプールで走るため、到達を短い上限つきのポーリングで待つと、全スイートの
+    /// 並列実行でプールが飽和したときに上限内へ入らず落ちる（実測: 飽和状態では自明な
+    /// <c>Task.Run</c> ですら 2 秒以内に開始しない）。テストはこのタスクを待つ。
+    /// </remarks>
+    internal Task? DetachedDisposalForTests => _detachedDisposal;
 
     /// <summary>組み立て中のアシスタント吹き出し（差分追記先）</summary>
     private ErChatMessage? _currentAssistantMessage;

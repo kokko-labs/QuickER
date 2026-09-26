@@ -809,6 +809,24 @@ namespace QuickER.CodeGen.UI.Resources {
                 return ResourceManager.GetString("QueryDialog_Status_RawSqlInvalid", resourceCulture);
             }
         }
+        
+        public static string QueryDialog_Status_DanglingOrderByColumn {
+            get {
+                return ResourceManager.GetString("QueryDialog_Status_DanglingOrderByColumn", resourceCulture);
+            }
+        }
+        
+        public static string QueryDialog_Status_DanglingFieldColumn {
+            get {
+                return ResourceManager.GetString("QueryDialog_Status_DanglingFieldColumn", resourceCulture);
+            }
+        }
+        
+        public static string QueryDialog_Status_DanglingParameterColumn {
+            get {
+                return ResourceManager.GetString("QueryDialog_Status_DanglingParameterColumn", resourceCulture);
+            }
+        }
 
         public static string Common_Complete {
             get {

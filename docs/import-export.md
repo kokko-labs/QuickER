@@ -52,6 +52,10 @@ DBML carries no dialect information, so the diagram's target DB stays as it was 
 
 Imports the `erDiagram` notation.
 Like DBML it carries no dialect information, so the target DB is kept.
+A column name cannot contain spaces or symbols (an attribute line separates type, name and marker by spaces).
+Export folds them to `_` and reports that it did among the information the format cannot carry.
+If folding collides with another column in the same table, the name that needs no folding keeps its spelling and the folded one gets a number (`_2`, `_3`, …).
+Table names round-trip even with spaces.
 A `UK` key marker is imported as a unique constraint over that single column (Mermaid has no syntax for grouping several columns, so composite unique constraints cannot be expressed).
 
 ### Excel definition documents (.xlsx)

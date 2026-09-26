@@ -749,6 +749,9 @@
   <data name="ExportOmission_NamedQuery" xml:space="preserve">
     <value>Named query definitions</value>
   </data>
+  <data name="ExportOmission_ColumnNameNormalized" xml:space="preserve">
+    <value>Column names that the format cannot spell (spaces and symbols are folded to "_")</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
   </data>
