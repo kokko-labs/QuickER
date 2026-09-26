@@ -235,4 +235,141 @@ CREATE TABLE invoices (
         result.Entities.Single().Columns.Should().OnlyContain(c => !c.IsComputed);
         result.Warnings.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// テーブル名にドットを含む DB でも取込が例外にならない（SL1）。
+    /// </summary>
+    /// <remarks>
+    /// PRAGMA の引数へ <see cref="SqliteIdentifier.Quote"/>（ドット分割クォート）を渡すと
+    /// <c>PRAGMA table_xinfo("a"."b")</c> のように誤って 2 分割クォートされ、取込全体が例外で失敗していた。
+    /// PRAGMA の引数は「ドットも含めた 1 つの識別子」のため <see cref="SqliteIdentifier.QuoteSimple"/> を使う。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQLite: テーブル名にドットを含む DB でも取込が例外にならない"
+    )]
+    public async Task Import_TableNameContainingDot_DoesNotThrow()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE ""a.b"" (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+CREATE TABLE customers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["a.b", "customers"]);
+
+        var dotted = result.Entities.Single(e => e.TableName == "a.b");
+        dotted.Columns.Select(c => c.Name).Should().Equal("id", "name");
+        dotted.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("id");
+        result.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 参照先テーブルが実在しない FK は、リレーションを作らず <see cref="SchemaImportWarningKind.ForeignKeyOutsideScope"/>
+    /// で告げる（SL4）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 参照先が実在しない FK は警告を出しリレーションを作らない"
+    )]
+    public async Task Import_ForeignKeyToMissingTable_WarnsAndExcludesRelationship()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE child (
+    id INTEGER PRIMARY KEY,
+    ghost_id INTEGER REFERENCES ghost(id)
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["child"]);
+        result.Relationships.Should().BeEmpty();
+
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.ForeignKeyOutsideScope)
+            .Subject;
+        warning.TableName.Should().Be("child");
+        warning.Detail.Should().Be("ghost");
+    }
+
+    /// <summary>
+    /// 複合 FK で参照先テーブルが実在しない場合も、構成列ごとにではなく FK 単位で警告 1 件にまとまる（SL4）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 複合 FK で参照先が実在しない場合も警告は 1 件にまとまる"
+    )]
+    public async Task Import_CompositeForeignKeyToMissingTable_WarnsOnce()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE child (
+    a INTEGER NOT NULL,
+    b INTEGER NOT NULL,
+    PRIMARY KEY (a, b),
+    FOREIGN KEY (a, b) REFERENCES ghost(x, y)
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Relationships.Should().BeEmpty();
+        result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.ForeignKeyOutsideScope)
+            .Which.TableName.Should()
+            .Be("child");
+    }
+
+    /// <summary>参照先が実在する FK では警告が出ない（回帰なし）</summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 参照先が実在する FK では ForeignKeyOutsideScope 警告が出ない（回帰なし）"
+    )]
+    public async Task Import_ForeignKeyToExistingTable_NoOutsideScopeWarning()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE customers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    customer_id INTEGER NOT NULL REFERENCES customers(id)
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Relationships.Should().ContainSingle();
+        result.Warnings.Should().BeEmpty();
+    }
 }

@@ -109,7 +109,13 @@ public class SqliteSchemaImporter : ISchemaImporter
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
+        var rels = await LoadForeignKeysAsync(
+                conn,
+                tables,
+                tableWarnings,
+                commandTimeoutSeconds,
+                ct
+            )
             .ConfigureAwait(false);
         var aux = await LoadAuxiliaryObjectsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
@@ -279,7 +285,7 @@ ORDER BY name;";
     {
         await using var cmd = DbCommands.Create(
             conn,
-            $"PRAGMA table_xinfo({SqliteIdentifier.Quote(entry.Key)});",
+            $"PRAGMA table_xinfo({SqliteIdentifier.QuoteSimple(entry.Key)});",
             commandTimeoutSeconds
         );
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -370,7 +376,7 @@ ORDER BY name;";
             await using (
                 var listCmd = DbCommands.Create(
                     conn,
-                    $"PRAGMA index_list({SqliteIdentifier.Quote(entry.Key)});",
+                    $"PRAGMA index_list({SqliteIdentifier.QuoteSimple(entry.Key)});",
                     commandTimeoutSeconds
                 )
             )
@@ -396,7 +402,7 @@ ORDER BY name;";
             {
                 await using var infoCmd = DbCommands.Create(
                     conn,
-                    $"PRAGMA index_info({SqliteIdentifier.Quote(indexName)});",
+                    $"PRAGMA index_info({SqliteIdentifier.QuoteSimple(indexName)});",
                     commandTimeoutSeconds
                 );
                 await using var infoReader = await infoCmd
@@ -425,12 +431,29 @@ ORDER BY name;";
 
     /// <summary>外部キーを PRAGMA foreign_key_list で読み込み、リレーションへ変換する</summary>
     /// <remarks>
+    /// <para>
     /// foreign_key_list の列は id / seq / table（参照先）/ from（子側列）/ to（親側列）/
     /// on_update / on_delete / match。同一 id が複合 FK の構成列を表すため、id ごとに集約する。
+    /// </para>
+    /// <para>
+    /// SQLite は <c>CREATE TABLE</c> 時に参照先テーブルの実在を検査しないため、参照先が取込範囲
+    /// （<paramref name="tables"/>）に無い FK が存在し得る（存在しないテーブルを参照する定義・
+    /// 参照先を後から DROP した定義）。そのままではリレーションにできないため、
+    /// <see cref="SchemaImportWarningKind.ForeignKeyOutsideScope"/> で名指しして除外する
+    /// （<c>Subject</c> = 合成 FK 名 / <c>Detail</c> = 参照先テーブル名）。複合 FK の構成列は
+    /// 同一 <c>id</c> に複数行で現れるため、警告は <c>id</c> 単位で 1 件にまとめる。
+    /// </para>
+    /// <para>
+    /// 参照先テーブル自体は存在するが、参照先列（<c>to</c>）が省略された暗黙参照で主キーの列数と
+    /// FK の列数が食い違う（<see cref="ResolvePrimaryKeyColumn"/> が解決不能）場合は、無効な
+    /// スキーマ定義として従来どおり無告知で除外する（参照先が範囲内に実在する以上「範囲外」ではなく、
+    /// 専用の警告種別を新設するほどの実例が無いため）。
+    /// </para>
     /// </remarks>
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        List<SchemaImportWarning> warnings,
         int commandTimeoutSeconds,
         CancellationToken ct
     )
@@ -441,10 +464,14 @@ ORDER BY name;";
         {
             await using var cmd = DbCommands.Create(
                 conn,
-                $"PRAGMA foreign_key_list({SqliteIdentifier.Quote(entry.Key)});",
+                $"PRAGMA foreign_key_list({SqliteIdentifier.QuoteSimple(entry.Key)});",
                 commandTimeoutSeconds
             );
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            // 同一 FK（id）で参照先テーブルが取込範囲に無いことを検出したら、複合 FK でも
+            // 警告 1 件にまとめる（id 単位で重複を抑止）
+            var missingRefWarned = new HashSet<long>();
 
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
@@ -460,6 +487,28 @@ ORDER BY name;";
                     reader.IsDBNull(6) ? null : reader.GetString(6)
                 );
 
+                // SQLite の FK には制約名が無いため、テーブル名＋id で安定した合成名を作る
+                var fkName = $"FK_{entry.Key}_{refTable}_{id}";
+
+                // 参照先テーブルが取込範囲に無い（実在しない／取り込めなかった）場合は
+                // リレーションにできないため、警告して除外する
+                if (!tables.ContainsKey(refTable))
+                {
+                    if (missingRefWarned.Add(id))
+                    {
+                        warnings.Add(
+                            new SchemaImportWarning(
+                                SchemaImportWarningKind.ForeignKeyOutsideScope,
+                                entry.Entity.TableName,
+                                fkName,
+                                refTable
+                            )
+                        );
+                    }
+
+                    continue;
+                }
+
                 // 参照先列（to）が NULL の場合は親テーブルの主キーを参照する（SQLite の暗黙参照）。
                 // 暗黙参照の構成列は seq 順に主キーの実効順と対応するため、seq で引き当てる
                 var refCol = toCol ?? ResolvePrimaryKeyColumn(tables, refTable, seq);
@@ -469,8 +518,6 @@ ORDER BY name;";
                     continue;
                 }
 
-                // SQLite の FK には制約名が無いため、テーブル名＋id で安定した合成名を作る
-                var fkName = $"FK_{entry.Key}_{refTable}_{id}";
                 builder.Add(fkName, entry.Key, fromCol, refTable, refCol, onDelete, onUpdate);
             }
         }

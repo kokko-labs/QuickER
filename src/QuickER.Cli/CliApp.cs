@@ -427,6 +427,17 @@ public static class CliApp
                     subject,
                     detail
                 ),
+            SchemaImportWarningKind.DisabledConstraintExcluded => string.Format(
+                Strings.Cli_ImportWarningDisabledConstraintExcluded,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.TemporalHistoryTableExcluded => string.Format(
+                Strings.Cli_ImportWarningTemporalHistoryTableExcluded,
+                table,
+                detail
+            ),
             // 未知の種別を黙って空行にしない（ConcurrencyModes.Validated と同じ流儀）
             _ => throw new ArgumentOutOfRangeException(
                 nameof(warning),

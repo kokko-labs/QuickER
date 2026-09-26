@@ -93,6 +93,9 @@ Named queries are stored on the diagram and become Repository methods when C# co
 `set_query`'s nested arguments:
 
 - `scalar_type`: required when `returns` = `scalar`; a dialect-neutral type token, for example `decimal(12,2)`.
+  Give string and binary types a length (for example `string(50)`).
+  A fixed-length token (`fixedstring`, `ansifixedstring`, `fixedbinary`) without one makes code generation fail.
+  A variable-length token (`string`, `ansistring`, `binary`) without one is treated as unbounded.
 - `condition`: a mini-DSL search condition (comparisons, `AND`/`OR`/`NOT`, parentheses, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] IN`, `CONTAINS`/`STARTSWITH`/`ENDSWITH`), used when `implementation` = `dsl` (omit for no filter).
   Column names refer to the table's columns; `@name` refers to a declared parameter.
 - `sql`: an object mapping a dialect name (`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`) to a raw SQL string, used when `implementation` = `sql`.

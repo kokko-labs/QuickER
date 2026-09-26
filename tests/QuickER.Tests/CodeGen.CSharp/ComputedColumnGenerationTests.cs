@@ -223,4 +223,149 @@ public class ComputedColumnGenerationTests
             .Should()
             .MatchRegex(@"nameof\(Qty\),\s*\r?\n\s*nameof\(BindingQty\),\s*\r?\n\s*true,");
     }
+
+    /// <summary>NOT NULL の計算列（値型）1 本を持つ最小ダイアグラム（テンポラルテーブルの期間列の形）</summary>
+    private static ErDiagram NotNullComputedDiagram() =>
+        new()
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "temporal_items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "period_start",
+                            DataType = "datetime2",
+                            IsNullable = false,
+                            IsComputed = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+    /// <summary>
+    /// Mapper が NOT NULL の値型の計算列を <c>.Value</c> で取り出すことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// EditModel の確定値は値型なら常に <c>Nullable&lt;T&gt;</c> なので、素の代入は CS0266 になる
+    /// （行バージョン列・除外バイナリ列はいずれも <c>byte[]</c>＝参照型でこの経路を踏まない）。
+    /// 実コンパイル水準の網は <c>GeneratedCodeCompilationTests</c> の共通図が持つ。
+    /// </remarks>
+    [Fact(DisplayName = "計算列: NOT NULL の値型は Mapper が .Value で取り出す")]
+    public void Generate_NotNullValueTypeComputedColumn_MapperUnwrapsNullable()
+    {
+        var content = SingleFile(
+            new CSharpCodeGenerationService().Generate(
+                NotNullComputedDiagram(),
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    GenerateRepositories = true,
+                    GenerateEditModels = true,
+                    GenerateMappers = true,
+                }
+            )
+        );
+
+        content
+            .Should()
+            .Contain("if (editModel.PeriodStart is not null)")
+            .And.Contain("entity.PeriodStart = editModel.PeriodStart.Value;");
+    }
+
+    /// <summary>警告の検証用に、方言・同期支援だけを差し替えて生成する</summary>
+    private static CodeGenerationResult GenerateFor(
+        ErDiagram diagram,
+        string[] dialects,
+        bool syncSupport = false
+    ) =>
+        new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                RepositoryDialects = dialects,
+                GenerateSyncSupport = syncSupport,
+            }
+        );
+
+    /// <summary>警告本文の識別に使う語（文面の正本は resx）</summary>
+    private const string NotNullComputedWarningMarker = "temporal_items.period_start";
+
+    private static bool HasNotNullComputedWarning(CodeGenerationResult result) =>
+        result.Diagnostics.Any(d =>
+            d.Severity == GenerationDiagnosticSeverity.Warning
+            && d.Message.Contains(NotNullComputedWarningMarker, StringComparison.Ordinal)
+        );
+
+    /// <summary>
+    /// マルチターゲット構成では NOT NULL の計算列が Warning で名指しされることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// ミラー側（式を持たない方言の DB）には普通の列として作られるため、送られない列の NOT NULL 制約で
+    /// 行の追加が必ず落ちる。Error でなく Warning なのは、ミラー側を既定値や同じ式で整えてある構成が
+    /// 正当に存在し、図からはそれを判定できないため。
+    /// </remarks>
+    [Fact(DisplayName = "マルチターゲット: NOT NULL の計算列を Warning が名指しする")]
+    public void Generate_MultiTarget_NotNullComputedColumn_Warns()
+    {
+        var result = GenerateFor(NotNullComputedDiagram(), ["sqlserver", "sqlite"]);
+
+        result.HasErrors.Should().BeFalse("警告であって生成は止めない");
+        HasNotNullComputedWarning(result).Should().BeTrue();
+    }
+
+    /// <summary>同期支援を有効にした構成でも同じ Warning が出ることを検証する</summary>
+    [Fact(DisplayName = "同期支援: NOT NULL の計算列を Warning が名指しする")]
+    public void Generate_SyncSupport_NotNullComputedColumn_Warns()
+    {
+        var result = GenerateFor(
+            NotNullComputedDiagram(),
+            ["sqlserver", "sqlite"],
+            syncSupport: true
+        );
+
+        result.HasErrors.Should().BeFalse("警告であって生成は止めない");
+        HasNotNullComputedWarning(result).Should().BeTrue();
+    }
+
+    /// <summary>単一方言・同期なしの構成では Warning が出ないことを検証する</summary>
+    /// <remarks>式を持つ DB しか相手にしないため、予告すべき乖離が実在しない。</remarks>
+    [Fact(DisplayName = "単一方言: NOT NULL の計算列でも Warning は出ない")]
+    public void Generate_SingleDialect_NotNullComputedColumn_DoesNotWarn()
+    {
+        HasNotNullComputedWarning(GenerateFor(NotNullComputedDiagram(), ["sqlserver"]))
+            .Should()
+            .BeFalse();
+    }
+
+    /// <summary>NULL 許容の計算列だけならマルチターゲットでも Warning が出ないことを検証する</summary>
+    /// <remarks>ミラー側は NULL のまま書けるため＝これが利用者へ案内する逃げ道そのもの。</remarks>
+    [Fact(DisplayName = "マルチターゲット: NULL 許容の計算列だけなら Warning は出ない")]
+    public void Generate_MultiTarget_NullableComputedColumn_DoesNotWarn()
+    {
+        GenerateFor(Diagram(computed: true), ["sqlserver", "sqlite"])
+            .Diagnostics.Should()
+            .NotContain(
+                d =>
+                    d.Severity == GenerationDiagnosticSeverity.Warning
+                    && d.Message.Contains("items.total", StringComparison.Ordinal),
+                "NULL 許容の計算列はミラー側へ NULL のまま書けるため予告しない"
+            );
+    }
 }

@@ -202,4 +202,197 @@ public sealed class SqlServerImportFidelityIntegrationTests(SqlServerContainerFi
             .Warnings.Should()
             .NotContain(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost);
     }
+
+    /// <summary>
+    /// <c>NOCHECK CONSTRAINT</c> で無効化された外部キーは取り込まず警告として報告する一方、
+    /// <c>WITH NOCHECK ADD CONSTRAINT</c>（未信頼だが有効）な外部キーは従来どおり取り込むことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は PRIMARY KEY / UNIQUE 制約を無効化する構文を持たない
+    /// （<c>ALTER TABLE ... NOCHECK CONSTRAINT</c> は FOREIGN KEY / CHECK にしか効かない）ため、
+    /// この告知は外部キーのみが対象になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQL Server: NOCHECK で無効化された FK は除外し報告する／未信頼だが有効な FK は取り込む"
+    )]
+    public async Task Import_DisabledForeignKey_IsExcludedButUntrustedForeignKeyIsImported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE parent_t (id int NOT NULL PRIMARY KEY);
+
+            CREATE TABLE disabled_child (id int NOT NULL PRIMARY KEY, pid int NULL);
+            ALTER TABLE disabled_child ADD CONSTRAINT FK_disabled_child_parent
+                FOREIGN KEY (pid) REFERENCES parent_t (id);
+            ALTER TABLE disabled_child NOCHECK CONSTRAINT FK_disabled_child_parent;
+
+            CREATE TABLE untrusted_child (id int NOT NULL PRIMARY KEY, pid int NULL);
+            ALTER TABLE untrusted_child WITH NOCHECK ADD CONSTRAINT FK_untrusted_child_parent
+                FOREIGN KEY (pid) REFERENCES parent_t (id);
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+        // 無効化された FK だけが除外される（未信頼だが有効な FK は残る）
+        var relationship = result.Relationships.Should().ContainSingle().Subject;
+        var untrustedChild = result.Entities.Single(e => e.TableName == "untrusted_child");
+        relationship.TargetEntityId.Should().Be(untrustedChild.Id);
+
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.DisabledConstraintExcluded)
+            .Subject;
+        warning.TableName.Should().Be("disabled_child");
+        warning.Subject.Should().Be("FK_disabled_child_parent");
+        warning.Detail.Should().Be("FOREIGN KEY");
+    }
+
+    /// <summary>
+    /// テンポラルテーブル（システムバージョニング）の履歴表は取り込まず本表名つきで告げ、
+    /// 本表の期間列は <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、
+    /// その生成規則が計算列と同じ警告種別で報告されることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server: テンポラルテーブルの履歴表は除外し、期間列は IsComputed つきで取り込む"
+    )]
+    public async Task Import_TemporalTable_ExcludesHistoryAndMarksPeriodColumns()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                CREATE TABLE products (
+                    product_id int NOT NULL PRIMARY KEY,
+                    name nvarchar(100) NOT NULL,
+                    valid_from datetime2 GENERATED ALWAYS AS ROW START NOT NULL,
+                    valid_to datetime2 GENERATED ALWAYS AS ROW END NOT NULL,
+                    PERIOD FOR SYSTEM_TIME (valid_from, valid_to)
+                )
+                WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.products_history));
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+            // 履歴表は独立したエンティティとして取り込まれない（本表だけが残る）
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("products");
+
+            var historyWarning = result
+                .Warnings.Should()
+                .ContainSingle(w => w.Kind == SchemaImportWarningKind.TemporalHistoryTableExcluded)
+                .Subject;
+            historyWarning.TableName.Should().Be("products_history");
+            historyWarning.Detail.Should().Be("products");
+
+            var entity = result.Entities.Single();
+            var periodColumns = entity
+                .Columns.Where(c => c.Name is "valid_from" or "valid_to")
+                .ToList();
+            periodColumns.Should().OnlyContain(c => c.IsComputed);
+
+            // 通常列は従来どおり計算列にならない
+            entity.Columns.Single(c => c.Name == "product_id").IsComputed.Should().BeFalse();
+            entity.Columns.Single(c => c.Name == "name").IsComputed.Should().BeFalse();
+
+            var periodWarnings = result
+                .Warnings.Where(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost)
+                .ToList();
+            periodWarnings.Should().OnlyContain(w => w.TableName == "products");
+            periodWarnings
+                .Single(w => w.Subject == "valid_from")
+                .Detail.Should()
+                .Be("GENERATED ALWAYS AS ROW START");
+            periodWarnings
+                .Single(w => w.Subject == "valid_to")
+                .Detail.Should()
+                .Be("GENERATED ALWAYS AS ROW END");
+        }
+        finally
+        {
+            // SYSTEM_VERSIONING を切らない限り本表・履歴表とも DROP TABLE できない
+            // （後続テストの ResetSchemaAsync が失敗しないよう、ここで解除しておく）
+            await fixture.ExecuteAsync(
+                """
+                IF OBJECT_ID('dbo.products', 'U') IS NOT NULL
+                BEGIN
+                    ALTER TABLE dbo.products SET (SYSTEM_VERSIONING = OFF);
+                END
+                """,
+                Ct
+            );
+        }
+    }
+
+    /// <summary>
+    /// <c>HIDDEN</c> 修飾つきの期間列も、カタログ照会（<see cref="QuickER.Provider.SqlServer.SqlServerSchemaImporter"/>
+    /// が使う <c>INFORMATION_SCHEMA.COLUMNS</c> / <c>sys.columns</c>）からは通常どおり取得できることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <c>HIDDEN</c> が変えるのは <c>SELECT *</c> の可視性だけで、カタログビューの列挙には影響しない
+    /// （<c>generated_always_type</c> はカタログの列としてそのまま現れる）。生成コードの SELECT は
+    /// 常に明示的な列名リストを組み立てる（<c>SelectColumns</c>）ため、この事実は取込の正しさに
+    /// 直結する＝ここで確かめておかないと「HIDDEN な期間列だけ取り込み漏れする」回帰に気付けない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQL Server: HIDDEN な期間列もカタログから取得でき、IsComputed つきで取り込む"
+    )]
+    public async Task Import_TemporalTableWithHiddenPeriodColumns_PeriodColumnsAreStillImported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                CREATE TABLE orders (
+                    order_id int NOT NULL PRIMARY KEY,
+                    amount decimal(18,2) NOT NULL,
+                    valid_from datetime2 GENERATED ALWAYS AS ROW START HIDDEN NOT NULL,
+                    valid_to datetime2 GENERATED ALWAYS AS ROW END HIDDEN NOT NULL,
+                    PERIOD FOR SYSTEM_TIME (valid_from, valid_to)
+                )
+                WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.orders_history));
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+            var entity = result.Entities.Single(e => e.TableName == "orders");
+            // HIDDEN でも SELECT * には現れない列がカタログには現れ、通常どおり取り込める
+            entity
+                .Columns.Select(c => c.Name)
+                .Should()
+                .BeEquivalentTo(["order_id", "amount", "valid_from", "valid_to"]);
+            entity
+                .Columns.Where(c => c.Name is "valid_from" or "valid_to")
+                .Should()
+                .OnlyContain(c => c.IsComputed);
+        }
+        finally
+        {
+            await fixture.ExecuteAsync(
+                """
+                IF OBJECT_ID('dbo.orders', 'U') IS NOT NULL
+                BEGIN
+                    ALTER TABLE dbo.orders SET (SYSTEM_VERSIONING = OFF);
+                END
+                """,
+                Ct
+            );
+        }
+    }
 }

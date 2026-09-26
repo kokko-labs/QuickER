@@ -114,6 +114,12 @@ public interface ITypeCatalog
     bool TryParse(string nativeType, out CanonicalType canonical);
 
     /// <summary>正規型からこの方言のネイティブ型文字列を生成する</summary>
+    /// <remarks>
+    /// 長さを要する型（<see cref="CanonicalTypeToken.HasLengthArgument"/> が真の種別）で
+    /// <see cref="CanonicalType.Length"/> が <c>null</c> の正規型は、長さを宣言できない方言では <c>false</c> を返す
+    /// ＝列として書き出せない。呼び出し側はこれを前提にすること（長さ無しの型名だけを出すと、方言によって
+    /// 構文エラーになるか、黙って長さ 1 の列を作る）。
+    /// </remarks>
     /// <param name="canonical">変換元の正規型</param>
     /// <param name="nativeType">生成に成功した場合のネイティブ型文字列</param>
     bool TryFormat(CanonicalType canonical, out string nativeType);

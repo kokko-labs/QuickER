@@ -335,6 +335,16 @@ internal sealed partial class CSharpGenerationModelBuilder
                     EntityTypeName = property.TypeName,
                     EditModelTypeName = editModelProperty.TypeName,
                     EditModelIsNullable = editModelProperty.IsNullable,
+                    // 「入力があるときだけ代入」の 3 種で Nullable<T> → 非 NULL の値型の取り出しが要るか。
+                    // 参照型は同条件でも .Value を持たない（is not null のフロー解析で素の代入が通る）
+                    NullableValueNeedsUnwrap =
+                        editModelProperty.IsNullable
+                        && !editModelProperty.IsReferenceType
+                        && !string.Equals(
+                            property.TypeName,
+                            editModelProperty.TypeName,
+                            StringComparison.Ordinal
+                        ),
                     IsBinary = editModelProperty.IsBinary,
                     EditModelLoadExpression = BuildEditModelLoadExpression(
                         property.PropertyName,

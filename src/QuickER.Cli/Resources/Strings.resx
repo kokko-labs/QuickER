@@ -304,4 +304,10 @@
   <data name="Cli_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
     <value>Warning: {0}.{1} was imported as an ordinary column. The diagram does not model the generated-column expression ({2}), so generated DDL creates a plain column and generated code leaves it out of INSERT / UPDATE.</value>
   </data>
+  <data name="Cli_ImportWarningDisabledConstraintExcluded" xml:space="preserve">
+    <value>Warning: {0}: the {2} constraint "{1}" is disabled and enforces nothing, so it was not imported.</value>
+  </data>
+  <data name="Cli_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
+    <value>Warning: {0} was excluded as the history table of the system-versioned table "{1}". It is not imported as an entity of its own.</value>
+  </data>
 </root>

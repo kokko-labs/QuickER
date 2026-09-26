@@ -101,7 +101,7 @@
     <value>Column '{0}.{1}' has no DB type metadata ([DbColumnMeta]) and was skipped.</value>
   </data>
   <data name="Reverse_TypeTokenUnresolved" xml:space="preserve">
-    <value>Type token '{0}' for column '{1}.{2}' could not be expanded for the target dialect; using it verbatim.</value>
+    <value>Type token '{0}' for column '{1}.{2}' could not be expanded for the target dialect; the token text was used as the column type. Fix this column's type by hand.</value>
   </data>
   <data name="Reverse_UniqueConstraintMemberUnresolved" xml:space="preserve">
     <value>A UNIQUE constraint on table '{0}' refers to property '{1}', which is not a restored column; the whole constraint was skipped.</value>

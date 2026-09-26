@@ -98,7 +98,7 @@
     <value>列 '{0}.{1}' に DB 型メタ（[DbColumnMeta]）が無いためスキップしました。</value>
   </data>
   <data name="Reverse_TypeTokenUnresolved" xml:space="preserve">
-    <value>列 '{1}.{2}' の型トークン '{0}' を対象方言へ展開できなかったため、そのまま採用しました。</value>
+    <value>列 '{1}.{2}' の型トークン '{0}' を対象方言へ展開できなかったため、トークン文字列をそのまま列の型として採用しました。この列の型は手で直してください。</value>
   </data>
   <data name="Reverse_UniqueConstraintMemberUnresolved" xml:space="preserve">
     <value>テーブル '{0}' の UNIQUE 制約が復元できない列（プロパティ '{1}'）を参照しているため、制約ごとスキップしました。</value>

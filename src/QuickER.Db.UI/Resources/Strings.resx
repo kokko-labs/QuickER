@@ -383,4 +383,10 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
     <value>{0}.{1}: imported as an ordinary column. The diagram does not model the generated-column expression ({2}), so generated DDL creates a plain column and generated code leaves it out of INSERT / UPDATE.</value>
   </data>
+  <data name="Db_ImportWarningDisabledConstraintExcluded" xml:space="preserve">
+    <value>{0}: the {2} constraint "{1}" is disabled and enforces nothing, so it was not imported.</value>
+  </data>
+  <data name="Db_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
+    <value>{0}: excluded as the history table of the system-versioned table "{1}". It is not imported as an entity of its own.</value>
+  </data>
 </root>

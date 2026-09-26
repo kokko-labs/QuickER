@@ -164,6 +164,15 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             return false;
         }
 
+        // 長さを要する文字列・バイナリ種別で長さが無い正規型は書き出さない（変換不能一覧に載せる）。
+        // Oracle は長さを省いた VARCHAR2 / NVARCHAR2 / RAW を構文エラーとして拒否し（`ORA-00906` 系）、
+        // CHAR / NCHAR は黙って長さ 1 として作る。
+        // 負のスケールと同じ「実行できない／意味の違う DDL を黙って作らない」線引き
+        if (CanonicalTypeToken.HasLengthArgument(canonical.Kind) && canonical.Length is null)
+        {
+            return false;
+        }
+
         switch (canonical.Kind)
         {
             case CanonicalTypeKind.Boolean:

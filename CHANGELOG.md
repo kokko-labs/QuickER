@@ -6,6 +6,24 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Breaking changes
+
+#### Code generation dialog & CLI
+
+- **A named query whose type token is a fixed-length string or binary without a length now fails generation** — `fixedstring`, `ansifixedstring` and `fixedbinary` mean nothing without one, and every dialect that needs a length writes them out as a type that does not exist. Give the token a length (for example `fixedstring(10)`), which the diagnostic message now says as well. Variable-length tokens (`string`, `ansistring`, `binary`) are unaffected: a parameter constrains no length, so they keep resolving as before
+
+### Added
+
+#### Code generation dialog & CLI
+
+- **Generation now warns when a NOT NULL computed column cannot be written on the mirror side** — in a multi-target build (SQL Server as the server, SQLite locally) or with bidirectional sync, the side that does not evaluate the expression gets an ordinary column, and generated code never writes it, so inserting a row there fails on the NOT NULL constraint. The affected columns are now named at generation time, with the two ways out: make the column nullable in the diagram (the mirror then keeps NULL for it) or leave the table out of synchronization. The note the DDL carries next to such a column says the same
+
+### Changed
+
+#### DB sync & DDL
+
+- **A difference in nullability on a computed column no longer produces an `ALTER COLUMN`** — the nullability of a computed column follows from its expression, which the diagram does not model and therefore cannot impose on a database. Without this, taking the way out above (making the column nullable in the diagram) would have made the sync offer a meaningless `ALTER COLUMN` against the database the diagram was imported from. Differences in the column's type are still detected
+
 ### Fixed
 
 #### Database import & generated code
@@ -13,6 +31,13 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Computed and generated columns are now imported as read-only and left out of generated writes** — a SQL Server computed column, a MySQL / PostgreSQL / SQLite generated column or an Oracle virtual column used to be imported as an ordinary column, so every INSERT / UPDATE the generated repository issued against that table failed at runtime. The import now marks the column and warns that the expression is not carried into the diagram, generated code excludes the column from INSERT / UPDATE on every backend (EF Core mode maps it as store-generated), generated DDL notes next to the column that the expression must be added by hand, and generation reports the excluded columns. A SQLite generated column used to be missing from the import entirely, and a diagram whose primary key is a computed column is now refused at generation time
 - **SQL Server tables whose names differ only in letter case no longer merge into one entity** — in a database with a case-sensitive collation, `Dup` and `dup` collapsed into a single entity with both tables' columns mixed together and no warning. One table is now kept and the other is skipped with a warning, the same way the other dialects already behaved
 - **SQLite virtual tables (FTS5, R*Tree and the like) are no longer imported as broken ordinary tables** — a virtual table and its shadow tables used to appear as entities full of BLOB columns. They are now excluded from the import, and each virtual table is reported once
+- **Disabled constraints are no longer imported as if they were enforced** — a SQL Server foreign key turned off with `NOCHECK CONSTRAINT` used to become a relationship in the diagram even though it enforces nothing. It is now skipped and reported. A key added `WITH NOCHECK` but currently enabled is still imported, because it is enforced from then on. Oracle already skipped its `DISABLE`d constraints, but did so silently; those are now reported the same way
+- **SQL Server temporal tables can now be imported and written to** — the history table is excluded and reported instead of arriving as a duplicate entity, and the current table's period columns (`GENERATED ALWAYS AS ROW START / END`) are treated as columns the database produces, so generated code leaves them out of INSERT / UPDATE. Writing to such a table used to be impossible: the period columns were sent like ordinary columns and SQL Server rejected the statement because they are `GENERATED ALWAYS`. Period columns declared `HIDDEN` work the same way, because generated code lists its columns explicitly rather than relying on `SELECT *`
+- **A generated mapper no longer fails to compile when a computed column is a NOT NULL value type** — with `datetime2`, `int`, `decimal` and the like, generating edit models produced code that did not compile (CS0266: `System.DateTime?` cannot be converted to `System.DateTime`). An edit model's confirmed value is always `Nullable<T>` for a value type, and the three kinds of column that are only assigned when an input is present (row version, computed, excluded unbounded binary) were missing that unwrap. Row version and excluded binary columns are always `byte[]`, so only a computed column — which can have any type — could reach it. Diagrams without a computed column, and those whose computed columns are reference types, generate byte-identical output
+- **A SQLite database whose table name contains a dot can be imported again** — the import quoted such a name as if the dot were a schema qualifier, which made the `PRAGMA` calls a syntax error and failed the whole import
+- **A SQLite foreign key whose parent table does not exist is now reported** — SQLite does not check the parent table when a table is created, and such a key used to vanish from the diagram without a word
+- **A string or binary column with no length is no longer written out for SQL Server, MySQL or Oracle** — switching a diagram to one of those dialects used to produce DDL that MySQL and Oracle refuse to run, while SQL Server quietly created a one-character column. Such a column is now listed as unconvertible, so a length can be given before switching. C# reverse engineering reports the same case per column instead of expanding the token, and generated entities now record the original spelling in `[DbColumnMeta(..., NativeType = "...")]`, so code generated by QuickER still round-trips
+- **MySQL `bit(n)` (n greater than 1) and `year` columns now map to `ulong` and `int`** — both used to fall through to the "unknown type" case and become `string`, so reading such a column from generated code threw. `bit(1)` is still `bool`, the counterpart of the `tinyint(1)` convention
 
 #### AI chat & mock generation
 

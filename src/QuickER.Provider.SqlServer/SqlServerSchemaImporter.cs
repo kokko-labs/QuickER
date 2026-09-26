@@ -79,6 +79,8 @@ public class SqlServerSchemaImporter : ISchemaImporter
         var warnings = new List<SchemaImportWarning>();
         var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+        await LoadTemporalHistoryTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
@@ -87,6 +89,8 @@ public class SqlServerSchemaImporter : ISchemaImporter
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
+            .ConfigureAwait(false);
+        await LoadDisabledForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
 
         // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
@@ -117,7 +121,11 @@ public class SqlServerSchemaImporter : ISchemaImporter
     /// <remarks>
     /// SSMS のオブジェクトエクスプローラーと同じ基準でシステム由来のテーブルを除外する:
     /// <c>is_ms_shipped = 1</c>（Microsoft 出荷物）と、拡張プロパティ
-    /// <c>microsoft_database_tools_support</c> が付いたツール用テーブル（sysdiagrams 等）
+    /// <c>microsoft_database_tools_support</c> が付いたツール用テーブル（sysdiagrams 等）。
+    /// <c>temporal_type = 1</c>（テンポラルテーブルの履歴表）も除外する
+    /// （<see cref="TemporalHistoryTablesSql"/> が別途拾って警告に載せる。本表＝
+    /// <c>temporal_type = 2</c> は通常テーブルとして取り込む＝この条件では除外しない）。
+    /// <c>temporal_type</c> は SQL Server 2016 で追加された列。
     /// </remarks>
     private const string TablesSql =
         @"
@@ -125,6 +133,7 @@ SELECT s.name AS TABLE_SCHEMA, t.name AS TABLE_NAME
 FROM sys.tables t
 JOIN sys.schemas s ON t.schema_id = s.schema_id
 WHERE t.is_ms_shipped = 0
+  AND t.temporal_type <> 1
   AND NOT EXISTS (
       SELECT 1
       FROM sys.extended_properties ep
@@ -137,23 +146,54 @@ WHERE t.is_ms_shipped = 0
 -- （衝突時にどちらを採るかを決定的にする。PostgreSQL の COLLATE C / Oracle の NLSSORT BINARY と同じ狙い）
 ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2;";
 
+    /// <summary>テンポラルテーブルの履歴表と、その本表名を取得するクエリ</summary>
+    /// <remarks>
+    /// 履歴表自身（<c>temporal_type = 1</c>）を本表（<c>bt</c>）へ <c>history_table_id</c> で結合し、
+    /// 告知に必要な本表名を一緒に持ち帰る。<c>temporal_type</c> / <c>history_table_id</c> はいずれも
+    /// SQL Server 2016 で追加された列。
+    /// </remarks>
+    private const string TemporalHistoryTablesSql =
+        @"
+SELECT s.name AS TABLE_SCHEMA, t.name AS TABLE_NAME, bs.name AS BASE_SCHEMA, bt.name AS BASE_TABLE
+FROM sys.tables t
+JOIN sys.schemas s ON t.schema_id = s.schema_id
+JOIN sys.tables bt ON bt.history_table_id = t.object_id
+JOIN sys.schemas bs ON bt.schema_id = bs.schema_id
+WHERE t.temporal_type = 1
+ORDER BY s.name, t.name;";
+
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
+    /// <para>
     /// 計算列（<c>AS (式)</c>）は <c>INFORMATION_SCHEMA.COLUMNS</c> からは判別できないため
     /// <c>sys.computed_columns</c> を左結合する。行の有無が計算列かどうかで、
     /// <c>definition</c>（式）は <c>VIEW DEFINITION</c> 権限が無いと NULL になり得るので、
     /// 判定には使わず <c>column_id</c> の有無で見る。
+    /// </para>
+    /// <para>
+    /// テンポラルテーブルの期間列（<c>GENERATED ALWAYS AS ROW START / END</c>）も同じ
+    /// 「書き込みを受け付けない」性質を持つため <c>sys.columns.generated_always_type</c>
+    /// （1 = ROW START・2 = ROW END）を左結合して同じ判定へ合流させる（0 と 1・2 以外の値は
+    /// 台帳テーブル〔SQL Server 2022 以降〕専用のトランザクション ID / シーケンス番号列で対象外
+    /// ＝<c>IN (1, 2)</c> で明示的に絞る）。<c>HIDDEN</c> 修飾（<c>generated_always_type</c> は
+    /// <c>SELECT *</c> の可視性に関係なくカタログへ現れる）でも取得できることを統合テストで固定する。
+    /// <c>generated_always_type</c> は SQL Server 2016 で追加された列。
+    /// </para>
     /// </remarks>
     private const string ColumnsSql =
         @"
 SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE,
        c.CHARACTER_MAXIMUM_LENGTH, c.NUMERIC_PRECISION, c.NUMERIC_SCALE, c.IS_NULLABLE, c.ORDINAL_POSITION,
-       CASE WHEN cc.column_id IS NULL THEN 0 ELSE 1 END AS IS_COMPUTED,
-       cc.definition AS COMPUTED_DEFINITION
+       CASE WHEN cc.column_id IS NOT NULL OR ISNULL(gc.generated_always_type, 0) IN (1, 2) THEN 1 ELSE 0 END AS IS_COMPUTED,
+       cc.definition AS COMPUTED_DEFINITION,
+       gc.generated_always_type AS GENERATED_ALWAYS_TYPE
 FROM INFORMATION_SCHEMA.COLUMNS c
 LEFT JOIN sys.computed_columns cc
        ON cc.object_id = OBJECT_ID(QUOTENAME(c.TABLE_SCHEMA) + N'.' + QUOTENAME(c.TABLE_NAME))
       AND cc.name = c.COLUMN_NAME
+LEFT JOIN sys.columns gc
+       ON gc.object_id = OBJECT_ID(QUOTENAME(c.TABLE_SCHEMA) + N'.' + QUOTENAME(c.TABLE_NAME))
+      AND gc.name = c.COLUMN_NAME
 ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION;";
 
     /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>
@@ -169,6 +209,12 @@ WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
 ORDER BY kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.ORDINAL_POSITION;";
 
     /// <summary>外部キーの親子テーブル・列・参照アクションを取得するクエリ</summary>
+    /// <remarks>
+    /// <c>is_disabled = 1</c>（<c>NOCHECK CONSTRAINT</c> で無効化された FK）は参照整合性を何も
+    /// 強制しないため除外する（<see cref="DisabledForeignKeysSql"/> が別途拾って警告に載せる）。
+    /// <c>is_not_trusted = 1</c>（<c>WITH NOCHECK</c> で追加されたが現在は有効）はこの条件では
+    /// 除外しない＝以後の書き込みには強制が効くため、通常どおり取り込む。
+    /// </remarks>
     private const string ForeignKeysSql =
         @"
 SELECT
@@ -184,7 +230,22 @@ JOIN sys.tables  tp ON fkc.parent_object_id = tp.object_id
 JOIN sys.columns cp ON fkc.parent_object_id = cp.object_id AND fkc.parent_column_id = cp.column_id
 JOIN sys.tables  tr ON fkc.referenced_object_id = tr.object_id
 JOIN sys.columns cr ON fkc.referenced_object_id = cr.object_id AND fkc.referenced_column_id = cr.column_id
+WHERE fk.is_disabled = 0
 ORDER BY fk.name, fkc.constraint_column_id;";
+
+    /// <summary>無効化された外部キー（<c>is_disabled = 1</c>）を、告知のためだけに列挙するクエリ</summary>
+    /// <remarks>
+    /// <see cref="ForeignKeysSql"/> は列展開が要るため無効な FK を素通しで除外しているだけで、
+    /// 除外した FK 名を名指しできない。ここでは列を持たない 1 行 1 FK の軽いクエリで、
+    /// 除外した FK を漏れなく告知する（既存の <see cref="ForeignKeysSql"/> の意味は変えない）。
+    /// </remarks>
+    private const string DisabledForeignKeysSql =
+        @"
+SELECT fk.name AS FkName, SCHEMA_NAME(tp.schema_id) AS ParentSchema, tp.name AS ParentTable
+FROM sys.foreign_keys fk
+JOIN sys.tables tp ON fk.parent_object_id = tp.object_id
+WHERE fk.is_disabled = 1
+ORDER BY fk.name;";
 
     /// <summary>UNIQUE 制約の構成列を宣言順に取得するクエリ（モデルの一意制約・1 対 1 判定に用いる）</summary>
     /// <remarks>
@@ -266,6 +327,40 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         return dict;
     }
 
+    /// <summary>テンポラルテーブルの履歴表を洗い出し、取り込まなかったことを本表名つきで告げる</summary>
+    /// <remarks>
+    /// 履歴表自体は <see cref="TablesSql"/> の <c>temporal_type &lt;&gt; 1</c> により
+    /// テーブル辞書へは元から入らない。ここでは告知専用に別途拾う（既存クエリの意味は変えない）。
+    /// </remarks>
+    private static async Task LoadTemporalHistoryTablesAsync(
+        SqlConnection conn,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(
+            conn,
+            TemporalHistoryTablesSql,
+            commandTimeoutSeconds
+        );
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var historyName = DisplayTableName(reader.GetString(0), reader.GetString(1));
+            var baseName = DisplayTableName(reader.GetString(2), reader.GetString(3));
+
+            warnings.Add(
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.TemporalHistoryTableExcluded,
+                    historyName,
+                    Detail: baseName
+                )
+            );
+        }
+    }
+
     /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
     /// <remarks>
     /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
@@ -321,6 +416,12 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             // 計算列は sys.computed_columns に行がある列＝式は図に載せず「書き込めない」事実だけを運ぶ
             var isComputed = Convert.ToInt32(reader.GetValue(9)) != 0;
 
+            // テンポラルテーブルの期間列（1 = ROW START・2 = ROW END）。HIDDEN でもここには現れる
+            int? generatedAlwaysType = reader.IsDBNull(11)
+                ? null
+                : Convert.ToInt32(reader.GetValue(11));
+            var isPeriodColumn = generatedAlwaysType is 1 or 2;
+
             var col = new Column
             {
                 Name = colName,
@@ -336,10 +437,17 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                         SchemaImportWarningKind.ComputedColumnExpressionLost,
                         entry.Entity.TableName,
                         colName,
-                        // 式は警告文へそのまま載るため、行構造を壊さないよう制御文字を畳んでおく
-                        SqlComment.Sanitize(
-                            reader.IsDBNull(10) ? string.Empty : reader.GetString(10)
-                        )
+                        // 期間列は式ではなく生成規則を運ぶ。式は警告文へそのまま載るため、
+                        // 行構造を壊さないよう制御文字を畳んでおく
+                        isPeriodColumn
+                            ? (
+                                generatedAlwaysType == 1
+                                    ? "GENERATED ALWAYS AS ROW START"
+                                    : "GENERATED ALWAYS AS ROW END"
+                            )
+                            : SqlComment.Sanitize(
+                                reader.IsDBNull(10) ? string.Empty : reader.GetString(10)
+                            )
                     )
                 );
             }
@@ -470,6 +578,49 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         }
 
         return builder.Build(tables);
+    }
+
+    /// <summary>無効化された外部キーを洗い出し、取り込まなかったことを制約名つきで告げる</summary>
+    /// <remarks>
+    /// <see cref="ForeignKeysSql"/> の <c>WHERE fk.is_disabled = 0</c> により無効な FK はそもそも
+    /// リレーションへ現れない。ここでは告知専用に別途拾う（既存クエリの意味は変えない）。
+    /// </remarks>
+    private static async Task LoadDisabledForeignKeysAsync(
+        SqlConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(
+            conn,
+            DisabledForeignKeysSql,
+            commandTimeoutSeconds
+        );
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var fkName = reader.GetString(0);
+            var schema = reader.GetString(1);
+            var table = reader.GetString(2);
+
+            // 衝突して捨てたテーブルの FK を、採用したほうへ付け替えない
+            if (!TryGetExactTable(tables, schema, table, out var entry))
+            {
+                continue;
+            }
+
+            warnings.Add(
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.DisabledConstraintExcluded,
+                    entry.Entity.TableName,
+                    fkName,
+                    "FOREIGN KEY"
+                )
+            );
+        }
     }
 
     /// <summary>UNIQUE 制約を読み込み、各エンティティの一意制約としてモデルへ載せる</summary>

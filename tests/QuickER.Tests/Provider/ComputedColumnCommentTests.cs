@@ -264,6 +264,113 @@ public class ComputedColumnCommentTests
         note.Should().Contain("a DROP TABLE users; --");
     }
 
+    /// <summary>
+    /// NULL 許容の計算列の注意コメントは従来の 1 文だけ（NOT NULL 向けの追記が混ざらない）ことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// この列の出力はバイト不変でなければならない（既存の図の DDL・同期スクリプトを動かさないため）。
+    /// </remarks>
+    [Fact(DisplayName = "注意コメント: NULL 許容の計算列は従来の 1 文だけ")]
+    public void Note_NullableComputedColumn_HasNoNotNullSentence()
+    {
+        ComputedColumnComment
+            .Build(
+                new Column
+                {
+                    Name = "total",
+                    DataType = "decimal(21,2)",
+                    IsNullable = true,
+                    IsComputed = true,
+                }
+            )
+            .Should()
+            .Be(
+                "-- Computed column 'total': "
+                    + "the expression is not part of the diagram; add it to the schema by hand."
+            );
+    }
+
+    /// <summary>
+    /// NOT NULL の計算列には「式を足すまで生成 INSERT が NOT NULL で失敗する」1 文が続くことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 生成コードは計算列を INSERT の対象から外すため、式のない普通の列として作った DB では
+    /// そのテーブルへの追加が必ず落ちる。DDL を読む時点で告げるのがいちばん早い。
+    /// </remarks>
+    [Fact(DisplayName = "注意コメント: NOT NULL の計算列は INSERT が失敗することも告げる")]
+    public void Note_NotNullComputedColumn_WarnsAboutInsertFailure()
+    {
+        var note = ComputedColumnComment.Build(
+            new Column
+            {
+                Name = "period_start",
+                DataType = "datetime2",
+                IsNullable = false,
+                IsComputed = true,
+            }
+        );
+
+        note.Should()
+            .Be(
+                "-- Computed column 'period_start': "
+                    + "the expression is not part of the diagram; add it to the schema by hand."
+                    + " Until the expression is added, generated INSERT statements leave this column out"
+                    + " and fail on its NOT NULL constraint."
+            );
+
+        // 1 行に収まる（コメント行を突き破らない）
+        note.Should().NotContain("\n").And.NotContain("\r");
+    }
+
+    /// <summary>
+    /// 5 方言の DDL で、NOT NULL の計算列だけに追記が出る（NULL 許容には出ない）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "DDL: NOT NULL の計算列にだけ INSERT 失敗の追記が出る")]
+    public void Ddl_NotNullComputedColumn_EmitsNotNullSentence()
+    {
+        const string NotNullSentence = "fail on its NOT NULL constraint";
+
+        var notNull = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "temporal_items",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "period_start",
+                            DataType = "datetime2",
+                            IsNullable = false,
+                            IsComputed = true,
+                        },
+                    },
+                },
+            },
+        };
+
+        foreach (var dialect in Dialects)
+        {
+            dialect.Ddl().Build(notNull).Should().Contain(NotNullSentence, $"{dialect.Name}");
+
+            // NULL 許容の計算列（既存の items 図）には追記が出ない
+            dialect
+                .Ddl()
+                .Build(BuildDiagram(computed: true))
+                .Should()
+                .NotContain(NotNullSentence, $"{dialect.Name}");
+        }
+    }
+
     /// <summary>計算列でない列にはコメントを作らないことを検証する</summary>
     [Fact(DisplayName = "注意コメントは計算列でない列には作られない")]
     public void Note_NonComputedColumn_IsNull()

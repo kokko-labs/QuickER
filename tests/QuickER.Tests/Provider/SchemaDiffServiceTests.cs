@@ -4,6 +4,10 @@ using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Oracle;
+using QuickER.Provider.PostgreSql;
+using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Services;
 using ProviderStrings = QuickER.Provider.Resources.Strings;
@@ -141,6 +145,124 @@ public class SchemaDiffServiceTests
             + expectedNullableChange;
         alter.Description.Should().Be(expectedDescription);
     }
+
+    /// <summary>
+    /// 計算列の NULL 許容差が AlterColumn を生まないことを、5 方言の同期ケーパビリティすべてで検証する。
+    /// </summary>
+    /// <remarks>
+    /// 計算列の NULL 許容は式が決める性質で、図が DB へ強制できない。しかも「NOT NULL の計算列は
+    /// マルチターゲットのミラー側へ書けない」問題の逃げ道が<b>図で NULL 許容にする</b>ことなので、
+    /// 比較すると逃げ道を採った瞬間に取込元の DB へ偽の <c>ALTER COLUMN</c> が出る。
+    /// 判定は方言中立だが、ケーパビリティで再び開かないことも 5 方言分まとめて押さえる。
+    /// </remarks>
+    [Fact(DisplayName = "計算列の NULL 許容差は AlterColumn にならない（5 方言）")]
+    public void ComputedColumn_NullabilityChange_IsNotDiffed()
+    {
+        foreach (var (dialect, capabilities) in DialectCapabilities)
+        {
+            var live = new List<Entity>
+            {
+                Tbl("Item", ("Id", "int", true), ("Total", "decimal(21,2)", false)),
+            };
+            live[0].Columns[1].IsNullable = false;
+            live[0].Columns[1].IsComputed = true;
+
+            var target = new List<Entity>
+            {
+                Tbl("Item", ("Id", "int", true), ("Total", "decimal(21,2)", false)),
+            };
+            target[0].Columns[1].IsNullable = true;
+            target[0].Columns[1].IsComputed = true;
+
+            var diff = new SchemaDiffService().Compute(
+                live,
+                new List<Relationship>(),
+                target,
+                new List<Relationship>(),
+                capabilities
+            );
+
+            diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AlterColumn, $"{dialect}");
+        }
+    }
+
+    /// <summary>計算列でも型差は従来どおり AlterColumn として検出されることを検証する（5 方言）</summary>
+    /// <remarks>飛ばすのは NULL 許容の比較だけで、列の比較そのものを止めるわけではない。</remarks>
+    [Fact(DisplayName = "計算列でも型差は AlterColumn になる（5 方言）")]
+    public void ComputedColumn_TypeChange_IsStillDiffed()
+    {
+        foreach (var (dialect, capabilities) in DialectCapabilities)
+        {
+            var live = new List<Entity>
+            {
+                Tbl("Item", ("Id", "int", true), ("Total", "decimal(18,2)", false)),
+            };
+            live[0].Columns[1].IsNullable = false;
+            live[0].Columns[1].IsComputed = true;
+
+            // 型だけでなく NULL 許容も変えておく＝それでも説明に載るのは型の変更だけ
+            var target = new List<Entity>
+            {
+                Tbl("Item", ("Id", "int", true), ("Total", "decimal(21,2)", false)),
+            };
+            target[0].Columns[1].IsNullable = true;
+            target[0].Columns[1].IsComputed = true;
+
+            var diff = new SchemaDiffService().Compute(
+                live,
+                new List<Relationship>(),
+                target,
+                new List<Relationship>(),
+                capabilities
+            );
+
+            var alter = diff
+                .Items.Should()
+                .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn, $"{dialect}")
+                .Which;
+            alter.ColumnName.Should().Be("Total", $"{dialect}");
+
+            var expectedDescription =
+                string.Format(ProviderStrings.Diff_ColumnChangePrefix, "Item", "Total")
+                + string.Format(ProviderStrings.Diff_TypeChange, "decimal(18,2)", "decimal(21,2)");
+            alter.Description.Should().Be(expectedDescription, $"{dialect}");
+        }
+    }
+
+    /// <summary>計算列でない列の NULL 許容差は従来どおり検出されることを検証する（スキップの範囲の下限）</summary>
+    [Fact(DisplayName = "計算列でなければ NULL 許容差は従来どおり AlterColumn になる")]
+    public void NonComputedColumn_NullabilityChange_IsStillDiffed()
+    {
+        var live = new List<Entity>
+        {
+            Tbl("Item", ("Id", "int", true), ("Total", "decimal(21,2)", false)),
+        };
+        live[0].Columns[1].IsNullable = false;
+
+        var target = new List<Entity>
+        {
+            Tbl("Item", ("Id", "int", true), ("Total", "decimal(21,2)", false)),
+        };
+        target[0].Columns[1].IsNullable = true;
+
+        new SchemaDiffService()
+            .Compute(live, new List<Relationship>(), target, new List<Relationship>())
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn);
+    }
+
+    /// <summary>5 方言の同期ケーパビリティ（差分計算の入力になる唯一の方言差）</summary>
+    private static readonly (
+        string Dialect,
+        SyncDialectCapabilities Capabilities
+    )[] DialectCapabilities =
+    [
+        ("SqlServer", new SqlServerProvider().SyncCapabilities),
+        ("PostgreSql", new PostgreSqlProvider().SyncCapabilities),
+        ("MySql", new MySqlProvider().SyncCapabilities),
+        ("Oracle", new OracleProvider().SyncCapabilities),
+        ("Sqlite", new SqliteProvider().SyncCapabilities),
+    ];
 
     /// <summary>ER 図に存在しない列が DropColumn として検出され、既定では未選択であることを検証する</summary>
     [Fact(DisplayName = "ER 図側に無い列は DropColumn になり、既定では未選択")]

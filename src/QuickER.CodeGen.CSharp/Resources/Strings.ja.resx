@@ -299,7 +299,7 @@
     <value>名前付きクエリ '{0}': パラメータ名 '{1}' はリポジトリの Query() メンバーを隠すため使えません。</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
-    <value>名前付きクエリ '{0}': 型トークン '{1}' を解決できません。</value>
+    <value>名前付きクエリ '{0}': 型トークン '{1}' を解決できません。文字列・バイナリの型には長さを書いてください（例: 'string(50)' / 'fixedstring(10)'）。</value>
   </data>
   <data name="CodeGen_Query_ConditionInvalid" xml:space="preserve">
     <value>名前付きクエリ '{0}' の条件式: {1}</value>
@@ -399,5 +399,8 @@
   </data>
   <data name="CodeGen_Info_ComputedColumns" xml:space="preserve">
     <value>計算列を INSERT / UPDATE 対象から除外しました:{0}</value>
+  </data>
+  <data name="CodeGen_Warning_NotNullComputedColumns" xml:space="preserve">
+    <value>NOT NULL の計算列は、式を評価しないエンジン（マルチターゲットのミラー側・双方向同期のローカル側）へ書き込めないため、その DB への行の追加が NOT NULL 制約で失敗します。図で NULL 許容にする（ミラー側の値は NULL のままになります）か、そのテーブルを同期対象から外す（そのテーブルは同期されません）かのどちらかで解消してください。対象の列:{0}</value>
   </data>
 </root>

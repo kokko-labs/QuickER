@@ -49,4 +49,42 @@ public class MySqlCSharpTypeMapperTests
         Mapper.Map("varchar(255)").IsUnboundedBinary.Should().BeFalse();
         Mapper.Map("int").IsUnboundedBinary.Should().BeFalse();
     }
+
+    /// <summary>
+    /// <c>bit(n&gt;1)</c> は <c>ulong</c>、<c>year</c> は <c>int</c>（MySqlConnector が返す CLR 型に合わせる）。
+    /// </summary>
+    /// <remarks>
+    /// 従来はどちらも「未知の型 → string」のフォールバックへ落ちており、生成コードが読み出しで
+    /// <c>InvalidCastException</c> になっていた。ドライバの実測値との一致は
+    /// <c>MySqlColumnClrTypeIntegrationTests</c>（実 mysql:8.4）が固定する。
+    /// </remarks>
+    [Theory(DisplayName = "bit(n>1) は ulong、year は int へマップされる")]
+    [InlineData("bit(2)", "ulong")]
+    [InlineData("bit(8)", "ulong")]
+    [InlineData("bit(64)", "ulong")]
+    [InlineData("BIT(8)", "ulong")]
+    [InlineData("year", "int")]
+    [InlineData("YEAR", "int")]
+    public void Map_BitFieldAndYear_MapToDriverClrTypes(string dataType, string expected)
+    {
+        var info = Mapper.Map(dataType);
+
+        info.TypeName.Should().Be(expected);
+        info.IsReferenceType.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// <c>bit(1)</c>（と引数なしの <c>bit</c>）は従来どおり真偽値慣習で <c>bool</c>。
+    /// </summary>
+    /// <remarks>
+    /// ドライバは <c>bit(1)</c> にも <c>ulong</c> を返すが、1 ビットを真偽値として扱うのは
+    /// <c>tinyint(1)</c> と対の既存の慣習で、<c>bit(n&gt;1)</c> の追加では変えない。
+    /// </remarks>
+    [Theory(DisplayName = "bit(1) / 引数なし bit は従来どおり bool のまま")]
+    [InlineData("bit")]
+    [InlineData("bit(1)")]
+    public void Map_SingleBit_StaysBool(string dataType)
+    {
+        Mapper.Map(dataType).TypeName.Should().Be("bool");
+    }
 }

@@ -544,5 +544,17 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_ImportWarningDisabledConstraintExcluded {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningDisabledConstraintExcluded", resourceCulture);
+            }
+        }
+
+        public static string Cli_ImportWarningTemporalHistoryTableExcluded {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningTemporalHistoryTableExcluded", resourceCulture);
+            }
+        }
+
     }
 }

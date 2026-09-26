@@ -13,6 +13,7 @@ namespace QuickER.Provider.MySql;
 /// 対応規則（MySQL 型 → C# 型）:
 /// <list type="bullet">
 /// <item><description>tinyint(1) / bool / boolean / bit(1) → bool、tinyint → sbyte、smallint → short、int → int、bigint → long</description></item>
+/// <item><description>bit(n)（n&gt;1）→ ulong、year → int（いずれも MySqlConnector が返す CLR 型に合わせる。実 mysql:8.4 で実測）</description></item>
 /// <item><description>float → float、double → double</description></item>
 /// <item><description>decimal / numeric → decimal</description></item>
 /// <item><description>date / datetime → DateTime、time → TimeSpan、timestamp → DateTimeOffset</description></item>
@@ -62,6 +63,7 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
         var (precision, scale) = TryGetPrecisionScale(normalized);
 
         // tinyint(1) / bit(1) は真偽値慣習として bool へ寄せる
+        // （MySqlConnector が bit(1) に返す CLR 型は ulong だが、1 ビットを真偽値として扱う慣習を優先する）
         if (
             (baseType == "tinyint" && maxLength == 1)
             || (baseType == "bit" && maxLength is null or 1)
@@ -77,6 +79,11 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
             "smallint" => Value("short"),
             "int" => Value("int"),
             "bigint" => Value("long"),
+            // bit(n>1) は複数ビットのビットフィールド。MySqlConnector は幅に依らず ulong を返す
+            // （bit(1) は上の真偽値慣習で先に bool へ寄せてある）
+            "bit" => Value("ulong"),
+            // year は 4 桁の年。MySqlConnector は int を返す
+            "year" => Value("int"),
             "float" => Value("float"),
             "double" => Value("double"),
             "decimal" => Decimal(precision, scale),

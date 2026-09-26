@@ -95,6 +95,9 @@ stdio トランスポートに対応した MCP クライアントであれば利
 `set_query` のネスト引数:
 
 - `scalar_type`：`returns` = `scalar` のとき必須。方言中立の型トークン（例: `decimal(12,2)`）。
+  文字列・バイナリの型は長さを書いてください（例: `string(50)`）。
+  固定長（`fixedstring` / `ansifixedstring` / `fixedbinary`）で長さを省くとコード生成がエラーになります。
+  可変長（`string` / `ansistring` / `binary`）の省略は、長さの制約が無いもの（無制限）として扱います。
 - `condition`：簡易 DSL の検索条件（比較・`AND`/`OR`/`NOT`・括弧・`IS [NOT] NULL`・`[NOT] LIKE`・`[NOT] IN`・`CONTAINS`/`STARTSWITH`/`ENDSWITH`）。
   `implementation` = `dsl` のとき使用（省略は無条件）。
   列名はテーブルの列を、`@名前` は宣言済みパラメータを指す。

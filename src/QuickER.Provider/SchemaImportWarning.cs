@@ -43,8 +43,15 @@ public enum SchemaImportWarningKind
     /// 取込範囲外のスキーマ（データベース）を参照する外部キーを、リレーションとして取り込まなかった。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 参照先テーブルが図に存在しない以上リレーションを作れないため除外する。従来は無告知だった。
     /// <c>Subject</c> = 制約名 / <c>Detail</c> = 参照先（<c>スキーマ.テーブル</c> または スキーマ名）。
+    /// </para>
+    /// <para>
+    /// SQLite の適用形: SQLite は取込範囲が単一 DB のため他スキーマという概念自体が無く、この警告は
+    /// 「取込時に参照先テーブルが実在しなかった」ことを指す（<c>CREATE TABLE</c> 時に参照先の実在を
+    /// 検査しないため、存在しないテーブルを参照する定義・参照先を後から DROP した定義が起こり得る）。
+    /// </para>
     /// </remarks>
     ForeignKeyOutsideScope,
 
@@ -98,7 +105,7 @@ public enum SchemaImportWarningKind
     VirtualTableExcluded,
 
     /// <summary>
-    /// 計算列・生成列を取り込んだが、その式は意味モデルに載らなかった。
+    /// 計算列・生成列を取り込んだが、その式または生成規則は意味モデルに載らなかった。
     /// </summary>
     /// <remarks>
     /// 意味モデルは式を持たないため、列自体は普通の列として取り込み
@@ -106,9 +113,44 @@ public enum SchemaImportWarningKind
     /// （<see cref="DomainTypeFlattened"/> と同じ「基底の形へ落として取り込む」告知）。
     /// 帰結として、この図から生成する DDL はその列を<b>普通の列</b>として作り直し、
     /// 生成コードはその列を INSERT / UPDATE の対象から外す。
-    /// <c>Subject</c> = 列名 / <c>Detail</c> = 式（取得できない方言では空）。
+    /// <c>Subject</c> = 列名 / <c>Detail</c> = 式または生成規則（<c>GENERATED ALWAYS AS ROW START</c> 等。
+    /// 取得できない方言・生成規則では空）。
     /// </remarks>
     ComputedColumnExpressionLost,
+
+    /// <summary>
+    /// 無効化された制約（PRIMARY KEY / UNIQUE / FOREIGN KEY）を、何も強制しないため取り込まなかった。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// DISABLE された制約（Oracle の <c>DISABLE</c> 句）・<c>NOCHECK</c> で無効化された外部キー
+    /// （SQL Server の <c>ALTER TABLE ... NOCHECK CONSTRAINT</c>）は一意性も参照整合性も実際には
+    /// 強制しないため、図へ取り込むと「DB には無い保証」を宣言してしまう。ENABLE 済み（有効）の
+    /// 制約だけが実在する制約として取り込まれる。
+    /// </para>
+    /// <para>
+    /// SQL Server の外部キーは「無効化されているか（<c>is_disabled</c>）」だけを見る。
+    /// <c>WITH NOCHECK</c> で追加されたが現在は有効な外部キー（<c>is_not_trusted = 1</c> かつ
+    /// <c>is_disabled = 0</c>）は、以後の書き込みには強制が効くため取り込む（この場合は告げない）。
+    /// SQL Server は PRIMARY KEY / UNIQUE 制約を無効化する構文を持たないため、この種別は
+    /// 外部キーのみが対象になる。
+    /// </para>
+    /// <c>Subject</c> = 制約名 / <c>Detail</c> = 制約の種類（<c>"PRIMARY KEY"</c> / <c>"UNIQUE"</c> /
+    /// <c>"FOREIGN KEY"</c>）。
+    /// </remarks>
+    DisabledConstraintExcluded,
+
+    /// <summary>
+    /// テンポラルテーブル（システムバージョニング）の履歴表を取り込まなかった。
+    /// </summary>
+    /// <remarks>
+    /// 履歴表（SQL Server の <c>SYSTEM_VERSIONING</c> が自動生成・管理する変更履歴の保管先）は
+    /// 本表の付属オブジェクトであり、それ自体が独立したエンティティではない。本表（現在値・
+    /// <c>temporal_type = 2</c>）は通常のテーブルとして取り込む（その期間列は
+    /// <see cref="ComputedColumnExpressionLost"/> で別途告げる）。
+    /// <c>Subject</c> は空 / <c>Detail</c> = 本表名。
+    /// </remarks>
+    TemporalHistoryTableExcluded,
 }
 
 /// <summary>

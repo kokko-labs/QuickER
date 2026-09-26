@@ -124,6 +124,66 @@ public class CanonicalTypeTokenTests
         }
     }
 
+    /// <summary>
+    /// 長さの無い文字列・バイナリの正規型を書き出せないのは SQL Server / MySQL / Oracle だけ
+    /// （長さ引数を持つ全 6 種別 × 5 方言を 1 つの表で固定する）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 長さを宣言しない型名だけを書き出すと、SQL Server は <c>CREATE TABLE</c> で黙って長さ 1 の列を作り、
+    /// MySQL の <c>varchar</c> / <c>varbinary</c> と Oracle の <c>VARCHAR2</c> / <c>RAW</c> は構文エラーになる。
+    /// 3 方言とも <c>TryFormat</c> が <c>false</c> を返して<b>対象 DBMS 切替の変換不能一覧に載る</b>のが正しい姿で、
+    /// 負のスケールと同じ「実行できない／意味の違う DDL を黙って作らない」線引き。
+    /// <c>char</c> / <c>binary</c> のように長さ省略が「長さ 1」として構文上は有効な型も、黙って 1 文字の列を作る点は
+    /// 同じなので一律で弾く。
+    /// </para>
+    /// <para>
+    /// PostgreSQL（長さ無し <c>varchar</c> / <c>char</c> は正当・<c>bytea</c> は長さの概念を持たない）と
+    /// SQLite（宣言型はアフィニティの表明でしかない）は従来どおり書き出せる。
+    /// 長さを与えれば 5 方言とも書き出せること（長さ無しだけを弾いていること）も併せて見る。
+    /// </para>
+    /// </remarks>
+    [Fact(
+        DisplayName = "長さの無い文字列・バイナリを書き出せないのは SQL Server / MySQL / Oracle だけ"
+    )]
+    public void LengthlessStringAndBinary_AreNotFormattableByLengthRequiringDialects()
+    {
+        var catalogs = new (string Dialect, ITypeCatalog Catalog, bool AllowsLengthless)[]
+        {
+            ("SqlServer", new SqlServerTypeCatalog(), false),
+            ("MySql", new MySqlTypeCatalog(), false),
+            ("Oracle", new OracleTypeCatalog(), false),
+            ("PostgreSql", new PostgreSqlTypeCatalog(), true),
+            ("Sqlite", new SqliteTypeCatalog(), true),
+        };
+
+        // 長さ引数を持つ種別の正本（片方だけ足すと表に穴が開くので列挙は CanonicalTypeToken から導く）
+        var lengthKinds = Enum.GetValues<CanonicalTypeKind>()
+            .Where(CanonicalTypeToken.HasLengthArgument)
+            .ToArray();
+
+        lengthKinds.Should().HaveCount(6, "長さ引数を持つ種別は文字列 4 種＋バイナリ 2 種");
+
+        foreach (var (dialect, catalog, allowsLengthless) in catalogs)
+        {
+            foreach (var kind in lengthKinds)
+            {
+                catalog
+                    .TryFormat(new CanonicalType(kind), out _)
+                    .Should()
+                    .Be(
+                        allowsLengthless,
+                        $"{dialect} が長さ無しの {kind} を書き出せるかは方言の実力どおりであること"
+                    );
+
+                catalog
+                    .TryFormat(new CanonicalType(kind, Length: 20), out _)
+                    .Should()
+                    .BeTrue($"{dialect} は長さ 20 の {kind} を従来どおり書き出せること");
+            }
+        }
+    }
+
     /// <summary>decimal の精度・スケール（p,s / p / 無指定）の正書法と往復</summary>
     [Theory(DisplayName = "decimal の精度スケールのトークン正書法と往復")]
     [InlineData(10, 2, "decimal(10,2)")]

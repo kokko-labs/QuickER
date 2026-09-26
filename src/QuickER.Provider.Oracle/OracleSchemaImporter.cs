@@ -85,6 +85,8 @@ public class OracleSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         await LoadOutOfScopeForeignKeysAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+        await LoadDisabledConstraintsAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
 
         // 列が 1 本も取れなかったテーブルは DDL を生成できないため、黙って通さず名指しで告げる
         warnings.AddRange(
@@ -227,6 +229,19 @@ FROM user_constraints c
 WHERE c.constraint_type = 'R' AND c.status = 'ENABLED' AND c.r_owner <> c.owner
 ORDER BY c.constraint_name";
 
+    /// <summary>DISABLE された制約（PK / UNIQUE / FK）を、告知のためだけに列挙するクエリ</summary>
+    /// <remarks>
+    /// <see cref="PrimaryKeysSql"/> / <see cref="UniqueConstraintSql"/> / <see cref="ForeignKeysSql"/>
+    /// は <c>status = 'ENABLED'</c> で無効な制約をそもそも除外しているだけで、除外した制約名を
+    /// 名指しできない。ここでは <c>user_constraints.table_name</c> だけで済む軽いクエリで、
+    /// 除外した制約を漏れなく告知する（既存の 3 クエリの意味は変えない）。
+    /// </remarks>
+    private const string DisabledConstraintsSql =
+        @"SELECT table_name, constraint_name, constraint_type
+FROM user_constraints
+WHERE constraint_type IN ('P', 'U', 'R') AND status = 'DISABLED'
+ORDER BY constraint_name";
+
     /// <summary>テーブルコメントを取得するクエリ</summary>
     /// <remarks>COMMENT ON TABLE 未設定のテーブルは comments が NULL になるため、ここで除外する</remarks>
     private const string TableCommentsSql =
@@ -308,6 +323,61 @@ ORDER BY c.constraint_name";
             );
         }
     }
+
+    /// <summary>DISABLE された制約を洗い出し、取り込まなかったことを制約名つきで告げる</summary>
+    /// <remarks>
+    /// <see cref="PrimaryKeysSql"/> / <see cref="UniqueConstraintSql"/> / <see cref="ForeignKeysSql"/>
+    /// の <c>status = 'ENABLED'</c> により無効な制約はそもそもモデルへ現れない。ここでは告知専用に
+    /// 別途拾う（既存 3 クエリの意味は変えない）。
+    /// </remarks>
+    private static async Task LoadDisabledConstraintsAsync(
+        OracleConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(
+            conn,
+            DisabledConstraintsSql,
+            commandTimeoutSeconds
+        );
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var table = reader.GetString(0);
+
+            // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
+            if (!TryGetExactTable(tables, table, out var entry))
+            {
+                continue;
+            }
+
+            var constraintName = reader.GetString(1);
+            var constraintType = reader.GetString(2);
+
+            warnings.Add(
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.DisabledConstraintExcluded,
+                    entry.Entity.TableName,
+                    constraintName,
+                    DescribeConstraintType(constraintType)
+                )
+            );
+        }
+    }
+
+    /// <summary>user_constraints.constraint_type（P / U / R）を告知用の制約種類名へ変換する</summary>
+    private static string DescribeConstraintType(string constraintType) =>
+        constraintType switch
+        {
+            "P" => "PRIMARY KEY",
+            "U" => "UNIQUE",
+            "R" => "FOREIGN KEY",
+            _ => constraintType,
+        };
 
     /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
     /// <remarks>

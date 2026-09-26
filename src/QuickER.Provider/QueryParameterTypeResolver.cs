@@ -77,7 +77,7 @@ public static class QueryParameterTypeResolver
         {
             if (
                 !CanonicalTypeToken.TryParse(token, out var canonical)
-                || !typeCatalog.TryFormat(canonical, out var nativeType)
+                || !TryFormatForParameter(typeCatalog, canonical, out var nativeType)
             )
             {
                 continue;
@@ -101,5 +101,49 @@ public static class QueryParameterTypeResolver
         }
 
         return result;
+    }
+
+    /// <summary>長さの無い可変長トークンを「無制限」として整形し直すフォールバックの対象種別</summary>
+    /// <remarks>
+    /// 固定長（<see cref="CanonicalTypeKind.FixedString"/> / <see cref="CanonicalTypeKind.AnsiFixedString"/> /
+    /// <see cref="CanonicalTypeKind.FixedBinary"/>）は含めない。<c>char</c> に「無制限」は存在せず、
+    /// 長さ <c>-1</c> を渡すと方言側の整形が機械的に <c>(max)</c> を付けて <c>nchar(max)</c> のような
+    /// 実在しない表記を <c>true</c> で返してしまう（その表記は読み戻せても DDL としては通らない）。
+    /// 固定長の長さ無しは仕様として意味を成さないため、従来どおり解決不能＝生成時エラーにする。
+    /// </remarks>
+    private static readonly IReadOnlySet<CanonicalTypeKind> UnboundedFallbackKinds =
+        new HashSet<CanonicalTypeKind>
+        {
+            CanonicalTypeKind.String,
+            CanonicalTypeKind.AnsiString,
+            CanonicalTypeKind.Binary,
+        };
+
+    /// <summary>
+    /// 型トークンの正規型を、パラメータ用のネイティブ型表記へ整形する。
+    /// </summary>
+    /// <remarks>
+    /// 通常は方言の <see cref="ITypeCatalog.TryFormat"/> をそのまま使う。長さを要する型で長さが無い正規型は
+    /// 「列として書き出せない」ため方言側が <c>false</c> を返すが、クエリのパラメータ・スカラー戻り値・射影
+    /// フィールドは列を作らないので長さ制約が無い。可変長の 3 種別に限り「無制限（長さ <c>-1</c>）」として
+    /// 整形し直し、C# 型への写像だけを成立させる（トークンが表す型の意味は変わらない）。
+    /// </remarks>
+    private static bool TryFormatForParameter(
+        ITypeCatalog typeCatalog,
+        CanonicalType canonical,
+        out string nativeType
+    )
+    {
+        if (typeCatalog.TryFormat(canonical, out nativeType))
+        {
+            return true;
+        }
+
+        if (canonical.Length is not null || !UnboundedFallbackKinds.Contains(canonical.Kind))
+        {
+            return false;
+        }
+
+        return typeCatalog.TryFormat(canonical with { Length = -1 }, out nativeType);
     }
 }
