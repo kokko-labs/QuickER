@@ -54,6 +54,11 @@ internal static class TableDefinitionDocumentLayout
     public const string FormatVersionPropertyName = "QuickER_TableDoc_FormatVersion";
 
     /// <summary>現在の書式バージョン値</summary>
+    /// <remarks>
+    /// 取込はこの値と突き合わせ、これより新しいブックを断る（<c>TableDefinitionDocumentImporter</c> の
+    /// <c>EnsureSupportedFormatVersion</c>）。書式を変えて値を上げるときは、取込側が読み替えるのか
+    /// 断るのかを併せて決めること。
+    /// </remarks>
     public const string FormatVersionValue = "1";
 
     /// <summary>対象 DBMS（プロバイダ識別名）を保持するカスタムプロパティ名</summary>

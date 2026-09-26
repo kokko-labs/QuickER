@@ -1059,7 +1059,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             ApiDocsLanguage = ApiDocsLanguage,
             ApiDocsSubdirectory = ApiDocsSubdirectory.Trim(),
             ApiDocsFileName = ApiDocsFileName.Trim(),
-            ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
+            // 同上（QuickER 版 Repository を選んでいないときは行ごと隠す）。この設定は EditModel の
+            // 必須判定にも効くため、隠れたまま持ち越すと画面に出ていない値で生成物が変わる
+            ExcludeUnboundedBinaryColumns =
+                ShowExcludeUnboundedBinary && ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
             // UI 非表示の属性系は保持値をそのまま書き戻す（読込→保存で値が失われない）

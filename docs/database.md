@@ -36,7 +36,8 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
   It defaults to 60 seconds and applies to every dialect including SQLite; `0` means no limit (the ADO.NET convention).
   A blank field, a non-numeric entry, or a negative value is rejected by both OK and *Test Connection*, so the dialog never falls back to the default behind your back.
   It is saved per connection profile, and profiles written before this setting existed load with the default
-- **Test Connection**: runs a real schema fetch and reports the number of tables detected
+- **Test Connection**: runs a real schema fetch and reports the number of tables detected.
+  OK is disabled while a test is running: the test cannot be cancelled, so confirming and closing would leave it holding the connection on its own
 
 > **Note:** "Trust the server certificate (TrustServerCertificate)" is checked by default so that local or containerized SQL Server instances with self-signed certificates work out of the box. This setting skips server certificate validation, so when connecting to a production or remote server that has a properly issued certificate, uncheck it to keep man-in-the-middle detection effective. The setting is saved per connection profile.
 
@@ -88,6 +89,8 @@ For `quicker scaffold` against PostgreSQL or MySQL there is no separate option e
 Connection settings can be saved under a name and recalled later from the "Saved Connections" list.
 Profiles are stored in `%LOCALAPPDATA%\QuickER\connections.json`, and passwords are stored in separate files, **encrypted with Windows DPAPI (CurrentUser scope)**, only when the "Save" checkbox is on and never in plain text under the shipped configuration.
 The last-used connection is remembered automatically and restored on the next launch.
+The DB Sync dialog fixes the target DB to the diagram's dialect, so a last-used connection recorded for a different dialect is not restored (host, file path, and service name mean different things per dialect, and the restored values would not connect).
+Saving with the "Save" checkbox on but the password box empty stores the checkbox as off as well, because there is nothing to save: the dialog never shows a password as saved when there is nothing to restore.
 Saving is keyed on the profile name.
 A profile with the same name and the same DB kind is overwritten; otherwise a new profile is created.
 When the profile that would be overwritten is not the one selected in the list, QuickER asks first, because its connection settings and saved password would be replaced with no way back.

@@ -141,16 +141,22 @@ public class SqlConnectionProfileStore
     }
 
     /// <summary>前回使用した接続情報を保存する</summary>
-    /// <remarks>登録済みプロファイル一覧とは別セクションで管理し、次回ダイアログ表示時の初期値復元に用いる</remarks>
+    /// <remarks>
+    /// 登録済みプロファイル一覧とは別セクションで管理し、次回ダイアログ表示時の初期値復元に用いる。
+    /// <see cref="SqlConnectionProfile.SavePassword"/> は <see cref="NormalizeSavePassword"/> が正規化する
+    /// （渡したインスタンスも書き換わる）。
+    /// </remarks>
     public void SaveLastUsed(SqlConnectionProfile profile, string password)
     {
+        var hasPassword = NormalizeSavePassword(profile, password);
+
         // read-modify-write で LastUsed のみ差し替え、Profiles を消さない
         var data = LoadData();
         data.LastUsed = profile;
         SaveData(data);
 
         // パスワード保存が無効化された場合は残存する暗号ファイルを確実に削除する
-        if (profile.SavePassword && !string.IsNullOrEmpty(password))
+        if (hasPassword)
         {
             SaveSecret(LastConnectionSecretPath(), password);
         }
@@ -160,11 +166,33 @@ public class SqlConnectionProfileStore
         }
     }
 
+    /// <summary>
+    /// 保存する <see cref="SqlConnectionProfile.SavePassword"/> を、実際に暗号ファイルを持つかへ揃える
+    /// （揃えた結果＝暗号ファイルを書くかどうかを返す）
+    /// </summary>
+    /// <remarks>
+    /// 空のパスワードでは暗号ファイルを書かないため、フラグだけを立てて保存すると
+    /// 「保存済みと表示されるのに復元するものが無い」状態が残る。JSON のフラグと暗号ファイルの有無は
+    /// 常に一致させる（読み出し側はフラグを見て復号するかを決めており、食い違うと
+    /// 保存したつもりのパスワードが黙って空で戻る）。<b>渡されたインスタンスを書き換える</b>——
+    /// 保存した内容と呼び出し側が持つプロファイルを食い違わせないため。
+    /// </remarks>
+    private static bool NormalizeSavePassword(SqlConnectionProfile profile, string password)
+    {
+        profile.SavePassword = profile.SavePassword && !string.IsNullOrEmpty(password);
+        return profile.SavePassword;
+    }
+
     /// <summary>プロファイルを 1 件追加または更新し、必要に応じてパスワードを暗号化保存する</summary>
     /// <param name="profile">保存対象 Id が既存と一致すれば上書き、なければ追加する</param>
     /// <param name="password">パスワード <see cref="SqlConnectionProfile.SavePassword"/> が <c>true</c> の場合のみ保存する</param>
+    /// <remarks>
+    /// <see cref="SqlConnectionProfile.SavePassword"/> は <see cref="NormalizeSavePassword"/> が正規化する
+    /// （渡したインスタンスも書き換わる）。
+    /// </remarks>
     public void Upsert(SqlConnectionProfile profile, string password)
     {
+        var hasPassword = NormalizeSavePassword(profile, password);
         var all = LoadAll();
         var idx = all.FindIndex(p => p.Id == profile.Id);
 
@@ -180,7 +208,7 @@ public class SqlConnectionProfileStore
         SaveAll(all);
 
         // 保存無効・空パスワード時は残存する暗号ファイルを削除する
-        if (profile.SavePassword && !string.IsNullOrEmpty(password))
+        if (hasPassword)
         {
             SaveSecret(profile.Id, password);
         }

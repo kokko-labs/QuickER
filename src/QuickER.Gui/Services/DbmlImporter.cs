@@ -15,7 +15,7 @@ namespace QuickER.Services;
 ///   <item><c>Table 名前 {</c> 〜 <c>}</c> ブロック（1 行 1 カラム定義）</item>
 ///   <item>カラム設定: <c>pk</c> / <c>ref</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note: '...'</c>（大文字小文字を区別しない）</item>
 ///   <item><c>Indexes { … }</c> ブロック: <c>unique</c> 設定を持つ索引のみ一意制約として取り込む（<c>(a, b) [unique, name: '…']</c> / 単一列は括弧なしも可）</item>
-///   <item><c>Ref:</c> 行: 多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）のみ（<c>&gt;</c>（多対1）は未対応）。エンドポイントは単一列 <c>親.a</c> と複合 Ref 構文 <c>親.(a, b)</c> の双方に対応し、<b>行に書かれた列名がそのまま外部キーの構成列になる</b>（推論しない）</item>
+///   <item><c>Ref:</c> 行: 多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）のみ（<c>&gt;</c>（多対1）は未対応）。エンドポイントは単一列 <c>親.a</c> と複合 Ref 構文 <c>親.(a, b)</c> の双方に対応し、<b>行に書かれた列名がそのまま外部キーの構成列になる</b>（推論しない）。参照先の <c>Table</c> より前に書かれていてもよい（テーブルを読み切ってから解析する）</item>
 ///   <item><c>//</c> 行コメント</item>
 /// </list>
 /// Project・Enum・TableGroup・複数行 Note ブロック等の DBML 構文は未対応
@@ -82,6 +82,9 @@ public static partial class DbmlImporter
         // Ref: 行の列名は、空テーブルへの既定 PK 列補完まで済んだ後にまとめて列ペアへ解決する
         var pendingRelationshipColumns =
             new List<(Relationship Relationship, List<string> Source, List<string> Target)>();
+        // Ref: 行は、参照先テーブルの定義より前に書かれていてもよいよう、行ループを抜けてから解析する
+        // （他ツール製の DBML はファイル先頭へ Ref: をまとめる書き方がある）
+        var pendingRefLines = new List<(string Line, int LineNumber)>();
         // Indexes ブロックの一意索引は、列定義より前に書かれていても解決できるよう最後にまとめて紐付ける
         // （解決は行ループを抜けた後になるため、診断用に定義行の行番号も持ち回る）
         var pendingUniqueIndexes =
@@ -218,12 +221,8 @@ public static partial class DbmlImporter
 
                 if (line.StartsWith("Ref:", StringComparison.OrdinalIgnoreCase))
                 {
-                    var (relationship, sourceColumns, targetColumns) = ParseRelationship(
-                        line,
-                        entities
-                    );
-                    relationships.Add(relationship);
-                    pendingRelationshipColumns.Add((relationship, sourceColumns, targetColumns));
+                    // 解析はテーブルを読み切ってから（前方参照＝定義より前に書かれた Ref: を受け付ける）
+                    pendingRefLines.Add((line, lineNumber));
                     continue;
                 }
 
@@ -264,6 +263,23 @@ public static partial class DbmlImporter
         if (entities.Count == 0)
         {
             throw new InvalidDataException(Strings.Dbml_NoEntities);
+        }
+
+        foreach (var (refLine, refLineNumber) in pendingRefLines)
+        {
+            try
+            {
+                var (relationship, sourceColumns, targetColumns) = ParseRelationship(
+                    refLine,
+                    entities
+                );
+                relationships.Add(relationship);
+                pendingRelationshipColumns.Add((relationship, sourceColumns, targetColumns));
+            }
+            catch (InvalidDataException ex)
+            {
+                throw ImportDiagnostics.AtLine(refLineNumber, ex);
+            }
         }
 
         EnsureEntitiesHaveColumns(entities.Values);

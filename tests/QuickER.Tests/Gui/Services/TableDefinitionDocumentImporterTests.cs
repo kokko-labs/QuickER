@@ -125,6 +125,63 @@ public class TableDefinitionDocumentImporterTests
         diagram.Relationships[0].OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
     }
 
+    /// <summary>ブックの書式バージョンのカスタムプロパティを差し替える</summary>
+    private static void SetFormatVersion(XLWorkbook workbook, string? value)
+    {
+        workbook.CustomProperties.Delete(TableDefinitionDocumentLayout.FormatVersionPropertyName);
+
+        if (value is not null)
+        {
+            workbook.CustomProperties.Add(
+                TableDefinitionDocumentLayout.FormatVersionPropertyName,
+                value
+            );
+        }
+    }
+
+    /// <summary>
+    /// この版より新しい書式バージョンのブックは取り込まないことを検証する（IF6）。
+    /// </summary>
+    /// <remarks>
+    /// 黙って取り込むと、将来の版が足した情報を読み落としたまま図ができる
+    /// （図ファイルの <c>IsNewerFormat</c> と同じ理由で断る）。
+    /// </remarks>
+    [Fact(DisplayName = "新しい書式バージョンの定義書は取り込まない")]
+    public void Load_NewerFormatVersion_IsRejected()
+    {
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(BuildSampleDiagram());
+        SetFormatVersion(workbook, "2");
+
+        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+
+        act.Should().Throw<InvalidDataException>().Which.Message.Should().Contain("2");
+    }
+
+    /// <summary>書式バージョンが同じブックは従来どおり取り込めることを検証する（IF6 の対照）</summary>
+    [Fact(DisplayName = "同じ書式バージョンの定義書は従来どおり取り込める")]
+    public void Load_CurrentFormatVersion_IsAccepted()
+    {
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(BuildSampleDiagram());
+
+        AssertSampleDiagram(TableDefinitionDocumentImporter.Load(workbook));
+    }
+
+    /// <summary>
+    /// 書式バージョンを持たない・数値として読めないブックは従来どおり取り込むことを検証する（IF6）。
+    /// </summary>
+    /// <remarks>断る根拠は「この版より新しいと分かること」だけで、分からないものは役割タグの検査に委ねる。</remarks>
+    [Theory(DisplayName = "書式バージョンが無い・読めない定義書は従来どおり取り込む")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("v2")]
+    public void Load_UnknownFormatVersion_IsAccepted(string? version)
+    {
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(BuildSampleDiagram());
+        SetFormatVersion(workbook, version);
+
+        AssertSampleDiagram(TableDefinitionDocumentImporter.Load(workbook));
+    }
+
     /// <summary>本アプリが出力した定義書を再取込し、エンティティ・列・リレーションが往復保持されることを検証する</summary>
     [Fact(DisplayName = "このアプリが出力した定義書をそのまま再取込できる")]
     public void Load_RoundTripsExportedWorkbook()

@@ -1477,6 +1477,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string TableDoc_NewerFormat {
+            get {
+                return ResourceManager.GetString("TableDoc_NewerFormat", resourceCulture);
+            }
+        }
+
         public static string TableDoc_MissingRoleTag {
             get {
                 return ResourceManager.GetString("TableDoc_MissingRoleTag", resourceCulture);

@@ -254,6 +254,70 @@ public class DbmlTests
         child.Columns.Single(column => column.Name == "ParentId").IsForeignKey.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 参照先テーブルの定義より前に書かれた <c>Ref:</c> 行も取り込めることを検証する（IF5）。
+    /// </summary>
+    /// <remarks>
+    /// 他ツール製の DBML は Ref をファイル先頭へまとめる書き方があり、
+    /// 行順に解析すると「参照先テーブルが未定義」で取込が丸ごと失敗していた。
+    /// </remarks>
+    [Fact(DisplayName = "DBML は Table より前に書かれた Ref: を取り込める")]
+    public void Parse_ForwardReference_IsResolved()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            [
+                "Ref: Parent.ParentId < Child.OwnerId",
+                string.Empty,
+                "Table Parent {",
+                "  ParentId int [pk, not null]",
+                "}",
+                string.Empty,
+                "Table Child {",
+                "  ChildId int [pk, not null]",
+                "  OwnerId int [null]",
+                "}",
+            ]
+        );
+
+        var diagram = DbmlImporter.Parse(text);
+        var parent = diagram.Entities.Single(entity => entity.TableName == "Parent");
+        var child = diagram.Entities.Single(entity => entity.TableName == "Child");
+        var pair = diagram.Relationships.Single().ColumnPairs.Should().ContainSingle().Subject;
+
+        pair.SourceColumnId.Should()
+            .Be(parent.Columns.Single(column => column.Name == "ParentId").Id);
+        pair.TargetColumnId.Should()
+            .Be(child.Columns.Single(column => column.Name == "OwnerId").Id);
+    }
+
+    /// <summary>
+    /// どこにも定義されていないテーブルを参照する <c>Ref:</c> は、行番号つきで拒否することを検証する。
+    /// </summary>
+    /// <remarks>前方参照を許しても「存在しないテーブルへの参照」は従来どおり黙って捨てない。</remarks>
+    [Fact(DisplayName = "DBML: 未定義テーブルを参照する Ref: は行番号つきで拒否する")]
+    public void Parse_RefToUndefinedTable_ThrowsWithLineNumber()
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            [
+                "Table Parent {",
+                "  ParentId int [pk, not null]",
+                "}",
+                string.Empty,
+                "Ref: Parent.ParentId < Missing.OwnerId",
+            ]
+        );
+
+        var act = () => DbmlImporter.Parse(text);
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .Which.Message.Should()
+            .Contain("Missing")
+            .And.Contain("5", "何行目かが分かる");
+    }
+
     /// <summary>単一列・複合が混在する図でも、それぞれの表記で往復することを検証する</summary>
     [Fact(DisplayName = "DBML は単一列と複合外部キーの混在を往復できる")]
     public void MixedForeignKeys_RoundTrip()

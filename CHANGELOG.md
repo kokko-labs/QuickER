@@ -44,6 +44,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **A difference in nullability on a computed column no longer produces an `ALTER COLUMN`** — the nullability of a computed column follows from its expression, which the diagram does not model and therefore cannot impose on a database. Without this, taking the way out above (making the column nullable in the diagram) would have made the sync offer a meaningless `ALTER COLUMN` against the database the diagram was imported from. Differences in the column's type are still detected
 
+#### Import and export
+
+- **An Excel definition document written in a format this version cannot read is no longer imported** — the document embeds its format version, but the import never looked at it. A document carrying information a future version added is now reported instead of imported, so nothing it could not read is silently dropped (the same stance the diagram file takes towards a newer format). Older documents that carry no version are imported as before
+
 ### Fixed
 
 #### Database import & generated code
@@ -64,6 +68,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 #### Code generation dialog & CLI
 
 - **A query that references a deleted column is now reported in the query definition dialog** — references from the sort order, a projection field or a parameter to a column that no longer exists could be confirmed with OK and were only reported at generation time (which skips that query with a warning). The dialog now names the query and the item and keeps OK disabled
+- **The "exclude unbounded binary columns" setting is no longer saved while it is hidden** — switching DB access back to "none" or to EF Core hides the row, but a checkbox ticked earlier was still written back to the settings file. Besides the columns QuickER repositories read and write, the setting also drives **whether an EditModel treats such a column as required**, so a hidden tick changed the generated code even in configurations that generate no QuickER repository: a NOT NULL unbounded binary column was left out of the edit model's required inputs (required only on a new row) and its mapper assigned it only when a value was supplied. In those configurations such columns are now required like any other column. While the row is hidden the value is only dropped from the file, not from the screen, so choosing QuickER repositories again brings the original tick back. The sync-support checkbox follows the same rule
 - **`--repository-dialects` with a value that names no dialect is now an error** — commas or spaces only produced an empty list, which skipped the "derive a single dialect from the provider" fallback and quietly emitted SQL Server code with exit code 0 even for `--provider sqlite`. A shell variable that failed to expand in CI hits this
 
 #### Import and export
@@ -71,12 +76,16 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **DBML now carries names that contain spaces or symbols** — export writes such a table or column name as a DBML quoted identifier (`"Order Details"`). Without the quotes a table name containing a space did not match the `Table` line's form and the table vanished from the import without a word, while a column name broke at the first space and the rest ran into the type (`Order Date date` became the column `Order` of type `Date date`). Names made only of letters, digits and underscores — Japanese included — are written exactly as before
 - **DBML no longer mangles a type that contains a space or brackets** — `double precision` and `integer[]` are now quoted on export, as DBML's own rules require, and the import no longer mistakes the brackets of an unquoted array type for the start of the settings block (which turned `integer[]` into `integer`)
 - **A `//` inside a DBML string is no longer treated as a comment** — a description holding a URL used to be cut at `//` and lost. DBML block comments (`/* ... */`), including ones spanning several lines, are now recognized as well, and keywords are accepted in any letter case (a lowercase `ref:` line used to fail to parse)
+- **A DBML `Ref:` line written before the table it points at can now be imported** — DBML produced by other tools often groups the Ref lines at the top of the file, and in that order the whole import failed with "referenced table is not defined". Ref lines are now resolved once every table has been read; a line that references a table defined nowhere is still an import error reported with its line number
 - **An Excel definition document with more than one foreign key between the same two tables can be read back** — a diagram with, say, a shipping address and a billing address both pointing at the same table exported fine but always failed to import, because duplicates were judged by the pair of table names alone. The check now includes the columns that make up the key; two rows that are identical down to their columns are still rejected
-
 - **Mermaid no longer drops part of a column name that contains a space** — a Mermaid attribute line separates type, name and marker by spaces, so `Order Date` used to lose everything after the space. Such names are now folded to `_` (the same treatment the type already gets) and reported among the information the format cannot carry. If folding would collide with another column in the same table, the name that needs no folding keeps its spelling and the folded one gets a number
+
 #### DB import & connections
 
 - **Saving a connection profile now asks before overwriting a different profile** — the save button picks its target by the profile name, so typing a name that an existing profile already had replaced that profile's server, user and saved password without a word, and with no way back. Overwriting a profile other than the one currently selected now asks first; saving over the profile you loaded is unchanged, and so is saving under a new name (which still creates another profile)
+- **OK is disabled while a connection test is running** — the test cannot be cancelled, so confirming and closing left it holding the connection on its own, hitting the same database at the same time as the import or sync that started right after
+- **The DB Sync dialog no longer restores a last-used connection from a different dialect** — sync fixes the target DB to the diagram's dialect, yet it still copied the host, file path and service name of the last connection into the fields. Those fields mean different things per dialect, so values that could not connect were left in place under a "restored" message
+- **Saving with "Save password" ticked but the box empty now clears the tick as well** — no encrypted file is written for an empty password, so only the tick was stored and the dialog showed a password as saved when there was nothing to restore. Overwriting a saved password with an empty box now drops both the encrypted file and the tick
 - **A connection profile can now be renamed** — the save button saves the current input under the name in the box, so typing a new name made a copy and left the old profile (and its saved password) behind. A "Rename" button next to it changes only the name of the selected profile, keeping its connection settings and its saved password; renaming onto a name another profile already uses asks first, the same way saving does
 
 #### AI chat & mock generation
@@ -93,6 +102,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Interrupting Codex just as a turn starts is now reported as an interruption, not an error**
 - **Switching or resetting a mock-generation conversation now disposes the previous AI back end** — starting a new conversation, changing the mock folder or switching the connection method used to leave the old session's engine, including a CLI back end's resident child process, alive until the application closed
 - **A tool that throws no longer fails the whole turn with the API key method** — the error is now returned to the AI as a failed tool result and the remaining tools still run, the way the Claude Code, Codex and Copilot back ends already behaved. Interrupting still ends the turn as before
+- **Reconnecting to Codex now cleans up what the previous connection left behind** — after a dropped connection or a failed start, the exited (or not fully stopped) process, its reader loop and its standard input are still around. They used to be dropped on the floor as a new process was started on top of them
 - **Closing the application right after switching a mock-generation conversation now waits for the previous session's engine** — the disposal of a session that has just been detached runs on the thread pool, and shutdown could not see it, so that back end's resident child process was orphaned
 
 ## [0.2.0] - 2026-09-24

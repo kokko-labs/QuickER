@@ -310,6 +310,143 @@ public class CSharpGenerationCommandServiceTests
         dialogs.InformationDetailsMessages.Should().ContainSingle();
     }
 
+    /// <summary>複合外部キー（列ペア 2 組）を持つ図＝生成は成功するが警告が出る最小構成</summary>
+    private static ErDiagram DiagramWithWarning()
+    {
+        var parentA = new Column
+        {
+            Name = "a",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var parentB = new Column
+        {
+            Name = "b",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var parent = new Entity { TableName = "Parents", Columns = { parentA, parentB } };
+
+        var childId = new Column
+        {
+            Name = "ID",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var childA = new Column
+        {
+            Name = "parent_a",
+            DataType = "int",
+            IsNullable = false,
+        };
+        var childB = new Column
+        {
+            Name = "parent_b",
+            DataType = "int",
+            IsNullable = false,
+        };
+        var child = new Entity { TableName = "Children", Columns = { childId, childA, childB } };
+
+        return new ErDiagram
+        {
+            TargetDbms = SqlServerProvider.ProviderName,
+            Entities = { parent, child },
+            Relationships =
+            {
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    ColumnPairs =
+                    {
+                        new RelationshipColumnPair
+                        {
+                            SourceColumnId = parentA.Id,
+                            TargetColumnId = childA.Id,
+                        },
+                        new RelationshipColumnPair
+                        {
+                            SourceColumnId = parentB.Id,
+                            TargetColumnId = childB.Id,
+                        },
+                    },
+                },
+            },
+        };
+    }
+
+    /// <summary>警告の出る図で生成を実行する（値オブジェクト生成の有無を切り替えられる）</summary>
+    private static (CSharpGenerationCommandService Service, StubDialogService Dialogs) WarningSetup(
+        string outputDirectory,
+        bool generateValueObjects
+    )
+    {
+        var dialogs = new StubDialogService();
+        var host = new StubErDiagramHost
+        {
+            DiagramToReturn = DiagramWithWarning(),
+            ProvidersToReturn = SqlServerRegistry(),
+        };
+        var presenter = new FakeCSharpPresenter(
+            new CSharpGenerationDialogResult(
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    OutputFileName = "Sample.g.cs",
+                    GenerateValueObjects = generateValueObjects,
+                },
+                outputDirectory
+            )
+        );
+
+        return (new CSharpGenerationCommandService(host, dialogs, presenter), dialogs);
+    }
+
+    [Fact(DisplayName = "VO 生成時の警告確認: キャンセルなら 1 つも書き出さない")]
+    public void Run_ValueObjectWarningAndCancel_WritesNothing()
+    {
+        using var output = new TempOutputDirectory();
+        var (service, dialogs) = WarningSetup(output.Path, generateValueObjects: true);
+        dialogs.ConfirmResult = false;
+
+        service.Run();
+
+        var message = dialogs.ConfirmMessages.Should().ContainSingle().Subject;
+        message.Should().StartWith(CodeGenStrings.Csharp_WarningIntro);
+        message.Should().EndWith(CodeGenStrings.Csharp_WarningPrompt);
+        Directory.GetFiles(output.Path).Should().BeEmpty("キャンセルでは生成物を書き出さない");
+        dialogs.InformationDetailsMessages.Should().BeEmpty("完了の通知も出さない");
+    }
+
+    [Fact(DisplayName = "VO 生成時の警告確認: 続行なら書き出して完了を通知する")]
+    public void Run_ValueObjectWarningAndConfirm_Writes()
+    {
+        using var output = new TempOutputDirectory();
+        var (service, dialogs) = WarningSetup(output.Path, generateValueObjects: true);
+
+        service.Run();
+
+        dialogs.ConfirmMessages.Should().ContainSingle();
+        Directory.GetFiles(output.Path).Should().NotBeEmpty();
+        dialogs.InformationDetailsMessages.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "VO を生成しないなら警告があっても続行を確認しない")]
+    public void Run_WarningWithoutValueObjects_DoesNotConfirm()
+    {
+        using var output = new TempOutputDirectory();
+        var (service, dialogs) = WarningSetup(output.Path, generateValueObjects: false);
+
+        service.Run();
+
+        dialogs.ConfirmMessages.Should().BeEmpty();
+        Directory.GetFiles(output.Path).Should().NotBeEmpty();
+        dialogs.InformationDetailsMessages.Should().ContainSingle();
+    }
+
     /// <summary>指定した確定結果を返し、渡されたプロバイダを記録するダイアログ提示フェイク</summary>
     private sealed class FakeCSharpPresenter(CSharpGenerationDialogResult? result)
         : ICSharpGenerationDialogPresenter
