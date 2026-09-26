@@ -59,6 +59,10 @@ A `date` column (as opposed to `datetime`) is displayed with the culture's short
 By default, an Entity is decorated with DataAnnotations and DB-definition metadata attributes (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, and so on) and a description.
 The generated code therefore doubles as a self-describing document of the DB definition.
 
+A DB type the type catalog cannot parse (`geometry`, `hierarchyid`, `sql_variant` and the like) falls back to `string` so that generation keeps going.
+The generated code does not show that it happened, so generation names those columns in an information diagnostic as "table.column (original type text)".
+Change the column's type in the diagram if `string` is not what you meant.
+
 For some columns the token does not reproduce the DB type spelling: `numeric` collapses onto `decimal`, and `datetime` onto `datetime2`.
 For those columns, `[DbColumnMeta]` also records the original text as `NativeType`, and an information diagnostic names them at generation time.
 That record is what lets C# reverse engineering restore the column type exactly as the diagram spelled it.

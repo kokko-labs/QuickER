@@ -57,6 +57,10 @@ Mapper は確定値を Entity から直接コピーし、`BindingXxx` はその�
 ### DB 定義メタ属性
 
 Entity には既定で DataAnnotations と DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。
+
+型カタログが解析できない DB 型（`geometry` / `hierarchyid` / `sql_variant` など）は、生成を止めないために `string` へ倒します。
+生成コードからはそれと分からないので、代替で決まった列は生成時の Info 診断が「テーブル.列（元の型表記）」で名指しします。
+意図した型でなければ、図の側で型を書き換えてください。
 生成コードは DB 定義の自己記述ドキュメントとしても機能します。
 
 型トークンでは DB 型の綴りを復元できない列があります（`numeric` は `decimal` へ、`datetime` は `datetime2` へ畳まれます）。

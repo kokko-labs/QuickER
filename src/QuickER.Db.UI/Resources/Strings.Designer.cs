@@ -701,5 +701,11 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string Db_ImportWarningPrimaryKeyNullabilityAdjusted {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningPrimaryKeyNullabilityAdjusted", resourceCulture);
+            }
+        }
+
     }
 }

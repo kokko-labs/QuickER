@@ -310,4 +310,7 @@
   <data name="Cli_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
     <value>Warning: {0} was excluded as the history table of the system-versioned table "{1}". It is not imported as an entity of its own.</value>
   </data>
+  <data name="Cli_ImportWarningPrimaryKeyNullabilityAdjusted" xml:space="preserve">
+    <value>Warning: {0}.{1} was corrected to NOT NULL as a primary key column. SQLite's rowid tables allow NULL there unless the primary key is a single INTEGER column (a rowid alias); if existing rows have NULL in it, syncing (table rebuild) from this diagram may fail to migrate the data.</value>
+  </data>
 </root>

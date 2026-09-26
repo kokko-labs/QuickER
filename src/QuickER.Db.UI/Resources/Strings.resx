@@ -389,4 +389,7 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
     <value>{0}: excluded as the history table of the system-versioned table "{1}". It is not imported as an entity of its own.</value>
   </data>
+  <data name="Db_ImportWarningPrimaryKeyNullabilityAdjusted" xml:space="preserve">
+    <value>{0}.{1}: primary key column corrected to NOT NULL. SQLite's rowid tables allow NULL there unless the primary key is a single INTEGER column (a rowid alias); if existing rows have NULL in it, syncing (table rebuild) from this diagram may fail to migrate the data.</value>
+  </data>
 </root>

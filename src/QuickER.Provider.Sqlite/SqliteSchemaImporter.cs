@@ -11,10 +11,12 @@ namespace QuickER.Provider.Sqlite;
 /// <summary>SQLite のテーブル定義を取得し <see cref="Entity"/> / <see cref="Relationship"/> へ変換するインポーター</summary>
 /// <remarks>
 /// <para>
-/// <c>sqlite_master</c> で通常テーブルを列挙し、各テーブルの <c>PRAGMA table_info</c> /
+/// <c>sqlite_master</c> で通常テーブルを列挙し、各テーブルの <c>PRAGMA table_xinfo</c> /
 /// <c>PRAGMA foreign_key_list</c> / <c>PRAGMA index_list</c> ＋ <c>PRAGMA index_info</c> で
 /// 列・主キー・外部キー・一意制約を取得する。<c>sqlite_sequence</c> / <c>sqlite_stat*</c> 等の
 /// 内部テーブルや <c>sqlite_</c> で始まるシステムテーブルは除外する。
+/// PRAGMA の括弧内は <see cref="SqliteIdentifier.QuoteSimple"/> でクォートする
+/// （取込範囲は単一 DB なので、名前に含まれるドットはスキーマ修飾ではない）。
 /// </para>
 /// <para>
 /// ビュー・仮想テーブル（FTS5 / R*Tree 等）・付属表（シャドウテーブル）は対象外。<c>sqlite_master</c> の
@@ -27,6 +29,11 @@ namespace QuickER.Provider.Sqlite;
 /// 宣言型（例: <c>NVARCHAR(50)</c>）は verbatim に保持されるため、そのままモデルの
 /// <see cref="Column.DataType"/> に格納する（<see cref="SqliteTypeCatalog"/> が読み戻せる）。
 /// 参照先列集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する（共有部品に委譲）。
+/// </para>
+/// <para>
+/// 意味モデルへそのまま写せないものは警告で告げる: 生成列は式を持ち帰れず
+/// （<see cref="Column.IsComputed"/> だけを立てる）、参照先テーブルが実在しない外部キーはリレーションにできず、
+/// rowid 表で NULL を許していた主キー列は NOT NULL へ補正する。
 /// </para>
 /// </remarks>
 public class SqliteSchemaImporter : ISchemaImporter
@@ -86,7 +93,7 @@ public class SqliteSchemaImporter : ISchemaImporter
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var (tables, tableCreateSql, tableWarnings) = await LoadTablesAsync(
+        var (tables, tableCreateSql, withoutRowidByTable, tableWarnings) = await LoadTablesAsync(
                 conn,
                 commandTimeoutSeconds,
                 ct
@@ -96,10 +103,14 @@ public class SqliteSchemaImporter : ISchemaImporter
         // 各テーブルの列・主キーは PRAGMA table_xinfo でまとめて取得する
         foreach (var entry in tables.Values)
         {
+            var isWithoutRowid =
+                withoutRowidByTable.TryGetValue(entry.Key, out var withoutRowid) && withoutRowid;
+
             await LoadColumnsAndPrimaryKeyAsync(
                     conn,
                     entry,
                     tableWarnings,
+                    isWithoutRowid,
                     commandTimeoutSeconds,
                     ct
                 )
@@ -171,6 +182,7 @@ ORDER BY name;";
     private static async Task<(
         Dictionary<string, SchemaTableEntry> Tables,
         Dictionary<string, string> CreateSql,
+        Dictionary<string, bool> WithoutRowidByTable,
         List<SchemaImportWarning> Warnings
     )> LoadTablesAsync(SqliteConnection conn, int commandTimeoutSeconds, CancellationToken ct)
     {
@@ -179,6 +191,7 @@ ORDER BY name;";
 
         var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
         var createSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var withoutRowidByTable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         var warnings = new List<SchemaImportWarning>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -186,10 +199,17 @@ ORDER BY name;";
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var name = reader.GetString(0);
+            var hasTableListEntry = tableTypes.TryGetValue(name, out var tableListEntry);
 
-            if (tableTypes.TryGetValue(name, out var type))
+            if (hasTableListEntry)
             {
-                if (string.Equals(type, "virtual", StringComparison.OrdinalIgnoreCase))
+                if (
+                    string.Equals(
+                        tableListEntry.Type,
+                        "virtual",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
                 {
                     warnings.Add(
                         new SchemaImportWarning(SchemaImportWarningKind.VirtualTableExcluded, name)
@@ -197,7 +217,9 @@ ORDER BY name;";
                     continue;
                 }
 
-                if (string.Equals(type, "shadow", StringComparison.OrdinalIgnoreCase))
+                if (
+                    string.Equals(tableListEntry.Type, "shadow", StringComparison.OrdinalIgnoreCase)
+                )
                 {
                     // 付属表は本体の VirtualTableExcluded 警告 1 件が代表するため無言で除外する
                     continue;
@@ -211,6 +233,7 @@ ORDER BY name;";
             };
 
             dict[entry.Key] = entry;
+            withoutRowidByTable[entry.Key] = hasTableListEntry && tableListEntry.WithoutRowid;
 
             if (!reader.IsDBNull(1))
             {
@@ -218,42 +241,54 @@ ORDER BY name;";
             }
         }
 
-        return (dict, createSql, warnings);
+        return (dict, createSql, withoutRowidByTable, warnings);
     }
 
     /// <summary>
-    /// <c>PRAGMA table_list</c> から main スキーマの名前→種別（<c>table</c> / <c>view</c> / <c>shadow</c> /
-    /// <c>virtual</c>）の対応を読み込む。
+    /// <c>PRAGMA table_list</c> から main スキーマの名前→(種別, WITHOUT ROWID か) の対応を読み込む。
     /// </summary>
     /// <remarks>
     /// <c>schema</c> 列は main / temp の 2 系統を返すため main に限定する（一時テーブルは取込対象外）。
+    /// <c>wr</c> 列（WITHOUT ROWID か）は SQLite 3.37 以降の追加列（本リポジトリ同梱の
+    /// SQLitePCLRaw.bundle_e_sqlite3 3.0.5 は満たす。実測 sqlite_version() = 3.53.4）。
+    /// 列の並び順（<c>schema, name, type, ncol, wr, strict</c>）はバージョン間で変わり得るため、
+    /// 位置でなく列名（<see cref="System.Data.Common.DbDataReader.GetOrdinal(string)"/>）で引く。
     /// </remarks>
-    private static async Task<Dictionary<string, string>> LoadTableTypesAsync(
+    private static async Task<Dictionary<string, SqliteTableListEntry>> LoadTableTypesAsync(
         SqliteConnection conn,
         int commandTimeoutSeconds,
         CancellationToken ct
     )
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, SqliteTableListEntry>(StringComparer.OrdinalIgnoreCase);
         await using var cmd = DbCommands.Create(conn, "PRAGMA table_list;", commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
+        var schemaOrdinal = reader.GetOrdinal("schema");
+        var nameOrdinal = reader.GetOrdinal("name");
+        var typeOrdinal = reader.GetOrdinal("type");
+        var withoutRowidOrdinal = reader.GetOrdinal("wr");
+
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var schema = reader.GetString(0);
+            var schema = reader.GetString(schemaOrdinal);
 
             if (!string.Equals(schema, "main", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var name = reader.GetString(1);
-            var type = reader.GetString(2);
-            result[name] = type;
+            var name = reader.GetString(nameOrdinal);
+            var type = reader.GetString(typeOrdinal);
+            var withoutRowid = reader.GetInt64(withoutRowidOrdinal) != 0;
+            result[name] = new SqliteTableListEntry(type, withoutRowid);
         }
 
         return result;
     }
+
+    /// <summary><c>PRAGMA table_list</c> の 1 行分（種別と WITHOUT ROWID かどうか）</summary>
+    private readonly record struct SqliteTableListEntry(string Type, bool WithoutRowid);
 
     /// <summary>1 テーブルの列定義と主キーを PRAGMA table_xinfo から読み込む</summary>
     /// <remarks>
@@ -274,11 +309,18 @@ ORDER BY name;";
     /// 生成列の式は PRAGMA からは取れない（<c>dflt_value</c> は NULL）ため、警告の
     /// <c>Detail</c> は空になる。
     /// </para>
+    /// <para>
+    /// 主キー列は取込時に無条件で NOT NULL へ補正する（従来どおり）。<paramref name="isWithoutRowid"/> が
+    /// false（rowid 表）かつ主キーが rowid 別名でない（<see cref="IsIntegerRowidAlias"/>）ときは、
+    /// SQLite 自身が NULL を許していた列を補正したことになるため
+    /// <see cref="SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted"/> で列ごとに告げる。
+    /// </para>
     /// </remarks>
     private static async Task LoadColumnsAndPrimaryKeyAsync(
         SqliteConnection conn,
         SchemaTableEntry entry,
         List<SchemaImportWarning> warnings,
+        bool isWithoutRowid,
         int commandTimeoutSeconds,
         CancellationToken ct
     )
@@ -342,11 +384,63 @@ ORDER BY name;";
             }
         }
 
-        foreach (var (_, column) in primaryKeyColumns.OrderBy(pair => pair.Ordinal))
+        var orderedPrimaryKeyColumns = primaryKeyColumns.OrderBy(pair => pair.Ordinal).ToList();
+
+        foreach (var (_, column) in orderedPrimaryKeyColumns)
         {
             entry.Entity.PrimaryKeyColumnIds.Add(column.Id);
         }
+
+        // WITHOUT ROWID 表、または単一列 INTEGER（rowid 別名）の主キーは SQLite 自身が NULL を拒否するため、
+        // 上の NOT NULL 補正は実質的に無補正（告げる必要がない）
+        if (
+            !isWithoutRowid
+            && orderedPrimaryKeyColumns.Count > 0
+            && !IsIntegerRowidAlias(orderedPrimaryKeyColumns)
+        )
+        {
+            foreach (var (_, column) in orderedPrimaryKeyColumns)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted,
+                        entry.Entity.TableName,
+                        column.Name
+                    )
+                );
+            }
+        }
     }
+
+    /// <summary>
+    /// 主キーが SQLite の rowid 別名（暗黙の自動採番）になっているかを判定する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// rowid 別名になるのは、宣言型がちょうど <c>INTEGER</c>（大文字小文字は問わない・前後空白は許容）の
+    /// <b>単一列</b>主キーだけ（SQLite の仕様）。<c>INT</c> / <c>BIGINT</c> / <c>INTEGER(10)</c> のような
+    /// 表記はどれも別名にならず、互換性のため NULL を許す普通の主キーのまま。複合主キーも同様に別名にならない
+    /// （別名になり得るのはテーブルの主キーがちょうど 1 列のときだけ）。
+    /// </para>
+    /// <para>
+    /// <b>既知の割り切り</b>: <c>INTEGER PRIMARY KEY DESC</c> は SQLite の仕様上 rowid 別名にならないが、
+    /// この判定は <c>PRAGMA table_xinfo</c> の宣言型としか突き合わせられず、<c>DESC</c> の有無は
+    /// <c>CREATE TABLE</c> の SQL 文そのものを見ないと分からない。区別せず別名側へ倒す
+    /// （＝<c>DESC</c> の場合は実際には NULL を許すのに告げない）。稀なケースであり、
+    /// 見逃しは「NULL の主キーがあると同期のデータ移送で失敗し得る」という助言が 1 件出ないだけなのに対し、
+    /// 逆側（<c>DESC</c> でない普通の <c>INTEGER PRIMARY KEY</c> にまで警告を出す）は、
+    /// SQLite が NULL を拒否する最も普通の表で毎回鳴ることになり、警告そのものを形骸化させるため。
+    /// </para>
+    /// </remarks>
+    private static bool IsIntegerRowidAlias(
+        IReadOnlyList<(long Ordinal, Column Column)> primaryKeyColumns
+    ) =>
+        primaryKeyColumns.Count == 1
+        && string.Equals(
+            primaryKeyColumns[0].Column.DataType.Trim(),
+            "INTEGER",
+            StringComparison.OrdinalIgnoreCase
+        );
 
     /// <summary>テーブルレベルの UNIQUE 制約を PRAGMA index_list / index_info から読み込み、モデルへ載せる</summary>
     /// <remarks>

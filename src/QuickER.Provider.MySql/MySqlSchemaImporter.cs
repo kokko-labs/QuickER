@@ -17,6 +17,11 @@ namespace QuickER.Provider.MySql;
 /// 型は <c>COLUMN_TYPE</c> 列（<c>varchar(50)</c> / <c>tinyint(1)</c> / <c>decimal(10,2)</c> 等、
 /// カタログがそのまま解析できる表記）をそのまま採用する。
 /// 参照先列集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する。
+/// <para>
+/// 生成列（<c>GENERATED ALWAYS AS</c>）は <see cref="Column.IsComputed"/> を立てて取り込み、
+/// パーティションを持つテーブルは親テーブルとして取り込む。どちらも意味モデルに載らないもの
+/// （式・パーティション定義）があるため警告で告げる。
+/// </para>
 /// </remarks>
 public class MySqlSchemaImporter : ISchemaImporter
 {
@@ -106,16 +111,31 @@ public class MySqlSchemaImporter : ISchemaImporter
 
     // ---------------- 内部実装 ----------------
 
-    /// <summary>接続先 DB の通常テーブル一覧・テーブルコメントを取得するクエリ</summary>
-    /// <remarks>MySQL では「スキーマ」="データベース" のため、TABLE_SCHEMA = DATABASE() で接続先 DB のみに絞る</remarks>
+    /// <summary>接続先 DB の通常テーブル一覧・テーブルコメント・パーティション有無を取得するクエリ</summary>
+    /// <remarks>
+    /// <para>MySQL では「スキーマ」="データベース" のため、TABLE_SCHEMA = DATABASE() で接続先 DB のみに絞る。</para>
+    /// <para>
+    /// パーティション有無は <c>information_schema.PARTITIONS</c> の <c>PARTITION_NAME IS NOT NULL</c> で判定する
+    /// （PostgreSQL の <c>relkind = 'p'</c> と同じ「カタログの事実で判定する」流儀。非パーティション表は
+    /// PARTITIONS に 1 行だけ現れ <c>PARTITION_NAME</c> が NULL になるため、<c>TABLES.CREATE_OPTIONS</c> の
+    /// <c>partitioned</c> 部分一致は採らない＝将来のオプション文字列追加に弱い）。
+    /// </para>
+    /// </remarks>
     private const string TablesSql =
         @"
-SELECT TABLE_NAME, TABLE_COMMENT
-FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'
+SELECT t.TABLE_NAME, t.TABLE_COMMENT,
+       EXISTS (
+           SELECT 1
+           FROM information_schema.PARTITIONS p
+           WHERE p.TABLE_SCHEMA = t.TABLE_SCHEMA
+             AND p.TABLE_NAME = t.TABLE_NAME
+             AND p.PARTITION_NAME IS NOT NULL
+       ) AS is_partitioned
+FROM information_schema.TABLES t
+WHERE t.TABLE_SCHEMA = DATABASE() AND t.TABLE_TYPE = 'BASE TABLE'
 -- BINARY で並べるのは、information_schema の既定照合順序が大文字小文字を区別せず
 -- `Dup` と `dup` の順序が環境依存になるため（衝突時にどちらを採るかを決定的にする）
-ORDER BY BINARY TABLE_NAME;";
+ORDER BY BINARY t.TABLE_NAME;";
 
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
@@ -247,6 +267,15 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                     Description = comment,
                 },
             };
+
+            // パーティション親は列・制約の宣言を持ち帰れるが、パーティション定義は意味モデルに無い
+            // ＝この図から生成した DDL はパーティションされていないテーブルを作る（PostgreSQL と同じ告知）
+            if (Convert.ToInt32(reader.GetValue(2)) != 0)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(SchemaImportWarningKind.PartitionDefinitionLost, name)
+                );
+            }
         }
 
         return dict;
