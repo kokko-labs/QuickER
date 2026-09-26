@@ -63,6 +63,10 @@ Entity には既定で DataAnnotations と DB 定義メタ属性（`[DbTableMeta
 意図した型でなければ、図の側で型を書き換えてください。
 生成コードは DB 定義の自己記述ドキュメントとしても機能します。
 
+MySQL の符号なし整数（`int unsigned` など）は、符号なしの C# 型として生成します（`tinyint`＝`byte`・`smallint`＝`ushort`・`mediumint` と `int`＝`uint`・`bigint`＝`ulong`）。
+ドライバと EF Core プロバイダーが返す CLR 型に合わせるためで、符号付きの範囲を超える値も読み出せます。
+真偽値の慣習（`tinyint(1)`＝`bool`）は符号付きの列だけに効きます。
+
 PostgreSQL の配列列（`integer[]` / `varchar(20)[]` など）は、要素型の配列（`int[]` / `string[]`）として生成します。
 ただし **EditModel と値オブジェクトには載りません**。
 EditModel は 1 列＝1 テキスト入力の投影で配列を表す記法が無く、値オブジェクトにすると等値が参照比較になって同じ内容の配列が等しくならないためです。

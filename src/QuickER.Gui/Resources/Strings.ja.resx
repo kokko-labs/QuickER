@@ -928,6 +928,9 @@
   <data name="TableDoc_RelUnknownRelation" xml:space="preserve">
     <value>リレーション一覧シートの {0} 行目の関係 '{1}' を解析できません。</value>
   </data>
+  <data name="TableDoc_NewerFormat" xml:space="preserve">
+    <value>このブックは、このバージョンの QuickER が対応するより新しい書式（{0}／対応は {1}）で書かれています。取り込むと、このバージョンが読めない情報が失われます。QuickER を更新してください。</value>
+  </data>
   <data name="TableDoc_MissingRoleTag" xml:space="preserve">
     <value>旧形式または本アプリ以外の出力です。再エクスポートしてください。</value>
   </data>

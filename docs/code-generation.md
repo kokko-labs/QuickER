@@ -63,6 +63,10 @@ A DB type the type catalog cannot parse (`geometry`, `hierarchyid`, `sql_variant
 The generated code does not show that it happened, so generation names those columns in an information diagnostic as "table.column (original type text)".
 Change the column's type in the diagram if `string` is not what you meant.
 
+MySQL unsigned integers (`int unsigned` and the like) are generated as unsigned C# types (`tinyint` as `byte`, `smallint` as `ushort`, `mediumint` and `int` as `uint`, `bigint` as `ulong`).
+This matches the CLR types the driver and the EF Core provider return, so values beyond the signed range can be read.
+The boolean convention (`tinyint(1)` as `bool`) applies to signed columns only.
+
 PostgreSQL array columns (`integer[]`, `varchar(20)[]` and the like) are generated as an array of the element type (`int[]`, `string[]`).
 They are **left out of edit models and value objects**, though.
 An edit model is one text input per column and has no notation for an array, and a value object would compare arrays by reference, so two arrays with the same contents would not be equal.

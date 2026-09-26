@@ -42,6 +42,99 @@ public class SqlConnectionProfileStoreTests : IDisposable
     /// <summary>DPAPI を使わず一時フォルダへ保存するテスト用ストアを生成する</summary>
     private SqlConnectionProfileStore CreateStore() => new(_tempFolder, useDpapi: false);
 
+    /// <summary>暗号ファイルが実在するか（フラグとの整合を確かめるために直接見る）</summary>
+    private bool SecretExists(SqlConnectionProfileStore store, Guid id) =>
+        File.Exists(Path.Combine(store.SecretsFolder, id.ToString("N") + ".dat"));
+
+    /// <summary>
+    /// 保存した <c>SavePassword</c> と暗号ファイルの有無が常に一致することを検証する（DU7・4 分岐）。
+    /// </summary>
+    /// <remarks>
+    /// 「パスワードを保存」をオンにしたまま空欄で保存すると暗号ファイルは書かれないため、
+    /// フラグだけが立つと「保存済みと表示されるのに復元するものが無い」状態になる。
+    /// </remarks>
+    [Theory(DisplayName = "Upsert: SavePassword と暗号ファイルの有無は常に一致する")]
+    [InlineData(true, "secret", true)]
+    [InlineData(true, "", false)]
+    [InlineData(false, "secret", false)]
+    [InlineData(false, "", false)]
+    public void Upsert_SavePasswordFlag_MatchesSecretFile(
+        bool savePassword,
+        string password,
+        bool expected
+    )
+    {
+        var store = CreateStore();
+        var profile = new SqlConnectionProfile
+        {
+            Name = "TestDB",
+            Server = "s",
+            Database = "d",
+            SavePassword = savePassword,
+        };
+
+        store.Upsert(profile, password);
+
+        SecretExists(store, profile.Id).Should().Be(expected);
+        store.LoadAll().Should().ContainSingle().Which.SavePassword.Should().Be(expected);
+        profile.SavePassword.Should().Be(expected, "呼び出し側のインスタンスも保存内容へ揃える");
+    }
+
+    [Theory(DisplayName = "SaveLastUsed: SavePassword と暗号ファイルの有無は常に一致する")]
+    [InlineData(true, "secret", true)]
+    [InlineData(true, "", false)]
+    [InlineData(false, "secret", false)]
+    [InlineData(false, "", false)]
+    public void SaveLastUsed_SavePasswordFlag_MatchesSecretFile(
+        bool savePassword,
+        string password,
+        bool expected
+    )
+    {
+        var store = CreateStore();
+        var profile = new SqlConnectionProfile
+        {
+            Server = "s",
+            Database = "d",
+            SavePassword = savePassword,
+        };
+
+        store.SaveLastUsed(profile, password);
+
+        File.Exists(Path.Combine(store.SecretsFolder, "last-connection.dat")).Should().Be(expected);
+
+        var restored = store.LoadLastUsed();
+        restored.Should().NotBeNull();
+        restored!.Value.Profile.SavePassword.Should().Be(expected);
+        restored.Value.Password.Should().Be(expected ? password : string.Empty);
+    }
+
+    /// <summary>
+    /// 保存済みパスワードを空欄で上書きしたら、フラグも暗号ファイルも落ちることを検証する（DU7）。
+    /// </summary>
+    [Fact(DisplayName = "Upsert: 保存済みパスワードを空欄で上書きするとフラグごと落ちる")]
+    public void Upsert_ClearingPassword_DropsFlagAndSecret()
+    {
+        var store = CreateStore();
+        var profile = new SqlConnectionProfile
+        {
+            Name = "TestDB",
+            Server = "s",
+            Database = "d",
+            SavePassword = true,
+        };
+        store.Upsert(profile, "secret");
+        SecretExists(store, profile.Id).Should().BeTrue();
+
+        // チェックはオンのまま、パスワード欄だけを空にして保存し直す
+        profile.SavePassword = true;
+        store.Upsert(profile, string.Empty);
+
+        SecretExists(store, profile.Id).Should().BeFalse();
+        store.LoadAll().Should().ContainSingle().Which.SavePassword.Should().BeFalse();
+        store.LoadPassword(profile.Id).Should().BeEmpty();
+    }
+
     /// <summary>Upsert で追加したプロファイルを LoadAll が名前順で返すことを検証する</summary>
     [Fact(DisplayName = "Upsert で追加され LoadAll が名前順で返す")]
     public void Upsert_AddsAndLoadsSorted()

@@ -191,7 +191,7 @@
     <value>Add [JsonIgnore] to parent-reference navigations (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_OutputPath" xml:space="preserve">
-    <value>Output file name for single-file output; only the file name part is used and the output directory is always --out (overrides the settings file)</value>
+    <value>Output file name for single-file output; only the file name part is used and the output directory is always --out. Unlike every other flag, this one does NOT override the settings file: it takes effect only when the settings file does not define OutputFileName</value>
   </data>
   <data name="Cli_InvalidBooleanFlag" xml:space="preserve">
     <value>'{0}' is not a valid boolean value. Use the flag alone for true, or specify true/false.</value>

@@ -1871,13 +1871,6 @@ public sealed class CSharpCodeGenerationService
             .ToList();
 
     /// <summary>
-    /// 計算列・生成列の一覧を <c>{EntityClass}.{Property} ({テーブル}.{列名})</c> 形式の行で組み立てる。
-    /// </summary>
-    /// <remarks>
-    /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsComputed"/> のものを対象にする
-    /// （マーカー属性 <c>[ComputedColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
-    /// </remarks>
-    /// <summary>
     /// NOT NULL の計算列を、式を評価しないエンジンへも書く構成（双方向同期支援・マルチターゲット）のときだけ
     /// Warning 診断で名指しする。
     /// </summary>
@@ -1940,6 +1933,13 @@ public sealed class CSharpCodeGenerationService
         );
     }
 
+    /// <summary>
+    /// 計算列・生成列の一覧を <c>{EntityClass}.{Property} ({テーブル}.{列名})</c> 形式の行で組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsComputed"/> のものを対象にする
+    /// （マーカー属性 <c>[ComputedColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
+    /// </remarks>
     private static IReadOnlyList<string> BuildComputedColumnLines(CSharpGenerationModel model) =>
         model
             .EntityClasses.SelectMany(entity =>

@@ -45,6 +45,9 @@ The supported syntax is the subset that QuickER's DBML export writes, and both t
 - Skipped: the `Project` / `Enum` / `TableGroup` / `TablePartial` / `Note` / `records` blocks, and table settings written after a table name (`Table users [owner: 'x'] {`). These carry only information QuickER cannot represent, so the block is passed over and the rest of the file is imported
 - Not supported, and reported with the line number rather than skipped: a relationship written as a named `Ref name: ...` or as the block form `Ref { ... }` (skipping it would lose the relationship), a table alias (`Table t as U {`), a `~partial` injection, a `Note` spanning several lines inside a `Table` block, and any other line that cannot be interpreted
 
+A `Ref:` line may appear before the `Table` block it points at; the lines are resolved once every table has been read.
+A line that references a table defined nowhere is still an import error reported with its line number.
+
 Tables with no columns get a default PK column (`ID int`).
 DBML carries no dialect information, so the diagram's target DB stays as it was before the import.
 
@@ -65,6 +68,7 @@ In the key column, `UQ{n}` marks unique constraints and the same number means th
 Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import.
 **Excel files created by other applications cannot be imported directly**, though: to migrate definition documents you already have, transcribe them into QuickER's document format once.
 The target DBMS is embedded in the document and restored, dialect and all, on import.
+The format version is embedded too, and a document written in a newer format than this version supports is reported instead of imported, so information this version cannot read is never silently dropped. Older documents that carry no version are imported as before.
 Count mismatches, duplicates, and references to undefined tables are import errors.
 A relationship row counts as a duplicate only when another row has the same pair of tables **and the same columns**, so a diagram with more than one foreign key between the same two tables (a shipping address and a billing address both pointing at the same table, say) round-trips.
 

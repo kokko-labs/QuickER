@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
@@ -32,6 +33,8 @@ public static partial class TableDefinitionDocumentImporter
     /// <exception cref="InvalidDataException">必須シートの欠落や整合性不一致を検出した場合にスローする</exception>
     public static ErDiagram Load(XLWorkbook workbook)
     {
+        EnsureSupportedFormatVersion(workbook);
+
         // テーブル一覧・リレーション一覧は必須（タグ欠落＝旧形式または他アプリ出力）
         var summarySheet =
             ResolveRoleSheet(workbook, TableDefinitionDocumentLayout.SummaryDefinedName)
@@ -69,6 +72,51 @@ public static partial class TableDefinitionDocumentImporter
         }
 
         return diagram;
+    }
+
+    /// <summary>ブックの書式バージョンが、この版で読める範囲かを確かめる</summary>
+    /// <remarks>
+    /// エクスポータは書式バージョンをカスタムプロパティへ刻む。読み手がそれを見ないと、将来の版が足した
+    /// 情報を含むブックを黙って取り込み、<b>読めなかった分を落としたまま</b>図を作ってしまう
+    /// （図ファイルの <c>IsNewerFormat</c> と同じ理由・同じ流儀で、読めないと分かった時点で断る）。
+    /// プロパティが無いブック（旧形式・他アプリ出力）と、数値として読めない値は従来どおり取り込む
+    /// ——断る根拠は「この版より新しいと分かること」だけで、分からないものは役割タグの検査に委ねる。
+    /// </remarks>
+    /// <exception cref="InvalidDataException">この版より新しい書式バージョンの場合</exception>
+    private static void EnsureSupportedFormatVersion(XLWorkbook workbook)
+    {
+        var raw = workbook
+            .CustomProperties.FirstOrDefault(property =>
+                string.Equals(
+                    property.Name,
+                    TableDefinitionDocumentLayout.FormatVersionPropertyName,
+                    StringComparison.Ordinal
+                )
+            )
+            ?.Value?.ToString();
+
+        if (
+            !int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var version)
+            || !int.TryParse(
+                TableDefinitionDocumentLayout.FormatVersionValue,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var supported
+            )
+            || version <= supported
+        )
+        {
+            return;
+        }
+
+        throw new InvalidDataException(
+            string.Format(
+                CultureInfo.CurrentUICulture,
+                Strings.TableDoc_NewerFormat,
+                version,
+                supported
+            )
+        );
     }
 
     /// <summary>テーブル一覧シートからテーブル名・説明・備考を取得する</summary>

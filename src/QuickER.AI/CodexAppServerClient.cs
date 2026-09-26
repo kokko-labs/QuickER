@@ -282,6 +282,14 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             return;
         }
 
+        // 接続断のあとの再接続では、前の接続の残骸（終了済みプロセス・受信ループ・stdin）がまだ残っている。
+        // 掃除せずに作り直すと、Process ハンドルと CancellationTokenSource が参照ごと捨てられて漏れる
+        // （IsStarted はプロセスが終了していれば false を返すので、この経路は再接続のたびに通る）
+        if (_process is not null || _readerCts is not null || _stdin is not null)
+        {
+            await StopProcessAsync();
+        }
+
         var (fileName, arguments) = ResolveLaunch(CodexCliLocator.ResolveExecutablePath());
 
         var startInfo = new ProcessStartInfo

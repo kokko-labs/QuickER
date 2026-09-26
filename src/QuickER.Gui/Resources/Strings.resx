@@ -906,6 +906,9 @@
   <data name="TableDoc_RelUnknownRelation" xml:space="preserve">
     <value>Cannot parse the relationship '{1}' in row {0} of the Relationship List sheet.</value>
   </data>
+  <data name="TableDoc_NewerFormat" xml:space="preserve">
+    <value>This workbook was written in a newer format ({0}) than this version of QuickER supports ({1}). Importing it would drop the information this version cannot read. Please update QuickER.</value>
+  </data>
   <data name="TableDoc_MissingRoleTag" xml:space="preserve">
     <value>This workbook is in an old format or was not produced by this application. Please export it again.</value>
   </data>

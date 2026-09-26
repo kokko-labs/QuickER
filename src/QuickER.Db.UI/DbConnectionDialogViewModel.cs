@@ -291,6 +291,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         BrowseNewFileCommand.NotifyCanExecuteChanged();
     }
 
+    partial void OnIsBusyChanged(bool value) => OkCommand.NotifyCanExecuteChanged();
+
     partial void OnModeChanged(DbConnectionDialogMode value)
     {
         OnPropertyChanged(nameof(CanSelectDbms));
@@ -303,6 +305,11 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     }
 
     /// <summary>前回接続情報があれば入力欄へ復元する</summary>
+    /// <remarks>
+    /// 同期モードは方言を図に固定するため、別方言の前回接続は復元しない。方言が違えば欄の意味も変わり
+    /// （SQLite のファイルパス・Oracle のサービス名・サーバー系の欄）、固定した方言では接続できない値を
+    /// 入力欄へ置くことになるため。取込モードは方言ごと復元するのでこの制限は無い。
+    /// </remarks>
     private void RestoreLastConnection()
     {
         var lastUsed = _store.LoadLastUsed();
@@ -312,7 +319,18 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        // 同期モードで方言固定中は、異なる方言の前回接続は方言のみ復元しない
+        if (
+            Mode == DbConnectionDialogMode.Sync
+            && !string.Equals(
+                lastUsed.Value.Profile.Dbms,
+                SelectedProvider.Name,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return;
+        }
+
         ApplyProfile(lastUsed.Value.Profile, lastUsed.Value.Password, updateProfileName: false);
         StatusMessage = Strings.DbConnection_Restored;
     }
@@ -681,8 +699,16 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         _creationPath = picked.Path;
     }
 
+    /// <summary>接続テスト中でないか（確定できるか）</summary>
+    private bool CanOk() => !IsBusy;
+
     /// <summary>入力を検証して確定し、前回接続として保存したうえでダイアログを閉じる</summary>
-    [RelayCommand]
+    /// <remarks>
+    /// 接続テスト中は確定できない。テストは取り消せないため、確定して閉じるとテストだけが
+    /// 接続を掴んだまま走り続け、呼び出し側の取込・同期と同時に同じ DB を叩くことになるため。
+    /// 取り消し（閉じる）は常にできる。
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanOk))]
     private void Ok()
     {
         // タイムアウトは方言に依らず効くため、方言別の検証より先に見る。

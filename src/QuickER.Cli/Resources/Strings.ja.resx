@@ -191,7 +191,7 @@
     <value>親参照ナビゲーションへ [JsonIgnore] を付与する（設定ファイルを上書き）</value>
   </data>
   <data name="Cli_Opt_OutputPath" xml:space="preserve">
-    <value>単一ファイル出力時の出力ファイル名（ファイル名部分のみ使用。出力先ディレクトリは常に --out。設定ファイルを上書き）</value>
+    <value>単一ファイル出力時の出力ファイル名（ファイル名部分のみ使用。出力先ディレクトリは常に --out。他のフラグと違い設定ファイルを上書きせず、設定ファイルに OutputFileName が無いときだけ効く）</value>
   </data>
   <data name="Cli_InvalidBooleanFlag" xml:space="preserve">
     <value>'{0}' は真偽値として解釈できません。フラグ単独で true、または true/false を明示指定してください。</value>

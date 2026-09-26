@@ -305,7 +305,7 @@
     <value>名前付きクエリ '{0}': パラメータ名 '{1}' はリポジトリの Query() メンバーを隠すため使えません。</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
-    <value>名前付きクエリ '{0}': 型トークン '{1}' を解決できません。文字列・バイナリの型には長さを書いてください（例: 'string(50)' / 'fixedstring(10)'）。</value>
+    <value>名前付きクエリ '{0}': 型トークン '{1}' を解決できません。設定スキーマが挙げるトークンと綴りを見比べてください。固定長の文字列・バイナリ（fixedstring など）の場合は長さも必要です（例: 'fixedstring(10)'）。</value>
   </data>
   <data name="CodeGen_Query_ConditionInvalid" xml:space="preserve">
     <value>名前付きクエリ '{0}' の条件式: {1}</value>

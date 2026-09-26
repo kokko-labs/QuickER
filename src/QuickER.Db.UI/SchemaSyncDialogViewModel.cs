@@ -381,67 +381,61 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
         var sb = new StringBuilder();
 
-        // 主キー変更に巻き込まれて自動再作成される FK（参照先が候補キーでなくなると失敗しうる）
-        var rebuiltForeignKeys = _currentPlan.Warnings.Count(w =>
-            w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey
-        );
-
-        if (rebuiltForeignKeys > 0)
+        // 種別を宣言順に回して網羅 switch で文言化する。個別に拾う形だと、将来 SyncPlanWarningKind へ
+        // 足した種別が黙って落ちる（取込警告の文言化と同じ規則＝未知の種別は例外にする）
+        foreach (var kind in Enum.GetValues<SyncPlanWarningKind>())
         {
+            var warnings = _currentPlan.Warnings.Where(w => w.Kind == kind).ToList();
+
+            if (warnings.Count == 0)
+            {
+                continue;
+            }
+
             sb.Append(Environment.NewLine)
                 .Append(Environment.NewLine)
-                .Append(
-                    string.Format(
-                        Strings.SchemaSync_ExecuteConfirmForeignKeyRebuildRisk,
-                        rebuiltForeignKeys
-                    )
-                );
-        }
-
-        // 一意制約の削除で、その列を参照している外部キーが壊れうる
-        var brokenForeignKeys = _currentPlan
-            .Warnings.Where(w =>
-                w.Kind == SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey
-            )
-            .Select(w =>
-                string.IsNullOrEmpty(w.Detail) ? w.TableName : $"{w.TableName} / {w.Detail}"
-            )
-            .ToList();
-
-        if (brokenForeignKeys.Count > 0)
-        {
-            var fkList = string.Join(
-                Environment.NewLine,
-                brokenForeignKeys.Select(t => "  • " + t)
-            );
-            sb.Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .Append(
-                    string.Format(Strings.SchemaSync_ExecuteConfirmUniqueConstraintDropRisk, fkList)
-                );
-        }
-
-        // テーブル再構築で、意味モデルに無い列レベル属性（既定値・CHECK 等）が再現されず失われる
-        var attributeLosses = _currentPlan
-            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.TableRebuildDropsColumnAttribute)
-            .Select(w => $"{w.TableName} / {w.Detail}")
-            .ToList();
-
-        if (attributeLosses.Count > 0)
-        {
-            var lossList = string.Join(
-                Environment.NewLine,
-                attributeLosses.Select(t => "  • " + t)
-            );
-            sb.Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .Append(
-                    string.Format(Strings.SchemaSync_ExecuteConfirmRebuildDropsAttributes, lossList)
-                );
+                .Append(Describe(kind, warnings));
         }
 
         return sb.ToString();
     }
+
+    /// <summary>1 種別ぶんの警告を、実行確認へ追記する文言へ整形する</summary>
+    /// <remarks>
+    /// 未知の種別は <see cref="ArgumentOutOfRangeException"/>（取込警告の文言化と同じ流儀）。
+    /// 黙って落とすと、新しい種別の警告が実行確認に出ないまま危険な同期が通る。
+    /// </remarks>
+    private static string Describe(
+        SyncPlanWarningKind kind,
+        IReadOnlyList<SyncPlanWarning> warnings
+    ) =>
+        kind switch
+        {
+            // 主キー変更に巻き込まれて自動再作成される FK（参照先が候補キーでなくなると失敗しうる）
+            SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey => string.Format(
+                Strings.SchemaSync_ExecuteConfirmForeignKeyRebuildRisk,
+                warnings.Count
+            ),
+            // 一意制約の削除で、その列を参照している外部キーが壊れうる
+            SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey => string.Format(
+                Strings.SchemaSync_ExecuteConfirmUniqueConstraintDropRisk,
+                BulletList(
+                    warnings.Select(w =>
+                        string.IsNullOrEmpty(w.Detail) ? w.TableName : $"{w.TableName} / {w.Detail}"
+                    )
+                )
+            ),
+            // テーブル再構築で、意味モデルに無い列レベル属性（既定値・CHECK 等）が再現されず失われる
+            SyncPlanWarningKind.TableRebuildDropsColumnAttribute => string.Format(
+                Strings.SchemaSync_ExecuteConfirmRebuildDropsAttributes,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+        };
+
+    /// <summary>項目を「  • 」付きの 1 行ずつへ並べる</summary>
+    private static string BulletList(IEnumerable<string> items) =>
+        string.Join(Environment.NewLine, items.Select(item => "  • " + item));
 
     /// <summary>ダイアログを閉じる</summary>
     [RelayCommand]

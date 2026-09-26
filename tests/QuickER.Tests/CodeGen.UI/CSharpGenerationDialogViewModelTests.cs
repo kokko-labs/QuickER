@@ -25,6 +25,118 @@ public class CSharpGenerationDialogViewModelTests
         );
     }
 
+    /// <summary>
+    /// 同期支援の表示は「QuickER 版 Repository ＋ 対象 DB が両方言」のときだけ真になることを検証する（CU2）。
+    /// </summary>
+    [Fact(DisplayName = "同期支援の表示は QuickER 版 Repository と両方言の選択に連動する")]
+    public void ShowSyncSupport_FollowsRepositoryAndBothDialects()
+    {
+        var vm = CreateViewModel(out _);
+
+        vm.GenerateRepositories = true;
+        vm.TargetSqlServer = true;
+        vm.TargetSqlite = false;
+        vm.ShowSyncSupport.Should().BeFalse("片方言では同期支援を選べない");
+
+        vm.TargetSqlite = true;
+        vm.ShowSyncSupport.Should().BeTrue("両方言なら選べる");
+
+        vm.GenerateRepositories = false;
+        vm.ShowSyncSupport.Should().BeFalse("QuickER 版 Repository を生成しないなら選べない");
+    }
+
+    /// <summary>
+    /// 片方言の構成で同期支援の行が隠れているとき、保持されたチェック値は結果・設定へ渡さないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 隠れた保存値をそのまま書き戻すと、次に開いたときに「選べないはずの同期支援が ON」の設定が残り、
+    /// 生成が「実効方言が sqlserver+sqlite のちょうど 2 つでない」エラーで止まる。
+    /// </remarks>
+    [Fact(DisplayName = "同期支援は非表示構成では結果・設定へ渡さない（値自体は保持する）")]
+    public void SyncSupport_IsDroppedWhenHidden_ButKeptInViewModel()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
+            vm.DbAccessRepository = true;
+            vm.TargetSqlServer = true;
+            vm.TargetSqlite = true;
+            vm.ShowSyncSupport.Should().BeTrue("両方言なら同期支援を選べる");
+            vm.GenerateSyncSupport = true;
+
+            // 片方言へ戻すと行が隠れる
+            vm.TargetSqlite = false;
+            vm.ShowSyncSupport.Should().BeFalse();
+
+            vm.OkCommand.Execute(null);
+
+            vm.Result.Should().NotBeNull();
+            vm.Result!.Options.GenerateSyncSupport.Should().BeFalse();
+            vm.GenerateSyncSupport.Should().BeTrue("両方言を選び直せば元の選択が見える");
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+            restored.GenerateSyncSupport.Should().BeFalse("隠れた値は設定へ持ち越さない");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// DB アクセス「なし」で無制限バイナリ列の除外の行が隠れているとき、保持されたチェック値は
+    /// 結果・設定へ渡さないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// このオプションは EditModel の必須判定（<c>IsRequired</c>）にも効くため、隠れた保存値を書き戻すと
+    /// QuickER 版 Repository を生成しない構成でも生成物が変わる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "無制限バイナリ列の除外は非表示構成では結果・設定へ渡さない（値自体は保持する）"
+    )]
+    public void ExcludeUnboundedBinary_IsDroppedWhenHidden_ButKeptInViewModel()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
+            vm.DbAccessRepository = true;
+            vm.ExcludeUnboundedBinaryColumns = true;
+
+            vm.DbAccessNone = true;
+            vm.ShowExcludeUnboundedBinary.Should().BeFalse();
+
+            vm.OkCommand.Execute(null);
+
+            vm.Result.Should().NotBeNull();
+            vm.Result!.Options.ExcludeUnboundedBinaryColumns.Should().BeFalse();
+            vm.ExcludeUnboundedBinaryColumns.Should()
+                .BeTrue("DB アクセスを選び直せば元の選択が見える");
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+            restored.ExcludeUnboundedBinaryColumns.Should().BeFalse("隠れた値は設定へ持ち越さない");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     /// <summary>OK 実行で namespace・出力先・生成オプションが結果へ反映され閉じることを検証する</summary>
     [Fact(DisplayName = "OK 実行で namespace と出力先が結果へ反映される")]
     public void Ok_SetsResult()

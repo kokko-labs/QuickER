@@ -211,6 +211,179 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.CanSelectDbms.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 同期モードでは、図と違う方言の前回接続を復元しないことを検証する（DU6）。
+    /// </summary>
+    /// <remarks>
+    /// 方言が違えば入力欄の意味も変わるため、固定した方言の欄へ別方言の値が入ると
+    /// 「復元しました」と言いながら接続できない入力になる。
+    /// </remarks>
+    [Fact(DisplayName = "同期モード: 方言が違う前回接続は復元しない")]
+    public void SyncMode_LastConnectionOfOtherDialect_IsNotRestored()
+    {
+        var store = CreateStore();
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Dbms = SqlServerProvider.ProviderName,
+                Server = "prod-sqlserver",
+                Database = "Sales",
+            },
+            password: "p@ss"
+        );
+
+        var vm = new DbConnectionDialogViewModel(
+            RegistryWithSqlite,
+            DbConnectionDialogMode.Sync,
+            fixedProvider: new SqliteProvider(),
+            store,
+            null
+        );
+
+        vm.Host.Should().Be("localhost", "別方言のサーバー名は入れず既定のまま");
+        vm.Database.Should().BeEmpty();
+        vm.Password.Should().BeEmpty();
+        vm.StatusMessage.Should().NotBe(Strings.DbConnection_Restored);
+    }
+
+    /// <summary>同期モードでも、方言が同じ前回接続は従来どおり復元することを検証する（DU6 の対照）</summary>
+    [Fact(DisplayName = "同期モード: 方言が同じ前回接続は復元する")]
+    public void SyncMode_LastConnectionOfSameDialect_IsRestored()
+    {
+        var store = CreateStore();
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Dbms = SqlServerProvider.ProviderName,
+                Server = "prod-sqlserver",
+                Database = "Sales",
+            },
+            password: "p@ss"
+        );
+
+        var vm = new DbConnectionDialogViewModel(
+            RegistryWithSqlite,
+            DbConnectionDialogMode.Sync,
+            fixedProvider: new SqlServerProvider(),
+            store,
+            null
+        );
+
+        vm.Host.Should().Be("prod-sqlserver");
+        vm.Database.Should().Be("Sales");
+        vm.StatusMessage.Should().Be(Strings.DbConnection_Restored);
+    }
+
+    /// <summary>取込モードは方言ごと復元する（DU6 の制限は同期モード限定）ことを検証する</summary>
+    [Fact(DisplayName = "取込モード: 前回接続は方言ごと復元する")]
+    public void ImportMode_LastConnection_RestoresDialectToo()
+    {
+        var store = CreateStore();
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Dbms = SqliteProvider.ProviderName,
+                FilePath = @"C:\data\app.db",
+            },
+            password: string.Empty
+        );
+
+        var vm = new DbConnectionDialogViewModel(
+            RegistryWithSqlite,
+            DbConnectionDialogMode.Import,
+            fixedProvider: null,
+            store,
+            null
+        );
+
+        vm.SelectedProvider.Name.Should().Be(SqliteProvider.ProviderName);
+        vm.FilePath.Should().Be(@"C:\data\app.db");
+    }
+
+    /// <summary>
+    /// 接続テスト中は OK で確定できないことを検証する（DU4）。
+    /// </summary>
+    /// <remarks>
+    /// テストは取り消せないため、確定して閉じるとテストだけが接続を掴んだまま走り続け、
+    /// 呼び出し側の取込・同期と同時に同じ DB を叩くことになる。
+    /// </remarks>
+    [Fact(DisplayName = "接続テスト中は OK を実行できない")]
+    public async Task Ok_WhileTestingConnection_IsDisabled()
+    {
+        var started = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var provider = new GatedTestProvider(started, release);
+        var vm = new DbConnectionDialogViewModel(
+            new DatabaseProviderRegistry(new IDatabaseProvider[] { provider }),
+            DbConnectionDialogMode.Import,
+            fixedProvider: provider,
+            CreateStore(),
+            null
+        );
+
+        vm.OkCommand.CanExecute(null).Should().BeTrue("テスト前は確定できる");
+
+        var testing = vm.TestConnectionCommand.ExecuteAsync(null);
+        await started.Task.WaitAsync(
+            TimeSpan.FromSeconds(10),
+            TestContext.Current.CancellationToken
+        );
+
+        vm.OkCommand.CanExecute(null).Should().BeFalse("接続テスト中は確定できない");
+
+        release.SetResult();
+        await testing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        vm.OkCommand.CanExecute(null).Should().BeTrue("テストが終われば確定できる");
+    }
+
+    /// <summary>接続テストが始まったことを知らせ、解放されるまで待つスキーマインポーター</summary>
+    private sealed class GatedSchemaImporter(
+        TaskCompletionSource started,
+        TaskCompletionSource release
+    ) : ISchemaImporter
+    {
+        public async Task<SchemaImportResult> ImportAsync(
+            string connectionString,
+            int commandTimeoutSeconds,
+            CancellationToken cancellationToken = default
+        )
+        {
+            started.TrySetResult();
+            await release.Task.ConfigureAwait(false);
+            return new SchemaImportResult();
+        }
+    }
+
+    /// <summary>接続テストを任意のタイミングまで止められるプロバイダ</summary>
+    private sealed class GatedTestProvider(
+        TaskCompletionSource started,
+        TaskCompletionSource release
+    ) : IDatabaseProvider
+    {
+        public string Name => "gated";
+
+        public string DisplayName => "Gated";
+
+        public int? DefaultPort => null;
+
+        public ISchemaImporter SchemaImporter { get; } = new GatedSchemaImporter(started, release);
+
+        public IColumnTypeMapper TypeMapper => null!;
+
+        public ITypeCatalog TypeCatalog => null!;
+
+        public ISyncScriptBuilder SyncScriptBuilder => null!;
+
+        public SyncDialectCapabilities SyncCapabilities => null!;
+
+        public ISchemaSyncExecutor SyncExecutor => null!;
+
+        public IDdlGenerator DdlGenerator => null!;
+
+        public string BuildConnectionString(DbConnectionSettings settings) => "gated";
+    }
+
     /// <summary>削除確認でキャンセルするとプロファイルが残ることを検証する</summary>
     [Fact(DisplayName = "DeleteProfile: 確認でキャンセルするとプロファイルは削除されない")]
     public void DeleteProfile_ConfirmDeclined_KeepsProfile()

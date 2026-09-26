@@ -148,6 +148,85 @@ public class SchemaSyncDialogViewModelTests
         vm.IsBusy.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 実行中の非同期コマンドは <c>CanExecute</c> が偽になる（ボタンからの二重実行は起きない）ことを検証する（DU2）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// レビューで「実行ボタンの連打で二重実行される」と報告されたが、その再現は
+    /// <c>ExecuteAsync</c> を直接呼ぶもので、画面のボタン（<c>ICommand</c>）とは経路が違う。
+    /// CommunityToolkit の <c>AsyncRelayCommand</c> は既定で実行中の <c>CanExecute</c> を偽にする。
+    /// </para>
+    /// <para>
+    /// 観測は<b>最初の await より後</b>＝実際に DB 作業が走っている最中に行う。確認ダイアログは
+    /// コマンド本体の同期区間（<c>ExecutionTask</c> が入る前）で呼ばれるため、そこで読むと
+    /// まだ真に見える——そして同期区間はモーダルが UI スレッドを止めているのでボタンは押せない。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "Execute: 実行中はコマンドの CanExecute が偽になる（二重実行できない）")]
+    public async Task Execute_WhileRunning_CanExecuteIsFalse()
+    {
+        var started = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var provider = new FakeSqliteProvider(
+            new FakeSchemaImporter(new SchemaImportResult()),
+            new GatedSyncExecutor(started, release)
+        );
+
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings(),
+            [],
+            [],
+            new StubDialogService { ConfirmResult = true }
+        )
+        {
+            ScriptPreview = "DROP TABLE [X];",
+        };
+
+        // 実行前は押せる
+        vm.ExecuteCommand.CanExecute(null).Should().BeTrue();
+
+        var run = vm.ExecuteCommand.ExecuteAsync(null);
+        await started.Task;
+
+        // 実行が始まってから（＝ボタンを押せる状態に戻っているはずの時点で）観測する
+        vm.ExecuteCommand.CanExecute(null)
+            .Should()
+            .BeFalse("実行中はボタンから再実行できないこと");
+
+        release.SetResult();
+        await run;
+
+        // 完了後は再び押せる
+        vm.ExecuteCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 実行の開始を知らせ、解放されるまで止まるテスト用の同期実行器
+    /// </summary>
+    /// <remarks>
+    /// 観測を「実行の最中」へ確実に置くための門。コールバックを継続で走らせる形だと、
+    /// <c>AsyncRelayCommand</c> が <c>ExecutionTask</c> を代入するのと継続の実行が競合し、
+    /// 観測が実行前に見えることがある（実測でそうなった）。
+    /// </remarks>
+    private sealed class GatedSyncExecutor(
+        TaskCompletionSource started,
+        TaskCompletionSource release
+    ) : ISchemaSyncExecutor
+    {
+        public async Task<SchemaSyncResult> ExecuteAsync(
+            DbConnectionSettings settings,
+            string script,
+            CancellationToken ct = default
+        )
+        {
+            started.SetResult();
+            await release.Task;
+            return new SchemaSyncResult { Committed = true };
+        }
+    }
+
     // ---------------- SQLite（テーブル再構築方言）向けの配線 ----------------
 
     /// <summary>Id/型を指定してエンティティを組み立てる（テストフィクスチャ用）</summary>
