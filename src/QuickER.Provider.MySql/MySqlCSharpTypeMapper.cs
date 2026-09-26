@@ -12,7 +12,12 @@ namespace QuickER.Provider.MySql;
 /// <remarks>
 /// 対応規則（MySQL 型 → C# 型）:
 /// <list type="bullet">
-/// <item><description>tinyint(1) / bool / boolean / bit(1) → bool、tinyint → sbyte、smallint → short、int → int、bigint → long</description></item>
+/// <item><description>tinyint(1) / bool / boolean / bit(1) → bool、tinyint → sbyte、smallint → short、mediumint → int、int → int、bigint → long</description></item>
+/// <item><description>符号なし整数（<c>unsigned</c>）→ tinyint は byte、smallint は ushort、mediumint / int は uint、bigint は ulong
+/// （MySqlConnector・EF Core の <c>UseMySQL</c> とも同じ CLR 型を返す。実 mysql:8.4 で実測）。
+/// <c>tinyint unsigned</c> には真偽値慣習を当てない（MySQL 8.4 は符号なし tinyint から表示幅を落とすため
+/// <c>tinyint(1) unsigned</c> という表記が保たれず、ドライバも byte を返す。
+/// <c>MySqlTypeCatalog.TryParseTinyInt</c> が Boolean 判定から unsigned を外しているのと同じ線引き）</description></item>
 /// <item><description>bit(n)（n&gt;1）→ ulong、year → int（いずれも MySqlConnector が返す CLR 型に合わせる。実 mysql:8.4 で実測）</description></item>
 /// <item><description>float → float、double → double</description></item>
 /// <item><description>decimal / numeric → decimal</description></item>
@@ -58,14 +63,17 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
     public CSharpTypeInfo Map(string dataType)
     {
         var normalized = Normalize(dataType);
-        var baseType = ResolveAlias(GetBaseType(normalized));
+        var (rawBaseType, isUnsigned) = GetBaseType(normalized);
+        var baseType = ResolveAlias(rawBaseType);
         var maxLength = TryGetLength(normalized);
         var (precision, scale) = TryGetPrecisionScale(normalized);
 
         // tinyint(1) / bit(1) は真偽値慣習として bool へ寄せる
-        // （MySqlConnector が bit(1) に返す CLR 型は ulong だが、1 ビットを真偽値として扱う慣習を優先する）
+        // （MySqlConnector が bit(1) に返す CLR 型は ulong だが、1 ビットを真偽値として扱う慣習を優先する）。
+        // 符号なしの tinyint は対象外＝MySQL 8.4 は tinyint unsigned から表示幅を落とすため
+        // tinyint(1) unsigned という表記そのものが保たれず、ドライバも byte を返す
         if (
-            (baseType == "tinyint" && maxLength == 1)
+            (baseType == "tinyint" && !isUnsigned && maxLength == 1)
             || (baseType == "bit" && maxLength is null or 1)
         )
         {
@@ -75,10 +83,11 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
         return baseType switch
         {
             "boolean" => Value("bool"),
-            "tinyint" => Value("sbyte"),
-            "smallint" => Value("short"),
-            "int" => Value("int"),
-            "bigint" => Value("long"),
+            "tinyint" => Value(isUnsigned ? "byte" : "sbyte"),
+            "smallint" => Value(isUnsigned ? "ushort" : "short"),
+            "mediumint" => Value(isUnsigned ? "uint" : "int"),
+            "int" => Value(isUnsigned ? "uint" : "int"),
+            "bigint" => Value(isUnsigned ? "ulong" : "long"),
             // bit(n>1) は複数ビットのビットフィールド。MySqlConnector は幅に依らず ulong を返す
             // （bit(1) は上の真偽値慣習で先に bool へ寄せてある）
             "bit" => Value("ulong"),
@@ -143,8 +152,16 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
     private static string Normalize(string dataType) =>
         WhitespaceRegex().Replace(dataType.Trim().ToLowerInvariant(), " ");
 
-    /// <summary>長さ指定の括弧・末尾修飾子を除いた基本型名を取り出す（例: "int unsigned" → "int"）</summary>
-    private static string GetBaseType(string normalizedDataType)
+    /// <summary>長さ指定の括弧・末尾修飾子を除いた基本型名と、符号なし修飾子の有無を取り出す</summary>
+    /// <remarks>
+    /// 例: <c>"int unsigned"</c> → <c>("int", true)</c>。符号は整数型の CLR 型（byte / ushort / uint / ulong）を
+    /// 決めるため呼び出し側へ返す——落とすと符号付きの型で解決してしまい、範囲を超える値の読み出しが
+    /// <c>OverflowException</c> になる。<c>zerofill</c> / <c>signed</c> は CLR 型に影響しないため従来どおり無視する。
+    /// <c>unsigned</c> は<b>括弧の後ろ</b>に付く（<c>tinyint(1) unsigned</c>）ので、基本型名を取り出すための
+    /// 「括弧以降の切り捨て」では判定できない。括弧の中身だけを落とした文字列から別に判定する
+    /// （中身ごと落とすのは <c>enum('unsigned')</c> のような値リストを拾わないため）。
+    /// </remarks>
+    private static (string BaseType, bool IsUnsigned) GetBaseType(string normalizedDataType)
     {
         var name = normalizedDataType;
 
@@ -159,7 +176,10 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
         // 末尾修飾子（unsigned / zerofill / signed）を除去する（例: "int unsigned" → "int"）
         name = ModifierRegex().Replace(name, "").Trim();
 
-        return name;
+        var isUnsigned = UnsignedModifierRegex()
+            .IsMatch(TypeArgumentsRegex().Replace(normalizedDataType, " "));
+
+        return (name, isUnsigned);
     }
 
     /// <summary>MySQL の型別名を代表表記へ解決する（例: <c>integer</c> → <c>int</c>）</summary>
@@ -239,4 +259,12 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
     /// <summary>末尾修飾子（unsigned / zerofill / signed）を検出する正規表現</summary>
     [GeneratedRegex(@"\s*\b(unsigned|zerofill|signed)\b", RegexOptions.CultureInvariant)]
     private static partial Regex ModifierRegex();
+
+    /// <summary>符号なし修飾子だけを検出する正規表現（<c>signed</c> に一致しないよう語境界で区切る）</summary>
+    [GeneratedRegex(@"\bunsigned\b", RegexOptions.CultureInvariant)]
+    private static partial Regex UnsignedModifierRegex();
+
+    /// <summary>括弧の引数部（長さ・精度・enum / set の値リスト）を検出する正規表現</summary>
+    [GeneratedRegex(@"\([^)]*\)", RegexOptions.CultureInvariant)]
+    private static partial Regex TypeArgumentsRegex();
 }

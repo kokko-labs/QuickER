@@ -3,6 +3,7 @@ using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Services;
+using GuiStrings = QuickER.Resources.Strings;
 
 namespace QuickER.Tests.Gui.Services;
 
@@ -189,5 +190,158 @@ public class TableDefinitionCompositeForeignKeyTests
         var act = () => TableDefinitionDocumentImporter.Load(workbook);
 
         act.Should().Throw<System.IO.InvalidDataException>();
+    }
+
+    /// <summary>
+    /// 同じ親子の間に 2 本の外部キー（配送先・請求先）を持つ図を作る。
+    /// </summary>
+    /// <remarks>
+    /// 現実の注文と住所の関係そのもので、定義書は 1 行 1 リレーションで両方を書き出せる。
+    /// 重複判定がテーブルの組だけを見ていると、この定義書は読み戻せない（IF4）。
+    /// </remarks>
+    private static ErDiagram BuildTwoForeignKeysBetweenSameTablesDiagram()
+    {
+        var addressId = new Column
+        {
+            Name = "AddressId",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var address = new Entity { TableName = "Address", Columns = { addressId } };
+
+        var orderId = new Column
+        {
+            Name = "OrderId",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var shipTo = new Column
+        {
+            Name = "ShipToAddressId",
+            DataType = "int",
+            IsForeignKey = true,
+            IsNullable = false,
+        };
+        var billTo = new Column
+        {
+            Name = "BillToAddressId",
+            DataType = "int",
+            IsForeignKey = true,
+            IsNullable = false,
+        };
+        var order = new Entity { TableName = "Orders", Columns = { orderId, shipTo, billTo } };
+
+        return new ErDiagram
+        {
+            Entities = { address, order },
+            Relationships =
+            {
+                new Relationship
+                {
+                    SourceEntityId = address.Id,
+                    TargetEntityId = order.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(addressId.Id, shipTo.Id)],
+                    ConstraintName = "FK_Orders_ShipToAddress",
+                },
+                new Relationship
+                {
+                    SourceEntityId = address.Id,
+                    TargetEntityId = order.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(addressId.Id, billTo.Id)],
+                    ConstraintName = "FK_Orders_BillToAddress",
+                },
+            },
+        };
+    }
+
+    /// <summary>
+    /// 同じ親子の間の複数の外部キーが、Excel 定義書の往復で 2 本とも構成列ごと復元される（IF4）。
+    /// </summary>
+    [Fact(DisplayName = "Excel 定義書は同じ親子間の複数の外部キーを往復で復元する")]
+    public void ExcelRoundTrip_RestoresMultipleForeignKeysBetweenSameTables()
+    {
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+            BuildTwoForeignKeysBetweenSameTablesDiagram(),
+            culture: new CultureInfo("en")
+        );
+
+        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var address = diagram.Entities.Single(entity => entity.TableName == "Address");
+        var order = diagram.Entities.Single(entity => entity.TableName == "Orders");
+
+        diagram.Relationships.Should().HaveCount(2);
+
+        diagram
+            .Relationships.Select(relationship =>
+                (
+                    relationship.ConstraintName,
+                    order
+                        .Columns.Single(column =>
+                            column.Id == relationship.ColumnPairs.Single().TargetColumnId
+                        )
+                        .Name
+                )
+            )
+            .Should()
+            .BeEquivalentTo([
+                ("FK_Orders_ShipToAddress", "ShipToAddressId"),
+                ("FK_Orders_BillToAddress", "BillToAddressId"),
+            ]);
+
+        // 参照先はどちらも親の主キー
+        diagram
+            .Relationships.Should()
+            .OnlyContain(relationship =>
+                relationship.ColumnPairs.Single().SourceColumnId
+                == address.Columns.Single(column => column.Name == "AddressId").Id
+            );
+
+        // 構成列はどちらも FK 化される
+        order
+            .Columns.Single(column => column.Name == "ShipToAddressId")
+            .IsForeignKey.Should()
+            .BeTrue();
+        order
+            .Columns.Single(column => column.Name == "BillToAddressId")
+            .IsForeignKey.Should()
+            .BeTrue();
+    }
+
+    /// <summary>
+    /// テーブルの組・構成列がまったく同じ 2 行は、従来どおり重複として弾かれる（IF4 で緩めすぎていないこと）。
+    /// </summary>
+    [Fact(DisplayName = "Excel 取込は構成列まで同一のリレーション行を重複として弾く")]
+    public void ExcelImport_IdenticalRelationshipRow_Throws()
+    {
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+            BuildTwoForeignKeysBetweenSameTablesDiagram(),
+            culture: new CultureInfo("en")
+        );
+
+        // 請求先の行の参照元列を配送先と同じにし、構成列まで同一の 2 行を作る
+        var sheet = workbook
+            .DefinedNames.Single(defined =>
+                defined.Name == TableDefinitionDocumentLayout.RelationshipsDefinedName
+            )
+            .Ranges.First()
+            .Worksheet;
+        var row = TableDefinitionDocumentLayout.RelationshipDataStartRow;
+
+        while (sheet.Cell(row, 2).GetString() != "FK_Orders_BillToAddress")
+        {
+            row++;
+        }
+
+        sheet.Cell(row, 4).Value = "ShipToAddressId";
+
+        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+
+        act.Should()
+            .Throw<System.IO.InvalidDataException>()
+            .WithMessage(string.Format(GuiStrings.TableDoc_RelDuplicate, "Address", "Orders"));
     }
 }

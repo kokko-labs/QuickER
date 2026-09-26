@@ -278,15 +278,20 @@ public static partial class TableDefinitionDocumentImporter
     }
 
     /// <summary>リレーション一覧シートからリレーションを復元し、参照列の外部キー化を行う</summary>
-    /// <remarks>参照元（FK 側）は子テーブル、参照先（PK 側）は親テーブルに対応する</remarks>
+    /// <remarks>
+    /// 参照元（FK 側）は子テーブル、参照先（PK 側）は親テーブルに対応する。
+    /// 重複の判定はテーブルの組だけでなく<b>構成列まで</b>含める——同じ親子の間に複数の外部キー
+    /// （配送先・請求先など）を持つ図を定義書は 1 行 1 リレーションで書き出せるため、
+    /// テーブルの組だけで弾くとその定義書を読み戻せない。
+    /// </remarks>
     private static List<Relationship> ReadRelationshipSheet(
         IXLWorksheet worksheet,
         IReadOnlyDictionary<string, Entity> entities
     )
     {
         var relationships = new List<Relationship>();
-        var existingPairs = new HashSet<(string Parent, string Child)>(
-            StringComparerOrdinalIgnoreCaseTupleComparer.Instance
+        var existingSignatures = new HashSet<RelationshipSignature>(
+            RelationshipSignatureComparer.Instance
         );
 
         for (var row = TableDefinitionDocumentLayout.RelationshipDataStartRow; ; row++)
@@ -326,13 +331,6 @@ public static partial class TableDefinitionDocumentImporter
                 );
             }
 
-            if (!existingPairs.Add((parent.TableName, child.TableName)))
-            {
-                throw new InvalidDataException(
-                    string.Format(Strings.TableDoc_RelDuplicate, parent.TableName, child.TableName)
-                );
-            }
-
             var type = ParseRelationshipType(GetCellText(worksheet, row, 7), row);
             var relationship = new Relationship
             {
@@ -344,11 +342,16 @@ public static partial class TableDefinitionDocumentImporter
                 OnUpdate = ForeignKeyReferentialActionHelper.Parse(GetCellText(worksheet, row, 9)),
             };
 
+            // 多対多は列対応を持たない（ジャンクションテーブル前提）ため構成列は空のまま＝
+            // 署名はテーブルの組だけになり、同一ペアの 2 行目は従来どおり重複として弾かれる
+            var childColumnNames = new List<string>();
+            var parentColumnNames = new List<string>();
+
             if (type != RelationshipType.ManyToMany)
             {
                 // 複合外部キーはカンマ区切りの複数列表記（単一列は列名 1 つ）
-                var childColumnNames = SplitColumnNames(GetCellText(worksheet, row, 4));
-                var parentColumnNames = SplitColumnNames(GetCellText(worksheet, row, 6));
+                childColumnNames = SplitColumnNames(GetCellText(worksheet, row, 4));
+                parentColumnNames = SplitColumnNames(GetCellText(worksheet, row, 6));
 
                 if (childColumnNames.Count == 0 || parentColumnNames.Count == 0)
                 {
@@ -363,7 +366,27 @@ public static partial class TableDefinitionDocumentImporter
                         string.Format(Strings.TableDoc_RelColumnCountMismatch, row)
                     );
                 }
+            }
 
+            // 構成列まで含めた署名で重複を判定する（列名の解決より前＝行の書かれ方だけで決まる）
+            if (
+                !existingSignatures.Add(
+                    new RelationshipSignature(
+                        parent.TableName,
+                        child.TableName,
+                        string.Join(',', parentColumnNames),
+                        string.Join(',', childColumnNames)
+                    )
+                )
+            )
+            {
+                throw new InvalidDataException(
+                    string.Format(Strings.TableDoc_RelDuplicate, parent.TableName, child.TableName)
+                );
+            }
+
+            if (type != RelationshipType.ManyToMany)
+            {
                 var pairs = new List<RelationshipColumnPair>();
 
                 for (var i = 0; i < childColumnNames.Count; i++)
@@ -477,26 +500,61 @@ public static partial class TableDefinitionDocumentImporter
     /// <summary>テーブル一覧シート 1 行分の情報</summary>
     private sealed record TableSummaryRow(string TableName, string Description, string Memo);
 
-    /// <summary>親子テーブル名の組を大文字小文字無視で比較する比較器（重複検出に用いる）</summary>
-    private sealed class StringComparerOrdinalIgnoreCaseTupleComparer
-        : IEqualityComparer<(string Parent, string Child)>
+    /// <summary>リレーション行の同一性を表す署名（重複検出に用いる）</summary>
+    /// <param name="Parent">親（参照先）テーブル名</param>
+    /// <param name="Child">子（参照元）テーブル名</param>
+    /// <param name="ParentColumns">参照先列をセルの宣言順でカンマ連結したもの（多対多は空文字）</param>
+    /// <param name="ChildColumns">参照元列をセルの宣言順でカンマ連結したもの（多対多は空文字）</param>
+    /// <remarks>
+    /// 構成列を含めるのは、同じ親子の間に複数の外部キーを持つ図を読み戻せるようにするため。
+    /// 制約名は署名へ含めない——テーブルと構成列が同じで名前だけ違う 2 行は、DB としても区別に
+    /// 意味がなく、重複行として止めるほうが検査の意味が残る。
+    /// 列名は定義書の表記どおり（カンマ区切りセルの分割結果）を連結する＝セルが列名にカンマを
+    /// 含められない以上、この連結で取り違えは起きない。
+    /// </remarks>
+    private sealed record RelationshipSignature(
+        string Parent,
+        string Child,
+        string ParentColumns,
+        string ChildColumns
+    );
+
+    /// <summary>リレーション署名を大文字小文字無視で比較する比較器（重複検出に用いる）</summary>
+    private sealed class RelationshipSignatureComparer : IEqualityComparer<RelationshipSignature>
     {
         /// <summary>共有インスタンス</summary>
-        public static StringComparerOrdinalIgnoreCaseTupleComparer Instance { get; } = new();
+        public static RelationshipSignatureComparer Instance { get; } = new();
 
         /// <inheritdoc />
-        public bool Equals((string Parent, string Child) x, (string Parent, string Child) y)
+        public bool Equals(RelationshipSignature? x, RelationshipSignature? y)
         {
+            if (x is null || y is null)
+            {
+                return ReferenceEquals(x, y);
+            }
+
             return string.Equals(x.Parent, y.Parent, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(x.Child, y.Child, StringComparison.OrdinalIgnoreCase);
+                && string.Equals(x.Child, y.Child, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    x.ParentColumns,
+                    y.ParentColumns,
+                    StringComparison.OrdinalIgnoreCase
+                )
+                && string.Equals(
+                    x.ChildColumns,
+                    y.ChildColumns,
+                    StringComparison.OrdinalIgnoreCase
+                );
         }
 
         /// <inheritdoc />
-        public int GetHashCode((string Parent, string Child) obj)
+        public int GetHashCode(RelationshipSignature obj)
         {
             return HashCode.Combine(
                 StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Parent),
-                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Child)
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Child),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.ParentColumns),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.ChildColumns)
             );
         }
     }

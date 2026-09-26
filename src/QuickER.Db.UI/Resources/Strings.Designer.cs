@@ -395,6 +395,12 @@ namespace QuickER.Db.UI.Resources {
                 return ResourceManager.GetString("DbConnection_DeleteProfileConfirm", resourceCulture);
             }
         }
+        
+        public static string DbConnection_OverwriteProfileConfirm {
+            get {
+                return ResourceManager.GetString("DbConnection_OverwriteProfileConfirm", resourceCulture);
+            }
+        }
 
         public static string DbConnection_ProfileDeleted {
             get {

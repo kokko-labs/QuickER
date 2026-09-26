@@ -2,7 +2,10 @@ using System.Text;
 
 namespace QuickER.Services;
 
-/// <summary>DBML の単一引用符リテラル（<c>Note: '…'</c> / <c>note: '…'</c> / <c>name: '…'</c>）の相互変換</summary>
+/// <summary>
+/// DBML のリテラル（単一引用符の <c>Note: '…'</c> / <c>note: '…'</c> / <c>name: '…'</c> と、
+/// 二重引用符の引用識別子 <c>"列 名"</c>）の相互変換
+/// </summary>
 /// <remarks>
 /// <para>
 /// エスケープと復元は必ず対で保つ。バックスラッシュを二重化せずに <c>'</c> だけを <c>\'</c> にすると、
@@ -18,17 +21,24 @@ namespace QuickER.Services;
 /// </remarks>
 internal static class DbmlLiteral
 {
-    /// <summary>DBML の単一引用符リテラルへ埋め込める形へエスケープする（引用符自体は呼び出し側が付ける）</summary>
-    public static string Escape(string? text) =>
+    /// <summary>
+    /// DBML のリテラルへ埋め込める形へエスケープする（引用符自体は呼び出し側が付ける）
+    /// </summary>
+    /// <param name="text">埋め込む文字列</param>
+    /// <param name="quote">囲む引用符。既定は単一引用符、引用識別子では <c>"</c> を渡す</param>
+    public static string Escape(string? text, char quote = '\'') =>
         // バックスラッシュを先に二重化する（後続の \' を二重エスケープしないため）
-        ExportTextSanitizer.Sanitize(text).Replace("\\", "\\\\").Replace("'", "\\'");
+        ExportTextSanitizer.Sanitize(text).Replace("\\", "\\\\").Replace($"{quote}", $"\\{quote}");
 
-    /// <summary>DBML の単一引用符リテラルの中身を元の文字列へ復元する</summary>
+    /// <summary>DBML のリテラルの中身を元の文字列へ復元する</summary>
+    /// <param name="text">引用符を除いたリテラルの中身</param>
+    /// <param name="quote">囲んでいた引用符。<see cref="Escape"/> へ渡した値と対で指定する</param>
     /// <remarks>
-    /// 左から 1 パスで <c>\\</c> と <c>\'</c> だけを解く。<c>Replace("\\\\", "\\")</c> と
-    /// <c>Replace("\\'", "'")</c> を順に掛けると、解いた結果がもう一方のエスケープに見えて二重に解けてしまう。
+    /// 左から 1 パスで <c>\\</c> と <c>\'</c>（引用識別子では <c>\"</c>）だけを解く。
+    /// <c>Replace("\\\\", "\\")</c> と <c>Replace("\\'", "'")</c> を順に掛けると、
+    /// 解いた結果がもう一方のエスケープに見えて二重に解けてしまう。
     /// </remarks>
-    public static string Unescape(string text)
+    public static string Unescape(string text, char quote = '\'')
     {
         if (!text.Contains('\\'))
         {
@@ -39,11 +49,11 @@ internal static class DbmlLiteral
 
         for (var i = 0; i < text.Length; i++)
         {
-            // エスケープ対象（\\ と \'）のときだけ次の 1 文字を素の文字として採用する
+            // エスケープ対象（\\ と \<引用符>）のときだけ次の 1 文字を素の文字として採用する
             if (
                 text[i] == '\\'
                 && i + 1 < text.Length
-                && (text[i + 1] == '\\' || text[i + 1] == '\'')
+                && (text[i + 1] == '\\' || text[i + 1] == quote)
             )
             {
                 i++;

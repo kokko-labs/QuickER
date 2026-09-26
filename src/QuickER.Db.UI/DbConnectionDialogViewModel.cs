@@ -495,6 +495,13 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     }
 
     /// <summary>現在の入力内容を名前付きプロファイルとして保存する（同名があれば上書きする）</summary>
+    /// <remarks>
+    /// 保存名がキー＝「現在の入力内容を保存名で保存する」（ボタンのツールチップのとおり）。
+    /// 上書き先が<b>選択中でない別のプロファイル</b>になるときだけ、上書き前に確認する——
+    /// 保存名を打ち間違えた・使い回しただけで、本番の接続先と保存済みパスワードが警告なく失われるため
+    /// （プロファイルに履歴も取り消しも無く、同じダイアログの削除には確認がある）。
+    /// 選択中のプロファイル自身の上書き（読み込んで直して保存）は従来どおり確認しない。
+    /// </remarks>
     [RelayCommand]
     private void SaveProfile()
     {
@@ -514,12 +521,38 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             )
         );
 
+        if (!ConfirmOverwriteOtherProfile(existing?.Profile))
+        {
+            return;
+        }
+
         var profile = CreateCurrentProfile(existing?.Profile.Id, ProfileName.Trim());
 
         _store.Upsert(profile, Password);
         ReloadProfiles();
         SelectedProfileItem = Profiles.FirstOrDefault(p => p.Profile.Id == profile.Id);
         StatusMessage = string.Format(Strings.DbConnection_ProfileSaved, profile.Name);
+    }
+
+    /// <summary>
+    /// 上書き先が選択中でない別のプロファイルなら確認を取る（続行してよければ <c>true</c>）
+    /// </summary>
+    /// <param name="target">上書き先のプロファイル。新規保存なら <c>null</c></param>
+    /// <remarks>
+    /// 失うのは本番の接続先と保存済みパスワードで、取り消す手段が無い。
+    /// 削除と同じ <see cref="IDialogService.ConfirmWarning"/>（警告つき）で出す。
+    /// </remarks>
+    private bool ConfirmOverwriteOtherProfile(SqlConnectionProfile? target)
+    {
+        if (target is null || target.Id == SelectedProfile?.Id)
+        {
+            return true;
+        }
+
+        return _dialogs.ConfirmWarning(
+            string.Format(Strings.DbConnection_OverwriteProfileConfirm, target.Name),
+            Strings.Common_Confirm
+        );
     }
 
     /// <summary>選択中プロファイルを確認のうえ削除する</summary>

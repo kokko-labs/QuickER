@@ -810,6 +810,12 @@
   <data name="Dbml_UnsupportedRelationshipSymbol" xml:space="preserve">
     <value>Unsupported relationship symbol '{0}'.</value>
   </data>
+  <data name="Dbml_UnsupportedLine" xml:space="preserve">
+    <value>Cannot interpret this DBML line: '{0}'.</value>
+  </data>
+  <data name="Dbml_UnsupportedRelationshipForm" xml:space="preserve">
+    <value>Unsupported relationship form: '{0}'. Only the short form without a name (Ref: parent.column &lt; child.column) is supported.</value>
+  </data>
   <data name="Mermaid_EmptyText" xml:space="preserve">
     <value>The Mermaid text is empty.</value>
   </data>

@@ -832,6 +832,12 @@
   <data name="Dbml_UnsupportedRelationshipSymbol" xml:space="preserve">
     <value>未対応のリレーション記号 '{0}' です。</value>
   </data>
+  <data name="Dbml_UnsupportedLine" xml:space="preserve">
+    <value>解釈できない DBML の行です: '{0}'。</value>
+  </data>
+  <data name="Dbml_UnsupportedRelationshipForm" xml:space="preserve">
+    <value>未対応のリレーション記法です: '{0}'。名前なしの短縮形（Ref: 親.列 &lt; 子.列）だけに対応しています。</value>
+  </data>
   <data name="Mermaid_EmptyText" xml:space="preserve">
     <value>Mermaid テキストが空です。</value>
   </data>

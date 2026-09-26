@@ -1831,6 +1831,18 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Dbml_UnsupportedLine {
+            get {
+                return ResourceManager.GetString("Dbml_UnsupportedLine", resourceCulture);
+            }
+        }
+        
+        public static string Dbml_UnsupportedRelationshipForm {
+            get {
+                return ResourceManager.GetString("Dbml_UnsupportedRelationshipForm", resourceCulture);
+            }
+        }
+        
         public static string Mermaid_EmptyText {
             get {
                 return ResourceManager.GetString("Mermaid_EmptyText", resourceCulture);

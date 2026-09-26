@@ -229,6 +229,9 @@
   <data name="DbConnection_DeleteProfileConfirm" xml:space="preserve">
     <value>Delete profile '{0}'. Are you sure?</value>
   </data>
+  <data name="DbConnection_OverwriteProfileConfirm" xml:space="preserve">
+    <value>A different profile named '{0}' already exists. Overwriting it replaces its connection settings and saved password, and cannot be undone. Continue?</value>
+  </data>
   <data name="DbConnection_ProfileDeleted" xml:space="preserve">
     <value>Deleted profile '{0}'.</value>
   </data>

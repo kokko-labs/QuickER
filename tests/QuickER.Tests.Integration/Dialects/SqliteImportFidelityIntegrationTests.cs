@@ -501,11 +501,48 @@ CREATE TABLE widgets (
         warning.Subject.Should().Be("id");
     }
 
-    /// <summary>複合主キーは rowid 別名になり得ないため、非 INTEGER でなくても列ごとに警告される（SL3）。</summary>
+    /// <summary>
+    /// 複合主キーは rowid 別名になり得ないため、構成列が NULL 許容のままなら列ごとに警告される（SL3）。
+    /// </summary>
     [Fact(
-        DisplayName = "[Integration] SQLite: 複合主キーは rowid 別名になり得ず列ごとに警告される"
+        DisplayName = "[Integration] SQLite: NULL 許容の複合主キーは rowid 別名になり得ず列ごとに警告される"
     )]
-    public async Task Import_CompositePrimaryKey_WarnsPerColumn()
+    public async Task Import_CompositePrimaryKeyWithoutNotNull_WarnsPerColumn()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE composite_pk (
+    a TEXT,
+    b TEXT,
+    PRIMARY KEY (a, b)
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        var warnings = result
+            .Warnings.Where(w => w.Kind == SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted)
+            .ToList();
+        warnings.Should().OnlyContain(w => w.TableName == "composite_pk");
+        warnings.Select(w => w.Subject).Should().BeEquivalentTo(["a", "b"]);
+    }
+
+    /// <summary>
+    /// 構成列が最初から <c>NOT NULL</c> の複合主キーは補正していないため警告されない（SL3・RI1）。
+    /// </summary>
+    /// <remarks>
+    /// 他の DB から移したスキーマでごく普通に現れる形。ここで鳴ると
+    /// 「補正した列を名指しする」という警告の意味が失われる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 明示 NOT NULL の複合主キーは補正していないため警告されない"
+    )]
+    public async Task Import_CompositePrimaryKeyDeclaredNotNull_DoesNotWarn()
     {
         using var db = SqliteTempDatabase.Create();
 
@@ -523,10 +560,44 @@ CREATE TABLE composite_pk (
         await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
         var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
 
+        // 補正自体は従来どおり（意味モデル・GUI は主キーを常に NOT NULL とする）
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        entity.Columns.Should().OnlyContain(c => !c.IsNullable);
+
+        result
+            .Warnings.Should()
+            .NotContain(w => w.Kind == SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted);
+    }
+
+    /// <summary>
+    /// 構成列ごとに宣言が違う複合主キーでは、実際に補正した列だけが警告される（SL3・RI1）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 複合主キーの警告は NULL 許容だった列だけを名指しする"
+    )]
+    public async Task Import_CompositePrimaryKeyMixedNullability_WarnsOnlyAdjustedColumn()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE mixed_pk (
+    a TEXT NOT NULL,
+    b TEXT,
+    PRIMARY KEY (a, b)
+);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
         var warnings = result
             .Warnings.Where(w => w.Kind == SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted)
             .ToList();
-        warnings.Should().OnlyContain(w => w.TableName == "composite_pk");
-        warnings.Select(w => w.Subject).Should().BeEquivalentTo(["a", "b"]);
+        warnings.Should().ContainSingle();
+        warnings[0].TableName.Should().Be("mixed_pk");
+        warnings[0].Subject.Should().Be("b");
     }
 }

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using QuickER.Model;
 using QuickER.Resources;
@@ -40,11 +41,20 @@ public static partial class DbmlImporter
     /// <summary><c>Indexes {</c> ブロック開始行を検出する正規表現</summary>
     private static readonly Regex IndexesHeaderRegex = IndexesHeaderLineRegex();
 
-    /// <summary><c>Indexes</c> ブロック内の索引定義行を解析する正規表現</summary>
-    private static readonly Regex IndexLineRegex = IndexDefinitionLineRegex();
-
     /// <summary>索引設定の <c>name: '...'</c> を解析する正規表現</summary>
     private static readonly Regex IndexNameRegex = IndexSettingNameRegex();
+
+    /// <summary>QuickER が扱わない DBML のトップレベルブロック開始行を検出する正規表現</summary>
+    private static readonly Regex SkippableBlockRegex = SkippableBlockLineRegex();
+
+    /// <summary><c>Table</c> ブロック内の未対応ブロック開始行を検出する正規表現</summary>
+    private static readonly Regex SkippableTableBlockRegex = SkippableTableBlockLineRegex();
+
+    /// <summary><c>Ref</c> で始まる行を検出する正規表現（未対応形式の告知に使う）</summary>
+    private static readonly Regex RefKeywordRegex = RefKeywordLineRegex();
+
+    /// <summary><c>Note</c> で始まる行を検出する正規表現（未対応の複数行 Note の告知に使う）</summary>
+    private static readonly Regex NoteKeywordRegex = NoteKeywordLineRegex();
 
     /// <summary>
     /// DBML ファイルを読み込み ER 図へ変換する
@@ -80,12 +90,24 @@ public static partial class DbmlImporter
         // 未閉じブロックの診断はループを抜けてから判明するため、ブロック開始行を覚えておく
         var currentEntityLineNumber = 0;
         var inIndexesBlock = false;
+        // 複数行にまたがる構文（ブロックコメント・複数行リテラル）の持ち越し状態
+        var scanState = ScanState.None;
+        // QuickER が扱わない DBML ブロックを読み飛ばしている間の波括弧の深さ
+        var skipDepth = 0;
 
         // 行単位の状態機械: currentEntity が非 null の間は Table ブロック内としてカラム行を解釈する
         for (var index = 0; index < lines.Length; index++)
         {
             var lineNumber = index + 1;
-            var line = RemoveComment(lines[index]).Trim();
+            var (scanned, braceDelta) = ScanLine(lines[index], ref scanState);
+            var line = scanned.Trim();
+
+            // 読み飛ばし中のブロックは、対応する閉じ括弧に達するまで中身を解釈しない
+            if (skipDepth > 0)
+            {
+                skipDepth = Math.Max(0, skipDepth + braceDelta);
+                continue;
+            }
 
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -135,6 +157,13 @@ public static partial class DbmlImporter
                         continue;
                     }
 
+                    // テーブル内の未対応ブロック（checks / records）はカラム定義として解釈せず読み飛ばす
+                    if (SkippableTableBlockRegex.IsMatch(line))
+                    {
+                        skipDepth = Math.Max(0, braceDelta);
+                        continue;
+                    }
+
                     // テーブルの説明（DBML 標準の Note: 行）。カラム定義として解釈しない
                     var tableNote = TableNoteRegex.Match(line);
 
@@ -144,6 +173,15 @@ public static partial class DbmlImporter
                             tableNote.Groups["note"].Value
                         );
                         continue;
+                    }
+
+                    // 1 行で閉じない Note（複数行リテラル）は未対応。カラム定義として解釈すると
+                    // "Note:" という名前の幻のカラムができる
+                    if (NoteKeywordRegex.IsMatch(line))
+                    {
+                        throw new InvalidDataException(
+                            string.Format(Strings.Dbml_UnsupportedLine, line)
+                        );
                     }
 
                     var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
@@ -164,7 +202,7 @@ public static partial class DbmlImporter
 
                 if (tableMatch.Success)
                 {
-                    var tableName = tableMatch.Groups["table"].Value;
+                    var tableName = UnquoteIdentifier(tableMatch.Groups["table"].Value);
 
                     if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
                     {
@@ -188,6 +226,26 @@ public static partial class DbmlImporter
                     pendingRelationshipColumns.Add((relationship, sourceColumns, targetColumns));
                     continue;
                 }
+
+                // QuickER が表せない情報しか持たないブロックは読み飛ばす（従来と同じ寛容さ）
+                if (SkippableBlockRegex.IsMatch(line))
+                {
+                    skipDepth = Math.Max(0, braceDelta);
+                    continue;
+                }
+
+                // 名前付き Ref（Ref name: …）とブロック形式（Ref … { … }）は未対応。
+                // 読み飛ばすとリレーションが黙って消えるため、行を名指しして拒否する
+                if (RefKeywordRegex.IsMatch(line))
+                {
+                    throw new InvalidDataException(
+                        string.Format(Strings.Dbml_UnsupportedRelationshipForm, line)
+                    );
+                }
+
+                // ここへ来る行は QuickER が解釈できない。黙って捨てると、書式に一致しなかった
+                // Table 行ごとテーブルが消えるといった欠落が気づけないまま残る
+                throw new InvalidDataException(string.Format(Strings.Dbml_UnsupportedLine, line));
             }
             catch (InvalidDataException ex)
             {
@@ -219,25 +277,32 @@ public static partial class DbmlImporter
     /// DBML のカラム定義行（<c>名前 型 [設定, ...]</c>）を解析する
     /// </summary>
     /// <remarks>
-    /// 型名は空白を含んでもよい（2 番目以降のトークンをすべて型として連結する）。
+    /// <para>
+    /// 名前は素の識別子と引用識別子（<c>"列 名"</c>）の双方を受け付ける。型名は空白を含んでもよく、
+    /// 素の記法（<c>timestamp without time zone</c>）と引用（<c>"double precision"</c>）の双方に対応する。
     /// 設定省略時は NULL 許可を既定とし、<c>pk</c> 指定時は NOT NULL を強制する。
     /// note 内のエスケープ（<c>\\</c> と <c>\'</c>）は <see cref="DbmlLiteral.Unescape"/> で復元する
+    /// </para>
+    /// <para>
+    /// 設定ブロックの開始は <see cref="FindSettingsBracket"/> が決める（最初の <c>[</c> ではない）。
+    /// 囲まれていない配列型 <c>integer[]</c> の角括弧を設定の開始と取り違えないため。
+    /// </para>
     /// </remarks>
     /// <returns>復元したカラムと、カラム設定 <c>unique</c> が指定されていたか</returns>
     /// <exception cref="InvalidDataException">名前と型の 2 トークンに満たない場合</exception>
     private static (Column Column, bool IsUnique) ParseColumn(string line, string tableName)
     {
         var trimmed = line.Trim();
-        var bracketStart = trimmed.IndexOf('[');
+        var bracketStart = FindSettingsBracket(trimmed);
         var bracketEnd = trimmed.LastIndexOf(']');
         var definition = bracketStart >= 0 ? trimmed[..bracketStart].Trim() : trimmed;
         var optionText =
             bracketStart >= 0 && bracketEnd > bracketStart
                 ? trimmed[(bracketStart + 1)..bracketEnd]
                 : string.Empty;
-        var tokens = definition.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var (name, dataType) = SplitNameAndType(definition);
 
-        if (tokens.Length < 2)
+        if (name.Length == 0 || dataType.Length == 0)
         {
             throw new InvalidDataException(
                 string.Format(Strings.Dbml_ColumnParseError, tableName, line)
@@ -246,8 +311,8 @@ public static partial class DbmlImporter
 
         var column = new Column
         {
-            Name = tokens[0],
-            DataType = string.Join(' ', tokens.Skip(1)),
+            Name = name,
+            DataType = dataType,
             IsNullable = true,
         };
         var isUnique = false;
@@ -297,6 +362,44 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
+    /// カラム定義の「名前 型」部分を、名前と型へ分ける
+    /// </summary>
+    /// <remarks>
+    /// 名前は先頭の 1 トークン（引用識別子ならその全体）で、残りがすべて型。
+    /// 型が引用識別子 1 つだけなら引用符を外す（<c>"double precision"</c> → <c>double precision</c>）。
+    /// </remarks>
+    private static (string Name, string DataType) SplitNameAndType(string definition)
+    {
+        var text = definition.Trim();
+
+        if (text.Length == 0)
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        int nameEnd;
+
+        if (text[0] == '"')
+        {
+            nameEnd = SkipLiteral(text, 0, '"');
+        }
+        else
+        {
+            nameEnd = text.IndexOf(' ', StringComparison.Ordinal);
+
+            if (nameEnd < 0)
+            {
+                return (UnquoteIdentifier(text), string.Empty);
+            }
+        }
+
+        var name = UnquoteIdentifier(text[..nameEnd].Trim());
+        var dataType = text[nameEnd..].Trim();
+
+        return (name, UnquoteIdentifier(dataType));
+    }
+
+    /// <summary>
     /// <c>Indexes</c> ブロック内の 1 行を解析し、一意索引なら制約名と構成列名を返す
     /// </summary>
     /// <returns>一意索引なら（名前・構成列名）。<c>unique</c> でない索引は <c>null</c>（読み飛ばす）</returns>
@@ -306,21 +409,31 @@ public static partial class DbmlImporter
         string tableName
     )
     {
-        var match = IndexLineRegex.Match(line);
+        var trimmed = line.Trim();
+        var bracketStart = FindSettingsBracket(trimmed);
+        var bracketEnd = trimmed.LastIndexOf(']');
+        var head = (bracketStart >= 0 ? trimmed[..bracketStart] : trimmed).Trim();
+        var settingText =
+            bracketStart >= 0 && bracketEnd > bracketStart
+                ? trimmed[(bracketStart + 1)..bracketEnd]
+                : string.Empty;
 
-        if (!match.Success)
+        if (head.Length == 0)
         {
             throw new InvalidDataException(
                 string.Format(Strings.Dbml_IndexParseError, tableName, line)
             );
         }
 
-        // 括弧つき（複数列可）と括弧なし（単一列）のどちらの記法でも列名一覧として扱う
-        var columnsText = match.Groups["columns"].Success
-            ? match.Groups["columns"].Value
-            : match.Groups["singleColumn"].Value;
-        var columns = columnsText
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        // 括弧つき（複数列可）と括弧なし（単一列）のどちらの記法でも列名一覧として扱う。
+        // 分割はリテラルの外のカンマだけで行う（引用識別子にカンマを含められるため）
+        var columns = (
+            head.StartsWith('(') && head.EndsWith(')')
+                ? SplitOutsideLiterals(head[1..^1], ',')
+                : [head]
+        )
+            .Select(UnquoteIdentifier)
+            .Where(column => column.Length > 0)
             .ToList();
 
         if (columns.Count == 0)
@@ -333,7 +446,7 @@ public static partial class DbmlImporter
         var isUnique = false;
         string? name = null;
 
-        foreach (var option in SplitOptions(match.Groups["settings"].Value))
+        foreach (var option in SplitOptions(settingText))
         {
             if (string.Equals(option, "unique", StringComparison.OrdinalIgnoreCase))
             {
@@ -422,8 +535,8 @@ public static partial class DbmlImporter
             );
         }
 
-        var leftTable = match.Groups["leftTable"].Value;
-        var rightTable = match.Groups["rightTable"].Value;
+        var leftTable = UnquoteIdentifier(match.Groups["leftTable"].Value);
+        var rightTable = UnquoteIdentifier(match.Groups["rightTable"].Value);
         var symbol = match.Groups["symbol"].Value;
         var (constraintName, onDelete, onUpdate) = ParseRelationshipSettings(
             match.Groups["settings"].Success ? match.Groups["settings"].Value : string.Empty
@@ -534,15 +647,12 @@ public static partial class DbmlImporter
     {
         if (!match.Groups[listGroupName].Success)
         {
-            return [match.Groups[singleGroupName].Value];
+            return [UnquoteIdentifier(match.Groups[singleGroupName].Value)];
         }
 
-        return match
-            .Groups[listGroupName]
-            .Value.Split(
-                ',',
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
-            )
+        // 分割はリテラルの外のカンマだけで行う（引用識別子にカンマを含められるため）
+        return SplitOutsideLiterals(match.Groups[listGroupName].Value, ',')
+            .Select(UnquoteIdentifier)
             .ToList();
     }
 
@@ -594,14 +704,254 @@ public static partial class DbmlImporter
         }
     }
 
-    /// <summary>
-    /// <c>//</c> 以降の行コメントを除去する
-    /// </summary>
-    private static string RemoveComment(string line)
+    /// <summary>行の走査で次の行へ持ち越す状態（複数行にまたがる構文）</summary>
+    private enum ScanState
     {
-        var index = line.IndexOf("//", StringComparison.Ordinal);
-        return index >= 0 ? line[..index] : line;
+        /// <summary>通常</summary>
+        None,
+
+        /// <summary><c>/* … */</c> の途中</summary>
+        BlockComment,
+
+        /// <summary>複数行リテラル <c>''' … '''</c> の途中</summary>
+        TripleQuote,
     }
+
+    /// <summary>
+    /// 1 行からコメントを取り除き、あわせてリテラルの外にある波括弧の増減を数える
+    /// </summary>
+    /// <param name="raw">元の行</param>
+    /// <param name="state">複数行構文の状態（行をまたいで持ち回る）</param>
+    /// <returns>コメントを除いた行と、この行での波括弧の増減</returns>
+    /// <remarks>
+    /// <para>
+    /// リテラル（<c>'…'</c> / <c>"…"</c> / <c>''' … '''</c>）の中身は素通しする。<c>//</c> を無条件に
+    /// 切り落とすと、説明に URL を書いただけで <c>note: 'see http://example.com'</c> が途中で切れる。
+    /// </para>
+    /// <para>
+    /// 波括弧を数えるのは、QuickER が扱わない DBML のブロック（<c>Project</c> 等）を読み飛ばすため。
+    /// リテラルの中の <c>{</c> <c>}</c> を数えると対応がずれてブロックの終わりを見失う。
+    /// </para>
+    /// </remarks>
+    private static (string Text, int BraceDelta) ScanLine(string raw, ref ScanState state)
+    {
+        var builder = new StringBuilder(raw.Length);
+        var braceDelta = 0;
+        var index = 0;
+
+        while (index < raw.Length)
+        {
+            if (state == ScanState.BlockComment)
+            {
+                var end = raw.IndexOf("*/", index, StringComparison.Ordinal);
+
+                if (end < 0)
+                {
+                    break;
+                }
+
+                state = ScanState.None;
+                index = end + 2;
+                continue;
+            }
+
+            if (state == ScanState.TripleQuote)
+            {
+                var end = raw.IndexOf("'''", index, StringComparison.Ordinal);
+
+                if (end < 0)
+                {
+                    break;
+                }
+
+                state = ScanState.None;
+                index = end + 3;
+                continue;
+            }
+
+            var rest = raw.AsSpan(index);
+
+            // 複数行リテラルの開始。記号そのものは残す（行の種類の判定に使う）
+            if (rest.StartsWith("'''", StringComparison.Ordinal))
+            {
+                state = ScanState.TripleQuote;
+                builder.Append("'''");
+                index += 3;
+                continue;
+            }
+
+            if (rest.StartsWith("//", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            if (rest.StartsWith("/*", StringComparison.Ordinal))
+            {
+                state = ScanState.BlockComment;
+                index += 2;
+                continue;
+            }
+
+            var ch = raw[index];
+
+            if (ch is '\'' or '"')
+            {
+                index = AppendLiteral(raw, index, ch, builder);
+                continue;
+            }
+
+            if (ch == '{')
+            {
+                braceDelta++;
+            }
+            else if (ch == '}')
+            {
+                braceDelta--;
+            }
+
+            builder.Append(ch);
+            index++;
+        }
+
+        return (builder.ToString(), braceDelta);
+    }
+
+    /// <summary>1 行で閉じるリテラルを引用符ごと素通しで写し、次の走査位置を返す</summary>
+    /// <remarks>閉じないまま行末に達した場合は、その行の残りをリテラルとして扱う</remarks>
+    private static int AppendLiteral(string raw, int start, char quote, StringBuilder builder)
+    {
+        builder.Append(raw[start]);
+        var index = start + 1;
+
+        while (index < raw.Length)
+        {
+            // エスケープ（\' / \" / \\）は 2 文字で 1 組
+            if (raw[index] == '\\' && index + 1 < raw.Length)
+            {
+                builder.Append(raw[index]).Append(raw[index + 1]);
+                index += 2;
+                continue;
+            }
+
+            builder.Append(raw[index]);
+            index++;
+
+            if (raw[index - 1] == quote)
+            {
+                break;
+            }
+        }
+
+        return index;
+    }
+
+    /// <summary>
+    /// 設定ブロック（<c>[…]</c>）の開始位置を返す（無ければ -1）
+    /// </summary>
+    /// <remarks>
+    /// リテラルの外にあり、かつ行頭または空白の直後にある <c>[</c> だけを設定の開始とみなす。
+    /// 単純に最初の <c>[</c> を採ると、囲まれていない配列型（<c>integer[]</c>）の角括弧を
+    /// 設定の開始と取り違え、型が <c>integer</c> へ化ける。
+    /// </remarks>
+    private static int FindSettingsBracket(string line)
+    {
+        var index = 0;
+
+        while (index < line.Length)
+        {
+            var ch = line[index];
+
+            if (ch is '\'' or '"')
+            {
+                index = SkipLiteral(line, index, ch);
+                continue;
+            }
+
+            if (ch == '[' && (index == 0 || char.IsWhiteSpace(line[index - 1])))
+            {
+                return index;
+            }
+
+            index++;
+        }
+
+        return -1;
+    }
+
+    /// <summary>リテラルを読み飛ばし、次の走査位置を返す</summary>
+    private static int SkipLiteral(string line, int start, char quote)
+    {
+        var index = start + 1;
+
+        while (index < line.Length)
+        {
+            if (line[index] == '\\' && index + 1 < line.Length)
+            {
+                index += 2;
+                continue;
+            }
+
+            index++;
+
+            if (line[index - 1] == quote)
+            {
+                break;
+            }
+        }
+
+        return index;
+    }
+
+    /// <summary>リテラルの外にある区切り文字で分割する（空要素は捨て、前後の空白は落とす）</summary>
+    private static List<string> SplitOutsideLiterals(string text, char separator)
+    {
+        var items = new List<string>();
+        var builder = new StringBuilder();
+        var index = 0;
+
+        while (index < text.Length)
+        {
+            var ch = text[index];
+
+            if (ch is '\'' or '"')
+            {
+                var end = SkipLiteral(text, index, ch);
+                builder.Append(text, index, end - index);
+                index = end;
+                continue;
+            }
+
+            if (ch == separator)
+            {
+                AddIfNotEmpty(items, builder);
+                index++;
+                continue;
+            }
+
+            builder.Append(ch);
+            index++;
+        }
+
+        AddIfNotEmpty(items, builder);
+        return items;
+
+        static void AddIfNotEmpty(List<string> items, StringBuilder builder)
+        {
+            var item = builder.ToString().Trim();
+            builder.Clear();
+
+            if (item.Length > 0)
+            {
+                items.Add(item);
+            }
+        }
+    }
+
+    /// <summary>引用識別子（<c>"列 名"</c>）なら引用符を外して復元する（素の識別子はそのまま）</summary>
+    private static string UnquoteIdentifier(string token) =>
+        token.Length >= 2 && token[0] == '"' && token[^1] == '"'
+            ? DbmlLiteral.Unescape(token[1..^1], '"')
+            : token;
 
     /// <summary>
     /// カラムを 1 つも持たないエンティティへ既定の PK 列（<c>ID int</c>）を補う
@@ -696,12 +1046,48 @@ public static partial class DbmlImporter
             string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)
         );
 
-    /// <summary><c>Table 名前 {</c> 形式のテーブル開始行に一致する正規表現を生成する</summary>
+    /// <summary>
+    /// <c>Table 名前 {</c> 形式のテーブル開始行に一致する正規表現を生成する
+    /// </summary>
+    /// <remarks>
+    /// 名前は素の識別子と引用識別子（<c>Table "Order Details" {</c>）の双方を受け付ける。
+    /// 名前の後ろのテーブル設定（<c>Table users [owner: 'x'] {</c>）は読み飛ばす
+    /// （QuickER が表せない情報しか載らないため、拒否せず無視する）
+    /// </remarks>
     [GeneratedRegex(
-        @"^Table\s+(?<table>\S+)\s*\{$",
+        """^Table\s+(?<table>"(?:\\.|[^"\\])*"|\S+)\s*(?:\[[^\]]*\]\s*)?\{$""",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     )]
     private static partial Regex TableHeaderLineRegex();
+
+    /// <summary>
+    /// QuickER が扱わない DBML のトップレベルブロックの開始行に一致する正規表現を生成する
+    /// </summary>
+    /// <remarks>
+    /// いずれも QuickER の意味モデルが表せない情報だけを持つため、ブロックごと読み飛ばす
+    /// （他ツールが書いたファイルを従来どおり取り込めるようにするため）。
+    /// リレーションを運ぶ <c>Ref</c> は<b>含めない</b>——読み飛ばすと関係が黙って消える
+    /// </remarks>
+    [GeneratedRegex(
+        @"^(project|enum|tablegroup|tablepartial|note|records)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    )]
+    private static partial Regex SkippableBlockLineRegex();
+
+    /// <summary>
+    /// <c>Table</c> ブロック内の未対応ブロック（<c>checks</c> / <c>records</c>）の開始行に一致する正規表現を生成する
+    /// </summary>
+    /// <remarks>読み飛ばさないとカラム定義として解釈され、幻のカラムができる</remarks>
+    [GeneratedRegex(@"^(checks|records)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex SkippableTableBlockLineRegex();
+
+    /// <summary><c>Ref</c> で始まる行に一致する正規表現を生成する（未対応形式の検出に使う）</summary>
+    [GeneratedRegex(@"^ref\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex RefKeywordLineRegex();
+
+    /// <summary><c>Note</c> で始まる行に一致する正規表現を生成する（未対応の複数行 Note の検出に使う）</summary>
+    [GeneratedRegex(@"^note\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex NoteKeywordLineRegex();
 
     /// <summary>テーブルの説明を表す <c>Note: '...'</c> 行に一致する正規表現を生成する</summary>
     [GeneratedRegex(
@@ -724,8 +1110,8 @@ public static partial class DbmlImporter
     /// 複合 Ref 構文（<c>親.(a, b)</c>）の双方を受け付ける
     /// </summary>
     [GeneratedRegex(
-        @"^Ref:(?:\s*\[(?<settings>[^\]]*)\])?\s*(?<leftTable>\w+)\.(?:\((?<leftColumns>[^)]*)\)|(?<leftColumn>\w+))\s*(?<symbol><>|<|-)\s*(?<rightTable>\w+)\.(?:\((?<rightColumns>[^)]*)\)|(?<rightColumn>\w+))\s*$",
-        RegexOptions.Compiled
+        """^Ref:(?:\s*\[(?<settings>[^\]]*)\])?\s*(?<leftTable>"(?:\\.|[^"\\])*"|\w+)\.(?:\((?<leftColumns>[^)]*)\)|(?<leftColumn>"(?:\\.|[^"\\])*"|\w+))\s*(?<symbol><>|<|-)\s*(?<rightTable>"(?:\\.|[^"\\])*"|\w+)\.(?:\((?<rightColumns>[^)]*)\)|(?<rightColumn>"(?:\\.|[^"\\])*"|\w+))\s*$""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
     )]
     private static partial Regex RelationshipLineRegex();
 
@@ -739,15 +1125,6 @@ public static partial class DbmlImporter
     /// <summary><c>Indexes {</c> 形式のブロック開始行に一致する正規表現を生成する</summary>
     [GeneratedRegex(@"^Indexes\s*\{$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex IndexesHeaderLineRegex();
-
-    /// <summary>
-    /// 索引定義行（<c>(列, …) [設定, …]</c> または単一列の <c>列 [設定, …]</c>）に一致する正規表現を生成する
-    /// </summary>
-    [GeneratedRegex(
-        @"^(?:\((?<columns>[^)]*)\)|(?<singleColumn>[^\s\[\]()]+))\s*(?:\[(?<settings>.*)\])?$",
-        RegexOptions.Compiled
-    )]
-    private static partial Regex IndexDefinitionLineRegex();
 
     /// <summary>索引設定の <c>name: '...'</c>（<c>\'</c> エスケープ対応）に一致する正規表現を生成する</summary>
     [GeneratedRegex(

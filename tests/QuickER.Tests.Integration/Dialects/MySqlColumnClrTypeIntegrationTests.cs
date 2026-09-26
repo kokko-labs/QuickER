@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using Microsoft.EntityFrameworkCore;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider.MySql;
@@ -41,6 +42,9 @@ public sealed class MySqlColumnClrTypeIntegrationTests(MySqlContainerFixture fix
     {
         [typeof(bool)] = "bool",
         [typeof(sbyte)] = "sbyte",
+        [typeof(byte)] = "byte",
+        [typeof(ushort)] = "ushort",
+        [typeof(uint)] = "uint",
         [typeof(short)] = "short",
         [typeof(int)] = "int",
         [typeof(long)] = "long",
@@ -177,5 +181,189 @@ public sealed class MySqlColumnClrTypeIntegrationTests(MySqlContainerFixture fix
 
         content.Should().Contain("public ulong? Flags8 { get; set; }");
         content.Should().Contain("public int? Built { get; set; }");
+    }
+
+    /// <summary>
+    /// 符号なし整数（および <c>mediumint</c>）のマッパー解決結果が、ドライバが返す CLR 型と一致する（TM1）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 従来は <c>unsigned</c> 修飾子を落として符号付きの型で解決しており、符号付きの範囲を超える値の
+    /// 読み出しが <c>OverflowException</c> になっていた。<c>mediumint</c> は符号の有無に依らず
+    /// 「未知の型 → string」のフォールバックへ落ちていた。
+    /// </para>
+    /// <para>
+    /// <c>tinyint(1) unsigned</c> だけは宣言と取込の表記が食い違う——MySQL 8.4 は符号なし tinyint から
+    /// 表示幅を落とすため、<c>COLUMN_TYPE</c> は <c>tinyint unsigned</c> を返す（符号付きの
+    /// <c>tinyint(1)</c> だけが表示幅を保つ）。ドライバも <c>byte</c> を返すため、
+    /// 真偽値慣習の対象外であることが実 DB 側からも裏づけられる。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] 符号なし整数と mediumint はドライバの実測 CLR 型と一致する")]
+    public async Task Map_UnsignedIntegers_MatchDriverClrTypes()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE unsigned_probe (
+                id int NOT NULL PRIMARY KEY,
+                ti tinyint NOT NULL,
+                ti_u tinyint unsigned NOT NULL,
+                ti1_u tinyint(1) unsigned NOT NULL,
+                si_u smallint unsigned NOT NULL,
+                mi mediumint NOT NULL,
+                mi_u mediumint unsigned NOT NULL,
+                i_u int unsigned NOT NULL,
+                bi_u bigint unsigned NOT NULL,
+                de_u decimal(10,2) unsigned NOT NULL
+            ) ENGINE=InnoDB;
+            INSERT INTO unsigned_probe VALUES
+                (1, -128, 255, 1, 65535, -8388608, 16777215, 4294967295, 18446744073709551615, 1.25);
+            """,
+            Ct
+        );
+
+        // 1) 図としての取込（COLUMN_TYPE をそのまま型表記に採る）
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var import = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+        var entity = import.Entities.Should().ContainSingle().Subject;
+        var declaredTypes = entity.Columns.ToDictionary(c => c.Name, c => c.DataType);
+
+        declaredTypes["i_u"].Should().Be("int unsigned");
+        declaredTypes["mi_u"].Should().Be("mediumint unsigned");
+
+        // MySQL 8.4 は符号なし tinyint から表示幅を落とす（符号付きの tinyint(1) だけが表示幅を保つ）
+        declaredTypes["ti1_u"].Should().Be("tinyint unsigned");
+
+        // 2) ドライバが実際に返す CLR 型
+        var driverTypes = new Dictionary<string, Type>(StringComparer.Ordinal);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                "SELECT ti, ti_u, ti1_u, si_u, mi, mi_u, i_u, bi_u, de_u FROM unsigned_probe WHERE id = 1";
+            await using var reader = await cmd.ExecuteReaderAsync(Ct);
+
+            (await reader.ReadAsync(Ct)).Should().BeTrue();
+
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                driverTypes[reader.GetName(i)] = reader.GetFieldType(i);
+            }
+        }
+
+        driverTypes["ti_u"].Should().Be<byte>();
+        driverTypes["ti1_u"].Should().Be<byte>();
+        driverTypes["si_u"].Should().Be<ushort>();
+        driverTypes["mi"].Should().Be<int>();
+        driverTypes["mi_u"].Should().Be<uint>();
+        driverTypes["i_u"].Should().Be<uint>();
+        driverTypes["bi_u"].Should().Be<ulong>();
+
+        // 3) マッパーの解決結果がドライバの CLR 型と一致する（全列・例外なし）
+        var mapper = new MySqlCSharpTypeMapper();
+
+        foreach (var (columnName, driverType) in driverTypes)
+        {
+            mapper
+                .Map(declaredTypes[columnName])
+                .TypeName.Should()
+                .Be(
+                    CSharpKeywords[driverType],
+                    $"{columnName}（{declaredTypes[columnName]}）はドライバが返す CLR 型と同じ C# 型へ解決されること"
+                );
+        }
+    }
+
+    /// <summary>
+    /// 符号なし整数の上限値が、EF Core（<c>UseMySQL</c>）経由で符号なしの CLR 型として往復する（TM1）。
+    /// </summary>
+    /// <remarks>
+    /// MySQL 方言の生成コードは QuickER 版 Repository を持たない（EF Core 経路のみ）ため、
+    /// 生成 Entity のプロパティ型が実際に使われるのはこの経路になる。
+    /// 符号付きの型で解決していた従来は、ここが <c>OverflowException</c> で落ちていた。
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] 符号なし整数の上限値は EF Core（UseMySQL）経由で往復する")]
+    public async Task EfCore_UnsignedIntegers_RoundTripMaxValues()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE unsigned_roundtrip (
+                id int NOT NULL PRIMARY KEY,
+                ti_u tinyint unsigned NOT NULL,
+                si_u smallint unsigned NOT NULL,
+                mi_u mediumint unsigned NOT NULL,
+                i_u int unsigned NOT NULL,
+                bi_u bigint unsigned NOT NULL
+            ) ENGINE=InnoDB;
+            """,
+            Ct
+        );
+
+        await using (var write = new UnsignedRoundTripContext(fixture.ConnectionString))
+        {
+            write.Rows.Add(
+                new UnsignedRow
+                {
+                    Id = 1,
+                    TinyUnsigned = byte.MaxValue,
+                    SmallUnsigned = ushort.MaxValue,
+                    MediumUnsigned = 16777215,
+                    IntUnsigned = uint.MaxValue,
+                    BigUnsigned = ulong.MaxValue,
+                }
+            );
+            await write.SaveChangesAsync(Ct);
+        }
+
+        await using var read = new UnsignedRoundTripContext(fixture.ConnectionString);
+        var row = await read.Rows.SingleAsync(Ct);
+
+        row.TinyUnsigned.Should().Be(byte.MaxValue);
+        row.SmallUnsigned.Should().Be(ushort.MaxValue);
+        row.MediumUnsigned.Should().Be(16777215u);
+        row.IntUnsigned.Should().Be(uint.MaxValue);
+        row.BigUnsigned.Should().Be(ulong.MaxValue);
+    }
+
+    /// <summary>
+    /// EF Core の往復検証で使う行。プロパティの型は <see cref="MySqlCSharpTypeMapper"/> の解決結果に合わせる
+    /// （生成 Entity と同じ型でなければ検証にならない）。
+    /// </summary>
+    private sealed class UnsignedRow
+    {
+        public int Id { get; set; }
+        public byte TinyUnsigned { get; set; }
+        public ushort SmallUnsigned { get; set; }
+        public uint MediumUnsigned { get; set; }
+        public uint IntUnsigned { get; set; }
+        public ulong BigUnsigned { get; set; }
+    }
+
+    /// <summary>EF Core（<c>UseMySQL</c>）の最小 DbContext</summary>
+    private sealed class UnsignedRoundTripContext(string connectionString) : DbContext
+    {
+        public DbSet<UnsignedRow> Rows => Set<UnsignedRow>();
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+            optionsBuilder.UseMySQL(connectionString);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            var row = modelBuilder.Entity<UnsignedRow>();
+            row.ToTable("unsigned_roundtrip");
+            row.HasKey(r => r.Id);
+            row.Property(r => r.Id).HasColumnName("id");
+            row.Property(r => r.TinyUnsigned).HasColumnName("ti_u");
+            row.Property(r => r.SmallUnsigned).HasColumnName("si_u");
+            row.Property(r => r.MediumUnsigned).HasColumnName("mi_u");
+            row.Property(r => r.IntUnsigned).HasColumnName("i_u");
+            row.Property(r => r.BigUnsigned).HasColumnName("bi_u");
+        }
     }
 }
