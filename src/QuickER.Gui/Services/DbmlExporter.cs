@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using QuickER.Model;
 using QuickER.Provider;
 
@@ -17,7 +18,7 @@ namespace QuickER.Services;
 ///   <item>note 文字列中のシングルクォートは <c>\'</c> にエスケープ</item>
 /// </list>
 /// </remarks>
-public static class DbmlExporter
+public static partial class DbmlExporter
 {
     /// <summary>
     /// ER 図定義から DBML 文字列を生成する
@@ -137,7 +138,7 @@ public static class DbmlExporter
             settings.Add($"note: '{EscapeNote(column.Description)}'");
         }
 
-        return $"{Identifier(column.Name)} {Identifier(column.DataType)} [{string.Join(", ", settings)}]";
+        return $"{Identifier(column.Name)} {TypeName(column.DataType)} [{string.Join(", ", settings)}]";
     }
 
     /// <summary>
@@ -300,11 +301,58 @@ public static class DbmlExporter
     private static string EscapeNote(string text) => DbmlLiteral.Escape(text);
 
     /// <summary>
-    /// 識別子（テーブル名・カラム名・型）を DBML の行へ載せる形へ整える
+    /// 識別子（テーブル名・カラム名）を DBML の行へ載せる形へ整える
     /// </summary>
     /// <remarks>
+    /// <para>
     /// DBML はクォートなしの識別子を 1 行 1 要素で書くため、改行が混じると行が途中で終わり、
-    /// 残りが別の宣言として解釈される。改行・制御文字は空白へ畳む
+    /// 残りが別の宣言として解釈される。改行・制御文字はまず空白へ畳む。
+    /// </para>
+    /// <para>
+    /// そのうえで、英数字・アンダースコア以外を含む名前は DBML の引用識別子（<c>"列 名"</c>）で囲む。
+    /// 囲まないと、空白を含むテーブル名は取込側の <c>Table</c> 行の書式に一致せず<b>テーブルごと落ち</b>、
+    /// 空白を含む列名は先頭トークンで切れて残りが型名へ混ざる（<c>Order Date date</c> → 名前
+    /// <c>Order</c> ・型 <c>Date date</c>）。SQL Server 由来の <c>[Order Details]</c> のような名前で現実に起きる。
+    /// </para>
+    /// <para>
+    /// 判定は「<c>^\w+$</c> に一致しないなら囲む」。<c>\w</c> は Unicode の文字・数字・アンダースコアを含むため、
+    /// 日本語の名前は従来どおり囲まない（既存の出力はバイト不変）。ドットを含む名前（<c>dbo.Customers</c>）は
+    /// 囲む側へ倒す——囲まないと <c>Ref:</c> 行の端点（<c>親.列</c>）と区切りが区別できず、
+    /// 書き出したファイルを読み戻せない。
+    /// </para>
     /// </remarks>
-    private static string Identifier(string? name) => ExportTextSanitizer.Sanitize(name);
+    private static string Identifier(string? name)
+    {
+        var sanitized = ExportTextSanitizer.Sanitize(name);
+
+        return PlainIdentifierRegex().IsMatch(sanitized) ? sanitized : QuoteIdentifier(sanitized);
+    }
+
+    /// <summary>
+    /// 型表記を DBML の行へ載せる形へ整える
+    /// </summary>
+    /// <remarks>
+    /// DBML の型名は「空白を含むなら二重引用符で囲む（<c>"double precision"</c>）、括弧つきは
+    /// そのまま書く（<c>varchar(255)</c> / <c>decimal(1,2)</c>）」という規約。あわせて角括弧を含む型
+    /// （PostgreSQL の配列型 <c>integer[]</c>）も囲む——囲まないと取込側が設定ブロックの開始と取り違え、
+    /// 型が <c>integer</c> へ化ける。
+    /// </remarks>
+    private static string TypeName(string? dataType)
+    {
+        var sanitized = ExportTextSanitizer.Sanitize(dataType);
+
+        return QuotedTypeRegex().IsMatch(sanitized) ? QuoteIdentifier(sanitized) : sanitized;
+    }
+
+    /// <summary>DBML の引用識別子（二重引用符）として囲む</summary>
+    private static string QuoteIdentifier(string sanitized) =>
+        $"\"{DbmlLiteral.Escape(sanitized, '"')}\"";
+
+    /// <summary>囲まずに書ける識別子（英数字・アンダースコアのみ）に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"^\w+$", RegexOptions.Compiled)]
+    private static partial Regex PlainIdentifierRegex();
+
+    /// <summary>囲む必要がある型表記（空白または角括弧を含む）に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"[\s\[\]]", RegexOptions.Compiled)]
+    private static partial Regex QuotedTypeRegex();
 }

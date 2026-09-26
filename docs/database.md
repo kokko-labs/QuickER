@@ -88,6 +88,10 @@ For `quicker scaffold` against PostgreSQL or MySQL there is no separate option e
 Connection settings can be saved under a name and recalled later from the "Saved Connections" list.
 Profiles are stored in `%LOCALAPPDATA%\QuickER\connections.json`, and passwords are stored in separate files, **encrypted with Windows DPAPI (CurrentUser scope)**, only when the "Save" checkbox is on and never in plain text under the shipped configuration.
 The last-used connection is remembered automatically and restored on the next launch.
+Saving is keyed on the profile name.
+A profile with the same name and the same DB kind is overwritten; otherwise a new profile is created.
+When the profile that would be overwritten is not the one selected in the list, QuickER asks first, because its connection settings and saved password would be replaced with no way back.
+Saving over the profile you loaded is not confirmed.
 
 ### What gets imported
 
@@ -151,6 +155,7 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
   Generated DDL creates the table unpartitioned
 - A SQLite **primary key that allows NULL** is imported as NOT NULL, and the adjusted columns are named.
   In a rowid table, any primary key other than a single column declared exactly `INTEGER` can hold NULL, while the diagram and the editor always treat a primary key as NOT NULL.
+  Only the columns actually adjusted are named: a key whose columns are already declared `NOT NULL` is not reported.
   If existing rows carry a NULL primary key, a sync from this diagram (which rebuilds the table) can fail while copying the data across
 
 When nothing is affected, the dialog is the usual one-line completion message.

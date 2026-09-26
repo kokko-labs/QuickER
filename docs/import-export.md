@@ -39,7 +39,11 @@ The supported syntax is the subset that QuickER's DBML export writes, and both t
   A line whose two endpoints list a different number of columns, or that names a column the table does not have, keeps the relationship but drops its column mapping (it can be completed in the properties panel)
 - Constraint name and referential actions: restored from the settings block right after `Ref:` (`[note: 'FK name', delete: cascade, update: set null]`).
   DBML's `restrict` has no counterpart in QuickER, so it is imported as `NO ACTION`
-- Not supported: `Project` / `Enum` / `TableGroup` / multi-line `Note` blocks
+- Quoted identifiers: a table or column name written as `"Order Details"` is read with the quotes removed, and a type written the same way (`"double precision"`, `"integer[]"`) likewise. `\"` and `\` inside the quotes are unescaped
+- Comments: `//` to the end of the line, and `/* ... */` including across several lines. Neither is treated as a comment inside a string, so a description may contain a URL
+- Keywords are not case-sensitive (`Table` and `table`, `Ref:` and `ref:` are both read)
+- Skipped: the `Project` / `Enum` / `TableGroup` / `TablePartial` / `Note` / `records` blocks, and table settings written after a table name (`Table users [owner: 'x'] {`). These carry only information QuickER cannot represent, so the block is passed over and the rest of the file is imported
+- Not supported, and reported with the line number rather than skipped: a relationship written as a named `Ref name: ...` or as the block form `Ref { ... }` (skipping it would lose the relationship), a table alias (`Table t as U {`), a `~partial` injection, a `Note` spanning several lines inside a `Table` block, and any other line that cannot be interpreted
 
 Tables with no columns get a default PK column (`ID int`).
 DBML carries no dialect information, so the diagram's target DB stays as it was before the import.
@@ -58,6 +62,7 @@ Sheet roles are identified by hidden definition tags, so the sheets can be renam
 **Excel files created by other applications cannot be imported directly**, though: to migrate definition documents you already have, transcribe them into QuickER's document format once.
 The target DBMS is embedded in the document and restored, dialect and all, on import.
 Count mismatches, duplicates, and references to undefined tables are import errors.
+A relationship row counts as a duplicate only when another row has the same pair of tables **and the same columns**, so a diagram with more than one foreign key between the same two tables (a shipping address and a billing address both pointing at the same table, say) round-trips.
 
 The import has no size limit of its own: every worksheet other than the two role sheets is read as a table-detail sheet, and rows are scanned until the first blank one.
 It also runs on the UI thread, so a very large workbook leaves the window unresponsive until it finishes, with nothing to cancel it.
@@ -134,6 +139,7 @@ Writes out the text formats.
 The DBML output is the same subset as the import above (`Table` blocks + `Ref:` lines), and the written file can be re-imported with the relationships' column mapping intact.
 That includes composite foreign keys, which are written with DBML's composite Ref syntax (`Ref: Parent.(a, b) < Child.(x, y)`; single-column foreign keys keep the plain `Parent.a < Child.x` form).
 Unique constraints are written as the `unique` column setting for unnamed single-column constraints, and as an `Indexes` block (`(col, …) [unique, name: '…']`) for composite and named ones.
+A table or column name that is not made only of letters, digits and underscores is written as a DBML quoted identifier (`"Order Details"`), as is a type that contains a space or brackets (`"double precision"`, `"integer[]"`); without the quotes such a name or type cannot be read back. A name of letters, digits and underscores — Japanese included — is written bare.
 Mermaid's key column holds a single marker per column, so it is folded to `PK` > `FK` > `UK`, and **`UK` is written only for the columns of single-column constraints** (splitting a composite constraint per column would come back on import as N separate single-column constraints, which means something else, so composite ones are not written).
 
 Both formats are useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.

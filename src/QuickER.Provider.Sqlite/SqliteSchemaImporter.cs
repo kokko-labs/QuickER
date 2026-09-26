@@ -310,10 +310,13 @@ ORDER BY name;";
     /// <c>Detail</c> は空になる。
     /// </para>
     /// <para>
-    /// 主キー列は取込時に無条件で NOT NULL へ補正する（従来どおり）。<paramref name="isWithoutRowid"/> が
-    /// false（rowid 表）かつ主キーが rowid 別名でない（<see cref="IsIntegerRowidAlias"/>）ときは、
-    /// SQLite 自身が NULL を許していた列を補正したことになるため
-    /// <see cref="SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted"/> で列ごとに告げる。
+    /// 主キー列は取込時に無条件で NOT NULL へ補正する（従来どおり）。告げるのは
+    /// <b>実際に補正した列だけ</b>＝<paramref name="isWithoutRowid"/> が false（rowid 表）かつ主キーが
+    /// rowid 別名でなく（<see cref="IsIntegerRowidAlias"/>）、<b>その列が元々 NULL を許していた</b>
+    /// （<c>table_xinfo</c> の <c>notnull</c> が 0）ときに
+    /// <see cref="SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted"/> を出す。
+    /// テーブルの形だけで判定すると、他の DB から移した <c>PRIMARY KEY (a, b)</c> ＋ 各列 <c>NOT NULL</c> の
+    /// ごく普通のスキーマで毎回鳴り、「補正した列を名指しする」という警告の意味が失われる。
     /// </para>
     /// </remarks>
     private static async Task LoadColumnsAndPrimaryKeyAsync(
@@ -332,8 +335,10 @@ ORDER BY name;";
         );
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
-        // 主キー構成列を (pk 値, 列) で集め、読み終えてから構成順に並べ替える
-        var primaryKeyColumns = new List<(long Ordinal, Column Column)>();
+        // 主キー構成列を (pk 値, 列, 宣言どおりの NOT NULL) で集め、読み終えてから構成順に並べ替える。
+        // 宣言どおりの NOT NULL を持ち回るのは、補正の告知を「実際に NULL 許容から変えた列」だけに絞るため
+        // （補正後の Column.IsNullable は常に false なので、列からは元の宣言を復元できない）
+        var primaryKeyColumns = new List<(long Ordinal, Column Column, bool DeclaredNotNull)>();
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
@@ -380,13 +385,13 @@ ORDER BY name;";
 
             if (pkOrdinal > 0)
             {
-                primaryKeyColumns.Add((pkOrdinal, col));
+                primaryKeyColumns.Add((pkOrdinal, col, notNull));
             }
         }
 
         var orderedPrimaryKeyColumns = primaryKeyColumns.OrderBy(pair => pair.Ordinal).ToList();
 
-        foreach (var (_, column) in orderedPrimaryKeyColumns)
+        foreach (var (_, column, _) in orderedPrimaryKeyColumns)
         {
             entry.Entity.PrimaryKeyColumnIds.Add(column.Id);
         }
@@ -399,7 +404,10 @@ ORDER BY name;";
             && !IsIntegerRowidAlias(orderedPrimaryKeyColumns)
         )
         {
-            foreach (var (_, column) in orderedPrimaryKeyColumns)
+            // 元から NOT NULL を宣言していた列は何も変えていないため告げない（列単位で判定する）
+            foreach (
+                var (_, column, _) in orderedPrimaryKeyColumns.Where(pair => !pair.DeclaredNotNull)
+            )
             {
                 warnings.Add(
                     new SchemaImportWarning(
@@ -433,7 +441,7 @@ ORDER BY name;";
     /// </para>
     /// </remarks>
     private static bool IsIntegerRowidAlias(
-        IReadOnlyList<(long Ordinal, Column Column)> primaryKeyColumns
+        IReadOnlyList<(long Ordinal, Column Column, bool DeclaredNotNull)> primaryKeyColumns
     ) =>
         primaryKeyColumns.Count == 1
         && string.Equals(

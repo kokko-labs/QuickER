@@ -749,6 +749,188 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.ShowOracleEncryptionNote.Should().Be(expected);
     }
 
+    // ---------------- プロファイル保存の上書き確認（DU1） ----------------
+
+    /// <summary>「本番DB」相当の既存プロファイル 1 件をストアへ用意する</summary>
+    private static Guid SeedProfile(SqlConnectionProfileStore store, string name) =>
+        SeedProfile(store, name, "prod.example.com", "prod-secret");
+
+    /// <summary>名前・サーバー・パスワードを指定して既存プロファイルを 1 件用意する</summary>
+    private static Guid SeedProfile(
+        SqlConnectionProfileStore store,
+        string name,
+        string server,
+        string password
+    )
+    {
+        var profile = new SqlConnectionProfile
+        {
+            Name = name,
+            Dbms = SqlServerProvider.ProviderName,
+            Server = server,
+            Database = "SalesDb",
+            SavePassword = true,
+        };
+        store.Upsert(profile, password);
+        return profile.Id;
+    }
+
+    /// <summary>
+    /// 未選択のまま既存と同じ保存名で保存すると、上書き前に確認が出る（DU1）。
+    /// </summary>
+    /// <remarks>
+    /// 保存名を打ち間違えた・使い回しただけで、本番の接続先と保存済みパスワードが警告なく失われていた。
+    /// </remarks>
+    [Fact(DisplayName = "保存: 選択していない同名プロファイルの上書きは確認を出す")]
+    public void SaveProfile_OverwritingUnselectedProfile_AsksForConfirmation()
+    {
+        var store = CreateStore();
+        var existingId = SeedProfile(store, "本番DB");
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = CreateVm(store, dialogs);
+        vm.Host = "test01";
+        vm.Password = "dev-secret";
+        vm.ProfileName = "本番DB";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(string.Format(Strings.DbConnection_OverwriteProfileConfirm, "本番DB"));
+
+        // キャンセルしたので既存の接続先もパスワードも変わらない
+        var stored = store.LoadAll().Should().ContainSingle().Subject;
+        stored.Id.Should().Be(existingId);
+        stored.Server.Should().Be("prod.example.com");
+        store.LoadPassword(existingId).Should().Be("prod-secret");
+    }
+
+    /// <summary>確認で続行を選べば、従来どおり同名プロファイルを上書きする（DU1）。</summary>
+    [Fact(DisplayName = "保存: 確認で続行すれば同名プロファイルを上書きする")]
+    public void SaveProfile_ConfirmedOverwrite_ReplacesExistingProfile()
+    {
+        var store = CreateStore();
+        var existingId = SeedProfile(store, "本番DB");
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = CreateVm(store, dialogs);
+        vm.Host = "test01";
+        vm.ProfileName = "本番DB";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        var stored = store.LoadAll().Should().ContainSingle().Subject;
+        stored.Id.Should().Be(existingId);
+        stored.Server.Should().Be("test01");
+    }
+
+    /// <summary>
+    /// 選択中のプロファイル自身の上書き（読み込んで直して保存）は従来どおり確認しない（DU1）。
+    /// </summary>
+    [Fact(DisplayName = "保存: 選択中のプロファイル自身の上書きは確認を出さない")]
+    public void SaveProfile_OverwritingSelectedProfile_DoesNotAsk()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = CreateVm(store, dialogs);
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.Host = "prod2.example.com";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        dialogs.WarningConfirmMessages.Should().BeEmpty();
+        store.LoadAll().Should().ContainSingle().Which.Server.Should().Be("prod2.example.com");
+    }
+
+    /// <summary>
+    /// 選択中のプロファイルを読み込んで別名で保存すると、確認なしで別のプロファイルになる（DU1・案 2）。
+    /// </summary>
+    /// <remarks>
+    /// 「現在の入力内容を保存名で保存する」という保存ボタンの意味どおり、
+    /// 既存のどれも上書きしないため確認は出さない（何も失われない）。
+    /// </remarks>
+    [Fact(DisplayName = "保存: 別名で保存すると確認なしで新しいプロファイルになる")]
+    public void SaveProfile_NewName_CreatesAnotherProfileWithoutAsking()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = CreateVm(store, dialogs);
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.Host = "staging01";
+        vm.ProfileName = "検証DB";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        dialogs.WarningConfirmMessages.Should().BeEmpty();
+        store
+            .LoadAll()
+            .Select(profile => (profile.Name, profile.Server))
+            .Should()
+            .BeEquivalentTo([("本番DB", "prod.example.com"), ("検証DB", "staging01")]);
+    }
+
+    /// <summary>
+    /// 別のプロファイルを選んだまま既存の保存名を打ち替えた場合も確認が出る（DU1・報告書の例 2）。
+    /// </summary>
+    /// <remarks>
+    /// 選んでいるのは「本番DB」なのに、壊れるのは触っていないつもりの「検証DB」という形。
+    /// </remarks>
+    [Fact(DisplayName = "保存: 選択中と違うプロファイルの名前を打つと確認を出す")]
+    public void SaveProfile_RenamingOntoAnotherProfile_AsksForConfirmation()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var stagingId = SeedProfile(store, "検証DB", "staging.example.com", "staging-secret");
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = CreateVm(store, dialogs);
+        vm.SelectedProfileItem = vm.Profiles.Single(p => p.Profile.Name == "本番DB");
+        vm.Host = "staging01";
+        vm.ProfileName = "検証DB";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(string.Format(Strings.DbConnection_OverwriteProfileConfirm, "検証DB"));
+        store
+            .LoadAll()
+            .Single(profile => profile.Id == stagingId)
+            .Server.Should()
+            .Be("staging.example.com");
+        store.LoadPassword(stagingId).Should().Be("staging-secret");
+    }
+
+    /// <summary>同名でも DB 種別が違えば別のプロファイルなので確認は出ない（DU1）。</summary>
+    [Fact(DisplayName = "保存: 同名でも DB 種別が違えば確認を出さない")]
+    public void SaveProfile_SameNameDifferentDbms_DoesNotAsk()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "共通名");
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new DbConnectionDialogViewModel(
+            RegistryWithSqlite,
+            DbConnectionDialogMode.Import,
+            fixedProvider: null,
+            store,
+            dialogs
+        )
+        {
+            SelectedProvider = RegistryWithSqlite.Get(SqliteProvider.ProviderName),
+        };
+        vm.FilePath = Path.Combine(_tempFolder, "local.db");
+        vm.ProfileName = "共通名";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        dialogs.WarningConfirmMessages.Should().BeEmpty();
+        store.LoadAll().Should().HaveCount(2);
+    }
+
     /// <summary>全方言を登録した取込モードの ViewModel を生成する</summary>
     private DbConnectionDialogViewModel CreateAllDialectVm(SqlConnectionProfileStore store) =>
         new(RegistryWithAllDialects, DbConnectionDialogMode.Import, fixedProvider: null, store);

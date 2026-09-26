@@ -229,6 +229,9 @@
   <data name="DbConnection_DeleteProfileConfirm" xml:space="preserve">
     <value>プロファイル '{0}' を削除します。よろしいですか？</value>
   </data>
+  <data name="DbConnection_OverwriteProfileConfirm" xml:space="preserve">
+    <value>同じ名前の別のプロファイル '{0}' があります。上書きすると、その接続設定と保存済みパスワードが置き換わり、元に戻せません。続行しますか？</value>
+  </data>
   <data name="DbConnection_ProfileDeleted" xml:space="preserve">
     <value>プロファイル '{0}' を削除しました。</value>
   </data>
