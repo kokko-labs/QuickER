@@ -257,6 +257,11 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("CodeGen_Info_FallbackTypeColumns", resourceCulture);
             }
         }
+        public static string CodeGen_Info_NegativeScaleColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_NegativeScaleColumns", resourceCulture);
+            }
+        }
         
         public static string CodeGen_Info_ArrayColumnsNotEditable {
             get {

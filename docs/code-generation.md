@@ -1151,6 +1151,11 @@ A diagram where one column references multiple principals that resolve to differ
 Each value object is a `sealed partial class` whose constructor is private and which can only be created through a static factory.
 Validation code is generated automatically from the column definition in the diagram: maximum length for strings, and precision and scale for `decimal`, where out-of-range values are rejected rather than rounded.
 
+A column with a **negative scale** (`numeric(10,-2)` on PostgreSQL, `NUMBER(10,-2)` on Oracle) is the exception: it gets no digit validation.
+Such a column is written to make the database round to hundreds, and rejecting the values it rounds would block that very use.
+Generation lists these columns as a note (Info); `[SqlColumnType]` carries no Precision / Scale for them and the EF Core model no `HasPrecision`.
+The database rounds as it always did (`numeric(10,-2)` stores 1234 as 1200).
+
 ```csharp
 var name = NameValue.Create("Alice");   // A validation violation throws ValueObjectValidationException
 
