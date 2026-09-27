@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 
@@ -11,7 +12,7 @@ namespace QuickER.CodeGen.CSharp;
 /// ファイル構成決定（<see cref="GeneratedFilePlanner"/>）→ テンプレート描画（<see cref="ScribanCSharpRenderer"/>）」の段階で進む。
 /// 非分割時は全クラスを単一の .g.cs ファイルへ、分割時はカテゴリ（＋共有基盤 Runtime）ごとに別ファイル・別名前空間で出力する
 /// </remarks>
-public sealed class CSharpCodeGenerationService
+public sealed partial class CSharpCodeGenerationService
 {
     /// <summary>ER 図定義をテンプレート入力用の生成モデルへ変換するビルダー</summary>
     private readonly CSharpGenerationModelBuilder _modelBuilder = new();
@@ -343,6 +344,27 @@ public sealed class CSharpCodeGenerationService
                             + string.Join(
                                 Environment.NewLine,
                                 fallbackTypeLines.Select(line => "  " + line)
+                            )
+                    )
+                )
+            );
+        }
+
+        // 負のスケールの decimal 列（PostgreSQL の numeric(10,-2)・Oracle の NUMBER(10,-2)）は、
+        // 型マッパーが精度・スケールを読まない＝生成物に桁数の情報が一切載らない。DB 側は値を丸めるので、
+        // 生成物を読んでも「丸められること」にも「検証が無いこと」にも気づけない
+        var negativeScaleLines = BuildNegativeScaleColumnLines(diagram);
+
+        if (negativeScaleLines.Count > 0)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Info(
+                    string.Format(
+                        Strings.CodeGen_Info_NegativeScaleColumns,
+                        Environment.NewLine
+                            + string.Join(
+                                Environment.NewLine,
+                                negativeScaleLines.Select(line => "  " + line)
                             )
                     )
                 )
@@ -1851,6 +1873,45 @@ public sealed class CSharpCodeGenerationService
                     .Select(column => $"{entity.TableName}.{column.Name} ({column.DataType})")
             )
             .ToList();
+
+    /// <summary>
+    /// 負のスケールを持つ decimal 列を「テーブル.列 (元の DB 型表記)」の 1 行ずつへ整形する（Info 診断専用）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 判定は<b>図の型表記から</b>行い、型マッパーの戻り値は見ない。5 方言の型マッパーは負のスケールを
+    /// <b>意図的に読まない</b>ため（精度・スケールとも null になる）、マッパー由来の値からは区別が付かない。
+    /// </para>
+    /// <para>
+    /// <b>Warning ではなく Info。</b>負のスケールは誤って書く型ではなく、「DB に百単位で丸めさせる」ことを
+    /// 意図して書くものなので、生成のたびに警告で鳴らすと形骸化する（解析できない DB 型を
+    /// <see cref="CSharpTypeInfo.IsFallbackType"/> の Info にしたのと同じ理屈）。
+    /// </para>
+    /// <para>
+    /// <b>値オブジェクトの有無で絞らない。</b>丸められるという事実は値オブジェクトと無関係で、
+    /// 値オブジェクトはオプトインなので絞ると既定の構成では鳴らなくなる。
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<string> BuildNegativeScaleColumnLines(ErDiagram diagram) =>
+        diagram
+            .Entities.SelectMany(entity =>
+                entity
+                    .Columns.Where(column => HasNegativeScale(column.DataType))
+                    .Select(column => $"{entity.TableName}.{column.Name} ({column.DataType})")
+            )
+            .ToList();
+
+    /// <summary>DB 型表記が負のスケール（<c>(精度,-スケール)</c>）を持つか</summary>
+    /// <remarks>
+    /// 型名は見ない（負のスケールを書ける型は方言ごとに違い、自由記述の型表記もあるため）。
+    /// 括弧の第 2 引数が負であることだけを見る。
+    /// </remarks>
+    private static bool HasNegativeScale(string? dataType) =>
+        dataType is not null && NegativeScaleRegex().IsMatch(dataType);
+
+    /// <summary>"(精度,-スケール)" を検出する正規表現（診断専用・型マッパーの読み取りには使わない）</summary>
+    [GeneratedRegex(@"\(\s*\d+\s*,\s*-\s*\d+\s*\)", RegexOptions.CultureInvariant)]
+    private static partial Regex NegativeScaleRegex();
 
     /// <summary>
     /// 無制限バイナリ列の除外対象一覧を <c>{EntityClass}.{Property} ({テーブル}.{列名})</c> 形式の行で組み立てる。

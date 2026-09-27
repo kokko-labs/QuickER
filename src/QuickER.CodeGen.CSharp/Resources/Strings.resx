@@ -157,6 +157,9 @@
   <data name="CodeGen_Info_NonCanonicalTypeSpellingColumns" xml:space="preserve">
     <value>The dialect-neutral type token does not reproduce the DB type spelling of the columns below (re-formatting the token yields the type shown after the arrow). The original text is therefore recorded verbatim in [DbColumnMeta] as well, so that reversing the generated code restores the column type as written here:{0}</value>
   </data>
+  <data name="CodeGen_Info_NegativeScaleColumns" xml:space="preserve">
+    <value>The columns below declare a negative scale, so the database rounds their values (numeric(10,-2) stores 1234 as 1200). No precision or scale is carried into the generated code for them: no digit validation on the value object, no Precision/Scale on [SqlColumnType], and no HasPrecision in the EF Core model. A negative scale is written on purpose, so this is a note rather than a warning:{0}</value>
+  </data>
   <data name="CodeGen_Info_FallbackTypeColumns" xml:space="preserve">
     <value>The type catalog could not recognize the DB type of the columns below, so the generated property falls back to string (a safe default that keeps generation from failing). Confirm this is the intended type; if not, adjust the column's type in the diagram:{0}</value>
   </data>

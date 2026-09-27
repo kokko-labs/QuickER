@@ -1159,6 +1159,11 @@ var customer = await customers.GetByIdAsync(CustomerIdValue.Create(1));
 各値オブジェクトは `sealed partial class` で、コンストラクタは非公開・生成は静的ファクトリ経由のみです。
 図の列定義から検証コードが自動生成されます（文字列は最大長、`decimal` は精度・スケールを、丸めずに弾きます）。
 
+ただし**負のスケール**（PostgreSQL の `numeric(10,-2)`・Oracle の `NUMBER(10,-2)`）を宣言した列には、桁数の検証は付きません。
+この型は「データベースに百単位で丸めさせる」ために書くもので、丸められる値を弾いてしまうとその使い方を塞ぐためです。
+該当する列は生成時にお知らせ（Info）として名指しします（`[SqlColumnType]` の Precision / Scale と EF Core の `HasPrecision` も出ません）。
+データベース側は従来どおり値を丸めます（`numeric(10,-2)` は 1234 を 1200 として保存します）。
+
 ```csharp
 var name = NameValue.Create("山田");   // 検証違反は ValueObjectValidationException
 

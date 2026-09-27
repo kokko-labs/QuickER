@@ -157,6 +157,9 @@
   <data name="CodeGen_Info_NonCanonicalTypeSpellingColumns" xml:space="preserve">
     <value>次の列は、方言中立トークンからは同じ綴りの DB 型へ戻りません（トークンを整形し直すと矢印の右の型になります）。そのためコード取込で元の型表記へ戻せるよう、[DbColumnMeta] へ元の表記もそのまま記録しています:{0}</value>
   </data>
+  <data name="CodeGen_Info_NegativeScaleColumns" xml:space="preserve">
+    <value>次の列は負のスケールを宣言しているため、データベースが値を丸めます（numeric(10,-2) は 1234 を 1200 として保存します）。これらの列には精度・スケールを生成コードへ載せません（値オブジェクトの桁数検証・[SqlColumnType] の Precision/Scale・EF Core の HasPrecision のいずれも出ません）。負のスケールは意図して書くものなので、警告ではなくお知らせとして出しています:{0}</value>
+  </data>
   <data name="CodeGen_Info_FallbackTypeColumns" xml:space="preserve">
     <value>次の列は型カタログが DB 型を認識できず、生成コードのプロパティが安全側のフォールバックとして string になっています（生成自体は失敗させないための既定値です）。意図した型かどうか確認し、違う場合は図の列の型表記を見直してください:{0}</value>
   </data>
