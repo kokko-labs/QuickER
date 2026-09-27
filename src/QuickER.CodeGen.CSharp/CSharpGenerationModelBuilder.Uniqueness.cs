@@ -51,7 +51,11 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 制約名は <see cref="UniqueConstraint.Name"/> が正本で、未設定なら <see cref="UniqueConstraint.SynthesizeName"/> の
     /// 合成名を使う（DDL 生成と同じ意味論。方言別の識別子安全化はここでは行わない＝生成コードは名前を文字列として運ぶだけ）。
     /// </remarks>
-    private List<ResolvedUniqueConstraint> ResolveUniqueConstraints(Entity entity)
+    /// <summary>構成列の絞り込み条件つきで解決する（条件に合わない列を含む制約はまるごと捨てる）</summary>
+    private List<ResolvedUniqueConstraint> ResolveUniqueConstraints(
+        Entity entity,
+        Func<Column, bool>? columnFilter = null
+    )
     {
         var columnsById = entity.Columns.ToDictionary(column => column.Id);
         var resolved = new List<ResolvedUniqueConstraint>();
@@ -70,6 +74,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 // 削除済み列を指す残骸は生成対象外（列構成が欠けた制約は DDL 側でも成立しない）
                 if (!columnsById.TryGetValue(columnId, out var column))
+                {
+                    complete = false;
+                    break;
+                }
+
+                // 絞り込み条件に合わない列を含む制約は、縮めずにまるごと捨てる
+                // （構成列を減らすと別の意味の制約になる）
+                if (columnFilter is not null && !columnFilter(column))
                 {
                     complete = false;
                     break;
@@ -100,6 +112,15 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return resolved;
     }
+
+    /// <summary>EditModel の重複検証に載せられる構成列か（配列列は載らない）</summary>
+    /// <remarks>
+    /// 配列列は EditModel に投影しない（<see cref="IsArrayColumn"/>）ので、その列を参照する検証を出すと
+    /// 実在しないプロパティを参照してコンパイルできない。<b>Repository 側の重複事前チェックからは外さない</b>
+    /// ＝そちらが読むのは Entity のプロパティで実在し、DB 側にも制約は実在するため、そこでは弾ける。
+    /// 外した制約は生成時 Info（<c>CodeGen_Info_ArrayUniqueConstraintsNotValidated</c>）で名指しする。
+    /// </remarks>
+    private bool IsEditableConstraint(Column column) => !IsArrayColumn(column);
 
     /// <summary>単一主キーを持つ（＝ Repository 契約面が生成される）エンティティかどうか</summary>
     /// <remarks>Repository モデルの構築判定と EditModel の <c>ValidateUniqueAsync</c> 生成判定が同じ規則を共有する。</remarks>
@@ -337,7 +358,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         CodeGenerationOptions options
     )
     {
-        var constraints = ResolveUniqueConstraints(entity);
+        // 配列列を含む制約は EditModel 側の検証から外す（下記 IsEditableConstraint の理由）
+        var constraints = ResolveUniqueConstraints(entity, IsEditableConstraint);
 
         // ValidateUniqueAsync は Repository 契約面（単一主キーが前提）が生成されるエンティティにだけ出せる
         var hasRepositoryFace = options.GeneratesRepositoryContract && HasSinglePrimaryKey(entity);

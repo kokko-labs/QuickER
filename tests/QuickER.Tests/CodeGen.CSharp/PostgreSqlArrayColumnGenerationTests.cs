@@ -331,4 +331,104 @@ public class PostgreSqlArrayColumnGenerationTests
         content.Should().Contain("ArticleSummary");
         content.Should().Contain("int[] Tags");
     }
+
+    /// <summary>配列列を含む UNIQUE 制約を持つ図を作る（単独列と複合の両方）</summary>
+    private static ErDiagram BuildDiagramWithArrayUniqueConstraints()
+    {
+        var diagram = BuildDiagram();
+        var entity = diagram.Entities[0];
+        var tags = entity.Columns.Single(column => column.Name == "tags");
+        var name = entity.Columns.Single(column => column.Name == "name");
+
+        entity.UniqueConstraints.Add(
+            new UniqueConstraint { Name = "uq_articles_tags", ColumnIds = [tags.Id] }
+        );
+
+        // 名前を持たない複合制約（名指しでは合成名が出る）
+        entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [name.Id, tags.Id] });
+
+        return diagram;
+    }
+
+    private static CodeGenerationResult GenerateWithArrayUniqueConstraints(
+        CodeGenerationOptions options
+    )
+    {
+        var diagram = BuildDiagramWithArrayUniqueConstraints();
+
+        return new CSharpCodeGenerationService().Generate(
+            diagram,
+            PostgreSqlCSharpTypeMapper.ResolveColumnTypes(diagram),
+            options
+        );
+    }
+
+    /// <summary>
+    /// 配列列を含む UNIQUE 制約があってもコンパイルできることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// EditModel の重複検証は制約の構成列をプロパティ名で参照する（制約テーブルと <c>ValidateUniqueAsync</c>）。
+    /// 配列列は EditModel に載らないので、外さずに出すと実在しないプロパティを指してコンパイルできない
+    /// （実測: 単独列・複合の 2 制約で CS0103 が 3 箇所）。Repository 側は Entity のプロパティを読むので落ちない。
+    /// </remarks>
+    [Theory(DisplayName = "配列列を含む UNIQUE 制約があってもコンパイルできる")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Generate_ArrayColumnInUniqueConstraint_Compiles(bool valueObjects)
+    {
+        var options = BaseOptions(editModels: true, valueObjects: valueObjects) with
+        {
+            GenerateRepositories = true,
+            GenerateEfCoreRepositories = false,
+        };
+        var result = GenerateWithArrayUniqueConstraints(options);
+
+        result.HasErrors.Should().BeFalse();
+
+        var compilation = GeneratedCodeCompiler.Compile(
+            result,
+            assemblyName: $"QuickER.Generated.ArrayUnique.{Guid.NewGuid():N}"
+        );
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                $"配列列を含む UNIQUE 制約の生成コードにコンパイルエラー:{Environment.NewLine}{compilation.DescribeErrors()}"
+            );
+    }
+
+    /// <summary>EditModel の検証から外した制約を Info が名指しすることを検証する</summary>
+    /// <remarks>黙って検証を外さないため。名前を持たない制約は生成側と同じ規則で合成した名前を出す。</remarks>
+    [Fact(DisplayName = "配列列を含む UNIQUE 制約は Info で名指しされる")]
+    public void Generate_ArrayColumnInUniqueConstraint_ReportsInfoDiagnostic()
+    {
+        var result = GenerateWithArrayUniqueConstraints(
+            BaseOptions(editModels: true, valueObjects: false)
+        );
+
+        var message = result
+            .Diagnostics.Should()
+            .ContainSingle(d =>
+                d.Severity == GenerationDiagnosticSeverity.Info
+                && d.Message.Contains("uq_articles_tags", StringComparison.Ordinal)
+            )
+            .Subject.Message;
+
+        message.Should().Contain("articles.uq_articles_tags (tags)");
+        message.Should().Contain("(name, tags)", "名前の無い制約は合成名で名指しする");
+    }
+
+    /// <summary>EditModel を生成しない構成では名指ししないことを検証する（負のアーム）</summary>
+    /// <remarks>外す対象が EditModel の検証だけなので、EditModel が無ければ外すものも無い。</remarks>
+    [Fact(DisplayName = "EditModel を生成しない構成では UNIQUE 制約を名指ししない")]
+    public void Generate_ArrayColumnInUniqueConstraint_IsSilentWithoutEditModels()
+    {
+        var result = GenerateWithArrayUniqueConstraints(
+            BaseOptions(editModels: false, valueObjects: false)
+        );
+
+        result
+            .Diagnostics.Should()
+            .NotContain(d => d.Message.Contains("uq_articles_tags", StringComparison.Ordinal));
+    }
 }

@@ -128,6 +128,10 @@ Each dialect imports one scope, and objects outside it are not visible to the im
 | Oracle | The connecting user's own schema (the `USER_*` views) |
 | SQLite | The single connected database file |
 
+On Oracle, a column the user made `INVISIBLE` is imported as well (it is a column deliberately hidden, not a column that does not exist).
+Oracle gives such a column no ordinal, so it comes after the visible columns in the diagram.
+The system-generated columns a function-based index adds to the table (`SYS_NC…$`) are not imported.
+
 A foreign key that points outside this scope cannot become a relationship, because its parent table is not in the diagram.
 Such a key is skipped and reported (see below) rather than dropped silently.
 SQLite does not check that a foreign key's parent table exists when the table is created, so a database can carry keys that point at a table that is not there; those are treated the same way.

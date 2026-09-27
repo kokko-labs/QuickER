@@ -322,6 +322,9 @@ public class SqlConnectionProfileStore
     /// <summary>プロファイルを 1 件追加または更新し、必要に応じてパスワードを暗号化保存する</summary>
     /// <param name="profile">保存対象 Id が既存と一致すれば上書き、なければ追加する</param>
     /// <param name="password">パスワード <see cref="SqlConnectionProfile.SavePassword"/> が <c>true</c> の場合のみ保存する</param>
+    /// <param name="replacedProfileId">
+    /// 同時に削除するプロファイルの Id（名前の変更で既存を置き換えるときに渡す。<c>null</c> なら削除しない）
+    /// </param>
     /// <remarks>
     /// <see cref="SqlConnectionProfile.SavePassword"/> は <see cref="NormalizeSavePassword"/> が正規化する
     /// （渡したインスタンスも書き換わる）。<b>読み取りに失敗したときは渡したインスタンスも書き換えない</b>。
@@ -329,14 +332,29 @@ public class SqlConnectionProfileStore
     /// 読み取りは 1 回だけ（<see cref="LoadDataForWrite"/>）。読み取ってから書くまでに 2 回読むと、
     /// 1 回目が失敗して 2 回目が成功した瞬間に「空の一覧＋既存の前回接続」を書いてしまう。
     /// </para>
+    /// <para>
+    /// <paramref name="replacedProfileId"/> を <see cref="Delete"/> の別呼び出しで済ませてはいけない。
+    /// 2 回の読み書きになり、2 回目が読めなかったときに<b>置き換え先だけが消えて対象は変わらない</b>
+    /// 状態が残る（名前の変更でこれが起きると、一覧には消えたはずのプロファイルが居座る）。
+    /// </para>
     /// </remarks>
     /// <exception cref="ConnectionProfileStoreUnavailableException">
     /// 接続情報ファイルを読み取れず保存を中止した（ファイルの中身は操作前のまま）
     /// </exception>
-    public void Upsert(SqlConnectionProfile profile, string password)
+    public void Upsert(
+        SqlConnectionProfile profile,
+        string password,
+        Guid? replacedProfileId = null
+    )
     {
         var data = LoadDataForWrite();
         var hasPassword = NormalizeSavePassword(profile, password);
+
+        if (replacedProfileId is { } replacedId && replacedId != profile.Id)
+        {
+            data.Profiles.RemoveAll(p => p.Id == replacedId);
+        }
+
         var idx = data.Profiles.FindIndex(p => p.Id == profile.Id);
 
         if (idx >= 0)
@@ -349,6 +367,13 @@ public class SqlConnectionProfileStore
         }
 
         SaveData(data);
+
+        // 置き換えたプロファイルの暗号ファイルは、JSON の書き込みが成功したあとで消す
+        // （先に消すと、書き込みに失敗したとき「一覧には居るのにパスワードだけ無い」状態が残る）
+        if (replacedProfileId is { } removedId && removedId != profile.Id)
+        {
+            DeleteSecret(removedId);
+        }
 
         // 保存無効・空パスワード時は残存する暗号ファイルを削除する
         if (hasPassword)

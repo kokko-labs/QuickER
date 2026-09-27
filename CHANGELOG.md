@@ -25,7 +25,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
   | `bigint[]` | `string` | `long[]` |
   | `varchar(n)[]` | `string` (silently, with no diagnostic) | `string[]` |
 
-  Two limits come with this. Writing a `timetz` value whose offset is not UTC needs the column type spelled out, which QuickER does not generate (EF Core is for connecting to an existing schema); add it in the generated `QuickErDbContext`'s `OnModelCreatingPartial` if you need it. And array columns are left out of edit models and value objects, and the length of an array's elements is not carried into the generated code; generation names the affected columns.
+  Two limits come with this. Writing a `timetz` value whose offset is not UTC needs the column type spelled out, which QuickER does not generate (EF Core is for connecting to an existing schema); add it in the generated `QuickErDbContext`'s `OnModelCreatingPartial` if you need it. And array columns are left out of edit models and value objects, and the length of an array's elements is not carried into the generated code; generation names the affected columns. A UNIQUE constraint containing an array column is likewise left out of the edit model's duplicate check (the repository still checks it before saving).
 
 #### Import and export
 

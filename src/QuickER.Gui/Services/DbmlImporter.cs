@@ -1093,8 +1093,20 @@ public static partial class DbmlImporter
     /// <summary>
     /// <c>Table</c> ブロック内の未対応ブロック（<c>checks</c> / <c>records</c>）の開始行に一致する正規表現を生成する
     /// </summary>
-    /// <remarks>読み飛ばさないとカラム定義として解釈され、幻のカラムができる</remarks>
-    [GeneratedRegex(@"^(checks|records)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    /// <remarks>
+    /// <para>読み飛ばさないとカラム定義として解釈され、幻のカラムができる。</para>
+    /// <para>
+    /// <b>キーワードだけで判定してはいけない</b>＝<c>records int</c> / <c>checks int</c> という<b>列</b>が
+    /// ブロックとみなされて無言で消える（エクスポートは列名を素の識別子で書くので往復が壊れる）。
+    /// ブロックの開始行は「キーワードのあと、設定の <c>[</c> より前に <c>{</c> がある」形で見分ける
+    /// （<c>records t(id) {</c> のように名前や引数を挟む形と、1 行で閉じる <c>checks { ... }</c> の両方を拾う。
+    /// 列定義は <c>名前 型 [設定]</c> なので、<c>{</c> が現れるとしても <c>[</c> より後ろになる）。
+    /// </para>
+    /// </remarks>
+    [GeneratedRegex(
+        @"^(checks|records)\b[^\[\r\n]*\{",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    )]
     private static partial Regex SkippableTableBlockLineRegex();
 
     /// <summary><c>Ref</c> で始まる行に一致する正規表現を生成する（未対応形式の検出に使う）</summary>
@@ -1102,7 +1114,13 @@ public static partial class DbmlImporter
     private static partial Regex RefKeywordLineRegex();
 
     /// <summary><c>Note</c> で始まる行に一致する正規表現を生成する（未対応の複数行 Note の検出に使う）</summary>
-    [GeneratedRegex(@"^note\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    /// <remarks>
+    /// <b>キーワードだけで判定してはいけない</b>＝<c>note varchar</c> という<b>列</b>を複数行 Note とみなして
+    /// 取込全体を失敗させる。複数行 Note は <c>Note {</c> か <c>Note: '''</c> の形なので、キーワードの直後が
+    /// <c>:</c> か <c>{</c> のときだけ一致させる（1 行の <c>Note: 'テキスト'</c> は手前の
+    /// <see cref="TableNoteLineRegex"/> が先に食べる）。
+    /// </remarks>
+    [GeneratedRegex(@"^note\s*[:{]", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex NoteKeywordLineRegex();
 
     /// <summary>テーブルの説明を表す <c>Note: '...'</c> 行に一致する正規表現を生成する</summary>

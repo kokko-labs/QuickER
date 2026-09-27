@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -113,6 +114,57 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
                 .Should()
                 .BeTrue($"取込型 '{column.DataType}' は DDL へ出せる表記であること");
         }
+    }
+
+    /// <summary>
+    /// 利用者が INVISIBLE にした列は取り込み、関数インデックスのシステム生成列は取り込まないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 列の取得は <c>user_tab_cols</c>（仮想列を判別するため）を <c>user_generated = 'YES'</c> で絞る。
+    /// <c>hidden_column = 'NO'</c> で絞ると、除きたい <c>SYS_NC…$</c> だけでなく、
+    /// <b>利用者が意図して隠した INVISIBLE 列も落ちる</b>（実測: INVISIBLE 列は
+    /// <c>hidden_column='YES'</c> / <c>user_generated='YES'</c>、<c>SYS_NC…$</c> は
+    /// <c>hidden_column='YES'</c> / <c>user_generated='NO'</c>）。
+    /// </para>
+    /// <para>
+    /// INVISIBLE 列の <c>column_id</c> は <c>NULL</c> なので、<c>ORDER BY column_id</c> では
+    /// 可視列の後ろへ並ぶ（Oracle の昇順は NULLS LAST）。図でも末尾の列になることを併せて固定する。
+    /// </para>
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] Oracle: INVISIBLE 列は取り込み、関数インデックスの隠し列は取り込まない"
+    )]
+    public async Task Import_InvisibleColumn_IsImportedButSystemGeneratedIsNot()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE PROBE_T (
+                ID NUMBER(10) PRIMARY KEY,
+                NAME VARCHAR2(50),
+                SECRET VARCHAR2(50) INVISIBLE
+            );
+            CREATE INDEX PROBE_IX ON PROBE_T (UPPER(NAME));
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        var probe = result.Entities.Single(e => e.TableName == "PROBE_T");
+
+        // INVISIBLE 列は取り込む。column_id が NULL なので可視列の後ろへ並ぶ
+        probe.Columns.Select(c => c.Name).Should().Equal("ID", "NAME", "SECRET");
+        probe.Columns.Single(c => c.Name == "SECRET").DataType.Should().Be("VARCHAR2(50)");
+
+        // 関数インデックスのシステム生成列は取り込まない（図に実在しない列を作らない）
+        probe
+            .Columns.Should()
+            .NotContain(c => c.Name.StartsWith("SYS_NC", StringComparison.Ordinal));
     }
 
     /// <summary>

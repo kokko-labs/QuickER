@@ -10,6 +10,7 @@ using QuickER.Provider.Oracle;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.Resources;
 using QuickER.Tests.TestDoubles;
 
 namespace QuickER.Tests.Db.UI;
@@ -1289,6 +1290,102 @@ public class DbConnectionDialogViewModelTests : IDisposable
         }
 
         store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+    }
+
+    /// <summary>
+    /// 置き換えを伴う名前の変更が中止されたときに、置き換え先も対象もそのまま残ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 「置き換え先の削除」と「対象の改名」を別々の読み書きで行うと、2 回目が読めなかったときに
+    /// <b>置き換え先だけが消えて対象は変わらない</b>状態が残る（しかも一覧は再読込されないので、
+    /// 画面には消えたはずのプロファイルが居座る）。1 回の読み書きへまとめてあることをここで固定する。
+    /// </remarks>
+    [Fact(DisplayName = "RenameProfile: 置き換えを伴う変更が中止されても、置き換え先を消さない")]
+    public void RenameProfile_WhenStoreUnavailable_KeepsBothProfiles()
+    {
+        var store = CreateStore();
+        var targetId = SeedProfile(store, "本番DB");
+        var conflictId = SeedProfile(store, "本番DB（東京）", "tokyo.example.com", "tokyo-secret");
+        var vm = CreateVm(store, new StubDialogService { ConfirmResult = true });
+        vm.SelectedProfileItem = vm.Profiles.Single(item => item.Profile.Id == targetId);
+        vm.ProfileName = "本番DB（東京）";
+
+        using (LockConnectionsFile(store))
+        {
+            vm.RenameProfileCommand.Execute(null);
+
+            vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileStoreUnavailable);
+        }
+
+        var stored = store.LoadAll();
+        stored.Should().HaveCount(2, "読めなかったのだから、どちらも消さない");
+        stored.Single(p => p.Id == targetId).Name.Should().Be("本番DB");
+        stored.Single(p => p.Id == conflictId).Name.Should().Be("本番DB（東京）");
+        store.LoadPassword(conflictId).Should().Be("tokyo-secret", "暗号ファイルも消さない");
+    }
+
+    /// <summary>置き換えを伴う名前の変更が成功したときの後始末を検証する</summary>
+    /// <remarks>
+    /// 置き換え先は一覧からも暗号ファイルからも消え、対象は改名されてパスワードを保つ。
+    /// 暗号ファイルの削除は JSON の書き込みが成功したあとに行う（先に消すと、書き込みに失敗したときに
+    /// 「一覧には居るのにパスワードだけ無い」状態が残る）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "RenameProfile: 置き換えた側は暗号ファイルごと消え、対象のパスワードは残る"
+    )]
+    public void RenameProfile_ReplacingAnotherProfile_RemovesItsSecretAndKeepsOwn()
+    {
+        var store = CreateStore();
+        var targetId = SeedProfile(store, "本番DB");
+        var conflictId = SeedProfile(store, "本番DB（東京）", "tokyo.example.com", "tokyo-secret");
+        var vm = CreateVm(store, new StubDialogService { ConfirmResult = true });
+        vm.SelectedProfileItem = vm.Profiles.Single(item => item.Profile.Id == targetId);
+        vm.ProfileName = "本番DB（東京）";
+
+        vm.RenameProfileCommand.Execute(null);
+
+        var stored = store.LoadAll().Should().ContainSingle().Subject;
+        stored.Id.Should().Be(targetId);
+        stored.Name.Should().Be("本番DB（東京）");
+        store.LoadPassword(targetId).Should().Be("prod-secret", "改名で自分のパスワードは失わない");
+        store.LoadPassword(conflictId).Should().BeEmpty("置き換えた側の暗号ファイルは残さない");
+        vm.Profiles.Should().ContainSingle("一覧も再読込する");
+    }
+
+    /// <summary>名前の変更が 1 回の読み書きで済んでいることをソース上で固定する</summary>
+    /// <remarks>
+    /// <para>
+    /// 「置き換え先の削除」と「対象の改名」を別々に呼ぶと 2 回の読み書きになり、2 回目が読めなかったときに
+    /// <b>置き換え先だけが消えて対象は変わらない</b>状態が残る。
+    /// </para>
+    /// <para>
+    /// <b>この退行は挙動テストでは捕まえられない。</b>読み取りを失敗させる手段が接続情報ファイルのロックしかなく、
+    /// ロックすると 1 回目（削除）も失敗してしまうため、「1 回目は成功して 2 回目が失敗する」状況を作れない
+    /// （store に差し替えの口を足せば作れるが、テストのためだけに本番の面を広げることになる）。
+    /// 呼び出しの形をソースで見張る。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "RenameProfile: 置き換えと改名を 1 回の読み書きで行う")]
+    public void RenameProfile_UsesASingleStoreWrite()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(
+                NeutralResxFiles.FindRepositoryRoot(),
+                "src",
+                "QuickER.Db.UI",
+                "DbConnectionDialogViewModel.cs"
+            )
+        );
+        var start = source.IndexOf("private void RenameProfile()", StringComparison.Ordinal);
+        start.Should().BeGreaterThan(0);
+
+        var end = source.IndexOf("private void DeleteProfile()", start, StringComparison.Ordinal);
+        end.Should().BeGreaterThan(start);
+
+        var body = source[start..end];
+
+        body.Should().Contain("_store.Upsert(target, password, conflict?.Id)");
+        body.Should().NotContain("_store.Delete(", "削除と改名を別々に呼ぶと 2 回の読み書きになる");
     }
 
     /// <summary>名前の変更が中止されたときに、名前を書き換えずステータスで知らせることを検証する（MS1）。</summary>
