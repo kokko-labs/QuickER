@@ -1395,6 +1395,11 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Print_Failed", resourceCulture);
             }
         }
+        public static string Print_ActualSizeTooLarge {
+            get {
+                return ResourceManager.GetString("Print_ActualSizeTooLarge", resourceCulture);
+            }
+        }
 
         public static string Import_Failed {
             get {

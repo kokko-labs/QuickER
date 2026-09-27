@@ -3,6 +3,7 @@ using System.Printing;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using QuickER.Gui.Abstractions;
 using QuickER.Resources;
 using QuickER.ViewModels;
 
@@ -119,6 +120,59 @@ public static class DiagramPrintService
         );
     }
 
+    /// <summary>原寸大印刷で許す用紙 1 辺の上限（200 インチ＝19,200 DIP）</summary>
+    /// <remarks>
+    /// 原寸大の用紙は図の実寸そのものなので、図が大きいほど用紙も際限なく大きくなる
+    /// （実測: エンティティを 100,000 DIP 離した 2 個だけの図で 1045 x 1044 インチ）。
+    /// <see cref="PageMediaSize"/> はその値をそのまま受け取ってしまう一方、PDF の用紙は
+    /// 1 辺 200 インチ（14,400pt）が上限で、XPS も同じ上限を持つ。
+    /// 自動整列した図は 1000 テーブルでも 100 x 61 インチ（実測）なので、ここに掛かるのは
+    /// 手配置で極端に離れた図だけになる。
+    /// </remarks>
+    public const double MaxPageSideDip = 200 * 96;
+
+    /// <summary>原寸大で印刷できない大きさかどうか</summary>
+    public static bool ExceedsPrintablePageSize(Size pageSize) =>
+        pageSize.Width > MaxPageSideDip || pageSize.Height > MaxPageSideDip;
+
+    /// <summary>実際に使う印刷サイズモードを決める（取りやめるなら <c>null</c>）</summary>
+    /// <remarks>
+    /// 原寸大が選ばれていて用紙が上限を超えるときだけ、実寸を示して確認する。
+    /// 了承なら縮小フィットへ倒し、取りやめなら <c>null</c> を返して<b>印刷ダイアログも出さない</b>
+    /// （断るだけだと大きな図を印刷する手段が無くなるため、縮小フィットという逃げ道を示す）。
+    /// </remarks>
+    internal static PrintSizeMode? ResolveEffectiveSizeMode(
+        PrintSizeMode requested,
+        Size contentSize,
+        double headerHeight,
+        IDialogService dialogs
+    )
+    {
+        if (requested != PrintSizeMode.ActualSize)
+        {
+            return requested;
+        }
+
+        var pageSize = CalculateActualSizePageSize(contentSize, headerHeight);
+
+        if (!ExceedsPrintablePageSize(pageSize))
+        {
+            return requested;
+        }
+
+        var confirmed = dialogs.ConfirmWarning(
+            string.Format(
+                Strings.Print_ActualSizeTooLarge,
+                Math.Round(pageSize.Width / 96),
+                Math.Round(pageSize.Height / 96),
+                Math.Round(MaxPageSideDip / 96)
+            ),
+            Strings.Common_Confirm
+        );
+
+        return confirmed ? PrintSizeMode.FitToPage : null;
+    }
+
     /// <summary>原寸大印刷時の印刷可能領域を自前で求める（用紙全体から上下左右の余白を引いた矩形）</summary>
     /// <remarks>
     /// 原寸大モードの用紙は自分で決めたサイズのため、印刷可能領域も自前で確定する。
@@ -199,9 +253,27 @@ public static class DiagramPrintService
         MainViewModel vm,
         string title,
         bool includeTimestamp,
-        PrintSizeMode sizeMode
+        PrintSizeMode sizeMode,
+        IDialogService dialogs
     )
     {
+        // 図の実寸は VM から直接求める（エンティティ 0 件時のフォールバックも同メソッドが持つ）
+        var bounds = DiagramVectorRenderer.CalculateDiagramBounds(vm);
+        var headerText = BuildHeaderText(title, DateTime.Now, includeTimestamp);
+        var headerHeight = CreateHeaderFormattedText(headerText).Height;
+
+        // 用紙が大きすぎる原寸大は、印刷ダイアログを出す前に決着させる
+        // （あとで取りやめると、選んだプリンタに印刷ジョブが残り得る）
+        if (
+            ResolveEffectiveSizeMode(sizeMode, bounds.Size, headerHeight, dialogs)
+            is not { } effectiveMode
+        )
+        {
+            return;
+        }
+
+        sizeMode = effectiveMode;
+
         var printDialog = new PrintDialog();
 
         // 用紙向きの既定は横（ユーザーはダイアログで変更可能）
@@ -218,17 +290,12 @@ public static class DiagramPrintService
             return;
         }
 
-        // 図の実寸は VM から直接求める（エンティティ 0 件時のフォールバックも同メソッドが持つ）
-        var bounds = DiagramVectorRenderer.CalculateDiagramBounds(vm);
-
-        var headerText = BuildHeaderText(title, DateTime.Now, includeTimestamp);
         Rect imageableArea;
 
         if (sizeMode == PrintSizeMode.ActualSize)
         {
             // 原寸大モードでは用紙サイズ自体を図の実寸（＋余白・ヘッダ領域）へ合わせる。
             // サイズを直接指定するため回転はさせない（Portrait 固定）
-            var headerHeight = CreateHeaderFormattedText(headerText).Height;
             var pageSize = CalculateActualSizePageSize(bounds.Size, headerHeight);
             var actualSizeTicket = printDialog.PrintTicket;
 

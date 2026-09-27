@@ -693,6 +693,9 @@
   <data name="Export_Failed" xml:space="preserve">
     <value>出力できませんでした。</value>
   </data>
+  <data name="Print_ActualSizeTooLarge" xml:space="preserve">
+    <value>この図は原寸大では印刷できません。用紙が {0} x {1} インチになり、1 辺 {2} インチの上限を超えます。縮小して 1 ページに収めて印刷しますか?</value>
+  </data>
   <data name="Print_Failed" xml:space="preserve">
     <value>印刷できませんでした。</value>
   </data>

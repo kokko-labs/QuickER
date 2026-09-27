@@ -671,6 +671,9 @@
   <data name="Export_Failed" xml:space="preserve">
     <value>Failed to export.</value>
   </data>
+  <data name="Print_ActualSizeTooLarge" xml:space="preserve">
+    <value>This diagram is too large to print at actual size: the paper would be {0} x {1} inches, and a page cannot exceed {2} inches on a side. Print it scaled to fit one page instead?</value>
+  </data>
   <data name="Print_Failed" xml:space="preserve">
     <value>Failed to print.</value>
   </data>

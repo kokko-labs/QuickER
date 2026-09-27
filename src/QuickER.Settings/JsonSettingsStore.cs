@@ -1,5 +1,7 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 
 namespace QuickER.Settings;
 
@@ -137,6 +139,22 @@ public class JsonSettingsStore<TSettings>
     /// 利用者の設定を既定値で塗り潰すことになる。書かずに諦めればファイルの中身は前のままで、
     /// 次に読み取りが成功した時点で抑止も解ける。
     /// </para>
+    /// <para>
+    /// <b>書き込みの直前にディスクの JSON を読み直し、<typeparamref name="TSettings"/> が知らないキーを
+    /// 引き継ぐ</b>（<see cref="CarryOverUnknownProperties"/>）。<see cref="Load"/> は
+    /// <see cref="JsonSerializer.Deserialize{TValue}(string, JsonSerializerOptions?)"/> なので型が知らないキーを
+    /// 読み捨てており、引き継がずに書くと<b>新しい版の QuickER が足したキーを、古い版で 1 度保存しただけで失う</b>。
+    /// 設定ファイルは図ファイル（<c>DiagramDocument</c>）と違って前方互換の版番号を持たず、
+    /// 「新しすぎるから読み込まない・上書きの前に確認する」（<c>IsNewerFormat</c>）に相当する仕組みが無いため、
+    /// 黙って捨てると利用者の設定がただ消える。ここで引き継ぐのがその代わりになる。
+    /// なお保存のたびにファイルを 1 回余計に読む（設定ファイルは数 KB なので通常は無視できるが、
+    /// ロックされているときは <see cref="AtomicFile.TryReadAllText"/> の再試行ぶん呼び出し元を待たせる）。
+    /// </para>
+    /// <para>
+    /// <b>読み直しが <see cref="FileReadStatus.Unavailable"/> のときは何も書かずに戻る。</b>
+    /// 「あるのに今は読めない」ファイルを読めないまま上書きすると、そこにあった未知のキーを
+    /// 黙って捨てることになり、この引き継ぎが塞ごうとしている穴そのものを開ける。
+    /// </para>
     /// </remarks>
     public void Save(TSettings settings)
     {
@@ -145,10 +163,163 @@ public class JsonSettingsStore<TSettings>
             return;
         }
 
+        var status = AtomicFile.TryReadAllText(SettingsPath, out var existingJson);
+
+        // 読めないまま上書きすると、ディスクにある未知のキーを黙って捨てることになる
+        if (status == FileReadStatus.Unavailable)
+        {
+            return;
+        }
+
         Directory.CreateDirectory(_folder);
         BackUpCorruptFileOnce();
         var json = JsonSerializer.Serialize(settings, JsonOptions);
+
+        // ファイルが無い（Missing）ときは引き継ぐ相手がいないので、そのまま書く
+        if (status == FileReadStatus.Loaded)
+        {
+            json = MergeUnknownProperties(json, existingJson!);
+        }
+
         AtomicFile.WriteAllText(SettingsPath, json);
+    }
+
+    /// <summary>
+    /// 書き出す JSON へ、ディスク上の JSON にしか無いキー（＝<typeparamref name="TSettings"/> が知らないキー）を
+    /// 再帰的に引き継ぐ
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ディスクの JSON が壊れている・オブジェクトでない（配列や JSON リテラルの <c>null</c>）ときは、
+    /// 引き継ぐ相手を決められないので<b>引き継がずにそのまま書く</b>（壊れたファイルの退避は
+    /// <see cref="BackUpCorruptFileOnce"/> が別途行う）。引き継ぎの途中で失敗した場合も、
+    /// 書き出すのは引き継ぎ前の文字列なので中途半端な内容にはならない。
+    /// </para>
+    /// <para>
+    /// <b>既知のキー</b>は必ず<b>型のメタデータ</b>（<see cref="JsonSerializerOptions.GetTypeInfo(Type)"/> が返す
+    /// <see cref="JsonTypeInfo.Properties"/>）から求める。<b>シリアライズ結果に現れたキーから求めてはいけない</b>。
+    /// 現在の設定型では表に出ないが、次の 2 つが警告なく静かに壊れる。
+    /// </para>
+    /// <list type="number">
+    /// <item><description>
+    /// <b>辞書型のプロパティ:</b> JSON ではオブジェクトとして出るため、出力ベースだと中へ再帰してしまい、
+    /// 利用者が消したエントリが「未知のキー」として復活する。型のメタデータなら
+    /// <see cref="JsonTypeInfoKind.Dictionary"/> と分かるので、値ごと置き換わる。
+    /// </description></item>
+    /// <item><description>
+    /// <b><see cref="JsonSerializerOptions.DefaultIgnoreCondition"/>（null を書かない設定）が将来入った場合:</b>
+    /// 利用者が null にした既知のプロパティが出力に現れないため、出力ベースだとディスクの旧値が
+    /// 「未知のキー」として復活する。
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// 再帰するのは <see cref="JsonTypeInfoKind.Object"/> のプロパティだけ。辞書・配列・値は
+    /// 「型が知っているプロパティ」として<b>値ごと置き換える</b>（中へは入らない）。
+    /// このため<b>配列の要素の中にある未知のキーは運べない</b>——要素の増減・並べ替えを考えると
+    /// どの要素とどの要素を突き合わせるべきかが決まらず、引き継ぎの意味が定まらないため。
+    /// これは既知の割り切りで、設定型に「要素ごとに版が増えていく配列」を足すときは注意すること。
+    /// </para>
+    /// <para>
+    /// キー名の比較は<b>大文字小文字を区別する</b>（<see cref="StringComparer.Ordinal"/>）。
+    /// 読み込み側（<see cref="JsonSerializerOptions.PropertyNameCaseInsensitive"/> の既定は <c>false</c>）と
+    /// 揃えないと、読み込みでは別のキーとして無視された綴りを、ここだけ既知と見なして取りこぼす。
+    /// </para>
+    /// </remarks>
+    /// <param name="serialized">書き出そうとしている JSON（<paramref name="existingJson"/> より優先する）</param>
+    /// <param name="existingJson">ディスクにある JSON</param>
+    /// <returns>未知のキーを引き継いだ JSON。引き継げなかったときは <paramref name="serialized"/> のまま</returns>
+    private static string MergeUnknownProperties(string serialized, string existingJson)
+    {
+        try
+        {
+            if (JsonNode.Parse(existingJson) is not JsonObject existing)
+            {
+                return serialized;
+            }
+
+            if (JsonNode.Parse(serialized) is not JsonObject target)
+            {
+                return serialized;
+            }
+
+            CarryOverUnknownProperties(
+                target,
+                existing,
+                JsonOptions.GetTypeInfo(typeof(TSettings))
+            );
+
+            return target.ToJsonString(JsonOptions);
+        }
+        catch (Exception ex)
+            when (ex
+                    is JsonException
+                        or ArgumentException
+                        or NotSupportedException
+                        or InvalidOperationException
+            )
+        {
+            // 壊れた JSON・キーの重複（JsonObject は列挙時に ArgumentException を投げる）など。
+            // 引き継げないだけで保存そのものは成立するので、書き出す内容は変えずに続ける
+            return serialized;
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="existing"/> にしか無いキーを <paramref name="target"/> へ写し、
+    /// 既知のオブジェクト型プロパティだけ 1 段深く同じ処理を行う
+    /// </summary>
+    /// <param name="target">書き出す JSON オブジェクト（この場で書き換える）</param>
+    /// <param name="existing">ディスク上の JSON オブジェクト</param>
+    /// <param name="typeInfo">両者に対応する設定型のメタデータ</param>
+    private static void CarryOverUnknownProperties(
+        JsonObject target,
+        JsonObject existing,
+        JsonTypeInfo typeInfo
+    )
+    {
+        var known = BuildKnownProperties(typeInfo);
+
+        foreach (var entry in existing)
+        {
+            if (!known.TryGetValue(entry.Key, out var nestedTypeInfo))
+            {
+                // 型が知らないキー＝読み込みで捨てられた値。書き出す側へそのまま持ち越す
+                target[entry.Key] = entry.Value?.DeepClone();
+
+                continue;
+            }
+
+            // 型が知っているキーは値ごと置き換わる（＝何もしない）。
+            // 中へ再帰するのはオブジェクト型のときだけで、辞書・配列・値は置き換えたままにする
+            if (
+                nestedTypeInfo is not null
+                && entry.Value is JsonObject existingChild
+                && target[entry.Key] is JsonObject targetChild
+            )
+            {
+                CarryOverUnknownProperties(targetChild, existingChild, nestedTypeInfo);
+            }
+        }
+    }
+
+    /// <summary>設定型が知っているキーの一覧を作る（値は「中へ再帰できるならその型のメタデータ」）</summary>
+    /// <remarks>
+    /// 値が <c>null</c> なのは辞書・配列・値など<b>再帰しない</b>プロパティ。
+    /// 「キーを知っているか」と「中へ入ってよいか」は別の問いなので、1 つの辞書で両方を答える。
+    /// </remarks>
+    private static Dictionary<string, JsonTypeInfo?> BuildKnownProperties(JsonTypeInfo typeInfo)
+    {
+        var known = new Dictionary<string, JsonTypeInfo?>(StringComparer.Ordinal);
+
+        foreach (var property in typeInfo.Properties)
+        {
+            var propertyTypeInfo = JsonOptions.GetTypeInfo(property.PropertyType);
+
+            known[property.Name] =
+                propertyTypeInfo.Kind == JsonTypeInfoKind.Object ? propertyTypeInfo : null;
+        }
+
+        return known;
     }
 
     /// <summary>壊れていた設定ファイルを、上書きしてしまう前に 1 回だけ退避する</summary>
@@ -177,7 +348,11 @@ public class JsonSettingsStore<TSettings>
     }
 
     /// <summary>設定を任意のパスへ保存する（エクスポート用。親フォルダが無ければ作成する）</summary>
-    /// <remarks>書き込みが原子的である理由は <see cref="Save"/> と同じ</remarks>
+    /// <remarks>
+    /// 書き込みが原子的である理由は <see cref="Save"/> と同じ。ただし<b>未知のキーの引き継ぎは行わない</b>——
+    /// エクスポートは「いまの設定を書き出す」操作で、書き出し先にたまたまあった別物の内容を
+    /// 混ぜる意味が無いため（引き継ぎが要るのは、同じファイルを読んで書き戻す <see cref="Save"/> だけ）。
+    /// </remarks>
     public void SaveTo(string path, TSettings settings)
     {
         var folder = Path.GetDirectoryName(path);

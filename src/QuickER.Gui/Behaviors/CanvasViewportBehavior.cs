@@ -32,7 +32,11 @@ public static class CanvasViewportBehavior
     /// <summary>
     /// Space 押下中またはパン中かどうか（<see cref="DragBehavior"/> がエンティティ移動を抑止するために参照する）
     /// </summary>
-    public static bool IsPanActive { get; private set; }
+    public static bool IsPanActive
+    {
+        get => _isPanActive;
+        private set => _isPanActive = value;
+    }
 
     /// <summary>
     /// ホイールズームがオフセットを自前補正している間、コードビハインドの中央基準補正を抑止するフラグ
@@ -41,25 +45,59 @@ public static class CanvasViewportBehavior
     /// ホイールズームはマウス位置を中心に補正するため、View 側のビューポート中央補正と競合させない。
     /// ボタン・キー由来のズームでは false のままとし、中央基準補正を有効にする。
     /// </remarks>
-    public static bool SuppressCenterZoomCorrection { get; set; }
+    public static bool SuppressCenterZoomCorrection
+    {
+        get => _suppressCenterZoomCorrection;
+        set => _suppressCenterZoomCorrection = value;
+    }
 
-    // 内部状態は静的フィールドで保持する（同時にパン可能なビューは 1 つに限られる前提）
+    // 内部状態は静的フィールドで保持する（同時にパン可能なビューは 1 つに限られる前提）。
+    //
+    // すべて [ThreadStatic] にしてあるのは DragBehavior / RubberBandBehavior と同じ理由で、
+    // 本番は単一の UI スレッドが読み書きするため意味は変わらないが、テストは複数の STA スレッドが
+    // それぞれウィンドウを表示するため、付けないとプロセス全体で状態を奪い合う
+    // （CLAUDE.md の不変条件「キャンバスの進行中操作の静的状態は [ThreadStatic]」）。
+    // [ThreadStatic] のフィールド初期化子は最初のスレッドでしか走らないため、初期値はすべて
+    // 型の既定（false / 0 / null）にしてある。
+
+    /// <summary><see cref="IsPanActive"/> の実体</summary>
+    [ThreadStatic]
+    private static bool _isPanActive;
+
+    /// <summary><see cref="SuppressCenterZoomCorrection"/> の実体</summary>
+    [ThreadStatic]
+    private static bool _suppressCenterZoomCorrection;
 
     /// <summary>Space キーが押下されているかどうか</summary>
+    [ThreadStatic]
     private static bool _isSpaceDown;
 
     /// <summary>ドラッグによるパンの実行中かどうか</summary>
+    [ThreadStatic]
     private static bool _isPanning;
 
     /// <summary>パン開始時のマウス位置（ScrollViewer 基準）</summary>
+    [ThreadStatic]
     private static Point _panStartMouse;
 
     /// <summary>パン開始時のスクロールオフセット</summary>
+    [ThreadStatic]
     private static double _panStartHorizontal;
+
+    [ThreadStatic]
     private static double _panStartVertical;
 
     /// <summary>対象 ScrollViewer</summary>
+    [ThreadStatic]
     private static ScrollViewer? _scrollViewer;
+
+    /// <summary>Space 監視を張ったウィンドウ（後始末で同じウィンドウから外すために持つ）</summary>
+    /// <remarks>
+    /// 後始末の時点では ScrollViewer が既に視覚ツリーから外れていることがあり、
+    /// <see cref="Window.GetWindow"/> は <c>null</c> を返す。張った相手を覚えていないと購読が外れない。
+    /// </remarks>
+    [ThreadStatic]
+    private static Window? _hostWindow;
 
     /// <summary>呼び出しスレッドが所有している場合に限り対象 ScrollViewer を返す</summary>
     /// <remarks>
@@ -111,6 +149,9 @@ public static class CanvasViewportBehavior
 
             // Space 監視はウィンドウ全体で行う（キャンバスにフォーカスがなくても効かせるため）
             sv.Loaded += OnScrollViewerLoaded;
+
+            // 画面から外れたときも後始末する（ウィンドウを閉じても IsEnabled は false にならないため）
+            sv.Unloaded += OnScrollViewerUnloaded;
         }
         else
         {
@@ -120,15 +161,78 @@ public static class CanvasViewportBehavior
             sv.PreviewMouseUp -= OnPreviewMouseUp;
             sv.LostMouseCapture -= OnLostMouseCapture;
             sv.Loaded -= OnScrollViewerLoaded;
+            sv.Unloaded -= OnScrollViewerUnloaded;
+
+            Detach(sv);
         }
     }
 
+    /// <summary>ScrollViewer が画面から外れたときの後始末</summary>
+    /// <remarks>
+    /// ウィンドウを閉じても添付プロパティは false にならないため、ここを持たないと
+    /// ウィンドウ側の購読と <see cref="_scrollViewer"/> の参照が残り続ける。
+    /// </remarks>
+    private static void OnScrollViewerUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ScrollViewer sv)
+        {
+            Detach(sv);
+        }
+    }
+
+    /// <summary>ウィンドウ側の購読を外し、対象 ScrollViewer の参照と進行中の状態を捨てる</summary>
+    /// <remarks>
+    /// <para>
+    /// 外すのは <see cref="OnScrollViewerLoaded"/> がウィンドウへ張った 3 つ
+    /// （<c>PreviewKeyDown</c> / <c>PreviewKeyUp</c> / <c>Deactivated</c>）。ScrollViewer 自身の
+    /// 購読しか外さないと、キャンバスを無効化・破棄したあともウィンドウのキー入力を拾い続け、
+    /// <see cref="_scrollViewer"/> の参照がキャンバスの視覚ツリーを掴んだまま残る。
+    /// </para>
+    /// <para>
+    /// 参照を捨てるのは<b>自分が対象のときだけ</b>＝別のビューが既に対象になっていれば触らない。
+    /// </para>
+    /// </remarks>
+    private static void Detach(ScrollViewer sv)
+    {
+        if (!ReferenceEquals(_scrollViewer, sv))
+        {
+            // 対象でないビューの後始末では、対象側の購読に触らない
+            return;
+        }
+
+        var window = _hostWindow ?? Window.GetWindow(sv);
+
+        if (window is not null)
+        {
+            window.PreviewKeyDown -= OnWindowPreviewKeyDown;
+            window.PreviewKeyUp -= OnWindowPreviewKeyUp;
+            window.Deactivated -= OnWindowDeactivated;
+        }
+
+        _hostWindow = null;
+        _scrollViewer = null;
+        _isSpaceDown = false;
+        _isPanning = false;
+        IsPanActive = false;
+    }
+
     /// <summary>ScrollViewer ロード時に所属ウィンドウへ Space キー監視を登録する</summary>
+    /// <remarks>
+    /// <b>対象 ScrollViewer も張り直す。</b><c>Unloaded</c> はウィンドウを閉じるときだけでなく、
+    /// 親の付け替えやテンプレートの再適用でも起きる。そこで <see cref="Detach"/> が参照を捨てたあと、
+    /// ここで戻さないと「添付プロパティは有効なのに対象が null」になり、Space パンと
+    /// それを見る処理がエラーも出さずに効かなくなる。
+    /// </remarks>
     private static void OnScrollViewerLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is not ScrollViewer sv)
         {
             return;
+        }
+
+        if (GetIsEnabled(sv))
+        {
+            _scrollViewer = sv;
         }
 
         var window = Window.GetWindow(sv);
@@ -145,6 +249,7 @@ public static class CanvasViewportBehavior
         window.PreviewKeyDown += OnWindowPreviewKeyDown;
         window.PreviewKeyUp += OnWindowPreviewKeyUp;
         window.Deactivated += OnWindowDeactivated;
+        _hostWindow = window;
     }
 
     /// <summary>ウィンドウ非アクティブ化時に Space 押下状態を破棄する</summary>
