@@ -244,6 +244,9 @@
   <data name="DbConnection_ProfileDeleted" xml:space="preserve">
     <value>Deleted profile '{0}'.</value>
   </data>
+  <data name="DbConnection_ProfileStoreUnavailable" xml:space="preserve">
+    <value>Could not read the saved connections file, so nothing was changed. Another program may be using it. Try again in a moment.</value>
+  </data>
   <data name="DbConnection_SqliteFileFilter" xml:space="preserve">
     <value>SQLite Database (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|All Files (*.*)|*.*</value>
   </data>

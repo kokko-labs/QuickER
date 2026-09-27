@@ -44,6 +44,21 @@ public static class AutoLayoutService
     /// <summary>ペア交換ヒルクライミングの最大反復回数（改善が無くなれば早期終了）</summary>
     private const int MaxOptimizePasses = 20;
 
+    /// <summary>ペア交換ヒルクライミングに使える判定回数の上限（超えたらそこまでの改善を採って打ち切る）</summary>
+    /// <remarks>
+    /// <para>
+    /// 交差最小化の総当たりは「パス × 全ペア × 影響辺 × 全辺」で、テーブル数に対しておよそ 3 乗で伸びる。
+    /// 上限を置かないと、数百テーブルの図（DB 取込では普通にある）を開いたときに画面が数十秒固まる
+    /// （実測: 400 テーブルで 88 秒）。数え上げるのは<b>時間ではなく判定の回数</b>なので、同じ図なら
+    /// 常に同じ位置で打ち切られる＝結果は決定的で、環境の速さに依らず再現する。
+    /// </para>
+    /// <para>
+    /// 値は実測から決めた（この上限に達するまでの所要時間が 1〜2 秒に収まる範囲）。上限に達しない図
+    /// （実測では 200 テーブル・200 リレーション程度まで）は最後まで最適化され、結果は上限が無い頃と同一。
+    /// </para>
+    /// </remarks>
+    private const long MaxOptimizeChecks = 250_000_000;
+
     /// <summary>バリセンタ法スイープの最大反復回数（並びが変化しなくなれば早期終了）</summary>
     private const int MaxBarycenterSweeps = 8;
 
@@ -1052,165 +1067,361 @@ public static class AutoLayoutService
     /// 交換の影響はその 2 エンティティに接続する辺に限られるため、コスト差分は影響辺のみで評価する
     /// </remarks>
     /// <param name="order">マス目順のエンティティ番号配列（in-place で並べ替える）</param>
-    private static void OptimizeOrder(int[] order, List<(int A, int B)> edges, int columns)
+    private static void OptimizeOrder(int[] order, List<(int A, int B)> edges, int columns) =>
+        new GridOrderOptimizer(order, edges, columns).Run();
+
+    /// <summary>格子への割り当てをペア交換ヒルクライミングで改善する最適化器</summary>
+    /// <remarks>
+    /// <para>
+    /// 改善する交換を見つけ次第採用し（first-improvement）、1 巡して改善が無ければ終了する。
+    /// 交換の影響はその 2 エンティティに接続する辺に限られるため、コスト差分は影響辺のみで評価する。
+    /// </para>
+    /// <para>
+    /// <b>1 回の交換で変わるのは 2 エンティティの位置と、それに接続する辺の外接矩形だけ</b>なので、
+    /// 位置・外接矩形は配列で持ち回り、交換のたびに差分だけ更新する。コスト評価の内側で座標を
+    /// 求め直すと、評価 1 回あたり辺の本数ぶんの除算が走る（評価回数は数十万回に達する）。
+    /// </para>
+    /// </remarks>
+    private sealed class GridOrderOptimizer
     {
-        var count = order.Length;
+        /// <summary>マス目順のエンティティ番号（in-place で並べ替える呼び出し側の配列）</summary>
+        private readonly int[] _order;
 
-        // エンティティ番号 → マス目番号の逆引きと、エンティティ番号 → 接続辺番号の索引を作る
-        var slotOf = new int[count];
+        /// <summary>エンティティ番号 → マス目番号の逆引き</summary>
+        private readonly int[] _slotOf;
 
-        for (var s = 0; s < count; s++)
+        /// <summary>辺の始点側の端点（タプルの <see cref="List{T}"/> より添字アクセスが軽い）</summary>
+        private readonly int[] _edgeA;
+
+        /// <summary>辺の終点側の端点</summary>
+        private readonly int[] _edgeB;
+
+        /// <summary>エンティティ番号 → 接続する辺番号</summary>
+        private readonly List<int>[] _incident;
+
+        /// <summary>エンティティ番号 → セル座標の X（セル間隔 = 1 の正規化座標）</summary>
+        private readonly double[] _cellX;
+
+        /// <summary>エンティティ番号 → セル座標の Y</summary>
+        private readonly double[] _cellY;
+
+        /// <summary>辺番号 → 外接矩形（交差判定の足切り用）</summary>
+        /// <remarks>
+        /// 4 本の配列でなく 1 本の構造体配列にするのは、交差判定が辺番号の昇順に全辺を舐めるため。
+        /// 4 本だと 1 回の判定で 4 つの配列を同時に触り、走査のたびにキャッシュの流れが 4 本になる。
+        /// </remarks>
+        private readonly EdgeBounds[] _edgeBounds;
+
+        /// <summary>辺番号 → 影響辺集合に入っているか（重複排除用）</summary>
+        private readonly bool[] _affectedFlags;
+
+        /// <summary>影響辺の集合（交換ごとに使い回す）</summary>
+        private readonly List<int> _affected = [];
+
+        private readonly int _columns;
+        private readonly int _count;
+
+        /// <summary>最終行の行番号（マス目はエンティティ数ちょうどではなく、最終行は途中で終わる）</summary>
+        private readonly int _lastRow;
+
+        /// <summary>これまでに行った判定の回数（<see cref="MaxOptimizeChecks"/> と突き合わせる）</summary>
+        private long _checks;
+
+        public GridOrderOptimizer(int[] order, List<(int A, int B)> edges, int columns)
         {
-            slotOf[order[s]] = s;
-        }
+            _order = order;
+            _columns = columns;
+            _count = order.Length;
+            _lastRow = (_count - 1) / columns;
+            _slotOf = new int[_count];
 
-        var incident = new List<int>[count];
-
-        for (var i = 0; i < count; i++)
-        {
-            incident[i] = new List<int>();
-        }
-
-        for (var ei = 0; ei < edges.Count; ei++)
-        {
-            incident[edges[ei].A].Add(ei);
-            incident[edges[ei].B].Add(ei);
-        }
-
-        var affectedFlags = new bool[edges.Count];
-        var affected = new List<int>();
-
-        for (var pass = 0; pass < MaxOptimizePasses; pass++)
-        {
-            var improved = false;
-
-            for (var si = 0; si < count - 1; si++)
+            for (var s = 0; s < _count; s++)
             {
-                for (var sj = si + 1; sj < count; sj++)
+                _slotOf[order[s]] = s;
+            }
+
+            _cellX = new double[_count];
+            _cellY = new double[_count];
+
+            for (var i = 0; i < _count; i++)
+            {
+                _cellX[i] = _slotOf[i] % columns;
+                _cellY[i] = _slotOf[i] / columns;
+            }
+
+            _edgeA = new int[edges.Count];
+            _edgeB = new int[edges.Count];
+            _incident = new List<int>[_count];
+
+            for (var i = 0; i < _count; i++)
+            {
+                _incident[i] = [];
+            }
+
+            for (var ei = 0; ei < edges.Count; ei++)
+            {
+                _edgeA[ei] = edges[ei].A;
+                _edgeB[ei] = edges[ei].B;
+                _incident[edges[ei].A].Add(ei);
+                _incident[edges[ei].B].Add(ei);
+            }
+
+            _edgeBounds = new EdgeBounds[edges.Count];
+            _affectedFlags = new bool[edges.Count];
+
+            for (var ei = 0; ei < edges.Count; ei++)
+            {
+                RefreshEdgeBounds(ei);
+            }
+        }
+
+        /// <summary>改善が無くなる（または上限パス数に達する）まで交換を繰り返す</summary>
+        public void Run()
+        {
+            for (var pass = 0; pass < MaxOptimizePasses; pass++)
+            {
+                var improved = false;
+
+                for (var si = 0; si < _count - 1; si++)
                 {
-                    var u = order[si];
-                    var v = order[sj];
-
-                    // 影響を受けるのは u・v に接続する辺のみ（重複しないよう集約）
-                    affected.Clear();
-
-                    foreach (var ei in incident[u])
+                    for (var sj = si + 1; sj < _count; sj++)
                     {
-                        if (!affectedFlags[ei])
+                        // 予算を使い切ったら、そこまでの改善を採用して打ち切る
+                        if (_checks >= MaxOptimizeChecks)
                         {
-                            affectedFlags[ei] = true;
-                            affected.Add(ei);
+                            return;
+                        }
+
+                        if (TrySwap(si, sj))
+                        {
+                            improved = true;
                         }
                     }
+                }
 
-                    foreach (var ei in incident[v])
+                if (!improved)
+                {
+                    return;
+                }
+            }
+        }
+
+        /// <summary>2 つのマス目の中身を交換し、改善しなければ元へ戻す（改善したら <c>true</c>）</summary>
+        private bool TrySwap(int si, int sj)
+        {
+            // 影響を受けるのは交換する 2 エンティティに接続する辺のみ（重複しないよう集約）
+            _affected.Clear();
+            CollectAffected(_order[si]);
+            CollectAffected(_order[sj]);
+
+            if (_affected.Count == 0)
+            {
+                return false;
+            }
+
+            var before = PartialCost();
+
+            Swap(si, sj);
+
+            var after = PartialCost();
+            var improved = after < before - 1e-9;
+
+            if (!improved)
+            {
+                Swap(si, sj);
+            }
+
+            foreach (var ei in _affected)
+            {
+                _affectedFlags[ei] = false;
+            }
+
+            return improved;
+        }
+
+        /// <summary>指定エンティティに接続する辺を影響辺集合へ加える</summary>
+        private void CollectAffected(int entity)
+        {
+            foreach (var ei in _incident[entity])
+            {
+                if (!_affectedFlags[ei])
+                {
+                    _affectedFlags[ei] = true;
+                    _affected.Add(ei);
+                }
+            }
+        }
+
+        /// <summary>order・slotOf とキャッシュ（セル座標・辺の外接矩形）の整合を保って交換する</summary>
+        private void Swap(int si, int sj)
+        {
+            (_order[si], _order[sj]) = (_order[sj], _order[si]);
+
+            var u = _order[si];
+            var v = _order[sj];
+            _slotOf[u] = si;
+            _slotOf[v] = sj;
+
+            // 動いたのはこの 2 件だけなので、位置と、その 2 件に接続する辺の外接矩形だけを更新する
+            _cellX[u] = si % _columns;
+            _cellY[u] = si / _columns;
+            _cellX[v] = sj % _columns;
+            _cellY[v] = sj / _columns;
+
+            foreach (var ei in _incident[u])
+            {
+                RefreshEdgeBounds(ei);
+            }
+
+            foreach (var ei in _incident[v])
+            {
+                RefreshEdgeBounds(ei);
+            }
+        }
+
+        /// <summary>辺の外接矩形を現在の位置から求め直す</summary>
+        private void RefreshEdgeBounds(int ei)
+        {
+            var ax = _cellX[_edgeA[ei]];
+            var ay = _cellY[_edgeA[ei]];
+            var bx = _cellX[_edgeB[ei]];
+            var by = _cellY[_edgeB[ei]];
+
+            _edgeBounds[ei] = new EdgeBounds(
+                Math.Min(ax, bx),
+                Math.Max(ax, bx),
+                Math.Min(ay, by),
+                Math.Max(ay, by)
+            );
+        }
+
+        /// <summary>影響辺に関わるコスト（交差・エンティティ跨ぎ・線長）を集計する</summary>
+        /// <remarks>
+        /// 座標はマス目の行・列をそのまま使う（セル間隔 = 1 の正規化座標）。
+        /// 影響辺同士の交差は番号の小さい側でのみ数え、二重計上を防ぐ。
+        /// </remarks>
+        private double PartialCost()
+        {
+            var cost = 0.0;
+
+            foreach (var ei in _affected)
+            {
+                var a = _edgeA[ei];
+                var b = _edgeB[ei];
+                var pa = (X: _cellX[a], Y: _cellY[a]);
+                var pb = (X: _cellX[b], Y: _cellY[b]);
+
+                cost += LengthWeight * LayoutGeometry.Distance(pa, pb);
+                cost += ThroughCost(ei, a, b, pa, pb);
+                cost += CrossingCost(ei, a, b, pa, pb);
+            }
+
+            return cost;
+        }
+
+        /// <summary>端点以外のエンティティのセル上を線が通過している件数ぶんのコスト</summary>
+        /// <remarks>
+        /// <b>絞り込みは判定を省くためのもので、コストの値は変えない。</b>全セルを走査せず、線分から
+        /// <see cref="NodeClearance"/> 以内に入り得る行・列だけを数え上げる（格子配置なのでセルの位置が
+        /// 行・列の番号そのもの＝範囲を計算で出せる）。範囲の外は距離が必ず離れるため、集計結果は
+        /// 全数走査と完全に一致する。
+        /// </remarks>
+        private double ThroughCost(
+            int ei,
+            int a,
+            int b,
+            (double X, double Y) pa,
+            (double X, double Y) pb
+        )
+        {
+            var cost = 0.0;
+            var bounds = _edgeBounds[ei];
+            var rowFirst = Math.Max(0, (int)Math.Ceiling(bounds.MinY - NodeClearance));
+            var rowLast = Math.Min(_lastRow, (int)Math.Floor(bounds.MaxY + NodeClearance));
+
+            for (var row = rowFirst; row <= rowLast; row++)
+            {
+                // この行の帯（row ± NodeClearance）に入る線分の断片が取り得る X の範囲を求め、
+                // さらに左右へ NodeClearance だけ広げた列だけを見る（これより外は距離が必ず離れる）
+                var (bandMinX, bandMaxX) = SegmentXRangeInBand(
+                    pa,
+                    pb,
+                    row - NodeClearance,
+                    row + NodeClearance
+                );
+                var colFirst = Math.Max(0, (int)Math.Ceiling(bandMinX - NodeClearance));
+                var colLast = Math.Min(_columns - 1, (int)Math.Floor(bandMaxX + NodeClearance));
+                var rowBase = row * _columns;
+                _checks += Math.Max(0, colLast - colFirst + 1);
+
+                for (var col = colFirst; col <= colLast; col++)
+                {
+                    var slot = rowBase + col;
+
+                    // 最終行は途中で終わる（マス目の数はエンティティ数ちょうどではない）
+                    if (slot >= _count)
                     {
-                        if (!affectedFlags[ei])
-                        {
-                            affectedFlags[ei] = true;
-                            affected.Add(ei);
-                        }
+                        break;
                     }
 
-                    if (affected.Count == 0)
+                    var w = _order[slot];
+
+                    if (w == a || w == b)
                     {
                         continue;
                     }
 
-                    var before = PartialCost(
-                        affected,
-                        affectedFlags,
-                        edges,
-                        slotOf,
-                        columns,
-                        count
-                    );
-
-                    // 仮交換してコストを再評価し、改善しなければ元へ戻す
-                    SwapSlots(order, slotOf, si, sj);
-
-                    var after = PartialCost(affected, affectedFlags, edges, slotOf, columns, count);
-
-                    if (after < before - 1e-9)
+                    if (
+                        LayoutGeometry.DistancePointToSegment((_cellX[w], _cellY[w]), pa, pb)
+                        < NodeClearance
+                    )
                     {
-                        improved = true;
-                    }
-                    else
-                    {
-                        SwapSlots(order, slotOf, si, sj);
-                    }
-
-                    foreach (var ei in affected)
-                    {
-                        affectedFlags[ei] = false;
+                        cost += ThroughWeight;
                     }
                 }
             }
 
-            if (!improved)
-            {
-                break;
-            }
+            return cost;
         }
-    }
 
-    /// <summary>order と slotOf の整合を保ったまま 2 つのマス目の中身を入れ替える</summary>
-    private static void SwapSlots(int[] order, int[] slotOf, int si, int sj)
-    {
-        (order[si], order[sj]) = (order[sj], order[si]);
-        slotOf[order[si]] = si;
-        slotOf[order[sj]] = sj;
-    }
-
-    /// <summary>影響辺に関わるコスト（交差・エンティティ跨ぎ・線長）を集計する</summary>
-    /// <remarks>
-    /// 座標はマス目の行・列をそのまま使う（セル間隔 = 1 の正規化座標）
-    /// 影響辺同士の交差は番号の小さい側でのみ数え、二重計上を防ぐ
-    /// </remarks>
-    private static double PartialCost(
-        List<int> affected,
-        bool[] affectedFlags,
-        List<(int A, int B)> edges,
-        int[] slotOf,
-        int columns,
-        int count
-    )
-    {
-        var cost = 0.0;
-
-        foreach (var ei in affected)
+        /// <summary>他の辺との交差件数ぶんのコスト</summary>
+        /// <remarks>
+        /// 2 線分の外接矩形が離れていれば交差し得ないため、そこで打ち切る（接している場合は判定へ進める）。
+        /// これも判定を省くだけで、集計結果は全数判定と完全に一致する。
+        /// </remarks>
+        private double CrossingCost(
+            int ei,
+            int a,
+            int b,
+            (double X, double Y) pa,
+            (double X, double Y) pb
+        )
         {
-            var (a, b) = edges[ei];
-            var pa = CellPoint(slotOf[a], columns);
-            var pb = CellPoint(slotOf[b], columns);
+            var cost = 0.0;
+            var bounds = _edgeBounds[ei];
+            _checks += _edgeBounds.Length;
 
-            cost += LengthWeight * LayoutGeometry.Distance(pa, pb);
-
-            // 端点以外のエンティティのセル上を線が通過していないか調べる
-            for (var w = 0; w < count; w++)
+            for (var fi = 0; fi < _edgeBounds.Length; fi++)
             {
-                if (w == a || w == b)
-                {
-                    continue;
-                }
+                var other = _edgeBounds[fi];
 
                 if (
-                    LayoutGeometry.DistancePointToSegment(CellPoint(slotOf[w], columns), pa, pb)
-                    < NodeClearance
+                    other.MaxX < bounds.MinX
+                    || other.MinX > bounds.MaxX
+                    || other.MaxY < bounds.MinY
+                    || other.MinY > bounds.MaxY
                 )
-                {
-                    cost += ThroughWeight;
-                }
-            }
-
-            for (var fi = 0; fi < edges.Count; fi++)
-            {
-                if (fi == ei || (affectedFlags[fi] && fi < ei))
                 {
                     continue;
                 }
 
-                var (c, d) = edges[fi];
+                if (fi == ei || (_affectedFlags[fi] && fi < ei))
+                {
+                    continue;
+                }
+
+                var c = _edgeA[fi];
+                var d = _edgeB[fi];
 
                 // 端点を共有する辺同士は交差と見なさない
                 if (a == c || a == d || b == c || b == d)
@@ -1222,20 +1433,53 @@ public static class AutoLayoutService
                     LayoutGeometry.SegmentsCross(
                         pa,
                         pb,
-                        CellPoint(slotOf[c], columns),
-                        CellPoint(slotOf[d], columns)
+                        (_cellX[c], _cellY[c]),
+                        (_cellX[d], _cellY[d])
                     )
                 )
                 {
                     cost += CrossingWeight;
                 }
             }
+
+            return cost;
         }
 
-        return cost;
-    }
+        /// <summary>辺の外接矩形（交差し得ない相手を判定へ進める前に外すための足切り）</summary>
+        private readonly record struct EdgeBounds(
+            double MinX,
+            double MaxX,
+            double MinY,
+            double MaxY
+        );
 
-    /// <summary>マス目番号をセル間隔 = 1 の正規化座標へ変換する</summary>
-    private static (double X, double Y) CellPoint(int slot, int columns) =>
-        (slot % columns, slot / columns);
+        /// <summary>横帯に入る線分の断片が取り得る X の範囲を返す（通過判定の絞り込み用）</summary>
+        /// <remarks>
+        /// 帯と線分の Y 範囲が重なることは呼び出し側が保証しており、返す範囲は<b>実際の断片を含む
+        /// 上位集合</b>（端点で丸めるため広めに出ることがある）。広めに出ても距離判定は従来どおり
+        /// 行うため、集計結果は変わらない。
+        /// </remarks>
+        private static (double MinX, double MaxX) SegmentXRangeInBand(
+            (double X, double Y) pa,
+            (double X, double Y) pb,
+            double bandMinY,
+            double bandMaxY
+        )
+        {
+            var dy = pb.Y - pa.Y;
+
+            // 水平な線分は帯の中で X 全体を取り得る
+            if (dy == 0)
+            {
+                return (Math.Min(pa.X, pb.X), Math.Max(pa.X, pb.X));
+            }
+
+            var tLow = Math.Clamp((bandMinY - pa.Y) / dy, 0, 1);
+            var tHigh = Math.Clamp((bandMaxY - pa.Y) / dy, 0, 1);
+            var xLow = pa.X + ((pb.X - pa.X) * tLow);
+            var xHigh = pa.X + ((pb.X - pa.X) * tHigh);
+
+            return (Math.Min(xLow, xHigh), Math.Max(xLow, xHigh));
+        }
+    }
 }

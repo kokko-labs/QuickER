@@ -244,6 +244,9 @@
   <data name="DbConnection_ProfileDeleted" xml:space="preserve">
     <value>プロファイル '{0}' を削除しました。</value>
   </data>
+  <data name="DbConnection_ProfileStoreUnavailable" xml:space="preserve">
+    <value>保存済み接続のファイルを読み取れなかったため、何も変更していません。他のプログラムが使用している可能性があります。少し待ってからやり直してください。</value>
+  </data>
   <data name="DbConnection_SqliteFileFilter" xml:space="preserve">
     <value>SQLite データベース (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|すべてのファイル (*.*)|*.*</value>
   </data>

@@ -3,6 +3,32 @@ using System.Text;
 
 namespace QuickER.Settings;
 
+/// <summary>ファイル読み取りの結果分類（<see cref="AtomicFile.TryReadAllText"/> が返す）</summary>
+/// <remarks>
+/// <b>「読めなかった」を「空だった」と取り違えないための型。</b>設定・接続プロファイルの保存は
+/// 「読み込み → 変更 → 書き込み」で、読みが失敗したときに既定値・空データへ黙ってフォールバックすると、
+/// その空データがそのまま保存先へ書き戻って<b>登録済みの内容が全件消える</b>。
+/// ファイルが無いこと（＝本当に空）と、あるのに読めなかったこと（＝中身は無事）は
+/// 呼び出し側が必ず区別できなければならない。
+/// </remarks>
+public enum FileReadStatus
+{
+    /// <summary>読み取りに成功した</summary>
+    Loaded,
+
+    /// <summary>
+    /// ファイル（またはその親フォルダ）が存在しない＝保存されたものが無い。
+    /// 既定値・空データへフォールバックしてよい唯一の分類。
+    /// </summary>
+    Missing,
+
+    /// <summary>
+    /// ファイルはあるが読み取れなかった（別プロセスの排他・権限不足等）。
+    /// <b>中身は無事なので、この分類を「空」と扱ってはいけない。</b>
+    /// </summary>
+    Unavailable,
+}
+
 /// <summary>ファイルを原子的に（書き込み途中の中断で保存先を壊さずに）書き出すユーティリティ</summary>
 /// <remarks>
 /// <para>
@@ -41,11 +67,17 @@ namespace QuickER.Settings;
 /// </remarks>
 public static class AtomicFile
 {
-    /// <summary>差し替え（Replace / Move）の試行回数（初回＋リトライ 4 回）</summary>
-    private const int ReplaceAttemptCount = 5;
+    /// <summary>一過性の失敗に対する試行回数（初回＋リトライ 4 回）</summary>
+    /// <remarks>
+    /// 差し替え（<see cref="ReplaceWithRetry"/>）と読み取り（<see cref="TryReadAllText"/>）で共有する。
+    /// 両者が相手にするのは同じ現象（別プロセスが同じファイルを掴んでいる短い瞬間）なので、
+    /// 粘り方が片方だけ変わると「書けたのに読めない」のような非対称が静かに生まれる。
+    /// </remarks>
+    private const int RetryAttemptCount = 5;
 
-    /// <summary>差し替えリトライの待ち時間（ミリ秒・試行ごとに 10ms ずつ延ばす）</summary>
-    private const int ReplaceRetryDelayStepMilliseconds = 10;
+    /// <summary>リトライの待ち時間（ミリ秒・試行ごとに 10ms ずつ延ばす＝合計 100ms 程度）</summary>
+    /// <remarks>回数と同じ理由で差し替えと読み取りで共有する</remarks>
+    private const int RetryDelayStepMilliseconds = 10;
 
     /// <summary>
     /// 文字コード未指定時の既定。<see cref="File.WriteAllText(string, string?)"/> の既定と同一
@@ -164,11 +196,77 @@ public static class AtomicFile
             }
             catch (Exception ex)
                 when (ex is IOException or UnauthorizedAccessException
-                    && attempt < ReplaceAttemptCount
+                    && attempt < RetryAttemptCount
                 )
             {
                 // 競合相手が差し替えを終えるまで少し待つ（10 / 20 / 30 / 40ms）
-                Thread.Sleep(ReplaceRetryDelayStepMilliseconds * attempt);
+                Thread.Sleep(RetryDelayStepMilliseconds * attempt);
+            }
+        }
+    }
+
+    /// <summary>ファイルの内容を読み出し、失敗したときは「無い」のか「読めない」のかを分類して返す</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>読み取り側の単一正本。</b><see cref="WriteAllText(string, string)"/> と対になる。
+    /// 設定・接続プロファイルの保存はどれも「読み込み → 変更 → 書き込み」なので、読み取りの失敗を
+    /// <c>catch</c> して既定値・空データへ落とすと、その空データが直後の書き込みで保存先へ焼き付き、
+    /// <b>登録済みの内容が黙って全件消える</b>。防ぐには呼び出し側が
+    /// 「保存されたものが無い（<see cref="FileReadStatus.Missing"/>）」と
+    /// 「あるのに今は読めない（<see cref="FileReadStatus.Unavailable"/>）」を区別できる必要があり、
+    /// その区別をここ 1 箇所で与える。
+    /// </para>
+    /// <para>
+    /// <b>存在確認をしてから読まない理由:</b> <see cref="File.Exists(string)"/> と読み取りの間に
+    /// ファイルが消える・現れることがある（TOCTOU）。判定は実際の読み取りの結果だけで行い、
+    /// <see cref="FileNotFoundException"/> / <see cref="DirectoryNotFoundException"/> を
+    /// <see cref="FileReadStatus.Missing"/> として扱う（この 2 つは
+    /// <see cref="IOException"/> の派生なので、分類の順序を入れ替えると
+    /// 「無いだけ」が「読めない」へ化けて保存が止まる）。
+    /// </para>
+    /// <para>
+    /// <b>リトライ:</b> 差し替え（<see cref="ReplaceWithRetry"/>）と同じ回数・同じバックオフで粘る。
+    /// 相手にしている現象が同じ（別プロセスの保存中・ウイルス対策ソフトの一瞬のロック）ためで、
+    /// 粘っても駄目だったものだけを <see cref="FileReadStatus.Unavailable"/> として返す。
+    /// 内容の妥当性（JSON として解釈できるか）は判定しない＝それは呼び出し側の関心事。
+    /// </para>
+    /// </remarks>
+    /// <param name="path">読み出すファイルのパス</param>
+    /// <param name="contents">
+    /// 読み出した内容。<see cref="FileReadStatus.Loaded"/> 以外のときは <c>null</c>
+    /// </param>
+    /// <returns>読み取りの結果分類</returns>
+    public static FileReadStatus TryReadAllText(string path, out string? contents)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                contents = File.ReadAllText(path);
+
+                return FileReadStatus.Loaded;
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // 保存されたものが無いだけ（IOException の派生なので下のリトライより先に捌く）
+                contents = null;
+
+                return FileReadStatus.Missing;
+            }
+            catch (Exception ex)
+                when (ex is IOException or UnauthorizedAccessException
+                    && attempt < RetryAttemptCount
+                )
+            {
+                // 競合相手が保存を終えるまで少し待つ（10 / 20 / 30 / 40ms）
+                Thread.Sleep(RetryDelayStepMilliseconds * attempt);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // 粘っても読めない。中身は無事なので「空」ではなく「読めない」として返す
+                contents = null;
+
+                return FileReadStatus.Unavailable;
             }
         }
     }

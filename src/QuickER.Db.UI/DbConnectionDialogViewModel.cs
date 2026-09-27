@@ -550,7 +550,18 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
         var profile = CreateCurrentProfile(existing?.Profile.Id, ProfileName.Trim());
 
-        _store.Upsert(profile, Password);
+        try
+        {
+            _store.Upsert(profile, Password);
+        }
+        catch (ConnectionProfileStoreUnavailableException)
+        {
+            // 保存は行われておらず、登録済みの内容も無傷。利用者が明示的に頼んだ操作なので
+            // 何も変えないまま「できなかった」ことだけを伝える（このダイアログの他の失敗と同じ流儀）
+            StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
+            return;
+        }
+
         ReloadProfiles();
         SelectedProfileItem = Profiles.FirstOrDefault(p => p.Profile.Id == profile.Id);
         StatusMessage = string.Format(Strings.DbConnection_ProfileSaved, profile.Name);
@@ -618,16 +629,28 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        if (conflict is not null)
-        {
-            _store.Delete(conflict.Id);
-        }
-
         var oldName = target.Name;
         // 保存済みのパスワードをそのまま書き戻す（Upsert は空パスワードだと暗号ファイルを消すため）
         var password = target.SavePassword ? _store.LoadPassword(target.Id) : string.Empty;
-        target.Name = newName;
-        _store.Upsert(target, password);
+
+        try
+        {
+            if (conflict is not null)
+            {
+                _store.Delete(conflict.Id);
+            }
+
+            target.Name = newName;
+            _store.Upsert(target, password);
+        }
+        catch (ConnectionProfileStoreUnavailableException)
+        {
+            // 書けなかったので、一覧に載っているインスタンスの名前も変更前へ戻す
+            // （ここで戻さないと、保存されていない名前が画面にだけ残る）
+            target.Name = oldName;
+            StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
+            return;
+        }
 
         ReloadProfiles();
         SelectedProfileItem = Profiles.FirstOrDefault(item => item.Profile.Id == target.Id);
@@ -655,7 +678,18 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         }
 
         var name = SelectedProfile.Name;
-        _store.Delete(SelectedProfile.Id);
+
+        try
+        {
+            _store.Delete(SelectedProfile.Id);
+        }
+        catch (ConnectionProfileStoreUnavailableException)
+        {
+            // 削除は行われておらず、登録済みの内容も無傷。選択も一覧もそのままにして伝えるだけにする
+            StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
+            return;
+        }
+
         ReloadProfiles();
         SelectedProfileItem = null;
         StatusMessage = string.Format(Strings.DbConnection_ProfileDeleted, name);
@@ -767,7 +801,18 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
         // 確定内容を前回接続として記録し、次回起動時に復元できるようにする
         var currentProfile = CreateCurrentProfile();
-        _store.SaveLastUsed(currentProfile, Password);
+
+        try
+        {
+            _store.SaveLastUsed(currentProfile, Password);
+        }
+        catch (ConnectionProfileStoreUnavailableException)
+        {
+            // ここでの保存は確定の「ついで」の記録で、書けなくてもファイルの中身は前のまま＝何も失われない
+            // （次回ダイアログの初期値が前々回のものになるだけ）。利用者が頼んだのは接続の確定なので、
+            // 記録できないことを理由に確定そのものを止めるのは釣り合わない。黙って諦めて先へ進む。
+        }
+
         Result = ToSettings();
         ResultProvider = SelectedProvider;
         CloseAction?.Invoke(true);

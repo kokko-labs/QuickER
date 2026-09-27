@@ -276,6 +276,114 @@ public class AtomicFileTests : IDisposable
             .Be("他プロセスが使用中の一時ファイル", "一時ファイル名には GUID が挟まる");
     }
 
+    /// <summary>存在するファイルを読み出せることを検証する</summary>
+    [Fact(DisplayName = "TryReadAllText: 読めたら Loaded と内容を返す")]
+    public void TryReadAllText_ExistingFile_ReturnsLoaded()
+    {
+        var path = Path.Combine(_folder, "readable.json");
+        AtomicFile.WriteAllText(path, "{ \"名前\": \"顧客\" }");
+
+        var status = AtomicFile.TryReadAllText(path, out var contents);
+
+        status.Should().Be(FileReadStatus.Loaded);
+        contents.Should().Be("{ \"名前\": \"顧客\" }");
+    }
+
+    /// <summary>ファイルが無いときに Missing を返すことを検証する</summary>
+    /// <remarks>
+    /// 「保存されたものが無い」は既定値・空データへ落としてよい唯一の分類。ここが
+    /// <see cref="FileReadStatus.Unavailable"/> へ化けると、初回起動で保存が一切できなくなる。
+    /// </remarks>
+    [Fact(DisplayName = "TryReadAllText: ファイルが無ければ Missing を返す")]
+    public void TryReadAllText_MissingFile_ReturnsMissing()
+    {
+        var status = AtomicFile.TryReadAllText(
+            Path.Combine(_folder, "absent.json"),
+            out var contents
+        );
+
+        status.Should().Be(FileReadStatus.Missing);
+        contents.Should().BeNull();
+    }
+
+    /// <summary>親フォルダごと無いときも Missing を返すことを検証する</summary>
+    /// <remarks>
+    /// <see cref="DirectoryNotFoundException"/> も <see cref="IOException"/> の派生なので、
+    /// 分類の順序を誤ると「フォルダごと未作成の初回起動」が読み取り失敗として扱われ、保存が止まる。
+    /// </remarks>
+    [Fact(DisplayName = "TryReadAllText: 親フォルダが無くても Missing を返す")]
+    public void TryReadAllText_MissingDirectory_ReturnsMissing()
+    {
+        var path = Path.Combine(_folder, "not-created", "absent.json");
+
+        AtomicFile.TryReadAllText(path, out _).Should().Be(FileReadStatus.Missing);
+    }
+
+    /// <summary>他プロセスが排他で掴んでいるファイルは Unavailable として返すことを検証する</summary>
+    /// <remarks>
+    /// 「中身はあるのに読めない」を <see cref="FileReadStatus.Missing"/>（＝空）と取り違えると、
+    /// 読み込み → 変更 → 書き込みの保存でその空が確定して登録済みの内容が全消えする。
+    /// 再現は <see cref="FileShare.None"/> で開いたままにするだけで決定的に作れる。
+    /// </remarks>
+    [Fact(DisplayName = "TryReadAllText: 排他で掴まれたファイルは Unavailable を返す")]
+    public void TryReadAllText_LockedFile_ReturnsUnavailable()
+    {
+        var path = Path.Combine(_folder, "locked-read.json");
+        File.WriteAllText(path, "{ \"kept\": true }");
+
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var status = AtomicFile.TryReadAllText(path, out var contents);
+
+            status.Should().Be(FileReadStatus.Unavailable, "中身は無事なので「空」ではない");
+            contents.Should().BeNull();
+        }
+
+        File.ReadAllText(path).Should().Be("{ \"kept\": true }", "読み取りは中身を変えない");
+    }
+
+    /// <summary>読み取りが差し替えと同じ回数・同じバックオフで粘ることを検証する</summary>
+    /// <remarks>
+    /// <para>
+    /// リトライを外すと、別プロセスの保存と重なった一瞬の失敗がそのまま
+    /// <see cref="FileReadStatus.Unavailable"/> になり、保存が理由もなく止まる（＝過剰に厳しい）。
+    /// 逆に回数・待ち時間だけを片方で変えると「書けたのに読めない」非対称が静かに生まれる。
+    /// </para>
+    /// <para>
+    /// 判定は時間で行う（合計待ち時間 10+20+30+40＝100ms）。粘らない実装では即座に戻るため、
+    /// フレークを避けつつ退行を検知できる下限として 60ms 以上を要求する。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "TryReadAllText: 読めないときは差し替えと同じだけ粘ってから諦める")]
+    public void TryReadAllText_LockedFile_RetriesWithSameBackoffAsReplace()
+    {
+        var path = Path.Combine(_folder, "retry-read.json");
+        File.WriteAllText(path, "{}");
+
+        using var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        var readWatch = System.Diagnostics.Stopwatch.StartNew();
+        AtomicFile.TryReadAllText(path, out _).Should().Be(FileReadStatus.Unavailable);
+        readWatch.Stop();
+
+        readWatch
+            .ElapsedMilliseconds.Should()
+            .BeGreaterThanOrEqualTo(60, "リトライのバックオフを経てから諦める");
+    }
+
+    /// <summary>読み取りの直後に書き込みが成功する（読み取りがファイルを掴み続けない）ことを検証する</summary>
+    [Fact(DisplayName = "TryReadAllText: 読み取り後もファイルを掴み続けない")]
+    public void TryReadAllText_DoesNotKeepFileHandleOpen()
+    {
+        var path = Path.Combine(_folder, "handle.json");
+        AtomicFile.WriteAllText(path, "before");
+
+        AtomicFile.TryReadAllText(path, out _).Should().Be(FileReadStatus.Loaded);
+        AtomicFile.WriteAllText(path, "after");
+
+        File.ReadAllText(path).Should().Be("after");
+    }
+
     /// <summary>一時保存先フォルダに残った AtomicFile 自身の一時ファイル（<c>{path}.{GUID}.tmp</c>）を列挙する</summary>
     /// <remarks>
     /// 一時ファイル名には GUID が挟まるため、固定名ではなくワイルドカードで探す。

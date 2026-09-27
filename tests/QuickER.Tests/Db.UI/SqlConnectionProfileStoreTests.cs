@@ -585,4 +585,178 @@ public class SqlConnectionProfileStoreTests : IDisposable
         store.LoadAll()[0].SslMode.Should().Be(DbSslMode.Unspecified);
         store.LoadLastUsed()!.Value.Profile.SslMode.Should().Be(DbSslMode.Unspecified);
     }
+
+    /// <summary>
+    /// 接続情報ファイルを読み取れないときは、書き込みを中止して専用の例外を投げることを検証する（MS1）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 保存はどれも「読み込み → 変更 → 書き込み」なので、読み取り失敗を空データへ落とすと、その空が
+    /// 保存先へ書き戻って<b>登録済みプロファイルが全件消える</b>。読み取り失敗はウイルス対策ソフトの
+    /// 一瞬のロックや別プロセスの保存中に実際に起こる。
+    /// </para>
+    /// <para>
+    /// 再現は別のハンドルで <see cref="FileShare.None"/> のまま開いておくだけで決定的に作れる
+    /// （人工的な並行・時間依存に頼らない）。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "読み取れないときの書き込みは中止され、プロファイルは消えない")]
+    public void Writes_WhenFileUnreadable_AreAbortedAndProfilesSurvive()
+    {
+        var store = CreateStore();
+        var kept = new SqlConnectionProfile
+        {
+            Name = "本番",
+            Server = "prod",
+            Database = "shop",
+        };
+        store.Upsert(kept, password: "");
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Name = "本番",
+                Server = "prod",
+                Database = "shop",
+            },
+            password: ""
+        );
+
+        var original = File.ReadAllText(store.ConnectionsPath);
+
+        using (
+            new FileStream(store.ConnectionsPath, FileMode.Open, FileAccess.Read, FileShare.None)
+        )
+        {
+            var added = new SqlConnectionProfile
+            {
+                Name = "新規",
+                Server = "s",
+                Database = "d",
+            };
+
+            FluentActions
+                .Invoking(() => store.Upsert(added, password: ""))
+                .Should()
+                .Throw<ConnectionProfileStoreUnavailableException>();
+            FluentActions
+                .Invoking(() => store.Delete(kept.Id))
+                .Should()
+                .Throw<ConnectionProfileStoreUnavailableException>();
+            FluentActions
+                .Invoking(() => store.SaveAll(new List<SqlConnectionProfile>()))
+                .Should()
+                .Throw<ConnectionProfileStoreUnavailableException>();
+            FluentActions
+                .Invoking(() =>
+                    store.SaveLastUsed(
+                        new SqlConnectionProfile { Name = "別", Server = "x" },
+                        password: ""
+                    )
+                )
+                .Should()
+                .Throw<ConnectionProfileStoreUnavailableException>();
+        }
+
+        File.ReadAllText(store.ConnectionsPath)
+            .Should()
+            .Be(original, "読めなかったので 1 バイトも書いていない");
+        store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番");
+        store.LoadLastUsed().Should().NotBeNull();
+    }
+
+    /// <summary>読み取れないときの書き込み中止は、渡したインスタンスも書き換えないことを検証する（MS1）。</summary>
+    /// <remarks>
+    /// <see cref="SqlConnectionProfileStore.Upsert"/> は <c>SavePassword</c> を正規化して
+    /// 呼び出し側のインスタンスを書き換えるが、保存を中止したのに書き換えだけ残ると
+    /// 「保存していないのに画面の表示だけ変わる」ことになる。
+    /// </remarks>
+    [Fact(DisplayName = "読み取れないときの中止は呼び出し側のインスタンスも変えない")]
+    public void Upsert_WhenFileUnreadable_DoesNotMutateArgument()
+    {
+        var store = CreateStore();
+        store.Upsert(new SqlConnectionProfile { Name = "本番", Server = "prod" }, password: "");
+
+        using (
+            new FileStream(store.ConnectionsPath, FileMode.Open, FileAccess.Read, FileShare.None)
+        )
+        {
+            var profile = new SqlConnectionProfile
+            {
+                Name = "新規",
+                Server = "s",
+                SavePassword = true,
+            };
+
+            FluentActions
+                .Invoking(() => store.Upsert(profile, password: ""))
+                .Should()
+                .Throw<ConnectionProfileStoreUnavailableException>();
+
+            profile.SavePassword.Should().BeTrue("保存を中止した以上、正規化もしない");
+        }
+    }
+
+    /// <summary>読み取りの公開 API は読めなくても例外を投げず、UI を止めないことを検証する（MS1）。</summary>
+    /// <remarks>
+    /// 表示は「並べるものが無い」で続行してよい（何も失われない）。止めるのは書き込みだけ、という非対称を固定する。
+    /// </remarks>
+    [Fact(DisplayName = "読み取れないときも読み取り API は空で返る（UI を止めない）")]
+    public void Reads_WhenFileUnreadable_FallBackToEmptyWithoutThrowing()
+    {
+        var store = CreateStore();
+        var profile = new SqlConnectionProfile { Name = "本番", Server = "prod" };
+        store.Upsert(profile, password: "");
+
+        using (
+            new FileStream(store.ConnectionsPath, FileMode.Open, FileAccess.Read, FileShare.None)
+        )
+        {
+            store.LoadAll().Should().BeEmpty();
+            store.LoadLastUsed().Should().BeNull();
+            store.LoadPassword(profile.Id).Should().BeEmpty();
+        }
+    }
+
+    /// <summary>ファイルが無いだけなら従来どおり空で読め、保存も普通にできることを検証する（MS1 の反対側）。</summary>
+    /// <remarks>
+    /// 「無い」を「読めない」と取り違えると、初回起動でプロファイルを 1 件も保存できなくなる。
+    /// </remarks>
+    [Fact(DisplayName = "ファイルが無いだけなら空で読め、保存もできる")]
+    public void Writes_WhenFileMissing_StillSucceed()
+    {
+        var store = CreateStore();
+
+        File.Exists(store.ConnectionsPath).Should().BeFalse();
+        store.LoadAll().Should().BeEmpty();
+
+        store.Upsert(new SqlConnectionProfile { Name = "初回", Server = "s" }, password: "");
+
+        store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("初回");
+    }
+
+    /// <summary>壊れた JSON は最初の保存で 1 回だけ退避されることを検証する（MS1）。</summary>
+    /// <remarks>
+    /// 破損時は従来どおり空データで続行して保存できる（＝正常化できる）が、上書きの前に
+    /// 元の内容を残す。残すのは最も古い退避＝最後に正しく読めていた状態にいちばん近いもの。
+    /// </remarks>
+    [Fact(DisplayName = "壊れた connections.json は最初の 1 回だけ .corrupt へ退避する")]
+    public void Save_CorruptConnectionsFile_BacksUpOnlyOnce()
+    {
+        var store = CreateStore();
+        Directory.CreateDirectory(_tempFolder);
+        File.WriteAllText(store.ConnectionsPath, "壊れた 1 回目");
+
+        store.Upsert(new SqlConnectionProfile { Name = "復旧", Server = "s" }, password: "");
+
+        File.Exists(store.CorruptBackupPath).Should().BeTrue();
+        File.ReadAllText(store.CorruptBackupPath).Should().Be("壊れた 1 回目");
+        store.LoadAll().Should().ContainSingle();
+
+        File.WriteAllText(store.ConnectionsPath, "壊れた 2 回目");
+        store.Upsert(new SqlConnectionProfile { Name = "復旧 2", Server = "s" }, password: "");
+
+        File.ReadAllText(store.CorruptBackupPath)
+            .Should()
+            .Be("壊れた 1 回目", "最も古い退避を残す");
+    }
 }
