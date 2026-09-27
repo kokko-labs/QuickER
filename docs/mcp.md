@@ -150,6 +150,9 @@ Before writing a `config` for `generate_csharp`, call `get_generation_config_sch
   Keeping diagram files under git is still recommended so changes stay reviewable.
 - **DiagramDocument validation.**
   The editing tools refuse a file that does not exist, JSON that is not a `DiagramDocument` (an object with `Version` and `Schema`), and documents saved in a newer format version than this tool supports (to avoid discarding unknown data).
+  It also refuses two kinds of damage that only a hand-edited diagram can carry: the same identifier (`Id`) used by more than one table or column, and an explicit `null` where a required string belongs (a table name, a column name, a column type, a query name).
+  Both are refused by name and location; neither is repaired, because guessing a value would change what the diagram means.
+  A `null` in an optional string such as a description or a memo is read as empty text.
   `get_diagram_summary` still reads a newer-format document, with a warning.
 - **Design defaults via server instructions.**
   On initialization the server sends MCP instructions carrying default design guidelines: PascalCase singular table names unless the user asks for a different convention (matching the existing diagram's style when there is one), exactly one primary-key column per table (the diagram and the generated DDL do support a composite key, and only the C# code generator does not; `set_primary_key` is how to declare one and its column order when the user asks for it), the foreign-key workflow, and the note that unique constraints are for columns other than the primary key.

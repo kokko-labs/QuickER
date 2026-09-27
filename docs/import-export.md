@@ -200,6 +200,11 @@ SVG is drawn directly from the diagram's model, so it contains no selection fram
 PNG rasterizes the canvas as it is drawn, so the selection state (selection frames and the dimming from relationship highlighting) and the grid background are captured as well.
 Clear the selection before exporting a PNG.
 
+Very large diagrams are scaled down before they are rasterized.
+PNG is capped at 100 million pixels in total (width x height); above that the image is shrunk to fit, keeping its aspect ratio, and the completion dialog reports the full size and the size that was actually saved.
+The cap exists because the rasterizer fails outright past its own limit: without it, a large enough diagram cannot be exported at all.
+SVG has no such cap, so export SVG when you need the full resolution.
+
 Every name and description the SVG carries is XML-escaped, so nothing written in the diagram can break out of the markup.
 A control character in a name is the one exception: it is written through as it stands, and XML forbids those in content, so the file is written without complaint and then fails to open in every SVG viewer.
 Nothing rejects such a name on the way out (the entry check for control characters in names guards DDL and code generation, not the exports), so keep them out of the names themselves.

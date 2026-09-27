@@ -13,12 +13,55 @@ namespace QuickER.Services;
 /// <summary>ER 図のキャンバスを画像（PNG）または SVG として書き出すサービス</summary>
 public static class ImageExportService
 {
+    /// <summary>PNG 出力の既定の総画素数の上限（1 億画素＝Pbgra32 で約 400MB）</summary>
+    /// <remarks>
+    /// <see cref="RenderTargetBitmap"/> は総画素数が 2^30 を超えると
+    /// <see cref="OverflowException"/> を投げる（メモリ不足ではなく確保サイズの計算で溢れる）ため、
+    /// 大きな図では「保存できない」ではなく「縮小して保存する」ほうが役に立つ。
+    /// 上限自体はその限界より十分低く採る＝1 枚のビットマップに加えて PNG 符号化の作業領域が要る。
+    /// </remarks>
+    public const long DefaultMaxTotalPixels = 100_000_000;
+
+    /// <summary>PNG 出力の結果（実寸と、実際に書き出した画素サイズ）</summary>
+    /// <param name="SourceWidth">縮小しなかった場合の幅 (px)</param>
+    /// <param name="SourceHeight">縮小しなかった場合の高さ (px)</param>
+    /// <param name="OutputWidth">実際に書き出した幅 (px)</param>
+    /// <param name="OutputHeight">実際に書き出した高さ (px)</param>
+    /// <remarks>
+    /// 実寸を <see cref="long"/> で持つのは、エンティティを極端に遠くへ置いた図で
+    /// <see cref="int"/> の範囲を超え得るため（負の値へ化けると上限の判定も素通りする）。
+    /// 出力側は上限に収まっているので <see cref="int"/> でよい。
+    /// </remarks>
+    public readonly record struct PngExportResult(
+        long SourceWidth,
+        long SourceHeight,
+        int OutputWidth,
+        int OutputHeight
+    )
+    {
+        /// <summary>上限に収めるため縮小したか</summary>
+        public bool WasScaledDown => OutputWidth != SourceWidth || OutputHeight != SourceHeight;
+    }
+
     /// <summary>WPF の <see cref="Visual"/> を PNG ファイルへ書き出す</summary>
     /// <param name="visual">レンダリング対象の Visual（通常はキャンバス Grid）</param>
     /// <param name="path">出力先パス</param>
     /// <param name="width">出力幅 (px) 0 以下なら Visual のサイズを使用する</param>
     /// <param name="height">出力高 (px) 0 以下なら Visual のサイズを使用する</param>
-    public static void ExportPng(Visual visual, string path, double width = 0, double height = 0)
+    /// <param name="maxTotalPixels">総画素数の上限（既定は <see cref="DefaultMaxTotalPixels"/>）</param>
+    /// <returns>実寸と実際に書き出した画素サイズ（縮小したかの判定に使う）</returns>
+    /// <remarks>
+    /// 上限を超える図は<b>縦横比を保ったまま縮小して</b>書き出す。判定と縮小は
+    /// <see cref="RenderTargetBitmap"/> を作る<b>前</b>に行う＝超えた時点で例外になるため、
+    /// 作ってから縮めることはできない。縮小後の画素数は切り捨てで求めるので上限を超えない。
+    /// </remarks>
+    public static PngExportResult ExportPng(
+        Visual visual,
+        string path,
+        double width = 0,
+        double height = 0,
+        long maxTotalPixels = DefaultMaxTotalPixels
+    )
     {
         var bounds = VisualTreeHelper.GetDescendantBounds(visual);
 
@@ -33,13 +76,19 @@ public static class ImageExportService
             height = double.IsFinite(bounds.Height) && bounds.Height > 0 ? bounds.Height : 600;
         }
 
-        var rtb = new RenderTargetBitmap(
-            (int)Math.Ceiling(width),
-            (int)Math.Ceiling(height),
-            96,
-            96,
-            PixelFormats.Pbgra32
+        var sourceWidth = CeilToPixels(width);
+        var sourceHeight = CeilToPixels(height);
+        var (pixelWidth, pixelHeight) = FitWithinPixelBudget(
+            width,
+            height,
+            sourceWidth,
+            sourceHeight,
+            maxTotalPixels
         );
+        var scaledDown = pixelWidth != sourceWidth || pixelHeight != sourceHeight;
+
+        var (dpiX, dpiY) = ResolveDpi(scaledDown, pixelWidth, pixelHeight, width, height);
+        var rtb = new RenderTargetBitmap(pixelWidth, pixelHeight, dpiX, dpiY, PixelFormats.Pbgra32);
 
         // 背景が透明のままだとダークモードのビューアで黒く見えるため、白背景を先に敷く
         var background = new DrawingVisual();
@@ -57,6 +106,75 @@ public static class ImageExportService
 
         using var fs = File.Create(path);
         encoder.Save(fs);
+
+        return new PngExportResult(sourceWidth, sourceHeight, pixelWidth, pixelHeight);
+    }
+
+    /// <summary>描画に使う DPI を決める</summary>
+    /// <remarks>
+    /// 画素サイズを縮めるだけでは中身が切り取られるため、縮小したときは DPI で描画側も同じ倍率へ縮める。
+    /// <b>縮小しないときは 96 ちょうどを使う</b>＝画素サイズは実寸の切り上げなので、倍率を常に
+    /// 「画素数 ÷ 実寸」で求めると 96 からわずかにずれ（例 96.019）、縮小していない図の
+    /// 解像度情報と描画倍率が従来の出力から変わってしまう。
+    /// </remarks>
+    internal static (double DpiX, double DpiY) ResolveDpi(
+        bool scaledDown,
+        int pixelWidth,
+        int pixelHeight,
+        double width,
+        double height
+    ) => scaledDown ? (96 * pixelWidth / width, 96 * pixelHeight / height) : (96, 96);
+
+    /// <summary>画素数として使える範囲（1 以上・<see cref="int"/> 以内）へ切り捨てて収める</summary>
+    private static int ClampToPixelCount(double value) =>
+        (int)Math.Clamp(Math.Floor(value), 1, int.MaxValue);
+
+    /// <summary>実寸 (px) を切り上げて求める（<see cref="int"/> の範囲を超え得るため <see cref="long"/>）</summary>
+    private static long CeilToPixels(double value) =>
+        (long)Math.Clamp(Math.Ceiling(value), 1, long.MaxValue);
+
+    /// <summary>総画素数が上限に収まる画素サイズを、縦横比を保ったまま求める</summary>
+    /// <remarks>
+    /// 総画素数は <see cref="double"/> で比べる。<see cref="long"/> の積はエンティティを極端に
+    /// 遠くへ置いた図であふれ得るためで、この判定に <see cref="double"/> の精度で足りる
+    /// （上限付近の 1 画素の差は問題にならない）。
+    /// </remarks>
+    internal static (int Width, int Height) FitWithinPixelBudget(
+        double width,
+        double height,
+        long sourceWidth,
+        long sourceHeight,
+        long maxTotalPixels
+    )
+    {
+        if ((double)sourceWidth * sourceHeight <= maxTotalPixels)
+        {
+            // 上限に収まっている＝どちらの辺も上限以下なので int へ収まる
+            return ((int)sourceWidth, (int)sourceHeight);
+        }
+
+        var scale = Math.Sqrt(maxTotalPixels / ((double)sourceWidth * sourceHeight));
+
+        // 切り捨てで求めるので、上限を超える丸め誤差は出ない（0 px は作れないので下限は 1 px）。
+        // int で受ける前に丸めるのは、片辺が極端に長い図では縮小後でも int を超え得るため
+        // （その場合も直後の上限チェックが上限内へ収める）
+        var pixelWidth = ClampToPixelCount(width * scale);
+        var pixelHeight = ClampToPixelCount(height * scale);
+
+        // 極端に細長い図では片辺が 1 px へ張り付き、もう一方だけで上限を超え得る
+        if ((long)pixelWidth * pixelHeight > maxTotalPixels)
+        {
+            if (pixelWidth >= pixelHeight)
+            {
+                pixelWidth = ClampToPixelCount(maxTotalPixels / (double)pixelHeight);
+            }
+            else
+            {
+                pixelHeight = ClampToPixelCount(maxTotalPixels / (double)pixelWidth);
+            }
+        }
+
+        return (pixelWidth, pixelHeight);
     }
 
     /// <summary><see cref="MainViewModel"/> の現在状態から SVG ファイルを書き出す</summary>

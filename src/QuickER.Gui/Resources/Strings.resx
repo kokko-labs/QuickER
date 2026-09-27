@@ -683,6 +683,9 @@
   <data name="Open_DuplicateId" xml:space="preserve">
     <value>Failed to open '{0}'. The file uses the same identifier for more than one table or column, which makes the diagram impossible to save. Edit the JSON by hand to give each one its own identifier. The current diagram was kept.</value>
   </data>
+  <data name="Open_MissingRequiredText" xml:space="preserve">
+    <value>Failed to open '{0}'. A required name or type is empty (null), so the diagram cannot be loaded. Edit the JSON by hand to fill it in. The current diagram was kept.</value>
+  </data>
   <data name="Save_Failed" xml:space="preserve">
     <value>Failed to save. Your changes were kept as unsaved; try saving again or save to another location.</value>
   </data>
@@ -715,6 +718,12 @@
   </data>
   <data name="Export_Completed" xml:space="preserve">
     <value>Export completed: {0}</value>
+  </data>
+  <data name="Export_PngScaledDownHeader" xml:space="preserve">
+    <value>The diagram was too large to save at full size, so it was scaled down:</value>
+  </data>
+  <data name="Export_PngScaledDown" xml:space="preserve">
+    <value>Full size: {0} x {1} px  ->  Saved: {2} x {3} px</value>
   </data>
   <data name="Export_OmissionsHeader" xml:space="preserve">
     <value>The following information is not preserved in this format:</value>

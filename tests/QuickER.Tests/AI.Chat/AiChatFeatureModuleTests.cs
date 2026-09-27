@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.AI.Chat;
 using QuickER.Extensibility;
+using QuickER.Gui.Abstractions;
 using QuickER.Tests.TestDoubles;
 using ChatStrings = QuickER.AI.Chat.Resources.Strings;
 
@@ -23,6 +24,7 @@ public class AiChatFeatureModuleTests
         var module = new AiChatFeatureModule();
         var services = new ServiceCollection();
         services.AddSingleton<IErDiagramHost>(new StubErDiagramHost());
+        services.AddSingleton<IShutdownFailureReporter>(new RecordingShutdownFailureReporter());
 
         module.ConfigureServices(services);
 
@@ -44,6 +46,7 @@ public class AiChatFeatureModuleTests
         var module = new AiChatFeatureModule();
         var services = new ServiceCollection();
         services.AddSingleton<IErDiagramHost>(new StubErDiagramHost());
+        services.AddSingleton<IShutdownFailureReporter>(new RecordingShutdownFailureReporter());
         module.ConfigureServices(services);
 
         using var provider = services.BuildServiceProvider();
@@ -64,11 +67,29 @@ public class AiChatFeatureModuleTests
         var module = new AiChatFeatureModule();
         var services = new ServiceCollection();
         services.AddSingleton<IErDiagramHost>(new StubErDiagramHost());
+        services.AddSingleton<IShutdownFailureReporter>(new RecordingShutdownFailureReporter());
         module.ConfigureServices(services);
 
         using var provider = services.BuildServiceProvider();
 
         var act = () => module.OnMainWindowClosing(provider);
         act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// 終了失敗の記録先が未登録ならランチャーの解決が失敗することを検証する（必須依存＝黙って捨てない）。
+    /// </summary>
+    [Fact(DisplayName = "終了失敗の記録先が未登録ならランチャーを解決できない")]
+    public void Resolve_WithoutShutdownFailureReporter_Throws()
+    {
+        var module = new AiChatFeatureModule();
+        var services = new ServiceCollection();
+        services.AddSingleton<IErDiagramHost>(new StubErDiagramHost());
+        module.ConfigureServices(services);
+
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetService<IAiChatLauncher>();
+        act.Should().Throw<InvalidOperationException>();
     }
 }

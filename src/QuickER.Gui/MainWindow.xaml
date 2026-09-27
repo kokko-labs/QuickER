@@ -2686,7 +2686,7 @@
                   />
                   <TextBox
                     Style="{StaticResource PropertyInputTextBox}"
-                    Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
+                    Text="{Binding SelectedEntity.Memo}"
                     AcceptsReturn="True"
                     TextWrapping="Wrap"
                     Height="120"

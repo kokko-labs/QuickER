@@ -26,6 +26,16 @@ public static class CrashHandlingService
     /// <summary>バージョンを解決できなかった場合に記録する代替表記</summary>
     private const string UnknownVersion = "unknown";
 
+    /// <summary>ログファイル名の既定の接頭辞（＝クラッシュの記録）</summary>
+    /// <remarks>
+    /// 終了処理の失敗など、アプリが落ちていない記録は別の接頭辞で書き分ける
+    /// （<c>crash-*.log</c> が増えていると「落ちた」と読み違えるため）。
+    /// </remarks>
+    public const string CrashLogPrefix = "crash";
+
+    /// <summary>アプリ終了の連鎖で受け止めた失敗を記録するログファイル名の接頭辞</summary>
+    public const string ShutdownLogPrefix = "shutdown";
+
     /// <summary>クラッシュ処理の再入ガード（0 = 未処理・1 = 処理中もしくは処理済み）</summary>
     /// <remarks>
     /// クラッシュ処理そのものが投げた二次例外や、複数スレッドからの同時発火で
@@ -92,7 +102,7 @@ public static class CrashHandlingService
         return builder.ToString();
     }
 
-    /// <summary>クラッシュログを <c>%LOCALAPPDATA%\QuickER\crash-yyyyMMdd-HHmmss-fff.log</c> へ書き出す</summary>
+    /// <summary>診断ログを <c>%LOCALAPPDATA%\QuickER\{接頭辞}-yyyyMMdd-HHmmss-fff.log</c> へ書き出す</summary>
     /// <remarks>
     /// <para>
     /// クラッシュ処理の途中で失敗しても後続（ダイアログ表示・終了）を止めないよう、
@@ -108,11 +118,16 @@ public static class CrashHandlingService
     /// <param name="ex">記録する例外</param>
     /// <param name="version">アプリのバージョン文字列</param>
     /// <param name="baseDirOverride">保存先フォルダ（テスト隔離用。null なら <c>%LOCALAPPDATA%\QuickER</c>）</param>
+    /// <param name="filePrefix">
+    /// ファイル名の接頭辞（既定は <see cref="CrashLogPrefix"/>）。本文の形式は共有したまま、
+    /// クラッシュ以外の記録（<see cref="ShutdownLogPrefix"/>）を別名で書き分けるために使う
+    /// </param>
     /// <returns>書き出したログのフルパス。失敗した場合は null</returns>
     public static string? WriteCrashLog(
         Exception ex,
         string version,
-        string? baseDirOverride = null
+        string? baseDirOverride = null,
+        string filePrefix = CrashLogPrefix
     )
     {
         try
@@ -124,14 +139,14 @@ public static class CrashHandlingService
                 "yyyyMMdd-HHmmss-fff",
                 CultureInfo.InvariantCulture
             );
-            var path = Path.Combine(folder, $"crash-{timestamp}.log");
+            var path = Path.Combine(folder, $"{filePrefix}-{timestamp}.log");
 
             // 同一ミリ秒での連続発火に備え、既存パスなら短縮 GUID を足して別ファイルへ逃がす
             if (File.Exists(path))
             {
                 path = Path.Combine(
                     folder,
-                    $"crash-{timestamp}-{Guid.NewGuid().ToString("N")[..8]}.log"
+                    $"{filePrefix}-{timestamp}-{Guid.NewGuid().ToString("N")[..8]}.log"
                 );
             }
 

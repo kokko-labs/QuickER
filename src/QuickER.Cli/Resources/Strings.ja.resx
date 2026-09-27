@@ -250,6 +250,9 @@
   <data name="Cli_SchemaDuplicateId" xml:space="preserve">
     <value>スキーマファイルで複数のテーブルまたは列が同じ識別子を使っています: {0}（{1}）。JSON を手で編集して、それぞれに別の識別子を与えてください。</value>
   </data>
+  <data name="Cli_SchemaMissingRequiredText" xml:space="preserve">
+    <value>スキーマファイルで必須の名前または型が空（null）になっています: {0}（{1}）。JSON を手で編集して値を入れてください。</value>
+  </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>生成エラーのため中止しました。</value>
   </data>

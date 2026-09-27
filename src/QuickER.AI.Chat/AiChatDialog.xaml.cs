@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using QuickER.AI;
 using QuickER.AI.UI;
+using QuickER.Gui.Abstractions;
 
 namespace QuickER.AI.Chat;
 
@@ -15,11 +16,24 @@ public partial class AiChatDialog : Window
     /// <summary>アプリ終了などで強制クローズ中かどうか（×ボタンの非表示化を抑止する）</summary>
     private bool _isForceClosing;
 
+    /// <summary>終了の連鎖で受け止めた失敗の記録先</summary>
+    private readonly IShutdownFailureReporter _shutdownFailureReporter;
+
     /// <summary>注入された ViewModel を結び付けてウィンドウを生成する</summary>
-    public AiChatDialog(AiChatDialogViewModel viewModel)
+    /// <param name="viewModel">このウィンドウの ViewModel</param>
+    /// <param name="shutdownFailureReporter">
+    /// <see cref="ForceClose"/> の各段で受け止めた失敗の記録先（ランチャーが DI から渡す）
+    /// </param>
+    public AiChatDialog(
+        AiChatDialogViewModel viewModel,
+        IShutdownFailureReporter shutdownFailureReporter
+    )
     {
+        ArgumentNullException.ThrowIfNull(shutdownFailureReporter);
+
         InitializeComponent();
         ViewModel = viewModel;
+        _shutdownFailureReporter = shutdownFailureReporter;
         DataContext = ViewModel;
 
         ViewModel.Messages.CollectionChanged += (_, _) => ScrollToBottom();
@@ -76,17 +90,32 @@ public partial class AiChatDialog : Window
 
     /// <summary>アプリ終了時などにウィンドウを実際に閉じる</summary>
     /// <remarks>
+    /// <para>
     /// 閉じる前に、(1) 実行中のターンを打ち切り (2) エンジンを破棄して常駐する子プロセス
     /// （codex app-server・copilot ランタイム）まで止める。中断だけではターンを実行していない
     /// 常駐プロセスが残るため、両方を通す。
+    /// </para>
+    /// <para>
+    /// 各段は <see cref="ShutdownSteps.Run"/> で独立して受け止める。とくに設定保存は
+    /// ディスクフル・権限などで落ちうるが、そこで連鎖が止まるとエンジンの破棄へ届かず
+    /// 常駐プロセスが孤児として残る。<see cref="Window.Close"/> 自体の失敗も同じ理由で受け止める。
+    /// </para>
     /// </remarks>
     public void ForceClose()
     {
         _isForceClosing = true;
-        ViewModel.RequestInterrupt();
-        ViewModel.SaveSettings();
-        ViewModel.ShutdownEngines(EngineShutdownTimeout);
-        Close();
+        ShutdownSteps.Run(
+            _shutdownFailureReporter,
+            "AiChat.RequestInterrupt",
+            ViewModel.RequestInterrupt
+        );
+        ShutdownSteps.Run(_shutdownFailureReporter, "AiChat.SaveSettings", ViewModel.SaveSettings);
+        ShutdownSteps.Run(
+            _shutdownFailureReporter,
+            "AiChat.ShutdownEngines",
+            () => ViewModel.ShutdownEngines(EngineShutdownTimeout)
+        );
+        ShutdownSteps.Run(_shutdownFailureReporter, "AiChat.Close", Close);
     }
 
     /// <summary>確定済み（切り替え済み）の接続タブのインデックス</summary>

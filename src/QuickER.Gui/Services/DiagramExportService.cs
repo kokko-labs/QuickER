@@ -21,10 +21,17 @@ namespace QuickER.Services;
 /// 寿命（＝VM と同じ）＝セッション単位で保持する。
 /// </para>
 /// </remarks>
+/// <param name="host">VM の能力を借りるためのホスト</param>
+/// <param name="dialogs">ダイアログ提示</param>
+/// <param name="files">ファイル選択ダイアログ</param>
+/// <param name="maxPngPixels">
+/// PNG 出力の総画素数の上限（テストから小さな値を与えて縮小の分岐を確かめるための差し替え口）
+/// </param>
 internal sealed class DiagramExportService(
     IDiagramTransferHost host,
     IDialogService dialogs,
-    IFileDialogService files
+    IFileDialogService files,
+    long maxPngPixels = ImageExportService.DefaultMaxTotalPixels
 )
 {
     /// <summary>出力形式ごとに「落ちる情報の告知」を済ませたかの記録（セッション中 1 回だけ内訳を見せるため）</summary>
@@ -114,6 +121,9 @@ internal sealed class DiagramExportService(
         // この形式では表現できず落ちた情報（Mermaid / DBML のみ検出する。他形式は常に空）
         IReadOnlyList<ExportOmissionKind> omissions = [];
 
+        // 画素数の上限に収めるため縮小したときの内訳（PNG のみ。縮小しなければ null）
+        string? scaledDownDetail = null;
+
         switch (format)
         {
             case DiagramExportFormat.Png:
@@ -122,7 +132,23 @@ internal sealed class DiagramExportService(
                     throw new InvalidOperationException(Strings.Export_PngCanvasInfoMissing);
                 }
 
-                ImageExportService.ExportPng(pngVisual, path);
+                var png = ImageExportService.ExportPng(
+                    pngVisual,
+                    path,
+                    maxTotalPixels: maxPngPixels
+                );
+
+                if (png.WasScaledDown)
+                {
+                    scaledDownDetail = string.Format(
+                        Strings.Export_PngScaledDown,
+                        png.SourceWidth,
+                        png.SourceHeight,
+                        png.OutputWidth,
+                        png.OutputHeight
+                    );
+                }
+
                 break;
 
             case DiagramExportFormat.Svg:
@@ -178,22 +204,42 @@ internal sealed class DiagramExportService(
                 break;
         }
 
-        NotifyExportCompleted(format, displayName, omissions);
+        NotifyExportCompleted(format, displayName, omissions, scaledDownDetail);
     }
 
-    /// <summary>出力完了を通知する（落ちた情報があれば、その形式で初回のときだけ内訳を添える）</summary>
+    /// <summary>出力完了を通知する（落ちた情報・縮小の内訳があれば添える）</summary>
     /// <remarks>
+    /// <para>
     /// Mermaid は NOT NULL 列がある限りほぼ必ず告知対象になるため、毎回内訳を出すと通知が形骸化する。
     /// 未対応方言のフォールバック警告と同じく、形式ごとに初回だけ見せる。
     /// 内訳の提示形式（要約＋詳細）は型変換警告と揃える
+    /// </para>
+    /// <para>
+    /// PNG の縮小は<b>毎回</b>告げる（形式の性質ではなく、いま書き出したこの 1 枚についての事実で、
+    /// 画素サイズを知らずに使うと後で別物として扱ってしまう）。
+    /// </para>
     /// </remarks>
     private void NotifyExportCompleted(
         DiagramExportFormat format,
         string displayName,
-        IReadOnlyList<ExportOmissionKind> omissions
+        IReadOnlyList<ExportOmissionKind> omissions,
+        string? scaledDownDetail
     )
     {
         var completed = string.Format(Strings.Export_Completed, displayName);
+
+        if (scaledDownDetail is not null)
+        {
+            dialogs.ShowInformationDetails(
+                completed
+                    + Environment.NewLine
+                    + Environment.NewLine
+                    + Strings.Export_PngScaledDownHeader,
+                scaledDownDetail,
+                Strings.Common_Complete
+            );
+            return;
+        }
 
         // 落ちた情報が無い、またはこの形式では既に告知済み（Add が false）なら完了文だけを出す
         if (omissions.Count == 0 || !_omissionNotifiedFormats.Add(format))

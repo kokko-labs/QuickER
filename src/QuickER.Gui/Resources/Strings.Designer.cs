@@ -1412,6 +1412,11 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Open_DuplicateId", resourceCulture);
             }
         }
+        public static string Open_MissingRequiredText {
+            get {
+                return ResourceManager.GetString("Open_MissingRequiredText", resourceCulture);
+            }
+        }
         public static string Confirm_OverwriteExternalChange {
             get {
                 return ResourceManager.GetString("Confirm_OverwriteExternalChange", resourceCulture);
@@ -1648,6 +1653,16 @@ namespace QuickER.Resources {
         public static string Export_OmissionsHeader {
             get {
                 return ResourceManager.GetString("Export_OmissionsHeader", resourceCulture);
+            }
+        }
+        public static string Export_PngScaledDownHeader {
+            get {
+                return ResourceManager.GetString("Export_PngScaledDownHeader", resourceCulture);
+            }
+        }
+        public static string Export_PngScaledDown {
+            get {
+                return ResourceManager.GetString("Export_PngScaledDown", resourceCulture);
             }
         }
 

@@ -84,7 +84,7 @@ public class ModelHistoryComboBoxTests
                 // （ここに × ボタンの束縛が入っている＝検証対象は実 XAML のテンプレート。
                 // 　BAML ロードは並列テストと競合しないよう直列化する）
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm)
+                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
                 );
                 var sourceCombo = dialog.FindName("ApiModelBox") as ComboBox;
                 sourceCombo.Should().NotBeNull("実 XAML にモデル名 ComboBox が存在すること");
@@ -254,7 +254,7 @@ public class ModelHistoryComboBoxTests
                     apiKeySaver: keyStore.Save
                 );
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(dialogVm)
+                    new AiChatDialog(dialogVm, new RecordingShutdownFailureReporter())
                 );
                 var sourceCombo = dialog.FindName("CodexModelBox") as ComboBox;
                 sourceCombo.Should().NotBeNull("実 XAML に Codex モデル ComboBox が存在すること");
@@ -425,7 +425,7 @@ public class ModelHistoryComboBoxTests
                     apiKeySaver: keyStore.Save
                 );
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(dialogVm)
+                    new AiChatDialog(dialogVm, new RecordingShutdownFailureReporter())
                 );
                 var sourceCombo = dialog.FindName("CopilotModelBox") as ComboBox;
                 sourceCombo.Should().NotBeNull("実 XAML に Copilot モデル ComboBox が存在すること");

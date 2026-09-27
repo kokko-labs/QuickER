@@ -47,12 +47,32 @@ public class DiagramExportServiceTests
         DiagramExportService Service,
         StubDiagramTransferHost Host,
         StubDialogService Dialogs
-    ) Create(QuickER.Gui.Abstractions.FileDialogResult? saveResult = null)
+    ) Create(
+        QuickER.Gui.Abstractions.FileDialogResult? saveResult = null,
+        long maxPngPixels = ImageExportService.DefaultMaxTotalPixels
+    )
     {
         var host = new StubDiagramTransferHost();
         var dialogs = new StubDialogService();
         var files = new StubFileDialogService { SaveResult = saveResult };
-        return (new DiagramExportService(host, dialogs, files), host, dialogs);
+        return (new DiagramExportService(host, dialogs, files, maxPngPixels), host, dialogs);
+    }
+
+    /// <summary>指定サイズを塗りつぶしただけの Visual を作る（PNG 出力の入力）</summary>
+    private static System.Windows.Media.Visual CreateVisual(double width, double height)
+    {
+        var visual = new System.Windows.Media.DrawingVisual();
+
+        using (var dc = visual.RenderOpen())
+        {
+            dc.DrawRectangle(
+                System.Windows.Media.Brushes.Red,
+                null,
+                new System.Windows.Rect(0, 0, width, height)
+            );
+        }
+
+        return visual;
     }
 
     [Theory(DisplayName = "形式解決: 拡張子が最優先・無ければフィルター順・どちらも無ければ例外")]
@@ -234,6 +254,76 @@ public class DiagramExportServiceTests
             File.ReadAllText(newer).Should().Contain("Customer");
             File.ReadAllText(current).Should().Contain("Customer");
             File.Exists(fresh).Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>上限に収まる PNG は従来どおり完了文だけを出すことを検証する</summary>
+    [Fact(DisplayName = "PNG: 上限に収まる図は完了文だけを通知する")]
+    public void Png_WithinBudget_NotifiesCompletionOnly()
+    {
+        var (service, _, dialogs) = Create(maxPngPixels: 20_000);
+        var dir = Directory
+            .CreateDirectory(
+                Path.Combine(Path.GetTempPath(), "quicker-png-" + Guid.NewGuid().ToString("N"))
+            )
+            .FullName;
+
+        try
+        {
+            var path = Path.Combine(dir, "small.png");
+            service.SaveDiagram(DiagramExportFormat.Png, path, CreateVisual(100, 100));
+
+            dialogs
+                .InformationMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(string.Format(Strings.Export_Completed, Strings.Format_Png));
+            dialogs.InformationDetailsMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>縮小したときは、実寸と保存した画素サイズを内訳として添えることを検証する</summary>
+    /// <remarks>
+    /// 縮小は形式の性質ではなく、いま書き出したこの 1 枚についての事実なので、
+    /// 欠落告知と違ってセッション 1 回に畳まず毎回出す（2 回目も内訳が出ることまで固定する）。
+    /// </remarks>
+    [Fact(DisplayName = "PNG: 縮小したときは実寸と保存サイズを内訳で告げる")]
+    public void Png_ScaledDown_ReportsSizesEveryTime()
+    {
+        var (service, _, dialogs) = Create(maxPngPixels: 20_000);
+        var dir = Directory
+            .CreateDirectory(
+                Path.Combine(Path.GetTempPath(), "quicker-png-" + Guid.NewGuid().ToString("N"))
+            )
+            .FullName;
+
+        try
+        {
+            service.SaveDiagram(
+                DiagramExportFormat.Png,
+                Path.Combine(dir, "first.png"),
+                CreateVisual(2000, 1000)
+            );
+            service.SaveDiagram(
+                DiagramExportFormat.Png,
+                Path.Combine(dir, "second.png"),
+                CreateVisual(2000, 1000)
+            );
+
+            dialogs.InformationDetailsMessages.Should().HaveCount(2);
+            dialogs.InformationMessages.Should().BeEmpty();
+
+            var (message, details, _) = dialogs.InformationDetailsMessages[0];
+            message.Should().Contain(Strings.Export_PngScaledDownHeader);
+            details.Should().Contain("2000").And.Contain("1000");
         }
         finally
         {

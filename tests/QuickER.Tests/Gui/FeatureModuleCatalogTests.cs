@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
+using QuickER.Services;
 using QuickER.Tests.TestDoubles;
 
 namespace QuickER.Tests.Gui;
@@ -44,6 +45,9 @@ public class FeatureModuleCatalogTests
         services.AddSingleton<IFileDialogService>(new NullFileDialogService());
         // DB 接続ダイアログ提示シーム（DbConnectionDialogPresenter）が要求するプロバイダレジストリ
         services.AddSingleton(new DatabaseProviderRegistry(Array.Empty<IDatabaseProvider>()));
+        // 終了時後始末の失敗を受け止める記録先（App.xaml.cs と同じく必須依存）
+        var shutdownFailureReporter = new RecordingShutdownFailureReporter();
+        services.AddSingleton<IShutdownFailureReporter>(shutdownFailureReporter);
 
         foreach (var module in modules)
         {
@@ -60,13 +64,9 @@ public class FeatureModuleCatalogTests
         items.Select(item => item.Icon).Should().Equal("🛢", "⇪", "🤖", "🖼", "⌘", "📥", "🔎");
         items.Should().OnlyContain(item => item.Command != null && item.Command.CanExecute(null));
 
-        var act = () =>
-        {
-            foreach (var module in modules)
-            {
-                module.OnMainWindowClosing(provider);
-            }
-        };
+        // 終了時後始末は App.xaml.cs と同じ経路（受け止めつき）で回す
+        var act = () => FeatureModuleShutdown.CloseAll(modules, provider, shutdownFailureReporter);
         act.Should().NotThrow();
+        shutdownFailureReporter.Reports.Should().BeEmpty();
     }
 }
