@@ -219,6 +219,11 @@ Nothing rejects such a name on the way out (the entry check for control characte
 
 Choose a PDF printer such as Microsoft Print to PDF and the print becomes a PDF export.
 
+At actual size the paper is the diagram itself, so a large diagram means a large page.
+A page is capped at 200 inches on a side (the limit PDF and XPS can handle); above that, QuickER reports the actual size and offers to print the diagram scaled to fit one page instead.
+Cancelling prints nothing.
+An auto-arranged diagram of 1,000 tables measures 100 x 61 inches, so the cap is reached only by diagrams whose tables are placed far apart.
+
 ## Related pages
 
 - [Database round-tripping](database.md): importing from live DBs and diff sync

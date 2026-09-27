@@ -12,9 +12,11 @@ namespace QuickER.Extensibility;
 /// <see cref="ICommand"/> は <c>System.Windows.Input</c>（net10.0 の System.ObjectModel）にあり、
 /// WPF アセンブリ参照を必要としない。
 /// <para>
-/// <see cref="Tooltip"/> と <see cref="BeginsGroup"/> は実行中に切り替わり得るため
-/// <see cref="INotifyPropertyChanged"/> を実装する（WPF のツールバー UI が変更へ追随する）。
+/// <see cref="Tooltip"/> は実行中に切り替わり得るため <see cref="INotifyPropertyChanged"/> を
+/// 実装する（WPF のツールバー UI が変更へ追随する）。
 /// Extensibility は CommunityToolkit 非依存の純契約プロジェクトのため、INPC は手実装する。
+/// <see cref="BeginsGroup"/> も通知は出すが、ホスト側の折返しは起動時に 1 回だけ組み立てられるため
+/// 実行中に変えても見た目は変わらない（<see cref="BeginsGroup"/> の説明を参照）。
 /// </para>
 /// </remarks>
 public sealed class FeatureToolbarItem : INotifyPropertyChanged
@@ -27,7 +29,7 @@ public sealed class FeatureToolbarItem : INotifyPropertyChanged
     /// <param name="label">ボタンキャプション（ローカライズ済み文字列）</param>
     /// <param name="tooltip">ツールチップ（<c>null</c> なら無し・動的切替可）</param>
     /// <param name="command">押下時に実行するコマンド</param>
-    /// <param name="beginsGroup">true のときボタンの直前にツールバーのグループ区切り（セパレータ）を描画する</param>
+    /// <param name="beginsGroup">true のときボタンの直前にツールバーのグループ区切り（セパレータ）を描画する（起動時の組み立てでのみ反映）</param>
     public FeatureToolbarItem(
         string icon,
         string label,
@@ -62,7 +64,13 @@ public sealed class FeatureToolbarItem : INotifyPropertyChanged
         set => SetField(ref _tooltip, value);
     }
 
-    /// <summary>true のときボタンの直前にツールバーのグループ区切り（セパレータ）を描画する。実行中に切り替え可能</summary>
+    /// <summary>true のときボタンの直前にツールバーのグループ区切り（セパレータ）を描画する</summary>
+    /// <remarks>
+    /// <b>反映されるのは起動時の組み立てのときだけ</b>。ホストは受け取ったボタン列を
+    /// この値で区切ってグループへ分割し、ビューは分割済みのグループへ束縛するため、
+    /// 実行中にこの値を変えても（通知は出るが）折返しの単位は変わらない。
+    /// 実行中に切り替えて効くのは <see cref="Tooltip"/> のほうで、そちらはビューが直接束縛している。
+    /// </remarks>
     public bool BeginsGroup
     {
         get => _beginsGroup;

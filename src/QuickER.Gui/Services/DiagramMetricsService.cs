@@ -200,7 +200,24 @@ public static class DiagramMetricsService
     /// 行数が実描画とわずかに異なる可能性はあるが、高さ計算には
     /// <see cref="MeasureWrappedTextHeight"/> と同じ実測値を用いるため図形の位置はずれない
     /// </remarks>
-    public static IReadOnlyList<string> WrapDescription(string? text, double maxWidth)
+    public static IReadOnlyList<string> WrapDescription(string? text, double maxWidth) =>
+        WrapDescription(
+            text,
+            maxWidth,
+            candidate =>
+                MeasureTextWidth(candidate, DescriptionFontSize, fontStyle: FontStyles.Italic)
+        );
+
+    /// <summary>幅の計測手段を差し替えられる <see cref="WrapDescription(string?, double)"/>（テスト用の口）</summary>
+    /// <remarks>
+    /// 折返しの速さは<b>計測を何回・どれだけ長い文字列に対して行うか</b>で決まるため、
+    /// 回数を数えられるようにしておく（結果だけを見るテストでは、計測が指数関数的に増えても緑のままになる）。
+    /// </remarks>
+    internal static IReadOnlyList<string> WrapDescription(
+        string? text,
+        double maxWidth,
+        Func<string, double> measure
+    )
     {
         var lines = new List<string>();
 
@@ -222,31 +239,7 @@ public static class DiagramMetricsService
             while (start < paragraph.Length)
             {
                 var remaining = paragraph.Length - start;
-
-                // 幅に収まる最長の文字数を二分探索で求める（最低 1 文字は進める）
-                var low = 1;
-                var high = remaining;
-                var fit = 1;
-
-                while (low <= high)
-                {
-                    var mid = (low + high) / 2;
-                    var candidateWidth = MeasureTextWidth(
-                        paragraph.Substring(start, mid),
-                        DescriptionFontSize,
-                        fontStyle: FontStyles.Italic
-                    );
-
-                    if (candidateWidth <= maxWidth)
-                    {
-                        fit = mid;
-                        low = mid + 1;
-                    }
-                    else
-                    {
-                        high = mid - 1;
-                    }
-                }
+                var fit = FindFittingLength(paragraph, start, remaining, maxWidth, measure);
 
                 if (fit >= remaining)
                 {
@@ -282,6 +275,70 @@ public static class DiagramMetricsService
         }
 
         return lines;
+    }
+
+    /// <summary>指定幅に収まる最長の文字数を求める（最低 1 文字は進める）</summary>
+    /// <remarks>
+    /// <para>
+    /// まず長さを<b>倍々に広げて上下限を括り</b>、そのあいだだけを二分探索する。
+    /// 上限を「段落の残り全体」のまま二分探索すると、1 行を決めるたびに残り全体の長さの文字列を
+    /// 計測することになり（計測コストは文字数に比例する）、段落が長いほど二乗で効く
+    /// （実測: 幅 200px で 10,000 文字 65ms・50,000 文字 2.3 秒）。
+    /// </para>
+    /// <para>
+    /// <b>結果は括りを入れる前と同一</b>＝判定式は変えておらず、「長くするほど幅は狭くならない」
+    /// という単調性（元の二分探索も同じ前提に立っている）だけを使って探索範囲を狭めている。
+    /// </para>
+    /// </remarks>
+    internal static int FindFittingLength(
+        string paragraph,
+        int start,
+        int remaining,
+        double maxWidth,
+        Func<string, double> measure
+    )
+    {
+        // 収まると分かっている最長（1 文字も収まらない場合もここへ進める）
+        var fit = 1;
+        var low = 1;
+        int high;
+        var probe = 1;
+
+        while (true)
+        {
+            if (measure(paragraph.Substring(start, probe)) > maxWidth)
+            {
+                high = probe - 1;
+                break;
+            }
+
+            fit = probe;
+
+            if (probe == remaining)
+            {
+                return remaining;
+            }
+
+            low = probe + 1;
+            probe = probe > remaining / 2 ? remaining : probe * 2;
+        }
+
+        while (low <= high)
+        {
+            var mid = (low + high) / 2;
+
+            if (measure(paragraph.Substring(start, mid)) <= maxWidth)
+            {
+                fit = mid;
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        return fit;
     }
 
     /// <summary>単語の途中判定に用いる（ASCII 英数字のみを単語構成文字とみなす）</summary>

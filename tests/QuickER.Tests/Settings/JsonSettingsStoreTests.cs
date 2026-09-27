@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json.Nodes;
 using AwesomeAssertions;
 using QuickER.Settings;
 
@@ -217,5 +218,194 @@ public class JsonSettingsStoreTests : IDisposable
 
         store.TryLoadFrom(exportPath)!.Language.Should().Be("ja");
         store.TryLoadFrom(Path.Combine(_folder, "absent.json")).Should().BeNull();
+    }
+
+    /// <summary>入れ子と辞書を持つ検証用の設定型（未知のキーの引き継ぎ範囲を確かめるためのもの）</summary>
+    public sealed class NestedProbeSettings
+    {
+        /// <summary>トップレベルの既知の値</summary>
+        public string Language { get; set; } = string.Empty;
+
+        /// <summary>入れ子のオブジェクト（型が知っているが、中には知らないキーが入り得る）</summary>
+        public ViewProbeSettings View { get; set; } = new();
+
+        /// <summary>辞書型のプロパティ（JSON ではオブジェクトとして出るが、中へ再帰してはいけない）</summary>
+        public Dictionary<string, string> Tags { get; set; } = new();
+    }
+
+    /// <summary><see cref="NestedProbeSettings"/> の入れ子側</summary>
+    public sealed class ViewProbeSettings
+    {
+        /// <summary>入れ子の既知の値</summary>
+        public bool IsCompact { get; set; }
+    }
+
+    /// <summary>入れ子と辞書を持つテスト用ストアを生成する</summary>
+    private JsonSettingsStore<NestedProbeSettings> CreateNestedStore() =>
+        new("probe-settings.json", _folder);
+
+    /// <summary>設定ファイルを直接書き、読み書きの対象となる JSON を用意する</summary>
+    private void WriteRawSettings(string json) =>
+        File.WriteAllText(Path.Combine(_folder, "probe-settings.json"), json);
+
+    /// <summary>保存後の設定ファイルを JSON オブジェクトとして読み出す</summary>
+    private JsonObject ReadWrittenSettings() =>
+        JsonNode.Parse(File.ReadAllText(Path.Combine(_folder, "probe-settings.json")))!.AsObject();
+
+    /// <summary>型が知らないトップレベルのキーが、保存後もファイルに残ることを検証する</summary>
+    /// <remarks>
+    /// 設定ファイルには版番号も「新しすぎるなら拒否する」仕組みも無いので、引き継がないと
+    /// 新しい版の QuickER が足したキーを、古い版で 1 度保存しただけで失う。
+    /// </remarks>
+    [Fact(DisplayName = "Save: 型が知らないトップレベルのキーを引き継ぐ")]
+    public void Save_UnknownTopLevelKey_IsPreserved()
+    {
+        var store = CreateNestedStore();
+        WriteRawSettings("""{"language":"ja","futureOption":123}""");
+
+        var loaded = store.Load();
+        loaded.Language = "en";
+        store.Save(loaded);
+
+        var written = ReadWrittenSettings();
+
+        written["futureOption"]!.GetValue<int>().Should().Be(123, "型が知らないキーは残す");
+        written["language"]!.GetValue<string>().Should().Be("en");
+    }
+
+    /// <summary>入れ子のオブジェクトの中にある未知のキーも引き継がれることを検証する</summary>
+    /// <remarks>
+    /// 実際の設定型（GuiAppSettings 等）は入れ子が深く、増えるキーの多くは入れ子の中に入る。
+    /// トップレベルだけ引き継いでも実質的にはほとんど守れない。
+    /// </remarks>
+    [Fact(DisplayName = "Save: 入れ子のオブジェクトの中の未知のキーも引き継ぐ")]
+    public void Save_UnknownNestedKey_IsPreserved()
+    {
+        var store = CreateNestedStore();
+        WriteRawSettings("""{"language":"ja","view":{"isCompact":true,"futureNested":"x"}}""");
+
+        var loaded = store.Load();
+        loaded.View.IsCompact.Should().BeTrue();
+        loaded.View.IsCompact = false;
+        store.Save(loaded);
+
+        var view = ReadWrittenSettings()["view"]!.AsObject();
+
+        view["futureNested"]!.GetValue<string>().Should().Be("x", "入れ子の未知のキーも残す");
+        view["isCompact"]!.GetValue<bool>().Should().BeFalse("既知の値は新しい値で書き換わる");
+    }
+
+    /// <summary>未知のキーの引き継ぎが、既知のキーの書き換えを邪魔しないことを検証する</summary>
+    /// <remarks>
+    /// 引き継ぎはディスク側の値を勝たせる処理ではない。既知のキーは必ず「いま保存しようとしている値」になる。
+    /// </remarks>
+    [Fact(DisplayName = "Save: 既知のキーは引き継ぎに邪魔されず新しい値で書き換わる")]
+    public void Save_KnownKeys_AreOverwrittenWithNewValues()
+    {
+        var store = CreateNestedStore();
+        WriteRawSettings(
+            """{"language":"ja","view":{"isCompact":true},"tags":{"a":"1"},"futureOption":1}"""
+        );
+
+        var loaded = store.Load();
+        loaded.Language = "en";
+        loaded.View.IsCompact = false;
+        loaded.Tags["a"] = "2";
+        store.Save(loaded);
+
+        var written = ReadWrittenSettings();
+
+        written["language"]!.GetValue<string>().Should().Be("en");
+        written["view"]!.AsObject()["isCompact"]!.GetValue<bool>().Should().BeFalse();
+        written["tags"]!.AsObject()["a"]!.GetValue<string>().Should().Be("2");
+    }
+
+    /// <summary>辞書型のプロパティから利用者が消したエントリが復活しないことを検証する</summary>
+    /// <remarks>
+    /// 辞書は JSON ではオブジェクトとして出るため、既知のキーをシリアライズ結果から求めて
+    /// 「オブジェクトなら中へ再帰する」と判定すると、消したエントリが未知のキーに見えて復活する。
+    /// 既知のキーは型のメタデータ（JsonTypeInfo.Properties）から求め、辞書は値ごと置き換えること。
+    /// </remarks>
+    [Fact(DisplayName = "Save: 辞書から消したエントリは復活しない")]
+    public void Save_RemovedDictionaryEntry_DoesNotComeBack()
+    {
+        var store = CreateNestedStore();
+        WriteRawSettings("""{"language":"ja","tags":{"a":"1","b":"2"}}""");
+
+        var loaded = store.Load();
+        loaded.Tags.Should().ContainKeys("a", "b");
+        loaded.Tags.Remove("b");
+        store.Save(loaded);
+
+        var tags = ReadWrittenSettings()["tags"]!.AsObject();
+
+        tags.Should().ContainSingle("消したエントリを未知のキーとして復活させない");
+        tags["a"]!.GetValue<string>().Should().Be("1");
+    }
+
+    /// <summary>保存の直前の読み直しが失敗したときは、何も書かないことを検証する</summary>
+    /// <remarks>
+    /// <see cref="JsonSettingsStore{TSettings}.LastLoadUnavailable"/> による抑止とは別の経路。
+    /// 「読み込みは成功したが、保存の時点では読めない」ときに読めないまま上書きすると、
+    /// そこにあった未知のキーを黙って捨てることになり、この引き継ぎが塞ぐ穴そのものを開ける。
+    /// </remarks>
+    [Fact(DisplayName = "Save: 保存直前の読み直しが失敗したら何も書かない")]
+    public void Save_WhenRereadIsUnavailable_WritesNothing()
+    {
+        var store = CreateNestedStore();
+        WriteRawSettings("""{"language":"ja","futureOption":123}""");
+
+        var loaded = store.Load();
+        store.LastLoadUnavailable.Should().BeFalse("読み込み自体は成功している");
+        var original = File.ReadAllText(store.SettingsPath);
+        loaded.Language = "en";
+
+        using (new FileStream(store.SettingsPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var act = () => store.Save(loaded);
+
+            act.Should().NotThrow("読めないときは書かずに諦める");
+        }
+
+        File.ReadAllText(store.SettingsPath)
+            .Should()
+            .Be(original, "読めないまま上書きして未知のキーを捨てない");
+    }
+
+    /// <summary>ファイルが無いときは引き継ぐ相手がいないので、普通に書けることを検証する</summary>
+    [Fact(DisplayName = "Save: ファイルが無ければ引き継がずに普通に書く")]
+    public void Save_WhenFileIsMissing_WritesSerializedSettings()
+    {
+        var store = CreateNestedStore();
+
+        store.Save(new NestedProbeSettings { Language = "ja" });
+
+        var written = ReadWrittenSettings();
+
+        written["language"]!.GetValue<string>().Should().Be("ja");
+        written.Should().HaveCount(3, "型が知っているキーだけが出る（language / view / tags）");
+    }
+
+    /// <summary>壊れた JSON は引き継がずに書き直し、退避も従来どおり行われることを検証する</summary>
+    /// <remarks>
+    /// 壊れているファイルからはどれが「型が知らないキー」なのかを決められない。引き継ぎを諦めて
+    /// 正常な内容で書き直す（＝従来の挙動）。<c>.corrupt</c> への退避はそれとは独立に効く。
+    /// </remarks>
+    [Fact(DisplayName = "Save: 壊れた JSON は引き継がずに書き直し .corrupt へ退避する")]
+    public void Save_CorruptJson_WritesWithoutMergeAndStillBacksUp()
+    {
+        var store = CreateNestedStore();
+        const string Broken = """{"language":"ja","futureOption":""";
+        WriteRawSettings(Broken);
+
+        store.Load();
+        store.LastLoadCorrupt.Should().BeTrue();
+        store.Save(new NestedProbeSettings { Language = "en" });
+
+        var written = ReadWrittenSettings();
+
+        written["language"]!.GetValue<string>().Should().Be("en");
+        written.Should().HaveCount(3, "壊れたファイルからは何も引き継がない");
+        File.ReadAllText(store.CorruptBackupPath).Should().Be(Broken, "退避は従来どおり効く");
     }
 }

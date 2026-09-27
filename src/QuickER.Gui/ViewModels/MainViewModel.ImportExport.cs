@@ -647,7 +647,8 @@ public partial class MainViewModel : IDiagramTransferHost
                 this,
                 options.Title,
                 options.IncludeTimestamp,
-                options.SizeMode
+                options.SizeMode,
+                _dialogs
             );
         }
         catch (Exception ex)
