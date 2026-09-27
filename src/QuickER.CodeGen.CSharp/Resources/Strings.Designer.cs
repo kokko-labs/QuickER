@@ -268,6 +268,11 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("CodeGen_Info_ArrayColumnsNotEditable", resourceCulture);
             }
         }
+        public static string CodeGen_Info_ArrayUniqueConstraintsNotValidated {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_ArrayUniqueConstraintsNotValidated", resourceCulture);
+            }
+        }
 
         public static string CodeGen_Info_IncludeGraphSkippedNavigations {
             get {

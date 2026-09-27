@@ -163,6 +163,9 @@
   <data name="CodeGen_Info_FallbackTypeColumns" xml:space="preserve">
     <value>The type catalog could not recognize the DB type of the columns below, so the generated property falls back to string (a safe default that keeps generation from failing). Confirm this is the intended type; if not, adjust the column's type in the diagram:{0}</value>
   </data>
+  <data name="CodeGen_Info_ArrayUniqueConstraintsNotValidated" xml:space="preserve">
+    <value>The UNIQUE constraints below contain an array column, so the edit model does not validate them for duplicates (an array column is not projected onto the edit model, so the check cannot read it). The repository still checks them before saving, and the constraint itself exists in the database:{0}</value>
+  </data>
   <data name="CodeGen_Info_ArrayColumnsNotEditable" xml:space="preserve">
     <value>The columns below are array columns. They are generated as entity properties (and work through EF Core, the in-memory repository and remote transfer), but they are left out of edit models and value objects: an edit model is one text input per column and has no notation for an array, and a value object would compare arrays by reference. The length of an array's elements is not carried into the generated code either:{0}</value>
   </data>

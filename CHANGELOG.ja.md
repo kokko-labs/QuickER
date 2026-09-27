@@ -25,7 +25,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
   | `bigint[]` | `string` | `long[]` |
   | `varchar(n)[]` | `string`（診断すら出ず黙って） | `string[]` |
 
-  制限が 2 つ付きます。`timetz` へ**UTC 以外のオフセット**を書くには列型の明示が要りますが、QuickER はそれを生成しません（EF Core は既存スキーマへの接続専用のため）。必要な場合は生成される `QuickErDbContext` の `OnModelCreatingPartial` で足してください。また**配列列は EditModel と値オブジェクトに載らず**、配列の要素の長さも生成コードには載りません（該当する列は生成時に名指しします）。
+  制限が 2 つ付きます。`timetz` へ**UTC 以外のオフセット**を書くには列型の明示が要りますが、QuickER はそれを生成しません（EF Core は既存スキーマへの接続専用のため）。必要な場合は生成される `QuickErDbContext` の `OnModelCreatingPartial` で足してください。また**配列列は EditModel と値オブジェクトに載らず**、配列の要素の長さも生成コードには載りません（該当する列は生成時に名指しします）。配列列を含む UNIQUE 制約も EditModel の重複検証からは外れます（Repository の保存前チェックは従来どおり効きます）。
 
 #### インポート・エクスポート
 

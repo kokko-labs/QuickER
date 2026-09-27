@@ -72,6 +72,10 @@ They are **left out of edit models and value objects**, though.
 An edit model is one text input per column and has no notation for an array, and a value object would compare arrays by reference, so two arrays with the same contents would not be equal.
 **The length of an array's elements is not carried into the generated code either**: the 20 in `varchar(20)[]` is the length of an element, while `[MaxLength]` on an array means the number of elements, so no such (wrong) check is declared.
 Generation names the affected columns.
+**A UNIQUE constraint that contains an array column is left out of the edit model's duplicate check** as well:
+the check reads each member as an edit-model property, and an array column is not there to read.
+The repository still checks it before saving, and the constraint itself exists in the database.
+Generation names those constraints too.
 Entity properties, EF Core, the in-memory repository and remote transfer handle them as usual.
 
 PostgreSQL's `time with time zone` (`timetz`) is generated as `DateTimeOffset`.

@@ -158,10 +158,21 @@ ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
     /// </para>
     /// <para>
     /// 仮想列（<c>virtual_column = 'YES'</c>）を判別するため <c>user_tab_columns</c> ではなく
-    /// <c>user_tab_cols</c> を引く。両ビューの差は隠し列の有無だけ（<c>user_tab_columns</c> は
-    /// <c>hidden_column = 'NO'</c> の行だけを返す）なので、同じ条件を明示して<b>列集合は従来どおり</b>に保つ。
-    /// この条件は関数インデックスがテーブルへ足すシステム生成列（<c>SYS_NC…$</c>）も同時に除外する
-    /// ＝それらは隠し列かつ仮想列なので、外すと図に実在しない列が現れる。
+    /// <c>user_tab_cols</c> を引き、<b>利用者が作った列</b>（<c>user_generated = 'YES'</c>）に絞る。
+    /// 除きたいのは関数インデックスがテーブルへ足すシステム生成列（<c>SYS_NC…$</c>）だけで、
+    /// それらは <c>user_generated = 'NO'</c> になる（実 Oracle 23 で確認）。
+    /// </para>
+    /// <para>
+    /// <b><c>hidden_column = 'NO'</c> で絞ってはいけない。</b>利用者が <c>INVISIBLE</c> にした列も
+    /// <c>hidden_column = 'YES'</c> になるため、意図して隠した列が図から丸ごと落ちる
+    /// （実測: <c>INVISIBLE</c> 列は <c>hidden_column='YES'</c> かつ <c>user_generated='YES'</c>・
+    /// <c>SYS_NC…$</c> は <c>hidden_column='YES'</c> かつ <c>user_generated='NO'</c>）。
+    /// なお <c>user_tab_columns</c> は隠し列を除くビューではなく、<c>INVISIBLE</c> 列も返す
+    /// （返さないのは <c>SYS_NC…$</c> のほう）。
+    /// </para>
+    /// <para>
+    /// <c>INVISIBLE</c> 列の <c>column_id</c> は <c>NULL</c> になるため、<c>ORDER BY column_id</c>
+    /// では可視列の後ろへ並ぶ（Oracle の昇順は NULLS LAST・実測）。図でも末尾の列になる。
     /// </para>
     /// <para>
     /// 仮想列の式は <c>data_default</c>（LONG 型）。ODP.NET は既定（<c>InitialLONGFetchSize = 0</c>）では
@@ -171,7 +182,7 @@ ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
     private const string ColumnsSql =
         @"SELECT table_name, column_name, data_type, data_precision, data_scale, char_length, nullable, column_id, data_length, char_used, virtual_column, data_default
 FROM user_tab_cols
-WHERE hidden_column = 'NO'
+WHERE user_generated = 'YES'
 ORDER BY table_name, column_id";
 
     /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>

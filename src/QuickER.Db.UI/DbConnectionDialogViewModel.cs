@@ -635,13 +635,11 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
         try
         {
-            if (conflict is not null)
-            {
-                _store.Delete(conflict.Id);
-            }
-
             target.Name = newName;
-            _store.Upsert(target, password);
+
+            // 置き換え先の削除と改名は 1 回の読み書きで行う（別々に呼ぶと、2 回目が読めなかったときに
+            // 置き換え先だけが消えて対象は変わらない状態が残る）
+            _store.Upsert(target, password, conflict?.Id);
         }
         catch (ConnectionProfileStoreUnavailableException)
         {
