@@ -216,6 +216,11 @@ public static class CliApp
                         schemaFile.FullName,
                         exception!.Message
                     ),
+                    DocumentLoadError.MissingRequiredText => string.Format(
+                        Strings.Cli_SchemaMissingRequiredText,
+                        schemaFile.FullName,
+                        exception!.Message
+                    ),
                     _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
                 }
             );

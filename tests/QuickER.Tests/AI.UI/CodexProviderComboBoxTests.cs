@@ -59,7 +59,7 @@ public class CodexProviderComboBoxTests
                 // 実ダイアログのプロバイダー ComboBox から本物のテンプレートと入力方式を確認する
                 // （BAML ロードは並列テストと競合しないよう直列化する）
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm)
+                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
                 );
                 var sourceCombo = dialog.FindName("CodexProviderBox") as ComboBox;
                 sourceCombo

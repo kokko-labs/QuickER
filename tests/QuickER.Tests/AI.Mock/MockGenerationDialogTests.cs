@@ -97,7 +97,7 @@ public class MockGenerationDialogTests
                 // 名前空間・型解決に失敗すると XamlParseException が送出される。
                 // BAML ロードは並列テストと競合しないよう直列化する
                 _ = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new MockGenerationDialog(viewModel)
+                    new MockGenerationDialog(viewModel, new RecordingShutdownFailureReporter())
                 );
             }
             catch (Exception ex)
@@ -155,7 +155,7 @@ public class MockGenerationDialogTests
                 viewModel.IsMockGenInProgress = true;
 
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new MockGenerationDialog(viewModel)
+                    new MockGenerationDialog(viewModel, new RecordingShutdownFailureReporter())
                 );
                 dialog.ForceClose();
             }
@@ -172,5 +172,80 @@ public class MockGenerationDialogTests
 
         captured.Should().BeNull();
         generator.Interrupted.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 途中の段（設定保存）が失敗しても、後続の中断・エンジン破棄・クローズまで到達し、
+    /// 失敗した段の名前が記録されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 終了時の設定保存はディスクフル・権限・保存先フォルダのパスに同名のファイルがある等で落ちる。
+    /// そこで連鎖が止まると、生成が起動した claude / codex / copilot / dotnet の子プロセスが孤児として残る。
+    /// </remarks>
+    [Fact(DisplayName = "ForceClose は設定保存が失敗しても中断とクローズまで進む")]
+    public void ForceClose_WhenSaveSettingsThrows_StillInterruptsAndCloses()
+    {
+        Exception? captured = null;
+        var generator = new InterruptRecordingGenerator();
+        var reporter = new RecordingShutdownFailureReporter();
+        var closed = false;
+
+        // 保存先フォルダと同じパスにファイルを置く＝Directory.CreateDirectory が必ず失敗する
+        var blockedFolder = Path.Combine(
+            Path.GetTempPath(),
+            $"QuickERTests-blocked-{Guid.NewGuid():N}"
+        );
+        File.WriteAllText(blockedFolder, "block");
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                WpfApplicationTestSupport.EnsureApplicationResources();
+
+                var keyStore = new InMemoryApiKeyStore();
+                var viewModel = new MockGenerationDialogViewModel(
+                    new StubDiagramSource(new ErDiagram()),
+                    new SyncUiDispatcher(),
+                    files: null,
+                    settingsStore: new AiSettingsStore(blockedFolder),
+                    apiKeyEngineFactory: null,
+                    codexEngineFactory: null,
+                    claudeCodeEngineFactory: null,
+                    copilotEngineFactory: null,
+                    mockProjectGenerator: generator,
+                    apiKeyLoader: keyStore.Load,
+                    apiKeySaver: keyStore.Save
+                );
+                viewModel.IsMockGenInProgress = true;
+
+                var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                    new MockGenerationDialog(viewModel, reporter)
+                );
+                dialog.Closed += (_, _) => closed = true;
+                dialog.ForceClose();
+            }
+            catch (Exception ex)
+            {
+                captured = ex;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        thread.Join();
+
+        try
+        {
+            captured.Should().BeNull();
+            reporter.Steps.Should().Equal("MockGeneration.SaveSettings");
+            generator.Interrupted.Should().BeTrue("保存の失敗より前の中断は完了していること");
+            closed.Should().BeTrue("保存の失敗でウィンドウが閉じ残ってはいけない");
+        }
+        finally
+        {
+            File.Delete(blockedFolder);
+        }
     }
 }

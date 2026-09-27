@@ -34,6 +34,16 @@ public enum DocumentLoadError
     /// 手で直す以外に復旧手段が無いため、表示側は必ずその内容まで見せること。
     /// </remarks>
     DuplicateId,
+
+    /// <summary>
+    /// 保存形式としては妥当だが、名前・型のような<b>推測で埋められない必須の文字列</b>に
+    /// 明示的な <c>null</c> が書かれており図として扱えなかった
+    /// </summary>
+    /// <remarks>
+    /// 該当箇所（テーブル名・列名・プロパティ名）は <c>exception</c> のメッセージが名指しする。
+    /// <see cref="DuplicateId"/> と同じく手で直す以外に復旧手段が無いため、表示側は必ずその内容まで見せること。
+    /// </remarks>
+    MissingRequiredText,
 }
 
 /// <summary>ER 図を JSON ファイルへ保存・読み込みするトップレベルサービス</summary>
@@ -117,7 +127,8 @@ public static class JsonStorageService
     /// <summary>ER 図の保存形式として妥当か検証したうえでファイルから保存文書を読み込む</summary>
     /// <remarks>
     /// 検証は「読み取り → JSON 解析 → ルートが <c>Version</c>・<c>Schema</c> を持つ JSON オブジェクトか
-    /// → 逆直列化 → 版番号 → Id の重複」の順で、<see cref="JsonStorageService"/> の読込仕様に合わせ
+    /// → 逆直列化 → 版番号 → 必須文字列の明示 <c>null</c> → Id の重複」の順で、
+    /// <see cref="JsonStorageService"/> の読込仕様に合わせ
     /// キー名の大文字小文字は区別する。無関係な JSON（例 <c>package.json</c>）を「空図」として読み込み、
     /// 誤解釈・上書きするのを防ぐ。
     /// <para>
@@ -137,8 +148,9 @@ public static class JsonStorageService
     /// <param name="error">失敗の種別（成功時は <see cref="DocumentLoadError.None"/>）</param>
     /// <param name="exception">
     /// 失敗の原因となった例外。<see cref="DocumentLoadError.ReadFailed"/>・
-    /// <see cref="DocumentLoadError.InvalidJson"/>・<see cref="DocumentLoadError.DuplicateId"/>
-    /// のときだけ非 null で、形式検証で弾いた場合と成功時は null。
+    /// <see cref="DocumentLoadError.InvalidJson"/>・<see cref="DocumentLoadError.DuplicateId"/>・
+    /// <see cref="DocumentLoadError.MissingRequiredText"/> のときだけ非 null で、
+    /// 形式検証で弾いた場合と成功時は null。
     /// </param>
     /// <returns>読み込めた場合は <c>true</c></returns>
     public static bool TryLoad(
@@ -199,6 +211,15 @@ public static class JsonStorageService
             return false;
         }
 
+        // 名前・型の明示 null は修復せず拒否する（理由は FindMissingRequiredText）。
+        // Id の重複より先に見るのは、名前が null のままでは重複の説明が場所を名指しできないため
+        if (FindMissingRequiredText(loaded.Schema) is { } missing)
+        {
+            error = DocumentLoadError.MissingRequiredText;
+            exception = new InvalidDataException(missing);
+            return false;
+        }
+
         // Id の重複は修復せず拒否する（理由は FindDuplicateId）
         if (FindDuplicateId(loaded.Schema) is { } duplicate)
         {
@@ -209,6 +230,86 @@ public static class JsonStorageService
 
         document = loaded;
         return true;
+    }
+
+    /// <summary>
+    /// 名前・型のような「推測で埋められない必須の文字列」に明示的な <c>null</c> が書かれていないか調べ、
+    /// 最初に見つかった箇所の説明を返す（無ければ null）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>修復はしない。</b>これらのプロパティはモデル側が非 NULL 許容で宣言しており、アプリ側に
+    /// <c>null</c> を書く経路は無い（GUI・MCP ツール・各種取込・C# リバースはいずれも文字列を組み立てて
+    /// 渡し、NULL 許容の綻びはビルドが警告＝エラーとして止める）。起こるのは JSON の手編集だけなので、
+    /// 既定値で埋めて意味を推測するより、どこが <c>null</c> かを名指しして読込を断るほうが直せる。
+    /// </para>
+    /// <para>
+    /// 対象は<b>推測で埋めると図の意味が変わるもの</b>だけ＝テーブル名・列名・<b>列の型</b>・
+    /// クエリ名・パラメータ名・射影フィールド名の 6 つ。列の型を既定値（<c>int</c>）で埋めるのは、
+    /// 名前を勝手に付け直すのと同じ性質の書き換えになる。
+    /// 説明・メモのような任意の文字列は空文字へ修復する（<see cref="Normalize"/>）＝埋めても意味が変わらない。
+    /// 対象 DBMS も従来どおり既定値へ修復する（方言は図の意味でなく出力先の指定で、既定が定まっている）。
+    /// </para>
+    /// <para>
+    /// 名前が <c>null</c> のものは名指しできないため、現れた順の番号（1 始まり）で位置を示す。
+    /// 説明文は例外メッセージと同じ扱いで英語固定とし、利用者向けの見出しは表示側が付ける
+    /// （<see cref="FindDuplicateId"/> と同じ規約）。
+    /// </para>
+    /// </remarks>
+    private static string? FindMissingRequiredText(ErDiagram schema)
+    {
+        for (var entityIndex = 0; entityIndex < schema.Entities.Count; entityIndex++)
+        {
+            var entity = schema.Entities[entityIndex];
+
+            if (entity.TableName is null)
+            {
+                return $"\"TableName\" is null for entity #{entityIndex + 1}.";
+            }
+
+            for (var columnIndex = 0; columnIndex < entity.Columns.Count; columnIndex++)
+            {
+                var column = entity.Columns[columnIndex];
+
+                if (column.Name is null)
+                {
+                    return $"\"Name\" is null for column #{columnIndex + 1} of table '{entity.TableName}'.";
+                }
+
+                if (column.DataType is null)
+                {
+                    return $"\"DataType\" is null for column '{column.Name}' of table '{entity.TableName}'.";
+                }
+            }
+        }
+
+        for (var queryIndex = 0; queryIndex < schema.Queries.Count; queryIndex++)
+        {
+            var query = schema.Queries[queryIndex];
+
+            if (query.Name is null)
+            {
+                return $"\"Name\" is null for query #{queryIndex + 1}.";
+            }
+
+            for (var index = 0; index < query.Parameters.Count; index++)
+            {
+                if (query.Parameters[index].Name is null)
+                {
+                    return $"\"Name\" is null for parameter #{index + 1} of query '{query.Name}'.";
+                }
+            }
+
+            for (var index = 0; index < query.Fields.Count; index++)
+            {
+                if (query.Fields[index].Name is null)
+                {
+                    return $"\"Name\" is null for projection field #{index + 1} of query '{query.Name}'.";
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>エンティティ Id・列 Id の重複を探し、最初に見つかった重複の説明を返す（無ければ null）</summary>
@@ -347,10 +448,15 @@ public static class JsonStorageService
     /// <c>null</c> で上書きし、以降の <c>Count</c> 参照などが <see cref="NullReferenceException"/> になる。
     /// 手書き・外部ツール生成の図ファイルでも起こり得るため、読込時に既定値へ寄せて修復する。
     /// <para>
-    /// 方針は「修復であって拒否ではない」。<c>System.Text.Json</c> の
-    /// <c>RespectNullableAnnotations</c> による例外化は、キー欠落・古い形式もそのまま読める
-    /// という <see cref="Options"/> の互換契約を壊すため採らない。図として妥当かどうか
-    /// （無関係な JSON でないか）の判定は、修復前段の形式検証（<see cref="TryLoad"/>）が担う。
+    /// <c>System.Text.Json</c> の <c>RespectNullableAnnotations</c> による例外化は、キー欠落・
+    /// 古い形式もそのまま読めるという <see cref="Options"/> の互換契約を壊すため採らない。
+    /// </para>
+    /// <para>
+    /// <b>ここで修復するのは「埋めても図の意味が変わらないもの」だけ</b>＝コレクション（空へ）・
+    /// 説明とメモ（空文字へ）・対象 DBMS（既定の方言へ）。名前・型のような<b>推測で埋めると
+    /// 図の意味が変わるもの</b>は修復せず、<see cref="TryLoad"/> の
+    /// <see cref="FindMissingRequiredText"/> が場所を名指しして拒否する。
+    /// 図として妥当かどうか（無関係な JSON でないか）の判定も <see cref="TryLoad"/> が担う。
     /// </para>
     /// </remarks>
     private static DiagramDocument Normalize(DiagramDocument document)
@@ -377,8 +483,17 @@ public static class JsonStorageService
 
         foreach (var entity in schema.Entities)
         {
+            // 説明・メモは空文字が正当な値なので、明示 null は空文字へ寄せる（意味は変わらない）
+            entity.Description ??= string.Empty;
+            entity.Memo ??= string.Empty;
+
             entity.Columns = Compact(entity.Columns);
             entity.UniqueConstraints = Compact(entity.UniqueConstraints);
+
+            foreach (var column in entity.Columns)
+            {
+                column.Description ??= string.Empty;
+            }
 
             // 主キーの順序も値型リストのため、リスト自体の null だけ既定値（＝列宣言順）へ寄せる
             entity.PrimaryKeyColumnIds ??= new List<Guid>();
@@ -392,6 +507,7 @@ public static class JsonStorageService
 
         foreach (var query in schema.Queries)
         {
+            query.Description ??= string.Empty;
             query.Parameters = Compact(query.Parameters);
             query.OrderBy = Compact(query.OrderBy);
             query.Fields = Compact(query.Fields);

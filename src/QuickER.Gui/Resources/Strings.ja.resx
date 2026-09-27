@@ -705,6 +705,9 @@
   <data name="Open_DuplicateId" xml:space="preserve">
     <value>'{0}' を開けませんでした。複数のテーブルまたは列が同じ識別子を使っており、この図は保存できません。JSON を手で編集して、それぞれに別の識別子を与えてください。現在の図はそのまま維持しました。</value>
   </data>
+  <data name="Open_MissingRequiredText" xml:space="preserve">
+    <value>'{0}' を開けませんでした。必須の名前または型が空（null）のため、この図は読み込めません。JSON を手で編集して値を入れてください。現在の図はそのまま維持しました。</value>
+  </data>
   <data name="Save_Failed" xml:space="preserve">
     <value>保存できませんでした。変更は未保存のまま維持しています。もう一度保存するか、別の場所へ保存してください。</value>
   </data>
@@ -737,6 +740,12 @@
   </data>
   <data name="Export_Completed" xml:space="preserve">
     <value>{0}の出力が完了しました。</value>
+  </data>
+  <data name="Export_PngScaledDownHeader" xml:space="preserve">
+    <value>図が大きすぎるため、縮小して保存しました:</value>
+  </data>
+  <data name="Export_PngScaledDown" xml:space="preserve">
+    <value>実寸: {0} x {1} px  ->  保存: {2} x {3} px</value>
   </data>
   <data name="Export_OmissionsHeader" xml:space="preserve">
     <value>次の情報はこの形式では保存されません:</value>

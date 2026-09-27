@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using QuickER.AI;
 using QuickER.AI.Mock.Resources;
 using QuickER.AI.UI;
+using QuickER.Gui.Abstractions;
 
 namespace QuickER.AI.Mock;
 
@@ -34,6 +35,9 @@ public partial class MockGenerationDialog : Window
     /// <summary>アプリ終了などで強制クローズ中かどうか</summary>
     private bool _isForceClosing;
 
+    /// <summary>終了の連鎖で受け止めた失敗の記録先</summary>
+    private readonly IShutdownFailureReporter _shutdownFailureReporter;
+
     /// <summary>「再確認」（Codex）コマンド</summary>
     public IAsyncRelayCommand CodexRefreshCommand { get; }
 
@@ -44,10 +48,20 @@ public partial class MockGenerationDialog : Window
     public IAsyncRelayCommand CopilotRefreshCommand { get; }
 
     /// <summary>注入された ViewModel を結び付けてウィンドウを生成する</summary>
-    public MockGenerationDialog(MockGenerationDialogViewModel viewModel)
+    /// <param name="viewModel">このウィンドウの ViewModel</param>
+    /// <param name="shutdownFailureReporter">
+    /// <see cref="ForceClose"/> の各段で受け止めた失敗の記録先（ランチャーが DI から渡す）
+    /// </param>
+    public MockGenerationDialog(
+        MockGenerationDialogViewModel viewModel,
+        IShutdownFailureReporter shutdownFailureReporter
+    )
     {
+        ArgumentNullException.ThrowIfNull(shutdownFailureReporter);
+
         InitializeComponent();
         ViewModel = viewModel;
+        _shutdownFailureReporter = shutdownFailureReporter;
         DataContext = ViewModel;
 
         var dispatcher = new WpfUiDispatcher();
@@ -155,17 +169,36 @@ public partial class MockGenerationDialog : Window
 
     /// <summary>アプリ終了時などにウィンドウを実際に閉じる</summary>
     /// <remarks>
+    /// <para>
     /// 閉じる前に、(1) 実行中の処理（モックプロジェクト生成・会話ターン）を打ち切り
     /// (2) 会話中のエンジンを破棄して常駐する子プロセス（codex app-server・copilot ランタイム）まで止める。
     /// 中断だけでは、処理を実行していない常駐プロセスが残るため、両方を通す。
+    /// </para>
+    /// <para>
+    /// 各段は <see cref="ShutdownSteps.Run"/> で独立して受け止める。とくに設定保存は
+    /// ディスクフル・権限などで落ちうるが、そこで連鎖が止まるとエンジンの破棄へ届かず
+    /// 常駐プロセスが孤児として残る。<see cref="Window.Close"/> 自体の失敗も同じ理由で受け止める。
+    /// </para>
     /// </remarks>
     public void ForceClose()
     {
         _isForceClosing = true;
-        ViewModel.RequestInterrupt();
-        ViewModel.SaveSettings();
-        ViewModel.ShutdownEngines(EngineShutdownTimeout);
-        Close();
+        ShutdownSteps.Run(
+            _shutdownFailureReporter,
+            "MockGeneration.RequestInterrupt",
+            ViewModel.RequestInterrupt
+        );
+        ShutdownSteps.Run(
+            _shutdownFailureReporter,
+            "MockGeneration.SaveSettings",
+            ViewModel.SaveSettings
+        );
+        ShutdownSteps.Run(
+            _shutdownFailureReporter,
+            "MockGeneration.ShutdownEngines",
+            () => ViewModel.ShutdownEngines(EngineShutdownTimeout)
+        );
+        ShutdownSteps.Run(_shutdownFailureReporter, "MockGeneration.Close", Close);
     }
 
     /// <summary>プレビュー要求を受けて、モックフォルダ内の実ファイルをプレビューへ Navigate する</summary>

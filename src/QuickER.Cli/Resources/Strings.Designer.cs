@@ -520,6 +520,11 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_SchemaDuplicateId", resourceCulture);
             }
         }
+        public static string Cli_SchemaMissingRequiredText {
+            get {
+                return ResourceManager.GetString("Cli_SchemaMissingRequiredText", resourceCulture);
+            }
+        }
         public static string Cli_ImportWarningColumnTypeNotEmittable {
             get {
                 return ResourceManager.GetString("Cli_ImportWarningColumnTypeNotEmittable", resourceCulture);

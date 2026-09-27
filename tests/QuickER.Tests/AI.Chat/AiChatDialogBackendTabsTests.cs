@@ -60,7 +60,7 @@ public class AiChatDialogBackendTabsTests
             try
             {
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm)
+                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
                 );
 
                 // 画面外＋非アクティブで Show し、テスト実行中に開発者のデスクトップを妨げない
@@ -144,7 +144,7 @@ public class AiChatDialogBackendTabsTests
             try
             {
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
-                    new AiChatDialog(vm)
+                    new AiChatDialog(vm, new RecordingShutdownFailureReporter())
                 );
 
                 // 画面外＋非アクティブで Show し、テスト実行中に開発者のデスクトップを妨げない

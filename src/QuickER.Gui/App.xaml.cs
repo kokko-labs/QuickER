@@ -63,6 +63,12 @@ namespace QuickER
             services.AddSingleton<IAppDialogService, WpfAppDialogService>();
             services.AddSingleton<IFileDialogService, WpfFileDialogService>();
 
+            // 終了の連鎖で受け止めた失敗の記録先（shutdown-*.log）。
+            // 省略可能引数を持つため、コンストラクタ選択を DI に委ねず明示的に組み立てる
+            services.AddSingleton<IShutdownFailureReporter>(
+                _ => new CrashLogShutdownFailureReporter()
+            );
+
             // フィーチャーモジュールへ ER 図操作能力を提供する契約実装（MainViewModel を包む）
             services.AddSingleton<IErDiagramHost>(sp => new MainViewModelErDiagramHost(
                 sp.GetRequiredService<MainViewModel>()
@@ -134,14 +140,19 @@ namespace QuickER
 
             var window = _provider.GetRequiredService<MainWindow>();
 
-            // メインウィンドウ終了時に各モジュールへ後始末（モードレスウィンドウの強制終了など）を通知する
+            // 終了条件 OnMainWindowClose（App.xaml）が見るのはこのプロパティ。WPF は最初に構築された
+            // Window を自動で入れるため今は放っておいても同じだが、モジュールの初期化中に別の Window
+            // 派生（詳細ダイアログ等）が先に作られると、そのダイアログを閉じた瞬間にアプリが終わる。
+            // 暗黙の前提に乗せず、ここで明示する
+            MainWindow = window;
+
+            // メインウィンドウ終了時に各モジュールへ後始末（モードレスウィンドウの強制終了など）を通知する。
+            // 1 つのモジュールの失敗で後続へ届かなくなると常駐する子プロセスが孤児として残るため、
+            // 受け止めを持つ FeatureModuleShutdown 経由で回す
+            var shutdownFailureReporter = _provider.GetRequiredService<IShutdownFailureReporter>();
+
             window.Closing += (_, _) =>
-            {
-                foreach (var module in modules)
-                {
-                    module.OnMainWindowClosing(_provider);
-                }
-            };
+                FeatureModuleShutdown.CloseAll(modules, _provider, shutdownFailureReporter);
 
             window.Show();
 

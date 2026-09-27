@@ -1,4 +1,5 @@
 using QuickER.Extensibility;
+using QuickER.Gui.Abstractions;
 
 namespace QuickER.AI.Chat;
 
@@ -26,13 +27,24 @@ public sealed class AiChatLauncher : IAiChatLauncher
 {
     private readonly IErDiagramHost _host;
 
+    /// <summary>終了の連鎖で受け止めた失敗の記録先（ダイアログへ引き渡す）</summary>
+    private readonly IShutdownFailureReporter _shutdownFailureReporter;
+
     /// <summary>シングルトンの AI チャットウィンドウ（未生成時は null）</summary>
     private AiChatDialog? _dialog;
 
     /// <summary>操作対象の ER 図能力を提供する <see cref="IErDiagramHost"/> を注入して生成する</summary>
-    public AiChatLauncher(IErDiagramHost host)
+    /// <param name="host">操作対象の ER 図能力</param>
+    /// <param name="shutdownFailureReporter">
+    /// アプリ終了時の後始末で受け止めた失敗の記録先。必須依存にして、登録漏れを起動時の例外で表に出す
+    /// （黙って捨てる既定を置くと、終了の連鎖が壊れても誰も気付けない）
+    /// </param>
+    public AiChatLauncher(IErDiagramHost host, IShutdownFailureReporter shutdownFailureReporter)
     {
+        ArgumentNullException.ThrowIfNull(shutdownFailureReporter);
+
         _host = host;
+        _shutdownFailureReporter = shutdownFailureReporter;
     }
 
     /// <inheritdoc />
@@ -42,7 +54,7 @@ public sealed class AiChatLauncher : IAiChatLauncher
         {
             var chatHost = new ErDiagramHostChatAdapter(_host);
             var viewModel = new AiChatDialogViewModel(chatHost);
-            _dialog = new AiChatDialog(viewModel);
+            _dialog = new AiChatDialog(viewModel, _shutdownFailureReporter);
         }
 
         _dialog.Owner = null;
