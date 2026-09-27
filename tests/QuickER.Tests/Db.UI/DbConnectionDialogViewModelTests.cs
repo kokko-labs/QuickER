@@ -1229,4 +1229,160 @@ public class DbConnectionDialogViewModelTests : IDisposable
     /// <summary>全方言を登録した取込モードの ViewModel を生成する</summary>
     private DbConnectionDialogViewModel CreateAllDialectVm(SqlConnectionProfileStore store) =>
         new(RegistryWithAllDialects, DbConnectionDialogMode.Import, fixedProvider: null, store);
+
+    // ---------------- 接続情報ファイルを読み取れないとき（MS1） ----------------
+
+    /// <summary>接続情報ファイルを排他で掴んだまま操作させるためのハンドルを開く</summary>
+    /// <remarks>
+    /// 読み取り失敗の再現は <see cref="FileShare.None"/> で開いておくだけで決定的に作れる
+    /// （人工的な並行・時間依存に頼らない）。開くのはファイルが既にある状態でだけ。
+    /// </remarks>
+    private static FileStream LockConnectionsFile(SqlConnectionProfileStore store) =>
+        new(store.ConnectionsPath, FileMode.Open, FileAccess.Read, FileShare.None);
+
+    /// <summary>保存が中止されたときに、状態メッセージで知らせて何も変えないことを検証する（MS1）。</summary>
+    /// <remarks>
+    /// 受け止めないと <see cref="ConnectionProfileStoreUnavailableException"/> がそのまま
+    /// WPF の未処理例外になってアプリが落ちる。利用者が明示的に頼んだ操作なので、
+    /// このダイアログの他の失敗と同じくステータス行で伝える。
+    /// </remarks>
+    [Fact(DisplayName = "SaveProfile: 接続情報ファイルを読み取れないときはステータスで知らせる")]
+    public void SaveProfile_WhenStoreUnavailable_ReportsStatusWithoutLosingProfiles()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService());
+        vm.Host = "new-server";
+        vm.Database = "new-db";
+        vm.ProfileName = "新しい接続";
+
+        using (LockConnectionsFile(store))
+        {
+            vm.SaveProfileCommand.Execute(null);
+
+            vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileStoreUnavailable);
+            vm.Profiles.Should()
+                .ContainSingle("一覧は空にしない")
+                .Which.Profile.Name.Should()
+                .Be("本番DB");
+        }
+
+        store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+    }
+
+    /// <summary>削除が中止されたときに、状態メッセージで知らせて選択も一覧も保つことを検証する（MS1）。</summary>
+    [Fact(DisplayName = "DeleteProfile: 接続情報ファイルを読み取れないときはステータスで知らせる")]
+    public void DeleteProfile_WhenStoreUnavailable_ReportsStatusAndKeepsSelection()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService { ConfirmResult = true });
+        vm.SelectedProfileItem = vm.Profiles.Single();
+
+        using (LockConnectionsFile(store))
+        {
+            vm.DeleteProfileCommand.Execute(null);
+
+            vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileStoreUnavailable);
+            vm.SelectedProfile.Should().NotBeNull("削除していないので選択も外さない");
+            vm.Profiles.Should().ContainSingle();
+        }
+
+        store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+    }
+
+    /// <summary>名前の変更が中止されたときに、名前を書き換えずステータスで知らせることを検証する（MS1）。</summary>
+    /// <remarks>
+    /// 名前の書き換えは保存の前に行われるため、受け止めるだけでは「保存されていない名前が画面にだけ残る」。
+    /// 中止したら表示も元へ戻す。
+    /// </remarks>
+    [Fact(DisplayName = "RenameProfile: 接続情報ファイルを読み取れないときは名前も書き換えない")]
+    public void RenameProfile_WhenStoreUnavailable_RollsBackDisplayedName()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService());
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.ProfileName = "本番DB（東京）";
+
+        using (LockConnectionsFile(store))
+        {
+            vm.RenameProfileCommand.Execute(null);
+
+            vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileStoreUnavailable);
+            vm.Profiles.Single()
+                .Profile.Name.Should()
+                .Be("本番DB", "保存できていない名前を画面に残さない");
+        }
+
+        store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+    }
+
+    /// <summary>
+    /// 名前の衝突を置き換える経路でも、読み取れないときは<b>どちらのプロファイルも消えない</b>ことを
+    /// 検証する（MS1）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// この経路は同じファイルへ 2 回書く（衝突相手の削除 → 置き換え）。実装では 1 つの <c>try</c> に
+    /// まとめて 1 つ目で止まったら 2 つ目へ進まないようにしてある——進むと、同じ名前のプロファイルが
+    /// 2 つ並んで「保存がどちらを指すか決まらない」状態になるため。
+    /// </para>
+    /// <para>
+    /// <b>ここで固定できるのは「どちらも消えない」まで。</b>「削除だけ成功して置き換えが失敗する」
+    /// 中間状態は、読み取りが 1 回目だけ失敗して 2 回目は成功するという一過性の並びでしか起きず、
+    /// ストアに差し替え口が無い現状では決定的に再現できない（人工的な時間依存のテストは書かない）。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "RenameProfile: 読み取れないときは衝突相手も対象も消えない")]
+    public void RenameProfile_WhenStoreUnavailableWithConflict_KeepsBothProfiles()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        SeedProfile(store, "旧本番DB");
+        var vm = CreateVm(store, new StubDialogService { ConfirmResult = true });
+        vm.SelectedProfileItem = vm.Profiles.Single(item => item.Profile.Name == "旧本番DB");
+        vm.ProfileName = "本番DB";
+
+        using (LockConnectionsFile(store))
+        {
+            vm.RenameProfileCommand.Execute(null);
+
+            vm.StatusMessage.Should().Be(Strings.DbConnection_ProfileStoreUnavailable);
+        }
+
+        store
+            .LoadAll()
+            .Select(profile => profile.Name)
+            .Should()
+            .BeEquivalentTo(new[] { "本番DB", "旧本番DB" }, "どちらも消えていない");
+    }
+
+    /// <summary>
+    /// OK 確定は、前回接続を記録できなくても黙って続行することを検証する（MS1）。
+    /// </summary>
+    /// <remarks>
+    /// ここでの保存は確定の「ついで」の記録で、書けなくてもファイルの中身は前のまま＝何も失われない。
+    /// 記録できないことを理由に接続そのものを止めるのは釣り合わないため、確定は通す。
+    /// </remarks>
+    [Fact(DisplayName = "Ok: 前回接続を記録できなくても確定は続行する")]
+    public void Ok_WhenStoreUnavailable_StillConfirms()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService());
+        vm.Host = "srv";
+        vm.Database = "db";
+        bool? closed = null;
+        vm.CloseAction = result => closed = result;
+
+        using (LockConnectionsFile(store))
+        {
+            vm.OkCommand.Execute(null);
+        }
+
+        closed.Should().BeTrue("記録できないだけで確定は妨げない");
+        vm.Result.Should().NotBeNull();
+        store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+    }
 }

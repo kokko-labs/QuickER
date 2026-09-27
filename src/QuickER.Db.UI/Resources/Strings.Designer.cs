@@ -426,6 +426,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string DbConnection_ProfileStoreUnavailable {
+            get {
+                return ResourceManager.GetString("DbConnection_ProfileStoreUnavailable", resourceCulture);
+            }
+        }
+        
         public static string DbConnection_SqliteFileFilter {
             get {
                 return ResourceManager.GetString("DbConnection_SqliteFileFilter", resourceCulture);

@@ -98,6 +98,8 @@ Saving over the profile you loaded is not confirmed.
 Use the "Rename" button when all you want is a different name.
 It changes only the name of the selected profile to the one in the box, keeping its connection settings and its saved password.
 Typing a new name and pressing "Save" stores a separate profile instead of renaming.
+Saving, renaming, and deleting all re-read `connections.json` before writing it back. When that read fails, for instance because another program is holding the file, the operation is **cancelled without writing anything** and says so in the status line (the saved profiles are left untouched; try again in a moment).
+If the file turns out to be corrupted, it is moved aside once to `connections.json.corrupt` before being overwritten.
 
 ### What gets imported
 

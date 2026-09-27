@@ -119,7 +119,10 @@ Select a relationship and the properties panel lets you edit the following.
   The canvas takes over the space, and if you have resized the property panel by dragging, that width comes back when you show it again.
   Selecting an entity while the panel is hidden does not reopen it.
   Both states are restored on the next launch
-- **Auto-arrange**: the toolbar's "Grid," "Tree," and "Free" (places entities with a force-directed model, arranging them so that relationship lines come close to horizontal or vertical), plus "Auto Width" (adjusts widths so column names and types do not overlap)
+- **Auto-arrange**: the toolbar's "Grid," "Tree," and "Free" (places entities with a force-directed model, arranging them so that relationship lines come close to horizontal or vertical), plus "Auto Width" (adjusts widths so column names and types do not overlap).
+  "Grid" searches for an arrangement with fewer crossing relationship lines, but the search has a cap on how many checks it may make and **stops early on large diagrams**, so that a diagram with hundreds of tables does not keep you waiting.
+  The cap counts checks rather than time, so the same diagram always comes out the same way.
+  At sizes where it stops early (measured from around 300 tables) more crossings remain, so move things by hand afterwards or try "Tree" if that bothers you
 
 ## Multi-select and bulk operations
 
