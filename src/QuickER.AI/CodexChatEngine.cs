@@ -367,6 +367,13 @@ public sealed class CodexChatEngine : IErChatEngine
         }
 
         Interlocked.Exchange(ref _turnInProgress, 1);
+
+        // 前のターン（完了済み）の Id を持ち越さない。StartTurnAsync が新しい Id を返すまでの間に
+        // 中断が来ると、実行中フラグは立っているのに Id は古いままで、完了済みのターンへ
+        // interrupt を送ってしまう（失敗すれば App Server ごと止めて会話の文脈を捨てる）。
+        // ここで消しておけば、その隙間の中断は InterruptAsync の入口で何もせず戻る
+        // （中断は効かないが会話は壊れない。利用者はもう一度押せば、Id が入った後の中断として効く）
+        _currentTurnId = null;
         StatusChanged?.Invoke(this, Strings.Codex_Processing);
 
         try
@@ -432,7 +439,13 @@ public sealed class CodexChatEngine : IErChatEngine
     /// </remarks>
     public async Task InterruptAsync(CancellationToken cancellationToken = default)
     {
-        if (_currentThreadId is null || _currentTurnId is null)
+        // 実行中のターンが無ければ送らない。_currentTurnId は正常完了では消えないので、
+        // これが無いと「完了した直後に中断を押す」だけで完了済みのターンへ interrupt が飛ぶ
+        if (
+            _currentThreadId is null
+            || _currentTurnId is null
+            || Volatile.Read(ref _turnInProgress) == 0
+        )
         {
             return;
         }
@@ -445,6 +458,13 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         catch (Exception ex)
         {
+            // 送っている間にターンが完了していたら、失敗しても壊すものは無い。
+            // ここで強制停止すると、正常に終わった会話の文脈を中断の失敗を理由に捨てることになる
+            if (Volatile.Read(ref _turnInProgress) == 0)
+            {
+                return;
+            }
+
             StatusChanged?.Invoke(this, string.Format(Strings.Codex_InterruptFailed, ex.Message));
             await ForceStopAfterFailedInterruptAsync().ConfigureAwait(false);
         }
@@ -741,39 +761,25 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         else
         {
-            try
-            {
-                var argumentsJson = request.Arguments.GetRawText();
-                (resultText, success) = _dispatcher.Invoke(() =>
-                    _toolHost.Execute(request.Tool, argumentsJson)
-                );
-            }
-            catch (Exception ex)
-            {
-                // ツール結果は AI へ返る機械向け文言のため英語で固定する。
-                // 例外を無音で消さず、Claude Code / Copilot と同じ「失敗のツール結果」の形で
-                // 返すことで、AI にも成否が正しく伝わりターンが詰まらない（3 エンジンで形を揃える）
-                resultText = $"The tool '{request.Tool}' threw an exception: {ex.Message}";
-                success = false;
-            }
+            // 例外を「失敗のツール結果」へ畳む作法は 4 エンジン共通（AI にも成否が正しく伝わり、
+            // 1 件の失敗でターンが詰まらない）
+            (resultText, success) = ChatToolInvocation.Execute(
+                _toolHost,
+                _dispatcher,
+                request.Tool,
+                () => request.Arguments.GetRawText(),
+                rethrowCancellation: false
+            );
         }
 
-        // 活動通知は応答送信より先に呼ぶが、購読側（UI）の例外で応答送信まで巻き込まれると
-        // AI がツール結果を待ち続けてターンが詰まる。通知だけを try で囲み、応答送信は必ず行う
-        try
-        {
-            ToolActivityReceived?.Invoke(
-                this,
-                new ErChatToolActivity(request.Tool, resultText, success)
-            );
-        }
-        catch (Exception ex)
-        {
-            StatusChanged?.Invoke(
-                this,
-                string.Format(Strings.Codex_ToolResponseSendFailed, ex.Message)
-            );
-        }
+        // 活動通知は応答送信より先に呼ぶ。購読側（UI）の例外で応答送信まで巻き込まれると
+        // AI がツール結果を待ち続けてターンが詰まるため、保護して呼ぶ
+        ChatToolInvocation.Notify(
+            ToolActivityReceived,
+            this,
+            new ErChatToolActivity(request.Tool, resultText, success),
+            message => StatusChanged?.Invoke(this, message)
+        );
 
         await _client
             .RespondToDynamicToolCallAsync(request.RequestId, resultText, success)
@@ -784,7 +790,9 @@ public sealed class CodexChatEngine : IErChatEngine
     /// <remarks>
     /// チャット経路は approvalPolicy=never かつ ER 図の操作は dynamicTools（別チャネル）で行うため、
     /// ここへ承認要求が届くのは「ER 図編集に不要な Codex ネイティブ操作」（コマンド実行・ファイル変更・
-    /// 権限昇格）に限られる。作業フォルダはアプリ自身のカレントディレクトリなので、無音の自動承認は危険。
+    /// 権限昇格）に限られる。作業フォルダは会話ごとの一時フォルダ（<c>%TEMP%\QuickER\codex\&lt;guid&gt;</c>）で
+    /// サンドボックスは <c>read-only</c> だが、それでも無音の自動承認はしない
+    /// （承認要求が届くこと自体が想定外の操作を意味し、黙って通すと何が起きたか残らないため）。
     /// 拒否したうえで <see cref="ToolActivityReceived"/> により会話へ記録し、ユーザーに見える形で残す
     /// </remarks>
     private void OnApprovalRequested(object? sender, CodexApprovalRequest e)
@@ -803,9 +811,13 @@ public sealed class CodexChatEngine : IErChatEngine
     {
         var kind = DescribeApprovalKind(request.Method);
 
-        ToolActivityReceived?.Invoke(
+        // 応答送信の前に通知するので、購読側の例外で応答まで巻き込まれないよう保護する
+        // （ツール実行の通知と同じ作法）
+        ChatToolInvocation.Notify(
+            ToolActivityReceived,
             this,
-            new ErChatToolActivity(kind, Strings.Codex_ApprovalDeclined, false)
+            new ErChatToolActivity(kind, Strings.Codex_ApprovalDeclined, false),
+            message => StatusChanged?.Invoke(this, message)
         );
 
         try

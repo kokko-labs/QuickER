@@ -37,6 +37,19 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     /// <summary>InterruptTurnAsync で投げる例外（非 null なら中断要求の失敗を模擬する）</summary>
     public Exception? InterruptException { get; set; }
 
+    /// <summary>InterruptTurnAsync の本体に入った時点で実行するフック（要求中のターン完了を模擬する）</summary>
+    public Action? OnInterruptRequested { get; set; }
+
+    /// <summary>非 null なら StartTurnAsync がこのタスクの完了まで待つ（ターン開始中の状態を作る）</summary>
+    public Task? StartTurnGate { get; set; }
+
+    /// <summary>StartTurnAsync に入った時点で完了する（待たせた状態へ確実に到達したことの合図）</summary>
+    /// <remarks>
+    /// <see cref="StartTurnGate"/> だけでは、送信タスクが最初の await で戻った時点と、実際に
+    /// 開始処理へ入った時点を区別できない。「開始中」を狙うテストはこれを待ってから操作する。
+    /// </remarks>
+    public TaskCompletionSource StartTurnEntered { get; } = new();
+
     /// <summary>StartThreadAsync が呼ばれた回数（接続断後に新しいスレッドを開き直すことの検証用）</summary>
     public int StartThreadCount { get; private set; }
 
@@ -169,12 +182,19 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         return Task.FromResult(new CodexThreadInfo { Id = "thr_test", Preview = string.Empty });
     }
 
-    public Task<CodexTurnInfo> StartTurnAsync(
+    public async Task<CodexTurnInfo> StartTurnAsync(
         string threadId,
         string prompt,
         CancellationToken cancellationToken = default
     )
     {
+        StartTurnEntered.TrySetResult();
+
+        if (StartTurnGate is { } gate)
+        {
+            await gate.ConfigureAwait(false);
+        }
+
         LastTurnPrompt = prompt;
         TurnPrompts.Add(prompt);
         StartTurnCount++;
@@ -193,7 +213,7 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
             RaiseTurnCompleted(status, error);
         }
 
-        return Task.FromResult(info);
+        return info;
     }
 
     public Task InterruptTurnAsync(
@@ -205,6 +225,7 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         InterruptTurnCount++;
         LastInterruptThreadId = threadId;
         LastInterruptTurnId = turnId;
+        OnInterruptRequested?.Invoke();
 
         if (InterruptException is not null)
         {

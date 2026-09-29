@@ -204,6 +204,11 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Chat_ToolActivityNotifyFailed {
+            get {
+                return ResourceManager.GetString("Chat_ToolActivityNotifyFailed", resourceCulture);
+            }
+        }
         public static string Chat_UnsupportedAttachment {
             get {
                 return ResourceManager.GetString("Chat_UnsupportedAttachment", resourceCulture);
@@ -342,11 +347,6 @@ namespace QuickER.AI.Resources {
             }
         }
 
-        public static string ClaudeCode_ToolActivityNotifyFailed {
-            get {
-                return ResourceManager.GetString("ClaudeCode_ToolActivityNotifyFailed", resourceCulture);
-            }
-        }
 
         public static string Codex_NotConnected {
             get {

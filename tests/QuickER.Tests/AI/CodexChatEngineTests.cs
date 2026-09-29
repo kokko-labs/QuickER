@@ -510,6 +510,162 @@ public class CodexChatEngineTests
         statuses.Should().BeEmpty();
     }
 
+    /// <summary>引数を持たないツール要求でも、応答を必ず返すことを検証する</summary>
+    /// <remarks>
+    /// <c>arguments</c> を持たない要求では <c>Arguments</c> が <c>default</c>（Undefined）になり、
+    /// <c>GetRawText()</c> が投げる。取り出しが例外の受け止めの外にあると、そこで抜けて
+    /// <b>応答を送らないまま</b>終わり、AI がツール結果を待ち続けてターンが詰まる。
+    /// </remarks>
+    [Fact(DisplayName = "引数を持たないツール要求でも応答を返す")]
+    public async Task DynamicToolCall_WithoutArguments_StillResponds()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+
+        // arguments を持たない要求（CodexAppServerClient の解析は Arguments = default にする）
+        client.RaiseDynamicToolCall(
+            new CodexDynamicToolCallRequest
+            {
+                RequestId = 1,
+                ThreadId = "thr_test",
+                TurnId = "turn_test",
+                CallId = "call_1",
+                Tool = "add_entity",
+            }
+        );
+
+        client.RespondToolCount.Should().Be(1, "応答を送らないと AI が待ち続ける");
+        client.LastToolSuccess.Should().BeFalse();
+        client.LastToolResult.Should().StartWith("The tool 'add_entity' threw an exception");
+    }
+
+    /// <summary>完了したターンへは中断を送らないことを検証する</summary>
+    /// <remarks>
+    /// <c>_currentTurnId</c> は正常完了では消えないため、実行中かどうかを見ないと「完了した直後に
+    /// 中断を押す」だけで完了済みのターンへ interrupt が飛ぶ。それがエラーなら App Server を止め、
+    /// 会話の文脈を失って次の送信が新しい会話になる（完了済みターンへの interrupt を Codex が
+    /// エラーにするかは未確認だが、どちらであってもこの防御は安全側に働く）。
+    /// </remarks>
+    [Fact(DisplayName = "完了したターンへは中断を送らない")]
+    public async Task InterruptAsync_AfterTurnCompleted_DoesNotSendInterrupt()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseTurnCompleted("completed");
+
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
+
+        client.InterruptTurnCount.Should().Be(0, "実行中のターンが無ければ送らない");
+        client.StopCount.Should().Be(0, "止める理由が無い");
+    }
+
+    /// <summary>実行中のターンへは従来どおり中断を送ることを検証する（正のアーム）</summary>
+    [Fact(DisplayName = "実行中のターンへは中断を送る")]
+    public async Task InterruptAsync_WhileTurnInProgress_SendsInterrupt()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
+
+        client.InterruptTurnCount.Should().Be(1);
+    }
+
+    /// <summary>新しいターンの開始中に中断が来ても、前のターンの Id へ送らないことを検証する</summary>
+    /// <remarks>
+    /// 実行中フラグを立ててから <c>StartTurnAsync</c> が新しい Id を返すまでの間、Id は前のターン
+    /// （完了済み）のままになる。この隙間で中断が来ると、実行中フラグを見る防御だけでは通り抜けて
+    /// しまうので、開始時に Id を消しておく。中断は効かないが会話は壊れない。
+    /// </remarks>
+    [Fact(DisplayName = "ターン開始中の中断は、前のターンの Id へ送らない")]
+    public async Task InterruptAsync_WhileTurnIsStarting_DoesNotSendToPreviousTurn()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+        client.RaiseTurnCompleted("completed");
+
+        // 2 回目の送信を「開始中」で止め、その最中に中断を掛ける
+        var gate = new TaskCompletionSource();
+        client.StartTurnGate = gate.Task;
+        var sending = engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
+
+        // 「開始中」へ確実に到達してから中断する（最初の await で戻っただけの状態と区別する）
+        await client.StartTurnEntered.Task;
+
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
+
+        client.InterruptTurnCount.Should().Be(0, "前のターンの Id へ送らない");
+        client.StopCount.Should().Be(0);
+
+        gate.SetResult();
+        await sending;
+    }
+
+    /// <summary>中断の送信中にターンが完了したら、その失敗で強制停止しないことを検証する</summary>
+    /// <remarks>
+    /// 終わったターンへの中断が失敗しても壊すものは無い。ここで App Server を止めると、
+    /// 正常に終わった会話の文脈を中断の失敗を理由に捨てることになる。
+    /// </remarks>
+    [Fact(DisplayName = "中断の送信中にターンが完了したら強制停止しない")]
+    public async Task InterruptAsync_WhenTurnCompletesDuringRequest_DoesNotForceStop()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            InterruptException = new TimeoutException("応答がありません"),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var statuses = new List<string>();
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        engine.StatusChanged += (_, m) => statuses.Add(m);
+
+        // 中断要求を処理している最中にターンが完了する状況を作る
+        client.OnInterruptRequested = () => client.RaiseTurnCompleted("completed");
+
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
+
+        client.InterruptTurnCount.Should().Be(1, "実行中だったので送ってはいる");
+        client.StopCount.Should().Be(0, "完了済みなら失敗しても止めない");
+        statuses.Should().BeEmpty("終わったターンの中断失敗を知らせても意味が無い");
+    }
+
     /// <summary>
     /// 中断要求が失敗（無応答のタイムアウト等）したら App Server を停止し、実行中ターンを失敗完了させる
     /// ことを検証する。停止までしないとターンが実行中のまま残る。
