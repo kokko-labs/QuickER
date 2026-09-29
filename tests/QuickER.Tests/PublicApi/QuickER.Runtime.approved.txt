@@ -28,6 +28,7 @@ public sealed class QuickER.Runtime.DbColumnMetaAttribute : System.Attribute
 public sealed class QuickER.Runtime.DbTableMetaAttribute : System.Attribute
     public .ctor()
     public string Description { get; set; }
+    public string[] PrimaryKeyOrder { get; set; }
 
 public sealed class QuickER.Runtime.DeclaredInstanceAttribute : System.Attribute
     public .ctor()

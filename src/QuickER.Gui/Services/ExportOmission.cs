@@ -42,4 +42,7 @@ public enum ExportOmissionKind
 
     /// <summary>列名そのもの（形式の記法に合わせて書き換えられた）</summary>
     ColumnNameNormalized,
+
+    /// <summary>複合主キー自身の列順序（列の並びと食い違うもの）</summary>
+    PrimaryKeyOrder,
 }

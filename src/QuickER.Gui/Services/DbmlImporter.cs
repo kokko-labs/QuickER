@@ -14,7 +14,9 @@ namespace QuickER.Services;
 /// <list type="bullet">
 ///   <item><c>Table 名前 {</c> 〜 <c>}</c> ブロック（1 行 1 カラム定義）</item>
 ///   <item>カラム設定: <c>pk</c> / <c>ref</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note: '...'</c>（大文字小文字を区別しない）</item>
-///   <item><c>Indexes { … }</c> ブロック: <c>unique</c> 設定を持つ索引のみ一意制約として取り込む（<c>(a, b) [unique, name: '…']</c> / 単一列は括弧なしも可）</item>
+///   <item><c>Indexes { … }</c> ブロック: <c>unique</c> 設定を持つ索引を一意制約として、<c>pk</c> 設定を持つ索引を主キーとして取り込む
+///     （<c>(a, b) [unique, name: '…']</c> / <c>(b, a) [pk]</c> / 単一列は括弧なしも可）。主キーの索引は構成列と順序を決め、
+///     一意制約は作らない（主キーはそれ自体が一意のため）。索引の名前は捨てる（図は主キーの制約名を持たない）</item>
 ///   <item><c>Ref:</c> 行: 多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）のみ（<c>&gt;</c>（多対1）は未対応）。エンドポイントは単一列 <c>親.a</c> と複合 Ref 構文 <c>親.(a, b)</c> の双方に対応し、<b>行に書かれた列名がそのまま外部キーの構成列になる</b>（推論しない）。参照先の <c>Table</c> より前に書かれていてもよい（テーブルを読み切ってから解析する）</item>
 ///   <item><c>//</c> 行コメント</item>
 /// </list>
@@ -89,6 +91,9 @@ public static partial class DbmlImporter
         // （解決は行ループを抜けた後になるため、診断用に定義行の行番号も持ち回る）
         var pendingUniqueIndexes =
             new List<(Entity Entity, string? Name, List<string> Columns, int LineNumber)>();
+        // 主キーの索引（[pk]）も同じ理由で最後にまとめて確定する（列ごとの pk との突き合わせも全行が揃ってから）
+        var pendingPrimaryKeyIndexes =
+            new List<(Entity Entity, List<string> Columns, int LineNumber)>();
         Entity? currentEntity = null;
         // 未閉じブロックの診断はループを抜けてから判明するため、ブロック開始行を覚えておく
         var currentEntityLineNumber = 0;
@@ -131,15 +136,21 @@ public static partial class DbmlImporter
                             continue;
                         }
 
-                        var uniqueIndex = ParseUniqueIndex(line, currentEntity.TableName);
+                        var parsedIndex = ParseIndex(line, currentEntity.TableName);
 
-                        if (uniqueIndex is not null)
+                        if (parsedIndex is { IsPrimaryKey: true })
+                        {
+                            pendingPrimaryKeyIndexes.Add(
+                                (currentEntity, parsedIndex.Value.Columns, lineNumber)
+                            );
+                        }
+                        else if (parsedIndex is { IsUnique: true })
                         {
                             pendingUniqueIndexes.Add(
                                 (
                                     currentEntity,
-                                    uniqueIndex.Value.Name,
-                                    uniqueIndex.Value.Columns,
+                                    parsedIndex.Value.Name,
+                                    parsedIndex.Value.Columns,
                                     lineNumber
                                 )
                             );
@@ -283,6 +294,7 @@ public static partial class DbmlImporter
         }
 
         EnsureEntitiesHaveColumns(entities.Values);
+        ResolvePrimaryKeyIndexes(pendingPrimaryKeyIndexes);
         ResolveUniqueIndexes(pendingUniqueIndexes);
         ResolveRelationshipColumns(entities, pendingRelationshipColumns);
 
@@ -416,14 +428,19 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// <c>Indexes</c> ブロック内の 1 行を解析し、一意索引なら制約名と構成列名を返す
+    /// <c>Indexes</c> ブロック内の 1 行を解析し、一意索引・主キーの索引なら名前と構成列名を返す
     /// </summary>
-    /// <returns>一意索引なら（名前・構成列名）。<c>unique</c> でない索引は <c>null</c>（読み飛ばす）</returns>
+    /// <returns>
+    /// <c>unique</c> または <c>pk</c> を持つ索引なら（名前・構成列名・一意か・主キーか）。
+    /// どちらでもない索引は <c>null</c>（読み飛ばす）
+    /// </returns>
     /// <exception cref="InvalidDataException">索引行の構文が解釈できない場合</exception>
-    private static (string? Name, List<string> Columns)? ParseUniqueIndex(
-        string line,
-        string tableName
-    )
+    private static (
+        string? Name,
+        List<string> Columns,
+        bool IsUnique,
+        bool IsPrimaryKey
+    )? ParseIndex(string line, string tableName)
     {
         var trimmed = line.Trim();
         var bracketStart = FindSettingsBracket(trimmed);
@@ -460,6 +477,7 @@ public static partial class DbmlImporter
         }
 
         var isUnique = false;
+        var isPrimaryKey = false;
         string? name = null;
 
         foreach (var option in SplitOptions(settingText))
@@ -467,6 +485,12 @@ public static partial class DbmlImporter
             if (string.Equals(option, "unique", StringComparison.OrdinalIgnoreCase))
             {
                 isUnique = true;
+                continue;
+            }
+
+            if (string.Equals(option, "pk", StringComparison.OrdinalIgnoreCase))
+            {
+                isPrimaryKey = true;
                 continue;
             }
 
@@ -478,8 +502,107 @@ public static partial class DbmlImporter
             }
         }
 
-        // unique でない索引は一意制約ではないため取り込まない（インデックス自体はモデルに持たない）
-        return isUnique ? (name, columns) : null;
+        // unique でも pk でもない索引は取り込まない（インデックス自体はモデルに持たない）
+        return isUnique || isPrimaryKey ? (name, columns, isUnique, isPrimaryKey) : null;
+    }
+
+    /// <summary>
+    /// <c>Indexes</c> ブロックの主キーの索引（<c>[pk]</c>）を、対象エンティティの主キーの構成列と順序として確定する
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 構成列は列ごとの <c>pk</c> と同じく NOT NULL へ寄せ、<see cref="Entity.PrimaryKeyColumnIds"/> に索引の並びを入れる。
+    /// 列ごとの <c>pk</c> と索引が両方あり、構成列の集合が同じなら受けて順序は索引を採る
+    /// （他ツール製の DBML でよくある書き方）。
+    /// </para>
+    /// <para>
+    /// 食い違う指定は推測で合わせず、索引の行を名指しして断る:
+    /// 1 テーブルに索引が 2 つ以上・索引の中で同じ列が 2 回・列ごとの <c>pk</c> と構成列の集合が違う。
+    /// どれを正としても、書いた人の意図と違う主キーを黙って作ることになるため。
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidDataException">上の断る条件、または索引が参照する列が無い場合</exception>
+    private static void ResolvePrimaryKeyIndexes(
+        IEnumerable<(Entity Entity, List<string> Columns, int LineNumber)> primaryKeyIndexes
+    )
+    {
+        var resolvedEntities = new HashSet<Entity>();
+
+        foreach (var (entity, columnNames, lineNumber) in primaryKeyIndexes)
+        {
+            if (!resolvedEntities.Add(entity))
+            {
+                throw ImportDiagnostics.AtLine(
+                    lineNumber,
+                    string.Format(Strings.Dbml_PrimaryKeyIndexDuplicate, entity.TableName)
+                );
+            }
+
+            var keyColumns = new List<Column>(columnNames.Count);
+
+            foreach (var columnName in columnNames)
+            {
+                var column = entity.Columns.FirstOrDefault(c =>
+                    string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+                );
+
+                if (column is null)
+                {
+                    throw ImportDiagnostics.AtLine(
+                        lineNumber,
+                        string.Format(
+                            Strings.Dbml_IndexColumnNotFound,
+                            entity.TableName,
+                            columnName
+                        )
+                    );
+                }
+
+                // 同じ列が 2 回出る索引は、主キーの定義として成り立たない
+                if (keyColumns.Contains(column))
+                {
+                    throw ImportDiagnostics.AtLine(
+                        lineNumber,
+                        string.Format(
+                            Strings.Dbml_IndexParseError,
+                            entity.TableName,
+                            string.Join(", ", columnNames)
+                        )
+                    );
+                }
+
+                keyColumns.Add(column);
+            }
+
+            var markedColumns = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
+
+            if (
+                markedColumns.Count > 0
+                && (
+                    markedColumns.Count != keyColumns.Count
+                    || markedColumns.Any(column => !keyColumns.Contains(column))
+                )
+            )
+            {
+                throw ImportDiagnostics.AtLine(
+                    lineNumber,
+                    string.Format(
+                        Strings.Dbml_PrimaryKeyConflict,
+                        entity.TableName,
+                        string.Join(", ", markedColumns.Select(column => column.Name)),
+                        string.Join(", ", keyColumns.Select(column => column.Name))
+                    )
+                );
+            }
+
+            foreach (var column in keyColumns)
+            {
+                column.IsPrimaryKey = true;
+                column.IsNullable = false;
+            }
+
+            entity.PrimaryKeyColumnIds = keyColumns.Select(column => column.Id).ToList();
+        }
     }
 
     /// <summary>

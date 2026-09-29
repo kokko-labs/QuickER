@@ -22,6 +22,11 @@ namespace QuickER.CodeReverse.CSharp;
 /// コードで消えた通常（多対多以外）のリレーションは追加しない（＝図からも消える）。
 /// UNIQUE 制約は <c>[UniqueConstraint]</c> でコードが完全に語れる（属性なし＝制約なし）ため温存対象外＝コードが正本。
 /// </para>
+/// <para>
+/// 主キーの順序は別の入口 <see cref="ApplyPrimaryKeyOrder"/> が同じ「コードが指定していなければ現在図で補完する」
+/// 形で温存する（<c>[DbTableMeta]</c> の <c>PrimaryKeyOrder</c> は食い違うときだけ出るため、属性が無いことは
+/// 「宣言順」とも「古い生成コードで書けなかった」とも読める）。
+/// </para>
 /// </remarks>
 public static class ReverseMergePostProcessor
 {
@@ -122,6 +127,71 @@ public static class ReverseMergePostProcessor
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// コードが主キーの順序を書いていなかったエンティティへ、現在図の主キーの順序を引き継ぐ
+    /// </summary>
+    /// <param name="current">コード取込前の現在図（順序の供給元）</param>
+    /// <param name="mergedEntities">
+    /// Guid 引継済みのマージ結果エンティティ（現在図の Id を引き継いでいる）。該当するものの
+    /// <see cref="Entity.PrimaryKeyColumnIds"/> をその場で書き換える
+    /// </param>
+    /// <param name="tablesWithPrimaryKeyOrder">
+    /// コードが順序を書いていたテーブル名（<see cref="CodeReverseResult.TablesWithPrimaryKeyOrder"/>）
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// 古い版の生成コード（属性に順序を持たない）をマージ取込すると、現在図が順序を持っていても
+    /// 宣言順へ戻り、次の DB 同期で主キーの張り直し（AlterPrimaryKey）が出る。これを防ぐ。
+    /// </para>
+    /// <para>
+    /// 引き継ぐのは <b>コードが順序を書いていない</b>（書いていれば不整合で採らなかった場合も含めコードが勝つ）、
+    /// かつ <b>現在図に同じ Id のエンティティがあり、主キー列の集合が列名で一致する</b> ときだけ。
+    /// 主キーの構成が変わったなら、それはコードが語った変更なので古い順序を持ち込まない。
+    /// 列 Id はマージ結果側の列へ列名で張り替える（名前の照合は <see cref="DiagramMergeReconciler"/> と同じ Ordinal）。
+    /// </para>
+    /// </remarks>
+    public static void ApplyPrimaryKeyOrder(
+        ErDiagram current,
+        IReadOnlyList<Entity> mergedEntities,
+        IReadOnlySet<string> tablesWithPrimaryKeyOrder
+    )
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(mergedEntities);
+        ArgumentNullException.ThrowIfNull(tablesWithPrimaryKeyOrder);
+
+        var currentById = current.Entities.ToDictionary(entity => entity.Id);
+
+        foreach (var entity in mergedEntities)
+        {
+            if (
+                tablesWithPrimaryKeyOrder.Contains(entity.TableName)
+                || !currentById.TryGetValue(entity.Id, out var existing)
+            )
+            {
+                continue;
+            }
+
+            var mergedKeyByName = entity
+                .Columns.Where(column => column.IsPrimaryKey)
+                .ToDictionary(column => column.Name, StringComparer.Ordinal);
+            var currentOrder = existing.GetPrimaryKeyColumnsInOrder();
+
+            // 主キー列の集合が一致しないなら、コードが主キーの構成を変えた＝古い順序は持ち込まない
+            if (
+                currentOrder.Count != mergedKeyByName.Count
+                || currentOrder.Any(column => !mergedKeyByName.ContainsKey(column.Name))
+            )
+            {
+                continue;
+            }
+
+            entity.PrimaryKeyColumnIds = currentOrder
+                .Select(column => mergedKeyByName[column.Name].Id)
+                .ToList();
+        }
     }
 
     /// <summary>エンティティ集合から「エンティティ Id → (列 Id → 列名)」の索引を作る</summary>

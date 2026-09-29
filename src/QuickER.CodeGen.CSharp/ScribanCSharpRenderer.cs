@@ -277,6 +277,7 @@ internal sealed class ScribanCSharpRenderer
             options.IncludeDataAnnotations
             && model.EntityClasses.Any(c =>
                 !string.IsNullOrEmpty(c.Description)
+                || !string.IsNullOrEmpty(c.PrimaryKeyOrderArgument)
                 || c.Properties.Any(p =>
                     p.CanonicalTypeToken is not null || !string.IsNullOrEmpty(p.Description)
                 )

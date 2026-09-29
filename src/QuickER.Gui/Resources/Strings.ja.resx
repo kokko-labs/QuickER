@@ -783,6 +783,9 @@
   <data name="ExportOmission_NamedQuery" xml:space="preserve">
     <value>名前付きクエリ定義</value>
   </data>
+  <data name="ExportOmission_PrimaryKeyOrder" xml:space="preserve">
+    <value>複合主キー自身の列順序のうち、列の並びと食い違うもの（取り込み直すと列の並びどおりになります）</value>
+  </data>
   <data name="ExportOmission_ColumnNameNormalized" xml:space="preserve">
     <value>この形式で書けない列名（空白・記号は「_」へ置き換わります）</value>
   </data>
@@ -834,6 +837,12 @@
   </data>
   <data name="Dbml_IndexColumnNotFound" xml:space="preserve">
     <value>テーブル '{0}' の索引が参照するカラム '{1}' が未定義です。</value>
+  </data>
+  <data name="Dbml_PrimaryKeyIndexDuplicate" xml:space="preserve">
+    <value>テーブル '{0}' に主キーの索引（[pk]）が複数あります。主キーはテーブルに 1 つだけです。</value>
+  </data>
+  <data name="Dbml_PrimaryKeyConflict" xml:space="preserve">
+    <value>テーブル '{0}' で、pk を付けたカラム（{1}）と主キーの索引のカラム（{2}）が食い違っています。同じ集合にするか、どちらか一方だけにしてください。</value>
   </data>
   <data name="Dbml_RelationshipParseError" xml:space="preserve">
     <value>リレーション定義 '{0}' を解析できません。</value>

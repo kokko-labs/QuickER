@@ -761,6 +761,9 @@
   <data name="ExportOmission_NamedQuery" xml:space="preserve">
     <value>Named query definitions</value>
   </data>
+  <data name="ExportOmission_PrimaryKeyOrder" xml:space="preserve">
+    <value>The column order of a composite primary key whose order differs from the table's column order (re-importing restores the key in column order)</value>
+  </data>
   <data name="ExportOmission_ColumnNameNormalized" xml:space="preserve">
     <value>Column names that the format cannot spell (spaces and symbols are folded to "_")</value>
   </data>
@@ -812,6 +815,12 @@
   </data>
   <data name="Dbml_IndexColumnNotFound" xml:space="preserve">
     <value>Column '{1}' referenced by an index of table '{0}' is undefined.</value>
+  </data>
+  <data name="Dbml_PrimaryKeyIndexDuplicate" xml:space="preserve">
+    <value>Table '{0}' declares more than one primary key index ([pk]); a table has at most one primary key.</value>
+  </data>
+  <data name="Dbml_PrimaryKeyConflict" xml:space="preserve">
+    <value>In table '{0}', the columns marked pk ({1}) differ from the columns of the primary key index ({2}); make them the same set or keep only one of the two.</value>
   </data>
   <data name="Dbml_RelationshipParseError" xml:space="preserve">
     <value>Cannot parse relationship definition '{0}'.</value>

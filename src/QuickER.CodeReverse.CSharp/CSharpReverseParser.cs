@@ -112,6 +112,7 @@ public sealed class CSharpReverseParser
         );
         var entityByTable = new Dictionary<string, Entity>(StringComparer.Ordinal);
         var navigations = new List<NavigationInfo>();
+        var tablesWithPrimaryKeyOrder = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var classDecl in targetClasses)
         {
@@ -196,6 +197,12 @@ public sealed class CSharpReverseParser
                 ReadUniqueConstraints(classDecl, tableName, columnsByPropertyName, warnings)
             );
 
+            // 主キーの順序（宣言順と食い違うときだけ [DbTableMeta] に載る）を列 Id へ逆写像する
+            if (ReadPrimaryKeyOrder(classDecl, tableName, entity, columnsByPropertyName, warnings))
+            {
+                tablesWithPrimaryKeyOrder.Add(tableName);
+            }
+
             // 列を 1 つも復元できなかったテーブルも、存在だけは保って取り込む（テーブルごと消すと
             // そのテーブルを端点に持つリレーションまで道連れになり、消えたことが伝わらない）
             if (entity.Columns.Count == 0)
@@ -226,6 +233,7 @@ public sealed class CSharpReverseParser
             Entities = entities,
             Relationships = relationships,
             RelationshipMetadata = relationshipMetadata,
+            TablesWithPrimaryKeyOrder = tablesWithPrimaryKeyOrder,
             Warnings = warnings,
         };
     }
@@ -305,6 +313,150 @@ public sealed class CSharpReverseParser
         }
 
         return constraints;
+    }
+
+    /// <summary>
+    /// <c>[DbTableMeta]</c> の <c>PrimaryKeyOrder</c>（主キーのプロパティ名を主キーの順に並べた配列）を読み、
+    /// 主キーの順序（<see cref="Entity.PrimaryKeyColumnIds"/>）を復元する。
+    /// </summary>
+    /// <returns>
+    /// 引数が書かれていたか（妥当かどうかは問わない＝GUI マージで「コードが指定していた」ことを伝えるため）
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// 生成側は主キーの実効順が列の宣言順と食い違うテーブルにだけ、主キー全列を実効順で書く。
+    /// したがって引数が無ければ従来どおり宣言順で、引数があるのに次のどれかに当たるものは
+    /// 手で壊された印として<b>順序を採らずに警告</b>し、宣言順へ戻す:
+    /// 未知のプロパティ名・主キー（<c>[Key]</c>）でない列・同じ名前の重複・主キー列の過不足。
+    /// 部分的な指定を併合規則で「それらしく」受けることはしない（生成側が出す形ではないため）。
+    /// </para>
+    /// <para>
+    /// 配列は <c>new[] { … }</c> / <c>new string[] { … }</c> / <c>[ … ]</c>（コレクション式）のどれでも受ける。
+    /// 要素が文字列リテラルでなければ（<c>nameof</c>・定数参照など）構文解析だけでは解決できないので不整合として扱う。
+    /// </para>
+    /// </remarks>
+    private static bool ReadPrimaryKeyOrder(
+        ClassDeclarationSyntax classDecl,
+        string tableName,
+        Entity entity,
+        IReadOnlyDictionary<string, Column> columnsByPropertyName,
+        List<string> warnings
+    )
+    {
+        var argument = FindAttribute(classDecl.AttributeLists, "DbTableMeta")
+            ?.ArgumentList?.Arguments.FirstOrDefault(candidate =>
+                string.Equals(
+                    candidate.NameEquals?.Name.Identifier.Text,
+                    "PrimaryKeyOrder",
+                    StringComparison.Ordinal
+                )
+            );
+
+        if (argument is null)
+        {
+            return false;
+        }
+
+        var columnIds = ResolvePrimaryKeyOrder(
+            ReadStringArray(argument.Expression),
+            entity,
+            columnsByPropertyName
+        );
+
+        if (columnIds is null)
+        {
+            warnings.Add(
+                string.Format(
+                    Strings.Reverse_PrimaryKeyOrderMismatch,
+                    tableName,
+                    argument.Expression.ToString()
+                )
+            );
+        }
+        else
+        {
+            entity.PrimaryKeyColumnIds = columnIds;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 主キーのプロパティ名の並びを列 Id の並びへ解決する（主キー列とちょうど一致しなければ <c>null</c>）
+    /// </summary>
+    private static List<Guid>? ResolvePrimaryKeyOrder(
+        IReadOnlyList<string>? propertyNames,
+        Entity entity,
+        IReadOnlyDictionary<string, Column> columnsByPropertyName
+    )
+    {
+        if (propertyNames is null)
+        {
+            return null;
+        }
+
+        var columnIds = new List<Guid>(propertyNames.Count);
+
+        foreach (var propertyName in propertyNames)
+        {
+            // 未知のプロパティ名・主キーでない列・重複は、どれも主キーの順序として成り立たない
+            if (
+                !columnsByPropertyName.TryGetValue(propertyName, out var column)
+                || !column.IsPrimaryKey
+                || columnIds.Contains(column.Id)
+            )
+            {
+                return null;
+            }
+
+            columnIds.Add(column.Id);
+        }
+
+        // 過不足: 載っていない主キー列がある（生成側は常に主キー全列を書く）
+        return columnIds.Count == entity.Columns.Count(column => column.IsPrimaryKey)
+            ? columnIds
+            : null;
+    }
+
+    /// <summary>
+    /// 配列の式（<c>new[] { … }</c> / <c>new string[] { … }</c> / <c>[ … ]</c>）から文字列リテラルの要素を読む
+    /// </summary>
+    /// <returns>全要素が文字列リテラルなら並び、そうでなければ <c>null</c></returns>
+    private static List<string>? ReadStringArray(ExpressionSyntax expression)
+    {
+        IEnumerable<ExpressionSyntax?>? elements = expression switch
+        {
+            ImplicitArrayCreationExpressionSyntax implicitArray => implicitArray
+                .Initializer
+                .Expressions,
+            ArrayCreationExpressionSyntax array => array.Initializer?.Expressions,
+            CollectionExpressionSyntax collection => collection.Elements.Select(element =>
+                (element as ExpressionElementSyntax)?.Expression
+            ),
+            _ => null,
+        };
+
+        if (elements is null)
+        {
+            return null;
+        }
+
+        var values = new List<string>();
+
+        foreach (var element in elements)
+        {
+            if (
+                element is not LiteralExpressionSyntax literal
+                || !literal.IsKind(SyntaxKind.StringLiteralExpression)
+            )
+            {
+                return null;
+            }
+
+            values.Add(literal.Token.ValueText);
+        }
+
+        return values;
     }
 
     /// <summary>
