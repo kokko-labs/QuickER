@@ -100,6 +100,56 @@ public class ChatTurnEngineTests
         completed!.Value.Success.Should().BeTrue();
     }
 
+    /// <summary>
+    /// 活動通知の購読側が例外を投げても、実行したツールの結果が履歴へ 1 件だけ積まれることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 通知を保護せず、しかも履歴へ積む前に通知していると、購読側の例外が外側の catch へ落ちて
+    /// <b>実行済みの呼び出しへ「実行されなかった」合成結果</b>が積まれる。AI はそれを見て同じ操作を
+    /// やり直す（エンティティの二重追加）。保護と順序の両方で守る。
+    /// </remarks>
+    [Fact(DisplayName = "活動通知の購読側が例外を投げても、実結果が履歴へ 1 件だけ積まれる")]
+    public async Task SendAsync_WhenToolActivitySubscriberThrows_KeepsRealToolResult()
+    {
+        var driver = new ScriptedTurnDriver([
+            new ChatAssistantTurn(
+                string.Empty,
+                [new ChatToolCallRequest("call_1", "add_entity", "{\"table_name\":\"Book\"}")]
+            ),
+            new ChatAssistantTurn("テーブルを追加しました", []),
+        ]);
+        var host = new RecordingToolHost();
+        var engine = CreateEngine(driver, host);
+        var statuses = new List<string>();
+
+        engine.ToolActivityReceived += (_, _) => throw new InvalidOperationException("UI が落ちた");
+        engine.StatusChanged += (_, m) => statuses.Add(m);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("本のテーブルを作って", TestContext.Current.CancellationToken);
+
+        // ツールは 1 回だけ実行され、ターンは最後まで進む
+        host.Calls.Should().ContainSingle();
+        driver.HistoryCountsAtCall.Should().HaveCount(2, "通知の失敗でターンを止めない");
+
+        // 2 回目のドライバ呼び出し時点の履歴に、ツール結果が実結果 1 件だけ積まれている
+        // （合成の「実行されなかった」が混ざらない）
+        var toolResults = driver
+            .HistoriesAtCall[1]
+            .Where(item => item.Role == ChatHistoryRole.Tool)
+            .ToList();
+        toolResults.Should().ContainSingle();
+        toolResults[0].ToolCallId.Should().Be("call_1");
+        toolResults[0]
+            .Text.Should()
+            .NotContain("not executed", "実行済みの呼び出しへ合成結果を積まない");
+
+        // 通知の失敗は握り潰さず、状態メッセージで知らせる
+        statuses
+            .Should()
+            .Contain(string.Format(AiStrings.Chat_ToolActivityNotifyFailed, "UI が落ちた"));
+    }
+
     /// <summary>ツール要求ターン→ツール実行→完了ターンのループが正しく回ることを検証する</summary>
     [Fact(DisplayName = "ツール要求ターンはツールを実行し結果を履歴へ積んで継続する")]
     public async Task SendAsync_WithToolCall_ExecutesToolThenCompletes()

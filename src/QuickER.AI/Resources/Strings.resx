@@ -133,6 +133,9 @@
   <data name="Attachment_BinaryTooLarge" xml:space="preserve">
     <value>The file exceeds the limit ({0} MB): {1}</value>
   </data>
+  <data name="Chat_ToolActivityNotifyFailed" xml:space="preserve">
+    <value>Failed to notify tool activity: {0}</value>
+  </data>
   <data name="Chat_UnsupportedAttachment" xml:space="preserve">
     <value>This connection method does not support the attachment "{0}" ({1}).</value>
   </data>
@@ -201,9 +204,6 @@
   </data>
   <data name="ClaudeCode_ExitedWithError" xml:space="preserve">
     <value>Claude Code exited with an error (exit code: {0}).</value>
-  </data>
-  <data name="ClaudeCode_ToolActivityNotifyFailed" xml:space="preserve">
-    <value>Failed to notify tool activity: {0}</value>
   </data>
   <data name="Codex_NotConnected" xml:space="preserve">
     <value>Not connected</value>

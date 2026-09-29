@@ -2636,6 +2636,71 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 続けて会話を切り替えたあとに閉じても、切り離した<b>すべて</b>のセッションの破棄を待つことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 切り離した破棄タスクを上書きで持つと、A→B→C と素早く切り替えて閉じたときに A の破棄を待てず、
+    /// その常駐子プロセス（codex app-server 等）が孤児になる。<b>最初</b>の破棄だけを門で止めて、
+    /// <c>ShutdownEngines</c> がそこで待っていることを確かめる（上書きだと 2 番目の破棄しか見ないので、
+    /// 門を開ける前に戻ってしまう）。
+    /// </remarks>
+    [Fact(DisplayName = "ShutdownEngines は続けて切り替えた分の破棄もすべて待つ")]
+    public async Task ShutdownEngines_AfterRepeatedSwitches_WaitsForEveryDetachedDisposal()
+    {
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
+        using var gate = new ManualResetEventSlim(false);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.StartConversationCommand.Execute(null);
+            var first = engineBox[0];
+            first.DisposeGate = gate;
+
+            // 1 回目の切替：最初のセッションの破棄は門で止まったまま進む
+            vm.StartConversationCommand.Execute(null);
+            first
+                .DisposeStarted.Wait(
+                    TimeSpan.FromSeconds(30),
+                    TestContext.Current.CancellationToken
+                )
+                .Should()
+                .BeTrue("1 回目の切替で最初のセッションの破棄が始まること");
+
+            // 2 回目の切替：2 番目のセッションの破棄は門が無いのですぐ終わる
+            var second = engineBox[0];
+            second.Should().NotBeSameAs(first);
+            vm.StartConversationCommand.Execute(null);
+
+            var shutdown = Task.Run(
+                () => vm.ShutdownEngines(TimeSpan.FromSeconds(30)),
+                TestContext.Current.CancellationToken
+            );
+
+            // 門が開くまで終了処理は戻らない（＝最初に切り離した分も待っている）
+            var finishedEarly = await Task.WhenAny(
+                shutdown,
+                Task.Delay(300, TestContext.Current.CancellationToken)
+            );
+            finishedEarly
+                .Should()
+                .NotBeSameAs(shutdown, "最初に切り離したセッションの破棄も待つこと");
+
+            gate.Set();
+            await shutdown;
+
+            first.DisposeCount.Should().Be(1, "最初に切り離した分も破棄されること");
+            second.DisposeCount.Should().Be(1, "次に切り離した分も破棄されること");
+            engineBox[0].DisposeCount.Should().Be(1, "現在のセッションも破棄されること");
+        }
+        finally
+        {
+            gate.Set();
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>会話を開始していない状態でも終了経路が例外を投げないことを検証する</summary>
     [Fact(DisplayName = "ShutdownEngines は会話未開始でも例外を投げない")]
     public void ShutdownEngines_WithoutConversation_DoesNotThrow()

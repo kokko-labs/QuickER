@@ -262,36 +262,6 @@ public sealed class ChatTurnEngine : IErChatEngine
     /// 往復数が <see cref="MaxToolRoundTripsPerTurn"/> を超えると、暴走（進展のない繰り返し）とみなして
     /// 打ち切る。
     /// </summary>
-    /// <summary>
-    /// ツールを 1 件実行する（ツール側の例外は「失敗のツール結果」へ畳んでターンを続ける）
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 例外をそのまま伝播させると、1 件の失敗でターン全体が失敗し、後続のツール呼び出しが実行されない。
-    /// Claude Code / Codex / Copilot の 3 エンジンは同じ形で失敗結果を返して続行するため、ここも揃える
-    /// （ツール結果は AI へ返る機械向け文言のため英語で固定する）。
-    /// </para>
-    /// <para>
-    /// 中断（<see cref="OperationCanceledException"/>）だけは通す。中断はターンの中止であって
-    /// ツールの失敗ではなく、未実行分を合成結果で埋める呼び出し側の経路（C1）へ渡す必要がある。
-    /// </para>
-    /// </remarks>
-    private (string Result, bool Success) ExecuteTool(ChatToolCallRequest call)
-    {
-        try
-        {
-            return _dispatcher.Invoke(() => _toolHost.Execute(call.Name, call.ArgumentsJson));
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return ($"The tool '{call.Name}' threw an exception: {ex.Message}", false);
-        }
-    }
-
     private async Task RunAgenticLoopAsync(CancellationToken token)
     {
         var roundTrips = 0;
@@ -331,18 +301,28 @@ public sealed class ChatTurnEngine : IErChatEngine
                     token.ThrowIfCancellationRequested();
 
                     // ER 図操作（ObservableCollection 変更）は UI スレッドで実行する
-                    var (result, success) = ExecuteTool(call);
-                    ToolActivityReceived?.Invoke(
-                        this,
-                        new ErChatToolActivity(call.Name, result, success)
+                    var (result, success) = ChatToolInvocation.Execute(
+                        _toolHost,
+                        _dispatcher,
+                        call.Name,
+                        () => call.ArgumentsJson,
+                        rethrowCancellation: true
                     );
+                    // 履歴と「実行済み」の記録を、活動通知より先に確定させる。逆順にすると、
+                    // 購読側が例外を投げたときに実行済みの呼び出しへ「実行されなかった」合成結果が
+                    // 積まれ、AI が同じ操作をやり直す（エンティティの二重追加）。通知自体も保護するが、
+                    // 順序でも守る（どちらか片方が戻っても穴が開かないようにする）
                     _history.Add(
                         new ChatHistoryItem(ChatHistoryRole.Tool, result, ToolCallId: call.Id)
                     );
-
-                    // 「実行済み」の記録は実結果を履歴へ積んだ後に行う（間の通知購読側が例外を投げても、
-                    // 実行済み扱いのまま tool 結果だけが欠ける形にしない）
                     executedCallIds.Add(call.Id);
+
+                    ChatToolInvocation.Notify(
+                        ToolActivityReceived,
+                        this,
+                        new ErChatToolActivity(call.Name, result, success),
+                        message => StatusChanged?.Invoke(this, message)
+                    );
                 }
             }
             catch

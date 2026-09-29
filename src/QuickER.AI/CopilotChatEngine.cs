@@ -436,38 +436,25 @@ public sealed class CopilotChatEngine : IErChatEngine
         }
         else
         {
-            try
-            {
-                (resultText, success) = _dispatcher.Invoke(() =>
-                    _toolHost.Execute(request.ToolName, request.ArgumentsJson)
-                );
-            }
-            catch (Exception ex)
-            {
-                // ツール結果は AI へ返る機械向け文言のため英語で固定する。
-                // 例外を無音で消さず、Claude Code / Codex と同じ「失敗のツール結果」の形で
-                // 返すことで、AI にも成否が正しく伝わりターンが詰まらない（3 エンジンで形を揃える）
-                resultText = $"The tool '{request.ToolName}' threw an exception: {ex.Message}";
-                success = false;
-            }
+            // 例外を「失敗のツール結果」へ畳む作法は 4 エンジン共通（AI にも成否が正しく伝わり、
+            // 1 件の失敗でターンが詰まらない）
+            (resultText, success) = ChatToolInvocation.Execute(
+                _toolHost,
+                _dispatcher,
+                request.ToolName,
+                () => request.ArgumentsJson,
+                rethrowCancellation: false
+            );
         }
 
-        // 活動通知は応答送信より先に呼ぶが、購読側（UI）の例外で応答送信まで巻き込まれると
-        // AI がツール結果を待ち続けてターンが詰まる。通知だけを try で囲み、応答送信は必ず行う
-        try
-        {
-            ToolActivityReceived?.Invoke(
-                this,
-                new ErChatToolActivity(request.ToolName, resultText, success)
-            );
-        }
-        catch (Exception ex)
-        {
-            StatusChanged?.Invoke(
-                this,
-                string.Format(Strings.Copilot_ToolResponseSendFailed, ex.Message)
-            );
-        }
+        // 活動通知は応答送信より先に呼ぶ。購読側（UI）の例外で応答送信まで巻き込まれると
+        // AI がツール結果を待ち続けてターンが詰まるため、保護して呼ぶ
+        ChatToolInvocation.Notify(
+            ToolActivityReceived,
+            this,
+            new ErChatToolActivity(request.ToolName, resultText, success),
+            message => StatusChanged?.Invoke(this, message)
+        );
 
         await _client
             .RespondToToolCallAsync(request.RequestId, resultText, success)
@@ -508,10 +495,16 @@ public sealed class CopilotChatEngine : IErChatEngine
     }
 
     /// <summary>拒否した許可要求を会話へ記録する（ユーザーに見える形で残す）</summary>
+    /// <remarks>
+    /// 通知はクライアントのイベント発火の途中で走るため、購読側の例外をそのまま返すとクライアント側の
+    /// 処理まで巻き込む。ツール実行の通知と同じ作法で保護する。
+    /// </remarks>
     private void OnPermissionDeclined(object? sender, string description) =>
-        ToolActivityReceived?.Invoke(
+        ChatToolInvocation.Notify(
+            ToolActivityReceived,
             this,
-            new ErChatToolActivity(description, Strings.Copilot_PermissionDeclined, false)
+            new ErChatToolActivity(description, Strings.Copilot_PermissionDeclined, false),
+            message => StatusChanged?.Invoke(this, message)
         );
 
     /// <inheritdoc />

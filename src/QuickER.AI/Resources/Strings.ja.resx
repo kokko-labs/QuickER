@@ -133,6 +133,9 @@
   <data name="Attachment_BinaryTooLarge" xml:space="preserve">
     <value>ファイルが上限（{0}MB）を超えています: {1}</value>
   </data>
+  <data name="Chat_ToolActivityNotifyFailed" xml:space="preserve">
+    <value>ツール活動の通知に失敗しました: {0}</value>
+  </data>
   <data name="Chat_UnsupportedAttachment" xml:space="preserve">
     <value>この接続方式は添付「{0}」（{1}）に対応していません。</value>
   </data>
@@ -201,9 +204,6 @@
   </data>
   <data name="ClaudeCode_ExitedWithError" xml:space="preserve">
     <value>Claude Code がエラー終了しました（終了コード: {0}）。</value>
-  </data>
-  <data name="ClaudeCode_ToolActivityNotifyFailed" xml:space="preserve">
-    <value>ツール活動の通知に失敗しました: {0}</value>
   </data>
   <data name="Codex_NotConnected" xml:space="preserve">
     <value>未接続</value>

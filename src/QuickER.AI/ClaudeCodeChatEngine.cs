@@ -339,39 +339,25 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         }
         else
         {
-            try
-            {
-                (result, success) = _dispatcher.Invoke(() =>
-                    _toolHost.Execute(toolName, argumentsJson)
-                );
-            }
-            catch (Exception ex)
-            {
-                // ツール結果は AI へ返る機械向け文言のため英語で固定する。
-                // Codex / Copilot と同じ「失敗のツール結果」の形で返すことで、例外を MCP SDK の変換に
-                // 委ねきりにせず、DelegatingToolFunction が CallToolResult.IsError へ写す形で外部エージェントに
-                // も成否が正しく伝わる（3 エンジンで形を揃える）
-                (result, success) = (
-                    $"The tool '{toolName}' threw an exception: {ex.Message}",
-                    false
-                );
-            }
-        }
-
-        // 活動通知は呼び出し元への戻り値（＝MCP 応答）より先に呼ぶが、購読側（UI）の例外で
-        // 戻り値まで巻き込まれると AI がツール結果を待ち続けてターンが詰まる。
-        // 通知だけを try で囲み、戻り値は必ず返す
-        try
-        {
-            ToolActivityReceived?.Invoke(this, new ErChatToolActivity(toolName, result, success));
-        }
-        catch (Exception ex)
-        {
-            StatusChanged?.Invoke(
-                this,
-                string.Format(Strings.ClaudeCode_ToolActivityNotifyFailed, ex.Message)
+            // 例外を「失敗のツール結果」へ畳む作法は 4 エンジン共通（DelegatingToolFunction が
+            // CallToolResult.IsError へ写すので、外部エージェントにも成否が正しく伝わる）
+            (result, success) = ChatToolInvocation.Execute(
+                _toolHost,
+                _dispatcher,
+                toolName,
+                () => argumentsJson,
+                rethrowCancellation: false
             );
         }
+
+        // 活動通知は呼び出し元への戻り値（＝MCP 応答）より先に呼ぶ。購読側（UI）の例外で
+        // 戻り値まで巻き込まれると AI がツール結果を待ち続けてターンが詰まるため、保護して呼ぶ
+        ChatToolInvocation.Notify(
+            ToolActivityReceived,
+            this,
+            new ErChatToolActivity(toolName, result, success),
+            message => StatusChanged?.Invoke(this, message)
+        );
 
         return (result, success);
     }
