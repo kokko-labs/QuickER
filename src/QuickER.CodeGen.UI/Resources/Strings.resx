@@ -77,7 +77,7 @@
     <value>Place the generated files into layer folders</value>
   </data>
   <data name="CodeGen_LayeredOutputToolTip" xml:space="preserve">
-    <value>Writes each generated file into a layer subfolder of the output folder: domain (Entity / value objects / repository contracts / runtime core), presentation (EditModel / Mapper), infrastructure (dialect implementations, EF Core, in-memory, sync, HTTP clients), and server (the remote server implementation).&#xD;&#xA;Turning this on implies the split output mode, so the output mode above switches to split (choosing the single-file mode clears this checkbox). Only the file placement changes: file names, namespaces, and file contents stay exactly the same</value>
+    <value>Writes each generated file into a layer subfolder of the output folder: domain (Entity / value objects / repository contracts / runtime core), presentation (EditModel / Mapper), infrastructure (dialect implementations, EF Core, in-memory, sync, HTTP clients), and server (the remote server implementation).&#xD;&#xA;Turning this on implies the split output mode, so the output mode above switches to split (choosing the single-file mode clears this checkbox). The default namespaces follow the layer folders, so folders and namespaces line up (namespaces you specify explicitly still win). File names and file contents stay exactly the same</value>
   </data>
   <data name="CodeGen_LayerDirectories" xml:space="preserve">
     <value>Layer folders (relative to the output folder)</value>
@@ -137,7 +137,7 @@
     <value>Generates the sync engine, per-table descriptors, journaling decorators, direct differential sources, and DI registration for a server (SQL Server) plus local (SQLite) setup.&#xD;&#xA;Only tables with a rowversion column take part; the server gets no extra schema, and the local database gets one shared journal table created at run time.</value>
   </data>
   <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
-    <value>Generates DB-independent in-memory repositories for prototyping and unit tests. Cannot be combined with the runtime NuGet package reference mode</value>
+    <value>Generates DB-independent in-memory repositories for prototyping and unit tests</value>
   </data>
   <data name="CodeGen_Runtime" xml:space="preserve">
     <value>Runtime</value>

@@ -5,14 +5,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>EcOrderRemoteSample.Client</RootNamespace>
-    <!-- サンプルは利用者のプロジェクトを模すため、リポジトリの中央パッケージ管理（CPM）から外す（Shared 側の注記を参照） -->
+    <!-- The samples mimic a consumer project, so they opt out of the repository's central package management (CPM) (see the note in the Shared project) -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
   <ItemGroup>
     <!--
-      クライアントは共有の本体生成物（リモート面契約・HTTP クライアント実装・DI 拡張）だけを参照する。
-      HTTP クライアントは BCL の HttpClient のみで動くため、サーバー生成物や ASP.NET Core への依存は持たない。
+      The client references only the shared main generated code (the remote contracts, the HTTP client implementation
+      and the DI extensions). The HTTP client runs on the BCL HttpClient alone, so it depends neither on the server
+      output nor on ASP.NET Core.
     -->
     <ProjectReference Include="../EcOrderRemote.Shared/EcOrderRemote.Shared.csproj" />
   </ItemGroup>

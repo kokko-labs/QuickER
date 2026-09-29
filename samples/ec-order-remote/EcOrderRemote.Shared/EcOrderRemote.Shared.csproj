@@ -4,29 +4,32 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>EcOrderRemoteSample</RootNamespace>
-    <!-- サンプルは利用者のプロジェクトを模すため、リポジトリの中央パッケージ管理（CPM）から外し、
-         バージョン直書きのピンを維持する（実際の利用者プロジェクトは QuickER の CPM 管理下に無い） -->
+    <!-- The samples mimic a consumer project, so they opt out of the repository's central package
+         management (CPM) and keep their versions pinned inline (a real consumer project is not
+         under QuickER's CPM) -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
   <ItemGroup>
     <!--
-      利用者のプロジェクトを模すため、QuickER 本体プロジェクトへは参照せず NuGet パッケージのみを参照する。
-      Microsoft.Data.Sqlite / SQLitePCLRaw のバージョンは src/QuickER.Runtime.Sqlite と同一のピンに揃える。
+      To mimic a consumer project, this references NuGet packages only and never the QuickER projects themselves.
+      The Microsoft.Data.Sqlite / SQLitePCLRaw versions match the pins used by src/QuickER.Runtime.Sqlite.
     -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
-    <!-- Microsoft.Data.Sqlite 10.0.9 が推移的に持ち込む SQLitePCLRaw 2.1.11 には既知の脆弱性
-         (GHSA-2m69-gcr7-jv3q) があるため、修正済みの 3.0.3 を明示参照して上書きする -->
+    <!-- SQLitePCLRaw, which Microsoft.Data.Sqlite brings in transitively, has a known vulnerability
+         (GHSA-2m69-gcr7-jv3q), so the fixed version is referenced explicitly to override it -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
     <!--
-      本体生成物のみをリンクする。Entity・SQLite 方言の QuickER 版 Repository・リモート面契約・HTTP クライアント・DI 拡張を含み、
-      BCL＋上記 NuGet だけでコンパイルできる（クライアント／サーバー双方が共有する土台）。
-      サーバー生成物（EcOrderRemote.RemoteServer.g.cs）はここではリンクしない。CLI は 2 ファイルを同一 out ディレクトリへ
-      出力するが、サーバー実装は ASP.NET Core の FrameworkReference を必要とするため Server プロジェクト側でリンクする。
+      Link the main generated file only. It holds the entities, the SQLite-dialect QuickER repositories, the remote
+      contracts, the HTTP client and the DI extensions, and it compiles against the BCL plus the NuGet packages above
+      (the foundation shared by both the client and the server).
+      The server output (EcOrderRemote.RemoteServer.g.cs) is not linked here. The CLI writes both files into the same
+      out directory, but the server implementation needs the ASP.NET Core FrameworkReference, so the Server project
+      links it instead.
     -->
     <Compile Include="../Generated/EcOrderRemote.g.cs" Link="Generated/EcOrderRemote.g.cs" />
   </ItemGroup>

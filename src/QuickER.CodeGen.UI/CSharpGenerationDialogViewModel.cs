@@ -250,7 +250,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// </summary>
     /// <remarks>
     /// DB アクセスの排他ラジオとは独立に選べる（「なし」/ QuickER 版 Repository / EF Core のいずれとも併用可能）。
-    /// パッケージ参照モード（<see cref="UseRuntimePackages"/>）とは併用できず、<see cref="Ok"/> で併用をブロックする。
+    /// パッケージ参照モード（<see cref="UseRuntimePackages"/>）とも併用できる（インメモリ基盤は
+    /// <c>QuickER.Runtime.InMemory</c> が担い、per-entity 実装・シーダー・DI 登録だけが生成側に残る）。
     /// </remarks>
     [ObservableProperty]
     private bool _generateInMemoryRepositories;

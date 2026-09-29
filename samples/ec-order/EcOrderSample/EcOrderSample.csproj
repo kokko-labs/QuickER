@@ -5,25 +5,26 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>EcOrderSample</RootNamespace>
-    <!-- サンプルは利用者のプロジェクトを模すため、リポジトリの中央パッケージ管理（CPM）から外し、
-         バージョン直書きのピンを維持する（実際の利用者プロジェクトは QuickER の CPM 管理下に無い） -->
+    <!-- The samples mimic a consumer project, so they opt out of the repository's central package
+         management (CPM) and keep their versions pinned inline (a real consumer project is not
+         under QuickER's CPM) -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
   <ItemGroup>
     <!--
-      利用者のプロジェクトを模すため、QuickER 本体プロジェクトへは参照せず NuGet パッケージのみを参照する。
-      Microsoft.Data.Sqlite / SQLitePCLRaw のバージョンは src/QuickER.Runtime.Sqlite と同一のピンに揃える。
+      To mimic a consumer project, this references NuGet packages only and never the QuickER projects themselves.
+      The Microsoft.Data.Sqlite / SQLitePCLRaw versions match the pins used by src/QuickER.Runtime.Sqlite.
     -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
-    <!-- Microsoft.Data.Sqlite 10.0.9 が推移的に持ち込む SQLitePCLRaw 2.1.11 には既知の脆弱性
-         (GHSA-2m69-gcr7-jv3q) があるため、修正済みの 3.0.3 を明示参照して上書きする -->
+    <!-- SQLitePCLRaw, which Microsoft.Data.Sqlite brings in transitively, has a known vulnerability
+         (GHSA-2m69-gcr7-jv3q), so the fixed version is referenced explicitly to override it -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- DDL を出力ディレクトリへコピーし、起動時にファイル DB を作成する -->
+    <!-- Copy the DDL to the output directory; the sample creates a file database from it at startup -->
     <None Include="../EcOrder.sql" Link="EcOrder.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

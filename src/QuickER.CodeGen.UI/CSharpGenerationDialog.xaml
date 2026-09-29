@@ -480,7 +480,7 @@
               </StackPanel>
             </Grid>
 
-            <!-- ランタイムのパッケージ参照モード（EF Core 選択中は併用不可のため無効化） -->
+            <!-- ランタイムのパッケージ参照モード（EF Core・インメモリ生成とも併用できるため、無効化はしない） -->
             <Grid Margin="0,10,0,0">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="96" />
