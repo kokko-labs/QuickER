@@ -100,6 +100,13 @@ public sealed class CodeReverseCommandService
             reversed.RelationshipMetadata
         );
 
+        // 主キーの順序も同じ規則で温存する（古い生成コードは順序を書けず、取り込むと宣言順へ戻るため）
+        ReverseMergePostProcessor.ApplyPrimaryKeyOrder(
+            current,
+            merged.Entities,
+            reversed.TablesWithPrimaryKeyOrder
+        );
+
         // 構造差分・壊れクエリがある場合のみ置換確認を行う（DB 取込と同じ規則）
         if (!ConfirmDiagramReplacement(current, merged, finalRelationships))
         {

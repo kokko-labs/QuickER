@@ -407,6 +407,17 @@ internal sealed class CSharpClassModel
     /// （刻む中身が 1 つでもあるか、またはインメモリ Repository を出すか）が決める。
     /// </remarks>
     public string UniqueConstraintAttributesBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// <c>[DbTableMeta]</c> へ載せる主キーの順序の名前付き引数（整形済み＝<c>PrimaryKeyOrder = new[] { "B", "A" }</c>）。
+    /// 主キーの実効順が列の宣言順と食い違うときだけ値を持ち、食い違わなければ空文字
+    /// </summary>
+    /// <remarks>
+    /// 判定の正本は <see cref="Entity.GetReorderedPrimaryKeyColumnNames"/>（summary・モック・MCP と共有）。
+    /// 食い違うときだけ出すのは <c>[DbColumnMeta].NativeType</c> の verbatim 併記と同じ方式で、
+    /// 順序を明示していない図・単一列の主キー・宣言順どおりの図の生成物は変わらない。
+    /// </remarks>
+    public string PrimaryKeyOrderArgument { get; init; } = string.Empty;
 }
 
 /// <summary>エンティティの 1 スカラープロパティに対応する生成モデル</summary>

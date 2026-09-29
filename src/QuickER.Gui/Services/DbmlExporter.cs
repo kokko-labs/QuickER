@@ -13,7 +13,8 @@ namespace QuickER.Services;
 /// 出力は <see cref="DbmlImporter"/> が解釈できる記法の範囲に限定する
 /// <list type="bullet">
 ///   <item><c>Table</c> ブロック: カラム設定は <c>pk</c> / <c>ref</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note</c> のみ出力（Enum 等は対象外）</item>
-///   <item><c>Indexes</c> ブロック: 一意制約のうちカラム設定 <c>unique</c> で表せないもの（複合・名前付き）を <c>(列, …) [unique, name: '…']</c> として出力</item>
+///   <item><c>Indexes</c> ブロック: 一意制約のうちカラム設定 <c>unique</c> で表せないもの（複合・名前付き）を <c>(列, …) [unique, name: '…']</c> として出力。
+///     主キーの順序が列の並びと食い違うテーブルは、主キーをカラム設定 <c>pk</c> でなく先頭の <c>(列, …) [pk]</c> で書く</item>
 ///   <item><c>Ref:</c> 行: 多重度を <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）の記号で表現し、複合外部キーは DBML 標準の複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で表現</item>
 ///   <item>note 文字列中のシングルクォートは <c>\'</c> にエスケープ</item>
 /// </list>
@@ -33,15 +34,18 @@ public static partial class DbmlExporter
             builder.AppendLine($"Table {Identifier(entity.TableName)} {{");
 
             var (inlineUniqueColumnIds, indexConstraints) = ClassifyUniqueConstraints(entity);
+            // 列ごとの pk は列の並びでしか順序を表せないので、食い違うときだけ索引の (列, …) [pk] で書く。
+            // 判定の正本は GetReorderedPrimaryKeyColumnNames（食い違わないテーブルの出力は従来どおり）
+            var reorderedPrimaryKey = entity.GetReorderedPrimaryKeyColumnNames();
 
             foreach (var column in entity.Columns)
             {
                 builder.AppendLine(
-                    $"  {BuildColumnLine(column, inlineUniqueColumnIds.Contains(column.Id))}"
+                    $"  {BuildColumnLine(column, inlineUniqueColumnIds.Contains(column.Id), markPrimaryKey: reorderedPrimaryKey is null)}"
                 );
             }
 
-            AppendIndexesBlock(builder, indexConstraints);
+            AppendIndexesBlock(builder, reorderedPrimaryKey, indexConstraints);
             AppendTableNote(builder, entity);
             builder.AppendLine("}");
             builder.AppendLine();
@@ -110,13 +114,16 @@ public static partial class DbmlExporter
     /// PK 列には <c>pk</c> のみを出力し <c>ref</c> は併記しない。NULL 許可は常に
     /// <c>null</c> / <c>not null</c> のどちらかを明示し、インポート時の既定値依存を避ける。
     /// <paramref name="isUnique"/> は「名前なし単一列の一意制約の構成列」を表す
-    /// （<see cref="ClassifyUniqueConstraints"/> の判定結果）
+    /// （<see cref="ClassifyUniqueConstraints"/> の判定結果）。
+    /// <paramref name="markPrimaryKey"/> が <c>false</c> のとき（主キーを索引の <c>[pk]</c> で書くテーブル）は
+    /// <c>pk</c> を付けない。付けると取込で列ごとの指定と索引の二重指定になるため
+    /// （NOT NULL は <c>not null</c> として列の行に残る）
     /// </remarks>
-    private static string BuildColumnLine(Column column, bool isUnique)
+    private static string BuildColumnLine(Column column, bool isUnique, bool markPrimaryKey)
     {
         var settings = new List<string>();
 
-        if (column.IsPrimaryKey)
+        if (column.IsPrimaryKey && markPrimaryKey)
         {
             settings.Add("pk");
         }
@@ -186,20 +193,34 @@ public static partial class DbmlExporter
     }
 
     /// <summary>
-    /// <c>Indexes</c> ブロック（複合・名前付きの一意制約）をテーブルブロック内へ出力する
+    /// <c>Indexes</c> ブロック（順序を明示する主キーと、複合・名前付きの一意制約）をテーブルブロック内へ出力する
     /// </summary>
+    /// <param name="builder">出力先</param>
+    /// <param name="reorderedPrimaryKey">
+    /// 主キーの順序が列の並びと食い違うときの実効順の列名（<c>null</c>＝主キーは列ごとの <c>pk</c> で書いた）
+    /// </param>
+    /// <param name="indexConstraints">索引として出す一意制約</param>
     private static void AppendIndexesBlock(
         StringBuilder builder,
+        IReadOnlyList<string>? reorderedPrimaryKey,
         IReadOnlyList<(string? Name, List<string> ColumnNames)> indexConstraints
     )
     {
-        if (indexConstraints.Count == 0)
+        if (reorderedPrimaryKey is null && indexConstraints.Count == 0)
         {
             return;
         }
 
         builder.AppendLine();
         builder.AppendLine("  Indexes {");
+
+        // 主キーは索引の先頭に置く（一意制約より先に読めば、取込側で主キー列が確定した状態になる）
+        if (reorderedPrimaryKey is not null)
+        {
+            builder.AppendLine(
+                $"    ({string.Join(", ", reorderedPrimaryKey.Select(Identifier))}) [pk]"
+            );
+        }
 
         foreach (var (name, columnNames) in indexConstraints)
         {

@@ -103,6 +103,9 @@
   <data name="Reverse_TypeTokenUnresolved" xml:space="preserve">
     <value>Type token '{0}' for column '{1}.{2}' could not be expanded for the target dialect; the token text was used as the column type. Fix this column's type by hand.</value>
   </data>
+  <data name="Reverse_PrimaryKeyOrderMismatch" xml:space="preserve">
+    <value>The primary key order {1} in [DbTableMeta] on table '{0}' does not match the table's primary key columns; the declaration order was used instead.</value>
+  </data>
   <data name="Reverse_UniqueConstraintMemberUnresolved" xml:space="preserve">
     <value>A UNIQUE constraint on table '{0}' refers to property '{1}', which is not a restored column; the whole constraint was skipped.</value>
   </data>

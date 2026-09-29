@@ -129,6 +129,14 @@ public static partial class MermaidExporter
                 ),
                 ExportOmissionKind.ColumnNameNormalized
             ),
+            (
+                // 属性行は主キー列に PK を付けるだけで順序の構文が無く、取込では列の並びが主キーの順序になる。
+                // 判定の正本は GetReorderedPrimaryKeyColumnNames（列の並びと一致するなら落ちるものが無い）
+                diagram.Entities.Any(entity =>
+                    entity.GetReorderedPrimaryKeyColumnNames() is not null
+                ),
+                ExportOmissionKind.PrimaryKeyOrder
+            ),
         };
 
         return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();

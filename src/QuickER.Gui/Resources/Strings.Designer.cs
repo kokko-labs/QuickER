@@ -1731,6 +1731,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string ExportOmission_PrimaryKeyOrder {
+            get {
+                return ResourceManager.GetString("ExportOmission_PrimaryKeyOrder", resourceCulture);
+            }
+        }
+
         public static string ExportOmission_ColumnNameNormalized {
             get {
                 return ResourceManager.GetString("ExportOmission_ColumnNameNormalized", resourceCulture);
@@ -1836,6 +1842,18 @@ namespace QuickER.Resources {
         public static string Dbml_IndexColumnNotFound {
             get {
                 return ResourceManager.GetString("Dbml_IndexColumnNotFound", resourceCulture);
+            }
+        }
+
+        public static string Dbml_PrimaryKeyIndexDuplicate {
+            get {
+                return ResourceManager.GetString("Dbml_PrimaryKeyIndexDuplicate", resourceCulture);
+            }
+        }
+
+        public static string Dbml_PrimaryKeyConflict {
+            get {
+                return ResourceManager.GetString("Dbml_PrimaryKeyConflict", resourceCulture);
             }
         }
 

@@ -90,6 +90,12 @@ namespace QuickER.CodeReverse.CSharp.Resources {
             }
         }
 
+        public static string Reverse_PrimaryKeyOrderMismatch {
+            get {
+                return ResourceManager.GetString("Reverse_PrimaryKeyOrderMismatch", resourceCulture);
+            }
+        }
+
         public static string Reverse_UniqueConstraintMemberUnresolved {
             get {
                 return ResourceManager.GetString("Reverse_UniqueConstraintMemberUnresolved", resourceCulture);

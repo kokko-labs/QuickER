@@ -174,7 +174,39 @@ internal sealed partial class CSharpGenerationModelBuilder
             Navigations = navigations.Select(BuildEntityNavigation).ToList(),
             // UNIQUE 制約は DB 定義メタ属性と同じ「Entity 側の自己記述」として刻む（実行時の振る舞いは持たない）
             UniqueConstraintAttributesBlock = BuildEntityUniqueConstraintAttributes(entity),
+            // 主キーの順序も同じ「Entity 側の自己記述」。C# リバースがこれを読んで順序を復元する
+            PrimaryKeyOrderArgument = BuildPrimaryKeyOrderArgument(entity, properties),
         };
+    }
+
+    /// <summary>
+    /// 主キーの実効順が列の宣言順と食い違うときに限り、<c>[DbTableMeta]</c> の <c>PrimaryKeyOrder</c> 引数を組み立てる
+    /// </summary>
+    /// <param name="entity">対象エンティティ</param>
+    /// <param name="properties">
+    /// <paramref name="entity"/> の列から作った生成プロパティ（列と 1 対 1・同じ並び）
+    /// </param>
+    /// <returns>整形済みの名前付き引数。食い違わなければ空文字</returns>
+    /// <remarks>
+    /// 値は列名でなく<b>プロパティ名</b>で書く＝<c>[UniqueConstraint]</c> の構成列と同じ形で、C# リバースは
+    /// 同じ「プロパティ名 → <c>[Column]</c>」の逆写像で解決できる。プロパティ名は C# の識別子なので、
+    /// 文字列リテラルとしてのエスケープは要らない。
+    /// </remarks>
+    private static string BuildPrimaryKeyOrderArgument(
+        Entity entity,
+        IReadOnlyList<CSharpPropertyModel> properties
+    )
+    {
+        if (entity.GetReorderedPrimaryKeyColumnNames() is null)
+        {
+            return string.Empty;
+        }
+
+        var names = entity
+            .GetPrimaryKeyColumnsInOrder()
+            .Select(column => $"\"{properties[entity.Columns.IndexOf(column)].PropertyName}\"");
+
+        return $"PrimaryKeyOrder = new[] {{ {string.Join(", ", names)} }}";
     }
 
     /// <summary>エンティティ定義と解決済みナビゲーションから EditModel クラスの生成モデルを構築する</summary>

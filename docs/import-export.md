@@ -33,7 +33,12 @@ The supported syntax is the subset that QuickER's DBML export writes, and both t
 - Column settings: `pk` / `ref` / `unique` / `null` / `not null` / `note: '...'`
 - Table description: a `Note: '...'` line inside the `Table` block (the standard DBML form, so descriptions are restored from files written by other tools too)
 - Unique constraints: the `unique` column setting (a constraint over that one column) and `unique` indexes in an `Indexes` block (`(col, …) [unique, name: '…']`, for composite and named constraints).
-  Indexes that are not `unique` are skipped
+  Indexes that are neither `unique` nor `pk` are skipped
+- Primary keys: the `pk` column setting and a `pk` index in an `Indexes` block (`(col, …) [pk]`), which also states the key's own column order.
+  A `pk` index creates no unique constraint (a primary key is unique on its own), and its name is discarded (the diagram keeps no primary key constraint name).
+  Files written by other tools that declare the key this way are read as well.
+  A table that marks columns `pk` and also has a `pk` index must name the same columns in both, and the index then decides the order.
+  A different set of columns, a second `pk` index, or a column listed twice in the index is rejected at that line rather than guessed at
 - Relationships: `-` (one-to-one), `<` (one-to-many), and `<>` (many-to-many) on `Ref:` lines; `>` (many-to-one) is not supported.
   An endpoint can be a single column (`Parent.a`) or the composite Ref syntax (`Parent.(a, b)`), which restores a composite foreign key with its pairs in order.
   A line whose two endpoints list a different number of columns, or that names a column the table does not have, keeps the relationship but drops its column mapping (it can be completed in the properties panel)
@@ -88,6 +93,7 @@ Each part of the diagram comes from a specific attribute.
 - **Column type and description**: `[DbColumnMeta]`
 - **Table description**: `[DbTableMeta]`
 - **Primary key**: `[Key]`
+- **Composite primary key order**: `PrimaryKeyOrder` of `[DbTableMeta]` (written only when it differs from the declaration order)
 - **Nullability**: whether the property type is `?` (`[Required]` is not used at all)
 - **UNIQUE constraints**: the class-level `[UniqueConstraint]`
 - **Relationships**: `[NavigationReference]`
@@ -105,6 +111,13 @@ A constraint is restored from `[UniqueConstraint("PropA", "PropB", Name = "UQ_..
 A constraint that refers to a property which could not be restored (or that declares no member) is skipped **as a whole**, never narrowed into a different constraint, and reported as a warning.
 The FK constraint name and the referential actions are restored from the named arguments `ConstraintName` / `OnDelete` / `OnUpdate` of `[NavigationReference]`; they are only written out when they differ from the defaults, and an unrecognized action token is warned about and treated as unspecified.
 
+**A composite primary key's own column order round-trips too.**
+When the key order differs from the order the key properties are declared in, code generation writes it as `[DbTableMeta(PrimaryKeyOrder = new[] { "B", "A" })]`.
+The values are property names, resolved back through `[Column]` the same way as `[UniqueConstraint]`.
+A table whose key follows the declaration order gets no such argument, so its generated code does not change.
+An order that does not name exactly the key columns (an unknown property, a column that is not part of the key, a duplicate, or a missing key column) is not adopted: a warning names the table, and the key comes back in declaration order.
+`[DbTableMeta]` is written only when data annotations are generated (`IncludeDataAnnotations`), as with the descriptions, so code generated without them cannot carry the order.
+
 Column types are expanded from the dialect-neutral tokens into the current diagram's native types (tokens that cannot be expanded are adopted as-is with a warning).
 A token carries the meaning of a type only, so several spellings of one meaning (`numeric` and `decimal`, `ntext` and `nvarchar(max)`, `datetime` and `datetime2`) collapse onto a single representative.
 For the columns where that would change the spelling, code generation therefore records the original text in `[DbColumnMeta]` as well (`NativeType`), and names those columns in an information diagnostic.
@@ -115,11 +128,12 @@ When the two disagree, because the file was hand-edited or generated for another
 Many-to-many relationships do not exist in code, so a merge import into an existing diagram preserves the many-to-many relationships whose two endpoints both survive (ordinary relationships that disappeared from the code disappear from the diagram too).
 For FK metadata the merge is **fallback-only**: for relationships whose endpoints (table and column names on both ends) match, only the fields the code did not specify are filled in from the current diagram, and code that does specify a value wins.
 This also covers code generated by an older version, which has no named arguments at all: every field counts as unspecified and the current diagram's values are preserved.
+The composite primary key's own column order follows the same rule.
+When the code states no order, as code generated by an older version cannot, the current diagram's order is kept as long as the key still consists of the same columns.
 **UNIQUE constraints, by contrast, are owned by the code**, and nothing is preserved from the current diagram, because an absent attribute cannot be told apart from a "this table has no constraint" declaration, and preserving it would make a constraint you deleted in code impossible to remove.
 As with the other imports, a replacement confirmation appears when there are structural differences or named queries that would break.
 
 **What code cannot say.**
-A composite primary key's own column order is not written into the code: `[Key]` marks each key column where the property is declared (= the diagram's column order), so a diagram whose composite key order differs from its column order comes back with the key in column order.
 A description that spans several lines is folded into single spaces when the code is generated (a `///` summary and an attribute literal cannot carry the line breaks), so the import restores the folded text and the original layout of the description is gone.
 The FK constraint name and the referential actions are written out only when they differ from the defaults, so an unnamed constraint with `NO ACTION` on both sides is indistinguishable from "not stated": a merge import keeps whatever the current diagram holds for those fields, and the CLI reverse leaves them at their defaults.
 Entities declared as `record` are not analysed (generated entities are always `class`), and the `Schema` argument of `[Table]` is not read (generation does not write it; a schema-qualified table name lives in the table name itself).
@@ -147,16 +161,17 @@ Writes out the text formats.
 The DBML output is the same subset as the import above (`Table` blocks + `Ref:` lines), and the written file can be re-imported with the relationships' column mapping intact.
 That includes composite foreign keys, which are written with DBML's composite Ref syntax (`Ref: Parent.(a, b) < Child.(x, y)`; single-column foreign keys keep the plain `Parent.a < Child.x` form).
 Unique constraints are written as the `unique` column setting for unnamed single-column constraints, and as an `Indexes` block (`(col, …) [unique, name: '…']`) for composite and named ones.
+When a composite primary key's own column order differs from the table's column order, the key is written as a `(col, …) [pk]` index at the top of the `Indexes` block instead of the `pk` column setting, so the order round-trips (a table whose key follows the column order is written as before).
 A table or column name that is not made only of letters, digits and underscores is written as a DBML quoted identifier (`"Order Details"`), as is a type that contains a space or brackets (`"double precision"`, `"integer[]"`); without the quotes such a name or type cannot be read back. A name of letters, digits and underscores — Japanese included — is written bare.
 Mermaid's key column holds a single marker per column, so it is folded to `PK` > `FK` > `UK`, and **`UK` is written only for the columns of single-column constraints** (splitting a composite constraint per column would come back on import as N separate single-column constraints, which means something else, so composite ones are not written).
 
 Both formats are useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.
-Neither states a composite primary key's own column order, since each key column simply carries its `pk` / `PK` marker, so a key whose order differs from the table's column order comes back in column order on re-import.
+Mermaid has no syntax for a composite primary key's own column order, since each key column simply carries its `PK` marker, so a key whose order differs from the table's column order comes back in column order on re-import.
 
 DBML also writes table descriptions as `Note:` lines and foreign key referential actions in the settings block of the `Ref:` line (`delete` / `update`; the default `NO ACTION` is not written), so those round-trip as well.
 
 Information the chosen format cannot represent is listed in the completion dialog (once per format per session, so it does not become noise).
-Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, or named queries, so it reports whichever of those the diagram actually contains.
+Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, named queries, or a composite primary key order that differs from the column order, so it reports whichever of those the diagram actually contains.
 For DBML only table memos and named queries are reported (`Note` is used for the description, so carrying a memo would need a non-standard extension, and interoperability with other tools was given priority).
 SQL DDL and the definition documents report nothing, because the only things they drop are the ones that format is not meant to carry.
 

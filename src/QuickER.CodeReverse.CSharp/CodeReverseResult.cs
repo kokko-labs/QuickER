@@ -31,6 +31,17 @@ public sealed class CodeReverseResult
         ReverseRelationshipMetadata
     > RelationshipMetadata { get; init; } = new Dictionary<Guid, ReverseRelationshipMetadata>();
 
+    /// <summary>
+    /// コードが主キーの順序（<c>[DbTableMeta]</c> の <c>PrimaryKeyOrder</c>）を書いていたテーブル名の集合
+    /// </summary>
+    /// <remarks>
+    /// 値そのもの（妥当なら <see cref="Entity.PrimaryKeyColumnIds"/>）は各エンティティへ反映済みで、この集合は
+    /// 「コードが指定していたか」だけを伝える（<see cref="RelationshipMetadata"/> と同じ用途＝GUI マージの温存判断）。
+    /// 指定が不整合で採らなかったテーブルも含む＝指定があった以上、現在図の順序で上書きしない。
+    /// </remarks>
+    public IReadOnlySet<string> TablesWithPrimaryKeyOrder { get; init; } =
+        new HashSet<string>(StringComparer.Ordinal);
+
     /// <summary>解析中に生じた非致命の警告（型トークン展開不能・型メタ欠落など。ローカライズ済み）</summary>
     public required IReadOnlyList<string> Warnings { get; init; }
 }

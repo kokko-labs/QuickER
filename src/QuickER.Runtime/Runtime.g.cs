@@ -151,6 +151,12 @@ public sealed class DbTableMetaAttribute : Attribute
 {
     /// <summary>Gets or sets the table description (derived from DB extended properties, etc.). Empty string when unset.</summary>
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the entity property names that make up the primary key, in key order.
+    /// It is set only when the key order differs from the order the key properties are declared in; <c>null</c> means that declaration order.
+    /// </summary>
+    public string[]? PrimaryKeyOrder { get; set; }
 }
 
 /// <summary>

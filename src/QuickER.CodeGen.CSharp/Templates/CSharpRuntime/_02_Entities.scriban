@@ -277,7 +277,7 @@ public abstract partial class EntityBase : EntityBaseCore { }
 {{ if !for.first }}
 {{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}Entity for the {{ item.table_name_xml_doc }} table{{ end }}</summary>
 {{ if include_data_annotations }}[Table("{{ item.table_name }}")]
-{{ end }}{{ if emit_db_meta_attr && item.description != "" }}[DbTableMeta(Description = "{{ item.description }}")]
+{{ end }}{{ if emit_db_meta_attr && (item.description != "" || item.primary_key_order_argument != "") }}[DbTableMeta({{ if item.description != "" }}Description = "{{ item.description }}"{{ if item.primary_key_order_argument != "" }}, {{ end }}{{ end }}{{ item.primary_key_order_argument }})]
 {{ end }}{{ if item.unique_constraint_attributes_block != "" }}{{ item.unique_constraint_attributes_block }}
 {{ end }}public partial class {{ item.class_name }} : EntityBase
 {
