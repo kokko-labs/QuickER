@@ -140,7 +140,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 
         var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape($"PK_{SqlIdentifier.SafeName(item.TableName)}")}] "
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName))}] "
                 + $"PRIMARY KEY ({pkCols});"
         );
         sb.AppendLine("GO");
@@ -225,7 +225,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
         var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? $"FK_{SqlIdentifier.SafeName(childTbl)}_{SqlIdentifier.SafeName(parentTbl)}"
+            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
             : item.Relationship.ConstraintName!;
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship

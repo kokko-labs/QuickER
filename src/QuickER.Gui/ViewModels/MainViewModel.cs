@@ -1341,8 +1341,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         entity,
                         Relationships
                     ),
-                    ConstraintName =
-                        $"FK_{SqlIdentifier.SafeName(entity.TableName)}_{SqlIdentifier.SafeName(PendingRelationshipSource.TableName)}",
+                    ConstraintName = ConstraintNames.ForeignKey(
+                        entity.TableName,
+                        PendingRelationshipSource.TableName
+                    ),
                 },
                 PendingRelationshipSource,
                 entity

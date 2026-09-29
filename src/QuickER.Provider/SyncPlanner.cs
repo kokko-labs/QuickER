@@ -736,7 +736,7 @@ public sealed class SyncPlanner
         string parentTable
     ) =>
         string.IsNullOrWhiteSpace(relationship?.ConstraintName)
-            ? $"FK_{SafeName(childTable)}_{SafeName(parentTable)}"
+            ? ConstraintNames.ForeignKey(childTable, parentTable)
             : relationship!.ConstraintName!;
 
     /// <summary>live のリレーションから、親子エンティティ・構成列ペアまで解決できた FK を列挙する</summary>
@@ -1597,8 +1597,4 @@ public sealed class SyncPlanner
                 or SchemaDiffKind.ReorderColumns
                 or SchemaDiffKind.AddUniqueConstraint
                 or SchemaDiffKind.DropUniqueConstraint;
-
-    /// <summary>制約名の安全化（"." と空白を "_" へ置換。<c>SqliteIdentifier.SafeName</c> と同一規則）</summary>
-    private static string SafeName(string name) =>
-        (name ?? string.Empty).Replace(".", "_").Replace(" ", "_");
 }

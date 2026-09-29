@@ -59,6 +59,7 @@ A drop-down offers only the columns that the other rows of the same constraint d
 "×" takes a row back out.
 
 Leave the name empty and `UQ_{table}_{columns}` is synthesized at DDL generation time (while the box is empty it shows that synthesized name as its placeholder).
+Dots and spaces in the names become `_`, and leading or trailing spaces are dropped.
 A name imported from a database is kept as it is.
 Deleting a column deletes the constraints that include it, together with the column, so a constraint is never silently narrowed to its remaining columns.
 Every operation is undoable.
@@ -73,6 +74,8 @@ One column can be a primary key, a foreign key, and part of a unique constraint 
 Press "One-to-One," "One-to-Many," or "Many-to-Many" in the toolbox to enter creation mode, then click the two entities in turn to commit it.
 Clicking the same entity twice creates a self-referencing relationship.
 On creation, **every primary key column of the source is paired with a matching column on the target**, each looked up by name, and the constraint name is generated in the form `FK_<target>_<source>`.
+Dots and spaces in the table names become `_` and leading or trailing spaces are dropped, the same rule DDL generation uses for a foreign key that has no name.
+A relationship added by the AI chat or the MCP tools gets the same name.
 A source column with no matching target column stays out of the mapping (fill it in from the properties panel), and no target column is used twice.
 
 While creation mode is active the toolbox says so and offers a "Cancel" button for it.

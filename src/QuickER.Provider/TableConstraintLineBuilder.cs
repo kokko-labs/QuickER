@@ -45,7 +45,7 @@ public static class TableConstraintLineBuilder
         {
             var pkCols = string.Join(", ", pks.Select(p => quoteSimpleName(p.Name)));
             lines.Add(
-                $"    CONSTRAINT {quoteConstraintName($"PK_{safeName(tableName)}")} PRIMARY KEY ({pkCols})"
+                $"    CONSTRAINT {quoteConstraintName(ConstraintNames.PrimaryKey(tableName))} PRIMARY KEY ({pkCols})"
             );
         }
 

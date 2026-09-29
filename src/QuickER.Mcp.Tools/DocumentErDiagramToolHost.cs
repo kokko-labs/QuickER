@@ -648,7 +648,8 @@ public static partial class DocumentErDiagramToolHost
                 TargetEntityId = target.Id,
                 Type = relType,
                 ColumnPairs = columnPairs!,
-                ConstraintName = $"FK_{target.TableName}_{source.TableName}",
+                // 既定名の規則は GUI の手作成・内蔵チャットのツールと共有する（作成経路で名前が割れないように）
+                ConstraintName = ConstraintNames.ForeignKey(target.TableName, source.TableName),
             }
         );
 

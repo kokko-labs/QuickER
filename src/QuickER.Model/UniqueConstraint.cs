@@ -29,14 +29,17 @@ public class UniqueConstraint
     /// <summary>制約名が未設定（<see cref="Name"/> が <c>null</c>）のときに用いる合成名を組み立てる</summary>
     /// <param name="tableName">対象テーブル名</param>
     /// <param name="columnNames">構成列名（宣言順）</param>
-    /// <returns><c>UQ_{テーブル名}_{列名…}</c> 形式の合成名</returns>
+    /// <returns><c>UQ_{テーブル名}_{列名…}</c> 形式の合成名（各部品は <see cref="ConstraintNames.SafeName"/> を通したもの）</returns>
     /// <remarks>
     /// 「名前なし＝列構成から合成する」は <see cref="Name"/> の意味論そのものなのでモデル側に置く。
-    /// 識別子として安全な形への正規化（記号の置換）は方言ごとに異なるため呼び出し側の責務で、
-    /// DDL 生成は <c>QuickER.Provider.UniqueConstraintNaming</c> が方言別の安全化を適用したうえで本メソッドを呼ぶ。
+    /// 安全化（前後の空白の除去と記号の置換）もここで行う＝DDL 生成・生成コードの <c>[UniqueConstraint]</c>・
+    /// ツールの要約表示が同じ名前を作る。安全化は冪等なので、方言の <c>SafeName</c> を先に通してから呼ぶ経路
+    /// （<c>QuickER.Provider.UniqueConstraintNaming</c>）でも結果は変わらない。
     /// </remarks>
     public static string SynthesizeName(string tableName, IEnumerable<string> columnNames) =>
-        "UQ_" + tableName + string.Concat(columnNames.Select(column => "_" + column));
+        "UQ_"
+        + ConstraintNames.SafeName(tableName)
+        + string.Concat(columnNames.Select(column => "_" + ConstraintNames.SafeName(column)));
 
     /// <summary>一意制約を複製する</summary>
     /// <param name="preserveId"><c>true</c> の場合は同じ ID を維持し、<c>false</c> の場合は新しい ID を割り当てる</param>
