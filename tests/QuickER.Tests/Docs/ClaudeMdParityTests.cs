@@ -242,4 +242,163 @@ public class ClaudeMdParityTests
                     + $"実在しない一覧項目=[{string.Join(", ", phantom)}]"
             );
     }
+
+    /// <summary>
+    /// 「テンプレート変更時は…」の箇条（再生成手順の正本）の本文を取り出す。
+    /// </summary>
+    /// <remarks>
+    /// 範囲は <c>- **テンプレート変更時は**</c> で始まる行から、次に行頭が <c>- </c> の行の直前まで
+    /// （途中の再生成コマンドのフェンスと、それに続く段落も本文に含む）。
+    /// <b>照合は CLAUDE.md 全体でなくこの本文に限る</b>＝全体で探すと、別の節での言及で偶然通ってしまう。
+    /// 書式を変えるときはこの契約も更新すること。
+    /// </remarks>
+    private static string FixtureListItem()
+    {
+        var lines = ClaudeMd.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
+        var start = lines.FindIndex(line =>
+            line.StartsWith("- **テンプレート変更時は**", StringComparison.Ordinal)
+        );
+        start.Should().BeGreaterThanOrEqualTo(0, "固定フィクスチャ一覧の箇条が見つかること");
+
+        var end = lines.FindIndex(
+            start + 1,
+            line => line.StartsWith("- ", StringComparison.Ordinal)
+        );
+        end.Should().BeGreaterThan(start, "箇条の終端（次の箇条）が見つかること");
+
+        return string.Join('\n', lines.GetRange(start, end - start));
+    }
+
+    /// <summary>識別子を構成する文字（名前の境界判定に使う）</summary>
+    private static bool IsWordCharacter(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
+
+    /// <summary>
+    /// <paramref name="text"/> の中に <paramref name="name"/> が<b>両側の境界つきで</b>現れるかを返す。
+    /// </summary>
+    /// <param name="text">探す対象（固定フィクスチャ一覧の箇条の本文）</param>
+    /// <param name="name">探す名前（ファイル名またはフィクスチャ名・クラス名）</param>
+    /// <param name="forbiddenSuffix">
+    /// 非 null なら、直後がこの文字列である出現を一致とみなさない
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// 素の部分一致では使えない＝フィクスチャ名どうしが包含する
+    /// （<c>SqlServerBinaryFixture.g.cs</c> ⊃ <c>BinaryFixture.g.cs</c>・
+    /// <c>SqlitePortableFixture.g.cs</c> ⊃ <c>PortableFixture.g.cs</c>）。
+    /// <b>左境界</b>がないと、別のフィクスチャの記載で本体の記載漏れが素通りする。
+    /// </para>
+    /// <para>
+    /// <b>右境界</b>も要る＝基底名で照合するとき（下記）、本体の記載を消しても同じ箇条に残る
+    /// <c>ComputedColumnFixtureDriftTests</c> や <c>BinaryFixtureDefinition.Build()</c> の記述で
+    /// 一致してしまう。ドリフトテストのクラス名も、将来の接尾辞つきの名前を右境界で防ぐ。
+    /// </para>
+    /// </remarks>
+    private static bool MentionsWithBoundaries(
+        string text,
+        string name,
+        string? forbiddenSuffix = null
+    )
+    {
+        for (var index = text.IndexOf(name, StringComparison.Ordinal); index >= 0; )
+        {
+            var after = index + name.Length;
+            var leftOk = index == 0 || !IsWordCharacter(text[index - 1]);
+            var rightOk = after >= text.Length || !IsWordCharacter(text[after]);
+            var suffixOk =
+                forbiddenSuffix is null
+                || !text.AsSpan(after).StartsWith(forbiddenSuffix, StringComparison.Ordinal);
+
+            if (leftOk && rightOk && suffixOk)
+            {
+                return true;
+            }
+
+            index = text.IndexOf(name, index + 1, StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
+    /// <summary>フィクスチャ生成物の置き場</summary>
+    private static string GeneratedFixtureDirectory() =>
+        Path.Combine(Root, "tests", "QuickER.Tests", "GeneratedFixture");
+
+    /// <summary>
+    /// <c>GeneratedFixture/</c> 直下の生成物（<c>*.g.cs</c>）が、すべて固定フィクスチャ一覧に載っていることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// この一覧は再生成手順の正本で、フィクスチャを足した本人が CLAUDE.md を思い出さない限り追従しない
+    /// （実際 2026-09-26 に <c>ComputedColumnFixture</c> を足したとき、一覧は 17 個のまま残った）。
+    /// 依存図・フォルダ一覧と同じ流儀で、名前で突合する網を張る（件数は照合しない）。
+    /// </para>
+    /// <para>
+    /// <b>本体の生成物は「ファイル名」か「<c>.g.cs</c> を外した名前」のどちらでも載っていればよい</b>＝
+    /// 2 ファイル構成のフィクスチャ（<c>ConcurrencyFixture</c> / <c>RemoteServiceFixture</c> / <c>SyncFixture</c>）は
+    /// 「本体＋<c>X.RemoteServer.g.cs</c> の 2 ファイル構成」と書く流儀のため、本体側がフィクスチャ名で呼ばれている。
+    /// ただし基底名の一致は<b>直後が <c>.RemoteServer</c> でない出現に限る</b>＝サーバー側の記載だけで
+    /// 本体の記載漏れを見逃さないため。<c>*.RemoteServer.g.cs</c> は 4 本ともフルのファイル名で書かれているので
+    /// 照合に含める。
+    /// </para>
+    /// </remarks>
+    [Fact(DisplayName = "CLAUDE.md の固定フィクスチャ一覧に、実在する生成物がすべて載っている")]
+    public void FixtureListItem_NamesEveryGeneratedFixtureFile()
+    {
+        var item = FixtureListItem();
+
+        var missing = Directory
+            .GetFiles(GeneratedFixtureDirectory(), "*.g.cs")
+            .Select(Path.GetFileName)
+            .Where(fileName =>
+                !MentionsWithBoundaries(item, fileName!)
+                && !(
+                    !fileName!.EndsWith(".RemoteServer.g.cs", StringComparison.Ordinal)
+                    && MentionsWithBoundaries(
+                        item,
+                        fileName[..^".g.cs".Length],
+                        forbiddenSuffix: ".RemoteServer"
+                    )
+                )
+            )
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToList();
+
+        missing
+            .Should()
+            .BeEmpty(
+                "固定フィクスチャ一覧は再生成手順の正本なので、生成物を足したら同じ箇条へ書く"
+                    + $"（載っていない生成物: [{string.Join(", ", missing)}]）"
+            );
+    }
+
+    /// <summary>
+    /// <c>GeneratedFixture/</c> 直下のドリフトテストが、すべて固定フィクスチャ一覧のドリフトテスト列挙に
+    /// 載っていることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 対象は <c>*FixtureDriftTests</c> だけ＝<c>RuntimePackageSourceDriftTests</c>（ランタイムパッケージ用ソース）と
+    /// サンプルのドリフトテスト（<c>EcOrderSampleDriftTests</c> / <c>EcOrderRemoteSampleDriftTests</c>）は、
+    /// 同じ箇条でも別の文で扱われているため照合しない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "CLAUDE.md の固定フィクスチャ一覧に、実在するドリフトテストがすべて載っている"
+    )]
+    public void FixtureListItem_NamesEveryFixtureDriftTest()
+    {
+        var item = FixtureListItem();
+
+        var missing = Directory
+            .GetFiles(GeneratedFixtureDirectory(), "*FixtureDriftTests.cs")
+            .Select(path => Path.GetFileNameWithoutExtension(path))
+            .Where(className => !MentionsWithBoundaries(item, className))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToList();
+
+        missing
+            .Should()
+            .BeEmpty(
+                "ドリフトテストの列挙も再生成手順の正本なので、足したら同じ箇条へ書く"
+                    + $"（載っていないドリフトテスト: [{string.Join(", ", missing)}]）"
+            );
+    }
 }
