@@ -185,7 +185,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     )
     {
         var pkCols = string.Join(", ", pks.Select(p => SqliteIdentifier.QuoteSimple(p.Name)));
-        return $"    CONSTRAINT \"{SqliteIdentifier.Escape($"PK_{SqliteIdentifier.SafeName(tableName)}")}\" PRIMARY KEY ({pkCols})";
+        return $"    CONSTRAINT \"{SqliteIdentifier.Escape(ConstraintNames.PrimaryKey(tableName))}\" PRIMARY KEY ({pkCols})";
     }
 
     /// <summary>一意制約行（<c>CONSTRAINT "…" UNIQUE (…)</c>）を組み立てる</summary>
@@ -315,7 +315,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
 
             // 制約名はモデルの値を優先し、未設定なら FK_子_親 の命名規則で生成する
             var constraintName = string.IsNullOrWhiteSpace(rel.ConstraintName)
-                ? $"FK_{SqliteIdentifier.SafeName(fkEntity.TableName)}_{SqliteIdentifier.SafeName(pkEntity.TableName)}"
+                ? ConstraintNames.ForeignKey(fkEntity.TableName, pkEntity.TableName)
                 : rel.ConstraintName;
 
             if (!index.TryGetValue(fkEntity.Id, out var list))

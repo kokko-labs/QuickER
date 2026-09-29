@@ -287,7 +287,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
         var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? $"FK_{MySqlIdentifier.SafeName(childTbl)}_{MySqlIdentifier.SafeName(parentTbl)}"
+            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
             : item.Relationship.ConstraintName!;
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship

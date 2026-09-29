@@ -427,7 +427,8 @@ public static class ErDiagramDynamicTools
                 Type = relType,
                 // 多対多では VM 側の整合処理が列ペアを落とす（中間テーブルを介する概念表現のため）
                 ColumnPairs = columnPairs!,
-                ConstraintName = $"FK_{target.TableName}_{source.TableName}",
+                // 既定名の規則は GUI の手作成・MCP のツールと共有する（作成経路で名前が割れないように）
+                ConstraintName = ConstraintNames.ForeignKey(target.TableName, source.TableName),
             },
             source,
             target

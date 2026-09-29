@@ -167,7 +167,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var pkCols = string.Join(", ", pks.Select(p => PgIdentifier.QuoteSimple(p.Name)));
         sb.AppendLine(
-            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape($"PK_{PgIdentifier.SafeName(item.TableName)}")}\" "
+            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName))}\" "
                 + $"PRIMARY KEY ({pkCols});"
         );
     }
@@ -244,7 +244,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
         var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? $"FK_{PgIdentifier.SafeName(childTbl)}_{PgIdentifier.SafeName(parentTbl)}"
+            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
             : item.Relationship.ConstraintName!;
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship

@@ -51,6 +51,14 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ### Changed
 
+#### Generated code
+
+- **With a schema-qualified table name, the generated unique constraint name now matches the DDL** — for a unique constraint that has no name, the generated entity's `[UniqueConstraint(…, Name = …)]` was synthesized from the raw table name, so for `dbo.Orders` it said `UQ_dbo.Orders_code` where the DDL creates `UQ_dbo_Orders_code`. Importing C# code restores that `Name` as the constraint's own name, so a round trip gave a previously unnamed constraint a different name. **Code generated before this fix still restores the old name**, so regenerate it before importing when you use schema-qualified table names
+
+#### AI chat & MCP
+
+- **Relationships created by the tools now get the same default constraint name as ones created in the GUI** — the built-in chat's and MCP's `add_relationship` joined the raw table names, so a schema-qualified name produced `FK_dbo.Orders_dbo.Customers` while creating the relationship by hand produced `FK_dbo_Orders_dbo_Customers`. All three now produce the latter. **Constraint names already saved in a diagram do not change.** The synthesized name of an unnamed unique constraint that `get_diagram_summary` shows now matches the DDL as well
+
 #### DB sync & DDL
 
 - **A difference in nullability on a computed column no longer produces an `ALTER COLUMN`** — the nullability of a computed column follows from its expression, which the diagram does not model and therefore cannot impose on a database. Without this, taking the way out above (making the column nullable in the diagram) would have made the sync offer a meaningless `ALTER COLUMN` against the database the diagram was imported from. Differences in the column's type are still detected
@@ -64,6 +72,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **A diagram file that leaves a required name or type empty (`null`) is no longer loaded** — a table name, a column name, a column type or a query name written as `null` used to be replaced with a default (an empty name, the type `int`), and saving over the file then made that replacement permanent. Such a file is now refused by name and location instead, in the GUI, the CLI and the MCP server alike, because filling the value in would change what the diagram means. A `null` in an optional string such as a description or a memo is still read as empty text. Only a hand-edited file can carry these, since nothing in QuickER writes one
 
 ### Fixed
+
+#### DB sync & DDL
+
+- **A table name with leading or trailing spaces no longer makes DDL and sync disagree about constraint names** — for an unnamed foreign key or primary key, the DDL turned a leading space into `_` (`FK__Orders_…`) while sync trimmed the table name before building the name (`FK_Orders_…`), so a sync could try to drop a constraint that did not exist. DDL, sync, generated code and the tools now all trim the name first and then replace dots and spaces with `_`. Only a diagram whose JSON was edited by hand can have such a name
 
 #### Diagram editing
 

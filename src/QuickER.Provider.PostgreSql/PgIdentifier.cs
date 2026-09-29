@@ -1,4 +1,5 @@
 using System.Text;
+using QuickER.Model;
 
 namespace QuickER.Provider.PostgreSql;
 
@@ -33,9 +34,8 @@ public static class PgIdentifier
     /// <summary>識別子内の <c>"</c> を PostgreSQL の規則（二重化）に従ってエスケープする</summary>
     public static string Escape(string name) => (name ?? string.Empty).Replace("\"", "\"\"");
 
-    /// <summary>制約名などに使う安全な ID を生成する（"." と空白を "_" へ置換）</summary>
-    public static string SafeName(string name) =>
-        (name ?? string.Empty).Replace(".", "_").Replace(" ", "_");
+    /// <summary>制約名などに使う安全な ID を生成する（規則の正本は <see cref="ConstraintNames.SafeName"/>）</summary>
+    public static string SafeName(string name) => ConstraintNames.SafeName(name);
 
     /// <summary><c>schema.table</c> 形式から <c>table</c> 部分のみを抽出する</summary>
     public static string TableNameOnly(string fullName) =>

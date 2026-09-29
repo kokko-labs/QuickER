@@ -259,7 +259,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         }
 
         var pkCols = string.Join(", ", pks.Select(p => OracleIdentifier.QuoteSimple(p.Name)));
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape($"PK_{OracleIdentifier.SafeName(item.TableName)}")}\" "
+        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName))}\" "
             + $"PRIMARY KEY ({pkCols});";
     }
 
@@ -331,7 +331,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
         var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? $"FK_{OracleIdentifier.SafeName(childTbl)}_{OracleIdentifier.SafeName(parentTbl)}"
+            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
             : item.Relationship.ConstraintName!;
 
         var sb = new StringBuilder();
