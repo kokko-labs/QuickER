@@ -4,19 +4,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>EcOrderRemoteSample.Server</RootNamespace>
-    <!-- サンプルは利用者のプロジェクトを模すため、リポジトリの中央パッケージ管理（CPM）から外す（Shared 側の注記を参照） -->
+    <!-- The samples mimic a consumer project, so they opt out of the repository's central package management (CPM) (see the note in the Shared project) -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 共有の本体生成物（Entity・SQLite 方言の QuickER 版 Repository・リモート面契約・DI 拡張）を参照する -->
+    <!-- Reference the shared main generated code (entities, SQLite-dialect QuickER repositories, remote contracts, DI extensions) -->
     <ProjectReference Include="../EcOrderRemote.Shared/EcOrderRemote.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <!--
-      サーバー生成物をリンクする。MapGeneratedRemoteEndpoints（Minimal API）は ASP.NET Core の
-      FrameworkReference を必要とするため、Web SDK を使う本プロジェクトでのみリンクする（Shared 側ではリンクしない）。
+      Link the server output. MapGeneratedRemoteEndpoints (Minimal API) needs the ASP.NET Core FrameworkReference,
+      so only this project, which uses the Web SDK, links it (the Shared project does not).
     -->
     <Compile
       Include="../Generated/EcOrderRemote.RemoteServer.g.cs"
@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- DDL を出力ディレクトリへコピーし、起動時にファイル DB を作成する -->
+    <!-- Copy the DDL to the output directory; the sample creates a file database from it at startup -->
     <None
       Include="../EcOrderRemote.sql"
       Link="EcOrderRemote.sql"

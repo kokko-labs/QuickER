@@ -77,7 +77,7 @@
     <value>層別フォルダへ振り分けて出力する</value>
   </data>
   <data name="CodeGen_LayeredOutputToolTip" xml:space="preserve">
-    <value>生成ファイルを出力フォルダ配下の層別サブフォルダへ書き出します。ドメイン層（Entity・値オブジェクト・Repository 契約・ランタイムのコア）／プレゼンテーション層（EditModel・Mapper）／インフラストラクチャ層（方言別実装・EF Core・インメモリ・同期・HTTP クライアント）／サーバー層（リモートサーバー実装）。&#xD;&#xA;ON にすると分割出力を含意するため、上の出力モードは分割へ切り替わります（「1 ファイルにまとめる」を選ぶとこのチェックは外れます）。変わるのはファイルの配置だけで、ファイル名・名前空間・内容は分割出力と同一です</value>
+    <value>生成ファイルを出力フォルダ配下の層別サブフォルダへ書き出します。ドメイン層（Entity・値オブジェクト・Repository 契約・ランタイムのコア）／プレゼンテーション層（EditModel・Mapper）／インフラストラクチャ層（方言別実装・EF Core・インメモリ・同期・HTTP クライアント）／サーバー層（リモートサーバー実装）。&#xD;&#xA;ON にすると分割出力を含意するため、上の出力モードは分割へ切り替わります（「1 ファイルにまとめる」を選ぶとこのチェックは外れます）。名前空間の既定は層フォルダに追従し、フォルダと名前空間が揃います（明示指定した名前空間はそちらが優先されます）。ファイル名・内容は分割出力と同一です</value>
   </data>
   <data name="CodeGen_LayerDirectories" xml:space="preserve">
     <value>層フォルダ（出力フォルダからの相対パス）</value>
@@ -137,7 +137,7 @@
     <value>サーバー（SQL Server）＋ローカル（SQLite）構成の同期エンジン・同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI 登録を生成します。&#xD;&#xA;対象は rowversion 列を持つテーブルだけで、サーバーには追加スキーマを作らず、ローカルにのみ共有ジャーナル 1 テーブルを実行時に用意します。</value>
   </data>
   <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
-    <value>DB 非依存のインメモリ Repository（プロトタイピング・単体テスト向け）を生成します。ランタイムの NuGet パッケージ参照モードとは併用できません</value>
+    <value>DB 非依存のインメモリ Repository（プロトタイピング・単体テスト向け）を生成します</value>
   </data>
   <data name="CodeGen_Runtime" xml:space="preserve">
     <value>ランタイム</value>

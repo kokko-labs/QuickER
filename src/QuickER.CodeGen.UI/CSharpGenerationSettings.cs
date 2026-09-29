@@ -110,7 +110,7 @@ public class CSharpGenerationSettings
     public bool GenerateEfCoreRepositories { get; set; }
 
     /// <summary>
-    /// DB 非依存のインメモリ Repository 群（テスト用）を生成するか（既定 false。パッケージ参照モードとは併用不可）
+    /// DB 非依存のインメモリ Repository 群（テスト用）を生成するか（既定 false）
     /// </summary>
     public bool GenerateInMemoryRepositories { get; set; }
 
@@ -140,7 +140,7 @@ public class CSharpGenerationSettings
 
     /// <summary>
     /// ランタイム（固定コード）を生成物に含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄うか
-    /// （既定 false。EF Core とは併用可能だがインメモリ生成とは併用不可）
+    /// （既定 false。EF Core・インメモリ生成とも併用可能）
     /// </summary>
     public bool UseRuntimePackages { get; set; }
 
