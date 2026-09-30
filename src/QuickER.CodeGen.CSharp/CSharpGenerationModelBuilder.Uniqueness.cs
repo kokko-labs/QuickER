@@ -47,11 +47,18 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>
     /// エンティティの UNIQUE 制約を「生成コード上の姿」へ解決する（構成列が 1 つでも解決できない制約は対象外として捨てる）。
     /// </summary>
+    /// <param name="entity">制約を解決するエンティティ</param>
+    /// <param name="columnFilter">構成列の絞り込み条件（<c>null</c> なら絞り込まない）</param>
     /// <remarks>
+    /// <para>
     /// 制約名は <see cref="UniqueConstraint.Name"/> が正本で、未設定なら <see cref="UniqueConstraint.SynthesizeName"/> の
     /// 合成名を使う（DDL 生成と同じ意味論。方言別の識別子安全化はここでは行わない＝生成コードは名前を文字列として運ぶだけ）。
+    /// </para>
+    /// <para>
+    /// <paramref name="columnFilter"/> を渡すと、構成列の絞り込み条件つきで解決する（条件に合わない列を含む制約は
+    /// 縮めずにまるごと捨てる）。
+    /// </para>
     /// </remarks>
-    /// <summary>構成列の絞り込み条件つきで解決する（条件に合わない列を含む制約はまるごと捨てる）</summary>
     private List<ResolvedUniqueConstraint> ResolveUniqueConstraints(
         Entity entity,
         Func<Column, bool>? columnFilter = null

@@ -173,6 +173,8 @@ ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
     /// <para>
     /// <c>INVISIBLE</c> 列の <c>column_id</c> は <c>NULL</c> になるため、<c>ORDER BY column_id</c>
     /// では可視列の後ろへ並ぶ（Oracle の昇順は NULLS LAST・実測）。図でも末尾の列になる。
+    /// <c>column_id</c> が同じ（<c>NULL</c> どうしの）<c>INVISIBLE</c> 列は、第 2 キーの
+    /// <c>internal_column_id</c>（列を作った順）で決定的に並ぶ。
     /// </para>
     /// <para>
     /// 仮想列の式は <c>data_default</c>（LONG 型）。ODP.NET は既定（<c>InitialLONGFetchSize = 0</c>）では
@@ -183,7 +185,7 @@ ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
         @"SELECT table_name, column_name, data_type, data_precision, data_scale, char_length, nullable, column_id, data_length, char_used, virtual_column, data_default
 FROM user_tab_cols
 WHERE user_generated = 'YES'
-ORDER BY table_name, column_id";
+ORDER BY table_name, column_id, internal_column_id";
 
     /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>
     /// <remarks>

@@ -564,9 +564,9 @@ public static partial class DbmlImporter
                     throw ImportDiagnostics.AtLine(
                         lineNumber,
                         string.Format(
-                            Strings.Dbml_IndexParseError,
+                            Strings.Dbml_PrimaryKeyIndexDuplicateColumn,
                             entity.TableName,
-                            string.Join(", ", columnNames)
+                            column.Name
                         )
                     );
                 }

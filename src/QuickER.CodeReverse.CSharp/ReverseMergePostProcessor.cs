@@ -130,7 +130,7 @@ public static class ReverseMergePostProcessor
     }
 
     /// <summary>
-    /// コードが主キーの順序を書いていなかったエンティティへ、現在図の主キーの順序を引き継ぐ
+    /// コードが主キーの順序を書いていなかったエンティティへ、現在図が明示した主キーの順序を引き継ぐ
     /// </summary>
     /// <param name="current">コード取込前の現在図（順序の供給元）</param>
     /// <param name="mergedEntities">
@@ -151,6 +151,11 @@ public static class ReverseMergePostProcessor
     /// 主キーの構成が変わったなら、それはコードが語った変更なので古い順序を持ち込まない。
     /// 列 Id はマージ結果側の列へ列名で張り替える（名前の照合は <see cref="DiagramMergeReconciler"/> と同じ Ordinal）。
     /// </para>
+    /// <para>
+    /// 引き継ぐのは <b>現在図が明示した順序</b>（<see cref="Entity.PrimaryKeyColumnIds"/> が空でない）だけ。
+    /// 明示していない図は、マージ結果でも明示しないまま残す。列宣言順のフォールバックを書き込むと
+    /// 順序が固定され、以後の列の並べ替えが主キーの順序に反映されなくなる。
+    /// </para>
     /// </remarks>
     public static void ApplyPrimaryKeyOrder(
         ErDiagram current,
@@ -170,6 +175,12 @@ public static class ReverseMergePostProcessor
                 tablesWithPrimaryKeyOrder.Contains(entity.TableName)
                 || !currentById.TryGetValue(entity.Id, out var existing)
             )
+            {
+                continue;
+            }
+
+            // 現在図が順序を明示していなければ、引き継ぐ順序が無い（未明示は未明示のまま）
+            if (existing.PrimaryKeyColumnIds.Count == 0)
             {
                 continue;
             }

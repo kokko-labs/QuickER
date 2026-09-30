@@ -79,6 +79,8 @@ internal static class ChatToolInvocation
     /// AI がツール結果を待ち続けたり（CLI 3 種）、実行済みの呼び出しへ「実行されなかった」合成結果が
     /// 積まれて AI が同じ操作をやり直したり（API キー接続）する。通知は付随処理なので、
     /// 失敗しても呼び出し元の処理は必ず続ける。
+    /// 報告先も同じ UI の購読であることが多く、購読側が投げる状況では報告先も投げ得るため、
+    /// 報告先の例外も呼び出し元へ伝えない（このメソッドは例外を投げない）。
     /// </remarks>
     internal static void Notify(
         EventHandler<ErChatToolActivity>? handler,
@@ -93,9 +95,16 @@ internal static class ChatToolInvocation
         }
         catch (Exception ex)
         {
-            reportStatus?.Invoke(
-                string.Format(Resources.Strings.Chat_ToolActivityNotifyFailed, ex.Message)
-            );
+            try
+            {
+                reportStatus?.Invoke(
+                    string.Format(Resources.Strings.Chat_ToolActivityNotifyFailed, ex.Message)
+                );
+            }
+            catch (Exception)
+            {
+                // 報告先まで失敗したら、それ以上知らせる手段が無い。呼び出し元の処理を優先して続ける
+            }
         }
     }
 }

@@ -224,7 +224,19 @@ public class DbmlPrimaryKeyOrderTests
 
         var act = () => DbmlImporter.Parse(text);
 
-        act.Should().Throw<InvalidDataException>().WithMessage("*4*tenant_id, tenant_id*");
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    4,
+                    string.Format(
+                        Strings.Dbml_PrimaryKeyIndexDuplicateColumn,
+                        "order_lines",
+                        "tenant_id"
+                    )
+                )
+            );
     }
 
     /// <summary>[pk] 索引が未定義の列を指せば、その列名を名指しして断る</summary>

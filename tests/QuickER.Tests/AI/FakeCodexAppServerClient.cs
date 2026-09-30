@@ -40,6 +40,18 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     /// <summary>InterruptTurnAsync の本体に入った時点で実行するフック（要求中のターン完了を模擬する）</summary>
     public Action? OnInterruptRequested { get; set; }
 
+    /// <summary>
+    /// 非 null なら InterruptTurnAsync がこのタスクの完了まで待ってから結果を返す（応答待ちの間に
+    /// 別のことが起きる状況を作る）
+    /// </summary>
+    public Task? InterruptGate { get; set; }
+
+    /// <summary>InterruptTurnAsync に入った時点で完了する（応答待ちへ確実に到達したことの合図）</summary>
+    public TaskCompletionSource InterruptEntered { get; } = new();
+
+    /// <summary>StartTurnAsync が返すターン Id（ターンごとに変えて、別のターンを区別する）</summary>
+    public string NextTurnId { get; set; } = "turn_test";
+
     /// <summary>非 null なら StartTurnAsync がこのタスクの完了まで待つ（ターン開始中の状態を作る）</summary>
     public Task? StartTurnGate { get; set; }
 
@@ -204,7 +216,7 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
             throw StartTurnException;
         }
 
-        var info = new CodexTurnInfo { Id = "turn_test", Status = "inProgress" };
+        var info = new CodexTurnInfo { Id = NextTurnId, Status = "inProgress" };
 
         // スクリプト化された完了があれば、ターン開始と同時に完了通知を自動発火する
         if (AutoTurnCompletions.Count > 0)
@@ -216,7 +228,7 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         return info;
     }
 
-    public Task InterruptTurnAsync(
+    public async Task InterruptTurnAsync(
         string threadId,
         string turnId,
         CancellationToken cancellationToken = default
@@ -226,13 +238,17 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         LastInterruptThreadId = threadId;
         LastInterruptTurnId = turnId;
         OnInterruptRequested?.Invoke();
+        InterruptEntered.TrySetResult();
+
+        if (InterruptGate is { } gate)
+        {
+            await gate.ConfigureAwait(false);
+        }
 
         if (InterruptException is not null)
         {
             throw InterruptException;
         }
-
-        return Task.CompletedTask;
     }
 
     public Task RespondToDynamicToolCallAsync(

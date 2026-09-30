@@ -129,7 +129,8 @@ Each dialect imports one scope, and objects outside it are not visible to the im
 | SQLite | The single connected database file |
 
 On Oracle, a column the user made `INVISIBLE` is imported as well (it is a column deliberately hidden, not a column that does not exist).
-Oracle gives such a column no ordinal, so it comes after the visible columns in the diagram.
+Oracle gives such a column no ordinal, so it comes after the visible columns in the diagram, with several such columns in the order they were created.
+The diagram does not model the `INVISIBLE` attribute itself, so DDL generated from the diagram declares the column as an ordinary visible column.
 The system-generated columns a function-based index adds to the table (`SYS_NC…$`) are not imported.
 
 A foreign key that points outside this scope cannot become a relationship, because its parent table is not in the diagram.

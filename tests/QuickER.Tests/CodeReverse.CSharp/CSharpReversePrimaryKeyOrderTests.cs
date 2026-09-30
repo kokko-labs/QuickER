@@ -294,4 +294,36 @@ public class CSharpReversePrimaryKeyOrderTests
 
         merged[0].PrimaryKeyColumnIds.Should().BeEmpty();
     }
+
+    /// <summary>現在図が主キーの順序を明示していなければ、マージ取込後も明示しないまま残る</summary>
+    /// <remarks>
+    /// 引き継ぐのは明示された順序だけ。列宣言順のフォールバックを書き込むと順序が固定され、
+    /// 以後の列の並べ替えが主キーの順序に反映されなくなる。GUI と同じ手順（生成 → リバース →
+    /// Guid 引継マージ → 後処理）を通す。
+    /// </remarks>
+    [Fact(DisplayName = "現在図が順序を明示していなければ、マージ取込後も未明示のまま")]
+    public void ApplyPrimaryKeyOrder_CurrentOrderNotExplicit_StaysNotExplicit()
+    {
+        var current = Diagram(null);
+        var reversed = Reverse(Generate(current));
+        reversed
+            .TablesWithPrimaryKeyOrder.Should()
+            .BeEmpty("宣言順どおりの主キーには順序を出さない＝コードは順序を書いていない");
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            reversed.Entities.ToList(),
+            reversed.Relationships.ToList(),
+            preserveExistingMemo: true
+        );
+
+        ReverseMergePostProcessor.ApplyPrimaryKeyOrder(
+            current,
+            merged.Entities,
+            reversed.TablesWithPrimaryKeyOrder
+        );
+
+        merged.Entities.Single().PrimaryKeyColumnIds.Should().BeEmpty();
+        KeyOrder(merged.Entities.Single()).Should().Equal("tenant_id", "order_no");
+    }
 }

@@ -667,6 +667,68 @@ public class CodexChatEngineTests
     }
 
     /// <summary>
+    /// 中断の応答を待つ間に次のターンが始まっていたら、その中断の失敗で強制停止しないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 中断要求の応答待ち（実クライアントは 30 秒でタイムアウト）の間にターン 1 が完了し、
+    /// ターン 2 が始まると、実行中フラグはターン 2 のものになる。フラグだけを見て止めると、
+    /// 中断を頼んでいないターン 2 と会話の文脈を捨てる。照合するのは中断を送ったターンの Id。
+    /// </remarks>
+    [Fact(DisplayName = "中断の応答待ちの間に次のターンが始まっていたら強制停止しない")]
+    public async Task InterruptAsync_WhenNextTurnStartsDuringRequest_DoesNotForceStop()
+    {
+        var gate = new TaskCompletionSource();
+        var client = new FakeCodexAppServerClient
+        {
+            InterruptException = new TimeoutException("応答がありません"),
+            InterruptGate = gate.Task,
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        var statuses = new List<string>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+        engine.StatusChanged += (_, m) => statuses.Add(m);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+
+        // ターン 1 への中断を応答待ちで止める
+        var interrupting = engine.InterruptAsync(TestContext.Current.CancellationToken);
+        await client.InterruptEntered.Task;
+
+        // 応答待ちの間にターン 1 が完了し、ターン 2 が始まる
+        client.RaiseTurnCompleted("completed");
+        client.NextTurnId = "turn_2";
+        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
+
+        // ターン 1 への中断は失敗で返る
+        gate.SetResult();
+        await interrupting;
+
+        client.LastInterruptTurnId.Should().Be("turn_test", "中断を送ったのはターン 1");
+        client.StopCount.Should().Be(0, "ターン 2 は中断を頼まれていない");
+        statuses
+            .Should()
+            .NotContain(
+                string.Format(
+                    QuickER.AI.Resources.Strings.Codex_InterruptFailed,
+                    "応答がありません"
+                )
+            );
+
+        // ターン 2 は実行中のまま＝完了通知がそのまま届く
+        client.RaiseTurnCompleted("completed");
+        results.Should().HaveCount(2);
+        results.Should().OnlyContain(result => result.Success);
+        client.StartThreadCount.Should().Be(1, "会話の文脈は保たれている");
+    }
+
+    /// <summary>
     /// 中断要求が失敗（無応答のタイムアウト等）したら App Server を停止し、実行中ターンを失敗完了させる
     /// ことを検証する。停止までしないとターンが実行中のまま残る。
     /// </summary>
