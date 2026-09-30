@@ -1851,6 +1851,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Dbml_PrimaryKeyIndexDuplicateColumn {
+            get {
+                return ResourceManager.GetString("Dbml_PrimaryKeyIndexDuplicateColumn", resourceCulture);
+            }
+        }
+
         public static string Dbml_PrimaryKeyConflict {
             get {
                 return ResourceManager.GetString("Dbml_PrimaryKeyConflict", resourceCulture);

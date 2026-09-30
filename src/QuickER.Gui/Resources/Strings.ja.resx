@@ -841,6 +841,9 @@
   <data name="Dbml_PrimaryKeyIndexDuplicate" xml:space="preserve">
     <value>テーブル '{0}' に主キーの索引（[pk]）が複数あります。主キーはテーブルに 1 つだけです。</value>
   </data>
+  <data name="Dbml_PrimaryKeyIndexDuplicateColumn" xml:space="preserve">
+    <value>テーブル '{0}' の主キーの索引（[pk]）に、カラム '{1}' が 2 回以上あります。</value>
+  </data>
   <data name="Dbml_PrimaryKeyConflict" xml:space="preserve">
     <value>テーブル '{0}' で、pk を付けたカラム（{1}）と主キーの索引のカラム（{2}）が食い違っています。同じ集合にするか、どちらか一方だけにしてください。</value>
   </data>

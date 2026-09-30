@@ -130,6 +130,8 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
     /// <para>
     /// INVISIBLE 列の <c>column_id</c> は <c>NULL</c> なので、<c>ORDER BY column_id</c> では
     /// 可視列の後ろへ並ぶ（Oracle の昇順は NULLS LAST）。図でも末尾の列になることを併せて固定する。
+    /// INVISIBLE 列が 2 本以上あるときは、第 2 キーの <c>internal_column_id</c> で作った順に並ぶ。
+    /// 作成順と名前の辞書順が逆になるように列を置き、可視列の間に INVISIBLE 列を挟んで宣言する。
     /// </para>
     /// </remarks>
     [Fact(
@@ -144,8 +146,9 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
             """
             CREATE TABLE PROBE_T (
                 ID NUMBER(10) PRIMARY KEY,
+                SECRET VARCHAR2(50) INVISIBLE,
                 NAME VARCHAR2(50),
-                SECRET VARCHAR2(50) INVISIBLE
+                ALPHA_HIDDEN NUMBER(10) INVISIBLE
             );
             CREATE INDEX PROBE_IX ON PROBE_T (UPPER(NAME));
             """,
@@ -157,8 +160,8 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
 
         var probe = result.Entities.Single(e => e.TableName == "PROBE_T");
 
-        // INVISIBLE 列は取り込む。column_id が NULL なので可視列の後ろへ並ぶ
-        probe.Columns.Select(c => c.Name).Should().Equal("ID", "NAME", "SECRET");
+        // INVISIBLE 列は取り込む。column_id が NULL なので可視列の後ろへ、作った順に並ぶ
+        probe.Columns.Select(c => c.Name).Should().Equal("ID", "NAME", "SECRET", "ALPHA_HIDDEN");
         probe.Columns.Single(c => c.Name == "SECRET").DataType.Should().Be("VARCHAR2(50)");
 
         // 関数インデックスのシステム生成列は取り込まない（図に実在しない列を作らない）

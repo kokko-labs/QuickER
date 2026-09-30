@@ -138,6 +138,30 @@ public class ChatToolInvocationTests
             .Be(string.Format(AiStrings.Chat_ToolActivityNotifyFailed, "UI が落ちた"));
     }
 
+    [Fact(DisplayName = "Notify: 購読側と報告先の両方が投げても、呼び出し元へ伝えない")]
+    public void Notify_SubscriberAndReporterThrow_IsNotPropagated()
+    {
+        var reported = 0;
+        EventHandler<ErChatToolActivity> handler = (_, _) =>
+            throw new InvalidOperationException("UI が落ちた");
+        Action<string> reportStatus = _ =>
+        {
+            reported++;
+            throw new InvalidOperationException("状態表示も落ちた");
+        };
+
+        var act = () =>
+            ChatToolInvocation.Notify(
+                handler,
+                this,
+                new ErChatToolActivity("add_entity", "added", true),
+                reportStatus
+            );
+
+        act.Should().NotThrow();
+        reported.Should().Be(1, "報告は試みる");
+    }
+
     [Fact(DisplayName = "Notify: 購読者がいなければ何もしない")]
     public void Notify_NoSubscriber_DoesNothing()
     {

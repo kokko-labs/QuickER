@@ -819,6 +819,9 @@
   <data name="Dbml_PrimaryKeyIndexDuplicate" xml:space="preserve">
     <value>Table '{0}' declares more than one primary key index ([pk]); a table has at most one primary key.</value>
   </data>
+  <data name="Dbml_PrimaryKeyIndexDuplicateColumn" xml:space="preserve">
+    <value>Table '{0}' lists column '{1}' more than once in its primary key index ([pk]).</value>
+  </data>
   <data name="Dbml_PrimaryKeyConflict" xml:space="preserve">
     <value>In table '{0}', the columns marked pk ({1}) differ from the columns of the primary key index ({2}); make them the same set or keep only one of the two.</value>
   </data>

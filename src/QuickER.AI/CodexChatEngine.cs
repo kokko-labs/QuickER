@@ -435,17 +435,17 @@ public sealed class CodexChatEngine : IErChatEngine
     /// <remarks>
     /// 中断要求そのものが届かない（無応答のタイムアウト・接続断）ときは、App Server を停止して
     /// ターンを打ち切る（Claude Code 側の強制終了に相当する最終手段）。要求の失敗を報告するだけでは
-    /// ターンが実行中のまま残り、チャットが二度と送信できなくなる
+    /// ターンが実行中のまま残り、チャットが二度と送信できなくなる。
+    /// 停止の前に照合するのは中断を送ったターン（実行中フラグに加え、ターン Id が送信時と同じこと）
     /// </remarks>
     public async Task InterruptAsync(CancellationToken cancellationToken = default)
     {
+        var threadId = _currentThreadId;
+        var turnId = _currentTurnId;
+
         // 実行中のターンが無ければ送らない。_currentTurnId は正常完了では消えないので、
         // これが無いと「完了した直後に中断を押す」だけで完了済みのターンへ interrupt が飛ぶ
-        if (
-            _currentThreadId is null
-            || _currentTurnId is null
-            || Volatile.Read(ref _turnInProgress) == 0
-        )
+        if (threadId is null || turnId is null || Volatile.Read(ref _turnInProgress) == 0)
         {
             return;
         }
@@ -453,14 +453,20 @@ public sealed class CodexChatEngine : IErChatEngine
         try
         {
             await _client
-                .InterruptTurnAsync(_currentThreadId, _currentTurnId, cancellationToken)
+                .InterruptTurnAsync(threadId, turnId, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            // 送っている間にターンが完了していたら、失敗しても壊すものは無い。
-            // ここで強制停止すると、正常に終わった会話の文脈を中断の失敗を理由に捨てることになる
-            if (Volatile.Read(ref _turnInProgress) == 0)
+            // 送っている間にそのターンが完了していたら、失敗しても壊すものは無い。
+            // ここで強制停止すると、正常に終わった会話の文脈を中断の失敗を理由に捨てることになる。
+            // 実行中フラグだけでは足りない＝要求を待つ間に次のターンが始まっていると、フラグは次の
+            // ターンのもので、止めると中断を頼んでいないターンと会話の文脈を捨てる
+            // （次のターンの開始待ちの間は Id が null なので、これも不一致として扱う）
+            if (
+                Volatile.Read(ref _turnInProgress) == 0
+                || !string.Equals(_currentTurnId, turnId, StringComparison.Ordinal)
+            )
             {
                 return;
             }
