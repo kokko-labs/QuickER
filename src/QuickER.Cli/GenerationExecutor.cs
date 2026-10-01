@@ -42,6 +42,37 @@ internal static class GenerationExecutor
     internal static IDatabaseProvider ResolveProvider(string providerName) =>
         Providers.Get(providerName);
 
+    /// <summary>プロバイダ名が登録済みか（大文字小文字は登録簿の照合規則に従う）</summary>
+    internal static bool IsRegisteredProvider(string providerName) =>
+        Providers.TryGet(providerName, out _);
+
+    /// <summary>登録済みのプロバイダ名を名前順・カンマ区切りで返す（エラー文言の案内用）</summary>
+    internal static string RegisteredProviderNames =>
+        string.Join(", ", Providers.All.Select(provider => provider.Name).Order());
+
+    /// <summary>
+    /// 図を入力に取る生成（CLI の generate・MCP の generate_csharp / generate_ddl）で使うプロバイダ名を決める。
+    /// 明示されていればそれを、無ければ図の対象 DBMS を、図にも無ければ sqlserver を返す
+    /// </summary>
+    /// <remarks>
+    /// 既定を図の方言にするのは、型の解決（DB 型 → C# 型）が方言ごとに違うため。固定の既定だと、
+    /// 別の方言の図を指定し忘れたときに型が黙って別の方言で解決される。
+    /// CLI と MCP で既定が割れないよう、規則はここだけに置く。
+    /// </remarks>
+    /// <param name="explicitName">利用者が指定したプロバイダ名（未指定なら null か空）</param>
+    /// <param name="diagram">生成対象の図</param>
+    internal static string ResolveProviderName(string? explicitName, ErDiagram diagram)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitName))
+        {
+            return explicitName;
+        }
+
+        return string.IsNullOrWhiteSpace(diagram.TargetDbms)
+            ? SqlServerProvider.ProviderName
+            : diagram.TargetDbms;
+    }
+
     /// <summary>
     /// 生成の共通パイプラインを実行する。図の取得（<paramref name="resolveDiagram"/>）だけがコマンド固有で、
     /// 失敗時は <c>null</c>（エラー表示済み）を返して終了コード 1 で中断する。
@@ -49,6 +80,8 @@ internal static class GenerationExecutor
     /// <remarks>
     /// 検証順序は「プロバイダ解決 → 図の取得 → 設定読解（LoadOptions）」。generate の schema 存在チェックのように
     /// プロバイダ解決より前に済ませるべき検証は、このメソッドを呼ぶ前にコマンド側で行うこと。
+    /// generate は方言の既定を図から決めるため、図を読んでからこのメソッドを呼ぶ（読込済みの図を
+    /// <paramref name="resolveDiagram"/> がそのまま返す）。
     /// 診断（標準エラー相当）と生成ファイル一覧（標準出力相当）は、引数の
     /// <paramref name="stdout"/> / <paramref name="stderr"/> へ書き出す。
     /// </remarks>

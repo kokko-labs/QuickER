@@ -31,7 +31,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 |---|:-:|---|
 | `--schema <file>` | ✅ | 入力する ER 図 JSON ファイル（アプリの保存形式） |
 | `--out <dir>` | ✅ | 生成コードの出力先フォルダ |
-| `--provider <name>` | | 対象データベースの種類。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
+| `--provider <name>` | | 対象データベースの種類。`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`。省略すると図の対象 DBMS（`TargetDbms`）を使い、図に無ければ `sqlserver` |
 | `--config <file>` | | 生成オプション設定ファイル（quicker.json）。下記参照 |
 | `--force` | | 生成後に手で編集された生成ファイルがあっても上書きする |
 
@@ -64,6 +64,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | `--connection <string>` | ✅ | 接続文字列（形式は `--provider` の DBMS に従う） |
 
 そのほかのオプション（`--out` / `--config` / `--provider` / `--force`、および設定キーと同名の kebab-case フラグ群）は `generate` と同じです。
+ただし方言を読み取る図が無いため、`--provider` の既定は `sqlserver` です。
 
 ## quicker reverse
 
@@ -81,10 +82,11 @@ quicker reverse --source ./Generated/QuickEREntities.g.cs --out diagram.json --p
 | `--source <file>` | ✅ | 入力する C# ソースファイル（`IncludeDataAnnotations` 有効で生成した、エンティティを含む `.g.cs`） |
 | `--out <file>` | ✅ | 出力する ER 図 JSON ファイル（スキーマのみ・`layout` キーなし）。親ディレクトリが無ければ作成します |
 | `--provider <name>` | | 列型の展開に使う方言と、図に記録される `TargetDbms`。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
-| `--force` | | 出力先がこのバージョンの対応より新しいフォーマットの図であっても上書きします |
+| `--force` | | 出力先のファイルが既にあっても上書きします（このバージョンの対応より新しいフォーマットの図も含む） |
 
 結果は新規の図として書き出し、既存図へのマージは行いません。
-`--out` が新しいフォーマットで保存された図を指す場合は、何も書かずに終了コード `2` で止まります（このバージョンの形式で書き出すと、このバージョンが表現できないデータが失われるため）。
+`--out` が既にあるファイルを指す場合は、`--force` を付けない限り何も書かずに終了コード `2` で止まります。
+書き出すのはスキーマだけの新しい図なので、既存の図を上書きするとレイアウト・名前付きクエリ・Id が失われ、新しいフォーマットで保存された図ではこのバージョンが表現できないデータも失われるためです。
 致命的でない指摘は警告として標準エラーへ出力し、解析対象クラスが 0 件の場合は失敗します。
 
 ## quicker mcp

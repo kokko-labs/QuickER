@@ -376,14 +376,10 @@ public static class CodeGenToolSet
         ErDiagram schema
     )
     {
-        var providerName = GetString(args, "provider");
-
-        if (string.IsNullOrWhiteSpace(providerName))
-        {
-            providerName = string.IsNullOrWhiteSpace(schema.TargetDbms)
-                ? "sqlserver"
-                : schema.TargetDbms;
-        }
+        var providerName = GenerationExecutor.ResolveProviderName(
+            GetString(args, "provider"),
+            schema
+        );
 
         try
         {
