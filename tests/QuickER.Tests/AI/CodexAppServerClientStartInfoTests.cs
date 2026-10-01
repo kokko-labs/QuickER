@@ -30,7 +30,7 @@ public class CodexAppServerClientStartInfoTests
         var (fileName, arguments) = CodexAppServerClient.ResolveLaunch(@"C:\npm\codex.cmd");
 
         fileName.Should().Be(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
-        arguments.Should().Be($"/d /s /c \"\"C:\\npm\\codex.cmd\" {Arguments}\"");
+        arguments.Should().Be($"/d /s /v:off /c \"\"C:\\npm\\codex.cmd\" {Arguments}\"");
     }
 
     [Fact]
@@ -62,7 +62,9 @@ public class CodexAppServerClientStartInfoTests
         );
 
         fileName.Should().Be(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
-        arguments.Should().Be($"/d /s /c \"\"C:\\Program Files\\nodejs\\codex.cmd\" {Arguments}\"");
+        arguments
+            .Should()
+            .Be($"/d /s /v:off /c \"\"C:\\Program Files\\nodejs\\codex.cmd\" {Arguments}\"");
     }
 
     [Fact]
@@ -75,6 +77,17 @@ public class CodexAppServerClientStartInfoTests
         act.Should()
             .Throw<InvalidOperationException>()
             .WithMessage(string.Format(AiStrings.Codex_PathHasQuote, path));
+    }
+
+    [Fact]
+    public void ResolveStartInfo_パーセントを含むシムのパスはCodexの文言で拒否する()
+    {
+        const string path = @"C:\%EVIL%\codex.cmd";
+        var act = () => CodexAppServerClient.ResolveStartInfo(path, Arguments);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.Codex_PathHasEnvExpansion, path));
     }
 
     [Theory]

@@ -330,4 +330,32 @@ public class DiagramExportServiceTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    /// <summary>
+    /// 欠落の種類はすべて resx の文言へ変換される（switch の腕が漏れて列挙名がそのまま画面に出ることがない）。
+    /// </summary>
+    /// <remarks>
+    /// <c>DescribeOmission</c> は該当しない種類を <c>kind.ToString()</c> へ落とすため、種類を足して腕を書き忘れても
+    /// ビルドは通る。列挙の全値を回して、文言が列挙名と同じでなく、対応する resx キーの値と一致することを確かめる。
+    /// </remarks>
+    [Fact(DisplayName = "欠落の種類はすべて resx の文言へ変換される")]
+    public void DescribeOmission_CoversEveryKind()
+    {
+        var describe = typeof(DiagramExportService).GetMethod(
+            "DescribeOmission",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static
+        )!;
+
+        foreach (var kind in Enum.GetValues<ExportOmissionKind>())
+        {
+            var text = (string)describe.Invoke(null, [kind])!;
+
+            text.Should()
+                .Be(
+                    Strings.ResourceManager.GetString($"ExportOmission_{kind}", Strings.Culture),
+                    $"{kind} は ExportOmission_{kind} の文言へ変換される"
+                );
+            text.Should().NotBe(kind.ToString());
+        }
+    }
 }

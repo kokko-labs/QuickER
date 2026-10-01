@@ -45,4 +45,7 @@ public enum ExportOmissionKind
 
     /// <summary>複合主キー自身の列順序（列の並びと食い違うもの）</summary>
     PrimaryKeyOrder,
+
+    /// <summary>リレーションの子側の列にならない列に付いた外部キーの印</summary>
+    ForeignKeyMarkerWithoutRelationship,
 }

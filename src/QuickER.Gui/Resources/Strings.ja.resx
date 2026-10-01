@@ -789,6 +789,9 @@
   <data name="ExportOmission_ColumnNameNormalized" xml:space="preserve">
     <value>この形式で書けない列名（空白・記号は「_」へ置き換わります）</value>
   </data>
+  <data name="ExportOmission_ForeignKeyMarkerWithoutRelationship" xml:space="preserve">
+    <value>リレーションの子側の列になっていない列の外部キー印（この形式は外部キーをリレーションの一部としてしか書けません）</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
   </data>
@@ -863,7 +866,7 @@
     <value>解釈できない DBML の行です: '{0}'。</value>
   </data>
   <data name="Dbml_UnsupportedRelationshipForm" xml:space="preserve">
-    <value>未対応のリレーション記法です: '{0}'。名前なしの短縮形（Ref: 親.列 &lt; 子.列）だけに対応しています。</value>
+    <value>未対応のリレーション記法です: '{0}'。短縮形（Ref: 親.列 &lt; 子.列、名前を付けるなら Ref 名前: …）だけに対応しています。ブロック形式 Ref {{ … }} には対応していません。</value>
   </data>
   <data name="Mermaid_EmptyText" xml:space="preserve">
     <value>Mermaid テキストが空です。</value>

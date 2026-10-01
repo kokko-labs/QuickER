@@ -58,6 +58,19 @@ public class ClaudeCodeProcessClientStartInfoTests
     }
 
     [Fact]
+    public void ApplyBatchShimGuard_パーセントを含むシムのパスはClaudeの文言で拒否する()
+    {
+        const string path = @"C:\%EVIL%\claude.cmd";
+        var startInfo = new ProcessStartInfo { FileName = path };
+
+        var act = () => ClaudeCodeProcessClient.ApplyBatchShimGuard(startInfo);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.ClaudeCode_PathHasEnvExpansion, path));
+    }
+
+    [Fact]
     public void ApplyBatchShimGuard_環境変数展開を含む引数はClaudeの文言で拒否する()
     {
         var startInfo = new ProcessStartInfo { FileName = @"C:\npm\claude.cmd" };

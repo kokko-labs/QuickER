@@ -470,6 +470,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         BatchShimProcessGuard.Apply(
             startInfo,
             Strings.ClaudeCode_PathHasQuote,
+            Strings.ClaudeCode_PathHasEnvExpansion,
             Strings.ClaudeCode_ArgHasEnvExpansion,
             Strings.ClaudeCode_ArgHasNewline
         );

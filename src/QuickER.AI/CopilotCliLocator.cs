@@ -32,22 +32,43 @@ public static class CopilotCliLocator
     /// <remarks>
     /// copilot の起動は GitHub.Copilot.SDK の内側で行われ、QuickER は引数を組み立てない。
     /// そのため <c>.cmd</c> シムに対して codex / claude と同じ cmd.exe ラップは掛けられず、
-    /// ここで掛けられる防御は「シムのパス自体に引用符が無いこと」の確認だけになる
-    /// （引用符は正規の Windows パスには現れず、含まれていれば引用の切断を狙ったもの）。
+    /// ここで掛けられる防御は「シムのパス自体に引用符・<c>%</c>・<c>!</c> が無いこと」の確認だけになる
+    /// （引用符は正規の Windows パスには現れず、含まれていれば引用の切断を狙ったもの。
+    /// <c>%</c> はシムを起動するとき CreateProcess が挟む cmd に環境変数として展開され、
+    /// 起動する実体が別物に化け得る＝<see cref="BatchShimProcessGuard"/> の 2 つの入口と同じ規則。
+    /// <c>!</c> は 2 つの入口なら <c>/v:off</c> で無効にできるが、ここでは cmd を起動するのが SDK で
+    /// <c>/v:off</c> を付けられないため、利用者がレジストリの <c>DelayedExpansion</c> を有効にしていると
+    /// <c>!名前!</c> が展開される＝Copilot に限り拒否する）。
     /// 残余は docs/ai-chat.md の注意節に明記している。検出（<see cref="IsAvailable"/>）が
     /// 例外を投げないよう、検証は解決ではなくこの起動直前の関門に置く。
     /// </remarks>
     /// <param name="executablePath">解決済みの copilot 実行ファイルパス</param>
-    /// <exception cref="InvalidOperationException">シムのパスに引用符が含まれる場合</exception>
+    /// <exception cref="InvalidOperationException">シムのパスに引用符・<c>%</c>・<c>!</c> のいずれかが含まれる場合</exception>
     public static string EnsureSafeToLaunch(string executablePath)
     {
-        if (
-            BatchShimProcessGuard.IsBatchShim(executablePath)
-            && executablePath.Contains('"', StringComparison.Ordinal)
-        )
+        if (!BatchShimProcessGuard.IsBatchShim(executablePath))
+        {
+            return executablePath;
+        }
+
+        if (executablePath.Contains('"', StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 string.Format(Resources.Strings.Copilot_PathHasQuote, executablePath)
+            );
+        }
+
+        if (executablePath.Contains('%', StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                string.Format(Resources.Strings.Copilot_PathHasEnvExpansion, executablePath)
+            );
+        }
+
+        if (executablePath.Contains('!', StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                string.Format(Resources.Strings.Copilot_PathHasDelayedExpansion, executablePath)
             );
         }
 

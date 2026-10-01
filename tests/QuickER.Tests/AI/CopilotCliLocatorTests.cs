@@ -145,10 +145,46 @@ public class CopilotCliLocatorTests
             .WithMessage(string.Format(AiStrings.Copilot_PathHasQuote, path));
     }
 
+    /// <summary>
+    /// 起動直前の関門が、シムのパスに <c>%</c> を含む解決結果を拒否することを検証する
+    /// （シムを起動するとき CreateProcess が挟む cmd が環境変数として展開するため）。
+    /// </summary>
+    [Fact(DisplayName = "% を含む cmd シムのパスは起動前に拒否する")]
+    public void EnsureSafeToLaunch_PercentInShimPath_Throws()
+    {
+        const string path = @"C:\%EVIL%\copilot.cmd";
+
+        var act = () => CopilotCliLocator.EnsureSafeToLaunch(path);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.Copilot_PathHasEnvExpansion, path));
+    }
+
+    /// <summary>
+    /// 起動直前の関門が、シムのパスに <c>!</c> を含む解決結果を拒否することを検証する。
+    /// codex / claude は自分で <c>/v:off</c> を付けて包み直すが、copilot は SDK が cmd を起動するため
+    /// 付けられず、利用者がレジストリで遅延展開を有効にしていると <c>!名前!</c> が展開される。
+    /// </summary>
+    [Fact(DisplayName = "! を含む cmd シムのパスは起動前に拒否する")]
+    public void EnsureSafeToLaunch_ExclamationInShimPath_Throws()
+    {
+        const string path = @"C:\!EVIL!\copilot.cmd";
+
+        var act = () => CopilotCliLocator.EnsureSafeToLaunch(path);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.Copilot_PathHasDelayedExpansion, path));
+    }
+
     /// <summary>正当なパス（シム・実行ファイルとも）はそのまま通ることを検証する</summary>
+    /// <remarks>実行ファイルは cmd を経由しないため、パスに <c>%</c> があっても通す。</remarks>
     [Theory]
     [InlineData(@"C:\npm\copilot.cmd")]
     [InlineData(@"C:\Program Files\GitHub\copilot.exe")]
+    [InlineData(@"C:\100%\copilot.exe")]
+    [InlineData(@"C:\Hi!\copilot.exe")]
     public void EnsureSafeToLaunch_SafePath_PassesThrough(string path)
     {
         CopilotCliLocator.EnsureSafeToLaunch(path).Should().Be(path);

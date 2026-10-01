@@ -187,6 +187,9 @@
   <data name="ClaudeCode_PathHasQuote" xml:space="preserve">
     <value>claude コマンドのパスに引用符が含まれるため起動できません: {0}</value>
   </data>
+  <data name="ClaudeCode_PathHasEnvExpansion" xml:space="preserve">
+    <value>claude コマンドのパスに cmd が展開する '%' が含まれるため起動できません: {0}</value>
+  </data>
   <data name="ClaudeCode_ArgHasEnvExpansion" xml:space="preserve">
     <value>claude コマンドの引数に cmd が展開する '%' が含まれるため起動できません: {0}</value>
   </data>
@@ -340,6 +343,9 @@
   <data name="Codex_PathHasQuote" xml:space="preserve">
     <value>codex コマンドのパスに引用符が含まれるため起動できません: {0}</value>
   </data>
+  <data name="Codex_PathHasEnvExpansion" xml:space="preserve">
+    <value>codex コマンドのパスに cmd が展開する '%' が含まれるため起動できません: {0}</value>
+  </data>
   <data name="Codex_ArgHasCmdMeta" xml:space="preserve">
     <value>codex コマンドの引数に cmd で解釈される文字 '{0}' が含まれるため起動できません: {1}</value>
   </data>
@@ -393,6 +399,12 @@
   </data>
   <data name="Copilot_PathHasQuote" xml:space="preserve">
     <value>copilot コマンドのパスに引用符が含まれるため起動できません: {0}</value>
+  </data>
+  <data name="Copilot_PathHasEnvExpansion" xml:space="preserve">
+    <value>copilot コマンドのパスに cmd が展開する '%' が含まれるため起動できません: {0}</value>
+  </data>
+  <data name="Copilot_PathHasDelayedExpansion" xml:space="preserve">
+    <value>copilot コマンドのパスに、遅延展開が有効な cmd が展開する '!' が含まれるため起動できません: {0}</value>
   </data>
   <data name="Copilot_NotConnected" xml:space="preserve">
     <value>GitHub Copilot ランタイムはまだ起動していません。</value>

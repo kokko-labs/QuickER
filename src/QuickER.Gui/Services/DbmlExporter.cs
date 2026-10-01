@@ -10,12 +10,14 @@ namespace QuickER.Services;
 /// ER 図を DBML (Database Markup Language) テキストへ変換するエクスポーター
 /// </summary>
 /// <remarks>
-/// 出力は <see cref="DbmlImporter"/> が解釈できる記法の範囲に限定する
+/// 出力は DBML 標準の記法だけを使い、<see cref="DbmlImporter"/> が解釈できる範囲に限定する
 /// <list type="bullet">
-///   <item><c>Table</c> ブロック: カラム設定は <c>pk</c> / <c>ref</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note</c> のみ出力（Enum 等は対象外）</item>
+///   <item><c>Table</c> ブロック: カラム設定は <c>pk</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note</c> のみ出力（Enum 等は対象外）</item>
 ///   <item><c>Indexes</c> ブロック: 一意制約のうちカラム設定 <c>unique</c> で表せないもの（複合・名前付き）を <c>(列, …) [unique, name: '…']</c> として出力。
 ///     主キーの順序が列の並びと食い違うテーブルは、主キーをカラム設定 <c>pk</c> でなく先頭の <c>(列, …) [pk]</c> で書く</item>
-///   <item><c>Ref:</c> 行: 多重度を <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）の記号で表現し、複合外部キーは DBML 標準の複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で表現</item>
+///   <item><c>Ref</c> 行: 制約名は名前付き Ref（<c>Ref 名前: …</c>）、参照アクションは端点の後ろの設定ブロック（<c>[delete: …, update: …]</c>）。
+///     多重度を <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）の記号で表現し、複合外部キーは複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で表現</item>
+///   <item>外部キー列の印は列の設定でなく <c>Ref</c> 行の子側の列として運ぶ（DBML に値なしの <c>ref</c> 設定は無い）</item>
 ///   <item>note 文字列中のシングルクォートは <c>\'</c> にエスケープ</item>
 /// </list>
 /// </remarks>
@@ -77,9 +79,10 @@ public static partial class DbmlExporter
     /// <summary>この形式では表現できないために落ちる情報の種類を、図の実際の中身から判定する</summary>
     /// <remarks>
     /// DBML はテーブル説明（<c>Note:</c>）・列の説明（<c>note</c>）・NULL 許可・一意制約（複合・名前付きとも
-    /// <c>Indexes</c> ブロック）・外部キーの列対応（複合 Ref 構文）・参照アクション（<c>delete</c> / <c>update</c>）を
-    /// すべて表現できる。載せられないのは、<c>Note</c> を説明に使うため独自拡張なしでは書けないテーブルのメモと、
-    /// DBML がそもそも持たない名前付きクエリ定義だけ。
+    /// <c>Indexes</c> ブロック）・外部キーの列対応（複合 Ref 構文）・制約名（名前付き Ref）・
+    /// 参照アクション（<c>delete</c> / <c>update</c>）をすべて表現できる。載せられないのは、<c>Note</c> を説明に
+    /// 使うため独自拡張なしでは書けないテーブルのメモと、DBML がそもそも持たない名前付きクエリ定義と、
+    /// <c>Ref</c> 行の子側の列にならない列に付いた外部キーの印（<see cref="HasForeignKeyMarkerOutsideRelationships"/>）。
     /// 中身が実際に入っているときだけ返す（空の説明では告知しない）
     /// </remarks>
     public static IReadOnlyList<ExportOmissionKind> DetectOmissions(ErDiagram diagram)
@@ -91,9 +94,48 @@ public static partial class DbmlExporter
                 ExportOmissionKind.TableMemo
             ),
             (diagram.Queries.Count > 0, ExportOmissionKind.NamedQuery),
+            (
+                HasForeignKeyMarkerOutsideRelationships(diagram),
+                ExportOmissionKind.ForeignKeyMarkerWithoutRelationship
+            ),
         };
 
         return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();
+    }
+
+    /// <summary>
+    /// 外部キーの印（<see cref="Column.IsForeignKey"/>）が付いた列のうち、出力する <c>Ref</c> 行の子側の列に
+    /// ならないものがあるかを判定する
+    /// </summary>
+    /// <remarks>
+    /// DBML には列の外部キー印を単独で書く記法が無く、取込は <c>Ref</c> 行の子側の列にだけ印を立てる。
+    /// 子側の列は出力（<see cref="BuildRelationshipLine"/>）と同じ <see cref="ForeignKeyColumnPairResolver"/> の
+    /// 解決から求める。多対多と、列ペアの無い（解決できない）リレーションは子側の列ゼロとみなす
+    /// （取込は多対多に列を割り当てない）。主キー列も区別しない
+    /// </remarks>
+    private static bool HasForeignKeyMarkerOutsideRelationships(ErDiagram diagram)
+    {
+        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+        var childColumnIds = new HashSet<Guid>();
+
+        foreach (var relationship in diagram.Relationships)
+        {
+            if (
+                relationship.Type == RelationshipType.ManyToMany
+                || !entitiesById.TryGetValue(relationship.SourceEntityId, out var source)
+                || !entitiesById.TryGetValue(relationship.TargetEntityId, out var target)
+                || ForeignKeyColumnPairResolver.Resolve(relationship, source, target) is null
+            )
+            {
+                continue;
+            }
+
+            childColumnIds.UnionWith(relationship.ColumnPairs.Select(pair => pair.TargetColumnId));
+        }
+
+        return diagram.Entities.Any(entity =>
+            entity.Columns.Any(column => column.IsForeignKey && !childColumnIds.Contains(column.Id))
+        );
     }
 
     /// <summary>テーブルの説明を DBML 標準の <c>Note:</c> 行として出力する（説明が空なら出さない）</summary>
@@ -111,8 +153,8 @@ public static partial class DbmlExporter
     /// DBML のカラム定義行（<c>名前 型 [設定, ...]</c>）を構築する
     /// </summary>
     /// <remarks>
-    /// PK 列には <c>pk</c> のみを出力し <c>ref</c> は併記しない。NULL 許可は常に
-    /// <c>null</c> / <c>not null</c> のどちらかを明示し、インポート時の既定値依存を避ける。
+    /// 外部キーの印は列の設定へ書かない（DBML に値なしの <c>ref</c> 設定は無く、印は <c>Ref</c> 行の子側の列として
+    /// 運ぶ）。NULL 許可は常に <c>null</c> / <c>not null</c> のどちらかを明示し、インポート時の既定値依存を避ける。
     /// <paramref name="isUnique"/> は「名前なし単一列の一意制約の構成列」を表す
     /// （<see cref="ClassifyUniqueConstraints"/> の判定結果）。
     /// <paramref name="markPrimaryKey"/> が <c>false</c> のとき（主キーを索引の <c>[pk]</c> で書くテーブル）は
@@ -126,11 +168,6 @@ public static partial class DbmlExporter
         if (column.IsPrimaryKey && markPrimaryKey)
         {
             settings.Add("pk");
-        }
-
-        if (column.IsForeignKey && !column.IsPrimaryKey)
-        {
-            settings.Add("ref");
         }
 
         if (isUnique)
@@ -236,12 +273,13 @@ public static partial class DbmlExporter
     }
 
     /// <summary>
-    /// DBML のリレーション行（<c>Ref:</c> 行）を構築する
+    /// DBML のリレーション行（<c>Ref</c> 行）を構築する
     /// </summary>
     /// <remarks>
-    /// 制約名は note 設定として出力する。標準 DBML では設定をエンドポイントの後ろへ置くが、
-    /// ここでは <see cref="DbmlImporter"/> との往復を前提に <c>Ref:</c> 直後へ配置する独自形式を採る。
-    /// 列ペアが 2 組以上（複合外部キー）なら DBML 標準の複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で書き出し、
+    /// DBML 標準の形 <c>Ref 名前: 親.列 &lt; 子.列 [delete: …, update: …]</c> で書く。制約名は名前付き Ref の
+    /// 名前として書き（無ければ <c>Ref:</c>）、テーブル名・列名と同じ規則で必要なら引用する。
+    /// 参照アクションは端点の後ろの設定ブロックへ置く。
+    /// 列ペアが 2 組以上（複合外部キー）なら複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で書き出し、
     /// 1 組なら単一列形式になる。参照カラム未指定のリレーションは各エンティティの先頭カラムで代用する
     /// </remarks>
     private static string? BuildRelationshipLine(
@@ -275,13 +313,16 @@ public static partial class DbmlExporter
             RelationshipType.ManyToMany => "<>",
             _ => "<",
         };
+        var name = string.IsNullOrWhiteSpace(relationship.ConstraintName)
+            ? string.Empty
+            : $" {Identifier(relationship.ConstraintName)}";
         var settings = BuildRelationshipSettings(relationship);
 
-        return $"Ref:{settings} {Identifier(source.TableName)}.{FormatEndpointColumns(sourceColumnNames)} "
-            + $"{symbol} {Identifier(target.TableName)}.{FormatEndpointColumns(targetColumnNames)}";
+        return $"Ref{name}: {Identifier(source.TableName)}.{FormatEndpointColumns(sourceColumnNames)} "
+            + $"{symbol} {Identifier(target.TableName)}.{FormatEndpointColumns(targetColumnNames)}{settings}";
     }
 
-    /// <summary><c>Ref:</c> 行の設定ブロック（制約名・参照アクション）を組み立てる</summary>
+    /// <summary><c>Ref</c> 行の端点の後ろに置く設定ブロック（参照アクション）を組み立てる</summary>
     /// <remarks>
     /// 既定の参照アクション（<see cref="ForeignKeyReferentialAction.NoAction"/>）は出力しない
     /// （指定があるものだけを刻む＝生成コードの <c>[NavigationReference]</c> と同じ流儀）。
@@ -290,11 +331,6 @@ public static partial class DbmlExporter
     private static string BuildRelationshipSettings(Relationship relationship)
     {
         var settings = new List<string>();
-
-        if (!string.IsNullOrWhiteSpace(relationship.ConstraintName))
-        {
-            settings.Add($"note: '{EscapeNote(relationship.ConstraintName!)}'");
-        }
 
         if (relationship.OnDelete != ForeignKeyReferentialAction.NoAction)
         {
@@ -309,7 +345,7 @@ public static partial class DbmlExporter
         return settings.Count == 0 ? string.Empty : $" [{string.Join(", ", settings)}]";
     }
 
-    /// <summary><c>Ref:</c> 行のエンドポイント列を表記する（単一列はそのまま・複数列は <c>(a, b)</c>）</summary>
+    /// <summary><c>Ref</c> 行のエンドポイント列を表記する（単一列はそのまま・複数列は <c>(a, b)</c>）</summary>
     private static string FormatEndpointColumns(IReadOnlyList<string> columnNames) =>
         columnNames.Count == 1
             ? Identifier(columnNames[0])
@@ -322,7 +358,7 @@ public static partial class DbmlExporter
     private static string EscapeNote(string text) => DbmlLiteral.Escape(text);
 
     /// <summary>
-    /// 識別子（テーブル名・カラム名）を DBML の行へ載せる形へ整える
+    /// 識別子（テーブル名・カラム名・制約名）を DBML の行へ載せる形へ整える
     /// </summary>
     /// <remarks>
     /// <para>
@@ -330,15 +366,16 @@ public static partial class DbmlExporter
     /// 残りが別の宣言として解釈される。改行・制御文字はまず空白へ畳む。
     /// </para>
     /// <para>
-    /// そのうえで、英数字・アンダースコア以外を含む名前は DBML の引用識別子（<c>"列 名"</c>）で囲む。
+    /// そのうえで、ASCII の英数字・アンダースコア以外を含む名前は DBML の引用識別子（<c>"列 名"</c>）で囲む。
     /// 囲まないと、空白を含むテーブル名は取込側の <c>Table</c> 行の書式に一致せず<b>テーブルごと落ち</b>、
     /// 空白を含む列名は先頭トークンで切れて残りが型名へ混ざる（<c>Order Date date</c> → 名前
     /// <c>Order</c> ・型 <c>Date date</c>）。SQL Server 由来の <c>[Order Details]</c> のような名前で現実に起きる。
     /// </para>
     /// <para>
-    /// 判定は「<c>^\w+$</c> に一致しないなら囲む」。<c>\w</c> は Unicode の文字・数字・アンダースコアを含むため、
-    /// 日本語の名前は従来どおり囲まない（既存の出力はバイト不変）。ドットを含む名前（<c>dbo.Customers</c>）は
-    /// 囲む側へ倒す——囲まないと <c>Ref:</c> 行の端点（<c>親.列</c>）と区切りが区別できず、
+    /// 判定は「<c>^[A-Za-z0-9_]+$</c> に一致しないなら囲む」。DBML の素の名前に使えるのはこの範囲だけで、
+    /// 日本語などの非 ASCII の名前を素で書くと DBML の公式パーサー（<c>@dbml/core</c>）が構文エラーにする
+    /// （<c>\w</c> で判定すると Unicode の文字を素で書いてしまう）。ドットを含む名前（<c>dbo.Customers</c>）も
+    /// 囲む側へ倒れる——囲まないと <c>Ref</c> 行の端点（<c>親.列</c>）と区切りが区別できず、
     /// 書き出したファイルを読み戻せない。
     /// </para>
     /// </remarks>
@@ -369,8 +406,8 @@ public static partial class DbmlExporter
     private static string QuoteIdentifier(string sanitized) =>
         $"\"{DbmlLiteral.Escape(sanitized, '"')}\"";
 
-    /// <summary>囲まずに書ける識別子（英数字・アンダースコアのみ）に一致する正規表現を生成する</summary>
-    [GeneratedRegex(@"^\w+$", RegexOptions.Compiled)]
+    /// <summary>囲まずに書ける識別子（ASCII の英数字・アンダースコアのみ）に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"^[A-Za-z0-9_]+$", RegexOptions.Compiled)]
     private static partial Regex PlainIdentifierRegex();
 
     /// <summary>囲む必要がある型表記（空白または角括弧を含む）に一致する正規表現を生成する</summary>

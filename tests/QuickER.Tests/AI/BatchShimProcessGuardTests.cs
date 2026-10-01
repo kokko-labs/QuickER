@@ -12,11 +12,13 @@ namespace QuickER.Tests.AI;
 /// 引数が 1 本の文字列で来る入口（<see cref="BatchShimProcessGuard.WrapCommandLine"/>＝メタ文字は拒否）と、
 /// ArgumentList で来る入口（<see cref="BatchShimProcessGuard.Apply"/>＝各トークンを引用し、引用の内側でも
 /// 効く <c>%</c> を拒否）の 2 系統を、ポリシーごとに固定する。改行はどちらの入口でも拒否する
-/// （引用では防げず cmd が <c>%*</c> 展開で行ごと切るため）。
+/// （引用では防げず cmd が <c>%*</c> 展開で行ごと切るため）。包み直しはどちらも <c>/v:off</c> つきで、
+/// シムのパスの引用符と <c>%</c> もどちらの入口でも拒否する。
 /// </remarks>
 public class BatchShimProcessGuardTests
 {
     private const string PathQuoteFormat = "path has quote: {0}";
+    private const string PathPercentFormat = "path has percent: {0}";
     private const string MetaCharFormat = "arg has meta '{0}': {1}";
     private const string EnvExpansionFormat = "arg has percent: {0}";
     private const string NewlineFormat = "arg has newline: {0}";
@@ -58,6 +60,7 @@ public class BatchShimProcessGuardTests
             @"C:\tools\codex.exe",
             "app-server",
             PathQuoteFormat,
+            PathPercentFormat,
             MetaCharFormat,
             NewlineFormat
         );
@@ -73,6 +76,7 @@ public class BatchShimProcessGuardTests
             @"C:\Program Files\nodejs\codex.cmd",
             "app-server --listen stdio://",
             PathQuoteFormat,
+            PathPercentFormat,
             MetaCharFormat,
             NewlineFormat
         );
@@ -81,7 +85,7 @@ public class BatchShimProcessGuardTests
         arguments
             .Should()
             .Be(
-                "/d /s /c \"\"C:\\Program Files\\nodejs\\codex.cmd\" app-server --listen stdio://\""
+                "/d /s /v:off /c \"\"C:\\Program Files\\nodejs\\codex.cmd\" app-server --listen stdio://\""
             );
     }
 
@@ -98,6 +102,7 @@ public class BatchShimProcessGuardTests
                 @"C:\tools\codex.cmd",
                 arguments,
                 PathQuoteFormat,
+                PathPercentFormat,
                 MetaCharFormat,
                 NewlineFormat
             );
@@ -115,11 +120,49 @@ public class BatchShimProcessGuardTests
                 path,
                 "app-server",
                 PathQuoteFormat,
+                PathPercentFormat,
                 MetaCharFormat,
                 NewlineFormat
             );
 
         act.Should().Throw<InvalidOperationException>().WithMessage($"path has quote: {path}");
+    }
+
+    /// <summary>
+    /// パスの <c>%</c> は cmd が環境変数として展開し、起動する実体が別物に化け得るため拒否する。
+    /// </summary>
+    [Fact]
+    public void WrapCommandLine_パーセントを含むシムのパスは拒否する()
+    {
+        const string path = @"C:\%EVIL%\codex.cmd";
+
+        var act = () =>
+            BatchShimProcessGuard.WrapCommandLine(
+                path,
+                "app-server",
+                PathQuoteFormat,
+                PathPercentFormat,
+                MetaCharFormat,
+                NewlineFormat
+            );
+
+        act.Should().Throw<InvalidOperationException>().WithMessage($"path has percent: {path}");
+    }
+
+    /// <summary>シムでなければ cmd を経由しないため、パスに <c>%</c> があっても素通しする</summary>
+    [Fact]
+    public void WrapCommandLine_パーセントを含むパスでもexeなら素通しする()
+    {
+        var (fileName, _) = BatchShimProcessGuard.WrapCommandLine(
+            @"C:\100%\codex.exe",
+            "app-server",
+            PathQuoteFormat,
+            PathPercentFormat,
+            MetaCharFormat,
+            NewlineFormat
+        );
+
+        fileName.Should().Be(@"C:\100%\codex.exe");
     }
 
     /// <summary>
@@ -133,6 +176,7 @@ public class BatchShimProcessGuardTests
                 @"C:\tools\codex.cmd",
                 "app-server\r\n--listen stdio://",
                 PathQuoteFormat,
+                PathPercentFormat,
                 MetaCharFormat,
                 NewlineFormat
             );
@@ -148,6 +192,7 @@ public class BatchShimProcessGuardTests
                 "C:\\tools\\co\r\ndex.cmd",
                 "app-server",
                 PathQuoteFormat,
+                PathPercentFormat,
                 MetaCharFormat,
                 NewlineFormat
             );
@@ -163,7 +208,13 @@ public class BatchShimProcessGuardTests
         var startInfo = new ProcessStartInfo { FileName = @"C:\tools\claude.exe" };
         startInfo.ArgumentList.Add("-p");
 
-        BatchShimProcessGuard.Apply(startInfo, PathQuoteFormat, EnvExpansionFormat, NewlineFormat);
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            PathQuoteFormat,
+            PathPercentFormat,
+            EnvExpansionFormat,
+            NewlineFormat
+        );
 
         startInfo.FileName.Should().Be(@"C:\tools\claude.exe");
         startInfo.ArgumentList.Should().Equal("-p");
@@ -178,7 +229,13 @@ public class BatchShimProcessGuardTests
         startInfo.ArgumentList.Add("--model");
         startInfo.ArgumentList.Add("sonnet");
 
-        BatchShimProcessGuard.Apply(startInfo, PathQuoteFormat, EnvExpansionFormat, NewlineFormat);
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            PathQuoteFormat,
+            PathPercentFormat,
+            EnvExpansionFormat,
+            NewlineFormat
+        );
 
         startInfo.FileName.Should().Be(SystemCmdExe);
 
@@ -204,7 +261,13 @@ public class BatchShimProcessGuardTests
         var startInfo = new ProcessStartInfo { FileName = @"C:\npm\claude.cmd" };
         startInfo.ArgumentList.Add(argument);
 
-        BatchShimProcessGuard.Apply(startInfo, PathQuoteFormat, EnvExpansionFormat, NewlineFormat);
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            PathQuoteFormat,
+            PathPercentFormat,
+            EnvExpansionFormat,
+            NewlineFormat
+        );
 
         startInfo.Arguments.Should().Contain($"\"{argument}\"");
     }
@@ -231,6 +294,7 @@ public class BatchShimProcessGuardTests
             BatchShimProcessGuard.Apply(
                 startInfo,
                 PathQuoteFormat,
+                PathPercentFormat,
                 EnvExpansionFormat,
                 NewlineFormat
             );
@@ -248,6 +312,7 @@ public class BatchShimProcessGuardTests
             BatchShimProcessGuard.Apply(
                 startInfo,
                 PathQuoteFormat,
+                PathPercentFormat,
                 EnvExpansionFormat,
                 NewlineFormat
             );
@@ -262,7 +327,13 @@ public class BatchShimProcessGuardTests
         var startInfo = new ProcessStartInfo { FileName = @"C:\npm\claude.cmd" };
         startInfo.ArgumentList.Add("say \"hi\"");
 
-        BatchShimProcessGuard.Apply(startInfo, PathQuoteFormat, EnvExpansionFormat, NewlineFormat);
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            PathQuoteFormat,
+            PathPercentFormat,
+            EnvExpansionFormat,
+            NewlineFormat
+        );
 
         startInfo
             .Arguments.Should()
@@ -276,7 +347,13 @@ public class BatchShimProcessGuardTests
         var startInfo = new ProcessStartInfo { FileName = @"C:\npm\claude.cmd" };
         startInfo.ArgumentList.Add(@"a\""b");
 
-        BatchShimProcessGuard.Apply(startInfo, PathQuoteFormat, EnvExpansionFormat, NewlineFormat);
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            PathQuoteFormat,
+            PathPercentFormat,
+            EnvExpansionFormat,
+            NewlineFormat
+        );
 
         // a \ \ "" b → 引用符の前の \ が 1 本から 2 本へ、引用符自身は "" へ
         startInfo.Arguments.Should().Contain(@"""a\\""""b""");
@@ -289,7 +366,13 @@ public class BatchShimProcessGuardTests
         var startInfo = new ProcessStartInfo { FileName = @"C:\npm\claude.cmd" };
         startInfo.ArgumentList.Add(@"C:\dir\");
 
-        BatchShimProcessGuard.Apply(startInfo, PathQuoteFormat, EnvExpansionFormat, NewlineFormat);
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            PathQuoteFormat,
+            PathPercentFormat,
+            EnvExpansionFormat,
+            NewlineFormat
+        );
 
         startInfo.Arguments.Should().Contain(@"""C:\dir\\""");
     }
@@ -302,7 +385,13 @@ public class BatchShimProcessGuardTests
         startInfo.ArgumentList.Add("--flag");
         startInfo.ArgumentList.Add(string.Empty);
 
-        BatchShimProcessGuard.Apply(startInfo, PathQuoteFormat, EnvExpansionFormat, NewlineFormat);
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            PathQuoteFormat,
+            PathPercentFormat,
+            EnvExpansionFormat,
+            NewlineFormat
+        );
 
         startInfo.Arguments.Should().EndWith("\"--flag\" \"\"\"");
     }
@@ -321,6 +410,7 @@ public class BatchShimProcessGuardTests
             BatchShimProcessGuard.Apply(
                 startInfo,
                 PathQuoteFormat,
+                PathPercentFormat,
                 EnvExpansionFormat,
                 NewlineFormat
             );
@@ -338,10 +428,52 @@ public class BatchShimProcessGuardTests
             BatchShimProcessGuard.Apply(
                 startInfo,
                 PathQuoteFormat,
+                PathPercentFormat,
                 EnvExpansionFormat,
                 NewlineFormat
             );
 
         act.Should().Throw<InvalidOperationException>().WithMessage($"path has quote: {path}");
+    }
+
+    /// <summary>
+    /// パスの <c>%</c> は引数と同じく cmd に展開されるため、こちらの入口でも拒否する。
+    /// </summary>
+    [Fact]
+    public void Apply_パーセントを含むシムのパスは拒否する()
+    {
+        const string path = @"C:\%EVIL%\claude.cmd";
+        var startInfo = new ProcessStartInfo { FileName = path };
+        startInfo.ArgumentList.Add("-p");
+
+        var act = () =>
+            BatchShimProcessGuard.Apply(
+                startInfo,
+                PathQuoteFormat,
+                PathPercentFormat,
+                EnvExpansionFormat,
+                NewlineFormat
+            );
+
+        act.Should().Throw<InvalidOperationException>().WithMessage($"path has percent: {path}");
+    }
+
+    /// <summary>シムでなければ cmd を経由しないため、パスに <c>%</c> があっても何もしない</summary>
+    [Fact]
+    public void Apply_パーセントを含むパスでもexeなら何もしない()
+    {
+        var startInfo = new ProcessStartInfo { FileName = @"C:\100%\claude.exe" };
+        startInfo.ArgumentList.Add("-p");
+
+        BatchShimProcessGuard.Apply(
+            startInfo,
+            PathQuoteFormat,
+            PathPercentFormat,
+            EnvExpansionFormat,
+            NewlineFormat
+        );
+
+        startInfo.FileName.Should().Be(@"C:\100%\claude.exe");
+        startInfo.ArgumentList.Should().Equal("-p");
     }
 }

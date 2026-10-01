@@ -1485,6 +1485,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             resolvedPath,
             appServerArguments,
             Strings.Codex_PathHasQuote,
+            Strings.Codex_PathHasEnvExpansion,
             Strings.Codex_ArgHasCmdMeta,
             Strings.Codex_ArgHasNewline
         );

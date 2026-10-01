@@ -279,6 +279,8 @@ internal sealed class DiagramExportService(
             ExportOmissionKind.NamedQuery => Strings.ExportOmission_NamedQuery,
             ExportOmissionKind.ColumnNameNormalized => Strings.ExportOmission_ColumnNameNormalized,
             ExportOmissionKind.PrimaryKeyOrder => Strings.ExportOmission_PrimaryKeyOrder,
+            ExportOmissionKind.ForeignKeyMarkerWithoutRelationship =>
+                Strings.ExportOmission_ForeignKeyMarkerWithoutRelationship,
             _ => kind.ToString(),
         };
 }

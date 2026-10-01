@@ -767,6 +767,9 @@
   <data name="ExportOmission_ColumnNameNormalized" xml:space="preserve">
     <value>Column names that the format cannot spell (spaces and symbols are folded to "_")</value>
   </data>
+  <data name="ExportOmission_ForeignKeyMarkerWithoutRelationship" xml:space="preserve">
+    <value>Foreign key markers on columns that no relationship uses as a child column (the format records a foreign key only as part of a relationship)</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
   </data>
@@ -841,7 +844,7 @@
     <value>Cannot interpret this DBML line: '{0}'.</value>
   </data>
   <data name="Dbml_UnsupportedRelationshipForm" xml:space="preserve">
-    <value>Unsupported relationship form: '{0}'. Only the short form without a name (Ref: parent.column &lt; child.column) is supported.</value>
+    <value>Unsupported relationship form: '{0}'. Only the short form (Ref: parent.column &lt; child.column, or Ref name: … for a named relationship) is supported; the block form Ref {{ … }} is not.</value>
   </data>
   <data name="Mermaid_EmptyText" xml:space="preserve">
     <value>The Mermaid text is empty.</value>

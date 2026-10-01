@@ -311,6 +311,12 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string ClaudeCode_PathHasEnvExpansion {
+            get {
+                return ResourceManager.GetString("ClaudeCode_PathHasEnvExpansion", resourceCulture);
+            }
+        }
+
         public static string ClaudeCode_ArgHasEnvExpansion {
             get {
                 return ResourceManager.GetString("ClaudeCode_ArgHasEnvExpansion", resourceCulture);
@@ -618,6 +624,12 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Codex_PathHasEnvExpansion {
+            get {
+                return ResourceManager.GetString("Codex_PathHasEnvExpansion", resourceCulture);
+            }
+        }
+
         public static string Codex_ArgHasCmdMeta {
             get {
                 return ResourceManager.GetString("Codex_ArgHasCmdMeta", resourceCulture);
@@ -723,6 +735,18 @@ namespace QuickER.AI.Resources {
         public static string Copilot_PathHasQuote {
             get {
                 return ResourceManager.GetString("Copilot_PathHasQuote", resourceCulture);
+            }
+        }
+
+        public static string Copilot_PathHasEnvExpansion {
+            get {
+                return ResourceManager.GetString("Copilot_PathHasEnvExpansion", resourceCulture);
+            }
+        }
+
+        public static string Copilot_PathHasDelayedExpansion {
+            get {
+                return ResourceManager.GetString("Copilot_PathHasDelayedExpansion", resourceCulture);
             }
         }
 

@@ -187,6 +187,9 @@
   <data name="ClaudeCode_PathHasQuote" xml:space="preserve">
     <value>Cannot launch because the claude command path contains a quotation mark: {0}</value>
   </data>
+  <data name="ClaudeCode_PathHasEnvExpansion" xml:space="preserve">
+    <value>Cannot launch because the claude command path contains '%', which cmd expands: {0}</value>
+  </data>
   <data name="ClaudeCode_ArgHasEnvExpansion" xml:space="preserve">
     <value>Cannot launch because a claude command argument contains '%', which cmd expands: {0}</value>
   </data>
@@ -340,6 +343,9 @@
   <data name="Codex_PathHasQuote" xml:space="preserve">
     <value>Cannot launch because the codex command path contains a quotation mark: {0}</value>
   </data>
+  <data name="Codex_PathHasEnvExpansion" xml:space="preserve">
+    <value>Cannot launch because the codex command path contains '%', which cmd expands: {0}</value>
+  </data>
   <data name="Codex_ArgHasCmdMeta" xml:space="preserve">
     <value>Cannot launch because the codex command arguments contain the character '{0}' interpreted by cmd: {1}</value>
   </data>
@@ -393,6 +399,12 @@
   </data>
   <data name="Copilot_PathHasQuote" xml:space="preserve">
     <value>Cannot launch because the copilot command path contains a quotation mark: {0}</value>
+  </data>
+  <data name="Copilot_PathHasEnvExpansion" xml:space="preserve">
+    <value>Cannot launch because the copilot command path contains '%', which cmd expands: {0}</value>
+  </data>
+  <data name="Copilot_PathHasDelayedExpansion" xml:space="preserve">
+    <value>Cannot launch because the copilot command path contains '!', which cmd expands when delayed expansion is enabled: {0}</value>
   </data>
   <data name="Copilot_NotConnected" xml:space="preserve">
     <value>The GitHub Copilot runtime has not started yet.</value>

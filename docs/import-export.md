@@ -27,10 +27,11 @@ The confirmation before a replacement is not unconditional: when the current dia
 
 ### DBML (.dbml)
 
-Imports DBML consisting of `Table` blocks and `Ref:` lines.
-The supported syntax is the subset that QuickER's DBML export writes, and both the syntax and the relationships' column mapping round-trip: the column names written on a `Ref:` line are taken as they are, so a relationship comes back connecting exactly the columns the file names.
+Imports DBML consisting of `Table` blocks and `Ref` lines.
+The supported syntax is the subset that QuickER's DBML export writes, and both the syntax and the relationships' column mapping round-trip: the column names written on a `Ref` line are taken as they are, so a relationship comes back connecting exactly the columns the file names.
 
-- Column settings: `pk` / `ref` / `unique` / `null` / `not null` / `note: '...'`
+- Column settings: `pk` / `unique` / `null` / `not null` / `note: '...'`.
+  Other settings are skipped; a column is marked as a foreign key by being on the child side of a `Ref` line, not by a setting
 - Table description: a `Note: '...'` line inside the `Table` block (the standard DBML form, so descriptions are restored from files written by other tools too)
 - Unique constraints: the `unique` column setting (a constraint over that one column) and `unique` indexes in an `Indexes` block (`(col, …) [unique, name: '…']`, for composite and named constraints).
   Indexes that are neither `unique` nor `pk` are skipped
@@ -39,18 +40,19 @@ The supported syntax is the subset that QuickER's DBML export writes, and both t
   Files written by other tools that declare the key this way are read as well.
   A table that marks columns `pk` and also has a `pk` index must name the same columns in both, and the index then decides the order.
   A different set of columns, a second `pk` index, or a column listed twice in the index is rejected at that line rather than guessed at
-- Relationships: `-` (one-to-one), `<` (one-to-many), and `<>` (many-to-many) on `Ref:` lines; `>` (many-to-one) is not supported.
+- Relationships: DBML's short form `Ref: Parent.a < Child.x`, or `Ref name: Parent.a < Child.x` with a name.
+  The symbols are `-` (one-to-one), `<` (one-to-many), and `<>` (many-to-many); `>` (many-to-one) is not supported.
   An endpoint can be a single column (`Parent.a`) or the composite Ref syntax (`Parent.(a, b)`), which restores a composite foreign key with its pairs in order.
   A line whose two endpoints list a different number of columns, or that names a column the table does not have, keeps the relationship but drops its column mapping (it can be completed in the properties panel)
-- Constraint name and referential actions: restored from the settings block right after `Ref:` (`[note: 'FK name', delete: cascade, update: set null]`).
+- Constraint name and referential actions: the constraint name is the name of a named `Ref` (`Ref FK_name: …`, or `Ref "FK name": …` when it needs quotes), and the referential actions come from the settings block after the endpoints (`[delete: cascade, update: set null]`).
   DBML's `restrict` has no counterpart in QuickER, so it is imported as `NO ACTION`
 - Quoted identifiers: a table or column name written as `"Order Details"` is read with the quotes removed, and a type written the same way (`"double precision"`, `"integer[]"`) likewise. `\"` and `\` inside the quotes are unescaped
 - Comments: `//` to the end of the line, and `/* ... */` including across several lines. Neither is treated as a comment inside a string, so a description may contain a URL
 - Keywords are not case-sensitive (`Table` and `table`, `Ref:` and `ref:` are both read)
 - Skipped: the `Project` / `Enum` / `TableGroup` / `TablePartial` / `Note` / `records` blocks, and table settings written after a table name (`Table users [owner: 'x'] {`). These carry only information QuickER cannot represent, so the block is passed over and the rest of the file is imported
-- Not supported, and reported with the line number rather than skipped: a relationship written as a named `Ref name: ...` or as the block form `Ref { ... }` (skipping it would lose the relationship), a table alias (`Table t as U {`), a `~partial` injection, a `Note` spanning several lines inside a `Table` block, and any other line that cannot be interpreted
+- Not supported, and reported with the line number rather than skipped: a relationship written as the block form `Ref { ... }` or `Ref name { ... }`, or as a `Ref` line whose settings block comes before the endpoints (skipping either would lose the relationship), a table alias (`Table t as U {`), a `~partial` injection, a `Note` spanning several lines inside a `Table` block, and any other line that cannot be interpreted
 
-A `Ref:` line may appear before the `Table` block it points at; the lines are resolved once every table has been read.
+A `Ref` line may appear before the `Table` block it points at; the lines are resolved once every table has been read.
 A line that references a table defined nowhere is still an import error reported with its line number.
 
 Tables with no columns get a default PK column (`ID int`).
@@ -158,11 +160,14 @@ Use it, separately from a normal save (a `.json` with layout), when you want to 
 ### DBML / Mermaid
 
 Writes out the text formats.
-The DBML output is the same subset as the import above (`Table` blocks + `Ref:` lines), and the written file can be re-imported with the relationships' column mapping intact.
+The DBML output is the same subset as the import above (`Table` blocks + `Ref` lines), uses only standard DBML syntax, and the written file can be re-imported with the relationships' column mapping intact.
 That includes composite foreign keys, which are written with DBML's composite Ref syntax (`Ref: Parent.(a, b) < Child.(x, y)`; single-column foreign keys keep the plain `Parent.a < Child.x` form).
+A constraint name is written as the name of a named `Ref` (`Ref FK_Child_Parent: Parent.a < Child.x`), and referential actions other than `NO ACTION` as a settings block after the endpoints (`[delete: cascade]`).
+A column's foreign key marker is carried only by the `Ref` line it is the child side of, since DBML has no setting that marks a column on its own.
 Unique constraints are written as the `unique` column setting for unnamed single-column constraints, and as an `Indexes` block (`(col, …) [unique, name: '…']`) for composite and named ones.
 When a composite primary key's own column order differs from the table's column order, the key is written as a `(col, …) [pk]` index at the top of the `Indexes` block instead of the `pk` column setting, so the order round-trips (a table whose key follows the column order is written as before).
-A table or column name that is not made only of letters, digits and underscores is written as a DBML quoted identifier (`"Order Details"`), as is a type that contains a space or brackets (`"double precision"`, `"integer[]"`); without the quotes such a name or type cannot be read back. A name of letters, digits and underscores — Japanese included — is written bare.
+A table, column or constraint name that is not made only of ASCII letters, digits and underscores is written as a DBML quoted identifier (`"Order Details"`, and likewise a Japanese name), as is a type that contains a space or brackets (`"double precision"`, `"integer[]"`).
+Without the quotes such a name or type cannot be read back, and DBML tools reject a bare name with other characters, Japanese included.
 Mermaid's key column holds a single marker per column, so it is folded to `PK` > `FK` > `UK`, and **`UK` is written only for the columns of single-column constraints** (splitting a composite constraint per column would come back on import as N separate single-column constraints, which means something else, so composite ones are not written).
 
 Both formats are useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.
@@ -172,7 +177,7 @@ DBML also writes table descriptions as `Note:` lines and foreign key referential
 
 Information the chosen format cannot represent is listed in the completion dialog (once per format per session, so it does not become noise).
 Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, named queries, or a composite primary key order that differs from the column order, so it reports whichever of those the diagram actually contains.
-For DBML only table memos and named queries are reported (`Note` is used for the description, so carrying a memo would need a non-standard extension, and interoperability with other tools was given priority).
+For DBML only table memos, named queries, and foreign key markers on columns that are not the child side of any relationship are reported (`Note` is used for the description, so carrying a memo would need a non-standard extension, and interoperability with other tools was given priority).
 SQL DDL and the definition documents report nothing, because the only things they drop are the ones that format is not meant to carry.
 
 ### Excel definition documents (.xlsx)
