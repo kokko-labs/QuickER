@@ -547,7 +547,7 @@ public class MockProjectAgentRunnerTests
             OnRun = dir =>
             {
                 WriteArtifacts()(dir);
-                CreateJunction(Path.Combine(project, "obj"), linkTarget);
+                ReparsePointTestHelper.CreateJunction(Path.Combine(project, "obj"), linkTarget);
             },
         };
         var build = new FakeBuildRunner();
@@ -616,36 +616,6 @@ public class MockProjectAgentRunnerTests
         {
             Cleanup(folder);
         }
-    }
-
-    /// <summary>
-    /// ジャンクション（ディレクトリの reparse point）を作る。
-    /// </summary>
-    /// <remarks>
-    /// ジャンクションの作成に公開 API は無く、シンボリックリンクは特権（開発者モード）を要するため、
-    /// 特権不要な <c>mklink /J</c> を使う。テストは Windows 専用プロジェクトにある。
-    /// </remarks>
-    private static void CreateJunction(string linkPath, string targetPath)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
-
-        using var process = System.Diagnostics.Process.Start(
-            new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath },
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            }
-        );
-        process!.WaitForExit();
-        process.ExitCode.Should().Be(0, "テスト前提のジャンクションを作成できる必要がある");
-        new DirectoryInfo(linkPath)
-            .Attributes.HasFlag(FileAttributes.ReparsePoint)
-            .Should()
-            .BeTrue();
     }
 
     /// <summary>中断要求がエージェントの InterruptAsync へ転送されることを検証する</summary>

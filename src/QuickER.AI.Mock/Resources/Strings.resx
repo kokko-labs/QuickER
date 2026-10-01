@@ -270,6 +270,8 @@ Do you want to continue?</value>
 
 The AI wrote the files listed below, which are not UI-layer sources or static assets. If any of them is a build or configuration file (a csproj, global.json, *.csproj.user and the like), the verification build reads it and runs what it says.
 
+The list also includes anything QuickER could not delete from the project's obj / bin folders before the build; the build reads files left there as well.
+
 Review them, then choose whether to run the verification build. If you cancel, generation finishes with the project left unverified.</value>
   </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
@@ -368,6 +370,10 @@ See the log for details:
   <data name="Mock_Run_BuildBoundaryChanges" xml:space="preserve">
     <value>
 The AI wrote these files, which are not UI-layer sources or static assets:</value>
+  </data>
+  <data name="Mock_Run_BuildOutputsNotDeleted" xml:space="preserve">
+    <value>
+QuickER could not delete these build outputs (obj / bin) before the final build:</value>
   </data>
   <data name="Mock_Run_BuildDeclined" xml:space="preserve">
     <value>The final build was not run because the confirmation was canceled.</value>

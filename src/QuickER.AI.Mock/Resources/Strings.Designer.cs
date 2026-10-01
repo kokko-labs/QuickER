@@ -612,6 +612,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_Run_BuildOutputsNotDeleted {
+            get {
+                return ResourceManager.GetString("Mock_Run_BuildOutputsNotDeleted", resourceCulture);
+            }
+        }
+
         public static string Mock_Run_BuildDeclined {
             get {
                 return ResourceManager.GetString("Mock_Run_BuildDeclined", resourceCulture);

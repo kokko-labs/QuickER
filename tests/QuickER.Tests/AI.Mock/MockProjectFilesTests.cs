@@ -175,4 +175,53 @@ public class MockProjectFilesTests
             Cleanup(root);
         }
     }
+
+    /// <summary>
+    /// リンクの判定は <see cref="FileSystemInfo.LinkTarget"/> で行い、reparse point の属性ビットでは決めない
+    /// （OneDrive の Files On-Demand のようなリンクでない reparse フォルダは中身を読み書きできる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "IsLink はジャンクションとシンボリックリンクだけを真にし、リンクでない reparse フォルダは偽"
+    )]
+    public void IsLink_DistinguishesLinksFromOtherReparsePoints()
+    {
+        var root = NewTempFolder();
+        var outside = NewTempFolder();
+
+        try
+        {
+            var plain = Path.Combine(root, "plain");
+            Directory.CreateDirectory(plain);
+
+            var junction = Path.Combine(root, "junction");
+            ReparsePointTestHelper.CreateJunction(junction, outside);
+
+            var nonLink = Path.Combine(root, "cloud");
+            Directory.CreateDirectory(nonLink);
+            Write(Path.Combine(nonLink, "inside.txt"));
+            ReparsePointTestHelper.MakeReadableNonLinkReparseDirectory(nonLink);
+
+            var fileTarget = Path.Combine(outside, "target.txt");
+            Write(fileTarget);
+            var fileLink = Path.Combine(root, "link.txt");
+            File.CreateSymbolicLink(fileLink, fileTarget);
+
+            MockProjectFiles.IsLink(new DirectoryInfo(plain)).Should().BeFalse();
+            MockProjectFiles.IsLink(new DirectoryInfo(junction)).Should().BeTrue();
+            MockProjectFiles.IsLink(new DirectoryInfo(nonLink)).Should().BeFalse();
+            MockProjectFiles.IsLink(new FileInfo(fileLink)).Should().BeTrue();
+            MockProjectFiles.IsLink(new FileInfo(fileTarget)).Should().BeFalse();
+
+            // 属性ビットだけで見ると、リンクでない reparse フォルダもリンクと区別できない
+            new DirectoryInfo(nonLink)
+                .Attributes.HasFlag(FileAttributes.ReparsePoint)
+                .Should()
+                .BeTrue();
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(root);
+            ReparsePointTestHelper.DeleteTree(outside);
+        }
+    }
 }

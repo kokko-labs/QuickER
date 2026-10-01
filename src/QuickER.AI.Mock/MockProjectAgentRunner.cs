@@ -321,17 +321,19 @@ public sealed class MockProjectAgentRunner
             // ビルド中間物を捨ててから検証する。obj/ に残った *.targets / *.props は
             // Microsoft.Common.targets のワイルドカード import で読み込まれる（実測で確認）ため、
             // AI が書いたものがこのビルドで実行され得る。前回実行の古い状態を持ち込まない意味もある。
+            // 消せずに残ったものは黙って見逃さず、一覧として受け取る（フェイルクローズ）。
             //
             // 削除したあとビルドが始まるまでに、実行器の子プロセス（Codex の app-server・Copilot）が
             // 残っていれば理屈の上では書き戻せる。閉じるには実行器を破棄してから削除する順序が要るが、
             // 破棄の責務は呼び出し側（VM）にあり、ここでは持てない。Phase 3 の変更検知と同じ種類の
             // 残余として扱う（Claude Code はターン終了時にプロセスが終わっているため該当しない）。
-            DeleteBuildOutputs(projectDirectory);
+            var residue = MockProjectBuildBoundary.ClearBuildOutputs(outputDirectory, projectName);
 
-            // 削除の「後」に差分を取る（obj / bin は消える側なので検知の対象に含めない）。
+            // 削除の「後」に差分を取る（obj / bin は消える側なので差分の対象に含めず、残存として別に受け取る）。
             // 実行器が書いた「ビルドが設定として読み得るファイル」があれば、実行する前に利用者へ見せる。
             buildDeclined = !ConfirmBuildBoundary(
                 boundarySnapshot,
+                residue,
                 outputDirectory,
                 projectName,
                 EmitLine
@@ -442,91 +444,60 @@ public sealed class MockProjectAgentRunner
         && MockProjectFiles.HasAny(projectDirectory, uiFileSearchPattern);
 
     /// <summary>
-    /// 最終ビルドの前にビルド中間物（<c>obj</c> / <c>bin</c>）を削除する。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <c>obj/{プロジェクト}.csproj.*.targets</c> / <c>*.props</c> は <c>Microsoft.Common.targets</c> の
-    /// ワイルドカード import で読み込まれるため、AI がそこへ書いたターゲットは最終ビルドで実行される
-    /// （実測で確認。<c>nuget.g.targets</c> だけは復元が作り直すが、同じワイルドカードに当たる別名は残る）。
-    /// 削除してからビルドすれば実行されない。
-    /// </para>
-    /// <para>
-    /// 対象が reparse point（ジャンクション・シンボリックリンク）のときはリンクだけを外し、リンク先には触れない
-    /// （<see cref="Directory.Delete(string, bool)"/> 自体もリンクを辿らないが、明示チェックで二重化する）。
-    /// </para>
-    /// </remarks>
-    private static void DeleteBuildOutputs(string projectDirectory)
-    {
-        foreach (var name in BuildOutputDirectoryNames)
-        {
-            TryDeleteDirectory(Path.Combine(projectDirectory, name));
-        }
-    }
-
-    /// <summary>ビルド中間物のフォルダ名</summary>
-    private static readonly string[] BuildOutputDirectoryNames = ["obj", "bin"];
-
-    /// <summary>フォルダを削除する（reparse point はリンクだけ外す・失敗はビルド検証を妨げない）</summary>
-    private static void TryDeleteDirectory(string path)
-    {
-        try
-        {
-            var info = new DirectoryInfo(path);
-
-            if (!info.Exists)
-            {
-                return;
-            }
-
-            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                // リンク先の中身は別物なので消さない（リンクの実体だけを外す）
-                info.Delete(recursive: false);
-                return;
-            }
-
-            info.Delete(recursive: true);
-        }
-        catch (IOException)
-        {
-            // 掴まれている等で消せない場合はそのままビルドへ進む
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // 権限不足も同じ扱い
-        }
-    }
-
-    /// <summary>
     /// 最終ビルド直前に、実行器が書いた「ビルドが設定として読み得るファイル」を検知して利用者へ確認する。
     /// </summary>
     /// <param name="snapshot">
     /// スキャフォールド直後のスナップショット（<see langword="null"/> は
     /// <see cref="IMockProjectAgent.FinalBuildEscapesSandbox"/> が false＝検知の対象外）
     /// </param>
+    /// <param name="residue">
+    /// 削除できずに残ったビルド中間物（<see cref="MockProjectBuildBoundary.ClearBuildOutputs"/> の戻り値）
+    /// </param>
     /// <param name="outputDirectory">出力フォルダ</param>
     /// <param name="projectName">プロジェクト名</param>
     /// <param name="emitLine">ログ・進捗への 1 行出力</param>
     /// <returns>最終ビルドを実行してよいか（false なら未検証で完了する）</returns>
     /// <remarks>
-    /// 変更が無ければ何も尋ねない。変更があれば一覧をログへ残したうえで確認を出し、確認する手段が
+    /// <para>
+    /// 差分も残存も無ければ何も尋ねない。どちらかがあれば一覧をログへ残したうえで確認を出し、確認する手段が
     /// 与えられていない（<c>confirmBuild</c> が null）ときは承認しない＝配線漏れが「黙って承認」へ
-    /// 倒れないようにする。
+    /// 倒れないようにする。差分と残存は同じ表記（出力フォルダからの相対パス）なので、1 つの一覧へまとめる。
+    /// </para>
+    /// <para>
+    /// 境界越えを宣言しない実行器（<paramref name="snapshot"/> が null）では残存をログへ残すだけで尋ねない
+    /// （Claude Code は無制限のシェルを持つため最終ビルドが境界にならない・API キー方式は obj / bin を保護
+    /// フォルダとして拒否する）。
+    /// </para>
     /// </remarks>
     private bool ConfirmBuildBoundary(
         MockProjectBuildBoundary.Snapshot? snapshot,
+        IReadOnlyList<string> residue,
         string outputDirectory,
         string projectName,
         Action<string> emitLine
     )
     {
+        if (residue.Count > 0)
+        {
+            emitLine(Strings.Mock_Run_BuildOutputsNotDeleted);
+
+            foreach (var path in residue)
+            {
+                emitLine("  " + path);
+            }
+        }
+
         if (snapshot is null)
         {
             return true;
         }
 
-        var changed = snapshot.DetectUnexpectedChanges(outputDirectory, projectName);
+        var changed = snapshot
+            .DetectUnexpectedChanges(outputDirectory, projectName)
+            .Concat(residue)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         if (changed.Count == 0)
         {

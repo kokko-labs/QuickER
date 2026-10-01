@@ -57,6 +57,39 @@ internal static class MockProjectFiles
     internal static bool HasAny(string root, string searchPattern) =>
         Enumerate(root, searchPattern).Any();
 
+    /// <summary>
+    /// リンク（ジャンクション・シンボリックリンク）か。判定は <see cref="FileSystemInfo.LinkTarget"/> で行う。
+    /// </summary>
+    /// <param name="info">判定するファイルまたはフォルダ</param>
+    /// <returns>リンクなら true（リンク先を読めないときも true＝中へ辿らない側へ倒す）</returns>
+    /// <remarks>
+    /// <para>
+    /// <see cref="FileAttributes.ReparsePoint"/> の属性ビットでは判定しない。reparse point にはリンク以外の
+    /// 種類もあり、OneDrive の Files On-Demand のようなクラウドファイルのフォルダは、属性ビットが立っていても
+    /// 中身は普通に読み書きできる。属性ビットで「辿らない」と決めると、そこに書かれたファイルが変更検知から
+    /// 見えなくなり、削除も非再帰で試みて失敗する。
+    /// </para>
+    /// <para>
+    /// 属性ビットは「立っていなければリンクではない」ことの安価な事前判定としてだけ使ってよい
+    /// （リンクは必ず属性ビットを持つ）。変更検知と最終ビルド前の削除が同じこの判定を使う。
+    /// </para>
+    /// </remarks>
+    internal static bool IsLink(FileSystemInfo info)
+    {
+        try
+        {
+            return info.LinkTarget is not null;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>ファイルが起点直下の <c>obj</c> / <c>bin</c> の配下にあるか</summary>
     /// <remarks>
     /// 見るのは相対パスの<b>先頭セグメントだけ</b>。途中の階層まで名前で弾くと、生成物が正当に作った

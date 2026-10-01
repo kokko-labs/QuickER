@@ -270,6 +270,8 @@
 
 AI が次のファイルを書きました（UI 層のソース・静的資産ではありません）。この中にビルド・設定ファイル（csproj・global.json・*.csproj.user 等）が含まれている場合、検証ビルドはそれを読み込んで記述どおりに実行します。
 
+一覧には、ビルドの前に QuickER がプロジェクトの obj / bin から削除できなかったものも含みます。そこに残ったファイルもビルドが読み込みます。
+
 内容を確認して、検証ビルドを実行するかどうかを選んでください。キャンセルすると、プロジェクトを未検証のまま生成を終了します。</value>
   </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
@@ -368,6 +370,10 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="Mock_Run_BuildBoundaryChanges" xml:space="preserve">
     <value>
 AI が次のファイルを書きました（UI 層のソース・静的資産ではありません）:</value>
+  </data>
+  <data name="Mock_Run_BuildOutputsNotDeleted" xml:space="preserve">
+    <value>
+最終ビルドの前に、次のビルド中間物（obj / bin）を削除できませんでした:</value>
   </data>
   <data name="Mock_Run_BuildDeclined" xml:space="preserve">
     <value>確認が取り消されたため、最終ビルドは実行しませんでした。</value>
