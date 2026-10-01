@@ -43,6 +43,9 @@ namespace QuickER
         /// </remarks>
         private MainViewModel? _mainViewModel;
 
+        /// <summary>終了の連鎖の失敗の記録先（DI コンテナの破棄後の <see cref="OnExit"/> でも使うため保持する）</summary>
+        private IShutdownFailureReporter? _shutdownFailureReporter;
+
         /// <summary>DI コンテナを構築し、メインウィンドウを解決して表示する</summary>
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -102,12 +105,15 @@ namespace QuickER
             }
 
             // 起動時更新チェックサービス。本番用ファクトリ（feed => Velopack 実装）と
-            // 実環境変数によるフィード解決（UpdateFeed.Resolve）、および設定によるオプトアウト
+            // 実環境変数によるフィード解決（UpdateFeed.Resolve）、適用の登録先と終了の要求
+            // （正常終了の最後に適用する＝WpfApplicationExit）、および設定によるオプトアウト
             // （gui-settings.json の CheckForUpdatesOnStartup）を注入する。
             services.AddSingleton(serviceProvider => new UpdateService(
                 serviceProvider.GetRequiredService<IDialogService>(),
                 feed => new VelopackAppUpdater(feed),
                 () => UpdateFeed.Resolve(Environment.GetEnvironmentVariable),
+                WpfApplicationExit.Pending,
+                WpfApplicationExit.RequestClose,
                 () => new GuiAppSettingsStore().Load().CheckForUpdatesOnStartup
             ));
 
@@ -150,6 +156,7 @@ namespace QuickER
             // 1 つのモジュールの失敗で後続へ届かなくなると常駐する子プロセスが孤児として残るため、
             // 受け止めを持つ FeatureModuleShutdown 経由で回す
             var shutdownFailureReporter = _provider.GetRequiredService<IShutdownFailureReporter>();
+            _shutdownFailureReporter = shutdownFailureReporter;
 
             window.Closing += (_, _) =>
                 FeatureModuleShutdown.CloseAll(modules, _provider, shutdownFailureReporter);
@@ -269,10 +276,18 @@ namespace QuickER
             Thread.CurrentThread.CurrentUICulture = culture;
         }
 
-        /// <summary>終了時に DI コンテナを破棄する</summary>
+        /// <summary>終了時に DI コンテナを破棄し、終了の最後に行う処理（更新の適用・再起動）を実行する</summary>
+        /// <remarks>
+        /// ここは正常終了でだけ呼ばれる（メインウィンドウの Closing＝自動保存・終了連鎖の後）。
+        /// 終了がキャンセルされた場合とクラッシュ経路（Environment.Exit）では呼ばれないので、
+        /// 更新の適用・再起動も走らない。
+        /// </remarks>
         protected override void OnExit(ExitEventArgs e)
         {
-            _provider?.Dispose();
+            WpfApplicationExit.Pending.CompleteExit(
+                _shutdownFailureReporter ?? new CrashLogShutdownFailureReporter(),
+                () => _provider?.Dispose()
+            );
             base.OnExit(e);
         }
     }

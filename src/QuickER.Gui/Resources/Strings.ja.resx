@@ -93,8 +93,12 @@
     <comment>更新確認ダイアログのタイトル</comment>
   </data>
   <data name="Update_ConfirmMessage" xml:space="preserve">
-    <value>新しいバージョン {0} が利用可能です。ダウンロードして再起動し、更新を適用しますか？</value>
+    <value>新しいバージョン {0} が利用可能です。ダウンロードしますか？（ダウンロードが終わったら、再起動して適用するかを確認します）</value>
     <comment>更新確認メッセージ（{0} は新バージョン番号）</comment>
+  </data>
+  <data name="Update_RestartConfirmMessage" xml:space="preserve">
+    <value>更新の準備ができました。今すぐ QuickER を再起動して適用しますか？（キャンセルを選ぶと、次に QuickER を閉じたときに適用します）</value>
+    <comment>更新のダウンロード完了後に、再起動して適用するかを確認するメッセージ</comment>
   </data>
   <data name="Settings_Caption" xml:space="preserve">
     <value>設定</value>

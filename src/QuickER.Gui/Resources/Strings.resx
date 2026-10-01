@@ -84,7 +84,10 @@
     <value>Update Available</value>
   </data>
   <data name="Update_ConfirmMessage" xml:space="preserve">
-    <value>A new version {0} is available. Download it and restart to apply?</value>
+    <value>A new version {0} is available. Download it? (When the download finishes, QuickER asks whether to restart and apply it.)</value>
+  </data>
+  <data name="Update_RestartConfirmMessage" xml:space="preserve">
+    <value>The update is ready. Restart QuickER now to apply it? (If you choose Cancel, it is applied the next time you close QuickER.)</value>
   </data>
   <data name="Settings_Caption" xml:space="preserve">
     <value>Settings</value>

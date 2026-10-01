@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -90,6 +91,12 @@ public partial class MainViewModel : IDiagramTransferHost
     /// 実プロセスの割り込みはタイミング依存で再現できないので、窓そのものをシームとして開ける。
     /// </remarks>
     internal Action? AfterSaveWriteForTests { get; set; }
+
+    /// <summary>
+    /// テスト専用: 開く・再読込でファイルを読み取った後（内容ハッシュの記録より前）に差し込む処理。
+    /// 「読み込んだファイルを外部プロセスが即座に書き換えた」競合窓を決定的に再現するための入口。
+    /// </summary>
+    internal Action? AfterLoadReadForTests { get; set; }
 
     /// <summary>ステータスバー左端に表示する一時通知のバッキングフィールド（既定は「準備完了」）</summary>
     private string _statusMessage = Strings.Status_Ready;
@@ -252,6 +259,13 @@ public partial class MainViewModel : IDiagramTransferHost
     /// 既存の読込フロー（<see cref="LoadDocumentIntoDiagram"/>）を流用するが、fit-to-window 要求を
     /// <see cref="_suppressFitToWindow"/> で抑止してズーム・スクロール位置を保つ。Guid 一致エンティティの
     /// レイアウトはファイル値を尊重し、欠落分のみ追記配置される（既存機構がそのまま効く）。
+    /// <para>
+    /// 最終既知ハッシュは<b>読み込んだバイト列そのもの</b>から求める（<see cref="Open"/> と同じ）。
+    /// 読み取りから記録までの隙間に外部が書いた場合、<see cref="Open"/> と違って記録直後の再照合はしない。
+    /// 再読込の経路では監視が最初から動いており、隙間の書き込みの監視イベントは、記録したハッシュ
+    /// （読み込んだ内容）とディスクが食い違うため捨てられずに届き、UI のキューを経て次の再読込へ進む。
+    /// ここで同期的に再照合すると、外部が書き続ける間「再読込 → 再照合 → 再読込…」が再帰で積み上がる。
+    /// </para>
     /// </remarks>
     private bool ReloadFromDisk()
     {
@@ -263,8 +277,13 @@ public partial class MainViewModel : IDiagramTransferHost
         // 破損（不正 JSON）・非 DiagramDocument は現状維持し、次の変更イベントで再試行する
         // （控えめな一時通知のため、ここでは失敗の原因までは見せない）
         if (
-            !TryLoadDiagramDocument(CurrentFilePath, out var document, out _, out _)
-            || document is null
+            !TryLoadDiagramDocument(
+                CurrentFilePath,
+                out var document,
+                out _,
+                out _,
+                out var rawContents
+            )
         )
         {
             NotifyStatus(Strings.Status_ExternalReloadFailed);
@@ -290,8 +309,11 @@ public partial class MainViewModel : IDiagramTransferHost
             _suppressFitToWindow = false;
         }
 
-        // 読み直した内容を最終既知として記録し、クリーン状態へ戻す
-        UpdateDocumentIdentity(CurrentFilePath);
+        AfterLoadReadForTests?.Invoke();
+
+        // 読み込んだ内容そのものを最終既知として記録し、クリーン状態へ戻す
+        // （ディスクを読み直さない理由は DocumentContentHash.ComputeForBytes）
+        UpdateDocumentIdentity(CurrentFilePath, DocumentContentHash.ComputeForBytes(rawContents));
         _ignoredExternalHash = null;
         return true;
     }
@@ -304,15 +326,20 @@ public partial class MainViewModel : IDiagramTransferHost
     /// 失敗の原因となった例外（IO エラー・不正 JSON・Id 重複）。形式検証で弾いた場合と成功時は null。
     /// 呼び出し側は「原因を持つ失敗」だけ他の失敗通知と同じく例外メッセージを連結して見せる。
     /// </param>
+    /// <param name="rawContents">
+    /// 読み取ったファイルのバイト列（成功時は非 null）。最終既知ハッシュをディスクの読み直しでなく
+    /// 読み込んだ内容から求めるために使う。
+    /// </param>
     /// <remarks>
-    /// 検証は <see cref="JsonStorageService.TryLoad"/> に委ね、ここは種別と原因例外をそのまま
-    /// 呼び出し側へ渡すだけを担う（種別ごとの文言は呼び出し側の責務）。
+    /// 検証は <see cref="JsonStorageService.TryLoad(string, out DiagramDocument?, out DocumentLoadError, out Exception?, out byte[]?)"/>
+    /// に委ね、ここは種別と原因例外をそのまま呼び出し側へ渡すだけを担う（種別ごとの文言は呼び出し側の責務）。
     /// </remarks>
     private static bool TryLoadDiagramDocument(
         string path,
-        out DiagramDocument? document,
+        [NotNullWhen(true)] out DiagramDocument? document,
         out DocumentLoadError kind,
-        out Exception? error
+        out Exception? error,
+        [NotNullWhen(true)] out byte[]? rawContents
     )
     {
         error = null;
@@ -320,7 +347,15 @@ public partial class MainViewModel : IDiagramTransferHost
 
         try
         {
-            if (JsonStorageService.TryLoad(path, out document, out kind, out var exception))
+            if (
+                JsonStorageService.TryLoad(
+                    path,
+                    out document,
+                    out kind,
+                    out var exception,
+                    out rawContents
+                )
+            )
             {
                 return true;
             }
@@ -333,6 +368,7 @@ public partial class MainViewModel : IDiagramTransferHost
         {
             // TryLoad が分類し切れない想定外の失敗も現状維持で扱う（防御）
             document = null;
+            rawContents = null;
             kind = DocumentLoadError.InvalidJson;
             error = ex;
             return false;
@@ -350,8 +386,9 @@ public partial class MainViewModel : IDiagramTransferHost
     /// <summary>現ファイルの内容が最終既知ハッシュと異なれば、通常の外部変更検知と同じ規則で処理する</summary>
     /// <remarks>
     /// 監視サービスの通知が届かない（届かなかった）タイミングで、ディスクとの乖離を 1 回だけ拾い直す
-    /// 共有経路。呼び出し元は起動復元の直後（<see cref="CheckExternalChangeOnStartup"/>）と、
-    /// 上書き保存で監視を再開した直後（<see cref="SaveToPath"/>）の 2 箇所。
+    /// 共有経路。呼び出し元は起動復元の直後（<see cref="CheckExternalChangeOnStartup"/>）・
+    /// 上書き保存で監視を再開した直後（<see cref="SaveToPath"/>）・ファイルを開いて監視を始めた直後
+    /// （<see cref="Open"/>）の 3 箇所。
     /// </remarks>
     private void CheckExternalChangeAgainstDisk()
     {
@@ -488,28 +525,19 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <summary>読込／保存の成功時に現在パス・内容ハッシュを更新し、クリーン状態にする共通ヘルパ</summary>
     /// <param name="path">紐付けるファイルのフルパス（読込元／保存先）</param>
-    /// <remarks>内容ハッシュはディスクから読み直して求める（読込経路・再読込経路はこれが正）</remarks>
-    private void UpdateDocumentIdentity(string path) =>
-        UpdateDocumentIdentity(path, TryComputeContentHash(path));
-
-    /// <summary>内容ハッシュを明示して文書アイデンティティを更新する</summary>
-    /// <param name="path">紐付けるファイルのフルパス</param>
-    /// <param name="contentHash">最終既知として記録する内容ハッシュ（算出不能なら null）</param>
+    /// <param name="contentHash">最終既知として記録する内容ハッシュ</param>
     /// <remarks>
-    /// 保存経路は「書き出した内容そのもの」から求めたハッシュを渡す
-    /// （理由の正本は <see cref="DocumentContentHash.ComputeForText"/>）。
+    /// ハッシュは<b>ディスクを読み直さず</b>、保存経路は書き出した内容そのもの
+    /// （<see cref="DocumentContentHash.ComputeForText"/>）、読込経路は読み込んだバイト列そのもの
+    /// （<see cref="DocumentContentHash.ComputeForBytes"/>）から求めて渡す。読み直す方式では、
+    /// 読み書きから採取までの隙間に外部が書いた内容を「自分が読み書きした内容」として記録してしまう。
     /// </remarks>
-    private void UpdateDocumentIdentity(string path, string? contentHash)
+    private void UpdateDocumentIdentity(string path, string contentHash)
     {
         CurrentFilePath = path;
         _lastKnownFileHash = contentHash;
         MarkClean();
     }
-
-    /// <summary>ファイル内容の SHA-256（16 進）を計算する（IO エラー時は null）</summary>
-    /// <remarks>監視サービスと同じ算出規則を共有するため <see cref="DocumentContentHash"/> へ委譲する</remarks>
-    private static string? TryComputeContentHash(string path) =>
-        DocumentContentHash.TryCompute(path);
 
     /// <summary>現在のダイアグラムと UI 表示状態・文書メタを自動保存ファイルへ書き出す</summary>
     public void AutoSave()
@@ -960,8 +988,13 @@ public partial class MainViewModel : IDiagramTransferHost
 
         // 破損 JSON・非 DiagramDocument JSON・Id 重複・必須の名前や型の null・IO 失敗は現状維持のうえ通知する
         if (
-            !TryLoadDiagramDocument(picked.Path, out var document, out var kind, out var error)
-            || document is null
+            !TryLoadDiagramDocument(
+                picked.Path,
+                out var document,
+                out var kind,
+                out var error,
+                out var rawContents
+            )
         )
         {
             // 原因を持つ失敗（IO エラー・不正 JSON・Id 重複・必須の名前や型の null）は他の失敗通知と
@@ -1008,11 +1041,17 @@ public partial class MainViewModel : IDiagramTransferHost
         SetCurrentProviderFromDbms(document.Schema.TargetDbms);
         LoadDocumentIntoDiagram(document);
 
-        // 読込したファイルを現在パスとして紐付け、内容ハッシュを記録してクリーン状態にする
-        UpdateDocumentIdentity(picked.Path);
+        AfterLoadReadForTests?.Invoke();
+
+        // 読込したファイルを現在パスとして紐付け、読み込んだ内容そのもののハッシュを記録してクリーン状態にする
+        UpdateDocumentIdentity(picked.Path, DocumentContentHash.ComputeForBytes(rawContents));
 
         // 保存と同じく ER 図ファイル自身の読み書きなので、ステータスバーの一時通知で知らせる
         NotifyStatus(Strings.Status_Opened);
+
+        // 監視は現在パスが決まった時点（上の UpdateDocumentIdentity）で始まるため、読み取りから
+        // ここまでの隙間に外部が書いた変更はイベントすら起きない。保存と同じく 1 回だけ突き合わせて拾う
+        CheckExternalChangeAgainstDisk();
     }
 
     /// <summary>読み込んだ文書を現在の図へ反映する（配置なし文書は全体を自動整列する）</summary>

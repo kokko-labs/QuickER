@@ -340,6 +340,8 @@ For the Portable edition, extract the ZIP and run `QuickER.exe`.
 The installers and update packages are not Authenticode signed, so Windows SmartScreen reports an unknown publisher.
 Choose "More info" and then "Run anyway" to proceed.
 The installed edition checks GitHub Releases (`api.github.com`) for a newer version at startup and asks before it downloads anything.
+When the download finishes, it asks whether to restart now and apply the update.
+If you choose to wait, the update is applied the next time you close QuickER.
 Turn that off under **Settings > Check for updates on startup**.
 The Portable edition never checks.
 

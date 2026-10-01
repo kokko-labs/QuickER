@@ -119,11 +119,20 @@ namespace QuickER.Resources {
         }
 
         /// <summary>
-        ///   A new version {0} is available. Download it and restart to apply? に類似しているローカライズされた文字列を検索します。
+        ///   A new version {0} is available. Download it? (When the download finishes, QuickER asks whether to restart and apply it.) に類似しているローカライズされた文字列を検索します。
         /// </summary>
         public static string Update_ConfirmMessage {
             get {
                 return ResourceManager.GetString("Update_ConfirmMessage", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   The update is ready. Restart QuickER now to apply it? (If you choose Cancel, it is applied the next time you close QuickER.) に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Update_RestartConfirmMessage {
+            get {
+                return ResourceManager.GetString("Update_RestartConfirmMessage", resourceCulture);
             }
         }
 
