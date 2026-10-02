@@ -133,6 +133,18 @@
   <data name="Attachment_BinaryTooLarge" xml:space="preserve">
     <value>ファイルが上限（{0}MB）を超えています: {1}</value>
   </data>
+  <data name="Attachment_NotFound" xml:space="preserve">
+    <value>ファイルが見つかりません: {0}</value>
+  </data>
+  <data name="Attachment_IsDirectory" xml:space="preserve">
+    <value>フォルダは添付できません: {0}</value>
+  </data>
+  <data name="Attachment_FileTooLarge" xml:space="preserve">
+    <value>添付として読み込める大きさ（{0}MB）を超えています（画像は縮小する前の大きさで判定します）: {1}</value>
+  </data>
+  <data name="Attachment_ReadFailed" xml:space="preserve">
+    <value>ファイルを読み込めませんでした: {0}（{1}）</value>
+  </data>
   <data name="Chat_ToolActivityNotifyFailed" xml:space="preserve">
     <value>ツール活動の通知に失敗しました: {0}</value>
   </data>

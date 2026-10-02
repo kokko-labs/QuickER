@@ -1,12 +1,13 @@
 ﻿using System.ClientModel;
 using System.Net.Http;
 using System.Text.Json;
+using Anthropic.Exceptions;
 using QuickER.AI.Resources;
 
 namespace QuickER.AI;
 
 /// <summary>
-/// AI 呼び出し (OpenAI / ローカル LLM 等) で発生した例外を、表示言語のユーザー向けメッセージへ変換するヘルパー
+/// AI 呼び出し (OpenAI / Anthropic / ローカル LLM 等) で発生した例外を、表示言語のユーザー向けメッセージへ変換するヘルパー
 /// </summary>
 public static class AiErrorMessageLocalizer
 {
@@ -18,6 +19,21 @@ public static class AiErrorMessageLocalizer
         if (ex is ClientResultException cre)
         {
             return TranslateClientResult(cre);
+        }
+
+        if (ex is AnthropicApiException aae)
+        {
+            // Message は「Status Code: …」と本文の連結なので、本文の error.message を優先して取り出す
+            var (_, detail) = ParseErrorBody(aae.ResponseBody, aae.ResponseBody);
+            return TranslateStatus((int)aae.StatusCode, detail);
+        }
+
+        if (ex is AnthropicIOException)
+        {
+            return Strings.Ai_ConnectionFailed
+                + Environment.NewLine
+                + Strings.Ai_DetailLabel
+                + ex.Message;
         }
 
         if (ex is JsonException)
@@ -74,6 +90,16 @@ public static class AiErrorMessageLocalizer
                 return prefix + Strings.Ai_Http_BillingHardLimit;
         }
 
+        return TranslateStatus(status, message);
+    }
+
+    /// <summary>HTTP ステータスに基づく表示用メッセージへ変換する（OpenAI・Anthropic の両 SDK の HTTP エラーで共有する）</summary>
+    /// <param name="status">HTTP ステータスコード</param>
+    /// <param name="message">サーバーが返したエラーメッセージ（無ければ空）</param>
+    private static string TranslateStatus(int status, string? message)
+    {
+        var prefix = $"HTTP {status}";
+
         return status switch
         {
             401 => prefix + Strings.Ai_Http_401,
@@ -101,13 +127,35 @@ public static class AiErrorMessageLocalizer
     /// <returns>エラーコード (特定できない場合は null) と表示用メッセージのタプル</returns>
     private static (string? Code, string Message) ParseOpenAiError(ClientResultException ex)
     {
+        string? raw;
+
         try
         {
-            var raw = ex.GetRawResponse()?.Content?.ToString();
+            raw = ex.GetRawResponse()?.Content?.ToString();
+        }
+        catch
+        {
+            raw = null;
+        }
 
+        return ParseErrorBody(raw, ex.Message);
+    }
+
+    /// <summary>
+    /// エラーレスポンス本文 (JSON) の <c>error.code</c> / <c>error.message</c> を抽出する。
+    /// OpenAI（<c>{"error":{"code","message"}}</c>）と Anthropic（<c>{"type":"error","error":{"type","message"}}</c>）は
+    /// 同じ <c>error.message</c> を持つため共有する（Anthropic は <c>code</c> を持たないので常に null）。
+    /// </summary>
+    /// <param name="raw">レスポンス本文（無ければ null）</param>
+    /// <param name="fallback">本文から取り出せないときに使うメッセージ</param>
+    /// <returns>エラーコード (特定できない場合は null) と表示用メッセージのタプル</returns>
+    private static (string? Code, string Message) ParseErrorBody(string? raw, string fallback)
+    {
+        try
+        {
             if (string.IsNullOrEmpty(raw))
             {
-                return (null, ex.Message);
+                return (null, fallback);
             }
 
             using var doc = JsonDocument.Parse(raw);
@@ -122,14 +170,14 @@ public static class AiErrorMessageLocalizer
                     err.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
                         ? m.GetString()
                         : null;
-                return (code, msg ?? ex.Message);
+                return (code, msg ?? fallback);
             }
         }
         catch
         {
-            // 本文が JSON でない・想定形式と異なる場合は例外メッセージをそのまま使う
+            // 本文が JSON でない・想定形式と異なる場合は既定のメッセージを使う
         }
 
-        return (null, ex.Message);
+        return (null, fallback);
     }
 }

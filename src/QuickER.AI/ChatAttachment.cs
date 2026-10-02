@@ -119,4 +119,11 @@ public static class ChatAttachmentLimits
 
     /// <summary>バイナリ 1 件あたりの上限バイト数（32MB。Claude Code 経路のみ）</summary>
     public const long MaxBinaryBytes = 32L * 1024 * 1024;
+
+    /// <summary>
+    /// ファイルから読み込む大きさの上限（32MB）。種別は内容を読むまで分からないため、読む前に
+    /// 種別をまたいで掛ける。画像以外の上限の最大値（PDF・バイナリ）と同じ値なので画像以外の結論は変わらず、
+    /// 縮小すれば <see cref="MaxImageBytes"/> に収まる画像でも、縮小前にこれを超えると拒否される。
+    /// </summary>
+    public const long MaxFileReadBytes = 32L * 1024 * 1024;
 }

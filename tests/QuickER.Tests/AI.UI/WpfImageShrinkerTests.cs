@@ -121,6 +121,62 @@ public class WpfImageShrinkerTests
         });
     }
 
+    /// <summary>
+    /// 上限（5MB）を超える実 JPEG を実縮小器で添付にすると、添付の MIME が縮小後の形式（image/png）になり、
+    /// その中身が PNG としてデコードできることを検証する（名乗りと中身が食い違わない）。
+    /// 生成を軽くするため、小さい JPEG の終端（EOI）の後ろを詰め物で 5MB 超へ伸ばす（デコーダは EOI 以降を読まない）
+    /// </summary>
+    [Fact(DisplayName = "大きい JPEG を実縮小器で添付にすると PNG として返る")]
+    public void CreateFromBytes_LargeJpegWithRealShrinker_ReturnsPng()
+    {
+        RunSta(() =>
+        {
+            var jpeg = CreateJpeg(400, 300);
+            var large = new byte[QuickER.AI.ChatAttachmentLimits.MaxImageBytes + 1];
+            jpeg.CopyTo(large, 0);
+
+            var result = QuickER.AI.ChatAttachmentFactory.CreateFromBytes(
+                "photo.jpg",
+                large,
+                WpfImageShrinker.Shrink
+            );
+
+            result.Success.Should().BeTrue();
+            result.Attachment!.MediaType.Should().Be(WpfImageShrinker.OutputMediaType);
+            DecodeSize(result.Attachment.Data).Should().Be((400, 300));
+
+            using var stream = new MemoryStream(result.Attachment.Data);
+            BitmapDecoder
+                .Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad)
+                .Should()
+                .BeOfType<PngBitmapDecoder>();
+        });
+    }
+
+    /// <summary>指定サイズの単色 Bgr24 画像を JPEG バイト列にエンコードして返す</summary>
+    private static byte[] CreateJpeg(int width, int height)
+    {
+        var stride = width * 3;
+        var source = BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            PixelFormats.Bgr24,
+            null,
+            new byte[height * stride],
+            stride
+        );
+
+        var encoder = new JpegBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(source));
+
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+
+        return stream.ToArray();
+    }
+
     /// <summary>正規化後の MIME タイプ定数が image/png であることを検証する</summary>
     [Fact(DisplayName = "出力 MIME タイプは image/png")]
     public void OutputMediaType_IsPng()

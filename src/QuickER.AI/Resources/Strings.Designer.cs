@@ -204,6 +204,30 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Attachment_NotFound {
+            get {
+                return ResourceManager.GetString("Attachment_NotFound", resourceCulture);
+            }
+        }
+
+        public static string Attachment_IsDirectory {
+            get {
+                return ResourceManager.GetString("Attachment_IsDirectory", resourceCulture);
+            }
+        }
+
+        public static string Attachment_FileTooLarge {
+            get {
+                return ResourceManager.GetString("Attachment_FileTooLarge", resourceCulture);
+            }
+        }
+
+        public static string Attachment_ReadFailed {
+            get {
+                return ResourceManager.GetString("Attachment_ReadFailed", resourceCulture);
+            }
+        }
+
         public static string Chat_ToolActivityNotifyFailed {
             get {
                 return ResourceManager.GetString("Chat_ToolActivityNotifyFailed", resourceCulture);

@@ -199,6 +199,38 @@ public class AttachmentListViewModelTests
         }
     }
 
+    /// <summary>
+    /// ドロップやファイル選択で読めないパス（フォルダ・存在しないファイル）が来ても例外を出さず、
+    /// 1 件ずつ理由をステータスへ出し、読めるファイルだけを取り込むことを検証する
+    /// </summary>
+    [Fact(DisplayName = "フォルダや存在しないパスは例外を出さずステータスへ出す")]
+    public void AddFiles_UnreadablePaths_ReportStatusWithoutThrowing()
+    {
+        var dir = Directory.CreateTempSubdirectory("QuickERTests_");
+        var missing = Path.Combine(Path.GetTempPath(), $"QuickERTests_{Guid.NewGuid():N}.png");
+        var pngPath = Path.Combine(Path.GetTempPath(), $"QuickERTests_{Guid.NewGuid():N}.png");
+        File.WriteAllBytes(pngPath, PngBytes());
+
+        try
+        {
+            var (vm, statuses) = CreateVm();
+
+            var act = () => vm.AddFiles(new[] { dir.FullName, missing, pngPath });
+
+            act.Should().NotThrow();
+            vm.Items.Should().ContainSingle();
+            vm.Items[0].FileName.Should().Be(Path.GetFileName(pngPath));
+            statuses.Should().HaveCount(2);
+            statuses[0].Should().Contain(dir.Name);
+            statuses[1].Should().Contain(Path.GetFileName(missing));
+        }
+        finally
+        {
+            dir.Delete();
+            File.Delete(pngPath);
+        }
+    }
+
     /// <summary>画像枚数の上限（5 枚）を超えると拒否し通知することを検証する</summary>
     [Fact(DisplayName = "画像は 5 枚を超えると拒否する")]
     public void ImageCount_ExceedingLimit_Rejected()

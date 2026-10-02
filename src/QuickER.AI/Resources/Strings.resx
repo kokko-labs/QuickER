@@ -133,6 +133,18 @@
   <data name="Attachment_BinaryTooLarge" xml:space="preserve">
     <value>The file exceeds the limit ({0} MB): {1}</value>
   </data>
+  <data name="Attachment_NotFound" xml:space="preserve">
+    <value>The file was not found: {0}</value>
+  </data>
+  <data name="Attachment_IsDirectory" xml:space="preserve">
+    <value>Folders cannot be attached: {0}</value>
+  </data>
+  <data name="Attachment_FileTooLarge" xml:space="preserve">
+    <value>The file is larger than the {0} MB that can be read for an attachment (images are checked before shrinking): {1}</value>
+  </data>
+  <data name="Attachment_ReadFailed" xml:space="preserve">
+    <value>Could not read the file: {0} ({1})</value>
+  </data>
   <data name="Chat_ToolActivityNotifyFailed" xml:space="preserve">
     <value>Failed to notify tool activity: {0}</value>
   </data>
