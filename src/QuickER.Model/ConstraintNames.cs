@@ -63,8 +63,8 @@ public static class ConstraintNames
     /// </remarks>
     public static IReadOnlySet<string> CollectExisting(ErDiagram diagram)
     {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var entities = diagram.Entities;
+        var names = CollectTableConstraints(entities);
 
         foreach (var relationship in diagram.Relationships)
         {
@@ -84,6 +84,20 @@ public static class ConstraintNames
                 names.Add(ForeignKey(child.TableName, parent.TableName));
             }
         }
+
+        return names;
+    }
+
+    /// <summary>テーブルが持つ制約（主キー・一意制約）の名前を、DDL が付ける名前で集める</summary>
+    /// <param name="entities">対象のテーブル</param>
+    /// <returns>主キー・一意制約の名前の集合（大文字小文字を区別しない・呼び出し側で追加してよい）</returns>
+    /// <remarks>
+    /// <see cref="CollectExisting"/> から外部キーを除いた部分で、規則は同じ。
+    /// リレーションの名前をまとめて決め直す取込（Mermaid）が、予約済みの名前の出発点に使う
+    /// </remarks>
+    public static HashSet<string> CollectTableConstraints(IEnumerable<Entity> entities)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entity in entities)
         {

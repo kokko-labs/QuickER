@@ -1329,17 +1329,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // 参照元は始点の PK 全列、参照先は共通リゾルバの既定 FK 解決、制約名は FK_<参照側>_<被参照側> を初期値とする
+            // 参照元は始点の PK 全列、参照先は共通リゾルバの既定 FK 解決。制約名は FK_<参照側>_<被参照側> を初期値とし、
+            // 図の既存の制約名と衝突するときは AI ツールと同じ規則で一意にする（別の組でも既定名が同じになり得るため）。
+            // 多対多は列ペアが整合処理で落ちるので、名前にも列を使わない（AI ツールと揃える）
+            var columnPairs = BuildDefaultColumnPairs(PendingRelationshipSource, entity);
+            var childColumnNames =
+                PendingRelationshipType == RelationshipType.ManyToMany
+                    ? []
+                    : columnPairs
+                        .Select(pair =>
+                            entity.Columns.First(column => column.Id == pair.TargetColumnId).Name
+                        )
+                        .ToList();
             var rel = new RelationshipViewModel(
                 new Relationship
                 {
                     SourceEntityId = PendingRelationshipSource.Id,
                     TargetEntityId = entity.Id,
                     Type = PendingRelationshipType,
-                    ColumnPairs = BuildDefaultColumnPairs(PendingRelationshipSource, entity),
-                    ConstraintName = ConstraintNames.ForeignKey(
+                    ColumnPairs = columnPairs,
+                    ConstraintName = ConstraintNames.UniqueForeignKey(
                         entity.TableName,
-                        PendingRelationshipSource.TableName
+                        PendingRelationshipSource.TableName,
+                        childColumnNames,
+                        ConstraintNames.CollectExisting(ToDiagramModel())
                     ),
                 },
                 PendingRelationshipSource,

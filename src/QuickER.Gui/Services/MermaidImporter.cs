@@ -33,6 +33,8 @@ public static partial class MermaidImporter
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
         var relationships = new List<Relationship>();
+        // リレーション行のラベル（relationships と同じ添字）。制約名にするかは全行を読んでから決める
+        var labels = new List<string?>();
         Entity? currentEntity = null;
         // 未閉じブロックの診断はループを抜けてから判明するため、ブロック開始行を覚えておく
         var currentEntityLineNumber = 0;
@@ -107,7 +109,9 @@ public static partial class MermaidImporter
                     continue;
                 }
 
-                relationships.Add(ParseRelationship(line, entities));
+                var (relationship, label) = ParseRelationship(line, entities);
+                relationships.Add(relationship);
+                labels.Add(label);
             }
             catch (InvalidDataException ex)
             {
@@ -136,6 +140,7 @@ public static partial class MermaidImporter
 
         EnsureEntitiesHaveColumns(entities.Values);
         ResolveRelationshipColumns(entities, relationships);
+        AssignConstraintNames(entities, relationships, labels);
 
         return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
     }
@@ -195,7 +200,11 @@ public static partial class MermaidImporter
     }
 
     /// <summary>リレーション定義行を解析して <see cref="Relationship"/> を生成する</summary>
-    private static Relationship ParseRelationship(
+    /// <returns>
+    /// 制約名を持たないリレーションと、行のラベル（無ければ <c>null</c>）。
+    /// ラベルを制約名にするかは <see cref="AssignConstraintNames"/> が全行を見て決める
+    /// </returns>
+    private static (Relationship Relationship, string? Label) ParseRelationship(
         string line,
         IReadOnlyDictionary<string, Entity> entities
     )
@@ -229,14 +238,112 @@ public static partial class MermaidImporter
         }
 
         var relationshipType = ParseRelationshipType(symbol);
-        return new Relationship
+        var relationship = new Relationship
         {
             SourceEntityId = entities[leftTable].Id,
             TargetEntityId = entities[rightTable].Id,
             Type = relationshipType,
-            ConstraintName = string.IsNullOrWhiteSpace(label) ? null : label,
         };
+
+        return (relationship, string.IsNullOrWhiteSpace(label) ? null : label);
     }
+
+    /// <summary>リレーション行のラベルから、リレーションの制約名を決める</summary>
+    /// <remarks>
+    /// <para>
+    /// Mermaid のラベルは構文上必須で、他のツールの図では <c>has</c> / <c>contains</c> のような動詞が
+    /// 繰り返し使われる。ラベルをそのまま制約名にすると、同じ名前の制約が並んで DDL の 2 本目が失敗するため、
+    /// ラベルを制約名に採るのは次をすべて満たすときに限る。
+    /// </para>
+    /// <list type="bullet">
+    /// <item>名前の無いリレーションに出力側が書くラベル（<see cref="MermaidExporter.UnnamedRelationshipLabel"/>）でない</item>
+    /// <item>1 トークン（空白を含まず、引用符で始まらない）。引用つき・複数語のラベルは動詞句で、制約名ではない</item>
+    /// <item>上の 2 条件を満たすラベルの中で、大文字小文字を無視して 1 回しか現れない</item>
+    /// <item>主キー・一意制約の名前（<see cref="ConstraintNames.CollectTableConstraints"/>）と衝突しない</item>
+    /// </list>
+    /// <para>
+    /// 回数は上の 2 条件で除外した後に数える。制約名として採られ得るのは残ったラベルだけで、衝突し得るのも
+    /// それらどうしだけだから（除外したラベルと同じ綴りでも、除外したほうは名前にならないので衝突しない）。
+    /// </para>
+    /// <para>
+    /// 採らなかったリレーションは、既定名 <c>FK_{子}_{親}</c> が空いていれば名前を持たないまま（DDL 生成時に既定名を
+    /// 合成する＝名前の無いリレーションの往復がそのまま保たれる）にし、ふさがっていれば
+    /// <see cref="ConstraintNames.UniqueForeignKey"/> の名前を明示的に付ける。同じ親子の組に名前の無い関係が
+    /// 2 本あると、既定名が同じになるため。採ったラベルを先にすべて予約してから、ファイルの順に決める。
+    /// 子の列名を一意化に使うので、列ペアを決めた後に呼ぶ
+    /// </para>
+    /// </remarks>
+    private static void AssignConstraintNames(
+        IReadOnlyDictionary<string, Entity> entities,
+        IReadOnlyList<Relationship> relationships,
+        IReadOnlyList<string?> labels
+    )
+    {
+        var candidates = labels
+            .Select(label => IsLabelShapedLikeName(label) ? label : null)
+            .ToList();
+        var candidateCounts = candidates
+            .OfType<string>()
+            .GroupBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Count(),
+                StringComparer.OrdinalIgnoreCase
+            );
+        var reserved = ConstraintNames.CollectTableConstraints(entities.Values);
+        var adopted = new bool[relationships.Count];
+
+        for (var index = 0; index < relationships.Count; index++)
+        {
+            var label = candidates[index];
+
+            if (label is not null && candidateCounts[label] == 1 && reserved.Add(label))
+            {
+                relationships[index].ConstraintName = label;
+                adopted[index] = true;
+            }
+        }
+
+        for (var index = 0; index < relationships.Count; index++)
+        {
+            if (adopted[index])
+            {
+                continue;
+            }
+
+            var relationship = relationships[index];
+            var parent = entities.Values.First(entity => entity.Id == relationship.SourceEntityId);
+            var child = entities.Values.First(entity => entity.Id == relationship.TargetEntityId);
+
+            if (reserved.Add(ConstraintNames.ForeignKey(child.TableName, parent.TableName)))
+            {
+                continue;
+            }
+
+            var childColumnNames = relationship.ColumnPairs.Select(pair =>
+                child.Columns.First(column => column.Id == pair.TargetColumnId).Name
+            );
+            var name = ConstraintNames.UniqueForeignKey(
+                child.TableName,
+                parent.TableName,
+                childColumnNames,
+                reserved
+            );
+            relationship.ConstraintName = name;
+            reserved.Add(name);
+        }
+    }
+
+    /// <summary>ラベルが制約名の候補になる形か（出力側のプレースホルダでない 1 トークン）を判定する</summary>
+    private static bool IsLabelShapedLikeName(string? label) =>
+        label is not null
+        && !string.Equals(
+            label,
+            MermaidExporter.UnnamedRelationshipLabel,
+            StringComparison.OrdinalIgnoreCase
+        )
+        && !label.StartsWith('"')
+        && !label.Any(char.IsWhiteSpace);
 
     /// <summary>Mermaid のカーディナリティ記号からリレーション種別を判定する</summary>
     private static RelationshipType ParseRelationshipType(string symbol)

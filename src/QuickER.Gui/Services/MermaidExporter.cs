@@ -13,6 +13,13 @@ namespace QuickER.Services;
 /// </remarks>
 public static partial class MermaidExporter
 {
+    /// <summary>制約名を持たないリレーションに書くラベル</summary>
+    /// <remarks>
+    /// Mermaid のリレーション行はラベルが構文上必須なので、名前の無いリレーションにも何か書く必要がある。
+    /// 取込（<see cref="MermaidImporter"/>）はこの値を制約名として採らない
+    /// </remarks>
+    internal const string UnnamedRelationshipLabel = "relates";
+
     /// <summary>ER 図定義から Mermaid 文字列を生成する</summary>
     public static string Build(ErDiagram diagram)
     {
@@ -313,7 +320,7 @@ public static partial class MermaidExporter
             _ => "||--o{",
         };
         var label = string.IsNullOrWhiteSpace(relationship.ConstraintName)
-            ? "relates"
+            ? UnnamedRelationshipLabel
             : Identifier(relationship.ConstraintName);
 
         return $"{Identifier(source.TableName)} {symbol} {Identifier(target.TableName)} : {label}";

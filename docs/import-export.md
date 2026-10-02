@@ -67,6 +67,11 @@ Export folds them to `_` and reports that it did among the information the forma
 If folding collides with another column in the same table, the name that needs no folding keeps its spelling and the folded one gets a number (`_2`, `_3`, …).
 Table names round-trip even with spaces.
 A `UK` key marker is imported as a unique constraint over that single column (Mermaid has no syntax for grouping several columns, so composite unique constraints cannot be expressed).
+A relationship line must carry a label, so export writes the constraint name there, or `relates` for a relationship without a name.
+On import, a label becomes the constraint name only when it is a single word without quotes, is not `relates`, appears on no other relationship, and is not the name of a primary key or unique constraint.
+Labels such as `has` that other tools repeat are therefore not taken as names, and neither is a constraint that is actually named `relates`.
+A relationship whose label is not taken stays without a name and gets the default `FK_{child}_{parent}` from the DDL.
+When that name is already taken, for example by a second relationship between the same two tables, it gets the child's foreign key column names appended, or a number.
 
 ### Excel definition documents (.xlsx)
 

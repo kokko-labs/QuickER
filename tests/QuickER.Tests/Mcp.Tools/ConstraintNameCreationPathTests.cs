@@ -207,6 +207,113 @@ public sealed class ConstraintNameCreationPathTests : IDisposable
     }
 
     /// <summary>
+    /// 既定名が別の組と同じになる 2 本目（子 <c>A_B</c>・親 <c>C</c> の後の、子 <c>A</c>・親 <c>B_C</c>＝どちらも
+    /// <c>FK_A_B_C</c>）に、GUI の手作成・内蔵チャット・MCP が同じ一意な名前を付け、DDL の制約名が重複しないことを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "別の組と既定名が同じになる外部キーに、GUI の手作成・内蔵チャット・MCP が同じ一意な名前を付ける"
+    )]
+    public void UniqueForeignKeyName_IsTheSameOnEveryCreationPath()
+    {
+        (string Tool, object Args)[] tables =
+        [
+            .. KeyedTable("C", "CId"),
+            .. KeyedTable("A_B", "A_BId", "CId"),
+            .. KeyedTable("B_C", "B_CId"),
+            .. KeyedTable("A", "AId", "B_CId"),
+        ];
+        (string Tool, object Args)[] relationships =
+        [
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "C",
+                    target_table = "A_B",
+                    relationship_type = "OneToMany",
+                }
+            ),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "B_C",
+                    target_table = "A",
+                    relationship_type = "OneToMany",
+                }
+            ),
+        ];
+        string[] expected = ["FK_A_B_C", "FK_A_B_C_B_CId"];
+
+        // GUI の手作成（リレーション作成モードで親 → 子の順にクリック）
+        var manual = RunGuiTools(tables);
+
+        foreach (var (parent, child) in new[] { ("C", "A_B"), ("B_C", "A") })
+        {
+            manual.StartAddOneToManyCommand.Execute(null);
+            manual.OnEntityClicked(manual.Entities.Single(entity => entity.TableName == parent));
+            manual.OnEntityClicked(manual.Entities.Single(entity => entity.TableName == child));
+        }
+
+        // 内蔵チャット・MCP のツール
+        var chat = RunGuiTools([.. tables, .. relationships]);
+        var mcp = JsonStorageService.Load(RunDocumentTools([.. tables, .. relationships])).Schema;
+
+        manual
+            .Relationships.Select(relationship => relationship.ConstraintName)
+            .Should()
+            .Equal(expected, "GUI の手作成");
+        chat.Relationships.Select(relationship => relationship.ConstraintName)
+            .Should()
+            .Equal(expected, "内蔵チャットのツール");
+        mcp.Relationships.Select(relationship => relationship.ConstraintName)
+            .Should()
+            .Equal(expected, "MCP のツール");
+
+        var ddl = new SqlServerDdlGenerator().Build(manual.ToDiagramModel());
+
+        foreach (var name in expected)
+        {
+            ddl.Should().Contain($"[{name}]", "DDL は付けた名前で外部キーを作る");
+        }
+    }
+
+    /// <summary>int の主キー 1 列と、残りの int 列を持つテーブルを作るツール呼び出し</summary>
+    private static (string Tool, object Args)[] KeyedTable(
+        string tableName,
+        string keyColumn,
+        params string[] otherColumns
+    ) =>
+        [
+            ("add_entity", new { table_name = tableName }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = tableName,
+                    column_name = keyColumn,
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            .. otherColumns.Select(column =>
+                (
+                    "add_column",
+                    (object)
+                        new
+                        {
+                            table_name = tableName,
+                            column_name = column,
+                            data_type = "int",
+                            is_primary_key = false,
+                            is_nullable = false,
+                        }
+                )
+            ),
+        ];
+
+    /// <summary>
     /// ツールが衝突の判定に使う既存の制約名（<see cref="ConstraintNames.CollectExisting"/>）が、DDL が実際に付ける
     /// 名前と一致し、役割の違う 2 本目の外部キーが DDL でも別の名前になることを検証する
     /// </summary>

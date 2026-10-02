@@ -209,6 +209,54 @@ public class ConstraintNamesTests
             );
     }
 
+    /// <summary>
+    /// テーブルの制約名は、<see cref="ConstraintNames.CollectExisting"/> から外部キーだけを除いたものと一致する
+    /// （主キー・一意制約の規則を写さず共有していることの確認）
+    /// </summary>
+    [Fact(DisplayName = "テーブルの制約名は既存の制約名から外部キーを除いたものと同じ")]
+    public void CollectTableConstraints_EqualsCollectExistingWithoutRelationships()
+    {
+        var customers = new Entity
+        {
+            TableName = "Customers",
+            Columns =
+            {
+                new Column { Name = "CustomerId", IsPrimaryKey = true },
+            },
+        };
+        var code = new Column { Name = "code" };
+        var orders = new Entity
+        {
+            TableName = "dbo.Orders",
+            Columns =
+            {
+                new Column { Name = "OrderId", IsPrimaryKey = true },
+                code,
+            },
+            UniqueConstraints = { new UniqueConstraint { ColumnIds = { code.Id } } },
+        };
+        var diagram = new ErDiagram
+        {
+            Entities = { customers, orders },
+            Relationships =
+            {
+                new Relationship { SourceEntityId = customers.Id, TargetEntityId = orders.Id },
+            },
+        };
+
+        var tableConstraints = ConstraintNames.CollectTableConstraints(diagram.Entities);
+
+        tableConstraints
+            .Should()
+            .BeEquivalentTo("PK_Customers", "PK_dbo_Orders", "UQ_dbo_Orders_code");
+        tableConstraints.Contains("pk_customers").Should().BeTrue("大文字小文字を区別しない");
+        ConstraintNames
+            .CollectExisting(diagram)
+            .Except(tableConstraints)
+            .Should()
+            .BeEquivalentTo("FK_dbo_Orders_Customers");
+    }
+
     [Fact(DisplayName = "既存の制約名の集合は大文字小文字を区別しない")]
     public void CollectExisting_IsCaseInsensitive()
     {
