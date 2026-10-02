@@ -11,6 +11,7 @@ The QuickER CLI provides subcommands for generating code (`generate` / `scaffold
 | `quicker reverse` | Generated C# source (a `.g.cs` produced with `IncludeDataAnnotations` enabled) | Schema-only ER diagram JSON |
 
 The CLI display language follows the OS language setting (Japanese / English).
+Interrupting a command with Ctrl+C stops it without further output and exits with code `130`.
 
 Install it with `dotnet tool install --global QuickER.Cli`.
 To run from source instead:
@@ -31,7 +32,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 |---|:-:|---|
 | `--schema <file>` | ✅ | The input ER diagram JSON file (the application's save format) |
 | `--out <dir>` | ✅ | The output folder for the generated code |
-| `--provider <name>` | | Target database type. `sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`. Defaults to the diagram's target DBMS (`TargetDbms`), or `sqlserver` when the diagram has none |
+| `--provider <name>` | | Target database type. `sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`. Defaults to the diagram's target DBMS (`TargetDbms`), or `sqlserver` when the diagram has none. A value that differs from the diagram's target DBMS prints a warning on stderr: column types are not converted and are read as written under that dialect's rules (to change the dialect, switch the target DBMS in the GUI, which converts the types first) |
 | `--config <file>` | | Generation option settings file (quicker.json). See below |
 | `--force` | | Overwrite generated files even if they have been edited by hand since they were generated |
 
@@ -62,6 +63,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | Option | Required | Description |
 |---|:-:|---|
 | `--connection <string>` | ✅ | The connection string (the format follows the DBMS of `--provider`) |
+| `--command-timeout <seconds>` | | The timeout for each statement the schema import runs (default `60`; `0` means no limit) |
 
 The other options (`--out` / `--config` / `--provider` / `--force`, and the kebab-case flags named after the settings keys) are the same as for `generate`.
 There is no diagram to read the dialect from, so `--provider` defaults to `sqlserver`.

@@ -198,6 +198,22 @@ public static class CliApp
             return Task.FromResult(1);
         }
 
+        // 図と違う方言を明示したときは、型を変換せずに生成することを警告する（生成は続ける）。
+        // 未対応の名前はこの後のプロバイダ解決が誤りとして報告するので、警告は対応する名前のときだけ出す
+        if (
+            GenerationExecutor.ProviderDiffersFromDiagram(providerName, diagram)
+            && GenerationExecutor.IsRegisteredProvider(resolvedProviderName)
+        )
+        {
+            stderr.WriteLine(
+                string.Format(
+                    Strings.Cli_ProviderDiffersFromDiagram,
+                    GenerationExecutor.ResolveProvider(resolvedProviderName).Name,
+                    SqlComment.Sanitize(diagram.TargetDbms)
+                )
+            );
+        }
+
         return GenerationExecutor.RunAsync(
             resolvedProviderName,
             output,
@@ -368,7 +384,13 @@ public static class CliApp
         );
 
     /// <summary>DB へ直結してスキーマをインポートし、意味モデル（<see cref="ErDiagram"/>）を組み立てる（失敗時は表示済みで null）</summary>
-    private static async Task<ErDiagram?> ImportDiagramAsync(
+    /// <remarks>
+    /// 利用者の中断（<paramref name="cancellationToken"/> が取り消された状態の <see cref="OperationCanceledException"/>）は
+    /// 取込の失敗として表示せず、そのまま伝える（<see cref="InvokeAsync(string[], TextWriter, TextWriter)"/> が 130 を返す）。
+    /// トークンが取り消されていない <see cref="OperationCanceledException"/> はドライバや内部の時間切れなので、
+    /// 他の例外と同じく取込の失敗として扱う（型だけで判定すると、失敗が「利用者の中断」に化けて黙って終わる）。
+    /// </remarks>
+    internal static async Task<ErDiagram?> ImportDiagramAsync(
         IDatabaseProvider provider,
         string connectionString,
         int commandTimeoutSeconds,
@@ -377,6 +399,7 @@ public static class CliApp
     )
     {
         SchemaImportResult imported;
+
         try
         {
             imported = await provider
@@ -388,6 +411,7 @@ public static class CliApp
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
+            when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
         {
             stderr.WriteLine(string.Format(Strings.Cli_SchemaImportFailed, ex.Message));
             return null;
@@ -399,10 +423,12 @@ public static class CliApp
             stderr.WriteLine(DescribeImportWarning(warning));
         }
 
+        // 取り込んだ方言を図の対象 DBMS にする（reverse と同じ。型は --provider の方言で書かれている）
         return new ErDiagram
         {
             Entities = imported.Entities.ToList(),
             Relationships = imported.Relationships.ToList(),
+            TargetDbms = provider.Name,
         };
     }
 
@@ -569,6 +595,7 @@ public static class CliApp
         }
 
         IDatabaseProvider provider;
+
         try
         {
             provider = GenerationExecutor.ResolveProvider(providerName);
@@ -581,6 +608,7 @@ public static class CliApp
         }
 
         CodeReverseResult result;
+
         try
         {
             var sourceText = File.ReadAllText(sourceFile.FullName);

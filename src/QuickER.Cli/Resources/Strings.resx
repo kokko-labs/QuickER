@@ -91,6 +91,9 @@
   <data name="Cli_DiagramTargetDbmsUnsupported" xml:space="preserve">
     <value>The diagram's target DBMS '{0}' is not supported. --provider was not given, so the value was taken from the diagram. Supported values: {1}. Run again with --provider to choose one.</value>
   </data>
+  <data name="Cli_ProviderDiffersFromDiagram" xml:space="preserve">
+    <value>Warning: --provider {0} differs from the diagram's target DBMS {1}. Column types were not converted; they are read as written under {0}'s rules. To change the dialect, switch the target DBMS in the QuickER GUI, which converts the types first.</value>
+  </data>
   <data name="Cli_Opt_GenerateProvider" xml:space="preserve">
     <value>Target database type (default: the diagram's target DBMS, or sqlserver if the diagram has none)</value>
   </data>

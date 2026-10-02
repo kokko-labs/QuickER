@@ -74,11 +74,31 @@ internal static class GenerationExecutor
     }
 
     /// <summary>
+    /// 明示されたプロバイダが図の対象 DBMS と違うか（未指定・図に対象 DBMS が無い・同じ方言なら false）
+    /// </summary>
+    /// <remarks>
+    /// 図の列の型は対象 DBMS の表記で書かれており、生成は型を変換しない（変換は GUI の対象 DBMS 切替の担当）。
+    /// 違う方言を明示した場合は、型がその方言の規則でそのまま解釈されることを警告する（CLI の generate と
+    /// MCP の generate_csharp / generate_ddl が同じ判定を使う）。方言名の照合は登録簿と同じく大文字小文字を区別しない。
+    /// </remarks>
+    /// <param name="explicitName">利用者が指定したプロバイダ名（未指定なら null か空）</param>
+    /// <param name="diagram">生成対象の図</param>
+    internal static bool ProviderDiffersFromDiagram(string? explicitName, ErDiagram diagram) =>
+        !string.IsNullOrWhiteSpace(explicitName)
+        && !string.IsNullOrWhiteSpace(diagram.TargetDbms)
+        && !string.Equals(
+            explicitName.Trim(),
+            diagram.TargetDbms.Trim(),
+            StringComparison.OrdinalIgnoreCase
+        );
+
+    /// <summary>
     /// 生成の共通パイプラインを実行する。図の取得（<paramref name="resolveDiagram"/>）だけがコマンド固有で、
     /// 失敗時は <c>null</c>（エラー表示済み）を返して終了コード 1 で中断する。
     /// </summary>
     /// <remarks>
-    /// 検証順序は「プロバイダ解決 → 図の取得 → 設定読解（LoadOptions）」。generate の schema 存在チェックのように
+    /// 検証順序は「プロバイダ解決 → 設定読解（LoadOptions）→ 図の取得」。設定読解は図に依らないため、
+    /// 時間のかかる図の取得（scaffold の DB 取込）より前に誤りを報告する。generate の schema 存在チェックのように
     /// プロバイダ解決より前に済ませるべき検証は、このメソッドを呼ぶ前にコマンド側で行うこと。
     /// generate は方言の既定を図から決めるため、図を読んでからこのメソッドを呼ぶ（読込済みの図を
     /// <paramref name="resolveDiagram"/> がそのまま返す）。
@@ -99,6 +119,7 @@ internal static class GenerationExecutor
     )
     {
         IDatabaseProvider provider;
+
         try
         {
             provider = Providers.Get(providerName);
@@ -109,15 +130,9 @@ internal static class GenerationExecutor
             return 1;
         }
 
-        var diagram = await resolveDiagram(provider, cancellationToken).ConfigureAwait(false);
-
-        if (diagram is null)
-        {
-            // 図の取得に失敗（コマンド側でエラー表示済み）
-            return 1;
-        }
-
+        // 設定の読解は図に依らないため、図の取得より先に行う（scaffold が DB 取込を終えてから設定の誤りに気づかない）
         CodeGenerationOptions options;
+
         try
         {
             options = GenerationConfigLoader.LoadOptions(
@@ -130,13 +145,17 @@ internal static class GenerationExecutor
         }
         catch (GenerationConfigException ex)
         {
-            // 設定ファイルの不在・不正 JSON・値の型違い（既定値のまま黙って続行せず、生成前に中止する）
+            // 設定ファイルの不在・不正 JSON・値の型違い・未対応の Repository 方言
+            // （既定値のまま黙って続行せず、生成前に中止する）
             stderr.WriteLine(ex.Message);
             return 1;
         }
-        catch (RepositoryDialectUnsupportedException ex)
+
+        var diagram = await resolveDiagram(provider, cancellationToken).ConfigureAwait(false);
+
+        if (diagram is null)
         {
-            stderr.WriteLine(ex.Message);
+            // 図の取得に失敗（コマンド側でエラー表示済み）
             return 1;
         }
 
@@ -166,8 +185,8 @@ internal static class GenerationExecutor
     /// <remarks>
     /// 診断（stderr）と生成ファイル一覧（stdout）は、引数の <paramref name="stdout"/> / <paramref name="stderr"/>
     /// へ書き出す（呼び出し側は <see cref="StringWriter"/> を渡せばそのまま捕捉できる）。
-    /// 設定エラー（<see cref="GenerationConfigException"/> ＝設定ファイル不在・不正 JSON・値の型違い /
-    /// <see cref="RepositoryDialectUnsupportedException"/>）やその他の例外は呼び出し側へ伝播する。
+    /// 設定エラー（<see cref="GenerationConfigException"/> ＝設定ファイル不在・不正 JSON・値の型違い。派生の
+    /// <see cref="RepositoryDialectUnsupportedException"/> を含む）やその他の例外は呼び出し側へ伝播する。
     /// </remarks>
     public static int GenerateFromConfig(
         IDatabaseProvider provider,

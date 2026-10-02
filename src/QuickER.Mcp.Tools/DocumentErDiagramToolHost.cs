@@ -195,29 +195,8 @@ public static partial class DocumentErDiagramToolHost
             return (document, null);
         }
 
-        return (null, DescribeLoadError(file, error, exception));
+        return (null, DiagramLoadErrors.Describe(file, error, exception));
     }
-
-    /// <summary>読込失敗の種別を MCP ツールの応答文言へ翻訳する（ユーザー向け文字列は英語正本）</summary>
-    private static string DescribeLoadError(
-        string file,
-        DocumentLoadError error,
-        Exception? exception
-    ) =>
-        error switch
-        {
-            DocumentLoadError.ReadFailed =>
-                $"Failed to read diagram file '{file}': {exception!.Message}",
-            DocumentLoadError.InvalidJson =>
-                $"Diagram file '{file}' is not valid JSON: {exception!.Message}",
-            DocumentLoadError.NotDiagramDocument =>
-                $"Diagram file '{file}' is not a DiagramDocument (expected an object with 'Version' and 'Schema'). Refusing to treat unrelated JSON as a diagram.",
-            DocumentLoadError.DuplicateId =>
-                $"Diagram file '{file}' uses the same identifier for more than one table or column, so it cannot be loaded: {exception!.Message}",
-            DocumentLoadError.MissingRequiredText =>
-                $"Diagram file '{file}' leaves a required name or type empty (null), so it cannot be loaded: {exception!.Message}",
-            _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
-        };
 
     // ---------------- create_diagram ----------------
 

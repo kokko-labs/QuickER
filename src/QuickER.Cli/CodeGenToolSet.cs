@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -126,8 +127,37 @@ public static class CodeGenToolSet
         return new McpToolSet(definitions, Dispatch);
     }
 
-    /// <summary>ツール名・引数 JSON を受け取り、<c>file</c> を取り出してツールを実行する</summary>
+    /// <summary>ツール名・引数 JSON を受け取り、UI 言語を英語に固定してツールを実行する</summary>
+    /// <remarks>
+    /// <para>
+    /// 結果テキストには、生成コアが CLI と共有する resx の文言（生成ファイルの一覧・件数・生成器の診断・
+    /// 設定エラー・ランタイムパッケージの案内）が入る。MCP の呼び手は外部 AI エージェントで、結果は機械向けの
+    /// 英語に統一する（ツール定義と同じ）ため、実行中だけ <see cref="CultureInfo.CurrentUICulture"/> を
+    /// <see cref="CultureInfo.InvariantCulture"/>（＝中立 resx の英語）にする。
+    /// </para>
+    /// <para>
+    /// 変えるのは UI 言語だけで <see cref="CultureInfo.CurrentCulture"/> には触れない（日時・数値の書式を CLI・GUI と
+    /// 同じに保つ）。この入口は同期で、設定した値は呼び出し元へ残るため、finally で必ず元へ戻す。
+    /// UI 言語はスレッド（非同期の流れ）ごとの値なので、並行に届いた別の呼び出しには影響しない。
+    /// </para>
+    /// </remarks>
     private static (string Result, bool Success) Dispatch(string toolName, string argumentsJson)
+    {
+        var previousUICulture = CultureInfo.CurrentUICulture;
+        CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
+
+        try
+        {
+            return DispatchCore(toolName, argumentsJson);
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = previousUICulture;
+        }
+    }
+
+    /// <summary>ツール名・引数 JSON を受け取り、<c>file</c> を取り出してツールを実行する</summary>
+    private static (string Result, bool Success) DispatchCore(string toolName, string argumentsJson)
     {
         // 引数不要の情報系ツールは file 検証より前に処理する（引数 JSON は参照しない）
         if (toolName == "get_generation_config_schema")
@@ -203,6 +233,11 @@ public static class CodeGenToolSet
             return (providerError!, false);
         }
 
+        // 図と違う方言を明示したときの警告（以降の結果の先頭へ付す。成功時は将来版の警告の後）
+        var providerWarning = DescribeProviderMismatch(args, document.Schema, provider);
+
+        (string, bool) Fail(string message) => (PrependLine(providerWarning, message), false);
+
         var configPath = GetString(args, "config");
         FileInfo? config = null;
 
@@ -210,7 +245,7 @@ public static class CodeGenToolSet
         {
             if (!File.Exists(configPath))
             {
-                return ($"Config file not found: {configPath}.", false);
+                return Fail($"Config file not found: {configPath}.");
             }
 
             config = new FileInfo(configPath);
@@ -223,7 +258,7 @@ public static class CodeGenToolSet
         {
             if (forceEl.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
             {
-                return ("force must be a boolean (true or false).", false);
+                return Fail("force must be a boolean (true or false).");
             }
 
             force = forceEl.GetBoolean();
@@ -246,10 +281,11 @@ public static class CodeGenToolSet
                 buffer
             );
         }
-        catch (RepositoryDialectUnsupportedException ex)
+        catch (GenerationConfigException ex)
         {
-            // 設定検証エラー（生成前）は捕捉バッファへ乗らないため、メッセージを明示的に付す
-            return (Combine(buffer.ToString(), $"C# code generation failed: {ex.Message}"), false);
+            // 設定エラー（生成前＝設定ファイルの不在・不正 JSON・値の型違い・未対応の Repository 方言）は
+            // 捕捉バッファへ乗らないため、メッセージを明示的に付す（バッファ側の未知キー警告も一緒に返す）
+            return Fail(Combine(buffer.ToString(), $"C# code generation failed: {ex.Message}"));
         }
 
         var diagnostics = buffer.ToString();
@@ -257,24 +293,24 @@ public static class CodeGenToolSet
         if (exitCode == GenerationExecutor.ModifiedFilesExitCode)
         {
             // CLI の --force 案内の代わりに、このツールでの上書き方法を英語で添える
-            return (
+            return Fail(
                 Combine(
                     diagnostics,
-                    "C# code generation wrote nothing because the files listed above have been edited by hand since they were generated. "
+                    "C# code generation wrote nothing because the files listed below have been edited by hand since they were generated. "
                         + "Ask the user whether their edits can be discarded. If so, call generate_csharp again with force: true; "
                         + "otherwise move the edits into a separate file (for example, a partial class) first."
-                ),
-                false
+                )
             );
         }
 
         if (exitCode != 0)
         {
-            return (Combine(diagnostics, "C# code generation failed."), false);
+            return Fail(Combine(diagnostics, "C# code generation failed."));
         }
 
         var sb = new StringBuilder();
         AppendNewerFormatWarning(sb, document);
+        AppendWarningLine(sb, providerWarning);
         sb.AppendLine(
             $"Generated C# code from '{file}' into '{outDir}' (provider: {provider.Name})."
         );
@@ -328,6 +364,7 @@ public static class CodeGenToolSet
 
         var sb = new StringBuilder();
         AppendNewerFormatWarning(sb, document);
+        AppendWarningLine(sb, DescribeProviderMismatch(args, document.Schema, provider));
         sb.Append($"Generated {provider.Name} DDL from '{file}' into '{outFile}'.");
 
         return (sb.ToString(), true);
@@ -397,8 +434,8 @@ public static class CodeGenToolSet
     /// 読み込んで続行し、警告は結果テキストへ付す（<see cref="AppendNewerFormatWarning"/>）。
     /// </summary>
     /// <remarks>
-    /// 形式検証は <see cref="JsonStorageService.TryLoad"/> に委ね、失敗種別を MCP ツールの応答文言
-    /// （英語正本）へ翻訳するだけを担う。不在だけはツール固有の案内文にするため先に判定する。
+    /// 形式検証は <see cref="JsonStorageService.TryLoad"/> に委ね、失敗種別の文言は ER 図操作ツールと共有の
+    /// <see cref="DiagramLoadErrors.Describe"/>（英語正本）で作る。不在だけはツール固有の案内文にするため先に判定する。
     /// 読み取りは <see cref="DiagramFileGate"/> のロックの中で行う（同じプロセスの ER 図操作ツールが同じファイルを
     /// 保存している最中に読むと、共有違反で読み取りが失敗するため）。生成そのものは読み込んだ文書だけを使うので
     /// ロックの外で行う。
@@ -419,23 +456,7 @@ public static class CodeGenToolSet
             return (document, null);
         }
 
-        return (
-            null,
-            error switch
-            {
-                DocumentLoadError.ReadFailed =>
-                    $"Failed to read diagram file '{file}': {exception!.Message}",
-                DocumentLoadError.InvalidJson =>
-                    $"Diagram file '{file}' is not valid JSON: {exception!.Message}",
-                DocumentLoadError.NotDiagramDocument =>
-                    $"Diagram file '{file}' is not a DiagramDocument (expected an object with 'Version' and 'Schema'). Refusing to treat unrelated JSON as a diagram.",
-                DocumentLoadError.DuplicateId =>
-                    $"Diagram file '{file}' uses the same identifier for more than one table or column, so it cannot be loaded: {exception!.Message}",
-                DocumentLoadError.MissingRequiredText =>
-                    $"Diagram file '{file}' leaves a required name or type empty (null), so it cannot be loaded: {exception!.Message}",
-                _ => throw new ArgumentOutOfRangeException(nameof(error), error, null),
-            }
-        );
+        return (null, DiagramLoadErrors.Describe(file, error, exception));
     }
 
     /// <summary>新フォーマット文書のときのみ、警告行を結果テキストの先頭へ付す（読み取り系は続行する）</summary>
@@ -449,6 +470,39 @@ public static class CodeGenToolSet
             sb.AppendLine();
         }
     }
+
+    /// <summary>
+    /// <c>provider</c> を明示し、それが図の対象 DBMS と違うときの警告行を返す（同じ方言・省略時は null）
+    /// </summary>
+    /// <remarks>
+    /// 判定は CLI の generate と共有（<see cref="GenerationExecutor.ProviderDiffersFromDiagram"/>）。生成は続ける＝
+    /// 型は変換されず、指定した方言の規則でそのまま解釈されることを、呼び手（AI エージェント）へ伝える。
+    /// 図の対象 DBMS はファイル由来の任意文字列なので、1 行に収まるよう改行・制御文字を畳む。
+    /// </remarks>
+    private static string? DescribeProviderMismatch(
+        JsonElement args,
+        ErDiagram schema,
+        IDatabaseProvider provider
+    ) =>
+        GenerationExecutor.ProviderDiffersFromDiagram(GetString(args, "provider"), schema)
+            ? $"Warning: provider '{provider.Name}' differs from the diagram's target DBMS '{SqlComment.Sanitize(schema.TargetDbms)}'. "
+                + $"Column types were not converted; they are read as written under {provider.Name}'s rules. "
+                + "To change the dialect, switch the target DBMS in the QuickER GUI, which converts the types first."
+            : null;
+
+    /// <summary>警告があれば、その行と空行を結果テキストへ足す（無ければ何もしない）</summary>
+    private static void AppendWarningLine(StringBuilder sb, string? warning)
+    {
+        if (warning is not null)
+        {
+            sb.AppendLine(warning);
+            sb.AppendLine();
+        }
+    }
+
+    /// <summary>警告があれば、結果テキストの先頭へ 1 行足す（無ければそのまま返す）</summary>
+    private static string PrependLine(string? warning, string text) =>
+        warning is null ? text : $"{warning}\n{text}";
 
     /// <summary>捕捉した診断テキストと固定メッセージを結合する（診断が空ならメッセージのみ）</summary>
     private static string Combine(string diagnostics, string message) =>

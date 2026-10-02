@@ -91,6 +91,9 @@
   <data name="Cli_DiagramTargetDbmsUnsupported" xml:space="preserve">
     <value>図の対象 DBMS '{0}' には対応していません（--provider を指定していないため、図の値を使いました）。対応する値: {1}。--provider で指定して再実行してください。</value>
   </data>
+  <data name="Cli_ProviderDiffersFromDiagram" xml:space="preserve">
+    <value>警告: --provider {0} は図の対象 DBMS {1} と異なります。列の型は変換せず、書かれたまま {0} の規則で解釈します。方言を変えるには、型を変換してくれる QuickER GUI の対象 DBMS の切替を使ってください。</value>
+  </data>
   <data name="Cli_Opt_GenerateProvider" xml:space="preserve">
     <value>対象データベースの種類（既定: 図の対象 DBMS。図に無ければ sqlserver）</value>
   </data>

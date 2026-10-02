@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -208,7 +209,7 @@ public class CodeGenToolSetTests
     /// </summary>
     /// <remarks>
     /// 設定検証エラー（生成前）は診断バッファへ乗らないため、<c>generate_csharp</c> は
-    /// <c>RepositoryDialectUnsupportedException</c> 専用の catch で「C# code generation failed:」を前置する。
+    /// 設定エラーの基底 <c>GenerationConfigException</c> の catch で「C# code generation failed:」を前置する。
     /// この catch を外すと総括 catch（<c>Error: …</c>）に拾われて前置が消えるため、前置と本文の両方を固定する。
     /// </remarks>
     [Fact(
@@ -241,11 +242,63 @@ public class CodeGenToolSetTests
                 .Should()
                 .Contain(
                     string.Format(
-                        CodeGenStrings.CodeGen_Error_UnsupportedRepositoryDialect,
+                        // MCP の結果は英語（中立 resx）に固定されるため、テストスレッドの言語でなく中立で引く
+                        CodeGenStrings.ResourceManager.GetString(
+                            nameof(CodeGenStrings.CodeGen_Error_UnsupportedRepositoryDialect),
+                            CultureInfo.InvariantCulture
+                        )!,
                         "postgresql",
                         string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects)
                     )
                 );
+        }
+        finally
+        {
+            Cleanup(root);
+        }
+    }
+
+    /// <summary>
+    /// 設定ファイルの値の型違い（生成前の設定エラー）でも、generate_csharp は前置つきの失敗を返し、
+    /// 捕捉バッファの未知キー警告を失わないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 設定エラーの catch が未対応方言の派生型だけだと、型違いは総括 catch（<c>Error: …</c>）へ落ち、
+    /// 先にバッファへ書かれた未知キーの警告ごと消える。
+    /// </remarks>
+    [Fact(
+        DisplayName = "generate_csharp は設定の型違いで前置つきの失敗を返し、未知キーの警告を残す"
+    )]
+    public void GenerateCSharp_ConfigValueInvalid_KeepsBufferedWarnings()
+    {
+        var (file, root) = CreateDiagram("sqlite");
+        var outDir = Path.Combine(root, "out");
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(
+            configPath,
+            """{ "NoSuchKeyForTest": 1, "GenerateRepositories": "yes" }"""
+        );
+
+        try
+        {
+            var (result, success) = Execute(
+                "generate_csharp",
+                Args(
+                    new
+                    {
+                        file,
+                        out_dir = outDir,
+                        config = configPath,
+                    }
+                )
+            );
+
+            success.Should().BeFalse(result);
+            result.Should().StartWith("C# code generation failed:");
+            result.Should().NotContain("Error: ");
+            result.Should().Contain("NoSuchKeyForTest", "未知キーの警告がバッファから返る");
+            result.Should().Contain("GenerateRepositories", "型違いのキーが名指しされる");
+            Directory.Exists(outDir).Should().BeFalse("設定エラーでは何も書かない");
         }
         finally
         {

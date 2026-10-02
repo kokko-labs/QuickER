@@ -120,6 +120,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_ProviderDiffersFromDiagram {
+            get {
+                return ResourceManager.GetString("Cli_ProviderDiffersFromDiagram", resourceCulture);
+            }
+        }
+
         public static string Cli_Opt_GenerateProvider {
             get {
                 return ResourceManager.GetString("Cli_Opt_GenerateProvider", resourceCulture);
