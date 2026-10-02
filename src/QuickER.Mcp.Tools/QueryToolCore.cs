@@ -1,6 +1,8 @@
 using System.Text.Json;
 using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Model;
+using static QuickER.Mcp.Tools.SchemaLookup;
+using static QuickER.Mcp.Tools.ToolArguments;
 
 namespace QuickER.Mcp.Tools;
 
@@ -227,6 +229,41 @@ public static class QueryToolCore
             }
         }
 
+        // ---- 実装方式に合わない入力（拒否はせず、使わないことを警告で知らせる） ----
+        // GUI のクエリ定義ダイアログと同じく、sql 方式以外では SQL を保存しない（condition は従来から dsl のときだけ保存）
+        var implementationText = implementation.ToString().ToLowerInvariant();
+
+        if (implementation != QueryImplementationKind.Sql && sql.Count > 0)
+        {
+            warnings.Add(
+                new QueryToolDiagnostic(
+                    QueryToolDiagnosticCode.SqlIgnoredForImplementation,
+                    Detail: implementationText
+                )
+            );
+        }
+
+        if (implementation != QueryImplementationKind.Dsl && !string.IsNullOrWhiteSpace(condition))
+        {
+            warnings.Add(
+                new QueryToolDiagnostic(
+                    QueryToolDiagnosticCode.ConditionIgnoredForImplementation,
+                    Detail: implementationText
+                )
+            );
+        }
+
+        // 中身のある SQL が 1 方言も無ければ、生成は全方言で手動実装（partial）になる
+        if (
+            implementation == QueryImplementationKind.Sql
+            && sql.Values.All(string.IsNullOrWhiteSpace)
+        )
+        {
+            warnings.Add(
+                new QueryToolDiagnostic(QueryToolDiagnosticCode.SqlImplementationWithoutSql)
+            );
+        }
+
         // ---- upsert の相手（既存は Id 温存で丸ごと置換・なければ追加） ----
         var existing = diagram.Queries.FirstOrDefault(query =>
             query.EntityId == entity.Id
@@ -250,7 +287,7 @@ public static class QueryToolCore
             OrderBy = orderBy,
             HasPaging = paging,
             Implementation = implementation,
-            Sql = sql,
+            Sql = implementation == QueryImplementationKind.Sql ? sql : [],
             ResultTypeName = string.IsNullOrWhiteSpace(resultTypeName) ? null : resultTypeName,
             Fields = fields,
         };
@@ -738,18 +775,6 @@ public static class QueryToolCore
 
     // ---------------- helpers ----------------
 
-    /// <summary>テーブル名でエンティティを検索する（大文字小文字を区別しない・最初の一致）</summary>
-    private static Entity? FindEntity(ErDiagram diagram, string tableName) =>
-        diagram.Entities.FirstOrDefault(entity =>
-            string.Equals(entity.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
-
-    /// <summary>列名でエンティティ内の列を検索する（大文字小文字を区別しない・最初の一致）</summary>
-    private static Column? FindColumn(Entity entity, string columnName) =>
-        entity.Columns.FirstOrDefault(column =>
-            string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)
-        );
-
     /// <summary>列 ID からエンティティ内の列名を引く（未解決は null＝面側で表示トークンを決める）</summary>
     private static string? ResolveColumnName(Entity? entity, Guid columnId) =>
         entity?.Columns.FirstOrDefault(column => column.Id == columnId)?.Name;
@@ -805,18 +830,4 @@ public static class QueryToolCore
                 return false;
         }
     }
-
-    /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>
-    private static string? GetString(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
-
-    /// <summary>JSON 引数から真偽プロパティを取得する（無い・型不一致なら null）</summary>
-    private static bool? GetBool(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var value)
-        && value.ValueKind is JsonValueKind.True or JsonValueKind.False
-            ? value.GetBoolean()
-            : null;
 }

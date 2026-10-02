@@ -2111,6 +2111,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Tool_Summary_TargetDbms {
+            get {
+                return ResourceManager.GetString("Tool_Summary_TargetDbms", resourceCulture);
+            }
+        }
+
         public static string Tool_Summary_RelationshipCount {
             get {
                 return ResourceManager.GetString("Tool_Summary_RelationshipCount", resourceCulture);
@@ -2150,6 +2156,12 @@ namespace QuickER.Resources {
         public static string Tool_EntityRemoved {
             get {
                 return ResourceManager.GetString("Tool_EntityRemoved", resourceCulture);
+            }
+        }
+
+        public static string Tool_EntityRemovedWithQueries {
+            get {
+                return ResourceManager.GetString("Tool_EntityRemovedWithQueries", resourceCulture);
             }
         }
 
@@ -2231,6 +2243,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Tool_PrimaryKeyNullableIgnored {
+            get {
+                return ResourceManager.GetString("Tool_PrimaryKeyNullableIgnored", resourceCulture);
+            }
+        }
+
         public static string Tool_SourceAndTargetTableRequired {
             get {
                 return ResourceManager.GetString("Tool_SourceAndTargetTableRequired", resourceCulture);
@@ -2246,6 +2264,18 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipAdded {
             get {
                 return ResourceManager.GetString("Tool_RelationshipAdded", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipPairsIncomplete {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipPairsIncomplete", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipParentHasNoKey {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipParentHasNoKey", resourceCulture);
             }
         }
 
@@ -2306,6 +2336,42 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipConstraintNameTaken {
             get {
                 return ResourceManager.GetString("Tool_RelationshipConstraintNameTaken", resourceCulture);
+            }
+        }
+
+        public static string Tool_TableNameTaken {
+            get {
+                return ResourceManager.GetString("Tool_TableNameTaken", resourceCulture);
+            }
+        }
+
+        public static string Tool_NewTableNameEmpty {
+            get {
+                return ResourceManager.GetString("Tool_NewTableNameEmpty", resourceCulture);
+            }
+        }
+
+        public static string Tool_DataTypeEmpty {
+            get {
+                return ResourceManager.GetString("Tool_DataTypeEmpty", resourceCulture);
+            }
+        }
+
+        public static string Tool_ColumnNameTaken {
+            get {
+                return ResourceManager.GetString("Tool_ColumnNameTaken", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipTypeInvalid {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipTypeInvalid", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipDuplicate {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipDuplicate", resourceCulture);
             }
         }
 

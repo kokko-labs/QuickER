@@ -1026,6 +1026,9 @@
   <data name="Tool_Summary_TableCount" xml:space="preserve">
     <value>Tables: {0}</value>
   </data>
+  <data name="Tool_Summary_TargetDbms" xml:space="preserve">
+    <value>Target DBMS: {0}</value>
+  </data>
   <data name="Tool_Summary_RelationshipCount" xml:space="preserve">
     <value>Relationships: {0}</value>
   </data>
@@ -1046,6 +1049,9 @@
   </data>
   <data name="Tool_EntityRemoved" xml:space="preserve">
     <value>Removed table '{0}'.</value>
+  </data>
+  <data name="Tool_EntityRemovedWithQueries" xml:space="preserve">
+    <value>Removed table '{0}' along with its named queries: {1}.</value>
   </data>
   <data name="Tool_TableAndColumnNameRequired" xml:space="preserve">
     <value>table_name and column_name are required.</value>
@@ -1086,6 +1092,9 @@
   <data name="Tool_ColumnUpdated" xml:space="preserve">
     <value>Updated {2} of column '{1}' in table '{0}'.</value>
   </data>
+  <data name="Tool_PrimaryKeyNullableIgnored" xml:space="preserve">
+    <value>Column '{0}' is part of the primary key, so it stays NOT NULL; is_nullable=true was ignored (to allow NULL, first take the column out of the key with set_primary_key).</value>
+  </data>
   <data name="Tool_SourceAndTargetTableRequired" xml:space="preserve">
     <value>source_table and target_table are required.</value>
   </data>
@@ -1094,6 +1103,12 @@
   </data>
   <data name="Tool_RelationshipAdded" xml:space="preserve">
     <value>Added relationship '{0}' → '{1}' (constraint name: {2}).</value>
+  </data>
+  <data name="Tool_RelationshipPairsIncomplete" xml:space="preserve">
+    <value>Note: only {0} of the {1} primary key columns of '{2}' could be paired with a column of '{3}', so the generated DDL has no FOREIGN KEY or an incomplete one for this relationship. To fix it, remove the relationship and add it again with source_columns and target_columns.</value>
+  </data>
+  <data name="Tool_RelationshipParentHasNoKey" xml:space="preserve">
+    <value>Note: table '{0}' has no primary key, so no column pairs were inferred and the generated DDL has no FOREIGN KEY for this relationship. To fix it, remove the relationship and add it again with source_columns and target_columns.</value>
   </data>
   <data name="Tool_RelationshipNotFound" xml:space="preserve">
     <value>Relationship '{0}' → '{1}' not found.</value>
@@ -1124,6 +1139,24 @@
   </data>
   <data name="Tool_RelationshipConstraintNameTaken" xml:space="preserve">
     <value>The constraint name '{0}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit constraint_name to get a unique one automatically.</value>
+  </data>
+  <data name="Tool_TableNameTaken" xml:space="preserve">
+    <value>A table named '{0}' already exists (table names must be unique, ignoring case).</value>
+  </data>
+  <data name="Tool_NewTableNameEmpty" xml:space="preserve">
+    <value>new_table_name must not be empty.</value>
+  </data>
+  <data name="Tool_DataTypeEmpty" xml:space="preserve">
+    <value>data_type must not be empty.</value>
+  </data>
+  <data name="Tool_ColumnNameTaken" xml:space="preserve">
+    <value>Table '{0}' already has a column named '{1}' (column names must be unique within a table, ignoring case).</value>
+  </data>
+  <data name="Tool_RelationshipTypeInvalid" xml:space="preserve">
+    <value>Invalid relationship_type '{0}'. Must be one of: {1}.</value>
+  </data>
+  <data name="Tool_RelationshipDuplicate" xml:space="preserve">
+    <value>A relationship '{0}' → '{1}' over the same column pairs already exists (constraint name: {2}). The same foreign key can be defined only once.</value>
   </data>
   <data name="Tool_RelationshipConstraintNotFound" xml:space="preserve">
     <value>Relationship '{0}' → '{1}' with constraint name '{2}' not found. Candidates: {3}.</value>

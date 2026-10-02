@@ -204,6 +204,7 @@ public class UndoCommandRoundTripTests
     {
         var main = new MainViewModel();
         var (parent, child) = AddRelatedEntities(main);
+        SeedQueries(main, parent, child);
 
         return new UndoScenario(new RemoveEntityCommand(main, parent), () => Describe(main));
     }
@@ -318,10 +319,25 @@ public class UndoCommandRoundTripTests
         );
     }
 
+    /// <summary>
+    /// 親・子・親の順に名前付きクエリを並べる（親を消すと間の子のクエリだけが残る＝Undo が元の位置へ戻せるかを見る形）
+    /// </summary>
+    private static void SeedQueries(
+        MainViewModel main,
+        EntityViewModel parent,
+        EntityViewModel child
+    )
+    {
+        main.Queries.Add(new QueryDefinition { EntityId = parent.Id, Name = "ParentFirst" });
+        main.Queries.Add(new QueryDefinition { EntityId = child.Id, Name = "ChildMiddle" });
+        main.Queries.Add(new QueryDefinition { EntityId = parent.Id, Name = "ParentLast" });
+    }
+
     private static UndoScenario BuildGroupRemoveEntities()
     {
         var main = new MainViewModel();
         var (parent, child) = AddRelatedEntities(main);
+        SeedQueries(main, parent, child);
 
         // このコマンドの Undo は SelectedEntity を先頭の対象へ戻す（Execute は選択に触らない）非対称を持つ。
         // 選択もユーザーに見える状態なので物差しへ含め、その非対称が成立する初期状態から検証する。
@@ -725,6 +741,19 @@ public class UndoCommandRoundTripTests
         foreach (var relationship in main.Relationships.OrderBy(relationship => relationship.Id))
         {
             builder.Append(Describe(relationship));
+        }
+
+        // 名前付きクエリは一覧の並びのまま比べる（Undo は取り除いた位置へ戻す）
+        foreach (var query in main.Queries)
+        {
+            builder
+                .Append("query(")
+                .Append(query.Id)
+                .Append(',')
+                .Append(query.EntityId)
+                .Append(',')
+                .Append(query.Name)
+                .Append(")\n");
         }
 
         builder

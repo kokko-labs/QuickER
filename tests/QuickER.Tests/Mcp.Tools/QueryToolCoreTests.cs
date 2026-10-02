@@ -201,6 +201,126 @@ public sealed class QueryToolCoreTests
         warning.DetailText!.FormatEnglish().Should().NotBeNullOrWhiteSpace();
     }
 
+    // ---------------- 実装方式に合わない入力（警告のみ） ----------------
+
+    [Theory(DisplayName = "SetQuery: sql 方式以外で渡した SQL は保存せず警告する")]
+    [InlineData("dsl")]
+    [InlineData("manual")]
+    public void SetQuery_SqlForOtherImplementation_IsDroppedWithWarning(string implementation)
+    {
+        var diagram = BuildOrders();
+
+        var outcome = SetQuery(
+            diagram,
+            new
+            {
+                table_name = "orders",
+                query_name = "ListAll",
+                returns = "list",
+                implementation,
+                sql = new Dictionary<string, string> { ["sqlite"] = "SELECT * FROM orders" },
+            }
+        );
+
+        outcome.Success.Should().BeTrue();
+        var warning = outcome.Warnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(QueryToolDiagnosticCode.SqlIgnoredForImplementation);
+        warning.Detail.Should().Be(implementation);
+        diagram.Queries.Single().Sql.Should().BeEmpty();
+    }
+
+    [Theory(
+        DisplayName = "SetQuery: dsl 方式以外で渡した condition は警告する（保存しないのは従来どおり）"
+    )]
+    [InlineData("sql")]
+    [InlineData("manual")]
+    public void SetQuery_ConditionForOtherImplementation_Warns(string implementation)
+    {
+        var diagram = BuildOrders();
+
+        var outcome = SetQuery(
+            diagram,
+            new
+            {
+                table_name = "orders",
+                query_name = "ListAll",
+                returns = "list",
+                implementation,
+                condition = "customer_id = 1",
+                sql = new Dictionary<string, string> { ["sqlite"] = "SELECT * FROM orders" },
+            }
+        );
+
+        outcome.Success.Should().BeTrue();
+        outcome
+            .Warnings.Select(warning => warning.Code)
+            .Should()
+            .Contain(QueryToolDiagnosticCode.ConditionIgnoredForImplementation);
+        outcome
+            .Warnings.Single(warning =>
+                warning.Code == QueryToolDiagnosticCode.ConditionIgnoredForImplementation
+            )
+            .Detail.Should()
+            .Be(implementation);
+        diagram.Queries.Single().Condition.Should().BeNull();
+    }
+
+    [Theory(
+        DisplayName = "SetQuery: sql 方式で中身のある SQL が無ければ全方言が手動実装になる旨を警告する"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SetQuery_SqlImplementationWithoutSql_Warns(bool blankSql)
+    {
+        var diagram = BuildOrders();
+        object args = blankSql
+            ? new
+            {
+                table_name = "orders",
+                query_name = "ListAll",
+                returns = "list",
+                implementation = "sql",
+                sql = new Dictionary<string, string> { ["sqlite"] = "   " },
+            }
+            : new
+            {
+                table_name = "orders",
+                query_name = "ListAll",
+                returns = "list",
+                implementation = "sql",
+            };
+
+        var outcome = SetQuery(diagram, args);
+
+        outcome.Success.Should().BeTrue();
+        outcome
+            .Warnings.Select(warning => warning.Code)
+            .Should()
+            .Contain(QueryToolDiagnosticCode.SqlImplementationWithoutSql);
+    }
+
+    [Fact(DisplayName = "SetQuery: 方式に合った入力では実装方式の警告を出さず SQL を保存する")]
+    public void SetQuery_MatchingInputs_NoImplementationWarnings()
+    {
+        var diagram = BuildOrders();
+
+        var outcome = SetQuery(
+            diagram,
+            new
+            {
+                table_name = "orders",
+                query_name = "ListAll",
+                returns = "list",
+                implementation = "sql",
+                sql = new Dictionary<string, string> { ["sqlite"] = "SELECT * FROM orders" },
+            }
+        );
+
+        outcome.Success.Should().BeTrue();
+        outcome.Warnings.Should().BeEmpty();
+        diagram.Queries.Single().Sql.Should().ContainKey("sqlite");
+    }
+
     // ---------------- 早期失敗（単一状態） ----------------
 
     [Fact(DisplayName = "SetQuery: table_name/query_name 欠落は MissingArgument")]

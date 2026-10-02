@@ -143,6 +143,12 @@ public static class QueryToolEnglishFormatter
                 $"Parameter '{d.Name}' is declared but not used in the condition.",
             // 生成時診断と同じ文言（規則と対象のクエリ名・名前を含む）を中立言語（英語）で描画する
             QueryToolDiagnosticCode.GenerationRule => d.DetailText?.FormatEnglish() ?? string.Empty,
+            QueryToolDiagnosticCode.SqlIgnoredForImplementation =>
+                $"'sql' is used only when implementation is 'sql' (got '{d.Detail}'); the SQL was not saved.",
+            QueryToolDiagnosticCode.ConditionIgnoredForImplementation =>
+                $"'condition' is used only when implementation is 'dsl' (got '{d.Detail}'); the condition was not saved.",
+            QueryToolDiagnosticCode.SqlImplementationWithoutSql =>
+                "implementation is 'sql' but no SQL was given for any dialect, so the generated code leaves the method to be written by hand (partial class) for every dialect.",
             _ => $"Unexpected diagnostic: {d.Code}",
         };
     }

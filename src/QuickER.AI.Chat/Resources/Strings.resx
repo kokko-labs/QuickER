@@ -381,6 +381,15 @@ Default to English for all responses (the language of the app UI). Switch only i
   <data name="QueryTool_Diag_ParameterUnusedInCondition" xml:space="preserve">
     <value>Parameter '{0}' is declared but not used in the condition.</value>
   </data>
+  <data name="QueryTool_Diag_SqlIgnoredForImplementation" xml:space="preserve">
+    <value>'sql' is used only when implementation is 'sql' (got '{0}'); the SQL was not saved.</value>
+  </data>
+  <data name="QueryTool_Diag_ConditionIgnoredForImplementation" xml:space="preserve">
+    <value>'condition' is used only when implementation is 'dsl' (got '{0}'); the condition was not saved.</value>
+  </data>
+  <data name="QueryTool_Diag_SqlImplementationWithoutSql" xml:space="preserve">
+    <value>implementation is 'sql' but no SQL was given for any dialect, so the generated code leaves the method to be written by hand (partial class) for every dialect.</value>
+  </data>
   <data name="QueryTool_Diag_Unexpected" xml:space="preserve">
     <value>Unexpected diagnostic: {0}</value>
   </data>

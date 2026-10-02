@@ -641,6 +641,24 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+        public static string QueryTool_Diag_SqlIgnoredForImplementation {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_SqlIgnoredForImplementation", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ConditionIgnoredForImplementation {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ConditionIgnoredForImplementation", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_SqlImplementationWithoutSql {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_SqlImplementationWithoutSql", resourceCulture);
+            }
+        }
+
         public static string QueryTool_Diag_Unexpected {
             get {
                 return ResourceManager.GetString("QueryTool_Diag_Unexpected", resourceCulture);

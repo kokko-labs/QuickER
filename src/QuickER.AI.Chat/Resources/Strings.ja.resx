@@ -381,6 +381,15 @@ ER 図の作成・変更は必ず提供されたツール（{0}）で行って�
   <data name="QueryTool_Diag_ParameterUnusedInCondition" xml:space="preserve">
     <value>パラメータ '{0}' は宣言されていますが条件で使用されていません。</value>
   </data>
+  <data name="QueryTool_Diag_SqlIgnoredForImplementation" xml:space="preserve">
+    <value>'sql' は implementation が 'sql' のときだけ使います（指定は '{0}'）。SQL は保存していません。</value>
+  </data>
+  <data name="QueryTool_Diag_ConditionIgnoredForImplementation" xml:space="preserve">
+    <value>'condition' は implementation が 'dsl' のときだけ使います（指定は '{0}'）。条件は保存していません。</value>
+  </data>
+  <data name="QueryTool_Diag_SqlImplementationWithoutSql" xml:space="preserve">
+    <value>implementation が 'sql' ですが、どの方言にも SQL がありません。生成コードでは全方言が手動実装（partial クラス）になります。</value>
+  </data>
   <data name="QueryTool_Diag_Unexpected" xml:space="preserve">
     <value>想定外の診断です: {0}</value>
   </data>

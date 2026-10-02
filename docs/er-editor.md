@@ -14,6 +14,7 @@ Both side panels collapse from the toolbar (F9 / F10), so you can hide them and 
 "Add Entity" in the toolbox adds a new table to the canvas (created as `NewTable` with a PK column `ID`, and selected).
 Delete with the "Delete Entity" button or the Delete key.
 With multiple entities selected, this becomes a bulk delete, and the connected relationships go with them.
+The named queries defined on a deleted entity are deleted with it, and undoing the delete brings them back.
 
 Entities move by dragging.
 Copy and paste with Ctrl+C / Ctrl+V, and duplicate with Ctrl+D (or "Duplicate" on the toolbar).

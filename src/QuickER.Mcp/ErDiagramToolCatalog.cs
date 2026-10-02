@@ -51,7 +51,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "add_entity",
                 Description =
-                    "Adds a new entity (table) to the ER diagram. No columns are created, so after adding, first define exactly one primary key column with add_column, then define the remaining columns. Unless the user requests a different convention, use PascalCase singular table names (e.g., Customer, OrderItem); if the diagram already has tables, match their existing naming style.",
+                    "Adds a new entity (table) to the ER diagram. No columns are created, so after adding, first define exactly one primary key column with add_column, then define the remaining columns. Unless the user requests a different convention, use PascalCase singular table names (e.g., Customer, OrderItem); if the diagram already has tables, match their existing naming style. The name must not be empty, and must not match an existing table's name ignoring case.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -72,7 +72,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "remove_entity",
                 Description =
-                    "Removes the entity with the specified table name from the ER diagram.",
+                    "Removes the entity with the specified table name from the ER diagram, together with every relationship that connects to it and every named query defined on it (the result names the removed queries). No tool brings the removed queries back, and adding a table with the same name again does not restore them.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -92,7 +92,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "add_column",
                 Description =
-                    "Adds a column to the specified table. Give each table exactly one primary key column: a second one is not rejected, and the diagram, the generated DDL and the schema sync all support a composite key, but the C# code generator does not. To declare a composite key - or to change which columns the key is made of, and in which order - call set_primary_key. A primary key column is always NOT NULL, so is_nullable is ignored when is_primary_key=true (to allow NULL, first take the column out of the key with set_primary_key). Columns that point at another table are not part of this table's primary key: add them as ordinary columns with is_primary_key=false and define the reference with add_relationship.",
+                    "Adds a column to the specified table. Give each table exactly one primary key column: a second one is not rejected, and the diagram, the generated DDL and the schema sync all support a composite key, but the C# code generator does not. To declare a composite key - or to change which columns the key is made of, and in which order - call set_primary_key. A primary key column is always NOT NULL, so is_nullable is ignored when is_primary_key=true (to allow NULL, first take the column out of the key with set_primary_key). Columns that point at another table are not part of this table's primary key: add them as ordinary columns with is_primary_key=false and define the reference with add_relationship. data_type must not be empty, and a column whose name matches another column of the same table ignoring case is rejected.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -149,7 +149,8 @@ public static class ErDiagramToolCatalog
             new ToolDefinition
             {
                 Name = "set_entity_property",
-                Description = "Changes an entity's properties (table name, memo, description).",
+                Description =
+                    "Changes an entity's properties (table name, memo, description). A new table name must not be empty, and must not match another table's name ignoring case (changing only the case of the table's own name is allowed). When the call is rejected, none of the given properties is changed.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -180,7 +181,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "set_column_property",
                 Description =
-                    "Changes a column's properties (description, data type, nullability) in the specified table. Specify at least one of description, data_type, or is_nullable. A primary key column is always NOT NULL, so is_nullable is ignored for it (to allow NULL, first take the column out of the key with set_primary_key).",
+                    "Changes a column's properties (description, data type, nullability) in the specified table. Specify at least one of description, data_type, or is_nullable. A primary key column is always NOT NULL, so is_nullable is ignored for it (to allow NULL, first take the column out of the key with set_primary_key). An empty data_type is rejected, and then none of the given properties is changed.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -220,7 +221,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "add_relationship",
                 Description =
-                    "Adds a relationship (foreign key) between two tables. To specify the mapping reliably, also provide source_columns (the referenced column names of the parent table) and target_columns (the foreign key column names of the child table). The two arrays are parallel: entry i of source_columns is referenced by entry i of target_columns, they must have the same length, and their order is the declaration order of the foreign key. One entry each is the usual single-column foreign key; two or more entries define a composite foreign key. When both arrays are omitted, every primary key column of the parent table is paired with a child column inferred from the column names (a parent column whose counterpart cannot be inferred is left out of the mapping). Add foreign keys with different roles as separate relationships. Each relationship gets a constraint name that no other constraint in the diagram uses: FK_{child}_{parent} by default, with the child's foreign key column names appended (and then a number) when that name is taken, so a second foreign key between the same two tables gets a distinct name. To choose the name yourself, give constraint_name; a name already used by a foreign key, primary key or unique constraint (ignoring case) is rejected. The result reports the name, which remove_relationship accepts.",
+                    "Adds a relationship (foreign key) between two tables. To specify the mapping reliably, also provide source_columns (the referenced column names of the parent table) and target_columns (the foreign key column names of the child table). The two arrays are parallel: entry i of source_columns is referenced by entry i of target_columns, they must have the same length, and their order is the declaration order of the foreign key. One entry each is the usual single-column foreign key; two or more entries define a composite foreign key. When both arrays are omitted, every primary key column of the parent table is paired with a child column inferred from the column names (a parent column whose counterpart cannot be inferred is left out of the mapping). Add foreign keys with different roles as separate relationships; a second relationship between the same parent and child over the same column pairs (in any order) is rejected, because it would be the same foreign key again. Each relationship gets a constraint name that no other constraint in the diagram uses: FK_{child}_{parent} by default, with the child's foreign key column names appended (and then a number) when that name is taken, so a second foreign key between the same two tables gets a distinct name. To choose the name yourself, give constraint_name; a name already used by a foreign key, primary key or unique constraint (ignoring case) is rejected. The result reports the name, which remove_relationship accepts.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -253,7 +254,7 @@ public static class ErDiagramToolCatalog
                         {
                             type = "string",
                             @enum = new[] { "OneToOne", "OneToMany", "ManyToMany" },
-                            description = "Relationship type",
+                            description = "Relationship type (case is ignored; any other value is rejected)",
                         },
                         constraint_name = new
                         {

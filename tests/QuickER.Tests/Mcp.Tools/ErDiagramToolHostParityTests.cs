@@ -276,10 +276,16 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                     name = "UQ_Order_Pair",
                 }
             ),
-            // 同じ列集合を順序違い・大小違いで再定義（upsert＝件数は増えず列順と名前が更新される）
+            // 同じ列集合を順序違い・大小違いで再定義（upsert＝件数は増えず列順と名前が更新される）。
+            // 名前は付け直して残す＝後ろの add_relationship が一意制約名との衝突で拒否される形を保つ
             (
                 "set_unique_constraint",
-                new { table_name = "Order", columns = new[] { "customerid", "orderid" } }
+                new
+                {
+                    table_name = "Order",
+                    columns = new[] { "customerid", "orderid" },
+                    name = "UQ_Order_Pair",
+                }
             ),
             (
                 "set_unique_constraint",
@@ -337,6 +343,17 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                 }
             ),
             (
+                "add_column",
+                new
+                {
+                    table_name = "Order",
+                    column_name = "ReturnToCustomerId",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            (
                 "add_relationship",
                 new
                 {
@@ -366,7 +383,7 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                     source_table = "Customer",
                     source_columns = new[] { "CustomerId" },
                     target_table = "Order",
-                    target_columns = new[] { "ShipToCustomerId" },
+                    target_columns = new[] { "ReturnToCustomerId" },
                     relationship_type = "OneToMany",
                     constraint_name = "fk_billto",
                 }
@@ -378,9 +395,73 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                     source_table = "Customer",
                     source_columns = new[] { "CustomerId" },
                     target_table = "Order",
-                    target_columns = new[] { "ShipToCustomerId" },
+                    target_columns = new[] { "ReturnToCustomerId" },
                     relationship_type = "OneToMany",
                     constraint_name = "UQ_Order_Pair",
+                }
+            ),
+            // 同じ親子・同じ列ペアの外部キーの重複（名前は別に付くが拒否される）
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "Customer",
+                    source_columns = new[] { "CustomerId" },
+                    target_table = "Order",
+                    target_columns = new[] { "ShipToCustomerId" },
+                    relationship_type = "OneToMany",
+                }
+            ),
+            // 未知の relationship_type（黙って一対多にしない）。まだ張っていない列ペアで、種別だけが拒否の理由になる形にする
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "Customer",
+                    source_columns = new[] { "Name" },
+                    target_table = "Order",
+                    target_columns = new[] { "ReturnToCustomerId" },
+                    relationship_type = "one_to_many",
+                }
+            ),
+            // 大文字小文字だけ違うテーブル名・列名、空のデータ型、他のテーブルと同じ名前への改名
+            ("add_entity", new { table_name = "customer" }),
+            ("add_entity", new { table_name = "  " }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Order",
+                    column_name = "returntocustomerid",
+                    data_type = "int",
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Order",
+                    column_name = "Note",
+                    data_type = " ",
+                }
+            ),
+            (
+                "set_column_property",
+                new
+                {
+                    table_name = "Order",
+                    column_name = "ReturnToCustomerId",
+                    description = "must not be applied",
+                    data_type = "",
+                }
+            ),
+            (
+                "set_entity_property",
+                new
+                {
+                    table_name = "Order",
+                    new_table_name = "CUSTOMER",
+                    memo = "must not be applied",
                 }
             ),
             ("remove_relationship", new { source_table = "Customer", target_table = "Order" }),

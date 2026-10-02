@@ -1,11 +1,12 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using QuickER.Model;
 using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
 
-/// <summary>エンティティと接続中の全リレーションを削除するコマンド（Undo で両方を復元する）</summary>
+/// <summary>エンティティと接続中の全リレーション・そのエンティティの名前付きクエリを削除するコマンド（Undo で復元する）</summary>
 public class RemoveEntityCommand : IUndoableCommand
 {
     /// <summary>削除を行うメイン ViewModel</summary>
@@ -16,6 +17,9 @@ public class RemoveEntityCommand : IUndoableCommand
 
     /// <summary>巻き添えで削除したリレーション（Undo の復元元）</summary>
     private List<RelationshipViewModel> _removedRelationships = new();
+
+    /// <summary>巻き添えで削除した名前付きクエリと元の位置（Undo の復元元）</summary>
+    private List<(int Index, QueryDefinition Query)> _removedQueries = new();
 
     /// <summary><see cref="RemoveEntityCommand"/> を生成する</summary>
     /// <param name="main">削除を行うメイン ViewModel</param>
@@ -43,6 +47,9 @@ public class RemoveEntityCommand : IUndoableCommand
         }
 
         _main.Entities.Remove(_entity);
+
+        // そのエンティティの名前付きクエリも取り除く（残すとどこからも触れない孤児になる）
+        _removedQueries = EntityQueryRemoval.Remove(_main, new HashSet<Guid> { _entity.Id });
     }
 
     /// <inheritdoc />
@@ -54,5 +61,7 @@ public class RemoveEntityCommand : IUndoableCommand
         {
             _main.Relationships.Add(r);
         }
+
+        EntityQueryRemoval.Restore(_main, _removedQueries);
     }
 }
