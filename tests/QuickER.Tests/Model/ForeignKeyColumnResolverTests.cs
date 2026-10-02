@@ -1,9 +1,8 @@
 using AwesomeAssertions;
 using QuickER.Model;
-using QuickER.Services;
 using QuickER.ViewModels;
 
-namespace QuickER.Tests.Gui.Services;
+namespace QuickER.Tests.Model;
 
 /// <summary><see cref="ForeignKeyColumnResolver"/> の優先順位・除外・タイブレークの判定を検証するテストクラス</summary>
 public class ForeignKeyColumnResolverTests
@@ -256,7 +255,12 @@ public class ForeignKeyColumnResolverTests
         return (parent, child);
     }
 
-    /// <summary>自動ペア化（ViewModel 版）が親主キーの実効順に従うことを検証する</summary>
+    /// <summary>
+    /// ViewModel を写した意味モデル（GUI の呼び方）でも、自動ペア化が親主キーの実効順に従うことを検証する
+    /// </summary>
+    /// <remarks>
+    /// GUI は ViewModel を <c>ToModel()</c> で写して渡すので、写しが主キーの順序を運ぶことまでを確かめる
+    /// </remarks>
     [Fact(DisplayName = "自動ペア化（ViewModel 版）は親主キーの実効順で列ペアを作る")]
     public void ResolveColumnPairs_ViewModel_FollowsPrimaryKeyOrder()
     {
@@ -265,9 +269,9 @@ public class ForeignKeyColumnResolverTests
         var child = new EntityViewModel(childModel);
 
         var pairs = ForeignKeyColumnResolver.ResolveColumnPairs(
-            parent,
-            child,
-            Array.Empty<RelationshipViewModel>()
+            parent.ToModel(),
+            child.ToModel(),
+            Array.Empty<Relationship>()
         );
 
         pairs
@@ -294,21 +298,189 @@ public class ForeignKeyColumnResolverTests
             .Equal("RegionCode", "TenantId");
     }
 
-    /// <summary>既定キー列の解決（引数 3 つの overload）が実効順の先頭 PK を使うことを検証する</summary>
-    [Fact(DisplayName = "既定キー列の解決は実効順で先頭の主キー列を使う")]
-    public void ResolveTargetColumn_DefaultKey_UsesFirstColumnInPrimaryKeyOrder()
+    /// <summary>テスト用の列を作る</summary>
+    private static Column NewColumn(
+        string name,
+        bool isPk = false,
+        bool isFk = false,
+        string dataType = "int"
+    ) =>
+        new()
+        {
+            Name = name,
+            DataType = dataType,
+            IsPrimaryKey = isPk,
+            IsForeignKey = isFk,
+        };
+
+    /// <summary>親と子の 2 テーブルで自動ペア化し、列ペアを「親列→子列」の名前で返す</summary>
+    private static List<string> PairNames(Entity parent, Entity child) =>
+        ForeignKeyColumnResolver
+            .ResolveColumnPairs(parent, child, Array.Empty<Relationship>())
+            .Select(pair =>
+                $"{parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name}→{child.Columns.Single(c => c.Id == pair.TargetColumnId).Name}"
+            )
+            .ToList();
+
+    /// <summary>
+    /// 複合主キーの 2 列目が、親テーブル名由来の名前（①）で 1 列目と同じ子列を引かないことを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "複合主キーの各列は同名の子列へ付く（2 列目が親テーブル名由来の列を引かない）"
+    )]
+    public void ResolveColumnPairs_CompositeKey_SecondColumnDoesNotReuseTableDerivedColumn()
     {
-        var (parentModel, childModel) = BuildCompositeKeyPair();
-        var parent = new EntityViewModel(parentModel);
-        var child = new EntityViewModel(childModel);
+        var parent = new Entity
+        {
+            TableName = "Orders",
+            Columns = { NewColumn("OrderId", isPk: true), NewColumn("Revision", isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "OrderNotes",
+            Columns =
+            {
+                NewColumn("NoteId", isPk: true),
+                NewColumn("OrderId"),
+                NewColumn("Revision"),
+            },
+        };
 
-        // 実効順の先頭は RegionCode のため、②（参照元キー列と同名）で RegionCode 列が選ばれる
-        var resolved = ForeignKeyColumnResolver.ResolveTargetColumn(
-            parent,
-            child,
-            Array.Empty<RelationshipViewModel>()
-        );
+        PairNames(parent, child).Should().Equal("OrderId→OrderId", "Revision→Revision");
+    }
 
-        resolved!.Name.Should().Be("RegionCode");
+    /// <summary>
+    /// 複合主キーの 1 列目が、親テーブル名由来の名前（①）で 2 列目の同名の子列を取り違えないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "複合主キーの 1 列目が後ろの列の同名の子列を取り違えない")]
+    public void ResolveColumnPairs_CompositeKey_FirstColumnDoesNotTakeLaterColumnsSameName()
+    {
+        var parent = new Entity
+        {
+            TableName = "Projects",
+            Columns = { NewColumn("TenantId", isPk: true), NewColumn("ProjectId", isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "Tasks",
+            Columns =
+            {
+                NewColumn("TaskId", isPk: true),
+                NewColumn("TenantId"),
+                NewColumn("ProjectId"),
+            },
+        };
+
+        PairNames(parent, child).Should().Equal("TenantId→TenantId", "ProjectId→ProjectId");
+    }
+
+    /// <summary>
+    /// 複合主キーでは、前の列が下位の順位（③の外部キー印）で後ろの列の同名の子列を奪わないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "複合主キーでは同名の子列への割り当てを全列について先に済ませる")]
+    public void ResolveColumnPairs_CompositeKey_SameNameIsAssignedBeforeLowerRanks()
+    {
+        // Code は同名の子列を持たず、③（外部キー印）で解く。印は TenantId と AccountCode の両方にあり、
+        // 型も同じなので宣言順なら TenantId が先に来る＝同名の割り当てを先に済ませないと TenantId を奪う
+        var parent = new Entity
+        {
+            TableName = "Accounts",
+            Columns = { NewColumn("Code", isPk: true), NewColumn("TenantId", isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "Ledgers",
+            Columns =
+            {
+                NewColumn("LedgerId", isPk: true),
+                NewColumn("TenantId", isFk: true),
+                NewColumn("AccountCode", isFk: true),
+            },
+        };
+
+        PairNames(parent, child).Should().Equal("Code→AccountCode", "TenantId→TenantId");
+    }
+
+    /// <summary>このペア化で既に選んだ子列が、後ろの列の候補から外れることを検証する</summary>
+    [Fact(DisplayName = "このペア化で既に選んだ子列は後ろの列の候補から外れる")]
+    public void ResolveColumnPairs_CompositeKey_ChosenColumnIsExcludedFromLaterColumns()
+    {
+        // Id は①で OrderId を取る。Revision は同名の子列が無く、①で再び OrderId を引けると
+        // 使用済みとして捨てられる＝候補から外れていれば③（外部キー印）で OrderRevision に付く
+        var parent = new Entity
+        {
+            TableName = "Orders",
+            Columns = { NewColumn("Id", isPk: true), NewColumn("Revision", isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "OrderNotes",
+            Columns =
+            {
+                NewColumn("NoteId", isPk: true),
+                NewColumn("OrderId", isFk: true),
+                NewColumn("OrderRevision", isFk: true),
+            },
+        };
+
+        PairNames(parent, child).Should().Equal("Id→OrderId", "Revision→OrderRevision");
+    }
+
+    /// <summary>主キーが 1 列のときは、同名の列より親テーブル名由来の名前（①）を先に見ることを検証する</summary>
+    [Fact(
+        DisplayName = "主キーが 1 列なら同名の列より親テーブル名由来の列を先に見る（従来どおり）"
+    )]
+    public void ResolveColumnPairs_SingleKey_PrefersTableDerivedNameOverSameName()
+    {
+        var parent = new Entity
+        {
+            TableName = "Customer",
+            Columns = { NewColumn("CustomerKey", isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "Orders",
+            Columns =
+            {
+                NewColumn("OrderId", isPk: true),
+                NewColumn("CustomerKey"),
+                NewColumn("CustomerId"),
+            },
+        };
+
+        PairNames(parent, child).Should().Equal("CustomerKey→CustomerId");
+    }
+
+    /// <summary>既存リレーションが使う子列は、複合主キーの同名の割り当てでも候補から外れることを検証する</summary>
+    [Fact(DisplayName = "既存リレーションが使う子列は同名の割り当てでも使わない")]
+    public void ResolveColumnPairs_CompositeKey_ColumnsUsedByExistingRelationshipAreExcluded()
+    {
+        var parent = new Entity
+        {
+            TableName = "Projects",
+            Columns = { NewColumn("TenantId", isPk: true), NewColumn("ProjectId", isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "Tasks",
+            Columns =
+            {
+                NewColumn("TaskId", isPk: true),
+                NewColumn("TenantId"),
+                NewColumn("ProjectId"),
+            },
+        };
+        var existing = new Relationship
+        {
+            SourceEntityId = Guid.NewGuid(),
+            TargetEntityId = child.Id,
+            ColumnPairs = { new RelationshipColumnPair(Guid.NewGuid(), child.Columns[1].Id) },
+        };
+
+        ForeignKeyColumnResolver
+            .ResolveColumnPairs(parent, child, [existing])
+            .Select(pair => child.Columns.Single(c => c.Id == pair.TargetColumnId).Name)
+            .Should()
+            .Equal("ProjectId");
     }
 }

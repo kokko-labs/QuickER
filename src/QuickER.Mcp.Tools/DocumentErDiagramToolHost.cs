@@ -641,6 +641,22 @@ public static partial class DocumentErDiagramToolHost
             columnPairs!.Clear();
         }
 
+        var childColumnNames = columnPairs!
+            .Select(pair => target.Columns.First(c => c.Id == pair.TargetColumnId).Name)
+            .ToList();
+        var (constraintName, nameError) = ResolveNewForeignKeyName(
+            args,
+            target.TableName,
+            source.TableName,
+            childColumnNames,
+            ConstraintNames.CollectExisting(schema)
+        );
+
+        if (nameError is not null)
+        {
+            return (nameError, false);
+        }
+
         schema.Relationships.Add(
             new Relationship
             {
@@ -648,8 +664,7 @@ public static partial class DocumentErDiagramToolHost
                 TargetEntityId = target.Id,
                 Type = relType,
                 ColumnPairs = columnPairs!,
-                // 既定名の規則は GUI の手作成・内蔵チャットのツールと共有する（作成経路で名前が割れないように）
-                ConstraintName = ConstraintNames.ForeignKey(target.TableName, source.TableName),
+                ConstraintName = constraintName,
             }
         );
 
@@ -664,7 +679,53 @@ public static partial class DocumentErDiagramToolHost
             }
         }
 
-        return ($"Added relationship '{sourceTable}' → '{targetTable}'.", true);
+        return (
+            $"Added relationship '{sourceTable}' → '{targetTable}' (constraint name: {constraintName}).",
+            true
+        );
+    }
+
+    /// <summary>新しいリレーションの制約名を決める（<c>constraint_name</c> の指定、無ければ衝突しない既定名）</summary>
+    /// <param name="args">ツール引数</param>
+    /// <param name="childTable">参照する側（子）のテーブル名</param>
+    /// <param name="parentTable">参照される側（親）のテーブル名</param>
+    /// <param name="childColumnNames">外部キーを構成する子の列名（宣言順）</param>
+    /// <param name="existingNames">図の中の既存の制約名</param>
+    /// <returns>決めた名前。指定された名前が既存と衝突するときはエラー文</returns>
+    /// <remarks>
+    /// GUI 側 <c>ErDiagramDynamicTools.ResolveNewForeignKeyName</c> のミラー。空・空白だけの指定は省略として扱い、
+    /// 前後の空白は除く。指定された名前が既存と衝突するときは、黙って付け替えず拒否する
+    /// （付け替えるとその名前での remove_relationship が外れ、受け入れると DDL が失敗する）
+    /// </remarks>
+    private static (string Name, string? Error) ResolveNewForeignKeyName(
+        JsonElement args,
+        string childTable,
+        string parentTable,
+        IReadOnlyList<string> childColumnNames,
+        IReadOnlySet<string> existingNames
+    )
+    {
+        var requested = GetString(args, "constraint_name")?.Trim();
+
+        if (string.IsNullOrEmpty(requested))
+        {
+            return (
+                ConstraintNames.UniqueForeignKey(
+                    childTable,
+                    parentTable,
+                    childColumnNames,
+                    existingNames
+                ),
+                null
+            );
+        }
+
+        return existingNames.Contains(requested)
+            ? (
+                requested,
+                $"The constraint name '{requested}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit constraint_name to get a unique one automatically."
+            )
+            : (requested, null);
     }
 
     /// <summary>

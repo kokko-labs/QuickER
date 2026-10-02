@@ -220,7 +220,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "add_relationship",
                 Description =
-                    "Adds a relationship (foreign key) between two tables. To specify the mapping reliably, also provide source_columns (the referenced column names of the parent table) and target_columns (the foreign key column names of the child table). The two arrays are parallel: entry i of source_columns is referenced by entry i of target_columns, they must have the same length, and their order is the declaration order of the foreign key. One entry each is the usual single-column foreign key; two or more entries define a composite foreign key. When both arrays are omitted, every primary key column of the parent table is paired with a child column inferred from the column names (a parent column whose counterpart cannot be inferred is left out of the mapping). Add foreign keys with different roles as separate relationships.",
+                    "Adds a relationship (foreign key) between two tables. To specify the mapping reliably, also provide source_columns (the referenced column names of the parent table) and target_columns (the foreign key column names of the child table). The two arrays are parallel: entry i of source_columns is referenced by entry i of target_columns, they must have the same length, and their order is the declaration order of the foreign key. One entry each is the usual single-column foreign key; two or more entries define a composite foreign key. When both arrays are omitted, every primary key column of the parent table is paired with a child column inferred from the column names (a parent column whose counterpart cannot be inferred is left out of the mapping). Add foreign keys with different roles as separate relationships. Each relationship gets a constraint name that no other constraint in the diagram uses: FK_{child}_{parent} by default, with the child's foreign key column names appended (and then a number) when that name is taken, so a second foreign key between the same two tables gets a distinct name. To choose the name yourself, give constraint_name; a name already used by a foreign key, primary key or unique constraint (ignoring case) is rejected. The result reports the name, which remove_relationship accepts.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -254,6 +254,11 @@ public static class ErDiagramToolCatalog
                             type = "string",
                             @enum = new[] { "OneToOne", "OneToMany", "ManyToMany" },
                             description = "Relationship type",
+                        },
+                        constraint_name = new
+                        {
+                            type = "string",
+                            description = "Constraint name of the new foreign key (optional). Must not be used by any other foreign key, primary key or unique constraint in the diagram, ignoring case. Omit it to get FK_{child}_{parent}, made unique automatically when another constraint already has that name.",
                         },
                     },
                     required = new[] { "source_table", "target_table", "relationship_type" },

@@ -1116,7 +1116,7 @@
     <value>テーブル '{0}' にカラム '{1}' が見つかりません。</value>
   </data>
   <data name="Tool_RelationshipAdded" xml:space="preserve">
-    <value>'{0}' → '{1}' のリレーションを追加しました。</value>
+    <value>'{0}' → '{1}' のリレーションを追加しました（制約名: {2}）。</value>
   </data>
   <data name="Tool_RelationshipNotFound" xml:space="preserve">
     <value>'{0}' → '{1}' のリレーションが見つかりません。</value>
@@ -1144,6 +1144,9 @@
   </data>
   <data name="Tool_RelationshipAmbiguous" xml:space="preserve">
     <value>'{0}' → '{1}' のリレーションが複数あります。constraint_name で対象を指定してください。候補: {2}。</value>
+  </data>
+  <data name="Tool_RelationshipConstraintNameTaken" xml:space="preserve">
+    <value>制約名 '{0}' はこの図で既に使われています（制約名は外部キー・主キー・一意制約をまたいで、大文字小文字を区別せずに一意である必要があります）。別の名前を指定するか、constraint_name を省いて一意な名前を自動で付けてください。</value>
   </data>
   <data name="Tool_RelationshipConstraintNotFound" xml:space="preserve">
     <value>'{0}' → '{1}' で制約名 '{2}' のリレーションが見つかりません。候補: {3}。</value>

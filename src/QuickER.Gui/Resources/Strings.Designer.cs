@@ -2303,6 +2303,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Tool_RelationshipConstraintNameTaken {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipConstraintNameTaken", resourceCulture);
+            }
+        }
+
         public static string Tool_RelationshipConstraintNotFound {
             get {
                 return ResourceManager.GetString("Tool_RelationshipConstraintNotFound", resourceCulture);

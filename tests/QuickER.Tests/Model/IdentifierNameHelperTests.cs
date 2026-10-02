@@ -1,7 +1,7 @@
 using AwesomeAssertions;
-using QuickER.Services;
+using QuickER.Model;
 
-namespace QuickER.Tests.Gui.Services;
+namespace QuickER.Tests.Model;
 
 /// <summary><see cref="IdentifierNameHelper"/> の識別子分解・単複変換・パスカル整形の境界を検証するテストクラス</summary>
 public class IdentifierNameHelperTests

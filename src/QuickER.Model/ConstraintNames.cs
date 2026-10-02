@@ -45,4 +45,127 @@ public static class ConstraintNames
     /// <param name="tableName">テーブル名</param>
     /// <returns><c>PK_{テーブル}</c>（<see cref="SafeName"/> を通したもの）</returns>
     public static string PrimaryKey(string tableName) => "PK_" + SafeName(tableName);
+
+    /// <summary>図の中で既に使われている制約名を、DDL が付ける名前で集める</summary>
+    /// <param name="diagram">対象の図</param>
+    /// <returns>外部キー・主キー・一意制約の名前の集合（大文字小文字を区別しない）</returns>
+    /// <remarks>
+    /// <para>
+    /// 外部キーは保存された名前、無ければ <see cref="ForeignKey"/> の既定名。主キーは主キー列を持つテーブルの
+    /// <see cref="PrimaryKey"/>。一意制約は保存された名前、無ければ <see cref="UniqueConstraint.SynthesizeName"/>
+    /// （構成列を解決できない一意制約は DDL が出さないので数えない）。
+    /// </para>
+    /// <para>
+    /// 主キーと一意制約まで数えるのは、SQL Server と Oracle では制約名がスキーマ単位で種類をまたいで
+    /// 共有されるため（外部キーに <c>PK_Orders</c> と名付けると DDL が失敗する）。
+    /// 大文字小文字を区別しないのは、SQL Server の既定の照合順序と MySQL で大文字小文字だけ違う名前も衝突するため。
+    /// </para>
+    /// </remarks>
+    public static IReadOnlySet<string> CollectExisting(ErDiagram diagram)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var entities = diagram.Entities;
+
+        foreach (var relationship in diagram.Relationships)
+        {
+            if (!string.IsNullOrWhiteSpace(relationship.ConstraintName))
+            {
+                names.Add(relationship.ConstraintName);
+                continue;
+            }
+
+            var child = entities.FirstOrDefault(entity => entity.Id == relationship.TargetEntityId);
+            var parent = entities.FirstOrDefault(entity =>
+                entity.Id == relationship.SourceEntityId
+            );
+
+            if (child is not null && parent is not null)
+            {
+                names.Add(ForeignKey(child.TableName, parent.TableName));
+            }
+        }
+
+        foreach (var entity in entities)
+        {
+            if (entity.Columns.Any(column => column.IsPrimaryKey))
+            {
+                names.Add(PrimaryKey(entity.TableName));
+            }
+
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                if (!string.IsNullOrWhiteSpace(constraint.Name))
+                {
+                    names.Add(constraint.Name);
+                    continue;
+                }
+
+                var columnNames = constraint
+                    .ColumnIds.Select(columnId =>
+                        entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name
+                    )
+                    .ToList();
+
+                if (columnNames.Count > 0 && columnNames.All(name => name is not null))
+                {
+                    names.Add(UniqueConstraint.SynthesizeName(entity.TableName, columnNames!));
+                }
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>図の中の既存の制約名と衝突しない外部キーの名前を組み立てる</summary>
+    /// <param name="childTable">参照する側（外部キーを持つ側）のテーブル名</param>
+    /// <param name="parentTable">参照される側のテーブル名</param>
+    /// <param name="childColumnNames">外部キーを構成する子の列名（宣言順・無ければ空）</param>
+    /// <param name="existingNames">既存の制約名（<see cref="CollectExisting"/> の結果）</param>
+    /// <returns>
+    /// 空いていれば <see cref="ForeignKey"/> の既定名。ふさがっていれば子の列名を <c>_</c> でつないで足した名前
+    /// （<c>FK_Orders_Customers_ShippingCustomerId</c>）。それもふさがっているか列が無いときは、さらに
+    /// <c>_2</c>、<c>_3</c>… を足した最初の空き
+    /// </returns>
+    /// <remarks>
+    /// 同じテーブルの組に役割の違う外部キー（請求先・配送先など）を 2 本張ると、既定名だけでは同じ名前になり、
+    /// DDL の 2 本目が失敗し、名前でリレーションを特定することもできなくなる。比較は大文字小文字を区別しない。
+    /// 結果は入力から一意に決まる
+    /// </remarks>
+    public static string UniqueForeignKey(
+        string childTable,
+        string parentTable,
+        IEnumerable<string> childColumnNames,
+        IEnumerable<string> existingNames
+    )
+    {
+        var taken = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+        var name = ForeignKey(childTable, parentTable);
+
+        if (!taken.Contains(name))
+        {
+            return name;
+        }
+
+        var columns = childColumnNames.Select(SafeName).Where(column => column.Length > 0).ToList();
+
+        if (columns.Count > 0)
+        {
+            name += "_" + string.Join("_", columns);
+
+            if (!taken.Contains(name))
+            {
+                return name;
+            }
+        }
+
+        for (var suffix = 2; ; suffix++)
+        {
+            var candidate = name + "_" + suffix;
+
+            if (!taken.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
 }

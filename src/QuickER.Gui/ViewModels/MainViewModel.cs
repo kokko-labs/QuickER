@@ -1336,11 +1336,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     SourceEntityId = PendingRelationshipSource.Id,
                     TargetEntityId = entity.Id,
                     Type = PendingRelationshipType,
-                    ColumnPairs = ForeignKeyColumnResolver.ResolveColumnPairs(
-                        PendingRelationshipSource,
-                        entity,
-                        Relationships
-                    ),
+                    ColumnPairs = BuildDefaultColumnPairs(PendingRelationshipSource, entity),
                     ConstraintName = ConstraintNames.ForeignKey(
                         entity.TableName,
                         PendingRelationshipSource.TableName
@@ -1368,6 +1364,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
             relationship.Source == source && relationship.Target == target
         );
     }
+
+    /// <summary>親の主キー全列を子の列へ自動で対応付けた、新しいリレーションの既定の列ペアを返す</summary>
+    /// <remarks>
+    /// 判定は MCP のツールと Mermaid の取込が共有する <see cref="ForeignKeyColumnResolver"/> に任せ、
+    /// ここでは ViewModel を意味モデルへ写すだけ（列の Id はそのまま運ばれるので、返る列ペアは ViewModel の列を指す）。
+    /// 既存リレーションは使用済みの子列の判定にしか使わないので、子が同じものだけを写す。
+    /// リレーション作成フローと内蔵チャットの <c>add_relationship</c>（列を省略したとき）が共有する
+    /// </remarks>
+    internal List<RelationshipColumnPair> BuildDefaultColumnPairs(
+        EntityViewModel source,
+        EntityViewModel target
+    ) =>
+        ForeignKeyColumnResolver.ResolveColumnPairs(
+            source.ToModel(),
+            target.ToModel(),
+            Relationships
+                .Where(relationship => ReferenceEquals(relationship.Target, target))
+                .Select(relationship => relationship.ToModel())
+        );
 
     /// <summary>リレーションクリック時の処理。対象を単一選択し、エンティティ選択を解除する</summary>
     public void OnRelationshipClicked(RelationshipViewModel rel)

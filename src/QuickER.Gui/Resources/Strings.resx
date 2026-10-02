@@ -1093,7 +1093,7 @@
     <value>Column '{1}' not found in table '{0}'.</value>
   </data>
   <data name="Tool_RelationshipAdded" xml:space="preserve">
-    <value>Added relationship '{0}' → '{1}'.</value>
+    <value>Added relationship '{0}' → '{1}' (constraint name: {2}).</value>
   </data>
   <data name="Tool_RelationshipNotFound" xml:space="preserve">
     <value>Relationship '{0}' → '{1}' not found.</value>
@@ -1121,6 +1121,9 @@
   </data>
   <data name="Tool_RelationshipAmbiguous" xml:space="preserve">
     <value>Several relationships connect '{0}' → '{1}'; specify constraint_name to choose one. Candidates: {2}.</value>
+  </data>
+  <data name="Tool_RelationshipConstraintNameTaken" xml:space="preserve">
+    <value>The constraint name '{0}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit constraint_name to get a unique one automatically.</value>
   </data>
   <data name="Tool_RelationshipConstraintNotFound" xml:space="preserve">
     <value>Relationship '{0}' → '{1}' with constraint name '{2}' not found. Candidates: {3}.</value>

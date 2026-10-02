@@ -173,6 +173,74 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                     relationship_type = "OneToOne",
                 }
             ),
+            // 複合主キーの自動ペア化（列は省略。主キーの 1 列目が親テーブル名由来の名前 ProjectId を
+            // 先に引くと取り違える構成＝各列が同名の子列へ付くことを両ホストで揃える）
+            ("add_entity", new { table_name = "Project" }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Project",
+                    column_name = "TenantId",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Project",
+                    column_name = "ProjectId",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            ("add_entity", new { table_name = "ProjectTask" }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "ProjectTask",
+                    column_name = "TaskId",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "ProjectTask",
+                    column_name = "TenantId",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "ProjectTask",
+                    column_name = "ProjectId",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "Project",
+                    target_table = "ProjectTask",
+                    relationship_type = "OneToMany",
+                }
+            ),
             // プロパティ変更
             (
                 "set_column_property",
@@ -237,6 +305,87 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                     target_table = "Order",
                     target_columns = new[] { "NoSuchColumn" },
                     relationship_type = "OneToMany",
+                }
+            ),
+            // 役割の違う外部キー（同じテーブルの組に 2 本目・3 本目）— 衝突しない既定名・明示の名前・
+            // 衝突する名前の拒否（外部キー・一意制約）・名前での削除を通す
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Order",
+                    column_name = "ShipToCustomerId",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Order",
+                    column_name = "BillToCustomerId",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "Customer",
+                    source_columns = new[] { "CustomerId" },
+                    target_table = "Order",
+                    target_columns = new[] { "ShipToCustomerId" },
+                    relationship_type = "OneToMany",
+                }
+            ),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "Customer",
+                    source_columns = new[] { "CustomerId" },
+                    target_table = "Order",
+                    target_columns = new[] { "BillToCustomerId" },
+                    relationship_type = "OneToMany",
+                    constraint_name = "FK_BillTo",
+                }
+            ),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "Customer",
+                    source_columns = new[] { "CustomerId" },
+                    target_table = "Order",
+                    target_columns = new[] { "ShipToCustomerId" },
+                    relationship_type = "OneToMany",
+                    constraint_name = "fk_billto",
+                }
+            ),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "Customer",
+                    source_columns = new[] { "CustomerId" },
+                    target_table = "Order",
+                    target_columns = new[] { "ShipToCustomerId" },
+                    relationship_type = "OneToMany",
+                    constraint_name = "UQ_Order_Pair",
+                }
+            ),
+            ("remove_relationship", new { source_table = "Customer", target_table = "Order" }),
+            (
+                "remove_relationship",
+                new
+                {
+                    source_table = "Customer",
+                    target_table = "Order",
+                    constraint_name = "FK_BillTo",
                 }
             ),
             // 複合外部キー（親 PK 2 列）— 明示指定・自動ペア化・失敗系を通す

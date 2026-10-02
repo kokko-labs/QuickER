@@ -205,4 +205,60 @@ public sealed class ConstraintNameCreationPathTests : IDisposable
             .Result.Should()
             .Contain(expected, "MCP の要約");
     }
+
+    /// <summary>
+    /// ツールが衝突の判定に使う既存の制約名（<see cref="ConstraintNames.CollectExisting"/>）が、DDL が実際に付ける
+    /// 名前と一致し、役割の違う 2 本目の外部キーが DDL でも別の名前になることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "スキーマ付きのテーブル名で、ツールが数える既存の制約名は DDL が付ける名前と一致する"
+    )]
+    public void ExistingConstraintNames_MatchDdl()
+    {
+        var file = RunDocumentTools([
+            .. TableSteps(),
+            (
+                "add_column",
+                new
+                {
+                    table_name = Child,
+                    column_name = "ShipToCustomerId",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            AddRelationship(),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = Parent,
+                    source_columns = new[] { "CustomerId" },
+                    target_table = Child,
+                    target_columns = new[] { "ShipToCustomerId" },
+                    relationship_type = "OneToMany",
+                }
+            ),
+            AddUnique(),
+        ]);
+        var schema = JsonStorageService.Load(file).Schema;
+        var ddl = new SqlServerDdlGenerator().Build(schema);
+        var existing = ConstraintNames.CollectExisting(schema);
+
+        existing
+            .Should()
+            .BeEquivalentTo(
+                "FK_dbo_Order_dbo_Customer",
+                "FK_dbo_Order_dbo_Customer_ShipToCustomerId",
+                "PK_dbo_Customer",
+                "PK_dbo_Order",
+                "UQ_dbo_Order_code"
+            );
+
+        foreach (var name in existing)
+        {
+            ddl.Should().Contain($"[{name}]", "ツールが数える名前は DDL が付ける名前と同じ");
+        }
+    }
 }

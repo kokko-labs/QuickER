@@ -1,14 +1,14 @@
 using System.Text.RegularExpressions;
 
-namespace QuickER.Mcp.Tools;
+namespace QuickER.Model;
 
 /// <summary>テーブル名・カラム名などの識別子を単語単位で扱うユーティリティ</summary>
 /// <remarks>
-/// 外部キー列の名前解決（<see cref="ForeignKeyColumnResolver"/>）で用いる。GUI 側
-/// <c>QuickER.Services.IdentifierNameHelper</c> の外部キー解決に必要な部分の移植で、
-/// ファイルベースの MCP ホストが VM に依存せず同じ命名規則を再現するために持つ。
+/// 外部キー列の名前解決（<see cref="ForeignKeyColumnResolver"/>）が用いる。
+/// GUI のリレーション作成・内蔵チャットと MCP のツール・Mermaid の取込が同じ命名規則を使うよう、
+/// どれからも参照できるモデル側に置く
 /// </remarks>
-internal static class IdentifierNameHelper
+public static class IdentifierNameHelper
 {
     /// <summary>スネークケース・パスカルケース等の識別子を単語のリストへ分解する</summary>
     public static List<string> SplitIdentifierWords(string value)
@@ -87,6 +87,41 @@ internal static class IdentifierNameHelper
         }
 
         return word[..^1];
+    }
+
+    /// <summary>単語を語尾の簡易ルールで複数形へ変換する (不規則変化は非対応)</summary>
+    public static string PluralizeWord(string word)
+    {
+        if (IsLikelyPlural(word))
+        {
+            return word;
+        }
+
+        var lower = word.ToLowerInvariant();
+
+        if (lower.EndsWith('y') && word.Length > 1)
+        {
+            var beforeLast = char.ToLowerInvariant(word[^2]);
+
+            if (beforeLast is not ('a' or 'e' or 'i' or 'o' or 'u'))
+            {
+                return word[..^1] + "ies";
+            }
+        }
+
+        if (
+            lower.EndsWith('s')
+            || lower.EndsWith('x')
+            || lower.EndsWith('z')
+            || lower.EndsWith("ch", StringComparison.Ordinal)
+            || lower.EndsWith("sh", StringComparison.Ordinal)
+            || lower.EndsWith('o')
+        )
+        {
+            return word + "es";
+        }
+
+        return word + "s";
     }
 
     /// <summary>単語を先頭大文字・以降小文字のパスカルケース表記へ整える</summary>
