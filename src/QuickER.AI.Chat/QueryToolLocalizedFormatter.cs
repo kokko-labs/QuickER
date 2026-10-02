@@ -194,6 +194,8 @@ public static class QueryToolLocalizedFormatter
                 Strings.QueryTool_Diag_ParameterUnusedInCondition,
                 d.Name
             ),
+            // 生成時診断と同じ文言（規則と対象のクエリ名・名前を含む）を UI 言語で描画する
+            QueryToolDiagnosticCode.GenerationRule => d.DetailText?.Format(null) ?? string.Empty,
             _ => string.Format(Strings.QueryTool_Diag_Unexpected, d.Code),
         };
     }

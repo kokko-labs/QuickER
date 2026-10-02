@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using QuickER.AI.Chat;
+using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Tests.TestDoubles;
@@ -49,12 +50,12 @@ public class ErDiagramHostChatAdapterQueryToolsTests
 
         var (_, success) = adapter.ToolHost.Execute(
             QueryToolCore.SetQueryToolName,
-            """{"table_name":"Order","query_name":"GetById","returns":"single"}"""
+            """{"table_name":"Order","query_name":"FindByCustomer","returns":"single"}"""
         );
 
         success.Should().BeTrue();
         host.LastReplacedQueries.Should().NotBeNull();
-        host.LastReplacedQueries!.Should().ContainSingle(query => query.Name == "GetById");
+        host.LastReplacedQueries!.Should().ContainSingle(query => query.Name == "FindByCustomer");
     }
 
     /// <summary>set_query の upsert が既存クエリの Id を温存して置換することを検証する</summary>
@@ -68,7 +69,7 @@ public class ErDiagramHostChatAdapterQueryToolsTests
             {
                 Id = existingId,
                 EntityId = order.Id,
-                Name = "GetById",
+                Name = "FindByCustomer",
                 Returns = QueryReturnShape.List,
             }
         );
@@ -76,12 +77,12 @@ public class ErDiagramHostChatAdapterQueryToolsTests
 
         var (_, success) = adapter.ToolHost.Execute(
             QueryToolCore.SetQueryToolName,
-            """{"table_name":"Order","query_name":"getbyid","returns":"single"}"""
+            """{"table_name":"Order","query_name":"findbycustomer","returns":"single"}"""
         );
 
         success.Should().BeTrue();
         var replaced = host.LastReplacedQueries!.Single(query =>
-            string.Equals(query.Name, "GetById", StringComparison.OrdinalIgnoreCase)
+            string.Equals(query.Name, "FindByCustomer", StringComparison.OrdinalIgnoreCase)
         );
         replaced.Id.Should().Be(existingId, "upsert は照合一致時に Id を温存する");
         replaced.Returns.Should().Be(QueryReturnShape.Single, "戻り形は新しい定義で置換される");
@@ -103,6 +104,39 @@ public class ErDiagramHostChatAdapterQueryToolsTests
         success.Should().BeFalse();
         host.LastReplacedQueries.Should().BeNull("検証失敗時は書き戻さない");
         diagram.Queries.Should().BeEmpty("図のクエリは変更されない");
+    }
+
+    /// <summary>
+    /// 生成で必ずエラーになる定義（標準メンバーと衝突するメソッド名）は、内蔵チャットの set_query でも保存されず、
+    /// 生成時診断と同じ文言（UI 言語で描画）が返ることを検証する
+    /// </summary>
+    [Fact(DisplayName = "set_query は生成で必ずエラーになる定義を生成時診断と同じ文言で拒否する")]
+    public void SetQuery_GenerationRuleViolation_IsRejectedWithGeneratorMessage()
+    {
+        var diagram = BuildDiagram(out var order);
+        var (adapter, host) = CreateAdapter(diagram);
+
+        var (message, success) = adapter.ToolHost.Execute(
+            QueryToolCore.SetQueryToolName,
+            """{"table_name":"Order","query_name":"GetById","returns":"list"}"""
+        );
+
+        success.Should().BeFalse();
+        host.LastReplacedQueries.Should().BeNull("検証失敗時は書き戻さない");
+        var expected = QueryDefinitionRules
+            .Validate(
+                order,
+                new QueryDefinition
+                {
+                    EntityId = order.Id,
+                    Name = "GetById",
+                    Returns = QueryReturnShape.List,
+                },
+                []
+            )
+            .Single()
+            .Text.Format(null);
+        message.Should().Contain(expected);
     }
 
     /// <summary>存在しないテーブルへの set_query は失敗し ReplaceQueries を呼ばないことを検証する</summary>

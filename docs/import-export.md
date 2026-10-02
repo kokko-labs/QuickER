@@ -145,6 +145,7 @@ As with the other imports, a replacement confirmation appears when there are str
 **What code cannot say.**
 A description that spans several lines is folded into single spaces when the code is generated (a `///` summary and an attribute literal cannot carry the line breaks), so the import restores the folded text and the original layout of the description is gone.
 The FK constraint name and the referential actions are written out only when they differ from the defaults, so an unnamed constraint with `NO ACTION` on both sides is indistinguishable from "not stated": a merge import keeps whatever the current diagram holds for those fields, and the CLI reverse leaves them at their defaults.
+When two unnamed foreign keys connect the same two tables, their default names would be the same, so the import names the one whose default name is taken, as the other imports do: the child's foreign key column names appended, or a number when that is taken too.
 Entities declared as `record` are not analysed (generated entities are always `class`), and the `Schema` argument of `[Table]` is not read (generation does not write it; a schema-qualified table name lives in the table name itself).
 
 The CLI's `quicker reverse` writes a fresh, merge-free diagram (schema-only JSON) using the same analysis, and creates the parent directory of `--out` when it is missing (see the [CLI reference](cli.md)).

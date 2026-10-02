@@ -15,6 +15,11 @@ public sealed class CodeReverseResult
     public required IReadOnlyList<Entity> Entities { get; init; }
 
     /// <summary>復元したリレーション一覧（<c>[NavigationReference]</c> の端点 4 つ組で一意化済み）</summary>
+    /// <remarks>
+    /// 名前を持たない外部キーのうち、既定名がほかの制約とぶつかるものには一意な名前を付け済み
+    /// （<see cref="ConstraintNames.NameUnnamedForeignKeys"/>）。付けた名前はコードが指定したものではないので
+    /// <see cref="RelationshipMetadata"/> には載らない。
+    /// </remarks>
     public required IReadOnlyList<Relationship> Relationships { get; init; }
 
     /// <summary>

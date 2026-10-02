@@ -236,12 +236,13 @@ public partial class QueryItemViewModel : ObservableObject
     /// <summary>スカラー戻り形×簡易 DSL の組み合わせが不正か（スカラーは生 SQL / 手動実装専用）</summary>
     /// <remarks>
     /// ラジオ無効化（<see cref="CanSelectScalar"/>）・実装方式切替時のリセット・ダイアログのフォーム検証の
-    /// 3 箇所の多重防御が、この単一述語を共有する（判定のドリフトを防ぐ）。
+    /// 3 箇所の多重防御が、この単一述語を共有する（判定のドリフトを防ぐ）。判定の正本は生成器と共有の
+    /// <see cref="QueryDefinitionRules.IsScalarDslConflict"/>。
     /// </remarks>
     public static bool IsScalarDslConflict(
         QueryReturnShape returns,
         QueryImplementationKind implementation
-    ) => returns == QueryReturnShape.Scalar && implementation == QueryImplementationKind.Dsl;
+    ) => QueryDefinitionRules.IsScalarDslConflict(returns, implementation);
 
     // ===== 戻り形ラジオ（bool プロキシ。既存ダイアログの流儀に合わせる） =====
 
@@ -421,7 +422,13 @@ public partial class QueryItemViewModel : ObservableObject
         _notifyParent?.Invoke();
     }
 
-    partial void OnScalarTypeChanged(string value) => RaiseSignatureChanged();
+    partial void OnScalarTypeChanged(string value)
+    {
+        RaiseSignatureChanged();
+
+        // スカラーの型の有無は生成の構造規則（QueryDefinitionRules）の対象なのでフォーム検証をやり直す
+        _notifyParent?.Invoke();
+    }
 
     partial void OnResultTypeNameChanged(string value)
     {
@@ -441,6 +448,9 @@ public partial class QueryItemViewModel : ObservableObject
 
         // ページングの有無で SQL から参照できる take / skip が変わるため生 SQL 検証をやり直す
         ValidateSql();
+
+        // ページングと戻り形の整合・take / skip とパラメータ名の重複は生成の構造規則の対象
+        _notifyParent?.Invoke();
     }
 
     partial void OnImplementationChanged(QueryImplementationKind value)
@@ -494,7 +504,8 @@ public partial class QueryItemViewModel : ObservableObject
 
     /// <summary>並び順行を追加する（既定は先頭列・昇順）</summary>
     [RelayCommand]
-    private void AddOrdering() =>
+    private void AddOrdering()
+    {
         OrderBy.Add(
             Track(
                 new QueryOrderingViewModel
@@ -504,6 +515,10 @@ public partial class QueryItemViewModel : ObservableObject
             )
         );
 
+        // 並び順の有無と戻り形の整合は生成の構造規則の対象なのでフォーム検証をやり直す
+        _notifyParent?.Invoke();
+    }
+
     /// <summary>指定並び順行を削除する</summary>
     [RelayCommand]
     private void RemoveOrdering(QueryOrderingViewModel? ordering)
@@ -511,6 +526,7 @@ public partial class QueryItemViewModel : ObservableObject
         if (ordering is not null)
         {
             OrderBy.Remove(Untrack(ordering));
+            _notifyParent?.Invoke();
         }
     }
 

@@ -228,6 +228,11 @@ public sealed class CSharpReverseParser
             warnings
         );
 
+        // 同じ親子の組に名前の無い外部キーが 2 本あると既定名が重なり、DDL の 2 本目が失敗する。
+        // ふさがっている側にだけ一意な名前を付ける（ここで付けた名前は RelationshipMetadata に載らない＝
+        // 「コードが指定した名前」ではないので、GUI のマージ取込では現在図の名前による補完が勝つ）
+        ConstraintNames.NameUnnamedForeignKeys(entities, relationships);
+
         return new CodeReverseResult
         {
             Entities = entities,

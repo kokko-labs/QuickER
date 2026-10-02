@@ -17,6 +17,8 @@ namespace QuickER.CodeReverse.CSharp;
 ///   <item>(a) 端点 4 つ組（両端テーブル名・列名）が一致するリレーションについて、
 ///     <b>コードが指定していなかったフィールドだけ</b> 現在図の値で補完する（fallback 専用＝指定があればコードが勝つ）</item>
 ///   <item>(b) 現在図の多対多リレーションは、両端エンティティが（Guid 引継で）生存していれば結果へ追加温存する</item>
+///   <item>(c) 最後に、名前の無い外部キーの既定名が重なる関係へ一意な名前を付ける
+///     （<see cref="ConstraintNames.NameUnnamedForeignKeys"/>。補完の後に行う＝補完で入った名前を先取りしない）</item>
 /// </list>
 /// <para>
 /// コードで消えた通常（多対多以外）のリレーションは追加しない（＝図からも消える）。
@@ -125,6 +127,16 @@ public static class ReverseMergePostProcessor
                 result.Add(relationship);
             }
         }
+
+        // (c) 補完の後で、名前の無い外部キーの既定名の重なりを解く。解析時にも同じ処理を通しているが、(a) は
+        // 「コードが名前を指定していない」関係の名前を現在図の値で上書きするため、現在図の名前が null なら
+        // 解析時に付けた名前は null へ戻る（この修正より前のリバースで作った図は、同じ組に名前の無い 2 本を
+        // 持っているのが普通）。多対多は渡さない＝(b) で温存したインスタンスは現在図と共有しており、
+        // DDL も外部キー制約として出さないため
+        ConstraintNames.NameUnnamedForeignKeys(
+            mergedEntities,
+            result.Where(relationship => relationship.Type != RelationshipType.ManyToMany)
+        );
 
         return result;
     }

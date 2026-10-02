@@ -17,6 +17,8 @@ namespace QuickER.Mcp.Tools;
 /// 検証の意味論は生成側（<c>QuickER.CodeGen.CSharp</c> の <c>CSharpGenerationModelBuilder.Queries</c>）・
 /// GUI のクエリ定義ダイアログと揃える：DSL は <see cref="QueryConditionParser"/>、生 SQL は
 /// <see cref="RawSqlAnalyzer"/> を用い、未宣言パラメータは保存拒否・未使用パラメータ／複文は警告のみ。
+/// 生成で必ずエラーになる構造規則（メソッド名・予約名・重複・識別子・戻り形と実装方式・ページングの整合）は
+/// 生成器と同じ <see cref="QueryDefinitionRules.Validate"/> を通し、違反があれば保存しない。
 /// 型トークンの内容検証（方言依存）は行わず、生成時検証に委ねる。
 /// </para>
 /// </remarks>
@@ -30,6 +32,24 @@ public static class QueryToolCore
 
     /// <summary>クエリ定義を 1 件削除するツールの名前（全面共通の正本）</summary>
     public const string RemoveQueryToolName = "remove_query";
+
+    /// <summary>
+    /// <see cref="QueryDefinitionRules.Validate"/> の違反のうち、ツール自身の診断（入力の引数名で言う文言）が
+    /// 同じ判定で先に報告するもの。二重に報告しないよう、ここに挙げた種別は構造規則の側から積まない
+    /// </summary>
+    /// <remarks>
+    /// <see cref="QueryRuleKind.ScalarRequiresType"/>＝<see cref="QueryToolDiagnosticCode.ScalarRequiresScalarType"/>・
+    /// <see cref="QueryRuleKind.ProjectionRequiresFields"/>＝<see cref="QueryToolDiagnosticCode.ProjectionRequiresResultTypeName"/> /
+    /// <see cref="QueryToolDiagnosticCode.ProjectionRequiresFields"/>・
+    /// <see cref="QueryRuleKind.OrderByRequiresList"/>＝<see cref="QueryToolDiagnosticCode.OrderByInvalidForReturnShape"/>
+    /// （ツール側は order_by 配列の要素数で判定するので、構造規則より広い）
+    /// </remarks>
+    private static readonly HashSet<QueryRuleKind> RuleKindsReportedByTool =
+    [
+        QueryRuleKind.ScalarRequiresType,
+        QueryRuleKind.ProjectionRequiresFields,
+        QueryRuleKind.OrderByRequiresList,
+    ];
 
     /// <summary>SQL 方言辞書のキーに指定できるプロバイダ識別名（クエリツール共通の正本）</summary>
     public static readonly string[] SupportedDbms =
@@ -207,18 +227,7 @@ public static class QueryToolCore
             }
         }
 
-        if (errors.Count > 0)
-        {
-            return new QueryToolOutcome
-            {
-                Status = QueryToolStatus.ValidationFailed,
-                TableName = tableName,
-                QueryName = queryName,
-                Errors = errors,
-            };
-        }
-
-        // ---- upsert（既存は Id 温存で丸ごと置換・なければ追加） ----
+        // ---- upsert の相手（既存は Id 温存で丸ごと置換・なければ追加） ----
         var existing = diagram.Queries.FirstOrDefault(query =>
             query.EntityId == entity.Id
             && string.Equals(query.Name, queryName, StringComparison.OrdinalIgnoreCase)
@@ -245,6 +254,34 @@ public static class QueryToolCore
             ResultTypeName = string.IsNullOrWhiteSpace(resultTypeName) ? null : resultTypeName,
             Fields = fields,
         };
+
+        // ---- 生成器と同じ構造規則（生成で必ずエラーになる定義を保存しない）。置き換える既存の定義は比較から外す ----
+        var otherQueries = diagram.Queries.Where(query => !ReferenceEquals(query, existing));
+
+        foreach (var violation in QueryDefinitionRules.Validate(entity, definition, otherQueries))
+        {
+            if (!RuleKindsReportedByTool.Contains(violation.Kind))
+            {
+                errors.Add(
+                    new QueryToolDiagnostic(
+                        QueryToolDiagnosticCode.GenerationRule,
+                        Detail: violation.Kind.ToString(),
+                        DetailText: violation.Text
+                    )
+                );
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            return new QueryToolOutcome
+            {
+                Status = QueryToolStatus.ValidationFailed,
+                TableName = tableName,
+                QueryName = queryName,
+                Errors = errors,
+            };
+        }
 
         bool wasUpdate;
 

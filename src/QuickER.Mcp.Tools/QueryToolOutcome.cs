@@ -154,6 +154,13 @@ public enum QueryToolDiagnosticCode
 
     /// <summary>DSL 条件で宣言済みパラメータが未使用（警告）</summary>
     ParameterUnusedInCondition,
+
+    /// <summary>
+    /// 生成で必ずエラーになる構造規則の違反（<see cref="QueryDefinitionRules"/>）。
+    /// <see cref="QueryToolDiagnostic.Detail"/>＝規則の種別名（<see cref="QueryRuleKind"/>）・
+    /// <see cref="QueryToolDiagnostic.DetailText"/>＝生成時診断と同じ文言（描画前）
+    /// </summary>
+    GenerationRule,
 }
 
 /// <summary>list_queries の一覧データ（テーブル別グループ＋総件数）</summary>

@@ -141,6 +141,8 @@ public static class QueryToolEnglishFormatter
                 $"{d.Dialect}: {d.DetailText?.FormatEnglish()}",
             QueryToolDiagnosticCode.ParameterUnusedInCondition =>
                 $"Parameter '{d.Name}' is declared but not used in the condition.",
+            // 生成時診断と同じ文言（規則と対象のクエリ名・名前を含む）を中立言語（英語）で描画する
+            QueryToolDiagnosticCode.GenerationRule => d.DetailText?.FormatEnglish() ?? string.Empty,
             _ => $"Unexpected diagnostic: {d.Code}",
         };
     }

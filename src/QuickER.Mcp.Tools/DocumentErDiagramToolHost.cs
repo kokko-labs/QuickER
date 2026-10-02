@@ -16,6 +16,8 @@ namespace QuickER.Mcp.Tools;
 /// 対象は ViewModel ではなく <see cref="ErDiagram"/> / <see cref="Entity"/> / <see cref="Column"/> /
 /// <see cref="Relationship"/>（意味モデル）。Undo/Redo は概念ごと持たない。結果テキストはすべて英語。
 /// レイアウト（<see cref="DiagramDocument.Layout"/>）は原則温存し、削除エンティティの孤児レイアウトのみ除去する。
+/// 同じプロセス内の呼び出しは <see cref="DiagramFileGate"/> で 1 本ずつに並べる（読込から保存までの途中へ
+/// 別の呼び出しを割り込ませない）。
 /// </remarks>
 public static partial class DocumentErDiagramToolHost
 {
@@ -44,29 +46,9 @@ public static partial class DocumentErDiagramToolHost
     {
         try
         {
-            return toolName switch
-            {
-                CreateDiagramToolName => CreateDiagram(file, arguments),
-                GetSummaryToolName => GetDiagramSummary(file),
-                ListQueriesToolName => ListQueries(file),
-                SetQueryToolName => Mutate(file, doc => SetQuery(doc, arguments)),
-                RemoveQueryToolName => Mutate(file, doc => RemoveQuery(doc, arguments)),
-                "add_entity" => Mutate(file, doc => AddEntity(doc, arguments)),
-                "remove_entity" => Mutate(file, doc => RemoveEntity(doc, arguments)),
-                "add_column" => Mutate(file, doc => AddColumn(doc, arguments)),
-                "remove_column" => Mutate(file, doc => RemoveColumn(doc, arguments)),
-                "set_entity_property" => Mutate(file, doc => SetEntityProperty(doc, arguments)),
-                "set_column_property" => Mutate(file, doc => SetColumnProperty(doc, arguments)),
-                "add_relationship" => Mutate(file, doc => AddRelationship(doc, arguments)),
-                "remove_relationship" => Mutate(file, doc => RemoveRelationship(doc, arguments)),
-                "set_primary_key" => Mutate(file, doc => SetPrimaryKey(doc, arguments)),
-                "set_unique_constraint" => Mutate(file, doc => SetUniqueConstraint(doc, arguments)),
-                "remove_unique_constraint" => Mutate(
-                    file,
-                    doc => RemoveUniqueConstraint(doc, arguments)
-                ),
-                _ => ($"Unsupported tool: {toolName}", false),
-            };
+            // 同じプロセス内の並行呼び出しを 1 本ずつに並べる（読込 → 変更 → 保存の途中へ別の呼び出しが
+            // 割り込むと、後から保存したほうが先の更新を消す。読み取り系も保存と重なると失敗するので同じロックに入れる）
+            return DiagramFileGate.Run(() => Dispatch(toolName, file, arguments));
         }
         catch (Exception ex)
         {
@@ -75,9 +57,42 @@ public static partial class DocumentErDiagramToolHost
         }
     }
 
+    /// <summary>ツール名で振り分けて実行する（呼び出し側が <see cref="DiagramFileGate"/> のロックを取っている）</summary>
+    private static (string Result, bool Success) Dispatch(
+        string toolName,
+        string file,
+        JsonElement arguments
+    ) =>
+        toolName switch
+        {
+            CreateDiagramToolName => CreateDiagram(file, arguments),
+            GetSummaryToolName => GetDiagramSummary(file),
+            ListQueriesToolName => ListQueries(file),
+            SetQueryToolName => Mutate(file, doc => SetQuery(doc, arguments)),
+            RemoveQueryToolName => Mutate(file, doc => RemoveQuery(doc, arguments)),
+            "add_entity" => Mutate(file, doc => AddEntity(doc, arguments)),
+            "remove_entity" => Mutate(file, doc => RemoveEntity(doc, arguments)),
+            "add_column" => Mutate(file, doc => AddColumn(doc, arguments)),
+            "remove_column" => Mutate(file, doc => RemoveColumn(doc, arguments)),
+            "set_entity_property" => Mutate(file, doc => SetEntityProperty(doc, arguments)),
+            "set_column_property" => Mutate(file, doc => SetColumnProperty(doc, arguments)),
+            "add_relationship" => Mutate(file, doc => AddRelationship(doc, arguments)),
+            "remove_relationship" => Mutate(file, doc => RemoveRelationship(doc, arguments)),
+            "set_primary_key" => Mutate(file, doc => SetPrimaryKey(doc, arguments)),
+            "set_unique_constraint" => Mutate(file, doc => SetUniqueConstraint(doc, arguments)),
+            "remove_unique_constraint" => Mutate(
+                file,
+                doc => RemoveUniqueConstraint(doc, arguments)
+            ),
+            _ => ($"Unsupported tool: {toolName}", false),
+        };
+
     // ---------------- load / save orchestration ----------------
 
-    /// <summary>変更系ツールの共通処理。読込・ガードを行い、変更が成功したときのみ保存する</summary>
+    /// <summary>
+    /// 変更系ツールの共通処理。読込・ガードを行い、変更が成功したときのみ外部キー印を当て直して
+    /// （<see cref="ReleaseForeignKeyMarks"/>）保存する
+    /// </summary>
     /// <param name="file">対象ファイル</param>
     /// <param name="operation">読み込んだ文書を変更し結果を返す処理（成功時のみ保存される）</param>
     private static (string, bool) Mutate(
@@ -92,16 +107,49 @@ public static partial class DocumentErDiagramToolHost
             return (error, false);
         }
 
-        var (result, success) = operation(document!);
+        var managedBefore = CollectRelationshipChildColumnIds(document!.Schema);
+        var (result, success) = operation(document);
 
         if (success)
         {
+            ReleaseForeignKeyMarks(document.Schema, managedBefore);
+
             // ユーザーの実ファイルへ書き戻すため原子的に差し替える（書き込み途中の中断・
             // ディスク満杯で既存の図が半端な JSON になるのを防ぐ）
             JsonStorageService.SaveAtomic(file, document!);
         }
 
         return (result, success);
+    }
+
+    /// <summary>全リレーションの列ペアに子列（外部キー側）として現れる列の Id を集める</summary>
+    private static HashSet<Guid> CollectRelationshipChildColumnIds(ErDiagram schema) =>
+        schema
+            .Relationships.SelectMany(relationship => relationship.ColumnPairs)
+            .Select(pair => pair.TargetColumnId)
+            .ToHashSet();
+
+    /// <summary>
+    /// 変更の前にリレーションの子列だった列のうち、変更の後にどの列ペアにも現れなくなった列の外部キー印を落とす
+    /// </summary>
+    /// <remarks>
+    /// GUI の規則（<c>MainViewModel.ApplyRelationshipColumnRules</c>）と同じ意味論。GUI は列ペアの子列を
+    /// 「リレーションが管理する列」として印を立て、リレーションから外れたら印を落とす。どの列ペアにも現れない列に
+    /// 手で付けた印（DB 取込・GUI の手動チェック由来）は残す。図を開いた時点で列ペアにいる子列だけが管理対象になるので、
+    /// 毎回読み込み直すこのホストでは「変更の前に列ペアにいた子列」が管理対象にあたる。
+    /// 関係の削除・端点テーブルの削除・列の削除（列ペアのクリア）のどれで外れても、ここで 1 回だけ当て直す。
+    /// </remarks>
+    private static void ReleaseForeignKeyMarks(ErDiagram schema, HashSet<Guid> managedBefore)
+    {
+        var managedAfter = CollectRelationshipChildColumnIds(schema);
+
+        foreach (var column in schema.Entities.SelectMany(entity => entity.Columns))
+        {
+            if (managedBefore.Contains(column.Id) && !managedAfter.Contains(column.Id))
+            {
+                column.IsForeignKey = false;
+            }
+        }
     }
 
     /// <summary>変更系ツール向けに文書を読み込む（不在・非 DiagramDocument・新フォーマットは拒否）</summary>

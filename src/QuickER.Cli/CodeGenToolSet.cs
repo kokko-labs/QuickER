@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using QuickER.Documents;
 using QuickER.Mcp;
+using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Settings;
@@ -398,8 +399,15 @@ public static class CodeGenToolSet
     /// <remarks>
     /// 形式検証は <see cref="JsonStorageService.TryLoad"/> に委ね、失敗種別を MCP ツールの応答文言
     /// （英語正本）へ翻訳するだけを担う。不在だけはツール固有の案内文にするため先に判定する。
+    /// 読み取りは <see cref="DiagramFileGate"/> のロックの中で行う（同じプロセスの ER 図操作ツールが同じファイルを
+    /// 保存している最中に読むと、共有違反で読み取りが失敗するため）。生成そのものは読み込んだ文書だけを使うので
+    /// ロックの外で行う。
     /// </remarks>
-    private static (DiagramDocument? Document, string? Error) LoadDiagram(string file)
+    private static (DiagramDocument? Document, string? Error) LoadDiagram(string file) =>
+        DiagramFileGate.Run(() => LoadDiagramCore(file));
+
+    /// <summary>図ファイルを読み込む本体（呼び出し側が <see cref="DiagramFileGate"/> のロックを取っている）</summary>
+    private static (DiagramDocument? Document, string? Error) LoadDiagramCore(string file)
     {
         if (!File.Exists(file))
         {

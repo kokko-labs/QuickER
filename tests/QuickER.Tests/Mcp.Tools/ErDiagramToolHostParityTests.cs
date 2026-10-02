@@ -12,7 +12,7 @@ namespace QuickER.Tests.Mcp.Tools;
 /// <summary>
 /// 同一のツール呼び出し列を (a) GUI 側 <see cref="ErDiagramDynamicTools"/>＋<see cref="MainViewModel"/> と
 /// (b) <see cref="DocumentErDiagramToolHost"/>＋一時ファイル の両経路へ流し、結果の意味モデル
-/// （エンティティ名・列の名前/型/PK/NULL/説明・主キーの実効順/保存された順序リスト・一意制約の名前/構成列・
+/// （エンティティ名・列の名前/型/PK/NULL/FK 印/説明・主キーの実効順/保存された順序リスト・一意制約の名前/構成列・
 /// リレーションの端点/種別）と各呼び出しの成否が
 /// 一致することを検証するパリティテスト。Guid は両経路で新規生成されるため突合には使わず、名前で対応付ける。
 /// </summary>
@@ -40,12 +40,17 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
         }
     }
 
-    /// <summary>比較用の列スナップショット（PK/NULL/説明を含む・FK フラグは比較対象外）</summary>
+    /// <summary>比較用の列スナップショット（PK/NULL/FK 印/説明を含む）</summary>
+    /// <remarks>
+    /// FK 印も比べる＝リレーションを外したときに子列の印を落とす規則（GUI の <c>ApplyRelationshipColumnRules</c>）が
+    /// 両ホストで食い違うと検知できるようにするため
+    /// </remarks>
     private sealed record ColumnSnap(
         string Name,
         string DataType,
         bool IsPrimaryKey,
         bool IsNullable,
+        bool IsForeignKey,
         string Description
     );
 
@@ -623,6 +628,55 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                     is_nullable = true,
                 }
             ),
+            // 外部キー印の後始末（リレーションから外れた子列の印を落とす）。親列の削除＝複合外部キー 2 本の
+            // 列ペアがすべてクリアされ、TenantUser / TenantAudit の子列 4 本の印が落ちる
+            ("remove_column", new { table_name = "TenantRegion", column_name = "RegionCode" }),
+            // 親テーブルの削除＝接続するリレーションが消え、残った子テーブルの列の印が落ちる
+            ("add_entity", new { table_name = "Supplier" }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Supplier",
+                    column_name = "SupplierId",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            ("add_entity", new { table_name = "Shipment" }),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Shipment",
+                    column_name = "ShipmentId",
+                    data_type = "int",
+                    is_primary_key = true,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_column",
+                new
+                {
+                    table_name = "Shipment",
+                    column_name = "SupplierId",
+                    data_type = "int",
+                    is_primary_key = false,
+                    is_nullable = false,
+                }
+            ),
+            (
+                "add_relationship",
+                new
+                {
+                    source_table = "Supplier",
+                    target_table = "Shipment",
+                    relationship_type = "OneToMany",
+                }
+            ),
+            ("remove_entity", new { table_name = "Supplier" }),
         };
 
         var vm = new MainViewModel();
@@ -677,6 +731,7 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                         c.DataType,
                         c.IsPrimaryKey,
                         c.IsNullable,
+                        c.IsForeignKey,
                         c.Description
                     ))
                     .ToList(),
@@ -704,6 +759,7 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
                         c.DataType,
                         c.IsPrimaryKey,
                         c.IsNullable,
+                        c.IsForeignKey,
                         c.Description
                     ))
                     .ToList(),
