@@ -275,4 +275,142 @@ public class ConstraintNamesTests
             .Should()
             .BeTrue();
     }
+
+    /// <summary>customers（主キー id）と orders（bill_customer_id / ship_customer_id）の 2 テーブル</summary>
+    private static (Entity Customers, Entity Orders) BuildCustomersAndOrders()
+    {
+        var customers = new Entity
+        {
+            TableName = "customers",
+            Columns =
+            {
+                new Column { Name = "id", IsPrimaryKey = true },
+            },
+        };
+        var orders = new Entity
+        {
+            TableName = "orders",
+            Columns =
+            {
+                new Column { Name = "id", IsPrimaryKey = true },
+                new Column { Name = "bill_customer_id" },
+                new Column { Name = "ship_customer_id" },
+            },
+        };
+
+        return (customers, orders);
+    }
+
+    /// <summary>customers.id → orders の指定列の 1 対多リレーション</summary>
+    private static Relationship Link(
+        Entity customers,
+        Entity orders,
+        string childColumn,
+        string? name = null
+    ) =>
+        new()
+        {
+            SourceEntityId = customers.Id,
+            TargetEntityId = orders.Id,
+            ConstraintName = name,
+            ColumnPairs =
+            [
+                new RelationshipColumnPair(
+                    customers.Columns[0].Id,
+                    orders.Columns.Single(column => column.Name == childColumn).Id
+                ),
+            ],
+        };
+
+    [Fact(DisplayName = "名前の無いリレーションは、既定名が空いていれば名前を持たないまま")]
+    public void NameUnnamedForeignKeys_DefaultNameFree_StaysUnnamed()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var relationship = Link(customers, orders, "bill_customer_id");
+
+        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [relationship]);
+
+        relationship.ConstraintName.Should().BeNull();
+    }
+
+    [Fact(
+        DisplayName = "同じテーブルの組に名前の無いリレーションが 2 本あれば、2 本目に子の列名つきの名前を付ける"
+    )]
+    public void NameUnnamedForeignKeys_SamePairTwice_SecondGetsUniqueName()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var bill = Link(customers, orders, "bill_customer_id");
+        var ship = Link(customers, orders, "ship_customer_id");
+
+        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [bill, ship]);
+
+        bill.ConstraintName.Should().BeNull("渡された順で先のリレーションが既定名を取る");
+        ship.ConstraintName.Should().Be("FK_orders_customers_ship_customer_id");
+    }
+
+    [Fact(
+        DisplayName = "名前を持つリレーションが既定名をふさいでいれば、名前の無い側に名前を付け、名前を持つ側は変えない"
+    )]
+    public void NameUnnamedForeignKeys_ExplicitNameTakesDefault_UnnamedIsRenamed()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var unnamed = Link(customers, orders, "bill_customer_id");
+        // 名前を持つリレーションが後ろにあっても、先に予約される
+        var named = Link(customers, orders, "ship_customer_id", "fk_ORDERS_customers");
+
+        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [unnamed, named]);
+
+        unnamed.ConstraintName.Should().Be("FK_orders_customers_bill_customer_id");
+        named.ConstraintName.Should().Be("fk_ORDERS_customers");
+    }
+
+    [Fact(
+        DisplayName = "主キー・一意制約の名前が既定名をふさいでいれば、名前の無い側に名前を付ける"
+    )]
+    public void NameUnnamedForeignKeys_TableConstraintTakesDefault_UnnamedIsRenamed()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        orders.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = "FK_orders_customers",
+                ColumnIds = { orders.Columns[1].Id },
+            }
+        );
+        var relationship = Link(customers, orders, "bill_customer_id");
+
+        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [relationship]);
+
+        relationship.ConstraintName.Should().Be("FK_orders_customers_bill_customer_id");
+    }
+
+    [Fact(DisplayName = "列ペアの無いリレーションは、既定名がふさがっていれば番号を足す")]
+    public void NameUnnamedForeignKeys_NoColumnPairs_AppendsNumber()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var first = new Relationship { SourceEntityId = customers.Id, TargetEntityId = orders.Id };
+        var second = new Relationship { SourceEntityId = customers.Id, TargetEntityId = orders.Id };
+
+        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [first, second]);
+
+        first.ConstraintName.Should().BeNull();
+        second.ConstraintName.Should().Be("FK_orders_customers_2");
+    }
+
+    [Fact(DisplayName = "親子を引けないリレーションは飛ばし、既定名も予約しない")]
+    public void NameUnnamedForeignKeys_UnresolvableRelationship_IsSkipped()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var dangling = new Relationship
+        {
+            SourceEntityId = Guid.NewGuid(),
+            TargetEntityId = orders.Id,
+        };
+        var relationship = Link(customers, orders, "bill_customer_id");
+
+        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [dangling, relationship]);
+
+        dangling.ConstraintName.Should().BeNull();
+        relationship.ConstraintName.Should().BeNull();
+    }
 }

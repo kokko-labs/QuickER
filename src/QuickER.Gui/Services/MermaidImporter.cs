@@ -266,10 +266,9 @@ public static partial class MermaidImporter
     /// それらどうしだけだから（除外したラベルと同じ綴りでも、除外したほうは名前にならないので衝突しない）。
     /// </para>
     /// <para>
-    /// 採らなかったリレーションは、既定名 <c>FK_{子}_{親}</c> が空いていれば名前を持たないまま（DDL 生成時に既定名を
-    /// 合成する＝名前の無いリレーションの往復がそのまま保たれる）にし、ふさがっていれば
-    /// <see cref="ConstraintNames.UniqueForeignKey"/> の名前を明示的に付ける。同じ親子の組に名前の無い関係が
-    /// 2 本あると、既定名が同じになるため。採ったラベルを先にすべて予約してから、ファイルの順に決める。
+    /// 採らなかったリレーションは、採ったラベルを先にすべて名前にしてから
+    /// <see cref="ConstraintNames.NameUnnamedForeignKeys"/> へ渡す（既定名 <c>FK_{子}_{親}</c> が空いていれば
+    /// 名前を持たないまま、ふさがっていれば一意な名前を明示する＝DBML・Excel 定義書の取込と同じ規則）。
     /// 子の列名を一意化に使うので、列ペアを決めた後に呼ぶ
     /// </para>
     /// </remarks>
@@ -291,7 +290,6 @@ public static partial class MermaidImporter
                 StringComparer.OrdinalIgnoreCase
             );
         var reserved = ConstraintNames.CollectTableConstraints(entities.Values);
-        var adopted = new bool[relationships.Count];
 
         for (var index = 0; index < relationships.Count; index++)
         {
@@ -300,38 +298,10 @@ public static partial class MermaidImporter
             if (label is not null && candidateCounts[label] == 1 && reserved.Add(label))
             {
                 relationships[index].ConstraintName = label;
-                adopted[index] = true;
             }
         }
 
-        for (var index = 0; index < relationships.Count; index++)
-        {
-            if (adopted[index])
-            {
-                continue;
-            }
-
-            var relationship = relationships[index];
-            var parent = entities.Values.First(entity => entity.Id == relationship.SourceEntityId);
-            var child = entities.Values.First(entity => entity.Id == relationship.TargetEntityId);
-
-            if (reserved.Add(ConstraintNames.ForeignKey(child.TableName, parent.TableName)))
-            {
-                continue;
-            }
-
-            var childColumnNames = relationship.ColumnPairs.Select(pair =>
-                child.Columns.First(column => column.Id == pair.TargetColumnId).Name
-            );
-            var name = ConstraintNames.UniqueForeignKey(
-                child.TableName,
-                parent.TableName,
-                childColumnNames,
-                reserved
-            );
-            relationship.ConstraintName = name;
-            reserved.Add(name);
-        }
+        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships);
     }
 
     /// <summary>ラベルが制約名の候補になる形か（出力側のプレースホルダでない 1 トークン）を判定する</summary>

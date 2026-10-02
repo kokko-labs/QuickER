@@ -49,6 +49,10 @@ public static partial class TableDefinitionDocumentImporter
         var summaries = ReadSummarySheet(summarySheet);
         var entities = ReadDetailSheets(workbook, summaries, roleSheets);
         var relationships = ReadRelationshipSheet(relationshipSheet, entities);
+
+        // 制約名欄が空のリレーションが同じテーブルの組に 2 行あると既定名が重なるため、ふさがった分だけ名前を付ける
+        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships);
+
         var diagram = new ErDiagram
         {
             Entities = entities.Values.ToList(),

@@ -303,6 +303,9 @@ public static partial class DbmlImporter
         ResolveUniqueIndexes(pendingUniqueIndexes);
         ResolveRelationshipColumns(entities, pendingRelationshipColumns);
 
+        // 名前の無い Ref が同じテーブルの組に 2 本あると既定名が重なるため、ふさがった分だけ名前を付ける
+        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships);
+
         return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
     }
 

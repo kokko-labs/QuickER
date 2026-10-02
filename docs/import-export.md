@@ -45,7 +45,8 @@ The supported syntax is the subset that QuickER's DBML export writes, and both t
   An endpoint can be a single column (`Parent.a`) or the composite Ref syntax (`Parent.(a, b)`), which restores a composite foreign key with its pairs in order.
   A line whose two endpoints list a different number of columns, or that names a column the table does not have, keeps the relationship but drops its column mapping (it can be completed in the properties panel)
 - Constraint name and referential actions: the constraint name is the name of a named `Ref` (`Ref FK_name: …`, or `Ref "FK name": …` when it needs quotes), and the referential actions come from the settings block after the endpoints (`[delete: cascade, update: set null]`).
-  DBML's `restrict` has no counterpart in QuickER, so it is imported as `NO ACTION`
+  DBML's `restrict` has no counterpart in QuickER, so it is imported as `NO ACTION`.
+  A `Ref` without a name stays without one and gets the default `FK_{child}_{parent}` from the DDL, unless that name is already taken, for example by a second unnamed `Ref` between the same two tables; then it gets the child's foreign key column names appended, or a number
 - Quoted identifiers: a table or column name written as `"Order Details"` is read with the quotes removed, and a type written the same way (`"double precision"`, `"integer[]"`) likewise. `\"` and `\` inside the quotes are unescaped
 - Comments: `//` to the end of the line, and `/* ... */` including across several lines. Neither is treated as a comment inside a string, so a description may contain a URL
 - Keywords are not case-sensitive (`Table` and `table`, `Ref:` and `ref:` are both read)
@@ -77,6 +78,7 @@ When that name is already taken, for example by a second relationship between th
 
 Definition documents exported by QuickER can be re-imported.
 In the key column, `UQ{n}` marks unique constraints and the same number means the same constraint, so the columns sharing a number are restored as one constraint (the constraint name is not carried by the document, so it is left unset and synthesized at DDL generation time).
+A relationship whose constraint name cell is empty stays without a name and gets the default `FK_{child}_{parent}` from the DDL, unless that name is already taken, for example by a second such row between the same two tables; then it gets the child's foreign key column names appended, or a number.
 Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import.
 **Excel files created by other applications cannot be imported directly**, though: to migrate definition documents you already have, transcribe them into QuickER's document format once.
 The target DBMS is embedded in the document and restored, dialect and all, on import.

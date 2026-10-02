@@ -1,10 +1,9 @@
 using System;
 using System.Linq;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Model;
-using QuickER.Provider.SqlServer;
 using QuickER.Services;
+using static QuickER.Tests.Gui.Services.ImportedConstraintNameAssertions;
 
 namespace QuickER.Tests.Gui.Services;
 
@@ -57,24 +56,6 @@ public class MermaidConstraintNameTests
                 )
             )
             .ToArray();
-
-    /// <summary>SQL Server の DDL が付ける制約名がすべて異なる（大文字小文字を無視）ことを表明する</summary>
-    private static void ShouldHaveDistinctDdlConstraintNames(ErDiagram diagram)
-    {
-        var ddl = new SqlServerDdlGenerator().Build(diagram);
-        var names = Regex
-            .Matches(ddl, @"CONSTRAINT \[([^\]]+)\]")
-            .Select(match => match.Groups[1].Value)
-            .ToList();
-
-        names.Should().NotBeEmpty();
-        names
-            .Should()
-            .OnlyHaveUniqueItems(
-                name => name.ToUpperInvariant(),
-                "DDL の制約名は重複してはいけない"
-            );
-    }
 
     [Fact(
         DisplayName = "名前の無いリレーションは relates を経由して往復しても名前を持たず、制約名も重複しない"

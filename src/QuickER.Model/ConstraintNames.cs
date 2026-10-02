@@ -93,7 +93,8 @@ public static class ConstraintNames
     /// <returns>主キー・一意制約の名前の集合（大文字小文字を区別しない・呼び出し側で追加してよい）</returns>
     /// <remarks>
     /// <see cref="CollectExisting"/> から外部キーを除いた部分で、規則は同じ。
-    /// リレーションの名前をまとめて決め直す取込（Mermaid）が、予約済みの名前の出発点に使う
+    /// リレーションの名前をまとめて決める処理（Mermaid のラベルの採否・<see cref="NameUnnamedForeignKeys"/>）が、
+    /// 予約済みの名前の出発点に使う
     /// </remarks>
     public static HashSet<string> CollectTableConstraints(IEnumerable<Entity> entities)
     {
@@ -128,6 +129,78 @@ public static class ConstraintNames
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// 名前を持たないリレーションのうち、既定名がほかの制約とぶつかるものに一意な名前を付ける
+    /// </summary>
+    /// <param name="entities">図のテーブル（リレーションの親子と、主キー・一意制約の名前を引く）</param>
+    /// <param name="relationships">対象のリレーション（<b>その場で書き換える</b>）</param>
+    /// <remarks>
+    /// <para>
+    /// 予約済みの名前は、主キー・一意制約の名前（<see cref="CollectTableConstraints"/>）と、名前を持つリレーションの名前。
+    /// 名前を持たないリレーションを渡された順に見て、既定名 <see cref="ForeignKey"/> が空いていれば名前を持たないまま
+    /// （DDL 生成時に既定名が合成される＝名前の無いリレーションは往復しても名前の無いまま）にし、ふさがっていれば
+    /// <see cref="UniqueForeignKey"/> の名前を <see cref="Relationship.ConstraintName"/> へ代入する。
+    /// どちらの場合も決まった名前を予約へ加える。名前を持つリレーションの名前は変えない。
+    /// </para>
+    /// <para>
+    /// 同じテーブルの組に名前の無いリレーションが 2 本あると既定名が同じになり、DDL の 2 本目が失敗する。
+    /// 図を丸ごと組み立てる取込（Mermaid・DBML・Excel 定義書）が、組み立ての最後に呼ぶ。
+    /// 子の列名を一意化に使うので、列ペアを決めた後に呼ぶこと。親子を引けないリレーションは飛ばす
+    /// </para>
+    /// </remarks>
+    public static void NameUnnamedForeignKeys(
+        IEnumerable<Entity> entities,
+        IEnumerable<Relationship> relationships
+    )
+    {
+        var tables = entities.ToList();
+        var targets = relationships.ToList();
+        var reserved = CollectTableConstraints(tables);
+
+        foreach (var relationship in targets)
+        {
+            if (!string.IsNullOrWhiteSpace(relationship.ConstraintName))
+            {
+                reserved.Add(relationship.ConstraintName);
+            }
+        }
+
+        foreach (var relationship in targets)
+        {
+            if (!string.IsNullOrWhiteSpace(relationship.ConstraintName))
+            {
+                continue;
+            }
+
+            var parent = tables.FirstOrDefault(entity => entity.Id == relationship.SourceEntityId);
+            var child = tables.FirstOrDefault(entity => entity.Id == relationship.TargetEntityId);
+
+            if (parent is null || child is null)
+            {
+                continue;
+            }
+
+            if (reserved.Add(ForeignKey(child.TableName, parent.TableName)))
+            {
+                continue;
+            }
+
+            var childColumnNames = relationship
+                .ColumnPairs.Select(pair =>
+                    child.Columns.FirstOrDefault(column => column.Id == pair.TargetColumnId)?.Name
+                )
+                .OfType<string>();
+            var name = UniqueForeignKey(
+                child.TableName,
+                parent.TableName,
+                childColumnNames,
+                reserved
+            );
+            relationship.ConstraintName = name;
+            reserved.Add(name);
+        }
     }
 
     /// <summary>図の中の既存の制約名と衝突しない外部キーの名前を組み立てる</summary>
