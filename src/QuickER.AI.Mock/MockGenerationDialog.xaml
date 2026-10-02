@@ -270,6 +270,7 @@
             Margin="0,0,8,0"
             VerticalContentAlignment="Center"
             Text="{Binding MockFolder, UpdateSourceTrigger=PropertyChanged}"
+            IsEnabled="{Binding CanEditMockFolder}"
             ToolTip="{x:Static res:Strings.Mock_MockFolderTooltip}"
           />
           <Button

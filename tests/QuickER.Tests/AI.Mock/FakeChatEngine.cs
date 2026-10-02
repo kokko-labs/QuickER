@@ -27,6 +27,15 @@ internal sealed class FakeChatEngine : IErChatEngine
     /// </summary>
     public Queue<IReadOnlyList<(string Tool, string Args)>> ScriptedTurns { get; } = new();
 
+    /// <summary>
+    /// true なら SendAsync でターン完了を通知せず保留する（実行中のターンを再現する）。
+    /// 保留した完了は <see cref="CompleteHeldTurn"/> で流す。
+    /// </summary>
+    public bool HoldTurnCompletion { get; set; }
+
+    /// <summary>保留していたターン完了（成功）を通知する</summary>
+    public void CompleteHeldTurn() => TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
+
     /// <summary>直近のツール実行結果（テストからの検証用）</summary>
     public (string Result, bool Success)? LastToolResult { get; private set; }
 
@@ -84,7 +93,11 @@ internal sealed class FakeChatEngine : IErChatEngine
             }
         }
 
-        TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
+        if (!HoldTurnCompletion)
+        {
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
+        }
+
         return Task.CompletedTask;
     }
 

@@ -1,6 +1,9 @@
 ﻿using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Threading;
+using System.Windows.Controls;
+using System.Windows.Data;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
@@ -2746,5 +2749,205 @@ public class MockGenerationDialogViewModelTests
         }
 
         public string? PickFolder(string title, string? initialDirectory = null) => null;
+    }
+
+    /// <summary>
+    /// 会話を開始し、ターン完了を保留した状態で 1 ターン送る（＝ターン実行中の状態を作る）。
+    /// </summary>
+    private static async Task<FakeChatEngine> StartHeldTurnAsync(
+        MockGenerationDialogViewModel vm,
+        FakeChatEngine[] engineBox
+    )
+    {
+        vm.StartConversationCommand.Execute(null);
+        var engine = engineBox[0];
+        engine.HoldTurnCompletion = true;
+
+        vm.UserInput = "要望";
+        await vm.SendMessageCommand.ExecuteAsync(null);
+        vm.IsTurnInProgress.Should().BeTrue("ターン完了を保留しているので実行中のまま");
+
+        return engine;
+    }
+
+    /// <summary>
+    /// ターン実行中の接続タブ切替は拒まれ、セッションを切り離さないので、後から届くターン完了で実行中が解ける
+    /// （切り離すと完了が届かず、ダイアログが操作不能のまま固まる）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中の接続タブ切替は拒まれ、ターン完了で実行中が解ける")]
+    public async Task TryChangeBackend_DuringTurn_IsRejected_AndTurnStillCompletes()
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            var engine = await StartHeldTurnAsync(vm, engineBox);
+
+            vm.TryChangeBackend(ErChatBackendKind.Codex).Should().BeFalse();
+
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.ApiKey);
+            vm.StatusMessage.Should().Be(MockStrings.Mock_SwitchBackendBlockedDuringTurn);
+            vm.DetachedDisposalForTests.Should().BeNull("セッションを切り離していない");
+            engine.DisposeCount.Should().Be(0);
+
+            engine.CompleteHeldTurn();
+
+            vm.IsTurnInProgress.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>ターン実行中でなければ、接続タブ切替は従来どおり切り替えて会話をリセットすることを検証する</summary>
+    [Fact(DisplayName = "ターン実行中でなければ接続タブを切り替えて会話をリセットする")]
+    public async Task TryChangeBackend_NotDuringTurn_SwitchesAndResetsConversation()
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "要望";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+            vm.Messages.Should().NotBeEmpty();
+
+            vm.TryChangeBackend(ErChatBackendKind.Codex).Should().BeTrue();
+
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
+            vm.Messages.Should().BeEmpty();
+            vm.DetachedDisposalForTests.Should().NotBeNull("旧セッションは切り離して破棄する");
+            await vm.DetachedDisposalForTests!;
+            engineBox[0].DisposeCount.Should().Be(1);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// ターン実行中のモックフォルダ変更は拒まれ（値は変わらず、束縛先へ読み直しの通知が出る）、
+    /// セッションを切り離さないので、後から届くターン完了で実行中が解けることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中のモックフォルダ変更は拒まれ、ターン完了で実行中が解ける")]
+    public async Task MockFolder_DuringTurn_IsRejected_AndTurnStillCompletes()
+    {
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            var engine = await StartHeldTurnAsync(vm, engineBox);
+            var notified = new List<string?>();
+            vm.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+            vm.MockFolder = Path.Combine(baseFolder, "other");
+
+            vm.MockFolder.Should().Be(mockFolder);
+            vm.StatusMessage.Should().Be(MockStrings.Mock_MockFolderLockedDuringTurn);
+            notified
+                .Should()
+                .Contain(
+                    nameof(MockGenerationDialogViewModel.MockFolder),
+                    "束縛先へ元の値を読み直させる"
+                );
+            vm.DetachedDisposalForTests.Should().BeNull("セッションを切り離していない");
+            engine.DisposeCount.Should().Be(0);
+
+            engine.CompleteHeldTurn();
+
+            vm.IsTurnInProgress.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>ターン実行中はモックフォルダの入力欄と参照ボタンが無効になり、完了で戻ることを検証する</summary>
+    [Fact(DisplayName = "ターン実行中はモックフォルダの入力欄と参照ボタンが無効")]
+    public async Task CanEditMockFolder_FalseDuringTurn()
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.CanEditMockFolder.Should().BeTrue();
+            vm.BrowseMockFolderCommand.CanExecute(null).Should().BeTrue();
+
+            var engine = await StartHeldTurnAsync(vm, engineBox);
+
+            vm.CanEditMockFolder.Should().BeFalse();
+            vm.BrowseMockFolderCommand.CanExecute(null).Should().BeFalse();
+
+            engine.CompleteHeldTurn();
+
+            vm.CanEditMockFolder.Should().BeTrue();
+            vm.BrowseMockFolderCommand.CanExecute(null).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// ターン実行中にモックフォルダの変更を拒んだとき、束縛している入力欄に打ち込んだ文字が残らない
+    /// （元の値へ戻る）ことを、実際の WPF の束縛で検証する。
+    /// </summary>
+    /// <remarks>
+    /// 画面では入力欄自体を無効化しているのでこの経路には来ないが、拒否が値を変えないまま
+    /// 入力欄にだけ文字を残すと、画面と VM が食い違ったまま見えてしまう。
+    /// </remarks>
+    [Fact(DisplayName = "モックフォルダの変更を拒んだとき入力欄の文字は元の値へ戻る")]
+    public async Task MockFolder_RejectedEdit_RevertsBoundTextBox()
+    {
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            await StartHeldTurnAsync(vm, engineBox);
+            string? textAfterEdit = null;
+            Exception? captured = null;
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    var textBox = new TextBox();
+                    textBox.SetBinding(
+                        TextBox.TextProperty,
+                        new Binding(nameof(MockGenerationDialogViewModel.MockFolder))
+                        {
+                            Source = vm,
+                            Mode = BindingMode.TwoWay,
+                            UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+                        }
+                    );
+                    textBox.Text.Should().Be(mockFolder);
+
+                    textBox.Text = Path.Combine(baseFolder, "typed");
+                    textAfterEdit = textBox.Text;
+                }
+                catch (Exception ex)
+                {
+                    captured = ex;
+                }
+            });
+
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.IsBackground = true;
+            thread.Start();
+            thread.Join();
+
+            captured.Should().BeNull();
+            vm.MockFolder.Should().Be(mockFolder);
+            textAfterEdit.Should().Be(mockFolder);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
     }
 }

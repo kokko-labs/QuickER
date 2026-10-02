@@ -326,6 +326,12 @@ See the log for details:
   <data name="Mock_Interrupted" xml:space="preserve">
     <value>The operation was interrupted.</value>
   </data>
+  <data name="Mock_SwitchBackendBlockedDuringTurn" xml:space="preserve">
+    <value>The connection method cannot be switched while a response is in progress. Interrupt the response first.</value>
+  </data>
+  <data name="Mock_MockFolderLockedDuringTurn" xml:space="preserve">
+    <value>The mock folder cannot be changed while a response is in progress. Interrupt the response first.</value>
+  </data>
   <data name="Mock_PreviewUpdateFailedFormat" xml:space="preserve">
     <value>Could not update the preview: {0}</value>
   </data>

@@ -483,48 +483,16 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <see cref="RequestInterrupt"/> が止められるのは実行中のターンだけで、ターンを実行していない
     /// 常駐プロセス（codex app-server・copilot ランタイム・Claude Code の実行中プロセス）は残る。
     /// それらを確実に止める経路はエンジンの破棄だけなので、ウィンドウを閉じる前にここを通す。
-    /// 待ちに上限を設けるのは、破棄がハングしたときにアプリの終了を長く止めないため。
+    /// 破棄の作法（スレッドプール・上限つきの待ち・個々の失敗を握る）は <see cref="EngineShutdown"/> が持つ。
     /// </remarks>
-    public void ShutdownEngines(TimeSpan timeout)
-    {
-        // 破棄そのものは必ずスレッドプールで走らせる。終了経路は UI スレッドで、ここで完了を待つため、
-        // 破棄の途中に UI スレッドへのマーシャリングがあると待ちがデッドロックする
-        var shutdown = Task.Run(() =>
-            Task.WhenAll(
-                DisposeEngineQuietlyAsync(_apiKeyEngine),
-                DisposeEngineQuietlyAsync(_codexEngine),
-                DisposeEngineQuietlyAsync(_claudeCodeEngine),
-                DisposeEngineQuietlyAsync(_copilotEngine)
-            )
+    public void ShutdownEngines(TimeSpan timeout) =>
+        EngineShutdown.DisposeAll(
+            timeout,
+            _apiKeyEngine,
+            _codexEngine,
+            _claudeCodeEngine,
+            _copilotEngine
         );
-
-        try
-        {
-            shutdown.Wait(timeout);
-        }
-        catch (Exception)
-        {
-            // 破棄の失敗・待ちの打ち切りで終了処理を妨げない
-        }
-    }
-
-    /// <summary>エンジン 1 つを破棄する（失敗は握り潰す＝1 つの失敗で他のエンジンの破棄を止めない）</summary>
-    private static async Task DisposeEngineQuietlyAsync(IErChatEngine? engine)
-    {
-        if (engine is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await engine.DisposeAsync().ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            // 終了経路のため、個々の破棄の失敗は報告先が無い
-        }
-    }
 
     // ── Codex 認証コマンド ──
 

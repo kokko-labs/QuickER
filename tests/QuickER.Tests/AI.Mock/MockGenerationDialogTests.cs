@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Model;
+using QuickER.Tests.AI;
 using QuickER.Tests.TestDoubles;
 using QuickER.Tests.TestSupport;
 
@@ -242,6 +243,161 @@ public class MockGenerationDialogTests
             reporter.Steps.Should().Equal("MockGeneration.SaveSettings");
             generator.Interrupted.Should().BeTrue("保存の失敗より前の中断は完了していること");
             closed.Should().BeTrue("保存の失敗でウィンドウが閉じ残ってはいけない");
+        }
+        finally
+        {
+            File.Delete(blockedFolder);
+        }
+    }
+
+    /// <summary>STA スレッドで処理を実行し、投げた例外を返す（無ければ null）</summary>
+    private static Exception? RunOnSta(Action body)
+    {
+        Exception? captured = null;
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                body();
+            }
+            catch (Exception ex)
+            {
+                captured = ex;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        thread.Join();
+
+        return captured;
+    }
+
+    /// <summary>プローブ用エンジン 3 つのクライアントを差し替えてダイアログを構築する</summary>
+    private static MockGenerationDialog CreateDialogWithProbes(
+        AiSettingsStore settingsStore,
+        RecordingShutdownFailureReporter reporter,
+        FakeCodexAppServerClient codex,
+        DisposeTrackingClaudeCodeClient claudeCode,
+        FakeCopilotRuntimeClient copilot
+    )
+    {
+        WpfApplicationTestSupport.EnsureApplicationResources();
+
+        var keyStore = new InMemoryApiKeyStore();
+        var viewModel = new MockGenerationDialogViewModel(
+            new StubDiagramSource(new ErDiagram()),
+            new SyncUiDispatcher(),
+            files: null,
+            settingsStore: settingsStore,
+            apiKeyEngineFactory: null,
+            codexEngineFactory: null,
+            claudeCodeEngineFactory: null,
+            copilotEngineFactory: null,
+            mockProjectGenerator: new InterruptRecordingGenerator(),
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
+        );
+
+        return WpfApplicationTestSupport.LoadXamlComponent(() =>
+            new MockGenerationDialog(viewModel, reporter, codex, claudeCode, copilot)
+        );
+    }
+
+    /// <summary>
+    /// プローブ用エンジン 3 つのクライアントがそれぞれ 1 回ずつ破棄されたかを返す。
+    /// </summary>
+    /// <remarks>
+    /// 破棄はスレッドプールで走り、<see cref="MockGenerationDialog.ForceClose"/> は上限（3 秒）までしか待たない。
+    /// 全スイートの並列実行でプールが飽和すると上限内に始まらないことがあるため、長めの上限で到達を待つ
+    /// （ForceClose が破棄を起動しなければ、待っても回数は 0 のまま）。
+    /// </remarks>
+    private static bool AllProbesDisposed(
+        FakeCodexAppServerClient codex,
+        DisposeTrackingClaudeCodeClient claudeCode,
+        FakeCopilotRuntimeClient copilot
+    ) =>
+        SpinWait.SpinUntil(
+            () =>
+                codex.DisposeCount == 1
+                && claudeCode.DisposeCount == 1
+                && copilot.DisposeCount == 1,
+            TimeSpan.FromSeconds(30)
+        );
+
+    /// <summary>
+    /// アプリ終了時の強制クローズが、接続状態の確認に使うプローブ用エンジン 3 つまで破棄することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// プローブは会話のエンジンとは別にダイアログが持つ。破棄しないと、確認のために起動した
+    /// codex app-server・copilot ランタイムの子プロセスがアプリ終了後も残る。
+    /// エンジンの破棄はクライアントの破棄を呼ぶので、クライアント側の回数で観測する。
+    /// </remarks>
+    [Fact(DisplayName = "ForceClose はプローブ用エンジン 3 つを破棄する")]
+    public void ForceClose_DisposesProbeEngines()
+    {
+        var codex = new FakeCodexAppServerClient();
+        var claudeCode = new DisposeTrackingClaudeCodeClient();
+        var copilot = new FakeCopilotRuntimeClient();
+        var reporter = new RecordingShutdownFailureReporter();
+        var settingsFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+
+        var captured = RunOnSta(() =>
+            CreateDialogWithProbes(
+                    new AiSettingsStore(settingsFolder),
+                    reporter,
+                    codex,
+                    claudeCode,
+                    copilot
+                )
+                .ForceClose()
+        );
+
+        captured.Should().BeNull();
+        reporter.Steps.Should().BeEmpty();
+        AllProbesDisposed(codex, claudeCode, copilot).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 途中の段（設定保存）が失敗しても、プローブ用エンジンの破棄まで届くことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "ForceClose は設定保存が失敗してもプローブ用エンジンを破棄する")]
+    public void ForceClose_WhenSaveSettingsThrows_StillDisposesProbeEngines()
+    {
+        var codex = new FakeCodexAppServerClient();
+        var claudeCode = new DisposeTrackingClaudeCodeClient();
+        var copilot = new FakeCopilotRuntimeClient();
+        var reporter = new RecordingShutdownFailureReporter();
+
+        // 保存先フォルダと同じパスにファイルを置く＝Directory.CreateDirectory が必ず失敗する
+        var blockedFolder = Path.Combine(
+            Path.GetTempPath(),
+            $"QuickERTests-blocked-{Guid.NewGuid():N}"
+        );
+        File.WriteAllText(blockedFolder, "block");
+
+        try
+        {
+            var captured = RunOnSta(() =>
+                CreateDialogWithProbes(
+                        new AiSettingsStore(blockedFolder),
+                        reporter,
+                        codex,
+                        claudeCode,
+                        copilot
+                    )
+                    .ForceClose()
+            );
+
+            captured.Should().BeNull();
+            reporter.Steps.Should().Equal("MockGeneration.SaveSettings");
+            AllProbesDisposed(codex, claudeCode, copilot).Should().BeTrue();
         }
         finally
         {

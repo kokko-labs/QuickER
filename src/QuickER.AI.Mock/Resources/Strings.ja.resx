@@ -326,6 +326,12 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="Mock_Interrupted" xml:space="preserve">
     <value>処理が中断されました。</value>
   </data>
+  <data name="Mock_SwitchBackendBlockedDuringTurn" xml:space="preserve">
+    <value>応答の実行中は接続方式を切り替えられません。先に中断してください。</value>
+  </data>
+  <data name="Mock_MockFolderLockedDuringTurn" xml:space="preserve">
+    <value>応答の実行中はモックフォルダを変更できません。先に中断してください。</value>
+  </data>
   <data name="Mock_PreviewUpdateFailedFormat" xml:space="preserve">
     <value>プレビューを更新できませんでした: {0}</value>
   </data>

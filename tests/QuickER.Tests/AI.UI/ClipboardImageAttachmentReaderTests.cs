@@ -1,3 +1,7 @@
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.UI;
@@ -57,5 +61,92 @@ public class ClipboardImageAttachmentReaderTests
         );
 
         result.Success.Should().BeFalse();
+    }
+
+    /// <summary>2x2 の実ビットマップを作る（PNG への変換が通る正常系の確認用）</summary>
+    private static BitmapSource SmallBitmap()
+    {
+        var pixels = new byte[2 * 2 * 4];
+        var bitmap = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32, null, pixels, 2 * 4);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    /// <summary>
+    /// クリップボードの読み取りが投げる例外のうち、「画像なし」へ畳むもの。
+    /// 他のプロセスがクリップボードを開いているとき（COMException）と、WIC がビットマップを解釈できないとき。
+    /// </summary>
+    public static TheoryData<Exception> FoldedClipboardExceptions =>
+        new()
+        {
+            new COMException("CLIPBRD_E_CANT_OPEN", unchecked((int)0x800401D0)),
+            new ExternalException("clipboard busy"),
+            new NotSupportedException("no imaging component"),
+            new FileFormatException("broken bitmap"),
+        };
+
+    /// <summary>
+    /// 画像の有無を問う段で例外が出ても null を返す（Ctrl+V のキーハンドラから例外が抜けてアプリが落ちない）ことを検証する
+    /// </summary>
+    [Theory(DisplayName = "画像の有無の問い合わせが投げても null を返す")]
+    [MemberData(nameof(FoldedClipboardExceptions))]
+    public void TryGetClipboardPng_ContainsImageThrows_ReturnsNull(Exception exception)
+    {
+        var png = ClipboardImageAttachmentReader.TryGetClipboardPng(
+            () => throw exception,
+            () => SmallBitmap()
+        );
+
+        png.Should().BeNull();
+    }
+
+    /// <summary>画像の取り出しで例外が出ても null を返すことを検証する</summary>
+    [Theory(DisplayName = "画像の取り出しが投げても null を返す")]
+    [MemberData(nameof(FoldedClipboardExceptions))]
+    public void TryGetClipboardPng_GetImageThrows_ReturnsNull(Exception exception)
+    {
+        var png = ClipboardImageAttachmentReader.TryGetClipboardPng(
+            () => true,
+            () => throw exception
+        );
+
+        png.Should().BeNull();
+    }
+
+    /// <summary>畳む対象でない例外（想定外の不具合）は黙らせないことを検証する</summary>
+    [Fact(DisplayName = "畳む対象でない例外はそのまま伝わる")]
+    public void TryGetClipboardPng_UnexpectedException_Propagates()
+    {
+        var act = () =>
+            ClipboardImageAttachmentReader.TryGetClipboardPng(
+                () => true,
+                () => throw new InvalidOperationException("bug")
+            );
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    /// <summary>画像が無い・取り出しが null のときは null を返すことを検証する</summary>
+    [Fact(DisplayName = "画像が無ければ null を返す")]
+    public void TryGetClipboardPng_NoImage_ReturnsNull()
+    {
+        ClipboardImageAttachmentReader
+            .TryGetClipboardPng(() => false, () => SmallBitmap())
+            .Should()
+            .BeNull();
+        ClipboardImageAttachmentReader.TryGetClipboardPng(() => true, () => null).Should().BeNull();
+    }
+
+    /// <summary>画像があれば PNG バイト列を返すことを検証する（正常系）</summary>
+    [Fact(DisplayName = "画像があれば PNG バイト列を返す")]
+    public void TryGetClipboardPng_Image_ReturnsPngBytes()
+    {
+        var png = ClipboardImageAttachmentReader.TryGetClipboardPng(
+            () => true,
+            () => SmallBitmap()
+        );
+
+        png.Should().NotBeNull();
+        png!.Take(8).Should().Equal(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A);
     }
 }

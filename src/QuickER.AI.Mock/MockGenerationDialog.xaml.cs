@@ -56,6 +56,27 @@ public partial class MockGenerationDialog : Window
         MockGenerationDialogViewModel viewModel,
         IShutdownFailureReporter shutdownFailureReporter
     )
+        : this(
+            viewModel,
+            shutdownFailureReporter,
+            new CodexAppServerClient(),
+            new ClaudeCodeProcessClient(),
+            new CopilotRuntimeClient()
+        ) { }
+
+    /// <summary>プローブ用エンジンのクライアントを差し替えてウィンドウを生成する（テスト用）</summary>
+    /// <param name="viewModel">このウィンドウの ViewModel</param>
+    /// <param name="shutdownFailureReporter"><see cref="ForceClose"/> の各段で受け止めた失敗の記録先</param>
+    /// <param name="codexClient">Codex プローブのクライアント</param>
+    /// <param name="claudeCodeClient">Claude Code プローブのクライアント</param>
+    /// <param name="copilotClient">GitHub Copilot プローブのクライアント</param>
+    internal MockGenerationDialog(
+        MockGenerationDialogViewModel viewModel,
+        IShutdownFailureReporter shutdownFailureReporter,
+        ICodexAppServerClient codexClient,
+        IClaudeCodeClient claudeCodeClient,
+        ICopilotRuntimeClient copilotClient
+    )
     {
         ArgumentNullException.ThrowIfNull(shutdownFailureReporter);
 
@@ -66,7 +87,7 @@ public partial class MockGenerationDialog : Window
 
         var dispatcher = new WpfUiDispatcher();
         _codexProbe = new CodexChatEngine(
-            new CodexAppServerClient(),
+            codexClient,
             toolHost: null,
             dispatcher,
             MockDesignProfile.FolderMockDesign
@@ -75,14 +96,14 @@ public partial class MockGenerationDialog : Window
         // 接続失敗・アカウント取得失敗の理由はステータス通知にしか出ないため、こちらも購読して VM へ流す
         _codexProbe.StatusChanged += OnCodexStatusChanged;
         _claudeCodeProbe = new ClaudeCodeChatEngine(
-            new ClaudeCodeProcessClient(),
+            claudeCodeClient,
             toolHost: null,
             dispatcher,
             MockDesignProfile.FolderMockDesign
         );
         _claudeCodeProbe.StatusSummaryChanged += OnClaudeCodeStatusChanged;
         _copilotProbe = new CopilotChatEngine(
-            new CopilotRuntimeClient(),
+            copilotClient,
             toolHost: null,
             dispatcher,
             MockDesignProfile.FolderMockDesign
@@ -171,8 +192,10 @@ public partial class MockGenerationDialog : Window
     /// <remarks>
     /// <para>
     /// 閉じる前に、(1) 実行中の処理（モックプロジェクト生成・会話ターン）を打ち切り
-    /// (2) 会話中のエンジンを破棄して常駐する子プロセス（codex app-server・copilot ランタイム）まで止める。
-    /// 中断だけでは、処理を実行していない常駐プロセスが残るため、両方を通す。
+    /// (2) 会話中のエンジンを破棄し (3) 接続状態の確認に使うプローブ用エンジン 3 つも破棄して、
+    /// 常駐する子プロセス（codex app-server・copilot ランタイム）まで止める。
+    /// 中断だけでは、処理を実行していない常駐プロセスが残るため、すべてを通す。
+    /// (2) と (3) はそれぞれ <see cref="EngineShutdownTimeout"/> を上限に待つので、閉じるまでの待ちは最大でその 2 倍になる。
     /// </para>
     /// <para>
     /// 各段は <see cref="ShutdownSteps.Run"/> で独立して受け止める。とくに設定保存は
@@ -197,6 +220,17 @@ public partial class MockGenerationDialog : Window
             _shutdownFailureReporter,
             "MockGeneration.ShutdownEngines",
             () => ViewModel.ShutdownEngines(EngineShutdownTimeout)
+        );
+        ShutdownSteps.Run(
+            _shutdownFailureReporter,
+            "MockGeneration.DisposeProbes",
+            () =>
+                EngineShutdown.DisposeAll(
+                    EngineShutdownTimeout,
+                    _codexProbe,
+                    _claudeCodeProbe,
+                    _copilotProbe
+                )
         );
         ShutdownSteps.Run(_shutdownFailureReporter, "MockGeneration.Close", Close);
     }
@@ -303,10 +337,17 @@ public partial class MockGenerationDialog : Window
     /// <summary>確定済み（切り替え済み）の接続タブのインデックス</summary>
     private int _committedBackendIndex;
 
-    /// <summary>タブ選択を接続方式へ変換して ViewModel に反映し、必要ならプローブする</summary>
+    /// <summary>タブ選択の復帰中か（復帰による再入を無視するためのガード）</summary>
+    private bool _revertingBackendTab;
+
+    /// <summary>
+    /// タブ選択を接続方式へ変換し、切替可否を ViewModel に委ねる（ターン実行中は拒まれる）。
+    /// 切り替えたら確定インデックスを更新して必要ならプローブし、拒まれたら元のタブへ戻す。
+    /// </summary>
     private async void BackendTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!ReferenceEquals(e.OriginalSource, BackendTabs))
+        // 子 Selector（ComboBox 等）のバブリングや、復帰による再入は無視する
+        if (!ReferenceEquals(e.OriginalSource, BackendTabs) || _revertingBackendTab)
         {
             return;
         }
@@ -318,7 +359,6 @@ public partial class MockGenerationDialog : Window
             return;
         }
 
-        _committedBackendIndex = newIndex;
         var backend = newIndex switch
         {
             1 => ErChatBackendKind.Codex,
@@ -326,7 +366,14 @@ public partial class MockGenerationDialog : Window
             3 => ErChatBackendKind.Copilot,
             _ => ErChatBackendKind.ApiKey,
         };
-        ViewModel.Connection.SelectedBackend = backend;
+
+        if (!ViewModel.TryChangeBackend(backend))
+        {
+            RevertBackendSelection();
+            return;
+        }
+
+        _committedBackendIndex = newIndex;
 
         if (backend == ErChatBackendKind.Codex)
         {
@@ -340,6 +387,29 @@ public partial class MockGenerationDialog : Window
         {
             await EnsureCopilotInitializedAsync();
         }
+    }
+
+    /// <summary>
+    /// 確定済みタブへ選択を戻す。<see cref="Selector.SelectionChanged"/> 処理中の同期的な選択戻しは
+    /// TabControl の選択状態を不整合にし、以降のクリックで再発火するため、イベント完了後にディスパッチャ経由で戻し、
+    /// 戻し中の再入はガードで無視する（AI チャットのダイアログと同じ形）。
+    /// </summary>
+    private void RevertBackendSelection()
+    {
+        Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                _revertingBackendTab = true;
+                try
+                {
+                    BackendTabs.SelectedIndex = _committedBackendIndex;
+                }
+                finally
+                {
+                    _revertingBackendTab = false;
+                }
+            })
+        );
     }
 
     /// <summary>Codex 接続を確立し、認証状態を ViewModel へ反映する</summary>

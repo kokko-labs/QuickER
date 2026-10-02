@@ -528,6 +528,18 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_MockFolderLockedDuringTurn {
+            get {
+                return ResourceManager.GetString("Mock_MockFolderLockedDuringTurn", resourceCulture);
+            }
+        }
+
+        public static string Mock_SwitchBackendBlockedDuringTurn {
+            get {
+                return ResourceManager.GetString("Mock_SwitchBackendBlockedDuringTurn", resourceCulture);
+            }
+        }
+
         public static string Mock_Interrupted {
             get {
                 return ResourceManager.GetString("Mock_Interrupted", resourceCulture);

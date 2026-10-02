@@ -112,9 +112,43 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    /// <summary>モックフォルダのフルパス（会話開始前に指定する動線。開けば即サイドバー・プレビューへ反映）</summary>
-    [ObservableProperty]
     private string _mockFolder = string.Empty;
+
+    /// <summary>モックフォルダのフルパス（会話開始前に指定する動線。開けば即サイドバー・プレビューへ反映）</summary>
+    /// <remarks>
+    /// ターン実行中の変更は拒む（値を変えず、理由をステータスへ出す）。変更は会話のリセット＝セッションの切り離しを伴い、
+    /// 切り離したセッションのターン完了は届かないため、通すと <see cref="IsTurnInProgress"/> が戻らずダイアログが固まる。
+    /// 画面からは入力欄と参照ボタンを <see cref="CanEditMockFolder"/> で無効化しているので、ここは二重化の防御。
+    /// </remarks>
+    public string MockFolder
+    {
+        get => _mockFolder;
+        set
+        {
+            if (string.Equals(_mockFolder, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (IsTurnInProgress)
+            {
+                StatusMessage = Strings.Mock_MockFolderLockedDuringTurn;
+                // 束縛している入力欄に打ち込んだ文字が残らないよう、元の値を読み直させる
+                // （WPF の束縛は値を書き込んだ後にソースを読み直すが、それに頼らず通知で確実にする）
+                OnPropertyChanged();
+                return;
+            }
+
+            // 通知の順序は [ObservableProperty] の生成コードと同じ（変更前通知→代入→フック→変更通知）
+            OnPropertyChanging();
+            _mockFolder = value;
+            OnMockFolderChanged(value);
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>モックフォルダの指定を変えられるか（ターン実行中は不可＝<see cref="MockFolder"/> の説明を参照）</summary>
+    public bool CanEditMockFolder => !IsTurnInProgress;
 
     /// <summary>サイドバーで選択中の画面（選択でプレビューへ遷移する）</summary>
     [ObservableProperty]
@@ -134,6 +168,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 SendMessageCommand.NotifyCanExecuteChanged();
                 InterruptCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanEditInput));
+                OnPropertyChanged(nameof(CanEditMockFolder));
+                BrowseMockFolderCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanClear));
                 ClearCommand.NotifyCanExecuteChanged();
                 // ターン実行中は添付操作も禁止する
@@ -621,7 +657,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     // ── モックフォルダ ──
 
     /// <summary>モックフォルダを選択する</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditMockFolder))]
     private void BrowseMockFolder()
     {
         var picked = _files.PickFolder(Strings.Mock_PickMockFolderTitle, MockFolder);
@@ -636,7 +672,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// モックフォルダの指定が変わったら、会話をリセットし、フォルダの種別を判定して
     /// サイドバー・プレビューへ即反映する（既存モックフォルダなら開いて眺められる）。
     /// </summary>
-    partial void OnMockFolderChanged(string value)
+    private void OnMockFolderChanged(string value)
     {
         // フォルダを変えたら会話・状態は仕切り直す
         ResetConversation();
@@ -1777,6 +1813,32 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 NotifyReadinessChanged();
                 break;
         }
+    }
+
+    /// <summary>
+    /// 接続タブの切り替えを試みる（コードビハインドのタブ切替から呼ぶ）。切り替えたら true、拒んだら false を返す。
+    /// </summary>
+    /// <param name="newBackend">切り替え先の接続方式</param>
+    /// <remarks>
+    /// ターン実行中は拒む（理由をステータスへ出す）。切り替えは会話のリセット＝セッションの切り離しを伴い、
+    /// 切り離したセッションのターン完了は届かないため、通すと <see cref="IsTurnInProgress"/> が戻らずダイアログが固まる。
+    /// 拒んだときはコードビハインドが確定済みのタブへ選択を戻す。
+    /// </remarks>
+    public bool TryChangeBackend(ErChatBackendKind newBackend)
+    {
+        if (newBackend == Connection.SelectedBackend)
+        {
+            return true;
+        }
+
+        if (IsTurnInProgress)
+        {
+            StatusMessage = Strings.Mock_SwitchBackendBlockedDuringTurn;
+            return false;
+        }
+
+        Connection.SelectedBackend = newBackend;
+        return true;
     }
 
     /// <summary>会話を未開始状態へ戻す（セッション購読解除・履歴クリア・可否更新）。フォルダ・画面・プレビューは保持する</summary>
