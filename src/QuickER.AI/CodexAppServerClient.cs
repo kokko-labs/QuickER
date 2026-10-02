@@ -183,6 +183,15 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>ログアウトの JSON-RPC メソッド名</summary>
     private const string LogoutAccountMethod = "account/logout";
 
+    /// <summary>JSON-RPC のエラーコード: メソッドが存在しない・扱えない</summary>
+    private const int JsonRpcMethodNotFound = -32601;
+
+    /// <summary>JSON-RPC のエラーコード: パラメータを解釈できない</summary>
+    private const int JsonRpcInvalidParams = -32602;
+
+    /// <summary>JSON-RPC のエラーコード: 処理中の内部エラー</summary>
+    private const int JsonRpcInternalError = -32603;
+
     /// <summary>codex CLI が PATH に無いときに起動失敗として返す Win32 エラーコード（ERROR_FILE_NOT_FOUND）</summary>
     private const int ErrorFileNotFound = 2;
 
@@ -223,6 +232,27 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// </remarks>
     private int _disconnectedRaised;
 
+    /// <summary>この接続の受信ループが終わったかどうか（<see cref="IsStarted"/> の判定材料）</summary>
+    /// <remarks>
+    /// タスクの完了でなくフラグで持つのは、受信ループの後始末が <see cref="Disconnected"/> を発火する時点で
+    /// まだタスクが完了していないため（購読側がその場で状態を見ても未起動に見えるようにする）
+    /// </remarks>
+    private volatile bool _readerEnded;
+
+    /// <summary>起動する実行ファイル名と引数を決める処理（既定は PATH から codex を解決する）</summary>
+    private readonly Func<(string FileName, string Arguments)> _resolveLaunch;
+
+    /// <summary>PATH 上の codex を app-server として起動するクライアントを作る</summary>
+    public CodexAppServerClient()
+        : this(() => ResolveLaunch(CodexCliLocator.ResolveExecutablePath())) { }
+
+    /// <summary>起動する実行ファイルを差し替えたクライアントを作る（テストが偽のサーバーを起動するため）</summary>
+    /// <param name="resolveLaunch">起動する実行ファイル名と引数を返す処理（<see cref="StartAsync"/> のたびに呼ぶ）</param>
+    internal CodexAppServerClient(Func<(string FileName, string Arguments)> resolveLaunch)
+    {
+        _resolveLaunch = resolveLaunch;
+    }
+
     /// <inheritdoc />
     public event EventHandler<CodexJsonRpcNotification>? NotificationReceived;
 
@@ -260,7 +290,13 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     public event EventHandler? Disconnected;
 
     /// <inheritdoc />
-    public bool IsStarted => _process is { HasExited: false } && _stdin is not null;
+    /// <remarks>
+    /// 受信ループが終わった接続（読み取りの失敗・stdout の切断）も未起動として扱う。プロセスが生きていても
+    /// 応答を読む者がいないので、送れば 30 秒のタイムアウトまで待たされるだけになる。false にしておけば
+    /// 要求はすぐに失敗し、次の <see cref="StartAsync"/> が残骸を片づけて接続し直す
+    /// </remarks>
+    public bool IsStarted =>
+        _process is { HasExited: false } && _stdin is not null && !_readerEnded;
 
     /// <inheritdoc />
     /// <remarks>共有ロケーターへ委譲する（結果はキャッシュせず、呼ぶたびに PATH を走査する）。</remarks>
@@ -290,7 +326,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             await StopProcessAsync();
         }
 
-        var (fileName, arguments) = ResolveLaunch(CodexCliLocator.ResolveExecutablePath());
+        var (fileName, arguments) = _resolveLaunch();
 
         var startInfo = new ProcessStartInfo
         {
@@ -324,12 +360,16 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         _process = process;
         // この接続の接続断通知はまだ出していない（再接続のたびに 1 回通知できるようにする）
         Interlocked.Exchange(ref _disconnectedRaised, 0);
+        _readerEnded = false;
         // stdout の EOF より先にプロセスの終了を掴めることがあるため、両方から接続断を検知する
         process.Exited += OnProcessExited;
         _stdin = process.StandardInput;
         _stdin.NewLine = "\n";
         _stdin.AutoFlush = true;
-        _readerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // 受信ループは接続の寿命で生かす＝呼び出し元のトークンへ連結しない。連結すると、起動を頼んだ処理の
+        // 取り消し（ターンの中断など）で受信ループだけが止まり、プロセスは生きたまま誰も応答を読まなくなる。
+        // 呼び出し元のトークンは下のハンドシェイクの待ちにだけ使う
+        _readerCts = new CancellationTokenSource();
         _readerTask = Task.Run(
             () => ReadLoopAsync(process.StandardOutput, _readerCts.Token),
             CancellationToken.None
@@ -750,71 +790,85 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>stdout を 1 行ずつ読み取り、レスポンス・サーバー発リクエスト・通知に振り分ける受信ループ</summary>
     /// <remarks>
     /// イベントは受信ループのスレッド上で発火するため、購読側で UI スレッドへのディスパッチが必要。
-    /// ループ終了時（EOF・キャンセル）は応答待ちの全リクエストを切断エラーで完了させ、待機側のハングを防ぐ
+    /// ループがどう終わっても（EOF・読み取りの失敗・キャンセル）応答待ちの全リクエストを切断エラーで完了させ、
+    /// 待機側のハングを防ぐ
     /// </remarks>
     private async Task ReadLoopAsync(StreamReader stdout, CancellationToken cancellationToken)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        try
         {
-            var line = await stdout.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-
-            if (line is null)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                break;
-            }
+                var line = await stdout.ReadLineAsync(cancellationToken).ConfigureAwait(false);
 
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-
-            try
-            {
-                using var document = JsonDocument.Parse(line);
-                var root = document.RootElement;
-
-                if (
-                    root.TryGetProperty("id", out var idElement)
-                    && !root.TryGetProperty("method", out _)
-                )
+                if (line is null)
                 {
-                    HandleResponse(root, idElement);
+                    break;
+                }
+
+                if (string.IsNullOrWhiteSpace(line))
+                {
                     continue;
                 }
 
-                if (root.TryGetProperty("method", out var methodElement))
+                try
                 {
-                    var method = methodElement.GetString() ?? string.Empty;
-                    var parameters = root.TryGetProperty("params", out var paramsElement)
-                        ? paramsElement.Clone()
-                        : (JsonElement?)null;
+                    using var document = JsonDocument.Parse(line);
+                    var root = document.RootElement;
 
-                    // id を持つ（サーバーからのリクエスト）場合は dynamicTool 呼び出しや承認として扱う
                     if (
-                        root.TryGetProperty("id", out var serverReqIdElement)
-                        && TryGetRequestId(serverReqIdElement, out var serverRequestId)
+                        root.TryGetProperty("id", out var idElement)
+                        && !root.TryGetProperty("method", out _)
                     )
                     {
-                        HandleServerRequest(method, serverRequestId, parameters);
+                        HandleResponse(root, idElement);
+                        continue;
                     }
-                    else
+
+                    if (root.TryGetProperty("method", out var methodElement))
                     {
-                        HandleNotification(method, parameters);
+                        var method = methodElement.GetString() ?? string.Empty;
+                        var parameters = root.TryGetProperty("params", out var paramsElement)
+                            ? paramsElement.Clone()
+                            : (JsonElement?)null;
+
+                        // id を持つ（サーバーからのリクエスト）場合は dynamicTool 呼び出しや承認として扱う
+                        if (
+                            root.TryGetProperty("id", out var serverReqIdElement)
+                            && TryGetRequestId(serverReqIdElement, out var serverRequestId)
+                        )
+                        {
+                            HandleServerRequest(
+                                method,
+                                serverRequestId,
+                                parameters,
+                                cancellationToken
+                            );
+                        }
+                        else
+                        {
+                            HandleNotification(method, parameters);
+                        }
                     }
                 }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // 1 行のパース・処理に失敗してもループを継続する
-                Debug.WriteLine($"[CodexAppServerClient] ReadLoop 処理エラー: {ex.Message}");
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // 1 行のパース・処理に失敗してもループを継続する
+                    Debug.WriteLine($"[CodexAppServerClient] ReadLoop 処理エラー: {ex.Message}");
+                }
             }
         }
+        finally
+        {
+            // 後始末は finally に置く＝EOF だけでなく読み取りの例外（パイプの切断など）で抜けたときも走る。
+            // 意図的な停止（StopProcessAsync が先に受信ループをキャンセルする）では接続断を通知しない。
+            // 未起動扱いへの切り替えは通知より先に行う（購読側がその場で状態を見ても食い違わないように）
+            _readerEnded = true;
+            FailPendingRequests();
 
-        FailPendingRequests();
-
-        // EOF（プロセス死・stdout の切断）で抜けた場合は接続断として通知する。
-        // 応答待ちが無ければ FailPendingRequests は誰にも伝わらず、購読側のターンが固着する
-        RaiseDisconnectedIfUnexpected();
+            // 応答待ちが無ければ FailPendingRequests は誰にも伝わらず、購読側のターンが固着する
+            RaiseDisconnectedIfUnexpected();
+        }
     }
 
     /// <summary>応答待ちの全リクエストを接続断エラーで完了させ、待機側のハングを防ぐ</summary>
@@ -886,26 +940,152 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     }
 
     /// <summary>サーバー発リクエスト（dynamicTool 呼び出し・各種承認要求）を対応するイベントへ振り分ける</summary>
-    /// <remarks>応答はイベント購読側が <see cref="RespondToDynamicToolCallAsync"/> / <see cref="RespondToApprovalAsync"/> で返す</remarks>
-    private void HandleServerRequest(string method, int requestId, JsonElement? parameters)
+    /// <remarks>
+    /// 正常な応答はイベント購読側が <see cref="RespondToDynamicToolCallAsync"/> / <see cref="RespondToApprovalAsync"/> で返す。
+    /// 購読側へ渡せないリクエストには、ここで JSON-RPC のエラー応答を 1 回だけ返す（リクエストには必ず応答が要り、
+    /// 返さないとサーバーが応答を永久に待つ）＝扱えないメソッド・購読者がいない場合は <c>-32601</c>、
+    /// パラメータを解釈できない場合は <c>-32602</c>、購読側が同期的に例外を投げた場合は <c>-32603</c>
+    /// </remarks>
+    private void HandleServerRequest(
+        string method,
+        int requestId,
+        JsonElement? parameters,
+        CancellationToken cancellationToken
+    )
     {
         switch (method)
         {
             case "item/tool/call":
-                DynamicToolCallReceived?.Invoke(
-                    this,
-                    ParseDynamicToolCallRequest(requestId, parameters)
+                DispatchServerRequest(
+                    method,
+                    requestId,
+                    DynamicToolCallReceived,
+                    () => ParseDynamicToolCallRequest(requestId, parameters),
+                    cancellationToken
                 );
                 break;
 
             case "item/commandExecution/requestApproval":
             case "item/fileChange/requestApproval":
             case "item/permissions/requestApproval":
-                ApprovalRequested?.Invoke(
-                    this,
-                    ParseApprovalRequest(requestId, method, parameters)
+                DispatchServerRequest(
+                    method,
+                    requestId,
+                    ApprovalRequested,
+                    () => ParseApprovalRequest(requestId, method, parameters),
+                    cancellationToken
                 );
                 break;
+
+            default:
+                RespondWithError(
+                    requestId,
+                    JsonRpcMethodNotFound,
+                    $"Method not found: {method}",
+                    cancellationToken
+                );
+                break;
+        }
+    }
+
+    /// <summary>サーバー発リクエストを解析して購読側へ渡し、渡せなければエラー応答を返す</summary>
+    /// <param name="method">リクエストのメソッド名（エラー応答の文言に使う）</param>
+    /// <param name="requestId">リクエスト ID（エラー応答の宛先）</param>
+    /// <param name="handler">渡す先のイベント（購読者がいなければ null）</param>
+    /// <param name="parse">パラメータの解析（例外は「パラメータを解釈できない」として扱う）</param>
+    /// <param name="cancellationToken">エラー応答の送信を打ち切るトークン（受信ループのもの）</param>
+    private void DispatchServerRequest<TRequest>(
+        string method,
+        int requestId,
+        EventHandler<TRequest>? handler,
+        Func<TRequest> parse,
+        CancellationToken cancellationToken
+    )
+    {
+        if (handler is null)
+        {
+            // 購読者がいない＝このクライアントの利用者はこのメソッドを扱わない（例: モック生成は承認要求を購読しない）
+            RespondWithError(
+                requestId,
+                JsonRpcMethodNotFound,
+                $"Method not supported by this client: {method}",
+                cancellationToken
+            );
+            return;
+        }
+
+        TRequest request;
+
+        try
+        {
+            request = parse();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(
+                $"[CodexAppServerClient] {method} のパラメータを解釈できません: {ex.Message}"
+            );
+            RespondWithError(
+                requestId,
+                JsonRpcInvalidParams,
+                $"Invalid params for '{method}'.",
+                cancellationToken
+            );
+            return;
+        }
+
+        try
+        {
+            handler(this, request);
+        }
+        catch (Exception ex)
+        {
+            // 購読側は応答を非同期に返す作りなので、同期的に投げた＝誰も応答しないまま終わったということ
+            Debug.WriteLine($"[CodexAppServerClient] {method} の処理で例外: {ex.Message}");
+            RespondWithError(
+                requestId,
+                JsonRpcInternalError,
+                $"Internal error while handling '{method}'.",
+                cancellationToken
+            );
+        }
+    }
+
+    /// <summary>サーバー発リクエストへ JSON-RPC のエラー応答を返す（受信ループを止めないよう完了を待たない）</summary>
+    /// <remarks>
+    /// 受信ループの中で stdin への書き込みを待つと、両方向のパイプが詰まったときに相互待ちになり得るため待たない。
+    /// 書き込みは他の送信と同じ <see cref="SendMessageAsync"/>（<see cref="_writeLock"/> で 1 行ずつ直列化）を通る。
+    /// 送信の失敗（接続断・停止）は診断出力だけに残す。文言は機械向けなので英語固定
+    /// </remarks>
+    private void RespondWithError(
+        int requestId,
+        int code,
+        string message,
+        CancellationToken cancellationToken
+    )
+    {
+        _ = SendErrorResponseAsync();
+
+        async Task SendErrorResponseAsync()
+        {
+            try
+            {
+                await SendMessageAsync(
+                        new Dictionary<string, object?>
+                        {
+                            ["id"] = requestId,
+                            ["error"] = new { code, message },
+                        },
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(
+                    $"[CodexAppServerClient] エラー応答（id={requestId}）を送れませんでした: {ex.Message}"
+                );
+            }
         }
     }
 

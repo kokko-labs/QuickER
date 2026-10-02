@@ -25,6 +25,25 @@ public class AiChatDialogForceCloseTests
         public T Invoke<T>(Func<T> func) => func();
     }
 
+    /// <summary>エンジン 3 つのクライアントがそれぞれ 1 回ずつ破棄されるまで待ち、そうなったかを返す。</summary>
+    /// <remarks>
+    /// 破棄はスレッドプールで走り、<see cref="AiChatDialog.ForceClose"/> は上限（3 秒）までしか待たない。
+    /// 全スイートの並列実行でプールが飽和すると上限内に始まらないことがあるため、長めの上限で到達を待つ
+    /// （ForceClose が破棄を起動しなければ、待っても回数は 0 のまま）。モック生成側（MockGenerationDialogTests の AllProbesDisposed）と同じ作法
+    /// </remarks>
+    private static bool AllEnginesDisposed(
+        FakeCodexAppServerClient codex,
+        DisposeTrackingClaudeCodeClient claudeCode,
+        FakeCopilotRuntimeClient copilot
+    ) =>
+        SpinWait.SpinUntil(
+            () =>
+                codex.DisposeCount == 1
+                && claudeCode.DisposeCount == 1
+                && copilot.DisposeCount == 1,
+            TimeSpan.FromSeconds(30)
+        );
+
     /// <summary>
     /// ForceClose が中断だけで終わらず、常駐プロセスを抱えるエンジンまで破棄することを検証する。
     /// </summary>
@@ -74,9 +93,12 @@ public class AiChatDialogForceCloseTests
 
                 dialog.ForceClose();
 
-                codex.DisposeCount.Should().Be(1, "codex app-server は常駐するため破棄が要る");
+                AllEnginesDisposed(codex, claudeCode, copilot)
+                    .Should()
+                    .BeTrue("codex app-server・copilot ランタイムは常駐するため破棄が要る");
+                codex.DisposeCount.Should().Be(1);
                 claudeCode.DisposeCount.Should().Be(1);
-                copilot.DisposeCount.Should().Be(1, "copilot ランタイムは常駐するため破棄が要る");
+                copilot.DisposeCount.Should().Be(1);
             }
             finally
             {
@@ -154,9 +176,10 @@ public class AiChatDialogForceCloseTests
                 act.Should().NotThrow();
 
                 reporter.Steps.Should().Equal("AiChat.SaveSettings");
-                codex
-                    .DisposeCount.Should()
-                    .Be(1, "保存の失敗で常駐プロセスの停止へ届かなくなってはいけない");
+                AllEnginesDisposed(codex, claudeCode, copilot)
+                    .Should()
+                    .BeTrue("保存の失敗で常駐プロセスの停止へ届かなくなってはいけない");
+                codex.DisposeCount.Should().Be(1);
                 claudeCode.DisposeCount.Should().Be(1);
                 copilot.DisposeCount.Should().Be(1);
                 closed.Should().BeTrue("保存の失敗でウィンドウが閉じ残ってはいけない");

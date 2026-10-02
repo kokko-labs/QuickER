@@ -129,6 +129,74 @@ public class CodexAppServerClientLifetimeTests
         raised.Should().Be(0);
     }
 
+    /// <summary>
+    /// 受信ループが読み取りの例外（パイプの切断など）で終わっても、接続断を通知し、応答待ちを解消し、
+    /// 以後の要求はタイムアウトを待たずにすぐ失敗することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 後始末がループの後ろ（例外では通らない位置）にあると、接続断が通知されず応答待ちも残る。さらにプロセスが
+    /// 生きている限り未起動扱いにならないと、次の要求は誰も読まない stdin へ書かれて 30 秒待たされる。
+    /// プロセスは生きている必要があるため、標準入力を待ち続ける cmd.exe を代役に置く
+    /// </remarks>
+    [Fact(
+        DisplayName = "受信ループが読み取りの例外で終わっても接続断を通知し以後の要求はすぐ失敗する"
+    )]
+    public async Task ReadLoop_OnReadFailure_RaisesDisconnectedAndStopsAcceptingRequests()
+    {
+        using var standIn = System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo(
+                Path.Combine(Environment.SystemDirectory, "cmd.exe")
+            )
+            {
+                // 出力も必ずリダイレクトする。引き継ぐとバナーとプロンプトがテストホストの標準出力へ流れ込み、
+                // テストランナーとの通信（標準出力経由）を壊して、別のテストの結果が報告から消える
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }
+        )!;
+
+        try
+        {
+            var client = new CodexAppServerClient();
+            using var readerCts = new CancellationTokenSource();
+            SetField(client, "_readerCts", readerCts);
+            SetField(client, "_process", standIn);
+            SetField(client, "_stdin", new StreamWriter(new MemoryStream()));
+            var pending = new TaskCompletionSource<JsonElement?>(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            );
+            GetPendingRequests(client)[1] = pending;
+            var raised = 0;
+            client.Disconnected += (_, _) => raised++;
+
+            using var failingReader = new FailingReader();
+            var loop = async () =>
+                await InvokeReadLoopAsync(client, failingReader, readerCts.Token);
+
+            await loop.Should().ThrowAsync<IOException>();
+            raised.Should().Be(1);
+            var pendingResult = async () => await pending.Task;
+            (await pendingResult.Should().ThrowAsync<InvalidOperationException>())
+                .Which.Message.Should()
+                .Be(AiStrings.Codex_ConnectionClosed);
+            client.IsStarted.Should().BeFalse("受信ループが終わった接続は使えない");
+
+            // 上限は失敗の形を分けるためだけのもの（すぐ失敗しないと上限で取り消されて別の例外になる）
+            using var requestCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var request = async () => await client.ReadAccountAsync(false, requestCts.Token);
+            (await request.Should().ThrowAsync<InvalidOperationException>())
+                .Which.Message.Should()
+                .Be(AiStrings.Codex_ServerNotStarted);
+        }
+        finally
+        {
+            standIn.Kill(entireProcessTree: true);
+        }
+    }
+
     /// <summary>公開 API の停止も内部クリーンアップと同じく再接続できる状態を残すことを検証する</summary>
     [Fact(DisplayName = "StopAsync は再接続できる停止である")]
     public async Task StopAsync_KeepsWriteLockUsable()
@@ -153,11 +221,28 @@ public class CodexAppServerClientLifetimeTests
     )
     {
         using var reader = new StreamReader(new MemoryStream());
+        await InvokeReadLoopAsync(client, reader, cancellationToken);
+    }
+
+    /// <summary>指定した stdout で受信ループを 1 回まわす</summary>
+    private static async Task InvokeReadLoopAsync(
+        CodexAppServerClient client,
+        StreamReader reader,
+        CancellationToken cancellationToken
+    )
+    {
         var method = typeof(CodexAppServerClient).GetMethod(
             "ReadLoopAsync",
             BindingFlags.NonPublic | BindingFlags.Instance
         )!;
         await (Task)method.Invoke(client, [reader, cancellationToken])!;
+    }
+
+    /// <summary>1 行目の読み取りで例外を投げる stdout（パイプの切断を模す）</summary>
+    private sealed class FailingReader() : StreamReader(new MemoryStream())
+    {
+        public override ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromException<string?>(new IOException("pipe broken"));
     }
 
     /// <summary>実プロセスを起動せず受信ループの前提（キャンセルソース）を整えるため private フィールドへ代入する</summary>
