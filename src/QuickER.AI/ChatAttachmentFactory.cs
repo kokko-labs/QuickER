@@ -21,6 +21,18 @@ public enum ChatAttachmentError
 
     /// <summary>データが空</summary>
     Empty,
+
+    /// <summary>ファイルが存在しない</summary>
+    NotFound,
+
+    /// <summary>パスがフォルダを指している（フォルダは添付できない）</summary>
+    IsDirectory,
+
+    /// <summary>ファイルが読み込み上限を超過している（内容を読む前の判定）</summary>
+    FileTooLarge,
+
+    /// <summary>ファイルを読めなかった（使用中・権限不足など）</summary>
+    ReadFailed,
 }
 
 /// <summary>添付作成の結果（成功なら <see cref="Attachment"/>、失敗なら理由とメッセージ）</summary>
@@ -66,6 +78,11 @@ public static class ChatAttachmentFactory
     public delegate byte[]? ImageShrinker(byte[] data, string mediaType);
 
     /// <summary>ファイルパスから添付を生成する（内容で種別を確定する。拡張子は不問）</summary>
+    /// <remarks>
+    /// 例外は投げず、失敗はすべて結果で返す（呼び出し側はドロップやファイル選択から直接呼ぶ）。
+    /// 種別は内容を読むまで分からないため、読む前に掛けられるのは種別をまたいだ
+    /// <see cref="ChatAttachmentLimits.MaxFileReadBytes"/> の 1 本だけで、超過したファイルは開かずに拒否する。
+    /// </remarks>
     /// <param name="filePath">読み込むファイルのパス</param>
     /// <param name="shrinker">画像縮小デリゲート（null 可）</param>
     public static ChatAttachmentResult CreateFromFile(
@@ -73,9 +90,76 @@ public static class ChatAttachmentFactory
         ImageShrinker? shrinker = null
     )
     {
-        var data = File.ReadAllBytes(filePath);
-        return Create(Path.GetFileName(filePath), data, shrinker);
+        var fileName = Path.GetFileName(filePath);
+
+        try
+        {
+            if (Directory.Exists(filePath))
+            {
+                return ChatAttachmentResult.Fail(
+                    ChatAttachmentError.IsDirectory,
+                    string.Format(Strings.Attachment_IsDirectory, fileName)
+                );
+            }
+
+            var info = new FileInfo(filePath);
+
+            if (!info.Exists)
+            {
+                return ChatAttachmentResult.Fail(
+                    ChatAttachmentError.NotFound,
+                    string.Format(Strings.Attachment_NotFound, fileName)
+                );
+            }
+
+            // 読む前に大きさだけを見る（数 GB のファイルを読み切ってから拒否しない）
+            if (info.Length > ChatAttachmentLimits.MaxFileReadBytes)
+            {
+                return FileTooLarge(fileName);
+            }
+
+            using var stream = new FileStream(
+                filePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read
+            );
+
+            // 検査から開くまでの間に伸びた分は、開いたハンドルの長さで改めて弾く
+            if (stream.Length > ChatAttachmentLimits.MaxFileReadBytes)
+            {
+                return FileTooLarge(fileName);
+            }
+
+            var data = new byte[stream.Length];
+            stream.ReadExactly(data);
+            return Create(fileName, data, shrinker);
+        }
+        catch (Exception ex)
+            when (ex
+                    is IOException
+                        or UnauthorizedAccessException
+                        or NotSupportedException
+                        or ArgumentException
+            )
+        {
+            return ChatAttachmentResult.Fail(
+                ChatAttachmentError.ReadFailed,
+                string.Format(Strings.Attachment_ReadFailed, fileName, ex.Message)
+            );
+        }
     }
+
+    /// <summary>読み込み上限（縮小前の大きさ）を超えたファイルの失敗結果を作る</summary>
+    private static ChatAttachmentResult FileTooLarge(string fileName) =>
+        ChatAttachmentResult.Fail(
+            ChatAttachmentError.FileTooLarge,
+            string.Format(
+                Strings.Attachment_FileTooLarge,
+                ChatAttachmentLimits.MaxFileReadBytes / (1024 * 1024),
+                fileName
+            )
+        );
 
     /// <summary>
     /// ファイル名・バイト列から添付を生成する。内容から種別を判定（画像/PDF/テキスト/バイナリ）し、
@@ -153,7 +237,15 @@ public static class ChatAttachmentFactory
         {
             var shrunk = shrinker?.Invoke(data, mediaType);
 
-            if (shrunk is null || shrunk.LongLength > ChatAttachmentLimits.MaxImageBytes)
+            // 縮小器は形式を変えて返し得る（WPF 版は常に PNG）ため、MIME は縮小後のバイト列から取り直す。
+            // 画像として判定できないものが返ったら、縮小できなかったものとして扱う
+            var shrunkMediaType = shrunk is null ? null : DetectImageMediaType(shrunk);
+
+            if (
+                shrunk is null
+                || shrunkMediaType is null
+                || shrunk.LongLength > ChatAttachmentLimits.MaxImageBytes
+            )
             {
                 return ChatAttachmentResult.Fail(
                     ChatAttachmentError.ImageTooLarge,
@@ -166,6 +258,7 @@ public static class ChatAttachmentFactory
             }
 
             data = shrunk;
+            mediaType = shrunkMediaType;
         }
 
         return ChatAttachmentResult.Ok(

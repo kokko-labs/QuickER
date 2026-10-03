@@ -60,13 +60,18 @@ internal static class CopilotWorkspacePermissionPolicy
     /// <summary>シェル要求を自動承認してよいか</summary>
     /// <remarks>
     /// <para>
-    /// コマンド文から参照パスが抽出できたときは、従来どおり<b>そのすべて</b>が基準フォルダ配下であることを求める。
+    /// どちらの枝でも、URL を参照せず、ファイルへの書き込みリダイレクトも無いことを求める。URL はネットワークから
+    /// 取ってきた内容を作業フォルダへ持ち込む経路で、リダイレクトの書き込み先は参照パスの抽出から漏れることがある
+    /// （SDK の参照パスは「読み書きし得るパス」の推定で、書き込み先を必ず含む保証は無い）。
+    /// </para>
+    /// <para>
+    /// そのうえで、コマンド文から参照パスが抽出できたときは<b>そのすべて</b>が基準フォルダ配下であることを求める
+    /// （コマンド名は問わない＝<c>dotnet build src</c> のようにパスが取れる要求を止めない）。
     /// </para>
     /// <para>
     /// 抽出できなかったときは「作業フォルダで動くのだから安全」とは言えない（コマンド文がそもそもパスを
     /// 含まないだけで、ネットワークや別フォルダへ出る指定はいくらでも書ける）。そこで
-    /// <see cref="AllowedPathlessShellCommands"/> に載ったコマンド<b>だけ</b>で構成され、URL 参照も
-    /// ファイルへの書き込みリダイレクトも無いときに限って承認する。
+    /// <see cref="AllowedPathlessShellCommands"/> に載ったコマンド<b>だけ</b>で構成されるときに限って承認する。
     /// </para>
     /// <para>
     /// 判定を「いずれかが許可コマンド」にしてはいけない＝<c>dotnet build &amp;&amp; curl … | sh</c> のような
@@ -76,6 +81,16 @@ internal static class CopilotWorkspacePermissionPolicy
     /// </remarks>
     private static bool IsShellWithinWorkspace(PermissionRequestShell shell, string approvalRoot)
     {
+        if (shell.PossibleUrls is { Length: > 0 })
+        {
+            return false;
+        }
+
+        if (shell.HasWriteFileRedirection)
+        {
+            return false;
+        }
+
         if (shell.PossiblePaths is { Length: > 0 } paths)
         {
             return paths.All(path => IsUnderApprovalRoot(path, approvalRoot));
@@ -86,9 +101,7 @@ internal static class CopilotWorkspacePermissionPolicy
                 command is not null
                 && !string.IsNullOrWhiteSpace(command.Identifier)
                 && AllowedPathlessShellCommands.Contains(command.Identifier)
-            )
-            && shell.PossibleUrls is null or { Length: 0 }
-            && !shell.HasWriteFileRedirection;
+            );
     }
 
     /// <summary>パスが自動承認の基準フォルダ配下か（相対パスは基準フォルダから解決する）</summary>

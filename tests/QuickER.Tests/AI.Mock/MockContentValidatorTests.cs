@@ -112,6 +112,33 @@ public class MockContentValidatorTests
             .Contain(w => w.Contains("Transition target") && w.Contains("Dangling.html"));
     }
 
+    [Fact(
+        DisplayName = "他の画面が宣言した遷移の To はリンク先として予告済みだが、遷移宣言の乖離の検査には使わない"
+    )]
+    public void DeclaredTransitionTargets_OnlyCountForLinkCheck()
+    {
+        var html = Screen("<a href=\"Planned.html\">p</a>");
+        var transitions = new[]
+        {
+            new MockTransition { From = "Current.html", To = "Dangling.html" },
+        };
+
+        var warnings = MockContentValidator.ValidateScreen(
+            "Current.html",
+            html,
+            transitions,
+            Array.Empty<string>(),
+            new[] { "Planned.html", "Dangling.html" }
+        );
+
+        // 他の画面が宣言済みの Planned.html へのリンクは警告しない
+        warnings.Should().NotContain(w => w.Contains("Link target"));
+        // 既存の画面にもリンクにも無い遷移 To は、他で宣言されていても従来どおり乖離として警告する
+        warnings
+            .Should()
+            .Contain(w => w.Contains("Transition target") && w.Contains("Dangling.html"));
+    }
+
     [Fact(DisplayName = "共有 CSS 未参照を警告する")]
     public void MissingStylesheetLink_Warns()
     {

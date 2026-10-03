@@ -154,6 +154,28 @@ public enum QueryToolDiagnosticCode
 
     /// <summary>DSL 条件で宣言済みパラメータが未使用（警告）</summary>
     ParameterUnusedInCondition,
+
+    /// <summary>
+    /// 生成で必ずエラーになる構造規則の違反（<see cref="QueryDefinitionRules"/>）。
+    /// <see cref="QueryToolDiagnostic.Detail"/>＝規則の種別名（<see cref="QueryRuleKind"/>）・
+    /// <see cref="QueryToolDiagnostic.DetailText"/>＝生成時診断と同じ文言（描画前）
+    /// </summary>
+    GenerationRule,
+
+    /// <summary>
+    /// implementation が sql でないのに sql を渡した（警告。SQL は保存しない＝GUI のクエリ定義ダイアログと同じ）。
+    /// <see cref="QueryToolDiagnostic.Detail"/>＝実装方式（小文字）
+    /// </summary>
+    SqlIgnoredForImplementation,
+
+    /// <summary>
+    /// implementation が dsl でないのに condition を渡した（警告。条件は保存しない）。
+    /// <see cref="QueryToolDiagnostic.Detail"/>＝実装方式（小文字）
+    /// </summary>
+    ConditionIgnoredForImplementation,
+
+    /// <summary>implementation=sql なのに中身のある SQL が 1 方言も無い（警告。生成すると全方言が手動実装になる）</summary>
+    SqlImplementationWithoutSql,
 }
 
 /// <summary>list_queries の一覧データ（テーブル別グループ＋総件数）</summary>

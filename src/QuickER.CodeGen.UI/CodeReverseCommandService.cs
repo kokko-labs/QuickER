@@ -1,5 +1,4 @@
 using System.IO;
-using System.Text;
 using QuickER.CodeGen.UI.Resources;
 using QuickER.CodeReverse.CSharp;
 using QuickER.Extensibility;
@@ -157,9 +156,9 @@ public sealed class CodeReverseCommandService
 
     /// <summary>構造変更・壊れクエリの削除・説明の上書きを伴う場合のみ確認ダイアログを表示する（DB 取込と同一規則）</summary>
     /// <remarks>
-    /// 構造署名（<see cref="SchemaSignature"/>）はテーブル・列の説明を含まないため、署名一致だけを根拠に
-    /// 無確認で続行すると、未保存の説明がコード由来の値で無言のうちに消える。実差分の件数
-    /// （<see cref="DiagramMergeResult.DescriptionOverwriteCount"/>）を条件へ加えてこれを防ぐ。
+    /// 確認を省く条件は <see cref="DiagramReplacementCheck.CanSkipConfirmation"/>（構造署名は説明を含まないため、
+    /// 署名の一致だけでなく説明の上書き件数も見る）。構造は、現在の図から参照アクション等を補った後の
+    /// リレーション（<paramref name="finalRelationships"/>）で比べる。
     /// </remarks>
     /// <returns>置換を続行してよい場合 true</returns>
     private bool ConfirmDiagramReplacement(
@@ -168,76 +167,30 @@ public sealed class CodeReverseCommandService
         IReadOnlyList<Relationship> finalRelationships
     )
     {
-        // エンティティ数だけで「空」と見なすと、クエリだけの図・未保存の編集内容を無確認で捨ててしまう
-        // （GUI 側 MainViewModel.HasNothingToLose と同じ判定。ホスト契約の IsEmpty は意味が異なるため使わない）
-        var structurallySame =
-            (current.Entities.Count == 0 && current.Queries.Count == 0 && !_host.IsDirty)
-            || HasSameStructure(current, merged.Entities, finalRelationships);
-
-        // 構造同一かつ壊れクエリ・説明の上書きなしなら無確認で続行する
         if (
-            structurallySame
-            && merged.BrokenQueries.Count == 0
-            && merged.DescriptionOverwriteCount == 0
+            DiagramReplacementCheck.CanSkipConfirmation(
+                DiagramReplacementCheck.HasNothingToLose(current, _host.IsDirty),
+                current,
+                merged,
+                finalRelationships
+            )
         )
         {
             return true;
         }
 
-        // 失うものがあれば内訳を確認メッセージへ付加する（キャンセルで取込中止）
-        var fullMessage = AppendLossWarnings(Strings.Reverse_ReplaceConfirm, merged);
+        var fullMessage = ReplacementLossMessage.Build(
+            Strings.Reverse_ReplaceConfirm,
+            merged.BrokenQueries.Select(query => query.Name).ToList(),
+            merged.DescriptionOverwriteCount,
+            new ReplacementLossTexts(
+                Strings.Reverse_BrokenQueriesWarning,
+                Strings.Reverse_DescriptionOverwriteWarning,
+                Strings.Common_MoreItems
+            )
+        );
 
         // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
         return _dialogs.ConfirmDiscard(_host.IsDirty, fullMessage, Strings.Common_Confirm);
-    }
-
-    /// <summary>確認メッセージへ「失うもの」の内訳（壊れクエリ名・説明の上書き件数）を追記する</summary>
-    private static string AppendLossWarnings(string message, DiagramMergeResult merged)
-    {
-        var builder = new StringBuilder(message);
-
-        if (merged.BrokenQueries.Count > 0)
-        {
-            builder
-                .Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .AppendFormat(
-                    Strings.Reverse_BrokenQueriesWarning,
-                    FormatQueryNames(merged.BrokenQueries)
-                );
-        }
-
-        if (merged.DescriptionOverwriteCount > 0)
-        {
-            builder
-                .Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .AppendFormat(
-                    Strings.Reverse_DescriptionOverwriteWarning,
-                    merged.DescriptionOverwriteCount
-                );
-        }
-
-        return builder.ToString();
-    }
-
-    /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する（件数が多いときは上限で畳む）</summary>
-    private static string FormatQueryNames(IReadOnlyList<QueryDefinition> queries) =>
-        DialogItemList.Format(
-            queries.Select(query => "- " + query.Name).ToList(),
-            Strings.Common_MoreItems
-        );
-
-    /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
-    private static bool HasSameStructure(
-        ErDiagram current,
-        IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships
-    )
-    {
-        var currentSignature = SchemaSignature.Compute(current.Entities, current.Relationships);
-        var newSignature = SchemaSignature.Compute(entities, relationships);
-
-        return currentSignature == newSignature;
     }
 }

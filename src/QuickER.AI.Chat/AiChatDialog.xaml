@@ -389,6 +389,7 @@
               Margin="0,0,8,0"
               ToolTip="{x:Static res:Strings.Chat_ApiKeyTooltip}"
               common:PasswordBoxBehavior.BoundPassword="{Binding Connection.ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+              LostKeyboardFocus="ApiKeyBox_LostKeyboardFocus"
             />
             <CheckBox
               Grid.Column="2"

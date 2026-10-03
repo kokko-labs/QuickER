@@ -185,6 +185,18 @@
   <data name="Mock_DisabledReason_InProgress" xml:space="preserve">
     <value>生成を実行中です。</value>
   </data>
+  <data name="Mock_DisabledReason_TurnInProgress" xml:space="preserve">
+    <value>応答の実行中です。</value>
+  </data>
+  <data name="Mock_ConversationBlockedDuringMockGen" xml:space="preserve">
+    <value>モックプロジェクトの生成中は会話できません。</value>
+  </data>
+  <data name="Mock_MockFolderNotFullyQualified" xml:space="preserve">
+    <value>モックフォルダはフルパスで指定してください（例: C:\Work\mock）。</value>
+  </data>
+  <data name="Mock_ConnectionCheckFailedFormat" xml:space="preserve">
+    <value>接続の状態を確認できませんでした: {0}</value>
+  </data>
   <data name="Mock_DisabledReason_NoScreens" xml:space="preserve">
     <value>先にモックフォルダへ画面を 1 つ以上追加してください。</value>
   </data>
@@ -270,6 +282,8 @@
 
 AI が次のファイルを書きました（UI 層のソース・静的資産ではありません）。この中にビルド・設定ファイル（csproj・global.json・*.csproj.user 等）が含まれている場合、検証ビルドはそれを読み込んで記述どおりに実行します。
 
+一覧には、ビルドの前に QuickER がプロジェクトの obj / bin から削除できなかったものも含みます。そこに残ったファイルもビルドが読み込みます。
+
 内容を確認して、検証ビルドを実行するかどうかを選んでください。キャンセルすると、プロジェクトを未検証のまま生成を終了します。</value>
   </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
@@ -315,6 +329,12 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="Mock_ResponseCompleted" xml:space="preserve">
     <value>応答が完了しました。</value>
   </data>
+  <data name="Mock_ModelHistorySaveFailedFormat" xml:space="preserve">
+    <value>応答が完了しました。モデルの履歴は保存できませんでした: {0}</value>
+  </data>
+  <data name="Mock_SettingsSaveFailedFormat" xml:space="preserve">
+    <value>設定を保存できませんでした: {0}</value>
+  </data>
   <data name="Mock_ErrorSystemFormat" xml:space="preserve">
     <value>エラー: {0}</value>
   </data>
@@ -323,6 +343,12 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   </data>
   <data name="Mock_Interrupted" xml:space="preserve">
     <value>処理が中断されました。</value>
+  </data>
+  <data name="Mock_SwitchBackendBlockedDuringTurn" xml:space="preserve">
+    <value>応答の実行中は接続方式を切り替えられません。先に中断してください。</value>
+  </data>
+  <data name="Mock_MockFolderLockedDuringTurn" xml:space="preserve">
+    <value>応答の実行中はモックフォルダを変更できません。先に中断してください。</value>
   </data>
   <data name="Mock_PreviewUpdateFailedFormat" xml:space="preserve">
     <value>プレビューを更新できませんでした: {0}</value>
@@ -368,6 +394,10 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="Mock_Run_BuildBoundaryChanges" xml:space="preserve">
     <value>
 AI が次のファイルを書きました（UI 層のソース・静的資産ではありません）:</value>
+  </data>
+  <data name="Mock_Run_BuildOutputsNotDeleted" xml:space="preserve">
+    <value>
+最終ビルドの前に、次のビルド中間物（obj / bin）を削除できませんでした:</value>
   </data>
   <data name="Mock_Run_BuildDeclined" xml:space="preserve">
     <value>確認が取り消されたため、最終ビルドは実行しませんでした。</value>
@@ -647,5 +677,26 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   </data>
   <data name="MockDoc_ItemTableFormat" xml:space="preserve">
     <value>テーブル {0}</value>
+  </data>
+  <data name="Mock_FolderAlreadyExistsFormat" xml:space="preserve">
+    <value>モックフォルダは既に存在します（{0} が見つかりました）: {1}</value>
+  </data>
+  <data name="Mock_FolderNotMockFormat" xml:space="preserve">
+    <value>モックフォルダではありません（{0} が見つかりません）: {1}</value>
+  </data>
+  <data name="Mock_ManifestParseFailedFormat" xml:space="preserve">
+    <value>モックの {0} を解釈できませんでした（破損している可能性があります）: {1}</value>
+  </data>
+  <data name="Mock_ManifestEmptyFormat" xml:space="preserve">
+    <value>モックの {0} が空か無効です: {1}</value>
+  </data>
+  <data name="Mock_ManifestNewerFormat" xml:space="preserve">
+    <value>より新しいフォーマットのモックです（version={0}・このアプリの対応は {1} まで）。アプリを更新してください: {2}</value>
+  </data>
+  <data name="Mock_ManifestInvalidScreenFileFormat" xml:space="preserve">
+    <value>モックの {0} の画面ファイル名が不正です（破損している可能性があります）: {1}</value>
+  </data>
+  <data name="Mock_ToolFileAccessFailedResult" xml:space="preserve">
+    <value>モックフォルダの読み書きに失敗しました: {0}</value>
   </data>
 </root>

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -71,9 +72,16 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <summary>
     /// ダーティ時に「このまま続行」を選んだ外部バージョンの内容ハッシュ。
-    /// 同一内容での再確認を抑止する（次の別内容変更では null に戻り再確認する）。
+    /// 同一内容での再確認を抑止する（別内容の変更は再確認する）。保存・開く・再読込
+    /// （<see cref="UpdateDocumentIdentity"/>）と現在パスの変更で捨てる。
     /// </summary>
     private string? _ignoredExternalHash;
+
+    /// <summary>外部変更の処理中か（確認ダイアログの入れ子のメッセージループからの再入を畳むため）</summary>
+    private bool _handlingExternalModification;
+
+    /// <summary>処理中に次の外部変更が届いたか（処理の後にディスクで 1 回だけ再評価する）</summary>
+    private bool _externalModificationPending;
 
     /// <summary>再読込経路で View への fit-to-window 要求を抑止するフラグ（ビューポート維持のため）</summary>
     private bool _suppressFitToWindow;
@@ -91,11 +99,20 @@ public partial class MainViewModel : IDiagramTransferHost
     /// </remarks>
     internal Action? AfterSaveWriteForTests { get; set; }
 
+    /// <summary>
+    /// テスト専用: 開く・再読込でファイルを読み取った後（内容ハッシュの記録より前）に差し込む処理。
+    /// 「読み込んだファイルを外部プロセスが即座に書き換えた」競合窓を決定的に再現するための入口。
+    /// </summary>
+    internal Action? AfterLoadReadForTests { get; set; }
+
     /// <summary>ステータスバー左端に表示する一時通知のバッキングフィールド（既定は「準備完了」）</summary>
     private string _statusMessage = Strings.Status_Ready;
 
     /// <summary>直近の一時通知を既定表示へ戻すためのシングルショットタイマ</summary>
     private Timer? _statusRevertTimer;
+
+    /// <summary>一時通知の世代（通知ごとに進める。古い通知の戻し処理が新しい通知を消さないため）</summary>
+    private int _statusGeneration;
 
     /// <summary>ステータスバー左端に表示するメッセージ（外部変更の控えめ通知に使う。既定は「準備完了」）</summary>
     public string StatusMessage
@@ -120,18 +137,39 @@ public partial class MainViewModel : IDiagramTransferHost
     }
 
     /// <summary>ステータスバーへ一時通知を表示し、数秒後に既定表示（準備完了）へ戻す</summary>
+    /// <remarks>
+    /// 前のタイマーを <see cref="Timer.Dispose()"/> しても、既にスレッドプールで動き出した（または UI の
+    /// キューへ載った）戻し処理は止まらない。そのまま戻すと新しい通知が直後に「準備完了」で消えるため、
+    /// 通知ごとに世代を進め、戻し処理は自分の世代がまだ最新のときだけ戻す（<see cref="RevertStatusIfCurrent"/>）。
+    /// </remarks>
     private void NotifyStatus(string message)
     {
         StatusMessage = message;
+        var generation = ++_statusGeneration;
 
         _statusRevertTimer?.Dispose();
         _statusRevertTimer = new Timer(
-            _ => _uiPost(() => StatusMessage = Strings.Status_Ready),
+            _ => _uiPost(() => RevertStatusIfCurrent(generation)),
             null,
             5000,
             Timeout.Infinite
         );
     }
+
+    /// <summary>一時通知を既定表示へ戻す（その通知の後に別の通知が出ていれば何もしない）</summary>
+    /// <param name="generation">戻す対象の通知の世代（<see cref="NotifyStatus"/> が採番した値）</param>
+    internal void RevertStatusIfCurrent(int generation)
+    {
+        if (generation != _statusGeneration)
+        {
+            return;
+        }
+
+        StatusMessage = Strings.Status_Ready;
+    }
+
+    /// <summary>テスト専用: 直近の一時通知の世代</summary>
+    internal int StatusGenerationForTests => _statusGeneration;
 
     /// <summary>監視スレッドからの外部変更通知を UI スレッドへ載せ替えて処理する</summary>
     private void OnDocumentFileChanged(object? sender, DocumentFileChangedEventArgs e)
@@ -186,11 +224,69 @@ public partial class MainViewModel : IDiagramTransferHost
             case DocumentFileChangeKind.Modified:
                 HandleExternalModification(e.ContentHash);
                 break;
+
+            case DocumentFileChangeKind.WatchInterrupted:
+                // 監視を張れなくなった（フォルダの消失など）。監視サービスが裏で張り直しを試み続ける
+                NotifyStatus(Strings.Status_ExternalWatchInterrupted);
+                break;
+
+            case DocumentFileChangeKind.WatchResumed:
+                // 張り直せた。止まっていた間の変更は監視サービスが 1 回照合して Modified で届ける
+                NotifyStatus(Strings.Status_ExternalWatchResumed);
+                break;
         }
     }
 
     /// <summary>外部での内容変更を処理する（クリーンなら無確認再読込・ダーティなら確認）</summary>
+    /// <remarks>
+    /// <para>
+    /// 次の 2 つは、進行中のマウス操作を打ち切るより<b>前</b>に判定して捨てる（何もしないイベントで
+    /// 利用者のドラッグを壊さないため）。
+    /// </para>
+    /// <list type="bullet">
+    /// <item>内容ハッシュが最終既知ハッシュと一致する＝既に反映済み（先に処理した再読込が同じ内容を読み込んだ、
+    /// または自分の保存）。最終既知ハッシュは読み書きした内容そのものから採るので、一致は「同じ内容」を意味する</item>
+    /// <item>処理中の再入。確認ダイアログは入れ子のメッセージループを回すため、その最中に届いた次の変更が
+    /// 確認をもう 1 枚重ねる。再入は「保留あり」を立てて戻り、処理の後に最新のディスクで 1 回だけ再評価する
+    /// （ディスクがさらに変わっていれば、閉じた後に確認がもう 1 回出る）</item>
+    /// </list>
+    /// </remarks>
     private void HandleExternalModification(string? contentHash)
+    {
+        if (
+            contentHash is not null
+            && string.Equals(contentHash, _lastKnownFileHash, StringComparison.Ordinal)
+        )
+        {
+            return;
+        }
+
+        if (_handlingExternalModification)
+        {
+            _externalModificationPending = true;
+            return;
+        }
+
+        _handlingExternalModification = true;
+
+        try
+        {
+            HandleExternalModificationCore(contentHash);
+        }
+        finally
+        {
+            _handlingExternalModification = false;
+        }
+
+        if (_externalModificationPending)
+        {
+            _externalModificationPending = false;
+            CheckExternalChangeAgainstDisk();
+        }
+    }
+
+    /// <summary>外部での内容変更を、クリーンなら無確認再読込・ダーティなら確認で処理する（再入しないこと）</summary>
+    private void HandleExternalModificationCore(string? contentHash)
     {
         // 進行中のマウス操作を、再読込・確認ダイアログのどちらへ進むより前に打ち切る。
         // 自動再読込では図が置き換わったあとの解放が幽霊 Undo を積み、確認ダイアログは
@@ -252,6 +348,13 @@ public partial class MainViewModel : IDiagramTransferHost
     /// 既存の読込フロー（<see cref="LoadDocumentIntoDiagram"/>）を流用するが、fit-to-window 要求を
     /// <see cref="_suppressFitToWindow"/> で抑止してズーム・スクロール位置を保つ。Guid 一致エンティティの
     /// レイアウトはファイル値を尊重し、欠落分のみ追記配置される（既存機構がそのまま効く）。
+    /// <para>
+    /// 最終既知ハッシュは<b>読み込んだバイト列そのもの</b>から求める（<see cref="Open"/> と同じ）。
+    /// 読み取りから記録までの隙間に外部が書いた場合、<see cref="Open"/> と違って記録直後の再照合はしない。
+    /// 再読込の経路では監視が最初から動いており、隙間の書き込みの監視イベントは、記録したハッシュ
+    /// （読み込んだ内容）とディスクが食い違うため捨てられずに届き、UI のキューを経て次の再読込へ進む。
+    /// ここで同期的に再照合すると、外部が書き続ける間「再読込 → 再照合 → 再読込…」が再帰で積み上がる。
+    /// </para>
     /// </remarks>
     private bool ReloadFromDisk()
     {
@@ -263,8 +366,13 @@ public partial class MainViewModel : IDiagramTransferHost
         // 破損（不正 JSON）・非 DiagramDocument は現状維持し、次の変更イベントで再試行する
         // （控えめな一時通知のため、ここでは失敗の原因までは見せない）
         if (
-            !TryLoadDiagramDocument(CurrentFilePath, out var document, out _, out _)
-            || document is null
+            !TryLoadDiagramDocument(
+                CurrentFilePath,
+                out var document,
+                out _,
+                out _,
+                out var rawContents
+            )
         )
         {
             NotifyStatus(Strings.Status_ExternalReloadFailed);
@@ -290,9 +398,11 @@ public partial class MainViewModel : IDiagramTransferHost
             _suppressFitToWindow = false;
         }
 
-        // 読み直した内容を最終既知として記録し、クリーン状態へ戻す
-        UpdateDocumentIdentity(CurrentFilePath);
-        _ignoredExternalHash = null;
+        AfterLoadReadForTests?.Invoke();
+
+        // 読み込んだ内容そのものを最終既知として記録し、クリーン状態へ戻す
+        // （ディスクを読み直さない理由は DocumentContentHash.ComputeForBytes）
+        UpdateDocumentIdentity(CurrentFilePath, DocumentContentHash.ComputeForBytes(rawContents));
         return true;
     }
 
@@ -304,15 +414,20 @@ public partial class MainViewModel : IDiagramTransferHost
     /// 失敗の原因となった例外（IO エラー・不正 JSON・Id 重複）。形式検証で弾いた場合と成功時は null。
     /// 呼び出し側は「原因を持つ失敗」だけ他の失敗通知と同じく例外メッセージを連結して見せる。
     /// </param>
+    /// <param name="rawContents">
+    /// 読み取ったファイルのバイト列（成功時は非 null）。最終既知ハッシュをディスクの読み直しでなく
+    /// 読み込んだ内容から求めるために使う。
+    /// </param>
     /// <remarks>
-    /// 検証は <see cref="JsonStorageService.TryLoad"/> に委ね、ここは種別と原因例外をそのまま
-    /// 呼び出し側へ渡すだけを担う（種別ごとの文言は呼び出し側の責務）。
+    /// 検証は <see cref="JsonStorageService.TryLoad(string, out DiagramDocument?, out DocumentLoadError, out Exception?, out byte[]?)"/>
+    /// に委ね、ここは種別と原因例外をそのまま呼び出し側へ渡すだけを担う（種別ごとの文言は呼び出し側の責務）。
     /// </remarks>
     private static bool TryLoadDiagramDocument(
         string path,
-        out DiagramDocument? document,
+        [NotNullWhen(true)] out DiagramDocument? document,
         out DocumentLoadError kind,
-        out Exception? error
+        out Exception? error,
+        [NotNullWhen(true)] out byte[]? rawContents
     )
     {
         error = null;
@@ -320,7 +435,15 @@ public partial class MainViewModel : IDiagramTransferHost
 
         try
         {
-            if (JsonStorageService.TryLoad(path, out document, out kind, out var exception))
+            if (
+                JsonStorageService.TryLoad(
+                    path,
+                    out document,
+                    out kind,
+                    out var exception,
+                    out rawContents
+                )
+            )
             {
                 return true;
             }
@@ -333,6 +456,7 @@ public partial class MainViewModel : IDiagramTransferHost
         {
             // TryLoad が分類し切れない想定外の失敗も現状維持で扱う（防御）
             document = null;
+            rawContents = null;
             kind = DocumentLoadError.InvalidJson;
             error = ex;
             return false;
@@ -350,8 +474,9 @@ public partial class MainViewModel : IDiagramTransferHost
     /// <summary>現ファイルの内容が最終既知ハッシュと異なれば、通常の外部変更検知と同じ規則で処理する</summary>
     /// <remarks>
     /// 監視サービスの通知が届かない（届かなかった）タイミングで、ディスクとの乖離を 1 回だけ拾い直す
-    /// 共有経路。呼び出し元は起動復元の直後（<see cref="CheckExternalChangeOnStartup"/>）と、
-    /// 上書き保存で監視を再開した直後（<see cref="SaveToPath"/>）の 2 箇所。
+    /// 共有経路。呼び出し元は起動復元の直後（<see cref="CheckExternalChangeOnStartup"/>）・
+    /// 上書き保存で監視を再開した直後（<see cref="SaveToPath"/>）・ファイルを開いて監視を始めた直後
+    /// （<see cref="Open"/>）の 3 箇所。
     /// </remarks>
     private void CheckExternalChangeAgainstDisk()
     {
@@ -488,28 +613,26 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <summary>読込／保存の成功時に現在パス・内容ハッシュを更新し、クリーン状態にする共通ヘルパ</summary>
     /// <param name="path">紐付けるファイルのフルパス（読込元／保存先）</param>
-    /// <remarks>内容ハッシュはディスクから読み直して求める（読込経路・再読込経路はこれが正）</remarks>
-    private void UpdateDocumentIdentity(string path) =>
-        UpdateDocumentIdentity(path, TryComputeContentHash(path));
-
-    /// <summary>内容ハッシュを明示して文書アイデンティティを更新する</summary>
-    /// <param name="path">紐付けるファイルのフルパス</param>
-    /// <param name="contentHash">最終既知として記録する内容ハッシュ（算出不能なら null）</param>
+    /// <param name="contentHash">最終既知として記録する内容ハッシュ</param>
     /// <remarks>
-    /// 保存経路は「書き出した内容そのもの」から求めたハッシュを渡す
-    /// （理由の正本は <see cref="DocumentContentHash.ComputeForText"/>）。
+    /// ハッシュは<b>ディスクを読み直さず</b>、保存経路は書き出した内容そのもの
+    /// （<see cref="DocumentContentHash.ComputeForText"/>）、読込経路は読み込んだバイト列そのもの
+    /// （<see cref="DocumentContentHash.ComputeForBytes"/>）から求めて渡す。読み直す方式では、
+    /// 読み書きから採取までの隙間に外部が書いた内容を「自分が読み書きした内容」として記録してしまう。
+    /// <para>
+    /// 「続行」で無視した外部版のハッシュ（<see cref="_ignoredExternalHash"/>）もここで捨てる。
+    /// 保存・開く・再読込のあとはディスクとメモリが一致しており、無視した版はもう比較の対象ではない。
+    /// 残すと、同じ内容が後から外部で書き戻されたとき（チェックアウトによる巻き戻し等）に確認も
+    /// 上書き前の照合も素通りする。パスが同じでも消えるよう、パス変更の経路ではなくこの共通出口で消す。
+    /// </para>
     /// </remarks>
-    private void UpdateDocumentIdentity(string path, string? contentHash)
+    private void UpdateDocumentIdentity(string path, string contentHash)
     {
         CurrentFilePath = path;
         _lastKnownFileHash = contentHash;
+        _ignoredExternalHash = null;
         MarkClean();
     }
-
-    /// <summary>ファイル内容の SHA-256（16 進）を計算する（IO エラー時は null）</summary>
-    /// <remarks>監視サービスと同じ算出規則を共有するため <see cref="DocumentContentHash"/> へ委譲する</remarks>
-    private static string? TryComputeContentHash(string path) =>
-        DocumentContentHash.TryCompute(path);
 
     /// <summary>現在のダイアグラムと UI 表示状態・文書メタを自動保存ファイルへ書き出す</summary>
     public void AutoSave()
@@ -702,6 +825,9 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <inheritdoc />
     int IDiagramTransferHost.QueryCount => Queries.Count;
+
+    /// <inheritdoc />
+    bool IDiagramTransferHost.IsCurrentDocumentPath(string path) => IsCurrentDocumentPath(path);
 
     /// <inheritdoc />
     void IDiagramTransferHost.RenderSvg(string path) => ImageExportService.ExportSvg(this, path);
@@ -960,8 +1086,13 @@ public partial class MainViewModel : IDiagramTransferHost
 
         // 破損 JSON・非 DiagramDocument JSON・Id 重複・必須の名前や型の null・IO 失敗は現状維持のうえ通知する
         if (
-            !TryLoadDiagramDocument(picked.Path, out var document, out var kind, out var error)
-            || document is null
+            !TryLoadDiagramDocument(
+                picked.Path,
+                out var document,
+                out var kind,
+                out var error,
+                out var rawContents
+            )
         )
         {
             // 原因を持つ失敗（IO エラー・不正 JSON・Id 重複・必須の名前や型の null）は他の失敗通知と
@@ -1008,11 +1139,17 @@ public partial class MainViewModel : IDiagramTransferHost
         SetCurrentProviderFromDbms(document.Schema.TargetDbms);
         LoadDocumentIntoDiagram(document);
 
-        // 読込したファイルを現在パスとして紐付け、内容ハッシュを記録してクリーン状態にする
-        UpdateDocumentIdentity(picked.Path);
+        AfterLoadReadForTests?.Invoke();
+
+        // 読込したファイルを現在パスとして紐付け、読み込んだ内容そのもののハッシュを記録してクリーン状態にする
+        UpdateDocumentIdentity(picked.Path, DocumentContentHash.ComputeForBytes(rawContents));
 
         // 保存と同じく ER 図ファイル自身の読み書きなので、ステータスバーの一時通知で知らせる
         NotifyStatus(Strings.Status_Opened);
+
+        // 監視は現在パスが決まった時点（上の UpdateDocumentIdentity）で始まるため、読み取りから
+        // ここまでの隙間に外部が書いた変更はイベントすら起きない。保存と同じく 1 回だけ突き合わせて拾う
+        CheckExternalChangeAgainstDisk();
     }
 
     /// <summary>読み込んだ文書を現在の図へ反映する（配置なし文書は全体を自動整列する）</summary>

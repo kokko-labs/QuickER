@@ -114,6 +114,24 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_DiagramTargetDbmsUnsupported {
+            get {
+                return ResourceManager.GetString("Cli_DiagramTargetDbmsUnsupported", resourceCulture);
+            }
+        }
+
+        public static string Cli_ProviderDiffersFromDiagram {
+            get {
+                return ResourceManager.GetString("Cli_ProviderDiffersFromDiagram", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_GenerateProvider {
+            get {
+                return ResourceManager.GetString("Cli_Opt_GenerateProvider", resourceCulture);
+            }
+        }
+
         public static string Cli_Opt_Provider {
             get {
                 return ResourceManager.GetString("Cli_Opt_Provider", resourceCulture);
@@ -477,6 +495,12 @@ namespace QuickER.Cli.Resources {
         public static string Cli_Opt_ReverseForce {
             get {
                 return ResourceManager.GetString("Cli_Opt_ReverseForce", resourceCulture);
+            }
+        }
+
+        public static string Cli_ReverseOutputExistsRefused {
+            get {
+                return ResourceManager.GetString("Cli_ReverseOutputExistsRefused", resourceCulture);
             }
         }
 

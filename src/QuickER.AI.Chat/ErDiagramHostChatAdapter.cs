@@ -130,7 +130,15 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
             return (QueryToolLocalizedFormatter.FormatRemoveQuery(outcome), outcome.Success);
         }
 
-        /// <summary>引数 JSON を <see cref="JsonElement"/> へ解釈する（空は空オブジェクト扱い・解釈不能はローカライズ済みエラー）</summary>
+        /// <summary>
+        /// 引数 JSON を <see cref="JsonElement"/> へ解釈する（空は空オブジェクト扱い・解釈不能と
+        /// オブジェクト以外の根〔<c>[]</c>・<c>null</c>・数値など〕はローカライズ済みエラー）
+        /// </summary>
+        /// <remarks>
+        /// 根がオブジェクトでないまま渡すと、<see cref="QueryToolCore"/> の <c>TryGetProperty</c> が
+        /// <see cref="InvalidOperationException"/>（英語の生メッセージ）で落ちる。MCP 側の
+        /// <c>DocumentErDiagramToolSet</c> と同じく入口で断る。
+        /// </remarks>
         private static bool TryParseArguments(
             string toolName,
             string argumentsJson,
@@ -143,6 +151,14 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
                 using var document = JsonDocument.Parse(
                     string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
                 );
+
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    arguments = default;
+                    error = (string.Format(Strings.QueryTool_ArgumentsNotObject, toolName), false);
+                    return false;
+                }
+
                 arguments = document.RootElement.Clone();
                 error = default;
                 return true;

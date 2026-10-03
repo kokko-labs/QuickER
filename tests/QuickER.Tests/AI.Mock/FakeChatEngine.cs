@@ -27,6 +27,22 @@ internal sealed class FakeChatEngine : IErChatEngine
     /// </summary>
     public Queue<IReadOnlyList<(string Tool, string Args)>> ScriptedTurns { get; } = new();
 
+    /// <summary>
+    /// true なら SendAsync でターン完了を通知せず保留する（実行中のターンを再現する）。
+    /// 保留した完了は <see cref="CompleteHeldTurn"/> で流す。
+    /// </summary>
+    public bool HoldTurnCompletion { get; set; }
+
+    /// <summary>設定すると SendAsync がこの例外で失敗する（送信失敗の再現用）</summary>
+    public Exception? SendException { get; set; }
+
+    /// <summary>保留していたターン完了（成功）を通知する</summary>
+    public void CompleteHeldTurn() => TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
+
+    /// <summary>保留中のターンを失敗（<paramref name="error"/> が null なら中断）として完了させる</summary>
+    public void FailHeldTurn(string? error) =>
+        TurnCompleted?.Invoke(this, new ErChatTurnResult(false, error));
+
     /// <summary>直近のツール実行結果（テストからの検証用）</summary>
     public (string Result, bool Success)? LastToolResult { get; private set; }
 
@@ -52,6 +68,12 @@ internal sealed class FakeChatEngine : IErChatEngine
         CancellationToken cancellationToken = default
     )
     {
+        if (SendException is { } failure)
+        {
+            // 送信の失敗（API キー未設定・CLI 不在など）を再現する
+            return Task.FromException(failure);
+        }
+
         SentPrompts.Add(prompt);
         SentAttachments.Add(attachments);
 
@@ -84,7 +106,11 @@ internal sealed class FakeChatEngine : IErChatEngine
             }
         }
 
-        TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
+        if (!HoldTurnCompletion)
+        {
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
+        }
+
         return Task.CompletedTask;
     }
 

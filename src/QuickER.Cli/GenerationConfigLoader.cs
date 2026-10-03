@@ -33,7 +33,8 @@ internal static class GenerationConfigLoader
 
     /// <summary>
     /// 設定ファイル（quicker.json）を読み、CLI フラグ（設定キーと 1:1 対応する kebab-case フラグ群）で
-    /// 上書きして生成オプションを構築する。優先順位は全キー一律「CLI フラグ ＞ 設定ファイル ＞ 既定値」。
+    /// 上書きして生成オプションを構築する。優先順位は「CLI フラグ ＞ 設定ファイル ＞ 既定値」で、唯一の例外は
+    /// <c>--output-path</c>（設定ファイルに <c>OutputFileName</c> があると、そちらが優先される）。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -312,7 +313,7 @@ internal static class GenerationConfigLoader
     /// 設定 JSON に <c>OutputPath</c> があり <c>OutputFileName</c> が無ければ、そのファイル名部分を
     /// <c>OutputFileName</c> へ導出する（大文字小文字非依存でキーを探す＝GUI は camelCase で書き出すため）。
     /// </summary>
-    private static void DeriveOutputFileName(JsonObject node)
+    internal static void DeriveOutputFileName(JsonObject node)
     {
         // 既に OutputFileName があれば尊重する（手書き設定の明示指定を上書きしない）
         if (FindProperty(node, "OutputFileName") is not null)
@@ -330,7 +331,8 @@ internal static class GenerationConfigLoader
 
             if (!string.IsNullOrWhiteSpace(fileName))
             {
-                node["OutputFileName"] = fileName;
+                // 値が null の別綴りキー（例 "outputFileName": null）を残さないよう正準キーで置き換える
+                SetNodeValue(node, "OutputFileName", fileName);
             }
         }
     }
@@ -370,11 +372,16 @@ internal static class GenerationConfigLoader
     }
 }
 
-/// <summary>QuickER 版 Repository の生成が要求されたが、指定プロバイダの方言が未対応のときに送出する例外</summary>
-internal sealed class RepositoryDialectUnsupportedException(string message) : Exception(message);
-
 /// <summary>
 /// 設定ファイル（<c>--config</c>）が存在しない、JSON オブジェクトとして読めない、
 /// または値の型が設定キーと合わないときに送出する例外
 /// </summary>
-internal sealed class GenerationConfigException(string message) : Exception(message);
+/// <remarks>
+/// 生成前に設定の誤りで中止する例外の基底（派生 <see cref="RepositoryDialectUnsupportedException"/>）。
+/// 呼び出し側（CLI の generate / scaffold・MCP の generate_csharp）はこの型 1 つを捕捉すれば足りる。
+/// </remarks>
+internal class GenerationConfigException(string message) : Exception(message);
+
+/// <summary>QuickER 版 Repository の生成が要求されたが、指定プロバイダの方言が未対応のときに送出する例外</summary>
+internal sealed class RepositoryDialectUnsupportedException(string message)
+    : GenerationConfigException(message);

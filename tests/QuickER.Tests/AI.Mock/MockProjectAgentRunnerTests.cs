@@ -24,6 +24,15 @@ public class MockProjectAgentRunnerTests
         /// <summary>RunAsync でスローする例外（タイムアウト・中断のシミュレーション）</summary>
         public Exception? ThrowOnRun { get; set; }
 
+        /// <summary>
+        /// RunAsync の中で、トークンが取り消されるまで待つか（中断のシミュレーション。5 秒で諦める＝
+        /// 中断が届かない変異でもテストがハングせず失敗する）。
+        /// </summary>
+        public bool WaitForCancellation { get; set; }
+
+        /// <summary>RunAsync が呼ばれたスレッド</summary>
+        public int? RunThreadId { get; private set; }
+
         public MockProjectAgentRequest? CapturedRequest { get; private set; }
         public bool Interrupted { get; private set; }
         public bool Available { get; set; } = true;
@@ -37,12 +46,13 @@ public class MockProjectAgentRunnerTests
 
         public bool FinalBuildEscapesSandbox => EscapesSandbox;
 
-        public Task<MockProjectAgentOutcome> RunAsync(
+        public async Task<MockProjectAgentOutcome> RunAsync(
             MockProjectAgentRequest request,
             Action<string> onProgress,
             CancellationToken cancellationToken
         )
         {
+            RunThreadId = Environment.CurrentManagedThreadId;
             CapturedRequest = request;
             onProgress("作業を開始します。\n");
             OnRun?.Invoke(request.WorkingDirectory);
@@ -52,7 +62,12 @@ public class MockProjectAgentRunnerTests
                 throw ThrowOnRun;
             }
 
-            return Task.FromResult(Outcome);
+            if (WaitForCancellation)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+
+            return Outcome;
         }
 
         public Task InterruptAsync()
@@ -84,6 +99,13 @@ public class MockProjectAgentRunnerTests
         /// </remarks>
         public bool SlowBuild { get; set; }
 
+        /// <summary>BuildAsync で投げる例外（dotnet を起動できない等のシミュレーション）</summary>
+        public Exception? ThrowOnBuild { get; set; }
+
+        /// <summary>ビルドが始まったことの合図（中断をビルド中に届けるテスト用）</summary>
+        public TaskCompletionSource BuildStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public async Task<BuildRunResult> BuildAsync(
             string solutionFilePath,
             CancellationToken cancellationToken = default
@@ -92,6 +114,12 @@ public class MockProjectAgentRunnerTests
             BuildCallCount++;
             CapturedSolutionPath = solutionFilePath;
             OnBuild?.Invoke();
+            BuildStarted.TrySetResult();
+
+            if (ThrowOnBuild is not null)
+            {
+                throw ThrowOnBuild;
+            }
 
             if (SlowBuild)
             {
@@ -547,7 +575,7 @@ public class MockProjectAgentRunnerTests
             OnRun = dir =>
             {
                 WriteArtifacts()(dir);
-                CreateJunction(Path.Combine(project, "obj"), linkTarget);
+                ReparsePointTestHelper.CreateJunction(Path.Combine(project, "obj"), linkTarget);
             },
         };
         var build = new FakeBuildRunner();
@@ -619,33 +647,322 @@ public class MockProjectAgentRunnerTests
     }
 
     /// <summary>
-    /// ジャンクション（ディレクトリの reparse point）を作る。
+    /// 実行器が OCE 以外の例外を投げても、ランは失敗の結果として終わり、原因を含むログが残ることを検証する
+    /// （例外のまま抜けると結果もログも残らず、利用者には原因が分からない）。
     /// </summary>
-    /// <remarks>
-    /// ジャンクションの作成に公開 API は無く、シンボリックリンクは特権（開発者モード）を要するため、
-    /// 特権不要な <c>mklink /J</c> を使う。テストは Windows 専用プロジェクトにある。
-    /// </remarks>
-    private static void CreateJunction(string linkPath, string targetPath)
+    [Fact(DisplayName = "実行器の想定外の例外は失敗の結果に畳み、ログを残す")]
+    public async Task RunAsync_AgentThrows_ReturnsFailureAndWritesLog()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent
+        {
+            ThrowOnRun = new InvalidOperationException("agent exploded"),
+        };
+        var build = new FakeBuildRunner();
+        var runner = new MockProjectAgentRunner(agent, build);
 
-        using var process = System.Diagnostics.Process.Start(
-            new System.Diagnostics.ProcessStartInfo
+        try
+        {
+            var result = await runner.RunAsync(
+                folder,
+                ProjectName,
+                additionalInstructions: null,
+                string.Empty,
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            result.Success.Should().BeFalse();
+            result.ClientSucceeded.Should().BeFalse();
+            result.Canceled.Should().BeFalse();
+            result.TimedOut.Should().BeFalse();
+            result.Message.Should().Contain("agent exploded");
+            File.ReadAllText(result.LogPath).Should().Contain("agent exploded");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>最終ビルドを実行できない例外は、ビルド失敗の結果として終わり、原因がログに残ることを検証する</summary>
+    [Fact(DisplayName = "最終ビルドの想定外の例外はビルド失敗に畳み、ログを残す")]
+    public async Task RunAsync_BuildRunnerThrows_ReturnsBuildFailureAndWritesLog()
+    {
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent { OnRun = WriteArtifacts() };
+        var build = new FakeBuildRunner
+        {
+            ThrowOnBuild = new InvalidOperationException("dotnet missing"),
+        };
+        var runner = new MockProjectAgentRunner(agent, build);
+
+        try
+        {
+            var result = await runner.RunAsync(
+                folder,
+                ProjectName,
+                additionalInstructions: null,
+                string.Empty,
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            result.Success.Should().BeFalse();
+            result.BuildSucceeded.Should().BeFalse();
+            result.Message.Should().Be(MockStrings.Mock_Result_BuildFailed);
+            File.ReadAllText(result.LogPath).Should().Contain("dotnet missing");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 結果へ畳めない場所（確認の呼び出し）で例外が出ても、そこまでのログは書き出されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "想定外の例外で抜けてもログは書き出す")]
+    public async Task RunAsync_UnexpectedException_StillWritesLog()
+    {
+        var folder = NewTempFolder();
+        var project = ProjectDirectory(folder);
+        var agent = new FakeMockProjectAgent
+        {
+            EscapesSandbox = true,
+            OnRun = dir =>
             {
-                FileName = "cmd.exe",
-                ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath },
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            }
+                WriteArtifacts()(dir);
+                File.WriteAllText(Path.Combine(project, "Directory.Build.props"), "<Project/>");
+            },
+        };
+        var build = new FakeBuildRunner();
+        var runner = new MockProjectAgentRunner(
+            agent,
+            build,
+            confirmBuild: _ => throw new InvalidOperationException("dialog failed")
         );
-        process!.WaitForExit();
-        process.ExitCode.Should().Be(0, "テスト前提のジャンクションを作成できる必要がある");
-        new DirectoryInfo(linkPath)
-            .Attributes.HasFlag(FileAttributes.ReparsePoint)
-            .Should()
-            .BeTrue();
+
+        try
+        {
+            var run = () =>
+                runner.RunAsync(
+                    folder,
+                    ProjectName,
+                    additionalInstructions: null,
+                    string.Empty,
+                    _ => { },
+                    TestContext.Current.CancellationToken
+                );
+
+            await run.Should().ThrowAsync<InvalidOperationException>();
+            build.BuildCallCount.Should().Be(0);
+
+            var logPath = Path.Combine(folder, MockProjectAgentRunner.LogFileName);
+            File.Exists(logPath).Should().BeTrue();
+            File.ReadAllText(logPath).Should().Contain("dialog failed");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 外部トークンを立てずに InterruptAsync だけを呼んでも、エージェント実行が止まり、
+    /// タイムアウトでなく中断として分類されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "InterruptAsync だけでもエージェント実行を止め、中断として分類する")]
+    public async Task InterruptAsync_DuringAgentRun_ClassifiesAsCanceled()
+    {
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent
+        {
+            OnRun = WriteArtifacts(),
+            WaitForCancellation = true,
+        };
+        var build = new FakeBuildRunner();
+        var runner = new MockProjectAgentRunner(agent, build);
+
+        try
+        {
+            var run = runner.RunAsync(
+                folder,
+                ProjectName,
+                additionalInstructions: null,
+                string.Empty,
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            // エージェントが走り始めてから中断する
+            while (agent.CapturedRequest is null)
+            {
+                await Task.Delay(10, TestContext.Current.CancellationToken);
+            }
+
+            await runner.InterruptAsync();
+            var result = await run;
+
+            result.Canceled.Should().BeTrue();
+            result.TimedOut.Should().BeFalse();
+            result.Message.Should().Be(MockStrings.Mock_Result_Canceled);
+            build.BuildCallCount.Should().Be(0);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>InterruptAsync が最終ビルドの最中にも効き、中断として分類されることを検証する</summary>
+    [Fact(DisplayName = "InterruptAsync は最終ビルド中にも効く")]
+    public async Task InterruptAsync_DuringFinalBuild_ClassifiesAsCanceled()
+    {
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent { OnRun = WriteArtifacts() };
+        var build = new FakeBuildRunner { SlowBuild = true };
+        var runner = new MockProjectAgentRunner(agent, build);
+
+        try
+        {
+            var run = runner.RunAsync(
+                folder,
+                ProjectName,
+                additionalInstructions: null,
+                string.Empty,
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            await build.BuildStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+            await runner.InterruptAsync();
+            var result = await run;
+
+            result.Canceled.Should().BeTrue();
+            result.TimedOut.Should().BeFalse();
+            result.BuildSucceeded.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>ランが終わったあとの InterruptAsync は何もせず、例外にならないことを検証する</summary>
+    [Fact(DisplayName = "ラン終了後の InterruptAsync は例外にならない")]
+    public async Task InterruptAsync_AfterRun_DoesNotThrow()
+    {
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent { OnRun = WriteArtifacts() };
+        var runner = new MockProjectAgentRunner(agent, new FakeBuildRunner());
+
+        try
+        {
+            await runner.RunAsync(
+                folder,
+                ProjectName,
+                additionalInstructions: null,
+                string.Empty,
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            var interrupt = () => runner.InterruptAsync();
+            await interrupt.Should().NotThrowAsync();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 変更検知のスナップショット（全ファイルのハッシュ）が呼び出し元のスレッド（UI スレッド）で走らないことを
+    /// 検証する。単一スレッドの同期コンテキストからランを始め、エージェントが別のスレッドで呼ばれることを見る
+    /// （エージェントの前にある await はスナップショットだけなので、同期で走ればエージェントも同じスレッドになる）。
+    /// </summary>
+    [Fact(DisplayName = "スナップショットは呼び出し元のスレッドで走らない")]
+    public async Task RunAsync_CapturesSnapshotOffCallerThread()
+    {
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent { EscapesSandbox = true, OnRun = WriteArtifacts() };
+        var runner = new MockProjectAgentRunner(
+            agent,
+            new FakeBuildRunner(),
+            confirmBuild: _ => true
+        );
+
+        try
+        {
+            var callerThreadId = await SingleThreadContext.RunAsync(() =>
+                runner.RunAsync(
+                    folder,
+                    ProjectName,
+                    additionalInstructions: null,
+                    string.Empty,
+                    _ => { },
+                    TestContext.Current.CancellationToken
+                )
+            );
+
+            agent.RunThreadId.Should().NotBeNull();
+            agent.RunThreadId.Should().NotBe(callerThreadId);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 専用スレッド 1 本で継続を回す同期コンテキスト（UI スレッドの代役）。渡した処理をそのスレッドで始め、
+    /// 完了まで継続を同じスレッドへ戻す。戻り値はそのスレッドの ID。
+    /// </summary>
+    private sealed class SingleThreadContext : SynchronizationContext
+    {
+        private readonly System.Collections.Concurrent.BlockingCollection<(
+            SendOrPostCallback Callback,
+            object? State
+        )> _queue = new();
+
+        public override void Post(SendOrPostCallback d, object? state) => _queue.Add((d, state));
+
+        public static Task<int> RunAsync(Func<Task> start)
+        {
+            var completion = new TaskCompletionSource<int>(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            );
+
+            var thread = new Thread(() =>
+            {
+                var context = new SingleThreadContext();
+                SetSynchronizationContext(context);
+
+                try
+                {
+                    var task = start();
+                    task.ContinueWith(_ => context._queue.CompleteAdding(), TaskScheduler.Default);
+
+                    foreach (var (callback, state) in context._queue.GetConsumingEnumerable())
+                    {
+                        callback(state);
+                    }
+
+                    task.GetAwaiter().GetResult();
+                    completion.SetResult(Environment.CurrentManagedThreadId);
+                }
+                catch (Exception ex)
+                {
+                    completion.SetException(ex);
+                }
+            })
+            {
+                IsBackground = true,
+            };
+            thread.Start();
+            return completion.Task;
+        }
     }
 
     /// <summary>中断要求がエージェントの InterruptAsync へ転送されることを検証する</summary>

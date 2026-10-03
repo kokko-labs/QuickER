@@ -79,9 +79,40 @@ public static class AttachmentSupportExtensions
         support.HasFlag(kind.ToSupportFlag());
 }
 
-/// <summary>プロバイダー選択から添付範囲を導く共有規則（合成ルートと UI・テストで同一判定を保つため）</summary>
+/// <summary>接続方式・プロバイダー選択から添付範囲を導く共有規則（エンジン・UI・テストで同一判定を保つため）</summary>
 public static class AttachmentSupportResolver
 {
+    /// <summary>Claude Code の添付範囲（全種別。<c>claude</c> が作業フォルダのファイルを Read で読む）</summary>
+    public const AttachmentSupport ClaudeCode =
+        AttachmentSupport.Images
+        | AttachmentSupport.Pdf
+        | AttachmentSupport.Text
+        | AttachmentSupport.Binary;
+
+    /// <summary>Codex の添付範囲（なし）</summary>
+    public const AttachmentSupport Codex = AttachmentSupport.None;
+
+    /// <summary>GitHub Copilot の添付範囲（画像のみ）</summary>
+    public const AttachmentSupport Copilot = AttachmentSupport.Images;
+
+    /// <summary>
+    /// 接続方式（API キーならプロバイダーも）から添付範囲を返す。エンジンを作る前でも判定できる。
+    /// </summary>
+    /// <remarks>
+    /// CLI 3 方式の値は各エンジンの <see cref="IErChatEngine.AttachmentSupport"/> と同じ定数を返す
+    /// （エンジン側もこのクラスの定数を返す＝正本は 1 つ）。
+    /// </remarks>
+    /// <param name="backend">接続方式</param>
+    /// <param name="apiProvider">API キー接続のプロバイダー（API キー以外の方式では使わない）</param>
+    public static AttachmentSupport ForBackend(ErChatBackendKind backend, AiProvider apiProvider) =>
+        backend switch
+        {
+            ErChatBackendKind.ClaudeCode => ClaudeCode,
+            ErChatBackendKind.Codex => Codex,
+            ErChatBackendKind.Copilot => Copilot,
+            _ => ForApiKeyProvider(apiProvider),
+        };
+
     /// <summary>
     /// API キー接続のプロバイダー選択に応じた添付範囲を返す。
     /// Claude=画像＋PDF＋テキスト・OpenAI／ローカル LLM=画像＋テキスト。
@@ -119,4 +150,11 @@ public static class ChatAttachmentLimits
 
     /// <summary>バイナリ 1 件あたりの上限バイト数（32MB。Claude Code 経路のみ）</summary>
     public const long MaxBinaryBytes = 32L * 1024 * 1024;
+
+    /// <summary>
+    /// ファイルから読み込む大きさの上限（32MB）。種別は内容を読むまで分からないため、読む前に
+    /// 種別をまたいで掛ける。画像以外の上限の最大値（PDF・バイナリ）と同じ値なので画像以外の結論は変わらず、
+    /// 縮小すれば <see cref="MaxImageBytes"/> に収まる画像でも、縮小前にこれを超えると拒否される。
+    /// </summary>
+    public const long MaxFileReadBytes = 32L * 1024 * 1024;
 }

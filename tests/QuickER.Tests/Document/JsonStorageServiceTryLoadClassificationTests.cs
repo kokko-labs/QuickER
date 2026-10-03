@@ -62,6 +62,24 @@ public sealed class JsonStorageServiceTryLoadClassificationTests : IDisposable
         exception.Should().NotBeNull("原因を呼び出し側へ持ち帰る");
     }
 
+    /// <summary>入れ子のキー重複は拒否せず、逆直列化の既定どおり後勝ちで読むことを検証する</summary>
+    /// <remarks>
+    /// 拒否するのはルートの重複だけ（どちらの値を図として採るか決まらない）。解析を 1 回にまとめても、
+    /// 入れ子の扱いを「文字列から逆直列化していたとき」から変えないことの固定。
+    /// </remarks>
+    [Fact(DisplayName = "TryLoad: 入れ子のキー重複は後勝ちで読む")]
+    public void TryLoad_DuplicateNestedKeys_LastOneWins()
+    {
+        var path = WriteJson(
+            "{ \"Version\": 1, \"Schema\": { \"TargetDbms\": \"sqlserver\", \"TargetDbms\": \"postgresql\" } }"
+        );
+
+        JsonStorageService.TryLoad(path, out var document, out var error, out _).Should().BeTrue();
+
+        error.Should().Be(DocumentLoadError.None);
+        document!.Schema.TargetDbms.Should().Be("postgresql");
+    }
+
     /// <summary>プロパティの型が合わない JSON が InvalidJson へ分類されることを検証する</summary>
     [Fact(DisplayName = "TryLoad: プロパティの型不一致は InvalidJson へ分類される")]
     public void TryLoad_TypeMismatch_IsInvalidJson()

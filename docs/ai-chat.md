@@ -23,6 +23,7 @@ The API Key tab offers three providers of its own, which brings the total to six
 
 Select a provider and model, then enter the API key.
 When you enable the "Save" checkbox (for the API key), the key is **encrypted with Windows DPAPI (CurrentUser scope)** and stored under your user profile, and it is filled in automatically the next time you start (it is never stored in plain text).
+The key is saved when you leave the key field, switch the provider, or close the window, not on every keystroke.
 DPAPI CurrentUser protection is tied to your Windows user account, so how well the key is protected depends on that account staying secure.
 
 Under "Local LLM" you give the endpoint URL of your server in the endpoint field, including the `/v1` part (the default is Ollama's `http://localhost:11434/v1`).
@@ -48,10 +49,13 @@ Leaving the model empty uses the CLI's default.
 The connection tab you used last is remembered and selected automatically the next time you start.
 The connection tabs are disabled while a response is in progress.
 Interrupt the response before switching.
+Switching tabs is also refused while a new conversation is starting.
 
 ## What you can do
 
-- **Generate a diagram**: describe your requirements and it creates tables, columns, and relationships
+- **Generate a diagram**: describe your requirements and it creates tables, columns, and relationships.
+  When a response that started from an empty diagram creates tables, the whole diagram is arranged automatically at the end of the response.
+  The tables it created are arranged even when the response fails or is interrupted.
 - **Edit a diagram**: add to, change, or delete from an existing diagram.
   Operations on tables, columns, and relationships go onto the Undo/Redo history, so you can revert them.
   Named-query edits are applied directly and are not part of that history.
@@ -63,6 +67,9 @@ Interrupt the response before switching.
   - **Claude Code**: images, PDFs, text, and other binary files as well
   - **Copilot**: images only
   - **Codex**: attachments are not supported
+
+  Attachments are cleared when a response completes.
+  They stay when the response fails or is interrupted, so you can send them again as they are.
 - **AI mock generation**: generate web mockup screens from the current ER diagram, saved as a mock folder (see below)
 
 ## AI mock generation
@@ -70,9 +77,12 @@ Interrupt the response before switching.
 "AI Mock Generation" turns the current ER diagram into web mockup screens.
 The result is saved as a **mock folder** (a `mock.json` manifest plus one HTML file per screen and a shared `style.css`), written live as you converse.
 Point the tool at an empty folder to start fresh, or at an existing mock folder to resume.
+Give the folder as a full path; a relative path such as `mock` cannot start a conversation.
+What you type in the folder field is applied when you stop typing, leave the field, or press Enter, and the folder's contents are read at that point.
 No chat log is kept: resuming restores from the folder contents alone, so it works the same on every backend.
 The screen-list sidebar lets you click through the screens, and the preview follows the links between them.
 You can export the whole mock as a single self-contained HTML file.
+In that file a link to another screen opens that screen but does not scroll to a `#section` inside it, and a link within a page keeps the current screen shown.
 A screen whose HTML contains a stray `</section>` tag can disrupt the screen boundaries in that export, letting content bleed into the screens after it.
 
 The mock folder also yields a screen design document (`README.md`: a screen list, a Mermaid transition diagram, a screen-by-entity CRUD table, and a per-screen item table), generated deterministically without any AI.
@@ -84,18 +94,24 @@ The target is **Blazor Web App** (the default) or **WPF (.NET)**.
 Blazor Web App is globally interactive with InteractiveServer, and reproduces the mock natively for the web by porting the screens' HTML and shared `style.css` as faithfully as possible.
 QuickER generates the solution, the csproj files, and the data-layer code (Entity / EditModel / Mapper / an in-memory Repository, plus the QuickER Repository when the diagram's dialect supports it) deterministically from the ER model, so the AI only has to write the UI layer.
 The mock folder is bundled under `design/mock/`, and the AI implements the UI from it.
+The generated csproj references the same package versions as QuickER itself, including the fixed `SQLitePCLRaw` that overrides the vulnerable version `Microsoft.Data.Sqlite` brings in.
 
 With Claude Code, Codex, or Copilot, the agent edits files and iterates on `dotnet build` until it passes or the run hits its overall time limit.
+The agent is told to build the solution by name (`dotnet build <project name>.sln`), so another solution or project in the output folder does not get in its way.
 With an API key, the model submits the files in a single deterministic pass (no self-correction, plus one fix round if the build fails), so it may fail more often.
 Either way, QuickER verifies the result with its own final `dotnet build`.
 An additional-instructions field lets you pass extra guidance for that implementation.
 
 If the output folder already holds files or folders, you get a confirmation listing them before anything is written.
-Generation overwrites the solution, the csproj files, `README-QuickER.md`, `Generated/` and `design/mock/` with the same names, which is how you regenerate under the same project name, and leaves every other file alone.
+Generation overwrites the solution, the csproj files and `README-QuickER.md` with the same names, which is how you regenerate under the same project name, and leaves every other file alone.
+`Generated/` and `design/mock/` are emptied before they are written again, so nothing from the previous run is left there, such as code generated for another database or the HTML of a screen you have since removed.
+If the mock folder you chose is one of those two folders, sits inside one, or contains one (for example the `design/mock/` of a previous output), generation stops before writing anything, so your mock folder is never deleted.
 
 This second step is an aid for PoCs and prototyping.
 Depending on the AI model and the connection method, build errors may remain.
 When the final build fails, the generated files and the log are left in the output folder so you can fix them yourself.
+An unexpected error during the run is reported the same way as a failure of the backend, and the log (`quickr-mock-generation.log`) is written in every case.
+Interrupting stops the run at any point, including while the final build is running.
 
 ## Notes
 
@@ -113,7 +129,7 @@ When the final build fails, the generated files and the log are left in the outp
   | Backend | File writes | Command execution |
   |---|---|---|
   | API key | Submission through `emit_file` only. Limited to the output folder and to UI-layer source extensions (`.xaml` / `.cs` for WPF, `.razor` / `.css` / `.cs` for Blazor); build configuration files (`.csproj`, `Directory.Build.props` and the like) and anything under `Generated/`, `design/`, `obj/` or `bin/` are rejected, as is a path segment that ends in a dot or a space or contains `~`, which Windows could resolve to one of those folders | None |
-  | Copilot | Auto-approved only under the output folder | Auto-approved when the command's paths all resolve under the output folder. When no path can be read out of the command line, only `dotnet` is auto-approved, and only when every part of the command is `dotnet`, no URL is referenced, and nothing is redirected into a file; anything else is refused (headless runs cannot ask you). Note that `dotnet` itself is not confined to that folder, so a subcommand that reaches outside it (installing a global tool and then running it, for example) is auto-approved as well |
+  | Copilot | Auto-approved only under the output folder | Auto-approved only when the command references no URL and redirects nothing into a file, and then only when its paths all resolve under the output folder. When no path can be read out of the command line, only `dotnet` is auto-approved, and only when every part of the command is `dotnet`; anything else is refused (headless runs cannot ask you). Note that `dotnet` itself is not confined to that folder, so a subcommand that reaches outside it (installing a global tool and then running it, for example) is auto-approved as well |
   | Codex | Inside the sandbox (`workspace-write`) | Runs without approval inside the sandbox |
   | Claude Code | Edits files from the working folder (`Edit` / `Write` / `MultiEdit`) | `Bash` is unrestricted (it can run any command) |
 
@@ -134,6 +150,7 @@ When the final build fails, the generated files and the log are left in the outp
   For those two backends, QuickER records the output folder right after scaffolding, compares file contents again right before the build, and asks you to confirm when anything outside UI-layer sources and static assets (`.cs`, `.razor`, `.xaml`, `.css`, `.js`, `.html`, images) was added or changed.
   The list is shown in full, so a legitimate addition such as an `appsettings.json` appears there too.
   A folder link (junction or symbolic link) is listed as a single entry and not followed, whatever its name.
+  Anything QuickER could not delete from the project's `obj` / `bin` before the build is listed as well, because the build would read it.
   If you cancel, the build is not run and generation finishes with the project left **unverified**, with the files and the log still in the output folder for you to review.
   Claude Code and the API key method are not asked: Claude Code already runs any command it likes through `Bash`, so the build crosses no new boundary, and the API key method cannot submit a build file at all.
   Two limits are worth knowing. The comparison runs immediately before the build, while the executor's own processes may still be alive, so a file written back in that window is not detected.
@@ -146,6 +163,8 @@ When the final build fails, the generated files and the log are left in the outp
   Arguments containing a line break are refused as well, because `cmd` truncates at the first newline and quoting cannot prevent it.
   Multi-line content is passed through a temporary file instead of an argument.
   `copilot` is started from inside the GitHub Copilot SDK, so QuickER does not compose its command line; only the resolved path is checked.
+  For all three CLIs, a `.cmd` shim whose path contains `%` is refused, because `cmd` would expand it as an environment variable.
+  For `copilot`, a path containing `!` is refused as well: QuickER cannot turn off `cmd`'s delayed expansion for a process the SDK starts.
   Each CLI is looked up on `PATH` by absolute folder only (a relative entry such as `.` is skipped) and started by that full path, and `cmd.exe` is started from the Windows system folder by full path rather than by name.
   Install the CLIs from a location you trust
 

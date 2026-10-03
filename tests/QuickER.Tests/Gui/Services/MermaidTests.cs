@@ -284,6 +284,54 @@ public class MermaidTests
         child.Columns.Single(column => column.Name == "RegionCode").IsForeignKey.Should().BeTrue();
     }
 
+    /// <summary>
+    /// 複合主キーの各列が、親テーブル名由来の名前の子列を取り違えずに同名の子列へ付くことを検証する
+    /// </summary>
+    /// <param name="parentTable">親テーブル名</param>
+    /// <param name="firstKey">親の主キーの 1 列目</param>
+    /// <param name="secondKey">親の主キーの 2 列目（子にも同名の列がある）</param>
+    [Theory(DisplayName = "Mermaid 取込の複合主キーの自動ペア化は各列を同名の子列へ付ける")]
+    [InlineData("Orders", "OrderId", "Revision")]
+    [InlineData("Projects", "TenantId", "ProjectId")]
+    public void Import_CompositePrimaryKey_PairsEachColumnWithSameName(
+        string parentTable,
+        string firstKey,
+        string secondKey
+    )
+    {
+        var text = string.Join(
+            Environment.NewLine,
+            [
+                "erDiagram",
+                $"    {parentTable} {{",
+                $"        int {firstKey} PK",
+                $"        int {secondKey} PK",
+                "    }",
+                "    Child {",
+                "        int ChildId PK",
+                $"        int {firstKey}",
+                $"        int {secondKey}",
+                "    }",
+                $"    {parentTable} ||--o{{ Child : FK_Child_{parentTable}",
+            ]
+        );
+
+        var diagram = MermaidImporter.Parse(text);
+        var parent = diagram.Entities.Single(entity => entity.TableName == parentTable);
+        var child = diagram.Entities.Single(entity => entity.TableName == "Child");
+
+        diagram
+            .Relationships.Single()
+            .ColumnPairs.Select(pair =>
+                (
+                    parent.Columns.Single(column => column.Id == pair.SourceColumnId).Name,
+                    child.Columns.Single(column => column.Id == pair.TargetColumnId).Name
+                )
+            )
+            .Should()
+            .Equal((firstKey, firstKey), (secondKey, secondKey));
+    }
+
     /// <summary>行に紐づく解析エラーへ、その行の行番号が前置されることを検証する</summary>
     [Fact(DisplayName = "Mermaid 取込の解析エラーに行番号が付く")]
     public void Import_ParseError_PrefixesLineNumber()

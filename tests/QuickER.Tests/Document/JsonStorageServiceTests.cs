@@ -869,6 +869,9 @@ public class JsonStorageServiceTests
     [InlineData("{\"Version\":2}", true)]
     [InlineData("{\"Version\":\"2\"}", true)]
     [InlineData("{\"Version\":2.0}", true)]
+    [InlineData("{\"Version\":null}", true)]
+    [InlineData("{\"Version\":{}}", true)]
+    [InlineData("{\"Version\":[1]}", true)]
     public void IsNewerFormatFile_ClassifiesVersions(string? content, bool expected)
     {
         var path = Path.Combine(Path.GetTempPath(), $"er-version-{Guid.NewGuid()}.json");

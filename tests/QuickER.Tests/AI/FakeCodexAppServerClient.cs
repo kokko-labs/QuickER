@@ -115,6 +115,22 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     /// <summary>StartAsync で投げる例外（非 null なら起動失敗を模擬する）</summary>
     public Exception? StartException { get; set; }
 
+    /// <summary>非 null なら StartAsync のハンドシェイクをこのタスクの完了まで待たせる</summary>
+    /// <remarks>
+    /// 待つ間は実クライアントと同じく <see cref="IsStarted"/> が真（プロセスと stdin はできている）になり、
+    /// 重ねて呼ばれた StartAsync は何もせずに戻る（実クライアントの <c>if (IsStarted) return;</c> と同じ）。
+    /// </remarks>
+    public Task? StartGate { get; set; }
+
+    /// <summary>ReadAccountAsync が呼ばれた回数</summary>
+    public int ReadAccountCount { get; private set; }
+
+    /// <summary>ハンドシェイクの完了前（StartGate を待っている間）に ReadAccountAsync が呼ばれた回数</summary>
+    public int ReadAccountBeforeHandshakeCount { get; private set; }
+
+    /// <summary>StartGate を待っている StartAsync の数</summary>
+    private int _handshakesInProgress;
+
     public Task StartAsync(
         CodexAppServerSettings settings,
         string clientName,
@@ -130,8 +146,28 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
             throw StartException;
         }
 
+        if (_handshakesInProgress > 0)
+        {
+            return Task.CompletedTask;
+        }
+
         IsStarted = true;
-        return Task.CompletedTask;
+        return StartGate is null ? Task.CompletedTask : WaitHandshakeAsync(StartGate);
+    }
+
+    /// <summary>ハンドシェイクの完了を模擬して待つ</summary>
+    private async Task WaitHandshakeAsync(Task gate)
+    {
+        _handshakesInProgress++;
+
+        try
+        {
+            await gate;
+        }
+        finally
+        {
+            _handshakesInProgress--;
+        }
     }
 
     /// <summary>実クライアントと同じく「再接続できる停止」を模擬する（接続断イベントは出さない）</summary>
@@ -151,7 +187,17 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     public Task<CodexAccountInfo> ReadAccountAsync(
         bool refreshToken,
         CancellationToken cancellationToken = default
-    ) => Task.FromResult(NextAccountInfo);
+    )
+    {
+        ReadAccountCount++;
+
+        if (_handshakesInProgress > 0)
+        {
+            ReadAccountBeforeHandshakeCount++;
+        }
+
+        return Task.FromResult(NextAccountInfo);
+    }
 
     public Task<CodexLoginStartResult> LoginWithApiKeyAsync(
         string apiKey,
@@ -175,8 +221,19 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
             new CodexLoginStartResult { Type = CodexLoginType.ChatGpt, AuthUrl = ChatGptAuthUrl }
         );
 
+    /// <summary>
+    /// ログアウト時に account/updated（未ログイン）を流すか（既定 true。false にすると、通知に頼らず
+    /// エンジン自身がログアウト後の状態を反映することを検証できる）
+    /// </summary>
+    public bool RaiseAccountUpdatedOnLogout { get; set; } = true;
+
     public Task LogoutAsync(CancellationToken cancellationToken = default)
     {
+        if (!RaiseAccountUpdatedOnLogout)
+        {
+            return Task.CompletedTask;
+        }
+
         AccountUpdated?.Invoke(
             this,
             new CodexAccountUpdatedNotification { AuthMode = CodexAuthMode.None }

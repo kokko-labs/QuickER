@@ -251,6 +251,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>テスト専用: 変更追跡器（一括置換で旧要素の追跡が終了することを観測するため）</summary>
     internal DiagramChangeTracker ChangeTrackerForTests => _changeTracker;
 
+    /// <summary>図の一括更新（<see cref="RunBulkDiagramUpdate"/>）の入れ子の深さ（0＝一括更新中でない）</summary>
+    private int _bulkDiagramUpdateDepth;
+
+    /// <summary>テスト専用: リレーション構成に基づく列ルール（<see cref="ApplyRelationshipColumnRules"/>）を適用した回数</summary>
+    internal int RelationshipRuleApplicationCountForTests { get; private set; }
+
     /// <summary>現在の図のターゲット DBMS（プロバイダ識別名。バッキングフィールド）</summary>
     private IDatabaseProvider _currentProvider;
 
@@ -402,32 +408,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _changeTracker.RunWithoutTracking(() =>
         {
-            // Clear() は Reset 通知で OldItems を持たず CollectionChanged 側の自動解除が効かないため、
-            // エンティティ・リレーションとも明示的に購読解除・追跡終了を行う専用経路を通す
-            ClearDiagramCollections();
-
-            foreach (var entity in entities)
+            // 要素を 1 つ足すたびの列ルール・ハイライト・ミニマップの再計算を止め、最後に 1 回だけ流す
+            RunBulkDiagramUpdate(() =>
             {
-                var entityLayout =
-                    layout is not null && layout.TryGetValue(entity.Id, out var found)
-                        ? found
-                        : new EntityLayout();
-                Entities.Add(new EntityViewModel(entity, entityLayout));
-            }
+                // Clear() は Reset 通知で OldItems を持たず CollectionChanged 側の自動解除が効かないため、
+                // エンティティ・リレーションとも明示的に購読解除・追跡終了を行う専用経路を通す
+                ClearDiagramCollections();
 
-            foreach (var relationship in relationships)
-            {
-                var src = Entities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
-                var tgt = Entities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
-
-                // 両端のエンティティを解決できないリレーションは不正データとして読み飛ばす
-                if (src is null || tgt is null)
+                foreach (var entity in entities)
                 {
-                    continue;
+                    var entityLayout =
+                        layout is not null && layout.TryGetValue(entity.Id, out var found)
+                            ? found
+                            : new EntityLayout();
+                    Entities.Add(new EntityViewModel(entity, entityLayout));
                 }
 
-                Relationships.Add(new RelationshipViewModel(relationship, src, tgt));
-            }
+                foreach (var relationship in relationships)
+                {
+                    var src = Entities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
+                    var tgt = Entities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
+
+                    // 両端のエンティティを解決できないリレーションは不正データとして読み飛ばす
+                    if (src is null || tgt is null)
+                    {
+                        continue;
+                    }
+
+                    Relationships.Add(new RelationshipViewModel(relationship, src, tgt));
+                }
+            });
 
             SelectedEntity = null;
             SelectedRelationship = null;
@@ -1329,21 +1339,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // 参照元は始点の PK 全列、参照先は共通リゾルバの既定 FK 解決、制約名は FK_<参照側>_<被参照側> を初期値とする
+            // 参照元は始点の PK 全列、参照先は共通リゾルバの既定 FK 解決。制約名は FK_<参照側>_<被参照側> を初期値とし、
+            // 図の既存の制約名と衝突するときは AI ツールと同じ規則で一意にする（別の組でも既定名が同じになり得るため）。
+            // 多対多は列ペアが整合処理で落ちるので、名前にも列を使わない（AI ツールと揃える）
+            var columnPairs = BuildDefaultColumnPairs(PendingRelationshipSource, entity);
+            var childColumnNames =
+                PendingRelationshipType == RelationshipType.ManyToMany
+                    ? []
+                    : columnPairs
+                        .Select(pair =>
+                            entity.Columns.First(column => column.Id == pair.TargetColumnId).Name
+                        )
+                        .ToList();
             var rel = new RelationshipViewModel(
                 new Relationship
                 {
                     SourceEntityId = PendingRelationshipSource.Id,
                     TargetEntityId = entity.Id,
                     Type = PendingRelationshipType,
-                    ColumnPairs = ForeignKeyColumnResolver.ResolveColumnPairs(
-                        PendingRelationshipSource,
-                        entity,
-                        Relationships
-                    ),
-                    ConstraintName = ConstraintNames.ForeignKey(
+                    ColumnPairs = columnPairs,
+                    ConstraintName = ConstraintNames.UniqueForeignKey(
                         entity.TableName,
-                        PendingRelationshipSource.TableName
+                        PendingRelationshipSource.TableName,
+                        childColumnNames,
+                        ConstraintNames.CollectExisting(ToDiagramModel())
                     ),
                 },
                 PendingRelationshipSource,
@@ -1368,6 +1387,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
             relationship.Source == source && relationship.Target == target
         );
     }
+
+    /// <summary>親の主キー全列を子の列へ自動で対応付けた、新しいリレーションの既定の列ペアを返す</summary>
+    /// <remarks>
+    /// 判定は MCP のツールと Mermaid の取込が共有する <see cref="ForeignKeyColumnResolver"/> に任せ、
+    /// ここでは ViewModel を意味モデルへ写すだけ（列の Id はそのまま運ばれるので、返る列ペアは ViewModel の列を指す）。
+    /// 既存リレーションは使用済みの子列の判定にしか使わないので、子が同じものだけを写す。
+    /// リレーション作成フローと内蔵チャットの <c>add_relationship</c>（列を省略したとき）が共有する
+    /// </remarks>
+    internal List<RelationshipColumnPair> BuildDefaultColumnPairs(
+        EntityViewModel source,
+        EntityViewModel target
+    ) =>
+        ForeignKeyColumnResolver.ResolveColumnPairs(
+            source.ToModel(),
+            target.ToModel(),
+            Relationships
+                .Where(relationship => ReferenceEquals(relationship.Target, target))
+                .Select(relationship => relationship.ToModel())
+        );
 
     /// <summary>リレーションクリック時の処理。対象を単一選択し、エンティティ選択を解除する</summary>
     public void OnRelationshipClicked(RelationshipViewModel rel)
@@ -1700,6 +1738,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </remarks>
     public void ApplyRelationshipColumnRules(object? excludedSnapshotTarget = null)
     {
+        RelationshipRuleApplicationCountForTests++;
+
         _changeTracker.RunWithoutTracking(
             () =>
             {
@@ -2074,6 +2114,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
+        // 一括更新中は再計算を止める（終了時に RefreshAfterBulkDiagramUpdate が 1 回だけ流す）
+        if (_bulkDiagramUpdateDepth > 0)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Entities));
         RefreshCanvasSize();
 
@@ -2092,6 +2138,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </remarks>
     private void DetachEntityViewModel(EntityViewModel entity)
     {
+        // 作成中のリレーションの始点が図から外れたら作成モードを解く（削除・Undo・図の一括置換の全経路）。
+        // 残すと図に無い VM を始点にリレーションを作れてしまう（線が追従せず、削除済みなら宙に浮いた参照を保存する）
+        if (ReferenceEquals(entity, PendingRelationshipSource))
+        {
+            CancelRelationshipMode();
+        }
+
         entity.PropertyChanged -= OnEntityPropertyChanged;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
         _changeTracker.DetachEntity(entity);
@@ -2127,9 +2180,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// クリアし、空になった後に退避分を解除する。
     /// </para>
     /// <para>
-    /// 図を丸ごと入れ替える全経路（新規・開く・取込・DB 取込・AI 生成・外部変更の再読込は
-    /// <c>ReplaceDiagram</c> 経由、取込コマンドの Execute / Undo は <c>ImportSchemaCommand</c>）が
-    /// 自前の <c>Clear()</c> ではなくこれを呼ぶ。
+    /// 図を丸ごと入れ替える全経路（新規・開く・取込・DB 取込・AI 生成・外部変更の再読込）は
+    /// <c>ReplaceDiagram</c> を通り、自前の <c>Clear()</c> ではなくこれを呼ぶ。
     /// </para>
     /// </remarks>
     internal void ClearDiagramCollections()
@@ -2149,6 +2201,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             DetachEntityViewModel(entity);
         }
+    }
+
+    /// <summary>図の要素をまとめて入れ替える処理を実行し、要素ごとの再計算を終了時の 1 回へまとめる</summary>
+    /// <param name="action">エンティティ・リレーションのコレクションを入れ替える処理</param>
+    /// <remarks>
+    /// <para>
+    /// 実行中はコレクション変更ハンドラの後段（列ルールの再適用・関連ハイライト・ミニマップ・キャンバスサイズ・
+    /// 変更通知）を止め、最外側の終了時に 1 回だけ流す。止めないとリレーションを 1 本足すたびに全列のルールを
+    /// 付け直すことになり、開く・取込・外部変更の自動再読込の時間がリレーション数×要素数で伸びる。
+    /// 購読の着脱と変更追跡の着脱は止めない（要素ごとに必要）。
+    /// </para>
+    /// <para>
+    /// 図を丸ごと入れ替える経路（<see cref="ReplaceDiagram"/>）が使う。
+    /// </para>
+    /// </remarks>
+    internal void RunBulkDiagramUpdate(Action action)
+    {
+        _bulkDiagramUpdateDepth++;
+
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _bulkDiagramUpdateDepth--;
+
+            if (_bulkDiagramUpdateDepth == 0)
+            {
+                RefreshAfterBulkDiagramUpdate();
+            }
+        }
+    }
+
+    /// <summary>一括更新で止めていたコレクション変更の後段処理を 1 回だけ流す</summary>
+    private void RefreshAfterBulkDiagramUpdate()
+    {
+        ApplyRelationshipColumnRules();
+        OnPropertyChanged(nameof(Entities));
+        OnPropertyChanged(nameof(Relationships));
+        RefreshCanvasSize();
+        UpdateRelatedHighlights();
+        RecalculateMiniMap();
     }
 
     /// <summary>一意制約カードの構成列行で列が選び直されたときに、Undo 可能な差し替えとして確定させる</summary>
@@ -2184,7 +2279,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>リレーションの増減に応じて端点購読・変更追跡を切り替え、カラムの PK/FK ルールを再適用する</summary>
     /// <remarks>
     /// <c>ObservableCollection.Clear()</c> は Reset 通知で <c>OldItems</c> を持たないため、
-    /// 一括置換の経路（<see cref="ReplaceDiagram"/> / <c>ImportSchemaCommand</c>）は素の Clear ではなく
+    /// 一括置換の経路（<see cref="ReplaceDiagram"/>）は素の Clear ではなく
     /// <see cref="ClearDiagramCollections"/> を呼ぶ（購読解除の取りこぼしを防ぐ）
     /// </remarks>
     private void OnRelationshipsCollectionChanged(
@@ -2212,6 +2307,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 relationship.ColumnPairSelectionEdited += OnRelationshipColumnPairSelectionEdited;
                 _changeTracker.AttachRelationship(relationship);
             }
+        }
+
+        // 一括更新中は再計算を止める（終了時に RefreshAfterBulkDiagramUpdate が 1 回だけ流す）
+        if (_bulkDiagramUpdateDepth > 0)
+        {
+            return;
         }
 
         ApplyRelationshipColumnRules();

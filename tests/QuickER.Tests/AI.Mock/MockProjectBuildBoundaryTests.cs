@@ -55,12 +55,16 @@ public class MockProjectBuildBoundaryTests
     {
         public int BuildCallCount { get; private set; }
 
+        /// <summary>ビルド開始時点の状態を観測するフック（obj の中身の有無など）</summary>
+        public Action? OnBuild { get; set; }
+
         public Task<BuildRunResult> BuildAsync(
             string solutionFilePath,
             CancellationToken cancellationToken = default
         )
         {
             BuildCallCount++;
+            OnBuild?.Invoke();
             return Task.FromResult(new BuildRunResult(true, "build output"));
         }
 
@@ -123,11 +127,12 @@ public class MockProjectBuildBoundaryTests
         Action<string> duringRun,
         bool confirmAnswer = true,
         bool escapesSandbox = true,
-        bool wireConfirm = true
+        bool wireConfirm = true,
+        Action? onBuild = null
     )
     {
         var agent = new FakeAgent { OnRun = duringRun, EscapesSandbox = escapesSandbox };
-        var build = new CountingBuildRunner();
+        var build = new CountingBuildRunner { OnBuild = onBuild };
         var confirm = new RecordingConfirm(confirmAnswer);
         var runner = new MockProjectAgentRunner(
             agent,
@@ -419,32 +424,6 @@ public class MockProjectBuildBoundaryTests
     }
 
     /// <summary>
-    /// ジャンクション（ディレクトリの reparse point）を作る。
-    /// </summary>
-    /// <remarks>
-    /// ジャンクションの作成に公開 API は無く、シンボリックリンクは特権（開発者モード）を要するため、
-    /// 特権不要な <c>mklink /J</c> を使う。テストは Windows 専用プロジェクトにある。
-    /// </remarks>
-    private static void CreateJunction(string linkPath, string targetPath)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
-
-        using var process = System.Diagnostics.Process.Start(
-            new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath },
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            }
-        );
-        process!.WaitForExit();
-        process.ExitCode.Should().Be(0, "テスト前提のジャンクションを作成できる必要がある");
-    }
-
-    /// <summary>
     /// 出力フォルダの外を指すジャンクションは中へ辿らず、リンクそのものを 1 件として確認に出すことを検証する。
     /// </summary>
     /// <remarks>
@@ -468,7 +447,10 @@ public class MockProjectBuildBoundaryTests
 
             var link = Path.Combine(folder, ProjectName, "styles.css");
 
-            var (_, confirm, build) = await RunAsync(folder, _ => CreateJunction(link, outside));
+            var (_, confirm, build) = await RunAsync(
+                folder,
+                _ => ReparsePointTestHelper.CreateJunction(link, outside)
+            );
 
             confirm.CallCount.Should().Be(1);
             confirm.LastPaths.Should().Equal($"{ProjectName}/styles.css");
@@ -558,6 +540,394 @@ public class MockProjectBuildBoundaryTests
         finally
         {
             Cleanup(folder);
+        }
+    }
+
+    /// <summary>出力フォルダからの相対パスで書いた、プロジェクトの obj 直下のターゲット</summary>
+    private static readonly string ObjTargetsRelative =
+        $"{ProjectName}/obj/{ProjectName}.csproj.evil.targets";
+
+    /// <summary>出力フォルダ配下の相対パス（<c>/</c> 区切り）を絶対パスへ</summary>
+    private static string FullPath(string outputDirectory, string relative) =>
+        Path.Combine(outputDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>ファイルを書いて読み取り専用にする（フォルダも作る）</summary>
+    private static void WriteReadOnly(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "<Project/>");
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+    }
+
+    /// <summary>ファイルを書いて、削除の共有を許さないハンドルで開いたままにする（削除が必ず失敗する）</summary>
+    private static Microsoft.Win32.SafeHandles.SafeFileHandle WriteAndLock(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "<Project/>");
+        return ReparsePointTestHelper.OpenWithoutDeleteSharing(path);
+    }
+
+    /// <summary>
+    /// 読み取り専用の <c>obj/*.targets</c> が、確認なしに最終ビルドへ渡らないこと（安全側の性質）。
+    /// </summary>
+    /// <remarks>
+    /// Windows の <see cref="Directory.Delete(string, bool)"/> は読み取り専用を外さないので、素の削除では
+    /// このファイルが残り、ワイルドカード import で最終ビルドに実行される。ここで固定するのは実装の手段でなく
+    /// 結果＝「ビルドの時点でファイルが無い」か「確認一覧に載る（確認手段が無ければビルドしない）」のどちらか。
+    /// 読み取り専用の解除を外しても、残存検査が拾うのでこのテストは緑のまま（二重化の確認）。
+    /// </remarks>
+    [Theory(DisplayName = "読み取り専用の obj/*.targets を確認なしに最終ビルドへ渡さない")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReadOnlyObjTargets_NeverReachBuildUnconfirmed(bool wireConfirm)
+    {
+        var folder = NewTempFolder();
+        var targets = FullPath(folder, ObjTargetsRelative);
+
+        try
+        {
+            Scaffold(folder);
+            bool? existedAtBuild = null;
+
+            var (result, confirm, build) = await RunAsync(
+                folder,
+                _ => WriteReadOnly(targets),
+                wireConfirm: wireConfirm,
+                onBuild: () => existedAtBuild = File.Exists(targets)
+            );
+
+            if (build.BuildCallCount == 0)
+            {
+                // ビルドしなかったのなら、確認する手段が無かった場合に限る
+                result.BuildDeclined.Should().BeTrue();
+                wireConfirm.Should().BeFalse();
+            }
+            else if (existedAtBuild == true)
+            {
+                // 残ったままビルドしたのなら、利用者がそれを一覧で見て承認していなければならない
+                wireConfirm.Should().BeTrue();
+                confirm.LastPaths.Should().Contain(ObjTargetsRelative);
+            }
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(folder);
+        }
+    }
+
+    /// <summary>
+    /// 読み取り専用の属性を外してから消すので、読み取り専用の <c>obj/*.targets</c> は確認なしに消えて
+    /// そのままビルドする（現行の実装の結果＝上の性質のうち「ファイルが無い」側）。
+    /// </summary>
+    [Fact(DisplayName = "読み取り専用の obj/*.targets も属性を外して消し、確認なしでビルドする")]
+    public async Task ReadOnlyObjTargets_AreDeletedBeforeBuild()
+    {
+        var folder = NewTempFolder();
+        var targets = FullPath(folder, ObjTargetsRelative);
+
+        try
+        {
+            Scaffold(folder);
+            bool? existedAtBuild = null;
+
+            var (result, confirm, build) = await RunAsync(
+                folder,
+                _ => WriteReadOnly(targets),
+                onBuild: () => existedAtBuild = File.Exists(targets)
+            );
+
+            confirm.CallCount.Should().Be(0);
+            build.BuildCallCount.Should().Be(1);
+            existedAtBuild.Should().BeFalse();
+            result.Success.Should().BeTrue();
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(folder);
+        }
+    }
+
+    /// <summary>
+    /// 削除できずに残った <c>obj</c> のファイルは確認一覧へ回り、承認したときだけビルドする（フェイルクローズ）。
+    /// </summary>
+    /// <remarks>
+    /// 削除の共有を許さないハンドルで開いたままにして、削除を確実に失敗させる（読み取り専用と違い、
+    /// QuickER の側からは外せない）。変更検知は obj / bin を見ないので、拾えるのは残存検査だけ。
+    /// </remarks>
+    [Theory(DisplayName = "削除できずに残った obj のファイルは確認一覧に出す")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UndeletableObjFile_IsListedForConfirmation(bool confirmAnswer)
+    {
+        var folder = NewTempFolder();
+        var targets = FullPath(folder, ObjTargetsRelative);
+        Microsoft.Win32.SafeHandles.SafeFileHandle? lockHandle = null;
+
+        try
+        {
+            Scaffold(folder);
+
+            var (result, confirm, build) = await RunAsync(
+                folder,
+                _ => lockHandle = WriteAndLock(targets),
+                confirmAnswer: confirmAnswer
+            );
+
+            confirm.CallCount.Should().Be(1);
+            confirm.LastPaths.Should().Equal(ObjTargetsRelative);
+            build.BuildCallCount.Should().Be(confirmAnswer ? 1 : 0);
+            result.BuildDeclined.Should().Be(!confirmAnswer);
+            File.ReadAllText(result.LogPath)
+                .Should()
+                .Contain(MockStrings.Mock_Run_BuildOutputsNotDeleted)
+                .And.Contain(ObjTargetsRelative);
+        }
+        finally
+        {
+            lockHandle?.Dispose();
+            ReparsePointTestHelper.DeleteTree(folder);
+        }
+    }
+
+    /// <summary>削除できずに残った obj があり、確認する手段が無ければビルドしない</summary>
+    [Fact(
+        DisplayName = "削除できずに残った obj があり確認 seam が未配線なら最終ビルドを実行しない"
+    )]
+    public async Task UndeletableObjFile_WithoutConfirmSeam_SkipsBuild()
+    {
+        var folder = NewTempFolder();
+        var targets = FullPath(folder, ObjTargetsRelative);
+        Microsoft.Win32.SafeHandles.SafeFileHandle? lockHandle = null;
+
+        try
+        {
+            Scaffold(folder);
+
+            var (result, _, build) = await RunAsync(
+                folder,
+                _ => lockHandle = WriteAndLock(targets),
+                wireConfirm: false
+            );
+
+            build.BuildCallCount.Should().Be(0);
+            result.BuildDeclined.Should().BeTrue();
+        }
+        finally
+        {
+            lockHandle?.Dispose();
+            ReparsePointTestHelper.DeleteTree(folder);
+        }
+    }
+
+    /// <summary>
+    /// 境界越えを宣言しない実行器では、残存は確認に回さずログへ残すだけ（黙らせない）。
+    /// </summary>
+    [Fact(DisplayName = "境界越えを宣言しない実行器では残った obj をログへ残して確認しない")]
+    public async Task UndeletableObjFile_NonEscapingAgent_IsLoggedOnly()
+    {
+        var folder = NewTempFolder();
+        var targets = FullPath(folder, ObjTargetsRelative);
+        Microsoft.Win32.SafeHandles.SafeFileHandle? lockHandle = null;
+
+        try
+        {
+            Scaffold(folder);
+
+            var (result, confirm, build) = await RunAsync(
+                folder,
+                _ => lockHandle = WriteAndLock(targets),
+                escapesSandbox: false
+            );
+
+            confirm.CallCount.Should().Be(0);
+            build.BuildCallCount.Should().Be(1);
+            File.ReadAllText(result.LogPath)
+                .Should()
+                .Contain(MockStrings.Mock_Run_BuildOutputsNotDeleted)
+                .And.Contain(ObjTargetsRelative);
+        }
+        finally
+        {
+            lockHandle?.Dispose();
+            ReparsePointTestHelper.DeleteTree(folder);
+        }
+    }
+
+    /// <summary>
+    /// 外せなかった obj のジャンクションは、フォルダそのものを 1 件として確認一覧に出す（中へ入らない・重複しない）。
+    /// </summary>
+    /// <remarks>
+    /// 差分（変更検知）と残存は同じ表記の 1 つの一覧へまとめる。obj / bin はフォルダ自身も差分の対象外なので
+    /// 2 つの出どころは重ならないが、まとめる側でも重複を除く（二重化）。リンク先の中身は消さず、一覧にも出さない。
+    /// </remarks>
+    [Fact(DisplayName = "外せなかった obj のジャンクションはフォルダ自体を 1 件だけ確認に出す")]
+    public async Task UndeletableObjJunction_IsListedOnceWithoutTraversal()
+    {
+        var folder = NewTempFolder();
+        var outside = NewTempFolder();
+        var obj = Path.Combine(folder, ProjectName, "obj");
+        Microsoft.Win32.SafeHandles.SafeFileHandle? lockHandle = null;
+
+        try
+        {
+            Scaffold(folder);
+            var outsideTargets = Path.Combine(outside, $"{ProjectName}.csproj.evil.targets");
+            File.WriteAllText(outsideTargets, "<Project/>");
+
+            var (_, confirm, build) = await RunAsync(
+                folder,
+                _ =>
+                {
+                    ReparsePointTestHelper.CreateJunction(obj, outside);
+                    lockHandle = ReparsePointTestHelper.OpenWithoutDeleteSharing(obj);
+                }
+            );
+
+            confirm.CallCount.Should().Be(1);
+            confirm.LastPaths.Should().OnlyHaveUniqueItems();
+            confirm.LastPaths.Should().Equal($"{ProjectName}/obj");
+            build.BuildCallCount.Should().Be(1);
+            File.Exists(outsideTargets).Should().BeTrue("リンク先の中身には触れない");
+        }
+        finally
+        {
+            lockHandle?.Dispose();
+            ReparsePointTestHelper.DeleteTree(folder);
+            ReparsePointTestHelper.DeleteTree(outside);
+        }
+    }
+
+    /// <summary>
+    /// リンクでない reparse フォルダ（OneDrive の Files On-Demand と同じ形）は中へ入って比較する。
+    /// </summary>
+    /// <remarks>
+    /// 属性ビットで「辿らない」と決めると、中へ書かれたファイルが変更検知から見えなくなる。
+    /// 判定は <see cref="FileSystemInfo.LinkTarget"/>（<see cref="MockProjectFiles.IsLink"/>）で行う。
+    /// </remarks>
+    [Fact(DisplayName = "リンクでない reparse フォルダの中へ書かれたファイルも確認に出す")]
+    public async Task NonLinkReparseFolder_IsTraversed()
+    {
+        var folder = NewTempFolder();
+
+        try
+        {
+            Scaffold(folder);
+            var wwwroot = Path.Combine(folder, ProjectName, "wwwroot");
+            Directory.CreateDirectory(wwwroot);
+            File.WriteAllText(Path.Combine(wwwroot, "site.css"), "body {}");
+            ReparsePointTestHelper.MakeReadableNonLinkReparseDirectory(wwwroot);
+
+            var (_, confirm, build) = await RunAsync(
+                folder,
+                _ => File.WriteAllText(Path.Combine(wwwroot, "evil.targets"), "<Project/>")
+            );
+
+            confirm.CallCount.Should().Be(1);
+            confirm.LastPaths.Should().Equal($"{ProjectName}/wwwroot/evil.targets");
+            build.BuildCallCount.Should().Be(1);
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(folder);
+        }
+    }
+
+    /// <summary>リンクでない reparse フォルダは、中身が変わっていなければ確認に出さない（誤検知しない）</summary>
+    [Fact(DisplayName = "リンクでない reparse フォルダは変化が無ければ確認しない")]
+    public async Task NonLinkReparseFolder_Unchanged_NoConfirmation()
+    {
+        var folder = NewTempFolder();
+
+        try
+        {
+            Scaffold(folder);
+            var wwwroot = Path.Combine(folder, ProjectName, "wwwroot");
+            Directory.CreateDirectory(wwwroot);
+            File.WriteAllText(Path.Combine(wwwroot, "appsettings.json"), "{}");
+            ReparsePointTestHelper.MakeReadableNonLinkReparseDirectory(wwwroot);
+
+            var (_, confirm, build) = await RunAsync(folder, _ => { });
+
+            confirm.CallCount.Should().Be(0);
+            build.BuildCallCount.Should().Be(1);
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(folder);
+        }
+    }
+
+    /// <summary>
+    /// obj がリンクでない reparse フォルダでも、中身ごと消してから確認なしでビルドする。
+    /// </summary>
+    /// <remarks>
+    /// 属性ビットでリンク扱いにすると、非再帰の削除が「空でない」で失敗して obj が残る。
+    /// </remarks>
+    [Fact(DisplayName = "obj がリンクでない reparse フォルダでも中身ごと消してビルドする")]
+    public async Task ObjAsNonLinkReparseFolder_IsDeletedWithContents()
+    {
+        var folder = NewTempFolder();
+        var obj = Path.Combine(folder, ProjectName, "obj");
+
+        try
+        {
+            Scaffold(folder);
+            bool? objExistedAtBuild = null;
+
+            var (_, confirm, build) = await RunAsync(
+                folder,
+                dir =>
+                {
+                    Directory.CreateDirectory(obj);
+                    File.WriteAllText(FullPath(dir, ObjTargetsRelative), "<Project/>");
+                    ReparsePointTestHelper.MakeReadableNonLinkReparseDirectory(obj);
+                },
+                onBuild: () => objExistedAtBuild = Directory.Exists(obj)
+            );
+
+            confirm.CallCount.Should().Be(0);
+            build.BuildCallCount.Should().Be(1);
+            objExistedAtBuild.Should().BeFalse();
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(folder);
+        }
+    }
+
+    /// <summary>
+    /// 中を列挙できない reparse フォルダは中へ入らず（ランは落ちない）、変化が無くても毎回確認一覧に出す。
+    /// </summary>
+    /// <remarks>
+    /// 中身を確かめられない以上「変わっていない」とは言えないので、スキャフォールド時点から在って何も
+    /// 変わっていなくても毎回一覧に出る（フェイルクローズとして受け入れた挙動）。中へ再帰しようとすると
+    /// 列挙が <see cref="IOException"/> で止まり、ランごと落ちる。
+    /// </remarks>
+    [Fact(DisplayName = "中を列挙できない reparse フォルダは毎回確認に出し、ランは落ちない")]
+    public async Task UnlistableReparseFolder_IsAlwaysListed()
+    {
+        var folder = NewTempFolder();
+
+        try
+        {
+            Scaffold(folder);
+
+            // 置き場所は出力フォルダ直下（プロジェクトフォルダの外）。成果物検証（MockProjectFiles）は
+            // プロジェクトフォルダ配下だけを見るので、変更検知の挙動だけを切り出して確かめられる
+            var cache = Path.Combine(folder, "cache");
+            Directory.CreateDirectory(cache);
+            ReparsePointTestHelper.MakeUnlistableReparseDirectory(cache);
+
+            // 実行器は何も書かない（スキャフォールド時点から在るフォルダが変わらないまま）
+            var (_, confirm, build) = await RunAsync(folder, _ => { });
+
+            confirm.CallCount.Should().Be(1);
+            confirm.LastPaths.Should().Equal("cache");
+            build.BuildCallCount.Should().Be(1);
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(folder);
         }
     }
 

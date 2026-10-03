@@ -51,6 +51,9 @@ public static class ErDiagramDynamicTools
     private static string BuildDiagramSummary(MainViewModel vm)
     {
         var sb = new StringBuilder();
+
+        // 型名・制約の書き方は対象 DBMS で変わるので、最初に読む要約の先頭で示す（MCP のツールと同じ）
+        sb.AppendLine(string.Format(Strings.Tool_Summary_TargetDbms, vm.CurrentProvider.Name));
         sb.AppendLine(string.Format(Strings.Tool_Summary_TableCount, vm.Entities.Count));
         sb.AppendLine(
             string.Format(Strings.Tool_Summary_RelationshipCount, vm.Relationships.Count)
@@ -115,10 +118,24 @@ public static class ErDiagramDynamicTools
     }
 
     /// <summary>エンティティを追加する（初期座標は重なり回避のため件数に応じてずらす）</summary>
+    /// <remarks>
+    /// 空・空白だけの名前と、既存テーブルと大文字小文字を無視して同じ名前は拒否する（MCP のツールと同じ規則）
+    /// </remarks>
     private static (string, bool) AddEntity(JsonElement args, MainViewModel vm)
     {
         var tableName = GetString(args, "table_name") ?? "NewTable";
         var desc = GetString(args, "description") ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            return (Strings.Tool_TableNameRequired, false);
+        }
+
+        if (FindEntity(vm, tableName) is { } existing)
+        {
+            return (string.Format(Strings.Tool_TableNameTaken, existing.TableName), false);
+        }
+
         var model = new Entity { TableName = tableName, Description = desc };
         var layout = new Documents.EntityLayout
         {
@@ -140,17 +157,30 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
             return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
+        // 削除コマンドはそのテーブルの名前付きクエリも取り除くので、応答で名指しする（MCP のツールと同じ）
+        var removedQueryNames = vm
+            .Queries.Where(query => query.EntityId == entity.Id)
+            .Select(query => query.Name)
+            .ToList();
         vm.UndoRedo.Execute(new UndoRedo.RemoveEntityCommand(vm, entity));
-        return (string.Format(Strings.Tool_EntityRemoved, tableName), true);
+
+        return removedQueryNames.Count == 0
+            ? (string.Format(Strings.Tool_EntityRemoved, tableName), true)
+            : (
+                string.Format(
+                    Strings.Tool_EntityRemovedWithQueries,
+                    tableName,
+                    string.Join(Strings.Tool_ListSeparator, removedQueryNames)
+                ),
+                true
+            );
     }
 
     /// <summary>指定テーブルへカラムを追加する</summary>
@@ -165,13 +195,25 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableAndColumnNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            return (Strings.Tool_DataTypeEmpty, false);
+        }
+
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
             return (string.Format(Strings.Tool_TableNotFound, tableName), false);
+        }
+
+        // 同じテーブルに大文字小文字だけ違う同名の列を作らない（列名で照合する他のツールから 2 本目に触れなくなる）
+        if (FindColumn(entity, columnName) is { } existingColumn)
+        {
+            return (
+                string.Format(Strings.Tool_ColumnNameTaken, entity.TableName, existingColumn.Name),
+                false
+            );
         }
 
         var isPk =
@@ -207,18 +249,14 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableAndColumnNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
             return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
-        var column = entity.Columns.FirstOrDefault(c =>
-            string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
-        );
+        var column = FindColumn(entity, columnName);
 
         if (column is null)
         {
@@ -248,9 +286,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -264,7 +300,29 @@ public static class ErDiagramDynamicTools
             && newNameEl.ValueKind == JsonValueKind.String
         )
         {
-            entity.TableName = newNameEl.GetString()!;
+            var newTableName = newNameEl.GetString()!;
+
+            if (string.IsNullOrWhiteSpace(newTableName))
+            {
+                return (Strings.Tool_NewTableNameEmpty, false);
+            }
+
+            // 自分自身の大文字小文字だけを変える改名は許す
+            var other = vm.Entities.FirstOrDefault(candidate =>
+                !ReferenceEquals(candidate, entity)
+                && string.Equals(
+                    candidate.TableName,
+                    newTableName,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            );
+
+            if (other is not null)
+            {
+                return (string.Format(Strings.Tool_TableNameTaken, other.TableName), false);
+            }
+
+            entity.TableName = newTableName;
             changed.Add(Strings.Tool_Field_TableName);
         }
 
@@ -309,22 +367,27 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableAndColumnNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
             return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
-        var column = entity.Columns.FirstOrDefault(c =>
-            string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
-        );
+        var column = FindColumn(entity, columnName);
 
         if (column is null)
         {
             return (string.Format(Strings.Tool_ColumnNotFound, columnName), false);
+        }
+
+        // 検証はどの変更よりも先に行う（変更はその場で VM へ反映されるので、途中で失敗すると一部だけ反映される）
+        if (
+            GetString(args, "data_type") is { } requestedDataType
+            && string.IsNullOrWhiteSpace(requestedDataType)
+        )
+        {
+            return (Strings.Tool_DataTypeEmpty, false);
         }
 
         var changed = new List<string>();
@@ -347,29 +410,42 @@ public static class ErDiagramDynamicTools
             changed.Add(Strings.Tool_Field_DataType);
         }
 
+        // 主キー列は NULL 不可（ColumnViewModel が握り潰す）。NULL 許容への変更は無視し、応答でそう告げる（MCP のツールと同じ）
+        var nullableIgnored = false;
+
         if (
             args.TryGetProperty("is_nullable", out var isNullEl)
             && isNullEl.ValueKind is JsonValueKind.True or JsonValueKind.False
         )
         {
-            column.IsNullable = isNullEl.GetBoolean();
-            changed.Add(Strings.Tool_Field_Nullable);
+            if (column.IsPrimaryKey && isNullEl.GetBoolean())
+            {
+                nullableIgnored = true;
+            }
+            else
+            {
+                column.IsNullable = isNullEl.GetBoolean();
+                changed.Add(Strings.Tool_Field_Nullable);
+            }
         }
+
+        var ignoredNote = string.Format(Strings.Tool_PrimaryKeyNullableIgnored, column.Name);
 
         if (changed.Count == 0)
         {
-            return (Strings.Tool_NoColumnPropertiesToChange, false);
+            return nullableIgnored
+                ? (ignoredNote, true)
+                : (Strings.Tool_NoColumnPropertiesToChange, false);
         }
 
-        return (
-            string.Format(
-                Strings.Tool_ColumnUpdated,
-                tableName,
-                columnName,
-                string.Join(Strings.Tool_ListSeparator, changed)
-            ),
-            true
+        var updated = string.Format(
+            Strings.Tool_ColumnUpdated,
+            tableName,
+            columnName,
+            string.Join(Strings.Tool_ListSeparator, changed)
         );
+
+        return (nullableIgnored ? $"{updated} {ignoredNote}" : updated, true);
     }
 
     /// <summary>2 テーブル間にリレーションを追加する</summary>
@@ -381,19 +457,15 @@ public static class ErDiagramDynamicTools
     {
         var sourceTable = GetString(args, "source_table");
         var targetTable = GetString(args, "target_table");
-        var typeStr = GetString(args, "relationship_type") ?? "OneToMany";
+        var typeStr = GetString(args, "relationship_type");
 
         if (string.IsNullOrWhiteSpace(sourceTable) || string.IsNullOrWhiteSpace(targetTable))
         {
             return (Strings.Tool_SourceAndTargetTableRequired, false);
         }
 
-        var source = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, sourceTable, StringComparison.OrdinalIgnoreCase)
-        );
-        var target = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, targetTable, StringComparison.OrdinalIgnoreCase)
-        );
+        var source = FindEntity(vm, sourceTable);
+        var target = FindEntity(vm, targetTable);
 
         if (source is null)
         {
@@ -405,18 +477,67 @@ public static class ErDiagramDynamicTools
             return (string.Format(Strings.Tool_TableNotFound, targetTable), false);
         }
 
-        var relType = typeStr switch
+        if (ParseRelationshipType(typeStr) is not { } relType)
         {
-            "OneToOne" => RelationshipType.OneToOne,
-            "ManyToMany" => RelationshipType.ManyToMany,
-            _ => RelationshipType.OneToMany,
-        };
+            return (
+                string.Format(
+                    Strings.Tool_RelationshipTypeInvalid,
+                    typeStr,
+                    string.Join(", ", Enum.GetNames<RelationshipType>())
+                ),
+                false
+            );
+        }
 
         var (columnPairs, pairError) = ResolveRelationshipColumnPairs(source, target, args, vm);
 
         if (pairError is not null)
         {
             return (pairError, false);
+        }
+
+        // 同じ親子・同じ列ペアの外部キーを 2 本作らない（DDL に同じ外部キーが 2 本出る）。
+        // 多対多と列ペアの無い関係は外部キーとして DDL に出ないので対象にしない（MCP のツールと同じ規則）
+        var duplicate =
+            relType == RelationshipType.ManyToMany || columnPairs!.Count == 0
+                ? null
+                : vm.Relationships.FirstOrDefault(existing =>
+                    ReferenceEquals(existing.Source, source)
+                    && ReferenceEquals(existing.Target, target)
+                    && HasSameColumnPairs(existing.ColumnPairs, columnPairs)
+                );
+
+        if (duplicate is not null)
+        {
+            return (
+                string.Format(
+                    Strings.Tool_RelationshipDuplicate,
+                    source.TableName,
+                    target.TableName,
+                    DescribeConstraintNames([duplicate])
+                ),
+                false
+            );
+        }
+
+        // 多対多は VM 側の整合処理が列ペアを落とすので、名前にも列を使わない（MCP ホストと揃える）
+        var childColumnNames =
+            relType == RelationshipType.ManyToMany
+                ? []
+                : columnPairs!
+                    .Select(pair => target.Columns.First(c => c.Id == pair.TargetColumnId).Name)
+                    .ToList();
+        var (constraintName, nameError) = ResolveNewForeignKeyName(
+            args,
+            target.TableName,
+            source.TableName,
+            childColumnNames,
+            ConstraintNames.CollectExisting(vm.ToDiagramModel())
+        );
+
+        if (nameError is not null)
+        {
+            return (nameError, false);
         }
 
         var rel = new RelationshipViewModel(
@@ -427,14 +548,100 @@ public static class ErDiagramDynamicTools
                 Type = relType,
                 // 多対多では VM 側の整合処理が列ペアを落とす（中間テーブルを介する概念表現のため）
                 ColumnPairs = columnPairs!,
-                // 既定名の規則は GUI の手作成・MCP のツールと共有する（作成経路で名前が割れないように）
-                ConstraintName = ConstraintNames.ForeignKey(target.TableName, source.TableName),
+                ConstraintName = constraintName,
             },
             source,
             target
         );
         vm.UndoRedo.Execute(new UndoRedo.AddRelationshipCommand(vm, rel));
-        return (string.Format(Strings.Tool_RelationshipAdded, sourceTable, targetTable), true);
+
+        var added = string.Format(
+            Strings.Tool_RelationshipAdded,
+            sourceTable,
+            targetTable,
+            constraintName
+        );
+        var note =
+            DescribeIncompleteInferredPairs(args, relType, source, target, columnPairs!.Count)
+            ?? DescribeNonCandidateKeyColumns(relType, source, columnPairs);
+
+        return (note is null ? added : $"{added} {note}", true);
+    }
+
+    /// <summary>
+    /// 明示した親側の列が親の主キーとも一意制約とも一致しないときの注意文
+    /// </summary>
+    /// <returns>注意文。候補キーと一致する・列ペアが無い・多対多のときは null</returns>
+    /// <remarks>
+    /// 拒否はしない（MySQL は一意でない索引列を参照する外部キーを受け付け、DB 取込の図にもその形が入り得る）。
+    /// 列を省略した推論は主キー全列から作るため、ここに来るのは列を明示したときだけ。
+    /// MCP 側 <c>DocumentErDiagramToolHost.DescribeNonCandidateKeyColumns</c> と同じ判定（<see cref="Entity.IsCandidateKey"/>）
+    /// </remarks>
+    private static string? DescribeNonCandidateKeyColumns(
+        RelationshipType relationshipType,
+        EntityViewModel source,
+        IReadOnlyList<RelationshipColumnPair> columnPairs
+    )
+    {
+        if (relationshipType == RelationshipType.ManyToMany || columnPairs.Count == 0)
+        {
+            return null;
+        }
+
+        var parentColumnIds = columnPairs.Select(pair => pair.SourceColumnId).ToList();
+
+        if (source.ToModel().IsCandidateKey(parentColumnIds))
+        {
+            return null;
+        }
+
+        var names = parentColumnIds.Select(id => source.Columns.First(c => c.Id == id).Name);
+
+        return string.Format(
+            Strings.Tool_RelationshipParentColumnsNotKey,
+            $"({string.Join(", ", names)})",
+            source.TableName
+        );
+    }
+
+    /// <summary>新しいリレーションの制約名を決める（<c>constraint_name</c> の指定、無ければ衝突しない既定名）</summary>
+    /// <param name="args">ツール引数</param>
+    /// <param name="childTable">参照する側（子）のテーブル名</param>
+    /// <param name="parentTable">参照される側（親）のテーブル名</param>
+    /// <param name="childColumnNames">外部キーを構成する子の列名（宣言順）</param>
+    /// <param name="existingNames">図の中の既存の制約名</param>
+    /// <returns>決めた名前。指定された名前が既存と衝突するときはエラー文</returns>
+    /// <remarks>
+    /// 空・空白だけの指定は省略として扱い、前後の空白は除く。指定された名前が既存と衝突するときは、
+    /// 黙って付け替えず拒否する（付け替えるとその名前での remove_relationship が外れ、受け入れると DDL が失敗する）。
+    /// 規則は MCP のツールと共有する（<see cref="ConstraintNames.UniqueForeignKey"/>）
+    /// </remarks>
+    private static (string Name, string? Error) ResolveNewForeignKeyName(
+        JsonElement args,
+        string childTable,
+        string parentTable,
+        IReadOnlyList<string> childColumnNames,
+        IReadOnlySet<string> existingNames
+    )
+    {
+        var requested = GetString(args, "constraint_name")?.Trim();
+
+        if (string.IsNullOrEmpty(requested))
+        {
+            return (
+                ConstraintNames.UniqueForeignKey(
+                    childTable,
+                    parentTable,
+                    childColumnNames,
+                    existingNames
+                ),
+                null
+            );
+        }
+
+        return existingNames.Contains(requested)
+            ? (requested, string.Format(Strings.Tool_RelationshipConstraintNameTaken, requested))
+            : (requested, null);
     }
 
     /// <summary>
@@ -467,10 +674,7 @@ public static class ErDiagramDynamicTools
 
         if (sourceNames is null && targetNames is null)
         {
-            return (
-                ForeignKeyColumnResolver.ResolveColumnPairs(source, target, vm.Relationships),
-                null
-            );
+            return (vm.BuildDefaultColumnPairs(source, target), null);
         }
 
         if (sourceNames is null || targetNames is null)
@@ -599,6 +803,72 @@ public static class ErDiagramDynamicTools
         return (names, null);
     }
 
+    /// <summary>
+    /// 列を省略して親の主キーから列ペアを推論したのに、主キー列の一部（または全部）に子列を引き当てられなかったときの注意文
+    /// </summary>
+    /// <returns>注意文。推論が親の主キー全列に届いた・列を明示した・多対多のときは null</returns>
+    /// <remarks>MCP 側 <c>DocumentErDiagramToolHost.DescribeIncompleteInferredPairs</c> と同じ判定</remarks>
+    private static string? DescribeIncompleteInferredPairs(
+        JsonElement args,
+        RelationshipType relationshipType,
+        EntityViewModel source,
+        EntityViewModel target,
+        int pairCount
+    )
+    {
+        var columnsGiven =
+            GetColumnNames(args, "source_columns").Names is not null
+            || GetColumnNames(args, "target_columns").Names is not null;
+        var keyCount = source.Columns.Count(column => column.IsPrimaryKey);
+
+        if (columnsGiven || relationshipType == RelationshipType.ManyToMany)
+        {
+            return null;
+        }
+
+        if (keyCount == 0)
+        {
+            return string.Format(Strings.Tool_RelationshipParentHasNoKey, source.TableName);
+        }
+
+        return pairCount < keyCount
+            ? string.Format(
+                Strings.Tool_RelationshipPairsIncomplete,
+                pairCount,
+                keyCount,
+                source.TableName,
+                target.TableName
+            )
+            : null;
+    }
+
+    /// <summary><c>relationship_type</c> を列挙値へ解釈する（列挙子の名前と大文字小文字を無視して一致。未指定は一対多）</summary>
+    /// <returns>解釈した種別。どの列挙子とも一致しなければ null</returns>
+    /// <remarks>MCP 側 <c>DocumentErDiagramToolHost.ParseRelationshipType</c> と同じ規則</remarks>
+    private static RelationshipType? ParseRelationshipType(string? value) =>
+        value is null
+            ? RelationshipType.OneToMany
+            : Enum.GetValues<RelationshipType>()
+                .Cast<RelationshipType?>()
+                .FirstOrDefault(type =>
+                    string.Equals(type.ToString(), value, StringComparison.OrdinalIgnoreCase)
+                );
+
+    /// <summary>2 つの列ペア一覧が、並びを問わず同じ (親列, 子列) の組を持つかを判定する</summary>
+    private static bool HasSameColumnPairs(
+        IReadOnlyCollection<RelationshipColumnPair> left,
+        IReadOnlyCollection<RelationshipColumnPair> right
+    ) =>
+        left.Select(pair => (pair.SourceColumnId, pair.TargetColumnId))
+            .ToHashSet()
+            .SetEquals(right.Select(pair => (pair.SourceColumnId, pair.TargetColumnId)));
+
+    /// <summary>テーブル名でエンティティを検索する（大文字小文字を区別しない・最初の一致）</summary>
+    private static EntityViewModel? FindEntity(MainViewModel vm, string tableName) =>
+        vm.Entities.FirstOrDefault(entity =>
+            string.Equals(entity.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
+
     /// <summary>指定テーブルの列を名前で検索する（大文字小文字を区別しない）</summary>
     private static ColumnViewModel? FindColumn(EntityViewModel entity, string columnName) =>
         entity.Columns.FirstOrDefault(column =>
@@ -715,9 +985,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -753,9 +1021,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -825,9 +1091,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -893,9 +1157,7 @@ public static class ErDiagramDynamicTools
             }
 
             var columnName = item.GetString()!;
-            var column = entity.Columns.FirstOrDefault(c =>
-                string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
-            );
+            var column = FindColumn(entity, columnName);
 
             if (column is null)
             {

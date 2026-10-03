@@ -1,6 +1,9 @@
-﻿using Anthropic.Models.Messages;
+﻿using System.Net.Http;
+using Anthropic;
+using Anthropic.Models.Messages;
 using AwesomeAssertions;
 using QuickER.AI;
+using QuickER.AI.Chat;
 
 namespace QuickER.Tests.AI;
 
@@ -61,6 +64,57 @@ public class AnthropicChatTurnDriverTests
         var messages = AnthropicChatTurnDriver.ToMessageParams(history);
 
         messages.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// テキストが空・空白だけで、ツール呼び出しも無いアシスタント項目（空の応答）は再送しないことを検証する
+    /// （空の content は API が 400 で拒否し、履歴に残る限り以後の全ターンが失敗する）。
+    /// </summary>
+    [Theory(DisplayName = "ToMessageParams は空の応答のアシスタント項目を積まない")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ToMessageParams_EmptyAssistant_IsSkipped(string text)
+    {
+        var history = new List<ChatHistoryItem>
+        {
+            new(ChatHistoryRole.User, "こんにちは"),
+            new(ChatHistoryRole.Assistant, text),
+            new(ChatHistoryRole.User, "もう一度"),
+        };
+
+        var messages = AnthropicChatTurnDriver.ToMessageParams(history);
+
+        messages.Should().HaveCount(2);
+        messages.Should().OnlyContain(m => m.Role.Value() == Role.User);
+    }
+
+    /// <summary>
+    /// ツール呼び出しを伴うアシスタント項目で、テキストが空白だけなら、テキストブロックを作らず
+    /// ツール呼び出しのブロックだけにすることを検証する（空白だけのテキストブロックも API が拒否する）。
+    /// </summary>
+    [Fact(DisplayName = "ToMessageParams はツール呼び出し前の空白テキストをブロックにしない")]
+    public void ToMessageParams_WhitespaceTextWithToolCalls_HasOnlyToolUseBlocks()
+    {
+        var history = new List<ChatHistoryItem>
+        {
+            new(ChatHistoryRole.User, "本のテーブルを作って"),
+            new(
+                ChatHistoryRole.Assistant,
+                Environment.NewLine + Environment.NewLine,
+                new[]
+                {
+                    new ChatToolCallRequest("call_1", "add_entity", "{\"table_name\":\"Book\"}"),
+                }
+            ),
+            new(ChatHistoryRole.Tool, "テーブル 'Book' を追加しました。", ToolCallId: "call_1"),
+        };
+
+        var messages = AnthropicChatTurnDriver.ToMessageParams(history);
+
+        messages.Should().HaveCount(3);
+        var blocks = messages[1].Content.Value.As<IReadOnlyList<ContentBlockParam>>();
+        blocks.Should().ContainSingle();
+        blocks[0].Value.Should().BeOfType<ToolUseBlockParam>();
     }
 
     /// <summary>画像添付付き User 項目が image(base64) ブロック＋テキストブロックの content 配列になることを検証する</summary>
@@ -205,5 +259,56 @@ public class AnthropicChatTurnDriverTests
         messages.Should().ContainSingle();
         var blocks = messages[0].Content.Value.As<IReadOnlyList<ContentBlockParam>>();
         blocks[0].Value.Should().BeOfType<ImageBlockParam>();
+    }
+
+    /// <summary>応答を 500 で返し、破棄されたかどうかを記録する HTTP ハンドラー</summary>
+    private sealed class DisposeRecordingHandler : HttpMessageHandler
+    {
+        public bool Disposed { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken
+        ) =>
+            Task.FromResult(
+                new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent("{}"),
+                }
+            );
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
+    /// 呼び出しごとに作った SDK のクライアントを、失敗した呼び出しでも破棄することを検証する
+    /// （クライアントはインスタンスごとに自分の HttpClient を持ち、破棄しないとツール往復のたびに
+    /// 接続が積み上がる）。破棄はクライアントへ渡した HttpClient のハンドラーが破棄されたことで観測する
+    /// （SDK はクライアントの破棄で、渡された HttpClient も破棄する）。
+    /// </summary>
+    [Fact(DisplayName = "RunAsync は呼び出しごとに作ったクライアントを破棄する")]
+    public async Task RunAsync_DisposesClientPerCall()
+    {
+        var handler = new DisposeRecordingHandler();
+        var driver = new AnthropicChatTurnDriver(
+            () => new AnthropicChatConnection("test-key", "claude-test"),
+            ErDesignProfile.ErDesign,
+            connection => new AnthropicClient
+            {
+                ApiKey = connection.ApiKey,
+                HttpClient = new HttpClient(handler),
+                MaxRetries = 0,
+            }
+        );
+        var history = new List<ChatHistoryItem> { new(ChatHistoryRole.User, "やあ") };
+
+        var run = () => driver.RunAsync(history, _ => { }, TestContext.Current.CancellationToken);
+
+        await run.Should().ThrowAsync<Exception>();
+        handler.Disposed.Should().BeTrue();
     }
 }

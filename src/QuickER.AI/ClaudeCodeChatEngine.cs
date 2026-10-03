@@ -92,14 +92,29 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
     /// <inheritdoc />
     /// <remarks>Claude Code は Read でファイルを読み返せるため、テキスト・バイナリを含む全種別に対応する。</remarks>
-    public AttachmentSupport AttachmentSupport =>
-        AttachmentSupport.Images
-        | AttachmentSupport.Pdf
-        | AttachmentSupport.Text
-        | AttachmentSupport.Binary;
+    public AttachmentSupport AttachmentSupport => AttachmentSupportResolver.ClaudeCode;
 
     /// <inheritdoc />
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// <para>
+    /// 初期化済み（かつ CLI を検出できる）なら何もしない。とくに状態を「未確認」へ戻さない
+    /// （接続タブへ戻るたびに呼ばれるため、戻すと「再確認」や成功したターンで得た確認済みの状態が消える）。
+    /// </para>
+    /// <para>
+    /// 初期化が実行中のあいだに重ねて呼ばれたら、新しく初期化せず実行中の初期化を待つ（<see cref="SingleFlight"/>）。
+    /// 2 本が同時に MCP サーバーを起動すると、片方のサーバーが誰にも止められないまま残る。
+    /// 相乗りした呼び出しの <paramref name="cancellationToken"/> は待つのをやめることにだけ効く
+    /// （起動した呼び出しのトークンは初期化へ渡るので、その取り消しは相乗りした呼び出しにも届く）。
+    /// </para>
+    /// </remarks>
+    public Task InitializeAsync(CancellationToken cancellationToken = default) =>
+        _initialize.RunAsync(InitializeCoreAsync, cancellationToken);
+
+    /// <summary>初期化を重ねて走らせないための共有（実行中のあいだだけ）</summary>
+    private readonly SingleFlight _initialize = new();
+
+    /// <summary><see cref="InitializeAsync"/> の本体</summary>
+    private async Task InitializeCoreAsync(CancellationToken cancellationToken)
     {
         if (!_client.IsAvailable())
         {
@@ -112,16 +127,34 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             return;
         }
 
+        if (_initialized)
+        {
+            return;
+        }
+
+        if (_workingDirectory.Length == 0)
+        {
+            _workingDirectory = BackendWorkingDirectory.Create("claude-code");
+        }
+
         if (_mcpServer is null && _toolHost is not null)
         {
-            _workingDirectory = CreateWorkingDirectory();
-            _mcpServer = new ErDiagramMcpServer(ExecuteTool, _profile.Tools);
-            await _mcpServer.StartAsync(cancellationToken).ConfigureAwait(false);
-            _mcpConfigPath = WriteMcpConfig(_mcpServer);
-        }
-        else if (_workingDirectory.Length == 0)
-        {
-            _workingDirectory = CreateWorkingDirectory();
+            // 起動に成功してから保持する。起動前に保持すると、失敗した後の初期化が
+            // 「起動済み」とみなして再試行せず、MCP 設定なし（ER ツールなし）のままターンが走る
+            var server = new ErDiagramMcpServer(ExecuteTool, _profile.Tools);
+
+            try
+            {
+                await server.StartAsync(cancellationToken).ConfigureAwait(false);
+                _mcpConfigPath = WriteMcpConfig(server);
+            }
+            catch
+            {
+                await server.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            _mcpServer = server;
         }
 
         _initialized = true;
@@ -138,6 +171,11 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     /// 軽量ログインプローブで状態を取り直す（「再確認」ボタン）。
     /// 検出不可なら赤、ログイン済みなら緑、未ログインなら赤＋案内に更新する。
     /// </summary>
+    /// <remarks>
+    /// 初期化やプローブ自体の失敗（起動の拒否・プロセス起動の失敗・標準入力への書き込みの失敗など）は投げずに、
+    /// 赤の状態と理由入りの案内へ畳む。呼び出し元は「再確認」ボタンで、投げるとアプリまで落ちる。
+    /// 取り消しだけは呼び出し元へ伝える。
+    /// </remarks>
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         if (!_client.IsAvailable())
@@ -150,12 +188,26 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             return;
         }
 
-        if (!_initialized)
-        {
-            await InitializeAsync(cancellationToken).ConfigureAwait(false);
-        }
+        ClaudeLoginProbeResult result;
 
-        var result = await _client.ProbeLoginAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_initialized)
+            {
+                await InitializeAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            result = await _client.ProbeLoginAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            UpdateStatus(
+                Strings.ClaudeCode_Status_Inconclusive,
+                ConnectionHealth.NeedsAction,
+                string.Format(Strings.ClaudeCode_Guidance_CheckFailedFormat, ex.Message)
+            );
+            return;
+        }
 
         switch (result)
         {
@@ -212,36 +264,37 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         var token = _turnCts.Token;
         StatusChanged?.Invoke(this, Strings.ClaudeCode_Processing);
 
-        // 添付があれば作業フォルダ配下へ書き出し、プロンプト末尾に絶対パス一覧を付記する。
-        // 一度でも添付を使った会話は以降のターンも Read 許可を維持する（_attachmentsUsedInConversation）。
-        var effectivePrompt = prompt;
-
-        if (attachments is { Count: > 0 })
-        {
-            var paths = WriteAttachments(attachments);
-            var hasBinary = attachments.Any(a => a.Kind == ChatAttachmentKind.Binary);
-            effectivePrompt = AppendAttachmentPaths(prompt, paths, hasBinary);
-            _attachmentsUsedInConversation = true;
-        }
-
-        // 添付を使った会話では Read を追加許可する（MCP ツールと併記）。従来の添付なし会話は MCP のみで不変。
-        var additionalTools = _attachmentsUsedInConversation
-            ? new[] { ReadTool }
-            : Array.Empty<string>();
-
-        var options = new ClaudeCodeLaunchOptions(
-            Model,
-            _toolHost is not null ? _profile.BuildSystemPrompt() : string.Empty,
-            _mcpConfigPath,
-            AllowedTool,
-            _workingDirectory
-        )
-        {
-            AdditionalAllowedTools = additionalTools,
-        };
-
         try
         {
+            // 添付があれば作業フォルダ配下へ書き出し、プロンプト末尾に絶対パス一覧を付記する。
+            // 一度でも添付を使った会話は以降のターンも Read 許可を維持する（_attachmentsUsedInConversation）。
+            // 書き出しの失敗も他のターン失敗と同じく TurnCompleted で知らせる（try の外だと CTS が残る）
+            var effectivePrompt = prompt;
+
+            if (attachments is { Count: > 0 })
+            {
+                var paths = WriteAttachments(attachments);
+                var hasBinary = attachments.Any(a => a.Kind == ChatAttachmentKind.Binary);
+                effectivePrompt = AppendAttachmentPaths(prompt, paths, hasBinary);
+                _attachmentsUsedInConversation = true;
+            }
+
+            // 添付を使った会話では Read を追加許可する（MCP ツールと併記）。従来の添付なし会話は MCP のみで不変。
+            var additionalTools = _attachmentsUsedInConversation
+                ? new[] { ReadTool }
+                : Array.Empty<string>();
+
+            var options = new ClaudeCodeLaunchOptions(
+                Model,
+                _toolHost is not null ? _profile.BuildSystemPrompt() : string.Empty,
+                _mcpConfigPath,
+                AllowedTool,
+                _workingDirectory
+            )
+            {
+                AdditionalAllowedTools = additionalTools,
+            };
+
             var outcome = await _client
                 .RunTurnAsync(
                     effectivePrompt,
@@ -282,12 +335,27 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             }
             else
             {
-                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, outcome.Error));
+                // 利用者の中断（自分のトークンが立っている）だけを無音の中断として扱う。クライアントは中断を
+                // Error=null の失敗へ畳むが、報告文の無い本物の失敗も Error=null で返り得るので、トークンで見分ける
+                TurnCompleted?.Invoke(
+                    this,
+                    new ErChatTurnResult(
+                        false,
+                        token.IsCancellationRequested ? null : BuildTurnFailedMessage(outcome.Error)
+                    )
+                );
             }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
         }
         catch (Exception ex)
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, BuildTurnFailedMessage(ex.Message))
+            );
         }
         finally
         {
@@ -295,6 +363,19 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             _turnCts = null;
         }
     }
+
+    /// <summary>ターンの失敗（未ログイン以外）としてチャットへ表示する文言を組み立てる</summary>
+    /// <param name="detail">
+    /// 原因（例外の文言、または CLI・クライアントが報告した文）。無ければ null または空。
+    /// CLI が理由を報告しなかったときにクライアントが補う汎用文言（<see cref="Strings.ClaudeCode_GenericError"/>）は、
+    /// 要約と同じことしか言わないので詳細に載せない
+    /// </param>
+    /// <returns>何が起きたかと次に何をするかの要約（UI 言語に追従）に、原因を「詳細: …」の行で添えた文言</returns>
+    private static string BuildTurnFailedMessage(string? detail) =>
+        AiErrorMessageLocalizer.WithDetail(
+            Strings.ClaudeCode_TurnFailed,
+            detail == Strings.ClaudeCode_GenericError ? null : detail
+        );
 
     /// <summary>未ログイン失敗としてチャットへ表示する文言を組み立てる</summary>
     /// <param name="reportedError">
@@ -459,19 +540,6 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         return path;
     }
 
-    /// <summary>一時作業ディレクトリを作成する（claude の cwd を無害な場所に限定する）</summary>
-    private static string CreateWorkingDirectory()
-    {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            "QuickER",
-            "claude-code",
-            Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(path);
-        return path;
-    }
-
     /// <summary>状態サマリー・健全度・案内を更新し通知する</summary>
     private void UpdateStatus(string summary, ConnectionHealth level, string guidance)
     {
@@ -496,31 +564,6 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
         await _client.DisposeAsync().ConfigureAwait(false);
 
-        TryDeleteWorkingDirectory();
-    }
-
-    /// <summary>一時作業ディレクトリを削除する（ベストエフォート）</summary>
-    private void TryDeleteWorkingDirectory()
-    {
-        if (_workingDirectory.Length == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (Directory.Exists(_workingDirectory))
-            {
-                Directory.Delete(_workingDirectory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // 使用中などで削除できない場合は無視する
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // 権限不足は無視する
-        }
+        BackendWorkingDirectory.TryDelete(_workingDirectory);
     }
 }

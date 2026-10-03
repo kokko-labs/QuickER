@@ -115,19 +115,29 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
             }
         }
 
-        var calls = toolCalls
-            .Values.Where(acc => !string.IsNullOrEmpty(acc.Id) && !string.IsNullOrEmpty(acc.Name))
+        return new ChatAssistantTurn(textBuilder.ToString(), BuildToolCalls(toolCalls.Values));
+    }
+
+    /// <summary>index 順に組み立てたツール呼び出しを、中立なツール呼び出し要求へ変換する</summary>
+    /// <remarks>
+    /// 名前の無い呼び出しは実行できないため捨てる。ID の無い呼び出し（ローカルの OpenAI 互換サーバーに
+    /// ストリーミングで ID を付けない実装がある）は捨てずに ID を合成する。合成した ID はアシスタントの
+    /// tool_calls とツール結果の両方で同じ値が使われる。ターンをまたいで同じ ID が履歴に並ぶと、サーバーに
+    /// よってはツール結果の突き合わせを誤るため、連番でなく GUID で作る。
+    /// </remarks>
+    internal static List<ChatToolCallRequest> BuildToolCalls(
+        IEnumerable<ToolCallAccumulator> accumulators
+    ) =>
+        accumulators
+            .Where(acc => !string.IsNullOrEmpty(acc.Name))
             .Select(acc => new ChatToolCallRequest(
-                acc.Id!,
+                string.IsNullOrEmpty(acc.Id) ? $"call_{Guid.NewGuid():N}" : acc.Id,
                 acc.Name!,
                 // 小型モデルは壊れた引数 JSON を出すことがあるため、直せる壊れ方はここで修復して
                 // ツールホストへ渡す（修復不能なら原文のまま＝ホストが解析エラーを返しリトライさせる）
                 ToolArgumentJson.NormalizeForExecution(acc.Arguments.ToString())
             ))
             .ToList();
-
-        return new ChatAssistantTurn(textBuilder.ToString(), calls);
-    }
 
     /// <summary>接続設定から ChatClient を生成する</summary>
     private ChatClient CreateClient()
@@ -225,7 +235,7 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
     }
 
     /// <summary>ストリーム断片からツール呼び出しを index ごとに組み立てる作業用</summary>
-    private sealed class ToolCallAccumulator
+    internal sealed class ToolCallAccumulator
     {
         /// <summary>ツール呼び出し ID</summary>
         public string? Id { get; set; }

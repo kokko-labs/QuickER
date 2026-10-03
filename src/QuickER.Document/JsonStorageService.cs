@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -126,8 +128,8 @@ public static class JsonStorageService
 
     /// <summary>ER 図の保存形式として妥当か検証したうえでファイルから保存文書を読み込む</summary>
     /// <remarks>
-    /// 検証は「読み取り → JSON 解析 → ルートが <c>Version</c>・<c>Schema</c> を持つ JSON オブジェクトか
-    /// → 逆直列化 → 版番号 → 必須文字列の明示 <c>null</c> → Id の重複」の順で、
+    /// 検証は「読み取り → JSON 解析 → ルートが JSON オブジェクトか → ルートのキー重複 →
+    /// <c>Version</c>・<c>Schema</c> を持つか → 逆直列化 → 版番号 → 必須文字列の明示 <c>null</c> → Id の重複」の順で、
     /// <see cref="JsonStorageService"/> の読込仕様に合わせ
     /// キー名の大文字小文字は区別する。無関係な JSON（例 <c>package.json</c>）を「空図」として読み込み、
     /// 誤解釈・上書きするのを防ぐ。
@@ -136,11 +138,10 @@ public static class JsonStorageService
     /// 拒否するか警告して続行するかは経路ごとに異なるため、読み込んだ文書を見て呼び出し側が決める。
     /// </para>
     /// <para>
-    /// <b>逆直列化とルートキーの評価も try の内側で行う。</b>JSON のキー重複は
-    /// <see cref="JsonNode"/> の遅延評価のため <see cref="JsonNode.Parse(string, JsonNodeOptions?, JsonDocumentOptions)"/>
-    /// では出ず、ルートオブジェクトのキーへ最初に触れた時点で <see cref="ArgumentException"/> として現れる。
-    /// プロパティの型不一致（<see cref="JsonException"/>）も含め、これらを外へ漏らすと呼び出し側は
-    /// 種別を持てず「読めなかった」以上のことを言えなくなる。
+    /// <b>逆直列化とルートキーの評価も try の内側で行う。</b>ルートのキー重複（どちらの値を採るか
+    /// 決まらない）とプロパティの型不一致（<see cref="JsonException"/>）を外へ漏らすと、呼び出し側は
+    /// 種別を持てず「読めなかった」以上のことを言えなくなる。どちらも <see cref="DocumentLoadError.InvalidJson"/>
+    /// として原因の例外を持ち帰る。入れ子のキー重複は逆直列化の既定どおり後勝ちで読む。
     /// </para>
     /// </remarks>
     /// <param name="path">読み込むファイルパス</param>
@@ -155,20 +156,53 @@ public static class JsonStorageService
     /// <returns>読み込めた場合は <c>true</c></returns>
     public static bool TryLoad(
         string path,
-        out DiagramDocument? document,
+        [NotNullWhen(true)] out DiagramDocument? document,
         out DocumentLoadError error,
         out Exception? exception
+    ) => TryLoad(path, out document, out error, out exception, out _);
+
+    /// <summary>
+    /// <see cref="TryLoad(string, out DiagramDocument?, out DocumentLoadError, out Exception?)"/> と同じ検証で
+    /// 読み込み、あわせて<b>実際に読み取ったファイルのバイト列</b>を返す
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 用途は GUI の外部変更検知で、読込直後の「最終既知ハッシュ」をディスクの読み直しではなく
+    /// 読み込んだ内容そのものから求めるため。読み直す方式では、読み取りからハッシュ採取までの隙間に
+    /// 外部プロセスが書いた内容を「読み込んだ内容」として記録してしまう。
+    /// </para>
+    /// <para>
+    /// 文字列でなくバイト列を返すのは、文字列から符号化し直すとファイルのバイト列と一致しないことが
+    /// あるため（BOM は復号で剥がれ、UTF-16 のファイルは別の符号化になる）。復号の規則は
+    /// <see cref="File.ReadAllText(string)"/> と同じ（UTF-8 既定・BOM を検出）で、読込結果は
+    /// 4 引数版と変わらない。
+    /// </para>
+    /// </remarks>
+    /// <param name="path">読み込むファイルパス</param>
+    /// <param name="document">読み込んだ文書（失敗時は <c>null</c>）</param>
+    /// <param name="error">失敗の種別（成功時は <see cref="DocumentLoadError.None"/>）</param>
+    /// <param name="exception">失敗の原因となった例外（4 引数版と同じ）</param>
+    /// <param name="rawContents">
+    /// 読み取ったファイルのバイト列。読み取り自体に失敗した場合だけ <c>null</c>
+    /// （読み取れた後の検証で失敗した場合も、読み取った内容を返す）
+    /// </param>
+    /// <returns>読み込めた場合は <c>true</c></returns>
+    public static bool TryLoad(
+        string path,
+        [NotNullWhen(true)] out DiagramDocument? document,
+        out DocumentLoadError error,
+        out Exception? exception,
+        [NotNullWhen(true)] out byte[]? rawContents
     )
     {
         document = null;
         error = DocumentLoadError.None;
         exception = null;
-
-        string json;
+        rawContents = null;
 
         try
         {
-            json = File.ReadAllText(path);
+            rawContents = File.ReadAllBytes(path);
         }
         catch (Exception ex)
         {
@@ -177,24 +211,42 @@ public static class JsonStorageService
             return false;
         }
 
+        var json = DecodeText(rawContents);
         DiagramDocument loaded;
 
         try
         {
-            var root = JsonNode.Parse(json);
+            // 解析は 1 回だけ。逆直列化も解析済みの要素から行う（元の JSON テキストを読むので、
+            // 文字列から逆直列化した場合と結果は同じ＝入れ子のキー重複も従来どおり後勝ち）
+            using var parsed = JsonDocument.Parse(json);
+            var root = parsed.RootElement;
 
-            // ルートキーへ最初に触れるのはここ（キー重複の ArgumentException が出るのもここ）
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                error = DocumentLoadError.NotDiagramDocument;
+                return false;
+            }
+
+            // ルートのキー重複は、どちらの値を図として採るかが決まらないため InvalidJson として断る
+            if (FindDuplicateRootProperty(root) is { } duplicateName)
+            {
+                throw new JsonException(
+                    $"The property '{duplicateName}' appears more than once in the root object."
+                );
+            }
+
             if (
-                root is not JsonObject obj
-                || obj["Version"] is null
-                || obj["Schema"] is not JsonObject
+                !root.TryGetProperty("Version", out var version)
+                || version.ValueKind == JsonValueKind.Null
+                || !root.TryGetProperty("Schema", out var schema)
+                || schema.ValueKind != JsonValueKind.Object
             )
             {
                 error = DocumentLoadError.NotDiagramDocument;
                 return false;
             }
 
-            loaded = Deserialize(json);
+            loaded = Normalize(root.Deserialize<DiagramDocument>(Options) ?? new DiagramDocument());
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
@@ -380,7 +432,7 @@ public static class JsonStorageService
     /// 戻り値は 3 状態を区別する。<c>false</c>＝版を名乗っていない（ファイル不在・読み取り失敗・
     /// JSON でない・<c>Version</c> キーが無い）。<c>true</c> かつ <paramref name="version"/> が非 null＝
     /// その版。<c>true</c> かつ <c>null</c>＝<b>版を名乗っているのに解釈できない</b>
-    /// （<c>"2"</c>・<c>2.0</c>・<see cref="int"/> に収まらない値。この版が書く形ではないので、
+    /// （<c>"2"</c>・<c>2.0</c>・<see cref="int"/> に収まらない値・<c>null</c>・オブジェクト・配列。この版が書く形ではないので、
     /// 別の版か手編集のファイル）。
     /// </para>
     /// <para>
@@ -400,14 +452,15 @@ public static class JsonStorageService
         {
             if (
                 JsonNode.Parse(File.ReadAllText(path)) is not JsonObject root
-                || root["Version"] is not JsonValue value
+                || !root.ContainsKey("Version")
             )
             {
                 return false;
             }
 
-            // 版を名乗ってはいるので true。int として読めたときだけ値を持ち帰る
-            if (value.TryGetValue(out int parsed))
+            // キーがある以上は版を名乗っているので true。値が null・オブジェクト・配列なら解釈できない版
+            // （version は null のまま）として扱い、int として読めたときだけ値を持ち帰る
+            if (root["Version"] is JsonValue value && value.TryGetValue(out int parsed))
             {
                 version = parsed;
             }
@@ -434,8 +487,43 @@ public static class JsonStorageService
         TryReadFormatVersion(path, out var version)
         && (version is null || version > DiagramDocument.CurrentVersion);
 
+    /// <summary>ファイルのバイト列を <see cref="File.ReadAllText(string)"/> と同じ規則で文字列へ復号する</summary>
+    /// <remarks>UTF-8 を既定とし、BOM があればそれに従う（BOM 自体は結果に含めない）</remarks>
+    private static string DecodeText(byte[] bytes)
+    {
+        using var reader = new StreamReader(
+            new MemoryStream(bytes, writable: false),
+            Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true
+        );
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>ルートオブジェクトのキー重複を探し、最初に重複したキー名を返す（無ければ null）</summary>
+    /// <remarks>
+    /// 比較は大文字小文字を区別する序数比較（<see cref="JsonStorageService"/> の読込仕様と同じ）。
+    /// 見るのはルートだけで、入れ子のキー重複は逆直列化の既定どおり後勝ちで読む。
+    /// </remarks>
+    private static string? FindDuplicateRootProperty(JsonElement root)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var property in root.EnumerateObject())
+        {
+            if (!names.Add(property.Name))
+            {
+                return property.Name;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>JSON 文字列を保存文書へ逆直列化し、非 null 契約を満たすよう正規化する</summary>
-    /// <remarks><see cref="Load"/> と <see cref="TryLoad"/> で読込結果を完全に一致させるための共有ヘルパ</remarks>
+    /// <remarks>
+    /// <see cref="Load"/> 用。<see cref="TryLoad(string, out DiagramDocument?, out DocumentLoadError, out Exception?, out byte[]?)"/>
+    /// は解析済みの要素から逆直列化し、同じ <see cref="Options"/> と <see cref="Normalize"/> を通す（読込結果は一致する）。
+    /// </remarks>
     private static DiagramDocument Deserialize(string json) =>
         Normalize(
             JsonSerializer.Deserialize<DiagramDocument>(json, Options) ?? new DiagramDocument()

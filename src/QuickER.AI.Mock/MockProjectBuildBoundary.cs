@@ -83,35 +83,109 @@ internal static class MockProjectBuildBoundary
     };
 
     /// <summary>
-    /// 走査オプション。<see cref="FileAttributes.Hidden"/> / <see cref="FileAttributes.System"/> /
-    /// <see cref="FileAttributes.ReparsePoint"/> を<b>列挙からは飛ばさない</b>（既定の
-    /// <see cref="EnumerationOptions"/> は前 2 属性を飛ばすため、隠し属性を付けた <c>*.csproj.user</c> が
-    /// 差分から消える＝検知の回避路になる）。
+    /// 消せずに残ったビルド中間物を列挙するときの走査オプション（読めないフォルダを黙って飛ばさない）。
     /// </summary>
     /// <remarks>
-    /// reparse point を属性で飛ばしてはいけない＝外を指すファイルのシンボリックリンク
-    /// （<c>X.csproj.user</c>）まで列挙から消える。辿らないのは<b>ディレクトリのリンクの中への再帰だけ</b>で、
-    /// それは <see cref="EnumerateEntries"/> の再帰判定が担う。
+    /// 残存の一覧は「確認なしでビルドしてよいか」の唯一の根拠なので、読めないところは例外にして
+    /// 呼び出し側でフォルダごと残存として扱う（<see cref="ListResidue"/>）。
     /// </remarks>
-    private static readonly EnumerationOptions EnumerationOptions = new()
+    private static readonly EnumerationOptions ResidueEnumerationOptions = new()
     {
         RecurseSubdirectories = true,
-        IgnoreInaccessible = true,
+        IgnoreInaccessible = false,
         AttributesToSkip = 0,
     };
 
     /// <summary>ディレクトリのリンクをスナップショットへ記録するときの値の接頭辞（ファイルのハッシュと衝突しない）</summary>
     private const string DirectoryLinkMarker = "link:";
 
-    /// <summary>ビルド中間物のフォルダ名（プロジェクトフォルダ直下の 2 つ）</summary>
-    private static readonly string[] BuildOutputDirectoryNames = ["obj", "bin"];
+    /// <summary>
+    /// 最終ビルドの前にビルド中間物（<c>{プロジェクト}/obj</c>・<c>bin</c>）を削除し、消せずに残ったものを返す。
+    /// </summary>
+    /// <param name="outputDirectory">出力フォルダ（ソリューション直下）</param>
+    /// <param name="projectName">プロジェクト名</param>
+    /// <returns>残ったファイルと中へ入らないディレクトリ（出力フォルダからの相対パス・区切りは <c>/</c>・昇順）</returns>
+    /// <remarks>
+    /// <para>
+    /// <c>obj/{プロジェクト}.csproj.*.targets</c> / <c>*.props</c> は <c>Microsoft.Common.targets</c> の
+    /// ワイルドカード import で読み込まれるため、AI がそこへ書いたターゲットは最終ビルドで実行される
+    /// （実測で確認。<c>nuget.g.targets</c> だけは復元が作り直すが、同じワイルドカードに当たる別名は残る）。
+    /// 変更検知はこの 2 つを見ない（消す側だから）ので、<b>消せなかったものはここで必ず拾って返す</b>
+    /// ＝削除の失敗を黙って握らない（フェイルクローズ）。
+    /// </para>
+    /// <para>
+    /// 削除の前に読み取り専用の属性を外す（Windows の <see cref="Directory.Delete(string, bool)"/> は外さないため、
+    /// 読み取り専用のファイルが 1 つあるだけで削除が失敗する）。リンクの中へは入らず、リンクはリンクだけを外す
+    /// （リンク先の中身には触れない）。
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<string> ClearBuildOutputs(
+        string outputDirectory,
+        string projectName
+    )
+    {
+        var projectDirectory = MockProjectScaffoldService.GetProjectDirectory(
+            outputDirectory,
+            projectName
+        );
+        var residue = new List<string>();
+
+        foreach (var name in MockProjectFiles.BuildOutputDirectoryNames)
+        {
+            var root = Path.Combine(projectDirectory, name);
+            MockProjectFiles.TryDeleteDirectory(root);
+            residue.AddRange(ListResidue(root, outputDirectory));
+        }
+
+        residue.Sort(StringComparer.OrdinalIgnoreCase);
+        return residue;
+    }
+
+    /// <summary>
+    /// 削除しようとしたフォルダに残っているものを返す（フォルダが無ければ空）。
+    /// </summary>
+    /// <remarks>
+    /// 拡張子のホワイトリストは掛けない（<c>obj</c> の中は拡張子に依らず怪しい）。フォルダ自体が中へ入らない
+    /// ディレクトリのとき、または中を読み切れないときはフォルダそのものを 1 件として返す。空のフォルダだけが
+    /// 残ったときは何も返さない（ビルドが読むものが無い）。
+    /// </remarks>
+    private static IEnumerable<string> ListResidue(string root, string outputDirectory)
+    {
+        if (!Directory.Exists(root))
+        {
+            return [];
+        }
+
+        var rootRelative = ToRelative(outputDirectory, root);
+
+        if (MockProjectFiles.IsOpaqueDirectory(root))
+        {
+            return [rootRelative];
+        }
+
+        try
+        {
+            return EnumerateEntries(root, outputDirectory, _ => false, ResidueEnumerationOptions)
+                .Select(entry => entry.Relative)
+                .ToList();
+        }
+        catch (IOException)
+        {
+            return [rootRelative];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [rootRelative];
+        }
+    }
 
     /// <summary>
     /// 出力フォルダ配下のファイル内容ハッシュを記録したスナップショット。
     /// </summary>
     /// <remarks>
-    /// <c>{プロジェクト名}/obj</c> と <c>{プロジェクト名}/bin</c> は、最終ビルドの直前に削除されるため
-    /// 記録も比較もしない（削除する範囲と検知の範囲を揃える）。
+    /// <c>{プロジェクト名}/obj</c> と <c>{プロジェクト名}/bin</c> は（フォルダ自身も含めて）最終ビルドの直前に
+    /// 削除されるため記録も比較もしない（削除する範囲と検知の範囲を揃える）。消せずに残ったものは
+    /// <see cref="ClearBuildOutputs"/> が返す。
     /// </remarks>
     internal sealed class Snapshot
     {
@@ -125,12 +199,21 @@ internal static class MockProjectBuildBoundary
         /// </summary>
         /// <param name="outputDirectory">出力フォルダ（ソリューション直下）</param>
         /// <param name="projectName">プロジェクト名（obj / bin の除外位置を決める）</param>
-        internal static Snapshot Capture(string outputDirectory, string projectName)
+        /// <param name="cancellationToken">
+        /// キャンセルトークン（1 件ごとに確かめる。打ち切られたら <see cref="OperationCanceledException"/>）
+        /// </param>
+        internal static Snapshot Capture(
+            string outputDirectory,
+            string projectName,
+            CancellationToken cancellationToken = default
+        )
         {
             var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var entry in EnumerateEntries(outputDirectory, projectName))
+            foreach (var entry in EnumerateComparedEntries(outputDirectory, projectName))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (IsExemptFromComparison(entry))
                 {
                     continue;
@@ -160,7 +243,7 @@ internal static class MockProjectBuildBoundary
         {
             var changed = new List<string>();
 
-            foreach (var entry in EnumerateEntries(outputDirectory, projectName))
+            foreach (var entry in EnumerateComparedEntries(outputDirectory, projectName))
             {
                 if (IsExemptFromComparison(entry))
                 {
@@ -185,33 +268,39 @@ internal static class MockProjectBuildBoundary
         }
     }
 
-    /// <summary>走査で見つけた 1 件（ファイル、または辿らなかったディレクトリのリンク）</summary>
+    /// <summary>走査で見つけた 1 件（ファイル、または中へ入らなかったディレクトリ）</summary>
     /// <param name="Relative">出力フォルダからの相対パス（区切りは <c>/</c>）</param>
     /// <param name="FullPath">絶対パス</param>
-    /// <param name="IsDirectoryLink">ディレクトリの reparse point（ジャンクション・シンボリックリンク）か</param>
-    private readonly record struct Entry(string Relative, string FullPath, bool IsDirectoryLink);
+    /// <param name="IsOpaqueDirectory">
+    /// 中へ入らなかったディレクトリ（リンク、または中を列挙できない reparse フォルダ）か
+    /// </param>
+    private readonly record struct Entry(string Relative, string FullPath, bool IsOpaqueDirectory);
 
     /// <summary>
-    /// 比較から外すか＝<see cref="SafeExtensions"/> に当たる<b>ファイル</b>。ディレクトリのリンクは名前に
-    /// 依らず必ず比較する（<c>assets.css</c> という名前のジャンクションで素通りさせない）。
+    /// 比較から外すか＝<see cref="SafeExtensions"/> に当たる<b>ファイル</b>。中へ入らなかったディレクトリは
+    /// 名前に依らず必ず比較する（<c>assets.css</c> という名前のジャンクションで素通りさせない）。
     /// </summary>
     private static bool IsExemptFromComparison(Entry entry) =>
-        !entry.IsDirectoryLink && SafeExtensions.Contains(Path.GetExtension(entry.Relative));
+        !entry.IsOpaqueDirectory && SafeExtensions.Contains(Path.GetExtension(entry.Relative));
 
     /// <summary>
     /// 比較に使う値（ファイルは内容の SHA-256・ディレクトリのリンクは接頭辞付きのリンク先）。読めなければ null。
     /// </summary>
+    /// <remarks>
+    /// リンクでないのに中を列挙できない reparse フォルダは null を返す＝記録されず、比較では毎回「変更」として
+    /// 一覧に出る（中身を確かめられない以上、変わっていないとは言えないため）。
+    /// </remarks>
     private static string? Fingerprint(Entry entry)
     {
-        if (!entry.IsDirectoryLink)
+        if (!entry.IsOpaqueDirectory)
         {
             return TryComputeHash(entry.FullPath);
         }
 
         try
         {
-            return DirectoryLinkMarker
-                + (new DirectoryInfo(entry.FullPath).LinkTarget ?? string.Empty);
+            var target = new DirectoryInfo(entry.FullPath).LinkTarget;
+            return target is null ? null : DirectoryLinkMarker + target;
         }
         catch (IOException)
         {
@@ -223,9 +312,48 @@ internal static class MockProjectBuildBoundary
         }
     }
 
+    /// <summary>出力フォルダからの相対パス（区切りは <c>/</c>）</summary>
+    private static string ToRelative(string outputDirectory, string fullPath) =>
+        Path.GetRelativePath(outputDirectory, fullPath).Replace('\\', '/');
+
     /// <summary>
-    /// 出力フォルダ配下のファイルとディレクトリのリンクを列挙する（<c>{プロジェクト}/obj</c>・<c>bin</c> は除く）。
+    /// 比較の対象を列挙する＝出力フォルダ配下（<c>{プロジェクト}/obj</c>・<c>bin</c> はフォルダ自身も含めて除く）。
     /// </summary>
+    private static IEnumerable<Entry> EnumerateComparedEntries(
+        string outputDirectory,
+        string projectName
+    )
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
+        {
+            return [];
+        }
+
+        var buildOutputs = MockProjectFiles
+            .BuildOutputDirectoryNames.Select(name => $"{projectName}/{name}")
+            .ToArray();
+
+        bool IsBuildOutput(string relative) =>
+            buildOutputs.Any(root =>
+                relative.Equals(root, StringComparison.OrdinalIgnoreCase)
+                || relative.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase)
+            );
+
+        return EnumerateEntries(
+            outputDirectory,
+            outputDirectory,
+            IsBuildOutput,
+            MockProjectFiles.AllEntriesOptions
+        );
+    }
+
+    /// <summary>
+    /// 指定フォルダ配下のファイルと、中へ入らないディレクトリ（<see cref="MockProjectFiles.IsOpaqueDirectory(string)"/>）を列挙する。
+    /// </summary>
+    /// <param name="root">走査の起点</param>
+    /// <param name="outputDirectory">相対パスの基準（出力フォルダ）</param>
+    /// <param name="isExcluded">除外する相対パスか（除外したディレクトリの中へも入らない）</param>
+    /// <param name="options">走査オプション</param>
     /// <remarks>
     /// <para>
     /// <b>ディレクトリのリンクの中へは再帰しない</b>。辿ると (1) <c>C:\</c> を指すジャンクション 1 つで
@@ -238,45 +366,35 @@ internal static class MockProjectBuildBoundary
     /// <c>X.csproj.user</c> も一覧に出る）。
     /// </para>
     /// </remarks>
-    private static IEnumerable<Entry> EnumerateEntries(string outputDirectory, string projectName)
-    {
-        if (string.IsNullOrWhiteSpace(outputDirectory) || !Directory.Exists(outputDirectory))
-        {
-            return [];
-        }
-
-        var excludedPrefixes = BuildOutputDirectoryNames
-            .Select(name => $"{projectName}/{name}/")
-            .ToArray();
-
-        bool IsExcluded(string relative) =>
-            excludedPrefixes.Any(prefix =>
-                relative.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            );
-
-        string ToRelative(string fullPath) =>
-            Path.GetRelativePath(outputDirectory, fullPath).Replace('\\', '/');
-
-        return new FileSystemEnumerable<Entry>(
-            outputDirectory,
+    private static IEnumerable<Entry> EnumerateEntries(
+        string root,
+        string outputDirectory,
+        Func<string, bool> isExcluded,
+        EnumerationOptions options
+    ) =>
+        new FileSystemEnumerable<Entry>(
+            root,
             (ref FileSystemEntry entry) =>
             {
                 var fullPath = entry.ToFullPath();
-                return new Entry(ToRelative(fullPath), fullPath, entry.IsDirectory);
+                return new Entry(
+                    ToRelative(outputDirectory, fullPath),
+                    fullPath,
+                    entry.IsDirectory
+                );
             },
-            EnumerationOptions
+            options
         )
         {
-            // ファイルと、辿らないディレクトリのリンクだけを返す（obj / bin 配下は返さない）
+            // ファイルと、中へ入らないディレクトリだけを返す（除外したものは返さない）
             ShouldIncludePredicate = (ref FileSystemEntry entry) =>
-                (!entry.IsDirectory || (entry.Attributes & FileAttributes.ReparsePoint) != 0)
-                && !IsExcluded(ToRelative(entry.ToFullPath())),
-            // 再帰は通常のディレクトリだけ（リンクの中と obj / bin の中へは入らない）
+                (!entry.IsDirectory || MockProjectFiles.IsOpaqueDirectory(ref entry))
+                && !isExcluded(ToRelative(outputDirectory, entry.ToFullPath())),
+            // 再帰は中へ入れるディレクトリだけ（リンク・列挙できない reparse フォルダ・除外の中へは入らない）
             ShouldRecursePredicate = (ref FileSystemEntry entry) =>
-                (entry.Attributes & FileAttributes.ReparsePoint) == 0
-                && !IsExcluded(ToRelative(entry.ToFullPath()) + "/"),
+                !MockProjectFiles.IsOpaqueDirectory(ref entry)
+                && !isExcluded(ToRelative(outputDirectory, entry.ToFullPath())),
         };
-    }
 
     /// <summary>ファイル内容の SHA-256 を 16 進で返す（読めなければ null）</summary>
     private static string? TryComputeHash(string path)

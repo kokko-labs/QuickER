@@ -721,6 +721,164 @@ public class CliAppTests
         }
     }
 
+    /// <summary>
+    /// 対象 DBMS が PostgreSQL の図を書き出す（<c>timestamptz</c> 列は PostgreSQL なら <c>DateTimeOffset</c>、
+    /// SQL Server では未知の型＝<c>string</c> へ解決されるので、どの方言で解決したかを生成物で見分けられる）
+    /// </summary>
+    private static (string schemaPath, string outDir, string root) CreatePostgreSqlSchema(
+        string targetDbms
+    )
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERCliTests",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        var schemaPath = Path.Combine(root, "schema.json");
+
+        var document = new DiagramDocument();
+        document.Schema.TargetDbms = targetDbms;
+        var entity = new Entity { TableName = "events" };
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "integer",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "occurred_at",
+                DataType = "timestamptz",
+                IsNullable = false,
+            }
+        );
+        document.Schema.Entities.Add(entity);
+        JsonStorageService.Save(schemaPath, document);
+
+        return (schemaPath, Path.Combine(root, "out"), root);
+    }
+
+    /// <summary>出力フォルダの .g.cs をすべて連結して返す</summary>
+    private static string ReadGeneratedCode(string outDir) =>
+        string.Concat(
+            Directory
+                .GetFiles(outDir, "*.g.cs", SearchOption.AllDirectories)
+                .Select(File.ReadAllText)
+        );
+
+    /// <summary>
+    /// --provider を省略した generate は図の対象 DBMS で型を解決する
+    /// （既定が sqlserver 固定だと、PostgreSQL の図の型が黙って SQL Server の規則で解決される）
+    /// </summary>
+    [Fact(DisplayName = "generate の --provider 省略時は図の対象 DBMS で型を解決する")]
+    public async Task Generate_WithoutProvider_UsesDiagramTargetDbms()
+    {
+        var (schemaPath, outDir, root) = CreatePostgreSqlSchema("postgresql");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+            ]);
+
+            exit.Should().Be(0);
+            ReadGeneratedCode(outDir).Should().Contain("DateTimeOffset OccurredAt");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>--provider を明示すれば、図の対象 DBMS より指定が優先される</summary>
+    [Fact(DisplayName = "generate の --provider 明示は図の対象 DBMS より優先する")]
+    public async Task Generate_ExplicitProvider_OverridesDiagramTargetDbms()
+    {
+        var (schemaPath, outDir, root) = CreatePostgreSqlSchema("postgresql");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "sqlserver",
+            ]);
+
+            exit.Should().Be(0);
+            ReadGeneratedCode(outDir).Should().NotContain("DateTimeOffset OccurredAt");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// --provider を省略し、図の対象 DBMS が未対応の名前なら終了コード 1 で止め、図の値であることと
+    /// --provider で回避できることを名指しする（汎用の「未対応のプロバイダ」だけでは名前の出どころが分からない）
+    /// </summary>
+    [Fact(
+        DisplayName = "generate は図の対象 DBMS が未対応なら図の値と --provider を名指しして止まる"
+    )]
+    public async Task Generate_UnsupportedDiagramTargetDbms_NamesDiagramValue()
+    {
+        var (schemaPath, outDir, root) = CreatePostgreSqlSchema("mssqlx");
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["generate", "--schema", schemaPath, "--out", outDir],
+                new StringWriter(),
+                stderr
+            );
+
+            exit.Should().Be(1);
+            stderr.ToString().Should().Contain("'mssqlx'").And.Contain("--provider");
+            Directory.Exists(outDir).Should().BeFalse("生成前に止めて何も書かない");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>図が対象 DBMS を持たないときは、従来どおり sqlserver で解決する</summary>
+    [Fact(DisplayName = "generate は図の対象 DBMS が空なら sqlserver で解決する")]
+    public void ResolveProviderName_EmptyTargetDbms_FallsBackToSqlServer()
+    {
+        GenerationExecutor
+            .ResolveProviderName(null, new ErDiagram { TargetDbms = " " })
+            .Should()
+            .Be("sqlserver");
+        GenerationExecutor
+            .ResolveProviderName("sqlite", new ErDiagram { TargetDbms = "postgresql" })
+            .Should()
+            .Be("sqlite");
+    }
+
     /// <summary>未対応プロバイダを指定すると終了コード 1 を返すことを検証する</summary>
     [Fact(DisplayName = "未対応プロバイダ指定は終了コード 1")]
     public async Task Generate_UnknownProvider_ReturnsError()

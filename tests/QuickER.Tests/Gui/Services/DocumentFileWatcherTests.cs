@@ -13,6 +13,12 @@ namespace QuickER.Tests.Gui.Services;
 /// <remarks>
 /// 実 <see cref="FileSystemWatcher"/> と一時ファイルを使う。タイミング依存はポーリング＋タイムアウトで
 /// 頑健化し、固定 <c>Sleep</c> による決め打ち待ちを避ける。デバウンス幅は短め（150ms）にして所要時間を抑える。
+/// <para>
+/// 通知を待つ上限（<see cref="WaitUntil"/> の既定）は 30 秒にする。監視器のコールバックもデバウンスのタイマも
+/// スレッドプールで走るため、並列実行の負荷でスレッドが空かないと通知は数秒遅れて届く（全件実行の開始直後に
+/// 走るときが最も遅く、5 秒を超え得る）。製品はこの遅れの上限を約束しておらず、待つのは「最終的に届くこと」なので、
+/// 上限を伸ばしても時間がかかるのは本当に届かなかったときだけになる。
+/// </para>
 /// </remarks>
 public sealed class DocumentFileWatcherTests : IDisposable
 {
@@ -42,9 +48,17 @@ public sealed class DocumentFileWatcherTests : IDisposable
         }
     }
 
-    private DocumentFileWatcher CreateWatcher(Func<string?> expectedHash, int debounceMs = 150)
+    private DocumentFileWatcher CreateWatcher(
+        Func<string?> expectedHash,
+        int debounceMs = 150,
+        int retryInitialMs = 2000,
+        int retryMaxMs = 30000
+    )
     {
-        var watcher = new DocumentFileWatcher(debounceMs) { ExpectedHashProvider = expectedHash };
+        var watcher = new DocumentFileWatcher(debounceMs, retryInitialMs, retryMaxMs)
+        {
+            ExpectedHashProvider = expectedHash,
+        };
         watcher.FileChanged += (_, e) =>
         {
             lock (_eventsLock)
@@ -72,7 +86,7 @@ public sealed class DocumentFileWatcherTests : IDisposable
     }
 
     /// <summary>述語が真になるまで、または timeout まで短間隔でポーリングする</summary>
-    private static bool WaitUntil(Func<bool> predicate, int timeoutMs = 5000)
+    private static bool WaitUntil(Func<bool> predicate, int timeoutMs = 30000)
     {
         var sw = Stopwatch.StartNew();
 
@@ -284,5 +298,86 @@ public sealed class DocumentFileWatcherTests : IDisposable
         // 張り直した監視器で以後の外部変更を検知する
         File.WriteAllText(path, "written-after-restart");
         WaitUntil(() => EventCount() >= 1).Should().BeTrue("張り直し後も通常どおり検知する");
+    }
+
+    private int CountOf(DocumentFileChangeKind kind) => Snapshot().Count(e => e.Kind == kind);
+
+    /// <summary>
+    /// 張り直しに失敗してもパスを保持して試み続け、フォルダが戻ったら監視を再開し、止まっていた間の変更を拾う。
+    /// 中断・再開の通知は 1 回ずつで、再試行のたびには通知しない
+    /// </summary>
+    [Fact(
+        DisplayName = "張り直しの失敗: フォルダが戻るまで試み続け、再開後に止まっていた間の変更を拾う"
+    )]
+    public void RestartFailure_RetriesUntilFolderReturns_AndPicksUpChange()
+    {
+        var subFolder = Path.Combine(_folder, "share");
+        Directory.CreateDirectory(subFolder);
+        var path = Path.Combine(subFolder, "doc.json");
+        File.WriteAllText(path, "A");
+        var expected = HashOf(path);
+
+        using var watcher = CreateWatcher(() => expected, retryInitialMs: 50, retryMaxMs: 100);
+        watcher.Watch(path);
+        var inner = watcher.CurrentWatcher;
+        inner.Should().NotBeNull();
+
+        // ネットワーク共有・USB の切断を模す（監視器を止めてからフォルダごと消す）
+        inner!.EnableRaisingEvents = false;
+        Directory.Delete(subFolder, recursive: true);
+
+        watcher.RestartAfterError();
+
+        watcher.CurrentWatcher.Should().BeNull("フォルダが無いので張れない");
+        watcher.IsRetryScheduledForTests.Should().BeTrue("パスを保持して張り直しを試み続ける");
+        CountOf(DocumentFileChangeKind.WatchInterrupted).Should().Be(1);
+
+        // 何回か再試行が空振りしても、中断の通知は増えない
+        Thread.Sleep(400);
+        CountOf(DocumentFileChangeKind.WatchInterrupted)
+            .Should()
+            .Be(1, "再試行のたびには通知しない");
+
+        // フォルダが戻り、止まっていた間に内容も変わった
+        Directory.CreateDirectory(subFolder);
+        File.WriteAllText(path, "changed-while-unreachable");
+        var changedHash = HashOf(path);
+
+        WaitUntil(() => CountOf(DocumentFileChangeKind.Modified) >= 1)
+            .Should()
+            .BeTrue("再開直後の照合で止まっていた間の変更を拾う");
+        watcher.CurrentWatcher.Should().NotBeNull("張り直しに成功している");
+        watcher.IsRetryScheduledForTests.Should().BeFalse();
+        CountOf(DocumentFileChangeKind.WatchResumed).Should().Be(1);
+        CountOf(DocumentFileChangeKind.WatchInterrupted).Should().Be(1);
+        Snapshot()
+            .Last(e => e.Kind == DocumentFileChangeKind.Modified)
+            .ContentHash.Should()
+            .Be(changedHash);
+    }
+
+    /// <summary>監視開始の時点でフォルダが無くても中断を 1 回通知して試み続け、Stop で張り直しをやめる</summary>
+    [Fact(DisplayName = "監視開始の失敗: 中断を通知して試み続け、Stop で張り直しをやめる")]
+    public void InitialWatchFailure_RetriesUntilStopped()
+    {
+        var subFolder = Path.Combine(_folder, "usb");
+        var path = Path.Combine(subFolder, "doc.json");
+
+        using var watcher = CreateWatcher(() => null, retryInitialMs: 50, retryMaxMs: 100);
+        watcher.Watch(path);
+
+        watcher.CurrentWatcher.Should().BeNull();
+        watcher.IsRetryScheduledForTests.Should().BeTrue();
+        CountOf(DocumentFileChangeKind.WatchInterrupted).Should().Be(1);
+        Snapshot()[0].Path.Should().Be(path);
+
+        watcher.Stop();
+        watcher.IsRetryScheduledForTests.Should().BeFalse("Stop で張り直しの予約も止める");
+
+        // 止めた後にフォルダが現れても、張り直さない
+        Directory.CreateDirectory(subFolder);
+        Thread.Sleep(300);
+        watcher.CurrentWatcher.Should().BeNull();
+        CountOf(DocumentFileChangeKind.WatchResumed).Should().Be(0);
     }
 }

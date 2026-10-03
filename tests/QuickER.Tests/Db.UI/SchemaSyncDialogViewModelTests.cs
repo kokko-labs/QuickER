@@ -293,16 +293,21 @@ public class SchemaSyncDialogViewModelTests
 
         await vm.ExecuteCommand.ExecuteAsync(null);
 
-        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
-        // 対象テーブルは 1 行 1 テーブルの箇条書きで列挙される
+        // 一覧を持つ確認は詳細領域つき（本文は要約、テーブルは 1 行 1 テーブルの箇条書きで詳細へ）
+        dialogs.WarningConfirmMessages.Should().BeEmpty();
+        var (message, details, _) = dialogs
+            .WarningConfirmDetailsMessages.Should()
+            .ContainSingle()
+            .Subject;
         message
             .Should()
+            .Be(string.Format(DbStrings.SchemaSync_ExecuteConfirmRebuild, settings.FilePath, 1));
+        details
+            .Should()
             .Be(
-                string.Format(
-                    DbStrings.SchemaSync_ExecuteConfirmRebuild,
-                    settings.FilePath,
-                    "  • Customer"
-                )
+                DbStrings.SchemaSync_ExecuteConfirmRebuildTablesHeader
+                    + Environment.NewLine
+                    + "  • Customer"
             );
     }
 
@@ -851,13 +856,16 @@ public class SchemaSyncDialogViewModelTests
 
         await vm.ExecuteCommand.ExecuteAsync(null);
 
-        var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
-        message
+        // 警告は判断材料として詳細領域へ載り、本文は破壊的変更の要約のまま
+        dialogs.WarningConfirmMessages.Should().BeEmpty();
+        var (message, details, _) = dialogs
+            .WarningConfirmDetailsMessages.Should()
+            .ContainSingle()
+            .Subject;
+        message.Should().Be(string.Format(DbStrings.SchemaSync_ExecuteConfirmDestructive, "shop"));
+        details
             .Should()
-            .StartWith(string.Format(DbStrings.SchemaSync_ExecuteConfirmDestructive, "shop"));
-        message
-            .Should()
-            .Contain(string.Format(DbStrings.SchemaSync_ExecuteConfirmForeignKeyRebuildRisk, 1));
+            .Be(string.Format(DbStrings.SchemaSync_ExecuteConfirmForeignKeyRebuildRisk, 1));
     }
 
     /// <summary>
@@ -925,17 +933,14 @@ public class SchemaSyncDialogViewModelTests
         await vm.ExecuteCommand.ExecuteAsync(null);
 
         // 再構築されるため確認文言はテーブル再構築版になる
-        dialogs
-            .WarningConfirmMessages.Should()
+        var (message, details, _) = dialogs
+            .WarningConfirmDetailsMessages.Should()
             .ContainSingle()
-            .Subject.Should()
-            .Be(
-                string.Format(
-                    DbStrings.SchemaSync_ExecuteConfirmRebuild,
-                    "shop.db",
-                    "  • order_line"
-                )
-            );
+            .Subject;
+        message
+            .Should()
+            .Be(string.Format(DbStrings.SchemaSync_ExecuteConfirmRebuild, "shop.db", 1));
+        details.Should().Contain("  • order_line");
 
         // 再構築後の CREATE TABLE でも外部キーは全構成列を保つ
         vm.ScriptPreview.Should()
@@ -1159,5 +1164,349 @@ public class SchemaSyncDialogViewModelTests
                 new SchemaSyncResult { Committed = false, Error = "statement 1 failed" }
             );
         }
+    }
+
+    // ---------------- 1-9 の対応（再計算の失敗・実行中の操作・失敗理由・一括選択） ----------------
+
+    /// <summary>取込の振る舞いを差し替えられるフェイクインポーター（例外・待機を再現する）</summary>
+    private sealed class ScriptedSchemaImporter(Func<Task<SchemaImportResult>> import)
+        : ISchemaImporter
+    {
+        /// <summary>次の取込の振る舞い</summary>
+        public Func<Task<SchemaImportResult>> Import { get; set; } = import;
+
+        public Task<SchemaImportResult> ImportAsync(
+            string connectionString,
+            int commandTimeoutSeconds,
+            CancellationToken cancellationToken = default
+        ) => Import();
+    }
+
+    /// <summary>実行された回数を数えるフェイク実行器（結果は差し替え可能）</summary>
+    private sealed class CountingExecutor(Func<SchemaSyncResult> result) : ISchemaSyncExecutor
+    {
+        /// <summary>実行された回数</summary>
+        public int Count { get; private set; }
+
+        public Task<SchemaSyncResult> ExecuteAsync(
+            DbConnectionSettings settings,
+            string script,
+            CancellationToken ct = default
+        )
+        {
+            Count++;
+            return Task.FromResult(result());
+        }
+    }
+
+    /// <summary>スクリプト生成の回数を数える SQLite 相当のフェイクプロバイダ</summary>
+    private sealed class CountingSqliteProvider(ISchemaImporter importer) : IDatabaseProvider
+    {
+        private readonly SqliteProvider _inner = new();
+
+        /// <summary>スクリプトを生成した回数</summary>
+        public int BuildCount { get; private set; }
+
+        public string Name => _inner.Name;
+
+        public string DisplayName => _inner.DisplayName;
+
+        public int? DefaultPort => _inner.DefaultPort;
+
+        public ISchemaImporter SchemaImporter => importer;
+
+        public IColumnTypeMapper TypeMapper => _inner.TypeMapper;
+
+        public ITypeCatalog TypeCatalog => _inner.TypeCatalog;
+
+        public ISyncScriptBuilder SyncScriptBuilder => new CountingBuilder(this);
+
+        public SyncDialectCapabilities SyncCapabilities => _inner.SyncCapabilities;
+
+        public ISchemaSyncExecutor SyncExecutor => _inner.SyncExecutor;
+
+        public IDdlGenerator DdlGenerator => _inner.DdlGenerator;
+
+        public string BuildConnectionString(DbConnectionSettings settings) =>
+            "Data Source=:memory:";
+
+        /// <summary>本物の SQLite レンダラーへ委譲しつつ回数を数える</summary>
+        private sealed class CountingBuilder(CountingSqliteProvider owner) : ISyncScriptBuilder
+        {
+            public string Build(SyncPlan plan)
+            {
+                owner.BuildCount++;
+                return owner._inner.SyncScriptBuilder.Build(plan);
+            }
+        }
+    }
+
+    /// <summary>live（Customer(Id)）と、列を 1 本足した目標から作る ViewModel の材料</summary>
+    private static (SchemaImportResult Live, Entity[] Target) AddColumnScenario() =>
+        (
+            new SchemaImportResult
+            {
+                Entities = [Table("Customer", Col("Id", "INTEGER", pk: true))],
+            },
+            [Table("Customer", Col("Id", "INTEGER", pk: true), Col("Name", "TEXT"))]
+        );
+
+    /// <summary>
+    /// 再計算が失敗したら、前回の差分・スクリプトを捨てて実行できない状態へ戻す（1-9 #4）。
+    /// </summary>
+    /// <remarks>
+    /// 残すと、取り直せなかったのに古いスクリプトを実行できてしまう。
+    /// </remarks>
+    [Fact(DisplayName = "Refresh: 失敗したら前回の差分とスクリプトを捨て、実行できない")]
+    public async Task Refresh_Failure_ClearsStaleScript()
+    {
+        var (live, target) = AddColumnScenario();
+        var importer = new ScriptedSchemaImporter(() => Task.FromResult(live));
+        var executor = new CountingExecutor(() => new SchemaSyncResult { Committed = true });
+        var vm = new SchemaSyncDialogViewModel(
+            new FakeSqliteProvider(importer, executor),
+            new DbConnectionSettings { FilePath = "shop.db" },
+            target,
+            [],
+            new StubDialogService { ConfirmResult = true }
+        );
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.ScriptPreview.Should().NotBeEmpty();
+
+        importer.Import = () => throw new InvalidOperationException("network down");
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        vm.DiffItems.Should().BeEmpty();
+        vm.HasDiff.Should().BeFalse();
+        vm.ScriptPreview.Should().BeEmpty();
+        vm.StatusMessage.Should()
+            .Be(string.Format(DbStrings.SchemaSync_DiffFailed, "network down"));
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        executor.Count.Should().Be(0, "取り直せなかった古いスクリプトは流さない");
+        vm.StatusMessage.Should().Be(DbStrings.SchemaSync_NoScript);
+    }
+
+    /// <summary>
+    /// 実行の失敗後の取り直しも失敗したら、古いスクリプトを再実行できない（1-9 #4）。
+    /// </summary>
+    /// <remarks>MySQL / Oracle の部分適用→回線断で取り直せない→回線復帰後に古いスクリプトを再実行、を塞ぐ</remarks>
+    [Fact(DisplayName = "Execute: 失敗後の取り直しも失敗したら、古いスクリプトを再実行できない")]
+    public async Task Execute_FailureThenRefreshFailure_CannotRerunStaleScript()
+    {
+        var (live, target) = AddColumnScenario();
+        var importer = new ScriptedSchemaImporter(() => Task.FromResult(live));
+        var executor = new CountingExecutor(() =>
+        {
+            importer.Import = () => throw new InvalidOperationException("network down");
+            return new SchemaSyncResult { Committed = false, Error = "statement 1 failed" };
+        });
+        var vm = new SchemaSyncDialogViewModel(
+            new FakeSqliteProvider(importer, executor),
+            new DbConnectionSettings { FilePath = "shop.db" },
+            target,
+            [],
+            new StubDialogService { ConfirmResult = true }
+        );
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        executor.Count.Should().Be(1);
+        vm.ScriptPreview.Should().BeEmpty();
+        vm.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 再計算の最中は実行・再計算・全選択・全解除ができない（閉じるのはできる）（1-9 #9）。
+    /// </summary>
+    [Fact(DisplayName = "Refresh: 再計算中は実行・全選択などを受け付けないが、閉じることはできる")]
+    public async Task Refresh_WhileRunning_DisablesOperationsButNotClose()
+    {
+        var (live, target) = AddColumnScenario();
+        var release = new TaskCompletionSource<SchemaImportResult>();
+        var importer = new ScriptedSchemaImporter(() => Task.FromResult(live));
+        var executor = new CountingExecutor(() => new SchemaSyncResult { Committed = true });
+        var vm = new SchemaSyncDialogViewModel(
+            new FakeSqliteProvider(importer, executor),
+            new DbConnectionSettings { FilePath = "shop.db" },
+            target,
+            [],
+            new StubDialogService { ConfirmResult = true }
+        );
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        importer.Import = () => release.Task;
+        var refreshing = vm.RefreshCommand.ExecuteAsync(null);
+
+        vm.IsBusy.Should().BeTrue();
+        vm.ExecuteCommand.CanExecute(null).Should().BeFalse();
+        vm.SelectAllCommand.CanExecute(null).Should().BeFalse();
+        vm.DeselectAllCommand.CanExecute(null).Should().BeFalse();
+        vm.CloseCommand.CanExecute(null).Should().BeTrue("読み直しの最中は閉じてよい");
+
+        // ボタンを通らない直接の呼び出しも、古いスクリプトを流さない
+        await vm.ExecuteCommand.ExecuteAsync(null);
+        executor.Count.Should().Be(0);
+
+        release.SetResult(live);
+        await refreshing;
+
+        vm.ExecuteCommand.CanExecute(null).Should().BeTrue();
+        vm.SelectAllCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    /// <summary>同期の実行中は閉じられない（実行後の取り直しの最中は閉じてよい）（1-9 #9）</summary>
+    [Fact(DisplayName = "Execute: 実行中は閉じられない")]
+    public async Task Execute_WhileRunning_CannotClose()
+    {
+        var started = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var vm = new SchemaSyncDialogViewModel(
+            new FakeSqliteProvider(
+                new FakeSchemaImporter(new SchemaImportResult()),
+                new GatedSyncExecutor(started, release)
+            ),
+            new DbConnectionSettings(),
+            [],
+            [],
+            new StubDialogService { ConfirmResult = true }
+        )
+        {
+            ScriptPreview = "DROP TABLE [X];",
+        };
+        var closed = false;
+        vm.CloseAction = _ => closed = true;
+
+        var run = vm.ExecuteCommand.ExecuteAsync(null);
+        await started.Task;
+
+        vm.IsExecuting.Should().BeTrue();
+        vm.CloseCommand.CanExecute(null).Should().BeFalse();
+        vm.CloseCommand.Execute(null);
+        closed.Should().BeFalse("DDL の実行中にダイアログを閉じない");
+
+        release.SetResult();
+        await run;
+
+        vm.IsExecuting.Should().BeFalse();
+        vm.CloseCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 再計算でプレビュー生成が失敗したとき、その理由を件数表示で上書きしない（1-9 #5）。
+    /// </summary>
+    [Fact(DisplayName = "Refresh: プレビュー生成の失敗理由は件数表示で上書きしない")]
+    public async Task Refresh_PreviewFailure_KeepsReason()
+    {
+        // 改行入りテーブル名の追加は入口の名前検証で拒否される（既定で選択される差分）
+        var bad = Table("a\nDROP TABLE users; --", Col("Id", "INTEGER", pk: true));
+        var vm = new SchemaSyncDialogViewModel(
+            new FakeSqliteProvider(new FakeSchemaImporter(new SchemaImportResult())),
+            new DbConnectionSettings { FilePath = "shop.db" },
+            [bad],
+            []
+        );
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        vm.DiffItems.Should().NotBeEmpty();
+        vm.ScriptPreview.Should().BeEmpty();
+        vm.StatusMessage.Should()
+            .StartWith(DbStrings.SchemaSync_PreviewFailed.Split("{0}")[0])
+            .And.Contain("DROP TABLE users");
+    }
+
+    /// <summary>
+    /// 全選択・全解除はスクリプトを 1 回だけ作り直す（項目ごとに作り直さない）（1-9 #14）。
+    /// </summary>
+    [Fact(DisplayName = "全選択・全解除はスクリプトを 1 回だけ作り直す")]
+    public async Task SelectAllAndDeselectAll_RebuildScriptOnce()
+    {
+        var live = new SchemaImportResult
+        {
+            Entities = [Table("Customer", Col("Id", "INTEGER", pk: true), Col("Age", "INTEGER"))],
+        };
+        var target = new[]
+        {
+            Table(
+                "Customer",
+                Col("Id", "INTEGER", pk: true),
+                Col("Age", "TEXT"),
+                Col("A", "TEXT"),
+                Col("B", "TEXT"),
+                Col("C", "TEXT")
+            ),
+        };
+        var provider = new CountingSqliteProvider(new FakeSchemaImporter(live));
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings { FilePath = "shop.db" },
+            target,
+            []
+        );
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.DiffItems.Count(i => i.IsSelectable).Should().BeGreaterThanOrEqualTo(4);
+
+        var before = provider.BuildCount;
+        vm.DeselectAllCommand.Execute(null);
+        provider.BuildCount.Should().Be(before + 1);
+
+        vm.SelectAllCommand.Execute(null);
+        provider.BuildCount.Should().Be(before + 2);
+        vm.DiffItems.Where(i => i.IsSelectable).Should().OnlyContain(i => i.IsSelected);
+    }
+
+    /// <summary>
+    /// 実行器が例外で抜けたときも、モーダルで知らせてから差分を取り直す（1-9 フェーズ B の追補）。
+    /// </summary>
+    /// <remarks>
+    /// 例外は接続断などの途中で起き、MySQL / Oracle では部分適用の後かもしれない。取り直しも失敗したら
+    /// 古いスクリプトを再実行できないこと（Committed=false の経路と同じ扱い）まで確かめる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "Execute: 実行器の例外もモーダルで知らせて取り直し、取り直しの失敗後は再実行できない"
+    )]
+    public async Task Execute_ExecutorThrows_ShowsErrorAndRefreshes()
+    {
+        var (live, target) = AddColumnScenario();
+        var imports = 0;
+        var importer = new ScriptedSchemaImporter(() =>
+        {
+            imports++;
+            return Task.FromResult(live);
+        });
+        var executor = new CountingExecutor(() =>
+        {
+            importer.Import = () =>
+            {
+                imports++;
+                throw new InvalidOperationException("network down");
+            };
+            throw new InvalidOperationException("connection lost");
+        });
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = new SchemaSyncDialogViewModel(
+            new FakeSqliteProvider(importer, executor),
+            new DbConnectionSettings { FilePath = "shop.db" },
+            target,
+            [],
+            dialogs
+        );
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        dialogs.ErrorMessages.Should().ContainSingle().Which.Should().Contain("connection lost");
+        imports.Should().Be(2, "失敗の後に差分を取り直す");
+        vm.ScriptPreview.Should().BeEmpty("取り直しも失敗したので古いスクリプトを残さない");
+        vm.IsBusy.Should().BeFalse();
+        vm.IsExecuting.Should().BeFalse();
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        executor.Count.Should().Be(1, "古いスクリプトは再実行できない");
     }
 }

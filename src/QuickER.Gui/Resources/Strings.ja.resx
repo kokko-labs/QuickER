@@ -93,8 +93,12 @@
     <comment>更新確認ダイアログのタイトル</comment>
   </data>
   <data name="Update_ConfirmMessage" xml:space="preserve">
-    <value>新しいバージョン {0} が利用可能です。ダウンロードして再起動し、更新を適用しますか？</value>
+    <value>新しいバージョン {0} が利用可能です。ダウンロードしますか？（ダウンロードが終わったら、再起動して適用するかを確認します）</value>
     <comment>更新確認メッセージ（{0} は新バージョン番号）</comment>
+  </data>
+  <data name="Update_RestartConfirmMessage" xml:space="preserve">
+    <value>更新の準備ができました。今すぐ QuickER を再起動して適用しますか？（キャンセルを選ぶと、次に QuickER を閉じたときに適用します）</value>
+    <comment>更新のダウンロード完了後に、再起動して適用するかを確認するメッセージ</comment>
   </data>
   <data name="Settings_Caption" xml:space="preserve">
     <value>設定</value>
@@ -344,6 +348,12 @@
   </data>
   <data name="Status_ExternalReloadFailed" xml:space="preserve">
     <value>外部変更されたファイルを再読込できませんでした（現在の図を維持します）。</value>
+  </data>
+  <data name="Status_ExternalWatchInterrupted" xml:space="preserve">
+    <value>ファイルの外部変更の監視が止まりました（フォルダにアクセスできません）。裏で再開を試み続けます。</value>
+  </data>
+  <data name="Status_ExternalWatchResumed" xml:space="preserve">
+    <value>ファイルの外部変更の監視を再開しました。</value>
   </data>
   <data name="Toolbox_Title" xml:space="preserve">
     <value>ツールボックス</value>
@@ -606,9 +616,6 @@
   <data name="Undo_GroupRemoveEntities" xml:space="preserve">
     <value>エンティティ一括削除: {0} 個</value>
   </data>
-  <data name="Undo_ImportSchema" xml:space="preserve">
-    <value>DB からスキーマ取込</value>
-  </data>
   <data name="Undo_MoveColumnOrder" xml:space="preserve">
     <value>列順変更: {0}</value>
   </data>
@@ -789,6 +796,27 @@
   <data name="ExportOmission_ColumnNameNormalized" xml:space="preserve">
     <value>この形式で書けない列名（空白・記号は「_」へ置き換わります）</value>
   </data>
+  <data name="ExportOmission_ForeignKeyMarkerWithoutRelationship" xml:space="preserve">
+    <value>リレーションの子側の列になっていない列の外部キー印（この形式は外部キーをリレーションの一部としてしか書けません）</value>
+  </data>
+  <data name="ExportOmission_RelationshipWithoutColumns" xml:space="preserve">
+    <value>列を書けないリレーション（列ペアの無い 1 対 1・1 対多と、列の無いテーブルにつながる多対多）。出力に含まれません</value>
+  </data>
+  <data name="ExportOmission_ComputedColumn" xml:space="preserve">
+    <value>計算列の指定（取り込むと通常の列になります）</value>
+  </data>
+  <data name="ExportOmission_TableNameNormalized" xml:space="preserve">
+    <value>引用してもこの形式で書けないテーブル名（「"」「%」「\」は「_」へ置き換わります）</value>
+  </data>
+  <data name="ExportOmission_ColumnTypeNormalized" xml:space="preserve">
+    <value>この形式で書けない列の型（空白・記号は「_」へ置き換わり、nvarchar(max) や double precision のように取込で元の表記へ戻りません）</value>
+  </data>
+  <data name="ExportOmission_UniqueConstraintOnForeignKeyColumn" xml:space="preserve">
+    <value>外部キー列の単一列 UNIQUE 制約（キー欄は列ごとに標識を 1 つしか持てず、FK が UK より優先されます）</value>
+  </data>
+  <data name="ExportOmission_RelationshipConstraintName" xml:space="preserve">
+    <value>取込で同じ名前に戻らないリレーションの制約名（空白や記号を含むため引用して書いた名前、複数のリレーションで同じ名前、relates や主キー・一意制約と同じ名前）</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
   </data>
@@ -810,6 +838,9 @@
   </data>
   <data name="Export_FormatUndetermined" xml:space="preserve">
     <value>出力形式を判定できませんでした。</value>
+  </data>
+  <data name="Export_TargetIsCurrentDocument" xml:space="preserve">
+    <value>選んだファイルはいま開いている図そのものなので、出力しませんでした。図そのものを保存するには上書き保存を使い、出力するときは別のファイルを選んでください。</value>
   </data>
   <data name="Import_FormatUndetermined" xml:space="preserve">
     <value>取込形式を判定できませんでした。</value>
@@ -863,7 +894,10 @@
     <value>解釈できない DBML の行です: '{0}'。</value>
   </data>
   <data name="Dbml_UnsupportedRelationshipForm" xml:space="preserve">
-    <value>未対応のリレーション記法です: '{0}'。名前なしの短縮形（Ref: 親.列 &lt; 子.列）だけに対応しています。</value>
+    <value>未対応のリレーション記法です: '{0}'。短縮形（Ref: 親.列 &lt; 子.列、名前を付けるなら Ref 名前: …）だけに対応しています。ブロック形式 Ref {{ … }} には対応していません。</value>
+  </data>
+  <data name="Dbml_UnsupportedInlineReference" xml:space="preserve">
+    <value>未対応のインライン参照 '{0}' です。ref: 記号 テーブル.列 の形だけに対応しています（記号は &lt;・&gt;・-・&lt;&gt;。スキーマ修飾の名前には対応していません）。</value>
   </data>
   <data name="Mermaid_EmptyText" xml:space="preserve">
     <value>Mermaid テキストが空です。</value>
@@ -921,9 +955,6 @@
   </data>
   <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
     <value>テーブル '{0}' のカラム '{1}' にデータ型がありません。</value>
-  </data>
-  <data name="TableDoc_TableNoColumns" xml:space="preserve">
-    <value>テーブル '{0}' にカラム定義がありません。</value>
   </data>
   <data name="TableDoc_RelMissingTableName" xml:space="preserve">
     <value>リレーション一覧シートの {0} 行目に参照元または参照先テーブル名がありません。</value>
@@ -1042,6 +1073,9 @@
   <data name="Tool_Summary_TableCount" xml:space="preserve">
     <value>テーブル数: {0}</value>
   </data>
+  <data name="Tool_Summary_TargetDbms" xml:space="preserve">
+    <value>対象 DBMS: {0}</value>
+  </data>
   <data name="Tool_Summary_RelationshipCount" xml:space="preserve">
     <value>リレーション数: {0}</value>
   </data>
@@ -1062,6 +1096,9 @@
   </data>
   <data name="Tool_EntityRemoved" xml:space="preserve">
     <value>テーブル '{0}' を削除しました。</value>
+  </data>
+  <data name="Tool_EntityRemovedWithQueries" xml:space="preserve">
+    <value>テーブル '{0}' と、そのテーブルの名前付きクエリ（{1}）を削除しました。</value>
   </data>
   <data name="Tool_TableAndColumnNameRequired" xml:space="preserve">
     <value>table_name と column_name は必須です。</value>
@@ -1102,6 +1139,9 @@
   <data name="Tool_ColumnUpdated" xml:space="preserve">
     <value>テーブル '{0}' のカラム '{1}' の {2} を更新しました。</value>
   </data>
+  <data name="Tool_PrimaryKeyNullableIgnored" xml:space="preserve">
+    <value>カラム '{0}' は主キーの列なので NOT NULL のままです。is_nullable=true は無視しました（NULL を許すには、先に set_primary_key でその列を主キーから外してください）。</value>
+  </data>
   <data name="Tool_SourceAndTargetTableRequired" xml:space="preserve">
     <value>source_table と target_table は必須です。</value>
   </data>
@@ -1109,7 +1149,16 @@
     <value>テーブル '{0}' にカラム '{1}' が見つかりません。</value>
   </data>
   <data name="Tool_RelationshipAdded" xml:space="preserve">
-    <value>'{0}' → '{1}' のリレーションを追加しました。</value>
+    <value>'{0}' → '{1}' のリレーションを追加しました（制約名: {2}）。</value>
+  </data>
+  <data name="Tool_RelationshipPairsIncomplete" xml:space="preserve">
+    <value>注意: '{2}' の主キー列 {1} 本のうち、'{3}' の列と対応付けられたのは {0} 本だけです。生成する DDL では、このリレーションの FOREIGN KEY が出ないか不完全になります。直すには、リレーションを削除し、source_columns と target_columns を指定して追加し直してください。</value>
+  </data>
+  <data name="Tool_RelationshipParentHasNoKey" xml:space="preserve">
+    <value>注意: テーブル '{0}' に主キーが無いため列ペアを推論できず、生成する DDL にこのリレーションの FOREIGN KEY は出ません。直すには、リレーションを削除し、source_columns と target_columns を指定して追加し直してください。</value>
+  </data>
+  <data name="Tool_RelationshipParentColumnsNotKey" xml:space="preserve">
+    <value>注意: '{1}' の列 {0} は主キーでも一意制約でもないため、生成した DDL を適用すると多くの DB がこの FOREIGN KEY を拒否します（MySQL は列に索引があれば受け付けます）。直すには、リレーションを削除して source_columns に主キーか一意制約の列を指定して追加し直すか、これらの列に一意制約を追加してください。</value>
   </data>
   <data name="Tool_RelationshipNotFound" xml:space="preserve">
     <value>'{0}' → '{1}' のリレーションが見つかりません。</value>
@@ -1137,6 +1186,27 @@
   </data>
   <data name="Tool_RelationshipAmbiguous" xml:space="preserve">
     <value>'{0}' → '{1}' のリレーションが複数あります。constraint_name で対象を指定してください。候補: {2}。</value>
+  </data>
+  <data name="Tool_RelationshipConstraintNameTaken" xml:space="preserve">
+    <value>制約名 '{0}' はこの図で既に使われています（制約名は外部キー・主キー・一意制約をまたいで、大文字小文字を区別せずに一意である必要があります）。別の名前を指定するか、constraint_name を省いて一意な名前を自動で付けてください。</value>
+  </data>
+  <data name="Tool_TableNameTaken" xml:space="preserve">
+    <value>テーブル '{0}' は既にあります（テーブル名は大文字小文字を区別せずに一意である必要があります）。</value>
+  </data>
+  <data name="Tool_NewTableNameEmpty" xml:space="preserve">
+    <value>new_table_name は空にできません。</value>
+  </data>
+  <data name="Tool_DataTypeEmpty" xml:space="preserve">
+    <value>data_type は空にできません。</value>
+  </data>
+  <data name="Tool_ColumnNameTaken" xml:space="preserve">
+    <value>テーブル '{0}' には列 '{1}' が既にあります（列名はテーブルの中で大文字小文字を区別せずに一意である必要があります）。</value>
+  </data>
+  <data name="Tool_RelationshipTypeInvalid" xml:space="preserve">
+    <value>relationship_type '{0}' は無効です。次のいずれかを指定してください: {1}。</value>
+  </data>
+  <data name="Tool_RelationshipDuplicate" xml:space="preserve">
+    <value>同じ列ペアのリレーション '{0}' → '{1}' は既にあります（制約名: {2}）。同じ外部キーは 1 回しか定義できません。</value>
   </data>
   <data name="Tool_RelationshipConstraintNotFound" xml:space="preserve">
     <value>'{0}' → '{1}' で制約名 '{2}' のリレーションが見つかりません。候補: {3}。</value>
@@ -1195,5 +1265,11 @@
   <data name="Crash_CopyDetails" xml:space="preserve">
     <value>詳細をコピー</value>
     <comment>クラッシュ報告ダイアログの詳細コピーボタン</comment>
+  </data>
+  <data name="SingleInstance_RunningWithDifferentPrivileges" xml:space="preserve">
+    <value>QuickER は別の権限（管理者として実行など）で既に起動しているため、もう 1 つ起動することも、そのウィンドウを前面に出すこともできません。
+
+すでに開いている QuickER のウィンドウに切り替えるか、それを閉じてから QuickER を起動し直してください。</value>
+    <comment>権限の違うインスタンスが起動中のときに、2 つ目の起動で出すメッセージ</comment>
   </data>
 </root>

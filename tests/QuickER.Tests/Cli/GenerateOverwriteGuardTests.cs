@@ -164,6 +164,12 @@ public sealed class GenerateOverwriteGuardTests : IDisposable
         success.Should().BeFalse();
         result.Should().Contain(path);
         result.Should().Contain("force: true");
+        // 案内文が「下の一覧」と言うとおり、編集されたファイルの一覧は案内文より後に出る
+        result.Should().Contain("files listed below");
+        result
+            .IndexOf(path, StringComparison.Ordinal)
+            .Should()
+            .BeGreaterThan(result.IndexOf("files listed below", StringComparison.Ordinal));
         result.Should().NotContain("--force", "CLI 向けの案内は MCP の結果へ出さない");
         File.ReadAllText(path).Should().Be(edited);
     }

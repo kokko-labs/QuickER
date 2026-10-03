@@ -103,8 +103,19 @@ internal sealed class DiagramExportService(
     }
 
     /// <summary>指定形式でダイアグラムをファイルへ書き出し、完了を通知する</summary>
+    /// <remarks>
+    /// 出力先がいま開いている図のファイルなら、形式を問わず何も書かずに断る。エクスポートは文書の
+    /// 保存ではないため、書けば図ファイルが別形式（スキーマのみの JSON ならレイアウトの無い文書）で
+    /// 潰され、しかも自分の書き込みが外部変更として扱われる（クリーンなら自動再読込で手配置が消える）。
+    /// </remarks>
     internal void SaveDiagram(DiagramExportFormat format, string path, object? visual)
     {
+        if (host.IsCurrentDocumentPath(path))
+        {
+            dialogs.ShowError(Strings.Export_TargetIsCurrentDocument, Strings.Common_Error);
+            return;
+        }
+
         var displayName = format switch
         {
             DiagramExportFormat.Png => Strings.Format_Png,
@@ -279,6 +290,17 @@ internal sealed class DiagramExportService(
             ExportOmissionKind.NamedQuery => Strings.ExportOmission_NamedQuery,
             ExportOmissionKind.ColumnNameNormalized => Strings.ExportOmission_ColumnNameNormalized,
             ExportOmissionKind.PrimaryKeyOrder => Strings.ExportOmission_PrimaryKeyOrder,
+            ExportOmissionKind.ForeignKeyMarkerWithoutRelationship =>
+                Strings.ExportOmission_ForeignKeyMarkerWithoutRelationship,
+            ExportOmissionKind.RelationshipWithoutColumns =>
+                Strings.ExportOmission_RelationshipWithoutColumns,
+            ExportOmissionKind.ComputedColumn => Strings.ExportOmission_ComputedColumn,
+            ExportOmissionKind.TableNameNormalized => Strings.ExportOmission_TableNameNormalized,
+            ExportOmissionKind.ColumnTypeNormalized => Strings.ExportOmission_ColumnTypeNormalized,
+            ExportOmissionKind.UniqueConstraintOnForeignKeyColumn =>
+                Strings.ExportOmission_UniqueConstraintOnForeignKeyColumn,
+            ExportOmissionKind.RelationshipConstraintName =>
+                Strings.ExportOmission_RelationshipConstraintName,
             _ => kind.ToString(),
         };
 }

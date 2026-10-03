@@ -213,6 +213,30 @@ public class CopilotChatEngineTests
         await engine.DisposeAsync();
     }
 
+    /// <summary>
+    /// copilot ランタイムとの接続が切れて（クライアントが接続とセッションを捨てて）いたら、次の送信で接続し直し、
+    /// 会話を開き直してから送ることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "接続が切れた後の送信は接続し直して会話を開き直す")]
+    public async Task SendAsync_AfterConnectionLost_ReconnectsAndStartsNewSession()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+        client.RaiseIdle();
+
+        client.SimulateConnectionLost();
+        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
+
+        client.StartCallCount.Should().Be(2);
+        client.StartSessionCallCount.Should().Be(2);
+        client.Sends.Select(send => send.Prompt).Should().Equal("1 回目", "2 回目");
+
+        await engine.DisposeAsync();
+    }
+
     /// <summary>差分がそのまま流れ、アイドル復帰で成功完了することを検証する</summary>
     [Fact(DisplayName = "差分を流しアイドルで成功完了する")]
     public async Task SendAsync_StreamsAndCompletesOnIdle()
@@ -304,7 +328,107 @@ public class CopilotChatEngineTests
 
         completions.Should().ContainSingle();
         completions[0].Success.Should().BeFalse();
-        completions[0].Error.Should().Be("rate limited");
+        completions[0].Error.Should().Be(ExpectedTurnFailed("rate limited"));
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>ターン失敗の表示文言（要約＋改行＋詳細: 原因）を組み立てる</summary>
+    private static string ExpectedTurnFailed(string detail) =>
+        Strings.Copilot_TurnFailed + Environment.NewLine + Strings.Ai_DetailLabel + detail;
+
+    /// <summary>送信が例外で終わったら、要約に例外の文言を詳細として添えた失敗で完了することを検証する</summary>
+    [Fact(DisplayName = "送信の例外は要約＋詳細の失敗として完了する")]
+    public async Task SendFailure_IsSummaryWithDetail()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        var completions = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => completions.Add(r);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.DuringSend = () => throw new InvalidOperationException("session lost");
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completions.Should().ContainSingle();
+        completions[0].Success.Should().BeFalse();
+        completions[0].Error.Should().Be(ExpectedTurnFailed("session lost"));
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 送信の取り消しは、呼び出し元のトークンが立っていれば無音の中断、立っていなければ失敗になることを検証する
+    /// </summary>
+    /// <param name="cancelOwnToken">送信前に呼び出し元のトークンを取り消すか</param>
+    [Theory(DisplayName = "送信の取り消しは自分のトークンのときだけ中断として畳まれる")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SendCancellation_IsInterruptOnlyForOwnToken(bool cancelOwnToken)
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+        using var cts = new CancellationTokenSource();
+
+        var completions = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => completions.Add(r);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.DuringSend = () =>
+        {
+            if (cancelOwnToken)
+            {
+                cts.Cancel();
+            }
+
+            throw new OperationCanceledException();
+        };
+        await engine.SendAsync("やあ", cts.Token);
+
+        completions.Should().ContainSingle();
+        completions[0].Success.Should().BeFalse();
+
+        if (cancelOwnToken)
+        {
+            completions[0].Error.Should().BeNull();
+        }
+        else
+        {
+            completions[0].Error.Should().StartWith(Strings.Copilot_TurnFailed);
+        }
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 送信の途中でセッションエラーがターンを完了させた後に、送信自体が例外で終わっても、
+    /// TurnCompleted が 1 回しか届かないことを検証する（送信失敗の経路が実行中フラグを見ずに
+    /// 通知すると、同じターンの失敗が 2 回届く）。
+    /// </summary>
+    [Fact(DisplayName = "送信中のエラーの後に送信が失敗しても完了通知は 1 回だけ")]
+    public async Task SendFailure_AfterSessionError_CompletesOnce()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        var completions = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => completions.Add(r);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.DuringSend = () =>
+        {
+            client.RaiseError("rate limited");
+            throw new InvalidOperationException("send failed");
+        };
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completions.Should().ContainSingle();
+        completions[0].Success.Should().BeFalse();
+        completions[0].Error.Should().Be(ExpectedTurnFailed("rate limited"));
 
         await engine.DisposeAsync();
     }
@@ -586,5 +710,55 @@ public class CopilotChatEngineTests
         engine.TurnCompleted += (_, r) => completions.Add(r);
         client.RaiseIdle();
         completions.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 接続が実行中のあいだに重ねて呼んでも、copilot の起動は 1 回だけであることを検証する
+    /// （2 本が同時に起動すると、後のクライアントが先のクライアントを置き換え、先の copilot ランタイムが残る）。
+    /// </summary>
+    [Fact(DisplayName = "接続中に重ねて接続しても copilot の起動は 1 回")]
+    public async Task Connect_WhileConnecting_StartsOnce()
+    {
+        var gate = new TaskCompletionSource();
+        var client = new FakeCopilotRuntimeClient { StartGate = gate.Task };
+        var engine = CreateEngine(client);
+
+        var first = engine.InitializeAsync(TestContext.Current.CancellationToken);
+        var second = engine.RefreshAsync(TestContext.Current.CancellationToken);
+
+        client.StartCallCount.Should().Be(1);
+
+        gate.SetResult();
+        await first;
+        await second;
+
+        client.StartCallCount.Should().Be(1);
+        engine.IsReady.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>1 回目の接続が失敗した後の接続は、失敗を返し続けず起動をやり直すことを検証する</summary>
+    [Fact(DisplayName = "接続が失敗した後の接続は起動をやり直す")]
+    public async Task Connect_AfterFailure_RetriesStart()
+    {
+        var client = new FakeCopilotRuntimeClient
+        {
+            StartError = new InvalidOperationException("first start fails"),
+        };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        engine.IsReady.Should().BeFalse();
+
+        client.StartError = null;
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        client
+            .StartCallCount.Should()
+            .Be(1, "失敗した起動は数えない（フェイクは成功した起動だけを数える）");
+        engine.IsReady.Should().BeTrue();
+
+        await engine.DisposeAsync();
     }
 }

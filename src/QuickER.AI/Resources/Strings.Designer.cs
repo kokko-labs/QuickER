@@ -204,6 +204,30 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Attachment_NotFound {
+            get {
+                return ResourceManager.GetString("Attachment_NotFound", resourceCulture);
+            }
+        }
+
+        public static string Attachment_IsDirectory {
+            get {
+                return ResourceManager.GetString("Attachment_IsDirectory", resourceCulture);
+            }
+        }
+
+        public static string Attachment_FileTooLarge {
+            get {
+                return ResourceManager.GetString("Attachment_FileTooLarge", resourceCulture);
+            }
+        }
+
+        public static string Attachment_ReadFailed {
+            get {
+                return ResourceManager.GetString("Attachment_ReadFailed", resourceCulture);
+            }
+        }
+
         public static string Chat_ToolActivityNotifyFailed {
             get {
                 return ResourceManager.GetString("Chat_ToolActivityNotifyFailed", resourceCulture);
@@ -254,6 +278,12 @@ namespace QuickER.AI.Resources {
         public static string ClaudeCode_Guidance_Inconclusive {
             get {
                 return ResourceManager.GetString("ClaudeCode_Guidance_Inconclusive", resourceCulture);
+            }
+        }
+
+        public static string ClaudeCode_Guidance_CheckFailedFormat {
+            get {
+                return ResourceManager.GetString("ClaudeCode_Guidance_CheckFailedFormat", resourceCulture);
             }
         }
 
@@ -308,6 +338,12 @@ namespace QuickER.AI.Resources {
         public static string ClaudeCode_PathHasQuote {
             get {
                 return ResourceManager.GetString("ClaudeCode_PathHasQuote", resourceCulture);
+            }
+        }
+
+        public static string ClaudeCode_PathHasEnvExpansion {
+            get {
+                return ResourceManager.GetString("ClaudeCode_PathHasEnvExpansion", resourceCulture);
             }
         }
 
@@ -618,6 +654,12 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Codex_PathHasEnvExpansion {
+            get {
+                return ResourceManager.GetString("Codex_PathHasEnvExpansion", resourceCulture);
+            }
+        }
+
         public static string Codex_ArgHasCmdMeta {
             get {
                 return ResourceManager.GetString("Codex_ArgHasCmdMeta", resourceCulture);
@@ -726,6 +768,18 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Copilot_PathHasEnvExpansion {
+            get {
+                return ResourceManager.GetString("Copilot_PathHasEnvExpansion", resourceCulture);
+            }
+        }
+
+        public static string Copilot_PathHasDelayedExpansion {
+            get {
+                return ResourceManager.GetString("Copilot_PathHasDelayedExpansion", resourceCulture);
+            }
+        }
+
         public static string Copilot_NotConnected {
             get {
                 return ResourceManager.GetString("Copilot_NotConnected", resourceCulture);
@@ -819,6 +873,24 @@ namespace QuickER.AI.Resources {
         public static string Copilot_ErrorOccurred {
             get {
                 return ResourceManager.GetString("Copilot_ErrorOccurred", resourceCulture);
+            }
+        }
+
+        public static string ClaudeCode_TurnFailed {
+            get {
+                return ResourceManager.GetString("ClaudeCode_TurnFailed", resourceCulture);
+            }
+        }
+
+        public static string Codex_TurnFailed {
+            get {
+                return ResourceManager.GetString("Codex_TurnFailed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_TurnFailed {
+            get {
+                return ResourceManager.GetString("Copilot_TurnFailed", resourceCulture);
             }
         }
     }

@@ -85,10 +85,16 @@ public static class DiagramPrintService
     /// タイトルと日時のうち存在するものを 2 スペース区切りで連結した文字列。
     /// タイトル空欄なら日時のみ、日時なしならタイトルのみ、両方なければ空文字
     /// </returns>
+    /// <remarks>
+    /// 日時は UI の言語・地域に依らず <c>yyyy/MM/dd HH:mm</c>（西暦・区切りは <c>/</c>）で書く。
+    /// 現在のカルチャで書式化すると <c>/</c> が地域の日付区切りに置き換わり、仏暦などの暦では年も変わる。
+    /// </remarks>
     public static string BuildHeaderText(string? title, DateTime printedAt, bool includeTimestamp)
     {
         var displayTitle = title?.Trim() ?? string.Empty;
-        var timestamp = includeTimestamp ? $"{printedAt:yyyy/MM/dd HH:mm}" : string.Empty;
+        var timestamp = includeTimestamp
+            ? printedAt.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)
+            : string.Empty;
 
         if (displayTitle.Length == 0)
         {

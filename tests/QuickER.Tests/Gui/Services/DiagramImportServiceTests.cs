@@ -1,7 +1,9 @@
 using System;
+using System.Globalization;
 using System.IO;
 using AwesomeAssertions;
 using QuickER.Gui.Abstractions;
+using QuickER.Model;
 using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
@@ -150,6 +152,120 @@ public class DiagramImportServiceTests
 
             dialogs.WarningConfirmMessages.Should().HaveCount(1);
             host.WholesaleReplacements.Should().HaveCount(1);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact(
+        DisplayName = "空でない図への丸ごと置換は、構造が同じでクエリも未保存変更も無くても確認し、拒否なら置換しない"
+    )]
+    public void Import_SameStructureCleanDiagram_StillConfirms()
+    {
+        var (dir, path) = WriteMinimalDbml();
+
+        try
+        {
+            var (service, host, dialogs) = Create(new FileDialogResult(path, 2));
+
+            // DBML と同じ構造の現在図（構造署名は一致する）。クエリ・未保存変更なし
+            host.Model = DbmlImporter.Load(path);
+            host.HasNothingToLose = false;
+            dialogs.ConfirmResult = false;
+
+            service.Import();
+
+            // クリーンなので通常の確認（Question）。丸ごと置換はレイアウト・Memo・Undo 履歴を失う
+            dialogs.ConfirmMessages.Should().ContainSingle();
+            dialogs.WarningConfirmMessages.Should().BeEmpty();
+            host.WholesaleReplacements.Should().BeEmpty("拒否したら置換しない");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory(
+        DisplayName = "Excel のマージ取込: 定義書が方言を宣言していればそれを採り、宣言が無ければ現在の図の方言を保つ"
+    )]
+    [InlineData("sqlite", "sqlite")]
+    [InlineData(null, "postgresql")]
+    public void ImportExcel_TargetDbms_FollowsDeclarationOrKeepsCurrent(
+        string? declared,
+        string expected
+    )
+    {
+        var dir = Directory
+            .CreateDirectory(
+                System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(),
+                    "quicker-import-" + Guid.NewGuid().ToString("N")
+                )
+            )
+            .FullName;
+
+        try
+        {
+            var current = new ErDiagram
+            {
+                TargetDbms = "postgresql",
+                Entities =
+                [
+                    new Entity
+                    {
+                        TableName = "Customer",
+                        Columns =
+                        [
+                            new Column
+                            {
+                                Name = "CustomerId",
+                                DataType = "int",
+                                IsPrimaryKey = true,
+                                IsNullable = false,
+                            },
+                        ],
+                    },
+                ],
+            };
+
+            // 現在図と同じ構造の定義書（宣言の有無だけを変える）
+            var exported = new ErDiagram
+            {
+                TargetDbms = declared ?? "sqlite",
+                Entities = current.Entities,
+            };
+            var path = System.IO.Path.Combine(dir, "definition.xlsx");
+
+            using (
+                var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+                    exported,
+                    culture: new CultureInfo("en")
+                )
+            )
+            {
+                if (declared is null)
+                {
+                    // 他のアプリで保存し直してカスタムプロパティが落ちたブックを再現する
+                    workbook.CustomProperties.Delete(
+                        TableDefinitionDocumentLayout.TargetDbmsPropertyName
+                    );
+                }
+
+                workbook.SaveAs(path);
+            }
+
+            var (service, host, dialogs) = Create(new FileDialogResult(path, 3));
+            host.Model = current;
+            host.HasNothingToLose = false;
+            dialogs.ConfirmResult = true;
+
+            service.Import();
+
+            dialogs.ErrorMessages.Should().BeEmpty();
+            host.MergedReplacements.Should().ContainSingle().Which.TargetDbms.Should().Be(expected);
         }
         finally
         {

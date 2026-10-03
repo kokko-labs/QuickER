@@ -420,6 +420,76 @@ public class CliReverseCommandTests
         }
     }
 
+    /// <summary>
+    /// 出力先にこの版の図が既にあれば、--force なしでは何も書かず終了コード 2 で止まる
+    /// （reverse はスキーマだけの新しい図を書くので、上書きすると既存の図のレイアウト・名前付きクエリ・Id が消える）
+    /// </summary>
+    [Fact(DisplayName = "reverse は既存の図を --force なしで上書きしない")]
+    public async Task Reverse_ExistingOutput_RefusesWithoutForce()
+    {
+        var (sourcePath, outPath, root) = CreateGeneratedSource();
+        var existing = new DiagramDocument();
+        existing.Schema.Entities.Add(new Entity { TableName = "kept" });
+        JsonStorageService.Save(outPath, existing);
+        var before = File.ReadAllText(outPath);
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["reverse", "--source", sourcePath, "--out", outPath],
+                stdout,
+                stderr
+            );
+
+            exit.Should().Be(GenerationExecutor.ModifiedFilesExitCode);
+            File.ReadAllText(outPath).Should().Be(before, "断ったときは何も書かない");
+            stderr.ToString().Should().Contain(outPath).And.Contain("--force");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>--force を付ければ、この版の既存の図もリバース結果で置き換える</summary>
+    [Fact(DisplayName = "reverse は --force で既存の図を上書きする")]
+    public async Task Reverse_ExistingOutput_OverwritesWithForce()
+    {
+        var (sourcePath, outPath, root) = CreateGeneratedSource();
+        var existing = new DiagramDocument();
+        existing.Schema.Entities.Add(new Entity { TableName = "kept" });
+        JsonStorageService.Save(outPath, existing);
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync(
+                ["reverse", "--source", sourcePath, "--out", outPath, "--force"],
+                new StringWriter(),
+                new StringWriter()
+            );
+
+            exit.Should().Be(0);
+            JsonStorageService
+                .Load(outPath)
+                .Schema.Entities.Should()
+                .ContainSingle()
+                .Which.TableName.Should()
+                .Be("customers");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>--force を付ければ将来版の図も現行フォーマットで上書きする</summary>
     [Fact(DisplayName = "reverse は --force で将来版の図を上書きする")]
     public async Task Reverse_NewerFormatOutput_OverwritesWithForce()

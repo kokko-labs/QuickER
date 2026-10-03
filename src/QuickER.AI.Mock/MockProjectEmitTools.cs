@@ -46,9 +46,8 @@ public static class MockProjectEmitTools
     private static readonly string[] BlockedFolderNames =
     [
         MockProjectScaffoldService.GeneratedFolderName,
-        "design",
-        "obj",
-        "bin",
+        MockProjectScaffoldService.DesignRootFolderName,
+        .. MockProjectFiles.BuildOutputDirectoryNames,
     ];
 
     /// <summary>API キー方式の固定パイプラインで公開するツール定義一覧を返す（<c>emit_file</c> の 1 つ）</summary>

@@ -1,8 +1,11 @@
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
+using QuickER.Tests.Resources;
 
 namespace QuickER.Tests.AI.Mock;
 
@@ -36,6 +39,40 @@ public class MockFolderStoreTests : IDisposable
 
     private MockFolderStore CreateNew(string title = "受注管理", string schema = "# schema") =>
         MockFolderStore.CreateNew(_folder, title, schema, () => FixedNow);
+
+    /// <summary>
+    /// UI カルチャを一時的に切り替えて処理を実行する（例外文言は resx で UI 言語に追従するため。
+    /// 静的 <c>Strings.Culture</c> は変えず、スレッドの <see cref="CultureInfo.CurrentUICulture"/> を戻す）
+    /// </summary>
+    private static T WithUiCulture<T>(string culture, Func<T> action)
+    {
+        var previous = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentUICulture = new CultureInfo(culture);
+            return action();
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = previous;
+        }
+    }
+
+    /// <summary>mock.json を読み取り専用にして、マニフェストの書き込みを失敗させる（戻すと解除）</summary>
+    private IDisposable MakeManifestReadOnly()
+    {
+        var path = Path.Combine(_folder, "mock.json");
+        File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.ReadOnly);
+
+        return new ReadOnlyRelease(path);
+    }
+
+    private sealed class ReadOnlyRelease(string path) : IDisposable
+    {
+        public void Dispose() =>
+            File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.ReadOnly);
+    }
 
     private static string ScreenHtml(string body, bool withStylesheet = true, string bodyExtra = "")
     {
@@ -117,7 +154,7 @@ public class MockFolderStoreTests : IDisposable
         Directory.CreateDirectory(_folder);
         File.WriteAllText(Path.Combine(_folder, "mock.json"), "{ this is not json");
 
-        var act = () => MockFolderStore.Open(_folder);
+        var act = () => WithUiCulture("ja-JP", () => MockFolderStore.Open(_folder));
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*解釈できませんでした*");
     }
@@ -162,7 +199,7 @@ public class MockFolderStoreTests : IDisposable
         json.Should().Contain("OrderList.html");
         File.WriteAllText(manifestPath, json.Replace("OrderList.html", invalidFileName));
 
-        var act = () => MockFolderStore.Open(_folder);
+        var act = () => WithUiCulture("ja-JP", () => MockFolderStore.Open(_folder));
 
         act.Should()
             .Throw<InvalidOperationException>()
@@ -576,5 +613,342 @@ public class MockFolderStoreTests : IDisposable
         (screen.Entities is null || screen.Entities.Count == 0)
             .Should()
             .BeTrue();
+    }
+
+    // --- 他の画面が宣言した遷移 --------------------------------------------
+
+    [Fact(
+        DisplayName = "他の画面が遷移を宣言した未作成の画面へのリンクは警告せず、どこにも宣言の無い画面へのリンクは警告する"
+    )]
+    public void SaveScreen_LinkToTargetDeclaredByAnotherScreen_IsNotWarned()
+    {
+        var store = CreateNew();
+
+        // 1 枚目: A が B への遷移を宣言する（B はまだ無い）
+        store.SaveScreen(
+            "A.html",
+            "A",
+            "a",
+            ScreenHtml("<a href=\"B.html\">B</a>"),
+            new[]
+            {
+                new MockTransition { To = "B.html", Trigger = "nav" },
+            },
+            "a"
+        );
+
+        // 2 枚目: C は B への遷移を宣言せず、共通のナビゲーションから B と D へリンクする。
+        // あわせて、リンクしていない E への遷移を宣言する（宣言と実装の乖離）
+        var warnings = store.SaveScreen(
+            "C.html",
+            "C",
+            "c",
+            ScreenHtml("<a href=\"B.html\">B</a><a href=\"D.html\">D</a>"),
+            new[]
+            {
+                new MockTransition { To = "E.html", Trigger = "next" },
+            },
+            "c"
+        );
+
+        warnings.Should().NotContain(w => w.Contains("'B.html'"));
+        // どの遷移にも無い D へのリンクは従来どおり警告する
+        warnings.Should().Contain(w => w.Contains("Link target 'D.html'"));
+        // 遷移宣言の乖離の検査は、実在する画面だけを見る（マニフェストの遷移 To を既知の画面に混ぜない）
+        warnings.Should().Contain(w => w.Contains("Transition target 'E.html'"));
+    }
+
+    // --- 書き込みの失敗とメモリの整合 --------------------------------------
+
+    [Fact(
+        DisplayName = "mock.json の書き込みに失敗した SaveScreen は、メモリにも次の保存にも残らない"
+    )]
+    public void SaveScreen_ManifestWriteFails_DoesNotLeakIntoLaterSave()
+    {
+        var store = CreateNew();
+        store.SaveScreen(
+            "A.html",
+            "A",
+            "a",
+            ScreenHtml("<h1>A</h1>"),
+            Array.Empty<MockTransition>(),
+            "first"
+        );
+        var revisionsBefore = store.Manifest.Revisions.Count;
+        var manifestPath = Path.Combine(_folder, "mock.json");
+        var jsonBefore = File.ReadAllText(manifestPath);
+
+        using (MakeManifestReadOnly())
+        {
+            var act = () =>
+                store.SaveScreen(
+                    "B.html",
+                    "B",
+                    "b",
+                    ScreenHtml("<h1>B</h1>"),
+                    new[]
+                    {
+                        new MockTransition { To = "A.html", Trigger = "back" },
+                    },
+                    "failed"
+                );
+
+            act.Should()
+                .Throw<Exception>()
+                .Which.Should()
+                .Match<Exception>(ex => ex is IOException || ex is UnauthorizedAccessException);
+
+            // メモリは変更前のまま（画面・遷移・改訂のいずれも増えていない）
+            store.Manifest.Screens.Select(s => s.File).Should().Equal("A.html");
+            store.Manifest.Transitions.Should().BeEmpty();
+            store.Manifest.Revisions.Should().HaveCount(revisionsBefore);
+            File.ReadAllText(manifestPath).Should().Be(jsonBefore);
+        }
+
+        // 次の保存が、失敗した変更を持ち込まない
+        store.SaveStylesheet("body{}", "css");
+
+        var reopened = MockFolderStore.Open(_folder);
+        reopened.Manifest.Screens.Select(s => s.File).Should().Equal("A.html");
+        reopened.Manifest.Transitions.Should().BeEmpty();
+        reopened.Manifest.Revisions.Should().NotContain(r => r.Note == "failed");
+    }
+
+    [Fact(DisplayName = "画面 HTML の書き込みに失敗した SaveScreen は、マニフェストを変えない")]
+    public void SaveScreen_HtmlWriteFails_LeavesManifestUnchanged()
+    {
+        var store = CreateNew();
+        // 書き込み先と同名のフォルダを置いて、画面 HTML を書けなくする
+        Directory.CreateDirectory(Path.Combine(_folder, "B.html"));
+        var jsonBefore = File.ReadAllText(Path.Combine(_folder, "mock.json"));
+
+        var act = () =>
+            store.SaveScreen(
+                "B.html",
+                "B",
+                "b",
+                ScreenHtml("<h1>B</h1>"),
+                Array.Empty<MockTransition>(),
+                "failed"
+            );
+
+        act.Should().Throw<Exception>();
+        store.Manifest.Screens.Should().BeEmpty();
+        store.Manifest.Revisions.Should().BeEmpty();
+        File.ReadAllText(Path.Combine(_folder, "mock.json")).Should().Be(jsonBefore);
+    }
+
+    [Fact(
+        DisplayName = "mock.json の書き込みに失敗した RemoveScreen は宣言を残し、やり直しで自己回復する"
+    )]
+    public void RemoveScreen_ManifestWriteFails_KeepsDeclarationAndRetrySucceeds()
+    {
+        var store = CreateNew();
+        store.SaveScreen(
+            "A.html",
+            "A",
+            "a",
+            ScreenHtml("<h1>A</h1>"),
+            Array.Empty<MockTransition>(),
+            "first"
+        );
+
+        using (MakeManifestReadOnly())
+        {
+            var act = () => store.RemoveScreen("A.html");
+
+            act.Should().Throw<Exception>();
+            // HTML は先に消えるが、宣言はメモリにもディスクにも残る
+            File.Exists(Path.Combine(_folder, "A.html")).Should().BeFalse();
+            store.Manifest.Screens.Select(s => s.File).Should().Equal("A.html");
+        }
+
+        // やり直すと、HTML の無い宣言を外して成功する
+        store.RemoveScreen("A.html");
+
+        store.Manifest.Screens.Should().BeEmpty();
+        MockFolderStore.Open(_folder).Manifest.Screens.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "mock.json の書き込みに失敗した UpdateSourceSchema は、スキーマを変えない")]
+    public void UpdateSourceSchema_ManifestWriteFails_KeepsSchema()
+    {
+        var store = CreateNew(schema: "# old");
+
+        using (MakeManifestReadOnly())
+        {
+            var act = () => store.UpdateSourceSchema("# new");
+
+            act.Should().Throw<Exception>();
+        }
+
+        store.Manifest.SourceSchema.Should().Be("# old");
+        MockFolderStore.Open(_folder).Manifest.SourceSchema.Should().Be("# old");
+    }
+
+    [Fact(
+        DisplayName = "MockFolderStore はファイルを素の File.WriteAllText で書かない（原子的書き込みだけを使う）"
+    )]
+    public void Source_UsesOnlyAtomicWrites()
+    {
+        var source = File.ReadAllText(
+            Path.Combine(
+                NeutralResxFiles.FindRepositoryRoot(),
+                "src",
+                "QuickER.AI.Mock",
+                "MockFolderStore.cs"
+            )
+        );
+
+        // 素の書き込みは既存ファイルを切り詰めてから書くため、途中で落ちると mock.json が壊れて
+        // フォルダごと再開できなくなる。書き込みは AtomicFile だけを通す
+        Regex
+            .Matches(source, @"(?<![A-Za-z])File\.(WriteAllText|WriteAllBytes|AppendAllText)\(")
+            .Should()
+            .BeEmpty();
+        source.Should().Contain("AtomicFile.WriteAllText(");
+    }
+
+    // --- 読み取り用スナップショット ----------------------------------------
+
+    [Fact(
+        DisplayName = "Manifest は変更までは同じインスタンスを返し、保存後は新しいインスタンスを返す"
+    )]
+    public void Manifest_IsSharedUntilNextChange()
+    {
+        var store = CreateNew();
+
+        var first = store.Manifest;
+        store.Manifest.Should().BeSameAs(first);
+
+        store.SaveStylesheet("body{}", "css");
+
+        store.Manifest.Should().NotBeSameAs(first);
+        store.Manifest.Revisions.Should().ContainSingle();
+    }
+
+    [Fact(
+        DisplayName = "Manifest のスナップショットを書き換えても、内部状態と次の保存には影響しない"
+    )]
+    public void Manifest_MutatingSnapshot_DoesNotAffectStore()
+    {
+        var store = CreateNew(title: "元の表題");
+
+        var snapshot = store.Manifest;
+        snapshot.Title = "書き換え";
+        snapshot.Screens.Add(new MockScreen { File = "Ghost.html" });
+
+        store.SaveStylesheet("body{}", "css");
+
+        store.Manifest.Title.Should().Be("元の表題");
+        store.Manifest.Screens.Should().BeEmpty();
+        var reopened = MockFolderStore.Open(_folder);
+        reopened.Manifest.Title.Should().Be("元の表題");
+        reopened.Manifest.Screens.Should().BeEmpty();
+    }
+
+    // --- 手編集の null --------------------------------------------------
+
+    [Fact(DisplayName = "Open は手編集の null を補い、後段（保存・出力・再開）が NRE にならない")]
+    public void Open_NullsInManifest_AreNormalized()
+    {
+        var store = CreateNew();
+        store.SaveScreen(
+            "A.html",
+            "A",
+            "a",
+            ScreenHtml("<a href=\"A.html\">self</a>"),
+            Array.Empty<MockTransition>(),
+            "first"
+        );
+
+        File.WriteAllText(
+            Path.Combine(_folder, "mock.json"),
+            """
+            {
+              "version": 1,
+              "title": null,
+              "sourceSchema": null,
+              "screens": [
+                null,
+                { "file": "A.html", "name": null, "description": null,
+                  "entities": [ null, { "name": null, "operations": null }, { "name": "Order", "operations": "R" } ] }
+              ],
+              "transitions": [ null, { "from": "A.html", "to": null, "trigger": null } ],
+              "revisions": [ null, { "timestamp": "2026-07-23T10:00:00+00:00", "note": null } ]
+            }
+            """
+        );
+
+        var reopened = MockFolderStore.Open(_folder, () => FixedNow);
+        var manifest = reopened.Manifest;
+
+        manifest.Title.Should().BeEmpty();
+        manifest.SourceSchema.Should().BeEmpty();
+        manifest.Screens.Should().ContainSingle();
+        manifest.Screens[0].Name.Should().BeEmpty();
+        manifest.Screens[0].Description.Should().BeEmpty();
+        manifest.Screens[0].Entities.Should().HaveCount(2);
+        manifest.Transitions.Should().ContainSingle();
+        manifest.Transitions[0].To.Should().BeEmpty();
+        manifest.Revisions.Should().ContainSingle();
+        manifest.Revisions[0].Note.Should().BeEmpty();
+
+        // 後段の各処理が NRE なしで通る
+        MockBundleExporter.Export(reopened).Should().Contain("data-screen");
+        MockDesignDocExporter.Export(reopened).Should().Contain("A.html");
+        MockResumePrompt.Build("# schema", manifest, schemaChanged: true).Should().NotBeEmpty();
+        reopened.SaveScreen(
+            "A.html",
+            "A",
+            "a",
+            ScreenHtml("<h1>A</h1>"),
+            Array.Empty<MockTransition>(),
+            "again"
+        );
+        MockFolderStore.Open(_folder).Manifest.Screens.Should().ContainSingle();
+    }
+
+    // --- 利用者向けの例外文言 ----------------------------------------------
+
+    [Theory(DisplayName = "Open の失敗文言は UI 言語に追従する")]
+    [InlineData("en-US", "*Could not parse*")]
+    [InlineData("ja-JP", "*解釈できませんでした*")]
+    public void Open_FailureMessage_FollowsUiCulture(string culture, string pattern)
+    {
+        Directory.CreateDirectory(_folder);
+        File.WriteAllText(Path.Combine(_folder, "mock.json"), "{ broken");
+
+        var act = () => WithUiCulture(culture, () => MockFolderStore.Open(_folder));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage(pattern);
+    }
+
+    [Theory(DisplayName = "フォルダの判定・版の失敗文言も UI 言語に追従する")]
+    [InlineData("en-US", "*not a mock folder*", "*newer format*", "*already exists*")]
+    [InlineData(
+        "ja-JP",
+        "*モックフォルダではありません*",
+        "*より新しいフォーマット*",
+        "*既に存在します*"
+    )]
+    public void FolderFailureMessages_FollowUiCulture(
+        string culture,
+        string notMock,
+        string newer,
+        string exists
+    )
+    {
+        var missing = () => WithUiCulture(culture, () => MockFolderStore.Open(_folder));
+        missing.Should().Throw<InvalidOperationException>().WithMessage(notMock);
+
+        Directory.CreateDirectory(_folder);
+        File.WriteAllText(Path.Combine(_folder, "mock.json"), "{ \"version\": 99 }");
+
+        var newerFormat = () => WithUiCulture(culture, () => MockFolderStore.Open(_folder));
+        newerFormat.Should().Throw<InvalidOperationException>().WithMessage(newer);
+
+        var create = () => WithUiCulture(culture, () => CreateNew());
+        create.Should().Throw<InvalidOperationException>().WithMessage(exists);
     }
 }

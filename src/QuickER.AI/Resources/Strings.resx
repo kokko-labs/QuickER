@@ -133,6 +133,18 @@
   <data name="Attachment_BinaryTooLarge" xml:space="preserve">
     <value>The file exceeds the limit ({0} MB): {1}</value>
   </data>
+  <data name="Attachment_NotFound" xml:space="preserve">
+    <value>The file was not found: {0}</value>
+  </data>
+  <data name="Attachment_IsDirectory" xml:space="preserve">
+    <value>Folders cannot be attached: {0}</value>
+  </data>
+  <data name="Attachment_FileTooLarge" xml:space="preserve">
+    <value>The file is larger than the {0} MB that can be read for an attachment (images are checked before shrinking): {1}</value>
+  </data>
+  <data name="Attachment_ReadFailed" xml:space="preserve">
+    <value>Could not read the file: {0} ({1})</value>
+  </data>
   <data name="Chat_ToolActivityNotifyFailed" xml:space="preserve">
     <value>Failed to notify tool activity: {0}</value>
   </data>
@@ -160,6 +172,9 @@
   <data name="ClaudeCode_Guidance_Inconclusive" xml:space="preserve">
     <value>Wait a moment and press "Recheck".</value>
   </data>
+  <data name="ClaudeCode_Guidance_CheckFailedFormat" xml:space="preserve">
+    <value>Could not run the check: {0}</value>
+  </data>
   <data name="ClaudeCode_Status_Unconfirmed" xml:space="preserve">
     <value>Not verified</value>
   </data>
@@ -186,6 +201,9 @@
   </data>
   <data name="ClaudeCode_PathHasQuote" xml:space="preserve">
     <value>Cannot launch because the claude command path contains a quotation mark: {0}</value>
+  </data>
+  <data name="ClaudeCode_PathHasEnvExpansion" xml:space="preserve">
+    <value>Cannot launch because the claude command path contains '%', which cmd expands: {0}</value>
   </data>
   <data name="ClaudeCode_ArgHasEnvExpansion" xml:space="preserve">
     <value>Cannot launch because a claude command argument contains '%', which cmd expands: {0}</value>
@@ -340,6 +358,9 @@
   <data name="Codex_PathHasQuote" xml:space="preserve">
     <value>Cannot launch because the codex command path contains a quotation mark: {0}</value>
   </data>
+  <data name="Codex_PathHasEnvExpansion" xml:space="preserve">
+    <value>Cannot launch because the codex command path contains '%', which cmd expands: {0}</value>
+  </data>
   <data name="Codex_ArgHasCmdMeta" xml:space="preserve">
     <value>Cannot launch because the codex command arguments contain the character '{0}' interpreted by cmd: {1}</value>
   </data>
@@ -394,6 +415,12 @@
   <data name="Copilot_PathHasQuote" xml:space="preserve">
     <value>Cannot launch because the copilot command path contains a quotation mark: {0}</value>
   </data>
+  <data name="Copilot_PathHasEnvExpansion" xml:space="preserve">
+    <value>Cannot launch because the copilot command path contains '%', which cmd expands: {0}</value>
+  </data>
+  <data name="Copilot_PathHasDelayedExpansion" xml:space="preserve">
+    <value>Cannot launch because the copilot command path contains '!', which cmd expands when delayed expansion is enabled: {0}</value>
+  </data>
   <data name="Copilot_NotConnected" xml:space="preserve">
     <value>The GitHub Copilot runtime has not started yet.</value>
   </data>
@@ -441,5 +468,14 @@
   </data>
   <data name="Copilot_ErrorOccurred" xml:space="preserve">
     <value>An error occurred: {0}</value>
+  </data>
+  <data name="ClaudeCode_TurnFailed" xml:space="preserve">
+    <value>Claude Code could not complete the response. Send the message again; if it keeps failing, check the connection status.</value>
+  </data>
+  <data name="Codex_TurnFailed" xml:space="preserve">
+    <value>Codex could not complete the response. Send the message again; if it keeps failing, check the connection status.</value>
+  </data>
+  <data name="Copilot_TurnFailed" xml:space="preserve">
+    <value>GitHub Copilot could not complete the response. Send the message again; if it keeps failing, check the connection status.</value>
   </data>
 </root>

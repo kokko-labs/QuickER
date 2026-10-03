@@ -238,6 +238,61 @@ public class CodexChatEngineTests
     }
 
     /// <summary>
+    /// 理由（error）の無い failed も失敗として扱い、ターン失敗の要約だけを出すことを検証する
+    /// （成功に見せると、AI が何もせずに終わったターンが正常終了に見える）。
+    /// </summary>
+    [Fact(DisplayName = "Codex の理由なしの failed は要約だけの失敗になる")]
+    public async Task TurnCompleted_FailedWithoutError_IsFailureWithUnknownError()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        ErChatTurnResult? result = null;
+        engine.TurnCompleted += (_, r) => result = r;
+
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseTurnCompleted("failed", null);
+
+        result.Should().NotBeNull();
+        result!.Value.Success.Should().BeFalse();
+        result.Value.Error.Should().Be(QuickER.AI.Resources.Strings.Codex_TurnFailed);
+    }
+
+    /// <summary>
+    /// Codex が理由つきで失敗したターンは、何が起きたかと次の行動の要約に、報告文を詳細として添えることを検証する
+    /// </summary>
+    [Fact(DisplayName = "Codex の理由つきの failed は要約＋詳細の失敗になる")]
+    public async Task TurnCompleted_FailedWithError_IsSummaryWithDetail()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        ErChatTurnResult? result = null;
+        engine.TurnCompleted += (_, r) => result = r;
+
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseTurnCompleted("failed", "usage limit reached");
+
+        result!.Value.Success.Should().BeFalse();
+        result
+            .Value.Error.Should()
+            .Be(
+                QuickER.AI.Resources.Strings.Codex_TurnFailed
+                    + Environment.NewLine
+                    + QuickER.AI.Resources.Strings.Ai_DetailLabel
+                    + "usage limit reached"
+            );
+    }
+
+    /// <summary>
     /// エンジンが開始していないターンの完了通知（既に完了済み・エンジン外のターン）は
     /// 転送されないことを検証する（強制停止・接続断と turn/completed の競合時の二重通知防止）。
     /// </summary>
@@ -371,6 +426,82 @@ public class CodexChatEngineTests
                 )
             );
         engine.Guidance.Should().Be(QuickER.AI.Resources.Strings.Codex_Guidance_LoggedIn);
+    }
+
+    /// <summary>
+    /// ログイン済みの状態から、CLI 側でログアウトされた後の「再確認」で未ログインが返ったら、
+    /// 認証モード・概要・常時案内がすべて未ログインへ戻ることを検証する
+    /// （直前の状態がログイン済みでも、未ログインを取りこぼさない）。
+    /// </summary>
+    [Fact(DisplayName = "ログイン済みから再確認で未ログインが返ったら未ログイン表示へ戻る")]
+    public async Task Refresh_AfterExternalLogout_ShowsNotLoggedIn()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            NextAccountInfo = new CodexAccountInfo
+            {
+                RequiresOpenAiAuth = true,
+                AuthMode = CodexAuthMode.ChatGpt,
+                Email = "user@example.com",
+            },
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        CodexAuthState? state = null;
+        engine.AuthStateChanged += (_, s) => state = s;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        engine.AuthMode.Should().Be(CodexAuthMode.ChatGpt);
+
+        client.NextAccountInfo = new CodexAccountInfo
+        {
+            RequiresOpenAiAuth = true,
+            AuthMode = CodexAuthMode.None,
+        };
+        await engine.RefreshAccountStateAsync(TestContext.Current.CancellationToken);
+
+        engine.AuthMode.Should().Be(CodexAuthMode.None);
+        engine.IsLoggedIn.Should().BeFalse();
+        engine.AccountSummary.Should().Be(QuickER.AI.Resources.Strings.Codex_NotLoggedIn);
+        engine.Guidance.Should().BeEmpty();
+        state!.Value.AuthMode.Should().Be(CodexAuthMode.None);
+    }
+
+    /// <summary>
+    /// アプリ内のログアウトが成功したら、account/updated の通知が来なくても
+    /// エンジン自身が認証モードを未ログインへ戻すことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "ログアウトは通知を待たずに認証モードを未ログインへ戻す")]
+    public async Task Logout_ResetsAuthModeWithoutNotification()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            RaiseAccountUpdatedOnLogout = false,
+            NextAccountInfo = new CodexAccountInfo
+            {
+                RequiresOpenAiAuth = true,
+                AuthMode = CodexAuthMode.ApiKey,
+            },
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        CodexAuthState? state = null;
+        engine.AuthStateChanged += (_, s) => state = s;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.LogoutAsync(TestContext.Current.CancellationToken);
+
+        engine.AuthMode.Should().Be(CodexAuthMode.None);
+        engine.IsLoggedIn.Should().BeFalse();
+        state!.Value.AuthMode.Should().Be(CodexAuthMode.None);
     }
 
     /// <summary>未検出から検出可能へ変わったら、「再確認」で未検出表示が解除され接続されることを検証する</summary>
@@ -813,17 +944,84 @@ public class CodexChatEngineTests
         results.Should().ContainSingle();
     }
 
+    /// <summary>ターン中の error 通知は、要約に通知の文を詳細として添えた失敗で完了することを検証する</summary>
+    [Fact(DisplayName = "ターン中の error 通知は要約＋詳細の失敗として完了する")]
+    public async Task ErrorNotification_DuringTurn_IsSummaryWithDetail()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseNotification(
+            new CodexJsonRpcNotification
+            {
+                Method = "error",
+                Params = JsonSerializer.SerializeToElement(
+                    new { error = new { message = "stream disconnected" } }
+                ),
+            }
+        );
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0]
+            .Error.Should()
+            .Be(
+                QuickER.AI.Resources.Strings.Codex_TurnFailed
+                    + Environment.NewLine
+                    + QuickER.AI.Resources.Strings.Ai_DetailLabel
+                    + "stream disconnected"
+            );
+    }
+
     /// <summary>
-    /// StartTurnAsync が <see cref="OperationCanceledException"/> を投げたら、中断として
-    /// Success=false・Error=null（ChatTurnEngine / <see cref="IClaudeCodeClient.RunTurnAsync"/> と
+    /// 呼び出し元のトークンが取り消されて StartTurnAsync が <see cref="OperationCanceledException"/> を投げたら、
+    /// 中断として Success=false・Error=null（ChatTurnEngine / <see cref="IClaudeCodeClient.RunTurnAsync"/> と
     /// 同じ規約）で完了することを検証する（B4: 誤ってエラー扱いに畳まれていない回帰固定）。
     /// </summary>
-    [Fact(DisplayName = "ターン送信の OperationCanceledException は中断として畳まれる")]
+    [Fact(DisplayName = "ターン送信の取り消し（自分のトークン）は中断として畳まれる")]
     public async Task SendAsync_StartTurnThrowsOperationCanceledException_CompletesAsInterrupted()
+    {
+        using var cts = new CancellationTokenSource();
+        var client = new FakeCodexAppServerClient
+        {
+            StartTurnException = new OperationCanceledException(cts.Token),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await cts.CancelAsync();
+        await engine.SendAsync("やあ", cts.Token);
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0].Error.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 呼び出し元のトークンが立っていない <see cref="OperationCanceledException"/> は、中断に化けず
+    /// 失敗として表示することを検証する（ChatTurnEngine と同じ区別）
+    /// </summary>
+    [Fact(DisplayName = "ターン送信のトークン以外の取り消しは中断でなく失敗として完了する")]
+    public async Task SendAsync_StartTurnThrowsForeignCancellation_CompletesAsFailure()
     {
         var client = new FakeCodexAppServerClient
         {
-            StartTurnException = new OperationCanceledException(),
+            StartTurnException = new OperationCanceledException("canceled elsewhere"),
         };
         var engine = new CodexChatEngine(
             client,
@@ -839,11 +1037,11 @@ public class CodexChatEngineTests
 
         results.Should().ContainSingle();
         results[0].Success.Should().BeFalse();
-        results[0].Error.Should().BeNull();
+        results[0].Error.Should().StartWith(QuickER.AI.Resources.Strings.Codex_TurnFailed);
     }
 
-    /// <summary>対照: 一般例外は従来どおりメッセージ付きの失敗として完了することを検証する</summary>
-    [Fact(DisplayName = "ターン送信の一般例外はメッセージ付きの失敗として完了する")]
+    /// <summary>対照: 一般例外は要約に例外の文言を詳細として添えた失敗として完了することを検証する</summary>
+    [Fact(DisplayName = "ターン送信の一般例外は要約＋詳細の失敗として完了する")]
     public async Task SendAsync_StartTurnThrowsGeneralException_CompletesWithErrorMessage()
     {
         var client = new FakeCodexAppServerClient
@@ -864,7 +1062,14 @@ public class CodexChatEngineTests
 
         results.Should().ContainSingle();
         results[0].Success.Should().BeFalse();
-        results[0].Error.Should().Be("boom");
+        results[0]
+            .Error.Should()
+            .Be(
+                QuickER.AI.Resources.Strings.Codex_TurnFailed
+                    + Environment.NewLine
+                    + QuickER.AI.Resources.Strings.Ai_DetailLabel
+                    + "boom"
+            );
     }
 
     /// <summary>
@@ -927,5 +1132,63 @@ public class CodexChatEngineTests
             engine.SendAsync("やあ", [attachment], TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<NotSupportedException>();
+    }
+
+    /// <summary>
+    /// 接続が実行中のあいだに重ねて呼んでも、App Server の起動は 1 回だけで、アカウント状態は
+    /// ハンドシェイクの完了後にしか読まないことを検証する（タブの素早い往復・タブ切替と「再確認」の重なり）。
+    /// </summary>
+    [Fact(
+        DisplayName = "接続中に重ねて接続しても起動は 1 回でハンドシェイク前にアカウントを読まない"
+    )]
+    public async Task Connect_WhileConnecting_SharesTheConnection()
+    {
+        var gate = new TaskCompletionSource();
+        var client = new FakeCodexAppServerClient { StartGate = gate.Task };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        var first = engine.ConnectAsync(TestContext.Current.CancellationToken);
+        var second = engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        client.StartCount.Should().Be(1);
+        client.ReadAccountBeforeHandshakeCount.Should().Be(0);
+
+        gate.SetResult();
+        await first;
+        await second;
+
+        client.StartCount.Should().Be(1);
+        client.ReadAccountCount.Should().Be(1);
+        client.ReadAccountBeforeHandshakeCount.Should().Be(0);
+    }
+
+    /// <summary>1 回目の接続が失敗した後の接続は、失敗を返し続けず起動をやり直すことを検証する</summary>
+    [Fact(DisplayName = "接続が失敗した後の接続は起動をやり直す")]
+    public async Task Connect_AfterFailure_RetriesStart()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            StartException = new InvalidOperationException("first start fails"),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        await engine.ConnectAsync(TestContext.Current.CancellationToken);
+        engine.IsStarted.Should().BeFalse();
+
+        client.StartException = null;
+        await engine.ConnectAsync(TestContext.Current.CancellationToken);
+
+        client.StartCount.Should().Be(2);
+        engine.IsStarted.Should().BeTrue();
     }
 }

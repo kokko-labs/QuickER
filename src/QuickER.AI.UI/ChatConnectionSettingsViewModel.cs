@@ -61,6 +61,18 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// <summary>初期化中は API キーの上書き保存を抑止するフラグ</summary>
     private bool _isInitializing;
 
+    /// <summary>
+    /// <see cref="LoadSettings"/> の実行中だけ保持する設定の読み込み結果（null なら都度読む）。
+    /// </summary>
+    /// <remarks>
+    /// 候補の再構築は、両ダイアログが共有するファイルの最新を拾うため都度読むのが原則。
+    /// 読み込みの最中だけは、代入が誘発する再構築が同じ内容を何度も読み直すので、1 回の読み込みを使い回す。
+    /// </remarks>
+    private AiSettings? _settingsSnapshot;
+
+    /// <summary>入力された API キーがまだ保存されていないか（<see cref="CommitApiKey()"/> が保存して落とす）</summary>
+    private bool _apiKeyDirty;
+
     private CodexConfigToml _configToml = new();
 
     /// <summary>起動時に選択すべき接続方式（前回使ったタブ。保存が無ければ API キー）</summary>
@@ -217,7 +229,16 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         get => _copilotAvailableModels;
         set
         {
-            _copilotAvailableModels = value ?? [];
+            var models = value ?? [];
+
+            // 接続の状態通知のたびに同じ一覧が届くので、内容が変わらなければ候補を作り直さない
+            // （作り直しは共有ファイルの読み直しを伴う）
+            if (models.SequenceEqual(_copilotAvailableModels, StringComparer.Ordinal))
+            {
+                return;
+            }
+
+            _copilotAvailableModels = models;
             OnPropertyChanged();
             RefreshCopilotModelCandidates();
         }
@@ -230,8 +251,11 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     public ObservableCollection<ModelCandidate> CopilotModelCandidates { get; } = new();
 
     /// <summary>現在のプロバイダーに対応する API キー保存名（プロバイダーごとに別スロットで保持する）</summary>
-    private string? CurrentApiKeyStoreName =>
-        ApiProvider switch
+    private string? CurrentApiKeyStoreName => ApiKeyStoreNameFor(ApiProvider);
+
+    /// <summary>指定したプロバイダーの API キー保存名（キーを持たないプロバイダーは null）</summary>
+    private static string? ApiKeyStoreNameFor(AiProvider provider) =>
+        provider switch
         {
             AiProvider.OpenAI => OpenAiApiKeyStoreName,
             AiProvider.Claude => ClaudeApiKeyStoreName,
@@ -256,34 +280,89 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// <summary>保存済み設定と config.toml の候補を読み込む（親が PropertyChanged 購読確立後に呼ぶ）</summary>
     public void LoadSettings()
     {
-        // 共有ファイルを 1 回だけ読み、Codex / Claude Code / UI 状態を各セクションから取り出す
+        // 共有ファイルを 1 回だけ読み、Codex / Claude Code / UI 状態を各セクションから取り出す。
+        // 下の代入が誘発する候補の再構築（プロバイダー変更のフック等）も、読み直さずにこの内容を使う
         var settings = _settingsStore.Load();
+        _settingsSnapshot = settings;
 
-        LoadCodexModelCandidates();
-        CodexModelProvider = ResolveCodexModelProvider(settings.CodexAppServer.ModelProvider);
-        CodexModel = string.IsNullOrWhiteSpace(settings.CodexAppServer.Model)
-            ? AiModelCatalog.DefaultOpenAiModel
-            : settings.CodexAppServer.Model;
-
-        ClaudeCodeModel = settings.ClaudeCode.Model;
-        CopilotModel = settings.Copilot.Model;
-        RefreshCopilotModelCandidates();
-
-        var ui = settings.UiFor(_dialogKind);
-        InitialBackend = ui.ParseLastBackend() ?? ErChatBackendKind.ApiKey;
-
-        // プロバイダー → エンドポイントの順で復元する。プロバイダー変更フックは
-        // 「ローカル LLM かつエンドポイント空」なら既定 URL を補完するため、保存値がある場合だけ後から上書きする
-        // （保存が無いローカル LLM は既定 URL・保存がある場合はその URL、という復元になる）
-        ApiProvider = ui.ParseApiProvider() ?? AiProvider.OpenAI;
-
-        if (!string.IsNullOrWhiteSpace(ui.EndpointOverride))
+        try
         {
-            EndpointOverride = ui.EndpointOverride;
-        }
+            LoadCodexModelCandidates();
+            CodexModelProvider = ResolveCodexModelProvider(settings.CodexAppServer.ModelProvider);
+            CodexModel = string.IsNullOrWhiteSpace(settings.CodexAppServer.Model)
+                ? AiModelCatalog.DefaultOpenAiModel
+                : settings.CodexAppServer.Model;
 
-        RefreshApiModelCandidates();
+            ClaudeCodeModel = settings.ClaudeCode.Model;
+            CopilotModel = settings.Copilot.Model;
+            RefreshCopilotModelCandidates(settings);
+
+            var ui = settings.UiFor(_dialogKind);
+            InitialBackend = ui.ParseLastBackend() ?? ErChatBackendKind.ApiKey;
+
+            // プロバイダー → エンドポイントの順で復元する。プロバイダー変更フックは
+            // 「ローカル LLM かつエンドポイント空」なら既定 URL を補完するため、保存値がある場合だけ後から上書きする
+            // （保存が無いローカル LLM は既定 URL・保存がある場合はその URL、という復元になる）
+            ApiProvider = ui.ParseApiProvider() ?? AiProvider.OpenAI;
+
+            if (!string.IsNullOrWhiteSpace(ui.EndpointOverride))
+            {
+                EndpointOverride = ui.EndpointOverride;
+            }
+
+            RefreshApiModelCandidates(settings);
+        }
+        finally
+        {
+            _settingsSnapshot = null;
+        }
     }
+
+    /// <summary>API キー接続で送信できるか（ローカル LLM はキー任意・それ以外はキー入力が必須）</summary>
+    public bool IsApiKeyConnectionReady =>
+        ApiProvider == AiProvider.LocalLlm || !string.IsNullOrWhiteSpace(ApiKey);
+
+    /// <summary>OpenAI 互換（OpenAI・ローカル LLM）の接続設定を現在の入力から組み立てる</summary>
+    /// <remarks>
+    /// エンドポイント上書きは <see cref="EffectiveEndpointOverride"/> から取る
+    /// （ローカル LLM 以外では null＝欄が非表示のまま残った値が OpenAI 接続へ紛れ込まない）。
+    /// </remarks>
+    public OpenAiChatConnection BuildOpenAiConnection() =>
+        new(ApiProvider, ApiKey, ApiModel, EffectiveEndpointOverride);
+
+    /// <summary>Anthropic (Claude) の接続設定を現在の入力から組み立てる</summary>
+    public AnthropicChatConnection BuildAnthropicConnection() => new(ApiKey, ApiModel);
+
+    /// <summary>
+    /// API キー接続のエンジン（プロバイダーで OpenAI 互換と Anthropic を振り分ける）を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// プロバイダー・キー・モデル・エンドポイントは毎ターンこの VM から読む（組み立てた時点の値を閉じ込めない）。
+    /// AI チャットとモック生成が同じ組み立てを共有する。
+    /// </remarks>
+    /// <param name="profile">会話のプロファイル（ツール定義・指示文）</param>
+    /// <param name="toolHost">ツールの実行先</param>
+    /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
+    public ChatTurnEngine CreateApiKeyEngine(
+        ErChatProfile profile,
+        IErDiagramToolHost toolHost,
+        IUiDispatcher dispatcher
+    ) =>
+        new(
+            new ProviderRoutingTurnDriver(
+                () => ApiProvider,
+                new OpenAiTurnDriver(BuildOpenAiConnection, profile),
+                new AnthropicChatTurnDriver(BuildAnthropicConnection, profile)
+            ),
+            toolHost,
+            dispatcher,
+            () => IsApiKeyConnectionReady,
+            profile,
+            attachmentSupport: () => AttachmentSupportResolver.ForApiKeyProvider(ApiProvider)
+        );
+
+    /// <summary>候補の再構築に使う設定を返す（読み込みの最中はその結果・それ以外は共有ファイルの最新）</summary>
+    private AiSettings ReadSettings() => _settingsSnapshot ?? _settingsStore.Load();
 
     /// <summary>現在の API プロバイダーの履歴キー（<see cref="AiProvider"/> の小文字名）</summary>
     private string ApiProviderKey => ApiProvider.ToString().ToLowerInvariant();
@@ -315,7 +394,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// その下へカタログ外の手入力モデルの MRU 履歴（× で削除可能）を追加する
     /// （カタログと同名の履歴は表示しない。両ダイアログ共有ファイルの最新を反映するため都度 Load する）。
     /// </summary>
-    private void RefreshApiModelCandidates()
+    private void RefreshApiModelCandidates(AiSettings? settings = null)
     {
         // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの ApiModel）を
         // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する（成功ターン後の MRU 記録・
@@ -330,7 +409,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             ApiModelCandidates.Add(new ModelCandidate(m, IsRemovable: false));
         }
 
-        foreach (var m in _settingsStore.Load().ApiModelHistory.ModelsFor(ApiProviderKey))
+        foreach (var m in (settings ?? ReadSettings()).ApiModelHistory.ModelsFor(ApiProviderKey))
         {
             // カタログと同名（大文字小文字問わず）の履歴は表示しない（カタログ側を優先。ファイル上の履歴には残る）
             if (
@@ -392,7 +471,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             _settingsStore.Save(settings);
         }
 
-        RefreshApiModelCandidates();
+        RefreshApiModelCandidates(settings);
     }
 
     /// <summary>指定したモデルを現在の API プロバイダーの履歴から個別削除する（ドロップダウン項目の × ボタン）</summary>
@@ -413,7 +492,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         }
 
         // 選択中の項目を消しても Text（＝双方向バインドの ApiModel）が保たれる（再構築側が退避・復元する）
-        RefreshApiModelCandidates();
+        RefreshApiModelCandidates(settings);
     }
 
     /// <summary>
@@ -436,7 +515,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             _settingsStore.Save(settings);
         }
 
-        RefreshCodexModelCandidates();
+        RefreshCodexModelCandidates(settings);
     }
 
     /// <summary>指定した Codex モデルを現在プロバイダーの履歴から個別削除する（ドロップダウン項目の × ボタン）</summary>
@@ -457,7 +536,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         }
 
         // 選択中の項目を消しても Text（＝双方向バインドの CodexModel）が保たれる（再構築側が退避・復元する）
-        RefreshCodexModelCandidates();
+        RefreshCodexModelCandidates(settings);
     }
 
     /// <summary>
@@ -487,7 +566,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             _settingsStore.Save(settings);
         }
 
-        RefreshCopilotModelCandidates();
+        RefreshCopilotModelCandidates(settings);
     }
 
     /// <summary>指定した Copilot モデルを履歴から個別削除する（ドロップダウン項目の × ボタン）</summary>
@@ -508,7 +587,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         }
 
         // 選択中の項目を消しても Text（＝双方向バインドの CopilotModel）が保たれる（再構築側が退避・復元する）
-        RefreshCopilotModelCandidates();
+        RefreshCopilotModelCandidates(settings);
     }
 
     /// <summary>
@@ -516,7 +595,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// その下へ列挙に無いモデルの MRU 履歴（× で削除可能）を追加する
     /// （両ダイアログ共有ファイルの最新を反映するため都度 Load する）。
     /// </summary>
-    private void RefreshCopilotModelCandidates()
+    private void RefreshCopilotModelCandidates(AiSettings? settings = null)
     {
         // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの CopilotModel）を
         // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する。Copilot は成功ターンごとに
@@ -532,9 +611,9 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         }
 
         foreach (
-            var m in _settingsStore
-                .Load()
-                .CopilotModelHistory.ModelsFor(CopilotSettings.HistoryProviderKey)
+            var m in (settings ?? ReadSettings()).CopilotModelHistory.ModelsFor(
+                CopilotSettings.HistoryProviderKey
+            )
         )
         {
             // 実行時列挙と同名（大文字小文字問わず）の履歴は表示しない（列挙側を優先。ファイル上の履歴には残る）
@@ -556,6 +635,10 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// <summary>接続タブ関連の設定を保存する（親の SaveSettings から呼ぶ）</summary>
     public void SaveSettings()
     {
+        // 未保存の API キーを先に保存する（キーは DPAPI ストアだけが持ち、この JSON には入れない）。
+        // キーの保存は失敗しても投げないので、JSON の保存の失敗に巻き込まれない順にする
+        CommitApiKey();
+
         // 両ダイアログが共有する 1 ファイルを Load → 該当セクションのみ変更 → Save で書き戻す
         // （古いスナップショットの丸ごと書き戻しで他ダイアログのセクションを消さない）
         var settings = _settingsStore.Load();
@@ -623,7 +706,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// openai は静的カタログのみ（従来同等・削除不可）。非 openai は MRU 履歴（× で削除可能）のみで、
     /// 初期状態は空・チャットのターン成功時に使用モデルが追加される。
     /// </summary>
-    private void RefreshCodexModelCandidates()
+    private void RefreshCodexModelCandidates(AiSettings? settings = null)
     {
         // 候補の Clear で編集可能 ComboBox が選択中項目を失い、Text（＝双方向バインドの CodexModel）を
         // 空へ押し戻すことがあるため、再構築の前に退避して最後に復元する（成功ターン後の MRU 記録・
@@ -646,7 +729,11 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             }
 
             // 非 openai: MRU 履歴のみ。両ダイアログ共有ファイルの最新を反映するため都度 Load する
-            foreach (var m in _settingsStore.Load().CodexModelHistory.ModelsFor(CodexModelProvider))
+            foreach (
+                var m in (settings ?? ReadSettings()).CodexModelHistory.ModelsFor(
+                    CodexModelProvider
+                )
+            )
             {
                 CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
             }
@@ -703,9 +790,28 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     partial void OnEndpointOverrideChanged(string value) =>
         OnPropertyChanged(nameof(EffectiveEndpointOverride));
 
-    partial void OnApiKeyChanged(string value) => PersistApiKey();
+    /// <summary>入力されたキーを未保存として印を付ける（保存は確定点で行う＝<see cref="CommitApiKey"/>）</summary>
+    partial void OnApiKeyChanged(string value)
+    {
+        if (!_isInitializing)
+        {
+            _apiKeyDirty = true;
+        }
+    }
 
-    partial void OnSaveApiKeyChanged(bool value) => PersistApiKey();
+    /// <summary>「保存」の切替は即座に反映する（オフにしたら保存済みのキーを消す）</summary>
+    partial void OnSaveApiKeyChanged(bool value)
+    {
+        _apiKeyDirty = true;
+        CommitApiKey();
+    }
+
+    /// <summary>
+    /// プロバイダーを切り替える直前に、切替前のプロバイダーのスロットへ入力中のキーを保存する
+    /// （切替後は別のプロバイダーのキーを読み直すので、ここで保存しないと入力したキーが失われる）。
+    /// </summary>
+    partial void OnApiProviderChanging(AiProvider oldValue, AiProvider newValue) =>
+        CommitApiKey(ApiKeyStoreNameFor(oldValue));
 
     partial void OnCodexModelProviderChanged(string value)
     {
@@ -713,17 +819,49 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         RefreshCodexModelCandidates();
     }
 
-    /// <summary>保存設定に従い、現在のプロバイダーの API キーを永続化する（キー不要のプロバイダーは何もしない）</summary>
-    private void PersistApiKey()
+    /// <summary>
+    /// 未保存の API キーを、保存設定に従って現在のプロバイダーのスロットへ保存する
+    /// （キー欄からフォーカスが外れたとき・ウィンドウを閉じるときなどの確定点で呼ぶ）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 打鍵ごとには保存しない（保存は DPAPI での暗号化とファイルの書き込みを伴う）。確定点は
+    /// 「保存」の切替・プロバイダーの切替・キー欄から離れたとき・<see cref="SaveSettings"/> の 4 つ。
+    /// </para>
+    /// <para>
+    /// 保存の失敗（DPAPI・ファイル）は投げずに未保存の印を残し、次の確定点で保存し直す。
+    /// 呼び出し元はフォーカス移動のハンドラや終了処理で、ここで投げると関係のない操作まで止まる。
+    /// </para>
+    /// </remarks>
+    public void CommitApiKey() => CommitApiKey(CurrentApiKeyStoreName);
+
+    /// <summary>未保存の API キーを指定スロットへ保存する（スロットが null＝キーを持たないプロバイダーなら印だけ消す）</summary>
+    private void CommitApiKey(string? slot)
     {
-        if (_isInitializing)
+        if (!_apiKeyDirty || _isInitializing)
         {
             return;
         }
 
-        if (CurrentApiKeyStoreName is { } slot)
+        if (slot is null)
+        {
+            _apiKeyDirty = false;
+            return;
+        }
+
+        try
         {
             _apiKeySaver(slot, SaveApiKey ? ApiKey : string.Empty);
+            _apiKeyDirty = false;
+        }
+        catch (Exception ex)
+            when (ex
+                    is System.IO.IOException
+                        or UnauthorizedAccessException
+                        or System.Security.Cryptography.CryptographicException
+            )
+        {
+            // 印を残して次の確定点で保存し直す
         }
     }
 }

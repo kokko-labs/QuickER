@@ -261,6 +261,80 @@ public class DiagramExportServiceTests
         }
     }
 
+    /// <summary>出力先がいま開いている図のファイルなら、形式を問わず何も書かずにエラーで断ることを検証する</summary>
+    /// <remarks>
+    /// 書けば図ファイルが別形式（スキーマのみの JSON ならレイアウトの無い文書）で潰され、自分の書き込みが
+    /// 外部変更として扱われる。パスは大文字小文字の違いも同じファイルとして扱う
+    /// </remarks>
+    [Theory(DisplayName = "出力先が開いている図のファイルなら、何も書かずにエラーで断る")]
+    [InlineData((int)DiagramExportFormat.SchemaJson)]
+    [InlineData((int)DiagramExportFormat.Mermaid)]
+    public void Export_ToCurrentDocument_IsRejected(int format)
+    {
+        var (service, host, dialogs) = Create();
+        host.Model = BuildModelWithOmission();
+        var dir = Directory
+            .CreateDirectory(
+                Path.Combine(Path.GetTempPath(), "quicker-export-" + Guid.NewGuid().ToString("N"))
+            )
+            .FullName;
+        var document = Path.Combine(dir, "Diagram.json");
+        const string original = "{\"Version\":1,\"Schema\":{\"Entities\":[]},\"Layout\":{}}";
+        File.WriteAllText(document, original);
+        host.CurrentDocumentPath = document;
+
+        try
+        {
+            service.SaveDiagram(
+                (DiagramExportFormat)format,
+                Path.Combine(dir, "DIAGRAM.json"),
+                null
+            );
+
+            dialogs
+                .ErrorMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(Strings.Export_TargetIsCurrentDocument);
+            File.ReadAllText(document)
+                .Should()
+                .Be(original, "開いている図のファイルは書き換えない");
+            dialogs.InformationMessages.Should().BeEmpty("出力していないのに完了を出さない");
+            dialogs.WarningConfirmMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>開いている図とは別のファイルへの出力は従来どおり書き出すことを検証する（直前のテストの対照）</summary>
+    [Fact(DisplayName = "開いている図と別のファイルへの出力は断らない")]
+    public void Export_ToOtherFile_IsNotRejected()
+    {
+        var (service, host, dialogs) = Create();
+        host.Model = BuildModelWithOmission();
+        var dir = Directory
+            .CreateDirectory(
+                Path.Combine(Path.GetTempPath(), "quicker-export-" + Guid.NewGuid().ToString("N"))
+            )
+            .FullName;
+        host.CurrentDocumentPath = Path.Combine(dir, "Diagram.json");
+        var schema = Path.Combine(dir, "Diagram.schema.json");
+
+        try
+        {
+            service.SaveDiagram(DiagramExportFormat.SchemaJson, schema, null);
+
+            dialogs.ErrorMessages.Should().BeEmpty();
+            File.ReadAllText(schema).Should().Contain("Customer");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     /// <summary>上限に収まる PNG は従来どおり完了文だけを出すことを検証する</summary>
     [Fact(DisplayName = "PNG: 上限に収まる図は完了文だけを通知する")]
     public void Png_WithinBudget_NotifiesCompletionOnly()
@@ -328,6 +402,34 @@ public class DiagramExportServiceTests
         finally
         {
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// 欠落の種類はすべて resx の文言へ変換される（switch の腕が漏れて列挙名がそのまま画面に出ることがない）。
+    /// </summary>
+    /// <remarks>
+    /// <c>DescribeOmission</c> は該当しない種類を <c>kind.ToString()</c> へ落とすため、種類を足して腕を書き忘れても
+    /// ビルドは通る。列挙の全値を回して、文言が列挙名と同じでなく、対応する resx キーの値と一致することを確かめる。
+    /// </remarks>
+    [Fact(DisplayName = "欠落の種類はすべて resx の文言へ変換される")]
+    public void DescribeOmission_CoversEveryKind()
+    {
+        var describe = typeof(DiagramExportService).GetMethod(
+            "DescribeOmission",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static
+        )!;
+
+        foreach (var kind in Enum.GetValues<ExportOmissionKind>())
+        {
+            var text = (string)describe.Invoke(null, [kind])!;
+
+            text.Should()
+                .Be(
+                    Strings.ResourceManager.GetString($"ExportOmission_{kind}", Strings.Culture),
+                    $"{kind} は ExportOmission_{kind} の文言へ変換される"
+                );
+            text.Should().NotBe(kind.ToString());
         }
     }
 }

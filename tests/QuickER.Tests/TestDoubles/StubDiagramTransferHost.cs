@@ -26,6 +26,9 @@ internal sealed class StubDiagramTransferHost : IDiagramTransferHost
     /// <summary>名前付きクエリの件数</summary>
     public int QueryCount { get; set; }
 
+    /// <summary>いま開いている図のファイルのパス（無題なら null）</summary>
+    public string? CurrentDocumentPath { get; set; }
+
     /// <summary>RenderSvg に渡されたパスの記録</summary>
     public List<string> SvgRenderPaths { get; } = [];
 
@@ -40,6 +43,15 @@ internal sealed class StubDiagramTransferHost : IDiagramTransferHost
 
     /// <inheritdoc />
     public ErDiagram BuildModel() => Model;
+
+    /// <inheritdoc />
+    public bool IsCurrentDocumentPath(string path) =>
+        CurrentDocumentPath is not null
+        && string.Equals(
+            System.IO.Path.GetFullPath(path),
+            System.IO.Path.GetFullPath(CurrentDocumentPath),
+            System.StringComparison.OrdinalIgnoreCase
+        );
 
     /// <inheritdoc />
     public void RenderSvg(string path) => SvgRenderPaths.Add(path);

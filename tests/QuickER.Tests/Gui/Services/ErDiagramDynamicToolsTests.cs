@@ -449,6 +449,80 @@ public class ErDiagramDynamicToolsTests
             .Equal("TenantId", "RegionCode");
     }
 
+    /// <summary>
+    /// 列省略時の自動ペア化で、複合主キーの各列が親テーブル名由来の名前の子列を取り違えずに
+    /// 同名の子列へ付くことを検証する
+    /// </summary>
+    /// <param name="parentTable">親テーブル名</param>
+    /// <param name="firstKey">親の主キーの 1 列目</param>
+    /// <param name="secondKey">親の主キーの 2 列目（子にも同名の列がある）</param>
+    [Theory(DisplayName = "add_relationship の複合主キーの自動ペア化は各列を同名の子列へ付ける")]
+    [InlineData("Orders", "OrderId", "Revision")]
+    [InlineData("Projects", "TenantId", "ProjectId")]
+    public void AddRelationship_OmittedColumns_CompositeKeyPairsEachColumnWithSameName(
+        string parentTable,
+        string firstKey,
+        string secondKey
+    )
+    {
+        var vm = CreateVm();
+        Exec(vm, "add_entity", new { table_name = parentTable });
+        Exec(vm, "add_entity", new { table_name = "Child" });
+
+        foreach (
+            var (table, column, isKey) in new[]
+            {
+                (parentTable, firstKey, true),
+                (parentTable, secondKey, true),
+                ("Child", "ChildId", true),
+                ("Child", firstKey, false),
+                ("Child", secondKey, false),
+            }
+        )
+        {
+            Exec(
+                vm,
+                "add_column",
+                new
+                {
+                    table_name = table,
+                    column_name = column,
+                    data_type = "int",
+                    is_primary_key = isKey,
+                    is_nullable = false,
+                }
+            )
+                .Success.Should()
+                .BeTrue();
+        }
+
+        Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = parentTable,
+                target_table = "Child",
+                relationship_type = "OneToMany",
+            }
+        )
+            .Success.Should()
+            .BeTrue();
+
+        var parent = vm.Entities.Single(e => e.TableName == parentTable);
+        var child = vm.Entities.Single(e => e.TableName == "Child");
+
+        vm.Relationships.Single()
+            .ColumnPairs.Select(pair =>
+                (
+                    parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name,
+                    child.Columns.Single(c => c.Id == pair.TargetColumnId).Name
+                )
+            )
+            .Should()
+            .Equal((firstKey, firstKey), (secondKey, secondKey));
+    }
+
     /// <summary>同じテーブル対に複数のリレーションがある場合、remove_relationship は constraint_name を要求する</summary>
     [Fact(DisplayName = "remove_relationship は複数一致時に候補を挙げてエラーにする")]
     public void RemoveRelationship_MultipleMatches_RequiresConstraintName()
@@ -512,6 +586,173 @@ public class ErDiagramDynamicToolsTests
         removed.Success.Should().BeTrue();
         vm.Relationships.Should().ContainSingle();
         vm.Relationships[0].ConstraintName.Should().Be("FK_TenantUser_TenantRegion");
+    }
+
+    /// <summary>
+    /// 親 Customers(CustomerId) と、役割の違う外部キー列 2 本（請求先・配送先）と一意制約の候補列 code を持つ
+    /// 子 Orders を作る
+    /// </summary>
+    private static MainViewModel CreateVmWithBillingAndShipping()
+    {
+        var vm = CreateVm();
+        Exec(vm, "add_entity", new { table_name = "Customers" });
+        Exec(vm, "add_entity", new { table_name = "Orders" });
+
+        foreach (
+            var (table, column, isKey) in new[]
+            {
+                ("Customers", "CustomerId", true),
+                ("Orders", "OrderId", true),
+                ("Orders", "BillingCustomerId", false),
+                ("Orders", "ShippingCustomerId", false),
+                ("Orders", "code", false),
+            }
+        )
+        {
+            Exec(
+                vm,
+                "add_column",
+                new
+                {
+                    table_name = table,
+                    column_name = column,
+                    data_type = "int",
+                    is_primary_key = isKey,
+                    is_nullable = false,
+                }
+            )
+                .Success.Should()
+                .BeTrue();
+        }
+
+        return vm;
+    }
+
+    /// <summary>Customers → Orders の外部キーを 1 本足す（constraint_name は null なら渡さない）</summary>
+    private static (string Result, bool Success) AddCustomerReference(
+        MainViewModel vm,
+        string childColumn,
+        string? constraintName = null
+    ) =>
+        Exec(
+            vm,
+            "add_relationship",
+            constraintName is null
+                ? (object)
+                    new
+                    {
+                        source_table = "Customers",
+                        source_columns = new[] { "CustomerId" },
+                        target_table = "Orders",
+                        target_columns = new[] { childColumn },
+                        relationship_type = "OneToMany",
+                    }
+                : new
+                {
+                    source_table = "Customers",
+                    source_columns = new[] { "CustomerId" },
+                    target_table = "Orders",
+                    target_columns = new[] { childColumn },
+                    relationship_type = "OneToMany",
+                    constraint_name = constraintName,
+                }
+        );
+
+    /// <summary>
+    /// 同じテーブルの組へ役割の違う外部キーを 2 本張ると別々の制約名になり、名前を指定して 1 本ずつ消せることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "add_relationship は役割の違う 2 本目に衝突しない制約名を付け、名前で 1 本ずつ消せる"
+    )]
+    public void AddRelationship_SecondRoleForeignKey_GetsDistinctNameAndCanBeRemovedByName()
+    {
+        var vm = CreateVmWithBillingAndShipping();
+
+        var billing = AddCustomerReference(vm, "BillingCustomerId");
+        var shipping = AddCustomerReference(vm, "ShippingCustomerId");
+
+        billing.Success.Should().BeTrue();
+        billing.Result.Should().Contain("FK_Orders_Customers");
+        shipping.Success.Should().BeTrue();
+        shipping.Result.Should().Contain("FK_Orders_Customers_ShippingCustomerId");
+        vm.Relationships.Select(r => r.ConstraintName)
+            .Should()
+            .Equal("FK_Orders_Customers", "FK_Orders_Customers_ShippingCustomerId");
+
+        Exec(
+            vm,
+            "remove_relationship",
+            new
+            {
+                source_table = "Customers",
+                target_table = "Orders",
+                constraint_name = "FK_Orders_Customers_ShippingCustomerId",
+            }
+        )
+            .Success.Should()
+            .BeTrue();
+        vm.Relationships.Select(r => r.ConstraintName).Should().Equal("FK_Orders_Customers");
+
+        Exec(
+            vm,
+            "remove_relationship",
+            new
+            {
+                source_table = "Customers",
+                target_table = "Orders",
+                constraint_name = "FK_Orders_Customers",
+            }
+        )
+            .Success.Should()
+            .BeTrue();
+        vm.Relationships.Should().BeEmpty();
+    }
+
+    /// <summary>指定した constraint_name が前後の空白を除いて採用されることを検証する</summary>
+    [Fact(DisplayName = "add_relationship は指定した constraint_name を前後の空白を除いて使う")]
+    public void AddRelationship_ExplicitConstraintName_IsTrimmedAndUsed()
+    {
+        var vm = CreateVmWithBillingAndShipping();
+
+        var (result, success) = AddCustomerReference(vm, "BillingCustomerId", "  FK_Bill  ");
+
+        success.Should().BeTrue();
+        result.Should().Contain("FK_Bill");
+        vm.Relationships.Single().ConstraintName.Should().Be("FK_Bill");
+    }
+
+    /// <summary>空白だけの constraint_name は省略として扱われることを検証する</summary>
+    [Fact(DisplayName = "add_relationship は空白だけの constraint_name を省略として扱う")]
+    public void AddRelationship_BlankConstraintName_IsTreatedAsOmitted()
+    {
+        var vm = CreateVmWithBillingAndShipping();
+
+        AddCustomerReference(vm, "BillingCustomerId", "   ").Success.Should().BeTrue();
+
+        vm.Relationships.Single().ConstraintName.Should().Be("FK_Orders_Customers");
+    }
+
+    /// <summary>
+    /// 既存の外部キー・主キー・一意制約と（大文字小文字を無視して）同じ名前の指定は、図を変えずに拒否されることを検証する
+    /// </summary>
+    /// <param name="constraintName">指定する名前</param>
+    [Theory(DisplayName = "add_relationship は既存の制約名と衝突する constraint_name を拒否する")]
+    [InlineData("fk_orders_customers")]
+    [InlineData("PK_Customers")]
+    [InlineData("uq_orders_code")]
+    public void AddRelationship_ConflictingConstraintName_IsRejected(string constraintName)
+    {
+        var vm = CreateVmWithBillingAndShipping();
+        AddCustomerReference(vm, "BillingCustomerId").Success.Should().BeTrue();
+        Exec(vm, "set_unique_constraint", new { table_name = "Orders", columns = new[] { "code" } })
+            .Success.Should()
+            .BeTrue();
+
+        var (result, success) = AddCustomerReference(vm, "ShippingCustomerId", constraintName);
+
+        success.Should().BeFalse();
+        result.Should().Contain(constraintName);
+        vm.Relationships.Should().ContainSingle();
     }
 
     /// <summary>get_diagram_summary が複合外部キーの列ペアを表示することを検証する</summary>

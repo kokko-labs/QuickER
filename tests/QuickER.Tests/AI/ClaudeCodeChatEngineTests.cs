@@ -28,11 +28,27 @@ public class ClaudeCodeChatEngineTests
         public ClaudeLoginProbeResult ProbeResult { get; set; } = ClaudeLoginProbeResult.LoggedIn;
         public int ProbeCallCount { get; private set; }
 
+        /// <summary>非 null ならプローブがこの例外を投げる（起動の拒否・プロセス起動の失敗などの模擬）</summary>
+        public Exception? ProbeException { get; set; }
+        public ClaudeCodeLaunchOptions? LastOptions { get; private set; }
+
+        /// <summary>非 null ならターンの実行中に呼ぶ（利用者の中断などの模擬）</summary>
+        public Action? DuringRun { get; set; }
+
+        /// <summary>非 null ならターンの実行がこの例外を投げる（起動の失敗などの模擬）</summary>
+        public Exception? RunException { get; set; }
+
         public bool IsAvailable() => Available;
 
         public Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken)
         {
             ProbeCallCount++;
+
+            if (ProbeException is not null)
+            {
+                return Task.FromException<ClaudeLoginProbeResult>(ProbeException);
+            }
+
             return Task.FromResult(ProbeResult);
         }
 
@@ -45,10 +61,18 @@ public class ClaudeCodeChatEngineTests
         )
         {
             ResumeSessionIdsAtCall.Add(resumeSessionId);
+            LastOptions = options;
 
             if (!string.IsNullOrEmpty(ScriptedText))
             {
                 onAssistantText(ScriptedText);
+            }
+
+            DuringRun?.Invoke();
+
+            if (RunException is not null)
+            {
+                return Task.FromException<ClaudeCodeTurnOutcome>(RunException);
             }
 
             var outcome =
@@ -106,6 +130,111 @@ public class ClaudeCodeChatEngineTests
         await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
 
         client.ResumeSessionIdsAtCall.Should().Equal(new string?[] { null, "s1" });
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>未ログイン以外の失敗を、ターン失敗の要約と、詳細の行の原因で表示することを検証する</summary>
+    /// <param name="reported">クライアントが返した原因（null・空・汎用文言なら詳細の行を付けない）</param>
+    /// <param name="expectDetail">詳細の行に原因を添えるか</param>
+    [Theory(
+        DisplayName = "未ログイン以外の失敗は要約に原因を詳細として添える（汎用文言・空は要約だけ）"
+    )]
+    [InlineData("Claude Code exited with an error (exit code: 1).", true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("<generic>", false)]
+    public async Task SendAsync_ReportedFailure_IsSummaryWithDetail(
+        string? reported,
+        bool expectDetail
+    )
+    {
+        var error = reported == "<generic>" ? Strings.ClaudeCode_GenericError : reported;
+        var client = new FakeClaudeCodeClient();
+        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(false, error, null, false));
+        var engine = CreateEngine(client);
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeFalse();
+        completed!
+            .Value.Error.Should()
+            .Be(
+                expectDetail
+                    ? Strings.ClaudeCode_TurnFailed
+                        + Environment.NewLine
+                        + Strings.Ai_DetailLabel
+                        + error
+                    : Strings.ClaudeCode_TurnFailed
+            );
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>ターンの実行が例外を投げたら、要約に例外の文言を詳細として添えた失敗で完了することを検証する</summary>
+    [Fact(DisplayName = "ターンの例外は要約＋詳細の失敗として完了する")]
+    public async Task SendAsync_RunThrows_IsSummaryWithDetail()
+    {
+        var client = new FakeClaudeCodeClient
+        {
+            RunException = new InvalidOperationException("The system cannot find the file"),
+        };
+        var engine = CreateEngine(client);
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeFalse();
+        completed!
+            .Value.Error.Should()
+            .Be(
+                Strings.ClaudeCode_TurnFailed
+                    + Environment.NewLine
+                    + Strings.Ai_DetailLabel
+                    + "The system cannot find the file"
+            );
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>利用者の中断（自分のトークンが立つ）は、原因の無い失敗でも無音の中断として完了することを検証する</summary>
+    /// <param name="throwCancellation">ターンの実行が取り消しの例外を投げるか（false なら原因なしの失敗を返す）</param>
+    [Theory(DisplayName = "利用者の中断はエラー文言なしで完了する")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_UserInterrupt_CompletesSilently(bool throwCancellation)
+    {
+        var client = new FakeClaudeCodeClient();
+        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(false, null, null, false));
+        var engine = CreateEngine(client);
+        client.DuringRun = () =>
+        {
+            engine.InterruptAsync().GetAwaiter().GetResult();
+
+            if (throwCancellation)
+            {
+                throw new OperationCanceledException();
+            }
+        };
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeFalse();
+        completed!.Value.Error.Should().BeNull();
 
         await engine.DisposeAsync();
     }
@@ -261,6 +390,38 @@ public class ClaudeCodeChatEngineTests
         toolHost.Calls.Should().ContainSingle();
     }
 
+    /// <summary>
+    /// MCP サーバーの起動に失敗した後の初期化で起動を再試行し、続くターンが MCP 設定つき
+    /// （ER ツールあり）で走ることを検証する（失敗したサーバーを保持すると再試行されず、
+    /// MCP 設定パスが空のままターンが走る）。起動の失敗はキャンセル済みトークンで起こす。
+    /// </summary>
+    [Fact(DisplayName = "MCP サーバーの起動に失敗しても次の初期化で再試行する")]
+    public async Task Initialize_AfterMcpStartFailure_RetriesAndPassesMcpConfig()
+    {
+        var client = new FakeClaudeCodeClient();
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var initialize = () => engine.InitializeAsync(cts.Token);
+        await initialize.Should().ThrowAsync<OperationCanceledException>();
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        client.LastOptions.Should().NotBeNull();
+        client.LastOptions!.McpConfigPath.Should().NotBeNullOrEmpty();
+        System.IO.File.Exists(client.LastOptions.McpConfigPath).Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
+
     /// <summary>検出済み・未プローブの初期状態は Pending（灰・未確認）であることを検証する</summary>
     [Fact(DisplayName = "初期状態は Pending（未確認）")]
     public async Task Initialize_WhenAvailable_IsPending()
@@ -272,6 +433,52 @@ public class ClaudeCodeChatEngineTests
 
         engine.StatusLevel.Should().Be(ConnectionHealth.Pending);
         engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_Unconfirmed);
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 再確認のプローブ自体が失敗（起動の拒否・プロセス起動の失敗・標準入力への書き込みの失敗など）しても
+    /// 例外を投げず、赤の状態と理由入りの案内になることを検証する（投げると「再確認」ボタンからアプリが落ちる）。
+    /// </summary>
+    [Fact(DisplayName = "再確認: プローブが投げても例外にせず赤＋理由の案内にする")]
+    public async Task Refresh_ProbeThrows_BecomesNeedsActionWithReason()
+    {
+        var client = new FakeClaudeCodeClient
+        {
+            ProbeException = new InvalidOperationException("probe-launch-refused"),
+        };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        var refresh = () => engine.RefreshAsync(TestContext.Current.CancellationToken);
+
+        await refresh.Should().NotThrowAsync();
+        engine.StatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+        engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_Inconclusive);
+        engine.Guidance.Should().Contain("probe-launch-refused");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 初期化済みのエンジンを再び初期化しても（接続タブへ戻るたびに呼ばれる）、確認済みの状態を
+    /// 「未確認」へ戻さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "初期化済みなら再初期化で確認済みの状態を戻さない")]
+    public async Task Initialize_AfterRefresh_KeepsConfirmedStatus()
+    {
+        var client = new FakeClaudeCodeClient { ProbeResult = ClaudeLoginProbeResult.LoggedIn };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.RefreshAsync(TestContext.Current.CancellationToken);
+        engine.StatusLevel.Should().Be(ConnectionHealth.Ready);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        engine.StatusLevel.Should().Be(ConnectionHealth.Ready);
+        engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_LoggedIn);
 
         await engine.DisposeAsync();
     }

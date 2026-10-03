@@ -18,6 +18,36 @@ public sealed class SqlConnectionData
     public SqlConnectionProfile? LastUsed { get; set; }
 }
 
+/// <summary>保存済みパスワードの読み取り結果の分類</summary>
+public enum SavedPasswordStatus
+{
+    /// <summary>暗号ファイルを読み取り、復号できた</summary>
+    Loaded,
+
+    /// <summary>暗号ファイルが無い＝保存されたパスワードが無い</summary>
+    Missing,
+
+    /// <summary>暗号ファイルはあるが読み取れない・復号できない（ファイルは残っている）</summary>
+    /// <remarks>
+    /// 別プロセスの一時的なロック・権限不足・別ユーザー／別端末で暗号化されたファイルなど。
+    /// 「無い」と同じ空文字として扱うと、その空値を書き戻す保存がファイルごと消してしまうため区別する。
+    /// </remarks>
+    Unreadable,
+}
+
+/// <summary>保存済みパスワードの読み取り結果</summary>
+/// <param name="Status">読み取り結果の分類</param>
+/// <param name="Value">復号したパスワード（<see cref="SavedPasswordStatus.Loaded"/> 以外は空文字）</param>
+public readonly record struct SavedPassword(SavedPasswordStatus Status, string Value)
+{
+    /// <summary>保存されたパスワードが無いことを表す値</summary>
+    public static SavedPassword Missing { get; } = new(SavedPasswordStatus.Missing, string.Empty);
+
+    /// <summary>暗号ファイルはあるが読み取れないことを表す値</summary>
+    public static SavedPassword Unreadable { get; } =
+        new(SavedPasswordStatus.Unreadable, string.Empty);
+}
+
 /// <summary>接続情報ファイルを読み取れず、保存を中止したことを表す例外</summary>
 /// <remarks>
 /// <para>
@@ -156,13 +186,27 @@ public class SqlConnectionProfileStore
 
             return data is null
                 ? (new SqlConnectionData(), ConnectionDataStatus.Corrupt)
-                : (data, ConnectionDataStatus.Loaded);
+                : (Normalize(data), ConnectionDataStatus.Loaded);
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
             // 破損 JSON・旧配列形式等で UI を妨げないよう空データへフォールバックする
             return (new SqlConnectionData(), ConnectionDataStatus.Corrupt);
         }
+    }
+
+    /// <summary>JSON として正しいが一覧・要素が null の接続情報を、空の一覧・null 要素なしへ揃える</summary>
+    /// <remarks>
+    /// <c>"profiles": null</c> や <c>[null]</c> は手編集でしか生じないが、逆直列化はそのまま通すため、
+    /// 揃えずに返すと一覧を並べる <see cref="LoadAll"/> が接続ダイアログの構築中に例外を出す。
+    /// 要素そのものが null のときは、その要素について何も言っていないので黙って除く
+    /// （図ファイルの読み込みで null 要素を除くのと同じ扱い）。
+    /// </remarks>
+    private static SqlConnectionData Normalize(SqlConnectionData data)
+    {
+        data.Profiles = (data.Profiles ?? []).Where(profile => profile is not null).ToList();
+
+        return data;
     }
 
     /// <summary>接続情報（プロファイル一覧＋前回接続）を読み込む（読み取り失敗時は空データ）</summary>
@@ -246,8 +290,11 @@ public class SqlConnectionProfileStore
         LoadData().Profiles.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
     /// <summary>前回使用した接続情報を読み込む</summary>
-    /// <remarks>パスワードは <see cref="SqlConnectionProfile.SavePassword"/> が有効な場合のみ復号して返す</remarks>
-    public (SqlConnectionProfile Profile, string Password)? LoadLastUsed()
+    /// <remarks>
+    /// パスワードは <see cref="SqlConnectionProfile.SavePassword"/> が有効な場合のみ復号して返す
+    /// （無効なら <see cref="SavedPassword.Missing"/>）
+    /// </remarks>
+    public (SqlConnectionProfile Profile, SavedPassword Password)? LoadLastUsed()
     {
         var profile = LoadData().LastUsed;
 
@@ -256,7 +303,9 @@ public class SqlConnectionProfileStore
             return null;
         }
 
-        var password = profile.SavePassword ? LoadSecret(LastConnectionSecretPath()) : string.Empty;
+        var password = profile.SavePassword
+            ? LoadSecret(LastConnectionSecretPath())
+            : SavedPassword.Missing;
         return (profile, password);
     }
 
@@ -386,6 +435,52 @@ public class SqlConnectionProfileStore
         }
     }
 
+    /// <summary>プロファイルの名前だけを変更する（パスワードの暗号ファイルには触れない）</summary>
+    /// <param name="id">名前を変えるプロファイルの Id</param>
+    /// <param name="newName">変更後の名前</param>
+    /// <param name="replacedProfileId">
+    /// 同時に削除するプロファイルの Id（変更後の名前が別のプロファイルと衝突し、そちらを置き換えるときに渡す）
+    /// </param>
+    /// <returns>対象が見つかり変更した場合 <c>true</c>（別のプログラムに消されていた場合は何も書かず <c>false</c>）</returns>
+    /// <remarks>
+    /// <para>
+    /// 対象自身の暗号ファイルは<b>読みも書きもしない</b>。名前の変更でパスワードを読み戻して
+    /// <see cref="Upsert"/> へ書き戻すと、一時的に読めなかっただけのパスワードが空値として書き戻され、
+    /// 正規化（<see cref="NormalizeSavePassword"/>）で暗号ファイルごと消える。Id は変わらないので、
+    /// 暗号ファイルはそのまま引き継がれる。
+    /// </para>
+    /// <para>読み取りが 1 回だけである理由と、置き換え先の暗号ファイルを書き込みの後に消す理由は <see cref="Upsert"/> と同じ。</para>
+    /// </remarks>
+    /// <exception cref="ConnectionProfileStoreUnavailableException">
+    /// 接続情報ファイルを読み取れず変更を中止した（ファイルの中身は操作前のまま）
+    /// </exception>
+    public bool Rename(Guid id, string newName, Guid? replacedProfileId = null)
+    {
+        var data = LoadDataForWrite();
+        var target = data.Profiles.Find(p => p.Id == id);
+
+        if (target is null)
+        {
+            return false;
+        }
+
+        target.Name = newName;
+
+        if (replacedProfileId is { } replacedId && replacedId != id)
+        {
+            data.Profiles.RemoveAll(p => p.Id == replacedId);
+        }
+
+        SaveData(data);
+
+        if (replacedProfileId is { } removedId && removedId != id)
+        {
+            DeleteSecret(removedId);
+        }
+
+        return true;
+    }
+
     /// <summary>指定 ID のプロファイルと暗号化パスワードを削除する</summary>
     /// <remarks>読み取りが 1 回だけである理由は <see cref="Upsert"/> と同じ</remarks>
     /// <exception cref="ConnectionProfileStoreUnavailableException">
@@ -399,19 +494,20 @@ public class SqlConnectionProfileStore
         DeleteSecret(id);
     }
 
-    /// <summary>指定 ID のプロファイルに紐づくパスワードを復号して返す（無ければ空文字）</summary>
-    public string LoadPassword(Guid id)
-    {
-        var path = SecretPath(id);
-        return LoadSecret(path);
-    }
+    /// <summary>指定 ID のプロファイルに紐づくパスワードを復号して返す（読めたか・無いか・読めないかを含む）</summary>
+    public SavedPassword LoadPassword(Guid id) => LoadSecret(SecretPath(id));
 
     /// <summary>暗号ファイルを復号してパスワード文字列を返す（DPAPI 無効時は平文として読む）</summary>
-    private string LoadSecret(string path)
+    /// <remarks>
+    /// 「無い」と「あるのに読めない」を分けて返す。読めないものを空文字として返すと、呼び出し側は
+    /// 「保存されていない」と区別できず、その空値を書き戻した保存が暗号ファイルを消してしまう
+    /// （<see cref="Upsert"/> は空パスワードを「保存しない」へ正規化するため）。
+    /// </remarks>
+    private SavedPassword LoadSecret(string path)
     {
         if (!File.Exists(path))
         {
-            return string.Empty;
+            return SavedPassword.Missing;
         }
 
         try
@@ -425,15 +521,16 @@ public class SqlConnectionProfileStore
                     optionalEntropy: null,
                     scope: DataProtectionScope.CurrentUser
                 );
-                return Encoding.UTF8.GetString(data);
+                return new SavedPassword(SavedPasswordStatus.Loaded, Encoding.UTF8.GetString(data));
             }
 
-            return Encoding.UTF8.GetString(bytes);
+            return new SavedPassword(SavedPasswordStatus.Loaded, Encoding.UTF8.GetString(bytes));
         }
-        catch
+        catch (Exception ex)
+            when (ex is IOException or UnauthorizedAccessException or CryptographicException)
         {
-            // 別ユーザーで暗号化された等で復号失敗した場合は空文字を返す
-            return string.Empty;
+            // 一時的なロック・権限不足・別ユーザー／別端末で暗号化されたファイルなど（ファイルは残っている）
+            return SavedPassword.Unreadable;
         }
     }
 

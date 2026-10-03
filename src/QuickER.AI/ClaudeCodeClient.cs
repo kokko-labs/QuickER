@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -141,11 +140,43 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         "/login",
     ];
 
-    private readonly Lazy<string?> _executablePath = new(ResolveExecutablePath);
+    /// <summary>ログイン確認（<see cref="ProbeLoginAsync"/>）の既定の上限時間</summary>
+    internal static readonly TimeSpan DefaultProbeTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>claude の実行ファイルのパスを返す処理（呼ぶたびに解決する）</summary>
+    /// <remarks>
+    /// 結果をキャッシュしない＝<see cref="PathExecutableResolver"/> と同じ契約。キャッシュすると、アプリを起動した後に
+    /// PATH 上のフォルダへ claude を入れても「再確認」で検出できない
+    /// </remarks>
+    private readonly Func<string?> _resolveExecutablePath;
+
+    /// <summary>ログイン確認の上限時間（超えたらプロセスを止めて「確認できなかった」として返す）</summary>
+    private readonly TimeSpan _probeTimeout;
+
     private Process? _currentProcess;
 
+    /// <summary>実行中のログイン確認のプロセス（破棄で止めるために控える）</summary>
+    /// <remarks>
+    /// ターンの <see cref="_currentProcess"/> とは分けて持つ。<see cref="Interrupt"/> は「実行中のターンの中断」なので
+    /// 確認を止めるのは意味が違い、共有すると確認とターンが重なったときに片方の後片づけが相手を追跡から外す
+    /// </remarks>
+    private Process? _probeProcess;
+
+    /// <summary>PATH 上の claude を使うクライアントを作る</summary>
+    public ClaudeCodeProcessClient()
+        : this(ResolveExecutablePath, DefaultProbeTimeout) { }
+
+    /// <summary>実行ファイルとログイン確認の上限時間を差し替えたクライアントを作る（テストが偽の claude を使うため）</summary>
+    /// <param name="resolveExecutablePath">claude の実行ファイルのパスを返す処理（見つからなければ null）</param>
+    /// <param name="probeTimeout">ログイン確認の上限時間</param>
+    internal ClaudeCodeProcessClient(Func<string?> resolveExecutablePath, TimeSpan probeTimeout)
+    {
+        _resolveExecutablePath = resolveExecutablePath;
+        _probeTimeout = probeTimeout;
+    }
+
     /// <inheritdoc />
-    public bool IsAvailable() => _executablePath.Value is not null;
+    public bool IsAvailable() => _resolveExecutablePath() is not null;
 
     /// <inheritdoc />
     public async Task<ClaudeCodeTurnOutcome> RunTurnAsync(
@@ -156,7 +187,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         CancellationToken cancellationToken
     )
     {
-        var executable = _executablePath.Value;
+        var executable = _resolveExecutablePath();
 
         if (executable is null)
         {
@@ -252,8 +283,19 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
             try
             {
-                await process.StandardInput.WriteAsync(prompt).ConfigureAwait(false);
-                process.StandardInput.Close();
+                try
+                {
+                    await process
+                        .StandardInput.WriteAsync(prompt.AsMemory(), cancellationToken)
+                        .ConfigureAwait(false);
+                    process.StandardInput.Close();
+                }
+                catch (IOException)
+                {
+                    // claude がプロンプトを読み切る前に終わった（起動直後に落ちた・引数を拒否した）。生の例外で抜けると
+                    // stderr の診断が失われるので、入力を閉じて読み進め、終了コードと stderr で失敗の結果を組み立てる
+                    CloseInputQuietly(process);
+                }
 
                 var stream = await ReadStreamAsync(process, onAssistantText, cancellationToken)
                     .ConfigureAwait(false);
@@ -283,9 +325,13 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 確認のプロセスは破棄（<see cref="DisposeAsync"/>）で止まり、上限時間（既定 60 秒）を過ぎても止める。
+    /// どちらも、呼び出し元の取り消しと同じく <see cref="ClaudeLoginProbeResult.Unavailable"/>（確認できなかった）を返す
+    /// </remarks>
     public async Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken)
     {
-        var executable = _executablePath.Value;
+        var executable = _resolveExecutablePath();
 
         if (executable is null)
         {
@@ -306,19 +352,35 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             return ClaudeLoginProbeResult.Unavailable;
         }
 
+        _probeProcess = process;
+
         // 実ターンと同様に stderr を常時ドレインする（読まないままだとパイプバッファ満杯で
         // 子プロセスが停止し、stdout の読み取りが返らなくなる）
         var standardError = new StandardErrorDrain(process);
 
+        // 呼び出し元の取り消しに上限時間を重ねる（確認が返らないまま子プロセスが残り続けないように）
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(_probeTimeout);
+
         try
         {
-            await process.StandardInput.WriteAsync("ping").ConfigureAwait(false);
-            process.StandardInput.Close();
+            try
+            {
+                await process.StandardInput.WriteAsync("ping").ConfigureAwait(false);
+                process.StandardInput.Close();
+            }
+            catch (IOException)
+            {
+                // claude が入力を読む前に終わった（破棄で止められた・起動直後に落ちた）。書き込みはスレッドプールで
+                // 進むので、破棄が先に走ればここへ来る。確認の結果は出力で決める（出力が無ければ確認できなかった）。
+                // 閉じ損ねた入力を閉じておく（StreamWriter は失敗しても下のパイプを閉じる＝プロセスの破棄で再び投げない）
+                CloseInputQuietly(process);
+            }
 
             var output = await process
-                .StandardOutput.ReadToEndAsync(cancellationToken)
+                .StandardOutput.ReadToEndAsync(timeoutCts.Token)
                 .ConfigureAwait(false);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
             await standardError.WaitForCompletionAsync().ConfigureAwait(false);
 
             return InterpretProbe(output);
@@ -327,6 +389,11 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         {
             TryKill(process);
             return ClaudeLoginProbeResult.Unavailable;
+        }
+        finally
+        {
+            // 自分が載せたものだけを外す
+            Interlocked.CompareExchange(ref _probeProcess, null, process);
         }
     }
 
@@ -470,6 +537,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         BatchShimProcessGuard.Apply(
             startInfo,
             Strings.ClaudeCode_PathHasQuote,
+            Strings.ClaudeCode_PathHasEnvExpansion,
             Strings.ClaudeCode_ArgHasEnvExpansion,
             Strings.ClaudeCode_ArgHasNewline
         );
@@ -609,72 +677,6 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     }
 
     /// <summary>
-    /// 子プロセスの標準エラー出力を常時読み出し、直近行だけをリングバッファで保持するドレイナ。
-    /// </summary>
-    /// <remarks>
-    /// stderr を読まないままにすると、子プロセスが数 KB 書いた時点でパイプバッファが満杯になって
-    /// write でブロックし、stdout も進まなくなって読み取りが永久に返らない（デッドロック）。
-    /// <see cref="CodexAppServerClient"/> と同じ流儀で、読み捨てつつ診断用に直近行だけを残す。
-    /// </remarks>
-    private sealed class StandardErrorDrain
-    {
-        /// <summary>診断用に保持する直近行数</summary>
-        private const int MaxRetainedLines = 20;
-
-        /// <summary>読み切りを待つ上限（子孫プロセスがパイプを握ったままでも固まらないようにする）</summary>
-        private static readonly TimeSpan CompletionTimeout = TimeSpan.FromSeconds(2);
-
-        private readonly ConcurrentQueue<string> _lines = new();
-        private readonly Task _drainTask;
-
-        public StandardErrorDrain(Process process)
-        {
-            _drainTask = Task.Run(() => DrainAsync(process), CancellationToken.None);
-        }
-
-        /// <summary>保持している直近の stderr 行（古い順）</summary>
-        public IReadOnlyList<string> RecentLines => _lines.ToArray();
-
-        /// <summary>EOF までの読み切りを上限付きで待つ（超過しても保持済みの行はそのまま使える）</summary>
-        public async Task WaitForCompletionAsync()
-        {
-            try
-            {
-                await _drainTask.WaitAsync(CompletionTimeout).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                // 読み切れなくても保持済みの行で診断する（待ち続けない）
-            }
-        }
-
-        /// <summary>EOF まで stderr を読み続け、直近 <see cref="MaxRetainedLines"/> 行だけを残す</summary>
-        private async Task DrainAsync(Process process)
-        {
-            try
-            {
-                while (true)
-                {
-                    var line = await process.StandardError.ReadLineAsync().ConfigureAwait(false);
-
-                    if (line is null)
-                    {
-                        break;
-                    }
-
-                    _lines.Enqueue(line);
-
-                    while (_lines.Count > MaxRetainedLines && _lines.TryDequeue(out _)) { }
-                }
-            }
-            catch
-            {
-                // 中断・プロセス破棄に伴うストリーム例外は無視する（診断目的のため取り逃しは許容）
-            }
-        }
-    }
-
-    /// <summary>
     /// stream_event の content_block_delta（text_delta）から差分テキストを取り出して逐次通知する。
     /// 集約版の assistant イベントは無視する（二重出力になるため）。thinking_delta も対象外。
     /// </summary>
@@ -784,6 +786,19 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     /// <inheritdoc />
     public void Interrupt() => TryKill(_currentProcess);
 
+    /// <summary>書き込みに失敗した標準入力を、例外を出さずに閉じる</summary>
+    private static void CloseInputQuietly(Process process)
+    {
+        try
+        {
+            process.StandardInput.Close();
+        }
+        catch (IOException)
+        {
+            // 残りを書き出せないだけで、下のパイプは閉じられている
+        }
+    }
+
     /// <summary>プロセスを安全に終了する</summary>
     private static void TryKill(Process? process)
     {
@@ -809,6 +824,9 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     {
         TryKill(_currentProcess);
         _currentProcess = null;
+        // 実行中のログイン確認も止める（止めないと、確認が返らない限り子プロセスが孤児として残る）
+        TryKill(_probeProcess);
+        _probeProcess = null;
         return ValueTask.CompletedTask;
     }
 }

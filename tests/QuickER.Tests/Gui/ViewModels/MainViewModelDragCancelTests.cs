@@ -150,4 +150,23 @@ public sealed class MainViewModelDragCancelTests : IDisposable
             .Be(generationBefore, "打ち切りは履歴・変更世代へ触れない");
         vm.IsDirty.Should().BeTrue("元からあった未保存変更はそのまま残る");
     }
+
+    /// <summary>既に反映済みの内容（最終既知ハッシュと一致）の変更検知では、ドラッグを打ち切らないことを検証する</summary>
+    /// <remarks>捨てるだけのイベントで利用者の操作を壊さないよう、反映済みの判定は打ち切りより前に置く</remarks>
+    [Fact(DisplayName = "反映済みの内容の変更検知ではドラッグを打ち切らない")]
+    public void AlreadyReflectedChange_DoesNotCancelDrag()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var vm = OpenClean(path, "Original", new StubDialogService());
+
+        var dragged = vm.Entities[0];
+        DragBehavior.BeginInteractionForTests(dragged, startX: dragged.X, startY: dragged.Y);
+
+        vm.RaiseExternalChangeForTests(
+            DocumentFileChangeKind.Modified,
+            DocumentContentHash.TryCompute(path)
+        );
+
+        DragBehavior.IsInteractionActiveForTests.Should().BeTrue("ディスクは読み込んだ内容のまま");
+    }
 }

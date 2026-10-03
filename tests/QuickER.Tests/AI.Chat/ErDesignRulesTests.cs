@@ -117,34 +117,6 @@ public class ErDesignRulesTests
         En("ErDesign_ChatInstructionsTemplate").Should().Contain("PascalCase and singular");
     }
 
-    /// <summary>識別子命名規則の指示行がスタイルごとに対応する resx キーへ切り替わることを検証する（ambient カルチャ非依存）</summary>
-    [Fact(DisplayName = "命名規則の指示行はスタイルごとに切り替わる")]
-    public void BuildNamingInstruction_SwitchesByStyle()
-    {
-        ErDesignRules
-            .BuildNamingInstruction(AiIdentifierNamingStyle.SnakeCase)
-            .Should()
-            .Be(Strings.ErDesign_NamingSnakeCase);
-        ErDesignRules
-            .BuildNamingInstruction(AiIdentifierNamingStyle.PascalCase)
-            .Should()
-            .Be(Strings.ErDesign_NamingPascalCase);
-    }
-
-    /// <summary>テーブル名の単数・複数の指示行がスタイルごとに対応する resx キーへ切り替わることを検証する（ambient カルチャ非依存）</summary>
-    [Fact(DisplayName = "テーブル名の単複数の指示行はスタイルごとに切り替わる")]
-    public void BuildTableNameNumberInstruction_SwitchesByStyle()
-    {
-        ErDesignRules
-            .BuildTableNameNumberInstruction(AiTableNameNumberStyle.Plural)
-            .Should()
-            .Be(Strings.ErDesign_TableNamePlural);
-        ErDesignRules
-            .BuildTableNameNumberInstruction(AiTableNameNumberStyle.Singular)
-            .Should()
-            .Be(Strings.ErDesign_TableNameSingular);
-    }
-
     /// <summary>
     /// チャット指示文（API キー / Codex / Claude Code 共通）が最優先の言語ルールで終わることを検証する。
     /// CLI エージェント接続ではユーザー環境のメモリファイル等に応答言語が引きずられることがあるため、

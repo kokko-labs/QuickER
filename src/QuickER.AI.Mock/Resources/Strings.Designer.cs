@@ -330,6 +330,30 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_DisabledReason_TurnInProgress {
+            get {
+                return ResourceManager.GetString("Mock_DisabledReason_TurnInProgress", resourceCulture);
+            }
+        }
+
+        public static string Mock_ConversationBlockedDuringMockGen {
+            get {
+                return ResourceManager.GetString("Mock_ConversationBlockedDuringMockGen", resourceCulture);
+            }
+        }
+
+        public static string Mock_MockFolderNotFullyQualified {
+            get {
+                return ResourceManager.GetString("Mock_MockFolderNotFullyQualified", resourceCulture);
+            }
+        }
+
+        public static string Mock_ConnectionCheckFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_ConnectionCheckFailedFormat", resourceCulture);
+            }
+        }
+
         public static string Mock_DisabledReason_NoScreens {
             get {
                 return ResourceManager.GetString("Mock_DisabledReason_NoScreens", resourceCulture);
@@ -516,6 +540,18 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_ModelHistorySaveFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_ModelHistorySaveFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_SettingsSaveFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_SettingsSaveFailedFormat", resourceCulture);
+            }
+        }
+
         public static string Mock_ErrorSystemFormat {
             get {
                 return ResourceManager.GetString("Mock_ErrorSystemFormat", resourceCulture);
@@ -525,6 +561,18 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_ErrorStatusFormat {
             get {
                 return ResourceManager.GetString("Mock_ErrorStatusFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_MockFolderLockedDuringTurn {
+            get {
+                return ResourceManager.GetString("Mock_MockFolderLockedDuringTurn", resourceCulture);
+            }
+        }
+
+        public static string Mock_SwitchBackendBlockedDuringTurn {
+            get {
+                return ResourceManager.GetString("Mock_SwitchBackendBlockedDuringTurn", resourceCulture);
             }
         }
 
@@ -609,6 +657,12 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_Run_BuildBoundaryChanges {
             get {
                 return ResourceManager.GetString("Mock_Run_BuildBoundaryChanges", resourceCulture);
+            }
+        }
+
+        public static string Mock_Run_BuildOutputsNotDeleted {
+            get {
+                return ResourceManager.GetString("Mock_Run_BuildOutputsNotDeleted", resourceCulture);
             }
         }
 
@@ -1118,6 +1172,48 @@ namespace QuickER.AI.Mock.Resources {
         public static string MockDoc_ItemTableFormat {
             get {
                 return ResourceManager.GetString("MockDoc_ItemTableFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_FolderAlreadyExistsFormat {
+            get {
+                return ResourceManager.GetString("Mock_FolderAlreadyExistsFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_FolderNotMockFormat {
+            get {
+                return ResourceManager.GetString("Mock_FolderNotMockFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ManifestParseFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestParseFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ManifestEmptyFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestEmptyFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ManifestNewerFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestNewerFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ManifestInvalidScreenFileFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestInvalidScreenFileFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ToolFileAccessFailedResult {
+            get {
+                return ResourceManager.GetString("Mock_ToolFileAccessFailedResult", resourceCulture);
             }
         }
 

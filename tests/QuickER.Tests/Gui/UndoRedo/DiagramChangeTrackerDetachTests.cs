@@ -98,30 +98,4 @@ public class DiagramChangeTrackerDetachTests
         tracker.IsTrackedForTests(oldConstraint).Should().BeFalse();
         tracker.IsTrackedForTests(oldRelationship).Should().BeFalse();
     }
-
-    /// <summary>取込コマンドの Undo で図へ戻した要素が、二重購読にならないことを検証する</summary>
-    /// <remarks>
-    /// 一括置換時の明示的な解除（<c>ClearDiagramCollections</c>）と、再追加時の <c>CollectionChanged</c> 経由の
-    /// 購読が二重にならないことの確認（購読が 2 本になると 1 回の編集で履歴が 2 つ積まれる）。
-    /// </remarks>
-    [Fact(DisplayName = "取込 Undo で戻した図の編集は履歴へ 1 回だけ積まれる")]
-    public void ImportSchemaUndo_RestoredElementsAreTrackedExactlyOnce()
-    {
-        var vm = new MainViewModel();
-        var existing = new EntityViewModel(new Entity { TableName = "Old" });
-        vm.Entities.Add(existing);
-
-        var command = new ImportSchemaCommand(vm, [new Entity { TableName = "New" }], [], "取込");
-
-        command.Execute();
-        command.Undo();
-
-        vm.Entities.Should().ContainSingle().Which.Should().BeSameAs(existing);
-
-        var generationBefore = vm.UndoRedo.ChangeGeneration;
-        existing.TableName = "Edited";
-
-        vm.UndoRedo.ChangeGeneration.Should()
-            .Be(generationBefore + 1, "購読は 1 本だけ＝履歴も 1 つだけ積まれる");
-    }
 }

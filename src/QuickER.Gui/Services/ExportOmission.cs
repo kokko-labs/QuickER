@@ -3,7 +3,7 @@ namespace QuickER.Services;
 /// <summary>出力形式が構造的に表現できないために落ちる情報の種類（言語中立）</summary>
 /// <remarks>
 /// <para>
-/// 検出側（エクスポータ）は言語中立の種類だけを返し、表示側（<c>MainViewModel</c>）が resx で
+/// 検出側（エクスポータ）は言語中立の種類だけを返し、表示側（<c>DiagramExportService.DescribeOmission</c>）が resx で
 /// 文言化する。スキーマ同期の警告（<c>SyncPlan.Warnings</c>）と同じ流儀。
 /// </para>
 /// <para>
@@ -45,4 +45,25 @@ public enum ExportOmissionKind
 
     /// <summary>複合主キー自身の列順序（列の並びと食い違うもの）</summary>
     PrimaryKeyOrder,
+
+    /// <summary>リレーションの子側の列にならない列に付いた外部キーの印</summary>
+    ForeignKeyMarkerWithoutRelationship,
+
+    /// <summary>列の対応を書けないために出力しないリレーション</summary>
+    RelationshipWithoutColumns,
+
+    /// <summary>計算列・生成列の指定（取り込むと通常の列になる）</summary>
+    ComputedColumn,
+
+    /// <summary>テーブル名そのもの（形式の記法に合わせて書き換えられた）</summary>
+    TableNameNormalized,
+
+    /// <summary>列の型表記（形式の記法に合わせて書き換えられ、取込で元へ戻らない）</summary>
+    ColumnTypeNormalized,
+
+    /// <summary>外部キー列の単一列 UNIQUE 制約（キー標識が 1 つしか書けない形式で外部キー印に隠れる）</summary>
+    UniqueConstraintOnForeignKeyColumn,
+
+    /// <summary>リレーションの制約名（取込で同じ名前に戻らないもの）</summary>
+    RelationshipConstraintName,
 }

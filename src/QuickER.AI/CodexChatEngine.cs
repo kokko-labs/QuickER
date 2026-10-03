@@ -145,7 +145,7 @@ public sealed class CodexChatEngine : IErChatEngine
 
     /// <inheritdoc />
     /// <remarks>Codex は添付プロトコルが未対応のため添付不可（UI 側で無効化・防御的にガードもする）。</remarks>
-    public AttachmentSupport AttachmentSupport => AttachmentSupport.None;
+    public AttachmentSupport AttachmentSupport => AttachmentSupportResolver.Codex;
 
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -155,10 +155,25 @@ public sealed class CodexChatEngine : IErChatEngine
 
     /// <summary>App Server を起動・接続し、アカウント状態を復元する</summary>
     /// <remarks>
+    /// <para>
     /// codex CLI が PATH に無いときはプロセス起動を試みず、未検出（赤・インストール案内）として返す。
     /// 起動を試みると Win32Exception になり「接続に失敗しました」という的外れな理由しか出せないため。
+    /// </para>
+    /// <para>
+    /// 接続が実行中のあいだに重ねて呼ばれたら、新しく接続せず実行中の接続を待つ（<see cref="SingleFlight"/>）。
+    /// 2 本目が 1 本目の起動直後・ハンドシェイク前の状態を「起動済み」と見て、アカウント状態を早く読みに行かないため。
+    /// 相乗りした呼び出しの <paramref name="cancellationToken"/> は待つのをやめることにだけ効く
+    /// （起動した呼び出しのトークンは接続へ渡るので、その取り消しは相乗りした呼び出しにも届く）。
+    /// </para>
     /// </remarks>
-    public async Task ConnectAsync(CancellationToken cancellationToken = default)
+    public Task ConnectAsync(CancellationToken cancellationToken = default) =>
+        _connect.RunAsync(ConnectCoreAsync, cancellationToken);
+
+    /// <summary>接続を重ねて走らせないための共有（実行中のあいだだけ）</summary>
+    private readonly SingleFlight _connect = new();
+
+    /// <summary><see cref="ConnectAsync"/> の本体</summary>
+    private async Task ConnectCoreAsync(CancellationToken cancellationToken)
     {
         if (!EnsureCliAvailable())
         {
@@ -308,6 +323,7 @@ public sealed class CodexChatEngine : IErChatEngine
         try
         {
             await _client.LogoutAsync(cancellationToken).ConfigureAwait(false);
+            AuthMode = CodexAuthMode.None;
             RequiresOpenAiAuth = true;
             AccountSummary = Strings.Codex_NotLoggedIn;
             // ログイン済みの常時案内を残さない（ログインパネル側が案内する）
@@ -383,11 +399,11 @@ public sealed class CodexChatEngine : IErChatEngine
                 .ConfigureAwait(false);
             _currentTurnId = turn.Id;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // 中断は失敗ではないため、他の 2 エンジン（ChatTurnEngine / ClaudeCodeChatEngine の
-            // IClaudeCodeClient.RunTurnAsync 契約）と同じく Success=false・Error=null へ畳む。
-            // 送信失敗と並行して接続断などが先にターンを完了させていたら、二重に通知しない
+            // 利用者の中断（呼び出し元のトークン）は失敗ではないため、他のエンジン（ChatTurnEngine /
+            // ClaudeCodeChatEngine）と同じく Success=false・Error=null へ畳む。トークンの立っていない取り消しは
+            // 下の失敗へ落とす。送信失敗と並行して接続断などが先にターンを完了させていたら、二重に通知しない
             if (TryCompleteTurn())
             {
                 TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
@@ -398,10 +414,19 @@ public sealed class CodexChatEngine : IErChatEngine
             // 送信失敗と並行して接続断などが先にターンを完了させていたら、二重に通知しない
             if (TryCompleteTurn())
             {
-                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+                TurnCompleted?.Invoke(
+                    this,
+                    new ErChatTurnResult(false, BuildTurnFailedMessage(ex.Message))
+                );
             }
         }
     }
+
+    /// <summary>ターンの失敗としてチャットへ表示する文言を組み立てる</summary>
+    /// <param name="detail">原因（例外の文言、または App Server が報告した文）。無ければ null または空</param>
+    /// <returns>何が起きたかと次に何をするかの要約（UI 言語に追従）に、原因を「詳細: …」の行で添えた文言</returns>
+    private static string BuildTurnFailedMessage(string? detail) =>
+        AiErrorMessageLocalizer.WithDetail(Strings.Codex_TurnFailed, detail);
 
     /// <summary>実行中フラグを 1→0 へ落とせた（＝このターンの完了通知の権利を勝ち取った）ときだけ true を返す</summary>
     /// <remarks>
@@ -554,7 +579,7 @@ public sealed class CodexChatEngine : IErChatEngine
     {
         if (_workingDirectory.Length == 0)
         {
-            _workingDirectory = CreateWorkingDirectory();
+            _workingDirectory = BackendWorkingDirectory.Create("codex");
         }
 
         return new()
@@ -569,44 +594,6 @@ public sealed class CodexChatEngine : IErChatEngine
                 ? _profile.BuildCodexDeveloperInstructions()
                 : null,
         };
-    }
-
-    /// <summary>一時作業ディレクトリを作成する（codex の cwd を無害な場所に限定する）</summary>
-    private static string CreateWorkingDirectory()
-    {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            "QuickER",
-            "codex",
-            Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(path);
-        return path;
-    }
-
-    /// <summary>一時作業ディレクトリを削除する（ベストエフォート）</summary>
-    private void TryDeleteWorkingDirectory()
-    {
-        if (_workingDirectory.Length == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (Directory.Exists(_workingDirectory))
-            {
-                Directory.Delete(_workingDirectory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // 使用中などで削除できない場合は無視する
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // 権限不足は無視する
-        }
     }
 
     /// <summary>現在のプロバイダー・モデルから保存用設定を組み立てる</summary>
@@ -639,18 +626,17 @@ public sealed class CodexChatEngine : IErChatEngine
             return;
         }
 
-        if (AuthMode == CodexAuthMode.None)
-        {
-            AccountSummary = BuildAccountSummary(
-                account.AuthMode,
-                account.PlanType,
-                account.Email,
-                account.RequiresOpenAiAuth,
-                IsOpenAiProvider
-            );
-            // 未ログインへ変わった場合は、直前のログイン済み案内を残さない（ログインパネル側が案内する）
-            Guidance = string.Empty;
-        }
+        // 未ログインは直前の状態に依らず反映する（CLI 側でログアウトされた後の再確認で、
+        // ログイン済みの表示とログイン済み案内を残さない。ログインパネル側が案内する）
+        AuthMode = CodexAuthMode.None;
+        AccountSummary = BuildAccountSummary(
+            account.AuthMode,
+            account.PlanType,
+            account.Email,
+            account.RequiresOpenAiAuth,
+            IsOpenAiProvider
+        );
+        Guidance = string.Empty;
     }
 
     /// <summary>認証モード・プラン・メール・プロバイダー種別から概要文言を組み立てる</summary>
@@ -716,9 +702,13 @@ public sealed class CodexChatEngine : IErChatEngine
         {
             TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
         }
-        else if (e.Turn.Status == "failed" && !string.IsNullOrWhiteSpace(e.Turn.Error))
+        else if (e.Turn.Status == "failed")
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, e.Turn.Error));
+            // 理由の無い failed も失敗として扱う（成功に見せない）。理由が無ければ要約だけになる
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, BuildTurnFailedMessage(e.Turn.Error))
+            );
         }
         else
         {
@@ -894,7 +884,7 @@ public sealed class CodexChatEngine : IErChatEngine
             return;
         }
 
-        var message = Strings.Codex_UnknownError;
+        string? reported = null;
 
         if (
             e.Params is JsonElement paramsElement
@@ -902,16 +892,26 @@ public sealed class CodexChatEngine : IErChatEngine
             && errorElement.TryGetProperty("message", out var msgElement)
         )
         {
-            message = msgElement.GetString() ?? message;
+            reported = msgElement.GetString();
         }
 
         if (TryCompleteTurn())
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, message));
+            // ターン中の失敗は、ほかのターン失敗と同じく要約に報告文を添える（報告文が無ければ要約だけ）
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, BuildTurnFailedMessage(reported))
+            );
         }
         else
         {
-            StatusChanged?.Invoke(this, string.Format(Strings.Codex_ErrorOccurred, message));
+            StatusChanged?.Invoke(
+                this,
+                string.Format(
+                    Strings.Codex_ErrorOccurred,
+                    string.IsNullOrWhiteSpace(reported) ? Strings.Codex_UnknownError : reported
+                )
+            );
         }
     }
 
@@ -929,6 +929,6 @@ public sealed class CodexChatEngine : IErChatEngine
         await _client.DisposeAsync().ConfigureAwait(false);
 
         // 子プロセスを止めてから作業フォルダを消す（掴まれたままだと削除できない）
-        TryDeleteWorkingDirectory();
+        BackendWorkingDirectory.TryDelete(_workingDirectory);
     }
 }

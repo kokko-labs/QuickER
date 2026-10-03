@@ -27,7 +27,7 @@ public sealed record MockProjectAgentRequest(
 public sealed record MockProjectAgentOutcome(bool Success, string? Error, bool NotLoggedIn);
 
 /// <summary>
-/// スキャフォールド済みフォルダに対して「WPF の UI 層を書く」部分だけを担うエージェント（バックエンド）の抽象。
+/// スキャフォールド済みフォルダに対して「UI 層（WPF / Blazor）を書く」部分だけを担うエージェント（バックエンド）の抽象。
 /// </summary>
 /// <remarks>
 /// <para>

@@ -175,4 +175,150 @@ public class MockProjectFilesTests
             Cleanup(root);
         }
     }
+
+    /// <summary>
+    /// 中を列挙できない reparse フォルダがあっても、列挙は例外にならず、ほかのファイルを返すことを検証する
+    /// （素の再帰列挙は <see cref="IOException"/> で止まり、成果物検証がランごと落ちていた）。
+    /// </summary>
+    [Fact(
+        DisplayName = "中を列挙できない reparse フォルダがあっても HasAny / Enumerate は落ちない"
+    )]
+    public void Enumerate_UnlistableReparseFolder_DoesNotThrow()
+    {
+        var root = NewTempFolder();
+
+        try
+        {
+            Write(Path.Combine(root, "AcmeMock.csproj"));
+            Write(Path.Combine(root, "Components", "Home.razor"));
+            var cache = Path.Combine(root, "cache");
+            Directory.CreateDirectory(cache);
+            ReparsePointTestHelper.MakeUnlistableReparseDirectory(cache);
+
+            // 素の列挙は落ちる（＝共有ヘルパーが解決している問題が実在することの確認）
+            var raw = () =>
+                Directory
+                    .EnumerateFiles(
+                        root,
+                        "*.razor",
+                        new EnumerationOptions
+                        {
+                            RecurseSubdirectories = true,
+                            IgnoreInaccessible = true,
+                        }
+                    )
+                    .ToList();
+            raw.Should().Throw<IOException>();
+
+            MockProjectFiles.HasAny(root, "*.csproj").Should().BeTrue();
+            MockProjectFiles.HasAny(root, "*.xaml").Should().BeFalse();
+            MockProjectFiles
+                .Enumerate(root, "*.razor")
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .EndWith("Home.razor");
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(root);
+        }
+    }
+
+    /// <summary>
+    /// ジャンクションの先は数えないことを検証する（成果物はプロジェクトフォルダの中に実在するものだけ。
+    /// 辿ると、外を指すジャンクション 1 つで出力フォルダの外を走査し、外のファイルで成果物検証が通る）。
+    /// </summary>
+    [Fact(DisplayName = "ジャンクションの先のファイルは数えない")]
+    public void Enumerate_DoesNotFollowJunctions()
+    {
+        var root = NewTempFolder();
+        var outside = NewTempFolder();
+
+        try
+        {
+            Write(Path.Combine(outside, "Outside.razor"));
+            ReparsePointTestHelper.CreateJunction(Path.Combine(root, "linked"), outside);
+
+            MockProjectFiles.HasAny(root, "*.razor").Should().BeFalse();
+            File.Exists(Path.Combine(outside, "Outside.razor")).Should().BeTrue();
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(root);
+            ReparsePointTestHelper.DeleteTree(outside);
+        }
+    }
+
+    /// <summary>
+    /// リンクでない reparse フォルダ（OneDrive の Files On-Demand と同じ形）の中は数えることを検証する
+    /// （属性ビットだけで止めると、そこへ書かれた成果物が見えなくなる）。
+    /// </summary>
+    [Fact(DisplayName = "リンクでない reparse フォルダの中は数える")]
+    public void Enumerate_TraversesNonLinkReparseFolder()
+    {
+        var root = NewTempFolder();
+
+        try
+        {
+            var cloud = Path.Combine(root, "Components");
+            Write(Path.Combine(cloud, "Home.razor"));
+            ReparsePointTestHelper.MakeReadableNonLinkReparseDirectory(cloud);
+
+            MockProjectFiles.HasAny(root, "*.razor").Should().BeTrue();
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(root);
+        }
+    }
+
+    /// <summary>
+    /// リンクの判定は <see cref="FileSystemInfo.LinkTarget"/> で行い、reparse point の属性ビットでは決めない
+    /// （OneDrive の Files On-Demand のようなリンクでない reparse フォルダは中身を読み書きできる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "IsLink はジャンクションとシンボリックリンクだけを真にし、リンクでない reparse フォルダは偽"
+    )]
+    public void IsLink_DistinguishesLinksFromOtherReparsePoints()
+    {
+        var root = NewTempFolder();
+        var outside = NewTempFolder();
+
+        try
+        {
+            var plain = Path.Combine(root, "plain");
+            Directory.CreateDirectory(plain);
+
+            var junction = Path.Combine(root, "junction");
+            ReparsePointTestHelper.CreateJunction(junction, outside);
+
+            var nonLink = Path.Combine(root, "cloud");
+            Directory.CreateDirectory(nonLink);
+            Write(Path.Combine(nonLink, "inside.txt"));
+            ReparsePointTestHelper.MakeReadableNonLinkReparseDirectory(nonLink);
+
+            var fileTarget = Path.Combine(outside, "target.txt");
+            Write(fileTarget);
+            var fileLink = Path.Combine(root, "link.txt");
+            File.CreateSymbolicLink(fileLink, fileTarget);
+
+            MockProjectFiles.IsLink(new DirectoryInfo(plain)).Should().BeFalse();
+            MockProjectFiles.IsLink(new DirectoryInfo(junction)).Should().BeTrue();
+            MockProjectFiles.IsLink(new DirectoryInfo(nonLink)).Should().BeFalse();
+            MockProjectFiles.IsLink(new FileInfo(fileLink)).Should().BeTrue();
+            MockProjectFiles.IsLink(new FileInfo(fileTarget)).Should().BeFalse();
+
+            // 属性ビットだけで見ると、リンクでない reparse フォルダもリンクと区別できない
+            new DirectoryInfo(nonLink)
+                .Attributes.HasFlag(FileAttributes.ReparsePoint)
+                .Should()
+                .BeTrue();
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(root);
+            ReparsePointTestHelper.DeleteTree(outside);
+        }
+    }
 }

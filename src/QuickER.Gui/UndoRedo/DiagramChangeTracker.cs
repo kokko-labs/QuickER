@@ -277,6 +277,12 @@ public sealed class DiagramChangeTracker
     /// <summary>Undo 追跡を一時停止して <paramref name="action"/> を実行し、終了後にスナップショットを更新する</summary>
     /// <param name="action">追跡を止めて実行する処理</param>
     /// <param name="excludedSnapshotTarget">スナップショット再取得から除外する対象（呼び出し側で別途更新済みの対象）</param>
+    /// <remarks>
+    /// スナップショットの再取得は<b>最外側の呼び出しの終了時だけ</b>行う。入れ子の内側で取り直しても、
+    /// 外側の終了時の全要素の再取得が必ず上書きするため最終状態は変わらず、追跡停止中のハンドラは
+    /// スナップショットを読まない（停止中は早期 return する）。内側でも取り直すと、図の一括置換で
+    /// リレーションを 1 本足すたびに全要素を取り直すことになり、開く時間が要素数の積で伸びる。
+    /// </remarks>
     public void RunWithoutTracking(Action action, object? excludedSnapshotTarget = null)
     {
         var old = _suspendUndoTracking;
@@ -289,9 +295,16 @@ public sealed class DiagramChangeTracker
         finally
         {
             _suspendUndoTracking = old;
-            RefreshTrackedPropertySnapshots(excludedSnapshotTarget);
+
+            if (!old)
+            {
+                RefreshTrackedPropertySnapshots(excludedSnapshotTarget);
+            }
         }
     }
+
+    /// <summary>テスト専用: 全要素のスナップショット再取得を行った回数</summary>
+    internal int SnapshotRefreshCountForTests { get; private set; }
 
     /// <summary>エンティティのカラム増減に追従し、出入りしたカラムの追跡を着脱する</summary>
     private void OnEntityColumnsCollectionChanged(
@@ -627,6 +640,8 @@ public sealed class DiagramChangeTracker
     /// <param name="excludedTarget">再取得から除外する対象（呼び出し側で更新済みの対象）</param>
     private void RefreshTrackedPropertySnapshots(object? excludedTarget = null)
     {
+        SnapshotRefreshCountForTests++;
+
         foreach (var entity in _entities)
         {
             if (!ReferenceEquals(entity, excludedTarget))

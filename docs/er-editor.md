@@ -14,6 +14,7 @@ Both side panels collapse from the toolbar (F9 / F10), so you can hide them and 
 "Add Entity" in the toolbox adds a new table to the canvas (created as `NewTable` with a PK column `ID`, and selected).
 Delete with the "Delete Entity" button or the Delete key.
 With multiple entities selected, this becomes a bulk delete, and the connected relationships go with them.
+The named queries defined on a deleted entity are deleted with it, and undoing the delete brings them back.
 
 Entities move by dragging.
 Copy and paste with Ctrl+C / Ctrl+V, and duplicate with Ctrl+D (or "Duplicate" on the toolbar).
@@ -77,6 +78,8 @@ On creation, **every primary key column of the source is paired with a matching 
 Dots and spaces in the table names become `_` and leading or trailing spaces are dropped, the same rule DDL generation uses for a foreign key that has no name.
 A relationship added by the AI chat or the MCP tools gets the same name.
 A source column with no matching target column stays out of the mapping (fill it in from the properties panel), and no target column is used twice.
+A target primary key column is paired only when its name is the one derived from the source table (`OrderId` / `order_id` for `Orders`), or, for a composite source key, when it has the same name as a source key column, so an identifying relationship such as order lines keyed by `(OrderId, LineNo)` gets its `OrderId` pair, while a target whose primary key is just `id` is not paired with the source's `id`.
+A self-reference never pairs a primary key column.
 
 While creation mode is active the toolbox says so and offers a "Cancel" button for it.
 Collapsing the toolbox during creation mode also cancels the mode, because neither the notice nor the cancel button is visible once the panel is gone.

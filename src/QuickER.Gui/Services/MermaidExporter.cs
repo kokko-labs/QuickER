@@ -13,15 +13,31 @@ namespace QuickER.Services;
 /// </remarks>
 public static partial class MermaidExporter
 {
+    /// <summary>制約名を持たないリレーションに書くラベル</summary>
+    /// <remarks>
+    /// Mermaid のリレーション行はラベルが構文上必須なので、名前の無いリレーションにも何か書く必要がある。
+    /// 取込（<see cref="MermaidImporter"/>）はこの値を制約名として採らない
+    /// </remarks>
+    internal const string UnnamedRelationshipLabel = "relates";
+
+    /// <summary>型が空の列に書く型トークン</summary>
+    /// <remarks>
+    /// 属性行は「型 名前 標識」の並びで型を省けず、空のまま書くと名前が型の位置へずれて取込が
+    /// 名前を型・標識を名前と読む。取込（<see cref="MermaidImporter"/>）はこの値を空の型へ戻す
+    /// </remarks>
+    internal const string EmptyDataTypeToken = "_";
+
     /// <summary>ER 図定義から Mermaid 文字列を生成する</summary>
     public static string Build(ErDiagram diagram)
     {
         var builder = new StringBuilder();
         builder.AppendLine("erDiagram");
 
+        var entityNames = BuildEntityNames(diagram.Entities);
+
         foreach (var entity in diagram.Entities)
         {
-            builder.AppendLine($"    {Identifier(entity.TableName)} {{");
+            builder.AppendLine($"    {entityNames[entity.Id]} {{");
 
             var uniqueColumnIds = CollectSingleColumnUniqueMembers(entity);
             var attributeNames = BuildAttributeNames(entity);
@@ -41,10 +57,9 @@ public static partial class MermaidExporter
             builder.AppendLine();
         }
 
-        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
         foreach (var relationship in diagram.Relationships)
         {
-            var line = BuildRelationshipLine(relationship, entitiesById);
+            var line = BuildRelationshipLine(relationship, entityNames);
             if (line is not null)
             {
                 builder.AppendLine($"    {line}");
@@ -137,10 +152,184 @@ public static partial class MermaidExporter
                 ),
                 ExportOmissionKind.PrimaryKeyOrder
             ),
+            (
+                diagram.Entities.Any(entity => entity.Columns.Any(column => column.IsComputed)),
+                ExportOmissionKind.ComputedColumn
+            ),
+            (
+                // 型トークンに書けない文字を畳んだ結果、取込の復元で元の表記へ戻らない型（nvarchar(max)・double precision 等）。
+                // 判定は書き出し（NormalizeDataType）と取込の復元（DenormalizeDataType）を実際に往復させて行う
+                diagram.Entities.Any(entity =>
+                    entity.Columns.Any(column =>
+                        MermaidImporter.DenormalizeDataType(NormalizeDataType(column.DataType))
+                        != column.DataType
+                    )
+                ),
+                ExportOmissionKind.ColumnTypeNormalized
+            ),
+            (
+                // 引用しても書けない文字（" % \）を含むテーブル名は畳んで出す（判定は BuildEntityNames と共有）
+                diagram.Entities.Any(entity => FoldsEntityName(entity.TableName)),
+                ExportOmissionKind.TableNameNormalized
+            ),
+            (
+                // キー欄は 1 列 1 標識で FK が UK より優先されるため、外部キー列の単一列 UNIQUE は書けない
+                // （主キー列の UNIQUE は主キー自身が一意なので落としても意味は変わらない）。判定は KeyMarker と共有
+                diagram.Entities.Any(entity =>
+                {
+                    var uniqueColumnIds = CollectSingleColumnUniqueMembers(entity);
+
+                    return entity.Columns.Any(column =>
+                        uniqueColumnIds.Contains(column.Id)
+                        && !column.IsPrimaryKey
+                        && KeyMarker(column, isUnique: true) != "UK"
+                    );
+                }),
+                ExportOmissionKind.UniqueConstraintOnForeignKeyColumn
+            ),
+            (
+                LosesRelationshipConstraintNames(diagram),
+                ExportOmissionKind.RelationshipConstraintName
+            ),
         };
 
         return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();
     }
+
+    /// <summary>名前付きのリレーションのうち、取込で同じ制約名に戻らないものがあるかを判定する</summary>
+    /// <remarks>
+    /// <para>
+    /// 取込がラベルを制約名に採るのは、引用の無い 1 語で、<see cref="UnnamedRelationshipLabel"/> でなく、
+    /// ほかのリレーションに付いておらず、主キー・一意制約の名前と重ならないときだけ（<see cref="MermaidImporter"/>）。
+    /// 引用して書いた名前（<see cref="FormatRelationshipLabel"/>）・同じ名前の外部キーが複数ある図・前後の空白や制御文字を
+    /// 書き換えた名前は、取り込むと名前が落ちるか別の名前になる。
+    /// </para>
+    /// <para>
+    /// 判定は出力を実際に取り込み直して、書いた順に制約名を突き合わせて行う（取込の規則を出力側へ写さないので、
+    /// 規則が変わっても判定がずれない＝型の書き換えの判定と同じ流儀）。名前付きのリレーションが無ければ取り込まない。
+    /// 取込そのものが失敗する図（大文字小文字だけ違うテーブル名が並ぶ等）は、名前も戻らないものとして扱う
+    /// </para>
+    /// </remarks>
+    private static bool LosesRelationshipConstraintNames(ErDiagram diagram)
+    {
+        var entityIds = diagram.Entities.Select(entity => entity.Id).ToHashSet();
+
+        // 書き出す関係行は、両端のテーブルが図にあるリレーションだけ（BuildRelationshipLine と同じ条件）で、順序も同じ
+        var written = diagram
+            .Relationships.Where(relationship =>
+                entityIds.Contains(relationship.SourceEntityId)
+                && entityIds.Contains(relationship.TargetEntityId)
+            )
+            .ToList();
+
+        if (!written.Any(relationship => !string.IsNullOrWhiteSpace(relationship.ConstraintName)))
+        {
+            return false;
+        }
+
+        ErDiagram reimported;
+
+        try
+        {
+            reimported = MermaidImporter.Parse(Build(diagram));
+        }
+        catch (InvalidDataException)
+        {
+            return true;
+        }
+
+        if (reimported.Relationships.Count != written.Count)
+        {
+            return true;
+        }
+
+        return written
+            .Select((relationship, index) => (relationship, index))
+            .Any(item =>
+                !string.IsNullOrWhiteSpace(item.relationship.ConstraintName)
+                && !string.Equals(
+                    reimported.Relationships[item.index].ConstraintName,
+                    item.relationship.ConstraintName,
+                    StringComparison.Ordinal
+                )
+            );
+    }
+
+    /// <summary>テーブル ID → Mermaid の実体名（必要なら引用つき）の写像を作る</summary>
+    /// <remarks>
+    /// <para>
+    /// Mermaid の素の実体名に使えるのは非 ASCII 文字・英数字・<c>_</c>・<c>-</c>・<c>*</c>・<c>.</c> だけで、
+    /// それ以外（空白・括弧など）を含む名前は引用して <c>"Order Details"</c> と書く。素で書くと関係行の端点が
+    /// 空白で切れ、取込全体が失敗する。素で書ける名前の出力は変えない。
+    /// </para>
+    /// <para>
+    /// 引用の中にも書けない <c>"</c> <c>%</c> <c>\</c> は <c>_</c> へ畳み、
+    /// <see cref="ExportOmissionKind.TableNameNormalized"/> で告知する。畳んだ結果が別のテーブルとぶつかると取込が
+    /// 重複として断るため、列名（<see cref="BuildAttributeNames"/>）と同じく、畳む必要のない名前を先に予約し、
+    /// 畳んだ名前に <c>_2</c>, <c>_3</c>, … を付けて空くまで進める（取込はテーブル名の大文字小文字を区別しないので、予約も区別しない）
+    /// </para>
+    /// </remarks>
+    private static Dictionary<Guid, string> BuildEntityNames(IEnumerable<Entity> entities)
+    {
+        var result = new Dictionary<Guid, string>();
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var folded = new List<Entity>();
+
+        foreach (var entity in entities)
+        {
+            if (FoldsEntityName(entity.TableName))
+            {
+                folded.Add(entity);
+                continue;
+            }
+
+            var sanitized = Identifier(entity.TableName);
+            used.Add(sanitized);
+            result[entity.Id] = PlainNamePattern().IsMatch(sanitized)
+                ? sanitized
+                : $"\"{sanitized}\"";
+        }
+
+        foreach (var entity in folded)
+        {
+            var replaced = UnquotableEntityNameCharacters()
+                .Replace(Identifier(entity.TableName), "_");
+            var candidate = replaced.Length == 0 ? "_" : replaced;
+            var unique = candidate;
+
+            for (var suffix = 2; !used.Add(unique); suffix++)
+            {
+                unique = $"{candidate}_{suffix}";
+            }
+
+            result[entity.Id] = PlainNamePattern().IsMatch(unique) ? unique : $"\"{unique}\"";
+        }
+
+        return result;
+    }
+
+    /// <summary>テーブル名を畳む必要があるか（素で書けず、引用にも書けない文字を含むか）を判定する</summary>
+    private static bool FoldsEntityName(string tableName)
+    {
+        var sanitized = Identifier(tableName);
+
+        return !PlainNamePattern().IsMatch(sanitized)
+            && (sanitized.Length == 0 || UnquotableEntityNameCharacters().IsMatch(sanitized));
+    }
+
+    /// <summary>
+    /// Mermaid が引用なしで読める名前（非 ASCII・英数字・<c>_ - * .</c>）に一致する正規表現を生成する
+    /// </summary>
+    /// <remarks>
+    /// Mermaid の字句規則の <c>UNICODE_TEXT</c> と同じ文字集合で、実体名と関係行のラベルの両方がこの形なら素で書ける
+    /// （それ以外は引用が要る）
+    /// </remarks>
+    [GeneratedRegex(@"^(?:[^\x00-\x7F]|[A-Za-z0-9_\-*.])+$", RegexOptions.Compiled)]
+    private static partial Regex PlainNamePattern();
+
+    /// <summary>Mermaid の引用実体名の中に書けない文字に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"[""%\\]", RegexOptions.Compiled)]
+    private static partial Regex UnquotableEntityNameCharacters();
 
     /// <summary>
     /// テーブル内の列 ID → Mermaid の属性名の写像を作る（衝突したら決定的に連番を付ける）
@@ -210,21 +399,29 @@ public static partial class MermaidExporter
 
     /// <summary>Mermaid の属性型トークン用に DataType を正規化する</summary>
     /// <remarks>
-    /// Mermaid の型トークンは英数字とアンダースコアのみ許容するため、カッコ・カンマ・空白を
-    /// アンダースコアへ置換する 例: <c>decimal(10,2)</c> → <c>decimal_10_2</c>
+    /// <para>
+    /// 英数字・<c>_</c>・<c>-</c>・<c>[</c> <c>]</c>・<c>.</c>・<c>*</c> 以外の文字の連続を 1 つのアンダースコアへ置換し、
+    /// 末尾のアンダースコアを落とす。例: <c>decimal(10,2)</c> → <c>decimal_10_2</c>（取込が括弧の形へ戻す）・
+    /// <c>integer[]</c> はそのまま。括弧とカンマは Mermaid の型にも書けるが、取込の復元
+    /// （<see cref="MermaidImporter.DenormalizeDataType"/>）と対になる表記として畳む。
+    /// </para>
+    /// <para>
+    /// 空白・括弧・カンマ以外の記号（<c>"</c> <c>'</c> 等）も畳む。残すと、<c>"</c> は取込が属性行の説明の開始と読んで
+    /// 行が壊れ、<c>'</c> は Mermaid として不正になる。取込で元の表記へ戻らない書き換えは
+    /// <see cref="ExportOmissionKind.ColumnTypeNormalized"/> で告知する。空の型は <see cref="EmptyDataTypeToken"/> で書く
+    /// </para>
     /// </remarks>
     private static string NormalizeDataType(string dataType)
     {
-        // 記号・空白の連続をまとめて 1 つのアンダースコアへ置換する。
-        // 先に改行・制御文字を空白へ畳んでおく（\s に含まれない制御文字が型トークンへ残ると行が壊れる）
-        var result = System.Text.RegularExpressions.Regex.Replace(
-            Identifier(dataType),
-            @"[\s(),]+",
-            "_"
-        );
+        // 先に改行・制御文字を空白へ畳んでおく（制御文字が型トークンへ残ると行が壊れる）
+        var result = DataTypeFoldPattern().Replace(Identifier(dataType), "_").TrimEnd('_');
 
-        return result.TrimEnd('_');
+        return result.Length == 0 ? EmptyDataTypeToken : result;
     }
+
+    /// <summary>Mermaid の型トークンへ書かない文字の連続に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"[^\w\-\[\].*]+", RegexOptions.Compiled)]
+    private static partial Regex DataTypeFoldPattern();
 
     /// <summary>識別子（テーブル名・カラム名・リレーションのラベル）を Mermaid の行へ載せる形へ整える</summary>
     /// <remarks>
@@ -246,21 +443,23 @@ public static partial class MermaidExporter
         builder.Append(' ');
         builder.Append(attributeName);
 
-        if (column.IsPrimaryKey)
+        if (KeyMarker(column, isUnique) is { } marker)
         {
-            builder.Append(" PK");
-        }
-        else if (column.IsForeignKey)
-        {
-            builder.Append(" FK");
-        }
-        else if (isUnique)
-        {
-            builder.Append(" UK");
+            builder.Append(' ').Append(marker);
         }
 
         return builder.ToString();
     }
+
+    /// <summary>列に書くキー標識を <c>PK &gt; FK &gt; UK</c> の優先度で 1 つ選ぶ（無ければ <c>null</c>）</summary>
+    /// <remarks>
+    /// 出力（<see cref="BuildColumnLine"/>）と欠落の判定（外部キー列の単一列 UNIQUE が書けないこと）が共有する
+    /// </remarks>
+    private static string? KeyMarker(Column column, bool isUnique) =>
+        column.IsPrimaryKey ? "PK"
+        : column.IsForeignKey ? "FK"
+        : isUnique ? "UK"
+        : null;
 
     /// <summary>単一列の一意制約に参加しているカラム ID を集める</summary>
     /// <remarks>
@@ -292,14 +491,16 @@ public static partial class MermaidExporter
     }
 
     /// <summary>Mermaid のリレーション行を構築する。参照先エンティティが解決できない場合は null を返す</summary>
+    /// <param name="relationship">対象のリレーション</param>
+    /// <param name="entityNames">テーブル ID → 実体名（<see cref="BuildEntityNames"/>）</param>
     private static string? BuildRelationshipLine(
         Relationship relationship,
-        IReadOnlyDictionary<Guid, Entity> entitiesById
+        IReadOnlyDictionary<Guid, string> entityNames
     )
     {
         if (
-            !entitiesById.TryGetValue(relationship.SourceEntityId, out var source)
-            || !entitiesById.TryGetValue(relationship.TargetEntityId, out var target)
+            !entityNames.TryGetValue(relationship.SourceEntityId, out var source)
+            || !entityNames.TryGetValue(relationship.TargetEntityId, out var target)
         )
         {
             return null;
@@ -312,10 +513,25 @@ public static partial class MermaidExporter
             RelationshipType.ManyToMany => "}o--o{",
             _ => "||--o{",
         };
-        var label = string.IsNullOrWhiteSpace(relationship.ConstraintName)
-            ? "relates"
-            : Identifier(relationship.ConstraintName);
+        return $"{source} {symbol} {target} : {FormatRelationshipLabel(relationship.ConstraintName)}";
+    }
 
-        return $"{Identifier(source.TableName)} {symbol} {Identifier(target.TableName)} : {label}";
+    /// <summary>関係行のラベル（制約名、名前が無ければ <see cref="UnnamedRelationshipLabel"/>）を書く形にする</summary>
+    /// <remarks>
+    /// Mermaid のラベルは引用なしの 1 語か引用文字列で、空白や記号を含む名前を素で書くと行が構文として壊れる。
+    /// 素で書けない名前は <c>"…"</c> で囲み、引用の中に書けない <c>"</c> は <c>_</c> へ畳む。
+    /// 取込は引用されたラベルを制約名に採らないので、引用した名前は取込で落ちる
+    /// （<see cref="ExportOmissionKind.RelationshipConstraintName"/> で告知する）
+    /// </remarks>
+    private static string FormatRelationshipLabel(string? constraintName)
+    {
+        if (string.IsNullOrWhiteSpace(constraintName))
+        {
+            return UnnamedRelationshipLabel;
+        }
+
+        var label = Identifier(constraintName);
+
+        return PlainNamePattern().IsMatch(label) ? label : $"\"{label.Replace('"', '_')}\"";
     }
 }

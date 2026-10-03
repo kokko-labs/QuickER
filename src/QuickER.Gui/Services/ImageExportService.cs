@@ -5,6 +5,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Xml;
 using QuickER.Model;
 using QuickER.ViewModels;
 
@@ -278,7 +279,7 @@ public static class ImageExportService
             }
 
             sb.AppendLine(
-                $"  <text class=\"label\" x=\"{F(r.LabelX)}\" y=\"{F(r.LabelY)}\" text-anchor=\"middle\">{SecurityElement.Escape(r.Label)}</text>"
+                $"  <text class=\"label\" x=\"{F(r.LabelX)}\" y=\"{F(r.LabelY)}\" text-anchor=\"middle\">{EscapeSvgText(r.Label)}</text>"
             );
         }
 
@@ -303,7 +304,7 @@ public static class ImageExportService
                 $"    <path d=\"M0,{F(layout.HeaderHeight)} V6 Q0,0 6,0 H{F(w - 6)} Q{F(w)},0 {F(w)},6 V{F(layout.HeaderHeight)} Z\" fill=\"{headerColor}\" />"
             );
             sb.AppendLine(
-                $"    <text class=\"title\" x=\"10\" y=\"{F(layout.TitleTop + BodyBaselineOffset)}\">{SecurityElement.Escape(e.TableName)}</text>"
+                $"    <text class=\"title\" x=\"10\" y=\"{F(layout.TitleTop + BodyBaselineOffset)}\">{EscapeSvgText(e.TableName)}</text>"
             );
 
             // テーブル説明（説明表示 ON かつ説明があるときのみ）
@@ -335,13 +336,13 @@ public static class ImageExportService
                 }
 
                 sb.AppendLine(
-                    $"    <text class=\"col\" x=\"40\" y=\"{F(baseline)}\">{SecurityElement.Escape(c.Name)}</text>"
+                    $"    <text class=\"col\" x=\"40\" y=\"{F(baseline)}\">{EscapeSvgText(c.Name)}</text>"
                 );
 
                 // 型は右端へ右詰め、NULL 許容表示はその左隣へ配置する（キャンバスの Grid 列構成と同じ並び）
                 var typeRight = w - 7;
                 sb.AppendLine(
-                    $"    <text class=\"meta\" x=\"{F(typeRight)}\" y=\"{F(baseline)}\" text-anchor=\"end\">{SecurityElement.Escape(c.DataType)}</text>"
+                    $"    <text class=\"meta\" x=\"{F(typeRight)}\" y=\"{F(baseline)}\" text-anchor=\"end\">{EscapeSvgText(c.DataType)}</text>"
                 );
 
                 if (e.ShowNullabilityInDiagram)
@@ -402,8 +403,59 @@ public static class ImageExportService
         {
             var baseline = top + i * lineHeight + DescriptionBaselineOffset;
             sb.AppendLine(
-                $"    <text class=\"desc\" x=\"{format(x)}\" y=\"{format(baseline)}\">{SecurityElement.Escape(lines[i])}</text>"
+                $"    <text class=\"desc\" x=\"{format(x)}\" y=\"{format(baseline)}\">{EscapeSvgText(lines[i])}</text>"
             );
         }
+    }
+
+    /// <summary>図由来の文字列を SVG（XML 1.0）の文字データとして書ける形にする</summary>
+    /// <param name="text">テーブル名・列名・型・ラベル・説明など図由来の文字列</param>
+    /// <returns>XML で使えない文字を空白へ置き換え、マークアップの文字をエスケープした文字列</returns>
+    /// <remarks>
+    /// <see cref="SecurityElement.Escape"/> はマークアップの 5 文字しか扱わず、XML 1.0 が文字として許さない
+    /// 制御文字（Word から貼り付けた改行の U+000B など）と対になっていないサロゲートをそのまま残す。
+    /// 残すと整形式でない SVG になり、ブラウザや XML パーサーが読めない。消さずに空白にするのは、
+    /// U+000B のように改行の代わりに入っている文字を消すと前後の語がくっつくため。
+    /// </remarks>
+    private static string? EscapeSvgText(string? text) =>
+        SecurityElement.Escape(ReplaceInvalidXmlChars(text));
+
+    /// <summary>XML 1.0 で使えない文字（制御文字・対になっていないサロゲートなど）を空白へ置き換える</summary>
+    internal static string? ReplaceInvalidXmlChars(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text;
+        }
+
+        StringBuilder? builder = null;
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+
+            // サロゲートは上位・下位が並んだ組だけを文字として通す
+            if (
+                char.IsHighSurrogate(c)
+                && i + 1 < text.Length
+                && XmlConvert.IsXmlSurrogatePair(text[i + 1], c)
+            )
+            {
+                builder?.Append(c).Append(text[i + 1]);
+                i++;
+                continue;
+            }
+
+            if (XmlConvert.IsXmlChar(c))
+            {
+                builder?.Append(c);
+                continue;
+            }
+
+            builder ??= new StringBuilder(text.Length).Append(text, 0, i);
+            builder.Append(' ');
+        }
+
+        return builder?.ToString() ?? text;
     }
 }

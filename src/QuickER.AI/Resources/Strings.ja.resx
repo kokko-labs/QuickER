@@ -133,6 +133,18 @@
   <data name="Attachment_BinaryTooLarge" xml:space="preserve">
     <value>ファイルが上限（{0}MB）を超えています: {1}</value>
   </data>
+  <data name="Attachment_NotFound" xml:space="preserve">
+    <value>ファイルが見つかりません: {0}</value>
+  </data>
+  <data name="Attachment_IsDirectory" xml:space="preserve">
+    <value>フォルダは添付できません: {0}</value>
+  </data>
+  <data name="Attachment_FileTooLarge" xml:space="preserve">
+    <value>添付として読み込める大きさ（{0}MB）を超えています（画像は縮小する前の大きさで判定します）: {1}</value>
+  </data>
+  <data name="Attachment_ReadFailed" xml:space="preserve">
+    <value>ファイルを読み込めませんでした: {0}（{1}）</value>
+  </data>
   <data name="Chat_ToolActivityNotifyFailed" xml:space="preserve">
     <value>ツール活動の通知に失敗しました: {0}</value>
   </data>
@@ -160,6 +172,9 @@
   <data name="ClaudeCode_Guidance_Inconclusive" xml:space="preserve">
     <value>しばらくして「再確認」を押してください。</value>
   </data>
+  <data name="ClaudeCode_Guidance_CheckFailedFormat" xml:space="preserve">
+    <value>確認を実行できませんでした: {0}</value>
+  </data>
   <data name="ClaudeCode_Status_Unconfirmed" xml:space="preserve">
     <value>未確認</value>
   </data>
@@ -186,6 +201,9 @@
   </data>
   <data name="ClaudeCode_PathHasQuote" xml:space="preserve">
     <value>claude コマンドのパスに引用符が含まれるため起動できません: {0}</value>
+  </data>
+  <data name="ClaudeCode_PathHasEnvExpansion" xml:space="preserve">
+    <value>claude コマンドのパスに cmd が展開する '%' が含まれるため起動できません: {0}</value>
   </data>
   <data name="ClaudeCode_ArgHasEnvExpansion" xml:space="preserve">
     <value>claude コマンドの引数に cmd が展開する '%' が含まれるため起動できません: {0}</value>
@@ -340,6 +358,9 @@
   <data name="Codex_PathHasQuote" xml:space="preserve">
     <value>codex コマンドのパスに引用符が含まれるため起動できません: {0}</value>
   </data>
+  <data name="Codex_PathHasEnvExpansion" xml:space="preserve">
+    <value>codex コマンドのパスに cmd が展開する '%' が含まれるため起動できません: {0}</value>
+  </data>
   <data name="Codex_ArgHasCmdMeta" xml:space="preserve">
     <value>codex コマンドの引数に cmd で解釈される文字 '{0}' が含まれるため起動できません: {1}</value>
   </data>
@@ -394,6 +415,12 @@
   <data name="Copilot_PathHasQuote" xml:space="preserve">
     <value>copilot コマンドのパスに引用符が含まれるため起動できません: {0}</value>
   </data>
+  <data name="Copilot_PathHasEnvExpansion" xml:space="preserve">
+    <value>copilot コマンドのパスに cmd が展開する '%' が含まれるため起動できません: {0}</value>
+  </data>
+  <data name="Copilot_PathHasDelayedExpansion" xml:space="preserve">
+    <value>copilot コマンドのパスに、遅延展開が有効な cmd が展開する '!' が含まれるため起動できません: {0}</value>
+  </data>
   <data name="Copilot_NotConnected" xml:space="preserve">
     <value>GitHub Copilot ランタイムはまだ起動していません。</value>
   </data>
@@ -441,5 +468,14 @@
   </data>
   <data name="Copilot_ErrorOccurred" xml:space="preserve">
     <value>エラーが発生しました: {0}</value>
+  </data>
+  <data name="ClaudeCode_TurnFailed" xml:space="preserve">
+    <value>Claude Code が応答を完了できませんでした。もう一度送信してください。続く場合は接続の状態を確認してください。</value>
+  </data>
+  <data name="Codex_TurnFailed" xml:space="preserve">
+    <value>Codex が応答を完了できませんでした。もう一度送信してください。続く場合は接続の状態を確認してください。</value>
+  </data>
+  <data name="Copilot_TurnFailed" xml:space="preserve">
+    <value>GitHub Copilot が応答を完了できませんでした。もう一度送信してください。続く場合は接続の状態を確認してください。</value>
   </data>
 </root>

@@ -1,12 +1,12 @@
-using QuickER.AI;
 using QuickER.AI.Chat.Resources;
 
 namespace QuickER.AI.Chat;
 
-/// <summary>AI スキーマ生成と Codex チャットで共用する ER 設計ルール文を集約するクラス</summary>
+/// <summary>ER 図設計チャットの 4 つの接続方式で共用する ER 設計ルール文を集約するクラス</summary>
 /// <remarks>
 /// 出力形式に依存しない設計原則（命名・PK/FK・NULL 許容・データ型）をここで一元管理し、
-/// OpenAI 系のシステムプロンプトと Codex の developerInstructions の双方から組み立てる。
+/// API キー接続のシステムプロンプトと、Codex・Copilot の developerInstructions の双方から組み立てる
+/// （Claude Code は API キー接続と同じシステムプロンプトを使う）。
 /// 文言はすべて resx（中立＝英語 / <c>ja</c> サテライト＝日本語）から解決するため、アプリの表示言語に追従する。
 /// </remarks>
 public static class ErDesignRules
@@ -20,22 +20,6 @@ public static class ErDesignRules
     /// <summary>外部キーの列対応（並行配列・複合可）の 1 行ルール（ツール説明文などから単独参照する短文）</summary>
     internal static string ForeignKeyColumnMappingRule =>
         Strings.ErDesign_ForeignKeyColumnMappingRule;
-
-    /// <summary>識別子（テーブル名・カラム名）の命名規則の指示行を返す</summary>
-    internal static string BuildNamingInstruction(AiIdentifierNamingStyle style) =>
-        style switch
-        {
-            AiIdentifierNamingStyle.SnakeCase => Strings.ErDesign_NamingSnakeCase,
-            _ => Strings.ErDesign_NamingPascalCase,
-        };
-
-    /// <summary>テーブル名の単数形・複数形の指示行を返す</summary>
-    internal static string BuildTableNameNumberInstruction(AiTableNameNumberStyle style) =>
-        style switch
-        {
-            AiTableNameNumberStyle.Plural => Strings.ErDesign_TableNamePlural,
-            _ => Strings.ErDesign_TableNameSingular,
-        };
 
     /// <summary>Codex スレッド開始時に渡す developerInstructions（共通設計原則＋ツール運用手順）を組み立てる</summary>
     internal static string BuildCodexDeveloperInstructions() =>

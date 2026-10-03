@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using AwesomeAssertions;
+using QuickER.Model;
 using QuickER.Resources;
 using QuickER.Services;
 
@@ -113,9 +114,9 @@ public class DbmlUnsupportedSyntaxTests
     }
 
     [Theory(DisplayName = "DBML 取込: 未対応のリレーション記法は行番号つきで拒否する")]
-    [InlineData("Ref fk_name: t.id < t.id")]
     [InlineData("Ref {")]
     [InlineData("Ref fk_name {")]
+    [InlineData("Ref \"fk name\" {")]
     public void Import_UnsupportedRelationshipForms_ThrowWithLineNumber(string line)
     {
         var act = () => DbmlImporter.Parse(Lines(MinimalTable, string.Empty, line));
@@ -129,6 +130,74 @@ public class DbmlUnsupportedSyntaxTests
                     string.Format(Strings.Dbml_UnsupportedRelationshipForm, line)
                 )
             );
+    }
+
+    /// <summary>
+    /// DBML 標準の名前付き Ref（<c>Ref 名前: …</c>）は短縮形として受け付け、名前を制約名にする。
+    /// </summary>
+    [Fact(DisplayName = "DBML 取込: 名前付き Ref は名前を制約名として取り込む")]
+    public void Import_NamedRef_TakesNameAsConstraintName()
+    {
+        var diagram = DbmlImporter.Parse(
+            Lines(
+                "Table p {",
+                "  id int [pk]",
+                "}",
+                "Table c {",
+                "  pid int",
+                "}",
+                "Ref fk_c_p: p.id < c.pid [delete: cascade]"
+            )
+        );
+
+        var relationship = diagram.Relationships.Should().ContainSingle().Subject;
+        relationship.ConstraintName.Should().Be("fk_c_p");
+        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+        diagram
+            .Entities.Single(entity => entity.TableName == "c")
+            .Columns.Single()
+            .IsForeignKey.Should()
+            .BeTrue("外部キーの印は Ref 行の子側の列に立つ");
+    }
+
+    /// <summary>
+    /// 設定ブロックを端点の前に置いた Ref 行（DBML 標準ではない形）は、黙って捨てずに行番号つきで拒否する。
+    /// </summary>
+    [Fact(DisplayName = "DBML 取込: 設定ブロックを端点の前に置いた Ref 行は行番号つきで拒否する")]
+    public void Import_RefWithSettingsBeforeEndpoints_ThrowsWithLineNumber()
+    {
+        const string RefLine = "Ref: [note: 'FK_x'] t.id < t.id";
+
+        var act = () => DbmlImporter.Parse(Lines(MinimalTable, string.Empty, RefLine));
+
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(
+                    Strings.Import_LineDiagnostic,
+                    5,
+                    string.Format(Strings.Dbml_RelationshipParseError, RefLine)
+                )
+            );
+    }
+
+    /// <summary>
+    /// 値の無い列設定 <c>ref</c>（DBML 標準には無い）は未知の設定として読み飛ばし、外部キーの印は立てない。
+    /// 同じ列のほかの設定は生きる。
+    /// </summary>
+    [Fact(DisplayName = "DBML 取込: 値の無い ref 設定は読み飛ばし、ほかの設定は生きる")]
+    public void Import_ValuelessRefSetting_IsIgnored()
+    {
+        var column = DbmlImporter
+            .Parse(
+                Lines("Table t {", "  id int [pk]", "  owner int [ref, not null, note: 'x']", "}")
+            )
+            .Entities.Single()
+            .Columns.Single(column => column.Name == "owner");
+
+        column.IsForeignKey.Should().BeFalse();
+        column.IsNullable.Should().BeFalse();
+        column.Description.Should().Be("x");
     }
 
     /// <summary>

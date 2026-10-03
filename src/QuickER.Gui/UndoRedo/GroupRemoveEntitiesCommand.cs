@@ -1,13 +1,15 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Model;
 using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
 
-/// <summary>複数エンティティ（と接続リレーション）の一括削除を単一の Undo 単位として扱う複合コマンド</summary>
+/// <summary>複数エンティティ（と接続リレーション・名前付きクエリ）の一括削除を単一の Undo 単位として扱う複合コマンド</summary>
 /// <remarks>
-/// 単一削除（<see cref="RemoveEntityCommand"/>）と同じく、削除対象を端点に持つリレーションを併せて退避・復元する。
+/// 単一削除（<see cref="RemoveEntityCommand"/>）と同じく、削除対象を端点に持つリレーションと、削除対象の
+/// 名前付きクエリを併せて退避・復元する。
 /// 1 回の Undo で全エンティティと巻き添えリレーションが同時に復元される
 /// （重複するリレーション＝複数の対象エンティティを結ぶ線を二重に退避しないよう集合で管理する）。
 /// </remarks>
@@ -21,6 +23,9 @@ public sealed class GroupRemoveEntitiesCommand : IUndoableCommand
 
     /// <summary>巻き添えで削除したリレーション（Undo の復元元）</summary>
     private List<RelationshipViewModel> _removedRelationships = new();
+
+    /// <summary>巻き添えで削除した名前付きクエリと元の位置（Undo の復元元）</summary>
+    private List<(int Index, QueryDefinition Query)> _removedQueries = new();
 
     /// <summary><see cref="GroupRemoveEntitiesCommand"/> を生成する</summary>
     /// <param name="main">削除を行うメイン ViewModel</param>
@@ -54,6 +59,12 @@ public sealed class GroupRemoveEntitiesCommand : IUndoableCommand
         {
             _main.Entities.Remove(entity);
         }
+
+        // 削除対象の名前付きクエリも取り除く（残すとどこからも触れない孤児になる）
+        _removedQueries = EntityQueryRemoval.Remove(
+            _main,
+            _entities.Select(entity => entity.Id).ToHashSet()
+        );
     }
 
     /// <inheritdoc />
@@ -68,6 +79,8 @@ public sealed class GroupRemoveEntitiesCommand : IUndoableCommand
         {
             _main.Relationships.Add(r);
         }
+
+        EntityQueryRemoval.Restore(_main, _removedQueries);
 
         // 復元メンバーは IsSelected を保持したまま戻るため、主選択も復元して
         // パネル表示（一括操作カード・削除ボタンの実行可否）との整合を取る

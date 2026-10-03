@@ -19,7 +19,7 @@ public static class DocumentContentHash
     {
         try
         {
-            return Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+            return ComputeForBytes(File.ReadAllBytes(path));
         }
         catch
         {
@@ -45,7 +45,22 @@ public static class DocumentContentHash
     /// </para>
     /// </remarks>
     public static string ComputeForText(string contents) =>
-        Convert.ToHexString(SHA256.HashData(WriteEncoding.GetBytes(contents)));
+        ComputeForBytes(WriteEncoding.GetBytes(contents));
+
+    /// <summary>
+    /// 読み込んだファイルのバイト列そのものから SHA-256（16 進大文字）を計算する。
+    /// </summary>
+    /// <param name="contents">ファイルから読み取ったバイト列</param>
+    /// <returns>16 進文字列のハッシュ</returns>
+    /// <remarks>
+    /// 読込直後の「最終既知ハッシュ」はこちらで採る（理由は <see cref="ComputeForText"/> と同じで、
+    /// 読み取りから採取までの隙間に外部が書いた内容を「読み込んだ内容」として記録しないため）。
+    /// 復号済みの文字列から <see cref="ComputeForText"/> で採ってはいけない＝復号は BOM を剥がす
+    /// （UTF-16 は別の符号化になる）ため、そうしたファイルでは <see cref="TryCompute"/> と値が一致せず、
+    /// 開いた直後に毎回「外部変更あり」と判定されて再読込が暴発する。
+    /// </remarks>
+    public static string ComputeForBytes(ReadOnlySpan<byte> contents) =>
+        Convert.ToHexString(SHA256.HashData(contents));
 
     /// <summary>書き出しに使う符号化（<see cref="Settings.AtomicFile"/> の既定＝BOM なし UTF-8）</summary>
     private static readonly Encoding WriteEncoding = new UTF8Encoding(

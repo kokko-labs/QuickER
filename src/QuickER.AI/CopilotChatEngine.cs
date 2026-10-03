@@ -31,7 +31,9 @@ public sealed class CopilotChatEngine : IErChatEngine
     private static readonly string InconclusiveGuidance = Strings.Copilot_Guidance_Inconclusive;
 
     private bool _sessionStarted;
-    private bool _turnInProgress;
+
+    /// <summary>ターン実行中フラグ（1=実行中・0=非実行。<see cref="TryCompleteTurn"/> と対で Interlocked 操作する）</summary>
+    private int _turnInProgress;
 
     /// <summary>使用するモデル ID（空なら Copilot CLI の既定モデル）</summary>
     public string Model { get; set; } = string.Empty;
@@ -103,7 +105,7 @@ public sealed class CopilotChatEngine : IErChatEngine
 
     /// <inheritdoc />
     /// <remarks>Copilot の添付 API は画像を対象とするため、画像のみ受け付ける。</remarks>
-    public AttachmentSupport AttachmentSupport => AttachmentSupport.Images;
+    public AttachmentSupport AttachmentSupport => AttachmentSupportResolver.Copilot;
 
     /// <inheritdoc />
     public Task InitializeAsync(CancellationToken cancellationToken = default) =>
@@ -111,10 +113,26 @@ public sealed class CopilotChatEngine : IErChatEngine
 
     /// <summary>copilot を起動・接続し、認証状態とモデル一覧を取り込む</summary>
     /// <remarks>
+    /// <para>
     /// copilot CLI が PATH に無いときはプロセス起動を試みず未検出（赤・インストール案内）として返す。
     /// 起動を試みても的外れなプロセス起動エラーしか出せないため（Codex 接続と同じ判断）。
+    /// </para>
+    /// <para>
+    /// 接続が実行中のあいだに重ねて呼ばれたら、新しく接続せず実行中の接続を待つ（<see cref="SingleFlight"/>）。
+    /// 2 本が同時にクライアントを起動すると、後から起動したほうが先のクライアントを置き換え、
+    /// 置き換えられた copilot ランタイムは誰にも止められないまま残る。
+    /// 相乗りした呼び出しの <paramref name="cancellationToken"/> は待つのをやめることにだけ効く
+    /// （起動した呼び出しのトークンは接続へ渡るので、その取り消しは相乗りした呼び出しにも届く）。
+    /// </para>
     /// </remarks>
-    public async Task ConnectAsync(CancellationToken cancellationToken = default)
+    public Task ConnectAsync(CancellationToken cancellationToken = default) =>
+        _connect.RunAsync(ConnectCoreAsync, cancellationToken);
+
+    /// <summary>接続を重ねて走らせないための共有（実行中のあいだだけ）</summary>
+    private readonly SingleFlight _connect = new();
+
+    /// <summary><see cref="ConnectAsync"/> の本体</summary>
+    private async Task ConnectCoreAsync(CancellationToken cancellationToken)
     {
         if (!EnsureCliAvailable())
         {
@@ -191,7 +209,9 @@ public sealed class CopilotChatEngine : IErChatEngine
     {
         EnsureAttachmentsSupported(attachments);
 
-        if (!_sessionStarted)
+        // 接続が切れるとクライアントはセッションごと捨てる（HasSession が false に戻る）。そのときは会話を開き直す
+        // （開き直す処理が未接続を見て copilot ランタイムを起動し直す。前の会話の文脈は引き継げない）
+        if (!_sessionStarted || !_client.HasSession)
         {
             await StartConversationAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -205,19 +225,49 @@ public sealed class CopilotChatEngine : IErChatEngine
             return;
         }
 
-        _turnInProgress = true;
+        Interlocked.Exchange(ref _turnInProgress, 1);
         StatusChanged?.Invoke(this, Strings.Copilot_Processing);
 
         try
         {
             await _client.SendAsync(prompt, attachments, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 利用者の中断（呼び出し元のトークン）は失敗ではないため、他のエンジンと同じく Error=null へ畳む。
+            // 送信の途中でセッションエラーが先にターンを完了させていたら、二重に通知しない
+            if (TryCompleteTurn())
+            {
+                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
+            }
+        }
         catch (Exception ex)
         {
-            _turnInProgress = false;
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            // 送信の途中でセッションエラーが先にターンを完了させていたら、二重に通知しない
+            if (TryCompleteTurn())
+            {
+                TurnCompleted?.Invoke(
+                    this,
+                    new ErChatTurnResult(false, BuildTurnFailedMessage(ex.Message))
+                );
+            }
         }
     }
+
+    /// <summary>ターンの失敗としてチャットへ表示する文言を組み立てる</summary>
+    /// <param name="detail">原因（例外の文言、または copilot ランタイムが報告した文）。無ければ null または空</param>
+    /// <returns>何が起きたかと次に何をするかの要約（UI 言語に追従）に、原因を「詳細: …」の行で添えた文言</returns>
+    private static string BuildTurnFailedMessage(string? detail) =>
+        AiErrorMessageLocalizer.WithDetail(Strings.Copilot_TurnFailed, detail);
+
+    /// <summary>実行中フラグを 1→0 へ落とせた（＝このターンの完了通知の権利を勝ち取った）ときだけ true を返す</summary>
+    /// <remarks>
+    /// 完了通知の発火点は、SDK のスレッド（アイドル復帰・セッションエラー）と、送信を呼んだスレッド
+    /// （送信失敗）に分かれる。bool の「読んでから書く」では複数の発火点が勝って
+    /// <see cref="TurnCompleted"/> が二重に届くため、Interlocked の交換で勝者を 1 つに絞る。
+    /// ターンを完了させる全経路はこのメソッドを通ること（Codex のエンジンと同じ形）。
+    /// </remarks>
+    private bool TryCompleteTurn() => Interlocked.Exchange(ref _turnInProgress, 0) == 1;
 
     /// <inheritdoc />
     public async Task InterruptAsync(CancellationToken cancellationToken = default)
@@ -464,12 +514,11 @@ public sealed class CopilotChatEngine : IErChatEngine
     /// <summary>アイドル復帰をターン完了へ変換する（ターン外のアイドルは無視する）</summary>
     private void OnSessionIdle(object? sender, bool aborted)
     {
-        if (!_turnInProgress)
+        if (!TryCompleteTurn())
         {
             return;
         }
 
-        _turnInProgress = false;
         // 中断はエラーではないため、エラーメッセージなしの失敗として扱う（Codex の interrupted と同じ）
         TurnCompleted?.Invoke(
             this,
@@ -483,10 +532,13 @@ public sealed class CopilotChatEngine : IErChatEngine
     /// </summary>
     private void OnSessionError(object? sender, string message)
     {
-        if (_turnInProgress)
+        if (TryCompleteTurn())
         {
-            _turnInProgress = false;
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, message));
+            // ターン中の失敗は、ほかのターン失敗と同じく要約に報告文を添える
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, BuildTurnFailedMessage(message))
+            );
         }
         else
         {

@@ -26,6 +26,7 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 ### Specifying the connection
 
 - **Server-type DBMS**: specify the target DB, host, port (leave empty for the dialect's default), database name, user name, and password.
+  Only an empty port means the default; a value that is not a number or is outside 1 to 65535 is rejected by OK, *Test Connection*, and saving a profile (a typo never connects to another instance on the default port).
   For SQL Server you can also choose the authentication mode (Windows / SQL Server) and the "Trust the server certificate (TrustServerCertificate)" checkbox.
   For Oracle, the value of the database-name field is used as the service name (the connection is built as EZConnect `host:port/service`)
 - **Encryption (SSL Mode)**: for PostgreSQL and MySQL, how strongly the connection requires TLS.
@@ -34,7 +35,7 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 - **SQLite**: specify the file path via "Browse" (import works on existing files only)
 - **Command timeout**: how long a single schema-import or sync statement may run.
   It defaults to 60 seconds and applies to every dialect including SQLite; `0` means no limit (the ADO.NET convention).
-  A blank field, a non-numeric entry, or a negative value is rejected by both OK and *Test Connection*, so the dialog never falls back to the default behind your back.
+  A blank field, a non-numeric entry, or a negative value is rejected by OK, *Test Connection*, and saving a profile, so the dialog never falls back to the default behind your back.
   It is saved per connection profile, and profiles written before this setting existed load with the default
 - **Test Connection**: runs a real schema fetch and reports the number of tables detected.
   OK is disabled while a test is running: the test cannot be cancelled, so confirming and closing would leave it holding the connection on its own
@@ -91,14 +92,18 @@ Profiles are stored in `%LOCALAPPDATA%\QuickER\connections.json`, and passwords 
 The last-used connection is remembered automatically and restored on the next launch.
 The DB Sync dialog fixes the target DB to the diagram's dialect, so a last-used connection recorded for a different dialect is not restored (host, file path, and service name mean different things per dialect, and the restored values would not connect).
 Saving with the "Save" checkbox on but the password box empty stores the checkbox as off as well, because there is nothing to save: the dialog never shows a password as saved when there is nothing to restore.
-Saving is keyed on the profile name.
+When the encrypted file of a saved password cannot be read (another program holding it for an instant, or a file encrypted by another user or machine), the password box is left empty and the status line says so.
+Saving over that profile with the password box still empty and the "Save" checkbox on is refused, because saving would delete a password that merely could not be read.
+Enter the password again, or clear the "Save" checkbox, and then save.
+Saving is keyed on the profile name (spaces before and after it are ignored).
 A profile with the same name and the same DB kind is overwritten; otherwise a new profile is created.
 When the profile that would be overwritten is not the one selected in the list, QuickER asks first, because its connection settings and saved password would be replaced with no way back.
 Saving over the profile you loaded is not confirmed.
 Use the "Rename" button when all you want is a different name.
-It changes only the name of the selected profile to the one in the box, keeping its connection settings and its saved password.
+It changes only the name of the selected profile to the one in the box, keeping its connection settings and its saved password (the encrypted password file is not touched).
 Typing a new name and pressing "Save" stores a separate profile instead of renaming.
 Saving, renaming, and deleting all re-read `connections.json` before writing it back. When that read fails, for instance because another program is holding the file, the operation is **cancelled without writing anything** and says so in the status line (the saved profiles are left untouched; try again in a moment).
+When a write fails partway (a full disk, a failure to write or delete an encrypted password file, and so on), the change may have been applied only partly, so the status line says so and the list is reloaded from the file.
 If the file turns out to be corrupted, it is moved aside once to `connections.json.corrupt` before being overwritten.
 
 ### What gets imported
@@ -266,10 +271,14 @@ On the other three dialects it is shown for information only and is not synced.
   That includes the implicit drop-and-recreate triggered by a primary-key change and SQLite's table rebuilds, and a composite foreign key is never silently narrowed to a single column
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
   On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied
-- A SQLite run that involves rebuilds shows a dedicated confirmation listing the tables to be rebuilt
+- A SQLite run that involves rebuilds shows a dedicated confirmation listing the tables to be rebuilt.
+  The list of tables to rebuild and notes such as recreated foreign keys appear in full in a scrollable details area of the confirmation
 - When the initial diff detection finds no differences at all, the dialog reports that and stays open.
   Once a sync has been applied, it re-reads the diff and closes automatically if no differences remain.
-  After a failed run the diff is also re-read automatically, so the list reflects any partially applied changes (relevant on MySQL / Oracle)
+  After a failed run the diff is also re-read automatically, so the list reflects any partially applied changes (relevant on MySQL / Oracle).
+  If re-reading the diff itself fails (for example, the connection drops), the diff and the script are cleared and nothing can be run until a recalculation succeeds, so a stale script is never run
+- While the diff is being recalculated or the script is running, Recalculate Diff, Execute, Select All, and Deselect All are disabled.
+  While the sync script is running the dialog cannot be closed either, because the run would carry on outside the dialog. It can be closed during a recalculation
 
 ### Primary key sync
 

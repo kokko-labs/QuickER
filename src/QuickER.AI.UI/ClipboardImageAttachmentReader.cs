@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using QuickER.AI;
@@ -60,22 +61,57 @@ public static class ClipboardImageAttachmentReader
     /// <summary>
     /// 現在のクリップボードに画像があれば PNG バイト列を取り出す（無ければ null）。WPF の Clipboard に依存する。
     /// </summary>
-    /// <remarks>コードビハインドから呼ぶ入り口。取り出した PNG は <see cref="CreateFromPngBytes"/> へ渡す。</remarks>
-    public static byte[]? TryGetClipboardPng()
+    /// <remarks>
+    /// コードビハインドから呼ぶ入り口。取り出した PNG は <see cref="CreateFromPngBytes"/> へ渡す。
+    /// 読み取れなかったときも null を返す（理由は <see cref="TryGetClipboardPng(Func{bool}, Func{BitmapSource?})"/>）。
+    /// </remarks>
+    public static byte[]? TryGetClipboardPng() =>
+        TryGetClipboardPng(Clipboard.ContainsImage, Clipboard.GetImage);
+
+    /// <summary>
+    /// クリップボードの読み取り手段を受け取り、画像があれば PNG バイト列を返す（無い・読み取れなければ null）。
+    /// </summary>
+    /// <param name="containsImage">クリップボードに画像があるかを問う手段</param>
+    /// <param name="getImage">クリップボードの画像を取り出す手段</param>
+    /// <remarks>
+    /// <para>
+    /// 呼び手は Ctrl+V のキーハンドラで、null なら既定のテキスト貼り付けに委ねる。
+    /// 読み取りの失敗を例外のまま返すとキーハンドラから抜けてアプリが落ちるため、次の失敗は「画像なし」として扱う。
+    /// </para>
+    /// <list type="bullet">
+    /// <item><see cref="ExternalException"/>（<see cref="COMException"/> を含む）: 他のプロセスがクリップボードを開いている
+    /// （CLIPBRD_E_CANT_OPEN）。画像の変換で WIC が失敗したときもこの型で届く</item>
+    /// <item><see cref="NotSupportedException"/> / <see cref="FileFormatException"/>: クリップボードのビットマップを
+    /// WIC が解釈できない</item>
+    /// </list>
+    /// <para>それ以外の例外（メモリ不足など）は黙らせない。</para>
+    /// </remarks>
+    internal static byte[]? TryGetClipboardPng(
+        Func<bool> containsImage,
+        Func<BitmapSource?> getImage
+    )
     {
-        if (!Clipboard.ContainsImage())
+        try
+        {
+            if (!containsImage())
+            {
+                return null;
+            }
+
+            var image = getImage();
+
+            if (image is null)
+            {
+                return null;
+            }
+
+            return EncodePng(image);
+        }
+        catch (Exception ex)
+            when (ex is ExternalException or NotSupportedException or FileFormatException)
         {
             return null;
         }
-
-        var image = Clipboard.GetImage();
-
-        if (image is null)
-        {
-            return null;
-        }
-
-        return EncodePng(image);
     }
 
     /// <summary><see cref="BitmapSource"/> を PNG バイト列へエンコードする</summary>

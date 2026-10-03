@@ -71,8 +71,7 @@ public static class CodexConfigTomlReader
             // セクションヘッダー（[model_providers.xxx] 形式に対応）
             if (line.StartsWith('['))
             {
-                // [[array]] 形式も考慮してトリム
-                var sectionName = line.TrimStart('[').TrimEnd(']').Trim();
+                var sectionName = ParseSectionName(line);
                 currentSection = sectionName;
 
                 // [model_providers.<name>] セクションのプロバイダー名を収集する
@@ -125,26 +124,66 @@ public static class CodexConfigTomlReader
         };
     }
 
+    /// <summary>セクション見出しの行から名前を取り出す（<c>[[array]]</c> の括弧と末尾コメントを除く）</summary>
+    /// <remarks>
+    /// 名前は先頭の <c>[</c> の並びの後ろから最初の <c>]</c> の手前まで。末尾から括弧を剥がす形にすると、
+    /// <c>[model_providers.ollama] # local</c> の名前が <c>ollama] # local</c> になる
+    /// </remarks>
+    private static string ParseSectionName(string line)
+    {
+        var body = line.TrimStart('[');
+        var closeIndex = body.IndexOf(']');
+
+        return (closeIndex >= 0 ? body[..closeIndex] : body).Trim();
+    }
+
     /// <summary>TOML の値文字列からクォートと末尾コメントを除去しプレーン文字列を返す</summary>
+    /// <remarks>
+    /// 末尾コメントの <c>#</c> は引用の外だけで探す（<c>"a#b"</c> の <c>#</c> は値の一部）。
+    /// 基本文字列（<c>"…"</c>）は <c>\"</c> のエスケープを読み飛ばして閉じ引用符を探し、
+    /// リテラル文字列（<c>'…'</c>）は次の <c>'</c> で閉じる。エスケープは解かずにそのまま返す
+    /// </remarks>
     private static string ParseTomlValue(string raw)
     {
-        // 末尾コメントを除去する
+        if (raw.Length > 0 && (raw[0] == '"' || raw[0] == '\''))
+        {
+            var closeIndex = FindClosingQuote(raw);
+
+            if (closeIndex > 0)
+            {
+                return raw[1..closeIndex];
+            }
+
+            // 閉じ引用符が無い不正な値は加工せずに返す
+            return raw;
+        }
+
+        // 引用されていない値（数値・真偽値など）は最初の # 以降を末尾コメントとして除去する
         var commentIndex = raw.IndexOf('#');
 
-        if (commentIndex > 0)
+        return commentIndex >= 0 ? raw[..commentIndex].Trim() : raw;
+    }
+
+    /// <summary>先頭の引用符に対応する閉じ引用符の位置を返す（見つからなければ -1）</summary>
+    private static int FindClosingQuote(string raw)
+    {
+        var quote = raw[0];
+
+        for (var i = 1; i < raw.Length; i++)
         {
-            raw = raw[..commentIndex].Trim();
+            // 基本文字列のエスケープ（\" や \\）は次の 1 文字ごと読み飛ばす
+            if (quote == '"' && raw[i] == '\\')
+            {
+                i++;
+                continue;
+            }
+
+            if (raw[i] == quote)
+            {
+                return i;
+            }
         }
 
-        // 引用符を除去する（" か ' で囲まれた文字列）
-        if (
-            raw.Length >= 2
-            && ((raw[0] == '"' && raw[^1] == '"') || (raw[0] == '\'' && raw[^1] == '\''))
-        )
-        {
-            return raw[1..^1];
-        }
-
-        return raw;
+        return -1;
     }
 }

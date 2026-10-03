@@ -105,7 +105,12 @@ public static class CliApp
         };
         var config = new Option<FileInfo>("--config") { Description = Strings.Cli_Opt_Config };
         var force = ForceOption();
-        var provider = ProviderOption();
+
+        // 既定値を持たせない（未指定＝図の対象 DBMS を使う。解決は図を読んでから行う）
+        var provider = new Option<string>("--provider")
+        {
+            Description = Strings.Cli_Opt_GenerateProvider,
+        };
         var generation = new GenerationOptionSet();
 
         var command = new Command("generate", Strings.Cli_Cmd_Generate)
@@ -128,7 +133,7 @@ public static class CliApp
                     parseResult.GetValue(schema)!,
                     parseResult.GetValue(output)!,
                     parseResult.GetValue(config),
-                    parseResult.GetValue(provider)!,
+                    parseResult.GetValue(provider),
                     parseResult,
                     generation,
                     parseResult.GetValue(force),
@@ -141,11 +146,16 @@ public static class CliApp
         return command;
     }
 
+    /// <summary>generate を実行する（<paramref name="providerName"/> が未指定なら図の対象 DBMS を使う）</summary>
+    /// <remarks>
+    /// 方言の既定を図から決めるため、図の読込はプロバイダ解決より前に行う
+    /// （scaffold は図を DB から取るのでプロバイダが先＝<see cref="GenerationExecutor.RunAsync"/> の既定の順序）。
+    /// </remarks>
     private static Task<int> RunGenerateAsync(
         FileInfo schemaFile,
         DirectoryInfo output,
         FileInfo? config,
-        string providerName,
+        string? providerName,
         ParseResult parseResult,
         GenerationOptionSet generation,
         bool force,
@@ -161,8 +171,51 @@ public static class CliApp
             return Task.FromResult(1);
         }
 
+        var diagram = LoadSchemaDiagram(schemaFile, stderr);
+
+        if (diagram is null)
+        {
+            return Task.FromResult(1);
+        }
+
+        var resolvedProviderName = GenerationExecutor.ResolveProviderName(providerName, diagram);
+
+        // 方言を図から採ったのに未対応の名前だったときは、図の値であることと --provider で回避できることを
+        // 名指しする（プロバイダ解決の汎用文言だけでは、利用者が書いていない名前の出どころが分からない）
+        if (
+            string.IsNullOrWhiteSpace(providerName)
+            && !GenerationExecutor.IsRegisteredProvider(resolvedProviderName)
+        )
+        {
+            stderr.WriteLine(
+                string.Format(
+                    Strings.Cli_DiagramTargetDbmsUnsupported,
+                    resolvedProviderName,
+                    GenerationExecutor.RegisteredProviderNames
+                )
+            );
+
+            return Task.FromResult(1);
+        }
+
+        // 図と違う方言を明示したときは、型を変換せずに生成することを警告する（生成は続ける）。
+        // 未対応の名前はこの後のプロバイダ解決が誤りとして報告するので、警告は対応する名前のときだけ出す
+        if (
+            GenerationExecutor.ProviderDiffersFromDiagram(providerName, diagram)
+            && GenerationExecutor.IsRegisteredProvider(resolvedProviderName)
+        )
+        {
+            stderr.WriteLine(
+                string.Format(
+                    Strings.Cli_ProviderDiffersFromDiagram,
+                    GenerationExecutor.ResolveProvider(resolvedProviderName).Name,
+                    SqlComment.Sanitize(diagram.TargetDbms)
+                )
+            );
+        }
+
         return GenerationExecutor.RunAsync(
-            providerName,
+            resolvedProviderName,
             output,
             config,
             parseResult,
@@ -170,8 +223,8 @@ public static class CliApp
             force,
             stdout,
             stderr,
-            // generate の図取得は同期（JSON 読込）。プロバイダは使わないため受け取るだけ
-            (_, _) => Task.FromResult<ErDiagram?>(LoadSchemaDiagram(schemaFile, stderr)),
+            // 図は読込済み（方言の既定を決めるため先に読んだ）。プロバイダは使わないため受け取るだけ
+            (_, _) => Task.FromResult<ErDiagram?>(diagram),
             cancellationToken
         );
     }
@@ -331,7 +384,13 @@ public static class CliApp
         );
 
     /// <summary>DB へ直結してスキーマをインポートし、意味モデル（<see cref="ErDiagram"/>）を組み立てる（失敗時は表示済みで null）</summary>
-    private static async Task<ErDiagram?> ImportDiagramAsync(
+    /// <remarks>
+    /// 利用者の中断（<paramref name="cancellationToken"/> が取り消された状態の <see cref="OperationCanceledException"/>）は
+    /// 取込の失敗として表示せず、そのまま伝える（<see cref="InvokeAsync(string[], TextWriter, TextWriter)"/> が 130 を返す）。
+    /// トークンが取り消されていない <see cref="OperationCanceledException"/> はドライバや内部の時間切れなので、
+    /// 他の例外と同じく取込の失敗として扱う（型だけで判定すると、失敗が「利用者の中断」に化けて黙って終わる）。
+    /// </remarks>
+    internal static async Task<ErDiagram?> ImportDiagramAsync(
         IDatabaseProvider provider,
         string connectionString,
         int commandTimeoutSeconds,
@@ -340,6 +399,7 @@ public static class CliApp
     )
     {
         SchemaImportResult imported;
+
         try
         {
             imported = await provider
@@ -351,6 +411,7 @@ public static class CliApp
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
+            when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
         {
             stderr.WriteLine(string.Format(Strings.Cli_SchemaImportFailed, ex.Message));
             return null;
@@ -362,10 +423,12 @@ public static class CliApp
             stderr.WriteLine(DescribeImportWarning(warning));
         }
 
+        // 取り込んだ方言を図の対象 DBMS にする（reverse と同じ。型は --provider の方言で書かれている）
         return new ErDiagram
         {
             Entities = imported.Entities.ToList(),
             Relationships = imported.Relationships.ToList(),
+            TargetDbms = provider.Name,
         };
     }
 
@@ -516,17 +579,23 @@ public static class CliApp
             return 1;
         }
 
-        // 出力先が将来版の図なら、--force なしでは書かない（この版の形式で書き戻すと、この版が表現できない
-        // データを黙って消すため。GUI の上書き保存・Schema JSON エクスポートの確認と同じ判定）。
+        // 出力先にファイルがあれば、--force なしでは書かない。reverse が書くのはスキーマだけの新しい図で、
+        // 既存の図のレイアウト・名前付きクエリ・Id を引き継がないため、上書きするとそれらが黙って消える
+        // （GUI のマージ取込のような引き継ぎは CLI に無い）。将来版の図は、この版が表現できないデータまで
+        // 失うので、その旨を名指しする文言にする（GUI の上書き保存・Schema JSON エクスポートの確認と同じ判定）。
         // 終了コードは generate の「上書きを断った」と同じ 2＝失敗一般（1）とスクリプトから区別できる
-        if (!force && JsonStorageService.IsNewerFormatFile(output.FullName))
+        if (!force && File.Exists(output.FullName))
         {
-            stderr.WriteLine(string.Format(Strings.Cli_ReverseNewerFormatRefused, output.FullName));
+            var refusal = JsonStorageService.IsNewerFormatFile(output.FullName)
+                ? Strings.Cli_ReverseNewerFormatRefused
+                : Strings.Cli_ReverseOutputExistsRefused;
+            stderr.WriteLine(string.Format(refusal, output.FullName));
 
             return GenerationExecutor.ModifiedFilesExitCode;
         }
 
         IDatabaseProvider provider;
+
         try
         {
             provider = GenerationExecutor.ResolveProvider(providerName);
@@ -539,6 +608,7 @@ public static class CliApp
         }
 
         CodeReverseResult result;
+
         try
         {
             var sourceText = File.ReadAllText(sourceFile.FullName);

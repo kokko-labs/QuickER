@@ -96,18 +96,87 @@ public class DbmlQuotedIdentifierTests
         dbml.Should().NotContain("\"");
     }
 
-    [Fact(DisplayName = "DBML 出力: 日本語の名前は従来どおり囲まない")]
-    public void Export_JapaneseNames_AreNotQuoted()
+    /// <summary>
+    /// DBML の素の名前に使えるのは ASCII の英数字・アンダースコアだけで、日本語などの非 ASCII の名前を素で書くと
+    /// DBML の公式パーサー（<c>@dbml/core</c>）が構文エラーにする。引用して書き、取込で元に戻ることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "DBML 往復: 日本語の名前は引用して書き、元に戻る")]
+    public void RoundTrip_JapaneseNames_AreQuotedAndPreserved()
     {
         var dbml = DbmlExporter.Build(BuildDiagram("受注明細", "受注日", "date"));
 
-        dbml.Should().Contain("Table 受注明細 {");
-        dbml.Should().Contain("受注日 date [");
-        dbml.Should().NotContain("\"");
+        dbml.Should().Contain("Table \"受注明細\" {");
+        dbml.Should().Contain("\"受注日\" date [");
+
+        var entity = DbmlImporter.Parse(dbml).Entities.Should().ContainSingle().Subject;
+        entity.TableName.Should().Be("受注明細");
+        entity.Columns.Select(column => column.Name).Should().Contain("受注日");
     }
 
     /// <summary>
-    /// 空白を含む名前でも、リレーションの端点（<c>Ref:</c> 行）が往復する。
+    /// 制約名は名前付き Ref の名前として、テーブル名・列名と同じ規則で書く（ASCII の英数字・アンダースコアだけなら素、
+    /// それ以外は引用）。引用した名前の <c>"</c> と <c>\</c> はテーブル名と同じエスケープで往復する。
+    /// </summary>
+    [Theory(DisplayName = "DBML 往復: 制約名は名前付き Ref の名前として、必要なら引用して保たれる")]
+    [InlineData("FK_Orders_Customer", "Ref FK_Orders_Customer: ")]
+    [InlineData("FK Orders Customer", "Ref \"FK Orders Customer\": ")]
+    [InlineData("dbo.FK_Orders", "Ref \"dbo.FK_Orders\": ")]
+    [InlineData("外部キー_受注", "Ref \"外部キー_受注\": ")]
+    [InlineData(@"FK ""q"" \x", @"Ref ""FK \""q\"" \\x"": ")]
+    public void RoundTrip_ConstraintName_IsWrittenAsRefName(string constraintName, string expected)
+    {
+        var diagram = BuildRelationshipDiagram(constraintName);
+
+        var dbml = DbmlExporter.Build(diagram);
+
+        dbml.Should().Contain(expected);
+        DbmlImporter
+            .Parse(dbml)
+            .Relationships.Should()
+            .ContainSingle()
+            .Which.ConstraintName.Should()
+            .Be(constraintName);
+    }
+
+    /// <summary>親 p(id) → 子 c(pid) の 1 対多を、指定の制約名で組み立てる</summary>
+    private static ErDiagram BuildRelationshipDiagram(string constraintName)
+    {
+        var parentKey = new Column
+        {
+            Name = "id",
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+        var childKey = new Column
+        {
+            Name = "pid",
+            DataType = "int",
+            IsForeignKey = true,
+            IsNullable = false,
+        };
+        var parent = new Entity { TableName = "p", Columns = [parentKey] };
+        var child = new Entity { TableName = "c", Columns = [childKey] };
+
+        return new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(parentKey.Id, childKey.Id)],
+                    ConstraintName = constraintName,
+                },
+            ],
+        };
+    }
+
+    /// <summary>
+    /// 空白を含む名前でも、リレーションの端点（<c>Ref</c> 行）が往復する。
     /// </summary>
     [Fact(DisplayName = "DBML 往復: 空白を含む名前のリレーションも列対応ごと保たれる")]
     public void RoundTrip_RelationshipWithQuotedNames_KeepsColumnPairs()

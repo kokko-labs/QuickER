@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using QuickER.AI;
@@ -48,6 +49,16 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// <summary>宣言されたエンティティが現在の ER 図に存在しない旨の警告フォーマット（英語）</summary>
     private const string EntityNotInSchemaWarningFormat =
         "Declared entity '{0}' does not exist in the current ER diagram.";
+
+    /// <summary>
+    /// 宣言が 1 件も有効でなかったため既存の宣言を残した旨の警告（英語）。空でない配列が全部不正なときに、
+    /// 「空配列＝消去」と取り違えて既存の宣言を消さないため。
+    /// </summary>
+    private const string EntityDeclarationsAllInvalidWarning =
+        "None of the entity declarations were valid; the screen's existing declarations were kept. Send an empty array to clear them.";
+
+    /// <summary>ツール引数のルートがオブジェクトでないときの失敗詳細（英語・機械向け）</summary>
+    private const string ArgumentsNotObjectDetail = "The arguments must be a JSON object.";
 
     private readonly IErChatEngine _engine;
 
@@ -163,7 +174,8 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
 
     /// <summary>
     /// 再開フローで会話を開始する。現在スキーマとマニフェストから状態再開プロンプトを組み立てて送信し、
-    /// 送信前にストアのスキーマスナップショットを現在スキーマへ更新する。
+    /// 送信が成功した後にストアのスキーマスナップショットを現在スキーマへ更新する
+    /// （送信が失敗したときは更新しない＝次の再開でも「スキーマ変更あり」を AI へ伝える）。
     /// </summary>
     /// <param name="diagram">モックの元になる（現在の）ER 図</param>
     /// <param name="userInstructions">ユーザーからの補足指示（省略可）</param>
@@ -187,10 +199,12 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
             userInstructions
         );
 
-        // 再開時は元スキーマを現在の内容へ更新してから送信する（次回の差異判定の基準になる）
-        _store.UpdateSourceSchema(schema);
-
         await SendInitialAsync(prompt, attachments, cancellationToken).ConfigureAwait(false);
+
+        // 送信できたら元スキーマを現在の内容へ更新する（次回の差異判定の基準になる）。
+        // 送信の前に更新すると、送信が失敗したときに「スキーマ変更あり」の印だけが消え、
+        // 変更を AI へ一度も伝えないまま次の再開が「変更なし」になる
+        _store.UpdateSourceSchema(schema);
     }
 
     /// <summary>エンジンを初期化して会話を開始し、初回プロンプトを送信する（新規・再開で共通）</summary>
@@ -259,6 +273,18 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
             );
             var root = document.RootElement;
 
+            // 引数はオブジェクトでなければならない（配列・文字列のルートでは TryGetProperty が例外を投げる）
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return (
+                    string.Format(
+                        Strings.Mock_ArgumentsParseFailedResult,
+                        ArgumentsNotObjectDetail
+                    ),
+                    false
+                );
+            }
+
             return toolName switch
             {
                 MockFolderDesignTools.SaveScreenToolName => ExecuteSaveScreen(root),
@@ -271,6 +297,13 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
         catch (JsonException ex)
         {
             return (string.Format(Strings.Mock_ArgumentsParseFailedResult, ex.Message), false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // フォルダの読み書きの失敗（ロック・権限・ディスク満杯）は失敗結果として返す。
+            // ストアは書き込みに成功してから変更を確定するので、ここへ来た変更は保存されておらず、
+            // 保存の通知（ScreenSaved 等）も発火していない
+            return (string.Format(Strings.Mock_ToolFileAccessFailedResult, ex.Message), false);
         }
     }
 
@@ -422,10 +455,12 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// save_screen 引数の entities 配列を <see cref="MockScreenEntity"/> の一覧へ変換する。
     /// entities 未指定（プロパティ不在）なら <c>null</c>（＝既存宣言を維持）を返す。
     /// 名前が空の壊れた要素は読み飛ばし、正規化での破棄・図に無い名前は <paramref name="warnings"/> へ積む。
+    /// 空でない配列の要素が 1 つも有効でなかった（オブジェクトでない・名前が空・操作が全部無効）ときも
+    /// <c>null</c> を返して既存宣言を残し、その旨を警告する（消去は明示の空配列だけ）。
     /// </summary>
     /// <param name="root">save_screen 引数の JSON ルート</param>
     /// <param name="warnings">宣言由来の警告の集約先（英語）</param>
-    /// <returns>宣言一覧（空配列＝消去）／未指定なら null</returns>
+    /// <returns>宣言一覧（空配列＝消去）／未指定・全要素不正なら null</returns>
     private IReadOnlyList<MockScreenEntity>? ParseEntities(JsonElement root, List<string> warnings)
     {
         if (
@@ -482,6 +517,13 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
                     warnings.Add(string.Format(EntityNotInSchemaWarningFormat, entity.Name));
                 }
             }
+        }
+
+        // 空でない配列が全部不正なら、消去でなく省略として扱う（明示の空配列だけが消去）
+        if (entitiesElement.GetArrayLength() > 0 && normalization.Entities.Count == 0)
+        {
+            warnings.Add(EntityDeclarationsAllInvalidWarning);
+            return null;
         }
 
         return parsed;

@@ -10,7 +10,7 @@ namespace QuickER.Services;
 /// フィード文字列が <c>https://github.com/</c> で始まる場合は <see cref="GithubSource"/> を、
 /// それ以外（ローカルパス・単純 URL）は文字列コンストラクタで <see cref="UpdateManager"/> を構築する。
 /// <see cref="CheckForUpdateAsync"/> で得た <see cref="UpdateInfo"/> を内部に保持し、
-/// <see cref="DownloadAsync"/> / <see cref="ApplyAndRestart"/> で使い回す。
+/// <see cref="DownloadAsync"/> / <see cref="ApplyOnExit"/> で使い回す。
 /// </remarks>
 public sealed class VelopackAppUpdater : IAppUpdater
 {
@@ -61,14 +61,21 @@ public sealed class VelopackAppUpdater : IAppUpdater
     }
 
     /// <inheritdoc />
-    public void ApplyAndRestart()
+    public void ApplyOnExit(bool restart)
     {
         if (_pendingUpdate is null)
         {
             return;
         }
 
-        // 更新を適用してアプリを再起動する（このメソッドからは戻らない）
-        _manager.ApplyUpdatesAndRestart(_pendingUpdate.TargetFullRelease);
+        // 更新プログラムを起動し、このプロセスの終了を待ってから適用させる（呼び出しから戻る）。
+        // その場でプロセスを終わらせる ApplyUpdatesAndRestart は終了処理を飛ばすので使わない。
+        // silent: false＝フレームワークの追加が要る更新などで、更新プログラムの画面・確認を潰さない
+        _manager.WaitExitThenApplyUpdates(
+            _pendingUpdate.TargetFullRelease,
+            silent: false,
+            restart: restart,
+            restartArgs: []
+        );
     }
 }

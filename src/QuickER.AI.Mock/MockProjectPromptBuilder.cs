@@ -1,7 +1,8 @@
 namespace QuickER.AI.Mock;
 
 /// <summary>
-/// WPF モックプロジェクト生成（第2ステップ）のシステムプロンプト・初回プロンプトを組み立てる共有ヘルパ。
+/// モックプロジェクト生成（第2ステップ）のシステムプロンプト・初回プロンプトを組み立てる共有ヘルパ
+/// （ターゲット固有の文面は <see cref="MockProjectTargetProfile"/> のフラグメントから合成する）。
 /// </summary>
 /// <remarks>
 /// バックエンド（Claude Code / Codex / Copilot）に依らずプロンプト本文は同一である必要があるため、
@@ -15,12 +16,6 @@ namespace QuickER.AI.Mock;
 /// </remarks>
 internal static class MockProjectPromptBuilder
 {
-    /// <summary>デザイン仕様のモックフォルダの相対パス（スキャフォールドが同梱する）</summary>
-    public const string DesignFolderRelativePath = "design/mock";
-
-    /// <summary>規約ドキュメントのファイル名</summary>
-    public const string ReadmeFileName = "README-QuickER.md";
-
     /// <summary>追加指示を連結するときの見出し（英語固定＝機械向け指示のため UI 言語に追従させない）</summary>
     internal const string AdditionalInstructionsHeading = "# Additional instructions";
 
@@ -37,7 +32,9 @@ internal static class MockProjectPromptBuilder
     /// <summary>ヘッドレス実行のシステムプロンプト（規約・制約）を組み立てる</summary>
     /// <remarks>
     /// 出力は Visual Studio 標準構成（cwd 直下に <c>{ProjectName}.sln</c>、プロジェクト一式は <c>{ProjectName}/</c> 配下）。
-    /// パス案内はプロジェクトフォルダ配下を指し、ビルドは cwd で <c>dotnet build</c>（sln を拾う）を指示する。
+    /// パス案内はプロジェクトフォルダ配下を指し、ビルドは cwd で <c>dotnet build {ProjectName}.sln</c> を指示する
+    /// （ソリューションを名指しする＝出力フォルダに別のソリューション・プロジェクトが同居しても MSB1011 にならない。
+    /// 最終ビルドもソリューションのパスを明示して実行する）。
     /// ターゲット固有の文面（役割・フレームワーク・ビュー種別・進め方）は <paramref name="profile"/> から合成し、
     /// 共有規約（README 参照・読み取り専用・Repository 経由・PK 採番・NuGet.Config 禁止・ビルド検証）はここに残す。
     /// </remarks>
@@ -51,8 +48,8 @@ This folder uses the standard Visual Studio layout: the solution {projectName}.s
 This is a non-interactive, headless run. There is no user to answer you. Never present a plan, ask a clarifying question, or wait for approval: complete everything within this turn, from the implementation through verification with `dotnet build`.
 
 # Rules you must follow
-- Before you start working, read {projectName}/{ReadmeFileName} and follow the rules it states.
-- {projectName}/{DesignFolderRelativePath}/ is the mock folder that holds the design specification. Start by reading {projectName}/{DesignFolderRelativePath}/mock.json to learn the screen list (screens) and the screen transitions (transitions), then review every screen's *.html (one file is the design specification of one screen) and the shared design system style.css. {profile.SystemScreenReproductionRule}
+- Before you start working, read {projectName}/{MockProjectScaffoldService.ReadmeFileName} and follow the rules it states.
+- {projectName}/{MockProjectScaffoldService.DesignFolderRelativePath}/ is the mock folder that holds the design specification. Start by reading {projectName}/{MockProjectScaffoldService.DesignFolderRelativePath}/mock.json to learn the screen list (screens) and the screen transitions (transitions), then review every screen's *.html (one file is the design specification of one screen) and the shared design system style.css. {profile.SystemScreenReproductionRule}
 - Everything under {projectName}/Generated/ (the auto-generated data-layer code) is read-only. Never edit or delete it. From the UI, use I{{Entity}}Repository through dependency injection.
 {profile.SystemUiFrameworkRules}
 - Implement every screen's data display, insert, update and delete with the generated code under {projectName}/Generated/ (Entity / EditModel / Mapper / I{{Entity}}Repository). You must not substitute your own data classes or a hard-coded list inside a ViewModel (read lists and details from the repository, and save inserts, updates and deletes through the repository).
@@ -62,7 +59,7 @@ This is a non-interactive, headless run. There is no user to answer you. Never p
 
 # How to proceed
 {profile.SystemWorkflowSteps(projectName)}
-- Once the implementation is in place, run `dotnet build` in this folder (the solution root) and keep fixing until it succeeds with no errors and no warnings.
+- Once the implementation is in place, run `dotnet build {projectName}.sln` in this folder (the solution root; name the solution file explicitly, because another solution or project may sit in the same folder) and keep fixing until it succeeds with no errors and no warnings.
 - Finally, report that you confirmed the build succeeded with no errors and no warnings.";
 
     /// <summary>初回プロンプト（実装の起点となる具体指示）を組み立てる</summary>
@@ -81,11 +78,11 @@ This is a non-interactive, headless run. There is no user to answer you. Never p
 This folder uses the standard Visual Studio layout: the solution {projectName}.sln sits at the root and the project itself lives under the {projectName}/ folder. Add the UI-layer sources under the {projectName}/ folder (the same place as the csproj).
 
 Steps:
-1. First read {projectName}/{ReadmeFileName} to learn the project layout and the rules.
-2. Read {projectName}/{DesignFolderRelativePath}/mock.json to learn the screen list (screens) and the screen transitions (transitions), then read every screen's *.html and the shared style.css to learn the screen structure, the fields and the transitions you must reproduce.
+1. First read {projectName}/{MockProjectScaffoldService.ReadmeFileName} to learn the project layout and the rules.
+2. Read {projectName}/{MockProjectScaffoldService.DesignFolderRelativePath}/mock.json to learn the screen list (screens) and the screen transitions (transitions), then read every screen's *.html and the shared style.css to learn the screen structure, the fields and the transitions you must reproduce.
 3. Review the data layer under {projectName}/Generated/ (Entity / I{{Entity}}Repository / AddGeneratedInMemoryRepositories and so on) and use it from the UI.
 4. {profile.PromptImplementStep}Use AddGeneratedInMemoryRepositories() for dependency injection.
-5. Run `dotnet build` in this folder (the solution root) and fix your own code until it succeeds with no errors and no warnings.
+5. Run `dotnet build {projectName}.sln` in this folder (the solution root; name the solution file explicitly) and fix your own code until it succeeds with no errors and no warnings.
 6. Confirm that the build succeeded and report it.
 
 Completion criteria (all of them must hold):
@@ -93,7 +90,7 @@ Completion criteria (all of them must hold):
 - Every data operation for lists, details and insert/edit goes through I{{Entity}}Repository (no substitution with your own data classes or hard-coded lists).
 - A new record (insert) can actually be saved, including the assignment of its primary key.
 - The transitions declared in mock.json work as screen navigation.
-- `dotnet build` succeeds with no errors and no warnings.
+- `dotnet build {projectName}.sln` succeeds with no errors and no warnings.
 
 Everything under {projectName}/Generated/ is read-only. Do not edit it.
 
@@ -135,7 +132,7 @@ QuickER has already generated the data layer (Entity / EditModel / Mapper / I{{E
 - Do not submit NuGet.Config or any other package source configuration file (such a submission is rejected).
 - The mock needs no appsettings.json: it runs entirely on AddGeneratedInMemoryRepositories(), so there is no configuration value to read.
 - {profile.ApiKeyScreenReproductionRule}
-- Do not change anything under {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/ (the data layer), anything under design/ (the design specification), {ReadmeFileName}, or the .sln/.csproj files (such a submission is rejected). You only add and update UI-layer sources.
+- Do not change anything under {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/ (the data layer), anything under design/ (the design specification), {MockProjectScaffoldService.ReadmeFileName}, or the .sln/.csproj files (such a submission is rejected). You only add and update UI-layer sources.
 
 # How to submit files (important)
 - The emit_file tool is the only way to submit an implementation file. Code written in the chat body has no effect.

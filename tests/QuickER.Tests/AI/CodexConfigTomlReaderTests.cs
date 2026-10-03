@@ -64,4 +64,42 @@ public class CodexConfigTomlReaderTests
 
         result.Model.Should().Be("gpt-4o");
     }
+
+    /// <summary>セクション見出しの末尾コメントがプロバイダー名へ混ざらないことを検証する</summary>
+    [Fact(DisplayName = "見出しの末尾コメントはプロバイダー名に含めない")]
+    public void Parse_SectionHeaderWithTrailingComment_ExtractsNameOnly()
+    {
+        var lines = new[]
+        {
+            "[model_providers.ollama] # local",
+            "[[model_providers.remote]]  # array table",
+        };
+
+        var result = CodexConfigTomlReader.Parse(lines);
+
+        result.ProviderNames.Should().Equal("ollama", "remote");
+    }
+
+    /// <summary>引用の内側の # を末尾コメントとして切らないことを検証する</summary>
+    [Fact(DisplayName = "引用の内側の # は値の一部として残す")]
+    public void Parse_HashInsideQuotes_IsPartOfValue()
+    {
+        var lines = new[] { "model = \"gpt#5\" # comment", "model_provider = 'local#1' # comment" };
+
+        var result = CodexConfigTomlReader.Parse(lines);
+
+        result.Model.Should().Be("gpt#5");
+        result.ModelProvider.Should().Be("local#1");
+    }
+
+    /// <summary>基本文字列のエスケープした引用符で値を閉じないことを検証する</summary>
+    [Fact(DisplayName = "エスケープした引用符の後ろの # も値の一部として残す")]
+    public void Parse_EscapedQuote_DoesNotCloseValue()
+    {
+        var lines = new[] { "model = \"a\\\"#b\" # comment" };
+
+        var result = CodexConfigTomlReader.Parse(lines);
+
+        result.Model.Should().Be("a\\\"#b");
+    }
 }

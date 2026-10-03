@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Reflection;
 using Anthropic.Models.Messages;
 using AwesomeAssertions;
@@ -881,5 +882,97 @@ public class ChatTurnEngineTests
             attachmentSupport: () => AttachmentSupport.Images
         );
         imageEngine.AttachmentSupport.Should().Be(AttachmentSupport.Images);
+    }
+
+    /// <summary>
+    /// 呼び出されると例外を投げるフェイクドライバ。投げる前に任意の処理（エンジンへの中断要求など）を差し込める。
+    /// </summary>
+    private sealed class ThrowingTurnDriver(Func<CancellationToken, Exception> createException)
+        : IChatTurnDriver
+    {
+        /// <summary>投げる前に呼ぶ処理（後差しでエンジンへ中断を要求する等）</summary>
+        public Action? BeforeThrow { get; set; }
+
+        public Task<ChatAssistantTurn> RunAsync(
+            IReadOnlyList<ChatHistoryItem> history,
+            Action<string> onTextDelta,
+            CancellationToken cancellationToken
+        )
+        {
+            BeforeThrow?.Invoke();
+            throw createException(cancellationToken);
+        }
+    }
+
+    /// <summary>例外を投げるドライバでエンジンを作り、1 ターン送って完了通知を返す</summary>
+    private static async Task<ErChatTurnResult> SendWithThrowingDriverAsync(
+        ThrowingTurnDriver driver,
+        Action<ChatTurnEngine>? configure = null
+    )
+    {
+        var engine = new ChatTurnEngine(
+            driver,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            () => true,
+            ErDesignProfile.ErDesign
+        );
+        configure?.Invoke(engine);
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed.Should().NotBeNull();
+        return completed!.Value;
+    }
+
+    /// <summary>
+    /// 利用者が中断していない取り消し（HttpClient のタイムアウト＝TaskCanceledException）は、
+    /// 無音の中断でなくタイムアウトのエラー文つきの失敗として届くことを検証する
+    /// </summary>
+    [Fact(DisplayName = "利用者が中断していない取り消しはタイムアウトのエラー文で届く")]
+    public async Task SendAsync_CancellationNotRequestedByUser_ReportsTimeoutError()
+    {
+        var driver = new ThrowingTurnDriver(_ => new TaskCanceledException("HttpClient timeout"));
+
+        var result = await SendWithThrowingDriverAsync(driver);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be(AiStrings.Ai_Timeout);
+    }
+
+    /// <summary>
+    /// 利用者の中断（<see cref="ChatTurnEngine.InterruptAsync"/>）でドライバが取り消し例外を投げたときは、
+    /// 従来どおりエラー文の無い失敗（無音の中断）になることを検証する
+    /// </summary>
+    [Fact(DisplayName = "利用者の中断は従来どおり無音の中断になる")]
+    public async Task SendAsync_InterruptedByUser_ReportsSilentInterrupt()
+    {
+        var driver = new ThrowingTurnDriver(token => new OperationCanceledException(token));
+
+        var result = await SendWithThrowingDriverAsync(
+            driver,
+            engine => driver.BeforeThrow = () => engine.InterruptAsync().GetAwaiter().GetResult()
+        );
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().BeNull();
+    }
+
+    /// <summary>取り消し以外の失敗は、SDK の生の文でなく <see cref="AiErrorMessageLocalizer"/> の文言で届くことを検証する</summary>
+    [Fact(DisplayName = "取り消し以外の失敗は表示用の文言で届く")]
+    public async Task SendAsync_DriverFails_ReportsLocalizedMessage()
+    {
+        var failure = new HttpRequestException("connection refused");
+        var driver = new ThrowingTurnDriver(_ => failure);
+
+        var result = await SendWithThrowingDriverAsync(driver);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be(AiErrorMessageLocalizer.ToUserMessage(failure));
+        result.Error.Should().Contain(AiStrings.Ai_ConnectionFailed);
     }
 }

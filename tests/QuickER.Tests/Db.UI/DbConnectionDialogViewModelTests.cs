@@ -406,7 +406,8 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.DeleteProfileCommand.Execute(null);
 
         vm.Profiles.Should().ContainSingle();
-        dialogs.ConfirmMessages.Should().ContainSingle().Which.Should().Contain("TestDB");
+        dialogs.ConfirmMessages.Should().BeEmpty("取り消せない削除は警告つきで確認する");
+        dialogs.WarningConfirmMessages.Should().ContainSingle().Which.Should().Contain("TestDB");
     }
 
     /// <summary>削除確認で OK するとプロファイルが削除され、状態メッセージに反映されることを検証する</summary>
@@ -978,7 +979,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         var stored = store.LoadAll().Should().ContainSingle().Subject;
         stored.Id.Should().Be(existingId);
         stored.Server.Should().Be("prod.example.com");
-        store.LoadPassword(existingId).Should().Be("prod-secret");
+        store.LoadPassword(existingId).Value.Should().Be("prod-secret");
     }
 
     /// <summary>確認で続行を選べば、従来どおり同名プロファイルを上書きする（DU1）。</summary>
@@ -1076,7 +1077,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
             .Single(profile => profile.Id == stagingId)
             .Server.Should()
             .Be("staging.example.com");
-        store.LoadPassword(stagingId).Should().Be("staging-secret");
+        store.LoadPassword(stagingId).Value.Should().Be("staging-secret");
     }
 
     /// <summary>同名でも DB 種別が違えば別のプロファイルなので確認は出ない（DU1）。</summary>
@@ -1131,7 +1132,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         // 接続の設定値は変わらない
         stored.Server.Should().Be("prod.example.com");
         // 保存済みのパスワードは引き継がれる（古い暗号ファイルも残らない＝Id が変わらないため）
-        store.LoadPassword(id).Should().Be("prod-secret");
+        store.LoadPassword(id).Value.Should().Be("prod-secret");
     }
 
     /// <summary>入力欄の編集内容は名前の変更で保存されないことを検証する（DU3）</summary>
@@ -1321,7 +1322,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         stored.Should().HaveCount(2, "読めなかったのだから、どちらも消さない");
         stored.Single(p => p.Id == targetId).Name.Should().Be("本番DB");
         stored.Single(p => p.Id == conflictId).Name.Should().Be("本番DB（東京）");
-        store.LoadPassword(conflictId).Should().Be("tokyo-secret", "暗号ファイルも消さない");
+        store.LoadPassword(conflictId).Value.Should().Be("tokyo-secret", "暗号ファイルも消さない");
     }
 
     /// <summary>置き換えを伴う名前の変更が成功したときの後始末を検証する</summary>
@@ -1347,8 +1348,14 @@ public class DbConnectionDialogViewModelTests : IDisposable
         var stored = store.LoadAll().Should().ContainSingle().Subject;
         stored.Id.Should().Be(targetId);
         stored.Name.Should().Be("本番DB（東京）");
-        store.LoadPassword(targetId).Should().Be("prod-secret", "改名で自分のパスワードは失わない");
-        store.LoadPassword(conflictId).Should().BeEmpty("置き換えた側の暗号ファイルは残さない");
+        store
+            .LoadPassword(targetId)
+            .Value.Should()
+            .Be("prod-secret", "改名で自分のパスワードは失わない");
+        store
+            .LoadPassword(conflictId)
+            .Value.Should()
+            .BeEmpty("置き換えた側の暗号ファイルは残さない");
         vm.Profiles.Should().ContainSingle("一覧も再読込する");
     }
 
@@ -1384,7 +1391,12 @@ public class DbConnectionDialogViewModelTests : IDisposable
 
         var body = source[start..end];
 
-        body.Should().Contain("_store.Upsert(target, password, conflict?.Id)");
+        body.Should().Contain("_store.Rename(target.Id, newName, conflict?.Id)");
+        body.Should()
+            .NotContain(
+                "LoadPassword",
+                "名前の変更でパスワードを読み戻して書き戻すと、読めなかったものが消える"
+            );
         body.Should().NotContain("_store.Delete(", "削除と改名を別々に呼ぶと 2 回の読み書きになる");
     }
 
@@ -1481,5 +1493,409 @@ public class DbConnectionDialogViewModelTests : IDisposable
         closed.Should().BeTrue("記録できないだけで確定は妨げない");
         vm.Result.Should().NotBeNull();
         store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+    }
+
+    // ---------------- 1-9 の対応（パスワードの読み取り失敗・書き込み失敗・保存名・ポート） ----------------
+
+    /// <summary>DPAPI で暗号化するストアを一時フォルダへ作る（読めない暗号ファイルを作るため）</summary>
+    private SqlConnectionProfileStore CreateDpapiStore() => new(_tempFolder, useDpapi: true);
+
+    /// <summary>プロファイルの暗号ファイルのパス</summary>
+    private static string SecretFile(SqlConnectionProfileStore store, Guid id) =>
+        Path.Combine(store.SecretsFolder, id.ToString("N") + ".dat");
+
+    /// <summary>暗号ファイルを復号できないバイト列で置き換える（別ユーザー・別端末で暗号化されたものの代役）</summary>
+    private static byte[] CorruptSecret(SqlConnectionProfileStore store, Guid id)
+    {
+        var garbage = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+        File.WriteAllBytes(SecretFile(store, id), garbage);
+        return garbage;
+    }
+
+    /// <summary>書き込み失敗の文言の固定部分（例外の文面より前）</summary>
+    private static string WriteFailedPrefix =>
+        Strings.DbConnection_ProfileWriteFailed.Split("{0}")[0];
+
+    /// <summary>
+    /// 保存済みパスワードを読めないプロファイルを選ぶと、空欄で出したうえで読めなかったことを知らせる（1-9 #2）。
+    /// </summary>
+    [Fact(DisplayName = "選択: 保存済みパスワードを読めないときは空欄にして知らせる")]
+    public void SelectProfile_WhenPasswordUnreadable_ReportsStatus()
+    {
+        var store = CreateDpapiStore();
+        var id = SeedProfile(store, "本番DB");
+        CorruptSecret(store, id);
+        var vm = CreateVm(store, new StubDialogService());
+
+        vm.SelectedProfileItem = vm.Profiles.Single();
+
+        vm.Password.Should().BeEmpty();
+        vm.StatusMessage.Should()
+            .Be(string.Format(Strings.DbConnection_ProfileLoadedPasswordUnreadable, "本番DB"));
+    }
+
+    /// <summary>
+    /// 読めないパスワードを持つプロファイルを、空欄のまま「パスワードを保存」付きで上書き保存しようとすると断る（1-9 #2）。
+    /// </summary>
+    /// <remarks>
+    /// 保存の正規化は空パスワードを「保存しない」へ倒して暗号ファイルを消す。一時的に読めなかっただけの
+    /// パスワードがここで黙って消えていた。暗号ファイルは一切変わらないことまで確かめる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "保存: 読めないパスワードを空欄のまま上書きする保存は断り、暗号ファイルを残す"
+    )]
+    public void SaveProfile_WhenPasswordUnreadableAndEmpty_RefusesAndKeepsSecret()
+    {
+        var store = CreateDpapiStore();
+        var id = SeedProfile(store, "本番DB");
+        var garbage = CorruptSecret(store, id);
+        var vm = CreateVm(store, new StubDialogService());
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.Host = "changed.example.com";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        vm.StatusMessage.Should().Be(Strings.DbConnection_SaveRefusedPasswordUnreadable);
+        File.ReadAllBytes(SecretFile(store, id)).Should().Equal(garbage);
+        var stored = store.LoadAll().Should().ContainSingle().Subject;
+        stored.Server.Should().Be("prod.example.com", "断ったので何も書いていない");
+        stored.SavePassword.Should().BeTrue();
+    }
+
+    /// <summary>読めないパスワードは、入力し直せばそのまま保存できる（断るのは空欄のときだけ）</summary>
+    [Fact(DisplayName = "保存: 読めないパスワードでも入力し直せば保存できる")]
+    public void SaveProfile_WhenPasswordUnreadableButReentered_Saves()
+    {
+        var store = CreateDpapiStore();
+        var id = SeedProfile(store, "本番DB");
+        CorruptSecret(store, id);
+        var vm = CreateVm(store, new StubDialogService());
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.Password = "new-secret";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        vm.StatusMessage.Should().Be(string.Format(Strings.DbConnection_ProfileSaved, "本番DB"));
+        store
+            .LoadPassword(id)
+            .Should()
+            .Be(new SavedPassword(SavedPasswordStatus.Loaded, "new-secret"));
+    }
+
+    /// <summary>
+    /// 名前の変更は、読めないパスワードの暗号ファイルを読みも書きもしない（1-9 #2）。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装はパスワードを読み戻して書き戻しており、読めなかった値が空として書き戻されて暗号ファイルごと消えた。
+    /// </remarks>
+    [Fact(DisplayName = "名前の変更: 読めないパスワードの暗号ファイルはそのまま残る")]
+    public void RenameProfile_WhenPasswordUnreadable_KeepsSecretUntouched()
+    {
+        var store = CreateDpapiStore();
+        var id = SeedProfile(store, "本番DB");
+        var garbage = CorruptSecret(store, id);
+        var vm = CreateVm(store, new StubDialogService());
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.ProfileName = "本番DB（新）";
+
+        vm.RenameProfileCommand.Execute(null);
+
+        File.ReadAllBytes(SecretFile(store, id)).Should().Equal(garbage);
+        var stored = store.LoadAll().Should().ContainSingle().Subject;
+        stored.Name.Should().Be("本番DB（新）");
+        stored.SavePassword.Should().BeTrue("パスワードを保存する設定も変えない");
+    }
+
+    /// <summary>前回接続のパスワードを読めないときは、復元したうえで読めなかったことを知らせる（1-9 #2）</summary>
+    [Fact(DisplayName = "前回接続の復元: パスワードを読めないときは知らせる")]
+    public void RestoreLastConnection_WhenPasswordUnreadable_ReportsStatus()
+    {
+        var store = CreateDpapiStore();
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Server = "srv",
+                Database = "db",
+                SavePassword = true,
+            },
+            "secret"
+        );
+        File.WriteAllBytes(
+            Path.Combine(store.SecretsFolder, "last-connection.dat"),
+            new byte[] { 9, 9, 9 }
+        );
+
+        var vm = CreateVm(store, new StubDialogService());
+
+        vm.Host.Should().Be("srv");
+        vm.Password.Should().BeEmpty();
+        vm.StatusMessage.Should().Be(Strings.DbConnection_RestoredPasswordUnreadable);
+    }
+
+    /// <summary>
+    /// 保存の書き込み側が失敗しても落ちず、一部だけ反映された可能性を伝えて一覧を読み直す（1-9 #1）。
+    /// </summary>
+    /// <remarks>
+    /// 暗号ファイルの格納フォルダの位置にファイルを置き、JSON の書き込み後のパスワード保存を失敗させる。
+    /// </remarks>
+    [Fact(DisplayName = "保存: 書き込みの失敗はステータスで伝え、一覧をディスクから読み直す")]
+    public void SaveProfile_WhenWriteFails_ReportsAndReloads()
+    {
+        var store = CreateStore();
+        File.WriteAllText(store.SecretsFolder, "not a folder");
+        var vm = CreateVm(store, new StubDialogService());
+        vm.Host = "srv";
+        vm.Database = "db";
+        vm.SavePassword = true;
+        vm.Password = "secret";
+        vm.ProfileName = "新しい接続";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        vm.StatusMessage.Should().StartWith(WriteFailedPrefix);
+        vm.Profiles.Should()
+            .ContainSingle("JSON は書けているので、ディスクの実体どおり一覧に出す")
+            .Which.Profile.Name.Should()
+            .Be("新しい接続");
+    }
+
+    /// <summary>削除の書き込み側（暗号ファイルの削除）が失敗しても落ちない（1-9 #1）</summary>
+    [Fact(
+        DisplayName = "削除: 暗号ファイルを消せなくてもステータスで伝え、一覧をディスクから読み直す"
+    )]
+    public void DeleteProfile_WhenSecretDeleteFails_ReportsAndReloads()
+    {
+        var store = CreateStore();
+        var id = SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService { ConfirmResult = true });
+        vm.SelectedProfileItem = vm.Profiles.Single();
+
+        using (
+            new FileStream(SecretFile(store, id), FileMode.Open, FileAccess.Read, FileShare.None)
+        )
+        {
+            vm.DeleteProfileCommand.Execute(null);
+        }
+
+        vm.StatusMessage.Should().StartWith(WriteFailedPrefix);
+        vm.Profiles.Should().BeEmpty("JSON からは消えているので、一覧もディスクに合わせる");
+        vm.SelectedProfile.Should().BeNull();
+    }
+
+    /// <summary>名前の変更で置き換え先の暗号ファイルを消せなくても落ちない（1-9 #1）</summary>
+    [Fact(DisplayName = "名前の変更: 置き換え先の暗号ファイルを消せなくてもステータスで伝える")]
+    public void RenameProfile_WhenReplacedSecretDeleteFails_ReportsAndReloads()
+    {
+        var store = CreateStore();
+        var targetId = SeedProfile(store, "本番DB");
+        var conflictId = SeedProfile(store, "本番DB（東京）", "tokyo.example.com", "tokyo-secret");
+        var vm = CreateVm(store, new StubDialogService { ConfirmResult = true });
+        vm.SelectedProfileItem = vm.Profiles.Single(item => item.Profile.Id == targetId);
+        vm.ProfileName = "本番DB（東京）";
+
+        using (
+            new FileStream(
+                SecretFile(store, conflictId),
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.None
+            )
+        )
+        {
+            vm.RenameProfileCommand.Execute(null);
+        }
+
+        vm.StatusMessage.Should().StartWith(WriteFailedPrefix);
+        vm.Profiles.Should().ContainSingle().Which.Profile.Id.Should().Be(targetId);
+        vm.SelectedProfile!.Id.Should().Be(targetId);
+    }
+
+    /// <summary>OK の前回接続の記録で書き込み側が失敗しても、確定は続ける（1-9 #1）</summary>
+    [Fact(DisplayName = "Ok: 前回接続のパスワードを書けなくても確定は続行する")]
+    public void Ok_WhenLastUsedSecretWriteFails_StillConfirms()
+    {
+        var store = CreateStore();
+        File.WriteAllText(store.SecretsFolder, "not a folder");
+        var vm = CreateVm(store, new StubDialogService());
+        vm.Host = "srv";
+        vm.Database = "db";
+        vm.SavePassword = true;
+        vm.Password = "secret";
+        bool? closed = null;
+        vm.CloseAction = result => closed = result;
+
+        vm.OkCommand.Execute(null);
+
+        closed.Should().BeTrue();
+        vm.Result.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// 保存名の前後の空白を除いてから既存を探す（1-9 #3）。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装は空白付きの名前で探し、空白を除いた名前で保存していたため、上書き確認も上書きもすり抜けて
+    /// 同じ名前のプロファイルが 2 つできた。
+    /// </remarks>
+    [Fact(DisplayName = "保存: 前後に空白を付けた保存名も既存の同名プロファイルとして扱う")]
+    public void SaveProfile_NameWithSurroundingSpaces_MatchesExistingProfile()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = CreateVm(store, dialogs);
+        vm.Host = "srv";
+        vm.Database = "db";
+        vm.ProfileName = "  本番DB  ";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle("選択していない同名プロファイルの上書き確認");
+        store.LoadAll().Should().ContainSingle().Which.Server.Should().Be("srv");
+        vm.ProfileName.Should().Be("本番DB");
+    }
+
+    /// <summary>
+    /// 保存の直後に入力欄を保存値で塗り直さない＝パスワードを保存しない設定でも入力済みのパスワードが残る（1-9 #6）。
+    /// </summary>
+    [Fact(DisplayName = "保存: 保存の直後もパスワード欄の入力は消えない")]
+    public void SaveProfile_KeepsTypedPasswordWhenNotSaved()
+    {
+        var store = CreateStore();
+        var vm = CreateVm(store, new StubDialogService());
+        vm.Host = "srv";
+        vm.Database = "db";
+        vm.SavePassword = false;
+        vm.Password = "typed";
+        vm.ProfileName = "開発";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        vm.SelectedProfile!.Name.Should().Be("開発");
+        vm.Password.Should().Be("typed");
+        vm.StatusMessage.Should().Be(string.Format(Strings.DbConnection_ProfileSaved, "開発"));
+    }
+
+    /// <summary>名前の変更の直後に、入力中の未保存の編集を保存値へ戻さない（1-9 #6）</summary>
+    [Fact(DisplayName = "名前の変更: 直後も入力中の編集は保存値へ戻らない")]
+    public void RenameProfile_KeepsUnsavedEdits()
+    {
+        var store = CreateStore();
+        SeedProfile(store, "本番DB");
+        var vm = CreateVm(store, new StubDialogService());
+        vm.SelectedProfileItem = vm.Profiles.Single();
+        vm.Host = "edited.example.com";
+        vm.ProfileName = "本番DB（新）";
+
+        vm.RenameProfileCommand.Execute(null);
+
+        vm.Host.Should().Be("edited.example.com");
+        vm.Password.Should().Be("prod-secret");
+        vm.SelectedProfile!.Name.Should().Be("本番DB（新）");
+        store.LoadAll().Single().Server.Should().Be("prod.example.com", "変えたのは名前だけ");
+    }
+
+    /// <summary>ポート欄の不正値は確定を止める（空欄だけが方言既定）（1-9 #7）</summary>
+    [Theory(DisplayName = "Ok: ポートの不正値は確定を止める")]
+    [InlineData("1543z")]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("65536")]
+    public void Ok_InvalidPort_IsRejected(string port)
+    {
+        var vm = CreateVm(CreateStore(), new StubDialogService());
+        vm.Host = "srv";
+        vm.Database = "db";
+        vm.Port = port;
+        bool? closed = null;
+        vm.CloseAction = result => closed = result;
+
+        vm.OkCommand.Execute(null);
+
+        closed.Should().BeNull();
+        vm.StatusMessage.Should().Be(Strings.DbConnection_PortInvalid);
+    }
+
+    /// <summary>空欄は方言既定・範囲内の整数はそのまま使う（1-9 #7）</summary>
+    [Theory(DisplayName = "Ok: 空欄と範囲内のポートは確定できる")]
+    [InlineData("", null)]
+    [InlineData("  ", null)]
+    [InlineData("1", 1)]
+    [InlineData("65535", 65535)]
+    public void Ok_ValidPort_IsAccepted(string port, int? expected)
+    {
+        var vm = CreateVm(CreateStore(), new StubDialogService());
+        vm.Host = "srv";
+        vm.Database = "db";
+        vm.Port = port;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Port.Should().Be(expected);
+    }
+
+    /// <summary>接続テストもポートの不正値で止める（確定と同じ値でテストするため）（1-9 #7）</summary>
+    [Fact(DisplayName = "接続テスト: ポートの不正値は接続しない")]
+    public async Task TestConnection_InvalidPort_IsRejected()
+    {
+        var vm = CreateVm(CreateStore(), new StubDialogService());
+        vm.Port = "1543z";
+
+        await vm.TestConnectionCommand.ExecuteAsync(null);
+
+        vm.StatusMessage.Should().Be(Strings.DbConnection_PortInvalid);
+    }
+
+    /// <summary>
+    /// プロファイルの保存もポート・タイムアウトの不正値で止める（1-9 #7）。
+    /// </summary>
+    /// <remarks>
+    /// 保存だけ緩いと不正値が null として保存され、読み込んだときに空欄＝既定値へ化けて同じ取り違えが残る。
+    /// </remarks>
+    [Theory(DisplayName = "保存: ポート・タイムアウトの不正値は保存しない")]
+    [InlineData("1543z", "60", "port")]
+    [InlineData("", "abc", "timeout")]
+    public void SaveProfile_InvalidNumericInput_IsRejected(
+        string port,
+        string timeout,
+        string invalidField
+    )
+    {
+        var store = CreateStore();
+        var vm = CreateVm(store, new StubDialogService());
+        vm.Host = "srv";
+        vm.Database = "db";
+        vm.Port = port;
+        vm.CommandTimeout = timeout;
+        vm.ProfileName = "開発";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        vm.StatusMessage.Should()
+            .Be(
+                invalidField == "port"
+                    ? Strings.DbConnection_PortInvalid
+                    : Strings.DbConnection_CommandTimeoutInvalid
+            );
+        store.LoadAll().Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 一覧が null・要素が null の connections.json でもダイアログが開ける（1-9 #11）。
+    /// </summary>
+    [Theory(DisplayName = "一覧や要素が null の connections.json でもダイアログを開ける")]
+    [InlineData("{\"profiles\": null}", 0)]
+    [InlineData("{\"profiles\": [null, {\"name\": \"本番DB\", \"server\": \"srv\"}]}", 1)]
+    public void Constructor_NullProfilesInFile_DoesNotThrow(string json, int expectedCount)
+    {
+        var store = CreateStore();
+        File.WriteAllText(store.ConnectionsPath, json);
+
+        var vm = CreateVm(store, new StubDialogService());
+
+        vm.Profiles.Should().HaveCount(expectedCount);
     }
 }

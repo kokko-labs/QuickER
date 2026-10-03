@@ -189,10 +189,15 @@ public sealed class MainViewModelDiscardConfirmTests : IDisposable
         vm.Queries.Should().HaveCount(2, "キャンセルすればクエリは残る");
     }
 
-    /// <summary>構造が同一でクエリも未保存変更も無い Mermaid 再取込は、無確認で進むことを検証する</summary>
-    /// <remarks>直前のテストの対照。構造署名の一致判定そのものが効いていることを示す</remarks>
-    [Fact(DisplayName = "Mermaid 再取込: 構造同一でクエリが無ければ確認しない")]
-    public void ImportMermaid_SameStructureWithoutQueries_DoesNotConfirm()
+    /// <summary>
+    /// 構造が同一でクエリも未保存変更も無い Mermaid 再取込でも、空でない図なら確認を出すことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 丸ごと置換は新しい Id で全体を自動整列するため、構造署名が一致してもレイアウト・Memo・Undo 履歴を失う。
+    /// 構造署名の一致で確認を省けるのはレイアウトを引き継ぐマージ取込だけ
+    /// </remarks>
+    [Fact(DisplayName = "Mermaid 再取込: 構造同一でクエリが無くても、空でない図なら確認する")]
+    public void ImportMermaid_SameStructureWithoutQueries_StillConfirms()
     {
         var jsonPath = Path.Combine(_folder, "NoQuery.json");
         var mermaidPath = Path.Combine(_folder, "NoQuery.mmd");
@@ -202,12 +207,21 @@ public sealed class MainViewModelDiscardConfirmTests : IDisposable
         var dialogs = new StubDialogService { ConfirmResult = false };
         var vm = CreateViewModel(dialogs, new SequencedFileDialogService(jsonPath, mermaidPath));
         vm.OpenCommand.Execute(null);
+        var originalId = vm.Entities.Single().Id;
 
         vm.ImportDiagramCommand.Execute(null);
 
-        dialogs.ConfirmMessages.Should().BeEmpty();
+        // クリーンなので通常の確認（Question）。クエリが無いので件数の告知は付かない
+        dialogs
+            .ConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .NotContain(string.Format(Strings.Import_QueriesRemovedWarning, 0));
         dialogs.WarningConfirmMessages.Should().BeEmpty();
-        vm.Entities.Should().ContainSingle(e => e.TableName == "Customer");
+        vm.Entities.Should()
+            .ContainSingle()
+            .Which.Id.Should()
+            .Be(originalId, "キャンセルすれば置換しない");
     }
 
     // ---------------- テスト補助 ----------------

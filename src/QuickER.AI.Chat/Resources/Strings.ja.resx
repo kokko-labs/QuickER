@@ -157,6 +157,12 @@
   <data name="Chat_SwitchBackendBlockedDuringTurn" xml:space="preserve">
     <value>応答の実行中は接続方式を切り替えられません。先に中断してください。</value>
   </data>
+  <data name="Chat_SwitchBackendBlockedWhileStarting" xml:space="preserve">
+    <value>新しい会話の開始中は接続方式を切り替えられません。開始を待ってください。</value>
+  </data>
+  <data name="Chat_ConnectionCheckFailedFormat" xml:space="preserve">
+    <value>接続の状態を確認できませんでした: {0}</value>
+  </data>
   <data name="Chat_SendFailedFormat" xml:space="preserve">
     <value>送信に失敗しました: {0}</value>
   </data>
@@ -168,6 +174,12 @@
   </data>
   <data name="Chat_ResponseCompleted" xml:space="preserve">
     <value>応答が完了しました。</value>
+  </data>
+  <data name="Chat_ModelHistorySaveFailedFormat" xml:space="preserve">
+    <value>応答が完了しました。モデルの履歴は保存できませんでした: {0}</value>
+  </data>
+  <data name="Chat_SettingsSaveFailedFormat" xml:space="preserve">
+    <value>設定を保存できませんでした: {0}</value>
   </data>
   <data name="Chat_ErrorSystemFormat" xml:space="preserve">
     <value>エラー: {0}</value>
@@ -236,18 +248,6 @@ ER 図の作成・変更は必ず提供されたツール（{0}）で行って�
   <data name="ErDesign_ResponseLanguageRule" xml:space="preserve">
     <value># 応答言語
 応答は既定で日本語（アプリ UI の言語）で書いてください。ユーザーの直近のチャットメッセージが明らかに別の言語で書かれている場合のみ、その言語に切り替えてください。</value>
-  </data>
-  <data name="ErDesign_NamingSnakeCase" xml:space="preserve">
-    <value>- テーブル名・カラム名は必ずスネークケース (例: customer_order, customer_id) にする。</value>
-  </data>
-  <data name="ErDesign_NamingPascalCase" xml:space="preserve">
-    <value>- テーブル名・カラム名は必ずパスカルケース (例: CustomerOrder, CustomerId) にする。</value>
-  </data>
-  <data name="ErDesign_TableNamePlural" xml:space="preserve">
-    <value>- テーブル名は必ず複数形 (例: Customers, Orders) にする。</value>
-  </data>
-  <data name="ErDesign_TableNameSingular" xml:space="preserve">
-    <value>- テーブル名は必ず単数形 (例: Customer, Order) にする。</value>
   </data>
   <data name="QueryTool_SetSuccessUpdated" xml:space="preserve">
     <value>テーブル '{1}' のクエリ '{0}' を更新しました（戻り形 {2}、{3}）。</value>
@@ -381,10 +381,22 @@ ER 図の作成・変更は必ず提供されたツール（{0}）で行って�
   <data name="QueryTool_Diag_ParameterUnusedInCondition" xml:space="preserve">
     <value>パラメータ '{0}' は宣言されていますが条件で使用されていません。</value>
   </data>
+  <data name="QueryTool_Diag_SqlIgnoredForImplementation" xml:space="preserve">
+    <value>'sql' は implementation が 'sql' のときだけ使います（指定は '{0}'）。SQL は保存していません。</value>
+  </data>
+  <data name="QueryTool_Diag_ConditionIgnoredForImplementation" xml:space="preserve">
+    <value>'condition' は implementation が 'dsl' のときだけ使います（指定は '{0}'）。条件は保存していません。</value>
+  </data>
+  <data name="QueryTool_Diag_SqlImplementationWithoutSql" xml:space="preserve">
+    <value>implementation が 'sql' ですが、どの方言にも SQL がありません。生成コードでは全方言が手動実装（partial クラス）になります。</value>
+  </data>
   <data name="QueryTool_Diag_Unexpected" xml:space="preserve">
     <value>想定外の診断です: {0}</value>
   </data>
   <data name="QueryTool_InvalidArgumentsJson" xml:space="preserve">
     <value>ツール '{0}' の引数 JSON を解釈できませんでした。</value>
+  </data>
+  <data name="QueryTool_ArgumentsNotObject" xml:space="preserve">
+    <value>ツール '{0}' の引数は JSON オブジェクトで渡してください。</value>
   </data>
 </root>

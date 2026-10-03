@@ -1,5 +1,6 @@
 using System.Linq;
 using AwesomeAssertions;
+using QuickER.CodeGen.CSharp.Queries;
 using QuickER.CodeGen.UI;
 using QuickER.Model;
 
@@ -562,5 +563,64 @@ public class QueryDefinitionDialogViewModelTests
         // 生 SQL へ戻すと SQL 本文が残っている
         query.Implementation = QueryImplementationKind.Sql;
         query.SqlServerSql.Should().Be("SELECT * FROM [Order]");
+    }
+
+    /// <summary>
+    /// 生成で必ずエラーになる定義（標準メンバーと衝突するメソッド名）は、確定する前にフォーム検証で止まり、
+    /// 生成時診断と同じ文言が状態欄に出ることを検証する
+    /// </summary>
+    [Fact(DisplayName = "標準メンバーと衝突するクエリ名は生成時診断と同じ文言で確定を止める")]
+    public void ReservedMethodName_BlocksOkWithGeneratorMessage()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        query.Name = "GetById";
+
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        var expected = QueryDefinitionRules
+            .Validate(diagram.Entities[0], query.ToModel(), [])
+            .Single()
+            .Text.Format(null);
+        vm.StatusMessage.Should().Be(expected);
+        vm.StatusMessage.Should().Contain("GetByIdAsync");
+
+        query.Name = "FindById";
+
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+        vm.StatusMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// ページング・スカラーの型・パラメータ名の変更でもフォーム検証をやり直し、構造規則の違反を確定前に止めることを検証する
+    /// （これらの変更は従来フォーム検証の対象でなく、親へ再検証を知らせていなかった）
+    /// </summary>
+    [Fact(DisplayName = "ページング・スカラーの型・パラメータ名の変更でも構造規則を検証し直す")]
+    public void PagingScalarTypeAndParameterChanges_RevalidateRules()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        // 単一行にページングは付けられない
+        query.Returns = QueryReturnShape.Single;
+        query.HasPaging = true;
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        query.HasPaging = false;
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+
+        // スカラーは型が要る（型を入れた時点で確定できるようになる）
+        query.Implementation = QueryImplementationKind.Manual;
+        query.Returns = QueryReturnShape.Scalar;
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        query.ScalarType = "int32";
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+
+        // Query という名前のパラメータは契約メンバーを隠す
+        query.Parameters[0].Name = "Query";
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        query.Parameters[0].Name = "query";
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
     }
 }

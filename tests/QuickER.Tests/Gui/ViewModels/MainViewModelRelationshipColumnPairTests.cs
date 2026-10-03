@@ -167,6 +167,81 @@ public class MainViewModelRelationshipColumnPairTests : IDisposable
         relationship.ColumnPairs[0].TargetColumnId.Should().Be(duplicateCandidate.Id);
     }
 
+    /// <summary>
+    /// 複合主キーの各列が、親テーブル名由来の名前の子列を取り違えずに同名の子列へ付くことを検証する
+    /// </summary>
+    /// <param name="parentTable">親テーブル名</param>
+    /// <param name="firstKey">親の主キーの 1 列目</param>
+    /// <param name="secondKey">親の主キーの 2 列目（子にも同名の列がある）</param>
+    [Theory(DisplayName = "作成時の複合主キーの自動ペア化は各列を同名の子列へ付ける")]
+    [InlineData("Orders", "OrderId", "Revision")]
+    [InlineData("Projects", "TenantId", "ProjectId")]
+    public void CreateRelationship_CompositeKey_PairsEachColumnWithSameName(
+        string parentTable,
+        string firstKey,
+        string secondKey
+    )
+    {
+        var vm = CreateViewModel();
+        vm.Entities.Add(
+            new EntityViewModel(
+                new Entity
+                {
+                    TableName = parentTable,
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = firstKey,
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                        new Column
+                        {
+                            Name = secondKey,
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                }
+            )
+        );
+        vm.Entities.Add(
+            new EntityViewModel(
+                new Entity
+                {
+                    TableName = "Child",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "ChildId",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                        new Column { Name = firstKey, DataType = "int" },
+                        new Column { Name = secondKey, DataType = "int" },
+                    },
+                }
+            )
+        );
+        vm.UndoRedo.Clear();
+
+        var relationship = CreateRelationship(vm);
+        var parent = vm.Entities[0];
+        var child = vm.Entities[1];
+
+        relationship
+            .ColumnPairs.Select(pair =>
+                (
+                    parent.Columns.Single(c => c.Id == pair.SourceColumnId).Name,
+                    child.Columns.Single(c => c.Id == pair.TargetColumnId).Name
+                )
+            )
+            .Should()
+            .Equal((firstKey, firstKey), (secondKey, secondKey));
+    }
+
     [Fact(DisplayName = "列ペア行の確定・差し替え・削除はそれぞれ 1 回の Undo で戻る")]
     public void ColumnPairRow_CommitReplaceRemove_AreSingleUndoSteps()
     {

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -116,6 +117,26 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// （タイプミスと新規作成の意図を区別するため。選択後に別パスへ手編集すると再び存在必須に戻る）。
     /// </summary>
     private string? _creationPath;
+
+    /// <summary>
+    /// 選択時に保存済みパスワードを読み取れなかったプロファイルの Id（読めた・選び直した・保存し直したら null）
+    /// </summary>
+    /// <remarks>
+    /// このプロファイルを「パスワードを保存」オン＋パスワード欄が空のまま上書き保存すると、
+    /// 保存の正規化が空パスワードを「保存しない」へ倒して暗号ファイルを消す。一時的に読めなかっただけの
+    /// パスワードを黙って消さないよう、<see cref="SaveProfile"/> はこの組み合わせを断る。
+    /// </remarks>
+    private Guid? _unreadablePasswordProfileId;
+
+    /// <summary>
+    /// 選択の付け替えで入力欄への再適用（<see cref="ApplyProfile"/>）を行わないか（保存・名前の変更の直後だけ立てる）
+    /// </summary>
+    /// <remarks>
+    /// 保存・名前の変更の直後は、画面の入力内容がそのまま保存したものなので読み直す必要が無い。
+    /// 読み直すと「パスワードを保存」なしのプロファイルではパスワード欄が空へ戻り、名前の変更では
+    /// 未保存の編集が保存値へ戻ってしまう。
+    /// </remarks>
+    private bool _suppressProfileApply;
 
     /// <summary>パスワードも DPAPI で暗号化保存するかどうか</summary>
     [ObservableProperty]
@@ -331,8 +352,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        ApplyProfile(lastUsed.Value.Profile, lastUsed.Value.Password, updateProfileName: false);
-        StatusMessage = Strings.DbConnection_Restored;
+        var password = lastUsed.Value.Password;
+        ApplyProfile(lastUsed.Value.Profile, password.Value, updateProfileName: false);
+
+        // 読めなかったパスワードを、保存されていないのと同じ空欄として黙って出さない
+        StatusMessage =
+            password.Status == SavedPasswordStatus.Unreadable
+                ? Strings.DbConnection_RestoredPasswordUnreadable
+                : Strings.DbConnection_Restored;
     }
 
     /// <summary>プロファイルまたは前回接続情報の内容を入力欄へ反映する</summary>
@@ -396,7 +423,67 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         int.TryParse(CommandTimeout, out var value) && value >= 0 ? value : null;
 
     /// <summary>ポート入力を数値へ解析する（空欄・不正値は null＝方言既定）</summary>
-    private int? ParsePort() => int.TryParse(Port, out var value) && value > 0 ? value : null;
+    /// <remarks>不正値を既定へ倒すのは検証（<see cref="ValidateNumericInputs"/>）を通った後だけ＝実際には空欄のときだけ</remarks>
+    private int? ParsePort() =>
+        int.TryParse(Port, out var value) && value is >= 1 and <= 65535 ? value : null;
+
+    /// <summary>コマンドタイムアウトとポートの入力を検証する（問題があればステータスへ出す文言、無ければ null）</summary>
+    /// <remarks>
+    /// ポートは空欄だけを方言既定とし、非数値・範囲外は不正として止める——黙って既定ポートへ倒すと、
+    /// 打ち間違えただけで既定ポートの別インスタンスへつながり、同期なら別の DB へ DDL を流し得る。
+    /// 確定・接続テスト・プロファイルの保存の 3 経路で同じ検証を通す（保存だけ緩いと、不正値が null として
+    /// 保存され、読み込んだときに空欄＝既定ポートへ化けて同じ取り違えが残るため）。
+    /// </remarks>
+    private string? ValidateNumericInputs()
+    {
+        if (ParseCommandTimeout() is null)
+        {
+            return Strings.DbConnection_CommandTimeoutInvalid;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Port) && ParsePort() is null)
+        {
+            return Strings.DbConnection_PortInvalid;
+        }
+
+        return null;
+    }
+
+    /// <summary>プロファイルの書き込み側（JSON の差し替え・暗号ファイルの読み書き）で起きる例外か</summary>
+    /// <remarks>
+    /// 読み取りの中止（<see cref="ConnectionProfileStoreUnavailableException"/>）と違い、書き込みが途中まで
+    /// 進んでいる可能性がある（JSON は書けたが暗号ファイルで失敗した等）。捕まえないとコマンドから抜けて
+    /// アプリが終了するため、利用者へ伝えて一覧をディスクから読み直す。
+    /// </remarks>
+    private static bool IsStoreWriteFailure(Exception ex) =>
+        ex is IOException or UnauthorizedAccessException or CryptographicException;
+
+    /// <summary>プロファイルの書き込みに失敗したことを伝え、一覧をディスクの実体へ揃え直す</summary>
+    /// <param name="ex">書き込みで起きた例外</param>
+    /// <param name="reselectId">読み直した一覧で選び直すプロファイルの Id（無ければ選択を外す）</param>
+    private void ReportStoreWriteFailure(Exception ex, Guid? reselectId)
+    {
+        ReloadProfiles();
+        SelectProfileWithoutApplying(reselectId);
+        StatusMessage = string.Format(Strings.DbConnection_ProfileWriteFailed, ex.Message);
+    }
+
+    /// <summary>入力欄へ再適用せずに一覧の選択だけを付け替える（保存・名前の変更・失敗後の読み直し用）</summary>
+    private void SelectProfileWithoutApplying(Guid? id)
+    {
+        _suppressProfileApply = true;
+
+        try
+        {
+            SelectedProfileItem = id is { } profileId
+                ? Profiles.FirstOrDefault(p => p.Profile.Id == profileId)
+                : null;
+        }
+        finally
+        {
+            _suppressProfileApply = false;
+        }
+    }
 
     /// <summary>2 つのファイルパスが同一を指すか（Windows のため大文字小文字は無視・正規化して比較する）</summary>
     private static bool IsSamePath(string a, string b)
@@ -434,6 +521,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedProfile));
         RenameProfileCommand.NotifyCanExecuteChanged();
 
+        // 保存・名前の変更の直後は選択を付け替えるだけ（入力欄は保存した内容そのもの）
+        if (_suppressProfileApply)
+        {
+            return;
+        }
+
+        _unreadablePasswordProfileId = null;
+
         if (value is null)
         {
             return;
@@ -451,11 +546,23 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        ApplyProfile(
-            profile,
-            profile.SavePassword ? _store.LoadPassword(profile.Id) : string.Empty,
-            updateProfileName: true
-        );
+        var password = profile.SavePassword
+            ? _store.LoadPassword(profile.Id)
+            : SavedPassword.Missing;
+        ApplyProfile(profile, password.Value, updateProfileName: true);
+
+        // 読めなかったパスワードは空欄で出すが、黙らない（保存されていないのと区別して知らせ、
+        // 空欄のままの上書き保存で消えないよう覚えておく）
+        if (password.Status == SavedPasswordStatus.Unreadable)
+        {
+            _unreadablePasswordProfileId = profile.Id;
+            StatusMessage = string.Format(
+                Strings.DbConnection_ProfileLoadedPasswordUnreadable,
+                profile.Name
+            );
+            return;
+        }
+
         StatusMessage = string.Format(Strings.DbConnection_ProfileLoaded, profile.Name);
     }
 
@@ -485,12 +592,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [RelayCommand]
     private async Task TestConnectionAsync()
     {
-        // 確定と同じ値でテストするため、ここでも先にタイムアウト入力を検証する
-        if (ParseCommandTimeout() is not { } commandTimeoutSeconds)
+        // 確定と同じ値でテストするため、ここでも先にタイムアウト・ポートの入力を検証する
+        if (ValidateNumericInputs() is { } invalid)
         {
-            StatusMessage = Strings.DbConnection_CommandTimeoutInvalid;
+            StatusMessage = invalid;
             return;
         }
+
+        var commandTimeoutSeconds = ParseCommandTimeout()!.Value;
 
         IsBusy = true;
         StatusMessage = Strings.DbConnection_Connecting;
@@ -523,6 +632,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// 保存名を打ち間違えた・使い回しただけで、本番の接続先と保存済みパスワードが警告なく失われるため
     /// （プロファイルに履歴も取り消しも無く、同じダイアログの削除には確認がある）。
     /// 選択中のプロファイル自身の上書き（読み込んで直して保存）は従来どおり確認しない。
+    /// 保存名は前後の空白を除いてから照合する（保存する名前と同じ値で探さないと、空白を付けただけで
+    /// 上書き確認も上書きもすり抜け、同じ名前のプロファイルが 2 つできる）。
     /// </remarks>
     [RelayCommand]
     private void SaveProfile()
@@ -533,9 +644,17 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             return;
         }
 
+        if (ValidateNumericInputs() is { } invalid)
+        {
+            StatusMessage = invalid;
+            return;
+        }
+
+        var name = ProfileName.Trim();
+
         // 同名かつ同一方言のプロファイルのみ上書き対象とする
         var existing = Profiles.FirstOrDefault(p =>
-            string.Equals(p.Profile.Name, ProfileName, StringComparison.OrdinalIgnoreCase)
+            string.Equals(p.Profile.Name, name, StringComparison.OrdinalIgnoreCase)
             && string.Equals(
                 p.Profile.Dbms,
                 SelectedProvider.Name,
@@ -543,12 +662,26 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             )
         );
 
+        // 保存済みパスワードを読み取れなかったプロファイルを、空欄のまま「パスワードを保存」付きで上書きすると、
+        // 保存の正規化がパスワードを「保存しない」へ倒して暗号ファイルを消す。一時的に読めなかっただけの
+        // パスワードを黙って失わないよう、入力し直すかチェックを外すかを利用者に決めてもらう
+        if (
+            existing is not null
+            && existing.Profile.Id == _unreadablePasswordProfileId
+            && SavePassword
+            && string.IsNullOrEmpty(Password)
+        )
+        {
+            StatusMessage = Strings.DbConnection_SaveRefusedPasswordUnreadable;
+            return;
+        }
+
         if (!ConfirmOverwriteOtherProfile(existing?.Profile))
         {
             return;
         }
 
-        var profile = CreateCurrentProfile(existing?.Profile.Id, ProfileName.Trim());
+        var profile = CreateCurrentProfile(existing?.Profile.Id, name);
 
         try
         {
@@ -561,9 +694,17 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
             return;
         }
+        catch (Exception ex) when (IsStoreWriteFailure(ex))
+        {
+            ReportStoreWriteFailure(ex, profile.Id);
+            return;
+        }
 
+        // 保存したので、読めなかったパスワードは入力し直した値か「保存しない」で置き換わった
+        _unreadablePasswordProfileId = null;
         ReloadProfiles();
-        SelectedProfileItem = Profiles.FirstOrDefault(p => p.Profile.Id == profile.Id);
+        SelectProfileWithoutApplying(profile.Id);
+        ProfileName = profile.Name;
         StatusMessage = string.Format(Strings.DbConnection_ProfileSaved, profile.Name);
     }
 
@@ -630,32 +771,47 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         }
 
         var oldName = target.Name;
-        // 保存済みのパスワードをそのまま書き戻す（Upsert は空パスワードだと暗号ファイルを消すため）
-        var password = target.SavePassword ? _store.LoadPassword(target.Id) : string.Empty;
+        bool renamed;
 
         try
         {
-            target.Name = newName;
-
-            // 置き換え先の削除と改名は 1 回の読み書きで行う（別々に呼ぶと、2 回目が読めなかったときに
-            // 置き換え先だけが消えて対象は変わらない状態が残る）
-            _store.Upsert(target, password, conflict?.Id);
+            // 名前だけを書き換える専用経路を使う（パスワードを読み戻して書き戻すと、一時的に読めなかった
+            // パスワードが空値として書き戻されて消えるため）。置き換え先の削除と改名は 1 回の読み書きで行う
+            // （別々に呼ぶと、2 回目が読めなかったときに置き換え先だけが消えて対象は変わらない状態が残る）
+            renamed = _store.Rename(target.Id, newName, conflict?.Id);
         }
         catch (ConnectionProfileStoreUnavailableException)
         {
-            // 書けなかったので、一覧に載っているインスタンスの名前も変更前へ戻す
-            // （ここで戻さないと、保存されていない名前が画面にだけ残る）
-            target.Name = oldName;
+            // 何も書いていないので、一覧も選択もそのままにして伝えるだけにする
             StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
+            return;
+        }
+        catch (Exception ex) when (IsStoreWriteFailure(ex))
+        {
+            ReportStoreWriteFailure(ex, target.Id);
             return;
         }
 
         ReloadProfiles();
-        SelectedProfileItem = Profiles.FirstOrDefault(item => item.Profile.Id == target.Id);
+
+        if (!renamed)
+        {
+            // 別のプログラムが消していた。読み直した一覧には居ないので選択を外して伝える
+            SelectProfileWithoutApplying(null);
+            StatusMessage = string.Format(Strings.DbConnection_ProfileNotFound, oldName);
+            return;
+        }
+
+        SelectProfileWithoutApplying(target.Id);
+        ProfileName = newName;
         StatusMessage = string.Format(Strings.DbConnection_ProfileRenamed, oldName, newName);
     }
 
     /// <summary>選択中プロファイルを確認のうえ削除する</summary>
+    /// <remarks>
+    /// 接続先と保存済みパスワードの暗号ファイルごと消え、取り消せないため警告つき
+    /// （<see cref="IDialogService.ConfirmWarning"/>）で確認する＝別のプロファイルへの上書きと同じ水準。
+    /// </remarks>
     [RelayCommand]
     private void DeleteProfile()
     {
@@ -666,7 +822,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         }
 
         if (
-            !_dialogs.Confirm(
+            !_dialogs.ConfirmWarning(
                 string.Format(Strings.DbConnection_DeleteProfileConfirm, SelectedProfile.Name),
                 Strings.Common_Confirm
             )
@@ -676,15 +832,22 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         }
 
         var name = SelectedProfile.Name;
+        var id = SelectedProfile.Id;
 
         try
         {
-            _store.Delete(SelectedProfile.Id);
+            _store.Delete(id);
         }
         catch (ConnectionProfileStoreUnavailableException)
         {
             // 削除は行われておらず、登録済みの内容も無傷。選択も一覧もそのままにして伝えるだけにする
             StatusMessage = Strings.DbConnection_ProfileStoreUnavailable;
+            return;
+        }
+        catch (Exception ex) when (IsStoreWriteFailure(ex))
+        {
+            // 一覧からは消えたが暗号ファイルが残った、などがあり得る。ディスクの実体で一覧を出し直す
+            ReportStoreWriteFailure(ex, id);
             return;
         }
 
@@ -745,10 +908,10 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     {
         // タイムアウトは方言に依らず効くため、方言別の検証より先に見る。
         // 0 は ADO.NET の規約どおり「無制限」として通し、空欄・非数値・負値を弾く（黙って既定へ
-        // 丸めると「入れた値と違う値で動く」ため）
-        if (ParseCommandTimeout() is null)
+        // 丸めると「入れた値と違う値で動く」ため）。ポートも同じ理由で、空欄以外の不正値を弾く
+        if (ValidateNumericInputs() is { } invalid)
         {
-            StatusMessage = Strings.DbConnection_CommandTimeoutInvalid;
+            StatusMessage = invalid;
             return;
         }
 
@@ -804,11 +967,13 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         {
             _store.SaveLastUsed(currentProfile, Password);
         }
-        catch (ConnectionProfileStoreUnavailableException)
+        catch (Exception ex)
+            when (ex is ConnectionProfileStoreUnavailableException || IsStoreWriteFailure(ex))
         {
-            // ここでの保存は確定の「ついで」の記録で、書けなくてもファイルの中身は前のまま＝何も失われない
-            // （次回ダイアログの初期値が前々回のものになるだけ）。利用者が頼んだのは接続の確定なので、
-            // 記録できないことを理由に確定そのものを止めるのは釣り合わない。黙って諦めて先へ進む。
+            // ここでの保存は確定の「ついで」の記録で、書けなくても失うのは前回接続の記録だけ
+            // （次回ダイアログの初期値が前々回のものになるか、パスワードが空で復元されるだけ）。
+            // 利用者が頼んだのは接続の確定なので、記録できないことを理由に確定そのものを止めるのは
+            // 釣り合わない。黙って諦めて先へ進む（ダイアログはこの直後に閉じ、ステータスを読む場所も無い）。
         }
 
         Result = ToSettings();

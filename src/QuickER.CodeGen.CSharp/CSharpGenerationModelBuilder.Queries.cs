@@ -36,44 +36,6 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>ビルド全体で射影 DTO 名の重複を検出するための集合（namespace 単位で一意が必要）</summary>
     private readonly HashSet<string> _queryDtoNames = new(StringComparer.Ordinal);
 
-    /// <summary>
-    /// 標準 Repository メンバー・リモートエンドポイントの操作名と衝突するため名前付きクエリに使えないメソッド名。
-    /// </summary>
-    /// <remarks>
-    /// C# メンバー名の衝突（コンパイルエラー）だけでなく、リモートサービスのルート
-    /// （<c>POST {prefix}/{エンティティ}/{操作}</c>）の衝突も対象にする。ルートが重なると同じパスへ
-    /// ハンドラが 2 本張られ、実行時に AmbiguousMatch の 500 になる（<c>SaveMany</c>＝保存の複数形・
-    /// <c>Ping</c>＝死活確認・<c>SyncCeiling</c> / <c>SyncChanges</c> / <c>SyncKeys</c> / <c>SyncPage</c>＝
-    /// 同期専用エンドポイント）。リモートを生成しない構成でも予約する（後からリモートを ON にした
-    /// 瞬間に既存クエリ名が壊れる非対称を作らない）。照合はルートの照合規則に合わせて大小無視
-    /// （ASP.NET Core のルートリテラルは大小を区別しないため、<c>Savemany</c> のような大小違いも
-    /// 同じパスへの 2 本目のハンドラになる）。
-    /// </remarks>
-    private static readonly HashSet<string> ReservedQueryMethodNames = new(
-        StringComparer.OrdinalIgnoreCase
-    )
-    {
-        "GetByIdAsync",
-        "GetAllAsync",
-        "InsertAsync",
-        "BulkInsertAsync",
-        "UpdateAsync",
-        "DeleteAsync",
-        "SaveAsync",
-        "SaveManyAsync",
-        "PingAsync",
-        "SyncCeilingAsync",
-        "SyncChangesAsync",
-        "SyncKeysAsync",
-        "SyncPageAsync",
-        "Query",
-        "QueryBySqlAsync",
-        "ExecuteSqlAsync",
-        "ExecuteScalarSqlAsync",
-        "QueryProjectionBySqlAsync",
-        "CheckUniquenessAsync",
-    };
-
     /// <summary>1 エンティティ分のクエリブロック（テンプレートへ渡す整形済みテキスト群）</summary>
     private sealed record QueryBlocks(
         string InterfaceBlock,
@@ -266,7 +228,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         // 予約名と同じく大小無視で照合する（大小だけ違うメソッド名は C# としては共存できるが、
         // リモートのルートは大小を区別しないため同じパスへの 2 本目のハンドラになる）
         var usedMethodNames = new HashSet<string>(
-            ReservedQueryMethodNames,
+            QueryDefinitionRules.ReservedMethodNames,
             StringComparer.OrdinalIgnoreCase
         );
 
@@ -412,95 +374,55 @@ internal sealed partial class CSharpGenerationModelBuilder
         var hasError = false;
 
         // ---- メソッド名（PascalCase ＋ Async。既存メンバー・他クエリとの衝突を弾く） ----
-        var baseName = _nameConverter.ToPropertyName(query.Name);
+        // 判定と文言の正本は QueryDefinitionRules（保存前に同じ判定を通す set_query・クエリ定義ダイアログと共有）
+        var methodName = QueryDefinitionRules.ToMethodName(query.Name);
 
-        if (string.IsNullOrEmpty(baseName) || !IsValidIdentifier(baseName))
+        if (methodName is null)
         {
-            diagnostics.Add(
-                GenerationDiagnostic.Error(
-                    string.Format(Strings.CodeGen_Query_InvalidName, query.Name)
-                )
-            );
+            AddRuleError(diagnostics, QueryRuleViolation.InvalidName(query.Name));
             return null;
         }
 
-        var methodName = baseName.EndsWith("Async", StringComparison.Ordinal)
-            ? baseName
-            : baseName + "Async";
-
-        if (ReservedQueryMethodNames.Contains(methodName))
+        if (QueryDefinitionRules.ReservedMethodNames.Contains(methodName))
         {
-            diagnostics.Add(
-                GenerationDiagnostic.Error(
-                    string.Format(Strings.CodeGen_Query_ReservedMethodName, query.Name, methodName)
-                )
+            AddRuleError(
+                diagnostics,
+                QueryRuleViolation.ReservedMethodName(query.Name, methodName)
             );
             return null;
         }
 
         if (!usedMethodNames.Add(methodName))
         {
-            diagnostics.Add(
-                GenerationDiagnostic.Error(
-                    string.Format(
-                        Strings.CodeGen_Query_DuplicateMethodName,
-                        query.Name,
-                        methodName,
-                        entity.TableName
-                    )
-                )
+            AddRuleError(
+                diagnostics,
+                QueryRuleViolation.DuplicateMethodName(query.Name, methodName, entity.TableName)
             );
             return null;
         }
 
         // ---- 戻り形と実装方式の整合 ----
-        if (query.Returns == QueryReturnShape.Scalar)
+        if (query.Returns == QueryReturnShape.Scalar && string.IsNullOrWhiteSpace(query.ScalarType))
         {
-            if (string.IsNullOrWhiteSpace(query.ScalarType))
-            {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(Strings.CodeGen_Query_ScalarRequiresType, query.Name)
-                    )
-                );
-                hasError = true;
-            }
-
-            if (query.Implementation == QueryImplementationKind.Dsl)
-            {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(Strings.CodeGen_Query_ScalarDslUnsupported, query.Name)
-                    )
-                );
-                hasError = true;
-            }
-        }
-
-        var supportsOrderAndPaging =
-            query.Returns is QueryReturnShape.List or QueryReturnShape.Projection;
-
-        if (query.HasPaging && !supportsOrderAndPaging)
-        {
-            diagnostics.Add(
-                GenerationDiagnostic.Error(
-                    string.Format(Strings.CodeGen_Query_PagingRequiresList, query.Name)
-                )
-            );
+            AddRuleError(diagnostics, QueryRuleViolation.ScalarRequiresType(query.Name));
             hasError = true;
         }
 
-        if (
-            query.OrderBy.Count > 0
-            && !supportsOrderAndPaging
-            && query.Returns != QueryReturnShape.Single
-        )
+        if (QueryDefinitionRules.IsScalarDslConflict(query.Returns, query.Implementation))
         {
-            diagnostics.Add(
-                GenerationDiagnostic.Error(
-                    string.Format(Strings.CodeGen_Query_OrderByRequiresList, query.Name)
-                )
-            );
+            AddRuleError(diagnostics, QueryRuleViolation.ScalarDslUnsupported(query.Name));
+            hasError = true;
+        }
+
+        if (query.HasPaging && !QueryDefinitionRules.SupportsPaging(query.Returns))
+        {
+            AddRuleError(diagnostics, QueryRuleViolation.PagingRequiresList(query.Name));
+            hasError = true;
+        }
+
+        if (query.OrderBy.Count > 0 && !QueryDefinitionRules.SupportsOrderBy(query.Returns))
+        {
+            AddRuleError(diagnostics, QueryRuleViolation.OrderByRequiresList(query.Name));
             hasError = true;
         }
 
@@ -508,16 +430,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         var parameterDecls = new List<string>();
         var argumentNames = new List<string>();
         var payloadParameters = new List<QueryPayloadParameter>();
-        var seenParameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "cancellationToken",
-        };
-
-        if (query.HasPaging)
-        {
-            seenParameterNames.Add("take");
-            seenParameterNames.Add("skip");
-        }
+        var seenParameterNames = new HashSet<string>(
+            QueryDefinitionRules.ImplicitParameterNames(query.HasPaging),
+            StringComparer.OrdinalIgnoreCase
+        );
 
         // ---- 列バインディング（条件・並び順・射影・列参照パラメータが参照する列 → 生成コード上の姿） ----
         var columnBindings = BuildQueryColumnBindings(entity);
@@ -534,16 +450,11 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         foreach (var parameter in query.Parameters)
         {
-            if (!IsValidIdentifier(parameter.Name))
+            if (!QueryDefinitionRules.IsValidIdentifier(parameter.Name))
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Query_InvalidParameterName,
-                            query.Name,
-                            parameter.Name
-                        )
-                    )
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.InvalidParameterName(query.Name, parameter.Name)
                 );
                 hasError = true;
                 continue;
@@ -552,16 +463,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             // 生成メソッドの本体は契約メンバー Query() の呼び出しで組み立てる。同名（大文字小文字まで一致）の
             // 引数はメソッドグループを隠して Query() がコンパイル不能になるため名指しで拒否する
             // （小文字の query は隠さないので合法のまま）
-            if (string.Equals(parameter.Name, "Query", StringComparison.Ordinal))
+            if (QueryDefinitionRules.IsReservedParameterName(parameter.Name))
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Query_ReservedParameterName,
-                            query.Name,
-                            parameter.Name
-                        )
-                    )
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.ReservedParameterName(query.Name, parameter.Name)
                 );
                 hasError = true;
                 continue;
@@ -569,14 +475,9 @@ internal sealed partial class CSharpGenerationModelBuilder
 
             if (!seenParameterNames.Add(parameter.Name))
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Query_DuplicateParameterName,
-                            query.Name,
-                            parameter.Name
-                        )
-                    )
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.DuplicateParameterName(query.Name, parameter.Name)
                 );
                 hasError = true;
                 continue;
@@ -804,38 +705,24 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             if (query.Fields.Count == 0 || string.IsNullOrEmpty(resultTypeName))
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(Strings.CodeGen_Query_ProjectionRequiresFields, query.Name)
-                    )
-                );
+                AddRuleError(diagnostics, QueryRuleViolation.ProjectionRequiresFields(query.Name));
                 return null;
             }
 
-            if (!IsValidIdentifier(resultTypeName))
+            if (!QueryDefinitionRules.IsValidIdentifier(resultTypeName))
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Query_InvalidResultTypeName,
-                            query.Name,
-                            resultTypeName
-                        )
-                    )
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.InvalidResultTypeName(query.Name, resultTypeName)
                 );
                 return null;
             }
 
             if (!_queryDtoNames.Add(resultTypeName))
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Query_DuplicateResultTypeName,
-                            query.Name,
-                            resultTypeName
-                        )
-                    )
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.DuplicateResultTypeName(query.Name, resultTypeName)
                 );
                 return null;
             }
@@ -1396,16 +1283,14 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         foreach (var field in query.Fields)
         {
-            if (!IsValidIdentifier(field.Name) || !seenFieldNames.Add(field.Name))
+            if (
+                !QueryDefinitionRules.IsValidIdentifier(field.Name)
+                || !seenFieldNames.Add(field.Name)
+            )
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Query_InvalidFieldName,
-                            query.Name,
-                            field.Name
-                        )
-                    )
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.InvalidFieldName(query.Name, field.Name)
                 );
                 hasError = true;
                 continue;
@@ -1414,14 +1299,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             // DTO 型名と同名のプロパティは C# が禁止する（CS0542＝メンバー名は外側の型名と同じにできない）
             if (string.Equals(field.Name, resultTypeName, StringComparison.Ordinal))
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Query_FieldNameEqualsResultType,
-                            query.Name,
-                            field.Name
-                        )
-                    )
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.FieldNameEqualsResultType(query.Name, field.Name)
                 );
                 hasError = true;
                 continue;
@@ -1516,13 +1396,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                 || !columnBindings.TryGetValue(columnId, out var binding)
             )
             {
-                diagnostics.Add(
-                    GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Query_ProjectionDslRequiresColumns,
-                            query.Name
-                        )
-                    )
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.ProjectionDslRequiresColumns(query.Name)
                 );
                 return null;
             }
@@ -1556,15 +1432,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         return $"{lambdaVar} => new {resultTypeName} {{ {string.Join(", ", assignments)} }}";
     }
 
-    /// <summary>C# 識別子として妥当か（先頭は文字か _、以降は文字・数字・_。予約語は不可）</summary>
-    /// <remarks>
-    /// 生成器は識別子を <c>@</c> エスケープせずそのまま出力するため、予約語（<c>class</c> / <c>int</c> 等）を
-    /// 通すと引数宣言・DTO プロパティ宣言がコンパイル不能になる（判定表は名前空間検証と共有。
-    /// 文脈キーワードは識別子として合法なので対象にしない）
-    /// </remarks>
-    private static bool IsValidIdentifier(string name) =>
-        !string.IsNullOrEmpty(name)
-        && (char.IsLetter(name[0]) || name[0] == '_')
-        && name.All(c => char.IsLetterOrDigit(c) || c == '_')
-        && !CSharpNamespaceValidator.IsReservedKeyword(name);
+    /// <summary>構造規則の違反をエラー診断として積む（文言は保存前の検証と同じ <see cref="QueryRuleViolation.Text"/>）</summary>
+    private static void AddRuleError(
+        ICollection<GenerationDiagnostic> diagnostics,
+        QueryRuleViolation violation
+    ) => diagnostics.Add(GenerationDiagnostic.Error(violation.Text.Format(null)));
 }

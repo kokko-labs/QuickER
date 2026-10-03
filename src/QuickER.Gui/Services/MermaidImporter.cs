@@ -33,6 +33,8 @@ public static partial class MermaidImporter
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
         var relationships = new List<Relationship>();
+        // リレーション行のラベル（relationships と同じ添字）。制約名にするかは全行を読んでから決める
+        var labels = new List<string?>();
         Entity? currentEntity = null;
         // 未閉じブロックの診断はループを抜けてから判明するため、ブロック開始行を覚えておく
         var currentEntityLineNumber = 0;
@@ -88,7 +90,7 @@ public static partial class MermaidImporter
 
                 if (line.EndsWith("{", StringComparison.Ordinal))
                 {
-                    var tableName = line[..^1].Trim();
+                    var tableName = UnquoteEntityName(line[..^1].Trim());
 
                     if (string.IsNullOrWhiteSpace(tableName))
                     {
@@ -107,7 +109,9 @@ public static partial class MermaidImporter
                     continue;
                 }
 
-                relationships.Add(ParseRelationship(line, entities));
+                var (relationship, label) = ParseRelationship(line, entities);
+                relationships.Add(relationship);
+                labels.Add(label);
             }
             catch (InvalidDataException ex)
             {
@@ -136,6 +140,7 @@ public static partial class MermaidImporter
 
         EnsureEntitiesHaveColumns(entities.Values);
         ResolveRelationshipColumns(entities, relationships);
+        AssignConstraintNames(entities, relationships, labels);
 
         return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
     }
@@ -195,7 +200,11 @@ public static partial class MermaidImporter
     }
 
     /// <summary>リレーション定義行を解析して <see cref="Relationship"/> を生成する</summary>
-    private static Relationship ParseRelationship(
+    /// <returns>
+    /// 制約名を持たないリレーションと、行のラベル（無ければ <c>null</c>）。
+    /// ラベルを制約名にするかは <see cref="AssignConstraintNames"/> が全行を見て決める
+    /// </returns>
+    private static (Relationship Relationship, string? Label) ParseRelationship(
         string line,
         IReadOnlyDictionary<string, Entity> entities
     )
@@ -209,8 +218,8 @@ public static partial class MermaidImporter
             );
         }
 
-        var leftTable = match.Groups["left"].Value;
-        var rightTable = match.Groups["right"].Value;
+        var leftTable = UnquoteEntityName(match.Groups["left"].Value);
+        var rightTable = UnquoteEntityName(match.Groups["right"].Value);
         var symbol = match.Groups["symbol"].Value;
         var label = match.Groups["label"].Success ? match.Groups["label"].Value.Trim() : null;
 
@@ -229,14 +238,82 @@ public static partial class MermaidImporter
         }
 
         var relationshipType = ParseRelationshipType(symbol);
-        return new Relationship
+        var relationship = new Relationship
         {
             SourceEntityId = entities[leftTable].Id,
             TargetEntityId = entities[rightTable].Id,
             Type = relationshipType,
-            ConstraintName = string.IsNullOrWhiteSpace(label) ? null : label,
         };
+
+        return (relationship, string.IsNullOrWhiteSpace(label) ? null : label);
     }
+
+    /// <summary>リレーション行のラベルから、リレーションの制約名を決める</summary>
+    /// <remarks>
+    /// <para>
+    /// Mermaid のラベルは構文上必須で、他のツールの図では <c>has</c> / <c>contains</c> のような動詞が
+    /// 繰り返し使われる。ラベルをそのまま制約名にすると、同じ名前の制約が並んで DDL の 2 本目が失敗するため、
+    /// ラベルを制約名に採るのは次をすべて満たすときに限る。
+    /// </para>
+    /// <list type="bullet">
+    /// <item>名前の無いリレーションに出力側が書くラベル（<see cref="MermaidExporter.UnnamedRelationshipLabel"/>）でない</item>
+    /// <item>1 トークン（空白を含まず、引用符で始まらない）。引用つき・複数語のラベルは動詞句で、制約名ではない</item>
+    /// <item>上の 2 条件を満たすラベルの中で、大文字小文字を無視して 1 回しか現れない</item>
+    /// <item>主キー・一意制約の名前（<see cref="ConstraintNames.CollectTableConstraints"/>）と衝突しない</item>
+    /// </list>
+    /// <para>
+    /// 回数は上の 2 条件で除外した後に数える。制約名として採られ得るのは残ったラベルだけで、衝突し得るのも
+    /// それらどうしだけだから（除外したラベルと同じ綴りでも、除外したほうは名前にならないので衝突しない）。
+    /// </para>
+    /// <para>
+    /// 採らなかったリレーションは、採ったラベルを先にすべて名前にしてから
+    /// <see cref="ConstraintNames.NameUnnamedForeignKeys"/> へ渡す（既定名 <c>FK_{子}_{親}</c> が空いていれば
+    /// 名前を持たないまま、ふさがっていれば一意な名前を明示する＝DBML・Excel 定義書の取込と同じ規則）。
+    /// 子の列名を一意化に使うので、列ペアを決めた後に呼ぶ
+    /// </para>
+    /// </remarks>
+    private static void AssignConstraintNames(
+        IReadOnlyDictionary<string, Entity> entities,
+        IReadOnlyList<Relationship> relationships,
+        IReadOnlyList<string?> labels
+    )
+    {
+        var candidates = labels
+            .Select(label => IsLabelShapedLikeName(label) ? label : null)
+            .ToList();
+        var candidateCounts = candidates
+            .OfType<string>()
+            .GroupBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Count(),
+                StringComparer.OrdinalIgnoreCase
+            );
+        var reserved = ConstraintNames.CollectTableConstraints(entities.Values);
+
+        for (var index = 0; index < relationships.Count; index++)
+        {
+            var label = candidates[index];
+
+            if (label is not null && candidateCounts[label] == 1 && reserved.Add(label))
+            {
+                relationships[index].ConstraintName = label;
+            }
+        }
+
+        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships);
+    }
+
+    /// <summary>ラベルが制約名の候補になる形か（出力側のプレースホルダでない 1 トークン）を判定する</summary>
+    private static bool IsLabelShapedLikeName(string? label) =>
+        label is not null
+        && !string.Equals(
+            label,
+            MermaidExporter.UnnamedRelationshipLabel,
+            StringComparison.OrdinalIgnoreCase
+        )
+        && !label.StartsWith('"')
+        && !label.Any(char.IsWhiteSpace);
 
     /// <summary>Mermaid のカーディナリティ記号からリレーション種別を判定する</summary>
     private static RelationshipType ParseRelationshipType(string symbol)
@@ -311,10 +388,17 @@ public static partial class MermaidImporter
     /// <remarks>
     /// 末尾にアンダースコア連結された数値引数を括弧記法へ戻す
     /// 例: <c>nvarchar_100</c> → <c>nvarchar(100)</c>、<c>decimal_10_2</c> → <c>decimal(10,2)</c>
-    /// 数値以外のアンダースコアはそのまま保持する
+    /// 数値以外のアンダースコアはそのまま保持する。空の型を表すトークン
+    /// （<see cref="MermaidExporter.EmptyDataTypeToken"/>）は空へ戻す。
+    /// 出力側の欠落判定（型の書き換え）もこの復元で往復させて判定する
     /// </remarks>
-    private static string DenormalizeDataType(string dataType)
+    internal static string DenormalizeDataType(string dataType)
     {
+        if (dataType == MermaidExporter.EmptyDataTypeToken)
+        {
+            return string.Empty;
+        }
+
         // 「識別子 + (_数値)の繰り返し」に一致する型のみ復元対象とする
         var match = System.Text.RegularExpressions.Regex.Match(
             dataType,
@@ -335,6 +419,11 @@ public static partial class MermaidImporter
         return $"{typeName}({args})";
     }
 
+    /// <summary>引用された実体名（<c>"Order Details"</c>）なら引用符を外す（素の名前はそのまま）</summary>
+    /// <remarks>Mermaid の引用実体名はエスケープを持たない（中に <c>"</c> を書けない）ので、両端を外すだけ</remarks>
+    private static string UnquoteEntityName(string token) =>
+        token.Length >= 2 && token[0] == '"' && token[^1] == '"' ? token[1..^1] : token;
+
     /// <summary>Mermaid 属性行末尾の二重引用符で始まる説明文字列を除去する</summary>
     private static string RemoveTrailingComment(string line)
     {
@@ -343,8 +432,9 @@ public static partial class MermaidImporter
     }
 
     /// <summary>リレーション行（左テーブル・カーディナリティ記号・右テーブル・任意ラベル）にマッチする正規表現</summary>
+    /// <remarks>テーブル名は素の名前と、空白を含められる引用実体名（<c>"Order Details"</c>）の双方を受け付ける</remarks>
     [GeneratedRegex(
-        @"^(?<left>\S+)\s+(?<symbol>[|}{o]+--[|}{o]+)\s+(?<right>\S+)(?:\s*:\s*(?<label>.+))?$",
+        @"^(?<left>""[^""]*""|\S+)\s+(?<symbol>[|}{o]+--[|}{o]+)\s+(?<right>""[^""]*""|\S+)(?:\s*:\s*(?<label>.+))?$",
         RegexOptions.Compiled
     )]
     private static partial Regex RelationshipLineRegex();

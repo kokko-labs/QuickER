@@ -308,4 +308,52 @@ public class ClaudeCodeChatEngineAttachmentTests
 
         await engine.DisposeAsync();
     }
+
+    /// <summary>
+    /// 添付をディスクへ書き出せなかったときは、SendAsync から例外で抜けず、他のターン失敗と同じく
+    /// TurnCompleted（失敗）で 1 回だけ知らせ、続くターンが通常どおり動くことを検証する
+    /// （書き出しが try の外だと、例外で抜けてターンの CancellationTokenSource が残る）。
+    /// </summary>
+    [Fact(DisplayName = "添付を書き出せなければターン失敗として知らせ、次のターンは動く")]
+    public async Task SendAsync_AttachmentWriteFailure_CompletesTurnAsFailure()
+    {
+        var client = new RecordingClaudeCodeClient();
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost: null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("1 ターン目", TestContext.Current.CancellationToken);
+
+        // attachments/ を作れないよう、同名のファイルを先に置く（Directory.CreateDirectory が IOException）
+        var workingDirectory = client.Options[0].WorkingDirectory;
+        File.WriteAllText(Path.Combine(workingDirectory, "attachments"), "block");
+
+        var send = () =>
+            engine.SendAsync(
+                "添付つき",
+                new[] { PngAttachment() },
+                TestContext.Current.CancellationToken
+            );
+        await send.Should().NotThrowAsync();
+
+        results.Should().HaveCount(2);
+        results[1].Success.Should().BeFalse();
+        results[1].Error.Should().NotBeNullOrWhiteSpace();
+        // 書き出しに失敗したターンは CLI を起動しない
+        client.Prompts.Should().HaveCount(1);
+
+        await engine.SendAsync("3 ターン目", TestContext.Current.CancellationToken);
+
+        results.Should().HaveCount(3);
+        results[2].Success.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
 }

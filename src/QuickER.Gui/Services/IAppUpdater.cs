@@ -18,13 +18,21 @@ public interface IAppUpdater
     /// <summary>
     /// 更新の有無を問い合わせる。新バージョンがあればユーザー提示用の表示文字列を返し、
     /// なければ <c>null</c> を返す。取得した更新情報は内部に保持し、以降の
-    /// <see cref="DownloadAsync"/> / <see cref="ApplyAndRestart"/> で使う。
+    /// <see cref="DownloadAsync"/> / <see cref="ApplyOnExit"/> で使う。
     /// </summary>
     Task<string?> CheckForUpdateAsync();
 
     /// <summary>直前の <see cref="CheckForUpdateAsync"/> で見つかった更新をダウンロードする</summary>
     Task DownloadAsync();
 
-    /// <summary>ダウンロード済みの更新を適用し、アプリを再起動する（このメソッドから戻らない）</summary>
-    void ApplyAndRestart();
+    /// <summary>
+    /// このプロセスの終了を待ってダウンロード済みの更新を適用するよう、更新プログラムを起動する
+    /// </summary>
+    /// <param name="restart">適用後にアプリを再起動するか</param>
+    /// <remarks>
+    /// 呼び出しから戻る（プロセスは終わらせない）。適用はこのプロセスが終わってから始まるので、
+    /// 呼ぶのは正常終了の最後（<see cref="PostExitActions.Run"/>）だけにする＝その場でプロセスを終わらせる
+    /// 方式は、メインウィンドウの <c>Closing</c>（自動保存・機能モジュールの終了連鎖）を飛ばす。
+    /// </remarks>
+    void ApplyOnExit(bool restart);
 }

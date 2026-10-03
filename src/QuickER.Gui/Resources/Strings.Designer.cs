@@ -119,11 +119,20 @@ namespace QuickER.Resources {
         }
 
         /// <summary>
-        ///   A new version {0} is available. Download it and restart to apply? に類似しているローカライズされた文字列を検索します。
+        ///   A new version {0} is available. Download it? (When the download finishes, QuickER asks whether to restart and apply it.) に類似しているローカライズされた文字列を検索します。
         /// </summary>
         public static string Update_ConfirmMessage {
             get {
                 return ResourceManager.GetString("Update_ConfirmMessage", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   The update is ready. Restart QuickER now to apply it? (If you choose Cancel, it is applied the next time you close QuickER.) に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Update_RestartConfirmMessage {
+            get {
+                return ResourceManager.GetString("Update_RestartConfirmMessage", resourceCulture);
             }
         }
 
@@ -646,6 +655,18 @@ namespace QuickER.Resources {
         public static string Status_ExternalReloadFailed {
             get {
                 return ResourceManager.GetString("Status_ExternalReloadFailed", resourceCulture);
+            }
+        }
+
+        public static string Status_ExternalWatchInterrupted {
+            get {
+                return ResourceManager.GetString("Status_ExternalWatchInterrupted", resourceCulture);
+            }
+        }
+
+        public static string Status_ExternalWatchResumed {
+            get {
+                return ResourceManager.GetString("Status_ExternalWatchResumed", resourceCulture);
             }
         }
 
@@ -1228,12 +1249,6 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string Undo_ImportSchema {
-            get {
-                return ResourceManager.GetString("Undo_ImportSchema", resourceCulture);
-            }
-        }
-        
         public static string Undo_MoveColumnOrder {
             get {
                 return ResourceManager.GetString("Undo_MoveColumnOrder", resourceCulture);
@@ -1742,6 +1757,48 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("ExportOmission_ColumnNameNormalized", resourceCulture);
             }
         }
+
+        public static string ExportOmission_ForeignKeyMarkerWithoutRelationship {
+            get {
+                return ResourceManager.GetString("ExportOmission_ForeignKeyMarkerWithoutRelationship", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_RelationshipWithoutColumns {
+            get {
+                return ResourceManager.GetString("ExportOmission_RelationshipWithoutColumns", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ComputedColumn {
+            get {
+                return ResourceManager.GetString("ExportOmission_ComputedColumn", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_TableNameNormalized {
+            get {
+                return ResourceManager.GetString("ExportOmission_TableNameNormalized", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ColumnTypeNormalized {
+            get {
+                return ResourceManager.GetString("ExportOmission_ColumnTypeNormalized", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_UniqueConstraintOnForeignKeyColumn {
+            get {
+                return ResourceManager.GetString("ExportOmission_UniqueConstraintOnForeignKeyColumn", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_RelationshipConstraintName {
+            get {
+                return ResourceManager.GetString("ExportOmission_RelationshipConstraintName", resourceCulture);
+            }
+        }
         
         public static string Import_ReplaceConfirm {
             get {
@@ -1782,6 +1839,12 @@ namespace QuickER.Resources {
         public static string Export_FormatUndetermined {
             get {
                 return ResourceManager.GetString("Export_FormatUndetermined", resourceCulture);
+            }
+        }
+        
+        public static string Export_TargetIsCurrentDocument {
+            get {
+                return ResourceManager.GetString("Export_TargetIsCurrentDocument", resourceCulture);
             }
         }
         
@@ -1896,6 +1959,12 @@ namespace QuickER.Resources {
         public static string Dbml_UnsupportedRelationshipForm {
             get {
                 return ResourceManager.GetString("Dbml_UnsupportedRelationshipForm", resourceCulture);
+            }
+        }
+
+        public static string Dbml_UnsupportedInlineReference {
+            get {
+                return ResourceManager.GetString("Dbml_UnsupportedInlineReference", resourceCulture);
             }
         }
         
@@ -2013,12 +2082,6 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string TableDoc_TableNoColumns {
-            get {
-                return ResourceManager.GetString("TableDoc_TableNoColumns", resourceCulture);
-            }
-        }
-        
         public static string TableDoc_RelMissingTableName {
             get {
                 return ResourceManager.GetString("TableDoc_RelMissingTableName", resourceCulture);
@@ -2096,6 +2159,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Tool_Summary_TargetDbms {
+            get {
+                return ResourceManager.GetString("Tool_Summary_TargetDbms", resourceCulture);
+            }
+        }
+
         public static string Tool_Summary_RelationshipCount {
             get {
                 return ResourceManager.GetString("Tool_Summary_RelationshipCount", resourceCulture);
@@ -2135,6 +2204,12 @@ namespace QuickER.Resources {
         public static string Tool_EntityRemoved {
             get {
                 return ResourceManager.GetString("Tool_EntityRemoved", resourceCulture);
+            }
+        }
+
+        public static string Tool_EntityRemovedWithQueries {
+            get {
+                return ResourceManager.GetString("Tool_EntityRemovedWithQueries", resourceCulture);
             }
         }
 
@@ -2216,6 +2291,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Tool_PrimaryKeyNullableIgnored {
+            get {
+                return ResourceManager.GetString("Tool_PrimaryKeyNullableIgnored", resourceCulture);
+            }
+        }
+
         public static string Tool_SourceAndTargetTableRequired {
             get {
                 return ResourceManager.GetString("Tool_SourceAndTargetTableRequired", resourceCulture);
@@ -2231,6 +2312,24 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipAdded {
             get {
                 return ResourceManager.GetString("Tool_RelationshipAdded", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipPairsIncomplete {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipPairsIncomplete", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipParentHasNoKey {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipParentHasNoKey", resourceCulture);
+            }
+        }
+        
+        public static string Tool_RelationshipParentColumnsNotKey {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipParentColumnsNotKey", resourceCulture);
             }
         }
 
@@ -2285,6 +2384,48 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipAmbiguous {
             get {
                 return ResourceManager.GetString("Tool_RelationshipAmbiguous", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipConstraintNameTaken {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipConstraintNameTaken", resourceCulture);
+            }
+        }
+
+        public static string Tool_TableNameTaken {
+            get {
+                return ResourceManager.GetString("Tool_TableNameTaken", resourceCulture);
+            }
+        }
+
+        public static string Tool_NewTableNameEmpty {
+            get {
+                return ResourceManager.GetString("Tool_NewTableNameEmpty", resourceCulture);
+            }
+        }
+
+        public static string Tool_DataTypeEmpty {
+            get {
+                return ResourceManager.GetString("Tool_DataTypeEmpty", resourceCulture);
+            }
+        }
+
+        public static string Tool_ColumnNameTaken {
+            get {
+                return ResourceManager.GetString("Tool_ColumnNameTaken", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipTypeInvalid {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipTypeInvalid", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipDuplicate {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipDuplicate", resourceCulture);
             }
         }
 
@@ -2387,6 +2528,12 @@ namespace QuickER.Resources {
         public static string Crash_CopyDetails {
             get {
                 return ResourceManager.GetString("Crash_CopyDetails", resourceCulture);
+            }
+        }
+
+        public static string SingleInstance_RunningWithDifferentPrivileges {
+            get {
+                return ResourceManager.GetString("SingleInstance_RunningWithDifferentPrivileges", resourceCulture);
             }
         }
 

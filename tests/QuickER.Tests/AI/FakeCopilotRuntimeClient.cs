@@ -30,6 +30,9 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     /// <summary>渡されたセッション生成オプション（最後の 1 件）</summary>
     public CopilotSessionOptions? LastSessionOptions { get; private set; }
 
+    /// <summary>接続（<see cref="StartAsync"/> の成功）の回数</summary>
+    public int StartCallCount { get; private set; }
+
     /// <summary>セッション生成回数</summary>
     public int StartSessionCallCount { get; private set; }
 
@@ -41,6 +44,12 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     /// 複数ターンを跨ぐシナリオ（自動続行ナッジ）で、テスト側が発火の順番を組まずに済むようにする。
     /// </summary>
     public bool AutoIdleAfterSend { get; set; }
+
+    /// <summary>
+    /// 送信の中で、アイドル復帰の自動発火の後に走らせる処理（SDK のスレッドが送信の途中で
+    /// セッションエラーを流す・送信自体が例外で終わる、といった順序の模擬に使う）
+    /// </summary>
+    public Action? DuringSend { get; set; }
 
     /// <summary>返送したツール結果の記録</summary>
     public List<(string RequestId, string Result, bool Success)> ToolResponses { get; } = new();
@@ -92,8 +101,25 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
             return Task.FromException(StartError);
         }
 
+        StartCallCount++;
+
+        if (StartGate is null)
+        {
+            IsStarted = true;
+            return Task.CompletedTask;
+        }
+
+        return WaitStartAsync(StartGate);
+    }
+
+    /// <summary>非 null なら StartAsync をこのタスクの完了まで待たせる（起動が終わるまで IsStarted は偽）</summary>
+    public Task? StartGate { get; set; }
+
+    /// <summary>起動の完了を模擬して待つ</summary>
+    private async Task WaitStartAsync(Task gate)
+    {
+        await gate;
         IsStarted = true;
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
@@ -123,8 +149,23 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
             return Task.FromException(StartSessionError);
         }
 
+        if (StartSessionGate is not null)
+        {
+            return WaitSessionAsync(StartSessionGate);
+        }
+
         HasSession = true;
         return Task.CompletedTask;
+    }
+
+    /// <summary>非 null なら StartSessionAsync（会話の開始）をこのタスクの完了まで待たせる</summary>
+    public Task? StartSessionGate { get; set; }
+
+    /// <summary>会話の開始の完了を模擬して待つ</summary>
+    private async Task WaitSessionAsync(Task gate)
+    {
+        await gate;
+        HasSession = true;
     }
 
     /// <inheritdoc />
@@ -140,6 +181,8 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
         {
             SessionIdle?.Invoke(this, false);
         }
+
+        DuringSend?.Invoke();
 
         return Task.CompletedTask;
     }
@@ -167,6 +210,15 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// copilot ランタイムとの接続が切れたことを模す（実装は接続断の失敗を受けるとセッションごと接続を捨てる）
+    /// </summary>
+    public void SimulateConnectionLost()
+    {
+        IsStarted = false;
+        HasSession = false;
     }
 
     /// <summary>アシスタント応答の差分を発火する</summary>

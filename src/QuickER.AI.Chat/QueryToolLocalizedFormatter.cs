@@ -194,6 +194,18 @@ public static class QueryToolLocalizedFormatter
                 Strings.QueryTool_Diag_ParameterUnusedInCondition,
                 d.Name
             ),
+            // 生成時診断と同じ文言（規則と対象のクエリ名・名前を含む）を UI 言語で描画する
+            QueryToolDiagnosticCode.GenerationRule => d.DetailText?.Format(null) ?? string.Empty,
+            QueryToolDiagnosticCode.SqlIgnoredForImplementation => string.Format(
+                Strings.QueryTool_Diag_SqlIgnoredForImplementation,
+                d.Detail
+            ),
+            QueryToolDiagnosticCode.ConditionIgnoredForImplementation => string.Format(
+                Strings.QueryTool_Diag_ConditionIgnoredForImplementation,
+                d.Detail
+            ),
+            QueryToolDiagnosticCode.SqlImplementationWithoutSql =>
+                Strings.QueryTool_Diag_SqlImplementationWithoutSql,
             _ => string.Format(Strings.QueryTool_Diag_Unexpected, d.Code),
         };
     }

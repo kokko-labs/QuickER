@@ -225,13 +225,24 @@ public sealed class ChatTurnEngine : IErChatEngine
             await RunAgenticLoopAsync(token).ConfigureAwait(false);
             TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
+            // 利用者の中断（InterruptAsync・呼び出し側トークン）だけを無音の中断として扱う。
+            // HttpClient のタイムアウトのような取り消しはトークンが立っていないので、下の失敗へ落とす
             TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
+        }
+        catch (TurnAbortedException ex)
+        {
+            // エンジン自身が打ち切った失敗は、文言が既に表示用なのでそのまま出す
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
         }
         catch (Exception ex)
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            // SDK・通信の失敗は生の例外文でなく表示言語の文言へ変換する
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, AiErrorMessageLocalizer.ToUserMessage(ex))
+            );
         }
         finally
         {
@@ -277,7 +288,7 @@ public sealed class ChatTurnEngine : IErChatEngine
 
             if (roundTrips > MaxToolRoundTripsPerTurn)
             {
-                throw new InvalidOperationException(
+                throw new TurnAbortedException(
                     string.Format(Strings.Chat_ToolLoopLimitReached, MaxToolRoundTripsPerTurn)
                 );
             }
@@ -364,4 +375,10 @@ public sealed class ChatTurnEngine : IErChatEngine
         _turnCts?.Dispose();
         return ValueTask.CompletedTask;
     }
+
+    /// <summary>
+    /// エンジン自身がターンを打ち切るときの例外（メッセージは表示用の文言そのもの）。
+    /// SDK・通信の例外と分けて捕捉し、<see cref="AiErrorMessageLocalizer"/> を通さずに出すための目印
+    /// </summary>
+    private sealed class TurnAbortedException(string message) : Exception(message);
 }

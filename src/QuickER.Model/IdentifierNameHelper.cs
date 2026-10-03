@@ -1,9 +1,13 @@
 using System.Text.RegularExpressions;
 
-namespace QuickER.Services;
+namespace QuickER.Model;
 
 /// <summary>テーブル名・カラム名などの識別子を単語単位で扱うユーティリティ</summary>
-/// <remarks>AI スキーマの命名正規化と外部キー列の名前解決（<see cref="ForeignKeyColumnResolver"/>）で共用する</remarks>
+/// <remarks>
+/// 外部キー列の名前解決（<see cref="ForeignKeyColumnResolver"/>）が用いる。
+/// GUI のリレーション作成・内蔵チャットと MCP のツール・Mermaid の取込が同じ命名規則を使うよう、
+/// どれからも参照できるモデル側に置く
+/// </remarks>
 public static class IdentifierNameHelper
 {
     /// <summary>スネークケース・パスカルケース等の識別子を単語のリストへ分解する</summary>
@@ -56,33 +60,57 @@ public static class IdentifierNameHelper
     }
 
     /// <summary>単語を語尾の簡易ルールで単数形へ変換する (不規則変化は非対応)</summary>
-    public static string SingularizeWord(string word)
+    /// <remarks>最も確からしい候補（<see cref="SingularizeCandidates"/> の先頭）を返す</remarks>
+    public static string SingularizeWord(string word) => SingularizeCandidates(word)[0];
+
+    /// <summary>単語の単数形の候補を、確からしい順に返す (不規則変化は非対応)</summary>
+    /// <returns>複数形らしくない単語はその単語だけ。語尾から 1 つに決まらないときは 2 つ</returns>
+    /// <remarks>
+    /// <para>
+    /// <c>-ses</c> / <c>-zes</c> / <c>-ches</c> / <c>-oes</c> などは、<c>es</c> を落とすか <c>s</c> だけを落とすかが語尾から決まらない
+    /// （<c>statuses</c>→<c>status</c> と <c>courses</c>→<c>course</c>、<c>matches</c>→<c>match</c> と <c>caches</c>→<c>cache</c>）。
+    /// 1 つに決め打つとどちらかの語を必ず取り違えるため、両方を候補として返す（外部キー列名の推定は全候補を期待名に加える）。
+    /// </para>
+    /// <para>
+    /// 先頭に置く候補は、<c>-sses</c> / <c>-xes</c> / <c>-ches</c> / <c>-shes</c> / <c>-zzes</c> / <c>-oes</c> と、
+    /// <c>-uses</c>（<c>-ouses</c> / <c>-auses</c> を除く）で <c>es</c> を落とした形、それ以外の <c>-ses</c> / <c>-zes</c> で
+    /// <c>s</c> だけを落とした形（<c>addresses</c>→<c>address</c>・<c>statuses</c>→<c>status</c>・<c>warehouses</c>→<c>warehouse</c>・
+    /// <c>courses</c>→<c>course</c>・<c>sizes</c>→<c>size</c>）
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<string> SingularizeCandidates(string word)
     {
         if (!IsLikelyPlural(word))
         {
-            return word;
+            return [word];
         }
 
         var lower = word.ToLowerInvariant();
 
         if (lower.EndsWith("ies", StringComparison.Ordinal) && word.Length > 3)
         {
-            return word[..^3] + "y";
+            return [word[..^3] + "y"];
         }
 
-        if (
-            lower.EndsWith("ches", StringComparison.Ordinal)
-            || lower.EndsWith("shes", StringComparison.Ordinal)
-            || lower.EndsWith("xes", StringComparison.Ordinal)
-            || lower.EndsWith("zes", StringComparison.Ordinal)
-            || lower.EndsWith("ses", StringComparison.Ordinal)
-            || lower.EndsWith("oes", StringComparison.Ordinal)
-        )
+        string[] ambiguousEndings = ["ses", "xes", "zes", "ches", "shes", "oes"];
+
+        if (!ambiguousEndings.Any(ending => lower.EndsWith(ending, StringComparison.Ordinal)))
         {
-            return word[..^2];
+            return [word[..^1]];
         }
 
-        return word[..^1];
+        string[] esFirstEndings = ["sses", "xes", "ches", "shes", "zzes", "oes"];
+        var dropEs = word[..^2];
+        var dropS = word[..^1];
+        var esFirst =
+            esFirstEndings.Any(ending => lower.EndsWith(ending, StringComparison.Ordinal))
+            || (
+                lower.EndsWith("uses", StringComparison.Ordinal)
+                && !lower.EndsWith("ouses", StringComparison.Ordinal)
+                && !lower.EndsWith("auses", StringComparison.Ordinal)
+            );
+
+        return esFirst ? [dropEs, dropS] : [dropS, dropEs];
     }
 
     /// <summary>単語を語尾の簡易ルールで複数形へ変換する (不規則変化は非対応)</summary>

@@ -131,6 +131,50 @@ public class ImageExportServiceTests
         svg.Should().Contain(">主キー</text>");
     }
 
+    /// <summary>
+    /// 図由来の文字列に XML 1.0 で使えない文字が混ざっても、整形式の SVG を出すことを検証する
+    /// </summary>
+    /// <remarks>
+    /// Word から貼り付けた改行（U+000B）・その他の制御文字・対になっていないサロゲートは空白へ置き換え、
+    /// 対になったサロゲート（絵文字など）はそのまま残す
+    /// </remarks>
+    [Fact(DisplayName = "BuildSvg は XML で使えない文字を空白へ置き換え、整形式の SVG を出す")]
+    public void BuildSvg_ReplacesCharactersInvalidInXml()
+    {
+        var verticalTab = ((char)0x0B).ToString();
+        var startOfHeading = ((char)0x01).ToString();
+        var loneSurrogate = ((char)0xD800).ToString();
+        var emoji = char.ConvertFromUtf32(0x1F600);
+        var vm = new MainViewModel { ShowColumnDescriptionsInDiagram = true };
+        vm.Entities.Add(
+            new EntityViewModel(
+                new Entity
+                {
+                    TableName = "Cust" + verticalTab + "omer",
+                    Description = "line1" + verticalTab + "line2" + emoji,
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id" + startOfHeading,
+                            DataType = "int" + loneSurrogate,
+                            Description = "key" + ((char)0xFFFE).ToString(),
+                        },
+                    },
+                }
+            )
+        );
+
+        var svg = ImageExportService.BuildSvg(vm);
+
+        var parse = () => System.Xml.Linq.XDocument.Parse(svg);
+        parse.Should().NotThrow("XML 1.0 で使えない文字を残すと整形式でなくなる");
+        svg.Should().Contain(">Cust omer</text>");
+        svg.Should().Contain(">Id </text>");
+        svg.Should().Contain(">int </text>");
+        svg.Should().Contain(">line1 line2" + emoji + "</text>");
+    }
+
     /// <summary>説明表示 OFF のとき、説明テキストが出力されないことを検証する</summary>
     [Fact(DisplayName = "BuildSvg は説明表示 OFF のとき説明を出力しない")]
     public void BuildSvg_OmitsDescriptions_WhenDisabled()

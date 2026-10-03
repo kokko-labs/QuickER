@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.CodeGen.CSharp.Queries;
 using QuickER.CodeGen.UI.Resources;
 using QuickER.Model;
 
@@ -120,8 +121,10 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
 
     /// <summary>全クエリを検証し、状態メッセージと OK 可否を更新する</summary>
     /// <remarks>
-    /// 深い検証（予約名など）は生成時診断に委ねる。ここではフォームとして最低限
-    /// （名前必須・エンティティ必須・射影の DTO/フィールド・条件診断・同一エンティティ内の重複名）を見る。
+    /// フォームとしての検証（名前必須・エンティティ必須・射影の DTO/フィールド・条件診断・同一エンティティ内の重複名）の後に、
+    /// 生成で必ずエラーになる構造規則（予約名・識別子・メソッド名や DTO 型名の重複・戻り形と実装方式の整合）を
+    /// 生成器と同じ <see cref="QueryDefinitionRules.Validate"/> で見る（文言も生成時診断と同じ）。
+    /// 型トークンの解決・条件式の型整合のような方言や列の型に依る検証は、生成時診断に委ねる。
     /// </remarks>
     public void Revalidate()
     {
@@ -189,6 +192,33 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
                 Strings.QueryDialog_Status_DuplicateName,
                 duplicate.First().Name.Trim()
             );
+        }
+
+        return FindFirstRuleViolation();
+    }
+
+    /// <summary>
+    /// 生成で必ずエラーになる構造規則の最初の違反の文言（なければ null）を返す（判定と文言は生成器と共有）
+    /// </summary>
+    /// <remarks>
+    /// フォームの検証をすべて通った後に呼ぶ（エンティティは実在する前提）。重複の相手には、ダイアログで編集中の
+    /// ほかのクエリすべて（保存すると図のクエリ一覧になるもの）を渡す。
+    /// </remarks>
+    private string? FindFirstRuleViolation()
+    {
+        var definitions = Queries.Select(query => query.ToModel()).ToList();
+
+        for (var index = 0; index < definitions.Count; index++)
+        {
+            var definition = definitions[index];
+            var entity = _entities.First(e => e.Id == definition.EntityId);
+            var others = definitions.Where((_, otherIndex) => otherIndex != index);
+            var violations = QueryDefinitionRules.Validate(entity, definition, others);
+
+            if (violations.Count > 0)
+            {
+                return violations[0].Text.Format(null);
+            }
         }
 
         return null;

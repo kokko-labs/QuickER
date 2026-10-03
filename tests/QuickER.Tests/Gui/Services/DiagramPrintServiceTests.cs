@@ -104,6 +104,35 @@ public class DiagramPrintServiceTests
         text.Should().NotContain("無題");
     }
 
+    /// <summary>ヘッダの日時が UI の言語・地域に依らず同じ書式（西暦・区切り '/'）になることを検証する</summary>
+    /// <remarks>de-DE は日付区切りが '.'、th-TH は既定の暦が仏暦（2026 年＝2569 年）</remarks>
+    [Theory(DisplayName = "BuildHeaderText の日時は現在のカルチャに依らず yyyy/MM/dd HH:mm で書く")]
+    [InlineData("de-DE")]
+    [InlineData("th-TH")]
+    [InlineData("ja-JP")]
+    public void BuildHeaderText_TimestampIsCultureInvariant(string cultureName)
+    {
+        var saved = System.Globalization.CultureInfo.CurrentCulture;
+
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture =
+                System.Globalization.CultureInfo.GetCultureInfo(cultureName);
+
+            var text = DiagramPrintService.BuildHeaderText(
+                null,
+                new DateTime(2026, 7, 4, 9, 30, 0),
+                includeTimestamp: true
+            );
+
+            text.Should().Be("2026/07/04 09:30");
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = saved;
+        }
+    }
+
     /// <summary>タイトルが空欄・日時印字 OFF のとき、ヘッダが空文字（何も印字しない）になることを検証する</summary>
     [Fact(DisplayName = "BuildHeaderText はタイトル空欄・日時 OFF のとき空文字を返す")]
     public void BuildHeaderText_ReturnsEmpty_WhenTitleBlankAndTimestampDisabled()

@@ -49,6 +49,10 @@ public static partial class TableDefinitionDocumentImporter
         var summaries = ReadSummarySheet(summarySheet);
         var entities = ReadDetailSheets(workbook, summaries, roleSheets);
         var relationships = ReadRelationshipSheet(relationshipSheet, entities);
+
+        // 制約名欄が空のリレーションが同じテーブルの組に 2 行あると既定名が重なるため、ふさがった分だけ名前を付ける
+        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships);
+
         var diagram = new ErDiagram
         {
             Entities = entities.Values.ToList(),
@@ -56,6 +60,24 @@ public static partial class TableDefinitionDocumentImporter
         };
 
         // 対象 DBMS は言語非依存のカスタムプロパティから復元する（欠落・空値は既定値のまま＝寛容仕様）
+        if (ReadTargetDbms(workbook) is { } targetDbms)
+        {
+            diagram.TargetDbms = targetDbms;
+        }
+
+        return diagram;
+    }
+
+    /// <summary>ブックが宣言している対象 DBMS を読む（カスタムプロパティが無い・空なら null＝不明）</summary>
+    /// <param name="workbook">対象ブック</param>
+    /// <returns>前後の空白を除いた方言名。宣言が無ければ null</returns>
+    /// <remarks>
+    /// 他のアプリを経由して保存し直したブック（Google スプレッドシート等）はカスタムプロパティを落とすことがある。
+    /// <see cref="Load(XLWorkbook)"/> はそのとき <see cref="ErDiagram"/> の既定の方言のままにするため、
+    /// 「宣言が無い」ことと「既定の方言を宣言している」ことを区別したい呼び出し側（マージ取込）はこちらを見る。
+    /// </remarks>
+    public static string? ReadTargetDbms(XLWorkbook workbook)
+    {
         var targetDbms = workbook
             .CustomProperties.FirstOrDefault(property =>
                 string.Equals(
@@ -66,12 +88,7 @@ public static partial class TableDefinitionDocumentImporter
             )
             ?.Value?.ToString();
 
-        if (!string.IsNullOrWhiteSpace(targetDbms))
-        {
-            diagram.TargetDbms = targetDbms.Trim();
-        }
-
-        return diagram;
+        return string.IsNullOrWhiteSpace(targetDbms) ? null : targetDbms.Trim();
     }
 
     /// <summary>ブックの書式バージョンが、この版で読める範囲かを確かめる</summary>
@@ -295,12 +312,8 @@ public static partial class TableDefinitionDocumentImporter
             }
         }
 
-        if (entity.Columns.Count == 0)
-        {
-            throw new InvalidDataException(
-                string.Format(Strings.TableDoc_TableNoColumns, entity.TableName)
-            );
-        }
+        // 列の行が 1 つも無いシートは列の無いテーブルとして受ける（モデルは許し、出力もそのまま書き出すため、
+        // 断ると自分が書いた定義書を読み戻せない）
 
         // 番号順に制約を復元する（出力時の連番＝登場順のため、往復で制約の並びが保たれる）
         foreach (var columnIds in uniqueConstraintColumns.Values)
@@ -394,6 +407,7 @@ public static partial class TableDefinitionDocumentImporter
             // 署名はテーブルの組だけになり、同一ペアの 2 行目は従来どおり重複として弾かれる
             var childColumnNames = new List<string>();
             var parentColumnNames = new List<string>();
+            var isPairless = false;
 
             if (type != RelationshipType.ManyToMany)
             {
@@ -401,7 +415,11 @@ public static partial class TableDefinitionDocumentImporter
                 childColumnNames = SplitColumnNames(GetCellText(worksheet, row, 4));
                 parentColumnNames = SplitColumnNames(GetCellText(worksheet, row, 6));
 
-                if (childColumnNames.Count == 0 || parentColumnNames.Count == 0)
+                // 両欄とも空＝列の対応を持たないリレーション（出力は解決できない列ペアをこの形で書く）。
+                // 片方だけ空の行は書き損じなので断る
+                isPairless = childColumnNames.Count == 0 && parentColumnNames.Count == 0;
+
+                if (!isPairless && (childColumnNames.Count == 0 || parentColumnNames.Count == 0))
                 {
                     throw new InvalidDataException(
                         string.Format(Strings.TableDoc_RelMissingColumn, row)
@@ -416,9 +434,12 @@ public static partial class TableDefinitionDocumentImporter
                 }
             }
 
-            // 構成列まで含めた署名で重複を判定する（列名の解決より前＝行の書かれ方だけで決まる）
+            // 構成列まで含めた署名で重複を判定する（列名の解決より前＝行の書かれ方だけで決まる）。
+            // 列の対応を持たないリレーションは判定しない（同じテーブルの組に何本あっても図として成り立ち、
+            // 出力もそのまま書き出すため、断ると自分が書いた定義書を読み戻せない）
             if (
-                !existingSignatures.Add(
+                !isPairless
+                && !existingSignatures.Add(
                     new RelationshipSignature(
                         parent.TableName,
                         child.TableName,
@@ -433,7 +454,7 @@ public static partial class TableDefinitionDocumentImporter
                 );
             }
 
-            if (type != RelationshipType.ManyToMany)
+            if (type != RelationshipType.ManyToMany && !isPairless)
             {
                 var pairs = new List<RelationshipColumnPair>();
 

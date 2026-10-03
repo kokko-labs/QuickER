@@ -37,12 +37,6 @@ public static class MockBundleExporter
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
-    /// <summary>href="*.html"（任意の #フラグメント付き）を捕捉するリンク書き換え用の正規表現</summary>
-    private static readonly Regex HtmlLinkRegex = new(
-        "href\\s*=\\s*([\"'])([^\"']+?\\.html)(#[^\"']*)?\\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
-    );
-
     /// <summary>モックフォルダ内容を単一 HTML へ結合する</summary>
     /// <param name="store">対象のモックフォルダストア</param>
     /// <returns>外部参照を持たない自己完結の単一 HTML</returns>
@@ -64,7 +58,7 @@ public static class MockBundleExporter
                 continue;
             }
 
-            var screenId = ScreenId(screen.File);
+            var screenId = MockScreenLinks.ScreenId(screen.File);
             firstScreenId ??= screenId;
 
             sections.Append(BuildSection(screenId, html));
@@ -116,26 +110,28 @@ public static class MockBundleExporter
         return section.ToString();
     }
 
-    /// <summary>相対 <c>*.html</c> リンクを <c>#ハッシュ</c>へ書き換える（外部 URL は素通し）</summary>
+    /// <summary>相対 <c>*.html</c> リンクを <c>#画面ID</c> へ書き換える（外部 URL は素通し）</summary>
+    /// <remarks>
+    /// リンク先のページ内フラグメント（<c>Foo.html#items</c> の <c>#items</c>）は捨てる。単一 HTML では
+    /// <c>location.hash</c> が表示画面の指定そのものなので、<c>#Foo#items</c> のように残すと画面 ID と
+    /// 一致せず遷移できない（遷移先の画面は表示されるが、その中のアンカー位置へはスクロールしない）。
+    /// </remarks>
     private static string RewriteLinks(string content)
     {
-        return HtmlLinkRegex.Replace(
+        return MockScreenLinks.RelativeScreenLink.Replace(
             content,
             match =>
             {
-                var quote = match.Groups[1].Value;
-                var path = match.Groups[2].Value;
-
                 // 絶対 URL（外部）は書き換えない
-                if (path.Contains("://", StringComparison.Ordinal))
+                if (!MockScreenLinks.TryGetScreenFile(match.Groups[2].Value, out var file))
                 {
                     return match.Value;
                 }
 
-                var id = ScreenId(path);
-                var fragment = match.Groups[3].Value; // 末尾の #… があればそのまま温存
+                // リンク先は元の属性値のテキスト（HTML の文字参照を含み得る）なので、エスケープし直さない
+                var quote = match.Groups[1].Value;
 
-                return $"href={quote}#{id}{fragment}{quote}";
+                return $"href={quote}#{MockScreenLinks.ScreenId(file)}{quote}";
             }
         );
     }
@@ -168,6 +164,17 @@ public static class MockBundleExporter
     }
 
     /// <summary>ハッシュルーターの JS を組み立てる（hash なしはマニフェスト先頭画面を表示）</summary>
+    /// <remarks>
+    /// <para>
+    /// 照合は hash と <c>data-screen</c> の両方を <c>decodeURIComponent</c>（失敗したら元の値）と小文字化で
+    /// そろえてから行う。ブラウザは空白・非 ASCII を含む hash を % エンコードして返し、画面の同一性は
+    /// 他所（保存・検証・ファイルシステム）では大文字小文字を区別しないため。
+    /// </para>
+    /// <para>
+    /// どの画面にも一致しない hash（ページ内アンカー <c>#items</c> 等）では表示中の画面を据え置き、
+    /// ブラウザのアンカー移動に任せる。先頭画面へ戻すのは、まだ何も表示していない初回だけ。
+    /// </para>
+    /// </remarks>
     private static string BuildRouterScript(string? firstScreenId)
     {
         // 先頭画面 ID を JS の文字列リテラルへ埋め込む（無ければ空文字）
@@ -178,41 +185,33 @@ public static class MockBundleExporter
             + "  var fallback = "
             + fallback
             + ";\n"
+            + "  var current = null;\n"
+            + "  function key(value){\n"
+            + "    try { value = decodeURIComponent(value); } catch (e) {}\n"
+            + "    return value.toLowerCase();\n"
+            + "  }\n"
             + "  function show(){\n"
-            + "    var id = location.hash.replace(/^#/, '');\n"
+            + "    var id = key(location.hash.replace(/^#/, ''));\n"
             + "    var sections = document.querySelectorAll('section[data-screen]');\n"
-            + "    var matched = false;\n"
+            + "    var target = null;\n"
             + "    sections.forEach(function(s){\n"
-            + "      var isMatch = s.getAttribute('data-screen') === id;\n"
-            + "      s.style.display = isMatch ? '' : 'none';\n"
-            + "      if (isMatch) { matched = true; }\n"
+            + "      if (target === null && key(s.getAttribute('data-screen')) === id) { target = s; }\n"
             + "    });\n"
-            + "    if (!matched) {\n"
+            + "    if (target === null) {\n"
+            + "      if (current !== null) { return; }\n"
             + "      sections.forEach(function(s){\n"
-            + "        s.style.display = s.getAttribute('data-screen') === fallback ? '' : 'none';\n"
+            + "        if (target === null && s.getAttribute('data-screen') === fallback) { target = s; }\n"
             + "      });\n"
             + "    }\n"
+            + "    sections.forEach(function(s){\n"
+            + "      s.style.display = s === target ? '' : 'none';\n"
+            + "    });\n"
+            + "    current = target;\n"
             + "  }\n"
             + "  window.addEventListener('hashchange', show);\n"
             + "  show();\n"
             + "})();\n"
             + "</script>";
-    }
-
-    /// <summary>画面ファイル名から拡張子を除いたセクション ID を得る（例 <c>OrderList.html</c> → <c>OrderList</c>）</summary>
-    private static string ScreenId(string file)
-    {
-        var normalized = file.Replace('\\', '/');
-        var slash = normalized.LastIndexOf('/');
-
-        if (slash >= 0)
-        {
-            normalized = normalized.Substring(slash + 1);
-        }
-
-        var dot = normalized.LastIndexOf('.');
-
-        return dot > 0 ? normalized.Substring(0, dot) : normalized;
     }
 
     /// <summary>属性値向けの最小限のエスケープ</summary>

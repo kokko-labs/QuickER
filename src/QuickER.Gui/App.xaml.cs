@@ -43,6 +43,15 @@ namespace QuickER
         /// </remarks>
         private MainViewModel? _mainViewModel;
 
+        /// <summary>終了の連鎖の失敗の記録先（DI コンテナの破棄後の <see cref="OnExit"/> でも使うため保持する）</summary>
+        private IShutdownFailureReporter? _shutdownFailureReporter;
+
+        /// <summary>
+        /// 機能モジュールの後始末（メインウィンドウの Closing とクラッシュ経路の両方から呼ぶ・1 回だけ実行する）。
+        /// モジュールの初期化前なら null
+        /// </summary>
+        private FeatureModuleShutdownOnce? _featureModuleShutdown;
+
         /// <summary>DI コンテナを構築し、メインウィンドウを解決して表示する</summary>
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -102,12 +111,15 @@ namespace QuickER
             }
 
             // 起動時更新チェックサービス。本番用ファクトリ（feed => Velopack 実装）と
-            // 実環境変数によるフィード解決（UpdateFeed.Resolve）、および設定によるオプトアウト
+            // 実環境変数によるフィード解決（UpdateFeed.Resolve）、適用の登録先と終了の要求
+            // （正常終了の最後に適用する＝WpfApplicationExit）、および設定によるオプトアウト
             // （gui-settings.json の CheckForUpdatesOnStartup）を注入する。
             services.AddSingleton(serviceProvider => new UpdateService(
                 serviceProvider.GetRequiredService<IDialogService>(),
                 feed => new VelopackAppUpdater(feed),
                 () => UpdateFeed.Resolve(Environment.GetEnvironmentVariable),
+                WpfApplicationExit.Pending,
+                WpfApplicationExit.RequestClose,
                 () => new GuiAppSettingsStore().Load().CheckForUpdatesOnStartup
             ));
 
@@ -149,10 +161,18 @@ namespace QuickER
             // メインウィンドウ終了時に各モジュールへ後始末（モードレスウィンドウの強制終了など）を通知する。
             // 1 つのモジュールの失敗で後続へ届かなくなると常駐する子プロセスが孤児として残るため、
             // 受け止めを持つ FeatureModuleShutdown 経由で回す
+            // クラッシュ経路（Closing を通らない）も同じインスタンスを呼ぶので、終了処理の途中でクラッシュしても
+            // モジュールの後始末は 1 回しか走らない
             var shutdownFailureReporter = _provider.GetRequiredService<IShutdownFailureReporter>();
+            _shutdownFailureReporter = shutdownFailureReporter;
+            var featureModuleShutdown = new FeatureModuleShutdownOnce(
+                modules,
+                _provider,
+                shutdownFailureReporter
+            );
+            _featureModuleShutdown = featureModuleShutdown;
 
-            window.Closing += (_, _) =>
-                FeatureModuleShutdown.CloseAll(modules, _provider, shutdownFailureReporter);
+            window.Closing += (_, _) => featureModuleShutdown.CloseAll();
 
             window.Show();
 
@@ -171,30 +191,40 @@ namespace QuickER
         }
 
         /// <summary>
-        /// UI スレッドの未捕捉例外を受け、緊急保存 → クラッシュログ → 報告ダイアログの順に処理してから終了する。
+        /// UI スレッドの未捕捉例外を受け、緊急保存 → クラッシュログ → 機能モジュールの後始末 → 報告ダイアログの順に
+        /// 処理してから終了する。
         /// </summary>
         /// <remarks>
+        /// <para>
         /// 終了に <see cref="Application.Shutdown()"/> を使わないのは、MainWindow の Closing 経由で
         /// 通常の自動保存が「壊れた ViewModel 状態」で走り、直前に採った緊急保存スナップショットを
         /// 上書きしうるため。プロセスを即座に終える <see cref="Environment.Exit(int)"/> を用いる。
+        /// Closing を通らない分、機能モジュールの後始末（AI の子プロセスの停止）はここから呼ぶ。
+        /// </para>
+        /// <para>
+        /// 報告ダイアログの表示中（入れ子のメッセージループ）に起きた 2 回目の例外は、握り潰して最初の
+        /// ダイアログへ戻す（終了は最初の呼び出しがダイアログを閉じた後に行う。判断の正本は
+        /// <see cref="CrashHandlingService.HandleUiCrash"/>）。
+        /// </para>
         /// </remarks>
         private void OnDispatcherUnhandledException(
             object sender,
             DispatcherUnhandledExceptionEventArgs e
         )
         {
+            // WPF 既定の即死（未処理例外による強制終了）を抑止し、こちらの手順で終了する
+            e.Handled = true;
+
             var version = CrashHandlingService.ResolveAppVersion();
 
-            CrashHandlingService.HandleCrash(
+            CrashHandlingService.HandleUiCrash(
                 e.Exception,
                 version,
                 TryEmergencySave,
-                logPath => ShowCrashDialog(e.Exception, version, logPath)
+                () => _featureModuleShutdown?.CloseAll(),
+                logPath => ShowCrashDialog(e.Exception, version, logPath),
+                () => Environment.Exit(1)
             );
-
-            // WPF 既定の即死（未処理例外による強制終了）を抑止し、こちらの手順で終了する
-            e.Handled = true;
-            Environment.Exit(1);
         }
 
         /// <summary>
@@ -259,7 +289,7 @@ namespace QuickER
         /// 保存された言語設定（未設定なら OS 言語から導出）を実効カルチャとして UI へ適用する。
         /// 以降に生成されるスレッド既定と現在スレッドの <see cref="Thread.CurrentUICulture"/> を上書きする。
         /// </summary>
-        private static void ApplyUiCulture()
+        internal static void ApplyUiCulture()
         {
             var settings = new GuiAppSettingsStore().Load();
             var languageCode = AppLanguage.Resolve(settings.Language, CultureInfo.CurrentUICulture);
@@ -269,10 +299,18 @@ namespace QuickER
             Thread.CurrentThread.CurrentUICulture = culture;
         }
 
-        /// <summary>終了時に DI コンテナを破棄する</summary>
+        /// <summary>終了時に DI コンテナを破棄し、終了の最後に行う処理（更新の適用・再起動）を実行する</summary>
+        /// <remarks>
+        /// ここは正常終了でだけ呼ばれる（メインウィンドウの Closing＝自動保存・終了連鎖の後）。
+        /// 終了がキャンセルされた場合とクラッシュ経路（Environment.Exit）では呼ばれないので、
+        /// 更新の適用・再起動も走らない。
+        /// </remarks>
         protected override void OnExit(ExitEventArgs e)
         {
-            _provider?.Dispose();
+            WpfApplicationExit.Pending.CompleteExit(
+                _shutdownFailureReporter ?? new CrashLogShutdownFailureReporter(),
+                () => _provider?.Dispose()
+            );
             base.OnExit(e);
         }
     }

@@ -1,5 +1,6 @@
 using System;
 using System.Windows;
+using QuickER.Resources;
 using QuickER.Services;
 using Velopack;
 
@@ -40,12 +41,23 @@ namespace QuickER
 
             // 単一インスタンス制御。既に起動済みなら、そちらのウィンドウをアクティブ化して
             // 自分は WPF を初期化せず即終了する（二重起動しない）
-            using var singleInstance = SingleInstanceGuard.TryAcquire();
+            using var singleInstance = SingleInstanceGuard.TryAcquire(out var outcome);
 
             if (singleInstance is null)
             {
+                // 権限の違うインスタンス（管理者として実行）が動いていると、アクティブ化も頼めない。
+                // 黙って終わると起動に失敗したようにしか見えないので、理由を伝えてから終わる
+                if (outcome == SingleInstanceOutcome.Inaccessible)
+                {
+                    ShowRunningWithDifferentPrivilegesMessage();
+                }
+
                 return;
             }
+
+            // 言語切替の再起動は終了処理の途中で新しいインスタンスを起動するので、その直前に座を手放す
+            // （手放さないと、新しいインスタンスが「既に起動中」と判断して黙って終わる）
+            WpfApplicationExit.Pending.ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose);
 
             App app = new();
             app.InitializeComponent();
@@ -56,6 +68,19 @@ namespace QuickER
             );
 
             app.Run();
+        }
+
+        /// <summary>権限の違うインスタンスが起動しているため起動できないことを、表示言語で伝える</summary>
+        /// <remarks>WPF の初期化前なので、言語の適用もここで行う（App と同じ規則）</remarks>
+        private static void ShowRunningWithDifferentPrivilegesMessage()
+        {
+            App.ApplyUiCulture();
+            MessageBox.Show(
+                Strings.SingleInstance_RunningWithDifferentPrivileges,
+                "QuickER",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning
+            );
         }
 
         /// <summary>メインウィンドウを前面へ出す（最小化されていれば復元する）</summary>

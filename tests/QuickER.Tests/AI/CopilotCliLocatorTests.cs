@@ -130,6 +130,73 @@ public class CopilotCliLocatorTests
     }
 
     /// <summary>
+    /// Windows では引用符で囲んだ PATH 要素（Windows では正当）も、引用符を外して走査することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "Windows では引用符で囲んだ PATH 要素も走査する")]
+    public void PathExecutableResolver_QuotedEntry_IsScanned()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var expected = Path.Combine(FakeBinDirectory, "copilot.cmd");
+        var pathValue = "\"" + FakeBinDirectory + "\"";
+
+        PathExecutableResolver
+            .Resolve("copilot", pathValue, Existing(expected))
+            .Should()
+            .Be(expected);
+    }
+
+    /// <summary>
+    /// Windows では拡張子なしのファイル（npm が置く sh スクリプト）を候補にせず、後ろのフォルダの実体まで走査することを
+    /// 検証する。拡張子なしの名前は CreateProcess が .exe を補うため起動できない。
+    /// </summary>
+    [Fact(DisplayName = "Windows では拡張子なしのファイルを読み飛ばして後ろのフォルダの実体を返す")]
+    public void PathExecutableResolver_ExtensionlessFile_IsSkippedOnWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var shScriptDirectory = Path.Combine(Path.GetTempPath(), "QuickERTests", "sh-only");
+        var shScript = Path.Combine(shScriptDirectory, "copilot");
+        var expected = Path.Combine(FakeBinDirectory, "copilot.cmd");
+        var pathValue = string.Join(Path.PathSeparator, shScriptDirectory, FakeBinDirectory);
+
+        PathExecutableResolver
+            .Resolve("copilot", pathValue, Existing(shScript, expected))
+            .Should()
+            .Be(expected);
+    }
+
+    /// <summary>
+    /// Windows 以外では拡張子なしの名前が唯一の候補で、引用符は名前の一部として扱うことを検証する
+    /// （Unix の PATH に引用の規則は無い）。
+    /// </summary>
+    [Fact(DisplayName = "Windows 以外では拡張子なしの名前を候補にし引用符を外さない")]
+    public void PathExecutableResolver_NonWindows_UsesBareNameAndKeepsQuotes()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var expected = Path.Combine(FakeBinDirectory, "copilot");
+
+        PathExecutableResolver
+            .Resolve("copilot", FakeBinDirectory, Existing(expected))
+            .Should()
+            .Be(expected);
+        PathExecutableResolver
+            .Resolve("copilot", "\"" + FakeBinDirectory + "\"", Existing(expected))
+            .Should()
+            .BeNull();
+    }
+
+    /// <summary>
     /// 起動直前の関門が、シムのパスに引用符を含む解決結果を拒否することを検証する。
     /// copilot は SDK の内側で起動されるため QuickER が引数を引用し直せず、掛けられる防御はここだけ。
     /// </summary>
@@ -145,10 +212,46 @@ public class CopilotCliLocatorTests
             .WithMessage(string.Format(AiStrings.Copilot_PathHasQuote, path));
     }
 
+    /// <summary>
+    /// 起動直前の関門が、シムのパスに <c>%</c> を含む解決結果を拒否することを検証する
+    /// （シムを起動するとき CreateProcess が挟む cmd が環境変数として展開するため）。
+    /// </summary>
+    [Fact(DisplayName = "% を含む cmd シムのパスは起動前に拒否する")]
+    public void EnsureSafeToLaunch_PercentInShimPath_Throws()
+    {
+        const string path = @"C:\%EVIL%\copilot.cmd";
+
+        var act = () => CopilotCliLocator.EnsureSafeToLaunch(path);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.Copilot_PathHasEnvExpansion, path));
+    }
+
+    /// <summary>
+    /// 起動直前の関門が、シムのパスに <c>!</c> を含む解決結果を拒否することを検証する。
+    /// codex / claude は自分で <c>/v:off</c> を付けて包み直すが、copilot は SDK が cmd を起動するため
+    /// 付けられず、利用者がレジストリで遅延展開を有効にしていると <c>!名前!</c> が展開される。
+    /// </summary>
+    [Fact(DisplayName = "! を含む cmd シムのパスは起動前に拒否する")]
+    public void EnsureSafeToLaunch_ExclamationInShimPath_Throws()
+    {
+        const string path = @"C:\!EVIL!\copilot.cmd";
+
+        var act = () => CopilotCliLocator.EnsureSafeToLaunch(path);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.Copilot_PathHasDelayedExpansion, path));
+    }
+
     /// <summary>正当なパス（シム・実行ファイルとも）はそのまま通ることを検証する</summary>
+    /// <remarks>実行ファイルは cmd を経由しないため、パスに <c>%</c> があっても通す。</remarks>
     [Theory]
     [InlineData(@"C:\npm\copilot.cmd")]
     [InlineData(@"C:\Program Files\GitHub\copilot.exe")]
+    [InlineData(@"C:\100%\copilot.exe")]
+    [InlineData(@"C:\Hi!\copilot.exe")]
     public void EnsureSafeToLaunch_SafePath_PassesThrough(string path)
     {
         CopilotCliLocator.EnsureSafeToLaunch(path).Should().Be(path);

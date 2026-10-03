@@ -5,7 +5,7 @@ using QuickER.AI.Mock.Resources;
 namespace QuickER.AI.Mock;
 
 /// <summary>
-/// Codex App Server をヘッドレス実行して WPF の UI 層を書かせる <see cref="IMockProjectAgent"/> の実装。
+/// Codex App Server をヘッドレス実行して UI 層（WPF / Blazor）を書かせる <see cref="IMockProjectAgent"/> の実装。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -194,7 +194,7 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
             //    無限ループを避けるため 2 回目以降は促さない（失敗ターン・キャンセルでもここへは来ない）。
             if (
                 outcome.Success
-                && !HasAnyUiFile(
+                && !MockProjectFiles.HasAnyInProject(
                     request.WorkingDirectory,
                     request.ProjectName,
                     request.Profile.UiFileSearchPattern
@@ -297,23 +297,6 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
             .ConfigureAwait(false);
         return account.RequiresOpenAiAuth && !account.IsLoggedIn;
     }
-
-    /// <summary>プロジェクトフォルダ配下に UI 成果物ファイルが 1 つでも存在するかを判定する（承認待ちで止まった兆候の検出用）</summary>
-    /// <remarks>
-    /// スキャフォールドはデータ層のみ（UI 層は生成しない）ため、成功ターン後に UI 成果物（WPF なら *.xaml）が
-    /// 皆無なら「計画提示だけで終わった（実装未着手）」疑いが濃い。検索パターンはターゲットのプロファイルが与える。
-    /// 走査は共有ヘルパー <see cref="MockProjectFiles"/> へ委譲する（アクセス拒否で落ちない・obj / bin を数えない・
-    /// 範囲はプロジェクトフォルダ配下だけ＝出力フォルダに同居する無関係なファイルで誤検知しない）。
-    /// </remarks>
-    private static bool HasAnyUiFile(
-        string outputDirectory,
-        string projectName,
-        string uiFileSearchPattern
-    ) =>
-        MockProjectFiles.HasAny(
-            MockProjectScaffoldService.GetProjectDirectory(outputDirectory, projectName),
-            uiFileSearchPattern
-        );
 
     /// <summary>コマンド実行・ファイル変更の項目開始を 1 行で要約して通知する</summary>
     private static void EmitItemSummary(Action<string> onProgress, string? itemType)

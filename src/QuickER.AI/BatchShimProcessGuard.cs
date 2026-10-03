@@ -14,8 +14,10 @@ namespace QuickER.AI;
 /// <c>cmd.exe</c> を経由する。.NET が組み立てるコマンドラインは C ランタイムの引用規約に従うが、
 /// cmd はそれを自分の構文規則で**もう一度**解釈するため、引数に含まれる <c>"</c> や <c>&amp;</c> が
 /// 引用の外へ抜けて任意コマンドの実行につながる。これを塞ぐため、シムのときは自分で
-/// <c>cmd.exe /d /s /c</c> 形式へ包み直す（<c>/d</c> は AutoRun レジストリコマンドの実行を抑止し、
-/// <c>/s</c> は外側の引用符で囲んだ全体を 1 つのコマンド行として扱わせて引用の解釈を決定的にする）。
+/// <c>cmd.exe /d /s /v:off /c</c> 形式へ包み直す（<c>/d</c> は AutoRun レジストリコマンドの実行を抑止し、
+/// <c>/s</c> は外側の引用符で囲んだ全体を 1 つのコマンド行として扱わせて引用の解釈を決定的にし、
+/// <c>/v:off</c> は遅延展開を明示的に無効にする＝利用者がレジストリ〔<c>DelayedExpansion</c>〕で
+/// 有効にしていても <c>!…!</c> を展開させない）。包み直しの形は 2 つの入口で同じ。
 /// </para>
 /// <para>
 /// 入口が 2 つあるのは**引数の形が違えば取り得る防御も違う**ため:
@@ -29,13 +31,15 @@ namespace QuickER.AI;
 /// <see cref="Apply"/> ＝<c>ProcessStartInfo.ArgumentList</c>。トークン境界が分かるので各トークンを
 /// 二重引用符で包み、内側の <c>"</c> を <c>""</c> へ倍加できる。引用の内側では <c>&amp; | &lt; &gt; ^ ( )</c> は
 /// cmd にとってただの文字になるため、残る危険は <c>%</c> の環境変数展開（展開結果が <c>"</c> を
-/// 持ち込んで引用を破れる）だけで、これだけを拒否する。遅延展開の <c>!</c> は <c>/v:off</c> を
-/// 明示して無効化するので拒否対象にしない
+/// 持ち込んで引用を破れる）だけで、これだけを拒否する。遅延展開の <c>!</c> は <c>/v:off</c> で
+/// 無効化されるので拒否対象にしない
 /// </item>
 /// </list>
 /// <para>
-/// パス側はどちらの入口でも <c>"</c> を拒否する（正規の Windows パスには現れない文字で、
-/// 含まれていれば引用の切断を狙ったもの）。**改行は引数・パスのどちらでも拒否する**＝npm の
+/// パス側はどちらの入口でも <c>"</c> と <c>%</c> を拒否する。<c>"</c> は正規の Windows パスには
+/// 現れない文字で、含まれていれば引用の切断を狙ったもの。<c>%</c> はパスとして正当だが、cmd が
+/// 環境変数として展開するため起動する実体が別物に化け得る（<c>!</c> は <c>/v:off</c> で無効になるので
+/// 拒否しない）。**改行は引数・パスのどちらでも拒否する**＝npm の
 /// cmd-shim（<c>"%~dp0bin\claude.exe" %*</c> 形）では cmd が <c>%*</c> を展開する段階で最初の
 /// 改行より後ろを捨てるため、引用しても黙った切り捨てを防げない（<see cref="EnsureNoNewline"/>）。
 /// 複数行の内容はファイル経由で渡す（claude なら <c>--append-system-prompt-file</c>）。
@@ -85,6 +89,7 @@ public static class BatchShimProcessGuard
     /// <param name="resolvedPath">解決済みの実行ファイルパス（拡張子で判定するため実体のパスを渡す）</param>
     /// <param name="arguments">連結済みの引数文字列</param>
     /// <param name="pathQuoteMessageFormat">パスに引用符があるときのメッセージ書式（<c>{0}</c>＝パス）</param>
+    /// <param name="pathPercentMessageFormat">パスに <c>%</c> があるときのメッセージ書式（<c>{0}</c>＝パス）</param>
     /// <param name="metaCharMessageFormat">
     /// 引数にメタ文字があるときのメッセージ書式（<c>{0}</c>＝検出文字・<c>{1}</c>＝引数全体）
     /// </param>
@@ -93,12 +98,13 @@ public static class BatchShimProcessGuard
     /// </param>
     /// <returns>起動に使う（実行ファイル名, 引数文字列）</returns>
     /// <exception cref="InvalidOperationException">
-    /// パスに引用符、引数に cmd のメタ文字、または引数・パスに改行が含まれる場合
+    /// パスに引用符か <c>%</c>、引数に cmd のメタ文字、または引数・パスに改行が含まれる場合
     /// </exception>
     public static (string FileName, string Arguments) WrapCommandLine(
         string resolvedPath,
         string arguments,
         string pathQuoteMessageFormat,
+        string pathPercentMessageFormat,
         string metaCharMessageFormat,
         string newlineMessageFormat
     )
@@ -109,6 +115,7 @@ public static class BatchShimProcessGuard
         }
 
         EnsurePathHasNoQuote(resolvedPath, pathQuoteMessageFormat);
+        EnsurePathHasNoPercent(resolvedPath, pathPercentMessageFormat);
         EnsureNoNewline(resolvedPath, newlineMessageFormat);
 
         // 改行は引用しても防げない（cmd が %* を展開する段階で行ごと切る）ため、メタ文字より先に見る
@@ -126,7 +133,7 @@ public static class BatchShimProcessGuard
         }
 
         // バッチファイルは cmd.exe /c 経由で起動しないとリダイレクトが機能しない
-        return (CmdExePath, $"/d /s /c \"\"{resolvedPath}\" {arguments}\"");
+        return (CmdExePath, $"/d /s /v:off /c \"\"{resolvedPath}\" {arguments}\"");
     }
 
     /// <summary>
@@ -140,6 +147,7 @@ public static class BatchShimProcessGuard
     /// </remarks>
     /// <param name="startInfo">書き換える起動情報</param>
     /// <param name="pathQuoteMessageFormat">パスに引用符があるときのメッセージ書式（<c>{0}</c>＝パス）</param>
+    /// <param name="pathPercentMessageFormat">パスに <c>%</c> があるときのメッセージ書式（<c>{0}</c>＝パス）</param>
     /// <param name="envExpansionMessageFormat">
     /// 引数に <c>%</c> があるときのメッセージ書式（<c>{0}</c>＝該当引数）
     /// </param>
@@ -147,11 +155,12 @@ public static class BatchShimProcessGuard
     /// 引数またはパスに改行があるときのメッセージ書式（<c>{0}</c>＝該当する値）
     /// </param>
     /// <exception cref="InvalidOperationException">
-    /// パスに引用符、引数に <c>%</c>、または引数・パスに改行が含まれる場合
+    /// パスに引用符か <c>%</c>、引数に <c>%</c>、または引数・パスに改行が含まれる場合
     /// </exception>
     public static void Apply(
         ProcessStartInfo startInfo,
         string pathQuoteMessageFormat,
+        string pathPercentMessageFormat,
         string envExpansionMessageFormat,
         string newlineMessageFormat
     )
@@ -165,6 +174,7 @@ public static class BatchShimProcessGuard
 
         var resolvedPath = startInfo.FileName;
         EnsurePathHasNoQuote(resolvedPath, pathQuoteMessageFormat);
+        EnsurePathHasNoPercent(resolvedPath, pathPercentMessageFormat);
         EnsureNoNewline(resolvedPath, newlineMessageFormat);
 
         var commandLine = new StringBuilder();
@@ -201,6 +211,20 @@ public static class BatchShimProcessGuard
     private static void EnsurePathHasNoQuote(string path, string messageFormat)
     {
         if (path.Contains('"', StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(string.Format(messageFormat, path));
+        }
+    }
+
+    /// <summary>実行ファイルパスに <c>%</c> が無いことを確かめる（あれば起動前に拒否する）</summary>
+    /// <remarks>
+    /// <c>%</c> はパスとして正当な文字だが、包み直した <c>cmd.exe /c</c> のコマンド行では
+    /// <c>%名前%</c> が環境変数として展開され、起動する実体が別物に化け得る。
+    /// 遅延展開の <c>!</c> は <c>/v:off</c> で無効になるため、ここでは見ない。
+    /// </remarks>
+    private static void EnsurePathHasNoPercent(string path, string messageFormat)
+    {
+        if (path.Contains('%', StringComparison.Ordinal))
         {
             throw new InvalidOperationException(string.Format(messageFormat, path));
         }

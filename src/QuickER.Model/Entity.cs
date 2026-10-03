@@ -76,6 +76,31 @@ public class Entity
         return ordered.SequenceEqual(declared) ? null : ordered.Select(c => c.Name).ToList();
     }
 
+    /// <summary>指定した列の集合が、このテーブルの候補キー（主キー、または一意制約のいずれか）と一致するか</summary>
+    /// <param name="columnIds">外部キーが参照する親側の列（<see cref="Column.Id"/>）。並びは問わない</param>
+    /// <returns>
+    /// 主キー列の集合（膜＝<see cref="Column.IsPrimaryKey"/>）と一致するか、いずれかの
+    /// <see cref="UniqueConstraint.ColumnIds"/> の集合と一致すれば true。空の集合は false
+    /// </returns>
+    /// <remarks>
+    /// 外部キーは参照先の主キーか一意制約の列とちょうど一致しないと、多くの DBMS が DDL を拒否する
+    /// （主キーの一部だけ・一意でない列）。MySQL のように一意でない索引列を参照できる DBMS もあるため、
+    /// 呼び出し側はこれを拒否の根拠でなく注意の根拠に使う
+    /// </remarks>
+    public bool IsCandidateKey(IReadOnlyCollection<Guid> columnIds)
+    {
+        if (columnIds.Count == 0)
+        {
+            return false;
+        }
+
+        var requested = columnIds.ToHashSet();
+        var primaryKey = Columns.Where(column => column.IsPrimaryKey).Select(column => column.Id);
+
+        return requested.SetEquals(primaryKey)
+            || UniqueConstraints.Any(constraint => requested.SetEquals(constraint.ColumnIds));
+    }
+
     /// <summary>カラム・一意制約も含めてエンティティを複製する</summary>
     /// <param name="preserveId"><c>true</c> の場合は同じ ID を維持し、<c>false</c> の場合は新しい ID を割り当てる（カラム・一意制約にも同様に適用される）</param>
     /// <returns>複製された <see cref="Entity"/></returns>

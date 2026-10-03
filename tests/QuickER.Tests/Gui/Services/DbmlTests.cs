@@ -86,12 +86,16 @@ public class DbmlTests
 
         dbml.Should().Contain("Table Customer {");
         dbml.Should().Contain("CustomerId int [pk, not null]");
-        dbml.Should().Contain("CustomerId int [ref, not null]");
-        dbml.Should()
-            .Contain("Ref: [note: 'FK_Orders_Customer'] Customer.CustomerId < Orders.CustomerId");
+        // 外部キーの印は列の設定でなく Ref 行の子側の列として運ぶ（DBML に値なしの ref 設定は無い）
+        dbml.Should().Contain("  CustomerId int [not null]");
+        dbml.Should().NotContain("ref,");
+        dbml.Should().Contain("Ref FK_Orders_Customer: Customer.CustomerId < Orders.CustomerId");
     }
 
-    /// <summary>DBML テキストのパースで pk/ref 属性と Ref 行の制約名・1対多種別が復元されることを検証する</summary>
+    /// <summary>
+    /// DBML テキストのパースで pk 属性と、名前付き Ref の名前（制約名）・1対多種別・子側の列の外部キー印が
+    /// 復元されることを検証する
+    /// </summary>
     [Fact(DisplayName = "DBML 読込でエンティティとリレーションを復元できる")]
     public void Import_ParsesEntitiesAndRelationships()
     {
@@ -105,10 +109,10 @@ public class DbmlTests
                 string.Empty,
                 "Table Orders {",
                 "  OrderId int [pk, not null]",
-                "  CustomerId int [ref, not null]",
+                "  CustomerId int [not null]",
                 "}",
                 string.Empty,
-                "Ref: [note: 'FK_Orders_Customer'] Customer.CustomerId < Orders.CustomerId",
+                "Ref FK_Orders_Customer: Customer.CustomerId < Orders.CustomerId",
             ]
         );
 
@@ -199,7 +203,7 @@ public class DbmlTests
 
         dbml.Should()
             .Contain(
-                "Ref: [note: 'FK_TenantUser_TenantRegion'] TenantRegion.(TenantId, RegionCode) < TenantUser.(TenantRef, RegionRef)"
+                "Ref FK_TenantUser_TenantRegion: TenantRegion.(TenantId, RegionCode) < TenantUser.(TenantRef, RegionRef)"
             );
 
         var restored = DbmlImporter.Parse(dbml);
@@ -369,7 +373,7 @@ public class DbmlTests
         // 単一列は表記のまま
         dbml.Should()
             .Contain(
-                "Ref: [note: 'FK_TenantAudit_TenantUser'] TenantUser.TenantUserId < TenantAudit.TenantUserId"
+                "Ref FK_TenantAudit_TenantUser: TenantUser.TenantUserId < TenantAudit.TenantUserId"
             );
 
         var restored = DbmlImporter.Parse(dbml);
@@ -584,7 +588,7 @@ public class DbmlTests
         entity.Description.Should().Be("Stores customers");
     }
 
-    /// <summary>参照アクションが Ref 行の設定ブロックとして往復することを検証する</summary>
+    /// <summary>参照アクションが Ref 行の端点の後ろの設定ブロックとして往復することを検証する</summary>
     [Fact(DisplayName = "DBML 往復: 参照アクションを設定ブロックで保持する")]
     public void Export_ReferentialActions_RoundTrip()
     {
@@ -595,8 +599,11 @@ public class DbmlTests
 
         var text = DbmlExporter.Build(diagram);
 
-        text.Should().Contain("delete: cascade");
-        text.Should().Contain("update: set null");
+        // DBML 標準の形＝名前付き Ref・設定は端点の後ろ
+        text.Should()
+            .Contain(
+                "Ref FK_Orders_Customer: Customer.CustomerId < Orders.CustomerId [delete: cascade, update: set null]"
+            );
 
         var restored = DbmlImporter.Parse(text).Relationships.Single();
         restored.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
@@ -617,10 +624,16 @@ public class DbmlTests
 
         text.Should().NotContain("delete:");
         text.Should().NotContain("update:");
-        text.Should().Contain("[note: 'FK_Orders_Customer']");
+        // 設定が 1 つも無ければ設定ブロックごと書かない
+        text.Split(Environment.NewLine)
+            .Should()
+            .Contain("Ref FK_Orders_Customer: Customer.CustomerId < Orders.CustomerId");
     }
 
-    /// <summary>DBML で表現できないのはテーブルのメモと名前付きクエリだけであることを検証する</summary>
+    /// <summary>
+    /// 説明・一意制約名・参照アクション・制約名は DBML で表現でき、欠落はテーブルのメモと名前付きクエリだけで
+    /// あることを検証する（外部キー印はリレーションの子側の列にあるので運ばれる）
+    /// </summary>
     [Fact(DisplayName = "DBML の欠落はメモと名前付きクエリだけ")]
     public void DetectOmissions_ReturnsMemoAndNamedQueryOnly()
     {
@@ -653,6 +666,109 @@ public class DbmlTests
         );
 
         DbmlExporter.DetectOmissions(diagram).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// リレーションの子側の列にならない列の外部キー印は、DBML に書けず往復で消えるため欠落として挙げる。
+    /// あわせて、その印が実際に取込で消えることも固定する（告知と挙動の一致）。
+    /// </summary>
+    [Fact(DisplayName = "DBML の欠落: リレーションに属さない列の外部キー印を挙げる")]
+    public void DetectOmissions_ForeignKeyMarkerOutsideRelationships_IsReported()
+    {
+        var diagram = BuildOneToManyDiagram(
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+        var orders = diagram.Entities[1];
+        orders.Columns.Add(
+            new Column
+            {
+                Name = "ShipperId",
+                DataType = "int",
+                IsForeignKey = true,
+                IsNullable = true,
+            }
+        );
+
+        DbmlExporter
+            .DetectOmissions(diagram)
+            .Should()
+            .Equal(ExportOmissionKind.ForeignKeyMarkerWithoutRelationship);
+
+        var restored = DbmlImporter
+            .Parse(DbmlExporter.Build(diagram))
+            .Entities.Single(entity => entity.TableName == "Orders");
+        restored
+            .Columns.Single(column => column.Name == "ShipperId")
+            .IsForeignKey.Should()
+            .BeFalse();
+        restored
+            .Columns.Single(column => column.Name == "CustomerId")
+            .IsForeignKey.Should()
+            .BeTrue();
+    }
+
+    /// <summary>
+    /// 多対多と列ペアの無いリレーションは子側の列ゼロとみなす（取込はどちらにも外部キー印を立てない）。
+    /// </summary>
+    [Theory(DisplayName = "DBML の欠落: 多対多・列ペアなしのリレーションは外部キー印を運ばない")]
+    [InlineData(RelationshipType.ManyToMany, true)]
+    [InlineData(RelationshipType.OneToMany, false)]
+    public void DetectOmissions_RelationshipWithoutChildColumns_DoesNotCarryMarker(
+        RelationshipType type,
+        bool keepPairs
+    )
+    {
+        var diagram = BuildOneToManyDiagram(
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+        var relationship = diagram.Relationships[0];
+        relationship.Type = type;
+
+        if (!keepPairs)
+        {
+            relationship.ColumnPairs = [];
+        }
+
+        // 列ペアの無い 1 対多は Ref 行ごと出さないので、その告知も並ぶ（DbmlRelationshipEndpointTests が本体）
+        DbmlExporter
+            .DetectOmissions(diagram)
+            .Should()
+            .Contain(ExportOmissionKind.ForeignKeyMarkerWithoutRelationship);
+    }
+
+    /// <summary>
+    /// 主キー列の外部キー印も、リレーションの子側の列であれば運ばれる（欠落にしない）。
+    /// </summary>
+    [Fact(DisplayName = "DBML の欠落: 子側の列なら主キー列の外部キー印も運ばれる")]
+    public void DetectOmissions_PrimaryKeyChildColumn_IsCarried()
+    {
+        var diagram = BuildOneToManyDiagram(
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction
+        );
+        var parent = diagram.Entities[0];
+        var orders = diagram.Entities[1];
+        var orderId = orders.Columns[0];
+        orderId.IsForeignKey = true;
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = orders.Id,
+                Type = RelationshipType.OneToOne,
+                ColumnPairs = [new RelationshipColumnPair(parent.Columns[0].Id, orderId.Id)],
+            }
+        );
+
+        DbmlExporter.DetectOmissions(diagram).Should().BeEmpty();
+        DbmlImporter
+            .Parse(DbmlExporter.Build(diagram))
+            .Entities.Single(entity => entity.TableName == "Orders")
+            .Columns.Single(column => column.Name == "OrderId")
+            .IsForeignKey.Should()
+            .BeTrue();
     }
 
     /// <summary>親 Customer(CustomerId PK) → 子 Orders(OrderId PK / CustomerId FK) の 1 対多図を作る</summary>
