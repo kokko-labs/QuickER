@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Npgsql;
+using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.PostgreSql;
 using QuickER.Tests.Integration;

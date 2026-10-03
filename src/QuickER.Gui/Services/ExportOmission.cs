@@ -3,7 +3,7 @@ namespace QuickER.Services;
 /// <summary>出力形式が構造的に表現できないために落ちる情報の種類（言語中立）</summary>
 /// <remarks>
 /// <para>
-/// 検出側（エクスポータ）は言語中立の種類だけを返し、表示側（<c>MainViewModel</c>）が resx で
+/// 検出側（エクスポータ）は言語中立の種類だけを返し、表示側（<c>DiagramExportService.DescribeOmission</c>）が resx で
 /// 文言化する。スキーマ同期の警告（<c>SyncPlan.Warnings</c>）と同じ流儀。
 /// </para>
 /// <para>

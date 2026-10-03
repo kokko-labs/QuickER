@@ -839,6 +839,9 @@
   <data name="Export_FormatUndetermined" xml:space="preserve">
     <value>出力形式を判定できませんでした。</value>
   </data>
+  <data name="Export_TargetIsCurrentDocument" xml:space="preserve">
+    <value>選んだファイルはいま開いている図そのものなので、出力しませんでした。図そのものを保存するには上書き保存を使い、出力するときは別のファイルを選んでください。</value>
+  </data>
   <data name="Import_FormatUndetermined" xml:space="preserve">
     <value>取込形式を判定できませんでした。</value>
   </data>
@@ -1153,6 +1156,9 @@
   </data>
   <data name="Tool_RelationshipParentHasNoKey" xml:space="preserve">
     <value>注意: テーブル '{0}' に主キーが無いため列ペアを推論できず、生成する DDL にこのリレーションの FOREIGN KEY は出ません。直すには、リレーションを削除し、source_columns と target_columns を指定して追加し直してください。</value>
+  </data>
+  <data name="Tool_RelationshipParentColumnsNotKey" xml:space="preserve">
+    <value>注意: '{1}' の列 {0} は主キーでも一意制約でもないため、生成した DDL を適用すると多くの DB がこの FOREIGN KEY を拒否します（MySQL は列に索引があれば受け付けます）。直すには、リレーションを削除して source_columns に主キーか一意制約の列を指定して追加し直すか、これらの列に一意制約を追加してください。</value>
   </data>
   <data name="Tool_RelationshipNotFound" xml:space="preserve">
     <value>'{0}' → '{1}' のリレーションが見つかりません。</value>

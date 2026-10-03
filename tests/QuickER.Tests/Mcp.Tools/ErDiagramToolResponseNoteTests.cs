@@ -5,8 +5,8 @@ using QuickER.Services;
 namespace QuickER.Tests.Mcp.Tools;
 
 /// <summary>
-/// 成功のまま返すが利用者が気付くべきことを応答に添える 3 つの規則（要約の対象 DBMS・主キー列の NULL 許容の無視・
-/// 列ペアの推論が親の主キーに届かなかったこと）を、GUI 側 <see cref="ErDiagramDynamicTools"/> と MCP の
+/// 成功のまま返すが利用者が気付くべきことを応答に添える 4 つの規則（要約の対象 DBMS・主キー列の NULL 許容の無視・
+/// 列ペアの推論が親の主キーに届かなかったこと・明示した親側の列が候補キーでないこと）を、GUI 側 <see cref="ErDiagramDynamicTools"/> と MCP の
 /// <see cref="DocumentErDiagramToolHost"/> の両方で検証する
 /// </summary>
 /// <remarks>
@@ -251,6 +251,9 @@ public sealed class ErDiagramToolResponseNoteTests : TwoHostToolTestBase
             }
         );
 
+        // 明示する親側の列は候補キー（一意制約）にしておく＝候補キーでない列の注意とは切り分ける
+        Arrange("set_unique_constraint", new { table_name = "Tag", columns = new[] { "Label" } });
+
         Exec(
             "add_relationship",
             new
@@ -270,6 +273,156 @@ public sealed class ErDiagramToolResponseNoteTests : TwoHostToolTestBase
                 target_table = "Order",
                 source_columns = new[] { "Label" },
                 target_columns = new[] { "ShipToCustomerId" },
+                relationship_type = "OneToMany",
+            }
+        )
+            .Result.Should()
+            .NotContain("source_columns");
+    }
+
+    [Theory(
+        DisplayName = "add_relationship は親に主キーがあっても子に対応する列が 1 本も無いと注意を添える"
+    )]
+    [InlineData(HostKind.Gui)]
+    [InlineData(HostKind.File)]
+    public void AddRelationship_NoChildColumnMatchesParentKey_IsReported(HostKind host)
+    {
+        Setup(host);
+        Arrange("add_entity", new { table_name = "Region" });
+        Arrange(
+            "add_column",
+            new
+            {
+                table_name = "Region",
+                column_name = "RegionId",
+                data_type = "int",
+                is_primary_key = true,
+            }
+        );
+
+        // Order に RegionId に当たる列は無い＝推論できた列ペアは 0 本
+        var (result, success) = Exec(
+            "add_relationship",
+            new
+            {
+                source_table = "Region",
+                target_table = "Order",
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeTrue();
+        result.Should().Contain("0").And.Contain("1").And.Contain("source_columns");
+        Schema.Relationships.Single().ColumnPairs.Should().BeEmpty();
+    }
+
+    // ---------------- 明示した親側の列が候補キーでない ----------------
+
+    [Theory(
+        DisplayName = "add_relationship は明示した親側の列が主キーでも一意制約でもなければ、作成したうえで注意を添える"
+    )]
+    [InlineData(HostKind.Gui, "Name")]
+    [InlineData(HostKind.File, "Name")]
+    [InlineData(HostKind.Gui, "CustomerId,Name")]
+    [InlineData(HostKind.File, "CustomerId,Name")]
+    public void AddRelationship_ExplicitNonCandidateKey_IsReported(
+        HostKind host,
+        string parentColumns
+    )
+    {
+        Setup(host);
+        var sourceColumns = parentColumns.Split(',');
+        var targetColumns = new[] { "CustomerId", "ShipToCustomerId" }[..sourceColumns.Length];
+
+        var (result, success) = Exec(
+            "add_relationship",
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                source_columns = sourceColumns,
+                target_columns = targetColumns,
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeTrue("拒否はせず、作成したうえで注意する");
+        result.Should().Contain("'Customer'").And.Contain("Name").And.Contain("source_columns");
+        Schema.Relationships.Single().ColumnPairs.Should().HaveCount(sourceColumns.Length);
+    }
+
+    [Theory(
+        DisplayName = "add_relationship は明示した親側の列が主キー全列か一意制約と一致すれば、並びを問わず注意を添えない"
+    )]
+    [InlineData(HostKind.Gui)]
+    [InlineData(HostKind.File)]
+    public void AddRelationship_ExplicitCandidateKey_HasNoNote(HostKind host)
+    {
+        Setup(host);
+        Arrange("add_entity", new { table_name = "Region" });
+
+        foreach (var column in new[] { "RegionId", "Code" })
+        {
+            Arrange(
+                "add_column",
+                new
+                {
+                    table_name = "Region",
+                    column_name = column,
+                    data_type = "int",
+                    is_primary_key = true,
+                }
+            );
+        }
+
+        Arrange(
+            "add_column",
+            new
+            {
+                table_name = "Region",
+                column_name = "Slug",
+                data_type = "nvarchar(20)",
+            }
+        );
+        Arrange("set_unique_constraint", new { table_name = "Region", columns = new[] { "Slug" } });
+
+        foreach (var column in new[] { "RegionId", "RegionCode", "RegionSlug" })
+        {
+            Arrange(
+                "add_column",
+                new
+                {
+                    table_name = "Order",
+                    column_name = column,
+                    data_type = "int",
+                }
+            );
+        }
+
+        // 主キー全列（宣言と逆の並び）
+        Exec(
+            "add_relationship",
+            new
+            {
+                source_table = "Region",
+                target_table = "Order",
+                source_columns = new[] { "Code", "RegionId" },
+                target_columns = new[] { "RegionCode", "RegionId" },
+                relationship_type = "OneToMany",
+            }
+        )
+            .Result.Should()
+            .NotContain("source_columns");
+
+        // 一意制約の列
+        Exec(
+            "add_relationship",
+            new
+            {
+                source_table = "Region",
+                target_table = "Order",
+                source_columns = new[] { "Slug" },
+                target_columns = new[] { "RegionSlug" },
                 relationship_type = "OneToMany",
             }
         )

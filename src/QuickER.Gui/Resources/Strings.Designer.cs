@@ -1842,6 +1842,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Export_TargetIsCurrentDocument {
+            get {
+                return ResourceManager.GetString("Export_TargetIsCurrentDocument", resourceCulture);
+            }
+        }
+        
         public static string Import_FormatUndetermined {
             get {
                 return ResourceManager.GetString("Import_FormatUndetermined", resourceCulture);
@@ -2318,6 +2324,12 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipParentHasNoKey {
             get {
                 return ResourceManager.GetString("Tool_RelationshipParentHasNoKey", resourceCulture);
+            }
+        }
+        
+        public static string Tool_RelationshipParentColumnsNotKey {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipParentColumnsNotKey", resourceCulture);
             }
         }
 

@@ -70,6 +70,10 @@ internal interface IDiagramTransferHost
     /// <summary>名前付きクエリの件数（Mermaid / DBML 置換で失われるクエリの告知に使う）</summary>
     int QueryCount { get; }
 
+    /// <summary>指定パスがいま開いている図のファイルか（フルパス正規化・大文字小文字を区別しない。無題なら false）</summary>
+    /// <param name="path">判定するパス</param>
+    bool IsCurrentDocumentPath(string path);
+
     /// <summary>現在の図を SVG としてファイルへ書き出す（VM の表示状態からのベクタ描画）</summary>
     void RenderSvg(string path);
 

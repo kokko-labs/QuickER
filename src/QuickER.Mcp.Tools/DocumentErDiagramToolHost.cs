@@ -819,15 +819,44 @@ public static partial class DocumentErDiagramToolHost
 
         var added =
             $"Added relationship '{sourceTable}' → '{targetTable}' (constraint name: {constraintName}).";
-        var note = DescribeIncompleteInferredPairs(
-            args,
-            relType,
-            source,
-            target,
-            columnPairs.Count
-        );
+        var note =
+            DescribeIncompleteInferredPairs(args, relType, source, target, columnPairs.Count)
+            ?? DescribeNonCandidateKeyColumns(relType, source, columnPairs);
 
         return (note is null ? added : $"{added} {note}", true);
+    }
+
+    /// <summary>明示した親側の列が親の主キーとも一意制約とも一致しないときの注意文</summary>
+    /// <param name="relationshipType">リレーションの種別（多対多は列ペアを持たないので対象外）</param>
+    /// <param name="source">親テーブル</param>
+    /// <param name="columnPairs">作成したリレーションの列ペア</param>
+    /// <returns>注意文。候補キーと一致する・列ペアが無い・多対多のときは null</returns>
+    /// <remarks>
+    /// 拒否はしない（MySQL は一意でない索引列を参照する外部キーを受け付け、DB 取込の図にもその形が入り得る）。
+    /// 列を省略した推論は主キー全列から作るため、ここに来るのは列を明示したときだけ。
+    /// GUI 側 <c>ErDiagramDynamicTools.DescribeNonCandidateKeyColumns</c> と同じ判定（<see cref="Entity.IsCandidateKey"/>）
+    /// </remarks>
+    private static string? DescribeNonCandidateKeyColumns(
+        RelationshipType relationshipType,
+        Entity source,
+        IReadOnlyList<RelationshipColumnPair> columnPairs
+    )
+    {
+        if (relationshipType == RelationshipType.ManyToMany || columnPairs.Count == 0)
+        {
+            return null;
+        }
+
+        var parentColumnIds = columnPairs.Select(pair => pair.SourceColumnId).ToList();
+
+        if (source.IsCandidateKey(parentColumnIds))
+        {
+            return null;
+        }
+
+        var names = parentColumnIds.Select(id => source.Columns.First(c => c.Id == id).Name);
+
+        return $"Note: the columns ({string.Join(", ", names)}) of '{source.TableName}' are neither its primary key nor one of its unique constraints, so most databases reject this FOREIGN KEY when the generated DDL is applied (MySQL accepts it if the columns are indexed). To fix it, remove the relationship and add it again with source_columns naming the primary key or a unique constraint's columns, or add a unique constraint over these columns.";
     }
 
     /// <summary>

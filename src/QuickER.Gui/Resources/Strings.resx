@@ -816,6 +816,9 @@
   <data name="Export_FormatUndetermined" xml:space="preserve">
     <value>Could not determine the export format.</value>
   </data>
+  <data name="Export_TargetIsCurrentDocument" xml:space="preserve">
+    <value>The selected file is the diagram that is currently open, so nothing was exported. To save the diagram itself, use Save; to export, choose a different file.</value>
+  </data>
   <data name="Import_FormatUndetermined" xml:space="preserve">
     <value>Could not determine the import format.</value>
   </data>
@@ -1130,6 +1133,9 @@
   </data>
   <data name="Tool_RelationshipParentHasNoKey" xml:space="preserve">
     <value>Note: table '{0}' has no primary key, so no column pairs were inferred and the generated DDL has no FOREIGN KEY for this relationship. To fix it, remove the relationship and add it again with source_columns and target_columns.</value>
+  </data>
+  <data name="Tool_RelationshipParentColumnsNotKey" xml:space="preserve">
+    <value>Note: the columns {0} of '{1}' are neither its primary key nor one of its unique constraints, so most databases reject this FOREIGN KEY when the generated DDL is applied (MySQL accepts it if the columns are indexed). To fix it, remove the relationship and add it again with source_columns naming the primary key or a unique constraint's columns, or add a unique constraint over these columns.</value>
   </data>
   <data name="Tool_RelationshipNotFound" xml:space="preserve">
     <value>Relationship '{0}' → '{1}' not found.</value>

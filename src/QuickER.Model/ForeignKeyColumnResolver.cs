@@ -279,14 +279,12 @@ public static class ForeignKeyColumnResolver
         sourceKeyColumnName is not null
         && string.Equals(column.Name, sourceKeyColumnName, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>2 つのデータ型表記が実質同じかどうかを判定する（空白と大文字小文字の差を無視）</summary>
-    private static bool IsSameDataType(string? left, string? right)
-    {
-        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
-        {
-            return false;
-        }
-
-        return string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
-    }
+    /// <summary>
+    /// 2 つのデータ型表記が同じ型宣言を表すかを判定する（前後の空白と大文字小文字の差を無視。
+    /// 規則は <see cref="DbTypeText.AreEquivalent"/>。どちらかが空なら一致としない）
+    /// </summary>
+    private static bool IsSameDataType(string? left, string? right) =>
+        !string.IsNullOrWhiteSpace(left)
+        && !string.IsNullOrWhiteSpace(right)
+        && DbTypeText.AreEquivalent(left, right);
 }

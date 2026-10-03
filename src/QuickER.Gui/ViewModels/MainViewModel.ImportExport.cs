@@ -72,7 +72,8 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <summary>
     /// ダーティ時に「このまま続行」を選んだ外部バージョンの内容ハッシュ。
-    /// 同一内容での再確認を抑止する（次の別内容変更では null に戻り再確認する）。
+    /// 同一内容での再確認を抑止する（別内容の変更は再確認する）。保存・開く・再読込
+    /// （<see cref="UpdateDocumentIdentity"/>）と現在パスの変更で捨てる。
     /// </summary>
     private string? _ignoredExternalHash;
 
@@ -110,6 +111,9 @@ public partial class MainViewModel : IDiagramTransferHost
     /// <summary>直近の一時通知を既定表示へ戻すためのシングルショットタイマ</summary>
     private Timer? _statusRevertTimer;
 
+    /// <summary>一時通知の世代（通知ごとに進める。古い通知の戻し処理が新しい通知を消さないため）</summary>
+    private int _statusGeneration;
+
     /// <summary>ステータスバー左端に表示するメッセージ（外部変更の控えめ通知に使う。既定は「準備完了」）</summary>
     public string StatusMessage
     {
@@ -133,18 +137,39 @@ public partial class MainViewModel : IDiagramTransferHost
     }
 
     /// <summary>ステータスバーへ一時通知を表示し、数秒後に既定表示（準備完了）へ戻す</summary>
+    /// <remarks>
+    /// 前のタイマーを <see cref="Timer.Dispose()"/> しても、既にスレッドプールで動き出した（または UI の
+    /// キューへ載った）戻し処理は止まらない。そのまま戻すと新しい通知が直後に「準備完了」で消えるため、
+    /// 通知ごとに世代を進め、戻し処理は自分の世代がまだ最新のときだけ戻す（<see cref="RevertStatusIfCurrent"/>）。
+    /// </remarks>
     private void NotifyStatus(string message)
     {
         StatusMessage = message;
+        var generation = ++_statusGeneration;
 
         _statusRevertTimer?.Dispose();
         _statusRevertTimer = new Timer(
-            _ => _uiPost(() => StatusMessage = Strings.Status_Ready),
+            _ => _uiPost(() => RevertStatusIfCurrent(generation)),
             null,
             5000,
             Timeout.Infinite
         );
     }
+
+    /// <summary>一時通知を既定表示へ戻す（その通知の後に別の通知が出ていれば何もしない）</summary>
+    /// <param name="generation">戻す対象の通知の世代（<see cref="NotifyStatus"/> が採番した値）</param>
+    internal void RevertStatusIfCurrent(int generation)
+    {
+        if (generation != _statusGeneration)
+        {
+            return;
+        }
+
+        StatusMessage = Strings.Status_Ready;
+    }
+
+    /// <summary>テスト専用: 直近の一時通知の世代</summary>
+    internal int StatusGenerationForTests => _statusGeneration;
 
     /// <summary>監視スレッドからの外部変更通知を UI スレッドへ載せ替えて処理する</summary>
     private void OnDocumentFileChanged(object? sender, DocumentFileChangedEventArgs e)
@@ -378,7 +403,6 @@ public partial class MainViewModel : IDiagramTransferHost
         // 読み込んだ内容そのものを最終既知として記録し、クリーン状態へ戻す
         // （ディスクを読み直さない理由は DocumentContentHash.ComputeForBytes）
         UpdateDocumentIdentity(CurrentFilePath, DocumentContentHash.ComputeForBytes(rawContents));
-        _ignoredExternalHash = null;
         return true;
     }
 
@@ -595,11 +619,18 @@ public partial class MainViewModel : IDiagramTransferHost
     /// （<see cref="DocumentContentHash.ComputeForText"/>）、読込経路は読み込んだバイト列そのもの
     /// （<see cref="DocumentContentHash.ComputeForBytes"/>）から求めて渡す。読み直す方式では、
     /// 読み書きから採取までの隙間に外部が書いた内容を「自分が読み書きした内容」として記録してしまう。
+    /// <para>
+    /// 「続行」で無視した外部版のハッシュ（<see cref="_ignoredExternalHash"/>）もここで捨てる。
+    /// 保存・開く・再読込のあとはディスクとメモリが一致しており、無視した版はもう比較の対象ではない。
+    /// 残すと、同じ内容が後から外部で書き戻されたとき（チェックアウトによる巻き戻し等）に確認も
+    /// 上書き前の照合も素通りする。パスが同じでも消えるよう、パス変更の経路ではなくこの共通出口で消す。
+    /// </para>
     /// </remarks>
     private void UpdateDocumentIdentity(string path, string contentHash)
     {
         CurrentFilePath = path;
         _lastKnownFileHash = contentHash;
+        _ignoredExternalHash = null;
         MarkClean();
     }
 
@@ -794,6 +825,9 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <inheritdoc />
     int IDiagramTransferHost.QueryCount => Queries.Count;
+
+    /// <inheritdoc />
+    bool IDiagramTransferHost.IsCurrentDocumentPath(string path) => IsCurrentDocumentPath(path);
 
     /// <inheritdoc />
     void IDiagramTransferHost.RenderSvg(string path) => ImageExportService.ExportSvg(this, path);

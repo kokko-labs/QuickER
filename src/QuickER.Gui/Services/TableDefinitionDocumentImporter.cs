@@ -60,6 +60,24 @@ public static partial class TableDefinitionDocumentImporter
         };
 
         // 対象 DBMS は言語非依存のカスタムプロパティから復元する（欠落・空値は既定値のまま＝寛容仕様）
+        if (ReadTargetDbms(workbook) is { } targetDbms)
+        {
+            diagram.TargetDbms = targetDbms;
+        }
+
+        return diagram;
+    }
+
+    /// <summary>ブックが宣言している対象 DBMS を読む（カスタムプロパティが無い・空なら null＝不明）</summary>
+    /// <param name="workbook">対象ブック</param>
+    /// <returns>前後の空白を除いた方言名。宣言が無ければ null</returns>
+    /// <remarks>
+    /// 他のアプリを経由して保存し直したブック（Google スプレッドシート等）はカスタムプロパティを落とすことがある。
+    /// <see cref="Load(XLWorkbook)"/> はそのとき <see cref="ErDiagram"/> の既定の方言のままにするため、
+    /// 「宣言が無い」ことと「既定の方言を宣言している」ことを区別したい呼び出し側（マージ取込）はこちらを見る。
+    /// </remarks>
+    public static string? ReadTargetDbms(XLWorkbook workbook)
+    {
         var targetDbms = workbook
             .CustomProperties.FirstOrDefault(property =>
                 string.Equals(
@@ -70,12 +88,7 @@ public static partial class TableDefinitionDocumentImporter
             )
             ?.Value?.ToString();
 
-        if (!string.IsNullOrWhiteSpace(targetDbms))
-        {
-            diagram.TargetDbms = targetDbms.Trim();
-        }
-
-        return diagram;
+        return string.IsNullOrWhiteSpace(targetDbms) ? null : targetDbms.Trim();
     }
 
     /// <summary>ブックの書式バージョンが、この版で読める範囲かを確かめる</summary>

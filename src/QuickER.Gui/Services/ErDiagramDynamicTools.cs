@@ -157,9 +157,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -202,9 +200,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_DataTypeEmpty, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -253,18 +249,14 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableAndColumnNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
             return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
-        var column = entity.Columns.FirstOrDefault(c =>
-            string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
-        );
+        var column = FindColumn(entity, columnName);
 
         if (column is null)
         {
@@ -294,9 +286,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -377,18 +367,14 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableAndColumnNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
             return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
-        var column = entity.Columns.FirstOrDefault(c =>
-            string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
-        );
+        var column = FindColumn(entity, columnName);
 
         if (column is null)
         {
@@ -478,12 +464,8 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_SourceAndTargetTableRequired, false);
         }
 
-        var source = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, sourceTable, StringComparison.OrdinalIgnoreCase)
-        );
-        var target = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, targetTable, StringComparison.OrdinalIgnoreCase)
-        );
+        var source = FindEntity(vm, sourceTable);
+        var target = FindEntity(vm, targetTable);
 
         if (source is null)
         {
@@ -579,15 +561,47 @@ public static class ErDiagramDynamicTools
             targetTable,
             constraintName
         );
-        var note = DescribeIncompleteInferredPairs(
-            args,
-            relType,
-            source,
-            target,
-            columnPairs!.Count
-        );
+        var note =
+            DescribeIncompleteInferredPairs(args, relType, source, target, columnPairs!.Count)
+            ?? DescribeNonCandidateKeyColumns(relType, source, columnPairs);
 
         return (note is null ? added : $"{added} {note}", true);
+    }
+
+    /// <summary>
+    /// 明示した親側の列が親の主キーとも一意制約とも一致しないときの注意文
+    /// </summary>
+    /// <returns>注意文。候補キーと一致する・列ペアが無い・多対多のときは null</returns>
+    /// <remarks>
+    /// 拒否はしない（MySQL は一意でない索引列を参照する外部キーを受け付け、DB 取込の図にもその形が入り得る）。
+    /// 列を省略した推論は主キー全列から作るため、ここに来るのは列を明示したときだけ。
+    /// MCP 側 <c>DocumentErDiagramToolHost.DescribeNonCandidateKeyColumns</c> と同じ判定（<see cref="Entity.IsCandidateKey"/>）
+    /// </remarks>
+    private static string? DescribeNonCandidateKeyColumns(
+        RelationshipType relationshipType,
+        EntityViewModel source,
+        IReadOnlyList<RelationshipColumnPair> columnPairs
+    )
+    {
+        if (relationshipType == RelationshipType.ManyToMany || columnPairs.Count == 0)
+        {
+            return null;
+        }
+
+        var parentColumnIds = columnPairs.Select(pair => pair.SourceColumnId).ToList();
+
+        if (source.ToModel().IsCandidateKey(parentColumnIds))
+        {
+            return null;
+        }
+
+        var names = parentColumnIds.Select(id => source.Columns.First(c => c.Id == id).Name);
+
+        return string.Format(
+            Strings.Tool_RelationshipParentColumnsNotKey,
+            $"({string.Join(", ", names)})",
+            source.TableName
+        );
     }
 
     /// <summary>新しいリレーションの制約名を決める（<c>constraint_name</c> の指定、無ければ衝突しない既定名）</summary>
@@ -971,9 +985,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -1009,9 +1021,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -1081,9 +1091,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_TableNameRequired, false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e =>
-            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        var entity = FindEntity(vm, tableName);
 
         if (entity is null)
         {
@@ -1149,9 +1157,7 @@ public static class ErDiagramDynamicTools
             }
 
             var columnName = item.GetString()!;
-            var column = entity.Columns.FirstOrDefault(c =>
-                string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
-            );
+            var column = FindColumn(entity, columnName);
 
             if (column is null)
             {

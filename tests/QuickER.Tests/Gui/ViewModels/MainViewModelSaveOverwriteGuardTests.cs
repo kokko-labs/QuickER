@@ -235,4 +235,117 @@ public sealed class MainViewModelSaveOverwriteGuardTests : IDisposable
         vm.StatusMessage.Should().Be(Strings.Status_Saved);
         JsonStorageService.Load(path).Schema.Entities.Should().HaveCount(2);
     }
+
+    /// <summary>
+    /// 「続行」で無視した外部版は保存で忘れ、同じ内容が後から書き戻されたら改めて確認することを検証する
+    /// （外部変更の確認）
+    /// </summary>
+    /// <remarks>
+    /// 保存した時点でディスクは自分の内容になり、無視した版は比較の対象ではなくなる。覚えたままだと、
+    /// チェックアウトによる巻き戻しのように同じ内容が戻ったとき、未保存の編集があっても確認なしで素通りする
+    /// </remarks>
+    [Fact(DisplayName = "外部変更: 続行で無視した版も、保存した後に書き戻されたら改めて確認する")]
+    public void IgnoredExternalVersion_IsForgottenAfterSave_ForExternalChange()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var (vm, dialogs, externalBytes) = IgnoreExternalVersionThenSave(path);
+
+        // 無視した版と同じ内容が書き戻され、手元には未保存の編集がある
+        File.WriteAllBytes(path, externalBytes);
+        vm.AddEntityCommand.Execute(null);
+        dialogs.ConfirmResult = false;
+
+        vm.RaiseExternalChangeForTests(
+            DocumentFileChangeKind.Modified,
+            DocumentContentHash.TryCompute(path)
+        );
+
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(Strings.Confirm_ExternalChangeReload);
+    }
+
+    /// <summary>
+    /// 「続行」で無視した外部版は保存で忘れ、同じ内容が後から書き戻されたら上書き保存の前に確認することを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "上書き保存: 続行で無視した版も、保存した後に書き戻されたら上書き前に確認する"
+    )]
+    public void IgnoredExternalVersion_IsForgottenAfterSave_ForOverwrite()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var (vm, dialogs, externalBytes) = IgnoreExternalVersionThenSave(path);
+
+        File.WriteAllBytes(path, externalBytes);
+        vm.AddEntityCommand.Execute(null);
+        dialogs.ConfirmResult = false;
+
+        vm.SaveCommand.Execute(null);
+
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(Strings.Confirm_OverwriteExternalChange);
+        File.ReadAllBytes(path).Should().Equal(externalBytes, "キャンセルでは書き込まない");
+    }
+
+    /// <summary>
+    /// 図を開いて編集し、外部版を「続行」で無視したうえで上書き保存した VM を返す（無視した版の内容つき）。
+    /// 返す時点で確認の記録は空にしてある
+    /// </summary>
+    private (
+        MainViewModel Vm,
+        StubDialogService Dialogs,
+        byte[] ExternalBytes
+    ) IgnoreExternalVersionThenSave(string path)
+    {
+        WriteDiagram(path, "Original");
+
+        var dialogs = new StubDialogService();
+        var vm = OpenDiagram(path, dialogs);
+        vm.AddEntityCommand.Execute(null);
+
+        var externalHash = WriteDiagram(path, "External");
+        var externalBytes = File.ReadAllBytes(path);
+        dialogs.ConfirmResult = false;
+        vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Modified, externalHash);
+        dialogs.WarningConfirmMessages.Should().ContainSingle("ここで続行を選ぶ");
+
+        vm.SaveCommand.Execute(null);
+        vm.IsDirty.Should().BeFalse();
+        dialogs.WarningConfirmMessages.Clear();
+        return (vm, dialogs, externalBytes);
+    }
+
+    /// <summary>いま開いている図のファイルへエクスポートしようとすると断ることを検証する（VM の配線）</summary>
+    [Fact(DisplayName = "エクスポート: 出力先に開いている図のファイルを選ぶと何も書かずに断る")]
+    public void Export_ToCurrentDocument_IsRejected()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        WriteDiagram(path, "Original");
+        var original = File.ReadAllBytes(path);
+
+        var dialogs = new StubDialogService();
+        var vm = CreateViewModel(
+            dialogs,
+            new RecordingFileDialogService
+            {
+                OpenResult = new(path, 1),
+                SaveResult = new(Path.Combine(_folder, "DOC.JSON"), 4),
+            }
+        );
+        vm.OpenCommand.Execute(null);
+
+        vm.ExportDiagramCommand.Execute(null);
+
+        dialogs
+            .ErrorMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(Strings.Export_TargetIsCurrentDocument);
+        File.ReadAllBytes(path).Should().Equal(original);
+    }
 }

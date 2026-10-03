@@ -23,7 +23,8 @@ Importing from a live database is the one exception, on its own "DB Import" butt
 Choosing a file from the "Import" button brings the contents into the diagram.
 DBML and Mermaid replace the whole diagram and auto-arrange it afterwards.
 **Excel definition documents are merge-imported**: matching tables and columns take over the identity of the current diagram's elements, so the named-query definitions and hand-placed layout are preserved and no auto-arrange runs.
-The confirmation before a replacement is not unconditional: when the current diagram is empty, or its structure is identical to what is being imported, the import continues without asking.
+DBML and Mermaid ask before replacing a diagram that is not empty: the replacement re-creates the tables and arranges them again, so the hand-placed layout, colors, memos (and, for Mermaid, descriptions) and the undo history are lost even when the structure is identical.
+An Excel definition document continues without asking when the current diagram is empty, or when its structure is identical and the import overwrites no description or memo and breaks no named query.
 
 ### DBML (.dbml)
 
@@ -92,6 +93,7 @@ A relationship whose constraint name cell is empty stays without a name and gets
 Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import.
 **Excel files created by other applications cannot be imported directly**, though: to migrate definition documents you already have, transcribe them into QuickER's document format once.
 The target DBMS is embedded in the document and restored, dialect and all, on import.
+A document that has lost it (another application that saves the workbook again can drop it) keeps the current diagram's target DBMS.
 The format version is embedded too, and a document written in a newer format than this version supports is reported instead of imported, so information this version cannot read is never silently dropped. Older documents that carry no version are imported as before.
 Count mismatches, duplicates, and references to undefined tables are import errors.
 A relationship row counts as a duplicate only when another row has the same pair of tables **and the same columns**, so a diagram with more than one foreign key between the same two tables (a shipping address and a billing address both pointing at the same table, say) round-trips.
@@ -165,6 +167,7 @@ The CLI's `quicker reverse` writes a fresh, merge-free diagram (schema-only JSON
 ## Export
 
 Choose a format from the "Export" button.
+The diagram file that is open cannot be the target, whatever the format: the export writes nothing and says so (use Save for the diagram itself).
 
 ### SQL DDL (.sql)
 
@@ -248,8 +251,7 @@ The cap exists because the rasterizer fails outright past its own limit: without
 SVG has no such cap, so export SVG when you need the full resolution.
 
 Every name and description the SVG carries is XML-escaped, so nothing written in the diagram can break out of the markup.
-A control character in a name is the one exception: it is written through as it stands, and XML forbids those in content, so the file is written without complaint and then fails to open in every SVG viewer.
-Nothing rejects such a name on the way out (the entry check for control characters in names guards DDL and code generation, not the exports), so keep them out of the names themselves.
+Characters XML does not allow in content (control characters such as a line break pasted from Word) are written as a space, so the file always opens.
 
 ### Print / PDF
 
@@ -257,7 +259,7 @@ Nothing rejects such a name on the way out (the entry check for control characte
 
 - **Diagram Title**: the title printed in the header
 - **Print size**: "Scale to fit one page" (default) / "Print at actual size" (match the paper size to the diagram's real size; good for PDF output)
-- **Print the timestamp in the header**: on by default
+- **Print the timestamp in the header**: on by default. It is written as `yyyy/MM/dd HH:mm` in the Gregorian calendar, whatever the system's regional settings
 
 Choose a PDF printer such as Microsoft Print to PDF and the print becomes a PDF export.
 

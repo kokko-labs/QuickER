@@ -212,6 +212,32 @@ public sealed class MainViewModelExternalChangeTests : IDisposable
         vm.StatusMessage.Should().Be(Strings.Status_ExternalFileDeleted);
     }
 
+    /// <summary>
+    /// 古い一時通知の戻し処理（タイマー）が遅れて走っても、その後に出た通知を「準備完了」で消さないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// タイマーを破棄しても、既に動き出した・UI のキューへ載った戻し処理は止まらない。実タイマー（5 秒）は待たず、
+    /// 戻し処理を世代つきで直接呼んで判定を確かめる
+    /// </remarks>
+    [Fact(DisplayName = "一時通知: 古い通知の戻し処理は、後から出た通知を消さない")]
+    public void StatusRevert_FromOlderNotification_DoesNotClearNewerOne()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var vm = CreateCleanBoundViewModel(path, "Alive");
+
+        vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Deleted, null);
+        var older = vm.StatusGenerationForTests;
+        vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Renamed, null);
+        var newer = vm.StatusGenerationForTests;
+
+        vm.RevertStatusIfCurrent(older);
+        vm.StatusMessage.Should()
+            .Be(Strings.Status_ExternalFileRenamed, "古い通知の戻し処理は無視する");
+
+        vm.RevertStatusIfCurrent(newer);
+        vm.StatusMessage.Should().Be(Strings.Status_Ready);
+    }
+
     /// <summary>無題（現在パスなし）では外部変更イベントを無視することを検証する（監視しない契約の観測面）</summary>
     [Fact(DisplayName = "無題: パス不一致の外部変更は無視する")]
     public void Untitled_IgnoresExternalEvents()
