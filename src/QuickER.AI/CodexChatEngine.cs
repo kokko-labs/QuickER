@@ -399,11 +399,11 @@ public sealed class CodexChatEngine : IErChatEngine
                 .ConfigureAwait(false);
             _currentTurnId = turn.Id;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // 中断は失敗ではないため、他の 2 エンジン（ChatTurnEngine / ClaudeCodeChatEngine の
-            // IClaudeCodeClient.RunTurnAsync 契約）と同じく Success=false・Error=null へ畳む。
-            // 送信失敗と並行して接続断などが先にターンを完了させていたら、二重に通知しない
+            // 利用者の中断（呼び出し元のトークン）は失敗ではないため、他のエンジン（ChatTurnEngine /
+            // ClaudeCodeChatEngine）と同じく Success=false・Error=null へ畳む。トークンの立っていない取り消しは
+            // 下の失敗へ落とす。送信失敗と並行して接続断などが先にターンを完了させていたら、二重に通知しない
             if (TryCompleteTurn())
             {
                 TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
@@ -414,10 +414,19 @@ public sealed class CodexChatEngine : IErChatEngine
             // 送信失敗と並行して接続断などが先にターンを完了させていたら、二重に通知しない
             if (TryCompleteTurn())
             {
-                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+                TurnCompleted?.Invoke(
+                    this,
+                    new ErChatTurnResult(false, BuildTurnFailedMessage(ex.Message))
+                );
             }
         }
     }
+
+    /// <summary>ターンの失敗としてチャットへ表示する文言を組み立てる</summary>
+    /// <param name="detail">原因（例外の文言、または App Server が報告した文）。無ければ null または空</param>
+    /// <returns>何が起きたかと次に何をするかの要約（UI 言語に追従）に、原因を「詳細: …」の行で添えた文言</returns>
+    private static string BuildTurnFailedMessage(string? detail) =>
+        AiErrorMessageLocalizer.WithDetail(Strings.Codex_TurnFailed, detail);
 
     /// <summary>実行中フラグを 1→0 へ落とせた（＝このターンの完了通知の権利を勝ち取った）ときだけ true を返す</summary>
     /// <remarks>
@@ -695,11 +704,11 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         else if (e.Turn.Status == "failed")
         {
-            // 理由の無い failed も失敗として扱う（成功に見せない）
-            var error = string.IsNullOrWhiteSpace(e.Turn.Error)
-                ? Strings.Codex_UnknownError
-                : e.Turn.Error;
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, error));
+            // 理由の無い failed も失敗として扱う（成功に見せない）。理由が無ければ要約だけになる
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, BuildTurnFailedMessage(e.Turn.Error))
+            );
         }
         else
         {
@@ -875,7 +884,7 @@ public sealed class CodexChatEngine : IErChatEngine
             return;
         }
 
-        var message = Strings.Codex_UnknownError;
+        string? reported = null;
 
         if (
             e.Params is JsonElement paramsElement
@@ -883,16 +892,26 @@ public sealed class CodexChatEngine : IErChatEngine
             && errorElement.TryGetProperty("message", out var msgElement)
         )
         {
-            message = msgElement.GetString() ?? message;
+            reported = msgElement.GetString();
         }
 
         if (TryCompleteTurn())
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, message));
+            // ターン中の失敗は、ほかのターン失敗と同じく要約に報告文を添える（報告文が無ければ要約だけ）
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, BuildTurnFailedMessage(reported))
+            );
         }
         else
         {
-            StatusChanged?.Invoke(this, string.Format(Strings.Codex_ErrorOccurred, message));
+            StatusChanged?.Invoke(
+                this,
+                string.Format(
+                    Strings.Codex_ErrorOccurred,
+                    string.IsNullOrWhiteSpace(reported) ? Strings.Codex_UnknownError : reported
+                )
+            );
         }
     }
 

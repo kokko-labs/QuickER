@@ -791,6 +791,9 @@
   <data name="ExportOmission_UniqueConstraintOnForeignKeyColumn" xml:space="preserve">
     <value>Single-column unique constraints on foreign key columns (a column carries one key marker, and FK takes precedence over UK)</value>
   </data>
+  <data name="ExportOmission_RelationshipConstraintName" xml:space="preserve">
+    <value>Relationship constraint names that the import would not read back as the same name (names that must be quoted, such as ones with spaces or symbols, names shared by several relationships, and names equal to relates or to a primary key or unique constraint name)</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
   </data>

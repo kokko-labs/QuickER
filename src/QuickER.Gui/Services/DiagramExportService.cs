@@ -299,6 +299,8 @@ internal sealed class DiagramExportService(
             ExportOmissionKind.ColumnTypeNormalized => Strings.ExportOmission_ColumnTypeNormalized,
             ExportOmissionKind.UniqueConstraintOnForeignKeyColumn =>
                 Strings.ExportOmission_UniqueConstraintOnForeignKeyColumn,
+            ExportOmissionKind.RelationshipConstraintName =>
+                Strings.ExportOmission_RelationshipConstraintName,
             _ => kind.ToString(),
         };
 }

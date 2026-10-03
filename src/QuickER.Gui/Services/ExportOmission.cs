@@ -63,4 +63,7 @@ public enum ExportOmissionKind
 
     /// <summary>外部キー列の単一列 UNIQUE 制約（キー標識が 1 つしか書けない形式で外部キー印に隠れる）</summary>
     UniqueConstraintOnForeignKeyColumn,
+
+    /// <summary>リレーションの制約名（取込で同じ名前に戻らないもの）</summary>
+    RelationshipConstraintName,
 }

@@ -469,4 +469,13 @@
   <data name="Copilot_ErrorOccurred" xml:space="preserve">
     <value>An error occurred: {0}</value>
   </data>
+  <data name="ClaudeCode_TurnFailed" xml:space="preserve">
+    <value>Claude Code could not complete the response. Send the message again; if it keeps failing, check the connection status.</value>
+  </data>
+  <data name="Codex_TurnFailed" xml:space="preserve">
+    <value>Codex could not complete the response. Send the message again; if it keeps failing, check the connection status.</value>
+  </data>
+  <data name="Copilot_TurnFailed" xml:space="preserve">
+    <value>GitHub Copilot could not complete the response. Send the message again; if it keeps failing, check the connection status.</value>
+  </data>
 </root>

@@ -469,4 +469,13 @@
   <data name="Copilot_ErrorOccurred" xml:space="preserve">
     <value>エラーが発生しました: {0}</value>
   </data>
+  <data name="ClaudeCode_TurnFailed" xml:space="preserve">
+    <value>Claude Code が応答を完了できませんでした。もう一度送信してください。続く場合は接続の状態を確認してください。</value>
+  </data>
+  <data name="Codex_TurnFailed" xml:space="preserve">
+    <value>Codex が応答を完了できませんでした。もう一度送信してください。続く場合は接続の状態を確認してください。</value>
+  </data>
+  <data name="Copilot_TurnFailed" xml:space="preserve">
+    <value>GitHub Copilot が応答を完了できませんでした。もう一度送信してください。続く場合は接続の状態を確認してください。</value>
+  </data>
 </root>

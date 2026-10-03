@@ -238,10 +238,10 @@ public class CodexChatEngineTests
     }
 
     /// <summary>
-    /// 理由（error）の無い failed も失敗として扱い、既定の文言を補うことを検証する
+    /// 理由（error）の無い failed も失敗として扱い、ターン失敗の要約だけを出すことを検証する
     /// （成功に見せると、AI が何もせずに終わったターンが正常終了に見える）。
     /// </summary>
-    [Fact(DisplayName = "Codex の理由なしの failed は既定の文言つきの失敗になる")]
+    [Fact(DisplayName = "Codex の理由なしの failed は要約だけの失敗になる")]
     public async Task TurnCompleted_FailedWithoutError_IsFailureWithUnknownError()
     {
         var client = new FakeCodexAppServerClient();
@@ -259,7 +259,37 @@ public class CodexChatEngineTests
 
         result.Should().NotBeNull();
         result!.Value.Success.Should().BeFalse();
-        result.Value.Error.Should().Be(QuickER.AI.Resources.Strings.Codex_UnknownError);
+        result.Value.Error.Should().Be(QuickER.AI.Resources.Strings.Codex_TurnFailed);
+    }
+
+    /// <summary>
+    /// Codex が理由つきで失敗したターンは、何が起きたかと次の行動の要約に、報告文を詳細として添えることを検証する
+    /// </summary>
+    [Fact(DisplayName = "Codex の理由つきの failed は要約＋詳細の失敗になる")]
+    public async Task TurnCompleted_FailedWithError_IsSummaryWithDetail()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        ErChatTurnResult? result = null;
+        engine.TurnCompleted += (_, r) => result = r;
+
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseTurnCompleted("failed", "usage limit reached");
+
+        result!.Value.Success.Should().BeFalse();
+        result
+            .Value.Error.Should()
+            .Be(
+                QuickER.AI.Resources.Strings.Codex_TurnFailed
+                    + Environment.NewLine
+                    + QuickER.AI.Resources.Strings.Ai_DetailLabel
+                    + "usage limit reached"
+            );
     }
 
     /// <summary>
@@ -914,17 +944,84 @@ public class CodexChatEngineTests
         results.Should().ContainSingle();
     }
 
+    /// <summary>ターン中の error 通知は、要約に通知の文を詳細として添えた失敗で完了することを検証する</summary>
+    [Fact(DisplayName = "ターン中の error 通知は要約＋詳細の失敗として完了する")]
+    public async Task ErrorNotification_DuringTurn_IsSummaryWithDetail()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseNotification(
+            new CodexJsonRpcNotification
+            {
+                Method = "error",
+                Params = JsonSerializer.SerializeToElement(
+                    new { error = new { message = "stream disconnected" } }
+                ),
+            }
+        );
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0]
+            .Error.Should()
+            .Be(
+                QuickER.AI.Resources.Strings.Codex_TurnFailed
+                    + Environment.NewLine
+                    + QuickER.AI.Resources.Strings.Ai_DetailLabel
+                    + "stream disconnected"
+            );
+    }
+
     /// <summary>
-    /// StartTurnAsync が <see cref="OperationCanceledException"/> を投げたら、中断として
-    /// Success=false・Error=null（ChatTurnEngine / <see cref="IClaudeCodeClient.RunTurnAsync"/> と
+    /// 呼び出し元のトークンが取り消されて StartTurnAsync が <see cref="OperationCanceledException"/> を投げたら、
+    /// 中断として Success=false・Error=null（ChatTurnEngine / <see cref="IClaudeCodeClient.RunTurnAsync"/> と
     /// 同じ規約）で完了することを検証する（B4: 誤ってエラー扱いに畳まれていない回帰固定）。
     /// </summary>
-    [Fact(DisplayName = "ターン送信の OperationCanceledException は中断として畳まれる")]
+    [Fact(DisplayName = "ターン送信の取り消し（自分のトークン）は中断として畳まれる")]
     public async Task SendAsync_StartTurnThrowsOperationCanceledException_CompletesAsInterrupted()
+    {
+        using var cts = new CancellationTokenSource();
+        var client = new FakeCodexAppServerClient
+        {
+            StartTurnException = new OperationCanceledException(cts.Token),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await cts.CancelAsync();
+        await engine.SendAsync("やあ", cts.Token);
+
+        results.Should().ContainSingle();
+        results[0].Success.Should().BeFalse();
+        results[0].Error.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 呼び出し元のトークンが立っていない <see cref="OperationCanceledException"/> は、中断に化けず
+    /// 失敗として表示することを検証する（ChatTurnEngine と同じ区別）
+    /// </summary>
+    [Fact(DisplayName = "ターン送信のトークン以外の取り消しは中断でなく失敗として完了する")]
+    public async Task SendAsync_StartTurnThrowsForeignCancellation_CompletesAsFailure()
     {
         var client = new FakeCodexAppServerClient
         {
-            StartTurnException = new OperationCanceledException(),
+            StartTurnException = new OperationCanceledException("canceled elsewhere"),
         };
         var engine = new CodexChatEngine(
             client,
@@ -940,11 +1037,11 @@ public class CodexChatEngineTests
 
         results.Should().ContainSingle();
         results[0].Success.Should().BeFalse();
-        results[0].Error.Should().BeNull();
+        results[0].Error.Should().StartWith(QuickER.AI.Resources.Strings.Codex_TurnFailed);
     }
 
-    /// <summary>対照: 一般例外は従来どおりメッセージ付きの失敗として完了することを検証する</summary>
-    [Fact(DisplayName = "ターン送信の一般例外はメッセージ付きの失敗として完了する")]
+    /// <summary>対照: 一般例外は要約に例外の文言を詳細として添えた失敗として完了することを検証する</summary>
+    [Fact(DisplayName = "ターン送信の一般例外は要約＋詳細の失敗として完了する")]
     public async Task SendAsync_StartTurnThrowsGeneralException_CompletesWithErrorMessage()
     {
         var client = new FakeCodexAppServerClient
@@ -965,7 +1062,14 @@ public class CodexChatEngineTests
 
         results.Should().ContainSingle();
         results[0].Success.Should().BeFalse();
-        results[0].Error.Should().Be("boom");
+        results[0]
+            .Error.Should()
+            .Be(
+                QuickER.AI.Resources.Strings.Codex_TurnFailed
+                    + Environment.NewLine
+                    + QuickER.AI.Resources.Strings.Ai_DetailLabel
+                    + "boom"
+            );
     }
 
     /// <summary>

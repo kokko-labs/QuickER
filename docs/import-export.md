@@ -79,8 +79,10 @@ A type the import cannot restore, such as `nvarchar(max)` or `double precision`,
 A column without a type is written with the type `_`, which the import reads back as no type.
 A `UK` key marker is imported as a unique constraint over that single column (Mermaid has no syntax for grouping several columns, so composite unique constraints cannot be expressed).
 A relationship line must carry a label, so export writes the constraint name there, or `relates` for a relationship without a name.
+A name Mermaid cannot write bare, such as one with a space or a symbol, is written in double quotes, with a `"` folded to `_`.
 On import, a label becomes the constraint name only when it is a single word without quotes, is not `relates`, appears on no other relationship, and is not the name of a primary key or unique constraint.
 Labels such as `has` that other tools repeat are therefore not taken as names, and neither is a constraint that is actually named `relates`.
+Export reports any relationship constraint name that would not come back this way.
 A relationship whose label is not taken stays without a name and gets the default `FK_{child}_{parent}` from the DDL.
 When that name is already taken, for example by a second relationship between the same two tables, it gets the child's foreign key column names appended, or a number.
 
@@ -201,7 +203,7 @@ Mermaid has no syntax for a composite primary key's own column order, since each
 DBML also writes table descriptions as `Note:` lines and foreign key referential actions in the settings block of the `Ref:` line (`delete` / `update`; the default `NO ACTION` is not written), so those round-trip as well.
 
 Information the chosen format cannot represent is listed in the completion dialog (once per format per session, so it does not become noise).
-Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, named queries, computed columns, a single-column unique constraint on a foreign key column (the column's one marker is `FK`), or a composite primary key order that differs from the column order, so it reports whichever of those the diagram actually contains, along with column names, types and table names it had to rewrite.
+Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, named queries, computed columns, a single-column unique constraint on a foreign key column (the column's one marker is `FK`), or a composite primary key order that differs from the column order, so it reports whichever of those the diagram actually contains, along with column names, types and table names it had to rewrite and relationship constraint names the import would not read back.
 For DBML only table memos, named queries, computed columns (they come back as ordinary columns), foreign key markers on columns that are not the child side of any relationship, and relationships left out because their columns cannot be written are reported (`Note` is used for the description, so carrying a memo would need a non-standard extension, and interoperability with other tools was given priority).
 SQL DDL and the definition documents report nothing, because the only things they drop are the ones that format is not meant to carry.
 

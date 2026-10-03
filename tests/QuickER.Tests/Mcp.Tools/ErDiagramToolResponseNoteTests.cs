@@ -148,6 +148,57 @@ public sealed class ErDiagramToolResponseNoteTests : TwoHostToolTestBase
         Schema.Relationships.Single().ColumnPairs.Should().ContainSingle();
     }
 
+    [Theory(
+        DisplayName = "add_relationship は識別関係（子の主キー (OrderId, LineNo) の OrderId）を推論し、注意を添えない"
+    )]
+    [InlineData(HostKind.Gui)]
+    [InlineData(HostKind.File)]
+    public void AddRelationship_IdentifyingRelationship_PairsChildPrimaryKey(HostKind host)
+    {
+        Setup(host);
+        Arrange("add_entity", new { table_name = "OrderLine" });
+        Arrange(
+            "add_column",
+            new
+            {
+                table_name = "OrderLine",
+                column_name = "OrderId",
+                data_type = "int",
+                is_primary_key = true,
+            }
+        );
+        Arrange(
+            "add_column",
+            new
+            {
+                table_name = "OrderLine",
+                column_name = "LineNo",
+                data_type = "int",
+                is_primary_key = true,
+            }
+        );
+
+        var (result, success) = Exec(
+            "add_relationship",
+            new
+            {
+                source_table = "Order",
+                target_table = "OrderLine",
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeTrue();
+        result.Should().NotContain("source_columns");
+        var schema = Schema;
+        var child = schema.Entities.Single(entity => entity.TableName == "OrderLine");
+        var pair = schema.Relationships.Single().ColumnPairs.Should().ContainSingle().Subject;
+        var childColumn = child.Columns.Single(column => column.Id == pair.TargetColumnId);
+        childColumn.Name.Should().Be("OrderId");
+        childColumn.IsPrimaryKey.Should().BeTrue();
+        childColumn.IsForeignKey.Should().BeTrue();
+    }
+
     [Theory(DisplayName = "add_relationship は親に主キーが無く列ペアを推論できないと注意を添える")]
     [InlineData(HostKind.Gui)]
     [InlineData(HostKind.File)]

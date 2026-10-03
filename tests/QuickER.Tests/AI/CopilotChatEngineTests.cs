@@ -328,7 +328,77 @@ public class CopilotChatEngineTests
 
         completions.Should().ContainSingle();
         completions[0].Success.Should().BeFalse();
-        completions[0].Error.Should().Be("rate limited");
+        completions[0].Error.Should().Be(ExpectedTurnFailed("rate limited"));
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>ターン失敗の表示文言（要約＋改行＋詳細: 原因）を組み立てる</summary>
+    private static string ExpectedTurnFailed(string detail) =>
+        Strings.Copilot_TurnFailed + Environment.NewLine + Strings.Ai_DetailLabel + detail;
+
+    /// <summary>送信が例外で終わったら、要約に例外の文言を詳細として添えた失敗で完了することを検証する</summary>
+    [Fact(DisplayName = "送信の例外は要約＋詳細の失敗として完了する")]
+    public async Task SendFailure_IsSummaryWithDetail()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        var completions = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => completions.Add(r);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.DuringSend = () => throw new InvalidOperationException("session lost");
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completions.Should().ContainSingle();
+        completions[0].Success.Should().BeFalse();
+        completions[0].Error.Should().Be(ExpectedTurnFailed("session lost"));
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 送信の取り消しは、呼び出し元のトークンが立っていれば無音の中断、立っていなければ失敗になることを検証する
+    /// </summary>
+    /// <param name="cancelOwnToken">送信前に呼び出し元のトークンを取り消すか</param>
+    [Theory(DisplayName = "送信の取り消しは自分のトークンのときだけ中断として畳まれる")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SendCancellation_IsInterruptOnlyForOwnToken(bool cancelOwnToken)
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+        using var cts = new CancellationTokenSource();
+
+        var completions = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => completions.Add(r);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.DuringSend = () =>
+        {
+            if (cancelOwnToken)
+            {
+                cts.Cancel();
+            }
+
+            throw new OperationCanceledException();
+        };
+        await engine.SendAsync("やあ", cts.Token);
+
+        completions.Should().ContainSingle();
+        completions[0].Success.Should().BeFalse();
+
+        if (cancelOwnToken)
+        {
+            completions[0].Error.Should().BeNull();
+        }
+        else
+        {
+            completions[0].Error.Should().StartWith(Strings.Copilot_TurnFailed);
+        }
 
         await engine.DisposeAsync();
     }
@@ -358,7 +428,7 @@ public class CopilotChatEngineTests
 
         completions.Should().ContainSingle();
         completions[0].Success.Should().BeFalse();
-        completions[0].Error.Should().Be("rate limited");
+        completions[0].Error.Should().Be(ExpectedTurnFailed("rate limited"));
 
         await engine.DisposeAsync();
     }

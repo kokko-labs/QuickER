@@ -232,15 +232,33 @@ public sealed class CopilotChatEngine : IErChatEngine
         {
             await _client.SendAsync(prompt, attachments, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 利用者の中断（呼び出し元のトークン）は失敗ではないため、他のエンジンと同じく Error=null へ畳む。
+            // 送信の途中でセッションエラーが先にターンを完了させていたら、二重に通知しない
+            if (TryCompleteTurn())
+            {
+                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
+            }
+        }
         catch (Exception ex)
         {
             // 送信の途中でセッションエラーが先にターンを完了させていたら、二重に通知しない
             if (TryCompleteTurn())
             {
-                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+                TurnCompleted?.Invoke(
+                    this,
+                    new ErChatTurnResult(false, BuildTurnFailedMessage(ex.Message))
+                );
             }
         }
     }
+
+    /// <summary>ターンの失敗としてチャットへ表示する文言を組み立てる</summary>
+    /// <param name="detail">原因（例外の文言、または copilot ランタイムが報告した文）。無ければ null または空</param>
+    /// <returns>何が起きたかと次に何をするかの要約（UI 言語に追従）に、原因を「詳細: …」の行で添えた文言</returns>
+    private static string BuildTurnFailedMessage(string? detail) =>
+        AiErrorMessageLocalizer.WithDetail(Strings.Copilot_TurnFailed, detail);
 
     /// <summary>実行中フラグを 1→0 へ落とせた（＝このターンの完了通知の権利を勝ち取った）ときだけ true を返す</summary>
     /// <remarks>
@@ -516,7 +534,11 @@ public sealed class CopilotChatEngine : IErChatEngine
     {
         if (TryCompleteTurn())
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, message));
+            // ターン中の失敗は、ほかのターン失敗と同じく要約に報告文を添える
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, BuildTurnFailedMessage(message))
+            );
         }
         else
         {

@@ -814,6 +814,9 @@
   <data name="ExportOmission_UniqueConstraintOnForeignKeyColumn" xml:space="preserve">
     <value>外部キー列の単一列 UNIQUE 制約（キー欄は列ごとに標識を 1 つしか持てず、FK が UK より優先されます）</value>
   </data>
+  <data name="ExportOmission_RelationshipConstraintName" xml:space="preserve">
+    <value>取込で同じ名前に戻らないリレーションの制約名（空白や記号を含むため引用して書いた名前、複数のリレーションで同じ名前、relates や主キー・一意制約と同じ名前）</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
   </data>

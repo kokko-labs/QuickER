@@ -335,12 +335,27 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             }
             else
             {
-                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, outcome.Error));
+                // 利用者の中断（自分のトークンが立っている）だけを無音の中断として扱う。クライアントは中断を
+                // Error=null の失敗へ畳むが、報告文の無い本物の失敗も Error=null で返り得るので、トークンで見分ける
+                TurnCompleted?.Invoke(
+                    this,
+                    new ErChatTurnResult(
+                        false,
+                        token.IsCancellationRequested ? null : BuildTurnFailedMessage(outcome.Error)
+                    )
+                );
             }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
         }
         catch (Exception ex)
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, BuildTurnFailedMessage(ex.Message))
+            );
         }
         finally
         {
@@ -348,6 +363,19 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             _turnCts = null;
         }
     }
+
+    /// <summary>ターンの失敗（未ログイン以外）としてチャットへ表示する文言を組み立てる</summary>
+    /// <param name="detail">
+    /// 原因（例外の文言、または CLI・クライアントが報告した文）。無ければ null または空。
+    /// CLI が理由を報告しなかったときにクライアントが補う汎用文言（<see cref="Strings.ClaudeCode_GenericError"/>）は、
+    /// 要約と同じことしか言わないので詳細に載せない
+    /// </param>
+    /// <returns>何が起きたかと次に何をするかの要約（UI 言語に追従）に、原因を「詳細: …」の行で添えた文言</returns>
+    private static string BuildTurnFailedMessage(string? detail) =>
+        AiErrorMessageLocalizer.WithDetail(
+            Strings.ClaudeCode_TurnFailed,
+            detail == Strings.ClaudeCode_GenericError ? null : detail
+        );
 
     /// <summary>未ログイン失敗としてチャットへ表示する文言を組み立てる</summary>
     /// <param name="reportedError">

@@ -875,5 +875,23 @@ namespace QuickER.AI.Resources {
                 return ResourceManager.GetString("Copilot_ErrorOccurred", resourceCulture);
             }
         }
+
+        public static string ClaudeCode_TurnFailed {
+            get {
+                return ResourceManager.GetString("ClaudeCode_TurnFailed", resourceCulture);
+            }
+        }
+
+        public static string Codex_TurnFailed {
+            get {
+                return ResourceManager.GetString("Codex_TurnFailed", resourceCulture);
+            }
+        }
+
+        public static string Copilot_TurnFailed {
+            get {
+                return ResourceManager.GetString("Copilot_TurnFailed", resourceCulture);
+            }
+        }
     }
 }

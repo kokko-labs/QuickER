@@ -32,6 +32,12 @@ public class ClaudeCodeChatEngineTests
         public Exception? ProbeException { get; set; }
         public ClaudeCodeLaunchOptions? LastOptions { get; private set; }
 
+        /// <summary>非 null ならターンの実行中に呼ぶ（利用者の中断などの模擬）</summary>
+        public Action? DuringRun { get; set; }
+
+        /// <summary>非 null ならターンの実行がこの例外を投げる（起動の失敗などの模擬）</summary>
+        public Exception? RunException { get; set; }
+
         public bool IsAvailable() => Available;
 
         public Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken)
@@ -60,6 +66,13 @@ public class ClaudeCodeChatEngineTests
             if (!string.IsNullOrEmpty(ScriptedText))
             {
                 onAssistantText(ScriptedText);
+            }
+
+            DuringRun?.Invoke();
+
+            if (RunException is not null)
+            {
+                return Task.FromException<ClaudeCodeTurnOutcome>(RunException);
             }
 
             var outcome =
@@ -117,6 +130,111 @@ public class ClaudeCodeChatEngineTests
         await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
 
         client.ResumeSessionIdsAtCall.Should().Equal(new string?[] { null, "s1" });
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>未ログイン以外の失敗を、ターン失敗の要約と、詳細の行の原因で表示することを検証する</summary>
+    /// <param name="reported">クライアントが返した原因（null・空・汎用文言なら詳細の行を付けない）</param>
+    /// <param name="expectDetail">詳細の行に原因を添えるか</param>
+    [Theory(
+        DisplayName = "未ログイン以外の失敗は要約に原因を詳細として添える（汎用文言・空は要約だけ）"
+    )]
+    [InlineData("Claude Code exited with an error (exit code: 1).", true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("<generic>", false)]
+    public async Task SendAsync_ReportedFailure_IsSummaryWithDetail(
+        string? reported,
+        bool expectDetail
+    )
+    {
+        var error = reported == "<generic>" ? Strings.ClaudeCode_GenericError : reported;
+        var client = new FakeClaudeCodeClient();
+        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(false, error, null, false));
+        var engine = CreateEngine(client);
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeFalse();
+        completed!
+            .Value.Error.Should()
+            .Be(
+                expectDetail
+                    ? Strings.ClaudeCode_TurnFailed
+                        + Environment.NewLine
+                        + Strings.Ai_DetailLabel
+                        + error
+                    : Strings.ClaudeCode_TurnFailed
+            );
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>ターンの実行が例外を投げたら、要約に例外の文言を詳細として添えた失敗で完了することを検証する</summary>
+    [Fact(DisplayName = "ターンの例外は要約＋詳細の失敗として完了する")]
+    public async Task SendAsync_RunThrows_IsSummaryWithDetail()
+    {
+        var client = new FakeClaudeCodeClient
+        {
+            RunException = new InvalidOperationException("The system cannot find the file"),
+        };
+        var engine = CreateEngine(client);
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeFalse();
+        completed!
+            .Value.Error.Should()
+            .Be(
+                Strings.ClaudeCode_TurnFailed
+                    + Environment.NewLine
+                    + Strings.Ai_DetailLabel
+                    + "The system cannot find the file"
+            );
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>利用者の中断（自分のトークンが立つ）は、原因の無い失敗でも無音の中断として完了することを検証する</summary>
+    /// <param name="throwCancellation">ターンの実行が取り消しの例外を投げるか（false なら原因なしの失敗を返す）</param>
+    [Theory(DisplayName = "利用者の中断はエラー文言なしで完了する")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_UserInterrupt_CompletesSilently(bool throwCancellation)
+    {
+        var client = new FakeClaudeCodeClient();
+        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(false, null, null, false));
+        var engine = CreateEngine(client);
+        client.DuringRun = () =>
+        {
+            engine.InterruptAsync().GetAwaiter().GetResult();
+
+            if (throwCancellation)
+            {
+                throw new OperationCanceledException();
+            }
+        };
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeFalse();
+        completed!.Value.Error.Should().BeNull();
 
         await engine.DisposeAsync();
     }

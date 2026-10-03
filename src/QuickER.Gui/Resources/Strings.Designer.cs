@@ -1793,6 +1793,12 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("ExportOmission_UniqueConstraintOnForeignKeyColumn", resourceCulture);
             }
         }
+
+        public static string ExportOmission_RelationshipConstraintName {
+            get {
+                return ResourceManager.GetString("ExportOmission_RelationshipConstraintName", resourceCulture);
+            }
+        }
         
         public static string Import_ReplaceConfirm {
             get {

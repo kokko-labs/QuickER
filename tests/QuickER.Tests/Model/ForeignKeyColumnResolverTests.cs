@@ -110,9 +110,9 @@ public class ForeignKeyColumnResolverTests
         Resolve(columns).Should().Be(1);
     }
 
-    /// <summary>主キー列は名前が一致しても候補から除外されることを検証する</summary>
-    [Fact(DisplayName = "主キー列は候補から除外される")]
-    public void PrimaryKeyColumns_AreExcluded()
+    /// <summary>①（親テーブル名から導いた名前）では、子の主キー列も候補になることを検証する（識別関係）</summary>
+    [Fact(DisplayName = "①: 親テーブル名から導いた名前なら主キー列も選ばれる")]
+    public void Rank1_PrimaryKeyColumn_IsSelected()
     {
         var columns = new[]
         {
@@ -120,7 +120,50 @@ public class ForeignKeyColumnResolverTests
             Col("Note", dataType: "nvarchar(100)"),
         };
 
+        Resolve(columns).Should().Be(0);
+    }
+
+    /// <summary>②〜④では、子の主キー列は名前・印が一致しても候補にならないことを検証する</summary>
+    /// <param name="name">主キー列の名前</param>
+    /// <param name="isFk">外部キーの印が付いているか</param>
+    [Theory(DisplayName = "②〜④では主キー列は選ばれない")]
+    [InlineData("Id", false)]
+    [InlineData("Code", true)]
+    [InlineData("BillingCustomerId", false)]
+    public void Ranks2To4_PrimaryKeyColumn_IsNotSelected(string name, bool isFk)
+    {
+        var columns = new[] { Col(name, isPk: true, isFk: isFk) };
+
         Resolve(columns).Should().BeNull();
+    }
+
+    /// <summary>①の名前に一致する主キー列は、③（外部キー印）の主キーでない列より優先されることを検証する</summary>
+    [Fact(DisplayName = "①の主キー列は③の外部キー印の列より優先される")]
+    public void Rank1_PrimaryKeyColumn_BeatsForeignKeyMarker()
+    {
+        var columns = new[]
+        {
+            Col("ProductId", isFk: true),
+            Col("CustomerId", isPk: true),
+            Col("LineNo", isPk: true),
+        };
+
+        Resolve(columns).Should().Be(1);
+    }
+
+    /// <summary>自己参照では、①の名前に一致しても主キー列（自分自身）を選ばないことを検証する</summary>
+    [Fact(DisplayName = "自己参照では①の名前でも主キー列は選ばれない")]
+    public void SelfReference_PrimaryKeyColumn_IsNotSelected()
+    {
+        var columns = new[]
+        {
+            Col("EmployeeId", isPk: true),
+            Col("Name", dataType: "nvarchar(50)"),
+        };
+
+        Resolve(columns, sourceTable: "Employee", pkName: "EmployeeId", selfRef: true)
+            .Should()
+            .BeNull();
     }
 
     /// <summary>他リレーションで使用済みの列が除外され、次点の列が選ばれることを検証する</summary>
@@ -482,6 +525,101 @@ public class ForeignKeyColumnResolverTests
             .Select(pair => child.Columns.Single(c => c.Id == pair.TargetColumnId).Name)
             .Should()
             .Equal("ProjectId");
+    }
+
+    /// <summary>識別関係（明細の主キー (OrderId, LineNo) の OrderId）が名前一致で自動ペア化されることを検証する</summary>
+    [Fact(DisplayName = "識別関係: 明細の主キー (OrderId, LineNo) の OrderId に付く")]
+    public void ResolveColumnPairs_IdentifyingRelationship_PairsPrimaryKeyColumn()
+    {
+        var parent = new Entity
+        {
+            TableName = "Orders",
+            Columns =
+            {
+                NewColumn("OrderId", isPk: true),
+                NewColumn("OrderedAt", dataType: "date"),
+            },
+        };
+        var child = new Entity
+        {
+            TableName = "OrderLines",
+            Columns =
+            {
+                NewColumn("OrderId", isPk: true),
+                NewColumn("LineNo", isPk: true),
+                NewColumn("Quantity"),
+            },
+        };
+
+        PairNames(parent, child).Should().Equal("OrderId→OrderId");
+    }
+
+    /// <summary>子の主キーが単独の id のとき、親の id と取り違えないことを検証する</summary>
+    /// <param name="parentKey">親の主キー列名</param>
+    /// <param name="childKey">子の主キー列名（単独）</param>
+    [Theory(DisplayName = "子の主キーが単独の id なら、親の id と対応づけない")]
+    [InlineData("id", "id")]
+    [InlineData("Id", "Id")]
+    public void ResolveColumnPairs_SingleIdPrimaryKey_IsNotPaired(string parentKey, string childKey)
+    {
+        var parent = new Entity
+        {
+            TableName = "Customers",
+            Columns = { NewColumn(parentKey, isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "Orders",
+            Columns = { NewColumn(childKey, isPk: true), NewColumn("total") },
+        };
+
+        PairNames(parent, child).Should().BeEmpty();
+    }
+
+    /// <summary>複合主キーの親からの識別関係で、子の主キー列が同名の割り当てで全列ペアになることを検証する</summary>
+    [Fact(
+        DisplayName = "識別関係: 複合主キーの親 (TenantId, ProjectId) から子の主キー列へ全列付く"
+    )]
+    public void ResolveColumnPairs_CompositeIdentifyingRelationship_PairsAllKeyColumns()
+    {
+        var parent = new Entity
+        {
+            TableName = "Projects",
+            Columns = { NewColumn("TenantId", isPk: true), NewColumn("ProjectId", isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "Tasks",
+            Columns =
+            {
+                NewColumn("TenantId", isPk: true),
+                NewColumn("ProjectId", isPk: true),
+                NewColumn("TaskId", isPk: true),
+            },
+        };
+
+        PairNames(parent, child).Should().Equal("TenantId→TenantId", "ProjectId→ProjectId");
+    }
+
+    /// <summary>複合主キーの自己参照では、同名の割り当てでも自分自身の主キー列を選ばないことを検証する</summary>
+    [Fact(DisplayName = "複合主キーの自己参照は同名の主キー列（自分自身）へ付かない")]
+    public void ResolveColumnPairs_CompositeSelfReference_DoesNotPairOwnPrimaryKey()
+    {
+        var entity = new Entity
+        {
+            TableName = "Nodes",
+            Columns =
+            {
+                NewColumn("TenantId", isPk: true),
+                NewColumn("NodeId", isPk: true),
+                NewColumn("Label", dataType: "nvarchar(50)"),
+            },
+        };
+
+        ForeignKeyColumnResolver
+            .ResolveColumnPairs(entity, entity, Array.Empty<Relationship>())
+            .Should()
+            .BeEmpty();
     }
 
     /// <summary>

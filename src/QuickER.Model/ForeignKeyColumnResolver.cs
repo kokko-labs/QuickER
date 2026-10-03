@@ -17,16 +17,23 @@ namespace QuickER.Model;
 ///   <item>①の名前との後方一致（BillingCustomerId のようなロール付き FK 名）</item>
 /// </list>
 /// いずれにも該当しなければ null（列未割当）とし、無関係な列を外部キー扱いにしない。
-/// 主キー列と他リレーションで参照先として使用済みの列は候補から除外し、
+/// 他リレーションで参照先として使用済みの列は候補から除外し、
 /// 同率の場合は参照元キー列とデータ型が一致する列 → 宣言順で決める。
 /// 自己参照では Parent 系の名前（ParentId / parent_id / Parent+キー列名）も①の候補へ加える。
+/// </para>
+/// <para>
+/// 子の主キー列を候補にするのは、名前が強く一致するときだけ: ①（親テーブル名から導いた名前）と、
+/// 複合主キーの親で同名の子列を先に割り当てる段（<see cref="ResolveColumnPairs"/>）。注文明細の主キー
+/// <c>(OrderId, LineNo)</c> の <c>OrderId</c> のような識別関係の外部キー列は、ここで拾う。
+/// ②〜④では主キー列を外す（単一主キーの親の②で許すと、子の主キーが単独の <c>id</c> のときに親の <c>id</c> と
+/// 取り違える）。自己参照ではどの段でも外す（①の名前が自分自身の主キーを指すため）。
 /// </para>
 /// </remarks>
 public static class ForeignKeyColumnResolver
 {
     /// <summary>参照先テーブルの列 1 つ分の判定材料</summary>
     /// <param name="Name">カラム名</param>
-    /// <param name="IsPrimaryKey">主キーかどうか（true なら候補から除外）</param>
+    /// <param name="IsPrimaryKey">主キーかどうか（true なら①の名前一致のときだけ候補にする。自己参照では除外）</param>
     /// <param name="IsForeignKey">外部キーとしてマーク済みかどうか</param>
     /// <param name="DataType">データ型（同率時のタイブレークに使用）</param>
     /// <param name="IsUsedByOtherRelationship">既に他リレーション（またはこのペア化の先の列）の参照先列かどうか（true なら候補から除外）</param>
@@ -66,25 +73,32 @@ public static class ForeignKeyColumnResolver
             }
         }
 
-        // 優先ランク（上から順に評価し、最初に候補が見つかったランクで確定する）
-        var ranks = new Func<CandidateColumn, bool>[]
+        // 優先ランク（上から順に評価し、最初に候補が見つかったランクで確定する）。
+        // 子の主キー列を候補にするのは①だけ（識別関係の外部キー列。自己参照では自分の主キーを指すので外す）
+        var ranks = new (Func<CandidateColumn, bool> Matches, bool AllowPrimaryKey)[]
         {
-            column =>
-                expectedNames.Any(name =>
-                    string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase)
-                ),
-            column => IsSameName(column, sourceKeyColumnName),
-            column => column.IsForeignKey,
-            column =>
-                expectedNames.Any(name =>
-                    column.Name.Length > name.Length
-                    && column.Name.EndsWith(name, StringComparison.OrdinalIgnoreCase)
-                ),
+            (
+                column =>
+                    expectedNames.Any(name =>
+                        string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase)
+                    ),
+                !isSelfReference
+            ),
+            (column => IsSameName(column, sourceKeyColumnName), false),
+            (column => column.IsForeignKey, false),
+            (
+                column =>
+                    expectedNames.Any(name =>
+                        column.Name.Length > name.Length
+                        && column.Name.EndsWith(name, StringComparison.OrdinalIgnoreCase)
+                    ),
+                false
+            ),
         };
 
-        foreach (var matches in ranks)
+        foreach (var (matches, allowPrimaryKey) in ranks)
         {
-            var index = PickBest(targetColumns, matches, sourceKeyDataType);
+            var index = PickBest(targetColumns, matches, sourceKeyDataType, allowPrimaryKey);
 
             if (index is not null)
             {
@@ -112,6 +126,10 @@ public static class ForeignKeyColumnResolver
     /// <c>ProjectId</c> を取ってしまうため。同名の割り当てを全列について先に済ませるのは、前の列が下位の順位
     /// （③の外部キー印など）で後ろの列の同名の子列を奪わないようにするため。
     /// 主キーが 1 列のときは同名の割り当てを先に行わず、①〜④の順位だけで決める。
+    /// </para>
+    /// <para>
+    /// 同名を先に割り当てる段では子の主キー列も候補にする（自己参照を除く）。<c>Projects(TenantId, ProjectId)</c> から
+    /// <c>Tasks(TenantId, ProjectId, TaskId)</c>（3 列とも主キー）への識別関係が、2 列ともペアになる。
     /// </para>
     /// </remarks>
     public static List<RelationshipColumnPair> ResolveColumnPairs(
@@ -143,6 +161,8 @@ public static class ForeignKeyColumnResolver
 
         if (keyColumns.Count > 1)
         {
+            var isSelfReference = source.Id == target.Id;
+
             for (var i = 0; i < keyColumns.Count; i++)
             {
                 var keyColumn = keyColumns[i];
@@ -151,7 +171,8 @@ public static class ForeignKeyColumnResolver
                     PickBest(
                         BuildCandidates(target, usedColumnIds),
                         column => IsSameName(column, keyColumn.Name),
-                        keyColumn.DataType
+                        keyColumn.DataType,
+                        allowPrimaryKey: !isSelfReference
                     )
                 );
             }
@@ -245,18 +266,23 @@ public static class ForeignKeyColumnResolver
             ))
             .ToList();
 
-    /// <summary>候補（主キー・使用済みを除く）のうち条件に合う列を 1 つ選び、その位置を返す</summary>
+    /// <summary>候補（使用済みと、許さないときは主キーを除く）のうち条件に合う列を 1 つ選び、その位置を返す</summary>
+    /// <param name="targetColumns">参照先テーブルの列の判定材料</param>
+    /// <param name="matches">この段の一致条件</param>
+    /// <param name="sourceKeyDataType">参照元キー列のデータ型（タイブレーク用）</param>
+    /// <param name="allowPrimaryKey">子の主キー列も候補にするか（名前が強く一致する段だけ true）</param>
     /// <returns>条件に合う列が無ければ null。複数あればデータ型が一致する列 → 宣言順で決める</returns>
     private static int? PickBest(
         IReadOnlyList<CandidateColumn> targetColumns,
         Func<CandidateColumn, bool> matches,
-        string? sourceKeyDataType
+        string? sourceKeyDataType,
+        bool allowPrimaryKey
     )
     {
         var hits = Enumerable
             .Range(0, targetColumns.Count)
             .Where(i =>
-                !targetColumns[i].IsPrimaryKey
+                (allowPrimaryKey || !targetColumns[i].IsPrimaryKey)
                 && !targetColumns[i].IsUsedByOtherRelationship
                 && matches(targetColumns[i])
             )

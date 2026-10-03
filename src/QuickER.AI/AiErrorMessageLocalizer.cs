@@ -30,10 +30,7 @@ public static class AiErrorMessageLocalizer
 
         if (ex is AnthropicIOException)
         {
-            return Strings.Ai_ConnectionFailed
-                + Environment.NewLine
-                + Strings.Ai_DetailLabel
-                + ex.Message;
+            return WithDetail(Strings.Ai_ConnectionFailed, ex.Message);
         }
 
         if (ex is JsonException)
@@ -48,14 +45,24 @@ public static class AiErrorMessageLocalizer
 
         if (ex is HttpRequestException)
         {
-            return Strings.Ai_ConnectionFailed
-                + Environment.NewLine
-                + Strings.Ai_DetailLabel
-                + ex.Message;
+            return WithDetail(Strings.Ai_ConnectionFailed, ex.Message);
         }
 
         return Strings.Ai_Unexpected + ex.Message;
     }
+
+    /// <summary>表示用の要約に、原因の生の文言を「詳細: …」の行として添える</summary>
+    /// <param name="summary">何が起きたかと次に何をすればよいかを述べた、表示言語の要約</param>
+    /// <param name="detail">原因の生の文言（例外の文言・バックエンドが報告した文）。空なら要約だけを返す</param>
+    /// <returns>要約、または「要約＋改行＋詳細: 原因」</returns>
+    /// <remarks>
+    /// API キー接続の接続失敗と、CLI 系のエンジン（Claude Code / Codex / Copilot）のターン失敗が同じ形で出す。
+    /// 原因を隠さずに残すのは、要約だけでは利用者が状況を照合できないため
+    /// </remarks>
+    internal static string WithDetail(string summary, string? detail) =>
+        string.IsNullOrWhiteSpace(detail)
+            ? summary
+            : summary + Environment.NewLine + Strings.Ai_DetailLabel + detail;
 
     /// <summary>HTTP エラー (<see cref="ClientResultException"/>) を OpenAI のエラーコードと HTTP ステータスに基づく表示用メッセージへ変換する</summary>
     private static string TranslateClientResult(ClientResultException ex)

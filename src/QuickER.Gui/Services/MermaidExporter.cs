@@ -187,9 +187,72 @@ public static partial class MermaidExporter
                 }),
                 ExportOmissionKind.UniqueConstraintOnForeignKeyColumn
             ),
+            (
+                LosesRelationshipConstraintNames(diagram),
+                ExportOmissionKind.RelationshipConstraintName
+            ),
         };
 
         return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();
+    }
+
+    /// <summary>名前付きのリレーションのうち、取込で同じ制約名に戻らないものがあるかを判定する</summary>
+    /// <remarks>
+    /// <para>
+    /// 取込がラベルを制約名に採るのは、引用の無い 1 語で、<see cref="UnnamedRelationshipLabel"/> でなく、
+    /// ほかのリレーションに付いておらず、主キー・一意制約の名前と重ならないときだけ（<see cref="MermaidImporter"/>）。
+    /// 引用して書いた名前（<see cref="FormatRelationshipLabel"/>）・同じ名前の外部キーが複数ある図・前後の空白や制御文字を
+    /// 書き換えた名前は、取り込むと名前が落ちるか別の名前になる。
+    /// </para>
+    /// <para>
+    /// 判定は出力を実際に取り込み直して、書いた順に制約名を突き合わせて行う（取込の規則を出力側へ写さないので、
+    /// 規則が変わっても判定がずれない＝型の書き換えの判定と同じ流儀）。名前付きのリレーションが無ければ取り込まない。
+    /// 取込そのものが失敗する図（大文字小文字だけ違うテーブル名が並ぶ等）は、名前も戻らないものとして扱う
+    /// </para>
+    /// </remarks>
+    private static bool LosesRelationshipConstraintNames(ErDiagram diagram)
+    {
+        var entityIds = diagram.Entities.Select(entity => entity.Id).ToHashSet();
+
+        // 書き出す関係行は、両端のテーブルが図にあるリレーションだけ（BuildRelationshipLine と同じ条件）で、順序も同じ
+        var written = diagram
+            .Relationships.Where(relationship =>
+                entityIds.Contains(relationship.SourceEntityId)
+                && entityIds.Contains(relationship.TargetEntityId)
+            )
+            .ToList();
+
+        if (!written.Any(relationship => !string.IsNullOrWhiteSpace(relationship.ConstraintName)))
+        {
+            return false;
+        }
+
+        ErDiagram reimported;
+
+        try
+        {
+            reimported = MermaidImporter.Parse(Build(diagram));
+        }
+        catch (InvalidDataException)
+        {
+            return true;
+        }
+
+        if (reimported.Relationships.Count != written.Count)
+        {
+            return true;
+        }
+
+        return written
+            .Select((relationship, index) => (relationship, index))
+            .Any(item =>
+                !string.IsNullOrWhiteSpace(item.relationship.ConstraintName)
+                && !string.Equals(
+                    reimported.Relationships[item.index].ConstraintName,
+                    item.relationship.ConstraintName,
+                    StringComparison.Ordinal
+                )
+            );
     }
 
     /// <summary>テーブル ID → Mermaid の実体名（必要なら引用つき）の写像を作る</summary>
@@ -222,7 +285,7 @@ public static partial class MermaidExporter
 
             var sanitized = Identifier(entity.TableName);
             used.Add(sanitized);
-            result[entity.Id] = PlainEntityNamePattern().IsMatch(sanitized)
+            result[entity.Id] = PlainNamePattern().IsMatch(sanitized)
                 ? sanitized
                 : $"\"{sanitized}\"";
         }
@@ -239,7 +302,7 @@ public static partial class MermaidExporter
                 unique = $"{candidate}_{suffix}";
             }
 
-            result[entity.Id] = PlainEntityNamePattern().IsMatch(unique) ? unique : $"\"{unique}\"";
+            result[entity.Id] = PlainNamePattern().IsMatch(unique) ? unique : $"\"{unique}\"";
         }
 
         return result;
@@ -250,13 +313,19 @@ public static partial class MermaidExporter
     {
         var sanitized = Identifier(tableName);
 
-        return !PlainEntityNamePattern().IsMatch(sanitized)
+        return !PlainNamePattern().IsMatch(sanitized)
             && (sanitized.Length == 0 || UnquotableEntityNameCharacters().IsMatch(sanitized));
     }
 
-    /// <summary>Mermaid の素の実体名（非 ASCII・英数字・<c>_ - * .</c>）に一致する正規表現を生成する</summary>
+    /// <summary>
+    /// Mermaid が引用なしで読める名前（非 ASCII・英数字・<c>_ - * .</c>）に一致する正規表現を生成する
+    /// </summary>
+    /// <remarks>
+    /// Mermaid の字句規則の <c>UNICODE_TEXT</c> と同じ文字集合で、実体名と関係行のラベルの両方がこの形なら素で書ける
+    /// （それ以外は引用が要る）
+    /// </remarks>
     [GeneratedRegex(@"^(?:[^\x00-\x7F]|[A-Za-z0-9_\-*.])+$", RegexOptions.Compiled)]
-    private static partial Regex PlainEntityNamePattern();
+    private static partial Regex PlainNamePattern();
 
     /// <summary>Mermaid の引用実体名の中に書けない文字に一致する正規表現を生成する</summary>
     [GeneratedRegex(@"[""%\\]", RegexOptions.Compiled)]
@@ -444,10 +513,25 @@ public static partial class MermaidExporter
             RelationshipType.ManyToMany => "}o--o{",
             _ => "||--o{",
         };
-        var label = string.IsNullOrWhiteSpace(relationship.ConstraintName)
-            ? UnnamedRelationshipLabel
-            : Identifier(relationship.ConstraintName);
+        return $"{source} {symbol} {target} : {FormatRelationshipLabel(relationship.ConstraintName)}";
+    }
 
-        return $"{source} {symbol} {target} : {label}";
+    /// <summary>関係行のラベル（制約名、名前が無ければ <see cref="UnnamedRelationshipLabel"/>）を書く形にする</summary>
+    /// <remarks>
+    /// Mermaid のラベルは引用なしの 1 語か引用文字列で、空白や記号を含む名前を素で書くと行が構文として壊れる。
+    /// 素で書けない名前は <c>"…"</c> で囲み、引用の中に書けない <c>"</c> は <c>_</c> へ畳む。
+    /// 取込は引用されたラベルを制約名に採らないので、引用した名前は取込で落ちる
+    /// （<see cref="ExportOmissionKind.RelationshipConstraintName"/> で告知する）
+    /// </remarks>
+    private static string FormatRelationshipLabel(string? constraintName)
+    {
+        if (string.IsNullOrWhiteSpace(constraintName))
+        {
+            return UnnamedRelationshipLabel;
+        }
+
+        var label = Identifier(constraintName);
+
+        return PlainNamePattern().IsMatch(label) ? label : $"\"{label.Replace('"', '_')}\"";
     }
 }
