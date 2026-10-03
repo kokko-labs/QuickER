@@ -660,4 +660,25 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="MockDoc_ItemTableFormat" xml:space="preserve">
     <value>テーブル {0}</value>
   </data>
+  <data name="Mock_FolderAlreadyExistsFormat" xml:space="preserve">
+    <value>モックフォルダは既に存在します（{0} が見つかりました）: {1}</value>
+  </data>
+  <data name="Mock_FolderNotMockFormat" xml:space="preserve">
+    <value>モックフォルダではありません（{0} が見つかりません）: {1}</value>
+  </data>
+  <data name="Mock_ManifestParseFailedFormat" xml:space="preserve">
+    <value>モックの {0} を解釈できませんでした（破損している可能性があります）: {1}</value>
+  </data>
+  <data name="Mock_ManifestEmptyFormat" xml:space="preserve">
+    <value>モックの {0} が空か無効です: {1}</value>
+  </data>
+  <data name="Mock_ManifestNewerFormat" xml:space="preserve">
+    <value>より新しいフォーマットのモックです（version={0}・このアプリの対応は {1} まで）。アプリを更新してください: {2}</value>
+  </data>
+  <data name="Mock_ManifestInvalidScreenFileFormat" xml:space="preserve">
+    <value>モックの {0} の画面ファイル名が不正です（破損している可能性があります）: {1}</value>
+  </data>
+  <data name="Mock_ToolFileAccessFailedResult" xml:space="preserve">
+    <value>モックフォルダの読み書きに失敗しました: {0}</value>
+  </data>
 </root>

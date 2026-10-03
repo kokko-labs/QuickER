@@ -660,4 +660,25 @@ Default to English for all responses (the language of the app UI). Switch only i
   <data name="MockDoc_ItemTableFormat" xml:space="preserve">
     <value>Table {0}</value>
   </data>
+  <data name="Mock_FolderAlreadyExistsFormat" xml:space="preserve">
+    <value>A mock folder already exists here ({0} was found): {1}</value>
+  </data>
+  <data name="Mock_FolderNotMockFormat" xml:space="preserve">
+    <value>This is not a mock folder ({0} was not found): {1}</value>
+  </data>
+  <data name="Mock_ManifestParseFailedFormat" xml:space="preserve">
+    <value>Could not parse the mock's {0} (it may be corrupted): {1}</value>
+  </data>
+  <data name="Mock_ManifestEmptyFormat" xml:space="preserve">
+    <value>The mock's {0} is empty or invalid: {1}</value>
+  </data>
+  <data name="Mock_ManifestNewerFormat" xml:space="preserve">
+    <value>This mock uses a newer format (version={0}; this app supports up to {1}). Update the app: {2}</value>
+  </data>
+  <data name="Mock_ManifestInvalidScreenFileFormat" xml:space="preserve">
+    <value>The mock's {0} has an invalid screen file name (it may be corrupted): {1}</value>
+  </data>
+  <data name="Mock_ToolFileAccessFailedResult" xml:space="preserve">
+    <value>Could not read or write the mock folder: {0}</value>
+  </data>
 </root>

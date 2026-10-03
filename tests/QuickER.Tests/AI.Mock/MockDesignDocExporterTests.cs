@@ -100,10 +100,10 @@ public class MockDesignDocExporterTests : IDisposable
         doc.Should().Contain("## " + Strings.MockDoc_TransitionDiagramHeading);
         doc.Should().Contain("```mermaid");
         doc.Should().Contain("flowchart LR");
-        doc.Should().Contain("OrderList[\"注文一覧\"]");
-        doc.Should().Contain("OrderDetail[\"注文詳細\"]");
-        doc.Should().Contain("OrderList -->|行クリック| OrderDetail");
-        doc.Should().Contain("OrderDetail --> OrderList");
+        doc.Should().Contain("\n  s_OrderList[\"注文一覧\"]\n");
+        doc.Should().Contain("\n  s_OrderDetail[\"注文詳細\"]\n");
+        doc.Should().Contain("\n  s_OrderList -->|行クリック| s_OrderDetail\n");
+        doc.Should().Contain("\n  s_OrderDetail --> s_OrderList\n");
 
         // 画面セクション（説明・遷移先／元）
         doc.Should().Contain("## 注文一覧");
@@ -173,10 +173,10 @@ public class MockDesignDocExporterTests : IDisposable
         var doc = MockDesignDocExporter.Export(store);
 
         // mermaid ラベル内の引用符は &quot; へエスケープされる（生の引用符では出ない）
-        doc.Should().Contain("Order_Detail[\"詳細&quot;A&quot;\"]");
+        doc.Should().Contain("\n  s_Order_Detail[\"詳細&quot;A&quot;\"]\n");
         doc.Should().NotContain("[\"詳細\"A\"\"]");
         // 衝突した 2 つ目は連番付き ID になる
-        doc.Should().Contain("Order_Detail_2[\"詳細B\"]");
+        doc.Should().Contain("\n  s_Order_Detail_2[\"詳細B\"]\n");
     }
 
     [Fact(DisplayName = "実在しない画面への遷移はエッジに現れない")]
@@ -201,7 +201,7 @@ public class MockDesignDocExporterTests : IDisposable
 
         doc.Should().NotContain("Ghost");
         // A のノード宣言はあるがエッジ（-->）は無い
-        doc.Should().Contain("A[\"A\"]");
+        doc.Should().Contain("\n  s_A[\"A\"]\n");
         doc.Should().NotContain("-->");
     }
 
@@ -578,5 +578,73 @@ public class MockDesignDocExporterTests : IDisposable
 
         // 画面一覧の説明セルでパイプがエスケープされる
         doc.Should().Contain("| [A](<A.html>) | 一覧 \\| 詳細 |");
+    }
+
+    [Theory(
+        DisplayName = "mermaid のノード ID は常に s_ を前置し、予約語や数字始まりのファイル名でも図が壊れない"
+    )]
+    [InlineData("end.html", "s_end")]
+    [InlineData("1st.html", "s_1st")]
+    [InlineData("subgraph.html", "s_subgraph")]
+    public void Export_PrefixesMermaidNodeIds(string file, string expectedId)
+    {
+        var store = MockFolderStore.CreateNew(_folder, "t", "s");
+        store.SaveStylesheet("body{}", "css");
+        store.SaveScreen(
+            file,
+            "画面",
+            "",
+            Screen("<h1>x</h1>"),
+            Array.Empty<MockTransition>(),
+            "v1"
+        );
+        store.SaveScreen(
+            "Home.html",
+            "ホーム",
+            "",
+            Screen("<h1>h</h1>"),
+            new[]
+            {
+                new MockTransition { From = "Home.html", To = file },
+            },
+            "v2"
+        );
+
+        var doc = MockDesignDocExporter.Export(store);
+
+        var lf = ((char)10).ToString();
+        doc.Should().Contain(lf + "  " + expectedId + "[\"画面\"]" + lf);
+        doc.Should().Contain(lf + "  s_Home --> " + expectedId + lf);
+        // 予約語がそのまま識別子として出ない（mermaid の flowchart では end が subgraph の終端になる）
+        var bareId = expectedId.Substring(2);
+        doc.Should().NotContain(lf + "  " + bareId + "[");
+    }
+
+    [Fact(DisplayName = "説明とタイトルの改行は LF にそろい、CR や行区切り文字が出力に残らない")]
+    public void Export_NormalizesLineEndingsOfDescriptionAndTitle()
+    {
+        var crlf = ((char)13).ToString() + ((char)10).ToString();
+        var lineSeparator = ((char)0x2028).ToString();
+
+        var store = MockFolderStore.CreateNew(_folder, "受注" + crlf + "管理", "s");
+        store.SaveStylesheet("body{}", "css");
+        store.SaveScreen(
+            "A.html",
+            "A",
+            "一行目" + crlf + "二行目" + lineSeparator + "三行目",
+            Screen("<h1>a</h1>"),
+            Array.Empty<MockTransition>(),
+            "v1"
+        );
+
+        var doc = MockDesignDocExporter.Export(store);
+
+        var lf = ((char)10).ToString();
+        doc.Should().NotContain(((char)13).ToString());
+        doc.Should().NotContain(lineSeparator);
+        // タイトルは 1 行の見出しに畳まれる
+        doc.Should().StartWith("# 受注 管理" + lf);
+        // 説明は段落として改行を保ったまま LF にそろう
+        doc.Should().Contain(lf + "一行目" + lf + "二行目" + lf + "三行目" + lf);
     }
 }

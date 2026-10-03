@@ -73,6 +73,7 @@ Point the tool at an empty folder to start fresh, or at an existing mock folder 
 No chat log is kept: resuming restores from the folder contents alone, so it works the same on every backend.
 The screen-list sidebar lets you click through the screens, and the preview follows the links between them.
 You can export the whole mock as a single self-contained HTML file.
+In that file a link to another screen opens that screen but does not scroll to a `#section` inside it, and a link within a page keeps the current screen shown.
 A screen whose HTML contains a stray `</section>` tag can disrupt the screen boundaries in that export, letting content bleed into the screens after it.
 
 The mock folder also yields a screen design document (`README.md`: a screen list, a Mermaid transition diagram, a screen-by-entity CRUD table, and a per-screen item table), generated deterministically without any AI.

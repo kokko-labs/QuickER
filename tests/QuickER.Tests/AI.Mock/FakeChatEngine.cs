@@ -33,6 +33,9 @@ internal sealed class FakeChatEngine : IErChatEngine
     /// </summary>
     public bool HoldTurnCompletion { get; set; }
 
+    /// <summary>設定すると SendAsync がこの例外で失敗する（送信失敗の再現用）</summary>
+    public Exception? SendException { get; set; }
+
     /// <summary>保留していたターン完了（成功）を通知する</summary>
     public void CompleteHeldTurn() => TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
 
@@ -61,6 +64,12 @@ internal sealed class FakeChatEngine : IErChatEngine
         CancellationToken cancellationToken = default
     )
     {
+        if (SendException is { } failure)
+        {
+            // 送信の失敗（API キー未設定・CLI 不在など）を再現する
+            return Task.FromException(failure);
+        }
+
         SentPrompts.Add(prompt);
         SentAttachments.Add(attachments);
 

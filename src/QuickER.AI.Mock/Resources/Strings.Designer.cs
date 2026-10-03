@@ -1139,5 +1139,47 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_FolderAlreadyExistsFormat {
+            get {
+                return ResourceManager.GetString("Mock_FolderAlreadyExistsFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_FolderNotMockFormat {
+            get {
+                return ResourceManager.GetString("Mock_FolderNotMockFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ManifestParseFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestParseFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ManifestEmptyFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestEmptyFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ManifestNewerFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestNewerFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ManifestInvalidScreenFileFormat {
+            get {
+                return ResourceManager.GetString("Mock_ManifestInvalidScreenFileFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ToolFileAccessFailedResult {
+            get {
+                return ResourceManager.GetString("Mock_ToolFileAccessFailedResult", resourceCulture);
+            }
+        }
+
     }
 }

@@ -168,7 +168,7 @@ public class MockFolderDesignSessionTests : IDisposable
             .Should()
             .Contain(QuickER.AI.Mock.Resources.Strings.Mock_ResumePromptSchemaChangedNote);
 
-        // 送信前にスナップショットが現在スキーマへ更新される
+        // 送信が成功したのでスナップショットが現在スキーマへ更新される
         var reopened = MockFolderStore.Open(_folder);
         reopened.Manifest.SourceSchema.Should().Contain("Orders");
         reopened.Manifest.SourceSchema.Should().NotContain("旧スキーマ");
@@ -616,5 +616,181 @@ public class MockFolderDesignSessionTests : IDisposable
         engine.SentPrompts.Should().ContainSingle().Which.Should().Be("列を減らして");
         deltas.Should().Contain("了解しました。");
         completed!.Value.Success.Should().BeTrue();
+    }
+
+    // --- 再開の送信失敗 ----------------------------------------------------
+
+    /// <summary>再開プロンプトの送信が失敗したら、「スキーマ変更あり」の印（古いスナップショット）が残ることを検証する</summary>
+    [Fact(DisplayName = "StartResumeAsync の送信が失敗したらスナップショットを更新しない")]
+    public async Task StartResumeAsync_SendFails_KeepsSchemaChangedMarker()
+    {
+        var store = CreateStore(schema: "# 旧スキーマ");
+        var (session, engine) = CreateSession(store);
+        engine.SendException = new InvalidOperationException("API key is not set.");
+
+        var diagram = new ErDiagram { Entities = { new Entity { TableName = "Orders" } } };
+
+        var act = () =>
+            session.StartResumeAsync(diagram, null, null, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        store.Manifest.SourceSchema.Should().Be("# 旧スキーマ");
+        MockFolderStore.Open(_folder).Manifest.SourceSchema.Should().Be("# 旧スキーマ");
+        MockResumePrompt
+            .IsSchemaChanged(MockSchemaSerializer.Serialize(diagram), store.Manifest)
+            .Should()
+            .BeTrue();
+    }
+
+    // --- entities がすべて不正 ----------------------------------------------
+
+    /// <summary>
+    /// 空でない entities の要素が 1 つも有効でないときは、消去でなく省略として扱い既存の宣言を残すことを検証する
+    /// （名前が空・オブジェクトでない要素・操作が全部無効の 3 形）
+    /// </summary>
+    [Theory(DisplayName = "save_screen の entities が全部不正なら既存宣言を残して警告する")]
+    [InlineData("""[{"name": ""}]""")]
+    [InlineData("""["Order"]""")]
+    [InlineData("""[{"name": "Order", "operations": "Z"}]""")]
+    public void Execute_SaveScreen_AllInvalidEntities_KeepsExistingDeclarations(string entitiesJson)
+    {
+        var store = CreateStore();
+        var (session, _) = CreateSession(store);
+
+        // 既存の宣言を持つ画面を作る
+        session.Execute(
+            MockFolderDesignTools.SaveScreenToolName,
+            SaveScreenArgs(
+                "OrderList.html",
+                "注文一覧",
+                ScreenHtml("<h1>一覧</h1>"),
+                entities: new object[] { new { name = "Order", operations = "R" } }
+            )
+        );
+
+        MockScreenSavedEventArgs? saved = null;
+        session.ScreenSaved += (_, e) => saved = e;
+
+        var args =
+            SaveScreenArgs("OrderList.html", "注文一覧", ScreenHtml("<h1>一覧</h1>")).TrimEnd('}')
+            + ",\"entities\":"
+            + entitiesJson
+            + "}";
+
+        var (result, success) = session.Execute(MockFolderDesignTools.SaveScreenToolName, args);
+
+        success.Should().BeTrue();
+        result.Should().Contain("existing declarations were kept");
+        saved!.Warnings.Should().Contain(w => w.Contains("existing declarations were kept"));
+
+        var recorded = MockFolderStore
+            .Open(_folder)
+            .Manifest.Screens.Single(s => s.File == "OrderList.html")
+            .Entities;
+        recorded.Should().ContainSingle();
+        recorded![0].Name.Should().Be("Order");
+        recorded[0].Operations.Should().Be("R");
+    }
+
+    /// <summary>明示の空配列は従来どおり宣言の消去であることを検証する（全部不正の扱いとの対照）</summary>
+    [Fact(DisplayName = "save_screen の entities が空配列なら宣言を消去する")]
+    public void Execute_SaveScreen_EmptyEntities_ClearsDeclarations()
+    {
+        var store = CreateStore();
+        var (session, _) = CreateSession(store);
+
+        session.Execute(
+            MockFolderDesignTools.SaveScreenToolName,
+            SaveScreenArgs(
+                "OrderList.html",
+                "注文一覧",
+                ScreenHtml("<h1>一覧</h1>"),
+                entities: new object[] { new { name = "Order", operations = "R" } }
+            )
+        );
+
+        var (result, success) = session.Execute(
+            MockFolderDesignTools.SaveScreenToolName,
+            SaveScreenArgs(
+                "OrderList.html",
+                "注文一覧",
+                ScreenHtml("<h1>一覧</h1>"),
+                entities: Array.Empty<object>()
+            )
+        );
+
+        success.Should().BeTrue();
+        result.Should().NotContain("existing declarations were kept");
+        MockFolderStore
+            .Open(_folder)
+            .Manifest.Screens.Single(s => s.File == "OrderList.html")
+            .Entities.Should()
+            .BeNull();
+    }
+
+    // --- 引数・フォルダの失敗 ------------------------------------------------
+
+    /// <summary>引数のルートがオブジェクトでないときは、例外を漏らさず引数エラーの失敗結果を返すことを検証する</summary>
+    [Theory(DisplayName = "引数のルートがオブジェクトでなければ引数エラーの失敗結果")]
+    [InlineData("[]")]
+    [InlineData("\"x\"")]
+    [InlineData("42")]
+    public void Execute_NonObjectArguments_ReturnsParseFailure(string argumentsJson)
+    {
+        var store = CreateStore();
+        var (session, _) = CreateSession(store);
+
+        var (result, success) = session.Execute(
+            MockFolderDesignTools.SaveScreenToolName,
+            argumentsJson
+        );
+
+        success.Should().BeFalse();
+        result
+            .Should()
+            .Be(
+                string.Format(
+                    QuickER.AI.Mock.Resources.Strings.Mock_ArgumentsParseFailedResult,
+                    "The arguments must be a JSON object."
+                )
+            );
+    }
+
+    /// <summary>フォルダへ書き込めないときは、失敗結果を返し保存の通知を出さないことを検証する</summary>
+    [Fact(DisplayName = "フォルダへ書き込めないときは失敗結果を返し ScreenSaved を発火しない")]
+    public void Execute_SaveScreen_WriteFails_ReturnsFailureWithoutEvent()
+    {
+        var store = CreateStore();
+        var (session, _) = CreateSession(store);
+
+        var saved = false;
+        session.ScreenSaved += (_, _) => saved = true;
+
+        var manifestPath = Path.Combine(_folder, "mock.json");
+        File.SetAttributes(manifestPath, FileAttributes.ReadOnly);
+
+        try
+        {
+            var (result, success) = session.Execute(
+                MockFolderDesignTools.SaveScreenToolName,
+                SaveScreenArgs("OrderList.html", "注文一覧", ScreenHtml("<h1>一覧</h1>"))
+            );
+
+            success.Should().BeFalse();
+            result
+                .Should()
+                .StartWith(
+                    QuickER.AI.Mock.Resources.Strings.Mock_ToolFileAccessFailedResult.Split("{0}")[
+                        0
+                    ]
+                );
+            saved.Should().BeFalse();
+            store.Manifest.Screens.Should().BeEmpty();
+        }
+        finally
+        {
+            File.SetAttributes(manifestPath, FileAttributes.Normal);
+        }
     }
 }

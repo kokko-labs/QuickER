@@ -25,6 +25,12 @@ public partial class MockPreviewPanel : UserControl
     /// <summary>WebView2 の初期化が完了したか</summary>
     private bool _webViewReady;
 
+    /// <summary>
+    /// 進行中または完了した初期化（1 つだけ持ち回す）。Loaded より前の <see cref="Navigate"/> と
+    /// <see cref="OnLoaded"/> の両方から初期化が求められても、ハンドラとフィルタの登録は 1 回にする。
+    /// </summary>
+    private Task? _initialization;
+
     /// <summary>初期化失敗などでプレビューを表示できない状態か</summary>
     private bool _unavailable;
 
@@ -47,8 +53,18 @@ public partial class MockPreviewPanel : UserControl
     public MockPreviewPanel()
     {
         InitializeComponent();
+        CoreWebViewInitializer = () => WebView.EnsureCoreWebView2Async();
         Loaded += OnLoaded;
     }
+
+    /// <summary>
+    /// WebView2 コアを初期化する処理（既定は <c>WebView.EnsureCoreWebView2Async()</c>）。
+    /// 実ランタイムなしに初期化の回数を確かめるためのテスト用の差し替え口。
+    /// </summary>
+    internal Func<Task> CoreWebViewInitializer { get; set; }
+
+    /// <summary>現在表示中（許可済み）のプレビューファイル URI（テストからの確認用）</summary>
+    internal Uri? CurrentSource => _currentSource;
 
     /// <summary>初回表示時に WebView2 を初期化する（ランタイム未導入時は案内へフォールバック）</summary>
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -57,17 +73,20 @@ public partial class MockPreviewPanel : UserControl
         await EnsureWebViewAsync();
     }
 
-    /// <summary>WebView2 のコアを初期化し、セキュリティ設定とイベントハンドラを構成する</summary>
-    private async Task EnsureWebViewAsync()
+    /// <summary>WebView2 の初期化を始める（既に始まっていれば、その初期化をそのまま返す）</summary>
+    internal Task EnsureWebViewAsync() => _initialization ??= InitializeWebViewAsync();
+
+    /// <summary>WebView2 のコアを初期化し、セキュリティ設定とイベントハンドラを構成する（1 回だけ走る）</summary>
+    private async Task InitializeWebViewAsync()
     {
-        if (_webViewReady || _unavailable)
+        if (_unavailable)
         {
             return;
         }
 
         try
         {
-            await WebView.EnsureCoreWebView2Async();
+            await CoreWebViewInitializer();
         }
         catch (Exception)
         {
@@ -83,14 +102,15 @@ public partial class MockPreviewPanel : UserControl
 
         // 許可フォルダ直下の *.html 以外（http/https 等の外部遷移・フォルダ外）を遮断する
         core.NavigationStarting += OnNavigationStarting;
-        // iframe 内の遷移も同じ方針で遮断する（外部リソースの埋め込み読込を防ぐ）
-        core.FrameNavigationStarting += OnNavigationStarting;
+        // iframe 内の遷移も同じ方針で遮断する（外部リソースの埋め込み読込を防ぐ）。iframe の遷移は
+        // 表示中の画面を変えないので、現在ファイルの追跡はしない（別ハンドラ）
+        core.FrameNavigationStarting += OnFrameNavigationStarting;
         // 新規ウィンドウ要求（target=_blank・window.open）を遮断する
         core.NewWindowRequested += OnNewWindowRequested;
 
         // ドキュメント遷移だけでなくサブリソース要求（img/script/fetch/XHR/WebSocket 等）も
         // すべて拾い、許可フォルダ内のファイル以外を既定拒否する
-        core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+        AddResourceFilterForAllSources(core);
         core.WebResourceRequested += OnWebResourceRequested;
 
         _webViewReady = true;
@@ -189,33 +209,87 @@ public partial class MockPreviewPanel : UserControl
     }
 
     /// <summary>
+    /// サブリソースのフィルタを、iframe（別オリジン）を含むすべての要求元に対して登録する。
+    /// </summary>
+    /// <remarks>
+    /// 2 引数のオーバーロードは非推奨で、メインフレームと同一オリジンの iframe にしか発火しない。
+    /// file:// はファイルごとに別オリジンなので、許可フォルダ内の別画面を iframe で埋めると、その中の
+    /// サブリソースが既定拒否から漏れる。3 引数版は Runtime 122 以降の <c>ICoreWebView2_22</c> が要り、
+    /// それより古いランタイムではラッパーが <see cref="NotImplementedException"/> を投げるので、
+    /// そのときだけ 2 引数版へ落としてメインフレームの遮断は保つ。
+    /// </remarks>
+    private static void AddResourceFilterForAllSources(CoreWebView2 core)
+    {
+        try
+        {
+            core.AddWebResourceRequestedFilter(
+                "*",
+                CoreWebView2WebResourceContext.All,
+                CoreWebView2WebResourceRequestSourceKinds.All
+            );
+        }
+        catch (NotImplementedException)
+        {
+            core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+        }
+    }
+
+    /// <summary>最上位フレームの遷移：許可・遮断に加えて、現在ファイルを追跡する</summary>
+    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+    {
+        if (HandleNavigationStarting(e.Uri, isTopLevel: true))
+        {
+            e.Cancel = true;
+        }
+    }
+
+    /// <summary>iframe の遷移：許可・遮断だけを行い、現在ファイルは変えない</summary>
+    private void OnFrameNavigationStarting(
+        object? sender,
+        CoreWebView2NavigationStartingEventArgs e
+    )
+    {
+        if (HandleNavigationStarting(e.Uri, isTopLevel: false))
+        {
+            e.Cancel = true;
+        }
+    }
+
+    /// <summary>
     /// 許可フォルダ直下の <c>*.html</c>（<c>#fragment</c> を含む同一ファイル）への遷移のみを許可し、
     /// 外部（http/https 等）・フォルダ外への遷移はキャンセルする。
-    /// ページ内リンクで別画面へ遷移したときは現在ファイルを追跡する。
+    /// 最上位フレームがページ内リンクで別画面へ遷移したときだけ現在ファイルを追跡する（iframe の遷移で
+    /// 追跡すると、表示中の画面と現在ファイルが食い違い、サイドバーの選択と再表示の判定が狂う）。
     /// </summary>
-    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+    /// <param name="uri">遷移先の URI 文字列</param>
+    /// <param name="isTopLevel">最上位フレームの遷移なら true・iframe なら false</param>
+    /// <returns>遷移をキャンセルするなら true</returns>
+    internal bool HandleNavigationStarting(string? uri, bool isTopLevel)
     {
         // まだ許可フォルダが未設定（WebView2 初期化直後の about:blank 等）は素通しする
         if (string.IsNullOrEmpty(_allowedRootFolder))
         {
-            return;
+            return false;
         }
 
-        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var target))
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var target))
         {
-            e.Cancel = true;
-            return;
+            return true;
         }
 
         if (!IsNavigationAllowed(target, _allowedRootFolder))
         {
-            e.Cancel = true;
-            return;
+            return true;
         }
 
-        // 許可された遷移: ページ内リンクで別ファイルへ移ったら現在ファイルを追跡する
-        _currentSource = target;
-        SetCurrentFile(Path.GetFileName(target.LocalPath));
+        if (isTopLevel)
+        {
+            // 許可された遷移: ページ内リンクで別ファイルへ移ったら現在ファイルを追跡する
+            _currentSource = target;
+            SetCurrentFile(Path.GetFileName(target.LocalPath));
+        }
+
+        return false;
     }
 
     /// <summary>

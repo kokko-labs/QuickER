@@ -1,6 +1,8 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using QuickER.AI.Mock.Resources;
+using QuickER.Settings;
 
 namespace QuickER.AI.Mock;
 
@@ -9,7 +11,10 @@ namespace QuickER.AI.Mock;
 /// 1 インスタンス = 1 フォルダで、マニフェストと各ファイルの整合を保ちながらライブ保存する。
 /// </summary>
 /// <remarks>
-/// 書き出しはすべて BOM なし UTF-8。時刻は <see cref="Func{DateTimeOffset}"/> をコンストラクタ注入して
+/// 書き出しはすべて BOM なし UTF-8 で、<see cref="AtomicFile"/> 経由の原子的書き込み（途中で落ちても
+/// 書き込み前か書き込み後の内容しか残らない）。変更は複製したマニフェストへ適用し、ファイルと
+/// <c>mock.json</c> の書き込みが成功してから保持中のマニフェストへ反映する（書き込みに失敗した変更が
+/// メモリだけに残って次の保存へ紛れ込まないため）。時刻は <see cref="Func{DateTimeOffset}"/> をコンストラクタ注入して
 /// テスト可能にしている（改訂履歴のタイムスタンプに用いる）。
 /// </remarks>
 public sealed class MockFolderStore
@@ -23,8 +28,14 @@ public sealed class MockFolderStore
     /// <summary>現在時刻の供給元（改訂履歴用・テスト差し替え可能）</summary>
     private readonly Func<DateTimeOffset> _clock;
 
-    /// <summary>フォルダ内で保持しているマニフェスト（このインスタンスが正本を保持し、変更のたびに保存する）</summary>
-    private readonly MockManifest _manifest;
+    /// <summary>
+    /// 確定済みのマニフェスト（<c>mock.json</c> へ書き込めた内容）。確定後はその場で書き換えず、
+    /// 変更は複製へ適用してから <see cref="Commit"/> で差し替える。
+    /// </summary>
+    private MockManifest _manifest;
+
+    /// <summary>読み取り用の複製（次の確定まで使い回す。確定のたびに破棄する）</summary>
+    private MockManifest? _snapshot;
 
     private MockFolderStore(string folder, MockManifest manifest, Func<DateTimeOffset> clock)
     {
@@ -36,8 +47,14 @@ public sealed class MockFolderStore
     /// <summary>対象フォルダのフルパス</summary>
     public string Folder => _folder;
 
-    /// <summary>現在のマニフェスト（読み取り用スナップショット。外部から変更しても内部状態には影響しない）</summary>
-    public MockManifest Manifest => CloneManifest(_manifest);
+    /// <summary>現在のマニフェスト（読み取り用スナップショット）</summary>
+    /// <remarks>
+    /// 次の変更（画面・CSS の保存、画面の削除、スキーマの更新）までは同じインスタンスを返す
+    /// （読むたびにスキーマ本文と全改訂を複製しないため）。読み取り専用として扱うこと。
+    /// 書き換えても内部状態と <c>mock.json</c> には影響しないが、同じインスタンスを受け取った
+    /// 他の読み手にはその書き換えが見える。
+    /// </remarks>
+    public MockManifest Manifest => _snapshot ??= CloneManifest(_manifest);
 
     /// <summary>指定フォルダがモックフォルダ（<c>mock.json</c> を持つ）かどうかを返す</summary>
     public static bool IsMockFolder(string folder) =>
@@ -63,7 +80,11 @@ public sealed class MockFolderStore
         if (File.Exists(manifestPath))
         {
             throw new InvalidOperationException(
-                $"モックフォルダは既に存在します（{MockManifest.ManifestFileName} が見つかりました）: {folder}"
+                string.Format(
+                    Strings.Mock_FolderAlreadyExistsFormat,
+                    MockManifest.ManifestFileName,
+                    folder
+                )
             );
         }
 
@@ -76,16 +97,17 @@ public sealed class MockFolderStore
             SourceSchema = sourceSchema ?? string.Empty,
         };
 
-        var store = new MockFolderStore(folder, manifest, clock ?? (() => DateTimeOffset.Now));
-        store.SaveManifest();
+        WriteManifest(folder, manifest);
 
-        return store;
+        return new MockFolderStore(folder, manifest, clock ?? (() => DateTimeOffset.Now));
     }
 
     /// <summary>
     /// 既存のモックフォルダを開く。<c>mock.json</c> 不在・JSON 破損・新フォーマット（Version 超過）・
     /// 画面ファイル名の不正（手編集による <c>".."</c> やパス区切りの混入等）は
-    /// 呼び出し側でユーザー提示できる明確なメッセージの例外を投げる。
+    /// 呼び出し側でユーザー提示できる明確なメッセージ（UI 言語に追従）の例外を投げる。
+    /// 手編集で入り得る <c>null</c> は、文字列なら空文字へ補い、リストの要素そのものが <c>null</c> なら
+    /// 黙って捨てる（要素は何の情報も持たないため。図ファイルの読み込みと同じ扱い）。
     /// </summary>
     /// <param name="folder">開くフォルダ</param>
     /// <param name="clock">現在時刻の供給元（省略時は <see cref="DateTimeOffset.Now"/>）</param>
@@ -96,7 +118,11 @@ public sealed class MockFolderStore
         if (!File.Exists(manifestPath))
         {
             throw new InvalidOperationException(
-                $"モックフォルダではありません（{MockManifest.ManifestFileName} が見つかりません）: {folder}"
+                string.Format(
+                    Strings.Mock_FolderNotMockFormat,
+                    MockManifest.ManifestFileName,
+                    folder
+                )
             );
         }
 
@@ -113,7 +139,11 @@ public sealed class MockFolderStore
         catch (JsonException ex)
         {
             throw new InvalidOperationException(
-                $"モックの {MockManifest.ManifestFileName} を解釈できませんでした（破損している可能性があります）: {ex.Message}",
+                string.Format(
+                    Strings.Mock_ManifestParseFailedFormat,
+                    MockManifest.ManifestFileName,
+                    ex.Message
+                ),
                 ex
             );
         }
@@ -121,21 +151,28 @@ public sealed class MockFolderStore
         if (manifest is null)
         {
             throw new InvalidOperationException(
-                $"モックの {MockManifest.ManifestFileName} が空か無効です: {folder}"
+                string.Format(
+                    Strings.Mock_ManifestEmptyFormat,
+                    MockManifest.ManifestFileName,
+                    folder
+                )
             );
         }
 
         if (manifest.Version > MockManifest.CurrentVersion)
         {
             throw new InvalidOperationException(
-                $"より新しいフォーマットのモックです（version={manifest.Version}・このアプリの対応は {MockManifest.CurrentVersion} まで）。アプリを更新してください: {folder}"
+                string.Format(
+                    Strings.Mock_ManifestNewerFormat,
+                    manifest.Version,
+                    MockManifest.CurrentVersion,
+                    folder
+                )
             );
         }
 
-        // null 耐性: 古い/部分的な JSON でもリストは常に存在させる
-        manifest.Screens ??= new List<MockScreen>();
-        manifest.Transitions ??= new List<MockTransition>();
-        manifest.Revisions ??= new List<MockRevision>();
+        // null 耐性: 古い/部分的な JSON・手編集の null を、後段が前提にする形へ整える
+        NormalizeLoaded(manifest);
 
         // 画面ファイル名は保存経路（SaveScreen/RemoveScreen/GetScreenHtml）と同じ規則で読み込み時にも検証し、
         // ".." やパス区切りを含む不正な名前は破損として開いた時点で拒否する
@@ -144,12 +181,16 @@ public sealed class MockFolderStore
         {
             try
             {
-                ValidateScreenFileName(screen?.File ?? string.Empty);
+                ValidateScreenFileName(screen.File);
             }
             catch (ArgumentException ex)
             {
                 throw new InvalidOperationException(
-                    $"モックの {MockManifest.ManifestFileName} の画面ファイル名が不正です（破損している可能性があります）: {ex.Message}",
+                    string.Format(
+                        Strings.Mock_ManifestInvalidScreenFileFormat,
+                        MockManifest.ManifestFileName,
+                        ex.Message
+                    ),
                     ex
                 );
             }
@@ -206,12 +247,11 @@ public sealed class MockFolderStore
 
         var normalizedTransitions = transitions ?? Array.Empty<MockTransition>();
 
-        // HTML ファイルを書き出す
-        Directory.CreateDirectory(_folder);
-        File.WriteAllText(Path.Combine(_folder, file), html, Utf8NoBom);
+        // 変更は複製へ適用し、ファイルの書き込みが成功してから確定する
+        var next = CloneManifest(_manifest);
 
         // 画面を upsert（ファイル名一致・大文字小文字無視）
-        var existing = _manifest.Screens.FirstOrDefault(s =>
+        var existing = next.Screens.FirstOrDefault(s =>
             string.Equals(s.File, file, StringComparison.OrdinalIgnoreCase)
         );
 
@@ -225,7 +265,7 @@ public sealed class MockFolderStore
             };
             // 新規画面は entities 省略（null）なら宣言なし・指定ありなら正規化して設定する
             added.Entities = ResolveEntities(added.Entities, entities);
-            _manifest.Screens.Add(added);
+            next.Screens.Add(added);
         }
         else
         {
@@ -237,10 +277,10 @@ public sealed class MockFolderStore
         }
 
         // この画面を起点（From）とする遷移を差し替える
-        _manifest.Transitions.RemoveAll(t =>
+        next.Transitions.RemoveAll(t =>
             string.Equals(t.From, file, StringComparison.OrdinalIgnoreCase)
         );
-        _manifest.Transitions.AddRange(
+        next.Transitions.AddRange(
             normalizedTransitions.Select(t => new MockTransition
             {
                 From = string.IsNullOrWhiteSpace(t.From) ? file : t.From,
@@ -250,15 +290,33 @@ public sealed class MockFolderStore
         );
 
         AppendRevision(
+            next,
             string.IsNullOrWhiteSpace(revisionNote) ? $"Saved screen '{file}'." : revisionNote
         );
 
-        SaveManifest();
+        // HTML→mock.json の順に書き出す。HTML だけ書けて mock.json で失敗した場合、mock.json と
+        // メモリは変更前のまま一致する。ディスクに残るのは、新しい画面なら宣言の無い HTML、
+        // 既存の画面なら「HTML は新しい内容・名前・遷移・改訂は前のまま」の食い違いで、どちらも
+        // 次の save_screen で解消する
+        Directory.CreateDirectory(_folder);
+        AtomicFile.WriteAllText(Path.Combine(_folder, file), html, Utf8NoBom);
+        Commit(next);
 
         // 保存後のフォルダ状態＋マニフェスト宣言を既知集合として検証する
         var knownScreens = CollectKnownScreenFiles();
 
-        return MockContentValidator.ValidateScreen(file, html, normalizedTransitions, knownScreens);
+        // 他の画面が宣言した遷移の To も「予告済み」のリンク先として渡す（保存後のマニフェスト＝
+        // いま保存した画面自身の遷移を含む）。既知の画面の集合へは混ぜない＝後段の「宣言と実装の乖離」の
+        // 検査は従来どおり実在する画面だけを見る
+        var declaredTargets = _manifest.Transitions.Select(t => t.To).ToList();
+
+        return MockContentValidator.ValidateScreen(
+            file,
+            html,
+            normalizedTransitions,
+            knownScreens,
+            declaredTargets
+        );
     }
 
     /// <summary>
@@ -275,9 +333,13 @@ public sealed class MockFolderStore
 
         if (existing is null)
         {
-            throw new InvalidOperationException($"画面が見つかりません: {file}");
+            // 機械向けの文言（呼び出し側が捕まえて画面一覧つきの結果へ差し替える）なので英語で固定する
+            throw new InvalidOperationException($"The screen was not found: {file}");
         }
 
+        // HTML を先に消す。mock.json の書き込みが失敗しても、宣言だけ残った画面へ remove を
+        // やり直せば（HTML が無ければ削除を飛ばして）自己回復する。逆の順序だと HTML の削除に
+        // 失敗したときに宣言の無い HTML が残り、やり直しは「見つからない」になる。
         var path = Path.Combine(_folder, file);
 
         if (File.Exists(path))
@@ -285,18 +347,20 @@ public sealed class MockFolderStore
             File.Delete(path);
         }
 
-        _manifest.Screens.RemoveAll(s =>
+        var next = CloneManifest(_manifest);
+
+        next.Screens.RemoveAll(s =>
             string.Equals(s.File, file, StringComparison.OrdinalIgnoreCase)
         );
 
         // 起点・終点いずれかがこの画面である遷移を除去する
-        _manifest.Transitions.RemoveAll(t =>
+        next.Transitions.RemoveAll(t =>
             string.Equals(t.From, file, StringComparison.OrdinalIgnoreCase)
             || string.Equals(t.To, file, StringComparison.OrdinalIgnoreCase)
         );
 
-        AppendRevision($"Removed screen '{file}'.");
-        SaveManifest();
+        AppendRevision(next, $"Removed screen '{file}'.");
+        Commit(next);
     }
 
     /// <summary>共有 CSS（<c>style.css</c>）を書き出し、改訂追記・保存する</summary>
@@ -306,16 +370,18 @@ public sealed class MockFolderStore
     public IReadOnlyList<string> SaveStylesheet(string css, string revisionNote)
     {
         Directory.CreateDirectory(_folder);
-        File.WriteAllText(
+        AtomicFile.WriteAllText(
             Path.Combine(_folder, MockManifest.StylesheetFileName),
             css ?? string.Empty,
             Utf8NoBom
         );
 
+        var next = CloneManifest(_manifest);
         AppendRevision(
+            next,
             string.IsNullOrWhiteSpace(revisionNote) ? "Saved shared stylesheet." : revisionNote
         );
-        SaveManifest();
+        Commit(next);
 
         return MockContentValidator.ValidateStylesheet(css ?? string.Empty);
     }
@@ -347,8 +413,9 @@ public sealed class MockFolderStore
     /// <param name="schema">最新の ER スキーマ記述テキスト</param>
     public void UpdateSourceSchema(string schema)
     {
-        _manifest.SourceSchema = schema ?? string.Empty;
-        SaveManifest();
+        var next = CloneManifest(_manifest);
+        next.SourceSchema = schema ?? string.Empty;
+        Commit(next);
     }
 
     /// <summary>フォルダ内の実 HTML ファイル ∪ マニフェスト宣言画面を既知画面集合として集める</summary>
@@ -482,18 +549,83 @@ public sealed class MockFolderStore
     }
 
     /// <summary>改訂履歴へ 1 件追記する</summary>
-    private void AppendRevision(string note)
+    private void AppendRevision(MockManifest target, string note)
     {
-        _manifest.Revisions.Add(
+        target.Revisions.Add(
             new MockRevision { Timestamp = _clock(), Note = note ?? string.Empty }
         );
     }
 
-    /// <summary>マニフェストを <c>mock.json</c> へ BOM なし UTF-8 で書き出す</summary>
-    private void SaveManifest()
+    /// <summary>
+    /// 変更を適用した複製を <c>mock.json</c> へ書き出し、成功したときだけ保持中のマニフェストを差し替える
+    /// （書き込みが例外で終われば、保持中のマニフェストと読み取り用の複製は変更前のまま）。
+    /// </summary>
+    private void Commit(MockManifest next)
     {
-        var json = JsonSerializer.Serialize(_manifest, MockManifest.SerializerOptions);
-        File.WriteAllText(Path.Combine(_folder, MockManifest.ManifestFileName), json, Utf8NoBom);
+        WriteManifest(_folder, next);
+        _manifest = next;
+        _snapshot = null;
+    }
+
+    /// <summary>マニフェストを <c>mock.json</c> へ BOM なし UTF-8 で原子的に書き出す</summary>
+    private static void WriteManifest(string folder, MockManifest manifest)
+    {
+        var json = JsonSerializer.Serialize(manifest, MockManifest.SerializerOptions);
+        AtomicFile.WriteAllText(
+            Path.Combine(folder, MockManifest.ManifestFileName),
+            json,
+            Utf8NoBom
+        );
+    }
+
+    /// <summary>
+    /// 読み込んだマニフェストの <c>null</c> を整える。リストの <c>null</c> は空リストへ、リストの要素の
+    /// <c>null</c> は除去、文字列の <c>null</c> は空文字へ（JSON の <c>null</c> は宣言上 NULL 非許容の
+    /// プロパティにも入るため、後段の文字列処理が NRE にならないよう読み込み時に補う）。
+    /// </summary>
+    private static void NormalizeLoaded(MockManifest manifest)
+    {
+        manifest.Title ??= string.Empty;
+        manifest.SourceSchema ??= string.Empty;
+        manifest.Screens = (manifest.Screens ?? new List<MockScreen>())
+            .Where(s => s is not null)
+            .ToList();
+        manifest.Transitions = (manifest.Transitions ?? new List<MockTransition>())
+            .Where(t => t is not null)
+            .ToList();
+        manifest.Revisions = (manifest.Revisions ?? new List<MockRevision>())
+            .Where(r => r is not null)
+            .ToList();
+
+        foreach (var screen in manifest.Screens)
+        {
+            screen.File ??= string.Empty;
+            screen.Name ??= string.Empty;
+            screen.Description ??= string.Empty;
+
+            if (screen.Entities is not null)
+            {
+                screen.Entities = screen.Entities.Where(e => e is not null).ToList();
+
+                foreach (var entity in screen.Entities)
+                {
+                    entity.Name ??= string.Empty;
+                    entity.Operations ??= string.Empty;
+                }
+            }
+        }
+
+        foreach (var transition in manifest.Transitions)
+        {
+            transition.From ??= string.Empty;
+            transition.To ??= string.Empty;
+            transition.Trigger ??= string.Empty;
+        }
+
+        foreach (var revision in manifest.Revisions)
+        {
+            revision.Note ??= string.Empty;
+        }
     }
 
     /// <summary>マニフェストのスナップショット複製を JSON ラウンドトリップで作る</summary>

@@ -9,7 +9,8 @@ namespace QuickER.AI.Mock;
 /// <remarks>
 /// <see cref="MockGenerationDialogViewModel"/> をアプリ本体の巨大な MainViewModel 具象から切り離し、
 /// スタブ注入による単体テストを可能にする（AI チャットの IErDiagramChatHost と同じ発想）。
-/// 具象アダプタ（MainViewModelMockDiagramSource）はアプリ本体（QuickER.Gui）に置く。
+/// 具象アダプタは <see cref="ErDiagramHostMockDiagramSource"/>（この機能プロジェクト側。ホストの
+/// <c>IErDiagramHost</c> を包む）。
 /// </remarks>
 public interface IMockDiagramSource
 {

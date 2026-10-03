@@ -29,12 +29,6 @@ public static class MockContentValidator
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
-    /// <summary>href="*.html"（相対リンク・任意の #フラグメント付き）</summary>
-    private static readonly Regex HtmlLink = new(
-        "href\\s*=\\s*[\"']([^\"']+?\\.html)(?:#[^\"']*)?[\"']",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
-    );
-
     /// <summary>style.css への link 参照</summary>
     private static readonly Regex StylesheetLink = new(
         "href\\s*=\\s*[\"'][^\"']*style\\.css[\"']",
@@ -48,12 +42,19 @@ public static class MockContentValidator
     /// <param name="html">画面 HTML 全体</param>
     /// <param name="transitions">この画面を起点として宣言された遷移（To は「予告済み」リンクとして扱う）</param>
     /// <param name="knownScreenFiles">既知の画面ファイル名集合（保存後のフォルダ内 HTML ＋マニフェスト宣言）</param>
+    /// <param name="declaredTransitionTargets">
+    /// マニフェストのすべての遷移の To（他の画面が宣言したものを含む・保存後の状態）。リンク先の検査でだけ
+    /// 「予告済み」として扱う（共通のナビゲーションから、まだ作っていない画面へリンクしても、どこかの画面で
+    /// 遷移を宣言していれば警告しない）。遷移宣言と実装の乖離を見る後段の検査には使わない。
+    /// 省略時は空（この画面自身の遷移だけを予告として扱う）。
+    /// </param>
     /// <returns>英語の警告文字列一覧（問題なしなら空）</returns>
     public static IReadOnlyList<string> ValidateScreen(
         string file,
         string html,
         IReadOnlyList<MockTransition> transitions,
-        IReadOnlyCollection<string> knownScreenFiles
+        IReadOnlyCollection<string> knownScreenFiles,
+        IReadOnlyCollection<string>? declaredTransitionTargets = null
     )
     {
         var warnings = new List<string>();
@@ -61,11 +62,20 @@ public static class MockContentValidator
         // 外部参照（オフライン完結の規約違反）
         warnings.AddRange(DetectExternalReferences(html));
 
-        // 予告済みリンク先の集合（既知画面 ∪ 遷移 To ∪ 自分自身）を大文字小文字無視で組む
+        // 予告済みリンク先の集合（既知画面 ∪ マニフェスト全体の遷移 To ∪ この画面の遷移 To ∪ 自分自身）を
+        // 大文字小文字無視で組む
         var known = new HashSet<string>(knownScreenFiles, StringComparer.OrdinalIgnoreCase)
         {
             file,
         };
+
+        foreach (var target in declaredTransitionTargets ?? Array.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(target))
+            {
+                known.Add(target);
+            }
+        }
 
         foreach (var transition in transitions)
         {
@@ -164,33 +174,17 @@ public static class MockContentValidator
         }
     }
 
-    /// <summary>HTML 内の相対 <c>*.html</c> リンク先ファイル名を抽出する（外部 URL は除外）</summary>
+    /// <summary>
+    /// HTML 内の相対 <c>*.html</c> リンク先ファイル名を抽出する（外部 URL は除外）。
+    /// 抽出の規則は単一 HTML のリンク書き換えと共有する（<see cref="MockScreenLinks"/>）。
+    /// </summary>
     private static IReadOnlyList<string> ExtractHtmlLinkTargets(string html)
     {
         var targets = new List<string>();
 
-        foreach (Match match in HtmlLink.Matches(html))
+        foreach (Match match in MockScreenLinks.RelativeScreenLink.Matches(html))
         {
-            var raw = match.Groups[1].Value;
-
-            // 絶対 URL（外部）は対象外
-            if (raw.Contains("://", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            // 先頭の "./" を除去し、ファイル名部分のみを取り出す（フォルダ直下想定）
-            var normalized = raw.Replace('\\', '/');
-
-            if (normalized.StartsWith("./", StringComparison.Ordinal))
-            {
-                normalized = normalized.Substring(2);
-            }
-
-            var slash = normalized.LastIndexOf('/');
-            var fileName = slash >= 0 ? normalized.Substring(slash + 1) : normalized;
-
-            if (!string.IsNullOrWhiteSpace(fileName))
+            if (MockScreenLinks.TryGetScreenFile(match.Groups[2].Value, out var fileName))
             {
                 targets.Add(fileName);
             }

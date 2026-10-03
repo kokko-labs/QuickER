@@ -144,7 +144,7 @@ public static class MockDesignDocExporter
         // 1. タイトル
         var title = string.IsNullOrWhiteSpace(manifest.Title)
             ? Strings.MockDoc_DefaultTitle
-            : manifest.Title.Trim();
+            : FoldNewlines(manifest.Title);
 
         sb.Append("# ").Append(title).Append('\n');
 
@@ -356,10 +356,11 @@ public static class MockDesignDocExporter
         sb.Append('\n');
         sb.Append("## ").Append(FoldNewlines(ScreenDisplayName(screen))).Append('\n');
 
-        // 説明（段落。表セルではないためエスケープ不要）
+        // 説明（段落。表セルではないためエスケープはしない＝説明に Markdown を書ける。改行だけは
+        // 出力全体の LF 固定にそろえる）
         if (!string.IsNullOrWhiteSpace(screen.Description))
         {
-            sb.Append('\n').Append(screen.Description.Trim()).Append('\n');
+            sb.Append('\n').Append(screen.Description.Trim().ReplaceLineEndings("\n")).Append('\n');
         }
 
         // 遷移先（この画面が起点）・遷移元（この画面が終点）を箇条書きにする
@@ -870,34 +871,31 @@ public static class MockDesignDocExporter
         return map;
     }
 
-    /// <summary>ファイル名から mermaid ノード ID の素（拡張子除去・英数字以外は <c>_</c>・先頭数字回避）を作る</summary>
+    /// <summary>
+    /// ファイル名から mermaid ノード ID の素を作る（画面 ID＝拡張子除去・英数字以外は <c>_</c>・常に <c>s_</c> を前置）。
+    /// </summary>
+    /// <remarks>
+    /// 接頭辞を常に付けるのは、ファイル名がそのまま mermaid の予約語（<c>end</c>＝subgraph の終端など）や
+    /// 数字始まりになっても、識別子として無条件に安全にするため。ノードの表示は別途のラベルなので見た目は変わらない。
+    /// </remarks>
     private static string MermaidNodeIdBase(string file)
     {
-        var name = file;
-        var dot = name.LastIndexOf('.');
-
-        if (dot > 0)
-        {
-            name = name.Substring(0, dot);
-        }
-
-        var builder = new StringBuilder(name.Length);
+        var name = MockScreenLinks.ScreenId(file);
+        var builder = new StringBuilder(
+            MermaidNodeIdPrefix,
+            MermaidNodeIdPrefix.Length + name.Length
+        );
 
         foreach (var ch in name)
         {
             builder.Append(char.IsLetterOrDigit(ch) ? ch : '_');
         }
 
-        var result = builder.ToString();
-
-        // 空・先頭が数字なら英字を前置する（mermaid の識別子として安全にする）
-        if (result.Length == 0 || !(char.IsLetter(result[0]) || result[0] == '_'))
-        {
-            result = "s" + result;
-        }
-
-        return result;
+        return builder.ToString();
     }
+
+    /// <summary>mermaid ノード ID の接頭辞（<see cref="MermaidNodeIdBase"/> 参照）</summary>
+    private const string MermaidNodeIdPrefix = "s_";
 
     /// <summary>画面の表示名（Name。空ならファイル名）を得る</summary>
     private static string ScreenDisplayName(MockScreen screen) =>
@@ -945,42 +943,24 @@ public static class MockDesignDocExporter
     private static string DecodeEntities(string value) => System.Net.WebUtility.HtmlDecode(value);
 
     /// <summary>
-    /// 見出し等の 1 行テキスト向けに改行を空白 1 つへ畳む（<see cref="string.ReplaceLineEndings(string)"/> が
-    /// 改行と見なす CRLF / CR / LF / NEL / LS / PS / VT / FF の全てが対象。畳まないと Markdown 見出しの行が割れる）。
+    /// 1 行テキスト向けに改行を空白 1 つへ畳み、前後の空白を除く（<see cref="string.ReplaceLineEndings(string)"/> が
+    /// 改行と見なす CRLF / CR / LF / NEL / LS / PS / FF の全てが対象。VT は改行と見なされない）。
+    /// 見出し・表セル・リンクテキスト・mermaid のラベルが共有する（畳まないと Markdown の行や mermaid の文が割れる）。
     /// </summary>
     private static string FoldNewlines(string value) => value.ReplaceLineEndings(" ").Trim();
 
     /// <summary>Markdown 表セル向けのエスケープ（改行を空白へ・パイプをエスケープ）</summary>
-    private static string EscapeCell(string value)
-    {
-        var single = value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
-
-        return single.Replace("|", "\\|").Trim();
-    }
+    private static string EscapeCell(string value) => FoldNewlines(value).Replace("|", "\\|");
 
     /// <summary>Markdown リンクテキスト向けのエスケープ（角括弧・パイプ・改行）</summary>
-    private static string EscapeLinkText(string value)
-    {
-        var single = value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
-
-        return single.Replace("[", "\\[").Replace("]", "\\]").Replace("|", "\\|").Trim();
-    }
+    private static string EscapeLinkText(string value) =>
+        FoldNewlines(value).Replace("[", "\\[").Replace("]", "\\]").Replace("|", "\\|");
 
     /// <summary>mermaid ノードラベル向けのエスケープ（引用符をエンティティ化・改行を空白へ）</summary>
-    private static string MermaidLabel(string value)
-    {
-        var single = value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
-
-        return single.Replace("\"", "&quot;").Trim();
-    }
+    private static string MermaidLabel(string value) => FoldNewlines(value).Replace("\"", "&quot;");
 
     /// <summary>mermaid エッジラベル向けのエスケープ（区切りのパイプを退避・改行を空白へ）</summary>
-    private static string MermaidEdgeText(string value)
-    {
-        var single = value.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
-
-        return single.Replace("|", "/").Trim();
-    }
+    private static string MermaidEdgeText(string value) => FoldNewlines(value).Replace("|", "/");
 
     /// <summary>タグ文字列（またはその属性部分）から属性辞書を作る（キーは大文字小文字無視・真偽属性は空値）</summary>
     private static Dictionary<string, string> ParseAttributes(string tagOrAttributes)
