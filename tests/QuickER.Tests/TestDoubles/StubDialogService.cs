@@ -54,10 +54,17 @@ public sealed class StubDialogService : IDialogService
         return ConfirmResult;
     }
 
+    /// <summary>
+    /// <see cref="ConfirmWarning"/> の記録の直後・応答を返す前に実行するフック（既定は無し）。
+    /// 本物のダイアログが回す入れ子のメッセージループの最中に起きる処理（再入）を模すために使う。
+    /// </summary>
+    public Action? OnConfirmWarning { get; set; }
+
     /// <summary>メッセージを記録し <see cref="ConfirmResult"/> を返す</summary>
     public bool ConfirmWarning(string message, string title)
     {
         WarningConfirmMessages.Add(message);
+        OnConfirmWarning?.Invoke();
         return ConfirmResult;
     }
 

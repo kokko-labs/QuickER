@@ -326,6 +326,12 @@
   <data name="Status_ExternalReloadFailed" xml:space="preserve">
     <value>Could not reload the externally changed file; keeping the current diagram.</value>
   </data>
+  <data name="Status_ExternalWatchInterrupted" xml:space="preserve">
+    <value>Stopped watching the file for external changes (its folder cannot be reached). Retrying in the background.</value>
+  </data>
+  <data name="Status_ExternalWatchResumed" xml:space="preserve">
+    <value>Resumed watching the file for external changes.</value>
+  </data>
   <data name="Toolbox_Title" xml:space="preserve">
     <value>Toolbox</value>
   </data>
@@ -1212,5 +1218,10 @@ Please report the problem with the details below.</value>
   </data>
   <data name="Crash_CopyDetails" xml:space="preserve">
     <value>Copy Details</value>
+  </data>
+  <data name="SingleInstance_RunningWithDifferentPrivileges" xml:space="preserve">
+    <value>QuickER is already running with different privileges (for example, as administrator), so it cannot be started again or brought to the front.
+
+Switch to the QuickER window that is already open, or close it and start QuickER again.</value>
   </data>
 </root>

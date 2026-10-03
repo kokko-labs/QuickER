@@ -349,6 +349,12 @@
   <data name="Status_ExternalReloadFailed" xml:space="preserve">
     <value>外部変更されたファイルを再読込できませんでした（現在の図を維持します）。</value>
   </data>
+  <data name="Status_ExternalWatchInterrupted" xml:space="preserve">
+    <value>ファイルの外部変更の監視が止まりました（フォルダにアクセスできません）。裏で再開を試み続けます。</value>
+  </data>
+  <data name="Status_ExternalWatchResumed" xml:space="preserve">
+    <value>ファイルの外部変更の監視を再開しました。</value>
+  </data>
   <data name="Toolbox_Title" xml:space="preserve">
     <value>ツールボックス</value>
   </data>
@@ -1238,5 +1244,11 @@
   <data name="Crash_CopyDetails" xml:space="preserve">
     <value>詳細をコピー</value>
     <comment>クラッシュ報告ダイアログの詳細コピーボタン</comment>
+  </data>
+  <data name="SingleInstance_RunningWithDifferentPrivileges" xml:space="preserve">
+    <value>QuickER は別の権限（管理者として実行など）で既に起動しているため、もう 1 つ起動することも、そのウィンドウを前面に出すこともできません。
+
+すでに開いている QuickER のウィンドウに切り替えるか、それを閉じてから QuickER を起動し直してください。</value>
+    <comment>権限の違うインスタンスが起動中のときに、2 つ目の起動で出すメッセージ</comment>
   </data>
 </root>

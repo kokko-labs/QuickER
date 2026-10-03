@@ -76,6 +76,12 @@ public partial class MainViewModel : IDiagramTransferHost
     /// </summary>
     private string? _ignoredExternalHash;
 
+    /// <summary>外部変更の処理中か（確認ダイアログの入れ子のメッセージループからの再入を畳むため）</summary>
+    private bool _handlingExternalModification;
+
+    /// <summary>処理中に次の外部変更が届いたか（処理の後にディスクで 1 回だけ再評価する）</summary>
+    private bool _externalModificationPending;
+
     /// <summary>再読込経路で View への fit-to-window 要求を抑止するフラグ（ビューポート維持のため）</summary>
     private bool _suppressFitToWindow;
 
@@ -193,11 +199,69 @@ public partial class MainViewModel : IDiagramTransferHost
             case DocumentFileChangeKind.Modified:
                 HandleExternalModification(e.ContentHash);
                 break;
+
+            case DocumentFileChangeKind.WatchInterrupted:
+                // 監視を張れなくなった（フォルダの消失など）。監視サービスが裏で張り直しを試み続ける
+                NotifyStatus(Strings.Status_ExternalWatchInterrupted);
+                break;
+
+            case DocumentFileChangeKind.WatchResumed:
+                // 張り直せた。止まっていた間の変更は監視サービスが 1 回照合して Modified で届ける
+                NotifyStatus(Strings.Status_ExternalWatchResumed);
+                break;
         }
     }
 
     /// <summary>外部での内容変更を処理する（クリーンなら無確認再読込・ダーティなら確認）</summary>
+    /// <remarks>
+    /// <para>
+    /// 次の 2 つは、進行中のマウス操作を打ち切るより<b>前</b>に判定して捨てる（何もしないイベントで
+    /// 利用者のドラッグを壊さないため）。
+    /// </para>
+    /// <list type="bullet">
+    /// <item>内容ハッシュが最終既知ハッシュと一致する＝既に反映済み（先に処理した再読込が同じ内容を読み込んだ、
+    /// または自分の保存）。最終既知ハッシュは読み書きした内容そのものから採るので、一致は「同じ内容」を意味する</item>
+    /// <item>処理中の再入。確認ダイアログは入れ子のメッセージループを回すため、その最中に届いた次の変更が
+    /// 確認をもう 1 枚重ねる。再入は「保留あり」を立てて戻り、処理の後に最新のディスクで 1 回だけ再評価する
+    /// （ディスクがさらに変わっていれば、閉じた後に確認がもう 1 回出る）</item>
+    /// </list>
+    /// </remarks>
     private void HandleExternalModification(string? contentHash)
+    {
+        if (
+            contentHash is not null
+            && string.Equals(contentHash, _lastKnownFileHash, StringComparison.Ordinal)
+        )
+        {
+            return;
+        }
+
+        if (_handlingExternalModification)
+        {
+            _externalModificationPending = true;
+            return;
+        }
+
+        _handlingExternalModification = true;
+
+        try
+        {
+            HandleExternalModificationCore(contentHash);
+        }
+        finally
+        {
+            _handlingExternalModification = false;
+        }
+
+        if (_externalModificationPending)
+        {
+            _externalModificationPending = false;
+            CheckExternalChangeAgainstDisk();
+        }
+    }
+
+    /// <summary>外部での内容変更を、クリーンなら無確認再読込・ダーティなら確認で処理する（再入しないこと）</summary>
+    private void HandleExternalModificationCore(string? contentHash)
     {
         // 進行中のマウス操作を、再読込・確認ダイアログのどちらへ進むより前に打ち切る。
         // 自動再読込では図が置き換わったあとの解放が幽霊 Undo を積み、確認ダイアログは

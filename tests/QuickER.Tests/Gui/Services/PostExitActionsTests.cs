@@ -138,6 +138,74 @@ public sealed class PostExitActionsTests
         reporter.Steps.Should().Equal("App.DisposeServices");
     }
 
+    /// <summary>自分で再起動するときは、その直前に単一インスタンスの座を手放す</summary>
+    [Fact(DisplayName = "PostExitActions: 自分で再起動する直前に単一インスタンスの座を手放す")]
+    public void Run_Relaunch_ReleasesSingleInstanceFirst()
+    {
+        var actions = new PostExitActions();
+        var calls = new List<string>();
+        actions.ReleaseSingleInstanceBeforeRelaunch(() => calls.Add("release"));
+        actions.ScheduleRelaunch(() => calls.Add("relaunch"));
+
+        actions.Run(new RecordingShutdownFailureReporter());
+
+        calls.Should().Equal("release", "relaunch");
+    }
+
+    /// <summary>更新プログラムに再起動を任せる経路と、再起動しない終了では座を手放さない（プロセスの終了で手放す）</summary>
+    [Theory(DisplayName = "PostExitActions: 自分で再起動しない終了では座を手放さない")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Run_WithoutOwnRelaunch_DoesNotRelease(bool updateScheduled)
+    {
+        var actions = new PostExitActions();
+        var released = 0;
+        actions.ReleaseSingleInstanceBeforeRelaunch(() => released++);
+
+        if (updateScheduled)
+        {
+            actions.ScheduleUpdateApply(_ => { }, restart: false);
+            actions.ScheduleRelaunch(() => { });
+        }
+
+        actions.Run(new RecordingShutdownFailureReporter());
+
+        released.Should().Be(0);
+    }
+
+    /// <summary>更新の適用が失敗して自分で再起動するときも、直前に座を手放す</summary>
+    [Fact(DisplayName = "PostExitActions: 適用が失敗して自分で再起動するときも座を手放す")]
+    public void Run_ApplyFailsWithRelaunch_ReleasesBeforeRelaunch()
+    {
+        var actions = new PostExitActions();
+        var calls = new List<string>();
+        actions.ReleaseSingleInstanceBeforeRelaunch(() => calls.Add("release"));
+        actions.ScheduleUpdateApply(_ => throw new InvalidOperationException("no updater"), false);
+        actions.ScheduleRelaunch(() => calls.Add("relaunch"));
+
+        actions.Run(new RecordingShutdownFailureReporter());
+
+        calls.Should().Equal("release", "relaunch");
+    }
+
+    /// <summary>座の手放しが失敗しても、再起動は試み、失敗は終了の連鎖の 1 段として記録する</summary>
+    [Fact(DisplayName = "PostExitActions: 座の手放しが失敗しても再起動は試みる")]
+    public void Run_ReleaseFails_StillRelaunches()
+    {
+        var actions = new PostExitActions();
+        var reporter = new RecordingShutdownFailureReporter();
+        var relaunched = 0;
+        actions.ReleaseSingleInstanceBeforeRelaunch(() =>
+            throw new InvalidOperationException("release failed")
+        );
+        actions.ScheduleRelaunch(() => relaunched++);
+
+        actions.Run(reporter);
+
+        relaunched.Should().Be(1);
+        reporter.Steps.Should().Equal("App.ReleaseSingleInstance");
+    }
+
     /// <summary>何も登録されていなければ何もしない</summary>
     [Fact(DisplayName = "PostExitActions: 登録が無ければ何もしない")]
     public void Run_NothingScheduled_DoesNothing()

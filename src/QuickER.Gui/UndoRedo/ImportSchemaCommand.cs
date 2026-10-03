@@ -58,45 +58,49 @@ public class ImportSchemaCommand : IUndoableCommand
         _previousEntities = _main.Entities.ToList();
         _previousRelationships = _main.Relationships.ToList();
 
-        // 退避済みエンティティ・リレーションのイベント購読と変更追跡を切り離しつつ空にする
-        // （Clear() は Reset 通知で OldItems を持たず、コレクション側の自動解除が効かないため専用経路を通す）
-        _main.ClearDiagramCollections();
-
-        // 取り込み用 ViewModel は初回 Execute 時のみ構築し、Redo では再利用する
-        if (ImportedEntities.Count == 0)
+        // 要素ごとの列ルール・ハイライト・ミニマップの再計算を止め、最後に 1 回だけ流す
+        _main.RunBulkDiagramUpdate(() =>
         {
-            // リレーション接続のためエンティティ ID から ViewModel を引けるよう索引化する
-            var byId = new Dictionary<System.Guid, EntityViewModel>();
+            // 退避済みエンティティ・リレーションのイベント購読と変更追跡を切り離しつつ空にする
+            // （Clear() は Reset 通知で OldItems を持たず、コレクション側の自動解除が効かないため専用経路を通す）
+            _main.ClearDiagramCollections();
 
-            foreach (var e in _newEntities)
+            // 取り込み用 ViewModel は初回 Execute 時のみ構築し、Redo では再利用する
+            if (ImportedEntities.Count == 0)
             {
-                var vm = new EntityViewModel(e);
-                ImportedEntities.Add(vm);
-                byId[e.Id] = vm;
-            }
+                // リレーション接続のためエンティティ ID から ViewModel を引けるよう索引化する
+                var byId = new Dictionary<System.Guid, EntityViewModel>();
 
-            // 両端のエンティティが揃うリレーションのみ復元する
-            foreach (var r in _newRelationships)
-            {
-                if (
-                    byId.TryGetValue(r.SourceEntityId, out var s)
-                    && byId.TryGetValue(r.TargetEntityId, out var t)
-                )
+                foreach (var e in _newEntities)
                 {
-                    ImportedRelationships.Add(new RelationshipViewModel(r, s, t));
+                    var vm = new EntityViewModel(e);
+                    ImportedEntities.Add(vm);
+                    byId[e.Id] = vm;
+                }
+
+                // 両端のエンティティが揃うリレーションのみ復元する
+                foreach (var r in _newRelationships)
+                {
+                    if (
+                        byId.TryGetValue(r.SourceEntityId, out var s)
+                        && byId.TryGetValue(r.TargetEntityId, out var t)
+                    )
+                    {
+                        ImportedRelationships.Add(new RelationshipViewModel(r, s, t));
+                    }
                 }
             }
-        }
 
-        foreach (var e in ImportedEntities)
-        {
-            _main.Entities.Add(e);
-        }
+            foreach (var e in ImportedEntities)
+            {
+                _main.Entities.Add(e);
+            }
 
-        foreach (var r in ImportedRelationships)
-        {
-            _main.Relationships.Add(r);
-        }
+            foreach (var r in ImportedRelationships)
+            {
+                _main.Relationships.Add(r);
+            }
+        });
 
         _main.SelectedEntity = null;
         _main.SelectedRelationship = null;
@@ -106,20 +110,23 @@ public class ImportSchemaCommand : IUndoableCommand
     /// <inheritdoc />
     public void Undo()
     {
-        // 取り込んだエンティティ・リレーションの購読と変更追跡を切り離しつつ空にする
-        // （Clear() は Reset 通知で OldItems を持たないため専用経路を通す。
-        //   復元する退避済みの要素は Add 通知で購読・追跡が張り直される）
-        _main.ClearDiagramCollections();
-
-        foreach (var e in _previousEntities)
+        _main.RunBulkDiagramUpdate(() =>
         {
-            _main.Entities.Add(e);
-        }
+            // 取り込んだエンティティ・リレーションの購読と変更追跡を切り離しつつ空にする
+            // （Clear() は Reset 通知で OldItems を持たないため専用経路を通す。
+            //   復元する退避済みの要素は Add 通知で購読・追跡が張り直される）
+            _main.ClearDiagramCollections();
 
-        foreach (var r in _previousRelationships)
-        {
-            _main.Relationships.Add(r);
-        }
+            foreach (var e in _previousEntities)
+            {
+                _main.Entities.Add(e);
+            }
+
+            foreach (var r in _previousRelationships)
+            {
+                _main.Relationships.Add(r);
+            }
+        });
 
         _main.SelectedEntity = null;
         _main.SelectedRelationship = null;

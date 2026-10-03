@@ -31,6 +31,21 @@ public sealed class PostExitActions
     /// <summary>終了の最後に呼ぶ再起動（未要求なら null）</summary>
     private Action? _relaunch;
 
+    /// <summary>自分で再起動する直前に、単一インスタンスの座を手放す処理（未登録なら null）</summary>
+    private Action? _releaseSingleInstance;
+
+    /// <summary>自分で再起動する直前に呼ぶ、単一インスタンスの座を手放す処理を登録する</summary>
+    /// <param name="release">座（名前付き Mutex）を手放す処理</param>
+    /// <remarks>
+    /// 再起動はこのプロセスの終了処理の途中（<c>Application.Exit</c>）で行うため、座はまだこのプロセスが持っている。
+    /// 手放さずに起動すると、新しいインスタンスが先に座を取りに来たとき「既に起動中」と判断して黙って終わり、
+    /// 再起動が失われる。更新プログラムに再起動を任せる経路では呼ばない（更新プログラムはこのプロセスの終了を待つ）。
+    /// </remarks>
+    public void ReleaseSingleInstanceBeforeRelaunch(Action release)
+    {
+        _releaseSingleInstance = release;
+    }
+
     /// <summary>正常終了の最後に更新を適用するよう登録する</summary>
     /// <param name="applyOnExit">
     /// 更新を適用する処理（引数＝適用後に再起動するか）。このプロセスの終了を待って適用する
@@ -100,6 +115,12 @@ public sealed class PostExitActions
 
         if (relaunch is not null)
         {
+            // 新しいインスタンスが座を取れるよう、起動の直前に手放す（手放しの失敗でも起動は試みる）
+            if (_releaseSingleInstance is { } release)
+            {
+                ShutdownSteps.Run(reporter, "App.ReleaseSingleInstance", release);
+            }
+
             ShutdownSteps.Run(reporter, "App.Relaunch", relaunch);
         }
     }

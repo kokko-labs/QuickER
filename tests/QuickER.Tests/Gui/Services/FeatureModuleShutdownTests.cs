@@ -96,6 +96,29 @@ public class FeatureModuleShutdownTests
     }
 
     /// <summary>
+    /// 後始末の入口が 2 つ（メインウィンドウの Closing とクラッシュ経路）あっても、モジュールの終了処理は
+    /// 1 回しか走らないことを検証する（Closing の後にクラッシュした場合）
+    /// </summary>
+    [Fact(
+        DisplayName = "1 回だけ実行のガード: Closing の後にクラッシュ経路から呼ばれても二重に走らない"
+    )]
+    public void ShutdownOnce_SecondCall_DoesNothing()
+    {
+        var log = new List<string>();
+        var reporter = new RecordingShutdownFailureReporter();
+        var shutdown = new FeatureModuleShutdownOnce(
+            [new RecordingModule("ai-chat", log), new RecordingModule("mock-generation", log)],
+            new ServiceCollection().BuildServiceProvider(),
+            reporter
+        );
+
+        shutdown.CloseAll();
+        shutdown.CloseAll();
+
+        log.Should().Equal("ai-chat", "mock-generation");
+    }
+
+    /// <summary>
     /// <c>App.xaml.cs</c> の終了処理が、受け止めを持つ <see cref="FeatureModuleShutdown"/> を
     /// 経由していることをソース上で固定する。
     /// </summary>
@@ -111,7 +134,8 @@ public class FeatureModuleShutdownTests
             Path.Combine(NeutralResxFiles.FindRepositoryRoot(), "src", "QuickER.Gui", "App.xaml.cs")
         );
 
-        source.Should().Contain("FeatureModuleShutdown.CloseAll(");
+        source.Should().Contain("new FeatureModuleShutdownOnce(");
+        source.Should().Contain("window.Closing += (_, _) => featureModuleShutdown.CloseAll();");
         Regex
             .Matches(source, @"\.OnMainWindowClosing\s*\(")
             .Should()

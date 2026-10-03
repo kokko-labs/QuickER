@@ -432,7 +432,7 @@ public static class JsonStorageService
     /// 戻り値は 3 状態を区別する。<c>false</c>＝版を名乗っていない（ファイル不在・読み取り失敗・
     /// JSON でない・<c>Version</c> キーが無い）。<c>true</c> かつ <paramref name="version"/> が非 null＝
     /// その版。<c>true</c> かつ <c>null</c>＝<b>版を名乗っているのに解釈できない</b>
-    /// （<c>"2"</c>・<c>2.0</c>・<see cref="int"/> に収まらない値。この版が書く形ではないので、
+    /// （<c>"2"</c>・<c>2.0</c>・<see cref="int"/> に収まらない値・<c>null</c>・オブジェクト・配列。この版が書く形ではないので、
     /// 別の版か手編集のファイル）。
     /// </para>
     /// <para>
@@ -452,14 +452,15 @@ public static class JsonStorageService
         {
             if (
                 JsonNode.Parse(File.ReadAllText(path)) is not JsonObject root
-                || root["Version"] is not JsonValue value
+                || !root.ContainsKey("Version")
             )
             {
                 return false;
             }
 
-            // 版を名乗ってはいるので true。int として読めたときだけ値を持ち帰る
-            if (value.TryGetValue(out int parsed))
+            // キーがある以上は版を名乗っているので true。値が null・オブジェクト・配列なら解釈できない版
+            // （version は null のまま）として扱い、int として読めたときだけ値を持ち帰る
+            if (root["Version"] is JsonValue value && value.TryGetValue(out int parsed))
             {
                 version = parsed;
             }

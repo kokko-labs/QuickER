@@ -251,6 +251,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>テスト専用: 変更追跡器（一括置換で旧要素の追跡が終了することを観測するため）</summary>
     internal DiagramChangeTracker ChangeTrackerForTests => _changeTracker;
 
+    /// <summary>図の一括更新（<see cref="RunBulkDiagramUpdate"/>）の入れ子の深さ（0＝一括更新中でない）</summary>
+    private int _bulkDiagramUpdateDepth;
+
+    /// <summary>テスト専用: リレーション構成に基づく列ルール（<see cref="ApplyRelationshipColumnRules"/>）を適用した回数</summary>
+    internal int RelationshipRuleApplicationCountForTests { get; private set; }
+
     /// <summary>現在の図のターゲット DBMS（プロバイダ識別名。バッキングフィールド）</summary>
     private IDatabaseProvider _currentProvider;
 
@@ -402,32 +408,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _changeTracker.RunWithoutTracking(() =>
         {
-            // Clear() は Reset 通知で OldItems を持たず CollectionChanged 側の自動解除が効かないため、
-            // エンティティ・リレーションとも明示的に購読解除・追跡終了を行う専用経路を通す
-            ClearDiagramCollections();
-
-            foreach (var entity in entities)
+            // 要素を 1 つ足すたびの列ルール・ハイライト・ミニマップの再計算を止め、最後に 1 回だけ流す
+            RunBulkDiagramUpdate(() =>
             {
-                var entityLayout =
-                    layout is not null && layout.TryGetValue(entity.Id, out var found)
-                        ? found
-                        : new EntityLayout();
-                Entities.Add(new EntityViewModel(entity, entityLayout));
-            }
+                // Clear() は Reset 通知で OldItems を持たず CollectionChanged 側の自動解除が効かないため、
+                // エンティティ・リレーションとも明示的に購読解除・追跡終了を行う専用経路を通す
+                ClearDiagramCollections();
 
-            foreach (var relationship in relationships)
-            {
-                var src = Entities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
-                var tgt = Entities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
-
-                // 両端のエンティティを解決できないリレーションは不正データとして読み飛ばす
-                if (src is null || tgt is null)
+                foreach (var entity in entities)
                 {
-                    continue;
+                    var entityLayout =
+                        layout is not null && layout.TryGetValue(entity.Id, out var found)
+                            ? found
+                            : new EntityLayout();
+                    Entities.Add(new EntityViewModel(entity, entityLayout));
                 }
 
-                Relationships.Add(new RelationshipViewModel(relationship, src, tgt));
-            }
+                foreach (var relationship in relationships)
+                {
+                    var src = Entities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
+                    var tgt = Entities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
+
+                    // 両端のエンティティを解決できないリレーションは不正データとして読み飛ばす
+                    if (src is null || tgt is null)
+                    {
+                        continue;
+                    }
+
+                    Relationships.Add(new RelationshipViewModel(relationship, src, tgt));
+                }
+            });
 
             SelectedEntity = null;
             SelectedRelationship = null;
@@ -1728,6 +1738,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </remarks>
     public void ApplyRelationshipColumnRules(object? excludedSnapshotTarget = null)
     {
+        RelationshipRuleApplicationCountForTests++;
+
         _changeTracker.RunWithoutTracking(
             () =>
             {
@@ -2102,6 +2114,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
+        // 一括更新中は再計算を止める（終了時に RefreshAfterBulkDiagramUpdate が 1 回だけ流す）
+        if (_bulkDiagramUpdateDepth > 0)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(Entities));
         RefreshCanvasSize();
 
@@ -2120,6 +2138,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </remarks>
     private void DetachEntityViewModel(EntityViewModel entity)
     {
+        // 作成中のリレーションの始点が図から外れたら作成モードを解く（削除・Undo・図の一括置換の全経路）。
+        // 残すと図に無い VM を始点にリレーションを作れてしまう（線が追従せず、削除済みなら宙に浮いた参照を保存する）
+        if (ReferenceEquals(entity, PendingRelationshipSource))
+        {
+            CancelRelationshipMode();
+        }
+
         entity.PropertyChanged -= OnEntityPropertyChanged;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
         _changeTracker.DetachEntity(entity);
@@ -2177,6 +2202,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             DetachEntityViewModel(entity);
         }
+    }
+
+    /// <summary>図の要素をまとめて入れ替える処理を実行し、要素ごとの再計算を終了時の 1 回へまとめる</summary>
+    /// <param name="action">エンティティ・リレーションのコレクションを入れ替える処理</param>
+    /// <remarks>
+    /// <para>
+    /// 実行中はコレクション変更ハンドラの後段（列ルールの再適用・関連ハイライト・ミニマップ・キャンバスサイズ・
+    /// 変更通知）を止め、最外側の終了時に 1 回だけ流す。止めないとリレーションを 1 本足すたびに全列のルールを
+    /// 付け直すことになり、開く・取込・外部変更の自動再読込の時間がリレーション数×要素数で伸びる。
+    /// 購読の着脱と変更追跡の着脱は止めない（要素ごとに必要）。
+    /// </para>
+    /// <para>
+    /// 図を丸ごと入れ替える経路（<see cref="ReplaceDiagram"/> と <c>ImportSchemaCommand</c> の Execute / Undo）が使う。
+    /// </para>
+    /// </remarks>
+    internal void RunBulkDiagramUpdate(Action action)
+    {
+        _bulkDiagramUpdateDepth++;
+
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _bulkDiagramUpdateDepth--;
+
+            if (_bulkDiagramUpdateDepth == 0)
+            {
+                RefreshAfterBulkDiagramUpdate();
+            }
+        }
+    }
+
+    /// <summary>一括更新で止めていたコレクション変更の後段処理を 1 回だけ流す</summary>
+    private void RefreshAfterBulkDiagramUpdate()
+    {
+        ApplyRelationshipColumnRules();
+        OnPropertyChanged(nameof(Entities));
+        OnPropertyChanged(nameof(Relationships));
+        RefreshCanvasSize();
+        UpdateRelatedHighlights();
+        RecalculateMiniMap();
     }
 
     /// <summary>一意制約カードの構成列行で列が選び直されたときに、Undo 可能な差し替えとして確定させる</summary>
@@ -2240,6 +2308,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 relationship.ColumnPairSelectionEdited += OnRelationshipColumnPairSelectionEdited;
                 _changeTracker.AttachRelationship(relationship);
             }
+        }
+
+        // 一括更新中は再計算を止める（終了時に RefreshAfterBulkDiagramUpdate が 1 回だけ流す）
+        if (_bulkDiagramUpdateDepth > 0)
+        {
+            return;
         }
 
         ApplyRelationshipColumnRules();

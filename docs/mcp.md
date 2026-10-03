@@ -150,6 +150,8 @@ Before writing a `config` for `generate_csharp`, call `get_generation_config_sch
   If the GUI has no unsaved edits and the new content is readable, it reloads the file automatically (zoom and scroll position are preserved) and shows a brief status note.
   Content it cannot load (malformed JSON, something that is not a `DiagramDocument`, or a newer format version) is not loaded: the GUI keeps what it has and reports the problem.
   The confirmation dialog appears only when the GUI itself has unsaved changes and something else writes the file; in that case the GUI asks whether to reload (discarding your unsaved edits) or keep editing.
+  Further writes while that dialog is open do not stack another confirmation: after it closes, the GUI checks the file once more.
+  If the folder holding the diagram becomes briefly unreachable (a dropped network share or USB drive), the GUI keeps retrying the watch and, once the folder is back, picks up any change made in the meantime (the status bar says once that watching stopped and once that it resumed).
   A mouse gesture in progress (moving or resizing a table, or a rubber-band selection) is cancelled back to where it started on either path.
   Dialogs that are already open (database sync, query definitions, and so on) are **not** closed, however: they still show the diagram as it was when they opened, so confirming one after a reload can act on stale content.
   Keeping diagram files under git is still recommended so changes stay reviewable.

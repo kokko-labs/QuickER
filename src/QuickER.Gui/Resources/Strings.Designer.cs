@@ -658,6 +658,18 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Status_ExternalWatchInterrupted {
+            get {
+                return ResourceManager.GetString("Status_ExternalWatchInterrupted", resourceCulture);
+            }
+        }
+
+        public static string Status_ExternalWatchResumed {
+            get {
+                return ResourceManager.GetString("Status_ExternalWatchResumed", resourceCulture);
+            }
+        }
+
         public static string Toolbox_Title {
             get {
                 return ResourceManager.GetString("Toolbox_Title", resourceCulture);
@@ -2474,6 +2486,12 @@ namespace QuickER.Resources {
         public static string Crash_CopyDetails {
             get {
                 return ResourceManager.GetString("Crash_CopyDetails", resourceCulture);
+            }
+        }
+
+        public static string SingleInstance_RunningWithDifferentPrivileges {
+            get {
+                return ResourceManager.GetString("SingleInstance_RunningWithDifferentPrivileges", resourceCulture);
             }
         }
 

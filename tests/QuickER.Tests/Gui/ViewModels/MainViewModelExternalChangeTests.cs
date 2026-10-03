@@ -287,4 +287,112 @@ public sealed class MainViewModelExternalChangeTests : IDisposable
         vm2.IsDirty.Should().BeTrue("復元ダーティを引き継ぐ");
         dialogs.WarningConfirmMessages.Should().ContainSingle("起動時のダーティ外部変更は確認する");
     }
+
+    /// <summary>
+    /// ダーティ時の確認ダイアログの最中に次の外部変更が届いても確認が重ならず、
+    /// 「続行」で閉じた後に最新のディスクで 1 回だけ再評価して確認をもう 1 回出すことを検証する
+    /// </summary>
+    [Fact(DisplayName = "再入: 確認中に届いた外部変更は重ねず、続行の後にディスクで再評価する")]
+    public void Dirty_ChangeDuringConfirmation_IsDeferredAndReevaluatedAfterContinue()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = OpenClean(path, "Original", dialogs);
+        vm.AddEntityCommand.Execute(null);
+
+        var active = 0;
+        var maxActive = 0;
+        var injected = false;
+        dialogs.OnConfirmWarning = () =>
+        {
+            active++;
+            maxActive = Math.Max(maxActive, active);
+
+            // 1 枚目の確認の最中（入れ子のメッセージループ）に、別内容の書き込みと検知が届く
+            if (!injected)
+            {
+                injected = true;
+                var secondHash = WriteDiagram(path, "Second");
+                vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Modified, secondHash);
+                dialogs
+                    .WarningConfirmMessages.Should()
+                    .ContainSingle("処理中の再入は確認を重ねない");
+            }
+
+            active--;
+        };
+
+        var firstHash = WriteDiagram(path, "First");
+        vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Modified, firstHash);
+
+        maxActive.Should().Be(1, "確認ダイアログが入れ子で 2 枚重ならない");
+        dialogs
+            .WarningConfirmMessages.Should()
+            .HaveCount(2, "閉じた後に最新のディスク（Second）で 1 回だけ再評価して確認する");
+        vm.IsDirty.Should().BeTrue("どちらも続行を選んだので未保存変更は残る");
+    }
+
+    /// <summary>確認中に届いた外部変更は、再読込を選んだ場合は最新の内容に吸収され、確認が再度出ないことを検証する</summary>
+    [Fact(DisplayName = "再入: 確認中に届いた外部変更は、再読込を選べば再評価で確認を出さない")]
+    public void Dirty_ChangeDuringConfirmation_IsAbsorbedByReload()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = OpenClean(path, "Original", dialogs);
+        vm.AddEntityCommand.Execute(null);
+
+        dialogs.OnConfirmWarning = () =>
+        {
+            dialogs.OnConfirmWarning = null;
+            var secondHash = WriteDiagram(path, "Second");
+            vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Modified, secondHash);
+        };
+
+        var firstHash = WriteDiagram(path, "First");
+        vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Modified, firstHash);
+
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle("再読込が最新の内容を読み込んだので再評価は一致する");
+        vm.Entities.Should()
+            .ContainSingle(e => e.TableName == "Second", "再読込はディスクの最新を読む");
+        vm.IsDirty.Should().BeFalse();
+    }
+
+    /// <summary>最終既知ハッシュと一致する（既に反映済みの）変更は、確認も再読込もせず捨てることを検証する</summary>
+    [Fact(DisplayName = "反映済み: 最終既知ハッシュと同じ内容の変更は確認も再読込もしない")]
+    public void AlreadyReflectedHash_IsIgnored()
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = OpenClean(path, "Original", dialogs);
+        vm.AddEntityCommand.Execute(null);
+        var currentHash = DocumentContentHash.TryCompute(path);
+
+        vm.RaiseExternalChangeForTests(DocumentFileChangeKind.Modified, currentHash);
+
+        dialogs.WarningConfirmMessages.Should().BeEmpty("ディスクは最後に読み込んだ内容のまま");
+        vm.Entities.Should().HaveCount(2, "未保存の編集は捨てられない");
+        vm.IsDirty.Should().BeTrue();
+    }
+
+    /// <summary>監視の中断・再開の通知が、それぞれのステータス文言として表示されることを検証する</summary>
+    [Theory(DisplayName = "監視の中断・再開はステータスバーへ通知する")]
+    [InlineData(DocumentFileChangeKind.WatchInterrupted)]
+    [InlineData(DocumentFileChangeKind.WatchResumed)]
+    public void WatchStateChanges_AreShownInStatus(DocumentFileChangeKind kind)
+    {
+        var path = Path.Combine(_folder, "Doc.json");
+        var vm = CreateCleanBoundViewModel(path, "Original");
+
+        vm.RaiseExternalChangeForTests(kind, null);
+
+        vm.StatusMessage.Should()
+            .Be(
+                kind == DocumentFileChangeKind.WatchInterrupted
+                    ? Strings.Status_ExternalWatchInterrupted
+                    : Strings.Status_ExternalWatchResumed
+            );
+        vm.Entities.Should().ContainSingle(e => e.TableName == "Original", "図には触れない");
+    }
 }
