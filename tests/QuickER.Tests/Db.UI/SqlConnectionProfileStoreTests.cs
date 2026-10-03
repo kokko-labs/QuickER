@@ -1,5 +1,6 @@
 ﻿using System.IO;
 using System.Linq;
+using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Provider;
@@ -106,7 +107,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         var restored = store.LoadLastUsed();
         restored.Should().NotBeNull();
         restored!.Value.Profile.SavePassword.Should().Be(expected);
-        restored.Value.Password.Should().Be(expected ? password : string.Empty);
+        restored.Value.Password.Value.Should().Be(expected ? password : string.Empty);
     }
 
     /// <summary>
@@ -132,7 +133,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
 
         SecretExists(store, profile.Id).Should().BeFalse();
         store.LoadAll().Should().ContainSingle().Which.SavePassword.Should().BeFalse();
-        store.LoadPassword(profile.Id).Should().BeEmpty();
+        store.LoadPassword(profile.Id).Value.Should().BeEmpty();
     }
 
     /// <summary>Upsert で追加したプロファイルを LoadAll が名前順で返すことを検証する</summary>
@@ -208,12 +209,12 @@ public class SqlConnectionProfileStoreTests : IDisposable
         };
 
         store.Upsert(p, password: "secret");
-        store.LoadPassword(p.Id).Should().Be("secret");
+        store.LoadPassword(p.Id).Value.Should().Be("secret");
 
         store.Delete(p.Id);
 
         store.LoadAll().Should().BeEmpty();
-        store.LoadPassword(p.Id).Should().BeEmpty();
+        store.LoadPassword(p.Id).Value.Should().BeEmpty();
     }
 
     /// <summary>SavePassword=true で保存したパスワードが復号で同値復元できることを検証する</summary>
@@ -231,7 +232,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
 
         store.Upsert(p, password: "P@ssw0rd!日本語");
 
-        store.LoadPassword(p.Id).Should().Be("P@ssw0rd!日本語");
+        store.LoadPassword(p.Id).Value.Should().Be("P@ssw0rd!日本語");
     }
 
     /// <summary>SavePassword を false にして Upsert すると既存パスワードが削除されることを検証する</summary>
@@ -248,12 +249,12 @@ public class SqlConnectionProfileStoreTests : IDisposable
         };
 
         store.Upsert(p, password: "secret");
-        store.LoadPassword(p.Id).Should().Be("secret");
+        store.LoadPassword(p.Id).Value.Should().Be("secret");
 
         p.SavePassword = false;
         store.Upsert(p, password: "secret");
 
-        store.LoadPassword(p.Id).Should().BeEmpty();
+        store.LoadPassword(p.Id).Value.Should().BeEmpty();
     }
 
     /// <summary>Dbms フィールドを欠くプロファイルを読み込むと sqlserver とみなされることを検証する</summary>
@@ -481,7 +482,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         lastUsed.Value.Profile.Database.Should().Be("SalesDb");
         lastUsed.Value.Profile.UserId.Should().Be("sa");
         lastUsed.Value.Profile.TrustServerCertificate.Should().BeFalse();
-        lastUsed.Value.Password.Should().Be("secret");
+        lastUsed.Value.Password.Value.Should().Be("secret");
     }
 
     /// <summary>TLS 要求水準がプロファイルの保存・読込で保たれることを検証する</summary>
@@ -713,7 +714,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         {
             store.LoadAll().Should().BeEmpty();
             store.LoadLastUsed().Should().BeNull();
-            store.LoadPassword(profile.Id).Should().BeEmpty();
+            store.LoadPassword(profile.Id).Value.Should().BeEmpty();
         }
     }
 
@@ -758,5 +759,155 @@ public class SqlConnectionProfileStoreTests : IDisposable
         File.ReadAllText(store.CorruptBackupPath)
             .Should()
             .Be("壊れた 1 回目", "最も古い退避を残す");
+    }
+
+    // ---------------- 1-9 の対応（パスワードの読み取り分類・名前だけの変更・null の一覧） ----------------
+
+    /// <summary>プロファイルの暗号ファイルのパス</summary>
+    private static string SecretFile(SqlConnectionProfileStore store, Guid id) =>
+        Path.Combine(store.SecretsFolder, id.ToString("N") + ".dat");
+
+    /// <summary>パスワードを保存したプロファイルを 1 件用意する</summary>
+    private static SqlConnectionProfile SeedWithPassword(
+        SqlConnectionProfileStore store,
+        string name,
+        string password
+    )
+    {
+        var profile = new SqlConnectionProfile
+        {
+            Name = name,
+            Server = "srv",
+            SavePassword = true,
+        };
+        store.Upsert(profile, password);
+        return profile;
+    }
+
+    /// <summary>
+    /// 保存済みパスワードの読み取りは「読めた」「無い」「読めない」を区別して返す（1-9 #2）。
+    /// </summary>
+    /// <remarks>
+    /// 「読めない」を「無い」と同じ空文字へ畳むと、その空値を書き戻した保存が暗号ファイルを消す。
+    /// 読めない暗号ファイルは、DPAPI で復号できないバイト列で作る（別ユーザー・別端末で暗号化されたものの代役）。
+    /// </remarks>
+    [Fact(DisplayName = "LoadPassword: 読めた・無い・読めないを区別して返す")]
+    public void LoadPassword_DistinguishesLoadedMissingAndUnreadable()
+    {
+        var store = new SqlConnectionProfileStore(_tempFolder, useDpapi: true);
+        var loaded = SeedWithPassword(store, "読める", "secret");
+        var unreadable = SeedWithPassword(store, "読めない", "secret");
+        File.WriteAllBytes(SecretFile(store, unreadable.Id), new byte[] { 1, 2, 3, 4 });
+
+        store
+            .LoadPassword(loaded.Id)
+            .Should()
+            .Be(new SavedPassword(SavedPasswordStatus.Loaded, "secret"));
+        store.LoadPassword(Guid.NewGuid()).Should().Be(SavedPassword.Missing);
+        store.LoadPassword(unreadable.Id).Should().Be(SavedPassword.Unreadable);
+        File.Exists(SecretFile(store, unreadable.Id)).Should().BeTrue("読めないだけで消さない");
+    }
+
+    /// <summary>ロックされた暗号ファイルも「読めない」に分類する（一時的なロックの代表）</summary>
+    [Fact(DisplayName = "LoadPassword: ロックされた暗号ファイルは読めないに分類する")]
+    public void LoadPassword_LockedSecret_IsUnreadable()
+    {
+        var store = CreateStore();
+        var profile = SeedWithPassword(store, "本番DB", "secret");
+
+        using (
+            new FileStream(
+                SecretFile(store, profile.Id),
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.None
+            )
+        )
+        {
+            store.LoadPassword(profile.Id).Should().Be(SavedPassword.Unreadable);
+        }
+    }
+
+    /// <summary>
+    /// 名前だけの変更は、対象の暗号ファイルを読みも書きもしない（1-9 #2）。
+    /// </summary>
+    [Fact(DisplayName = "Rename: 名前だけを変え、対象の暗号ファイルには触れない")]
+    public void Rename_ChangesNameOnly_AndLeavesSecretUntouched()
+    {
+        var store = new SqlConnectionProfileStore(_tempFolder, useDpapi: true);
+        var profile = SeedWithPassword(store, "本番DB", "secret");
+        var garbage = new byte[] { 5, 6, 7, 8 };
+        File.WriteAllBytes(SecretFile(store, profile.Id), garbage);
+
+        store.Rename(profile.Id, "本番DB（新）").Should().BeTrue();
+
+        var stored = store.LoadAll().Should().ContainSingle().Subject;
+        stored.Name.Should().Be("本番DB（新）");
+        stored.SavePassword.Should().BeTrue();
+        File.ReadAllBytes(SecretFile(store, profile.Id)).Should().Equal(garbage);
+    }
+
+    /// <summary>置き換えを伴う名前の変更は、置き換え先を一覧と暗号ファイルから消す</summary>
+    [Fact(DisplayName = "Rename: 置き換え先は一覧と暗号ファイルから消える")]
+    public void Rename_WithReplacedProfile_RemovesIt()
+    {
+        var store = CreateStore();
+        var target = SeedWithPassword(store, "本番DB", "secret");
+        var replaced = SeedWithPassword(store, "本番DB（東京）", "tokyo");
+
+        store.Rename(target.Id, "本番DB（東京）", replaced.Id).Should().BeTrue();
+
+        store.LoadAll().Should().ContainSingle().Which.Id.Should().Be(target.Id);
+        File.Exists(SecretFile(store, replaced.Id)).Should().BeFalse();
+        store.LoadPassword(target.Id).Value.Should().Be("secret");
+    }
+
+    /// <summary>対象が別のプログラムに消されていたら、何も書かずに false を返す</summary>
+    [Fact(DisplayName = "Rename: 対象が無ければ何も書かず false を返す")]
+    public void Rename_MissingTarget_ReturnsFalseWithoutWriting()
+    {
+        var store = CreateStore();
+        var other = SeedWithPassword(store, "本番DB", "secret");
+        var before = File.ReadAllText(store.ConnectionsPath);
+
+        store.Rename(Guid.NewGuid(), "新しい名前", other.Id).Should().BeFalse();
+
+        File.ReadAllText(store.ConnectionsPath).Should().Be(before);
+        File.Exists(SecretFile(store, other.Id)).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 一覧が null・要素が null の connections.json は、空の一覧・null 要素なしとして読む（1-9 #11）。
+    /// </summary>
+    /// <remarks>保存の起点としても同じく読めて、書き戻すと null 要素は消える</remarks>
+    [Fact(DisplayName = "一覧や要素が null の connections.json は揃えて読み、保存もできる")]
+    public void NullProfilesAndElements_AreNormalized()
+    {
+        var store = CreateStore();
+        File.WriteAllText(
+            store.ConnectionsPath,
+            "{\"profiles\": [null, {\"name\": \"本番DB\"}, null]}"
+        );
+
+        store.LoadAll().Should().ContainSingle().Which.Name.Should().Be("本番DB");
+
+        store.Upsert(new SqlConnectionProfile { Name = "開発" }, string.Empty);
+
+        store.LoadAll().Select(p => p.Name).Should().BeEquivalentTo(new[] { "本番DB", "開発" });
+        using (var written = JsonDocument.Parse(File.ReadAllText(store.ConnectionsPath)))
+        {
+            written
+                .RootElement.GetProperty("profiles")
+                .EnumerateArray()
+                .Should()
+                .OnlyContain(e => e.ValueKind == JsonValueKind.Object, "null 要素は書き戻さない");
+        }
+
+        File.Exists(store.CorruptBackupPath)
+            .Should()
+            .BeFalse("正しい JSON なので壊れたものとして退避しない");
+
+        File.WriteAllText(store.ConnectionsPath, "{\"profiles\": null}");
+        store.LoadAll().Should().BeEmpty();
     }
 }

@@ -1,7 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -63,8 +62,34 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     private string _statusMessage = string.Empty;
 
     /// <summary>差分計算・実行中かどうか</summary>
+    /// <remarks>
+    /// 立っている間は再計算・実行・全選択・全解除を受け付けない。再計算中に実行すると古いスクリプトが流れ、
+    /// 実行中に再計算すると実行中の DB を読み直すことになる。画面のボタンの無効化（CanExecute）に加えて、
+    /// 各コマンドの先頭でも同じ条件で止める（直接 <c>ExecuteAsync</c> を呼ぶ経路は CanExecute を通らない）。
+    /// </remarks>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RefreshCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ExecuteCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SelectAllCommand))]
+    [NotifyCanExecuteChangedFor(nameof(DeselectAllCommand))]
     private bool _isBusy;
+
+    /// <summary>同期スクリプトを DB に対して実行している最中か（このあいだはダイアログを閉じられない）</summary>
+    /// <remarks>
+    /// 閉じると呼び出し側へ制御が戻り、DDL の実行がダイアログの外で走り続ける。止めるのは実行器を
+    /// 待っている間だけで、実行後の再計算（DB を読むだけ）の最中は閉じてよい。
+    /// × ボタンでの閉じ方はビュー（<see cref="SchemaSyncDialog"/>）がこのフラグを見て取り消す。
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CloseCommand))]
+    private bool _isExecuting;
+
+    /// <summary>全選択・全解除で項目の選択をまとめて変えている最中か（項目ごとのプレビュー再生成を抑える）</summary>
+    /// <remarks>
+    /// 項目ごとに計画とスクリプトを作り直すと、N 件の一括変更で N 回の全再生成＝O(N²) になる。
+    /// 一括変更の間は抑え、最後に 1 回だけ作り直す。
+    /// </remarks>
+    private bool _bulkSelecting;
 
     /// <summary>差分が計算済みかどうか</summary>
     [ObservableProperty]
@@ -104,11 +129,41 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         _dialogs = dialogService ?? new MessageBoxDialogService();
     }
 
+    /// <summary>差分計算・実行中でないか（再計算・実行・全選択・全解除を受け付けるか）</summary>
+    private bool CanOperate() => !IsBusy;
+
+    /// <summary>同期の実行中でないか（ダイアログを閉じてよいか）</summary>
+    private bool CanClose() => !IsExecuting;
+
     /// <summary>DB スキーマを取り込み、目標スキーマとの差分を再計算する</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanOperate))]
     private async Task RefreshAsync()
     {
+        if (IsBusy)
+        {
+            return;
+        }
+
         IsBusy = true;
+
+        try
+        {
+            await RefreshCoreAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>差分の再計算の本体（<see cref="IsBusy"/> を触らない＝実行の後の取り直しからも呼ぶ）</summary>
+    /// <remarks>
+    /// 失敗したときは前回の差分・スクリプト・計画・取込結果をすべて捨てる。残すと、回線断などで
+    /// 取り直せなかったのに古いスクリプトを実行できてしまう（MySQL / Oracle の部分適用の後に取り直しが
+    /// 失敗した場合、回線が戻ってから古いスクリプトを再実行することになる）。
+    /// </remarks>
+    private async Task RefreshCoreAsync()
+    {
         StatusMessage = Strings.SchemaSync_Fetching;
 
         try
@@ -169,7 +224,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             {
                 entry.PropertyChanged += (_, e) =>
                 {
-                    if (e.PropertyName == nameof(SchemaDiffItem.IsSelected))
+                    if (e.PropertyName == nameof(SchemaDiffItem.IsSelected) && !_bulkSelecting)
                     {
                         UpdatePreview();
                     }
@@ -179,19 +234,33 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             }
 
             HasDiff = DiffItems.Count > 0;
-            UpdatePreview();
-            StatusMessage = HasDiff
-                ? string.Format(Strings.SchemaSync_DiffCount, DiffItems.Count)
-                : Strings.SchemaSync_NoDiff;
+
+            // プレビュー生成が失敗したときは、その理由（ステータス行）を件数表示で上書きしない
+            if (TryUpdatePreview())
+            {
+                StatusMessage = HasDiff
+                    ? string.Format(Strings.SchemaSync_DiffCount, DiffItems.Count)
+                    : Strings.SchemaSync_NoDiff;
+            }
         }
         catch (Exception ex)
         {
+            ClearDiffState();
             StatusMessage = string.Format(Strings.SchemaSync_DiffFailed, ex.Message);
         }
-        finally
-        {
-            IsBusy = false;
-        }
+    }
+
+    /// <summary>差分・スクリプト・計画・取込結果を空にする（取り直しに失敗したとき＝実行できない状態へ戻す）</summary>
+    private void ClearDiffState()
+    {
+        DiffItems.Clear();
+        HasDiff = false;
+        _liveEntities = [];
+        _liveRelationships = [];
+        _liveAuxiliaryObjects = [];
+        _liveTableCreateSql = new Dictionary<string, string>();
+        _currentPlan = new SyncPlan();
+        ScriptPreview = string.Empty;
     }
 
     /// <summary>直近の取込結果から、計画組み立て用の live スキーマ入力を作る</summary>
@@ -211,7 +280,10 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// 取込結果を <see cref="SyncPlanContext"/> として常に渡すことで、未取込時も空の live を土台に
     /// 空プレビューへ落ち着かせる（DiffItems も Refresh 前は空のため実質何も生成しない）。
     /// </remarks>
-    public void UpdatePreview()
+    public void UpdatePreview() => TryUpdatePreview();
+
+    /// <summary>計画とスクリプトプレビューを作り直し、成功したかを返す（失敗の理由はステータス行へ出す）</summary>
+    private bool TryUpdatePreview()
     {
         // 計画組み立て・スクリプト生成は図の内容次第で失敗し得る（型表記・名前の入口検証など）。
         // このメソッドはチェックボックスの選択変更から直接呼ばれるため、例外を外へ出すと
@@ -224,89 +296,66 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 BuildPlanContext()
             );
             ScriptPreview = _provider.SyncScriptBuilder.Build(_currentPlan);
+            return true;
         }
         catch (Exception ex)
         {
             _currentPlan = new SyncPlan();
             ScriptPreview = string.Empty;
             StatusMessage = string.Format(Strings.SchemaSync_PreviewFailed, ex.Message);
+            return false;
         }
     }
 
     /// <summary>選択可能なすべての差分を選択する</summary>
-    [RelayCommand]
-    private void SelectAll()
-    {
-        foreach (var i in DiffItems.Where(i => i.IsSelectable))
-        {
-            i.IsSelected = true;
-        }
-
-        UpdatePreview();
-    }
+    [RelayCommand(CanExecute = nameof(CanOperate))]
+    private void SelectAll() => SetAllSelectable(true);
 
     /// <summary>選択可能なすべての差分の選択を解除する</summary>
-    [RelayCommand]
-    private void DeselectAll()
+    [RelayCommand(CanExecute = nameof(CanOperate))]
+    private void DeselectAll() => SetAllSelectable(false);
+
+    /// <summary>選択可能なすべての差分の選択をまとめて変え、プレビューを 1 回だけ作り直す</summary>
+    private void SetAllSelectable(bool selected)
     {
-        foreach (var i in DiffItems.Where(i => i.IsSelectable))
+        if (IsBusy)
         {
-            i.IsSelected = false;
+            return;
+        }
+
+        _bulkSelecting = true;
+
+        try
+        {
+            foreach (var i in DiffItems.Where(i => i.IsSelectable))
+            {
+                i.IsSelected = selected;
+            }
+        }
+        finally
+        {
+            _bulkSelecting = false;
         }
 
         UpdatePreview();
     }
 
     /// <summary>選択中の差分スクリプトを DB に対し実行する（破壊的変更を含む場合は警告確認する）</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanOperate))]
     private async Task ExecuteAsync()
     {
+        if (IsBusy)
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(ScriptPreview))
         {
             StatusMessage = Strings.SchemaSync_NoScript;
             return;
         }
 
-        // テーブルを作り直して全行データを移し替える再構築（CreateOnly=false）を含む場合は、
-        // 対象テーブルを列挙した専用文言に切り替える。新規テーブル作成のみ（CreateOnly=true）は
-        // データ移し替えを伴わないため対象外とする
-        var rebuildTables = _currentPlan
-            .Rebuilds.Where(r => !r.CreateOnly)
-            .Select(r => r.TableName)
-            .ToList();
-
-        // 削除・型変更など破壊的変更を含む場合は、確認文言を切り替えて誤実行を防ぐ
-        var destructive = DiffItems.Any(i => i.IsSelected && i.IsDestructive);
-
-        // 優先順位: 再構築あり ＞ 破壊的変更あり ＞ 通常
-        string msg;
-
-        if (rebuildTables.Count > 0)
-        {
-            // 対象テーブルは 1 行 1 テーブルの箇条書きで列挙する（横並びだと多テーブル時に読みづらいため）
-            var tableList = string.Join(Environment.NewLine, rebuildTables.Select(t => "  • " + t));
-            msg = string.Format(
-                Strings.SchemaSync_ExecuteConfirmRebuild,
-                SyncTargetDisplayName,
-                tableList
-            );
-        }
-        else if (destructive)
-        {
-            msg = string.Format(
-                Strings.SchemaSync_ExecuteConfirmDestructive,
-                SyncTargetDisplayName
-            );
-        }
-        else
-        {
-            msg = string.Format(Strings.SchemaSync_ExecuteConfirm, SyncTargetDisplayName);
-        }
-
-        // 計画側で検出した注意事項（FK 自動再作成の失敗リスク・複合 FK による再構築ブロック）を追記する
-        msg += BuildPlanWarningSuffix();
-
-        if (!_dialogs.ConfirmWarning(msg, Strings.Common_Confirm))
+        if (!ConfirmExecution())
         {
             return;
         }
@@ -316,11 +365,44 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
         try
         {
-            var result = await _provider
-                .SyncExecutor.ExecuteAsync(_settings, ScriptPreview)
-                .ConfigureAwait(true);
+            SchemaSyncResult? result = null;
+            Exception? failure = null;
 
-            if (result.Committed)
+            // 閉じられないのは実行器を待っている間だけ（後の取り直しは DB を読むだけなので閉じてよい。
+            // 成功して差分が無くなったときの自動クローズもこの外で行う）。例外は捕まえて外で扱う＝
+            // 失敗のモーダルと取り直しを、閉じられない状態のまま出さない
+            IsExecuting = true;
+
+            try
+            {
+                result = await _provider
+                    .SyncExecutor.ExecuteAsync(_settings, ScriptPreview)
+                    .ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                IsExecuting = false;
+            }
+
+            if (failure is not null)
+            {
+                // 実行器が例外で抜けるのは接続断などの途中でも起き、MySQL / Oracle では部分適用の後かもしれない。
+                // Committed=false の失敗と同じく、モーダルで知らせてから取り直す（取り直しも失敗すれば
+                // 差分とスクリプトが空になり、古いスクリプトを再実行できなくなる）
+                StatusMessage = string.Format(Strings.SchemaSync_ExecuteError, failure.Message);
+                _dialogs.ShowError(
+                    Strings.SchemaSync_ExecuteFailedMessage + "\n" + failure.Message,
+                    Strings.Common_Error
+                );
+                await RefreshCoreAsync().ConfigureAwait(true);
+                return;
+            }
+
+            if (result!.Committed)
             {
                 // ダイアログ内は簡潔な状態表示、モーダルは結果の要約（実行バッチ数）と役割を分ける。
                 // 同じ文字列を 2 箇所へ出すと重複した通知に見えるため、文言を分けて重ねる意味を持たせる
@@ -330,7 +412,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                     Strings.Common_Complete
                 );
                 // 適用後の最新状態を反映するため差分を再計算する
-                await RefreshAsync().ConfigureAwait(true);
+                await RefreshCoreAsync().ConfigureAwait(true);
 
                 // 差分が完全に無くなった（案内項目すら残らない＝図と DB が一致した）ときは、
                 // 役目を終えたダイアログを自動で閉じる
@@ -352,7 +434,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
                 // 部分適用が起こりうる方言（MySQL / Oracle）では、失敗しても DB が変わっていることがある。
                 // 古い差分を出し続けないよう、エラーを読み終えた（＝モーダルを閉じた）後に取り直す
-                await RefreshAsync().ConfigureAwait(true);
+                await RefreshCoreAsync().ConfigureAwait(true);
             }
         }
         catch (Exception ex)
@@ -365,21 +447,79 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// 実行計画の警告（<see cref="SyncPlan.Warnings"/>）を、実行確認へ追記する文言へ整形する。
-    /// </summary>
+    /// <summary>実行前の確認を出し、続行してよいかを返す</summary>
     /// <remarks>
-    /// 警告が無ければ空文字を返す（＝確認文言に追記しない）。文言は UI 言語追従（resx）で、
-    /// スクリプト内コメント（英語固定）とは別系統である点に注意。
+    /// <para>
+    /// 本文は要約（再構築あり ＞ 破壊的変更あり ＞ 通常 の優先順で文言を選ぶ）。再構築するテーブルの一覧と
+    /// 計画の警告は判断材料なので、あるときは <see cref="IDialogService.ConfirmWarningDetails"/> の
+    /// スクロールできる詳細領域へ畳まずに全件載せる。標準 MessageBox へ連結すると、件数が多いときに
+    /// OK / キャンセルが画面の外へ出る（もっとも破壊的な確認でそれが起きる）。
+    /// 一覧が無い確認は従来どおり単文の <see cref="IDialogService.ConfirmWarning"/>。
+    /// </para>
+    /// <para>
+    /// 再構築（<c>CreateOnly=false</c>）はテーブルを作り直して全行データを移し替える。新規テーブル作成のみ
+    /// （<c>CreateOnly=true</c>）はデータの移し替えを伴わないため対象外。
+    /// </para>
     /// </remarks>
-    private string BuildPlanWarningSuffix()
+    private bool ConfirmExecution()
     {
-        if (_currentPlan.Warnings.Count == 0)
+        var rebuildTables = _currentPlan
+            .Rebuilds.Where(r => !r.CreateOnly)
+            .Select(r => r.TableName)
+            .ToList();
+
+        // 削除・型変更など破壊的変更を含む場合は、確認文言を切り替えて誤実行を防ぐ
+        var destructive = DiffItems.Any(i => i.IsSelected && i.IsDestructive);
+
+        string summary;
+
+        if (rebuildTables.Count > 0)
         {
-            return string.Empty;
+            summary = string.Format(
+                Strings.SchemaSync_ExecuteConfirmRebuild,
+                SyncTargetDisplayName,
+                rebuildTables.Count
+            );
+        }
+        else if (destructive)
+        {
+            summary = string.Format(
+                Strings.SchemaSync_ExecuteConfirmDestructive,
+                SyncTargetDisplayName
+            );
+        }
+        else
+        {
+            summary = string.Format(Strings.SchemaSync_ExecuteConfirm, SyncTargetDisplayName);
         }
 
-        var sb = new StringBuilder();
+        var details = BuildConfirmDetails(rebuildTables);
+
+        return details.Length == 0
+            ? _dialogs.ConfirmWarning(summary, Strings.Common_Confirm)
+            : _dialogs.ConfirmWarningDetails(summary, details, Strings.Common_Confirm);
+    }
+
+    /// <summary>
+    /// 実行確認の詳細領域へ載せる判断材料（再構築するテーブルの一覧と、計画の警告）を整形する。
+    /// </summary>
+    /// <remarks>
+    /// どちらも無ければ空文字を返す（＝単文の確認にする）。文言は UI 言語追従（resx）で、
+    /// スクリプト内コメント（英語固定）とは別系統である点に注意。
+    /// </remarks>
+    private string BuildConfirmDetails(IReadOnlyList<string> rebuildTables)
+    {
+        var sections = new List<string>();
+
+        if (rebuildTables.Count > 0)
+        {
+            // 対象テーブルは 1 行 1 テーブルの箇条書きで列挙する（横並びだと多テーブル時に読みづらいため）
+            sections.Add(
+                Strings.SchemaSync_ExecuteConfirmRebuildTablesHeader
+                    + Environment.NewLine
+                    + BulletList(rebuildTables)
+            );
+        }
 
         // 種別を宣言順に回して網羅 switch で文言化する。個別に拾う形だと、将来 SyncPlanWarningKind へ
         // 足した種別が黙って落ちる（取込警告の文言化と同じ規則＝未知の種別は例外にする）
@@ -387,17 +527,13 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         {
             var warnings = _currentPlan.Warnings.Where(w => w.Kind == kind).ToList();
 
-            if (warnings.Count == 0)
+            if (warnings.Count > 0)
             {
-                continue;
+                sections.Add(Describe(kind, warnings));
             }
-
-            sb.Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .Append(Describe(kind, warnings));
         }
 
-        return sb.ToString();
+        return string.Join(Environment.NewLine + Environment.NewLine, sections);
     }
 
     /// <summary>1 種別ぶんの警告を、実行確認へ追記する文言へ整形する</summary>
@@ -438,6 +574,15 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         string.Join(Environment.NewLine, items.Select(item => "  • " + item));
 
     /// <summary>ダイアログを閉じる</summary>
-    [RelayCommand]
-    private void Close() => CloseAction?.Invoke(true);
+    /// <remarks>同期の実行中は閉じない（<see cref="IsExecuting"/>。Esc もこのコマンドのボタンを経由する）</remarks>
+    [RelayCommand(CanExecute = nameof(CanClose))]
+    private void Close()
+    {
+        if (IsExecuting)
+        {
+            return;
+        }
+
+        CloseAction?.Invoke(true);
+    }
 }

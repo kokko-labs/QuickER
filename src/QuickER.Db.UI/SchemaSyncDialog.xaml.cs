@@ -20,6 +20,16 @@ public partial class SchemaSyncDialog : Window
         };
 
         DataContext = ViewModel;
+
+        // 同期の実行中は × ボタンなどでも閉じない（閉じると DDL の実行がダイアログの外で走り続ける）
+        Closing += (_, e) =>
+        {
+            if (ViewModel.IsExecuting)
+            {
+                e.Cancel = true;
+            }
+        };
+
         // 表示完了時点で DB との差分を取得し、初期表示に反映する
         Loaded += async (_, _) => await ViewModel.RefreshCommand.ExecuteAsync(null);
     }

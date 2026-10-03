@@ -1,5 +1,4 @@
 using System.IO;
-using System.Text;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -164,23 +163,10 @@ internal sealed class DiagramImportService(
         );
     }
 
-    /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
-    private bool HasSameStructure(
-        IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships
-    )
-    {
-        var current = host.BuildModel();
-        var currentSignature = SchemaSignature.Compute(current.Entities, current.Relationships);
-        var newSignature = SchemaSignature.Compute(entities, relationships);
-
-        return currentSignature == newSignature;
-    }
-
     /// <summary>置換で失うものがある場合のみ確認ダイアログを表示する（Mermaid / DBML の丸ごと置換用）</summary>
     /// <remarks>
     /// 失うものが無い（<see cref="IDiagramTransferHost.HasNothingToLose"/>）か、構造が同一で失う中身も
-    /// 無いときは確認なしで続行する。構造署名（<see cref="HasSameStructure"/>）は名前付きクエリと
+    /// 無いときは確認なしで続行する。構造署名（<see cref="DiagramReplacementCheck.HasSameStructure"/>）は名前付きクエリと
     /// 未保存の編集内容（手配置レイアウトを含む）を見ないため、署名一致だけを根拠に無確認で置換すると
     /// それらが無言で消える。クエリがある場合は削除件数を確認メッセージへ付加する
     /// （マージ取込の壊れクエリ列挙と同じ流儀）。
@@ -194,7 +180,15 @@ internal sealed class DiagramImportService(
     {
         if (
             host.HasNothingToLose
-            || (host.QueryCount == 0 && !host.IsDirty && HasSameStructure(entities, relationships))
+            || (
+                host.QueryCount == 0
+                && !host.IsDirty
+                && DiagramReplacementCheck.HasSameStructure(
+                    host.BuildModel(),
+                    entities,
+                    relationships
+                )
+            )
         )
         {
             return true;
@@ -216,56 +210,37 @@ internal sealed class DiagramImportService(
     /// <summary>マージ取込用の置換確認（構造同一かつ失うものが無ければ無確認・失うものは内訳を付加する）</summary>
     /// <remarks>
     /// マージ取込はクエリ・レイアウトを温存するため、構造が同一なら「クエリ・レイアウトは失われない」。
-    /// ただし構造署名（<see cref="HasSameStructure"/>）はテーブル・列の説明・Memo を含まないため、
-    /// 署名一致だけを根拠に無確認で続行すると未保存の説明・Memo が取込値で無言のうちに消える。
-    /// 実差分の件数（<see cref="DiagramMergeResult.DescriptionOverwriteCount"/>）を条件へ加えてこれを防ぐ。
+    /// 確認を省く条件は DB 取込・C# コードの取込と共有の <see cref="DiagramReplacementCheck.CanSkipConfirmation"/>
+    /// （構造署名は説明・Memo を含まないため、説明・Memo の上書き件数も見る）。
     /// </remarks>
     /// <returns>置換を続行してよい場合 true</returns>
     private bool ConfirmMergedReplacement(DiagramMergeResult merged, string message)
     {
-        var structurallySame =
-            host.HasNothingToLose || HasSameStructure(merged.Entities, merged.Relationships);
-
-        // 構造同一かつ壊れクエリ・説明/Memo の上書きなしなら無確認で続行する
         if (
-            structurallySame
-            && merged.BrokenQueries.Count == 0
-            && merged.DescriptionOverwriteCount == 0
+            DiagramReplacementCheck.CanSkipConfirmation(
+                host.HasNothingToLose,
+                host.BuildModel(),
+                merged,
+                merged.Relationships
+            )
         )
         {
             return true;
         }
 
         // 失うものがあれば内訳（削除対象のクエリ名・上書き件数）を確認メッセージへ付加する（キャンセルで取込中止）
-        var builder = new StringBuilder(message);
-
-        if (merged.BrokenQueries.Count > 0)
-        {
-            builder
-                .Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .AppendFormat(
-                    Strings.Import_BrokenQueriesWarning,
-                    // 件数が多いとダイアログが縦に伸びてボタンが画面外へ出るため、上限で畳む
-                    DialogItemList.Format(
-                        merged.BrokenQueries.Select(query => "- " + query.Name).ToList(),
-                        Strings.Common_MoreItems
-                    )
-                );
-        }
-
-        if (merged.DescriptionOverwriteCount > 0)
-        {
-            builder
-                .Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .AppendFormat(
-                    Strings.Import_DescriptionOverwriteWarning,
-                    merged.DescriptionOverwriteCount
-                );
-        }
+        var fullMessage = ReplacementLossMessage.Build(
+            message,
+            merged.BrokenQueries.Select(query => query.Name).ToList(),
+            merged.DescriptionOverwriteCount,
+            new ReplacementLossTexts(
+                Strings.Import_BrokenQueriesWarning,
+                Strings.Import_DescriptionOverwriteWarning,
+                Strings.Common_MoreItems
+            )
+        );
 
         // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
-        return dialogs.ConfirmDiscard(host.IsDirty, builder.ToString(), Strings.Common_Confirm);
+        return dialogs.ConfirmDiscard(host.IsDirty, fullMessage, Strings.Common_Confirm);
     }
 }

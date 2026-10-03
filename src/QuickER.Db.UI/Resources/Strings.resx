@@ -247,6 +247,24 @@
   <data name="DbConnection_ProfileStoreUnavailable" xml:space="preserve">
     <value>Could not read the saved connections file, so nothing was changed. Another program may be using it. Try again in a moment.</value>
   </data>
+  <data name="DbConnection_ProfileWriteFailed" xml:space="preserve">
+    <value>Could not write the saved connections. The change may have been applied only partly, so the list was reloaded from the file: {0}</value>
+  </data>
+  <data name="DbConnection_ProfileNotFound" xml:space="preserve">
+    <value>Profile '{0}' was not found. Another program may have deleted it. The list was reloaded.</value>
+  </data>
+  <data name="DbConnection_ProfileLoadedPasswordUnreadable" xml:space="preserve">
+    <value>Loaded profile '{0}', but its saved password could not be read, so the password field is empty. Enter the password again.</value>
+  </data>
+  <data name="DbConnection_RestoredPasswordUnreadable" xml:space="preserve">
+    <value>Restored the previous connection settings, but the saved password could not be read, so the password field is empty.</value>
+  </data>
+  <data name="DbConnection_SaveRefusedPasswordUnreadable" xml:space="preserve">
+    <value>Not saved: the saved password of this profile could not be read, and saving with an empty password field would delete it. Enter the password, or clear the password "Save" check box, and then save.</value>
+  </data>
+  <data name="DbConnection_PortInvalid" xml:space="preserve">
+    <value>Leave the port empty to use the default, or enter an integer from 1 to 65535.</value>
+  </data>
   <data name="DbConnection_SqliteFileFilter" xml:space="preserve">
     <value>SQLite Database (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|All Files (*.*)|*.*</value>
   </data>
@@ -308,11 +326,12 @@
     <value>Run the script against {0}. Are you sure?</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmRebuild" xml:space="preserve">
-    <value>The following tables will be synchronized by recreating the table and copying all rows:
-
-{1}
+    <value>{1} table(s) will be synchronized by recreating the table and copying all rows (listed below).
 
 Do you want to run this against {0}?</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmRebuildTablesHeader" xml:space="preserve">
+    <value>Tables to recreate:</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyRebuildRisk" xml:space="preserve">
     <value>Note: {0} foreign key(s) will be dropped and recreated automatically because the primary key they reference changes. If the referenced column is no longer a candidate key, recreation fails; on MySQL / Oracle the change may be left partially applied (the foreign key gone while the primary key is already changed).</value>

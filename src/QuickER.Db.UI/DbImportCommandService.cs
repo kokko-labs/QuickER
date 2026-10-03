@@ -1,4 +1,3 @@
-using System.Text;
 using QuickER.Db.UI.Resources;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
@@ -13,9 +12,8 @@ namespace QuickER.Db.UI;
 /// <remarks>
 /// ER 図の取得・置換・プロバイダ解決はホスト契約（<see cref="IErDiagramHost"/>）越しに行い、
 /// 接続ダイアログ提示は <see cref="IDbConnectionDialogPresenter"/> のシーム越しに行う。
-/// 置換確認ロジック（<see cref="ConfirmDiagramReplacement"/> / <see cref="HasSameStructure"/>）は、
-/// ファイル取込で使う <c>MainViewModel</c> 側の同名メソッドと同一の署名比較ロジックを本サービスへ移植した
-/// （ファイル取込は VM 側、DB 取込は本サービスと入口が分かれるため少量の重複を許容する）。
+/// 置換確認の判定は <see cref="DiagramReplacementCheck"/>、確認文の内訳は <see cref="ReplacementLossMessage"/> を
+/// C# コードの取込・Excel 定義書のマージ取込と共有する（文言だけが各機能の resx にある）。
 /// </remarks>
 public sealed class DbImportCommandService
 {
@@ -76,15 +74,16 @@ public sealed class DbImportCommandService
             // Guid 引継マージ: 取込結果の Id を現在図の Guid へ寄せ、クエリ定義・レイアウトを温存できるようにする。
             // DB には Memo に対応する情報がないため、一致エンティティの Memo は現在図の値を温存する。
             // 署名比較は「マージ後」に行う（新規 Guid のままだとリレーションのある図で署名が常に不一致になるため）。
+            var current = _host.GetDiagram();
             var merged = DiagramMergeReconciler.Reconcile(
-                _host.GetDiagram(),
+                current,
                 result.Entities,
                 result.Relationships,
                 preserveExistingMemo: true
             );
 
             // 構造差分がある場合のみ置換確認を行う（壊れクエリがあれば削除対象名を確認メッセージへ付加する）
-            if (!ConfirmDiagramReplacement(merged, Strings.Db_ImportReplaceConfirm))
+            if (!ConfirmDiagramReplacement(current, merged, Strings.Db_ImportReplaceConfirm))
             {
                 return;
             }
@@ -123,68 +122,41 @@ public sealed class DbImportCommandService
 
     /// <summary>構造変更・壊れクエリの削除・説明の上書きを伴う場合のみ確認ダイアログを表示する</summary>
     /// <remarks>
-    /// 空の図、または構造が同一（かつ壊れクエリ・説明の上書きなし）の場合は確認なしで続行する。
-    /// 構造署名（<see cref="SchemaSignature"/>）はテーブル・列の説明を含まないため、署名一致だけを
-    /// 根拠に無確認で続行すると、未保存の説明が取込値で無言のうちに消える。実差分の件数
-    /// （<see cref="DiagramMergeResult.DescriptionOverwriteCount"/>）を条件へ加えてこれを防ぐ。
-    /// 壊れクエリがある場合は削除対象のクエリ名一覧を確認メッセージへ付加する。
+    /// 確認を省く条件は <see cref="DiagramReplacementCheck.CanSkipConfirmation"/>（構造署名は説明を含まないため、
+    /// 署名の一致だけでなく説明の上書き件数も見る）。失うものがあれば内訳を確認文へ付ける。
     /// </remarks>
     /// <returns>置換を続行してよい場合 true</returns>
-    private bool ConfirmDiagramReplacement(DiagramMergeResult merged, string message)
+    private bool ConfirmDiagramReplacement(
+        ErDiagram current,
+        DiagramMergeResult merged,
+        string message
+    )
     {
-        var current = _host.GetDiagram();
-
-        // エンティティ数だけで「空」と見なすと、クエリだけの図・未保存の編集内容を無確認で捨ててしまう
-        // （GUI 側 MainViewModel.HasNothingToLose と同じ判定。ホスト契約の IsEmpty は意味が異なるため使わない）
-        var structurallySame =
-            (current.Entities.Count == 0 && current.Queries.Count == 0 && !_host.IsDirty)
-            || HasSameStructure(current, merged.Entities, merged.Relationships);
-
-        // 構造同一かつ壊れクエリ・説明の上書きなしなら無確認で続行する
         if (
-            structurallySame
-            && merged.BrokenQueries.Count == 0
-            && merged.DescriptionOverwriteCount == 0
+            DiagramReplacementCheck.CanSkipConfirmation(
+                DiagramReplacementCheck.HasNothingToLose(current, _host.IsDirty),
+                current,
+                merged,
+                merged.Relationships
+            )
         )
         {
             return true;
         }
 
-        // 失うものがあれば内訳を確認メッセージへ付加する（キャンセルで取込中止）
-        var fullMessage = AppendLossWarnings(message, merged);
+        var fullMessage = ReplacementLossMessage.Build(
+            message,
+            merged.BrokenQueries.Select(query => query.Name).ToList(),
+            merged.DescriptionOverwriteCount,
+            new ReplacementLossTexts(
+                Strings.Db_ImportBrokenQueriesWarning,
+                Strings.Db_ImportDescriptionOverwriteWarning,
+                Strings.Common_MoreItems
+            )
+        );
 
         // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
         return _dialogs.ConfirmDiscard(_host.IsDirty, fullMessage, Strings.Common_Confirm);
-    }
-
-    /// <summary>確認メッセージへ「失うもの」の内訳（壊れクエリ名・説明の上書き件数）を追記する</summary>
-    private static string AppendLossWarnings(string message, DiagramMergeResult merged)
-    {
-        var builder = new StringBuilder(message);
-
-        if (merged.BrokenQueries.Count > 0)
-        {
-            builder
-                .Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .AppendFormat(
-                    Strings.Db_ImportBrokenQueriesWarning,
-                    FormatQueryNames(merged.BrokenQueries)
-                );
-        }
-
-        if (merged.DescriptionOverwriteCount > 0)
-        {
-            builder
-                .Append(Environment.NewLine)
-                .Append(Environment.NewLine)
-                .AppendFormat(
-                    Strings.Db_ImportDescriptionOverwriteWarning,
-                    merged.DescriptionOverwriteCount
-                );
-        }
-
-        return builder.ToString();
     }
 
     /// <summary>取込の完了を知らせる。宣言どおりに写し取れなかった箇所があれば内訳を添える</summary>
@@ -302,26 +274,5 @@ public sealed class DbImportCommandService
                 "Unknown schema import warning kind."
             ),
         };
-    }
-
-    /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する（件数が多いときは上限で畳む）</summary>
-    private static string FormatQueryNames(IReadOnlyList<QueryDefinition> queries) =>
-        DialogItemList.Format(
-            queries.Select(query => "- " + query.Name).ToList(),
-            Strings.Common_MoreItems
-        );
-
-    /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
-    /// <remarks>ファイル取込で使う <c>MainViewModel.HasSameStructure</c> と同一の <see cref="SchemaSignature"/> 比較</remarks>
-    private static bool HasSameStructure(
-        ErDiagram current,
-        IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships
-    )
-    {
-        var currentSignature = SchemaSignature.Compute(current.Entities, current.Relationships);
-        var newSignature = SchemaSignature.Compute(entities, relationships);
-
-        return currentSignature == newSignature;
     }
 }

@@ -247,6 +247,24 @@
   <data name="DbConnection_ProfileStoreUnavailable" xml:space="preserve">
     <value>保存済み接続のファイルを読み取れなかったため、何も変更していません。他のプログラムが使用している可能性があります。少し待ってからやり直してください。</value>
   </data>
+  <data name="DbConnection_ProfileWriteFailed" xml:space="preserve">
+    <value>保存済み接続の書き込みに失敗しました。一部だけ反映された可能性があるため、一覧をファイルから読み直しました: {0}</value>
+  </data>
+  <data name="DbConnection_ProfileNotFound" xml:space="preserve">
+    <value>プロファイル '{0}' が見つかりませんでした。他のプログラムが削除した可能性があります。一覧を読み直しました。</value>
+  </data>
+  <data name="DbConnection_ProfileLoadedPasswordUnreadable" xml:space="preserve">
+    <value>プロファイル '{0}' を読み込みましたが、保存済みのパスワードを読み取れなかったため、パスワード欄は空欄です。入力し直してください。</value>
+  </data>
+  <data name="DbConnection_RestoredPasswordUnreadable" xml:space="preserve">
+    <value>前回の接続情報を復元しましたが、保存済みのパスワードを読み取れなかったため、パスワード欄は空欄です。</value>
+  </data>
+  <data name="DbConnection_SaveRefusedPasswordUnreadable" xml:space="preserve">
+    <value>保存していません。このプロファイルの保存済みパスワードを読み取れておらず、パスワード欄が空欄のまま保存するとそのパスワードが消えます。パスワードを入力するか、パスワードの「保存」のチェックを外してから保存してください。</value>
+  </data>
+  <data name="DbConnection_PortInvalid" xml:space="preserve">
+    <value>ポートは空欄（既定値）にするか、1〜65535 の整数を入力してください。</value>
+  </data>
   <data name="DbConnection_SqliteFileFilter" xml:space="preserve">
     <value>SQLite データベース (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|すべてのファイル (*.*)|*.*</value>
   </data>
@@ -308,11 +326,12 @@
     <value>スクリプトを {0} に実行します。よろしいですか？</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmRebuild" xml:space="preserve">
-    <value>次のテーブルは、テーブルを作り直して全行データを移し替える方法で同期されます:
-
-{1}
+    <value>{1} 件のテーブルは、テーブルを作り直して全行データを移し替える方法で同期されます（対象は下の一覧のとおりです）。
 
 {0} に対して実行してよろしいですか？</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmRebuildTablesHeader" xml:space="preserve">
+    <value>作り直すテーブル:</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyRebuildRisk" xml:space="preserve">
     <value>注意: 参照先の主キーが変わるため、{0} 件の外部キーを自動で外して再作成します。参照先の列が候補キーでなくなる場合は再作成に失敗し、MySQL / Oracle では部分適用（外部キーが消えたまま主キーだけ変わった状態）になり得ます。</value>

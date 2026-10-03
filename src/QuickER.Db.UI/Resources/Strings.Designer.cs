@@ -432,6 +432,42 @@ namespace QuickER.Db.UI.Resources {
             }
         }
         
+        public static string DbConnection_ProfileWriteFailed {
+            get {
+                return ResourceManager.GetString("DbConnection_ProfileWriteFailed", resourceCulture);
+            }
+        }
+        
+        public static string DbConnection_ProfileNotFound {
+            get {
+                return ResourceManager.GetString("DbConnection_ProfileNotFound", resourceCulture);
+            }
+        }
+        
+        public static string DbConnection_ProfileLoadedPasswordUnreadable {
+            get {
+                return ResourceManager.GetString("DbConnection_ProfileLoadedPasswordUnreadable", resourceCulture);
+            }
+        }
+        
+        public static string DbConnection_RestoredPasswordUnreadable {
+            get {
+                return ResourceManager.GetString("DbConnection_RestoredPasswordUnreadable", resourceCulture);
+            }
+        }
+        
+        public static string DbConnection_SaveRefusedPasswordUnreadable {
+            get {
+                return ResourceManager.GetString("DbConnection_SaveRefusedPasswordUnreadable", resourceCulture);
+            }
+        }
+        
+        public static string DbConnection_PortInvalid {
+            get {
+                return ResourceManager.GetString("DbConnection_PortInvalid", resourceCulture);
+            }
+        }
+        
         public static string DbConnection_SqliteFileFilter {
             get {
                 return ResourceManager.GetString("DbConnection_SqliteFileFilter", resourceCulture);
@@ -555,6 +591,12 @@ namespace QuickER.Db.UI.Resources {
         public static string SchemaSync_ExecuteConfirmRebuild {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuild", resourceCulture);
+            }
+        }
+        
+        public static string SchemaSync_ExecuteConfirmRebuildTablesHeader {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuildTablesHeader", resourceCulture);
             }
         }
 
