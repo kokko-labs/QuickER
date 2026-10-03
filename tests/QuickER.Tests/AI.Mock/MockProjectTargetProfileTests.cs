@@ -42,4 +42,27 @@ public class MockProjectTargetProfileTests
             .Should()
             .Throw<ArgumentException>();
     }
+
+    /// <summary>
+    /// エージェントへの指示と README が、ビルド対象としてソリューションファイルを名指しすることを検証する
+    /// （フォルダ指定の dotnet build は、別のソリューションが同居していると MSB1011 で落ち、エージェントが自己検証できない）。
+    /// </summary>
+    [Theory(DisplayName = "指示と README はソリューションを名指しして dotnet build させる")]
+    [InlineData("wpf")]
+    [InlineData("blazor")]
+    public void PromptsAndReadme_NameTheSolutionToBuild(string target)
+    {
+        var profile = MockProjectTargetProfile.Resolve(
+            target == "wpf" ? MockProjectTarget.Wpf : MockProjectTarget.Blazor
+        );
+        const string expected = "dotnet build AcmeMock.sln";
+
+        MockProjectPromptBuilder.BuildSystemPrompt(profile, "AcmeMock").Should().Contain(expected);
+        MockProjectPromptBuilder.BuildPrompt(profile, "AcmeMock", null).Should().Contain(expected);
+        profile.BuildReadme("AcmeMock", "AcmeMock", "sqlite").Should().Contain(expected);
+        MockProjectPromptBuilder
+            .BuildSystemPrompt(profile, "AcmeMock")
+            .Should()
+            .NotContain("run `dotnet build` in this folder");
+    }
 }

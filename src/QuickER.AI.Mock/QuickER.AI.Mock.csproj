@@ -25,6 +25,35 @@
   </ItemGroup>
 
   <!--
+    モックプロジェクト生成が書き出す csproj の PackageReference の版。正本は Directory.Packages.props
+    （脆弱性対策の SQLitePCLRaw のピンを含む）で、ここではその値をアセンブリのメタデータへ写すだけ＝
+    版の数字を C# に書かない。読み出しは MockProjectPackageVersions（キーの接頭辞と ID の一覧もそちらが正本）。
+    PackageVersion が消えると値が空になり、読み出しが例外で止まる（MockProjectPackageVersionsTests が検知する）。
+  -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>QuickER.MockProjectPackageVersion:CommunityToolkit.Mvvm</_Parameter1>
+      <_Parameter2>@(PackageVersion->WithMetadataValue('Identity', 'CommunityToolkit.Mvvm')->'%(Version)')</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>QuickER.MockProjectPackageVersion:Microsoft.Extensions.DependencyInjection</_Parameter1>
+      <_Parameter2>@(PackageVersion->WithMetadataValue('Identity', 'Microsoft.Extensions.DependencyInjection')->'%(Version)')</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>QuickER.MockProjectPackageVersion:Microsoft.Data.SqlClient</_Parameter1>
+      <_Parameter2>@(PackageVersion->WithMetadataValue('Identity', 'Microsoft.Data.SqlClient')->'%(Version)')</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>QuickER.MockProjectPackageVersion:Microsoft.Data.Sqlite</_Parameter1>
+      <_Parameter2>@(PackageVersion->WithMetadataValue('Identity', 'Microsoft.Data.Sqlite')->'%(Version)')</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>QuickER.MockProjectPackageVersion:SQLitePCLRaw.bundle_e_sqlite3</_Parameter1>
+      <_Parameter2>@(PackageVersion->WithMetadataValue('Identity', 'SQLitePCLRaw.bundle_e_sqlite3')->'%(Version)')</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <!--
     多言語リソース: Strings.resx（中立＝英語）と Strings.ja.resx（日本語サテライト）。
     厳密型アクセサ（Strings.Designer.cs）は VS 以外でも確実に通るよう手書きでチェックイン済み。
   -->

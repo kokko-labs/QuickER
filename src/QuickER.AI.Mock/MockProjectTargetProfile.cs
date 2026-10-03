@@ -95,6 +95,47 @@ public abstract class MockProjectTargetProfile
     /// <summary>API キー型 system プロンプトの emit_file パス例（英語の "and" で連ねたターゲット代表例 2 つ）</summary>
     internal abstract string ApiKeyEmitPathExamples(string projectName);
 
+    // ── ターゲット共通のスキャフォールド部品 ──
+
+    /// <summary>
+    /// 方言の ADO.NET パッケージの PackageReference 行を返す（対応方言でなければ空）。版は
+    /// <see cref="MockProjectPackageVersions"/>（正本は <c>Directory.Packages.props</c>）から取る。
+    /// </summary>
+    /// <remarks>
+    /// SQLite は <c>Microsoft.Data.Sqlite</c> が推移的に持ち込む SQLitePCLRaw の版に既知の脆弱性があるため、
+    /// QuickER 本体・サンプルと同じく修正済みの版を明示参照で上書きする（無いと restore が NU1903 を出す）。
+    /// </remarks>
+    private protected static string BuildAdoPackageReferences(string? repositoryDialect) =>
+        repositoryDialect switch
+        {
+            "sqlserver" => PackageReferenceLine(MockProjectPackageVersions.SqlClient),
+            "sqlite" => PackageReferenceLine(MockProjectPackageVersions.Sqlite)
+                + "    <!-- Microsoft.Data.Sqlite brings in an SQLitePCLRaw version with a known vulnerability "
+                + "(GHSA-2m69-gcr7-jv3q), so the fixed version is referenced explicitly to override it -->\n"
+                + PackageReferenceLine(MockProjectPackageVersions.SqliteNativeBundle),
+            _ => string.Empty,
+        };
+
+    /// <summary>csproj の PackageReference 1 行（字下げ 4・末尾改行つき）を返す</summary>
+    private protected static string PackageReferenceLine(string packageId) =>
+        $"    <PackageReference Include=\"{packageId}\" Version=\"{MockProjectPackageVersions.Get(packageId)}\" />\n";
+
+    /// <summary>README の「実 DB への切り替え」手順 3 を返す（DI 登録は方言別の拡張メソッド名で案内する）</summary>
+    private protected static string BuildDialectSwitchGuide(string? repositoryDialect) =>
+        repositoryDialect switch
+        {
+            "sqlserver" =>
+                "3. To switch to a real database (SQL Server), replace `AddGeneratedInMemoryRepositories()` with "
+                    + "`AddGeneratedSqlServerRepositories(connectionString)`.",
+            "sqlite" =>
+                "3. To switch to a real database (SQLite), replace `AddGeneratedInMemoryRepositories()` with "
+                    + "`AddGeneratedSqliteRepositories(connectionString)`.",
+            _ =>
+                "3. To switch to a real database, regenerate the QuickER repositories for a supported dialect "
+                    + "(SQL Server / SQLite) with QuickER, then replace `AddGeneratedInMemoryRepositories()` with "
+                    + "the matching DI registration.",
+        };
+
     /// <summary>ターゲットから対応するプロファイルを解決する（未知のターゲットは例外）</summary>
     /// <exception cref="ArgumentException">未対応のターゲットが渡された場合</exception>
     internal static MockProjectTargetProfile Resolve(MockProjectTarget target)
@@ -112,7 +153,7 @@ public abstract class MockProjectTargetProfile
         }
 
         throw new ArgumentException(
-            $"未対応のモックプロジェクトターゲットです: {target.Id}",
+            $"Unsupported mock project target: {target.Id}",
             nameof(target)
         );
     }

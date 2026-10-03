@@ -32,10 +32,10 @@ public interface IBuildRunner
 /// <param name="Output">結合出力（ログ保全・診断用）</param>
 public readonly record struct BuildRunResult(bool Success, string Output);
 
-/// <summary>WPF モックプロジェクト生成の実行結果</summary>
+/// <summary>モックプロジェクト生成（実行器の実行と最終ビルド検証）の実行結果</summary>
 /// <param name="Success">全体として成功したか（エージェント成功・成果物存在・最終ビルド成功のすべてを満たす）</param>
 /// <param name="ClientSucceeded">エージェント（バックエンド）の実行が成功で完了したか</param>
-/// <param name="ArtifactsPresent">出力フォルダに csproj と xaml が存在するか（軽い成果物検証）</param>
+/// <param name="ArtifactsPresent">プロジェクトフォルダに csproj と UI 成果物（WPF は .xaml・Blazor は .razor）が存在するか（軽い成果物検証）</param>
 /// <param name="BuildSucceeded">独立に実行した最終 <c>dotnet build</c> が成功したか</param>
 /// <param name="TimedOut">全体タイムアウトで打ち切られたか</param>
 /// <param name="Canceled">利用者が中断したか</param>
@@ -64,7 +64,7 @@ public sealed record MockProjectAgentResult(
 /// <remarks>
 /// <para>
 /// データ層（Entity/EditModel/Mapper/InMemory 等）はスキャフォールドが決定的に生成済みで、エージェントには
-/// 書かせない。エージェントの UI 層生成が終わったら、その自己申告を信じずに成果物（csproj/xaml）の存在と
+/// 書かせない。エージェントの UI 層生成が終わったら、その自己申告を信じずに成果物（csproj と UI 成果物）の存在と
 /// 最終 <c>dotnet build</c>（<see cref="IBuildRunner"/>）で独立に検証する。
 /// </para>
 /// <para>
@@ -73,7 +73,7 @@ public sealed record MockProjectAgentResult(
 /// <c>quickr-mock-generation.log</c> へ書き出す。
 /// </para>
 /// <para>
-/// バックエンドの差異（Claude Code / Codex / API キー等）は <see cref="IMockProjectAgent"/> の実装が吸収する。
+/// バックエンドの差異（Claude Code / Codex / Copilot / API キー）は <see cref="IMockProjectAgent"/> の実装が吸収する。
 /// </para>
 /// </remarks>
 public sealed class MockProjectAgentRunner
@@ -114,8 +114,17 @@ public sealed class MockProjectAgentRunner
     private readonly MockProjectTargetProfile _profile;
     private readonly Func<IReadOnlyList<string>, bool>? _confirmBuild;
 
-    /// <summary>実行中ターンのキャンセル起点（中断・タイムアウトで発火）</summary>
-    private CancellationTokenSource? _runCts;
+    /// <summary>
+    /// 実行中のランの中断起点（<see cref="InterruptAsync"/> が発火する）。エージェント実行と最終ビルドの
+    /// 両方のトークンへ連結する。ランの外では null。
+    /// </summary>
+    private CancellationTokenSource? _interruptCts;
+
+    /// <summary>
+    /// <see cref="InterruptAsync"/> が呼ばれたか（外部トークンが立っていなくても中断として分類するため）。
+    /// ランの開始時に下ろす。
+    /// </summary>
+    private volatile bool _interruptRequested;
 
     /// <summary>依存を注入して生成する</summary>
     /// <param name="agent">UI 層を書くエージェント（バックエンド）</param>
@@ -207,6 +216,59 @@ public sealed class MockProjectAgentRunner
         var log = new StringBuilder();
         var logPath = Path.Combine(outputDirectory, LogFileName);
 
+        // 中断の起点はランごとに作り直す（前のランの中断要求を持ち越さない）
+        using var interruptCts = new CancellationTokenSource();
+        _interruptRequested = false;
+        _interruptCts = interruptCts;
+
+        try
+        {
+            return await RunCoreAsync(
+                    outputDirectory,
+                    projectName,
+                    additionalInstructions,
+                    model,
+                    modelProvider,
+                    onProgress,
+                    log,
+                    logPath,
+                    interruptCts.Token,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 想定外の例外で抜ける経路でも、そこまでの経過と原因をログへ残す（下の finally で書き出す）
+            log.Append(ex).Append('\n');
+            throw;
+        }
+        finally
+        {
+            _interruptCts = null;
+
+            // 実行ログは成功・失敗・想定外の例外を問わず書き出す
+            WriteLog(logPath, log.ToString());
+        }
+    }
+
+    /// <summary>
+    /// <see cref="RunAsync(string, string, string?, string, string, Action{string}, CancellationToken)"/> の本体
+    /// （ログの書き出しと中断起点の後始末は呼び出し側が持つ）。
+    /// </summary>
+    private async Task<MockProjectAgentResult> RunCoreAsync(
+        string outputDirectory,
+        string projectName,
+        string? additionalInstructions,
+        string model,
+        string modelProvider,
+        Action<string> onProgress,
+        StringBuilder log,
+        string logPath,
+        CancellationToken interruptToken,
+        CancellationToken cancellationToken
+    )
+    {
         // 進捗はログへも蓄積しつつ UI へ転送する
         void Emit(string text)
         {
@@ -220,15 +282,12 @@ public sealed class MockProjectAgentRunner
             onProgress(line + "\n");
         }
 
+        // 利用者自身の中断か（外部トークン・InterruptAsync のどちらでも）
+        bool IsCanceledByUser() => cancellationToken.IsCancellationRequested || _interruptRequested;
+
         EmitLine(Strings.Mock_Run_Start);
         EmitLine(string.Format(Strings.Mock_Run_OutputFolderFormat, outputDirectory));
         EmitLine(string.Format(Strings.Mock_Run_ProjectNameFormat, projectName));
-
-        // 最終ビルドが実行器にとって境界越えになる場合だけ、スキャフォールド直後（＝ここ）の状態を記録する。
-        // 記録するのは内容のハッシュで、更新日時やサイズでは比べない（書き換えたあとで日時は戻せる）。
-        var boundarySnapshot = _agent.FinalBuildEscapesSandbox
-            ? MockProjectBuildBoundary.Snapshot.Capture(outputDirectory, projectName)
-            : null;
 
         var request = new MockProjectAgentRequest(
             WorkingDirectory: outputDirectory,
@@ -239,9 +298,10 @@ public sealed class MockProjectAgentRunner
             ModelProvider: modelProvider
         );
 
-        _runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _runCts.CancelAfter(_timeout);
-        var token = _runCts.Token;
+        // 最終ビルドが実行器にとって境界越えになるか。境界越えなのにスナップショットが無いときは
+        // （記録に失敗した・記録前に打ち切られた）ビルドしない＝検知なしのビルドへ倒さない
+        var boundaryRequired = _agent.FinalBuildEscapesSandbox;
+        MockProjectBuildBoundary.Snapshot? boundarySnapshot = null;
 
         MockProjectAgentOutcome outcome;
         var timedOut = false;
@@ -250,21 +310,49 @@ public sealed class MockProjectAgentRunner
         // 最終ビルドが専用タイムアウトで打ち切られたか（結果としてはタイムアウト扱いだが文言を分ける）
         var buildTimedOut = false;
 
-        try
+        using (
+            var runCts = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                interruptToken
+            )
+        )
         {
-            outcome = await _agent.RunAsync(request, Emit, token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // 外部キャンセルとタイムアウトを区別する（外部トークンが立っていなければタイムアウト）
-            timedOut = !cancellationToken.IsCancellationRequested;
-            canceled = cancellationToken.IsCancellationRequested;
-            outcome = new MockProjectAgentOutcome(false, null, false);
-        }
-        finally
-        {
-            _runCts.Dispose();
-            _runCts = null;
+            runCts.CancelAfter(_timeout);
+            var token = runCts.Token;
+
+            try
+            {
+                // スキャフォールド直後（＝ここ）の状態を記録する。記録するのは内容のハッシュで、更新日時やサイズでは
+                // 比べない（書き換えたあとで日時は戻せる）。全ファイルを読むので UI スレッドから外して走らせる。
+                if (boundaryRequired)
+                {
+                    boundarySnapshot = await Task.Run(
+                            () =>
+                                MockProjectBuildBoundary.Snapshot.Capture(
+                                    outputDirectory,
+                                    projectName,
+                                    token
+                                ),
+                            token
+                        )
+                        .ConfigureAwait(false);
+                }
+
+                outcome = await _agent.RunAsync(request, Emit, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // 利用者の中断とタイムアウトを区別する（外部トークンも中断要求も立っていなければタイムアウト）
+                canceled = IsCanceledByUser();
+                timedOut = !canceled;
+                outcome = new MockProjectAgentOutcome(false, null, false);
+            }
+            catch (Exception ex)
+            {
+                // 実行器の想定外の例外は実行器の失敗として結果へ畳む（ログと結果メッセージに原因を残す）
+                log.Append(ex).Append('\n');
+                outcome = new MockProjectAgentOutcome(false, ex.Message, false);
+            }
         }
 
         if (timedOut)
@@ -316,7 +404,11 @@ public sealed class MockProjectAgentRunner
         // 最終ビルド直前の確認を利用者が取り消したか（成果物は残るが未検証として完了する）
         var buildDeclined = false;
 
-        if (!timedOut && !canceled && artifactsPresent)
+        // 境界越えの実行器なのにスナップショットが無い（記録が例外で失敗した）ときはビルドしない。
+        // 実行器の失敗として結果に出るので、確認の取り消し（BuildDeclined）とは扱いを分ける。
+        var buildBlocked = boundaryRequired && boundarySnapshot is null;
+
+        if (!timedOut && !canceled && artifactsPresent && !buildBlocked)
         {
             // ビルド中間物を捨ててから検証する。obj/ に残った *.targets / *.props は
             // Microsoft.Common.targets のワイルドカード import で読み込まれる（実測で確認）ため、
@@ -340,12 +432,16 @@ public sealed class MockProjectAgentRunner
             );
         }
 
-        if (!timedOut && !canceled && artifactsPresent && !buildDeclined)
+        if (!timedOut && !canceled && artifactsPresent && !buildBlocked && !buildDeclined)
         {
             EmitLine(Strings.Mock_Run_BuildVerify);
 
-            // 最終ビルドには専用のタイムアウトを掛ける（全体タイムアウトはエージェント実行までで解けている）
-            using var buildCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            // 最終ビルドには専用のタイムアウトを掛ける（全体タイムアウトはエージェント実行までで解けている）。
+            // 中断はエージェント実行と同じ起点で効く。
+            using var buildCts = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                interruptToken
+            );
             buildCts.CancelAfter(_buildTimeout);
 
             try
@@ -372,8 +468,8 @@ public sealed class MockProjectAgentRunner
             }
             catch (OperationCanceledException)
             {
-                // 外部トークンが立っていなければ、打ち切ったのは最終ビルドのタイムアウト
-                if (cancellationToken.IsCancellationRequested)
+                // 利用者の中断でなければ、打ち切ったのは最終ビルドのタイムアウト
+                if (IsCanceledByUser())
                 {
                     canceled = true;
                     EmitLine(Strings.Mock_Run_BuildVerifyCanceled);
@@ -388,6 +484,12 @@ public sealed class MockProjectAgentRunner
                         )
                     );
                 }
+            }
+            catch (Exception ex)
+            {
+                // ビルドを実行できなかった（dotnet の起動失敗など）＝検証できなかったのでビルド失敗として扱う
+                log.Append(ex).Append('\n');
+                EmitLine(Strings.Mock_Run_BuildFailed);
             }
         }
 
@@ -411,8 +513,6 @@ public sealed class MockProjectAgentRunner
         );
         EmitLine("\n" + message);
 
-        WriteLog(logPath, log.ToString());
-
         return new MockProjectAgentResult(
             Success: success,
             ClientSucceeded: outcome.Success,
@@ -427,11 +527,31 @@ public sealed class MockProjectAgentRunner
         );
     }
 
-    /// <summary>実行中のターンを中断する</summary>
+    /// <summary>実行中のランを中断する（エージェント実行中・最終ビルド中のどちらでも効く）</summary>
+    /// <remarks>
+    /// ランが同時に終わって中断起点が破棄されていても例外にしない。外部トークンを立てずにこれだけを
+    /// 呼んだ場合も、結果は（タイムアウトでなく）中断として分類する。
+    /// </remarks>
     public async Task InterruptAsync()
     {
-        await _agent.InterruptAsync().ConfigureAwait(false);
-        _runCts?.Cancel();
+        _interruptRequested = true;
+        var interruptCts = _interruptCts;
+
+        try
+        {
+            await _agent.InterruptAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                interruptCts?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // ランが同時に終わって破棄済みなら何もしない
+            }
+        }
     }
 
     /// <summary>プロジェクトフォルダに csproj と UI 成果物（ターゲットの検索パターン）が存在するかを軽く検証する</summary>

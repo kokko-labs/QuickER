@@ -3,7 +3,7 @@ using QuickER.AI;
 namespace QuickER.AI.Mock;
 
 /// <summary>
-/// Claude Code CLI をヘッドレス実行して WPF の UI 層を書かせる <see cref="IMockProjectAgent"/> の実装。
+/// Claude Code CLI をヘッドレス実行して UI 層（WPF / Blazor）を書かせる <see cref="IMockProjectAgent"/> の実装。
 /// </summary>
 /// <remarks>
 /// <para>

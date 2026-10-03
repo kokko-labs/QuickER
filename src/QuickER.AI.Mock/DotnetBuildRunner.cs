@@ -125,9 +125,10 @@ public sealed class DotnetBuildRunner : IBuildRunner
             var result = await RunAsync(startInfo, cancellationToken).ConfigureAwait(false);
             return result.Success;
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // dotnet が PATH に無い等で起動自体に失敗した場合は「利用不可」とみなす
+            // dotnet が PATH に無い等で起動自体に失敗した場合は「利用不可」とみなす。
+            // 取り消しは「利用不可」ではないので畳まずに通す（呼び出し側が取り消しとして扱う）
             return false;
         }
     }
@@ -148,6 +149,8 @@ public sealed class DotnetBuildRunner : IBuildRunner
         {
             FileName = "dotnet",
             WorkingDirectory = workingDirectory,
+            // 標準入力も切り離す（ビルドは入力を読まない。親の標準入力を引き継がせない）
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -158,7 +161,11 @@ public sealed class DotnetBuildRunner : IBuildRunner
     }
 
     /// <summary>プロセスを実行し、結合出力と成否（終了コード 0）を返す</summary>
-    private static async Task<BuildRunResult> RunAsync(
+    /// <remarks>
+    /// 取り消されたらプロセスツリーを止め、標準出力・標準エラーの読み取りが終わるのを待ってから
+    /// <see cref="OperationCanceledException"/> を投げる（読み取りの Task を観測されないまま残さない）。
+    /// </remarks>
+    internal static async Task<BuildRunResult> RunAsync(
         ProcessStartInfo startInfo,
         CancellationToken cancellationToken
     )
@@ -168,6 +175,12 @@ public sealed class DotnetBuildRunner : IBuildRunner
         if (!process.Start())
         {
             return new BuildRunResult(false, Strings.Mock_DotnetStartFailed);
+        }
+
+        // 入力は渡さない（閉じておけば、入力を待つ子プロセスもすぐ EOF を受け取る）
+        if (startInfo.RedirectStandardInput)
+        {
+            process.StandardInput.Close();
         }
 
         var output = new StringBuilder();
@@ -194,6 +207,12 @@ public sealed class DotnetBuildRunner : IBuildRunner
         catch (OperationCanceledException)
         {
             TryKill(process);
+
+            // 読み取りの Task を観測してから抜ける（片方だけ待って抜けると、もう片方がプロセスの破棄後に
+            // 例外で終わり、誰にも観測されない例外として残る）。プロセスを止めたのでパイプは閉じ、
+            // どちらもすぐ終わる。結果と例外は要らないので握る。
+            await Task.WhenAll((Task)stdoutTask, stderrTask)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             throw;
         }
     }

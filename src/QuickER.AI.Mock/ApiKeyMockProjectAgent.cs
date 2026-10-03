@@ -8,7 +8,7 @@ using QuickER.AI.Mock.Resources;
 namespace QuickER.AI.Mock;
 
 /// <summary>
-/// API キー方式（OpenAI / Claude / ローカル LLM＝<see cref="ChatTurnEngine"/> 系）で WPF の UI 層を書かせる
+/// API キー方式（OpenAI / Claude / ローカル LLM＝<see cref="ChatTurnEngine"/> 系）で UI 層（WPF / Blazor）を書かせる
 /// <see cref="IMockProjectAgent"/> の実装。
 /// </summary>
 /// <remarks>
@@ -36,6 +36,9 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
     /// <summary>生成された契約要約の最大文字数（トークン浪費を避けるための上限）</summary>
     private const int GeneratedSummaryMaxChars = 8000;
+
+    /// <summary>修正ターンへ添えるビルド出力の最大文字数（契約要約と同じ上限）</summary>
+    internal const int BuildOutputMaxChars = GeneratedSummaryMaxChars;
 
     private readonly Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> _engineFactory;
     private readonly IBuildRunner _buildRunner;
@@ -218,7 +221,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             EmitLine(Strings.Mock_ApiRun_BuildFailedFixing);
             var fixFailure = await SendTurnAsync(
                     MockProjectPromptBuilder.BuildApiKeyFixPrompt(
-                        build.Output,
+                        ExcerptBuildOutput(build.Output, BuildOutputMaxChars),
                         _emittedFiles.ToArray()
                     ),
                     cancellationToken
@@ -583,18 +586,27 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
     // ── データ層（Generated/）の契約要約 ──
 
-    /// <summary>public 型宣言（interface/class/record/enum/struct）を拾う正規表現</summary>
+    /// <summary>public 型宣言（interface/class/record/record struct/record class/enum/struct）を拾う正規表現</summary>
+    /// <remarks>
+    /// 種類は <c>record struct</c> / <c>record class</c> を 1 語として先に拾う（<c>record</c> だけを拾うと、
+    /// 続く <c>struct</c> を型名と取り違える）。2 つ目のグループは型名、3 つ目は型引数（あれば）。
+    /// </remarks>
     private static readonly Regex PublicTypeRegex = new(
-        @"\bpublic\s+(?:sealed\s+|abstract\s+|static\s+|partial\s+|readonly\s+)*(interface|class|record|enum|struct)\s+([A-Za-z_][A-Za-z0-9_]*)",
+        @"\bpublic\s+(?:sealed\s+|abstract\s+|static\s+|partial\s+|readonly\s+)*(interface|class|record\s+struct|record\s+class|record|enum|struct)\s+([A-Za-z_][A-Za-z0-9_]*)(<[^>\r\n]*>)?",
         RegexOptions.Compiled
     );
 
     /// <summary>
     /// <c>Generated/</c> 配下のデータ層コードを、トークンを浪費しない範囲で要約する
-    /// （ファイル名一覧＋公開型名＋リポジトリ契約 <c>I{Entity}Repository</c> のメンバーシグネチャ）。
+    /// （ファイル名一覧＋公開型名＋リポジトリ契約のメンバーシグネチャ）。
     /// </summary>
-    /// <remarks>詳細な規約は README に書かれている前提で、UI から使う「名前とシグネチャ」だけを渡す。</remarks>
-    private static string SummarizeGeneratedContracts(string generatedDir)
+    /// <remarks>
+    /// 詳細な規約は README に書かれている前提で、UI から使う「名前とシグネチャ」だけを渡す。
+    /// リポジトリ契約は <c>I{Entity}Repository</c> だけでなく、CRUD（GetAll / GetById / Insert / Update /
+    /// Delete / Save）を宣言している共有の基底契約 <c>IRemoteRepositoryCore</c> / <c>IRepositoryCore</c> も含める
+    /// （per-entity の契約は基底を継承するだけで、CRUD の署名を自分では持たない）。
+    /// </remarks>
+    internal static string SummarizeGeneratedContracts(string generatedDir)
     {
         if (!Directory.Exists(generatedDir))
         {
@@ -623,6 +635,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
         var publicTypes = new List<string>();
         var repositoryContracts = new List<string>();
+        var coreContractCount = 0;
 
         foreach (var file in files)
         {
@@ -646,11 +659,15 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
                     publicTypes.Add(name);
                 }
 
-                // I{Entity}Repository はメンバーシグネチャも抽出して DI 利用の助けにする
+                // リポジトリ契約（I{Entity}Repository と共有の基底 I*RepositoryCore）はメンバーシグネチャも
+                // 抽出して DI 利用の助けにする
                 if (
                     match.Groups[1].Value == "interface"
                     && name.StartsWith('I')
-                    && name.EndsWith("Repository", StringComparison.Ordinal)
+                    && (
+                        name.EndsWith("Repository", StringComparison.Ordinal)
+                        || name.EndsWith("RepositoryCore", StringComparison.Ordinal)
+                    )
                 )
                 {
                     var members = ExtractInterfaceMemberSignatures(
@@ -660,25 +677,30 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
                     if (members.Count > 0)
                     {
-                        repositoryContracts.Add(
-                            $"{name}\n{string.Join("\n", members.Select(m => "  " + m))}"
+                        // 共有の基底契約（CRUD）は先頭へ置く＝図が大きく要約が上限で切られても届くようにする
+                        repositoryContracts.Insert(
+                            name.EndsWith("RepositoryCore", StringComparison.Ordinal)
+                                ? coreContractCount++
+                                : repositoryContracts.Count,
+                            $"{name}{match.Groups[3].Value}\n{string.Join("\n", members.Select(m => "  " + m))}"
                         );
                     }
                 }
             }
         }
 
-        if (publicTypes.Count > 0)
-        {
-            builder.AppendLine();
-            builder.Append("Public types: ").AppendLine(string.Join(", ", publicTypes));
-        }
-
+        // 契約の署名を型名の一覧より先に置く（上限で切られるときに、UI から呼ぶ署名のほうを残す）
         if (repositoryContracts.Count > 0)
         {
             builder.AppendLine();
             builder.AppendLine("Repository contracts (consumed through dependency injection):");
             builder.AppendLine(string.Join("\n", repositoryContracts));
+        }
+
+        if (publicTypes.Count > 0)
+        {
+            builder.AppendLine();
+            builder.Append("Public types: ").AppendLine(string.Join(", ", publicTypes));
         }
 
         var summary = builder.ToString().TrimEnd();
@@ -692,6 +714,54 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         }
 
         return summary;
+    }
+
+    /// <summary>
+    /// 修正ターンへ添えるビルド出力を上限の長さに収める（エラーの行を優先し、残りの枠を出力の末尾で埋める）。
+    /// </summary>
+    /// <param name="output">ビルドの結合出力</param>
+    /// <param name="maxChars">上限の文字数</param>
+    /// <remarks>
+    /// <c>dotnet build</c> の出力は復元・各プロジェクトの進捗を含めて長くなり得るため、全文を渡すと 1 回きりの
+    /// 修正ターンのコンテキストを使い切る。モデルが直すのに要るのはエラーの行なので、それを先頭に集める。
+    /// 同じエラーは MSBuild が末尾の要約で繰り返すため、重複は 1 回にまとめる。上限を超えたら省略したことを一文で示す。
+    /// </remarks>
+    internal static string ExcerptBuildOutput(string output, int maxChars)
+    {
+        if (string.IsNullOrEmpty(output) || output.Length <= maxChars)
+        {
+            return output;
+        }
+
+        const string Omitted =
+            "(the build output was shortened to fit the size limit: the error lines come first, followed by the end of the output)";
+        var budget = Math.Max(0, maxChars - Omitted.Length - 2);
+        var builder = new StringBuilder();
+
+        foreach (
+            var line in output
+                .Split('\n')
+                .Select(line => line.TrimEnd('\r'))
+                .Where(line => line.Contains(": error ", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.Ordinal)
+        )
+        {
+            if (builder.Length + line.Length + 1 > budget)
+            {
+                break;
+            }
+
+            builder.Append(line).Append('\n');
+        }
+
+        var remaining = budget - builder.Length;
+
+        if (remaining > 0)
+        {
+            builder.Append(output[^Math.Min(remaining, output.Length)..]);
+        }
+
+        return Omitted + "\n\n" + builder.ToString().TrimEnd();
     }
 
     /// <summary>インターフェイス宣言直後の <c>{ }</c> ブロックから、メンバーシグネチャ行を抽出する</summary>
@@ -736,26 +806,60 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
         var body = text[(open + 1)..end];
         var members = new List<string>();
+        var pending = new StringBuilder();
 
-        // 「;」で終わるシグネチャ行のみを拾う（XML doc コメント・属性は除外）
+        // 入れ子の波括弧の深さ（既定実装のメソッド本体の中は拾わない）
+        var nesting = 0;
+
+        // 「;」で終わる宣言を拾う。CSharpier の整形で引数ごとに改行されたシグネチャは 1 行へまとめる
+        // （XML doc コメント・属性は除外する）
         foreach (var rawLine in body.Split('\n'))
         {
             var line = rawLine.Trim();
+
+            if (nesting > 0)
+            {
+                nesting += line.Count(ch => ch == '{') - line.Count(ch => ch == '}');
+                continue;
+            }
 
             if (
                 line.Length == 0
                 || line.StartsWith("//", StringComparison.Ordinal)
                 || line.StartsWith("/*", StringComparison.Ordinal)
                 || line.StartsWith('*')
-                || line.StartsWith('[')
+                || (pending.Length == 0 && line.StartsWith('['))
             )
             {
                 continue;
             }
 
-            if (line.EndsWith(';') && line.Contains('('))
+            if (line.Contains('{'))
             {
-                members.Add(line);
+                // 本体つきのメンバー（既定実装）は署名を捨てて本体ごと飛ばす
+                pending.Clear();
+                nesting = line.Count(ch => ch == '{') - line.Count(ch => ch == '}');
+                continue;
+            }
+
+            if (pending.Length > 0 && !pending.ToString().EndsWith('('))
+            {
+                pending.Append(' ');
+            }
+
+            pending.Append(line);
+
+            if (!line.EndsWith(';'))
+            {
+                continue;
+            }
+
+            var signature = pending.ToString().Replace("( ", "(").Replace(" )", ")");
+            pending.Clear();
+
+            if (signature.Contains('(') && !signature.Contains("=>", StringComparison.Ordinal))
+            {
+                members.Add(signature);
             }
         }
 

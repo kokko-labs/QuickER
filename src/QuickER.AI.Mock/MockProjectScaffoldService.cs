@@ -29,7 +29,7 @@ public sealed record MockProjectScaffoldResult(
 );
 
 /// <summary>
-/// モックフォルダをデザイン仕様として、WPF モックプロジェクトの「決定的な土台」を出力フォルダへ書き出すサービス。
+/// モックフォルダをデザイン仕様として、モックプロジェクト（WPF / Blazor）の「決定的な土台」を出力フォルダへ書き出すサービス。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -40,7 +40,7 @@ public sealed record MockProjectScaffoldResult(
 /// UI 層（App/MainWindow/ビュー・ビューモデル）は AI（Claude Code）に書かせるため、ここでは生成しない。
 /// </para>
 /// <para>
-/// WPF 型に依存しない純ロジックとし、型解決は <see cref="DiagramCodeGenerator"/>（プロバイダ層）へ委譲する。
+/// UI フレームワークの型に依存しない純ロジックとし、型解決は <see cref="DiagramCodeGenerator"/>（プロバイダ層）へ委譲する。
 /// 図の方言（<see cref="ErDiagram.TargetDbms"/>）を <see cref="DatabaseProviderRegistry"/> で解決して型マッパを得る。
 /// </para>
 /// </remarks>
@@ -49,8 +49,11 @@ public sealed class MockProjectScaffoldService
     /// <summary>データ層コードを配置するサブフォルダ名（読み取り専用の自動生成コード）</summary>
     public const string GeneratedFolderName = "Generated";
 
+    /// <summary>デザイン仕様を置く最上位フォルダ名（API キー方式はこの配下への提出を拒否する）</summary>
+    public const string DesignRootFolderName = "design";
+
     /// <summary>デザイン仕様のモックフォルダの相対パス（<c>design/mock/</c> にモックフォルダの内容を同梱する）</summary>
-    public const string DesignFolderRelativePath = "design/mock";
+    public const string DesignFolderRelativePath = DesignRootFolderName + "/mock";
 
     /// <summary>規約ドキュメントのファイル名</summary>
     public const string ReadmeFileName = "README-QuickER.md";
@@ -117,10 +120,22 @@ public sealed class MockProjectScaffoldService
         if (!IsValidProjectName(projectName))
         {
             throw new ArgumentException(
-                $"プロジェクト名にはパス区切り文字・絶対パス・\".\"/\"..\"・フォルダ名やファイル名に使用できない文字・前後の空白・末尾のピリオドを含められません: {projectName}",
+                $"The project name must be a single folder name: it cannot contain path separators, an absolute path, \".\" or \"..\", characters that are invalid in file or folder names, leading or trailing spaces, or a trailing period: {projectName}",
                 nameof(projectName)
             );
         }
+
+        // 書き直す前に空にするフォルダ（Generated/・design/mock/）が、コピー元のモックフォルダと重なっていたら
+        // 何も書かずに止める。前回の出力の design/mock/ をそのままモックフォルダに指定する使い方では、
+        // 先に消すとコピー元（利用者の作業の正本）が失われる。
+        var projectDirectory = GetProjectDirectory(outputDirectory, projectName);
+        var generatedDirectory = Path.Combine(projectDirectory, GeneratedFolderName);
+        var designFolderPath = Path.Combine(
+            projectDirectory,
+            DesignFolderRelativePath.Replace('/', Path.DirectorySeparatorChar)
+        );
+        EnsureDoesNotOverlapMockFolder(mockFolder, generatedDirectory);
+        EnsureDoesNotOverlapMockFolder(mockFolder, designFolderPath);
 
         Directory.CreateDirectory(outputDirectory);
         var written = new List<string>();
@@ -133,11 +148,9 @@ public sealed class MockProjectScaffoldService
         var repositoryDialect = ResolveRepositoryDialect(diagram.TargetDbms);
 
         // Visual Studio 標準構成: プロジェクト一式はプロジェクトフォルダ配下、ソリューションは出力フォルダ直下へ出す
-        var projectDirectory = GetProjectDirectory(outputDirectory, projectName);
         Directory.CreateDirectory(projectDirectory);
 
         var options = BuildOptions(generatedNamespace, repositoryDialect);
-        var generatedDirectory = Path.Combine(projectDirectory, GeneratedFolderName);
         WriteGeneratedCode(diagram, options, repositoryDialect, generatedDirectory, written);
 
         var projectFilePath = Path.Combine(projectDirectory, $"{projectName}.csproj");
@@ -150,11 +163,9 @@ public sealed class MockProjectScaffoldService
             written
         );
 
-        // モックフォルダの内容（mock.json・画面 HTML・共有 style.css）を design/mock/ へフラットに同梱する
-        var designFolderPath = Path.Combine(
-            projectDirectory,
-            DesignFolderRelativePath.Replace('/', Path.DirectorySeparatorChar)
-        );
+        // モックフォルダの内容（mock.json・画面 HTML・共有 style.css）を design/mock/ へフラットに同梱する。
+        // 前回の同梱物を先に空にする（削除した画面の HTML が残ると、AI が無い画面まで再現する）
+        ClearOwnedDirectory(designFolderPath);
         CopyMockFolder(mockFolder, designFolderPath, written);
 
         // ソリューションはプロジェクトを 1 つ参照する最小構成で出力フォルダ直下へ出す（GUID は名前から決定的に導出）
@@ -263,12 +274,55 @@ public sealed class MockProjectScaffoldService
                     .Select(diagnostic => diagnostic.Message)
             );
             throw new InvalidOperationException(
-                $"データ層コードの生成に失敗しました。{Environment.NewLine}{message}"
+                $"Generating the data-layer code failed.{Environment.NewLine}{message}"
             );
         }
 
+        // 前回の生成物を先に空にする（別方言で生成した Repositories.Sqlite.g.cs のような残骸が残ると、
+        // 型が二重に定義されてコンパイルできない）。生成に失敗したときは消さない＝ここは生成が通った後
+        ClearOwnedDirectory(generatedDirectory);
+
         var writer = new GeneratedFileWriter();
         written.AddRange(writer.WriteFiles(generatedDirectory, result));
+    }
+
+    /// <summary>
+    /// スキャフォールドが所有するフォルダ（<c>Generated/</c>・<c>design/mock/</c>）を書き直す前に空にする。
+    /// 消しきれなければ例外で止める（前回の残骸の上に書くと、残骸と新しい生成物が混ざる）。
+    /// </summary>
+    /// <remarks>
+    /// 読み取り専用の属性を外してから消し、リンクはリンクだけを外す（リンク先の中身には触れない）。
+    /// どちらのフォルダも上書き確認（<see cref="MockProjectOverwriteScanner"/>）の一覧に出しており、
+    /// README で「手で編集しない」と宣言している。
+    /// </remarks>
+    private static void ClearOwnedDirectory(string directory)
+    {
+        MockProjectFiles.TryDeleteDirectory(directory);
+
+        if (Directory.Exists(directory))
+        {
+            throw new IOException(
+                $"Could not clear '{directory}' before regenerating it. Close any program that is using the files there and try again."
+            );
+        }
+    }
+
+    /// <summary>
+    /// 空にするフォルダとコピー元のモックフォルダが同じか、どちらかがもう一方の中にあれば例外で止める。
+    /// </summary>
+    /// <remarks>
+    /// 判定は <see cref="MockProjectFiles.PathsOverlap"/>（フルパスへ正規化・途中のリンクは実体まで解決・
+    /// 大文字小文字を区別しない・解決できなければ重なる扱い）。
+    /// </remarks>
+    private static void EnsureDoesNotOverlapMockFolder(string mockFolder, string ownedDirectory)
+    {
+        if (MockProjectFiles.PathsOverlap(mockFolder, ownedDirectory))
+        {
+            throw new InvalidOperationException(
+                $"The mock folder '{mockFolder}' overlaps '{ownedDirectory}', which the generation clears and rewrites. "
+                    + "Choose a different output folder, or copy the mock folder somewhere else first."
+            );
+        }
     }
 
     /// <summary>図の方言に対応するプロバイダを解決する（未解決なら SQL Server を既定にする）</summary>

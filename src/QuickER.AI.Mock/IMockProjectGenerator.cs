@@ -5,7 +5,7 @@ using QuickER.Provider;
 
 namespace QuickER.AI.Mock;
 
-/// <summary>WPF モックプロジェクト生成（第2ステップ）の実行結果</summary>
+/// <summary>モックプロジェクト生成（第2ステップ）の実行結果</summary>
 /// <param name="Success">全体として成功したか</param>
 /// <param name="Message">結果メッセージ（成功理由・失敗理由）</param>
 /// <param name="OutputDirectory">出力フォルダ（成功・失敗を問わず成果物とログが残る）</param>
@@ -25,14 +25,14 @@ public sealed record MockProjectGenerationResult(
 );
 
 /// <summary>
-/// 第2ステップ（モックプロジェクト生成）の生成ターゲット（プラットフォーム）。現状は WPF の 1 種のみ。
+/// 第2ステップ（モックプロジェクト生成）の生成ターゲット（プラットフォーム）。Blazor Web App（既定）と WPF の 2 種。
 /// </summary>
 /// <param name="Id">内部識別子（安定した機械可読キー）</param>
 /// <param name="DisplayName">UI に出す表示名</param>
 /// <remarks>
 /// <para>
-/// 将来 Blazor 等のターゲットを追加する場合は、この型のインスタンスを増やし、UI でメニュー化して選ばせる
-/// （現状は 1 種のみのため UI にターゲット選択は出さない）。ターゲット差分（スキャフォールドの csproj／README・
+/// ターゲットを追加する場合は、この型のインスタンスを増やして <see cref="IMockProjectGenerator.Targets"/> へ載せる
+/// （UI は第2ステップの ComboBox で選ばせる）。ターゲット差分（スキャフォールドの csproj／README・
 /// ランナーのプロンプト・UI 成果物の検索パターン）は <see cref="MockProjectTargetProfile"/> が一手に束ねており、
 /// <see cref="MockProjectTargetProfile.Resolve"/> でターゲットからプロファイルを解決する
 /// （<see cref="IMockProjectGenerator"/> の口は変えない）。
@@ -53,7 +53,7 @@ public sealed record MockProjectTarget(string Id, string DisplayName)
 }
 
 /// <summary>
-/// 「確定 HTML → 決定的スキャフォールド → 選択バックエンド（Claude Code / Codex）による UI 層生成 → 最終ビルド検証」を
+/// 「確定 HTML → 決定的スキャフォールド → 選択バックエンド（Claude Code / Codex / Copilot / API キー）による UI 層生成 → 最終ビルド検証」を
 /// 一括で担う第2ステップの抽象。ViewModel はこの 1 つの seam に依存し、単体テストでフェイクへ差し替える。
 /// </summary>
 public interface IMockProjectGenerator
@@ -61,14 +61,14 @@ public interface IMockProjectGenerator
     /// <summary>この生成器が対応する生成ターゲット一覧（<see cref="MockProjectTarget.Blazor"/> / <see cref="MockProjectTarget.Wpf"/>。先頭が UI の既定選択）</summary>
     IReadOnlyList<MockProjectTarget> Targets { get; }
 
-    /// <summary>指定バックエンド（Claude Code / Codex / Copilot）の実行器（CLI）が利用可能か</summary>
+    /// <summary>指定バックエンド（Claude Code / Codex / Copilot / API キー）の実行器が利用可能か</summary>
     bool IsAgentAvailable(ErChatBackendKind backend);
 
     /// <summary>dotnet SDK が利用可能か（<c>dotnet --version</c> の成否で判定）</summary>
     Task<bool> IsDotnetAvailableAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// スキャフォールドを書き出し、選択バックエンド（Claude Code / Codex）をヘッドレス実行して
+    /// スキャフォールドを書き出し、選択バックエンド（Claude Code / Codex / Copilot / API キー）をヘッドレス実行して
     /// モックプロジェクトを生成する。
     /// </summary>
     /// <param name="diagram">生成元の ER 図</param>
@@ -77,7 +77,7 @@ public interface IMockProjectGenerator
     /// <param name="outputDirectory">出力フォルダ</param>
     /// <param name="projectName">プロジェクト名</param>
     /// <param name="target">生成ターゲット（<see cref="Targets"/> のいずれか）</param>
-    /// <param name="backend">実行バックエンド（Claude Code / Codex）</param>
+    /// <param name="backend">実行バックエンド（Claude Code / Codex / Copilot / API キー）</param>
     /// <param name="model">モデルエイリアス（空なら既定）</param>
     /// <param name="modelProvider">モデルプロバイダー（Codex 用。空なら既定。Claude Code は無視する）</param>
     /// <param name="onProgress">進捗テキストの逐次転送先</param>
@@ -109,14 +109,16 @@ public interface IMockProjectGenerator
 
 /// <summary>
 /// <see cref="MockProjectScaffoldService"/>（決定的スキャフォールド）と、バックエンド別に構築する
-/// <see cref="MockProjectAgentRunner"/>（Claude Code / Codex のオーケストレーション）を束ねる
+/// <see cref="MockProjectAgentRunner"/>（実行器のオーケストレーション）を束ねる
 /// <see cref="IMockProjectGenerator"/> の既定実装。
 /// </summary>
 public sealed class MockProjectGenerator : IMockProjectGenerator
 {
     private readonly MockProjectScaffoldService _scaffold;
     private readonly IBuildRunner _buildRunner;
-    private readonly Func<ErChatBackendKind, IMockProjectAgent> _agentFactory;
+
+    /// <summary>バックエンド別の実行器ファクトリ（組み立てられない構成では null を返す）</summary>
+    private readonly Func<ErChatBackendKind, IMockProjectAgent?> _agentFactory;
     private readonly TimeSpan? _timeout;
 
     /// <summary>
@@ -168,20 +170,17 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
     }
 
     /// <summary>
-    /// 本番の実行器をバックエンド別に構築する（Claude Code / Codex / Copilot / API キー。既定は Claude Code）
+    /// 本番の実行器をバックエンド別に構築する（Claude Code / Codex / Copilot / API キー。既定は Claude Code）。
+    /// API キー方式でエンジンファクトリが与えられていないときは組み立てられないので null を返す。
     /// </summary>
-    private IMockProjectAgent CreateDefaultAgent(ErChatBackendKind backend) =>
+    private IMockProjectAgent? CreateDefaultAgent(ErChatBackendKind backend) =>
         backend switch
         {
             ErChatBackendKind.Codex => new CodexMockProjectAgent(new CodexAppServerClient()),
             ErChatBackendKind.Copilot => new CopilotMockProjectAgent(new CopilotRuntimeClient()),
-            ErChatBackendKind.ApiKey => new ApiKeyMockProjectAgent(
-                _apiKeyEngineFactory
-                    ?? throw new InvalidOperationException(
-                        "API キーバックエンドの実行にはエンジンファクトリが必要です。"
-                    ),
-                _buildRunner
-            ),
+            ErChatBackendKind.ApiKey => _apiKeyEngineFactory is null
+                ? null
+                : new ApiKeyMockProjectAgent(_apiKeyEngineFactory, _buildRunner),
             _ => new ClaudeCodeMockProjectAgent(new ClaudeCodeProcessClient()),
         };
 
@@ -191,7 +190,12 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
     [MockProjectTarget.Blazor, MockProjectTarget.Wpf];
 
     /// <inheritdoc />
-    public bool IsAgentAvailable(ErChatBackendKind backend) => _agentFactory(backend).IsAvailable();
+    /// <remarks>
+    /// 純粋な問い合わせなので投げない。API キー方式でエンジンファクトリが与えられていない構成は
+    /// 実行器を組み立てられない＝「利用できない」と答える。
+    /// </remarks>
+    public bool IsAgentAvailable(ErChatBackendKind backend) =>
+        _agentFactory(backend)?.IsAvailable() == true;
 
     /// <inheritdoc />
     public Task<bool> IsDotnetAvailableAsync(CancellationToken cancellationToken = default) =>
@@ -216,6 +220,13 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         // 生成ターゲット→プロファイル（csproj／README・プロンプト・成果物検索パターンの正本）を解決する
         var profile = MockProjectTargetProfile.Resolve(target);
 
+        // 実行器を組み立てられない構成（エンジンファクトリの無い API キー方式）は、何も書き出す前に止める
+        var agent =
+            _agentFactory(backend)
+            ?? throw new InvalidOperationException(
+                $"The {backend} backend cannot run the mock project generation because no chat engine factory was supplied."
+            );
+
         // 1) 決定的スキャフォールド（データ層コード＋csproj＋README＋design/mock/ 同梱）を書き出す
         try
         {
@@ -233,7 +244,7 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
 
         // 2) 選択バックエンドの実行器で 1 回分のオーケストレーションを行い、最終ビルドを検証する
         var runner = new MockProjectAgentRunner(
-            _agentFactory(backend),
+            agent,
             _buildRunner,
             _timeout,
             profile,

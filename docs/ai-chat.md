@@ -85,18 +85,24 @@ The target is **Blazor Web App** (the default) or **WPF (.NET)**.
 Blazor Web App is globally interactive with InteractiveServer, and reproduces the mock natively for the web by porting the screens' HTML and shared `style.css` as faithfully as possible.
 QuickER generates the solution, the csproj files, and the data-layer code (Entity / EditModel / Mapper / an in-memory Repository, plus the QuickER Repository when the diagram's dialect supports it) deterministically from the ER model, so the AI only has to write the UI layer.
 The mock folder is bundled under `design/mock/`, and the AI implements the UI from it.
+The generated csproj references the same package versions as QuickER itself, including the fixed `SQLitePCLRaw` that overrides the vulnerable version `Microsoft.Data.Sqlite` brings in.
 
 With Claude Code, Codex, or Copilot, the agent edits files and iterates on `dotnet build` until it passes or the run hits its overall time limit.
+The agent is told to build the solution by name (`dotnet build <project name>.sln`), so another solution or project in the output folder does not get in its way.
 With an API key, the model submits the files in a single deterministic pass (no self-correction, plus one fix round if the build fails), so it may fail more often.
 Either way, QuickER verifies the result with its own final `dotnet build`.
 An additional-instructions field lets you pass extra guidance for that implementation.
 
 If the output folder already holds files or folders, you get a confirmation listing them before anything is written.
-Generation overwrites the solution, the csproj files, `README-QuickER.md`, `Generated/` and `design/mock/` with the same names, which is how you regenerate under the same project name, and leaves every other file alone.
+Generation overwrites the solution, the csproj files and `README-QuickER.md` with the same names, which is how you regenerate under the same project name, and leaves every other file alone.
+`Generated/` and `design/mock/` are emptied before they are written again, so nothing from the previous run is left there, such as code generated for another database or the HTML of a screen you have since removed.
+If the mock folder you chose is one of those two folders, sits inside one, or contains one (for example the `design/mock/` of a previous output), generation stops before writing anything, so your mock folder is never deleted.
 
 This second step is an aid for PoCs and prototyping.
 Depending on the AI model and the connection method, build errors may remain.
 When the final build fails, the generated files and the log are left in the output folder so you can fix them yourself.
+An unexpected error during the run is reported the same way as a failure of the backend, and the log (`quickr-mock-generation.log`) is written in every case.
+Interrupting stops the run at any point, including while the final build is running.
 
 ## Notes
 
