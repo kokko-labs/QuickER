@@ -593,9 +593,6 @@
   <data name="Undo_GroupRemoveEntities" xml:space="preserve">
     <value>Bulk delete entities: {0}</value>
   </data>
-  <data name="Undo_ImportSchema" xml:space="preserve">
-    <value>Import schema from DB</value>
-  </data>
   <data name="Undo_MoveColumnOrder" xml:space="preserve">
     <value>Reorder column: {0}</value>
   </data>

@@ -13,6 +13,12 @@ namespace QuickER.Tests.Gui.Services;
 /// <remarks>
 /// 実 <see cref="FileSystemWatcher"/> と一時ファイルを使う。タイミング依存はポーリング＋タイムアウトで
 /// 頑健化し、固定 <c>Sleep</c> による決め打ち待ちを避ける。デバウンス幅は短め（150ms）にして所要時間を抑える。
+/// <para>
+/// 通知を待つ上限（<see cref="WaitUntil"/> の既定）は 30 秒にする。監視器のコールバックもデバウンスのタイマも
+/// スレッドプールで走るため、並列実行の負荷でスレッドが空かないと通知は数秒遅れて届く（全件実行の開始直後に
+/// 走るときが最も遅く、5 秒を超え得る）。製品はこの遅れの上限を約束しておらず、待つのは「最終的に届くこと」なので、
+/// 上限を伸ばしても時間がかかるのは本当に届かなかったときだけになる。
+/// </para>
 /// </remarks>
 public sealed class DocumentFileWatcherTests : IDisposable
 {
@@ -80,7 +86,7 @@ public sealed class DocumentFileWatcherTests : IDisposable
     }
 
     /// <summary>述語が真になるまで、または timeout まで短間隔でポーリングする</summary>
-    private static bool WaitUntil(Func<bool> predicate, int timeoutMs = 5000)
+    private static bool WaitUntil(Func<bool> predicate, int timeoutMs = 30000)
     {
         var sw = Stopwatch.StartNew();
 

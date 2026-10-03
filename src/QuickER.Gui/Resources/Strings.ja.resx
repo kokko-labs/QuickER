@@ -616,9 +616,6 @@
   <data name="Undo_GroupRemoveEntities" xml:space="preserve">
     <value>エンティティ一括削除: {0} 個</value>
   </data>
-  <data name="Undo_ImportSchema" xml:space="preserve">
-    <value>DB からスキーマ取込</value>
-  </data>
   <data name="Undo_MoveColumnOrder" xml:space="preserve">
     <value>列順変更: {0}</value>
   </data>

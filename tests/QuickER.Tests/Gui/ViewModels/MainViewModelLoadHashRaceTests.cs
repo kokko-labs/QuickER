@@ -250,7 +250,8 @@ public sealed class MainViewModelLoadHashRaceTests : IDisposable
             // 1 回目の外部書き込み → 監視 → 再読込（その読み取り直後に 2 回目が割り込む）
             WriteDiagram(path, "External");
 
-            var deadline = DateTime.UtcNow.AddSeconds(15);
+            // 監視の通知はスレッドプールで届くため、並列実行の負荷で数秒遅れ得る（届けばすぐ抜ける）
+            var deadline = DateTime.UtcNow.AddSeconds(30);
 
             while (
                 DateTime.UtcNow < deadline

@@ -114,30 +114,6 @@ public sealed class MainViewModelBulkDiagramUpdateTests
         vm.UndoRedo.CanUndo.Should().BeFalse("一括置換の後始末（列ルールの適用）は履歴に積まない");
     }
 
-    /// <summary>取込コマンドの Execute / Undo も一括更新を通り、列ルールを 1 回ずつだけ適用することを検証する</summary>
-    [Fact(DisplayName = "取込コマンドの実行と取り消しは列ルールを 1 回ずつだけ適用する")]
-    public void ImportSchemaCommand_RecomputesOnceForExecuteAndUndo()
-    {
-        var vm = new MainViewModel();
-        vm.ReplaceDiagramFromModule(BuildStar(10));
-        var diagram = BuildStar(20);
-        var command = new ImportSchemaCommand(vm, diagram.Entities, diagram.Relationships, "取込");
-
-        var before = vm.RelationshipRuleApplicationCountForTests;
-        command.Execute();
-        (vm.RelationshipRuleApplicationCountForTests - before).Should().Be(1);
-        vm.Relationships.Should().HaveCount(20);
-
-        before = vm.RelationshipRuleApplicationCountForTests;
-        command.Undo();
-        (vm.RelationshipRuleApplicationCountForTests - before).Should().Be(1);
-        vm.Relationships.Should().HaveCount(10);
-        vm.Relationships.SelectMany(r => r.Target.Columns)
-            .Where(c => c.Name == "ParentId")
-            .Should()
-            .OnlyContain(c => c.IsForeignKey, "戻した図にも列ルールが付け直される");
-    }
-
     /// <summary>入れ子の追跡停止は、最外側の終了時に 1 回だけスナップショットを取り直すことを検証する</summary>
     [Fact(DisplayName = "入れ子の追跡停止はスナップショットを最外側で 1 回だけ取り直す")]
     public void NestedRunWithoutTracking_RefreshesOnlyAtOutermost()

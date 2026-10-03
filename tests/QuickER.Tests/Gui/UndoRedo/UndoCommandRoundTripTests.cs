@@ -68,7 +68,6 @@ public class UndoCommandRoundTripTests
             [typeof(GroupRemoveEntitiesCommand)] = BuildGroupRemoveEntities,
             [typeof(GroupChangeTitleColorCommand)] = BuildGroupChangeTitleColor,
             [typeof(DuplicateEntityCommand)] = BuildDuplicateEntity,
-            [typeof(ImportSchemaCommand)] = BuildImportSchema,
             [typeof(ArrangeEntitiesCommand)] = BuildArrangeEntities,
             [typeof(PropertyChangeCommand)] = BuildPropertyChange,
             [typeof(SnapshotChangeCommand)] = BuildSnapshotChange,
@@ -374,27 +373,6 @@ public class UndoCommandRoundTripTests
         main.Entities.Add(original);
 
         return new UndoScenario(new DuplicateEntityCommand(main, original), () => Describe(main));
-    }
-
-    private static UndoScenario BuildImportSchema()
-    {
-        var main = new MainViewModel();
-        AddRelatedEntities(main);
-
-        var importedParent = NewEntityModel("ImportedParent");
-        var importedChild = NewEntityModel("ImportedChild");
-        var importedRelationship = new Relationship
-        {
-            Id = Guid.NewGuid(),
-            SourceEntityId = importedParent.Id,
-            TargetEntityId = importedChild.Id,
-            Type = RelationshipType.OneToMany,
-        };
-
-        return new UndoScenario(
-            new ImportSchemaCommand(main, [importedParent, importedChild], [importedRelationship]),
-            () => Describe(main)
-        );
     }
 
     private static UndoScenario BuildArrangeEntities()

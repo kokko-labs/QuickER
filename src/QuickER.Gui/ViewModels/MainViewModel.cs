@@ -2180,9 +2180,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// クリアし、空になった後に退避分を解除する。
     /// </para>
     /// <para>
-    /// 図を丸ごと入れ替える全経路（新規・開く・取込・DB 取込・AI 生成・外部変更の再読込は
-    /// <c>ReplaceDiagram</c> 経由、取込コマンドの Execute / Undo は <c>ImportSchemaCommand</c>）が
-    /// 自前の <c>Clear()</c> ではなくこれを呼ぶ。
+    /// 図を丸ごと入れ替える全経路（新規・開く・取込・DB 取込・AI 生成・外部変更の再読込）は
+    /// <c>ReplaceDiagram</c> を通り、自前の <c>Clear()</c> ではなくこれを呼ぶ。
     /// </para>
     /// </remarks>
     internal void ClearDiagramCollections()
@@ -2214,7 +2213,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// 購読の着脱と変更追跡の着脱は止めない（要素ごとに必要）。
     /// </para>
     /// <para>
-    /// 図を丸ごと入れ替える経路（<see cref="ReplaceDiagram"/> と <c>ImportSchemaCommand</c> の Execute / Undo）が使う。
+    /// 図を丸ごと入れ替える経路（<see cref="ReplaceDiagram"/>）が使う。
     /// </para>
     /// </remarks>
     internal void RunBulkDiagramUpdate(Action action)
@@ -2280,7 +2279,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>リレーションの増減に応じて端点購読・変更追跡を切り替え、カラムの PK/FK ルールを再適用する</summary>
     /// <remarks>
     /// <c>ObservableCollection.Clear()</c> は Reset 通知で <c>OldItems</c> を持たないため、
-    /// 一括置換の経路（<see cref="ReplaceDiagram"/> / <c>ImportSchemaCommand</c>）は素の Clear ではなく
+    /// 一括置換の経路（<see cref="ReplaceDiagram"/>）は素の Clear ではなく
     /// <see cref="ClearDiagramCollections"/> を呼ぶ（購読解除の取りこぼしを防ぐ）
     /// </remarks>
     private void OnRelationshipsCollectionChanged(

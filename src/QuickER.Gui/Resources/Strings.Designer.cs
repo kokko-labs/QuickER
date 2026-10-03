@@ -1249,12 +1249,6 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string Undo_ImportSchema {
-            get {
-                return ResourceManager.GetString("Undo_ImportSchema", resourceCulture);
-            }
-        }
-        
         public static string Undo_MoveColumnOrder {
             get {
                 return ResourceManager.GetString("Undo_MoveColumnOrder", resourceCulture);
