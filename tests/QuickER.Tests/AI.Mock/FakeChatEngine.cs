@@ -39,6 +39,10 @@ internal sealed class FakeChatEngine : IErChatEngine
     /// <summary>保留していたターン完了（成功）を通知する</summary>
     public void CompleteHeldTurn() => TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
 
+    /// <summary>保留中のターンを失敗（<paramref name="error"/> が null なら中断）として完了させる</summary>
+    public void FailHeldTurn(string? error) =>
+        TurnCompleted?.Invoke(this, new ErChatTurnResult(false, error));
+
     /// <summary>直近のツール実行結果（テストからの検証用）</summary>
     public (string Result, bool Success)? LastToolResult { get; private set; }
 

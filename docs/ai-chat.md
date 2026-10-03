@@ -49,10 +49,13 @@ Leaving the model empty uses the CLI's default.
 The connection tab you used last is remembered and selected automatically the next time you start.
 The connection tabs are disabled while a response is in progress.
 Interrupt the response before switching.
+Switching tabs is also refused while a new conversation is starting.
 
 ## What you can do
 
-- **Generate a diagram**: describe your requirements and it creates tables, columns, and relationships
+- **Generate a diagram**: describe your requirements and it creates tables, columns, and relationships.
+  When a response that started from an empty diagram creates tables, the whole diagram is arranged automatically at the end of the response.
+  The tables it created are arranged even when the response fails or is interrupted.
 - **Edit a diagram**: add to, change, or delete from an existing diagram.
   Operations on tables, columns, and relationships go onto the Undo/Redo history, so you can revert them.
   Named-query edits are applied directly and are not part of that history.
@@ -64,6 +67,9 @@ Interrupt the response before switching.
   - **Claude Code**: images, PDFs, text, and other binary files as well
   - **Copilot**: images only
   - **Codex**: attachments are not supported
+
+  Attachments are cleared when a response completes.
+  They stay when the response fails or is interrupted, so you can send them again as they are.
 - **AI mock generation**: generate web mockup screens from the current ER diagram, saved as a mock folder (see below)
 
 ## AI mock generation

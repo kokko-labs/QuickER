@@ -172,6 +172,9 @@
   <data name="ClaudeCode_Guidance_Inconclusive" xml:space="preserve">
     <value>しばらくして「再確認」を押してください。</value>
   </data>
+  <data name="ClaudeCode_Guidance_CheckFailedFormat" xml:space="preserve">
+    <value>確認を実行できませんでした: {0}</value>
+  </data>
   <data name="ClaudeCode_Status_Unconfirmed" xml:space="preserve">
     <value>未確認</value>
   </data>

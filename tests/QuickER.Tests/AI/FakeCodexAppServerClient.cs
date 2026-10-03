@@ -115,6 +115,22 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     /// <summary>StartAsync で投げる例外（非 null なら起動失敗を模擬する）</summary>
     public Exception? StartException { get; set; }
 
+    /// <summary>非 null なら StartAsync のハンドシェイクをこのタスクの完了まで待たせる</summary>
+    /// <remarks>
+    /// 待つ間は実クライアントと同じく <see cref="IsStarted"/> が真（プロセスと stdin はできている）になり、
+    /// 重ねて呼ばれた StartAsync は何もせずに戻る（実クライアントの <c>if (IsStarted) return;</c> と同じ）。
+    /// </remarks>
+    public Task? StartGate { get; set; }
+
+    /// <summary>ReadAccountAsync が呼ばれた回数</summary>
+    public int ReadAccountCount { get; private set; }
+
+    /// <summary>ハンドシェイクの完了前（StartGate を待っている間）に ReadAccountAsync が呼ばれた回数</summary>
+    public int ReadAccountBeforeHandshakeCount { get; private set; }
+
+    /// <summary>StartGate を待っている StartAsync の数</summary>
+    private int _handshakesInProgress;
+
     public Task StartAsync(
         CodexAppServerSettings settings,
         string clientName,
@@ -130,8 +146,28 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
             throw StartException;
         }
 
+        if (_handshakesInProgress > 0)
+        {
+            return Task.CompletedTask;
+        }
+
         IsStarted = true;
-        return Task.CompletedTask;
+        return StartGate is null ? Task.CompletedTask : WaitHandshakeAsync(StartGate);
+    }
+
+    /// <summary>ハンドシェイクの完了を模擬して待つ</summary>
+    private async Task WaitHandshakeAsync(Task gate)
+    {
+        _handshakesInProgress++;
+
+        try
+        {
+            await gate;
+        }
+        finally
+        {
+            _handshakesInProgress--;
+        }
     }
 
     /// <summary>実クライアントと同じく「再接続できる停止」を模擬する（接続断イベントは出さない）</summary>
@@ -151,7 +187,17 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     public Task<CodexAccountInfo> ReadAccountAsync(
         bool refreshToken,
         CancellationToken cancellationToken = default
-    ) => Task.FromResult(NextAccountInfo);
+    )
+    {
+        ReadAccountCount++;
+
+        if (_handshakesInProgress > 0)
+        {
+            ReadAccountBeforeHandshakeCount++;
+        }
+
+        return Task.FromResult(NextAccountInfo);
+    }
 
     public Task<CodexLoginStartResult> LoginWithApiKeyAsync(
         string apiKey,

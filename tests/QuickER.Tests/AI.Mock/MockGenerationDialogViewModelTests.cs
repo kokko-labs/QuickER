@@ -172,7 +172,12 @@ public class MockGenerationDialogViewModelTests
         FakeChatEngine[] engineBox,
         string baseFolder,
         string mockFolder
-    ) CreateVm(ErDiagram diagram, bool setMockFolder = true, StubDialogService? dialogs = null)
+    ) CreateVm(
+        ErDiagram diagram,
+        bool setMockFolder = true,
+        StubDialogService? dialogs = null,
+        string? settingsFolder = null
+    )
     {
         var baseFolder = Path.Combine(
             Path.GetTempPath(),
@@ -189,7 +194,9 @@ public class MockGenerationDialogViewModelTests
             new SyncUiDispatcher(),
             files: null,
             // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %LOCALAPPDATA% を保護）
-            settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
+            settingsStore: new AiSettingsStore(
+                settingsFolder ?? Path.Combine(baseFolder, "settings")
+            ),
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,
             claudeCodeEngineFactory: null,
@@ -3290,6 +3297,96 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
+            Cleanup(baseFolder);
+        }
+    }
+
+    // ── 1-8 の対応（AI チャットと同型の箇所） ──
+
+    /// <summary>
+    /// 失敗・中断したターンでは添付を消さず、成功したターンで消すことを検証する
+    /// （エンジンの多くは失敗を例外でなく TurnCompleted(false) で返すため、送信の戻りで消すと送れなかった添付まで消える）。
+    /// </summary>
+    [Theory(DisplayName = "失敗・中断したターンでは添付が残り成功したターンで消える")]
+    [InlineData("session failed")]
+    [InlineData(null)]
+    public async Task Attachments_KeptOnFailedOrInterruptedTurn_ClearedOnSuccess(string? error)
+    {
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.ApplyClaudeCodeReadiness(true, "ログイン済み", ConnectionHealth.Ready, string.Empty);
+            vm.MockFolder = mockFolder;
+            vm.StartConversationCommand.Execute(null);
+            engineBox[0].HoldTurnCompletion = true;
+
+            vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
+            vm.UserInput = "この画面イメージで作って";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+            engineBox[0].SentAttachments.Should().ContainSingle().Which.Should().HaveCount(1);
+
+            engineBox[0].FailHeldTurn(error);
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            vm.Attachments.Items.Should().HaveCount(1, "送れなかった添付は送り直せるように残す");
+
+            vm.UserInput = "もう一度";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+            engineBox[0].CompleteHeldTurn();
+
+            vm.Attachments.Items.Should().BeEmpty("成功したターンで送った添付は消す");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 成功したターンのモデル履歴の保存が失敗しても、ターンは成功のまま（エラー表示にならない）で、
+    /// 保存できなかった理由がステータスに出ることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "モデル履歴の保存に失敗しても成功したターンは成功のまま")]
+    public async Task SuccessfulTurn_ModelHistorySaveFails_StaysSuccessful()
+    {
+        // 保存先フォルダと同じパスにファイルを置く＝設定の書き込みが必ず失敗する
+        var blockedFolder = Path.Combine(
+            Path.GetTempPath(),
+            $"QuickERTests-blocked-{Guid.NewGuid():N}"
+        );
+        File.WriteAllText(blockedFolder, "block");
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram(), settingsFolder: blockedFolder);
+
+        try
+        {
+            // 前提の確認: この構成では設定の保存が実際に落ちる
+            var save = vm.SaveSettings;
+            save.Should().Throw<Exception>();
+
+            // ローカル LLM のカタログに無いモデル＝成功ターンで履歴へ書き込みに行く
+            vm.Connection.ApiModel = "qwen3.6:35b";
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "管理画面を作って";
+
+            var send = () => vm.SendMessageCommand.ExecuteAsync(null);
+            await send.Should().NotThrowAsync();
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            var prefix = MockStrings.Mock_ModelHistorySaveFailedFormat;
+            vm.StatusMessage.Should().StartWith(prefix[..prefix.IndexOf('{')]);
+            var errorFormat = MockStrings.Mock_ErrorSystemFormat;
+            var errorPrefix = errorFormat[..errorFormat.IndexOf('{')];
+            vm.Messages.Should()
+                .NotContain(m =>
+                    m.Role == ErChatMessageRole.System
+                    && m.Content.StartsWith(errorPrefix, StringComparison.Ordinal)
+                );
+        }
+        finally
+        {
+            File.Delete(blockedFolder);
             Cleanup(baseFolder);
         }
     }

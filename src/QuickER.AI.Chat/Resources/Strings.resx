@@ -157,6 +157,12 @@
   <data name="Chat_SwitchBackendBlockedDuringTurn" xml:space="preserve">
     <value>The connection method cannot be switched while a response is in progress. Interrupt the response first.</value>
   </data>
+  <data name="Chat_SwitchBackendBlockedWhileStarting" xml:space="preserve">
+    <value>The connection method cannot be switched while a new conversation is starting. Wait for it to start.</value>
+  </data>
+  <data name="Chat_ConnectionCheckFailedFormat" xml:space="preserve">
+    <value>Could not check the connection: {0}</value>
+  </data>
   <data name="Chat_SendFailedFormat" xml:space="preserve">
     <value>Failed to send: {0}</value>
   </data>
@@ -168,6 +174,12 @@
   </data>
   <data name="Chat_ResponseCompleted" xml:space="preserve">
     <value>Response completed.</value>
+  </data>
+  <data name="Chat_ModelHistorySaveFailedFormat" xml:space="preserve">
+    <value>Response completed. The model history could not be saved: {0}</value>
+  </data>
+  <data name="Chat_SettingsSaveFailedFormat" xml:space="preserve">
+    <value>The settings could not be saved: {0}</value>
   </data>
   <data name="Chat_ErrorSystemFormat" xml:space="preserve">
     <value>Error: {0}</value>
@@ -236,18 +248,6 @@ Always create and modify ER diagrams with the provided tools ({0}). Do not use f
   <data name="ErDesign_ResponseLanguageRule" xml:space="preserve">
     <value># Response language
 Default to English for all responses (the language of the app UI). Switch only if the user's latest chat message is clearly written in a different language - then use that language.</value>
-  </data>
-  <data name="ErDesign_NamingSnakeCase" xml:space="preserve">
-    <value>- Table and column names must be snake_case (e.g. customer_order, customer_id).</value>
-  </data>
-  <data name="ErDesign_NamingPascalCase" xml:space="preserve">
-    <value>- Table and column names must be PascalCase (e.g. CustomerOrder, CustomerId).</value>
-  </data>
-  <data name="ErDesign_TableNamePlural" xml:space="preserve">
-    <value>- Table names must be plural (e.g. Customers, Orders).</value>
-  </data>
-  <data name="ErDesign_TableNameSingular" xml:space="preserve">
-    <value>- Table names must be singular (e.g. Customer, Order).</value>
   </data>
   <data name="QueryTool_SetSuccessUpdated" xml:space="preserve">
     <value>Updated query '{0}' on table '{1}' (returns {2}, {3}).</value>
@@ -395,5 +395,8 @@ Default to English for all responses (the language of the app UI). Switch only i
   </data>
   <data name="QueryTool_InvalidArgumentsJson" xml:space="preserve">
     <value>Could not parse the arguments JSON for tool '{0}'.</value>
+  </data>
+  <data name="QueryTool_ArgumentsNotObject" xml:space="preserve">
+    <value>The arguments for tool '{0}' must be a JSON object.</value>
   </data>
 </root>

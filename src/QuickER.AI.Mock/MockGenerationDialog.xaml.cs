@@ -25,7 +25,7 @@ public partial class MockGenerationDialog : Window
     public MockGenerationDialogViewModel ViewModel { get; }
 
     /// <summary>Codex 認証状態のプローブ用エンジン（ツールホスト無し）</summary>
-    private readonly CodexChatEngine? _codexProbe;
+    private readonly CodexChatEngine _codexProbe;
 
     /// <summary>Claude Code ログイン状態のプローブ用エンジン（ツールホスト無し）</summary>
     private readonly ClaudeCodeChatEngine _claudeCodeProbe;
@@ -125,6 +125,8 @@ public partial class MockGenerationDialog : Window
         ViewModel.PreviewClearRequested += OnPreviewClearRequested;
         Preview.CurrentFileChanged += OnPreviewCurrentFileChanged;
         ViewModel.Messages.CollectionChanged += (_, _) => ScrollToBottom();
+        // ストリーミングで吹き出しが伸びたときも、末尾付近を見ていれば追従する（読み返し中は動かさない）
+        ChatScrollFollower.Attach(ChatScrollViewer);
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         Loaded += OnLoaded;
         Closing += OnWindowClosing;
@@ -175,7 +177,10 @@ public partial class MockGenerationDialog : Window
         }
     }
 
-    /// <summary>×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）</summary>
+    /// <summary>
+    /// ×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）。
+    /// 保存に失敗しても非表示にし、失敗はモーダルで知らせる。
+    /// </summary>
     private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_isForceClosing)
@@ -184,8 +189,7 @@ public partial class MockGenerationDialog : Window
         }
 
         e.Cancel = true;
-        ViewModel.SaveSettings();
-        Hide();
+        ViewModel.SaveSettingsAndHide(Hide);
     }
 
     /// <summary>
@@ -484,11 +488,6 @@ public partial class MockGenerationDialog : Window
     /// <summary>Codex 接続を確立し、認証状態を ViewModel へ反映する</summary>
     private async Task EnsureCodexConnectedAsync()
     {
-        if (_codexProbe is null)
-        {
-            return;
-        }
-
         _codexProbe.ModelProvider = ViewModel.Connection.CodexModelProvider;
         _codexProbe.Model = ViewModel.Connection.CodexModel;
         await _codexProbe.InitializeAsync();
@@ -497,20 +496,12 @@ public partial class MockGenerationDialog : Window
     /// <summary>Codex アカウント状態を取り直す（「再確認」）</summary>
     private async Task RefreshCodexAsync()
     {
-        if (_codexProbe is not null)
-        {
-            await _codexProbe.RefreshAccountStateAsync();
-        }
+        await _codexProbe.RefreshAccountStateAsync();
     }
 
     /// <summary>Codex 認証状態の変化を ViewModel へ反映する</summary>
     private void OnCodexAuthStateChanged(object? sender, CodexAuthState state)
     {
-        if (_codexProbe is null)
-        {
-            return;
-        }
-
         var ready = _codexProbe.IsReady;
         // CLI 未検出はユーザー操作（インストール）が要るため、未接続の灰ではなく赤で出す
         var level =

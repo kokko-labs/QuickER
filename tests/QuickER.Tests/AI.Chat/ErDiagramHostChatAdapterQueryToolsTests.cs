@@ -4,6 +4,7 @@ using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Tests.TestDoubles;
+using ChatStrings = QuickER.AI.Chat.Resources.Strings;
 
 namespace QuickER.Tests.AI.Chat;
 
@@ -253,6 +254,32 @@ public class ErDiagramHostChatAdapterQueryToolsTests
         var (_, success) = adapter.ToolHost.Execute(QueryToolCore.SetQueryToolName, "{not json");
 
         success.Should().BeFalse();
+        host.LastReplacedQueries.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 引数の根が JSON オブジェクトでない（<c>[]</c>・<c>null</c>・数値・文字列）とき、例外にせず
+    /// ローカライズ済みのエラーで失敗し、ホストへ書き戻さないことを検証する
+    /// （素通しすると共有コアの <c>TryGetProperty</c> が英語の生メッセージの例外で落ちる）。
+    /// list_queries は引数を読まないので対象外。
+    /// </summary>
+    [Theory(DisplayName = "クエリツールの引数の根がオブジェクトでなければエラーで失敗する")]
+    [InlineData("set_query", "[]")]
+    [InlineData("set_query", "null")]
+    [InlineData("remove_query", "1")]
+    [InlineData("remove_query", "\"text\"")]
+    public void QueryTool_NonObjectRoot_FailsWithLocalizedError(
+        string toolName,
+        string argumentsJson
+    )
+    {
+        var diagram = BuildDiagram(out _);
+        var (adapter, host) = CreateAdapter(diagram);
+
+        var (result, success) = adapter.ToolHost.Execute(toolName, argumentsJson);
+
+        success.Should().BeFalse();
+        result.Should().Be(string.Format(ChatStrings.QueryTool_ArgumentsNotObject, toolName));
         host.LastReplacedQueries.Should().BeNull();
     }
 }

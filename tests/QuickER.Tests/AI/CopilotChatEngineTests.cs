@@ -641,4 +641,54 @@ public class CopilotChatEngineTests
         client.RaiseIdle();
         completions.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// 接続が実行中のあいだに重ねて呼んでも、copilot の起動は 1 回だけであることを検証する
+    /// （2 本が同時に起動すると、後のクライアントが先のクライアントを置き換え、先の copilot ランタイムが残る）。
+    /// </summary>
+    [Fact(DisplayName = "接続中に重ねて接続しても copilot の起動は 1 回")]
+    public async Task Connect_WhileConnecting_StartsOnce()
+    {
+        var gate = new TaskCompletionSource();
+        var client = new FakeCopilotRuntimeClient { StartGate = gate.Task };
+        var engine = CreateEngine(client);
+
+        var first = engine.InitializeAsync(TestContext.Current.CancellationToken);
+        var second = engine.RefreshAsync(TestContext.Current.CancellationToken);
+
+        client.StartCallCount.Should().Be(1);
+
+        gate.SetResult();
+        await first;
+        await second;
+
+        client.StartCallCount.Should().Be(1);
+        engine.IsReady.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>1 回目の接続が失敗した後の接続は、失敗を返し続けず起動をやり直すことを検証する</summary>
+    [Fact(DisplayName = "接続が失敗した後の接続は起動をやり直す")]
+    public async Task Connect_AfterFailure_RetriesStart()
+    {
+        var client = new FakeCopilotRuntimeClient
+        {
+            StartError = new InvalidOperationException("first start fails"),
+        };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        engine.IsReady.Should().BeFalse();
+
+        client.StartError = null;
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        client
+            .StartCallCount.Should()
+            .Be(1, "失敗した起動は数えない（フェイクは成功した起動だけを数える）");
+        engine.IsReady.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
 }

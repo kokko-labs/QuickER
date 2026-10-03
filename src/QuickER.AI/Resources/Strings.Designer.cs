@@ -281,6 +281,12 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string ClaudeCode_Guidance_CheckFailedFormat {
+            get {
+                return ResourceManager.GetString("ClaudeCode_Guidance_CheckFailedFormat", resourceCulture);
+            }
+        }
+
         public static string ClaudeCode_Status_Unconfirmed {
             get {
                 return ResourceManager.GetString("ClaudeCode_Status_Unconfirmed", resourceCulture);

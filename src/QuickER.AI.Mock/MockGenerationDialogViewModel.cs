@@ -1003,8 +1003,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 await _session.SendFeedbackAsync(message, attachments).ConfigureAwait(true);
             }
 
-            // 送信できたら添付をクリアする（メッセージ単位のライフサイクル）
-            Attachments.Clear();
+            // 添付はここでは消さない。エンジンの多くは失敗を例外でなく TurnCompleted(false) で返すため、
+            // 送信の戻りで消すと、送れなかった添付まで消える。消すのはターンの成功時（ApplyTurnCompleted）
         }
         catch (Exception ex)
         {
@@ -1839,9 +1839,25 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         if (result.Success)
         {
-            // 成功したターンで使ったモデルを MRU 履歴へ記録する（ローカル LLM / Codex のガードは子 VM 側）
-            Connection.RecordSuccessfulModel();
+            // 送った添付はここで消す（失敗・中断では残し、送り直せるようにする）。
+            // ターン実行中は添付を足せないので、いま残っているのは送った添付だけ
+            Attachments.Clear();
             StatusMessage = Strings.Mock_ResponseCompleted;
+
+            // 成功したターンで使ったモデルを MRU 履歴へ記録する（ローカル LLM / Codex のガードは子 VM 側）。
+            // 記録は設定ファイルの書き込みを伴う。失敗してもターンの成功は変わらないので、ここで受け止める
+            // （漏らすと同期の Dispatcher.Invoke を通ってエンジンへ戻り、成功したターンが失敗として二度通知される）
+            try
+            {
+                Connection.RecordSuccessfulModel();
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = string.Format(
+                    Strings.Mock_ModelHistorySaveFailedFormat,
+                    ex.Message
+                );
+            }
         }
         else if (!string.IsNullOrWhiteSpace(result.Error))
         {
@@ -1857,6 +1873,40 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
     /// <remarks>接続タブの状態保存は子（<see cref="ChatConnectionSettingsViewModel.SaveSettings"/>）へ委譲する。</remarks>
     public void SaveSettings() => Connection.SaveSettings();
+
+    /// <summary>
+    /// × でウィンドウを閉じるときに、設定を保存してからウィンドウを隠す。
+    /// 保存に失敗してもウィンドウは必ず隠し、隠した後でモーダルのエラーで知らせる（理由はステータスにも残す）。
+    /// </summary>
+    /// <remarks>
+    /// 保存はディスクフル・権限などで落ちうる。例外を Closing から漏らすと、閉じる操作が取り消されたまま
+    /// 隠れもしないウィンドウが残る。隠したウィンドウのステータスは開き直すまで見えないため、失敗はモーダルで知らせる
+    /// （隠した後に出すので、オーナーは残っているウィンドウになる）。アプリ終了時の経路（ForceClose）は
+    /// <see cref="SaveSettings"/> を直接呼び、失敗は終了の記録へ残す。AI チャットの同名メソッドと同じ形。
+    /// </remarks>
+    /// <param name="hide">ウィンドウを隠す処理</param>
+    public void SaveSettingsAndHide(Action hide)
+    {
+        Exception? failure = null;
+
+        try
+        {
+            SaveSettings();
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
+        hide();
+
+        if (failure is not null)
+        {
+            var message = string.Format(Strings.Mock_SettingsSaveFailedFormat, failure.Message);
+            StatusMessage = message;
+            _dialogs.ShowError(message, Strings.Mock_WindowTitle);
+        }
+    }
 
     // ── 設定変更フック ──
 

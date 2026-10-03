@@ -155,10 +155,25 @@ public sealed class CodexChatEngine : IErChatEngine
 
     /// <summary>App Server を起動・接続し、アカウント状態を復元する</summary>
     /// <remarks>
+    /// <para>
     /// codex CLI が PATH に無いときはプロセス起動を試みず、未検出（赤・インストール案内）として返す。
     /// 起動を試みると Win32Exception になり「接続に失敗しました」という的外れな理由しか出せないため。
+    /// </para>
+    /// <para>
+    /// 接続が実行中のあいだに重ねて呼ばれたら、新しく接続せず実行中の接続を待つ（<see cref="SingleFlight"/>）。
+    /// 2 本目が 1 本目の起動直後・ハンドシェイク前の状態を「起動済み」と見て、アカウント状態を早く読みに行かないため。
+    /// 相乗りした呼び出しの <paramref name="cancellationToken"/> は待つのをやめることにだけ効く
+    /// （起動した呼び出しのトークンは接続へ渡るので、その取り消しは相乗りした呼び出しにも届く）。
+    /// </para>
     /// </remarks>
-    public async Task ConnectAsync(CancellationToken cancellationToken = default)
+    public Task ConnectAsync(CancellationToken cancellationToken = default) =>
+        _connect.RunAsync(ConnectCoreAsync, cancellationToken);
+
+    /// <summary>接続を重ねて走らせないための共有（実行中のあいだだけ）</summary>
+    private readonly SingleFlight _connect = new();
+
+    /// <summary><see cref="ConnectAsync"/> の本体</summary>
+    private async Task ConnectCoreAsync(CancellationToken cancellationToken)
     {
         if (!EnsureCliAvailable())
         {

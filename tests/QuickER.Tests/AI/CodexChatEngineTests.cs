@@ -1029,4 +1029,62 @@ public class CodexChatEngineTests
 
         await act.Should().ThrowAsync<NotSupportedException>();
     }
+
+    /// <summary>
+    /// 接続が実行中のあいだに重ねて呼んでも、App Server の起動は 1 回だけで、アカウント状態は
+    /// ハンドシェイクの完了後にしか読まないことを検証する（タブの素早い往復・タブ切替と「再確認」の重なり）。
+    /// </summary>
+    [Fact(
+        DisplayName = "接続中に重ねて接続しても起動は 1 回でハンドシェイク前にアカウントを読まない"
+    )]
+    public async Task Connect_WhileConnecting_SharesTheConnection()
+    {
+        var gate = new TaskCompletionSource();
+        var client = new FakeCodexAppServerClient { StartGate = gate.Task };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        var first = engine.ConnectAsync(TestContext.Current.CancellationToken);
+        var second = engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        client.StartCount.Should().Be(1);
+        client.ReadAccountBeforeHandshakeCount.Should().Be(0);
+
+        gate.SetResult();
+        await first;
+        await second;
+
+        client.StartCount.Should().Be(1);
+        client.ReadAccountCount.Should().Be(1);
+        client.ReadAccountBeforeHandshakeCount.Should().Be(0);
+    }
+
+    /// <summary>1 回目の接続が失敗した後の接続は、失敗を返し続けず起動をやり直すことを検証する</summary>
+    [Fact(DisplayName = "接続が失敗した後の接続は起動をやり直す")]
+    public async Task Connect_AfterFailure_RetriesStart()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            StartException = new InvalidOperationException("first start fails"),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        await engine.ConnectAsync(TestContext.Current.CancellationToken);
+        engine.IsStarted.Should().BeFalse();
+
+        client.StartException = null;
+        await engine.ConnectAsync(TestContext.Current.CancellationToken);
+
+        client.StartCount.Should().Be(2);
+        engine.IsStarted.Should().BeTrue();
+    }
 }

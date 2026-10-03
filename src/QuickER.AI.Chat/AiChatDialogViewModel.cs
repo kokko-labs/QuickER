@@ -28,7 +28,7 @@ public partial class AiChatDialogViewModel : ObservableObject
     public ChatConnectionSettingsViewModel Connection { get; }
 
     private readonly ChatTurnEngine _apiKeyEngine;
-    private readonly CodexChatEngine? _codexEngine;
+    private readonly CodexChatEngine _codexEngine;
     private readonly ClaudeCodeChatEngine _claudeCodeEngine;
     private readonly CopilotChatEngine _copilotEngine;
     private IErChatEngine _engine;
@@ -56,8 +56,25 @@ public partial class AiChatDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    [ObservableProperty]
-    private bool _isBusy;
+    private bool _isStartingConversation;
+
+    /// <summary>
+    /// 新しい会話の開始（エンジンの会話開始処理）を待っている最中か。
+    /// 待つ間に送信・タブ切替が通ると、待ち明けの会話リセットが送信済みのメッセージを消したり、
+    /// 切り替え後のエンジンへ「開始済み」の印を付けたりするため、待つ間はそれらを止める。
+    /// </summary>
+    private bool IsStartingConversation
+    {
+        get => _isStartingConversation;
+        set
+        {
+            if (_isStartingConversation != value)
+            {
+                _isStartingConversation = value;
+                NotifyReadinessChanged();
+            }
+        }
+    }
 
     private bool _isTurnInProgress;
 
@@ -88,14 +105,16 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// </summary>
     public bool CanEditConnectionSettings => !IsTurnInProgress;
 
-    /// <summary>新しい会話を開始できるか（接続・認証が整っており、かつターン実行中でないか）</summary>
-    public bool CanStartConversation => _engine.IsReady && !IsTurnInProgress;
+    /// <summary>新しい会話を開始できるか（接続・認証が整っており、ターン実行中でも会話の開始中でもないか）</summary>
+    public bool CanStartConversation =>
+        _engine.IsReady && !IsTurnInProgress && !IsStartingConversation;
 
     /// <summary>メッセージを送信できるか</summary>
     public bool CanSendMessage =>
         _conversationStarted
         && _engine.IsReady
         && !IsTurnInProgress
+        && !IsStartingConversation
         && !string.IsNullOrWhiteSpace(UserInput);
 
     /// <summary>クリア確認が必要な実質的な会話があるか（ユーザー／アシスタントの発言が 1 件以上）</summary>
@@ -117,9 +136,6 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>Codex 接続・認証状態の解決中か（解決までログインパネルのちらつきを抑止する）</summary>
     private bool _codexConnecting;
 
-    /// <summary>Codex 認証セクションを表示するか（openai プロバイダー時のみ）</summary>
-    public bool ShowCodexAuthSection => _codexEngine?.IsOpenAiProvider ?? false;
-
     /// <summary>
     /// Codex ログインパネルを表示するか（openai・認証必要・未ログイン、かつ接続解決済みのときのみ）。
     /// codex CLI 未検出のときは表示しない（ログインを促しても解決しないため。案内は
@@ -128,7 +144,7 @@ public partial class AiChatDialogViewModel : ObservableObject
     public bool ShowCodexLoginPanel =>
         !_codexConnecting
         && !_codexAuth.IsCliMissing
-        && (_codexEngine?.IsOpenAiProvider ?? false)
+        && _codexEngine.IsOpenAiProvider
         && _codexAuth.RequiresOpenAiAuth
         && _codexAuth.AuthMode == CodexAuthMode.None;
 
@@ -138,11 +154,6 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     /// <summary>Codex の案内文を表示するか（空なら行ごと隠す）</summary>
     public bool ShowCodexGuidance => !string.IsNullOrWhiteSpace(CodexGuidance);
-
-    /// <summary>Codex ログアウト可能か</summary>
-    public bool CanCodexLogout =>
-        _codexAuth.IsStarted
-        && (_codexAuth.AuthMode != CodexAuthMode.None || !_codexAuth.RequiresOpenAiAuth);
 
     /// <summary>Codex の状態ドット健全度（CLI 未検出/未ログイン=赤・接続中/未開始=灰・他=緑）</summary>
     public ConnectionHealth CodexStatusLevel
@@ -161,7 +172,7 @@ public partial class AiChatDialogViewModel : ObservableObject
             }
 
             if (
-                (_codexEngine?.IsOpenAiProvider ?? false)
+                _codexEngine.IsOpenAiProvider
                 && _codexAuth.RequiresOpenAiAuth
                 && _codexAuth.AuthMode == CodexAuthMode.None
             )
@@ -175,7 +186,7 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     /// <summary>Codex ログアウトボタンを表示するか（openai かつログイン済みのときのみ）</summary>
     public bool ShowCodexLogout =>
-        (_codexEngine?.IsOpenAiProvider ?? false) && _codexAuth.AuthMode != CodexAuthMode.None;
+        _codexEngine.IsOpenAiProvider && _codexAuth.AuthMode != CodexAuthMode.None;
 
     /// <summary>送信待ち添付を束ねる共通 VM 部品（チップ列・可否・追加/削除）</summary>
     public AttachmentListViewModel Attachments { get; }
@@ -300,32 +311,19 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <remarks>API キーエンジンはプロバイダー依存（合成ルールを注入済み）・Codex/Claude Code は固定値を公開する</remarks>
     private void RefreshAttachmentSupport() => Attachments.Support = _engine.AttachmentSupport;
 
-    /// <summary>ダイアログ表示時に API キーを読み込み、Codex タブなら自動接続する</summary>
-    /// <remarks>設定・候補の読込は ctor で <see cref="ChatConnectionSettingsViewModel.LoadSettings"/> 済み。</remarks>
-    public async Task InitializeAsync()
-    {
-        // 現在のプロバイダーの保存済み API キーを読み直す（子側で _isInitializing 抑止）
-        Connection.Initialize();
-
-        if (Connection.IsCodexBackend)
-        {
-            await EnsureCodexConnectedAsync().ConfigureAwait(true);
-        }
-        else if (Connection.IsClaudeCodeBackend)
-        {
-            await EnsureClaudeCodeInitializedAsync().ConfigureAwait(true);
-        }
-        else if (Connection.IsCopilotBackend)
-        {
-            await EnsureCopilotInitializedAsync().ConfigureAwait(true);
-        }
-    }
+    /// <summary>ダイアログ表示時に、現在のプロバイダーの保存済み API キーを読み込む</summary>
+    /// <remarks>
+    /// 設定・候補の読込は ctor で <see cref="ChatConnectionSettingsViewModel.LoadSettings"/> 済み。
+    /// 前回使った接続方式への切替（とそれに伴う接続）は、ダイアログがタブを復元したときの
+    /// 通常のタブ切替（<see cref="TryChangeBackend"/>）が行う。
+    /// </remarks>
+    public void Initialize() => Connection.Initialize();
 
     /// <summary>新しい会話を開始する</summary>
     [RelayCommand(CanExecute = nameof(CanStartConversation))]
     private async Task StartConversationAsync()
     {
-        IsBusy = true;
+        IsStartingConversation = true;
 
         try
         {
@@ -333,11 +331,10 @@ public partial class AiChatDialogViewModel : ObservableObject
             _conversationStarted = true;
             Messages.Clear();
             AddSystemMessage(Strings.Chat_ConversationStarted);
-            SendMessageCommand.NotifyCanExecuteChanged();
         }
         finally
         {
-            IsBusy = false;
+            IsStartingConversation = false;
         }
     }
 
@@ -358,6 +355,13 @@ public partial class AiChatDialogViewModel : ObservableObject
         if (IsTurnInProgress)
         {
             StatusMessage = Strings.Chat_SwitchBackendBlockedDuringTurn;
+            return false;
+        }
+
+        // 会話の開始を待つ間に切り替えると、待ち明けに切り替え後のエンジンへ「開始済み」の印が付く
+        if (IsStartingConversation)
+        {
+            StatusMessage = Strings.Chat_SwitchBackendBlockedWhileStarting;
             return false;
         }
 
@@ -418,11 +422,11 @@ public partial class AiChatDialogViewModel : ObservableObject
         _currentToolCallMessage = null;
         _diagramWasEmptyAtTurnStart = _host is not null && _host.IsEmpty;
 
+        // 添付はここでは消さない。エンジンの多くは失敗を例外でなく TurnCompleted(false) で返すため、
+        // 送信の戻りで消すと、送れなかった添付まで消える。消すのはターンの成功時（ApplyTurnCompleted）
         try
         {
             await _engine.SendAsync(prompt, attachments).ConfigureAwait(true);
-            // 送信できたら添付をクリアする（メッセージ単位のライフサイクル）
-            Attachments.Clear();
         }
         catch (Exception ex)
         {
@@ -490,11 +494,6 @@ public partial class AiChatDialogViewModel : ObservableObject
     [RelayCommand]
     private async Task CodexStartChatGptLoginAsync()
     {
-        if (_codexEngine is null)
-        {
-            return;
-        }
-
         var url = await _codexEngine.StartChatGptLoginAsync().ConfigureAwait(true);
 
         if (string.IsNullOrWhiteSpace(url))
@@ -529,49 +528,89 @@ public partial class AiChatDialogViewModel : ObservableObject
     [RelayCommand]
     private async Task CodexLogoutAsync()
     {
-        if (_codexEngine is not null)
-        {
-            await _codexEngine.LogoutAsync().ConfigureAwait(true);
-        }
+        await _codexEngine.LogoutAsync().ConfigureAwait(true);
     }
 
     /// <summary>Codex のアカウント状態を取り直す（「再確認」）</summary>
     [RelayCommand]
-    private async Task CodexRefreshAsync()
-    {
-        if (_codexEngine is not null)
-        {
-            await _codexEngine.RefreshAccountStateAsync().ConfigureAwait(true);
-        }
-    }
+    private Task CodexRefreshAsync() =>
+        RunProbeAsync(() => _codexEngine.RefreshAccountStateAsync());
 
     /// <summary>Claude のログイン状態を軽量プローブで取り直す（「再確認」）</summary>
     [RelayCommand]
-    private async Task ClaudeCodeRefreshAsync()
-    {
-        await _claudeCodeEngine.RefreshAsync().ConfigureAwait(true);
-    }
+    private Task ClaudeCodeRefreshAsync() => RunProbeAsync(() => _claudeCodeEngine.RefreshAsync());
 
     /// <summary>Copilot の接続・ログイン状態とモデル一覧を取り直す（「再確認」）</summary>
     [RelayCommand]
-    private async Task CopilotRefreshAsync()
+    private Task CopilotRefreshAsync() =>
+        RunProbeAsync(async () =>
+        {
+            await _copilotEngine.RefreshAsync().ConfigureAwait(true);
+            ApplyCopilotState();
+        });
+
+    /// <summary>
+    /// 接続状態の確認（タブ切替時の接続・「再確認」）を実行し、失敗はステータスへ出す（例外をウィンドウの外へ漏らさない）。
+    /// </summary>
+    /// <remarks>
+    /// タブ切替からは完了を待たずに起動するため、ここで受け止めないと例外が観測されずに消え、状態は灰のまま残る。
+    /// 「再確認」のコマンド（AsyncRelayCommand）は例外をディスパッチャへ投げ直すため、受け止めないとアプリが落ちる。
+    /// モック生成ダイアログの同名メソッドと同じ形。
+    /// </remarks>
+    /// <param name="probe">実行する確認</param>
+    private async Task RunProbeAsync(Func<Task> probe)
     {
-        await _copilotEngine.RefreshAsync().ConfigureAwait(true);
-        ApplyCopilotState();
+        try
+        {
+            await probe().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = string.Format(Strings.Chat_ConnectionCheckFailedFormat, ex.Message);
+        }
     }
 
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
     /// <remarks>接続タブの状態保存は子（<see cref="ChatConnectionSettingsViewModel.SaveSettings"/>）へ委譲する。</remarks>
     public void SaveSettings() => Connection.SaveSettings();
 
+    /// <summary>
+    /// × でウィンドウを閉じるときに、設定を保存してからウィンドウを隠す。
+    /// 保存に失敗してもウィンドウは必ず隠し、隠した後でモーダルのエラーで知らせる（理由はステータスにも残す）。
+    /// </summary>
+    /// <remarks>
+    /// 保存はディスクフル・権限などで落ちうる。例外を Closing から漏らすと、閉じる操作が取り消されたまま
+    /// 隠れもしないウィンドウが残る。隠したウィンドウのステータスは開き直すまで見えないため、失敗はモーダルで知らせる
+    /// （隠した後に出すので、オーナーは残っているウィンドウになる）。アプリ終了時の経路（ForceClose）は
+    /// <see cref="SaveSettings"/> を直接呼び、失敗は終了の記録へ残す。
+    /// </remarks>
+    /// <param name="hide">ウィンドウを隠す処理</param>
+    public void SaveSettingsAndHide(Action hide)
+    {
+        Exception? failure = null;
+
+        try
+        {
+            SaveSettings();
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
+        hide();
+
+        if (failure is not null)
+        {
+            var message = string.Format(Strings.Chat_SettingsSaveFailedFormat, failure.Message);
+            StatusMessage = message;
+            _dialogs.ShowError(message, Strings.Chat_WindowTitle);
+        }
+    }
+
     /// <summary>Codex 接続が未確立なら接続を試みる（解決中はログインパネルのちらつきを抑止する）</summary>
     private async Task EnsureCodexConnectedAsync()
     {
-        if (_codexEngine is null)
-        {
-            return;
-        }
-
         _codexEngine.ModelProvider = Connection.CodexModelProvider;
         _codexEngine.Model = Connection.CodexModel;
         SetCodexConnecting(true);
@@ -648,7 +687,7 @@ public partial class AiChatDialogViewModel : ObservableObject
                 UnsubscribeEngine(_engine);
                 _engine = Connection.SelectedBackend switch
                 {
-                    ErChatBackendKind.Codex when _codexEngine is not null => _codexEngine,
+                    ErChatBackendKind.Codex => _codexEngine,
                     ErChatBackendKind.ClaudeCode => _claudeCodeEngine,
                     ErChatBackendKind.Copilot => _copilotEngine,
                     _ => _apiKeyEngine,
@@ -660,17 +699,19 @@ public partial class AiChatDialogViewModel : ObservableObject
                 RefreshAttachmentSupport();
                 NotifyReadinessChanged();
 
+                // 完了は待たない（タブ切替を止めない）。失敗は RunProbeAsync がステータスへ出す。
+                // 素早い往復で重なっても、エンジンの接続・初期化は実行中の処理を共有するので二重に走らない
                 if (Connection.SelectedBackend == ErChatBackendKind.Codex)
                 {
-                    _ = EnsureCodexConnectedAsync();
+                    _ = RunProbeAsync(EnsureCodexConnectedAsync);
                 }
                 else if (Connection.SelectedBackend == ErChatBackendKind.ClaudeCode)
                 {
-                    _ = EnsureClaudeCodeInitializedAsync();
+                    _ = RunProbeAsync(EnsureClaudeCodeInitializedAsync);
                 }
                 else if (Connection.SelectedBackend == ErChatBackendKind.Copilot)
                 {
-                    _ = EnsureCopilotInitializedAsync();
+                    _ = RunProbeAsync(EnsureCopilotInitializedAsync);
                 }
 
                 break;
@@ -710,22 +751,14 @@ public partial class AiChatDialogViewModel : ObservableObject
                 break;
 
             case nameof(ChatConnectionSettingsViewModel.CodexModelProvider):
-                if (_codexEngine is not null)
-                {
-                    _codexEngine.ModelProvider = Connection.CodexModelProvider;
-                }
-
-                OnPropertyChanged(nameof(ShowCodexAuthSection));
-                OnPropertyChanged(nameof(ShowCodexLoginPanel));
+                _codexEngine.ModelProvider = Connection.CodexModelProvider;
+                // 状態ドット・ログイン／ログアウトの表示はいずれも openai プロバイダーかどうかに依る
+                NotifyCodexAuthPresentation();
                 NotifyReadinessChanged();
                 break;
 
             case nameof(ChatConnectionSettingsViewModel.CodexModel):
-                if (_codexEngine is not null)
-                {
-                    _codexEngine.Model = Connection.CodexModel;
-                }
-
+                _codexEngine.Model = Connection.CodexModel;
                 break;
 
             case nameof(ChatConnectionSettingsViewModel.ClaudeCodeModel):
@@ -792,7 +825,7 @@ public partial class AiChatDialogViewModel : ObservableObject
     private void OnCopilotAvailableModelsChanged(object? sender, EventArgs e) =>
         RunOnUi(() => Connection.CopilotAvailableModels = _copilotEngine.AvailableModels);
 
-    /// <summary>ストリーミング差分を組み立て中のアシスタント吹き出しへ追記する</summary>
+    /// <summary>ストリーミング差分を組み立て中のアシスタント吹き出しへ追記し、次のツール活動を新吹き出しにする</summary>
     private void ApplyDelta(string delta)
     {
         if (_currentAssistantMessage is null)
@@ -803,6 +836,9 @@ public partial class AiChatDialogViewModel : ObservableObject
                 Content = delta,
             };
             Messages.Add(_currentAssistantMessage);
+            // アシスタントの文が挟まったら、以後のツール活動は新しい吹き出しにする
+            // （前のツール吹き出しへ追記すると、表示の順序と実際の順序が食い違う）
+            _currentToolCallMessage = null;
         }
         else
         {
@@ -841,12 +877,30 @@ public partial class AiChatDialogViewModel : ObservableObject
         _currentToolCallMessage = null;
         CollapseToolCallMessages();
 
+        // 失敗・中断したターンでも、それまでのツール実行でテーブルはできている
+        ArrangeNewDiagramIfCreated();
+
         if (result.Success)
         {
-            // 成功したターンで使ったモデルを MRU 履歴へ記録する（ローカル LLM / Codex のガードは子 VM 側）
-            Connection.RecordSuccessfulModel();
-            ArrangeNewDiagramIfCreated();
+            // 送った添付はここで消す（失敗・中断では残し、送り直せるようにする）。
+            // ターン実行中は添付を足せないので、いま残っているのは送った添付だけ
+            Attachments.Clear();
             StatusMessage = Strings.Chat_ResponseCompleted;
+
+            // 成功したターンで使ったモデルを MRU 履歴へ記録する（ローカル LLM / Codex のガードは子 VM 側）。
+            // 記録は設定ファイルの書き込みを伴う。失敗してもターンの成功は変わらないので、ここで受け止める
+            // （漏らすと同期の Dispatcher.Invoke を通ってエンジンへ戻り、成功したターンが失敗として二度通知される）
+            try
+            {
+                Connection.RecordSuccessfulModel();
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = string.Format(
+                    Strings.Chat_ModelHistorySaveFailedFormat,
+                    ex.Message
+                );
+            }
         }
         else if (!string.IsNullOrWhiteSpace(result.Error))
         {
@@ -865,15 +919,19 @@ public partial class AiChatDialogViewModel : ObservableObject
         _codexAuth = state;
         CodexAccountSummary = state.AccountSummary;
         CodexGuidance = state.Guidance;
-        OnPropertyChanged(nameof(ShowCodexAuthSection));
-        OnPropertyChanged(nameof(ShowCodexLoginPanel));
-        OnPropertyChanged(nameof(CanCodexLogout));
-        OnPropertyChanged(nameof(ShowCodexLogout));
-        OnPropertyChanged(nameof(CodexStatusLevel));
+        NotifyCodexAuthPresentation();
         NotifyReadinessChanged();
     }
 
-    /// <summary>空の ER 図から始まったターンでエンティティが生成された場合のみ自動整列する</summary>
+    /// <summary>Codex の認証状態とプロバイダーに依る表示（ログインパネル・ログアウト・状態ドット）をまとめて通知する</summary>
+    private void NotifyCodexAuthPresentation()
+    {
+        OnPropertyChanged(nameof(ShowCodexLoginPanel));
+        OnPropertyChanged(nameof(ShowCodexLogout));
+        OnPropertyChanged(nameof(CodexStatusLevel));
+    }
+
+    /// <summary>空の ER 図から始まったターンでエンティティが生成された場合のみ自動整列する（ターンの成否は問わない）</summary>
     private void ArrangeNewDiagramIfCreated()
     {
         if (_diagramWasEmptyAtTurnStart && _host is not null && !_host.IsEmpty)

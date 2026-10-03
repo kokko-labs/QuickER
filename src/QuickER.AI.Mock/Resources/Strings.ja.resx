@@ -329,6 +329,12 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="Mock_ResponseCompleted" xml:space="preserve">
     <value>応答が完了しました。</value>
   </data>
+  <data name="Mock_ModelHistorySaveFailedFormat" xml:space="preserve">
+    <value>応答が完了しました。モデルの履歴は保存できませんでした: {0}</value>
+  </data>
+  <data name="Mock_SettingsSaveFailedFormat" xml:space="preserve">
+    <value>設定を保存できませんでした: {0}</value>
+  </data>
   <data name="Mock_ErrorSystemFormat" xml:space="preserve">
     <value>エラー: {0}</value>
   </data>

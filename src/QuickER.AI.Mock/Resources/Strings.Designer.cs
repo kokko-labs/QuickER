@@ -540,6 +540,18 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_ModelHistorySaveFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_ModelHistorySaveFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_SettingsSaveFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_SettingsSaveFailedFormat", resourceCulture);
+            }
+        }
+
         public static string Mock_ErrorSystemFormat {
             get {
                 return ResourceManager.GetString("Mock_ErrorSystemFormat", resourceCulture);

@@ -329,6 +329,12 @@ See the log for details:
   <data name="Mock_ResponseCompleted" xml:space="preserve">
     <value>Response completed.</value>
   </data>
+  <data name="Mock_ModelHistorySaveFailedFormat" xml:space="preserve">
+    <value>Response completed. The model history could not be saved: {0}</value>
+  </data>
+  <data name="Mock_SettingsSaveFailedFormat" xml:space="preserve">
+    <value>The settings could not be saved: {0}</value>
+  </data>
   <data name="Mock_ErrorSystemFormat" xml:space="preserve">
     <value>Error: {0}</value>
   </data>

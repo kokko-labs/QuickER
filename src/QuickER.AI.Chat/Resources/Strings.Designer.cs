@@ -252,6 +252,18 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+        public static string Chat_SwitchBackendBlockedWhileStarting {
+            get {
+                return ResourceManager.GetString("Chat_SwitchBackendBlockedWhileStarting", resourceCulture);
+            }
+        }
+
+        public static string Chat_ConnectionCheckFailedFormat {
+            get {
+                return ResourceManager.GetString("Chat_ConnectionCheckFailedFormat", resourceCulture);
+            }
+        }
+
         public static string Chat_SendFailedFormat {
             get {
                 return ResourceManager.GetString("Chat_SendFailedFormat", resourceCulture);
@@ -273,6 +285,18 @@ namespace QuickER.AI.Chat.Resources {
         public static string Chat_ResponseCompleted {
             get {
                 return ResourceManager.GetString("Chat_ResponseCompleted", resourceCulture);
+            }
+        }
+
+        public static string Chat_ModelHistorySaveFailedFormat {
+            get {
+                return ResourceManager.GetString("Chat_ModelHistorySaveFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Chat_SettingsSaveFailedFormat {
+            get {
+                return ResourceManager.GetString("Chat_SettingsSaveFailedFormat", resourceCulture);
             }
         }
 
@@ -350,30 +374,6 @@ namespace QuickER.AI.Chat.Resources {
         public static string ErDesign_ResponseLanguageRule {
             get {
                 return ResourceManager.GetString("ErDesign_ResponseLanguageRule", resourceCulture);
-            }
-        }
-
-        public static string ErDesign_NamingSnakeCase {
-            get {
-                return ResourceManager.GetString("ErDesign_NamingSnakeCase", resourceCulture);
-            }
-        }
-
-        public static string ErDesign_NamingPascalCase {
-            get {
-                return ResourceManager.GetString("ErDesign_NamingPascalCase", resourceCulture);
-            }
-        }
-
-        public static string ErDesign_TableNamePlural {
-            get {
-                return ResourceManager.GetString("ErDesign_TableNamePlural", resourceCulture);
-            }
-        }
-
-        public static string ErDesign_TableNameSingular {
-            get {
-                return ResourceManager.GetString("ErDesign_TableNameSingular", resourceCulture);
             }
         }
 
@@ -668,6 +668,12 @@ namespace QuickER.AI.Chat.Resources {
         public static string QueryTool_InvalidArgumentsJson {
             get {
                 return ResourceManager.GetString("QueryTool_InvalidArgumentsJson", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ArgumentsNotObject {
+            get {
+                return ResourceManager.GetString("QueryTool_ArgumentsNotObject", resourceCulture);
             }
         }
 

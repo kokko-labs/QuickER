@@ -113,10 +113,26 @@ public sealed class CopilotChatEngine : IErChatEngine
 
     /// <summary>copilot を起動・接続し、認証状態とモデル一覧を取り込む</summary>
     /// <remarks>
+    /// <para>
     /// copilot CLI が PATH に無いときはプロセス起動を試みず未検出（赤・インストール案内）として返す。
     /// 起動を試みても的外れなプロセス起動エラーしか出せないため（Codex 接続と同じ判断）。
+    /// </para>
+    /// <para>
+    /// 接続が実行中のあいだに重ねて呼ばれたら、新しく接続せず実行中の接続を待つ（<see cref="SingleFlight"/>）。
+    /// 2 本が同時にクライアントを起動すると、後から起動したほうが先のクライアントを置き換え、
+    /// 置き換えられた copilot ランタイムは誰にも止められないまま残る。
+    /// 相乗りした呼び出しの <paramref name="cancellationToken"/> は待つのをやめることにだけ効く
+    /// （起動した呼び出しのトークンは接続へ渡るので、その取り消しは相乗りした呼び出しにも届く）。
+    /// </para>
     /// </remarks>
-    public async Task ConnectAsync(CancellationToken cancellationToken = default)
+    public Task ConnectAsync(CancellationToken cancellationToken = default) =>
+        _connect.RunAsync(ConnectCoreAsync, cancellationToken);
+
+    /// <summary>接続を重ねて走らせないための共有（実行中のあいだだけ）</summary>
+    private readonly SingleFlight _connect = new();
+
+    /// <summary><see cref="ConnectAsync"/> の本体</summary>
+    private async Task ConnectCoreAsync(CancellationToken cancellationToken)
     {
         if (!EnsureCliAvailable())
         {

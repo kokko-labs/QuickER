@@ -172,6 +172,9 @@
   <data name="ClaudeCode_Guidance_Inconclusive" xml:space="preserve">
     <value>Wait a moment and press "Recheck".</value>
   </data>
+  <data name="ClaudeCode_Guidance_CheckFailedFormat" xml:space="preserve">
+    <value>Could not run the check: {0}</value>
+  </data>
   <data name="ClaudeCode_Status_Unconfirmed" xml:space="preserve">
     <value>Not verified</value>
   </data>

@@ -1343,4 +1343,373 @@ public class AiChatDialogViewModelTests
             Cleanup(folder);
         }
     }
+
+    // ── 1-8 の対応（会話の開始中・ターンの完了・接続の確認） ──
+
+    /// <summary>ホスト・Claude Code・設定の保存先を差し替え、Copilot をフェイクにした VM を用意する</summary>
+    private static (
+        AiChatDialogViewModel vm,
+        FakeCopilotRuntimeClient copilot,
+        string folder
+    ) CreateVmFor(
+        IErDiagramChatHost? host = null,
+        IClaudeCodeClient? claudeCode = null,
+        string? settingsFolder = null
+    )
+    {
+        var folder =
+            settingsFolder
+            ?? Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var copilot = new FakeCopilotRuntimeClient();
+        var keyStore = new InMemoryApiKeyStore();
+        var vm = new AiChatDialogViewModel(
+            host: host,
+            dispatcher: new SyncUiDispatcher(),
+            settingsStore: new AiSettingsStore(folder),
+            codexClient: new FakeCodexAppServerClient(),
+            claudeCodeClient: claudeCode,
+            copilotClient: copilot,
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
+        );
+        return (vm, copilot, folder);
+    }
+
+    /// <summary>Copilot へ切り替えて会話を開始し、送信してターンを実行中にする</summary>
+    private static void StartCopilotTurn(AiChatDialogViewModel vm)
+    {
+        vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+        vm.StartConversationCommand.Execute(null);
+        vm.UserInput = "本のテーブルを作って";
+        vm.SendMessageCommand.Execute(null);
+        vm.IsTurnInProgress.Should().BeTrue();
+    }
+
+    /// <summary>書式文字列の先頭（最初のプレースホルダより前）を返す（文言の照合用）</summary>
+    private static string FormatPrefix(string format) => format[..format.IndexOf('{')];
+
+    /// <summary>
+    /// 会話の開始（エンジンの会話開始処理）を待つ間は、送信・新しい会話・タブ切替ができないことを検証する
+    /// （待ち明けの会話リセットが送信済みのメッセージを消す・切り替え後のエンジンに「開始済み」の印が付くのを防ぐ）。
+    /// </summary>
+    [Fact(DisplayName = "会話の開始を待つ間は送信・新しい会話・タブ切替を止める")]
+    public async Task StartConversation_WhileStarting_BlocksSendStartAndSwitch()
+    {
+        var (vm, copilot, folder) = CreateVmFor();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            await vm.StartConversationCommand.ExecuteAsync(null);
+            vm.UserInput = "次の質問";
+            vm.CanSendMessage.Should().BeTrue();
+
+            var gate = new TaskCompletionSource();
+            copilot.StartSessionGate = gate.Task;
+            var starting = vm.StartConversationCommand.ExecuteAsync(null);
+
+            vm.CanSendMessage.Should().BeFalse();
+            vm.SendMessageCommand.CanExecute(null).Should().BeFalse();
+            vm.CanStartConversation.Should().BeFalse();
+            vm.TryChangeBackend(ErChatBackendKind.ApiKey).Should().BeFalse();
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Copilot);
+            vm.StatusMessage.Should().Be(ChatStrings.Chat_SwitchBackendBlockedWhileStarting);
+
+            gate.SetResult();
+            await starting;
+
+            vm.CanSendMessage.Should().BeTrue();
+            vm.CanStartConversation.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 成功したターンのモデル履歴の保存が失敗しても、ターンは成功のまま（エラー表示にならない）で、
+    /// 保存できなかった理由がステータスに出ることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "モデル履歴の保存に失敗しても成功したターンは成功のまま")]
+    public void SuccessfulTurn_ModelHistorySaveFails_StaysSuccessful()
+    {
+        // 保存先フォルダと同じパスにファイルを置く＝設定の書き込みが必ず失敗する
+        var blockedFolder = Path.Combine(
+            Path.GetTempPath(),
+            $"QuickERTests-blocked-{Guid.NewGuid():N}"
+        );
+        File.WriteAllText(blockedFolder, "block");
+
+        try
+        {
+            var (vm, copilot, _) = CreateVmFor(settingsFolder: blockedFolder);
+
+            // 前提の確認: この構成では設定の保存が実際に落ちる
+            var save = vm.SaveSettings;
+            save.Should().Throw<Exception>();
+
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.Connection.CopilotModel = "mru-copilot-model";
+            StartCopilotTurn(vm);
+
+            var raise = () => copilot.RaiseIdle();
+            raise.Should().NotThrow();
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            vm.StatusMessage.Should()
+                .StartWith(FormatPrefix(ChatStrings.Chat_ModelHistorySaveFailedFormat));
+            vm.Messages.Should()
+                .NotContain(m =>
+                    m.Role == ErChatMessageRole.System
+                    && m.Content.StartsWith(
+                        FormatPrefix(ChatStrings.Chat_ErrorSystemFormat),
+                        StringComparison.Ordinal
+                    )
+                );
+        }
+        finally
+        {
+            File.Delete(blockedFolder);
+        }
+    }
+
+    /// <summary>
+    /// Codex のプロバイダーを変えたとき、プロバイダーに依る表示（状態ドット・ログアウト・ログインパネル）が
+    /// すべて通知されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "Codex のプロバイダー変更で状態ドットとログアウトの表示が通知される")]
+    public void CodexModelProviderChange_NotifiesAuthPresentation()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            var raised = new List<string>();
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is not null)
+                {
+                    raised.Add(e.PropertyName);
+                }
+            };
+
+            vm.Connection.CodexModelProvider = "notify-test-provider";
+
+            raised
+                .Should()
+                .Contain([
+                    nameof(AiChatDialogViewModel.CodexStatusLevel),
+                    nameof(AiChatDialogViewModel.ShowCodexLogout),
+                    nameof(AiChatDialogViewModel.ShowCodexLoginPanel),
+                ]);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>失敗したターンでは添付を消さず、成功したターンで消すことを検証する（送れなかった添付を失わない）</summary>
+    [Fact(DisplayName = "失敗したターンでは添付が残り成功したターンで消える")]
+    public void Attachments_KeptOnFailedTurn_ClearedOnSuccess()
+    {
+        var (vm, copilot, folder) = CreateVmFor();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
+            StartCopilotTurn(vm);
+            copilot.Sends.Should().ContainSingle().Which.AttachmentCount.Should().Be(1);
+
+            copilot.RaiseError("session failed");
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            vm.Attachments.HasAttachments.Should().BeTrue("送れなかった添付は送り直せるように残す");
+
+            vm.UserInput = "もう一度";
+            vm.SendMessageCommand.Execute(null);
+            copilot.RaiseIdle();
+
+            vm.Attachments.HasAttachments.Should().BeFalse("成功したターンで送った添付は消す");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>中断したターンでも添付は消さないことを検証する</summary>
+    [Fact(DisplayName = "中断したターンでは添付が残る")]
+    public void Attachments_KeptOnInterruptedTurn()
+    {
+        var (vm, copilot, folder) = CreateVmFor();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
+            StartCopilotTurn(vm);
+
+            vm.InterruptCommand.Execute(null);
+            copilot.RaiseIdle(aborted: true);
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            vm.Attachments.HasAttachments.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// アシスタントの文が挟まったあとのツール活動は、最初のツール吹き出しへ追記せず新しい吹き出しに出すことを検証する
+    /// （追記すると表示の順序と実際の順序が食い違う）。
+    /// </summary>
+    [Fact(DisplayName = "アシスタントの文を挟んだあとのツール活動は新しい吹き出しに出る")]
+    public void ToolActivity_AfterAssistantText_StartsNewToolBubble()
+    {
+        var (vm, copilot, folder) = CreateVmFor();
+
+        try
+        {
+            StartCopilotTurn(vm);
+
+            copilot.RaiseToolCall("r1", "add_entity", "{}");
+            copilot.RaiseDelta("テーブルを追加しました。");
+            copilot.RaiseToolCall("r2", "add_column", "{}");
+
+            vm.Messages.Select(m => m.Role)
+                .Should()
+                .EndWith([
+                    ErChatMessageRole.User,
+                    ErChatMessageRole.ToolCall,
+                    ErChatMessageRole.Assistant,
+                    ErChatMessageRole.ToolCall,
+                ]);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>空の図から始まったターンが失敗しても、テーブルができていれば自動整列することを検証する</summary>
+    [Fact(DisplayName = "空の図から始まったターンが失敗してもテーブルができていれば自動整列する")]
+    public void FailedTurn_FromEmptyDiagram_ArrangesCreatedTables()
+    {
+        var host = new RecordingChatHost { IsEmpty = true };
+        var (vm, copilot, folder) = CreateVmFor(host: host);
+
+        try
+        {
+            StartCopilotTurn(vm);
+            host.IsEmpty = false;
+
+            copilot.RaiseError("session failed");
+
+            host.AutoArrangeCount.Should().Be(1);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>空の図から始まったターンを中断しても、テーブルができていれば自動整列することを検証する</summary>
+    [Fact(DisplayName = "空の図から始まったターンを中断してもテーブルができていれば自動整列する")]
+    public void InterruptedTurn_FromEmptyDiagram_ArrangesCreatedTables()
+    {
+        var host = new RecordingChatHost { IsEmpty = true };
+        var (vm, copilot, folder) = CreateVmFor(host: host);
+
+        try
+        {
+            StartCopilotTurn(vm);
+            host.IsEmpty = false;
+
+            vm.InterruptCommand.Execute(null);
+            copilot.RaiseIdle(aborted: true);
+
+            host.AutoArrangeCount.Should().Be(1);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>検出の段階で投げる Claude Code クライアント（初期化・再確認の失敗の受け止めの検証用）</summary>
+    private sealed class ThrowingClaudeCodeClient : IClaudeCodeClient
+    {
+        public bool IsAvailable() => throw new InvalidOperationException("claude-detect-failed");
+
+        public Task<ClaudeCodeTurnOutcome> RunTurnAsync(
+            string prompt,
+            string? resumeSessionId,
+            ClaudeCodeLaunchOptions options,
+            Action<string> onAssistantText,
+            CancellationToken cancellationToken
+        ) => Task.FromResult(new ClaudeCodeTurnOutcome(true, null, null, false));
+
+        public Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(ClaudeLoginProbeResult.LoggedIn);
+
+        public void Interrupt() { }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// タブ切替で起動する初期化が失敗しても、例外を観測されないまま捨てず、理由をステータスへ出すことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "タブ切替の初期化の失敗はステータスへ出る")]
+    public void SwitchToClaudeCode_InitializeFails_ReportsStatus()
+    {
+        var (vm, _, folder) = CreateVmFor(claudeCode: new ThrowingClaudeCodeClient());
+
+        try
+        {
+            vm.TryChangeBackend(ErChatBackendKind.ClaudeCode).Should().BeTrue();
+
+            vm.StatusMessage.Should()
+                .Be(
+                    string.Format(
+                        ChatStrings.Chat_ConnectionCheckFailedFormat,
+                        "claude-detect-failed"
+                    )
+                );
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>「再確認」が失敗しても例外をコマンドの外へ漏らさず、理由をステータスへ出すことを検証する</summary>
+    [Fact(DisplayName = "Claude Code の再確認の失敗はステータスへ出る")]
+    public async Task ClaudeCodeRefresh_Fails_ReportsStatus()
+    {
+        var (vm, _, folder) = CreateVmFor(claudeCode: new ThrowingClaudeCodeClient());
+
+        try
+        {
+            var refresh = () => vm.ClaudeCodeRefreshCommand.ExecuteAsync(null);
+
+            await refresh.Should().NotThrowAsync();
+            vm.StatusMessage.Should()
+                .Be(
+                    string.Format(
+                        ChatStrings.Chat_ConnectionCheckFailedFormat,
+                        "claude-detect-failed"
+                    )
+                );
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
 }

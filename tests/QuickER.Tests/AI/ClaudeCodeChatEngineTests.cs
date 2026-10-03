@@ -27,6 +27,9 @@ public class ClaudeCodeChatEngineTests
         public bool Interrupted { get; private set; }
         public ClaudeLoginProbeResult ProbeResult { get; set; } = ClaudeLoginProbeResult.LoggedIn;
         public int ProbeCallCount { get; private set; }
+
+        /// <summary>非 null ならプローブがこの例外を投げる（起動の拒否・プロセス起動の失敗などの模擬）</summary>
+        public Exception? ProbeException { get; set; }
         public ClaudeCodeLaunchOptions? LastOptions { get; private set; }
 
         public bool IsAvailable() => Available;
@@ -34,6 +37,12 @@ public class ClaudeCodeChatEngineTests
         public Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken)
         {
             ProbeCallCount++;
+
+            if (ProbeException is not null)
+            {
+                return Task.FromException<ClaudeLoginProbeResult>(ProbeException);
+            }
+
             return Task.FromResult(ProbeResult);
         }
 
@@ -306,6 +315,52 @@ public class ClaudeCodeChatEngineTests
 
         engine.StatusLevel.Should().Be(ConnectionHealth.Pending);
         engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_Unconfirmed);
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 再確認のプローブ自体が失敗（起動の拒否・プロセス起動の失敗・標準入力への書き込みの失敗など）しても
+    /// 例外を投げず、赤の状態と理由入りの案内になることを検証する（投げると「再確認」ボタンからアプリが落ちる）。
+    /// </summary>
+    [Fact(DisplayName = "再確認: プローブが投げても例外にせず赤＋理由の案内にする")]
+    public async Task Refresh_ProbeThrows_BecomesNeedsActionWithReason()
+    {
+        var client = new FakeClaudeCodeClient
+        {
+            ProbeException = new InvalidOperationException("probe-launch-refused"),
+        };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        var refresh = () => engine.RefreshAsync(TestContext.Current.CancellationToken);
+
+        await refresh.Should().NotThrowAsync();
+        engine.StatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+        engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_Inconclusive);
+        engine.Guidance.Should().Contain("probe-launch-refused");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 初期化済みのエンジンを再び初期化しても（接続タブへ戻るたびに呼ばれる）、確認済みの状態を
+    /// 「未確認」へ戻さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "初期化済みなら再初期化で確認済みの状態を戻さない")]
+    public async Task Initialize_AfterRefresh_KeepsConfirmedStatus()
+    {
+        var client = new FakeClaudeCodeClient { ProbeResult = ClaudeLoginProbeResult.LoggedIn };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.RefreshAsync(TestContext.Current.CancellationToken);
+        engine.StatusLevel.Should().Be(ConnectionHealth.Ready);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        engine.StatusLevel.Should().Be(ConnectionHealth.Ready);
+        engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_LoggedIn);
 
         await engine.DisposeAsync();
     }

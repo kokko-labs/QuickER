@@ -37,15 +37,17 @@ public partial class AiChatDialog : Window
         DataContext = ViewModel;
 
         ViewModel.Messages.CollectionChanged += (_, _) => ScrollToBottom();
+        // ストリーミングで吹き出しが伸びたときも、末尾付近を見ていれば追従する（読み返し中は動かさない）
+        ChatScrollFollower.Attach(ChatScrollViewer);
         Loaded += OnLoaded;
         Closing += OnWindowClosing;
     }
 
-    /// <summary>初回表示時に ViewModel を初期化する（API キーは添付ビヘイビアが PasswordBox へ同期する）</summary>
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    /// <summary>初回表示時に ViewModel を初期化し、前回使った接続タブを復元する（API キーは添付ビヘイビアが PasswordBox へ同期する）</summary>
+    private void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
-        await ViewModel.InitializeAsync();
+        ViewModel.Initialize();
         ApplyInitialBackendTab();
     }
 
@@ -69,7 +71,10 @@ public partial class AiChatDialog : Window
         }
     }
 
-    /// <summary>×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）</summary>
+    /// <summary>
+    /// ×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）。
+    /// 保存に失敗しても非表示にし、失敗はモーダルで知らせる。
+    /// </summary>
     private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_isForceClosing)
@@ -78,8 +83,7 @@ public partial class AiChatDialog : Window
         }
 
         e.Cancel = true;
-        ViewModel.SaveSettings();
-        Hide();
+        ViewModel.SaveSettingsAndHide(Hide);
     }
 
     /// <summary>

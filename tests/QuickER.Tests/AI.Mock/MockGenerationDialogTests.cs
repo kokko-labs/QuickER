@@ -928,4 +928,142 @@ public class MockGenerationDialogTests
         savedWhileTyping.Should().BeFalse("打鍵ごとには保存しない");
         savedAfterLeaving.Should().Be("sk-typed");
     }
+
+    // ── 1-8 の対応（× で閉じたときの設定保存・チャット欄の自動スクロール） ──
+
+    /// <summary>設定の保存先と確認・エラー表示を差し替えた ViewModel を作る</summary>
+    private static MockGenerationDialogViewModel CreateViewModelWithDialogs(
+        string settingsFolder,
+        StubDialogService dialogs
+    )
+    {
+        var keyStore = new InMemoryApiKeyStore();
+
+        return new MockGenerationDialogViewModel(
+            new StubDiagramSource(new ErDiagram()),
+            new SyncUiDispatcher(),
+            files: null,
+            settingsStore: new AiSettingsStore(settingsFolder),
+            apiKeyEngineFactory: null,
+            codexEngineFactory: null,
+            claudeCodeEngineFactory: null,
+            copilotEngineFactory: null,
+            mockProjectGenerator: new InterruptRecordingGenerator(),
+            dialogService: dialogs,
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
+        );
+    }
+
+    /// <summary>
+    /// × で閉じたときに設定の保存が失敗しても、例外を漏らさずウィンドウを隠し、
+    /// 隠した後でエラーを 1 回知らせる（理由はステータスにも残る）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "× で閉じたとき設定の保存が失敗しても隠れてエラーを知らせる")]
+    public void CloseButton_WhenSaveFails_HidesAndReportsError()
+    {
+        // 保存先フォルダと同じパスにファイルを置く＝設定の書き込みが必ず失敗する
+        var blockedFolder = Path.Combine(
+            Path.GetTempPath(),
+            $"QuickERTests-blocked-{Guid.NewGuid():N}"
+        );
+        File.WriteAllText(blockedFolder, "block");
+        var dialogs = new StubDialogService();
+
+        try
+        {
+            WpfApplicationTestSupport.RunSta(() =>
+            {
+                var viewModel = CreateViewModelWithDialogs(blockedFolder, dialogs);
+
+                WithShownDialog(
+                    viewModel,
+                    dialog =>
+                    {
+                        var visibleWhenErrorShown = true;
+                        dialogs.OnBeforeShow = () => visibleWhenErrorShown = dialog.IsVisible;
+
+                        var close = dialog.Close;
+                        close.Should().NotThrow();
+
+                        dialog.IsVisible.Should().BeFalse("保存の失敗でも × で隠れる");
+                        visibleWhenErrorShown.Should().BeFalse("エラーは隠した後に出す");
+                        dialogs.ErrorMessages.Should().ContainSingle();
+                        viewModel.StatusMessage.Should().Be(dialogs.ErrorMessages[0]);
+                    }
+                );
+            });
+        }
+        finally
+        {
+            File.Delete(blockedFolder);
+        }
+    }
+
+    /// <summary>
+    /// ストリーミングで最後の吹き出しが伸びたとき、末尾を見ていればチャット欄が追従することを検証する
+    /// （吹き出しの本文が伸びるだけではメッセージ一覧は変わらないため、一覧の変更だけでは追従しない）。
+    /// </summary>
+    [Fact(DisplayName = "ストリーミングで吹き出しが伸びると末尾を見ているチャット欄は追従する")]
+    public void StreamingGrowth_WhenAtBottom_FollowsToEnd()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            WpfApplicationTestSupport.RunSta(() =>
+            {
+                var viewModel = CreateViewModelWithDialogs(folder, new StubDialogService());
+
+                WithShownDialog(
+                    viewModel,
+                    dialog =>
+                    {
+                        for (var i = 0; i < 30; i++)
+                        {
+                            viewModel.Messages.Add(
+                                new ErChatMessage
+                                {
+                                    Role = ErChatMessageRole.Assistant,
+                                    Content = $"message {i}",
+                                }
+                            );
+                        }
+
+                        WpfApplicationTestSupport.DoEvents();
+                        var viewer = dialog.ChatScrollViewer;
+                        var scrollableBefore = viewer.ScrollableHeight;
+                        scrollableBefore.Should().BeGreaterThan(0, "末尾がある状態を作る");
+
+                        // 新しい吹き出しの ScrollToEnd は位置を「無限大」として覚え、以後の伸びにも自然に付いていく。
+                        // 追従が切れるのは利用者が手で動かした後なので、手で末尾まで戻した状態（有限の位置）を作る
+                        viewer.ScrollToVerticalOffset(scrollableBefore);
+                        WpfApplicationTestSupport.DoEvents();
+                        viewer
+                            .VerticalOffset.Should()
+                            .Be(scrollableBefore, "末尾を見ている状態を作る");
+
+                        var last = viewModel.Messages[^1];
+
+                        for (var i = 0; i < 20; i++)
+                        {
+                            last.Content += "\nstreamed line " + i;
+                        }
+
+                        WpfApplicationTestSupport.DoEvents();
+
+                        viewer.ScrollableHeight.Should().BeGreaterThan(scrollableBefore);
+                        viewer.VerticalOffset.Should().Be(viewer.ScrollableHeight);
+                    }
+                );
+            });
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
 }

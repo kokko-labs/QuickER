@@ -101,9 +101,25 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
             return Task.FromException(StartError);
         }
 
-        IsStarted = true;
         StartCallCount++;
-        return Task.CompletedTask;
+
+        if (StartGate is null)
+        {
+            IsStarted = true;
+            return Task.CompletedTask;
+        }
+
+        return WaitStartAsync(StartGate);
+    }
+
+    /// <summary>非 null なら StartAsync をこのタスクの完了まで待たせる（起動が終わるまで IsStarted は偽）</summary>
+    public Task? StartGate { get; set; }
+
+    /// <summary>起動の完了を模擬して待つ</summary>
+    private async Task WaitStartAsync(Task gate)
+    {
+        await gate;
+        IsStarted = true;
     }
 
     /// <inheritdoc />
@@ -133,8 +149,23 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
             return Task.FromException(StartSessionError);
         }
 
+        if (StartSessionGate is not null)
+        {
+            return WaitSessionAsync(StartSessionGate);
+        }
+
         HasSession = true;
         return Task.CompletedTask;
+    }
+
+    /// <summary>非 null なら StartSessionAsync（会話の開始）をこのタスクの完了まで待たせる</summary>
+    public Task? StartSessionGate { get; set; }
+
+    /// <summary>会話の開始の完了を模擬して待つ</summary>
+    private async Task WaitSessionAsync(Task gate)
+    {
+        await gate;
+        HasSession = true;
     }
 
     /// <inheritdoc />

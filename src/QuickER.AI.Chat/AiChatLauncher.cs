@@ -1,5 +1,6 @@
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
+using QuickER.Gui.Common;
 
 namespace QuickER.AI.Chat;
 
@@ -58,8 +59,8 @@ public sealed class AiChatLauncher : IAiChatLauncher
         }
 
         _dialog.Owner = null;
-        _dialog.Show();
-        _dialog.Activate();
+        // 最小化したまま開き直されても、元の大きさへ戻して前面へ出す
+        WindowActivation.ShowAndActivate(_dialog);
     }
 
     /// <inheritdoc />

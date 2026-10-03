@@ -95,7 +95,26 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     public AttachmentSupport AttachmentSupport => AttachmentSupportResolver.ClaudeCode;
 
     /// <inheritdoc />
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// <para>
+    /// 初期化済み（かつ CLI を検出できる）なら何もしない。とくに状態を「未確認」へ戻さない
+    /// （接続タブへ戻るたびに呼ばれるため、戻すと「再確認」や成功したターンで得た確認済みの状態が消える）。
+    /// </para>
+    /// <para>
+    /// 初期化が実行中のあいだに重ねて呼ばれたら、新しく初期化せず実行中の初期化を待つ（<see cref="SingleFlight"/>）。
+    /// 2 本が同時に MCP サーバーを起動すると、片方のサーバーが誰にも止められないまま残る。
+    /// 相乗りした呼び出しの <paramref name="cancellationToken"/> は待つのをやめることにだけ効く
+    /// （起動した呼び出しのトークンは初期化へ渡るので、その取り消しは相乗りした呼び出しにも届く）。
+    /// </para>
+    /// </remarks>
+    public Task InitializeAsync(CancellationToken cancellationToken = default) =>
+        _initialize.RunAsync(InitializeCoreAsync, cancellationToken);
+
+    /// <summary>初期化を重ねて走らせないための共有（実行中のあいだだけ）</summary>
+    private readonly SingleFlight _initialize = new();
+
+    /// <summary><see cref="InitializeAsync"/> の本体</summary>
+    private async Task InitializeCoreAsync(CancellationToken cancellationToken)
     {
         if (!_client.IsAvailable())
         {
@@ -105,6 +124,11 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
                 InstallGuidance
             );
             _initialized = false;
+            return;
+        }
+
+        if (_initialized)
+        {
             return;
         }
 
@@ -147,6 +171,11 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     /// 軽量ログインプローブで状態を取り直す（「再確認」ボタン）。
     /// 検出不可なら赤、ログイン済みなら緑、未ログインなら赤＋案内に更新する。
     /// </summary>
+    /// <remarks>
+    /// 初期化やプローブ自体の失敗（起動の拒否・プロセス起動の失敗・標準入力への書き込みの失敗など）は投げずに、
+    /// 赤の状態と理由入りの案内へ畳む。呼び出し元は「再確認」ボタンで、投げるとアプリまで落ちる。
+    /// 取り消しだけは呼び出し元へ伝える。
+    /// </remarks>
     public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         if (!_client.IsAvailable())
@@ -159,12 +188,26 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             return;
         }
 
-        if (!_initialized)
-        {
-            await InitializeAsync(cancellationToken).ConfigureAwait(false);
-        }
+        ClaudeLoginProbeResult result;
 
-        var result = await _client.ProbeLoginAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_initialized)
+            {
+                await InitializeAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            result = await _client.ProbeLoginAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            UpdateStatus(
+                Strings.ClaudeCode_Status_Inconclusive,
+                ConnectionHealth.NeedsAction,
+                string.Format(Strings.ClaudeCode_Guidance_CheckFailedFormat, ex.Message)
+            );
+            return;
+        }
 
         switch (result)
         {
