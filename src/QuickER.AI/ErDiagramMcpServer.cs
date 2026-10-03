@@ -33,6 +33,11 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
     /// <summary>接続時に Authorization: Bearer で要求するトークン。未起動なら null</summary>
     public string? AuthToken { get; private set; }
 
+    /// <summary>
+    /// 組み立てたアプリを起動する直前に受け取るテスト用のフック（起動に失敗したアプリが破棄されることの観測用）
+    /// </summary>
+    internal Action<WebApplication>? AppBuilt { get; init; }
+
     /// <summary>ツール実行コールバック（ツール名・引数 JSON → 結果テキストと成否）を指定して生成する</summary>
     /// <param name="execute">ツール実行コールバック</param>
     /// <param name="tools">公開するツール定義セット（合成ルート／エンジンが明示的に指定する）</param>
@@ -78,8 +83,18 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
         );
 
         app.MapMcp();
+        AppBuilt?.Invoke(app);
 
-        await app.StartAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await app.StartAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // _app へ入る前に失敗すると DisposeAsync からも届かないため、ここで破棄する
+            await app.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
 
         _app = app;
         AuthToken = token;

@@ -23,6 +23,7 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
 
     private readonly Func<AnthropicChatConnection> _connectionProvider;
     private readonly IReadOnlyList<ToolUnion> _tools;
+    private readonly Func<AnthropicChatConnection, AnthropicClient> _clientFactory;
 
     /// <summary>接続設定プロバイダからドライバを生成する（設定変更を毎ターン反映するため遅延取得する）</summary>
     /// <param name="connectionProvider">接続設定を返す関数</param>
@@ -31,8 +32,26 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
         Func<AnthropicChatConnection> connectionProvider,
         ErChatProfile profile
     )
+        : this(
+            connectionProvider,
+            profile,
+            connection => new AnthropicClient { ApiKey = connection.ApiKey }
+        ) { }
+
+    /// <summary>クライアントの生成方法を差し替えてドライバを生成する（テスト用）</summary>
+    /// <param name="connectionProvider">接続設定を返す関数</param>
+    /// <param name="profile">用途プロファイル</param>
+    /// <param name="clientFactory">
+    /// 接続設定から SDK のクライアントを作る関数。作ったクライアントは呼び出しごとにドライバが破棄する
+    /// </param>
+    internal AnthropicChatTurnDriver(
+        Func<AnthropicChatConnection> connectionProvider,
+        ErChatProfile profile,
+        Func<AnthropicChatConnection, AnthropicClient> clientFactory
+    )
     {
         _connectionProvider = connectionProvider;
+        _clientFactory = clientFactory;
         _tools = ChatToolConverter
             .ToAnthropicTools(profile.Tools)
             .Select(tool => (ToolUnion)tool)
@@ -47,7 +66,9 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
     )
     {
         var connection = _connectionProvider();
-        var client = new AnthropicClient { ApiKey = connection.ApiKey };
+        // クライアントはインスタンスごとに自分の HttpClient（接続プール）を持つため、呼び出しごとに破棄する。
+        // 破棄しないと、ツール往復のたびに作るクライアントの接続が積み上がる
+        using var client = _clientFactory(connection);
 
         var systemText = ExtractSystemPrompt(history);
         var parameters = new MessageCreateParams
@@ -109,6 +130,14 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
                     messages.Add(ToUserParam(item));
                     break;
                 case ChatHistoryRole.Assistant:
+                    // テキストもツール呼び出しも無い応答（空の応答）は再送しない。空の content は API が
+                    // 400 で拒否し、履歴に残る限り以後の全ターンが失敗する。前後の user ターンが
+                    // 連続することになるが、連続する同じ役割のターンは API 側が 1 つに結合して受け付ける
+                    if (IsEmptyAssistantItem(item))
+                    {
+                        break;
+                    }
+
                     messages.Add(ToAssistantParam(item));
                     break;
                 case ChatHistoryRole.Tool:
@@ -197,6 +226,10 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
             _ => MediaType.ImagePng,
         };
 
+    /// <summary>テキストが空白だけで、ツール呼び出しも無いアシスタント履歴項目か</summary>
+    private static bool IsEmptyAssistantItem(ChatHistoryItem item) =>
+        string.IsNullOrWhiteSpace(item.Text) && item.ToolCalls is not { Count: > 0 };
+
     /// <summary>アシスタント履歴項目を、テキスト・ツール呼び出しを保持した MessageParam へ変換する</summary>
     private static MessageParam ToAssistantParam(ChatHistoryItem item)
     {
@@ -207,7 +240,8 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
 
         var blocks = new List<ContentBlockParam>();
 
-        if (!string.IsNullOrEmpty(item.Text))
+        // 空白だけのテキストブロックも API が拒否するため、ツール呼び出しの前に置かない
+        if (!string.IsNullOrWhiteSpace(item.Text))
         {
             blocks.Add(new TextBlockParam { Text = item.Text });
         }

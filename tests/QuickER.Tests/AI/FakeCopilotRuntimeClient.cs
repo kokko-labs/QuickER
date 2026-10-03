@@ -45,6 +45,12 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     /// </summary>
     public bool AutoIdleAfterSend { get; set; }
 
+    /// <summary>
+    /// 送信の中で、アイドル復帰の自動発火の後に走らせる処理（SDK のスレッドが送信の途中で
+    /// セッションエラーを流す・送信自体が例外で終わる、といった順序の模擬に使う）
+    /// </summary>
+    public Action? DuringSend { get; set; }
+
     /// <summary>返送したツール結果の記録</summary>
     public List<(string RequestId, string Result, bool Success)> ToolResponses { get; } = new();
 
@@ -144,6 +150,8 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
         {
             SessionIdle?.Invoke(this, false);
         }
+
+        DuringSend?.Invoke();
 
         return Task.CompletedTask;
     }

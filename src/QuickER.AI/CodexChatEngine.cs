@@ -308,6 +308,7 @@ public sealed class CodexChatEngine : IErChatEngine
         try
         {
             await _client.LogoutAsync(cancellationToken).ConfigureAwait(false);
+            AuthMode = CodexAuthMode.None;
             RequiresOpenAiAuth = true;
             AccountSummary = Strings.Codex_NotLoggedIn;
             // ログイン済みの常時案内を残さない（ログインパネル側が案内する）
@@ -601,18 +602,17 @@ public sealed class CodexChatEngine : IErChatEngine
             return;
         }
 
-        if (AuthMode == CodexAuthMode.None)
-        {
-            AccountSummary = BuildAccountSummary(
-                account.AuthMode,
-                account.PlanType,
-                account.Email,
-                account.RequiresOpenAiAuth,
-                IsOpenAiProvider
-            );
-            // 未ログインへ変わった場合は、直前のログイン済み案内を残さない（ログインパネル側が案内する）
-            Guidance = string.Empty;
-        }
+        // 未ログインは直前の状態に依らず反映する（CLI 側でログアウトされた後の再確認で、
+        // ログイン済みの表示とログイン済み案内を残さない。ログインパネル側が案内する）
+        AuthMode = CodexAuthMode.None;
+        AccountSummary = BuildAccountSummary(
+            account.AuthMode,
+            account.PlanType,
+            account.Email,
+            account.RequiresOpenAiAuth,
+            IsOpenAiProvider
+        );
+        Guidance = string.Empty;
     }
 
     /// <summary>認証モード・プラン・メール・プロバイダー種別から概要文言を組み立てる</summary>
@@ -678,9 +678,13 @@ public sealed class CodexChatEngine : IErChatEngine
         {
             TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
         }
-        else if (e.Turn.Status == "failed" && !string.IsNullOrWhiteSpace(e.Turn.Error))
+        else if (e.Turn.Status == "failed")
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, e.Turn.Error));
+            // 理由の無い failed も失敗として扱う（成功に見せない）
+            var error = string.IsNullOrWhiteSpace(e.Turn.Error)
+                ? Strings.Codex_UnknownError
+                : e.Turn.Error;
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, error));
         }
         else
         {

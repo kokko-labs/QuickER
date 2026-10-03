@@ -175,8 +175,19 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
             new CodexLoginStartResult { Type = CodexLoginType.ChatGpt, AuthUrl = ChatGptAuthUrl }
         );
 
+    /// <summary>
+    /// ログアウト時に account/updated（未ログイン）を流すか（既定 true。false にすると、通知に頼らず
+    /// エンジン自身がログアウト後の状態を反映することを検証できる）
+    /// </summary>
+    public bool RaiseAccountUpdatedOnLogout { get; set; } = true;
+
     public Task LogoutAsync(CancellationToken cancellationToken = default)
     {
+        if (!RaiseAccountUpdatedOnLogout)
+        {
+            return Task.CompletedTask;
+        }
+
         AccountUpdated?.Invoke(
             this,
             new CodexAccountUpdatedNotification { AuthMode = CodexAuthMode.None }

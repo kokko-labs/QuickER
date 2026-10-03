@@ -112,16 +112,29 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             return;
         }
 
+        if (_workingDirectory.Length == 0)
+        {
+            _workingDirectory = BackendWorkingDirectory.Create("claude-code");
+        }
+
         if (_mcpServer is null && _toolHost is not null)
         {
-            _workingDirectory = BackendWorkingDirectory.Create("claude-code");
-            _mcpServer = new ErDiagramMcpServer(ExecuteTool, _profile.Tools);
-            await _mcpServer.StartAsync(cancellationToken).ConfigureAwait(false);
-            _mcpConfigPath = WriteMcpConfig(_mcpServer);
-        }
-        else if (_workingDirectory.Length == 0)
-        {
-            _workingDirectory = BackendWorkingDirectory.Create("claude-code");
+            // 起動に成功してから保持する。起動前に保持すると、失敗した後の初期化が
+            // 「起動済み」とみなして再試行せず、MCP 設定なし（ER ツールなし）のままターンが走る
+            var server = new ErDiagramMcpServer(ExecuteTool, _profile.Tools);
+
+            try
+            {
+                await server.StartAsync(cancellationToken).ConfigureAwait(false);
+                _mcpConfigPath = WriteMcpConfig(server);
+            }
+            catch
+            {
+                await server.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            _mcpServer = server;
         }
 
         _initialized = true;
@@ -212,36 +225,37 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         var token = _turnCts.Token;
         StatusChanged?.Invoke(this, Strings.ClaudeCode_Processing);
 
-        // 添付があれば作業フォルダ配下へ書き出し、プロンプト末尾に絶対パス一覧を付記する。
-        // 一度でも添付を使った会話は以降のターンも Read 許可を維持する（_attachmentsUsedInConversation）。
-        var effectivePrompt = prompt;
-
-        if (attachments is { Count: > 0 })
-        {
-            var paths = WriteAttachments(attachments);
-            var hasBinary = attachments.Any(a => a.Kind == ChatAttachmentKind.Binary);
-            effectivePrompt = AppendAttachmentPaths(prompt, paths, hasBinary);
-            _attachmentsUsedInConversation = true;
-        }
-
-        // 添付を使った会話では Read を追加許可する（MCP ツールと併記）。従来の添付なし会話は MCP のみで不変。
-        var additionalTools = _attachmentsUsedInConversation
-            ? new[] { ReadTool }
-            : Array.Empty<string>();
-
-        var options = new ClaudeCodeLaunchOptions(
-            Model,
-            _toolHost is not null ? _profile.BuildSystemPrompt() : string.Empty,
-            _mcpConfigPath,
-            AllowedTool,
-            _workingDirectory
-        )
-        {
-            AdditionalAllowedTools = additionalTools,
-        };
-
         try
         {
+            // 添付があれば作業フォルダ配下へ書き出し、プロンプト末尾に絶対パス一覧を付記する。
+            // 一度でも添付を使った会話は以降のターンも Read 許可を維持する（_attachmentsUsedInConversation）。
+            // 書き出しの失敗も他のターン失敗と同じく TurnCompleted で知らせる（try の外だと CTS が残る）
+            var effectivePrompt = prompt;
+
+            if (attachments is { Count: > 0 })
+            {
+                var paths = WriteAttachments(attachments);
+                var hasBinary = attachments.Any(a => a.Kind == ChatAttachmentKind.Binary);
+                effectivePrompt = AppendAttachmentPaths(prompt, paths, hasBinary);
+                _attachmentsUsedInConversation = true;
+            }
+
+            // 添付を使った会話では Read を追加許可する（MCP ツールと併記）。従来の添付なし会話は MCP のみで不変。
+            var additionalTools = _attachmentsUsedInConversation
+                ? new[] { ReadTool }
+                : Array.Empty<string>();
+
+            var options = new ClaudeCodeLaunchOptions(
+                Model,
+                _toolHost is not null ? _profile.BuildSystemPrompt() : string.Empty,
+                _mcpConfigPath,
+                AllowedTool,
+                _workingDirectory
+            )
+            {
+                AdditionalAllowedTools = additionalTools,
+            };
+
             var outcome = await _client
                 .RunTurnAsync(
                     effectivePrompt,

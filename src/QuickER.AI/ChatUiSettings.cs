@@ -23,9 +23,14 @@ public class ChatUiSettings
     /// </summary>
     public string EndpointOverride { get; set; } = string.Empty;
 
-    /// <summary><see cref="LastBackend"/> を列挙値として解釈する（空・不正値は null）</summary>
+    /// <summary>
+    /// <see cref="LastBackend"/> を列挙値として解釈する（空・不正値は null）。
+    /// 数値文字列は <see cref="Enum.TryParse{TEnum}(string, bool, out TEnum)"/> が定義外の値でも
+    /// 成功させてしまうため、<see cref="Enum.IsDefined{TEnum}(TEnum)"/> で定義済みかどうかも確かめる。
+    /// </summary>
     public ErChatBackendKind? ParseLastBackend() =>
         Enum.TryParse<ErChatBackendKind>(LastBackend, ignoreCase: true, out var backend)
+        && Enum.IsDefined(backend)
             ? backend
             : null;
 

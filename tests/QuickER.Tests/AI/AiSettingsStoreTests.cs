@@ -177,9 +177,10 @@ public class AiSettingsStoreTests
             .Be(expected);
     }
 
-    [Theory(DisplayName = "ParseLastBackend は空・不正値を null にする")]
+    [Theory(DisplayName = "ParseLastBackend は空・不正値・定義外の数値を null にする")]
     [InlineData("")]
     [InlineData("Unknown")]
+    [InlineData("99")]
     public void ParseLastBackend_ReturnsNull_ForInvalidValues(string value)
     {
         new ChatUiSettings { LastBackend = value }

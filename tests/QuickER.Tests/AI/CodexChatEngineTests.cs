@@ -238,6 +238,31 @@ public class CodexChatEngineTests
     }
 
     /// <summary>
+    /// 理由（error）の無い failed も失敗として扱い、既定の文言を補うことを検証する
+    /// （成功に見せると、AI が何もせずに終わったターンが正常終了に見える）。
+    /// </summary>
+    [Fact(DisplayName = "Codex の理由なしの failed は既定の文言つきの失敗になる")]
+    public async Task TurnCompleted_FailedWithoutError_IsFailureWithUnknownError()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        ErChatTurnResult? result = null;
+        engine.TurnCompleted += (_, r) => result = r;
+
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+        client.RaiseTurnCompleted("failed", null);
+
+        result.Should().NotBeNull();
+        result!.Value.Success.Should().BeFalse();
+        result.Value.Error.Should().Be(QuickER.AI.Resources.Strings.Codex_UnknownError);
+    }
+
+    /// <summary>
     /// エンジンが開始していないターンの完了通知（既に完了済み・エンジン外のターン）は
     /// 転送されないことを検証する（強制停止・接続断と turn/completed の競合時の二重通知防止）。
     /// </summary>
@@ -371,6 +396,82 @@ public class CodexChatEngineTests
                 )
             );
         engine.Guidance.Should().Be(QuickER.AI.Resources.Strings.Codex_Guidance_LoggedIn);
+    }
+
+    /// <summary>
+    /// ログイン済みの状態から、CLI 側でログアウトされた後の「再確認」で未ログインが返ったら、
+    /// 認証モード・概要・常時案内がすべて未ログインへ戻ることを検証する
+    /// （直前の状態がログイン済みでも、未ログインを取りこぼさない）。
+    /// </summary>
+    [Fact(DisplayName = "ログイン済みから再確認で未ログインが返ったら未ログイン表示へ戻る")]
+    public async Task Refresh_AfterExternalLogout_ShowsNotLoggedIn()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            NextAccountInfo = new CodexAccountInfo
+            {
+                RequiresOpenAiAuth = true,
+                AuthMode = CodexAuthMode.ChatGpt,
+                Email = "user@example.com",
+            },
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        CodexAuthState? state = null;
+        engine.AuthStateChanged += (_, s) => state = s;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        engine.AuthMode.Should().Be(CodexAuthMode.ChatGpt);
+
+        client.NextAccountInfo = new CodexAccountInfo
+        {
+            RequiresOpenAiAuth = true,
+            AuthMode = CodexAuthMode.None,
+        };
+        await engine.RefreshAccountStateAsync(TestContext.Current.CancellationToken);
+
+        engine.AuthMode.Should().Be(CodexAuthMode.None);
+        engine.IsLoggedIn.Should().BeFalse();
+        engine.AccountSummary.Should().Be(QuickER.AI.Resources.Strings.Codex_NotLoggedIn);
+        engine.Guidance.Should().BeEmpty();
+        state!.Value.AuthMode.Should().Be(CodexAuthMode.None);
+    }
+
+    /// <summary>
+    /// アプリ内のログアウトが成功したら、account/updated の通知が来なくても
+    /// エンジン自身が認証モードを未ログインへ戻すことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "ログアウトは通知を待たずに認証モードを未ログインへ戻す")]
+    public async Task Logout_ResetsAuthModeWithoutNotification()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            RaiseAccountUpdatedOnLogout = false,
+            NextAccountInfo = new CodexAccountInfo
+            {
+                RequiresOpenAiAuth = true,
+                AuthMode = CodexAuthMode.ApiKey,
+            },
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        CodexAuthState? state = null;
+        engine.AuthStateChanged += (_, s) => state = s;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.LogoutAsync(TestContext.Current.CancellationToken);
+
+        engine.AuthMode.Should().Be(CodexAuthMode.None);
+        engine.IsLoggedIn.Should().BeFalse();
+        state!.Value.AuthMode.Should().Be(CodexAuthMode.None);
     }
 
     /// <summary>未検出から検出可能へ変わったら、「再確認」で未検出表示が解除され接続されることを検証する</summary>

@@ -333,6 +333,36 @@ public class CopilotChatEngineTests
         await engine.DisposeAsync();
     }
 
+    /// <summary>
+    /// 送信の途中でセッションエラーがターンを完了させた後に、送信自体が例外で終わっても、
+    /// TurnCompleted が 1 回しか届かないことを検証する（送信失敗の経路が実行中フラグを見ずに
+    /// 通知すると、同じターンの失敗が 2 回届く）。
+    /// </summary>
+    [Fact(DisplayName = "送信中のエラーの後に送信が失敗しても完了通知は 1 回だけ")]
+    public async Task SendFailure_AfterSessionError_CompletesOnce()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        var completions = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => completions.Add(r);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.DuringSend = () =>
+        {
+            client.RaiseError("rate limited");
+            throw new InvalidOperationException("send failed");
+        };
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completions.Should().ContainSingle();
+        completions[0].Success.Should().BeFalse();
+        completions[0].Error.Should().Be("rate limited");
+
+        await engine.DisposeAsync();
+    }
+
     /// <summary>ツール呼び出し要求をツールホストで実行し、結果を返送・活動通知することを検証する</summary>
     [Fact(DisplayName = "ツール要求は実行して結果を返送する")]
     public async Task ToolCallRequested_ExecutesAndResponds()

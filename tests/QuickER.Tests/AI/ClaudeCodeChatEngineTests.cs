@@ -27,6 +27,7 @@ public class ClaudeCodeChatEngineTests
         public bool Interrupted { get; private set; }
         public ClaudeLoginProbeResult ProbeResult { get; set; } = ClaudeLoginProbeResult.LoggedIn;
         public int ProbeCallCount { get; private set; }
+        public ClaudeCodeLaunchOptions? LastOptions { get; private set; }
 
         public bool IsAvailable() => Available;
 
@@ -45,6 +46,7 @@ public class ClaudeCodeChatEngineTests
         )
         {
             ResumeSessionIdsAtCall.Add(resumeSessionId);
+            LastOptions = options;
 
             if (!string.IsNullOrEmpty(ScriptedText))
             {
@@ -259,6 +261,38 @@ public class ClaudeCodeChatEngineTests
 
         success.Should().BeTrue();
         toolHost.Calls.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// MCP サーバーの起動に失敗した後の初期化で起動を再試行し、続くターンが MCP 設定つき
+    /// （ER ツールあり）で走ることを検証する（失敗したサーバーを保持すると再試行されず、
+    /// MCP 設定パスが空のままターンが走る）。起動の失敗はキャンセル済みトークンで起こす。
+    /// </summary>
+    [Fact(DisplayName = "MCP サーバーの起動に失敗しても次の初期化で再試行する")]
+    public async Task Initialize_AfterMcpStartFailure_RetriesAndPassesMcpConfig()
+    {
+        var client = new FakeClaudeCodeClient();
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var initialize = () => engine.InitializeAsync(cts.Token);
+        await initialize.Should().ThrowAsync<OperationCanceledException>();
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        client.LastOptions.Should().NotBeNull();
+        client.LastOptions!.McpConfigPath.Should().NotBeNullOrEmpty();
+        System.IO.File.Exists(client.LastOptions.McpConfigPath).Should().BeTrue();
+
+        await engine.DisposeAsync();
     }
 
     /// <summary>検出済み・未プローブの初期状態は Pending（灰・未確認）であることを検証する</summary>

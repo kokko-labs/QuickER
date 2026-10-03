@@ -204,6 +204,13 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **A Codex timeout message after reconnecting no longer includes the previous connection's error output** — the last lines of the app server's error output are added to a timeout message, and they used to be kept across connections
 - **The Copilot chat recovers after the Copilot runtime stops** — QuickER kept treating the connection as alive, so every later message failed and "Recheck" did not help until the window was reopened. A call that finds the connection lost now drops it: that call still fails, and the next message starts the runtime again and opens a new conversation. The previous conversation's context is not carried over
 - **A failed Copilot start no longer leaves an empty folder in `%TEMP%\QuickER\copilot`** — each attempt creates a working folder for the runtime, and a failed attempt left it behind
+- **The Codex connection tab now shows "not signed in" after you sign out** — after signing out with `codex logout` in a terminal, "Recheck" kept showing the previous sign-in and the sign-in panel did not appear. Signing out from QuickER now also resets the sign-in state on its own
+- **A Codex turn that fails without a reason is now shown as a failure** — it used to end as if it had succeeded. It now ends with "An unknown error occurred."
+- **Claude Code gets the ER design tools after a failed start of QuickER's tool server** — when the local server that offers the tools to `claude` failed to start, later turns ran without the tools instead of trying again. The next turn now starts the server again
+- **A Copilot turn that fails while sending no longer reports the failure twice**
+- **An attachment that Claude Code cannot write to disk is now shown as a chat error** — QuickER writes attachments to a working folder for `claude` to read. A failed write used to escape as a send failure in the status bar; it now ends the turn as a failure in the chat, and the attachments are cleared as with any other failed turn
+- **An empty Claude response no longer breaks the rest of the conversation with the API key method** — when the model returned a response with no text and no tool calls, QuickER sent that empty response back with every later message, and the API rejected each one until "New conversation". Empty responses are no longer sent back
+- **Tool calls from OpenAI-compatible servers that do not send a call ID are no longer dropped** — with the API key method, some local servers stream tool calls without an ID, and QuickER ignored those calls silently. QuickER now gives each such call an ID of its own and runs it
 
 ## [0.2.0] - 2026-09-24
 

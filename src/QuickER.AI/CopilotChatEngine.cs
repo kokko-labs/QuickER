@@ -31,7 +31,9 @@ public sealed class CopilotChatEngine : IErChatEngine
     private static readonly string InconclusiveGuidance = Strings.Copilot_Guidance_Inconclusive;
 
     private bool _sessionStarted;
-    private bool _turnInProgress;
+
+    /// <summary>ターン実行中フラグ（1=実行中・0=非実行。<see cref="TryCompleteTurn"/> と対で Interlocked 操作する）</summary>
+    private int _turnInProgress;
 
     /// <summary>使用するモデル ID（空なら Copilot CLI の既定モデル）</summary>
     public string Model { get; set; } = string.Empty;
@@ -207,7 +209,7 @@ public sealed class CopilotChatEngine : IErChatEngine
             return;
         }
 
-        _turnInProgress = true;
+        Interlocked.Exchange(ref _turnInProgress, 1);
         StatusChanged?.Invoke(this, Strings.Copilot_Processing);
 
         try
@@ -216,10 +218,22 @@ public sealed class CopilotChatEngine : IErChatEngine
         }
         catch (Exception ex)
         {
-            _turnInProgress = false;
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            // 送信の途中でセッションエラーが先にターンを完了させていたら、二重に通知しない
+            if (TryCompleteTurn())
+            {
+                TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            }
         }
     }
+
+    /// <summary>実行中フラグを 1→0 へ落とせた（＝このターンの完了通知の権利を勝ち取った）ときだけ true を返す</summary>
+    /// <remarks>
+    /// 完了通知の発火点は、SDK のスレッド（アイドル復帰・セッションエラー）と、送信を呼んだスレッド
+    /// （送信失敗）に分かれる。bool の「読んでから書く」では複数の発火点が勝って
+    /// <see cref="TurnCompleted"/> が二重に届くため、Interlocked の交換で勝者を 1 つに絞る。
+    /// ターンを完了させる全経路はこのメソッドを通ること（Codex のエンジンと同じ形）。
+    /// </remarks>
+    private bool TryCompleteTurn() => Interlocked.Exchange(ref _turnInProgress, 0) == 1;
 
     /// <inheritdoc />
     public async Task InterruptAsync(CancellationToken cancellationToken = default)
@@ -466,12 +480,11 @@ public sealed class CopilotChatEngine : IErChatEngine
     /// <summary>アイドル復帰をターン完了へ変換する（ターン外のアイドルは無視する）</summary>
     private void OnSessionIdle(object? sender, bool aborted)
     {
-        if (!_turnInProgress)
+        if (!TryCompleteTurn())
         {
             return;
         }
 
-        _turnInProgress = false;
         // 中断はエラーではないため、エラーメッセージなしの失敗として扱う（Codex の interrupted と同じ）
         TurnCompleted?.Invoke(
             this,
@@ -485,9 +498,8 @@ public sealed class CopilotChatEngine : IErChatEngine
     /// </summary>
     private void OnSessionError(object? sender, string message)
     {
-        if (_turnInProgress)
+        if (TryCompleteTurn())
         {
-            _turnInProgress = false;
             TurnCompleted?.Invoke(this, new ErChatTurnResult(false, message));
         }
         else
