@@ -33,6 +33,9 @@ public partial class MockGenerationDialog : Window
     /// <summary>GitHub Copilot ログイン状態・モデル一覧のプローブ用エンジン（ツールホスト無し）</summary>
     private readonly CopilotChatEngine _copilotProbe;
 
+    /// <summary>接続方式を切り替えたときのプローブと「再確認」の実行</summary>
+    private readonly BackendConnectionChecks _connectionChecks;
+
     /// <summary>アプリ終了などで強制クローズ中かどうか</summary>
     private bool _isForceClosing;
 
@@ -113,12 +116,30 @@ public partial class MockGenerationDialog : Window
         // モデル一覧は接続後に実行時列挙されるため、更新通知も拾って接続タブの候補へ流す
         _copilotProbe.AvailableModelsChanged += OnCopilotStatusChanged;
 
-        // 「再確認」も失敗をステータスへ畳む（AsyncRelayCommand は例外をディスパッチャへ投げ直す）
-        CodexRefreshCommand = new AsyncRelayCommand(() => RunProbeAsync(RefreshCodexAsync));
-        ClaudeCodeRefreshCommand = new AsyncRelayCommand(() =>
-            RunProbeAsync(RefreshClaudeCodeAsync)
+        // 接続方式を切り替えたらプローブする。ViewModel の切替処理（会話のリセット）は ctor で先に購読済みなので、その後に走る。
+        // 失敗はステータスへ畳む（「再確認」も同じ。AsyncRelayCommand は例外をディスパッチャへ投げ直す）
+        _connectionChecks = new BackendConnectionChecks(
+            ViewModel.Connection,
+            EnsureCodexConnectedAsync,
+            EnsureClaudeCodeInitializedAsync,
+            EnsureCopilotInitializedAsync,
+            ex =>
+                ViewModel.StatusMessage = string.Format(
+                    Strings.Mock_ConnectionCheckFailedFormat,
+                    ex.Message
+                )
         );
-        CopilotRefreshCommand = new AsyncRelayCommand(() => RunProbeAsync(RefreshCopilotAsync));
+        CodexRefreshCommand = new AsyncRelayCommand(() =>
+            _connectionChecks.RunAsync(RefreshCodexAsync)
+        );
+        ClaudeCodeRefreshCommand = new AsyncRelayCommand(() =>
+            _connectionChecks.RunAsync(RefreshClaudeCodeAsync)
+        );
+        CopilotRefreshCommand = new AsyncRelayCommand(() =>
+            _connectionChecks.RunAsync(RefreshCopilotAsync)
+        );
+        // タブの確定を、タブの選択変更処理が終わった後へ後置する
+        ViewModel.BackendSelection.SetUiPost(action => Dispatcher.BeginInvoke(action));
 
         // ViewModel のプレビュー要求／クリア要求と、プレビュー内リンク遷移をサイドバー選択へ橋渡しする
         ViewModel.PreviewRequested += OnPreviewRequested;
@@ -149,32 +170,11 @@ public partial class MockGenerationDialog : Window
         }
     }
 
-    /// <summary>初回表示時に ViewModel を初期化し、前回使った接続タブを復元する</summary>
+    /// <summary>初回表示時に ViewModel を初期化する（前回使った接続方式へ切り替わり、タブは束縛で追従する）</summary>
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
         ViewModel.Initialize();
-        ApplyInitialBackendTab();
-    }
-
-    /// <summary>
-    /// 前回使った接続タブを復元する。SelectedIndex の変更で通常のタブ切替処理
-    /// （<see cref="BackendTabs_SelectionChanged"/>）が走り、切替経路を一本に保つ。
-    /// </summary>
-    private void ApplyInitialBackendTab()
-    {
-        var index = ViewModel.Connection.InitialBackend switch
-        {
-            ErChatBackendKind.Codex => 1,
-            ErChatBackendKind.ClaudeCode => 2,
-            ErChatBackendKind.Copilot => 3,
-            _ => 0,
-        };
-
-        if (index != BackendTabs.SelectedIndex)
-        {
-            BackendTabs.SelectedIndex = index;
-        }
     }
 
     /// <summary>
@@ -382,108 +382,7 @@ public partial class MockGenerationDialog : Window
         e.Handled = true;
     }
 
-    // ── 接続タブの切り替え・状態プローブ ──
-
-    /// <summary>確定済み（切り替え済み）の接続タブのインデックス</summary>
-    private int _committedBackendIndex;
-
-    /// <summary>タブ選択の復帰中か（復帰による再入を無視するためのガード）</summary>
-    private bool _revertingBackendTab;
-
-    /// <summary>
-    /// タブ選択を接続方式へ変換し、切替可否を ViewModel に委ねる（ターン実行中は拒まれる）。
-    /// 切り替えたら確定インデックスを更新して必要ならプローブし、拒まれたら元のタブへ戻す。
-    /// </summary>
-    private async void BackendTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        // 子 Selector（ComboBox 等）のバブリングや、復帰による再入は無視する
-        if (!ReferenceEquals(e.OriginalSource, BackendTabs) || _revertingBackendTab)
-        {
-            return;
-        }
-
-        var newIndex = BackendTabs.SelectedIndex;
-
-        if (newIndex == _committedBackendIndex)
-        {
-            return;
-        }
-
-        var backend = newIndex switch
-        {
-            1 => ErChatBackendKind.Codex,
-            2 => ErChatBackendKind.ClaudeCode,
-            3 => ErChatBackendKind.Copilot,
-            _ => ErChatBackendKind.ApiKey,
-        };
-
-        if (!ViewModel.TryChangeBackend(backend))
-        {
-            RevertBackendSelection();
-            return;
-        }
-
-        _committedBackendIndex = newIndex;
-
-        if (backend == ErChatBackendKind.Codex)
-        {
-            await RunProbeAsync(EnsureCodexConnectedAsync);
-        }
-        else if (backend == ErChatBackendKind.ClaudeCode)
-        {
-            await RunProbeAsync(EnsureClaudeCodeInitializedAsync);
-        }
-        else if (backend == ErChatBackendKind.Copilot)
-        {
-            await RunProbeAsync(EnsureCopilotInitializedAsync);
-        }
-    }
-
-    /// <summary>
-    /// 確定済みタブへ選択を戻す。<see cref="Selector.SelectionChanged"/> 処理中の同期的な選択戻しは
-    /// TabControl の選択状態を不整合にし、以降のクリックで再発火するため、イベント完了後にディスパッチャ経由で戻し、
-    /// 戻し中の再入はガードで無視する（AI チャットのダイアログと同じ形）。
-    /// </summary>
-    private void RevertBackendSelection()
-    {
-        Dispatcher.BeginInvoke(
-            new Action(() =>
-            {
-                _revertingBackendTab = true;
-                try
-                {
-                    BackendTabs.SelectedIndex = _committedBackendIndex;
-                }
-                finally
-                {
-                    _revertingBackendTab = false;
-                }
-            })
-        );
-    }
-
-    /// <summary>
-    /// 接続状態の確認（プローブ）を実行し、失敗はステータスへ出す（例外をウィンドウの外へ漏らさない）。
-    /// </summary>
-    /// <remarks>
-    /// 呼び出し元はタブ切替の <c>async void</c> ハンドラと「再確認」のコマンドで、どちらも例外を
-    /// ディスパッチャへ投げ直す＝作業フォルダの作成失敗など 1 回の確認の失敗でアプリが落ちる。
-    /// </remarks>
-    /// <param name="probe">実行する確認</param>
-    private async Task RunProbeAsync(Func<Task> probe)
-    {
-        try
-        {
-            await probe();
-        }
-        catch (Exception ex)
-        {
-            ViewModel.StatusMessage = string.Format(
-                Strings.Mock_ConnectionCheckFailedFormat,
-                ex.Message
-            );
-        }
-    }
+    // ── 接続状態のプローブ ──
 
     /// <summary>Codex 接続を確立し、認証状態を ViewModel へ反映する</summary>
     private async Task EnsureCodexConnectedAsync()

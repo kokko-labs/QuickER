@@ -2776,6 +2776,66 @@ public class MockGenerationDialogViewModelTests
     }
 
     /// <summary>
+    /// 接続方式を切り替えられない状態（ターン実行中）でタブの可否（CanChangeBackend）が偽になり、TryChangeBackend も断ること、
+    /// モックプロジェクトの生成中は切り替えられることを検証する（タブの無効化と VM の拒否の条件を一致させる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "ターン実行中はタブの可否が偽で TryChangeBackend も断り、生成中は切り替えられる"
+    )]
+    public async Task CanChangeBackend_MatchesTryChangeBackendRejection()
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.CanChangeBackend.Should().BeTrue("待機中は切り替えられる");
+
+            var engine = await StartHeldTurnAsync(vm, engineBox);
+            vm.CanChangeBackend.Should().BeFalse("ターン実行中は切り替えられない");
+            vm.TryChangeBackend(ErChatBackendKind.Codex).Should().BeFalse();
+            engine.CompleteHeldTurn();
+            vm.CanChangeBackend.Should().BeTrue("ターンが終われば切り替えられる");
+
+            // モックプロジェクトの生成は開始時の接続方式を控えて使うので、生成中の切り替えは止めない
+            vm.IsMockGenInProgress = true;
+            vm.CanChangeBackend.Should().BeTrue("生成中は切り替えられる");
+            vm.TryChangeBackend(ErChatBackendKind.Codex).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>タブの可否（CanChangeBackend）の変化が、ターンの開始・終了で通知されることを検証する</summary>
+    [Fact(DisplayName = "タブの可否の変化はターンの開始と終了で通知される")]
+    public void CanChangeBackend_RaisesPropertyChanged()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            var raised = 0;
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MockGenerationDialogViewModel.CanChangeBackend))
+                {
+                    raised++;
+                }
+            };
+
+            vm.IsTurnInProgress = true;
+            vm.IsTurnInProgress = false;
+
+            raised.Should().Be(2);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
     /// ターン実行中のモックフォルダ変更は拒まれ（値は変わらず、束縛先へ読み直しの通知が出る）、
     /// セッションを切り離さないので、後から届くターン完了で実行中が解けることを検証する。
     /// </summary>

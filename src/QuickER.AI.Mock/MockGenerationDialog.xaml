@@ -63,6 +63,7 @@
         </Setter>
       </Style>
 
+      <!-- 切り替えられないとき（ターン実行中）はタブ単位で無効化する（TabControl 全体を無効化すると選択中タブの設定パネルまで操作不能になるため） -->
       <Style TargetType="TabItem">
         <Setter Property="Foreground" Value="{StaticResource MutedText}" />
         <Setter Property="Template">
@@ -94,10 +95,18 @@
                   </MultiTrigger.Conditions>
                   <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
                 </MultiTrigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter TargetName="Bd" Property="Opacity" Value="0.5" />
+                </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
           </Setter.Value>
         </Setter>
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding CanChangeBackend}" Value="False">
+            <Setter Property="IsEnabled" Value="False" />
+          </DataTrigger>
+        </Style.Triggers>
       </Style>
 
       <Style x:Key="SettingsTabs" TargetType="TabControl">
@@ -286,13 +295,18 @@
         </Grid>
 
         <!-- 接続方式タブ + 設定カード -->
+        <!-- 選択は各タブの Tag（接続方式）で束縛する。確定と巻き戻しは BackendSelection が持つ -->
         <TabControl
           x:Name="BackendTabs"
           Grid.Row="1"
           Style="{StaticResource SettingsTabs}"
-          SelectionChanged="BackendTabs_SelectionChanged"
+          SelectedValuePath="Tag"
+          SelectedValue="{Binding BackendSelection.Selected}"
         >
-          <TabItem Header="{x:Static res:Strings.Mock_TabApiKey}">
+          <TabItem
+            Header="{x:Static res:Strings.Mock_TabApiKey}"
+            Tag="{x:Static chat:ErChatBackendKind.ApiKey}"
+          >
             <StackPanel Margin="14,12">
               <Grid>
                 <Grid.ColumnDefinitions>
@@ -427,7 +441,7 @@
             </StackPanel>
           </TabItem>
 
-          <TabItem Header="Codex">
+          <TabItem Header="Codex" Tag="{x:Static chat:ErChatBackendKind.Codex}">
             <StackPanel Margin="14,12">
               <Grid>
                 <Grid.ColumnDefinitions>
@@ -522,7 +536,7 @@
             </StackPanel>
           </TabItem>
 
-          <TabItem Header="Claude Code">
+          <TabItem Header="Claude Code" Tag="{x:Static chat:ErChatBackendKind.ClaudeCode}">
             <StackPanel Margin="14,12">
               <Grid>
                 <Grid.ColumnDefinitions>
@@ -560,7 +574,7 @@
             </StackPanel>
           </TabItem>
 
-          <TabItem Header="Copilot">
+          <TabItem Header="Copilot" Tag="{x:Static chat:ErChatBackendKind.Copilot}">
             <StackPanel Margin="14,12">
               <Grid>
                 <Grid.ColumnDefinitions>

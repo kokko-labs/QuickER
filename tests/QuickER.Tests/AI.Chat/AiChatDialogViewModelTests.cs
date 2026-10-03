@@ -1354,7 +1354,8 @@ public class AiChatDialogViewModelTests
     ) CreateVmFor(
         IErDiagramChatHost? host = null,
         IClaudeCodeClient? claudeCode = null,
-        string? settingsFolder = null
+        string? settingsFolder = null,
+        IDialogService? dialogService = null
     )
     {
         var folder =
@@ -1369,6 +1370,7 @@ public class AiChatDialogViewModelTests
             codexClient: new FakeCodexAppServerClient(),
             claudeCodeClient: claudeCode,
             copilotClient: copilot,
+            dialogService: dialogService,
             apiKeyLoader: keyStore.Load,
             apiKeySaver: keyStore.Save
         );
@@ -1420,6 +1422,143 @@ public class AiChatDialogViewModelTests
 
             vm.CanSendMessage.Should().BeTrue();
             vm.CanStartConversation.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 接続方式を切り替えられない各状態（ターン実行中・会話の開始中）で、タブの可否（CanChangeBackend）が偽になり、
+    /// TryChangeBackend も確認を出さずに断ることを検証する（タブの無効化と VM の拒否の条件を一致させる）。
+    /// </summary>
+    /// <remarks>
+    /// 会話がある状態で試す＝条件から漏れた状態があれば、確認が出るか切り替わるかのどちらかで表に出る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "切り替えられない各状態でタブの可否が偽になり TryChangeBackend も確認なしで断る"
+    )]
+    public async Task CanChangeBackend_MatchesTryChangeBackendRejection()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, copilot, folder) = CreateVmFor(dialogService: dialogs);
+
+        try
+        {
+            vm.CanChangeBackend.Should().BeTrue("待機中は切り替えられる");
+
+            // ターン実行中
+            vm.Messages.Add(new ErChatMessage { Role = ErChatMessageRole.User, Content = "q" });
+            vm.IsTurnInProgress = true;
+            vm.CanChangeBackend.Should().BeFalse("ターン実行中は切り替えられない");
+            vm.TryChangeBackend(ErChatBackendKind.Codex).Should().BeFalse();
+            vm.IsTurnInProgress = false;
+            vm.CanChangeBackend.Should().BeTrue();
+
+            // 会話の開始中
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            var gate = new TaskCompletionSource();
+            copilot.StartSessionGate = gate.Task;
+            var starting = vm.StartConversationCommand.ExecuteAsync(null);
+            vm.Messages.Add(new ErChatMessage { Role = ErChatMessageRole.User, Content = "q" });
+            vm.CanChangeBackend.Should().BeFalse("会話の開始中は切り替えられない");
+            vm.TryChangeBackend(ErChatBackendKind.ApiKey).Should().BeFalse();
+
+            dialogs.ConfirmMessages.Should().BeEmpty("切り替えられない状態では確認より前に断る");
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Copilot);
+
+            gate.SetResult();
+            await starting;
+            vm.CanChangeBackend.Should().BeTrue("会話の開始が終われば切り替えられる");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>タブの可否（CanChangeBackend）の変化が、ターンの開始・終了と会話の開始・終了で通知されることを検証する</summary>
+    [Fact(DisplayName = "タブの可否の変化はターンと会話の開始の出入りで通知される")]
+    public async Task CanChangeBackend_RaisesPropertyChanged()
+    {
+        var (vm, copilot, folder) = CreateVmFor();
+
+        try
+        {
+            var raised = 0;
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(AiChatDialogViewModel.CanChangeBackend))
+                {
+                    raised++;
+                }
+            };
+
+            vm.IsTurnInProgress = true;
+            vm.IsTurnInProgress = false;
+            raised.Should().Be(2);
+
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            var gate = new TaskCompletionSource();
+            copilot.StartSessionGate = gate.Task;
+            var starting = vm.StartConversationCommand.ExecuteAsync(null);
+            raised.Should().Be(3);
+            gate.SetResult();
+            await starting;
+            raised.Should().Be(4);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 表示時の Initialize が前回使った接続方式へ切り替え、タブの選択へ中継し、その方式の接続確認を起動することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "Initialize は前回の接続方式へ切り替えてタブへ中継し接続確認を起動する")]
+    public void Initialize_SwitchesToInitialBackend_AndStartsCheck()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var keyStore = new InMemoryApiKeyStore();
+
+        try
+        {
+            var first = new AiChatDialogViewModel(
+                host: null,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new AiSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient(),
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
+            );
+            first.TryChangeBackend(ErChatBackendKind.Codex).Should().BeTrue();
+            first.SaveSettings();
+
+            var client = new FakeCodexAppServerClient();
+            var restored = new AiChatDialogViewModel(
+                host: null,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new AiSettingsStore(folder),
+                codexClient: client,
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
+            );
+            var relayed = new List<ErChatBackendKind>();
+            restored.BackendSelection.PropertyChanged += (_, _) =>
+                relayed.Add(restored.BackendSelection.Selected);
+
+            restored
+                .Connection.SelectedBackend.Should()
+                .Be(ErChatBackendKind.ApiKey, "生成時には切り替えない");
+            client.StartCount.Should().Be(0, "生成時には接続確認を起動しない");
+
+            restored.Initialize();
+
+            restored.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
+            relayed.Should().Equal(ErChatBackendKind.Codex);
+            client.StartCount.Should().Be(1, "切り替えた方式の接続確認を起動する");
         }
         finally
         {

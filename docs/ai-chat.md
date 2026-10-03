@@ -49,7 +49,7 @@ Leaving the model empty uses the CLI's default.
 The connection tab you used last is remembered and selected automatically the next time you start.
 The connection tabs are disabled while a response is in progress.
 Interrupt the response before switching.
-Switching tabs is also refused while a new conversation is starting.
+The tabs are also disabled while a new conversation is starting.
 
 ## What you can do
 
