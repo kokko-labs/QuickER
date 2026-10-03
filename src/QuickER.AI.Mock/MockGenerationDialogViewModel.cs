@@ -172,6 +172,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 InterruptCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanEditInput));
                 OnPropertyChanged(nameof(CanEditMockFolder));
+                // ターン実行中は接続方式タブも押せなくする
+                OnPropertyChanged(nameof(CanChangeBackend));
                 BrowseMockFolderCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanClear));
                 ClearCommand.NotifyCanExecuteChanged();
@@ -231,6 +233,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     /// <summary>入力欄を編集できるか（ターン実行中は禁止）</summary>
     public bool CanEditInput => !IsTurnInProgress;
+
+    /// <summary>接続方式を切り替えられるか（タブの有効・無効に束縛する）。ターン実行中は切り替えられない。</summary>
+    /// <remarks>
+    /// 条件は <see cref="TryChangeBackend"/> が断る条件と一致させる（そちらは二重の守りとして残す）。
+    /// モックプロジェクトの生成中は切り替えてよい（生成は開始時の接続方式を控えて使うので影響しない）。
+    /// </remarks>
+    public bool CanChangeBackend => !IsTurnInProgress;
+
+    /// <summary>接続方式タブの選択（タブと TwoWay で束縛し、確定を <see cref="TryChangeBackend"/> へ委ねる）</summary>
+    public BackendTabSelection BackendSelection { get; }
 
     /// <summary>モックフォルダに画面が 1 つ以上あるか（単一 HTML 出力・第2ステップの前提）</summary>
     public bool HasScreens => _store is not null && Screens.Count > 0;
@@ -600,6 +612,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // ctor 順序厳守: Connection 生成 → PropertyChanged 購読 → Connection.LoadSettings
         // （購読前にロードするとモデル同期・可否再評価が漏れる）
         Connection.PropertyChanged += OnConnectionPropertyChanged;
+        // タブへの中継は、上の会話リセットなどの後に走るよう、ここで購読させる
+        BackendSelection = new BackendTabSelection(Connection, TryChangeBackend);
         Connection.LoadSettings();
 
         RefreshAttachmentSupport();
@@ -635,8 +649,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="paths">ドロップされたファイルパス群</param>
     public void AddDroppedFiles(IReadOnlyList<string> paths) => Attachments.AddFiles(paths);
 
-    /// <summary>ダイアログ表示時に API キーを読み込む</summary>
-    /// <remarks>設定・候補の読込は ctor で <see cref="ChatConnectionSettingsViewModel.LoadSettings"/> 済み。</remarks>
+    /// <summary>ダイアログ表示時に API キーを読み込み、前回使った接続方式へ切り替える</summary>
+    /// <remarks>
+    /// 設定・候補の読込は ctor で <see cref="ChatConnectionSettingsViewModel.LoadSettings"/> 済み。
+    /// 接続方式の切り替えはここ（表示時）で行う＝接続確認は外部プロセスを起動するため、VM の生成時には走らせない。
+    /// 表示時はターンが無いので、そのまま切り替える。タブは <see cref="BackendSelection"/> の束縛で追従する。
+    /// </remarks>
     public void Initialize()
     {
         // 現在のプロバイダーの保存済み API キーを読み直す（子側で _isInitializing 抑止）
@@ -645,6 +663,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         // 第2ステップ（モックプロジェクト生成）の有効条件（claude CLI・dotnet SDK 検出）を非同期に確認する
         _ = RefreshMockGenAvailabilityAsync();
+
+        Connection.SelectedBackend = Connection.InitialBackend;
     }
 
     /// <summary>
@@ -1957,13 +1977,15 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 接続タブの切り替えを試みる（コードビハインドのタブ切替から呼ぶ）。切り替えたら true、拒んだら false を返す。
+    /// 接続タブの切り替えを試みる（タブの選択＝<see cref="BackendSelection"/> が確定のために呼ぶ）。切り替えたら true、拒んだら false を返す。
     /// </summary>
     /// <param name="newBackend">切り替え先の接続方式</param>
     /// <remarks>
     /// ターン実行中は拒む（理由をステータスへ出す）。切り替えは会話のリセット＝セッションの切り離しを伴い、
     /// 切り離したセッションのターン完了は届かないため、通すと <see cref="IsTurnInProgress"/> が戻らずダイアログが固まる。
-    /// 拒んだときはコードビハインドが確定済みのタブへ選択を戻す。
+    /// 画面からは <see cref="CanChangeBackend"/> でタブ自体を押せなくしているので、ここでの拒否は二重の守り
+    /// （キーボード・UI オートメーション・プログラムからの経路はタブの無効化を通らないことがある）。
+    /// 拒んだときは <see cref="BackendSelection"/> がタブを元の接続方式へ戻す。
     /// </remarks>
     public bool TryChangeBackend(ErChatBackendKind newBackend)
     {

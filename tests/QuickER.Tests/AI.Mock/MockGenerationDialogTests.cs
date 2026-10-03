@@ -477,8 +477,9 @@ public class MockGenerationDialogTests
     /// 接続タブの切替と「再確認」で接続状態の確認が例外を投げても、ウィンドウの外へ漏れず、ステータスに出ることを検証する。
     /// </summary>
     /// <remarks>
-    /// タブ切替のハンドラは <c>async void</c>、「再確認」は <c>AsyncRelayCommand</c> で、どちらも例外をディスパッチャへ
+    /// タブ切替からは確認を完了を待たずに起動し、「再確認」は <c>AsyncRelayCommand</c> で例外をディスパッチャへ
     /// 投げ直す。ディスパッチャの同期コンテキストを入れておき、漏れた例外がディスパッチャを回した時点で表へ出るようにする。
+    /// タブの選択は束縛で VM へ届くので、ダイアログを画面外へ表示して視覚ツリー（DataContext の継承）を組ませる。
     /// </remarks>
     [Fact(DisplayName = "接続状態の確認が失敗してもウィンドウの外へ漏れずステータスに出る")]
     public void ProbeFailure_IsReportedInStatus_NotThrown()
@@ -524,15 +525,31 @@ public class MockGenerationDialogTests
                 )
             );
 
-            // Claude Code タブへ切り替える＝タブ切替のハンドラがプローブを起動する
-            ((TabControl)dialog.FindName("BackendTabs")).SelectedIndex = 2;
-            WpfApplicationTestSupport.DoEvents();
-            statusAfterTab = viewModel.StatusMessage;
+            dialog.WindowStartupLocation = WindowStartupLocation.Manual;
+            dialog.Left = -4000;
+            dialog.Top = -4000;
+            dialog.ShowActivated = false;
+            dialog.ShowInTaskbar = false;
+            dialog.Show();
 
-            viewModel.StatusMessage = string.Empty;
-            dialog.ClaudeCodeRefreshCommand.ExecuteAsync(null).GetAwaiter().GetResult();
-            WpfApplicationTestSupport.DoEvents();
-            statusAfterRefresh = viewModel.StatusMessage;
+            try
+            {
+                WpfApplicationTestSupport.DoEvents();
+
+                // Claude Code タブへ切り替える＝束縛経由で接続方式が確定し、プローブが起動する
+                ((TabControl)dialog.FindName("BackendTabs")).SelectedIndex = 2;
+                WpfApplicationTestSupport.DoEvents();
+                statusAfterTab = viewModel.StatusMessage;
+
+                viewModel.StatusMessage = string.Empty;
+                dialog.ClaudeCodeRefreshCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+                WpfApplicationTestSupport.DoEvents();
+                statusAfterRefresh = viewModel.StatusMessage;
+            }
+            finally
+            {
+                dialog.ForceClose();
+            }
         });
 
         var expected = string.Format(
@@ -625,6 +642,120 @@ public class MockGenerationDialogTests
         finally
         {
             dialog.ForceClose();
+        }
+    }
+
+    /// <summary>
+    /// ターン実行中は接続方式タブが全て無効化されて半透明になり、ターンが終われば戻ることを検証する
+    /// （押してから断って戻すのでなく、押せなくする）。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中は接続方式タブが全て無効化され半透明になる")]
+    public void BackendTabs_DisabledDuringTurn_AndReenabledAfter()
+    {
+        var settingsFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+
+        try
+        {
+            var captured = RunOnSta(() =>
+            {
+                var viewModel = CreateReadyViewModel(settingsFolder);
+
+                WithShownDialog(
+                    viewModel,
+                    dialog =>
+                    {
+                        var tabItems = ((TabControl)dialog.FindName("BackendTabs"))
+                            .Items.Cast<TabItem>()
+                            .ToList();
+                        tabItems.Should().HaveCount(4);
+
+                        Func<TabItem, double> borderOpacity = tab =>
+                            ((Border)tab.Template.FindName("Bd", tab)).Opacity;
+
+                        tabItems.Should().OnlyContain(t => t.IsEnabled && borderOpacity(t) == 1.0);
+
+                        viewModel.IsTurnInProgress = true;
+                        dialog.UpdateLayout();
+                        WpfApplicationTestSupport.DoEvents();
+
+                        tabItems
+                            .Should()
+                            .OnlyContain(
+                                t => !t.IsEnabled && borderOpacity(t) == 0.5,
+                                "ターン実行中は全タブが押せず半透明になる"
+                            );
+
+                        viewModel.IsTurnInProgress = false;
+                        dialog.UpdateLayout();
+                        WpfApplicationTestSupport.DoEvents();
+
+                        tabItems.Should().OnlyContain(t => t.IsEnabled && borderOpacity(t) == 1.0);
+                    }
+                );
+            });
+
+            captured.Should().BeNull(captured?.ToString());
+        }
+        finally
+        {
+            if (Directory.Exists(settingsFolder))
+            {
+                Directory.Delete(settingsFolder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 前回使った接続方式（保存した設定）が、表示時にタブの選択と VM の接続方式の両方へ反映されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "表示時に前回の接続方式のタブが選ばれ VM もその方式になる")]
+    public void InitialBackend_IsShownOnLoad()
+    {
+        var settingsFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+
+        try
+        {
+            var captured = RunOnSta(() =>
+            {
+                var saver = CreateReadyViewModel(settingsFolder);
+                saver.Connection.SelectedBackend = ErChatBackendKind.Codex;
+                saver.SaveSettings();
+                var viewModel = CreateReadyViewModel(settingsFolder);
+
+                WithShownDialog(
+                    viewModel,
+                    dialog =>
+                    {
+                        var tabControl = (TabControl)dialog.FindName("BackendTabs");
+                        var tabItems = tabControl.Items.Cast<TabItem>().ToList();
+
+                        viewModel.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
+                        tabControl.SelectedIndex.Should().Be(1);
+                        tabItems
+                            .Select(t => t.IsSelected)
+                            .Should()
+                            .Equal(false, true, false, false);
+                        tabControl.SelectedContent.Should().BeSameAs(tabItems[1].Content);
+                    }
+                );
+            });
+
+            captured.Should().BeNull(captured?.ToString());
+        }
+        finally
+        {
+            if (Directory.Exists(settingsFolder))
+            {
+                Directory.Delete(settingsFolder, recursive: true);
+            }
         }
     }
 

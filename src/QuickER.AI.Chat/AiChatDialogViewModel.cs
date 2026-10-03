@@ -72,6 +72,7 @@ public partial class AiChatDialogViewModel : ObservableObject
             {
                 _isStartingConversation = value;
                 NotifyReadinessChanged();
+                OnPropertyChanged(nameof(CanChangeBackend));
             }
         }
     }
@@ -92,6 +93,8 @@ public partial class AiChatDialogViewModel : ObservableObject
                 Attachments.IsTurnInProgress = value;
                 // ターン実行中は API キー接続の設定編集も禁止する（設定パネルの無効化に連動）
                 OnPropertyChanged(nameof(CanEditConnectionSettings));
+                // ターン実行中は接続方式タブも押せなくする
+                OnPropertyChanged(nameof(CanChangeBackend));
                 // ターン実行中は「新しい会話」も禁止する（CanStartConversation の再評価）
                 NotifyReadinessChanged();
             }
@@ -104,6 +107,21 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// 会話履歴の列挙（添付告知の判定）も伴うため、ターン実行中は編集不可にする。
     /// </summary>
     public bool CanEditConnectionSettings => !IsTurnInProgress;
+
+    /// <summary>
+    /// 接続方式を切り替えられるか（タブの有効・無効に束縛する）。ターン実行中・会話の開始中は切り替えられない。
+    /// </summary>
+    /// <remarks>
+    /// 条件は <see cref="TryChangeBackend"/> が確認を出さずに断る条件と一致させる（そちらは二重の守りとして残す）。
+    /// 会話があるときの確認は押した後に利用者が決めるので、ここには含めない。
+    /// </remarks>
+    public bool CanChangeBackend => !IsTurnInProgress && !IsStartingConversation;
+
+    /// <summary>接続方式タブの選択（タブと TwoWay で束縛し、確定を <see cref="TryChangeBackend"/> へ委ねる）</summary>
+    public BackendTabSelection BackendSelection { get; }
+
+    /// <summary>接続方式を切り替えたときの接続確認と「再確認」の実行</summary>
+    private readonly BackendConnectionChecks _connectionChecks;
 
     /// <summary>新しい会話を開始できるか（接続・認証が整っており、ターン実行中でも会話の開始中でもないか）</summary>
     public bool CanStartConversation =>
@@ -282,6 +300,16 @@ public partial class AiChatDialogViewModel : ObservableObject
         // ctor 順序厳守: エンジン確立 → Connection.PropertyChanged 購読 → Connection.LoadSettings
         // （購読前にロードするとエンジンのモデル同期が漏れる）
         Connection.PropertyChanged += OnConnectionPropertyChanged;
+        // 接続確認とタブの中継は、上のエンジン差し替えの後に走るよう、ここで購読させる
+        _connectionChecks = new BackendConnectionChecks(
+            Connection,
+            EnsureCodexConnectedAsync,
+            EnsureClaudeCodeInitializedAsync,
+            EnsureCopilotInitializedAsync,
+            ex =>
+                StatusMessage = string.Format(Strings.Chat_ConnectionCheckFailedFormat, ex.Message)
+        );
+        BackendSelection = new BackendTabSelection(Connection, TryChangeBackend);
         Connection.LoadSettings();
 
         RefreshAttachmentSupport();
@@ -311,13 +339,17 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <remarks>API キーエンジンはプロバイダー依存（合成ルールを注入済み）・Codex/Claude Code は固定値を公開する</remarks>
     private void RefreshAttachmentSupport() => Attachments.Support = _engine.AttachmentSupport;
 
-    /// <summary>ダイアログ表示時に、現在のプロバイダーの保存済み API キーを読み込む</summary>
+    /// <summary>ダイアログ表示時に、現在のプロバイダーの保存済み API キーを読み込み、前回使った接続方式へ切り替える</summary>
     /// <remarks>
     /// 設定・候補の読込は ctor で <see cref="ChatConnectionSettingsViewModel.LoadSettings"/> 済み。
-    /// 前回使った接続方式への切替（とそれに伴う接続）は、ダイアログがタブを復元したときの
-    /// 通常のタブ切替（<see cref="TryChangeBackend"/>）が行う。
+    /// 接続方式の切り替えはここ（表示時）で行う＝接続確認は外部プロセスを起動するため、VM の生成時には走らせない。
+    /// 表示時は会話もターンも無いので、確認を挟まずに切り替える。タブは <see cref="BackendSelection"/> の束縛で追従する。
     /// </remarks>
-    public void Initialize() => Connection.Initialize();
+    public void Initialize()
+    {
+        Connection.Initialize();
+        Connection.SelectedBackend = Connection.InitialBackend;
+    }
 
     /// <summary>新しい会話を開始する</summary>
     [RelayCommand(CanExecute = nameof(CanStartConversation))]
@@ -343,6 +375,11 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// ターン実行中は拒否する（旧エンジンの <see cref="IErChatEngine.TurnCompleted"/> 購読が
     /// 切替で外れ、<see cref="IsTurnInProgress"/> が true のまま固着するため）。
     /// </summary>
+    /// <remarks>
+    /// 画面からはタブの選択（<see cref="BackendSelection"/>）が確定のために呼ぶ。ターン実行中・会話の開始中は
+    /// <see cref="CanChangeBackend"/> でタブ自体を押せなくしているので、ここでの拒否は二重の守り
+    /// （キーボード・UI オートメーション・プログラムからの経路はタブの無効化を通らないことがある）。
+    /// </remarks>
     /// <param name="newBackend">切り替え先の接続方式</param>
     /// <returns>切り替えた（または既に同じ）場合 true、ユーザーがキャンセルまたはターン実行中で拒否した場合 false</returns>
     public bool TryChangeBackend(ErChatBackendKind newBackend)
@@ -534,41 +571,21 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>Codex のアカウント状態を取り直す（「再確認」）</summary>
     [RelayCommand]
     private Task CodexRefreshAsync() =>
-        RunProbeAsync(() => _codexEngine.RefreshAccountStateAsync());
+        _connectionChecks.RunAsync(() => _codexEngine.RefreshAccountStateAsync());
 
     /// <summary>Claude のログイン状態を軽量プローブで取り直す（「再確認」）</summary>
     [RelayCommand]
-    private Task ClaudeCodeRefreshAsync() => RunProbeAsync(() => _claudeCodeEngine.RefreshAsync());
+    private Task ClaudeCodeRefreshAsync() =>
+        _connectionChecks.RunAsync(() => _claudeCodeEngine.RefreshAsync());
 
     /// <summary>Copilot の接続・ログイン状態とモデル一覧を取り直す（「再確認」）</summary>
     [RelayCommand]
     private Task CopilotRefreshAsync() =>
-        RunProbeAsync(async () =>
+        _connectionChecks.RunAsync(async () =>
         {
             await _copilotEngine.RefreshAsync().ConfigureAwait(true);
             ApplyCopilotState();
         });
-
-    /// <summary>
-    /// 接続状態の確認（タブ切替時の接続・「再確認」）を実行し、失敗はステータスへ出す（例外をウィンドウの外へ漏らさない）。
-    /// </summary>
-    /// <remarks>
-    /// タブ切替からは完了を待たずに起動するため、ここで受け止めないと例外が観測されずに消え、状態は灰のまま残る。
-    /// 「再確認」のコマンド（AsyncRelayCommand）は例外をディスパッチャへ投げ直すため、受け止めないとアプリが落ちる。
-    /// モック生成ダイアログの同名メソッドと同じ形。
-    /// </remarks>
-    /// <param name="probe">実行する確認</param>
-    private async Task RunProbeAsync(Func<Task> probe)
-    {
-        try
-        {
-            await probe().ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = string.Format(Strings.Chat_ConnectionCheckFailedFormat, ex.Message);
-        }
-    }
 
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
     /// <remarks>接続タブの状態保存は子（<see cref="ChatConnectionSettingsViewModel.SaveSettings"/>）へ委譲する。</remarks>
@@ -698,22 +715,7 @@ public partial class AiChatDialogViewModel : ObservableObject
                 // バックエンド切替で添付範囲を再評価する（非対応になったら添付部品側で Pending をクリア・通知する）
                 RefreshAttachmentSupport();
                 NotifyReadinessChanged();
-
-                // 完了は待たない（タブ切替を止めない）。失敗は RunProbeAsync がステータスへ出す。
-                // 素早い往復で重なっても、エンジンの接続・初期化は実行中の処理を共有するので二重に走らない
-                if (Connection.SelectedBackend == ErChatBackendKind.Codex)
-                {
-                    _ = RunProbeAsync(EnsureCodexConnectedAsync);
-                }
-                else if (Connection.SelectedBackend == ErChatBackendKind.ClaudeCode)
-                {
-                    _ = RunProbeAsync(EnsureClaudeCodeInitializedAsync);
-                }
-                else if (Connection.SelectedBackend == ErChatBackendKind.Copilot)
-                {
-                    _ = RunProbeAsync(EnsureCopilotInitializedAsync);
-                }
-
+                // 切り替えた方式の接続確認は、この後に購読している _connectionChecks が起動する
                 break;
 
             case nameof(ChatConnectionSettingsViewModel.ApiProvider):
