@@ -706,65 +706,6 @@ public class AiChatDialogViewModelTests
         return data;
     }
 
-    /// <summary>
-    /// 接続組み立てで、エンドポイント上書きがローカル LLM のときだけ渡ることを検証する。
-    /// 欄が非表示のまま残った URL が OpenAI 接続へ紛れ込む事故（回帰）を防ぐ。
-    /// </summary>
-    [Fact(DisplayName = "接続のエンドポイント上書きは Local LLM のときだけ渡る")]
-    public void BuildOpenAiConnection_AppliesEndpointOnlyForLocalLlm()
-    {
-        var (vm, _, folder) = CreateVm();
-
-        try
-        {
-            vm.Connection.ApiProvider = AiProvider.LocalLlm;
-            vm.Connection.EndpointOverride = "http://127.0.0.1:1234/v1";
-
-            var local = vm.BuildOpenAiConnection();
-            local.Provider.Should().Be(AiProvider.LocalLlm);
-            local.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
-
-            // 欄は非表示になるが値は残る。それでも OpenAI 接続には渡さない
-            vm.Connection.ApiProvider = AiProvider.OpenAI;
-            vm.Connection.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
-
-            var openAi = vm.BuildOpenAiConnection();
-            openAi.EndpointOverride.Should().BeNull();
-            openAi.ResolveEndpoint().Should().Be("https://api.openai.com/v1");
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
-    }
-
-    /// <summary>ローカル LLM のキーは、入力すればそのまま接続へ渡り、未入力ならダミーになることを検証する</summary>
-    [Fact(DisplayName = "Local LLM のキーは入力時そのまま・未入力でダミー")]
-    public void BuildOpenAiConnection_LocalLlmApiKey_IsOptional()
-    {
-        var (vm, _, folder) = CreateVm();
-
-        try
-        {
-            vm.Connection.ApiProvider = AiProvider.LocalLlm;
-
-            vm.Connection.ApiKey = "local-secret";
-            var withKey = vm.BuildOpenAiConnection();
-            withKey.ApiKey.Should().Be("local-secret");
-            withKey.ResolveApiKey().Should().Be("local-secret");
-
-            vm.Connection.ApiKey = string.Empty;
-            vm.BuildOpenAiConnection()
-                .ResolveApiKey()
-                .Should()
-                .Be(LocalLlmDefaults.PlaceholderApiKey);
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
-    }
-
     /// <summary>API キー接続の添付範囲がプロバイダー選択に追従することを検証する</summary>
     [Fact(DisplayName = "添付範囲はプロバイダーに追従する")]
     public void AttachmentSupport_TracksApiProvider()

@@ -264,14 +264,18 @@
             Style="{StaticResource FieldLabel}"
             Text="{x:Static res:Strings.Mock_MockFolder}"
           />
+          <!-- 確定は入力が止まって 400ms 後・フォーカスが外れたとき・Enter（キー入力ごとにフォルダを走査しない） -->
           <TextBox
+            x:Name="MockFolderBox"
             Grid.Column="1"
             Padding="6,4"
             Margin="0,0,8,0"
             VerticalContentAlignment="Center"
-            Text="{Binding MockFolder, UpdateSourceTrigger=PropertyChanged}"
+            Text="{Binding MockFolder, UpdateSourceTrigger=PropertyChanged, Delay=400}"
             IsEnabled="{Binding CanEditMockFolder}"
             ToolTip="{x:Static res:Strings.Mock_MockFolderTooltip}"
+            LostKeyboardFocus="MockFolderBox_LostKeyboardFocus"
+            PreviewKeyDown="MockFolderBox_PreviewKeyDown"
           />
           <Button
             Grid.Column="2"
@@ -383,6 +387,7 @@
                   Margin="0,0,8,0"
                   ToolTip="{x:Static res:Strings.Mock_ApiKeyTooltip}"
                   common:PasswordBoxBehavior.BoundPassword="{Binding Connection.ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                  LostKeyboardFocus="ApiKeyBox_LostKeyboardFocus"
                 />
                 <CheckBox
                   Grid.Column="2"
@@ -676,6 +681,17 @@
                     VerticalAlignment="Center"
                   />
                 </StackPanel>
+                <!-- 会話を止めている理由（モックプロジェクトの生成中。ターンの実行中とは同時に立たない） -->
+                <TextBlock
+                  Grid.Column="1"
+                  Margin="12,0,0,0"
+                  VerticalAlignment="Center"
+                  Foreground="{StaticResource MutedText}"
+                  FontSize="12"
+                  TextWrapping="Wrap"
+                  Text="{Binding ConversationDisabledReason}"
+                  Visibility="{Binding IsMockGenInProgress, Converter={StaticResource BoolToVisibilityConverter}}"
+                />
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
                   <Button
                     Style="{StaticResource SecondaryButton}"
@@ -685,9 +701,12 @@
                     Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}"
                   />
                   <Button
+                    x:Name="StartConversationButton"
                     Style="{StaticResource SecondaryButton}"
                     Content="{x:Static res:Strings.Mock_NewConversation}"
                     Command="{Binding StartConversationCommand}"
+                    ToolTip="{Binding ConversationDisabledReason}"
+                    ToolTipService.ShowOnDisabled="True"
                   />
                   <!-- 画面全体の初期化（確認後に会話・フォルダ選択・第2ステップ入力をクリア） -->
                   <Button
@@ -771,6 +790,8 @@
               VerticalAlignment="Stretch"
               Content="{x:Static res:Strings.Mock_Send}"
               Command="{Binding SendMessageCommand}"
+              ToolTip="{Binding ConversationDisabledReason}"
+              ToolTipService.ShowOnDisabled="True"
             />
           </Grid>
         </Grid>

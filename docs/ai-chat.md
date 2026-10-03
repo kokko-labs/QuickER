@@ -23,6 +23,7 @@ The API Key tab offers three providers of its own, which brings the total to six
 
 Select a provider and model, then enter the API key.
 When you enable the "Save" checkbox (for the API key), the key is **encrypted with Windows DPAPI (CurrentUser scope)** and stored under your user profile, and it is filled in automatically the next time you start (it is never stored in plain text).
+The key is saved when you leave the key field, switch the provider, or close the window, not on every keystroke.
 DPAPI CurrentUser protection is tied to your Windows user account, so how well the key is protected depends on that account staying secure.
 
 Under "Local LLM" you give the endpoint URL of your server in the endpoint field, including the `/v1` part (the default is Ollama's `http://localhost:11434/v1`).
@@ -70,6 +71,8 @@ Interrupt the response before switching.
 "AI Mock Generation" turns the current ER diagram into web mockup screens.
 The result is saved as a **mock folder** (a `mock.json` manifest plus one HTML file per screen and a shared `style.css`), written live as you converse.
 Point the tool at an empty folder to start fresh, or at an existing mock folder to resume.
+Give the folder as a full path; a relative path such as `mock` cannot start a conversation.
+What you type in the folder field is applied when you stop typing, leave the field, or press Enter, and the folder's contents are read at that point.
 No chat log is kept: resuming restores from the folder contents alone, so it works the same on every backend.
 The screen-list sidebar lets you click through the screens, and the preview follows the links between them.
 You can export the whole mock as a single self-contained HTML file.

@@ -238,20 +238,10 @@ public partial class AiChatDialogViewModel : ObservableObject
             apiKeySaver: apiKeySaver
         );
 
-        _apiKeyEngine = new ChatTurnEngine(
-            new ProviderRoutingTurnDriver(
-                () => Connection.ApiProvider,
-                new OpenAiTurnDriver(BuildOpenAiConnection, ErDesignProfile.ErDesign),
-                new AnthropicChatTurnDriver(BuildAnthropicConnection, ErDesignProfile.ErDesign)
-            ),
-            toolHost ?? new NullToolHost(),
-            dispatcher,
-            () =>
-                Connection.ApiProvider == AiProvider.LocalLlm
-                || !string.IsNullOrWhiteSpace(Connection.ApiKey),
+        _apiKeyEngine = Connection.CreateApiKeyEngine(
             ErDesignProfile.ErDesign,
-            attachmentSupport: () =>
-                AttachmentSupportResolver.ForApiKeyProvider(Connection.ApiProvider)
+            toolHost ?? new NullToolHost(),
+            dispatcher
         );
 
         var client = codexClient ?? new CodexAppServerClient();
@@ -573,23 +563,6 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
     /// <remarks>接続タブの状態保存は子（<see cref="ChatConnectionSettingsViewModel.SaveSettings"/>）へ委譲する。</remarks>
     public void SaveSettings() => Connection.SaveSettings();
-
-    /// <summary>OpenAI 接続設定を現在の入力から組み立てる</summary>
-    /// <remarks>
-    /// エンドポイント上書きは <see cref="ChatConnectionSettingsViewModel.EffectiveEndpointOverride"/> から取る
-    /// （ローカル LLM 以外では null＝欄が非表示のまま残った値が OpenAI 接続へ紛れ込まない）。
-    /// </remarks>
-    internal OpenAiChatConnection BuildOpenAiConnection() =>
-        new(
-            Connection.ApiProvider,
-            Connection.ApiKey,
-            Connection.ApiModel,
-            Connection.EffectiveEndpointOverride
-        );
-
-    /// <summary>Anthropic (Claude) 接続設定を現在の入力から組み立てる</summary>
-    private AnthropicChatConnection BuildAnthropicConnection() =>
-        new(Connection.ApiKey, Connection.ApiModel);
 
     /// <summary>Codex 接続が未確立なら接続を試みる（解決中はログインパネルのちらつきを抑止する）</summary>
     private async Task EnsureCodexConnectedAsync()

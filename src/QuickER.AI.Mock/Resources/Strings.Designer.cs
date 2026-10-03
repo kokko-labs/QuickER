@@ -330,6 +330,30 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_DisabledReason_TurnInProgress {
+            get {
+                return ResourceManager.GetString("Mock_DisabledReason_TurnInProgress", resourceCulture);
+            }
+        }
+
+        public static string Mock_ConversationBlockedDuringMockGen {
+            get {
+                return ResourceManager.GetString("Mock_ConversationBlockedDuringMockGen", resourceCulture);
+            }
+        }
+
+        public static string Mock_MockFolderNotFullyQualified {
+            get {
+                return ResourceManager.GetString("Mock_MockFolderNotFullyQualified", resourceCulture);
+            }
+        }
+
+        public static string Mock_ConnectionCheckFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_ConnectionCheckFailedFormat", resourceCulture);
+            }
+        }
+
         public static string Mock_DisabledReason_NoScreens {
             get {
                 return ResourceManager.GetString("Mock_DisabledReason_NoScreens", resourceCulture);

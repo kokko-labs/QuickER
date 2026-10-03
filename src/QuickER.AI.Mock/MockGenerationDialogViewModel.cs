@@ -64,6 +64,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>現在の生成セッション（会話開始前は null）</summary>
     private MockFolderDesignSession? _session;
 
+    /// <summary>現在のセッションが抱えるエンジン（モデルの変更を流すために控える。セッションと同時に消える）</summary>
+    private IErChatEngine? _sessionEngine;
+
     /// <summary>
     /// 現在のモックフォルダのストア（フォルダを開いた／作成したときに設定される）。
     /// 会話開始前でもサイドバー・プレビュー・単一 HTML 出力・第2ステップの土台になる。
@@ -186,34 +189,45 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             ErChatBackendKind.Codex => _codexReady,
             ErChatBackendKind.ClaudeCode => _claudeCodeReady,
             ErChatBackendKind.Copilot => _copilotReady,
-            _ => IsApiKeyConnectionReady,
+            _ => Connection.IsApiKeyConnectionReady,
         };
-
-    /// <summary>API キー接続が送信可能か（ローカル LLM はキー任意・それ以外はキー入力が必須）</summary>
-    private bool IsApiKeyConnectionReady =>
-        Connection.ApiProvider == AiProvider.LocalLlm
-        || !string.IsNullOrWhiteSpace(Connection.ApiKey);
 
     /// <summary>図が空（エンティティ 0）か（会話開始の可否に使う）</summary>
     public bool IsDiagramEmpty => _diagramSource.IsEmpty;
 
     /// <summary>
-    /// 新しい会話を開始できるか（接続 OK・図が空でない・ターン非実行中・モックフォルダ指定あり・
-    /// そのフォルダが会話に使える＝モックフォルダでない既存フォルダや破損でない）。
+    /// 新しい会話を開始できるか（接続 OK・図が空でない・ターン非実行中・モックプロジェクト生成の非実行中・
+    /// モックフォルダ指定あり・そのフォルダが会話に使える＝モックフォルダでない既存フォルダや破損でない）。
     /// </summary>
     public bool CanStartConversation =>
         IsBackendReady
         && !IsDiagramEmpty
         && !IsTurnInProgress
+        && !IsMockGenInProgress
         && !string.IsNullOrWhiteSpace(MockFolder)
         && !_folderBlocked;
 
-    /// <summary>メッセージを送信できるか（会話開始済み・接続 OK・入力あり・ターン非実行中）</summary>
+    /// <summary>
+    /// メッセージを送信できるか（会話開始済み・接続 OK・入力あり・ターン非実行中・モックプロジェクト生成の非実行中）
+    /// </summary>
+    /// <remarks>
+    /// モックプロジェクトの生成はモックフォルダを出力先へ写すため、その間のターンがモックフォルダへ書き込むと
+    /// 写した内容と食い違い得る。生成の開始がターンの実行中を拒むのと対にして、生成中は会話を止める。
+    /// </remarks>
     public bool CanSendMessage =>
         _conversationStarted
         && IsBackendReady
         && !IsTurnInProgress
+        && !IsMockGenInProgress
         && !string.IsNullOrWhiteSpace(UserInput);
+
+    /// <summary>会話（開始・送信）を止めている理由（止めていなければ null＝ツールチップを出さない）</summary>
+    /// <remarks>
+    /// 表示するのは利用者が待つしかない理由（モックプロジェクトの生成中）だけで、
+    /// 接続や入力の不足のように画面の他の場所が既に示している理由は載せない。
+    /// </remarks>
+    public string? ConversationDisabledReason =>
+        IsMockGenInProgress ? Strings.Mock_ConversationBlockedDuringMockGen : null;
 
     /// <summary>入力欄を編集できるか（ターン実行中は禁止）</summary>
     public bool CanEditInput => !IsTurnInProgress;
@@ -289,7 +303,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             if (SetProperty(ref _isMockGenInProgress, value))
             {
-                NotifyMockGenChanged();
+                // 会話の開始・送信の可否も変わる（NotifyReadinessChanged は第2ステップの通知も含む）
+                OnPropertyChanged(nameof(ConversationDisabledReason));
+                NotifyReadinessChanged();
             }
         }
     }
@@ -359,7 +375,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             ErChatBackendKind.ClaudeCode => IsClaudeCliAvailable,
             ErChatBackendKind.Codex => _codexReady,
             ErChatBackendKind.Copilot => _copilotReady,
-            _ => IsApiKeyConnectionReady,
+            _ => Connection.IsApiKeyConnectionReady,
         };
 
     /// <summary>モックプロジェクト生成が無効な場合の理由（ツールチップ／案内文用）</summary>
@@ -370,6 +386,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             if (IsMockGenInProgress)
             {
                 return Strings.Mock_DisabledReason_InProgress;
+            }
+
+            if (IsTurnInProgress)
+            {
+                return Strings.Mock_DisabledReason_TurnInProgress;
             }
 
             if (!HasScreens)
@@ -392,7 +413,10 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 return Strings.Mock_DisabledReason_CopilotNotReady;
             }
 
-            if (Connection.SelectedBackend == ErChatBackendKind.ApiKey && !IsApiKeyConnectionReady)
+            if (
+                Connection.SelectedBackend == ErChatBackendKind.ApiKey
+                && !Connection.IsApiKeyConnectionReady
+            )
             {
                 return Strings.Mock_DisabledReason_ApiKeyNotReady;
             }
@@ -529,7 +553,10 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         );
 
         _apiKeyEngineFactory =
-            apiKeyEngineFactory ?? ((profile, toolHost) => BuildApiKeyEngine(profile, toolHost));
+            apiKeyEngineFactory
+            ?? (
+                (profile, toolHost) => Connection.CreateApiKeyEngine(profile, toolHost, _dispatcher)
+            );
 
         // API キー方式のモックプロジェクト生成は、チャットと同じ API キーエンジンを使う。生成時点の Connection 状態
         // （モデル・キー・エンドポイント）を閉包へ閉じ込めるため、確定済みの _apiKeyEngineFactory を渡す
@@ -540,15 +567,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // 生成ターゲット一覧を取り込み、既定を先頭（Blazor Web App）にする（第 2 ステップの ComboBox が選ばせる）
         MockProjectTargets = _mockProjectGenerator.Targets;
         _selectedMockProjectTarget = MockProjectTargets[0];
+        // CLI 3 方式のモデル・プロバイダーは生成後に ApplyConnectionModel が入れる（会話中の変更も同じ口で流す）
         _codexEngineFactory =
             codexEngineFactory
             ?? (
                 (profile, toolHost) =>
                     new CodexChatEngine(new CodexAppServerClient(), toolHost, _dispatcher, profile)
-                    {
-                        ModelProvider = Connection.CodexModelProvider,
-                        Model = Connection.CodexModel,
-                    }
             );
         _claudeCodeEngineFactory =
             claudeCodeEngineFactory
@@ -560,9 +584,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                         _dispatcher,
                         profile
                     )
-                    {
-                        Model = Connection.ClaudeCodeModel,
-                    }
             );
         _copilotEngineFactory =
             copilotEngineFactory
@@ -574,9 +595,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                         _dispatcher,
                         profile
                     )
-                    {
-                        Model = Connection.CopilotModel,
-                    }
             );
 
         // ctor 順序厳守: Connection 生成 → PropertyChanged 購読 → Connection.LoadSettings
@@ -588,21 +606,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 選択中バックエンドに応じて添付部品の対応範囲を再評価する。
-    /// API キー=プロバイダー依存・Codex=なし・Claude Code=全種別・Copilot=画像のみ
-    /// （エンジン生成前でも判定できるよう規則で解決する）。
+    /// 選択中バックエンドに応じて添付部品の対応範囲を再評価する（エンジン生成前でも判定できるよう、
+    /// エンジンと同じ正本 <see cref="AttachmentSupportResolver.ForBackend"/> の規則で解決する）。
     /// </summary>
     private void RefreshAttachmentSupport() =>
-        Attachments.Support = Connection.SelectedBackend switch
-        {
-            ErChatBackendKind.ClaudeCode => AttachmentSupport.Images
-                | AttachmentSupport.Pdf
-                | AttachmentSupport.Text
-                | AttachmentSupport.Binary,
-            ErChatBackendKind.Codex => AttachmentSupport.None,
-            ErChatBackendKind.Copilot => AttachmentSupport.Images,
-            _ => AttachmentSupportResolver.ForApiKeyProvider(Connection.ApiProvider),
-        };
+        Attachments.Support = AttachmentSupportResolver.ForBackend(
+            Connection.SelectedBackend,
+            Connection.ApiProvider
+        );
 
     /// <summary>添付ボタン押下でファイル選択ダイアログを開き、選択ファイルを添付へ取り込む</summary>
     public void PickAndAddAttachments()
@@ -636,23 +647,13 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _ = RefreshMockGenAvailabilityAsync();
     }
 
-    /// <summary>本番の API キーエンジン（プロバイダ振り分けドライバ）を組み立てる</summary>
-    private ChatTurnEngine BuildApiKeyEngine(ErChatProfile profile, IErDiagramToolHost toolHost) =>
-        new(
-            new ProviderRoutingTurnDriver(
-                () => Connection.ApiProvider,
-                new OpenAiTurnDriver(BuildOpenAiConnection, profile),
-                new AnthropicChatTurnDriver(BuildAnthropicConnection, profile)
-            ),
-            toolHost,
-            _dispatcher,
-            () =>
-                Connection.ApiProvider == AiProvider.LocalLlm
-                || !string.IsNullOrWhiteSpace(Connection.ApiKey),
-            profile,
-            attachmentSupport: () =>
-                AttachmentSupportResolver.ForApiKeyProvider(Connection.ApiProvider)
-        );
+    /// <summary>
+    /// 図の状態（空かどうか）に依存する可否を評価し直す（ダイアログが前面に戻ったときに呼ぶ）。
+    /// </summary>
+    /// <remarks>
+    /// 図の供給元は変更を通知しないため、メイン画面で図を編集して戻ってきた時点で読み直す。
+    /// </remarks>
+    public void RefreshDiagramState() => NotifyReadinessChanged();
 
     // ── モックフォルダ ──
 
@@ -686,6 +687,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         if (string.IsNullOrEmpty(folder))
         {
+            NotifyFolderStateChanged();
+            return;
+        }
+
+        if (!Path.IsPathFullyQualified(folder))
+        {
+            // 相対パスはアプリの作業フォルダ基準で解決され、思わぬ場所にモックフォルダを作る
+            // （プレビューのファイル URI も組めない）。フルパスを求めて会話の開始を止める
+            _folderBlocked = true;
+            StatusMessage = Strings.Mock_MockFolderNotFullyQualified;
             NotifyFolderStateChanged();
             return;
         }
@@ -738,17 +749,47 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         NotifyMockGenChanged();
     }
 
-    /// <summary>マニフェスト宣言の画面群からサイドバー項目を再構築する</summary>
+    /// <summary>
+    /// マニフェスト宣言の画面群からサイドバー項目を再構築する。選択中の画面がまだあれば同じファイル名で選び直し、
+    /// プレビューは要求しない（表示を変えるかどうかは呼び出し側が決める）。
+    /// </summary>
+    /// <remarks>
+    /// 画面一覧に束縛した ListBox は <see cref="ObservableCollection{T}.Clear"/> で選択を null へ押し戻す。
+    /// 選び直さないと、表示していない画面の削除・保存だけで選択が外れて先頭の画面へ飛ぶ。
+    /// 項目は値で等しくなる record なので、同じ値の旧インスタンスが残っていても新しいインスタンスへ差し替える
+    /// （一覧に実在するインスタンスを選択に持つ）。
+    /// </remarks>
     private void RebuildScreens()
     {
-        Screens.Clear();
+        var selectedFile = SelectedScreen?.File;
+        var wasSuppressed = _suppressPreviewRequest;
+        _suppressPreviewRequest = true;
 
-        if (_store is not null)
+        try
         {
-            foreach (var screen in _store.Manifest.Screens)
+            Screens.Clear();
+
+            if (_store is not null)
             {
-                Screens.Add(new MockScreenListItem(screen.File, screen.Name, screen.Description));
+                foreach (var screen in _store.Manifest.Screens)
+                {
+                    Screens.Add(
+                        new MockScreenListItem(screen.File, screen.Name, screen.Description)
+                    );
+                }
             }
+
+            var reselected = selectedFile is null ? null : FindScreen(selectedFile);
+
+            if (!ReferenceEquals(SelectedScreen, reselected))
+            {
+                SelectedScreen = null;
+                SelectedScreen = reselected;
+            }
+        }
+        finally
+        {
+            _suppressPreviewRequest = wasSuppressed;
         }
 
         OnPropertyChanged(nameof(HasScreens));
@@ -758,17 +799,36 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         NotifyMockGenChanged();
     }
 
-    /// <summary>指定ファイルの画面をサイドバーで選択する（見つかればプレビュー要求が飛ぶ）</summary>
-    private void SelectScreenByFile(string file)
-    {
-        var item = Screens.FirstOrDefault(s =>
+    /// <summary>指定ファイルの画面項目を返す（無ければ null。ファイル名は大文字小文字を区別しない）</summary>
+    private MockScreenListItem? FindScreen(string file) =>
+        Screens.FirstOrDefault(s =>
             string.Equals(s.File, file, StringComparison.OrdinalIgnoreCase)
         );
 
-        if (item is not null)
+    /// <summary>
+    /// 指定ファイルの画面をサイドバーで選択し、プレビューへ表示し直す（既に選択中でも、内容が変わっているため再要求する）
+    /// </summary>
+    private void ShowScreen(string file)
+    {
+        var item = FindScreen(file);
+
+        if (item is null)
+        {
+            return;
+        }
+
+        _suppressPreviewRequest = true;
+
+        try
         {
             SelectedScreen = item;
         }
+        finally
+        {
+            _suppressPreviewRequest = false;
+        }
+
+        RaisePreview(item.File);
     }
 
     /// <summary>プレビューへ「この画面を表示せよ」と要求する（許可フォルダ付き）</summary>
@@ -803,9 +863,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="file">プレビューが現在表示している画面ファイル名</param>
     public void SyncSelectionFromPreview(string file)
     {
-        var item = Screens.FirstOrDefault(s =>
-            string.Equals(s.File, file, StringComparison.OrdinalIgnoreCase)
-        );
+        var item = FindScreen(file);
 
         if (item is null || ReferenceEquals(item, SelectedScreen))
         {
@@ -864,11 +922,15 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // 選択中バックエンドのエンジンを、モックフォルダ方式プロファイル注入・セッション自身をツールホストにして生成する。
         // エンジン⇔セッションの相互依存は MockFolderDesignSession のファクトリコンストラクタが解く。
         var factory = SelectedFactory();
+        IErChatEngine? engine = null;
         var session = new MockFolderDesignSession(
-            toolHost => factory(MockDesignProfile.FolderMockDesign, toolHost),
+            toolHost => engine = factory(MockDesignProfile.FolderMockDesign, toolHost),
             _store
         );
         AttachSession(session);
+        // 切り離し（AttachSession 内の DetachSession）が旧エンジンの参照を消した後に控える
+        _sessionEngine = engine;
+        ApplyConnectionModel();
 
         Messages.Clear();
         _currentAssistantMessage = null;
@@ -915,8 +977,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             if (!_firstMessageSent)
             {
-                // 初回送信は新規（スキーマ）／再開（画面一覧＋差異）のいずれかで会話を開始する
-                _firstMessageSent = true;
+                // 初回送信は新規（スキーマ）／再開（画面一覧＋差異）のいずれかで会話を開始する。
+                // 済みの印は送信が戻ってから立てる（失敗したら次の送信も初回としてやり直す＝
+                // 先に立てると、初期化されていないエンジンへフィードバックとして送ってしまう）
                 var diagram = _diagramSource.GetDiagram();
 
                 if (_resumeMode)
@@ -931,6 +994,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                         .StartNewAsync(diagram, message, attachments)
                         .ConfigureAwait(true);
                 }
+
+                _firstMessageSent = true;
             }
             else
             {
@@ -1123,6 +1188,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         ClearMockGenLog();
         MockGenCompleted = false;
         MockGenSucceeded = false;
+        _lastGeneratedOutputDirectory = null;
 
         StatusMessage = string.Empty;
     }
@@ -1192,6 +1258,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         ClearMockGenLog();
         MockGenCompleted = false;
         MockGenSucceeded = false;
+        _lastGeneratedOutputDirectory = null;
         IsMockGenInProgress = true;
         StatusMessage = Strings.Mock_GeneratingProject;
 
@@ -1226,6 +1293,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 .ConfigureAwait(true);
 
             MockGenSucceeded = result.Success;
+            _lastGeneratedOutputDirectory = result.OutputDirectory;
             StatusMessage = result.Message;
         }
         catch (Exception ex)
@@ -1320,6 +1388,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     /// <summary>モックプロジェクト生成の中断起点</summary>
     private CancellationTokenSource? _mockGenCts;
+
+    /// <summary>
+    /// 直近の生成が成果物を書き出したフォルダ（「フォルダを開く」が開く先。生成の開始と画面の初期化で破棄する）
+    /// </summary>
+    /// <remarks>
+    /// 出力フォルダ欄は生成の後も編集できるため、欄の現在値を開くと、生成していない場所を開いてしまう。
+    /// </remarks>
+    private string? _lastGeneratedOutputDirectory;
 
     /// <summary>実行中のモックプロジェクト生成を中断する</summary>
     [RelayCommand(CanExecute = nameof(IsMockGenInProgress))]
@@ -1433,13 +1509,13 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             TaskScheduler.Default
         );
 
-    /// <summary>出力フォルダをエクスプローラで開く</summary>
+    /// <summary>直近の生成が書き出したフォルダをエクスプローラで開く（欄の現在値ではない）</summary>
     [RelayCommand(CanExecute = nameof(ShowOpenFolder))]
     private void OpenOutputFolder()
     {
-        var folder = OutputFolder.Trim();
+        var folder = _lastGeneratedOutputDirectory;
 
-        if (Directory.Exists(folder))
+        if (folder is not null && Directory.Exists(folder))
         {
             OpenFolder(folder);
         }
@@ -1540,6 +1616,32 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             _ => _apiKeyEngineFactory,
         };
 
+    /// <summary>
+    /// 接続タブのモデル（Codex はプロバイダーも）を会話のエンジンへ入れる（会話の開始時と、接続タブの変更時に呼ぶ）。
+    /// </summary>
+    /// <remarks>
+    /// 効き始めはエンジンごとに違い、AI チャットと同じ＝Claude Code は次のターンから、
+    /// Codex と Copilot は次のスレッド（セッション）の開始から。API キー方式は接続設定を毎ターン読むので対象外。
+    /// </remarks>
+    private void ApplyConnectionModel()
+    {
+        switch (_sessionEngine)
+        {
+            case CodexChatEngine codex:
+                codex.ModelProvider = Connection.CodexModelProvider;
+                codex.Model = Connection.CodexModel;
+                break;
+
+            case ClaudeCodeChatEngine claudeCode:
+                claudeCode.Model = Connection.ClaudeCodeModel;
+                break;
+
+            case CopilotChatEngine copilot:
+                copilot.Model = Connection.CopilotModel;
+                break;
+        }
+    }
+
     /// <summary>新しいセッションを結び付け、イベントを購読する（旧セッションは購読解除して破棄する）</summary>
     private void AttachSession(MockFolderDesignSession session)
     {
@@ -1582,6 +1684,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         session.TurnCompleted -= OnTurnCompleted;
         session.StatusChanged -= OnStatus;
         _session = null;
+        _sessionEngine = null;
 
         var disposal = Task.Run(() => session.DisposeAsync().AsTask());
 
@@ -1661,8 +1764,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _currentAssistantMessage = null;
 
         RebuildScreens();
-        // 保存された画面を選択するとプレビュー要求が飛ぶ（同名再保存でも新インスタンスなので反映される）
-        SelectScreenByFile(e.File);
+        // 保存された画面を選択してプレビューを再要求する（同名の再保存で選択が変わらなくても内容は新しい）
+        ShowScreen(e.File);
 
         // 設計書（README.md）を出力済みなら、画面変更に無音で追従して再生成する
         RegenerateDesignDocIfPresent();
@@ -1690,14 +1793,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     {
         _currentAssistantMessage = null;
 
-        var wasShowingRemoved =
-            SelectedScreen is not null
-            && string.Equals(SelectedScreen.File, file, StringComparison.OrdinalIgnoreCase);
-
+        // 再構築は選択中の画面がまだあれば選び直す＝表示していない画面の削除では選択もプレビューも動かない
         RebuildScreens();
 
-        // 削除で選択が実体を失ったら先頭画面（なければ空表示）へ
-        if (wasShowingRemoved || SelectedScreen is null || !Screens.Contains(SelectedScreen))
+        // 表示していた画面が消えた（または何も選んでいなかった）ら先頭画面（なければ空表示）へ
+        if (SelectedScreen is null)
         {
             if (Screens.Count > 0)
             {
@@ -1754,23 +1854,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>OpenAI 接続設定を現在の入力から組み立てる</summary>
-    /// <remarks>
-    /// エンドポイント上書きは <see cref="ChatConnectionSettingsViewModel.EffectiveEndpointOverride"/> から取る
-    /// （ローカル LLM 以外では null＝欄が非表示のまま残った値が OpenAI 接続へ紛れ込まない）。
-    /// </remarks>
-    internal OpenAiChatConnection BuildOpenAiConnection() =>
-        new(
-            Connection.ApiProvider,
-            Connection.ApiKey,
-            Connection.ApiModel,
-            Connection.EffectiveEndpointOverride
-        );
-
-    /// <summary>Anthropic (Claude) 接続設定を現在の入力から組み立てる</summary>
-    private AnthropicChatConnection BuildAnthropicConnection() =>
-        new(Connection.ApiKey, Connection.ApiModel);
-
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
     /// <remarks>接続タブの状態保存は子（<see cref="ChatConnectionSettingsViewModel.SaveSettings"/>）へ委譲する。</remarks>
     public void SaveSettings() => Connection.SaveSettings();
@@ -1811,6 +1894,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             case nameof(ChatConnectionSettingsViewModel.ApiKey):
                 // API キー永続化は子が済ませている。親は readiness 再評価のみ。
                 NotifyReadinessChanged();
+                break;
+
+            case nameof(ChatConnectionSettingsViewModel.CodexModelProvider):
+            case nameof(ChatConnectionSettingsViewModel.CodexModel):
+            case nameof(ChatConnectionSettingsViewModel.ClaudeCodeModel):
+            case nameof(ChatConnectionSettingsViewModel.CopilotModel):
+                // 会話中のエンジンへモデルの変更を流す（会話の開始前は開始時に入る）
+                ApplyConnectionModel();
                 break;
         }
     }

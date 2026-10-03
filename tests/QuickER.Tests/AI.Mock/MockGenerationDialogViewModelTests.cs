@@ -1890,65 +1890,6 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>
-    /// 接続組み立てで、エンドポイント上書きがローカル LLM のときだけ渡ることを検証する。
-    /// 欄が非表示のまま残った URL が OpenAI 接続へ紛れ込む事故（回帰）を防ぐ。
-    /// </summary>
-    [Fact(DisplayName = "接続のエンドポイント上書きは Local LLM のときだけ渡る")]
-    public void BuildOpenAiConnection_AppliesEndpointOnlyForLocalLlm()
-    {
-        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
-
-        try
-        {
-            vm.Connection.ApiProvider = AiProvider.LocalLlm;
-            vm.Connection.EndpointOverride = "http://127.0.0.1:1234/v1";
-
-            var local = vm.BuildOpenAiConnection();
-            local.Provider.Should().Be(AiProvider.LocalLlm);
-            local.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
-
-            // 欄は非表示になるが値は残る。それでも OpenAI 接続には渡さない
-            vm.Connection.ApiProvider = AiProvider.OpenAI;
-            vm.Connection.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
-
-            var openAi = vm.BuildOpenAiConnection();
-            openAi.EndpointOverride.Should().BeNull();
-            openAi.ResolveEndpoint().Should().Be("https://api.openai.com/v1");
-        }
-        finally
-        {
-            Cleanup(baseFolder);
-        }
-    }
-
-    /// <summary>ローカル LLM のキーは、入力すればそのまま接続へ渡り、未入力ならダミーになることを検証する</summary>
-    [Fact(DisplayName = "Local LLM のキーは入力時そのまま・未入力でダミー")]
-    public void BuildOpenAiConnection_LocalLlmApiKey_IsOptional()
-    {
-        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
-
-        try
-        {
-            vm.Connection.ApiProvider = AiProvider.LocalLlm;
-
-            vm.Connection.ApiKey = "local-secret";
-            var withKey = vm.BuildOpenAiConnection();
-            withKey.ApiKey.Should().Be("local-secret");
-            withKey.ResolveApiKey().Should().Be("local-secret");
-
-            vm.Connection.ApiKey = string.Empty;
-            vm.BuildOpenAiConnection()
-                .ResolveApiKey()
-                .Should()
-                .Be(LocalLlmDefaults.PlaceholderApiKey);
-        }
-        finally
-        {
-            Cleanup(baseFolder);
-        }
-    }
-
     /// <summary>API キー接続では、キー未入力なら無効（理由＝ApiKeyNotReady・注記フラグが立つ）／キー任意の Local LLM なら有効になることを検証する</summary>
     [Fact(DisplayName = "API キー接続はキー未入力で無効・Local LLM で有効")]
     public async Task CanGenerateMockProject_ApiKeyBackend_NeedsKeyThenAllows()
@@ -2944,6 +2885,408 @@ public class MockGenerationDialogViewModelTests
             captured.Should().BeNull();
             vm.MockFolder.Should().Be(mockFolder);
             textAfterEdit.Should().Be(mockFolder);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    // ── 1-7 の対応（初回送信の失敗・画面一覧の選択・図の再評価・モデルの反映・無効理由・フォルダを開く・生成中の会話） ──
+
+    /// <summary>
+    /// 初回送信が失敗したら、次の送信も初回（スキーマを含む開始のプロンプト）としてやり直すことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 済みの印を送信の前に立てると、失敗後の送信がフィードバックとして、初期化されていないエンジンへ流れる。
+    /// </remarks>
+    [Fact(DisplayName = "初回送信が失敗したら次の送信も初回としてやり直す")]
+    public async Task FirstSendFailure_RetriesAsInitialPrompt()
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.StartConversationCommand.Execute(null);
+            engineBox[0].SendException = new InvalidOperationException("boom");
+
+            vm.UserInput = "初回の要望";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            engineBox[0].SentPrompts.Should().BeEmpty();
+
+            engineBox[0].SendException = null;
+            vm.UserInput = "再送";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            engineBox[0].SentPrompts.Should().ContainSingle();
+            engineBox[0]
+                .SentPrompts[0]
+                .Should()
+                .Contain("Customer", "やり直しも開始のプロンプト（スキーマ入り）で送る");
+            engineBox[0].SentPrompts[0].Should().Contain("再送");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 表示中の画面を同じ名前で保存し直したとき、選択が変わらなくてもプレビューを再要求することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 画面一覧の項目は値で等しくなる record なので、選び直しは選択の変更にならない。
+    /// 再要求を選択の変更通知に頼ると、内容が新しくなってもプレビューが古いまま残る。
+    /// </remarks>
+    [Fact(DisplayName = "表示中の画面を同じ名前で保存し直すとプレビューを再要求する")]
+    public async Task ScreenResaved_SameName_RequestsPreviewAgain()
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.StartConversationCommand.Execute(null);
+            await SaveScreenViaEngine(vm, engineBox[0], "OrderList.html", "注文一覧");
+
+            var requests = new List<string>();
+            vm.PreviewRequested += (_, r) => requests.Add(Path.GetFileName(r.FilePath));
+
+            await SaveScreenViaEngine(vm, engineBox[0], "OrderList.html", "注文一覧");
+
+            requests.Should().Equal("OrderList.html");
+            vm.SelectedScreen!.File.Should().Be("OrderList.html");
+            vm.Screens.Should().Contain(s => ReferenceEquals(s, vm.SelectedScreen));
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 実 ListBox を画面一覧へ束縛した状態で、表示していない画面が削除されても、選択とプレビューが動かないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// ListBox は画面一覧の Clear で選択を null へ押し戻す。再構築が選び直さないと、
+    /// 表示していない画面の削除だけで先頭の画面へ飛ぶ（画面に出る SelectedItem で表明する）。
+    /// </remarks>
+    [Fact(DisplayName = "表示していない画面を削除しても実 ListBox の選択は動かない")]
+    public void ScreenRemoved_OtherScreen_KeepsListBoxSelection()
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            Exception? captured = null;
+            string? selectedAfter = null;
+            string? listBoxSelectedAfter = null;
+            var previewsAfterRemoval = new List<string>();
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    var listBox = new ListBox { ItemsSource = vm.Screens };
+                    listBox.SetBinding(
+                        System.Windows.Controls.Primitives.Selector.SelectedItemProperty,
+                        new Binding(nameof(MockGenerationDialogViewModel.SelectedScreen))
+                        {
+                            Source = vm,
+                            Mode = BindingMode.TwoWay,
+                        }
+                    );
+
+                    vm.StartConversationCommand.Execute(null);
+                    SaveScreenViaEngine(vm, engineBox[0], "A.html", "画面A")
+                        .GetAwaiter()
+                        .GetResult();
+                    SaveScreenViaEngine(vm, engineBox[0], "B.html", "画面B")
+                        .GetAwaiter()
+                        .GetResult();
+                    SaveScreenViaEngine(vm, engineBox[0], "C.html", "画面C")
+                        .GetAwaiter()
+                        .GetResult();
+
+                    // 利用者が B を選んでいる
+                    listBox.SelectedItem = vm.Screens.Single(s => s.File == "B.html");
+                    vm.PreviewRequested += (_, r) =>
+                        previewsAfterRemoval.Add(Path.GetFileName(r.FilePath));
+
+                    RunToolViaEngine(
+                            vm,
+                            engineBox[0],
+                            MockFolderDesignTools.RemoveScreenToolName,
+                            new Dictionary<string, object?> { ["file"] = "C.html" }
+                        )
+                        .GetAwaiter()
+                        .GetResult();
+
+                    selectedAfter = vm.SelectedScreen?.File;
+                    listBoxSelectedAfter = (listBox.SelectedItem as MockScreenListItem)?.File;
+                }
+                catch (Exception ex)
+                {
+                    captured = ex;
+                }
+            });
+
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.IsBackground = true;
+            thread.Start();
+            thread.Join();
+
+            captured.Should().BeNull();
+            selectedAfter.Should().Be("B.html");
+            listBoxSelectedAfter.Should().Be("B.html");
+            previewsAfterRemoval.Should().BeEmpty();
+            vm.Screens.Select(s => s.File).Should().Equal("A.html", "B.html");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 図の空・非空が変わったあと、再評価（ダイアログが前面に戻ったとき）で会話開始の可否通知が出ることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "図の状態の再評価で会話開始の可否が通知される")]
+    public void RefreshDiagramState_NotifiesStartConversation()
+    {
+        var diagram = new ErDiagram();
+        var (vm, _, baseFolder, _) = CreateVm(diagram);
+
+        try
+        {
+            vm.StartConversationCommand.CanExecute(null).Should().BeFalse();
+
+            var raised = 0;
+            vm.StartConversationCommand.CanExecuteChanged += (_, _) => raised++;
+            diagram.Entities.Add(new Entity { TableName = "Customer" });
+
+            vm.RefreshDiagramState();
+
+            raised.Should().BeGreaterThan(0);
+            vm.StartConversationCommand.CanExecute(null).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 会話中に Claude Code のモデル・Codex のモデルとプロバイダーを変えると、会話のエンジンへ流れることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "会話中のモデル変更は会話のエンジンへ反映される")]
+    public void ModelChange_DuringConversation_ReachesSessionEngine()
+    {
+        var baseFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+        var keyStore = new InMemoryApiKeyStore();
+        ClaudeCodeChatEngine? claudeCode = null;
+        CodexChatEngine? codex = null;
+        var dispatcher = new SyncUiDispatcher();
+
+        try
+        {
+            var vm = new MockGenerationDialogViewModel(
+                new StubDiagramSource(NonEmptyDiagram()),
+                dispatcher,
+                files: null,
+                settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
+                apiKeyEngineFactory: null,
+                codexEngineFactory: (profile, toolHost) =>
+                    codex = new CodexChatEngine(
+                        new QuickER.Tests.AI.FakeCodexAppServerClient(),
+                        toolHost,
+                        dispatcher,
+                        profile
+                    ),
+                claudeCodeEngineFactory: (profile, toolHost) =>
+                    claudeCode = new ClaudeCodeChatEngine(
+                        new QuickER.Tests.AI.DisposeTrackingClaudeCodeClient(),
+                        toolHost,
+                        dispatcher,
+                        profile
+                    ),
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
+            );
+            vm.MockFolder = Path.Combine(baseFolder, "mock");
+
+            // Claude Code: 開始前の値が開始時に入り、会話中の変更も流れる
+            vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.ApplyClaudeCodeReadiness(true, "ok", ConnectionHealth.Ready, string.Empty);
+            vm.Connection.ClaudeCodeModel = "model-a";
+            vm.StartConversationCommand.Execute(null);
+            claudeCode!.Model.Should().Be("model-a");
+
+            vm.Connection.ClaudeCodeModel = "model-b";
+            claudeCode.Model.Should().Be("model-b");
+
+            // Codex: プロバイダーとモデルの両方
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+            vm.ApplyCodexReadiness(true, "ok", ConnectionHealth.Ready);
+            vm.StartConversationCommand.Execute(null);
+            codex.Should().NotBeNull();
+
+            vm.Connection.CodexModel = "codex-model-x";
+            vm.Connection.CodexModelProvider = "custom-provider";
+            codex!.Model.Should().Be("codex-model-x");
+            codex.ModelProvider.Should().Be("custom-provider");
+
+            // 切り離した旧エンジンへは流さない
+            vm.Connection.ClaudeCodeModel = "model-c";
+            claudeCode.Model.Should().Be("model-b");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 会話のターン実行中は、第 2 ステップが無効な理由として「応答の実行中」を表示することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "ターン実行中は第 2 ステップの無効理由に応答の実行中を出す")]
+    public async Task MockGenDisabledReason_DuringTurn_ShowsTurnInProgress()
+    {
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.MockGenDisabledReason.Should().BeEmpty();
+
+            var notified = new List<string?>();
+            vm.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+            vm.IsTurnInProgress = true;
+
+            vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should().Be(MockStrings.Mock_DisabledReason_TurnInProgress);
+            notified.Should().Contain(nameof(MockGenerationDialogViewModel.MockGenDisabledReason));
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 「フォルダを開く」は、出力フォルダ欄を書き換えた後も、最後に生成したフォルダを開くことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "フォルダを開くは欄を書き換えた後も最後に生成したフォルダを開く")]
+    public async Task OpenOutputFolder_OpensLastGeneratedFolder_NotCurrentField()
+    {
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            var opened = new List<string>();
+            vm.OpenFolder = opened.Add;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            var generated = Path.Combine(baseFolder, "out1");
+            var edited = Path.Combine(baseFolder, "out2");
+            Directory.CreateDirectory(generated);
+            Directory.CreateDirectory(edited);
+            vm.OutputFolder = generated;
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+            vm.ShowOpenFolder.Should().BeTrue();
+
+            vm.OutputFolder = edited;
+            vm.OpenOutputFolderCommand.Execute(null);
+
+            opened.Should().Equal(generated);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// モックプロジェクトの生成中は、会話の開始も送信もできず、止めている理由を表示することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 生成はモックフォルダを出力先へ写すため、その間のターンがモックフォルダへ書き込むと写した内容と食い違い得る。
+    /// </remarks>
+    [Fact(DisplayName = "モックプロジェクトの生成中は会話の開始も送信もできず理由を表示する")]
+    public void MockGenInProgress_BlocksConversation_AndShowsReason()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "要望";
+            vm.CanStartConversation.Should().BeTrue();
+            vm.CanSendMessage.Should().BeTrue();
+            vm.ConversationDisabledReason.Should().BeNull();
+
+            var startChanged = 0;
+            var sendChanged = 0;
+            vm.StartConversationCommand.CanExecuteChanged += (_, _) => startChanged++;
+            vm.SendMessageCommand.CanExecuteChanged += (_, _) => sendChanged++;
+
+            vm.IsMockGenInProgress = true;
+
+            vm.CanStartConversation.Should().BeFalse();
+            vm.CanSendMessage.Should().BeFalse();
+            vm.StartConversationCommand.CanExecute(null).Should().BeFalse();
+            vm.SendMessageCommand.CanExecute(null).Should().BeFalse();
+            vm.ConversationDisabledReason.Should()
+                .Be(MockStrings.Mock_ConversationBlockedDuringMockGen);
+            startChanged.Should().BeGreaterThan(0);
+            sendChanged.Should().BeGreaterThan(0);
+
+            vm.IsMockGenInProgress = false;
+
+            vm.StartConversationCommand.CanExecute(null).Should().BeTrue();
+            vm.SendMessageCommand.CanExecute(null).Should().BeTrue();
+            vm.ConversationDisabledReason.Should().BeNull();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// フルパスでないモックフォルダの指定は、会話を開始できず案内を出し、どこにもフォルダを作らないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 相対パス（ドライブ相対の <c>C:mock</c> を含む）はアプリの作業フォルダ基準で解決され、思わぬ場所にモックフォルダを作る。
+    /// プレビューのファイル URI も組めない。
+    /// </remarks>
+    [Theory(DisplayName = "フルパスでないモックフォルダでは会話を開始できず案内を出す")]
+    [InlineData(@"quicker-relative-mock")]
+    [InlineData(@"C:quicker-relative-mock")]
+    public void MockFolder_NotFullyQualified_BlocksStartWithGuidance(string folder)
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram(), setMockFolder: false);
+
+        try
+        {
+            vm.MockFolder = folder;
+
+            vm.CanStartConversation.Should().BeFalse();
+            vm.StartConversationCommand.CanExecute(null).Should().BeFalse();
+            vm.StatusMessage.Should().Be(MockStrings.Mock_MockFolderNotFullyQualified);
+            Directory.Exists(Path.GetFullPath(folder)).Should().BeFalse();
+
+            // フルパスへ直せば始められる
+            vm.MockFolder = Path.Combine(baseFolder, "mock");
+            vm.CanStartConversation.Should().BeTrue();
         }
         finally
         {

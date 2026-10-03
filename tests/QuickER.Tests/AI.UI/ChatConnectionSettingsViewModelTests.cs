@@ -199,9 +199,9 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
-    /// <summary>手入力したキーが現在プロバイダーの保存名で保存されることを検証する</summary>
-    [Fact(DisplayName = "手入力キーは現在プロバイダーの保存名で保存される")]
-    public void ApiKeyChanged_PersistsForCurrentProvider()
+    /// <summary>手入力したキーが、確定時に現在プロバイダーの保存名で保存されることを検証する</summary>
+    [Fact(DisplayName = "手入力キーは確定時に現在プロバイダーの保存名で保存される")]
+    public void ApiKeyCommit_PersistsForCurrentProvider()
     {
         var folder = NewFolder();
 
@@ -211,6 +211,7 @@ public class ChatConnectionSettingsViewModelTests
             var vm = CreateVm(folder, apiKeySaver: spy.Save);
 
             vm.ApiKey = "sk-manual";
+            vm.CommitApiKey();
 
             spy.Saves.Should().ContainSingle();
             spy.Saves[0].Should().Be(("OpenAiApiKey", "sk-manual"));
@@ -306,7 +307,7 @@ public class ChatConnectionSettingsViewModelTests
     /// ローカル LLM でもキーは（任意ながら）専用スロット "LocalLlmApiKey" へ永続化されることを検証する。
     /// 認証を課すローカルサーバー向けにキーを保持できる必要があるため、OpenAI / Claude と同じ機構に乗せる。
     /// </summary>
-    [Fact(DisplayName = "Local LLM のキーは専用スロットへ永続化される")]
+    [Fact(DisplayName = "Local LLM のキーは確定時に専用スロットへ永続化される")]
     public void LocalLlmProvider_PersistsKeyToOwnSlot()
     {
         var folder = NewFolder();
@@ -319,6 +320,7 @@ public class ChatConnectionSettingsViewModelTests
             spy.Saves.Clear();
 
             vm.ApiKey = "local-secret";
+            vm.CommitApiKey();
 
             spy.Saves.Should().ContainSingle();
             spy.Saves[0].Slot.Should().Be("LocalLlmApiKey");
@@ -1517,5 +1519,320 @@ public class ChatConnectionSettingsViewModelTests
         {
             Cleanup(folder);
         }
+    }
+
+    // ── 1-7 の対応（API キーの保存の確定点・候補の再構築の読み直し・接続の組み立て） ──
+
+    /// <summary>
+    /// API キーは打鍵ごとには保存せず、確定（<see cref="ChatConnectionSettingsViewModel.CommitApiKey()"/>）で最後の値を 1 回だけ保存することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "API キーは打鍵ごとには保存せず確定で 1 回保存する")]
+    public void ApiKey_IsNotSavedPerKeystroke_ButOnCommit()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var spy = new KeySaverSpy();
+            var vm = CreateVm(folder, apiKeySaver: spy.Save);
+
+            vm.ApiKey = "s";
+            vm.ApiKey = "sk";
+            vm.ApiKey = "sk-1";
+            spy.Saves.Should().BeEmpty();
+
+            vm.CommitApiKey();
+            spy.Saves.Should().Equal(("OpenAiApiKey", "sk-1"));
+
+            // 変更が無ければ確定しても書かない
+            vm.CommitApiKey();
+            spy.Saves.Should().ContainSingle();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 入力中にプロバイダーを切り替えると、入力したキーを切替前のプロバイダーのスロットへ保存することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 切替後は別のプロバイダーのキーを読み直すので、ここで保存しないと入力したキーが失われる。
+    /// </remarks>
+    [Fact(DisplayName = "プロバイダーを切り替えると入力中のキーを切替前のスロットへ保存する")]
+    public void ProviderSwitch_SavesTypedKeyToPreviousSlot()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var spy = new KeySaverSpy();
+            var vm = CreateVm(folder, apiKeyLoader: _ => "loaded", apiKeySaver: spy.Save);
+
+            vm.ApiKey = "sk-openai";
+            vm.ApiProvider = AiProvider.Claude;
+
+            spy.Saves.Should().Equal(("OpenAiApiKey", "sk-openai"));
+            vm.ApiKey.Should().Be("loaded", "切替後は切替先のキーを読み直す");
+
+            // 読み直したキーは未保存の扱いにしない
+            vm.CommitApiKey();
+            spy.Saves.Should().ContainSingle();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>設定の保存（ウィンドウを閉じるとき）で、入力中の API キーも保存することを検証する。</summary>
+    [Fact(DisplayName = "設定の保存で入力中の API キーも保存する")]
+    public void SaveSettings_CommitsTypedApiKey()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var spy = new KeySaverSpy();
+            var vm = CreateVm(folder, apiKeySaver: spy.Save);
+            vm.ApiKey = "sk-typed";
+
+            vm.SaveSettings();
+
+            spy.Saves.Should().Equal(("OpenAiApiKey", "sk-typed"));
+            File.ReadAllText(Path.Combine(folder, AiSettingsStore.DefaultFileName))
+                .Should()
+                .NotContain("sk-typed", "キーは設定の JSON へは入れない");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// キーの保存に失敗しても、入力は反映されて変更通知も出て、次の確定で保存し直すことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 打鍵ごとに保存していたときは、保存の例外が変更通知より前に抜けていた
+    /// （束縛が例外を黙って捨てるので、値は入るのに通知が出ず、送信できる状態の再評価が漏れた。実測）。
+    /// </remarks>
+    [Fact(DisplayName = "キーの保存が失敗しても通知は出て次の確定で保存し直す")]
+    public void ApiKeySaveFailure_KeepsNotifying_AndRetriesOnNextCommit()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var fail = true;
+            var saved = new List<(string, string)>();
+            var vm = CreateVm(
+                folder,
+                apiKeySaver: (slot, value) =>
+                {
+                    if (fail)
+                    {
+                        throw new System.Security.Cryptography.CryptographicException("dpapi");
+                    }
+
+                    saved.Add((slot, value));
+                }
+            );
+            var changes = RecordChanges(vm);
+
+            vm.ApiKey = "sk-1";
+            changes.Should().Contain(nameof(ChatConnectionSettingsViewModel.ApiKey));
+
+            var commit = () => vm.CommitApiKey();
+            commit.Should().NotThrow();
+            saved.Should().BeEmpty();
+
+            fail = false;
+            vm.CommitApiKey();
+            saved.Should().Equal(("OpenAiApiKey", "sk-1"));
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Copilot のモデル一覧に同じ内容が届いても候補を作り直さず、内容が変わったときだけ作り直すことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 接続の状態通知のたびに同じ一覧が届き、作り直しは共有ファイルの読み直しを伴う。
+    /// </remarks>
+    [Fact(DisplayName = "Copilot のモデル一覧が同じ内容なら候補を作り直さない")]
+    public void CopilotAvailableModels_SameContent_DoesNotRebuild()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.CopilotAvailableModels = new List<string> { "gpt-a", "gpt-b" };
+
+            var rebuilds = 0;
+            vm.CopilotModelCandidates.CollectionChanged += (_, _) => rebuilds++;
+
+            vm.CopilotAvailableModels = new List<string> { "gpt-a", "gpt-b" };
+            rebuilds.Should().Be(0);
+
+            vm.CopilotAvailableModels = new List<string> { "gpt-a", "gpt-c" };
+            rebuilds.Should().BeGreaterThan(0);
+            vm.CopilotModelCandidates.Select(c => c.Name).Should().Contain("gpt-c");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 読み込みの後の候補の再構築は、もう一方のダイアログが共有ファイルへ書いた履歴を拾うことを検証する
+    /// （読み込み中だけ使い回す設定が、読み込みの後まで残っていない）。
+    /// </summary>
+    [Fact(DisplayName = "読み込みの後の候補の再構築は共有ファイルの最新を拾う")]
+    public void CandidateRebuild_AfterLoad_ReadsLatestSharedFile()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+
+            // もう一方のダイアログが、カタログに無いモデルの使用を履歴へ記録した
+            var otherStore = new AiSettingsStore(folder);
+            var settings = otherStore.Load();
+            settings.ApiModelHistory.Touch("openai", "custom-model-x");
+            otherStore.Save(settings);
+
+            // プロバイダーの切替で候補を作り直す
+            vm.ApiProvider = AiProvider.Claude;
+            vm.ApiProvider = AiProvider.OpenAI;
+
+            vm.ApiModelCandidates.Select(c => c.Name).Should().Contain("custom-model-x");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 接続の組み立てで、エンドポイント上書きがローカル LLM のときだけ渡ることを検証する。
+    /// 欄が非表示のまま残った URL が OpenAI 接続へ紛れ込む事故（回帰）を防ぐ。
+    /// </summary>
+    [Fact(DisplayName = "接続のエンドポイント上書きは Local LLM のときだけ渡る")]
+    public void BuildOpenAiConnection_AppliesEndpointOnlyForLocalLlm()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.ApiProvider = AiProvider.LocalLlm;
+            vm.EndpointOverride = "http://127.0.0.1:1234/v1";
+
+            var local = vm.BuildOpenAiConnection();
+            local.Provider.Should().Be(AiProvider.LocalLlm);
+            local.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+
+            // 欄は非表示になるが値は残る。それでも OpenAI 接続には渡さない
+            vm.ApiProvider = AiProvider.OpenAI;
+            vm.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+
+            var openAi = vm.BuildOpenAiConnection();
+            openAi.EndpointOverride.Should().BeNull();
+            openAi.ResolveEndpoint().Should().Be("https://api.openai.com/v1");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>ローカル LLM のキーは、入力すればそのまま接続へ渡り、未入力ならダミーになることを検証する</summary>
+    [Fact(DisplayName = "Local LLM のキーは入力時そのまま・未入力でダミー")]
+    public void BuildOpenAiConnection_LocalLlmApiKey_IsOptional()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.ApiProvider = AiProvider.LocalLlm;
+
+            vm.ApiKey = "local-secret";
+            var withKey = vm.BuildOpenAiConnection();
+            withKey.ApiKey.Should().Be("local-secret");
+            withKey.ResolveApiKey().Should().Be("local-secret");
+
+            vm.ApiKey = string.Empty;
+            vm.BuildOpenAiConnection()
+                .ResolveApiKey()
+                .Should()
+                .Be(LocalLlmDefaults.PlaceholderApiKey);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// API キー接続のエンジンは、送信できるかをこの VM の現在の入力から判定する（組み立て後の変更も効く）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "API キー接続のエンジンは送信可否を現在の入力から判定する")]
+    public void CreateApiKeyEngine_ReadinessFollowsCurrentInput()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            var engine = vm.CreateApiKeyEngine(
+                QuickER.AI.Mock.MockDesignProfile.FolderMockDesign,
+                new NoopToolHost(),
+                new SyncUiDispatcher()
+            );
+
+            vm.ApiProvider = AiProvider.OpenAI;
+            vm.ApiKey = string.Empty;
+            engine.IsReady.Should().BeFalse();
+            vm.IsApiKeyConnectionReady.Should().BeFalse();
+
+            vm.ApiKey = "sk-1";
+            engine.IsReady.Should().BeTrue();
+            vm.IsApiKeyConnectionReady.Should().BeTrue();
+
+            // ローカル LLM はキーが無くても送信できる
+            vm.ApiProvider = AiProvider.LocalLlm;
+            vm.ApiKey = string.Empty;
+            engine.IsReady.Should().BeTrue();
+            engine
+                .AttachmentSupport.Should()
+                .Be(AttachmentSupportResolver.ForApiKeyProvider(AiProvider.LocalLlm));
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>UI スレッドへのマーシャリングを同期実行で代替するテスト用ディスパッチャ</summary>
+    private sealed class SyncUiDispatcher : IUiDispatcher
+    {
+        public T Invoke<T>(Func<T> func) => func();
+    }
+
+    /// <summary>何もしないツールホスト</summary>
+    private sealed class NoopToolHost : IErDiagramToolHost
+    {
+        public (string Result, bool Success) Execute(string toolName, string argumentsJson) =>
+            (string.Empty, true);
     }
 }

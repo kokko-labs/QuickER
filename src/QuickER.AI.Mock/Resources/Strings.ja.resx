@@ -185,6 +185,18 @@
   <data name="Mock_DisabledReason_InProgress" xml:space="preserve">
     <value>生成を実行中です。</value>
   </data>
+  <data name="Mock_DisabledReason_TurnInProgress" xml:space="preserve">
+    <value>応答の実行中です。</value>
+  </data>
+  <data name="Mock_ConversationBlockedDuringMockGen" xml:space="preserve">
+    <value>モックプロジェクトの生成中は会話できません。</value>
+  </data>
+  <data name="Mock_MockFolderNotFullyQualified" xml:space="preserve">
+    <value>モックフォルダはフルパスで指定してください（例: C:\Work\mock）。</value>
+  </data>
+  <data name="Mock_ConnectionCheckFailedFormat" xml:space="preserve">
+    <value>接続の状態を確認できませんでした: {0}</value>
+  </data>
   <data name="Mock_DisabledReason_NoScreens" xml:space="preserve">
     <value>先にモックフォルダへ画面を 1 つ以上追加してください。</value>
   </data>

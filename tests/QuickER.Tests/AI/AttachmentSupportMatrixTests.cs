@@ -102,6 +102,77 @@ public class AttachmentSupportMatrixTests
         engine.AttachmentSupport.Allows(ChatAttachmentKind.Binary).Should().BeTrue();
     }
 
+    /// <summary>
+    /// 接続方式から添付範囲を引く規則（エンジンを作る前に使う）が、各エンジンが実際に公開する範囲と一致することを検証する。
+    /// </summary>
+    /// <remarks>
+    /// モック生成は会話を始める前に規則で、AI チャットはエンジンから添付範囲を読む。両者が食い違うと、
+    /// 片方のダイアログだけが添付を受け付けて送信時に落とす。
+    /// </remarks>
+    [Theory(DisplayName = "接続方式の添付範囲の規則はエンジンが公開する範囲と一致する")]
+    [InlineData(ErChatBackendKind.Codex, AiProvider.OpenAI)]
+    [InlineData(ErChatBackendKind.ClaudeCode, AiProvider.OpenAI)]
+    [InlineData(ErChatBackendKind.Copilot, AiProvider.OpenAI)]
+    [InlineData(ErChatBackendKind.ApiKey, AiProvider.OpenAI)]
+    [InlineData(ErChatBackendKind.ApiKey, AiProvider.Claude)]
+    [InlineData(ErChatBackendKind.ApiKey, AiProvider.LocalLlm)]
+    public void Resolver_ForBackend_MatchesEngine(ErChatBackendKind backend, AiProvider provider)
+    {
+        var dispatcher = new SyncUiDispatcher();
+        IErChatEngine engine = backend switch
+        {
+            ErChatBackendKind.Codex => new CodexChatEngine(
+                new FakeCodexAppServerClient(),
+                toolHost: null,
+                dispatcher,
+                ErDesignProfile.ErDesign
+            ),
+            ErChatBackendKind.ClaudeCode => new ClaudeCodeChatEngine(
+                new FakeAvailableClaudeCodeClient(),
+                toolHost: null,
+                dispatcher,
+                ErDesignProfile.ErDesign
+            ),
+            ErChatBackendKind.Copilot => new CopilotChatEngine(
+                new FakeCopilotRuntimeClient(),
+                toolHost: null,
+                dispatcher,
+                ErDesignProfile.ErDesign
+            ),
+            _ => new ChatTurnEngine(
+                new NoopTurnDriver(),
+                new NoopToolHost(),
+                dispatcher,
+                () => true,
+                ErDesignProfile.ErDesign,
+                attachmentSupport: () => AttachmentSupportResolver.ForApiKeyProvider(provider)
+            ),
+        };
+
+        AttachmentSupportResolver
+            .ForBackend(backend, provider)
+            .Should()
+            .Be(engine.AttachmentSupport);
+    }
+
+    /// <summary>CLI 3 方式の添付範囲の値（Codex=なし・Claude Code=全種別・Copilot=画像のみ）を検証する</summary>
+    [Fact(DisplayName = "CLI 3 方式の添付範囲は Codex なし・Claude Code 全種別・Copilot 画像のみ")]
+    public void Resolver_ForBackend_CliValues()
+    {
+        AttachmentSupportResolver
+            .ForBackend(ErChatBackendKind.Codex, AiProvider.OpenAI)
+            .Should()
+            .Be(AttachmentSupport.None);
+        AttachmentSupportResolver
+            .ForBackend(ErChatBackendKind.ClaudeCode, AiProvider.OpenAI)
+            .Should()
+            .Be(ClaudeCodeSupport);
+        AttachmentSupportResolver
+            .ForBackend(ErChatBackendKind.Copilot, AiProvider.OpenAI)
+            .Should()
+            .Be(AttachmentSupport.Images);
+    }
+
     /// <summary>常に利用可能・成功を返す最小フェイク（AttachmentSupport 評価用）</summary>
     private sealed class FakeAvailableClaudeCodeClient : IClaudeCodeClient
     {

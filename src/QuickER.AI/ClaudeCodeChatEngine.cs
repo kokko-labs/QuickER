@@ -92,11 +92,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
     /// <inheritdoc />
     /// <remarks>Claude Code は Read でファイルを読み返せるため、テキスト・バイナリを含む全種別に対応する。</remarks>
-    public AttachmentSupport AttachmentSupport =>
-        AttachmentSupport.Images
-        | AttachmentSupport.Pdf
-        | AttachmentSupport.Text
-        | AttachmentSupport.Binary;
+    public AttachmentSupport AttachmentSupport => AttachmentSupportResolver.ClaudeCode;
 
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)

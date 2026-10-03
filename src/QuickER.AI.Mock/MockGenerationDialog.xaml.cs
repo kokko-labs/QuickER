@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.AI;
@@ -112,9 +113,12 @@ public partial class MockGenerationDialog : Window
         // モデル一覧は接続後に実行時列挙されるため、更新通知も拾って接続タブの候補へ流す
         _copilotProbe.AvailableModelsChanged += OnCopilotStatusChanged;
 
-        CodexRefreshCommand = new AsyncRelayCommand(RefreshCodexAsync);
-        ClaudeCodeRefreshCommand = new AsyncRelayCommand(RefreshClaudeCodeAsync);
-        CopilotRefreshCommand = new AsyncRelayCommand(RefreshCopilotAsync);
+        // 「再確認」も失敗をステータスへ畳む（AsyncRelayCommand は例外をディスパッチャへ投げ直す）
+        CodexRefreshCommand = new AsyncRelayCommand(() => RunProbeAsync(RefreshCodexAsync));
+        ClaudeCodeRefreshCommand = new AsyncRelayCommand(() =>
+            RunProbeAsync(RefreshClaudeCodeAsync)
+        );
+        CopilotRefreshCommand = new AsyncRelayCommand(() => RunProbeAsync(RefreshCopilotAsync));
 
         // ViewModel のプレビュー要求／クリア要求と、プレビュー内リンク遷移をサイドバー選択へ橋渡しする
         ViewModel.PreviewRequested += OnPreviewRequested;
@@ -124,6 +128,8 @@ public partial class MockGenerationDialog : Window
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         Loaded += OnLoaded;
         Closing += OnWindowClosing;
+        // 図の変更は通知されないため、前面に戻るたびに図に依存する可否を読み直す（再表示・メイン画面からの戻り）
+        Activated += (_, _) => ViewModel.RefreshDiagramState();
     }
 
     /// <summary>進捗ログの更新に追従して自動スクロールする</summary>
@@ -240,7 +246,7 @@ public partial class MockGenerationDialog : Window
     {
         try
         {
-            Preview.Navigate(new Uri(request.FilePath), request.Folder);
+            Preview.Navigate(ToPreviewUri(request.FilePath), request.Folder);
         }
         catch (Exception ex)
         {
@@ -250,6 +256,15 @@ public partial class MockGenerationDialog : Window
             );
         }
     }
+
+    /// <summary>画面ファイルのフルパスからプレビューへ渡すファイル URI を作る</summary>
+    /// <remarks>
+    /// 暗黙のファイルパスとして解釈させる（<c>#</c>・<c>?</c>・<c>%</c> はパスの文字としてエスケープされ、
+    /// フラグメントやクエリにならない）。<see cref="UriBuilder"/> で組むと <c>%20</c> のような並びを
+    /// 復号してしまい、別のファイルを指す。モックフォルダは ViewModel がフルパスに限っている。
+    /// </remarks>
+    /// <param name="path">画面ファイルのフルパス</param>
+    internal static Uri ToPreviewUri(string path) => new(path, UriKind.Absolute);
 
     /// <summary>プレビューのクリア要求を受けて、空表示へ戻す</summary>
     private void OnPreviewClearRequested(object? sender, EventArgs e) => Preview.ShowEmpty();
@@ -266,6 +281,37 @@ public partial class MockGenerationDialog : Window
             System.Windows.Threading.DispatcherPriority.Background
         );
     }
+
+    // ── モックフォルダ欄の確定 ──
+
+    /// <summary>
+    /// モックフォルダ欄の入力を、遅延（<c>Delay</c>）を待たずに ViewModel へ確定する。
+    /// </summary>
+    /// <remarks>
+    /// 欄は入力が止まってから確定する（キー入力ごとにフォルダを走査して会話をやり直さない）。
+    /// ただし利用者が欄を離れた時点の値で動くべき操作（「新しい会話」など）が、確定前の古いフォルダで
+    /// 動かないよう、フォーカスが外れたときと Enter で即座に確定する。ボタンはマウスを押した時点で
+    /// フォーカスを取るので、クリックの実行可否の判定より前にこの確定が走る。
+    /// </remarks>
+    private void CommitMockFolderInput() =>
+        BindingOperations.GetBindingExpression(MockFolderBox, TextBox.TextProperty)?.UpdateSource();
+
+    /// <summary>モックフォルダ欄からフォーカスが外れたら確定する</summary>
+    private void MockFolderBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        CommitMockFolderInput();
+
+    /// <summary>モックフォルダ欄で Enter を押したら確定する</summary>
+    private void MockFolderBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            CommitMockFolderInput();
+        }
+    }
+
+    /// <summary>API キー欄から離れたら、入力したキーを保存する（打鍵ごとには保存しない）</summary>
+    private void ApiKeyBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        ViewModel.Connection.CommitApiKey();
 
     // ── 添付: ボタン・Ctrl+V・ドラッグ&ドロップ ──
 
@@ -377,15 +423,15 @@ public partial class MockGenerationDialog : Window
 
         if (backend == ErChatBackendKind.Codex)
         {
-            await EnsureCodexConnectedAsync();
+            await RunProbeAsync(EnsureCodexConnectedAsync);
         }
         else if (backend == ErChatBackendKind.ClaudeCode)
         {
-            await EnsureClaudeCodeInitializedAsync();
+            await RunProbeAsync(EnsureClaudeCodeInitializedAsync);
         }
         else if (backend == ErChatBackendKind.Copilot)
         {
-            await EnsureCopilotInitializedAsync();
+            await RunProbeAsync(EnsureCopilotInitializedAsync);
         }
     }
 
@@ -410,6 +456,29 @@ public partial class MockGenerationDialog : Window
                 }
             })
         );
+    }
+
+    /// <summary>
+    /// 接続状態の確認（プローブ）を実行し、失敗はステータスへ出す（例外をウィンドウの外へ漏らさない）。
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し元はタブ切替の <c>async void</c> ハンドラと「再確認」のコマンドで、どちらも例外を
+    /// ディスパッチャへ投げ直す＝作業フォルダの作成失敗など 1 回の確認の失敗でアプリが落ちる。
+    /// </remarks>
+    /// <param name="probe">実行する確認</param>
+    private async Task RunProbeAsync(Func<Task> probe)
+    {
+        try
+        {
+            await probe();
+        }
+        catch (Exception ex)
+        {
+            ViewModel.StatusMessage = string.Format(
+                Strings.Mock_ConnectionCheckFailedFormat,
+                ex.Message
+            );
+        }
     }
 
     /// <summary>Codex 接続を確立し、認証状態を ViewModel へ反映する</summary>

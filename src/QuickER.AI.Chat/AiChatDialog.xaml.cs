@@ -202,6 +202,10 @@ public partial class AiChatDialog : Window
     private void Attachments_AttachRequested(object sender, RoutedEventArgs e) =>
         ViewModel.PickAndAddAttachments();
 
+    /// <summary>API キー欄から離れたら、入力したキーを保存する（打鍵ごとには保存しない）</summary>
+    private void ApiKeyBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        ViewModel.Connection.CommitApiKey();
+
     /// <summary>
     /// 入力欄フォーカス時の Ctrl+V を捕捉し、クリップボードに画像があればチップ化する。
     /// 画像が無ければ何もせず（テキスト貼付の既定動作を妨げない）。

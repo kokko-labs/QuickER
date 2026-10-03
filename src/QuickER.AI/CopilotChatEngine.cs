@@ -105,7 +105,7 @@ public sealed class CopilotChatEngine : IErChatEngine
 
     /// <inheritdoc />
     /// <remarks>Copilot の添付 API は画像を対象とするため、画像のみ受け付ける。</remarks>
-    public AttachmentSupport AttachmentSupport => AttachmentSupport.Images;
+    public AttachmentSupport AttachmentSupport => AttachmentSupportResolver.Copilot;
 
     /// <inheritdoc />
     public Task InitializeAsync(CancellationToken cancellationToken = default) =>

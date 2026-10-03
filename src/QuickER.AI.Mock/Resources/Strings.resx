@@ -185,6 +185,18 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   <data name="Mock_DisabledReason_InProgress" xml:space="preserve">
     <value>Generation is in progress.</value>
   </data>
+  <data name="Mock_DisabledReason_TurnInProgress" xml:space="preserve">
+    <value>A response is in progress.</value>
+  </data>
+  <data name="Mock_ConversationBlockedDuringMockGen" xml:space="preserve">
+    <value>The conversation is paused while the mock project is being generated.</value>
+  </data>
+  <data name="Mock_MockFolderNotFullyQualified" xml:space="preserve">
+    <value>Specify the mock folder as a full path (for example, C:\Work\mock).</value>
+  </data>
+  <data name="Mock_ConnectionCheckFailedFormat" xml:space="preserve">
+    <value>Could not check the connection: {0}</value>
+  </data>
   <data name="Mock_DisabledReason_NoScreens" xml:space="preserve">
     <value>Add at least one screen to the mock folder first.</value>
   </data>

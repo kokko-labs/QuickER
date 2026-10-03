@@ -145,7 +145,7 @@ public sealed class CodexChatEngine : IErChatEngine
 
     /// <inheritdoc />
     /// <remarks>Codex は添付プロトコルが未対応のため添付不可（UI 側で無効化・防御的にガードもする）。</remarks>
-    public AttachmentSupport AttachmentSupport => AttachmentSupport.None;
+    public AttachmentSupport AttachmentSupport => AttachmentSupportResolver.Codex;
 
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
