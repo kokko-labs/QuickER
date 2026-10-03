@@ -483,4 +483,31 @@ public class ForeignKeyColumnResolverTests
             .Should()
             .Equal("ProjectId");
     }
+
+    /// <summary>
+    /// 単数形が語尾から 1 つに決まらないテーブル名でも、親テーブル名_id の列が名前一致で選ばれることを検証する
+    /// （外部キー印の付いた別の列が先にあっても、順位 3 へ落ちて取り違えない）
+    /// </summary>
+    [Theory(DisplayName = "①: courses / warehouses / statuses なども単数形の列名に一致する")]
+    [InlineData("courses", "course_id")]
+    [InlineData("purchases", "purchase_id")]
+    [InlineData("responses", "response_id")]
+    [InlineData("warehouses", "warehouse_id")]
+    [InlineData("statuses", "status_id")]
+    [InlineData("caches", "cache_id")]
+    [InlineData("Courses", "CourseId")]
+    public void Rank1_AmbiguousPluralTableName_MatchesSingularColumn(
+        string sourceTable,
+        string expectedColumn
+    )
+    {
+        var columns = new[]
+        {
+            Col("id", isPk: true),
+            Col("other_ref", isFk: true),
+            Col(expectedColumn),
+        };
+
+        Resolve(columns, sourceTable: sourceTable, pkName: "id").Should().Be(2);
+    }
 }

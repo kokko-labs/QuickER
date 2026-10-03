@@ -802,6 +802,21 @@
   <data name="ExportOmission_ForeignKeyMarkerWithoutRelationship" xml:space="preserve">
     <value>リレーションの子側の列になっていない列の外部キー印（この形式は外部キーをリレーションの一部としてしか書けません）</value>
   </data>
+  <data name="ExportOmission_RelationshipWithoutColumns" xml:space="preserve">
+    <value>列を書けないリレーション（列ペアの無い 1 対 1・1 対多と、列の無いテーブルにつながる多対多）。出力に含まれません</value>
+  </data>
+  <data name="ExportOmission_ComputedColumn" xml:space="preserve">
+    <value>計算列の指定（取り込むと通常の列になります）</value>
+  </data>
+  <data name="ExportOmission_TableNameNormalized" xml:space="preserve">
+    <value>引用してもこの形式で書けないテーブル名（「"」「%」「\」は「_」へ置き換わります）</value>
+  </data>
+  <data name="ExportOmission_ColumnTypeNormalized" xml:space="preserve">
+    <value>この形式で書けない列の型（空白・記号は「_」へ置き換わり、nvarchar(max) や double precision のように取込で元の表記へ戻りません）</value>
+  </data>
+  <data name="ExportOmission_UniqueConstraintOnForeignKeyColumn" xml:space="preserve">
+    <value>外部キー列の単一列 UNIQUE 制約（キー欄は列ごとに標識を 1 つしか持てず、FK が UK より優先されます）</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
   </data>
@@ -878,6 +893,9 @@
   <data name="Dbml_UnsupportedRelationshipForm" xml:space="preserve">
     <value>未対応のリレーション記法です: '{0}'。短縮形（Ref: 親.列 &lt; 子.列、名前を付けるなら Ref 名前: …）だけに対応しています。ブロック形式 Ref {{ … }} には対応していません。</value>
   </data>
+  <data name="Dbml_UnsupportedInlineReference" xml:space="preserve">
+    <value>未対応のインライン参照 '{0}' です。ref: 記号 テーブル.列 の形だけに対応しています（記号は &lt;・&gt;・-・&lt;&gt;。スキーマ修飾の名前には対応していません）。</value>
+  </data>
   <data name="Mermaid_EmptyText" xml:space="preserve">
     <value>Mermaid テキストが空です。</value>
   </data>
@@ -934,9 +952,6 @@
   </data>
   <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
     <value>テーブル '{0}' のカラム '{1}' にデータ型がありません。</value>
-  </data>
-  <data name="TableDoc_TableNoColumns" xml:space="preserve">
-    <value>テーブル '{0}' にカラム定義がありません。</value>
   </data>
   <data name="TableDoc_RelMissingTableName" xml:space="preserve">
     <value>リレーション一覧シートの {0} 行目に参照元または参照先テーブル名がありません。</value>

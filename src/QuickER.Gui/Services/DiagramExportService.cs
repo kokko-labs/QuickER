@@ -281,6 +281,13 @@ internal sealed class DiagramExportService(
             ExportOmissionKind.PrimaryKeyOrder => Strings.ExportOmission_PrimaryKeyOrder,
             ExportOmissionKind.ForeignKeyMarkerWithoutRelationship =>
                 Strings.ExportOmission_ForeignKeyMarkerWithoutRelationship,
+            ExportOmissionKind.RelationshipWithoutColumns =>
+                Strings.ExportOmission_RelationshipWithoutColumns,
+            ExportOmissionKind.ComputedColumn => Strings.ExportOmission_ComputedColumn,
+            ExportOmissionKind.TableNameNormalized => Strings.ExportOmission_TableNameNormalized,
+            ExportOmissionKind.ColumnTypeNormalized => Strings.ExportOmission_ColumnTypeNormalized,
+            ExportOmissionKind.UniqueConstraintOnForeignKeyColumn =>
+                Strings.ExportOmission_UniqueConstraintOnForeignKeyColumn,
             _ => kind.ToString(),
         };
 }

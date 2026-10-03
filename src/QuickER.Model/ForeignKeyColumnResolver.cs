@@ -192,7 +192,9 @@ public static class ForeignKeyColumnResolver
     /// <summary>参照元テーブル名から参照先テーブルに期待する FK 列名の候補一覧を求める</summary>
     /// <remarks>
     /// パスカルケース（CustomerId）とスネークケース（customer_id）の両方を生成し、
-    /// テーブル名が複数形の場合は末尾単語を単数形化した変体（Customers → CustomerId）も加える
+    /// テーブル名が複数形の場合は末尾単語を単数形化した変体（Customers → CustomerId）も加える。
+    /// 単数形が語尾から 1 つに決まらない語は、<see cref="IdentifierNameHelper.SingularizeCandidates"/> の全候補の変体を加える
+    /// （Courses → CourseId と CoursId）
     /// </remarks>
     public static IReadOnlyList<string> BuildExpectedForeignKeyNames(string sourceTableName)
     {
@@ -215,12 +217,14 @@ public static class ForeignKeyColumnResolver
 
         AddVariants(words);
 
-        var singularLastWord = IdentifierNameHelper.SingularizeWord(words[^1]);
-
-        if (!string.Equals(singularLastWord, words[^1], StringComparison.OrdinalIgnoreCase))
+        // 単数形が語尾から 1 つに決まらない語（courses / statuses）は、候補をすべて期待名に加える
+        foreach (var singularLastWord in IdentifierNameHelper.SingularizeCandidates(words[^1]))
         {
-            var singularWords = new List<string>(words) { [^1] = singularLastWord };
-            AddVariants(singularWords);
+            if (!string.Equals(singularLastWord, words[^1], StringComparison.OrdinalIgnoreCase))
+            {
+                var singularWords = new List<string>(words) { [^1] = singularLastWord };
+                AddVariants(singularWords);
+            }
         }
 
         return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();

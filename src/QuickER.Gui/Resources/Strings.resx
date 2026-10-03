@@ -779,6 +779,21 @@
   <data name="ExportOmission_ForeignKeyMarkerWithoutRelationship" xml:space="preserve">
     <value>Foreign key markers on columns that no relationship uses as a child column (the format records a foreign key only as part of a relationship)</value>
   </data>
+  <data name="ExportOmission_RelationshipWithoutColumns" xml:space="preserve">
+    <value>Relationships whose columns cannot be written (one-to-one and one-to-many relationships without column pairs, and many-to-many relationships to a table with no columns); they are left out</value>
+  </data>
+  <data name="ExportOmission_ComputedColumn" xml:space="preserve">
+    <value>Computed column settings (the columns are imported as ordinary columns)</value>
+  </data>
+  <data name="ExportOmission_TableNameNormalized" xml:space="preserve">
+    <value>Table names that the format cannot spell even in quotes (", % and \ are folded to "_")</value>
+  </data>
+  <data name="ExportOmission_ColumnTypeNormalized" xml:space="preserve">
+    <value>Column types that the format cannot spell (spaces and symbols are folded to "_", and the import cannot restore the original, as with nvarchar(max) or double precision)</value>
+  </data>
+  <data name="ExportOmission_UniqueConstraintOnForeignKeyColumn" xml:space="preserve">
+    <value>Single-column unique constraints on foreign key columns (a column carries one key marker, and FK takes precedence over UK)</value>
+  </data>
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
   </data>
@@ -855,6 +870,9 @@
   <data name="Dbml_UnsupportedRelationshipForm" xml:space="preserve">
     <value>Unsupported relationship form: '{0}'. Only the short form (Ref: parent.column &lt; child.column, or Ref name: … for a named relationship) is supported; the block form Ref {{ … }} is not.</value>
   </data>
+  <data name="Dbml_UnsupportedInlineReference" xml:space="preserve">
+    <value>Unsupported inline reference '{0}'. Only ref: symbol table.column is supported (the symbol is &lt;, &gt;, - or &lt;&gt;; schema-qualified names are not supported).</value>
+  </data>
   <data name="Mermaid_EmptyText" xml:space="preserve">
     <value>The Mermaid text is empty.</value>
   </data>
@@ -911,9 +929,6 @@
   </data>
   <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
     <value>Column '{1}' of table '{0}' has no data type.</value>
-  </data>
-  <data name="TableDoc_TableNoColumns" xml:space="preserve">
-    <value>Table '{0}' has no column definitions.</value>
   </data>
   <data name="TableDoc_RelMissingTableName" xml:space="preserve">
     <value>Row {0} of the Relationship List sheet is missing a source or target table name.</value>

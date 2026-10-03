@@ -125,16 +125,22 @@ internal sealed class DiagramImportService(
     /// 取込結果の Id を現在図へ寄せ、生存クエリ・レイアウト引継をホストのマージ置換
     /// （<see cref="IDiagramTransferHost.ReplaceMerged"/>）に委ねる。Excel 定義書は Memo を保持するため、
     /// 一致エンティティの Memo は取込値を正とする（<c>preserveExistingMemo: false</c>）。
+    /// 定義書が運ばない計算列の指定と一意制約の順序・名前は現在図から引き継ぐ（<see cref="TableDefinitionMergePostProcessor"/>）。
     /// 壊れクエリがあれば確認メッセージへ削除対象名を付加する。
     /// </remarks>
     private void ImportExcelMerging(ErDiagram diagram, string displayName)
     {
+        var current = host.BuildModel();
         var merged = DiagramMergeReconciler.Reconcile(
-            host.BuildModel(),
+            current,
             diagram.Entities,
             diagram.Relationships,
             preserveExistingMemo: false
         );
+
+        // 定義書が運べない計算列の指定と一意制約の順序・名前を現在図から引き継ぐ。
+        // 置換確認（構造の同一判定）より前に行う＝書き出して読み戻しただけの定義書で確認を出さない
+        TableDefinitionMergePostProcessor.Apply(current, merged.Entities);
 
         if (
             !ConfirmMergedReplacement(

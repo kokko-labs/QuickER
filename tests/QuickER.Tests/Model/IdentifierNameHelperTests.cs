@@ -104,6 +104,47 @@ public class IdentifierNameHelperTests
         IdentifierNameHelper.SingularizeWord(word).Should().Be(word);
     }
 
+    /// <summary>
+    /// <c>es</c> を落とすか <c>s</c> だけを落とすかが語尾から決まらない語は、候補を 2 つ確からしい順に返すことを検証する
+    /// </summary>
+    [Theory(
+        DisplayName = "SingularizeCandidates: 語尾から決まらない語は候補を 2 つ、確からしい順に返す"
+    )]
+    [InlineData("courses", "course", "cours")]
+    [InlineData("purchases", "purchase", "purchas")]
+    [InlineData("responses", "response", "respons")]
+    [InlineData("warehouses", "warehouse", "warehous")]
+    [InlineData("causes", "cause", "caus")]
+    [InlineData("sizes", "size", "siz")]
+    [InlineData("statuses", "status", "statuse")]
+    [InlineData("buses", "bus", "buse")]
+    [InlineData("addresses", "address", "addresse")]
+    [InlineData("boxes", "box", "boxe")]
+    [InlineData("matches", "match", "matche")]
+    [InlineData("caches", "cach", "cache")]
+    [InlineData("dishes", "dish", "dishe")]
+    [InlineData("buzzes", "buzz", "buzze")]
+    [InlineData("heroes", "hero", "heroe")]
+    [InlineData("Courses", "Course", "Cours")]
+    public void SingularizeCandidates_AmbiguousEndings(string word, string first, string second)
+    {
+        IdentifierNameHelper.SingularizeCandidates(word).Should().Equal(first, second);
+        IdentifierNameHelper.SingularizeWord(word).Should().Be(first);
+    }
+
+    /// <summary>語尾から 1 つに決まる語・複数形でない語は候補が 1 つであることを検証する</summary>
+    [Theory(DisplayName = "SingularizeCandidates: 語尾から決まる語・単数語は候補 1 つ")]
+    [InlineData("cities", "city")]
+    [InlineData("orders", "order")]
+    [InlineData("types", "type")]
+    [InlineData("tables", "table")]
+    [InlineData("status", "status")]
+    [InlineData("class", "class")]
+    public void SingularizeCandidates_UnambiguousWords(string word, string expected)
+    {
+        IdentifierNameHelper.SingularizeCandidates(word).Should().Equal(expected);
+    }
+
     /// <summary>単数形が語尾ルールで複数形へ変換されることを検証する</summary>
     [Theory(DisplayName = "PluralizeWord: 語尾ルールで複数化する")]
     [InlineData("cat", "cats")]

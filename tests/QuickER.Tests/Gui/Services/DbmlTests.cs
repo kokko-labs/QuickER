@@ -731,10 +731,11 @@ public class DbmlTests
             relationship.ColumnPairs = [];
         }
 
+        // 列ペアの無い 1 対多は Ref 行ごと出さないので、その告知も並ぶ（DbmlRelationshipEndpointTests が本体）
         DbmlExporter
             .DetectOmissions(diagram)
             .Should()
-            .Equal(ExportOmissionKind.ForeignKeyMarkerWithoutRelationship);
+            .Contain(ExportOmissionKind.ForeignKeyMarkerWithoutRelationship);
     }
 
     /// <summary>

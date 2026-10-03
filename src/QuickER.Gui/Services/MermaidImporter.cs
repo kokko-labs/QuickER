@@ -90,7 +90,7 @@ public static partial class MermaidImporter
 
                 if (line.EndsWith("{", StringComparison.Ordinal))
                 {
-                    var tableName = line[..^1].Trim();
+                    var tableName = UnquoteEntityName(line[..^1].Trim());
 
                     if (string.IsNullOrWhiteSpace(tableName))
                     {
@@ -218,8 +218,8 @@ public static partial class MermaidImporter
             );
         }
 
-        var leftTable = match.Groups["left"].Value;
-        var rightTable = match.Groups["right"].Value;
+        var leftTable = UnquoteEntityName(match.Groups["left"].Value);
+        var rightTable = UnquoteEntityName(match.Groups["right"].Value);
         var symbol = match.Groups["symbol"].Value;
         var label = match.Groups["label"].Success ? match.Groups["label"].Value.Trim() : null;
 
@@ -388,10 +388,17 @@ public static partial class MermaidImporter
     /// <remarks>
     /// 末尾にアンダースコア連結された数値引数を括弧記法へ戻す
     /// 例: <c>nvarchar_100</c> → <c>nvarchar(100)</c>、<c>decimal_10_2</c> → <c>decimal(10,2)</c>
-    /// 数値以外のアンダースコアはそのまま保持する
+    /// 数値以外のアンダースコアはそのまま保持する。空の型を表すトークン
+    /// （<see cref="MermaidExporter.EmptyDataTypeToken"/>）は空へ戻す。
+    /// 出力側の欠落判定（型の書き換え）もこの復元で往復させて判定する
     /// </remarks>
-    private static string DenormalizeDataType(string dataType)
+    internal static string DenormalizeDataType(string dataType)
     {
+        if (dataType == MermaidExporter.EmptyDataTypeToken)
+        {
+            return string.Empty;
+        }
+
         // 「識別子 + (_数値)の繰り返し」に一致する型のみ復元対象とする
         var match = System.Text.RegularExpressions.Regex.Match(
             dataType,
@@ -412,6 +419,11 @@ public static partial class MermaidImporter
         return $"{typeName}({args})";
     }
 
+    /// <summary>引用された実体名（<c>"Order Details"</c>）なら引用符を外す（素の名前はそのまま）</summary>
+    /// <remarks>Mermaid の引用実体名はエスケープを持たない（中に <c>"</c> を書けない）ので、両端を外すだけ</remarks>
+    private static string UnquoteEntityName(string token) =>
+        token.Length >= 2 && token[0] == '"' && token[^1] == '"' ? token[1..^1] : token;
+
     /// <summary>Mermaid 属性行末尾の二重引用符で始まる説明文字列を除去する</summary>
     private static string RemoveTrailingComment(string line)
     {
@@ -420,8 +432,9 @@ public static partial class MermaidImporter
     }
 
     /// <summary>リレーション行（左テーブル・カーディナリティ記号・右テーブル・任意ラベル）にマッチする正規表現</summary>
+    /// <remarks>テーブル名は素の名前と、空白を含められる引用実体名（<c>"Order Details"</c>）の双方を受け付ける</remarks>
     [GeneratedRegex(
-        @"^(?<left>\S+)\s+(?<symbol>[|}{o]+--[|}{o]+)\s+(?<right>\S+)(?:\s*:\s*(?<label>.+))?$",
+        @"^(?<left>""[^""]*""|\S+)\s+(?<symbol>[|}{o]+--[|}{o]+)\s+(?<right>""[^""]*""|\S+)(?:\s*:\s*(?<label>.+))?$",
         RegexOptions.Compiled
     )]
     private static partial Regex RelationshipLineRegex();

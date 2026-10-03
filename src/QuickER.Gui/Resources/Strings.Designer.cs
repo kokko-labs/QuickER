@@ -1769,6 +1769,36 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("ExportOmission_ForeignKeyMarkerWithoutRelationship", resourceCulture);
             }
         }
+
+        public static string ExportOmission_RelationshipWithoutColumns {
+            get {
+                return ResourceManager.GetString("ExportOmission_RelationshipWithoutColumns", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ComputedColumn {
+            get {
+                return ResourceManager.GetString("ExportOmission_ComputedColumn", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_TableNameNormalized {
+            get {
+                return ResourceManager.GetString("ExportOmission_TableNameNormalized", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_ColumnTypeNormalized {
+            get {
+                return ResourceManager.GetString("ExportOmission_ColumnTypeNormalized", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_UniqueConstraintOnForeignKeyColumn {
+            get {
+                return ResourceManager.GetString("ExportOmission_UniqueConstraintOnForeignKeyColumn", resourceCulture);
+            }
+        }
         
         public static string Import_ReplaceConfirm {
             get {
@@ -1925,6 +1955,12 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Dbml_UnsupportedRelationshipForm", resourceCulture);
             }
         }
+
+        public static string Dbml_UnsupportedInlineReference {
+            get {
+                return ResourceManager.GetString("Dbml_UnsupportedInlineReference", resourceCulture);
+            }
+        }
         
         public static string Mermaid_EmptyText {
             get {
@@ -2037,12 +2073,6 @@ namespace QuickER.Resources {
         public static string TableDoc_ColumnMissingDataType {
             get {
                 return ResourceManager.GetString("TableDoc_ColumnMissingDataType", resourceCulture);
-            }
-        }
-        
-        public static string TableDoc_TableNoColumns {
-            get {
-                return ResourceManager.GetString("TableDoc_TableNoColumns", resourceCulture);
             }
         }
         

@@ -13,12 +13,13 @@ namespace QuickER.Services;
 /// 対応する記法は <see cref="DbmlExporter"/> の出力と往復可能な範囲に限定する
 /// <list type="bullet">
 ///   <item><c>Table 名前 {</c> 〜 <c>}</c> ブロック（1 行 1 カラム定義）</item>
-///   <item>カラム設定: <c>pk</c> / <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note: '...'</c>（大文字小文字を区別しない。それ以外の設定は読み飛ばす）</item>
+///   <item>カラム設定: <c>pk</c>（<c>primary key</c>）/ <c>unique</c> / <c>null</c> / <c>not null</c> / <c>note: '...'</c> /
+///     インライン参照 <c>ref: 記号 テーブル.列</c>（大文字小文字を区別しない。それ以外の設定は読み飛ばす）</item>
 ///   <item><c>Indexes { … }</c> ブロック: <c>unique</c> 設定を持つ索引を一意制約として、<c>pk</c> 設定を持つ索引を主キーとして取り込む
 ///     （<c>(a, b) [unique, name: '…']</c> / <c>(b, a) [pk]</c> / 単一列は括弧なしも可）。主キーの索引は構成列と順序を決め、
 ///     一意制約は作らない（主キーはそれ自体が一意のため）。索引の名前は捨てる（図は主キーの制約名を持たない）</item>
 ///   <item><c>Ref</c> 行（短縮形）: <c>Ref: 親.a &lt; 子.x</c> と名前付きの <c>Ref 名前: …</c>（名前は制約名になる）。端点の後ろの設定ブロック
-///     <c>[delete: …, update: …]</c> を参照アクションとして読む。多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）のみ（<c>&gt;</c>（多対1）は未対応）。エンドポイントは単一列 <c>親.a</c> と複合 Ref 構文 <c>親.(a, b)</c> の双方に対応し、<b>行に書かれた列名がそのまま外部キーの構成列になる</b>（推論しない）。
+///     <c>[delete: …, update: …]</c> を参照アクションとして読む。多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&gt;</c>（多対1＝左右を入れ替えた 1対多）/ <c>&lt;&gt;</c>（多対多）。エンドポイントは単一列 <c>親.a</c> と複合 Ref 構文 <c>親.(a, b)</c> の双方に対応し、<b>行に書かれた列名がそのまま外部キーの構成列になる</b>（推論しない）。
 ///     外部キーの印はこの子側の列に立てる。参照先の <c>Table</c> より前に書かれていてもよい（テーブルを読み切ってから解析する）</item>
 ///   <item><c>//</c> 行コメント</item>
 /// </list>
@@ -63,6 +64,12 @@ public static partial class DbmlImporter
     /// <summary><c>Note</c> で始まる行を検出する正規表現（未対応の複数行 Note の告知に使う）</summary>
     private static readonly Regex NoteKeywordRegex = NoteKeywordLineRegex();
 
+    /// <summary>カラム設定の値つき <c>ref:</c> を検出する正規表現</summary>
+    private static readonly Regex InlineReferenceStartRegex = InlineReferenceStartLineRegex();
+
+    /// <summary>カラム設定のインライン参照を解析する正規表現</summary>
+    private static readonly Regex InlineReferenceRegex = InlineReferenceLineRegex();
+
     /// <summary>
     /// DBML ファイルを読み込み ER 図へ変換する
     /// </summary>
@@ -89,9 +96,10 @@ public static partial class DbmlImporter
         // Ref 行の列名は、空テーブルへの既定 PK 列補完まで済んだ後にまとめて列ペアへ解決する
         var pendingRelationshipColumns =
             new List<(Relationship Relationship, List<string> Source, List<string> Target)>();
-        // Ref 行は、参照先テーブルの定義より前に書かれていてもよいよう、行ループを抜けてから解析する
-        // （他ツール製の DBML はファイル先頭へ Ref をまとめる書き方がある）
-        var pendingRefLines = new List<(string Line, int LineNumber)>();
+        // Ref 行とインライン参照は、参照先テーブルの定義より前に書かれていてもよいよう、テーブルへの解決を
+        // 行ループを抜けてから行う（他ツール製の DBML はファイル先頭へ Ref をまとめる書き方がある）。
+        // 書かれた順に並べておき、その順でリレーションにする
+        var pendingReferences = new List<(RefEndpoints Endpoints, int LineNumber)>();
         // Indexes ブロックの一意索引は、列定義より前に書かれていても解決できるよう最後にまとめて紐付ける
         // （解決は行ループを抜けた後になるため、診断用に定義行の行番号も持ち回る）
         var pendingUniqueIndexes =
@@ -203,8 +211,14 @@ public static partial class DbmlImporter
                         );
                     }
 
-                    var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
+                    var (column, isUnique, inlineReferences) = ParseColumn(
+                        line,
+                        currentEntity.TableName
+                    );
                     currentEntity.Columns.Add(column);
+                    pendingReferences.AddRange(
+                        inlineReferences.Select(endpoints => (endpoints, lineNumber))
+                    );
 
                     // カラム設定の unique は「その 1 列だけの名前なし一意制約」を意味する
                     if (isUnique)
@@ -237,8 +251,8 @@ public static partial class DbmlImporter
 
                 if (RelationshipStartRegex.IsMatch(line))
                 {
-                    // 解析はテーブルを読み切ってから（前方参照＝定義より前に書かれた Ref を受け付ける）
-                    pendingRefLines.Add((line, lineNumber));
+                    // テーブルへの解決は読み切ってから（前方参照＝定義より前に書かれた Ref を受け付ける）
+                    pendingReferences.Add((ParseRelationshipLine(line), lineNumber));
                     continue;
                 }
 
@@ -281,12 +295,12 @@ public static partial class DbmlImporter
             throw new InvalidDataException(Strings.Dbml_NoEntities);
         }
 
-        foreach (var (refLine, refLineNumber) in pendingRefLines)
+        foreach (var (endpoints, refLineNumber) in pendingReferences)
         {
             try
             {
-                var (relationship, sourceColumns, targetColumns) = ParseRelationship(
-                    refLine,
+                var (relationship, sourceColumns, targetColumns) = BuildRelationship(
+                    endpoints,
                     entities
                 );
                 relationships.Add(relationship);
@@ -316,17 +330,25 @@ public static partial class DbmlImporter
     /// <para>
     /// 名前は素の識別子と引用識別子（<c>"列 名"</c>）の双方を受け付ける。型名は空白を含んでもよく、
     /// 素の記法（<c>timestamp without time zone</c>）と引用（<c>"double precision"</c>）の双方に対応する。
-    /// 設定省略時は NULL 許可を既定とし、<c>pk</c> 指定時は NOT NULL を強制する。
+    /// 設定省略時は NULL 許可を既定とし、<c>pk</c>（<c>primary key</c>）指定時は NOT NULL を強制する。
     /// note 内のエスケープ（<c>\\</c> と <c>\'</c>）は <see cref="DbmlLiteral.Unescape"/> で復元する
     /// </para>
     /// <para>
     /// 設定ブロックの開始は <see cref="FindSettingsBracket"/> が決める（最初の <c>[</c> ではない）。
     /// 囲まれていない配列型 <c>integer[]</c> の角括弧を設定の開始と取り違えないため。
     /// </para>
+    /// <para>
+    /// 値つきの <c>ref: 記号 テーブル.列</c>（インライン参照）は <see cref="ParseInlineReference"/> が
+    /// <c>Ref</c> 行と同じ形へ写し、テーブルを読み切った後に <c>Ref</c> 行と同じ解決でリレーションにする。
+    /// 値なしの <c>ref</c> は読み飛ばす（列単独では参照先が決まらない）
+    /// </para>
     /// </remarks>
-    /// <returns>復元したカラムと、カラム設定 <c>unique</c> が指定されていたか</returns>
-    /// <exception cref="InvalidDataException">名前と型の 2 トークンに満たない場合</exception>
-    private static (Column Column, bool IsUnique) ParseColumn(string line, string tableName)
+    /// <returns>復元したカラムと、カラム設定 <c>unique</c> が指定されていたか、インライン参照の一覧</returns>
+    /// <exception cref="InvalidDataException">名前と型の 2 トークンに満たない場合・インライン参照が読めない場合</exception>
+    private static (Column Column, bool IsUnique, List<RefEndpoints> InlineReferences) ParseColumn(
+        string line,
+        string tableName
+    )
     {
         var trimmed = line.Trim();
         var bracketStart = FindSettingsBracket(trimmed);
@@ -352,13 +374,23 @@ public static partial class DbmlImporter
             IsNullable = true,
         };
         var isUnique = false;
+        var inlineReferences = new List<RefEndpoints>();
 
         foreach (var option in SplitOptions(optionText))
         {
-            if (string.Equals(option, "pk", StringComparison.OrdinalIgnoreCase))
+            if (
+                string.Equals(option, "pk", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(option, "primary key", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 column.IsPrimaryKey = true;
                 column.IsNullable = false;
+                continue;
+            }
+
+            if (ParseInlineReference(option, tableName, name) is { } inlineReference)
+            {
+                inlineReferences.Add(inlineReference);
                 continue;
             }
 
@@ -388,7 +420,59 @@ public static partial class DbmlImporter
             }
         }
 
-        return (column, isUnique);
+        return (column, isUnique, inlineReferences);
+    }
+
+    /// <summary>
+    /// カラム設定のインライン参照（<c>ref: 記号 テーブル.列</c>）を、<c>Ref</c> 行と同じ端点の組へ写す
+    /// </summary>
+    /// <param name="option">カラム設定の 1 項目</param>
+    /// <param name="tableName">この列のテーブル名</param>
+    /// <param name="columnName">この列の名前</param>
+    /// <returns>インライン参照でない設定（値なしの <c>ref</c> を含む）なら <c>null</c></returns>
+    /// <remarks>
+    /// <c>Ref</c> 行の左辺にこの列を置いた形（<c>Ref: テーブル.列 記号 参照先</c>）と同じ意味にする。ただし 1 対 1（<c>-</c>）は
+    /// 左右を入れ替える。DBML は 1 対 1 の外部キーを、<c>Ref</c> 行では右辺の列、インライン参照では <c>ref</c> を書いた列に置くと
+    /// 定めているため（<c>Ref</c> 行の左辺は親）。
+    /// </remarks>
+    /// <exception cref="InvalidDataException">値つきの <c>ref:</c> が読めない形（スキーマ修飾など）の場合</exception>
+    private static RefEndpoints? ParseInlineReference(
+        string option,
+        string tableName,
+        string columnName
+    )
+    {
+        if (!InlineReferenceStartRegex.IsMatch(option))
+        {
+            return null;
+        }
+
+        var match = InlineReferenceRegex.Match(option);
+
+        if (!match.Success)
+        {
+            throw new InvalidDataException(
+                string.Format(Strings.Dbml_UnsupportedInlineReference, option)
+            );
+        }
+
+        var symbol = match.Groups["symbol"].Value;
+        var self = (Table: tableName, Columns: new List<string> { columnName });
+        var other = (
+            Table: UnquoteIdentifier(match.Groups["table"].Value),
+            Columns: new List<string> { UnquoteIdentifier(match.Groups["column"].Value) }
+        );
+        var (left, right) = symbol == "-" ? (other, self) : (self, other);
+
+        return new RefEndpoints(
+            left.Table,
+            left.Columns,
+            symbol,
+            right.Table,
+            right.Columns,
+            Name: null,
+            Settings: string.Empty
+        );
     }
 
     /// <summary>
@@ -652,21 +736,29 @@ public static partial class DbmlImporter
         }
     }
 
+    /// <summary><c>Ref</c> 行・インライン参照から読んだ、テーブルへ解決する前の端点の組</summary>
+    /// <param name="LeftTable">左辺のテーブル名</param>
+    /// <param name="LeftColumns">左辺の列名（宣言順）</param>
+    /// <param name="Symbol">多重度記号（<c>&lt;</c> / <c>&gt;</c> / <c>-</c> / <c>&lt;&gt;</c>）</param>
+    /// <param name="RightTable">右辺のテーブル名</param>
+    /// <param name="RightColumns">右辺の列名（宣言順）</param>
+    /// <param name="Name">名前付き Ref の名前（制約名）</param>
+    /// <param name="Settings">端点の後ろの設定ブロックの中身</param>
+    private sealed record RefEndpoints(
+        string LeftTable,
+        List<string> LeftColumns,
+        string Symbol,
+        string RightTable,
+        List<string> RightColumns,
+        string? Name,
+        string Settings
+    );
+
     /// <summary>
-    /// DBML の <c>Ref</c> 行（短縮形）を解析してリレーションを生成する
+    /// DBML の <c>Ref</c> 行（短縮形）を端点の組へ解析する（テーブルへの解決は <see cref="BuildRelationship"/>）
     /// </summary>
-    /// <remarks>
-    /// 左辺テーブルを親（Source）、右辺テーブルを子（Target）として扱う。名前付き Ref の名前を制約名にし、
-    /// 端点の後ろの設定ブロックから参照アクションを読む。
-    /// 行中のカラム名（単一列 <c>親.a</c> / 複合 <c>親.(a, b)</c>）は外部キーの構成列そのものとして持ち帰り、
-    /// 後段の <see cref="ResolveRelationshipColumns"/> が列ペアへ解決する（推論はしない）
-    /// </remarks>
-    /// <exception cref="InvalidDataException">構文不一致、または参照先テーブルが未定義の場合</exception>
-    private static (
-        Relationship Relationship,
-        List<string> SourceColumns,
-        List<string> TargetColumns
-    ) ParseRelationship(string line, IReadOnlyDictionary<string, Entity> entities)
+    /// <exception cref="InvalidDataException">構文不一致の場合</exception>
+    private static RefEndpoints ParseRelationshipLine(string line)
     {
         var match = RelationshipRegex.Match(line);
 
@@ -677,53 +769,83 @@ public static partial class DbmlImporter
             );
         }
 
-        var leftTable = UnquoteIdentifier(match.Groups["leftTable"].Value);
-        var rightTable = UnquoteIdentifier(match.Groups["rightTable"].Value);
-        var symbol = match.Groups["symbol"].Value;
-        var constraintName = match.Groups["name"].Success
-            ? UnquoteIdentifier(match.Groups["name"].Value)
-            : null;
-        var (onDelete, onUpdate) = ParseRelationshipSettings(
+        return new RefEndpoints(
+            UnquoteIdentifier(match.Groups["leftTable"].Value),
+            ReadEndpointColumns(match, "leftColumns", "leftColumn"),
+            match.Groups["symbol"].Value,
+            UnquoteIdentifier(match.Groups["rightTable"].Value),
+            ReadEndpointColumns(match, "rightColumns", "rightColumn"),
+            match.Groups["name"].Success ? UnquoteIdentifier(match.Groups["name"].Value) : null,
             match.Groups["settings"].Success ? match.Groups["settings"].Value : string.Empty
         );
+    }
 
-        if (!entities.ContainsKey(leftTable))
+    /// <summary>
+    /// 端点の組をテーブルへ解決してリレーションを生成する
+    /// </summary>
+    /// <remarks>
+    /// 左辺テーブルを親（Source）、右辺テーブルを子（Target）として扱う。多対1（<c>&gt;</c>）は左右を入れ替えて
+    /// 1 対多（<c>&lt;</c>）と同じにする（<c>a.x &gt; b.y</c> は <c>b.y &lt; a.x</c> と同じ意味）。
+    /// 名前付き Ref の名前を制約名にし、端点の後ろの設定ブロックから参照アクションを読む。
+    /// 端点の列名（単一列 <c>親.a</c> / 複合 <c>親.(a, b)</c>）は外部キーの構成列そのものとして持ち帰り、
+    /// 後段の <see cref="ResolveRelationshipColumns"/> が列ペアへ解決する（推論はしない）
+    /// </remarks>
+    /// <exception cref="InvalidDataException">記号が未対応、または参照先テーブルが未定義の場合</exception>
+    private static (
+        Relationship Relationship,
+        List<string> SourceColumns,
+        List<string> TargetColumns
+    ) BuildRelationship(RefEndpoints endpoints, IReadOnlyDictionary<string, Entity> entities)
+    {
+        var isManyToOne = endpoints.Symbol == ">";
+        var (parentTable, parentColumns, childTable, childColumns) = isManyToOne
+            ? (
+                endpoints.RightTable,
+                endpoints.RightColumns,
+                endpoints.LeftTable,
+                endpoints.LeftColumns
+            )
+            : (
+                endpoints.LeftTable,
+                endpoints.LeftColumns,
+                endpoints.RightTable,
+                endpoints.RightColumns
+            );
+        var (onDelete, onUpdate) = ParseRelationshipSettings(endpoints.Settings);
+
+        if (!entities.ContainsKey(parentTable))
         {
             throw new InvalidDataException(
-                string.Format(Strings.Dbml_RelationshipSourceUndefined, leftTable)
+                string.Format(Strings.Dbml_RelationshipSourceUndefined, parentTable)
             );
         }
 
-        if (!entities.ContainsKey(rightTable))
+        if (!entities.ContainsKey(childTable))
         {
             throw new InvalidDataException(
-                string.Format(Strings.Dbml_RelationshipTargetUndefined, rightTable)
+                string.Format(Strings.Dbml_RelationshipTargetUndefined, childTable)
             );
         }
 
         var relationship = new Relationship
         {
-            SourceEntityId = entities[leftTable].Id,
-            TargetEntityId = entities[rightTable].Id,
-            Type = symbol switch
+            SourceEntityId = entities[parentTable].Id,
+            TargetEntityId = entities[childTable].Id,
+            Type = endpoints.Symbol switch
             {
                 "-" => RelationshipType.OneToOne,
-                "<" => RelationshipType.OneToMany,
+                "<" or ">" => RelationshipType.OneToMany,
                 "<>" => RelationshipType.ManyToMany,
                 _ => throw new InvalidDataException(
-                    string.Format(Strings.Dbml_UnsupportedRelationshipSymbol, symbol)
+                    string.Format(Strings.Dbml_UnsupportedRelationshipSymbol, endpoints.Symbol)
                 ),
             },
-            ConstraintName = constraintName,
+            ConstraintName = endpoints.Name,
             OnDelete = onDelete,
             OnUpdate = onUpdate,
         };
 
-        return (
-            relationship,
-            ReadEndpointColumns(match, "leftColumns", "leftColumn"),
-            ReadEndpointColumns(match, "rightColumns", "rightColumn")
-        );
+        return (relationship, parentColumns, childColumns);
     }
 
     /// <summary><c>Ref</c> 行の端点の後ろの設定ブロックから参照アクションを取り出す</summary>
@@ -795,49 +917,13 @@ public static partial class DbmlImporter
     /// カラム設定文字列をカンマ区切りで分割する
     /// </summary>
     /// <remarks>
-    /// <c>note: 'a, b'</c> のようにクォート内へ含まれるカンマは区切りとして扱わない。
-    /// クォートの開閉判定では直前の <c>\</c> によるエスケープを考慮する
+    /// <c>note: 'a, b'</c> のようにリテラル内へ含まれるカンマは区切りとして扱わない。
+    /// リテラルの終わりはエスケープを 1 文字ずつ追って決める（<see cref="SplitOutsideLiterals"/>）。
+    /// 「直前の 1 文字が <c>\</c> か」で判定すると、<c>\</c> で終わる文字列（<c>'C:\\'</c>）の閉じ引用を
+    /// エスケープと取り違え、後ろの設定まで説明に飲み込む
     /// </remarks>
-    private static IEnumerable<string> SplitOptions(string optionText)
-    {
-        if (string.IsNullOrWhiteSpace(optionText))
-        {
-            yield break;
-        }
-
-        var builder = new System.Text.StringBuilder();
-        var inQuote = false;
-
-        foreach (var ch in optionText)
-        {
-            if (ch == '\'' && (builder.Length == 0 || builder[^1] != '\\'))
-            {
-                inQuote = !inQuote;
-            }
-
-            if (ch == ',' && !inQuote)
-            {
-                var item = builder.ToString().Trim();
-
-                if (item.Length > 0)
-                {
-                    yield return item;
-                }
-
-                builder.Clear();
-                continue;
-            }
-
-            builder.Append(ch);
-        }
-
-        var last = builder.ToString().Trim();
-
-        if (last.Length > 0)
-        {
-            yield return last;
-        }
-    }
+    private static List<string> SplitOptions(string optionText) =>
+        SplitOutsideLiterals(optionText, ',');
 
     /// <summary>行の走査で次の行へ持ち越す状態（複数行にまたがる構文）</summary>
     private enum ScanState
@@ -1243,8 +1329,12 @@ public static partial class DbmlImporter
     private static partial Regex NoteKeywordLineRegex();
 
     /// <summary>テーブルの説明を表す <c>Note: '...'</c> 行に一致する正規表現を生成する</summary>
+    /// <remarks>
+    /// リテラルの中身はエスケープを組で読む（<c>\\.</c>）。<c>\'</c> だけを組にすると、<c>\</c> で終わる文字列
+    /// （<c>'C:\\'</c>）の閉じ引用をエスケープと取り違える（カラム設定の note・索引の name も同じ）
+    /// </remarks>
     [GeneratedRegex(
-        @"^Note:\s*'(?<note>(?:\\'|[^'])*)'$",
+        @"^Note:\s*'(?<note>(?:\\.|[^'\\])*)'$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     )]
     private static partial Regex TableNoteLineRegex();
@@ -1263,10 +1353,12 @@ public static partial class DbmlImporter
     /// 形は <c>Ref 名前: 親.a &lt; 子.x [delete: …, update: …]</c>。名前（制約名）は省略でき（<c>Ref:</c>）、
     /// 素の識別子と引用識別子（<c>"FK \"x\""</c>＝エスケープは <see cref="UnquoteIdentifier"/> が戻す）の双方を受け付ける。
     /// 設定ブロックは端点の後ろに置き、中身（<c>delete</c> / <c>update</c>）は <see cref="ParseRelationshipSettings"/> が解釈する。
-    /// エンドポイントは単一列（<c>親.a</c>）と複合 Ref 構文（<c>親.(a, b)</c>）の双方を受け付ける
+    /// エンドポイントは単一列（<c>親.a</c>）と複合 Ref 構文（<c>親.(a, b)</c>）の双方を受け付ける。
+    /// 複合の列リストと設定ブロックは、リテラル（引用識別子・単一引用符の文字列）の中の <c>)</c> / <c>]</c> で
+    /// 終わらない（<c>)</c> を含む引用列名の複合外部キーを書き出せるため）
     /// </remarks>
     [GeneratedRegex(
-        """^Ref(?:\s+(?<name>"(?:\\.|[^"\\])*"|\w+))?\s*:\s*(?<leftTable>"(?:\\.|[^"\\])*"|\w+)\.(?:\((?<leftColumns>[^)]*)\)|(?<leftColumn>"(?:\\.|[^"\\])*"|\w+))\s*(?<symbol><>|<|-)\s*(?<rightTable>"(?:\\.|[^"\\])*"|\w+)\.(?:\((?<rightColumns>[^)]*)\)|(?<rightColumn>"(?:\\.|[^"\\])*"|\w+))\s*(?:\[(?<settings>[^\]]*)\])?\s*$""",
+        """^Ref(?:\s+(?<name>"(?:\\.|[^"\\])*"|\w+))?\s*:\s*(?<leftTable>"(?:\\.|[^"\\])*"|\w+)\.(?:\((?<leftColumns>(?:"(?:\\.|[^"\\])*"|[^)"])*)\)|(?<leftColumn>"(?:\\.|[^"\\])*"|\w+))\s*(?<symbol><>|<|>|-)\s*(?<rightTable>"(?:\\.|[^"\\])*"|\w+)\.(?:\((?<rightColumns>(?:"(?:\\.|[^"\\])*"|[^)"])*)\)|(?<rightColumn>"(?:\\.|[^"\\])*"|\w+))\s*(?:\[(?<settings>(?:'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[^\]'"])*)\])?\s*$""",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     )]
     private static partial Regex RelationshipLineRegex();
@@ -1285,9 +1377,25 @@ public static partial class DbmlImporter
     )]
     private static partial Regex RelationshipLineStartRegex();
 
+    /// <summary>カラム設定のうち値つきの <c>ref:</c>（インライン参照）の書き出しに一致する正規表現を生成する</summary>
+    /// <remarks>ここに一致して <see cref="InlineReferenceLineRegex"/> に一致しない設定は、項目を名指しして断る</remarks>
+    [GeneratedRegex(@"^ref\s*:", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex InlineReferenceStartLineRegex();
+
+    /// <summary>カラム設定のインライン参照 <c>ref: 記号 テーブル.列</c> に一致する正規表現を生成する</summary>
+    /// <remarks>
+    /// 記号は <c>Ref</c> 行と同じ 4 つ。テーブル名・列名は素の識別子と引用識別子の双方を受け付ける。
+    /// スキーマ修飾（<c>schema.table.column</c>）は <c>Ref</c> 行と同じく未対応
+    /// </remarks>
+    [GeneratedRegex(
+        """^ref\s*:\s*(?<symbol><>|<|>|-)\s*(?<table>"(?:\\.|[^"\\])*"|\w+)\.(?<column>"(?:\\.|[^"\\])*"|\w+)$""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    )]
+    private static partial Regex InlineReferenceLineRegex();
+
     /// <summary>カラム設定の <c>note: '...'</c>（<c>\'</c> エスケープ対応）に一致する正規表現を生成する</summary>
     [GeneratedRegex(
-        @"^note:\s*'(?<note>(?:\\'|[^'])*)'$",
+        @"^note:\s*'(?<note>(?:\\.|[^'\\])*)'$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     )]
     private static partial Regex ColumnNoteRegex();
@@ -1298,7 +1406,7 @@ public static partial class DbmlImporter
 
     /// <summary>索引設定の <c>name: '...'</c>（<c>\'</c> エスケープ対応）に一致する正規表現を生成する</summary>
     [GeneratedRegex(
-        @"^name:\s*'(?<name>(?:\\'|[^'])*)'$",
+        @"^name:\s*'(?<name>(?:\\.|[^'\\])*)'$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     )]
     private static partial Regex IndexSettingNameRegex();

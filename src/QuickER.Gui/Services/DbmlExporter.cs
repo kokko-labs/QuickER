@@ -81,8 +81,9 @@ public static partial class DbmlExporter
     /// DBML はテーブル説明（<c>Note:</c>）・列の説明（<c>note</c>）・NULL 許可・一意制約（複合・名前付きとも
     /// <c>Indexes</c> ブロック）・外部キーの列対応（複合 Ref 構文）・制約名（名前付き Ref）・
     /// 参照アクション（<c>delete</c> / <c>update</c>）をすべて表現できる。載せられないのは、<c>Note</c> を説明に
-    /// 使うため独自拡張なしでは書けないテーブルのメモと、DBML がそもそも持たない名前付きクエリ定義と、
-    /// <c>Ref</c> 行の子側の列にならない列に付いた外部キーの印（<see cref="HasForeignKeyMarkerOutsideRelationships"/>）。
+    /// 使うため独自拡張なしでは書けないテーブルのメモと、DBML がそもそも持たない名前付きクエリ定義・計算列の指定と、
+    /// <c>Ref</c> 行の子側の列にならない列に付いた外部キーの印（<see cref="HasForeignKeyMarkerOutsideRelationships"/>）と、
+    /// 端点の列を書けないために <c>Ref</c> 行を出さないリレーション（<see cref="ResolveEndpointColumns"/>）。
     /// 中身が実際に入っているときだけ返す（空の説明では告知しない）
     /// </remarks>
     public static IReadOnlyList<ExportOmissionKind> DetectOmissions(ErDiagram diagram)
@@ -98,9 +99,70 @@ public static partial class DbmlExporter
                 HasForeignKeyMarkerOutsideRelationships(diagram),
                 ExportOmissionKind.ForeignKeyMarkerWithoutRelationship
             ),
+            (
+                HasRelationshipWithoutEndpointColumns(diagram),
+                ExportOmissionKind.RelationshipWithoutColumns
+            ),
+            (
+                diagram.Entities.Any(entity => entity.Columns.Any(column => column.IsComputed)),
+                ExportOmissionKind.ComputedColumn
+            ),
         };
 
         return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();
+    }
+
+    /// <summary>端点の列を書けないために <c>Ref</c> 行を出さないリレーションがあるかを判定する</summary>
+    /// <remarks>判定は出力（<see cref="BuildRelationshipLine"/>）と同じ <see cref="ResolveEndpointColumns"/> で行う</remarks>
+    private static bool HasRelationshipWithoutEndpointColumns(ErDiagram diagram)
+    {
+        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+
+        return diagram.Relationships.Any(relationship =>
+            entitiesById.TryGetValue(relationship.SourceEntityId, out var source)
+            && entitiesById.TryGetValue(relationship.TargetEntityId, out var target)
+            && ResolveEndpointColumns(relationship, source, target) is null
+        );
+    }
+
+    /// <summary><c>Ref</c> 行の両端に書く列名（親側・子側）を決める</summary>
+    /// <returns>書ける列名。書けないときは <c>null</c>（そのリレーションは <c>Ref</c> 行を出さない）</returns>
+    /// <remarks>
+    /// <para>
+    /// 列ペアを解決できればその列を書く（DDL 生成と同じ <see cref="ForeignKeyColumnPairResolver"/>）。
+    /// </para>
+    /// <para>
+    /// 解決できないとき、多対多は各テーブルの先頭列で代用する（取込は多対多の列を読まないので、往復で何も作らない）。
+    /// 1 対 1・1 対多は代用しない——取込は <c>Ref</c> 行の列を外部キーの構成列として採るため、先頭列を書くと
+    /// 定義していない外部キー（多くは子の主キー列）が往復で黙ってできる。列の無いテーブルにつながる多対多も、
+    /// 書ける列が無いので出さない。どちらも欠落（<see cref="ExportOmissionKind.RelationshipWithoutColumns"/>）として告知する
+    /// </para>
+    /// </remarks>
+    private static (
+        IReadOnlyList<string> Parent,
+        IReadOnlyList<string> Child
+    )? ResolveEndpointColumns(Relationship relationship, Entity source, Entity target)
+    {
+        var pairs = ForeignKeyColumnPairResolver.Resolve(relationship, source, target);
+
+        if (pairs is not null)
+        {
+            return (
+                ForeignKeyColumnPairResolver.ParentColumns(pairs).ToList(),
+                ForeignKeyColumnPairResolver.ChildColumns(pairs).ToList()
+            );
+        }
+
+        if (
+            relationship.Type != RelationshipType.ManyToMany
+            || source.Columns.Count == 0
+            || target.Columns.Count == 0
+        )
+        {
+            return null;
+        }
+
+        return ([source.Columns[0].Name], [target.Columns[0].Name]);
     }
 
     /// <summary>
@@ -280,7 +342,8 @@ public static partial class DbmlExporter
     /// 名前として書き（無ければ <c>Ref:</c>）、テーブル名・列名と同じ規則で必要なら引用する。
     /// 参照アクションは端点の後ろの設定ブロックへ置く。
     /// 列ペアが 2 組以上（複合外部キー）なら複合 Ref 構文 <c>親.(a, b) &lt; 子.(x, y)</c> で書き出し、
-    /// 1 組なら単一列形式になる。参照カラム未指定のリレーションは各エンティティの先頭カラムで代用する
+    /// 1 組なら単一列形式になる。端点の列は <see cref="ResolveEndpointColumns"/> が決め、書けないリレーションは
+    /// 出さない（<c>null</c> を返す）
     /// </remarks>
     private static string? BuildRelationshipLine(
         Relationship relationship,
@@ -290,21 +353,13 @@ public static partial class DbmlExporter
         if (
             !entitiesById.TryGetValue(relationship.SourceEntityId, out var source)
             || !entitiesById.TryGetValue(relationship.TargetEntityId, out var target)
+            || ResolveEndpointColumns(relationship, source, target)
+                is not
+                (var sourceColumnNames, var targetColumnNames)
         )
         {
             return null;
         }
-
-        // 列ペアの解決は DDL 生成と同じ共通ヘルパーに委ねる（1 列でも解決できなければ null）
-        var pairs = ForeignKeyColumnPairResolver.Resolve(relationship, source, target);
-
-        // 列ペアを持たない（多対多・未割当）リレーションは先頭カラムで代用する
-        var sourceColumnNames = pairs is null
-            ? [source.Columns.First().Name]
-            : ForeignKeyColumnPairResolver.ParentColumns(pairs).ToList();
-        var targetColumnNames = pairs is null
-            ? new List<string> { target.Columns.First().Name }
-            : ForeignKeyColumnPairResolver.ChildColumns(pairs).ToList();
 
         var symbol = relationship.Type switch
         {
@@ -393,7 +448,9 @@ public static partial class DbmlExporter
     /// DBML の型名は「空白を含むなら二重引用符で囲む（<c>"double precision"</c>）、括弧つきは
     /// そのまま書く（<c>varchar(255)</c> / <c>decimal(1,2)</c>）」という規約。あわせて角括弧を含む型
     /// （PostgreSQL の配列型 <c>integer[]</c>）も囲む——囲まないと取込側が設定ブロックの開始と取り違え、
-    /// 型が <c>integer</c> へ化ける。
+    /// 型が <c>integer</c> へ化ける。二重引用符を含む型（PostgreSQL の引用型名 <c>"MyType"</c>）も囲む——
+    /// 囲まないと取込側が型の途中の <c>"</c> を引用の開始と読み、設定ごと型の一部として飲み込むか、
+    /// 引用符を剥がして別の型へ変える。
     /// </remarks>
     private static string TypeName(string? dataType)
     {
@@ -410,7 +467,7 @@ public static partial class DbmlExporter
     [GeneratedRegex(@"^[A-Za-z0-9_]+$", RegexOptions.Compiled)]
     private static partial Regex PlainIdentifierRegex();
 
-    /// <summary>囲む必要がある型表記（空白または角括弧を含む）に一致する正規表現を生成する</summary>
-    [GeneratedRegex(@"[\s\[\]]", RegexOptions.Compiled)]
+    /// <summary>囲む必要がある型表記（空白・角括弧・二重引用符を含む）に一致する正規表現を生成する</summary>
+    [GeneratedRegex(@"[\s\[\]""]", RegexOptions.Compiled)]
     private static partial Regex QuotedTypeRegex();
 }
