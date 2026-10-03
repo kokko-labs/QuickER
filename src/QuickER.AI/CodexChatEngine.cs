@@ -554,7 +554,7 @@ public sealed class CodexChatEngine : IErChatEngine
     {
         if (_workingDirectory.Length == 0)
         {
-            _workingDirectory = CreateWorkingDirectory();
+            _workingDirectory = BackendWorkingDirectory.Create("codex");
         }
 
         return new()
@@ -569,44 +569,6 @@ public sealed class CodexChatEngine : IErChatEngine
                 ? _profile.BuildCodexDeveloperInstructions()
                 : null,
         };
-    }
-
-    /// <summary>一時作業ディレクトリを作成する（codex の cwd を無害な場所に限定する）</summary>
-    private static string CreateWorkingDirectory()
-    {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            "QuickER",
-            "codex",
-            Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(path);
-        return path;
-    }
-
-    /// <summary>一時作業ディレクトリを削除する（ベストエフォート）</summary>
-    private void TryDeleteWorkingDirectory()
-    {
-        if (_workingDirectory.Length == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (Directory.Exists(_workingDirectory))
-            {
-                Directory.Delete(_workingDirectory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // 使用中などで削除できない場合は無視する
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // 権限不足は無視する
-        }
     }
 
     /// <summary>現在のプロバイダー・モデルから保存用設定を組み立てる</summary>
@@ -929,6 +891,6 @@ public sealed class CodexChatEngine : IErChatEngine
         await _client.DisposeAsync().ConfigureAwait(false);
 
         // 子プロセスを止めてから作業フォルダを消す（掴まれたままだと削除できない）
-        TryDeleteWorkingDirectory();
+        BackendWorkingDirectory.TryDelete(_workingDirectory);
     }
 }

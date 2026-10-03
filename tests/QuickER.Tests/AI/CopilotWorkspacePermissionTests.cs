@@ -149,6 +149,89 @@ public class CopilotWorkspacePermissionTests
         CopilotWorkspacePermissionPolicy.IsWithinWorkspace(request, Root).Should().Be(expected);
     }
 
+    /// <summary>
+    /// パスがすべて配下でも、URL を参照するシェル要求は拒否する（ネットワークから取ってきた内容を作業フォルダへ持ち込む経路）。
+    /// </summary>
+    [Theory(DisplayName = "パスが配下でも URL を参照するシェル要求は拒否する")]
+    [InlineData(
+        @"curl https://example.com/x.ps1 -o .\x.ps1",
+        "curl",
+        @".\x.ps1",
+        "https://example.com/x.ps1"
+    )]
+    [InlineData(
+        @"Invoke-WebRequest https://example.com/logo.png -OutFile assets\logo.png",
+        "Invoke-WebRequest",
+        @"assets\logo.png",
+        "https://example.com/logo.png"
+    )]
+    [InlineData(
+        @"git clone https://github.com/foo/bar lib\bar",
+        "git",
+        @"lib\bar",
+        "https://github.com/foo/bar"
+    )]
+    [InlineData(
+        "dotnet add MyApp package Foo --source https://api.nuget.org/v3/index.json",
+        "dotnet",
+        "MyApp",
+        "https://api.nuget.org/v3/index.json"
+    )]
+    public void Shell_WithPathsAndUrl_IsDeclined(
+        string commandText,
+        string identifier,
+        string path,
+        string url
+    )
+    {
+        var request = Shell(
+            commandText,
+            identifiers: [identifier],
+            possiblePaths: [path],
+            possibleUrls: [url]
+        );
+
+        CopilotWorkspacePermissionPolicy.IsWithinWorkspace(request, Root).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// パスがすべて配下でも、ファイルへの書き込みリダイレクトを伴うシェル要求は拒否する
+    /// （書き込み先が参照パスの抽出から漏れることがある）。
+    /// </summary>
+    [Theory(DisplayName = "パスが配下でも書き込みリダイレクトを伴うシェル要求は拒否する")]
+    [InlineData(@"dotnet build MyApp\MyApp.csproj > build.log", "dotnet", @"MyApp\MyApp.csproj")]
+    [InlineData(@"echo x > Pages\Foo.razor", "echo", @"Pages\Foo.razor")]
+    public void Shell_WithPathsAndWriteRedirection_IsDeclined(
+        string commandText,
+        string identifier,
+        string path
+    )
+    {
+        var request = Shell(
+            commandText,
+            identifiers: [identifier],
+            possiblePaths: [path],
+            hasWriteFileRedirection: true
+        );
+
+        CopilotWorkspacePermissionPolicy.IsWithinWorkspace(request, Root).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// URL もリダイレクトも無く、パスがすべて配下のシェル要求は、コマンド名に依らずこれまでどおり承認する。
+    /// </summary>
+    [Theory(DisplayName = "URL もリダイレクトも無くパスが配下のシェル要求はこれまでどおり承認する")]
+    [InlineData(@"dotnet build MyApp\MyApp.csproj", "dotnet", @"MyApp\MyApp.csproj")]
+    [InlineData("dotnet restore MyApp", "dotnet", "MyApp")]
+    [InlineData(@"powershell -File .\x.ps1", "powershell", @".\x.ps1")]
+    [InlineData(@"del obj\x", "del", @"obj\x")]
+    public void Shell_WithPathsOnly_IsApproved(string commandText, string identifier, string path)
+    {
+        var request = Shell(commandText, identifiers: [identifier], possiblePaths: [path]);
+
+        CopilotWorkspacePermissionPolicy.IsWithinWorkspace(request, Root).Should().BeTrue();
+    }
+
     /// <summary>サンドボックス迂回を要求するシェルは、他の条件を満たしても承認しない</summary>
     [Fact(DisplayName = "サンドボックス迂回を要求するシェルは拒否する")]
     public void Shell_SandboxBypass_IsDeclined()

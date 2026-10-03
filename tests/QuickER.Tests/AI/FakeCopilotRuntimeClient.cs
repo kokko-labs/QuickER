@@ -30,6 +30,9 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     /// <summary>渡されたセッション生成オプション（最後の 1 件）</summary>
     public CopilotSessionOptions? LastSessionOptions { get; private set; }
 
+    /// <summary>接続（<see cref="StartAsync"/> の成功）の回数</summary>
+    public int StartCallCount { get; private set; }
+
     /// <summary>セッション生成回数</summary>
     public int StartSessionCallCount { get; private set; }
 
@@ -93,6 +96,7 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
         }
 
         IsStarted = true;
+        StartCallCount++;
         return Task.CompletedTask;
     }
 
@@ -167,6 +171,15 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// copilot ランタイムとの接続が切れたことを模す（実装は接続断の失敗を受けるとセッションごと接続を捨てる）
+    /// </summary>
+    public void SimulateConnectionLost()
+    {
+        IsStarted = false;
+        HasSession = false;
     }
 
     /// <summary>アシスタント応答の差分を発火する</summary>

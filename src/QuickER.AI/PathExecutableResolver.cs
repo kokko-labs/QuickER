@@ -32,9 +32,12 @@ public static class PathExecutableResolver
             return null;
         }
 
-        // Windows では PATHEXT 相当の候補（npm 製 CLI は .cmd / .bat で入ることが多い）も順に試す
+        // Windows では PATHEXT 相当の候補（npm 製 CLI は .cmd / .bat で入ることが多い）を順に試す。
+        // 拡張子なしの名前は候補にしない＝CreateProcess は拡張子のない名前に .exe を補って探すため、
+        // npm が同じフォルダへ置く sh スクリプト（拡張子なしの claude 等）を返しても起動できない
+        // （しかも見つかった時点で走査が止まり、後ろのフォルダにある本物へ届かない）
         string[] candidates = OperatingSystem.IsWindows()
-            ? [commandName + ".exe", commandName + ".cmd", commandName + ".bat", commandName]
+            ? [commandName + ".exe", commandName + ".cmd", commandName + ".bat"]
             : [commandName];
 
         foreach (var directory in pathValue.Split(Path.PathSeparator))
@@ -44,7 +47,11 @@ public static class PathExecutableResolver
                 continue;
             }
 
-            var trimmed = directory.Trim();
+            // Windows の PATH は要素を引用符で囲んでもよい（"C:\Program Files\nodejs" など）ので外す
+            // （Unix の PATH に引用の規則は無く、引用符も名前の一部なので触らない）
+            var trimmed = OperatingSystem.IsWindows()
+                ? directory.Trim().Trim('"').Trim()
+                : directory.Trim();
 
             // 相対パスの PATH 要素（"." など）は読み飛ばす＝解決結果がカレントフォルダ次第で変わり、
             // 呼び出し側へフルパスを返すという約束が崩れるため

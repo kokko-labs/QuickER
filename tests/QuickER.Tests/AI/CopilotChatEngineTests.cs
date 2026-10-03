@@ -213,6 +213,30 @@ public class CopilotChatEngineTests
         await engine.DisposeAsync();
     }
 
+    /// <summary>
+    /// copilot ランタイムとの接続が切れて（クライアントが接続とセッションを捨てて）いたら、次の送信で接続し直し、
+    /// 会話を開き直してから送ることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "接続が切れた後の送信は接続し直して会話を開き直す")]
+    public async Task SendAsync_AfterConnectionLost_ReconnectsAndStartsNewSession()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+        client.RaiseIdle();
+
+        client.SimulateConnectionLost();
+        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
+
+        client.StartCallCount.Should().Be(2);
+        client.StartSessionCallCount.Should().Be(2);
+        client.Sends.Select(send => send.Prompt).Should().Equal("1 回目", "2 回目");
+
+        await engine.DisposeAsync();
+    }
+
     /// <summary>差分がそのまま流れ、アイドル復帰で成功完了することを検証する</summary>
     [Fact(DisplayName = "差分を流しアイドルで成功完了する")]
     public async Task SendAsync_StreamsAndCompletesOnIdle()

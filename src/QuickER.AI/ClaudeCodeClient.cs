@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -144,7 +143,12 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     /// <summary>ログイン確認（<see cref="ProbeLoginAsync"/>）の既定の上限時間</summary>
     internal static readonly TimeSpan DefaultProbeTimeout = TimeSpan.FromSeconds(60);
 
-    private readonly Lazy<string?> _executablePath;
+    /// <summary>claude の実行ファイルのパスを返す処理（呼ぶたびに解決する）</summary>
+    /// <remarks>
+    /// 結果をキャッシュしない＝<see cref="PathExecutableResolver"/> と同じ契約。キャッシュすると、アプリを起動した後に
+    /// PATH 上のフォルダへ claude を入れても「再確認」で検出できない
+    /// </remarks>
+    private readonly Func<string?> _resolveExecutablePath;
 
     /// <summary>ログイン確認の上限時間（超えたらプロセスを止めて「確認できなかった」として返す）</summary>
     private readonly TimeSpan _probeTimeout;
@@ -167,12 +171,12 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     /// <param name="probeTimeout">ログイン確認の上限時間</param>
     internal ClaudeCodeProcessClient(Func<string?> resolveExecutablePath, TimeSpan probeTimeout)
     {
-        _executablePath = new Lazy<string?>(resolveExecutablePath);
+        _resolveExecutablePath = resolveExecutablePath;
         _probeTimeout = probeTimeout;
     }
 
     /// <inheritdoc />
-    public bool IsAvailable() => _executablePath.Value is not null;
+    public bool IsAvailable() => _resolveExecutablePath() is not null;
 
     /// <inheritdoc />
     public async Task<ClaudeCodeTurnOutcome> RunTurnAsync(
@@ -183,7 +187,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         CancellationToken cancellationToken
     )
     {
-        var executable = _executablePath.Value;
+        var executable = _resolveExecutablePath();
 
         if (executable is null)
         {
@@ -279,8 +283,19 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
             try
             {
-                await process.StandardInput.WriteAsync(prompt).ConfigureAwait(false);
-                process.StandardInput.Close();
+                try
+                {
+                    await process
+                        .StandardInput.WriteAsync(prompt.AsMemory(), cancellationToken)
+                        .ConfigureAwait(false);
+                    process.StandardInput.Close();
+                }
+                catch (IOException)
+                {
+                    // claude がプロンプトを読み切る前に終わった（起動直後に落ちた・引数を拒否した）。生の例外で抜けると
+                    // stderr の診断が失われるので、入力を閉じて読み進め、終了コードと stderr で失敗の結果を組み立てる
+                    CloseInputQuietly(process);
+                }
 
                 var stream = await ReadStreamAsync(process, onAssistantText, cancellationToken)
                     .ConfigureAwait(false);
@@ -316,7 +331,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     /// </remarks>
     public async Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken)
     {
-        var executable = _executablePath.Value;
+        var executable = _resolveExecutablePath();
 
         if (executable is null)
         {
@@ -659,72 +674,6 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             .ToArray();
 
         return lines.Length == 0 ? string.Empty : $" stderr: {string.Join(" | ", lines)}";
-    }
-
-    /// <summary>
-    /// 子プロセスの標準エラー出力を常時読み出し、直近行だけをリングバッファで保持するドレイナ。
-    /// </summary>
-    /// <remarks>
-    /// stderr を読まないままにすると、子プロセスが数 KB 書いた時点でパイプバッファが満杯になって
-    /// write でブロックし、stdout も進まなくなって読み取りが永久に返らない（デッドロック）。
-    /// <see cref="CodexAppServerClient"/> と同じ流儀で、読み捨てつつ診断用に直近行だけを残す。
-    /// </remarks>
-    private sealed class StandardErrorDrain
-    {
-        /// <summary>診断用に保持する直近行数</summary>
-        private const int MaxRetainedLines = 20;
-
-        /// <summary>読み切りを待つ上限（子孫プロセスがパイプを握ったままでも固まらないようにする）</summary>
-        private static readonly TimeSpan CompletionTimeout = TimeSpan.FromSeconds(2);
-
-        private readonly ConcurrentQueue<string> _lines = new();
-        private readonly Task _drainTask;
-
-        public StandardErrorDrain(Process process)
-        {
-            _drainTask = Task.Run(() => DrainAsync(process), CancellationToken.None);
-        }
-
-        /// <summary>保持している直近の stderr 行（古い順）</summary>
-        public IReadOnlyList<string> RecentLines => _lines.ToArray();
-
-        /// <summary>EOF までの読み切りを上限付きで待つ（超過しても保持済みの行はそのまま使える）</summary>
-        public async Task WaitForCompletionAsync()
-        {
-            try
-            {
-                await _drainTask.WaitAsync(CompletionTimeout).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                // 読み切れなくても保持済みの行で診断する（待ち続けない）
-            }
-        }
-
-        /// <summary>EOF まで stderr を読み続け、直近 <see cref="MaxRetainedLines"/> 行だけを残す</summary>
-        private async Task DrainAsync(Process process)
-        {
-            try
-            {
-                while (true)
-                {
-                    var line = await process.StandardError.ReadLineAsync().ConfigureAwait(false);
-
-                    if (line is null)
-                    {
-                        break;
-                    }
-
-                    _lines.Enqueue(line);
-
-                    while (_lines.Count > MaxRetainedLines && _lines.TryDequeue(out _)) { }
-                }
-            }
-            catch
-            {
-                // 中断・プロセス破棄に伴うストリーム例外は無視する（診断目的のため取り逃しは許容）
-            }
-        }
     }
 
     /// <summary>

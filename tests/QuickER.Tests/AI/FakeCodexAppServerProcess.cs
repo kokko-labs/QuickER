@@ -19,6 +19,10 @@ namespace QuickER.Tests.AI;
 /// ＝テストは <see cref="CodexAppServerClient.NotificationReceived"/> で、クライアントが何を返したかを見られる。
 /// </para>
 /// <para>
+/// (2) で送る行のうち、次の 3 つだけは送らずに動作の指示として扱う：<c>stderr:文字列</c>（標準エラーへ書く）・
+/// <c>exit</c>（終了する）・<c>block</c>（以後は標準入力を読まずに眠り続ける＝書き込みが詰まる相手の代役）。
+/// </para>
+/// <para>
 /// 後始末: クライアントの破棄が stdin を閉じてプロセスツリーごと止める。それに加えてスクリプト自身も stdin の
 /// EOF で終わる（テストのプロセスが落ちても孤児にならない）。<see cref="DisposeAsync"/> は念のため、
 /// <see cref="StartAsync"/> で起動した powershell.exe が残っていれば止めてから一時フォルダを消す。
@@ -44,7 +48,12 @@ internal sealed class FakeCodexAppServerProcess : IAsyncDisposable
               $out.WriteLine('{"id":' + $Matches[1] + ',"result":{}}')
               $out.Flush()
             } elseif ($method -ceq 'initialized') {
-              foreach ($e in [IO.File]::ReadAllLines($EmitFile)) { $out.WriteLine($e) }
+              foreach ($e in [IO.File]::ReadAllLines($EmitFile)) {
+                if ($e.StartsWith('stderr:')) { [Console]::Error.WriteLine($e.Substring(7)); [Console]::Error.Flush() }
+                elseif ($e -ceq 'exit') { $out.Flush(); exit 0 }
+                elseif ($e -ceq 'block') { $out.Flush(); Start-Sleep -Seconds 120; exit 0 }
+                else { $out.WriteLine($e) }
+              }
               $out.Flush()
             }
           } elseif ($line -cmatch '"id":') {
@@ -71,6 +80,10 @@ internal sealed class FakeCodexAppServerProcess : IAsyncDisposable
     }
 
     private string ScriptPath => Path.Combine(_directory, ScriptFileName);
+
+    /// <summary>次に起動する偽サーバーが <c>initialized</c> の直後に送る行を差し替える（再接続の検証用）</summary>
+    public void ReplaceServerMessages(params string[] serverMessages) =>
+        File.WriteAllLines(EmitPath, serverMessages, new UTF8Encoding(false));
 
     private string EmitPath => Path.Combine(_directory, "emit.txt");
 
@@ -107,13 +120,9 @@ internal sealed class FakeCodexAppServerProcess : IAsyncDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var stderr = (System.Collections.Concurrent.ConcurrentQueue<string>)
-                typeof(CodexAppServerClient)
-                    .GetField("_stderrLines", BindingFlags.NonPublic | BindingFlags.Instance)!
-                    .GetValue(client)!;
             throw new Xunit.Sdk.XunitException(
                 $"偽の app-server（powershell.exe）を起動できませんでした: {ex.GetType().Name}: {ex.Message}"
-                    + $" / stderr: {string.Join(" | ", stderr)}"
+                    + $" / {client.BuildRecentStandardErrorSuffix()}"
             );
         }
     }

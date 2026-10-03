@@ -191,7 +191,9 @@ public sealed class CopilotChatEngine : IErChatEngine
     {
         EnsureAttachmentsSupported(attachments);
 
-        if (!_sessionStarted)
+        // 接続が切れるとクライアントはセッションごと捨てる（HasSession が false に戻る）。そのときは会話を開き直す
+        // （開き直す処理が未接続を見て copilot ランタイムを起動し直す。前の会話の文脈は引き継げない）
+        if (!_sessionStarted || !_client.HasSession)
         {
             await StartConversationAsync(cancellationToken).ConfigureAwait(false);
         }

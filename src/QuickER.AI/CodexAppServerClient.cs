@@ -219,8 +219,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>JSON-RPC リクエスト ID の採番カウンター（<see cref="Interlocked.Increment(ref int)"/> で加算）</summary>
     private int _nextRequestId;
 
-    /// <summary>診断用に保持する直近の標準エラー出力（最大 20 行）</summary>
-    private readonly ConcurrentQueue<string> _stderrLines = new();
+    /// <summary>現在の接続の標準エラー出力（診断用に直近行を保持する）</summary>
+    /// <remarks>
+    /// 接続（子プロセス）ごとに作り直す＝再接続した後のタイムアウト文言に、前の接続の stderr を混ぜない
+    /// </remarks>
+    private StandardErrorDrain? _standardError;
 
     /// <summary>インスタンスが最終破棄済みかどうか（<see cref="DisposeAsync"/> の二重呼び出しを無害化する）</summary>
     private bool _disposed;
@@ -375,35 +378,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             CancellationToken.None
         );
 
-        // stderr を非同期で読み捨てる（バッファフルによるデッドロックを防ぐ）
-        _ = Task.Run(
-            async () =>
-            {
-                try
-                {
-                    while (!_readerCts.IsCancellationRequested)
-                    {
-                        var line = await process
-                            .StandardError.ReadLineAsync()
-                            .ConfigureAwait(false);
-
-                        if (line is null)
-                        {
-                            break;
-                        }
-
-                        _stderrLines.Enqueue(line);
-
-                        while (_stderrLines.Count > 20 && _stderrLines.TryDequeue(out _)) { }
-                    }
-                }
-                catch
-                {
-                    // 終了時の例外は無視する
-                }
-            },
-            CancellationToken.None
-        );
+        // stderr を非同期で読み捨てる（バッファフルによるデッドロックを防ぐ）。この接続のプロセスだけを読み、
+        // EOF（プロセスの終了）で止まる＝フィールドの CTS を読まないので、停止・再接続と競合しない
+        _standardError = new StandardErrorDrain(process);
 
         // initialize/initialized ハンドシェイクが失敗した場合はプロセスをクリーンアップし、
         // IsStarted が false に戻るようにする（次回の EnsureStartedAsync で再接続できるようにする）
@@ -631,10 +608,36 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     {
         _readerCts?.Cancel();
 
+        // 子プロセスを先に止める。標準入力を先に閉じようとすると、書き込みが詰まっている（相手が読まない）ときに
+        // 閉じる処理が失敗し、しかもその後は相手を止めても詰まった書き込みが失敗で終わらなくなる
+        if (_process is not null)
+        {
+            try
+            {
+                if (!_process.HasExited)
+                {
+                    _process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // 既に終了している場合などの例外は破棄する
+            }
+        }
+
         if (_stdin is not null)
         {
-            await _stdin.DisposeAsync();
+            var stdin = _stdin;
             _stdin = null;
+
+            try
+            {
+                await stdin.DisposeAsync();
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException)
+            {
+                // 書き込みの途中・パイプが切れた後は閉じきれない。子プロセスは止めてあるので先へ進む
+            }
         }
 
         if (_readerTask is not null)
@@ -653,18 +656,6 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         if (_process is not null)
         {
-            try
-            {
-                if (!_process.HasExited)
-                {
-                    _process.Kill(entireProcessTree: true);
-                }
-            }
-            catch
-            {
-                // 既に終了している場合などの例外は破棄する
-            }
-
             // 破棄前に購読を解除する（意図的な停止なので接続断としては扱わない）
             _process.Exited -= OnProcessExited;
             _process.Dispose();
@@ -738,16 +729,27 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             }
         });
 
-        await SendMessageAsync(
-            new Dictionary<string, object?>
-            {
-                ["jsonrpc"] = "2.0",
-                ["method"] = method,
-                ["id"] = requestId,
-                ["params"] = parameters,
-            },
-            cancellationToken
-        );
+        try
+        {
+            // 書き込み（ロック待ちを含む）も 30 秒のタイムアウトと呼び出し元の取り消しの内側に置く
+            // （外に置くと、詰まった書き込みがロックを握ったまま全リクエストを止める）
+            await SendMessageAsync(
+                new Dictionary<string, object?>
+                {
+                    ["jsonrpc"] = "2.0",
+                    ["method"] = method,
+                    ["id"] = requestId,
+                    ["params"] = parameters,
+                },
+                linkedCts.Token
+            );
+        }
+        catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
+        {
+            // 取り消しの登録が応答待ちをタイムアウト（または呼び出し元の取り消し）として完了させ済み。
+            // 書き込みの取り消しではなく、そちらの結果を呼び出し元へ返す
+        }
+
         return await completionSource.Task.ConfigureAwait(false);
     }
 
@@ -779,7 +781,15 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         try
         {
-            await _stdin!.WriteLineAsync(json).ConfigureAwait(false);
+            await _stdin!.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // 書き込みの途中で取り消すと、JSON の行が半端に残って以後の行がすべて壊れる。接続を捨てて
+            // 接続断の経路（応答待ちの解消・Disconnected）へ流し、次の操作で張り直させる。
+            // ロック待ちの段階の取り消しは何も書いていないので、ここへは来ない（接続はそのまま）
+            AbortConnection();
+            throw;
         }
         finally
         {
@@ -882,6 +892,22 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                     new InvalidOperationException(Strings.Codex_ConnectionClosed)
                 );
             }
+        }
+    }
+
+    /// <summary>
+    /// 壊れた接続を捨てる（子プロセスをツリーごと止める）。終了イベントと受信ループの終わりが、通常の接続断として
+    /// 応答待ちの解消と <see cref="Disconnected"/> の通知を行う
+    /// </summary>
+    private void AbortConnection()
+    {
+        try
+        {
+            _process?.Kill(entireProcessTree: true);
+        }
+        catch (Exception)
+        {
+            // 既に終了している・破棄済みなら何もしない
         }
     }
 
@@ -1684,15 +1710,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
     /// <summary>直近の標準エラー出力をタイムアウトメッセージへの補足文として返す</summary>
     /// <returns>stderr が空の場合は空文字列</returns>
-    private string BuildRecentStandardErrorSuffix()
+    internal string BuildRecentStandardErrorSuffix()
     {
-        if (_stderrLines.IsEmpty)
-        {
-            return string.Empty;
-        }
+        var lines = _standardError?.RecentLines ?? [];
 
-        var lines = _stderrLines.ToArray();
-        return $" stderr: {string.Join(" | ", lines)}";
+        return lines.Count == 0 ? string.Empty : $" stderr: {string.Join(" | ", lines)}";
     }
 
     /// <summary>サーバープロセスが通信可能であることを検証する</summary>

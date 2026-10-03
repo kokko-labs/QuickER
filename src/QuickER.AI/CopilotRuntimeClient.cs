@@ -49,6 +49,9 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     /// </summary>
     private string _approvalRoot = string.Empty;
 
+    /// <summary>copilot の実行ファイルのパスを返す処理（見つからなければ null）</summary>
+    private readonly Func<string?> _resolveExecutablePath;
+
     private CopilotClient? _client;
     private CopilotSession? _session;
     private string _workingDirectory = string.Empty;
@@ -77,8 +80,19 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     /// <inheritdoc />
     public event EventHandler<string>? PermissionDeclined;
 
+    /// <summary>PATH 上の copilot を使うクライアントを作る</summary>
+    public CopilotRuntimeClient()
+        : this(CopilotCliLocator.ResolveExecutablePath) { }
+
+    /// <summary>実行ファイルの解決を差し替えたクライアントを作る（テストが起動の失敗を起こすため）</summary>
+    /// <param name="resolveExecutablePath">copilot の実行ファイルのパスを返す処理（見つからなければ null）</param>
+    internal CopilotRuntimeClient(Func<string?> resolveExecutablePath)
+    {
+        _resolveExecutablePath = resolveExecutablePath;
+    }
+
     /// <inheritdoc />
-    public bool IsAvailable() => CopilotCliLocator.IsAvailable();
+    public bool IsAvailable() => _resolveExecutablePath() is not null;
 
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -89,34 +103,49 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
         }
 
         var executable = CopilotCliLocator.EnsureSafeToLaunch(
-            CopilotCliLocator.ResolveExecutablePath()
+            _resolveExecutablePath()
                 ?? throw new InvalidOperationException(Strings.Copilot_CliNotFound)
         );
 
-        _workingDirectory = CreateWorkingDirectory();
-
-        var client = new CopilotClient(
-            new CopilotClientOptions
-            {
-                // SDK 同梱 CLI ではなくユーザーがインストールした copilot を明示的に起動する
-                Connection = RuntimeConnection.ForStdio(executable),
-                // ユーザーの CLI ログイン状態（OAuth トークン / gh CLI 認証）をそのまま使う
-                UseLoggedInUser = true,
-                // アプリのカレントディレクトリを触らせないよう、無害な一時フォルダに閉じ込める
-                WorkingDirectory = _workingDirectory,
-            }
-        );
+        var workingDirectory = BackendWorkingDirectory.Create("copilot");
+        CopilotClient? client = null;
 
         try
         {
+            client = new CopilotClient(
+                new CopilotClientOptions
+                {
+                    // SDK 同梱 CLI ではなくユーザーがインストールした copilot を明示的に起動する
+                    Connection = RuntimeConnection.ForStdio(executable),
+                    // ユーザーの CLI ログイン状態（OAuth トークン / gh CLI 認証）をそのまま使う
+                    UseLoggedInUser = true,
+                    // アプリのカレントディレクトリを触らせないよう、無害な一時フォルダに閉じ込める
+                    WorkingDirectory = workingDirectory,
+                }
+            );
             await client.StartAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
-            await client.DisposeAsync().ConfigureAwait(false);
+            // 起動に失敗した接続の一時フォルダは残さない（再試行のたびに新しいフォルダを作るため、
+            // 消さないと %TEMP% に溜まる）
+            if (client is not null)
+            {
+                try
+                {
+                    await client.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // 起動の失敗を伝えるほうを優先する
+                }
+            }
+
+            BackendWorkingDirectory.TryDelete(workingDirectory);
             throw;
         }
 
+        _workingDirectory = workingDirectory;
         _client = client;
     }
 
@@ -126,7 +155,8 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     )
     {
         var client = RequireClient();
-        var status = await client.GetAuthStatusAsync(cancellationToken).ConfigureAwait(false);
+        var status = await InvokeAsync(() => client.GetAuthStatusAsync(cancellationToken))
+            .ConfigureAwait(false);
 
         return new CopilotAuthInfo(
             status.IsAuthenticated,
@@ -142,7 +172,8 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     )
     {
         var client = RequireClient();
-        var models = await client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+        var models = await InvokeAsync(() => client.ListModelsAsync(cancellationToken))
+            .ConfigureAwait(false);
 
         return models
             .Select(model => model.Id)
@@ -195,8 +226,12 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             config.Tools = options
                 .Tools.Select(tool => (AIFunctionDeclaration)new CopilotToolDeclaration(tool))
                 .ToList();
-            // 許可リストを ER 設計ツールだけに絞り、Copilot 組込みツール・GitHub MCP を使わせない
-            config.AvailableTools = toolNames;
+        }
+
+        // 絞らないときは代入しない（SDK の既定のまま＝全ツール）
+        if (ResolveAvailableTools(options.AllowWorkspaceTools, toolNames) is { } availableTools)
+        {
+            config.AvailableTools = availableTools;
         }
 
         if (!string.IsNullOrWhiteSpace(options.Instructions))
@@ -208,8 +243,7 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             };
         }
 
-        var session = await client
-            .CreateSessionAsync(config, cancellationToken)
+        var session = await InvokeAsync(() => client.CreateSessionAsync(config, cancellationToken))
             .ConfigureAwait(false);
         _session = session;
         _streamedMessageIds.Clear();
@@ -232,12 +266,15 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             message.Attachments = attachments.Select(CreateAttachment).ToList();
         }
 
-        await session.SendAsync(message, cancellationToken).ConfigureAwait(false);
+        await InvokeAsync(() => session.SendAsync(message, cancellationToken))
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public Task AbortAsync(CancellationToken cancellationToken = default) =>
-        _session is null ? Task.CompletedTask : _session.AbortAsync(cancellationToken);
+        _session is { } session
+            ? InvokeAsync(() => session.AbortAsync(cancellationToken))
+            : Task.CompletedTask;
 
     /// <inheritdoc />
     public async Task RespondToToolCallAsync(
@@ -250,15 +287,73 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
         var session = RequireSession();
 
         // 成功は result、失敗は error として返す（失敗の内容もモデルに見せて次の手を選ばせる）
-        await session
-            .Rpc.Tools.HandlePendingToolCallAsync(
-                requestId,
-                success ? result : null,
-                success ? null : result,
-                cancellationToken
+        await InvokeAsync(() =>
+                session.Rpc.Tools.HandlePendingToolCallAsync(
+                    requestId,
+                    success ? result : null,
+                    success ? null : result,
+                    cancellationToken
+                )
             )
             .ConfigureAwait(false);
     }
+
+    /// <summary>SDK を呼び、接続が切れていたら接続を捨ててから例外を投げ直す（値を返す呼び出し）</summary>
+    /// <remarks>
+    /// SDK は copilot ランタイムの終了を知らせるイベントも状態も公開していないため、呼び出しの失敗で知る。
+    /// 接続を捨てると <see cref="IsStarted"/> と <see cref="HasSession"/> が false に戻り、エンジンの次の接続で
+    /// 起動し直せる。捨てないと <see cref="IsStarted"/> が true のまま残り、以後の呼び出しがすべて同じ理由で失敗し続ける
+    /// </remarks>
+    internal async Task<T> InvokeAsync<T>(Func<Task<T>> call)
+    {
+        try
+        {
+            return await call().ConfigureAwait(false);
+        }
+        catch (IOException ex) when (IsConnectionLost(ex))
+        {
+            await ResetConnectionAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>SDK を呼び、接続が切れていたら接続を捨ててから例外を投げ直す（値を返さない呼び出し）</summary>
+    internal async Task InvokeAsync(Func<Task> call)
+    {
+        try
+        {
+            await call().ConfigureAwait(false);
+        }
+        catch (IOException ex) when (IsConnectionLost(ex))
+        {
+            await ResetConnectionAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>SDK の呼び出しの失敗が、copilot ランタイムとの接続が切れたことを表すか</summary>
+    /// <remarks>
+    /// 実機（GitHub.Copilot.SDK 1.0.14・copilot.exe）でランタイムを止めて確かめた形だけに絞る。呼び出し中に止まると
+    /// <c>Communication error with Copilot CLI</c>（内側は SDK 内部の接続断の例外）、止まった後の呼び出しはパイプが
+    /// 閉じた旨のメッセージで、どちらも型がちょうど <see cref="IOException"/> になる。派生型（ファイルの不在など）や、
+    /// ランタイムが返した通常のエラー応答では接続を捨てない（会話の文脈を失うため）
+    /// </remarks>
+    /// <param name="exception">SDK の呼び出しが投げた例外</param>
+    internal static bool IsConnectionLost(Exception exception) =>
+        exception.GetType() == typeof(IOException);
+
+    /// <summary>セッションで使わせるツールの許可リストを決める（null＝絞らない）</summary>
+    /// <remarks>
+    /// 組込みツールを許可しないセッションで宣言ツールがあるときだけ、宣言ツールに絞る（Copilot 組込みツール・
+    /// GitHub MCP を使わせない）。組込みツールを許可するセッション（<see cref="CopilotSessionOptions.AllowWorkspaceTools"/>）
+    /// で絞ると、宣言ツールを渡しただけで組込みのファイル編集・シェル実行が使えなくなる
+    /// </remarks>
+    /// <param name="allowWorkspaceTools">組込みツールを許可するセッションか</param>
+    /// <param name="toolNames">宣言したツールの名前</param>
+    internal static List<string>? ResolveAvailableTools(
+        bool allowWorkspaceTools,
+        List<string> toolNames
+    ) => !allowWorkspaceTools && toolNames.Count > 0 ? toolNames : null;
 
     /// <summary>チャット添付を Copilot の blob 添付へ変換する（base64 をそのまま渡す＝一時ファイルを作らない）</summary>
     private static Attachment CreateAttachment(ChatAttachment attachment) =>
@@ -388,11 +483,7 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
         PermissionInvocation invocation
     )
     {
-        if (
-            request is PermissionRequestCustomTool custom
-            && custom.ToolName is { Length: > 0 } toolName
-            && _allowedToolNames.Contains(toolName)
-        )
+        if (IsDeclaredTool(request, _allowedToolNames))
         {
             return Task.FromResult(PermissionDecision.ApproveOnce());
         }
@@ -408,14 +499,15 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     /// <remarks>
     /// Codex の <c>sandbox=workspace-write</c> ／ Claude Code の <c>--permission-mode acceptEdits</c> に
     /// 相当する権限を、SDK が表現できる範囲で最も狭く与える。サンドボックス外実行の要求
-    /// （<c>RequestSandboxBypass</c>）は、対象パスが配下でも承認しない。
+    /// （<c>RequestSandboxBypass</c>）は、対象パスが配下でも承認しない。宣言したツールの呼び出しは
+    /// 通常のセッションと同じく承認する（拒否すると、宣言したツールそのものが使えない）。
     /// </remarks>
     private Task<PermissionDecision> HandleWorkspacePermissionRequestAsync(
         PermissionRequest request,
         PermissionInvocation invocation
     )
     {
-        if (IsWithinWorkspace(request))
+        if (IsApprovedInWorkspaceSession(request, _allowedToolNames, _approvalRoot))
         {
             return Task.FromResult(PermissionDecision.ApproveOnce());
         }
@@ -425,9 +517,28 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     }
 #pragma warning restore GHCP001
 
-    /// <summary>許可要求が作業フォルダ配下に収まっているか（判定は <see cref="CopilotWorkspacePermissionPolicy"/>）</summary>
-    private bool IsWithinWorkspace(PermissionRequest request) =>
-        CopilotWorkspacePermissionPolicy.IsWithinWorkspace(request, _approvalRoot);
+    /// <summary>許可要求が、このセッションで宣言したツールの呼び出しか</summary>
+    /// <param name="request">Copilot から届いた許可要求</param>
+    /// <param name="declaredToolNames">セッションで宣言したツールの名前</param>
+    internal static bool IsDeclaredTool(
+        PermissionRequest request,
+        IReadOnlySet<string> declaredToolNames
+    ) =>
+        request is PermissionRequestCustomTool { ToolName: { Length: > 0 } toolName }
+        && declaredToolNames.Contains(toolName);
+
+    /// <summary>組込みツール許可セッションで、許可要求を承認するか</summary>
+    /// <remarks>宣言したツールの呼び出しか、作業フォルダ配下に収まる要求（判定は <see cref="CopilotWorkspacePermissionPolicy"/>）を承認する</remarks>
+    /// <param name="request">Copilot から届いた許可要求</param>
+    /// <param name="declaredToolNames">セッションで宣言したツールの名前</param>
+    /// <param name="approvalRoot">自動承認の基準フォルダ（正規化済み絶対パス）</param>
+    internal static bool IsApprovedInWorkspaceSession(
+        PermissionRequest request,
+        IReadOnlySet<string> declaredToolNames,
+        string approvalRoot
+    ) =>
+        IsDeclaredTool(request, declaredToolNames)
+        || CopilotWorkspacePermissionPolicy.IsWithinWorkspace(request, approvalRoot);
 
     /// <summary>拒否した許可要求の表示名を組み立てる（種別＋ツール名／コマンド文。判別できなければ種別のみ）</summary>
     /// <remarks>
@@ -480,19 +591,6 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     private static string? NormalizeOptionalText(string? text) =>
         string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
-    /// <summary>一時作業ディレクトリを作成する（copilot の cwd を無害な場所に限定する）</summary>
-    private static string CreateWorkingDirectory()
-    {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            "QuickER",
-            "copilot",
-            Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(path);
-        return path;
-    }
-
     /// <summary>購読を解除してセッションを破棄する</summary>
     private async Task DisposeSessionAsync()
     {
@@ -520,7 +618,13 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync() => await ResetConnectionAsync().ConfigureAwait(false);
+
+    /// <summary>
+    /// セッションと接続を捨てて未接続へ戻す（copilot ランタイムを止め、一時作業フォルダを消す）。
+    /// 破棄と、接続が切れたときの後始末が共有する（後者のあとは <see cref="StartAsync"/> で接続し直せる）
+    /// </summary>
+    private async Task ResetConnectionAsync()
     {
         await DisposeSessionAsync().ConfigureAwait(false);
 
@@ -549,32 +653,8 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             await client.DisposeAsync().ConfigureAwait(false);
         }
 
-        TryDeleteWorkingDirectory();
-    }
-
-    /// <summary>一時作業ディレクトリを削除する（ベストエフォート）</summary>
-    private void TryDeleteWorkingDirectory()
-    {
-        if (_workingDirectory.Length == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (Directory.Exists(_workingDirectory))
-            {
-                Directory.Delete(_workingDirectory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // 使用中などで削除できない場合は無視する
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // 権限不足は無視する
-        }
+        BackendWorkingDirectory.TryDelete(_workingDirectory);
+        _workingDirectory = string.Empty;
     }
 }
 

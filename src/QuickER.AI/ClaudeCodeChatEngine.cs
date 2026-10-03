@@ -114,14 +114,14 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
         if (_mcpServer is null && _toolHost is not null)
         {
-            _workingDirectory = CreateWorkingDirectory();
+            _workingDirectory = BackendWorkingDirectory.Create("claude-code");
             _mcpServer = new ErDiagramMcpServer(ExecuteTool, _profile.Tools);
             await _mcpServer.StartAsync(cancellationToken).ConfigureAwait(false);
             _mcpConfigPath = WriteMcpConfig(_mcpServer);
         }
         else if (_workingDirectory.Length == 0)
         {
-            _workingDirectory = CreateWorkingDirectory();
+            _workingDirectory = BackendWorkingDirectory.Create("claude-code");
         }
 
         _initialized = true;
@@ -459,19 +459,6 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         return path;
     }
 
-    /// <summary>一時作業ディレクトリを作成する（claude の cwd を無害な場所に限定する）</summary>
-    private static string CreateWorkingDirectory()
-    {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            "QuickER",
-            "claude-code",
-            Guid.NewGuid().ToString("N")
-        );
-        Directory.CreateDirectory(path);
-        return path;
-    }
-
     /// <summary>状態サマリー・健全度・案内を更新し通知する</summary>
     private void UpdateStatus(string summary, ConnectionHealth level, string guidance)
     {
@@ -496,31 +483,6 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
         await _client.DisposeAsync().ConfigureAwait(false);
 
-        TryDeleteWorkingDirectory();
-    }
-
-    /// <summary>一時作業ディレクトリを削除する（ベストエフォート）</summary>
-    private void TryDeleteWorkingDirectory()
-    {
-        if (_workingDirectory.Length == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            if (Directory.Exists(_workingDirectory))
-            {
-                Directory.Delete(_workingDirectory, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-            // 使用中などで削除できない場合は無視する
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // 権限不足は無視する
-        }
+        BackendWorkingDirectory.TryDelete(_workingDirectory);
     }
 }

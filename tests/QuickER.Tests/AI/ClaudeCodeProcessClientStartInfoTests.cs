@@ -206,4 +206,30 @@ public class ClaudeCodeProcessClientStartInfoTests
             ClaudeCodeProcessClient.TryDeleteSystemPromptFile(path);
         }
     }
+
+    /// <summary>
+    /// claude の解決結果をキャッシュせず、呼ぶたびに解決し直すことを検証する
+    /// （アプリの起動後に入れた claude を「再確認」で検出できるように）。
+    /// </summary>
+    [Fact(DisplayName = "claude の検出は呼ぶたびに解決し直す")]
+    public void IsAvailable_ResolvesOnEveryCall()
+    {
+        string? installed = null;
+        var resolveCount = 0;
+        var client = new ClaudeCodeProcessClient(
+            () =>
+            {
+                resolveCount++;
+                return installed;
+            },
+            ClaudeCodeProcessClient.DefaultProbeTimeout
+        );
+
+        client.IsAvailable().Should().BeFalse();
+
+        installed = @"C:\tools\claude.exe";
+
+        client.IsAvailable().Should().BeTrue("後から入れた claude も検出できる");
+        resolveCount.Should().Be(2);
+    }
 }
