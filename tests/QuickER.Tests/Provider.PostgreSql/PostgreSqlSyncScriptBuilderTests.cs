@@ -466,7 +466,7 @@ public class PostgreSqlSyncScriptBuilderTests
         sql.Should().Contain("AND tbl.relnamespace = 'public'::regnamespace;");
         sql.Should().Contain("IF pk_name IS NOT NULL THEN");
         sql.Should()
-            .Contain("EXECUTE 'ALTER TABLE \"orders\" DROP CONSTRAINT \"' || pk_name || '\"';");
+            .Contain("EXECUTE 'ALTER TABLE \"orders\" DROP CONSTRAINT ' || quote_ident(pk_name);");
         // 新主キーは列定義順の複合キーとして CREATE TABLE と同じ制約名規則で付与する
         sql.Should()
             .Contain(
@@ -582,7 +582,9 @@ public class PostgreSqlSyncScriptBuilderTests
         var sql = Build(AlterPk("o'rders", PkTarget("o'rders", "order_id")));
 
         sql.Should()
-            .Contain("EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || pk_name || '\"';");
+            .Contain(
+                "EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT ' || quote_ident(pk_name);"
+            );
         sql.Should().NotContain("EXECUTE 'ALTER TABLE \"o'rders\"");
     }
 
@@ -602,8 +604,41 @@ public class PostgreSqlSyncScriptBuilderTests
         var sql = Build(item);
 
         sql.Should()
-            .Contain("EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || fk_name || '\"';");
+            .Contain(
+                "EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT ' || quote_ident(fk_name);"
+            );
         sql.Should().NotContain("EXECUTE 'ALTER TABLE \"o'rders\"");
+    }
+
+    // ---------------- 実行時にカタログから読んだ制約名の埋め込み ----------------
+
+    /// <summary>
+    /// 実行時にカタログから読んだ制約名（<c>pk_name</c> / <c>fk_name</c>）が、動的 SQL へ必ず <c>quote_ident</c> を通して
+    /// 埋められ、生の連結が残らないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 制約名は図の外（DB）から来る値で、<c>"</c> を含み得る（QuickER 自身も表 <c>a"b</c> に主キー名 <c>PK_a"b</c> を付ける）。
+    /// <c>'"' || pk_name || '"'</c> のように引用符で挟むだけでは、名前の <c>"</c> が識別子の引用を閉じる。
+    /// </remarks>
+    [Fact(DisplayName = "実行時に読んだ制約名は quote_ident を通して動的 SQL へ埋める")]
+    public void RuntimeConstraintName_IsAlwaysQuoteIdented()
+    {
+        var dropForeignKey = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "lines",
+            ParentEntity = new Entity { TableName = "orders" },
+            ChildEntity = new Entity { TableName = "lines" },
+            IsSelected = true,
+        };
+
+        var sql = Build(AlterPk("orders", PkTarget("orders", "id")), dropForeignKey);
+
+        sql.Should().Contain("quote_ident(pk_name)");
+        sql.Should().Contain("quote_ident(fk_name)");
+        // 変数を quote_ident を通さずに文字列へ連結している箇所が無いこと
+        sql.Should().NotContain("|| pk_name");
+        sql.Should().NotContain("|| fk_name");
     }
 
     // ---------------- DO ブロックのドルクォートタグ ----------------

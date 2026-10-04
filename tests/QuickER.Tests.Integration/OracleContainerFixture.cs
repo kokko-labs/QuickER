@@ -208,41 +208,91 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// スクリプトを文単位に分割する。「/」のみの行を含むスクリプト（同期スクリプト）は
-    /// <see cref="OracleSchemaSyncExecutor.SplitStatements"/> をそのまま呼び、
-    /// 「/」行が 1 つも含まれないスクリプト（<see cref="QuickER.Provider.Oracle.OracleDdlGenerator"/> の生出力等）は
-    /// 各行末の <c>;</c> を文の区切りとして扱う（PL/SQL ブロックは含まれない前提）。
+    /// スクリプトを文単位に分割する。同期スクリプト（どの文の後ろにも「/」のみの行がある）は
+    /// <see cref="OracleSchemaSyncExecutor.SplitStatements"/> をそのまま呼ぶ。
+    /// <see cref="QuickER.Provider.Oracle.OracleDdlGenerator"/> の生出力のような <c>;</c> 終端のスクリプトは、
+    /// SQL*Plus と同じく「通常文は行末の <c>;</c>、PL/SQL ブロックは「/」のみの行」を文の区切りとして扱う。
     /// </summary>
+    /// <remarks>
+    /// DDL も、改行や <c>&amp;</c> を含む説明を PL/SQL ブロックで出し、その後ろに「/」行を置く。
+    /// そのため「/」行があるだけでは同期スクリプトと判定できない。「/」行の直前がブロックの終わり（<c>END;</c>）で
+    /// ない箇所が 1 つでもあれば、通常文の後ろにも「/」を置く同期スクリプトの書き方とみなす。
+    /// </remarks>
     internal static List<string> SplitStatements(string script)
     {
         var normalized = script.Replace("\r\n", "\n");
 
-        // 「/」のみの行が 1 つでもあれば、Executor と同じ「/」区切り規約に従う
-        var hasSlashSeparator = normalized.Split('\n').Any(line => line.Trim() == "/");
-
         // 「/」区切りは実行器そのものを呼ぶ（リテラル・コメント追跡まで含めて同一の分割になる）
-        return hasSlashSeparator
+        return IsSlashSeparatedScript(normalized)
             ? OracleSchemaSyncExecutor.SplitStatements(normalized)
             : SplitBySemicolon(normalized);
     }
 
+    /// <summary>通常文の後ろにも「/」行を置く書き方（同期スクリプト）かどうかを判定する</summary>
+    private static bool IsSlashSeparatedScript(string normalized)
+    {
+        string? previous = null;
+
+        foreach (var line in normalized.Split('\n'))
+        {
+            var trimmed = line.Trim();
+
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            if (trimmed == "/" && previous is not null && previous != "END;")
+            {
+                return true;
+            }
+
+            previous = trimmed;
+        }
+
+        return false;
+    }
+
     /// <summary>
-    /// 「/」区切りを含まないスクリプトを <c>;</c> 終端の文単位に分割する。
-    /// コメント専用行（<c>--</c> 始まり）・空行は除去し、DECLARE / BEGIN ブロックは考慮しない
-    /// （<see cref="QuickER.Provider.Oracle.OracleDdlGenerator"/> は PL/SQL ブロックを出力しないため）。
+    /// <c>;</c> 終端のスクリプトを SQL*Plus と同じ規則で文単位に分割する。
+    /// 通常文は行末の <c>;</c> で終わり、<c>DECLARE</c> / <c>BEGIN</c> で始まる PL/SQL ブロックは「/」のみの行で終わる。
+    /// 文の外にあるコメント専用行（<c>--</c> 始まり）・空行は除去する。
     /// </summary>
     private static List<string> SplitBySemicolon(string normalized)
     {
         var statements = new List<string>();
         var current = new List<string>();
+        var inBlock = false;
 
         foreach (var rawLine in normalized.Split('\n'))
         {
             var trimmed = rawLine.Trim();
 
+            // PL/SQL ブロックの中は「/」のみの行まで 1 文として溜める（行末の ; では区切らない）
+            if (inBlock)
+            {
+                if (trimmed == "/")
+                {
+                    AddIfMeaningful(statements, current);
+                    current.Clear();
+                    inBlock = false;
+                    continue;
+                }
+
+                current.Add(rawLine);
+                continue;
+            }
+
             // コメント専用行・空行はスキップ（文の途中に混ざることは想定しない）
             if (trimmed.Length == 0 || trimmed.StartsWith("--", StringComparison.Ordinal))
             {
+                continue;
+            }
+
+            if (current.Count == 0 && IsPlSqlBlock(trimmed))
+            {
+                inBlock = true;
+                current.Add(rawLine);
                 continue;
             }
 

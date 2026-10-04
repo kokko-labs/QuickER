@@ -1685,7 +1685,10 @@ public class SyncPlannerTests
         );
         var sql = new SqlServerSyncScriptBuilder().Build(plan);
 
-        var dropPrimaryKey = sql.IndexOf("DROP CONSTRAINT [' + @pk + ']", StringComparison.Ordinal);
+        var dropPrimaryKey = sql.IndexOf(
+            "DROP CONSTRAINT ' + QUOTENAME(@pk);",
+            StringComparison.Ordinal
+        );
         var alterColumnAt = sql.IndexOf("ALTER COLUMN [old_id]", StringComparison.Ordinal);
         var addPrimaryKey = sql.IndexOf("ADD CONSTRAINT [PK_T]", StringComparison.Ordinal);
 

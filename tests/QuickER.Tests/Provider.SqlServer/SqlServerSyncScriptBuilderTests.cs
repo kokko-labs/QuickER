@@ -471,11 +471,13 @@ public class SqlServerSyncScriptBuilderTests
         // 旧主キーの制約名は差分に無いため sys.key_constraints から逆引きして動的 SQL で外す
         sql.Should().Contain("DECLARE @pk sysname;");
         sql.Should().Contain("FROM sys.key_constraints kc");
-        sql.Should().Contain("WHERE kc.type = 'PK' AND t.name = N'Order';");
+        sql.Should()
+            .Contain("WHERE kc.type = 'PK' AND kc.parent_object_id = OBJECT_ID(N'[Order]');");
         sql.Should()
             .Contain(
-                "IF @pk IS NOT NULL EXEC('ALTER TABLE [Order] DROP CONSTRAINT [' + @pk + ']');"
+                "DECLARE @sql nvarchar(max) = N'ALTER TABLE [Order] DROP CONSTRAINT ' + QUOTENAME(@pk);"
             );
+        sql.Should().Contain("IF @pk IS NOT NULL EXEC sys.sp_executesql @sql;");
         // 新主キーは列定義順の複合キーとして CREATE TABLE と同じ制約名規則で付与する
         sql.Should()
             .Contain(
@@ -492,7 +494,7 @@ public class SqlServerSyncScriptBuilderTests
             new[] { AlterPk("Customer", PkTarget("Customer", "Id")) }
         );
 
-        sql.Should().Contain("IF @pk IS NOT NULL EXEC(");
+        sql.Should().Contain("IF @pk IS NOT NULL EXEC sys.sp_executesql @sql;");
         sql.Should()
             .Contain("ALTER TABLE [Customer] ADD CONSTRAINT [PK_Customer] PRIMARY KEY ([Id]);");
     }
@@ -506,7 +508,7 @@ public class SqlServerSyncScriptBuilderTests
             new[] { AlterPk("Customer", PkTarget("Customer")) }
         );
 
-        sql.Should().Contain("IF @pk IS NOT NULL EXEC(");
+        sql.Should().Contain("IF @pk IS NOT NULL EXEC sys.sp_executesql @sql;");
         sql.Should().NotContain("ADD CONSTRAINT");
         sql.Should().NotContain("PRIMARY KEY (");
     }
@@ -590,7 +592,8 @@ public class SqlServerSyncScriptBuilderTests
     /// 主キー解除の動的 SQL で、括弧付けしたテーブル名が文字列リテラル用にもエスケープされることを検証する。
     /// </summary>
     /// <remarks>
-    /// <c>EXEC('…')</c> の中身は文字列リテラルなので、括弧付けだけではテーブル名の <c>'</c> がリテラルを閉じ、
+    /// 動的 SQL（<c>N'ALTER TABLE …'</c>）と逆引き（<c>OBJECT_ID(N'…')</c>）のテーブル名は文字列リテラルの中にあるので、
+    /// 括弧付けだけではテーブル名の <c>'</c> がリテラルを閉じ、
     /// 以降が SQL のコードとして解釈される。括弧付け＋リテラルエスケープ（<see cref="SqlIdentifier.QuoteForDynamicSql"/>）
     /// を通していれば <c>'</c> は <c>''</c> になる。
     /// </remarks>
@@ -602,8 +605,13 @@ public class SqlServerSyncScriptBuilderTests
             new[] { AlterPk("o'rders", PkTarget("o'rders", "OrderId")) }
         );
 
-        sql.Should().Contain("EXEC('ALTER TABLE [o''rders] DROP CONSTRAINT [' + @pk + ']')");
-        sql.Should().NotContain("EXEC('ALTER TABLE [o'rders]");
+        sql.Should()
+            .Contain(
+                "DECLARE @sql nvarchar(max) = N'ALTER TABLE [o''rders] DROP CONSTRAINT ' + QUOTENAME(@pk);"
+            );
+        sql.Should().Contain("OBJECT_ID(N'[o''rders]')");
+        sql.Should().NotContain("N'ALTER TABLE [o'rders]");
+        sql.Should().NotContain("OBJECT_ID(N'[o'rders]')");
     }
 
     /// <summary>制約名不明の外部キー削除でも、動的 SQL のテーブル名がリテラル用にエスケープされることを検証する</summary>
@@ -621,8 +629,93 @@ public class SqlServerSyncScriptBuilderTests
 
         var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
 
-        sql.Should().Contain("EXEC('ALTER TABLE [o''rders] DROP CONSTRAINT [' + @fk + ']')");
-        sql.Should().NotContain("EXEC('ALTER TABLE [o'rders]");
+        sql.Should()
+            .Contain(
+                "DECLARE @sql nvarchar(max) = N'ALTER TABLE [o''rders] DROP CONSTRAINT ' + QUOTENAME(@fk);"
+            );
+        sql.Should().Contain("OBJECT_ID(N'[o''rders]')");
+        sql.Should().NotContain("N'ALTER TABLE [o'rders]");
+        sql.Should().NotContain("OBJECT_ID(N'[o'rders]')");
+    }
+
+    // ---------------- 実行時にカタログから読んだ制約名の埋め込み ----------------
+
+    /// <summary>
+    /// 主キー解除の逆引きが、ALTER TABLE と同じ 1 つのテーブル（スキーマ込み）に <c>OBJECT_ID</c> で絞られることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// テーブル名だけで <c>sys.tables</c> を引くと、別スキーマの同名テーブルの主キー名を拾う。
+    /// </remarks>
+    [Fact(DisplayName = "AlterPrimaryKey の逆引きは OBJECT_ID でスキーマ込みの 1 テーブルに絞る")]
+    public void AlterPrimaryKey_Lookup_IsScopedByObjectId()
+    {
+        var sql = BuildScript(
+            new SqlServerSyncScriptBuilder(),
+            new[] { AlterPk("sales.Orders", PkTarget("sales.Orders", "Id")) }
+        );
+
+        sql.Should()
+            .Contain(
+                "WHERE kc.type = 'PK' AND kc.parent_object_id = OBJECT_ID(N'[sales].[Orders]');"
+            );
+        sql.Should().NotContain("sys.tables");
+        sql.Should().NotContain("t.name");
+    }
+
+    /// <summary>
+    /// 制約名不明の外部キー削除の逆引きが、子・親とも <c>OBJECT_ID</c> でスキーマ込みに絞られることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "DropForeignKey の逆引きは子・親とも OBJECT_ID でスキーマ込みに絞る")]
+    public void DropForeignKey_Lookup_IsScopedByObjectId()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "sales.Lines",
+            ParentEntity = new Entity { TableName = "sales.Orders" },
+            ChildEntity = new Entity { TableName = "sales.Lines" },
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
+
+        sql.Should().Contain("WHERE fk.parent_object_id = OBJECT_ID(N'[sales].[Lines]')");
+        sql.Should().Contain("  AND fk.referenced_object_id = OBJECT_ID(N'[sales].[Orders]');");
+        sql.Should().NotContain("sys.tables");
+    }
+
+    /// <summary>
+    /// 実行時にカタログから読んだ制約名（<c>@pk</c> / <c>@fk</c>）が、動的 SQL へ必ず <c>QUOTENAME</c> を通して埋められ、
+    /// 生の連結が残らないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 制約名は図の外（DB）から来る値で、<c>]</c> を含み得る。<c>'[' + @pk + ']'</c> のように括弧で挟むだけでは
+    /// <c>]</c> が括弧を閉じ、以降が SQL のコードとして解釈される。
+    /// </remarks>
+    [Fact(DisplayName = "実行時に読んだ制約名は QUOTENAME を通して動的 SQL へ埋める")]
+    public void RuntimeConstraintName_IsAlwaysQuotenamed()
+    {
+        var dropForeignKey = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "Lines",
+            ParentEntity = new Entity { TableName = "Orders" },
+            ChildEntity = new Entity { TableName = "Lines" },
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(
+            new SqlServerSyncScriptBuilder(),
+            AlterPk("Orders", PkTarget("Orders", "Id")),
+            dropForeignKey
+        );
+
+        sql.Should().Contain("QUOTENAME(@pk)");
+        sql.Should().Contain("QUOTENAME(@fk)");
+        // 変数を QUOTENAME を通さずに文字列へ連結している箇所が無いこと
+        sql.Should().NotContain("+ @pk");
+        sql.Should().NotContain("+ @fk");
+        sql.Should().NotContain("EXEC(");
     }
 
     // ---------------- AddTable の UNIQUE 制約（DDL 生成との同形性） ----------------

@@ -105,6 +105,8 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <remarks>
     /// 旧主キーの制約名は差分項目に含まれないため、テーブル名から <c>pg_constraint</c> を逆引きし、
     /// DO ブロックで動的に DROP する（主キーが無いテーブルなら何も実行しない）。
+    /// 実行時に読んだ制約名は図の外から来る値なので、動的 SQL へは必ず <c>quote_ident</c> を通して埋める
+    /// （<c>"</c> を含む名前で構文が崩れないように。外部キー側の逆引きも同じ）。
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
@@ -126,7 +128,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         body.AppendLine("        AND tbl.relnamespace = 'public'::regnamespace;");
         body.AppendLine("    IF pk_name IS NOT NULL THEN");
         body.AppendLine(
-            $"        EXECUTE 'ALTER TABLE {table} DROP CONSTRAINT \"' || pk_name || '\"';"
+            $"        EXECUTE 'ALTER TABLE {table} DROP CONSTRAINT ' || quote_ident(pk_name);"
         );
         body.AppendLine("    END IF;");
 
@@ -311,7 +313,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         body.AppendLine("    IF fk_name IS NOT NULL THEN");
         body.AppendLine(
             // クォートした名前を EXECUTE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
-            $"        EXECUTE 'ALTER TABLE {PgIdentifier.QuoteForDynamicSql(childTbl)} DROP CONSTRAINT \"' || fk_name || '\"';"
+            $"        EXECUTE 'ALTER TABLE {PgIdentifier.QuoteForDynamicSql(childTbl)} DROP CONSTRAINT ' || quote_ident(fk_name);"
         );
         body.AppendLine("    END IF;");
 

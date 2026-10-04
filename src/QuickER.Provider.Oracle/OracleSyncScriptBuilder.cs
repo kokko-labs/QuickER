@@ -428,22 +428,21 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     // ---------------- COMMENT ON (説明) ----------------
 
     /// <summary>テーブルの説明（COMMENT ON TABLE）設定文を生成する</summary>
-    /// <remarks>Oracle は <c>IS NULL</c> 構文が使えないため、削除は空文字 <c>IS ''</c> で表現する</remarks>
-    private static string AppendSetTableDescription(SchemaDiffItem item)
-    {
-        var newVal = item.NewDescription ?? string.Empty;
-        var target = OracleIdentifier.Quote(item.TableName);
-        return $"COMMENT ON TABLE {target} IS '{OracleIdentifier.EscapeStringLiteral(newVal)}';";
-    }
+    /// <remarks>
+    /// Oracle は <c>IS NULL</c> 構文が使えないため、削除は空文字 <c>IS ''</c> で表現する。
+    /// 改行・<c>&amp;</c> を含む説明は PL/SQL ブロックになる（<see cref="OracleCommentStatement"/>）。
+    /// 文と文の間には常に「/」行が入るので、ブロックでもそのまま実行される
+    /// </remarks>
+    private static string AppendSetTableDescription(SchemaDiffItem item) =>
+        OracleCommentStatement.ForTable(item.TableName, item.NewDescription ?? string.Empty);
 
     /// <summary>カラムの説明（COMMENT ON COLUMN）設定文を生成する</summary>
-    private static string AppendSetColumnDescription(SchemaDiffItem item)
-    {
-        var newVal = item.NewDescription ?? string.Empty;
-        var target =
-            $"{OracleIdentifier.Quote(item.TableName)}.{OracleIdentifier.QuoteSimple(item.ColumnName!)}";
-        return $"COMMENT ON COLUMN {target} IS '{OracleIdentifier.EscapeStringLiteral(newVal)}';";
-    }
+    private static string AppendSetColumnDescription(SchemaDiffItem item) =>
+        OracleCommentStatement.ForColumn(
+            item.TableName,
+            item.ColumnName!,
+            item.NewDescription ?? string.Empty
+        );
 
     /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL、それ以外は空）</summary>
     /// <remarks>Oracle の ADD 句では NULL は既定のため明示しない</remarks>

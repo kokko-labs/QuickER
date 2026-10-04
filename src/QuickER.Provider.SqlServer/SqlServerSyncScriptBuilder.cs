@@ -100,25 +100,48 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 
     /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）文を生成する</summary>
     /// <remarks>
-    /// 旧主キーの制約名は差分項目に含まれないため、テーブル名から sys.key_constraints を逆引きし、
+    /// <para>
+    /// 旧主キーの制約名は差分項目に含まれないため、sys.key_constraints を逆引きし、
     /// 動的 SQL で DROP する（主キーが無いテーブルなら何も実行しない）。
+    /// </para>
+    /// <para>
+    /// 逆引きは <c>OBJECT_ID</c> で ALTER TABLE と同じ 1 つのテーブルに絞る（テーブル名だけで引くと、
+    /// 別スキーマの同名テーブルの主キー名を拾う）。実行時に読んだ制約名は図の外から来る値なので、
+    /// 動的 SQL へは必ず <c>QUOTENAME</c> を通して埋める（<c>]</c> を含む名前で構文が崩れないように）。
+    /// </para>
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
-        // 括弧付けした名前を EXEC の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+        // 括弧付けした名前を文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
         var table = SqlIdentifier.QuoteForDynamicSql(item.TableName);
 
         // 旧主キーの制約名はカタログビューを逆引きして特定する（主キーが無ければ @pk は NULL のまま）
         sb.AppendLine("DECLARE @pk sysname;");
         sb.AppendLine("SELECT @pk = kc.name FROM sys.key_constraints kc");
-        sb.AppendLine("  JOIN sys.tables t ON kc.parent_object_id = t.object_id");
-        sb.AppendLine(
-            $"WHERE kc.type = 'PK' AND t.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(item.TableName))}';"
-        );
-        sb.AppendLine(
-            $"IF @pk IS NOT NULL EXEC('ALTER TABLE {table} DROP CONSTRAINT [' + @pk + ']');"
-        );
+        sb.AppendLine($"WHERE kc.type = 'PK' AND kc.parent_object_id = OBJECT_ID(N'{table}');");
+        AppendDropConstraintByVariable(sb, table, "@pk");
         sb.AppendLine("GO");
+    }
+
+    /// <summary>実行時に変数へ読んだ制約名で、テーブルの制約を動的 SQL で DROP する文を書き出す</summary>
+    /// <remarks>
+    /// <c>EXEC( … )</c> の中には関数呼び出しを書けないため、<c>QUOTENAME</c> を通した文を
+    /// <c>nvarchar(max)</c> の変数に組み立ててから <c>sp_executesql</c> で実行する
+    /// （<c>QUOTENAME</c> の結果は <c>]</c> の二重化で最大 258 文字になり、<c>sysname</c> へ戻すと切り詰められる）。
+    /// 変数が NULL（＝制約が見つからない）なら何も実行しない。
+    /// </remarks>
+    /// <param name="table">文字列リテラル用にエスケープ済みの括弧付けテーブル名</param>
+    /// <param name="nameVariable">制約名を保持する変数名（<c>@pk</c> / <c>@fk</c>）</param>
+    private static void AppendDropConstraintByVariable(
+        StringBuilder sb,
+        string table,
+        string nameVariable
+    )
+    {
+        sb.AppendLine(
+            $"DECLARE @sql nvarchar(max) = N'ALTER TABLE {table} DROP CONSTRAINT ' + QUOTENAME({nameVariable});"
+        );
+        sb.AppendLine($"IF {nameVariable} IS NOT NULL EXEC sys.sp_executesql @sql;");
     }
 
     /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する</summary>
@@ -280,21 +303,16 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
             return;
         }
 
-        // 制約名不明時は親子テーブル名からカタログビューを逆引きして特定する
-        sb.AppendLine($"DECLARE @fk sysname;");
-        sb.AppendLine($"SELECT @fk = fk.name FROM sys.foreign_keys fk");
-        sb.AppendLine($"  JOIN sys.tables tp ON fk.parent_object_id = tp.object_id");
-        sb.AppendLine($"  JOIN sys.tables tr ON fk.referenced_object_id = tr.object_id");
-        sb.AppendLine(
-            $"WHERE tp.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(childTbl))}'"
-        );
-        sb.AppendLine(
-            $"  AND tr.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(parentTbl))}';"
-        );
-        sb.AppendLine(
-            // 括弧付けした名前を EXEC の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
-            $"IF @fk IS NOT NULL EXEC('ALTER TABLE {SqlIdentifier.QuoteForDynamicSql(childTbl)} DROP CONSTRAINT [' + @fk + ']');"
-        );
+        // 制約名不明時は親子テーブルからカタログビューを逆引きして特定する。
+        // 主キーの解除と同じく OBJECT_ID でスキーマまで絞り、読んだ名前は QUOTENAME を通して埋める
+        // 括弧付けした名前を文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
+        var child = SqlIdentifier.QuoteForDynamicSql(childTbl);
+        var parent = SqlIdentifier.QuoteForDynamicSql(parentTbl);
+        sb.AppendLine("DECLARE @fk sysname;");
+        sb.AppendLine("SELECT @fk = fk.name FROM sys.foreign_keys fk");
+        sb.AppendLine($"WHERE fk.parent_object_id = OBJECT_ID(N'{child}')");
+        sb.AppendLine($"  AND fk.referenced_object_id = OBJECT_ID(N'{parent}');");
+        AppendDropConstraintByVariable(sb, child, "@fk");
         sb.AppendLine("GO");
     }
 
