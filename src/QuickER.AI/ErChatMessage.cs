@@ -28,6 +28,9 @@ public sealed class ErChatMessage : INotifyPropertyChanged
     /// <summary>展開状態の実体フィールド</summary>
     private bool _isExpanded;
 
+    /// <summary>応答中かどうかの実体フィールド</summary>
+    private bool _isStreaming;
+
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -63,6 +66,24 @@ public sealed class ErChatMessage : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// アシスタントの回答をストリーミングで組み立てている最中か（応答中は true、ターンが終わると false）。
+    /// 表示側は応答中の回答をテキストで出し、終わってから Markdown 表示へ切り替える。
+    /// 既定は false＝ストリーミングを経ずに作ったメッセージは最初から応答済みとして扱う。
+    /// </summary>
+    public bool IsStreaming
+    {
+        get => _isStreaming;
+        set
+        {
+            if (_isStreaming != value)
+            {
+                _isStreaming = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>
     /// このメッセージに同梱された添付の要約（ユーザー発話の吹き出しに「📎 ファイル名」で表示するための文言・省略時は null）。
     /// 添付なしの既存メッセージは null のままで挙動不変。
     /// </summary>
@@ -70,6 +91,18 @@ public sealed class ErChatMessage : INotifyPropertyChanged
 
     /// <summary>添付要約を持つか（吹き出しの添付行の表示制御に使う）</summary>
     public bool HasAttachments => !string.IsNullOrEmpty(AttachmentSummary);
+
+    /// <summary>
+    /// 応答中の回答をすべて応答済みにする（ターンの終了時に呼ぶ。完了・失敗・中断・送信の例外のどれでも同じ）
+    /// </summary>
+    /// <param name="messages">チャットのメッセージ一覧</param>
+    public static void EndStreaming(IEnumerable<ErChatMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            message.IsStreaming = false;
+        }
+    }
 
     /// <summary>指定プロパティの変更を通知する</summary>
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>

@@ -54,6 +54,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **The Mermaid export now reports that a composite primary key order is lost** — Mermaid has no syntax for the order, so it cannot be carried; the omissions listed when the export finishes include it whenever a table's key order differs from its column order
 - **DBML import now reads inline references, `primary key`, and many-to-one `Ref` lines** — these are standard DBML that dbdiagram.io writes all the time, and they used to be skipped in silence, so the primary keys and relationships they declared vanished from an import that reported success. A column setting `ref: > users.id` is read as the `Ref` line with that column on the left; for one-to-one (`-`) the column carrying the `ref` is the foreign key, following DBML's rule, which is the opposite of a `Ref` line. `primary key` is read like `pk`, and a `Ref` line with `>` is read as one-to-many with its sides swapped. An inline reference that cannot be read, such as a schema-qualified one, is reported with its line number
 
+#### AI chat & mock generation
+
+- **AI answers in AI chat and AI mock generation are now shown as formatted Markdown** — headings, emphasis, inline code, code blocks, lists, tables, quotes, horizontal rules and links are formatted once a response ends, and an answer in progress stays as text. A "Markdown" check box in the chat header switches back to the original text, for example to copy it; each window remembers the choice, and it is on by default. Only `http` and `https` links can be clicked (they open in the default browser), images are not loaded and show their alternative text, HTML is shown as written, and an answer nested too deeply to format is shown as text
+
 ### Changed
 
 #### Generated code

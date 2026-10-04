@@ -1735,6 +1735,92 @@ public class AiChatDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// アシスタントの回答は応答中だけ <see cref="ErChatMessage.IsStreaming"/> が立ち、ターンが終われば
+    /// 完了・失敗・中断のどれでも外れることを検証する（ツール活動を挟んだ複数の吹き出しも、ターンの終わりにまとめて外れる）。
+    /// </summary>
+    [Theory(DisplayName = "回答の応答中の印はターンの終わり（完了・失敗・中断）で外れる")]
+    [InlineData("completed")]
+    [InlineData("failed")]
+    [InlineData("aborted")]
+    public void AssistantMessages_StopStreaming_WhenTurnEnds(string outcome)
+    {
+        var (vm, copilot, folder) = CreateVmFor();
+
+        try
+        {
+            StartCopilotTurn(vm);
+
+            copilot.RaiseDelta("テーブルを");
+            copilot.RaiseToolCall("r1", "add_entity", "{}");
+            copilot.RaiseDelta("追加しました。");
+
+            var answers = vm.Messages.Where(m => m.Role == ErChatMessageRole.Assistant).ToList();
+            answers.Should().HaveCount(2);
+            answers.Should().OnlyContain(m => m.IsStreaming, "ターンが終わるまでは応答中");
+
+            switch (outcome)
+            {
+                case "completed":
+                    copilot.RaiseIdle();
+                    break;
+
+                case "failed":
+                    copilot.RaiseError("session failed");
+                    break;
+
+                default:
+                    copilot.RaiseIdle(aborted: true);
+                    break;
+            }
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            answers.Should().OnlyContain(m => !m.IsStreaming);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 実行中フラグが外れれば、どの経路でも（送信の例外の経路を含む）回答の応答中の印が外れることを検証する
+    /// </summary>
+    [Fact(DisplayName = "実行中フラグが外れると回答の応答中の印も外れる")]
+    public void IsTurnInProgressOff_StopsStreaming()
+    {
+        var (vm, _, folder) = CreateVmFor();
+
+        try
+        {
+            var answer = new ErChatMessage
+            {
+                Role = ErChatMessageRole.Assistant,
+                Content = "途中まで",
+                IsStreaming = true,
+            };
+            vm.Messages.Add(answer);
+            vm.IsTurnInProgress = true;
+
+            vm.IsTurnInProgress = false;
+
+            answer.IsStreaming.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>ストリーミングを経ずに作った回答は、最初から応答済み（Markdown 表示の対象）であることを検証する</summary>
+    [Fact(DisplayName = "ストリーミングを経ずに作った回答は最初から応答済み")]
+    public void AssistantMessage_NotStreamed_IsNotStreaming()
+    {
+        new ErChatMessage { Role = ErChatMessageRole.Assistant, Content = "完成した回答" }
+            .IsStreaming.Should()
+            .BeFalse();
+    }
+
     /// <summary>空の図から始まったターンが失敗しても、テーブルができていれば自動整列することを検証する</summary>
     [Fact(DisplayName = "空の図から始まったターンが失敗してもテーブルができていれば自動整列する")]
     public void FailedTurn_FromEmptyDiagram_ArrangesCreatedTables()

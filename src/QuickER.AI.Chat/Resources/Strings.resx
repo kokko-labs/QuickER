@@ -399,4 +399,10 @@ Default to English for all responses (the language of the app UI). Switch only i
   <data name="QueryTool_ArgumentsNotObject" xml:space="preserve">
     <value>The arguments for tool '{0}' must be a JSON object.</value>
   </data>
+  <data name="Chat_ShowMarkdown" xml:space="preserve">
+    <value>Markdown</value>
+  </data>
+  <data name="Chat_ShowMarkdownTooltip" xml:space="preserve">
+    <value>Show the AI answers as formatted Markdown. Turn this off to see and copy the original text.</value>
+  </data>
 </root>

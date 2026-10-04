@@ -185,14 +185,12 @@
           HorizontalAlignment="Left"
           MaxWidth="440"
         >
-          <TextBox
+          <!-- 応答が終わった回答は、ウィンドウのトグルに従って Markdown 表示にする（応答中はテキスト） -->
+          <ui:AssistantMessageView
             Text="{Binding Content, Mode=OneWay}"
-            TextWrapping="Wrap"
-            IsReadOnly="True"
-            BorderThickness="0"
-            Background="Transparent"
-            Foreground="#1F2937"
-            FontSize="13"
+            IsStreaming="{Binding IsStreaming, Mode=OneWay}"
+            ShowMarkdown="{Binding DataContext.Connection.ShowAssistantMarkdown, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"
+            LinkOpener="{Binding DataContext.LinkOpener, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"
           />
         </Border>
       </DataTemplate>
@@ -246,7 +244,7 @@
 
       <!--
         左: チャット + 接続設定。D&D はトンネル段（Preview*）で受ける
-        （メッセージバブル＝コピー可能な TextBox の組み込みドラッグ処理に飲み込まれないように）
+        （メッセージバブル＝コピー可能な TextBox / RichTextBox の組み込みドラッグ処理に飲み込まれないように）
       -->
       <Grid
         Grid.Column="0"
@@ -707,6 +705,14 @@
                   Visibility="{Binding IsMockGenInProgress, Converter={StaticResource BoolToVisibilityConverter}}"
                 />
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
+                  <!-- 回答の表示（Markdown / テキスト）の切り替え。ダイアログ別の UI 状態として保存する -->
+                  <CheckBox
+                    Margin="0,0,12,0"
+                    VerticalAlignment="Center"
+                    Content="{x:Static res:Strings.Mock_ShowMarkdown}"
+                    ToolTip="{x:Static res:Strings.Mock_ShowMarkdownTooltip}"
+                    IsChecked="{Binding Connection.ShowAssistantMarkdown}"
+                  />
                   <Button
                     Style="{StaticResource SecondaryButton}"
                     Margin="0,0,8,0"

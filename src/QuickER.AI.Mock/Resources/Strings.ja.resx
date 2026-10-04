@@ -699,4 +699,10 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   <data name="Mock_ToolFileAccessFailedResult" xml:space="preserve">
     <value>モックフォルダの読み書きに失敗しました: {0}</value>
   </data>
+  <data name="Mock_ShowMarkdown" xml:space="preserve">
+    <value>Markdown 表示</value>
+  </data>
+  <data name="Mock_ShowMarkdownTooltip" xml:space="preserve">
+    <value>AI の回答を Markdown として整形して表示します。オフにすると元の文章を表示・コピーできます。</value>
+  </data>
 </root>

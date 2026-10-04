@@ -182,14 +182,12 @@
           HorizontalAlignment="Left"
           MaxWidth="600"
         >
-          <TextBox
+          <!-- 応答が終わった回答は、ウィンドウのトグルに従って Markdown 表示にする（応答中はテキスト） -->
+          <ui:AssistantMessageView
             Text="{Binding Content, Mode=OneWay}"
-            TextWrapping="Wrap"
-            IsReadOnly="True"
-            BorderThickness="0"
-            Background="Transparent"
-            Foreground="#1F2937"
-            FontSize="13"
+            IsStreaming="{Binding IsStreaming, Mode=OneWay}"
+            ShowMarkdown="{Binding DataContext.Connection.ShowAssistantMarkdown, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"
+            LinkOpener="{Binding DataContext.LinkOpener, RelativeSource={RelativeSource AncestorType=Window}, Mode=OneWay}"
           />
         </Border>
       </DataTemplate>
@@ -268,8 +266,8 @@
   </Window.Resources>
 
   <!--
-    D&D はトンネル段（Preview*）で受ける: メッセージバブルはコピー可能にするため TextBox で実装しており、
-    TextBox の組み込みドラッグ処理がバブリング段の DragOver/Drop を飲み込むため、
+    D&D はトンネル段（Preview*）で受ける: メッセージバブルはコピー可能にするため TextBox / RichTextBox（Markdown 表示）で実装しており、
+    その組み込みドラッグ処理がバブリング段の DragOver/Drop を飲み込むため、
     バブルの上へのファイルドロップがバブリングでは親 Grid に届かない
   -->
   <Grid
@@ -742,6 +740,14 @@
               />
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal">
+              <!-- 回答の表示（Markdown / テキスト）の切り替え。ダイアログ別の UI 状態として保存する -->
+              <CheckBox
+                Margin="0,0,12,0"
+                VerticalAlignment="Center"
+                Content="{x:Static res:Strings.Chat_ShowMarkdown}"
+                ToolTip="{x:Static res:Strings.Chat_ShowMarkdownTooltip}"
+                IsChecked="{Binding Connection.ShowAssistantMarkdown}"
+              />
               <Button
                 Style="{StaticResource SecondaryButton}"
                 Margin="0,0,8,0"

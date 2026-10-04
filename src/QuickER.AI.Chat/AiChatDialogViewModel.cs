@@ -45,6 +45,9 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>チャットメッセージ一覧</summary>
     public ObservableCollection<ErChatMessage> Messages { get; } = new();
 
+    /// <summary>回答の中のリンクを開く処理（Markdown 表示の吹き出しが使う。開けなかったときはエラーで知らせる）</summary>
+    public IChatLinkOpener LinkOpener { get; }
+
     /// <summary>ダイアログを閉じる際に呼ぶアクション</summary>
     public Action<bool>? CloseAction { get; set; }
 
@@ -97,6 +100,12 @@ public partial class AiChatDialogViewModel : ObservableObject
                 OnPropertyChanged(nameof(CanChangeBackend));
                 // ターン実行中は「新しい会話」も禁止する（CanStartConversation の再評価）
                 NotifyReadinessChanged();
+
+                // ターンが終わったら（完了・失敗・中断・送信の例外のどれでも）回答を Markdown 表示へ切り替える
+                if (!value)
+                {
+                    ErChatMessage.EndStreaming(Messages);
+                }
             }
         }
     }
@@ -249,6 +258,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         _dispatcher = dispatcher;
         _dialogs = dialogService ?? new MessageBoxDialogService();
         _files = files ?? new WpfFileDialogService();
+        LinkOpener = new ShellChatLinkOpener(_dialogs, Strings.Chat_WindowTitle);
 
         // 添付部品は本番では WPF の画像縮小を差し込む（テストでは注入された縮小・null）
         Attachments = new AttachmentListViewModel(
@@ -836,6 +846,7 @@ public partial class AiChatDialogViewModel : ObservableObject
             {
                 Role = ErChatMessageRole.Assistant,
                 Content = delta,
+                IsStreaming = true,
             };
             Messages.Add(_currentAssistantMessage);
             // アシスタントの文が挟まったら、以後のツール活動は新しい吹き出しにする

@@ -209,5 +209,11 @@ namespace QuickER.AI.UI.Resources {
                 return ResourceManager.GetString("Attachment_ClipboardCaptureFailed", resourceCulture);
             }
         }
+
+        public static string Markdown_OpenLinkFailedFormat {
+            get {
+                return ResourceManager.GetString("Markdown_OpenLinkFailedFormat", resourceCulture);
+            }
+        }
     }
 }

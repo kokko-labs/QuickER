@@ -2719,6 +2719,78 @@ public class MockGenerationDialogViewModelTests
     }
 
     /// <summary>
+    /// アシスタントの回答は応答中だけ <see cref="ErChatMessage.IsStreaming"/> が立ち、ターンが終われば
+    /// 完了・失敗・中断のどれでも外れることを検証する。
+    /// </summary>
+    [Theory(DisplayName = "回答の応答中の印はターンの終わり（完了・失敗・中断）で外れる")]
+    [InlineData("completed")]
+    [InlineData("failed")]
+    [InlineData("aborted")]
+    public async Task AssistantMessages_StopStreaming_WhenTurnEnds(string outcome)
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            var engine = await StartHeldTurnAsync(vm, engineBox);
+
+            var answer = vm.Messages.Single(m => m.Role == ErChatMessageRole.Assistant);
+            answer.IsStreaming.Should().BeTrue("ターンが終わるまでは応答中");
+
+            switch (outcome)
+            {
+                case "completed":
+                    engine.CompleteHeldTurn();
+                    break;
+
+                case "failed":
+                    engine.FailHeldTurn("session failed");
+                    break;
+
+                default:
+                    engine.FailHeldTurn(null);
+                    break;
+            }
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            answer.IsStreaming.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 実行中フラグが外れれば、どの経路でも（送信の例外の経路を含む）回答の応答中の印が外れることを検証する
+    /// </summary>
+    [Fact(DisplayName = "実行中フラグが外れると回答の応答中の印も外れる")]
+    public void IsTurnInProgressOff_StopsStreaming()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            var answer = new ErChatMessage
+            {
+                Role = ErChatMessageRole.Assistant,
+                Content = "途中まで",
+                IsStreaming = true,
+            };
+            vm.Messages.Add(answer);
+            vm.IsTurnInProgress = true;
+
+            vm.IsTurnInProgress = false;
+
+            answer.IsStreaming.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
     /// ターン実行中の接続タブ切替は拒まれ、セッションを切り離さないので、後から届くターン完了で実行中が解ける
     /// （切り離すと完了が届かず、ダイアログが操作不能のまま固まる）ことを検証する。
     /// </summary>

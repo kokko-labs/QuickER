@@ -1217,5 +1217,17 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+
+        public static string Mock_ShowMarkdown {
+            get {
+                return ResourceManager.GetString("Mock_ShowMarkdown", resourceCulture);
+            }
+        }
+
+        public static string Mock_ShowMarkdownTooltip {
+            get {
+                return ResourceManager.GetString("Mock_ShowMarkdownTooltip", resourceCulture);
+            }
+        }
     }
 }

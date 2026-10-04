@@ -677,5 +677,17 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+
+        public static string Chat_ShowMarkdown {
+            get {
+                return ResourceManager.GetString("Chat_ShowMarkdown", resourceCulture);
+            }
+        }
+
+        public static string Chat_ShowMarkdownTooltip {
+            get {
+                return ResourceManager.GetString("Chat_ShowMarkdownTooltip", resourceCulture);
+            }
+        }
     }
 }

@@ -98,6 +98,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>チャットメッセージ一覧</summary>
     public ObservableCollection<ErChatMessage> Messages { get; } = new();
 
+    /// <summary>回答の中のリンクを開く処理（Markdown 表示の吹き出しが使う。開けなかったときはエラーで知らせる）</summary>
+    public IChatLinkOpener LinkOpener { get; }
+
     /// <summary>画面一覧サイドバーの項目（マニフェストから再構築する）</summary>
     public ObservableCollection<MockScreenListItem> Screens { get; } = new();
 
@@ -180,6 +183,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 // ターン実行中は添付操作も禁止する
                 Attachments.IsTurnInProgress = value;
                 NotifyMockGenChanged();
+
+                // ターンが終わったら（完了・失敗・中断・送信の例外のどれでも）回答を Markdown 表示へ切り替える
+                if (!value)
+                {
+                    ErChatMessage.EndStreaming(Messages);
+                }
             }
         }
     }
@@ -549,6 +558,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             );
         _files = files ?? new WpfFileDialogService();
         _dialogs = dialogService ?? new MessageBoxDialogService();
+        LinkOpener = new ShellChatLinkOpener(_dialogs, Strings.Mock_WindowTitle);
 
         // 添付部品は本番では WPF の画像縮小を差し込む（テストでは注入された縮小・null）
         Attachments = new AttachmentListViewModel(
@@ -1768,6 +1778,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             {
                 Role = ErChatMessageRole.Assistant,
                 Content = delta,
+                IsStreaming = true,
             };
             Messages.Add(_currentAssistantMessage);
         }

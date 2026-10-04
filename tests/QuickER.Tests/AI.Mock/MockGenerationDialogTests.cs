@@ -3,9 +3,11 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
+using QuickER.AI.UI;
 using QuickER.Model;
 using QuickER.Tests.AI;
 using QuickER.Tests.TestDoubles;
@@ -1194,6 +1196,99 @@ public class MockGenerationDialogTests
             if (Directory.Exists(folder))
             {
                 Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 回答の吹き出しは Markdown 表示の部品を使い、応答の終わりとウィンドウのトグルに従って
+    /// テキスト表示と Markdown 表示を切り替えることを、実 XAML の配線で検証する。
+    /// </summary>
+    [Fact(DisplayName = "回答の吹き出しは応答の終わりとトグルに従って Markdown 表示を切り替える")]
+    public void AssistantBubble_FollowsStreamingAndToggle()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            WpfApplicationTestSupport.RunSta(() =>
+            {
+                var vm = CreateViewModelWithDialogs(folder, new StubDialogService());
+
+                WithShownDialog(
+                    vm,
+                    dialog =>
+                    {
+                        vm.Messages.Add(
+                            new ErChatMessage
+                            {
+                                Role = ErChatMessageRole.Assistant,
+                                Content = "**done**",
+                            }
+                        );
+                        vm.Messages.Add(
+                            new ErChatMessage
+                            {
+                                Role = ErChatMessageRole.Assistant,
+                                Content = "**partial",
+                                IsStreaming = true,
+                            }
+                        );
+                        WpfApplicationTestSupport.DoEvents();
+
+                        var views = FindVisualChildren<AssistantMessageView>(dialog).ToList();
+                        views.Should().HaveCount(2);
+                        views[0].IsShowingMarkdown.Should().BeTrue("応答済みの回答");
+                        views[0].LinkOpener.Should().BeSameAs(vm.LinkOpener);
+                        views[1].IsShowingMarkdown.Should().BeFalse("応答中の回答");
+
+                        vm.IsTurnInProgress = true;
+                        vm.IsTurnInProgress = false;
+                        views[1].IsShowingMarkdown.Should().BeTrue("ターンが終わったら切り替わる");
+
+                        var toggle = FindVisualChildren<CheckBox>(dialog)
+                            .Single(c =>
+                                Equals(
+                                    c.Content,
+                                    QuickER.AI.Mock.Resources.Strings.Mock_ShowMarkdown
+                                )
+                            );
+                        toggle.IsChecked.Should().BeTrue();
+                        toggle.IsChecked = false;
+                        vm.Connection.ShowAssistantMarkdown.Should().BeFalse();
+                        views.Should().OnlyContain(v => !v.IsShowingMarkdown);
+
+                        vm.Connection.ShowAssistantMarkdown = true;
+                        views.Should().OnlyContain(v => v.IsShowingMarkdown);
+                    }
+                );
+            });
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>ビジュアルツリーから指定型の子孫を列挙する</summary>
+    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+
+            if (child is T match)
+            {
+                yield return match;
+            }
+
+            foreach (var nested in FindVisualChildren<T>(child))
+            {
+                yield return nested;
             }
         }
     }

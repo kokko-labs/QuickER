@@ -24,6 +24,12 @@ public class ChatUiSettings
     public string EndpointOverride { get; set; } = string.Empty;
 
     /// <summary>
+    /// アシスタントの回答を Markdown として表示するか（false ならテキスト表示）。
+    /// 既定は true で、このキーを持たない既存の設定ファイルも Markdown 表示で読む。
+    /// </summary>
+    public bool ShowAssistantMarkdown { get; set; } = true;
+
+    /// <summary>
     /// <see cref="LastBackend"/> を列挙値として解釈する（空・不正値は null）。
     /// 数値文字列は <see cref="Enum.TryParse{TEnum}(string, bool, out TEnum)"/> が定義外の値でも
     /// 成功させてしまうため、<see cref="Enum.IsDefined{TEnum}(TEnum)"/> で定義済みかどうかも確かめる。
