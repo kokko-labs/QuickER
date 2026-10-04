@@ -667,7 +667,17 @@ ORDER BY constraint_name";
     /// </para>
     /// <para>
     /// <c>TIMESTAMP</c> 系は <c>data_type</c> が既に <c>"TIMESTAMP(6)"</c> /
-    /// <c>"TIMESTAMP(6) WITH TIME ZONE"</c> の形式を含むため、そのまま採用する。
+    /// <c>"TIMESTAMP(6) WITH TIME ZONE"</c> の形式を含むため、それを採用する。
+    /// </para>
+    /// <para>
+    /// 精度を持たない <c>NUMBER</c> はスケールで分ける。スケールも無ければ素の <c>NUMBER</c>（浮動）、
+    /// スケールがあれば <c>NUMBER(*,s)</c>（精度は上限なし・スケールは s）。<c>INTEGER</c> / <c>SMALLINT</c> は
+    /// Oracle が精度なし・スケール 0 として保存するので <c>NUMBER(*,0)</c> になる（素の <c>NUMBER</c> にすると、
+    /// その図から作り直した DDL が小数を受ける列になり、整数の制約が落ちる）。
+    /// </para>
+    /// <para>
+    /// 組み立てた表記は <see cref="OracleTypeNotation.Normalize"/> を通す（差分の比較が図の表記に掛ける正規化と
+    /// 同じ関数＝取込の出力はその不動点になる）。
     /// </para>
     /// <para>
     /// <c>char_length</c> は CHAR / VARCHAR2 / NCHAR / NVARCHAR2 系のみ有効な文字数で、
@@ -694,7 +704,7 @@ ORDER BY constraint_name";
         // TIMESTAMP 系（WITH TIME ZONE 等を含む）は data_type が既に精度・修飾を持つためそのまま返す
         if (upper.StartsWith("TIMESTAMP", StringComparison.Ordinal))
         {
-            return dataType;
+            return OracleTypeNotation.Normalize(dataType);
         }
 
         switch (upper)
@@ -702,16 +712,15 @@ ORDER BY constraint_name";
             case "NUMBER":
                 if (dataPrecision is null)
                 {
-                    // NUMBER(*,s) は「精度は最大・スケールは s」の宣言で、data_precision が null・
-                    // data_scale が非 null で返る。早期 return するとスケードが落ちて素の NUMBER に化ける
-                    return dataScale is not null and not 0 ? $"NUMBER(*,{dataScale})" : "NUMBER";
+                    // NUMBER(*,s) は「精度は上限なし・スケールは s」の宣言で、data_precision が null・
+                    // data_scale が非 null で返る（INTEGER / SMALLINT はスケール 0）。早期 return すると
+                    // スケールが落ちて素の NUMBER（浮動）に化ける
+                    return dataScale is null ? "NUMBER" : $"NUMBER(*,{dataScale})";
                 }
 
-                // スケール 0 と未指定は user_tab_cols 上で区別できないため精度のみ。
+                // スケール 0 と未指定は user_tab_cols 上で区別できないため精度のみ（正規化が (p,0) を (p) へ畳む）。
                 // 負のスケール（NUMBER(10,-2) = 100 の倍数へ丸める）は宣言どおりに書き出す
-                return dataScale is not null and not 0
-                    ? $"NUMBER({dataPrecision},{dataScale})"
-                    : $"NUMBER({dataPrecision})";
+                return OracleTypeNotation.Normalize($"NUMBER({dataPrecision},{dataScale ?? 0})");
 
             case "VARCHAR2":
             case "CHAR":
@@ -734,7 +743,9 @@ ORDER BY constraint_name";
 
             case "FLOAT":
                 // FLOAT(b) は 2 進精度。精度があれば付与する（正規型では Float64 として解釈される）
-                return dataPrecision is null ? "FLOAT" : $"FLOAT({dataPrecision})";
+                return OracleTypeNotation.Normalize(
+                    dataPrecision is null ? "FLOAT" : $"FLOAT({dataPrecision})"
+                );
 
             default:
                 // BINARY_FLOAT / BINARY_DOUBLE / DATE / CLOB / NCLOB / BLOB / XMLTYPE 等はそのまま

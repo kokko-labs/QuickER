@@ -58,4 +58,36 @@ public class SqliteCSharpTypeMapperTests
         Mapper.Map("int").IsFallbackType.Should().BeFalse();
         Mapper.Map("nvarchar(50)").IsFallbackType.Should().BeFalse();
     }
+
+    /// <summary>
+    /// REAL アフィニティの宣言型（REAL・FLOAT・DOUBLE 等）はすべて倍精度の <c>double</c> へ写すことを検証する。
+    /// SQLite の REAL は 8 バイトの倍精度で、単精度の <c>float</c> で受けると読み書きのたびに精度を落とす。
+    /// </summary>
+    [Theory(DisplayName = "REAL アフィニティの宣言型は double へ写す")]
+    [InlineData("REAL")]
+    [InlineData("real")]
+    [InlineData("FLOAT")]
+    [InlineData("DOUBLE")]
+    [InlineData("DOUBLE PRECISION")]
+    [InlineData("FLOAT8")]
+    [InlineData("REAL(10)")]
+    public void Map_RealAffinity_IsDouble(string dataType)
+    {
+        var info = Mapper.Map(dataType);
+
+        info.TypeName.Should().Be("double");
+        info.IsFallbackType.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// アフィニティの判定順（INT → TEXT 系 → BLOB → REAL）どおり、先の規則に当たる名前は REAL として扱わないことを検証する。
+    /// </summary>
+    [Theory(DisplayName = "先のアフィニティ規則に当たる名前は double にしない")]
+    [InlineData("FLOATINT")]
+    [InlineData("REALCHAR")]
+    [InlineData("DOUBLEBLOB")]
+    public void Map_EarlierAffinityWins(string dataType)
+    {
+        Mapper.Map(dataType).TypeName.Should().NotBe("double");
+    }
 }

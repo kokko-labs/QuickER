@@ -332,7 +332,8 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
             var col = new Column
             {
                 Name = colName,
-                DataType = columnType,
+                // COLUMN_TYPE はすでに取込の表記（既定値を補った形）。差分の比較と同じ正規化を通して不動点にする
+                DataType = MySqlTypeNotation.Normalize(columnType),
                 IsNullable = isNullable,
                 Description = comment,
                 IsComputed = isComputed,

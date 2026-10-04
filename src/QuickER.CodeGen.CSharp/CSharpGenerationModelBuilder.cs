@@ -219,7 +219,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var className = _nameConverter.ToEditModelClassName(entity.TableName);
         var properties = entity
-            .Columns.Where(column => !IsArrayColumn(column))
+            .Columns.Where(column => !IsExcludedFromEditModelColumn(column))
             .Select(column => BuildEditModelProperty(column, options))
             .ToList();
         var navigationModels = navigations.Select(BuildEditModelNavigation).ToList();
@@ -354,7 +354,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         var mapperClassName = _nameConverter.ToMapperClassName(entity.TableName);
 
         var scalarProperties = entity
-            .Columns.Where(column => !IsArrayColumn(column))
+            .Columns.Where(column => !IsExcludedFromEditModelColumn(column))
             .Select(column =>
             {
                 var property = BuildProperty(column);
@@ -566,7 +566,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             // 非 NULL の VO は妥当な空既定値を作れないため null! でロード前提を表明（NULL 許容 VO は初期化不要）
             Initializer = valueObject is not null
                 ? (column.IsNullable ? string.Empty : " = null!;")
-                : BuildEntityInitializer(typeName, column.IsNullable),
+                : BuildEntityInitializer(typeName, column.IsNullable, typeInfo),
             // インメモリ Repository のシーダー用の決定的サンプル値式
             SampleValueExpression = BuildSampleValueExpression(
                 column,
@@ -692,6 +692,13 @@ internal sealed partial class CSharpGenerationModelBuilder
             case "byte[]":
                 return "new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }";
 
+            // PostgreSQL の inet / cidr（行ごとに違う決定的なアドレス・ネットワーク）
+            case "System.Net.IPAddress":
+                return "new System.Net.IPAddress(new byte[] { 10, 0, 0, (byte)index })";
+
+            case "System.Net.IPNetwork":
+                return "new System.Net.IPNetwork(new System.Net.IPAddress(new byte[] { 10, (byte)index, 0, 0 }), 16)";
+
             case "string":
                 return BuildSampleStringExpression(column, maxLength);
 
@@ -772,16 +779,17 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 確定値プロパティと UI バインディング用文字列プロパティの両方の情報を組み立てる
     /// </remarks>
     /// <summary>
-    /// その列が配列型（PostgreSQL の <c>integer[]</c> 等）として解決されたか
+    /// その列を EditModel・Mapper・値オブジェクトの対象外にするか（<see cref="CSharpTypeInfo.IsExcludedFromEditModel"/>）
     /// </summary>
     /// <remarks>
-    /// 配列列は EditModel・Mapper・値オブジェクトの対象外にする。EditModel は 1 列＝1 テキスト入力の
-    /// 投影で、配列を表す記法が無い（載せると入力文字列を配列へ代入する形になりコンパイルできない）。
-    /// Entity のプロパティ・EF Core・インメモリ・リモート転送では通常どおり扱う。
-    /// 外した列は生成時 Info（<c>CodeGen_Info_ArrayColumnsNotEditable</c>）で名指しする。
+    /// 対象は配列列（PostgreSQL の <c>integer[]</c> 等）と、テキスト入力で扱えない型の列（PostgreSQL の <c>inet</c>）。
+    /// EditModel は 1 列＝1 テキスト入力の投影で、配列を表す記法が無く、<c>IPAddress</c> のような参照型は入力文字列を
+    /// そのまま代入する形になる（どちらもコンパイルできない）。Entity のプロパティ・EF Core・インメモリ・リモート転送では
+    /// 通常どおり扱う。外した列は生成時 Info（<c>CodeGen_Info_ArrayColumnsNotEditable</c> /
+    /// <c>CodeGen_Info_TextInputUnsupportedColumns</c>）で名指しする。
     /// </remarks>
-    private bool IsArrayColumn(Column column) =>
-        _columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsArray;
+    private bool IsExcludedFromEditModelColumn(Column column) =>
+        _columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsExcludedFromEditModel;
 
     private CSharpEditModelPropertyModel BuildEditModelProperty(
         Column column,
@@ -928,7 +936,11 @@ internal sealed partial class CSharpGenerationModelBuilder
         && string.Equals(typeInfo.CanonicalTypeToken, "date", StringComparison.Ordinal);
 
     /// <summary>非 NULL の string / byte[] プロパティに対する空既定値の初期化子を生成する</summary>
-    private static string BuildEntityInitializer(string typeName, bool isNullable)
+    private static string BuildEntityInitializer(
+        string typeName,
+        bool isNullable,
+        CSharpTypeInfo typeInfo
+    )
     {
         if (typeName == "string" && !isNullable)
         {
@@ -945,6 +957,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (!isNullable && typeName.EndsWith("[]", StringComparison.Ordinal))
         {
             return $" = Array.Empty<{typeName[..^2]}>();";
+        }
+
+        // テキスト入力で扱えない参照型（inet＝IPAddress）は妥当な空既定値が無い。非 NULL の VO と同じく null! で
+        // ロード前提を表明する（架空のアドレスを既定値にすると、EditModel を経ずに作った行へ黙って入る）
+        if (!isNullable && typeInfo.IsTextInputUnsupported && typeInfo.IsReferenceType)
+        {
+            return " = null!;";
         }
 
         return string.Empty;

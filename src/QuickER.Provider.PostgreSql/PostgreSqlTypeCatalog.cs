@@ -179,6 +179,14 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
                 return true;
 
             case CanonicalTypeKind.Decimal:
+                // 精度なし・スケールあり（Oracle の NUMBER(*,s)）は書き出せない。PostgreSQL の numeric は
+                // 精度なしでスケールだけを宣言できず、素の numeric へ写すと「s 桁へ丸める」宣言が黙って落ちる
+                // （SQL Server・MySQL の精度なし Decimal と同じ「意味の違う DDL を黙って作らない」線引き）
+                if (canonical.Precision is null && canonical.Scale is not null)
+                {
+                    return false;
+                }
+
                 nativeType = FormatPrecisionScale("numeric", canonical.Precision, canonical.Scale);
                 return true;
 

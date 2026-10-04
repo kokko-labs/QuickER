@@ -87,7 +87,7 @@ public class PostgreSqlCSharpTypeMapperTests
     }
 
     [Theory(DisplayName = "未知の型は IsFallbackType が true になる")]
-    [InlineData("inet")]
+    [InlineData("geometry")]
     [InlineData("point")]
     public void Map_UnknownType_IsFallbackTypeIsTrue(string dataType)
     {
@@ -99,5 +99,25 @@ public class PostgreSqlCSharpTypeMapperTests
     {
         Mapper.Map("integer").IsFallbackType.Should().BeFalse();
         Mapper.Map("varchar(50)").IsFallbackType.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// <c>interval</c>（範囲の修飾つきを含む）・<c>cidr</c> は、Npgsql が返す CLR 型（<c>TimeSpan</c> /
+    /// <c>System.Net.IPNetwork</c>）へ写すことを検証する。文字列へ落とすと Npgsql が読めず
+    /// （<c>InvalidCastException</c>）、その列を持つ表の行の組み立てが丸ごと失敗する。
+    /// </summary>
+    [Theory(DisplayName = "interval・cidr は Npgsql が返す CLR 型へ写す")]
+    [InlineData("interval", "TimeSpan")]
+    [InlineData("interval day to second(3)", "TimeSpan")]
+    [InlineData("interval year to month", "TimeSpan")]
+    [InlineData("interval(3)", "TimeSpan")]
+    [InlineData("cidr", "System.Net.IPNetwork")]
+    public void Map_IntervalAndCidr_MapToDriverType(string dataType, string expected)
+    {
+        var info = Mapper.Map(dataType);
+
+        info.TypeName.Should().Be(expected);
+        info.IsReferenceType.Should().BeFalse();
+        info.IsFallbackType.Should().BeFalse();
     }
 }

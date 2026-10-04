@@ -194,7 +194,8 @@ SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE,
        c.CHARACTER_MAXIMUM_LENGTH, c.NUMERIC_PRECISION, c.NUMERIC_SCALE, c.IS_NULLABLE, c.ORDINAL_POSITION,
        CASE WHEN cc.column_id IS NOT NULL OR ISNULL(gc.generated_always_type, 0) IN (1, 2) THEN 1 ELSE 0 END AS IS_COMPUTED,
        cc.definition AS COMPUTED_DEFINITION,
-       gc.generated_always_type AS GENERATED_ALWAYS_TYPE
+       gc.generated_always_type AS GENERATED_ALWAYS_TYPE,
+       c.DATETIME_PRECISION
 FROM INFORMATION_SCHEMA.COLUMNS c
 LEFT JOIN sys.computed_columns cc
        ON cc.object_id = OBJECT_ID(QUOTENAME(c.TABLE_SCHEMA) + N'.' + QUOTENAME(c.TABLE_NAME))
@@ -430,10 +431,16 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 : Convert.ToInt32(reader.GetValue(11));
             var isPeriodColumn = generatedAlwaysType is 1 or 2;
 
+            // 小数秒の桁数（datetime2 / time / datetimeoffset で使う）。読まないと datetime2(3) が
+            // datetime2（＝7 桁）として図へ入り、その図からの同期が精度を黙って 3 → 7 に変える
+            int? datetimePrecision = reader.IsDBNull(12)
+                ? null
+                : Convert.ToInt32(reader.GetValue(12));
+
             var col = new Column
             {
                 Name = colName,
-                DataType = FormatDataType(dataType, maxLen, numPrec, numScale),
+                DataType = FormatDataType(dataType, maxLen, numPrec, numScale, datetimePrecision),
                 IsNullable = isNullable,
                 IsComputed = isComputed,
             };
@@ -666,8 +673,23 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     }
 
     /// <summary>SQL Server の型情報を <c>nvarchar(50)</c> や <c>decimal(10,2)</c> 等の表示形式へ整形する</summary>
-    /// <remarks>可変長型の最大長 -1 は <c>(max)</c> として表現する</remarks>
-    public static string FormatDataType(string dataType, int? maxLen, int? precision, int? scale)
+    /// <remarks>
+    /// 可変長型の最大長 -1 は <c>(max)</c> として表現する。数値と小数秒の桁数は書き下ろしたうえで
+    /// <see cref="SqlServerTypeNotation.Normalize"/> を通す（既定の精度・スケール 0 を省く）＝差分の比較が
+    /// 図の表記に掛ける正規化と同じ関数なので、取込の出力はその不動点になる。
+    /// </remarks>
+    /// <param name="dataType">カタログの型名（<c>DATA_TYPE</c>）</param>
+    /// <param name="maxLen">文字列・バイナリの最大長（<c>CHARACTER_MAXIMUM_LENGTH</c>）</param>
+    /// <param name="precision">数値の精度（<c>NUMERIC_PRECISION</c>）</param>
+    /// <param name="scale">数値のスケール（<c>NUMERIC_SCALE</c>）</param>
+    /// <param name="datetimePrecision">小数秒の桁数（<c>DATETIME_PRECISION</c>。datetime2 / time / datetimeoffset で使う）</param>
+    public static string FormatDataType(
+        string dataType,
+        int? maxLen,
+        int? precision,
+        int? scale,
+        int? datetimePrecision = null
+    )
     {
         var dt = dataType.ToLowerInvariant();
 
@@ -695,7 +717,18 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                     return dt;
                 }
 
-                return scale is > 0 ? $"{dt}({precision},{scale})" : $"{dt}({precision})";
+                return SqlServerTypeNotation.Normalize($"{dt}({precision},{scale ?? 0})");
+
+            case "datetime2":
+            case "time":
+            case "datetimeoffset":
+
+                if (datetimePrecision is null)
+                {
+                    return dt;
+                }
+
+                return SqlServerTypeNotation.Normalize($"{dt}({datetimePrecision})");
 
             default:
                 return dt;

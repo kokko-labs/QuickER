@@ -198,6 +198,12 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             return false;
         }
 
+        // MySQL の上限を超える精度・スケールは書き出さない（DDL の適用で必ず失敗するため、切替の時点で変換不能一覧に載せる）
+        if (!IsWithinLimits(canonical))
+        {
+            return false;
+        }
+
         switch (canonical.Kind)
         {
             case CanonicalTypeKind.Boolean:
@@ -226,6 +232,13 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
                 // MySQL は負のスケールを受け付けない（`ERROR 1064` = 構文エラー）。
                 // ここで true を返すと、対象 DBMS の切替が実行できない DDL を黙って作る
                 if (canonical.Scale is < 0)
+                {
+                    return false;
+                }
+
+                // 精度の無い Decimal も書き出さない。MySQL の素の decimal は decimal(10,0) で、Oracle の NUMBER・
+                // PostgreSQL の無制約 numeric から切り替えた列が小数部を黙って丸め、整数部も 10 桁で溢れる
+                if (canonical.Precision is null)
                 {
                     return false;
                 }
@@ -383,9 +396,15 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
 
     private static bool TryParsePrecisionScale(string? argsRaw, out CanonicalType canonical)
     {
+        // 素の decimal は decimal(10,0)（MySQL の既定の精度・スケール）。精度なし（＝任意の小数）と読むと、
+        // 書き出せない型として C# リバースが偽の警告を出し、他方言への切替も意味の違う型になる
         if (argsRaw is null)
         {
-            canonical = new CanonicalType(CanonicalTypeKind.Decimal);
+            canonical = new CanonicalType(
+                CanonicalTypeKind.Decimal,
+                Precision: DefaultDecimalPrecision,
+                Scale: 0
+            );
             return true;
         }
 
@@ -487,6 +506,43 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
 
         return length == -1 ? "longblob" : $"binary({length})";
     }
+
+    /// <summary>精度を省いた decimal の既定の精度</summary>
+    private const int DefaultDecimalPrecision = 10;
+
+    /// <summary>decimal の最大精度</summary>
+    private const int MaxDecimalPrecision = 65;
+
+    /// <summary>decimal の最大スケール</summary>
+    private const int MaxDecimalScale = 30;
+
+    /// <summary>time / datetime / timestamp の小数秒の最大桁数</summary>
+    private const int MaxFractionalSecondsPrecision = 6;
+
+    /// <summary>正規型の精度・スケールが MySQL で宣言できる範囲に収まるか</summary>
+    /// <remarks>
+    /// 範囲外は MySQL が CREATE / ALTER の時点で拒否する値（<c>datetime(7)</c> は <c>Too-big precision 7</c>、
+    /// <c>decimal(66,2)</c> と <c>decimal(10,31)</c> も拒否）。SQL Server の <c>datetime2(7)</c> を手で書いた図などから切り替えると出る。
+    /// </remarks>
+    private static bool IsWithinLimits(CanonicalType canonical) =>
+        canonical.Kind switch
+        {
+            CanonicalTypeKind.Decimal => canonical.Precision
+                is null
+                    or (>= 1 and <= MaxDecimalPrecision)
+                && canonical.Scale is null or (>= 0 and <= MaxDecimalScale)
+                && (
+                    canonical.Precision is null
+                    || canonical.Scale is null
+                    || canonical.Scale <= canonical.Precision
+                ),
+            CanonicalTypeKind.Time
+            or CanonicalTypeKind.DateTime
+            or CanonicalTypeKind.DateTimeOffset => canonical.Precision
+                is null
+                    or (>= 0 and <= MaxFractionalSecondsPrecision),
+            _ => true,
+        };
 
     private static string FormatPrecisionScale(string name, int? precision, int? scale)
     {

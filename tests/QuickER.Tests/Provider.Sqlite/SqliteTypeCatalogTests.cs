@@ -31,7 +31,8 @@ public class SqliteTypeCatalogTests
     [InlineData("SMALLINT", CanonicalTypeKind.SmallInt)]
     [InlineData("INT", CanonicalTypeKind.Int32)]
     [InlineData("BIGINT", CanonicalTypeKind.Int64)]
-    [InlineData("REAL", CanonicalTypeKind.Float32)]
+    // REAL は 8 バイトの倍精度（REAL アフィニティ）
+    [InlineData("REAL", CanonicalTypeKind.Float64)]
     [InlineData("FLOAT", CanonicalTypeKind.Float64)]
     [InlineData("MONEY", CanonicalTypeKind.Money)]
     [InlineData("DATE", CanonicalTypeKind.Date)]
@@ -311,7 +312,6 @@ public class SqliteTypeCatalogTests
     [InlineData("INT")]
     [InlineData("BIGINT")]
     [InlineData("DECIMAL(18,2)")]
-    [InlineData("REAL")]
     [InlineData("FLOAT")]
     [InlineData("MONEY")]
     [InlineData("NVARCHAR(100)")]
@@ -334,5 +334,24 @@ public class SqliteTypeCatalogTests
         Catalog.TryFormat(canonical, out var formatted).Should().BeTrue();
 
         formatted.Should().Be(nativeType);
+    }
+
+    /// <summary>
+    /// REAL アフィニティの宣言型はすべて倍精度（Float64）として読み、Float64 は従来どおり <c>FLOAT</c> と書き戻すことを
+    /// 検証する。<c>REAL</c> の綴りは型トークン経由では <c>FLOAT</c> へ畳まれるため、生成コードは元の綴りを併記する
+    /// （<c>CanonicalTypeTokenAttacher</c> の verbatim 併記）。
+    /// </summary>
+    [Theory(DisplayName = "REAL アフィニティの宣言型は Float64 として読む")]
+    [InlineData("REAL")]
+    [InlineData("FLOAT")]
+    [InlineData("DOUBLE")]
+    [InlineData("FLOAT8")]
+    public void TryParse_RealAffinity_IsFloat64(string nativeType)
+    {
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
+
+        canonical.Should().Be(new CanonicalType(CanonicalTypeKind.Float64));
+        Catalog.TryFormat(canonical, out var formatted).Should().BeTrue();
+        formatted.Should().Be("FLOAT");
     }
 }

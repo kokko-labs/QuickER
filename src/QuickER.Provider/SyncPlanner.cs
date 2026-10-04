@@ -446,7 +446,13 @@ public sealed class SyncPlanner
             // 方言（MySQL / Oracle）では外部キーが消えたまま残るので、外さずに列定義変更の時点で失敗させて警告する
             if (
                 columnAltered
-                && HasPostSyncTypeMismatch(fk, childTable, parentTable, alteredColumnTypes)
+                && HasPostSyncTypeMismatch(
+                    fk,
+                    childTable,
+                    parentTable,
+                    alteredColumnTypes,
+                    capabilities
+                )
             )
             {
                 warnings.Add(
@@ -550,7 +556,9 @@ public sealed class SyncPlanner
 
     /// <summary>同期後（選択済みの列定義変更を適用した後）に、外部キーの両端の列の型が食い違うか</summary>
     /// <remarks>
-    /// 型の比較は差分の型比較と同じ規則（<see cref="DbTypeText.AreEquivalent"/>＝前後空白・大文字小文字を無視）。
+    /// 型の比較は差分の型比較と同じ規則（<see cref="SyncDialectCapabilities.AreSameType"/>＝方言の取込表記へ寄せ、
+    /// 前後空白・大文字小文字を無視）。live の表記と図の表記が混ざって比べられるため、正規化を通さないと
+    /// 綴りだけ違う同じ型を「食い違う」と判定し、外し直しを止めてしまう。
     /// 変更しない側は live の型で比べる。
     /// </remarks>
     private static bool HasPostSyncTypeMismatch(
@@ -562,7 +570,8 @@ public sealed class SyncPlanner
         ) fk,
         string childTable,
         string parentTable,
-        Dictionary<string, string> alteredColumnTypes
+        Dictionary<string, string> alteredColumnTypes,
+        SyncDialectCapabilities capabilities
     )
     {
         foreach (var pair in fk.ColumnPairs)
@@ -570,7 +579,7 @@ public sealed class SyncPlanner
             var childType = PostSyncType(fk.Child, childTable, pair.ChildColumn);
             var parentType = PostSyncType(fk.Parent, parentTable, pair.ParentColumn);
 
-            if (!DbTypeText.AreEquivalent(childType, parentType))
+            if (!capabilities.AreSameType(childType, parentType))
             {
                 return true;
             }

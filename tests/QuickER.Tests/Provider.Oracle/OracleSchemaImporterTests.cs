@@ -33,8 +33,9 @@ public class OracleSchemaImporterTests
     // 精度が無いからと早期 return するとスケールが消えて素の NUMBER に化ける
     [InlineData(2, "NUMBER(*,2)")]
     [InlineData(-2, "NUMBER(*,-2)")]
-    // スケール 0 は「未指定」と区別できないため従来どおり型名のみ
-    [InlineData(0, "NUMBER")]
+    // スケール 0 は INTEGER / SMALLINT / NUMBER(*,0) の宣言（Oracle の実測で data_scale = 0）。素の NUMBER
+    // （data_scale も null）と区別して書かないと、取り込んだ図から作る DDL が小数を受ける列になる
+    [InlineData(0, "NUMBER(*,0)")]
     public void FormatDataType_NumberWithScaleOnly(int scale, string expected)
     {
         OracleSchemaImporter.FormatDataType("NUMBER", null, scale, 0).Should().Be(expected);

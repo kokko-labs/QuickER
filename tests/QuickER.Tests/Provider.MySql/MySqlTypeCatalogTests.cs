@@ -406,4 +406,47 @@ public class MySqlTypeCatalogTests
 
         formatted.Should().Be(nativeType);
     }
+
+    /// <summary>
+    /// 引数を省いた decimal は MySQL の既定どおり decimal(10,0) として解析される。精度なし（任意の小数）と読むと、
+    /// 書き出せない型として C# リバースが偽の警告を出し、他方言への切替も意味の違う型になる。
+    /// </summary>
+    [Fact(DisplayName = "decimal（引数省略）は既定の decimal(10,0) として解析される")]
+    public void TryParse_DecimalWithoutArgs_ResolvesDefaultPrecisionScale()
+    {
+        Catalog.TryParse("decimal", out var canonical).Should().BeTrue();
+
+        canonical
+            .Should()
+            .Be(new CanonicalType(CanonicalTypeKind.Decimal, Precision: 10, Scale: 0));
+    }
+
+    /// <summary>
+    /// MySQL が宣言を拒否する精度・スケール（と精度の無い Decimal）は書き出さず、対象 DBMS 切替の変換不能一覧に
+    /// 載せることを検証する。上限ちょうどは書き出せる（境界の対照）。
+    /// </summary>
+    [Theory(DisplayName = "TryFormat は MySQL の上限を超える値と精度の無い Decimal を書き出さない")]
+    [InlineData(CanonicalTypeKind.DateTime, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.DateTime, null, 6, null, true)]
+    [InlineData(CanonicalTypeKind.Time, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.DateTimeOffset, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 66, 2, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 65, 30, true)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 40, 31, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, 11, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, null, null, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, null, 2, false)]
+    public void TryFormat_RespectsMySqlLimits(
+        CanonicalTypeKind kind,
+        int? length,
+        int? precision,
+        int? scale,
+        bool expected
+    )
+    {
+        Catalog
+            .TryFormat(new CanonicalType(kind, length, precision, scale), out _)
+            .Should()
+            .Be(expected);
+    }
 }

@@ -75,6 +75,40 @@ internal static class SchemaReapplyAssertions
             );
     }
 
+    /// <summary>指定テーブルの列が、起点 DDL の宣言に対応する型表記で取り込まれたことを表明する</summary>
+    /// <param name="entities">取込結果のエンティティ一覧</param>
+    /// <param name="tableName">検証対象のテーブル名</param>
+    /// <param name="expected">列名と、その列について取込が返すべき型表記の組</param>
+    /// <remarks>
+    /// <see cref="ShouldRoundTrip"/> の不動点表明だけでは、取込が型の情報を落としたことは観測できない
+    /// （1 回目と 2 回目がそろって落ちた表記になり一致する）。起点 DDL の宣言と突き合わせて初めて検出できる。
+    /// 比較は前後空白・大文字小文字を無視する（差分の型比較と同じ規則）。
+    /// </remarks>
+    public static void ShouldHaveColumnTypes(
+        IReadOnlyList<Entity> entities,
+        string tableName,
+        params (string Column, string Type)[] expected
+    )
+    {
+        var entity = entities.Single(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
+
+        foreach (var (column, type) in expected)
+        {
+            var imported = entity.Columns.Single(c =>
+                string.Equals(c.Name, column, StringComparison.OrdinalIgnoreCase)
+            );
+
+            DbTypeText
+                .AreEquivalent(imported.DataType, type)
+                .Should()
+                .BeTrue(
+                    $"{tableName}.{column} は {type} として取り込まれること（実際は {imported.DataType}）"
+                );
+        }
+    }
+
     /// <summary>エンティティを名前ベースの比較可能な形へ射影する</summary>
     private static object Project(IReadOnlyList<Entity> entities) =>
         entities

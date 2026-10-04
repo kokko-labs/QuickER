@@ -16,7 +16,9 @@ namespace QuickER.Provider;
 /// 引数規則は <see cref="CanonicalType"/> のフィールドに対応する:
 /// <list type="bullet">
 ///   <item>文字列・バイナリ系: <c>Length</c>。<c>-1</c> は <c>max</c>、<c>null</c> は括弧なし（例 <c>string(50)</c> / <c>string(max)</c> / <c>string</c>）</item>
-///   <item>decimal: <c>Precision</c> と <c>Scale</c>（例 <c>decimal(10,2)</c> / <c>decimal(10)</c> / <c>decimal</c>）</item>
+///   <item>decimal: <c>Precision</c> と <c>Scale</c>（例 <c>decimal(10,2)</c> / <c>decimal(10)</c> / <c>decimal</c>）。
+///   精度なし・スケールありは <c>decimal(*,s)</c>（Oracle の <c>NUMBER(*,s)</c>＝精度は上限なし・スケールは s。
+///   スケールを落として <c>decimal</c> と書くと、C# リバースで「s 桁へ丸める」宣言が消える）</item>
 ///   <item>time / datetime / datetimeoffset: <c>Precision</c>（小数秒桁。例 <c>datetime(7)</c> / <c>datetime</c>）</item>
 ///   <item>その他の種別（整数・bool・guid など）は引数を持たない</item>
 /// </list>
@@ -79,7 +81,7 @@ public static partial class CanonicalTypeToken
         };
 
     [GeneratedRegex(
-        @"^\s*(?<name>[a-z0-9]+)\s*(\(\s*(?<arg1>max|-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\))?\s*$"
+        @"^\s*(?<name>[a-z0-9]+)\s*(\(\s*(?<arg1>max|-?\d+|\*)\s*(,\s*(?<arg2>-?\d+)\s*)?\))?\s*$"
     )]
     private static partial Regex TokenPattern();
 
@@ -202,7 +204,10 @@ public static partial class CanonicalTypeToken
     {
         if (precision is null)
         {
-            return name;
+            // 精度なし・スケールあり（Oracle の NUMBER(*,s)）は * で精度の欠けを書く。素の name へ落とすとスケールが消える
+            return scale is null
+                ? name
+                : $"{name}(*,{scale.Value.ToString(CultureInfo.InvariantCulture)})";
         }
 
         var p = precision.Value.ToString(CultureInfo.InvariantCulture);
@@ -258,8 +263,23 @@ public static partial class CanonicalTypeToken
             return true;
         }
 
-        // max はスケール・精度の引数として無効
-        if (!TryParseArg(arg1, out var precision))
+        // * は「精度なし」。スケールを伴うときだけ受ける（decimal(*) は decimal と同じ意味の別表記なので、
+        // 書き出しの形を 1 つに保つため受けない）。max はスケール・精度の引数として無効
+        int? precision = null;
+
+        if (string.Equals(arg1, "*", StringComparison.Ordinal))
+        {
+            if (arg2 is null)
+            {
+                canonical = null!;
+                return false;
+            }
+        }
+        else if (TryParseArg(arg1, out var parsedPrecision))
+        {
+            precision = parsedPrecision;
+        }
+        else
         {
             canonical = null!;
             return false;

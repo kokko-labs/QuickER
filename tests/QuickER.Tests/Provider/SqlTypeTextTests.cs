@@ -158,6 +158,34 @@ public class SqlTypeTextTests
     public void IsSafe_TooLong_Rejected() =>
         SqlTypeText.IsSafe(new string('a', SqlTypeText.MaxLength + 1)).Should().BeFalse();
 
+    /// <summary>
+    /// 長さの上限は値リスト型（MySQL の enum / set）には掛からないことを検証する。値が 14 個程度の実在の enum でも
+    /// 200 文字を超え、掛けると取込が持ち帰ったその 1 列のせいで図全体の DDL・同期が止まる。
+    /// 値リストの判定は線形なので、非常に長い値リストも短時間で判定できる（上限で先に切らなくてよいことの確認）。
+    /// </summary>
+    [Fact(DisplayName = "長さ上限は値リスト型には掛からない（長い enum も通る）")]
+    public void IsSafe_LongValueList_Accepted()
+    {
+        var values = string.Join(
+            ",",
+            Enumerable.Range(1, 30).Select(i => $"'status_value_{i:D2}'")
+        );
+        var longEnum = $"enum({values})";
+        longEnum.Length.Should().BeGreaterThan(SqlTypeText.MaxLength);
+
+        SqlTypeText.IsSafe(longEnum).Should().BeTrue();
+        SqlTypeText.IsSafe($"set({values})").Should().BeTrue();
+
+        // 非常に長い値リスト（MySQL の上限に近い数）でも短時間で判定できる
+        var huge = $"enum({string.Join(",", Enumerable.Range(1, 60000).Select(i => $"'v{i}'"))})";
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        SqlTypeText.IsSafe(huge).Should().BeTrue();
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+
+        // 値リストに見せかけた形は長くても通さない
+        SqlTypeText.IsSafe($"enum({values}); DROP TABLE t; --").Should().BeFalse();
+    }
+
     /// <summary><c>#</c> は MySQL の行末コメント開始なので語の構成文字から外れていることを検証する</summary>
     /// <remarks>
     /// <c>int#</c> が通ると、MySQL の <c>MODIFY COLUMN</c> で型の直後に続く <c>NOT NULL</c> / <c>COMMENT</c> /
@@ -206,6 +234,14 @@ public class SqlTypeTextTests
     [InlineData("varchar(50) COLLATE Latin1_General_BIN")]
     [InlineData("int UNIQUE")]
     [InlineData("int CHECK")]
+    // 生成列の省略形・自動採番・可視性・名前付きの列制約（図に無い性質が DB 側にだけ生まれる）
+    [InlineData("int AS (price)")]
+    [InlineData("int AS(price)")]
+    [InlineData("int AUTO_INCREMENT")]
+    [InlineData("integer AUTOINCREMENT")]
+    [InlineData("int INVISIBLE")]
+    [InlineData("int VISIBLE")]
+    [InlineData("int CONSTRAINT foo")]
     public void IsSafe_SmuggledColumnClause_Rejected(string dataType) =>
         SqlTypeText.IsSafe(dataType).Should().BeFalse();
 

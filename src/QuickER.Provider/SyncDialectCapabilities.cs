@@ -1,3 +1,5 @@
+using QuickER.Model;
+
 namespace QuickER.Provider;
 
 /// <summary>
@@ -73,4 +75,53 @@ public sealed record SyncDialectCapabilities
 
     /// <summary>列順同期の実現方式。</summary>
     public ColumnReorderMode ColumnReorder { get; init; } = ColumnReorderMode.None;
+
+    /// <summary>
+    /// 型表記を「その表記で宣言した列を取り込むと返る表記」へ寄せる関数（既定は恒等）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// DB は宣言の綴りをそのまま保存するとは限らない（SQL Server の <c>numeric(18,0)</c> は <c>numeric(18)</c>、
+    /// PostgreSQL の <c>timestamp</c> は <c>timestamp(6)</c> として返る）。図・型の選択肢・<c>TryFormat</c> の表記と
+    /// 取込の表記をそのまま比べると、適用しても消えない <c>ALTER COLUMN</c> が出続けるため、差分の型比較
+    /// （<see cref="AreSameType"/>）は両側をこの関数に通してから比べる。
+    /// </para>
+    /// <para>
+    /// 実体は方言ごとの静的関数（<c>{方言}TypeNotation.Normalize</c>）で、取込側も同じ関数を通す＝ここは配線だけ。
+    /// 契約は「取込の出力は不動点（正規化しても変わらない）」「冪等」の 2 つ。
+    /// </para>
+    /// </remarks>
+    public Func<string, string> NormalizeTypeNotation { get; init; } = static type => type;
+
+    /// <summary>外部キーの <c>ON UPDATE</c> 句を持つか（Oracle は持たない）。</summary>
+    /// <remarks>
+    /// <c>false</c> の方言では差分の比較で図側の <c>ON UPDATE</c> を <c>NO ACTION</c> へ畳む
+    /// （<see cref="EffectiveOnUpdate"/>）。畳まないと、DB が表せない参照アクションの差分が同期しても消えない。
+    /// </remarks>
+    public bool SupportsOnUpdateAction { get; init; } = true;
+
+    /// <summary>外部キーの <c>ON DELETE SET DEFAULT</c> を持つか（Oracle は持たない）。</summary>
+    /// <remarks><c>false</c> の方言では差分の比較で <c>SET DEFAULT</c> を <c>NO ACTION</c> へ畳む（<see cref="EffectiveOnDelete"/>）。</remarks>
+    public bool SupportsSetDefaultOnDelete { get; init; } = true;
+
+    /// <summary>2 つの型表記が、この方言の DB で同じ宣言として保存されるか</summary>
+    /// <remarks>
+    /// 両側を <see cref="NormalizeTypeNotation"/> に通したうえで <see cref="DbTypeText.AreEquivalent"/>
+    /// （前後空白・大文字小文字を無視）で比べる。同期の <c>ALTER COLUMN</c> 判定と、外部キーの両端の型照合が使う。
+    /// </remarks>
+    public bool AreSameType(string? left, string? right) =>
+        DbTypeText.AreEquivalent(
+            NormalizeTypeNotation(left ?? string.Empty),
+            NormalizeTypeNotation(right ?? string.Empty)
+        );
+
+    /// <summary>この方言の DB で実際に効く <c>ON DELETE</c> の参照アクション</summary>
+    public ForeignKeyReferentialAction EffectiveOnDelete(ForeignKeyReferentialAction action) =>
+        action == ForeignKeyReferentialAction.SetDefault && !SupportsSetDefaultOnDelete
+            ? ForeignKeyReferentialAction.NoAction
+            : action;
+
+    /// <summary>この方言の DB で実際に効く <c>ON UPDATE</c> の参照アクション</summary>
+    public ForeignKeyReferentialAction EffectiveOnUpdate(ForeignKeyReferentialAction action) =>
+        SupportsOnUpdateAction ? action : ForeignKeyReferentialAction.NoAction;
 }

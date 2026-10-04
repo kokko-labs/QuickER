@@ -194,6 +194,18 @@ These columns now carry their real declared type.
 Any column of the kinds above shows up once as a column change in the diff sync, because the diagram holds the old broken spelling and the database reports the correct one.
 Healthy columns are unaffected: their spelling is unchanged.
 
+On SQL Server the import also reads the fractional-second precision of `datetime2` / `time` / `datetimeoffset`.
+The default precision of 7 is written without parentheses as `datetime2`, and any other precision is written out, as in `datetime2(3)`.
+Earlier versions did not read the precision and imported a `datetime2(3)` column as `datetime2`.
+Syncing from such a diagram could change the column's precision to 7.
+
+**In a diagram imported from SQL Server by an earlier version, columns whose fractional-second precision is not 7 show up as a type change in the next sync.**
+Import the diagram again, or change the types in the diagram to match the database's declarations.
+
+On Oracle, a `NUMBER` with no precision and a scale of 0 (a column declared `INTEGER`, `SMALLINT` or `NUMBER(*,0)`) is imported as `NUMBER(*,0)`.
+Earlier versions imported it as a bare `NUMBER`, so DDL generated from that diagram made a column that accepts fractions.
+In a diagram imported from Oracle by an earlier version, such columns show up as a type change in the next sync.
+
 The import result is merged into the current diagram.
 Tables and columns are matched by name, and matching elements take over the identity of the current diagram's elements, so their layout, width, color, and notes are preserved, along with the named queries that reference them.
 Only newly imported tables are placed in free space; the whole diagram is auto-arranged only when nothing in the current diagram matches (a completely new import).
@@ -257,6 +269,15 @@ It compares the current state of the database with the contents of the diagram, 
 
 Elements with the same name are treated as the same element, so a rename is detected as "drop + add."
 A foreign key of an unnamed relationship is matched by the same default name the DDL gives it (`FK_{child table}_{parent table}`).
+
+Column types are compared after bringing both sides to the spelling the database stores.
+A database does not always remember a declaration as written: a column declared `numeric(18,0)` comes back as `numeric(18)`.
+Two spellings of the same type, such as `numeric(18,0)` and `numeric(18)` or `datetime2(7)` and `datetime2`, are therefore not a difference.
+PostgreSQL's `timestamp` and `timestamp(6)` or `numeric(18,0)` and `numeric(18)`, MySQL's `decimal(12)` and `decimal(12,0)`, and Oracle's `TIMESTAMP` and `TIMESTAMP(6)` or `INTEGER` and `NUMBER(*,0)`, are not a difference for the same reason.
+Only omitted defaults and aliases the database does not remember are aligned; types that differ in meaning (`datetime2(3)` and `datetime2`) are still a difference.
+
+Oracle foreign keys have no `ON UPDATE` and no `ON DELETE SET DEFAULT`, so those settings in the diagram are compared as `NO ACTION`.
+The DDL and the sync script create the foreign key without the clause and add a comment saying so.
 Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
 
 Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions.
@@ -375,6 +396,14 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - A string or binary column declared without a length (PostgreSQL's `varchar`, SQLite's `TEXT` and the like) cannot move to SQL Server, MySQL or Oracle and is listed as well.
   MySQL and Oracle reject a `varchar` / `VARCHAR2` with no length, and SQL Server quietly creates a **one-character** column when the length is omitted.
   Give the column a length in the source diagram before switching
+- A length or precision beyond the target's limit (SQL Server's `nvarchar(5000)`, `decimal(50,2)`, `datetime2(9)`, Oracle's `NVARCHAR2(4000)`, `NUMBER(39)`, MySQL's `datetime(7)`, `decimal(66,2)` and the like) is listed as unconvertible.
+  Writing it out as is would make the DDL fail when applied.
+  Oracle's limits for strings and `RAW` are those of `MAX_STRING_SIZE = STANDARD`, the default (`NVARCHAR2` 2000, `VARCHAR2` 4000, `NCHAR` 1000, `CHAR` and `RAW` 2000).
+  QuickER does not know the connected database's setting, so a column beyond these limits is listed as unconvertible even for a `MAX_STRING_SIZE = EXTENDED` database
+- A `decimal` without a precision (Oracle's `NUMBER`, PostgreSQL's unconstrained `numeric`) cannot move to SQL Server or MySQL and is listed as well.
+  A bare `decimal` means `decimal(18,0)` on SQL Server and `decimal(10,0)` on MySQL, a column that quietly rounds away the fractional part
+- Oracle's `NUMBER(*,2)` (no precision limit, a scale of 2) can be written out only for Oracle and is listed for every other dialect except SQLite.
+  PostgreSQL's `numeric` cannot declare a scale without a precision, and a bare `numeric` would drop the rounding to two places
 - SQL Server's `rowversion` / `timestamp` becomes a plain `BLOB` on SQLite, and its NOT NULL is lifted at the same time (SQLite assigns nothing, so a locally created row has no version until a sync writes one).
   The conversion is one-way: converting that `BLOB` back to SQL Server yields `varbinary(max)`, not a row version.
   See [Multi-target repositories](code-generation.md#multi-target-repositories-sqlserver--sqlite) for what the column means on each side, and [Bidirectional sync support](code-generation.md#bidirectional-sync-support---generate-sync-support) for generating the code that keeps the two databases in step.
@@ -399,6 +428,9 @@ A type may contain:
 - A trailing `[]` for a PostgreSQL array, repeatable for more dimensions: `integer[]`, `integer[][]`
 - A MySQL value list: `enum('a','b')`, `set('x','y')`
 
+A type may be at most 200 characters long.
+Only a MySQL value list has no length limit, because an `enum` with many values can exceed 200 characters and is a real declaration.
+
 Everything the five dialect catalogues offer, and everything schema import builds from a live database, is inside this.
 What falls outside it:
 
@@ -407,8 +439,9 @@ What falls outside it:
 - A type with leading or trailing whitespace.
   What is validated has to be exactly what is written out, and trimming first breaks that: `"\nGO\n"` reads as the single word `GO` once trimmed, but written out it can trip SQL Server's batch splitting.
   An empty or whitespace-only type still means "not set" and passes as before
-- A type whose second or later word is a column clause keyword: `NOT`, `NULL`, `DEFAULT`, `PRIMARY`, `KEY`, `REFERENCES`, `CHECK`, `GENERATED`, `IDENTITY`, `COLLATE`, `UNIQUE`, `ON`.
+- A type whose second or later word is a column clause keyword: `NOT`, `NULL`, `DEFAULT`, `PRIMARY`, `KEY`, `REFERENCES`, `CHECK`, `GENERATED`, `IDENTITY`, `COLLATE`, `UNIQUE`, `ON`, `AS`, `AUTO_INCREMENT`, `AUTOINCREMENT`, `INVISIBLE`, `VISIBLE`, `CONSTRAINT`.
   A type is interpolated into the middle of a column definition, so `int NOT NULL` or `varchar(50) COLLATE Latin1_General_BIN` produces perfectly valid DDL whose nullability, default or collation disagrees with what the diagram declares, and no syntax error tells you.
+  The same goes for `int AS (price)` (the short form of a generated column) or `int AUTO_INCREMENT`: a column the diagram says is neither computed nor auto-numbered becomes one in the database, and the generated code's INSERT fails at run time.
   None of these words appears in any real type notation the catalogues or schema import produce
 
 Two known exclusions are worth naming because a database can produce them.

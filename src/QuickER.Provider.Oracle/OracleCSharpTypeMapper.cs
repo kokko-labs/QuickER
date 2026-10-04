@@ -69,11 +69,11 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
             "number" => MapNumber(precision, scale),
             "binary_float" => Value("float"),
             "binary_double" or "float" => Value("double"),
-            // 日付時刻: WITH TIME ZONE のみ DateTimeOffset、それ以外は DateTime
-            "timestamp with time zone" or "timestamp with local time zone" => Value(
-                "DateTimeOffset"
-            ),
-            "date" or "timestamp" => Value("DateTime"),
+            // 日付時刻: WITH TIME ZONE のみ DateTimeOffset、それ以外は DateTime。
+            // WITH LOCAL TIME ZONE はセッションの時間帯へ変換した値を返す型で、ODP.NET が返す CLR 型は DateTime
+            // （DateTimeOffset で受けると読み取り自体が InvalidCastException になる＝実 ODP.NET で実測）
+            "timestamp with time zone" => Value("DateTimeOffset"),
+            "date" or "timestamp" or "timestamp with local time zone" => Value("DateTime"),
             // blob・long raw は上限不明の無制限バイナリ、raw(n) は有界
             "raw" or "blob" or "long raw" => Reference(
                 "byte[]",
@@ -236,8 +236,12 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
     [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
     private static partial Regex WhitespaceRegex();
 
-    /// <summary>長さ指定 "(数値)" を検出する正規表現</summary>
-    [GeneratedRegex(@"\((\d+)\)", RegexOptions.CultureInvariant)]
+    /// <summary>長さ指定 "(数値)" を検出する正規表現（単位語つきの "(50 char)" / "(50 byte)" も受ける）</summary>
+    /// <remarks>
+    /// <c>NLS_LENGTH_SEMANTICS=CHAR</c> の DB では取込の全文字列列が <c>VARCHAR2(50 CHAR)</c> の形になるため、
+    /// 単位語を受けないと最大長が null になり、[MaxLength]・HasMaxLength・値オブジェクトの長さ検証が全部消える。
+    /// </remarks>
+    [GeneratedRegex(@"\((\d+)(?:\s+(?:byte|char))?\)", RegexOptions.CultureInvariant)]
     private static partial Regex LengthRegex();
 
     /// <summary>NUMBER の "(精度)" または "(精度,スケール)" を検出する正規表現</summary>

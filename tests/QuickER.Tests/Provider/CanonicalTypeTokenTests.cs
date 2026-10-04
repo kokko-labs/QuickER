@@ -73,6 +73,44 @@ public class CanonicalTypeTokenTests
     }
 
     /// <summary>
+    /// 精度なし・スケールありの正規型（Oracle の <c>NUMBER(*,s)</c>）を書き出せるのは Oracle だけ
+    /// （SQLite はアフィニティの宣言なので従来どおり）であることを 5 方言の表で固定する。
+    /// </summary>
+    [Fact(DisplayName = "精度なし・スケールありの decimal を書き出せるのは Oracle だけ")]
+    public void PrecisionlessScaledDecimal_IsFormattableOnlyByOracle()
+    {
+        // 精度なし・スケールあり（Oracle の NUMBER(*,s)＝精度は上限なし・スケールは s）を書ける語彙は Oracle にしか無い。
+        // SQL Server・MySQL は精度を書かないと既定の精度・スケール 0 の列になり小数部を黙って丸める。PostgreSQL の
+        // numeric は精度なしでスケールだけを宣言できず、素の numeric へ写すと「s 桁へ丸める」宣言が黙って落ちる。
+        // SQLite の DECIMAL は宣言がアフィニティでしかないので従来どおり書き出す
+        var catalogs = new (string Dialect, ITypeCatalog Catalog, string? Expected)[]
+        {
+            ("SqlServer", new SqlServerTypeCatalog(), null),
+            ("MySql", new MySqlTypeCatalog(), null),
+            ("PostgreSql", new PostgreSqlTypeCatalog(), null),
+            ("Sqlite", new SqliteTypeCatalog(), "DECIMAL"),
+            ("Oracle", new OracleTypeCatalog(), "NUMBER(*,2)"),
+        };
+        var canonical = new CanonicalType(CanonicalTypeKind.Decimal, Scale: 2);
+
+        foreach (var (dialect, catalog, expected) in catalogs)
+        {
+            catalog
+                .TryFormat(canonical, out var native)
+                .Should()
+                .Be(
+                    expected is not null,
+                    $"{dialect} が decimal(*,2) を書き出せるかは方言の語彙どおりであること"
+                );
+
+            if (expected is not null)
+            {
+                native.Should().Be(expected, $"{dialect} の書き出す表記");
+            }
+        }
+    }
+
+    /// <summary>
     /// 負のスケールを書き出せるのは PostgreSQL / Oracle だけ（5 方言を 1 つの表で固定する）。
     /// </summary>
     /// <remarks>
@@ -194,6 +232,10 @@ public class CanonicalTypeTokenTests
     // 読み戻しで符号を弾くと、C# リバースが自分で書いたトークンを解釈できなくなる
     [InlineData(10, -2, "decimal(10,-2)")]
     [InlineData(5, -1, "decimal(5,-1)")]
+    // 精度なし・スケールあり（Oracle の NUMBER(*,s)）。精度の欠けを * で書く＝スケールを落とさない
+    [InlineData(null, 2, "decimal(*,2)")]
+    [InlineData(null, 0, "decimal(*,0)")]
+    [InlineData(null, -2, "decimal(*,-2)")]
     public void Decimal_FormatAndRoundTrip(int? precision, int? scale, string expectedToken)
     {
         var canonical = new CanonicalType(
@@ -261,6 +303,9 @@ public class CanonicalTypeTokenTests
     [InlineData("string(1,2)")] // 文字列に 2 引数
     [InlineData("time(1,2)")] // 時刻に 2 引数
     [InlineData("decimal(max)")] // decimal に max は不可
+    [InlineData("decimal(*)")] // 精度なし・スケールなしは decimal（書き出しの形を 1 つに保つ）
+    [InlineData("string(*)")] // * は decimal の精度だけ
+    [InlineData("datetime(*)")] // 同上
     [InlineData("string()")] // 空括弧
     [InlineData("string(-5)")] // 長さに負数（max 以外の -1 も TryParse の None で弾かれる）
     public void TryParse_InvalidTokens_ReturnsFalse(string token)

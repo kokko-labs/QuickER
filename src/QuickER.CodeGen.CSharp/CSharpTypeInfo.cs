@@ -132,4 +132,21 @@ public sealed record CSharpTypeInfo
     /// </para>
     /// </remarks>
     public bool IsArray { get; init; }
+
+    /// <summary>
+    /// 1 列＝1 テキスト入力として扱えない型（PostgreSQL の <c>inet</c>＝<c>System.Net.IPAddress</c>）かどうか。
+    /// </summary>
+    /// <remarks>
+    /// EditModel は入力文字列を値型なら <c>TryParse</c> で解析し、参照型は文字列として代入する。参照型で文字列でも
+    /// バイナリでもない型を載せると、入力文字列をその型へそのまま代入する形になりコンパイルできない。配列列と同じく
+    /// EditModel と値オブジェクトから外す（<see cref="IsExcludedFromEditModel"/>）。
+    /// </remarks>
+    public bool IsTextInputUnsupported { get; init; }
+
+    /// <summary>EditModel・Mapper・値オブジェクトへ載せない列か（配列列と、テキスト入力で扱えない型の列）</summary>
+    /// <remarks>
+    /// 除外の判定はこの 1 つの述語に寄せる（EditModel の列・Mapper・値オブジェクト・EditModel の重複検証・
+    /// 生成時 Info が同じ答えを使う）。写しを作ると、ある経路だけ列を載せてコンパイルできなくなる。
+    /// </remarks>
+    public bool IsExcludedFromEditModel => IsArray || IsTextInputUnsupported;
 }

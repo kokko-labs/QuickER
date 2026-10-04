@@ -199,6 +199,18 @@ PostgreSQL では、これにあわせて**従来は誤った表記で取り込�
 上記に当たる列は、図が古い壊れた表記を、データベースが正しい表記を持つため、差分同期に列の変更として 1 度だけ現れます。
 健全な列は影響を受けません（表記は変わりません）。
 
+SQL Server では、`datetime2` / `time` / `datetimeoffset` の小数秒の桁数も取り込みます。
+既定の 7 桁は括弧を省いて `datetime2` と書き、それ以外は `datetime2(3)` のように桁数を書きます。
+以前のバージョンは桁数を読まず、`datetime2(3)` の列を `datetime2` として取り込んでいました。
+その図から同期すると、列の精度が 7 桁へ変わることがありました。
+
+**以前のバージョンで SQL Server から取り込んだ図では、7 桁以外の小数秒を持つ列が次の同期で型の変更として現れます。**
+図を取り込み直すか、図の型をデータベースの宣言に合わせてください。
+
+Oracle では、精度を持たずスケールが 0 の `NUMBER`（`INTEGER`・`SMALLINT`・`NUMBER(*,0)` と宣言した列）を `NUMBER(*,0)` として取り込みます。
+以前のバージョンは素の `NUMBER` として取り込んでおり、その図から作った DDL は小数を受ける列になっていました。
+以前のバージョンで Oracle から取り込んだ図では、該当する列が次の同期で型の変更として現れます。
+
 取込結果は現在の図へマージされます。
 テーブル名・列名で現在の図と照合し、一致した要素は現在の図にある要素をそのまま引き継ぐため、レイアウト・幅・色・メモと、それらを参照する名前付きクエリが温存されます。
 空き領域へ配置されるのは新しく取り込まれたテーブルだけで、現在の図に一致する要素が 1 件もない完全な新規取込のときにだけ、図全体が自動整列されます。
@@ -261,6 +273,15 @@ SQLite のテーブル再構築を除けば、これらのオブジェクトは�
 
 同名の要素を同一とみなして比較するため、リネームは「削除＋追加」として検出されます。
 名前の無いリレーションの外部キーは、DDL が付けるのと同じ既定名（`FK_{子テーブル}_{親テーブル}`）で照合されます。
+
+列の型は、データベースが保存する表記へそろえてから比較します。
+データベースは宣言の綴りをそのまま覚えるとは限らず、`numeric(18,0)` と宣言しても `numeric(18)` として返します。
+そのため `numeric(18,0)` と `numeric(18)`、`datetime2(7)` と `datetime2` のような同じ型の別の綴りは差分になりません。
+PostgreSQL の `timestamp` と `timestamp(6)`、`numeric(18,0)` と `numeric(18)`、MySQL の `decimal(12)` と `decimal(12,0)`、Oracle の `TIMESTAMP` と `TIMESTAMP(6)`、`INTEGER` と `NUMBER(*,0)` も同じ理由で差分になりません。
+そろえるのは既定値の省略と、データベースが覚えていない別名だけで、意味の違う型（`datetime2(3)` と `datetime2`）は従来どおり差分になります。
+
+Oracle は外部キーの `ON UPDATE` と `ON DELETE SET DEFAULT` を持たないため、図のそれらは `NO ACTION` として比べます。
+DDL と同期スクリプトは句を省いて外部キーを作り、注意のコメントを添えます。
 外部キーの作り直しは削除と追加を 1 つにまとめた差分項目で、既定では選択されません（同じ名前の外部キーを外してから付け直すため、MySQL / Oracle では付け直しに失敗すると外部キーが外れたまま残り得ます）。
 
 列の並び順は、追加・削除を除いた共通列の相対順序で比較されます。
@@ -385,6 +406,14 @@ SQLite は既定で外部キーを検査しないため、親の無い子行を�
 - 長さを書かない文字列・バイナリ列（PostgreSQL の `varchar`、SQLite の `TEXT` など）は、SQL Server・MySQL・Oracle へは変換できず一覧に載ります。
   MySQL と Oracle は長さの無い `varchar` / `VARCHAR2` を受け付けず、SQL Server は長さを省くと**黙って 1 文字の列**を作るためです。
   切り替えたい場合は、元の図で長さを書いてください
+- 移行先の上限を超える長さ・精度（SQL Server の `nvarchar(5000)`・`decimal(50,2)`・`datetime2(9)`、Oracle の `NVARCHAR2(4000)`・`NUMBER(39)`、MySQL の `datetime(7)`・`decimal(66,2)` など）は変換不能として一覧に載ります。
+  そのまま書き出すと、DDL の適用で失敗するためです。
+  Oracle の文字列と `RAW` の上限は `MAX_STRING_SIZE = STANDARD`（既定）の値です（`NVARCHAR2` 2000・`VARCHAR2` 4000・`NCHAR` 1000・`CHAR` と `RAW` 2000）。
+  QuickER は接続先の設定を知らないため、`MAX_STRING_SIZE = EXTENDED` のデータベースでも、この上限を超える列は変換不能として一覧に出ます
+- 精度の無い `decimal`（Oracle の `NUMBER`・PostgreSQL の無制約の `numeric`）は SQL Server と MySQL へ変換できず一覧に載ります。
+  素の `decimal` は SQL Server では `decimal(18,0)`、MySQL では `decimal(10,0)` で、小数部を黙って丸める列になるためです
+- Oracle の `NUMBER(*,2)`（精度は上限なし・スケールは 2）は Oracle にしか書き出せず、SQLite を除く方言では一覧に載ります。
+  PostgreSQL の `numeric` は精度なしでスケールだけを宣言できず、素の `numeric` へ写すと 2 桁へ丸める宣言が落ちるためです
 - SQL Server の `rowversion` / `timestamp` は SQLite では通常の `BLOB` になり、同時に NOT NULL が解除されます（SQLite には採番する主体がいないため、ローカルで作った行は同期が書き込むまで版を持ちません）。
   この変換は非可逆で、その `BLOB` を SQL Server へ戻しても `varbinary(max)` にしかなりません（行バージョンには戻りません）。
   両者で列の意味がどう変わるかは [マルチターゲット Repository](code-generation.ja.md#マルチターゲット-repositorysqlserver--sqlite) を、2 つのデータベースを同期させるコードの生成は[双方向同期の支援](code-generation.ja.md#双方向同期の支援--generate-sync-support)を参照してください。
@@ -409,6 +438,9 @@ SQLite は既定で外部キーを検査しないため、親の無い子行を�
 - PostgreSQL の配列を表す末尾の `[]`（多次元のため繰り返せます）：`integer[]`・`integer[][]`
 - MySQL の値リスト：`enum('a','b')`・`set('x','y')`
 
+型の長さは 200 文字までです。
+MySQL の値リストだけは長さを問いません（値の多い `enum` は 200 文字を超えることがあり、実在の宣言だからです）。
+
 5 方言の型カタログが提供する表記も、スキーマ取込が実 DB から組み立てる表記も、すべてこの範囲に収まります。
 外れるのは次のものです。
 
@@ -417,8 +449,9 @@ SQLite は既定で外部キーを検査しないため、親の無い子行を�
 - 前後に空白・改行が付いた型。
   検証した文字列と書き出す文字列は一致していなければならず、先に Trim するとそれが崩れます（`"\nGO\n"` は Trim すると語 1 つの `GO` に見えますが、書き出されれば SQL Server のバッチ分割を誤作動させ得ます）。
   空・空白のみは従来どおり「型が未設定」として通ります
-- 2 語目以降が列定義の句のキーワード（`NOT`・`NULL`・`DEFAULT`・`PRIMARY`・`KEY`・`REFERENCES`・`CHECK`・`GENERATED`・`IDENTITY`・`COLLATE`・`UNIQUE`・`ON`）である型。
+- 2 語目以降が列定義の句のキーワード（`NOT`・`NULL`・`DEFAULT`・`PRIMARY`・`KEY`・`REFERENCES`・`CHECK`・`GENERATED`・`IDENTITY`・`COLLATE`・`UNIQUE`・`ON`・`AS`・`AUTO_INCREMENT`・`AUTOINCREMENT`・`INVISIBLE`・`VISIBLE`・`CONSTRAINT`）である型。
   型は列定義の途中へ補間されるため、`int NOT NULL` や `varchar(50) COLLATE Latin1_General_BIN` はそのまま有効な DDL になり、NULL 許容・既定値・照合順序が図の宣言と食い違ったまま通ります（構文エラーが出ないので気付けません）。
+  `int AS (price)`（生成列の省略形）や `int AUTO_INCREMENT` も同じで、図が計算列でも自動採番でもないと言う列が、データベースでは生成列・自動採番の列になり、生成コードの INSERT が実行時に失敗します。
   これらの語は、型カタログにも取込が組み立てる実在表記にも現れません
 
 実 DB が生み出し得るものとして 2 つ明記しておきます。

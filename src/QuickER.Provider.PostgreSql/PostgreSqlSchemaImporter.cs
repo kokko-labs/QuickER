@@ -608,118 +608,14 @@ WHERE "
             _ => ForeignKeyReferentialAction.NoAction,
         };
 
-    /// <summary>PostgreSQL が小数秒に付ける既定精度（<c>timestamp</c> = <c>timestamp(6)</c>）</summary>
-    private const int DefaultFractionalSecondsPrecision = 6;
-
     /// <summary>
     /// <c>format_type()</c> が返す PostgreSQL の正準表記を、QuickER が扱う短縮語彙へ正規化する。
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// 情報源としては <c>format_type()</c> を採り、<b>表記としてはそのまま採らない</b>。正準表記を
-    /// 素通しすると、既存の図が持つ短縮表記（<c>varchar(50)</c>）と取り込んだ表記
-    /// （<c>character varying(50)</c>）が文字列として食い違い、差分同期が毎回「型を変更する」項目を出す
-    /// ——しかも <c>ALTER TABLE ... TYPE character varying(50)</c> を実行しても <c>format_type()</c> の
-    /// 出力は変わらないので、その差分は<b>実行しても消えない</b>（実 PostgreSQL 16 で確認済み）。
-    /// </para>
-    /// <para>
-    /// 書き戻す規則は次の 5 つだけで、いずれも「同じ型の別表記」への置換（意味は変わらない）:
-    /// <list type="bullet">
-    ///   <item><c>character varying[(n)]</c> → <c>varchar[(n)]</c> / <c>character(n)</c> → <c>char(n)</c></item>
-    ///   <item><c>timestamp[(n)] without time zone</c> → <c>timestamp(n)</c>（無修飾は既定精度 6）</item>
-    ///   <item><c>timestamp[(n)] with time zone</c> → <c>timestamptz(n)</c>（同上）</item>
-    ///   <item><c>time[(n)] without time zone</c> → <c>time(n)</c>（同上）。
-    ///   <c>time with time zone</c> 側は QuickER の従来語彙がそのままなので触らない</item>
-    ///   <item><c>numeric(p,0)</c> → <c>numeric(p)</c>（<c>format_type()</c> はスケール 0 も必ず書く）</item>
-    /// </list>
-    /// これ以外（<c>bit(8)</c> / <c>bit varying(16)</c> / <c>interval day to second(3)</c> /
-    /// <c>numeric(10,-2)</c> / 配列 / ユーザー定義型）は素通しする＝ここが従来の
-    /// <c>information_schema</c> 経由では表せず落ちていた情報にあたる。
-    /// </para>
-    /// <para>
-    /// 配列は末尾の <c>[]</c> を外して要素型へ同じ規則を当て、付け直す（<c>character varying(20)[]</c> →
-    /// <c>varchar(20)[]</c>）。要素型だけ正準表記のまま残すと、同じ型に 2 通りの綴りが生まれるため。
-    /// </para>
-    /// <para>
-    /// 規則が「同じ意味の別表記」であること・正規化後の表記がそのまま DDL として通り、再取込で同じ表記へ
-    /// 戻る（不動点）ことは <c>PostgreSqlDdlRoundTripIntegrationTests</c> の閉包テストと往復テストが固定する。
-    /// </para>
+    /// 規則の正本は <see cref="PostgreSqlTypeNotation.Normalize"/>。差分の比較が図の表記に掛ける正規化と同じ関数なので、
+    /// 取込の出力はその不動点になる（ここだけ別の規則を持つと、図の表記と取込の表記がまた食い違う）。
     /// </remarks>
-    public static string NormalizeFormatType(string formatType)
-    {
-        var text = formatType.Trim();
-
-        // 配列は要素型へ同じ規則を当てて [] を付け直す（format_type は次元数を表記に出さない）
-        var suffix = "";
-
-        while (text.EndsWith("[]", StringComparison.Ordinal))
-        {
-            suffix = "[]" + suffix;
-            text = text[..^2].TrimEnd();
-        }
-
-        return NormalizeElementType(text) + suffix;
-    }
-
-    /// <summary>配列の <c>[]</c> を外した要素型 1 つを短縮語彙へ正規化する</summary>
-    private static string NormalizeElementType(string text)
-    {
-        var dateTime = DateTimeTypePattern().Match(text);
-
-        if (dateTime.Success)
-        {
-            var precision = dateTime.Groups["p"].Success
-                ? dateTime.Groups["p"].Value
-                : DefaultFractionalSecondsPrecision.ToString(CultureInfo.InvariantCulture);
-            var withTimeZone = string.Equals(
-                dateTime.Groups["zone"].Value,
-                "with",
-                StringComparison.Ordinal
-            );
-
-            return (dateTime.Groups["name"].Value, withTimeZone) switch
-            {
-                ("timestamp", false) => $"timestamp({precision})",
-                ("timestamp", true) => $"timestamptz({precision})",
-                ("time", false) => $"time({precision})",
-                // time with time zone は QuickER の従来語彙がそのままなので触らない
-                _ => text,
-            };
-        }
-
-        var character = CharacterTypePattern().Match(text);
-
-        if (character.Success)
-        {
-            var shortName = character.Groups["varying"].Success ? "varchar" : "char";
-            return shortName + character.Groups["args"].Value;
-        }
-
-        var zeroScaleNumeric = ZeroScaleNumericPattern().Match(text);
-
-        if (zeroScaleNumeric.Success)
-        {
-            return $"numeric({zeroScaleNumeric.Groups["p"].Value})";
-        }
-
-        return text;
-    }
-
-    // timestamp / time の正準表記（"timestamp(3) without time zone" 等）。修飾子は名称の直後に入る
-    [GeneratedRegex(
-        @"^(?<name>timestamp|time)(?:\((?<p>\d+)\))? (?<zone>with|without) time zone$",
-        RegexOptions.CultureInvariant
-    )]
-    private static partial Regex DateTimeTypePattern();
-
-    // character varying(n) / character(n)（長さ無しの正準表記も一応受ける）
-    [GeneratedRegex(
-        @"^character(?<varying> varying)?(?<args>\(\d+\))?$",
-        RegexOptions.CultureInvariant
-    )]
-    private static partial Regex CharacterTypePattern();
-
-    // format_type はスケール 0 も必ず書き下ろすため、QuickER の従来表記 numeric(p) へ畳む
-    [GeneratedRegex(@"^numeric\((?<p>\d+),0\)$", RegexOptions.CultureInvariant)]
-    private static partial Regex ZeroScaleNumericPattern();
+    /// <param name="formatType"><c>format_type(atttypid, atttypmod)</c> の出力</param>
+    public static string NormalizeFormatType(string formatType) =>
+        PostgreSqlTypeNotation.Normalize(formatType);
 }

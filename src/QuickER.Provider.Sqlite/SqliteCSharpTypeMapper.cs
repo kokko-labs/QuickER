@@ -77,8 +77,9 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
             "smallint" => Value("short"),
             "int" => Value("int"),
             "bigint" => Value("long"),
-            "real" => Value("float"),
-            "float" => Value("double"),
+            // SQLite の REAL アフィニティは 8 バイトの倍精度（REAL・FLOAT・DOUBLE とも）。単精度の float で受けると
+            // 読み書きのたびに精度を落とす（SqliteTypeAffinity の規則）
+            "real" or "float" => Value("double"),
             "decimal" => Decimal(precision, scale),
             "money" => Value("decimal"),
             "date" or "datetime" or "datetime2" => Value("DateTime"),
@@ -96,6 +97,7 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
                 maxLength
             ),
             // 未知の型は string として扱い、生成自体は継続させる
+            _ when SqliteTypeAffinity.IsReal(baseType) => Value("double"),
             _ => Reference("string", isFallbackType: true),
         };
     }

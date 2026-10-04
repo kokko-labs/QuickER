@@ -78,6 +78,16 @@ The repository still checks it before saving, and the constraint itself exists i
 Generation names those constraints too.
 Entity properties, EF Core, the in-memory repository and remote transfer handle them as usual.
 
+SQLite's `REAL` (and `FLOAT`, `DOUBLE` and the other types SQLite treats as REAL affinity) is generated as `double`.
+SQLite's REAL holds an 8-byte double, so a single-precision `float` would drop the low digits of the value on every read and write.
+
+PostgreSQL's `interval` is generated as `TimeSpan`, `cidr` as `System.Net.IPNetwork`, and `inet` as `System.Net.IPAddress`.
+These are the types the driver (Npgsql) returns; it cannot read them as strings.
+**Reading an `inet` value as `IPAddress` drops its netmask** (the `/24` in `192.168.0.1/24`), as Npgsql does by default.
+**`inet` columns are left out of edit models and value objects** (an edit model is one text input per column and has no way to build an `IPAddress` from the input).
+As with array columns, generation names those columns, and a UNIQUE constraint that contains one is left out of the edit model's duplicate check.
+`interval` and `cidr` columns work in edit models as usual.
+
 PostgreSQL's `time with time zone` (`timetz`) is generated as `DateTimeOffset`.
 **Writing a value whose offset is not UTC needs the column type spelled out.**
 QuickER does not generate EF Core's `HasColumnType` (EF Core is for connecting to an existing schema), so by default EF Core infers `timestamp with time zone` for a `DateTimeOffset` and Npgsql refuses any offset other than UTC.

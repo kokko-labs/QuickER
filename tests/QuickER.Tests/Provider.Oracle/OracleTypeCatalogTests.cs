@@ -446,4 +446,75 @@ public class OracleTypeCatalogTests
         // DATE は時刻を含むため DateTime へ寄せ、書き戻しは TIMESTAMP になる
         formatted.Should().Be("TIMESTAMP");
     }
+
+    /// <summary>
+    /// <c>NUMBER(*)</c> は精度もスケールも持たない素の <c>NUMBER</c>（浮動）と同じに読むことを検証する
+    /// （実 Oracle で 1.5 を保持する）。整数型への振り分けへ落とすと Decimal(null,0)＝整数として読む。
+    /// </summary>
+    [Fact(DisplayName = "NUMBER(*) は素の NUMBER と同じ精度・スケールなしの Decimal")]
+    public void TryParse_NumberStar_IsUnconstrainedDecimal()
+    {
+        Catalog.TryParse("NUMBER(*)", out var canonical).Should().BeTrue();
+
+        canonical.Should().Be(new CanonicalType(CanonicalTypeKind.Decimal));
+    }
+
+    /// <summary>
+    /// 精度なし・スケールありの Decimal は <c>NUMBER(*,s)</c> へ書き出すことを検証する（素の <c>NUMBER</c> へ
+    /// 落とすと s 桁への丸めの宣言が消える）。精度もスケールも無いときは素の <c>NUMBER</c>。
+    /// </summary>
+    [Theory(DisplayName = "精度なし・スケールありの Decimal は NUMBER(*,s) へ書き出す")]
+    [InlineData(2, "NUMBER(*,2)")]
+    [InlineData(0, "NUMBER(*,0)")]
+    [InlineData(null, "NUMBER")]
+    public void TryFormat_DecimalWithoutPrecision_KeepsScale(int? scale, string expected)
+    {
+        Catalog
+            .TryFormat(new CanonicalType(CanonicalTypeKind.Decimal, Scale: scale), out var native)
+            .Should()
+            .BeTrue();
+
+        native.Should().Be(expected);
+    }
+
+    /// <summary>
+    /// Oracle が宣言を拒否する長さ・精度・スケールは書き出さず、対象 DBMS 切替の変換不能一覧に載せることを
+    /// 検証する。文字列・RAW の上限は MAX_STRING_SIZE = STANDARD の値（EXTENDED の DB でも同じに判定する）。
+    /// 上限ちょうどと max（LOB へ写す）は書き出せる（境界の対照）。
+    /// </summary>
+    [Theory(DisplayName = "TryFormat は Oracle の上限を超える値を書き出さない")]
+    [InlineData(CanonicalTypeKind.String, 2001, null, null, false)]
+    [InlineData(CanonicalTypeKind.String, 2000, null, null, true)]
+    [InlineData(CanonicalTypeKind.String, 4000, null, null, false)]
+    [InlineData(CanonicalTypeKind.String, -1, null, null, true)]
+    [InlineData(CanonicalTypeKind.String, 0, null, null, false)]
+    [InlineData(CanonicalTypeKind.AnsiString, 4001, null, null, false)]
+    [InlineData(CanonicalTypeKind.AnsiString, 4000, null, null, true)]
+    [InlineData(CanonicalTypeKind.FixedString, 1001, null, null, false)]
+    [InlineData(CanonicalTypeKind.FixedString, 1000, null, null, true)]
+    [InlineData(CanonicalTypeKind.AnsiFixedString, 2001, null, null, false)]
+    [InlineData(CanonicalTypeKind.Binary, 2001, null, null, false)]
+    [InlineData(CanonicalTypeKind.Binary, 2000, null, null, true)]
+    [InlineData(CanonicalTypeKind.FixedBinary, 2001, null, null, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 39, 2, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 38, 2, true)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, 128, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, -85, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, -84, true)]
+    [InlineData(CanonicalTypeKind.DateTime, null, 10, null, false)]
+    [InlineData(CanonicalTypeKind.DateTime, null, 9, null, true)]
+    [InlineData(CanonicalTypeKind.DateTimeOffset, null, 10, null, false)]
+    public void TryFormat_RespectsOracleLimits(
+        CanonicalTypeKind kind,
+        int? length,
+        int? precision,
+        int? scale,
+        bool expected
+    )
+    {
+        Catalog
+            .TryFormat(new CanonicalType(kind, length, precision, scale), out _)
+            .Should()
+            .Be(expected);
+    }
 }

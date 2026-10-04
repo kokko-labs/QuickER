@@ -91,8 +91,10 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
             case "decimal":
                 return TryParsePrecisionScale(arg1, arg2, CanonicalTypeKind.Decimal, out canonical);
 
+            // SQLite の REAL は 8 バイトの倍精度（REAL アフィニティ＝SqliteTypeAffinity）。単精度の Float32 と読むと、
+            // 他方言へ切り替えたときに単精度の列になり値の精度が落ちる
             case "real":
-                canonical = new CanonicalType(CanonicalTypeKind.Float32);
+                canonical = new CanonicalType(CanonicalTypeKind.Float64);
                 return true;
 
             case "float":
@@ -162,7 +164,13 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
                 return true;
 
             default:
-                // 未知の型は変換不能として扱う
+                // REAL アフィニティになる名前（float8・double precision 等）は倍精度として読む。それ以外の未知の型は変換不能
+                if (SqliteTypeAffinity.IsReal(name))
+                {
+                    canonical = new CanonicalType(CanonicalTypeKind.Float64);
+                    return true;
+                }
+
                 return false;
         }
     }
@@ -211,6 +219,8 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
                 nativeType = FormatPrecisionScale("DECIMAL", canonical.Precision, canonical.Scale);
                 return true;
 
+            // SQLite に単精度は無い。REAL（8 バイトの倍精度）へ写す＝精度を広げる方向なので値は失わない。
+            // 読み戻すと Float64（REAL アフィニティ）になる
             case CanonicalTypeKind.Float32:
                 nativeType = "REAL";
                 return true;

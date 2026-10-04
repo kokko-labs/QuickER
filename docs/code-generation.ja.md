@@ -77,6 +77,16 @@ EditModel は 1 列＝1 テキスト入力の投影で配列を表す記法が�
 制約そのものもデータベースに存在します。外した制約も生成時の Info 診断で名指しします。
 エンティティのプロパティ・EF Core・インメモリ Repository・リモート転送では通常どおり扱えます。
 
+SQLite の `REAL`（と `FLOAT`・`DOUBLE` など、SQLite が REAL アフィニティとして扱う型）は `double` として生成します。
+SQLite の REAL は 8 バイトの倍精度で値を持つため、単精度の `float` では読み書きのたびに値の下位の桁が落ちます。
+
+PostgreSQL の `interval` は `TimeSpan`、`cidr` は `System.Net.IPNetwork`、`inet` は `System.Net.IPAddress` として生成します。
+いずれもドライバ（Npgsql）が返す型で、文字列としては読めません。
+**`inet` の値を `IPAddress` で読むと、ネットマスク（`192.168.0.1/24` の `/24`）は落ちます**（Npgsql の既定の扱い）。
+**`inet` の列は EditModel と値オブジェクトには載りません**（EditModel は 1 列＝1 テキスト入力の投影で、`IPAddress` を入力から組み立てる経路を持たないため）。
+配列列と同じく、該当する列は生成時の Info 診断で名指しし、その列を含む UNIQUE 制約は EditModel の重複検証から外れます。
+`interval` と `cidr` の列は EditModel でも通常どおり扱えます。
+
 PostgreSQL の `time with time zone`（`timetz`）は `DateTimeOffset` として生成します。
 **UTC 以外のオフセットでの書き込みには列型の明示が必要です**。
 QuickER は EF Core の `HasColumnType` を生成しないため（EF Core は既存スキーマへの接続専用）、既定では EF Core が `DateTimeOffset` を `timestamp with time zone` と推論し、Npgsql が UTC 以外のオフセットを拒否します。

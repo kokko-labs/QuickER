@@ -2997,6 +2997,55 @@ public class SyncPlannerTests
         warning.Detail.Should().Be("FK_orders_customer");
     }
 
+    /// <summary>
+    /// 両端の型が綴りだけ違う同じ型（SQL Server の <c>numeric(18,0)</c> と <c>numeric(18)</c>）なら、方言の
+    /// 正規化（<see cref="SyncDialectCapabilities.NormalizeTypeNotation"/>）を通して同じ型とみなし、外部キーを
+    /// 外し直して警告しないことを検証する。正規化を通さない capabilities では食い違いとして警告する（対照）。
+    /// </summary>
+    [Fact(DisplayName = "型の食い違い: 綴りだけ違う同じ型は方言の正規化を通して一致とみなす")]
+    public void AlterColumn_BothSidesWithEquivalentNotation_UsesDialectNormalization()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+        List<SchemaDiffItem> Items() =>
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "orders",
+                    ColumnName = "customer_id",
+                    Column = Col("customer_id", "numeric(18,0)"),
+                    IsSelected = true,
+                },
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "customer",
+                    ColumnName = "id",
+                    Column = Col("id", "numeric(18)"),
+                    IsSelected = true,
+                },
+            ];
+
+        var normalized = new SyncPlanner().BuildPlan(
+            Items(),
+            FkRebuildCaps with
+            {
+                NormalizeTypeNotation = SqlServerTypeNotation.Normalize,
+            },
+            context
+        );
+        var raw = new SyncPlanner().BuildPlan(Items(), FkRebuildCaps, context);
+
+        normalized.Warnings.Should().BeEmpty();
+        normalized
+            .Sections.Select(s => s.Kind)
+            .Should()
+            .Contain(SchemaDiffKind.DropForeignKey)
+            .And.Contain(SchemaDiffKind.AddForeignKey);
+        raw.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch);
+    }
+
     /// <summary>両端を同じ型へ変えれば外部キーを外して付け直し、警告は出さない（大文字小文字の違いは同じ型）</summary>
     [Fact(DisplayName = "型の食い違い: 両端を同じ型へ変えれば外し直して警告しない")]
     public void AlterColumn_BothSidesOfForeignKey_InjectsWithoutWarning()

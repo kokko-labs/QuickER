@@ -120,14 +120,14 @@ internal sealed partial class CSharpGenerationModelBuilder
         return resolved;
     }
 
-    /// <summary>EditModel の重複検証に載せられる構成列か（配列列は載らない）</summary>
+    /// <summary>EditModel の重複検証に載せられる構成列か（配列列・テキスト入力で扱えない型の列は載らない）</summary>
     /// <remarks>
-    /// 配列列は EditModel に投影しない（<see cref="IsArrayColumn"/>）ので、その列を参照する検証を出すと
+    /// 配列列・inet の列は EditModel に投影しない（<see cref="IsExcludedFromEditModelColumn"/>）ので、その列を参照する検証を出すと
     /// 実在しないプロパティを参照してコンパイルできない。<b>Repository 側の重複事前チェックからは外さない</b>
     /// ＝そちらが読むのは Entity のプロパティで実在し、DB 側にも制約は実在するため、そこでは弾ける。
     /// 外した制約は生成時 Info（<c>CodeGen_Info_ArrayUniqueConstraintsNotValidated</c>）で名指しする。
     /// </remarks>
-    private bool IsEditableConstraint(Column column) => !IsArrayColumn(column);
+    private bool IsEditableConstraint(Column column) => !IsExcludedFromEditModelColumn(column);
 
     /// <summary>単一主キーを持つ（＝ Repository 契約面が生成される）エンティティかどうか</summary>
     /// <remarks>Repository モデルの構築判定と EditModel の <c>ValidateUniqueAsync</c> 生成判定が同じ規則を共有する。</remarks>

@@ -65,6 +65,14 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
         // N 系は常に文字単位だが Oracle の構文が単位語を受けないため付けない
         new("C_NVC", "NVARCHAR2(20)", "NVARCHAR2(20)", Closure.RoundTrips),
         new("C_RAW", "RAW(16)", "RAW(16)", Closure.RoundTrips),
+        // 精度なし・スケール 0（INTEGER / SMALLINT / NUMBER(*,0)）は素の NUMBER と区別して取り込む。
+        // 素の NUMBER にすると、取り込んだ図から作り直した DDL が小数を受ける列になり整数の制約が落ちる
+        new("C_INTEGER", "INTEGER", "NUMBER(*,0)", Closure.RoundTrips),
+        new("C_SMALLINT", "SMALLINT", "NUMBER(*,0)", Closure.RoundTrips),
+        new("C_NUM_STAR_0", "NUMBER(*,0)", "NUMBER(*,0)", Closure.RoundTrips),
+        new("C_NUM_STAR_2", "NUMBER(*,2)", "NUMBER(*,2)", Closure.RoundTrips),
+        // NUMBER(*) は精度もスケールも持たない＝素の NUMBER と同じ
+        new("C_NUM_STAR", "NUMBER(*)", "NUMBER", Closure.RoundTrips),
     ];
 
     /// <summary>
@@ -440,5 +448,56 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
         result
             .Warnings.Should()
             .NotContain(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost);
+    }
+
+    /// <summary>
+    /// <c>INTEGER</c> の列を取り込んだ図から DDL を作り直しても、整数の制約が保たれる（1.5 が 2 へ丸められる）
+    /// ことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// Oracle は <c>INTEGER</c> を精度なし・スケール 0 の <c>NUMBER</c> として保存する。取込が素の
+    /// <c>NUMBER</c>（浮動）として書くと、作り直した列は 1.5 をそのまま保存する別の列になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] Oracle: INTEGER の列は取込図から作り直しても整数の制約を保つ"
+    )]
+    public async Task Import_IntegerColumn_KeepsIntegerConstraintAfterRegeneration()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE INT_PROBE (ID NUMBER(10) PRIMARY KEY, QTY INTEGER);",
+            Ct
+        );
+
+        ErDiagram imported;
+
+        await using (var conn = await fixture.OpenConnectionAsync(Ct))
+        {
+            var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+            imported = new ErDiagram
+            {
+                Entities = result.Entities.ToList(),
+                Relationships = result.Relationships.ToList(),
+            };
+        }
+
+        imported
+            .Entities.Single(e => e.TableName == "INT_PROBE")
+            .Columns.Single(c => c.Name == "QTY")
+            .DataType.Should()
+            .Be("NUMBER(*,0)");
+
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(new OracleDdlGenerator().Build(imported), Ct);
+        await fixture.ExecuteAsync("INSERT INTO INT_PROBE (ID, QTY) VALUES (1, 1.5);", Ct);
+
+        await using var reconn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = reconn.CreateCommand();
+        cmd.CommandText = "SELECT TO_CHAR(QTY) FROM INT_PROBE";
+        var stored = (string?)await cmd.ExecuteScalarAsync(Ct);
+
+        stored.Should().Be("2", "作り直した列も整数の列であり、1.5 は 2 へ丸められること");
     }
 }
