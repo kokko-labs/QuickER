@@ -136,4 +136,7 @@
   <data name="Attachment_ClipboardCaptureFailed" xml:space="preserve">
     <value>Could not capture the clipboard contents as an image.</value>
   </data>
+  <data name="Markdown_OpenLinkFailedFormat" xml:space="preserve">
+    <value>Could not open the link {0}: {1}</value>
+  </data>
 </root>

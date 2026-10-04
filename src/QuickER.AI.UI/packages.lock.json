@@ -8,6 +8,12 @@
         "resolved": "8.4.2",
         "contentHash": "WadCzGEc2U+3e20avRLng4qNtt4zoOGWrdUISqJWrHe3/FSnrYjuM5Sb4yQb09LhkBXrrI4Zt3dLKgRMbItsrg=="
       },
+      "Markdig": {
+        "type": "Direct",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "lLhaiI/mNDTNzgLqnmknhf4LjgTqOAyjx5+GNz0X3AxYMxUhmFppF2WVMdER+SDqwhE5wUF1pzs/cuLwFxs7xA=="
+      },
       "Microsoft.Extensions.AI.Abstractions": {
         "type": "Transitive",
         "resolved": "10.8.3",
@@ -289,9 +295,9 @@
           "GitHub.Copilot.SDK": "[1.0.14, )",
           "ModelContextProtocol.AspNetCore": "[2.2.0, )",
           "OpenAI": "[2.14.0, )",
-          "QuickER.Mcp": "[0.1.0, )",
-          "QuickER.Model": "[0.1.0, )",
-          "QuickER.Settings": "[0.1.0, )"
+          "QuickER.Mcp": "[0.2.0, )",
+          "QuickER.Model": "[0.2.0, )",
+          "QuickER.Settings": "[0.2.0, )"
         }
       },
       "quicker.gui.abstractions": {

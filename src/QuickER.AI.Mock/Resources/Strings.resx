@@ -699,4 +699,10 @@ Default to English for all responses (the language of the app UI). Switch only i
   <data name="Mock_ToolFileAccessFailedResult" xml:space="preserve">
     <value>Could not read or write the mock folder: {0}</value>
   </data>
+  <data name="Mock_ShowMarkdown" xml:space="preserve">
+    <value>Markdown</value>
+  </data>
+  <data name="Mock_ShowMarkdownTooltip" xml:space="preserve">
+    <value>Show the AI answers as formatted Markdown. Turn this off to see and copy the original text.</value>
+  </data>
 </root>

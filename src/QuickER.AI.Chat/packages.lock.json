@@ -289,39 +289,40 @@
           "GitHub.Copilot.SDK": "[1.0.14, )",
           "ModelContextProtocol.AspNetCore": "[2.2.0, )",
           "OpenAI": "[2.14.0, )",
-          "QuickER.Mcp": "[0.1.0, )",
-          "QuickER.Model": "[0.1.0, )",
-          "QuickER.Settings": "[0.1.0, )"
+          "QuickER.Mcp": "[0.2.0, )",
+          "QuickER.Model": "[0.2.0, )",
+          "QuickER.Settings": "[0.2.0, )"
         }
       },
       "quicker.ai.ui": {
         "type": "Project",
         "dependencies": {
           "CommunityToolkit.Mvvm": "[8.4.2, )",
-          "QuickER.AI": "[0.1.0, )",
-          "QuickER.Gui.Abstractions": "[0.1.0, )"
+          "Markdig": "[1.4.0, )",
+          "QuickER.AI": "[0.2.0, )",
+          "QuickER.Gui.Abstractions": "[0.2.0, )"
         }
       },
       "quicker.codegen.csharp": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Model": "[0.1.0, )",
+          "QuickER.Model": "[0.2.0, )",
           "Scriban": "[7.4.0, )"
         }
       },
       "quicker.document": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Model": "[0.1.0, )",
-          "QuickER.Settings": "[0.1.0, )"
+          "QuickER.Model": "[0.2.0, )",
+          "QuickER.Settings": "[0.2.0, )"
         }
       },
       "quicker.extensibility": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.12, )",
-          "QuickER.Model": "[0.1.0, )",
-          "QuickER.Provider": "[0.1.0, )"
+          "QuickER.Model": "[0.2.0, )",
+          "QuickER.Provider": "[0.2.0, )"
         }
       },
       "quicker.gui.abstractions": {
@@ -330,7 +331,7 @@
       "quicker.gui.common": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Gui.Abstractions": "[0.1.0, )"
+          "QuickER.Gui.Abstractions": "[0.2.0, )"
         }
       },
       "quicker.mcp": {
@@ -343,10 +344,10 @@
       "quicker.mcp.tools": {
         "type": "Project",
         "dependencies": {
-          "QuickER.CodeGen.CSharp": "[0.1.0, )",
-          "QuickER.Document": "[0.1.0, )",
-          "QuickER.Mcp": "[0.1.0, )",
-          "QuickER.Model": "[0.1.0, )"
+          "QuickER.CodeGen.CSharp": "[0.2.0, )",
+          "QuickER.Document": "[0.2.0, )",
+          "QuickER.Mcp": "[0.2.0, )",
+          "QuickER.Model": "[0.2.0, )"
         }
       },
       "quicker.model": {
@@ -355,8 +356,8 @@
       "quicker.provider": {
         "type": "Project",
         "dependencies": {
-          "QuickER.CodeGen.CSharp": "[0.1.0, )",
-          "QuickER.Model": "[0.1.0, )"
+          "QuickER.CodeGen.CSharp": "[0.2.0, )",
+          "QuickER.Model": "[0.2.0, )"
         }
       },
       "quicker.settings": {
@@ -380,6 +381,12 @@
           "Microsoft.Extensions.AI.Abstractions": "10.2.0",
           "Microsoft.Extensions.Logging.Abstractions": "10.0.2"
         }
+      },
+      "Markdig": {
+        "type": "CentralTransitive",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "lLhaiI/mNDTNzgLqnmknhf4LjgTqOAyjx5+GNz0X3AxYMxUhmFppF2WVMdER+SDqwhE5wUF1pzs/cuLwFxs7xA=="
       },
       "Microsoft.Extensions.DependencyInjection": {
         "type": "CentralTransitive",

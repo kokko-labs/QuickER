@@ -72,6 +72,26 @@ The tabs are also disabled while a new conversation is starting.
   They stay when the response fails or is interrupted, so you can send them again as they are.
 - **AI mock generation**: generate web mockup screens from the current ER diagram, saved as a mock folder (see below)
 
+## Displaying answers
+
+In AI chat and AI mock generation, the AI's answers are shown as formatted Markdown.
+Headings, bold and italic text, inline code, code blocks, bulleted and numbered lists, tables, quotes, horizontal rules, and links are formatted.
+The "Markdown" check box in the chat header switches between the formatted view and the original text.
+Each window remembers its own setting, and it is on by default.
+While a response is in progress, the answer is shown as text.
+It switches to the formatted view once the response ends, whether it completes, fails, or is interrupted.
+A short answer made only of text gets a bubble as wide as the text, and an answer with a table, code block, or list uses the full bubble width.
+
+- **Links**: only `http` and `https` links open, in your default browser and without confirmation.
+  Hover over a link to see the URL it opens.
+  Any other link (a `file:` link, a network path, a link that starts an app, and so on) is shown as plain text that cannot be clicked.
+- **Images**: images are not loaded, and only their alternative text is shown.
+  An image in an answer never makes QuickER connect to an outside server.
+- **HTML**: HTML in an answer is not interpreted and is shown as written.
+- **Deeply nested answers**: an answer nested too deeply to format, such as one with dozens of levels of quotes or emphasis, is shown as text.
+- **Copying**: in the formatted view, copying copies the text as displayed.
+  To copy the original Markdown, clear the "Markdown" check box and copy from the text view.
+
 ## AI mock generation
 
 "AI Mock Generation" turns the current ER diagram into web mockup screens.

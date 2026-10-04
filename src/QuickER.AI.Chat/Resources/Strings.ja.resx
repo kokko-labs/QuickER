@@ -399,4 +399,10 @@ ER 図の作成・変更は必ず提供されたツール（{0}）で行って�
   <data name="QueryTool_ArgumentsNotObject" xml:space="preserve">
     <value>ツール '{0}' の引数は JSON オブジェクトで渡してください。</value>
   </data>
+  <data name="Chat_ShowMarkdown" xml:space="preserve">
+    <value>Markdown 表示</value>
+  </data>
+  <data name="Chat_ShowMarkdownTooltip" xml:space="preserve">
+    <value>AI の回答を Markdown として整形して表示します。オフにすると元の文章を表示・コピーできます。</value>
+  </data>
 </root>

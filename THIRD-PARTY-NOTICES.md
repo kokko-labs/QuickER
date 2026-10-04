@@ -269,6 +269,7 @@ The following components are licensed under the Apache License, Version 2.0.
 
 ## BSD 2-Clause License
 
+- **Markdig** — Copyright (c) 2016-2026, Alexandre Mutel — https://github.com/xoofx/markdig — *GUI*
 - **Scriban** — Copyright (c) Alexandre Mutel — https://github.com/scriban/scriban — *GUI, CLI*
 
 ### BSD 2-Clause License text

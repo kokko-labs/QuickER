@@ -104,6 +104,12 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     [ObservableProperty]
     private ErChatBackendKind _selectedBackend = ErChatBackendKind.ApiKey;
 
+    /// <summary>
+    /// アシスタントの回答を Markdown として表示するか（ウィンドウのトグル。ダイアログ別の UI 状態として保存する）
+    /// </summary>
+    [ObservableProperty]
+    private bool _showAssistantMarkdown = true;
+
     /// <summary>API キー接続タブが選択されているか</summary>
     public bool IsApiKeyBackend => SelectedBackend == ErChatBackendKind.ApiKey;
 
@@ -299,6 +305,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
             var ui = settings.UiFor(_dialogKind);
             InitialBackend = ui.ParseLastBackend() ?? ErChatBackendKind.ApiKey;
+            ShowAssistantMarkdown = ui.ShowAssistantMarkdown;
 
             // プロバイダー → エンドポイントの順で復元する。プロバイダー変更フックは
             // 「ローカル LLM かつエンドポイント空」なら既定 URL を補完するため、保存値がある場合だけ後から上書きする
@@ -658,6 +665,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
         var ui = settings.UiFor(_dialogKind);
         ui.LastBackend = SelectedBackend.ToString();
+        ui.ShowAssistantMarkdown = ShowAssistantMarkdown;
 
         // API キー接続の選択（プロバイダー・エンドポイント）も次回起動へ引き継ぐ。
         // API キー本体はここ（平文 JSON）へは入れず、DPAPI ストアだけが持つ

@@ -639,6 +639,73 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
+    /// <summary>
+    /// 回答の Markdown 表示は既定でオンで、このキーを持たない既存の設定ファイルもオンで読むことを検証する
+    /// </summary>
+    [Fact(DisplayName = "回答の Markdown 表示は既定でオンで、キーの無い既存の設定もオンで読む")]
+    public void LoadSettings_ShowAssistantMarkdown_DefaultsToOn()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var fresh = CreateVm(folder);
+            fresh.LoadSettings();
+            fresh.ShowAssistantMarkdown.Should().BeTrue("設定ファイルが無いときの既定");
+
+            // この機能より前の設定ファイル（UI 状態のセクションにキーが無い）を置く
+            var path = new AiSettingsStore(folder).SettingsPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "{\"chatUi\":{\"lastBackend\":\"Codex\"},\"mockUi\":{}}");
+
+            var chat = CreateVm(folder, dialogKind: AiDialogKind.AiChat);
+            chat.LoadSettings();
+            chat.InitialBackend.Should()
+                .Be(ErChatBackendKind.Codex, "置いた設定ファイルが読まれている");
+            chat.ShowAssistantMarkdown.Should().BeTrue();
+
+            var mock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
+            mock.LoadSettings();
+            mock.ShowAssistantMarkdown.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>回答の Markdown 表示の選択は、ダイアログ別（chat / mock）に保存・復元されることを検証する</summary>
+    [Fact(DisplayName = "回答の Markdown 表示の選択は chat / mock で独立して保存される")]
+    public void SaveSettings_ShowAssistantMarkdown_IsolatedPerDialog()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var chat = CreateVm(folder, dialogKind: AiDialogKind.AiChat);
+            chat.LoadSettings();
+            chat.ShowAssistantMarkdown = false;
+            chat.SaveSettings();
+
+            var mock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
+            mock.LoadSettings();
+            mock.ShowAssistantMarkdown.Should().BeTrue("chat の選択は mock へ波及しない");
+            mock.SaveSettings();
+
+            var restoredChat = CreateVm(folder, dialogKind: AiDialogKind.AiChat);
+            restoredChat.LoadSettings();
+            restoredChat.ShowAssistantMarkdown.Should().BeFalse();
+
+            var restoredMock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
+            restoredMock.LoadSettings();
+            restoredMock.ShowAssistantMarkdown.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>ローカル LLM を復元したとき、モデルは MRU 履歴の先頭が選ばれることを検証する（カタログ無しプロバイダーの既定選択）</summary>
     [Fact(DisplayName = "Local LLM 復元でモデルは MRU 先頭が選ばれる")]
     public void LoadSettings_LocalLlm_SelectsHistoryHeadModel()
