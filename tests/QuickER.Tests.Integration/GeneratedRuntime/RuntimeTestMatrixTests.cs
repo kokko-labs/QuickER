@@ -208,6 +208,44 @@ public class RuntimeTestMatrixTests
                 NotApplicable("Query() はリモート面に無く、Include ツリーは転送されない")
             )
         ),
+        ["GraphSave"] = new(
+            "グラフ保存がカスケードの閉包だけを保存する（親への逆参照を辿らない・削除の根の子孫）",
+            Row(
+                Gap(
+                    "QuickER 版は SQL Server・SQLite とも同じ EntityGraphSaver の走査で、SQLite の派生を基準として代表させている"
+                ),
+                Covered(),
+                Covered(),
+                Covered(),
+                Gap(
+                    "リモートの保存はサーバー側の直結実装が行うため、走査の意味論は直結の各セルが持つ"
+                )
+            )
+        ),
+        ["EfCoreExecutionStrategy"] = new(
+            "再試行する実行戦略のもとで、自前のトランザクションを開く経路（フックありの保存・カスケードの一括削除）を試行ごとに組み直す",
+            Row(
+                NotApplicable("実行戦略は EF Core の機構"),
+                NotApplicable("実行戦略は EF Core の機構"),
+                Covered(),
+                NotApplicable("実行戦略は EF Core の機構"),
+                NotApplicable("実行戦略は EF Core の機構")
+            )
+        ),
+        ["IgnoredWrite"] = new(
+            "版の無い表で競合以外の理由により更新が当たらないときの扱い（行なしとして報告・やり直さない）",
+            Row(
+                Gap(
+                    "QuickER 版は SQL Server・SQLite とも版の無い表で 0 行を実在確認しない同じ規則で、SQLite で代表させている"
+                ),
+                Covered(),
+                Covered(),
+                NotApplicable(
+                    "インメモリにはトリガー・行レベルセキュリティが無く、文が当たらない状況が生まれない"
+                ),
+                NotApplicable("リモートの保存はサーバー側の直結実装が行う")
+            )
+        ),
         ["IncludeGraphSelfReference"] = new(
             "IncludeGraph の edge-skip（自己参照ナビを展開しない）",
             Row(
@@ -480,6 +518,13 @@ public class RuntimeTestMatrixTests
         new("UniquenessCheckRemoteRuntimeTests", "UniquenessCheck", Backend.Remote),
         new("InMemoryUniquenessRuntimeTests", "UniquenessEnforcement", Backend.InMemory),
         // --- 名前付きクエリ ---
+        new("EfCoreExecutionStrategyRuntimeTests", "EfCoreExecutionStrategy", Backend.EfCore),
+        new("IgnoredWriteAdoRuntimeTests", "IgnoredWrite", Backend.AdoSqlite),
+        new("IgnoredWriteEfCoreRuntimeTests", "IgnoredWrite", Backend.EfCore),
+        new("GraphSaveAdoRuntimeTests", "GraphSave", Backend.AdoSqlite),
+        new("GraphSaveEfCoreRuntimeTests", "GraphSave", Backend.EfCore),
+        new("GraphSaveEfCoreSqlServerRuntimeTests", "GraphSave", Backend.EfCore),
+        new("GraphSaveInMemoryRuntimeTests", "GraphSave", Backend.InMemory),
         new("IncludeGraphSqlServerRuntimeTests", "IncludeGraph", Backend.AdoSqlServer),
         new("IncludeGraphAdoRuntimeTests", "IncludeGraph", Backend.AdoSqlite),
         new("IncludeGraphEfCoreRuntimeTests", "IncludeGraph", Backend.EfCore),

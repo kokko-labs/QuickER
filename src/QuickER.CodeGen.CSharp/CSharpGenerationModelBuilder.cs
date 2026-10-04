@@ -51,6 +51,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
         _valueObjects = BuildValueObjects(diagram, options, diagnostics);
 
+        // シーダーのサンプル値は列の役割（外部キーの参照先・主キーと一意制約の構成列）と行数を先に決めてから組み立てる
+        PrepareSampleData(diagram);
+
         // 同期支援は Repository 契約の生成モデル（インターフェイス名・主キー型）を素材にするため、先に確定させる
         var repositoryClasses = options.GeneratesRepositoryContract
             ? diagram
@@ -157,6 +160,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             ClassName = className,
             // [Table("...")] へ C# リテラルとして埋め込むためエスケープする（DB 取込では " を含むテーブル名が実在し得る）
             TableName = EscapeNameForCSharpString(entity.TableName),
+            // インメモリのシーダーが投入する行数（主キー・一意制約・参照先の行数で上限より減ることがある）
+            SampleRowCount = _sampleRowCounts.GetValueOrDefault(entity.Id, MaxSampleRows),
             // 説明が無いときの XmlDoc 定型文へ載せるため、XML としてエスケープした形も持つ
             TableNameXmlDoc = EscapeForXmlDocSummary(entity.TableName),
             // API リファレンス（.g.md）の表セル用は未エスケープのまま（Markdown 側の安全化は EscapeCell の責務）
@@ -576,202 +581,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             ),
         };
     }
-
-    /// <summary>
-    /// インメモリ Repository の決定的シーダーで、指定カラムへ代入する値の C# 式を構築する。
-    /// </summary>
-    /// <remarks>
-    /// シーダーは各エンティティ 3 件（ループ変数 <c>index</c> = 1..3）を親→子の順で投入する。
-    /// 主キー（int/long 等）は <c>index</c>、string 主キーは <c>"{TABLE}-00n"</c>、FK は親キーの実在値（<c>index</c>）を指す。
-    /// NULL 可列は 3 件中 1 件（<c>index == 3</c>）を null にする。値オブジェクトは <c>Create</c> で包む。型ベースの固定値で決定的。
-    /// サンプル値は列の宣言制約（string の MaxLength・decimal の precision/scale）を満たす形で組み立てる＝
-    /// VO 有効時はシードが <c>Create</c> の検証を通るため、制約を見ない固定値は DI 登録（既定シード）を起動時例外にする。
-    /// ただし利用者が書く検証（OnValidate・手書き VO の規則）は生成器には知りようがなく満たせないため、
-    /// VO の Create はシーダー内のガード（CreateSampleValue）経由で呼び、拒否されたときに
-    /// 「どのプロパティへ何を入れようとしたか」と対処（seedSampleData: false）が例外メッセージに載るようにする。
-    /// </remarks>
-    private string BuildSampleValueExpression(
-        Column column,
-        CSharpTypeInfo typeInfo,
-        CSharpValueObjectModel? valueObject,
-        string? entityClassName
-    )
-    {
-        // 値オブジェクトは内包値を作ってから Create で包む（GuidKey は無引数生成の代わりに決定的 GUID を渡す）
-        if (valueObject is not null)
-        {
-            var innerExpr = valueObject.IsGuidKey
-                ? SampleGuidLiteral() + ".ToString()"
-                : BuildSampleScalarExpression(
-                    column,
-                    valueObject.ValueTypeName,
-                    valueObject.MaxLength,
-                    valueObject.Precision,
-                    valueObject.Scale
-                );
-
-            // 失敗文脈（"{クラス}.{プロパティ}"）を添えたガード経由で Create する
-            var propertyName = _nameConverter.ToPropertyName(column.Name);
-            var target = entityClassName is null
-                ? propertyName
-                : $"{entityClassName}.{propertyName}";
-            var created =
-                $"CreateSampleValue<{valueObject.ClassName}, {valueObject.ValueTypeName}>(\"{target}\", {innerExpr})";
-
-            // NULL 可 VO 列は 3 件中 1 件を null にする（確定値型は VoClass?）
-            return column.IsNullable ? $"index == 3 ? null : {created}" : created;
-        }
-
-        var baseType = typeInfo.TypeName.TrimEnd('?');
-        var scalar = BuildSampleScalarExpression(
-            column,
-            baseType,
-            typeInfo.MaxLength,
-            typeInfo.Precision,
-            typeInfo.Scale
-        );
-
-        // NULL 可列は 3 件中 1 件（index == 3）を null にする（プロパティ型は T?・target-typed conditional で解決）
-        return column.IsNullable ? $"index == 3 ? null : {scalar}" : scalar;
-    }
-
-    /// <summary>型・主キー/外部キー・列名から、非 NULL のスカラーサンプル値式を構築する</summary>
-    private string BuildSampleScalarExpression(
-        Column column,
-        string baseType,
-        int? maxLength,
-        int? precision,
-        int? scale
-    )
-    {
-        // 主キー・外部キーは決定的な行番号（index）で表現し、親子の FK 整合を保つ
-        var isKey = column.IsPrimaryKey || column.IsForeignKey;
-
-        switch (baseType)
-        {
-            case "int":
-                return isKey ? "index" : "index * 10";
-
-            case "long":
-                return isKey ? "(long)index" : "index * 10L";
-
-            case "short":
-                return isKey ? "(short)index" : "(short)(index * 10)";
-
-            case "byte":
-                return "(byte)index";
-
-            case "decimal":
-                return BuildSampleDecimalExpression(precision, scale);
-
-            case "double":
-                return "index * 100.5d";
-
-            case "float":
-                return "index * 100.5f";
-
-            case "bool":
-                return "index % 2 == 1";
-
-            case "System.Guid":
-            case "Guid":
-                return SampleGuidLiteral();
-
-            case "System.DateTime":
-            case "DateTime":
-                return "new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(index)";
-
-            case "System.DateTimeOffset":
-            case "DateTimeOffset":
-                return "new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero).AddDays(index)";
-
-            case "System.TimeSpan":
-            case "TimeSpan":
-                return "TimeSpan.FromHours(index)";
-
-            case "byte[]":
-                return "new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }";
-
-            // PostgreSQL の inet / cidr（行ごとに違う決定的なアドレス・ネットワーク）
-            case "System.Net.IPAddress":
-                return "new System.Net.IPAddress(new byte[] { 10, 0, 0, (byte)index })";
-
-            case "System.Net.IPNetwork":
-                return "new System.Net.IPNetwork(new System.Net.IPAddress(new byte[] { 10, (byte)index, 0, 0 }), 16)";
-
-            case "string":
-                return BuildSampleStringExpression(column, maxLength);
-
-            default:
-                // 配列列は空配列で始める（default は null で、NOT NULL の列へ入れられない）
-                if (baseType.EndsWith("[]", StringComparison.Ordinal))
-                {
-                    return $"Array.Empty<{baseType[..^2]}>()";
-                }
-
-                // enum など未知の値型は既定値へフォールバックする（決定的・コンパイル可能）
-                return $"default({baseType})";
-        }
-    }
-
-    /// <summary>decimal 列のサンプル値式を構築する（precision / scale が既知なら、その桁で表現できる決定的な値にする）</summary>
-    /// <remarks>
-    /// decimal は値だけでなく桁の持ち方（<c>decimal.Scale</c>）も保持し、整数 <c>index</c> を掛けても
-    /// リテラル由来の Scale は減らない。生成される検証（ValidateDecimal）は precision があるときだけ出るため、
-    /// 桁を合わせる必要があるのも既知のときだけで、未知（自由記述の decimal 等）は従来の固定値のままにする。
-    /// 組み立ての不変条件は「小数部の桁数＝宣言 scale（宣言の全桁を実際に使う）・index=1..3 を掛けても
-    /// 整数部が precision - scale 桁に収まる（整数部は最大 3 桁に抑え、繰り上がり分も 1 桁目に収まる 5 を使う）」。
-    /// </remarks>
-    private static string BuildSampleDecimalExpression(int? precision, int? scale)
-    {
-        if (precision is not int p || p <= 0)
-        {
-            return "index * 100.50m";
-        }
-
-        // ValidateDecimal と同じ解釈（scale 省略は 0）。範囲外の宣言は防御的に 0..precision へ丸める
-        var s = Math.Clamp(scale ?? 0, 0, p);
-        var integralDigits = p - s;
-
-        // 整数部が使えない列（precision == scale）は最小桁の刻み＝index * 10^-s（index=3 でも 1 未満）
-        if (integralDigits == 0)
-        {
-            return $"index * 0.{new string('0', s - 1)}1m";
-        }
-
-        var integral = "1" + new string('0', Math.Min(integralDigits, 3) - 1);
-        return s == 0 ? $"index * {integral}m" : $"index * {integral}.{new string('0', s - 1)}5m";
-    }
-
-    /// <summary>string 列のサンプル値式を構築する（主キーは "{TABLE}-00n"・それ以外は "{列名} n"。MaxLength で切り詰め）</summary>
-    private string BuildSampleStringExpression(Column column, int? maxLength)
-    {
-        string expression;
-
-        if (column.IsPrimaryKey)
-        {
-            // string 主キーは "{TABLE}-001" 形式（テーブル名は大文字化）。出力先が補間文字列なので波括弧も二重化する
-            var prefix = EscapeForCSharpInterpolatedString(column.Name.ToUpperInvariant());
-            expression = $"$\"{prefix}-00{{index}}\"";
-        }
-        else
-        {
-            var label = EscapeForCSharpInterpolatedString(column.Name);
-            expression = $"$\"{label} {{index}}\"";
-        }
-
-        // MaxLength があれば宣言長を超えないよう安全側で切り詰める（決定的・実行時例外を避ける）
-        if (maxLength is > 0)
-        {
-            return $"({expression}).Length > {maxLength} ? ({expression})[..{maxLength}] : ({expression})";
-        }
-
-        return expression;
-    }
-
-    /// <summary>決定的な GUID リテラル式を返す（index を末尾に埋め込み 3 件を区別する）</summary>
-    private static string SampleGuidLiteral() =>
-        "new Guid($\"00000000-0000-0000-0000-00000000000{index}\")";
 
     /// <summary>カラム定義から EditModel のプロパティ生成モデルを構築する</summary>
     /// <remarks>

@@ -1511,19 +1511,20 @@ public sealed class IncludeLoader
         // Collect the parent-side key values (non-null). When the set is empty, no child query is issued.
         // Keys are compared in their normalized form (IncludeKeys): the parent's key and the child's foreign key can have
         // different CLR types (a long INTEGER key referred to by an int INT column), which as boxed values never compare equal
-        var parentKeys = new List<object>();
+        // The query binds a value per distinct key: the normalized key itself, except a binary key, whose normalized form is
+        // text that matches nothing in the column, so the bytes are bound instead
+        var boundByKey = new Dictionary<object, object>();
         foreach (var parent in parents)
         {
-            var key = IncludeKeys.Normalize(
-                _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn)
-            );
+            var raw = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
+            var key = IncludeKeys.Normalize(raw);
             if (key is not null)
             {
-                parentKeys.Add(key);
+                boundByKey.TryAdd(key, SqlParameterValue.Unwrap(raw) is byte[] bytes ? bytes : key);
             }
         }
 
-        var distinctKeys = parentKeys.Distinct().ToList();
+        var distinctKeys = boundByKey.Values.ToList();
         if (distinctKeys.Count == 0)
         {
             return;
@@ -2339,9 +2340,10 @@ public static class SqlExpressionTranslator
     /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property, and a property without a [Column] mapping, are not columns and are rejected outright.</summary>
     /// <remarks>
     /// A navigation carries no column of its own, so treating one as a column would emit its property name as a column
-    /// name and produce SQL the database rejects (<c>x.Parent == null</c> became <c>[Parent] IS NULL</c>). The in-memory
-    /// store and EF Core both translate such a predicate happily, which made this the one place where the three backends
-    /// disagreed. Failing here states the limitation instead, and the fix is always the same: filter on the foreign-key column.
+    /// name and produce SQL the database rejects (<c>x.Parent == null</c> became <c>[Parent] IS NULL</c>). Failing here
+    /// states the limitation instead, and the fix is always the same: filter on the foreign-key column. The in-memory
+    /// backend refuses a navigation in the same way (its stored rows carry no navigations to evaluate); EF Core translates
+    /// one into a join of its own.
     /// On a type that uses <c>[Column]</c> mapping (a generated entity), a property without the mapping — one added
     /// through an extension partial, or base-class state such as RowState — is refused for the same reason: it has no
     /// column behind it, so the only translations available are wrong ones. A type with no <c>[Column]</c> at all
@@ -3270,7 +3272,8 @@ public sealed class EntitySaveMetadata
     /// <summary>
     /// Sets a column value read from the reader onto the target property (the shared row-mapping step). <c>DBNull</c>
     /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
-    /// or passed through for SQL Server, depending on the dialect.
+    /// converted through <see cref="RawValueConverter"/> for EF Core, or passed through for SQL Server, depending on the
+    /// dialect.
     /// </summary>
     private static void SetColumnValue(EntityBaseCore entity, PropertyInfo property, object value)
     {

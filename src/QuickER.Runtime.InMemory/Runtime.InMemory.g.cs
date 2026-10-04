@@ -404,7 +404,7 @@ public static class InMemoryUniqueness
 
         foreach (var (otherKey, other) in existing)
         {
-            if (Equals(otherKey, key))
+            if (InMemoryKeyComparer.KeysEqual(otherKey, key))
             {
                 continue;
             }
@@ -505,6 +505,52 @@ public static class InMemoryUniqueness
     }
 }
 
+/// <summary>Compares the primary keys the in-memory store files rows under.</summary>
+/// <remarks>
+/// A key is compared the way a database compares the column: a binary key (<c>binary(n)</c>, a <c>byte[]</c>) by its
+/// bytes, everything else by its own equality. The default comparer would compare a <c>byte[]</c> by reference, and the
+/// store hands out copies of every array, so a binary key read back from the store would never find its own row again.
+/// </remarks>
+internal sealed class InMemoryKeyComparer
+    : IEqualityComparer<object>,
+        IEqualityComparer<(Type EntityType, object Key)>
+{
+    /// <summary>The shared instance (the comparer holds no state).</summary>
+    public static readonly InMemoryKeyComparer Instance = new();
+
+    private InMemoryKeyComparer() { }
+
+    /// <summary>Whether two keys identify the same row.</summary>
+    public static bool KeysEqual(object? x, object? y) =>
+        x is byte[] left && y is byte[] right ? left.AsSpan().SequenceEqual(right) : Equals(x, y);
+
+    /// <summary>The hash code of a key, consistent with <see cref="KeysEqual"/>.</summary>
+    public static int KeyHashCode(object key)
+    {
+        if (key is byte[] bytes)
+        {
+            var hash = new HashCode();
+            hash.AddBytes(bytes);
+            return hash.ToHashCode();
+        }
+
+        return key.GetHashCode();
+    }
+
+    bool IEqualityComparer<object>.Equals(object? x, object? y) => KeysEqual(x, y);
+
+    int IEqualityComparer<object>.GetHashCode(object obj) => KeyHashCode(obj);
+
+    bool IEqualityComparer<(Type EntityType, object Key)>.Equals(
+        (Type EntityType, object Key) x,
+        (Type EntityType, object Key) y
+    ) => x.EntityType == y.EntityType && KeysEqual(x.Key, y.Key);
+
+    int IEqualityComparer<(Type EntityType, object Key)>.GetHashCode(
+        (Type EntityType, object Key) obj
+    ) => HashCode.Combine(obj.EntityType, KeyHashCode(obj.Key));
+}
+
 /// <summary>
 /// In-memory data store that holds entities in memory without a database (shared as a DI singleton).
 /// </summary>
@@ -517,7 +563,8 @@ public static class InMemoryUniqueness
 /// </para>
 /// <para>
 /// The primary key is taken from <see cref="EntitySaveMetadata.KeyProperty"/>, and value objects are opened to their
-/// underlying value to form the dictionary key (so they match by value equality).
+/// underlying value to form the dictionary key (so they match by value equality). Keys are compared by
+/// <see cref="InMemoryKeyComparer"/>, which compares a binary key (<c>binary(n)</c>) by its bytes.
 /// </para>
 /// </remarks>
 public sealed class InMemoryDataStore
@@ -531,7 +578,7 @@ public sealed class InMemoryDataStore
     {
         if (!_tables.TryGetValue(entityType, out var table))
         {
-            table = new Dictionary<object, EntityBaseCore>();
+            table = new Dictionary<object, EntityBaseCore>(InMemoryKeyComparer.Instance);
             _tables[entityType] = table;
         }
 
@@ -1044,7 +1091,7 @@ public sealed class InMemoryDataStore
         InMemorySaveStaging staging
     )
     {
-        var view = new Dictionary<object, EntityBaseCore>(Table(entityType));
+        var view = new Dictionary<object, EntityBaseCore>(Table(entityType), InMemoryKeyComparer.Instance);
 
         foreach (var ((stagedType, key), snapshot) in staging.Overlay)
         {
@@ -1257,9 +1304,11 @@ public sealed class InMemoryDataStore
 /// </remarks>
 public sealed class InMemorySaveStaging
 {
-    private readonly Dictionary<(Type EntityType, object Key), EntityBaseCore?> _overlay = new();
+    private readonly Dictionary<(Type EntityType, object Key), EntityBaseCore?> _overlay = new(
+        InMemoryKeyComparer.Instance
+    );
     private readonly List<(Type EntityType, object Key, EntityBaseCore? Base)> _baseline = new();
-    private readonly HashSet<(Type EntityType, object Key)> _touched = new();
+    private readonly HashSet<(Type EntityType, object Key)> _touched = new(InMemoryKeyComparer.Instance);
     private readonly List<(
         EntityBaseCore Source,
         PropertyInfo Property,
@@ -1523,14 +1572,17 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     /// <summary>Compiles the plan's predicates into delegates.</summary>
     /// <remarks>
     /// Compiling an expression tree is expensive, and it is done before the store lock is taken on purpose: doing it inside
-    /// would serialize every read in the process behind one query's compilation. Equality over <c>byte[]</c> is rewritten
-    /// to a byte-wise comparison first (see <see cref="ByteArrayEqualityRewriter"/>).
+    /// would serialize every read in the process behind one query's compilation. A navigation property is rejected first
+    /// (see <see cref="NavigationGuard"/>), and equality and <c>Contains</c> over <c>byte[]</c> are rewritten to a byte-wise
+    /// comparison (see <see cref="ByteArrayEqualityRewriter"/>).
     /// </remarks>
     private static Func<TEntity, bool>[] CompilePredicates(SqlQueryPlan<TEntity> plan) =>
         plan.Predicates.Select(predicate =>
-                (Func<TEntity, bool>)
-                    ((LambdaExpression)ByteArrayEqualityRewriter.Instance.Visit(predicate)).Compile()
-            )
+            {
+                NavigationGuard.Instance.Visit(predicate);
+                return (Func<TEntity, bool>)
+                    ((LambdaExpression)ByteArrayEqualityRewriter.Instance.Visit(predicate)).Compile();
+            })
             .ToArray();
 
     /// <summary>Compares two byte arrays by value (two nulls are equal; one null never matches).</summary>
@@ -1547,15 +1599,36 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
+    /// <summary>Whether a collection of byte arrays holds one with the same bytes as <paramref name="value"/> (an IN over a binary column).</summary>
+    private static bool ContainsBytes(IEnumerable<byte[]?> source, byte[]? value)
+    {
+        foreach (var item in source)
+        {
+            if (AreBytesEqual(item, value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The <see cref="ContainsBytes"/> method, resolved once for the rewriter.</summary>
+    private static readonly MethodInfo ContainsBytesMethod = typeof(InMemoryQueryExecutor<TEntity>).GetMethod(
+        nameof(ContainsBytes),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
     /// <summary>
-    /// Rewrites <c>==</c> / <c>!=</c> over <c>byte[]</c> operands into a byte-wise comparison before the predicate
-    /// is compiled.
+    /// Rewrites <c>==</c> / <c>!=</c> over <c>byte[]</c> operands, and a <c>Contains</c> over a collection of <c>byte[]</c>
+    /// (an IN), into a byte-wise comparison before the predicate is compiled.
     /// </summary>
     /// <remarks>
-    /// C#'s <c>==</c> on arrays is reference equality, so a compiled predicate would treat two equal blobs as
-    /// different - the SQL backends compare the column's actual bytes, and the in-memory store hands out cloned
-    /// arrays by design, which makes reference equality never match. Value-object columns are unaffected (their
-    /// operators already compare by value), and other operand types keep their C# semantics untouched.
+    /// C#'s <c>==</c> on arrays is reference equality, and so is the default comparer a collection's <c>Contains</c> uses,
+    /// so a compiled predicate would treat two equal blobs as different - the SQL backends compare the column's actual
+    /// bytes, and the in-memory store hands out cloned arrays by design, which makes reference equality never match.
+    /// Value-object columns are unaffected (their operators already compare by value), and other operand types keep their
+    /// C# semantics untouched.
     /// </remarks>
     private sealed class ByteArrayEqualityRewriter : ExpressionVisitor
     {
@@ -1579,6 +1652,92 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
 
             return base.VisitBinary(node);
         }
+
+        /// <inheritdoc />
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            // Enumerable.Contains(source, value), or an instance Contains(value) on a List / HashSet / ICollection
+            if (node.Method.Name == nameof(Enumerable.Contains))
+            {
+                var source = node.Object ?? (node.Arguments.Count == 2 ? node.Arguments[0] : null);
+                var value = node.Object is null
+                    ? (node.Arguments.Count == 2 ? node.Arguments[1] : null)
+                    : (node.Arguments.Count == 1 ? node.Arguments[0] : null);
+
+                if (
+                    source is not null
+                    && value is not null
+                    && value.Type == typeof(byte[])
+                    && typeof(IEnumerable<byte[]>).IsAssignableFrom(source.Type)
+                )
+                {
+                    return Expression.Call(
+                        ContainsBytesMethod,
+                        Expression.Convert(Visit(source), typeof(IEnumerable<byte[]?>)),
+                        Visit(value)
+                    );
+                }
+            }
+
+            return base.VisitMethodCall(node);
+        }
+    }
+
+    /// <summary>Rejects a navigation property in a query condition or ordering, as the SQL backends do.</summary>
+    /// <remarks>
+    /// A navigation is not a column. The SQL backends refuse to translate one, and here the store holds rows rather than
+    /// graphs, so a navigation read off a stored row is always empty: <c>x.Orders.Any()</c> would match no row and
+    /// <c>x.Customer == null</c> every row, without an error. Only a navigation reached from the entity being queried is
+    /// rejected; a value captured from outside the query is evaluated like any other value.
+    /// </remarks>
+    private sealed class NavigationGuard : ExpressionVisitor
+    {
+        /// <summary>The shared stateless instance.</summary>
+        public static readonly NavigationGuard Instance = new();
+
+        /// <inheritdoc />
+        protected override Expression VisitMember(MemberExpression node)
+        {
+            if (
+                node.Member is PropertyInfo property
+                && EntitySaveMetadata.NavigationAttribute(property) is not null
+                && IsReadOffParameter(node.Expression)
+            )
+            {
+                throw new NotSupportedException(
+                    $"'{property.DeclaringType?.Name}.{property.Name}' is a navigation property and cannot be used in a query condition or ordering; "
+                        + "filter on the foreign-key column instead."
+                );
+            }
+
+            return base.VisitMember(node);
+        }
+
+        /// <summary>Whether the expression is a lambda parameter, possibly through member accesses and conversions.</summary>
+        private static bool IsReadOffParameter(Expression? expression)
+        {
+            while (true)
+            {
+                switch (expression)
+                {
+                    case ParameterExpression:
+                        return true;
+                    case MemberExpression member:
+                        expression = member.Expression;
+                        break;
+                    case UnaryExpression
+                    {
+                        NodeType: ExpressionType.Convert
+                            or ExpressionType.ConvertChecked
+                            or ExpressionType.TypeAs
+                    } unary:
+                        expression = unary.Operand;
+                        break;
+                    default:
+                        return false;
+                }
+            }
+        }
     }
 
     /// <summary>Compiles the plan's ordering key selectors into delegates (paired with their direction). Called outside the store lock, for the same reason as <see cref="CompilePredicates"/>.</summary>
@@ -1587,8 +1746,10 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     ) =>
         plan
             .Orderings.Select(ordering =>
-                ((Func<TEntity, object?>)ordering.KeySelector.Compile(), ordering.Descending)
-            )
+            {
+                NavigationGuard.Instance.Visit(ordering.KeySelector);
+                return ((Func<TEntity, object?>)ordering.KeySelector.Compile(), ordering.Descending);
+            })
             .ToArray();
 
     /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
@@ -2314,8 +2475,8 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
 
         var count = Store.Write(scope =>
         {
-            var batchKeys = new HashSet<object>();
-            var accepted = new Dictionary<object, EntityBaseCore>();
+            var batchKeys = new HashSet<object>(InMemoryKeyComparer.Instance);
+            var accepted = new Dictionary<object, EntityBaseCore>(InMemoryKeyComparer.Instance);
 
             // Pre-validate all keys and constraint values, then apply: a duplicate must not leave a partially inserted batch behind.
             foreach (var entity in targets)

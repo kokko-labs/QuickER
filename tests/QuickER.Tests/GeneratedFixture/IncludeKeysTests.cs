@@ -37,6 +37,19 @@ public sealed class IncludeKeysTests
         IncludeKeys.Normalize(null).Should().BeNull();
     }
 
+    [Fact(DisplayName = "バイト列は中身の 16 進文字列にし、同じ中身の別の配列が等しくなる")]
+    public void ByteArrays_CompareByContent()
+    {
+        IncludeKeys.Normalize(new byte[] { 1, 2, 0xAB }).Should().Be("0102AB");
+
+        Equals(
+                IncludeKeys.Normalize(new byte[] { 1, 2 }),
+                IncludeKeys.Normalize(new byte[] { 1, 2 })
+            )
+            .Should()
+            .BeTrue();
+    }
+
     [Fact(DisplayName = "値オブジェクトは中の値を取り出してからそろえる")]
     public void ValueObjects_AreOpened()
     {

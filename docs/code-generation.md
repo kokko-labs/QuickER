@@ -314,7 +314,8 @@ Projection (Select), GroupBy, Join, and arithmetic expressions are not supported
 **Navigation properties cannot appear in a predicate or an ordering key.**
 `Where(o => o.Customer == null)` throws `NotSupportedException`.
 A navigation has no column of its own, so filter on the foreign-key column instead (`Where(o => o.CustomerId == null)`).
-The in-memory and EF Core backends do translate such a predicate, so this is a limitation of the QuickER Repository rather than a shared one.
+The in-memory backend refuses it in the same way, because the rows it stores carry no navigations to evaluate.
+EF Core translates such a predicate into a join of its own, so there the limitation does not apply.
 
 #### Null compensation
 
@@ -561,7 +562,7 @@ If `insertWhenUpdateMissing: true` and no update target is found so it switches 
 | Target | Hook firing | Context support |
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
-| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
+| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
 | In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
 | Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
 
@@ -755,9 +756,17 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 // For SQLite / PostgreSQL / MySQL / Oracle, specify the corresponding EF Core provider's Use*
 ```
 
-- Save uses a disconnected-graph save via `TrackGraph`, converting `RowState` to EF Core's state.
+- Save is a disconnected-graph save that converts `RowState` to EF Core's state.
+  Like the QuickER repositories, it registers only the entities the cascade reaches from the root.
+  A parent reference (such as `line.Order`) is not followed, so a parent loaded with `Include` is neither written nor deleted.
 - Optimistic concurrency is at parity: `ConcurrencyMode` selects the policy, EF Core's `DbUpdateConcurrencyException` is converted to `SaveConflictException`, and the refreshed concurrency token is left on the entity (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
-- The raw-SQL APIs are at full parity.
+- An update of a table without a rowversion column that matches no row (a trigger or row-level security discarded it) is reported as a missing row, as the QuickER Repository does: `UpdateAsync` returns `false` and a graph save fails with `SaveConflictException` (`NotFound`).
+  A save that keeps being rejected as a concurrency conflict is attempted at most 10 times and then fails with `SaveConflictException`.
+- The raw-SQL APIs are at full parity, including the conversion of the values a driver returns in its own storage type (SQLite returns an `int` column as `long`, Oracle a `NUMBER` as `decimal`).
+- A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
+- A retrying execution strategy (such as SQL Server's `EnableRetryOnFailure`) is supported.
+  A graph save and a cascading `ExecuteDeleteAsync` run inside the strategy, and every attempt starts over from scratch.
+  With save hooks, Before and After run once per attempt: their database writes roll back with the failed attempt, but a side effect outside the database is repeated.
 - A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
   The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
 - A table without a primary key is **excluded from the DbContext** (no DbSet, no Fluent configuration, and navigations to it are ignored via an explicit `modelBuilder.Ignore<T>()`), and a Warning diagnostic names the table.

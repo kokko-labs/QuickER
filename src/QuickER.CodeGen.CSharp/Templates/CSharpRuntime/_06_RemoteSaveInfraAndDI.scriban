@@ -2053,7 +2053,8 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// <summary>
     /// Sets a column value read from the reader onto the target property (the shared row-mapping step). <c>DBNull</c>
     /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
-    /// or passed through for SQL Server, depending on the dialect.
+    /// converted through <see cref="RawValueConverter"/> for EF Core, or passed through for SQL Server, depending on the
+    /// dialect.
     /// </summary>
     private static void SetColumnValue(EntityBaseCore entity, PropertyInfo property, object value)
     {
@@ -2078,6 +2079,33 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
                     typeof(IValueObjectCore).IsAssignableFrom(propertyType)
                         ? SqlValueObjectActivator.Wrap(value, propertyType)
                         : CoerceScalar(value, propertyType)
+                );
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
+                    ex
+                );
+            }
+{{~ else if ef_core && !(repositories && repository_dialect != "sqlserver") ~}}
+            // EF Core reaches databases whose driver hands back a storage type rather than the property's own (SQLite returns
+            // an int column as long, Oracle a NUMBER as decimal), so a plain column goes through the shared raw-value
+            // conversion - a value that already has the property's type passes through untouched.
+            // A stored value the property cannot take surfaces with no hint of where it came from, so the column is named
+            // here and the original exception is kept as the inner one
+            try
+            {
+                var propertyType = property.PropertyType;
+                property.SetValue(
+                    entity,
+{{~ if generate_value_objects ~}}
+                    typeof(IValueObjectCore).IsAssignableFrom(propertyType)
+                        ? SqlValueObjectActivator.Wrap(value, propertyType)
+                        : RawValueConverter.ConvertRaw(value, propertyType)
+{{~ else ~}}
+                    RawValueConverter.ConvertRaw(value, propertyType)
+{{~ end ~}}
                 );
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

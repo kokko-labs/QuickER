@@ -5090,8 +5090,9 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         // 主キー VO の変換（v.Value / Create）
         content.Should().Contain(".HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!))");
-        // VO 列は Fluent の HasMaxLength/HasPrecision を出さない（長さ・桁数は VO 内部検証）
-        content.Should().NotContain(".HasMaxLength(50).HasConversion");
+        // VO 列にも Fluent の HasMaxLength/HasPrecision を出す（検証は VO の Create が行うが、列のストア型は EF Core が
+        // パラメータと .Value の CAST に使うため。出さないと既定の nvarchar(max)・decimal(18,2) になる）
+        content.Should().Contain(".HasMaxLength(50).HasConversion(");
     }
 
     /// <summary>rowversion 列を持つエンティティの EF Core 構成で IsRowVersion() が出力されることを検証する</summary>
@@ -5465,9 +5466,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("context.Entry(entity).State = EntityState.Added;");
     }
 
-    /// <summary>EF Core 版 SaveAsync が TrackGraph で RowState → EntityState 変換し、競合を SaveConflictException へ変換することを検証する</summary>
+    /// <summary>EF Core 版 SaveAsync がカスケードの閉包を RowState → EntityState 変換で登録し、競合を SaveConflictException へ変換することを検証する</summary>
     [Fact]
-    public void Generate_EfCore_ShouldConvertRowStateViaTrackGraphInSave()
+    public void Generate_EfCore_ShouldConvertRowStateOfCascadeClosureInSave()
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
@@ -5481,8 +5482,9 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
-        // TrackGraph による切断グラフの登録と RowState → EntityState の変換表
-        content.Should().Contain("context.ChangeTracker.TrackGraph(");
+        // カスケードの閉包だけを 1 件ずつ登録する（ChangeTracker.TrackGraph は親への逆参照まで辿るので使わない）と RowState → EntityState の変換表
+        content.Should().Contain("foreach (var child in entity.EnumerateCascadeChildren())");
+        content.Should().NotContain("ChangeTracker.TrackGraph(");
         content.Should().Contain("RowState.Added => EntityState.Added,");
         content.Should().Contain("RowState.Updated => EntityState.Modified,");
         content.Should().Contain("RowState.Removed => EntityState.Deleted,");

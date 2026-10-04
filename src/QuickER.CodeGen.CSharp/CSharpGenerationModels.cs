@@ -355,6 +355,9 @@ internal sealed class CSharpClassModel
     /// <summary>対応するテーブル名</summary>
     public required string TableName { get; init; }
 
+    /// <summary>インメモリのシーダーが投入する行数（最大 3。主キー・一意制約が 3 行ぶん違う値を作れないとき、またはその親の行数に合わせて減る）</summary>
+    public int SampleRowCount { get; init; } = 3;
+
     /// <summary>XML doc summary の定型文へ埋め込むテーブル名（XML エスケープ・改行畳み込み済み）</summary>
     /// <remarks>
     /// <see cref="TableName"/> は <c>[Table("…")]</c> 用の C# リテラルエスケープなので XmlDoc には使えない

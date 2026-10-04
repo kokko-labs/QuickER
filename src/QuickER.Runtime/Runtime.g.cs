@@ -6755,8 +6755,10 @@ public sealed class IncludeNode
 /// The two ends of a relationship need not share a CLR type: a SQLite <c>INTEGER</c> primary key is a <c>long</c> while an
 /// <c>INT</c> foreign key referring to it is an <c>int</c>, and the value objects of the two columns can differ as well. Boxed,
 /// <c>(object)1L</c> and <c>(object)1</c> are not equal, so matching the raw values left the navigation silently empty.
-/// Every match on the CLR side goes through this one rule: a value object is opened to its underlying value, and an integer
-/// that fits in a <c>long</c> becomes a <c>long</c>. Anything else is returned as it is.
+/// Every match on the CLR side goes through this one rule: a value object is opened to its underlying value, an integer
+/// that fits in a <c>long</c> becomes a <c>long</c>, and a binary key (<c>byte[]</c>) becomes the hexadecimal text of its
+/// bytes (an array compares by reference, so two reads of the same key would never meet). Anything else is returned as it
+/// is. The result is for matching only: a query that needs the key as a value binds the original one.
 /// </remarks>
 public static class IncludeKeys
 {
@@ -6777,6 +6779,7 @@ public static class IncludeKeys
             int value => (long)value,
             uint value => (long)value,
             ulong value when value <= long.MaxValue => (long)value,
+            byte[] bytes => Convert.ToHexString(bytes),
             _ => key,
         };
     }

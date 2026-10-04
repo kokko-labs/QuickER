@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedBinaryFixture;
@@ -240,6 +242,81 @@ public sealed class EfCoreConcurrencyRuntimeTests(SqlServerContainerFixture fixt
 
         document.RowVer.Should().NotEqual(beforeSave, "コミット成功後は新しい版が反映される");
         (await ReadTitleAsync(SeededRootId)).Should().Be("by-me");
+    }
+
+    // ── EF Core 固有: 競合の解消をやり直しても当たらない文 ──
+
+    /// <summary>documents の UPDATE を必ず 0 行にするコマンドのインターセプター（試みた回数を数える）</summary>
+    /// <remarks>
+    /// 版を持つ表で、競合ではない理由（トリガー・行レベルセキュリティ）により文が当たらない状況を作る。
+    /// 現在値の読み直し（SELECT）は書き換えないので、行は在り・版も読めるのに UPDATE だけが当たらない。
+    /// </remarks>
+    private sealed class DiscardDocumentUpdates : DbCommandInterceptor
+    {
+        /// <summary>書き換えた UPDATE の回数</summary>
+        public int Updates;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (command.CommandText.Contains("UPDATE [documents]", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref Updates);
+                command.CommandText = command.CommandText.Replace(
+                    "WHERE [document_id] =",
+                    "WHERE 1 = 0 AND [document_id] =",
+                    StringComparison.Ordinal
+                );
+            }
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    [Theory(
+        DisplayName = "[EfCore] 強制上書きでも当たらない UPDATE は上限回数でやり直しをやめ、競合として報告する"
+    )]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ForceOverwrite_StatementThatNeverMatches_StopsAtTheAttemptLimit(
+        bool graphSave
+    )
+    {
+        await ResetAndSeedAsync();
+        var interceptor = new DiscardDocumentUpdates();
+        var provider = new ServiceCollection()
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseSqlServer(_fixture.ConnectionString).AddInterceptors(interceptor)
+            )
+            .BuildServiceProvider();
+        _hookProviders.Add(provider);
+        var documents = provider.GetRequiredService<IDocumentRepository>();
+
+        var document = (await documents.GetByIdAsync(SeededRootId, Ct))!;
+        document.Title = "never-applied";
+        document.MarkUpdated();
+
+        // 退行（やり直しの上限なし）で全体が止まらないよう、上限時間を掛ける
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        bounded.CancelAfter(TimeSpan.FromSeconds(60));
+
+        Func<Task> act = graphSave
+            ? () =>
+                documents.SaveAsync(
+                    document,
+                    mode: ConcurrencyMode.ForceOverwrite,
+                    cancellationToken: bounded.Token
+                )
+            : () => documents.UpdateAsync(document, ConcurrencyMode.ForceOverwrite, bounded.Token);
+
+        var thrown = await act.Should().ThrowAsync<SaveConflictException>();
+        thrown.Which.Reason.Should().Be(SaveConflictReason.Unknown);
+        interceptor.Updates.Should().Be(10);
+        (await ReadTitleAsync(SeededRootId)).Should().Be("alpha");
     }
 
     /// <summary>After が見た版を記録し、任意で例外を投げる Save フック（版の反映タイミング検証用）</summary>

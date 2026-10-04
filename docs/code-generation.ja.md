@@ -314,7 +314,8 @@ NULL 許容の列は `.Value` 経由でも読めます（`x.ShippedAt != null &&
 **ナビゲーションプロパティは、述語にも並び替えキーにも書けません。**
 `Where(o => o.Customer == null)` は `NotSupportedException` になります。
 ナビゲーションは自分の列を持たないため、外部キー列で絞ってください（`Where(o => o.CustomerId == null)`）。
-インメモリと EF Core はこの述語を翻訳できるので、これは QuickER 版 Repository 固有の制限です。
+インメモリも同じく断ります（保存している行はナビゲーションを持たず、評価できないため）。
+EF Core はこの述語を独自の結合へ翻訳するので、この制限はありません。
 
 #### NULL の補償
 
@@ -559,7 +560,7 @@ context が提供する操作は次の 2 つで、生ハンドルは公開しま
 | 実装先 | フック発火 | context の対応 |
 |---|---|---|
 | QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
-| EF Core 版 Repository（`GenerateEfCoreRepositories`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
+| EF Core 版 Repository（`GenerateEfCoreRepositories`） | 対応（After は `SaveChanges` 後に一括）。再試行する実行戦略では、Before と After が試行の回数だけ走る | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
 | インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションはありませんが、copy-on-write で保存単位を all-or-nothing にします。全書き込みをステージングし、最後のフェーズが成功したときだけ一括公開するため、失敗した保存の書き込み（After が書いた blob を含む）は一度も見えず、失敗の巻き添えで並行書き込みが消えることもありません |
 | リモート（`--generate-remote-services`） | サーバー側の DI に登録したフックが発火します | サーバー側の実体実装に準じます。Before でサーバーがスキップした行は保存応答に載って戻るため、クライアント側の `RowState` も据え置かれます（その行は未保存のまま残り、次回の保存で再試行されます）。直結と同じ挙動です |
 
@@ -756,9 +757,20 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 // SQLite / PostgreSQL / MySQL / Oracle は対応する EF Core プロバイダの Use* を指定する
 ```
 
-- 保存は `TrackGraph` による切断グラフ保存です（`RowState` を EF Core の状態へ変換）
+- 保存は `RowState` を EF Core の状態へ変換する切断グラフ保存です。
+  QuickER 版 Repository と同じく、根からカスケードで辿れるエンティティだけを登録します。
+  親への逆参照（`line.Order` など）は辿らないので、`Include` で一緒に読んだ親は書き込みも削除もされません
 - 楽観排他もパリティです。`ConcurrencyMode` でポリシーを選び、EF Core の `DbUpdateConcurrencyException` を `SaveConflictException` へ変換し、更新後の並行性トークンをエンティティへ残します（[rowversion による楽観排他](#rowversion-による楽観排他)）
-- 生 SQL 系 API も完全パリティです
+- rowversion 列の無い表で、更新が 1 行も当たらないとき（トリガーや行レベルセキュリティが文を捨てたとき）は、QuickER 版 Repository と同じく行が無いものとして報告します。
+  `UpdateAsync` は `false` を返し、グラフ保存は `SaveConflictException`（`NotFound`）で失敗します。
+  競合として拒否され続ける保存は最大 10 回まで試み、それでも当たらなければ `SaveConflictException` で失敗します
+- 生 SQL 系 API も完全パリティです。
+  ドライバが自分の格納型で返す値（SQLite は `int` 列を `long` で、Oracle は `NUMBER` を `decimal` で返す）もプロパティの型へ変換します
+- 値オブジェクトの列にも、ほかの列と同じく長さと桁（`HasMaxLength` / `HasPrecision`）を構成します。
+  そのためパラメータと `.Value` の条件は、EF Core の既定（`nvarchar(max)`・`decimal(18,2)`）でなく列自身の型を使います
+- 再試行する実行戦略（SQL Server の `EnableRetryOnFailure` など）に対応します。
+  グラフ保存とカスケードの `ExecuteDeleteAsync` は実行戦略の中で動き、試行のたびに最初からやり直します。
+  Save フックがあると、Before と After は試行の回数だけ走ります（DB への書き込みは失敗した試行と一緒に巻き戻りますが、DB の外への副作用は繰り返されます）
 - 参照先（親側）列が主キーでないリレーション（UNIQUE 列参照・複合主キーの一部参照）は `HasPrincipalKey` を明示して構成され、外部キーは QuickER 版 Repository と同じくその親列へ結合します（EF Core の既定のままだと主キーへ黙って結合されます）
 - 主キーの無いテーブルは **DbContext から除外**されます（DbSet・Fluent 構成を出さず、そのテーブルへのナビゲーションも `modelBuilder.Ignore<T>()` の明示で無視・Warning 診断がテーブルを名指し）。
   EF Core はマップされる全エンティティ型にキーを要求し、キーの無い型が 1 つでもモデルに入ると DbContext 全体が初回使用時に例外になるためで、QuickER 版 Repository の生成スキップと同じ線引きです

@@ -327,6 +327,41 @@ public abstract class TranslatorParityRuntimeTestsBase
             .BeEquivalentTo([(1, new List<int> { 10, 11 }), (2, new List<int> { 20 })]);
     }
 
+    /// <summary>
+    /// ナビゲーションプロパティを使う条件・並び替えを、どの実装先も NotSupportedException で断ることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// ナビゲーションは列ではない。SQL の実装先は翻訳できずに断る。インメモリは行だけを持ち、保存行のナビゲーションは
+    /// 常に空なので、評価すると <c>x.OrderLines.Any()</c> は 0 件・<c>x.Order == null</c> は全件を黙って返す。
+    /// 3 つの実装先で同じく断ることを固定する（外部キーの列で絞る、が共通の書き換え）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[翻訳パリティ] ナビゲーションを使う条件・並び替えは NotSupportedException で断る"
+    )]
+    public async Task NavigationInConditionOrOrdering_IsRejected()
+    {
+        await SetUpAsync();
+
+        await Repository<IOrderRepository>()
+            .InsertAsync(new OrderEntity { OrderId = 1, Group = "first" }, Ct);
+        await Repository<IOrderLineRepository>()
+            .InsertAsync(new OrderLineEntity { LineId = 10, OrderId = 1 }, Ct);
+
+        var anyChild = () =>
+            Repository<IOrderRepository>().Query().Where(o => o.OrderLines.Any()).ToListAsync(Ct);
+        var nullParent = () =>
+            Repository<IOrderLineRepository>().Query().Where(l => l.Order == null).ToListAsync(Ct);
+        var countByParent = () =>
+            Repository<IOrderLineRepository>().Query().Where(l => l.Order == null).CountAsync(Ct);
+        var orderByParent = () =>
+            Repository<IOrderLineRepository>().Query().OrderBy(l => l.Order.Group).ToListAsync(Ct);
+
+        await anyChild.Should().ThrowAsync<NotSupportedException>();
+        await nullParent.Should().ThrowAsync<NotSupportedException>();
+        await countByParent.Should().ThrowAsync<NotSupportedException>();
+        await orderByParent.Should().ThrowAsync<NotSupportedException>();
+    }
+
     // ===== CLR の型が違うキーの Include =====
 
     /// <summary>
