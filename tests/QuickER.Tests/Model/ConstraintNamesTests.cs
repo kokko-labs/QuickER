@@ -384,6 +384,23 @@ public class ConstraintNamesTests
         relationship.ConstraintName.Should().Be("FK_orders_customers_bill_customer_id");
     }
 
+    [Fact(DisplayName = "外部キーの実効名は、保存された名前が無ければ既定名・あればそのまま")]
+    public void EffectiveForeignKey_FallsBackToDefaultOnlyWhenUnnamed()
+    {
+        ConstraintNames
+            .EffectiveForeignKey(null, "orders", "customers")
+            .Should()
+            .Be("FK_orders_customers");
+        ConstraintNames
+            .EffectiveForeignKey("  ", " orders ", "dbo.customers")
+            .Should()
+            .Be("FK_orders_dbo_customers");
+        ConstraintNames
+            .EffectiveForeignKey("fk_custom", "orders", "customers")
+            .Should()
+            .Be("fk_custom");
+    }
+
     [Fact(DisplayName = "列ペアの無いリレーションは、既定名がふさがっていれば番号を足す")]
     public void NameUnnamedForeignKeys_NoColumnPairs_AppendsNumber()
     {

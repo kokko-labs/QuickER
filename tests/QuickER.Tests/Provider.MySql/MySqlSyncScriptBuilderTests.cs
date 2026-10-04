@@ -122,6 +122,46 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("MODIFY COLUMN `name` varchar(100) NOT NULL COMMENT '顧客名';");
     }
 
+    /// <summary>
+    /// AlterColumn の COMMENT は DB の現在の説明（変更前の列）で書き、図の説明は使わないことを検証する
+    /// （説明の変更を選んでいないのに、型の変更だけで説明が消える・変わるのを防ぐ）。
+    /// </summary>
+    [Theory(DisplayName = "AlterColumn の COMMENT は DB の現在の説明を保つ")]
+    [InlineData("", "顧客名", " COMMENT '顧客名'")]
+    [InlineData("図の説明", "", "")]
+    public void AlterColumn_KeepsLiveComment(
+        string diagramDescription,
+        string liveDescription,
+        string expectedComment
+    )
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "name",
+                Column = new Column
+                {
+                    Name = "name",
+                    DataType = "varchar(100)",
+                    IsNullable = false,
+                    Description = diagramDescription,
+                },
+                OldColumn = new Column
+                {
+                    Name = "name",
+                    DataType = "varchar(50)",
+                    IsNullable = false,
+                    Description = liveDescription,
+                },
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().Contain($"MODIFY COLUMN `name` varchar(100) NOT NULL{expectedComment};");
+    }
+
     /// <summary>NULL 許容へ変更する AlterColumn が NULL を再指定することを検証する</summary>
     [Fact(DisplayName = "AlterColumn は NULL 許容化で NULL を再指定する")]
     public void AlterColumn_NullableGeneratesNull()
@@ -880,7 +920,9 @@ public class MySqlSyncScriptBuilderTests
             );
         sql.Should()
             .Contain(
-                "SET @sql = IF(@pk IS NULL, 'DO 0', 'ALTER TABLE `orders` DROP PRIMARY KEY');"
+                "SET @sql = IF(@pk IS NULL, 'DO 0', IF(@def IS NULL, 'ALTER TABLE `orders` DROP PRIMARY KEY', "
+                    + "CONCAT('ALTER TABLE `orders` MODIFY COLUMN `', REPLACE(@ai, '`', '``'), '` ', @def, "
+                    + "' COMMENT ', QUOTE(@cmt), ', DROP PRIMARY KEY')));"
             );
         sql.Should().Contain("PREPARE stmt FROM @sql;");
         // MySQL の主キー名は PRIMARY 固定のため CONSTRAINT 名は指定しない
@@ -994,10 +1036,8 @@ public class MySqlSyncScriptBuilderTests
     {
         var sql = Build(AlterPk("o'rders", PkTarget("o'rders", "order_id")));
 
-        sql.Should()
-            .Contain(
-                "SET @sql = IF(@pk IS NULL, 'DO 0', 'ALTER TABLE `o''rders` DROP PRIMARY KEY');"
-            );
+        sql.Should().Contain("'ALTER TABLE `o''rders` DROP PRIMARY KEY'");
+        sql.Should().Contain("CONCAT('ALTER TABLE `o''rders` MODIFY COLUMN `'");
         sql.Should().NotContain("'ALTER TABLE `o'rders`");
     }
 

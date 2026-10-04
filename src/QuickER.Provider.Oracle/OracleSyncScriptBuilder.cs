@@ -174,15 +174,25 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
     /// <summary>ALTER TABLE ... MODIFY（列定義変更）文を生成する</summary>
     /// <remarks>
+    /// <para>
     /// Oracle は型変更と NULL 制約変更を <c>MODIFY</c> 1 文で表現する。
-    /// NULL→NOT NULL と NOT NULL→NULL の切替はいずれも明示的に句を付ける。
+    /// NULL / NOT NULL の句は、NULL 許容が変わるときだけ付ける（主キーの列は NOT NULL とみなす）。
+    /// Oracle は今と同じ指定を拒否する（NOT NULL の列へ NOT NULL は ORA-01442、NULL 許容の列へ NULL は ORA-01451）ため、
+    /// 常に付けると型だけの変更が必ず失敗する。
+    /// </para>
+    /// <para>
+    /// 変更前の列（<see cref="SchemaDiffItem.OldColumn"/>）が無い項目では NULL 許容の差が分からないため、従来どおり句を付ける。
+    /// </para>
     /// </remarks>
     private static string AppendAlterColumn(SchemaDiffItem item)
     {
         var col = item.Column!;
-        var nullClause = col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL";
+        var nullable = col.IsNullable && !col.IsPrimaryKey;
+        var nullabilityChanged =
+            item.OldColumn is not { } old || (old.IsNullable && !old.IsPrimaryKey) != nullable;
+        var nullClause = nullabilityChanged ? (nullable ? " NULL" : " NOT NULL") : string.Empty;
         return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
-            + $"MODIFY ({OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {nullClause});";
+            + $"MODIFY ({OracleIdentifier.QuoteSimple(col.Name)} {col.DataType}{nullClause});";
     }
 
     /// <summary>主キー変更の 1 項目を、セクションのフェーズに応じた解除 / 付与の文へ振り分ける</summary>
@@ -330,9 +340,11 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
-            : item.Relationship.ConstraintName!;
+        var fkName = ConstraintNames.EffectiveForeignKey(
+            item.Relationship?.ConstraintName,
+            childTbl,
+            parentTbl
+        );
 
         var sb = new StringBuilder();
 

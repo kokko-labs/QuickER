@@ -30,9 +30,18 @@ public sealed class MySqlProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new MySqlSyncScriptBuilder();
 
     /// <inheritdoc />
-    /// <remarks>MySQL は <c>ALTER TABLE ... MODIFY ... AFTER</c> による列順のネイティブ変更が可能</remarks>
+    /// <remarks>
+    /// MySQL は <c>ALTER TABLE ... MODIFY ... AFTER</c> による列順のネイティブ変更が可能。
+    /// 外部キーの両端の列の型変更を拒否するため、列定義変更の前後で外部キーを外して付け直す。
+    /// 旧主キーの索引に支えられた自表の外部キーも、主キー変更の前後で外して付け直す（エラー 1553 対策）。
+    /// </remarks>
     public SyncDialectCapabilities SyncCapabilities { get; } =
-        new() { ColumnReorder = ColumnReorderMode.Native };
+        new()
+        {
+            ColumnReorder = ColumnReorderMode.Native,
+            AlterColumnRequiresForeignKeyRebuild = true,
+            PrimaryKeyChangeRequiresOwnForeignKeyRebuild = true,
+        };
 
     /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new MySqlSchemaSyncExecutor();

@@ -41,6 +41,27 @@ public static class ConstraintNames
     public static string ForeignKey(string childTable, string parentTable) =>
         "FK_" + SafeName(childTable) + "_" + SafeName(parentTable);
 
+    /// <summary>外部キーの実効名（保存された名前、無ければ <see cref="ForeignKey"/> の既定名）を返す</summary>
+    /// <param name="constraintName">保存された制約名（<c>null</c> や空白だけなら名前を持たない扱い）</param>
+    /// <param name="childTable">参照する側（外部キーを持つ側）のテーブル名</param>
+    /// <param name="parentTable">参照される側のテーブル名</param>
+    /// <returns>保存された名前（そのまま）か、<c>FK_{子}_{親}</c></returns>
+    /// <remarks>
+    /// DDL・同期スクリプトが外部キーに付ける名前と、同期の差分が live の外部キーと突き合わせる名前は
+    /// 同じでなければならない。差分だけが保存された名前を素のまま比べると、名前を持たないリレーションと、
+    /// DDL が既定名で作った live の外部キーが別物に見え、何も変えていなくても追加と削除が出る
+    /// （既定のまま実行すると同じ名前の外部キーを足そうとして失敗する）。
+    /// 「名前が空なら既定名」の分岐を呼び出し側で書かず、ここを通すこと。
+    /// </remarks>
+    public static string EffectiveForeignKey(
+        string? constraintName,
+        string childTable,
+        string parentTable
+    ) =>
+        string.IsNullOrWhiteSpace(constraintName)
+            ? ForeignKey(childTable, parentTable)
+            : constraintName;
+
     /// <summary>主キーの既定名を組み立てる</summary>
     /// <param name="tableName">テーブル名</param>
     /// <returns><c>PK_{テーブル}</c>（<see cref="SafeName"/> を通したもの）</returns>

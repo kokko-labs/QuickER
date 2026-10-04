@@ -314,9 +314,11 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             }
 
             // 制約名はモデルの値を優先し、未設定なら FK_子_親 の命名規則で生成する
-            var constraintName = string.IsNullOrWhiteSpace(rel.ConstraintName)
-                ? ConstraintNames.ForeignKey(fkEntity.TableName, pkEntity.TableName)
-                : rel.ConstraintName;
+            var constraintName = ConstraintNames.EffectiveForeignKey(
+                rel.ConstraintName,
+                fkEntity.TableName,
+                pkEntity.TableName
+            );
 
             if (!index.TryGetValue(fkEntity.Id, out var list))
             {

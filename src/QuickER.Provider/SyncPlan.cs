@@ -61,8 +61,8 @@ public sealed class SyncPlanSection
 public enum SyncPlanWarningKind
 {
     /// <summary>
-    /// 主キー変更に伴って自動再作成する外部キーの参照先列が、新しい主キー列に含まれない
-    /// （＝参照先が候補キーでなくなり、再作成が実行時に失敗しうる）。
+    /// 参照先の主キーが変わる外部キーの参照先列が、同期後に候補キーでなくなりうる
+    /// （逐次 DDL の方言では自動再作成が、テーブル再構築の方言では同期後の外部キー検査が実行時に失敗しうる）。
     /// </summary>
     /// <remarks>
     /// 判定は「同期後に被参照列が候補キーであることを証明できたか」で行う（同期後の主キー、または同期後に
@@ -82,8 +82,9 @@ public enum SyncPlanWarningKind
     UniqueConstraintDropMayBreakForeignKey,
 
     /// <summary>
-    /// テーブル再構築で、意味モデルが持たない列レベル属性（<c>AUTOINCREMENT</c> / <c>DEFAULT</c> /
-    /// <c>CHECK</c> / <c>COLLATE</c> / 生成列）が失われる。
+    /// テーブル再構築で、意味モデルが持たない属性（列の属性 <c>AUTOINCREMENT</c> / <c>DEFAULT</c> /
+    /// <c>CHECK</c> / <c>COLLATE</c> / 生成列、制約の句 <c>ON CONFLICT</c> / <c>DEFERRABLE INITIALLY DEFERRED</c>、
+    /// テーブルオプション <c>WITHOUT ROWID</c> / <c>STRICT</c>）が失われる。
     /// </summary>
     /// <remarks>
     /// 再構築の <c>CREATE TABLE</c> はモデルから組み立て直すため、モデルに無い属性は再現されない
@@ -92,6 +93,18 @@ public enum SyncPlanWarningKind
     /// 断定はできないため実行ブロックではなく警告に留める（他 2 種と同じ方針）。
     /// </remarks>
     TableRebuildDropsColumnAttribute,
+
+    /// <summary>
+    /// 列定義変更で外部キーの両端の列の型が同期後に一致しなくなるため、その外部キーを外し直さない
+    /// （＝列定義変更が依存エラーで失敗する）。
+    /// </summary>
+    /// <remarks>
+    /// 外部キーの両端の列の型変更を拒否する方言（SQL Server・MySQL）では、外部キーを外して列を変え、付け直す。
+    /// ところが両端の型が食い違うと付け直しが必ず失敗し、DDL が暗黙コミットされる方言では外部キーが消えたまま残る。
+    /// そのため外さずに列定義変更の時点で失敗させ（データも定義も変わらない）、両端の列を揃えるよう知らせる。
+    /// 比較は図側の型表記で、差分の型比較と同じ規則（前後空白・大文字小文字を無視）。
+    /// </remarks>
+    ForeignKeyColumnTypeMismatch,
 }
 
 /// <summary>
@@ -101,11 +114,13 @@ public enum SyncPlanWarningKind
 /// <param name="TableName">
 /// 対象テーブル。<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/> では
 /// 外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/>
-/// では一意制約を削除するテーブル（＝外部キーの参照先）。
+/// では一意制約を削除するテーブル（＝外部キーの参照先）、<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/>
+/// では外部キーを保有する子テーブル。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/> では壊れうる外部キーの制約名。
+/// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> では外し直さない外部キーの制約名。
 /// <see cref="SyncPlanWarningKind.TableRebuildDropsColumnAttribute"/> では失われる属性の SQL キーワードを
 /// カンマ区切りで並べたもの（<c>AUTOINCREMENT, DEFAULT</c> 等）。SQL の綴りそのものなので言語中立に扱える。
 /// </param>

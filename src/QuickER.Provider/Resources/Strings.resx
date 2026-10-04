@@ -112,6 +112,18 @@
   <data name="Diff_DropForeignKey" xml:space="preserve">
     <value>Drop foreign key [{0}] → [{1}]</value>
   </data>
+  <data name="Diff_AlterForeignKey" xml:space="preserve">
+    <value>Change foreign key [{0}] ({1}) → [{2}] ({3}): {4}</value>
+  </data>
+  <data name="Diff_ForeignKeyChange_Reference" xml:space="preserve">
+    <value>was [{0}] ({1}) → [{2}] ({3})</value>
+  </data>
+  <data name="Diff_ForeignKeyChange_OnDelete" xml:space="preserve">
+    <value>ON DELETE {0} → {1}</value>
+  </data>
+  <data name="Diff_ForeignKeyChange_OnUpdate" xml:space="preserve">
+    <value>ON UPDATE {0} → {1}</value>
+  </data>
   <data name="Diff_AddUniqueConstraint" xml:space="preserve">
     <value>Add unique constraint [{0}] ({1})</value>
   </data>
@@ -130,6 +142,12 @@
   <data name="Diff_AutoForeignKeyRebuild" xml:space="preserve">
     <value>Automatically dropped and re-added to allow the change: [{0}]</value>
   </data>
+  <data name="Diff_AutoPrimaryKeyRebuild" xml:space="preserve">
+    <value>Automatically drops and re-adds the primary key to allow the change: ({0})</value>
+  </data>
+  <data name="Diff_AutoForeignKeyDrop" xml:space="preserve">
+    <value>Automatically drops the foreign key to allow the change (the table or column it uses is dropped): [{0}]</value>
+  </data>
   <data name="Diff_AutoUniqueConstraintRebuild" xml:space="preserve">
     <value>Unique constraint automatically dropped and re-added to allow the change: ({0})</value>
   </data>
@@ -141,6 +159,9 @@
   </data>
   <data name="Sync_Error_OracleStatementFailed" xml:space="preserve">
     <value>{0} (Oracle DDL is implicitly committed, so the {1} statement(s) that succeeded beforehand are not rolled back and may be partially applied)</value>
+  </data>
+  <data name="Sync_Error_SqliteBrokenView" xml:space="preserve">
+    <value>The sync broke views (they refer to a column or table that no longer exists), so it was rolled back: {0}</value>
   </data>
   <data name="Sync_Error_SqliteForeignKeyViolation" xml:space="preserve">
     <value>Foreign key constraint violations were detected after the table rebuild, so the transaction was rolled back. Affected table(s): {0}</value>

@@ -334,14 +334,18 @@
     <value>作り直すテーブル:</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyRebuildRisk" xml:space="preserve">
-    <value>注意: 参照先の主キーが変わるため、{0} 件の外部キーを自動で外して再作成します。参照先の列が候補キーでなくなる場合は再作成に失敗し、MySQL / Oracle では部分適用（外部キーが消えたまま主キーだけ変わった状態）になり得ます。</value>
+    <value>注意: {0} 件の外部キーで参照先の主キーが変わり、参照先の列が候補キーでなくなる可能性があります。その場合は外部キーの再作成（SQLite では同期後の外部キー検査）が失敗し、MySQL / Oracle では部分適用（外部キーが消えたまま主キーだけ変わった状態）になり得ます。</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmUniqueConstraintDropRisk" xml:space="preserve">
     <value>注意: 以下の一意制約は、既存の外部キーが参照している列を覆っています。削除すると候補キーが失われるため、削除自体が拒否されるか外部キーが壊れる可能性があります（主キーが同じ列を覆っている場合を除く）:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmForeignKeyTypeMismatch" xml:space="preserve">
+    <value>注意: 列の変更で、以下の外部キーの両端の列の型が一致しなくなります。外部キーは外して付け直さないため、列の変更は失敗します（DB は変わりません）。両端の列を同じ型へ揃えてください:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">
-    <value>注意: テーブルの再構築は図の定義から作り直すため、既定値や CHECK 制約といった列レベルの属性は図が持っておらず再現されません。以下は現在の DB にある属性で、再構築後は失われます（インデックス・トリガーは温存されます）:
+    <value>注意: テーブルの再構築は図の定義から作り直すため、既定値や CHECK 制約といった列の属性、制約の句、WITHOUT ROWID などのテーブルオプションは図が持っておらず再現されません。以下は現在の DB にある属性で、再構築後は失われます（インデックス・トリガーは温存されます）:
 {0}</value>
   </data>
   <data name="SchemaSync_Executing" xml:space="preserve">

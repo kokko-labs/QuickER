@@ -245,9 +245,11 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
-            : item.Relationship.ConstraintName!;
+        var fkName = ConstraintNames.EffectiveForeignKey(
+            item.Relationship?.ConstraintName,
+            childTbl,
+            parentTbl
+        );
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );

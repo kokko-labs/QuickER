@@ -363,7 +363,10 @@ public class SchemaDiffService
         }
 
         // ---------- 外部キーの差分 ----------
-        // 親・子・列・制約名などのシグネチャでキー化し、同一 FK の有無を集合比較で判定する
+        // 親・子・列・制約名などのシグネチャでキー化し、同一 FK の有無を集合比較で判定する。
+        // 追加候補・削除候補はいったん集め、同じ外部キーの作り直しにあたる組を 1 項目へ畳んでから差分へ並べる
+        var fkAdds = new List<SchemaDiffItem>();
+        var fkDrops = new List<SchemaDiffItem>();
         var liveFkPairs = liveRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
             .Select(r => MakeForeignKeySignature(r, liveEntities, includeFkConstraintName))
@@ -406,7 +409,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            diff.Items.Add(
+            fkAdds.Add(
                 new SchemaDiffItem
                 {
                     Kind = SchemaDiffKind.AddForeignKey,
@@ -429,8 +432,8 @@ public class SchemaDiffService
             );
         }
 
-        // DB にあるが ER 図にない FK は削除候補とする
-        // 取得側 Relationship には FK 名が無いため、ここでは「親→子ペアの消失」ケースのみ検出する
+        // DB にあるが ER 図にない FK は削除候補とする（同じシグネチャの外部キーが図に無いもの。
+        // 名前を保存する方言では名前もシグネチャに入るため、名前だけ変えた外部キーも削除＋追加になる）
         var targetFkPairs = targetRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
             .Select(r => MakeForeignKeySignature(r, targetEntities, includeFkConstraintName))
@@ -472,7 +475,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            diff.Items.Add(
+            fkDrops.Add(
                 new SchemaDiffItem
                 {
                     Kind = SchemaDiffKind.DropForeignKey,
@@ -492,6 +495,8 @@ public class SchemaDiffService
                 }
             );
         }
+
+        diff.Items.AddRange(PairForeignKeyAlters(fkAdds, fkDrops, includeFkConstraintName));
 
         // ---------- 列順の差分（対応方言のみ・既定では非選択） ----------
         // 列順同期は SQLite（テーブル再構築）と MySQL（ネイティブ MODIFY ... AFTER）だけが実現できる。
@@ -709,8 +714,10 @@ public class SchemaDiffService
                 $"{p.ParentColumn.ToLowerInvariant()}>{p.ChildColumn.ToLowerInvariant()}"
             )
         );
+        // 名前は DDL・同期スクリプトが付けるのと同じ実効名で比べる（名前の無いリレーションは既定名）。
+        // 素の名前で比べると、名前の無い図と、DDL が既定名で作った live の外部キーが別物に見える
         var constraintName = includeConstraintName
-            ? rel.ConstraintName?.Trim().ToLowerInvariant() ?? string.Empty
+            ? ForeignKeyNameKey(rel, parent, child)
             : string.Empty;
 
         return string.Join(
@@ -722,6 +729,169 @@ public class SchemaDiffService
             rel.OnDelete.ToString(),
             rel.OnUpdate.ToString()
         );
+    }
+
+    /// <summary>外部キーの実効名を照合用（前後空白を除き小文字化）に整える</summary>
+    private static string ForeignKeyNameKey(Relationship rel, Entity parent, Entity child) =>
+        ConstraintNames
+            .EffectiveForeignKey(rel.ConstraintName, NormalizeTable(child), NormalizeTable(parent))
+            .Trim()
+            .ToLowerInvariant();
+
+    /// <summary>
+    /// 同じ外部キーの作り直しにあたる削除候補と追加候補を、1 つの <see cref="SchemaDiffKind.AlterForeignKey"/> へ畳む。
+    /// </summary>
+    /// <param name="adds">図にだけ在る外部キー（AddForeignKey 候補・差分へ並べる順）</param>
+    /// <param name="drops">DB にだけ在る外部キー（DropForeignKey 候補）</param>
+    /// <param name="includeConstraintName">外部キー名を DB に保存する方言か</param>
+    /// <returns>差分へ並べる順の外部キー項目（畳んだ項目は追加候補の位置に入る）</returns>
+    /// <remarks>
+    /// <para>
+    /// 参照アクション・列ペアの順序・参照先だけが変わった外部キーは、シグネチャが違うため削除と追加の 2 項目になる。
+    /// 名前を保存する方言では両者が同じ名前を持つため、既定どおり追加だけを選んで実行すると、同じ名前の
+    /// 外部キーを足そうとして失敗する。名前を保存しない方言（SQLite）では失敗はしないが、再構築後の表に
+    /// 旧と新の外部キーが同じ列へ 2 本並ぶ。どちらも「同じ外部キーを作り直す」1 つの操作なので 1 項目にする。
+    /// </para>
+    /// <para>
+    /// 対応づけは、名前を保存する方言では「子表と実効名」（DB の名前の衝突そのもの）、保存しない方言では
+    /// 「子表・親表・子列の集合」（同じ列に張る外部キー）で行う。1 対 1 で、先に見つかったものと組む。
+    /// </para>
+    /// </remarks>
+    private static List<SchemaDiffItem> PairForeignKeyAlters(
+        List<SchemaDiffItem> adds,
+        List<SchemaDiffItem> drops,
+        bool includeConstraintName
+    )
+    {
+        var remainingDrops = new List<SchemaDiffItem>(drops);
+        var result = new List<SchemaDiffItem>();
+
+        foreach (var add in adds)
+        {
+            var key = ForeignKeyPairingKey(add, includeConstraintName);
+            var drop = remainingDrops.FirstOrDefault(d =>
+                string.Equals(
+                    ForeignKeyPairingKey(d, includeConstraintName),
+                    key,
+                    StringComparison.Ordinal
+                )
+            );
+
+            if (drop is null)
+            {
+                result.Add(add);
+                continue;
+            }
+
+            remainingDrops.Remove(drop);
+            result.Add(BuildForeignKeyAlter(add, drop));
+        }
+
+        result.AddRange(remainingDrops);
+        return result;
+    }
+
+    /// <summary>削除候補と追加候補を対応づけるキー（<see cref="PairForeignKeyAlters"/> の規則）</summary>
+    private static string ForeignKeyPairingKey(SchemaDiffItem item, bool includeConstraintName)
+    {
+        var child = NormalizeTable(item.ChildEntity!).ToLowerInvariant();
+
+        if (includeConstraintName)
+        {
+            return $"{child}|{ForeignKeyNameKey(item.Relationship!, item.ParentEntity!, item.ChildEntity!)}";
+        }
+
+        var parent = NormalizeTable(item.ParentEntity!).ToLowerInvariant();
+        var childColumns = string.Join(
+            ",",
+            ForeignKeyColumnPairResolver
+                .ChildColumns(item.ForeignKeyColumnPairs)
+                .Select(c => c.Trim().ToLowerInvariant())
+                .Order(StringComparer.Ordinal)
+        );
+
+        return $"{child}|{parent}|{childColumns}";
+    }
+
+    /// <summary>対応づいた追加候補（新しい定義）と削除候補（DB の定義）から外部キー変更の項目を作る</summary>
+    private static SchemaDiffItem BuildForeignKeyAlter(SchemaDiffItem add, SchemaDiffItem drop)
+    {
+        var changes = new List<string>();
+        var oldParent = NormalizeTable(drop.ParentEntity!);
+        var newParent = NormalizeTable(add.ParentEntity!);
+        var oldChildColumns = ForeignKeyColumnPairResolver.ChildColumns(drop.ForeignKeyColumnPairs);
+        var oldParentColumns = ForeignKeyColumnPairResolver.ParentColumns(
+            drop.ForeignKeyColumnPairs
+        );
+        var newChildColumns = ForeignKeyColumnPairResolver.ChildColumns(add.ForeignKeyColumnPairs);
+        var newParentColumns = ForeignKeyColumnPairResolver.ParentColumns(
+            add.ForeignKeyColumnPairs
+        );
+
+        var referenceChanged =
+            !string.Equals(oldParent, newParent, StringComparison.OrdinalIgnoreCase)
+            || !oldChildColumns.SequenceEqual(newChildColumns, StringComparer.OrdinalIgnoreCase)
+            || !oldParentColumns.SequenceEqual(newParentColumns, StringComparer.OrdinalIgnoreCase);
+
+        if (referenceChanged)
+        {
+            changes.Add(
+                string.Format(
+                    Strings.Diff_ForeignKeyChange_Reference,
+                    NormalizeTable(drop.ChildEntity!),
+                    FormatColumnList(oldChildColumns),
+                    oldParent,
+                    FormatColumnList(oldParentColumns)
+                )
+            );
+        }
+
+        var oldRel = drop.Relationship!;
+        var newRel = add.Relationship!;
+
+        if (oldRel.OnDelete != newRel.OnDelete)
+        {
+            changes.Add(
+                string.Format(
+                    Strings.Diff_ForeignKeyChange_OnDelete,
+                    oldRel.OnDelete.ToSqlText(),
+                    newRel.OnDelete.ToSqlText()
+                )
+            );
+        }
+
+        if (oldRel.OnUpdate != newRel.OnUpdate)
+        {
+            changes.Add(
+                string.Format(
+                    Strings.Diff_ForeignKeyChange_OnUpdate,
+                    oldRel.OnUpdate.ToSqlText(),
+                    newRel.OnUpdate.ToSqlText()
+                )
+            );
+        }
+
+        return new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterForeignKey,
+            TableName = add.TableName,
+            ColumnName = add.ColumnName,
+            Entity = add.Entity,
+            ParentEntity = add.ParentEntity,
+            ChildEntity = add.ChildEntity,
+            Relationship = add.Relationship,
+            ForeignKeyColumnPairs = add.ForeignKeyColumnPairs,
+            ReplacedForeignKey = drop,
+            IsSelected = false,
+            Description = string.Format(
+                Strings.Diff_AlterForeignKey,
+                NormalizeTable(add.ChildEntity!),
+                FormatColumnList(newChildColumns),
+                newParent,
+                FormatColumnList(newParentColumns),
+                string.Join(" / ", changes)
+            ),
+        };
     }
 
     /// <summary>外部キーの構成列を差分表示用の列名リストへ整形する（宣言順・カンマ区切り）</summary>

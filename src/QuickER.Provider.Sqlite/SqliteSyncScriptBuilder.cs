@@ -23,6 +23,14 @@ namespace QuickER.Provider.Sqlite;
 /// スタンドアロン実行時のための備え（トランザクション内では無害）。
 /// </para>
 /// <para>
+/// 既存テーブルの作り直しを含むときは、前後を <c>PRAGMA legacy_alter_table=ON;</c> / <c>OFF;</c> で挟む。
+/// SQLite 3.26 以降の <c>RENAME</c> はスキーマ全体（ビュー・トリガー）を検証し直すため、作り直す表を参照する
+/// ビューがあると、旧い表を消した時点で「無い表を参照するビュー」になり <c>RENAME</c> が失敗する（壊れたビューが
+/// もともと 1 つあるだけでも、無関係な表の作り直しが失敗する）。旧来の動作では <c>RENAME</c> が検証しないので、
+/// 同じ名前で表が戻った時点でビューもトリガーも元どおり新しい表を指す。作り直しで本当に壊れたビュー
+/// （消した列を参照するもの）は、実行側が同期の前後でビューを検証して見つけ、ロールバックする。
+/// </para>
+/// <para>
 /// <b>既知の制限</b>: NOT NULL の列追加（AddColumn）は SQLite が DEFAULT 無しの <c>ADD COLUMN ... NOT NULL</c> を
 /// 受け付けないため実行時に失敗する（トランザクションはロールバックされ、データは無変更で安全）。
 /// </para>
@@ -50,8 +58,18 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
 
         var sb = new StringBuilder();
 
+        // 既存テーブルの作り直し（DROP → RENAME）を含むか
+        var rebuildsExistingTables = plan.Rebuilds.Any(r => !r.CreateOnly);
+
         // 再構築中は FK 強制を切る（実行側がトランザクション外で実際に OFF にする。ここは対規約の明示）
         sb.AppendLine("PRAGMA foreign_keys=OFF;");
+
+        // RENAME がスキーマ全体（ビュー・トリガー）を検証しないようにする（実行側も同じく設定する。対規約の明示）
+        if (rebuildsExistingTables)
+        {
+            sb.AppendLine("PRAGMA legacy_alter_table=ON;");
+        }
+
         sb.AppendLine();
 
         // 1. 新規テーブル（CreateOnly）＝FK 句インラインの CREATE TABLE
@@ -92,6 +110,11 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // FK 整合性を最終確認する対規約（実行側が ExecuteReader で違反を検出しロールバックする）
         sb.AppendLine("PRAGMA foreign_key_check;");
         sb.AppendLine("PRAGMA foreign_keys=ON;");
+
+        if (rebuildsExistingTables)
+        {
+            sb.AppendLine("PRAGMA legacy_alter_table=OFF;");
+        }
 
         return sb.ToString();
     }

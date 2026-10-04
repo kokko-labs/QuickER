@@ -169,7 +169,7 @@ ORDER BY name;";
     /// <summary>テーブル一覧を読み込み、テーブル名をキーとするエントリ辞書と CREATE 文全文を構築する</summary>
     /// <remarks>
     /// <c>CREATE TABLE</c> 文の原文（<c>sqlite_master.sql</c>）も同時に持ち帰る。意味モデルには載らない
-    /// 列レベル属性（<c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列）が
+    /// 属性（列の属性・制約の句・テーブルオプション。一覧は <see cref="TableRebuildAttributeDetector"/>）が
     /// テーブル再構築で失われることを、同期の実行前に警告するための材料になる。
     /// <para>
     /// <c>sqlite_master</c> 上では仮想テーブル本体・付属表（シャドウテーブル）も通常テーブルと同じ

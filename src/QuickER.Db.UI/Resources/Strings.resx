@@ -334,14 +334,18 @@ Do you want to run this against {0}?</value>
     <value>Tables to recreate:</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyRebuildRisk" xml:space="preserve">
-    <value>Note: {0} foreign key(s) will be dropped and recreated automatically because the primary key they reference changes. If the referenced column is no longer a candidate key, recreation fails; on MySQL / Oracle the change may be left partially applied (the foreign key gone while the primary key is already changed).</value>
+    <value>Note: the primary key referenced by {0} foreign key(s) changes, and the referenced column may no longer be a candidate key. If so, recreating the foreign key (on SQLite, the foreign key check after the sync) fails; on MySQL / Oracle the change may be left partially applied (the foreign key gone while the primary key is already changed).</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmUniqueConstraintDropRisk" xml:space="preserve">
     <value>Note: the unique constraint(s) below cover a column that an existing foreign key references. Dropping them removes the candidate key, so the drop may be rejected or the foreign key may break (unless the primary key still covers the same column):
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmForeignKeyTypeMismatch" xml:space="preserve">
+    <value>Note: changing these columns leaves the two ends of the foreign keys below with different types, so the foreign keys are NOT dropped and re-added and the column change will fail (the database stays unchanged). Change the column on both ends to the same type:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">
-    <value>Note: rebuilding a table recreates it from the diagram, which does not model column-level attributes such as default values or CHECK constraints. The attributes below exist in the database today and will NOT be reproduced (indexes and triggers are preserved):
+    <value>Note: rebuilding a table recreates it from the diagram, which does not model column attributes such as default values or CHECK constraints, constraint clauses, or table options such as WITHOUT ROWID. The attributes below exist in the database today and will NOT be reproduced (indexes and triggers are preserved):
 {0}</value>
   </data>
   <data name="SchemaSync_Executing" xml:space="preserve">

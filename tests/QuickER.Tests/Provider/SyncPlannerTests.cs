@@ -884,10 +884,13 @@ public class SyncPlannerTests
 
     // ---------------- 主キー変更（AlterPrimaryKey）と依存 FK の自動 DROP → 再 ADD ----------------
 
-    /// <summary>FK 参加列の型変更に FK の外し直しが必要な方言（SQL Server 相当）のケーパビリティ</summary>
+    /// <summary>
+    /// FK 参加列・主キー／一意制約の構成列の型変更に、制約の外し直しが必要な方言（SQL Server 相当）のケーパビリティ
+    /// </summary>
     private static readonly SyncDialectCapabilities FkRebuildCaps = new()
     {
         AlterColumnRequiresForeignKeyRebuild = true,
+        AlterColumnRequiresKeyConstraintRebuild = true,
     };
 
     /// <summary>customer(id) ← orders(customer_id) の live スキーマと、その FK リレーションを組み立てる</summary>
@@ -1031,12 +1034,19 @@ public class SyncPlannerTests
     public void AlterColumn_WithCapability_InjectsImplicitForeignKeyRebuild()
     {
         var (_, _, _, context) = LiveFkScenario();
+
+        // 型は同じまま NULL 許容だけを変える（両端の型が食い違う変更は外し直さない＝別のテスト）
         var alter = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AlterColumn,
             TableName = "orders",
             ColumnName = "customer_id",
-            Column = Col("customer_id", "BIGINT"),
+            Column = new Column
+            {
+                Name = "customer_id",
+                DataType = "INT",
+                IsNullable = false,
+            },
             IsSelected = true,
         };
 
@@ -1056,7 +1066,9 @@ public class SyncPlannerTests
     public void AlterColumn_OnParentColumn_InjectsImplicitForeignKeyRebuild()
     {
         var (_, _, _, context) = LiveFkScenario();
-        var alter = new SchemaDiffItem
+
+        // 両端を同じ型へ変える（片側だけだと付け直しが必ず失敗するため外し直さない）
+        var alterParent = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AlterColumn,
             TableName = "customer",
@@ -1064,8 +1076,16 @@ public class SyncPlannerTests
             Column = Col("id", "BIGINT"),
             IsSelected = true,
         };
+        var alterChild = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "orders",
+            ColumnName = "customer_id",
+            Column = Col("customer_id", "BIGINT"),
+            IsSelected = true,
+        };
 
-        var plan = new SyncPlanner().BuildPlan([alter], FkRebuildCaps, context);
+        var plan = new SyncPlanner().BuildPlan([alterParent, alterChild], FkRebuildCaps, context);
 
         plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.DropForeignKey);
         plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AddForeignKey);
@@ -1426,28 +1446,38 @@ public class SyncPlannerTests
     /// 単列へ縮まない——劣化時代のガードが止めていたのはこの縮退で、その前提そのものが無くなった。
     /// </remarks>
     [Theory(DisplayName = "複合外部キー: 構成列の定義変更は全構成列のままの FK 再作成を伴う")]
-    [InlineData("child", "parent_id", "BIGINT")]
-    [InlineData("child", "order_no", "BIGINT")]
-    [InlineData("parent", "code", "BIGINT")]
+    [InlineData("parent_id", "id")]
+    [InlineData("order_no", "code")]
     public void AlterColumn_OnCompositeForeignKeyColumn_RebuildsAllColumnPairs(
-        string table,
-        string column,
-        string newType
+        string childColumn,
+        string parentColumn
     )
     {
         var context = CompositeFkScenario();
-        var alter = new SchemaDiffItem
+
+        // 1 組の両端を同じ型へ変える（片側だけだと付け直しが必ず失敗するため外し直さない）
+        var alterChild = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AlterColumn,
-            TableName = table,
-            ColumnName = column,
-            Column = Col(column, newType),
+            TableName = "child",
+            ColumnName = childColumn,
+            Column = Col(childColumn, "BIGINT"),
+            IsSelected = true,
+        };
+        var alterParent = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "parent",
+            ColumnName = parentColumn,
+            Column = Col(parentColumn, "BIGINT"),
             IsSelected = true,
         };
 
-        var plan = new SyncPlanner().BuildPlan([alter], FkRebuildCaps, context);
+        var plan = new SyncPlanner().BuildPlan([alterChild, alterParent], FkRebuildCaps, context);
 
-        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AlterColumn).Items.Should().Equal(alter);
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AlterColumn)
+            .Items.Should()
+            .Equal(alterChild, alterParent);
 
         var add = plan
             .Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
@@ -2452,5 +2482,689 @@ public class SyncPlannerTests
 
         var rb = plan.Rebuilds.Should().ContainSingle().Which;
         rb.NewDefinition.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("b", "a");
+    }
+
+    // ---------------- 再構築の合成は live の列を保つ（図は別 Guid 空間） ----------------
+
+    /// <summary>
+    /// AlterColumn は live の列オブジェクト（Id）を保って型・NULL 許容・計算列だけを写し、
+    /// live の一意制約・主キー順序が合成後も解決できることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 差分項目の列は図側（live と別の Guid）。差し替えると live の一意制約・主キー順序の列 ID が
+    /// 宙に浮き、一意制約が再構築後の表から消え、複合主キーの順序も変わる。
+    /// </remarks>
+    [Fact(DisplayName = "再構築: AlterColumn は live の列 ID を保ち一意制約と主キー順序を壊さない")]
+    public void Rebuild_AlterColumn_KeepsLiveColumnIdentity()
+    {
+        var live = WithUnique(PairTable(["a", "b"]), null, "a");
+        var liveA = live.Columns.Single(c => c.Name == "a");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "pair",
+                    ColumnName = "a",
+                    // 図側の列（別 Guid）。型・NULL 許容・計算列が変わる
+                    Column = new Column
+                    {
+                        Name = "a",
+                        DataType = "BIGINT",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                        IsComputed = true,
+                    },
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var newDef = plan.Rebuilds.Should().ContainSingle().Which.NewDefinition;
+        var a = newDef.Columns.Single(c => c.Name == "a");
+        a.Id.Should().Be(liveA.Id);
+        a.DataType.Should().Be("BIGINT");
+        a.IsComputed.Should().BeTrue();
+        newDef.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("a", "b");
+        newDef.UniqueConstraints.Should().ContainSingle().Which.ColumnIds.Should().Equal(liveA.Id);
+    }
+
+    /// <summary>AlterPrimaryKey を選ばない限り、AlterColumn・AddColumn は図側の主キー指定を持ち込まない</summary>
+    [Fact(
+        DisplayName = "再構築: AlterPrimaryKey 未選択なら AlterColumn・AddColumn は主キーを変えない"
+    )]
+    public void Rebuild_ColumnChangesWithoutAlterPrimaryKey_KeepLivePrimaryKey()
+    {
+        var live = new Entity { TableName = "items", Columns = { PkId(), Col("code", "TEXT") } };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "items",
+                    ColumnName = "code",
+                    Column = new Column
+                    {
+                        Name = "code",
+                        DataType = "VARCHAR(20)",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                    },
+                    IsSelected = true,
+                },
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddColumn,
+                    TableName = "items",
+                    ColumnName = "k2",
+                    Column = new Column
+                    {
+                        Name = "k2",
+                        DataType = "TEXT",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                    },
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var newDef = plan.Rebuilds.Should().ContainSingle().Which.NewDefinition;
+        newDef.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("id");
+        newDef.Columns.Single(c => c.Name == "k2").IsNullable.Should().BeFalse();
+    }
+
+    /// <summary>AlterPrimaryKey を選べば、追加列も主キーの構成へ入る（主キーを決めるのは AlterPrimaryKey）</summary>
+    [Fact(DisplayName = "再構築: AlterPrimaryKey を選べば追加列も主キーになる")]
+    public void Rebuild_AddColumnWithAlterPrimaryKey_JoinsPrimaryKey()
+    {
+        var live = new Entity { TableName = "items", Columns = { PkId(), Col("note", "TEXT") } };
+        var target = new Entity
+        {
+            TableName = "items",
+            Columns =
+            {
+                PkId(),
+                Col("note", "TEXT"),
+                new Column
+                {
+                    Name = "k2",
+                    DataType = "TEXT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddColumn,
+                    TableName = "items",
+                    ColumnName = "k2",
+                    Column = target.Columns[2],
+                    IsSelected = true,
+                },
+                AlterPk("items", target),
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Rebuilds.Should()
+            .ContainSingle()
+            .Which.NewDefinition.GetPrimaryKeyColumnsInOrder()
+            .Select(c => c.Name)
+            .Should()
+            .Equal("id", "k2");
+    }
+
+    // ---------------- 再構築での候補キー喪失の警告 ----------------
+
+    /// <summary>主キー id・自然キー code の親と、id を参照する子の live スキーマを作る</summary>
+    private static (Entity Parent, Entity Child, Relationship Fk) CandidateKeyScenario()
+    {
+        var parent = new Entity
+        {
+            TableName = "parent",
+            Columns =
+            {
+                PkId(),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "TEXT",
+                    IsNullable = false,
+                },
+            },
+        };
+        var child = new Entity
+        {
+            TableName = "child",
+            Columns = { PkId(), Col("parent_id", "INT") },
+        };
+        var fk = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            ColumnPairs = { new RelationshipColumnPair(parent.Columns[0].Id, child.Columns[1].Id) },
+        };
+
+        return (parent, child, fk);
+    }
+
+    /// <summary>親の主キーを id から code へ付け替える AlterPrimaryKey（図側の親）を作る</summary>
+    private static SchemaDiffItem MovePrimaryKeyToCode()
+    {
+        var target = new Entity
+        {
+            TableName = "parent",
+            Columns =
+            {
+                Col("id", "INT"),
+                new Column
+                {
+                    Name = "code",
+                    DataType = "TEXT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            },
+        };
+
+        return AlterPk("parent", target);
+    }
+
+    /// <summary>
+    /// 再構築の方言でも、参照される主キーの付け替えで被参照列が候補キーでなくなる外部キーを警告することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "再構築: 参照される主キーの付け替えで候補キーを失う外部キーを警告する")]
+    public void Rebuild_AlterReferencedPrimaryKey_WarnsCandidateKeyLoss()
+    {
+        var (parent, child, fk) = CandidateKeyScenario();
+
+        var plan = new SyncPlanner().BuildPlan(
+            [MovePrimaryKeyToCode()],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [parent, child], LiveRelationships = [fk] }
+        );
+
+        var warning = plan
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey)
+            .Which;
+        warning.TableName.Should().Be("child");
+        warning.Detail.Should().Be("FK_child_parent");
+    }
+
+    /// <summary>
+    /// 被参照列に一意制約がある（候補キーのまま）・子表を削除する場合は、再構築の方言でも警告しないことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "再構築: 被参照列に一意制約がある・子表を削除するなら候補キー喪失を警告しない"
+    )]
+    public void Rebuild_AlterReferencedPrimaryKey_NoWarningWhenProvable()
+    {
+        var (parent, child, fk) = CandidateKeyScenario();
+        var parentWithUnique = WithUnique(parent, null, "id");
+
+        var withUnique = new SyncPlanner().BuildPlan(
+            [MovePrimaryKeyToCode()],
+            RebuildCaps,
+            new SyncPlanContext
+            {
+                LiveEntities = [parentWithUnique, child],
+                LiveRelationships = [fk],
+            }
+        );
+
+        var childDropped = new SyncPlanner().BuildPlan(
+            [
+                MovePrimaryKeyToCode(),
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.DropTable,
+                    TableName = "child",
+                    Entity = child,
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [parent, child], LiveRelationships = [fk] }
+        );
+
+        withUnique.Warnings.Should().BeEmpty();
+        childDropped.Warnings.Should().BeEmpty();
+    }
+
+    // ---------------- 外部キーの作り直し（AlterForeignKey） ----------------
+
+    /// <summary>
+    /// <see cref="LiveFkScenario"/> の外部キーの ON DELETE だけを Cascade へ変えた図と差分を取り、
+    /// 外部キー変更の項目を選んだ状態で返す。
+    /// </summary>
+    private static SchemaDiffItem SelectedForeignKeyAlter(
+        SyncPlanContext context,
+        SyncDialectCapabilities? capabilities = null
+    )
+    {
+        var targetEntities = context.LiveEntities.Select(e => e.Clone(preserveId: true)).ToList();
+        var liveRel = context.LiveRelationships[0];
+        var targetRel = new Relationship
+        {
+            SourceEntityId = liveRel.SourceEntityId,
+            TargetEntityId = liveRel.TargetEntityId,
+            ColumnPairs = [.. liveRel.ColumnPairs.Select(p => p.Clone())],
+            ConstraintName = liveRel.ConstraintName,
+            OnDelete = ForeignKeyReferentialAction.Cascade,
+        };
+
+        var alter = new SchemaDiffService()
+            .Compute(
+                context.LiveEntities,
+                context.LiveRelationships,
+                targetEntities,
+                [targetRel],
+                capabilities
+            )
+            .Items.Single(i => i.Kind == SchemaDiffKind.AlterForeignKey);
+        alter.IsSelected = true;
+        return alter;
+    }
+
+    /// <summary>選んだ外部キー変更は、外す側の DROP と付ける側の ADD の 2 セクションへ展開されることを検証する</summary>
+    [Fact(DisplayName = "外部キー変更: 選択すると旧定義の DROP と新定義の ADD へ展開される")]
+    public void AlterForeignKey_Selected_ExpandsToDropAndAdd()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+
+        var plan = new SyncPlanner().BuildPlan(
+            [SelectedForeignKeyAlter(context)],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        var drop = plan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which;
+        drop.ForeignKeyName.Should().Be("FK_orders_customer");
+        drop.Relationship!.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
+
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which.Relationship!.OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.Cascade);
+    }
+
+    /// <summary>選んでいない外部キー変更は計画に何も出さない（既定のまま実行しても名前の重複で失敗しない）</summary>
+    [Fact(DisplayName = "外部キー変更: 未選択なら計画は空")]
+    public void AlterForeignKey_Unselected_ProducesEmptyPlan()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+        var alter = SelectedForeignKeyAlter(context);
+        alter.IsSelected = false;
+
+        new SyncPlanner()
+            .BuildPlan([alter], new SyncDialectCapabilities(), context)
+            .IsEmpty.Should()
+            .BeTrue();
+    }
+
+    /// <summary>
+    /// 外部キー変更の DROP は明示的な削除として扱われ、主キー変更に伴う暗黙の外し直しと重複せず、
+    /// 旧い定義を付け直さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "外部キー変更: 主キー変更の暗黙の外し直しと重複せず旧定義を付け直さない")]
+    public void AlterForeignKey_WithReferencedPrimaryKeyChange_DoesNotDuplicate()
+    {
+        var (customer, _, _, context) = LiveFkScenario();
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                SelectedForeignKeyAlter(context),
+                AlterPk("customer", customer.Clone(preserveId: false)),
+            ],
+            new SyncDialectCapabilities(),
+            context
+        );
+
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .Items.Should()
+            .ContainSingle();
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which.Relationship!.OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.Cascade);
+    }
+
+    // ---------------- 主キー・外部キーの暗黙の外し直し（SQL Server・MySQL） ----------------
+
+    /// <summary>MySQL 相当のケーパビリティ（外部キーは外し直す・主キー／一意制約は外さない・自表の外部キーも外し直す）</summary>
+    private static readonly SyncDialectCapabilities MySqlLikeCaps = new()
+    {
+        ColumnReorder = ColumnReorderMode.Native,
+        AlterColumnRequiresForeignKeyRebuild = true,
+        PrimaryKeyChangeRequiresOwnForeignKeyRebuild = true,
+    };
+
+    /// <summary>
+    /// 主キーの構成列の型を変えると、主キー変更を選んでいなくても、同じ構成の主キーを外して付け直す項目が
+    /// 「解除 → 列定義変更 → 付与」の 3 フェーズで入ることを検証する（SQL Server の Msg 5074 対策）。
+    /// </summary>
+    [Fact(DisplayName = "暗黙の主キー: 主キー列の型変更で同じ構成の主キーを外して付け直す")]
+    public void AlterColumn_OnPrimaryKeyColumn_InjectsImplicitPrimaryKeyRebuild()
+    {
+        var live = PairTable(["b", "a"]);
+        var alter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "pair",
+            ColumnName = "a",
+            Column = new Column
+            {
+                Name = "a",
+                DataType = "BIGINT",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            },
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [alter],
+            FkRebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Sections.Select(s => (s.Kind, s.PrimaryKeyPhase))
+            .Should()
+            .Equal(
+                (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Drop),
+                (SchemaDiffKind.AlterColumn, PrimaryKeyPhase.None),
+                (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Add)
+            );
+
+        // 付け直す主キーは live の構成・順序のまま
+        plan.Sections.Last()
+            .Items.Should()
+            .ContainSingle()
+            .Which.Entity!.GetPrimaryKeyColumnsInOrder()
+            .Select(c => c.Name)
+            .Should()
+            .Equal("b", "a");
+    }
+
+    /// <summary>主キー変更を選んでいれば、その変更が解除と付与を行うので暗黙の主キー項目は足さない</summary>
+    [Fact(DisplayName = "暗黙の主キー: 主キー変更を選んでいれば重ねて注入しない")]
+    public void AlterColumn_OnPrimaryKeyColumnWithAlterPrimaryKey_DoesNotDuplicate()
+    {
+        var live = PairTable(["a", "b"]);
+        var alter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "pair",
+            ColumnName = "a",
+            Column = Col("a", "BIGINT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [alter, AlterPk("pair", PairTable(["b", "a"]))],
+            FkRebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Sections.Where(s => s.Kind == SchemaDiffKind.AlterPrimaryKey)
+            .Should()
+            .OnlyContain(s => s.Items.Count == 1);
+    }
+
+    /// <summary>主キー・一意制約を外さなくても列を変えられる方言（MySQL）では、暗黙の主キー・一意制約を注入しない</summary>
+    [Fact(DisplayName = "暗黙の主キー: MySQL 相当では主キー・一意制約を外し直さない")]
+    public void AlterColumn_OnKeyColumns_MySqlLike_DoesNotRebuildKeys()
+    {
+        var live = WithUnique(PairTable(["a", "b"]), "UQ_pair_memo", "memo");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "pair",
+                    ColumnName = "a",
+                    Column = Col("a", "BIGINT"),
+                    IsSelected = true,
+                },
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "pair",
+                    ColumnName = "memo",
+                    Column = Col("memo", "VARCHAR(20)"),
+                    IsSelected = true,
+                },
+            ],
+            MySqlLikeCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.AlterColumn);
+    }
+
+    /// <summary>
+    /// 外部キーの片側の列だけ型を変えると、同期後に両端の型が食い違うため外部キーを外し直さず
+    /// （＝列定義変更の時点で失敗させる）、その外部キーを警告で名指しすることを検証する。
+    /// </summary>
+    [Theory(DisplayName = "型の食い違い: 片側だけの型変更では外部キーを外し直さず警告する")]
+    [InlineData("orders", "customer_id")]
+    [InlineData("customer", "id")]
+    public void AlterColumn_OneSideOfForeignKey_WarnsAndDoesNotInject(string table, string column)
+    {
+        var (_, _, _, context) = LiveFkScenario();
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = table,
+                    ColumnName = column,
+                    Column = Col(column, "BIGINT"),
+                    IsSelected = true,
+                },
+            ],
+            MySqlLikeCaps,
+            context
+        );
+
+        plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.AlterColumn);
+        var warning = plan
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch)
+            .Which;
+        warning.TableName.Should().Be("orders");
+        warning.Detail.Should().Be("FK_orders_customer");
+    }
+
+    /// <summary>両端を同じ型へ変えれば外部キーを外して付け直し、警告は出さない（大文字小文字の違いは同じ型）</summary>
+    [Fact(DisplayName = "型の食い違い: 両端を同じ型へ変えれば外し直して警告しない")]
+    public void AlterColumn_BothSidesOfForeignKey_InjectsWithoutWarning()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "orders",
+                    ColumnName = "customer_id",
+                    Column = Col("customer_id", "bigint"),
+                    IsSelected = true,
+                },
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "customer",
+                    ColumnName = "id",
+                    Column = Col("id", "BIGINT"),
+                    IsSelected = true,
+                },
+            ],
+            MySqlLikeCaps,
+            context
+        );
+
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(
+                SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.AlterColumn,
+                SchemaDiffKind.AddForeignKey
+            );
+        plan.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 子表・構成列が同じ計画で消える外部キーは、主キー変更に巻き込まれても外すだけで付け直さないことを検証する
+    /// （付け直すと消えた表・列を参照して失敗する。外すほうは、残っていると主キーの解除・列の削除が拒否されるので要る）。
+    /// </summary>
+    [Theory(
+        DisplayName = "消える端: 子表の削除・子列の削除と重なる外部キーは外すだけで付け直さない"
+    )]
+    [InlineData(SchemaDiffKind.DropTable)]
+    [InlineData(SchemaDiffKind.DropColumn)]
+    public void AlterPrimaryKey_WithDroppedChildEndpoint_DoesNotInject(SchemaDiffKind dropKind)
+    {
+        var (customer, orders, _, context) = LiveFkScenario();
+        var drop = new SchemaDiffItem
+        {
+            Kind = dropKind,
+            TableName = "orders",
+            ColumnName = dropKind == SchemaDiffKind.DropColumn ? "customer_id" : null,
+            Entity = orders,
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [AlterPk("customer", customer.Clone(preserveId: false)), drop],
+            FkRebuildCaps,
+            context
+        );
+
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which.ForeignKeyName.Should()
+            .Be("FK_orders_customer");
+        plan.Sections.Should().NotContain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+        plan.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// MySQL では、主キーを変える表自身の外部キーのうち子列が旧主キーの先頭に乗るものも外して付け直す
+    /// （旧主キーがその外部キーを支える唯一の索引だと DROP PRIMARY KEY がエラー 1553 になる）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "自表の外部キー: MySQL 相当では旧主キーの先頭に乗る外部キーを外し直す")]
+    public void AlterPrimaryKey_OwnForeignKeyOnLeadingColumns_InjectsForMySqlLike()
+    {
+        var parent = new Entity { TableName = "p", Columns = { PkId() } };
+        var other = new Entity { TableName = "q", Columns = { PkId() } };
+        var link = new Entity
+        {
+            TableName = "link",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "p_id",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "x",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                Col("q_id", "INT"),
+            },
+        };
+        var leading = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = link.Id,
+            ColumnPairs = [new(parent.Columns[0].Id, link.Columns[0].Id)],
+            ConstraintName = "FK_link_p",
+        };
+        var notLeading = new Relationship
+        {
+            SourceEntityId = other.Id,
+            TargetEntityId = link.Id,
+            ColumnPairs = [new(other.Columns[0].Id, link.Columns[2].Id)],
+            ConstraintName = "FK_link_q",
+        };
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [parent, other, link],
+            LiveRelationships = [leading, notLeading],
+        };
+
+        // 主キーを (p_id, x) から (x, p_id) へ並べ替える
+        var target = link.Clone(preserveId: true);
+        target.PrimaryKeyColumnIds = [target.Columns[1].Id, target.Columns[0].Id];
+
+        var mySqlPlan = new SyncPlanner().BuildPlan(
+            [AlterPk("link", target)],
+            MySqlLikeCaps,
+            context
+        );
+        var otherPlan = new SyncPlanner().BuildPlan(
+            [AlterPk("link", target)],
+            FkRebuildCaps,
+            context
+        );
+
+        mySqlPlan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .Items.Select(i => i.ForeignKeyName)
+            .Should()
+            .Equal("FK_link_p");
+        otherPlan.Sections.Should().NotContain(s => s.Kind == SchemaDiffKind.DropForeignKey);
+    }
+
+    /// <summary>再構築の方言では、外部キー変更で子表の外部キーが新しい定義の 1 本だけになることを検証する</summary>
+    [Fact(
+        DisplayName = "外部キー変更: 再構築の方言では子表の外部キーが新しい定義の 1 本だけになる"
+    )]
+    public void AlterForeignKey_RebuildDialect_ReplacesForeignKey()
+    {
+        var (_, _, _, context) = LiveFkScenario();
+
+        var plan = new SyncPlanner().BuildPlan(
+            [SelectedForeignKeyAlter(context, RebuildCaps)],
+            RebuildCaps,
+            context
+        );
+
+        plan.Rebuilds.Should()
+            .ContainSingle()
+            .Which.ForeignKeys.Should()
+            .ContainSingle()
+            .Which.OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.Cascade);
     }
 }

@@ -250,14 +250,18 @@ It compares the current state of the database with the contents of the diagram, 
 
 - Adding and dropping tables
 - Adding, altering (type, nullability), and dropping columns
-- Adding and dropping foreign keys
+- Adding, dropping, and recreating foreign keys (a foreign key whose referential actions, column pairs, or referenced table alone changed)
 - Changing the primary key (adding or removing it, or changing its column set or column order)
 - Setting, updating, and removing table and column descriptions (SQLite is out of scope)
 - Changes to the column order (syncable on SQLite / MySQL)
 
 Elements with the same name are treated as the same element, so a rename is detected as "drop + add."
+A foreign key of an unnamed relationship is matched by the same default name the DDL gives it (`FK_{child table}_{parent table}`).
+Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
 
 Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions.
+Adding a column in the middle is therefore not a column-order difference by itself: the new column goes to the end of the table, and the next sync shows the order difference.
+When existing columns are reordered at the same time, a single sync also puts the new column in place.
 On SQLite and MySQL it can be synced as a selectable diff item (unselected by default): SQLite folds it into the table rebuild, and MySQL uses `ALTER TABLE ... MODIFY ... AFTER`, moving as few columns as possible.
 MySQL's `MODIFY` re-specifies the column from the live catalog, so moving a column keeps its attributes and its comment (see [what MySQL's `MODIFY COLUMN` re-specifies](#what-mysqls-modify-column-re-specifies)).
 On the other three dialects it is shown for information only and is not synced.
@@ -286,7 +290,12 @@ Changing a table's primary key in the diagram (adding or removing it, or changin
 The old primary-key constraint is located by querying the database catalog at run time, so imported databases with arbitrary constraint names work.
 The script drops the old key first, applies any selected column alterations, and then adds the new key, so a change that also makes the old key column nullable succeeds in one sync.
 
-Foreign keys that reference the changed primary key are dropped and re-created automatically around the change (on SQL Server, the same applies when altering a column that participates in a foreign key).
+Foreign keys that reference the changed primary key are dropped and re-created automatically around the change (on SQL Server and MySQL, the same applies when altering a column that participates in a foreign key).
+On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
+On SQL Server, altering the type of a primary key column also drops the primary key and adds it back with the same columns (the re-added key is named `PK_{table}`).
+When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
+Re-adding it would always fail and, on MySQL / Oracle, leave the foreign key missing.
+The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
 If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.
 On SQL Server and PostgreSQL such a failure rolls the whole script back, while on MySQL / Oracle it can leave the foreign keys dropped (partially applied).
 
@@ -311,7 +320,10 @@ QuickER therefore takes the definition from two different places, depending on w
   Column-order sync preserves the column's existing comment as well.
 - **Altering a column** (a type or nullability change) re-specifies from the diagram, because the diagram is what that change expresses.
   It therefore **does** drop the attributes listed above, none of which the diagram can represent.
+  The comment alone is re-stated from the live database and kept (changing it is the job of the description sync item).
   Such diffs are unselected by default.
+- **Changing the primary key** removes `AUTO_INCREMENT` from an old primary key column before dropping the key, because MySQL refuses to drop it otherwise (error 1075).
+  `AUTO_INCREMENT` is not added back because the diagram cannot represent it (the comment, default, and other attributes are carried over from the live definition).
 
 Two things do not come through the rebuild, both because the catalog does not record them the way they were written:
 
@@ -332,20 +344,21 @@ It records `COLUMN_DEFAULT` with different semantics, so a definition rebuilt fr
 
 Because SQLite's `ALTER TABLE` supports only limited changes, sync operations that involve column changes or deletions use a table-rebuild approach.
 A new table is created from the combined definition of "the database's current state + the selected differences," the data is migrated, the old table is swapped out, and auxiliary objects such as indexes are recreated.
-The rebuild runs inside a transaction, and before committing it checks foreign-key integrity (`PRAGMA foreign_key_check`); on violations it rolls back and reports the violating tables.
+The rebuild runs inside a transaction, and before committing it checks foreign-key integrity (`PRAGMA foreign_key_check`); if the sync added violations it rolls back and reports the violating tables.
+SQLite does not check foreign keys by default, so databases that hold child rows without a parent are common, and violations that existed before the sync do not make it fail.
+A view that refers to a rebuilt table does not stop the rebuild, and it keeps pointing at the rebuilt table (`PRAGMA legacy_alter_table` is turned on for the duration).
+If the sync breaks a view, for example one that refers to a dropped column, it rolls back and names the view.
 
 The rebuilt table is created from the diagram's definition, so anything outside [what the diagram models](#modeling-fidelity) is **not** reproduced and is silently lost.
 That covers `AUTOINCREMENT`, `DEFAULT`, `CHECK`, `COLLATE`, and generated columns, which is exactly why the `DEFAULT` values you set outside QuickER disappear after a rebuild.
+Conflict clauses on constraints (`ON CONFLICT`), deferred foreign keys (`DEFERRABLE INITIALLY DEFERRED`), and the table options after the closing parenthesis of the column list (`WITHOUT ROWID` and `STRICT`) are lost the same way.
 Indexes and triggers are safe: they are captured as their full `CREATE` statements and replayed.
 Implicit auto-numbering is also safe as long as the diagram's declared type is `INTEGER`, because such a primary key stays a rowid alias in the rebuilt table (a key declared `INT`, which is what a diagram created in QuickER or converted through another dialect holds, was never an alias to begin with; see [what the diagram models](#modeling-fidelity)).
 
 To make the loss visible, QuickER reads the live `CREATE TABLE` statement of every table it is about to rebuild and lists the attributes it found in the execution-confirmation dialog.
 If the table needs those attributes, re-apply them yourself after the sync, or run the change as hand-written SQL.
-
-The **table options** `WITHOUT ROWID` and `STRICT` are lost the same way, but **without a warning**.
-They sit after the closing parenthesis of the column list, the detector behind that confirmation only reads what is inside it, and neither word is in its keyword list either.
-A rebuilt table therefore comes back as an ordinary rowid, non-strict table with nothing said about it.
-If a table depends on either option, do not sync it through a rebuild; apply the change as hand-written SQL instead.
+A table that depends on `WITHOUT ROWID` or `STRICT` comes back as an ordinary rowid, non-strict table, so do not sync it through a rebuild; apply the change as hand-written SQL instead.
+`NOT DEFERRABLE` and `DEFERRABLE INITIALLY IMMEDIATE` check immediately, the same as the default, so losing them changes nothing and they are not listed.
 
 The sync-target SQLite file can also be created fresh with the "Create new" button in the connection dialog.
 Apply the whole diagram to an empty database to set it up from scratch.

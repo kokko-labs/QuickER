@@ -203,9 +203,12 @@ public sealed class CompositeForeignKeyTests
         liveChild.Columns.Should().HaveCount(3);
     }
 
-    /// <summary>構成列が 1 組減ると Drop ＋ Add の差分になり、Add 側が全構成列を運ぶことを検証する</summary>
-    [Fact(DisplayName = "複合 FK が単列へ変わると Drop と Add の両方が出て構成列を運ぶ")]
-    public void SchemaDiff_CompositeToSingle_EmitsDropAndAddWithColumnPairs()
+    /// <summary>
+    /// 構成列が 1 組減ると外部キー変更（AlterForeignKey）の差分になり、外す側と付ける側がそれぞれ
+    /// 全構成列を運ぶことを検証する（同じ名前の作り直しなので削除と追加の 2 項目にしない）。
+    /// </summary>
+    [Fact(DisplayName = "複合 FK が単列へ変わると AlterForeignKey になり新旧の構成列を運ぶ")]
+    public void SchemaDiff_CompositeToSingle_EmitsAlterWithColumnPairs()
     {
         var (live, _, _, _) = BuildCompositeDiagram();
         var (target, _, _, targetRel) = CloneDiagram(live);
@@ -220,18 +223,13 @@ public sealed class CompositeForeignKeyTests
             target.Relationships
         );
 
-        var drop = diff
-            .Items.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey)
-            .Which;
-        drop.ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn))
-            .Should()
-            .Equal(("a", "a_ref"), ("b", "b_ref"));
-
         var add = diff
             .Items.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey)
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterForeignKey)
             .Which;
+        add.ReplacedForeignKey!.ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn))
+            .Should()
+            .Equal(("a", "a_ref"), ("b", "b_ref"));
         add.ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn))
             .Should()
             .Equal(("a", "a_ref"));

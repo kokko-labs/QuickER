@@ -58,6 +58,19 @@ public enum SchemaDiffKind
 
     /// <summary>列の並び順をダイアグラムに合わせて変更する（対応方言のみ・既定では非選択）</summary>
     ReorderColumns,
+
+    /// <summary>
+    /// 既存の外部キー制約を作り直す（参照アクション・列ペア・参照先だけが変わった外部キー。既定では非選択）
+    /// </summary>
+    /// <remarks>
+    /// 削除候補（DB の定義＝<see cref="SchemaDiffItem.ReplacedForeignKey"/>）と追加候補（図の定義＝この項目自身の
+    /// 外部キーのフィールド）を 1 項目へ畳んだもの。2 項目のままだと、既定どおり追加だけを選んで実行したときに
+    /// 同じ名前の外部キーを足そうとして失敗する。<see cref="SyncPlanner"/> が計画の入口で DROP と ADD の 2 項目へ
+    /// 展開するため、方言別レンダラーは既存の外部キーの DROP / ADD のまま SQL 化できる。
+    /// 作り直しの間は外部キーが無く、MySQL / Oracle では付け直しの失敗で外部キーが消えたまま残りうるため、
+    /// 列定義変更・主キー変更と同じく破壊的に数えて既定では選択しない。
+    /// </remarks>
+    AlterForeignKey,
 }
 
 /// <summary>
@@ -107,6 +120,14 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// （<see cref="ColumnName"/> は表示・照合の互換のため先頭ペアの子列名が入る）。
     /// </remarks>
     public IReadOnlyList<ForeignKeyColumnNamePair> ForeignKeyColumnPairs { get; init; } = [];
+
+    /// <summary>作り直す前の外部キー（DB の定義の DropForeignKey 項目。AlterForeignKey のみ）。</summary>
+    /// <remarks>
+    /// <see cref="SchemaDiffKind.AlterForeignKey"/> では、この項目自身の外部キーのフィールド（<see cref="Relationship"/>・
+    /// <see cref="ParentEntity"/>・<see cref="ChildEntity"/>・<see cref="ForeignKeyColumnPairs"/>）が新しい定義を、
+    /// ここが外す側の定義を運ぶ。
+    /// </remarks>
+    public SchemaDiffItem? ReplacedForeignKey { get; init; }
 
     /// <summary>
     /// 対象の一意制約名 (Add/DropUniqueConstraint のみ)。
@@ -159,6 +180,8 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// 主キーの解除・付け替えは重複データや NULL の存在で失敗しうるうえ、被参照 FK の張り直しを伴うため。
     /// 一意制約の削除（<see cref="SchemaDiffKind.DropUniqueConstraint"/>）も、候補キーを失って被参照 FK を
     /// 壊しうる（＝取り消すには重複データの解消が要る）ため破壊的に数える。
+    /// 外部キーの作り直し（<see cref="SchemaDiffKind.AlterForeignKey"/>）は、MySQL / Oracle では付け直しの失敗で
+    /// 外部キーが消えたまま残りうるため破壊的に数える。
     /// </remarks>
     public bool IsDestructive =>
         Kind
@@ -167,6 +190,7 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
                 or SchemaDiffKind.DropColumn
                 or SchemaDiffKind.DropTable
                 or SchemaDiffKind.DropForeignKey
+                or SchemaDiffKind.AlterForeignKey
                 or SchemaDiffKind.DropUniqueConstraint;
 
     /// <inheritdoc/>

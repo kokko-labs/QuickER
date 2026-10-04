@@ -566,6 +566,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmRebuildDropsAttributes,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // 列の変更で両端の型が食い違う外部キーは外し直さない（＝列の変更が失敗する）
+            SyncPlanWarningKind.ForeignKeyColumnTypeMismatch => string.Format(
+                Strings.SchemaSync_ExecuteConfirmForeignKeyTypeMismatch,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

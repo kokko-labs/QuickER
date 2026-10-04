@@ -89,6 +89,67 @@ public class SqliteSyncScriptBuilderTests
             .BeLessThan(script.IndexOf("PRAGMA foreign_keys=ON;", System.StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// 既存テーブルの作り直しを含むときだけ、前後を legacy_alter_table の ON / OFF で挟むことを検証する
+    /// （作り直す表を参照するビューがあっても RENAME が失敗しないようにする）。
+    /// </summary>
+    [Fact(
+        DisplayName = "既存テーブルの作り直しは legacy_alter_table の ON / OFF で挟み、新規作成だけなら挟まない"
+    )]
+    public void Rebuild_IsWrappedWithLegacyAlterTableOnlyForExistingTables()
+    {
+        var rebuild = Build(
+            new SyncPlan
+            {
+                Rebuilds =
+                [
+                    new TableRebuildPlan
+                    {
+                        TableName = "invoice",
+                        NewDefinition = new Entity
+                        {
+                            TableName = "invoice",
+                            Columns = { Pk("id") },
+                        },
+                        CreateOnly = false,
+                        CopyColumns = ["id"],
+                    },
+                ],
+            }
+        );
+        var createOnly = Build(
+            new SyncPlan
+            {
+                Rebuilds =
+                [
+                    new TableRebuildPlan
+                    {
+                        TableName = "invoice",
+                        NewDefinition = new Entity
+                        {
+                            TableName = "invoice",
+                            Columns = { Pk("id") },
+                        },
+                        CreateOnly = true,
+                    },
+                ],
+            }
+        );
+
+        rebuild
+            .Should()
+            .StartWith(
+                "PRAGMA foreign_keys=OFF;"
+                    + System.Environment.NewLine
+                    + "PRAGMA legacy_alter_table=ON;"
+            );
+        rebuild
+            .IndexOf("PRAGMA legacy_alter_table=OFF;", System.StringComparison.Ordinal)
+            .Should()
+            .BeGreaterThan(rebuild.IndexOf("RENAME TO", System.StringComparison.Ordinal));
+        createOnly.Should().NotContain("legacy_alter_table");
+    }
+
     /// <summary>CreateOnly（新規テーブル）は FK 句インラインの CREATE TABLE のみで、移送・入替を伴わないことを検証する</summary>
     [Fact(DisplayName = "CreateOnly は FK 句インラインの CREATE のみ")]
     public void CreateOnly_EmitsInlineForeignKeyCreateWithoutMigration()

@@ -4,11 +4,11 @@ using QuickER.Provider;
 namespace QuickER.Tests.Provider;
 
 /// <summary>
-/// テーブル再構築で失われる列レベル属性の検出（<see cref="TableRebuildAttributeDetector"/>）を検証する。
+/// テーブル再構築で失われる属性の検出（<see cref="TableRebuildAttributeDetector"/>）を検証する。
 /// </summary>
 /// <remarks>
-/// 意味モデルが持たない属性（<c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列）は
-/// 再構築で黙って消える。検出漏れは「消えたことに気づかない」に直結するため、種別ごとに固定する。
+/// 意味モデルが持たない属性（列の属性・制約の句・テーブルオプション）は再構築で消える。
+/// 検出漏れは「消えたことに気づかない」に直結するため、種別ごとに固定する。
 /// </remarks>
 public class TableRebuildAttributeDetectorTests
 {
@@ -145,6 +145,79 @@ public class TableRebuildAttributeDetectorTests
             .Detect("CREATE TABLE t (defaults INTEGER, checked INTEGER, collated TEXT)")
             .Should()
             .BeEmpty();
+    }
+
+    /// <summary>制約の競合解決句（ON CONFLICT）を検出する</summary>
+    [Fact(DisplayName = "ON CONFLICT を検出する")]
+    public void Detects_OnConflict()
+    {
+        TableRebuildAttributeDetector
+            .Detect("CREATE TABLE t (id INTEGER PRIMARY KEY, code TEXT NOT NULL ON CONFLICT ABORT)")
+            .Should()
+            .Equal("ON CONFLICT");
+    }
+
+    /// <summary>検査を実際に遅延させる外部キー（DEFERRABLE INITIALLY DEFERRED）を検出する</summary>
+    [Fact(DisplayName = "DEFERRABLE INITIALLY DEFERRED を検出する")]
+    public void Detects_DeferredForeignKey()
+    {
+        TableRebuildAttributeDetector
+            .Detect(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, p INTEGER, "
+                    + "FOREIGN KEY (p) REFERENCES parent (id) DEFERRABLE  INITIALLY\nDEFERRED)"
+            )
+            .Should()
+            .Equal("DEFERRABLE");
+    }
+
+    /// <summary>既定と同じ即時検査になる遅延指定は、失われても意味が変わらないので検出しない</summary>
+    [Fact(DisplayName = "NOT DEFERRABLE と DEFERRABLE INITIALLY IMMEDIATE は検出しない")]
+    public void DoesNotDetect_ImmediateForeignKeys()
+    {
+        TableRebuildAttributeDetector
+            .Detect(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, p INTEGER, q INTEGER, "
+                    + "FOREIGN KEY (p) REFERENCES parent (id) NOT DEFERRABLE, "
+                    + "FOREIGN KEY (q) REFERENCES parent (id) DEFERRABLE INITIALLY IMMEDIATE)"
+            )
+            .Should()
+            .BeEmpty();
+    }
+
+    /// <summary>最外の括弧の後ろのテーブルオプション（WITHOUT ROWID・STRICT）を検出する</summary>
+    [Fact(DisplayName = "括弧の後ろの WITHOUT ROWID と STRICT を検出する")]
+    public void Detects_TableOptions()
+    {
+        TableRebuildAttributeDetector
+            .Detect("CREATE TABLE t (id INTEGER PRIMARY KEY, note TEXT) without rowid , strict")
+            .Should()
+            .Equal("WITHOUT ROWID", "STRICT");
+    }
+
+    /// <summary>
+    /// テーブルオプションの語は括弧の後ろでだけ数え、括弧の中の列名・括弧の後ろのコメントは数えない。
+    /// </summary>
+    [Fact(DisplayName = "括弧の中の列名や括弧の後ろのコメントはテーブルオプションとして検出しない")]
+    public void DoesNotDetect_TableOptionWordsOutsideOptions()
+    {
+        TableRebuildAttributeDetector
+            .Detect("CREATE TABLE t (id INTEGER PRIMARY KEY, strict INTEGER) -- WITHOUT ROWID")
+            .Should()
+            .BeEmpty();
+    }
+
+    /// <summary>種別の並びは「列の属性 → 制約の句 → テーブルオプション」になる</summary>
+    [Fact(DisplayName = "列の属性・制約の句・テーブルオプションの順に並べる")]
+    public void Detects_AllGroupsInOrder()
+    {
+        TableRebuildAttributeDetector
+            .Detect(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, code TEXT NOT NULL ON CONFLICT REPLACE "
+                    + "DEFAULT 'x', p INTEGER REFERENCES parent (id) DEFERRABLE INITIALLY DEFERRED) "
+                    + "STRICT, WITHOUT ROWID"
+            )
+            .Should()
+            .Equal("DEFAULT", "ON CONFLICT", "DEFERRABLE", "WITHOUT ROWID", "STRICT");
     }
 
     /// <summary>DDL が無い（取得できなかった）場合は検出なし</summary>

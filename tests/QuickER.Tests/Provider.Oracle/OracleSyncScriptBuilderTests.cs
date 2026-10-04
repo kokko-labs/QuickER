@@ -144,6 +144,72 @@ public class OracleSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE \"customer\" MODIFY (\"note\" VARCHAR2(200) NULL);");
     }
 
+    /// <summary>
+    /// 型だけを変える AlterColumn は NULL / NOT NULL の句を付けないことを検証する
+    /// （Oracle は今と同じ指定を ORA-01442 / ORA-01451 で拒否するため、付けると必ず失敗する）。
+    /// </summary>
+    [Theory(
+        DisplayName = "AlterColumn は NULL 許容が変わらなければ NULL / NOT NULL の句を付けない"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AlterColumn_TypeOnly_OmitsNullabilityClause(bool nullable)
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "name",
+                Column = new Column
+                {
+                    Name = "name",
+                    DataType = "VARCHAR2(100)",
+                    IsNullable = nullable,
+                },
+                OldColumn = new Column
+                {
+                    Name = "name",
+                    DataType = "VARCHAR2(50)",
+                    IsNullable = nullable,
+                },
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().Contain("ALTER TABLE \"customer\" MODIFY (\"name\" VARCHAR2(100));");
+    }
+
+    /// <summary>変更前の列があっても、NULL 許容が変わるときは句を付けることを検証する（主キーの列は NOT NULL とみなす）</summary>
+    [Fact(DisplayName = "AlterColumn は NULL 許容が変わるときだけ句を付ける")]
+    public void AlterColumn_NullabilityChange_KeepsClause()
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "name",
+                Column = new Column
+                {
+                    Name = "name",
+                    DataType = "VARCHAR2(50)",
+                    IsNullable = true,
+                },
+                OldColumn = new Column
+                {
+                    Name = "name",
+                    DataType = "VARCHAR2(50)",
+                    IsNullable = true,
+                    IsPrimaryKey = true,
+                },
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().Contain("ALTER TABLE \"customer\" MODIFY (\"name\" VARCHAR2(50) NULL);");
+    }
+
     /// <summary>DropColumn が DROP COLUMN 文を生成することを検証する</summary>
     [Fact(DisplayName = "DropColumn は DROP COLUMN を生成する")]
     public void DropColumn_GeneratesDropColumn()

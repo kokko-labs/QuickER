@@ -131,8 +131,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <summary>ALTER TABLE ... MODIFY COLUMN（列定義変更）文を生成する</summary>
     /// <remarks>
     /// <para>
-    /// MySQL の MODIFY は列定義を完全に再指定するため、型・NULL 制約に加えて
-    /// 対象列に説明があれば COMMENT も含める（含めないと既存コメントが消える）。
+    /// MySQL の MODIFY は列定義を完全に再指定するため、型・NULL 制約に加えて COMMENT も含める
+    /// （含めないと既存コメントが消える）。COMMENT は DB の現在の説明（<see cref="SchemaDiffItem.OldColumn"/>）で書き、
+    /// 図の説明は使わない＝説明を変えるのは説明の同期の項目（SetColumnDescription）だけにする。
     /// </para>
     /// <para>
     /// <b>MODIFY は図に無い列属性を落とす</b>: 意味モデルが持たない DEFAULT / AUTO_INCREMENT /
@@ -145,17 +146,38 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
+
+        // COMMENT は DB の現在の説明（取り込んだ live の列）で書く。図の説明で書くと、説明の変更を選んでいないのに
+        // 型の変更だけで説明が消える・変わる。説明の変更を選んでいれば、後段の説明のセクションが上書きする
+        var definition = new Column
+        {
+            Name = col.Name,
+            DataType = col.DataType,
+            IsNullable = col.IsNullable,
+            IsPrimaryKey = col.IsPrimaryKey,
+            Description = item.OldColumn?.Description ?? col.Description,
+        };
+
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
-                + $"MODIFY COLUMN {MySqlIdentifier.QuoteSimple(col.Name)} {BuildColumnDefinition(col)};"
+                + $"MODIFY COLUMN {MySqlIdentifier.QuoteSimple(col.Name)} {BuildColumnDefinition(definition)};"
         );
     }
 
     /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）文を生成する</summary>
     /// <remarks>
+    /// <para>
     /// <c>ALTER TABLE ... DROP PRIMARY KEY</c> は主キーが無いテーブルに対してエラーになるため、
     /// <c>information_schema.TABLE_CONSTRAINTS</c> を逆引きし、主キーが在るときだけプリペアド動的 SQL で
     /// 実行する（無ければ無害な <c>DO 0</c>）。
+    /// </para>
+    /// <para>
+    /// 主キーの列に <c>AUTO_INCREMENT</c> があると、主キーを外した瞬間にその列が索引を失い、素の
+    /// <c>DROP PRIMARY KEY</c> はエラー 1075 になる。そこで実行時にその列を探し、在れば実定義から
+    /// <c>AUTO_INCREMENT</c> だけを除いた <c>MODIFY</c> と <c>DROP PRIMARY KEY</c> を 1 つの <c>ALTER</c> で実行する。
+    /// <c>AUTO_INCREMENT</c> は図が持たない属性なので付け直さない（列定義変更の <c>MODIFY</c> が図に無い属性を
+    /// 落とすのと同じ扱い。スクリプトに英語の注記を出す）。
+    /// </para>
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
@@ -176,13 +198,30 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
                 + $"AND tc.TABLE_NAME = '{tableName}' "
                 + "AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY' LIMIT 1;"
         );
-        // 主キーが無ければ無害な DO 0 を実行する
+
+        // 旧主キーの AUTO_INCREMENT 列を探し、在れば AUTO_INCREMENT を除いた実定義を再構成する
         sb.AppendLine(
-            $"SET @sql = IF(@pk IS NULL, 'DO 0', 'ALTER TABLE {table} DROP PRIMARY KEY');"
+            "-- Note: AUTO_INCREMENT on an old primary key column is removed so that the primary key can be "
+                + "dropped (the diagram does not model AUTO_INCREMENT)."
         );
-        sb.AppendLine("PREPARE stmt FROM @sql;");
-        sb.AppendLine("EXECUTE stmt;");
-        sb.AppendLine("DEALLOCATE PREPARE stmt;");
+        sb.AppendLine("SET @ai = NULL;");
+        sb.AppendLine("SELECT c.COLUMN_NAME INTO @ai");
+        sb.AppendLine("FROM information_schema.COLUMNS c");
+        sb.AppendLine(
+            $"WHERE {SchemaPredicate("c.TABLE_SCHEMA", item.TableName)} "
+                + $"AND c.TABLE_NAME = '{tableName}' "
+                + "AND c.COLUMN_KEY = 'PRI' AND INSTR(c.EXTRA, 'auto_increment') > 0 LIMIT 1;"
+        );
+        AppendLiveColumnDefinitionLookup(sb, item.TableName, "@ai", includeAutoIncrement: false);
+
+        // 主キーが無ければ無害な DO 0。AUTO_INCREMENT の列が無ければ素の DROP PRIMARY KEY。
+        // 在れば AUTO_INCREMENT を外す MODIFY と同じ ALTER で外す（列名は実行時の値なので終端の ` を二重化して埋める）
+        sb.AppendLine(
+            $"SET @sql = IF(@pk IS NULL, 'DO 0', IF(@def IS NULL, 'ALTER TABLE {table} DROP PRIMARY KEY', "
+                + $"CONCAT('ALTER TABLE {table} MODIFY COLUMN `', REPLACE(@ai, '`', '``'), '` ', @def, "
+                + "' COMMENT ', QUOTE(@cmt), ', DROP PRIMARY KEY')));"
+        );
+        AppendExecutePrepared(sb);
     }
 
     /// <summary>主キー変更の付与フェーズ（新主キー制約の ADD）文を生成する</summary>
@@ -286,9 +325,11 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
-            : item.Relationship.ConstraintName!;
+        var fkName = ConstraintNames.EffectiveForeignKey(
+            item.Relationship?.ConstraintName,
+            childTbl,
+            parentTbl
+        );
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );
@@ -440,14 +481,34 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         StringBuilder sb,
         string tableName,
         string columnName
+    ) =>
+        // カタログ検索は素の名前を文字列リテラルとして渡す（クォートではなくリテラルエスケープ）
+        AppendLiveColumnDefinitionLookup(
+            sb,
+            tableName,
+            $"'{MySqlIdentifier.EscapeStringLiteral(columnName)}'",
+            includeAutoIncrement: true
+        );
+
+    /// <summary>
+    /// <see cref="AppendLiveColumnDefinitionLookup(StringBuilder, string, string)"/> の本体。
+    /// 列名を SQL の式（文字列リテラルかユーザー変数）で受ける。
+    /// </summary>
+    /// <param name="columnNameExpression">列名を表す SQL の式（<c>'col'</c> / <c>@ai</c>）</param>
+    /// <param name="includeAutoIncrement">
+    /// 再構成した定義に <c>AUTO_INCREMENT</c> を残すか。主キーを外す前にその列から外したいときだけ <c>false</c>。
+    /// </param>
+    private static void AppendLiveColumnDefinitionLookup(
+        StringBuilder sb,
+        string tableName,
+        string columnNameExpression,
+        bool includeAutoIncrement
     )
     {
-        // カタログ検索は素の名前を文字列リテラルとして渡す（クォートではなくリテラルエスケープ）
         var table = MySqlIdentifier.EscapeStringLiteral(MySqlIdentifier.TableNameOnly(tableName));
-        var column = MySqlIdentifier.EscapeStringLiteral(columnName);
         var where =
             $"WHERE {SchemaPredicate("c.TABLE_SCHEMA", tableName)} AND c.TABLE_NAME = '{table}' "
-            + $"AND c.COLUMN_NAME = '{column}' LIMIT 1;";
+            + $"AND c.COLUMN_NAME = {columnNameExpression} LIMIT 1;";
 
         // SELECT ... INTO は該当行が無いとユーザー変数を書き換えないため、事前に初期化する
         // （初期化しないと 2 列目以降が直前の列の定義を読んで別の列の属性を焼き付ける）。
@@ -513,7 +574,11 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         );
         sb.AppendLine("CONCAT(' DEFAULT ', QUOTE(c.COLUMN_DEFAULT)))))),");
         sb.AppendLine("IF(INSTR(c.EXTRA, 'INVISIBLE') > 0, ' INVISIBLE', ''),");
-        sb.AppendLine("IF(INSTR(c.EXTRA, 'auto_increment') > 0, ' AUTO_INCREMENT', ''),");
+        sb.AppendLine(
+            includeAutoIncrement
+                ? "IF(INSTR(c.EXTRA, 'auto_increment') > 0, ' AUTO_INCREMENT', ''),"
+                : "'',"
+        );
         // ON UPDATE は精度込みで EXTRA から取る。EXTRA には後続の属性（INVISIBLE）が並び得るため
         // 最初の空白までで切る（ON UPDATE の値そのものは空白を含まない）
         sb.AppendLine(

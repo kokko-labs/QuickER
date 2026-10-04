@@ -122,9 +122,11 @@ public abstract class DdlGeneratorBase : IDdlGenerator
             var fkTable = fkEntity.TableName;
             var pkTable = pkEntity.TableName;
             // 制約名はモデルの値を優先し、未設定なら FK_子_親 の命名規則で生成する
-            var constraintName = string.IsNullOrWhiteSpace(rel.ConstraintName)
-                ? ConstraintNames.ForeignKey(fkTable, pkTable)
-                : rel.ConstraintName;
+            var constraintName = ConstraintNames.EffectiveForeignKey(
+                rel.ConstraintName,
+                fkTable,
+                pkTable
+            );
 
             AppendBeforeForeignKeyStatement(sb, rel);
 

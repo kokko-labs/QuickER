@@ -387,9 +387,17 @@ public class SchemaDiffServiceTests
             );
     }
 
-    /// <summary>参照アクション（ON DELETE/UPDATE）の変更で再作成（Drop+Add）が出力されることを検証する</summary>
-    [Fact(DisplayName = "参照アクションが変わると DropForeignKey と AddForeignKey になる")]
-    public void ForeignKeyReferentialActionChanged_EmitsDropAndAdd()
+    /// <summary>
+    /// 参照アクション（ON DELETE/UPDATE）だけが変わった外部キーは、削除と追加の 2 項目でなく
+    /// 1 つの外部キー変更（AlterForeignKey）になることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 削除と追加は同じ名前を持つため、2 項目のままだと既定どおり追加だけを選んで実行したときに
+    /// 同じ名前の外部キーを足そうとして失敗する。外部キー変更は既定未選択・破壊的で、外す側（DB の定義）と
+    /// 付ける側（図の定義）の両方を運ぶ。
+    /// </remarks>
+    [Fact(DisplayName = "参照アクションだけが変わると 1 つの AlterForeignKey になる")]
+    public void ForeignKeyReferentialActionChanged_EmitsSingleAlter()
     {
         var parentLive = Tbl("Parent", ("Id", "int", true));
         var childLive = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
@@ -425,15 +433,118 @@ public class SchemaDiffServiceTests
         );
 
         diff.Items.Should()
-            .ContainSingle(i =>
-                i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_Child_Parent"
+            .NotContain(i =>
+                i.Kind == SchemaDiffKind.AddForeignKey || i.Kind == SchemaDiffKind.DropForeignKey
             );
+        var alter = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterForeignKey)
+            .Which;
+        alter.IsSelected.Should().BeFalse();
+        alter.IsDestructive.Should().BeTrue();
+        alter.Relationship!.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+        alter.Relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetNull);
+        alter.ReplacedForeignKey!.Kind.Should().Be(SchemaDiffKind.DropForeignKey);
+        alter.ReplacedForeignKey.ForeignKeyName.Should().Be("FK_Child_Parent");
+        alter
+            .ReplacedForeignKey.Relationship!.OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.NoAction);
+    }
+
+    /// <summary>
+    /// 名前の無いリレーションと、DDL が既定名 <c>FK_{子}_{親}</c> で作った live の外部キーは同じものとみなし、
+    /// 外部キーの差分を出さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "名前の無いリレーションは既定名の live 外部キーと一致し差分を出さない")]
+    public void UnnamedRelationship_MatchesDefaultNamedLiveForeignKey()
+    {
+        var (live, liveRels, target, targetRels) = ForeignKeyPair(
+            liveName: "FK_Child_Parent",
+            targetName: null
+        );
+
+        var diff = new SchemaDiffService().Compute(live, liveRels, target, targetRels);
+
+        diff.Items.Should().NotContain(i => IsForeignKeyDiff(i));
+    }
+
+    /// <summary>
+    /// 外部キー名を保存しない方言（SQLite）でも、同じ子列に張る外部キーの参照アクションだけが変われば
+    /// AlterForeignKey になることを検証する（2 項目のままだと再構築で旧と新が同じ列に並ぶ）。
+    /// </summary>
+    [Fact(
+        DisplayName = "名前を保存しない方言でも同じ子列の外部キーの変更は AlterForeignKey になる"
+    )]
+    public void ForeignKeyChange_WithoutPersistedNames_EmitsSingleAlter()
+    {
+        var (live, liveRels, target, targetRels) = ForeignKeyPair(
+            liveName: "FK_Child_Parent_0",
+            targetName: null
+        );
+        targetRels[0].OnDelete = ForeignKeyReferentialAction.Cascade;
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            liveRels,
+            target,
+            targetRels,
+            new SqliteProvider().SyncCapabilities
+        );
+
         diff.Items.Should()
-            .ContainSingle(i =>
-                i.Kind == SchemaDiffKind.AddForeignKey
-                && i.Relationship!.OnDelete == ForeignKeyReferentialAction.Cascade
-                && i.Relationship.OnUpdate == ForeignKeyReferentialAction.SetNull
-            );
+            .ContainSingle(i => IsForeignKeyDiff(i))
+            .Which.Kind.Should()
+            .Be(SchemaDiffKind.AlterForeignKey);
+    }
+
+    /// <summary>名前の違う外部キー同士は作り直しとみなさず、削除と追加のまま残すことを検証する</summary>
+    [Fact(DisplayName = "名前の違う外部キーは AlterForeignKey に畳まない")]
+    public void ForeignKeysWithDifferentNames_StayDropAndAdd()
+    {
+        var (live, liveRels, target, targetRels) = ForeignKeyPair(
+            liveName: "fk_old",
+            targetName: "fk_new"
+        );
+
+        var diff = new SchemaDiffService().Compute(live, liveRels, target, targetRels);
+
+        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey);
+        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey);
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AlterForeignKey);
+    }
+
+    /// <summary>親 Parent(Id)・子 Child(Id, ParentId) と、ParentId → Id の外部キーを live と図の両方に作る</summary>
+    private static (
+        List<Entity> Live,
+        List<Relationship> LiveRels,
+        List<Entity> Target,
+        List<Relationship> TargetRels
+    ) ForeignKeyPair(string? liveName, string? targetName)
+    {
+        static List<Relationship> Build(List<Entity> entities, string? name) =>
+            [
+                new Relationship
+                {
+                    SourceEntityId = entities[0].Id,
+                    TargetEntityId = entities[1].Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(entities[0].Columns[0].Id, entities[1].Columns[1].Id)],
+                    ConstraintName = name,
+                },
+            ];
+
+        var live = new List<Entity>
+        {
+            Tbl("Parent", ("Id", "int", true)),
+            Tbl("Child", ("Id", "int", true), ("ParentId", "int", false)),
+        };
+        var target = new List<Entity>
+        {
+            Tbl("Parent", ("Id", "int", true)),
+            Tbl("Child", ("Id", "int", true), ("ParentId", "int", false)),
+        };
+
+        return (live, Build(live, liveName), target, Build(target, targetName));
     }
 
     /// <summary>DB と ER 図が同一なら差分項目が空になることを検証する</summary>
@@ -1198,4 +1309,11 @@ public class SchemaDiffServiceTests
 
         diff.Items.Should().BeEmpty();
     }
+
+    /// <summary>外部キーの差分（追加・削除・作り直し）か</summary>
+    private static bool IsForeignKeyDiff(SchemaDiffItem item) =>
+        item.Kind
+            is SchemaDiffKind.AddForeignKey
+                or SchemaDiffKind.DropForeignKey
+                or SchemaDiffKind.AlterForeignKey;
 }
