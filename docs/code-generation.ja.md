@@ -306,6 +306,9 @@ var result = await customers.Query()
 そのため EF Core と同じ分岐イディオムで、`Orders` の下に複数の枝を書けます（`Include(c => c.Orders).ThenInclude(o => o.OrderLines)` に続けて `Include(c => c.Orders).ThenInclude(o => o.Customer)` と書く形）。
 
 翻訳できるのは、等値・比較・`&&` と `||`・`Contains` / `StartsWith` / `EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty` と `string.IsNullOrWhiteSpace`・値オブジェクト比較です。
+NULL 許容の列は `.Value` 経由でも読めます（`x.ShippedAt != null && x.ShippedAt.Value.Year == 2024`）。
+クロージャの変数・定数・それらどうしの比較のように列を読まない部分は、翻訳の前に評価して定数の条件にします。
+`&&` と `||` は C# と同じく左辺で結果が決まればそこで止まるため、`filter == null || x.Name == filter` は `filter` が null のとき何も絞りません。
 射影（Select）・GroupBy・Join・算術式は未対応で、実行時例外になります（生 SQL か EF Core で回避してください）。
 
 **ナビゲーションプロパティは、述語にも並び替えキーにも書けません。**
@@ -377,13 +380,18 @@ SQL Server などの文字クラス `[...]` は特別扱いせず、角括弧そ
 効いてくるのはハイブリッド構成です。
 マルチターゲットや「サーバーへリモート・ローカルコピーへ直結」の構成は同じ述語を 2 つのエンジンで走らせるため、サーバー側では大文字小文字を区別しない検索が、ローカル側では区別する検索になり得ます。
 
-`string.IsNullOrWhiteSpace` は `(col IS NULL OR LTRIM(RTRIM(col)) = '')` へ変換されます。
-ただし両 SQL エンジンの 1 引数 `LTRIM` / `RTRIM` が落とすのは半角スペースだけなので、タブ・改行・ノーブレークスペースだけが入った列は一致しません。
-インメモリ実装は本物の `string.IsNullOrWhiteSpace` を評価するため Unicode の空白をすべて数え、こちらは一致します。
+`Query()` の述語の `string.IsNullOrEmpty` と `string.IsNullOrWhiteSpace` は `NULL` でも真になり、両 SQL エンジンで C# と同じ結果を返します。
+SQL Server の空の判定は `DATALENGTH` で行います（`= ''` は末尾の空白を無視するため、空白だけの値も空とみなしてしまいます）。
+`IsNullOrWhiteSpace` は `char.IsWhiteSpace` が空白とする文字（タブ・改行・ノーブレークスペース・全角空白など）をすべて数えます。
+
+SQL Server の固定長の列（`nchar(n)`・`char(n)`）は値を空白で詰めて格納し、詰めたまま返します。
+そのため `EndsWith` は詰めた値に対して比べ、これはリポジトリが読み戻した値へ C# で当てた結果と同じです。
+インメモリ実装は値を詰めずに持つため、結果が食い違うことがあります。
 
 日付部品（`Year`・`Month` など）へ変換されるのは、読み出し元が `DateTime` / `DateOnly` / `DateTimeOffset`（いずれも nullable を含む）の列である場合だけです。
 同名のプロパティを別の型に持たせても、日付部品とは見なしません（値オブジェクトへ partial で足した場合など）。
 黙って `YEAR([col])` になる代わりに、`NotSupportedException` で失敗します。
+`DateTimeOffset` の列の日付部品は、C# と同じく値が持つ時差のまま取り出します（`2024-01-01 05:00 +09:00` は 2024 年・5 時）。
 
 リストの `Contains` は、要素 1 個につきバインド変数 1 個へ展開され、チャンク分割はしません。
 そのため巨大なリストは方言のバインド変数・IN リスト上限を超えて実行時エラーになります（Oracle の 1000、SQL Server の 2100 パラメータ、SQLite の歴史的な 999 など）。

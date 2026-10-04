@@ -201,6 +201,15 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **Oracle の `INTEGER`・`SMALLINT`・`NUMBER(*,0)` の列を、整数の列として取り込むようになりました** — Oracle はこれらを精度なし・スケール 0 の `NUMBER` として保存しますが、取込は素の `NUMBER`（浮動）として書いていたため、その図から作った DDL は小数を受ける列になっていました。`NUMBER(*,0)` として取り込みます。**以前のバージョンで取り込んだ図では、該当する列が次の同期で型の変更として現れます**
 - **Oracle の `VARCHAR2(50 CHAR)` のような単位語つきの長さを、生成コードの最大長として読むようになりました** — 単位語があると最大長が空になり、`[MaxLength]`・EF Core の `HasMaxLength`・値オブジェクトの長さ検証が出ていませんでした。`NLS_LENGTH_SEMANTICS=CHAR` のデータベースから取り込んだ図では、すべての文字列列がこの形です
 - **Oracle の `NUMBER(*,s)`（精度は上限なし・スケールは s）を、生成コードの型トークンにスケールごと刻むようになりました** — トークンがスケールを落として `decimal` と書いていたため、生成コードから C# の取込で図を戻すと素の `NUMBER`（浮動）になり、`INTEGER` から取り込んだ列（`NUMBER(*,0)`）では整数の制約が消えていました。トークンは `decimal(*,s)` になり、Oracle へは元の表記で戻ります。Oracle 以外の方言で取り込むときは、書き出せる型が無いため従来の一般則どおり警告してトークンの文字列のまま採ります
+- **列を読まない条件を、DB へ送る前に評価するようになりました** — よく使う「null なら絞らない」書き方 `x => filter == null || x.Name == filter` では、`filter == null` が SQL Server と SQLite へ 2 つのパラメータの比較として送られていました。null のときは全行で不定になり、エラーにならないまま違う行（名前が NULL の行だけ）が返っていました。クロージャの変数・定数・それらどうしの比較のように列を読まない部分は先に評価し、`&&` / `||` は C# と同じく左辺で結果が決まればそこで止めます。`NotSupportedException` で失敗していた `flag || x.IsActive` も使えるようになりました
+- **SQL Server の固定長の列（`nchar(n)`・`char(n)`）への `StartsWith` / `EndsWith` / `Contains` が一致するようになりました** — パターンを列の固定長の型で束縛していたため、パターン自体が空白で詰められて一致しませんでした。なお SQL Server はこの列の値を空白で詰めて返すので、`EndsWith` は詰めた値に対して比べます（読み戻した値へ C# で当てたときと同じ結果です）
+- **SQLite の日時の列の `.Date` が一致するようになりました** — 列の側を `'YYYY-MM-DD'`、パラメータを `'YYYY-MM-DD HH:MM:SS'` の形で比べていたため、`x.At.Date == day` は 1 行も一致せず、`>=` は境界の日を落としていました。あわせて、SQLite の `DateTimeOffset` の列の日付部品（`Year`・`Hour`・`Date` など）は、格納した時差のまま取り出すようにしました。先に UTC へ換算していたため、`2024-01-01 05:00 +09:00` が 2024 年・5 時と判定されませんでした
+- **条件の中で NULL 許容の列を `.Value` 経由で読めるようになりました** — `x.ShippedAt != null && x.ShippedAt.Value.Year == 2024` は `NotSupportedException` で失敗していました
+- **`char` を受ける `Contains` / `StartsWith` / `EndsWith` を使えるようになりました** — 引数が null だという誤った `ArgumentNullException` で失敗していました
+- **`string.IsNullOrEmpty` / `IsNullOrWhiteSpace` が SQL Server と SQLite で C# と同じ結果を返すようになりました** — SQL Server の `IsNullOrEmpty` は空白だけの値にも一致し、両方言の `IsNullOrWhiteSpace` はタブ・改行・全角空白を中身として扱っていました
+- **列名・プロパティ名・ナビゲーション名がキーワードと同じでも、SQL Server のクエリが失敗しなくなりました** — `group` という列を持つ表の `Query()` や `Include(x => x.Order)` が構文エラーになり、`]` を含む列名では文が壊れていました
+- **主キーと外部キーの CLR の型が違っても、`Include` がナビゲーションを空にしなくなりました** — SQLite とインメモリ実装では、`long` の主キー（`INTEGER`）を `int` の外部キー（`INT`）が参照する組が一致せず、`Include` はエラーにならないまま空のコレクションと null の親を返していました。インメモリ実装の `ExecuteDeleteAsync(cascadeDelete: true)` は子を消し残していました。あわせて、インメモリ実装の `Include` は関連するテーブルをエンティティごとでなく `Include` ごとに 1 回だけ読むようになりました
+- **更新できる列が無い表の行の更新が失敗しなくなりました** — キー列と、更新から外れる列（行バージョン・計算列・除外したバイナリ列）だけの表では `UPDATE … SET WHERE …` という構文エラーの文ができ、SQL Server と SQLite でその行の `UpdateAsync` とグラフ保存の更新が必ず失敗していました。更新はキー列を自分自身へ代入するようになり、行の有無の判定・行バージョンの照合・新しい版の返却はそのまま働きます。SQL Server は同じ値への主キーの更新では `ON UPDATE CASCADE` を実行しないので、子の行は書き換わりません
 
 #### コード生成ダイアログ・CLI
 

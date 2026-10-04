@@ -1008,7 +1008,11 @@ public static class UnboundedBinaryColumnEngine
 /// <param name="Name">The parameter name (for example, @p0).</param>
 /// <param name="Value">The value to bind (may include a value object; unwrapping to the raw value happens on the binding side).</param>
 /// <param name="ColumnName">The target column name without brackets; null when the column cannot be identified.</param>
-public readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName);
+public readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName)
+{
+    /// <summary>Whether the column's type is applied in its variable-length form (nchar → nvarchar, char → varchar). Set for a LIKE pattern, which a fixed-length type would pad with blanks.</summary>
+    public bool VariableLength { get; init; }
+}
 
 /// <summary>
 /// The SQLite ADO executor for <see cref="SqlQuery{TEntity}"/>.
@@ -1424,7 +1428,13 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
         {
             var value =
                 SqlParameterValue.Unwrap(parameter.Value);
-            metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);
+            metadata.AddQueryParameter(
+                command,
+                parameter.Name,
+                parameter.ColumnName,
+                value,
+                parameter.VariableLength
+            );
         }
     }
 }
@@ -1498,11 +1508,15 @@ public sealed class IncludeLoader
             ? attribute.PrincipalColumn
             : attribute.DependentColumn;
 
-        // Collect the parent-side key values (non-null). When the set is empty, no child query is issued
+        // Collect the parent-side key values (non-null). When the set is empty, no child query is issued.
+        // Keys are compared in their normalized form (IncludeKeys): the parent's key and the child's foreign key can have
+        // different CLR types (a long INTEGER key referred to by an int INT column), which as boxed values never compare equal
         var parentKeys = new List<object>();
         foreach (var parent in parents)
         {
-            var key = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
+            var key = IncludeKeys.Normalize(
+                _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn)
+            );
             if (key is not null)
             {
                 parentKeys.Add(key);
@@ -1527,7 +1541,7 @@ public sealed class IncludeLoader
         var childrenByKey = new Dictionary<object, List<EntityBaseCore>>();
         foreach (var child in children)
         {
-            var fk = childMetadata.GetColumnValue(child, childKeyColumn);
+            var fk = IncludeKeys.Normalize(childMetadata.GetColumnValue(child, childKeyColumn));
             if (fk is null)
             {
                 continue;
@@ -1615,7 +1629,9 @@ public sealed class IncludeLoader
     {
         foreach (var parent in parents)
         {
-            var key = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
+            var key = IncludeKeys.Normalize(
+                _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn)
+            );
             var matched =
                 key is not null && childrenByKey.TryGetValue(key, out var bucket)
                     ? bucket
@@ -1669,18 +1685,66 @@ public static class SqlExpressionTranslator
         return ColumnName(member.Member);
     }
 
+    /// <summary>The SQL a condition folded to true is written as.</summary>
+    private const string AlwaysTrue = "1 = 1";
+
+    /// <summary>The SQL a condition folded to false is written as.</summary>
+    private const string AlwaysFalse = "1 = 0";
+
+    /// <remarks>
+    /// A boolean sub-expression that does not reference the lambda parameter - a closure variable, a constant, or a
+    /// comparison between such values (<c>filter == null</c>) - has the same value for every row, so it is evaluated here
+    /// and written as <c>1 = 1</c> / <c>1 = 0</c>, which is what C# makes of it. Sent to the database instead, a comparison
+    /// between two values becomes <c>@p0 = @p1</c>, and a null on either side makes it UNKNOWN for every row: the common
+    /// "no filter when null" form <c>filter == null || x.Col == filter</c> then returns the wrong rows without an error.
+    /// <c>&amp;&amp;</c> / <c>||</c> short-circuit from the left the way C# does, so a right operand is not evaluated once
+    /// the left one has settled the result (<c>text == null || text.Length &gt; 3</c> does not read a null text).
+    /// </remarks>
     private static string Visit(
         Expression expression,
         List<SqlQueryParameter> parameters
     )
     {
+        if (TryFold(expression, out var folded))
+        {
+            return folded ? AlwaysTrue : AlwaysFalse;
+        }
+
         switch (expression)
         {
             case BinaryExpression { NodeType: ExpressionType.AndAlso } binary:
-                return $"({Visit(binary.Left, parameters)} AND {Visit(binary.Right, parameters)})";
+            {
+                if (TryFold(binary.Left, out var leftHolds))
+                {
+                    return leftHolds ? Visit(binary.Right, parameters) : AlwaysFalse;
+                }
+
+                var left = Visit(binary.Left, parameters);
+
+                if (TryFold(binary.Right, out var rightHolds))
+                {
+                    return rightHolds ? left : AlwaysFalse;
+                }
+
+                return $"({left} AND {Visit(binary.Right, parameters)})";
+            }
 
             case BinaryExpression { NodeType: ExpressionType.OrElse } binary:
-                return $"({Visit(binary.Left, parameters)} OR {Visit(binary.Right, parameters)})";
+            {
+                if (TryFold(binary.Left, out var leftHolds))
+                {
+                    return leftHolds ? AlwaysTrue : Visit(binary.Right, parameters);
+                }
+
+                var left = Visit(binary.Left, parameters);
+
+                if (TryFold(binary.Right, out var rightHolds))
+                {
+                    return rightHolds ? AlwaysTrue : left;
+                }
+
+                return $"({left} OR {Visit(binary.Right, parameters)})";
+            }
 
             case BinaryExpression binary:
                 return VisitComparison(binary, parameters);
@@ -1746,21 +1810,27 @@ public static class SqlExpressionTranslator
                     return $"{likeColumn} LIKE {BuildLikePatternFromColumn(patternColumn, likeKind)} ESCAPE '\\'";
                 }
 
-                // The argument may be a string or a value object (the TSelf overload). Value objects are unwrapped to the raw value (string)
+                // The argument may be a string, a char (the char overloads of string), or a value object (the TSelf overload). Value objects are unwrapped to the raw value (string)
                 // A null pattern is unreachable when the query was built through SqlQuery.Where (the guard rejects it up front); kept as defense in depth
                 var raw =
-                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string
-                    ?? throw new ArgumentNullException(
-                        "value",
-                        "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
-                    );
+                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) switch
+                    {
+                        string text => text,
+                        char single => single.ToString(),
+                        _ => throw new ArgumentNullException(
+                            "value",
+                            "The pattern argument of Contains/StartsWith/EndsWith in a query predicate must not be null."
+                        ),
+                    };
                 var pattern = likeKind switch
                 {
                     LikeKind.Contains => "%" + EscapeLike(raw) + "%",
                     LikeKind.StartsWith => EscapeLike(raw) + "%",
                     _ => "%" + EscapeLike(raw),
                 };
-                return $"{likeColumn} LIKE {AddParameter(pattern, parameters, RawColumnName(likeColumn))} ESCAPE '\\'";
+                // The pattern keeps the column's type but always as its variable-length form: bound as a fixed-length nchar(10),
+                // 'ab%' would itself be padded with blanks ('ab%       ') and stop matching
+                return $"{likeColumn} LIKE {AddParameter(pattern, parameters, RawColumnName(likeColumn), variableLength: true)} ESCAPE '\\'";
 
             case MethodCallExpression call
                 when TryGetIn(call, out var inColumn, out var inCollection):
@@ -1768,9 +1838,10 @@ public static class SqlExpressionTranslator
 
             case MethodCallExpression call
                 when TryGetNullOrEmpty(call, out var neColumn, out var neWhitespace):
-                // Empty-string check. IsNullOrWhiteSpace also treats surrounding whitespace as empty
+                // Both are true for NULL as well. IsNullOrWhiteSpace counts every character char.IsWhiteSpace accepts, not only the blank
+                // SQLite compares = '' exactly; trim's default removes only the blank, so it is given the whitespace set
                 return neWhitespace
-                    ? $"({neColumn} IS NULL OR LTRIM(RTRIM({neColumn})) = '')"
+                    ? $"({neColumn} IS NULL OR trim({neColumn}, {WhiteSpaceCharacters}) = '')"
                     : $"({neColumn} IS NULL OR {neColumn} = '')";
 
             case MethodCallExpression call
@@ -2171,6 +2242,26 @@ public static class SqlExpressionTranslator
         return false;
     }
 
+    /// <summary>
+    /// The characters <see cref="char.IsWhiteSpace(char)"/> accepts, written as SQL that builds them
+    /// (char(n, ...)) so the statement itself carries no control characters.
+    /// </summary>
+    private static readonly string WhiteSpaceCharacters = BuildWhiteSpaceCharacters();
+
+    private static string BuildWhiteSpaceCharacters()
+    {
+        var codes = new List<int>();
+        for (var code = 0; code <= char.MaxValue; code++)
+        {
+            if (char.IsWhiteSpace((char)code))
+            {
+                codes.Add(code);
+            }
+        }
+
+        return $"char({string.Join(", ", codes)})";
+    }
+
     /// <summary>Detects string.IsNullOrEmpty(x.Col) / IsNullOrWhiteSpace(x.Col) (the column may be a plain column or a value object's .Value).</summary>
     private static bool TryGetNullOrEmpty(
         MethodCallExpression call,
@@ -2344,6 +2435,18 @@ public static class SqlExpressionTranslator
             return ColumnName(member.Member);
         }
 
+        // Strip Nullable<T>.Value and resolve to the column it reads (x.Col!.Value -> [col]); a NULL column then behaves as SQL
+        // NULL, where C# would throw - the predicate's own null test (x.Col != null && ...) is what keeps such rows out in both
+        if (
+            member.Member.Name == "Value"
+            && member.Expression is { } nullableSource
+            && Nullable.GetUnderlyingType(nullableSource.Type) is not null
+            && TryColumnName(nullableSource) is { } nullableColumn
+        )
+        {
+            return nullableColumn;
+        }
+
         // Strip the value object's .Value and resolve to the inner column ([col]) (x.Col.Value -> [col])
         if (
             member.Member.Name == "Value"
@@ -2381,7 +2484,12 @@ public static class SqlExpressionTranslator
 
         sql = member.Member.Name switch
         {
-            // SQLite stores date-times as ISO8601 TEXT, so extract the part with strftime and CAST to INTEGER
+            // SQLite stores date-times as ISO8601 TEXT, so extract the part with strftime and CAST to INTEGER.
+            // A DateTimeOffset column is read from the text itself instead (see SqliteOffsetDatePart)
+            _ when IsDateTimeOffsetType(Unwrap(source).Type) => SqliteOffsetDatePart(
+                member.Member.Name,
+                column
+            ),
             "Year" => $"CAST(strftime('%Y', {column}) AS INTEGER)",
             "Month" => $"CAST(strftime('%m', {column}) AS INTEGER)",
             "Day" => $"CAST(strftime('%d', {column}) AS INTEGER)",
@@ -2389,12 +2497,38 @@ public static class SqlExpressionTranslator
             "Minute" => $"CAST(strftime('%M', {column}) AS INTEGER)",
             "Second" => $"CAST(strftime('%S', {column}) AS INTEGER)",
             "DayOfYear" => $"CAST(strftime('%j', {column}) AS INTEGER)",
-            "Date" => $"date({column})",
+            // date() alone gives 'YYYY-MM-DD', while a DateTime parameter is bound as 'YYYY-MM-DD HH:MM:SS': compared as text
+            // the two never meet, so = finds nothing and >= drops the boundary day. datetime(date()) writes the midnight the parameter has
+            "Date" => $"datetime(date({column}))",
             _ => string.Empty,
         };
 
         return sql.Length != 0;
     }
+
+    /// <summary>Whether the type is <see cref="DateTimeOffset"/> (or its nullable form).</summary>
+    private static bool IsDateTimeOffsetType(Type type) =>
+        (Nullable.GetUnderlyingType(type) ?? type) == typeof(DateTimeOffset);
+
+    /// <summary>Translates a date component of a DateTimeOffset column, stored as text in the form <c>yyyy-MM-dd HH:mm:ss…±hh:mm</c>.</summary>
+    /// <remarks>
+    /// strftime reads the offset and converts the value to UTC before taking the part, while C# takes the parts in the
+    /// offset the value carries (2024-01-01 05:00+09:00 is year 2024, hour 5). Cutting the digits out of the stored text keeps
+    /// the stored offset. <c>Date</c> is written as the midnight a DateTime parameter is bound as (see the DateTime case).
+    /// </remarks>
+    private static string SqliteOffsetDatePart(string member, string column) =>
+        member switch
+        {
+            "Year" => $"CAST(substr({column}, 1, 4) AS INTEGER)",
+            "Month" => $"CAST(substr({column}, 6, 2) AS INTEGER)",
+            "Day" => $"CAST(substr({column}, 9, 2) AS INTEGER)",
+            "Hour" => $"CAST(substr({column}, 12, 2) AS INTEGER)",
+            "Minute" => $"CAST(substr({column}, 15, 2) AS INTEGER)",
+            "Second" => $"CAST(substr({column}, 18, 2) AS INTEGER)",
+            "DayOfYear" => $"CAST(strftime('%j', substr({column}, 1, 10)) AS INTEGER)",
+            "Date" => $"substr({column}, 1, 10) || ' 00:00:00'",
+            _ => string.Empty,
+        };
 
     /// <summary>Whether the type is one whose members can be date components (the nullable forms included).</summary>
     private static bool IsDateTimeType(Type type)
@@ -2428,17 +2562,38 @@ public static class SqlExpressionTranslator
         return QueryValueEvaluator.Evaluate(expression);
     }
 
+    /// <summary>
+    /// Evaluates a boolean expression that does not reference the lambda parameter. Returns false - leaving the expression to be
+    /// translated - for anything that reads a column or is not a <c>bool</c>.
+    /// </summary>
+    private static bool TryFold(Expression expression, out bool value)
+    {
+        value = false;
+
+        if (expression.Type != typeof(bool) || ReferencesLambdaParameter(expression))
+        {
+            return false;
+        }
+
+        value = (bool)QueryValueEvaluator.Evaluate(expression)!;
+        return true;
+    }
+
     /// <param name="value">The actual value to parameterize (may be null).</param>
     /// <param name="parameters">The list that receives the generated parameter.</param>
     /// <param name="columnName">The target column name (without brackets). Passed only when the column can be identified, and used for explicit typing.</param>
+    /// <param name="variableLength">Whether the column's type is to be used in its variable-length form (a LIKE pattern).</param>
     private static string AddParameter(
         object? value,
         List<SqlQueryParameter> parameters,
-        string? columnName = null
+        string? columnName = null,
+        bool variableLength = false
     )
     {
         var name = "@p" + parameters.Count;
-        parameters.Add(new SqlQueryParameter(name, value, columnName));
+        parameters.Add(
+            new SqlQueryParameter(name, value, columnName) { VariableLength = variableLength }
+        );
         return name;
     }
 
@@ -2469,6 +2624,10 @@ public static class SqlExpressionTranslator
     }
 
     /// <summary>Walks the expression tree to determine whether it contains a lambda parameter (i.e. an entity column reference).</summary>
+    /// <remarks>
+    /// Only parameters the expression does not bind itself count: in <c>ids.Any(i =&gt; i &gt; 0)</c> the <c>i</c> belongs to
+    /// the inner lambda, so the expression as a whole is still a value that can be evaluated.
+    /// </remarks>
     private static bool ReferencesLambdaParameter(Expression expression)
     {
         var finder = new LambdaParameterFinder();
@@ -2476,14 +2635,31 @@ public static class SqlExpressionTranslator
         return finder.Found;
     }
 
-    /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
+    /// <summary>A lightweight visitor that raises a flag when it finds a parameter that no lambda inside the expression binds.</summary>
     private sealed class LambdaParameterFinder : ExpressionVisitor
     {
+        private readonly HashSet<ParameterExpression> _bound = new();
+
         public bool Found { get; private set; }
+
+        protected override Expression VisitLambda<T>(Expression<T> node)
+        {
+            foreach (var parameter in node.Parameters)
+            {
+                _bound.Add(parameter);
+            }
+
+            Visit(node.Body);
+            return node;
+        }
 
         protected override Expression VisitParameter(ParameterExpression node)
         {
-            Found = true;
+            if (!_bound.Contains(node))
+            {
+                Found = true;
+            }
+
             return node;
         }
     }
@@ -2685,9 +2861,21 @@ public sealed class EntitySaveMetadata
         var tableName = EntitySaveMetadata.QuoteTableName(tableAttribute.Name);
         var keyColumnName = GetColumnName(keyProperty);
         var columnList = string.Join(", ", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
-        var updateAssignments = nonKeyProperties.Select(property =>
-            $"{EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))} = @{property.Name}"
-        );
+        // A table whose only columns are the key and columns the update leaves out (the row version, computed columns,
+        // excluded binary columns) has nothing to assign, and "UPDATE t SET WHERE ..." is a syntax error. Assigning the key to
+        // itself keeps every path that reads the statement - the affected-row count, the row-version guard and OUTPUT - as it
+        // is. A key set to the value it already holds changes nothing elsewhere: SQL Server does not run ON UPDATE CASCADE
+        // for it (no child row is rewritten, no child row version moves, no child trigger fires), and a key referenced by a
+        // NO ACTION foreign key accepts it
+        var keyColumn = EntitySaveMetadata.QuoteIdentifier(keyColumnName);
+        var updateSetClause = nonKeyProperties.Count == 0
+            ? $"{keyColumn} = {keyColumn}"
+            : string.Join(
+                ", ",
+                nonKeyProperties.Select(property =>
+                    $"{EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))} = @{property.Name}"
+                )
+            );
         var insertColumnList = string.Join(", ", insertProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
         var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
         var cascades = allProperties
@@ -2738,7 +2926,7 @@ public sealed class EntitySaveMetadata
             InsertSql =
                 $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
-                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
+                $"UPDATE {tableName} SET {updateSetClause} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             DeleteSql = $"DELETE FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             CascadeNavigations = cascades,
         };
@@ -3510,11 +3698,13 @@ public sealed class EntitySaveMetadata
     /// <param name="name">The parameter name (with the @ prefix)</param>
     /// <param name="property">The property corresponding to the target column (unused in this branch)</param>
     /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
+    /// <param name="variableLength">Whether the column's type would be applied in its variable-length form (unused in this branch)</param>
     private static void AddColumnParameter(
         SqliteCommand command,
         string name,
         PropertyInfo property,
-        object? rawValue
+        object? rawValue,
+        bool variableLength = false
     ) => command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
 
     /// <summary>
@@ -3530,11 +3720,28 @@ public sealed class EntitySaveMetadata
         string name,
         string? columnName,
         object? rawValue
+    ) => AddQueryParameter(command, name, columnName, rawValue, variableLength: false);
+
+    /// <summary>
+    /// Binds a query WHERE-clause parameter, optionally applying the column's type in its variable-length form. A LIKE
+    /// pattern needs that: bound with a fixed-length type (nchar(10)), the pattern itself is padded with blanks and stops matching.
+    /// </summary>
+    /// <param name="command">The command to add the parameter to</param>
+    /// <param name="name">The parameter name (with the @ prefix)</param>
+    /// <param name="columnName">The unquoted column name; null when the column cannot be determined</param>
+    /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
+    /// <param name="variableLength">Whether a fixed-length column type is bound as its variable-length form</param>
+    public void AddQueryParameter(
+        SqliteCommand command,
+        string name,
+        string? columnName,
+        object? rawValue,
+        bool variableLength
     )
     {
         if (columnName is not null && PropertyByColumn.TryGetValue(columnName, out var property))
         {
-            AddColumnParameter(command, name, property, rawValue);
+            AddColumnParameter(command, name, property, rawValue, variableLength);
             return;
         }
 

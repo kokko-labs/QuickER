@@ -644,6 +644,11 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
         var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+
+        // 413 の拒否は本文を読まずに返り、Kestrel はその接続を閉じる。同じ HttpClient で次の要求を送るとき、
+        // 閉じたことにクライアントが気づく前の接続を再利用すると「強制的に切断されました」で失敗するので、
+        // 要求ごとに接続を閉じて再利用させない
+        request.Headers.ConnectionClose = true;
         return client.SendAsync(request, Ct);
     }
 

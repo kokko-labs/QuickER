@@ -6221,6 +6221,32 @@ public static class QueryValueEvaluator
             case NewArrayExpression { NodeType: ExpressionType.NewArrayInit } newArray:
                 return CreateArray(newArray);
 
+            // The value-only conditions a predicate folds before translating ("filter == null || ...") are evaluated directly,
+            // so the common "no filter when null" form does not compile an expression tree on every query. Only the built-in
+            // operators qualify (Method is null): a user-defined operator is a method call and keeps to the compiling fallback.
+            // && and || short-circuit from the left as C# does
+            case BinaryExpression { NodeType: ExpressionType.AndAlso, Method: null } and:
+                return (bool)Evaluate(and.Left)! && (bool)Evaluate(and.Right)!;
+
+            case BinaryExpression { NodeType: ExpressionType.OrElse, Method: null } or:
+                return (bool)Evaluate(or.Left)! || (bool)Evaluate(or.Right)!;
+
+            case UnaryExpression { NodeType: ExpressionType.Not, Method: null } not
+                when not.Type == typeof(bool):
+                return !(bool)Evaluate(not.Operand)!;
+
+            case BinaryExpression
+            {
+                NodeType: ExpressionType.Equal or ExpressionType.NotEqual,
+            } equality
+                when equality.Type == typeof(bool) && IsBuiltInEquality(equality):
+                var equal = AreBuiltInEqual(
+                    equality.Left.Type,
+                    Evaluate(equality.Left),
+                    Evaluate(equality.Right)
+                );
+                return equality.NodeType == ExpressionType.Equal ? equal : !equal;
+
             // Everything else (arithmetic, conditionals, constructor calls, etc.) is evaluated by compiling the expression tree (compatibility-first fallback)
             default:
                 return CompileAndInvoke(expression);
@@ -6272,6 +6298,45 @@ public static class QueryValueEvaluator
             !convert.Operand.Type.IsValueType
             && convert.Type.IsAssignableFrom(convert.Operand.Type)
         );
+
+    /// <summary>Whether an equality is the language's own: no operator method, or string's == / != (ordinal equality).</summary>
+    private static bool IsBuiltInEquality(BinaryExpression equality) =>
+        equality.Method is null
+        || (
+            equality.Method.DeclaringType == typeof(string)
+            && equality.Method.Name is "op_Equality" or "op_Inequality"
+        );
+
+    /// <summary>Compares two evaluated operands with the meaning C#'s built-in == gives the operand type.</summary>
+    /// <remarks>
+    /// Null equals only null (for a nullable value type this is the lifted ==). A string compares ordinally, any other reference
+    /// type by reference, and a value type by value - except that floating-point == holds NaN unequal to itself where Equals
+    /// does not, so those two are compared with their own operator.
+    /// </remarks>
+    private static bool AreBuiltInEqual(Type operandType, object? left, object? right)
+    {
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        if (operandType == typeof(string))
+        {
+            return string.Equals((string)left, (string)right, StringComparison.Ordinal);
+        }
+
+        if (!(Nullable.GetUnderlyingType(operandType) ?? operandType).IsValueType)
+        {
+            return ReferenceEquals(left, right);
+        }
+
+        return left switch
+        {
+            double leftDouble => leftDouble == (double)right,
+            float leftFloat => leftFloat == (float)right,
+            _ => left.Equals(right),
+        };
+    }
 
     /// <summary>Builds the array an inline initializer denotes from its evaluated elements.</summary>
     private static object CreateArray(NewArrayExpression newArray)
@@ -6682,6 +6747,38 @@ public sealed class IncludeNode
         throw new ArgumentException(
             $"Include/ThenInclude requires a navigation property: {selector}"
         );
+    }
+}
+
+/// <summary>Turns a key value into the form an Include (or a cascade) matches a principal key against a foreign key with.</summary>
+/// <remarks>
+/// The two ends of a relationship need not share a CLR type: a SQLite <c>INTEGER</c> primary key is a <c>long</c> while an
+/// <c>INT</c> foreign key referring to it is an <c>int</c>, and the value objects of the two columns can differ as well. Boxed,
+/// <c>(object)1L</c> and <c>(object)1</c> are not equal, so matching the raw values left the navigation silently empty.
+/// Every match on the CLR side goes through this one rule: a value object is opened to its underlying value, and an integer
+/// that fits in a <c>long</c> becomes a <c>long</c>. Anything else is returned as it is.
+/// </remarks>
+public static class IncludeKeys
+{
+    /// <summary>Returns the comparable form of a key value (null stays null).</summary>
+    public static object? Normalize(object? key)
+    {
+        if (key is IValueObjectCore valueObject)
+        {
+            key = valueObject.UnderlyingValue;
+        }
+
+        return key switch
+        {
+            sbyte value => (long)value,
+            byte value => (long)value,
+            short value => (long)value,
+            ushort value => (long)value,
+            int value => (long)value,
+            uint value => (long)value,
+            ulong value when value <= long.MaxValue => (long)value,
+            _ => key,
+        };
     }
 }
 

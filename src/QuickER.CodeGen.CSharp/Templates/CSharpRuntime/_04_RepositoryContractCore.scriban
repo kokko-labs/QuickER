@@ -2524,5 +2524,9 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 /// <param name="Name">The parameter name (for example, @p0).</param>
 /// <param name="Value">The value to bind (may include a value object; unwrapping to the raw value happens on the binding side).</param>
 /// <param name="ColumnName">The target column name without brackets; null when the column cannot be identified.</param>
-{{ infra_visibility }} readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName);
+{{ infra_visibility }} readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName)
+{
+    /// <summary>Whether the column's type is applied in its variable-length form (nchar → nvarchar, char → varchar). Set for a LIKE pattern, which a fixed-length type would pad with blanks.</summary>
+    public bool VariableLength { get; init; }
+}
 {{~ end ~}}

@@ -1254,7 +1254,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "$\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;\""
+                "$\"UPDATE {tableName} SET {updateSetClause} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;\""
             );
         content
             .Should()
@@ -1491,7 +1491,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("SqlColumnType(SqlDbType.Udt");
         // ランタイムは属性から明示 SqlParameter を組み立て、Size 安全ガードで超過時は値長を使う
         content.Should().Contain("private static void AddColumnParameter(");
-        content.Should().Contain("var parameter = new SqlParameter(name, attribute.DbType);");
+        content.Should().Contain("var parameter = new SqlParameter(name, dbType);");
         content
             .Should()
             .Contain(
@@ -1613,11 +1613,11 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public async Task<int> CountAsync(");
         content.Should().Contain("public async Task<bool> AnyAsync(");
         // 値はパラメータ化し、列名が判明していれば列型で明示 SqlParameter を構築（なければ AddWithValue へフォールバック）
+        // LIKE のパターンは列の型の可変長形で束縛する（固定長だとパターン自体が空白で詰められる）
         content
             .Should()
-            .Contain(
-                "metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);"
-            );
+            .Contain("metadata.AddQueryParameter(")
+            .And.Contain("parameter.VariableLength");
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
     }
 
@@ -1714,8 +1714,13 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         // ② IsNullOrEmpty / IsNullOrWhiteSpace
         content.Should().Contain("private static bool TryGetNullOrEmpty(");
-        content.Should().Contain("({neColumn} IS NULL OR {neColumn} = '')");
-        content.Should().Contain("({neColumn} IS NULL OR LTRIM(RTRIM({neColumn})) = '')");
+        // SQL Server の空判定はバイト長（= '' は末尾の空白を無視する）・空白判定は char.IsWhiteSpace の全文字の否定クラス
+        content.Should().Contain("({neColumn} IS NULL OR DATALENGTH({neColumn}) = 0)");
+        content
+            .Should()
+            .Contain(
+                "({neColumn} IS NULL OR {neColumn} NOT LIKE N'%[^' + {WhiteSpaceCharacters} + N']%')"
+            );
         // ④ 日付コンポーネント
         content.Should().Contain("private static bool TryGetDatePart(");
         content.Should().Contain("\"Year\" => $\"YEAR({column})\"");
@@ -1888,13 +1893,17 @@ public class CSharpCodeGenerationServiceTests
             .Should()
             .Contain("Expression<Func<TProperty, ICollection<TNext>>> navigationSelector");
         // 列はプロパティ名へ別名付け、単一参照は WITHOUT_ARRAY_WRAPPER
-        content.Should().Contain("[{columnName}] AS {propertyName}");
+        content
+            .Should()
+            .Contain(
+                "{EntitySaveMetadata.QuoteIdentifier(columnName)} AS {EntitySaveMetadata.QuoteIdentifier(propertyName)}"
+            );
         content.Should().Contain("WITHOUT_ARRAY_WRAPPER");
         // ネストした FOR JSON はそのままだと文字列化されるため JSON_QUERY で包む
         content
             .Should()
             .Contain(
-                "JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {node.Property.Name}"
+                "JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {EntitySaveMetadata.QuoteIdentifier(node.Property.Name)}"
             );
         // FOR JSON の複数行結果を連結する
         content.Should().Contain("string.Concat(chunks)");

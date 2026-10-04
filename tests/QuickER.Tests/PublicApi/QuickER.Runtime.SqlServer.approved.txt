@@ -56,6 +56,7 @@ public sealed class QuickER.Runtime.SqlServer.EntitySaveMetadata
     public string UpdateSql { get; init; }
     public string UpdateVersionedSql { get; init; }
     public void AddQueryParameter(Microsoft.Data.SqlClient.SqlCommand command, string name, string columnName, object rawValue)
+    public void AddQueryParameter(Microsoft.Data.SqlClient.SqlCommand command, string name, string columnName, object rawValue, bool variableLength)
     public void BindEntityKeyParameter(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBaseCore entity)
     public void BindInsertParameters(Microsoft.Data.SqlClient.SqlCommand command, QuickER.Runtime.EntityBaseCore entity)
     public void BindKeyParameter(Microsoft.Data.SqlClient.SqlCommand command, object id)
@@ -108,6 +109,7 @@ public static class QuickER.Runtime.SqlServer.SqlExpressionTranslator
 
 public struct QuickER.Runtime.SqlServer.SqlQueryParameter : System.IEquatable<QuickER.Runtime.SqlServer.SqlQueryParameter>
     public .ctor(string Name, object Value, string ColumnName)
+    public bool VariableLength { get; init; }
     public object Value { get; init; }
     public string ColumnName { get; init; }
     public string Name { get; init; }

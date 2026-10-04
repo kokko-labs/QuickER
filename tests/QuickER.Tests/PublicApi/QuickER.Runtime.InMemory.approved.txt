@@ -109,6 +109,7 @@ public static class QuickER.Runtime.InMemory.InMemoryUniqueness
 
 public static class QuickER.Runtime.InMemory.IncludeAttacher
     public static void Attach(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryReadScope scope)
+    public static void AttachAll(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> entities, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.IncludeNode> includes, QuickER.Runtime.InMemory.InMemoryDataStore.InMemoryReadScope scope)
 
 public sealed class QuickER.Runtime.InMemory.SaveHookSession
     public .ctor(QuickER.Runtime.ISaveHookRegistry registry, System.Func<QuickER.Runtime.EntityBaseCore, QuickER.Runtime.ISaveHookContext> contextFactory)

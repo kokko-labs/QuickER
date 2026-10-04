@@ -1594,9 +1594,21 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         var columnList = string.Join(", ", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
 {{~ end ~}}
 {{~ if repositories ~}}
-        var updateAssignments = nonKeyProperties.Select(property =>
-            $"{EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))} = @{property.Name}"
-        );
+        // A table whose only columns are the key and columns the update leaves out (the row version, computed columns,
+        // excluded binary columns) has nothing to assign, and "UPDATE t SET WHERE ..." is a syntax error. Assigning the key to
+        // itself keeps every path that reads the statement - the affected-row count, the row-version guard and OUTPUT - as it
+        // is. A key set to the value it already holds changes nothing elsewhere: SQL Server does not run ON UPDATE CASCADE
+        // for it (no child row is rewritten, no child row version moves, no child trigger fires), and a key referenced by a
+        // NO ACTION foreign key accepts it
+        var keyColumn = EntitySaveMetadata.QuoteIdentifier(keyColumnName);
+        var updateSetClause = nonKeyProperties.Count == 0
+            ? $"{keyColumn} = {keyColumn}"
+            : string.Join(
+                ", ",
+                nonKeyProperties.Select(property =>
+                    $"{EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))} = @{property.Name}"
+                )
+            );
         var insertColumnList = string.Join(", ", insertProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
         var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
 {{~ end ~}}
@@ -1671,7 +1683,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             InsertSql =
                 $"INSERT INTO {tableName} ({insertColumnList}) VALUES ({insertValueList});",
             UpdateSql =
-                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
+                $"UPDATE {tableName} SET {updateSetClause} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             DeleteSql = $"DELETE FROM {tableName} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
 {{~ end ~}}
 {{~ if repositories && repository_dialect == "sqlserver" ~}}
@@ -1682,11 +1694,11 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             UpdateVersionedSql =
                 rowVersionColumn is null
                     ? null
-                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id AND {rowVersionColumn} = @originalRowVersion;",
+                    : $"UPDATE {tableName} SET {updateSetClause} OUTPUT INSERTED.{rowVersionColumn} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id AND {rowVersionColumn} = @originalRowVersion;",
             UpdateForcedSql =
                 rowVersionColumn is null
                     ? null
-                    : $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} OUTPUT INSERTED.{rowVersionColumn} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
+                    : $"UPDATE {tableName} SET {updateSetClause} OUTPUT INSERTED.{rowVersionColumn} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;",
             DeleteVersionedSql =
                 rowVersionColumn is null
                     ? null
@@ -2533,11 +2545,13 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// <param name="name">The parameter name (with the @ prefix)</param>
     /// <param name="property">The property corresponding to the target column (the basis for typing)</param>
     /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
+    /// <param name="variableLength">Whether a fixed-length column type is bound as its variable-length form (nchar → nvarchar, char → varchar, binary → varbinary)</param>
     private static void AddColumnParameter(
         {{ sql_command_type }} command,
         string name,
         PropertyInfo property,
-        object? rawValue
+        object? rawValue,
+        bool variableLength = false
     )
     {
         var attribute = _columnTypeCache.GetOrAdd(
@@ -2550,7 +2564,16 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return;
         }
 
-        var parameter = new {{ sql_parameter_type }}(name, attribute.DbType);
+        var dbType = variableLength
+            ? attribute.DbType switch
+            {
+                SqlDbType.NChar => SqlDbType.NVarChar,
+                SqlDbType.Char => SqlDbType.VarChar,
+                SqlDbType.Binary => SqlDbType.VarBinary,
+                var other => other,
+            }
+            : attribute.DbType;
+        var parameter = new {{ sql_parameter_type }}(name, dbType);
         // String/binary Size safety guard: when the declared length is positive and the value length is within it,
         // use the declared length; when the value exceeds the declared length, use the value length as Size
         // (ADO.NET truncates input values client-side by Size, so a fixed Size would cause silent data corruption
@@ -2587,11 +2610,13 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// <param name="name">The parameter name (with the @ prefix)</param>
     /// <param name="property">The property corresponding to the target column (unused in this branch)</param>
     /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
+    /// <param name="variableLength">Whether the column's type would be applied in its variable-length form (unused in this branch)</param>
     private static void AddColumnParameter(
         {{ sql_command_type }} command,
         string name,
         PropertyInfo property,
-        object? rawValue
+        object? rawValue,
+        bool variableLength = false
     ) => command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
 {{~ end ~}}
 
@@ -2608,11 +2633,28 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         string name,
         string? columnName,
         object? rawValue
+    ) => AddQueryParameter(command, name, columnName, rawValue, variableLength: false);
+
+    /// <summary>
+    /// Binds a query WHERE-clause parameter, optionally applying the column's type in its variable-length form. A LIKE
+    /// pattern needs that: bound with a fixed-length type (nchar(10)), the pattern itself is padded with blanks and stops matching.
+    /// </summary>
+    /// <param name="command">The command to add the parameter to</param>
+    /// <param name="name">The parameter name (with the @ prefix)</param>
+    /// <param name="columnName">The unquoted column name; null when the column cannot be determined</param>
+    /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
+    /// <param name="variableLength">Whether a fixed-length column type is bound as its variable-length form</param>
+    public void AddQueryParameter(
+        {{ sql_command_type }} command,
+        string name,
+        string? columnName,
+        object? rawValue,
+        bool variableLength
     )
     {
         if (columnName is not null && PropertyByColumn.TryGetValue(columnName, out var property))
         {
-            AddColumnParameter(command, name, property, rawValue);
+            AddColumnParameter(command, name, property, rawValue, variableLength);
             return;
         }
 

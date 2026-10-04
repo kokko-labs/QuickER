@@ -325,6 +325,9 @@ public sealed class QuickER.Runtime.IncludableSqlQuery<TEntity, TProperty>
     public System.Threading.Tasks.Task<bool> AnyAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> CountAsync(System.Threading.CancellationToken cancellationToken = default)
 
+public static class QuickER.Runtime.IncludeKeys
+    public static object Normalize(object key)
+
 public sealed class QuickER.Runtime.IncludeNode
     public .ctor(System.Reflection.PropertyInfo property)
     public System.Collections.Generic.List<QuickER.Runtime.IncludeNode> Children { get; }

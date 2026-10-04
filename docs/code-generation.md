@@ -306,6 +306,9 @@ var result = await customers.Query()
 The same branching idiom as EF Core therefore writes multiple branches under `Orders`: `Include(c => c.Orders).ThenInclude(o => o.OrderLines)` followed by `Include(c => c.Orders).ThenInclude(o => o.Customer)`.
 
 Supported: equality, comparison, `&&`/`||`, `Contains`/`StartsWith`/`EndsWith` (LIKE), `Contains` on a list (IN), date parts (`Year`, etc.), `string.IsNullOrEmpty` and `string.IsNullOrWhiteSpace`, and value-object comparison.
+A nullable column can be read through `.Value` (`x.ShippedAt != null && x.ShippedAt.Value.Year == 2024`).
+A part of the predicate that reads no column, such as a closure variable, a constant, or a comparison between them, is evaluated before translation and becomes a constant condition.
+`&&` and `||` stop at the left operand when it settles the result, as C# does, so `filter == null || x.Name == filter` filters nothing when `filter` is null.
 Projection (Select), GroupBy, Join, and arithmetic expressions are not supported and throw at runtime; work around them with raw SQL or EF Core.
 
 **Navigation properties cannot appear in a predicate or an ordering key.**
@@ -378,13 +381,18 @@ This is worth knowing wherever one predicate has to hold across backends.
 A hybrid build runs the identical predicate on two engines, so a search that is case-insensitive on the server can be case-sensitive on the local side.
 Multi-target generation is one such build; a remote repository against the server with a local one against the copy is another.
 
-In a `Query()` predicate, `string.IsNullOrWhiteSpace` becomes `(col IS NULL OR LTRIM(RTRIM(col)) = '')`.
-The one-argument `LTRIM` / `RTRIM` of both SQL engines strip the space character alone, so a column holding a tab, a newline, or a non-breaking space is not matched.
-The in-memory backend evaluates the real `string.IsNullOrWhiteSpace`, which counts every Unicode whitespace character, and does match it.
+In a `Query()` predicate, `string.IsNullOrEmpty` and `string.IsNullOrWhiteSpace` hold for `NULL` too and give the C# answer on both SQL engines.
+SQL Server measures emptiness with `DATALENGTH`, because `= ''` ignores trailing blanks and would call a value of blanks empty.
+`IsNullOrWhiteSpace` counts every character `char.IsWhiteSpace` accepts, including the tab, the newline, and the non-breaking and full-width spaces.
+
+A fixed-length column (`nchar(n)`, `char(n)`) on SQL Server holds its value padded with blanks and returns it padded.
+`EndsWith` therefore compares against the padded value, which is also what C# gives on the value the repository reads back.
+The in-memory backend stores the value unpadded, so its answer can differ.
 
 Date parts (`Year`, `Month`, …) are translated only when the member is read from a `DateTime`, `DateOnly`, or `DateTimeOffset` column, nullable forms included.
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.
 It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`.
+The date parts of a `DateTimeOffset` column are taken in the offset the value carries, as C# does (`2024-01-01 05:00 +09:00` is year 2024, hour 5).
 
 `Contains` on a list expands to one bind variable per element and is not chunked.
 A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999).

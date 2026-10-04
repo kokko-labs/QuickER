@@ -260,6 +260,19 @@ public class RuntimeTestMatrixTests
                 NotApplicable("Query() はリモート面に無く、式木は転送されない")
             )
         ),
+        ["TranslatorParity"] = new(
+            "式木の翻訳・識別子の引用・Include の照合・UPDATE 文の組み立てを C# の意味論と突き合わせる共通シナリオ",
+            Row(
+                Covered(),
+                Covered(),
+                NotApplicable(
+                    "EF Core はマルチターゲットと生成時エラーで排他になり、同じエンティティ型を共有できない"
+                        + "（翻訳も EF Core の LINQ プロバイダが行い SqlExpressionTranslator を通らない）"
+                ),
+                Covered(),
+                NotApplicable("Query() はリモート面に無く、式木は転送されない")
+            )
+        ),
         ["SchemaBootstrap"] = new(
             "生成 DDL の適用ヘルパー（ApplyDdlAsync）",
             Row(
@@ -508,6 +521,9 @@ public class RuntimeTestMatrixTests
         ),
         new("SqliteTranslatorOperatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
         new("SqliteBoolColumnTranslatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
+        new("TranslatorParitySqlServerRuntimeTests", "TranslatorParity", Backend.AdoSqlServer),
+        new("TranslatorParitySqliteRuntimeTests", "TranslatorParity", Backend.AdoSqlite),
+        new("TranslatorParityInMemoryRuntimeTests", "TranslatorParity", Backend.InMemory),
         // --- スキーマ適用 ---
         new("SqlServerSchemaBootstrapRuntimeTests", "SchemaBootstrap", Backend.AdoSqlServer),
         new("SqliteSchemaBootstrapRuntimeTests", "SchemaBootstrap", Backend.AdoSqlite),
