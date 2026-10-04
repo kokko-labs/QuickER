@@ -41,11 +41,11 @@ Download and run the [Full installer](https://github.com/kokko-labs/QuickER/rele
 To run from source, use `dotnet run --project src/QuickER.Gui`.
 
 That is all you need to start creating and editing ER models.
-The steps below take the bundled sample through to the generated code.
+The steps below use the bundled sample to go all the way to running the generated code.
 
 ### 2. Open the bundled sample
 
-The sample lives in the repository, so clone it first (the released build needs this too).
+The sample lives in the repository, so clone the repository (you need it even if you use the installer).
 
 ```powershell
 git clone https://github.com/kokko-labs/QuickER.git
@@ -79,7 +79,7 @@ What's in the sample:
 - [Program.cs](samples/ec-order/EcOrderSample/Program.cs): runnable examples of CRUD, graph save, Include, editing through the EditModel / Mapper, raw SQL, and delete cascade
 
 See [the EC order sample](samples/ec-order/README.md) for details.
-To walk through the loop from editing the diagram to generating code with your own hands, continue to the [tutorial](docs/getting-started.md).
+To try the whole path from editing the diagram to generating code yourself, continue to the [tutorial](docs/getting-started.md).
 
 ## Design ER models visually
 
@@ -113,7 +113,7 @@ You can also detect the differences between the ER model and the database and ge
 | Oracle     | ✅ | ✅ | ✅ | ✅ |
 | SQLite     | ✅ | ✅ | ✅ | ✅ |
 
-Each diagram keeps its target DBMS, and you can switch to another SQL dialect at any time.
+Each diagram keeps its target DBMS, and you can switch to another SQL dialect (each database's own types and syntax) at any time.
 Types are converted automatically where possible, and types that cannot be converted are flagged with a warning.
 
 See [Database round-tripping](docs/database.md) for details.
@@ -147,14 +147,15 @@ See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
 ## AI mock generation
 
 Use AI to generate HTML mockups of business screens from the ER model through conversation.
-The generated files are written to a "mock folder" (mock.json + one HTML per screen + a shared style.css) as the conversation proceeds, and the in-dialog preview lets you follow the transitions between screens.
+The generated screens are saved to a "mock folder" (mock.json + one HTML per screen + a shared style.css) as the conversation proceeds.
+The in-dialog preview also lets you follow the transitions between screens.
 
 ![Generating 7 order-management screens with AI mock generation (previewing the dashboard)](docs/images/ai-mock.png)
 
 - The conversation proceeds as "propose the screen structure → agree → generate," and you refine the screens with follow-up instructions
 - For sharing with stakeholders, export a single HTML that bundles every screen, and a design document with the screen list, a transition diagram, and a CRUD matrix
 - As a second step, you can generate a WPF / Blazor mock project from the mock folder.
-  QuickER scaffolds the data layer from the ER model, the AI implements the screen UI, and QuickER checks the result by running `dotnet build`.
+  QuickER scaffolds the data layer from the ER model, the AI implements the screen UI, and QuickER runs `dotnet build` to check that the project builds.
   This step is an aid for PoCs and prototyping, so build errors may remain, depending on the AI model and the connection mode
 
 The connection methods are shared with the AI chat.
@@ -175,7 +176,8 @@ The connection methods are shared with the AI chat.
 | Print / PDF | ✅ | — |
 
 Export to a live database means writing the changes back through diff sync.
-C# code is exported by the code generation feature, and the import target is a main `.g.cs` generated with `IncludeDataAnnotations` ON.
+C# code is exported by the code generation feature.
+C# code import accepts a main `.g.cs` file generated with `IncludeDataAnnotations` ON.
 Schema JSON carries no layout, so an imported diagram is arranged automatically.
 
 Update the ER model and re-export the definition documents to keep the design and the documentation from drifting apart.
@@ -216,9 +218,10 @@ Optionally generated:
 | Bidirectional sync | Sync between a SQL Server database and a local SQLite copy: replaying offline edits, fetching server changes, and a fast full reload |
 
 DataAnnotations and DB definition metadata attributes (dialect-neutral type tokens and descriptions) are added by default.
-They are required whenever a Repository is generated, since the runtime reads them by reflection.
+They are required whenever a Repository is generated, since the runtime reads these attributes by reflection.
 
-The EditModel accepts screen input as strings, keeps values that pass validation as confirmed values, and holds error information for those that fail.
+The EditModel accepts screen input as strings.
+It keeps only values that pass validation as confirmed values, and holds error information for those that fail.
 The Mapper applies only the confirmed values and change state to the entity, preventing invalid input from entering the entity.
 
 The generated code does not depend on any particular UI framework.
@@ -251,7 +254,9 @@ The QuickER Repository ships with:
 - Raw SQL execution
 
 The QuickER Repository and the EF Core Repository implement the same interfaces.
-Keep your application code dependent on the interfaces, and you can switch implementations by changing the DI registration (the GUI generates one of the two; generating both at once is available through the CLI or a config file).
+Keep your application code dependent on the interfaces, and you can switch implementations by changing the DI registration.
+The GUI generates one of the two.
+To generate both at once, use the CLI or a config file.
 
 ```csharp
 // QuickER Repository
@@ -341,9 +346,9 @@ The installers and update packages are not Authenticode signed, so Windows Smart
 Choose "More info" and then "Run anyway" to proceed.
 The installed edition checks GitHub Releases (`api.github.com`) for a newer version at startup and asks before it downloads anything.
 When the download finishes, it asks whether to restart now and apply the update.
-If you choose to wait, the update is applied the next time you close QuickER.
-Turn that off under **Settings > Check for updates on startup**.
-The Portable edition never checks.
+If you don't restart right away, the update is applied the next time you close QuickER.
+You can turn off the startup check under **Settings > Check for updates on startup**.
+The Portable edition never checks for updates.
 
 To run from source:
 
@@ -359,7 +364,7 @@ Install it as a dotnet tool:
 dotnet tool install --global QuickER.Cli
 ```
 
-Generating code from an ER model:
+To generate code from an ER model, run:
 
 ```powershell
 quicker generate `
@@ -368,7 +373,7 @@ quicker generate `
   --provider sqlserver
 ```
 
-Generating code directly from a live database:
+To generate code directly from a live database, use `scaffold`:
 
 ```powershell
 quicker scaffold `
@@ -377,7 +382,7 @@ quicker scaffold `
   --out ./Generated
 ```
 
-Recovering an ER diagram JSON (schema only, no layout key) from generated C# code:
+To recover an ER diagram JSON (schema only, no layout key) from generated C# code, use `reverse`:
 
 ```powershell
 quicker reverse `

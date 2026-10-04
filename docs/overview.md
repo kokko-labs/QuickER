@@ -22,7 +22,7 @@ An ER model backed by a diagram that people have reviewed can be trusted as the 
 
 A diagram or model, however, cannot be created once and then left alone.
 Leave implementation-side changes out of it and the model drifts from reality until no one looks at it.
-QuickER imposes two conditions to avoid this familiar failure.
+To avoid this familiar failure, QuickER is built to meet two conditions.
 First, the model must round-trip with both the database and text formats.
 Second, artifacts derived from the model must be generated mechanically rather than copied by hand.
 When the model changes, its generated artifacts can always be rebuilt from it.
@@ -36,7 +36,7 @@ Teams stop writing the same schema information by hand in place after place, and
 If the ER model is the source of truth, it is natural to want its definition in text and under Git version control.
 QuickER saves an ER diagram as a single JSON file.
 Within the JSON, the model definition (meaning) is separated from coordinates and colors (appearance), and the model definition can also be saved on its own.
-These files can be versioned in Git and reviewed through pull-request diffs just like source code.
+Either file can be versioned in Git and reviewed through pull-request diffs just like source code.
 QuickER also supports bidirectional import and export with other text formats, including DBML and Mermaid.
 You can work in the format you know best, import the result, and verify it visually in the diagram.
 
@@ -59,7 +59,8 @@ Ask the AI to "design the tables for order management on an e-commerce site," an
 Depending on your environment, you can connect through an API key, a local LLM, Codex, Claude Code, or Copilot (the GitHub Copilot CLI).
 
 The AI can also generate web screen mockups from the ER model.
-The output is written live to a mock folder containing per-screen HTML and shared styles, where you can inspect it in a preview and refine it through conversation.
+The output is saved continuously to a mock folder containing per-screen HTML and shared styles.
+You can inspect the saved screens in a preview and refine them through conversation.
 From the mock, QuickER mechanically generates a self-contained HTML file and design documents, including a screen list, a transition diagram, and a screen-by-entity CRUD matrix.
 Sharing these artifacts with stakeholders helps align expectations, including the intended look of the screens, early in the design process.
 
@@ -73,10 +74,9 @@ Using AI this way has a different structure from asking it to write an entire ap
 When AI writes an application from scratch, probabilistic output spreads across every layer of the codebase, leaving people to catch up afterward through code review.
 In QuickER's workflow, probabilistic AI work is limited to drafting the ER diagram and generating design-supporting mockups.
 People inspect each artifact and make any necessary corrections.
-Once the ER model has passed review, QuickER generates code derived from it with the same content every time.
-As long as the ER model is sound, this generated code does not unpredictably change from one day to the next.
-Use AI, but decide first where people get to inspect the results.
-That is the division of labor.
+Once the ER model has passed review, QuickER generates the same code from it every time.
+As long as the ER model is sound, the quality of the generated code does not vary from one day to the next.
+The division of labor is to decide first where people inspect the results, and then use AI.
 
 ## What the generated code takes on
 
@@ -90,7 +90,7 @@ The generated code comes in three kinds.
   For a value object representing a string primary key, QuickER can also generate the key value as a GUID.
 - **Data operations**: QuickER generates two Repository implementations behind the same interfaces.
   One is the lightweight QuickER implementation, currently supporting SQL Server and SQLite, and the other is an EF Core implementation.
-  Because both sit behind abstracted interfaces, switching implementations requires changing only one line of DI registration.
+  Because both share the same interfaces, switching implementations requires changing only one line of DI registration.
   Queries involving grouping, aggregation, and similar operations can be created and stored with the ER diagram as named queries.
   Each named query is generated as a Repository method.
   The Repository also provides general-purpose methods for running raw SQL.
@@ -98,7 +98,8 @@ The generated code comes in three kinds.
   In that mode, it also generates remote-access interfaces and the client and server code that communicate over HTTP and JSON.
   Switching to remote access likewise takes only one line of DI registration.
 - **UI binding models**: QuickER generates an EditModel that can be bound directly to a screen and a Mapper that converts between the EditModel and its entity.
-  The EditModel accepts screen input as strings, retains values that pass validation as confirmed values, and stores error information when validation fails.
+  The EditModel accepts screen input as strings.
+  It retains values that pass validation as confirmed values, and stores error information when validation fails.
   The Mapper applies only the EditModel's confirmed values and change state to the entity, preventing invalid input from entering it.
   Because the Mapper handles the conversion, there is no value-conversion or copying logic to rewrite for every screen.
 
