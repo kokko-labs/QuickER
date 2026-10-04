@@ -182,6 +182,178 @@ public class RelationshipColumnPairCardTests
         items.Items.Count.Should().Be(2);
     }
 
+    /// <summary>一意制約の削除を Redo しても、その列を参照する列ペアと画面の選択が残ることを検証する</summary>
+    [Fact(
+        DisplayName = "リレーションのキー列エディタ: 参照先の一意制約を Redo で消しても落ちず、ペアと選択と履歴が残る"
+    )]
+    public void RelationshipColumnPairEditor_SurvivesUniqueConstraintRedo()
+    {
+        RunInIsolatedWindow(AssertSurvivesUniqueConstraintRedo);
+    }
+
+    /// <summary>表示済みウィンドウ上で、一意制約の削除の Undo / Redo と列ペアの表示を検証する</summary>
+    private static void AssertSurvivesUniqueConstraintRedo(MainViewModel vm, MainWindow window)
+    {
+        vm.ReplaceDiagramFromModule(CreateCodeReferenceDiagram());
+
+        // 親を選んで制約を消し、続けて親の名前を変える（Redo が 2 段積まれた状態を作るため）
+        var parentVm = vm.Entities[0];
+        vm.OnEntityClicked(parentVm);
+        vm.RemoveUniqueConstraintCommand.Execute(parentVm.UniqueConstraints.Single());
+        parentVm.TableName = "Parent2";
+        DoEvents();
+        vm.UndoCommand.Execute(null);
+        vm.UndoCommand.Execute(null);
+        DoEvents();
+        parentVm.UniqueConstraints.Should().ContainSingle("Undo 2 回で制約が戻る");
+
+        // リレーションを選んでキー列エディタを表示する
+        var relationship = vm.Relationships.Should().ContainSingle().Subject;
+        vm.OnRelationshipClicked(relationship);
+        window.UpdateLayout();
+        DoEvents();
+
+        var items = (ItemsControl)window.FindName("RelationshipColumnPairItems")!;
+        var container = (FrameworkElement)items.ItemContainerGenerator.ContainerFromIndex(0)!;
+        container.UpdateLayout();
+        var sourceComboBox = FindVisualChildren<ComboBox>(container).First();
+        ((ColumnViewModel)sourceComboBox.SelectedItem).Name.Should().Be("Code");
+
+        // 制約の削除を Redo する（Code は候補キーでなくなる）
+        var generation = vm.UndoRedo.ChangeGeneration;
+        vm.RedoCommand.Execute(null);
+        window.UpdateLayout();
+        DoEvents();
+
+        parentVm.UniqueConstraints.Should().BeEmpty();
+        relationship
+            .ColumnPairs.Should()
+            .ContainSingle("列が残っている限り、候補キーでなくなってもペアは残す");
+        sourceComboBox
+            .SelectedItem.Should()
+            .BeSameAs(relationship.ColumnPairRows[0].SelectedSourceColumn);
+        ((ColumnViewModel)sourceComboBox.SelectedItem)
+            .Name.Should()
+            .Be("Code", "画面の選択も落ちない");
+        vm.UndoRedo.ChangeGeneration.Should().Be(generation + 1, "Redo 1 回分だけ進む");
+        vm.UndoRedo.CanRedo.Should().BeTrue("入れ子の Execute が走ると残りの Redo が消える");
+
+        // 制約の削除は履歴にあるので Undo で戻る
+        vm.UndoCommand.Execute(null);
+        window.UpdateLayout();
+        DoEvents();
+
+        parentVm.UniqueConstraints.Should().ContainSingle();
+        relationship.ColumnPairs.Should().ContainSingle();
+        ((ColumnViewModel)sourceComboBox.SelectedItem).Name.Should().Be("Code");
+    }
+
+    /// <summary>選択中の列を並べ替えても、コンボボックスの選択が落ちず候補が重複しないことを検証する</summary>
+    [Fact(
+        DisplayName = "リレーションのキー列エディタ: 選択中の列を並べ替えて Undo しても選択が落ちず候補が重複しない"
+    )]
+    public void RelationshipColumnPairEditor_KeepsSelectionOnColumnReorder()
+    {
+        RunInIsolatedWindow(AssertKeepsSelectionOnColumnReorder);
+    }
+
+    /// <summary>表示済みウィンドウ上で、親列の並べ替えとその Undo の後の列ペア行を検証する</summary>
+    private static void AssertKeepsSelectionOnColumnReorder(MainViewModel vm, MainWindow window)
+    {
+        vm.ReplaceDiagramFromModule(CreateCodeReferenceDiagram());
+        var parentVm = vm.Entities[0];
+        var relationship = vm.Relationships.Should().ContainSingle().Subject;
+        vm.OnRelationshipClicked(relationship);
+        window.UpdateLayout();
+        DoEvents();
+
+        var items = (ItemsControl)window.FindName("RelationshipColumnPairItems")!;
+        var container = (FrameworkElement)items.ItemContainerGenerator.ContainerFromIndex(0)!;
+        container.UpdateLayout();
+        var sourceComboBox = FindVisualChildren<ComboBox>(container).First();
+
+        // 選択中の Code を先頭へ移す（候補の中で選択中の項目が動く）
+        var generation = vm.UndoRedo.ChangeGeneration;
+        vm.UndoRedo.Execute(
+            new QuickER.UndoRedo.MoveColumnOrderCommand(parentVm.Columns, parentVm.Columns[1], 0)
+        );
+        window.UpdateLayout();
+        DoEvents();
+
+        sourceComboBox
+            .Items.Cast<ColumnViewModel>()
+            .Select(column => column.Name)
+            .Should()
+            .Equal("Code", "Id");
+        ((ColumnViewModel)sourceComboBox.SelectedItem).Name.Should().Be("Code");
+        relationship.ColumnPairs.Should().ContainSingle();
+        vm.UndoRedo.ChangeGeneration.Should()
+            .Be(generation + 1, "並べ替えだけが履歴に入り、列ペアの変更は積まれない");
+
+        vm.UndoCommand.Execute(null);
+        window.UpdateLayout();
+        DoEvents();
+
+        sourceComboBox
+            .Items.Cast<ColumnViewModel>()
+            .Select(column => column.Name)
+            .Should()
+            .Equal("Id", "Code");
+        ((ColumnViewModel)sourceComboBox.SelectedItem).Name.Should().Be("Code");
+        relationship.ColumnPairs.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// 親（Id＝主キー・Code＝一意制約）と子（ChildId・ParentCode）を、Code → ParentCode の列ペアで結んだ図を作る
+    /// </summary>
+    private static ErDiagram CreateCodeReferenceDiagram()
+    {
+        var code = new Column { Name = "Code", DataType = "nvarchar(20)" };
+        var parentCode = new Column { Name = "ParentCode", DataType = "nvarchar(20)" };
+        var parent = new Entity
+        {
+            TableName = "Parent",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                code,
+            },
+            UniqueConstraints = { new UniqueConstraint { ColumnIds = [code.Id] } },
+        };
+        var child = new Entity
+        {
+            TableName = "Child",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "ChildId",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                parentCode,
+            },
+        };
+        return new ErDiagram
+        {
+            Entities = { parent, child },
+            Relationships =
+            {
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    ColumnPairs = { new RelationshipColumnPair(code.Id, parentCode.Id) },
+                },
+            },
+        };
+    }
+
     /// <summary>指定コマンドへ束縛されたボタンを 1 つだけ取り出す</summary>
     private static Button FindCommandButton(
         DependencyObject root,

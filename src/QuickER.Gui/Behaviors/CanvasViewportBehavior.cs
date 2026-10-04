@@ -23,6 +23,22 @@ namespace QuickER.Behaviors;
 /// パン中は <see cref="IsPanActive"/> が true になり、<see cref="DragBehavior"/> の
 /// エンティティ移動を抑止する。
 /// </para>
+/// <para>
+/// Space はウィンドウ全体で監視し、キャンバスにフォーカスが無くてもパン待機に入る。横取りしないのは次の 2 つだけ:
+/// </para>
+/// <list type="bullet">
+///   <item>テキスト入力（TextBox / PasswordBox 等）にフォーカスがあるとき（文字の入力を壊さない）</item>
+///   <item>
+///     Space を押下に使うコントロール（ボタン・チェックボックス・コンボボックス・一覧の項目・グリッドのセル）に、
+///     <b>Tab などキーボード操作で</b>フォーカスが移ってきたとき（キーボードだけで操作する利用者が押せるように）
+///   </item>
+/// </list>
+/// <para>
+/// マウスでクリックした直後のボタンや、別のウィンドウから戻った直後（どちらの操作で来たか分からない）は
+/// パンを優先する。ツールバーのボタンを押したあと Space+ドラッグで見回す操作で、そのボタンを
+/// もう一度押してしまわないため。どちらの操作で来たかは、ウィンドウの入力イベントで自前に覚える
+/// （<see cref="OnWindowPreviewGotKeyboardFocus"/>）。
+/// </para>
 /// </remarks>
 public static class CanvasViewportBehavior
 {
@@ -75,6 +91,21 @@ public static class CanvasViewportBehavior
     /// <summary>ドラッグによるパンの実行中かどうか</summary>
     [ThreadStatic]
     private static bool _isPanning;
+
+    /// <summary>ウィンドウが受けた直前の入力がキーボードかどうか（false＝マウス、または入力がまだ無い）</summary>
+    [ThreadStatic]
+    private static bool _lastInputWasKeyboard;
+
+    /// <summary>今のキーボードフォーカスが、キーボード操作で移ってきたものかどうか</summary>
+    [ThreadStatic]
+    private static bool _focusArrivedByKeyboard;
+
+    /// <summary>
+    /// ウィンドウが非アクティブになってから、まだキーもマウスも受けていないかどうか
+    /// （この間のフォーカス移動＝戻ったときの復元は、どちらの操作で来たか分からない）
+    /// </summary>
+    [ThreadStatic]
+    private static bool _focusOriginUnknown;
 
     /// <summary>パン開始時のマウス位置（ScrollViewer 基準）</summary>
     [ThreadStatic]
@@ -183,8 +214,9 @@ public static class CanvasViewportBehavior
     /// <summary>ウィンドウ側の購読を外し、対象 ScrollViewer の参照と進行中の状態を捨てる</summary>
     /// <remarks>
     /// <para>
-    /// 外すのは <see cref="OnScrollViewerLoaded"/> がウィンドウへ張った 3 つ
-    /// （<c>PreviewKeyDown</c> / <c>PreviewKeyUp</c> / <c>Deactivated</c>）。ScrollViewer 自身の
+    /// 外すのは <see cref="OnScrollViewerLoaded"/> がウィンドウへ張った 5 つ
+    /// （<c>PreviewKeyDown</c> / <c>PreviewKeyUp</c> / <c>PreviewMouseDown</c> /
+    /// <c>PreviewGotKeyboardFocus</c> / <c>Deactivated</c>）。ScrollViewer 自身の
     /// 購読しか外さないと、キャンバスを無効化・破棄したあともウィンドウのキー入力を拾い続け、
     /// <see cref="_scrollViewer"/> の参照がキャンバスの視覚ツリーを掴んだまま残る。
     /// </para>
@@ -204,16 +236,27 @@ public static class CanvasViewportBehavior
 
         if (window is not null)
         {
-            window.PreviewKeyDown -= OnWindowPreviewKeyDown;
-            window.PreviewKeyUp -= OnWindowPreviewKeyUp;
-            window.Deactivated -= OnWindowDeactivated;
+            UnsubscribeWindow(window);
         }
 
         _hostWindow = null;
         _scrollViewer = null;
         _isSpaceDown = false;
         _isPanning = false;
+        _lastInputWasKeyboard = false;
+        _focusArrivedByKeyboard = false;
+        _focusOriginUnknown = false;
         IsPanActive = false;
+    }
+
+    /// <summary>ウィンドウへ張る購読を外す（<see cref="Detach"/> と二重登録の防止が共有する）</summary>
+    private static void UnsubscribeWindow(Window window)
+    {
+        window.PreviewKeyDown -= OnWindowPreviewKeyDown;
+        window.PreviewKeyUp -= OnWindowPreviewKeyUp;
+        window.PreviewMouseDown -= OnWindowPreviewMouseDown;
+        window.PreviewGotKeyboardFocus -= OnWindowPreviewGotKeyboardFocus;
+        window.Deactivated -= OnWindowDeactivated;
     }
 
     /// <summary>ScrollViewer ロード時に所属ウィンドウへ Space キー監視を登録する</summary>
@@ -243,24 +286,35 @@ public static class CanvasViewportBehavior
         }
 
         // 二重登録を避けるため一度解除してから登録する
-        window.PreviewKeyDown -= OnWindowPreviewKeyDown;
-        window.PreviewKeyUp -= OnWindowPreviewKeyUp;
-        window.Deactivated -= OnWindowDeactivated;
+        UnsubscribeWindow(window);
         window.PreviewKeyDown += OnWindowPreviewKeyDown;
         window.PreviewKeyUp += OnWindowPreviewKeyUp;
+        window.PreviewMouseDown += OnWindowPreviewMouseDown;
+        window.PreviewGotKeyboardFocus += OnWindowPreviewGotKeyboardFocus;
         window.Deactivated += OnWindowDeactivated;
         _hostWindow = window;
     }
 
-    /// <summary>ウィンドウ非アクティブ化時に Space 押下状態を破棄する</summary>
+    /// <summary>ウィンドウ非アクティブ化時に Space 押下状態を破棄し、フォーカスの経緯を「不明」にする</summary>
     /// <remarks>
+    /// <para>
     /// Space 押下中に Alt+Tab やダイアログ表示でフォーカスを失うと KeyUp を取り逃し、
     /// パン待機状態が固着して以降の左ドラッグがすべてパン扱いになる（エンティティを動かせなくなる）。
     /// パン実行中のキャプチャ喪失は <see cref="OnLostMouseCapture"/> が後始末する。
+    /// </para>
+    /// <para>
+    /// 戻ったときは WPF がフォーカスを復元するが、そのフォーカスはキーボードとマウスのどちらで来たとも言えない。
+    /// 戻ってから最初のキーかマウスの入力までに移ったフォーカスはパン側（キーボードで来なかった側）として記録する
+    /// （<see cref="OnWindowPreviewGotKeyboardFocus"/>）。判断できないときにボタンを押さない側へ倒すため
+    /// </para>
     /// </remarks>
     private static void OnWindowDeactivated(object? sender, EventArgs e)
     {
         _isSpaceDown = false;
+
+        // 戻ったときに復元されるフォーカスは、どちらの操作で来たか分からない＝パン側へ倒す
+        _focusArrivedByKeyboard = false;
+        _focusOriginUnknown = true;
 
         if (!_isPanning)
         {
@@ -445,9 +499,13 @@ public static class CanvasViewportBehavior
 
     // ---------- Space キー監視 ----------
 
-    /// <summary>Space 押下でパン待機状態へ入る（編集コントロールへの入力中は横取りしない）</summary>
+    /// <summary>Space 押下でパン待機状態へ入る（テキスト入力と、キーボードで移ったボタン類は横取りしない）</summary>
+    /// <remarks>直前の入力の種類も、Space の判定より前にすべてのキーで記録する</remarks>
     private static void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        _lastInputWasKeyboard = true;
+        _focusOriginUnknown = false;
+
         if (e.Key != Key.Space || _isSpaceDown)
         {
             return;
@@ -455,6 +513,12 @@ public static class CanvasViewportBehavior
 
         // テキスト入力中の Space はプロパティパネルの編集を壊さないため横取りしない
         if (IsTextInputFocused())
+        {
+            return;
+        }
+
+        // Tab などで移ったボタン・チェックボックス等では、Space はその押下に使わせる
+        if (_focusArrivedByKeyboard && IsSpaceActivatedControlFocused())
         {
             return;
         }
@@ -491,6 +555,62 @@ public static class CanvasViewportBehavior
                 sv.Cursor = null;
             }
         }
+    }
+
+    /// <summary>ウィンドウ内のマウス押下を、直前の入力として記録する</summary>
+    /// <remarks>
+    /// <para>
+    /// トンネル（Preview）で受けるので、押下を受けた要素がフォーカスを取るより先に記録が済む
+    /// （タッチもマウスへ昇格してここへ届く）。
+    /// </para>
+    /// <para>
+    /// <b>キーボードで来たという記録もここで落とす。</b>フォーカスが移らないマウス操作
+    /// （既にフォーカスのあるボタンをクリックする・フォーカスを取らない余白をクリックする）では
+    /// <see cref="OnWindowPreviewGotKeyboardFocus"/> が走らないため、落とさないと Tab で移ったときの記録が残り、
+    /// マウスでクリックした直後のボタンの上の Space がそのボタンの押下になる（最後の操作がマウスならパン側）
+    /// </para>
+    /// </remarks>
+    private static void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _lastInputWasKeyboard = false;
+        _focusArrivedByKeyboard = false;
+        _focusOriginUnknown = false;
+    }
+
+    /// <summary>ウィンドウ内でフォーカスが移ったとき、キーボード操作で移ってきたかを記録する</summary>
+    /// <remarks>
+    /// <para>
+    /// 判断の材料は直前の入力の種類（<see cref="OnWindowPreviewKeyDown"/> /
+    /// <see cref="OnWindowPreviewMouseDown"/> が記録）。Tab のフォーカス移動はキーの処理の中で起き、
+    /// クリックのフォーカス移動はマウス押下の処理の中で起きるので、移動の時点で直前の入力が分かる。
+    /// </para>
+    /// <para>
+    /// <c>InputManager.MostRecentInputDevice</c> を使わないのは、テストで流す擬似入力では値が入らず、
+    /// この判定をテストで駆動できないため（ウィンドウの入力イベントなら製品と同じ経路で駆動できる）。
+    /// 別のウィンドウの入力・フォーカス移動は、このウィンドウへ張った購読へ届かないので記録を書き換えない。
+    /// </para>
+    /// </remarks>
+    private static void OnWindowPreviewGotKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e
+    )
+    {
+        _focusArrivedByKeyboard = _lastInputWasKeyboard && !_focusOriginUnknown;
+    }
+
+    /// <summary>Space を押下に使うコントロールにフォーカスがあるかどうかを判定する</summary>
+    /// <remarks>
+    /// ボタン類（<see cref="ButtonBase"/>＝ボタン・トグル・チェックボックス・ラジオボタン）・コンボボックス・
+    /// 一覧の項目（コンボボックスの項目を含む）・ツリーの項目・グリッドのセル
+    /// </remarks>
+    private static bool IsSpaceActivatedControlFocused()
+    {
+        return Keyboard.FocusedElement
+            is ButtonBase
+                or ComboBox
+                or ListBoxItem
+                or TreeViewItem
+                or DataGridCell;
     }
 
     /// <summary>現在のフォーカスがテキスト編集コントロールにあるかどうかを判定する</summary>

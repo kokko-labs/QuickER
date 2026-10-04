@@ -753,6 +753,86 @@ public class RelationshipViewModelTests
         rel.ColumnPairs[0].SourceColumnId.Should().Be(source.Columns[0].Id);
     }
 
+    /// <summary>一意制約が無くなっても、その列を選んでいる行の選択と候補が残ることを検証する</summary>
+    /// <remarks>
+    /// 選択中の列が行の候補から消えるとコンボボックスが <c>null</c> を書き戻し、それが利用者の編集として
+    /// 列ペアを消す（一意制約の削除の Undo / Redo の最中だとアプリが落ちる）
+    /// </remarks>
+    [Fact(
+        DisplayName = "一意制約が無くなった親列は、選んでいる行の候補に残り、他の行の候補には出ない"
+    )]
+    public void ColumnPairRow_KeepsOwnSelection_WhenUniqueConstraintIsRemoved()
+    {
+        var (rel, source, target) = NewRelationshipForPairEditing();
+        rel.SetColumnPairs([
+            new RelationshipColumnPair(source.Columns[1].Id, target.Columns[2].Id),
+        ]);
+        rel.CanAddColumnPair.Should().BeTrue("Id がまだ使われていない");
+
+        source.UniqueConstraints.Clear();
+
+        rel.ColumnPairs.Should().ContainSingle("列が残っている限りペアは残す");
+        var row = rel.ColumnPairRows.Should().ContainSingle().Subject;
+        row.SelectedSourceColumn.Should().BeSameAs(source.Columns[1]);
+        row.AvailableSourceColumns.Select(column => column.Name).Should().Equal("Id", "Code");
+        rel.CanAddColumnPair.Should()
+            .BeTrue("候補キーでない Code を選んだ行があっても、未使用の Id が残っている");
+
+        // 新しく足す行の候補には、候補キーでなくなった Code は出ない
+        rel.AddPendingColumnPairSlot();
+        rel.ColumnPairRows[1]
+            .AvailableSourceColumns.Select(column => column.Name)
+            .Should()
+            .Equal("Id");
+    }
+
+    /// <summary>主キーを外しても、その列を選んでいる行の選択と候補が残ることを検証する</summary>
+    [Fact(DisplayName = "主キーでなくなった親列は、選んでいる行の候補に残る")]
+    public void ColumnPairRow_KeepsOwnSelection_WhenPrimaryKeyIsCleared()
+    {
+        var (rel, source, target) = NewRelationshipForPairEditing();
+        rel.SetColumnPairs([
+            new RelationshipColumnPair(source.Columns[0].Id, target.Columns[1].Id),
+        ]);
+
+        source.Columns[0].IsPrimaryKey = false;
+
+        rel.ColumnPairs.Should().ContainSingle();
+        var row = rel.ColumnPairRows.Should().ContainSingle().Subject;
+        row.SelectedSourceColumn.Should().BeSameAs(source.Columns[0]);
+        row.AvailableSourceColumns.Select(column => column.Name).Should().Equal("Id", "Code");
+        rel.AvailableSourceColumns.Select(column => column.Name).Should().Equal("Code");
+    }
+
+    /// <summary>両端の列を並べ替えても、列ペア行の候補が重複せずカラム順に並ぶことを検証する</summary>
+    [Fact(DisplayName = "列を並べ替えて Undo しても、列ペア行の候補は重複せずカラム順に並ぶ")]
+    public void ColumnPairRow_Candidates_FollowColumnReorderWithoutDuplicates()
+    {
+        var (rel, source, target) = NewRelationshipForPairEditing();
+        rel.SetColumnPairs([
+            new RelationshipColumnPair(source.Columns[0].Id, target.Columns[1].Id),
+        ]);
+        var row = rel.ColumnPairRows.Should().ContainSingle().Subject;
+        var move = new QuickER.UndoRedo.MoveColumnOrderCommand(
+            target.Columns,
+            target.Columns[2],
+            0
+        );
+
+        move.Execute();
+
+        row.AvailableTargetColumns.Select(column => column.Name)
+            .Should()
+            .Equal("ParentCode", "Id", "ParentId");
+
+        move.Undo();
+
+        row.AvailableTargetColumns.Select(column => column.Name)
+            .Should()
+            .Equal("Id", "ParentId", "ParentCode");
+        row.SelectedTargetColumn.Should().BeSameAs(target.Columns[1]);
+    }
+
     /// <summary>Id（PK）と Code（UNIQUE 構成列）と Memo を持つ親エンティティを生成する</summary>
     private static EntityViewModel NewParentWithUniqueConstraint()
     {

@@ -90,7 +90,7 @@ public partial class RelationshipViewModel : ObservableObject
     /// （<see cref="ColumnViewModel.IsUniqueConstraintMember"/> は所有エンティティが制約の増減へ追従して立てる）
     /// </remarks>
     public IReadOnlyList<ColumnViewModel> AvailableSourceColumns =>
-        Source.Columns.Where(c => c.IsPrimaryKey || c.IsUniqueConstraintMember).ToList();
+        Source.Columns.Where(IsCandidateKeyColumn).ToList();
 
     /// <summary>外部キー列として選択可能な終点側カラム一覧</summary>
     public IReadOnlyList<ColumnViewModel> AvailableTargetColumns => Target.Columns.ToList();
@@ -107,13 +107,29 @@ public partial class RelationshipViewModel : ObservableObject
     public ObservableCollection<RelationshipColumnPairViewModel> ColumnPairRows { get; } = new();
 
     /// <summary>列ペアを 1 行追加できるかどうか（両側に未使用の候補列があり、空スロットが出ていない）</summary>
+    /// <remarks>
+    /// 件数の比較でなく「どの行も使っていない候補が残っているか」で判定する。行の選択は候補キーでなくなっても
+    /// 残る（<see cref="RefreshColumnPairCandidates"/>）ため、選択済みの行数と候補数は対応しない
+    /// </remarks>
     public bool CanAddColumnPair =>
         !_hasPendingSlot
         && CanSelectForeignKeyColumns
-        && AvailableSourceColumns.Count
-            > ColumnPairRows.Count(row => row.SelectedSourceColumn is not null)
-        && AvailableTargetColumns.Count
-            > ColumnPairRows.Count(row => row.SelectedTargetColumn is not null);
+        && HasUnusedColumn(AvailableSourceColumns, row => row.SelectedSourceColumn)
+        && HasUnusedColumn(AvailableTargetColumns, row => row.SelectedTargetColumn);
+
+    /// <summary>親列が候補キー（主キーまたは一意制約の構成列）かどうかを返す</summary>
+    private static bool IsCandidateKeyColumn(ColumnViewModel column) =>
+        column.IsPrimaryKey || column.IsUniqueConstraintMember;
+
+    /// <summary>候補のうち、どの列ペア行も選んでいない列が 1 つ以上あるかどうかを返す</summary>
+    private bool HasUnusedColumn(
+        IReadOnlyList<ColumnViewModel> candidates,
+        Func<RelationshipColumnPairViewModel, ColumnViewModel?> selected
+    )
+    {
+        var used = ColumnPairRows.Select(selected).ToHashSet();
+        return candidates.Any(column => !used.Contains(column));
+    }
 
     /// <summary>列ペア行の選択がユーザー操作で変わったときに発火する（履歴化は購読側の責務）</summary>
     /// <remarks>
@@ -402,33 +418,42 @@ public partial class RelationshipViewModel : ObservableObject
     }
 
     /// <summary>各行の選択候補を「他行が使っていない列＋自行の現在選択」へ絞り込む</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>自行の現在選択は、候補キー（主キー・一意制約）でなくなっても候補に残す。</b>選択中の項目が
+    /// ItemsSource から消えるとコンボボックスは <c>null</c> を書き戻し、それが利用者の編集として
+    /// 列ペアを消す（一意制約の削除の Undo / Redo の最中なら、入れ子の履歴まで積む）。
+    /// 列が存在する限りペアを残す <see cref="EnsureColumnSelectionConsistency"/> と同じ線引き。
+    /// </para>
+    /// <para>
+    /// 行の列挙はコピーに対して回す。候補の入れ替えが選択の書き戻しを誘発しても、
+    /// 列挙中の <see cref="ColumnPairRows"/> を書き換えないようにするため。
+    /// </para>
+    /// </remarks>
     private void RefreshColumnPairCandidates()
     {
-        var usedSources = ColumnPairRows
-            .Select(row => row.SelectedSourceColumn)
+        var rows = ColumnPairRows.ToList();
+        var usedSources = rows.Select(row => row.SelectedSourceColumn)
             .Where(column => column is not null)
             .Select(column => column!)
             .ToHashSet();
-        var usedTargets = ColumnPairRows
-            .Select(row => row.SelectedTargetColumn)
+        var usedTargets = rows.Select(row => row.SelectedTargetColumn)
             .Where(column => column is not null)
             .Select(column => column!)
             .ToHashSet();
-        var sourceCandidates = AvailableSourceColumns;
-        var targetCandidates = AvailableTargetColumns;
 
-        foreach (var row in ColumnPairRows)
+        foreach (var row in rows)
         {
             row.SyncAvailableSourceColumns(
-                sourceCandidates.Where(column =>
-                    !usedSources.Contains(column)
-                    || ReferenceEquals(column, row.SelectedSourceColumn)
+                Source.Columns.Where(column =>
+                    ReferenceEquals(column, row.SelectedSourceColumn)
+                    || (IsCandidateKeyColumn(column) && !usedSources.Contains(column))
                 )
             );
             row.SyncAvailableTargetColumns(
-                targetCandidates.Where(column =>
-                    !usedTargets.Contains(column)
-                    || ReferenceEquals(column, row.SelectedTargetColumn)
+                Target.Columns.Where(column =>
+                    ReferenceEquals(column, row.SelectedTargetColumn)
+                    || !usedTargets.Contains(column)
                 )
             );
         }
@@ -829,7 +854,7 @@ public sealed class RelationshipColumnPairViewModel : ObservableObject
     /// <summary>この行が属するリレーション</summary>
     public RelationshipViewModel Relationship { get; }
 
-    /// <summary>親列の選択候補（他行が使っていない候補キー列＋自行の現在選択）</summary>
+    /// <summary>親列の選択候補（他行が使っていない候補キー列＋自行の現在選択。現在選択は候補キーでなくても残る）</summary>
     public ObservableCollection<ColumnViewModel> AvailableSourceColumns { get; } = new();
 
     /// <summary>子列の選択候補（他行が使っていない列＋自行の現在選択）</summary>
@@ -941,44 +966,11 @@ public sealed class RelationshipColumnPairViewModel : ObservableObject
     /// <summary>この行を行リストから外れたものとして無効化する</summary>
     internal void Detach() => _isDetached = true;
 
-    /// <summary>親列の選択候補を差分だけ入れ替える</summary>
+    /// <summary>親列の選択候補を差分だけ入れ替える（並びは所有エンティティのカラム順）</summary>
     internal void SyncAvailableSourceColumns(IEnumerable<ColumnViewModel> columns) =>
-        SyncCandidates(AvailableSourceColumns, columns);
+        CandidateListSync.SyncTo(AvailableSourceColumns, columns);
 
-    /// <summary>子列の選択候補を差分だけ入れ替える</summary>
+    /// <summary>子列の選択候補を差分だけ入れ替える（並びは所有エンティティのカラム順）</summary>
     internal void SyncAvailableTargetColumns(IEnumerable<ColumnViewModel> columns) =>
-        SyncCandidates(AvailableTargetColumns, columns);
-
-    /// <summary>選択候補コレクションを差分だけ入れ替える</summary>
-    /// <remarks>
-    /// ItemsSource を丸ごと差し替えるとコンボボックスが選択を落とすため、実際に増減した項目だけを反映する
-    /// （並びは所有エンティティのカラム順）
-    /// </remarks>
-    private static void SyncCandidates(
-        ObservableCollection<ColumnViewModel> candidates,
-        IEnumerable<ColumnViewModel> columns
-    )
-    {
-        var desired = columns.ToList();
-
-        for (var i = candidates.Count - 1; i >= 0; i--)
-        {
-            if (!desired.Contains(candidates[i]))
-            {
-                candidates.RemoveAt(i);
-            }
-        }
-
-        for (var i = 0; i < desired.Count; i++)
-        {
-            if (i >= candidates.Count)
-            {
-                candidates.Add(desired[i]);
-            }
-            else if (!ReferenceEquals(candidates[i], desired[i]))
-            {
-                candidates.Insert(i, desired[i]);
-            }
-        }
-    }
+        CandidateListSync.SyncTo(AvailableTargetColumns, columns);
 }
