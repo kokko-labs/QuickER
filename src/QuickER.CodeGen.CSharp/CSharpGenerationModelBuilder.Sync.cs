@@ -58,12 +58,16 @@ internal sealed partial class CSharpGenerationModelBuilder
             targets.Add(entity);
         }
 
+        var targetIds = targets.Select(entity => entity.Id).ToHashSet();
+
         return targets
             .Select(entity =>
                 BuildSyncTable(
                     entity,
                     repositoriesByEntityClass[_nameConverter.ToEntityClassName(entity.TableName)],
-                    options
+                    options,
+                    diagram,
+                    targetIds
                 )
             )
             .ToList();
@@ -151,7 +155,9 @@ internal sealed partial class CSharpGenerationModelBuilder
     private CSharpSyncTableModel BuildSyncTable(
         Entity entity,
         CSharpRepositoryModel repository,
-        CodeGenerationOptions options
+        CodeGenerationOptions options,
+        ErDiagram diagram,
+        IReadOnlySet<Guid> syncTargetIds
     )
     {
         var keyColumn = entity.Columns.First(column => column.IsPrimaryKey);
@@ -274,7 +280,6 @@ internal sealed partial class CSharpGenerationModelBuilder
                     rowVersionValueObject
                 ),
             FormatKeyExpression = BuildFormatKey("key", keyColumn, keyValueObject),
-            FormatKeyIdExpression = BuildFormatKey("id", keyColumn, keyValueObject),
             ParseKeyExpression = BuildParseKey(keyColumn, keyValueObject),
             DecoratorDelegationBlock = BuildSyncDelegationBlock(repository),
             BinaryColumnPropertyNames = binaryColumns,
@@ -285,12 +290,168 @@ internal sealed partial class CSharpGenerationModelBuilder
             ),
             DecoratorBinaryBlock = BuildSyncDecoratorBinaryBlock(
                 binaryColumns,
-                // Journal.RecordAsync("…") へ C# リテラルとして埋め込むためエスケープする
-                EscapeNameForCSharpString(entity.TableName),
-                repository.KeyTypeName,
-                BuildFormatKey("id", keyColumn, keyValueObject)
+                repository.KeyTypeName
             ),
+            FillUnsetUnboundedBinariesBlock = BuildSyncFillUnsetUnboundedBinariesBlock(
+                entity,
+                options
+            ),
+            ParentReferencesBlock = BuildSyncParentReferencesBlock(
+                entity,
+                repository.EntityClassName,
+                diagram,
+                syncTargetIds
+            ),
+            ReferencingTableNamesBlock = BuildSyncReferencingTableNamesBlock(entity, diagram),
         };
+    }
+
+    /// <summary>
+    /// 記述子の <c>FillUnsetUnboundedBinaries</c>（NOT NULL の除外列が null なら空の値を入れる処理）を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 除外列が無い・NOT NULL の除外列が無いときは空文字（記述子の既定＝何もしない）。値オブジェクトは空配列から
+    /// 作った値（<c>Create([])</c>＝無制限なので長さの検証に掛からない）、非 VO は空配列。
+    /// </remarks>
+    private string BuildSyncFillUnsetUnboundedBinariesBlock(
+        Entity entity,
+        CodeGenerationOptions options
+    )
+    {
+        if (!options.ExcludeUnboundedBinaryColumns)
+        {
+            return string.Empty;
+        }
+
+        var statements = entity
+            .Columns.Where(column =>
+                !column.IsNullable && _columnTypes[column.Id].IsUnboundedBinary
+            )
+            .Select(column =>
+            {
+                var propertyName = _nameConverter.ToPropertyName(column.Name);
+                var empty = ResolveValueObject(column) is { } valueObject
+                    ? $"{valueObject.ClassName}.Create([])"
+                    : "[]";
+
+                return $"                entity.{propertyName} ??= {empty};";
+            })
+            .ToList();
+
+        return statements.Count == 0
+            ? string.Empty
+            : "            FillUnsetUnboundedBinaries = static entity =>\n            {\n"
+                + string.Join("\n", statements)
+                + "\n            },";
+    }
+
+    /// <summary>
+    /// 記述子の親参照（子の行から親のキーのテキストを読む関数の表）を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 対象は列ペア 1 組で、親の主キー（同期対象は単一主キー）を参照し、親も同期対象のリレーションだけ（自己参照を
+    /// 含む）。一意制約の列を参照する外部キーと複数列の外部キーは、親のキーを子の行から組み立てられないため出さない
+    /// （docs の既知の制限）。
+    /// </para>
+    /// <para>
+    /// キーのテキストは子の外部キー列へ主キーと同じ整形（<see cref="BuildFormatKey"/>）を当てて作る。ジャーナルの
+    /// キーは「同じ値が同じ文字列になる」ことだけを要求するので、int と long、親と同じ値オブジェクト（FK 列の VO 型
+    /// 統一）のどちらでも親の記述子が作る文字列と一致する。NULL の外部キーは「参照なし」＝null を返す。
+    /// </para>
+    /// </remarks>
+    private string BuildSyncParentReferencesBlock(
+        Entity entity,
+        string entityClassName,
+        ErDiagram diagram,
+        IReadOnlySet<Guid> syncTargetIds
+    )
+    {
+        var entitiesById = diagram.Entities.ToDictionary(candidate => candidate.Id);
+        var columnOwners = diagram
+            .Entities.SelectMany(owner => owner.Columns.Select(column => (column.Id, owner)))
+            .ToDictionary(pair => pair.Id, pair => pair.owner);
+        var references = new List<string>();
+
+        foreach (var relationship in diagram.Relationships)
+        {
+            if (relationship.ColumnPairs.Count != 1)
+            {
+                continue;
+            }
+
+            var pair = relationship.ColumnPairs[0];
+
+            if (
+                !columnOwners.TryGetValue(pair.SourceColumnId, out var parent)
+                || !columnOwners.TryGetValue(pair.TargetColumnId, out var child)
+                || child.Id != entity.Id
+                || !syncTargetIds.Contains(parent.Id)
+                || !entitiesById.ContainsKey(parent.Id)
+            )
+            {
+                continue;
+            }
+
+            var parentKeys = parent.Columns.Where(column => column.IsPrimaryKey).ToList();
+
+            if (parentKeys.Count != 1 || parentKeys[0].Id != pair.SourceColumnId)
+            {
+                continue;
+            }
+
+            var foreignKey = entity.Columns.First(column => column.Id == pair.TargetColumnId);
+            var propertyName = _nameConverter.ToPropertyName(foreignKey.Name);
+            var format = BuildFormatKey("value", foreignKey, ResolveValueObject(foreignKey));
+
+            references.Add(
+                $"                new SyncParentReference<{entityClassName}>(\n"
+                    + $"                    \"{EscapeNameForCSharpString(parent.TableName)}\",\n"
+                    + $"                    entity => entity.{propertyName} is {{ }} value ? {format} : null\n"
+                    + "                ),"
+            );
+        }
+
+        return references.Count == 0
+            ? string.Empty
+            : "            ParentReferences =\n            [\n"
+                + string.Join("\n", references)
+                + "\n            ],";
+    }
+
+    /// <summary>記述子の被参照テーブル名（このテーブルを親として参照する子テーブル・図の全リレーションから）を組み立てる。</summary>
+    /// <remarks>
+    /// 同期対象かどうかを問わない。サーバーの削除を断るのはサーバーの外部キーで、同期対象外の子テーブルにも
+    /// 外部キーはあるため。自己参照も含める（自分の子の行が削除を断り得る）。
+    /// </remarks>
+    private static string BuildSyncReferencingTableNamesBlock(Entity entity, ErDiagram diagram)
+    {
+        var columnOwners = diagram
+            .Entities.SelectMany(owner => owner.Columns.Select(column => (column.Id, owner)))
+            .ToDictionary(pair => pair.Id, pair => pair.owner);
+        var names = new List<string>();
+
+        foreach (var relationship in diagram.Relationships)
+        {
+            foreach (var pair in relationship.ColumnPairs)
+            {
+                if (
+                    columnOwners.TryGetValue(pair.SourceColumnId, out var parent)
+                    && parent.Id == entity.Id
+                    && columnOwners.TryGetValue(pair.TargetColumnId, out var child)
+                    && !names.Contains(child.TableName, StringComparer.Ordinal)
+                )
+                {
+                    names.Add(child.TableName);
+                }
+            }
+        }
+
+        return names.Count == 0
+            ? string.Empty
+            : "            ReferencingTableNames = ["
+                + string.Join(", ", names.Select(name => $"\"{EscapeNameForCSharpString(name)}\""))
+                + "],";
     }
 
     /// <summary>
@@ -350,14 +511,13 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// blob だけを差し替える編集（行の通常列は変わらない）は Repository の他の入口を一切通らないため、
     /// ここで記録しないとオフライン編集として永久に検出されない。記録は
     /// <c>SyncOptions.IncludeUnboundedBinary</c> に依らず常時行う（送るかどうかは送信側の判断で、
-    /// 生成時点ではどちらで呼ばれるか分からない）。<c>SyncJournal.RecordAsync</c> 自身が
-    /// <c>SyncSession.IsSuppressed</c> のとき何もしないので、エンジン自身のコピーは記録されない。
+    /// 生成時点ではどちらで呼ばれるか分からない）。記録と書き込みは基底の
+    /// <c>RecordUnboundedBinaryWriteAsync</c> がローカルの書き込みロックの内側で 1 組として行い、
+    /// <c>SyncSession.IsSuppressed</c> のとき（エンジン自身のコピー）は記録もロックもしない。
     /// </remarks>
     private static string BuildSyncDecoratorBinaryBlock(
         IReadOnlyList<string> columns,
-        string tableName,
-        string keyTypeName,
-        string formatKeyIdExpression
+        string keyTypeName
     )
     {
         if (columns.Count == 0)
@@ -378,17 +538,18 @@ internal sealed partial class CSharpGenerationModelBuilder
             + "    /// intent is journaled first, exactly as every other write is, and the upload sends the row's\n"
             + "    /// current content (blob included) when it is asked to carry the excluded columns.\n"
             + "    /// </remarks>\n"
-            + $"    public async Task<bool> Write{column}Async(\n"
+            + $"    public Task<bool> Write{column}Async(\n"
             + $"        {keyTypeName} id,\n"
             + "        Stream? source,\n"
             + "        long? length = null,\n"
             + "        CancellationToken cancellationToken = default\n"
-            + "    )\n    {\n"
-            + $"        await Journal.RecordAsync(\n            \"{tableName}\",\n            {formatKeyIdExpression},\n"
-            + "            SyncJournalOperation.Upsert,\n            null,\n            cancellationToken\n        )\n"
-            + "            .ConfigureAwait(false);\n\n"
-            + $"        return await _inner.Write{column}Async(id, source, length, cancellationToken)\n"
-            + "            .ConfigureAwait(false);\n    }"
+            + "    ) =>\n"
+            + "        RecordUnboundedBinaryWriteAsync(\n"
+            + "            id,\n"
+            + $"            \"{column}\",\n"
+            + $"            () => _inner.Write{column}Async(id, source, length, cancellationToken),\n"
+            + "            cancellationToken\n"
+            + "        );"
         );
 
         return string.Join("\n\n", members);

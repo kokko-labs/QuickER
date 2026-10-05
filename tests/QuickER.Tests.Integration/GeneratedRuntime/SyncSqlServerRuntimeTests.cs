@@ -704,4 +704,90 @@ public sealed class SyncSqlServerRuntimeTests(
         result.Downloaded.Should().Be(2);
         (await LocalLines().GetByIdAsync(11, Ct)).Should().NotBeNull();
     }
+
+    /// <summary>サーバー側（SQL Server）の明細リポジトリ</summary>
+    private ISyncOrderLineRepository ServerLines() =>
+        _provider.GetRequiredKeyedService<ISyncOrderLineRepository>(ServerKey);
+
+    /// <summary>
+    /// 実 SQL Server の外部キーエラー（SqlException）でも、親が消えた行の LocalWins の書き込みは
+    /// ParentMissingOnServer として報告され、同期は止まらない。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/SqlServer] 親が消えた行の LocalWins は実サーバーの外部キーエラーを ParentMissingOnServer で報告する"
+    )]
+    public async Task LocalWins_RowWhoseParentIsGone_IsReportedAsParentMissing()
+    {
+        await ServerOrders()
+            .InsertAsync(new SyncOrderEntity { OrderId = 1, CustomerName = "alice" }, Ct);
+        await ServerLines()
+            .InsertAsync(
+                new SyncOrderLineEntity
+                {
+                    LineId = 11,
+                    OrderId = 1,
+                    Product = "widget",
+                },
+                Ct
+            );
+        await Engine().SyncAsync(cancellationToken: Ct);
+
+        var local = await LocalLines().GetByIdAsync(11, Ct);
+        local!.Product = "widget-local";
+        await LocalLines().UpdateAsync(local, cancellationToken: Ct);
+        (await ServerLines().DeleteAsync(11, Ct)).Should().BeTrue();
+        (await ServerOrders().DeleteAsync(1, Ct)).Should().BeTrue();
+
+        var result = await Engine()
+            .SyncAsync(new SyncOptions { ConflictPolicy = SyncConflictPolicy.LocalWins }, Ct);
+
+        result
+            .Conflicts.Should()
+            .ContainSingle()
+            .Which.Reason.Should()
+            .Be(SyncConflictReason.ParentMissingOnServer);
+        (await LocalOrders().GetByIdAsync(1, Ct)).Should().NotBeNull("残した明細の親も残る");
+    }
+
+    /// <summary>
+    /// 実 SQL Server で、別端末が子を足した親のローカル削除は DeleteRefusedOnServer として報告され、
+    /// その子のダウンロードは打ち切られる（同期は止まらない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/SqlServer] 子が足された親の削除は実サーバーで DeleteRefusedOnServer と打ち切りになる"
+    )]
+    public async Task DeleteOfParentWithChildAddedOnServer_IsReportedAsRefused()
+    {
+        await ServerOrders()
+            .InsertAsync(new SyncOrderEntity { OrderId = 1, CustomerName = "alice" }, Ct);
+        await ServerOrders()
+            .InsertAsync(new SyncOrderEntity { OrderId = 2, CustomerName = "bob" }, Ct);
+        await Engine().SyncAsync(cancellationToken: Ct);
+
+        (await LocalOrders().DeleteAsync(1, Ct)).Should().BeTrue();
+        await ServerLines()
+            .InsertAsync(
+                new SyncOrderLineEntity
+                {
+                    LineId = 21,
+                    OrderId = 1,
+                    Product = "added elsewhere",
+                },
+                Ct
+            );
+
+        var result = await Engine().SyncAsync(cancellationToken: Ct);
+
+        result
+            .Conflicts.Should()
+            .ContainSingle()
+            .Which.Reason.Should()
+            .Be(SyncConflictReason.DeleteRefusedOnServer);
+        result
+            .Truncations.Should()
+            .Contain(truncation =>
+                truncation.TableName == "sync_order_lines" && truncation.PendingKeyText == "21"
+            );
+        (await LocalLines().GetByIdAsync(21, Ct)).Should().BeNull();
+    }
 }

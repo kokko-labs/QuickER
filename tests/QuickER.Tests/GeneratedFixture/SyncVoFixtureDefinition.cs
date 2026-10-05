@@ -31,12 +31,17 @@ namespace QuickER.Tests.GeneratedSyncVoFixture;
 /// 図は親子 2 テーブルの最小構成（カスケード削除の記録＝スタブ経路を通すため子が要る）:
 /// </para>
 /// <list type="bullet">
-///   <item><c>syncvo_orders</c>: <c>order_id</c>（int・PK）／<c>title</c>（nvarchar(50)）／<c>row_ver</c>（rowversion・NOT NULL）</item>
+///   <item><c>syncvo_orders</c>: <c>order_id</c>（int・PK）／<c>title</c>（nvarchar(50)）／<c>row_ver</c>（rowversion・NOT NULL）／<c>photo</c>（varbinary(max)・NOT NULL・除外列）</item>
 ///   <item><c>syncvo_lines</c>: <c>line_id</c>（int・PK）／<c>order_id</c>（int・FK）／<c>qty</c>（int）／<c>row_ver</c>（rowversion・NOT NULL）</item>
 /// </list>
 /// <para>
-/// EditModel・Mapper・EF Core・リモートサービス・無制限バイナリ列の除外は交差の焦点でないため生成しない
-/// （EF Core はマルチターゲットと排他でもある）。
+/// 無制限バイナリ列の除外を有効にし、注文に NOT NULL の除外列（<c>photo</c>）を置く。同期の行の読み出しは除外列を
+/// 含まないため、値オブジェクトの除外列は null のまま届き、エンジンがローカルへ挿入すると NOT NULL で失敗していた
+/// （記述子の <c>FillUnsetUnboundedBinaries</c> が空の値を入れる）。この交差を実行時に通すための列。
+/// </para>
+/// <para>
+/// EditModel・Mapper・EF Core・リモートサービスは交差の焦点でないため生成しない（EF Core はマルチターゲットと
+/// 排他でもある）。
 /// </para>
 /// </remarks>
 public static class SyncVoFixtureDefinition
@@ -62,6 +67,7 @@ public static class SyncVoFixtureDefinition
             GenerateValueObjects = true,
             GenerateEfCoreRepositories = false,
             GenerateSyncSupport = true,
+            ExcludeUnboundedBinaryColumns = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
             SplitFilesByCategory = false,
         };
@@ -71,6 +77,7 @@ public static class SyncVoFixtureDefinition
     private static readonly Guid OrderPkColId = new("c2000000-0000-0000-0000-000000000002");
     private static readonly Guid OrderTitleColId = new("c2000000-0000-0000-0000-000000000003");
     private static readonly Guid OrderRowVerColId = new("c2000000-0000-0000-0000-000000000004");
+    private static readonly Guid OrderPhotoColId = new("c2000000-0000-0000-0000-000000000005");
     private static readonly Guid LineEntityId = new("c2000000-0000-0000-0000-000000000011");
     private static readonly Guid LinePkColId = new("c2000000-0000-0000-0000-000000000012");
     private static readonly Guid LineOrderColId = new("c2000000-0000-0000-0000-000000000013");
@@ -111,6 +118,14 @@ public static class SyncVoFixtureDefinition
                     Id = OrderRowVerColId,
                     Name = "row_ver",
                     DataType = "rowversion",
+                    IsNullable = false,
+                },
+                // NOT NULL の除外列（値オブジェクト＝読まなければ null のまま届く側）
+                new Column
+                {
+                    Id = OrderPhotoColId,
+                    Name = "photo",
+                    DataType = "varbinary(max)",
                     IsNullable = false,
                 },
             },

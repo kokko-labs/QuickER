@@ -421,20 +421,23 @@ public class SyncSupportGenerationTests
 
         // 書き込み入口の網羅は汎用基底（第 10 次 A-2 で集約）が持つ:
         // 直接 CRUD と一括追加は「アップサート」として記録し、削除は記録フック経由・グラフ保存は
-        // RecordGraphSaveAsync（per-type がカスケード閉包の記録へ委譲）を先に呼ぶ
+        // カスケード閉包の記録（SyncGraphRecorder）を先に呼ぶ。どの入口も記録と業務書き込みを
+        // RecordAndWriteAsync（ローカルの書き込みロックの内側で 1 組）へ渡す
         var journalingBase = ExtractClass(
             content,
             "public abstract class JournalingRepositoryBase<TEntity, TKey>"
         );
         journalingBase.Should().Contain("public async Task InsertAsync(");
-        journalingBase.Should().Contain("public async Task<bool> UpdateAsync(");
-        journalingBase.Should().Contain("public async Task<int> BulkInsertAsync(");
-        journalingBase.Should().Contain("public async Task<bool> DeleteAsync(");
-        journalingBase
+        journalingBase.Should().Contain("public Task<bool> UpdateAsync(");
+        journalingBase.Should().Contain("public Task<int> BulkInsertAsync(");
+        journalingBase.Should().Contain("public Task<bool> DeleteAsync(");
+        journalingBase.Should().Contain("GraphRecorder.RecordSaveAsync(");
+        journalingBase.Should().Contain("GraphRecorder.CollectSave(");
+        CountOccurrences(journalingBase, "return RecordAndWriteAsync(")
             .Should()
-            .Contain(
-                "await RecordGraphSaveAsync(entity, cascadeSave, cascadeDelete, cancellationToken)"
-            );
+            .Be(4, "Update・BulkInsert・SaveAsync×2 はロックの内側で記録と書き込みを 1 組にする");
+        journalingBase.Should().Contain("await RecordAndWriteAsync(", "Insert も同じ");
+        journalingBase.Should().Contain("Journal.Gate.WriteExclusiveAsync(");
 
         // 読み取り経路は素通し（記録しない）
         journalingBase.Should().Contain("public SqlQuery<TEntity> Query() => Inner.Query();");
@@ -842,14 +845,12 @@ public class SyncSupportGenerationTests
             .Should()
             .Contain("=> _inner.ReadAttachmentAsync(id, destination, cancellationToken);");
 
-        // 書きは journal-first（記録 → 実書き込み）
-        decorator.Should().Contain("public async Task<bool> WriteAttachmentAsync(");
-        var record = decorator.IndexOf("SyncJournalOperation.Upsert", StringComparison.Ordinal);
-        var write = decorator.IndexOf(
-            "await _inner.WriteAttachmentAsync(",
-            StringComparison.Ordinal
-        );
-        record.Should().BeLessThan(write, "意図を先に記録してから業務書き込みを行う");
+        // 書きは journal-first（記録 → 実書き込み）を基底のヘルパーがロックの内側で行う
+        decorator.Should().Contain("public Task<bool> WriteAttachmentAsync(");
+        decorator.Should().Contain("RecordUnboundedBinaryWriteAsync(");
+        decorator
+            .Should()
+            .Contain("() => _inner.WriteAttachmentAsync(id, source, length, cancellationToken)");
     }
 
     /// <summary>
@@ -926,6 +927,187 @@ public class SyncSupportGenerationTests
         content.Should().NotContain("WriteAttachmentAsync");
     }
 
+    /// <summary>
+    /// 記述子は、単一列で同期対象の親の主キーを参照する外部キーを親参照として持ち、親の側は自分を参照する
+    /// テーブルの名前を持つ。
+    /// </summary>
+    [Fact(DisplayName = "記述子は単一列の外部キーを親参照として、参照される側は子テーブル名を持つ")]
+    public void Descriptors_CarryParentReferencesAndReferencingTables()
+    {
+        var (files, _) = Generate(Diagram(), SyncOptions());
+        var content = string.Concat(files.Values);
+
+        var line = ExtractDescriptor(content, "SyncOrderLineEntity", "SyncOrderLine");
+        line.Should().Contain("new SyncParentReference<SyncOrderLineEntity>(");
+        line.Should().Contain("\"sync_orders\",");
+        line.Should()
+            .Contain(
+                "entity => entity.OrderId is { } value ? value.ToString(CultureInfo.InvariantCulture) : null"
+            );
+        line.Should().NotContain("ReferencingTableNames");
+
+        var order = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
+        order.Should().NotContain("ParentReferences");
+        order.Should().Contain("ReferencingTableNames = [\"sync_order_lines\", \"sync_notes\"],");
+    }
+
+    /// <summary>
+    /// 自己参照は親参照に含め、複数列の外部キー・一意制約の列を参照する外部キー・同期対象でない親への外部キーは
+    /// 含めない（子の行から親のキーを組み立てられない・親の記述子が無い）。被参照テーブル名は同期対象かどうかを
+    /// 問わない。
+    /// </summary>
+    [Fact(
+        DisplayName = "親参照は自己参照を含み、複数列・一意制約参照・同期対象外の親への外部キーは含めない"
+    )]
+    public void ParentReferences_CoverSelfReferenceAndSkipWhatCannotBeKeyed()
+    {
+        var diagram = Diagram();
+        var order = diagram.Entities.Single(entity => entity.TableName == "sync_orders");
+        var note = diagram.Entities.Single(entity => entity.TableName == "sync_notes");
+        var orderKey = order.Columns.Single(column => column.IsPrimaryKey);
+        var orderName = order.Columns.Single(column => column.Name == "customer_name");
+
+        // 自己参照（NULL 許容）
+        var parentOrder = new Column
+        {
+            Id = System.Guid.NewGuid(),
+            Name = "parent_order_id",
+            DataType = "int",
+            IsNullable = true,
+        };
+        order.Columns.Add(parentOrder);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Id = System.Guid.NewGuid(),
+                SourceEntityId = order.Id,
+                TargetEntityId = order.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs = { new RelationshipColumnPair(orderKey.Id, parentOrder.Id) },
+            }
+        );
+
+        // 一意制約の列（主キーでない）を参照する外部キー（同じ親子の 2 本目はナビゲーション名が重なるので別テーブル）
+        var tagOwner = new Column
+        {
+            Id = System.Guid.NewGuid(),
+            Name = "owner_name",
+            DataType = "nvarchar(50)",
+            IsNullable = true,
+        };
+        var tag = new Entity
+        {
+            Id = System.Guid.NewGuid(),
+            TableName = "sync_tags",
+            Columns =
+            {
+                new Column
+                {
+                    Id = System.Guid.NewGuid(),
+                    Name = "tag_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                tagOwner,
+            },
+        };
+        diagram.Entities.Add(tag);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Id = System.Guid.NewGuid(),
+                SourceEntityId = order.Id,
+                TargetEntityId = tag.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs = { new RelationshipColumnPair(orderName.Id, tagOwner.Id) },
+            }
+        );
+
+        // 同期対象でない親（複合主キー＝Repository 契約が無い）への外部キー
+        var category = new Entity
+        {
+            Id = System.Guid.NewGuid(),
+            TableName = "categories",
+            Columns =
+            {
+                new Column
+                {
+                    Id = System.Guid.NewGuid(),
+                    Name = "region",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                new Column
+                {
+                    Id = System.Guid.NewGuid(),
+                    Name = "code",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+            },
+        };
+        diagram.Entities.Add(category);
+        var noteRegion = new Column
+        {
+            Id = System.Guid.NewGuid(),
+            Name = "region",
+            DataType = "int",
+            IsNullable = true,
+        };
+        var noteCode = new Column
+        {
+            Id = System.Guid.NewGuid(),
+            Name = "code",
+            DataType = "int",
+            IsNullable = true,
+        };
+        note.Columns.Add(noteRegion);
+        note.Columns.Add(noteCode);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Id = System.Guid.NewGuid(),
+                SourceEntityId = category.Id,
+                TargetEntityId = note.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs =
+                {
+                    new RelationshipColumnPair(category.Columns[0].Id, noteRegion.Id),
+                    new RelationshipColumnPair(category.Columns[1].Id, noteCode.Id),
+                },
+            }
+        );
+
+        var (files, diagnostics) = Generate(diagram, SyncOptions());
+        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+        var content = string.Concat(files.Values);
+
+        var orderDescriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
+        orderDescriptor.Should().Contain("new SyncParentReference<SyncOrderEntity>(");
+        orderDescriptor
+            .Should()
+            .Contain(
+                "entity => entity.ParentOrderId is { } value ? value.ToString(CultureInfo.InvariantCulture) : null"
+            );
+        orderDescriptor
+            .Should()
+            .Contain(
+                "ReferencingTableNames = [\"sync_order_lines\", \"sync_notes\", \"sync_orders\", \"sync_tags\"],"
+            );
+
+        var noteDescriptor = ExtractDescriptor(content, "SyncNoteEntity", "SyncNote");
+        CountOccurrences(noteDescriptor, "new SyncParentReference<SyncNoteEntity>(")
+            .Should()
+            .Be(1, "主キーを単一列で参照する注文への外部キーだけ");
+        noteDescriptor.Should().NotContain("\"categories\"");
+        ExtractDescriptor(content, "SyncTagEntity", "SyncTag")
+            .Should()
+            .NotContain(
+                "ParentReferences",
+                "一意制約の列への外部キーからは親のキーを組み立てられない"
+            );
+    }
+
     /// <summary>1 テーブル分の記述子（<c>GeneratedSyncTables</c> の静的プロパティ初期化子）を切り出す</summary>
     private static string ExtractDescriptor(
         string content,
@@ -957,5 +1139,22 @@ public class SyncSupportGenerationTests
         );
 
         return next < 0 ? content[start..] : content[start..next];
+    }
+
+    /// <summary>部分文字列の出現回数を数える</summary>
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+
+        for (
+            var index = text.IndexOf(value, StringComparison.Ordinal);
+            index >= 0;
+            index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal)
+        )
+        {
+            count++;
+        }
+
+        return count;
     }
 }
