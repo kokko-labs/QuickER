@@ -208,6 +208,8 @@ In a diagram imported from Oracle by an earlier version, such columns show up as
 
 The import result is merged into the current diagram.
 Tables and columns are matched by name, and matching elements take over the identity of the current diagram's elements, so their layout, width, color, and notes are preserved, along with the named queries that reference them.
+A name that differs only in letter case also matches, as long as it is unique on both sides ignoring case (MySQL on Windows, for example, returns table names in lower case); the imported spelling then replaces the diagram's.
+When names differing only in case exist side by side, an exact match is taken first, and a name that stays ambiguous is treated as a new table or column.
 Only newly imported tables are placed in free space; the whole diagram is auto-arranged only when nothing in the current diagram matches (a completely new import).
 A confirmation appears when the current diagram differs structurally, and also when the import would break named queries, in which case the queries to be removed are listed by name.
 

@@ -214,15 +214,16 @@ public static partial class SqlTypeText
 
     /// <summary>安全でない型文字列を持つ列を「テーブル.列 → 型文字列」の形で名指しして例外を投げる</summary>
     /// <remarks>
-    /// 例外文は英語が正本（生成 SQL に乗る固定文と同じ流儀＝方言中立・カルチャ非依存）。型文字列そのものを
-    /// 文面へ載せるが、制御文字はここでも空白へ畳んでからにする（例外文を表示する側の行構造を壊さないため）。
+    /// 例外文は英語が正本（生成 SQL に乗る固定文と同じ流儀＝方言中立・カルチャ非依存）。型文字列・テーブル名・
+    /// 列名を文面へ載せるが、制御文字はここでも空白へ畳んでからにする（例外文を表示する側の行構造を壊さないため。
+    /// 型の検証は名前の検証より先に走るので、改行を含む名前もここへ届く）。
     /// </remarks>
     private static void ThrowIfAnyUnsafe(IEnumerable<(string TableName, Column Column)> columns)
     {
         var offenders = columns
             .Where(pair => !IsSafe(pair.Column.DataType))
             .Select(pair =>
-                $"{pair.TableName}.{pair.Column.Name} = '{SqlComment.Sanitize(pair.Column.DataType)}'"
+                $"{SqlComment.Sanitize(pair.TableName)}.{SqlComment.Sanitize(pair.Column.Name)} = '{SqlComment.Sanitize(pair.Column.DataType)}'"
             )
             .Distinct(StringComparer.Ordinal)
             .ToList();

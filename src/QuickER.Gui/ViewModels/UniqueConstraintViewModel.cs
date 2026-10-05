@@ -20,8 +20,7 @@ namespace QuickER.ViewModels;
 /// </para>
 /// <para>
 /// 表示名（<see cref="ResolvedName"/>）は DDL 生成と同じ合成規則
-/// （<see cref="UniqueConstraintNaming.Resolve"/>）を共有する。ただし識別子の安全化は方言ごとに
-/// 異なるためプレビューでは行わない（実際に出力される名前と記号の置換だけが食い違いうる）。
+/// （<see cref="UniqueConstraintNaming.Resolve"/>）を共有する（安全化も同じ規則なので、DDL が出す名前と一致する）。
 /// </para>
 /// </remarks>
 public partial class UniqueConstraintViewModel : ObservableObject
@@ -79,8 +78,7 @@ public partial class UniqueConstraintViewModel : ObservableObject
         UniqueConstraintNaming.Resolve(
             string.IsNullOrWhiteSpace(Name) ? null : Name,
             _owner.TableName,
-            MemberColumnNames,
-            identifier => identifier
+            MemberColumnNames
         );
 
     /// <summary>構成列の名前（宣言順）。解決できない Guid は読み飛ばす</summary>

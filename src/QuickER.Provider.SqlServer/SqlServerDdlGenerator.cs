@@ -24,9 +24,6 @@ public sealed class SqlServerDdlGenerator : DdlGeneratorBase
     protected override string QuoteSimpleName(string name) => SqlIdentifier.BracketSimple(name);
 
     /// <inheritdoc />
-    protected override string SafeName(string name) => SqlIdentifier.SafeName(name);
-
-    /// <inheritdoc />
     protected override string QuoteConstraintName(string constraintName) =>
         $"[{SqlIdentifier.Escape(constraintName)}]";
 

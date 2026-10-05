@@ -27,14 +27,12 @@ public static class TableConstraintLineBuilder
     /// <param name="tableName">制約名の基にするテーブル名</param>
     /// <param name="quoteSimpleName">カラム名を方言のクォート方式でクォートする関数</param>
     /// <param name="quoteConstraintName">制約名を方言のクォート方式でクォートする関数（エスケープ込み）</param>
-    /// <param name="safeName">制約名に使う安全な ID を作る方言別の関数</param>
     /// <returns>行頭インデント付きの制約行（区切りカンマは付かない）。該当が無ければ空リスト</returns>
     public static List<string> Build(
         Entity entity,
         string tableName,
         Func<string, string> quoteSimpleName,
-        Func<string, string> quoteConstraintName,
-        Func<string, string> safeName
+        Func<string, string> quoteConstraintName
     )
     {
         var lines = new List<string>();
@@ -50,7 +48,7 @@ public static class TableConstraintLineBuilder
         }
 
         // UNIQUE 制約（制約名が未設定なら UQ_{テーブル}_{列…} を合成する）
-        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, tableName, safeName))
+        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, tableName))
         {
             var uniqueCols = string.Join(", ", unique.ColumnNames.Select(quoteSimpleName));
             lines.Add($"    CONSTRAINT {quoteConstraintName(unique.Name)} UNIQUE ({uniqueCols})");

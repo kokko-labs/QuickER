@@ -24,9 +24,6 @@ public sealed class MySqlDdlGenerator : DdlGeneratorBase
     protected override string QuoteSimpleName(string name) => MySqlIdentifier.QuoteSimple(name);
 
     /// <inheritdoc />
-    protected override string SafeName(string name) => MySqlIdentifier.SafeName(name);
-
-    /// <inheritdoc />
     protected override string QuoteConstraintName(string constraintName) =>
         $"`{MySqlIdentifier.Escape(constraintName)}`";
 

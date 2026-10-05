@@ -54,8 +54,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 entity,
                 table,
                 QuoteSimpleName,
-                QuoteConstraintName,
-                SafeName
+                QuoteConstraintName
             );
 
             for (var i = 0; i < entity.Columns.Count; i++)
@@ -87,6 +86,13 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         }
 
         var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+
+        // 外部キー名は同期の差分・スクリプトと同じ規則で求める（名前の無い同じ組の 2 本目は一意化される）
+        var foreignKeyNames = ConstraintNames.ResolveForeignKeyNames(
+            diagram.Entities,
+            diagram.Relationships
+        );
+
         foreach (var rel in diagram.Relationships)
         {
             // 1対多 / 1対1 とも、親 (Source) の PK を子 (Target) が外部キーとして参照する。
@@ -121,12 +127,8 @@ public abstract class DdlGeneratorBase : IDdlGenerator
 
             var fkTable = fkEntity.TableName;
             var pkTable = pkEntity.TableName;
-            // 制約名はモデルの値を優先し、未設定なら FK_子_親 の命名規則で生成する
-            var constraintName = ConstraintNames.EffectiveForeignKey(
-                rel.ConstraintName,
-                fkTable,
-                pkTable
-            );
+            // 親子を引けたリレーションは必ず名前を持つ（モデルの名前、無ければ既定名か一意化した名前）
+            var constraintName = foreignKeyNames[rel];
 
             AppendBeforeForeignKeyStatement(sb, rel);
 
@@ -160,9 +162,6 @@ public abstract class DdlGeneratorBase : IDdlGenerator
 
     /// <summary>カラム名など単一識別子を方言のクォート方式でクォートする</summary>
     protected abstract string QuoteSimpleName(string name);
-
-    /// <summary>制約名などに使う安全な ID を生成する（"." と空白を "_" へ置換）</summary>
-    protected abstract string SafeName(string name);
 
     /// <summary>制約名を方言のクォート方式でクォートする（エスケープ込み）</summary>
     protected abstract string QuoteConstraintName(string constraintName);

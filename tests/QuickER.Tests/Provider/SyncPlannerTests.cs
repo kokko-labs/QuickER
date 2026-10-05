@@ -3216,4 +3216,71 @@ public class SyncPlannerTests
             .Which.OnDelete.Should()
             .Be(ForeignKeyReferentialAction.Cascade);
     }
+
+    // ---------------- 大文字小文字だけ違う live テーブルの引き当て ----------------
+
+    /// <summary>live に大文字小文字だけ違うテーブルが共存するときの、再構築の引き当てを検証する</summary>
+    /// <remarks>
+    /// 引き当ての規則は差分と同じ（序数一致の 1 件を優先し、大文字小文字を無視した一致は 1 件のときだけ）。
+    /// 曖昧な名前は並び順で片方を選ばず「live に無いテーブル」と同じ扱いにする＝再構築せず、項目はセクションへ
+    /// 残り、レンダラーがスキップを明示する
+    /// </remarks>
+    [Fact(
+        DisplayName = "再構築: 大文字小文字だけ違う live テーブルは序数一致で引き、曖昧なら再構築せずスキップを明示する"
+    )]
+    public void Rebuild_CaseOnlyDifferentLiveTables_ExactOrSkipped()
+    {
+        var upper = new Entity { TableName = "Dup", Columns = { PkId(), Col("note", "TEXT") } };
+        var lower = new Entity { TableName = "dup", Columns = { PkId(), Col("note", "TEXT") } };
+        var context = new SyncPlanContext { LiveEntities = [upper, lower] };
+
+        SchemaDiffItem AlterNote(string table) =>
+            new()
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = table,
+                ColumnName = "note",
+                Column = Col("note", "INTEGER"),
+                IsSelected = true,
+            };
+
+        // 序数一致: 小文字のほうを作り直す
+        var exact = new SyncPlanner().BuildPlan([AlterNote("dup")], RebuildCaps, context);
+        exact.Rebuilds.Should().ContainSingle().Which.TableName.Should().Be("dup");
+
+        // 曖昧: 再構築せず、項目はセクションへ残ってスキップのコメントになる
+        var ambiguousItem = AlterNote("DUP");
+        var ambiguous = new SyncPlanner().BuildPlan([ambiguousItem], RebuildCaps, context);
+        ambiguous.Rebuilds.Should().BeEmpty();
+        ambiguous.Sections.Should().ContainSingle().Which.Items.Should().Equal(ambiguousItem);
+
+        var script = new QuickER.Provider.Sqlite.SqliteSyncScriptBuilder().Build(ambiguous);
+        script.Should().Contain("-- Skipped 'AlterColumn' on DUP");
+    }
+
+    /// <summary>ネイティブ列順変更でも、曖昧な live テーブルは並べ替え計画に含めないことを検証する</summary>
+    [Fact(
+        DisplayName = "列順変更: 大文字小文字だけ違う live テーブルが曖昧なら並べ替え計画に含めない"
+    )]
+    public void NativeReorder_CaseOnlyDifferentLiveTables_AmbiguousIsDropped()
+    {
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [Ent("Dup", "a", "b"), Ent("dup", "a", "b")],
+        };
+
+        var exact = new SyncPlanner().BuildPlan(
+            [Reorder("Dup", Ent("Dup", "b", "a"))],
+            NativeCaps,
+            context
+        );
+        exact.Reorders.Should().ContainSingle().Which.TableName.Should().Be("Dup");
+
+        var ambiguous = new SyncPlanner().BuildPlan(
+            [Reorder("DUP", Ent("DUP", "b", "a"))],
+            NativeCaps,
+            context
+        );
+        ambiguous.Reorders.Should().BeEmpty();
+    }
 }

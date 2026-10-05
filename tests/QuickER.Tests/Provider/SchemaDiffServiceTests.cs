@@ -1316,4 +1316,87 @@ public class SchemaDiffServiceTests
             is SchemaDiffKind.AddForeignKey
                 or SchemaDiffKind.DropForeignKey
                 or SchemaDiffKind.AlterForeignKey;
+
+    /// <summary>大文字小文字だけ違う列が DB 側に共存しても差分が例外にならず、序数一致で組むことを検証する</summary>
+    /// <remarks>
+    /// PostgreSQL の引用識別子は <c>"Dup"</c> と <c>dup</c> を共存させ、取込は両方を持ち帰る。大文字小文字を無視した
+    /// 辞書で索引を作ると、同期画面がその DB を一切扱えなくなっていた（キー重複の例外）
+    /// </remarks>
+    [Fact(
+        DisplayName = "大文字小文字だけ違う列が共存しても例外にならず、組めなかった側だけが差分になる"
+    )]
+    public void CaseOnlyDifferentColumns_DoNotThrow_AndExactMatchWins()
+    {
+        var live = new List<Entity>
+        {
+            Tbl("t", ("id", "int", true), ("Dup", "int", false), ("dup", "int", false)),
+        };
+        var target = new List<Entity> { Tbl("t", ("id", "int", true), ("Dup", "int", false)) };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Match<SchemaDiffItem>(i =>
+                i.Kind == SchemaDiffKind.DropColumn && i.ColumnName == "dup"
+            );
+    }
+
+    /// <summary>大文字小文字だけ違うテーブルが DB 側に共存しても差分が例外にならないことを検証する</summary>
+    [Fact(
+        DisplayName = "大文字小文字だけ違うテーブルが共存しても例外にならず、曖昧な名前は組まない"
+    )]
+    public void CaseOnlyDifferentTables_DoNotThrow_AndAmbiguousIsNotMatched()
+    {
+        var live = new List<Entity>
+        {
+            Tbl("Dup", ("id", "int", true)),
+            Tbl("dup", ("id", "int", true)),
+        };
+        var target = new List<Entity> { Tbl("DUP", ("id", "int", true)) };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Select(i => (i.Kind, i.TableName))
+            .Should()
+            .BeEquivalentTo(
+                new[]
+                {
+                    (SchemaDiffKind.AddTable, "DUP"),
+                    (SchemaDiffKind.DropTable, "Dup"),
+                    (SchemaDiffKind.DropTable, "dup"),
+                }
+            );
+    }
+
+    /// <summary>大文字小文字だけ違う名前でも、双方で一意なら同じテーブル・列として比べることを検証する</summary>
+    [Fact(DisplayName = "大文字小文字だけ違う名前は双方で一意なら同じテーブル・列として比べる")]
+    public void CaseOnlyDifference_UniqueOnBothSides_IsMatched()
+    {
+        var live = new List<Entity> { Tbl("orders", ("id", "int", true), ("name", "int", false)) };
+        var target = new List<Entity>
+        {
+            Tbl("Orders", ("Id", "int", true), ("Name", "int", false)),
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should().BeEmpty();
+    }
 }

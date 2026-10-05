@@ -43,8 +43,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             e,
             item.TableName,
             PgIdentifier.QuoteSimple,
-            name => $"\"{PgIdentifier.Escape(name)}\"",
-            PgIdentifier.SafeName
+            name => $"\"{PgIdentifier.Escape(name)}\""
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -186,8 +185,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            PgIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         var cols = string.Join(", ", item.UniqueConstraintColumns.Select(PgIdentifier.QuoteSimple));
         sb.AppendLine(
@@ -202,8 +200,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            PgIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         sb.AppendLine(
             $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
@@ -245,11 +242,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = ConstraintNames.EffectiveForeignKey(
-            item.Relationship?.ConstraintName,
-            childTbl,
-            parentTbl
-        );
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );

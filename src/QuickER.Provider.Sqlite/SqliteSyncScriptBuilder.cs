@@ -212,9 +212,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // （選択した列削除で構成列が消えた等）は ResolveAll が黙って除外する。
         // 合成名 UQ_{表}_{列…} の基になるテーブル名は definition.TableName＝実テーブル名
         // （再構築の一時テーブル名ではない）ため、リネーム後に自然な制約名になる
-        foreach (
-            var unique in UniqueConstraintNaming.ResolveAll(definition, SqliteIdentifier.SafeName)
-        )
+        foreach (var unique in UniqueConstraintNaming.ResolveAll(definition))
         {
             trailingConstraints.Add(
                 SqliteDdlGenerator.BuildUniqueConstraintLine(unique.Name, unique.ColumnNames)

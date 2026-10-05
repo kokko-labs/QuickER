@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,27 +38,8 @@ public class OracleSchemaImporter : ISchemaImporter
     {
         await using var conn = new OracleConnection(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var result = await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
+        return await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
             .ConfigureAwait(false);
-        return new SchemaImportResult
-        {
-            Entities = result.Entities,
-            Relationships = result.Relationships,
-            Warnings = result.Warnings,
-        };
-    }
-
-    /// <summary>取得したスキーマを格納する結果 DTO</summary>
-    public sealed class SchemaResult
-    {
-        /// <summary>取得したエンティティ一覧</summary>
-        public List<Entity> Entities { get; init; } = new();
-
-        /// <summary>取得したリレーション一覧</summary>
-        public List<Relationship> Relationships { get; init; } = new();
-
-        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
-        public List<SchemaImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
@@ -70,7 +50,7 @@ public class OracleSchemaImporter : ISchemaImporter
     /// カタログ照会 1 本ごとの実行タイムアウト（秒）。既定値付きで <paramref name="ct"/> の後ろに置くのは、
     /// 既存の位置指定呼び出し（統合テストの <c>ImportAsync(conn, ct)</c>）を壊さないため。
     /// </param>
-    public async Task<SchemaResult> ImportAsync(
+    public async Task<SchemaImportResult> ImportAsync(
         OracleConnection conn,
         CancellationToken ct = default,
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
@@ -110,7 +90,7 @@ public class OracleSchemaImporter : ISchemaImporter
             )
         );
 
-        return new SchemaResult
+        return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
@@ -368,7 +348,7 @@ ORDER BY constraint_name";
             var table = reader.GetString(0);
 
             // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
-            if (!TryGetExactTable(tables, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, table, out var entry))
             {
                 continue;
             }
@@ -397,20 +377,6 @@ ORDER BY constraint_name";
             _ => constraintType,
         };
 
-    /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
-    /// <remarks>
-    /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
-    /// 列・制約・説明が、採用したほうのエンティティへ吸い寄せられて混ざる。USER_ ビューが返す名前は
-    /// どのクエリでも同じ実体名なので、ここで序数一致まで求めても正当な行を取りこぼすことはない。
-    /// </remarks>
-    private static bool TryGetExactTable(
-        Dictionary<string, SchemaTableEntry> tables,
-        string tableName,
-        [NotNullWhen(true)] out SchemaTableEntry? entry
-    ) =>
-        tables.TryGetValue(tableName, out entry)
-        && string.Equals(entry.Key, tableName, StringComparison.Ordinal);
-
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         OracleConnection conn,
@@ -434,7 +400,7 @@ ORDER BY constraint_name";
         {
             var table = reader.GetString(0);
 
-            if (!TryGetExactTable(tables, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, table, out var entry))
             {
                 continue;
             }
@@ -508,7 +474,7 @@ ORDER BY constraint_name";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry))
             {
                 continue;
             }
@@ -538,7 +504,7 @@ ORDER BY constraint_name";
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 if (
-                    TryGetExactTable(tables, reader.GetString(0), out var entry)
+                    SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry)
                     && !reader.IsDBNull(1)
                 )
                 {
@@ -554,7 +520,7 @@ ORDER BY constraint_name";
 
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
+                if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry))
                 {
                     continue;
                 }
@@ -599,8 +565,8 @@ ORDER BY constraint_name";
 
             // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
             if (
-                !TryGetExactTable(tables, childKey, out _)
-                || !TryGetExactTable(tables, refKey, out _)
+                !SchemaTableEntry.TryGetExact(tables, childKey, out _)
+                || !SchemaTableEntry.TryGetExact(tables, refKey, out _)
             )
             {
                 continue;
@@ -640,7 +606,7 @@ ORDER BY constraint_name";
                 var key = reader.GetString(0);
 
                 // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
-                if (!TryGetExactTable(tables, key, out _))
+                if (!SchemaTableEntry.TryGetExact(tables, key, out _))
                 {
                     continue;
                 }

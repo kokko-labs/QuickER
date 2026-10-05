@@ -88,8 +88,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
             e,
             item.TableName,
             MySqlIdentifier.QuoteSimple,
-            name => $"`{MySqlIdentifier.Escape(name)}`",
-            MySqlIdentifier.SafeName
+            name => $"`{MySqlIdentifier.Escape(name)}`"
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -259,8 +258,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            MySqlIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         var cols = string.Join(
             ", ",
@@ -282,8 +280,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            MySqlIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
@@ -325,11 +322,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = ConstraintNames.EffectiveForeignKey(
-            item.Relationship?.ConstraintName,
-            childTbl,
-            parentTbl
-        );
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );

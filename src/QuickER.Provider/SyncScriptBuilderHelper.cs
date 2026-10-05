@@ -44,6 +44,22 @@ public static class SyncScriptBuilderHelper
         + $"{SqlComment.Sanitize(SchemaDiffService.NormalizeTable(item.ChildEntity!))} -> "
         + $"{SqlComment.Sanitize(SchemaDiffService.NormalizeTable(item.ParentEntity!))})";
 
+    /// <summary>付ける外部キーの名前を返す（AddForeignKey と再構築の外部キー）</summary>
+    /// <param name="item">外部キーを付ける差分項目（子・親のエンティティが解決済み）</param>
+    /// <returns>
+    /// 差分が求めた名前（<see cref="SchemaDiffItem.ForeignKeyName"/>）。無ければリレーションの名前、それも無ければ既定名
+    /// </returns>
+    /// <remarks>
+    /// 差分は DDL と同じ規則（<see cref="ConstraintNames.ResolveForeignKeyNames"/>）で名前を求めて項目へ載せる。
+    /// リレーションの名前から求め直すと、名前の無い同じ組の 2 本目が DDL と違う名前（既定名）になる。
+    /// </remarks>
+    public static string ForeignKeyNameToAdd(SchemaDiffItem item) =>
+        ConstraintNames.EffectiveForeignKey(
+            item.ForeignKeyName ?? item.Relationship?.ConstraintName,
+            SchemaDiffService.NormalizeTable(item.ChildEntity!),
+            SchemaDiffService.NormalizeTable(item.ParentEntity!)
+        );
+
     /// <summary>外部キーの ON DELETE / ON UPDATE 参照アクション句を生成する</summary>
     public static string BuildReferentialActionClause(Relationship? relationship) =>
         relationship is null

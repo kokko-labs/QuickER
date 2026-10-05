@@ -28,7 +28,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     private IReadOnlyDictionary<string, CSharpTypeInfo> _queryTokenTypes = new Dictionary<
         string,
         CSharpTypeInfo
-    >(StringComparer.OrdinalIgnoreCase);
+    >(StringComparer.Ordinal);
 
     /// <summary>エンティティ ID → そのエンティティの名前付きクエリ定義（定義順）</summary>
     private Dictionary<Guid, List<QueryDefinition>> _queriesByEntity = new();

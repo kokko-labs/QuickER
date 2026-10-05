@@ -380,4 +380,30 @@ public class ComputedColumnCommentTests
             .Should()
             .BeNull();
     }
+
+    /// <summary>NULL 許容と記された主キーの計算列にも、INSERT が失敗する旨の追記が出ることを検証する</summary>
+    /// <remarks>
+    /// DDL は主キー列を NULL 許容の値に関わらず NOT NULL で出す。注意を <c>IsNullable</c> だけで決めると、
+    /// NOT NULL で作られる列なのに INSERT の失敗を告げない（主キー列の NULL 許容は編集経路で落とされるので、
+    /// 起きるのは手で編集した図だけ）
+    /// </remarks>
+    [Fact(
+        DisplayName = "注意コメント: NULL 許容と記された主キーの計算列も INSERT が失敗することを告げる"
+    )]
+    public void Note_NullablePrimaryKeyComputedColumn_WarnsAboutInsertFailure()
+    {
+        ComputedColumnComment
+            .Build(
+                new Column
+                {
+                    Name = "period_start",
+                    DataType = "datetime2",
+                    IsPrimaryKey = true,
+                    IsNullable = true,
+                    IsComputed = true,
+                }
+            )
+            .Should()
+            .Contain("fail on its NOT NULL constraint");
+    }
 }

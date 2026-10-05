@@ -157,4 +157,31 @@ public class SchemaSignatureTests
 
         Sign(withoutOrder).Should().Be(Sign(withOrder));
     }
+
+    /// <summary>計算列の指定だけが違うと署名が変わることを検証する</summary>
+    /// <remarks>
+    /// 計算列は生成コードの INSERT / UPDATE を変える。署名に入っていないと、取込でこれだけが変わっても
+    /// 「構造が同じ」とみなされ、置き換えの確認が省かれていた
+    /// </remarks>
+    [Fact(DisplayName = "Compute: 計算列の指定だけが違えば署名が変わる")]
+    public void Compute_ComputedFlag_ChangesSignature()
+    {
+        var plain = BuildEntity();
+        var computed = BuildEntity();
+        computed.Columns[0].IsComputed = true;
+
+        Sign(computed).Should().NotBe(Sign(plain));
+    }
+
+    /// <summary>外部キー印だけが違うと署名が変わることを検証する</summary>
+    /// <remarks>手で付けた外部キー印は、取込の結果に無ければ置き換えで黙って消えるため</remarks>
+    [Fact(DisplayName = "Compute: 外部キー印だけが違えば署名が変わる")]
+    public void Compute_ForeignKeyMarker_ChangesSignature()
+    {
+        var plain = BuildEntity();
+        var marked = BuildEntity();
+        marked.Columns[0].IsForeignKey = true;
+
+        Sign(marked).Should().NotBe(Sign(plain));
+    }
 }

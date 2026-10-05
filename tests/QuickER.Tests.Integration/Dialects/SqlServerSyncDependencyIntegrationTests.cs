@@ -65,6 +65,58 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
     }
 
     /// <summary>
+    /// 同じテーブルの組に名前の無いリレーションが 2 本ある図で、DDL が適用でき、適用後の差分に外部キーが出ないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 既定名だけでは 2 本が同じ名前 <c>FK_{子}_{親}</c> になり、DDL の 2 本目が名前の重複で失敗していた。
+    /// 2 本目は子の列名を足した名前になり、差分も同じ規則で名前を求めるので、何も変えていなければ外部キーの差分は出ない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 名前の無い同じ組の外部キー 2 本の図は DDL が通り、適用後に外部キーの差分を出さない"
+    )]
+    public async Task UnnamedSamePairRelationships_DdlAppliesAndProducesNoDiff()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var diagram = BuildParentChildDiagram(constraintName: null);
+        var parent = diagram.Entities[0];
+        var child = diagram.Entities[1];
+        var backup = new Column
+        {
+            Name = "backup_parent_id",
+            DataType = "int",
+            IsNullable = true,
+        };
+        child.Columns.Add(backup);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ColumnPairs = [new(parent.Columns[0].Id, backup.Id)],
+            }
+        );
+
+        await fixture.ApplyDdlAsync(diagram, Ct);
+
+        var live = await ImportAsync();
+        live.Relationships.Select(r => r.ConstraintName)
+            .Should()
+            .BeEquivalentTo("FK_sd_child_sd_parent", "FK_sd_child_sd_parent_backup_parent_id");
+
+        var diff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            diagram.Entities,
+            diagram.Relationships,
+            _provider.SyncCapabilities
+        );
+
+        diff.Items.Should().NotContain(i => IsForeignKeyDiff(i));
+    }
+
+    /// <summary>
     /// 参照アクションだけを変えた外部キーは 1 つの外部キー変更になり、既定の選択（未選択）のまま実行しても失敗せず、
     /// 選んで実行すると新しい参照アクションで作り直されることを検証する。
     /// </summary>

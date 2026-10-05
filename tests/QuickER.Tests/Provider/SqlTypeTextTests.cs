@@ -379,4 +379,23 @@ public class SqlTypeTextTests
                 },
             ],
         };
+
+    /// <summary>型の拒否の例外文に、テーブル名・列名の改行・制御文字がそのまま載らないことを検証する</summary>
+    /// <remarks>
+    /// 型の検証は名前の検証より先に走るため、改行を含む名前もこの例外文へ届く。型だけを畳んで名前を素のまま
+    /// 載せると、例外文を表示する側の行構造を壊す
+    /// </remarks>
+    [Fact(DisplayName = "安全でない型の例外文は、テーブル名・列名の改行も空白へ畳む")]
+    public void Validate_UnsafeType_SanitizesNamesInMessage()
+    {
+        var diagram = BuildDiagram("int; DROP TABLE users");
+        diagram.Entities[0].TableName = "ord\ners";
+        diagram.Entities[0].Columns[1].Name = "me\r\nmo";
+
+        var act = () => SqlTypeText.Validate(diagram);
+
+        var message = act.Should().Throw<InvalidOperationException>().Which.Message;
+        message.Should().NotContain("\n").And.NotContain("\r");
+        message.Should().Contain("ord ers.me  mo");
+    }
 }

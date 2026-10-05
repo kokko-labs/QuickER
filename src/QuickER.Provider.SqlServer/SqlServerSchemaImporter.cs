@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Data;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,31 +34,12 @@ public class SqlServerSchemaImporter : ISchemaImporter
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var result = await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
+        return await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
             .ConfigureAwait(false);
-        return new SchemaImportResult
-        {
-            Entities = result.Entities,
-            Relationships = result.Relationships,
-            Warnings = result.Warnings,
-        };
-    }
-
-    /// <summary>取得したスキーマを格納する結果 DTO</summary>
-    public sealed class SchemaResult
-    {
-        /// <summary>取得したエンティティ一覧</summary>
-        public List<Entity> Entities { get; init; } = new();
-
-        /// <summary>取得したリレーション一覧</summary>
-        public List<Relationship> Relationships { get; init; } = new();
-
-        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
-        public List<SchemaImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>指定の接続設定で接続を開きスキーマを取得する</summary>
-    public async Task<SchemaResult> ImportAsync(
+    public async Task<SchemaImportResult> ImportAsync(
         SqlConnectionSettings settings,
         CancellationToken ct = default
     )
@@ -78,7 +58,7 @@ public class SqlServerSchemaImporter : ISchemaImporter
     /// カタログ照会 1 本ごとの実行タイムアウト（秒）。既定値付きで <paramref name="ct"/> の後ろに置くのは、
     /// 既存の位置指定呼び出し（統合テストの <c>ImportAsync(conn, ct)</c>）を壊さないため。
     /// </param>
-    public async Task<SchemaResult> ImportAsync(
+    public async Task<SchemaImportResult> ImportAsync(
         SqlConnection conn,
         CancellationToken ct = default,
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
@@ -108,7 +88,7 @@ public class SqlServerSchemaImporter : ISchemaImporter
             )
         );
 
-        return new SchemaResult
+        return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
@@ -370,25 +350,6 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         }
     }
 
-    /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
-    /// <remarks>
-    /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
-    /// 列・主キー・説明・一意制約・外部キーが、採用したほうのエンティティへ吸い寄せられて混ざる。
-    /// カタログビューが返す名前はどのクエリでも同じ実体名なので、ここで序数一致まで求めても
-    /// 正当な行を取りこぼすことはない。
-    /// </remarks>
-    private static bool TryGetExactTable(
-        Dictionary<string, SchemaTableEntry> tables,
-        string schema,
-        string name,
-        [NotNullWhen(true)] out SchemaTableEntry? entry
-    )
-    {
-        var key = TableKey(schema, name);
-        return tables.TryGetValue(key, out entry)
-            && string.Equals(entry.Key, key, StringComparison.Ordinal);
-    }
-
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         SqlConnection conn,
@@ -406,7 +367,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
 
-            if (!TryGetExactTable(tables, schema, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, TableKey(schema, table), out var entry))
             {
                 continue;
             }
@@ -488,7 +449,13 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (!TryGetExactTable(tables, reader.GetString(0), reader.GetString(1), out var entry))
+            if (
+                !SchemaTableEntry.TryGetExact(
+                    tables,
+                    TableKey(reader.GetString(0), reader.GetString(1)),
+                    out var entry
+                )
+            )
             {
                 continue;
             }
@@ -520,7 +487,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
 
-            if (!TryGetExactTable(tables, schema, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, TableKey(schema, table), out var entry))
             {
                 continue;
             }
@@ -579,8 +546,8 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
             // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
             if (
-                !TryGetExactTable(tables, parentSchema, parentTable, out _)
-                || !TryGetExactTable(tables, refSchema, refTable, out _)
+                !SchemaTableEntry.TryGetExact(tables, TableKey(parentSchema, parentTable), out _)
+                || !SchemaTableEntry.TryGetExact(tables, TableKey(refSchema, refTable), out _)
             )
             {
                 continue;
@@ -622,7 +589,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var table = reader.GetString(2);
 
             // 衝突して捨てたテーブルの FK を、採用したほうへ付け替えない
-            if (!TryGetExactTable(tables, schema, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, TableKey(schema, table), out var entry))
             {
                 continue;
             }
@@ -657,7 +624,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 var table = reader.GetString(1);
 
                 // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
-                if (!TryGetExactTable(tables, schema, table, out _))
+                if (!SchemaTableEntry.TryGetExact(tables, TableKey(schema, table), out _))
                 {
                     continue;
                 }

@@ -108,7 +108,13 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// <summary>FK 操作で参照される子(FK 保有) エンティティ。</summary>
     public Entity? ChildEntity { get; init; }
 
-    /// <summary>削除する FK 制約の名前 (DropForeignKey のみ)。</summary>
+    /// <summary>FK 制約の名前</summary>
+    /// <remarks>
+    /// DropForeignKey では外す名前（DB の名前。<c>null</c> なら方言がカタログから引く）。
+    /// AddForeignKey / AlterForeignKey では付ける名前で、差分が DDL と同じ規則
+    /// （<see cref="ConstraintNames.ResolveForeignKeyNames"/>）で求めたもの。<c>null</c> の項目は
+    /// リレーションの名前か既定名で付ける（<see cref="SyncScriptBuilderHelper.ForeignKeyNameToAdd"/>）。
+    /// </remarks>
     public string? ForeignKeyName { get; init; }
 
     /// <summary>

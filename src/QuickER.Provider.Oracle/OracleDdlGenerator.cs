@@ -26,9 +26,6 @@ public sealed class OracleDdlGenerator : DdlGeneratorBase
     protected override string QuoteSimpleName(string name) => OracleIdentifier.QuoteSimple(name);
 
     /// <inheritdoc />
-    protected override string SafeName(string name) => OracleIdentifier.SafeName(name);
-
-    /// <inheritdoc />
     protected override string QuoteConstraintName(string constraintName) =>
         $"\"{OracleIdentifier.Escape(constraintName)}\"";
 

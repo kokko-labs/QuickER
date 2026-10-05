@@ -36,9 +36,6 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     protected override string QuoteSimpleName(string name) => SqliteIdentifier.QuoteSimple(name);
 
     /// <inheritdoc />
-    protected override string SafeName(string name) => SqliteIdentifier.SafeName(name);
-
-    /// <inheritdoc />
     protected override string QuoteConstraintName(string constraintName) =>
         $"\"{SqliteIdentifier.Escape(constraintName)}\"";
 
@@ -129,7 +126,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         }
 
         // UNIQUE 制約は PK 行と FK 行の間に出力する（他方言の並びと揃える）
-        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, SqliteIdentifier.SafeName))
+        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity))
         {
             trailingConstraints.Add(BuildUniqueConstraintLine(unique.Name, unique.ColumnNames));
         }
@@ -287,6 +284,12 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     {
         var index = new Dictionary<Guid, List<ResolvedForeignKey>>();
 
+        // 外部キー名は同期の差分・スクリプトと同じ規則で求める（名前の無い同じ組の 2 本目は一意化される）
+        var foreignKeyNames = ConstraintNames.ResolveForeignKeyNames(
+            diagram.Entities,
+            diagram.Relationships
+        );
+
         foreach (var rel in diagram.Relationships)
         {
             // 多対多はコメント出力のみ（FK 制約は張らない）
@@ -313,12 +316,8 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
                 continue;
             }
 
-            // 制約名はモデルの値を優先し、未設定なら FK_子_親 の命名規則で生成する
-            var constraintName = ConstraintNames.EffectiveForeignKey(
-                rel.ConstraintName,
-                fkEntity.TableName,
-                pkEntity.TableName
-            );
+            // 親子を引けたリレーションは必ず名前を持つ（モデルの名前、無ければ既定名か一意化した名前）
+            var constraintName = foreignKeyNames[rel];
 
             if (!index.TryGetValue(fkEntity.Id, out var list))
             {

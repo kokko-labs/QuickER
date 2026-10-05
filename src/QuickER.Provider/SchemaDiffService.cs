@@ -52,19 +52,17 @@ public class SchemaDiffService
         // 型表記の正規化と参照アクションの畳み込み（capabilities が無ければ恒等＝従来どおり素の比較）
         var dialect = capabilities ?? new SyncDialectCapabilities();
 
-        var liveByName = liveEntities.ToDictionary(
-            NormalizeTable,
-            StringComparer.OrdinalIgnoreCase
-        );
-        var targetByName = targetEntities.ToDictionary(
-            NormalizeTable,
-            StringComparer.OrdinalIgnoreCase
-        );
+        // テーブルの組（規則は NameLookup＝序数一致を優先し、大文字小文字だけ違う名前は双方で一意なときだけ組む。
+        // 曖昧な名前は組まず、図側は追加・DB 側は削除の候補になる）
+        var livePartnerOf = MatchTables(targetEntities, liveEntities);
+        var matchedLive = livePartnerOf.Values.ToHashSet();
 
         // ---------- テーブル/カラムの差分 ----------
-        foreach (var (name, target) in targetByName)
+        foreach (var target in targetEntities)
         {
-            if (!liveByName.TryGetValue(name, out var live))
+            var name = NormalizeTable(target);
+
+            if (!livePartnerOf.TryGetValue(target, out var live))
             {
                 // DB に存在しないテーブルは新規作成として扱う
                 diff.Items.Add(
@@ -134,12 +132,9 @@ public class SchemaDiffService
                 continue;
             }
 
-            // 既存テーブル: カラム差分
-            var liveCols = live.Columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
-            var targetCols = target.Columns.ToDictionary(
-                c => c.Name,
-                StringComparer.OrdinalIgnoreCase
-            );
+            // 既存テーブル: カラム差分（列の組もテーブルと同じ規則）
+            var liveColumnOf = MatchColumns(target, live);
+            var matchedLiveColumns = liveColumnOf.Values.ToHashSet();
 
             // テーブル説明の差分
             var targetTableDesc = target.Description ?? string.Empty;
@@ -169,9 +164,11 @@ public class SchemaDiffService
                 );
             }
 
-            foreach (var (cname, tcol) in targetCols)
+            foreach (var tcol in target.Columns)
             {
-                if (!liveCols.TryGetValue(cname, out var lcol))
+                var cname = tcol.Name;
+
+                if (!liveColumnOf.TryGetValue(tcol, out var lcol))
                 {
                     diff.Items.Add(
                         new SchemaDiffItem
@@ -328,9 +325,11 @@ public class SchemaDiffService
             // 名前を比較に含めると恒常的な Drop＋Add の誤検出になる。
             AppendUniqueConstraintDiffs(diff, name, live, target);
 
-            foreach (var (cname, lcol) in liveCols)
+            foreach (var lcol in live.Columns)
             {
-                if (!targetCols.ContainsKey(cname))
+                var cname = lcol.Name;
+
+                if (!matchedLiveColumns.Contains(lcol))
                 {
                     diff.Items.Add(
                         new SchemaDiffItem
@@ -353,9 +352,11 @@ public class SchemaDiffService
             }
         }
 
-        foreach (var (name, live) in liveByName)
+        foreach (var live in liveEntities)
         {
-            if (!targetByName.ContainsKey(name))
+            var name = NormalizeTable(live);
+
+            if (!matchedLive.Contains(live))
             {
                 diff.Items.Add(
                     new SchemaDiffItem
@@ -375,53 +376,54 @@ public class SchemaDiffService
         // 追加候補・削除候補はいったん集め、同じ外部キーの作り直しにあたる組を 1 項目へ畳んでから差分へ並べる
         var fkAdds = new List<SchemaDiffItem>();
         var fkDrops = new List<SchemaDiffItem>();
-        var liveFkPairs = liveRelationships
-            .Where(r => r.Type != RelationshipType.ManyToMany)
-            .Select(r => MakeForeignKeySignature(r, liveEntities, includeFkConstraintName, dialect))
-            .Where(p => p is not null)
-            .Select(p => p!)
-            .ToHashSet();
 
-        foreach (var rel in targetRelationships)
+        // 外部キー名は DDL・同期スクリプトが付けるのと同じ規則で求める（名前の無い同じ組の 2 本目は一意化される）
+        var liveFkNames = ConstraintNames.ResolveForeignKeyNames(liveEntities, liveRelationships);
+        var targetFkNames = ConstraintNames.ResolveForeignKeyNames(
+            targetEntities,
+            targetRelationships
+        );
+        // 外部キーとして扱えるリレーションを両側で 1 回ずつ解決し、シグネチャも 1 回ずつ求める
+        var liveFks = ForeignKeyColumnPairResolver
+            .ResolveAll(liveRelationships, liveEntities)
+            .Select(fk =>
+                (
+                    Fk: fk,
+                    Signature: ForeignKeySignature(
+                        fk,
+                        liveFkNames,
+                        includeFkConstraintName,
+                        dialect
+                    )
+                )
+            )
+            .ToList();
+        var targetFks = ForeignKeyColumnPairResolver
+            .ResolveAll(targetRelationships, targetEntities)
+            .Select(fk =>
+                (
+                    Fk: fk,
+                    Signature: ForeignKeySignature(
+                        fk,
+                        targetFkNames,
+                        includeFkConstraintName,
+                        dialect
+                    )
+                )
+            )
+            .ToList();
+        var liveFkSignatures = liveFks.Select(fk => fk.Signature).ToHashSet();
+        var targetFkSignatures = targetFks.Select(fk => fk.Signature).ToHashSet();
+
+        // 図にあるが DB に無い外部キーは追加候補
+        foreach (var (fk, signature) in targetFks)
         {
-            if (rel.Type == RelationshipType.ManyToMany)
+            if (liveFkSignatures.Contains(signature))
             {
                 continue;
             }
 
-            var signature = MakeForeignKeySignature(
-                rel,
-                targetEntities,
-                includeFkConstraintName,
-                dialect
-            );
-
-            if (signature is null)
-            {
-                continue;
-            }
-
-            if (liveFkPairs.Contains(signature))
-            {
-                continue;
-            }
-
-            var parent = targetEntities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
-            var child = targetEntities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
-
-            if (parent is null || child is null)
-            {
-                continue;
-            }
-
-            // 列ペアが正本（推測フォールバックなし）。解決できない外部キーはシグネチャ生成の時点で落ちている
-            var columnPairs = ForeignKeyColumnPairResolver.Resolve(rel, parent, child);
-
-            if (columnPairs is null)
-            {
-                continue;
-            }
-
+            var (rel, parent, child, columnPairs) = fk;
             fkAdds.Add(
                 new SchemaDiffItem
                 {
@@ -433,6 +435,8 @@ public class SchemaDiffService
                     ParentEntity = parent,
                     ChildEntity = child,
                     Relationship = rel,
+                    // 同期スクリプトは DDL と同じ名前で付ける（名前の無い同じ組の 2 本目は一意化した名前）
+                    ForeignKeyName = targetFkNames[rel],
                     ForeignKeyColumnPairs = columnPairs,
                     Description = string.Format(
                         Strings.Diff_AddForeignKey,
@@ -447,54 +451,14 @@ public class SchemaDiffService
 
         // DB にあるが ER 図にない FK は削除候補とする（同じシグネチャの外部キーが図に無いもの。
         // 名前を保存する方言では名前もシグネチャに入るため、名前だけ変えた外部キーも削除＋追加になる）
-        var targetFkPairs = targetRelationships
-            .Where(r => r.Type != RelationshipType.ManyToMany)
-            .Select(r =>
-                MakeForeignKeySignature(r, targetEntities, includeFkConstraintName, dialect)
-            )
-            .Where(p => p is not null)
-            .Select(p => p!)
-            .ToHashSet();
-
-        foreach (var rel in liveRelationships)
+        foreach (var (fk, signature) in liveFks)
         {
-            if (rel.Type == RelationshipType.ManyToMany)
+            if (targetFkSignatures.Contains(signature))
             {
                 continue;
             }
 
-            var signature = MakeForeignKeySignature(
-                rel,
-                liveEntities,
-                includeFkConstraintName,
-                dialect
-            );
-
-            if (signature is null)
-            {
-                continue;
-            }
-
-            if (targetFkPairs.Contains(signature))
-            {
-                continue;
-            }
-
-            var parent = liveEntities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
-            var child = liveEntities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
-
-            if (parent is null || child is null)
-            {
-                continue;
-            }
-
-            var columnPairs = ForeignKeyColumnPairResolver.Resolve(rel, parent, child);
-
-            if (columnPairs is null)
-            {
-                continue;
-            }
-
+            var (rel, parent, child, columnPairs) = fk;
             fkDrops.Add(
                 new SchemaDiffItem
                 {
@@ -525,13 +489,14 @@ public class SchemaDiffService
         // 非対応方言（ColumnReorder=None）では幻の差分を出さない（案内表示は UI 側が担う）。
         if (capabilities is not null && capabilities.ColumnReorder != ColumnReorderMode.None)
         {
-            foreach (var tableName in DetectColumnOrderChanges(liveEntities, targetEntities))
+            foreach (var (target, live) in livePartnerOf)
             {
-                if (!targetByName.TryGetValue(tableName, out var target))
+                if (!HasColumnOrderChanged(live, target))
                 {
                     continue;
                 }
 
+                var tableName = NormalizeTable(target);
                 diff.Items.Add(
                     new SchemaDiffItem
                     {
@@ -668,29 +633,28 @@ public class SchemaDiffService
         IReadOnlyList<Entity> targetEntities
     )
     {
-        var changed = new List<string>();
-        var liveByName = liveEntities.ToDictionary(
-            NormalizeTable,
-            StringComparer.OrdinalIgnoreCase
-        );
+        var livePartnerOf = MatchTables(targetEntities, liveEntities);
 
-        foreach (var target in targetEntities)
-        {
-            var name = NormalizeTable(target);
-
-            if (!liveByName.TryGetValue(name, out var live))
-            {
-                continue;
-            }
-
-            if (HasColumnOrderChanged(live, target))
-            {
-                changed.Add(name);
-            }
-        }
-
-        return changed;
+        return livePartnerOf
+            .Where(pair => HasColumnOrderChanged(pair.Value, pair.Key))
+            .Select(pair => NormalizeTable(pair.Key))
+            .ToList();
     }
+
+    /// <summary>図側のテーブル → 組になる DB 側のテーブル（<see cref="NameLookup{T}"/> の規則・図側の並び順）</summary>
+    private static Dictionary<Entity, Entity> MatchTables(
+        IReadOnlyList<Entity> targetEntities,
+        IReadOnlyList<Entity> liveEntities
+    ) =>
+        NameMatching
+            .Match(targetEntities, liveEntities, NormalizeTable, NormalizeTable)
+            .ToDictionary(pair => pair.Left, pair => pair.Right);
+
+    /// <summary>図側の列 → 組になる DB 側の列（<see cref="NameLookup{T}"/> の規則）</summary>
+    private static Dictionary<Column, Column> MatchColumns(Entity target, Entity live) =>
+        NameMatching
+            .Match(target.Columns, live.Columns, column => column.Name, column => column.Name)
+            .ToDictionary(pair => pair.Left, pair => pair.Right);
 
     /// <summary>テーブル名を比較用に正規化する（前後空白を除去する）</summary>
     public static string NormalizeTable(Entity e)
@@ -699,12 +663,14 @@ public class SchemaDiffService
     }
 
     /// <summary>外部キーの同一性比較に使うシグネチャ（親子・構成列ペア・制約名・参照アクション）を生成する</summary>
+    /// <param name="fk">親子・列ペアまで解決済みの外部キー</param>
+    /// <param name="foreignKeyNames">同じ側の図の外部キー名（<see cref="ConstraintNames.ResolveForeignKeyNames"/>）</param>
     /// <param name="includeConstraintName">
     /// 制約名を比較キーへ含めるか。<c>false</c>（SQLite）のときは制約名を空にして名前差を無視する。
     /// </param>
     /// <returns>
-    /// 親子エンティティまたは構成列を解決できない場合は null。複合外部キーは列ペアを宣言順に並べて畳むため、
-    /// 構成列の順序が違う外部キーは別物として扱われる（DDL の意味が異なるため）
+    /// 複合外部キーは列ペアを宣言順に並べて畳むため、構成列の順序が違う外部キーは別物として扱われる
+    /// （DDL の意味が異なるため）
     /// </returns>
     /// <param name="dialect">
     /// 参照アクションを方言の実効値へ畳むためのケーパビリティ（Oracle は <c>ON UPDATE</c> と
@@ -713,57 +679,39 @@ public class SchemaDiffService
     /// <remarks>
     /// 列ペアが可変長になったため、値タプルではなく文字列へ畳む（集合比較は <c>HashSet&lt;string&gt;</c>）。
     /// </remarks>
-    private static string? MakeForeignKeySignature(
-        Relationship rel,
-        IReadOnlyList<Entity> entities,
+    private static string ForeignKeySignature(
+        ResolvedForeignKeyRelationship fk,
+        IReadOnlyDictionary<Relationship, string> foreignKeyNames,
         bool includeConstraintName,
         SyncDialectCapabilities dialect
     )
     {
-        var parent = entities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
-        var child = entities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
-
-        if (parent is null || child is null)
-        {
-            return null;
-        }
-
-        var pairs = ForeignKeyColumnPairResolver.Resolve(rel, parent, child);
-
-        if (pairs is null)
-        {
-            return null;
-        }
-
         var pairSignature = string.Join(
             ",",
-            pairs.Select(p =>
+            fk.ColumnPairs.Select(p =>
                 $"{p.ParentColumn.ToLowerInvariant()}>{p.ChildColumn.ToLowerInvariant()}"
             )
         );
-        // 名前は DDL・同期スクリプトが付けるのと同じ実効名で比べる（名前の無いリレーションは既定名）。
-        // 素の名前で比べると、名前の無い図と、DDL が既定名で作った live の外部キーが別物に見える
+        // 名前は DDL・同期スクリプトが付けるのと同じ実効名で比べる（名前の無いリレーションは既定名、
+        // 同じ組の 2 本目は一意化した名前）。素の名前で比べると、名前の無い図と、DDL が既定名で作った
+        // live の外部キーが別物に見える
         var constraintName = includeConstraintName
-            ? ForeignKeyNameKey(rel, parent, child)
+            ? NameKey(foreignKeyNames[fk.Relationship])
             : string.Empty;
 
         return string.Join(
             "|",
-            NormalizeTable(parent).ToLowerInvariant(),
-            NormalizeTable(child).ToLowerInvariant(),
+            NormalizeTable(fk.Parent).ToLowerInvariant(),
+            NormalizeTable(fk.Child).ToLowerInvariant(),
             pairSignature,
             constraintName,
-            dialect.EffectiveOnDelete(rel.OnDelete).ToString(),
-            dialect.EffectiveOnUpdate(rel.OnUpdate).ToString()
+            dialect.EffectiveOnDelete(fk.Relationship.OnDelete).ToString(),
+            dialect.EffectiveOnUpdate(fk.Relationship.OnUpdate).ToString()
         );
     }
 
-    /// <summary>外部キーの実効名を照合用（前後空白を除き小文字化）に整える</summary>
-    private static string ForeignKeyNameKey(Relationship rel, Entity parent, Entity child) =>
-        ConstraintNames
-            .EffectiveForeignKey(rel.ConstraintName, NormalizeTable(child), NormalizeTable(parent))
-            .Trim()
-            .ToLowerInvariant();
+    /// <summary>外部キーの名前を照合用（前後空白を除き小文字化）に整える</summary>
+    private static string NameKey(string name) => name.Trim().ToLowerInvariant();
 
     /// <summary>
     /// 同じ外部キーの作り直しにあたる削除候補と追加候補を、1 つの <see cref="SchemaDiffKind.AlterForeignKey"/> へ畳む。
@@ -827,7 +775,14 @@ public class SchemaDiffService
 
         if (includeConstraintName)
         {
-            return $"{child}|{ForeignKeyNameKey(item.Relationship!, item.ParentEntity!, item.ChildEntity!)}";
+            // 追加候補は差分が求めた名前、削除候補は DB の名前（無ければ既定名）
+            var name = ConstraintNames.EffectiveForeignKey(
+                item.ForeignKeyName,
+                NormalizeTable(item.ChildEntity!),
+                NormalizeTable(item.ParentEntity!)
+            );
+
+            return $"{child}|{NameKey(name)}";
         }
 
         var parent = NormalizeTable(item.ParentEntity!).ToLowerInvariant();
@@ -916,6 +871,7 @@ public class SchemaDiffService
             ParentEntity = add.ParentEntity,
             ChildEntity = add.ChildEntity,
             Relationship = add.Relationship,
+            ForeignKeyName = add.ForeignKeyName,
             ForeignKeyColumnPairs = add.ForeignKeyColumnPairs,
             ReplacedForeignKey = drop,
             IsSelected = false,
@@ -962,17 +918,15 @@ public class SchemaDiffService
         columns.Count == 0 ? Strings.Diff_PrimaryKey_None : string.Join(", ", columns);
 
     /// <summary>共通列（双方に存在する列）の相対順序が変更されているかを判定する</summary>
+    /// <remarks>共通列は差分と同じ規則（<see cref="MatchColumns"/>）で組になった列</remarks>
     private static bool HasColumnOrderChanged(Entity live, Entity target)
     {
-        var liveNames = live.Columns.Select(c => c.Name).ToList();
-        var targetNames = target.Columns.Select(c => c.Name).ToList();
+        var liveColumnOf = MatchColumns(target, live);
 
-        var liveSet = new HashSet<string>(liveNames, StringComparer.OrdinalIgnoreCase);
-        var targetSet = new HashSet<string>(targetNames, StringComparer.OrdinalIgnoreCase);
-
-        // 追加・削除を除いた共通列を、それぞれの出現順で取り出す（両者は同一集合＝同数になる）
-        var liveCommon = liveNames.Where(targetSet.Contains).ToList();
-        var targetCommon = targetNames.Where(liveSet.Contains).ToList();
+        // 追加・削除を除いた共通列を、それぞれの出現順で取り出す（組なので同数になる）
+        var targetCommon = target.Columns.Where(liveColumnOf.ContainsKey).ToList();
+        var matchedLive = liveColumnOf.Values.ToHashSet();
+        var liveCommon = live.Columns.Where(matchedLive.Contains).ToList();
 
         // 共通列が 2 列未満なら相対順序の概念が無いため並び替えとは扱わない
         if (liveCommon.Count < 2)
@@ -983,7 +937,7 @@ public class SchemaDiffService
         // 共通列の相対順序が 1 か所でも異なれば列順変更とみなす
         for (var i = 0; i < liveCommon.Count; i++)
         {
-            if (!string.Equals(liveCommon[i], targetCommon[i], StringComparison.OrdinalIgnoreCase))
+            if (!ReferenceEquals(liveColumnOf[targetCommon[i]], liveCommon[i]))
             {
                 return true;
             }

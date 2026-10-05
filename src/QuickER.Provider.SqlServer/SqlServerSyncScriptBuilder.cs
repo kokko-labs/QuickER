@@ -43,8 +43,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
             e,
             item.TableName,
             SqlIdentifier.BracketSimple,
-            name => $"[{SqlIdentifier.Escape(name)}]",
-            SqlIdentifier.SafeName
+            name => $"[{SqlIdentifier.Escape(name)}]"
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -181,8 +180,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            SqlIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         var cols = string.Join(
             ", ",
@@ -201,8 +199,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            SqlIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         sb.AppendLine(
             $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
@@ -247,11 +244,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = ConstraintNames.EffectiveForeignKey(
-            item.Relationship?.ConstraintName,
-            childTbl,
-            parentTbl
-        );
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );

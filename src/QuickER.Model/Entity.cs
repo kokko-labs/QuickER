@@ -11,8 +11,25 @@ public class Entity
     /// <summary>エンティティの一意識別子（<see cref="Relationship"/> からの参照に使用する）</summary>
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    private string _tableName = "NewTable";
+
     /// <summary>物理テーブル名（例: <c>Customer</c>）</summary>
-    public string TableName { get; set; } = "NewTable";
+    /// <remarks>
+    /// <para>
+    /// 代入した名前の前後の空白は除く（読込・GUI・ツール・取込のどの経路でも、モデルに入った時点で同じ形にする）。
+    /// DB 同期はテーブル名を前後の空白を除いてから扱うため、空白つきの名前のままだと DDL とコード生成は
+    /// <c>"Orders "</c> を作り・参照し、同期は <c>"Orders"</c> を探す、という食い違いが起きる。
+    /// </para>
+    /// <para>
+    /// 列名・制約名は除かない。DDL と同期が同じ名前をそのまま使っており、食い違いが起きていたのはテーブル名だけのため。
+    /// <c>null</c> はそのまま通す（手で編集した JSON の <c>null</c> は、読込の必須名の検査が場所を名指しして断る）。
+    /// </para>
+    /// </remarks>
+    public string TableName
+    {
+        get => _tableName;
+        set => _tableName = value?.Trim()!;
+    }
 
     /// <summary>備考メモ（プロパティパネルから編集する）</summary>
     public string Memo { get; set; } = string.Empty;

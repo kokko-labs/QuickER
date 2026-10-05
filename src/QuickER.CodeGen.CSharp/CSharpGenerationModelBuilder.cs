@@ -43,8 +43,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         _columnTypes = columnTypes;
         _queryTokenTypes =
-            queryParameterTypes
-            ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.OrdinalIgnoreCase);
+            queryParameterTypes ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.Ordinal);
         _queriesByEntity = CollectValidQueries(diagram, diagnostics);
         _queryDtoNames.Clear();
 

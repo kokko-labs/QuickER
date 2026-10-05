@@ -13,8 +13,10 @@ namespace QuickER.Provider;
 /// これにより現在図のクエリ参照・レイアウトが取込後も温存できる。
 /// </para>
 /// <para>
-/// 照合は「名前が現在図・取込結果の双方で一意なもの」だけを対象にする（同名テーブル・同一テーブル内の
-/// 同名列が複数ある場合はその名前をマッチ対象から外す＝曖昧さ回避で新規扱い）。リネームは削除＋新規扱い。
+/// 照合の規則は <see cref="NameLookup{T}"/>：名前が序数一致で双方 1 件ならそれ、無ければ大文字小文字を無視して
+/// 双方 1 件ならそれ（MySQL の <c>lower_case_table_names=1</c> のように DB が小文字で返す名前でも引き継げる）。
+/// 曖昧な名前（同名・大文字小文字だけ違う名前が複数）は組まず新規扱い。リネームは削除＋新規扱い。
+/// 名前の表記は定義内容と同じく取込結果が正（図の <c>Orders</c> は <c>orders</c> になる）。
 /// 一致エンティティの Memo は <paramref name="preserveExistingMemo"/> が真のとき現在図の値を温存する
 /// （DB には対応物がないため。Excel 定義書は Memo を持つので取込値を正とする）。
 /// </para>
@@ -41,10 +43,6 @@ public static class DiagramMergeReconciler
         bool preserveExistingMemo
     )
     {
-        // 名前照合の索引（現在図・取込結果とも「一意な名前」だけをマッチ対象にする）
-        var currentByName = BuildUniqueNameIndex(current.Entities, entity => entity.TableName);
-        var importedByName = BuildUniqueNameIndex(importedEntities, entity => entity.TableName);
-
         // 取込結果 Id → 現在図 Id の対応表（エンティティ・列）と、Memo 温存用の現在図エンティティ参照
         var entityIdMap = new Dictionary<Guid, Guid>();
         var columnIdMap = new Dictionary<Guid, Guid>();
@@ -53,13 +51,16 @@ public static class DiagramMergeReconciler
         // 一致要素のうち、説明（および Memo 上書きが有効な経路では Memo）が取込値で実際に変わる件数
         var descriptionOverwriteCount = 0;
 
-        foreach (var (name, importedEntity) in importedByName)
-        {
-            if (!currentByName.TryGetValue(name, out var currentEntity))
-            {
-                continue;
-            }
+        // 名前照合（序数一致を優先し、無ければ大文字小文字を無視して双方で一意なものだけを組む）
+        var entityPairs = NameMatching.Match(
+            importedEntities,
+            current.Entities,
+            entity => entity.TableName,
+            entity => entity.TableName
+        );
 
+        foreach (var (importedEntity, currentEntity) in entityPairs)
+        {
             // エンティティ一致: 取込結果の Id を現在図の Guid へ寄せる
             entityIdMap[importedEntity.Id] = currentEntity.Id;
             matchedCurrentEntities[importedEntity.Id] = currentEntity;
@@ -70,33 +71,28 @@ public static class DiagramMergeReconciler
                 descriptionOverwriteCount++;
             }
 
-            // 列も同一エンティティ内で名前が双方一意のものだけ照合する
-            var currentColumnsByName = BuildUniqueNameIndex(
-                currentEntity.Columns,
-                column => column.Name
-            );
-            var importedColumnsByName = BuildUniqueNameIndex(
+            // 列も同一エンティティ内で同じ規則で照合する
+            var columnPairs = NameMatching.Match(
                 importedEntity.Columns,
+                currentEntity.Columns,
+                column => column.Name,
                 column => column.Name
             );
 
-            foreach (var (columnName, importedColumn) in importedColumnsByName)
+            foreach (var (importedColumn, currentColumn) in columnPairs)
             {
-                if (currentColumnsByName.TryGetValue(columnName, out var currentColumn))
-                {
-                    columnIdMap[importedColumn.Id] = currentColumn.Id;
+                columnIdMap[importedColumn.Id] = currentColumn.Id;
 
-                    // 列の説明も取込値が正のため、実際に変わるものを数える
-                    if (
-                        !string.Equals(
-                            currentColumn.Description,
-                            importedColumn.Description,
-                            StringComparison.Ordinal
-                        )
+                // 列の説明も取込値が正のため、実際に変わるものを数える
+                if (
+                    !string.Equals(
+                        currentColumn.Description,
+                        importedColumn.Description,
+                        StringComparison.Ordinal
                     )
-                    {
-                        descriptionOverwriteCount++;
-                    }
+                )
+                {
+                    descriptionOverwriteCount++;
                 }
             }
         }
@@ -151,6 +147,7 @@ public static class DiagramMergeReconciler
         {
             relationship.SourceEntityId = MapId(entityIdMap, relationship.SourceEntityId);
             relationship.TargetEntityId = MapId(entityIdMap, relationship.TargetEntityId);
+
             // 構成列ペアは両端の列 Id を対応表で置き換える（宣言順は保つ）
             foreach (var pair in relationship.ColumnPairs)
             {
@@ -197,34 +194,6 @@ public static class DiagramMergeReconciler
 
         return !preserveExistingMemo
             && !string.Equals(currentEntity.Memo, importedEntity.Memo, StringComparison.Ordinal);
-    }
-
-    /// <summary>名前が一意な要素だけを引ける索引を作る（重複した名前は曖昧さ回避のため除外する）</summary>
-    private static Dictionary<string, T> BuildUniqueNameIndex<T>(
-        IEnumerable<T> items,
-        Func<T, string> nameSelector
-    )
-    {
-        var firstByName = new Dictionary<string, T>(StringComparer.Ordinal);
-        var duplicatedNames = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var item in items)
-        {
-            var name = nameSelector(item);
-
-            if (!firstByName.TryAdd(name, item))
-            {
-                duplicatedNames.Add(name);
-            }
-        }
-
-        // 2 回以上出現した名前はマッチ対象から外す（現在図・取込結果いずれに複数あっても新規扱い）
-        foreach (var name in duplicatedNames)
-        {
-            firstByName.Remove(name);
-        }
-
-        return firstByName;
     }
 
     /// <summary>現在図のクエリを、マージ後のエンティティに対する Guid 参照解決の可否で生存/壊れへ分類する</summary>

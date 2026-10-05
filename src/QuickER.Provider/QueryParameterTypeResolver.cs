@@ -33,8 +33,11 @@ public static class QueryParameterTypeResolver
         ArgumentNullException.ThrowIfNull(typeMapper);
         ArgumentNullException.ThrowIfNull(typeCatalog);
 
-        // 参照される全トークンの収集（パラメータ・スカラー戻り値・射影の自由フィールド）
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 参照される全トークンの収集（パラメータ・スカラー戻り値・射影の自由フィールド）。
+        // 集合も結果の辞書も大文字小文字を区別する＝トークンの解析（CanonicalTypeToken.TryParse）が小文字しか
+        // 受けないのと規則を合わせる。区別しないと、解析できない String(50) が先に来たときに string(50) が
+        // 重複として捨てられ、正しいほうまで解決できなくなる（クエリの並び順で結果が変わる）
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var query in diagram.Queries)
         {
@@ -66,7 +69,7 @@ public static class QueryParameterTypeResolver
 
         if (tokens.Count == 0)
         {
-            return new Dictionary<string, CSharpTypeInfo>(StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, CSharpTypeInfo>(StringComparer.Ordinal);
         }
 
         // トークン → ネイティブ型の合成列を作り、列型解決と同一経路（ResolveColumnTypes）で C# 型へ写す
@@ -90,7 +93,7 @@ public static class QueryParameterTypeResolver
 
         var syntheticDiagram = new ErDiagram { Entities = { syntheticEntity } };
         var resolved = typeMapper.ResolveColumnTypes(syntheticDiagram);
-        var result = new Dictionary<string, CSharpTypeInfo>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, CSharpTypeInfo>(StringComparer.Ordinal);
 
         foreach (var (columnId, token) in columnIdByToken)
         {

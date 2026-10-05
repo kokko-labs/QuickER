@@ -239,6 +239,7 @@ public sealed class SyncPlanner
                     ParentEntity = item.ParentEntity,
                     ChildEntity = item.ChildEntity,
                     Relationship = item.Relationship,
+                    ForeignKeyName = item.ForeignKeyName,
                     ForeignKeyColumnPairs = item.ForeignKeyColumnPairs,
                     Description = item.Description,
                 }
@@ -493,6 +494,7 @@ public sealed class SyncPlanner
                     ParentEntity = fk.Parent,
                     ChildEntity = fk.Child,
                     Relationship = fk.Relationship,
+                    ForeignKeyName = constraintName,
                     ForeignKeyColumnPairs = fk.ColumnPairs,
                     Description = description,
                 }
@@ -511,12 +513,7 @@ public sealed class SyncPlanner
 
     /// <summary>live の外部キーを外す暗黙の DropForeignKey 項目を作る（差分計算の FK 差分と同じフィールド規則）</summary>
     private static SchemaDiffItem BuildImplicitForeignKeyDrop(
-        (
-            Relationship Relationship,
-            Entity Parent,
-            Entity Child,
-            IReadOnlyList<ForeignKeyColumnNamePair> ColumnPairs
-        ) fk,
+        ResolvedForeignKeyRelationship fk,
         string childTable,
         string description
     ) =>
@@ -562,12 +559,7 @@ public sealed class SyncPlanner
     /// 変更しない側は live の型で比べる。
     /// </remarks>
     private static bool HasPostSyncTypeMismatch(
-        (
-            Relationship Relationship,
-            Entity Parent,
-            Entity Child,
-            IReadOnlyList<ForeignKeyColumnNamePair> ColumnPairs
-        ) fk,
+        ResolvedForeignKeyRelationship fk,
         string childTable,
         string parentTable,
         Dictionary<string, string> alteredColumnTypes,
@@ -1130,43 +1122,25 @@ public sealed class SyncPlanner
         string parentTable
     ) => ConstraintNames.EffectiveForeignKey(relationship?.ConstraintName, childTable, parentTable);
 
+    /// <summary>live のテーブルを名前で引く索引（規則は差分と同じ <see cref="NameLookup{T}"/>）</summary>
+    /// <remarks>
+    /// 序数一致の 1 件を優先し、無ければ大文字小文字を無視した一致が 1 件のときだけ引ける。
+    /// 2 件以上なら引けない＝並び順で片方を選ばない。引けないテーブルの項目は、再構築・列順変更の対象にせず
+    /// 既存の「live に無いテーブル」と同じ扱い（再構築はセクションへ残してレンダラーがスキップを明示・
+    /// 列順変更は計画に含めない）になる。
+    /// </remarks>
+    private static NameLookup<Entity> IndexLiveTables(SyncPlanContext context) =>
+        new(context.LiveEntities, SchemaDiffService.NormalizeTable);
+
     /// <summary>live のリレーションから、親子エンティティ・構成列ペアまで解決できた FK を列挙する</summary>
     /// <remarks>
-    /// 多対多や、親子・構成列が解決できないリレーションは FK として扱えないため除外する。
+    /// 多対多や、親子・構成列が解決できないリレーションは FK として扱えないため除外する
+    /// （規則は差分計算と共有の <see cref="ForeignKeyColumnPairResolver.ResolveAll"/>）。
     /// 複合外部キーは列ペアを宣言順に保持したまま列挙する。
     /// </remarks>
-    private static IEnumerable<(
-        Relationship Relationship,
-        Entity Parent,
-        Entity Child,
-        IReadOnlyList<ForeignKeyColumnNamePair> ColumnPairs
-    )> EnumerateLiveForeignKeys(SyncPlanContext context)
-    {
-        foreach (var rel in context.LiveRelationships)
-        {
-            if (rel.Type == RelationshipType.ManyToMany)
-            {
-                continue;
-            }
-
-            var parent = context.LiveEntities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
-            var child = context.LiveEntities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
-
-            if (parent is null || child is null)
-            {
-                continue;
-            }
-
-            var columnPairs = ForeignKeyColumnPairResolver.Resolve(rel, parent, child);
-
-            if (columnPairs is null)
-            {
-                continue;
-            }
-
-            yield return (rel, parent, child, columnPairs);
-        }
-    }
+    private static List<ResolvedForeignKeyRelationship> EnumerateLiveForeignKeys(
+        SyncPlanContext context
+    ) => ForeignKeyColumnPairResolver.ResolveAll(context.LiveRelationships, context.LiveEntities);
 
     /// <summary>
     /// rebuild 方言の実行計画を組み立てる。逐次 DDL で表現できない変更をテーブル単位の再構築へ集約し、
@@ -1185,12 +1159,7 @@ public sealed class SyncPlanner
             .ToHashSet(TableComparer);
 
         // live のテーブル索引（合成の土台）
-        var liveByName = new Dictionary<string, Entity>(TableComparer);
-
-        foreach (var live in context.LiveEntities)
-        {
-            liveByName.TryAdd(SchemaDiffService.NormalizeTable(live), live);
-        }
+        var liveByName = IndexLiveTables(context);
 
         // 既存テーブルの再構築対象（新規テーブルを子とする AddForeignKey は CreateOnly へ畳むため除外）。
         // live に実在するテーブルに限る——「新規テーブルの AddTable は未選択のまま、そのテーブルへの
@@ -1199,11 +1168,15 @@ public sealed class SyncPlanner
         var existingRebuildTables = selected
             .Where(i => IsRebuildTriggerKind(i.Kind) && !addedTables.Contains(i.TableName.Trim()))
             .Select(i => i.TableName.Trim())
-            .Where(liveByName.ContainsKey)
+            .Where(liveByName.Contains)
             .ToHashSet(TableComparer);
 
         // rebuild へ転用（畳み込み）が確定した項目の集合（SchemaDiffItem は参照同一性で比較する）
         var diverted = new HashSet<SchemaDiffItem>();
+
+        // live の外部キーは子表ごとに 1 回だけまとめる（作り直す表ごとに全外部キーを解決し直さない）
+        var liveForeignKeysByChild = EnumerateLiveForeignKeys(context)
+            .ToLookup(fk => SchemaDiffService.NormalizeTable(fk.Child), TableComparer);
 
         var rebuilds = new List<TableRebuildPlan>();
         rebuilds.AddRange(BuildCreateOnlyRebuilds(selected, addedTables, diverted));
@@ -1213,7 +1186,8 @@ public sealed class SyncPlanner
                 existingRebuildTables,
                 liveByName,
                 diverted,
-                context
+                context,
+                liveForeignKeysByChild
             )
         );
 
@@ -1340,14 +1314,19 @@ public sealed class SyncPlanner
     private static IEnumerable<TableRebuildPlan> BuildExistingTableRebuilds(
         List<SchemaDiffItem> selected,
         HashSet<string> existingRebuildTables,
-        Dictionary<string, Entity> liveByName,
+        NameLookup<Entity> liveByName,
         HashSet<SchemaDiffItem> diverted,
-        SyncPlanContext context
+        SyncPlanContext context,
+        ILookup<string, ResolvedForeignKeyRelationship> liveForeignKeysByChild
     )
     {
         foreach (var table in existingRebuildTables)
         {
-            var live = liveByName[table];
+            // existingRebuildTables は引ける名前だけに絞ってある
+            if (!liveByName.TryGet(table, out var live))
+            {
+                continue;
+            }
 
             // このテーブルに畳み込む項目（再構築トリガー種別＋列追加）を確定する
             var tableItems = selected
@@ -1376,7 +1355,7 @@ public sealed class SyncPlanner
             ApplySelectedUniqueConstraintChanges(newDef, tableItems);
 
             // FK 集合 = live の子側 FK − 選択済み DropForeignKey ＋ 選択済み AddForeignKey
-            var foreignKeys = SynthesizeForeignKeys(table, tableItems, context);
+            var foreignKeys = SynthesizeForeignKeys(tableItems, liveForeignKeysByChild[table]);
 
             // データ移送対象 = live と合成後の両方に存在する列（合成後の列順で並べる）
             var liveColumnNames = live.Columns.Select(c => c.Name).ToHashSet(TableComparer);
@@ -1628,12 +1607,7 @@ public sealed class SyncPlanner
             );
         }
 
-        var liveByName = new Dictionary<string, Entity>(TableComparer);
-
-        foreach (var live in context.LiveEntities)
-        {
-            liveByName.TryAdd(SchemaDiffService.NormalizeTable(live), live);
-        }
+        var liveByName = IndexLiveTables(context);
 
         var plans = new List<TableReorderPlan>();
 
@@ -1642,7 +1616,7 @@ public sealed class SyncPlanner
             var table = item.TableName.Trim();
 
             // live に無いテーブル（そのテーブル自体が同期対象外）・target 不明なら並べ替えられない
-            if (!liveByName.TryGetValue(table, out var live) || item.Entity is null)
+            if (!liveByName.TryGet(table, out var live) || item.Entity is null)
             {
                 continue;
             }
@@ -1850,13 +1824,14 @@ public sealed class SyncPlanner
     }
 
     /// <summary>再構築後に張る FK 集合を合成する（live 集合から Drop を除き Add を足す）</summary>
+    /// <param name="tableItems">この表へ畳み込む選択済みの項目</param>
+    /// <param name="liveForeignKeys">この表を子に持つ live の外部キー</param>
     private static List<TableRebuildForeignKey> SynthesizeForeignKeys(
-        string childTable,
         IReadOnlyList<SchemaDiffItem> tableItems,
-        SyncPlanContext context
+        IEnumerable<ResolvedForeignKeyRelationship> liveForeignKeys
     )
     {
-        var foreignKeys = ResolveLiveForeignKeys(childTable, context).ToList();
+        var foreignKeys = liveForeignKeys.Select(ToRebuildForeignKey).ToList();
 
         // 選択済み DropForeignKey に一致する live FK を除去する（親テーブル・構成列ペアのシグネチャで照合）
         foreach (var dropFk in tableItems.Where(i => i.Kind == SchemaDiffKind.DropForeignKey))
@@ -1896,34 +1871,23 @@ public sealed class SyncPlanner
         return foreignKeys;
     }
 
-    /// <summary>live のリレーションから、指定した子テーブルの FK 仕様を解決する</summary>
-    private static IEnumerable<TableRebuildForeignKey> ResolveLiveForeignKeys(
-        string childTable,
-        SyncPlanContext context
-    )
+    /// <summary>live の外部キーを、再構築の CREATE TABLE へ載せる FK 仕様へ変換する</summary>
+    private static TableRebuildForeignKey ToRebuildForeignKey(ResolvedForeignKeyRelationship fk)
     {
-        foreach (var fk in EnumerateLiveForeignKeys(context))
-        {
-            if (!TableComparer.Equals(SchemaDiffService.NormalizeTable(fk.Child), childTable))
-            {
-                continue;
-            }
+        var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
 
-            var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
-
-            yield return new TableRebuildForeignKey(
-                ResolveForeignKeyName(
-                    fk.Relationship,
-                    SchemaDiffService.NormalizeTable(fk.Child),
-                    parentTable
-                ),
-                [.. ForeignKeyColumnPairResolver.ChildColumns(fk.ColumnPairs)],
-                parentTable,
-                [.. ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)],
-                fk.Relationship.OnDelete,
-                fk.Relationship.OnUpdate
-            );
-        }
+        return new TableRebuildForeignKey(
+            ResolveForeignKeyName(
+                fk.Relationship,
+                SchemaDiffService.NormalizeTable(fk.Child),
+                parentTable
+            ),
+            [.. ForeignKeyColumnPairResolver.ChildColumns(fk.ColumnPairs)],
+            parentTable,
+            [.. ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)],
+            fk.Relationship.OnDelete,
+            fk.Relationship.OnUpdate
+        );
     }
 
     /// <summary>選択済み AddForeignKey 差分項目を解決済みの FK 仕様へ変換する（解決不能なら null）</summary>
@@ -1945,7 +1909,7 @@ public sealed class SyncPlanner
         var parentTable = SchemaDiffService.NormalizeTable(item.ParentEntity);
 
         return new TableRebuildForeignKey(
-            ResolveForeignKeyName(item.Relationship, childTable, parentTable),
+            SyncScriptBuilderHelper.ForeignKeyNameToAdd(item),
             [.. ForeignKeyColumnPairResolver.ChildColumns(columnPairs)],
             parentTable,
             [.. ForeignKeyColumnPairResolver.ParentColumns(columnPairs)],

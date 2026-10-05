@@ -125,8 +125,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             e,
             item.TableName,
             OracleIdentifier.QuoteSimple,
-            name => $"\"{OracleIdentifier.Escape(name)}\"",
-            OracleIdentifier.SafeName
+            name => $"\"{OracleIdentifier.Escape(name)}\""
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -284,8 +283,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            OracleIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         var cols = string.Join(
             ", ",
@@ -301,8 +299,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            OracleIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
             + $"DROP CONSTRAINT \"{OracleIdentifier.Escape(name)}\";";
@@ -340,11 +337,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = ConstraintNames.EffectiveForeignKey(
-            item.Relationship?.ConstraintName,
-            childTbl,
-            parentTbl
-        );
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
 
         var sb = new StringBuilder();
 
