@@ -477,8 +477,9 @@ WHERE "
     )
     {
         var builder = new ForeignKeyRelationshipBuilder();
-        // 取込範囲外を参照する FK は制約単位で 1 度だけ告げる（複合 FK は行が複数出るため）
-        var reportedOutOfScope = new HashSet<string>(StringComparer.Ordinal);
+        // 取込範囲外を参照する FK は制約単位で 1 度だけ告げる（複合 FK は行が複数出るため）。
+        // PostgreSQL の外部キー名は表ごとに一意なので、制約は (子表, 名前) で識別する
+        var reportedOutOfScope = new HashSet<(string Table, string Name)>();
 
         await using var cmd = DbCommands.Create(conn, ForeignKeysSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -499,9 +500,13 @@ WHERE "
             var refSchema = reader.GetString(8);
 
             // 参照先が public 以外＝図に親テーブルが無いのでリレーションを作れない。除外して告げる
+            // （取り込まなかった子表＝大文字小文字の衝突で捨てた表の外部キーは、図に載らないので名指ししない）
             if (!string.Equals(refSchema, "public", StringComparison.Ordinal))
             {
-                if (reportedOutOfScope.Add(fkName))
+                if (
+                    SchemaTableEntry.TryGetExact(tables, parentKey, out _)
+                    && reportedOutOfScope.Add((parentKey, fkName))
+                )
                 {
                     warnings.Add(
                         new SchemaImportWarning(

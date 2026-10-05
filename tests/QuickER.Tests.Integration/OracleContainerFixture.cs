@@ -27,9 +27,8 @@ namespace QuickER.Tests.Integration;
 /// </para>
 /// <para>
 /// ODP.NET（Oracle.ManagedDataAccess.Core）は 1 コマンドで複数文を実行できないため、
-/// <see cref="ExecuteAsync"/> は <see cref="OracleSchemaSyncExecutor"/> と同じ「/」行区切りの規約に加え、
-/// 「/」行が 1 つも無いスクリプト（<c>OracleDdlGenerator</c> の生出力等、<c>;</c> 終端の文が並ぶだけのもの）も
-/// 文単位に分割できるよう拡張したロジックで、1 文ずつ順次実行する。
+/// <see cref="ExecuteAsync"/> は <see cref="OracleSchemaSyncExecutor.SplitStatements"/>（SQL*Plus と同じ分割）で
+/// 文単位に分け、1 文ずつ順次実行する。
 /// </para>
 /// </remarks>
 public sealed class OracleContainerFixture : IAsyncLifetime
@@ -176,6 +175,40 @@ public sealed class OracleContainerFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>コンテナ内の SQL*Plus でスクリプトを流し、終了コードと出力を返す</summary>
+    /// <remarks>
+    /// 利用者が出力したスクリプトを手で流すときと同じ経路を確かめるためのもの。先頭に
+    /// <c>WHENEVER SQLERROR EXIT FAILURE</c> を置くので、どれか 1 文でも ORA エラーになれば終了コードが 0 でなくなる
+    /// （同じ文が 2 回実行されたときの ORA-00955 / ORA-01430 もここで表に出る）。置換変数の設定（<c>SET DEFINE</c>）は
+    /// 触らない＝利用者の既定のまま流す。
+    /// </remarks>
+    public async Task<(long ExitCode, string Output)> RunSqlPlusAsync(
+        string script,
+        CancellationToken ct = default
+    )
+    {
+        var container = _container!;
+        const string ScriptPath = "/tmp/quicker-sqlplus.sql";
+        var full =
+            "WHENEVER SQLERROR EXIT FAILURE\n" + script.Replace("\r\n", "\n") + "\nEXIT SUCCESS\n";
+        await container
+            .CopyAsync(System.Text.Encoding.UTF8.GetBytes(full), ScriptPath, ct: ct)
+            .ConfigureAwait(false);
+        var result = await container
+            .ExecAsync(
+                [
+                    "sqlplus",
+                    "-S",
+                    "-L",
+                    $"{Username}/{Password}@//localhost:1521/{ServiceName}",
+                    $"@{ScriptPath}",
+                ],
+                ct
+            )
+            .ConfigureAwait(false);
+        return (result.ExitCode ?? -1, result.Stdout + result.Stderr);
+    }
+
     /// <summary>コンテナの接続情報から共通接続設定 <see cref="DbConnectionSettings"/> を組み立てる</summary>
     /// <remarks>接続文字列ファクトリの実接続検証（D）で用いる</remarks>
     public DbConnectionSettings ToDbConnectionSettings()
@@ -207,158 +240,13 @@ public sealed class OracleContainerFixture : IAsyncLifetime
         return b.ConnectionString;
     }
 
-    /// <summary>
-    /// スクリプトを文単位に分割する。同期スクリプト（どの文の後ろにも「/」のみの行がある）は
-    /// <see cref="OracleSchemaSyncExecutor.SplitStatements"/> をそのまま呼ぶ。
-    /// <see cref="QuickER.Provider.Oracle.OracleDdlGenerator"/> の生出力のような <c>;</c> 終端のスクリプトは、
-    /// SQL*Plus と同じく「通常文は行末の <c>;</c>、PL/SQL ブロックは「/」のみの行」を文の区切りとして扱う。
-    /// </summary>
+    /// <summary>スクリプトを文単位に分割する（実行器 <see cref="OracleSchemaSyncExecutor.SplitStatements"/> と同じ分割）</summary>
     /// <remarks>
-    /// DDL も、改行や <c>&amp;</c> を含む説明を PL/SQL ブロックで出し、その後ろに「/」行を置く。
-    /// そのため「/」行があるだけでは同期スクリプトと判定できない。「/」行の直前がブロックの終わり（<c>END;</c>）で
-    /// ない箇所が 1 つでもあれば、通常文の後ろにも「/」を置く同期スクリプトの書き方とみなす。
+    /// 実行器は SQL*Plus と同じ規則（通常文は行末の <c>;</c>、PL/SQL ブロックは「/」のみの行）で分割するので、
+    /// 同期スクリプトも DDL の生出力も、テスト用のセットアップ SQL もこれ 1 つで分割できる。
     /// </remarks>
-    internal static List<string> SplitStatements(string script)
-    {
-        var normalized = script.Replace("\r\n", "\n");
-
-        // 「/」区切りは実行器そのものを呼ぶ（リテラル・コメント追跡まで含めて同一の分割になる）
-        return IsSlashSeparatedScript(normalized)
-            ? OracleSchemaSyncExecutor.SplitStatements(normalized)
-            : SplitBySemicolon(normalized);
-    }
-
-    /// <summary>通常文の後ろにも「/」行を置く書き方（同期スクリプト）かどうかを判定する</summary>
-    private static bool IsSlashSeparatedScript(string normalized)
-    {
-        string? previous = null;
-
-        foreach (var line in normalized.Split('\n'))
-        {
-            var trimmed = line.Trim();
-
-            if (trimmed.Length == 0)
-            {
-                continue;
-            }
-
-            if (trimmed == "/" && previous is not null && previous != "END;")
-            {
-                return true;
-            }
-
-            previous = trimmed;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// <c>;</c> 終端のスクリプトを SQL*Plus と同じ規則で文単位に分割する。
-    /// 通常文は行末の <c>;</c> で終わり、<c>DECLARE</c> / <c>BEGIN</c> で始まる PL/SQL ブロックは「/」のみの行で終わる。
-    /// 文の外にあるコメント専用行（<c>--</c> 始まり）・空行は除去する。
-    /// </summary>
-    private static List<string> SplitBySemicolon(string normalized)
-    {
-        var statements = new List<string>();
-        var current = new List<string>();
-        var inBlock = false;
-
-        foreach (var rawLine in normalized.Split('\n'))
-        {
-            var trimmed = rawLine.Trim();
-
-            // PL/SQL ブロックの中は「/」のみの行まで 1 文として溜める（行末の ; では区切らない）
-            if (inBlock)
-            {
-                if (trimmed == "/")
-                {
-                    AddIfMeaningful(statements, current);
-                    current.Clear();
-                    inBlock = false;
-                    continue;
-                }
-
-                current.Add(rawLine);
-                continue;
-            }
-
-            // コメント専用行・空行はスキップ（文の途中に混ざることは想定しない）
-            if (trimmed.Length == 0 || trimmed.StartsWith("--", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (current.Count == 0 && IsPlSqlBlock(trimmed))
-            {
-                inBlock = true;
-                current.Add(rawLine);
-                continue;
-            }
-
-            current.Add(rawLine);
-
-            if (trimmed.EndsWith(';'))
-            {
-                AddIfMeaningful(statements, current);
-                current.Clear();
-            }
-        }
-
-        AddIfMeaningful(statements, current);
-        return statements;
-    }
-
-    /// <summary>蓄積した行を 1 文として整形し、意味がある場合のみ追加する</summary>
-    private static void AddIfMeaningful(List<string> statements, List<string> lines)
-    {
-        var block = string.Join("\n", lines).Trim();
-
-        if (block.Length == 0)
-        {
-            return;
-        }
-
-        if (IsCommentOnly(block))
-        {
-            return;
-        }
-
-        if (IsPlSqlBlock(block))
-        {
-            statements.Add(block);
-        }
-        else
-        {
-            statements.Add(block.TrimEnd().TrimEnd(';').TrimEnd());
-        }
-    }
-
-    /// <summary>文が DECLARE / BEGIN で始まる PL/SQL 無名ブロックかどうかを判定する</summary>
-    private static bool IsPlSqlBlock(string block)
-    {
-        var head = block.TrimStart();
-        return head.StartsWith("DECLARE", StringComparison.OrdinalIgnoreCase)
-            || head.StartsWith("BEGIN", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>文がコメント行（-- 始まり）と空行のみで構成されているかどうかを判定する</summary>
-    private static bool IsCommentOnly(string block)
-    {
-        foreach (var line in block.Split('\n'))
-        {
-            var trimmed = line.Trim();
-
-            if (trimmed.Length == 0 || trimmed.StartsWith("--", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            return false;
-        }
-
-        return true;
-    }
+    internal static List<string> SplitStatements(string script) =>
+        OracleSchemaSyncExecutor.SplitStatements(script);
 }
 
 /// <summary>Oracle 統合テスト用のコレクション定義（コンテナをコレクション内で共有する）</summary>

@@ -72,14 +72,32 @@ public class MySqlTypeCatalogTests
         canonical.Kind.Should().Be(CanonicalTypeKind.Boolean);
     }
 
-    [Theory(DisplayName = "tinyint unsigned / tinyint（(1) 以外）は TinyInt として解析される")]
-    [InlineData("tinyint unsigned")]
-    [InlineData("tinyint")]
-    [InlineData("tinyint(4)")]
-    public void TryParse_TinyInt_ResolvesTinyInt(string nativeType)
+    /// <summary>
+    /// 整数型は符号の有無で値の範囲が変わるので、範囲を収められる正規型として解析されることを検証する
+    /// （正規型の TinyInt は 0〜255。符号なしは 1 段広い型、bigint unsigned は decimal(20,0)）。
+    /// </summary>
+    [Theory(DisplayName = "整数型は符号の有無に応じて範囲を収められる正規型として解析される")]
+    [InlineData("tinyint unsigned", CanonicalTypeKind.TinyInt, null)]
+    [InlineData("tinyint(4) unsigned zerofill", CanonicalTypeKind.TinyInt, null)]
+    [InlineData("tinyint", CanonicalTypeKind.SmallInt, null)]
+    [InlineData("tinyint(4)", CanonicalTypeKind.SmallInt, null)]
+    [InlineData("smallint", CanonicalTypeKind.SmallInt, null)]
+    [InlineData("smallint unsigned", CanonicalTypeKind.Int32, null)]
+    [InlineData("int", CanonicalTypeKind.Int32, null)]
+    [InlineData("int unsigned", CanonicalTypeKind.Int64, null)]
+    [InlineData("INT(10) UNSIGNED", CanonicalTypeKind.Int64, null)]
+    [InlineData("bigint", CanonicalTypeKind.Int64, null)]
+    [InlineData("bigint unsigned", CanonicalTypeKind.Decimal, 20)]
+    public void TryParse_Integer_UsesRangeOfSign(
+        string nativeType,
+        CanonicalTypeKind kind,
+        int? precision
+    )
     {
         Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
-        canonical.Kind.Should().Be(CanonicalTypeKind.TinyInt);
+        canonical.Kind.Should().Be(kind);
+        canonical.Precision.Should().Be(precision);
+        canonical.Scale.Should().Be(precision is null ? null : 0);
     }
 
     [Fact(DisplayName = "varchar(n) は String(n) として解析される")]
@@ -187,13 +205,6 @@ public class MySqlTypeCatalogTests
         ok.Should().BeTrue();
         canonical.Kind.Should().Be(CanonicalTypeKind.String);
         canonical.Length.Should().Be(100);
-    }
-
-    [Fact(DisplayName = "int unsigned は末尾修飾子を無視して Int32 として解析される")]
-    public void TryParse_IntUnsigned_ResolvesInt32()
-    {
-        Catalog.TryParse("int unsigned", out var canonical).Should().BeTrue();
-        canonical.Kind.Should().Be(CanonicalTypeKind.Int32);
     }
 
     [Theory(DisplayName = "変換不能な型は TryParse が false を返す")]

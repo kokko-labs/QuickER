@@ -150,6 +150,12 @@ ORDER BY name;";
     /// <see cref="SchemaImportWarningKind.VirtualTableExcluded"/> で名指しし、付属表は無言で除外する
     /// （付属表ごとの警告は本体の警告 1 件に代表させる）。
     /// </para>
+    /// <para>
+    /// SQLite が名前の大文字小文字を畳むのは ASCII だけなので、<c>Äpfel</c> と <c>äpfel</c> は別の表として共存できる。
+    /// テーブル辞書は 5 方言共通の大文字小文字非依存（Unicode 全体を畳む）なので、黙って上書きすると片方が消え、
+    /// 消えた側を参照する外部キーまで残った側へ結ばれる。他の 4 方言と同じく、後着（<c>name</c> の BINARY 昇順で後ろ）を
+    /// 取り込まず <see cref="SchemaImportWarningKind.TableNameCollision"/> で告げる。
+    /// </para>
     /// </remarks>
     private static async Task<(
         Dictionary<string, SchemaTableEntry> Tables,
@@ -163,7 +169,7 @@ ORDER BY name;";
 
         var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
         var createSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var withoutRowidByTable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var withoutRowidByTable = new Dictionary<string, bool>(StringComparer.Ordinal);
         var warnings = new List<SchemaImportWarning>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -196,6 +202,19 @@ ORDER BY name;";
                     // 付属表は本体の VirtualTableExcluded 警告 1 件が代表するため無言で除外する
                     continue;
                 }
+            }
+
+            if (dict.TryGetValue(name, out var existing))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.TableNameCollision,
+                        name,
+                        name,
+                        existing.Entity.TableName
+                    )
+                );
+                continue;
             }
 
             var entry = new SchemaTableEntry
@@ -232,7 +251,8 @@ ORDER BY name;";
         CancellationToken ct
     )
     {
-        var result = new Dictionary<string, SqliteTableListEntry>(StringComparer.OrdinalIgnoreCase);
+        // 名前は sqlite_master と同じ実体名で返る。大文字小文字だけ違う 2 つの表の種別を混ぜないよう序数で引く
+        var result = new Dictionary<string, SqliteTableListEntry>(StringComparer.Ordinal);
         await using var cmd = DbCommands.Create(conn, "PRAGMA table_list;", commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -565,9 +585,17 @@ ORDER BY name;";
                 var fkName = $"FK_{entry.Key}_{refTable}_{id}";
 
                 // 参照先テーブルが取込範囲に無い（実在しない／取り込めなかった）場合は
-                // リレーションにできないため、警告して除外する
-                if (!tables.ContainsKey(refTable))
+                // リレーションにできないため、警告して除外する（参照先は宣言どおりの綴りで返るので、
+                // SQLite と同じく ASCII だけ大文字小文字を無視して引く）
+                if (!TryGetTable(tables, refTable, out var refEntry))
                 {
+                    // 辞書の照合でだけ一致する＝大文字小文字の衝突で捨てた表への参照。捨てたことは
+                    // TableNameCollision が告げているので、他の方言と同じく黙ってリレーションにしない
+                    if (tables.ContainsKey(refTable))
+                    {
+                        continue;
+                    }
+
                     if (missingRefWarned.Add(id))
                     {
                         warnings.Add(
@@ -585,14 +613,14 @@ ORDER BY name;";
 
                 // 参照先列（to）が NULL の場合は親テーブルの主キーを参照する（SQLite の暗黙参照）。
                 // 暗黙参照の構成列は seq 順に主キーの実効順と対応するため、seq で引き当てる
-                var refCol = toCol ?? ResolvePrimaryKeyColumn(tables, refTable, seq);
+                var refCol = toCol ?? ResolvePrimaryKeyColumn(refEntry, seq);
 
                 if (refCol is null)
                 {
                     continue;
                 }
 
-                builder.Add(fkName, entry.Key, fromCol, refTable, refCol, onDelete, onUpdate);
+                builder.Add(fkName, entry.Key, fromCol, refEntry.Key, refCol, onDelete, onUpdate);
             }
         }
 
@@ -643,8 +671,8 @@ ORDER BY name;";
                 var tableName = reader.GetString(2);
                 var sql = reader.GetString(3);
 
-                // 取込対象テーブルに紐づくものだけを収集する（ビュー等に対する定義は対象外）
-                if (!tables.ContainsKey(tableName))
+                // 取込対象テーブルに紐づくものだけを収集する（ビュー等に対する定義・捨てた表の定義は対象外）
+                if (!TryGetTable(tables, tableName, out var tableEntry))
                 {
                     continue;
                 }
@@ -652,7 +680,7 @@ ORDER BY name;";
                 aux.Add(
                     new SchemaAuxiliaryObject
                     {
-                        TableName = tableName,
+                        TableName = tableEntry.Key,
                         Name = name,
                         Kind = string.Equals(type, "trigger", StringComparison.OrdinalIgnoreCase)
                             ? SchemaAuxiliaryObjectKind.Trigger
@@ -673,19 +701,45 @@ ORDER BY name;";
     /// （<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）の同じ位置の列を引き当てる。
     /// 範囲外（主キーの列数と FK の列数が食い違う不正なスキーマ）は解決不能として null を返す。
     /// </remarks>
-    private static string? ResolvePrimaryKeyColumn(
-        Dictionary<string, SchemaTableEntry> tables,
-        string tableName,
-        long seq
-    )
+    private static string? ResolvePrimaryKeyColumn(SchemaTableEntry entry, long seq)
     {
-        if (!tables.TryGetValue(tableName, out var entry))
-        {
-            return null;
-        }
-
         var pks = entry.Entity.GetPrimaryKeyColumnsInOrder();
 
         return seq >= 0 && seq < pks.Count ? pks[(int)seq].Name : null;
     }
+
+    /// <summary>取り込んだテーブルを、SQLite と同じ名前の照合（ASCII の大文字小文字だけを無視）で引く</summary>
+    /// <remarks>
+    /// <c>foreign_key_list</c> の参照先は <c>REFERENCES</c> に書かれた綴りのまま返る（<c>REFERENCES ORDERS</c> は表
+    /// <c>orders</c> を指す）ので、序数一致（<see cref="SchemaTableEntry.TryGetExact"/>）では正当な外部キーを落とす。
+    /// 一方で辞書の照合（Unicode 全体の大文字小文字を畳む）のままでは、衝突で捨てた <c>äpfel</c> への参照が
+    /// 残った <c>Äpfel</c> へ結ばれる。SQLite 自身の規則（ASCII だけ畳む）で一致したときだけ採る。
+    /// </remarks>
+    private static bool TryGetTable(
+        Dictionary<string, SchemaTableEntry> tables,
+        string name,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SchemaTableEntry? entry
+    ) => tables.TryGetValue(name, out entry) && SqliteNameEquals(entry.Key, name);
+
+    /// <summary>SQLite の識別子の照合（ASCII の英字だけ大文字小文字を同一視し、それ以外は序数で比べる）</summary>
+    private static bool SqliteNameEquals(string left, string right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < left.Length; i++)
+        {
+            if (AsciiLower(left[i]) != AsciiLower(right[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>ASCII の大文字だけを小文字にする</summary>
+    private static char AsciiLower(char c) => c is >= 'A' and <= 'Z' ? (char)(c + 32) : c;
 }

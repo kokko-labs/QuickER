@@ -600,4 +600,60 @@ CREATE TABLE mixed_pk (
         warnings[0].TableName.Should().Be("mixed_pk");
         warnings[0].Subject.Should().Be("b");
     }
+
+    /// <summary>
+    /// ASCII 以外の大文字小文字だけが違う同名テーブル（SQLite は ASCII しか畳まないので共存する）を、列を混ぜずに
+    /// 片方だけ取り込み、警告として報告することを検証する。捨てた表の外部キー・索引は図に載せず、
+    /// <c>REFERENCES</c> の綴りは SQLite と同じく ASCII だけ大文字小文字を無視して残った表へ結ぶ。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 大文字小文字だけ違う同名テーブルは列を混ぜず片方を捨てて報告する"
+    )]
+    public async Task Import_TableNamesDifferingOnlyInCase_KeepsOneAndWarns()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE ""Äpfel"" (id INTEGER PRIMARY KEY, upper_only TEXT);
+CREATE TABLE ""äpfel"" (id INTEGER PRIMARY KEY, lower_only TEXT);
+CREATE TABLE to_lower (id INTEGER PRIMARY KEY, p INTEGER REFERENCES ""äpfel"" (id));
+CREATE TABLE to_upper (id INTEGER PRIMARY KEY, p INTEGER REFERENCES ""ÄPFEL"" (id));
+CREATE INDEX ix_lower ON ""äpfel"" (lower_only);
+CREATE INDEX ix_upper ON ""Äpfel"" (upper_only);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        // name の BINARY 昇順で先に来る "Äpfel"（UTF-8 で C3 84 < C3 A4）を採り、後着の "äpfel" は捨てる
+        result
+            .Entities.Select(e => e.TableName)
+            .Should()
+            .BeEquivalentTo(["Äpfel", "to_lower", "to_upper"]);
+        result
+            .Entities.Single(e => e.TableName == "Äpfel")
+            .Columns.Select(c => c.Name)
+            .Should()
+            .Equal(["id", "upper_only"], "両テーブルの列が 1 エンティティへ混ざってはいけない");
+
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.TableNameCollision);
+        warning.Subject.Should().Be("äpfel");
+        warning.Detail.Should().Be("Äpfel");
+
+        // "ÄPFEL" は ASCII を畳むと "Äpfel" と同じ名前＝残った表への外部キー。"äpfel" への外部キーは結ばない
+        var relationship = result.Relationships.Should().ContainSingle().Subject;
+        var child = result.Entities.Single(e => e.Id == relationship.TargetEntityId);
+        var parent = result.Entities.Single(e => e.Id == relationship.SourceEntityId);
+        child.TableName.Should().Be("to_upper");
+        parent.TableName.Should().Be("Äpfel");
+
+        result
+            .AuxiliaryObjects.Select(a => (a.Name, a.TableName))
+            .Should()
+            .BeEquivalentTo([("ix_upper", "Äpfel")]);
+    }
 }

@@ -387,9 +387,13 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                 );
 
                 // 参照先が接続先 DB の外＝図に親テーブルが無いのでリレーションを作れない。除外して告げる
+                // （取り込まなかった子表＝大文字小文字の衝突で捨てた表の外部キーは、図に載らないので名指ししない）
                 if (Convert.ToInt32(reader.GetValue(9)) == 0)
                 {
-                    if (reportedOutOfScope.Add(fkName))
+                    if (
+                        SchemaTableEntry.TryGetExact(tables, parentKey, out _)
+                        && reportedOutOfScope.Add(fkName)
+                    )
                     {
                         var refSchema = reader.IsDBNull(8) ? "" : reader.GetString(8);
                         warnings.Add(

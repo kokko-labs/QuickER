@@ -169,6 +169,70 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
     }
 
     /// <summary>
+    /// 取り込まなかった表（大文字小文字の衝突で捨てた表）の、範囲外を参照する外部キーは報告しないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] A: 捨てた表の範囲外の外部キーは警告しない")]
+    public async Task Import_OutOfScopeForeignKeyOfDiscardedTable_IsNotReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await using (var probe = await fixture.OpenConnectionAsync(Ct))
+        {
+            await using var cmd = probe.CreateCommand();
+            cmd.CommandText = "SELECT @@lower_case_table_names;";
+            var lowerCaseTableNames = Convert.ToInt32(await cmd.ExecuteScalarAsync(Ct));
+
+            Assert.SkipWhen(
+                lowerCaseTableNames != 0,
+                $"lower_case_table_names = {lowerCaseTableNames} のサーバーでは同名テーブルが共存しない"
+            );
+        }
+
+        var appUser = new MySqlConnectionStringBuilder(fixture.ConnectionString).UserID;
+        await fixture.ExecuteAsRootAsync(
+            $"""
+            DROP DATABASE IF EXISTS other_scope;
+            CREATE DATABASE other_scope;
+            CREATE TABLE other_scope.vendor (id int NOT NULL PRIMARY KEY) ENGINE=InnoDB;
+            GRANT SELECT, REFERENCES ON other_scope.* TO '{appUser}'@'%';
+            """,
+            Ct
+        );
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                CREATE TABLE `Dup` (id int NOT NULL PRIMARY KEY) ENGINE=InnoDB;
+                CREATE TABLE `dup` (
+                    id int NOT NULL PRIMARY KEY,
+                    vendor_id int NULL,
+                    CONSTRAINT FK_dup_vendor FOREIGN KEY (vendor_id)
+                        REFERENCES other_scope.vendor (id)
+                ) ENGINE=InnoDB;
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("Dup");
+            result
+                .Warnings.Should()
+                .ContainSingle("捨てた dup の外部キーは図に載らないので名指ししない")
+                .Which.Kind.Should()
+                .Be(SchemaImportWarningKind.TableNameCollision);
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP TABLE IF EXISTS `dup`;", Ct);
+            await fixture.ExecuteAsRootAsync("DROP DATABASE IF EXISTS other_scope;", Ct);
+        }
+    }
+
+    /// <summary>
     /// 生成列（<c>GENERATED ALWAYS AS</c>）が <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、
     /// 式が落ちることが警告として報告されることを検証する。
     /// </summary>

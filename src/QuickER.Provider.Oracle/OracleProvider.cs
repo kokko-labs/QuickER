@@ -40,7 +40,7 @@ public sealed class OracleProvider : IDatabaseProvider
         new()
         {
             SupportsOnUpdateAction = false,
-            SupportsSetDefaultOnDelete = false,
+            SupportsSetDefaultAction = false,
             NormalizeTypeNotation = OracleTypeNotation.Normalize,
         };
 

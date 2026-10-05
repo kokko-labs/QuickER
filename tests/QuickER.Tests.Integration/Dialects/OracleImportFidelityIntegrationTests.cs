@@ -336,6 +336,115 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
     }
 
     /// <summary>
+    /// 取り込まなかったテーブル（大文字小文字の衝突で捨てた側）の外部キーについては、範囲外の警告を出さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] Oracle: 捨てたテーブルの範囲外の外部キーは警告しない")]
+    public async Task Import_OutOfScopeForeignKeyOfDiscardedTable_IsNotReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsSystemAsync(
+            """
+            CREATE USER QEROTHER IDENTIFIED BY qerother QUOTA UNLIMITED ON USERS;
+            GRANT CREATE SESSION, CREATE TABLE TO QEROTHER;
+            CREATE TABLE QEROTHER.XPARENT (ID NUMBER(10) PRIMARY KEY);
+            GRANT REFERENCES ON QEROTHER.XPARENT TO ORACLE;
+            """,
+            Ct
+        );
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                CREATE TABLE DUP (ID NUMBER(10) PRIMARY KEY);
+                CREATE TABLE "dup" (ID NUMBER(10) PRIMARY KEY, PID NUMBER(10));
+                ALTER TABLE "dup" ADD CONSTRAINT FK_DISCARDED
+                    FOREIGN KEY (PID) REFERENCES QEROTHER.XPARENT (ID);
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("DUP");
+            result
+                .Warnings.Should()
+                .ContainSingle("捨てた \"dup\" の外部キーは図に載らないので名指ししない")
+                .Which.Kind.Should()
+                .Be(SchemaImportWarningKind.TableNameCollision);
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP TABLE \"dup\" CASCADE CONSTRAINTS PURGE;", Ct);
+            await fixture.ExecuteAsSystemAsync("DROP USER QEROTHER CASCADE;", Ct);
+        }
+    }
+
+    /// <summary>
+    /// マテリアライズドビューのログ表（<c>MLOG$_…</c>）が取込対象から除外されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] Oracle: マテリアライズドビューのログ表は取込から除外される")]
+    public async Task Import_ExcludesMaterializedViewLogTables()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE LOG_BASE (ID NUMBER(10) PRIMARY KEY, V NUMBER(10));
+            CREATE MATERIALIZED VIEW LOG ON LOG_BASE;
+            """,
+            Ct
+        );
+
+        try
+        {
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+            // MLOG$_LOG_BASE は user_tables に通常テーブルとして現れるが、ビューの更新のための変更記録
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("LOG_BASE");
+        }
+        finally
+        {
+            // ログ表は DROP TABLE で落とせないので、後続テストの ResetSchemaAsync のためにログとして落とす
+            await fixture.ExecuteAsync("DROP MATERIALIZED VIEW LOG ON LOG_BASE;", Ct);
+        }
+    }
+
+    /// <summary>
+    /// パーティション表を取り込み、パーティション定義が失われることを警告として報告することを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] Oracle: パーティション表は取り込み、パーティション定義の喪失を報告する"
+    )]
+    public async Task Import_PartitionedTable_IsImportedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE PART_T (ID NUMBER(10) PRIMARY KEY, D DATE)
+                PARTITION BY RANGE (D) (PARTITION P1 VALUES LESS THAN (DATE '2030-01-01'));
+            CREATE TABLE PLAIN_T (ID NUMBER(10) PRIMARY KEY);
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("PART_T", "PLAIN_T");
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.PartitionDefinitionLost);
+        warning.TableName.Should().Be("PART_T");
+    }
+
+    /// <summary>
     /// 大文字小文字だけが違う同名テーブルを、列を混ぜずに片方だけ取り込み、警告として報告することを検証する。
     /// </summary>
     [Fact(

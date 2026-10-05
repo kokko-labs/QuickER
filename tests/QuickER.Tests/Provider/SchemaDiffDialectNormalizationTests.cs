@@ -3,6 +3,7 @@ using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
 using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.Provider;
@@ -128,7 +129,7 @@ public class SchemaDiffDialectNormalizationTests
     private static readonly SyncDialectCapabilities NoOnUpdateNoSetDefault = new()
     {
         SupportsOnUpdateAction = false,
-        SupportsSetDefaultOnDelete = false,
+        SupportsSetDefaultAction = false,
     };
 
     /// <summary>
@@ -198,6 +199,48 @@ public class SchemaDiffDialectNormalizationTests
             .Which;
         alter.Description.Should().Contain("ON DELETE");
         alter.Description.Should().NotContain("ON UPDATE");
+    }
+
+    /// <summary>
+    /// MySQL は ON UPDATE を持つが SET DEFAULT は（ON DELETE・ON UPDATE とも）効かないので、SET DEFAULT だけを
+    /// NO ACTION へ畳んで比べることを検証する。CASCADE への変更は畳まずに外部キー変更になる（対照）。
+    /// </summary>
+    [Theory(
+        DisplayName = "MySQL は SET DEFAULT だけを ON DELETE・ON UPDATE とも NO ACTION へ畳んで比べる"
+    )]
+    [InlineData(
+        ForeignKeyReferentialAction.SetDefault,
+        ForeignKeyReferentialAction.NoAction,
+        false
+    )]
+    [InlineData(
+        ForeignKeyReferentialAction.NoAction,
+        ForeignKeyReferentialAction.SetDefault,
+        false
+    )]
+    [InlineData(ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.Cascade, true)]
+    public void MySql_FoldsOnlySetDefault(
+        ForeignKeyReferentialAction targetOnDelete,
+        ForeignKeyReferentialAction targetOnUpdate,
+        bool expectsAlter
+    )
+    {
+        var (live, liveRels, target, targetRels) = ForeignKey(
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.NoAction,
+            targetOnDelete,
+            targetOnUpdate
+        );
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            liveRels,
+            target,
+            targetRels,
+            new MySqlProvider().SyncCapabilities
+        );
+
+        diff.Items.Any(IsForeignKeyDiff).Should().Be(expectsAlter);
     }
 
     private static bool IsForeignKeyDiff(SchemaDiffItem item) =>

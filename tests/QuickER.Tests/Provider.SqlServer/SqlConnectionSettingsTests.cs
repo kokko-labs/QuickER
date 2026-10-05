@@ -73,4 +73,29 @@ public class SqlConnectionSettingsTests
         cs.Should().Contain("Authentication=ActiveDirectoryInteractive");
         cs.Should().Contain("User ID=user@contoso.com");
     }
+
+    /// <summary>
+    /// <see cref="SqlConnectionSettings.Build"/> の結果が、GUI・CLI の接続が使う
+    /// <see cref="SqlServerConnectionStringFactory.Build"/> と同じ接続文字列になることを検証する（組み立ての写しを持たない）。
+    /// </summary>
+    [Theory(DisplayName = "Build はどの認証方式でも共通の接続文字列ファクトリと同じ文字列を返す")]
+    [InlineData(SqlAuthMode.Windows, "")]
+    [InlineData(SqlAuthMode.SqlServer, "sa")]
+    [InlineData(SqlAuthMode.AzureAd, "")]
+    [InlineData(SqlAuthMode.AzureAd, "user@contoso.com")]
+    public void Build_MatchesConnectionStringFactory(SqlAuthMode authMode, string userId)
+    {
+        var s = new SqlConnectionSettings
+        {
+            Server = "srv,14330",
+            Database = "Db",
+            AuthMode = authMode,
+            UserId = userId,
+            Password = "p@ss",
+            TrustServerCertificate = false,
+            ConnectTimeoutSeconds = 7,
+        };
+
+        s.Build().Should().Be(SqlServerConnectionStringFactory.Build(s.ToDbConnectionSettings()));
+    }
 }

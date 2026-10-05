@@ -455,10 +455,12 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
         {
             CanonicalTypeKind.String => IsLengthWithin(canonical.Length, MaxNVarchar2Length),
             CanonicalTypeKind.AnsiString => IsLengthWithin(canonical.Length, MaxVarchar2Length),
-            CanonicalTypeKind.FixedString => IsLengthWithin(canonical.Length, MaxNCharLength),
-            CanonicalTypeKind.AnsiFixedString
-            or CanonicalTypeKind.Binary
-            or CanonicalTypeKind.FixedBinary => IsLengthWithin(
+            CanonicalTypeKind.FixedString => IsFixedLengthWithin(canonical.Length, MaxNCharLength),
+            CanonicalTypeKind.AnsiFixedString => IsFixedLengthWithin(
+                canonical.Length,
+                MaxCharOrRawLength
+            ),
+            CanonicalTypeKind.Binary or CanonicalTypeKind.FixedBinary => IsLengthWithin(
                 canonical.Length,
                 MaxCharOrRawLength
             ),
@@ -475,6 +477,15 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
     /// <summary>長さが 1 以上・上限以下（max の -1 も可）か</summary>
     private static bool IsLengthWithin(int? length, int max) =>
         length is null or -1 || length is >= 1 && length <= max;
+
+    /// <summary>固定長の長さが 1 以上・上限以下か（max の -1 は不可）</summary>
+    /// <remarks>
+    /// 固定長の max は Oracle に対応する型が無い（素の <c>NCHAR</c> / <c>CHAR</c> は 1 文字の列になる）ため、
+    /// 書き出さずに変換不能一覧へ載せる。正規型にこの形が現れるのは、SQL Server として不正な <c>nchar(max)</c> を
+    /// 解析したときだけ。
+    /// </remarks>
+    private static bool IsFixedLengthWithin(int? length, int max) =>
+        length is >= 1 && length <= max;
 
     /// <summary>Decimal を <c>NUMBER</c> / <c>NUMBER(p)</c> / <c>NUMBER(p,s)</c> / <c>NUMBER(*,s)</c> へ整形する</summary>
     /// <remarks>
@@ -510,8 +521,8 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             return name;
         }
 
-        // 固定長で max（-1）は Oracle に対応が無いため型名のみで表現する
-        return length == -1 ? name : $"{name}({length})";
+        // 固定長の max（-1）は IsWithinLimits が先に断るのでここへは来ない
+        return $"{name}({length})";
     }
 
     /// <summary>バイナリを <c>RAW(n)</c> または <c>BLOB</c>（max）へ整形する</summary>

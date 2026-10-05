@@ -68,6 +68,30 @@ public class SqliteTypeCatalogTests
         canonical.Kind.Should().Be(expected);
     }
 
+    /// <summary>
+    /// 複数語の別名（他のツールや DBML から入る <c>double precision</c> / <c>character varying</c>）も解析でき、
+    /// 型マッパー（生成コードの型）と同じ結果になることを検証する（別名表は 1 つを共有する）。
+    /// </summary>
+    [Theory(DisplayName = "複数語の別名も解析でき、型マッパーと同じ型になる")]
+    [InlineData("double precision", CanonicalTypeKind.Float64, null, "double")]
+    [InlineData("DOUBLE  PRECISION", CanonicalTypeKind.Float64, null, "double")]
+    [InlineData("character varying(20)", CanonicalTypeKind.AnsiString, 20, "string")]
+    [InlineData("character  varying(20)", CanonicalTypeKind.AnsiString, 20, "string")]
+    [InlineData("character\tvarying(20)", CanonicalTypeKind.AnsiString, 20, "string")]
+    [InlineData("CHARACTER (5)", CanonicalTypeKind.AnsiFixedString, 5, "string")]
+    public void TryParse_MultiWordAliases_MatchTypeMapper(
+        string nativeType,
+        CanonicalTypeKind expected,
+        int? length,
+        string clrType
+    )
+    {
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
+        canonical.Kind.Should().Be(expected);
+        canonical.Length.Should().Be(length);
+        new SqliteCSharpTypeMapper().Map(nativeType).TypeName.Should().Be(clrType);
+    }
+
     [Fact(DisplayName = "大文字小文字・空白を許容して解析できる")]
     public void TryParse_IsCaseInsensitiveAndAllowsWhitespace()
     {
@@ -184,6 +208,7 @@ public class SqliteTypeCatalogTests
     [InlineData("NVARCHAR(99999999999)")] // int 範囲外の型引数は例外ではなく false
     [InlineData("DECIMAL(99999999999,2)")]
     [InlineData("INT[]")] // 配列表記は SQLite に無く弾かれる
+    [InlineData("unsigned big int")] // 複数語でも別名表に無ければ弾かれる
     public void TryParse_UnconvertibleTypes_ReturnsFalse(string nativeType)
     {
         Catalog.TryParse(nativeType, out _).Should().BeFalse();

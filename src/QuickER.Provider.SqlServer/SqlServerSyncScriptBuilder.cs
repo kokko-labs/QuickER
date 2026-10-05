@@ -332,22 +332,18 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         bool columnLevel
     )
     {
-        var schema = SqlIdentifier.SchemaOf(item.TableName);
-        var table = SqlIdentifier.TableNameOnly(item.TableName);
         var newVal = item.NewDescription ?? string.Empty;
+        var levelArgs = SqlServerExtendedProperty.LevelArguments(
+            item.TableName,
+            columnLevel ? item.ColumnName! : null
+        );
+        var objectIdLiteral = SqlServerExtendedProperty.ObjectIdLiteral(item.TableName);
 
-        var levelArgs =
-            $"@level0type=N'SCHEMA', @level0name=N'{SqlIdentifier.EscapeStringLiteral(schema)}', "
-            + $"@level1type=N'TABLE',  @level1name=N'{SqlIdentifier.EscapeStringLiteral(table)}'";
-
-        if (columnLevel)
+        // 修飾の無い表は既定スキーマを変数で渡す。文ごとに GO で区切るので、文ごとに宣言する
+        if (SqlServerExtendedProperty.UsesDefaultSchema(item.TableName))
         {
-            levelArgs +=
-                $", @level2type=N'COLUMN', @level2name=N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}'";
+            sb.AppendLine(SqlServerExtendedProperty.DeclareDefaultSchema);
         }
-
-        var objectIdLiteral =
-            $"OBJECT_ID(N'{SqlIdentifier.EscapeStringLiteral(schema)}.{SqlIdentifier.EscapeStringLiteral(table)}')";
         var minorIdCondition = columnLevel
             ? $"      AND ep.minor_id = COLUMNPROPERTY({objectIdLiteral}, N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}', 'ColumnId')"
             : $"      AND ep.minor_id = 0";

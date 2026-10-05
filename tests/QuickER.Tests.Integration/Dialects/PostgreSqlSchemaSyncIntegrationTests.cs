@@ -269,6 +269,58 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
     }
 
     /// <summary>
+    /// 型の系統をまたぐ変更（varchar → integer）は USING つきで値を変換して通り、文字列の短縮（varchar(100) →
+    /// varchar(5)）は USING を付けないので長すぎる値を黙って切り詰めずに失敗することを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] C: 型の系統をまたぐ変更は USING で通り、文字列の短縮は切り詰めずに失敗する"
+    )]
+    public async Task SchemaSync_AlterColumnAcrossTypeFamilies_UsesCastButNeverTruncates()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var settings = fixture.ToDbConnectionSettings();
+        var caps = new PostgreSqlProvider().SyncCapabilities;
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"u\" (\"id\" integer NOT NULL, \"qty\" varchar(50) NULL, "
+                + "\"name\" varchar(100) NULL, CONSTRAINT \"PK_u\" PRIMARY KEY (\"id\"));",
+            Ct
+        );
+        await fixture.ExecuteAsync("INSERT INTO \"u\" VALUES (1, '42', 'abcdefghij');", Ct);
+
+        async Task<SchemaSyncResult> SyncTypeAsync(string column, string newType)
+        {
+            var live = await ImportAsync();
+            var target = CloneAsTarget(live.Entities.Single(e => e.TableName == "u"));
+            target.Columns.Single(c => c.Name == column).DataType = newType;
+            var diff = _diff.Compute(live.Entities, live.Relationships, [target], [], caps);
+            var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterColumn);
+            alter.IsSelected = true;
+            var script = _builder.Build(new SyncPlanner().BuildPlan([alter], caps));
+            return await _executor.ExecuteAsync(settings, script, Ct);
+        }
+
+        var toInteger = await SyncTypeAsync("qty", "integer");
+        toInteger
+            .Committed.Should()
+            .BeTrue($"USING で '42' を integer へ変換できるはず: {toInteger.Error}");
+
+        var shorten = await SyncTypeAsync("name", "varchar(5)");
+        shorten
+            .Committed.Should()
+            .BeFalse("長すぎる値は切り詰めずにエラーにする（USING を付けない）");
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT \"qty\", \"name\" FROM \"u\";";
+        await using var reader = await cmd.ExecuteReaderAsync(Ct);
+        (await reader.ReadAsync(Ct)).Should().BeTrue();
+        reader.GetInt32(0).Should().Be(42);
+        reader.GetString(1).Should().Be("abcdefghij");
+    }
+
+    /// <summary>
     /// 主キーの付け替え（id → code）が実 DB へ適用され、行データが温存されることを検証する。
     /// </summary>
     /// <remarks>参照してくる FK が無いテーブルで、主キー変更単体の往復を確認する</remarks>

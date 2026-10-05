@@ -100,9 +100,13 @@ public sealed record SyncDialectCapabilities
     /// </remarks>
     public bool SupportsOnUpdateAction { get; init; } = true;
 
-    /// <summary>外部キーの <c>ON DELETE SET DEFAULT</c> を持つか（Oracle は持たない）。</summary>
-    /// <remarks><c>false</c> の方言では差分の比較で <c>SET DEFAULT</c> を <c>NO ACTION</c> へ畳む（<see cref="EffectiveOnDelete"/>）。</remarks>
-    public bool SupportsSetDefaultOnDelete { get; init; } = true;
+    /// <summary>外部キーの参照アクション <c>SET DEFAULT</c> が効くか（Oracle は持たず、MySQL の InnoDB は受け付けても効かない）。</summary>
+    /// <remarks>
+    /// <c>false</c> の方言では差分の比較で <c>ON DELETE</c> / <c>ON UPDATE</c> の <c>SET DEFAULT</c> を <c>NO ACTION</c> へ畳む
+    /// （<see cref="EffectiveOnDelete"/> / <see cref="EffectiveOnUpdate"/>）。MySQL は <c>SET DEFAULT</c> を宣言として保存するが、
+    /// 親を消すと外部キーエラーになる＝実際の動きは <c>NO ACTION</c>（<c>RESTRICT</c>）と同じ。
+    /// </remarks>
+    public bool SupportsSetDefaultAction { get; init; } = true;
 
     /// <summary>2 つの型表記が、この方言の DB で同じ宣言として保存されるか</summary>
     /// <remarks>
@@ -117,11 +121,14 @@ public sealed record SyncDialectCapabilities
 
     /// <summary>この方言の DB で実際に効く <c>ON DELETE</c> の参照アクション</summary>
     public ForeignKeyReferentialAction EffectiveOnDelete(ForeignKeyReferentialAction action) =>
-        action == ForeignKeyReferentialAction.SetDefault && !SupportsSetDefaultOnDelete
+        action == ForeignKeyReferentialAction.SetDefault && !SupportsSetDefaultAction
             ? ForeignKeyReferentialAction.NoAction
             : action;
 
     /// <summary>この方言の DB で実際に効く <c>ON UPDATE</c> の参照アクション</summary>
     public ForeignKeyReferentialAction EffectiveOnUpdate(ForeignKeyReferentialAction action) =>
-        SupportsOnUpdateAction ? action : ForeignKeyReferentialAction.NoAction;
+        !SupportsOnUpdateAction
+        || action == ForeignKeyReferentialAction.SetDefault && !SupportsSetDefaultAction
+            ? ForeignKeyReferentialAction.NoAction
+            : action;
 }

@@ -66,7 +66,7 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
     public CSharpTypeInfo Map(string dataType)
     {
         var normalized = Normalize(dataType);
-        var baseType = ResolveAlias(GetBaseType(normalized));
+        var baseType = SqliteTypeAlias.Resolve(GetBaseType(normalized));
         var maxLength = TryGetLength(normalized);
         var (precision, scale) = TryGetPrecisionScale(normalized);
 
@@ -144,24 +144,6 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
         var parenIndex = normalizedDataType.IndexOf('(', StringComparison.Ordinal);
         return parenIndex < 0 ? normalizedDataType : normalizedDataType[..parenIndex].Trim();
     }
-
-    /// <summary>SQLite / 他方言由来の型別名を代表表記へ解決する（例: <c>integer</c> → <c>int</c>）</summary>
-    private static string ResolveAlias(string baseType) =>
-        baseType switch
-        {
-            // SQLite の INTEGER は最大 8 バイト格納（EF Core も long 対応）のため Int64 として扱う
-            "integer" or "int8" => "bigint",
-            "int4" => "int",
-            "int2" => "smallint",
-            "boolean" or "bool" => "bit",
-            "numeric" => "decimal",
-            "double" or "double precision" => "float",
-            "character varying" => "varchar",
-            "character" => "char",
-            "guid" => "uniqueidentifier",
-            "timestamp" => "datetime2",
-            _ => baseType,
-        };
 
     /// <summary>
     /// 長さ指定から最大長を抽出する

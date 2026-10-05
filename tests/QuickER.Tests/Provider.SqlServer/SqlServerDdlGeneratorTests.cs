@@ -367,6 +367,113 @@ public class SqlServerDdlGeneratorTests
         sql.Should().NotContain("GO");
     }
 
+    /// <summary>
+    /// 修飾の無い表の説明は、表と同じ既定スキーマを <c>SCHEMA_NAME()</c> で求めて指す（DDL は 1 バッチなので
+    /// 最初に使う文の前で 1 回だけ宣言する）。修飾つきの表は従来どおりスキーマ名を書く（対照）。
+    /// </summary>
+    [Fact(
+        DisplayName = "Build: 修飾の無い表の説明は既定スキーマ（SCHEMA_NAME()）を指し、宣言は 1 回だけ"
+    )]
+    public void Build_UnqualifiedTableDescriptions_UseDefaultSchemaOnce()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "sales.Order",
+                    Description = "注文",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+                new Entity
+                {
+                    TableName = "Customer",
+                    Description = "顧客",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Name",
+                            DataType = "nvarchar(50)",
+                            Description = "氏名",
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new SqlServerDdlGenerator().Build(diagram);
+        var declaration = "DECLARE @default_schema sysname = SCHEMA_NAME();";
+
+        sql.Split(declaration).Length.Should().Be(2, "宣言は 1 回だけ");
+        sql.IndexOf(declaration, StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(sql.IndexOf("@level0name=@default_schema", StringComparison.Ordinal));
+        sql.Should()
+            .Contain(
+                "@level0type=N'SCHEMA', @level0name=@default_schema, @level1type=N'TABLE',  @level1name=N'Customer';"
+            );
+        sql.Should()
+            .Contain(
+                "@level0type=N'SCHEMA', @level0name=@default_schema, @level1type=N'TABLE',  @level1name=N'Customer', "
+                    + "@level2type=N'COLUMN', @level2name=N'Name';"
+            );
+        sql.Should()
+            .Contain(
+                "@level0type=N'SCHEMA', @level0name=N'sales', @level1type=N'TABLE',  @level1name=N'Order';"
+            );
+    }
+
+    /// <summary>説明のない図・修飾つきの表だけの図では宣言を出さない（出力は従来どおり）</summary>
+    [Fact(DisplayName = "Build: 修飾つきの表だけの説明には既定スキーマの宣言を出さない")]
+    public void Build_QualifiedOnlyDescriptions_EmitNoDeclaration()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "dbo.User",
+                    Description = "利用者",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+                new Entity
+                {
+                    TableName = "Plain",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+            },
+        };
+
+        new SqlServerDdlGenerator().Build(diagram).Should().NotContain("@default_schema");
+    }
+
     /// <summary>説明に含まれるシングルクォートが N リテラルの規則で二重化エスケープされることを検証する</summary>
     [Fact(DisplayName = "Build: 説明のシングルクォートがエスケープされる")]
     public void Build_EscapesQuotesInDescriptions()

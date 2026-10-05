@@ -1399,4 +1399,81 @@ public class SchemaDiffServiceTests
 
         diff.Items.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// 大文字小文字だけ違う綴りで組んだ表・列の項目は DB 側の綴りを書く（スクリプトが実在する名前を指す）。
+    /// 図にしか無い表・列は図の綴りのまま作り、図そのものは書き換えない。外部キーの両端も揃えた表を指す。
+    /// </summary>
+    [Fact(
+        DisplayName = "大文字小文字だけ違う綴りで組んだ表・列は DB の綴りで、図にしか無いものは図の綴りで項目を作る"
+    )]
+    public void CaseOnlyDifference_ItemsUseLiveSpellingForMatchedNamesOnly()
+    {
+        var liveOrders = Tbl("ORDERS", ("ID", "NUMBER(10)", true), ("NAME", "VARCHAR2(50)", false));
+        var liveCustomers = Tbl("CUSTOMERS", ("ID", "NUMBER(10)", true));
+        var targetOrders = Tbl(
+            "Orders",
+            ("Id", "NUMBER(10)", true),
+            ("Name", "VARCHAR2(100)", false),
+            ("CustomerId", "NUMBER(10)", false),
+            ("NewCol", "NUMBER(10)", false)
+        );
+        var targetCustomers = Tbl("Customers", ("Id", "NUMBER(10)", true));
+        var targetItems = Tbl("Items", ("Id", "NUMBER(10)", true));
+        targetOrders.Description = "orders";
+        var relationship = new Relationship
+        {
+            SourceEntityId = targetCustomers.Id,
+            TargetEntityId = targetOrders.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs = [new(targetCustomers.Columns[0].Id, targetOrders.Columns[2].Id)],
+            ConstraintName = "FK_Orders_Customers",
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            [liveOrders, liveCustomers],
+            [],
+            [targetOrders, targetCustomers, targetItems],
+            [relationship]
+        );
+
+        var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterColumn);
+        alter.TableName.Should().Be("ORDERS");
+        alter.ColumnName.Should().Be("NAME");
+        alter.Column!.Name.Should().Be("NAME");
+        alter.Column.DataType.Should().Be("VARCHAR2(100)", "型は図の定義のまま");
+        diff.Items.Single(i => i.Kind == SchemaDiffKind.SetTableDescription)
+            .TableName.Should()
+            .Be("ORDERS");
+
+        // 図にしか無い列・表は図の綴りで作る（揃えるのは組になったものだけ）
+        diff.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn)
+            .Select(i => (i.TableName, i.ColumnName))
+            .Should()
+            .BeEquivalentTo([("ORDERS", "CustomerId"), ("ORDERS", "NewCol")]);
+        diff.Items.Single(i => i.Kind == SchemaDiffKind.AddTable).TableName.Should().Be("Items");
+
+        // 外部キーの両端は揃えた表を指す
+        var addFk = diff.Items.Single(i => i.Kind == SchemaDiffKind.AddForeignKey);
+        SchemaDiffService.NormalizeTable(addFk.ChildEntity!).Should().Be("ORDERS");
+        SchemaDiffService.NormalizeTable(addFk.ParentEntity!).Should().Be("CUSTOMERS");
+
+        // 図そのものは書き換えない
+        targetOrders.TableName.Should().Be("Orders");
+        targetOrders.Columns[1].Name.Should().Be("Name");
+    }
+
+    /// <summary>綴りが揃っている（揃える組が無い）表は、元の図のオブジェクトのまま項目に載る</summary>
+    [Fact(DisplayName = "揃える組が無い表は元の図のオブジェクトのまま項目に載る")]
+    public void SameSpelling_ItemsReferenceOriginalTargetObjects()
+    {
+        var live = Tbl("orders", ("id", "int", true), ("name", "varchar(50)", false));
+        var target = Tbl("orders", ("id", "int", true), ("name", "varchar(100)", false));
+
+        var diff = new SchemaDiffService().Compute([live], [], [target], []);
+
+        var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterColumn);
+        alter.Entity.Should().BeSameAs(target);
+        alter.Column.Should().BeSameAs(target.Columns[1]);
+    }
 }

@@ -99,16 +99,25 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             case "tinyint":
                 return TryParseTinyInt(argsRaw, isUnsigned, out canonical);
 
+            // 符号の有無で値の範囲が変わるので、範囲を収められる正規型を選ぶ（unsigned は 1 段広い型）。
+            // 正規型は符号なし整数を持たないため、元の綴りは verbatim 併記（NativeType）が運ぶ
             case "smallint":
-                canonical = new CanonicalType(CanonicalTypeKind.SmallInt);
+                canonical = new CanonicalType(
+                    isUnsigned ? CanonicalTypeKind.Int32 : CanonicalTypeKind.SmallInt
+                );
                 return true;
 
             case "int":
-                canonical = new CanonicalType(CanonicalTypeKind.Int32);
+                canonical = new CanonicalType(
+                    isUnsigned ? CanonicalTypeKind.Int64 : CanonicalTypeKind.Int32
+                );
                 return true;
 
+            // bigint unsigned（0〜18,446,744,073,709,551,615＝20 桁）は Int64 に収まらないので decimal(20,0)
             case "bigint":
-                canonical = new CanonicalType(CanonicalTypeKind.Int64);
+                canonical = isUnsigned
+                    ? new CanonicalType(CanonicalTypeKind.Decimal, Precision: 20, Scale: 0)
+                    : new CanonicalType(CanonicalTypeKind.Int64);
                 return true;
 
             case "decimal":
@@ -330,7 +339,7 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
 
     /// <summary>
     /// <c>tinyint</c> を解釈する。<c>tinyint(1)</c> は真偽値慣習として Boolean、
-    /// <c>tinyint unsigned</c>（および長さ 1 以外）は TinyInt として扱う。
+    /// <c>tinyint unsigned</c> は TinyInt（0〜255）、符号つきの <c>tinyint</c>（長さ 1 以外）は値の範囲を収められる SmallInt として扱う。
     /// </summary>
     private static bool TryParseTinyInt(
         string? argsRaw,
@@ -345,14 +354,17 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             return true;
         }
 
-        // 表示幅指定（例: tinyint(4)）は int 範囲内なら無視して TinyInt とし、負数・範囲外は変換不能
+        // 表示幅指定（例: tinyint(4)）は int 範囲内なら無視し、負数・範囲外は変換不能
         if (argsRaw is not null && !TryParseTypeArg(argsRaw, out _))
         {
             canonical = null!;
             return false;
         }
 
-        canonical = new CanonicalType(CanonicalTypeKind.TinyInt);
+        // 正規型の TinyInt は 0〜255（SQL Server の tinyint）。符号つきの tinyint（-128〜127）は収まらないので SmallInt
+        canonical = new CanonicalType(
+            isUnsigned ? CanonicalTypeKind.TinyInt : CanonicalTypeKind.SmallInt
+        );
         return true;
     }
 

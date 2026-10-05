@@ -3,7 +3,7 @@ using QuickER.Provider.Oracle;
 
 namespace QuickER.Tests.Provider.Oracle;
 
-/// <summary><see cref="OracleSchemaSyncExecutor.SplitStatements"/> の「/」区切り分割を検証するテストクラス</summary>
+/// <summary><see cref="OracleSchemaSyncExecutor.SplitStatements"/> の SQL*Plus と同じ分割（行末の ; と「/」行）を検証するテストクラス</summary>
 public class OracleSchemaSyncExecutorTests
 {
     /// <summary>「/」のみの行で文が分割されることを検証する</summary>
@@ -122,5 +122,67 @@ public class OracleSchemaSyncExecutorTests
         var sql =
             "COMMENT ON TABLE \"t\" IS 'unterminated\n/\nSELECT 1 FROM dual;\n/\nSELECT 2 FROM dual;\n/\n";
         OracleSchemaSyncExecutor.SplitStatements(sql).Should().HaveCount(1);
+    }
+
+    /// <summary>通常の文は行末の ; で区切られ、「/」行が無くても分割されることを検証する</summary>
+    [Fact(DisplayName = "通常の文は行末の ; で区切られる（「/」行は要らない）")]
+    public void Split_SemicolonTerminatesPlainStatement()
+    {
+        var sql = "CREATE TABLE \"a\" (\n  x NUMBER\n);\nALTER TABLE \"a\" ADD (y NUMBER);\n";
+        var statements = OracleSchemaSyncExecutor.SplitStatements(sql);
+
+        statements.Should().HaveCount(2);
+        statements[0].Should().StartWith("CREATE TABLE").And.NotEndWith(";");
+        statements[1].Should().StartWith("ALTER TABLE");
+    }
+
+    /// <summary>通常の文の後ろに「/」行があっても、その文は 1 回だけ実行対象になることを検証する</summary>
+    /// <remarks>SQL*Plus はこの「/」で直前の文を再実行するが、実行器は空のバッファの「/」を何もしない</remarks>
+    [Fact(DisplayName = "通常の文の後ろの「/」行で同じ文が 2 回実行対象にならない")]
+    public void Split_SlashAfterTerminatedStatement_RunsOnce()
+    {
+        var sql =
+            "CREATE TABLE \"a\" (x NUMBER);\n/\nBEGIN\n  NULL;\nEND;\n/\nALTER TABLE \"a\" ADD (y NUMBER);\n/\n";
+        var statements = OracleSchemaSyncExecutor.SplitStatements(sql);
+
+        statements
+            .Should()
+            .Equal(
+                "CREATE TABLE \"a\" (x NUMBER)",
+                "BEGIN\n  NULL;\nEND;",
+                "ALTER TABLE \"a\" ADD (y NUMBER)"
+            );
+    }
+
+    /// <summary>PL/SQL ブロックの中の行末の ; では区切らず、「/」行で区切ることを検証する</summary>
+    [Fact(DisplayName = "ブロックの中の行末の ; では区切らず「/」行で区切る")]
+    public void Split_BlockEndsOnlyAtSlash()
+    {
+        var sql = "-- note\nDECLARE\n  n NUMBER;\nBEGIN\n  n := 1;\nEND;\n/\nSELECT 1 FROM dual;\n";
+        var statements = OracleSchemaSyncExecutor.SplitStatements(sql);
+
+        statements.Should().HaveCount(2);
+        statements[0].Should().StartWith("-- note\nDECLARE").And.EndWith("END;");
+        statements[1].Should().Be("SELECT 1 FROM dual");
+    }
+
+    /// <summary>行コメントやリテラルの中の行末の ; では区切らないことを検証する</summary>
+    [Fact(DisplayName = "行コメント・リテラルの中の行末の ; では区切らない")]
+    public void Split_SemicolonInsideCommentOrLiteral_DoesNotTerminate()
+    {
+        var sql = "SELECT 1 -- a;\nFROM dual;\nCOMMENT ON TABLE \"t\" IS 'x;\ny';\n";
+        var statements = OracleSchemaSyncExecutor.SplitStatements(sql);
+
+        statements.Should().HaveCount(2);
+        statements[0].Should().Contain("FROM dual");
+        statements[1].Should().Contain("x;\ny'");
+    }
+
+    /// <summary>ブロックの判定は語の単位で行い、BEGIN で始まる別の語を見誤らないことを検証する</summary>
+    [Fact(DisplayName = "BEGINNING のような語はブロックの始まりとみなさない")]
+    public void Split_IsPlSqlBlock_RequiresWordBoundary()
+    {
+        OracleSchemaSyncExecutor.IsPlSqlBlock("BEGINNING_TABLE x;").Should().BeFalse();
+        OracleSchemaSyncExecutor.IsPlSqlBlock("-- note\n  begin\nNULL;").Should().BeTrue();
     }
 }

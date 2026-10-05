@@ -418,6 +418,45 @@ public class SqlServerSyncScriptBuilderTests
         sql.Should().NotContain("sp_addextendedproperty");
     }
 
+    /// <summary>
+    /// 修飾の無い表の説明は、表と同じ既定スキーマを <c>SCHEMA_NAME()</c> で求めて指す（文ごとに GO で区切るので
+    /// 文ごとに宣言する）。修飾つきの表は従来どおりスキーマ名を書く（対照）。
+    /// </summary>
+    [Fact(
+        DisplayName = "修飾の無い表の説明は既定スキーマ（SCHEMA_NAME()）を指し、修飾つきはスキーマ名を書く"
+    )]
+    public void Description_OfUnqualifiedTable_UsesDefaultSchema()
+    {
+        var unqualified = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.SetColumnDescription,
+            TableName = "Customer",
+            ColumnName = "Name",
+            NewDescription = "顧客名",
+            IsSelected = true,
+        };
+        var qualified = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.SetTableDescription,
+            TableName = "sales.Order",
+            NewDescription = "注文",
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), unqualified, qualified);
+        var batches = sql.Replace("\r\n", "\n").Split("\nGO\n");
+        var customer = batches.Single(b => b.Contains("@level1name=N'Customer'"));
+        var order = batches.Single(b => b.Contains("@level1name=N'Order'"));
+
+        customer.Should().Contain("DECLARE @default_schema sysname = SCHEMA_NAME();");
+        customer.Should().Contain("@level0name=@default_schema");
+        customer.Should().Contain("OBJECT_ID(N'[Customer]')");
+        customer.Should().NotContain("N'dbo'");
+        order.Should().NotContain("@default_schema");
+        order.Should().Contain("@level0name=N'sales'");
+        order.Should().Contain("OBJECT_ID(N'sales.Order')");
+    }
+
     // ---------------- 主キー変更（AlterPrimaryKey） ----------------
 
     /// <summary>指定の主キー列を持つ target エンティティを組み立てる</summary>

@@ -68,7 +68,7 @@ public class OracleSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        await LoadOutOfScopeForeignKeysAsync(conn, commandTimeoutSeconds, warnings, ct)
+        await LoadOutOfScopeForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
         await LoadDisabledConstraintsAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
@@ -109,19 +109,25 @@ public class OracleSchemaImporter : ISchemaImporter
     /// IOT オーバーフローセグメント（<c>SYS_IOT_OVER_...</c>）は除外する。
     /// </para>
     /// <para>
-    /// 一時表（<c>temporary = 'Y'</c>）とマテリアライズドビューのコンテナ表も除外する。
-    /// どちらも <c>user_tables</c> には通常テーブルとして現れるが、実体はセッション作業域とビューの結果で、
-    /// ER 図のエンティティではない（「ビューは取り込まない」という取込範囲の宣言に実装を合わせる）。
+    /// 一時表（<c>temporary = 'Y'</c>）・マテリアライズドビューのコンテナ表・マテリアライズドビューのログ表
+    /// （<c>MLOG$_…</c>＝<c>user_mview_logs.log_table</c>）も除外する。
+    /// どれも <c>user_tables</c> には通常テーブルとして現れるが、実体はセッション作業域・ビューの結果・
+    /// ビューの更新のための変更記録で、ER 図のエンティティではない（「ビューは取り込まない」という取込範囲の宣言に実装を合わせる）。
+    /// </para>
+    /// <para>
+    /// 2 列目の <c>partitioned</c> はパーティション表かどうか（<c>'YES'</c> / <c>'NO'</c>）。パーティション定義は
+    /// 意味モデルに無いので、取り込んだうえで <see cref="SchemaImportWarningKind.PartitionDefinitionLost"/> で告げる。
     /// </para>
     /// </remarks>
     private const string TablesSql =
-        @"SELECT table_name FROM user_tables
+        @"SELECT table_name, partitioned FROM user_tables
 WHERE dropped = 'NO'
   AND secondary = 'N'
   AND nested = 'NO'
   AND temporary = 'N'
   AND (iot_type IS NULL OR iot_type = 'IOT')
   AND table_name NOT IN (SELECT mview_name FROM user_mviews)
+  AND table_name NOT IN (SELECT log_table FROM user_mview_logs)
 -- NLSSORT の BINARY 指定は、セッションの NLS_SORT 次第で DUP と 小文字の dup の順序が変わるため
 -- （衝突時にどちらを採るかを決定的にする）
 ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
@@ -289,14 +295,28 @@ ORDER BY constraint_name";
                 Key = name,
                 Entity = new Entity { TableName = name, Columns = new List<Column>() },
             };
+
+            // パーティション表は列・制約の宣言を持ち帰れるが、パーティション定義は意味モデルに無い
+            // ＝この図から生成した DDL はパーティションされていないテーブルを作る
+            if (string.Equals(reader.GetString(1), "YES", StringComparison.Ordinal))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(SchemaImportWarningKind.PartitionDefinitionLost, name)
+                );
+            }
         }
 
         return dict;
     }
 
     /// <summary>取込範囲外を参照する外部キーを拾い、除外したことを警告として積む</summary>
+    /// <remarks>
+    /// 取り込んだテーブル（<see cref="SchemaTableEntry.TryGetExact"/>）の外部キーだけを告げる。大文字小文字だけ違うために
+    /// 衝突して捨てたテーブルや、取込から除外したテーブルの外部キーは、図に載らないので名指ししない。
+    /// </remarks>
     private static async Task LoadOutOfScopeForeignKeysAsync(
         OracleConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
         int commandTimeoutSeconds,
         List<SchemaImportWarning> warnings,
         CancellationToken ct
@@ -311,10 +331,15 @@ ORDER BY constraint_name";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(1), out var entry))
+            {
+                continue;
+            }
+
             warnings.Add(
                 new SchemaImportWarning(
                     SchemaImportWarningKind.ForeignKeyOutsideScope,
-                    reader.GetString(1),
+                    entry.Entity.TableName,
                     reader.GetString(0),
                     reader.GetString(2)
                 )

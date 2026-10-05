@@ -37,15 +37,13 @@ public class LengthlessTypeFormattingTests
     /// </summary>
     /// <remarks>
     /// <c>FormatLength</c> 系は長さ <c>-1</c> に対して機械的に <c>(max)</c> を付ける（または LOB 型へ倒す）ため、
-    /// 「長さが無いなら無制限として読み直す」を固定長まで広げると、長さ 1 の固定長（Oracle の <c>NCHAR</c>）や、
-    /// 固定長が可変長 LOB に化けた表記が生まれる（SQL Server は固定長の max を書き出さない＝下のテスト）。
+    /// 「長さが無いなら無制限として読み直す」を固定長まで広げると、固定長が可変長 LOB に化けた表記が生まれる
+    /// （SQL Server と Oracle は固定長の max を書き出さない＝下のテスト）。
     /// ここはその実測を固定して、フォールバックの対象種別を安易に広げられないようにするためのもの。
     /// </remarks>
     [Theory(
         DisplayName = "固定長へ max（-1）を渡すと実在しない／別種別の表記が返る（対象外の根拠）"
     )]
-    [InlineData("Oracle", CanonicalTypeKind.FixedString, "NCHAR")]
-    [InlineData("Oracle", CanonicalTypeKind.AnsiFixedString, "CHAR")]
     [InlineData("MySql", CanonicalTypeKind.FixedString, "longtext")]
     [InlineData("MySql", CanonicalTypeKind.FixedBinary, "longblob")]
     public void TryFormat_FixedLengthWithMax_ProducesUnusableText(
@@ -70,19 +68,25 @@ public class LengthlessTypeFormattingTests
     }
 
     /// <summary>
-    /// SQL Server は固定長の max（-1）を書き出さない＝<c>nchar(max)</c> のような存在しない表記を返さず、
-    /// 対象 DBMS 切替の変換不能一覧に載せる（上限を超える長さと同じ扱い）。
+    /// SQL Server と Oracle は固定長の max（-1）を書き出さない＝<c>nchar(max)</c> のような存在しない表記や、
+    /// 1 文字の列になる素の <c>NCHAR</c> / <c>CHAR</c> を返さず、対象 DBMS 切替の変換不能一覧に載せる
+    /// （上限を超える長さと同じ扱い）。Oracle の固定長バイナリの max は <c>BLOB</c> へ写せるので対象外。
     /// </summary>
-    [Theory(DisplayName = "SQL Server は固定長の max（-1）を書き出さない")]
-    [InlineData(CanonicalTypeKind.FixedString)]
-    [InlineData(CanonicalTypeKind.AnsiFixedString)]
-    [InlineData(CanonicalTypeKind.FixedBinary)]
-    public void TryFormat_SqlServerFixedLengthWithMax_IsNotFormattable(CanonicalTypeKind kind)
+    [Theory(DisplayName = "SQL Server と Oracle は固定長の文字列の max（-1）を書き出さない")]
+    [InlineData("SqlServer", CanonicalTypeKind.FixedString)]
+    [InlineData("SqlServer", CanonicalTypeKind.AnsiFixedString)]
+    [InlineData("SqlServer", CanonicalTypeKind.FixedBinary)]
+    [InlineData("Oracle", CanonicalTypeKind.FixedString)]
+    [InlineData("Oracle", CanonicalTypeKind.AnsiFixedString)]
+    public void TryFormat_FixedLengthWithMax_IsNotFormattable(
+        string dialect,
+        CanonicalTypeKind kind
+    )
     {
-        new SqlServerTypeCatalog()
-            .TryFormat(new CanonicalType(kind, Length: -1), out _)
-            .Should()
-            .BeFalse();
+        ITypeCatalog catalog =
+            dialect == "Oracle" ? new OracleTypeCatalog() : new SqlServerTypeCatalog();
+
+        catalog.TryFormat(new CanonicalType(kind, Length: -1), out _).Should().BeFalse();
     }
 
     /// <summary>PostgreSQL の長さ無し <c>varchar</c> 1 列だけを持つ図を作る</summary>

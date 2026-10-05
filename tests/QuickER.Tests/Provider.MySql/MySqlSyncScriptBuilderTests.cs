@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
@@ -262,6 +263,71 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("FOREIGN KEY (`customer_id`) REFERENCES `customer` (`id`)");
         sql.Should().Contain("ON DELETE CASCADE");
         sql.Should().Contain("ON UPDATE SET NULL");
+        sql.Should().NotContain(MySqlReferentialAction.SetDefaultNote);
+    }
+
+    /// <summary>InnoDB で効かない SET DEFAULT は句を省き、注意コメントを添えることを検証する</summary>
+    [Theory(DisplayName = "AddForeignKey は SET DEFAULT の句を出さず注意コメントを添える")]
+    [InlineData(
+        ForeignKeyReferentialAction.SetDefault,
+        ForeignKeyReferentialAction.Cascade,
+        " ON UPDATE CASCADE;"
+    )]
+    [InlineData(
+        ForeignKeyReferentialAction.Cascade,
+        ForeignKeyReferentialAction.SetDefault,
+        " ON DELETE CASCADE;"
+    )]
+    public void AddForeignKey_SetDefault_IsOmittedWithNote(
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate,
+        string expectedTail
+    )
+    {
+        var customer = new Entity { TableName = "customer" };
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
+        var order = new Entity { TableName = "order" };
+        order.Columns.Add(new Column { Name = "customer_id", DataType = "int" });
+        var rel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = order.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs = [new(customer.Columns[0].Id, order.Columns[^1].Id)],
+            ConstraintName = "FK_order_customer",
+            OnDelete = onDelete,
+            OnUpdate = onUpdate,
+        };
+
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddForeignKey,
+                TableName = "order",
+                ColumnName = "customer_id",
+                ForeignKeyColumnPairs = [new("id", "customer_id")],
+                ParentEntity = customer,
+                ChildEntity = order,
+                Relationship = rel,
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().NotContain("SET DEFAULT ");
+        sql.Should()
+            .Contain(
+                MySqlReferentialAction.SetDefaultNote
+                    + Environment.NewLine
+                    + "ALTER TABLE `order` ADD CONSTRAINT `FK_order_customer`"
+            );
+        sql.Should().Contain("REFERENCES `customer` (`id`)" + expectedTail);
     }
 
     /// <summary>DropForeignKey が制約名判明時に DROP FOREIGN KEY を生成することを検証する</summary>

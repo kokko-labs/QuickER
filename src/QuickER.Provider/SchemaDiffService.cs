@@ -52,6 +52,9 @@ public class SchemaDiffService
         // 型表記の正規化と参照アクションの畳み込み（capabilities が無ければ恒等＝従来どおり素の比較）
         var dialect = capabilities ?? new SyncDialectCapabilities();
 
+        // 組になる live と大文字小文字だけ違う図側の表・列は、live の綴りへ揃えた複製で差分を組む
+        targetEntities = AlignNameCaseToLive(targetEntities, liveEntities);
+
         // テーブルの組（規則は NameLookup＝序数一致を優先し、大文字小文字だけ違う名前は双方で一意なときだけ組む。
         // 曖昧な名前は組まず、図側は追加・DB 側は削除の候補になる）
         var livePartnerOf = MatchTables(targetEntities, liveEntities);
@@ -649,6 +652,78 @@ public class SchemaDiffService
         NameMatching
             .Match(targetEntities, liveEntities, NormalizeTable, NormalizeTable)
             .ToDictionary(pair => pair.Left, pair => pair.Right);
+
+    /// <summary>
+    /// 組になる DB 側と大文字小文字だけ綴りが違う図側の表・列を、DB 側の綴りへ揃えた複製に差し替えたリストを返す
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 差分は表・列を大文字小文字を無視して組む（<see cref="NameMatching"/>）が、スクリプトは図側の綴りを書く。
+    /// 引用識別子で綴りを区別する方言では、それでは組んだ相手を指せない（Oracle は引用符なしで作られた表を
+    /// 大文字で持つので、図の <c>"Orders"</c> では表 <c>ORDERS</c> に届かず ORA-00942。PostgreSQL は小文字で持つ）。
+    /// 組になった表・列だけを DB 側の綴りへ揃えれば、項目・計画・スクリプトのすべてが DB に実在する名前を書く。
+    /// </para>
+    /// <para>
+    /// 揃えるのは組になった表・列だけで、図にしか無い表（AddTable）・列（AddColumn）は図の綴りのまま作る。
+    /// 図そのものは書き換えない（Id を保った複製＝リレーション・一意制約・主キーの順序の参照はそのまま通る）。
+    /// 揃える組が 1 つも無い表は元のオブジェクトのまま返す（出力はバイト不変）。
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<Entity> AlignNameCaseToLive(
+        IReadOnlyList<Entity> targetEntities,
+        IReadOnlyList<Entity> liveEntities
+    )
+    {
+        var livePartnerOf = MatchTables(targetEntities, liveEntities);
+        List<Entity>? aligned = null;
+
+        for (var i = 0; i < targetEntities.Count; i++)
+        {
+            var target = targetEntities[i];
+
+            if (!livePartnerOf.TryGetValue(target, out var live))
+            {
+                continue;
+            }
+
+            var liveColumnOf = MatchColumns(target, live);
+            var renameTable = !string.Equals(
+                NormalizeTable(target),
+                NormalizeTable(live),
+                StringComparison.Ordinal
+            );
+            var renamedColumns = liveColumnOf
+                .Where(pair =>
+                    !string.Equals(pair.Key.Name, pair.Value.Name, StringComparison.Ordinal)
+                )
+                .ToDictionary(pair => pair.Key.Id, pair => pair.Value.Name);
+
+            if (!renameTable && renamedColumns.Count == 0)
+            {
+                continue;
+            }
+
+            var clone = target.Clone(preserveId: true);
+
+            if (renameTable)
+            {
+                clone.TableName = live.TableName;
+            }
+
+            foreach (var column in clone.Columns)
+            {
+                if (renamedColumns.TryGetValue(column.Id, out var liveName))
+                {
+                    column.Name = liveName;
+                }
+            }
+
+            aligned ??= targetEntities.ToList();
+            aligned[i] = clone;
+        }
+
+        return aligned ?? targetEntities;
+    }
 
     /// <summary>図側の列 → 組になる DB 側の列（<see cref="NameLookup{T}"/> の規則）</summary>
     private static Dictionary<Column, Column> MatchColumns(Entity target, Entity live) =>

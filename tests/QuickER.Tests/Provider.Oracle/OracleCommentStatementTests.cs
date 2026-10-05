@@ -125,7 +125,8 @@ public class OracleCommentStatementTests
 
         SyncScript("customer", null, description)
             .Should()
-            .Contain("COMMENT ON TABLE \"customer\" IS 'It''s 顧客\tCHR(10) | 🙂';\n/\n")
+            .Contain("COMMENT ON TABLE \"customer\" IS 'It''s 顧客\tCHR(10) | 🙂';\n")
+            .And.NotContain("\n/\n")
             .And.NotContain("BEGIN");
         SyncScript("customer", "name", description)
             .Should()

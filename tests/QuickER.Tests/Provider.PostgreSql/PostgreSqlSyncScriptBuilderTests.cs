@@ -100,6 +100,59 @@ public class PostgreSqlSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE \"customer\" ALTER COLUMN \"name\" SET NOT NULL;");
     }
 
+    /// <summary>
+    /// 型の系統をまたぐ変更（代入キャストが無い）にだけ <c>USING 列::新型</c> を付けることを検証する。
+    /// 文字列系への変更・同じ系統の変更・解析できない型・旧型が分からない項目には付けない
+    /// （明示キャストは varchar(n) への変換で長すぎる値を黙って切り詰めるため）。
+    /// </summary>
+    [Theory(DisplayName = "AlterColumn は型の系統をまたぐ変更にだけ USING を付ける")]
+    [InlineData("varchar(50)", "integer", true)]
+    [InlineData("text", "date", true)]
+    [InlineData("integer", "boolean", true)]
+    [InlineData("varchar(36)", "uuid", true)]
+    [InlineData("text", "jsonb", true)]
+    [InlineData("varchar(100)", "varchar(50)", false)]
+    [InlineData("integer", "varchar(10)", false)]
+    [InlineData("integer", "bigint", false)]
+    [InlineData("timestamp(6)", "date", false)]
+    [InlineData("geometry(Point,4326)", "integer", false)]
+    [InlineData(null, "integer", false)]
+    public void AlterColumn_AddsUsingOnlyAcrossTypeFamilies(
+        string? oldType,
+        string newType,
+        bool expectsUsing
+    )
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "code",
+                Column = new Column
+                {
+                    Name = "code",
+                    DataType = newType,
+                    IsNullable = true,
+                },
+                OldColumn = oldType is null
+                    ? null
+                    : new Column
+                    {
+                        Name = "code",
+                        DataType = oldType,
+                        IsNullable = true,
+                    },
+                IsSelected = true,
+            }
+        );
+
+        var expected = expectsUsing
+            ? $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType} USING \"code\"::{newType};"
+            : $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType};";
+        sql.Should().Contain(expected);
+    }
+
     /// <summary>NULL 許容へ変更する AlterColumn が DROP NOT NULL を生成することを検証する</summary>
     [Fact(DisplayName = "AlterColumn は NULL 許容化で DROP NOT NULL を生成する")]
     public void AlterColumn_NullableGeneratesDropNotNull()

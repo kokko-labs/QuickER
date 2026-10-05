@@ -26,9 +26,9 @@ namespace QuickER.Provider.Oracle;
 /// </list>
 /// </para>
 /// <para>
-/// 文の区切りは SQL*Plus 流儀に従う。各文は <c>;</c> で終端し、<b>文と文の間に「/」のみの行</b>を置く。
-/// PL/SQL の無名ブロックも <c>END;</c> の後に <c>/</c> 行を置く。この規約は
-/// <see cref="OracleSchemaSyncExecutor"/> と対になっており、実行側は「/」のみの行で分割して 1 文ずつ実行する。
+/// 文の区切りは SQL*Plus と同じにする。通常の文は <c>;</c> で終え、<c>/</c> だけの行は PL/SQL の無名ブロック
+/// （<c>END;</c>）の後ろにだけ置く。SQL*Plus の <c>/</c> は直前の文をもう一度実行するため、通常の文の後ろに置くと
+/// 同じ文が 2 回走る。実行側の <see cref="OracleSchemaSyncExecutor"/> も同じ規則で分割する。
 /// </para>
 /// </remarks>
 public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
@@ -44,7 +44,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var sb = new StringBuilder();
 
-        // 各文（末尾 ; を含む）を蓄積し、最後に「/」のみの行で連結する
+        // 各文（末尾 ; を含む）を蓄積し、最後に連結する（PL/SQL ブロックの後ろにだけ「/」のみの行を置く）
         var statements = new List<string>();
 
         // 計画は既に選択フィルタ済み・固定順序でセクション化されているため、
@@ -63,8 +63,11 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
                 sb.AppendLine();
             }
 
-            // 文と文の間に「/」のみの行を置く（最後の文の後にも置き、実行側の分割を安定させる）
-            sb.AppendLine("/");
+            // PL/SQL ブロックは「/」のみの行で実行させる。通常の文は ; で実行されるので置かない
+            if (OracleSchemaSyncExecutor.IsPlSqlBlock(statements[i]))
+            {
+                sb.AppendLine("/");
+            }
         }
 
         return sb.ToString();

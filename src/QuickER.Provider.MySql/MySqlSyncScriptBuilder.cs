@@ -323,9 +323,14 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
         var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
-        var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
-            item.Relationship
-        );
+        var referentialActions = MySqlReferentialAction.BuildClause(item.Relationship);
+
+        // InnoDB で効かない SET DEFAULT は句を省き、その旨を残す（DDL 生成と同じ注意コメント）
+        if (MySqlReferentialAction.UsesSetDefault(item.Relationship))
+        {
+            sb.AppendLine(MySqlReferentialAction.SetDefaultNote);
+        }
+
         // 複合外部キーは構成列を宣言順にカンマ区切りで並べる（単列なら従来と同一の出力）
         var childColumnList = string.Join(
             ", ",

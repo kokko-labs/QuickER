@@ -37,10 +37,11 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
     /// <inheritdoc />
     public string DefaultDataType => "INT";
 
-    // 型名は英字・アンダースコアで始まり英数字・アンダースコアを許容する。
+    // 型名は英字・アンダースコアで始まり英数字・アンダースコアを許容する語の並び（double precision・
+    // character varying のような複数語の別名を含む。語の間の空白は SqliteTypeAlias が 1 つへ畳む）。
     // 末尾の括弧内には長さ（数値または MAX）／精度・スケールを取る。
     [GeneratedRegex(
-        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*(\(\s*(?<arg1>max|-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\))?\s*$",
+        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_]*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)*)\s*(\(\s*(?<arg1>max|-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\))?\s*$",
         RegexOptions.IgnoreCase
     )]
     private static partial Regex TypePattern();
@@ -62,7 +63,7 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
             return false;
         }
 
-        var name = NormalizeAlias(match.Groups["name"].Value.ToLowerInvariant());
+        var name = SqliteTypeAlias.Resolve(match.Groups["name"].Value);
         string? arg1 = match.Groups["arg1"].Success ? match.Groups["arg1"].Value : null;
         string? arg2 = match.Groups["arg2"].Success ? match.Groups["arg2"].Value : null;
 
@@ -295,30 +296,6 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
                 return false;
         }
     }
-
-    /// <summary>SQLite / 他方言由来の型別名を代表表記へ解決する（例: <c>numeric</c> → <c>decimal</c>）</summary>
-    /// <remarks>
-    /// SQLite の型親和性は名称の部分一致で決まるが、本カタログは宣言型を厳密名で扱うため、
-    /// 代表的な別名のみを明示的に正規化する。SQLite の伝統キーワード（<c>integer</c> / <c>boolean</c> 等）や
-    /// 他方言由来の別名（<c>numeric</c> / <c>character varying</c> 等）を SQL Server 風の代表名へ寄せる。
-    /// </remarks>
-    private static string NormalizeAlias(string name) =>
-        name switch
-        {
-            // SQLite の INTEGER は最大 8 バイト格納（EF Core も long 対応）のため Int64 として扱う
-            "integer" => "bigint",
-            "int4" => "int",
-            "int8" => "bigint",
-            "int2" => "smallint",
-            "boolean" or "bool" => "bit",
-            "numeric" => "decimal",
-            "double" or "double precision" => "float",
-            "character varying" => "varchar",
-            "character" => "char",
-            "guid" => "uniqueidentifier",
-            "timestamp" => "datetime2",
-            _ => name,
-        };
 
     private static bool TryParseLength(
         string? arg1,
