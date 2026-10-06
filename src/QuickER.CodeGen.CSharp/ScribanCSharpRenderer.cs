@@ -384,8 +384,7 @@ internal sealed class ScribanCSharpRenderer
             // per-entity 契約・DI の出力は従来と同一。ON は純粋に追加的で、リモート面と転送 DI 登録が増えるだけ
             // （I{Entity}Repository は全機能面のまま）。固定 infra の基底分割（IRemoteRepositoryCore）は常時出力する（非破壊）。
             // リモートサービス生成（remote_services）はリモート面を前提とするため自動的に含意する。
-            ["remote_contracts"] =
-                options.GenerateRemoteContracts || options.GenerateRemoteServices,
+            ["remote_contracts"] = options.GeneratesRemoteContracts,
             // リモート面の HTTP クライアント／サーバー実装を生成するか。クライアント固定 infra（RemoteJson・
             // RemoteRepositoryException・HttpRemoteRepositoryCore 等）と per-entity クライアント・DI 登録の出力を制御する。
             ["remote_services"] = options.GenerateRemoteServices,

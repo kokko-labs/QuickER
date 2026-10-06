@@ -222,6 +222,13 @@ public sealed record CodeGenerationOptions
     /// </remarks>
     public bool GenerateSyncSupport { get; init; }
 
+    /// <summary>
+    /// リモート面（<c>I{Entity}RemoteRepository</c>）を生成するか（<see cref="GenerateRemoteContracts"/>、またはそれを含意する
+    /// <see cref="GenerateRemoteServices"/>）。リモート面を生成する構成では、エンティティ固有の契約（Stream アクセサ・
+    /// EditModel の DB 照合の引数）もリモート面へ置く
+    /// </summary>
+    public bool GeneratesRemoteContracts => GenerateRemoteContracts || GenerateRemoteServices;
+
     /// <summary>Repository 契約（共通契約バケット）の生成が必要か（QuickER 版 / EF Core / インメモリのいずれかが有効）</summary>
     public bool GeneratesRepositoryContract =>
         GenerateRepositories || GenerateEfCoreRepositories || GenerateInMemoryRepositories;

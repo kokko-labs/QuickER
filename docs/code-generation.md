@@ -738,6 +738,9 @@ if (!await editModel.ValidateUniqueAsync(repository))
 ```
 
 It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties.
+Every confirmed value goes onto the entity, so a user-defined check sees the whole row, not only the constraint's columns.
+A value-type property with no input cannot reach the entity (its property is not nullable and would hold the CLR default), and neither can a column the edit model leaves out (array and `inet` columns).
+A violation that names such a property is dropped, so a constraint over it is not checked, while every other constraint still is.
 A violation with no property names, or with names that do not belong to the edit model, becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns.
 The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors; it clears its own findings only, so what the check among the siblings reported stays.
 A model marked for removal returns `true` without querying at all, in line with every other read of the validation state.
@@ -1733,6 +1736,7 @@ Semantics:
 
 - **Return value.**
   `Read` returns `true` once it has written to the destination, and an empty blob is also `true`; no row or a NULL column returns `false` and writes nothing to the destination.
+  `Read...ToFileAsync` reads into a temporary file in the same folder and replaces the destination only when `Read` returns `true`, so `false`, an exception or a cancellation leaves an existing file as it was.
   `Write` returns `true` if it could update, `false` if there is no row.
   This matches the bool convention of the existing `UpdateAsync`.
 - **`Write(id, null)`** sets the column to `NULL`, which is how an excluded column returns to the "unset" state.

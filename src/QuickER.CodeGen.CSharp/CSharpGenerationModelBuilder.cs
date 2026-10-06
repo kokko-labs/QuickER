@@ -437,6 +437,15 @@ internal sealed partial class CSharpGenerationModelBuilder
         return $"(byte[]?)entity.{propertyName}?.Clone()";
     }
 
+    /// <summary>
+    /// Entity クラス名から Repository の名前の幹（<c>I{幹}Repository</c> / <c>{幹}Repository</c> / リモートのルート名）を作る
+    /// （末尾の <c>Entity</c> を外す）
+    /// </summary>
+    private static string ToRepositoryName(string entityClassName) =>
+        entityClassName.EndsWith("Entity", StringComparison.Ordinal)
+            ? entityClassName[..^"Entity".Length]
+            : entityClassName;
+
     /// <summary>エンティティ定義から Repository の生成モデルを構築する</summary>
     /// <returns>単一主キーを持たないテーブルは対象外として null を返す</returns>
     private CSharpRepositoryModel? BuildRepositoryClass(
@@ -460,9 +469,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
-        var repositoryName = entityClassName.EndsWith("Entity", StringComparison.Ordinal)
-            ? entityClassName[..^"Entity".Length]
-            : entityClassName;
+        var repositoryName = ToRepositoryName(entityClassName);
         var keyTypeName = BuildProperty(keyColumn[0]).TypeName.TrimEnd('?');
         var queryBlocks = BuildQueryBlocks(entity, repositoryName, options, diagnostics);
         var binaryStreamBlocks = BuildBinaryStreamBlocks(
@@ -1131,8 +1138,9 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// NEL（U+0085）・FORM FEED（U+000C）・LINE SEPARATOR（U+2028）・PARAGRAPH SEPARATOR（U+2029）。
     /// 描画後のレンダラーが同メソッドで改行を正規化するため、C# 言語仕様の new-line 5 種だけを畳むと
     /// FF が実改行へ化けて通常リテラルや <c>///</c> コメントが行をまたいで壊れる。
+    /// API リファレンス（<c>.g.md</c>）の表のセルも、同じ理由でこの関数で畳む（行が割れて表が崩れるため）。
     /// </remarks>
-    private static string FoldNewLines(string text)
+    internal static string FoldNewLines(string text)
     {
         var builder = new StringBuilder(text.Length);
 

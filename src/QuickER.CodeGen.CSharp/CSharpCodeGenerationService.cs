@@ -761,10 +761,7 @@ public sealed partial class CSharpCodeGenerationService
         // 契約が無い構成では計画（GeneratedFilePlanner）が該当バケットを丸ごと落とすため、指定しても診断ゼロで
         // 何も生成されない＝「ON にしたのに出ない」が黙って通る。GUI はチェック欄ごと隠すので、実際に踏むのは
         // CLI / MCP / 手書き config だが、指定が無視される事実は生成前に伝える
-        if (
-            (options.GenerateRemoteContracts || options.GenerateRemoteServices)
-            && !options.GeneratesRepositoryContract
-        )
+        if (options.GeneratesRemoteContracts && !options.GeneratesRepositoryContract)
         {
             diagnostics.Add(
                 GenerationDiagnostic.Error(Strings.CodeGen_Error_RemoteRequiresContract)

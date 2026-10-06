@@ -742,6 +742,9 @@ if (!await editModel.ValidateUniqueAsync(repository))
 ```
 
 EditModel の確定値から Entity を組み立てて `CheckUniquenessAsync` を呼び、各違反の `PropertyNames` をバインディングプロパティ名へ写します。
+Entity へは確定値をすべて写すので、ユーザー定義チェックは制約の列だけでなく行全体を読めます。
+未入力の値型のプロパティ（Entity 側は NULL を持てず CLR の既定値になる）と、EditModel に載らない列（配列列・`inet` の列）は Entity へ値を運べません。
+そのプロパティを名指しする違反は捨てるため、その列を含む制約は照合されず、ほかの制約は照合されます。
 構成列を持たない違反（および EditModel に無いプロパティ名の違反）は、空のプロパティ名で登録されるモデルレベルエラーになり、`GetErrors(null)` で取得できます。
 呼び出しの先頭で前回の重複エラーを消すため、再検証で古いエラーが残ることはありません（消すのは自分が付けた分だけなので、要素どうしの検証が報告したエラーは残ります）。
 削除マークされた EditModel は、他の検証と同じく照会せずに `true` を返します。
@@ -1750,6 +1753,8 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 意味論です。
 
 - **戻り値**: `Read` は宛先へ書いたら `true`（空 blob も `true`）、行なし・列 NULL は `false`（宛先へ何も書きません）。
+  `Read...ToFileAsync` は同じフォルダの一時ファイルへ読み、`Read` が `true` を返したときだけ宛先と置き換えます。
+  `false`・例外・キャンセルのときは既存のファイルに触れません。
   `Write` は更新できたら `true`、行なしは `false` です。
   既存の `UpdateAsync` の bool 規約に揃えています。
 - **`Write(id, null)`** は、列を `NULL` に設定します（除外列を「未設定」へ戻す手段）。

@@ -174,6 +174,59 @@ public sealed class ApiReferenceDocTests
     /// 載ることを検証する。従来はテーブル名セルへ [Table] 用の C# リテラルエスケープ（\"）が漏れ、
     /// 説明セルも C# エスケープ済みの値を Markdown 安全化していた
     /// </summary>
+    /// <summary>
+    /// 説明に含まれる NEL・FF・LINE SEPARATOR・PARAGRAPH SEPARATOR が表の行を割らないことを検証する（英日とも）。
+    /// 描画後の ReplaceLineEndings はこれらも改行にするので、CR / LF だけを畳んでいた頃は表の行が分断されていた
+    /// </summary>
+    [Fact(DisplayName = ".g.md の表セルは CR / LF 以外の改行文字でも行が割れない")]
+    public void Markdown_Cells_FoldEveryLineBreakCharacter()
+    {
+        var diagram = BuildDiagram();
+        diagram.Entities[0].Columns[1].Description =
+            $"a{(char)0x85}b{(char)0x0C}c{(char)0x2028}d{(char)0x2029}e";
+
+        var result = Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                GenerateApiDocs = true,
+                ApiDocsLanguage = ApiDocsLanguage.Both,
+            }
+        );
+
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+
+        foreach (var file in new[] { EnglishMarkdownFile(result)!, JapaneseMarkdownFile(result)! })
+        {
+            file.Content.Should().Contain("a b c d e", file.FileName);
+            file.Content.Split(Environment.NewLine)
+                .Should()
+                .Contain(line => line.StartsWith('|') && line.Contains("a b c d e"), file.FileName);
+        }
+    }
+
+    /// <summary>
+    /// 例（CRUD の使用例）は Repository を持つ最初のエンティティを使い、Repository の無いエンティティ（複合主キー）を使わないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "使用例は Repository を持つ最初のエンティティを使う")]
+    public void Example_UsesFirstEntityWithRepository()
+    {
+        var diagram = BuildDiagram();
+
+        // 先頭の customers に複合主キーを与える＝Repository が生成されない
+        diagram.Entities[0].Columns[1].IsPrimaryKey = true;
+
+        var result = Generate(
+            diagram,
+            new CodeGenerationOptions { GenerateApiDocs = true, GenerateRepositories = true }
+        );
+        var content = EnglishMarkdownFile(result)!.Content;
+
+        content.Should().Contain("new OrderEntity()").And.NotContain("new CustomerEntity()");
+    }
+
     [Fact(DisplayName = ".g.md の表セルは生の名前・説明（Markdown 安全化のみ）で載る")]
     public void Markdown_Cells_UseRawValuesWithMarkdownEscaping()
     {

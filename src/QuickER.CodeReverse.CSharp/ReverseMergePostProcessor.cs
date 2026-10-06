@@ -197,9 +197,21 @@ public static class ReverseMergePostProcessor
                 continue;
             }
 
-            var mergedKeyByName = entity
-                .Columns.Where(column => column.IsPrimaryKey)
-                .ToDictionary(column => column.Name, StringComparer.Ordinal);
+            var mergedKeys = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
+
+            // パーサーは重複する列名を警告つきで通す。名前で引けない主キーには順序を引き継げない（どれが誰か決まらない）
+            if (
+                mergedKeys.DistinctBy(column => column.Name, StringComparer.Ordinal).Count()
+                != mergedKeys.Count
+            )
+            {
+                continue;
+            }
+
+            var mergedKeyByName = mergedKeys.ToDictionary(
+                column => column.Name,
+                StringComparer.Ordinal
+            );
             var currentOrder = existing.GetPrimaryKeyColumnsInOrder();
 
             // 主キー列の集合が一致しないなら、コードが主キーの構成を変えた＝古い順序は持ち込まない

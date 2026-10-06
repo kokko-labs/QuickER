@@ -328,12 +328,12 @@ public class UniquenessGenerationTests
     }
 
     /// <summary>
-    /// 値型（非 NULL・非参照型）の構成列は「未入力」を Entity へ写せないため、未入力のときは DB 照合を
-    /// 走らせず true を返すガードが ValidateUniqueAsync に出ることを検証する
-    /// （ガードが無いと CLR 既定値 0 のまま照合され、0 を持つ既存行との偽の重複を報告していた）。
-    /// 参照型の構成列（string）は null の組が照合対象外になるためガードは出ない
+    /// 値型（非 NULL・非参照型）の列は「未入力」を Entity へ写せないため、未入力のときは「照合できない列」として
+    /// ランタイムへ渡す判定が ValidateUniqueAsync に出ることを検証する（その列を含む制約の結果だけを捨て、ほかの制約は
+    /// 照合する。旧実装はメソッド全体を true で打ち切り、無関係な制約の照合と DB 照合の所見まで消していた）。
+    /// 参照型の列（string）は null の組が照合対象外になるため判定は出ない
     /// </summary>
-    [Fact(DisplayName = "値型の構成列が未入力なら DB 照合せず true を返すガードが出る")]
+    [Fact(DisplayName = "値型の列が未入力なら照合できない列として渡し、メソッド全体は打ち切らない")]
     public void Generate_ValueTypeConstraintMember_EmitsUnsetGuard()
     {
         var qty = new Column
@@ -352,7 +352,13 @@ public class UniquenessGenerationTests
         var content = AllContent(Generate(diagram, CreateOptions()));
 
         content.Should().Contain("if (Qty is null)");
-        content.Should().Contain("return Task.FromResult(true);");
+        content.Should().Contain("uncheckedProperties.Add(nameof(OrderEntity.Qty));");
+        content
+            .Should()
+            .NotContain(
+                "return Task.FromResult(true);",
+                "ほかの制約は照合する（メソッド全体を true で打ち切らない）"
+            );
         content
             .Should()
             .NotContain("if (Code is null)", "参照型の構成列は null の組が照合対象外＝ガード不要");

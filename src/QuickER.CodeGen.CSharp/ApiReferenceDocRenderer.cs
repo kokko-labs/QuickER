@@ -332,25 +332,26 @@ internal sealed class ApiReferenceDocRenderer
         new() { ["description"] = description, ["code"] = code };
 
     /// <summary>
-    /// 図の先頭エンティティで CRUD/クエリ例を具体化する。Repository モデルがない（対応 Repository なし）場合は null を返す。
+    /// Repository を持つ最初のエンティティ（図の並び順）で CRUD/クエリ例を具体化する。Repository を持つエンティティが無い場合は null を返す
+    /// （複合主キーなど Repository の無いエンティティで例を作ると、存在しない Repository の呼び出しを示してしまう）。
     /// </summary>
     private static ScriptObject? BuildExample(
         CSharpGenerationModel model,
         IReadOnlyDictionary<string, CSharpRepositoryModel> repositoryByEntity
     )
     {
-        var firstEntity = model.EntityClasses.FirstOrDefault();
+        var firstEntity = model.EntityClasses.FirstOrDefault(entity =>
+            repositoryByEntity.ContainsKey(entity.ClassName)
+        );
 
         if (firstEntity is null)
         {
             return null;
         }
 
-        // 例に使う主キー型・並べ替えプロパティを図から取る。Repository が対応していれば主キー型を優先する。
+        // 例に使う主キー型は Repository の主キー型、並べ替えプロパティは図から取る
         var keyProperty = firstEntity.Properties.FirstOrDefault(property => property.IsPrimaryKey);
-        var keyTypeName = repositoryByEntity.TryGetValue(firstEntity.ClassName, out var repository)
-            ? repository.KeyTypeName
-            : keyProperty?.TypeName ?? "int";
+        var keyTypeName = repositoryByEntity[firstEntity.ClassName].KeyTypeName;
 
         // 並べ替えに使う代表プロパティ（主キーがあれば主キー、なければ先頭プロパティ）
         var orderProperty =
@@ -439,11 +440,11 @@ internal sealed class ApiReferenceDocRenderer
             return string.Empty;
         }
 
-        // 改行（CRLF / LF）を半角空白へ、パイプをエスケープする（表の列崩れを防ぐ）
-        return value
-            .Replace("\r\n", " ", StringComparison.Ordinal)
-            .Replace("\n", " ", StringComparison.Ordinal)
-            .Replace("\r", " ", StringComparison.Ordinal)
+        // 改行を半角空白へ、パイプをエスケープする（表の行・列崩れを防ぐ）。改行として畳む文字は、描画後の
+        // ReplaceLineEndings が改行にする集合すべて（CR / LF だけだと NEL・FF・LINE SEPARATOR・PARAGRAPH SEPARATOR が
+        // 実改行になり表の行が割れる）
+        return CSharpGenerationModelBuilder
+            .FoldNewLines(value)
             .Replace("|", "\\|", StringComparison.Ordinal)
             .Trim();
     }

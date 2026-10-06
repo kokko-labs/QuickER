@@ -377,6 +377,192 @@ public class SyncSupportGenerationTests
     }
 
     /// <summary>
+    /// 主キーが <c>TimeSpan</c> / <c>TimeOnly</c> / <c>DateOnly</c> のテーブルでも同期支援がコンパイルでき、生成されたキーの文字列化が
+    /// 往復することを、生成→実コンパイル→記述子の <c>FormatKey</c> / <c>ParseKey</c> の実行で検証する
+    /// </summary>
+    /// <remarks>
+    /// <c>TimeSpan</c> は書式を取る <c>ToString(IFormatProvider)</c> を持たず、既定の形ではコンパイルできなかった。<c>TimeOnly</c> の
+    /// 既定の形は秒を落として往復しなかった。どちらも不変の往復書式（"c" / "O"）で書く。<c>DateOnly</c> は既定の形
+    /// （"MM/dd/yyyy"）で往復するので変えない（変えると、更新前に記録した未送信のジャーナルのキーが読めなくなる）。
+    /// 5 方言の型マッパーは <c>TimeOnly</c> / <c>DateOnly</c> を出さないので、列の型はこのテストで直接与える。
+    /// </remarks>
+    [Theory(
+        DisplayName = "TimeSpan・TimeOnly・DateOnly の主キーの同期キーはコンパイルでき、文字列化が往復する"
+    )]
+    [InlineData("TimeSpan")]
+    [InlineData("TimeOnly")]
+    [InlineData("DateOnly")]
+    public void SyncKeyText_TimeLikePrimaryKeys_RoundTrip(string keyTypeName)
+    {
+        var diagram = Diagram();
+        var keyColumnIds = new[]
+        {
+            diagram
+                .Entities.First(e => e.TableName == "sync_orders")
+                .Columns.First(c => c.Name == "order_id")
+                .Id,
+            diagram
+                .Entities.First(e => e.TableName == "sync_order_lines")
+                .Columns.First(c => c.Name == "order_id")
+                .Id,
+        };
+        var (primary, byDialect) = SyncFixtureDefinition.ResolveColumnTypes(diagram);
+
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> WithKeyType(
+            IReadOnlyDictionary<Guid, CSharpTypeInfo> types
+        )
+        {
+            var replaced = types.ToDictionary(pair => pair.Key, pair => pair.Value);
+
+            foreach (var id in keyColumnIds)
+            {
+                replaced[id] = replaced[id] with
+                {
+                    TypeName = keyTypeName,
+                    IsReferenceType = false,
+                };
+            }
+
+            return replaced;
+        }
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            WithKeyType(primary),
+            byDialect.ToDictionary(
+                pair => pair.Key,
+                pair => WithKeyType(pair.Value),
+                StringComparer.OrdinalIgnoreCase
+            ),
+            SyncOptions() with
+            {
+                GenerateRemoteServices = false,
+            }
+        );
+
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+
+        var assembly = GeneratedCodeCompiler.CompileAndLoad(
+            result,
+            $"QuickER.SyncKey.{keyTypeName}.{Guid.NewGuid():N}"
+        );
+        var descriptor = assembly
+            .GetTypes()
+            .Single(type => type.Name == "GeneratedSyncTables")
+            .GetProperty("SyncOrder")!
+            .GetValue(null)!;
+        var format = (Delegate)descriptor.GetType().GetProperty("FormatKey")!.GetValue(descriptor)!;
+        var parse = (Delegate)descriptor.GetType().GetProperty("ParseKey")!.GetValue(descriptor)!;
+
+        object[] samples = keyTypeName switch
+        {
+            "TimeSpan" =>
+            [
+                new TimeSpan(2, 13, 45, 30, 123).Add(TimeSpan.FromTicks(4)),
+                TimeSpan.FromHours(-3),
+                TimeSpan.Zero,
+            ],
+            "TimeOnly" =>
+            [
+                new TimeOnly(13, 45, 30, 123).Add(TimeSpan.FromTicks(4)),
+                TimeOnly.MinValue,
+            ],
+            _ => [new DateOnly(2026, 10, 7), DateOnly.MaxValue],
+        };
+
+        foreach (var sample in samples)
+        {
+            var text = (string)format.DynamicInvoke(sample)!;
+            parse.DynamicInvoke(text).Should().Be(sample, $"'{text}' は元の値へ戻るべき");
+        }
+
+        if (keyTypeName == "DateOnly")
+        {
+            ((string)format.DynamicInvoke(new DateOnly(2026, 10, 7))!)
+                .Should()
+                .Be(
+                    "10/07/2026",
+                    "DateOnly の文字列化は従来の形のまま（未送信のジャーナルを読めるように）"
+                );
+        }
+    }
+
+    /// <summary>
+    /// 循環参照のある図でも、循環の外のテーブルは親の後ろへ並ぶ（行き詰まったら循環に属するテーブルを宣言順で 1 つずつ先に出す）
+    /// </summary>
+    /// <remarks>
+    /// 宣言順 comments, users, teams で users ⇄ teams が循環し、comments が users を参照する図。行き詰まった時点で残りを宣言順に
+    /// 全部出していた頃は Comment → User → Team の順になり、子の comments が親の users より前へ出ていた。
+    /// </remarks>
+    [Fact(DisplayName = "循環参照のある図でも循環の外の子は親の後ろへ並ぶ")]
+    public void SyncTables_CycleDoesNotPullOutsideChildBeforeParent()
+    {
+        static Entity Table(string name, out Column id)
+        {
+            id = new Column
+            {
+                Name = "id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            };
+            return new Entity { TableName = name, Columns = [id] };
+        }
+
+        static Column AddForeignKey(Entity entity, string name)
+        {
+            var column = new Column { Name = name, DataType = "int" };
+            entity.Columns.Add(column);
+            return column;
+        }
+
+        var comments = Table("comments", out _);
+        var users = Table("users", out var userId);
+        var teams = Table("teams", out var teamId);
+        var commentUser = AddForeignKey(comments, "user_id");
+        var userTeam = AddForeignKey(users, "team_id");
+        var teamLead = AddForeignKey(teams, "lead_user_id");
+
+        Relationship Reference(Entity parent, Column parentKey, Entity child, Column childKey) =>
+            new()
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs = [new RelationshipColumnPair(parentKey.Id, childKey.Id)],
+            };
+
+        var diagram = new ErDiagram
+        {
+            TargetDbms = "sqlserver",
+            Entities = [comments, users, teams],
+            Relationships =
+            [
+                Reference(users, userId, comments, commentUser),
+                Reference(teams, teamId, users, userTeam),
+                Reference(users, userId, teams, teamLead),
+            ],
+        };
+
+        var (files, diagnostics) = Generate(diagram, SyncOptions());
+
+        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
+
+        var content = string.Concat(files.Values);
+        int IndexOf(string entityName) =>
+            content.IndexOf(
+                $"AddSyncTable<{entityName}Entity, int, I{entityName}Repository>(",
+                StringComparison.Ordinal
+            );
+
+        IndexOf("User").Should().BeGreaterThan(-1);
+        IndexOf("User").Should().BeLessThan(IndexOf("Comment"), "comments は users の子");
+        IndexOf("Comment").Should().BeLessThan(IndexOf("Team"), "循環の残りは宣言順");
+    }
+
+    /// <summary>
     /// DI 登録は FK トポロジカル順（親→子）でテーブルを並べる（エンジンはこの順で適用・逆順で削除する）。
     /// </summary>
     [Fact(
