@@ -30,7 +30,19 @@ public sealed class OracleProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new OracleSyncScriptBuilder();
 
     /// <inheritdoc />
-    public SyncDialectCapabilities SyncCapabilities { get; } = new();
+    /// <remarks>
+    /// Oracle の外部キーは <c>ON UPDATE</c> も <c>ON DELETE SET DEFAULT</c> も持たない（DDL・同期は注意コメントを
+    /// 出して句を省く）。差分の比較で図のそれらを <c>NO ACTION</c> へ畳まないと、同期しても消えない外部キーの差分が
+    /// 出続ける（既定どおり追加だけを選ぶと同じ名前の外部キーで ORA-02275）。型表記の比較は
+    /// <see cref="OracleTypeNotation.Normalize"/>（取込が返す表記）へ寄せてから行う。
+    /// </remarks>
+    public SyncDialectCapabilities SyncCapabilities { get; } =
+        new()
+        {
+            SupportsOnUpdateAction = false,
+            SupportsSetDefaultAction = false,
+            NormalizeTypeNotation = OracleTypeNotation.Normalize,
+        };
 
     /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new OracleSchemaSyncExecutor();

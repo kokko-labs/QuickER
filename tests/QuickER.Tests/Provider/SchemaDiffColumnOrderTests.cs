@@ -122,4 +122,22 @@ public class SchemaDiffColumnOrderTests
 
         changed.Should().BeEmpty();
     }
+
+    /// <summary>大文字小文字だけ違うテーブル・列が共存しても例外にならず、序数一致で組んで比べることを検証する</summary>
+    [Fact(
+        DisplayName = "大文字小文字だけ違う名前が共存しても例外にならず、序数一致の組で列順を比べる"
+    )]
+    public void DetectColumnOrderChanges_CaseOnlyDuplicates_DoNotThrow()
+    {
+        var live = new List<Entity>
+        {
+            Tbl("Customer", "Id", "Dup", "dup"),
+            Tbl("customer", "Id", "Name"),
+        };
+        var target = new List<Entity> { Tbl("Customer", "Id", "dup", "Dup") };
+
+        var changed = SchemaDiffService.DetectColumnOrderChanges(live, target);
+
+        changed.Should().ContainSingle().Which.Should().Be("Customer");
+    }
 }

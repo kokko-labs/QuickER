@@ -120,14 +120,14 @@ internal sealed partial class CSharpGenerationModelBuilder
         return resolved;
     }
 
-    /// <summary>EditModel の重複検証に載せられる構成列か（配列列は載らない）</summary>
+    /// <summary>EditModel の重複検証に載せられる構成列か（配列列・テキスト入力で扱えない型の列は載らない）</summary>
     /// <remarks>
-    /// 配列列は EditModel に投影しない（<see cref="IsArrayColumn"/>）ので、その列を参照する検証を出すと
+    /// 配列列・inet の列は EditModel に投影しない（<see cref="IsExcludedFromEditModelColumn"/>）ので、その列を参照する検証を出すと
     /// 実在しないプロパティを参照してコンパイルできない。<b>Repository 側の重複事前チェックからは外さない</b>
     /// ＝そちらが読むのは Entity のプロパティで実在し、DB 側にも制約は実在するため、そこでは弾ける。
     /// 外した制約は生成時 Info（<c>CodeGen_Info_ArrayUniqueConstraintsNotValidated</c>）で名指しする。
     /// </remarks>
-    private bool IsEditableConstraint(Column column) => !IsArrayColumn(column);
+    private bool IsEditableConstraint(Column column) => !IsExcludedFromEditModelColumn(column);
 
     /// <summary>単一主キーを持つ（＝ Repository 契約面が生成される）エンティティかどうか</summary>
     /// <remarks>Repository モデルの構築判定と EditModel の <c>ValidateUniqueAsync</c> 生成判定が同じ規則を共有する。</remarks>
@@ -490,8 +490,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             "    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:",
             "    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,",
             "    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).",
-            "    /// The same applies to the model itself: a confirmed value edited while the call is awaiting is not seen by the query that is already in flight, so the violations registered when it returns are about the values the model held when it started.",
-            "    /// (An edit clears the database findings as it happens, but the continuation then registers what it found for the previous values.) Run the check again after the last edit, before saving.",
+            "    /// When a confirmed value is edited, the model is reloaded, or another check starts while the call is awaiting, what the query found is about values the model no longer holds:",
+            "    /// nothing is registered and the call returns false, meaning that the current values were not confirmed unique. Run the check again after the last edit, before saving.",
             "    /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.",
             "    /// A WPF binding marshals that back to the UI thread by itself, so the ordinary case needs nothing; a subscriber that updates UI state directly has to marshal it at the call site.",
             "    /// </remarks>",

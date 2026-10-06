@@ -354,15 +354,28 @@ public static class UnboundedBinaryColumns
 
     /// <summary>
     /// Determines the length of the write stream (a shared check that keeps the contract uniform across dialects).
-    /// If <paramref name="source"/> is <c>CanSeek</c>, <c>Length - Position</c> is used; otherwise <paramref name="length"/>
-    /// is required (a missing value throws <see cref="ArgumentException"/>). SQLite's zeroblob requires the length to be
-    /// known before writing.
+    /// If <paramref name="source"/> is <c>CanSeek</c>, <c>Length - Position</c> is used, and a <paramref name="length"/>
+    /// given alongside it must equal that (a different value throws <see cref="ArgumentException"/>); otherwise
+    /// <paramref name="length"/> is required (a missing or negative value throws). SQLite's zeroblob requires the length to
+    /// be known before writing.
     /// </summary>
     public static long ResolveWriteLength(Stream source, long? length)
     {
         if (source.CanSeek)
         {
-            return source.Length - source.Position;
+            var remaining = source.Length - source.Position;
+
+            // A length that disagrees with the stream is a mistake on one side or the other, and either way the caller does
+            // not get the blob they asked for: rejecting it is the only answer that does not pick one of the two silently
+            if (length is { } declared && declared != remaining)
+            {
+                throw new ArgumentException(
+                    $"The length ({declared}) does not match the {remaining} bytes remaining in the seekable stream.",
+                    nameof(length)
+                );
+            }
+
+            return remaining;
         }
 
         if (length is null)
@@ -373,7 +386,164 @@ public static class UnboundedBinaryColumns
             );
         }
 
+        ArgumentOutOfRangeException.ThrowIfNegative(length.Value, nameof(length));
         return length.Value;
+    }
+
+    /// <summary>
+    /// Wraps a write source so that it yields exactly <paramref name="length"/> bytes: reading fails with
+    /// <see cref="ArgumentException"/> when <paramref name="source"/> ends before that many bytes, or still has data after them.
+    /// </summary>
+    /// <remarks>
+    /// The engines read the source until it ends, so the declared length alone does not say what gets stored: SQL Server
+    /// would store whatever the stream holds and SQLite, which allocates the declared length first, would leave the missing
+    /// tail as zeros and report success. Reading through this wrapper turns both into a failure the write rolls back.
+    /// Whether the source has data left is found out by reading one more byte, which is consumed - the write fails anyway.
+    /// The wrapper never closes or disposes <paramref name="source"/>; it stays owned by the caller.
+    /// </remarks>
+    /// <param name="source">The stream to write from.</param>
+    /// <param name="length">The number of bytes the stream must yield (the value <see cref="ResolveWriteLength"/> returned).</param>
+    public static Stream WithExactLength(Stream source, long length)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        return new ExactLengthStream(source, length);
+    }
+
+    /// <summary>The read-only stream <see cref="WithExactLength"/> returns.</summary>
+    private sealed class ExactLengthStream : Stream
+    {
+        /// <summary>The stream being read (owned by the caller).</summary>
+        private readonly Stream _source;
+
+        /// <summary>The number of bytes the stream must yield.</summary>
+        private readonly long _length;
+
+        /// <summary>The bytes still owed before the declared length is reached.</summary>
+        private long _remaining;
+
+        /// <summary>Whether the source has been confirmed to end at the declared length.</summary>
+        private bool _endVerified;
+
+        /// <summary>Wraps <paramref name="source"/> to yield exactly <paramref name="length"/> bytes.</summary>
+        public ExactLengthStream(Stream source, long length)
+        {
+            _source = source;
+            _length = length;
+            _remaining = length;
+        }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (buffer.IsEmpty)
+            {
+                return 0;
+            }
+
+            if (_remaining == 0)
+            {
+                if (!_endVerified)
+                {
+                    Span<byte> probe = stackalloc byte[1];
+                    VerifyEnd(_source.Read(probe));
+                }
+
+                return 0;
+            }
+
+            return Consume(_source.Read(buffer[..Allowed(buffer.Length)]));
+        }
+
+        public override System.Threading.Tasks.Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            System.Threading.CancellationToken cancellationToken
+        ) => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override async System.Threading.Tasks.ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            System.Threading.CancellationToken cancellationToken = default
+        )
+        {
+            if (buffer.IsEmpty)
+            {
+                return 0;
+            }
+
+            if (_remaining == 0)
+            {
+                if (!_endVerified)
+                {
+                    var probe = new byte[1];
+                    VerifyEnd(await _source.ReadAsync(probe, cancellationToken).ConfigureAwait(false));
+                }
+
+                return 0;
+            }
+
+            return Consume(
+                await _source.ReadAsync(buffer[..Allowed(buffer.Length)], cancellationToken).ConfigureAwait(false)
+            );
+        }
+
+        /// <summary>Caps a read at the bytes still owed, so the source is never read past the declared length.</summary>
+        private int Allowed(int requested) => (int)Math.Min(requested, _remaining);
+
+        /// <summary>Counts a read against the declared length; a source that ends early is rejected.</summary>
+        private int Consume(int read)
+        {
+            if (read == 0)
+            {
+                throw new ArgumentException(
+                    $"The stream ended after {_length - _remaining} bytes, before the {_length} bytes given as its length.",
+                    "length"
+                );
+            }
+
+            _remaining -= read;
+            return read;
+        }
+
+        /// <summary>Checks the read past the declared length; a source that still has data is rejected.</summary>
+        private void VerifyEnd(int read)
+        {
+            if (read != 0)
+            {
+                throw new ArgumentException(
+                    $"The stream has more data than the {_length} bytes given as its length.",
+                    "length"
+                );
+            }
+
+            _endVerified = true;
+        }
+
+        public override void Flush() { }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 }
 
@@ -983,10 +1153,12 @@ public abstract class ValueObjectBaseCore<TSelf, TValue>
     {
         List<string>? errors = null;
         RunValidation(value, ref errors);
+
         if (errors is { Count: > 0 })
         {
             throw new ValueObjectValidationException(typeof(TSelf), errors);
         }
+
         return Materialize(value);
     }
 
@@ -999,12 +1171,14 @@ public abstract class ValueObjectBaseCore<TSelf, TValue>
     {
         List<string>? list = null;
         RunValidation(value, ref list);
+
         if (list is { Count: > 0 })
         {
             result = null;
             errors = list;
             return false;
         }
+
         result = Materialize(value);
         errors = Array.Empty<string>();
         return true;
@@ -1016,6 +1190,7 @@ public abstract class ValueObjectBaseCore<TSelf, TValue>
     {
         List<string>? collected = null;
         RunValidation(value, ref collected);
+
         if (collected is null or { Count: 0 })
         {
             return true;
@@ -1736,9 +1911,20 @@ public static class ValueObjectDecimalRules
 /// CSV field or a spreadsheet cell through <c>TryCreateFrom</c> / <c>CreateFrom</c> like every other value type.
 /// </para>
 /// <para>
-/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
-/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
-/// types, so a value object column and a plain column read the same text the same way.
+/// Two more shapes <c>ChangeType</c> cannot reach are handled before it: an enum, from a member name or a number, and the
+/// <see cref="DateOnly"/> / <see cref="TimeOnly"/> a driver hands back as a <see cref="DateTime"/> / <see cref="TimeSpan"/>
+/// (SQL Server reads date and time columns that way).
+/// </para>
+/// <para>
+/// <see cref="ConvertRaw"/> also reads a stored <see cref="DateTime"/> and <see cref="Guid"/> the way the SQLite driver's typed
+/// getters do: date and time text that carries an offset is converted to UTC (text without one stays Unspecified), and a 16-byte
+/// blob is a Guid. The generated repositories read most rows through those getters, so a value read through this conversion -
+/// a value object column, a <c>Query()</c> row, a raw SQL result - comes out the same as the same row read by <c>GetByIdAsync</c>.
+/// </para>
+/// <para>
+/// This is the single conversion shared by value object rewrapping, raw SQL scalars, raw SQL projection properties and the
+/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>), so a value object column and a plain column
+/// read the same text the same way.
 /// </para>
 /// <para>
 /// <see cref="ConvertInput"/> is the same conversion for a value that did not come from a database - a spreadsheet cell, a CSV
@@ -1755,7 +1941,7 @@ public static class RawValueConverter
     /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
     /// <exception cref="OverflowException">The value does not fit the target type.</exception>
     public static object ConvertRaw(object raw, Type targetType) =>
-        ConvertCore(raw, targetType, CultureInfo.InvariantCulture, allowNumericGroupSeparators: false);
+        ConvertCore(raw, targetType, CultureInfo.InvariantCulture, fromDatabase: true);
 
     /// <summary>Converts a value that came from outside the database - a spreadsheet cell, a CSV field, a form field - to the target type.</summary>
     /// <remarks>
@@ -1772,14 +1958,14 @@ public static class RawValueConverter
     /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
     /// <exception cref="OverflowException">The value does not fit the target type.</exception>
     public static object ConvertInput(object raw, Type targetType, IFormatProvider? provider) =>
-        ConvertCore(raw, targetType, provider ?? CultureInfo.InvariantCulture, allowNumericGroupSeparators: true);
+        ConvertCore(raw, targetType, provider ?? CultureInfo.InvariantCulture, fromDatabase: false);
 
-    /// <summary>Body shared by <see cref="ConvertRaw"/> and <see cref="ConvertInput"/>; the two differ only in the culture and in whether numeric text may carry group separators.</summary>
+    /// <summary>Body shared by <see cref="ConvertRaw"/> and <see cref="ConvertInput"/>; the two differ in the culture, in whether numeric text may carry group separators, and in reading a stored date and time or Guid the way the driver does.</summary>
     private static object ConvertCore(
         object raw,
         Type targetType,
         IFormatProvider provider,
-        bool allowNumericGroupSeparators
+        bool fromDatabase
     )
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
@@ -1787,6 +1973,40 @@ public static class RawValueConverter
         if (underlying.IsInstanceOfType(raw))
         {
             return raw;
+        }
+
+        // Before the numeric parse below, which would hand back the underlying integer: Type.GetTypeCode reports an enum
+        // as its underlying type, and ChangeType cannot produce an enum at all
+        if (underlying.IsEnum)
+        {
+            return ConvertEnum(raw, underlying, provider);
+        }
+
+        // A driver reads a date column as a DateTime and a time column as a TimeSpan (SQL Server does both)
+        if (underlying == typeof(DateOnly) && raw is DateTime dateTime)
+        {
+            return ToDateOnly(dateTime);
+        }
+
+        if (underlying == typeof(TimeOnly) && raw is TimeSpan timeSpan)
+        {
+            return ToTimeOnly(timeSpan);
+        }
+
+        // A value the database stored as text or a blob is read the way the SQLite driver's typed getters read it, so a row read
+        // through this conversion matches the same row read through GetDateTime / GetGuid: a date and time that carries an
+        // offset is converted to UTC (one without stays Unspecified), and a 16-byte blob is a Guid
+        if (fromDatabase)
+        {
+            if (underlying == typeof(DateTime) && raw is string dateTimeText)
+            {
+                return DateTime.Parse(dateTimeText, provider, System.Globalization.DateTimeStyles.AdjustToUniversal);
+            }
+
+            if (underlying == typeof(Guid) && raw is byte[] { Length: 16 } guidBytes)
+            {
+                return new Guid(guidBytes);
+            }
         }
 
         // Text is the only shape these types can arrive in, and none of them implements IConvertible,
@@ -1826,13 +2046,53 @@ public static class RawValueConverter
             }
         }
 
-        if (allowNumericGroupSeparators && raw is string number && ParseNumber(number, underlying, provider) is { } parsed)
+        if (!fromDatabase && raw is string number && ParseNumber(number, underlying, provider) is { } parsed)
         {
             return parsed;
         }
 
         return Convert.ChangeType(raw, underlying, provider);
     }
+
+    /// <summary>Converts a raw value to an enum: text by member name or number, anything else through the underlying integer type.</summary>
+    /// <remarks>
+    /// A number that names no member is accepted, the same as a C# cast. Text that
+    /// is neither a member name nor a number throws <see cref="FormatException"/> rather than the <see cref="ArgumentException"/>
+    /// <see cref="Enum.Parse(Type, string)"/> would, so the callers report it like any other malformed value.
+    /// </remarks>
+    private static object ConvertEnum(object raw, Type enumType, IFormatProvider provider)
+    {
+        if (raw is string text)
+        {
+            return Enum.TryParse(enumType, text, ignoreCase: false, out var parsed)
+                ? parsed!
+                : throw new FormatException($"'{text}' is neither a member name nor a number of {enumType.Name}.");
+        }
+
+        return Enum.ToObject(enumType, Convert.ChangeType(raw, Enum.GetUnderlyingType(enumType), provider));
+    }
+
+    /// <summary>Converts a DateTime to a DateOnly, refusing one that carries a time of day.</summary>
+    /// <remarks>
+    /// A date column comes back at midnight, so the time is the part a date cannot hold. A value with a time of day was read
+    /// from a column that is not a date - a datetime2 projected into a DateOnly property, say - and dropping the time there
+    /// would change the value without a word, so it fails like any other value that does not fit its target.
+    /// </remarks>
+    private static DateOnly ToDateOnly(DateTime value) =>
+        value.TimeOfDay == TimeSpan.Zero
+            ? DateOnly.FromDateTime(value)
+            : throw new InvalidCastException($"The DateTime value {value:O} carries a time of day and cannot be read as a DateOnly.");
+
+    /// <summary>Converts a TimeSpan to a TimeOnly, refusing one outside a single day.</summary>
+    /// <remarks>
+    /// A time column comes back as a span within one day. A negative span or one of a day or more does not name a time of day
+    /// (<see cref="TimeOnly.FromTimeSpan"/> would throw <see cref="ArgumentOutOfRangeException"/>), so it fails as a value
+    /// that does not fit its target.
+    /// </remarks>
+    private static TimeOnly ToTimeOnly(TimeSpan value) =>
+        value >= TimeSpan.Zero && value < TimeSpan.FromDays(1)
+            ? TimeOnly.FromTimeSpan(value)
+            : throw new OverflowException($"The TimeSpan value {value} is not a time of day and cannot be read as a TimeOnly.");
 
     /// <summary>Parses numeric text with group separators allowed, or returns null when the target is not a number.</summary>
     /// <remarks>
@@ -2178,6 +2438,14 @@ public abstract class EditModelBaseCore
     /// </summary>
     /// <remarks>An entry is removed as soon as both of its slots are empty, which is what keeps <c>Count</c> a valid "are there any" test.</remarks>
     private readonly Dictionary<string, DuplicateErrors> _duplicateErrors = new();
+
+    /// <summary>Counts the times the database check's findings were withdrawn, so a check can tell that what it found has gone stale while it was awaiting.</summary>
+    /// <remarks>
+    /// It moves on every withdrawal of the <see cref="DuplicateErrorSource.Database"/> findings - an edit of a confirmed value,
+    /// a load, a cancelled edit, and the start of another check - whether or not there was anything to clear. Edit models are
+    /// not thread-safe, so a plain field is enough.
+    /// </remarks>
+    private int _databaseCheckGeneration;
 
     /// <summary>An input error message together with the check that registered it.</summary>
     private readonly record struct InputError(string Message, bool FromRequiredCheck);
@@ -3216,6 +3484,12 @@ public abstract class EditModelBaseCore
     /// <summary>Shared implementation of the two ClearDuplicateErrors overloads (null clears every source).</summary>
     private void ClearDuplicateErrorsCore(DuplicateErrorSource? source)
     {
+        // Before the early return: a check in flight has to learn that its values changed even when nothing was registered yet
+        if (source is null or DuplicateErrorSource.Database)
+        {
+            _databaseCheckGeneration++;
+        }
+
         if (_duplicateErrors.Count == 0)
         {
             return;
@@ -3319,6 +3593,12 @@ public abstract class EditModelBaseCore
     /// siblings reported stays.
     /// </para>
     /// <para>
+    /// The findings are registered only if they are still about the values the model holds. When a confirmed value is edited,
+    /// the model is reloaded or its edit cancelled, or another check starts while the query is out, what the query found is
+    /// about values the model no longer holds: nothing is registered and the result is <c>false</c>, meaning that the current
+    /// values were not confirmed unique. Run the check again.
+    /// </para>
+    /// <para>
     /// A model marked for removal passes without a query, the same as every other read of the validation state
     /// (<see cref="Validate"/>, the error collection, and the check among the siblings all skip it): only its key reaches the
     /// save, so a duplicate in a value that is about to be deleted must not block one. The error store is left untouched, so a
@@ -3343,10 +3623,17 @@ public abstract class EditModelBaseCore
         }
 
         ClearDuplicateErrors(DuplicateErrorSource.Database);
+        var generation = _databaseCheckGeneration;
 
         var violations = await repository
             .CheckUniquenessAsync(entity, cancellationToken)
             .ConfigureAwait(false);
+
+        // The values changed while the query was out, so its findings would land on values it did not check
+        if (generation != _databaseCheckGeneration)
+        {
+            return false;
+        }
 
         foreach (var violation in violations)
         {
@@ -3609,6 +3896,18 @@ public static class EditModelUniquenessValidator
             model.ClearDuplicateErrors(DuplicateErrorSource.Siblings);
         }
 
+        return ValidateCleared(targets);
+    }
+
+    /// <summary>Body of <see cref="Validate"/> for models whose previous findings of this check are already cleared and that are not deletion targets.</summary>
+    /// <remarks>
+    /// <c>EditModelCollection.Validate</c> has to clear those findings before it validates each element (a stale one would make
+    /// the element look invalid), so it calls this directly rather than having them cleared a second time.
+    /// </remarks>
+    /// <param name="targets">The edit models to compare with each other, none of them marked for removal.</param>
+    internal static bool ValidateCleared<T>(IReadOnlyList<T> targets)
+        where T : EditModelBaseCore
+    {
         if (targets.Count == 0)
         {
             return true;
@@ -3738,7 +4037,8 @@ public sealed record EditModelError(string Path, string Property, string Message
 /// format is what the screen has always shown and there is nothing extra to carry. Only a value that does hold a sub-second
 /// part is rendered through a pattern that appends it, because otherwise the input string would not describe the value it was
 /// derived from: the next commit of that field (its LostFocus re-parses the text through the binding setter) would write the
-/// truncated instant back over the stored one.
+/// truncated instant back over the stored one. <see cref="TimeOnly"/> is the one type whose own <c>ToString()</c> drops a
+/// larger part - the seconds - so its overload keeps that form only for a value on a whole minute.
 /// </para>
 /// <para>
 /// The fraction is written with a literal <c>.</c> and no trailing zeros, whatever the culture's decimal separator is. It has
@@ -3789,16 +4089,20 @@ public static class EditModelInputFormat
 
     /// <summary>Renders a <see cref="TimeOnly"/> confirmed value (null becomes an empty string).</summary>
     /// <remarks>
-    /// A value with no sub-second part keeps the short time its own <c>ToString()</c> writes, seconds and all left out as
-    /// before. Only a value that holds one switches to the long time pattern, which is the shortest form that can show it.
+    /// Unlike the other types, the own <c>ToString()</c> of a <see cref="TimeOnly"/> writes the short time, which leaves the
+    /// seconds out. So only a value on a whole minute keeps that form; a value with seconds is written in the culture's long
+    /// time pattern, and a value with a sub-second part in that pattern with the fraction attached. Each is the shortest form
+    /// that still shows the whole value, so editing another field never writes back a time cut down to the minute.
     /// </remarks>
     public static string Format(TimeOnly? value) =>
         value is not { } resolved ? string.Empty
-        : !HasFraction(resolved.Ticks) ? resolved.ToString()
-        : resolved.ToString(
-            FractionalTimePattern(CultureInfo.CurrentCulture),
-            CultureInfo.CurrentCulture
-        );
+        : HasFraction(resolved.Ticks)
+            ? resolved.ToString(
+                FractionalTimePattern(CultureInfo.CurrentCulture),
+                CultureInfo.CurrentCulture
+            )
+        : resolved.Second != 0 ? resolved.ToLongTimeString()
+        : resolved.ToString();
 
     /// <summary>Whether the tick count carries a part smaller than a second.</summary>
     private static bool HasFraction(long ticks) => ticks % TimeSpan.TicksPerSecond != 0;
@@ -4375,6 +4679,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     public bool Validate(bool includeChildren = true)
     {
         var valid = true;
+        var targets = new List<T>(Count);
 
         foreach (var item in this)
         {
@@ -4388,6 +4693,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
             // them would make this element look invalid even after the duplication was resolved. Findings of the database check
             // are left alone (they are cleared and re-registered by that check instead).
             item.ClearDuplicateErrors(DuplicateErrorSource.Siblings);
+            targets.Add(item);
 
             // Do not short-circuit, so that errors are registered for every element.
             if (!item.Validate(includeChildren))
@@ -4398,7 +4704,8 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 
         // Detect values duplicated among the elements themselves (the UNIQUE constraints declared on the edit model class).
         // It runs after every element has been validated, so the duplicate-value errors are registered on top of the fresh per-element errors.
-        if (!EditModelUniquenessValidator.Validate(this))
+        // The elements' previous findings were cleared above, so the check starts from them as they are.
+        if (!EditModelUniquenessValidator.ValidateCleared(targets))
         {
             valid = false;
         }
@@ -4526,7 +4833,8 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
             );
         }
 
-        if (count < 0 || index + count > Count)
+        // Compared as Count - index (index is already within 0..Count), because index + count can overflow and pass the check
+        if (count < 0 || count > Count - index)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(count),
@@ -5075,7 +5383,8 @@ public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity,
     /// </para>
     /// <para>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> inside a single <see cref="ExecuteSqlAsync"/> call.
+    /// write the transaction into the SQL of a single <see cref="ExecuteSqlAsync"/> call, in the database's own syntax
+    /// (<c>BEGIN TRAN ... COMMIT</c> on SQL Server, <c>BEGIN; ... COMMIT;</c> on SQLite).
     /// </para>
     /// </remarks>
     /// <param name="sql">The DML statement to execute.</param>
@@ -5171,7 +5480,8 @@ public partial interface ISqlExecutor
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
+    /// write the transaction into the SQL of a single call, in the database's own syntax (<c>BEGIN TRAN ... COMMIT</c> on
+    /// SQL Server, <c>BEGIN; ... COMMIT;</c> on SQLite).
     /// </remarks>
     /// <param name="sql">The DML statement to execute.</param>
     /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
@@ -5371,7 +5681,7 @@ public interface ISaveHookContext
     /// <param name="propertyName">The C# property name of the target column (use <c>nameof</c>).</param>
     /// <param name="key">The primary key value of the target row.</param>
     /// <param name="source">The stream to write (<c>null</c> for SET NULL).</param>
-    /// <param name="length">The length, required when <c>source.CanSeek</c> is false (omitting it throws <see cref="ArgumentException"/>).</param>
+    /// <param name="length">The length, required when <c>source.CanSeek</c> is false (omitting it throws <see cref="ArgumentException"/>). The stream must yield exactly this many bytes: a length that disagrees with a seekable stream, or a stream that ends early or runs on, throws <see cref="ArgumentException"/> and nothing is written.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> WriteBinaryColumnAsync(
         string propertyName,
@@ -5889,6 +6199,8 @@ public static class RawSqlMapper
             || actual == typeof(decimal)
             || actual == typeof(DateTime)
             || actual == typeof(DateTimeOffset)
+            || actual == typeof(DateOnly)
+            || actual == typeof(TimeOnly)
             || actual == typeof(TimeSpan)
             || actual == typeof(Guid)
             || actual == typeof(byte[]);
@@ -6221,6 +6533,32 @@ public static class QueryValueEvaluator
             case NewArrayExpression { NodeType: ExpressionType.NewArrayInit } newArray:
                 return CreateArray(newArray);
 
+            // The value-only conditions a predicate folds before translating ("filter == null || ...") are evaluated directly,
+            // so the common "no filter when null" form does not compile an expression tree on every query. Only the built-in
+            // operators qualify (Method is null): a user-defined operator is a method call and keeps to the compiling fallback.
+            // && and || short-circuit from the left as C# does
+            case BinaryExpression { NodeType: ExpressionType.AndAlso, Method: null } and:
+                return (bool)Evaluate(and.Left)! && (bool)Evaluate(and.Right)!;
+
+            case BinaryExpression { NodeType: ExpressionType.OrElse, Method: null } or:
+                return (bool)Evaluate(or.Left)! || (bool)Evaluate(or.Right)!;
+
+            case UnaryExpression { NodeType: ExpressionType.Not, Method: null } not
+                when not.Type == typeof(bool):
+                return !(bool)Evaluate(not.Operand)!;
+
+            case BinaryExpression
+            {
+                NodeType: ExpressionType.Equal or ExpressionType.NotEqual,
+            } equality
+                when equality.Type == typeof(bool) && IsBuiltInEquality(equality):
+                var equal = AreBuiltInEqual(
+                    equality.Left.Type,
+                    Evaluate(equality.Left),
+                    Evaluate(equality.Right)
+                );
+                return equality.NodeType == ExpressionType.Equal ? equal : !equal;
+
             // Everything else (arithmetic, conditionals, constructor calls, etc.) is evaluated by compiling the expression tree (compatibility-first fallback)
             default:
                 return CompileAndInvoke(expression);
@@ -6272,6 +6610,45 @@ public static class QueryValueEvaluator
             !convert.Operand.Type.IsValueType
             && convert.Type.IsAssignableFrom(convert.Operand.Type)
         );
+
+    /// <summary>Whether an equality is the language's own: no operator method, or string's == / != (ordinal equality).</summary>
+    private static bool IsBuiltInEquality(BinaryExpression equality) =>
+        equality.Method is null
+        || (
+            equality.Method.DeclaringType == typeof(string)
+            && equality.Method.Name is "op_Equality" or "op_Inequality"
+        );
+
+    /// <summary>Compares two evaluated operands with the meaning C#'s built-in == gives the operand type.</summary>
+    /// <remarks>
+    /// Null equals only null (for a nullable value type this is the lifted ==). A string compares ordinally, any other reference
+    /// type by reference, and a value type by value - except that floating-point == holds NaN unequal to itself where Equals
+    /// does not, so those two are compared with their own operator.
+    /// </remarks>
+    private static bool AreBuiltInEqual(Type operandType, object? left, object? right)
+    {
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        if (operandType == typeof(string))
+        {
+            return string.Equals((string)left, (string)right, StringComparison.Ordinal);
+        }
+
+        if (!(Nullable.GetUnderlyingType(operandType) ?? operandType).IsValueType)
+        {
+            return ReferenceEquals(left, right);
+        }
+
+        return left switch
+        {
+            double leftDouble => leftDouble == (double)right,
+            float leftFloat => leftFloat == (float)right,
+            _ => left.Equals(right),
+        };
+    }
 
     /// <summary>Builds the array an inline initializer denotes from its evaluated elements.</summary>
     private static object CreateArray(NewArrayExpression newArray)
@@ -6685,6 +7062,41 @@ public sealed class IncludeNode
     }
 }
 
+/// <summary>Turns a key value into the form an Include (or a cascade) matches a principal key against a foreign key with.</summary>
+/// <remarks>
+/// The two ends of a relationship need not share a CLR type: a SQLite <c>INTEGER</c> primary key is a <c>long</c> while an
+/// <c>INT</c> foreign key referring to it is an <c>int</c>, and the value objects of the two columns can differ as well. Boxed,
+/// <c>(object)1L</c> and <c>(object)1</c> are not equal, so matching the raw values left the navigation silently empty.
+/// Every match on the CLR side goes through this one rule: a value object is opened to its underlying value, an integer
+/// that fits in a <c>long</c> becomes a <c>long</c>, and a binary key (<c>byte[]</c>) becomes the hexadecimal text of its
+/// bytes (an array compares by reference, so two reads of the same key would never meet). Anything else is returned as it
+/// is. The result is for matching only: a query that needs the key as a value binds the original one.
+/// </remarks>
+public static class IncludeKeys
+{
+    /// <summary>Returns the comparable form of a key value (null stays null).</summary>
+    public static object? Normalize(object? key)
+    {
+        if (key is IValueObjectCore valueObject)
+        {
+            key = valueObject.UnderlyingValue;
+        }
+
+        return key switch
+        {
+            sbyte value => (long)value,
+            byte value => (long)value,
+            short value => (long)value,
+            ushort value => (long)value,
+            int value => (long)value,
+            uint value => (long)value,
+            ulong value when value <= long.MaxValue => (long)value,
+            byte[] bytes => Convert.ToHexString(bytes),
+            _ => key,
+        };
+    }
+}
+
 /// <summary>A query that lets you specify ThenInclude (fetching descendants) after an Include.</summary>
 public sealed class IncludableSqlQuery<TEntity, TProperty>
     where TEntity : class
@@ -7078,15 +7490,15 @@ public sealed record RemoteSaveResult(
 );
 
 /// <summary>
-/// Shared reflection over an entity graph for remote transport: the cascade navigations to walk, and the tables the server
-/// collects after a save for the client to act on - the row versions (<see cref="RemoteRowVersionEntry"/>) to write back and
-/// the rows (<see cref="RemoteEntityRef"/>) a save hook skipped.
+/// Shared reflection over an entity graph for remote transport: the tables the server collects after a save for the client
+/// to act on - the row versions (<see cref="RemoteRowVersionEntry"/>) to write back and the rows
+/// (<see cref="RemoteEntityRef"/>) a save hook skipped.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Both sides identify an entity the same way - CLR type name plus the primary key serialized with
 /// <see cref="RemoteJson.Options"/> - so this single place defines the correspondence between the two.
-/// The traversal is attribute-driven ([NavigationReference(Cascade=true)]) and therefore matches the child direction the
+/// The traversal follows <see cref="EntityBaseCore.EnumerateCascadeChildren"/>, the same child direction the
 /// direct-connection graph saver walks.
 /// </para>
 /// <para>
@@ -7096,22 +7508,8 @@ public sealed record RemoteSaveResult(
 /// </remarks>
 public static class RemoteEntityGraph
 {
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> _rowVersionProperties = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo> _keyProperties = new();
-
-    /// <summary>Enumerates the cascade-target (child-direction) navigation properties.</summary>
-    public static PropertyInfo[] CascadeNavigations(Type entityType) =>
-        _cascadeNavigations.GetOrAdd(
-            entityType,
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property =>
-                        property.GetCustomAttribute<NavigationReferenceAttribute>()
-                            is { Cascade: true }
-                    )
-                    .ToArray()
-        );
 
     /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the type has no such column.</summary>
     public static PropertyInfo? RowVersionProperty(Type entityType) =>
@@ -7168,24 +7566,9 @@ public static class RemoteEntityGraph
             return;
         }
 
-        foreach (var property in CascadeNavigations(entity.GetType()))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBaseCore child)
-            {
-                CollectRowVersions(child, true, into);
-            }
-            else if (value is IEnumerable<EntityBaseCore> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        CollectRowVersions(item, true, into);
-                    }
-                }
-            }
+            CollectRowVersions(child, true, into);
         }
     }
 
@@ -7211,24 +7594,9 @@ public static class RemoteEntityGraph
             return;
         }
 
-        foreach (var property in CascadeNavigations(entity.GetType()))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBaseCore child)
-            {
-                CollectSkipped(child, true, into);
-            }
-            else if (value is IEnumerable<EntityBaseCore> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        CollectSkipped(item, true, into);
-                    }
-                }
-            }
+            CollectSkipped(child, true, into);
         }
     }
 
@@ -7373,12 +7741,16 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
         TEntity entity,
         CancellationToken cancellationToken = default
-    ) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>(
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        return InvokeAsync<IReadOnlyList<UniquenessViolation>>(
             "CheckUniqueness",
             new { entity },
             cancellationToken
         );
+    }
 
     /// <summary>Asks the server whether it is up (<c>GET {prefix}/health</c>), returning <c>false</c> instead of throwing when it is not.</summary>
     /// <remarks>
@@ -7727,10 +8099,14 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         var list = entities.ToList();
 
         // Reject before sending if any updated entity in each aggregate root (including cascade targets)
-        // still carries values in unbounded binary columns
+        // still carries values in unbounded binary columns. A null element is skipped here and on the server,
+        // the same as a direct connection ignores it, so it is sent as is
         foreach (var entity in list)
         {
-            GuardUnboundedBinaryOnSave(entity, cascadeSave);
+            if (entity is not null)
+            {
+                GuardUnboundedBinaryOnSave(entity, cascadeSave);
+            }
         }
 
         var result = await InvokeAsync<RemoteSaveResult>(
@@ -7744,7 +8120,10 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 
         foreach (var entity in list)
         {
-            AcceptChanges(entity, cascadeSave, rowVersions, skipped);
+            if (entity is not null)
+            {
+                AcceptChanges(entity, cascadeSave, rowVersions, skipped);
+            }
         }
 
         return result.Affected;
@@ -7763,24 +8142,9 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return;
         }
 
-        foreach (var property in RemoteEntityGraph.CascadeNavigations(entity.GetType()))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBaseCore child)
-            {
-                GuardUnboundedBinaryOnSave(child, true);
-            }
-            else if (value is IEnumerable<EntityBaseCore> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        GuardUnboundedBinaryOnSave(item, true);
-                    }
-                }
-            }
+            GuardUnboundedBinaryOnSave(child, true);
         }
     }
 
@@ -7817,24 +8181,9 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return;
         }
 
-        foreach (var property in RemoteEntityGraph.CascadeNavigations(entity.GetType()))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBaseCore child)
-            {
-                AcceptChanges(child, true, rowVersions, skipped);
-            }
-            else if (value is IEnumerable<EntityBaseCore> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        AcceptChanges(item, true, rowVersions, skipped);
-                    }
-                }
-            }
+            AcceptChanges(child, true, rowVersions, skipped);
         }
     }
 

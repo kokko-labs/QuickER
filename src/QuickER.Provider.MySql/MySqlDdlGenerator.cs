@@ -1,3 +1,4 @@
+using System.Text;
 using QuickER.Model;
 using QuickER.Provider;
 
@@ -24,11 +25,24 @@ public sealed class MySqlDdlGenerator : DdlGeneratorBase
     protected override string QuoteSimpleName(string name) => MySqlIdentifier.QuoteSimple(name);
 
     /// <inheritdoc />
-    protected override string SafeName(string name) => MySqlIdentifier.SafeName(name);
-
-    /// <inheritdoc />
     protected override string QuoteConstraintName(string constraintName) =>
         $"`{MySqlIdentifier.Escape(constraintName)}`";
+
+    /// <summary>参照アクション句を組み立てる（InnoDB で効かない <c>SET DEFAULT</c> は句を出さない）</summary>
+    protected override string BuildReferentialActionClause(Relationship relationship) =>
+        MySqlReferentialAction.BuildClause(relationship);
+
+    /// <summary><c>SET DEFAULT</c> を省いたことを注意コメントで残す</summary>
+    protected override void AppendBeforeForeignKeyStatement(
+        StringBuilder sb,
+        Relationship relationship
+    )
+    {
+        if (MySqlReferentialAction.UsesSetDefault(relationship))
+        {
+            sb.AppendLine(MySqlReferentialAction.SetDefaultNote);
+        }
+    }
 
     /// <summary>列定義末尾へインライン <c>COMMENT '…'</c> を付ける（説明が空なら何も付けない）</summary>
     /// <remarks>同期スクリプトの列定義再指定と同じ表記を <see cref="MySqlIdentifier.ColumnCommentClause"/> で共有する</remarks>

@@ -144,6 +144,72 @@ public class OracleSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE \"customer\" MODIFY (\"note\" VARCHAR2(200) NULL);");
     }
 
+    /// <summary>
+    /// 型だけを変える AlterColumn は NULL / NOT NULL の句を付けないことを検証する
+    /// （Oracle は今と同じ指定を ORA-01442 / ORA-01451 で拒否するため、付けると必ず失敗する）。
+    /// </summary>
+    [Theory(
+        DisplayName = "AlterColumn は NULL 許容が変わらなければ NULL / NOT NULL の句を付けない"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AlterColumn_TypeOnly_OmitsNullabilityClause(bool nullable)
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "name",
+                Column = new Column
+                {
+                    Name = "name",
+                    DataType = "VARCHAR2(100)",
+                    IsNullable = nullable,
+                },
+                OldColumn = new Column
+                {
+                    Name = "name",
+                    DataType = "VARCHAR2(50)",
+                    IsNullable = nullable,
+                },
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().Contain("ALTER TABLE \"customer\" MODIFY (\"name\" VARCHAR2(100));");
+    }
+
+    /// <summary>変更前の列があっても、NULL 許容が変わるときは句を付けることを検証する（主キーの列は NOT NULL とみなす）</summary>
+    [Fact(DisplayName = "AlterColumn は NULL 許容が変わるときだけ句を付ける")]
+    public void AlterColumn_NullabilityChange_KeepsClause()
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "name",
+                Column = new Column
+                {
+                    Name = "name",
+                    DataType = "VARCHAR2(50)",
+                    IsNullable = true,
+                },
+                OldColumn = new Column
+                {
+                    Name = "name",
+                    DataType = "VARCHAR2(50)",
+                    IsNullable = true,
+                    IsPrimaryKey = true,
+                },
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().Contain("ALTER TABLE \"customer\" MODIFY (\"name\" VARCHAR2(50) NULL);");
+    }
+
     /// <summary>DropColumn が DROP COLUMN 文を生成することを検証する</summary>
     [Fact(DisplayName = "DropColumn は DROP COLUMN を生成する")]
     public void DropColumn_GeneratesDropColumn()
@@ -380,11 +446,12 @@ public class OracleSyncScriptBuilderTests
         sql.Should().NotContain("email");
     }
 
-    // ---------------- 「/」区切り規約 ----------------
+    // ---------------- 文の区切り（SQL*Plus と同じ）----------------
 
-    /// <summary>各文が「/」のみの行で区切られることを検証する</summary>
-    [Fact(DisplayName = "各文は「/」のみの行で区切られる（SQL*Plus 流儀）")]
-    public void Statements_AreSeparatedBySlashLine()
+    /// <summary>通常の文は ; で終わり、後ろに「/」行を置かないことを検証する</summary>
+    /// <remarks>SQL*Plus の「/」は直前の文をもう一度実行するため、通常の文の後ろに置くと同じ文が 2 回走る</remarks>
+    [Fact(DisplayName = "通常の文は ; で終わり「/」行を置かない（SQL*Plus で 2 回実行させない）")]
+    public void PlainStatements_AreNotFollowedBySlashLine()
     {
         var e = new Entity { TableName = "t" };
         e.Columns.Add(
@@ -412,9 +479,10 @@ public class OracleSyncScriptBuilderTests
             }
         );
 
-        // 「/」のみの行が 2 本（各文の後）現れる
-        var slashLines = sql.Replace("\r\n", "\n").Split('\n').Count(l => l.Trim() == "/");
-        slashLines.Should().Be(2);
+        // 通常の文だけなので「/」のみの行は 1 本も無く、各文は ; で終わる
+        var lines = sql.Replace("\r\n", "\n").Split('\n');
+        lines.Count(l => l.Trim() == "/").Should().Be(0);
+        lines.Should().Contain(");").And.Contain("DROP TABLE \"u\";");
     }
 
     /// <summary>PL/SQL ブロックが END; の後に「/」行を伴うことを検証する</summary>
@@ -561,9 +629,9 @@ public class OracleSyncScriptBuilderTests
             .Contain(
                 "ALTER TABLE \"orders\" ADD CONSTRAINT \"PK_orders\" PRIMARY KEY (\"order_id\", \"line_no\");"
             );
-        // DROP（PL/SQL ブロック）と ADD は別々の文として「/」のみの行で区切られる
+        // 「/」のみの行は DROP（PL/SQL ブロック）の後ろの 1 本だけ。ADD は ; で終わる
         var slashLines = sql.Replace("\r\n", "\n").Split('\n').Count(l => l.Trim() == "/");
-        slashLines.Should().Be(2);
+        slashLines.Should().Be(1);
     }
 
     /// <summary>主キーが無いテーブルへの主キー付与でも DROP が無害な形（NO_DATA_FOUND を握り潰す）で出ることを検証する</summary>

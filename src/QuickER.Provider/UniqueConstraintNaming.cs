@@ -12,7 +12,8 @@ namespace QuickER.Provider;
 /// 制約名がモデルに無い場合の合成規則は、外部キーの <c>FK_{子}_{親}</c>（<see cref="DdlGeneratorBase"/>）と
 /// 対称に <c>UQ_{テーブル名}_{列名…}</c>（宣言順の連結）とする。規則そのものの正本は
 /// <see cref="UniqueConstraint.SynthesizeName"/>（モデル側＝Provider を参照しない MCP ツールホストとも共有する）で、
-/// 識別子として安全な形への正規化は方言ごとの <c>SafeName</c> に委ねる。
+/// テーブル名・列名の安全化も <see cref="UniqueConstraint.SynthesizeName"/> 自身が <see cref="ConstraintNames.SafeName"/> で行う
+/// （規則が方言で変わらないので、方言ごとの安全化関数は受け取らない）。
 /// </remarks>
 public static class UniqueConstraintNaming
 {
@@ -20,13 +21,11 @@ public static class UniqueConstraintNaming
     /// <param name="constraintName">モデルが保持する制約名（未設定は <c>null</c> / 空）</param>
     /// <param name="tableName">対象テーブル名</param>
     /// <param name="columnNames">構成列名（宣言順）</param>
-    /// <param name="safeName">方言別の識別子安全化関数（"." と空白を "_" へ置換する等）</param>
     /// <returns>DDL へ出力する制約名（クォートは呼び出し側の責務）</returns>
     public static string Resolve(
         string? constraintName,
         string tableName,
-        IReadOnlyList<string> columnNames,
-        Func<string, string> safeName
+        IReadOnlyList<string> columnNames
     )
     {
         if (!string.IsNullOrWhiteSpace(constraintName))
@@ -34,39 +33,31 @@ public static class UniqueConstraintNaming
             return constraintName;
         }
 
-        // 合成規則そのものはモデル側（UniqueConstraint.SynthesizeName）が正本。ここは方言別の安全化を挟むだけ
-        return UniqueConstraint.SynthesizeName(safeName(tableName), columnNames.Select(safeName));
+        // 合成規則（安全化を含む）はモデル側の UniqueConstraint.SynthesizeName が正本
+        return UniqueConstraint.SynthesizeName(tableName, columnNames);
     }
 
     /// <summary>エンティティの一意制約を「解決済み制約名 ＋ 宣言順の構成列名」へ展開する</summary>
     /// <param name="entity">対象エンティティ</param>
-    /// <param name="safeName">方言別の識別子安全化関数</param>
     /// <returns>DDL へ出力可能な一意制約の一覧（モデルの並び順を保つ）</returns>
     /// <remarks>
     /// 構成列が空の制約、およびエンティティ内で解決できないカラム ID を含む制約は黙って除外する
     /// （SQLite の同期再構築が壊れた参照を無視するのと同じ流儀。DDL 生成は編集操作ではないため
     /// 不整合を例外にせず、出力可能なものだけを出す）。
     /// </remarks>
-    public static List<ResolvedUniqueConstraint> ResolveAll(
-        Entity entity,
-        Func<string, string> safeName
-    ) => ResolveAll(entity, entity.TableName, safeName);
+    public static List<ResolvedUniqueConstraint> ResolveAll(Entity entity) =>
+        ResolveAll(entity, entity.TableName);
 
     /// <summary>エンティティの一意制約を、指定したテーブル名を合成名の基として展開する</summary>
     /// <param name="entity">対象エンティティ</param>
     /// <param name="tableName">合成名 <c>UQ_{テーブル}_{列…}</c> の基にするテーブル名</param>
-    /// <param name="safeName">方言別の識別子安全化関数</param>
     /// <returns>DDL へ出力可能な一意制約の一覧（モデルの並び順を保つ）</returns>
     /// <remarks>
     /// 差分同期はエンティティではなく差分項目の正規化済みテーブル名（<see cref="SchemaDiffService.NormalizeTable"/>）を
     /// 制約名の基にするため、テーブル名を明示できる形を用意する。除外規則（構成列が空・解決できない制約は
-    /// 黙って除外）は <see cref="ResolveAll(Entity, Func{string, string})"/> と同じ。
+    /// 黙って除外）は <see cref="ResolveAll(Entity)"/> と同じ。
     /// </remarks>
-    public static List<ResolvedUniqueConstraint> ResolveAll(
-        Entity entity,
-        string tableName,
-        Func<string, string> safeName
-    )
+    public static List<ResolvedUniqueConstraint> ResolveAll(Entity entity, string tableName)
     {
         var resolved = new List<ResolvedUniqueConstraint>();
 
@@ -79,7 +70,7 @@ public static class UniqueConstraintNaming
 
             resolved.Add(
                 new ResolvedUniqueConstraint(
-                    Resolve(constraint.Name, tableName, columnNames, safeName),
+                    Resolve(constraint.Name, tableName, columnNames),
                     columnNames
                 )
             );
@@ -133,13 +124,15 @@ public static class UniqueConstraintNaming
     /// 制約名は DB 側の実名と図側の未設定（<c>null</c>＝合成名）で恒常的に食い違うため、差分・計画の照合は
     /// 「どの列に一意性を課しているか」だけで行う。順序を無視するのは、UNIQUE の意味論が列の並びに依存しない
     /// ため（インデックスの走査効率は変わるが、制約としては同一）。
+    /// 各列名は「長さ:名前」の形で連結する。区切り文字だけでつなぐと、区切り文字を含む列名 1 本（<c>a|b</c>）と
+    /// 2 列（<c>a</c>, <c>b</c>）が同じシグネチャになる。
     /// </remarks>
     public static string ColumnSetSignature(IEnumerable<string> columnNames) =>
-        string.Join(
-            "|",
+        string.Concat(
             columnNames
                 .Select(name => (name ?? string.Empty).Trim().ToLowerInvariant())
                 .OrderBy(name => name, StringComparer.Ordinal)
+                .Select(name => $"{name.Length}:{name}")
         );
 }
 

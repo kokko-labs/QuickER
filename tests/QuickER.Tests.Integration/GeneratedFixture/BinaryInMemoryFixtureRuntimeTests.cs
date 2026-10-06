@@ -64,6 +64,49 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
         doc.Checksum.Should().Equal(Doc1Checksum, "有界バイナリ checksum は除外対象外＝保持される");
     }
 
+    /// <summary>
+    /// 読み取りは除外列の blob を写さない。返す行は除外列を未取得状態のまま作るので、ストアの行が大きな blob を
+    /// 持っていても、読み取りの割り当て量は blob の大きさに比例しない。
+    /// </summary>
+    /// <remarks>
+    /// 行を JSON で丸ごと複製してから除外列を捨てる形では、捨てる blob も Base64 で往復して blob の数倍を割り当てる。
+    /// 読み取りは同期で完了するため、現在のスレッドの割り当て量で測れる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Binary/InMemory] 1b: 読み取りは除外列の blob を写さない（割り当てが blob の大きさに比例しない）"
+    )]
+    public async Task Read_DoesNotCopyExcludedBlob()
+    {
+        var store = new InMemoryDataStore();
+        var documents = new InMemoryDocumentRepository(store);
+        var blob = new byte[4 * 1024 * 1024];
+
+        await documents.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 1,
+                Title = "big",
+                Payload = blob,
+                Thumb = [],
+                RowState = RowState.Added,
+            },
+            Ct
+        );
+
+        // 1 回目は JIT やキャッシュの割り当てを含むので、測る前に済ませる
+        await documents.GetByIdAsync(1, Ct);
+        await documents.Query().ToListAsync(Ct);
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var byId = await documents.GetByIdAsync(1, Ct);
+        var listed = await documents.Query().ToListAsync(Ct);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        byId!.Payload.Should().BeNull("除外列は未取得状態で返る");
+        listed.Should().ContainSingle().Which.Payload.Should().BeNull();
+        allocated.Should().BeLessThan(blob.Length / 4, "読み取りは捨てる blob を写さない");
+    }
+
     /// <summary>3. 除外列へ非空値を代入した UpdateAsync は例外になる（実 DB と同じガード）</summary>
     [Fact(DisplayName = "[Binary/InMemory] 3: 除外列へ非空値代入後の UpdateAsync が例外になる")]
     public async Task Update_WithAssignedExcludedColumn_Throws()
@@ -293,6 +336,33 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
     }
 
     // ── Stream アクセサ（Read/Write{Column}Async）のインメモリ・パリティ ──
+
+    /// <summary>Stream が length どおりのバイト数を出さない書き込みは、実 DB と同じく ArgumentException で失敗し既存の blob を変えない</summary>
+    [Fact(
+        DisplayName = "[Binary/InMemory] Stream: length と食い違う Stream は例外で既存の blob を変えない"
+    )]
+    public async Task Stream_Write_LengthMismatch_Throws_AndKeepsBlob()
+    {
+        var (_, documents) = await SeededAsync();
+
+        foreach (
+            var (
+                label,
+                source,
+                length
+            ) in QuickER.Tests.Integration.BinaryLengthMismatchCases.Create()
+        )
+        {
+            var write = async () => await documents.WritePayloadAsync(1, source, length, Ct);
+            (await write.Should().ThrowExactlyAsync<ArgumentException>(label))
+                .Which.ParamName.Should()
+                .Be("length", label);
+
+            using var destination = new MemoryStream();
+            (await documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue(label);
+            destination.ToArray().Should().Equal(Doc1Payload, label);
+        }
+    }
 
     /// <summary>Write→Read の往復でデータが一致する（MemoryStream パリティ）</summary>
     [Fact(DisplayName = "[Binary/InMemory] Stream: Write→Read の往復が一致する")]

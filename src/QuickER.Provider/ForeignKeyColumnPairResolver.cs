@@ -11,6 +11,18 @@ namespace QuickER.Provider;
 /// <param name="ChildColumn">外部キーを保有する（子）テーブル側の列名</param>
 public sealed record ForeignKeyColumnNamePair(string ParentColumn, string ChildColumn);
 
+/// <summary>外部キーとして扱えるリレーションを、親子のテーブルと列名ペアまで解決したもの</summary>
+/// <param name="Relationship">元のリレーション</param>
+/// <param name="Parent">参照先（親）のテーブル</param>
+/// <param name="Child">外部キーを持つ（子）テーブル</param>
+/// <param name="ColumnPairs">構成列の名前のペア（宣言順）</param>
+internal sealed record ResolvedForeignKeyRelationship(
+    Relationship Relationship,
+    Entity Parent,
+    Entity Child,
+    IReadOnlyList<ForeignKeyColumnNamePair> ColumnPairs
+);
+
 /// <summary>
 /// リレーションの列ペア（<see cref="Relationship.ColumnPairs"/>）を列名へ解決する共通ヘルパー。
 /// </summary>
@@ -26,6 +38,47 @@ public sealed record ForeignKeyColumnNamePair(string ParentColumn, string ChildC
 /// </remarks>
 public static class ForeignKeyColumnPairResolver
 {
+    /// <summary>外部キーとして扱えるリレーションを、親子と列名ペアまで解決して列挙する</summary>
+    /// <param name="relationships">対象のリレーション（並び順を保つ）</param>
+    /// <param name="entities">リレーションの親子を引くテーブル（同じ Id が複数あれば先のもの）</param>
+    /// <returns>多対多と、親子・列ペアを解決できないリレーションを除いたもの</returns>
+    /// <remarks>
+    /// 差分計算と同期計画が、リレーションごとにテーブル一覧を線形に探し直さずに済むよう、Id の索引を 1 回だけ作る。
+    /// </remarks>
+    internal static List<ResolvedForeignKeyRelationship> ResolveAll(
+        IEnumerable<Relationship> relationships,
+        IEnumerable<Entity> entities
+    )
+    {
+        var entitiesById = new Dictionary<Guid, Entity>();
+
+        foreach (var entity in entities)
+        {
+            entitiesById.TryAdd(entity.Id, entity);
+        }
+
+        var resolved = new List<ResolvedForeignKeyRelationship>();
+
+        foreach (var relationship in relationships)
+        {
+            if (
+                relationship.Type == RelationshipType.ManyToMany
+                || !entitiesById.TryGetValue(relationship.SourceEntityId, out var parent)
+                || !entitiesById.TryGetValue(relationship.TargetEntityId, out var child)
+                || Resolve(relationship, parent, child) is not { } columnPairs
+            )
+            {
+                continue;
+            }
+
+            resolved.Add(
+                new ResolvedForeignKeyRelationship(relationship, parent, child, columnPairs)
+            );
+        }
+
+        return resolved;
+    }
+
     /// <summary>リレーションの列ペアを列名へ解決する</summary>
     /// <param name="relationship">対象のリレーション</param>
     /// <param name="parent">起点（親・被参照）エンティティ</param>

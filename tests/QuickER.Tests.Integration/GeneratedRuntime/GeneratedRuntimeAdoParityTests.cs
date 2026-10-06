@@ -27,6 +27,77 @@ public sealed class GeneratedRuntimeAdoParityTests(SqlServerContainerFixture fix
 
     protected override ISqlExecutor CreateSqlExecutor() => new SqlExecutor(Factory());
 
+    /// <summary>
+    /// 追加（QuickER の SQL Server のみ）: BulkInsertAsync は DEFAULT 制約のある列にも null を NULL として入れる。
+    /// SqlBulkCopy は既定で null の代わりに DEFAULT を入れるため、KeepNulls が無いと行単位の InsertAsync と結果が割れる
+    /// </summary>
+    [Fact(
+        DisplayName = "[Parity] 追加: BulkInsertAsync は DEFAULT のある列にも null を NULL として入れる（InsertAsync と同じ）"
+    )]
+    public async Task BulkInsert_NullIntoColumnWithDefault_StoresNull()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        // QuickER の DDL は DEFAULT を出さないので、既存 DB を取り込んだ構成を模して後から付ける
+        await Fixture.ExecuteAsync(
+            "ALTER TABLE customers ADD CONSTRAINT DF_customers_balance DEFAULT 99 FOR balance;",
+            Ct
+        );
+
+        var repo = CreateCustomerRepository();
+        (await repo.BulkInsertAsync([NewCustomer(1, "Alice")], Ct)).Should().Be(1);
+        await repo.InsertAsync(NewCustomer(2, "Bob"), Ct);
+
+        var all = await repo.GetAllAsync(Ct);
+        all.Should().HaveCount(2);
+        all.Should()
+            .OnlyContain(c => c.Balance == null, "null を渡した列は DEFAULT でなく NULL になる");
+    }
+
+    /// <summary>
+    /// 追加（QuickER の SQL Server のみ）: BulkInsertAsync は接続文字列の Command Timeout に従う。
+    /// SqlBulkCopy は独自の BulkCopyTimeout（既定 30 秒）を持ち、接続文字列の値は届かない
+    /// </summary>
+    [Fact(
+        DisplayName = "[Parity] 追加: BulkInsertAsync は接続文字列の Command Timeout でタイムアウトする"
+    )]
+    public async Task BulkInsert_FollowsConnectionStringCommandTimeout()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var connectionString = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(
+            Fixture.ConnectionString
+        )
+        {
+            CommandTimeout = 1,
+        }.ToString();
+        var repo = new CustomerRepository(new SqlConnectionFactory(connectionString));
+
+        // 別の接続が表を排他ロックで握ったままにして、一括挿入を待たせる
+        await using var blocker = await Fixture.OpenConnectionAsync(Ct);
+        await using var transaction = (Microsoft.Data.SqlClient.SqlTransaction)
+            await blocker.BeginTransactionAsync(Ct);
+        await using (var lockCommand = blocker.CreateCommand())
+        {
+            lockCommand.Transaction = transaction;
+            lockCommand.CommandText = "SELECT COUNT(*) FROM customers WITH (TABLOCKX, HOLDLOCK);";
+            await lockCommand.ExecuteScalarAsync(Ct);
+        }
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var bulkInsert = async () => await repo.BulkInsertAsync([NewCustomer(1, "Alice")], Ct);
+
+        await bulkInsert.Should().ThrowAsync<Microsoft.Data.SqlClient.SqlException>();
+        stopwatch
+            .Elapsed.Should()
+            .BeLessThan(
+                TimeSpan.FromSeconds(15),
+                "接続文字列の 1 秒で打ち切られる（既定の 30 秒を待たない）"
+            );
+
+        await transaction.RollbackAsync(Ct);
+    }
+
     /// <summary>列判定用のプローブ（プロパティ名 A/B がそのまま列名になる）</summary>
     private sealed class ProbeRow
     {

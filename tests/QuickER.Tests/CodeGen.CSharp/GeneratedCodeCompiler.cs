@@ -114,11 +114,16 @@ internal static class GeneratedCodeCompiler
     /// </summary>
     /// <param name="result">検証対象の生成結果</param>
     /// <param name="assemblyName">コンパイル対象アセンブリ名（テストごとに一意にする）</param>
+    /// <param name="extraSources">生成物と一緒にコンパイルする追加ソース（生成物の型を静的に使う検証コードなど）</param>
     /// <remarks>
     /// 参照集合は <see cref="Compile"/> と同一（TPA＋明示追加）。ロードしたアセンブリはテストホストに
     /// 既にロード済みの同一 ID のアセンブリ（EF Core 等）へ束縛されるため、生成コードをそのまま実行できる。
     /// </remarks>
-    public static Assembly CompileAndLoad(CodeGenerationResult result, string assemblyName)
+    public static Assembly CompileAndLoad(
+        CodeGenerationResult result,
+        string assemblyName,
+        params string[] extraSources
+    )
     {
         var syntaxTrees = result
             .Files.Select(file =>
@@ -126,6 +131,16 @@ internal static class GeneratedCodeCompiler
                     file.Content,
                     new CSharpParseOptions(LanguageVersion.Latest),
                     path: file.FileName
+                )
+            )
+            .Concat(
+                extraSources.Select(
+                    (source, index) =>
+                        CSharpSyntaxTree.ParseText(
+                            source,
+                            new CSharpParseOptions(LanguageVersion.Latest),
+                            path: $"Extra{index}.cs"
+                        )
                 )
             )
             .ToArray();

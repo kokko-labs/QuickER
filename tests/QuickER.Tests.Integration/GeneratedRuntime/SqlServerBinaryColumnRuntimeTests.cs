@@ -236,6 +236,30 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
         destination.ToArray().Should().Equal(payload);
     }
 
+    /// <summary>
+    /// 4b. Stream が length どおりのバイト数を出さない書き込みは ArgumentException で失敗し、既存の blob を変えない。
+    /// SqlClient は渡された Stream を終わりまで読むので、従来は length を捨てて Stream の中身をそのまま保存していた
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/SqlServer] Stream: length と食い違う Stream は例外で既存の blob を変えない"
+    )]
+    public async Task Stream_Write_LengthMismatch_Throws_AndKeepsBlob()
+    {
+        var documents = Documents();
+
+        foreach (var (label, source, length) in BinaryLengthMismatchCases.Create())
+        {
+            var write = async () => await documents.WritePayloadAsync(1, source, length, Ct);
+            (await write.Should().ThrowExactlyAsync<ArgumentException>(label))
+                .Which.ParamName.Should()
+                .Be("length", label);
+
+            using var destination = new MemoryStream();
+            (await documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue(label);
+            destination.ToArray().Should().Equal(Doc1Payload, label);
+        }
+    }
+
     /// <summary>5. 除外の FOR JSON 縮小 SELECT: GetById / GetAll で除外列は未取得状態・有界バイナリは取得される</summary>
     [Fact(
         DisplayName = "[Binary/SqlServer] 除外(FOR JSON): GetById/GetAll で除外列は未取得状態・有界は取得"

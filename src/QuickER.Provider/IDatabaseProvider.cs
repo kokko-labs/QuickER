@@ -26,8 +26,8 @@ public sealed class SchemaImportResult
     /// </summary>
     /// <remarks>
     /// 現状は SQLite だけが埋める（他方言は空のまま）。テーブル再構築同期は意味モデルから
-    /// <c>CREATE TABLE</c> を組み立て直すため、モデルが持たない列レベル属性（<c>AUTOINCREMENT</c> /
-    /// <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> / 生成列）は再現されない。その喪失を実行前に警告するには
+    /// <c>CREATE TABLE</c> を組み立て直すため、モデルが持たない属性（列の属性・制約の句・テーブルオプション。
+    /// 一覧は <see cref="TableRebuildAttributeDetector"/>）は再現されない。その喪失を実行前に警告するには
     /// 「今 DB にある定義そのもの」が要るため、意味モデルとは別に原文を運ぶ
     /// （<see cref="SchemaAuxiliaryObject"/> へ載せると再作成ループに乗ってしまうので別枠にしている）。
     /// </remarks>

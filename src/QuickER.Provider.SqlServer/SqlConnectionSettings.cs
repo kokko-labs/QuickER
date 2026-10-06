@@ -1,5 +1,4 @@
-﻿using Microsoft.Data.SqlClient;
-using QuickER.Provider;
+﻿using QuickER.Provider;
 
 namespace QuickER.Provider.SqlServer;
 
@@ -36,47 +35,11 @@ public class SqlConnectionSettings
     public int CommandTimeoutSeconds { get; set; } = DbCommands.DefaultTimeoutSeconds;
 
     /// <summary>現在の設定値から ADO.NET の接続文字列を構築する</summary>
-    public string Build()
-    {
-        var b = new SqlConnectionStringBuilder
-        {
-            DataSource = Server,
-            InitialCatalog = Database,
-            TrustServerCertificate = TrustServerCertificate,
-            ConnectTimeout = ConnectTimeoutSeconds,
-            ApplicationName = "QuickER",
-        };
-
-        switch (AuthMode)
-        {
-            case SqlAuthMode.Windows:
-                b.IntegratedSecurity = true;
-                break;
-
-            case SqlAuthMode.SqlServer:
-                b.UserID = UserId;
-                b.Password = Password;
-                break;
-
-            case SqlAuthMode.AzureAd:
-
-                if (!string.IsNullOrWhiteSpace(UserId))
-                {
-                    // 非推奨の ActiveDirectoryPassword は使わず、対話式サインインへ誘導する
-                    b.Authentication = SqlAuthenticationMethod.ActiveDirectoryInteractive;
-                    b.UserID = UserId;
-                }
-                else
-                {
-                    // ユーザー未指定時は既定資格情報チェーン（環境変数・マネージド ID 等）に委ねる
-                    b.Authentication = SqlAuthenticationMethod.ActiveDirectoryDefault;
-                }
-
-                break;
-        }
-
-        return b.ConnectionString;
-    }
+    /// <remarks>
+    /// 組み立ては <see cref="SqlServerConnectionStringFactory.Build"/> が単一の正本（GUI・CLI の接続と同じ文字列になる）。
+    /// この型はポートを持たないので、既定以外のポートは <see cref="Server"/> に <c>host,port</c> の形で書く。
+    /// </remarks>
+    public string Build() => SqlServerConnectionStringFactory.Build(ToDbConnectionSettings());
 
     /// <summary>この設定を方言中立の <see cref="DbConnectionSettings"/> へ変換する</summary>
     /// <remarks>認証方式は <see cref="SqlAuthMode.SqlServer"/> を <see cref="DbAuthMode.UsernamePassword"/> へ対応付ける</remarks>

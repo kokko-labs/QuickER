@@ -6,14 +6,24 @@ using System.Text.RegularExpressions;
 namespace QuickER.Provider;
 
 /// <summary>
-/// テーブル再構築（rebuild 方言＝SQLite）で失われる列レベル属性を、live の <c>CREATE TABLE</c> 文から検出する。
+/// テーブル再構築（rebuild 方言＝SQLite）で失われる属性を、live の <c>CREATE TABLE</c> 文から検出する。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 再構築の <c>CREATE TABLE</c> は意味モデル（<see cref="QuickER.Model.Column"/> の 7 プロパティ）から
-/// 組み立て直すため、モデルが持たない <c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> /
-/// 生成列（<c>GENERATED ALWAYS AS</c>・省略形の <c>AS (...)</c>）は再現されずに黙って消える。
+/// 組み立て直すため、モデルが持たない次の属性は再現されずに黙って消える。
 /// インデックス・トリガーは <see cref="SchemaAuxiliaryObject"/> が CREATE 文全文で温存しているのと対照的。
+/// </para>
+/// <list type="bullet">
+///   <item>列の属性: <c>AUTOINCREMENT</c> / <c>DEFAULT</c> / <c>CHECK</c> / <c>COLLATE</c> /
+///   生成列（<c>GENERATED ALWAYS AS</c>・省略形の <c>AS (...)</c>）</item>
+///   <item>制約の句: 競合解決句（<c>ON CONFLICT</c>）と、外部キーの遅延（<c>DEFERRABLE INITIALLY DEFERRED</c>）</item>
+///   <item>テーブルオプション（最外の括弧の後ろ）: <c>WITHOUT ROWID</c> / <c>STRICT</c></item>
+/// </list>
+/// <para>
+/// 外部キーの遅延は <c>DEFERRABLE INITIALLY DEFERRED</c> の形だけを数える。SQLite で検査が遅延するのは
+/// この形だけで、<c>NOT DEFERRABLE</c> や <c>DEFERRABLE INITIALLY IMMEDIATE</c> は既定と同じ即時検査
+/// （消えても意味が変わらない）のため、数えると本当の喪失が埋もれる。
 /// </para>
 /// <para>
 /// なお <b>rowid 別名（暗黙の自動採番）は失われない</b>。SQLite では表制約形式の <c>PRIMARY KEY(x)</c> でも
@@ -21,16 +31,17 @@ namespace QuickER.Provider;
 /// そのため rowid 別名は検出対象に含めない（含めると常時警告になり、本当の喪失が埋もれる）。
 /// </para>
 /// <para>
-/// <b>検出精度の割り切り</b>: 完全な SQL パーサーは持たず、<c>CREATE TABLE</c> の最外側の括弧の中だけを
-/// 対象に、文字列リテラル（<c>'...'</c>）・引用識別子（<c>"..."</c> / <c>[...]</c> / <c>`...`</c>）・
-/// コメント（<c>--</c> / <c>/* */</c>）を取り除いてからキーワードを語境界付き・大文字小文字非依存で探す。
+/// <b>検出精度の割り切り</b>: 完全な SQL パーサーは持たず、<c>CREATE TABLE</c> の最外側の括弧の中と、
+/// その後ろ（テーブルオプション）を分けて取り出し、文字列リテラル（<c>'...'</c>）・引用識別子
+/// （<c>"..."</c> / <c>[...]</c> / <c>`...`</c>）・コメント（<c>--</c> / <c>/* */</c>）を取り除いてから
+/// キーワードを語境界付き・大文字小文字非依存で探す。
 /// 取り除いた後でも「テーブル名が DEFAULT を含む列の CHECK 式」のような入れ子の誤検出は理屈上あり得るが、
 /// これは実行を止めない警告であり、過剰に出ても害が小さい側（見落としのほうが有害）に倒している。
 /// </para>
 /// </remarks>
 public static class TableRebuildAttributeDetector
 {
-    /// <summary>検出対象のキーワード（表示にそのまま使うため SQL の綴りで持つ）</summary>
+    /// <summary>括弧の中で探す列の属性（表示にそのまま使うため SQL の綴りで持つ）</summary>
     private static readonly (string Token, Regex Pattern)[] Keywords =
     [
         ("AUTOINCREMENT", Word("AUTOINCREMENT")),
@@ -46,14 +57,35 @@ public static class TableRebuildAttributeDetector
         RegexOptions.IgnoreCase | RegexOptions.Compiled
     );
 
+    /// <summary>括弧の中で探す制約の句（列の属性の後ろに並べて報告する）</summary>
+    /// <remarks>
+    /// 外部キーの遅延は検査が実際に遅延する <c>DEFERRABLE INITIALLY DEFERRED</c> だけを数える
+    /// （クラスの remarks を参照）。報告は短い <c>DEFERRABLE</c> にする。
+    /// </remarks>
+    private static readonly (string Token, Regex Pattern)[] ClauseKeywords =
+    [
+        ("ON CONFLICT", Words("ON", "CONFLICT")),
+        ("DEFERRABLE", Words("DEFERRABLE", "INITIALLY", "DEFERRED")),
+    ];
+
+    /// <summary>最外の括弧の後ろで探すテーブルオプション</summary>
+    private static readonly (string Token, Regex Pattern)[] TableOptionKeywords =
+    [
+        ("WITHOUT ROWID", Words("WITHOUT", "ROWID")),
+        ("STRICT", Word("STRICT")),
+    ];
+
     /// <summary>
-    /// <c>CREATE TABLE</c> 文から、再構築で失われる列レベル属性のトークンを検出する。
+    /// <c>CREATE TABLE</c> 文から、再構築で失われる属性のトークンを検出する。
     /// </summary>
     /// <param name="createTableSql">live の <c>CREATE TABLE</c> 文全文（<c>null</c> / 空なら検出なし）</param>
-    /// <returns>検出したトークン（<c>AUTOINCREMENT</c> 等）を出現順・重複なしで返す。無ければ空</returns>
+    /// <returns>
+    /// 検出したトークン（<c>AUTOINCREMENT</c> 等）を重複なしで返す。並びは列の属性 → 制約の句 →
+    /// テーブルオプションで、それぞれの中は定義順。無ければ空
+    /// </returns>
     public static IReadOnlyList<string> Detect(string? createTableSql)
     {
-        var body = ExtractTableBody(createTableSql);
+        var (body, tail) = ExtractTableParts(createTableSql);
 
         if (body.Length == 0)
         {
@@ -75,6 +107,22 @@ public static class TableRebuildAttributeDetector
             found.Add("GENERATED");
         }
 
+        foreach (var (token, pattern) in ClauseKeywords)
+        {
+            if (pattern.IsMatch(body))
+            {
+                found.Add(token);
+            }
+        }
+
+        foreach (var (token, pattern) in TableOptionKeywords)
+        {
+            if (pattern.IsMatch(tail))
+            {
+                found.Add(token);
+            }
+        }
+
         return found;
     }
 
@@ -82,23 +130,32 @@ public static class TableRebuildAttributeDetector
     private static Regex Word(string keyword) =>
         new($@"\b{keyword}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    /// <summary>空白で区切られた語の並びを、語境界付き・大文字小文字非依存で探すパターンを作る</summary>
+    private static Regex Words(params string[] keywords) =>
+        new(
+            $@"\b{string.Join(@"\s+", keywords)}\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled
+        );
+
     /// <summary>
-    /// <c>CREATE TABLE ... ( ... )</c> の最外側の括弧の中身を取り出し、
-    /// 文字列リテラル・引用識別子・コメントを取り除いた文字列を返す。
+    /// <c>CREATE TABLE ... ( ... ) ...</c> を、最外側の括弧の中身（本体）とその後ろ（テーブルオプション）に分け、
+    /// それぞれから文字列リテラル・引用識別子・コメントを取り除いた文字列を返す。
     /// </summary>
     /// <remarks>
     /// テーブル名側（<c>CREATE TABLE "default_values"</c> 等）を検査対象から外すのが目的。
-    /// 括弧が見つからない（<c>CREATE TABLE x AS SELECT ...</c> 等）場合は空を返す＝検出なし。
+    /// 括弧が見つからない（<c>CREATE TABLE x AS SELECT ...</c> 等）場合は両方とも空を返す＝検出なし。
     /// </remarks>
-    private static string ExtractTableBody(string? sql)
+    private static (string Body, string Tail) ExtractTableParts(string? sql)
     {
         if (string.IsNullOrWhiteSpace(sql))
         {
-            return string.Empty;
+            return (string.Empty, string.Empty);
         }
 
         var builder = new StringBuilder(sql.Length);
+        var tail = new StringBuilder();
         var depth = 0;
+        var bodyClosed = false;
 
         for (var i = 0; i < sql.Length; i++)
         {
@@ -147,6 +204,13 @@ public static class TableRebuildAttributeDetector
                 continue;
             }
 
+            // 最外側の閉じ括弧より後ろはテーブルオプション（WITHOUT ROWID / STRICT）として別に集める
+            if (bodyClosed)
+            {
+                tail.Append(c);
+                continue;
+            }
+
             if (c == '(')
             {
                 depth++;
@@ -161,10 +225,11 @@ public static class TableRebuildAttributeDetector
             {
                 depth--;
 
-                // 最外側の閉じ括弧で本体は終わり（以降のテーブルオプションは対象外）
+                // 最外側の閉じ括弧で本体は終わり（以降はテーブルオプション）
                 if (depth == 0)
                 {
-                    break;
+                    bodyClosed = true;
+                    continue;
                 }
             }
 
@@ -174,6 +239,6 @@ public static class TableRebuildAttributeDetector
             }
         }
 
-        return builder.ToString();
+        return (builder.ToString(), tail.ToString());
     }
 }

@@ -61,7 +61,9 @@ public sealed class EditModelInputFormatTests
                 var dateTime = WholeSecond();
                 var offset = new DateTimeOffset(dateTime, TimeSpan.FromHours(9));
                 var span = new TimeSpan(0, 14, 30, 15);
-                var time = new TimeOnly(14, 30, 15);
+
+                // TimeOnly の ToString() は秒を出さない短い形式なので、秒の無い値でだけ同じ表示になる
+                var time = new TimeOnly(14, 30);
 
                 EditModelInputFormat.Format(dateTime).Should().Be(dateTime.ToString());
                 EditModelInputFormat.Format(offset).Should().Be(offset.ToString());
@@ -152,6 +154,24 @@ public sealed class EditModelInputFormatTests
                 text.Should().Contain(".1234567");
                 TimeOnly.TryParse(text, null, out var parsed).Should().BeTrue(text);
                 parsed.Ticks.Should().Be(value.Ticks, text);
+            }
+        );
+
+    [Theory(
+        DisplayName = "秒を持つ TimeOnly は秒まで出し、表示→パースで往復する（分へ切り詰めない）"
+    )]
+    [MemberData(nameof(Cultures))]
+    public void 秒を持つTimeOnlyは往復する(string culture) =>
+        InCulture(
+            culture,
+            () =>
+            {
+                var value = new TimeOnly(14, 30, 15);
+                var text = EditModelInputFormat.Format(value);
+
+                text.Should().Be(value.ToLongTimeString());
+                TimeOnly.TryParse(text, null, out var parsed).Should().BeTrue(text);
+                parsed.Should().Be(value, text);
             }
         );
 

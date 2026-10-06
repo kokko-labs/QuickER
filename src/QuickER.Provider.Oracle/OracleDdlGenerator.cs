@@ -26,9 +26,6 @@ public sealed class OracleDdlGenerator : DdlGeneratorBase
     protected override string QuoteSimpleName(string name) => OracleIdentifier.QuoteSimple(name);
 
     /// <inheritdoc />
-    protected override string SafeName(string name) => OracleIdentifier.SafeName(name);
-
-    /// <inheritdoc />
     protected override string QuoteConstraintName(string constraintName) =>
         $"\"{OracleIdentifier.Escape(constraintName)}\"";
 
@@ -52,17 +49,30 @@ public sealed class OracleDdlGenerator : DdlGeneratorBase
     /// <remarks>
     /// 本 DDL は基底の <see cref="DdlGeneratorBase.Build"/>（各文を <c>;</c> で終端）を用いるため、
     /// <c>COMMENT ON</c> も <c>;</c> 終端で出力する（同期スクリプト側の SQL*Plus「/」区切り方式とは別）。
-    /// 識別子・リテラルの整形は <see cref="OracleSyncScriptBuilder"/> の <c>COMMENT ON</c> 出力と揃える
+    /// 文の組み立ては <see cref="OracleSyncScriptBuilder"/> と同じ <see cref="OracleCommentStatement"/> を使う。
+    /// 改行・<c>&amp;</c> を含む説明は PL/SQL ブロックになるため、SQL*Plus が実行するよう後ろに <c>/</c> だけの行を置く
     /// </remarks>
     protected override void AppendDescriptions(StringBuilder sb, ErDiagram diagram) =>
         AppendDescriptionStatements(
             sb,
             diagram,
             entity =>
-                $"COMMENT ON TABLE {OracleIdentifier.Quote(entity.TableName)} "
-                + $"IS '{OracleIdentifier.EscapeStringLiteral(entity.Description)}';",
+                TerminateForDdl(
+                    OracleCommentStatement.ForTable(entity.TableName, entity.Description)
+                ),
             (entity, column) =>
-                $"COMMENT ON COLUMN {OracleIdentifier.Quote(entity.TableName)}.{OracleIdentifier.QuoteSimple(column.Name)} "
-                + $"IS '{OracleIdentifier.EscapeStringLiteral(column.Description)}';"
+                TerminateForDdl(
+                    OracleCommentStatement.ForColumn(
+                        entity.TableName,
+                        column.Name,
+                        column.Description
+                    )
+                )
         );
+
+    /// <summary>PL/SQL ブロックなら、<c>;</c> 終端の DDL の中で実行されるよう <c>/</c> だけの行を後ろに付ける</summary>
+    private static string TerminateForDdl(string statement) =>
+        OracleCommentStatement.IsBlock(statement)
+            ? statement + Environment.NewLine + "/"
+            : statement;
 }

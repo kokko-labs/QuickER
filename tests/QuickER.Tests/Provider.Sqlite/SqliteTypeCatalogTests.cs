@@ -31,7 +31,8 @@ public class SqliteTypeCatalogTests
     [InlineData("SMALLINT", CanonicalTypeKind.SmallInt)]
     [InlineData("INT", CanonicalTypeKind.Int32)]
     [InlineData("BIGINT", CanonicalTypeKind.Int64)]
-    [InlineData("REAL", CanonicalTypeKind.Float32)]
+    // REAL は 8 バイトの倍精度（REAL アフィニティ）
+    [InlineData("REAL", CanonicalTypeKind.Float64)]
     [InlineData("FLOAT", CanonicalTypeKind.Float64)]
     [InlineData("MONEY", CanonicalTypeKind.Money)]
     [InlineData("DATE", CanonicalTypeKind.Date)]
@@ -65,6 +66,30 @@ public class SqliteTypeCatalogTests
 
         ok.Should().BeTrue();
         canonical.Kind.Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 複数語の別名（他のツールや DBML から入る <c>double precision</c> / <c>character varying</c>）も解析でき、
+    /// 型マッパー（生成コードの型）と同じ結果になることを検証する（別名表は 1 つを共有する）。
+    /// </summary>
+    [Theory(DisplayName = "複数語の別名も解析でき、型マッパーと同じ型になる")]
+    [InlineData("double precision", CanonicalTypeKind.Float64, null, "double")]
+    [InlineData("DOUBLE  PRECISION", CanonicalTypeKind.Float64, null, "double")]
+    [InlineData("character varying(20)", CanonicalTypeKind.AnsiString, 20, "string")]
+    [InlineData("character  varying(20)", CanonicalTypeKind.AnsiString, 20, "string")]
+    [InlineData("character\tvarying(20)", CanonicalTypeKind.AnsiString, 20, "string")]
+    [InlineData("CHARACTER (5)", CanonicalTypeKind.AnsiFixedString, 5, "string")]
+    public void TryParse_MultiWordAliases_MatchTypeMapper(
+        string nativeType,
+        CanonicalTypeKind expected,
+        int? length,
+        string clrType
+    )
+    {
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
+        canonical.Kind.Should().Be(expected);
+        canonical.Length.Should().Be(length);
+        new SqliteCSharpTypeMapper().Map(nativeType).TypeName.Should().Be(clrType);
     }
 
     [Fact(DisplayName = "大文字小文字・空白を許容して解析できる")]
@@ -183,6 +208,7 @@ public class SqliteTypeCatalogTests
     [InlineData("NVARCHAR(99999999999)")] // int 範囲外の型引数は例外ではなく false
     [InlineData("DECIMAL(99999999999,2)")]
     [InlineData("INT[]")] // 配列表記は SQLite に無く弾かれる
+    [InlineData("unsigned big int")] // 複数語でも別名表に無ければ弾かれる
     public void TryParse_UnconvertibleTypes_ReturnsFalse(string nativeType)
     {
         Catalog.TryParse(nativeType, out _).Should().BeFalse();
@@ -311,7 +337,6 @@ public class SqliteTypeCatalogTests
     [InlineData("INT")]
     [InlineData("BIGINT")]
     [InlineData("DECIMAL(18,2)")]
-    [InlineData("REAL")]
     [InlineData("FLOAT")]
     [InlineData("MONEY")]
     [InlineData("NVARCHAR(100)")]
@@ -334,5 +359,24 @@ public class SqliteTypeCatalogTests
         Catalog.TryFormat(canonical, out var formatted).Should().BeTrue();
 
         formatted.Should().Be(nativeType);
+    }
+
+    /// <summary>
+    /// REAL アフィニティの宣言型はすべて倍精度（Float64）として読み、Float64 は従来どおり <c>FLOAT</c> と書き戻すことを
+    /// 検証する。<c>REAL</c> の綴りは型トークン経由では <c>FLOAT</c> へ畳まれるため、生成コードは元の綴りを併記する
+    /// （<c>CanonicalTypeTokenAttacher</c> の verbatim 併記）。
+    /// </summary>
+    [Theory(DisplayName = "REAL アフィニティの宣言型は Float64 として読む")]
+    [InlineData("REAL")]
+    [InlineData("FLOAT")]
+    [InlineData("DOUBLE")]
+    [InlineData("FLOAT8")]
+    public void TryParse_RealAffinity_IsFloat64(string nativeType)
+    {
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
+
+        canonical.Should().Be(new CanonicalType(CanonicalTypeKind.Float64));
+        Catalog.TryFormat(canonical, out var formatted).Should().BeTrue();
+        formatted.Should().Be("FLOAT");
     }
 }

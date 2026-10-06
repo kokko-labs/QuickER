@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Data;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,31 +34,12 @@ public class SqlServerSchemaImporter : ISchemaImporter
     {
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var result = await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
+        return await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
             .ConfigureAwait(false);
-        return new SchemaImportResult
-        {
-            Entities = result.Entities,
-            Relationships = result.Relationships,
-            Warnings = result.Warnings,
-        };
-    }
-
-    /// <summary>取得したスキーマを格納する結果 DTO</summary>
-    public sealed class SchemaResult
-    {
-        /// <summary>取得したエンティティ一覧</summary>
-        public List<Entity> Entities { get; init; } = new();
-
-        /// <summary>取得したリレーション一覧</summary>
-        public List<Relationship> Relationships { get; init; } = new();
-
-        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
-        public List<SchemaImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>指定の接続設定で接続を開きスキーマを取得する</summary>
-    public async Task<SchemaResult> ImportAsync(
+    public async Task<SchemaImportResult> ImportAsync(
         SqlConnectionSettings settings,
         CancellationToken ct = default
     )
@@ -78,7 +58,7 @@ public class SqlServerSchemaImporter : ISchemaImporter
     /// カタログ照会 1 本ごとの実行タイムアウト（秒）。既定値付きで <paramref name="ct"/> の後ろに置くのは、
     /// 既存の位置指定呼び出し（統合テストの <c>ImportAsync(conn, ct)</c>）を壊さないため。
     /// </param>
-    public async Task<SchemaResult> ImportAsync(
+    public async Task<SchemaImportResult> ImportAsync(
         SqlConnection conn,
         CancellationToken ct = default,
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
@@ -108,7 +88,7 @@ public class SqlServerSchemaImporter : ISchemaImporter
             )
         );
 
-        return new SchemaResult
+        return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
@@ -194,7 +174,8 @@ SELECT c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE,
        c.CHARACTER_MAXIMUM_LENGTH, c.NUMERIC_PRECISION, c.NUMERIC_SCALE, c.IS_NULLABLE, c.ORDINAL_POSITION,
        CASE WHEN cc.column_id IS NOT NULL OR ISNULL(gc.generated_always_type, 0) IN (1, 2) THEN 1 ELSE 0 END AS IS_COMPUTED,
        cc.definition AS COMPUTED_DEFINITION,
-       gc.generated_always_type AS GENERATED_ALWAYS_TYPE
+       gc.generated_always_type AS GENERATED_ALWAYS_TYPE,
+       c.DATETIME_PRECISION
 FROM INFORMATION_SCHEMA.COLUMNS c
 LEFT JOIN sys.computed_columns cc
        ON cc.object_id = OBJECT_ID(QUOTENAME(c.TABLE_SCHEMA) + N'.' + QUOTENAME(c.TABLE_NAME))
@@ -369,25 +350,6 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         }
     }
 
-    /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
-    /// <remarks>
-    /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
-    /// 列・主キー・説明・一意制約・外部キーが、採用したほうのエンティティへ吸い寄せられて混ざる。
-    /// カタログビューが返す名前はどのクエリでも同じ実体名なので、ここで序数一致まで求めても
-    /// 正当な行を取りこぼすことはない。
-    /// </remarks>
-    private static bool TryGetExactTable(
-        Dictionary<string, SchemaTableEntry> tables,
-        string schema,
-        string name,
-        [NotNullWhen(true)] out SchemaTableEntry? entry
-    )
-    {
-        var key = TableKey(schema, name);
-        return tables.TryGetValue(key, out entry)
-            && string.Equals(entry.Key, key, StringComparison.Ordinal);
-    }
-
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         SqlConnection conn,
@@ -405,7 +367,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
 
-            if (!TryGetExactTable(tables, schema, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, TableKey(schema, table), out var entry))
             {
                 continue;
             }
@@ -430,10 +392,16 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 : Convert.ToInt32(reader.GetValue(11));
             var isPeriodColumn = generatedAlwaysType is 1 or 2;
 
+            // 小数秒の桁数（datetime2 / time / datetimeoffset で使う）。読まないと datetime2(3) が
+            // datetime2（＝7 桁）として図へ入り、その図からの同期が精度を黙って 3 → 7 に変える
+            int? datetimePrecision = reader.IsDBNull(12)
+                ? null
+                : Convert.ToInt32(reader.GetValue(12));
+
             var col = new Column
             {
                 Name = colName,
-                DataType = FormatDataType(dataType, maxLen, numPrec, numScale),
+                DataType = FormatDataType(dataType, maxLen, numPrec, numScale, datetimePrecision),
                 IsNullable = isNullable,
                 IsComputed = isComputed,
             };
@@ -481,7 +449,13 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (!TryGetExactTable(tables, reader.GetString(0), reader.GetString(1), out var entry))
+            if (
+                !SchemaTableEntry.TryGetExact(
+                    tables,
+                    TableKey(reader.GetString(0), reader.GetString(1)),
+                    out var entry
+                )
+            )
             {
                 continue;
             }
@@ -513,7 +487,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
 
-            if (!TryGetExactTable(tables, schema, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, TableKey(schema, table), out var entry))
             {
                 continue;
             }
@@ -572,8 +546,8 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
             // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
             if (
-                !TryGetExactTable(tables, parentSchema, parentTable, out _)
-                || !TryGetExactTable(tables, refSchema, refTable, out _)
+                !SchemaTableEntry.TryGetExact(tables, TableKey(parentSchema, parentTable), out _)
+                || !SchemaTableEntry.TryGetExact(tables, TableKey(refSchema, refTable), out _)
             )
             {
                 continue;
@@ -615,7 +589,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var table = reader.GetString(2);
 
             // 衝突して捨てたテーブルの FK を、採用したほうへ付け替えない
-            if (!TryGetExactTable(tables, schema, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, TableKey(schema, table), out var entry))
             {
                 continue;
             }
@@ -650,7 +624,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 var table = reader.GetString(1);
 
                 // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
-                if (!TryGetExactTable(tables, schema, table, out _))
+                if (!SchemaTableEntry.TryGetExact(tables, TableKey(schema, table), out _))
                 {
                     continue;
                 }
@@ -666,8 +640,23 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     }
 
     /// <summary>SQL Server の型情報を <c>nvarchar(50)</c> や <c>decimal(10,2)</c> 等の表示形式へ整形する</summary>
-    /// <remarks>可変長型の最大長 -1 は <c>(max)</c> として表現する</remarks>
-    public static string FormatDataType(string dataType, int? maxLen, int? precision, int? scale)
+    /// <remarks>
+    /// 可変長型の最大長 -1 は <c>(max)</c> として表現する。数値と小数秒の桁数は書き下ろしたうえで
+    /// <see cref="SqlServerTypeNotation.Normalize"/> を通す（既定の精度・スケール 0 を省く）＝差分の比較が
+    /// 図の表記に掛ける正規化と同じ関数なので、取込の出力はその不動点になる。
+    /// </remarks>
+    /// <param name="dataType">カタログの型名（<c>DATA_TYPE</c>）</param>
+    /// <param name="maxLen">文字列・バイナリの最大長（<c>CHARACTER_MAXIMUM_LENGTH</c>）</param>
+    /// <param name="precision">数値の精度（<c>NUMERIC_PRECISION</c>）</param>
+    /// <param name="scale">数値のスケール（<c>NUMERIC_SCALE</c>）</param>
+    /// <param name="datetimePrecision">小数秒の桁数（<c>DATETIME_PRECISION</c>。datetime2 / time / datetimeoffset で使う）</param>
+    public static string FormatDataType(
+        string dataType,
+        int? maxLen,
+        int? precision,
+        int? scale,
+        int? datetimePrecision = null
+    )
     {
         var dt = dataType.ToLowerInvariant();
 
@@ -695,7 +684,18 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                     return dt;
                 }
 
-                return scale is > 0 ? $"{dt}({precision},{scale})" : $"{dt}({precision})";
+                return SqlServerTypeNotation.Normalize($"{dt}({precision},{scale ?? 0})");
+
+            case "datetime2":
+            case "time":
+            case "datetimeoffset":
+
+                if (datetimePrecision is null)
+                {
+                    return dt;
+                }
+
+                return SqlServerTypeNotation.Normalize($"{dt}({datetimePrecision})");
 
             default:
                 return dt;

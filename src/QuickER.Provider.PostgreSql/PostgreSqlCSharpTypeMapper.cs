@@ -91,6 +91,18 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
             // TimeSpan で受けると読み取り自体が InvalidCastException になる（実 PG で実測）
             "timetz" => Value("DateTimeOffset"),
             "uuid" => Value("Guid"),
+            // interval / inet / cidr は Npgsql が文字列として読めない（GetFieldValue<string> が InvalidCastException＝
+            // その列を持つ表の行の組み立てが丸ごと失敗する）。Npgsql 10 が返す CLR 型へ写す（実 PostgreSQL 16 で実測。
+            // EF Core 経由の読み書きも通る）。inet を IPAddress で読むとネットマスク（/24 等）は落ちる＝Npgsql の既定の写し方
+            "interval" => Value("TimeSpan"),
+            "inet" => new CSharpTypeInfo
+            {
+                TypeName = "System.Net.IPAddress",
+                IsReferenceType = true,
+                // EditModel は参照型の入力を文字列として代入する＝IPAddress を載せるとコンパイルできない
+                IsTextInputUnsupported = true,
+            },
+            "cidr" => Value("System.Net.IPNetwork"),
             // bytea は長さ宣言を持たず上限が分からないため無制限バイナリ
             "bytea" => Reference("byte[]", isUnboundedBinary: true),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
@@ -191,6 +203,8 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
             "timestamp with time zone" => "timestamptz",
             "time without time zone" => "time",
             "time with time zone" => "timetz",
+            // 範囲の修飾つき（interval day to second(3) 等）も同じ interval 型
+            _ when baseType.StartsWith("interval ", StringComparison.Ordinal) => "interval",
             _ => baseType,
         };
 

@@ -384,6 +384,23 @@ public class ConstraintNamesTests
         relationship.ConstraintName.Should().Be("FK_orders_customers_bill_customer_id");
     }
 
+    [Fact(DisplayName = "外部キーの実効名は、保存された名前が無ければ既定名・あればそのまま")]
+    public void EffectiveForeignKey_FallsBackToDefaultOnlyWhenUnnamed()
+    {
+        ConstraintNames
+            .EffectiveForeignKey(null, "orders", "customers")
+            .Should()
+            .Be("FK_orders_customers");
+        ConstraintNames
+            .EffectiveForeignKey("  ", " orders ", "dbo.customers")
+            .Should()
+            .Be("FK_orders_dbo_customers");
+        ConstraintNames
+            .EffectiveForeignKey("fk_custom", "orders", "customers")
+            .Should()
+            .Be("fk_custom");
+    }
+
     [Fact(DisplayName = "列ペアの無いリレーションは、既定名がふさがっていれば番号を足す")]
     public void NameUnnamedForeignKeys_NoColumnPairs_AppendsNumber()
     {
@@ -412,5 +429,46 @@ public class ConstraintNamesTests
 
         dangling.ConstraintName.Should().BeNull();
         relationship.ConstraintName.Should().BeNull();
+    }
+
+    [Fact(
+        DisplayName = "外部キー名の解決は、名前の無い同じ組の 2 本目を一意化し、図は書き換えない"
+    )]
+    public void ResolveForeignKeyNames_SamePairTwice_UniqueWithoutMutation()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var bill = Link(customers, orders, "bill_customer_id");
+        var ship = Link(customers, orders, "ship_customer_id");
+        var named = Link(customers, orders, "ship_customer_id", name: "FK_custom");
+
+        var names = ConstraintNames.ResolveForeignKeyNames(
+            [customers, orders],
+            [bill, ship, named]
+        );
+
+        names[bill].Should().Be("FK_orders_customers");
+        names[ship].Should().Be("FK_orders_customers_ship_customer_id");
+        names[named].Should().Be("FK_custom");
+        bill.ConstraintName.Should().BeNull();
+        ship.ConstraintName.Should().BeNull("名前を求めるだけで、図には書き込まない");
+    }
+
+    [Fact(
+        DisplayName = "名前を図へ書き込む NameUnnamedForeignKeys は、外部キー名の解決と同じ名前を付ける"
+    )]
+    public void NameUnnamedForeignKeys_AgreesWithResolveForeignKeyNames()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var bill = Link(customers, orders, "bill_customer_id");
+        var ship = Link(customers, orders, "ship_customer_id");
+        var resolved = ConstraintNames.ResolveForeignKeyNames([customers, orders], [bill, ship]);
+
+        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [bill, ship]);
+
+        ConstraintNames
+            .EffectiveForeignKey(bill.ConstraintName, orders.TableName, customers.TableName)
+            .Should()
+            .Be(resolved[bill]);
+        ship.ConstraintName.Should().Be(resolved[ship]);
     }
 }

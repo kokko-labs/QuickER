@@ -9,17 +9,11 @@ namespace QuickER.Tests.Provider;
 /// </summary>
 public class UniqueConstraintNamingTests
 {
-    /// <summary>テスト用の識別子安全化関数（"." と空白を "_" へ置換する。方言実装と同じ流儀）</summary>
-    private static string SafeName(string name) => name.Replace(".", "_").Replace(" ", "_");
-
     /// <summary>モデルに制約名があればそのまま返すことを検証する</summary>
     [Fact(DisplayName = "Resolve: モデルの制約名があればそのまま使う")]
     public void Resolve_UsesModelName()
     {
-        UniqueConstraintNaming
-            .Resolve("UQ_Custom", "Shop", ["Code"], SafeName)
-            .Should()
-            .Be("UQ_Custom");
+        UniqueConstraintNaming.Resolve("UQ_Custom", "Shop", ["Code"]).Should().Be("UQ_Custom");
     }
 
     /// <summary>制約名が null / 空白なら UQ_{テーブル}_{列…} を宣言順で合成することを検証する</summary>
@@ -30,17 +24,17 @@ public class UniqueConstraintNamingTests
     public void Resolve_SynthesizesName(string? name)
     {
         UniqueConstraintNaming
-            .Resolve(name, "Shop", ["Region", "Code"], SafeName)
+            .Resolve(name, "Shop", ["Region", "Code"])
             .Should()
             .Be("UQ_Shop_Region_Code");
     }
 
-    /// <summary>合成名がテーブル名・列名の双方へ SafeName を適用することを検証する</summary>
+    /// <summary>合成名がテーブル名・列名の双方へ ConstraintNames.SafeName を適用することを検証する</summary>
     [Fact(DisplayName = "Resolve: 合成名はテーブル名・列名とも SafeName で正規化する")]
     public void Resolve_AppliesSafeNameToAllParts()
     {
         UniqueConstraintNaming
-            .Resolve(null, "sales.Shop", ["Zip Code"], SafeName)
+            .Resolve(null, "sales.Shop", ["Zip Code"])
             .Should()
             .Be("UQ_sales_Shop_Zip_Code");
     }
@@ -57,7 +51,7 @@ public class UniqueConstraintNamingTests
         );
         entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [code.Id] });
 
-        var resolved = UniqueConstraintNaming.ResolveAll(entity, SafeName);
+        var resolved = UniqueConstraintNaming.ResolveAll(entity);
 
         resolved.Should().HaveCount(2);
         resolved[0].Name.Should().Be("UQ_Named");
@@ -78,6 +72,30 @@ public class UniqueConstraintNamingTests
             new UniqueConstraint { ColumnIds = [code.Id, Guid.NewGuid()] }
         );
 
-        UniqueConstraintNaming.ResolveAll(entity, SafeName).Should().BeEmpty();
+        UniqueConstraintNaming.ResolveAll(entity).Should().BeEmpty();
+    }
+
+    /// <summary>区切り文字を含む列名 1 本と、2 列の組が同じシグネチャにならないことを検証する</summary>
+    /// <remarks>
+    /// 列名を区切り文字だけでつなぐと、<c>a|b</c> という列 1 本の一意制約と (a, b) の一意制約を同じものとみなし、
+    /// 差分が片方の追加・削除を出さなくなる
+    /// </remarks>
+    [Fact(DisplayName = "ColumnSetSignature: 区切り文字を含む列名 1 本と 2 列の組を区別する")]
+    public void ColumnSetSignature_DistinguishesSeparatorInName()
+    {
+        UniqueConstraintNaming
+            .ColumnSetSignature(["a|b"])
+            .Should()
+            .NotBe(UniqueConstraintNaming.ColumnSetSignature(["a", "b"]));
+    }
+
+    /// <summary>シグネチャが大文字小文字と順序を無視することを検証する（照合の意味論は変えない）</summary>
+    [Fact(DisplayName = "ColumnSetSignature: 大文字小文字と順序は無視する")]
+    public void ColumnSetSignature_IgnoresCaseAndOrder()
+    {
+        UniqueConstraintNaming
+            .ColumnSetSignature(["Region", "Code"])
+            .Should()
+            .Be(UniqueConstraintNaming.ColumnSetSignature(["code", " region "]));
     }
 }

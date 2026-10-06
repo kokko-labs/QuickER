@@ -1,4 +1,4 @@
-﻿# Using the generated code
+# Using the generated code
 
 *English | [日本語](code-generation.ja.md)*
 
@@ -77,6 +77,16 @@ the check reads each member as an edit-model property, and an array column is no
 The repository still checks it before saving, and the constraint itself exists in the database.
 Generation names those constraints too.
 Entity properties, EF Core, the in-memory repository and remote transfer handle them as usual.
+
+SQLite's `REAL` (and `FLOAT`, `DOUBLE` and the other types SQLite treats as REAL affinity) is generated as `double`.
+SQLite's REAL holds an 8-byte double, so a single-precision `float` would drop the low digits of the value on every read and write.
+
+PostgreSQL's `interval` is generated as `TimeSpan`, `cidr` as `System.Net.IPNetwork`, and `inet` as `System.Net.IPAddress`.
+These are the types the driver (Npgsql) returns; it cannot read them as strings.
+**Reading an `inet` value as `IPAddress` drops its netmask** (the `/24` in `192.168.0.1/24`), as Npgsql does by default.
+**`inet` columns are left out of edit models and value objects** (an edit model is one text input per column and has no way to build an `IPAddress` from the input).
+As with array columns, generation names those columns, and a UNIQUE constraint that contains one is left out of the edit model's duplicate check.
+`interval` and `cidr` columns work in edit models as usual.
 
 PostgreSQL's `time with time zone` (`timetz`) is generated as `DateTimeOffset`.
 **Writing a value whose offset is not UTC needs the column type spelled out.**
@@ -279,6 +289,8 @@ On SQL Server the bulk insert runs through `SqlBulkCopy` with `CheckConstraints`
 Foreign key and CHECK constraints are honored, so a row the row-at-a-time `InsertAsync` would reject fails the copy too.
 `SqlBulkCopy` skips those checks unless asked, which would otherwise let a bulk insert write rows the rest of the API refuses.
 Triggers are deliberately not fired, since QuickER's DDL generates none.
+`KeepNulls` is always on as well, so a `null` is stored as NULL even in a column with a DEFAULT, as `InsertAsync` stores it.
+The copy times out after the connection string's `Command Timeout` (30 seconds unless it says otherwise).
 
 ### Queries (expression tree → SQL)
 
@@ -296,12 +308,16 @@ var result = await customers.Query()
 The same branching idiom as EF Core therefore writes multiple branches under `Orders`: `Include(c => c.Orders).ThenInclude(o => o.OrderLines)` followed by `Include(c => c.Orders).ThenInclude(o => o.Customer)`.
 
 Supported: equality, comparison, `&&`/`||`, `Contains`/`StartsWith`/`EndsWith` (LIKE), `Contains` on a list (IN), date parts (`Year`, etc.), `string.IsNullOrEmpty` and `string.IsNullOrWhiteSpace`, and value-object comparison.
+A nullable column can be read through `.Value` (`x.ShippedAt != null && x.ShippedAt.Value.Year == 2024`).
+A part of the predicate that reads no column, such as a closure variable, a constant, or a comparison between them, is evaluated before translation and becomes a constant condition.
+`&&` and `||` stop at the left operand when it settles the result, as C# does, so `filter == null || x.Name == filter` filters nothing when `filter` is null.
 Projection (Select), GroupBy, Join, and arithmetic expressions are not supported and throw at runtime; work around them with raw SQL or EF Core.
 
 **Navigation properties cannot appear in a predicate or an ordering key.**
 `Where(o => o.Customer == null)` throws `NotSupportedException`.
 A navigation has no column of its own, so filter on the foreign-key column instead (`Where(o => o.CustomerId == null)`).
-The in-memory and EF Core backends do translate such a predicate, so this is a limitation of the QuickER Repository rather than a shared one.
+The in-memory backend refuses it in the same way, because the rows it stores carry no navigations to evaluate.
+EF Core translates such a predicate into a join of its own, so there the limitation does not apply.
 
 #### Null compensation
 
@@ -368,13 +384,18 @@ This is worth knowing wherever one predicate has to hold across backends.
 A hybrid build runs the identical predicate on two engines, so a search that is case-insensitive on the server can be case-sensitive on the local side.
 Multi-target generation is one such build; a remote repository against the server with a local one against the copy is another.
 
-In a `Query()` predicate, `string.IsNullOrWhiteSpace` becomes `(col IS NULL OR LTRIM(RTRIM(col)) = '')`.
-The one-argument `LTRIM` / `RTRIM` of both SQL engines strip the space character alone, so a column holding a tab, a newline, or a non-breaking space is not matched.
-The in-memory backend evaluates the real `string.IsNullOrWhiteSpace`, which counts every Unicode whitespace character, and does match it.
+In a `Query()` predicate, `string.IsNullOrEmpty` and `string.IsNullOrWhiteSpace` hold for `NULL` too and give the C# answer on both SQL engines.
+SQL Server measures emptiness with `DATALENGTH`, because `= ''` ignores trailing blanks and would call a value of blanks empty.
+`IsNullOrWhiteSpace` counts every character `char.IsWhiteSpace` accepts, including the tab, the newline, and the non-breaking and full-width spaces.
+
+A fixed-length column (`nchar(n)`, `char(n)`) on SQL Server holds its value padded with blanks and returns it padded.
+`EndsWith` therefore compares against the padded value, which is also what C# gives on the value the repository reads back.
+The in-memory backend stores the value unpadded, so its answer can differ.
 
 Date parts (`Year`, `Month`, …) are translated only when the member is read from a `DateTime`, `DateOnly`, or `DateTimeOffset` column, nullable forms included.
 A property of the same name on any other type is not a date part, such as one added to a value object through a partial declaration.
 It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`.
+The date parts of a `DateTimeOffset` column are taken in the offset the value carries, as C# does (`2024-01-01 05:00 +09:00` is year 2024, hour 5).
 
 `Contains` on a list expands to one bind variable per element and is not chunked.
 A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999).
@@ -543,7 +564,7 @@ If `insertWhenUpdateMissing: true` and no update target is found so it switches 
 | Target | Hook firing | Context support |
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
-| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
+| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
 | In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
 | Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
 
@@ -700,6 +721,8 @@ It builds an entity from the edit model's confirmed values, calls `CheckUniquene
 A violation with no property names, or with names that do not belong to the edit model, becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns.
 The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors; it clears its own findings only, so what the check among the siblings reported stays.
 A model marked for removal returns `true` without querying at all, in line with every other read of the validation state.
+If a confirmed value is edited, the model is reloaded, or another check starts while the query is out, the call registers nothing and returns `false`: what it found is about values the model no longer holds, so the current values were not confirmed unique.
+Run the check again after the last edit.
 
 The errors are registered after the `await`, which puts them on a thread pool thread rather than the caller's, and `ErrorsChanged` fires on that same thread.
 A WPF binding marshals the notification back to the UI thread by itself, so the ordinary case needs nothing from you.
@@ -737,9 +760,17 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 // For SQLite / PostgreSQL / MySQL / Oracle, specify the corresponding EF Core provider's Use*
 ```
 
-- Save uses a disconnected-graph save via `TrackGraph`, converting `RowState` to EF Core's state.
+- Save is a disconnected-graph save that converts `RowState` to EF Core's state.
+  Like the QuickER repositories, it registers only the entities the cascade reaches from the root.
+  A parent reference (such as `line.Order`) is not followed, so a parent loaded with `Include` is neither written nor deleted.
 - Optimistic concurrency is at parity: `ConcurrencyMode` selects the policy, EF Core's `DbUpdateConcurrencyException` is converted to `SaveConflictException`, and the refreshed concurrency token is left on the entity (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
-- The raw-SQL APIs are at full parity.
+- An update of a table without a rowversion column that matches no row (a trigger or row-level security discarded it) is reported as a missing row, as the QuickER Repository does: `UpdateAsync` returns `false` and a graph save fails with `SaveConflictException` (`NotFound`).
+  A save that keeps being rejected as a concurrency conflict is attempted at most 10 times and then fails with `SaveConflictException`.
+- The raw-SQL APIs are at full parity, including the conversion of the values a driver returns in its own storage type (SQLite returns an `int` column as `long`, Oracle a `NUMBER` as `decimal`).
+- A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
+- A retrying execution strategy (such as SQL Server's `EnableRetryOnFailure`) is supported.
+  A graph save and a cascading `ExecuteDeleteAsync` run inside the strategy, and every attempt starts over from scratch.
+  With save hooks, Before and After run once per attempt: their database writes roll back with the failed attempt, but a side effect outside the database is repeated.
 - A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
   The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
 - A table without a primary key is **excluded from the DbContext** (no DbSet, no Fluent configuration, and navigations to it are ignored via an explicit `modelBuilder.Ignore<T>()`), and a Warning diagnostic names the table.
@@ -1549,7 +1580,7 @@ You rarely need to unwrap them to the raw value by hand.
 | EditModel | The committed-value property is a value object such as `NameValue?`. The screen-binding property `BindingXxx` (string) validates with `TryCreate` and surfaces errors through `INotifyDataErrorInfo`. |
 | JSON (`ToJson` / `Clone` / remote transfer) | Serialized **as the wrapped value** (`{"customerId": 1}`. The value object's wrapper structure does not appear in the JSON). |
 
-> **Note**: reads from the DB or from JSON are also validated through `Create`. If existing data holds a value that does not pass validation, the read throws `ValueObjectValidationException`, so keep the extra validation you add in `OnValidate` consistent with existing data.
+> **Note**: reads from the DB or from JSON are also validated through `Create`. If existing data holds a value that does not pass validation, a read from the DB throws `InvalidOperationException` naming the column (the `ValueObjectValidationException` is its inner exception) and a read from JSON throws `ValueObjectValidationException`, so keep the extra validation you add in `OnValidate` consistent with existing data.
 
 ### GUID keys for string primary keys (UseGuidKeyForStringPrimaryKey)
 
@@ -1688,6 +1719,8 @@ Semantics:
 - **Length.**
   It is automatic when `source` is `CanSeek` (`Length - Position`); otherwise the `length` argument is required, and an omission throws `ArgumentException`.
   SQLite's `zeroblob` requires the length before writing, and the contract is unified to be dialect-neutral.
+  The stream must yield exactly that many bytes.
+  A `length` that differs from what is left in a seekable stream, and a stream that ends before `length` or goes on past it, throw `ArgumentException` and leave the stored value as it was.
 - **Optimistic concurrency (rowversion and the like) is out of scope**, since this is direct column manipulation on par with raw SQL.
 - **The generated code has no INSERT-only method.**
   Write a new row in two steps: INSERT with the blob left empty, then stream in the body with `Write{Column}Async`.
@@ -1772,8 +1805,9 @@ What the column means on each of the two sides is described under [Row version c
 ### What it puts where
 
 The server gets no extra schema at all.
-The local database gets two shared tables, created on first use with `CREATE TABLE IF NOT EXISTS`.
-`quicker_sync_journal` records offline edits (table, key, operation, and for a delete the version the row carried), and `quicker_sync_ack` records, per row, the version the server stamped on an upload it took.
+The local database gets three shared tables, created on first use with `CREATE TABLE IF NOT EXISTS`.
+`quicker_sync_journal` records offline edits (table, key, operation, for a delete the version the row carried, and the unbounded binary columns the write stored a value in), and `quicker_sync_ack` records, per row, the version the server stamped on an upload it took.
+`quicker_sync_blob_pending` records the blob copies a download still owes (see [Unbounded binary columns](#unbounded-binary-columns)).
 
 The resume point is derived, not stored.
 It is the highest mirrored version among the local rows, so there is no bookkeeping row that can drift out of step with the data.
@@ -1880,6 +1914,10 @@ That is what keeps `Collect` from resolving a "the server no longer has this row
 Once the entry is settled, whether uploaded, discarded as a stale intent, or dropped by `ServerWins`, a later run propagates the deletion as usual.
 The protection reaches exactly as far as the journal does: a row written into a synchronized table by some other route has no entry, and while propagation is on it is deleted (see [Known limitations](#known-limitations)).
 
+A row it spares keeps what it points at.
+Tables are propagated children first, and a spared row's parents are spared in turn, in its own table and in its parents' tables, however many steps up.
+Removing them would fail on the local foreign key, or under `ON DELETE CASCADE` take the spared row with it.
+
 Replaying one change has three outcomes, not two, and `Uploaded` / `Discarded` / `Conflicts` are exactly those three: sent, nothing to send, refused.
 Folding the middle one into either of the others would report a change as delivered when nothing crossed the wire.
 `Uploaded` and `Discarded` count rows rather than journal entries, since a row edited several times offline collapses into its latest intent.
@@ -1936,6 +1974,19 @@ The same re-read protects a delete whose business write failed.
 An entry whose local row is still there says the delete never landed, whether a foreign key refused it or a lock timed out, and the entry is discarded unsent rather than carried out on the server.
 Without that check a failed local delete would complete itself on the server, and the delete propagation of the same run would take the surviving local row with it.
 
+The operation a row's replay sends is decided from what the local row is now and from every entry recorded about it, not from the newest entry alone.
+The newest entry can describe a write that never landed, and acting on it alone would throw away what the earlier entries were about: an edit followed by a delete a foreign key refused, or a delete followed by a reinsert that failed.
+
+| Local row | Entries for the row | What the replay does |
+|---|---|---|
+| There | Include an insert or an update | Sends its current content |
+| There | Deletes only | Drops the entries: the delete never landed |
+| Gone | Include a delete, and a version the server held for the row is known | Deletes it on the server, guarded by the latest such version (the versions the deletes recorded and the receipt) |
+| Gone | Otherwise | Drops the entries: the row never reached the server |
+
+A table without a version column has no version to know, so a delete recorded for a row that is gone is sent unconditionally.
+A conflict reports the operation decided here.
+
 **Raw SQL is not recorded.**
 `ExecuteSqlAsync` forwards untouched: the statement's shape is opaque to the decorator, so there is no key to journal.
 The same holds for the bulk delete behind `Query().ExecuteDeleteAsync`, whose rows are chosen by a predicate the decorator never sees.
@@ -1948,6 +1999,42 @@ The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exac
 A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract.
 One consequence is worth knowing: a write a `BeforeSaveAsync` returned `false` for still leaves a journal entry, because the entry is written first.
 For an insert that entry is discarded, since there is no row to read, and for an update the row is uploaded as it stands, with unchanged content, which the server accepts and stamps with a new version.
+
+A bulk insert or a graph save records all of its rows in one go, as multi-row inserts of 100 rows each, rather than one statement per row.
+The entries are separate commits per statement, and that is enough: a recording cut short leaves entries for rows the business write never reached, which the upload discards like any other stale intent.
+
+### Writing while a run is in flight
+
+The application can keep writing to the local database while a sync run is in flight, for example a screen that stays editable while the sync runs in the background.
+Each write through the journaling decorator, the journal entry together with the business write, takes a lock on the local database.
+The engine takes the same lock for the stretches where it reads what is still unsent and then acts on it.
+
+- Deciding the upload of one table: which local rows are there is read, and the entries there is nothing to send for are dropped
+- Applying one download batch: the unsent keys are read again right before the batch, and the batch is written before the lock is released
+- Delete propagation of one table: the local keys, then the unsent keys, are read and the rows are deleted
+- `ServerWins` settling one table: the journal is read again, the server's rows are written, and the entries are dropped
+- `RefreshAsync`: the whole run
+
+A write that arrives during one of these waits for that stretch and then lands where the next read sees it.
+A row created during a download is therefore not deleted by the same run's delete propagation, and a row edited during it is not overwritten by a batch: the download stops at it, as at any other unsent change.
+The server is read outside the lock, so a write waits for one batch, not for the network.
+The exception is a run that carries the [unbounded binary columns](#unbounded-binary-columns): their copies are part of the batch, so a write can wait for those transfers as well.
+A write made while a refresh runs waits for the whole refresh.
+
+The lock is kept per raw SQL executor of the local database, which the generated registration makes a singleton, so it is shared across DI scopes: a screen's scope and the sync's scope wait for each other.
+Two runs over the same local database do not overlap either: `SyncAsync`, `RefreshAsync`, `UploadAsync`, and `DownloadAsync` take a second lock for the whole call, and the one that arrives later waits.
+
+Two things fall outside this.
+
+- **Another process writing the same database file is not covered.**
+  The locks live in the process, and SQLite's own file lock is all that stands between two processes.
+- **A sync cannot be started from inside a save hook.**
+  A write through a journaling repository holds the lock while its save hooks run, and a run started there would wait for that very lock (and, while another run is in flight, the two would wait for each other for good).
+  `SyncAsync`, `RefreshAsync`, `UploadAsync`, and `DownloadAsync` called there throw `InvalidOperationException` at once, and the save is rolled back.
+  Start the sync after the save returns.
+
+A write that read its row before a batch and saves it after is a write based on what the server's change replaced.
+It lands after the batch, so it is not lost, and the next run reports it as a `ModifiedOnServer` conflict rather than sending it silently.
 
 ### Unbounded binary columns
 
@@ -1987,6 +2074,26 @@ Two details follow from copying columns separately.
 The recording does not depend on `IncludeUnboundedBinary`, because what to send is decided when sending, not when generating.
 A run left at the default uploads the row without the blob and settles the entry.
 
+**Only the columns this device wrote are sent.**
+Each journal entry records which unbounded binary columns its write stored a value in: an insert stores all of them, `Write{Column}Async` stores its own, and an update stores none.
+A run that carries the columns sends only those named by some entry of the row.
+A row that came down in a run that did not carry them has no blob here, and an edit to its ordinary columns does not send that empty column over the server's blob.
+
+**A copy that fails is made later, not lost.**
+A download writes a batch of rows and then copies their blobs, and the rows have already moved the resume point past themselves by then.
+The copies a batch owes are therefore recorded in the local table `quicker_sync_blob_pending` before the rows are written and removed once made.
+A copy that fails leaves its record, and the next run that carries the columns makes it first, before anything else of that table.
+That late copy is decided per row and column: a row that is gone here has nothing to copy into, and a column an unsent local change wrote holds a blob written here since, which the server's copy must not replace; in both cases the owed record is dropped.
+Otherwise, including a row whose unsent change touched only its ordinary columns, the server's blob is copied down.
+A refresh drops the table's owed records, because it reloads the rows anyway.
+
+On the way up, the row's own write is accepted before the blobs are sent, and the receipt is recorded with the version that write returned.
+A blob copy that fails therefore leaves the entry in the journal but not a stale original: the next run replays it against the version the server took, not as a conflict with this device's own write.
+
+**A NOT NULL value-object column is filled with an empty value when the engine inserts a row.**
+A row is read for a run without its unbounded binary columns, so such a column of a value-object entity holds nothing, which a NOT NULL column refuses.
+Both the download's inserts and the upload's inserts on the server put an empty value in, the same thing a row new to a side holds when the run does not carry the columns.
+
 The cost is one round trip per column per changed row, which is why it is off by default.
 A table of large blobs whose rows change often pays for it on every run.
 
@@ -2014,6 +2121,7 @@ foreach (var stop in result.Truncations)
 The rows behind the stopping point are still on the server and come down as soon as the entry that stopped them is settled, whether decided and re-run, or dropped with `SyncJournal.RemoveTableAsync`.
 What a run stops for is an unsent journal entry.
 That is usually a conflict it has just collected, but it is equally an entry an interrupted upload left behind.
+A row also stops the download when the parent it points at was deleted here and the delete has not reached the server: applying it would fail on the local foreign key.
 A run that settles every entry reports no truncations.
 
 | `SyncConflictPolicy` | What happens |
@@ -2022,10 +2130,26 @@ A run that settles every entry reports no truncations.
 | `ServerWins` | The run's entries are dropped and each of their rows is read back from the server over the local one (entries of tables outside the run's scope, versionless or excluded ones, stay put) |
 | `LocalWins` | The change is resent with `ConcurrencyMode.ForceOverwrite`, overwriting the server row, and inserted again when the server has no such row, so a row deleted on the server is resurrected by a local edit (the same resolution applies to a key the server already holds under a local insert) |
 
+Two more reasons come from the server's foreign keys, and no policy resolves them by writing rows this device did not change.
+They are reported only after a write to the server has failed, by looking up the state the failure would follow from, so a run where nothing goes wrong makes no extra call.
+A failure they do not explain, such as a dropped connection, is thrown as it was.
+
+| `SyncConflictReason` | When | Ways out |
+|---|---|---|
+| `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` and last-write-wins report it too, rather than bringing the parent back | Run with `ServerWins`, point the row at another parent, or edit the parent locally so it has a change of its own |
+| `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins`, which brings the row back together with what now points at it |
+
 **`ServerWins` reads the rows back rather than leaving them to the download.**
 The download carries a row only when its version has moved since it was last mirrored, so a local edit to a row nobody else has touched would otherwise outlive the run that was told to discard it, and with its journal entry gone, no later run would correct it.
 Every discarded entry's key is therefore read from the server and written over the local row, which also brings back a row that was deleted locally.
 A key the server no longer holds has nothing to apply and is left to the delete propagation, so with `PropagateDeletes` turned off such a row stays where it is.
+
+The rows are read back table by table, right after that table's download, parents first.
+By then the parents the server's rows point at have come down, including a parent the server added since, and a row put back is there before the tables that may point at it are downloaded.
+The entries being dropped do not stop the table's download.
+A table whose download an earlier truncation skipped is not settled in that run; its entries stay for the next one.
+An entry recorded while the run is in flight is not one the run was told to drop, so the row it is about keeps its local content.
+When `UploadAsync` is called on its own, with no download to follow, the rows are read back there instead.
 
 **A restored row keeps its mirrored version.**
 The copy read from the server carries the server's current version, and writing that into the mirror would raise the resume point to it, past every change this device has not fetched yet, none of which a later run would ask for again.
@@ -2054,7 +2178,7 @@ Adding a versionless table to a diagram therefore changes nothing about what the
 A `LastWriteWins` run covers every table and gives the whole run one semantics.
 
 - **Uploads are uniform across all tables**: update with `ForceOverwrite`, insert when the update finds no row, delete unconditionally.
-  No version is read, no existence is probed, and nothing is ever reported as a conflict (`Conflicts` stays empty and `ConflictPolicy` is ignored).
+  No version is read, no existence is probed, and nothing is reported as a conflict except the two foreign-key reasons under [Conflicts](#conflicts) (`ConflictPolicy` is ignored).
   Versioned tables overwrite without their guards too.
   The version the server stamps is still reported to the run, so the same run's download recognizes the row as its own echo and takes nothing but the version from it.
 - **The winner is whoever uploads last, not whoever edited last.**
@@ -2137,7 +2261,7 @@ The generated repositories manage their own connections, so nothing here can enl
 What holds instead is that every point at which it commits is a state a later run can start from.
 Deletes go children first and reloads parents first, so no foreign key ever points at a row that is not there, and each table's rows arrive in ascending version order, so a table interrupted part way holds exactly the rows below the version it stopped at, which is the resume point the local maximum yields anyway.
 The state this leaves that a single transaction would not is a partly rebuilt local database: between the first delete and the last row of the last table, a reader sees fewer rows than either side holds.
-Nothing is lost by it, but a refresh is not something to run underneath a live screen.
+Nothing is lost by it, and local writes wait until the refresh is over, but a screen reading the tables meanwhile sees them half empty, so a refresh is not something to run underneath a live screen.
 
 ### Known limitations
 
@@ -2151,6 +2275,8 @@ Nothing is lost by it, but a refresh is not something to run underneath a live s
   Give a table a rowversion column when its conflicts should be detected (see [Versionless tables and last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins)).
 - **Unbounded binary columns are not carried unless you ask for them** (`SyncOptions.IncludeUnboundedBinary`), and carrying them costs one round trip per column per changed row.
   See [Unbounded binary columns](#unbounded-binary-columns).
+- **Only a single-column foreign key to a synchronized table's primary key is followed.**
+  A foreign key that refers to a unique constraint, or spans several columns, is not: delete propagation does not keep the parents of a kept row through it, the download does not stop at a row whose parent's delete is unsent through it, and a write the server refuses through it is thrown rather than reported.
 - **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.
 - **The HTTP transport requires `--generate-remote-services`.**
   Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.
@@ -2160,6 +2286,10 @@ Nothing is lost by it, but a refresh is not something to run underneath a live s
   The journal entry survives, and the next run replays it as a version-guarded update against a mirrored version the server has already moved past.
   It is reported as a conflict, with the row this device itself wrote on the other side of it.
   Resolving it with `LocalWins` sends the same local content again.
+- **The version read back after a blob upload can be another device's.**
+  After sending the blobs the engine reads the row's version again, and a write another device makes to the row in between is taken as this device's own.
+  The download then recognizes that row as an echo and does not apply the other device's content, and a later local edit overwrites it.
+  This is the same kind of narrow window as the one above, and has not been observed in practice.
 - **A row deleted on the server and recreated under the same key can conflict when `PropagateDeletes` is off.**
   The receipt of such a row is dropped when delete propagation removes the local row; with propagation off nothing removes it.
   A local row recreated under that key is then replayed as an update against a version of a row that is gone, and reported as `MissingOnServer`.
@@ -2171,6 +2301,8 @@ Nothing is lost by it, but a refresh is not something to run underneath a live s
   Writes made there are recorded as ordinary local edits, and the rows the engine has just applied are then uploaded straight back on the next run.
   The mirror image is a fire-and-forget task started inside the scope: it keeps the suppression after the scope ends, so its later writes are never recorded at all.
   Do the work inside the hook's own flow.
+- **Writing while a run is in flight is safe only within one process.**
+  The locks that make it safe are per process, so another process writing the same local database file is not covered (see [Writing while a run is in flight](#writing-while-a-run-is-in-flight)).
 - **Keys are matched as text, ordinally.**
   The journal and the receipt table hold the key as a string (a `byte[]` key as uppercase hex, a `Guid` by `ToString()`), and every comparison the engine makes (pending keys, receipts, delete propagation) is ordinal and case-sensitive.
   The server, by contrast, looks its rows up with ordinary SQL equality on the key column, under that column's collation.

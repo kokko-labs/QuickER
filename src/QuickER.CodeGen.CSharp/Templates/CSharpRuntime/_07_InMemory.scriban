@@ -71,7 +71,7 @@
 
         foreach (var (otherKey, other) in existing)
         {
-            if (Equals(otherKey, key))
+            if (InMemoryKeyComparer.KeysEqual(otherKey, key))
             {
                 continue;
             }
@@ -139,6 +139,113 @@
         return true;
     }
 
+    /// <summary>Builds an index of <paramref name="rows"/> on every UNIQUE constraint the type declares (<c>null</c> when it declares none).</summary>
+    /// <remarks>
+    /// A check that writes many rows at once - a bulk insert, the rows a graph save publishes - reads each row's values once
+    /// into the index and looks every written row up in it, instead of comparing every written row against every row there
+    /// is, which grew with the square of the row count.
+    /// </remarks>
+    /// <param name="entityType">The entity type the rows belong to.</param>
+    /// <param name="rows">The rows to index, keyed by primary key.</param>
+    internal static Index? BuildIndex(
+        Type entityType,
+        IEnumerable<KeyValuePair<object, EntityBaseCore>> rows
+    )
+    {
+        var constraints = For(entityType);
+
+        if (constraints.Count == 0)
+        {
+            return null;
+        }
+
+        var index = new Index(entityType, constraints);
+
+        foreach (var (key, row) in rows)
+        {
+            index.Add(key, row);
+        }
+
+        return index;
+    }
+
+    /// <summary>The rows of one type indexed by their values on each declared UNIQUE constraint, applying the same comparison rules as <see cref="Verify"/>.</summary>
+    internal sealed class Index
+    {
+        private readonly Type _entityType;
+        private readonly IReadOnlyList<InMemoryUniqueConstraint> _constraints;
+        private readonly Dictionary<object[], List<object>>[] _keysByValues;
+
+        internal Index(Type entityType, IReadOnlyList<InMemoryUniqueConstraint> constraints)
+        {
+            _entityType = entityType;
+            _constraints = constraints;
+            _keysByValues = new Dictionary<object[], List<object>>[constraints.Count];
+
+            for (var position = 0; position < constraints.Count; position++)
+            {
+                _keysByValues[position] = new Dictionary<object[], List<object>>(TupleComparer.Instance);
+            }
+        }
+
+        /// <summary>Adds a row under its primary key (a tuple containing a null is not indexed, as it is not compared).</summary>
+        public void Add(object key, EntityBaseCore row)
+        {
+            for (var position = 0; position < _constraints.Count; position++)
+            {
+                if (ValuesOf(row, _constraints[position]) is not { } values)
+                {
+                    continue;
+                }
+
+                if (!_keysByValues[position].TryGetValue(values, out var keys))
+                {
+                    keys = new List<object>(1);
+                    _keysByValues[position].Add(values, keys);
+                }
+
+                keys.Add(key);
+            }
+        }
+
+        /// <summary>Throws when a row other than the one under <paramref name="key"/> holds the same values as <paramref name="row"/> on a declared UNIQUE constraint.</summary>
+        public void Verify(object key, EntityBaseCore row)
+        {
+            for (var position = 0; position < _constraints.Count; position++)
+            {
+                if (
+                    ValuesOf(row, _constraints[position]) is { } values
+                    && _keysByValues[position].TryGetValue(values, out var keys)
+                    && keys.Exists(other => !InMemoryKeyComparer.KeysEqual(other, key))
+                )
+                {
+                    throw DuplicateValueError(_entityType, _constraints[position], values);
+                }
+            }
+        }
+    }
+
+    /// <summary>Compares member-value tuples the way <see cref="TupleEquals"/> does, with a hash code consistent with it.</summary>
+    private sealed class TupleComparer : IEqualityComparer<object[]>
+    {
+        public static readonly TupleComparer Instance = new();
+
+        public bool Equals(object[]? x, object[]? y) =>
+            ReferenceEquals(x, y) || (x is not null && y is not null && TupleEquals(x, y));
+
+        public int GetHashCode(object[] obj)
+        {
+            var hash = new HashCode();
+
+            foreach (var value in obj)
+            {
+                hash.Add(StructuralComparisons.StructuralEqualityComparer.GetHashCode(value));
+            }
+
+            return hash.ToHashCode();
+        }
+    }
+
     /// <summary>Resolves the constraints declared on an entity type (a constraint naming a property the type does not have is dropped, as one whose columns cannot all be resolved is never generated).</summary>
     private static IReadOnlyList<InMemoryUniqueConstraint> Build(Type entityType)
     {
@@ -172,19 +279,66 @@
     }
 }
 
+/// <summary>Compares the primary keys the in-memory store files rows under.</summary>
+/// <remarks>
+/// A key is compared the way a database compares the column: a binary key (<c>binary(n)</c>, a <c>byte[]</c>) by its
+/// bytes, everything else by its own equality. The default comparer would compare a <c>byte[]</c> by reference, and the
+/// store hands out copies of every array, so a binary key read back from the store would never find its own row again.
+/// </remarks>
+internal sealed class InMemoryKeyComparer
+    : IEqualityComparer<object>,
+        IEqualityComparer<(Type EntityType, object Key)>
+{
+    /// <summary>The shared instance (the comparer holds no state).</summary>
+    public static readonly InMemoryKeyComparer Instance = new();
+
+    private InMemoryKeyComparer() { }
+
+    /// <summary>Whether two keys identify the same row.</summary>
+    public static bool KeysEqual(object? x, object? y) =>
+        x is byte[] left && y is byte[] right ? left.AsSpan().SequenceEqual(right) : Equals(x, y);
+
+    /// <summary>The hash code of a key, consistent with <see cref="KeysEqual"/>.</summary>
+    public static int KeyHashCode(object key)
+    {
+        if (key is byte[] bytes)
+        {
+            var hash = new HashCode();
+            hash.AddBytes(bytes);
+            return hash.ToHashCode();
+        }
+
+        return key.GetHashCode();
+    }
+
+    bool IEqualityComparer<object>.Equals(object? x, object? y) => KeysEqual(x, y);
+
+    int IEqualityComparer<object>.GetHashCode(object obj) => KeyHashCode(obj);
+
+    bool IEqualityComparer<(Type EntityType, object Key)>.Equals(
+        (Type EntityType, object Key) x,
+        (Type EntityType, object Key) y
+    ) => x.EntityType == y.EntityType && KeysEqual(x.Key, y.Key);
+
+    int IEqualityComparer<(Type EntityType, object Key)>.GetHashCode(
+        (Type EntityType, object Key) obj
+    ) => HashCode.Combine(obj.EntityType, KeyHashCode(obj.Key));
+}
+
 /// <summary>
 /// In-memory data store that holds entities in memory without a database (shared as a DI singleton).
 /// </summary>
 /// <remarks>
 /// <para>
 /// Keeps a "primary key -> snapshot" dictionary per entity type. A write files away a copy of the entity's columns and a
-/// read hands out a clone produced by <see cref="EntityBaseCore.Clone"/>, so mutating a returned entity on the caller
+/// read hands out another copy of the stored row's columns, so mutating a returned entity on the caller
 /// side never changes the store contents (matching the by-value semantics of a real database). All operations are
 /// serialized with a <c>lock</c> to be thread-safe.
 /// </para>
 /// <para>
 /// The primary key is taken from <see cref="EntitySaveMetadata.KeyProperty"/>, and value objects are opened to their
-/// underlying value to form the dictionary key (so they match by value equality).
+/// underlying value to form the dictionary key (so they match by value equality). Keys are compared by
+/// <see cref="InMemoryKeyComparer"/>, which compares a binary key (<c>binary(n)</c>) by its bytes.
 /// </para>
 /// </remarks>
 public sealed class InMemoryDataStore
@@ -198,7 +352,7 @@ public sealed class InMemoryDataStore
     {
         if (!_tables.TryGetValue(entityType, out var table))
         {
-            table = new Dictionary<object, EntityBaseCore>();
+            table = new Dictionary<object, EntityBaseCore>(InMemoryKeyComparer.Instance);
             _tables[entityType] = table;
         }
 
@@ -227,14 +381,7 @@ public sealed class InMemoryDataStore
     {
         lock (_gate)
         {
-            return Table(typeof(TEntity))
-                .Values.Select(entity =>
-                {
-                    var clone = (TEntity)entity.Clone();
-                    UnboundedBinaryColumns.StripExcluded(clone);
-                    return clone;
-                })
-                .ToList();
+            return Table(typeof(TEntity)).Values.Select(entity => CopyRow<TEntity>(entity)).ToList();
         }
     }
 
@@ -250,9 +397,7 @@ public sealed class InMemoryDataStore
                 return null;
             }
 
-            var clone = (TEntity)entity.Clone();
-            UnboundedBinaryColumns.StripExcluded(clone);
-            return clone;
+            return CopyRow<TEntity>(entity);
         }
     }
 
@@ -333,12 +478,18 @@ public sealed class InMemoryDataStore
     /// keeps the by-value semantics cloning gave, where writing through the caller's array cannot reach the store's row.
     /// </para>
     /// </remarks>
-    private static EntityBaseCore CopyColumns(EntityBaseCore entity)
+    /// <param name="entity">The entity whose columns are copied.</param>
+    /// <param name="includeUnboundedBinary">
+    /// Whether the unbounded binary columns are copied as well. When they are not, the copy keeps the values the constructor
+    /// gives them - the "not fetched" state a real database's SELECT leaves them in - and the blob is never read at all.
+    /// </param>
+    private static EntityBaseCore CopyColumns(EntityBaseCore entity, bool includeUnboundedBinary = true)
     {
         var entityType = entity.GetType();
         var copy = (EntityBaseCore)Activator.CreateInstance(entityType)!;
+        var metadata = EntitySaveMetadata.For(entityType);
 
-        foreach (var property in EntitySaveMetadata.For(entityType).AllProperties)
+        foreach (var property in includeUnboundedBinary ? metadata.AllProperties : metadata.SelectProperties)
         {
             var value = property.GetValue(entity);
 {{~ if generate_value_objects ~}}
@@ -360,6 +511,21 @@ public sealed class InMemoryDataStore
         }
 
         return copy;
+    }
+
+    /// <summary>Copies a stored row for a reader: its columns only, marked Unchanged.</summary>
+    /// <remarks>
+    /// The unbounded binary columns are left in their "not fetched" state unless <paramref name="includeUnboundedBinary"/>
+    /// asks for them, matching a real database's SELECT that does not name them. Leaving them out of the copy, rather than
+    /// copying them and dropping them again afterwards, is what keeps a read of a row holding a large blob from moving the
+    /// blob at all.
+    /// </remarks>
+    internal static TEntity CopyRow<TEntity>(EntityBaseCore row, bool includeUnboundedBinary = false)
+        where TEntity : EntityBaseCore
+    {
+        var copy = CopyColumns(row, includeUnboundedBinary);
+        copy.MarkUnchanged();
+        return (TEntity)copy;
     }
 
     /// <summary>Prepares the snapshot to store for <paramref name="entity"/>: a detached row carrying over whatever the row being replaced holds in columns this write does not name.</summary>
@@ -498,7 +664,7 @@ public sealed class InMemoryDataStore
                     return false;
                 }
 
-                var clone = entity.Clone();
+                var clone = CopyRow<EntityBaseCore>(entity, includeUnboundedBinary: true);
                 column.SetValue(clone, value);
                 clone.MarkUnchanged();
                 StampRowVersion(clone);
@@ -523,7 +689,7 @@ public sealed class InMemoryDataStore
         }
 
         staging.CaptureBase(entityType, key, baseRow);
-        var updated = current.Clone();
+        var updated = CopyRow<EntityBaseCore>(current, includeUnboundedBinary: true);
         column.SetValue(updated, value);
         updated.MarkUnchanged();
         StampRowVersion(updated);
@@ -597,6 +763,11 @@ public sealed class InMemoryDataStore
     /// rather than something an overwrite policy can excuse.
     /// </para>
     /// <para>
+    /// A delete the save staged for a row that did not exist when the save reached it is neither verified nor applied. A
+    /// row standing under that key at publishing time was put there by someone else meanwhile, and removing it would
+    /// delete a row the save never saw, where a real database's DELETE affected no rows at the moment it ran.
+    /// </para>
+    /// <para>
     /// Once every row has been verified, the declared UNIQUE constraints are verified as well, over the state publishing is
     /// about to leave the store in (see <see cref="VerifyStagedUniqueness"/>). That check comes last because it is about the
     /// values the save is writing rather than about who else has written meanwhile, and it comes before anything is applied,
@@ -621,11 +792,19 @@ public sealed class InMemoryDataStore
                     continue;
                 }
 
-                // The save is adding this row, but the primary key has been taken since: a real database would raise the
-                // primary-key violation at this point, and no concurrency policy makes that acceptable.
-                if (baseRow is null && staging.Staged(entityType, key) is not null)
+                if (baseRow is null)
                 {
-                    throw DuplicateKeyError(entityType, key);
+                    // The save is adding this row, but the primary key has been taken since: a real database would raise
+                    // the primary-key violation at this point, and no concurrency policy makes that acceptable.
+                    if (staging.Staged(entityType, key) is not null)
+                    {
+                        throw DuplicateKeyError(entityType, key);
+                    }
+
+                    // A delete of a row that did not exist when the save reached it: the row there now was written by
+                    // someone else meanwhile, so it is neither a conflict nor this save's to remove (applying is skipped
+                    // below as well), just as a real database's DELETE affected no rows at the moment it ran.
+                    continue;
                 }
 
                 // The row this write started from is gone. Whether it is still there is settled before whether its version
@@ -633,7 +812,7 @@ public sealed class InMemoryDataStore
                 // overwriting last-write-wins does not extend to reviving it, and saying so beats dropping the write, which
                 // would report a saved row that is not there. A staged delete against an already deleted row stays the no-op
                 // it is against a real database, whether or not the type carries a rowversion column.
-                if (baseRow is not null && current is null)
+                if (current is null)
                 {
                     // "Staged a delete" is an entry holding a null snapshot, not the absence of an entry: a save that
                     // captured this row without ever writing to it has nothing to revive, and reading the two as one
@@ -659,13 +838,15 @@ public sealed class InMemoryDataStore
 
             foreach (var ((entityType, key), snapshot) in staging.Overlay)
             {
-                if (snapshot is null)
-                {
-                    Table(entityType).Remove(key);
-                }
-                else
+                if (snapshot is not null)
                 {
                     Table(entityType)[key] = snapshot;
+                }
+                else if (!staging.StartedWithoutRow(entityType, key))
+                {
+                    // A delete removes only a row the save started from: had the row been absent then, whatever stands
+                    // under the key now (another writer's insert) is not the row the save deleted
+                    Table(entityType).Remove(key);
                 }
             }
 
@@ -685,11 +866,13 @@ public sealed class InMemoryDataStore
     /// so a save sees its own writes: two rows it adds with the same values collide with each other, and a value it frees by
     /// deleting a row is available to a row it adds in the same save. Judging the outcome rather than the order the graph
     /// walker happened to reach the rows in is what makes the verdict independent of that order. It runs before anything is
-    /// applied, so a violation leaves the save all-or-nothing exactly as a version conflict does.
+    /// applied, so a violation leaves the save all-or-nothing exactly as a version conflict does. The view of each type is
+    /// indexed once and every staged row is looked up in the index, so the check grows with the rows rather than with their
+    /// square.
     /// </remarks>
     private void VerifyStagedUniqueness(InMemorySaveStaging staging)
     {
-        Dictionary<Type, Dictionary<object, EntityBaseCore>>? views = null;
+        Dictionary<Type, InMemoryUniqueness.Index>? indexes = null;
 
         foreach (var ((entityType, key), snapshot) in staging.Overlay)
         {
@@ -699,15 +882,15 @@ public sealed class InMemoryDataStore
                 continue;
             }
 
-            views ??= new Dictionary<Type, Dictionary<object, EntityBaseCore>>();
+            indexes ??= new Dictionary<Type, InMemoryUniqueness.Index>();
 
-            if (!views.TryGetValue(entityType, out var view))
+            if (!indexes.TryGetValue(entityType, out var index))
             {
-                view = ComposeView(entityType, staging);
-                views.Add(entityType, view);
+                index = InMemoryUniqueness.BuildIndex(entityType, ComposeView(entityType, staging))!;
+                indexes.Add(entityType, index);
             }
 
-            InMemoryUniqueness.Verify(entityType, snapshot, key, view);
+            index.Verify(key, snapshot);
         }
     }
 
@@ -717,7 +900,7 @@ public sealed class InMemoryDataStore
         InMemorySaveStaging staging
     )
     {
-        var view = new Dictionary<object, EntityBaseCore>(Table(entityType));
+        var view = new Dictionary<object, EntityBaseCore>(Table(entityType), InMemoryKeyComparer.Instance);
 
         foreach (var ((stagedType, key), snapshot) in staging.Overlay)
         {
@@ -749,7 +932,7 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>Scope for reading across multiple tables under the lock (used for Include key matching).</summary>
-    {{ infra_visibility }} readonly struct InMemoryReadScope(InMemoryDataStore store)
+    internal readonly struct InMemoryReadScope(InMemoryDataStore store)
     {
         /// <summary>The list of raw snapshots (no clones) for the given type.</summary>
         public IReadOnlyList<EntityBaseCore> All(Type entityType) => store.RawAll(entityType);
@@ -763,7 +946,7 @@ public sealed class InMemoryDataStore
     /// straight away; with one they are staged and read back through the staging, so the save sees its own writes while
     /// nobody else does until it publishes.
     /// </summary>
-    {{ infra_visibility }} readonly struct InMemoryWriteScope(
+    internal readonly struct InMemoryWriteScope(
         InMemoryDataStore store,
         InMemorySaveStaging? staging
     )
@@ -838,7 +1021,7 @@ public sealed class InMemoryDataStore
         /// <summary>Whether a snapshot exists for the given type and primary key.</summary>
         public bool Exists(Type entityType, object key) => Current(entityType, key) is not null;
 
-        /// <summary>Verifies the declared UNIQUE constraints of a row about to be written, against the store's rows and any the caller is holding in a batch of its own.</summary>
+        /// <summary>Verifies the declared UNIQUE constraints of a row about to be written, against the store's rows.</summary>
         /// <remarks>
         /// This is the direct writes' check, made before the write so that a rejection leaves nothing behind. A graph save's
         /// rows are not checked here but as a whole when the save publishes, so that a save which frees a value on one row and
@@ -846,21 +1029,15 @@ public sealed class InMemoryDataStore
         /// </remarks>
         /// <param name="entity">The row about to be written.</param>
         /// <param name="key">The primary key of that row (the row carrying it is skipped, so an update never collides with itself).</param>
-        /// <param name="pending">Rows the caller has accepted but not written yet, keyed by primary key (a bulk insert's preceding elements).</param>
-        public void VerifyUnique(
-            EntityBaseCore entity,
-            object key,
-            IReadOnlyDictionary<object, EntityBaseCore>? pending = null
-        )
+        public void VerifyUnique(EntityBaseCore entity, object key)
         {
             var entityType = entity.GetType();
             InMemoryUniqueness.Verify(entityType, entity, key, store.Table(entityType));
-
-            if (pending is not null)
-            {
-                InMemoryUniqueness.Verify(entityType, entity, key, pending);
-            }
         }
+
+        /// <summary>Indexes the store's rows of the given type on its declared UNIQUE constraints (<c>null</c> when it declares none), for a check that writes many rows at once.</summary>
+        public InMemoryUniqueness.Index? UniquenessIndex(Type entityType) =>
+            InMemoryUniqueness.BuildIndex(entityType, store.Table(entityType));
 
         /// <summary>
         /// Whether <paramref name="entity"/> may overwrite the stored row under the given concurrency policy: <c>true</c> when
@@ -930,9 +1107,11 @@ public sealed class InMemoryDataStore
 /// </remarks>
 {{ infra_visibility }} sealed class InMemorySaveStaging
 {
-    private readonly Dictionary<(Type EntityType, object Key), EntityBaseCore?> _overlay = new();
+    private readonly Dictionary<(Type EntityType, object Key), EntityBaseCore?> _overlay = new(
+        InMemoryKeyComparer.Instance
+    );
     private readonly List<(Type EntityType, object Key, EntityBaseCore? Base)> _baseline = new();
-    private readonly HashSet<(Type EntityType, object Key)> _touched = new();
+    private readonly Dictionary<(Type EntityType, object Key), bool> _touched = new(InMemoryKeyComparer.Instance);
     private readonly List<(
         EntityBaseCore Source,
         PropertyInfo Property,
@@ -957,11 +1136,15 @@ public sealed class InMemoryDataStore
     /// <summary>Records the snapshot the store held for a row when the save first touched it (later touches are ignored).</summary>
     public void CaptureBase(Type entityType, object key, EntityBaseCore? baseRow)
     {
-        if (_touched.Add((entityType, key)))
+        if (_touched.TryAdd((entityType, key), baseRow is null))
         {
             _baseline.Add((entityType, key, baseRow));
         }
     }
+
+    /// <summary>Whether the row did not exist when the save first touched it (false for a row the save never touched).</summary>
+    internal bool StartedWithoutRow(Type entityType, object key) =>
+        _touched.TryGetValue((entityType, key), out var absent) && absent;
 
     /// <summary>Stages a write for a row (a null snapshot marks a delete), replacing whatever the save staged for it before.</summary>
     public void Stage(Type entityType, object key, EntityBaseCore? snapshot) =>
@@ -1012,27 +1195,14 @@ public sealed class InMemoryDataStore
         var result = _store.Read(scope =>
         {
             var matched = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings);
-            // Clone first, then attach Include (so the store's actual entities are not mutated). By default the returned clones drop
-            // unbounded binary columns to their not-fetched state (when WithUnboundedBinary is set they are returned as full clones
-            // without stripping, so excluded columns are also fetched; the Include-less case is already guarded at the terminal).
+            // Copy first, then attach Include (so the store's actual entities are not mutated). By default the returned copies leave
+            // unbounded binary columns in their not-fetched state (when WithUnboundedBinary is set they are copied as well, so
+            // excluded columns are also fetched; the Include-less case is already guarded at the terminal).
             var cloned = matched
-                .Select(entity =>
-                {
-                    var clone = (TEntity)entity.Clone();
-
-                    if (!plan.WithUnboundedBinary)
-                    {
-                        UnboundedBinaryColumns.StripExcluded(clone);
-                    }
-
-                    return clone;
-                })
+                .Select(entity => InMemoryDataStore.CopyRow<TEntity>(entity, plan.WithUnboundedBinary))
                 .ToList();
 
-            foreach (var entity in cloned)
-            {
-                IncludeAttacher.Attach(entity, plan.Includes, scope);
-            }
+            IncludeAttacher.AttachAll(cloned, plan.Includes, scope);
 
             return (IReadOnlyList<TEntity>)cloned;
         });
@@ -1067,24 +1237,24 @@ public sealed class InMemoryDataStore
         var result = _store.Read(scope =>
         {
             var matched = ApplyOrderingAndPaging(FilterRaw(predicates), plan, orderings);
-            var projected = new List<TResult>(matched.Count);
+            var clones = new List<TEntity>(matched.Count);
 
             foreach (var entity in matched)
             {
-                // Always clone before projecting so the projection does not share byte[] and the like with the store's actual entity.
-                var clone = (TEntity)entity.Clone();
+                // Always copy before projecting so the projection does not share byte[] and the like with the store's actual entity.
+                // Same parity as the conventional path (ToListAsync): unbounded binary columns are left out unless they were asked for
+                clones.Add(InMemoryDataStore.CopyRow<TEntity>(entity, prunable || plan.WithUnboundedBinary));
+            }
 
-                if (!prunable)
-                {
-                    // Same parity as the conventional path (ToListAsync): strip unbounded binary columns unless they were asked for, attach Include, then project.
-                    if (!plan.WithUnboundedBinary)
-                    {
-                        UnboundedBinaryColumns.StripExcluded(clone);
-                    }
+            // ... then attach Include (all clones at once), then project
+            if (!prunable)
+            {
+                IncludeAttacher.AttachAll(clones, plan.Includes, scope);
+            }
 
-                    IncludeAttacher.Attach(clone, plan.Includes, scope);
-                }
-
+            var projected = new List<TResult>(clones.Count);
+            foreach (var clone in clones)
+            {
                 projected.Add(project(clone));
             }
 
@@ -1113,13 +1283,8 @@ public sealed class InMemoryDataStore
                 return null;
             }
 
-            var cloned = (TEntity)first.Clone();
-
-            // By default drop unbounded binary columns to their not-fetched state. When WithUnboundedBinary is set, return a full clone without stripping.
-            if (!plan.WithUnboundedBinary)
-            {
-                UnboundedBinaryColumns.StripExcluded(cloned);
-            }
+            // By default unbounded binary columns are left in their not-fetched state. When WithUnboundedBinary is set, they are copied as well.
+            var cloned = InMemoryDataStore.CopyRow<TEntity>(first, plan.WithUnboundedBinary);
 
             IncludeAttacher.Attach(cloned, plan.Includes, scope);
             return cloned;
@@ -1144,8 +1309,9 @@ public sealed class InMemoryDataStore
 
     /// <summary>Deletes rows matching the conditions. With cascadeDelete=true, descendants are also deleted along the FK chain.</summary>
     /// <remarks>
-    /// The deletes are staged and published as one unit, so a traversal that gives up part-way through - a cascade the fixed
-    /// descendant walk cannot express, for instance - leaves the store exactly as it found it: the writes only ever existed in
+    /// A cascade the fixed descendant walk cannot express (a cycle) is rejected before any row is read, whatever the
+    /// condition matches, as the SQL backends reject it. The deletes are staged and published as one unit, so a traversal
+    /// that fails part-way through leaves the store exactly as it found it: the writes only ever existed in
     /// the staging, so there is nothing to undo. That is abort safety, not isolation - the staging writes and the publish take
     /// the store lock separately, so another thread can still observe the store in between and change the rows this delete
     /// started from, which a database's statement-level rollback would have held locks against. Publishing waives the version
@@ -1158,6 +1324,12 @@ public sealed class InMemoryDataStore
     )
     {
         var predicates = CompilePredicates(plan);
+
+        if (cascadeDelete)
+        {
+            InMemoryCascade.ThrowIfCascadeIsCyclic(typeof(TEntity));
+        }
+
         var staging = new InMemorySaveStaging();
 
         var rows = _store.Write(
@@ -1192,14 +1364,17 @@ public sealed class InMemoryDataStore
     /// <summary>Compiles the plan's predicates into delegates.</summary>
     /// <remarks>
     /// Compiling an expression tree is expensive, and it is done before the store lock is taken on purpose: doing it inside
-    /// would serialize every read in the process behind one query's compilation. Equality over <c>byte[]</c> is rewritten
-    /// to a byte-wise comparison first (see <see cref="ByteArrayEqualityRewriter"/>).
+    /// would serialize every read in the process behind one query's compilation. A navigation property is rejected first
+    /// (see <see cref="NavigationGuard"/>), and equality and <c>Contains</c> over <c>byte[]</c> are rewritten to a byte-wise
+    /// comparison (see <see cref="ByteArrayEqualityRewriter"/>).
     /// </remarks>
     private static Func<TEntity, bool>[] CompilePredicates(SqlQueryPlan<TEntity> plan) =>
         plan.Predicates.Select(predicate =>
-                (Func<TEntity, bool>)
-                    ((LambdaExpression)ByteArrayEqualityRewriter.Instance.Visit(predicate)).Compile()
-            )
+            {
+                NavigationGuard.Instance.Visit(predicate);
+                return (Func<TEntity, bool>)
+                    ((LambdaExpression)ByteArrayEqualityRewriter.Instance.Visit(predicate)).Compile();
+            })
             .ToArray();
 
     /// <summary>Compares two byte arrays by value (two nulls are equal; one null never matches).</summary>
@@ -1216,15 +1391,36 @@ public sealed class InMemoryDataStore
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
+    /// <summary>Whether a collection of byte arrays holds one with the same bytes as <paramref name="value"/> (an IN over a binary column).</summary>
+    private static bool ContainsBytes(IEnumerable<byte[]?> source, byte[]? value)
+    {
+        foreach (var item in source)
+        {
+            if (AreBytesEqual(item, value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The <see cref="ContainsBytes"/> method, resolved once for the rewriter.</summary>
+    private static readonly MethodInfo ContainsBytesMethod = typeof(InMemoryQueryExecutor<TEntity>).GetMethod(
+        nameof(ContainsBytes),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
     /// <summary>
-    /// Rewrites <c>==</c> / <c>!=</c> over <c>byte[]</c> operands into a byte-wise comparison before the predicate
-    /// is compiled.
+    /// Rewrites <c>==</c> / <c>!=</c> over <c>byte[]</c> operands, and a <c>Contains</c> over a collection of <c>byte[]</c>
+    /// (an IN), into a byte-wise comparison before the predicate is compiled.
     /// </summary>
     /// <remarks>
-    /// C#'s <c>==</c> on arrays is reference equality, so a compiled predicate would treat two equal blobs as
-    /// different - the SQL backends compare the column's actual bytes, and the in-memory store hands out cloned
-    /// arrays by design, which makes reference equality never match. Value-object columns are unaffected (their
-    /// operators already compare by value), and other operand types keep their C# semantics untouched.
+    /// C#'s <c>==</c> on arrays is reference equality, and so is the default comparer a collection's <c>Contains</c> uses,
+    /// so a compiled predicate would treat two equal blobs as different - the SQL backends compare the column's actual
+    /// bytes, and the in-memory store hands out cloned arrays by design, which makes reference equality never match.
+    /// Value-object columns are unaffected (their operators already compare by value), and other operand types keep their
+    /// C# semantics untouched.
     /// </remarks>
     private sealed class ByteArrayEqualityRewriter : ExpressionVisitor
     {
@@ -1248,6 +1444,92 @@ public sealed class InMemoryDataStore
 
             return base.VisitBinary(node);
         }
+
+        /// <inheritdoc />
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            // Enumerable.Contains(source, value), or an instance Contains(value) on a List / HashSet / ICollection
+            if (node.Method.Name == nameof(Enumerable.Contains))
+            {
+                var source = node.Object ?? (node.Arguments.Count == 2 ? node.Arguments[0] : null);
+                var value = node.Object is null
+                    ? (node.Arguments.Count == 2 ? node.Arguments[1] : null)
+                    : (node.Arguments.Count == 1 ? node.Arguments[0] : null);
+
+                if (
+                    source is not null
+                    && value is not null
+                    && value.Type == typeof(byte[])
+                    && typeof(IEnumerable<byte[]>).IsAssignableFrom(source.Type)
+                )
+                {
+                    return Expression.Call(
+                        ContainsBytesMethod,
+                        Expression.Convert(Visit(source), typeof(IEnumerable<byte[]?>)),
+                        Visit(value)
+                    );
+                }
+            }
+
+            return base.VisitMethodCall(node);
+        }
+    }
+
+    /// <summary>Rejects a navigation property in a query condition or ordering, as the SQL backends do.</summary>
+    /// <remarks>
+    /// A navigation is not a column. The SQL backends refuse to translate one, and here the store holds rows rather than
+    /// graphs, so a navigation read off a stored row is always empty: <c>x.Orders.Any()</c> would match no row and
+    /// <c>x.Customer == null</c> every row, without an error. Only a navigation reached from the entity being queried is
+    /// rejected; a value captured from outside the query is evaluated like any other value.
+    /// </remarks>
+    private sealed class NavigationGuard : ExpressionVisitor
+    {
+        /// <summary>The shared stateless instance.</summary>
+        public static readonly NavigationGuard Instance = new();
+
+        /// <inheritdoc />
+        protected override Expression VisitMember(MemberExpression node)
+        {
+            if (
+                node.Member is PropertyInfo property
+                && EntitySaveMetadata.NavigationAttribute(property) is not null
+                && IsReadOffParameter(node.Expression)
+            )
+            {
+                throw new NotSupportedException(
+                    $"'{property.DeclaringType?.Name}.{property.Name}' is a navigation property and cannot be used in a query condition or ordering; "
+                        + "filter on the foreign-key column instead."
+                );
+            }
+
+            return base.VisitMember(node);
+        }
+
+        /// <summary>Whether the expression is a lambda parameter, possibly through member accesses and conversions.</summary>
+        private static bool IsReadOffParameter(Expression? expression)
+        {
+            while (true)
+            {
+                switch (expression)
+                {
+                    case ParameterExpression:
+                        return true;
+                    case MemberExpression member:
+                        expression = member.Expression;
+                        break;
+                    case UnaryExpression
+                    {
+                        NodeType: ExpressionType.Convert
+                            or ExpressionType.ConvertChecked
+                            or ExpressionType.TypeAs
+                    } unary:
+                        expression = unary.Operand;
+                        break;
+                    default:
+                        return false;
+                }
+            }
+        }
     }
 
     /// <summary>Compiles the plan's ordering key selectors into delegates (paired with their direction). Called outside the store lock, for the same reason as <see cref="CompilePredicates"/>.</summary>
@@ -1256,8 +1538,10 @@ public sealed class InMemoryDataStore
     ) =>
         plan
             .Orderings.Select(ordering =>
-                ((Func<TEntity, object?>)ordering.KeySelector.Compile(), ordering.Descending)
-            )
+            {
+                NavigationGuard.Instance.Visit(ordering.KeySelector);
+                return ((Func<TEntity, object?>)ordering.KeySelector.Compile(), ordering.Descending);
+            })
             .ToArray();
 
     /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
@@ -1367,39 +1651,57 @@ public sealed class InMemoryDataStore
 }
 
 /// <summary>Reconstructs navigations (child collections, parent references) from FK metadata along the Include tree and attaches them to the cloned graph.</summary>
-{{ infra_visibility }} static class IncludeAttacher
+/// <remarks>
+/// The navigations of a whole result are attached together: for each Include node the related table is read once and indexed
+/// by the key it is matched on, instead of being scanned again for every entity. Keys are matched in the form
+/// <see cref="IncludeKeys"/> gives them, so a principal key and a foreign key of different CLR types (a long key referred to by
+/// an int column) still meet. Every entity gets clones of its own; the store's snapshots are never handed out.
+/// </remarks>
+internal static class IncludeAttacher
 {
     /// <summary>Recursively attaches the navigations for the Include tree onto the given (cloned) entity.</summary>
     public static void Attach(
         EntityBaseCore entity,
         IReadOnlyList<IncludeNode> includes,
         InMemoryDataStore.InMemoryReadScope scope
+    ) => AttachAll(new[] { entity }, includes, scope);
+
+    /// <summary>Recursively attaches the navigations for the Include tree onto every given (cloned) entity of one type.</summary>
+    public static void AttachAll(
+        IReadOnlyList<EntityBaseCore> entities,
+        IReadOnlyList<IncludeNode> includes,
+        InMemoryDataStore.InMemoryReadScope scope
     )
     {
+        if (entities.Count == 0 || includes.Count == 0)
+        {
+            return;
+        }
+
         foreach (var node in includes)
         {
             var attribute =
-                node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
+                EntitySaveMetadata.NavigationAttribute(node.Property)
                 ?? throw new InvalidOperationException(
                     $"{node.Property.Name} is not a navigation that has [NavigationReference]."
                 );
 
-            var metadata = EntitySaveMetadata.For(entity.GetType());
+            var metadata = EntitySaveMetadata.For(entities[0].GetType());
 
             if (attribute.IsCollection || !attribute.IsParentReference)
             {
-                AttachChildren(entity, node, attribute, metadata, scope);
+                AttachChildren(entities, node, attribute, metadata, scope);
             }
             else
             {
-                AttachParent(entity, node, attribute, metadata, scope);
+                AttachParents(entities, node, attribute, metadata, scope);
             }
         }
     }
 
-    /// <summary>Fills a collection or child-direction single-reference navigation with the children whose FK matches the parent key.</summary>
+    /// <summary>Fills a collection or child-direction single-reference navigation with the children whose FK matches each parent's key.</summary>
     private static void AttachChildren(
-        EntityBaseCore parent,
+        IReadOnlyList<EntityBaseCore> parents,
         IncludeNode node,
         NavigationReferenceAttribute attribute,
         EntitySaveMetadata parentMetadata,
@@ -1411,44 +1713,67 @@ public sealed class InMemoryDataStore
             : node.Property.PropertyType;
         var childMetadata = EntitySaveMetadata.For(childType);
 
-        var parentKey = ColumnValue(parent, attribute.PrincipalColumn, parentMetadata);
-        var matched = new List<EntityBaseCore>();
-
+        // One pass over the child table, grouped by the (normalized) foreign key
+        var childrenByKey = new Dictionary<object, List<EntityBaseCore>>();
         foreach (var child in scope.All(childType))
         {
-            var fk = ColumnValue(child, attribute.DependentColumn, childMetadata);
-
-            if (parentKey is not null && Equals(fk, parentKey))
+            if (ColumnValue(child, attribute.DependentColumn, childMetadata) is not { } fk)
             {
-                var clonedChild = child.Clone();
-                UnboundedBinaryColumns.StripExcluded(clonedChild);
-                Attach(clonedChild, node.Children, scope);
-                matched.Add(clonedChild);
+                continue;
+            }
+
+            if (!childrenByKey.TryGetValue(fk, out var bucket))
+            {
+                bucket = new List<EntityBaseCore>();
+                childrenByKey[fk] = bucket;
+            }
+
+            bucket.Add(child);
+        }
+
+        var attached = new List<EntityBaseCore>();
+        foreach (var parent in parents)
+        {
+            var matched = new List<EntityBaseCore>();
+
+            if (
+                ColumnValue(parent, attribute.PrincipalColumn, parentMetadata) is { } parentKey
+                && childrenByKey.TryGetValue(parentKey, out var bucket)
+            )
+            {
+                foreach (var child in bucket)
+                {
+                    matched.Add(InMemoryDataStore.CopyRow<EntityBaseCore>(child));
+                }
+            }
+
+            attached.AddRange(matched);
+
+            if (attribute.IsCollection)
+            {
+                // Create a concrete List for ICollection<childType> and fill it.
+                var listType = typeof(List<>).MakeGenericType(childType);
+                var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
+
+                foreach (var child in matched)
+                {
+                    list.Add(child);
+                }
+
+                node.Property.SetValue(parent, list);
+            }
+            else
+            {
+                node.Property.SetValue(parent, matched.Count > 0 ? matched[0] : null);
             }
         }
 
-        if (attribute.IsCollection)
-        {
-            // Create a concrete List for ICollection<childType> and fill it.
-            var listType = typeof(List<>).MakeGenericType(childType);
-            var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
-
-            foreach (var child in matched)
-            {
-                list.Add(child);
-            }
-
-            node.Property.SetValue(parent, list);
-        }
-        else
-        {
-            node.Property.SetValue(parent, matched.Count > 0 ? matched[0] : null);
-        }
+        AttachAll(attached, node.Children, scope);
     }
 
-    /// <summary>Fills a parent-reference navigation with the parent that its own FK points to.</summary>
-    private static void AttachParent(
-        EntityBaseCore dependent,
+    /// <summary>Fills a parent-reference navigation with the parent that each entity's own FK points to.</summary>
+    private static void AttachParents(
+        IReadOnlyList<EntityBaseCore> dependents,
         IncludeNode node,
         NavigationReferenceAttribute attribute,
         EntitySaveMetadata dependentMetadata,
@@ -1458,32 +1783,38 @@ public sealed class InMemoryDataStore
         var parentType = node.Property.PropertyType;
         var parentMetadata = EntitySaveMetadata.For(parentType);
 
-        var fk = ColumnValue(dependent, attribute.DependentColumn, dependentMetadata);
-
-        if (fk is null)
-        {
-            node.Property.SetValue(dependent, null);
-            return;
-        }
-
+        // One pass over the parent table, indexed by the (normalized) principal key; the first row wins, as the scan did
+        var parentsByKey = new Dictionary<object, EntityBaseCore>();
         foreach (var candidate in scope.All(parentType))
         {
-            var principal = ColumnValue(candidate, attribute.PrincipalColumn, parentMetadata);
-
-            if (Equals(principal, fk))
+            if (ColumnValue(candidate, attribute.PrincipalColumn, parentMetadata) is { } principal)
             {
-                var clonedParent = candidate.Clone();
-                UnboundedBinaryColumns.StripExcluded(clonedParent);
-                Attach(clonedParent, node.Children, scope);
-                node.Property.SetValue(dependent, clonedParent);
-                return;
+                parentsByKey.TryAdd(principal, candidate);
             }
         }
 
-        node.Property.SetValue(dependent, null);
+        var attached = new List<EntityBaseCore>();
+        foreach (var dependent in dependents)
+        {
+            if (
+                ColumnValue(dependent, attribute.DependentColumn, dependentMetadata) is { } fk
+                && parentsByKey.TryGetValue(fk, out var parent)
+            )
+            {
+                var clonedParent = InMemoryDataStore.CopyRow<EntityBaseCore>(parent);
+                node.Property.SetValue(dependent, clonedParent);
+                attached.Add(clonedParent);
+            }
+            else
+            {
+                node.Property.SetValue(dependent, null);
+            }
+        }
+
+        AttachAll(attached, node.Children, scope);
     }
 
-    /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
+    /// <summary>Reads the value of the given column from an entity in the form keys are matched in (<see cref="IncludeKeys"/>).</summary>
     private static object? ColumnValue(
         EntityBaseCore entity,
         string columnName,
@@ -1497,50 +1828,18 @@ public sealed class InMemoryDataStore
             );
         }
 
-        var value = property.GetValue(entity);
-{{~ if generate_value_objects ~}}
-        return value is IValueObjectCore vo ? vo.UnderlyingValue : value;
-{{~ else ~}}
-        return value;
-{{~ end ~}}
+        return IncludeKeys.Normalize(property.GetValue(entity));
     }
 }
 
 /// <summary>Cascade save/delete for the in-memory repository (traversing child navigations derived from FK metadata).</summary>
-{{ infra_visibility }} static class InMemoryCascade
+/// <remarks>
+/// A loaded graph is walked through <see cref="EntityBaseCore.EnumerateCascadeChildren"/>, the cascade traversal every graph
+/// operation shares; only <see cref="DeleteDescendants"/>, which has no loaded graph, reads the cascade navigations of the
+/// metadata to find the child rows in the store.
+/// </remarks>
+internal static class InMemoryCascade
 {
-    /// <summary>Enumerates the child entities subject to cascade (null is excluded).</summary>
-    public static IEnumerable<EntityBaseCore> EnumerateChildren(EntityBaseCore entity)
-    {
-        foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
-        {
-            var value = navigation.Property.GetValue(entity);
-
-            if (value is null)
-            {
-                continue;
-            }
-
-            if (navigation.IsCollection)
-            {
-                if (value is IEnumerable<EntityBaseCore> children)
-                {
-                    foreach (var child in children)
-                    {
-                        if (child is not null)
-                        {
-                            yield return child;
-                        }
-                    }
-                }
-            }
-            else if (value is EntityBaseCore child)
-            {
-                yield return child;
-            }
-        }
-    }
-
     /// <summary>Saves the graph driven by RowState and returns the number of rows written (same semantics as QuickER's EntityGraphSaver).</summary>
     /// <remarks>
     /// IsRemoved deletes children first and then the entity itself, IsAdded inserts, and IsUpdated updates (when the target is
@@ -1578,7 +1877,7 @@ public sealed class InMemoryDataStore
         {
             if (cascadeDelete)
             {
-                foreach (var child in EnumerateChildren(entity))
+                foreach (var child in entity.EnumerateCascadeChildren())
                 {
                     rows += DeleteGraph(child, scope, mode, hooks, records);
                 }
@@ -1651,7 +1950,7 @@ public sealed class InMemoryDataStore
 
         if (cascadeSave)
         {
-            foreach (var child in EnumerateChildren(entity))
+            foreach (var child in entity.EnumerateCascadeChildren())
             {
                 rows += Save(
                     child,
@@ -1691,7 +1990,7 @@ public sealed class InMemoryDataStore
             // For deletes, fire Before starting from the children (same order as Save / DeleteGraph).
             if (cascadeDelete)
             {
-                foreach (var child in EnumerateChildren(entity))
+                foreach (var child in entity.EnumerateCascadeChildren())
                 {
                     await InvokeBeforeDeleteGraphAsync(child, hooks, cancellationToken).ConfigureAwait(false);
                 }
@@ -1722,7 +2021,7 @@ public sealed class InMemoryDataStore
 
         if (cascadeSave)
         {
-            foreach (var child in EnumerateChildren(entity))
+            foreach (var child in entity.EnumerateCascadeChildren())
             {
                 await InvokeBeforeGraphAsync(
                     child,
@@ -1742,7 +2041,7 @@ public sealed class InMemoryDataStore
         CancellationToken cancellationToken
     )
     {
-        foreach (var child in EnumerateChildren(entity))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
             await InvokeBeforeDeleteGraphAsync(child, hooks, cancellationToken).ConfigureAwait(false);
         }
@@ -1764,7 +2063,7 @@ public sealed class InMemoryDataStore
     {
         var rows = 0;
 
-        foreach (var child in EnumerateChildren(entity))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
             rows += DeleteGraph(child, scope, mode, hooks, records);
         }
@@ -1795,18 +2094,12 @@ public sealed class InMemoryDataStore
     /// <summary>For ExecuteDelete, which has no loaded graph, deletes descendants in the store along the FK chain (grandchildren before children).</summary>
     /// <remarks>
     /// Follows the cascade navigations (FK metadata) and finds and deletes children in the store whose DependentColumn matches the
-    /// parent's PrincipalColumn value. Cyclic cascades (self-references and the like) cannot be expressed by this fixed traversal
-    /// and are therefore unsupported.
+    /// parent's PrincipalColumn value. Cyclic cascades (self-references and the like) cannot be expressed by this fixed traversal;
+    /// the caller rejects them up front with <see cref="ThrowIfCascadeIsCyclic"/>, so the traversal here always terminates.
     /// </remarks>
     public static int DeleteDescendants(
-        EntityBaseCore root,
-        InMemoryDataStore.InMemoryWriteScope scope
-    ) => DeleteDescendants(root, scope, new HashSet<Type> { root.GetType() });
-
-    private static int DeleteDescendants(
         EntityBaseCore parent,
-        InMemoryDataStore.InMemoryWriteScope scope,
-        HashSet<Type> visited
+        InMemoryDataStore.InMemoryWriteScope scope
     )
     {
         var rows = 0;
@@ -1814,13 +2107,6 @@ public sealed class InMemoryDataStore
 
         foreach (var navigation in parentMetadata.CascadeNavigations)
         {
-            if (!visited.Add(navigation.ChildType))
-            {
-                throw new NotSupportedException(
-                    $"A cyclic cascade ({navigation.ChildType.Name}) is not supported by ExecuteDeleteAsync. Load the graph and use SaveAsync, or use SaveAsync against an already loaded graph."
-                );
-            }
-
             var childMetadata = EntitySaveMetadata.For(navigation.ChildType);
             var parentKey = ColumnValue(parent, navigation.PrincipalColumn, parentMetadata);
 
@@ -1839,21 +2125,65 @@ public sealed class InMemoryDataStore
             foreach (var child in children)
             {
                 // Delete grandchildren and below first, then the child (FK consistency).
-                rows += DeleteDescendants(child, scope, visited);
+                rows += DeleteDescendants(child, scope);
 
                 if (scope.Remove(navigation.ChildType, InMemoryDataStore.KeyOf(child)))
                 {
                     rows++;
                 }
             }
-
-            visited.Remove(navigation.ChildType);
         }
 
         return rows;
     }
 
-    /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
+    /// <summary>Caches, per root type, the child type that closes a cascade cycle (<c>null</c> when the cascade is acyclic).</summary>
+    private static readonly ConcurrentDictionary<Type, Type?> _cyclicCascadeCache = new();
+
+    /// <summary>Throws when the cascade reachable from <paramref name="rootType"/> contains a cycle, which a cascading ExecuteDelete cannot express.</summary>
+    /// <remarks>
+    /// The verdict comes from the metadata alone, before any row is read, so it does not depend on how many rows the
+    /// condition matches: a delete that happens to match nothing is rejected all the same, as the SQL backends' cascade
+    /// planners reject the shape before running anything.
+    /// </remarks>
+    public static void ThrowIfCascadeIsCyclic(Type rootType)
+    {
+        var childType = _cyclicCascadeCache.GetOrAdd(
+            rootType,
+            static type => FindCyclicChild(type, new HashSet<Type> { type })
+        );
+
+        if (childType is not null)
+        {
+            throw new NotSupportedException(
+                $"A cyclic cascade ({childType.Name}) is not supported by ExecuteDeleteAsync. Load the graph and use SaveAsync, or use SaveAsync against an already loaded graph."
+            );
+        }
+    }
+
+    /// <summary>Walks the cascade navigations depth first and returns the child type met twice on one path (<c>null</c> when there is none).</summary>
+    private static Type? FindCyclicChild(Type parentType, HashSet<Type> path)
+    {
+        foreach (var navigation in EntitySaveMetadata.For(parentType).CascadeNavigations)
+        {
+            if (!path.Add(navigation.ChildType))
+            {
+                return navigation.ChildType;
+            }
+
+            var found = FindCyclicChild(navigation.ChildType, path);
+            path.Remove(navigation.ChildType);
+
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Reads the value of the given column from an entity in the form keys are matched in (<see cref="IncludeKeys"/>).</summary>
     private static object? ColumnValue(
         EntityBaseCore entity,
         string columnName,
@@ -1867,12 +2197,8 @@ public sealed class InMemoryDataStore
             );
         }
 
-        var value = property.GetValue(entity);
-{{~ if generate_value_objects ~}}
-        return value is IValueObjectCore vo ? vo.UnderlyingValue : value;
-{{~ else ~}}
-        return value;
-{{~ end ~}}
+        // Matched in the same form as the Include attacher (a long principal key and an int foreign key still meet)
+        return IncludeKeys.Normalize(property.GetValue(entity));
     }
 }
 
@@ -1944,21 +2270,31 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
 
         var count = Store.Write(scope =>
         {
-            var batchKeys = new HashSet<object>();
-            var accepted = new Dictionary<object, EntityBaseCore>();
+            var batchKeys = new HashSet<object>(InMemoryKeyComparer.Instance);
+
+            // The store's rows are indexed once per type and each accepted row joins the index, so the whole batch is checked
+            // against the store and against its own preceding rows without comparing every pair
+            var indexes = new Dictionary<Type, InMemoryUniqueness.Index?>();
 
             // Pre-validate all keys and constraint values, then apply: a duplicate must not leave a partially inserted batch behind.
             foreach (var entity in targets)
             {
+                var entityType = entity.GetType();
                 var key = InMemoryDataStore.KeyOf(entity);
 
-                if (scope.Exists(entity.GetType(), key) || !batchKeys.Add(key))
+                if (scope.Exists(entityType, key) || !batchKeys.Add(key))
                 {
-                    throw InMemoryDataStore.DuplicateKeyError(entity.GetType(), key);
+                    throw InMemoryDataStore.DuplicateKeyError(entityType, key);
                 }
 
-                scope.VerifyUnique(entity, key, accepted);
-                accepted[key] = entity;
+                if (!indexes.TryGetValue(entityType, out var index))
+                {
+                    index = scope.UniquenessIndex(entityType);
+                    indexes.Add(entityType, index);
+                }
+
+                index?.Verify(key, entity);
+                index?.Add(key, entity);
             }
 
             foreach (var entity in targets)
@@ -2083,6 +2419,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
             return false;
         }
 {{~ if generate_value_objects ~}}
+
         // Open value objects to their underlying value (when the excluded column is a VO).
         value = value is IValueObjectCore vo ? vo.UnderlyingValue : value;
 {{~ end ~}}
@@ -2121,11 +2458,12 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         else
         {
             // The CanSeek/length contract validation matches the real database (dialect-neutral parity).
-            _ = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+            var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical).
+            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical,
+            // including the exact-length check: a stream shorter or longer than the length fails as it does on a real database).
             using var buffer = new MemoryStream();
-            await source.CopyToAsync(
+            await UnboundedBinaryColumns.WithExactLength(source, payloadLength).CopyToAsync(
                 buffer,
                 UnboundedBinaryColumns.StreamCopyBufferSize,
                 cancellationToken
@@ -2173,67 +2511,14 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
             return 0;
         }
 
-        // Copy-on-write staging that makes the whole save all-or-nothing: every write goes here and reaches the store only
-        // once the last phase has succeeded.
-        var staging = new InMemorySaveStaging();
-
-        // If hooks are registered, build a session that supplies a context participating in the in-progress store write.
-        var hooks =
-            _saveHooks is null
-                ? null
-                : new SaveHookSession(
-                    _saveHooks,
-                    e => new InMemorySaveHookContext(Store, e.GetType(){{ if exclude_unbounded_binary || runtime_package_export }}, staging{{ end }})
-                );
-
-        // Phase 1 (outside the lock): traverse the graph in the same order as Save, fire Before, and build the skip set.
-        if (hooks is not null)
-        {
-            await InMemoryCascade.InvokeBeforeGraphAsync(
-                entity,
-                hooks,
-                cascadeSave,
-                cascadeDelete,
-                cancellationToken,
-                changesAlreadyVerified: true
-            ).ConfigureAwait(false);
-        }
-
-        // Phase 2 (inside the lock): stage the save applying the skip set and record the (entity, operation) pairs performed.
-        var records =
-            hooks is null ? null : new List<(EntityBaseCore Entity, SaveOperation Operation)>();
-        var rows = Store.Write(
-            scope =>
-                InMemoryCascade.Save(
-                    entity,
-                    scope,
-                    cascadeSave,
-                    cascadeDelete,
-                    insertWhenUpdateMissing,
-                    mode,
-                    hooks,
-                    records,
-                    changesAlreadyVerified: true
-                ),
-            staging
-        );
-
-        // Phase 3 (outside the lock): fire After in execution order. An exception here leaves the staging unpublished, so the
-        // "row written but the hook's follow-up failed" half state cannot survive.
-        if (hooks is not null)
-        {
-            foreach (var (recordEntity, operation) in records!)
-            {
-                await hooks.InvokeAfterAsync(recordEntity, operation, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        // Every phase succeeded, so the staged writes become visible as one unit and hand their row versions to the caller.
-        Store.Publish(staging, mode);
-
-        // Finalize the saved graph as Unchanged (skipped rows are left as they are).
-        EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
-        return rows;
+        return await SaveRootsAsync(
+            [entity],
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        ).ConfigureAwait(false);
     }
 
     /// <summary>Saves multiple aggregate roots as one unit (atomic processing: all succeed or all roll back).</summary>
@@ -2264,9 +2549,31 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
             return 0;
         }
 
-        // Staging shared by every root, so the whole call is one all-or-nothing unit.
+        return await SaveRootsAsync(
+            roots,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            mode,
+            cancellationToken
+        ).ConfigureAwait(false);
+    }
+
+    /// <summary>The 3 phases both <c>SaveAsync</c> overloads share, over roots already known to have changes (see the single-root overload).</summary>
+    private async Task<int> SaveRootsAsync(
+        IReadOnlyList<TEntity> roots,
+        bool cascadeSave,
+        bool cascadeDelete,
+        bool insertWhenUpdateMissing,
+        ConcurrencyMode mode,
+        CancellationToken cancellationToken
+    )
+    {
+        // Copy-on-write staging shared by every root, so the whole call is one all-or-nothing unit: every write goes here and
+        // reaches the store only once the last phase has succeeded.
         var staging = new InMemorySaveStaging();
 
+        // If hooks are registered, build a session that supplies a context participating in the in-progress store write.
         var hooks =
             _saveHooks is null
                 ? null
@@ -2275,7 +2582,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
                     e => new InMemorySaveHookContext(Store, e.GetType(){{ if exclude_unbounded_binary || runtime_package_export }}, staging{{ end }})
                 );
 
-        // Phase 1 (outside the lock): traverse the graphs of all roots and fire Before.
+        // Phase 1 (outside the lock): traverse the graphs of all roots in the same order as Save, fire Before, and build the skip set.
         if (hooks is not null)
         {
             foreach (var entity in roots)
@@ -2319,7 +2626,8 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
             staging
         );
 
-        // Phase 3 (outside the lock): fire After in execution order (an exception here leaves the staging unpublished).
+        // Phase 3 (outside the lock): fire After in execution order. An exception here leaves the staging unpublished, so the
+        // "row written but the hook's follow-up failed" half state cannot survive.
         if (hooks is not null)
         {
             foreach (var (recordEntity, operation) in records!)
@@ -2331,6 +2639,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         // Every phase succeeded, so the staged writes become visible as one unit and hand their row versions to the caller.
         Store.Publish(staging, mode);
 
+        // Finalize the saved graphs as Unchanged (skipped rows are left as they are).
         foreach (var entity in roots)
         {
             EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
@@ -2429,11 +2738,12 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         else
         {
             // The CanSeek/length contract validation matches the real database (dialect-neutral parity).
-            _ = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+            var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical).
+            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical,
+            // including the exact-length check: a stream shorter or longer than the length fails as it does on a real database).
             using var buffer = new MemoryStream();
-            await source.CopyToAsync(
+            await UnboundedBinaryColumns.WithExactLength(source, payloadLength).CopyToAsync(
                 buffer,
                 UnboundedBinaryColumns.StreamCopyBufferSize,
                 cancellationToken
@@ -2503,16 +2813,24 @@ public sealed partial class InMemory{{ repository.class_name }}(
 }{{ end }}
 {{~ end ~}}
 
-/// <summary>Seeder that loads deterministic sample data into the in-memory store (3 rows per entity, in FK dependency order).</summary>
+/// <summary>Seeder that loads deterministic sample data into the in-memory store (up to 3 rows per entity).</summary>
 /// <remarks>
-/// Values are generated deterministically from the column metadata (int keys = 1,2,3; string keys = "{TABLE}-00n";
-/// Guids are deterministic from a fixed seed; string columns = "{column name} n"; numbers/dates are type-based fixed
-/// values; nullable columns get null in 1 of the 3 rows). FK columns reference existing parent key values, so seeding
-/// runs parent-first, then children.
+/// <para>
+/// Values are generated deterministically from the column metadata and the column's role: a primary-key or UNIQUE
+/// column gets a different value on every row (int keys = 1,2,3; string keys = "{COLUMN NAME}-00n", shortened before the
+/// row number when the column is too short; Guids are deterministic from a fixed seed), a foreign-key column takes the
+/// value of the column it refers to on the same row, so row n of a child refers to row n of its parent, and any other
+/// column gets a type-based fixed value ("{column name} n" for strings). Nullable columns get null in the third row.
+/// </para>
+/// <para>
+/// An entity whose primary key or UNIQUE constraint cannot take three different sample values (a NOT NULL bool, for
+/// one) is seeded with fewer rows, and so is a child that refers to it, so that every key and UNIQUE constraint holds and
+/// every foreign key refers to a row that exists.
+/// </para>
 /// </remarks>
 public static class InMemorySampleData
 {
-    /// <summary>Number of rows seeded per entity.</summary>
+    /// <summary>The most rows seeded per entity (an entity whose keys cannot take that many different values gets fewer).</summary>
     public const int RowsPerEntity = 3;
 
     /// <summary>Seeds sample data for all entities (in parent-to-child FK dependency order).</summary>
@@ -2527,7 +2845,7 @@ public static class InMemorySampleData
     /// <summary>Seeds sample data for {{ entity.table_name_xml_doc }}.</summary>
     private static void Seed{{ entity.class_name }}(InMemoryDataStore store)
     {
-        for (var index = 1; index <= RowsPerEntity; index++)
+        for (var index = 1; index <= {{ if entity.sample_row_count == 3 }}RowsPerEntity{{ else }}{{ entity.sample_row_count }}{{ end }}; index++)
         {
             var entity = new {{ entity.class_name }}
             {

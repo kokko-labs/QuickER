@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -90,8 +91,41 @@ public sealed class SyncVoRuntimeTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>注文を 1 件作る（NOT NULL の除外列 <c>photo</c> も埋める＝アプリが挿入するときの形）</summary>
     private static SyncvoOrderEntity NewOrder(int id, string title) =>
-        new() { OrderId = OrderIdValue.Create(id), Title = TitleValue.Create(title) };
+        new()
+        {
+            OrderId = OrderIdValue.Create(id),
+            Title = TitleValue.Create(title),
+            Photo = PhotoValue.Create([1, 2, 3]),
+        };
+
+    /// <summary>
+    /// 除外した NOT NULL の blob 列を持つ新しい行も、ダウンロードでローカルへ挿入できる。
+    /// </summary>
+    /// <remarks>
+    /// 同期の行の読み出しは除外列を含まないため、値オブジェクトの除外列は null のまま届く。そのまま挿入すると
+    /// NOT NULL で失敗し、新しい行のダウンロードが毎回止まっていた。エンジンは挿入する行の除外列へ空の値を入れる
+    /// （blob を運ばない回の、相手側に新しい行の除外列が空になるのと同じ状態）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/VO] 除外した NOT NULL の blob 列を持つ新しい行もダウンロードで挿入できる"
+    )]
+    public async Task NewRowWithExcludedNotNullBlob_IsDownloaded()
+    {
+        await _serverWriter.InsertAsync(NewOrder(7, "from-server"), Ct);
+
+        var result = await _engine.SyncAsync(cancellationToken: Ct);
+
+        result.Downloaded.Should().Be(1);
+        (await _localOrdersRaw.GetByIdAsync(OrderIdValue.Create(7), Ct))!
+            .Title.Value.Should()
+            .Be("from-server");
+
+        using var photo = new MemoryStream();
+        (await _localOrdersRaw.ReadPhotoAsync(OrderIdValue.Create(7), photo, Ct)).Should().BeTrue();
+        photo.Length.Should().Be(0, "blob を運ばない回では、新しい行の除外列は空の値で入る");
+    }
 
     /// <summary>
     /// ミラー版が空のローカル新規行は、版の読み出しで落ちずに INSERT として送られる。
@@ -369,8 +403,9 @@ public sealed class SyncVoRuntimeTests : IAsyncLifetime
         IRemoteRepository<SyncvoOrderEntity, OrderIdValue> writer
     ) : ISyncServerSource<SyncvoOrderEntity, OrderIdValue>
     {
+        // 生成された差分ソースと同じく、除外列（photo）を SELECT に含めない（行の転送は除外列を運ばない）
         private const string ChangesSql =
-            "SELECT * FROM \"syncvo_orders\" WHERE (@anchor IS NULL OR \"row_ver\" > @anchor) "
+            "SELECT \"order_id\", \"title\", \"row_ver\" FROM \"syncvo_orders\" WHERE (@anchor IS NULL OR \"row_ver\" > @anchor) "
             + "AND (@ceiling IS NULL OR \"row_ver\" < @ceiling) ORDER BY \"row_ver\" LIMIT @batchSize";
 
         private const string KeysSql = "SELECT \"order_id\" FROM \"syncvo_orders\"";

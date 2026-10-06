@@ -227,6 +227,180 @@ public sealed class SqliteValueConversionRuntimeTests : IAsyncLifetime
         row.Label.Should().Be("alpha");
     }
 
+    /// <summary>
+    /// 外部ツールが書いたオフセットつきの日時の TEXT を、どの経路で読んでも同じ値（UTC に換算・Kind=Utc）になることを検証する。
+    /// GetById は値オブジェクトの速い読み取り（ドライバの GetDateTime）、Query() は再ラップ（RawValueConverter）、
+    /// 素の列の生 SQL 取得は CoerceScalar、生 SQL スカラーは RawValueConverter を通る。
+    /// 従来は速い読み取りだけが UTC、他は Local に換算して食い違っていた
+    /// </summary>
+    [Fact(
+        DisplayName = "[SQLite/値変換] オフセットつきの日時の TEXT はどの経路でも同じ UTC の値に読む"
+    )]
+    public async Task StoredDateTimeWithOffset_ReadsTheSameOnEveryPath()
+    {
+        await Executor()
+            .ExecuteSqlAsync(
+                "UPDATE \"time_probes\" SET \"recorded_at\" = '2024-01-15 10:00:00+09:00';",
+                cancellationToken: Ct
+            );
+        var expected = new DateTime(2024, 1, 15, 1, 0, 0, DateTimeKind.Utc);
+
+        var byId = (await Probes().GetByIdAsync(ProbeIdValue.Create(1), Ct))!.RecordedAt!.Value;
+        var label = LabelValue.Create("alpha");
+        var byQuery = (await Probes().Query().Where(probe => probe.Label == label).ToListAsync(Ct))
+            .Should()
+            .ContainSingle()
+            .Subject.RecordedAt!.Value;
+        var byRawSql = (
+            await Executor()
+                .QueryBySqlAsync<RecordedProbeEntity>(
+                    "SELECT \"probe_id\", \"session_id\", \"recorded_at\" FROM \"time_probes\";",
+                    cancellationToken: Ct
+                )
+        )
+            .Should()
+            .ContainSingle()
+            .Subject.RecordedAt;
+        var byScalar = await Probes()
+            .ExecuteScalarSqlAsync<DateTime>(
+                "SELECT \"recorded_at\" FROM \"time_probes\";",
+                cancellationToken: Ct
+            );
+
+        foreach (
+            var (path, value) in new[]
+            {
+                ("GetById", byId),
+                ("Query()", byQuery),
+                ("生 SQL 取得", byRawSql!.Value),
+                ("生 SQL スカラー", byScalar),
+            }
+        )
+        {
+            value.Should().Be(expected, path);
+            value.Kind.Should().Be(DateTimeKind.Utc, path);
+        }
+    }
+
+    /// <summary>
+    /// 16 バイトの BLOB で格納された Guid を、どの経路で読んでも同じ値になることを検証する。
+    /// 従来は速い読み取り（GetGuid）だけが読め、Query() と素の列の生 SQL 取得は変換に失敗していた
+    /// </summary>
+    [Fact(DisplayName = "[SQLite/値変換] BLOB で格納された Guid はどの経路でも読める")]
+    public async Task StoredGuidBlob_ReadsTheSameOnEveryPath()
+    {
+        await Executor()
+            .ExecuteSqlAsync(
+                "UPDATE \"time_probes\" SET \"session_id\" = @session;",
+                new { session = SampleSession.ToByteArray() },
+                Ct
+            );
+
+        var byId = (await Probes().GetByIdAsync(ProbeIdValue.Create(1), Ct))!.SessionId!.Value;
+        var label = LabelValue.Create("alpha");
+        var byQuery = (await Probes().Query().Where(probe => probe.Label == label).ToListAsync(Ct))
+            .Should()
+            .ContainSingle()
+            .Subject.SessionId!.Value;
+        var byRawSql = (
+            await Executor()
+                .QueryBySqlAsync<RecordedProbeEntity>(
+                    "SELECT \"probe_id\", \"session_id\", \"recorded_at\" FROM \"time_probes\";",
+                    cancellationToken: Ct
+                )
+        )
+            .Should()
+            .ContainSingle()
+            .Subject.SessionId;
+
+        byId.Should().Be(SampleSession, "GetById");
+        byQuery.Should().Be(SampleSession, "Query()");
+        byRawSql.Should().Be(SampleSession, "生 SQL 取得");
+    }
+
+    /// <summary>
+    /// 手書きのエンティティの DateOnly / TimeOnly の列（SQLite は TEXT で格納する）を、リポジトリの GetAll と
+    /// 生 SQL 取得の両方で読めることを検証する。どちらも IConvertible を実装しないため、
+    /// Convert.ChangeType に任せると値の中身に関係なく失敗する
+    /// </summary>
+    [Fact(DisplayName = "[SQLite/値変換] 手書きエンティティの DateOnly / TimeOnly の列を読める")]
+    public async Task HandwrittenDateOnlyAndTimeOnlyColumns_AreRead()
+    {
+        var executor = Executor();
+        await executor.ExecuteSqlAsync(
+            "CREATE TABLE \"day_probes\" (\"probe_id\" INTEGER NOT NULL PRIMARY KEY, \"day\" TEXT NOT NULL, \"clock\" TEXT NULL);",
+            cancellationToken: Ct
+        );
+        await executor.ExecuteSqlAsync(
+            "INSERT INTO \"day_probes\" VALUES (1, '2024-01-15', '10:30:15.5000000');",
+            cancellationToken: Ct
+        );
+
+        var repository = new DayProbeRepository(
+            new SqlConnectionFactory(_sqlite.ReadWriteCreateConnectionString)
+        );
+        var byRepository = (await repository.GetAllAsync(Ct)).Should().ContainSingle().Subject;
+        var byRawSql = (
+            await executor.QueryBySqlAsync<DayProbeEntity>(
+                "SELECT \"probe_id\", \"day\", \"clock\" FROM \"day_probes\";",
+                cancellationToken: Ct
+            )
+        )
+            .Should()
+            .ContainSingle()
+            .Subject;
+
+        foreach (var (path, row) in new[] { ("GetAll", byRepository), ("生 SQL 取得", byRawSql) })
+        {
+            row.Day.Should().Be(new DateOnly(2024, 1, 15), path);
+            row.Clock.Should().Be(new TimeOnly(10, 30, 15, 500), path);
+        }
+    }
+
+    /// <summary>
+    /// 値オブジェクトの検証に通らない格納値（最大長 50 の列に 60 文字）を読むと、どの経路でも列名を名指しした
+    /// InvalidOperationException になることを検証する。速い読み取り（GetById / GetAll）は Create を直接呼び、
+    /// 従来は値オブジェクトの型しか分からない例外がそのまま出ていた
+    /// </summary>
+    [Fact(
+        DisplayName = "[SQLite/値変換] 値オブジェクトが拒む格納値はどの経路でも列名つきの例外になる"
+    )]
+    public async Task StoredValueRejectedByValueObject_NamesTheColumnOnEveryPath()
+    {
+        await Executor()
+            .ExecuteSqlAsync(
+                "UPDATE \"time_probes\" SET \"label\" = @label;",
+                new { label = new string('x', 60) },
+                Ct
+            );
+
+        var reads = new (string Path, Func<Task> Read)[]
+        {
+            ("GetById", async () => await Probes().GetByIdAsync(ProbeIdValue.Create(1), Ct)),
+            ("GetAll", async () => await Probes().GetAllAsync(Ct)),
+            (
+                "Query()",
+                async () =>
+                    await Probes()
+                        .Query()
+                        .Where(probe => probe.ProbeId == ProbeIdValue.Create(1))
+                        .ToListAsync(Ct)
+            ),
+        };
+
+        foreach (var (path, read) in reads)
+        {
+            var failure = (
+                await read.Should().ThrowExactlyAsync<InvalidOperationException>(path)
+            ).Which;
+            failure
+                .Message.Should()
+                .Contain("'label'", path)
+                .And.Contain("TimeProbeEntity.Label", path);
+            failure.InnerException.Should().BeOfType<ValueObjectValidationException>(path);
+        }
+    }
+
     /// <summary>生 SQL 射影の受け皿 DTO（素の CLR 型で受ける）</summary>
     private sealed class ProbeProjection
     {
@@ -279,3 +453,45 @@ public sealed class PlainProbeEntity : EntityBase
     [Column("label")]
     public string? Label { get; set; }
 }
+
+/// <summary>
+/// 手書きの、<c>time_probes</c> の一部の列を素の CLR 型で受けるエンティティ（生 SQL 取得の CoerceScalar の経路を通す）。
+/// </summary>
+[Table("time_probes")]
+public sealed class RecordedProbeEntity : EntityBase
+{
+    /// <summary>probe_id 列</summary>
+    [Key]
+    [Column("probe_id")]
+    public int ProbeId { get; set; }
+
+    /// <summary>session_id 列</summary>
+    [Column("session_id")]
+    public Guid SessionId { get; set; }
+
+    /// <summary>recorded_at 列</summary>
+    [Column("recorded_at")]
+    public DateTime? RecordedAt { get; set; }
+}
+
+/// <summary>手書きの、DateOnly / TimeOnly の列を持つエンティティ（型マッパーはこの 2 型を出さないので手書きでだけ現れる）。</summary>
+[Table("day_probes")]
+public sealed class DayProbeEntity : EntityBase
+{
+    /// <summary>probe_id 列</summary>
+    [Key]
+    [Column("probe_id")]
+    public int ProbeId { get; set; }
+
+    /// <summary>day 列</summary>
+    [Column("day")]
+    public DateOnly Day { get; set; }
+
+    /// <summary>clock 列</summary>
+    [Column("clock")]
+    public TimeOnly? Clock { get; set; }
+}
+
+/// <summary>手書きエンティティ <see cref="DayProbeEntity"/> を生成ランタイムの SQLite エンジンで読むリポジトリ。</summary>
+public sealed class DayProbeRepository(ISqlConnectionFactory connectionFactory)
+    : SqliteRepository<DayProbeEntity, int>(connectionFactory);

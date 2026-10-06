@@ -669,4 +669,160 @@ public class DiagramMergeReconcilerTests
             .Should()
             .Equal("b", "a");
     }
+
+    /// <summary>大文字小文字だけ違う名前でも、双方で一意ならエンティティ・列の Id を引き継ぐことを検証する</summary>
+    /// <remarks>
+    /// MySQL の <c>lower_case_table_names=1</c>（Windows の既定）はテーブル名を小文字で返す。序数一致だけで照合すると
+    /// 図の <c>Orders</c> と取込の <c>orders</c> が別物になり、名前付きクエリ・レイアウト・Memo が失われる
+    /// </remarks>
+    [Fact(
+        DisplayName = "大文字小文字だけ違う名前でも双方で一意なら Id を引き継ぎ、表記は取込側になる"
+    )]
+    public void Reconcile_CaseOnlyDifference_MatchesWhenUnique()
+    {
+        var currentEntityId = Guid.NewGuid();
+        var currentNameId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities = { Ent(currentEntityId, "Orders", Col(currentNameId, "CustomerName")) },
+            Queries =
+            {
+                new QueryDefinition
+                {
+                    Name = "ByName",
+                    EntityId = currentEntityId,
+                    OrderBy = { new QueryOrdering { ColumnId = currentNameId } },
+                },
+            },
+        };
+        var imported = Ent(Guid.NewGuid(), "orders", Col(Guid.NewGuid(), "customername"));
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { imported },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        merged.Entities[0].Id.Should().Be(currentEntityId);
+        merged.Entities[0].TableName.Should().Be("orders");
+        merged.Entities[0].Columns[0].Id.Should().Be(currentNameId);
+        merged.Entities[0].Columns[0].Name.Should().Be("customername");
+        merged.SurvivingQueries.Should().ContainSingle();
+        merged.BrokenQueries.Should().BeEmpty();
+    }
+
+    /// <summary>序数一致の組を、大文字小文字を無視した組より優先することを検証する</summary>
+    [Fact(DisplayName = "大文字小文字だけ違う同名が共存しても、序数一致どうしで組む")]
+    public void Reconcile_CaseOnlyDifference_PrefersExactMatch()
+    {
+        var upperId = Guid.NewGuid();
+        var lowerId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                Ent(upperId, "Dup", Col(Guid.NewGuid(), "Id")),
+                Ent(lowerId, "dup", Col(Guid.NewGuid(), "Id")),
+            },
+        };
+        var importedLower = Ent(Guid.NewGuid(), "dup", Col(Guid.NewGuid(), "Id"));
+        var importedUpper = Ent(Guid.NewGuid(), "Dup", Col(Guid.NewGuid(), "Id"));
+
+        DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedLower, importedUpper },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        importedUpper.Id.Should().Be(upperId);
+        importedLower.Id.Should().Be(lowerId);
+    }
+
+    /// <summary>大文字小文字を無視すると片側で曖昧になる名前は組まないことを検証する</summary>
+    /// <remarks>並び順で片方を選ぶと、取込のたびに引き継ぎ先が変わり得る</remarks>
+    [Fact(DisplayName = "大文字小文字を無視すると曖昧な名前は組まずに新規扱いにする")]
+    public void Reconcile_CaseOnlyDifference_AmbiguousIsNotMatched()
+    {
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                Ent(Guid.NewGuid(), "Dup", Col(Guid.NewGuid(), "Id")),
+                Ent(Guid.NewGuid(), "dup", Col(Guid.NewGuid(), "Id")),
+            },
+        };
+        var importedId = Guid.NewGuid();
+        var imported = Ent(importedId, "DUP", Col(Guid.NewGuid(), "Id"));
+
+        DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { imported },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        imported.Id.Should().Be(importedId);
+    }
+
+    /// <summary>取込側にだけ大文字小文字違いの同名が共存するとき、現在図の 1 件を 2 つが引き継がないことを検証する</summary>
+    /// <remarks>
+    /// 取込側の <c>dup</c> は大文字小文字を無視すると現在図の <c>Dup</c> に当たるが、<c>Dup</c> から取込側を引くと
+    /// 序数一致の <c>Dup</c> になる。相互に引き当たる組だけを組まないと、取込の 2 つがどちらも現在図の Id を
+    /// 引き継ぎ、Id が重複した図になる（PostgreSQL の引用識別子は <c>"Dup"</c> と <c>dup</c> を共存させる）
+    /// </remarks>
+    [Fact(
+        DisplayName = "取込側にだけ大文字小文字違いの同名が共存しても、現在図の Id は序数一致の 1 件だけが引き継ぐ"
+    )]
+    public void Reconcile_CaseOnlyDuplicatesOnImportedSide_DoNotShareCurrentId()
+    {
+        var currentId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities = { Ent(currentId, "Dup", Col(Guid.NewGuid(), "Id")) },
+        };
+        var lowerId = Guid.NewGuid();
+        var importedLower = Ent(lowerId, "dup", Col(Guid.NewGuid(), "Id"));
+        var importedUpper = Ent(Guid.NewGuid(), "Dup", Col(Guid.NewGuid(), "Id"));
+
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { importedLower, importedUpper },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        importedUpper.Id.Should().Be(currentId);
+        importedLower.Id.Should().Be(lowerId);
+        merged.Entities.Select(e => e.Id).Should().OnlyHaveUniqueItems();
+    }
+
+    /// <summary>列でも、取込側にだけ大文字小文字違いの同名が共存するとき現在図の列 Id を 2 つが引き継がないことを検証する</summary>
+    [Fact(
+        DisplayName = "取込側にだけ大文字小文字違いの同名列が共存しても、現在図の列 Id は序数一致の 1 件だけが引き継ぐ"
+    )]
+    public void Reconcile_CaseOnlyDuplicateColumnsOnImportedSide_DoNotShareCurrentId()
+    {
+        var currentColumnId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities = { Ent(Guid.NewGuid(), "T", Col(currentColumnId, "Dup")) },
+        };
+        var lowerColumnId = Guid.NewGuid();
+        var importedLower = Col(lowerColumnId, "dup");
+        var importedUpper = Col(Guid.NewGuid(), "Dup");
+        var imported = Ent(Guid.NewGuid(), "T", importedLower, importedUpper);
+
+        DiagramMergeReconciler.Reconcile(
+            current,
+            new[] { imported },
+            Array.Empty<Relationship>(),
+            preserveExistingMemo: true
+        );
+
+        importedUpper.Id.Should().Be(currentColumnId);
+        importedLower.Id.Should().Be(lowerColumnId);
+        imported.Columns.Select(c => c.Id).Should().OnlyHaveUniqueItems();
+    }
 }

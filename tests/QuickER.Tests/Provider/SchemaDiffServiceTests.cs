@@ -387,9 +387,17 @@ public class SchemaDiffServiceTests
             );
     }
 
-    /// <summary>参照アクション（ON DELETE/UPDATE）の変更で再作成（Drop+Add）が出力されることを検証する</summary>
-    [Fact(DisplayName = "参照アクションが変わると DropForeignKey と AddForeignKey になる")]
-    public void ForeignKeyReferentialActionChanged_EmitsDropAndAdd()
+    /// <summary>
+    /// 参照アクション（ON DELETE/UPDATE）だけが変わった外部キーは、削除と追加の 2 項目でなく
+    /// 1 つの外部キー変更（AlterForeignKey）になることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 削除と追加は同じ名前を持つため、2 項目のままだと既定どおり追加だけを選んで実行したときに
+    /// 同じ名前の外部キーを足そうとして失敗する。外部キー変更は既定未選択・破壊的で、外す側（DB の定義）と
+    /// 付ける側（図の定義）の両方を運ぶ。
+    /// </remarks>
+    [Fact(DisplayName = "参照アクションだけが変わると 1 つの AlterForeignKey になる")]
+    public void ForeignKeyReferentialActionChanged_EmitsSingleAlter()
     {
         var parentLive = Tbl("Parent", ("Id", "int", true));
         var childLive = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
@@ -425,15 +433,118 @@ public class SchemaDiffServiceTests
         );
 
         diff.Items.Should()
-            .ContainSingle(i =>
-                i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_Child_Parent"
+            .NotContain(i =>
+                i.Kind == SchemaDiffKind.AddForeignKey || i.Kind == SchemaDiffKind.DropForeignKey
             );
+        var alter = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterForeignKey)
+            .Which;
+        alter.IsSelected.Should().BeFalse();
+        alter.IsDestructive.Should().BeTrue();
+        alter.Relationship!.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+        alter.Relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetNull);
+        alter.ReplacedForeignKey!.Kind.Should().Be(SchemaDiffKind.DropForeignKey);
+        alter.ReplacedForeignKey.ForeignKeyName.Should().Be("FK_Child_Parent");
+        alter
+            .ReplacedForeignKey.Relationship!.OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.NoAction);
+    }
+
+    /// <summary>
+    /// 名前の無いリレーションと、DDL が既定名 <c>FK_{子}_{親}</c> で作った live の外部キーは同じものとみなし、
+    /// 外部キーの差分を出さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "名前の無いリレーションは既定名の live 外部キーと一致し差分を出さない")]
+    public void UnnamedRelationship_MatchesDefaultNamedLiveForeignKey()
+    {
+        var (live, liveRels, target, targetRels) = ForeignKeyPair(
+            liveName: "FK_Child_Parent",
+            targetName: null
+        );
+
+        var diff = new SchemaDiffService().Compute(live, liveRels, target, targetRels);
+
+        diff.Items.Should().NotContain(i => IsForeignKeyDiff(i));
+    }
+
+    /// <summary>
+    /// 外部キー名を保存しない方言（SQLite）でも、同じ子列に張る外部キーの参照アクションだけが変われば
+    /// AlterForeignKey になることを検証する（2 項目のままだと再構築で旧と新が同じ列に並ぶ）。
+    /// </summary>
+    [Fact(
+        DisplayName = "名前を保存しない方言でも同じ子列の外部キーの変更は AlterForeignKey になる"
+    )]
+    public void ForeignKeyChange_WithoutPersistedNames_EmitsSingleAlter()
+    {
+        var (live, liveRels, target, targetRels) = ForeignKeyPair(
+            liveName: "FK_Child_Parent_0",
+            targetName: null
+        );
+        targetRels[0].OnDelete = ForeignKeyReferentialAction.Cascade;
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            liveRels,
+            target,
+            targetRels,
+            new SqliteProvider().SyncCapabilities
+        );
+
         diff.Items.Should()
-            .ContainSingle(i =>
-                i.Kind == SchemaDiffKind.AddForeignKey
-                && i.Relationship!.OnDelete == ForeignKeyReferentialAction.Cascade
-                && i.Relationship.OnUpdate == ForeignKeyReferentialAction.SetNull
-            );
+            .ContainSingle(i => IsForeignKeyDiff(i))
+            .Which.Kind.Should()
+            .Be(SchemaDiffKind.AlterForeignKey);
+    }
+
+    /// <summary>名前の違う外部キー同士は作り直しとみなさず、削除と追加のまま残すことを検証する</summary>
+    [Fact(DisplayName = "名前の違う外部キーは AlterForeignKey に畳まない")]
+    public void ForeignKeysWithDifferentNames_StayDropAndAdd()
+    {
+        var (live, liveRels, target, targetRels) = ForeignKeyPair(
+            liveName: "fk_old",
+            targetName: "fk_new"
+        );
+
+        var diff = new SchemaDiffService().Compute(live, liveRels, target, targetRels);
+
+        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey);
+        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey);
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AlterForeignKey);
+    }
+
+    /// <summary>親 Parent(Id)・子 Child(Id, ParentId) と、ParentId → Id の外部キーを live と図の両方に作る</summary>
+    private static (
+        List<Entity> Live,
+        List<Relationship> LiveRels,
+        List<Entity> Target,
+        List<Relationship> TargetRels
+    ) ForeignKeyPair(string? liveName, string? targetName)
+    {
+        static List<Relationship> Build(List<Entity> entities, string? name) =>
+            [
+                new Relationship
+                {
+                    SourceEntityId = entities[0].Id,
+                    TargetEntityId = entities[1].Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(entities[0].Columns[0].Id, entities[1].Columns[1].Id)],
+                    ConstraintName = name,
+                },
+            ];
+
+        var live = new List<Entity>
+        {
+            Tbl("Parent", ("Id", "int", true)),
+            Tbl("Child", ("Id", "int", true), ("ParentId", "int", false)),
+        };
+        var target = new List<Entity>
+        {
+            Tbl("Parent", ("Id", "int", true)),
+            Tbl("Child", ("Id", "int", true), ("ParentId", "int", false)),
+        };
+
+        return (live, Build(live, liveName), target, Build(target, targetName));
     }
 
     /// <summary>DB と ER 図が同一なら差分項目が空になることを検証する</summary>
@@ -1197,5 +1308,172 @@ public class SchemaDiffServiceTests
         );
 
         diff.Items.Should().BeEmpty();
+    }
+
+    /// <summary>外部キーの差分（追加・削除・作り直し）か</summary>
+    private static bool IsForeignKeyDiff(SchemaDiffItem item) =>
+        item.Kind
+            is SchemaDiffKind.AddForeignKey
+                or SchemaDiffKind.DropForeignKey
+                or SchemaDiffKind.AlterForeignKey;
+
+    /// <summary>大文字小文字だけ違う列が DB 側に共存しても差分が例外にならず、序数一致で組むことを検証する</summary>
+    /// <remarks>
+    /// PostgreSQL の引用識別子は <c>"Dup"</c> と <c>dup</c> を共存させ、取込は両方を持ち帰る。大文字小文字を無視した
+    /// 辞書で索引を作ると、同期画面がその DB を一切扱えなくなっていた（キー重複の例外）
+    /// </remarks>
+    [Fact(
+        DisplayName = "大文字小文字だけ違う列が共存しても例外にならず、組めなかった側だけが差分になる"
+    )]
+    public void CaseOnlyDifferentColumns_DoNotThrow_AndExactMatchWins()
+    {
+        var live = new List<Entity>
+        {
+            Tbl("t", ("id", "int", true), ("Dup", "int", false), ("dup", "int", false)),
+        };
+        var target = new List<Entity> { Tbl("t", ("id", "int", true), ("Dup", "int", false)) };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Match<SchemaDiffItem>(i =>
+                i.Kind == SchemaDiffKind.DropColumn && i.ColumnName == "dup"
+            );
+    }
+
+    /// <summary>大文字小文字だけ違うテーブルが DB 側に共存しても差分が例外にならないことを検証する</summary>
+    [Fact(
+        DisplayName = "大文字小文字だけ違うテーブルが共存しても例外にならず、曖昧な名前は組まない"
+    )]
+    public void CaseOnlyDifferentTables_DoNotThrow_AndAmbiguousIsNotMatched()
+    {
+        var live = new List<Entity>
+        {
+            Tbl("Dup", ("id", "int", true)),
+            Tbl("dup", ("id", "int", true)),
+        };
+        var target = new List<Entity> { Tbl("DUP", ("id", "int", true)) };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Select(i => (i.Kind, i.TableName))
+            .Should()
+            .BeEquivalentTo(
+                new[]
+                {
+                    (SchemaDiffKind.AddTable, "DUP"),
+                    (SchemaDiffKind.DropTable, "Dup"),
+                    (SchemaDiffKind.DropTable, "dup"),
+                }
+            );
+    }
+
+    /// <summary>大文字小文字だけ違う名前でも、双方で一意なら同じテーブル・列として比べることを検証する</summary>
+    [Fact(DisplayName = "大文字小文字だけ違う名前は双方で一意なら同じテーブル・列として比べる")]
+    public void CaseOnlyDifference_UniqueOnBothSides_IsMatched()
+    {
+        var live = new List<Entity> { Tbl("orders", ("id", "int", true), ("name", "int", false)) };
+        var target = new List<Entity>
+        {
+            Tbl("Orders", ("Id", "int", true), ("Name", "int", false)),
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+
+        diff.Items.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 大文字小文字だけ違う綴りで組んだ表・列の項目は DB 側の綴りを書く（スクリプトが実在する名前を指す）。
+    /// 図にしか無い表・列は図の綴りのまま作り、図そのものは書き換えない。外部キーの両端も揃えた表を指す。
+    /// </summary>
+    [Fact(
+        DisplayName = "大文字小文字だけ違う綴りで組んだ表・列は DB の綴りで、図にしか無いものは図の綴りで項目を作る"
+    )]
+    public void CaseOnlyDifference_ItemsUseLiveSpellingForMatchedNamesOnly()
+    {
+        var liveOrders = Tbl("ORDERS", ("ID", "NUMBER(10)", true), ("NAME", "VARCHAR2(50)", false));
+        var liveCustomers = Tbl("CUSTOMERS", ("ID", "NUMBER(10)", true));
+        var targetOrders = Tbl(
+            "Orders",
+            ("Id", "NUMBER(10)", true),
+            ("Name", "VARCHAR2(100)", false),
+            ("CustomerId", "NUMBER(10)", false),
+            ("NewCol", "NUMBER(10)", false)
+        );
+        var targetCustomers = Tbl("Customers", ("Id", "NUMBER(10)", true));
+        var targetItems = Tbl("Items", ("Id", "NUMBER(10)", true));
+        targetOrders.Description = "orders";
+        var relationship = new Relationship
+        {
+            SourceEntityId = targetCustomers.Id,
+            TargetEntityId = targetOrders.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs = [new(targetCustomers.Columns[0].Id, targetOrders.Columns[2].Id)],
+            ConstraintName = "FK_Orders_Customers",
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            [liveOrders, liveCustomers],
+            [],
+            [targetOrders, targetCustomers, targetItems],
+            [relationship]
+        );
+
+        var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterColumn);
+        alter.TableName.Should().Be("ORDERS");
+        alter.ColumnName.Should().Be("NAME");
+        alter.Column!.Name.Should().Be("NAME");
+        alter.Column.DataType.Should().Be("VARCHAR2(100)", "型は図の定義のまま");
+        diff.Items.Single(i => i.Kind == SchemaDiffKind.SetTableDescription)
+            .TableName.Should()
+            .Be("ORDERS");
+
+        // 図にしか無い列・表は図の綴りで作る（揃えるのは組になったものだけ）
+        diff.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn)
+            .Select(i => (i.TableName, i.ColumnName))
+            .Should()
+            .BeEquivalentTo([("ORDERS", "CustomerId"), ("ORDERS", "NewCol")]);
+        diff.Items.Single(i => i.Kind == SchemaDiffKind.AddTable).TableName.Should().Be("Items");
+
+        // 外部キーの両端は揃えた表を指す
+        var addFk = diff.Items.Single(i => i.Kind == SchemaDiffKind.AddForeignKey);
+        SchemaDiffService.NormalizeTable(addFk.ChildEntity!).Should().Be("ORDERS");
+        SchemaDiffService.NormalizeTable(addFk.ParentEntity!).Should().Be("CUSTOMERS");
+
+        // 図そのものは書き換えない
+        targetOrders.TableName.Should().Be("Orders");
+        targetOrders.Columns[1].Name.Should().Be("Name");
+    }
+
+    /// <summary>綴りが揃っている（揃える組が無い）表は、元の図のオブジェクトのまま項目に載る</summary>
+    [Fact(DisplayName = "揃える組が無い表は元の図のオブジェクトのまま項目に載る")]
+    public void SameSpelling_ItemsReferenceOriginalTargetObjects()
+    {
+        var live = Tbl("orders", ("id", "int", true), ("name", "varchar(50)", false));
+        var target = Tbl("orders", ("id", "int", true), ("name", "varchar(100)", false));
+
+        var diff = new SchemaDiffService().Compute([live], [], [target], []);
+
+        var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterColumn);
+        alter.Entity.Should().BeSameAs(target);
+        alter.Column.Should().BeSameAs(target.Columns[1]);
     }
 }

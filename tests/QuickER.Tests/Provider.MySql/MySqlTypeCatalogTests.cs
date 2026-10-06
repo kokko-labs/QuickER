@@ -72,14 +72,32 @@ public class MySqlTypeCatalogTests
         canonical.Kind.Should().Be(CanonicalTypeKind.Boolean);
     }
 
-    [Theory(DisplayName = "tinyint unsigned / tinyint（(1) 以外）は TinyInt として解析される")]
-    [InlineData("tinyint unsigned")]
-    [InlineData("tinyint")]
-    [InlineData("tinyint(4)")]
-    public void TryParse_TinyInt_ResolvesTinyInt(string nativeType)
+    /// <summary>
+    /// 整数型は符号の有無で値の範囲が変わるので、範囲を収められる正規型として解析されることを検証する
+    /// （正規型の TinyInt は 0〜255。符号なしは 1 段広い型、bigint unsigned は decimal(20,0)）。
+    /// </summary>
+    [Theory(DisplayName = "整数型は符号の有無に応じて範囲を収められる正規型として解析される")]
+    [InlineData("tinyint unsigned", CanonicalTypeKind.TinyInt, null)]
+    [InlineData("tinyint(4) unsigned zerofill", CanonicalTypeKind.TinyInt, null)]
+    [InlineData("tinyint", CanonicalTypeKind.SmallInt, null)]
+    [InlineData("tinyint(4)", CanonicalTypeKind.SmallInt, null)]
+    [InlineData("smallint", CanonicalTypeKind.SmallInt, null)]
+    [InlineData("smallint unsigned", CanonicalTypeKind.Int32, null)]
+    [InlineData("int", CanonicalTypeKind.Int32, null)]
+    [InlineData("int unsigned", CanonicalTypeKind.Int64, null)]
+    [InlineData("INT(10) UNSIGNED", CanonicalTypeKind.Int64, null)]
+    [InlineData("bigint", CanonicalTypeKind.Int64, null)]
+    [InlineData("bigint unsigned", CanonicalTypeKind.Decimal, 20)]
+    public void TryParse_Integer_UsesRangeOfSign(
+        string nativeType,
+        CanonicalTypeKind kind,
+        int? precision
+    )
     {
         Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
-        canonical.Kind.Should().Be(CanonicalTypeKind.TinyInt);
+        canonical.Kind.Should().Be(kind);
+        canonical.Precision.Should().Be(precision);
+        canonical.Scale.Should().Be(precision is null ? null : 0);
     }
 
     [Fact(DisplayName = "varchar(n) は String(n) として解析される")]
@@ -187,13 +205,6 @@ public class MySqlTypeCatalogTests
         ok.Should().BeTrue();
         canonical.Kind.Should().Be(CanonicalTypeKind.String);
         canonical.Length.Should().Be(100);
-    }
-
-    [Fact(DisplayName = "int unsigned は末尾修飾子を無視して Int32 として解析される")]
-    public void TryParse_IntUnsigned_ResolvesInt32()
-    {
-        Catalog.TryParse("int unsigned", out var canonical).Should().BeTrue();
-        canonical.Kind.Should().Be(CanonicalTypeKind.Int32);
     }
 
     [Theory(DisplayName = "変換不能な型は TryParse が false を返す")]
@@ -405,5 +416,48 @@ public class MySqlTypeCatalogTests
         Catalog.TryFormat(canonical, out var formatted).Should().BeTrue();
 
         formatted.Should().Be(nativeType);
+    }
+
+    /// <summary>
+    /// 引数を省いた decimal は MySQL の既定どおり decimal(10,0) として解析される。精度なし（任意の小数）と読むと、
+    /// 書き出せない型として C# リバースが偽の警告を出し、他方言への切替も意味の違う型になる。
+    /// </summary>
+    [Fact(DisplayName = "decimal（引数省略）は既定の decimal(10,0) として解析される")]
+    public void TryParse_DecimalWithoutArgs_ResolvesDefaultPrecisionScale()
+    {
+        Catalog.TryParse("decimal", out var canonical).Should().BeTrue();
+
+        canonical
+            .Should()
+            .Be(new CanonicalType(CanonicalTypeKind.Decimal, Precision: 10, Scale: 0));
+    }
+
+    /// <summary>
+    /// MySQL が宣言を拒否する精度・スケール（と精度の無い Decimal）は書き出さず、対象 DBMS 切替の変換不能一覧に
+    /// 載せることを検証する。上限ちょうどは書き出せる（境界の対照）。
+    /// </summary>
+    [Theory(DisplayName = "TryFormat は MySQL の上限を超える値と精度の無い Decimal を書き出さない")]
+    [InlineData(CanonicalTypeKind.DateTime, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.DateTime, null, 6, null, true)]
+    [InlineData(CanonicalTypeKind.Time, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.DateTimeOffset, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 66, 2, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 65, 30, true)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 40, 31, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, 11, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, null, null, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, null, 2, false)]
+    public void TryFormat_RespectsMySqlLimits(
+        CanonicalTypeKind kind,
+        int? length,
+        int? precision,
+        int? scale,
+        bool expected
+    )
+    {
+        Catalog
+            .TryFormat(new CanonicalType(kind, length, precision, scale), out _)
+            .Should()
+            .Be(expected);
     }
 }

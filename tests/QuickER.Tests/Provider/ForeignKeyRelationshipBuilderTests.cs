@@ -503,20 +503,6 @@ public class ForeignKeyRelationshipBuilderTests
 
         rel.Type.Should().Be(RelationshipType.OneToOne);
     }
-
-    /// <summary><see cref="ForeignKeyRelationshipBuilder.SameSet"/> の集合一致（空・大小無視・長さ差）を検証する</summary>
-    [Fact(DisplayName = "SameSet: 空集合は不一致・大小無視で一致・長さ差は不一致")]
-    public void SameSet_ComparesCaseInsensitiveNonEmptySets()
-    {
-        // 空集合同士は不一致
-        ForeignKeyRelationshipBuilder.SameSet([], []).Should().BeFalse();
-        // 大文字小文字を無視して一致
-        ForeignKeyRelationshipBuilder.SameSet(["a", "b"], ["A", "B"]).Should().BeTrue();
-        // 長さが異なれば不一致
-        ForeignKeyRelationshipBuilder.SameSet(["a"], ["a", "b"]).Should().BeFalse();
-        // 同じ長さでも要素が違えば不一致
-        ForeignKeyRelationshipBuilder.SameSet(["a", "b"], ["a", "c"]).Should().BeFalse();
-    }
 }
 
 /// <summary>

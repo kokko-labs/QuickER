@@ -1,4 +1,4 @@
-﻿{{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core)) ~}}
+{{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core)) ~}}
 {{~ if render_contract && emit_shared_infra ~}}
 /// <summary>A single UNIQUE constraint violation reported by a uniqueness pre-check.</summary>
 /// <param name="ConstraintName">Name of the violated constraint (the synthesized name when the diagram does not set one; a caller-defined name for user-defined checks).</param>
@@ -293,7 +293,8 @@ public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity,
     /// </para>
     /// <para>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> inside a single <see cref="ExecuteSqlAsync"/> call.
+    /// write the transaction into the SQL of a single <see cref="ExecuteSqlAsync"/> call, in the database's own syntax
+    /// (<c>BEGIN TRAN ... COMMIT</c> on SQL Server, <c>BEGIN; ... COMMIT;</c> on SQLite).
     /// </para>
     /// </remarks>
     /// <param name="sql">The DML statement to execute.</param>
@@ -389,7 +390,8 @@ public partial interface ISqlExecutor
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
+    /// write the transaction into the SQL of a single call, in the database's own syntax (<c>BEGIN TRAN ... COMMIT</c> on
+    /// SQL Server, <c>BEGIN; ... COMMIT;</c> on SQLite).
     /// </remarks>
     /// <param name="sql">The DML statement to execute.</param>
     /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
@@ -595,7 +597,7 @@ public interface ISaveHookContext
     /// <param name="propertyName">The C# property name of the target column (use <c>nameof</c>).</param>
     /// <param name="key">The primary key value of the target row.</param>
     /// <param name="source">The stream to write (<c>null</c> for SET NULL).</param>
-    /// <param name="length">The length, required when <c>source.CanSeek</c> is false (omitting it throws <see cref="ArgumentException"/>).</param>
+    /// <param name="length">The length, required when <c>source.CanSeek</c> is false (omitting it throws <see cref="ArgumentException"/>). The stream must yield exactly this many bytes: a length that disagrees with a seekable stream, or a stream that ends early or runs on, throws <see cref="ArgumentException"/> and nothing is written.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> WriteBinaryColumnAsync(
         string propertyName,
@@ -880,6 +882,13 @@ public static class SqliteSchemaBootstrap
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(ddl);
 
+        // Every argument is checked before the connection opens: opening a SQLite connection creates the database file, so
+        // a bad argument found afterwards would leave an empty database behind (and on SQL Server it would cost a round trip)
+        if (commandTimeout is { } requested)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(requested, TimeSpan.Zero, nameof(commandTimeout));
+        }
+
         await using var connection = new SqlConnectionFactory(connectionString).CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
@@ -889,7 +898,6 @@ public static class SqliteSchemaBootstrap
         // The ADO command exposes its timeout in whole seconds, so a requested duration is rounded up (null keeps the provider default)
         if (commandTimeout is { } timeout)
         {
-            ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
             command.CommandTimeout = (int)Math.Ceiling(timeout.TotalSeconds);
         }
 
@@ -938,6 +946,13 @@ public static class SqlServerSchemaBootstrap
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(ddl);
 
+        // Every argument is checked before the connection opens: opening a SQLite connection creates the database file, so
+        // a bad argument found afterwards would leave an empty database behind (and on SQL Server it would cost a round trip)
+        if (commandTimeout is { } requested)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(requested, TimeSpan.Zero, nameof(commandTimeout));
+        }
+
         await using var connection = new SqlConnectionFactory(connectionString).CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
@@ -947,7 +962,6 @@ public static class SqlServerSchemaBootstrap
         // The ADO command exposes its timeout in whole seconds, so a requested duration is rounded up (null keeps the provider default)
         if (commandTimeout is { } timeout)
         {
-            ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
             command.CommandTimeout = (int)Math.Ceiling(timeout.TotalSeconds);
         }
 
@@ -1287,6 +1301,8 @@ public static class SqlServerSchemaBootstrap
             || actual == typeof(decimal)
             || actual == typeof(DateTime)
             || actual == typeof(DateTimeOffset)
+            || actual == typeof(DateOnly)
+            || actual == typeof(TimeOnly)
             || actual == typeof(TimeSpan)
             || actual == typeof(Guid)
             || actual == typeof(byte[]);
@@ -1644,6 +1660,14 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
     /// (<c>FireTriggers</c> is deliberately left off - QuickER's DDL generates no triggers).
     /// </para>
     /// <para>
+    /// A null is stored as NULL: SqlBulkCopy otherwise puts a column's DEFAULT in its place, which the row-at-a-time
+    /// INSERT never does, so <c>KeepNulls</c> is always on as well.
+    /// </para>
+    /// <para>
+    /// The copy is given the connection's command timeout - the connection string's <c>Command Timeout</c>, 30 seconds
+    /// unless it says otherwise. SqlBulkCopy has a timeout of its own that the connection string does not reach.
+    /// </para>
+    /// <para>
     /// Known limitation: SqlBulkCopy cannot return generated values, so for a table with a rowversion column the entities
     /// keep whatever version they had. Re-read them when the version is needed for a later update.
     /// </para>
@@ -1667,11 +1691,12 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 
         using var bulkCopy = new SqlBulkCopy(
             connection,
-            SqlBulkCopyOptions.CheckConstraints,
+            SqlBulkCopyOptions.CheckConstraints | SqlBulkCopyOptions.KeepNulls,
             externalTransaction: null
         )
         {
             DestinationTableName = _metadata.TableName,
+            BulkCopyTimeout = connection.CommandTimeout,
         };
 
         // Null elements are dropped before the reader sees them, so they are skipped rather than failing the whole copy
@@ -1927,8 +1952,8 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
     /// <summary>
     /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key (O(chunk) streaming).
     /// When <paramref name="source"/> is <c>null</c>, sets the column to NULL. A Stream that is not <c>CanSeek</c> requires
-    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>). Returns <c>true</c> when a row was
-    /// updated, <c>false</c> when no row matched.
+    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>), and a stream that does not yield exactly
+    /// that many bytes fails the write. Returns <c>true</c> when a row was updated, <c>false</c> when no row matched.
     /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
     /// </summary>
     protected async Task<bool> WriteUnboundedBinaryColumnAsync(
@@ -2165,7 +2190,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
+    /// write {{ if repository_dialect == "sqlserver" }}<c>BEGIN TRAN ... COMMIT</c>{{ else }}<c>BEGIN; ... COMMIT;</c>{{ end }} in the SQL within a single call.
     /// Parameter binding is the same as <see cref="QueryBySqlAsync"/>
     /// (<b>always pass values as parameters; string concatenation risks injection</b>).
     /// The implementation delegates to <see cref="ISqlExecutor"/>.
@@ -2336,6 +2361,13 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
         return true;
 {{~ else ~}}
 
+        // A standalone read resolves the rowid and opens the blob inside one read transaction. Outside one, another
+        // connection could delete the row in between and insert a different row that reuses its rowid (a rowid is reused
+        // once the highest one is gone), and the blob would then be read from that row. Deferred, so it only takes the
+        // shared lock a read needs; an enlisted read already runs inside the caller's transaction
+        await using var ownTransaction = transaction is null ? connection.BeginTransaction(deferred: true) : null;
+        var activeTransaction = transaction ?? ownTransaction;
+
         // Resolve the rowid and test for NULL in a single SELECT (SqliteBlob requires a rowid table; safe because QuickER's
         // SQLite DDL never generates WITHOUT ROWID). IS NULL yields 1 (true)
         long rowid;
@@ -2344,7 +2376,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
             var probe = CreateCommand(
                 $"SELECT rowid, {quotedColumn} IS NULL FROM {metadata.TableName} WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
                 connection,
-                transaction
+                activeTransaction
             )
         )
         {
@@ -2410,9 +2442,9 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
         // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
         var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 {{~ if repository_dialect == "sqlserver" ~}}
-        // SqlClient streams the upload when a Stream is passed as Value with SqlDbType.VarBinary and Size=-1 (max)
-        _ = payloadLength;
-
+        // SqlClient streams the upload when a Stream is passed as Value with SqlDbType.VarBinary and Size=-1 (max).
+        // It reads the stream to its end, so the stream goes through the exact-length wrapper: a stream that is shorter or
+        // longer than the length fails the UPDATE instead of storing whatever it happened to hold
         await using var command = CreateCommand(
             $"UPDATE {metadata.TableName} SET {quotedColumn} = @data WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
             connection,
@@ -2420,7 +2452,7 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
         );
         var parameter = new {{ sql_parameter_type }}("@data", SqlDbType.VarBinary, -1)
         {
-            Value = source,
+            Value = UnboundedBinaryColumns.WithExactLength(source, payloadLength),
         };
         command.Parameters.Add(parameter);
         metadata.BindKeyParameter(command, key);
@@ -2484,7 +2516,9 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
                 )
             )
             {
-                await source.CopyToAsync(
+                // The blob was allocated at the declared length, so a short stream would leave its tail as zeros: the
+                // exact-length wrapper fails the copy instead, and the catch below rolls the allocation back
+                await UnboundedBinaryColumns.WithExactLength(source, payloadLength).CopyToAsync(
                     blob,
                     UnboundedBinaryColumns.StreamCopyBufferSize,
                     cancellationToken
@@ -2524,5 +2558,9 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 /// <param name="Name">The parameter name (for example, @p0).</param>
 /// <param name="Value">The value to bind (may include a value object; unwrapping to the raw value happens on the binding side).</param>
 /// <param name="ColumnName">The target column name without brackets; null when the column cannot be identified.</param>
-{{ infra_visibility }} readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName);
+{{ infra_visibility }} readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName)
+{
+    /// <summary>Whether the column's type is applied in its variable-length form (nchar → nvarchar, char → varchar). Set for a LIKE pattern, which a fixed-length type would pad with blanks.</summary>
+    public bool VariableLength { get; init; }
+}
 {{~ end ~}}

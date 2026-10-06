@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,27 +38,8 @@ public class OracleSchemaImporter : ISchemaImporter
     {
         await using var conn = new OracleConnection(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var result = await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
+        return await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
             .ConfigureAwait(false);
-        return new SchemaImportResult
-        {
-            Entities = result.Entities,
-            Relationships = result.Relationships,
-            Warnings = result.Warnings,
-        };
-    }
-
-    /// <summary>取得したスキーマを格納する結果 DTO</summary>
-    public sealed class SchemaResult
-    {
-        /// <summary>取得したエンティティ一覧</summary>
-        public List<Entity> Entities { get; init; } = new();
-
-        /// <summary>取得したリレーション一覧</summary>
-        public List<Relationship> Relationships { get; init; } = new();
-
-        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
-        public List<SchemaImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
@@ -70,7 +50,7 @@ public class OracleSchemaImporter : ISchemaImporter
     /// カタログ照会 1 本ごとの実行タイムアウト（秒）。既定値付きで <paramref name="ct"/> の後ろに置くのは、
     /// 既存の位置指定呼び出し（統合テストの <c>ImportAsync(conn, ct)</c>）を壊さないため。
     /// </param>
-    public async Task<SchemaResult> ImportAsync(
+    public async Task<SchemaImportResult> ImportAsync(
         OracleConnection conn,
         CancellationToken ct = default,
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
@@ -88,7 +68,7 @@ public class OracleSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        await LoadOutOfScopeForeignKeysAsync(conn, commandTimeoutSeconds, warnings, ct)
+        await LoadOutOfScopeForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
         await LoadDisabledConstraintsAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
@@ -110,7 +90,7 @@ public class OracleSchemaImporter : ISchemaImporter
             )
         );
 
-        return new SchemaResult
+        return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
@@ -129,19 +109,25 @@ public class OracleSchemaImporter : ISchemaImporter
     /// IOT オーバーフローセグメント（<c>SYS_IOT_OVER_...</c>）は除外する。
     /// </para>
     /// <para>
-    /// 一時表（<c>temporary = 'Y'</c>）とマテリアライズドビューのコンテナ表も除外する。
-    /// どちらも <c>user_tables</c> には通常テーブルとして現れるが、実体はセッション作業域とビューの結果で、
-    /// ER 図のエンティティではない（「ビューは取り込まない」という取込範囲の宣言に実装を合わせる）。
+    /// 一時表（<c>temporary = 'Y'</c>）・マテリアライズドビューのコンテナ表・マテリアライズドビューのログ表
+    /// （<c>MLOG$_…</c>＝<c>user_mview_logs.log_table</c>）も除外する。
+    /// どれも <c>user_tables</c> には通常テーブルとして現れるが、実体はセッション作業域・ビューの結果・
+    /// ビューの更新のための変更記録で、ER 図のエンティティではない（「ビューは取り込まない」という取込範囲の宣言に実装を合わせる）。
+    /// </para>
+    /// <para>
+    /// 2 列目の <c>partitioned</c> はパーティション表かどうか（<c>'YES'</c> / <c>'NO'</c>）。パーティション定義は
+    /// 意味モデルに無いので、取り込んだうえで <see cref="SchemaImportWarningKind.PartitionDefinitionLost"/> で告げる。
     /// </para>
     /// </remarks>
     private const string TablesSql =
-        @"SELECT table_name FROM user_tables
+        @"SELECT table_name, partitioned FROM user_tables
 WHERE dropped = 'NO'
   AND secondary = 'N'
   AND nested = 'NO'
   AND temporary = 'N'
   AND (iot_type IS NULL OR iot_type = 'IOT')
   AND table_name NOT IN (SELECT mview_name FROM user_mviews)
+  AND table_name NOT IN (SELECT log_table FROM user_mview_logs)
 -- NLSSORT の BINARY 指定は、セッションの NLS_SORT 次第で DUP と 小文字の dup の順序が変わるため
 -- （衝突時にどちらを採るかを決定的にする）
 ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
@@ -309,14 +295,28 @@ ORDER BY constraint_name";
                 Key = name,
                 Entity = new Entity { TableName = name, Columns = new List<Column>() },
             };
+
+            // パーティション表は列・制約の宣言を持ち帰れるが、パーティション定義は意味モデルに無い
+            // ＝この図から生成した DDL はパーティションされていないテーブルを作る
+            if (string.Equals(reader.GetString(1), "YES", StringComparison.Ordinal))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(SchemaImportWarningKind.PartitionDefinitionLost, name)
+                );
+            }
         }
 
         return dict;
     }
 
     /// <summary>取込範囲外を参照する外部キーを拾い、除外したことを警告として積む</summary>
+    /// <remarks>
+    /// 取り込んだテーブル（<see cref="SchemaTableEntry.TryGetExact"/>）の外部キーだけを告げる。大文字小文字だけ違うために
+    /// 衝突して捨てたテーブルや、取込から除外したテーブルの外部キーは、図に載らないので名指ししない。
+    /// </remarks>
     private static async Task LoadOutOfScopeForeignKeysAsync(
         OracleConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
         int commandTimeoutSeconds,
         List<SchemaImportWarning> warnings,
         CancellationToken ct
@@ -331,10 +331,15 @@ ORDER BY constraint_name";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(1), out var entry))
+            {
+                continue;
+            }
+
             warnings.Add(
                 new SchemaImportWarning(
                     SchemaImportWarningKind.ForeignKeyOutsideScope,
-                    reader.GetString(1),
+                    entry.Entity.TableName,
                     reader.GetString(0),
                     reader.GetString(2)
                 )
@@ -368,7 +373,7 @@ ORDER BY constraint_name";
             var table = reader.GetString(0);
 
             // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
-            if (!TryGetExactTable(tables, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, table, out var entry))
             {
                 continue;
             }
@@ -397,20 +402,6 @@ ORDER BY constraint_name";
             _ => constraintType,
         };
 
-    /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
-    /// <remarks>
-    /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
-    /// 列・制約・説明が、採用したほうのエンティティへ吸い寄せられて混ざる。USER_ ビューが返す名前は
-    /// どのクエリでも同じ実体名なので、ここで序数一致まで求めても正当な行を取りこぼすことはない。
-    /// </remarks>
-    private static bool TryGetExactTable(
-        Dictionary<string, SchemaTableEntry> tables,
-        string tableName,
-        [NotNullWhen(true)] out SchemaTableEntry? entry
-    ) =>
-        tables.TryGetValue(tableName, out entry)
-        && string.Equals(entry.Key, tableName, StringComparison.Ordinal);
-
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         OracleConnection conn,
@@ -434,7 +425,7 @@ ORDER BY constraint_name";
         {
             var table = reader.GetString(0);
 
-            if (!TryGetExactTable(tables, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, table, out var entry))
             {
                 continue;
             }
@@ -508,7 +499,7 @@ ORDER BY constraint_name";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry))
             {
                 continue;
             }
@@ -538,7 +529,7 @@ ORDER BY constraint_name";
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 if (
-                    TryGetExactTable(tables, reader.GetString(0), out var entry)
+                    SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry)
                     && !reader.IsDBNull(1)
                 )
                 {
@@ -554,7 +545,7 @@ ORDER BY constraint_name";
 
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
+                if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry))
                 {
                     continue;
                 }
@@ -599,8 +590,8 @@ ORDER BY constraint_name";
 
             // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
             if (
-                !TryGetExactTable(tables, childKey, out _)
-                || !TryGetExactTable(tables, refKey, out _)
+                !SchemaTableEntry.TryGetExact(tables, childKey, out _)
+                || !SchemaTableEntry.TryGetExact(tables, refKey, out _)
             )
             {
                 continue;
@@ -640,7 +631,7 @@ ORDER BY constraint_name";
                 var key = reader.GetString(0);
 
                 // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
-                if (!TryGetExactTable(tables, key, out _))
+                if (!SchemaTableEntry.TryGetExact(tables, key, out _))
                 {
                     continue;
                 }
@@ -667,7 +658,17 @@ ORDER BY constraint_name";
     /// </para>
     /// <para>
     /// <c>TIMESTAMP</c> 系は <c>data_type</c> が既に <c>"TIMESTAMP(6)"</c> /
-    /// <c>"TIMESTAMP(6) WITH TIME ZONE"</c> の形式を含むため、そのまま採用する。
+    /// <c>"TIMESTAMP(6) WITH TIME ZONE"</c> の形式を含むため、それを採用する。
+    /// </para>
+    /// <para>
+    /// 精度を持たない <c>NUMBER</c> はスケールで分ける。スケールも無ければ素の <c>NUMBER</c>（浮動）、
+    /// スケールがあれば <c>NUMBER(*,s)</c>（精度は上限なし・スケールは s）。<c>INTEGER</c> / <c>SMALLINT</c> は
+    /// Oracle が精度なし・スケール 0 として保存するので <c>NUMBER(*,0)</c> になる（素の <c>NUMBER</c> にすると、
+    /// その図から作り直した DDL が小数を受ける列になり、整数の制約が落ちる）。
+    /// </para>
+    /// <para>
+    /// 組み立てた表記は <see cref="OracleTypeNotation.Normalize"/> を通す（差分の比較が図の表記に掛ける正規化と
+    /// 同じ関数＝取込の出力はその不動点になる）。
     /// </para>
     /// <para>
     /// <c>char_length</c> は CHAR / VARCHAR2 / NCHAR / NVARCHAR2 系のみ有効な文字数で、
@@ -694,7 +695,7 @@ ORDER BY constraint_name";
         // TIMESTAMP 系（WITH TIME ZONE 等を含む）は data_type が既に精度・修飾を持つためそのまま返す
         if (upper.StartsWith("TIMESTAMP", StringComparison.Ordinal))
         {
-            return dataType;
+            return OracleTypeNotation.Normalize(dataType);
         }
 
         switch (upper)
@@ -702,16 +703,15 @@ ORDER BY constraint_name";
             case "NUMBER":
                 if (dataPrecision is null)
                 {
-                    // NUMBER(*,s) は「精度は最大・スケールは s」の宣言で、data_precision が null・
-                    // data_scale が非 null で返る。早期 return するとスケードが落ちて素の NUMBER に化ける
-                    return dataScale is not null and not 0 ? $"NUMBER(*,{dataScale})" : "NUMBER";
+                    // NUMBER(*,s) は「精度は上限なし・スケールは s」の宣言で、data_precision が null・
+                    // data_scale が非 null で返る（INTEGER / SMALLINT はスケール 0）。早期 return すると
+                    // スケールが落ちて素の NUMBER（浮動）に化ける
+                    return dataScale is null ? "NUMBER" : $"NUMBER(*,{dataScale})";
                 }
 
-                // スケール 0 と未指定は user_tab_cols 上で区別できないため精度のみ。
+                // スケール 0 と未指定は user_tab_cols 上で区別できないため精度のみ（正規化が (p,0) を (p) へ畳む）。
                 // 負のスケール（NUMBER(10,-2) = 100 の倍数へ丸める）は宣言どおりに書き出す
-                return dataScale is not null and not 0
-                    ? $"NUMBER({dataPrecision},{dataScale})"
-                    : $"NUMBER({dataPrecision})";
+                return OracleTypeNotation.Normalize($"NUMBER({dataPrecision},{dataScale ?? 0})");
 
             case "VARCHAR2":
             case "CHAR":
@@ -734,7 +734,9 @@ ORDER BY constraint_name";
 
             case "FLOAT":
                 // FLOAT(b) は 2 進精度。精度があれば付与する（正規型では Float64 として解釈される）
-                return dataPrecision is null ? "FLOAT" : $"FLOAT({dataPrecision})";
+                return OracleTypeNotation.Normalize(
+                    dataPrecision is null ? "FLOAT" : $"FLOAT({dataPrecision})"
+                );
 
             default:
                 // BINARY_FLOAT / BINARY_DOUBLE / DATE / CLOB / NCLOB / BLOB / XMLTYPE 等はそのまま

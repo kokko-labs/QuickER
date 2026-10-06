@@ -440,6 +440,114 @@ public sealed class InMemoryConcurrencyRuntimeTests
     }
 
     /// <summary>
+    /// 保存が取り込んだ時点で存在しなかった行への削除は、公開時に適用しない。After 待機中に他者が同じキーへ
+    /// 挿入した行は、この保存が見た行ではないので残る（実 DB の DELETE は実行した時点で 0 行に終わっている）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: 存在しなかった行への削除は、待機中に他者が入れた行を消さない"
+    )]
+    public async Task SaveAsync_DeleteOfAbsentRow_KeepsRowInsertedDuringAfter()
+    {
+        await ResetAndSeedAsync();
+
+        var hook = new GatedAfterHook<DocumentNoteEntity>();
+        var notes = new InMemoryDocumentNoteRepository(
+            _store,
+            new SaveHookRegistry().Add<DocumentNoteEntity>(hook)
+        );
+        var other = Notes;
+
+        var ghost = new DocumentNoteEntity
+        {
+            NoteId = 777,
+            DocumentId = SeededRootId,
+            Note = "ghost",
+            RowState = RowState.Removed,
+        };
+
+        var saving = notes.SaveAsync(ghost, cancellationToken: Ct);
+        await hook.Entered.Task;
+
+        await other.InsertAsync(
+            new DocumentNoteEntity
+            {
+                NoteId = 777,
+                DocumentId = SeededRootId,
+                Note = "theirs",
+            },
+            Ct
+        );
+
+        hook.Release.TrySetResult();
+        (await saving).Should().Be(0, "取り込んだ時点で行が無かったので削除した行は無い");
+
+        (await ReadChildNoteAsync(777))
+            .Should()
+            .Be("theirs", "この保存が見ていない他者の行は消さない");
+    }
+
+    /// <summary>
+    /// 版を持つ型でも同じ。存在しなかった行への削除は競合（Modified）にもならず、他者の行も消さない。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: 版あり型でも存在しなかった行への削除は競合にせず他者の行を残す"
+    )]
+    public async Task SaveAsync_VersionedDeleteOfAbsentRow_IsNotAConflict()
+    {
+        await ResetAndSeedAsync();
+
+        var hook = new GatedAfterHook<DocumentEntity>();
+        var documents = new InMemoryDocumentRepository(_store, new SaveHookRegistry().Add(hook));
+        var other = Documents;
+
+        var ghost = NewEntity(900, "ghost");
+        ghost.RowState = RowState.Removed;
+
+        var saving = documents.SaveAsync(ghost, cancellationToken: Ct);
+        await hook.Entered.Task;
+
+        await other.InsertAsync(NewEntity(900, "theirs"), Ct);
+
+        hook.Release.TrySetResult();
+        (await saving).Should().Be(0, "取り込んだ時点で行が無い削除は、版を比べる相手も無い");
+
+        (await GetAsync(900))!
+            .Title.Should()
+            .Be("theirs", "この保存が見ていない他者の行は消さない");
+    }
+
+    /// <summary>
+    /// 同じ保存単位の中で挿入してから削除した行（取り込み時は無し・ステージは削除）は、公開後も作られない。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: 同じ保存で挿入して削除した行は作られない"
+    )]
+    public async Task SaveAsync_InsertThenRemoveInOneSave_LeavesNoRow()
+    {
+        await ResetAndSeedAsync();
+
+        (
+            await Notes.SaveAsync(
+                [Transient(RowState.Added), Transient(RowState.Removed)],
+                cancellationToken: Ct
+            )
+        )
+            .Should()
+            .Be(2, "挿入と削除の 2 操作を数える");
+
+        (await ReadChildNoteAsync(778)).Should().BeNull("挿入して削除した行は残らない");
+
+        static DocumentNoteEntity Transient(RowState state) =>
+            new()
+            {
+                NoteId = 778,
+                DocumentId = SeededRootId,
+                Note = "transient",
+                RowState = state,
+            };
+    }
+
+    /// <summary>
     /// 版を持つ型でも同じ状況は <see cref="SaveConflictReason.NotFound"/>。存否の判定は版の比較より先に
     /// 行うため、分類は版の有無に依らず揃う。
     /// </summary>

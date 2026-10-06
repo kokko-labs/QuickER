@@ -612,6 +612,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmForeignKeyTypeMismatch {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmForeignKeyTypeMismatch", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteConfirmRebuildDropsAttributes {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuildDropsAttributes", resourceCulture);

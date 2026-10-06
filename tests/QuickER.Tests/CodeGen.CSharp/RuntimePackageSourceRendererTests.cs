@@ -283,7 +283,7 @@ public class RuntimePackageSourceRendererTests
                 "private static readonly ConcurrentDictionary<PropertyInfo, SqlColumnTypeAttribute?> _columnTypeCache =",
                 "属性解決のキャッシュは明示型付け版の分岐にしかない"
             );
-        sqlServer.Should().Contain("var parameter = new SqlParameter(name, attribute.DbType);");
+        sqlServer.Should().Contain("var parameter = new SqlParameter(name, dbType);");
         sqlServer
             .Should()
             .Contain(

@@ -58,7 +58,12 @@ namespace QuickER.Provider;
 /// </remarks>
 public static partial class SqlTypeText
 {
-    /// <summary>受け付ける型文字列の長さ上限（これを超える表記は実在しない）</summary>
+    /// <summary>受け付ける型文字列の長さ上限（値リスト型を除く。これを超える表記は実在しない）</summary>
+    /// <remarks>
+    /// MySQL の値リスト型（<c>enum(...)</c> / <c>set(...)</c>）には掛けない。値が 14 個程度の実在の enum でも 200 文字を
+    /// 超え、掛けると取込が持ち帰ったその 1 列のせいで図全体の DDL・同期が止まる（入口の検証は図単位）。
+    /// 値リストの判定（<c>ValueListTypePattern</c>）は選択肢どうしが重ならない線形の正規表現なので、長さで先に切らなくてよい。
+    /// </remarks>
     public const int MaxLength = 200;
 
     /// <summary>型文字列が DDL へ素通しで出せる安全な表記か</summary>
@@ -81,14 +86,20 @@ public static partial class SqlTypeText
         }
 
         // 検証した文字列と出力する文字列を一致させる（前後の空白・改行は呼び出し側で落としてもらう）
-        if (dataType.Length > MaxLength || dataType != dataType.Trim())
+        if (dataType != dataType.Trim())
         {
             return false;
         }
 
+        // 値リスト型は長さの上限より先に見る（長い enum も実在の宣言）
         if (ValueListTypePattern().IsMatch(dataType))
         {
             return true;
+        }
+
+        if (dataType.Length > MaxLength)
+        {
+            return false;
         }
 
         return SafeTypePattern().IsMatch(dataType) && !ContainsSmuggledColumnClause(dataType);
@@ -138,6 +149,16 @@ public static partial class SqlTypeText
         "COLLATE",
         "UNIQUE",
         "ON",
+        // 生成列の省略形（MySQL の int AS (price)・SQLite の … AS (expr)）。通すと図は「計算列でない」と言うのに
+        // DB 側は生成列になり、生成コードの INSERT が実行時に失敗する
+        "AS",
+        // 自動採番（MySQL / SQLite）。同じく図に無い採番が DB 側にだけ生まれる
+        "AUTO_INCREMENT",
+        "AUTOINCREMENT",
+        // 列の可視性（MySQL / Oracle）と、名前付きの列制約の開始
+        "INVISIBLE",
+        "VISIBLE",
+        "CONSTRAINT",
     };
 
     /// <summary>図の全列の型文字列を検証し、安全でない表記があれば名指しで例外を投げる（DDL 生成の入口）</summary>
@@ -193,15 +214,16 @@ public static partial class SqlTypeText
 
     /// <summary>安全でない型文字列を持つ列を「テーブル.列 → 型文字列」の形で名指しして例外を投げる</summary>
     /// <remarks>
-    /// 例外文は英語が正本（生成 SQL に乗る固定文と同じ流儀＝方言中立・カルチャ非依存）。型文字列そのものを
-    /// 文面へ載せるが、制御文字はここでも空白へ畳んでからにする（例外文を表示する側の行構造を壊さないため）。
+    /// 例外文は英語が正本（生成 SQL に乗る固定文と同じ流儀＝方言中立・カルチャ非依存）。型文字列・テーブル名・
+    /// 列名を文面へ載せるが、制御文字はここでも空白へ畳んでからにする（例外文を表示する側の行構造を壊さないため。
+    /// 型の検証は名前の検証より先に走るので、改行を含む名前もここへ届く）。
     /// </remarks>
     private static void ThrowIfAnyUnsafe(IEnumerable<(string TableName, Column Column)> columns)
     {
         var offenders = columns
             .Where(pair => !IsSafe(pair.Column.DataType))
             .Select(pair =>
-                $"{pair.TableName}.{pair.Column.Name} = '{SqlComment.Sanitize(pair.Column.DataType)}'"
+                $"{SqlComment.Sanitize(pair.TableName)}.{SqlComment.Sanitize(pair.Column.Name)} = '{SqlComment.Sanitize(pair.Column.DataType)}'"
             )
             .Distinct(StringComparer.Ordinal)
             .ToList();

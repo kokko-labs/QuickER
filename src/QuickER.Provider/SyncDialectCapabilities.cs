@@ -1,3 +1,5 @@
+using QuickER.Model;
+
 namespace QuickER.Provider;
 
 /// <summary>
@@ -39,15 +41,94 @@ public sealed record SyncDialectCapabilities
     /// 列定義変更（<c>ALTER COLUMN</c>）の前に、その列が関与する外部キーを一旦外す必要があるか。
     /// </summary>
     /// <remarks>
-    /// SQL Server は FK に参加している列の型を変更しようとすると依存エラー（Msg 5074）になるため <c>true</c>。
+    /// SQL Server は FK に参加している列の型を変更しようとすると依存エラー（Msg 5074）になり、MySQL も外部キーの
+    /// 両端の列の型変更を拒否する（参照する列と参照される列の型が食い違う状態を一瞬も許さない）ため、両方言とも <c>true</c>。
     /// <c>true</c> の方言では <see cref="SyncPlanner"/> が該当 FK の DROP / ADD を自動で計画へ注入する
-    /// （ユーザーが明示的に DROP を選択している FK は対象外＝二重削除も再作成もしない）。
+    /// （ユーザーが明示的に DROP を選択している FK は対象外＝二重削除も再作成もしない。同期後に両端の列の型が
+    /// 一致しない FK も対象外＝付け直しが必ず失敗するため、外さずに列定義変更の時点で失敗させて警告する）。
     /// </remarks>
     public bool AlterColumnRequiresForeignKeyRebuild { get; init; }
+
+    /// <summary>
+    /// 列定義変更（<c>ALTER COLUMN</c>）の前に、その列を構成列に持つ主キー・一意制約を一旦外す必要があるか。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は主キー・一意制約の構成列の型を変えようとすると依存エラー（Msg 5074）になるため <c>true</c>。
+    /// <c>true</c> の方言では <see cref="SyncPlanner"/> が、構成列が変わる主キー・一意制約を同じ構成のまま
+    /// 外して付け直す項目を計画へ注入する。MySQL は <c>MODIFY</c> で構成列の型を変えられるうえ、一意索引が
+    /// 外部キーを支えていると外す段で失敗する（エラー 1553）ため <c>false</c>。
+    /// </remarks>
+    public bool AlterColumnRequiresKeyConstraintRebuild { get; init; }
+
+    /// <summary>
+    /// 主キーを変える表自身が持つ外部キーのうち、旧主キーの索引に支えられているものを一旦外す必要があるか。
+    /// </summary>
+    /// <remarks>
+    /// MySQL は外部キーの子列を先頭に持つ索引を必須とし、旧主キーがその唯一の索引だと
+    /// <c>DROP PRIMARY KEY</c> がエラー 1553 になるため <c>true</c>（子列が旧主キーの先頭に乗る外部キーを外して付け直す。
+    /// 付け直しのとき MySQL が必要な索引を自動で作る）。
+    /// </remarks>
+    public bool PrimaryKeyChangeRequiresOwnForeignKeyRebuild { get; init; }
 
     /// <summary>外部キー制約名が DB に永続化されるか（SQLite は制約名が合成名で永続化されない）。</summary>
     public bool PersistsForeignKeyConstraintNames { get; init; } = true;
 
     /// <summary>列順同期の実現方式。</summary>
     public ColumnReorderMode ColumnReorder { get; init; } = ColumnReorderMode.None;
+
+    /// <summary>
+    /// 型表記を「その表記で宣言した列を取り込むと返る表記」へ寄せる関数（既定は恒等）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// DB は宣言の綴りをそのまま保存するとは限らない（SQL Server の <c>numeric(18,0)</c> は <c>numeric(18)</c>、
+    /// PostgreSQL の <c>timestamp</c> は <c>timestamp(6)</c> として返る）。図・型の選択肢・<c>TryFormat</c> の表記と
+    /// 取込の表記をそのまま比べると、適用しても消えない <c>ALTER COLUMN</c> が出続けるため、差分の型比較
+    /// （<see cref="AreSameType"/>）は両側をこの関数に通してから比べる。
+    /// </para>
+    /// <para>
+    /// 実体は方言ごとの静的関数（<c>{方言}TypeNotation.Normalize</c>）で、取込側も同じ関数を通す＝ここは配線だけ。
+    /// 契約は「取込の出力は不動点（正規化しても変わらない）」「冪等」の 2 つ。
+    /// </para>
+    /// </remarks>
+    public Func<string, string> NormalizeTypeNotation { get; init; } = static type => type;
+
+    /// <summary>外部キーの <c>ON UPDATE</c> 句を持つか（Oracle は持たない）。</summary>
+    /// <remarks>
+    /// <c>false</c> の方言では差分の比較で図側の <c>ON UPDATE</c> を <c>NO ACTION</c> へ畳む
+    /// （<see cref="EffectiveOnUpdate"/>）。畳まないと、DB が表せない参照アクションの差分が同期しても消えない。
+    /// </remarks>
+    public bool SupportsOnUpdateAction { get; init; } = true;
+
+    /// <summary>外部キーの参照アクション <c>SET DEFAULT</c> が効くか（Oracle は持たず、MySQL の InnoDB は受け付けても効かない）。</summary>
+    /// <remarks>
+    /// <c>false</c> の方言では差分の比較で <c>ON DELETE</c> / <c>ON UPDATE</c> の <c>SET DEFAULT</c> を <c>NO ACTION</c> へ畳む
+    /// （<see cref="EffectiveOnDelete"/> / <see cref="EffectiveOnUpdate"/>）。MySQL は <c>SET DEFAULT</c> を宣言として保存するが、
+    /// 親を消すと外部キーエラーになる＝実際の動きは <c>NO ACTION</c>（<c>RESTRICT</c>）と同じ。
+    /// </remarks>
+    public bool SupportsSetDefaultAction { get; init; } = true;
+
+    /// <summary>2 つの型表記が、この方言の DB で同じ宣言として保存されるか</summary>
+    /// <remarks>
+    /// 両側を <see cref="NormalizeTypeNotation"/> に通したうえで <see cref="DbTypeText.AreEquivalent"/>
+    /// （前後空白・大文字小文字を無視）で比べる。同期の <c>ALTER COLUMN</c> 判定と、外部キーの両端の型照合が使う。
+    /// </remarks>
+    public bool AreSameType(string? left, string? right) =>
+        DbTypeText.AreEquivalent(
+            NormalizeTypeNotation(left ?? string.Empty),
+            NormalizeTypeNotation(right ?? string.Empty)
+        );
+
+    /// <summary>この方言の DB で実際に効く <c>ON DELETE</c> の参照アクション</summary>
+    public ForeignKeyReferentialAction EffectiveOnDelete(ForeignKeyReferentialAction action) =>
+        action == ForeignKeyReferentialAction.SetDefault && !SupportsSetDefaultAction
+            ? ForeignKeyReferentialAction.NoAction
+            : action;
+
+    /// <summary>この方言の DB で実際に効く <c>ON UPDATE</c> の参照アクション</summary>
+    public ForeignKeyReferentialAction EffectiveOnUpdate(ForeignKeyReferentialAction action) =>
+        !SupportsOnUpdateAction
+        || action == ForeignKeyReferentialAction.SetDefault && !SupportsSetDefaultAction
+            ? ForeignKeyReferentialAction.NoAction
+            : action;
 }

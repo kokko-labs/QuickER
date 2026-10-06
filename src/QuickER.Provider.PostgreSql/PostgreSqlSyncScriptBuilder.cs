@@ -43,8 +43,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             e,
             item.TableName,
             PgIdentifier.QuoteSimple,
-            name => $"\"{PgIdentifier.Escape(name)}\"",
-            PgIdentifier.SafeName
+            name => $"\"{PgIdentifier.Escape(name)}\""
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -86,15 +85,21 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <summary>ALTER TABLE ... ALTER COLUMN（列定義変更）文を生成する</summary>
     /// <remarks>
     /// PostgreSQL は型変更と NULL 制約変更を別の文で表現する。
-    /// 型は <c>ALTER COLUMN ... TYPE 新型</c>、NULL 制約は <c>SET NOT NULL</c> / <c>DROP NOT NULL</c> を用いる
+    /// 型は <c>ALTER COLUMN ... TYPE 新型</c>、NULL 制約は <c>SET NOT NULL</c> / <c>DROP NOT NULL</c> を用いる。
+    /// 型の系統が変わる変更（<c>varchar</c> → <c>integer</c> 等）には <c>USING 列::新型</c> を付ける（<see cref="NeedsUsingCast"/>）
     /// </remarks>
     protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
         var table = PgIdentifier.Quote(item.TableName);
         var column = PgIdentifier.QuoteSimple(col.Name);
+        var usingClause = NeedsUsingCast(item.OldColumn?.DataType, col.DataType)
+            ? $" USING {column}::{col.DataType}"
+            : string.Empty;
 
-        sb.AppendLine($"ALTER TABLE {table} ALTER COLUMN {column} TYPE {col.DataType};");
+        sb.AppendLine(
+            $"ALTER TABLE {table} ALTER COLUMN {column} TYPE {col.DataType}{usingClause};"
+        );
 
         // 主キー列または NULL 非許容なら NOT NULL を設定し、それ以外は NOT NULL を外す
         var nullClause = col.IsPrimaryKey || !col.IsNullable ? "SET NOT NULL" : "DROP NOT NULL";
@@ -105,6 +110,8 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <remarks>
     /// 旧主キーの制約名は差分項目に含まれないため、テーブル名から <c>pg_constraint</c> を逆引きし、
     /// DO ブロックで動的に DROP する（主キーが無いテーブルなら何も実行しない）。
+    /// 実行時に読んだ制約名は図の外から来る値なので、動的 SQL へは必ず <c>quote_ident</c> を通して埋める
+    /// （<c>"</c> を含む名前で構文が崩れないように。外部キー側の逆引きも同じ）。
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
@@ -126,7 +133,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         body.AppendLine("        AND tbl.relnamespace = 'public'::regnamespace;");
         body.AppendLine("    IF pk_name IS NOT NULL THEN");
         body.AppendLine(
-            $"        EXECUTE 'ALTER TABLE {table} DROP CONSTRAINT \"' || pk_name || '\"';"
+            $"        EXECUTE 'ALTER TABLE {table} DROP CONSTRAINT ' || quote_ident(pk_name);"
         );
         body.AppendLine("    END IF;");
 
@@ -184,8 +191,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            PgIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         var cols = string.Join(", ", item.UniqueConstraintColumns.Select(PgIdentifier.QuoteSimple));
         sb.AppendLine(
@@ -200,8 +206,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            PgIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         sb.AppendLine(
             $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
@@ -243,9 +248,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
-            : item.Relationship.ConstraintName!;
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );
@@ -311,7 +314,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         body.AppendLine("    IF fk_name IS NOT NULL THEN");
         body.AppendLine(
             // クォートした名前を EXECUTE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
-            $"        EXECUTE 'ALTER TABLE {PgIdentifier.QuoteForDynamicSql(childTbl)} DROP CONSTRAINT \"' || fk_name || '\"';"
+            $"        EXECUTE 'ALTER TABLE {PgIdentifier.QuoteForDynamicSql(childTbl)} DROP CONSTRAINT ' || quote_ident(fk_name);"
         );
         body.AppendLine("    END IF;");
 
@@ -342,5 +345,83 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             ? "NULL"
             : $"'{PgIdentifier.EscapeStringLiteral(newVal)}'";
         sb.AppendLine($"COMMENT ON COLUMN {target} IS {isClause};");
+    }
+
+    /// <summary>型の系統を判定するための型カタログ（解析だけに使う）</summary>
+    private static readonly PostgreSqlTypeCatalog TypeCatalog = new();
+
+    /// <summary>列の型の変更に <c>USING 列::新型</c> を付けるべきか</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ALTER COLUMN ... TYPE</c> は <c>USING</c> が無いと代入キャストで値を変換するので、代入キャストの無い
+    /// 系統をまたぐ変更（<c>varchar</c> → <c>integer</c>・<c>text</c> → <c>date</c>・<c>integer</c> → <c>boolean</c> 等）は
+    /// 42804 で失敗する。明示キャストを付けると、変換できる値の列ならそのまま通る。
+    /// </para>
+    /// <para>
+    /// 付けるのは「両方の型をカタログで解析でき、系統が違い、新しい型が文字列系でない」ときだけ。
+    /// 常に付けてはいけない＝明示キャストは <c>varchar(n)</c> への変換で長すぎる値を<b>黙って切り詰める</b>
+    /// （代入キャストはエラーにする）。文字列系への変更はどの型からも代入キャストで通るので付けない。
+    /// 解析できない型（PostGIS の型・ユーザー定義型等）は系統が分からないので付けない（従来どおり）。
+    /// </para>
+    /// </remarks>
+    internal static bool NeedsUsingCast(string? oldType, string newType)
+    {
+        if (
+            string.IsNullOrWhiteSpace(oldType)
+            || !TypeCatalog.TryParse(oldType, out var oldCanonical)
+            || !TypeCatalog.TryParse(newType, out var newCanonical)
+        )
+        {
+            return false;
+        }
+
+        var oldFamily = FamilyOf(oldCanonical.Kind);
+        var newFamily = FamilyOf(newCanonical.Kind);
+
+        return oldFamily is not null
+            && newFamily is not null
+            && oldFamily != newFamily
+            && newFamily != TypeFamily.Text;
+    }
+
+    /// <summary>正規型の種別を型の系統へ分類する（分類しない種別は null）</summary>
+    private static TypeFamily? FamilyOf(CanonicalTypeKind kind) =>
+        kind switch
+        {
+            CanonicalTypeKind.String
+            or CanonicalTypeKind.AnsiString
+            or CanonicalTypeKind.FixedString
+            or CanonicalTypeKind.AnsiFixedString => TypeFamily.Text,
+            CanonicalTypeKind.TinyInt
+            or CanonicalTypeKind.SmallInt
+            or CanonicalTypeKind.Int32
+            or CanonicalTypeKind.Int64
+            or CanonicalTypeKind.Decimal
+            or CanonicalTypeKind.Float32
+            or CanonicalTypeKind.Float64
+            or CanonicalTypeKind.Money => TypeFamily.Number,
+            CanonicalTypeKind.Boolean => TypeFamily.Boolean,
+            CanonicalTypeKind.Date
+            or CanonicalTypeKind.Time
+            or CanonicalTypeKind.DateTime
+            or CanonicalTypeKind.DateTimeOffset => TypeFamily.Temporal,
+            CanonicalTypeKind.Binary or CanonicalTypeKind.FixedBinary => TypeFamily.Binary,
+            CanonicalTypeKind.Guid => TypeFamily.Guid,
+            CanonicalTypeKind.Json => TypeFamily.Json,
+            CanonicalTypeKind.Xml => TypeFamily.Xml,
+            _ => null,
+        };
+
+    /// <summary><see cref="NeedsUsingCast"/> が比べる型の系統</summary>
+    private enum TypeFamily
+    {
+        Text,
+        Number,
+        Boolean,
+        Temporal,
+        Binary,
+        Guid,
+        Json,
+        Xml,
     }
 }

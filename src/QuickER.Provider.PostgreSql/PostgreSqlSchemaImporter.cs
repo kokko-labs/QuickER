@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -35,27 +34,8 @@ public partial class PostgreSqlSchemaImporter : ISchemaImporter
     {
         await using var conn = new NpgsqlConnection(connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
-        var result = await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
+        return await ImportAsync(conn, cancellationToken, commandTimeoutSeconds)
             .ConfigureAwait(false);
-        return new SchemaImportResult
-        {
-            Entities = result.Entities,
-            Relationships = result.Relationships,
-            Warnings = result.Warnings,
-        };
-    }
-
-    /// <summary>取得したスキーマを格納する結果 DTO</summary>
-    public sealed class SchemaResult
-    {
-        /// <summary>取得したエンティティ一覧</summary>
-        public List<Entity> Entities { get; init; } = new();
-
-        /// <summary>取得したリレーション一覧</summary>
-        public List<Relationship> Relationships { get; init; } = new();
-
-        /// <summary>取込で宣言どおりには写し取れなかった箇所の警告</summary>
-        public List<SchemaImportWarning> Warnings { get; init; } = new();
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
@@ -66,7 +46,7 @@ public partial class PostgreSqlSchemaImporter : ISchemaImporter
     /// カタログ照会 1 本ごとの実行タイムアウト（秒）。既定値付きで <paramref name="ct"/> の後ろに置くのは、
     /// 既存の位置指定呼び出し（統合テストの <c>ImportAsync(conn, ct)</c>）を壊さないため。
     /// </param>
-    public async Task<SchemaResult> ImportAsync(
+    public async Task<SchemaImportResult> ImportAsync(
         NpgsqlConnection conn,
         CancellationToken ct = default,
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
@@ -102,7 +82,7 @@ public partial class PostgreSqlSchemaImporter : ISchemaImporter
             )
         );
 
-        return new SchemaResult
+        return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
@@ -350,20 +330,6 @@ WHERE "
         return dict;
     }
 
-    /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>
-    /// <remarks>
-    /// テーブル辞書は 5 方言共通の大文字小文字非依存なので、素で引くと「衝突して捨てたほうのテーブル」の
-    /// 列・制約・説明が、採用したほうのエンティティへ吸い寄せられて混ざる。pg_catalog が返す名前は
-    /// どのクエリでも同じ実体名なので、ここで序数一致まで求めても正当な行を取りこぼすことはない。
-    /// </remarks>
-    private static bool TryGetExactTable(
-        Dictionary<string, SchemaTableEntry> tables,
-        string tableName,
-        [NotNullWhen(true)] out SchemaTableEntry? entry
-    ) =>
-        tables.TryGetValue(tableName, out entry)
-        && string.Equals(entry.Key, tableName, StringComparison.Ordinal);
-
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         NpgsqlConnection conn,
@@ -380,7 +346,7 @@ WHERE "
         {
             var table = reader.GetString(0);
 
-            if (!TryGetExactTable(tables, table, out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, table, out var entry))
             {
                 continue;
             }
@@ -447,7 +413,7 @@ WHERE "
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry))
             {
                 continue;
             }
@@ -474,7 +440,7 @@ WHERE "
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (!TryGetExactTable(tables, reader.GetString(0), out var entry))
+            if (!SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry))
             {
                 continue;
             }
@@ -511,8 +477,9 @@ WHERE "
     )
     {
         var builder = new ForeignKeyRelationshipBuilder();
-        // 取込範囲外を参照する FK は制約単位で 1 度だけ告げる（複合 FK は行が複数出るため）
-        var reportedOutOfScope = new HashSet<string>(StringComparer.Ordinal);
+        // 取込範囲外を参照する FK は制約単位で 1 度だけ告げる（複合 FK は行が複数出るため）。
+        // PostgreSQL の外部キー名は表ごとに一意なので、制約は (子表, 名前) で識別する
+        var reportedOutOfScope = new HashSet<(string Table, string Name)>();
 
         await using var cmd = DbCommands.Create(conn, ForeignKeysSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -533,9 +500,13 @@ WHERE "
             var refSchema = reader.GetString(8);
 
             // 参照先が public 以外＝図に親テーブルが無いのでリレーションを作れない。除外して告げる
+            // （取り込まなかった子表＝大文字小文字の衝突で捨てた表の外部キーは、図に載らないので名指ししない）
             if (!string.Equals(refSchema, "public", StringComparison.Ordinal))
             {
-                if (reportedOutOfScope.Add(fkName))
+                if (
+                    SchemaTableEntry.TryGetExact(tables, parentKey, out _)
+                    && reportedOutOfScope.Add((parentKey, fkName))
+                )
                 {
                     warnings.Add(
                         new SchemaImportWarning(
@@ -552,8 +523,8 @@ WHERE "
 
             // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
             if (
-                !TryGetExactTable(tables, parentKey, out _)
-                || !TryGetExactTable(tables, refKey, out _)
+                !SchemaTableEntry.TryGetExact(tables, parentKey, out _)
+                || !SchemaTableEntry.TryGetExact(tables, refKey, out _)
             )
             {
                 continue;
@@ -583,7 +554,7 @@ WHERE "
                 var key = reader.GetString(0);
 
                 // 衝突して捨てたテーブルの制約を、採用したほうへ付け替えない
-                if (!TryGetExactTable(tables, key, out _))
+                if (!SchemaTableEntry.TryGetExact(tables, key, out _))
                 {
                     continue;
                 }
@@ -608,118 +579,14 @@ WHERE "
             _ => ForeignKeyReferentialAction.NoAction,
         };
 
-    /// <summary>PostgreSQL が小数秒に付ける既定精度（<c>timestamp</c> = <c>timestamp(6)</c>）</summary>
-    private const int DefaultFractionalSecondsPrecision = 6;
-
     /// <summary>
     /// <c>format_type()</c> が返す PostgreSQL の正準表記を、QuickER が扱う短縮語彙へ正規化する。
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// 情報源としては <c>format_type()</c> を採り、<b>表記としてはそのまま採らない</b>。正準表記を
-    /// 素通しすると、既存の図が持つ短縮表記（<c>varchar(50)</c>）と取り込んだ表記
-    /// （<c>character varying(50)</c>）が文字列として食い違い、差分同期が毎回「型を変更する」項目を出す
-    /// ——しかも <c>ALTER TABLE ... TYPE character varying(50)</c> を実行しても <c>format_type()</c> の
-    /// 出力は変わらないので、その差分は<b>実行しても消えない</b>（実 PostgreSQL 16 で確認済み）。
-    /// </para>
-    /// <para>
-    /// 書き戻す規則は次の 5 つだけで、いずれも「同じ型の別表記」への置換（意味は変わらない）:
-    /// <list type="bullet">
-    ///   <item><c>character varying[(n)]</c> → <c>varchar[(n)]</c> / <c>character(n)</c> → <c>char(n)</c></item>
-    ///   <item><c>timestamp[(n)] without time zone</c> → <c>timestamp(n)</c>（無修飾は既定精度 6）</item>
-    ///   <item><c>timestamp[(n)] with time zone</c> → <c>timestamptz(n)</c>（同上）</item>
-    ///   <item><c>time[(n)] without time zone</c> → <c>time(n)</c>（同上）。
-    ///   <c>time with time zone</c> 側は QuickER の従来語彙がそのままなので触らない</item>
-    ///   <item><c>numeric(p,0)</c> → <c>numeric(p)</c>（<c>format_type()</c> はスケール 0 も必ず書く）</item>
-    /// </list>
-    /// これ以外（<c>bit(8)</c> / <c>bit varying(16)</c> / <c>interval day to second(3)</c> /
-    /// <c>numeric(10,-2)</c> / 配列 / ユーザー定義型）は素通しする＝ここが従来の
-    /// <c>information_schema</c> 経由では表せず落ちていた情報にあたる。
-    /// </para>
-    /// <para>
-    /// 配列は末尾の <c>[]</c> を外して要素型へ同じ規則を当て、付け直す（<c>character varying(20)[]</c> →
-    /// <c>varchar(20)[]</c>）。要素型だけ正準表記のまま残すと、同じ型に 2 通りの綴りが生まれるため。
-    /// </para>
-    /// <para>
-    /// 規則が「同じ意味の別表記」であること・正規化後の表記がそのまま DDL として通り、再取込で同じ表記へ
-    /// 戻る（不動点）ことは <c>PostgreSqlDdlRoundTripIntegrationTests</c> の閉包テストと往復テストが固定する。
-    /// </para>
+    /// 規則の正本は <see cref="PostgreSqlTypeNotation.Normalize"/>。差分の比較が図の表記に掛ける正規化と同じ関数なので、
+    /// 取込の出力はその不動点になる（ここだけ別の規則を持つと、図の表記と取込の表記がまた食い違う）。
     /// </remarks>
-    public static string NormalizeFormatType(string formatType)
-    {
-        var text = formatType.Trim();
-
-        // 配列は要素型へ同じ規則を当てて [] を付け直す（format_type は次元数を表記に出さない）
-        var suffix = "";
-
-        while (text.EndsWith("[]", StringComparison.Ordinal))
-        {
-            suffix = "[]" + suffix;
-            text = text[..^2].TrimEnd();
-        }
-
-        return NormalizeElementType(text) + suffix;
-    }
-
-    /// <summary>配列の <c>[]</c> を外した要素型 1 つを短縮語彙へ正規化する</summary>
-    private static string NormalizeElementType(string text)
-    {
-        var dateTime = DateTimeTypePattern().Match(text);
-
-        if (dateTime.Success)
-        {
-            var precision = dateTime.Groups["p"].Success
-                ? dateTime.Groups["p"].Value
-                : DefaultFractionalSecondsPrecision.ToString(CultureInfo.InvariantCulture);
-            var withTimeZone = string.Equals(
-                dateTime.Groups["zone"].Value,
-                "with",
-                StringComparison.Ordinal
-            );
-
-            return (dateTime.Groups["name"].Value, withTimeZone) switch
-            {
-                ("timestamp", false) => $"timestamp({precision})",
-                ("timestamp", true) => $"timestamptz({precision})",
-                ("time", false) => $"time({precision})",
-                // time with time zone は QuickER の従来語彙がそのままなので触らない
-                _ => text,
-            };
-        }
-
-        var character = CharacterTypePattern().Match(text);
-
-        if (character.Success)
-        {
-            var shortName = character.Groups["varying"].Success ? "varchar" : "char";
-            return shortName + character.Groups["args"].Value;
-        }
-
-        var zeroScaleNumeric = ZeroScaleNumericPattern().Match(text);
-
-        if (zeroScaleNumeric.Success)
-        {
-            return $"numeric({zeroScaleNumeric.Groups["p"].Value})";
-        }
-
-        return text;
-    }
-
-    // timestamp / time の正準表記（"timestamp(3) without time zone" 等）。修飾子は名称の直後に入る
-    [GeneratedRegex(
-        @"^(?<name>timestamp|time)(?:\((?<p>\d+)\))? (?<zone>with|without) time zone$",
-        RegexOptions.CultureInvariant
-    )]
-    private static partial Regex DateTimeTypePattern();
-
-    // character varying(n) / character(n)（長さ無しの正準表記も一応受ける）
-    [GeneratedRegex(
-        @"^character(?<varying> varying)?(?<args>\(\d+\))?$",
-        RegexOptions.CultureInvariant
-    )]
-    private static partial Regex CharacterTypePattern();
-
-    // format_type はスケール 0 も必ず書き下ろすため、QuickER の従来表記 numeric(p) へ畳む
-    [GeneratedRegex(@"^numeric\((?<p>\d+),0\)$", RegexOptions.CultureInvariant)]
-    private static partial Regex ZeroScaleNumericPattern();
+    /// <param name="formatType"><c>format_type(atttypid, atttypmod)</c> の出力</param>
+    public static string NormalizeFormatType(string formatType) =>
+        PostgreSqlTypeNotation.Normalize(formatType);
 }

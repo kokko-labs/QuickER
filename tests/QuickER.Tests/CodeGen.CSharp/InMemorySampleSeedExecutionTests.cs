@@ -12,6 +12,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
+using QuickER.Provider.MySql;
 using Xunit;
 
 namespace QuickER.Tests.CodeGen.CSharp;
@@ -167,6 +168,268 @@ public sealed class InMemorySampleSeedExecutionTests
             .And.Subject.GetType()
             .Name.Should()
             .Be("ValueObjectValidationException");
+    }
+
+    [Theory(
+        DisplayName = "シード値は主キー・一意制約を重複させず、外部キーは親に実在する行を指し、全行を保存し直せる"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task シード値は制約を守る(bool valueObjects)
+    {
+        var assembly = CompileAndLoad(GenerateConstraintDiagram(valueObjects), []);
+
+        var (violations, rowCounts) = SeededSampleDataInvariants.Check(assembly, "Sample.Domain");
+
+        violations.Should().BeEmpty();
+        rowCounts["CodeEntity"]
+            .Should()
+            .Be(3, "char(2) の主キーは末尾の行番号を残して 3 行を区別する");
+        rowCounts["UnitEntity"].Should().Be(3, "符号なし整数の主キーも行ごとに違う");
+        rowCounts["FlagEntity"]
+            .Should()
+            .Be(2, "NOT NULL の bool の一意制約は 2 種類の値しか作れない");
+        rowCounts["FlagItemEntity"].Should().Be(2, "2 行しかない親を参照する子も 2 行に減る");
+        rowCounts["ItemEntity"].Should().Be(3);
+
+        // 一意制約を検査するリポジトリ経由で、シードした全行を保存し直せる（重複があると一意制約違反になる）
+        var services = new ServiceCollection();
+        assembly
+            .GetTypes()
+            .Single(t => t.Name == "GeneratedInMemoryRepositoryServiceCollectionExtensions")
+            .GetMethod("AddGeneratedInMemoryRepositories")!
+            .Invoke(
+                null,
+                BindingFlags.OptionalParamBinding,
+                binder: null,
+                parameters: new object?[] { services, Type.Missing },
+                culture: null
+            );
+
+        using var provider = services.BuildServiceProvider();
+
+        foreach (var name in new[] { "Code", "Unit", "Flag", "FlagItem", "Ref", "Item" })
+        {
+            var repositoryInterface = assembly
+                .GetTypes()
+                .Single(t => t.IsInterface && t.Name == $"I{name}Repository");
+            var repository = provider.GetRequiredService(repositoryInterface);
+            var update = repositoryInterface
+                .GetInterfaces()
+                .Prepend(repositoryInterface)
+                .Select(i => i.GetMethod("UpdateAsync"))
+                .First(m => m is not null)!;
+
+            foreach (var entity in InvokeGetAll(repository, repositoryInterface))
+            {
+                entity.GetType().GetMethod("MarkUpdated")!.Invoke(entity, null);
+                var task =
+                    (Task<bool>)
+                        update.Invoke(
+                            repository,
+                            BindingFlags.OptionalParamBinding,
+                            binder: null,
+                            parameters: new object?[] { entity, Type.Missing, Type.Missing },
+                            culture: null
+                        )!;
+                (await task).Should().BeTrue($"{name} のシード行を保存し直せる");
+            }
+        }
+    }
+
+    [Fact(DisplayName = "既存の全フィクスチャのシーダーも、主キー・一意制約・外部キーを守る")]
+    public void 既存フィクスチャのシード値は制約を守る()
+    {
+        var assembly = typeof(InMemorySampleSeedExecutionTests).Assembly;
+        var namespaces = assembly
+            .GetTypes()
+            .Where(t => t.Name == "InMemorySampleData")
+            .Select(t => t.Namespace!)
+            .Distinct()
+            .ToList();
+
+        namespaces.Should().NotBeEmpty();
+
+        foreach (var namespaceName in namespaces)
+        {
+            var (violations, _) = SeededSampleDataInvariants.Check(assembly, namespaceName);
+            violations.Should().BeEmpty(namespaceName);
+        }
+    }
+
+    [Fact(
+        DisplayName = "シード行数の不動点は自己参照と相互参照でも止まり、減った行数が循環をたどって伝わる"
+    )]
+    public void シード行数は循環する参照でも決まる()
+    {
+        // a は NOT NULL の bool の一意制約で 2 行に減り、a と b は互いを参照し、nodes は自分自身を参照する。
+        // c は b を参照し、図の中で a・b より前に並ぶ＝b の行数が減ってから c へ伝わるには 2 周目が要る
+        var aId = Column("a_id", "int", key: true);
+        var aFlag = Column("flag", "tinyint(1)");
+        var aToB = Column("b_id", "int");
+        var bId = Column("b_id", "int", key: true);
+        var bToA = Column("a_id", "int");
+        var nodeId = Column("node_id", "int", key: true);
+        var parentId = Column("parent_id", "int", nullable: true);
+        var cId = Column("c_id", "int", key: true);
+        var cToB = Column("b_id", "int");
+
+        var a = new Entity { TableName = "a", Columns = [aId, aFlag, aToB] };
+        a.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = { aFlag.Id } });
+        var b = new Entity { TableName = "b", Columns = [bId, bToA] };
+        var nodes = new Entity { TableName = "nodes", Columns = [nodeId, parentId] };
+        var c = new Entity { TableName = "c", Columns = [cId, cToB] };
+
+        var diagram = new ErDiagram
+        {
+            TargetDbms = "mysql",
+            Entities = [c, a, b, nodes],
+            Relationships =
+            [
+                Reference(b, bId, a, aToB),
+                Reference(a, aId, b, bToA),
+                Reference(nodes, nodeId, nodes, parentId),
+                Reference(b, bId, c, cToB),
+            ],
+        };
+
+        var content = GenerateInMemory(diagram, valueObjects: false).Files[0].Content;
+
+        SeedLoopBound(content, "SeedAEntity").Should().Be("2");
+        SeedLoopBound(content, "SeedBEntity").Should().Be("2");
+        SeedLoopBound(content, "SeedCEntity").Should().Be("2");
+        SeedLoopBound(content, "SeedNodeEntity").Should().Be("RowsPerEntity");
+    }
+
+    /// <summary>シーダーのメソッドのループ上限（<c>index &lt;= …</c> の右辺）を取り出す</summary>
+    private static string SeedLoopBound(string content, string methodName)
+    {
+        var start = content.IndexOf($"private static void {methodName}(", StringComparison.Ordinal);
+        start.Should().BeGreaterThan(0, methodName);
+        var bound =
+            content.IndexOf("index <= ", start, StringComparison.Ordinal) + "index <= ".Length;
+        return content[bound..content.IndexOf(';', bound)];
+    }
+
+    /// <summary>列を組み立てる</summary>
+    private static Column Column(
+        string name,
+        string dataType,
+        bool key = false,
+        bool nullable = false
+    ) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            DataType = dataType,
+            IsPrimaryKey = key,
+            IsNullable = nullable,
+        };
+
+    /// <summary>親の列を子の列が参照する 1 対多のリレーションを組み立てる</summary>
+    private static Relationship Reference(
+        Entity parent,
+        Column parentColumn,
+        Entity child,
+        Column childColumn
+    ) =>
+        new()
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs = [new RelationshipColumnPair(parentColumn.Id, childColumn.Id)],
+        };
+
+    /// <summary>インメモリ単独の生成物を作る（生成エラーが無いことも確かめる）</summary>
+    private static CodeGenerationResult GenerateInMemory(ErDiagram diagram, bool valueObjects)
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            MySqlCSharpTypeMapper.ResolveColumnTypes(diagram),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateValueObjects = valueObjects,
+                GenerateInMemoryRepositories = true,
+                GenerateEditModels = false,
+                GenerateMappers = false,
+                GenerateRepositories = false,
+            }
+        );
+
+        result
+            .HasErrors.Should()
+            .BeFalse(
+                string.Join(
+                    " / ",
+                    result
+                        .Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Error)
+                        .Select(d => d.Message)
+                )
+            );
+        return result;
+    }
+
+    /// <summary>
+    /// シード値の作り方を試す図（MySQL）。char(2) の主キー・符号なし整数の主キーと char(2) の一意制約・
+    /// NOT NULL の bool の一意制約とそれを参照する子・主キーでない一意制約の列を参照される表と、
+    /// それらを文字列・符号なし整数・一意制約の列で参照する表。
+    /// </summary>
+    private static CodeGenerationResult GenerateConstraintDiagram(bool valueObjects)
+    {
+        var code = Column("code", "char(2)", key: true);
+        var codeLabel = Column("label", "varchar(50)");
+        var codes = new Entity { TableName = "codes", Columns = [code, codeLabel] };
+
+        var unitId = Column("unit_id", "int unsigned", key: true);
+        var unitShort = Column("short_name", "char(2)");
+        var units = new Entity { TableName = "units", Columns = [unitId, unitShort] };
+        units.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = { unitShort.Id } });
+
+        var flagId = Column("flag_id", "int", key: true);
+        var flag = Column("flag", "tinyint(1)");
+        var flags = new Entity { TableName = "flags", Columns = [flagId, flag] };
+        flags.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = { flag.Id } });
+
+        var flagChildId = Column("flag_child_id", "int", key: true);
+        var flagRef = Column("flag_id", "int");
+        var flagChildren = new Entity
+        {
+            TableName = "flag_items",
+            Columns = [flagChildId, flagRef],
+        };
+
+        var refId = Column("ref_id", "int", key: true);
+        var refNo = Column("ref_no", "int");
+        var refs = new Entity { TableName = "refs", Columns = [refId, refNo] };
+        refs.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = { refNo.Id } });
+
+        var itemId = Column("item_id", "int", key: true);
+        var itemCode = Column("code_value", "char(2)");
+        var itemUnit = Column("unit_no", "int unsigned");
+        var itemRef = Column("ref_value", "int", nullable: true);
+        var items = new Entity
+        {
+            TableName = "items",
+            Columns = [itemId, itemCode, itemUnit, itemRef],
+        };
+
+        var diagram = new ErDiagram
+        {
+            TargetDbms = "mysql",
+            Entities = [codes, units, flags, flagChildren, refs, items],
+            Relationships =
+            [
+                Reference(flags, flagId, flagChildren, flagRef),
+                Reference(codes, code, items, itemCode),
+                Reference(units, unitId, items, itemUnit),
+                Reference(refs, refNo, items, itemRef),
+            ],
+        };
+
+        return GenerateInMemory(diagram, valueObjects);
     }
 
     /// <summary>リフレクションで GetAllAsync を呼び、結果をリストとして返す。</summary>

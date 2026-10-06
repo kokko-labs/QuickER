@@ -451,6 +451,47 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
         live2.Relationships.Should().BeEmpty("自動で外した FK は戻らない（部分適用）");
     }
 
+    /// <summary>
+    /// NULL 許容を変えずに型だけを変える同期が、NOT NULL の列・NULL 許容の列のどちらでも成功することを検証する
+    /// （常に NULL / NOT NULL の句を付けていたため、ORA-01442 / ORA-01451 で必ず失敗していた）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] C: NULL 許容を変えずに型だけを変える同期が NOT NULL・NULL 許容の列とも成功する"
+    )]
+    public async Task AlterColumn_TypeOnly_Succeeds()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"alt_item\" (\"id\" NUMBER(10) NOT NULL, "
+                + "\"name\" VARCHAR2(50) NOT NULL, \"note\" VARCHAR2(50) NULL, "
+                + "CONSTRAINT \"PK_alt_item\" PRIMARY KEY (\"id\"))",
+            Ct
+        );
+
+        var live = await ImportAsync();
+        var target = CloneAsTarget(live.Entities.Single(e => e.TableName == "alt_item"));
+        target.Columns.Single(c => c.Name == "name").DataType = "VARCHAR2(100)";
+        target.Columns.Single(c => c.Name == "note").DataType = "VARCHAR2(100)";
+
+        var diff = _diff.Compute(live.Entities, live.Relationships, [target], []);
+
+        foreach (var item in diff.Items)
+        {
+            item.IsSelected = item.Kind == SchemaDiffKind.AlterColumn;
+        }
+
+        diff.Items.Count(i => i.IsSelected).Should().Be(2);
+        await ApplyAsync(fixture.ToDbConnectionSettings(), diff.Items);
+
+        var table = (await ImportAsync()).Entities.Single(e => e.TableName == "alt_item");
+        table.Columns.Single(c => c.Name == "name").DataType.Should().Be("VARCHAR2(100)");
+        table.Columns.Single(c => c.Name == "name").IsNullable.Should().BeFalse();
+        table.Columns.Single(c => c.Name == "note").DataType.Should().Be("VARCHAR2(100)");
+        table.Columns.Single(c => c.Name == "note").IsNullable.Should().BeTrue();
+    }
+
     // ---------------- ヘルパー ----------------
 
     /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>

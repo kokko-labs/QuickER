@@ -45,6 +45,9 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// <summary>ローカル（オフライン編集側）の一時ファイル SQLite DB</summary>
     private readonly SqliteTempDatabase _local = SqliteTempDatabase.Create();
 
+    /// <summary>ローカル DB の接続文字列（接続の設定を変えた部品を組むシナリオ用）</summary>
+    protected string LocalConnectionString => _local.ReadWriteCreateConnectionString;
+
     /// <summary>サーバー役の生 SQL 実行器</summary>
     protected ISqlExecutor ServerSql { get; private set; } = null!;
 
@@ -231,14 +234,23 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     protected SyncEngine CreateEngineWithOrderSource(
         ISyncServerSource<SyncOrderEntity, int> orders
     ) =>
+        CreateEngineWithOrderTable(
+            new SyncTable<SyncOrderEntity, int>(
+                LocalOrders,
+                LocalSql,
+                orders,
+                GeneratedSyncTables.SyncOrder
+            )
+        );
+
+    /// <summary>
+    /// 注文テーブルの部品（差分ソース・ローカルの生 SQL 実行器）を丸ごと差し替えた同期エンジンを組み立てる
+    /// （ジャーナルと他のテーブルは本体の <see cref="Engine"/> と同じ＝ロックも同じものを共有する）。
+    /// </summary>
+    protected SyncEngine CreateEngineWithOrderTable(ISyncTable orders) =>
         new(
             [
-                new SyncTable<SyncOrderEntity, int>(
-                    LocalOrders,
-                    LocalSql,
-                    orders,
-                    GeneratedSyncTables.SyncOrder
-                ),
+                orders,
                 new SyncTable<SyncOrderLineEntity, int>(
                     LocalLines,
                     LocalSql,
@@ -2075,6 +2087,942 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         ) => inner.GetAllKeysAsync(cancellationToken);
     }
 
+    // ---- 再生する操作の決め方（いまのローカルの行と、その行の記録全体）----
+
+    /// <summary>
+    /// 編集のあとに外部キーで拒否された削除があっても、編集はサーバーへ届く。
+    /// </summary>
+    /// <remarks>
+    /// ジャーナルは業務書き込みの前に書くため、最新の記録が「着地しなかった削除」になり得る。最新の記録だけで操作を
+    /// 決めると、行が残っている（削除は着地しなかった）ことを理由に、その行の記録が全部捨てられ、着地していた
+    /// 編集まで二度と届かなくなる。行が残っていて追加・更新の記録を含むなら、いまの内容を送る。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/再生] 編集のあと外部キーで拒否された削除があっても編集は届く")]
+    public async Task EditThenRefusedDelete_StillUploadsTheEdit()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var local = await LocalOrders.GetByIdAsync(1, Ct);
+        local!.CustomerName = "alice-edited";
+        await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+
+        // 明細 11 が注文 1 を参照しているため、ローカルの外部キーが削除を拒否する
+        var delete = async () => await LocalOrders.DeleteAsync(1, Ct);
+        await delete.Should().ThrowAsync<Exception>();
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull();
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Uploaded.Should().Be(1, "行が残り、更新の記録を含む＝いまの内容を送る");
+        (await ServerOrders.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("alice-edited");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 削除が着地したあと同じキーの再挿入が外部キーで失敗したら、サーバーからも消える。
+    /// </summary>
+    /// <remarks>
+    /// 最新の記録（着地しなかった挿入）だけで決めると「送るものが無い」として捨てられ、サーバーに行が残り
+    /// ローカルには無い状態が続く。行が無く削除の記録を含み、サーバーにあった版が分かるなら、その版で削除する。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/再生] 削除のあと再挿入が外部キーで失敗した行はサーバーからも消える")]
+    public async Task DeleteThenRefusedReinsert_DeletesOnServer()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        (await LocalLines.DeleteAsync(11, Ct)).Should().BeTrue();
+
+        var reinsert = async () =>
+            await LocalLines.InsertAsync(
+                new SyncOrderLineEntity
+                {
+                    LineId = 11,
+                    OrderId = 999,
+                    Product = "orphan",
+                },
+                Ct
+            );
+        await reinsert.Should().ThrowAsync<Exception>("注文 999 は無い＝外部キーが拒否する");
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Uploaded.Should().Be(1, "行が無く削除の記録を含む＝その版で削除する");
+        (await ServerLines.GetByIdAsync(11, Ct)).Should().BeNull();
+        (await LocalLinesRaw.GetByIdAsync(11, Ct)).Should().BeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>オフラインで作って消した行は、サーバーへ一度も届いていないので何も送らずに捨てる。</summary>
+    [Fact(DisplayName = "[Sync/再生] オフラインで作って消した行は送らずに捨てる")]
+    public async Task OfflineInsertThenDelete_IsDiscarded()
+    {
+        await LocalOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 50, CustomerName = "short-lived" },
+            Ct
+        );
+        (await LocalOrders.DeleteAsync(50, Ct)).Should().BeTrue();
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Uploaded.Should().Be(0);
+        result.Discarded.Should().Be(1);
+        result.Conflicts.Should().BeEmpty();
+        (await ServerOrders.GetByIdAsync(50, Ct)).Should().BeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 版なしテーブルでも、削除が着地したあとの再挿入が失敗した行は、後勝ちの実行でサーバーから消える。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/再生] 版なしテーブルで削除後の再挿入が失敗した行は後勝ちの実行で消える"
+    )]
+    public async Task VersionlessDeleteThenRefusedReinsert_DeletesOnServer()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerNoteAsync(5, 1, "note");
+        var lww = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        await Engine.SyncAsync(lww, Ct);
+
+        (await LocalNotes.DeleteAsync(5, Ct)).Should().BeTrue();
+
+        var reinsert = async () =>
+            await LocalNotes.InsertAsync(
+                new SyncNoteEntity
+                {
+                    NoteId = 5,
+                    OrderId = 999,
+                    Body = "orphan",
+                },
+                Ct
+            );
+        await reinsert.Should().ThrowAsync<Exception>();
+
+        await Engine.SyncAsync(lww, Ct);
+
+        (await ServerNotes.GetByIdAsync(5, Ct))
+            .Should()
+            .BeNull("版なし＝行が無く削除を含むなら無条件に削除");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 記録を書いたが業務の挿入がまだ着地していない書き込みがあっても、その記録はアップロードの判定で捨てられない。
+    /// </summary>
+    /// <remarks>
+    /// アップロードはジャーナルをロックの外で読むため、途中の書き込みの記録を読み得る。そのまま行の有無を見ると
+    /// 「行が無い（挿入はまだ）」と判定して記録を捨て、直後に着地した行は二度と送られない。判定と破棄はロックの
+    /// 内側で行うので、途中の書き込みが終わるのを待ってから判定する。割り込みは、ジャーナルを記録する Repository の
+    /// Save フックで業務の書き込みを止め（記録は済み・ロックは保持）、その間に同期を走らせることで作る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/並行] 記録と業務の挿入の間にある書き込みの記録はアップロードの判定で捨てられない"
+    )]
+    public async Task InFlightInsert_IsNotDiscardedByTheUpload()
+    {
+        var hook = new PausingSaveHook();
+        var orders = CreateHookedOrders(hook);
+        var order = new SyncOrderEntity { OrderId = 60, CustomerName = "in-flight" };
+        order.MarkAdded();
+
+        await RunSyncWhileSaveIsPausedAsync(
+            hook,
+            () => orders.SaveAsync(order, cancellationToken: Ct)
+        );
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var server = await ServerOrders.GetByIdAsync(60, Ct);
+        server.Should().NotBeNull("記録は捨てられず、着地した行が送られる");
+        server!.CustomerName.Should().Be("in-flight");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 削除の記録を書いたが業務の削除がまだ着地していない書き込みがあっても、その記録はアップロードの判定で
+    /// 捨てられない（行が残っているのを「削除は着地しなかった」と読み違えない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/並行] 記録と業務の削除の間にある書き込みの記録はアップロードの判定で捨てられない"
+    )]
+    public async Task InFlightDelete_IsNotDiscardedByTheUpload()
+    {
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 70, CustomerName = "to-delete" },
+            Ct
+        );
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var hook = new PausingSaveHook();
+        var orders = CreateHookedOrders(hook);
+        var order = await LocalOrdersRaw.GetByIdAsync(70, Ct);
+        order!.MarkRemoved();
+
+        await RunSyncWhileSaveIsPausedAsync(
+            hook,
+            () => orders.SaveAsync(order, cancellationToken: Ct)
+        );
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        (await ServerOrders.GetByIdAsync(70, Ct))
+            .Should()
+            .BeNull("記録は捨てられず、削除が送られる");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>Save フックを持つローカルの注文 Repository をジャーナル記録で包む（ジャーナル＝ロックは本体と共有）。</summary>
+    private JournalingSyncOrderRepository CreateHookedOrders(ISaveHook<SyncOrderEntity> hook) =>
+        new(
+            new SyncOrderRepository(
+                new SqlConnectionFactory(LocalConnectionString),
+                new SaveHookRegistry().Add(hook)
+            ),
+            Journal
+        );
+
+    /// <summary>
+    /// 保存を Save フックで止めている間（記録は済み・業務の書き込みはまだ）に同期を始め、少し待ってから保存を進める。
+    /// </summary>
+    private async Task RunSyncWhileSaveIsPausedAsync(PausingSaveHook hook, Func<Task<int>> save)
+    {
+        Task<int> saving;
+        Task<SyncResult> syncing;
+
+        using (ExecutionContext.SuppressFlow())
+        {
+            saving = Task.Run(save, Ct);
+        }
+
+        await hook.Entered.Task;
+
+        using (ExecutionContext.SuppressFlow())
+        {
+            syncing = Task.Run(() => Engine.SyncAsync(cancellationToken: Ct), Ct);
+        }
+
+        // 同期がジャーナルを読み、判定へ進む時間を与える（ロックがあれば判定は保存の後まで待つ）
+        await Task.Delay(500, Ct);
+        hook.Release();
+        await saving;
+        await syncing;
+    }
+
+    /// <summary>最初の保存の業務書き込みを、解放されるまで止める Save フック。</summary>
+    private sealed class PausingSaveHook : ISaveHook<SyncOrderEntity>
+    {
+        private readonly TaskCompletionSource _release = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+
+        /// <summary>保存がフックへ入った（記録は済み・業務の書き込みはまだ）</summary>
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>止めている保存を進める</summary>
+        public void Release() => _release.TrySetResult();
+
+        public async Task<bool> BeforeSaveAsync(
+            SyncOrderEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Entered.TrySetResult();
+            await _release.Task;
+
+            return true;
+        }
+    }
+
+    /// <summary>ダウンロードのバッチサイズの誤りは、アップロードが何かを変える前に拒否される。</summary>
+    [Fact(DisplayName = "[Sync] DownloadBatchSize が 0 以下なら何も変えずに拒否する")]
+    public async Task NonPositiveDownloadBatchSize_ThrowsBeforeTheUploadChangesAnything()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var local = await LocalOrders.GetByIdAsync(1, Ct);
+        local!.CustomerName = "alice-local";
+        await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+
+        var act = async () =>
+            await Engine.SyncAsync(
+                new SyncOptions
+                {
+                    ConflictPolicy = SyncConflictPolicy.ServerWins,
+                    DownloadBatchSize = 0,
+                },
+                Ct
+            );
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice-local", "ServerWins の適用より前に止まる");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(1);
+    }
+
+    // ---- 外部キーで止まらない（祖先を残す削除伝搬・ServerWins の適用順・サーバーの拒否の報告）----
+
+    /// <summary>
+    /// ServerWins は、サーバーで新しい親へ付け替えられた行も 1 回の同期で戻す（親が先に降りてから適用する）。
+    /// </summary>
+    /// <remarks>
+    /// サーバーの行を適用するのがダウンロードより前だと、まだ降りていない親（サーバーで新しく作られた注文 2）を
+    /// 参照する明細をローカルへ書くことになり、ローカルの外部キーで毎回止まる。適用はそのテーブルのダウンロードの
+    /// 直後（親→子）に行うので、親は先に降りている。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/外部キー] ServerWins はサーバーで新しい親へ付け替えた行も 1 回で戻す"
+    )]
+    public async Task ServerWins_RestoresRowMovedToANewParentOnServer()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var local = await LocalLines.GetByIdAsync(11, Ct);
+        local!.Product = "widget-local";
+        await LocalLines.UpdateAsync(local, cancellationToken: Ct);
+
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 2, CustomerName = "bob" },
+            Ct
+        );
+        var server = await ServerLines.GetByIdAsync(11, Ct);
+        server!.OrderId = 2;
+        await ServerLines.UpdateAsync(server, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        var restored = await LocalLinesRaw.GetByIdAsync(11, Ct);
+        restored!.OrderId.Should().Be(2, "サーバーの付け替えが戻る");
+        restored.Product.Should().Be("widget", "ローカルの編集は捨てられる");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 未送信の行を削除伝搬が残すとき、その親も残す（サーバーで親子とも消えても同期は止まらない）。
+    /// </summary>
+    /// <remarks>
+    /// 削除伝搬は未送信の行（ここでは編集した明細）を残すが、親（注文）は消そうとしていた。親を消すとローカルの
+    /// 外部キーで毎回止まり（CASCADE なら残した明細ごと消える）、集めた競合も返らない。残す行が参照する親も残す。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/外部キー] 未送信の行を残すときは親も残し、同期は止まらない")]
+    public async Task DeletePropagation_KeepsTheParentsOfTheRowsItKeeps()
+    {
+        await ArrangeEditedLineWhoseOrderWasDeletedOnServerAsync();
+
+        for (var run = 0; run < 2; run++)
+        {
+            var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+            result
+                .Conflicts.Should()
+                .ContainSingle()
+                .Which.Reason.Should()
+                .Be(SyncConflictReason.MissingOnServer);
+            result.DeletedLocally.Should().Be(0);
+        }
+
+        (await LocalLinesRaw.GetByIdAsync(11, Ct)).Should().NotBeNull("未送信の明細は残る");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull("残した明細の親も残る");
+    }
+
+    /// <summary>
+    /// サーバーで親が消えた行を LocalWins・後勝ちで戻そうとして断られたら、ParentMissingOnServer として報告し、
+    /// 同期は止まらない（親は復活させない）。
+    /// </summary>
+    [Theory(
+        DisplayName = "[Sync/外部キー] 親がサーバーに無い行の書き込みは ParentMissingOnServer で報告し止まらない"
+    )]
+    [InlineData(SyncMode.Versioned, SyncConflictPolicy.LocalWins)]
+    [InlineData(SyncMode.LastWriteWins, SyncConflictPolicy.Collect)]
+    public async Task WriteOfRowWhoseParentIsGoneOnServer_IsReportedAsParentMissing(
+        SyncMode mode,
+        SyncConflictPolicy policy
+    )
+    {
+        await ArrangeEditedLineWhoseOrderWasDeletedOnServerAsync();
+        var options = new SyncOptions { Mode = mode, ConflictPolicy = policy };
+
+        for (var run = 0; run < 2; run++)
+        {
+            var result = await Engine.SyncAsync(options, Ct);
+
+            var conflict = result.Conflicts.Should().ContainSingle().Which;
+            conflict.Reason.Should().Be(SyncConflictReason.ParentMissingOnServer);
+            conflict.TableName.Should().Be("sync_order_lines");
+            conflict.Operation.Should().Be(SyncJournalOperation.Upsert);
+        }
+
+        (await ServerOrders.GetByIdAsync(1, Ct))
+            .Should()
+            .BeNull("サーバーが消した親は復活させない");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(1, "記録は残る");
+    }
+
+    /// <summary>
+    /// ローカルで削除した親を、サーバーで別端末の子が参照していれば、削除は DeleteRefusedOnServer として報告し、
+    /// その子のダウンロードは打ち切る（Collect・LocalWins とも止まらない）。
+    /// </summary>
+    [Theory(
+        DisplayName = "[Sync/外部キー] サーバーで子が足された親の削除は DeleteRefusedOnServer で報告し子で打ち切る"
+    )]
+    [InlineData(SyncConflictPolicy.Collect)]
+    [InlineData(SyncConflictPolicy.LocalWins)]
+    public async Task DeleteOfParentWithChildAddedOnServer_IsReportedAndTheChildIsHeldBack(
+        SyncConflictPolicy policy
+    )
+    {
+        await ArrangeLocallyDeletedOrderWithChildAddedOnServerAsync();
+
+        var result = await Engine.SyncAsync(new SyncOptions { ConflictPolicy = policy }, Ct);
+
+        var conflict = result.Conflicts.Should().ContainSingle().Which;
+        conflict.Reason.Should().Be(SyncConflictReason.DeleteRefusedOnServer);
+        conflict.TableName.Should().Be("sync_orders");
+        conflict.Operation.Should().Be(SyncJournalOperation.Delete);
+        conflict.ServerEntity.Should().NotBeNull();
+        result
+            .Truncations.Should()
+            .Contain(truncation =>
+                truncation.TableName == "sync_order_lines" && truncation.PendingKeyText == "21"
+            );
+        (await LocalLinesRaw.GetByIdAsync(21, Ct))
+            .Should()
+            .BeNull("親が無いローカルへは降ろさない");
+        (await ServerOrders.GetByIdAsync(1, Ct)).Should().NotBeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(1, "記録は残る");
+    }
+
+    /// <summary>
+    /// 同じ配置を ServerWins で回すと、1 回で親が戻り、サーバーで足された子も降りる。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/外部キー] サーバーで子が足された親の削除は ServerWins で 1 回で親が戻り子も降りる"
+    )]
+    public async Task DeleteOfParentWithChildAddedOnServer_IsSettledByServerWins()
+    {
+        await ArrangeLocallyDeletedOrderWithChildAddedOnServerAsync();
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.HasTruncations.Should().BeFalse();
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull("ServerWins で親が戻る");
+        (await LocalLinesRaw.GetByIdAsync(21, Ct)).Should().NotBeNull("戻った親の下へ子が降りる");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// ServerWins のランの最中に、捨てる予定の行をローカルで編集すると、その編集は残る（新しい記録も残る）。
+    /// </summary>
+    /// <remarks>
+    /// ServerWins が捨てるのはランの冒頭に読んだ記録だけ。適用の直前に記録を読み直し、新しい記録が付いたキーには
+    /// サーバーの行を書かない（新しい編集は捨てるよう頼まれたものではない）。古い記録は捨てる。割り込みは注文
+    /// テーブルの最初の差分取得（＝そのテーブルの適用より前）でローカルを編集して作る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/外部キー] ServerWins の最中に編集した行は適用されず編集と新しい記録が残る"
+    )]
+    public async Task ServerWins_LeavesARowEditedDuringTheRun()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+        await EditLocalOrderAsync(1, "alice-before");
+        var oldIds = (await Journal.ReadAllAsync(Ct)).Select(entry => entry.Id).ToList();
+
+        var source = new LocalWriteOnFirstChangesOrderSource(
+            _sources.Orders,
+            async cancellationToken =>
+            {
+                var local = await LocalOrders.GetByIdAsync(1, cancellationToken);
+                local!.CustomerName = "alice-during";
+                await LocalOrders.UpdateAsync(local, cancellationToken: cancellationToken);
+            }
+        );
+
+        await CreateEngineWithOrderSource(source)
+            .SyncAsync(new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins }, Ct);
+
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice-during", "ランの最中の編集はサーバーの行で上書きされない");
+        var remaining = await Journal.ReadAllAsync(Ct);
+        remaining.Should().ContainSingle("新しい記録は残り、古い記録は捨てられる");
+        oldIds.Should().NotContain(remaining[0].Id);
+    }
+
+    /// <summary>
+    /// ServerWins で捨てる予定の行がサーバー側でも変わっていても、そのテーブルのダウンロードはその行で止まらず、
+    /// 1 回のランで全テーブルが降りて全記録が決着する。
+    /// </summary>
+    /// <remarks>
+    /// 捨てる予定の記録をダウンロード中も未送信に数えると、サーバーでも変わった行でそのテーブルが打ち切られ、
+    /// その後ろの変更と後ろのテーブル（とその ServerWins の記録）がその回に取り残される。最終的な内容だけを見ると
+    /// 次の回で追いついて区別できないため、1 回のランで打ち切りが無く全部が済むことを表明する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/外部キー] ServerWins で捨てる行がサーバーでも変わっていてもダウンロードは止まらず 1 回で済む"
+    )]
+    public async Task ServerWins_DoesNotStopTheDownloadAtRowsItDrops()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerAsync(2, "bob", 12, "gadget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        // 捨てる予定の記録（注文 1 と明細 12）
+        await EditLocalOrderAsync(1, "alice-local");
+        var localLine = await LocalLines.GetByIdAsync(12, Ct);
+        localLine!.Product = "gadget-local";
+        await LocalLines.UpdateAsync(localLine, cancellationToken: Ct);
+
+        // サーバー側の変更: 注文 1（捨てる行そのもの）→ それより版が上の注文 2 → 後ろのテーブルの明細 11
+        var serverOrder = await ServerOrders.GetByIdAsync(1, Ct);
+        serverOrder!.CustomerName = "alice-server";
+        await ServerOrders.UpdateAsync(serverOrder, cancellationToken: Ct);
+        var laterOrder = await ServerOrders.GetByIdAsync(2, Ct);
+        laterOrder!.CustomerName = "bob-server";
+        await ServerOrders.UpdateAsync(laterOrder, cancellationToken: Ct);
+        var serverLine = await ServerLines.GetByIdAsync(11, Ct);
+        serverLine!.Product = "widget-server";
+        await ServerLines.UpdateAsync(serverLine, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins },
+            Ct
+        );
+
+        result.Truncations.Should().BeEmpty("捨てる予定の行はダウンロードを止めない");
+        (await LocalOrdersRaw.GetByIdAsync(2, Ct))!
+            .CustomerName.Should()
+            .Be("bob-server", "その行より版が上の変更も同じランで降りる");
+        (await LocalLinesRaw.GetByIdAsync(11, Ct))!
+            .Product.Should()
+            .Be("widget-server", "後ろのテーブルの変更も同じランで降りる");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0, "後ろのテーブルの記録まで決着する");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("alice-server");
+        (await LocalLinesRaw.GetByIdAsync(12, Ct))!.Product.Should().Be("gadget");
+    }
+
+    /// <summary>明細 11 をローカルで編集し、サーバーでは明細 11 と注文 1 を消した配置を作る。</summary>
+    private async Task ArrangeEditedLineWhoseOrderWasDeletedOnServerAsync()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var local = await LocalLines.GetByIdAsync(11, Ct);
+        local!.Product = "widget-local";
+        await LocalLines.UpdateAsync(local, cancellationToken: Ct);
+
+        (await ServerLines.DeleteAsync(11, Ct)).Should().BeTrue();
+        (await ServerOrders.DeleteAsync(1, Ct)).Should().BeTrue();
+    }
+
+    /// <summary>ローカルで注文 1 を削除し、サーバーでは別端末が注文 1 に明細 21 を足した配置を作る。</summary>
+    /// <remarks>
+    /// 注文 2 は版の高い行としてローカルに残し、注文テーブルの再開点を注文 1 より上に保つ（注文 1 しか無いと、
+    /// 削除で再開点が消えて注文 1 が降り直し、注文テーブル自身がそこで打ち切られて明細まで届かない）。
+    /// </remarks>
+    private async Task ArrangeLocallyDeletedOrderWithChildAddedOnServerAsync()
+    {
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
+            Ct
+        );
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 2, CustomerName = "bob" },
+            Ct
+        );
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        (await LocalOrders.DeleteAsync(1, Ct)).Should().BeTrue();
+
+        await ServerLines.InsertAsync(
+            new SyncOrderLineEntity
+            {
+                LineId = 21,
+                OrderId = 1,
+                Product = "added elsewhere",
+            },
+            Ct
+        );
+    }
+
+    // ---- 同期中のローカル書き込み（ロックとジャーナルの読み直し）----
+
+    /// <summary>
+    /// ダウンロードの最中にローカルで作った行は、同じランの削除伝搬で消えない。
+    /// </summary>
+    /// <remarks>
+    /// 削除伝搬は「サーバーに無いキー」を消すが、未送信のジャーナルがあるキーは残す。そのジャーナルをランの冒頭で
+    /// 1 回だけ読むと、ダウンロード中に作った行は「未送信でもなくサーバーにも無い行」に見えて消され、次のランでは
+    /// ジャーナルの記録も「行が無い」として捨てられる＝両側から消える。割り込みは差分ソースを包み、最初の差分取得
+    /// （アップロードの後・削除伝搬の前）でローカルへ書くことで作る。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/並行] ダウンロード中にローカルで作った行は削除伝搬で消えない")]
+    public async Task LocalInsertDuringDownload_IsNotDeletedByPropagation()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var source = new LocalWriteOnFirstChangesOrderSource(
+            _sources.Orders,
+            cancellationToken =>
+                LocalOrders.InsertAsync(
+                    new SyncOrderEntity { OrderId = 99, CustomerName = "made-during-sync" },
+                    cancellationToken
+                )
+        );
+
+        var result = await CreateEngineWithOrderSource(source).SyncAsync(cancellationToken: Ct);
+
+        result.DeletedLocally.Should().Be(0, "ダウンロード中に作った行は未送信のジャーナルを持つ");
+        (await LocalOrdersRaw.GetByIdAsync(99, Ct)).Should().NotBeNull();
+
+        var next = await Engine.SyncAsync(cancellationToken: Ct);
+
+        next.Uploaded.Should().Be(1, "次のランで送られる");
+        (await ServerOrders.GetByIdAsync(99, Ct))!.CustomerName.Should().Be("made-during-sync");
+    }
+
+    /// <summary>
+    /// ダウンロードの最中にローカルで編集した行は、同じランのバッチ適用で上書きされない。
+    /// </summary>
+    /// <remarks>
+    /// 未送信のキーをランの冒頭で読むと、その後に編集した行はバッチにサーバーの内容で上書きされ、ジャーナルには
+    /// 記録だけが残る（次のランはサーバーの内容を送り直す＝編集が消える）。未送信のキーをバッチの直前に読み直せば、
+    /// 編集した行で打ち切られて編集は残る。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/並行] ダウンロード中のローカル編集はバッチ適用に上書きされない")]
+    public async Task LocalEditDuringDownload_IsNotOverwrittenByBatch()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var server = await ServerOrders.GetByIdAsync(1, Ct);
+        server!.CustomerName = "alice-server";
+        await ServerOrders.UpdateAsync(server, cancellationToken: Ct);
+
+        var source = new LocalWriteOnFirstChangesOrderSource(
+            _sources.Orders,
+            async cancellationToken =>
+            {
+                var local = await LocalOrders.GetByIdAsync(1, cancellationToken);
+                local!.CustomerName = "alice-local";
+                await LocalOrders.UpdateAsync(local, cancellationToken: cancellationToken);
+            }
+        );
+
+        var result = await CreateEngineWithOrderSource(source).SyncAsync(cancellationToken: Ct);
+
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice-local", "編集した行はバッチの直前に未送信として読まれ、上書きされない");
+        result.Truncations.Should().ContainSingle(truncation => truncation.PendingKeyText == "1");
+    }
+
+    /// <summary>
+    /// エンジンがバッチを適用している間、別の流れからのローカル書き込みはロックで待たされ、適用の後に着地する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 未送信のキーを読んでからバッチを書き終えるまでの間に別の画面が同じ行を書くと、その書き込みはキーの読み取りに
+    /// 間に合わず、バッチに上書きされる。デコレータとエンジンが同じロックを取ることで、その書き込みはバッチの後へ回る。
+    /// </para>
+    /// <para>
+    /// 割り込みは、注文テーブルのローカル生 SQL 実行器を包み、バッチ適用の最初の問い合わせ（既存キーの照会）の
+    /// 直前に、実行コンテキストを引き継がない別タスクで編集を始めることで作る。ロックがあれば編集はその場では
+    /// 終わらない（待つ）。ロックが無ければ待ち時間の間に書き終わり、直後のバッチに上書きされる。
+    /// </para>
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/並行] バッチ適用中の別の流れのローカル書き込みはロックで待ち、適用後に着地する"
+    )]
+    public async Task LocalWriteFromAnotherFlow_WaitsForTheBatch()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var server = await ServerOrders.GetByIdAsync(1, Ct);
+        server!.CustomerName = "alice-server";
+        await ServerOrders.UpdateAsync(server, cancellationToken: Ct);
+
+        Task? edit = null;
+        var editFinishedDuringBatch = false;
+        var localSql = new InterceptingSqlExecutor(
+            LocalSql,
+            async (sql, cancellationToken) =>
+            {
+                if (edit is not null || sql != GeneratedSyncTables.SyncOrder.LocalExistingKeysSql)
+                {
+                    return;
+                }
+
+                using (ExecutionContext.SuppressFlow())
+                {
+                    edit = Task.Run(
+                        async () =>
+                        {
+                            var local = await LocalOrders.GetByIdAsync(1, Ct);
+                            local!.CustomerName = "alice-local";
+                            await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+                        },
+                        Ct
+                    );
+                }
+
+                editFinishedDuringBatch =
+                    await Task.WhenAny(edit, Task.Delay(500, cancellationToken)) == edit;
+            }
+        );
+        var engine = CreateEngineWithOrderTable(
+            new SyncTable<SyncOrderEntity, int>(
+                LocalOrders,
+                localSql,
+                _sources.Orders,
+                GeneratedSyncTables.SyncOrder
+            )
+        );
+
+        await engine.SyncAsync(cancellationToken: Ct);
+        await edit!;
+
+        editFinishedDuringBatch.Should().BeFalse("ロックを持つバッチの間、ローカル書き込みは待つ");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice-local", "待った書き込みはバッチの後に着地する");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(1);
+
+        // 編集はバッチより前に読んだ行（旧い版）へ書かれたもの＝サーバーの変更を見ずに上書きした編集なので、次の
+        // ランは黙って送らず更新競合として報告する（編集は消えず、判断は呼び出し側へ渡る）
+        var next = await Engine.SyncAsync(cancellationToken: Ct);
+
+        next.Conflicts.Should()
+            .ContainSingle()
+            .Which.Reason.Should()
+            .Be(SyncConflictReason.ModifiedOnServer);
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("alice-local");
+    }
+
+    /// <summary>同じローカル DB に対する 2 つのランは重ならない（後から来たほうが待つ）。</summary>
+    [Fact(DisplayName = "[Sync/並行] 同じローカル DB への SyncAsync の重なりは後着が待つ")]
+    public async Task OverlappingRuns_AreSerialised()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var source = new LocalWriteOnFirstChangesOrderSource(
+            _sources.Orders,
+            async _ =>
+            {
+                entered.SetResult();
+                await release.Task;
+            }
+        );
+
+        var first = CreateEngineWithOrderSource(source).SyncAsync(cancellationToken: Ct);
+        await entered.Task;
+
+        Task<SyncResult> second;
+
+        using (ExecutionContext.SuppressFlow())
+        {
+            second = Task.Run(() => Engine.SyncAsync(cancellationToken: Ct), Ct);
+        }
+
+        var secondFinishedFirst = await Task.WhenAny(second, Task.Delay(500, Ct)) == second;
+        release.SetResult();
+        await first;
+        await second;
+
+        secondFinishedFirst.Should().BeFalse("先のランが終わるまで後のランは始まらない");
+    }
+
+    /// <summary>
+    /// BulkInsert の記録は行ごとの文でなく、複数行の INSERT（1 文 100 行）でジャーナルへ書かれる。
+    /// </summary>
+    /// <remarks>
+    /// 行ごとに自動コミットの INSERT を出すと、1 万行で素の BulkInsert の数百倍かかっていた。件数と順序（id が
+    /// 行の並びどおりに振られる）を確かめ、文の数はジャーナルの生 SQL 実行器を包んで数える（時間は表明しない）。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/記録] BulkInsert の記録は複数行の INSERT でまとめて書かれる")]
+    public async Task BulkInsert_IsJournaledInMultiRowStatements()
+    {
+        var counting = new InterceptingSqlExecutor(LocalSql, (_, _) => Task.CompletedTask);
+        var journal = new SyncJournal(counting);
+        await journal.EnsureCreatedAsync(Ct);
+        var orders = new JournalingSyncOrderRepository(LocalOrdersRaw, journal);
+        var rows = Enumerable
+            .Range(1, 10_000)
+            .Select(id => new SyncOrderEntity { OrderId = id, CustomerName = $"c{id}" })
+            .ToList();
+
+        counting.Executed.Clear();
+        await orders.BulkInsertAsync(rows, Ct);
+
+        counting
+            .Executed.Count(sql =>
+                sql.StartsWith("INSERT INTO quicker_sync_journal", StringComparison.Ordinal)
+            )
+            .Should()
+            .Be(100, "1 文 100 行");
+
+        var entries = await Journal.ReadAllAsync(Ct);
+        entries
+            .Select(entry => entry.KeyText)
+            .Should()
+            .Equal(
+                rows.Select(row =>
+                    row.OrderId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                )
+            );
+        entries
+            .Should()
+            .OnlyContain(entry => entry.Operation == nameof(SyncJournalOperation.Upsert));
+    }
+
+    /// <summary>複数行の記録は文の境界をまたいでも、版（BLOB）と NULL を行ごとに取り違えない。</summary>
+    [Fact(
+        DisplayName = "[Sync/記録] RecordManyAsync は文の境界をまたいでも版と NULL を行ごとに保つ"
+    )]
+    public async Task RecordMany_KeepsEachRowsValuesAcrossStatementBoundaries()
+    {
+        var records = Enumerable
+            .Range(0, 101)
+            .Select(index => new SyncJournalRecord(
+                index % 2 == 0 ? "sync_orders" : "sync_order_lines",
+                $"k{index}",
+                index % 3 == 0 ? SyncJournalOperation.Delete : SyncJournalOperation.Upsert,
+                index % 3 == 0 ? [(byte)index, 0xFF] : null
+            ))
+            .ToList();
+
+        await Journal.RecordManyAsync(records, Ct);
+
+        var entries = await Journal.ReadAllAsync(Ct);
+        entries
+            .Select(entry =>
+                (entry.TableName, entry.KeyText, entry.Operation, entry.OriginalRowVersion)
+            )
+            .Should()
+            .BeEquivalentTo(
+                records.Select(record =>
+                    (
+                        record.TableName,
+                        record.KeyText,
+                        record.Operation.ToString(),
+                        record.OriginalRowVersion
+                    )
+                ),
+                options => options.WithStrictOrdering()
+            );
+    }
+
+    /// <summary>最初の差分取得の直前に一度だけローカルへ書く差分ソース（ダウンロードの最中へ割り込むテストダブル）。</summary>
+    /// <remarks>
+    /// 上限（ceiling）の取得では発火しない。上限はダウンロードの先頭で取られるため、そこで書くと「ダウンロードの前」
+    /// になってしまい、ランの冒頭でジャーナルを 1 回だけ読む実装と区別できない。
+    /// </remarks>
+    private sealed class LocalWriteOnFirstChangesOrderSource(
+        ISyncServerSource<SyncOrderEntity, int> inner,
+        Func<CancellationToken, Task> onFirstChanges
+    ) : ISyncServerSource<SyncOrderEntity, int>
+    {
+        private int _fired;
+
+        public IRemoteRepositoryCore<SyncOrderEntity, int> Writer => inner.Writer;
+
+        public ISyncBinaryColumns<int>? BinaryColumns => inner.BinaryColumns;
+
+        public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
+            inner.GetChangeCeilingAsync(cancellationToken);
+
+        public async Task<SyncChangeBatch<SyncOrderEntity>> GetChangesAsync(
+            byte[]? anchor,
+            byte[]? ceiling,
+            int batchSize,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (Interlocked.Exchange(ref _fired, 1) == 0)
+            {
+                await onFirstChanges(cancellationToken);
+            }
+
+            return await inner.GetChangesAsync(anchor, ceiling, batchSize, cancellationToken);
+        }
+
+        public Task<IReadOnlyList<int>> GetAllKeysAsync(
+            CancellationToken cancellationToken = default
+        ) => inner.GetAllKeysAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 生 SQL 実行器を包み、問い合わせの直前に割り込み、実行した文を数えるテストダブル。
+    /// </summary>
+    private sealed class InterceptingSqlExecutor(
+        ISqlExecutor inner,
+        Func<string, CancellationToken, Task> beforeQuery
+    ) : ISqlExecutor
+    {
+        /// <summary>ExecuteSqlAsync で実行した文（ロックの外から並行に書かれることは無い前提の観測用）</summary>
+        public List<string> Executed { get; } = [];
+
+        public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
+            string sql,
+            object? parameters = null,
+            CancellationToken cancellationToken = default
+        )
+            where TEntity : EntityBaseCore, new()
+        {
+            await beforeQuery(sql, cancellationToken);
+
+            return await inner.QueryBySqlAsync<TEntity>(sql, parameters, cancellationToken);
+        }
+
+        public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
+            string sql,
+            object? parameters = null,
+            CancellationToken cancellationToken = default
+        )
+        {
+            await beforeQuery(sql, cancellationToken);
+
+            return await inner.QueryProjectionBySqlAsync<TResult>(
+                sql,
+                parameters,
+                cancellationToken
+            );
+        }
+
+        public Task<int> ExecuteSqlAsync(
+            string sql,
+            object? parameters = null,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Executed.Add(sql);
+
+            return inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
+        }
+
+        public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+            string sql,
+            object? parameters = null,
+            CancellationToken cancellationToken = default
+        ) => inner.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
+    }
+
     // ---- 受理記録（ack）＝ダウンロードが自分の行へ届かなかったランの後始末 ----
 
     /// <summary>
@@ -2336,17 +3284,18 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>
-    /// ServerWins の適用後にダウンロードが落ちたランの続きでも、再編集が偽の更新競合にならない。
+    /// ServerWins で適用した行にダウンロードが届いていなくても、再編集が偽の更新競合にならない。
     /// </summary>
     /// <remarks>
-    /// 適用はサーバーの内容だけを書いてミラー版を据え置くため、ダウンロードがその行へ届く前に落ちると
-    /// ミラーは旧版のまま残る。受理記録が無ければ次の再生は旧版を original に採り、誰とも競合していないのに
-    /// ModifiedOnServer になる（打ち切り経路と同型の穴が ServerWins 側にも開く）。
+    /// 適用はサーバーの内容だけを書いてミラー版を据え置くため、ダウンロードがその行へ届いていないと（同じテーブルの
+    /// 打ち切り・差分ソースの遅れなど）ミラーは旧版のまま残る。受理記録が無ければ次の再生は旧版を original に採り、
+    /// 誰とも競合していないのに ModifiedOnServer になる（打ち切り経路と同型の穴が ServerWins 側にも開く）。
+    /// 「届いていない」は、最初の差分取得だけ空を返す差分ソースで作る。
     /// </remarks>
     [Fact(
-        DisplayName = "[Sync/ack] ServerWins の適用後にダウンロードが落ちても再編集は偽競合にならない"
+        DisplayName = "[Sync/ack] ServerWins で適用した行にダウンロードが届いていなくても再編集は偽競合にならない"
     )]
-    public async Task ServerWinsApplied_ThenFailedDownload_ThenLocalEdit_DoesNotReportFalseModifiedConflict()
+    public async Task ServerWinsApplied_WithoutDownload_ThenLocalEdit_DoesNotReportFalseModifiedConflict()
     {
         await SeedServerAsync(1, "alice", 11, "widget");
         await Engine.SyncAsync(cancellationToken: Ct);
@@ -2357,15 +3306,13 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         server!.CustomerName = "alice-server";
         await ServerOrders.UpdateAsync(server, cancellationToken: Ct);
 
-        // ServerWins の適用は通し、そのあとのダウンロードだけを 1 回落とす
-        var failing = new FailOnFirstFetchOrderSource(_sources.Orders);
-        var act = async () =>
-            await CreateEngineWithOrderSource(failing)
-                .SyncAsync(new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins }, Ct);
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        // ServerWins の適用は通し、ダウンロードはその行へ届かせない
+        var lagging = new EmptyFirstChangesOrderSource(_sources.Orders);
+        await CreateEngineWithOrderSource(lagging)
+            .SyncAsync(new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins }, Ct);
         (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
             .CustomerName.Should()
-            .Be("alice-server", "落ちたのはダウンロード側＝適用は済んでいる");
+            .Be("alice-server", "ダウンロードは届かなかったが、適用は済んでいる");
 
         // 適用された行を編集する（ミラーは旧版のまま＝ここが偽の更新競合の入口）
         await EditLocalOrderAsync(1, "alice-2");
@@ -2443,6 +3390,34 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
                 throw new InvalidOperationException("download failed on purpose");
             }
         }
+    }
+
+    /// <summary>最初の差分取得だけ空を返す差分ソース（ダウンロードが行へ届かなかったランを作るテストダブル）</summary>
+    private sealed class EmptyFirstChangesOrderSource(ISyncServerSource<SyncOrderEntity, int> inner)
+        : ISyncServerSource<SyncOrderEntity, int>
+    {
+        private int _fired;
+
+        public IRemoteRepositoryCore<SyncOrderEntity, int> Writer => inner.Writer;
+
+        public ISyncBinaryColumns<int>? BinaryColumns => inner.BinaryColumns;
+
+        public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
+            inner.GetChangeCeilingAsync(cancellationToken);
+
+        public async Task<SyncChangeBatch<SyncOrderEntity>> GetChangesAsync(
+            byte[]? anchor,
+            byte[]? ceiling,
+            int batchSize,
+            CancellationToken cancellationToken = default
+        ) =>
+            Interlocked.Exchange(ref _fired, 1) == 0
+                ? new SyncChangeBatch<SyncOrderEntity>([], HasMore: false)
+                : await inner.GetChangesAsync(anchor, ceiling, batchSize, cancellationToken);
+
+        public Task<IReadOnlyList<int>> GetAllKeysAsync(
+            CancellationToken cancellationToken = default
+        ) => inner.GetAllKeysAsync(cancellationToken);
     }
 
     // ---- 洗い替え（高速リフレッシュ） ----
@@ -2847,6 +3822,283 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         result.Conflicts.Should().BeEmpty();
         (await ReadServerBlobAsync(1)).Should().Equal([4, 2]);
         (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// blob を運ぶ回でも、この端末が blob を書いていない行の編集はサーバーの blob を消さない。
+    /// </summary>
+    /// <remarks>
+    /// 既定の回で降りた行はローカルに blob を持たない。その行の名前だけを編集して blob を運ぶ回で上げると、
+    /// 行の全除外列をコピーしていた頃は空の列がサーバーの blob を NULL で上書きした。送るのはその行の記録が
+    /// 「値を書いた」と言う列（挿入・Write アクセサ）だけで、更新は列を書かない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/blob] blob を書いていない行の編集は blob を運ぶ回でもサーバーの blob を消さない"
+    )]
+    public async Task EditOfRowWithoutLocalBlob_DoesNotClearTheServerBlob()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await WriteServerBlobAsync(1, [1, 2, 3]);
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        await EditLocalOrderAsync(1, "alice-local");
+
+        var result = await Engine.SyncAsync(BlobOptions, Ct);
+
+        result.Uploaded.Should().Be(1);
+        (await ServerOrders.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("alice-local");
+        (await ReadServerBlobAsync(1))
+            .Should()
+            .Equal([1, 2, 3], "この端末が書いていない列は送らない");
+    }
+
+    /// <summary>
+    /// 挿入は全除外列を書いたものとして記録され、blob を運ぶ回でそのまま上がる。
+    /// </summary>
+    [Fact(DisplayName = "[Sync/blob] 挿入した行の blob は記録され blob を運ぶ回で上がる")]
+    public async Task InsertedRowsBlob_IsRecordedAndUploaded()
+    {
+        await LocalOrders.InsertAsync(
+            new SyncOrderEntity
+            {
+                OrderId = 6,
+                CustomerName = "erin",
+                Attachment = [6, 6],
+            },
+            Ct
+        );
+
+        (await Journal.ReadAllAsync(Ct))
+            .Should()
+            .ContainSingle()
+            .Which.UnboundedBinaryColumns.Should()
+            .Be("Attachment");
+
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        (await ReadServerBlobAsync(6)).Should().Equal([6, 6]);
+    }
+
+    /// <summary>
+    /// ダウンロードの blob のコピーが一度失敗しても、次に blob を運ぶ回で取り直す。
+    /// </summary>
+    /// <remarks>
+    /// 行のバッチはコピーより先にコミットされ、ミラー版が再開点をその行より先へ進める。コピーが失敗すると、
+    /// 以後のダウンロードはその行を二度と降ろさず、blob は空のまま残っていた。コピー待ちの記録を行の適用の前に
+    /// 残し、残った分は次の回の最初にコピーする。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/blob] ダウンロードの blob のコピーが失敗しても次に blob を運ぶ回で取り直す"
+    )]
+    public async Task FailedBlobDownload_IsRetriedByTheNextRun()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await WriteServerBlobAsync(1, [1, 2, 3]);
+
+        var failing = CreateEngineWithOrderSource(
+            new BlobFailingOrderSource(_sources.Orders, failRead: true, failWrite: false)
+        );
+        var act = async () => await failing.SyncAsync(BlobOptions, Ct);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull("行は先に入っている");
+
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        (await ReadLocalBlobAsync(1)).Should().Equal([1, 2, 3], "コピー待ちの記録から取り直す");
+    }
+
+    /// <summary>洗い替えの blob のコピーが一度失敗しても、次に blob を運ぶ回で取り直す。</summary>
+    [Fact(
+        DisplayName = "[Sync/blob] 洗い替えの blob のコピーが失敗しても次に blob を運ぶ回で取り直す"
+    )]
+    public async Task FailedBlobRefresh_IsRetriedByTheNextRun()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await WriteServerBlobAsync(1, [4, 5]);
+
+        var failing = CreateEngineWithOrderSource(
+            new BlobFailingOrderSource(_sources.Orders, failRead: true, failWrite: false)
+        );
+        var act = async () =>
+            await failing.RefreshAsync(
+                new SyncRefreshOptions { IncludeUnboundedBinary = true },
+                Ct
+            );
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        (await ReadLocalBlobAsync(1)).Should().Equal([4, 5]);
+    }
+
+    /// <summary>
+    /// 取り直しは、その列を書いた未送信の記録がある行の blob をサーバーの blob で上書きしない（記録は捨てる）。
+    /// </summary>
+    [Fact(DisplayName = "[Sync/blob] コピー待ちの取り直しはその列を書いた未送信の行を上書きしない")]
+    public async Task OwedBlobCopy_DoesNotOverwriteAnUnsentLocalBlob()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await WriteServerBlobAsync(1, [1, 2, 3]);
+
+        var failing = CreateEngineWithOrderSource(
+            new BlobFailingOrderSource(_sources.Orders, failRead: true, failWrite: false)
+        );
+        var act = async () => await failing.SyncAsync(BlobOptions, Ct);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        // コピー待ちが残っている行へ、この端末で blob を書く（未送信の記録が付く）
+        await WriteLocalBlobAsync(1, [9, 9]);
+
+        // アップロードを伴わないダウンロードだけを流す＝未送信の記録が残ったまま取り直しが走る
+        await Engine.DownloadAsync(BlobOptions, Ct);
+
+        (await ReadLocalBlobAsync(1))
+            .Should()
+            .Equal([9, 9], "未送信の書き込みはサーバーの blob で上書きしない");
+
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        (await ReadServerBlobAsync(1)).Should().Equal([9, 9], "次のランでこの端末の blob が上がる");
+    }
+
+    /// <summary>
+    /// 取り直しは、blob の列を書いていない未送信の記録（名前だけの編集）がある行でも、サーバーの blob を降ろす。
+    /// </summary>
+    /// <remarks>
+    /// 未送信の記録があるキーを一律に飛ばすと、名前だけを編集した行のローカルの blob は降りてきていないまま
+    /// （空）なのに、コピー待ちの記録だけが消え、その blob は二度と取り直されない。飛ばすのは、その列を書いた
+    /// 記録があるときだけ。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/blob] コピー待ちの取り直しは名前だけ編集した未送信の行でも blob を降ろす"
+    )]
+    public async Task OwedBlobCopy_IsMadeForARowEditedOnlyInOrdinaryColumns()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await WriteServerBlobAsync(1, [1, 2, 3]);
+
+        var failing = CreateEngineWithOrderSource(
+            new BlobFailingOrderSource(_sources.Orders, failRead: true, failWrite: false)
+        );
+        var act = async () => await failing.SyncAsync(BlobOptions, Ct);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        // コピー待ちが残っている行の名前だけを編集する（blob の列は書かない未送信の記録）
+        await EditLocalOrderAsync(1, "alice-local");
+
+        await Engine.DownloadAsync(BlobOptions, Ct);
+
+        (await ReadLocalBlobAsync(1))
+            .Should()
+            .Equal([1, 2, 3], "この端末は blob を書いていない＝サーバーの blob を降ろす");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("alice-local", "名前の編集は残る");
+    }
+
+    /// <summary>
+    /// blob のアップロードが一度失敗しても、次の回でこの端末自身の行に対する偽の更新競合にならない。
+    /// </summary>
+    /// <remarks>
+    /// 行の書き込みはサーバーに受理され版が進んでいるが、受理記録は blob の後でしか書いていなかったため、blob の
+    /// 失敗でジャーナルは残りミラーは旧版のまま＝次の回の再生が自分の書いた版を他者の変更と取り違えた。行の
+    /// 書き込みが返した版で先に受理記録を書く。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/blob] blob のアップロードが失敗しても次の回で偽の更新競合にならない"
+    )]
+    public async Task FailedBlobUpload_DoesNotReportAFalseConflictNextRun()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        await EditLocalOrderAsync(1, "alice-local");
+        await WriteLocalBlobAsync(1, [7, 7]);
+
+        var failing = CreateEngineWithOrderSource(
+            new BlobFailingOrderSource(_sources.Orders, failRead: false, failWrite: true)
+        );
+        var act = async () => await failing.SyncAsync(BlobOptions, Ct);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        var result = await Engine.SyncAsync(BlobOptions, Ct);
+
+        result.Conflicts.Should().BeEmpty("受理記録が行の書き込みの版を覚えている");
+        result.Uploaded.Should().Be(1);
+        (await ServerOrders.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("alice-local");
+        (await ReadServerBlobAsync(1)).Should().Equal([7, 7]);
+    }
+
+    /// <summary>サーバー側の blob の読み書きを、それぞれ最初の 1 回だけ失敗させる差分ソース</summary>
+    private sealed class BlobFailingOrderSource(
+        ISyncServerSource<SyncOrderEntity, int> inner,
+        bool failRead,
+        bool failWrite
+    ) : ISyncServerSource<SyncOrderEntity, int>
+    {
+        private readonly FailOnceBinaryColumns _binaryColumns = new(
+            inner.BinaryColumns!,
+            failRead,
+            failWrite
+        );
+
+        public IRemoteRepositoryCore<SyncOrderEntity, int> Writer => inner.Writer;
+
+        public ISyncBinaryColumns<int>? BinaryColumns => _binaryColumns;
+
+        public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
+            inner.GetChangeCeilingAsync(cancellationToken);
+
+        public Task<SyncChangeBatch<SyncOrderEntity>> GetChangesAsync(
+            byte[]? anchor,
+            byte[]? ceiling,
+            int batchSize,
+            CancellationToken cancellationToken = default
+        ) => inner.GetChangesAsync(anchor, ceiling, batchSize, cancellationToken);
+
+        public Task<IReadOnlyList<int>> GetAllKeysAsync(
+            CancellationToken cancellationToken = default
+        ) => inner.GetAllKeysAsync(cancellationToken);
+    }
+
+    /// <summary>blob の読み書きを最初の 1 回だけ失敗させる（失敗は書き込みの前＝サーバーは何も変わらない）</summary>
+    private sealed class FailOnceBinaryColumns(
+        ISyncBinaryColumns<int> inner,
+        bool failRead,
+        bool failWrite
+    ) : ISyncBinaryColumns<int>
+    {
+        private int _readFired;
+        private int _writeFired;
+
+        public IReadOnlyList<string> UnboundedBinaryColumnNames => inner.UnboundedBinaryColumnNames;
+
+        public Task<bool> ReadUnboundedBinaryAsync(
+            string columnName,
+            int id,
+            Stream destination,
+            CancellationToken cancellationToken = default
+        ) =>
+            failRead && Interlocked.Exchange(ref _readFired, 1) == 0
+                ? throw new InvalidOperationException("blob read failed on purpose")
+                : inner.ReadUnboundedBinaryAsync(columnName, id, destination, cancellationToken);
+
+        public Task<bool> WriteUnboundedBinaryAsync(
+            string columnName,
+            int id,
+            Stream? source,
+            long? length,
+            CancellationToken cancellationToken = default
+        ) =>
+            failWrite && Interlocked.Exchange(ref _writeFired, 1) == 0
+                ? throw new InvalidOperationException("blob write failed on purpose")
+                : inner.WriteUnboundedBinaryAsync(
+                    columnName,
+                    id,
+                    source,
+                    length,
+                    cancellationToken
+                );
     }
 
     /// <summary>

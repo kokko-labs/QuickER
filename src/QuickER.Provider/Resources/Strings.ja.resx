@@ -112,6 +112,18 @@
   <data name="Diff_DropForeignKey" xml:space="preserve">
     <value>外部キー [{0}] → [{1}] を削除</value>
   </data>
+  <data name="Diff_AlterForeignKey" xml:space="preserve">
+    <value>外部キー [{0}] ({1}) → [{2}] ({3}) を変更: {4}</value>
+  </data>
+  <data name="Diff_ForeignKeyChange_Reference" xml:space="preserve">
+    <value>変更前の参照 [{0}] ({1}) → [{2}] ({3})</value>
+  </data>
+  <data name="Diff_ForeignKeyChange_OnDelete" xml:space="preserve">
+    <value>ON DELETE を {0} → {1} に変更</value>
+  </data>
+  <data name="Diff_ForeignKeyChange_OnUpdate" xml:space="preserve">
+    <value>ON UPDATE を {0} → {1} に変更</value>
+  </data>
   <data name="Diff_AddUniqueConstraint" xml:space="preserve">
     <value>一意制約 [{0}] ({1}) を追加</value>
   </data>
@@ -130,6 +142,12 @@
   <data name="Diff_AutoForeignKeyRebuild" xml:space="preserve">
     <value>変更を可能にするため自動的に削除して再作成します: [{0}]</value>
   </data>
+  <data name="Diff_AutoPrimaryKeyRebuild" xml:space="preserve">
+    <value>変更を可能にするため主キーを自動的に外して付け直します: ({0})</value>
+  </data>
+  <data name="Diff_AutoForeignKeyDrop" xml:space="preserve">
+    <value>変更を可能にするため自動的に削除します（参照する表・列が削除されるため付け直しません）: [{0}]</value>
+  </data>
   <data name="Diff_AutoUniqueConstraintRebuild" xml:space="preserve">
     <value>変更を可能にするため一意制約を自動的に削除して再作成します: ({0})</value>
   </data>
@@ -141,6 +159,9 @@
   </data>
   <data name="Sync_Error_OracleStatementFailed" xml:space="preserve">
     <value>{0}（Oracle の DDL は暗黙コミットされるため、直前までに成功した {1} 文は取り消されず部分適用されている可能性があります）</value>
+  </data>
+  <data name="Sync_Error_SqliteBrokenView" xml:space="preserve">
+    <value>同期によってビューが壊れる（存在しない列・表を参照する）ため、ロールバックしました: {0}</value>
   </data>
   <data name="Sync_Error_SqliteForeignKeyViolation" xml:space="preserve">
     <value>テーブル再構築後に外部キー制約違反が検出されたため、トランザクションをロールバックしました。対象テーブル: {0}</value>

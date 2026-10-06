@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
@@ -122,6 +123,46 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("MODIFY COLUMN `name` varchar(100) NOT NULL COMMENT '顧客名';");
     }
 
+    /// <summary>
+    /// AlterColumn の COMMENT は DB の現在の説明（変更前の列）で書き、図の説明は使わないことを検証する
+    /// （説明の変更を選んでいないのに、型の変更だけで説明が消える・変わるのを防ぐ）。
+    /// </summary>
+    [Theory(DisplayName = "AlterColumn の COMMENT は DB の現在の説明を保つ")]
+    [InlineData("", "顧客名", " COMMENT '顧客名'")]
+    [InlineData("図の説明", "", "")]
+    public void AlterColumn_KeepsLiveComment(
+        string diagramDescription,
+        string liveDescription,
+        string expectedComment
+    )
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "name",
+                Column = new Column
+                {
+                    Name = "name",
+                    DataType = "varchar(100)",
+                    IsNullable = false,
+                    Description = diagramDescription,
+                },
+                OldColumn = new Column
+                {
+                    Name = "name",
+                    DataType = "varchar(50)",
+                    IsNullable = false,
+                    Description = liveDescription,
+                },
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().Contain($"MODIFY COLUMN `name` varchar(100) NOT NULL{expectedComment};");
+    }
+
     /// <summary>NULL 許容へ変更する AlterColumn が NULL を再指定することを検証する</summary>
     [Fact(DisplayName = "AlterColumn は NULL 許容化で NULL を再指定する")]
     public void AlterColumn_NullableGeneratesNull()
@@ -222,6 +263,71 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("FOREIGN KEY (`customer_id`) REFERENCES `customer` (`id`)");
         sql.Should().Contain("ON DELETE CASCADE");
         sql.Should().Contain("ON UPDATE SET NULL");
+        sql.Should().NotContain(MySqlReferentialAction.SetDefaultNote);
+    }
+
+    /// <summary>InnoDB で効かない SET DEFAULT は句を省き、注意コメントを添えることを検証する</summary>
+    [Theory(DisplayName = "AddForeignKey は SET DEFAULT の句を出さず注意コメントを添える")]
+    [InlineData(
+        ForeignKeyReferentialAction.SetDefault,
+        ForeignKeyReferentialAction.Cascade,
+        " ON UPDATE CASCADE;"
+    )]
+    [InlineData(
+        ForeignKeyReferentialAction.Cascade,
+        ForeignKeyReferentialAction.SetDefault,
+        " ON DELETE CASCADE;"
+    )]
+    public void AddForeignKey_SetDefault_IsOmittedWithNote(
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate,
+        string expectedTail
+    )
+    {
+        var customer = new Entity { TableName = "customer" };
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
+        var order = new Entity { TableName = "order" };
+        order.Columns.Add(new Column { Name = "customer_id", DataType = "int" });
+        var rel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = order.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs = [new(customer.Columns[0].Id, order.Columns[^1].Id)],
+            ConstraintName = "FK_order_customer",
+            OnDelete = onDelete,
+            OnUpdate = onUpdate,
+        };
+
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddForeignKey,
+                TableName = "order",
+                ColumnName = "customer_id",
+                ForeignKeyColumnPairs = [new("id", "customer_id")],
+                ParentEntity = customer,
+                ChildEntity = order,
+                Relationship = rel,
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().NotContain("SET DEFAULT ");
+        sql.Should()
+            .Contain(
+                MySqlReferentialAction.SetDefaultNote
+                    + Environment.NewLine
+                    + "ALTER TABLE `order` ADD CONSTRAINT `FK_order_customer`"
+            );
+        sql.Should().Contain("REFERENCES `customer` (`id`)" + expectedTail);
     }
 
     /// <summary>DropForeignKey が制約名判明時に DROP FOREIGN KEY を生成することを検証する</summary>
@@ -880,7 +986,9 @@ public class MySqlSyncScriptBuilderTests
             );
         sql.Should()
             .Contain(
-                "SET @sql = IF(@pk IS NULL, 'DO 0', 'ALTER TABLE `orders` DROP PRIMARY KEY');"
+                "SET @sql = IF(@pk IS NULL, 'DO 0', IF(@def IS NULL, 'ALTER TABLE `orders` DROP PRIMARY KEY', "
+                    + "CONCAT('ALTER TABLE `orders` MODIFY COLUMN `', REPLACE(@ai, '`', '``'), '` ', @def, "
+                    + "' COMMENT ', QUOTE(@cmt), ', DROP PRIMARY KEY')));"
             );
         sql.Should().Contain("PREPARE stmt FROM @sql;");
         // MySQL の主キー名は PRIMARY 固定のため CONSTRAINT 名は指定しない
@@ -994,10 +1102,8 @@ public class MySqlSyncScriptBuilderTests
     {
         var sql = Build(AlterPk("o'rders", PkTarget("o'rders", "order_id")));
 
-        sql.Should()
-            .Contain(
-                "SET @sql = IF(@pk IS NULL, 'DO 0', 'ALTER TABLE `o''rders` DROP PRIMARY KEY');"
-            );
+        sql.Should().Contain("'ALTER TABLE `o''rders` DROP PRIMARY KEY'");
+        sql.Should().Contain("CONCAT('ALTER TABLE `o''rders` MODIFY COLUMN `'");
         sql.Should().NotContain("'ALTER TABLE `o'rders`");
     }
 

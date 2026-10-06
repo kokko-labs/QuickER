@@ -30,7 +30,12 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new PostgreSqlSyncScriptBuilder();
 
     /// <inheritdoc />
-    public SyncDialectCapabilities SyncCapabilities { get; } = new();
+    /// <remarks>
+    /// 型表記の比較は <see cref="PostgreSqlTypeNotation.Normalize"/>（取込が返す短縮語彙の表記）へ寄せてから行う
+    /// （素の <c>timestamp</c> は <c>timestamp(6)</c>、<c>numeric(18,0)</c> は <c>numeric(18)</c> として返るため）。
+    /// </remarks>
+    public SyncDialectCapabilities SyncCapabilities { get; } =
+        new() { NormalizeTypeNotation = PostgreSqlTypeNotation.Normalize };
 
     /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new PostgreSqlSchemaSyncExecutor();

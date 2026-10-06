@@ -24,9 +24,6 @@ public sealed class PostgreSqlDdlGenerator : DdlGeneratorBase
     protected override string QuoteSimpleName(string name) => PgIdentifier.QuoteSimple(name);
 
     /// <inheritdoc />
-    protected override string SafeName(string name) => PgIdentifier.SafeName(name);
-
-    /// <inheritdoc />
     protected override string QuoteConstraintName(string constraintName) =>
         $"\"{PgIdentifier.Escape(constraintName)}\"";
 

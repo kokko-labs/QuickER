@@ -325,6 +325,9 @@ public sealed class QuickER.Runtime.IncludableSqlQuery<TEntity, TProperty>
     public System.Threading.Tasks.Task<bool> AnyAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<int> CountAsync(System.Threading.CancellationToken cancellationToken = default)
 
+public static class QuickER.Runtime.IncludeKeys
+    public static object Normalize(object key)
+
 public sealed class QuickER.Runtime.IncludeNode
     public .ctor(System.Reflection.PropertyInfo property)
     public System.Collections.Generic.List<QuickER.Runtime.IncludeNode> Children { get; }
@@ -414,7 +417,6 @@ public static class QuickER.Runtime.RemoteEntityGraph
     public static System.Collections.Generic.Dictionary<System.ValueTuple<string, string>, byte[]> RowVersionLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> entries)
     public static System.Collections.Generic.HashSet<System.ValueTuple<string, string>> SkippedLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> entries)
     public static System.Reflection.PropertyInfo RowVersionProperty(System.Type entityType)
-    public static System.Reflection.PropertyInfo[] CascadeNavigations(System.Type entityType)
     public static bool IsSkipped(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.HashSet<System.ValueTuple<string, string>> lookup)
     public static byte[] ReadRowVersion(QuickER.Runtime.EntityBaseCore entity)
     public static string KeyText(QuickER.Runtime.EntityBaseCore entity)
@@ -597,6 +599,7 @@ public sealed class QuickER.Runtime.UnboundedBinaryColumnAttribute : System.Attr
 
 public static class QuickER.Runtime.UnboundedBinaryColumns
     public const int StreamCopyBufferSize = 81920
+    public static System.IO.Stream WithExactLength(System.IO.Stream source, long length)
     public static System.Reflection.PropertyInfo[] For(System.Type entityType)
     public static long ResolveWriteLength(System.IO.Stream source, long? length)
     public static void PreserveUnset(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.EntityBaseCore stored)

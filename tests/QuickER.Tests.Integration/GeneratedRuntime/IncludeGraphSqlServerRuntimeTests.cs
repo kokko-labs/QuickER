@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedUniquenessSqlServerFixture;
 using QuickER.Tests.Integration;
@@ -262,4 +264,47 @@ public sealed class IncludeGraphSqlServerRuntimeTests(SqlServerContainerFixture 
             .Include(customer => customer.Orders)
                 .ThenInclude(order => order.Customer)
             .GetByIdAsync(CustomerIdValue.Create(customerId), Ct);
+
+    /// <summary>
+    /// 12. 値オブジェクトの検証に通らない格納値（最大長 50 の memo に 60 文字）を読むと、プレーン SELECT の
+    /// GetById・FOR JSON の Query()・Include 先の子のどれでも、列名を名指しした InvalidOperationException になる。
+    /// FOR JSON の経路は共有の値オブジェクト変換器を通るため、従来は値オブジェクトの型しか分からない例外だった
+    /// </summary>
+    [Fact(
+        DisplayName = "[IncludeGraph] 12: 値オブジェクトが拒む格納値は GetById・Query()・Include 先でも列名つきの例外になる (sqlserver)"
+    )]
+    public async Task StoredValueRejectedByValueObject_NamesTheColumn()
+    {
+        await ResetAndSeedAsync();
+
+        // 図（最大 50）より広くなった DB の列を模して、値オブジェクトが拒む長さの値を入れる
+        await _fixture.ExecuteAsync("ALTER TABLE orders ALTER COLUMN memo nvarchar(100) NULL;", Ct);
+        await _fixture.ExecuteAsync(
+            $"UPDATE orders SET memo = N'{new string('x', 60)}' WHERE order_id = 10;",
+            Ct
+        );
+
+        var reads = new (string Path, Func<Task> Read)[]
+        {
+            ("GetById", async () => await Orders().GetByIdAsync(OrderIdValue.Create(10), Ct)),
+            ("Query()", async () => await Orders().Query().ToListAsync(Ct)),
+            (
+                "Include 先",
+                async () =>
+                    await Customers()
+                        .Query()
+                        .Include(customer => customer.Orders)
+                        .GetByIdAsync(CustomerIdValue.Create(1), Ct)
+            ),
+        };
+
+        foreach (var (path, read) in reads)
+        {
+            var failure = (
+                await read.Should().ThrowExactlyAsync<InvalidOperationException>(path)
+            ).Which;
+            failure.Message.Should().Contain("'memo'", path).And.Contain("OrderEntity.Memo", path);
+            failure.InnerException.Should().BeOfType<ValueObjectValidationException>(path);
+        }
+    }
 }

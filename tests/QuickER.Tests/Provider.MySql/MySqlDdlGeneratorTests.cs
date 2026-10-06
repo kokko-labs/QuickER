@@ -1,3 +1,4 @@
+using System;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider.MySql;
@@ -165,6 +166,68 @@ public class MySqlDdlGeneratorTests
         sql.Should().Contain("FOREIGN KEY (`parent_id`) REFERENCES `parent` (`id`)");
         sql.Should().Contain("ON DELETE CASCADE");
         sql.Should().Contain("ON UPDATE SET NULL");
+        sql.Should().NotContain(MySqlReferentialAction.SetDefaultNote);
+    }
+
+    /// <summary>InnoDB で効かない SET DEFAULT は句を省き、外部キーの文の直前に注意コメントを添えることを検証する</summary>
+    [Fact(DisplayName = "Build: SET DEFAULT は句を出さず注意コメントを添える")]
+    public void Build_SetDefault_IsOmittedWithNote()
+    {
+        var parent = new Entity
+        {
+            TableName = "parent",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+            },
+        };
+        var child = new Entity
+        {
+            TableName = "child",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                new Column { Name = "parent_id", DataType = "int" },
+            },
+        };
+        var diagram = new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
+                    ConstraintName = "FK_child_parent",
+                    OnDelete = ForeignKeyReferentialAction.SetDefault,
+                    OnUpdate = ForeignKeyReferentialAction.SetDefault,
+                },
+            ],
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("SET DEFAULT ");
+        sql.Should()
+            .Contain(
+                MySqlReferentialAction.SetDefaultNote
+                    + Environment.NewLine
+                    + "ALTER TABLE `child` ADD CONSTRAINT `FK_child_parent`"
+            );
+        sql.Should().Contain("REFERENCES `parent` (`id`);");
     }
 
     /// <summary>schema.table 名が `schema`.`table` へ分割クォートされ、PK 制約名が安全化されることを検証する</summary>

@@ -1,4 +1,4 @@
-﻿using AwesomeAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
@@ -1254,7 +1254,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "$\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;\""
+                "$\"UPDATE {tableName} SET {updateSetClause} WHERE {EntitySaveMetadata.QuoteIdentifier(keyColumnName)} = @id;\""
             );
         content
             .Should()
@@ -1332,12 +1332,12 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("columns ({ColumnList})");
         // スカラー・単一値変換は共有変換ヘルパー経由（ChangeType が扱えない TimeSpan / Guid 等も復元できる）
         content.Should().Contain("RawValueConverter.ConvertRaw(raw, targetType)");
-        // DB から来た値はカルチャ非依存＝インバリアント固定で、桁区切りも許さない
+        // DB から来た値はカルチャ非依存＝インバリアント固定で、桁区切りも許さない（日時と Guid はドライバの読み方にそろえる）
         // （人が書いたテキスト用の ConvertInput とはここが分かれる）
         content
             .Should()
             .Contain(
-                "ConvertCore(raw, targetType, CultureInfo.InvariantCulture, allowNumericGroupSeparators: false)"
+                "ConvertCore(raw, targetType, CultureInfo.InvariantCulture, fromDatabase: true)"
             );
         content.Should().Contain("return Convert.ChangeType(raw, underlying, provider);");
         // InvariantCulture 使用のため System.Globalization を using
@@ -1491,7 +1491,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("SqlColumnType(SqlDbType.Udt");
         // ランタイムは属性から明示 SqlParameter を組み立て、Size 安全ガードで超過時は値長を使う
         content.Should().Contain("private static void AddColumnParameter(");
-        content.Should().Contain("var parameter = new SqlParameter(name, attribute.DbType);");
+        content.Should().Contain("var parameter = new SqlParameter(name, dbType);");
         content
             .Should()
             .Contain(
@@ -1613,11 +1613,11 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public async Task<int> CountAsync(");
         content.Should().Contain("public async Task<bool> AnyAsync(");
         // 値はパラメータ化し、列名が判明していれば列型で明示 SqlParameter を構築（なければ AddWithValue へフォールバック）
+        // LIKE のパターンは列の型の可変長形で束縛する（固定長だとパターン自体が空白で詰められる）
         content
             .Should()
-            .Contain(
-                "metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);"
-            );
+            .Contain("metadata.AddQueryParameter(")
+            .And.Contain("parameter.VariableLength");
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
     }
 
@@ -1714,8 +1714,13 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         // ② IsNullOrEmpty / IsNullOrWhiteSpace
         content.Should().Contain("private static bool TryGetNullOrEmpty(");
-        content.Should().Contain("({neColumn} IS NULL OR {neColumn} = '')");
-        content.Should().Contain("({neColumn} IS NULL OR LTRIM(RTRIM({neColumn})) = '')");
+        // SQL Server の空判定はバイト長（= '' は末尾の空白を無視する）・空白判定は char.IsWhiteSpace の全文字の否定クラス
+        content.Should().Contain("({neColumn} IS NULL OR DATALENGTH({neColumn}) = 0)");
+        content
+            .Should()
+            .Contain(
+                "({neColumn} IS NULL OR {neColumn} NOT LIKE N'%[^' + {WhiteSpaceCharacters} + N']%')"
+            );
         // ④ 日付コンポーネント
         content.Should().Contain("private static bool TryGetDatePart(");
         content.Should().Contain("\"Year\" => $\"YEAR({column})\"");
@@ -1888,13 +1893,17 @@ public class CSharpCodeGenerationServiceTests
             .Should()
             .Contain("Expression<Func<TProperty, ICollection<TNext>>> navigationSelector");
         // 列はプロパティ名へ別名付け、単一参照は WITHOUT_ARRAY_WRAPPER
-        content.Should().Contain("[{columnName}] AS {propertyName}");
+        content
+            .Should()
+            .Contain(
+                "{EntitySaveMetadata.QuoteIdentifier(columnName)} AS {EntitySaveMetadata.QuoteIdentifier(propertyName)}"
+            );
         content.Should().Contain("WITHOUT_ARRAY_WRAPPER");
         // ネストした FOR JSON はそのままだと文字列化されるため JSON_QUERY で包む
         content
             .Should()
             .Contain(
-                "JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {node.Property.Name}"
+                "JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {EntitySaveMetadata.QuoteIdentifier(node.Property.Name)}"
             );
         // FOR JSON の複数行結果を連結する
         content.Should().Contain("string.Concat(chunks)");
@@ -5081,8 +5090,9 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         // 主キー VO の変換（v.Value / Create）
         content.Should().Contain(".HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!))");
-        // VO 列は Fluent の HasMaxLength/HasPrecision を出さない（長さ・桁数は VO 内部検証）
-        content.Should().NotContain(".HasMaxLength(50).HasConversion");
+        // VO 列にも Fluent の HasMaxLength/HasPrecision を出す（検証は VO の Create が行うが、列のストア型は EF Core が
+        // パラメータと .Value の CAST に使うため。出さないと既定の nvarchar(max)・decimal(18,2) になる）
+        content.Should().Contain(".HasMaxLength(50).HasConversion(");
     }
 
     /// <summary>rowversion 列を持つエンティティの EF Core 構成で IsRowVersion() が出力されることを検証する</summary>
@@ -5456,9 +5466,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("context.Entry(entity).State = EntityState.Added;");
     }
 
-    /// <summary>EF Core 版 SaveAsync が TrackGraph で RowState → EntityState 変換し、競合を SaveConflictException へ変換することを検証する</summary>
+    /// <summary>EF Core 版 SaveAsync がカスケードの閉包を RowState → EntityState 変換で登録し、競合を SaveConflictException へ変換することを検証する</summary>
     [Fact]
-    public void Generate_EfCore_ShouldConvertRowStateViaTrackGraphInSave()
+    public void Generate_EfCore_ShouldConvertRowStateOfCascadeClosureInSave()
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
@@ -5472,8 +5482,9 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
-        // TrackGraph による切断グラフの登録と RowState → EntityState の変換表
-        content.Should().Contain("context.ChangeTracker.TrackGraph(");
+        // カスケードの閉包だけを 1 件ずつ登録する（ChangeTracker.TrackGraph は親への逆参照まで辿るので使わない）と RowState → EntityState の変換表
+        content.Should().Contain("foreach (var child in entity.EnumerateCascadeChildren())");
+        content.Should().NotContain("ChangeTracker.TrackGraph(");
         content.Should().Contain("RowState.Added => EntityState.Added,");
         content.Should().Contain("RowState.Updated => EntityState.Modified,");
         content.Should().Contain("RowState.Removed => EntityState.Deleted,");

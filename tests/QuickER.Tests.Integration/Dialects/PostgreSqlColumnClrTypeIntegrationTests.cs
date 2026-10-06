@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
@@ -352,6 +353,115 @@ public sealed class PostgreSqlColumnClrTypeIntegrationTests(PostgreSqlContainerF
             row.HasKey(r => r.Id);
             row.Property(r => r.Id).HasColumnName("id");
             row.Property(r => r.TimeTz).HasColumnName("t_tz").HasColumnType("time with time zone");
+        }
+    }
+
+    /// <summary>
+    /// <c>interval</c> / <c>inet</c> / <c>cidr</c> の解決結果が、ドライバが返す CLR 型と一致し、
+    /// 生成コードと同じ条件（<c>HasColumnType</c> なし）の EF Core で読み書きできることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 従来は 3 型とも <c>string</c> へ落ちており、Npgsql が文字列として読めないため（<c>InvalidCastException</c>）、
+    /// その列を持つ表の行の組み立てが丸ごと失敗していた。<c>inet</c> を <c>IPAddress</c> で読むとネットマスク
+    /// （<c>/24</c> 等）は落ちる＝Npgsql の既定の写し方であることも併せて固定する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] interval・inet・cidr はドライバの実測 CLR 型と一致し EF Core で読み書きできる"
+    )]
+    public async Task NetworkAndIntervalTypes_MatchDriverAndRoundTripThroughEfCore()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE net_rw (
+                id integer NOT NULL PRIMARY KEY,
+                lease interval NOT NULL,
+                addr inet NOT NULL,
+                net cidr NOT NULL
+            );
+            INSERT INTO net_rw VALUES (1, '1 day 02:03:04', '192.168.0.1/24', '10.0.0.0/8');
+            """,
+            Ct
+        );
+
+        await using (var conn = await fixture.OpenConnectionAsync(Ct))
+        {
+            var import = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+            var declared = import
+                .Entities.Single(entity => entity.TableName == "net_rw")
+                .Columns.ToDictionary(column => column.Name, column => column.DataType);
+            var mapper = new PostgreSqlCSharpTypeMapper();
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT lease, addr, net FROM net_rw WHERE id = 1";
+            await using var reader = await cmd.ExecuteReaderAsync(Ct);
+            (await reader.ReadAsync(Ct)).Should().BeTrue();
+
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                var name = reader.GetName(i);
+                var driverType = reader.GetFieldType(i);
+                var mapped = mapper.Map(declared[name]).TypeName;
+
+                (driverType.FullName == mapped || driverType.Name == mapped)
+                    .Should()
+                    .BeTrue(
+                        $"列 {name}（{declared[name]}）はドライバの CLR 型 {driverType} へ写すこと（実際は {mapped}）"
+                    );
+            }
+        }
+
+        await using (var read = new NetContext(fixture.ConnectionString))
+        {
+            var row = await read.Rows.SingleAsync(Ct);
+            row.Lease.Should().Be(new TimeSpan(1, 2, 3, 4));
+            row.Addr.Should()
+                .Be(IPAddress.Parse("192.168.0.1"), "inet のネットマスクは IPAddress では落ちる");
+            row.Net.Should().Be(IPNetwork.Parse("10.0.0.0/8"));
+
+            row.Lease = TimeSpan.FromHours(5);
+            row.Addr = IPAddress.Parse("10.1.2.3");
+            row.Net = IPNetwork.Parse("172.16.0.0/12");
+            await read.SaveChangesAsync(Ct);
+        }
+
+        await using (var reread = new NetContext(fixture.ConnectionString))
+        {
+            var row = await reread.Rows.SingleAsync(Ct);
+            row.Lease.Should().Be(TimeSpan.FromHours(5));
+            row.Addr.Should().Be(IPAddress.Parse("10.1.2.3"));
+            row.Net.Should().Be(IPNetwork.Parse("172.16.0.0/12"));
+        }
+    }
+
+    /// <summary>生成 Entity と同じ型（TimeSpan / IPAddress / IPNetwork）を持つ行</summary>
+    private sealed class NetRow
+    {
+        public int Id { get; set; }
+        public TimeSpan Lease { get; set; }
+        public IPAddress Addr { get; set; } = null!;
+        public IPNetwork Net { get; set; }
+    }
+
+    /// <summary>生成コードと同じ条件（<c>HasColumnType</c> なし）の DbContext</summary>
+    private sealed class NetContext(string connectionString) : DbContext
+    {
+        public DbSet<NetRow> Rows => Set<NetRow>();
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+            optionsBuilder.UseNpgsql(connectionString);
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            var row = modelBuilder.Entity<NetRow>();
+            row.ToTable("net_rw");
+            row.HasKey(r => r.Id);
+            row.Property(r => r.Id).HasColumnName("id");
+            row.Property(r => r.Lease).HasColumnName("lease");
+            row.Property(r => r.Addr).HasColumnName("addr");
+            row.Property(r => r.Net).HasColumnName("net");
         }
     }
 }

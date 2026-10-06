@@ -959,13 +959,13 @@ INSERT INTO [{ItemTable}] ([Code], [Id]) VALUES (N'A-001', 1);"
         + $"WHERE type = 'UQ' AND parent_object_id = OBJECT_ID(N'{ItemTable}');";
 
     /// <summary>取込結果から検証用テーブルのエンティティを取り出す</summary>
-    private static Entity SingleItemEntity(SqlServerSchemaImporter.SchemaResult result) =>
+    private static Entity SingleItemEntity(SchemaImportResult result) =>
         result.Entities.Single(e =>
             e.TableName.EndsWith(ItemTable, StringComparison.OrdinalIgnoreCase)
         );
 
     /// <summary>取込結果から計画用の live 入力を組み立てる</summary>
-    private static SyncPlanContext PlanContext(SqlServerSchemaImporter.SchemaResult result) =>
+    private static SyncPlanContext PlanContext(SchemaImportResult result) =>
         new() { LiveEntities = result.Entities, LiveRelationships = result.Relationships };
 
     /// <summary>セットアップ用の T-SQL をそのまま実行する</summary>

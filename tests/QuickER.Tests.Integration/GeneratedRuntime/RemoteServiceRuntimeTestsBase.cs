@@ -712,6 +712,11 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
                 () => direct.SaveAsync((IEnumerable<CustomerEntity>)null!, cancellationToken: Ct),
                 () => remote.SaveAsync((IEnumerable<CustomerEntity>)null!, cancellationToken: Ct)
             ),
+            (
+                "entity",
+                () => direct.CheckUniquenessAsync(null!, Ct),
+                () => remote.CheckUniquenessAsync(null!, Ct)
+            ),
         };
 
         foreach (var (parameter, directCall, remoteCall) in cases)
@@ -839,6 +844,52 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         (await remote.GetByCustomerAsync(1, take: 1, skip: 0, Ct))
             .Should()
             .BeEmpty();
+    }
+
+    /// <summary>
+    /// 23. 複数集約の一括保存（SaveAsync(IEnumerable)）はリスト内の null 要素を飛ばし、直結とリモートで同じ件数を返す。
+    /// </summary>
+    /// <remarks>
+    /// 直結の 3 実装はいずれも null 要素を黙って無視し、サーバー側の応答収集も null を飛ばす。HTTP クライアントだけが
+    /// 送信前のガード（除外列の検査）と保存後の RowState 確定で null 要素を読みに行き、NullReferenceException になっていた。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[RemoteService] 23: SaveMany はリスト内の null 要素を飛ばす（直結とのパリティ）"
+    )]
+    public async Task SaveMany_SkipsNullElements_LikeDirectConnection()
+    {
+        await Customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        var services = new ServiceCollection();
+        ConfigureServerRepositories(services, _db.ReadWriteCreateConnectionString);
+        await using var directProvider = services.BuildServiceProvider();
+        var direct = directProvider.GetRequiredService<IOrderRepository>();
+
+        var directFirst = NewOrder(20, 1, 10m, "direct a");
+        var directSecond = NewOrder(21, 1, 20m, "direct b");
+        directFirst.MarkAdded();
+        directSecond.MarkAdded();
+        var directAffected = await direct.SaveAsync(
+            [directFirst, null!, directSecond],
+            cancellationToken: Ct
+        );
+
+        var remoteFirst = NewOrder(10, 1, 100m, "remote a");
+        var remoteSecond = NewOrder(11, 1, 50m, "remote b");
+        remoteFirst.MarkAdded();
+        remoteSecond.MarkAdded();
+        var remoteAffected = await Orders.SaveAsync(
+            [remoteFirst, null!, remoteSecond],
+            cancellationToken: Ct
+        );
+
+        remoteAffected.Should().Be(directAffected).And.Be(2);
+
+        // 直結と同じく、保存できた要素のローカル RowState は確定する
+        remoteFirst.HasChanges.Should().BeFalse();
+        remoteSecond.HasChanges.Should().BeFalse();
+        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct)).Should().NotBeNull();
+        (await Orders.GetByIdAsync(OrderIdValue.Create(11), Ct)).Should().NotBeNull();
     }
 
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>

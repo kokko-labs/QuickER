@@ -173,6 +173,14 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             return false;
         }
 
+        // Oracle の上限を超える長さ・精度は書き出さない（DDL の適用で必ず失敗するため、切替の時点で変換不能一覧に載せる）。
+        // 文字列・RAW の上限は MAX_STRING_SIZE = STANDARD（既定）の値。QuickER は接続先の設定を知らないので、
+        // EXTENDED の DB でも同じ上限で判定する（安全側）
+        if (!IsWithinLimits(canonical))
+        {
+            return false;
+        }
+
         switch (canonical.Kind)
         {
             case CanonicalTypeKind.Boolean:
@@ -314,6 +322,14 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             scale = parsedScale;
         }
 
+        // NUMBER(*) は精度もスケールも持たない＝素の NUMBER と同じ浮動（実 Oracle で 1.5 を保持する）。
+        // 下の整数型への振り分けへ落とすと Decimal(null,0)＝整数として読んでしまう
+        if (precision is null && scale is null)
+        {
+            canonical = new CanonicalType(CanonicalTypeKind.Decimal);
+            return true;
+        }
+
         // スケールが指定され 0 以外なら固定小数点（Decimal(p,s)）として扱う。
         // 負のスケールも「精度による整数型振り分け」ではなく Decimal(p,s) 側＝宣言どおりに保つ
         // （NUMBER(10,-2) を NUMBER(10) と読むと Int32 に化けて丸め単位が黙って消える）
@@ -405,12 +421,82 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
     private static bool TryParseScaleArg(string text, out int value) =>
         int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value);
 
-    /// <summary>Decimal を <c>NUMBER</c> / <c>NUMBER(p)</c> / <c>NUMBER(p,s)</c> へ整形する</summary>
+    /// <summary>可変長 Unicode（NVARCHAR2）の最大長（MAX_STRING_SIZE = STANDARD・AL16UTF16 で 4000 バイト＝2000 文字）</summary>
+    private const int MaxNVarchar2Length = 2000;
+
+    /// <summary>可変長非 Unicode（VARCHAR2）の最大長（MAX_STRING_SIZE = STANDARD で 4000 バイト）</summary>
+    private const int MaxVarchar2Length = 4000;
+
+    /// <summary>固定長 Unicode（NCHAR）の最大長（2000 バイト＝1000 文字）</summary>
+    private const int MaxNCharLength = 1000;
+
+    /// <summary>固定長非 Unicode（CHAR）・RAW の最大長（2000 バイト）</summary>
+    private const int MaxCharOrRawLength = 2000;
+
+    /// <summary>NUMBER の最大精度</summary>
+    private const int MaxNumberPrecision = 38;
+
+    /// <summary>NUMBER のスケールの範囲（負は丸めの位）</summary>
+    private const int MinNumberScale = -84;
+
+    /// <summary>NUMBER のスケールの上限</summary>
+    private const int MaxNumberScale = 127;
+
+    /// <summary>TIMESTAMP の小数秒の最大桁数</summary>
+    private const int MaxTimestampPrecision = 9;
+
+    /// <summary>正規型の長さ・精度・スケールが Oracle で宣言できる範囲に収まるか</summary>
+    /// <remarks>
+    /// 範囲外は Oracle が CREATE / ALTER の時点で拒否する値（SQL Server でよく使う <c>nvarchar(4000)</c> が
+    /// <c>NVARCHAR2(4000)</c> になると ORA-00910）。max（-1）は LOB へ写すので範囲の判定から外す。
+    /// </remarks>
+    private static bool IsWithinLimits(CanonicalType canonical) =>
+        canonical.Kind switch
+        {
+            CanonicalTypeKind.String => IsLengthWithin(canonical.Length, MaxNVarchar2Length),
+            CanonicalTypeKind.AnsiString => IsLengthWithin(canonical.Length, MaxVarchar2Length),
+            CanonicalTypeKind.FixedString => IsFixedLengthWithin(canonical.Length, MaxNCharLength),
+            CanonicalTypeKind.AnsiFixedString => IsFixedLengthWithin(
+                canonical.Length,
+                MaxCharOrRawLength
+            ),
+            CanonicalTypeKind.Binary or CanonicalTypeKind.FixedBinary => IsLengthWithin(
+                canonical.Length,
+                MaxCharOrRawLength
+            ),
+            CanonicalTypeKind.Decimal => canonical.Precision
+                is null
+                    or (>= 1 and <= MaxNumberPrecision)
+                && canonical.Scale is null or (>= MinNumberScale and <= MaxNumberScale),
+            CanonicalTypeKind.DateTime or CanonicalTypeKind.DateTimeOffset => canonical.Precision
+                is null
+                    or (>= 0 and <= MaxTimestampPrecision),
+            _ => true,
+        };
+
+    /// <summary>長さが 1 以上・上限以下（max の -1 も可）か</summary>
+    private static bool IsLengthWithin(int? length, int max) =>
+        length is null or -1 || length is >= 1 && length <= max;
+
+    /// <summary>固定長の長さが 1 以上・上限以下か（max の -1 は不可）</summary>
+    /// <remarks>
+    /// 固定長の max は Oracle に対応する型が無い（素の <c>NCHAR</c> / <c>CHAR</c> は 1 文字の列になる）ため、
+    /// 書き出さずに変換不能一覧へ載せる。正規型にこの形が現れるのは、SQL Server として不正な <c>nchar(max)</c> を
+    /// 解析したときだけ。
+    /// </remarks>
+    private static bool IsFixedLengthWithin(int? length, int max) =>
+        length is >= 1 && length <= max;
+
+    /// <summary>Decimal を <c>NUMBER</c> / <c>NUMBER(p)</c> / <c>NUMBER(p,s)</c> / <c>NUMBER(*,s)</c> へ整形する</summary>
+    /// <remarks>
+    /// 精度なし・スケールありは <c>NUMBER(*,s)</c>（精度は上限なし・スケールは s）。素の <c>NUMBER</c> に落とすと
+    /// スケールの宣言（s 桁への丸め）が消える。
+    /// </remarks>
     private static string FormatNumber(int? precision, int? scale)
     {
         if (precision is null)
         {
-            return "NUMBER";
+            return scale is null ? "NUMBER" : $"NUMBER(*,{scale})";
         }
 
         return scale is null ? $"NUMBER({precision})" : $"NUMBER({precision},{scale})";
@@ -435,8 +521,8 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             return name;
         }
 
-        // 固定長で max（-1）は Oracle に対応が無いため型名のみで表現する
-        return length == -1 ? name : $"{name}({length})";
+        // 固定長の max（-1）は IsWithinLimits が先に断るのでここへは来ない
+        return $"{name}({length})";
     }
 
     /// <summary>バイナリを <c>RAW(n)</c> または <c>BLOB</c>（max）へ整形する</summary>

@@ -100,6 +100,59 @@ public class PostgreSqlSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE \"customer\" ALTER COLUMN \"name\" SET NOT NULL;");
     }
 
+    /// <summary>
+    /// 型の系統をまたぐ変更（代入キャストが無い）にだけ <c>USING 列::新型</c> を付けることを検証する。
+    /// 文字列系への変更・同じ系統の変更・解析できない型・旧型が分からない項目には付けない
+    /// （明示キャストは varchar(n) への変換で長すぎる値を黙って切り詰めるため）。
+    /// </summary>
+    [Theory(DisplayName = "AlterColumn は型の系統をまたぐ変更にだけ USING を付ける")]
+    [InlineData("varchar(50)", "integer", true)]
+    [InlineData("text", "date", true)]
+    [InlineData("integer", "boolean", true)]
+    [InlineData("varchar(36)", "uuid", true)]
+    [InlineData("text", "jsonb", true)]
+    [InlineData("varchar(100)", "varchar(50)", false)]
+    [InlineData("integer", "varchar(10)", false)]
+    [InlineData("integer", "bigint", false)]
+    [InlineData("timestamp(6)", "date", false)]
+    [InlineData("geometry(Point,4326)", "integer", false)]
+    [InlineData(null, "integer", false)]
+    public void AlterColumn_AddsUsingOnlyAcrossTypeFamilies(
+        string? oldType,
+        string newType,
+        bool expectsUsing
+    )
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "customer",
+                ColumnName = "code",
+                Column = new Column
+                {
+                    Name = "code",
+                    DataType = newType,
+                    IsNullable = true,
+                },
+                OldColumn = oldType is null
+                    ? null
+                    : new Column
+                    {
+                        Name = "code",
+                        DataType = oldType,
+                        IsNullable = true,
+                    },
+                IsSelected = true,
+            }
+        );
+
+        var expected = expectsUsing
+            ? $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType} USING \"code\"::{newType};"
+            : $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType};";
+        sql.Should().Contain(expected);
+    }
+
     /// <summary>NULL 許容へ変更する AlterColumn が DROP NOT NULL を生成することを検証する</summary>
     [Fact(DisplayName = "AlterColumn は NULL 許容化で DROP NOT NULL を生成する")]
     public void AlterColumn_NullableGeneratesDropNotNull()
@@ -466,7 +519,7 @@ public class PostgreSqlSyncScriptBuilderTests
         sql.Should().Contain("AND tbl.relnamespace = 'public'::regnamespace;");
         sql.Should().Contain("IF pk_name IS NOT NULL THEN");
         sql.Should()
-            .Contain("EXECUTE 'ALTER TABLE \"orders\" DROP CONSTRAINT \"' || pk_name || '\"';");
+            .Contain("EXECUTE 'ALTER TABLE \"orders\" DROP CONSTRAINT ' || quote_ident(pk_name);");
         // 新主キーは列定義順の複合キーとして CREATE TABLE と同じ制約名規則で付与する
         sql.Should()
             .Contain(
@@ -582,7 +635,9 @@ public class PostgreSqlSyncScriptBuilderTests
         var sql = Build(AlterPk("o'rders", PkTarget("o'rders", "order_id")));
 
         sql.Should()
-            .Contain("EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || pk_name || '\"';");
+            .Contain(
+                "EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT ' || quote_ident(pk_name);"
+            );
         sql.Should().NotContain("EXECUTE 'ALTER TABLE \"o'rders\"");
     }
 
@@ -602,8 +657,41 @@ public class PostgreSqlSyncScriptBuilderTests
         var sql = Build(item);
 
         sql.Should()
-            .Contain("EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || fk_name || '\"';");
+            .Contain(
+                "EXECUTE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT ' || quote_ident(fk_name);"
+            );
         sql.Should().NotContain("EXECUTE 'ALTER TABLE \"o'rders\"");
+    }
+
+    // ---------------- 実行時にカタログから読んだ制約名の埋め込み ----------------
+
+    /// <summary>
+    /// 実行時にカタログから読んだ制約名（<c>pk_name</c> / <c>fk_name</c>）が、動的 SQL へ必ず <c>quote_ident</c> を通して
+    /// 埋められ、生の連結が残らないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 制約名は図の外（DB）から来る値で、<c>"</c> を含み得る（QuickER 自身も表 <c>a"b</c> に主キー名 <c>PK_a"b</c> を付ける）。
+    /// <c>'"' || pk_name || '"'</c> のように引用符で挟むだけでは、名前の <c>"</c> が識別子の引用を閉じる。
+    /// </remarks>
+    [Fact(DisplayName = "実行時に読んだ制約名は quote_ident を通して動的 SQL へ埋める")]
+    public void RuntimeConstraintName_IsAlwaysQuoteIdented()
+    {
+        var dropForeignKey = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "lines",
+            ParentEntity = new Entity { TableName = "orders" },
+            ChildEntity = new Entity { TableName = "lines" },
+            IsSelected = true,
+        };
+
+        var sql = Build(AlterPk("orders", PkTarget("orders", "id")), dropForeignKey);
+
+        sql.Should().Contain("quote_ident(pk_name)");
+        sql.Should().Contain("quote_ident(fk_name)");
+        // 変数を quote_ident を通さずに文字列へ連結している箇所が無いこと
+        sql.Should().NotContain("|| pk_name");
+        sql.Should().NotContain("|| fk_name");
     }
 
     // ---------------- DO ブロックのドルクォートタグ ----------------

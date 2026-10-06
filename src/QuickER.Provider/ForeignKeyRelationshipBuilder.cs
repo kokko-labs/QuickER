@@ -140,19 +140,11 @@ public sealed class ForeignKeyRelationshipBuilder
                 }
             }
 
-            // FK 列集合が主キーまたは一意制約と一致すれば 1 対 1 とみなす
-            var sortedParent = g
-                .ParentCols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var pkCols = parent
-                .Entity.Columns.Where(c => c.IsPrimaryKey)
-                .Select(c => c.Name)
-                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var uniqueOnParent = ResolveUniqueColumnSets(parent.Entity);
-
-            var isOneToOne =
-                SameSet(sortedParent, pkCols) || uniqueOnParent.Any(s => SameSet(sortedParent, s));
+            // FK 列集合が主キーまたは一意制約と一致すれば 1 対 1 とみなす（判定の正本は Entity.IsCandidateKey。
+            // 列ペアは列 ID で解決済みなので、名前でなく ID の集合で比べる）
+            var isOneToOne = parent.Entity.IsCandidateKey(
+                columnPairs.Select(pair => pair.TargetColumnId).ToList()
+            );
 
             rels.Add(
                 new Relationship
@@ -210,58 +202,4 @@ public sealed class ForeignKeyRelationshipBuilder
 
         return pairs;
     }
-
-    /// <summary>エンティティの一意制約を「大文字小文字無視の昇順に並べた列名配列」の一覧へ展開する</summary>
-    /// <remarks>
-    /// 判定は集合一致（順序不問）なので、<see cref="SameSet"/> が比較できるようソートして返す。
-    /// カラム ID を解決できない制約は判定材料から除外する。
-    /// </remarks>
-    private static List<string[]> ResolveUniqueColumnSets(Entity entity)
-    {
-        var sets = new List<string[]>();
-
-        if (entity.UniqueConstraints.Count == 0)
-        {
-            return sets;
-        }
-
-        var columnNamesById = new Dictionary<Guid, string>();
-
-        foreach (var column in entity.Columns)
-        {
-            columnNamesById[column.Id] = column.Name;
-        }
-
-        foreach (var constraint in entity.UniqueConstraints)
-        {
-            var names = new List<string>(constraint.ColumnIds.Count);
-            var allResolved = true;
-
-            foreach (var columnId in constraint.ColumnIds)
-            {
-                if (!columnNamesById.TryGetValue(columnId, out var name))
-                {
-                    allResolved = false;
-                    break;
-                }
-
-                names.Add(name);
-            }
-
-            if (!allResolved || names.Count == 0)
-            {
-                continue;
-            }
-
-            sets.Add(names.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray());
-        }
-
-        return sets;
-    }
-
-    /// <summary>2 つのソート済み列名集合が大文字小文字無視で完全一致するか判定する（空集合は不一致）</summary>
-    public static bool SameSet(string[] a, string[] b) =>
-        a.Length > 0
-        && a.Length == b.Length
-        && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 }

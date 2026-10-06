@@ -29,6 +29,34 @@ public class SqlServerSchemaImporterTests
         SqlServerSchemaImporter.FormatDataType(type, maxLen, prec, scale).Should().Be(expected);
     }
 
+    /// <summary>
+    /// 小数秒の桁数（<c>DATETIME_PRECISION</c>）を型表記へ反映し、既定の 7 桁だけは括弧を省くことを検証する。
+    /// 桁数を読まないと <c>datetime2(3)</c> が <c>datetime2</c>（7 桁）として図へ入り、その図からの同期が
+    /// 精度を黙って 3 から 7 へ変える。
+    /// </summary>
+    [Theory(DisplayName = "FormatDataType: 小数秒の桁数を反映し既定の 7 桁は省く")]
+    [InlineData("datetime2", 3, "datetime2(3)")]
+    [InlineData("datetime2", 0, "datetime2(0)")]
+    [InlineData("datetime2", 7, "datetime2")]
+    [InlineData("time", 3, "time(3)")]
+    [InlineData("time", 7, "time")]
+    [InlineData("datetimeoffset", 5, "datetimeoffset(5)")]
+    [InlineData("datetimeoffset", 7, "datetimeoffset")]
+    [InlineData("datetime2", null, "datetime2")]
+    [InlineData("datetime", 3, "datetime")]
+    [InlineData("date", 0, "date")]
+    public void FormatDataType_FractionalSeconds(
+        string type,
+        int? datetimePrecision,
+        string expected
+    )
+    {
+        SqlServerSchemaImporter
+            .FormatDataType(type, null, null, null, datetimePrecision)
+            .Should()
+            .Be(expected);
+    }
+
     /// <summary>構造が同一なら同じ署名が返ることを検証する</summary>
     [Fact(DisplayName = "ComputeSignature: 同一構造なら同じ署名を返す")]
     public void ComputeSignature_SameStructure_SameSignature()

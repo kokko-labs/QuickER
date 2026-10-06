@@ -393,6 +393,51 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
     }
 
     /// <summary>
+    /// 範囲外を参照する同じ名前の外部キーが 2 つの表にあるとき、表ごとに 1 件ずつ報告し、
+    /// 取り込まなかった表（大文字小文字の衝突で捨てた表）の外部キーは報告しないことを検証する。
+    /// </summary>
+    /// <remarks>PostgreSQL の外部キー名は表ごとに一意なので、別の表なら同じ名前を付けられる</remarks>
+    [Fact(
+        DisplayName = "[Integration] PG: 範囲外の外部キーは表ごとに報告し、捨てた表の分は報告しない"
+    )]
+    public async Task Import_OutOfScopeForeignKeys_AreReportedPerImportedTable()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE SCHEMA crm;
+            CREATE TABLE crm.customers (id integer PRIMARY KEY);
+            CREATE TABLE orders (id integer PRIMARY KEY, customer_id integer,
+                CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES crm.customers (id));
+            CREATE TABLE invoices (id integer PRIMARY KEY, customer_id integer,
+                CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES crm.customers (id));
+            CREATE TABLE "Dup" (id integer PRIMARY KEY);
+            CREATE TABLE dup (id integer PRIMARY KEY, customer_id integer,
+                CONSTRAINT fk_dup_customer FOREIGN KEY (customer_id) REFERENCES crm.customers (id));
+            """,
+            Ct
+        );
+
+        try
+        {
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+            result
+                .Warnings.Where(w => w.Kind == SchemaImportWarningKind.ForeignKeyOutsideScope)
+                .Select(w => (w.TableName, w.Subject))
+                .Should()
+                .BeEquivalentTo([("orders", "fk_customer"), ("invoices", "fk_customer")]);
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP SCHEMA crm CASCADE;", Ct);
+        }
+    }
+
+    /// <summary>
     /// 大文字小文字だけが違う同名テーブルを、列を混ぜずに片方だけ取り込み、警告として報告することを検証する。
     /// </summary>
     [Fact(

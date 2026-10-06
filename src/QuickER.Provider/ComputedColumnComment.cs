@@ -46,8 +46,11 @@ public static class ComputedColumnComment
             $"-- Computed column '{SqlComment.Sanitize(column.Name)}': "
             + "the expression is not part of the diagram; add it to the schema by hand.";
 
-        // NOT NULL のまま式を足さないと、生成コードの INSERT がこの列を送らないため追加が必ず失敗する
-        return column.IsNullable
+        // NOT NULL のまま式を足さないと、生成コードの INSERT がこの列を送らないため追加が必ず失敗する。
+        // NOT NULL かどうかは DDL と同じ式で決める（主キー列は NULL 許容の値に関わらず NOT NULL で出る）
+        var emitsNotNull = column.IsPrimaryKey || !column.IsNullable;
+
+        return !emitsNotNull
             ? note
             : note
                 + " Until the expression is added, generated INSERT statements leave this column out"

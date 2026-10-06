@@ -30,9 +30,6 @@ public static class SqlIdentifier
     /// <summary>識別子内の <c>]</c> を SQL Server の規則（二重化）に従ってエスケープする</summary>
     public static string Escape(string name) => (name ?? string.Empty).Replace("]", "]]");
 
-    /// <summary>制約名などに使う安全な ID を生成する（規則の正本は <see cref="ConstraintNames.SafeName"/>）</summary>
-    public static string SafeName(string name) => ConstraintNames.SafeName(name);
-
     /// <summary><c>schema.table</c> 形式から <c>table</c> 部分のみを抽出する</summary>
     public static string TableNameOnly(string fullName) =>
         string.IsNullOrEmpty(fullName) ? string.Empty
@@ -50,7 +47,7 @@ public static class SqlIdentifier
 
     /// <summary>動的 SQL の文字列リテラル内へ埋め込むテーブル名を、括弧付け＋リテラルエスケープして返す</summary>
     /// <remarks>
-    /// <c>EXEC('ALTER TABLE … ')</c> のように組み立てた SQL を文字列リテラルとして渡す経路では、括弧付けだけでは
+    /// <c>N'ALTER TABLE …'</c> や <c>OBJECT_ID(N'…')</c> のように、テーブル名を文字列リテラルの中へ埋める経路では、括弧付けだけでは
     /// 不十分で、名前に含まれる <c>'</c> が外側のリテラルを閉じてしまう。括弧付けの後にリテラルエスケープを
     /// 掛けたこのメソッドを通すこと（4 方言で同名・同意味のヘルパーを持つ）。
     /// </remarks>

@@ -214,4 +214,59 @@ public class ConstraintNameConsistencyTests
         ddl.Should().Contain(ExpectedForeignKey).And.Contain(ExpectedPrimaryKey);
         sync.Should().Contain(ExpectedForeignKey).And.Contain(ExpectedPrimaryKey);
     }
+
+    /// <summary>
+    /// 前後に空白のあるテーブル名で、DDL が作るテーブルと同期が指すテーブルが同じ名前になることを 5 方言で検証する
+    /// </summary>
+    /// <remarks>
+    /// 同期はテーブル名の前後の空白を除いて扱う。モデルが空白つきの名前を保つと、DDL は <c>"Orders "</c> を作り、
+    /// 以後の同期は <c>"Orders"</c> を探して失敗する。<see cref="Entity.TableName"/> が代入時に空白を除くことで揃う
+    /// </remarks>
+    [Fact(
+        DisplayName = "前後に空白のあるテーブル名で、DDL が作るテーブルと同期が指すテーブルが一致する（5 方言）"
+    )]
+    public void TableName_MatchesBetweenDdlAndSync()
+    {
+        var dialects = SequentialDialects
+            .Select(d => (d.Name, d.Ddl, d.Sync))
+            .Append(("Sqlite", new SqliteDdlGenerator(), new SqliteSyncScriptBuilder()));
+
+        foreach (var (name, ddlGenerator, syncBuilder) in dialects)
+        {
+            var (diagram, _, child, _) = Diagram();
+
+            var ddl = ddlGenerator.Build(diagram);
+            var createLine = ddl.Split('\n')
+                .Single(line => line.StartsWith("CREATE TABLE ") && line.Contains("Orders"));
+            var tableIdentifier = createLine["CREATE TABLE ".Length..createLine.LastIndexOf(" (")];
+
+            var sync = syncBuilder.Build(
+                new SyncPlanner().BuildPlan(
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AddColumn,
+                            TableName = SchemaDiffService.NormalizeTable(child),
+                            ColumnName = "note",
+                            Entity = child,
+                            Column = new Column
+                            {
+                                Name = "note",
+                                DataType = "int",
+                                IsNullable = true,
+                            },
+                            IsSelected = true,
+                        },
+                    ],
+                    new SyncDialectCapabilities()
+                )
+            );
+
+            sync.Should()
+                .Contain(
+                    $"ALTER TABLE {tableIdentifier} ",
+                    $"{name} の同期は DDL が作ったテーブル名を指す"
+                );
+        }
+    }
 }

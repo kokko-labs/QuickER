@@ -208,6 +208,44 @@ public class RuntimeTestMatrixTests
                 NotApplicable("Query() はリモート面に無く、Include ツリーは転送されない")
             )
         ),
+        ["GraphSave"] = new(
+            "グラフ保存がカスケードの閉包だけを保存する（親への逆参照を辿らない・削除の根の子孫）",
+            Row(
+                Gap(
+                    "QuickER 版は SQL Server・SQLite とも同じ EntityGraphSaver の走査で、SQLite の派生を基準として代表させている"
+                ),
+                Covered(),
+                Covered(),
+                Covered(),
+                Gap(
+                    "リモートの保存はサーバー側の直結実装が行うため、走査の意味論は直結の各セルが持つ"
+                )
+            )
+        ),
+        ["EfCoreExecutionStrategy"] = new(
+            "再試行する実行戦略のもとで、自前のトランザクションを開く経路（フックありの保存・カスケードの一括削除）を試行ごとに組み直す",
+            Row(
+                NotApplicable("実行戦略は EF Core の機構"),
+                NotApplicable("実行戦略は EF Core の機構"),
+                Covered(),
+                NotApplicable("実行戦略は EF Core の機構"),
+                NotApplicable("実行戦略は EF Core の機構")
+            )
+        ),
+        ["IgnoredWrite"] = new(
+            "版の無い表で競合以外の理由により更新が当たらないときの扱い（行なしとして報告・やり直さない）",
+            Row(
+                Gap(
+                    "QuickER 版は SQL Server・SQLite とも版の無い表で 0 行を実在確認しない同じ規則で、SQLite で代表させている"
+                ),
+                Covered(),
+                Covered(),
+                NotApplicable(
+                    "インメモリにはトリガー・行レベルセキュリティが無く、文が当たらない状況が生まれない"
+                ),
+                NotApplicable("リモートの保存はサーバー側の直結実装が行う")
+            )
+        ),
         ["IncludeGraphSelfReference"] = new(
             "IncludeGraph の edge-skip（自己参照ナビを展開しない）",
             Row(
@@ -257,6 +295,19 @@ public class RuntimeTestMatrixTests
                 NotApplicable(
                     "インメモリは式木をコンパイルして C# 意味論で評価する（SQL を組み立てない）"
                 ),
+                NotApplicable("Query() はリモート面に無く、式木は転送されない")
+            )
+        ),
+        ["TranslatorParity"] = new(
+            "式木の翻訳・識別子の引用・Include の照合・UPDATE 文の組み立てを C# の意味論と突き合わせる共通シナリオ",
+            Row(
+                Covered(),
+                Covered(),
+                NotApplicable(
+                    "EF Core はマルチターゲットと生成時エラーで排他になり、同じエンティティ型を共有できない"
+                        + "（翻訳も EF Core の LINQ プロバイダが行い SqlExpressionTranslator を通らない）"
+                ),
+                Covered(),
                 NotApplicable("Query() はリモート面に無く、式木は転送されない")
             )
         ),
@@ -432,6 +483,8 @@ public class RuntimeTestMatrixTests
         new("GeneratedRuntimeEfCoreParityTests", "CrudParity", Backend.EfCore),
         new("GeneratedRuntimeEfCoreSpecificTests", "CrudParity", Backend.EfCore),
         new("GeneratedSqliteEfCoreParityRuntimeTests", "CrudParity", Backend.EfCore),
+        new("EfCoreKeyParameterRuntimeTests", "CrudParity", Backend.EfCore),
+        new("EfCoreCommandTimeoutRuntimeTests", "CrudParity", Backend.EfCore),
         new("InMemoryFixtureRuntimeTests", "CrudParity", Backend.InMemory),
         new("RemoteServiceAdoRuntimeTests", "CrudParity", Backend.Remote),
         new("RemoteServiceEfCoreRuntimeTests", "CrudParity", Backend.Remote),
@@ -449,6 +502,7 @@ public class RuntimeTestMatrixTests
         new("SaveHookSqlServerRuntimeTests", "SaveHook", Backend.AdoSqlServer),
         new("SaveHookAdoRuntimeTests", "SaveHook", Backend.AdoSqlite),
         new("SaveHookEfCoreRuntimeTests", "SaveHook", Backend.EfCore),
+        new("EfCoreCommandTimeoutRuntimeTests", "SaveHook", Backend.EfCore),
         new("SaveHookInMemoryRuntimeTests", "SaveHook", Backend.InMemory),
         new("SaveHookRegistrationRuntimeTests", "SaveHook", Backend.InMemory),
         new("SaveHookRemoteRuntimeTests", "SaveHook", Backend.Remote),
@@ -467,6 +521,13 @@ public class RuntimeTestMatrixTests
         new("UniquenessCheckRemoteRuntimeTests", "UniquenessCheck", Backend.Remote),
         new("InMemoryUniquenessRuntimeTests", "UniquenessEnforcement", Backend.InMemory),
         // --- 名前付きクエリ ---
+        new("EfCoreExecutionStrategyRuntimeTests", "EfCoreExecutionStrategy", Backend.EfCore),
+        new("IgnoredWriteAdoRuntimeTests", "IgnoredWrite", Backend.AdoSqlite),
+        new("IgnoredWriteEfCoreRuntimeTests", "IgnoredWrite", Backend.EfCore),
+        new("GraphSaveAdoRuntimeTests", "GraphSave", Backend.AdoSqlite),
+        new("GraphSaveEfCoreRuntimeTests", "GraphSave", Backend.EfCore),
+        new("GraphSaveEfCoreSqlServerRuntimeTests", "GraphSave", Backend.EfCore),
+        new("GraphSaveInMemoryRuntimeTests", "GraphSave", Backend.InMemory),
         new("IncludeGraphSqlServerRuntimeTests", "IncludeGraph", Backend.AdoSqlServer),
         new("IncludeGraphAdoRuntimeTests", "IncludeGraph", Backend.AdoSqlite),
         new("IncludeGraphEfCoreRuntimeTests", "IncludeGraph", Backend.EfCore),
@@ -508,6 +569,9 @@ public class RuntimeTestMatrixTests
         ),
         new("SqliteTranslatorOperatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
         new("SqliteBoolColumnTranslatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
+        new("TranslatorParitySqlServerRuntimeTests", "TranslatorParity", Backend.AdoSqlServer),
+        new("TranslatorParitySqliteRuntimeTests", "TranslatorParity", Backend.AdoSqlite),
+        new("TranslatorParityInMemoryRuntimeTests", "TranslatorParity", Backend.InMemory),
         // --- スキーマ適用 ---
         new("SqlServerSchemaBootstrapRuntimeTests", "SchemaBootstrap", Backend.AdoSqlServer),
         new("SqliteSchemaBootstrapRuntimeTests", "SchemaBootstrap", Backend.AdoSqlite),
@@ -554,6 +618,7 @@ public class RuntimeTestMatrixTests
         new("RemoteValueObjectBodyRuntimeTests", "RemoteTransport", Backend.Remote),
         new("RemoteKeyedRegistrationRuntimeTests", "RemoteTransport", Backend.Remote),
         new("RemoteAccessRuntimeTests", "RemoteTransport", Backend.Remote),
+        new("RemoteServerEngineRuntimeTests", "RemoteTransport", Backend.Remote),
         new("SaveConflictDetailsRuntimeTests", "Concurrency", Backend.Remote),
         // --- その他の単発機能 ---
         new("SqlExecutorInjectionRuntimeTests", "SqlExecutorInjection", Backend.AdoSqlite),

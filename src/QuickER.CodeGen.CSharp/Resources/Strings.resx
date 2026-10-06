@@ -164,10 +164,13 @@
     <value>The type catalog could not recognize the DB type of the columns below, so the generated property falls back to string (a safe default that keeps generation from failing). Confirm this is the intended type; if not, adjust the column's type in the diagram:{0}</value>
   </data>
   <data name="CodeGen_Info_ArrayUniqueConstraintsNotValidated" xml:space="preserve">
-    <value>The UNIQUE constraints below contain an array column, so the edit model does not validate them for duplicates (an array column is not projected onto the edit model, so the check cannot read it). The repository still checks them before saving, and the constraint itself exists in the database:{0}</value>
+    <value>The UNIQUE constraints below contain a column that is not projected onto the edit model (an array column, or a column of a type with no text input such as PostgreSQL inet), so the edit model does not validate them for duplicates (the check cannot read that column). The repository still checks them before saving, and the constraint itself exists in the database:{0}</value>
   </data>
   <data name="CodeGen_Info_ArrayColumnsNotEditable" xml:space="preserve">
     <value>The columns below are array columns. They are generated as entity properties (and work through EF Core, the in-memory repository and remote transfer), but they are left out of edit models and value objects: an edit model is one text input per column and has no notation for an array, and a value object would compare arrays by reference. The length of an array's elements is not carried into the generated code either:{0}</value>
+  </data>
+  <data name="CodeGen_Info_TextInputUnsupportedColumns" xml:space="preserve">
+    <value>The columns below have a type an edit model cannot take as one text input (PostgreSQL inet, generated as System.Net.IPAddress). They are generated as entity properties (and work through EF Core, the in-memory repository and remote transfer), but they are left out of edit models and value objects. Reading an inet value as IPAddress drops any netmask (/24 and the like), as the driver does by default:{0}</value>
   </data>
   <data name="CodeGen_Info_IncludeGraphSkippedNavigations" xml:space="preserve">
     <value>IncludeGraph does not follow the navigations below, because each one points back to a table that is already on the path from the root (an Include tree cannot express a cycle). Include them explicitly with Include / ThenInclude when a bounded depth is needed:{0}</value>

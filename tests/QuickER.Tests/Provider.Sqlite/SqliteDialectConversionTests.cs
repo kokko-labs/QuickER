@@ -91,7 +91,6 @@ public class SqliteDialectConversionTests
     [InlineData("bit")]
     [InlineData("decimal(18,2)")]
     [InlineData("money")]
-    [InlineData("real")]
     [InlineData("float")]
     [InlineData("nvarchar(50)")]
     [InlineData("nvarchar(max)")]
@@ -119,6 +118,20 @@ public class SqliteDialectConversionTests
         backPlan.Converted.Should().ContainSingle();
 
         backPlan.Converted[0].NewType.Should().Be(sqlServerType);
+    }
+
+    /// <summary>
+    /// SQL Server の <c>real</c>（単精度）は SQLite の <c>REAL</c> へ移り、戻すと <c>float</c>（倍精度）になることを検証する。
+    /// SQLite に単精度は無く REAL は 8 バイトの倍精度なので、往復は精度を広げる方向の非可逆（値は失わない）。
+    /// </summary>
+    [Fact(DisplayName = "sqlserver real は sqlite REAL を経て float（倍精度）へ広がる")]
+    public void RoundTrip_SqlServerReal_WidensToFloat()
+    {
+        var toSqlite = DiagramTypeConverter.CreatePlan(BuildDiagram("real"), Sql, Lite);
+        toSqlite.Converted.Should().ContainSingle().Which.NewType.Should().Be("REAL");
+
+        var back = DiagramTypeConverter.CreatePlan(BuildDiagram("REAL"), Lite, Sql);
+        back.Converted.Should().ContainSingle().Which.NewType.Should().Be("float");
     }
 
     /// <summary>変換不能な SQL Server 型（hierarchyid）が Unconverted に入ることを検証する</summary>

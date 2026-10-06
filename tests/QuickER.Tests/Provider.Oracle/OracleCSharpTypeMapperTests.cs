@@ -54,4 +54,34 @@ public class OracleCSharpTypeMapperTests
         Mapper.Map("number(10)").IsFallbackType.Should().BeFalse();
         Mapper.Map("varchar2(50)").IsFallbackType.Should().BeFalse();
     }
+
+    /// <summary>
+    /// 単位語つきの長さ（<c>VARCHAR2(50 CHAR)</c> / <c>CHAR(10 BYTE)</c>）からも最大長を読むことを検証する。
+    /// <c>NLS_LENGTH_SEMANTICS=CHAR</c> の DB では取込の全文字列列がこの形になるため、読めないと
+    /// [MaxLength]・HasMaxLength・値オブジェクトの長さ検証が全部消える。
+    /// </summary>
+    [Theory(DisplayName = "単位語つきの長さからも最大長を読む")]
+    [InlineData("VARCHAR2(50 CHAR)", 50)]
+    [InlineData("VARCHAR2(50 BYTE)", 50)]
+    [InlineData("CHAR(10 BYTE)", 10)]
+    [InlineData("CHAR(10 CHAR)", 10)]
+    [InlineData("VARCHAR2(50)", 50)]
+    public void LengthWithUnit_IsRead(string dataType, int expected)
+    {
+        Mapper.Map(dataType).MaxLength.Should().Be(expected);
+    }
+
+    /// <summary>
+    /// <c>TIMESTAMP WITH LOCAL TIME ZONE</c> は DateTime へ写すことを検証する（ODP.NET が返す CLR 型。
+    /// DateTimeOffset で受けると読み取りが InvalidCastException になる）。WITH TIME ZONE は DateTimeOffset のまま。
+    /// </summary>
+    [Theory(DisplayName = "WITH LOCAL TIME ZONE は DateTime、WITH TIME ZONE は DateTimeOffset")]
+    [InlineData("TIMESTAMP(6) WITH LOCAL TIME ZONE", "DateTime")]
+    [InlineData("TIMESTAMP WITH LOCAL TIME ZONE", "DateTime")]
+    [InlineData("TIMESTAMP(6) WITH TIME ZONE", "DateTimeOffset")]
+    [InlineData("TIMESTAMP(6)", "DateTime")]
+    public void TimestampFamily_MapsToDriverType(string dataType, string expected)
+    {
+        Mapper.Map(dataType).TypeName.Should().Be(expected);
+    }
 }

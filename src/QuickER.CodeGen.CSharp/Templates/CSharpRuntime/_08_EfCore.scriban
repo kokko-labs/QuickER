@@ -1,4 +1,4 @@
-﻿{{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
+{{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
 
 /// <summary>
 /// EF Core DbContext that connects to an existing schema.
@@ -307,7 +307,8 @@ public partial class QuickErDbContext : DbContext
 /// This lets EF Core translate predicates that unwrap the raw value, such as <c>string.IsNullOrEmpty(x.Col.Value)</c>
 /// or <c>x.Col.Value &gt; 100</c> (the same treatment as the QuickER SQL Server implementation's "a column may be a plain column or a value object's .Value").
 /// Since the column is already projected onto the raw value by a converter, it is explicitly coerced to the raw value type with CONVERT
-/// so that downstream translation does not re-read through the converter (an invalid cast).
+/// so that downstream translation does not re-read through the converter (an invalid cast). The target of the conversion is the
+/// column's own store type, so the comparison neither rounds nor widens the stored value.
 /// </remarks>
 {{ infra_visibility }} sealed class ValueObjectValueMemberTranslator(
     ISqlExpressionFactory sqlExpressionFactory,
@@ -335,8 +336,19 @@ public partial class QuickErDbContext : DbContext
             return null;
         }
 
-        // Skip types whose raw value type (string / int / decimal, etc.) has no default mapping (defer to other translators).
-        if (_typeMappingSource.FindMapping(returnType) is not { } typeMapping)
+        // The conversion keeps the column's own store type (the precision, scale and length the model configured), so the
+        // comparison runs on the value as stored: converting to the raw type's default mapping would round a decimal(10,4)
+        // column to decimal(18,2) and widen a string column to its unbounded type. Only when the store type has no mapping
+        // for the raw type does it fall back to the default one; a raw value type (string / int / decimal, etc.) with no
+        // mapping at all is skipped (deferred to other translators).
+        var typeMapping =
+            (
+                instance.TypeMapping?.StoreType is { } storeType
+                    ? _typeMappingSource.FindMapping(returnType, storeType)
+                    : null
+            ) ?? _typeMappingSource.FindMapping(returnType);
+
+        if (typeMapping is null)
         {
             return null;
         }
@@ -628,6 +640,14 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 
         var command = context.Database.GetDbConnection().CreateCommand();
         command.CommandText = sql;
+
+        // A command created from the connection does not see the timeout configured on the DbContext, so it is carried over
+        // (with none configured, the command keeps the connection's own default)
+        if (context.Database.GetCommandTimeout() is { } timeout)
+        {
+            command.CommandTimeout = timeout;
+        }
+
         RawSqlMapper.BindParameters(command, parameters);
         return command;
     }
@@ -782,18 +802,28 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
             return await roots.ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // Cascade: run ExecuteDelete in descendants → root order within a single transaction (same DELETE statement order as the existing version).
-        await using var transaction = await context.Database.BeginTransactionAsync(
-            cancellationToken
-        ).ConfigureAwait(false);
-        var rows = await DeleteSubtreeAsync(
-            context,
-            roots,
-            new HashSet<Type> { typeof(TEntity) },
-            cancellationToken
-        ).ConfigureAwait(false);
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        return rows;
+        // Cascade: run ExecuteDelete in descendants → root order within a single transaction (same DELETE statement order as
+        // the existing version). The transaction is opened inside the execution strategy, which a retrying strategy requires;
+        // an attempt that fails rolls back as a whole, so running the deletes again on a retry is safe.
+        return await context
+            .Database.CreateExecutionStrategy()
+            .ExecuteAsync(
+                async attemptToken =>
+                {
+                    await using var transaction = await context.Database.BeginTransactionAsync(
+                        attemptToken
+                    ).ConfigureAwait(false);
+                    var rows = await DeleteSubtreeAsync(
+                        context,
+                        roots,
+                        new HashSet<Type> { typeof(TEntity) },
+                        attemptToken
+                    ).ConfigureAwait(false);
+                    await transaction.CommitAsync(attemptToken).ConfigureAwait(false);
+                    return rows;
+                },
+                cancellationToken
+            ).ConfigureAwait(false);
     }
 
     /// <summary>Method info used to expand DeleteSubtreeAsync generically with the runtime child type.</summary>
@@ -1216,18 +1246,27 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         var entry = context.Entry(entity);
         entry.State = EntityState.Modified;
 
-        while (true)
+        for (var attempt = 1; ; attempt++)
         {
             try
             {
                 await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 return true;
             }
-            catch (DbUpdateConcurrencyException)
+            catch (DbUpdateConcurrencyException ex)
             {
+                if (attempt >= MaxConcurrencyAttempts)
+                {
+                    throw ConcurrencyAttemptsExhausted(ex);
+                }
+
                 // Matching no row is ambiguous: either the row is gone (the pre-existing "0 affected rows → false" contract)
-                // or its concurrency token moved on after this entity was read. Reading the stored values tells the two apart
-                var stored = await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false);
+                // or its concurrency token moved on after this entity was read. Reading the stored values tells the two apart.
+                // Without a concurrency token there is nothing that could have moved on, so it is the former (the QuickER
+                // repositories report a table without a rowversion column the same way)
+                var stored = HasConcurrencyToken(entry)
+                    ? await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false)
+                    : null;
 
                 if (stored is null)
                 {
@@ -1248,6 +1287,20 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
             }
         }
     }
+
+    /// <summary>How many times a save is attempted while it keeps being rejected as a concurrency conflict.</summary>
+    private const int MaxConcurrencyAttempts = 10;
+
+    /// <summary>Whether the entry's entity type carries a concurrency token (a rowversion column).</summary>
+    private static bool HasConcurrencyToken(EntityEntry entry) =>
+        entry.Metadata.GetProperties().Any(property => property.IsConcurrencyToken);
+
+    /// <summary>Creates the exception for a save that kept matching no row through every attempt.</summary>
+    private static SaveConflictException ConcurrencyAttemptsExhausted(DbUpdateConcurrencyException ex) =>
+        new(
+            $"The save still matched no row after {MaxConcurrencyAttempts} attempts. Something other than a concurrent change (such as a trigger or row-level security) may be discarding the statement.",
+            ex
+        );
 
     /// <summary>Reads an entity's primary key value for conflict reporting.</summary>
     private static object? KeyOf(object entity) =>
@@ -1329,16 +1382,10 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
             return 0;
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-
-        var tracked = new List<TrackedOperation>();
-        TrackGraph(context, entity, cascadeSave, cascadeDelete, tracked);
-
-        return await SaveTrackedGraphAsync(
-            context,
+        return await ExecuteGraphSaveAsync(
             [entity],
-            tracked,
             cascadeSave,
+            cascadeDelete,
             insertWhenUpdateMissing,
             mode,
             cancellationToken
@@ -1375,24 +1422,63 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
             return 0;
         }
 
-        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-
-        var tracked = new List<TrackedOperation>();
-
-        foreach (var entity in targets)
-        {
-            TrackGraph(context, entity, cascadeSave, cascadeDelete, tracked);
-        }
-
-        return await SaveTrackedGraphAsync(
-            context,
+        return await ExecuteGraphSaveAsync(
             targets,
-            tracked,
             cascadeSave,
+            cascadeDelete,
             insertWhenUpdateMissing,
             mode,
             cancellationToken
         ).ConfigureAwait(false);
+    }
+
+    /// <summary>Runs one graph save through the DbContext's execution strategy, building every attempt from scratch.</summary>
+    /// <remarks>
+    /// A retrying execution strategy (such as SQL Server's <c>EnableRetryOnFailure</c>) refuses a transaction opened
+    /// outside it, and the hook path opens one, so the whole save is handed to the strategy. Every attempt starts from an
+    /// empty change tracker and registers the graph again with a fresh hook session, so a failed attempt leaves nothing
+    /// behind for the next one (the entities' RowState is settled only after a successful commit). As a consequence a save
+    /// hook runs once per attempt: its database writes roll back with the failed attempt, but a side effect outside the
+    /// database is repeated.
+    /// </remarks>
+    private async Task<int> ExecuteGraphSaveAsync(
+        IReadOnlyList<TEntity> roots,
+        bool cascadeSave,
+        bool cascadeDelete,
+        bool insertWhenUpdateMissing,
+        ConcurrencyMode mode,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        return await context
+            .Database.CreateExecutionStrategy()
+            .ExecuteAsync(
+                async attemptToken =>
+                {
+                    // A failed attempt may have left its registrations behind
+                    context.ChangeTracker.Clear();
+
+                    var tracked = new List<TrackedOperation>();
+
+                    foreach (var root in roots)
+                    {
+                        TrackGraph(context, root, cascadeSave, cascadeDelete, tracked);
+                    }
+
+                    return await SaveTrackedGraphAsync(
+                        context,
+                        roots,
+                        tracked,
+                        cascadeSave,
+                        insertWhenUpdateMissing,
+                        mode,
+                        attemptToken
+                    ).ConfigureAwait(false);
+                },
+                cancellationToken
+            ).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1469,40 +1555,41 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
             }
         }
 
-        var rows = await SaveTrackedChangesAsync(
-            context,
-            survivors,
-            insertWhenUpdateMissing,
-            mode,
-            cancellationToken
-        ).ConfigureAwait(false);
-
-        // Set the assigned versions aside and restore the ones the entities were read with: After runs before the commit, so
-        // it must see the old version, and a rollback (an exception thrown by After) must not leave behind a version the
-        // database never stored - a later save of the same instance would then fail as a phantom conflict. This is the ADO
-        // path's RowVersionCollector expressed for EF Core; no value-object wrapping is needed here because the values never
-        // leave their property (the ADO collector wraps because the database hands it a raw byte[]).
+        int rows;
         var assignedVersions =
             new List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)>();
 
-        foreach (var (entity, property, readVersion) in readVersions)
+        try
         {
-            var assigned = property.GetValue(entity);
+            rows = await SaveTrackedChangesAsync(
+                context,
+                survivors,
+                insertWhenUpdateMissing,
+                mode,
+                cancellationToken
+            ).ConfigureAwait(false);
 
-            if (!Equals(assigned, readVersion))
+            SetAssignedVersionsAside(readVersions, assignedVersions);
+
+            // After pass (pre-commit): fires in recorded order with the operation actually performed (Insert when switched).
+            foreach (var op in survivors)
             {
-                assignedVersions.Add((entity, property, assigned));
+                await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The attempt failed and its transaction does not commit, so the entities go back to the versions they were
+            // read with (a retry, or a later save of the same instances, must not present a version the database never stored)
+            foreach (var (entity, property, readVersion) in readVersions)
+            {
                 property.SetValue(entity, readVersion);
             }
-        }
 
-        // After pass (pre-commit): fires in recorded order with the operation actually performed (Insert when switched).
-        foreach (var op in survivors)
-        {
-            await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false);
+            throw;
         }
-
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
         // The commit made the assigned row versions real, so settle them on the entities.
         foreach (var (entity, property, version) in assignedVersions)
@@ -1517,6 +1604,30 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         }
 
         return rows;
+    }
+
+    /// <summary>Sets the row versions SaveChanges assigned aside and puts back the ones the entities were read with.</summary>
+    /// <remarks>
+    /// After runs before the commit, so it must see the old version, and a rollback (an exception thrown by After) must not
+    /// leave behind a version the database never stored - a later save of the same instance would then fail as a phantom
+    /// conflict. This is the ADO path's RowVersionCollector expressed for EF Core; no value-object wrapping is needed here
+    /// because the values never leave their property (the ADO collector wraps because the database hands it a raw byte[]).
+    /// </remarks>
+    private static void SetAssignedVersionsAside(
+        List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)> readVersions,
+        List<(EntityBaseCore Entity, PropertyInfo Property, object? Version)> assignedVersions
+    )
+    {
+        foreach (var (entity, property, readVersion) in readVersions)
+        {
+            var assigned = property.GetValue(entity);
+
+            if (!Equals(assigned, readVersion))
+            {
+                assignedVersions.Add((entity, property, assigned));
+                property.SetValue(entity, readVersion);
+            }
+        }
     }
 
     /// <summary>Executes a raw SQL SELECT and returns the result rows mapped to {TEntity}.</summary>
@@ -1550,60 +1661,123 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
     /// <summary>Builds the primary key equality predicate (e => e.Key == id) from the metadata.</summary>
+    /// <remarks>
+    /// The key is read off a holder object rather than embedded as a constant: EF Core sends a captured member as a
+    /// parameter but writes a constant into the SQL as a literal, which compiles a new query - and gives the database a new
+    /// plan to cache - for every key value.
+    /// </remarks>
     private static Expression<Func<TEntity, bool>> BuildKeyPredicate(TKey id)
     {
         var parameter = Expression.Parameter(typeof(TEntity), "e");
-        var body = Expression.Equal(
-            Expression.Property(parameter, _metadata.KeyProperty),
-            Expression.Constant(id, _metadata.KeyProperty.PropertyType)
+        Expression key = Expression.Field(
+            Expression.Constant(new KeyHolder(id)),
+            nameof(KeyHolder.Value)
         );
+
+        if (key.Type != _metadata.KeyProperty.PropertyType)
+        {
+            key = Expression.Convert(key, _metadata.KeyProperty.PropertyType);
+        }
+
+        var body = Expression.Equal(Expression.Property(parameter, _metadata.KeyProperty), key);
         return Expression.Lambda<Func<TEntity, bool>>(body, parameter);
     }
 
+    /// <summary>Carries a key value into a predicate as a member EF Core turns into a parameter.</summary>
+    private sealed class KeyHolder(TKey value)
+    {
+        /// <summary>The key value.</summary>
+        public readonly TKey Value = value;
+    }
+
     /// <summary>Registers the graph with the DbContext via RowState → EntityState conversion and records save targets (non-Unchanged) into <paramref name="tracked"/> (pre-save processing for the disconnected pattern).</summary>
-    /// <remarks>The recording order is the graph traversal order (root → children), and the save hooks' Before/After fire in this order. Children of a Deleted subtree are also recorded as a deletion group.</remarks>
+    /// <remarks>
+    /// <para>
+    /// Only the cascade closure is registered - the children <see cref="EntityBaseCore.EnumerateCascadeChildren"/> yields,
+    /// the same walk the QuickER repositories' graph save follows - and each entity is registered on its own through
+    /// <c>Entry(...).State</c>, which does not reach the entities its navigations point at. A parent reference
+    /// (<c>line.Order</c>, <c>order.Customer</c>) is therefore never tracked: following it would mark a deleted child's
+    /// parent and siblings for deletion too, would collide when two loaded children carry separate instances of the same
+    /// parent, and would write a parent the save was never asked to write.
+    /// </para>
+    /// <para>
+    /// The recording order is the traversal order (root → children), and the save hooks' Before/After fire in this order.
+    /// The descendants of a deleted entity are recorded as a deletion group when <paramref name="cascadeDelete"/> is
+    /// <c>true</c>, whatever <paramref name="cascadeSave"/> says (the QuickER repositories delete the children of a removed
+    /// root first in that case as well); <paramref name="cascadeSave"/> only decides whether the children of an entity that
+    /// is kept are saved.
+    /// </para>
+    /// </remarks>
     private static void TrackGraph(
         TContext context,
         TEntity entity,
         bool cascadeSave,
         bool cascadeDelete,
         List<TrackedOperation> tracked
+    ) => TrackNode(context, entity, cascadeSave, cascadeDelete, tracked);
+
+    /// <summary>Registers one entity of the cascade closure and walks on to its children (see <see cref="TrackGraph"/>).</summary>
+    private static void TrackNode(
+        TContext context,
+        EntityBaseCore entity,
+        bool cascadeSave,
+        bool cascadeDelete,
+        List<TrackedOperation> tracked
     )
     {
-        if (!cascadeSave)
+        var entry = context.Entry(entity);
+        entry.State = ToEntityState(entity.RowState);
+        RecordOperation(tracked, entity, entry);
+
+        if (entity.IsRemoved)
         {
-            // Do not traverse children; only the single root is targeted for saving.
-            var entry = context.Entry(entity);
-            entry.State = ToEntityState(entity.RowState);
-            RecordOperation(tracked, entity, entry);
+            if (cascadeDelete)
+            {
+                foreach (var child in entity.EnumerateCascadeChildren())
+                {
+                    TrackDeletedNode(context, child, tracked);
+                }
+            }
+
             return;
         }
 
-        context.ChangeTracker.TrackGraph(
-            entity,
-            node =>
-            {
-                var current = (EntityBaseCore)node.Entry.Entity;
+        if (!cascadeSave)
+        {
+            return;
+        }
 
-                // When the parent is to be deleted, handling of descendants follows cascadeDelete (same as the existing version's descendants-first DELETE).
-                if (node.SourceEntry is { State: EntityState.Deleted })
-                {
-                    // With cascadeDelete=false, descendants are excluded (leaving them Detached also stops traversal below them).
-                    // Added children (not yet inserted into the database) have no row to delete and are excluded (the same result as the existing version's DELETE affecting 0 rows).
-                    if (cascadeDelete && !current.IsAdded)
-                    {
-                        node.Entry.State = EntityState.Deleted;
-                        RecordOperation(tracked, current, node.Entry);
-                    }
+        // Unchanged entities are also registered (EntityState.Unchanged) so the walk reaches changed entities below them
+        foreach (var child in entity.EnumerateCascadeChildren())
+        {
+            TrackNode(context, child, cascadeSave, cascadeDelete, tracked);
+        }
+    }
 
-                    return;
-                }
+    /// <summary>Registers a descendant of a deleted entity for deletion, together with its own descendants.</summary>
+    /// <remarks>
+    /// An Added descendant (not inserted into the database yet) has no row to delete, so it and everything below it are
+    /// left out (the same result as the QuickER repositories' DELETE affecting no row).
+    /// </remarks>
+    private static void TrackDeletedNode(
+        TContext context,
+        EntityBaseCore entity,
+        List<TrackedOperation> tracked
+    )
+    {
+        if (entity.IsAdded)
+        {
+            return;
+        }
 
-                // Unchanged entities are also tracked (EntityState.Unchanged) so traversal continues down to changed nodes below them.
-                node.Entry.State = ToEntityState(current.RowState);
-                RecordOperation(tracked, current, node.Entry);
-            }
-        );
+        var entry = context.Entry(entity);
+        entry.State = EntityState.Deleted;
+        RecordOperation(tracked, entity, entry);
+
+        foreach (var child in entity.EnumerateCascadeChildren())
+        {
+            TrackDeletedNode(context, child, tracked);
+        }
     }
 
     /// <summary>Adds a record for hook firing when the EntityState is a save target (Added/Modified/Deleted); Unchanged is ignored.</summary>
@@ -1642,7 +1816,7 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     /// </summary>
     /// <remarks>
     /// SaveChanges reports every statement that matched no row through one exception, which covers two different situations
-    /// that are told apart here by reading the stored values of each reported entry:
+    /// that are told apart here by reading the stored values of each reported entry that carries a concurrency token:
     /// <list type="bullet">
     ///   <item>the row is gone: with insertWhenUpdateMissing=true an UPDATE is switched to an INSERT and retried, otherwise
     ///     it is reported as a <see cref="SaveConflictException"/></item>
@@ -1651,8 +1825,13 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     ///     switched to an INSERT, which would turn a stale version into a primary-key violation), and under
     ///     <see cref="ConcurrencyMode.ForceOverwrite"/> the stored values are adopted as the originals so the retry wins</item>
     /// </list>
-    /// A retry can in principle hit a further concurrent change, so the loop is unbounded, matching how the
-    /// insertWhenUpdateMissing retry has always worked.
+    /// An entry without a concurrency token cannot have been changed "under" this save, so its statement matching no row is
+    /// treated as the row being gone without reading the stored values - the QuickER repositories do the same for a table
+    /// without a rowversion column. A row that is still there (a trigger or row-level security discarded the statement) is
+    /// therefore reported the way a missing one is, rather than as a concurrent modification.
+    /// A retry can hit a further concurrent change, so it is repeated, but no more than
+    /// <see cref="MaxConcurrencyAttempts"/> times: a statement that keeps matching no row for a reason other than concurrency
+    /// would otherwise be retried for ever.
     /// </remarks>
     private static async Task<int> SaveTrackedChangesAsync(
         TContext context,
@@ -1662,7 +1841,7 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         CancellationToken cancellationToken
     )
     {
-        while (true)
+        for (var attempt = 1; ; attempt++)
         {
             try
             {
@@ -1670,6 +1849,11 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
             }
             catch (DbUpdateConcurrencyException ex)
             {
+                if (attempt >= MaxConcurrencyAttempts)
+                {
+                    throw ConcurrencyAttemptsExhausted(ex);
+                }
+
                 if (ex.Entries.Count == 0)
                 {
                     // EF Core could not attribute the failure to any entry, so there is nothing to classify or retry. The
@@ -1683,7 +1867,9 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
 
                 foreach (var entry in ex.Entries)
                 {
-                    var stored = await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false);
+                    var stored = HasConcurrencyToken(entry)
+                        ? await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false)
+                        : null;
 
                     if (stored is not null)
                     {
@@ -1759,6 +1945,14 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         command.CommandText = sql;
         // Participate in the ongoing save transaction (no separate connection or transaction is opened).
         command.Transaction = _context.Database.CurrentTransaction?.GetDbTransaction();
+
+        // A command created from the connection does not see the timeout configured on the DbContext, so it is carried over
+        // (with none configured, the command keeps the connection's own default)
+        if (_context.Database.GetCommandTimeout() is { } timeout)
+        {
+            command.CommandTimeout = timeout;
+        }
+
         RawSqlMapper.BindParameters(command, parameters);
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }

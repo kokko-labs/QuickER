@@ -10,7 +10,8 @@ namespace QuickER.Provider.Oracle;
 /// <remarks>
 /// <para>
 /// ODP.NET（Oracle.ManagedDataAccess.Core）は 1 コマンドで複数文を実行できないため、
-/// スクリプトを <see cref="OracleSyncScriptBuilder"/> の規約に従い「/」のみの行で分割し、1 文ずつ順次実行する。
+/// スクリプトを <see cref="OracleSyncScriptBuilder"/> の規約（SQL*Plus と同じ＝通常文は行末の <c>;</c>、PL/SQL ブロックは
+/// 「/」のみの行で終わる）に従って分割し、1 文ずつ順次実行する。
 /// </para>
 /// <para>
 /// 通常文は末尾の <c>;</c> を除去してから実行する（ODP.NET は素の SQL の末尾セミコロンを拒否する）。
@@ -24,7 +25,7 @@ namespace QuickER.Provider.Oracle;
 /// </remarks>
 public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
 {
-    /// <summary>スクリプトを「/」区切りで分割し、1 文ずつ順次実行する</summary>
+    /// <summary>スクリプトを文に分割し（<see cref="SplitStatements"/>）、1 文ずつ順次実行する</summary>
     public async Task<SchemaSyncResult> ExecuteAsync(
         DbConnectionSettings settings,
         string script,
@@ -78,20 +79,25 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
         return result;
     }
 
-    /// <summary>スクリプトを「/」のみの行で分割し、各文を実行可能な形へ整える</summary>
+    /// <summary>スクリプトを SQL*Plus と同じ規則で文に分割し、各文を実行可能な形へ整える</summary>
     /// <remarks>
     /// <para>
-    /// 通常文は末尾の <c>;</c> を除去する。PL/SQL ブロック（<c>DECLARE</c> / <c>BEGIN</c> 開始）は
-    /// 末尾の <c>;</c> を保持する。コメントのみ・空の文は実行対象から除外する。
+    /// 区切りは SQL*Plus と同じ 2 つ。通常の文は<b>行末の <c>;</c></b>で終わり、<c>DECLARE</c> / <c>BEGIN</c> で始まる
+    /// PL/SQL 無名ブロックは<b>「/」のみの行</b>で終わる（ブロックの中の行末の <c>;</c> では区切らない）。
+    /// <see cref="OracleSyncScriptBuilder"/> はこの規約で書く（「/」行はブロックの後ろだけ）。
+    /// </para>
+    /// <para>
+    /// 溜めている文が無いときの「/」行は何もしない。SQL*Plus はそこで直前の文をもう一度実行するが、ここでは
+    /// 通常の文の後ろにも「/」行を置いたスクリプトを流しても、各文は 1 回だけ実行される。
+    /// </para>
+    /// <para>
+    /// 通常文は末尾の <c>;</c> を除去する。PL/SQL ブロックは末尾の <c>;</c>（<c>END;</c>）を保持する。
+    /// コメントのみ・空の文は実行対象から除外する。
     /// </para>
     /// <para>
     /// 文字列リテラル（<c>'…''…'</c>）・引用識別子（<c>"…"</c>）・ブロックコメント（<c>/* … */</c>）の
-    /// <b>内側</b>にある「/」だけの行は区切りとして扱わない。説明文は改行を含められるため、追跡しないと
-    /// <c>COMMENT ON</c> の値に紛れた「/」行で文が割れ、Oracle は暗黙コミットのため部分適用になる。
-    /// </para>
-    /// <para>
-    /// リテラルとブロックコメントは行をまたぐため、判定は「その行の先頭時点で外側に居るか」で行う
-    /// （「/」だけの行はそれ自体が状態を変えないので、この判定で必要十分）。
+    /// <b>内側</b>にある「/」だけの行と行末の <c>;</c> は区切りとして扱わない。行コメント（<c>--</c>）の中の <c>;</c> も
+    /// 区切りにしない。リテラルとブロックコメントは行をまたぐため、判定は行の走査が終わった時点の状態で行う。
     /// </para>
     /// <para>
     /// Oracle の代替引用 <c>q'[…]'</c> は追跡しない（QuickER 自身は出力しないため実害経路はない）。
@@ -104,19 +110,45 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
         // 開いているリテラル・引用識別子の終端文字（null＝外側）と、ブロックコメントの内外
         char? closing = null;
         var inBlockComment = false;
+        // 溜めている文が PL/SQL ブロックか（最初のコード行で決まる。null＝まだコード行が無い）
+        bool? currentIsBlock = null;
 
         foreach (var rawLine in script.Replace("\r\n", "\n").Split('\n'))
         {
-            // 「/」のみ（前後空白許容）の行を文の区切りとする（リテラル・コメントの外側に限る）
-            if (closing is null && !inBlockComment && rawLine.Trim() == "/")
+            var outsideAtStart = closing is null && !inBlockComment;
+
+            // 「/」のみ（前後空白許容）の行は文の区切り（リテラル・コメントの外側に限る）。
+            // 溜めている文が無ければ何もしない（通常文の後ろの「/」で同じ文を二重に実行しない）
+            if (outsideAtStart && rawLine.Trim() == "/")
             {
                 AddIfMeaningful(statements, current);
                 current.Clear();
+                currentIsBlock = null;
                 continue;
             }
 
-            ScanLine(rawLine, ref closing, ref inBlockComment);
+            var trimmed = rawLine.Trim();
+
+            if (
+                currentIsBlock is null
+                && outsideAtStart
+                && trimmed.Length > 0
+                && !trimmed.StartsWith("--", StringComparison.Ordinal)
+            )
+            {
+                currentIsBlock = IsPlSqlBlock(trimmed);
+            }
+
+            var endsWithSemicolon = ScanLine(rawLine, ref closing, ref inBlockComment);
             current.Add(rawLine);
+
+            // 通常の文は、リテラル・コメントの外で行末が ; の行で終わる（SQL*Plus と同じ）
+            if (currentIsBlock == false && endsWithSemicolon)
+            {
+                AddIfMeaningful(statements, current);
+                current.Clear();
+                currentIsBlock = null;
+            }
         }
 
         AddIfMeaningful(statements, current);
@@ -124,14 +156,17 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
     }
 
     /// <summary>1 行を走査してリテラル・引用識別子・ブロックコメントの開閉状態を更新する</summary>
+    /// <returns>行の終わりでリテラル・コメントの外にいて、最後のコードの文字が <c>;</c> なら <c>true</c></returns>
     /// <remarks>
     /// Oracle のブロックコメントは入れ子にできないため真偽値で持つ。終端文字の二重化（<c>''</c> / <c>""</c>）は
     /// エスケープなので閉じたとみなさない。行コメント（<c>--</c>）は行末までを読み飛ばす＝そこに現れる引用符で
-    /// リテラルを開かない。
+    /// リテラルを開かず、そこに現れる <c>;</c> も文の終わりとみなさない。
     /// </remarks>
-    private static void ScanLine(string line, ref char? closing, ref bool inBlockComment)
+    private static bool ScanLine(string line, ref char? closing, ref bool inBlockComment)
     {
         var i = 0;
+        // 外側で最後に見たコードの文字（空白・コメントは数えない）
+        char? last = null;
 
         while (i < line.Length)
         {
@@ -162,6 +197,7 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
                 if (c == closing)
                 {
                     closing = null;
+                    last = c;
                 }
 
                 i++;
@@ -171,7 +207,7 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
             // 行コメントは行末まで状態を変えない
             if (c == '-' && i + 1 < line.Length && line[i + 1] == '-')
             {
-                return;
+                break;
             }
 
             if (c == '/' && i + 1 < line.Length && line[i + 1] == '*')
@@ -188,8 +224,15 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
                 continue;
             }
 
+            if (!char.IsWhiteSpace(c))
+            {
+                last = c;
+            }
+
             i++;
         }
+
+        return closing is null && !inBlockComment && last == ';';
     }
 
     /// <summary>蓄積した行を 1 文として整形し、意味がある場合のみ追加する</summary>
@@ -219,13 +262,32 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
         }
     }
 
-    /// <summary>文が DECLARE / BEGIN で始まる PL/SQL 無名ブロックかどうかを判定する</summary>
-    private static bool IsPlSqlBlock(string block)
+    /// <summary>文（またはその最初のコード行）が DECLARE / BEGIN で始まる PL/SQL 無名ブロックかどうかを判定する</summary>
+    /// <remarks>先頭の行コメント・空行は読み飛ばす。<see cref="OracleSyncScriptBuilder"/> が「/」行を置くかの判定にも使う</remarks>
+    public static bool IsPlSqlBlock(string block)
     {
-        var head = block.TrimStart();
-        return head.StartsWith("DECLARE", StringComparison.OrdinalIgnoreCase)
-            || head.StartsWith("BEGIN", StringComparison.OrdinalIgnoreCase);
+        foreach (var line in block.Replace("\r\n", "\n").Split('\n'))
+        {
+            var head = line.Trim();
+
+            if (head.Length == 0 || head.StartsWith("--", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return StartsWithWord(head, "DECLARE") || StartsWithWord(head, "BEGIN");
+        }
+
+        return false;
     }
+
+    /// <summary>行が指定の語（大文字小文字を区別しない）で始まり、その後ろが語の続きでないか</summary>
+    private static bool StartsWithWord(string line, string word) =>
+        line.StartsWith(word, StringComparison.OrdinalIgnoreCase)
+        && (
+            line.Length == word.Length
+            || !(char.IsLetterOrDigit(line[word.Length]) || line[word.Length] == '_')
+        );
 
     /// <summary>文がコメント行（-- 始まり）と空行のみで構成されているかどうかを判定する</summary>
     private static bool IsCommentOnly(string block)

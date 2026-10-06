@@ -138,9 +138,6 @@ internal sealed class CSharpSyncTableModel
     /// <summary>キー変数 <c>key</c> をジャーナルのテキスト形へ変換する式</summary>
     public required string FormatKeyExpression { get; init; }
 
-    /// <summary>デコレータで引数 <c>id</c> をテキスト形へ変換する式</summary>
-    public required string FormatKeyIdExpression { get; init; }
-
     /// <summary>ジャーナルのテキスト形 <c>keyText</c> から主キーを復元する式</summary>
     public required string ParseKeyExpression { get; init; }
 
@@ -165,6 +162,28 @@ internal sealed class CSharpSyncTableModel
 
     /// <summary>ジャーナル記録デコレータへ挿入する除外列アクセサ（Read は素通し・Write は journal-first。無ければ空文字）</summary>
     public string DecoratorBinaryBlock { get; init; } = string.Empty;
+
+    /// <summary>記述子の初期化子へ挿入する、NOT NULL の除外列へ空の値を入れる処理（整形済み・無ければ空文字）</summary>
+    /// <remarks>
+    /// 同期の行の読み出しは除外列を含まないため、値オブジェクトの除外列は null のまま届き、ローカルへ挿入すると
+    /// NOT NULL で失敗する。エンジンは挿入する行へこれを当てる（値オブジェクトは空配列から作った値・非 VO は空配列）。
+    /// </remarks>
+    public string FillUnsetUnboundedBinariesBlock { get; init; } = string.Empty;
+
+    /// <summary>記述子の初期化子へ挿入する親参照（<c>ParentReferences = [...]</c>・整形済み・無ければ空文字）</summary>
+    /// <remarks>
+    /// 対象は列ペア 1 組で親の主キーを参照し、親も同期対象のリレーション（自己参照を含む）。削除伝搬が残す行の
+    /// 祖先を残すため・ダウンロードが削除の未送信な親を参照する行で止まるため・サーバーへの書き込みの失敗を
+    /// 親の不在として報告するために、エンジンが子の行から親のキーを読む。
+    /// </remarks>
+    public string ParentReferencesBlock { get; init; } = string.Empty;
+
+    /// <summary>記述子の初期化子へ挿入する被参照テーブル名（<c>ReferencingTableNames = [...]</c>・整形済み・無ければ空文字）</summary>
+    /// <remarks>
+    /// 図の全リレーションから、このテーブルを親として参照する子テーブル（同期対象かどうかを問わない）。サーバーへの
+    /// 削除の失敗を「サーバーが削除を断った」と報告してよいかの判定材料。
+    /// </remarks>
+    public string ReferencingTableNamesBlock { get; init; } = string.Empty;
 }
 
 /// <summary>EF Core 用コード（DbContext と OnModelCreating の Fluent 構成）のルート生成モデル</summary>
@@ -354,6 +373,9 @@ internal sealed class CSharpClassModel
 
     /// <summary>対応するテーブル名</summary>
     public required string TableName { get; init; }
+
+    /// <summary>インメモリのシーダーが投入する行数（最大 3。主キー・一意制約が 3 行ぶん違う値を作れないとき、またはその親の行数に合わせて減る）</summary>
+    public int SampleRowCount { get; init; } = 3;
 
     /// <summary>XML doc summary の定型文へ埋め込むテーブル名（XML エスケープ・改行畳み込み済み）</summary>
     /// <remarks>

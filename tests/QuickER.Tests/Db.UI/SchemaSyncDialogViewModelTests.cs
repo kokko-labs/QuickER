@@ -777,9 +777,13 @@ public class SchemaSyncDialogViewModelTests
     public async Task Refresh_CompositeForeignKey_KeepsSecondaryConstituentColumnSelectable()
     {
         var (live, target, targetRelationships) = CompositeForeignKeyChangeScenario();
-        // 第 1 構成列（parent_id）に加えて第 2 構成列（order_no）も型変更する
+        // 第 1 構成列（parent_id）に加えて第 2 構成列（order_no）も型変更する。
+        // 参照先の 2 列も同じ型へ揃える（両端の型が食い違う外部キーは外し直さないため）
         var childTarget = target.Single(e => e.TableName == "child");
         childTarget.Columns.Single(c => c.Name == "order_no").DataType = "bigint";
+        var parentTarget = target.Single(e => e.TableName == "parent");
+        parentTarget.Columns.Single(c => c.Name == "id").DataType = "bigint";
+        parentTarget.Columns.Single(c => c.Name == "code").DataType = "bigint";
 
         var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
         var vm = new SchemaSyncDialogViewModel(
@@ -792,7 +796,10 @@ public class SchemaSyncDialogViewModelTests
         await vm.RefreshCommand.ExecuteAsync(null);
 
         var alterColumns = vm.DiffItems.Where(i => i.Kind == SchemaDiffKind.AlterColumn).ToList();
-        alterColumns.Select(i => i.ColumnName).Should().BeEquivalentTo("parent_id", "order_no");
+        alterColumns
+            .Select(i => $"{i.TableName}.{i.ColumnName}")
+            .Should()
+            .BeEquivalentTo("child.parent_id", "child.order_no", "parent.id", "parent.code");
         alterColumns.Should().OnlyContain(i => i.IsSelectable);
 
         // 選択すると、構成列の変更に巻き込まれる FK が全構成列のまま作り直される

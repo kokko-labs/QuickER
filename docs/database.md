@@ -108,7 +108,7 @@ If the file turns out to be corrupted, it is moved aside once to `connections.js
 
 ### What gets imported
 
-- Tables (views, temporary tables, and the container tables behind materialized views are excluded) and columns (type, length, precision, nullability)
+- Tables (views, temporary tables, and the container and log tables behind materialized views are excluded) and columns (type, length, precision, nullability)
 - Primary keys, preserving a composite key's own column order.
   `PRIMARY KEY (b, a)` imports as exactly that, and generated DDL emits the constraint's declared order rather than the order the columns happen to appear in the table, so the column order of the backing index survives the round trip
 - Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions).
@@ -156,7 +156,7 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
 - A **foreign key that points outside the imported scope** is skipped (on SQLite this covers a key whose parent table does not exist)
 - A **disabled constraint** (`DISABLE` on Oracle, a foreign key turned off with `NOCHECK CONSTRAINT` on SQL Server) is not imported
 - A table whose **columns could not be read at all** is imported without columns
-- One of two tables whose **names differ only in letter case** is skipped, because the import cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, and SQL Server does in a database with a case-sensitive collation)
+- One of two tables whose **names differ only in letter case** is skipped, because the import cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, SQL Server does in a database with a case-sensitive collation, and SQLite, which folds only ASCII letters, does for names such as `Äpfel` and `äpfel`)
 - A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
   The diagram does not model expressions, so generated DDL creates an ordinary column (with a comment asking for the expression to be added by hand).
   Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))
@@ -169,7 +169,7 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
 - A column whose **data type cannot be written into SQL safely** is named, along with the type text.
   The import keeps it, but DDL generation and schema sync refuse the *whole diagram* until it is corrected, because a type is neither an identifier nor a string literal and there is nowhere to quote it (see [What a data type may contain](#what-a-data-type-may-contain)).
   SQLite stores whatever type text a table was declared with, and PostgreSQL reports a type name that needs quoting with the quotes attached, so either can produce one
-- A **partitioned table** (PostgreSQL, MySQL) is imported as its parent, and the partitioning itself is not modelled.
+- A **partitioned table** (PostgreSQL, MySQL, Oracle) is imported as its parent, and the partitioning itself is not modelled.
   Generated DDL creates the table unpartitioned
 - A SQLite **primary key that allows NULL** is imported as NOT NULL, and the adjusted columns are named.
   In a rowid table, any primary key other than a single column declared exactly `INTEGER` can hold NULL, while the diagram and the editor always treat a primary key as NOT NULL.
@@ -194,8 +194,22 @@ These columns now carry their real declared type.
 Any column of the kinds above shows up once as a column change in the diff sync, because the diagram holds the old broken spelling and the database reports the correct one.
 Healthy columns are unaffected: their spelling is unchanged.
 
+On SQL Server the import also reads the fractional-second precision of `datetime2` / `time` / `datetimeoffset`.
+The default precision of 7 is written without parentheses as `datetime2`, and any other precision is written out, as in `datetime2(3)`.
+Earlier versions did not read the precision and imported a `datetime2(3)` column as `datetime2`.
+Syncing from such a diagram could change the column's precision to 7.
+
+**In a diagram imported from SQL Server by an earlier version, columns whose fractional-second precision is not 7 show up as a type change in the next sync.**
+Import the diagram again, or change the types in the diagram to match the database's declarations.
+
+On Oracle, a `NUMBER` with no precision and a scale of 0 (a column declared `INTEGER`, `SMALLINT` or `NUMBER(*,0)`) is imported as `NUMBER(*,0)`.
+Earlier versions imported it as a bare `NUMBER`, so DDL generated from that diagram made a column that accepts fractions.
+In a diagram imported from Oracle by an earlier version, such columns show up as a type change in the next sync.
+
 The import result is merged into the current diagram.
 Tables and columns are matched by name, and matching elements take over the identity of the current diagram's elements, so their layout, width, color, and notes are preserved, along with the named queries that reference them.
+A name that differs only in letter case also matches, as long as it is unique on both sides ignoring case (MySQL on Windows, for example, returns table names in lower case); the imported spelling then replaces the diagram's.
+When names differing only in case exist side by side, an exact match is taken first, and a name that stays ambiguous is treated as a new table or column.
 Only newly imported tables are placed in free space; the whole diagram is auto-arranged only when nothing in the current diagram matches (a completely new import).
 A confirmation appears when the current diagram differs structurally, and also when the import would break named queries, in which case the queries to be removed are listed by name.
 
@@ -250,14 +264,36 @@ It compares the current state of the database with the contents of the diagram, 
 
 - Adding and dropping tables
 - Adding, altering (type, nullability), and dropping columns
-- Adding and dropping foreign keys
+- Adding, dropping, and recreating foreign keys (a foreign key whose referential actions, column pairs, or referenced table alone changed)
 - Changing the primary key (adding or removing it, or changing its column set or column order)
 - Setting, updating, and removing table and column descriptions (SQLite is out of scope)
 - Changes to the column order (syncable on SQLite / MySQL)
 
 Elements with the same name are treated as the same element, so a rename is detected as "drop + add."
+A table or column whose name differs from the database's only in letter case is the same element too, as long as it is unique on both sides ignoring case, and the script then writes the database's spelling.
+This matters where quoted names are case-sensitive: Oracle stores a table created without quotes as `ORDERS` and PostgreSQL as `orders`, so a diagram's `Orders` would otherwise name a table that does not exist.
+A table or column that exists only in the diagram is created with the diagram's spelling.
+A foreign key of an unnamed relationship is matched by the same default name the DDL gives it (`FK_{child table}_{parent table}`).
+
+Column types are compared after bringing both sides to the spelling the database stores.
+A database does not always remember a declaration as written: a column declared `numeric(18,0)` comes back as `numeric(18)`.
+Two spellings of the same type, such as `numeric(18,0)` and `numeric(18)` or `datetime2(7)` and `datetime2`, are therefore not a difference.
+PostgreSQL's `timestamp` and `timestamp(6)` or `numeric(18,0)` and `numeric(18)`, MySQL's `decimal(12)` and `decimal(12,0)`, and Oracle's `TIMESTAMP` and `TIMESTAMP(6)` or `INTEGER` and `NUMBER(*,0)`, are not a difference for the same reason.
+Only omitted defaults and aliases the database does not remember are aligned; types that differ in meaning (`datetime2(3)` and `datetime2`) are still a difference.
+
+On PostgreSQL, a type change that crosses type families (`varchar` to `integer`, `text` to `date`, `integer` to `boolean` and the like) is written with `USING column::new_type`, so it goes through when every value converts.
+A change to a string type is written without it, so a value too long for a shorter `varchar(n)` makes the sync fail instead of being cut off.
+A type the import cannot classify (PostGIS types, user-defined types) is also written without it.
+
+Oracle foreign keys have no `ON UPDATE` and no `ON DELETE SET DEFAULT`, so those settings in the diagram are compared as `NO ACTION`.
+The DDL and the sync script create the foreign key without the clause and add a comment saying so.
+MySQL (InnoDB) accepts `SET DEFAULT` in `ON DELETE` and `ON UPDATE` but does not apply it: deleting the parent row fails, as with `NO ACTION`.
+It is handled the same way: compared as `NO ACTION`, and left out of the DDL and the sync script with a comment.
+Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
 
 Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions.
+Adding a column in the middle is therefore not a column-order difference by itself: the new column goes to the end of the table, and the next sync shows the order difference.
+When existing columns are reordered at the same time, a single sync also puts the new column in place.
 On SQLite and MySQL it can be synced as a selectable diff item (unselected by default): SQLite folds it into the table rebuild, and MySQL uses `ALTER TABLE ... MODIFY ... AFTER`, moving as few columns as possible.
 MySQL's `MODIFY` re-specifies the column from the live catalog, so moving a column keeps its attributes and its comment (see [what MySQL's `MODIFY COLUMN` re-specifies](#what-mysqls-modify-column-re-specifies)).
 On the other three dialects it is shown for information only and is not synced.
@@ -271,6 +307,8 @@ On the other three dialects it is shown for information only and is not synced.
   That includes the implicit drop-and-recreate triggered by a primary-key change and SQLite's table rebuilds, and a composite foreign key is never silently narrowed to a single column
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
   On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied
+- The Oracle script and DDL can also be run by hand in SQL*Plus.
+  Ordinary statements end with `;`, and a `/` line follows only a PL/SQL block, so each statement runs exactly once (SQL*Plus runs the previous statement again on a `/` line)
 - A SQLite run that involves rebuilds shows a dedicated confirmation listing the tables to be rebuilt.
   The list of tables to rebuild and notes such as recreated foreign keys appear in full in a scrollable details area of the confirmation
 - When the initial diff detection finds no differences at all, the dialog reports that and stays open.
@@ -286,7 +324,12 @@ Changing a table's primary key in the diagram (adding or removing it, or changin
 The old primary-key constraint is located by querying the database catalog at run time, so imported databases with arbitrary constraint names work.
 The script drops the old key first, applies any selected column alterations, and then adds the new key, so a change that also makes the old key column nullable succeeds in one sync.
 
-Foreign keys that reference the changed primary key are dropped and re-created automatically around the change (on SQL Server, the same applies when altering a column that participates in a foreign key).
+Foreign keys that reference the changed primary key are dropped and re-created automatically around the change (on SQL Server and MySQL, the same applies when altering a column that participates in a foreign key).
+On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
+On SQL Server, altering the type of a primary key column also drops the primary key and adds it back with the same columns (the re-added key is named `PK_{table}`).
+When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
+Re-adding it would always fail and, on MySQL / Oracle, leave the foreign key missing.
+The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
 If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.
 On SQL Server and PostgreSQL such a failure rolls the whole script back, while on MySQL / Oracle it can leave the foreign keys dropped (partially applied).
 
@@ -297,6 +340,9 @@ SQL Server uses MS_Description extended properties, PostgreSQL and Oracle use `C
 Checking for an existing description to choose between add and update applies to SQL Server's extended properties only; PostgreSQL and Oracle simply re-run `COMMENT ON`, and MySQL re-runs the `COMMENT` clause (both idempotent in themselves).
 Clearing a description in the diagram removes it.
 SQLite has no description mechanism, so descriptions are neither diffed nor synced there.
+
+On SQL Server, a table name without a schema refers to the connecting login's default schema, as it does in `CREATE TABLE`, and its description goes to the same table (the schema is taken from `SCHEMA_NAME()`).
+The import writes tables outside `dbo` with their schema (`app.Widget`), so when your login's default schema is not `dbo`, write the schema into the diagram's table names as well; otherwise the next diff sees `Widget` and `app.Widget` as two different tables.
 
 #### What MySQL's `MODIFY COLUMN` re-specifies
 
@@ -311,7 +357,10 @@ QuickER therefore takes the definition from two different places, depending on w
   Column-order sync preserves the column's existing comment as well.
 - **Altering a column** (a type or nullability change) re-specifies from the diagram, because the diagram is what that change expresses.
   It therefore **does** drop the attributes listed above, none of which the diagram can represent.
+  The comment alone is re-stated from the live database and kept (changing it is the job of the description sync item).
   Such diffs are unselected by default.
+- **Changing the primary key** removes `AUTO_INCREMENT` from an old primary key column before dropping the key, because MySQL refuses to drop it otherwise (error 1075).
+  `AUTO_INCREMENT` is not added back because the diagram cannot represent it (the comment, default, and other attributes are carried over from the live definition).
 
 Two things do not come through the rebuild, both because the catalog does not record them the way they were written:
 
@@ -332,20 +381,21 @@ It records `COLUMN_DEFAULT` with different semantics, so a definition rebuilt fr
 
 Because SQLite's `ALTER TABLE` supports only limited changes, sync operations that involve column changes or deletions use a table-rebuild approach.
 A new table is created from the combined definition of "the database's current state + the selected differences," the data is migrated, the old table is swapped out, and auxiliary objects such as indexes are recreated.
-The rebuild runs inside a transaction, and before committing it checks foreign-key integrity (`PRAGMA foreign_key_check`); on violations it rolls back and reports the violating tables.
+The rebuild runs inside a transaction, and before committing it checks foreign-key integrity (`PRAGMA foreign_key_check`); if the sync added violations it rolls back and reports the violating tables.
+SQLite does not check foreign keys by default, so databases that hold child rows without a parent are common, and violations that existed before the sync do not make it fail.
+A view that refers to a rebuilt table does not stop the rebuild, and it keeps pointing at the rebuilt table (`PRAGMA legacy_alter_table` is turned on for the duration).
+If the sync breaks a view, for example one that refers to a dropped column, it rolls back and names the view.
 
 The rebuilt table is created from the diagram's definition, so anything outside [what the diagram models](#modeling-fidelity) is **not** reproduced and is silently lost.
 That covers `AUTOINCREMENT`, `DEFAULT`, `CHECK`, `COLLATE`, and generated columns, which is exactly why the `DEFAULT` values you set outside QuickER disappear after a rebuild.
+Conflict clauses on constraints (`ON CONFLICT`), deferred foreign keys (`DEFERRABLE INITIALLY DEFERRED`), and the table options after the closing parenthesis of the column list (`WITHOUT ROWID` and `STRICT`) are lost the same way.
 Indexes and triggers are safe: they are captured as their full `CREATE` statements and replayed.
 Implicit auto-numbering is also safe as long as the diagram's declared type is `INTEGER`, because such a primary key stays a rowid alias in the rebuilt table (a key declared `INT`, which is what a diagram created in QuickER or converted through another dialect holds, was never an alias to begin with; see [what the diagram models](#modeling-fidelity)).
 
 To make the loss visible, QuickER reads the live `CREATE TABLE` statement of every table it is about to rebuild and lists the attributes it found in the execution-confirmation dialog.
 If the table needs those attributes, re-apply them yourself after the sync, or run the change as hand-written SQL.
-
-The **table options** `WITHOUT ROWID` and `STRICT` are lost the same way, but **without a warning**.
-They sit after the closing parenthesis of the column list, the detector behind that confirmation only reads what is inside it, and neither word is in its keyword list either.
-A rebuilt table therefore comes back as an ordinary rowid, non-strict table with nothing said about it.
-If a table depends on either option, do not sync it through a rebuild; apply the change as hand-written SQL instead.
+A table that depends on `WITHOUT ROWID` or `STRICT` comes back as an ordinary rowid, non-strict table, so do not sync it through a rebuild; apply the change as hand-written SQL instead.
+`NOT DEFERRABLE` and `DEFERRABLE INITIALLY IMMEDIATE` check immediately, the same as the default, so losing them changes nothing and they are not listed.
 
 The sync-target SQLite file can also be created fresh with the "Create new" button in the connection dialog.
 Apply the whole diagram to an empty database to set it up from scratch.
@@ -362,6 +412,17 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - A string or binary column declared without a length (PostgreSQL's `varchar`, SQLite's `TEXT` and the like) cannot move to SQL Server, MySQL or Oracle and is listed as well.
   MySQL and Oracle reject a `varchar` / `VARCHAR2` with no length, and SQL Server quietly creates a **one-character** column when the length is omitted.
   Give the column a length in the source diagram before switching
+- A length or precision beyond the target's limit (SQL Server's `nvarchar(5000)`, `decimal(50,2)`, `datetime2(9)`, Oracle's `NVARCHAR2(4000)`, `NUMBER(39)`, MySQL's `datetime(7)`, `decimal(66,2)` and the like) is listed as unconvertible.
+  Writing it out as is would make the DDL fail when applied.
+  Oracle's limits for strings and `RAW` are those of `MAX_STRING_SIZE = STANDARD`, the default (`NVARCHAR2` 2000, `VARCHAR2` 4000, `NCHAR` 1000, `CHAR` and `RAW` 2000).
+  QuickER does not know the connected database's setting, so a column beyond these limits is listed as unconvertible even for a `MAX_STRING_SIZE = EXTENDED` database
+- A `decimal` without a precision (Oracle's `NUMBER`, PostgreSQL's unconstrained `numeric`) cannot move to SQL Server or MySQL and is listed as well.
+  A bare `decimal` means `decimal(18,0)` on SQL Server and `decimal(10,0)` on MySQL, a column that quietly rounds away the fractional part
+- Oracle's `NUMBER(*,2)` (no precision limit, a scale of 2) can be written out only for Oracle and is listed for every other dialect except SQLite.
+  PostgreSQL's `numeric` cannot declare a scale without a precision, and a bare `numeric` would drop the rounding to two places
+- A MySQL integer is converted by the range of values it holds, sign included.
+  `int unsigned` becomes a 64-bit integer (`bigint` on SQL Server), `smallint unsigned` a 32-bit one, and `bigint unsigned` becomes `decimal(20,0)`.
+  A signed `tinyint` (-128 to 127) becomes a 16-bit integer, because the 8-bit integer the other dialects share is unsigned (0 to 255, like SQL Server's `tinyint`)
 - SQL Server's `rowversion` / `timestamp` becomes a plain `BLOB` on SQLite, and its NOT NULL is lifted at the same time (SQLite assigns nothing, so a locally created row has no version until a sync writes one).
   The conversion is one-way: converting that `BLOB` back to SQL Server yields `varbinary(max)`, not a row version.
   See [Multi-target repositories](code-generation.md#multi-target-repositories-sqlserver--sqlite) for what the column means on each side, and [Bidirectional sync support](code-generation.md#bidirectional-sync-support---generate-sync-support) for generating the code that keeps the two databases in step.
@@ -386,6 +447,9 @@ A type may contain:
 - A trailing `[]` for a PostgreSQL array, repeatable for more dimensions: `integer[]`, `integer[][]`
 - A MySQL value list: `enum('a','b')`, `set('x','y')`
 
+A type may be at most 200 characters long.
+Only a MySQL value list has no length limit, because an `enum` with many values can exceed 200 characters and is a real declaration.
+
 Everything the five dialect catalogues offer, and everything schema import builds from a live database, is inside this.
 What falls outside it:
 
@@ -394,8 +458,9 @@ What falls outside it:
 - A type with leading or trailing whitespace.
   What is validated has to be exactly what is written out, and trimming first breaks that: `"\nGO\n"` reads as the single word `GO` once trimmed, but written out it can trip SQL Server's batch splitting.
   An empty or whitespace-only type still means "not set" and passes as before
-- A type whose second or later word is a column clause keyword: `NOT`, `NULL`, `DEFAULT`, `PRIMARY`, `KEY`, `REFERENCES`, `CHECK`, `GENERATED`, `IDENTITY`, `COLLATE`, `UNIQUE`, `ON`.
+- A type whose second or later word is a column clause keyword: `NOT`, `NULL`, `DEFAULT`, `PRIMARY`, `KEY`, `REFERENCES`, `CHECK`, `GENERATED`, `IDENTITY`, `COLLATE`, `UNIQUE`, `ON`, `AS`, `AUTO_INCREMENT`, `AUTOINCREMENT`, `INVISIBLE`, `VISIBLE`, `CONSTRAINT`.
   A type is interpolated into the middle of a column definition, so `int NOT NULL` or `varchar(50) COLLATE Latin1_General_BIN` produces perfectly valid DDL whose nullability, default or collation disagrees with what the diagram declares, and no syntax error tells you.
+  The same goes for `int AS (price)` (the short form of a generated column) or `int AUTO_INCREMENT`: a column the diagram says is neither computed nor auto-numbered becomes one in the database, and the generated code's INSERT fails at run time.
   None of these words appears in any real type notation the catalogues or schema import produce
 
 Two known exclusions are worth naming because a database can produce them.

@@ -65,6 +65,14 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
         // N 系は常に文字単位だが Oracle の構文が単位語を受けないため付けない
         new("C_NVC", "NVARCHAR2(20)", "NVARCHAR2(20)", Closure.RoundTrips),
         new("C_RAW", "RAW(16)", "RAW(16)", Closure.RoundTrips),
+        // 精度なし・スケール 0（INTEGER / SMALLINT / NUMBER(*,0)）は素の NUMBER と区別して取り込む。
+        // 素の NUMBER にすると、取り込んだ図から作り直した DDL が小数を受ける列になり整数の制約が落ちる
+        new("C_INTEGER", "INTEGER", "NUMBER(*,0)", Closure.RoundTrips),
+        new("C_SMALLINT", "SMALLINT", "NUMBER(*,0)", Closure.RoundTrips),
+        new("C_NUM_STAR_0", "NUMBER(*,0)", "NUMBER(*,0)", Closure.RoundTrips),
+        new("C_NUM_STAR_2", "NUMBER(*,2)", "NUMBER(*,2)", Closure.RoundTrips),
+        // NUMBER(*) は精度もスケールも持たない＝素の NUMBER と同じ
+        new("C_NUM_STAR", "NUMBER(*)", "NUMBER", Closure.RoundTrips),
     ];
 
     /// <summary>
@@ -328,6 +336,115 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
     }
 
     /// <summary>
+    /// 取り込まなかったテーブル（大文字小文字の衝突で捨てた側）の外部キーについては、範囲外の警告を出さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] Oracle: 捨てたテーブルの範囲外の外部キーは警告しない")]
+    public async Task Import_OutOfScopeForeignKeyOfDiscardedTable_IsNotReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsSystemAsync(
+            """
+            CREATE USER QEROTHER IDENTIFIED BY qerother QUOTA UNLIMITED ON USERS;
+            GRANT CREATE SESSION, CREATE TABLE TO QEROTHER;
+            CREATE TABLE QEROTHER.XPARENT (ID NUMBER(10) PRIMARY KEY);
+            GRANT REFERENCES ON QEROTHER.XPARENT TO ORACLE;
+            """,
+            Ct
+        );
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                CREATE TABLE DUP (ID NUMBER(10) PRIMARY KEY);
+                CREATE TABLE "dup" (ID NUMBER(10) PRIMARY KEY, PID NUMBER(10));
+                ALTER TABLE "dup" ADD CONSTRAINT FK_DISCARDED
+                    FOREIGN KEY (PID) REFERENCES QEROTHER.XPARENT (ID);
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("DUP");
+            result
+                .Warnings.Should()
+                .ContainSingle("捨てた \"dup\" の外部キーは図に載らないので名指ししない")
+                .Which.Kind.Should()
+                .Be(SchemaImportWarningKind.TableNameCollision);
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP TABLE \"dup\" CASCADE CONSTRAINTS PURGE;", Ct);
+            await fixture.ExecuteAsSystemAsync("DROP USER QEROTHER CASCADE;", Ct);
+        }
+    }
+
+    /// <summary>
+    /// マテリアライズドビューのログ表（<c>MLOG$_…</c>）が取込対象から除外されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] Oracle: マテリアライズドビューのログ表は取込から除外される")]
+    public async Task Import_ExcludesMaterializedViewLogTables()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE LOG_BASE (ID NUMBER(10) PRIMARY KEY, V NUMBER(10));
+            CREATE MATERIALIZED VIEW LOG ON LOG_BASE;
+            """,
+            Ct
+        );
+
+        try
+        {
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+            // MLOG$_LOG_BASE は user_tables に通常テーブルとして現れるが、ビューの更新のための変更記録
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("LOG_BASE");
+        }
+        finally
+        {
+            // ログ表は DROP TABLE で落とせないので、後続テストの ResetSchemaAsync のためにログとして落とす
+            await fixture.ExecuteAsync("DROP MATERIALIZED VIEW LOG ON LOG_BASE;", Ct);
+        }
+    }
+
+    /// <summary>
+    /// パーティション表を取り込み、パーティション定義が失われることを警告として報告することを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] Oracle: パーティション表は取り込み、パーティション定義の喪失を報告する"
+    )]
+    public async Task Import_PartitionedTable_IsImportedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE PART_T (ID NUMBER(10) PRIMARY KEY, D DATE)
+                PARTITION BY RANGE (D) (PARTITION P1 VALUES LESS THAN (DATE '2030-01-01'));
+            CREATE TABLE PLAIN_T (ID NUMBER(10) PRIMARY KEY);
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("PART_T", "PLAIN_T");
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.PartitionDefinitionLost);
+        warning.TableName.Should().Be("PART_T");
+    }
+
+    /// <summary>
     /// 大文字小文字だけが違う同名テーブルを、列を混ぜずに片方だけ取り込み、警告として報告することを検証する。
     /// </summary>
     [Fact(
@@ -440,5 +557,56 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
         result
             .Warnings.Should()
             .NotContain(w => w.Kind == SchemaImportWarningKind.ComputedColumnExpressionLost);
+    }
+
+    /// <summary>
+    /// <c>INTEGER</c> の列を取り込んだ図から DDL を作り直しても、整数の制約が保たれる（1.5 が 2 へ丸められる）
+    /// ことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// Oracle は <c>INTEGER</c> を精度なし・スケール 0 の <c>NUMBER</c> として保存する。取込が素の
+    /// <c>NUMBER</c>（浮動）として書くと、作り直した列は 1.5 をそのまま保存する別の列になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] Oracle: INTEGER の列は取込図から作り直しても整数の制約を保つ"
+    )]
+    public async Task Import_IntegerColumn_KeepsIntegerConstraintAfterRegeneration()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE INT_PROBE (ID NUMBER(10) PRIMARY KEY, QTY INTEGER);",
+            Ct
+        );
+
+        ErDiagram imported;
+
+        await using (var conn = await fixture.OpenConnectionAsync(Ct))
+        {
+            var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+            imported = new ErDiagram
+            {
+                Entities = result.Entities.ToList(),
+                Relationships = result.Relationships.ToList(),
+            };
+        }
+
+        imported
+            .Entities.Single(e => e.TableName == "INT_PROBE")
+            .Columns.Single(c => c.Name == "QTY")
+            .DataType.Should()
+            .Be("NUMBER(*,0)");
+
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(new OracleDdlGenerator().Build(imported), Ct);
+        await fixture.ExecuteAsync("INSERT INTO INT_PROBE (ID, QTY) VALUES (1, 1.5);", Ct);
+
+        await using var reconn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = reconn.CreateCommand();
+        cmd.CommandText = "SELECT TO_CHAR(QTY) FROM INT_PROBE";
+        var stored = (string?)await cmd.ExecuteScalarAsync(Ct);
+
+        stored.Should().Be("2", "作り直した列も整数の列であり、1.5 は 2 へ丸められること");
     }
 }

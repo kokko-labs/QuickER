@@ -1,8 +1,10 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedSyncFixture;
+using QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -97,6 +99,53 @@ public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
         var exception = await act.Should().ThrowAsync<System.InvalidOperationException>();
         exception.Which.Message.Should().Contain("sync_orders");
         exception.Which.Message.Should().Contain("not making progress");
+    }
+
+    /// <summary>
+    /// ジャーナルを記録する Repository の Save フックの中から同じローカル DB の同期を呼ぶと、その場で
+    /// InvalidOperationException になり、保存もロールバックされる。
+    /// </summary>
+    /// <remarks>
+    /// 書き込みはローカルの書き込みロックを持ったまま Save フックを呼ぶ。そこから同期を始めると、同期は実行用
+    /// ロックを取ってから書き込みロックを待つことになり、別の同期が走っていれば相手は実行用ロックを持ったまま
+    /// 同じ書き込みロックを待つ＝互いに待ち合って、どの待ち時間にも届かず止まる。別の同期が走っているかどうかに
+    /// 関係なく同じ例外で断るため、この配置は 1 本でも 2 本でも必ず即座に失敗する（ここでは 1 本の形で固定する）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/並行] Save フックの中から呼んだ同期は即座に InvalidOperationException で断られ保存も戻る"
+    )]
+    public async Task SyncFromInsideSaveHook_IsRefusedAndRollsBack()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+
+        var hook = new SyncInsideHook(() => Engine);
+        var orders = new JournalingSyncOrderRepository(
+            new SyncOrderRepository(
+                new SqlConnectionFactory(LocalConnectionString),
+                new SaveHookRegistry().Add<SyncOrderEntity>(hook)
+            ),
+            Journal
+        );
+
+        var order = new SyncOrderEntity { OrderId = 50, CustomerName = "hooked" };
+        order.MarkAdded();
+        var act = async () => await orders.SaveAsync(order, cancellationToken: Ct);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should()
+            .Contain("cannot be started from inside a write");
+        (await LocalOrdersRaw.GetByIdAsync(50, Ct)).Should().BeNull("保存はロールバックされる");
+    }
+
+    /// <summary>保存の直後（コミット前）に同期を呼ぶ Save フック</summary>
+    private sealed class SyncInsideHook(Func<SyncEngine> engine) : ISaveHook<SyncOrderEntity>
+    {
+        public async Task AfterSaveAsync(
+            SyncOrderEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        ) => await engine().SyncAsync(cancellationToken: cancellationToken);
     }
 
     /// <summary>受け取ったアンカーを捨てて常に先頭から返す差分ソース（エンジンの安全網を確かめるための壊れた実装）</summary>

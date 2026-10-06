@@ -450,6 +450,9 @@ public sealed class SqlServerDdlRoundTripIntegrationTests(SqlServerContainerFixt
                 [taken_at] datetime2(3) NULL,
                 [taken_at_tz] datetimeoffset(3) NULL,
                 [clock] time(3) NULL,
+                [stamp] datetime2 NULL,
+                [stamp7] datetime2(7) NULL,
+                [clock0] time(0) NULL,
                 CONSTRAINT [PK_measurement] PRIMARY KEY ([id]),
                 CONSTRAINT [FK_measurement_vendor] FOREIGN KEY ([vendor_id])
                     REFERENCES [dbo].[vendor] ([id]) ON DELETE SET NULL
@@ -473,6 +476,21 @@ public sealed class SqlServerDdlRoundTripIntegrationTests(SqlServerContainerFixt
             firstEntities = imported.Entities.ToList();
             firstRelationships = imported.Relationships.ToList();
         }
+
+        // 型の表記は起点 DDL の宣言どおりに取り込まれること（不動点の表明だけでは、取込が精度を落としても
+        // 1 回目と 2 回目がそろって落ちた表記になり一致してしまう＝datetime2(3) が datetime2 になっても通る）
+        SchemaReapplyAssertions.ShouldHaveColumnTypes(
+            firstEntities,
+            "measurement",
+            ("exact_v", "decimal(12,4)"),
+            ("plain", "decimal(9)"),
+            ("taken_at", "datetime2(3)"),
+            ("taken_at_tz", "datetimeoffset(3)"),
+            ("clock", "time(3)"),
+            ("stamp", "datetime2"),
+            ("stamp7", "datetime2"),
+            ("clock0", "time(0)")
+        );
 
         // 列宣言順（region_code, tenant_id）と食い違う主キーの並びが取込で保たれること
         SchemaReapplyAssertions.ShouldHavePrimaryKeyOrder(

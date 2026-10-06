@@ -162,6 +162,30 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Diff_AlterForeignKey {
+            get {
+                return ResourceManager.GetString("Diff_AlterForeignKey", resourceCulture);
+            }
+        }
+
+        public static string Diff_ForeignKeyChange_Reference {
+            get {
+                return ResourceManager.GetString("Diff_ForeignKeyChange_Reference", resourceCulture);
+            }
+        }
+
+        public static string Diff_ForeignKeyChange_OnDelete {
+            get {
+                return ResourceManager.GetString("Diff_ForeignKeyChange_OnDelete", resourceCulture);
+            }
+        }
+
+        public static string Diff_ForeignKeyChange_OnUpdate {
+            get {
+                return ResourceManager.GetString("Diff_ForeignKeyChange_OnUpdate", resourceCulture);
+            }
+        }
+
         public static string Diff_AddUniqueConstraint {
             get {
                 return ResourceManager.GetString("Diff_AddUniqueConstraint", resourceCulture);
@@ -198,6 +222,18 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Diff_AutoPrimaryKeyRebuild {
+            get {
+                return ResourceManager.GetString("Diff_AutoPrimaryKeyRebuild", resourceCulture);
+            }
+        }
+
+        public static string Diff_AutoForeignKeyDrop {
+            get {
+                return ResourceManager.GetString("Diff_AutoForeignKeyDrop", resourceCulture);
+            }
+        }
+
         public static string Diff_AutoUniqueConstraintRebuild {
             get {
                 return ResourceManager.GetString("Diff_AutoUniqueConstraintRebuild", resourceCulture);
@@ -219,6 +255,12 @@ namespace QuickER.Provider.Resources {
         public static string Sync_Error_OracleStatementFailed {
             get {
                 return ResourceManager.GetString("Sync_Error_OracleStatementFailed", resourceCulture);
+            }
+        }
+
+        public static string Sync_Error_SqliteBrokenView {
+            get {
+                return ResourceManager.GetString("Sync_Error_SqliteBrokenView", resourceCulture);
             }
         }
 

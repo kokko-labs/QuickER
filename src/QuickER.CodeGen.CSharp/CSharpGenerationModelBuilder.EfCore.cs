@@ -121,10 +121,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             // Fluent の HasColumnName("...") へ C# リテラルとして埋め込むためエスケープする（[Column] と同じ規則）
             ColumnName = EscapeNameForCSharpString(column.Name),
             IsRequired = !column.IsNullable,
-            // VO は最大長・桁数を VO 内部で検証するため Fluent には出さない（Entity の [MaxLength] 抑制と同じ方針）
-            MaxLength = valueObject is not null ? null : typeInfo.MaxLength,
-            Precision = valueObject is not null ? null : typeInfo.Precision,
-            Scale = valueObject is not null ? null : typeInfo.Scale,
+            // 最大長・桁数は VO の列にも出す。Fluent の HasMaxLength / HasPrecision は検証ではなく列のストア型の宣言で、
+            // 変換（HasConversion）の先の型にも効く。出さないと VO の列は既定のマッピング（decimal(18,2)・nvarchar(max)）になり、
+            // パラメータが既定の桁へ丸められ、.Value を比べる CAST も既定の型になる（検証は VO の Create が別に行う）
+            MaxLength = typeInfo.MaxLength,
+            Precision = typeInfo.Precision,
+            Scale = typeInfo.Scale,
             IsRowVersion = typeInfo.IsRowVersion,
             IsComputed = column.IsComputed,
             IsValueObject = valueObject is not null,

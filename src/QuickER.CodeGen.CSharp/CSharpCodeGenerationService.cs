@@ -310,7 +310,7 @@ public sealed partial class CSharpCodeGenerationService
         // 属性の有無でなくプロパティ型そのものの話であるため）
         var fallbackTypeLines = BuildFallbackTypeLines(diagram, columnTypes);
 
-        // 配列列を含む UNIQUE 制約は EditModel の重複検証から外れる（配列列が EditModel に載らないため、
+        // EditModel に載らない列（配列列・inet の列）を含む UNIQUE 制約は EditModel の重複検証から外れる（その列が EditModel に載らないため、
         // 参照すると実在しないプロパティを指してコンパイルできない）。黙って検証を外さないよう名指しする
         if (options.GenerateEditModels)
         {
@@ -338,7 +338,11 @@ public sealed partial class CSharpCodeGenerationService
         // 値オブジェクトにならないことは生成物を読んだだけでは気づけないため名指しする
         if (options.GenerateEditModels || options.GenerateValueObjects)
         {
-            var arrayColumnLines = BuildArrayColumnLines(diagram, columnTypes);
+            var arrayColumnLines = BuildColumnLines(
+                diagram,
+                columnTypes,
+                typeInfo => typeInfo.IsArray
+            );
 
             if (arrayColumnLines.Count > 0)
             {
@@ -350,6 +354,29 @@ public sealed partial class CSharpCodeGenerationService
                                 + string.Join(
                                     Environment.NewLine,
                                     arrayColumnLines.Select(line => "  " + line)
+                                )
+                        )
+                    )
+                );
+            }
+
+            // テキスト入力で扱えない型の列（PostgreSQL の inet）も同じ理由で EditModel・値オブジェクトから外れる
+            var textInputUnsupportedLines = BuildColumnLines(
+                diagram,
+                columnTypes,
+                typeInfo => typeInfo.IsTextInputUnsupported
+            );
+
+            if (textInputUnsupportedLines.Count > 0)
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Info(
+                        string.Format(
+                            Strings.CodeGen_Info_TextInputUnsupportedColumns,
+                            Environment.NewLine
+                                + string.Join(
+                                    Environment.NewLine,
+                                    textInputUnsupportedLines.Select(line => "  " + line)
                                 )
                         )
                     )
@@ -1855,20 +1882,23 @@ public sealed partial class CSharpCodeGenerationService
             .ToList();
 
     /// <summary>
-    /// 配列として解決した列を「テーブル.列 (元の DB 型表記)」の 1 行ずつへ整形する（Info 診断専用）。
+    /// 列型辞書の印で選んだ列を「テーブル.列 (元の DB 型表記)」の 1 行ずつへ整形する（Info 診断専用）。
     /// </summary>
     /// <remarks>
-    /// 判定材料は列型辞書（<see cref="CSharpTypeInfo.IsArray"/>）。列の並びは図の宣言順にする。
+    /// 配列列（<see cref="CSharpTypeInfo.IsArray"/>）とテキスト入力で扱えない型の列
+    /// （<see cref="CSharpTypeInfo.IsTextInputUnsupported"/>）を別々の Info で名指しするために使う。
+    /// 列の並びは図の宣言順にする。
     /// </remarks>
-    private static IReadOnlyList<string> BuildArrayColumnLines(
+    private static IReadOnlyList<string> BuildColumnLines(
         ErDiagram diagram,
-        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes,
+        Func<CSharpTypeInfo, bool> predicate
     ) =>
         diagram
             .Entities.SelectMany(entity =>
                 entity
                     .Columns.Where(column =>
-                        columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsArray
+                        columnTypes.TryGetValue(column.Id, out var typeInfo) && predicate(typeInfo)
                     )
                     .Select(column => $"{entity.TableName}.{column.Name} ({column.DataType})")
             )
@@ -1898,7 +1928,8 @@ public sealed partial class CSharpCodeGenerationService
             .ToList();
 
     /// <summary>
-    /// 配列列を含む UNIQUE 制約を「テーブル.制約名 (構成列)」の 1 行ずつへ整形する（Info 診断専用）。
+    /// EditModel に載らない列（配列列・テキスト入力で扱えない型の列）を含む UNIQUE 制約を
+    /// 「テーブル.制約名 (構成列)」の 1 行ずつへ整形する（Info 診断専用）。
     /// </summary>
     /// <remarks>
     /// 名前を持たない制約は、生成側と同じ規則（<see cref="UniqueConstraint.SynthesizeName"/>）で合成した名前を出す。
@@ -1919,7 +1950,8 @@ public sealed partial class CSharpCodeGenerationService
                         constraint.ColumnIds.Count > 0
                         && constraint.ColumnIds.All(columnsById.ContainsKey)
                         && constraint.ColumnIds.Any(id =>
-                            columnTypes.TryGetValue(id, out var typeInfo) && typeInfo.IsArray
+                            columnTypes.TryGetValue(id, out var typeInfo)
+                            && typeInfo.IsExcludedFromEditModel
                         )
                     )
                     .Select(constraint =>

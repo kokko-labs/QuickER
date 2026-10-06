@@ -26,9 +26,9 @@ namespace QuickER.Provider.Oracle;
 /// </list>
 /// </para>
 /// <para>
-/// 文の区切りは SQL*Plus 流儀に従う。各文は <c>;</c> で終端し、<b>文と文の間に「/」のみの行</b>を置く。
-/// PL/SQL の無名ブロックも <c>END;</c> の後に <c>/</c> 行を置く。この規約は
-/// <see cref="OracleSchemaSyncExecutor"/> と対になっており、実行側は「/」のみの行で分割して 1 文ずつ実行する。
+/// 文の区切りは SQL*Plus と同じにする。通常の文は <c>;</c> で終え、<c>/</c> だけの行は PL/SQL の無名ブロック
+/// （<c>END;</c>）の後ろにだけ置く。SQL*Plus の <c>/</c> は直前の文をもう一度実行するため、通常の文の後ろに置くと
+/// 同じ文が 2 回走る。実行側の <see cref="OracleSchemaSyncExecutor"/> も同じ規則で分割する。
 /// </para>
 /// </remarks>
 public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
@@ -44,7 +44,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var sb = new StringBuilder();
 
-        // 各文（末尾 ; を含む）を蓄積し、最後に「/」のみの行で連結する
+        // 各文（末尾 ; を含む）を蓄積し、最後に連結する（PL/SQL ブロックの後ろにだけ「/」のみの行を置く）
         var statements = new List<string>();
 
         // 計画は既に選択フィルタ済み・固定順序でセクション化されているため、
@@ -63,8 +63,11 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
                 sb.AppendLine();
             }
 
-            // 文と文の間に「/」のみの行を置く（最後の文の後にも置き、実行側の分割を安定させる）
-            sb.AppendLine("/");
+            // PL/SQL ブロックは「/」のみの行で実行させる。通常の文は ; で実行されるので置かない
+            if (OracleSchemaSyncExecutor.IsPlSqlBlock(statements[i]))
+            {
+                sb.AppendLine("/");
+            }
         }
 
         return sb.ToString();
@@ -125,8 +128,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             e,
             item.TableName,
             OracleIdentifier.QuoteSimple,
-            name => $"\"{OracleIdentifier.Escape(name)}\"",
-            OracleIdentifier.SafeName
+            name => $"\"{OracleIdentifier.Escape(name)}\""
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -174,15 +176,25 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
     /// <summary>ALTER TABLE ... MODIFY（列定義変更）文を生成する</summary>
     /// <remarks>
+    /// <para>
     /// Oracle は型変更と NULL 制約変更を <c>MODIFY</c> 1 文で表現する。
-    /// NULL→NOT NULL と NOT NULL→NULL の切替はいずれも明示的に句を付ける。
+    /// NULL / NOT NULL の句は、NULL 許容が変わるときだけ付ける（主キーの列は NOT NULL とみなす）。
+    /// Oracle は今と同じ指定を拒否する（NOT NULL の列へ NOT NULL は ORA-01442、NULL 許容の列へ NULL は ORA-01451）ため、
+    /// 常に付けると型だけの変更が必ず失敗する。
+    /// </para>
+    /// <para>
+    /// 変更前の列（<see cref="SchemaDiffItem.OldColumn"/>）が無い項目では NULL 許容の差が分からないため、従来どおり句を付ける。
+    /// </para>
     /// </remarks>
     private static string AppendAlterColumn(SchemaDiffItem item)
     {
         var col = item.Column!;
-        var nullClause = col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL";
+        var nullable = col.IsNullable && !col.IsPrimaryKey;
+        var nullabilityChanged =
+            item.OldColumn is not { } old || (old.IsNullable && !old.IsPrimaryKey) != nullable;
+        var nullClause = nullabilityChanged ? (nullable ? " NULL" : " NOT NULL") : string.Empty;
         return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
-            + $"MODIFY ({OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {nullClause});";
+            + $"MODIFY ({OracleIdentifier.QuoteSimple(col.Name)} {col.DataType}{nullClause});";
     }
 
     /// <summary>主キー変更の 1 項目を、セクションのフェーズに応じた解除 / 付与の文へ振り分ける</summary>
@@ -274,8 +286,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            OracleIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         var cols = string.Join(
             ", ",
@@ -291,8 +302,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns,
-            OracleIdentifier.SafeName
+            item.UniqueConstraintColumns
         );
         return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
             + $"DROP CONSTRAINT \"{OracleIdentifier.Escape(name)}\";";
@@ -330,9 +340,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
-            ? ConstraintNames.ForeignKey(childTbl, parentTbl)
-            : item.Relationship.ConstraintName!;
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
 
         var sb = new StringBuilder();
 
@@ -428,22 +436,21 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     // ---------------- COMMENT ON (説明) ----------------
 
     /// <summary>テーブルの説明（COMMENT ON TABLE）設定文を生成する</summary>
-    /// <remarks>Oracle は <c>IS NULL</c> 構文が使えないため、削除は空文字 <c>IS ''</c> で表現する</remarks>
-    private static string AppendSetTableDescription(SchemaDiffItem item)
-    {
-        var newVal = item.NewDescription ?? string.Empty;
-        var target = OracleIdentifier.Quote(item.TableName);
-        return $"COMMENT ON TABLE {target} IS '{OracleIdentifier.EscapeStringLiteral(newVal)}';";
-    }
+    /// <remarks>
+    /// Oracle は <c>IS NULL</c> 構文が使えないため、削除は空文字 <c>IS ''</c> で表現する。
+    /// 改行・<c>&amp;</c> を含む説明は PL/SQL ブロックになる（<see cref="OracleCommentStatement"/>）。
+    /// 文と文の間には常に「/」行が入るので、ブロックでもそのまま実行される
+    /// </remarks>
+    private static string AppendSetTableDescription(SchemaDiffItem item) =>
+        OracleCommentStatement.ForTable(item.TableName, item.NewDescription ?? string.Empty);
 
     /// <summary>カラムの説明（COMMENT ON COLUMN）設定文を生成する</summary>
-    private static string AppendSetColumnDescription(SchemaDiffItem item)
-    {
-        var newVal = item.NewDescription ?? string.Empty;
-        var target =
-            $"{OracleIdentifier.Quote(item.TableName)}.{OracleIdentifier.QuoteSimple(item.ColumnName!)}";
-        return $"COMMENT ON COLUMN {target} IS '{OracleIdentifier.EscapeStringLiteral(newVal)}';";
-    }
+    private static string AppendSetColumnDescription(SchemaDiffItem item) =>
+        OracleCommentStatement.ForColumn(
+            item.TableName,
+            item.ColumnName!,
+            item.NewDescription ?? string.Empty
+        );
 
     /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL、それ以外は空）</summary>
     /// <remarks>Oracle の ADD 句では NULL は既定のため明示しない</remarks>

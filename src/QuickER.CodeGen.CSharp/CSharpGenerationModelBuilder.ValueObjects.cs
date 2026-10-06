@@ -62,8 +62,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             foreach (var column in entity.Columns)
             {
-                // 配列列は VO にしない（等値が参照比較になり、同じ内容の配列が等しくならない）
-                if (IsArrayColumn(column))
+                // 配列列は VO にしない（等値が参照比較になり、同じ内容の配列が等しくならない）。inet の列も EditModel に
+                // 載らない列として同じ述語で外す（VO の EditModel 入力も文字列から作れないため）
+                if (IsExcludedFromEditModelColumn(column))
                 {
                     continue;
                 }
@@ -482,7 +483,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// リレーションの子側の列は親側の VO へ寄っているため、引き当ては列名ではなく統一済みの VO キーで行う。
     /// </remarks>
     private CSharpValueObjectModel? ResolveValueObject(Column column) =>
-        !IsArrayColumn(column)
+        !IsExcludedFromEditModelColumn(column)
         && _valueObjects.TryGetValue(ResolveValueObjectKey(column), out var model)
             ? model
             : null;

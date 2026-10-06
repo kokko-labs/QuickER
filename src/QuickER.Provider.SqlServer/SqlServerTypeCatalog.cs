@@ -89,7 +89,12 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
                 return true;
 
             case "float":
-                canonical = new CanonicalType(CanonicalTypeKind.Float64);
+                // float(1)〜float(24) は real と同じ単精度（素の float と float(25)〜float(53) は倍精度）
+                canonical = new CanonicalType(
+                    SqlServerTypeNotation.IsSinglePrecisionFloat(nativeType)
+                        ? CanonicalTypeKind.Float32
+                        : CanonicalTypeKind.Float64
+                );
                 return true;
 
             case "money":
@@ -181,6 +186,14 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
         // 黙って長さ 1 として作るため、true を返すと「1 文字しか入らない列」を無言で生む。
         // 負のスケールと同じ「実行できない／意味の違う DDL を黙って作らない」線引き
         if (CanonicalTypeToken.HasLengthArgument(canonical.Kind) && canonical.Length is null)
+        {
+            return false;
+        }
+
+        // SQL Server の上限を超える長さ・精度は書き出さない（DDL の適用で必ず失敗するため、切替の時点で
+        // 変換不能一覧に載せる）。精度の無い Decimal も書き出さない＝素の decimal は decimal(18,0) で、
+        // 小数部を黙って丸める列になる（Oracle の NUMBER・PostgreSQL の無制約 numeric から切り替えたとき）
+        if (!IsWithinLimits(canonical))
         {
             return false;
         }
@@ -332,9 +345,11 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
         out CanonicalType canonical
     )
     {
+        // 素の decimal / numeric は decimal(18,0)（SQL Server の既定の精度・スケール）。精度なし（＝任意の小数）と読むと、
+        // 書き出せない型として C# リバースが偽の警告を出し、他方言への切替も意味の違う型になる
         if (arg1 is null)
         {
-            canonical = new CanonicalType(kind);
+            canonical = new CanonicalType(kind, Precision: DefaultDecimalPrecision, Scale: 0);
             return true;
         }
 
@@ -386,6 +401,63 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
     /// <summary>型引数の数値を解析する。負数・int 範囲外は失敗（変換不能）として扱う</summary>
     private static bool TryParseTypeArg(string text, out int value) =>
         int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+
+    /// <summary>可変長 Unicode（nvarchar / nchar）の最大長</summary>
+    private const int MaxUnicodeLength = 4000;
+
+    /// <summary>非 Unicode・バイナリ（varchar / char / varbinary / binary）の最大長</summary>
+    private const int MaxByteLength = 8000;
+
+    /// <summary>decimal の最大精度</summary>
+    private const int MaxDecimalPrecision = 38;
+
+    /// <summary>精度を省いた decimal / numeric の既定の精度</summary>
+    private const int DefaultDecimalPrecision = 18;
+
+    /// <summary>datetime2 / time / datetimeoffset の小数秒の最大桁数</summary>
+    private const int MaxFractionalSecondsPrecision = 7;
+
+    /// <summary>正規型の長さ・精度・スケールが SQL Server で宣言できる範囲に収まるか</summary>
+    /// <remarks>
+    /// 範囲外は SQL Server が CREATE / ALTER の時点で拒否する値（<c>nvarchar(5000)</c>・<c>decimal(50,2)</c>・
+    /// <c>datetime2(9)</c> 等）。固定長の max（-1）も <c>nchar(max)</c> という存在しない表記になるので外す。
+    /// </remarks>
+    private static bool IsWithinLimits(CanonicalType canonical) =>
+        canonical.Kind switch
+        {
+            CanonicalTypeKind.String => IsLengthWithin(
+                canonical.Length,
+                MaxUnicodeLength,
+                allowMax: true
+            ),
+            CanonicalTypeKind.FixedString => IsLengthWithin(
+                canonical.Length,
+                MaxUnicodeLength,
+                allowMax: false
+            ),
+            CanonicalTypeKind.AnsiString or CanonicalTypeKind.Binary => IsLengthWithin(
+                canonical.Length,
+                MaxByteLength,
+                allowMax: true
+            ),
+            CanonicalTypeKind.AnsiFixedString or CanonicalTypeKind.FixedBinary => IsLengthWithin(
+                canonical.Length,
+                MaxByteLength,
+                allowMax: false
+            ),
+            CanonicalTypeKind.Decimal => canonical.Precision is >= 1 and <= MaxDecimalPrecision
+                && (canonical.Scale is null || canonical.Scale <= canonical.Precision),
+            CanonicalTypeKind.Time
+            or CanonicalTypeKind.DateTime
+            or CanonicalTypeKind.DateTimeOffset => canonical.Precision
+                is null
+                    or <= MaxFractionalSecondsPrecision,
+            _ => true,
+        };
+
+    /// <summary>長さが 1 以上・上限以下（<paramref name="allowMax"/> なら max の -1 も可）か</summary>
+    private static bool IsLengthWithin(int? length, int max, bool allowMax) =>
+        length is null || (allowMax && length == -1) || length is >= 1 && length <= max;
 
     private static string FormatLength(string name, int? length)
     {

@@ -474,7 +474,8 @@ public class CanonicalTypeRoundTripMatrixTests
             Cell("sqlite", CanonicalTypeKind.Int32, "INT", "int32"),
             Cell("sqlite", CanonicalTypeKind.Int64, "BIGINT", "int64"),
             Cell("sqlite", CanonicalTypeKind.Decimal, "DECIMAL(12,3)", "decimal(12,3)"),
-            Cell("sqlite", CanonicalTypeKind.Float32, "REAL", "float32"),
+            // SQLite に単精度は無い。REAL（8 バイトの倍精度）へ写し、読み戻すと Float64＝精度を広げる方向の非可逆
+            Cell("sqlite", CanonicalTypeKind.Float32, "REAL", "float64"),
             Cell("sqlite", CanonicalTypeKind.Float64, "FLOAT", "float64"),
             Cell("sqlite", CanonicalTypeKind.Money, "MONEY", "money"),
             Cell("sqlite", CanonicalTypeKind.String, "NVARCHAR(42)", "string(42)"),

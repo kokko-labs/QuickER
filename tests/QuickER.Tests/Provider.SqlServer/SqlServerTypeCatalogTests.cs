@@ -26,6 +26,10 @@ public class SqlServerTypeCatalogTests
     [InlineData("bigint", CanonicalTypeKind.Int64)]
     [InlineData("real", CanonicalTypeKind.Float32)]
     [InlineData("float", CanonicalTypeKind.Float64)]
+    [InlineData("float(1)", CanonicalTypeKind.Float32)]
+    [InlineData("float(24)", CanonicalTypeKind.Float32)]
+    [InlineData("float(25)", CanonicalTypeKind.Float64)]
+    [InlineData("FLOAT ( 53 )", CanonicalTypeKind.Float64)]
     [InlineData("money", CanonicalTypeKind.Money)]
     [InlineData("date", CanonicalTypeKind.Date)]
     [InlineData("uniqueidentifier", CanonicalTypeKind.Guid)]
@@ -88,14 +92,21 @@ public class SqlServerTypeCatalogTests
         canonical.Scale.Should().Be(2);
     }
 
-    [Fact(DisplayName = "decimal（引数省略）は Precision/Scale が null で解析される")]
-    public void TryParse_DecimalWithoutArgs_ResolvesDecimalWithNullPrecisionScale()
+    /// <summary>
+    /// 引数を省いた decimal / numeric は SQL Server の既定どおり decimal(18,0) として解析される。
+    /// 精度なし（任意の小数）と読むと、書き出せない型として C# リバースが偽の警告を出し、他方言への切替も
+    /// 意味の違う型（PostgreSQL の無制約 numeric 等）になる。
+    /// </summary>
+    [Theory(DisplayName = "decimal / numeric（引数省略）は既定の decimal(18,0) として解析される")]
+    [InlineData("decimal")]
+    [InlineData("numeric")]
+    public void TryParse_DecimalWithoutArgs_ResolvesDefaultPrecisionScale(string nativeType)
     {
-        Catalog.TryParse("decimal", out var canonical).Should().BeTrue();
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
 
-        canonical.Kind.Should().Be(CanonicalTypeKind.Decimal);
-        canonical.Precision.Should().BeNull();
-        canonical.Scale.Should().BeNull();
+        canonical
+            .Should()
+            .Be(new CanonicalType(CanonicalTypeKind.Decimal, Precision: 18, Scale: 0));
     }
 
     [Fact(DisplayName = "numeric(p,s) は parse-only で Decimal として解析される")]
@@ -345,5 +356,48 @@ public class SqlServerTypeCatalogTests
         Catalog.TryFormat(canonical, out var formatted).Should().BeTrue();
 
         formatted.Should().Be(nativeType);
+    }
+
+    /// <summary>
+    /// SQL Server が宣言を拒否する長さ・精度・スケール（と精度の無い Decimal）は書き出さず、対象 DBMS 切替の
+    /// 変換不能一覧に載せることを検証する。上限ちょうどは書き出せる（境界の対照）。
+    /// </summary>
+    /// <remarks>
+    /// 精度の無い Decimal は素の <c>decimal</c>＝<c>decimal(18,0)</c> になり、Oracle の <c>NUMBER</c> や
+    /// PostgreSQL の無制約 <c>numeric</c> から切り替えた列が小数部を黙って丸める（DDL の適用でもエラーにならない）。
+    /// </remarks>
+    [Theory(
+        DisplayName = "TryFormat は SQL Server の上限を超える値と精度の無い Decimal を書き出さない"
+    )]
+    [InlineData(CanonicalTypeKind.String, 4001, null, null, false)]
+    [InlineData(CanonicalTypeKind.String, 4000, null, null, true)]
+    [InlineData(CanonicalTypeKind.String, 0, null, null, false)]
+    [InlineData(CanonicalTypeKind.FixedString, 4001, null, null, false)]
+    [InlineData(CanonicalTypeKind.AnsiString, 8001, null, null, false)]
+    [InlineData(CanonicalTypeKind.AnsiString, 8000, null, null, true)]
+    [InlineData(CanonicalTypeKind.AnsiFixedString, 9000, null, null, false)]
+    [InlineData(CanonicalTypeKind.Binary, 8001, null, null, false)]
+    [InlineData(CanonicalTypeKind.FixedBinary, 8001, null, null, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 50, 2, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 38, 2, true)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, 11, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, null, null, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, null, 2, false)]
+    [InlineData(CanonicalTypeKind.DateTime, null, 9, null, false)]
+    [InlineData(CanonicalTypeKind.DateTime, null, 7, null, true)]
+    [InlineData(CanonicalTypeKind.Time, null, 8, null, false)]
+    [InlineData(CanonicalTypeKind.DateTimeOffset, null, 8, null, false)]
+    public void TryFormat_RespectsSqlServerLimits(
+        CanonicalTypeKind kind,
+        int? length,
+        int? precision,
+        int? scale,
+        bool expected
+    )
+    {
+        Catalog
+            .TryFormat(new CanonicalType(kind, length, precision, scale), out _)
+            .Should()
+            .Be(expected);
     }
 }

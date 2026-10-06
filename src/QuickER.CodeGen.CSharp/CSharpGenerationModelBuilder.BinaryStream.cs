@@ -164,7 +164,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("    /// <summary>Writes the ")
             .Append(columnNameXmlDoc)
             .Append(
-                " column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length; true = updated, false = no row).</summary>\n"
+                " column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length, and a stream that does not yield exactly that many bytes fails; true = updated, false = no row).</summary>\n"
             )
             .Append("    Task<bool> Write")
             .Append(propertyName)
