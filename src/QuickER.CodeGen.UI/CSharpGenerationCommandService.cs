@@ -86,7 +86,8 @@ public sealed class CSharpGenerationCommandService
                 return;
             }
 
-            // 値オブジェクト生成時に警告（定義競合など）がある場合は、内容を提示して続行可否を確認する
+            // 値オブジェクト生成時に警告（定義競合など）がある場合は、内容を提示して続行可否を確認する。
+            // 警告は列ごとに出得るので、一覧は畳まずにスクロールできる詳細領域へ載せる（判断材料を全件見せる）
             var warnings = result
                 .Diagnostics.Where(diagnostic =>
                     diagnostic.Severity == GenerationDiagnosticSeverity.Warning
@@ -100,14 +101,12 @@ public sealed class CSharpGenerationCommandService
                         string.Format(Strings.Csharp_WarningLine, diagnostic.Message)
                     )
                 );
-                var confirmed = _dialogs.Confirm(
+                var confirmed = _dialogs.ConfirmWarningDetails(
                     Strings.Csharp_WarningIntro
                         + Environment.NewLine
                         + Environment.NewLine
-                        + warningMessage
-                        + Environment.NewLine
-                        + Environment.NewLine
                         + Strings.Csharp_WarningPrompt,
+                    warningMessage,
                     Strings.Csharp_WarningTitle
                 );
                 if (!confirmed)

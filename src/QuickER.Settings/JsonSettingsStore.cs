@@ -13,12 +13,70 @@ namespace QuickER.Settings;
 public class JsonSettingsStore<TSettings>
     where TSettings : class, new()
 {
-    /// <summary>JSON シリアライズ設定（インデント付与・プロパティ名は camelCase）</summary>
+    /// <summary>
+    /// JSON シリアライズ設定（インデント付与・書き出しは camelCase・読み込みはキーの大文字小文字を区別しない・
+    /// 明示 null の扱いは <see cref="TreatNullAsMissing"/>）
+    /// </summary>
+    /// <remarks>
+    /// 読み込みで大文字小文字を区別しないのは、CLI の設定ファイル（quicker.json）と同じ規則にするため。
+    /// CLI は PascalCase（<c>"RootNamespace"</c>）で書かれたファイルも読むので、同じファイルを GUI の
+    /// 「設定読込」で読んだときにキーが全部捨てられて既定値に戻る、ということが起きないようにする。
+    /// </remarks>
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { TreatNullAsMissing } },
     };
+
+    /// <summary>
+    /// null を許さない参照型のプロパティへ来た JSON の <c>null</c> を、キーが無いのと同じに扱う
+    /// （setter を呼ばない＝コンストラクタの既定値のまま）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 設定ファイルは手で編集され得るため、<c>"repositoryDialects": null</c> のような明示 null が届く。
+    /// そのまま代入すると、宣言上は null にならないプロパティが null になり、読み手の側で
+    /// <see cref="NullReferenceException"/> になる（設定画面が開けなくなる）。null は「指定なし」と読み、
+    /// 既定値へ戻す。1 つのキーのために他の設定まで捨てる（壊れたファイル扱いにする）ほどの話ではなく、
+    /// 既定値で埋めても意味は変わらないため。
+    /// </para>
+    /// <para>
+    /// 判定は NRT の注釈（<see cref="JsonPropertyInfo.IsSetNullable"/>）で行う。注釈は
+    /// <see cref="JsonSerializerOptions.RespectNullableAnnotations"/> に依らず埋まるので、設定型ごとに
+    /// 対象を書き写す必要が無く、入れ子の設定型にも効く。値型（<see cref="Nullable{T}"/> を含む）は対象外。
+    /// コレクションの要素の null は STJ が注釈を持たないため扱わない。
+    /// </para>
+    /// </remarks>
+    private static void TreatNullAsMissing(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Kind != JsonTypeInfoKind.Object)
+        {
+            return;
+        }
+
+        foreach (var property in typeInfo.Properties)
+        {
+            if (property.Set is not { } set || property.PropertyType.IsValueType)
+            {
+                continue;
+            }
+
+            if (property.IsSetNullable)
+            {
+                continue;
+            }
+
+            property.Set = (target, value) =>
+            {
+                if (value is not null)
+                {
+                    set(target, value);
+                }
+            };
+        }
+    }
 
     /// <summary>設定ファイルの保存先フォルダ</summary>
     private readonly string _folder;
@@ -155,12 +213,18 @@ public class JsonSettingsStore<TSettings>
     /// 「あるのに今は読めない」ファイルを読めないまま上書きすると、そこにあった未知のキーを
     /// 黙って捨てることになり、この引き継ぎが塞ごうとしている穴そのものを開ける。
     /// </para>
+    /// <para>
+    /// 書かずに戻ったかは戻り値で分かる。利用者の操作で 1 つの値を保存する呼び出し側（設定メニューの切り替えなど）は、
+    /// <c>false</c> を保存の失敗として扱い、表示と保存の食い違いを残さないこと。書き込み自体の失敗
+    /// （アクセス拒否・保存先フォルダの位置に同名のファイルがある等）は従来どおり例外で伝わる。
+    /// </para>
     /// </remarks>
-    public void Save(TSettings settings)
+    /// <returns>書き込んだら <c>true</c>。読めなかったファイルを守るために何も書かずに戻ったら <c>false</c></returns>
+    public bool Save(TSettings settings)
     {
         if (LastLoadUnavailable)
         {
-            return;
+            return false;
         }
 
         var status = AtomicFile.TryReadAllText(SettingsPath, out var existingJson);
@@ -168,7 +232,7 @@ public class JsonSettingsStore<TSettings>
         // 読めないまま上書きすると、ディスクにある未知のキーを黙って捨てることになる
         if (status == FileReadStatus.Unavailable)
         {
-            return;
+            return false;
         }
 
         Directory.CreateDirectory(_folder);
@@ -182,6 +246,8 @@ public class JsonSettingsStore<TSettings>
         }
 
         AtomicFile.WriteAllText(SettingsPath, json);
+
+        return true;
     }
 
     /// <summary>
@@ -220,9 +286,11 @@ public class JsonSettingsStore<TSettings>
     /// これは既知の割り切りで、設定型に「要素ごとに版が増えていく配列」を足すときは注意すること。
     /// </para>
     /// <para>
-    /// キー名の比較は<b>大文字小文字を区別する</b>（<see cref="StringComparer.Ordinal"/>）。
-    /// 読み込み側（<see cref="JsonSerializerOptions.PropertyNameCaseInsensitive"/> の既定は <c>false</c>）と
-    /// 揃えないと、読み込みでは別のキーとして無視された綴りを、ここだけ既知と見なして取りこぼす。
+    /// キー名の比較は<b>大文字小文字を区別しない</b>（<see cref="StringComparer.OrdinalIgnoreCase"/>）。
+    /// 読み込み側（<see cref="JsonSerializerOptions.PropertyNameCaseInsensitive"/> を <c>true</c> にしている）と
+    /// 揃えないと、読み込みで既知のキーとして読んだ別の綴り（<c>"RootNamespace"</c>）をここだけ未知と見なして
+    /// 書き出す側へ持ち越し、次の読み込みで古い値が書き出した値を上書きする。入れ子へ入るときも、
+    /// 書き出す側の子は型の綴り（camelCase）で引く。
     /// </para>
     /// </remarks>
     /// <param name="serialized">書き出そうとしている JSON（<paramref name="existingJson"/> より優先する）</param>
@@ -281,7 +349,7 @@ public class JsonSettingsStore<TSettings>
 
         foreach (var entry in existing)
         {
-            if (!known.TryGetValue(entry.Key, out var nestedTypeInfo))
+            if (!known.TryGetValue(entry.Key, out var knownProperty))
             {
                 // 型が知らないキー＝読み込みで捨てられた値。書き出す側へそのまま持ち越す
                 target[entry.Key] = entry.Value?.DeepClone();
@@ -292,9 +360,9 @@ public class JsonSettingsStore<TSettings>
             // 型が知っているキーは値ごと置き換わる（＝何もしない）。
             // 中へ再帰するのはオブジェクト型のときだけで、辞書・配列・値は置き換えたままにする
             if (
-                nestedTypeInfo is not null
+                knownProperty.Nested is { } nestedTypeInfo
                 && entry.Value is JsonObject existingChild
-                && target[entry.Key] is JsonObject targetChild
+                && target[knownProperty.Name] is JsonObject targetChild
             )
             {
                 CarryOverUnknownProperties(targetChild, existingChild, nestedTypeInfo);
@@ -302,21 +370,30 @@ public class JsonSettingsStore<TSettings>
         }
     }
 
-    /// <summary>設定型が知っているキーの一覧を作る（値は「中へ再帰できるならその型のメタデータ」）</summary>
+    /// <summary>
+    /// 設定型が知っているキーの一覧を作る（値は「書き出す側の綴り」と「中へ再帰できるならその型のメタデータ」）
+    /// </summary>
     /// <remarks>
-    /// 値が <c>null</c> なのは辞書・配列・値など<b>再帰しない</b>プロパティ。
+    /// <c>Nested</c> が <c>null</c> なのは辞書・配列・値など<b>再帰しない</b>プロパティ。
     /// 「キーを知っているか」と「中へ入ってよいか」は別の問いなので、1 つの辞書で両方を答える。
+    /// 照合は大文字小文字を区別しない（読み込み側と同じ規則）。
     /// </remarks>
-    private static Dictionary<string, JsonTypeInfo?> BuildKnownProperties(JsonTypeInfo typeInfo)
+    private static Dictionary<string, (string Name, JsonTypeInfo? Nested)> BuildKnownProperties(
+        JsonTypeInfo typeInfo
+    )
     {
-        var known = new Dictionary<string, JsonTypeInfo?>(StringComparer.Ordinal);
+        var known = new Dictionary<string, (string Name, JsonTypeInfo? Nested)>(
+            StringComparer.OrdinalIgnoreCase
+        );
 
         foreach (var property in typeInfo.Properties)
         {
             var propertyTypeInfo = JsonOptions.GetTypeInfo(property.PropertyType);
 
-            known[property.Name] =
-                propertyTypeInfo.Kind == JsonTypeInfoKind.Object ? propertyTypeInfo : null;
+            known[property.Name] = (
+                property.Name,
+                propertyTypeInfo.Kind == JsonTypeInfoKind.Object ? propertyTypeInfo : null
+            );
         }
 
         return known;

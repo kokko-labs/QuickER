@@ -33,6 +33,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>ルート名前空間変更時の子名前空間追従更新を一時的に抑止するフラグ（設定適用中に使う）</summary>
     private bool _suppressNamespaceFollow;
 
+    /// <summary>単一ファイル出力で直前に使っていた出力ファイル名（分割から戻したときに使う。未使用なら null）</summary>
+    private string? _lastSingleFileName;
+
     /// <summary>確定結果（OK 確定まで null）</summary>
     public CSharpGenerationDialogResult? Result { get; private set; }
 
@@ -597,6 +600,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             LayeredOutput = false;
         }
 
+        // 設定の適用（ApplySettings）でもここを通るが、出力先は適用の最後に保存値で代入し直すので結果は変わらない
+        ConvertOutputPathForMode(value);
+
         OnPropertyChanged(nameof(MergeIntoSingleFile));
         RaiseDerivedChanged();
     }
@@ -661,8 +667,40 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnValueObjectNamespaceChanged(string value) => RefreshPreview();
 
+    /// <summary>出力モードの切替に合わせて、出力先をフォルダ ⇔ ファイルへ変換する</summary>
+    /// <param name="split">切替後が分割出力か</param>
+    /// <remarks>
+    /// 出力先の欄は 1 つで、単一ファイルではファイルパス・分割ではフォルダパスを表す。そのままにすると、
+    /// 分割のフォルダ <c>C:\App\Generated</c> がファイルとして（フォルダの隣に <c>Generated</c> という名前で）書かれ、
+    /// 単一の <c>C:\out\Foo.g.cs</c> が <c>Foo.g.cs</c> という名前のフォルダになる。
+    /// 単一→分割はファイルの親フォルダ、分割→単一はフォルダ＋直前に単一で使っていたファイル名（無ければ既定名）へ変える。
+    /// 空のときは空のまま（どちらのモードでも OK の「出力先を指定してください」が効く）
+    /// </remarks>
+    private void ConvertOutputPathForMode(bool split)
+    {
+        var current = OutputPath.Trim();
+
+        if (current.Length == 0)
+        {
+            return;
+        }
+
+        OutputPath = split
+            ? Path.GetDirectoryName(current) ?? string.Empty
+            : Path.Combine(
+                current,
+                _lastSingleFileName ?? CSharpGenerationSettings.DefaultOutputFilePath
+            );
+    }
+
     partial void OnOutputPathChanged(string value)
     {
+        // 単一ファイル出力のファイル名を覚えておく（分割から戻したときの出力ファイル名に使う）
+        if (!SplitFilesByCategory && Path.GetFileName(value.Trim()) is { Length: > 0 } fileName)
+        {
+            _lastSingleFileName = fileName;
+        }
+
         // 非分割時の API リファレンス既定名は出力ファイル名から導出されるため、プレースホルダを追従させる
         OnPropertyChanged(nameof(ApiDocsFileNameHint));
         RefreshPreview();
@@ -1108,16 +1146,26 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>現在の設定で生成されるファイル一覧（「ファイル名 → namespace」）を再計算する</summary>
+    /// <remarks>
+    /// ルート名前空間が空のときは、出力にルート名前空間が使われる構成に限って何も出さない（OK でも必須エラーになる）。
+    /// 層別出力のように使われない構成では、空でもプレビューを出す
+    /// </remarks>
     private void RefreshPreview()
     {
         PreviewFiles.Clear();
+        var options = ToOptions();
 
-        if (string.IsNullOrWhiteSpace(RootNamespace))
+        if (
+            string.IsNullOrWhiteSpace(RootNamespace)
+            && GeneratedFilePlanner
+                .UsedNamespaceSources(options)
+                .Contains(NamespaceSource.RootNamespace)
+        )
         {
             return;
         }
 
-        foreach (var spec in GeneratedFilePlanner.Plan(ToOptions()))
+        foreach (var spec in GeneratedFilePlanner.Plan(options))
         {
             // 層別出力では出力先が層フォルダ配下へ変わるため、相対フォルダを付けて配置まで見せる
             // （層別でないスペックは RelativeDirectory が null＝ファイル名だけ）
@@ -1299,19 +1347,28 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>入力内容を検証して確定し、設定を保存する（不正時はステータスにエラーを表示する）</summary>
+    /// <remarks>
+    /// 名前空間は、出力に実際に使われるもの（<see cref="GeneratedFilePlanner.UsedNamespaceSources"/>）だけを検証する
+    /// （生成前の検証と同じ判定。例: パッケージ参照モードの Runtime 名前空間・層別出力のルート名前空間は使われない）
+    /// </remarks>
     [RelayCommand]
     private void Ok()
     {
-        if (string.IsNullOrWhiteSpace(RootNamespace))
-        {
-            StatusMessage = Strings.CodeGen_Status_NamespaceRequired;
-            return;
-        }
+        var usedNamespaces = GeneratedFilePlanner.UsedNamespaceSources(ToOptions());
 
-        if (!IsValidNamespace(RootNamespace))
+        if (usedNamespaces.Contains(NamespaceSource.RootNamespace))
         {
-            StatusMessage = Strings.CodeGen_Status_NamespaceInvalid;
-            return;
+            if (string.IsNullOrWhiteSpace(RootNamespace))
+            {
+                StatusMessage = Strings.CodeGen_Status_NamespaceRequired;
+                return;
+            }
+
+            if (!IsValidNamespace(RootNamespace))
+            {
+                StatusMessage = Strings.CodeGen_Status_NamespaceInvalid;
+                return;
+            }
         }
 
         if (GenerateRepositories && !TargetSqlServer && !TargetSqlite)
@@ -1322,7 +1379,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
         if (SplitFilesByCategory)
         {
-            if (!ValidateSplitNamespaces(out var invalidName))
+            if (!ValidateSplitNamespaces(usedNamespaces, out var invalidName))
             {
                 StatusMessage = string.Format(
                     Strings.CodeGen_Status_NamespaceInvalidFormat,
@@ -1343,7 +1400,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        _store.Save(ToSettings());
+        SaveSettingsOnConfirm();
 
         var outputDirectory = SplitFilesByCategory
             ? OutputPath.Trim()
@@ -1353,6 +1410,38 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         CloseAction?.Invoke(true);
     }
 
+    /// <summary>確定した設定を次回の既定として保存する（失敗しても生成は止めない）</summary>
+    /// <remarks>
+    /// 利用者が頼んだのは生成で、設定の保存はそれに付随する処理なので、保存できなくても生成は続ける。
+    /// ただし黙って続けると次に開いたときに設定が戻らない理由が分からないため、原因を添えてモーダルで知らせる
+    /// （書き込みの失敗＝例外の文言／読めなかった既存ファイルを守るために書かなかった＝その旨）。
+    /// </remarks>
+    private void SaveSettingsOnConfirm()
+    {
+        string reason;
+
+        try
+        {
+            if (_store.Save(ToSettings()))
+            {
+                return;
+            }
+
+            reason = Strings.CodeGen_SettingsFileUnreadable;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            reason = ex.Message;
+        }
+
+        _dialogs.ShowError(
+            string.Format(Strings.CodeGen_SettingsAutoSaveFailedMessage, _store.SettingsPath)
+                + Environment.NewLine
+                + reason,
+            Strings.CodeGen_SettingsDialogTitle
+        );
+    }
+
     /// <summary>確定せずダイアログを閉じる</summary>
     [RelayCommand]
     private void Cancel()
@@ -1360,23 +1449,48 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         CloseAction?.Invoke(false);
     }
 
-    /// <summary>表示中のカテゴリ別名前空間（非空のもの）の形式を検証する</summary>
+    /// <summary>出力に使われるカテゴリ別名前空間の形式を検証する</summary>
+    /// <param name="usedNamespaces">出力に実際に使われる名前空間の出所（計画が記録したもの）</param>
     /// <param name="invalidName">最初に不正だった項目名（呼び出し側のメッセージ用）</param>
-    private bool ValidateSplitNamespaces(out string invalidName)
+    /// <remarks>
+    /// 使われるかは欄の表示ではなく計画の記録で決める（表示されていても使われない欄＝パッケージ参照モードの
+    /// Runtime 名前空間などで止めない）。既定と同じ値は空として渡る（<see cref="NamespaceForPersistence"/>）ため
+    /// 記録に現れず、記録に現れるのは利用者が書いた明示値だけになる
+    /// </remarks>
+    private bool ValidateSplitNamespaces(
+        IReadOnlySet<NamespaceSource> usedNamespaces,
+        out string invalidName
+    )
     {
-        var targets = new (bool Show, string Value, string Name)[]
+        var targets = new (NamespaceSource Source, string Value, string Name)[]
         {
-            (ShowRuntimeNamespace, RuntimeNamespace, Strings.CodeGen_NamespaceLabel_Runtime),
-            (ShowEntityNamespace, EntityNamespace, Strings.CodeGen_NamespaceLabel_Entity),
-            (ShowEditModelNamespace, EditModelNamespace, Strings.CodeGen_NamespaceLabel_EditModel),
-            (ShowMapperNamespace, MapperNamespace, Strings.CodeGen_NamespaceLabel_Mapper),
             (
-                ShowRepositoryNamespace,
+                NamespaceSource.RuntimeNamespace,
+                RuntimeNamespace,
+                Strings.CodeGen_NamespaceLabel_Runtime
+            ),
+            (
+                NamespaceSource.EntityNamespace,
+                EntityNamespace,
+                Strings.CodeGen_NamespaceLabel_Entity
+            ),
+            (
+                NamespaceSource.EditModelNamespace,
+                EditModelNamespace,
+                Strings.CodeGen_NamespaceLabel_EditModel
+            ),
+            (
+                NamespaceSource.MapperNamespace,
+                MapperNamespace,
+                Strings.CodeGen_NamespaceLabel_Mapper
+            ),
+            (
+                NamespaceSource.RepositoryNamespace,
                 RepositoryNamespace,
                 Strings.CodeGen_NamespaceLabel_Repository
             ),
             (
-                ShowValueObjectNamespace,
+                NamespaceSource.ValueObjectNamespace,
                 ValueObjectNamespace,
                 Strings.CodeGen_NamespaceLabel_ValueObject
             ),
@@ -1384,11 +1498,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
         foreach (var target in targets)
         {
-            if (
-                target.Show
-                && !string.IsNullOrWhiteSpace(target.Value)
-                && !IsValidNamespace(target.Value)
-            )
+            if (usedNamespaces.Contains(target.Source) && !IsValidNamespace(target.Value))
             {
                 invalidName = target.Name;
                 return false;

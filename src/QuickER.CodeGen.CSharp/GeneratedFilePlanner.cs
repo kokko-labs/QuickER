@@ -141,21 +141,43 @@ public enum GeneratedLayer
 
 /// <summary>生成コードの名前空間を決めたオプション（名前空間の出所）。値の名前は <see cref="CodeGenerationOptions"/> のプロパティ名と同じ</summary>
 /// <remarks>
-/// 計画（<see cref="GeneratedFilePlanner"/>）が名前空間を解決するたびに記録し、生成前の検証が「出力に実際に使われる
-/// オプションだけを検証する」ために読む。宣言順は検証の診断の並び（ルート→カテゴリ別→層フォルダ）を兼ねる。
+/// 計画（<see cref="GeneratedFilePlanner"/>）が名前空間を解決するたびに記録し、生成前の検証と GUI の生成ダイアログが
+/// 「出力に実際に使われるオプションだけを検証する」ために読む（<see cref="GeneratedFilePlanner.UsedNamespaceSources"/>）。
+/// 宣言順は検証の診断の並び（ルート→カテゴリ別→層フォルダ）を兼ねる。
 /// </remarks>
-internal enum NamespaceSource
+public enum NamespaceSource
 {
+    /// <summary><see cref="CodeGenerationOptions.RootNamespace"/></summary>
     RootNamespace,
+
+    /// <summary><see cref="CodeGenerationOptions.RuntimeNamespace"/></summary>
     RuntimeNamespace,
+
+    /// <summary><see cref="CodeGenerationOptions.EntityNamespace"/></summary>
     EntityNamespace,
+
+    /// <summary><see cref="CodeGenerationOptions.EditModelNamespace"/></summary>
     EditModelNamespace,
+
+    /// <summary><see cref="CodeGenerationOptions.MapperNamespace"/></summary>
     MapperNamespace,
+
+    /// <summary><see cref="CodeGenerationOptions.RepositoryNamespace"/></summary>
     RepositoryNamespace,
+
+    /// <summary><see cref="CodeGenerationOptions.ValueObjectNamespace"/></summary>
     ValueObjectNamespace,
+
+    /// <summary><see cref="CodeGenerationOptions.DomainLayerDirectory"/>（層別出力の名前空間の既定の出所）</summary>
     DomainLayerDirectory,
+
+    /// <summary><see cref="CodeGenerationOptions.PresentationLayerDirectory"/>（同上）</summary>
     PresentationLayerDirectory,
+
+    /// <summary><see cref="CodeGenerationOptions.InfrastructureLayerDirectory"/>（同上）</summary>
     InfrastructureLayerDirectory,
+
+    /// <summary><see cref="CodeGenerationOptions.ServerLayerDirectory"/>（同上）</summary>
     ServerLayerDirectory,
 }
 
@@ -315,11 +337,10 @@ public static class GeneratedFilePlanner
     /// <remarks>
     /// 計画と同じ解決を 1 回通し、名前空間を決めるたびに出所を記録する。計画の中で解決した名前空間は
     /// すべてスペックの名前空間かクロス using に入る（計算して捨てる解決を持たない）ため、ここに現れない
-    /// オプションは出力のどこにも使われていない。生成前の検証が「使われる値だけを検証する」ために読む。
+    /// オプションは出力のどこにも使われていない。生成前の検証と GUI の生成ダイアログの入力検証が
+    /// 「使われる値だけを検証する」ために読む（両者で判定を写さないための公開の入口）。
     /// </remarks>
-    internal static IReadOnlySet<NamespaceSource> UsedNamespaceSources(
-        CodeGenerationOptions options
-    )
+    public static IReadOnlySet<NamespaceSource> UsedNamespaceSources(CodeGenerationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         var used = new HashSet<NamespaceSource>();

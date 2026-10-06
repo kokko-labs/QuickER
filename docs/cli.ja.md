@@ -107,7 +107,7 @@ quicker mcp
 ## 設定ファイル（quicker.json）
 
 `--config` で渡す JSON で、生成オプションをまとめて指定できます。
-これは GUI の設定保存ファイル（`codegen-settings.json`）と**同一スキーマ**です（GUI は camelCase で書き出しますが、CLI は大文字小文字を区別せず解釈するためそのまま渡せます）。
+これは GUI の設定保存ファイル（`codegen-settings.json`）と**同一スキーマ**です（GUI は camelCase で書き出しますが、CLI はキーの大文字小文字を区別せず読むためそのまま渡せます。GUI も同じ規則で読むので、PascalCase で書いた `quicker.json` もコード生成ダイアログの「設定読込」で読めます。ただし CLI だけのキー `OutputFileName` は読みません）。
 **下表の各キーは同名の kebab-case フラグとして CLI からも指定でき、設定ファイルより優先されます**（優先順位: CLI フラグ ＞ 設定ファイル ＞ 既定値。bool は `--flag` / `--flag false` の三値）。
 
 > **注意**: `GenerateRepositories` の既定が `true` → `false` になりました。以前はキーを省略すると QuickER 版 Repository が生成されましたが、**現在は DB アクセスコードを生成するには `GenerateRepositories: true`（または `GenerateEfCoreRepositories: true`）の明示指定が必要**です（GUI の DB アクセス「なし」既定と揃えるため）。

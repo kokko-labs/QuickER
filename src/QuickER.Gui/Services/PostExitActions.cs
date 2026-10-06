@@ -19,17 +19,23 @@ namespace QuickER.Services;
 /// QuickER を止めるため、こちらで先に新しいインスタンスを起動すると、それが止められて再起動が失われる。
 /// 登録の順序（どちらが先に要求されたか）には依らない。
 /// </para>
+/// <para>
+/// 再起動の<b>要求</b>（言語切替の <see cref="RequestRelaunch"/>・更新の「今すぐ再起動」）と、
+/// 新しいインスタンスを<b>起動する処理</b>（<see cref="RelaunchWith"/>＝起動時に 1 回だけ登録）を分けて持つ。
+/// どの経路で再起動を求めても、自分で起動するときは同じ起動処理を通る。分けないと、起動処理を持たない経路
+/// （更新の「今すぐ再起動」）で更新プログラムの起動に失敗したとき、代わりに起動する手段が無く QuickER が戻ってこない。
+/// </para>
 /// </remarks>
 public sealed class PostExitActions
 {
     /// <summary>終了の最後に呼ぶ更新の適用（引数＝適用後に再起動するか。未要求なら null）</summary>
     private Action<bool>? _applyUpdate;
 
-    /// <summary>更新の適用後に再起動するか</summary>
-    private bool _restartAfterUpdate;
+    /// <summary>終了の最後に QuickER を起動し直すよう求められているか（言語切替・更新の「今すぐ再起動」）</summary>
+    private bool _relaunchRequested;
 
-    /// <summary>終了の最後に呼ぶ再起動（未要求なら null）</summary>
-    private Action? _relaunch;
+    /// <summary>新しいインスタンスを起動する処理（未登録なら null＝自分では起動できない）</summary>
+    private Action? _startNewInstance;
 
     /// <summary>自分で再起動する直前に、単一インスタンスの座を手放す処理（未登録なら null）</summary>
     private Action? _releaseSingleInstance;
@@ -46,24 +52,39 @@ public sealed class PostExitActions
         _releaseSingleInstance = release;
     }
 
+    /// <summary>自分で再起動するときに、新しいインスタンスを起動する処理を登録する（起動時に 1 回だけ呼ぶ）</summary>
+    /// <param name="startNewInstance">新しいインスタンスを起動する処理</param>
+    /// <remarks>
+    /// 再起動の要求（<see cref="RequestRelaunch"/>・<see cref="ScheduleUpdateApply"/> の <c>restart</c>）とは別に持つ。
+    /// 未登録のまま再起動が求められたときは、自分では起動しない（更新プログラムに任せる経路は従来どおり）。
+    /// </remarks>
+    public void RelaunchWith(Action startNewInstance)
+    {
+        _startNewInstance = startNewInstance;
+    }
+
     /// <summary>正常終了の最後に更新を適用するよう登録する</summary>
     /// <param name="applyOnExit">
     /// 更新を適用する処理（引数＝適用後に再起動するか）。このプロセスの終了を待って適用する
     /// 更新プログラムを起動するだけで、呼び出しから戻ること
     /// </param>
     /// <param name="restart">適用後に QuickER を再起動するか</param>
-    /// <remarks>重ねて登録したときは後の処理を採り、再起動はどちらかが求めていれば行う</remarks>
+    /// <remarks>
+    /// 重ねて登録したときは後の処理を採り、再起動はどちらかが求めていれば行う。
+    /// <paramref name="restart"/> は <see cref="RequestRelaunch"/> と同じ要求として扱う
+    /// （適用に失敗したときは、登録済みの起動処理で自分で起動し直す）
+    /// </remarks>
     public void ScheduleUpdateApply(Action<bool> applyOnExit, bool restart)
     {
         _applyUpdate = applyOnExit;
-        _restartAfterUpdate |= restart;
+        _relaunchRequested |= restart;
     }
 
-    /// <summary>正常終了の最後に QuickER を起動し直すよう登録する</summary>
-    /// <param name="relaunch">新しいインスタンスを起動する処理</param>
-    public void ScheduleRelaunch(Action relaunch)
+    /// <summary>正常終了の最後に QuickER を起動し直すよう求める</summary>
+    /// <remarks>起動に使う処理は <see cref="RelaunchWith"/> で登録したもの</remarks>
+    public void RequestRelaunch()
     {
-        _relaunch = relaunch;
+        _relaunchRequested = true;
     }
 
     /// <summary>DI コンテナの破棄から登録された処理の実行までの、正常終了の最後の連鎖を行う</summary>
@@ -83,18 +104,18 @@ public sealed class PostExitActions
     /// <remarks>
     /// 更新の適用が失敗した（更新プログラムを起動できなかった）ときは、再起動の要求があれば自分で起動する。
     /// 適用が始まらない以上、起動したインスタンスが止められることもなく、任せた再起動が失われるだけになるため。
+    /// 要求がどの経路から来たか（言語切替・更新の「今すぐ再起動」）には依らない。
     /// </remarks>
     public void Run(IShutdownFailureReporter reporter)
     {
         var applyUpdate = _applyUpdate;
-        var relaunch = _relaunch;
+        var restart = _relaunchRequested;
         _applyUpdate = null;
-        _relaunch = null;
+        _relaunchRequested = false;
 
         if (applyUpdate is not null)
         {
             // 再起動の要求があれば更新プログラムに任せる（自分で起動したインスタンスは適用の前に止められる）
-            var restart = _restartAfterUpdate || relaunch is not null;
             var applied = false;
 
             ShutdownSteps.Run(
@@ -113,7 +134,7 @@ public sealed class PostExitActions
             }
         }
 
-        if (relaunch is not null)
+        if (restart && _startNewInstance is { } relaunch)
         {
             // 新しいインスタンスが座を取れるよう、起動の直前に手放す（手放しの失敗でも起動は試みる）
             if (_releaseSingleInstance is { } release)

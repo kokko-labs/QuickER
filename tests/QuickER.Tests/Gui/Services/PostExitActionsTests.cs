@@ -15,7 +15,8 @@ public sealed class PostExitActionsTests
     {
         var actions = new PostExitActions();
         var relaunched = 0;
-        actions.ScheduleRelaunch(() => relaunched++);
+        actions.RelaunchWith(() => relaunched++);
+        actions.RequestRelaunch();
 
         actions.Run(new RecordingShutdownFailureReporter());
 
@@ -52,15 +53,16 @@ public sealed class PostExitActionsTests
         var actions = new PostExitActions();
         var applied = new List<bool>();
         var relaunched = 0;
+        actions.RelaunchWith(() => relaunched++);
 
         if (updateFirst)
         {
             actions.ScheduleUpdateApply(applied.Add, restart: false);
-            actions.ScheduleRelaunch(() => relaunched++);
+            actions.RequestRelaunch();
         }
         else
         {
-            actions.ScheduleRelaunch(() => relaunched++);
+            actions.RequestRelaunch();
             actions.ScheduleUpdateApply(applied.Add, restart: false);
         }
 
@@ -107,13 +109,56 @@ public sealed class PostExitActionsTests
         var actions = new PostExitActions();
         var reporter = new RecordingShutdownFailureReporter();
         var relaunched = 0;
+        actions.RelaunchWith(() => relaunched++);
         actions.ScheduleUpdateApply(_ => throw new InvalidOperationException("no updater"), false);
-        actions.ScheduleRelaunch(() => relaunched++);
+        actions.RequestRelaunch();
 
         actions.Run(reporter);
 
         relaunched.Should().Be(1);
         reporter.Steps.Should().Equal("Update.ApplyOnExit");
+    }
+
+    /// <summary>
+    /// 更新の「今すぐ再起動」だけで再起動を求めたときも、適用が失敗したら自分で起動し直す
+    /// </summary>
+    /// <remarks>
+    /// 更新の経路は起動処理を自分では持たない。起動処理を要求と別に登録しておかないと、
+    /// 更新プログラムを起動できなかったとき代わりに起動する手段が無く、QuickER が閉じたまま戻らない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "PostExitActions: 更新の「今すぐ再起動」で適用が失敗しても自分で起動し直す"
+    )]
+    public void Run_ApplyFailsWithUpdateRestart_FallsBackToRelaunch()
+    {
+        var actions = new PostExitActions();
+        var reporter = new RecordingShutdownFailureReporter();
+        var calls = new List<string>();
+        actions.ReleaseSingleInstanceBeforeRelaunch(() => calls.Add("release"));
+        actions.RelaunchWith(() => calls.Add("relaunch"));
+        actions.ScheduleUpdateApply(_ => throw new InvalidOperationException("no updater"), true);
+
+        actions.Run(reporter);
+
+        calls.Should().Equal("release", "relaunch");
+        reporter.Steps.Should().Equal("Update.ApplyOnExit");
+    }
+
+    /// <summary>起動処理が登録されていなければ、再起動を求められても何もしない（座も手放さない）</summary>
+    [Fact(DisplayName = "PostExitActions: 起動処理が無ければ再起動の要求があっても何もしない")]
+    public void Run_RelaunchRequestedWithoutStarter_DoesNothing()
+    {
+        var actions = new PostExitActions();
+        var reporter = new RecordingShutdownFailureReporter();
+        var released = 0;
+        actions.ReleaseSingleInstanceBeforeRelaunch(() => released++);
+        actions.RequestRelaunch();
+
+        var act = () => actions.Run(reporter);
+
+        act.Should().NotThrow();
+        released.Should().Be(0);
+        reporter.Reports.Should().BeEmpty();
     }
 
     /// <summary>DI コンテナの破棄が投げても、後段（更新の適用）まで届く</summary>
@@ -145,7 +190,8 @@ public sealed class PostExitActionsTests
         var actions = new PostExitActions();
         var calls = new List<string>();
         actions.ReleaseSingleInstanceBeforeRelaunch(() => calls.Add("release"));
-        actions.ScheduleRelaunch(() => calls.Add("relaunch"));
+        actions.RelaunchWith(() => calls.Add("relaunch"));
+        actions.RequestRelaunch();
 
         actions.Run(new RecordingShutdownFailureReporter());
 
@@ -161,11 +207,12 @@ public sealed class PostExitActionsTests
         var actions = new PostExitActions();
         var released = 0;
         actions.ReleaseSingleInstanceBeforeRelaunch(() => released++);
+        actions.RelaunchWith(() => { });
 
         if (updateScheduled)
         {
             actions.ScheduleUpdateApply(_ => { }, restart: false);
-            actions.ScheduleRelaunch(() => { });
+            actions.RequestRelaunch();
         }
 
         actions.Run(new RecordingShutdownFailureReporter());
@@ -180,8 +227,9 @@ public sealed class PostExitActionsTests
         var actions = new PostExitActions();
         var calls = new List<string>();
         actions.ReleaseSingleInstanceBeforeRelaunch(() => calls.Add("release"));
+        actions.RelaunchWith(() => calls.Add("relaunch"));
         actions.ScheduleUpdateApply(_ => throw new InvalidOperationException("no updater"), false);
-        actions.ScheduleRelaunch(() => calls.Add("relaunch"));
+        actions.RequestRelaunch();
 
         actions.Run(new RecordingShutdownFailureReporter());
 
@@ -198,7 +246,8 @@ public sealed class PostExitActionsTests
         actions.ReleaseSingleInstanceBeforeRelaunch(() =>
             throw new InvalidOperationException("release failed")
         );
-        actions.ScheduleRelaunch(() => relaunched++);
+        actions.RelaunchWith(() => relaunched++);
+        actions.RequestRelaunch();
 
         actions.Run(reporter);
 
@@ -211,9 +260,13 @@ public sealed class PostExitActionsTests
     public void Run_NothingScheduled_DoesNothing()
     {
         var reporter = new RecordingShutdownFailureReporter();
+        var actions = new PostExitActions();
+        var relaunched = 0;
+        actions.RelaunchWith(() => relaunched++);
 
-        new PostExitActions().Run(reporter);
+        actions.Run(reporter);
 
         reporter.Reports.Should().BeEmpty();
+        relaunched.Should().Be(0, "起動処理の登録は再起動の要求ではない");
     }
 }

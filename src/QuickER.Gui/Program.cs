@@ -59,6 +59,9 @@ namespace QuickER
             // （手放さないと、新しいインスタンスが「既に起動中」と判断して黙って終わる）
             WpfApplicationExit.Pending.ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose);
 
+            // 自分で再起動するときの起動処理（言語切替の再起動・更新の適用に失敗したときの代わりの再起動が共有する）
+            WpfApplicationExit.Pending.RelaunchWith(WpfApplicationRestartService.StartNewInstance);
+
             App app = new();
             app.InitializeComponent();
 

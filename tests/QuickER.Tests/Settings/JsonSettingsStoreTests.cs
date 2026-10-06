@@ -96,7 +96,7 @@ public class JsonSettingsStoreTests : IDisposable
             loaded.Language.Should().BeEmpty("読めなかったので既定値で起動する");
             store.LastLoadUnavailable.Should().BeTrue();
 
-            store.Save(loaded);
+            store.Save(loaded).Should().BeFalse("書かずに戻ったことを呼び出し側へ返す");
         }
 
         File.ReadAllText(store.SettingsPath)
@@ -127,7 +127,7 @@ public class JsonSettingsStoreTests : IDisposable
 
         store.LastLoadUnavailable.Should().BeFalse("読めたので抑止は解ける");
         reloaded.Language = "en";
-        store.Save(reloaded);
+        store.Save(reloaded).Should().BeTrue();
 
         store.Load().Language.Should().Be("en");
     }
@@ -365,6 +365,7 @@ public class JsonSettingsStoreTests : IDisposable
             var act = () => store.Save(loaded);
 
             act.Should().NotThrow("読めないときは書かずに諦める");
+            store.Save(loaded).Should().BeFalse("書かずに戻ったことを呼び出し側へ返す");
         }
 
         File.ReadAllText(store.SettingsPath)
@@ -407,5 +408,111 @@ public class JsonSettingsStoreTests : IDisposable
         written["language"]!.GetValue<string>().Should().Be("en");
         written.Should().HaveCount(3, "壊れたファイルからは何も引き継がない");
         File.ReadAllText(store.CorruptBackupPath).Should().Be(Broken, "退避は従来どおり効く");
+    }
+
+    /// <summary>明示 null の扱いを確かめる検証用の設定型（null を許さない参照型・許す参照型・リストを持つ）</summary>
+    public sealed class NullProbeSettings
+    {
+        /// <summary>null を許さない文字列（既定値が非空なので、null で上書きされたかが見分けられる）</summary>
+        public string Language { get; set; } = "en";
+
+        /// <summary>null を許す文字列（null は正当な値なので、そのまま null になる）</summary>
+        public string? Note { get; set; } = "note";
+
+        /// <summary>null を許さないリスト</summary>
+        public List<string> Dialects { get; set; } = ["sqlserver"];
+
+        /// <summary>null を許さない入れ子のオブジェクト</summary>
+        public ViewProbeSettings View { get; set; } = new() { IsCompact = true };
+    }
+
+    /// <summary>
+    /// null を許さない参照型のプロパティへ来た JSON の null は、キーが無いのと同じに既定値のまま残ることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 手で編集した設定ファイルの <c>"repositoryDialects": null</c> がそのまま代入されると、宣言上は null に
+    /// ならないプロパティが null になり、読み手の側で NullReferenceException になる（設定画面が開けなくなる）。
+    /// Load（既定の保存先）と TryLoadFrom（設定読込）の両方で確かめる。null を許すプロパティは対象外。
+    /// </remarks>
+    [Fact(
+        DisplayName = "Load / TryLoadFrom: null を許さないプロパティの明示 null は既定値のまま残る"
+    )]
+    public void Load_ExplicitNullForNonNullableProperty_KeepsDefault()
+    {
+        var store = new JsonSettingsStore<NullProbeSettings>("probe-settings.json", _folder);
+        WriteRawSettings("""{"language":null,"note":null,"dialects":null,"view":null}""");
+
+        foreach (var loaded in new[] { store.Load(), store.TryLoadFrom(store.SettingsPath)! })
+        {
+            loaded.Language.Should().Be("en");
+            loaded.Dialects.Should().Equal("sqlserver");
+            loaded.View.IsCompact.Should().BeTrue();
+            loaded.Note.Should().BeNull("null を許すプロパティの null は正当な値");
+        }
+
+        store.LastLoadCorrupt.Should().BeFalse("1 つのキーの null で設定全体を壊れた扱いにしない");
+    }
+
+    /// <summary>リストの要素の null は修復しない（STJ が要素の注釈を持たない）ことを固定する</summary>
+    /// <remarks>
+    /// 利用側（コード生成ダイアログの対象 DB の判定）は要素の null でも落ちない比較をしている。
+    /// 要素の null まで扱えるようになったときに気づけるよう、いまの挙動をここで固定しておく。
+    /// </remarks>
+    [Fact(DisplayName = "Load: リストの要素の null はそのまま読む")]
+    public void Load_NullListElement_IsKeptAsIs()
+    {
+        var store = new JsonSettingsStore<NullProbeSettings>("probe-settings.json", _folder);
+        WriteRawSettings("""{"dialects":[null,"sqlite"]}""");
+
+        store.Load().Dialects.Should().Equal(null, "sqlite");
+    }
+
+    /// <summary>PascalCase のキー（CLI の quicker.json の書き方）も同じキーとして読むことを検証する</summary>
+    /// <remarks>
+    /// CLI は設定ファイルのキーの大文字小文字を区別せずに読む。GUI の「設定読込」で同じファイルを読むと
+    /// キーが全部捨てられて画面が既定値へ戻っていた。Load と TryLoadFrom の両方で確かめる。
+    /// </remarks>
+    [Fact(DisplayName = "Load / TryLoadFrom: PascalCase のキーも読む")]
+    public void Load_PascalCaseKeys_AreRead()
+    {
+        var store = CreateNestedStore();
+        WriteRawSettings("""{"Language":"ja","View":{"IsCompact":true}}""");
+
+        foreach (var loaded in new[] { store.Load(), store.TryLoadFrom(store.SettingsPath)! })
+        {
+            loaded.Language.Should().Be("ja");
+            loaded.View.IsCompact.Should().BeTrue();
+        }
+    }
+
+    /// <summary>
+    /// PascalCase のキーのファイルを保存し直しても、同じキーが 2 つ残らず、入れ子の未知のキーは引き継ぐことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 未知のキーの引き継ぎの照合が大文字小文字を区別すると、読み込みで既知として読んだ <c>"Language"</c> を
+    /// 未知と見なして書き出す側へ持ち越し、<c>"language"</c> と並んで残る。次の読み込みでは後ろにある
+    /// 古い値が勝ち、保存した値が戻ってしまう。
+    /// </remarks>
+    [Fact(DisplayName = "Save: PascalCase のキーは 1 つにまとまり、入れ子の未知のキーは引き継ぐ")]
+    public void Save_PascalCaseFile_DoesNotDuplicateKnownKeys()
+    {
+        var store = CreateNestedStore();
+        WriteRawSettings(
+            """{"Language":"ja","View":{"IsCompact":true,"futureNested":1},"futureTop":2}"""
+        );
+
+        var loaded = store.Load();
+        loaded.Language = "en";
+        store.Save(loaded).Should().BeTrue();
+
+        var written = ReadWrittenSettings();
+
+        written
+            .Select(entry => entry.Key)
+            .Should()
+            .BeEquivalentTo("language", "view", "tags", "futureTop");
+        written["language"]!.GetValue<string>().Should().Be("en");
+        written["view"]!["futureNested"]!.GetValue<int>().Should().Be(1);
+        store.Load().Language.Should().Be("en");
     }
 }

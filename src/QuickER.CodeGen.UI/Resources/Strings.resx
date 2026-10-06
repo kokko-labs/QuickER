@@ -287,6 +287,12 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="CodeGen_SettingsSaveFailedMessage" xml:space="preserve">
     <value>Failed to save settings to {0}.</value>
   </data>
+  <data name="CodeGen_SettingsAutoSaveFailedMessage" xml:space="preserve">
+    <value>The code generation settings could not be saved to {0}. Generation continues with the settings in this dialog, but they will not be restored the next time it opens.</value>
+  </data>
+  <data name="CodeGen_SettingsFileUnreadable" xml:space="preserve">
+    <value>The existing settings file could not be read, so it was left as it is.</value>
+  </data>
   <data name="CodeGen_SettingsLoadFailedMessage" xml:space="preserve">
     <value>Failed to load settings from {0}.</value>
   </data>

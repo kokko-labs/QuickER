@@ -1,4 +1,6 @@
-﻿using QuickER.Settings;
+﻿using System.IO;
+using QuickER.Resources;
+using QuickER.Settings;
 
 namespace QuickER.Services;
 
@@ -97,4 +99,38 @@ public class GuiAppSettingsStore : JsonSettingsStore<GuiAppSettings>
     /// <summary>保存先フォルダを指定して設定ストアを生成する（テスト用）</summary>
     public GuiAppSettingsStore(string folder)
         : base(DefaultFileName, folder) { }
+
+    /// <summary>
+    /// 設定を読み直して 1 か所を変えて保存する（利用者の 1 操作を保存する用途。他の設定は消さない）
+    /// </summary>
+    /// <param name="change">読み直した設定へ当てる変更</param>
+    /// <param name="failureReason">保存できなかった理由（表示用。保存できたときは空）</param>
+    /// <returns>保存できたら <c>true</c></returns>
+    /// <remarks>
+    /// 保存できないのは 2 通り。書き込みの失敗（アクセス拒否・保存先フォルダの位置に同名のファイルがある等）と、
+    /// 読めない既存ファイルを既定値で塗り潰さないためにストアが書かずに戻ったとき（<see cref="JsonSettingsStore{TSettings}.Save"/>
+    /// の戻り値が <c>false</c>）。呼び出し側はどちらでも表示を元に戻して知らせ、表示と保存の食い違いを残さないこと。
+    /// </remarks>
+    public bool TryUpdate(Action<GuiAppSettings> change, out string failureReason)
+    {
+        try
+        {
+            var settings = Load();
+            change(settings);
+
+            if (Save(settings))
+            {
+                failureReason = string.Empty;
+                return true;
+            }
+
+            failureReason = Strings.Settings_FileUnreadable;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            failureReason = ex.Message;
+        }
+
+        return false;
+    }
 }

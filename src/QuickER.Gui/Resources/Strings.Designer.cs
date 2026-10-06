@@ -164,6 +164,24 @@ namespace QuickER.Resources {
         }
 
         /// <summary>
+        ///   The setting could not be saved, so it was left as it was. に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Settings_SaveFailed {
+            get {
+                return ResourceManager.GetString("Settings_SaveFailed", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   The settings file could not be read, so it was not overwritten. に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Settings_FileUnreadable {
+            get {
+                return ResourceManager.GetString("Settings_FileUnreadable", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   About QuickER に類似しているローカライズされた文字列を検索します。
         /// </summary>
         public static string About_MenuItem {

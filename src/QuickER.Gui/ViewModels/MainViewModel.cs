@@ -356,7 +356,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             OnColumnRenamed
         );
         LanguageSwitch = new LanguageSwitchViewModel(_dialogs);
-        UpdateSettings = new UpdateSettingsViewModel();
+        UpdateSettings = new UpdateSettingsViewModel(_dialogs);
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;

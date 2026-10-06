@@ -76,10 +76,16 @@ public partial class LanguageSwitchViewModel : ObservableObject
             return;
         }
 
-        // 設定を保存し、メニューのチェック表示を更新する（実際のカルチャ反映は次回起動時）
-        var settings = _store.Load();
-        settings.Language = resolved;
-        _store.Save(settings);
+        // 設定を保存し、メニューのチェック表示を更新する（実際のカルチャ反映は次回起動時）。
+        // 保存できなければ表示も言語も変えずに知らせる（保存できないまま再起動しても元の言語で起動するだけになる）
+        if (!_store.TryUpdate(settings => settings.Language = resolved, out var reason))
+        {
+            _dialogs.ShowError(
+                Strings.Settings_SaveFailed + Environment.NewLine + reason,
+                Strings.Common_Error
+            );
+            return;
+        }
 
         CurrentLanguage = resolved;
 
