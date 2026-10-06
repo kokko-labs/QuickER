@@ -719,6 +719,8 @@ It builds an entity from the edit model's confirmed values, calls `CheckUniquene
 A violation with no property names, or with names that do not belong to the edit model, becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns.
 The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors; it clears its own findings only, so what the check among the siblings reported stays.
 A model marked for removal returns `true` without querying at all, in line with every other read of the validation state.
+If a confirmed value is edited, the model is reloaded, or another check starts while the query is out, the call registers nothing and returns `false`: what it found is about values the model no longer holds, so the current values were not confirmed unique.
+Run the check again after the last edit.
 
 The errors are registered after the `await`, which puts them on a thread pool thread rather than the caller's, and `ErrorsChanged` fires on that same thread.
 A WPF binding marshals the notification back to the UI thread by itself, so the ordinary case needs nothing from you.

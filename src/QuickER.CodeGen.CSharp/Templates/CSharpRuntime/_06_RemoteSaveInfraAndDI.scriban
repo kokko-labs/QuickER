@@ -309,15 +309,15 @@ public sealed record RemoteSaveResult(
 );
 
 /// <summary>
-/// Shared reflection over an entity graph for remote transport: the cascade navigations to walk, and the tables the server
-/// collects after a save for the client to act on - the row versions (<see cref="RemoteRowVersionEntry"/>) to write back and
-/// the rows (<see cref="RemoteEntityRef"/>) a save hook skipped.
+/// Shared reflection over an entity graph for remote transport: the tables the server collects after a save for the client
+/// to act on - the row versions (<see cref="RemoteRowVersionEntry"/>) to write back and the rows
+/// (<see cref="RemoteEntityRef"/>) a save hook skipped.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Both sides identify an entity the same way - CLR type name plus the primary key serialized with
 /// <see cref="RemoteJson.Options"/> - so this single place defines the correspondence between the two.
-/// The traversal is attribute-driven ([NavigationReference(Cascade=true)]) and therefore matches the child direction the
+/// The traversal follows <see cref="EntityBaseCore.EnumerateCascadeChildren"/>, the same child direction the
 /// direct-connection graph saver walks.
 /// </para>
 /// <para>
@@ -327,22 +327,8 @@ public sealed record RemoteSaveResult(
 /// </remarks>
 public static class RemoteEntityGraph
 {
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> _rowVersionProperties = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo> _keyProperties = new();
-
-    /// <summary>Enumerates the cascade-target (child-direction) navigation properties.</summary>
-    public static PropertyInfo[] CascadeNavigations(Type entityType) =>
-        _cascadeNavigations.GetOrAdd(
-            entityType,
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property =>
-                        property.GetCustomAttribute<NavigationReferenceAttribute>()
-                            is { Cascade: true }
-                    )
-                    .ToArray()
-        );
 
     /// <summary>Gets the rowversion (concurrency token) property, or <c>null</c> when the type has no such column.</summary>
     public static PropertyInfo? RowVersionProperty(Type entityType) =>
@@ -409,24 +395,9 @@ public static class RemoteEntityGraph
             return;
         }
 
-        foreach (var property in CascadeNavigations(entity.GetType()))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBaseCore child)
-            {
-                CollectRowVersions(child, true, into);
-            }
-            else if (value is IEnumerable<EntityBaseCore> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        CollectRowVersions(item, true, into);
-                    }
-                }
-            }
+            CollectRowVersions(child, true, into);
         }
     }
 
@@ -452,24 +423,9 @@ public static class RemoteEntityGraph
             return;
         }
 
-        foreach (var property in CascadeNavigations(entity.GetType()))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBaseCore child)
-            {
-                CollectSkipped(child, true, into);
-            }
-            else if (value is IEnumerable<EntityBaseCore> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        CollectSkipped(item, true, into);
-                    }
-                }
-            }
+            CollectSkipped(child, true, into);
         }
     }
 
@@ -616,12 +572,16 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
         TEntity entity,
         CancellationToken cancellationToken = default
-    ) =>
-        InvokeAsync<IReadOnlyList<UniquenessViolation>>(
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        return InvokeAsync<IReadOnlyList<UniquenessViolation>>(
             "CheckUniqueness",
             new { entity },
             cancellationToken
         );
+    }
 
     /// <summary>Asks the server whether it is up (<c>GET {prefix}/health</c>), returning <c>false</c> instead of throwing when it is not.</summary>
     /// <remarks>
@@ -972,10 +932,14 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         var list = entities.ToList();
 
         // Reject before sending if any updated entity in each aggregate root (including cascade targets)
-        // still carries values in unbounded binary columns
+        // still carries values in unbounded binary columns. A null element is skipped here and on the server,
+        // the same as a direct connection ignores it, so it is sent as is
         foreach (var entity in list)
         {
-            GuardUnboundedBinaryOnSave(entity, cascadeSave);
+            if (entity is not null)
+            {
+                GuardUnboundedBinaryOnSave(entity, cascadeSave);
+            }
         }
 
         var result = await InvokeAsync<RemoteSaveResult>(
@@ -989,7 +953,10 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 
         foreach (var entity in list)
         {
-            AcceptChanges(entity, cascadeSave, rowVersions, skipped);
+            if (entity is not null)
+            {
+                AcceptChanges(entity, cascadeSave, rowVersions, skipped);
+            }
         }
 
         return result.Affected;
@@ -1008,24 +975,9 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return;
         }
 
-        foreach (var property in RemoteEntityGraph.CascadeNavigations(entity.GetType()))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBaseCore child)
-            {
-                GuardUnboundedBinaryOnSave(child, true);
-            }
-            else if (value is IEnumerable<EntityBaseCore> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        GuardUnboundedBinaryOnSave(item, true);
-                    }
-                }
-            }
+            GuardUnboundedBinaryOnSave(child, true);
         }
     }
 
@@ -1062,24 +1014,9 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return;
         }
 
-        foreach (var property in RemoteEntityGraph.CascadeNavigations(entity.GetType()))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
-            var value = property.GetValue(entity);
-
-            if (value is EntityBaseCore child)
-            {
-                AcceptChanges(child, true, rowVersions, skipped);
-            }
-            else if (value is IEnumerable<EntityBaseCore> children)
-            {
-                foreach (var item in children)
-                {
-                    if (item is not null)
-                    {
-                        AcceptChanges(item, true, rowVersions, skipped);
-                    }
-                }
-            }
+            AcceptChanges(child, true, rowVersions, skipped);
         }
     }
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
@@ -2397,7 +2334,8 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return value;
         }
 
-        // Enums are coerced to their underlying integer type first, then converted
+        // Enums are coerced to their underlying integer type first, then converted (RawValueConverter converts a non-text
+        // value to an enum by the same rule)
         if (underlying.IsEnum)
         {
             return Enum.ToObject(underlying, Convert.ChangeType(value, Enum.GetUnderlyingType(underlying), CultureInfo.InvariantCulture));

@@ -3556,7 +3556,8 @@ public sealed class EntitySaveMetadata
             return value;
         }
 
-        // Enums are coerced to their underlying integer type first, then converted
+        // Enums are coerced to their underlying integer type first, then converted (RawValueConverter converts a non-text
+        // value to an enum by the same rule)
         if (underlying.IsEnum)
         {
             return Enum.ToObject(underlying, Convert.ChangeType(value, Enum.GetUnderlyingType(underlying), CultureInfo.InvariantCulture));

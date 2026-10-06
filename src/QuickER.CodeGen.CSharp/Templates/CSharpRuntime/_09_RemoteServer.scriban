@@ -789,7 +789,7 @@
     /// </summary>
     /// <remarks>
     /// The traversal is the server-side counterpart of the client's <c>AcceptChanges</c>: both walk the same
-    /// [NavigationReference(Cascade=true)] child navigations (<c>RemoteEntityGraph.CascadeNavigations</c>) and identify an
+    /// [NavigationReference(Cascade=true)] child navigations (<c>EntityBaseCore.EnumerateCascadeChildren</c>) and identify an
     /// entity the same way, so every collected entry lands on the matching local entity. Backends that assign no versions -
     /// a dialect without a rowversion type, or a diagram whose tables carry no such column - simply yield an empty list.
     /// </remarks>

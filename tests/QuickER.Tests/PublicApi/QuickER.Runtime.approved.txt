@@ -417,7 +417,6 @@ public static class QuickER.Runtime.RemoteEntityGraph
     public static System.Collections.Generic.Dictionary<System.ValueTuple<string, string>, byte[]> RowVersionLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> entries)
     public static System.Collections.Generic.HashSet<System.ValueTuple<string, string>> SkippedLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> entries)
     public static System.Reflection.PropertyInfo RowVersionProperty(System.Type entityType)
-    public static System.Reflection.PropertyInfo[] CascadeNavigations(System.Type entityType)
     public static bool IsSkipped(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.HashSet<System.ValueTuple<string, string>> lookup)
     public static byte[] ReadRowVersion(QuickER.Runtime.EntityBaseCore entity)
     public static string KeyText(QuickER.Runtime.EntityBaseCore entity)

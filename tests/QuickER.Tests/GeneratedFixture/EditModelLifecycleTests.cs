@@ -744,6 +744,26 @@ public sealed class EditModelLifecycleTests
     }
 
     [Fact(
+        DisplayName = "RemoveRange: index + count が int を超える指定も、1 件も消さずに範囲外として断る"
+    )]
+    public void RemoveRangeの桁あふれ()
+    {
+        var col = new EditModelCollection<OrderEditModel>
+        {
+            new OrderEditModel(),
+            new OrderEditModel(),
+            new OrderEditModel(),
+        };
+
+        // index + count が負へ桁あふれする指定は、素の足し算の比較では範囲内に見えて途中まで消してしまう
+        var act = () => col.RemoveRange(1, int.MaxValue);
+
+        act.Should().Throw<ArgumentOutOfRangeException>().Which.ParamName.Should().Be("count");
+        col.Should().HaveCount(3);
+        col.RemovedItems.Should().BeEmpty();
+    }
+
+    [Fact(
         DisplayName = "CollectionChanged ハンドラからの入れ子範囲操作は最外の末尾 1 回に合流する"
     )]
     public void 入れ子範囲操作の通知合流()

@@ -1287,6 +1287,8 @@ public static class SqlServerSchemaBootstrap
             || actual == typeof(decimal)
             || actual == typeof(DateTime)
             || actual == typeof(DateTimeOffset)
+            || actual == typeof(DateOnly)
+            || actual == typeof(TimeOnly)
             || actual == typeof(TimeSpan)
             || actual == typeof(Guid)
             || actual == typeof(byte[]);
