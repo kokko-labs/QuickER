@@ -247,7 +247,7 @@ A no-row delete is silently accepted by the QuickER repositories but throws in a
 ## QuickER Repository
 
 A lightweight repository with minimal dependencies (ADO only).
-The supported dialects are SQL Server (`FOR JSON` based) and SQLite (plain SELECT plus multi-query), and the DI-registration extensions are generated with per-engine names (`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`).
+The supported dialects are SQL Server (plain SELECT, and `FOR JSON` for a query with `Include`) and SQLite (plain SELECT plus multi-query), and the DI-registration extensions are generated with per-engine names (`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`).
 
 ```csharp
 // DI registration (the generated extension method; choose SqlServer / Sqlite by dialect)
@@ -1708,7 +1708,7 @@ Constraints and behavior:
 - **Cannot be combined with `Include`**, which throws `InvalidOperationException` when the terminal method runs.
   If you need the unbounded binary column, fetch it with a separate query that has no `Include`.
   SQL Server's `Include` path goes through FOR JSON and Base64, which inflates memory for a huge BLOB by 5 to 6 times at the peak, so this restriction keeps the memory profile predictable for the "handle a huge BLOB" purpose.
-  On SQL Server the opt-in fetches with a plain SELECT rather than FOR JSON.
+  On SQL Server, too, the opt-in fetches with a plain SELECT, as every query without `Include` does.
 - The effect applies to the entity-shaped fetches `ToListAsync` / `FirstOrDefaultAsync`, and to `ToProjectionListAsync` when the projection falls back to materializing the entity in full: a selector whose columns cannot be extracted, or one combined with `Include`.
   It does not affect count, existence check, or a projection whose columns are pruned server-side, because that projection already fetches exactly the columns it references, excluded ones included.
 - The fetched entity is a legitimate entity, but the fact that the excluded column is out of scope for UPDATE does not change.

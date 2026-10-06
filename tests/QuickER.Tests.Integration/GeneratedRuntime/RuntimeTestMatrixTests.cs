@@ -479,6 +479,7 @@ public class RuntimeTestMatrixTests
         // --- CRUD パリティ ---
         new("GeneratedRuntimeAdoParityTests", "CrudParity", Backend.AdoSqlServer),
         new("SqlServerQueryPipelineRuntimeTests", "CrudParity", Backend.AdoSqlServer),
+        new("SqlServerPlainQueryRuntimeTests", "CrudParity", Backend.AdoSqlServer),
         new("GeneratedSqliteAdoRuntimeTests", "CrudParity", Backend.AdoSqlite),
         new("GeneratedRuntimeEfCoreParityTests", "CrudParity", Backend.EfCore),
         new("GeneratedRuntimeEfCoreSpecificTests", "CrudParity", Backend.EfCore),

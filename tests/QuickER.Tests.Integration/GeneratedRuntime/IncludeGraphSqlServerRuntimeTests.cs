@@ -267,11 +267,12 @@ public sealed class IncludeGraphSqlServerRuntimeTests(SqlServerContainerFixture 
 
     /// <summary>
     /// 12. 値オブジェクトの検証に通らない格納値（最大長 50 の memo に 60 文字）を読むと、プレーン SELECT の
-    /// GetById・FOR JSON の Query()・Include 先の子のどれでも、列名を名指しした InvalidOperationException になる。
-    /// FOR JSON の経路は共有の値オブジェクト変換器を通るため、従来は値オブジェクトの型しか分からない例外だった
+    /// GetById と Include の無い Query()・FOR JSON の Include のルートと Include 先の子のどれでも、列名を名指しした
+    /// InvalidOperationException になる。FOR JSON の経路は共有の値オブジェクト変換器を通るため、従来は値オブジェクトの
+    /// 型しか分からない例外だった
     /// </summary>
     [Fact(
-        DisplayName = "[IncludeGraph] 12: 値オブジェクトが拒む格納値は GetById・Query()・Include 先でも列名つきの例外になる (sqlserver)"
+        DisplayName = "[IncludeGraph] 12: 値オブジェクトが拒む格納値は GetById・Query()・Include のルートと先でも列名つきの例外になる (sqlserver)"
     )]
     public async Task StoredValueRejectedByValueObject_NamesTheColumn()
     {
@@ -288,6 +289,10 @@ public sealed class IncludeGraphSqlServerRuntimeTests(SqlServerContainerFixture 
         {
             ("GetById", async () => await Orders().GetByIdAsync(OrderIdValue.Create(10), Ct)),
             ("Query()", async () => await Orders().Query().ToListAsync(Ct)),
+            (
+                "Include のルート",
+                async () => await Orders().Query().Include(order => order.Customer).ToListAsync(Ct)
+            ),
             (
                 "Include 先",
                 async () =>

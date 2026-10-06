@@ -17,7 +17,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>
 /// 入力は <see cref="UniquenessSqlServerFixtureDefinition"/>（クエリフィクスチャと同一の図・同一の UNIQUE 制約を
 /// SQL Server 方言で生成したもの）。判定の共有本体は全実装先で同一テキストだが、SQL への翻訳は方言ごとに違う
-/// （SQL Server は FOR JSON 経路・識別子は角括弧）ため、SQLite で緑でも SQL Server で同じ行集合になるとは限らない。
+/// （SQL Server は識別子が角括弧・ページングは OFFSET-FETCH）ため、SQLite で緑でも SQL Server で同じ行集合になるとは限らない。
 /// バックエンド非依存のシナリオは基底が持ち、本派生は接続だけを差し込む。
 /// </para>
 /// <para>Docker 不在時は <see cref="SqlServerContainerFixture"/> の検出でスキップされる（CI では常にスキップ）。</para>

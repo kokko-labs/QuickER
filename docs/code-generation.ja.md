@@ -247,7 +247,7 @@ Mapper の変換も同じ規則で、削除行の未入力の非キー列は必�
 ## QuickER 版 Repository
 
 依存最小（ADO のみ）の軽量 Repository です。
-対象方言は SQL Server（`FOR JSON` ベース）と SQLite（プレーン SELECT ＋ マルチクエリ）で、DI 登録拡張はエンジン別の名前（`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`）で生成されます。
+対象方言は SQL Server（プレーン SELECT・`Include` のある取得は `FOR JSON`）と SQLite（プレーン SELECT ＋ マルチクエリ）で、DI 登録拡張はエンジン別の名前（`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`）で生成されます。
 
 ```csharp
 // DI 登録（生成される拡張メソッド。方言に応じて SqlServer / Sqlite を選ぶ）
@@ -1728,7 +1728,7 @@ var doc = await documents
 - **`Include` とは併用できません**（終端メソッド実行時に `InvalidOperationException`）。
   無制限バイナリ列が必要な場合は、`Include` なしの別クエリで取得してください。
   これは、SQL Server の `Include` 経路が FOR JSON と Base64 を経由して巨大 BLOB のメモリ膨張（ピーク 5〜6 倍）を招くためです。
-  「巨大 BLOB を扱う」目的では、メモリ特性が予測可能に保たれるようにします（SQL Server では FOR JSON を使わずプレーン SELECT で取得します）。
+  「巨大 BLOB を扱う」目的では、メモリ特性が予測可能に保たれるようにします（SQL Server でも、`Include` の無い取得と同じくプレーン SELECT で取得します）。
 - 効果があるのは、エンティティ形の取得（`ToListAsync` / `FirstOrDefaultAsync`）と、`ToProjectionListAsync` がエンティティを全列取得してから射影するフォールバック経路です（セレクタから列を抽出できない場合や `Include` 併用時）。
   件数・存在確認と、サーバー側で列を刈り込める射影には影響しません（後者は参照した列を、除外列も含めて取得済みのためです）。
 - 取得したエンティティは正当なエンティティですが、除外列が UPDATE 対象外である点は変わりません。

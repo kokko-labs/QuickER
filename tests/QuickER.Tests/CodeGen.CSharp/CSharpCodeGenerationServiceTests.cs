@@ -1863,7 +1863,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("entity.MarkUpdated();");
     }
 
-    /// <summary>Query の取得が FOR JSON＋STJ に統一され、Include / ThenInclude（多階層）が生成されることを検証する</summary>
+    /// <summary>Include のある Query の取得が FOR JSON＋STJ で生成され、Include / ThenInclude（多階層）が生成されることを検証する（Include の無い取得のプレーン SELECT は SqlServerPlainQueryRuntimeTests が実 DB で固定する）</summary>
     [Fact]
     public void Generate_ShouldCreateJsonIncludeQuery()
     {
@@ -1892,12 +1892,13 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("Expression<Func<TProperty, ICollection<TNext>>> navigationSelector");
-        // 列はプロパティ名へ別名付け、単一参照は WITHOUT_ARRAY_WRAPPER
+        // 列はプロパティ名へ別名付け（float / real の列は可逆な書式の文字列）、単一参照は WITHOUT_ARRAY_WRAPPER
         content
             .Should()
             .Contain(
-                "{EntitySaveMetadata.QuoteIdentifier(columnName)} AS {EntitySaveMetadata.QuoteIdentifier(propertyName)}"
+                "parts.Add($\"{column} AS {EntitySaveMetadata.QuoteIdentifier(property.Name)}\");"
             );
+        content.Should().Contain("column = $\"CONVERT(varchar(30), {column}, 3)\";");
         content.Should().Contain("WITHOUT_ARRAY_WRAPPER");
         // ネストした FOR JSON はそのままだと文字列化されるため JSON_QUERY で包む
         content

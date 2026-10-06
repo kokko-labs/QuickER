@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 方言で生成した固定フィクスチャ（<see cref="SqlServerBinaryFixtureDefinition"/>）を入力にする。SQLite 一時ファイル DB
 /// では検証できない SQL Server 固有経路——(1) Stream アクセサのストリーミングエンジン
 /// （読み=<c>CommandBehavior.SequentialAccess</c>＋<c>GetStream</c>・書き=Stream 値の <c>SqlParameter</c>）、
-/// (2) 除外の FOR JSON 縮小 SELECT、(3) <c>WithUnboundedBinary()</c> のプレーン全列 SELECT——を実 DB で往復検証する。
+/// (2) 除外の縮小 SELECT（GetById / GetAll と Include の無い Query()）、(3) <c>WithUnboundedBinary()</c> のプレーン全列 SELECT——を実 DB で往復検証する。
 /// </para>
 /// <para>
 /// シードは <b>生成された Repository の <c>InsertAsync</c></b> で行う。<c>row_ver</c>＝<c>rowversion</c> 列は
@@ -260,28 +260,45 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
         }
     }
 
-    /// <summary>5. 除外の FOR JSON 縮小 SELECT: GetById / GetAll で除外列は未取得状態・有界バイナリは取得される</summary>
+    /// <summary>5. 除外の縮小 SELECT: GetById / GetAll / Include の無い Query() で除外列は未取得状態・有界バイナリは取得される</summary>
     [Fact(
-        DisplayName = "[Binary/SqlServer] 除外(FOR JSON): GetById/GetAll で除外列は未取得状態・有界は取得"
+        DisplayName = "[Binary/SqlServer] 除外: GetById/GetAll/Query() で除外列は未取得状態・有界は取得"
     )]
-    public async Task Exclusion_ForJson_GetByIdAndGetAll()
+    public async Task Exclusion_NarrowSelect_GetByIdGetAllAndQuery()
     {
         var documents = Documents();
 
         var doc = await documents.GetByIdAsync(1, Ct);
         doc.Should().NotBeNull();
         doc!.Title.Should().Be("alpha", "除外対象外の列は通常どおり取得される");
-        doc.Payload.Should()
-            .BeNull("除外列 payload（nullable）は FOR JSON SELECT されず null のまま");
+        doc.Payload.Should().BeNull("除外列 payload（nullable）は SELECT されず null のまま");
         doc.Thumb.Should().BeEmpty("除外列 thumb（非 nullable）は SELECT されず空配列のまま");
         doc.Checksum.Should().Equal(Doc1Checksum, "有界バイナリ checksum は除外対象外＝値が取れる");
-        doc.RowVer.Should()
-            .NotBeNull("rowversion は除外対象外＝FOR JSON SELECT に含まれ値が取れる");
+        doc.RowVer.Should().NotBeNull("rowversion は除外対象外＝SELECT に含まれ値が取れる");
 
         var all = await documents.GetAllAsync(Ct);
         all.Should().HaveCount(3);
         all.Should().OnlyContain(d => d.Payload == null);
         all.Should().OnlyContain(d => d.Thumb.Length == 0);
+
+        // Include の無い Query() も同じ縮小 SELECT（WithUnboundedBinary を付けたときだけ全列）
+        var queried = await documents.Query().ToListAsync(Ct);
+        queried.Should().HaveCount(3);
+        queried.Should().OnlyContain(d => d.Payload == null && d.Thumb.Length == 0);
+        queried.Single(d => d.DocumentId == 1).Checksum.Should().Equal(Doc1Checksum);
+        (await documents.Query().Where(d => d.DocumentId == 1).FirstOrDefaultAsync(Ct))!
+            .Payload.Should()
+            .BeNull();
+
+        // Include のある取得（FOR JSON）も除外列は射影に含まれず、読む前に既定値へ戻すのは SELECT 列だけなので
+        // 除外列は初期化子のまま（nullable は null・非 nullable は空配列）＝未取得状態を保つ。子が 0 件のナビゲーションは空のコレクション
+        var included = await documents.Query().Include(d => d.DocumentNotes).ToListAsync(Ct);
+        included.Should().HaveCount(3);
+        included.Should().OnlyContain(d => d.Payload == null);
+        included.Should().OnlyContain(d => d.Thumb != null && d.Thumb.Length == 0);
+        included.Should().OnlyContain(d => d.DocumentNotes != null && d.DocumentNotes.Count == 0);
+        included.Single(d => d.DocumentId == 1).Checksum.Should().Equal(Doc1Checksum);
+        included.Should().OnlyContain(d => d.RowVer != null);
     }
 
     /// <summary>6. WithUnboundedBinary のプレーン全列 SELECT: 除外列の実データを返し RowState=Unchanged になる</summary>
