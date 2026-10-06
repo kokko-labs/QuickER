@@ -81,6 +81,79 @@ public sealed class CSharpNameConverterTests
         content.Should().Contain("BindingGenerated");
     }
 
+    [Theory(
+        DisplayName = "カラム名 → プロパティ名変換は大文字小文字の無い文字（漢字・かな）の並びを捨てない"
+    )]
+    // 英数字だけ・漢字かなだけの名前は従来と同じ名前になる
+    [InlineData("customer_id", "CustomerId")]
+    [InlineData("orderHTTPCode", "OrderHttpCode")]
+    [InlineData("2fa_status", "_2FaStatus")]
+    [InlineData("顧客", "顧客")]
+    [InlineData("注文明細", "注文明細")]
+    [InlineData("ID顧客", "Id顧客")]
+    // 英数字と混ざっても漢字かなの並びを 1 語として残す
+    [InlineData("顧客ID", "顧客Id")]
+    [InlineData("顧客2", "顧客2")]
+    [InlineData("顧客Name", "顧客Name")]
+    [InlineData("顧客_id", "顧客Id")]
+    [InlineData("注文ID顧客", "注文Id顧客")]
+    public void ToPropertyName_KeepsCaselessLetterRuns(string columnName, string expected)
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "sample",
+                    Columns = [Column("sample_key", primaryKey: true), Column(columnName)],
+                },
+            ],
+        };
+
+        var content = Generate(diagram);
+
+        content.Should().Contain($"public string Binding{expected}");
+    }
+
+    [Fact(
+        DisplayName = "漢字の名前に同じ英字の語が続く列同士（顧客ID・注文ID）は別のプロパティ・値オブジェクトになりコンパイルできる"
+    )]
+    public void CaselessLetterRuns_DistinguishColumnsSharingAsciiSuffix()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "注文",
+                    Columns = [Column("注文ID", primaryKey: true), Column("顧客ID")],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("class 注文IdValue");
+        content.Should().Contain("class 顧客IdValue");
+        content.Should().Contain("class 注文Entity");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "CaselessLetterRuns");
+        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
+    }
+
     [Fact(
         DisplayName = "C# キーワードと同綴りのカラム名でも @ エスケープされない（PascalCase 化で先頭が大文字になり衝突しないため）"
     )]

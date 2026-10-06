@@ -70,6 +70,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 }
 
                 var key = ResolveValueObjectKey(column);
+
                 if (!groups.TryGetValue(key, out var list))
                 {
                     list = new List<ValueObjectMember>();
@@ -418,6 +419,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         // （byte[]×string）や等価・順序の意味の無音変化（int×string＝文字列比較化）になる。
         // 型が同じで長さ・精度だけの食い違いは従来どおり Warning（PK 優先／最大定義で揃える）
         var signatures = members.Select(Signature).Distinct().ToList();
+
         if (signatures.Count > 1)
         {
             var locations = string.Join(
@@ -523,7 +525,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             BindingFieldName = ToFieldName(bindingPropertyName),
             NeedsParse = needsParse,
             ParseTypeName = needsParse ? underlying : string.Empty,
-            FieldInitializer = string.Empty, // 参照型・nullable → null 既定
             BindingFieldInitializer = "string.Empty",
             IsNullable = true,
             IsReferenceType = true,
@@ -625,18 +626,21 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// </summary>
     /// <remarks>
     /// <see cref="BuildValueObjectBaseDeclaration"/> の派生規則と、DSL 条件の型整合検査
-    /// （<see cref="Queries.QueryConditionTypeChecker"/>）が共有する単一正本。sbyte は MySQL の
-    /// tinyint（表示幅なし）だけが生む（5 方言の型マッパーを走査済み。ushort 等はどの方言も生成しない
-    /// ため列挙しない）。落とすと比較演算子も IComparable も持たない VO になり OrderBy が実行時
-    /// InvalidOperationException になる。DateTime は専用基底（Ordered 派生）だが演算子は持つため真。
+    /// （<see cref="Queries.QueryConditionTypeChecker"/>）が共有する単一正本。sbyte と符号なしの
+    /// ushort / uint / ulong は MySQL の型マッパーだけが生む（tinyint と、unsigned 付きの smallint /
+    /// mediumint / int / bigint・bit）。落とすと比較演算子も IComparable も持たない VO になり、
+    /// DSL 条件の大小比較がクエリごと生成から外れる。DateTime は専用基底（Ordered 派生）だが演算子は持つため真。
     /// </remarks>
     internal static bool ValueObjectHasOrderingOperators(string valueType) =>
         valueType
             is "byte"
                 or "sbyte"
                 or "short"
+                or "ushort"
                 or "int"
+                or "uint"
                 or "long"
+                or "ulong"
                 or "float"
                 or "double"
                 or "decimal"

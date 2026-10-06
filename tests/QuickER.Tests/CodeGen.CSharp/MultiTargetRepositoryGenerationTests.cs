@@ -114,21 +114,21 @@ public sealed class MultiTargetRepositoryGenerationTests
     public void EffectiveDialects_SingleElement_ResolvesToOne()
     {
         var options = new CodeGenerationOptions { RepositoryDialects = ["sqlite"] };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlite");
+        options.ResolveRepositoryDialects().Should().Equal("sqlite");
     }
 
     [Fact(DisplayName = "空リストは既定 sqlserver へフォールバックする")]
     public void EffectiveDialects_EmptyListFallsBackToSqlServer()
     {
         var options = new CodeGenerationOptions { RepositoryDialects = [] };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
+        options.ResolveRepositoryDialects().Should().Equal("sqlserver");
     }
 
     [Fact(DisplayName = "未指定（null）は既定 sqlserver へフォールバックする")]
     public void EffectiveDialects_NullFallsBackToSqlServer()
     {
         var options = new CodeGenerationOptions();
-        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
+        options.ResolveRepositoryDialects().Should().Equal("sqlserver");
     }
 
     [Fact(DisplayName = "実効方言は重複を大小無視で除去し順序を保つ")]
@@ -138,7 +138,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         {
             RepositoryDialects = ["SqlServer", "sqlite", "sqlserver"],
         };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlserver", "sqlite");
+        options.ResolveRepositoryDialects().Should().Equal("sqlserver", "sqlite");
     }
 
     /// <summary>
@@ -150,7 +150,7 @@ public sealed class MultiTargetRepositoryGenerationTests
     public void EffectiveDialects_NormalizesSpellingToCanonical()
     {
         var options = new CodeGenerationOptions { RepositoryDialects = ["SQLite", "SQLSERVER"] };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlite", "sqlserver");
+        options.ResolveRepositoryDialects().Should().Equal("sqlite", "sqlserver");
     }
 
     [Fact(DisplayName = "大小違いの方言指定は正規綴り指定とバイト同一の出力になる")]
@@ -195,7 +195,7 @@ public sealed class MultiTargetRepositoryGenerationTests
     public void EffectiveDialects_TrimsAndDropsBlanks()
     {
         var options = new CodeGenerationOptions { RepositoryDialects = [" sqlserver ", "", "  "] };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
+        options.ResolveRepositoryDialects().Should().Equal("sqlserver");
     }
 
     [Fact(DisplayName = "未対応方言＋GenerateRepositories=true は ArgumentException になる")]
@@ -206,8 +206,24 @@ public sealed class MultiTargetRepositoryGenerationTests
             GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "postgres"],
         };
-        var act = () => _ = options.EffectiveRepositoryDialects;
+        var act = () => _ = options.ResolveRepositoryDialects();
         act.Should().Throw<ArgumentException>().WithMessage("*postgres*");
+    }
+
+    [Fact(
+        DisplayName = "未対応方言を含むオプションも文字列化できる（record の ToString が例外を投げない）"
+    )]
+    public void ToString_WithUnsupportedDialect_DoesNotThrow()
+    {
+        // record の ToString は公開プロパティをすべて読む。方言の解決（未対応で投げる）がプロパティだと、
+        // デバッガ・ログ・テストの表示名でオプションを文字列化するだけで例外になる
+        var options = new CodeGenerationOptions
+        {
+            GenerateRepositories = true,
+            RepositoryDialects = ["sqlserver", "postgres"],
+        };
+
+        options.ToString().Should().Contain("GenerateRepositories = True");
     }
 
     /// <summary>
@@ -218,7 +234,7 @@ public sealed class MultiTargetRepositoryGenerationTests
     public void EffectiveDialects_UnsupportedWithoutRepositories_FallsBackToSqlServer()
     {
         var options = new CodeGenerationOptions { RepositoryDialects = ["postgresql"] };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
+        options.ResolveRepositoryDialects().Should().Equal("sqlserver");
     }
 
     /// <summary>
@@ -229,7 +245,7 @@ public sealed class MultiTargetRepositoryGenerationTests
     public void EffectiveDialects_MixedUnsupportedWithoutRepositories_FallsBackWholeList()
     {
         var options = new CodeGenerationOptions { RepositoryDialects = ["sqlite", "postgresql"] };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
+        options.ResolveRepositoryDialects().Should().Equal("sqlserver");
     }
 
     [Fact(
@@ -505,6 +521,63 @@ public sealed class MultiTargetRepositoryGenerationTests
         result.HasErrors.Should().BeFalse();
 
         return result;
+    }
+
+    [Theory(
+        DisplayName = "マルチ方言（非分割）は Repository 名前空間がルートの入れ子でなくても連結ファイルがコンパイルできる"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MultiDialect_NonSplit_RepositoryNamespaceOutsideRoot_Compiles(bool valueObjects)
+    {
+        // 方言ブロック namespace Data.Repos.SqlServer { } から、ルート MyApp の型（Entity・契約）は
+        // 外側の名前空間として見えない。連結時に using MyApp; を落とすと CS0246 が多数出ていた
+        var diagram = BuildDiagram();
+        var primary = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
+        var byDialect = new Dictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>>(
+            StringComparer.OrdinalIgnoreCase
+        )
+        {
+            ["sqlserver"] = primary,
+            ["sqlite"] = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram),
+        };
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "MyApp",
+            RepositoryNamespace = "Data.Repos",
+            GenerateRepositories = true,
+            GenerateValueObjects = valueObjects,
+            RepositoryDialects = ["sqlserver", "sqlite"],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            primary,
+            byDialect,
+            options
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single().Content;
+        content.Should().Contain("namespace Data.Repos.SqlServer");
+        content.Should().Contain("using MyApp;");
+
+        var compilation = GeneratedCodeCompiler.Compile(
+            result,
+            $"MultiDialectOutsideRoot_{valueObjects}"
+        );
+        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
+    }
+
+    [Fact(
+        DisplayName = "マルチ方言（非分割）は Repository 名前空間がルートの入れ子なら自ファイル内の名前空間を using しない"
+    )]
+    public void MultiDialect_NonSplit_NestedRepositoryNamespace_OmitsOwnUsing()
+    {
+        // 既定（{root}.Repositories）は方言ブロックがルートの入れ子なので using なしで解決できる＝従来どおり出さない
+        var content = GenerateMultiTarget().Files.Single().Content;
+
+        content.Should().NotContain("using Sample.Domain;");
     }
 
     [Fact(DisplayName = "マルチ方言（非分割）は契約を 1 回・方言別 namespace に両実装を出す")]

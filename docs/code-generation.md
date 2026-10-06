@@ -54,6 +54,20 @@ Only the fields the user actually edits take on the precision of their input str
 Binary columns are copied defensively, so editing the loaded model never writes into the entity it was loaded from.
 A `date` column (as opposed to `datetime`) is displayed with the culture's short date pattern, without a "0:00:00" tail.
 
+### Navigation property names
+
+A navigation property is named after the table at the other end.
+The parent side gets the plural of the child table (`Orders`), or the singular for a one-to-one relationship, and the child side gets the singular of the parent table (`Customer`).
+
+When two or more relationships join the same parent table and child table, every relationship between them is named after its foreign-key column instead.
+Table names alone would give the class two members with the same name.
+The role name is the foreign-key column in PascalCase without its trailing `Id`, so `ship_customer_id` becomes `ShipCustomer`.
+A column that does not end in `Id`, or is `id` itself, gets the parent table's singular appended, so `shipper` becomes `ShipperCustomer`.
+The child side is the role name (`order.ShipCustomer`).
+The parent side is `{child plural}By{role}` (`customer.OrdersByShipCustomer`), or `{child singular}By{role}` for a one-to-one relationship.
+A table that references itself twice follows the same rule and gets only the parent-side navigations, such as `NodesByParent` and `NodesByOrigin`.
+Adding a second relationship between two tables therefore renames the navigations of the first one.
+
 ### DB-definition metadata attributes
 
 By default, an Entity is decorated with DataAnnotations and DB-definition metadata attributes (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, and so on) and a description.

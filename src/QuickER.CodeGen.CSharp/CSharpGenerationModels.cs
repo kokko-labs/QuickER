@@ -955,9 +955,6 @@ internal sealed record CSharpEditModelPropertyModel
     /// <summary>TryParse に使う型名（例: int, Guid）NeedsParse=true のときのみ有効</summary>
     public required string ParseTypeName { get; init; }
 
-    /// <summary>通常プロパティのフィールド初期化子の式（例: = string.Empty）</summary>
-    public required string FieldInitializer { get; init; }
-
     /// <summary>バインディングフィールドの初期化子の式</summary>
     public required string BindingFieldInitializer { get; init; }
 

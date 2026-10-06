@@ -47,6 +47,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         _queriesByEntity = CollectValidQueries(diagram, diagnostics);
         _queryDtoNames.Clear();
 
+        // ナビゲーション名は Entity / EditModel / Mapper と EF Core の Fluent 構成が共有する（先に 1 回だけ決める）
+        _navigationNames = ResolveNavigationNames(diagram);
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
         _valueObjects = BuildValueObjects(diagram, options, diagnostics);
 
@@ -66,9 +68,8 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         var model = new CSharpGenerationModel
         {
-            NamespaceName = string.IsNullOrWhiteSpace(options.RootNamespace)
-                ? "Generated"
-                : options.RootNamespace.Trim(),
+            // API リファレンス（.g.md）の見出しに使う。既定値の規則は計画と共有する
+            NamespaceName = GeneratedFilePlanner.ResolveRootNamespace(options),
             // Entity は全カテゴリの前提のため常に生成する
             EntityClasses = diagram
                 .Entities.Select(entity =>
@@ -581,11 +582,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         };
     }
 
-    /// <summary>カラム定義から EditModel のプロパティ生成モデルを構築する</summary>
-    /// <remarks>
-    /// EditModel は入力途中の不正値も保持するため、値型・文字列・バイナリは原則 NULL 許容とし、
-    /// 確定値プロパティと UI バインディング用文字列プロパティの両方の情報を組み立てる
-    /// </remarks>
     /// <summary>
     /// その列を EditModel・Mapper・値オブジェクトの対象外にするか（<see cref="CSharpTypeInfo.IsExcludedFromEditModel"/>）
     /// </summary>
@@ -599,6 +595,11 @@ internal sealed partial class CSharpGenerationModelBuilder
     private bool IsExcludedFromEditModelColumn(Column column) =>
         _columnTypes.TryGetValue(column.Id, out var typeInfo) && typeInfo.IsExcludedFromEditModel;
 
+    /// <summary>カラム定義から EditModel のプロパティ生成モデルを構築する</summary>
+    /// <remarks>
+    /// EditModel は入力途中の不正値も保持するため、値型・文字列・バイナリは原則 NULL 許容とし、
+    /// 確定値プロパティと UI バインディング用文字列プロパティの両方の情報を組み立てる
+    /// </remarks>
     private CSharpEditModelPropertyModel BuildEditModelProperty(
         Column column,
         CodeGenerationOptions options
@@ -606,6 +607,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var typeInfo = _columnTypes[column.Id];
         var valueObject = ResolveValueObject(column);
+
         if (valueObject is not null)
         {
             return BuildValueObjectEditModelProperty(column, valueObject, options);
@@ -628,13 +630,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         var bindingPropertyName = "Binding" + propertyName;
         var bindingFieldName = ToFieldName(bindingPropertyName);
 
-        isBytes = typeName == "byte[]" || typeName == "byte[]?";
         var needsParse = !typeInfo.IsReferenceType && !isBytes;
         var parseTypeName = needsParse ? typeName.TrimEnd('?') : string.Empty;
-
-        // 参照型・NULL 許容の値型は初期化子なし（null 始まり）、それ以外の非 NULL 値型のみ default で初期化する
-        var fieldInitializer =
-            typeInfo.IsReferenceType || editModelIsNullable ? string.Empty : "default";
 
         var bindingFieldInitializer = "string.Empty";
 
@@ -658,7 +655,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             BindingFieldName = bindingFieldName,
             NeedsParse = needsParse,
             ParseTypeName = parseTypeName,
-            FieldInitializer = fieldInitializer,
             BindingFieldInitializer = bindingFieldInitializer,
             IsNullable = editModelIsNullable,
             IsReferenceType = typeInfo.IsReferenceType,
@@ -1016,15 +1012,13 @@ internal sealed partial class CSharpGenerationModelBuilder
             }
 
             var isCollection = relationship.Type == RelationshipType.OneToMany;
+            var navigationNames = _navigationNames[relationship.Id];
 
             // source 側（親）は子へのナビゲーション（1 対多なら collection）を持つ
             navigationsByEntity[source.Id]
                 .Add(
                     new NavigationInfo(
-                        PropertyName: _nameConverter.ToNavigationName(
-                            target.TableName,
-                            collection: isCollection
-                        ),
+                        PropertyName: navigationNames.Principal,
                         TargetTableName: target.TableName,
                         IsCollection: isCollection,
                         // 1 対 1 の子は行が無くても成立する（本質的に 0..1）ため nullable。
@@ -1048,10 +1042,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 navigationsByEntity[target.Id]
                     .Add(
                         new NavigationInfo(
-                            PropertyName: _nameConverter.ToNavigationName(
-                                source.TableName,
-                                collection: false
-                            ),
+                            PropertyName: navigationNames.Dependent,
                             TargetTableName: source.TableName,
                             IsCollection: false,
                             IsNullable: dependentColumn.IsNullable,

@@ -107,6 +107,7 @@ public sealed class GeneratedFileWriter
         // Path.GetFileName でディレクトリ要素を除去し、パストラバーサルによる出力先外への書き込みを防ぐ
         // （サブフォルダへの振り分けは検証済みの RelativeDirectory だけが担う＝FileName にパスは書けない）
         var fileName = Path.GetFileName(file.FileName);
+
         if (
             !fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
             && !fileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)

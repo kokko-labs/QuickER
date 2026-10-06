@@ -233,7 +233,7 @@ internal static class GenerationExecutor
     }
 
     /// <summary>
-    /// QuickER 版 Repository の実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）ごとに、
+    /// QuickER 版 Repository の実効方言（<see cref="CodeGenerationOptions.ResolveRepositoryDialects"/>）ごとに、
     /// CLI のプロバイダレジストリから方言別の型マッパを解決する。
     /// </summary>
     /// <remarks>レジストリに存在しない方言名は除外する（生成本体側で図の方言の辞書へ代替される）</remarks>
@@ -243,7 +243,7 @@ internal static class GenerationExecutor
     {
         var mappers = new Dictionary<string, IColumnTypeMapper>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var dialect in options.EffectiveRepositoryDialects)
+        foreach (var dialect in options.ResolveRepositoryDialects())
         {
             if (Providers.TryGet(dialect, out var provider))
             {

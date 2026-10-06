@@ -39,7 +39,7 @@ public sealed record CodeGenerationOptions
     /// </summary>
     /// <remarks>
     /// <c>null</c> または空のときは既定 <c>"sqlserver"</c> の単一へフォールバックする。実効値の解決・正規化
-    /// （重複排除・未対応方言の検証）は <see cref="EffectiveRepositoryDialects"/> に 1 箇所へ集約する。
+    /// （重複排除・未対応方言の検証）は <see cref="ResolveRepositoryDialects"/> に 1 箇所へ集約する。
     /// 対応方言は <see cref="SupportedRepositoryDialects"/> を参照（GUI / CLI 共通）。
     /// </remarks>
     public IReadOnlyList<string>? RepositoryDialects { get; init; }
@@ -66,57 +66,58 @@ public sealed record CodeGenerationOptions
     ///   </item>
     ///   <item>結果が空になった場合は既定 <c>"sqlserver"</c> の単一を返す（従来挙動の保険）</item>
     /// </list>
+    /// <para>
+    /// プロパティでなくメソッドにしているのは、未対応方言で例外を投げるため。record の <c>ToString()</c> は公開プロパティを
+    /// すべて読むので、投げるプロパティがあるとオプションを文字列化（デバッガ・ログ・テストの表示名）するだけで例外になる。
+    /// </para>
     /// </remarks>
-    public IReadOnlyList<string> EffectiveRepositoryDialects
+    public IReadOnlyList<string> ResolveRepositoryDialects()
     {
-        get
+        var source = RepositoryDialects is { Count: > 0 } ? RepositoryDialects : ["sqlserver"];
+
+        var resolved = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var raw in source)
         {
-            var source = RepositoryDialects is { Count: > 0 } ? RepositoryDialects : ["sqlserver"];
+            var value = raw?.Trim();
 
-            var resolved = new List<string>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var raw in source)
+            if (string.IsNullOrEmpty(value))
             {
-                var value = raw?.Trim();
-
-                if (string.IsNullOrEmpty(value))
-                {
-                    continue;
-                }
-
-                if (!SupportedRepositoryDialects.Contains(value, StringComparer.OrdinalIgnoreCase))
-                {
-                    if (!GenerateRepositories)
-                    {
-                        // QuickER 版 Repository を生成しない構成では方言指定が生成物に影響しないため検証しない。
-                        // CLI は --repository-dialects 未指定時に図の方言名（例 postgresql）を焼き込むため、ここで例外にすると
-                        // Repository 非生成の generate まで落ちる。GUI の空リスト時と同じ既定へ倒し、出力を GUI/CLI で対称に保つ
-                        return ["sqlserver"];
-                    }
-
-                    throw new ArgumentException(
-                        string.Format(
-                            Strings.CodeGen_Error_UnsupportedRepositoryDialect,
-                            value,
-                            string.Join(", ", SupportedRepositoryDialects)
-                        )
-                    );
-                }
-
-                if (seen.Add(value))
-                {
-                    // 下流の方言分岐（テンプレート・クエリ計画）は Ordinal 比較のため、正規綴りへ置換して返す
-                    resolved.Add(
-                        SupportedRepositoryDialects.First(dialect =>
-                            string.Equals(dialect, value, StringComparison.OrdinalIgnoreCase)
-                        )
-                    );
-                }
+                continue;
             }
 
-            return resolved.Count > 0 ? resolved : ["sqlserver"];
+            if (!SupportedRepositoryDialects.Contains(value, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!GenerateRepositories)
+                {
+                    // QuickER 版 Repository を生成しない構成では方言指定が生成物に影響しないため検証しない。
+                    // CLI は --repository-dialects 未指定時に図の方言名（例 postgresql）を焼き込むため、ここで例外にすると
+                    // Repository 非生成の generate まで落ちる。GUI の空リスト時と同じ既定へ倒し、出力を GUI/CLI で対称に保つ
+                    return ["sqlserver"];
+                }
+
+                throw new ArgumentException(
+                    string.Format(
+                        Strings.CodeGen_Error_UnsupportedRepositoryDialect,
+                        value,
+                        string.Join(", ", SupportedRepositoryDialects)
+                    )
+                );
+            }
+
+            if (seen.Add(value))
+            {
+                // 下流の方言分岐（テンプレート・クエリ計画）は Ordinal 比較のため、正規綴りへ置換して返す
+                resolved.Add(
+                    SupportedRepositoryDialects.First(dialect =>
+                        string.Equals(dialect, value, StringComparison.OrdinalIgnoreCase)
+                    )
+                );
+            }
         }
+
+        return resolved.Count > 0 ? resolved : ["sqlserver"];
     }
 
     /// <summary>

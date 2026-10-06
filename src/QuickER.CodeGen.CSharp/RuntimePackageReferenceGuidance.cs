@@ -44,11 +44,9 @@ public static class RuntimePackageReferenceGuidance
 
         if (options.GenerateRepositories)
         {
-            foreach (var dialect in options.EffectiveRepositoryDialects)
+            foreach (var dialect in options.ResolveRepositoryDialects())
             {
-                var package = IsSqlite(dialect)
-                    ? RuntimePackages.Sqlite
-                    : RuntimePackages.SqlServer;
+                var package = RuntimePackages.ForDialect(dialect);
 
                 if (!packages.Contains(package, StringComparer.Ordinal))
                 {
@@ -138,8 +136,4 @@ public static class RuntimePackageReferenceGuidance
         lines.AddRange(BuildPackageReferenceLines(options, version));
         return lines;
     }
-
-    /// <summary>指定方言が SQLite かどうか（プロバイダ名と同一の識別子で判定）</summary>
-    private static bool IsSqlite(string dialect) =>
-        string.Equals(dialect, "sqlite", StringComparison.OrdinalIgnoreCase);
 }

@@ -181,7 +181,7 @@ public sealed class CSharpGenerationCommandService
     }
 
     /// <summary>
-    /// QuickER 版 Repository の実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）ごとに、
+    /// QuickER 版 Repository の実効方言（<see cref="CodeGenerationOptions.ResolveRepositoryDialects"/>）ごとに、
     /// プロバイダレジストリから方言別の型マッパを解決する。
     /// </summary>
     /// <remarks>
@@ -194,7 +194,7 @@ public sealed class CSharpGenerationCommandService
     {
         var mappers = new Dictionary<string, IColumnTypeMapper>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var dialect in options.EffectiveRepositoryDialects)
+        foreach (var dialect in options.ResolveRepositoryDialects())
         {
             if (_host.Providers.TryGet(dialect, out var provider))
             {

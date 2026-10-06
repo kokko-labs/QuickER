@@ -118,7 +118,7 @@ public sealed partial class CSharpCodeGenerationService
 
         try
         {
-            effectiveDialects = options.EffectiveRepositoryDialects;
+            effectiveDialects = options.ResolveRepositoryDialects();
         }
         catch (ArgumentException ex)
         {
@@ -158,7 +158,7 @@ public sealed partial class CSharpCodeGenerationService
 
         // マルチ辞書が渡されているときは方言間の C# 型不一致を検証し、[SqlColumnType] を sqlserver 辞書から補完する。
         // QuickER 版 Repository を生成しない構成（DB アクセスなし・EF Core 単独）では方言辞書を無視する＝
-        // 方言指定は生成物に影響しないという既定（EffectiveRepositoryDialects の未検証フォールバックと同じ線）を
+        // 方言指定は生成物に影響しないという既定（ResolveRepositoryDialects() の未検証フォールバックと同じ線）を
         // ここでも守る。無視しないと、呼び出し側が渡した隠れた 2 方言辞書が型統合（SQLite 図の timestamp が
         // byte[] 行バージョン化）・Info 診断・[SqlColumnType] 補完として単一方言の出力と食い違いを生む
         var columnTypes = primaryColumnTypes;
@@ -233,50 +233,25 @@ public sealed partial class CSharpCodeGenerationService
             )
             : [];
 
-        // 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）が ON のとき、除外対象列の一覧を組み立てる
-        // （Info 診断専用。生成コード側の可視化は各プロパティの [UnboundedBinaryColumn] 属性が担う）。
-        var excludedColumnLines = options.ExcludeUnboundedBinaryColumns
-            ? BuildExcludedColumnLines(model)
-            : [];
-
-        // 除外列が 1 つ以上あれば Info 診断で通知する（利用者へ「どの列が SELECT / UPDATE から外れたか」を明示）。
-        // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる。
-        if (excludedColumnLines.Count > 0)
+        // 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）が ON のとき、除外対象列を Info 診断で通知する
+        // （利用者へ「どの列が SELECT / UPDATE から外れたか」を明示。生成コード側の可視化は各プロパティの
+        //   [UnboundedBinaryColumn] 属性が担う）
+        if (options.ExcludeUnboundedBinaryColumns)
         {
-            var excludedColumnList = string.Join(
-                Environment.NewLine,
-                excludedColumnLines.Select(line => "  " + line)
-            );
-            diagnostics.Add(
-                GenerationDiagnostic.Info(
-                    string.Format(
-                        Strings.CodeGen_Info_ExcludedUnboundedBinaryColumns,
-                        Environment.NewLine + excludedColumnList
-                    )
-                )
+            AddListInfo(
+                diagnostics,
+                Strings.CodeGen_Info_ExcludedUnboundedBinaryColumns,
+                BuildExcludedColumnLines(model)
             );
         }
 
         // 計算列・生成列を Info 診断で通知する（利用者へ「どの列が INSERT / UPDATE から外れたか」を明示）。
         // オプションに依らず常に効く除外なので、除外の有無をここで一度だけ名指しする。
-        var computedColumnLines = BuildComputedColumnLines(model);
-
-        if (computedColumnLines.Count > 0)
-        {
-            // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる
-            var computedColumnList = string.Join(
-                Environment.NewLine,
-                computedColumnLines.Select(line => "  " + line)
-            );
-            diagnostics.Add(
-                GenerationDiagnostic.Info(
-                    string.Format(
-                        Strings.CodeGen_Info_ComputedColumns,
-                        Environment.NewLine + computedColumnList
-                    )
-                )
-            );
-        }
+        AddListInfo(
+            diagnostics,
+            Strings.CodeGen_Info_ComputedColumns,
+            BuildComputedColumnLines(model)
+        );
 
         AddNotNullComputedColumnWarning(model, options, diagnostics);
 
@@ -284,53 +259,24 @@ public sealed partial class CSharpCodeGenerationService
         // 「同義だが綴りの違う型」は生成物を読んでも気づけず、コード取込の往復で図の型表記が変わる／変わらない
         // の分かれ目になるため、どの列が特別扱いなのかを生成時に一度だけ明示する。属性を出さない構成
         // （IncludeDataAnnotations=false）では元表記も刻まれないので出さない
-        var nonCanonicalSpellingLines = options.IncludeDataAnnotations
-            ? BuildNonCanonicalSpellingLines(diagram, columnTypes)
-            : [];
-
-        if (nonCanonicalSpellingLines.Count > 0)
+        if (options.IncludeDataAnnotations)
         {
-            diagnostics.Add(
-                GenerationDiagnostic.Info(
-                    string.Format(
-                        Strings.CodeGen_Info_NonCanonicalTypeSpellingColumns,
-                        Environment.NewLine
-                            + string.Join(
-                                Environment.NewLine,
-                                nonCanonicalSpellingLines.Select(line => "  " + line)
-                            )
-                    )
-                )
+            AddListInfo(
+                diagnostics,
+                Strings.CodeGen_Info_NonCanonicalTypeSpellingColumns,
+                BuildNonCanonicalSpellingLines(diagram, columnTypes)
             );
         }
-
-        // 型カタログが DB 型表記を解析できず string へフォールバックした列（CSharpTypeInfo.IsFallbackType）を
-        // Info 診断で通知する。生成コードのプロパティ型が実際には解決できていないことに利用者が生成物を
-        // 読んだだけでは気づけないため、方言に依らず常に検証する（IncludeDataAnnotations には依存しない＝
-        // 属性の有無でなくプロパティ型そのものの話であるため）
-        var fallbackTypeLines = BuildFallbackTypeLines(diagram, columnTypes);
 
         // EditModel に載らない列（配列列・inet の列）を含む UNIQUE 制約は EditModel の重複検証から外れる（その列が EditModel に載らないため、
         // 参照すると実在しないプロパティを指してコンパイルできない）。黙って検証を外さないよう名指しする
         if (options.GenerateEditModels)
         {
-            var arrayUniqueLines = BuildArrayUniqueConstraintLines(diagram, columnTypes);
-
-            if (arrayUniqueLines.Count > 0)
-            {
-                diagnostics.Add(
-                    GenerationDiagnostic.Info(
-                        string.Format(
-                            Strings.CodeGen_Info_ArrayUniqueConstraintsNotValidated,
-                            Environment.NewLine
-                                + string.Join(
-                                    Environment.NewLine,
-                                    arrayUniqueLines.Select(line => "  " + line)
-                                )
-                        )
-                    )
-                );
-            }
+            AddListInfo(
+                diagnostics,
+                Strings.CodeGen_Info_ArrayUniqueConstraintsNotValidated,
+                BuildArrayUniqueConstraintLines(diagram, columnTypes)
+            );
         }
 
         // 配列列（PostgreSQL の integer[] 等）は EditModel・値オブジェクトに載らない。
@@ -338,137 +284,73 @@ public sealed partial class CSharpCodeGenerationService
         // 値オブジェクトにならないことは生成物を読んだだけでは気づけないため名指しする
         if (options.GenerateEditModels || options.GenerateValueObjects)
         {
-            var arrayColumnLines = BuildColumnLines(
-                diagram,
-                columnTypes,
-                typeInfo => typeInfo.IsArray
+            AddListInfo(
+                diagnostics,
+                Strings.CodeGen_Info_ArrayColumnsNotEditable,
+                BuildColumnLines(diagram, columnTypes, typeInfo => typeInfo.IsArray)
             );
-
-            if (arrayColumnLines.Count > 0)
-            {
-                diagnostics.Add(
-                    GenerationDiagnostic.Info(
-                        string.Format(
-                            Strings.CodeGen_Info_ArrayColumnsNotEditable,
-                            Environment.NewLine
-                                + string.Join(
-                                    Environment.NewLine,
-                                    arrayColumnLines.Select(line => "  " + line)
-                                )
-                        )
-                    )
-                );
-            }
 
             // テキスト入力で扱えない型の列（PostgreSQL の inet）も同じ理由で EditModel・値オブジェクトから外れる
-            var textInputUnsupportedLines = BuildColumnLines(
-                diagram,
-                columnTypes,
-                typeInfo => typeInfo.IsTextInputUnsupported
-            );
-
-            if (textInputUnsupportedLines.Count > 0)
-            {
-                diagnostics.Add(
-                    GenerationDiagnostic.Info(
-                        string.Format(
-                            Strings.CodeGen_Info_TextInputUnsupportedColumns,
-                            Environment.NewLine
-                                + string.Join(
-                                    Environment.NewLine,
-                                    textInputUnsupportedLines.Select(line => "  " + line)
-                                )
-                        )
-                    )
-                );
-            }
-        }
-
-        if (fallbackTypeLines.Count > 0)
-        {
-            diagnostics.Add(
-                GenerationDiagnostic.Info(
-                    string.Format(
-                        Strings.CodeGen_Info_FallbackTypeColumns,
-                        Environment.NewLine
-                            + string.Join(
-                                Environment.NewLine,
-                                fallbackTypeLines.Select(line => "  " + line)
-                            )
-                    )
-                )
+            AddListInfo(
+                diagnostics,
+                Strings.CodeGen_Info_TextInputUnsupportedColumns,
+                BuildColumnLines(diagram, columnTypes, typeInfo => typeInfo.IsTextInputUnsupported)
             );
         }
+
+        // 型カタログが DB 型表記を解析できず string へフォールバックした列（CSharpTypeInfo.IsFallbackType）を
+        // Info 診断で通知する。生成コードのプロパティ型が実際には解決できていないことに利用者が生成物を
+        // 読んだだけでは気づけないため、方言に依らず常に検証する（IncludeDataAnnotations には依存しない＝
+        // 属性の有無でなくプロパティ型そのものの話であるため）
+        AddListInfo(
+            diagnostics,
+            Strings.CodeGen_Info_FallbackTypeColumns,
+            BuildFallbackTypeLines(diagram, columnTypes)
+        );
 
         // 負のスケールの decimal 列（PostgreSQL の numeric(10,-2)・Oracle の NUMBER(10,-2)）は、
         // 型マッパーが精度・スケールを読まない＝生成物に桁数の情報が一切載らない。DB 側は値を丸めるので、
         // 生成物を読んでも「丸められること」にも「検証が無いこと」にも気づけない
-        var negativeScaleLines = BuildNegativeScaleColumnLines(diagram);
-
-        if (negativeScaleLines.Count > 0)
-        {
-            diagnostics.Add(
-                GenerationDiagnostic.Info(
-                    string.Format(
-                        Strings.CodeGen_Info_NegativeScaleColumns,
-                        Environment.NewLine
-                            + string.Join(
-                                Environment.NewLine,
-                                negativeScaleLines.Select(line => "  " + line)
-                            )
-                    )
-                )
-            );
-        }
+        AddListInfo(
+            diagnostics,
+            Strings.CodeGen_Info_NegativeScaleColumns,
+            BuildNegativeScaleColumnLines(diagram)
+        );
 
         // 同期支援が有効なとき、実際に同期対象になったテーブルを FK 順のまま Info 診断で通知する
         // （対象は「Repository 契約が生成される単一主キーのテーブル」という導出条件なので、どのテーブルが
         //   入ったかは生成物を読むまで分からない）。rowversion 列を持たないテーブルは後勝ち専用として名指しする
-        if (options.GenerateSyncSupport && model.SyncTables.Count > 0)
+        if (options.GenerateSyncSupport)
         {
-            var syncTableList = string.Join(
-                Environment.NewLine,
-                model.SyncTables.Select(table =>
-                    $"  {table.TableName} ({table.EntityClassName})"
-                    + (
-                        table.IsVersionless
-                            ? Strings.CodeGen_Info_SyncSupportVersionlessTableSuffix
-                            : string.Empty
+            AddListInfo(
+                diagnostics,
+                Strings.CodeGen_Info_SyncSupportTables,
+                model
+                    .SyncTables.Select(table =>
+                        $"{table.TableName} ({table.EntityClassName})"
+                        + (
+                            table.IsVersionless
+                                ? Strings.CodeGen_Info_SyncSupportVersionlessTableSuffix
+                                : string.Empty
+                        )
                     )
-                )
-            );
-            diagnostics.Add(
-                GenerationDiagnostic.Info(
-                    string.Format(
-                        Strings.CodeGen_Info_SyncSupportTables,
-                        Environment.NewLine + syncTableList
-                    )
-                )
+                    .ToList()
             );
 
             // 同期対象テーブルに除外列があるときだけ、「通常の同期では運ばれない列」を名指しで通知する。
             // 除外オプションが OFF の図・除外列を持つ同期対象テーブルが 1 つも無い図では発火しない
             // （＝知らせるべき乖離が実在しないため。全体の除外列一覧は別の Info が既に出している）。
-            var syncBinaryLines = model
-                .SyncTables.Where(table => table.BinaryColumnPropertyNames.Count > 0)
-                .Select(table =>
-                    $"  {table.TableName}: {string.Join(", ", table.BinaryColumnPropertyNames)}"
-                )
-                .ToList();
-
-            if (syncBinaryLines.Count > 0)
-            {
-                diagnostics.Add(
-                    GenerationDiagnostic.Info(
-                        string.Format(
-                            Strings.CodeGen_Info_SyncSupportUnboundedBinaryColumns,
-                            Environment.NewLine + string.Join(Environment.NewLine, syncBinaryLines)
-                        )
+            AddListInfo(
+                diagnostics,
+                Strings.CodeGen_Info_SyncSupportUnboundedBinaryColumns,
+                model
+                    .SyncTables.Where(table => table.BinaryColumnPropertyNames.Count > 0)
+                    .Select(table =>
+                        $"{table.TableName}: {string.Join(", ", table.BinaryColumnPropertyNames)}"
                     )
-                );
-            }
+                    .ToList()
+            );
         }
-
         // 出力ファイルの構成（非分割=1 ファイル、分割=カテゴリごと、マルチ方言=契約＋方言別実装）を決め、
         // 各ファイルを範囲を絞って描画する。1 ファイルに複数スペック（非分割マルチ方言）が対応する場合は連結する。
         var specs = GeneratedFilePlanner.Plan(options);
@@ -532,21 +414,42 @@ public sealed partial class CSharpCodeGenerationService
     {
         foreach (var group in rowVersions.Groups)
         {
-            // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる
-            var columnList = string.Join(
-                Environment.NewLine,
-                group.Lines.Select(line => "  " + line)
-            );
-            diagnostics.Add(
-                GenerationDiagnostic.Info(
-                    string.Format(
-                        Strings.CodeGen_Info_MultiTargetRowVersionColumns,
-                        group.Dialect,
-                        Environment.NewLine + columnList
-                    )
-                )
+            AddListInfo(
+                diagnostics,
+                Strings.CodeGen_Info_MultiTargetRowVersionColumns,
+                group.Lines,
+                group.Dialect
             );
         }
+    }
+
+    /// <summary>導入文に項目の一覧を添えた Info 診断を足す（一覧が空なら何もしない）</summary>
+    /// <param name="diagnostics">診断の追加先</param>
+    /// <param name="format">導入文の書式。最後の書式引数が一覧になる</param>
+    /// <param name="lines">一覧の各行（インデントは付けずに渡す）</param>
+    /// <param name="leadingArguments">一覧より前の書式引数</param>
+    /// <remarks>
+    /// ダイアログ／CLI で 1 行 1 項目に見えるよう、導入文の後に改行＋インデント 2 スペースで各行を並べる
+    /// （一覧の書式はこの 1 か所だけが決める）。
+    /// </remarks>
+    private static void AddListInfo(
+        ICollection<GenerationDiagnostic> diagnostics,
+        string format,
+        IReadOnlyCollection<string> lines,
+        params object[] leadingArguments
+    )
+    {
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        var list =
+            Environment.NewLine
+            + string.Join(Environment.NewLine, lines.Select(line => "  " + line));
+        diagnostics.Add(
+            GenerationDiagnostic.Info(string.Format(format, [.. leadingArguments, list]))
+        );
     }
 
     /// <summary>
@@ -615,7 +518,7 @@ public sealed partial class CSharpCodeGenerationService
                 packageGuidanceLines.Select(line => $"// {line}" + Environment.NewLine)
             );
             var header =
-                "// <auto-generated />"
+                GeneratedContentHash.AutoGeneratedLine
                 + Environment.NewLine
                 + "#nullable enable"
                 + Environment.NewLine
@@ -658,17 +561,24 @@ public sealed partial class CSharpCodeGenerationService
     )
     {
         var external = new HashSet<string>(StringComparer.Ordinal);
-        var cross = new HashSet<string>(StringComparer.Ordinal);
+        // クロス using ごとに、それを要するスペックの名前空間を集める（using を落とせるかの判定に使う）
+        var crossRequesters = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         var ownNamespaces = members.Select(m => m.NamespaceName).ToHashSet(StringComparer.Ordinal);
 
         foreach (var member in members)
         {
             foreach (var u in GeneratedFileUsings.Resolve(member, options))
             {
-                // クロス using（他 namespace 参照）は連結後に自ファイル内の namespace を指す場合があるため除外する
+                // クロス using（他 namespace 参照）は連結後に自ファイル内の namespace を指す場合があるため別に集める
                 if (member.CrossNamespaceUsings.Contains(u, StringComparer.Ordinal))
                 {
-                    cross.Add(u);
+                    if (!crossRequesters.TryGetValue(u, out var requesters))
+                    {
+                        requesters = [];
+                        crossRequesters.Add(u, requesters);
+                    }
+
+                    requesters.Add(member.NamespaceName);
                 }
                 else
                 {
@@ -677,16 +587,40 @@ public sealed partial class CSharpCodeGenerationService
             }
         }
 
-        // 連結後は各 namespace ブロックが同一ファイル内にあるため、自ファイル内 namespace への using は不要（除外）。
         // 外部 using の並び順規則は GeneratedFileUsings と共有する（単一ファイル・連結ファイルでバイト一致）。
         var ordered = GeneratedFileUsings.OrderExternalUsings(external);
 
         ordered.AddRange(
-            cross.Where(ns => !ownNamespaces.Contains(ns)).OrderBy(ns => ns, StringComparer.Ordinal)
+            crossRequesters
+                .Where(entry =>
+                    !IsResolvedByEnclosingNamespace(entry.Key, entry.Value, ownNamespaces)
+                )
+                .Select(entry => entry.Key)
+                .OrderBy(ns => ns, StringComparer.Ordinal)
         );
 
         return ordered;
     }
+
+    /// <summary>
+    /// 連結ファイル内のクロス using が、using なしでも名前解決できるか（＝先頭の using から落としてよいか）を判定する
+    /// </summary>
+    /// <remarks>
+    /// C# の名前解決が using なしで見に行くのは、自分の名前空間とその外側の名前空間だけ。
+    /// 同じファイル内で宣言される名前空間でも、それを要するブロックの外側（自分自身かその祖先）でなければ解決できない
+    /// （例: <c>namespace Data.Repos.SqlServer { }</c> から <c>MyApp</c> の型は見えない）。
+    /// そのため「同じファイル内で宣言され、かつ要する全ブロックがその名前空間自身かその入れ子」のときだけ落とす。
+    /// </remarks>
+    private static bool IsResolvedByEnclosingNamespace(
+        string usingNamespace,
+        IReadOnlyList<string> requesterNamespaces,
+        IReadOnlySet<string> ownNamespaces
+    ) =>
+        ownNamespaces.Contains(usingNamespace)
+        && requesterNamespaces.All(requester =>
+            string.Equals(requester, usingNamespace, StringComparison.Ordinal)
+            || requester.StartsWith(usingNamespace + ".", StringComparison.Ordinal)
+        );
 
     /// <summary>
     /// ファイル計画から描画スコープ（名前空間・using・出力バケット）を組み立てる
@@ -782,11 +716,7 @@ public sealed partial class CSharpCodeGenerationService
             return [];
         }
 
-        var package = string.Equals(spec.Dialect, "sqlite", StringComparison.OrdinalIgnoreCase)
-            ? RuntimePackages.Sqlite
-            : RuntimePackages.SqlServer;
-
-        return [package];
+        return [RuntimePackages.ForDialect(spec.Dialect)];
     }
 
     /// <summary>
@@ -841,8 +771,10 @@ public sealed partial class CSharpCodeGenerationService
             );
         }
 
-        ValidateNamespaces(options, diagnostics);
-        ValidateLayerDirectories(options, diagnostics);
+        // 名前空間を実際に決めたオプション（出所）を計画から 1 回だけ求め、名前空間・層フォルダの検証が共有する
+        var usedNamespaceSources = GeneratedFilePlanner.UsedNamespaceSources(options);
+        ValidateNamespaces(options, usedNamespaceSources, diagnostics);
+        ValidateLayerDirectories(options, usedNamespaceSources, diagnostics);
         ValidateCodeSubdirectory(options, diagnostics);
         ValidateApiDocsSubdirectory(options, diagnostics);
         ValidateApiDocsFileName(options, diagnostics);
@@ -1331,81 +1263,34 @@ public sealed partial class CSharpCodeGenerationService
     /// <remarks>
     /// 判定は GUI の入力検証と同じ <see cref="CSharpNamespaceValidator"/>（単一正本）で行い、CLI / MCP でも
     /// 同じ規則を効かせる。空白のオプションは既定値（<c>Generated</c> / <c>{root}.{接尾辞}</c>）へ
-    /// フォールバックするため検証対象外。カテゴリ別名前空間は実際に使われる構成でのみ検証する
-    /// ＝分割時（<see cref="CodeGenerationOptions.SplitFilesByCategory"/>）の有効バケットのみ。
-    /// ただし Repository 名前空間は非分割でも<b>マルチ方言レイアウト</b>（QuickER 版 Repository ×
-    /// 実効方言 2 つ以上＝契約 1 回＋方言別 namespace 実装へ展開する構成）で使われるため、
-    /// そのときだけ分割の有無に依らず検証する（条件は <see cref="GeneratedFilePlanner"/> の
-    /// 非分割マルチ方言レイアウト判定と同じ。単一方言の非分割では使われないので検証しない＝
-    /// 「名前空間導出に実際に使われる値だけ検証する」既存の一般則）。
+    /// フォールバックするため検証対象外。検証するのは、計画がその名前空間を決めるのに実際に使ったオプション
+    /// （<see cref="GeneratedFilePlanner.UsedNamespaceSources"/>）だけ＝「名前空間導出に実際に使われる値だけ検証する」。
+    /// 例: 単一方言の非分割では Repository 名前空間を使わない・パッケージ参照モードでは Runtime 名前空間を使わない・
+    /// 層別出力ではルート名前空間を使わない（いずれも検証しない）。
     /// </remarks>
     private static void ValidateNamespaces(
         CodeGenerationOptions options,
+        IReadOnlySet<NamespaceSource> usedNamespaceSources,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        AddInvalidNamespaceDiagnostic(
-            nameof(CodeGenerationOptions.RootNamespace),
-            options.RootNamespace,
-            diagnostics
-        );
-
-        var activeBuckets = GeneratedFilePlanner.ActiveBuckets(options);
-
-        (GenerationBucket Bucket, string Name, string? Value)[] categoryNamespaces =
-        [
-            (
-                GenerationBucket.Runtime,
-                nameof(CodeGenerationOptions.RuntimeNamespace),
-                options.RuntimeNamespace
-            ),
-            (
-                GenerationBucket.Entity,
-                nameof(CodeGenerationOptions.EntityNamespace),
-                options.EntityNamespace
-            ),
-            (
-                GenerationBucket.EditModel,
-                nameof(CodeGenerationOptions.EditModelNamespace),
-                options.EditModelNamespace
-            ),
-            (
-                GenerationBucket.Mapper,
-                nameof(CodeGenerationOptions.MapperNamespace),
-                options.MapperNamespace
-            ),
-            (
-                GenerationBucket.Repository,
-                nameof(CodeGenerationOptions.RepositoryNamespace),
-                options.RepositoryNamespace
-            ),
-            (
-                GenerationBucket.ValueObject,
-                nameof(CodeGenerationOptions.ValueObjectNamespace),
-                options.ValueObjectNamespace
-            ),
-        ];
-
-        // 非分割で Repository 名前空間が使われるのはマルチ方言レイアウトだけ（GeneratedFilePlanner の
-        // repositoryMultiDialectInlineLayout と同じ条件。単一方言の非分割では出力に現れない）
-        var repositoryUsedInline =
-            options.GenerateRepositories && options.EffectiveRepositoryDialects.Count >= 2;
-
-        foreach (var target in categoryNamespaces)
+        // 並びは NamespaceSource の宣言順（ルート→カテゴリ別）。層フォルダは ValidateLayerDirectories が担う
+        foreach (var source in Enum.GetValues<NamespaceSource>())
         {
-            var used =
-                activeBuckets.Contains(target.Bucket)
-                && (
-                    options.EffectiveSplitFilesByCategory
-                    || (target.Bucket == GenerationBucket.Repository && repositoryUsedInline)
-                );
-
-            if (used)
+            if (!usedNamespaceSources.Contains(source) || IsLayerDirectorySource(source))
             {
-                AddInvalidNamespaceDiagnostic(target.Name, target.Value, diagnostics);
+                continue;
             }
+
+            var (optionName, value) = GeneratedFilePlanner.DescribeNamespaceSource(options, source);
+            AddInvalidNamespaceDiagnostic(optionName, value, diagnostics);
         }
     }
+
+    /// <summary>出所が層フォルダのオプションか（名前空間オプションでないか）</summary>
+    private static bool IsLayerDirectorySource(NamespaceSource source) =>
+        Enum.GetValues<GeneratedLayer>()
+            .Any(layer => GeneratedFilePlanner.LayerDirectorySource(layer) == source);
 
     /// <summary>
     /// 層別出力（<see cref="CodeGenerationOptions.LayeredOutput"/>）の層フォルダパスを検証する
@@ -1418,6 +1303,7 @@ public sealed partial class CSharpCodeGenerationService
     /// </remarks>
     private static void ValidateLayerDirectories(
         CodeGenerationOptions options,
+        IReadOnlySet<NamespaceSource> usedNamespaceSources,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
@@ -1433,48 +1319,24 @@ public sealed partial class CSharpCodeGenerationService
 
         // 並びはドメイン→プレゼンテーション→インフラストラクチャ→サーバー＝GeneratedLayer の宣言順・
         // GUI の層フォルダ欄と同じ順。複数の層フォルダが同時に不正なとき、診断の列挙順が画面の欄順と食い違わない
-        (GeneratedLayer Layer, string Name, string? Value)[] layerDirectories =
-        [
-            (
-                GeneratedLayer.Domain,
-                nameof(CodeGenerationOptions.DomainLayerDirectory),
-                options.DomainLayerDirectory
-            ),
-            (
-                GeneratedLayer.Presentation,
-                nameof(CodeGenerationOptions.PresentationLayerDirectory),
-                options.PresentationLayerDirectory
-            ),
-            (
-                GeneratedLayer.Infrastructure,
-                nameof(CodeGenerationOptions.InfrastructureLayerDirectory),
-                options.InfrastructureLayerDirectory
-            ),
-            (
-                GeneratedLayer.Server,
-                nameof(CodeGenerationOptions.ServerLayerDirectory),
-                options.ServerLayerDirectory
-            ),
-        ];
-
-        foreach (var target in layerDirectories)
+        foreach (var layer in Enum.GetValues<GeneratedLayer>())
         {
-            if (!usedLayers.Contains(target.Layer))
+            if (!usedLayers.Contains(layer))
             {
                 continue;
             }
 
-            if (
-                !string.IsNullOrWhiteSpace(target.Value)
-                && !LayerDirectoryValidator.IsValid(target.Value)
-            )
+            var source = GeneratedFilePlanner.LayerDirectorySource(layer);
+            var (name, value) = GeneratedFilePlanner.DescribeNamespaceSource(options, source);
+
+            if (!string.IsNullOrWhiteSpace(value) && !LayerDirectoryValidator.IsValid(value))
             {
                 diagnostics.Add(
                     GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Error_InvalidOutputSubdirectory,
-                            target.Name,
-                            target.Value.Trim()
+                            name,
+                            value.Trim()
                         )
                     )
                 );
@@ -1483,12 +1345,13 @@ public sealed partial class CSharpCodeGenerationService
             }
 
             // 層別出力は名前空間の既定を層フォルダから導出する（フォルダ追従）ため、その層で導出が実際に
-            // 使われる（＝明示の名前空間オプションで全バケットが賄われていない）場合は、フォルダが C# の
+            // 使われる（＝計画がその層のフォルダから名前空間を決めた）場合は、フォルダが C# の
             // 名前空間として成立することも要求する（ハイフン等はパスとしては合法でも名前空間になれない）。
+            // 明示の名前空間オプションで全バケットが賄われている層は、パス検証だけで足りる
             if (
-                LayerNamespaceDerivationUsed(options, target.Layer)
+                usedNamespaceSources.Contains(source)
                 && !CSharpNamespaceValidator.IsValid(
-                    GeneratedFilePlanner.LayerNamespaceRoot(options, target.Layer)
+                    GeneratedFilePlanner.LayerNamespaceRoot(options, layer)
                 )
             )
             {
@@ -1496,9 +1359,9 @@ public sealed partial class CSharpCodeGenerationService
                     GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Error_LayerDirectoryNotNamespace,
-                            target.Name,
-                            GeneratedFilePlanner.ResolveLayerDirectory(options, target.Layer),
-                            GeneratedFilePlanner.LayerNamespaceRoot(options, target.Layer)
+                            name,
+                            GeneratedFilePlanner.ResolveLayerDirectory(options, layer),
+                            GeneratedFilePlanner.LayerNamespaceRoot(options, layer)
                         )
                     )
                 );
@@ -1669,56 +1532,6 @@ public sealed partial class CSharpCodeGenerationService
 
         // 拡張子だけの指定（".g.md" 等）はベース名が空＝隠しファイルになるため拒否する
         return StripApiDocsSuffix(trimmed).Length > 0;
-    }
-
-    /// <summary>
-    /// 層別出力時、その層で「フォルダ由来の名前空間導出」が実際に使われるかを判定する
-    /// </summary>
-    /// <remarks>
-    /// 明示の名前空間オプションを持たないバケット（EF Core / インメモリ / 同期 / HTTP / サーバー実装）と、
-    /// QuickER 版 Repository の方言別実装（{インフラ層ルート}.SqlServer 等へ常に導出）は無条件に導出を使う。
-    /// 明示オプションを持つバケットは、そのオプションが空白のときだけ導出へフォールバックする。
-    /// すべて明示指定で賄われている層は、フォルダが名前空間になれなくてもエラーにしない（パス検証だけで足りる）。
-    /// </remarks>
-    private static bool LayerNamespaceDerivationUsed(
-        CodeGenerationOptions options,
-        GeneratedLayer layer
-    )
-    {
-        // 方言別実装（Repositories.{方言}.g.cs / Runtime.{方言}.g.cs）は常にインフラ層ルートから導出する
-        if (
-            layer == GeneratedLayer.Infrastructure
-            && options.GenerateRepositories
-            && options.GeneratesRepositoryContract
-        )
-        {
-            return true;
-        }
-
-        var active = GeneratedFilePlanner.ActiveBuckets(options).ToHashSet();
-
-        // サーバー実装（RemoteServer バケット）は ActiveBuckets に載らない専用スペックのため個別に加える
-        if (options.GenerateRemoteServices && active.Contains(GenerationBucket.Repository))
-        {
-            active.Add(GenerationBucket.RemoteServer);
-        }
-
-        return active.Any(bucket =>
-            GeneratedFilePlanner.LayerOfBucket(bucket) == layer
-            && string.IsNullOrWhiteSpace(
-                bucket switch
-                {
-                    GenerationBucket.Runtime => options.RuntimeNamespace,
-                    GenerationBucket.ValueObject => options.ValueObjectNamespace,
-                    GenerationBucket.Entity => options.EntityNamespace,
-                    GenerationBucket.EditModel => options.EditModelNamespace,
-                    GenerationBucket.Mapper => options.MapperNamespace,
-                    GenerationBucket.Repository => options.RepositoryNamespace,
-                    // 明示オプションを持たないバケットは常に導出（空白扱い）
-                    _ => null,
-                }
-            )
-        );
     }
 
     /// <summary>名前空間オプションが非空かつ不正な形式のときだけエラー診断を追加する</summary>
@@ -2054,7 +1867,7 @@ public sealed partial class CSharpCodeGenerationService
         // 警告が黙って落ちるのを避ける）
         var writesToMirror =
             options.GenerateSyncSupport
-            || (options.GenerateRepositories && options.EffectiveRepositoryDialects.Count >= 2);
+            || (options.GenerateRepositories && options.ResolveRepositoryDialects().Count >= 2);
 
         if (!writesToMirror)
         {

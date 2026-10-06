@@ -2711,11 +2711,9 @@ public abstract partial class EditModelBase<TSelf> : EditModelBaseCore<TSelf>
 public partial class {{ item.class_name }} : EditModelBase<{{ item.class_name }}>
 {
     // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
-{{ for p in item.properties }}{{ if p.field_initializer != "" }}    /// <summary>Confirmed value of {{ p.property_name }}.</summary>
-    private {{ p.type_name }} {{ p.field_name }} = {{ p.field_initializer }};
-{{ else }}    /// <summary>Confirmed value of {{ p.property_name }}.</summary>
+{{ for p in item.properties }}    /// <summary>Confirmed value of {{ p.property_name }}.</summary>
     private {{ p.type_name }} {{ p.field_name }};
-{{ end }}
+
     /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}On-screen input string for {{ p.property_name }}.{{ end }}</summary>
     private string {{ p.binding_field_name }} = {{ p.binding_field_initializer }};
 

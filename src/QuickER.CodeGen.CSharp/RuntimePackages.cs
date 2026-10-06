@@ -53,6 +53,15 @@ public static class RuntimePackages
     /// </remarks>
     public const string Sync = "QuickER.Runtime.Sync";
 
+    /// <summary>QuickER 版 Repository の方言名から、その方言エンジンパッケージの ID を返す</summary>
+    /// <param name="dialect">方言名（プロバイダ名と同一の識別子。大文字小文字は区別しない）</param>
+    /// <returns><c>sqlite</c> なら <see cref="Sqlite"/>、それ以外は <see cref="SqlServer"/></returns>
+    /// <remarks>
+    /// 方言→パッケージの対応はここだけに書く（パッケージ参照の案内・生成ファイルの using・非分割連結のブロック内 using が共有する）。
+    /// </remarks>
+    public static string ForDialect(string dialect) =>
+        string.Equals(dialect, "sqlite", StringComparison.OrdinalIgnoreCase) ? Sqlite : SqlServer;
+
     /// <summary>
     /// パッケージ参照の案内（生成ヘッダ・GUI/CLI）に載せる既定バージョン。
     /// </summary>

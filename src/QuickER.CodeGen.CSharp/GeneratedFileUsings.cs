@@ -130,7 +130,7 @@ internal static class GeneratedFileUsings
             && !spec.ContractOnly
         )
         {
-            yield return IsSqliteDialect(spec) ? RuntimePackages.Sqlite : RuntimePackages.SqlServer;
+            yield return RuntimePackages.ForDialect(spec.Dialect);
         }
 
         // EF Core 生成物（DbContext・EF Core 版実装）は EF Core 共通部品パッケージを参照する。

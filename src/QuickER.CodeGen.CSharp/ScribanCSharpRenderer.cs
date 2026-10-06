@@ -200,6 +200,7 @@ internal sealed class ScribanCSharpRenderer
     private static Template ParseTemplate()
     {
         var template = Template.Parse(TemplateText);
+
         if (template.HasErrors)
         {
             var message = string.Join(
@@ -251,10 +252,9 @@ internal sealed class ScribanCSharpRenderer
         // マルチ方言で図の方言が非 sqlserver でも、sqlserver 実装が属性を要するため「sqlserver がターゲットに含まれるか」で判定する
         // （SqlDbTypeName は sqlserver 辞書からサービス側で共有 Entity へ補完済み）。属性の定義・付与は Entity/Runtime を
         // 出力するスペックで行うため、方言実装スペック（Entity を出さない）ではこの条件が空振りして無害。
-        var sqlServerInTargets = options.EffectiveRepositoryDialects.Contains(
-            "sqlserver",
-            StringComparer.OrdinalIgnoreCase
-        );
+        var sqlServerInTargets = options
+            .ResolveRepositoryDialects()
+            .Contains("sqlserver", StringComparer.OrdinalIgnoreCase);
         var emitSqlColumnTypeAttr =
             sqlServerInTargets
             && (options.GenerateRepositories || options.IncludeDataAnnotations)
@@ -310,9 +310,8 @@ internal sealed class ScribanCSharpRenderer
         var storeGeneratedDialectsDiffer =
             options.GenerateRepositories
             && options
-                .EffectiveRepositoryDialects.Select(
-                    RepositoryDialectVariables.AssignsStoreGenerated
-                )
+                .ResolveRepositoryDialects()
+                .Select(RepositoryDialectVariables.AssignsStoreGenerated)
                 .Distinct()
                 .Count() > 1;
 

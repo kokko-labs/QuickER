@@ -54,7 +54,7 @@ public static class DiagramCodeGenerator
     /// <param name="primaryTypeCatalog">図の方言の型カタログ。列の DB 型を正規型へ解析し、DB 定義メタ属性の中立トークンを主辞書へ付加するのに使う</param>
     /// <param name="dialectTypeMappers">
     /// 方言名（プロバイダ名。例 <c>"sqlserver"</c> / <c>"sqlite"</c>）→ その方言の型マッパ。
-    /// <see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/> の各方言実装バケットの型解決に使う。
+    /// <see cref="CodeGenerationOptions.ResolveRepositoryDialects"/> の各方言実装バケットの型解決に使う。
     /// </param>
     /// <param name="diagram">生成元の ER 図定義</param>
     /// <param name="options">生成対象や属性付与を制御するオプション</param>
@@ -99,7 +99,7 @@ public static class DiagramCodeGenerator
             IReadOnlyDictionary<Guid, CSharpTypeInfo>
         >(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var dialect in options.EffectiveRepositoryDialects)
+        foreach (var dialect in options.ResolveRepositoryDialects())
         {
             if (columnTypesByDialect.ContainsKey(dialect))
             {
