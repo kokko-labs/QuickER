@@ -45,6 +45,10 @@ public sealed class SqlServerTypeNotationIntegrationTests(SqlServerContainerFixt
                 "datetimeoffset(7)",
                 "decimal(10,0)",
                 "datetime2(3)",
+                "float(1)",
+                "float(24)",
+                "float(25)",
+                "float(53)",
             ])
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();

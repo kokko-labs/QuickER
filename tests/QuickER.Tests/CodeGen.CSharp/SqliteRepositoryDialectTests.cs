@@ -54,6 +54,21 @@ public class SqliteRepositoryDialectTests
     }
 
     /// <summary>SQLite 生成物に SQL Server 依存（コードトークン）が一切含まれないことを検証する</summary>
+    /// <summary>
+    /// ExecuteSqlAsync の説明は、SQLite の利用者に T-SQL の <c>BEGIN TRAN ... COMMIT</c> を勧めない
+    /// （SQLite では <c>near "TRAN": syntax error</c>）。方言中立の契約は両方の書き方を併記し、SQLite の実装は SQLite の書き方だけを書く
+    /// </summary>
+    [Fact(
+        DisplayName = "SQLite の ExecuteSqlAsync の説明はトランザクションを SQLite の構文で勧める"
+    )]
+    public void SqliteDialect_ExecuteSqlDoc_RecommendsSqliteTransactionSyntax()
+    {
+        var code = GenerateSqlite();
+
+        code.Should().NotContain("write <c>BEGIN TRAN ... COMMIT</c>");
+        code.Should().Contain("write <c>BEGIN; ... COMMIT;</c> in the SQL within a single call.");
+    }
+
     [Fact]
     public void SqliteDialect_ShouldNotEmitSqlServerDependencies()
     {

@@ -117,6 +117,56 @@ public sealed class RawValueConverterTests
         act.Should().Throw<OverflowException>();
     }
 
+    /// <summary>
+    /// DB から来た日時の文字列は SQLite ドライバの GetDateTime と同じく読む（オフセットつきは UTC へ換算・なしは Unspecified）。
+    /// 速い読み取り（GetDateTime）と、値オブジェクトの再ラップ・生 SQL（ConvertRaw）で同じ行が別の値にならないため
+    /// </summary>
+    [Theory(
+        DisplayName = "ConvertRaw は日時の文字列をドライバと同じく読む（オフセットつきは UTC）"
+    )]
+    [InlineData("2024-01-15 10:00:00+09:00", "2024-01-15T01:00:00.0000000Z", DateTimeKind.Utc)]
+    [InlineData("2024-01-15T10:00:00Z", "2024-01-15T10:00:00.0000000Z", DateTimeKind.Utc)]
+    [InlineData(
+        "2024-01-15 10:00:00.1234567",
+        "2024-01-15T10:00:00.1234567",
+        DateTimeKind.Unspecified
+    )]
+    public void ConvertRaw_DateTimeText_ReadsLikeTheDriver(
+        string stored,
+        string expectedRoundTrip,
+        DateTimeKind expectedKind
+    )
+    {
+        var value = (DateTime)RawValueConverter.ConvertRaw(stored, typeof(DateTime));
+
+        value.ToString("O", CultureInfo.InvariantCulture).Should().Be(expectedRoundTrip);
+        value.Kind.Should().Be(expectedKind);
+    }
+
+    [Fact(
+        DisplayName = "ConvertRaw は 16 バイトの byte[] を Guid として読む（SQLite の BLOB 格納）"
+    )]
+    public void ConvertRaw_SixteenBytes_ToGuid()
+    {
+        var guid = new Guid("2b7f0e42-9c31-4a55-8d10-6f0c1e3a7b99");
+
+        RawValueConverter.ConvertRaw(guid.ToByteArray(), typeof(Guid?)).Should().Be(guid);
+    }
+
+    /// <summary>人が書いた値（ConvertInput）はドライバの格納形式ではないので、2 つの規則は効かない</summary>
+    [Fact(
+        DisplayName = "ConvertInput はオフセットつきの日時を UTC へ換算せず、byte[] を Guid にしない"
+    )]
+    public void ConvertInput_DoesNotApplyTheStoredValueRules()
+    {
+        var value = (DateTime)
+            RawValueConverter.ConvertInput("2024-01-15 10:00:00+09:00", typeof(DateTime), null);
+        value.Kind.Should().Be(DateTimeKind.Local);
+
+        var act = () => RawValueConverter.ConvertInput(new byte[16], typeof(Guid), null);
+        act.Should().Throw<InvalidCastException>();
+    }
+
     [Fact(DisplayName = "生 SQL のスカラーは列挙型を返せる")]
     public void ConvertSingleValue_ToEnum() =>
         RawSqlMapper.ConvertSingleValue<Status>(2L).Should().Be(Status.Active);

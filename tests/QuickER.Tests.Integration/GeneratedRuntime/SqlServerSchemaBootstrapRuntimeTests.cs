@@ -74,4 +74,24 @@ public sealed class SqlServerSchemaBootstrapRuntimeTests(SqlServerContainerFixtu
         (await documents.GetByIdAsync(1, Ct))!.Title.Should().Be("alpha");
         (await notes.GetByIdAsync(1, Ct))!.Note.Should().Be("first");
     }
+
+    /// <summary>
+    /// 不正な引数（負のタイムアウト）は接続を開く前に断る。到達できないサーバーを指していても、接続エラーでなく
+    /// ArgumentOutOfRangeException がすぐに返る（コンテナは使わない）
+    /// </summary>
+    [Fact(DisplayName = "[SQLServerブートストラップ] 負のタイムアウトは接続する前に引数例外")]
+    public async Task ApplyDdlAsync_RejectsNegativeTimeoutBeforeConnecting()
+    {
+        var negative = async () =>
+            await SqlServerSchemaBootstrap.ApplyDdlAsync(
+                "Server=127.0.0.1,1;Connect Timeout=2;Encrypt=False",
+                "CREATE TABLE t (id int);",
+                TimeSpan.FromSeconds(-1),
+                Ct
+            );
+
+        (await negative.Should().ThrowExactlyAsync<ArgumentOutOfRangeException>())
+            .Which.ParamName.Should()
+            .Be("commandTimeout");
+    }
 }

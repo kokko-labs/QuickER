@@ -31,6 +31,8 @@ public class SqlServerCSharpTypeMapperTests
     [InlineData("bigint", "BigInt")]
     [InlineData("float", "Float")]
     [InlineData("real", "Real")]
+    [InlineData("float(24)", "Real")]
+    [InlineData("float(25)", "Float")]
     [InlineData("date", "Date")]
     [InlineData("time", "Time")]
     [InlineData("datetime", "DateTime")]
@@ -46,6 +48,25 @@ public class SqlServerCSharpTypeMapperTests
     public void Map_ResolvesSqlDbTypeName(string dataType, string expected)
     {
         Mapper.Map(dataType).SqlDbTypeName.Should().Be(expected);
+    }
+
+    /// <summary>
+    /// float(1)〜float(24) は SQL Server では real（単精度）なので float へ写す。double にすると、
+    /// 生成コードの速い読み取り（GetDouble）がこの列で InvalidCastException になる
+    /// </summary>
+    [Theory(
+        DisplayName = "float(n) は n が 24 以下なら float、それより大きいか素の float なら double になる"
+    )]
+    [InlineData("float(1)", "float")]
+    [InlineData("float(24)", "float")]
+    [InlineData("FLOAT ( 24 )", "float")]
+    [InlineData("float(25)", "double")]
+    [InlineData("float(53)", "double")]
+    [InlineData("float", "double")]
+    [InlineData("real", "float")]
+    public void Map_FloatMantissaBits_SelectsPrecision(string dataType, string expected)
+    {
+        Mapper.Map(dataType).TypeName.Should().Be(expected);
     }
 
     [Fact(DisplayName = "未知の型は SqlDbTypeName が null になる")]

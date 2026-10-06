@@ -294,6 +294,33 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
 
     // ── Stream アクセサ（Read/Write{Column}Async）のインメモリ・パリティ ──
 
+    /// <summary>Stream が length どおりのバイト数を出さない書き込みは、実 DB と同じく ArgumentException で失敗し既存の blob を変えない</summary>
+    [Fact(
+        DisplayName = "[Binary/InMemory] Stream: length と食い違う Stream は例外で既存の blob を変えない"
+    )]
+    public async Task Stream_Write_LengthMismatch_Throws_AndKeepsBlob()
+    {
+        var (_, documents) = await SeededAsync();
+
+        foreach (
+            var (
+                label,
+                source,
+                length
+            ) in QuickER.Tests.Integration.BinaryLengthMismatchCases.Create()
+        )
+        {
+            var write = async () => await documents.WritePayloadAsync(1, source, length, Ct);
+            (await write.Should().ThrowExactlyAsync<ArgumentException>(label))
+                .Which.ParamName.Should()
+                .Be("length", label);
+
+            using var destination = new MemoryStream();
+            (await documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue(label);
+            destination.ToArray().Should().Equal(Doc1Payload, label);
+        }
+    }
+
     /// <summary>Write→Read の往復でデータが一致する（MemoryStream パリティ）</summary>
     [Fact(DisplayName = "[Binary/InMemory] Stream: Write→Read の往復が一致する")]
     public async Task Stream_WriteThenRead_RoundTrips()

@@ -1,4 +1,4 @@
-﻿# Using the generated code
+# Using the generated code
 
 *English | [日本語](code-generation.ja.md)*
 
@@ -289,6 +289,8 @@ On SQL Server the bulk insert runs through `SqlBulkCopy` with `CheckConstraints`
 Foreign key and CHECK constraints are honored, so a row the row-at-a-time `InsertAsync` would reject fails the copy too.
 `SqlBulkCopy` skips those checks unless asked, which would otherwise let a bulk insert write rows the rest of the API refuses.
 Triggers are deliberately not fired, since QuickER's DDL generates none.
+`KeepNulls` is always on as well, so a `null` is stored as NULL even in a column with a DEFAULT, as `InsertAsync` stores it.
+The copy times out after the connection string's `Command Timeout` (30 seconds unless it says otherwise).
 
 ### Queries (expression tree → SQL)
 
@@ -1578,7 +1580,7 @@ You rarely need to unwrap them to the raw value by hand.
 | EditModel | The committed-value property is a value object such as `NameValue?`. The screen-binding property `BindingXxx` (string) validates with `TryCreate` and surfaces errors through `INotifyDataErrorInfo`. |
 | JSON (`ToJson` / `Clone` / remote transfer) | Serialized **as the wrapped value** (`{"customerId": 1}`. The value object's wrapper structure does not appear in the JSON). |
 
-> **Note**: reads from the DB or from JSON are also validated through `Create`. If existing data holds a value that does not pass validation, the read throws `ValueObjectValidationException`, so keep the extra validation you add in `OnValidate` consistent with existing data.
+> **Note**: reads from the DB or from JSON are also validated through `Create`. If existing data holds a value that does not pass validation, a read from the DB throws `InvalidOperationException` naming the column (the `ValueObjectValidationException` is its inner exception) and a read from JSON throws `ValueObjectValidationException`, so keep the extra validation you add in `OnValidate` consistent with existing data.
 
 ### GUID keys for string primary keys (UseGuidKeyForStringPrimaryKey)
 
@@ -1717,6 +1719,8 @@ Semantics:
 - **Length.**
   It is automatic when `source` is `CanSeek` (`Length - Position`); otherwise the `length` argument is required, and an omission throws `ArgumentException`.
   SQLite's `zeroblob` requires the length before writing, and the contract is unified to be dialect-neutral.
+  The stream must yield exactly that many bytes.
+  A `length` that differs from what is left in a seekable stream, and a stream that ends before `length` or goes on past it, throw `ArgumentException` and leave the stored value as it was.
 - **Optimistic concurrency (rowversion and the like) is out of scope**, since this is direct column manipulation on par with raw SQL.
 - **The generated code has no INSERT-only method.**
   Write a new row in two steps: INSERT with the blob left empty, then stream in the body with `Write{Column}Async`.

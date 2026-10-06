@@ -896,6 +896,32 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 }
 {{~ end ~}}
 {{~ if repositories && emit_shared_infra ~}}
+{{~ if repository_dialect == "sqlserver" && generate_value_objects ~}}
+
+/// <summary>Reads one value object property of a FOR JSON row, naming the column when the value object rejects the stored value.</summary>
+/// <remarks>The value itself is read and written by the shared value object converter; this only adds the column to the failure.</remarks>
+internal sealed class ColumnNamingValueObjectConverter<TVo>(Type entityType, PropertyInfo property)
+    : System.Text.Json.Serialization.JsonConverter<TVo>
+    where TVo : class
+{
+    /// <summary>Reads the value through the shared converter, rethrowing a validation failure with the column named.</summary>
+    public override TVo? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        try
+        {
+            return ((System.Text.Json.Serialization.JsonConverter<TVo>)options.GetConverter(typeof(TVo))).Read(ref reader, typeToConvert, options);
+        }
+        catch (ValueObjectValidationException ex)
+        {
+            throw EntitySaveMetadata.ColumnMappingFailure(entityType, property, ex);
+        }
+    }
+
+    /// <summary>Writes the value through the shared converter.</summary>
+    public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) =>
+        ((System.Text.Json.Serialization.JsonConverter<TVo>)options.GetConverter(typeof(TVo))).Write(writer, value, options);
+}
+{{~ end ~}}
 
 /// <summary>
 /// The {{ dialect_display_name }} ADO executor for <see cref="SqlQuery{TEntity}"/>.
@@ -927,7 +953,11 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         PropertyNameCaseInsensitive = true,
         TypeInfoResolver = new DefaultJsonTypeInfoResolver
         {
+{{~ if generate_value_objects ~}}
+            Modifiers = { IncludeNavigationProperties, NameRejectedStoredValues },
+{{~ else ~}}
             Modifiers = { IncludeNavigationProperties },
+{{~ end ~}}
         },
         {{~ if generate_value_objects ~}}
         Converters = { new ValueObjectJsonConverterFactory() },
@@ -976,6 +1006,40 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             }
         }
     }
+{{~ if generate_value_objects ~}}
+
+    /// <summary>
+    /// Reads every value object column of the restored entities (the root and every Included one) through a converter that
+    /// names the column when the value object rejects the stored value.
+    /// </summary>
+    /// <remarks>
+    /// The shared value object converter knows only the value object type, so a stored value that fails validation would
+    /// otherwise surface with no hint of the table or column it came from. The resolver knows both, so the column is named
+    /// here, in the same exception the plain SELECT paths throw (<c>EntitySaveMetadata.ColumnMappingFailure</c>).
+    /// </remarks>
+    private static void NameRejectedStoredValues(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Kind != JsonTypeInfoKind.Object)
+        {
+            return;
+        }
+
+        foreach (var jsonProperty in typeInfo.Properties)
+        {
+            if (
+                jsonProperty.AttributeProvider is PropertyInfo property
+                && typeof(IValueObjectCore).IsAssignableFrom(jsonProperty.PropertyType)
+            )
+            {
+                jsonProperty.CustomConverter = (System.Text.Json.Serialization.JsonConverter)Activator.CreateInstance(
+                    typeof(ColumnNamingValueObjectConverter<>).MakeGenericType(jsonProperty.PropertyType),
+                    typeInfo.Type,
+                    property
+                )!;
+            }
+        }
+    }
+{{~ end ~}}
 {{~ end ~}}
 
     /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>

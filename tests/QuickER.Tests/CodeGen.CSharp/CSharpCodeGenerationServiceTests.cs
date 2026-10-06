@@ -1,4 +1,4 @@
-﻿using AwesomeAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
@@ -1332,12 +1332,12 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("columns ({ColumnList})");
         // スカラー・単一値変換は共有変換ヘルパー経由（ChangeType が扱えない TimeSpan / Guid 等も復元できる）
         content.Should().Contain("RawValueConverter.ConvertRaw(raw, targetType)");
-        // DB から来た値はカルチャ非依存＝インバリアント固定で、桁区切りも許さない
+        // DB から来た値はカルチャ非依存＝インバリアント固定で、桁区切りも許さない（日時と Guid はドライバの読み方にそろえる）
         // （人が書いたテキスト用の ConvertInput とはここが分かれる）
         content
             .Should()
             .Contain(
-                "ConvertCore(raw, targetType, CultureInfo.InvariantCulture, allowNumericGroupSeparators: false)"
+                "ConvertCore(raw, targetType, CultureInfo.InvariantCulture, fromDatabase: true)"
             );
         content.Should().Contain("return Convert.ChangeType(raw, underlying, provider);");
         // InvariantCulture 使用のため System.Globalization を using

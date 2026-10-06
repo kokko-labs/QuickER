@@ -13,7 +13,7 @@ namespace QuickER.Provider.SqlServer;
 /// 対応規則（SQL Server 型 → C# 型）:
 /// <list type="bullet">
 /// <item><description>bit → bool、tinyint → byte、smallint → short、int → int、bigint → long</description></item>
-/// <item><description>real → float、float → double（SQL の float は倍精度のため）</description></item>
+/// <item><description>real → float、float → double（SQL の float は倍精度のため）。ただし float(1)〜float(24) は real と同じ単精度なので float</description></item>
 /// <item><description>decimal / numeric / money / smallmoney → decimal</description></item>
 /// <item><description>date / datetime / datetime2 / smalldatetime → DateTime、time → TimeSpan、datetimeoffset → DateTimeOffset</description></item>
 /// <item><description>uniqueidentifier → Guid</description></item>
@@ -61,7 +61,11 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
     public CSharpTypeInfo Map(string dataType)
     {
         var normalized = Normalize(dataType);
-        var baseType = GetBaseType(normalized);
+
+        // float(1)〜float(24) は SQL Server では real（単精度）なので、ドライバが返す float へ写す（double で読むと InvalidCastException）
+        var baseType = SqlServerTypeNotation.IsSinglePrecisionFloat(normalized)
+            ? "real"
+            : GetBaseType(normalized);
         var maxLength = TryGetLength(normalized);
         var (precision, scale) = TryGetPrecisionScale(normalized);
         // SQL パラメータの型明示化に使う SqlDbType 列挙名を解決する（未知型は null でフォールバック）

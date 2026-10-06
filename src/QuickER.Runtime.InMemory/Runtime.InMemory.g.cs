@@ -2649,11 +2649,12 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         else
         {
             // The CanSeek/length contract validation matches the real database (dialect-neutral parity).
-            _ = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+            var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical).
+            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical,
+            // including the exact-length check: a stream shorter or longer than the length fails as it does on a real database).
             using var buffer = new MemoryStream();
-            await source.CopyToAsync(
+            await UnboundedBinaryColumns.WithExactLength(source, payloadLength).CopyToAsync(
                 buffer,
                 UnboundedBinaryColumns.StreamCopyBufferSize,
                 cancellationToken
@@ -2939,11 +2940,12 @@ public sealed class InMemorySaveHookContext(
         else
         {
             // The CanSeek/length contract validation matches the real database (dialect-neutral parity).
-            _ = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+            var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical).
+            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical,
+            // including the exact-length check: a stream shorter or longer than the length fails as it does on a real database).
             using var buffer = new MemoryStream();
-            await source.CopyToAsync(
+            await UnboundedBinaryColumns.WithExactLength(source, payloadLength).CopyToAsync(
                 buffer,
                 UnboundedBinaryColumns.StreamCopyBufferSize,
                 cancellationToken

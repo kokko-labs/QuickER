@@ -354,15 +354,28 @@ public static class UnboundedBinaryColumns
 
     /// <summary>
     /// Determines the length of the write stream (a shared check that keeps the contract uniform across dialects).
-    /// If <paramref name="source"/> is <c>CanSeek</c>, <c>Length - Position</c> is used; otherwise <paramref name="length"/>
-    /// is required (a missing value throws <see cref="ArgumentException"/>). SQLite's zeroblob requires the length to be
-    /// known before writing.
+    /// If <paramref name="source"/> is <c>CanSeek</c>, <c>Length - Position</c> is used, and a <paramref name="length"/>
+    /// given alongside it must equal that (a different value throws <see cref="ArgumentException"/>); otherwise
+    /// <paramref name="length"/> is required (a missing or negative value throws). SQLite's zeroblob requires the length to
+    /// be known before writing.
     /// </summary>
     public static long ResolveWriteLength(Stream source, long? length)
     {
         if (source.CanSeek)
         {
-            return source.Length - source.Position;
+            var remaining = source.Length - source.Position;
+
+            // A length that disagrees with the stream is a mistake on one side or the other, and either way the caller does
+            // not get the blob they asked for: rejecting it is the only answer that does not pick one of the two silently
+            if (length is { } declared && declared != remaining)
+            {
+                throw new ArgumentException(
+                    $"The length ({declared}) does not match the {remaining} bytes remaining in the seekable stream.",
+                    nameof(length)
+                );
+            }
+
+            return remaining;
         }
 
         if (length is null)
@@ -373,7 +386,164 @@ public static class UnboundedBinaryColumns
             );
         }
 
+        ArgumentOutOfRangeException.ThrowIfNegative(length.Value, nameof(length));
         return length.Value;
+    }
+
+    /// <summary>
+    /// Wraps a write source so that it yields exactly <paramref name="length"/> bytes: reading fails with
+    /// <see cref="ArgumentException"/> when <paramref name="source"/> ends before that many bytes, or still has data after them.
+    /// </summary>
+    /// <remarks>
+    /// The engines read the source until it ends, so the declared length alone does not say what gets stored: SQL Server
+    /// would store whatever the stream holds and SQLite, which allocates the declared length first, would leave the missing
+    /// tail as zeros and report success. Reading through this wrapper turns both into a failure the write rolls back.
+    /// Whether the source has data left is found out by reading one more byte, which is consumed - the write fails anyway.
+    /// The wrapper never closes or disposes <paramref name="source"/>; it stays owned by the caller.
+    /// </remarks>
+    /// <param name="source">The stream to write from.</param>
+    /// <param name="length">The number of bytes the stream must yield (the value <see cref="ResolveWriteLength"/> returned).</param>
+    public static Stream WithExactLength(Stream source, long length)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        return new ExactLengthStream(source, length);
+    }
+
+    /// <summary>The read-only stream <see cref="WithExactLength"/> returns.</summary>
+    private sealed class ExactLengthStream : Stream
+    {
+        /// <summary>The stream being read (owned by the caller).</summary>
+        private readonly Stream _source;
+
+        /// <summary>The number of bytes the stream must yield.</summary>
+        private readonly long _length;
+
+        /// <summary>The bytes still owed before the declared length is reached.</summary>
+        private long _remaining;
+
+        /// <summary>Whether the source has been confirmed to end at the declared length.</summary>
+        private bool _endVerified;
+
+        /// <summary>Wraps <paramref name="source"/> to yield exactly <paramref name="length"/> bytes.</summary>
+        public ExactLengthStream(Stream source, long length)
+        {
+            _source = source;
+            _length = length;
+            _remaining = length;
+        }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (buffer.IsEmpty)
+            {
+                return 0;
+            }
+
+            if (_remaining == 0)
+            {
+                if (!_endVerified)
+                {
+                    Span<byte> probe = stackalloc byte[1];
+                    VerifyEnd(_source.Read(probe));
+                }
+
+                return 0;
+            }
+
+            return Consume(_source.Read(buffer[..Allowed(buffer.Length)]));
+        }
+
+        public override System.Threading.Tasks.Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            System.Threading.CancellationToken cancellationToken
+        ) => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override async System.Threading.Tasks.ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            System.Threading.CancellationToken cancellationToken = default
+        )
+        {
+            if (buffer.IsEmpty)
+            {
+                return 0;
+            }
+
+            if (_remaining == 0)
+            {
+                if (!_endVerified)
+                {
+                    var probe = new byte[1];
+                    VerifyEnd(await _source.ReadAsync(probe, cancellationToken).ConfigureAwait(false));
+                }
+
+                return 0;
+            }
+
+            return Consume(
+                await _source.ReadAsync(buffer[..Allowed(buffer.Length)], cancellationToken).ConfigureAwait(false)
+            );
+        }
+
+        /// <summary>Caps a read at the bytes still owed, so the source is never read past the declared length.</summary>
+        private int Allowed(int requested) => (int)Math.Min(requested, _remaining);
+
+        /// <summary>Counts a read against the declared length; a source that ends early is rejected.</summary>
+        private int Consume(int read)
+        {
+            if (read == 0)
+            {
+                throw new ArgumentException(
+                    $"The stream ended after {_length - _remaining} bytes, before the {_length} bytes given as its length.",
+                    "length"
+                );
+            }
+
+            _remaining -= read;
+            return read;
+        }
+
+        /// <summary>Checks the read past the declared length; a source that still has data is rejected.</summary>
+        private void VerifyEnd(int read)
+        {
+            if (read != 0)
+            {
+                throw new ArgumentException(
+                    $"The stream has more data than the {_length} bytes given as its length.",
+                    "length"
+                );
+            }
+
+            _endVerified = true;
+        }
+
+        public override void Flush() { }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 }
 
@@ -1746,9 +1916,15 @@ public static class ValueObjectDecimalRules
 /// (SQL Server reads date and time columns that way).
 /// </para>
 /// <para>
-/// This is the single conversion shared by value object rewrapping, raw SQL scalars and raw SQL projection properties. The
-/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>) accepts the same stored formats for the same
-/// types, so a value object column and a plain column read the same text the same way.
+/// <see cref="ConvertRaw"/> also reads a stored <see cref="DateTime"/> and <see cref="Guid"/> the way the SQLite driver's typed
+/// getters do: date and time text that carries an offset is converted to UTC (text without one stays Unspecified), and a 16-byte
+/// blob is a Guid. The generated repositories read most rows through those getters, so a value read through this conversion -
+/// a value object column, a <c>Query()</c> row, a raw SQL result - comes out the same as the same row read by <c>GetByIdAsync</c>.
+/// </para>
+/// <para>
+/// This is the single conversion shared by value object rewrapping, raw SQL scalars, raw SQL projection properties and the
+/// SQLite engine's own column coercion (<c>EntitySaveMetadata.CoerceScalar</c>), so a value object column and a plain column
+/// read the same text the same way.
 /// </para>
 /// <para>
 /// <see cref="ConvertInput"/> is the same conversion for a value that did not come from a database - a spreadsheet cell, a CSV
@@ -1765,7 +1941,7 @@ public static class RawValueConverter
     /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
     /// <exception cref="OverflowException">The value does not fit the target type.</exception>
     public static object ConvertRaw(object raw, Type targetType) =>
-        ConvertCore(raw, targetType, CultureInfo.InvariantCulture, allowNumericGroupSeparators: false);
+        ConvertCore(raw, targetType, CultureInfo.InvariantCulture, fromDatabase: true);
 
     /// <summary>Converts a value that came from outside the database - a spreadsheet cell, a CSV field, a form field - to the target type.</summary>
     /// <remarks>
@@ -1782,14 +1958,14 @@ public static class RawValueConverter
     /// <exception cref="FormatException">The text does not have the shape the target type requires.</exception>
     /// <exception cref="OverflowException">The value does not fit the target type.</exception>
     public static object ConvertInput(object raw, Type targetType, IFormatProvider? provider) =>
-        ConvertCore(raw, targetType, provider ?? CultureInfo.InvariantCulture, allowNumericGroupSeparators: true);
+        ConvertCore(raw, targetType, provider ?? CultureInfo.InvariantCulture, fromDatabase: false);
 
-    /// <summary>Body shared by <see cref="ConvertRaw"/> and <see cref="ConvertInput"/>; the two differ only in the culture and in whether numeric text may carry group separators.</summary>
+    /// <summary>Body shared by <see cref="ConvertRaw"/> and <see cref="ConvertInput"/>; the two differ in the culture, in whether numeric text may carry group separators, and in reading a stored date and time or Guid the way the driver does.</summary>
     private static object ConvertCore(
         object raw,
         Type targetType,
         IFormatProvider provider,
-        bool allowNumericGroupSeparators
+        bool fromDatabase
     )
     {
         var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
@@ -1815,6 +1991,22 @@ public static class RawValueConverter
         if (underlying == typeof(TimeOnly) && raw is TimeSpan timeSpan)
         {
             return ToTimeOnly(timeSpan);
+        }
+
+        // A value the database stored as text or a blob is read the way the SQLite driver's typed getters read it, so a row read
+        // through this conversion matches the same row read through GetDateTime / GetGuid: a date and time that carries an
+        // offset is converted to UTC (one without stays Unspecified), and a 16-byte blob is a Guid
+        if (fromDatabase)
+        {
+            if (underlying == typeof(DateTime) && raw is string dateTimeText)
+            {
+                return DateTime.Parse(dateTimeText, provider, System.Globalization.DateTimeStyles.AdjustToUniversal);
+            }
+
+            if (underlying == typeof(Guid) && raw is byte[] { Length: 16 } guidBytes)
+            {
+                return new Guid(guidBytes);
+            }
         }
 
         // Text is the only shape these types can arrive in, and none of them implements IConvertible,
@@ -1854,7 +2046,7 @@ public static class RawValueConverter
             }
         }
 
-        if (allowNumericGroupSeparators && raw is string number && ParseNumber(number, underlying, provider) is { } parsed)
+        if (!fromDatabase && raw is string number && ParseNumber(number, underlying, provider) is { } parsed)
         {
             return parsed;
         }
@@ -1864,8 +2056,7 @@ public static class RawValueConverter
 
     /// <summary>Converts a raw value to an enum: text by member name or number, anything else through the underlying integer type.</summary>
     /// <remarks>
-    /// A number that names no member is accepted, the same as a C# cast and the SQLite engine's column coercion
-    /// (<c>EntitySaveMetadata.CoerceScalar</c>, which converts through the underlying integer type the same way). Text that
+    /// A number that names no member is accepted, the same as a C# cast. Text that
     /// is neither a member name nor a number throws <see cref="FormatException"/> rather than the <see cref="ArgumentException"/>
     /// <see cref="Enum.Parse(Type, string)"/> would, so the callers report it like any other malformed value.
     /// </remarks>
@@ -5192,7 +5383,8 @@ public interface IRepositoryCore<TEntity, TKey> : IRemoteRepositoryCore<TEntity,
     /// </para>
     /// <para>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> inside a single <see cref="ExecuteSqlAsync"/> call.
+    /// write the transaction into the SQL of a single <see cref="ExecuteSqlAsync"/> call, in the database's own syntax
+    /// (<c>BEGIN TRAN ... COMMIT</c> on SQL Server, <c>BEGIN; ... COMMIT;</c> on SQLite).
     /// </para>
     /// </remarks>
     /// <param name="sql">The DML statement to execute.</param>
@@ -5288,7 +5480,8 @@ public partial interface ISqlExecutor
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
+    /// write the transaction into the SQL of a single call, in the database's own syntax (<c>BEGIN TRAN ... COMMIT</c> on
+    /// SQL Server, <c>BEGIN; ... COMMIT;</c> on SQLite).
     /// </remarks>
     /// <param name="sql">The DML statement to execute.</param>
     /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
@@ -5488,7 +5681,7 @@ public interface ISaveHookContext
     /// <param name="propertyName">The C# property name of the target column (use <c>nameof</c>).</param>
     /// <param name="key">The primary key value of the target row.</param>
     /// <param name="source">The stream to write (<c>null</c> for SET NULL).</param>
-    /// <param name="length">The length, required when <c>source.CanSeek</c> is false (omitting it throws <see cref="ArgumentException"/>).</param>
+    /// <param name="length">The length, required when <c>source.CanSeek</c> is false (omitting it throws <see cref="ArgumentException"/>). The stream must yield exactly this many bytes: a length that disagrees with a seekable stream, or a stream that ends early or runs on, throws <see cref="ArgumentException"/> and nothing is written.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> WriteBinaryColumnAsync(
         string propertyName,

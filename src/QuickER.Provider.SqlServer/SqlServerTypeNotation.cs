@@ -20,6 +20,8 @@ namespace QuickER.Provider.SqlServer;
 ///   <item>素の <c>decimal</c> / <c>numeric</c> → <c>(18)</c>（既定の精度 18・スケール 0）</item>
 ///   <item><c>decimal(p,0)</c> / <c>numeric(p,0)</c> → <c>(p)</c>（スケール 0 は既定）</item>
 ///   <item><c>rowversion</c> → <c>timestamp</c>（カタログは同義の旧名を返す）</item>
+///   <item><c>float(1)</c>〜<c>float(24)</c> → <c>real</c>、<c>float(25)</c>〜<c>float(53)</c> → <c>float</c>
+///   （SQL Server は float(n) の n を覚えず、24 以下を単精度の real、それより大きいものを倍精度の float として持つ）</item>
 /// </list>
 /// 当てはまらない表記は前後の空白を落とすだけで変えない。
 /// </para>
@@ -81,8 +83,46 @@ public static partial class SqlServerTypeNotation
             return "timestamp";
         }
 
+        if (TryGetFloatMantissaBits(text) is >= 1 and <= MaxFloatMantissaBits)
+        {
+            // 単精度の境界の判定は型マッパー・型カタログと同じ 1 か所（IsSinglePrecisionFloat）に置く
+            return IsSinglePrecisionFloat(text) ? "real" : "float";
+        }
+
         return text;
     }
+
+    /// <summary>float(n) の n のうち、SQL Server が単精度（real・4 バイト）として持つ上限</summary>
+    private const int MaxSinglePrecisionMantissaBits = 24;
+
+    /// <summary>float(n) の n の上限（倍精度・8 バイト）</summary>
+    private const int MaxFloatMantissaBits = 53;
+
+    /// <summary>
+    /// 表記が単精度の float（<c>float(1)</c>〜<c>float(24)</c>＝SQL Server では real と同じ型）かどうか
+    /// </summary>
+    /// <remarks>
+    /// 型マッパー（C# 型）と型カタログ（正規型）が、この表記を real と同じに扱うために使う。
+    /// 素の <c>float</c> は <c>float(53)</c> と同じ倍精度。
+    /// </remarks>
+    internal static bool IsSinglePrecisionFloat(string dataType) =>
+        TryGetFloatMantissaBits(dataType) is >= 1 and <= MaxSinglePrecisionMantissaBits;
+
+    /// <summary><c>float(n)</c> の n を取り出す（float(n) の形でなければ null）</summary>
+    private static int? TryGetFloatMantissaBits(string dataType)
+    {
+        var match = FloatPattern().Match(dataType.Trim());
+        return match.Success
+            ? int.Parse(match.Groups["n"].Value, CultureInfo.InvariantCulture)
+            : null;
+    }
+
+    // float(n)（括弧内の空白と大文字小文字を許す。桁数を 9 までに絞って int へ必ず収める）
+    [GeneratedRegex(
+        @"^float\s*\(\s*(?<n>\d{1,9})\s*\)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex FloatPattern();
 
     // datetime2(n) / time(n) / datetimeoffset(n)（括弧内の空白と大文字小文字を許す。桁数を 9 までに絞って int へ必ず収める）
     [GeneratedRegex(

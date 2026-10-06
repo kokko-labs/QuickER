@@ -22,8 +22,13 @@ namespace QuickER.Tests.GeneratedSqliteValueConversionFixture;
 /// <list type="bullet">
 ///   <item><c>time_probes</c>: <c>probe_id</c>（int・PK）／<c>duration</c>（time＝TimeSpan）／
 ///   <c>session_id</c>（uniqueidentifier＝Guid）／<c>occurred_at</c>（datetimeoffset＝DateTimeOffset）／
-///   <c>label</c>（nvarchar(50)・NULL 許容＝対照の string 列）</item>
+///   <c>label</c>（nvarchar(50)・NULL 許容＝対照の string 列）／<c>recorded_at</c>（datetime2・NULL 許容＝DateTime）</item>
 /// </list>
+/// <para>
+/// <c>recorded_at</c> は IConvertible を実装する DateTime の列で、外部ツールが書いたオフセットつきの TEXT を、
+/// 速い読み取り（ドライバの GetDateTime）と値オブジェクトの再ラップ（RawValueConverter）が同じ値に読むことを
+/// 確かめるために置く（<c>label</c> は値オブジェクトの最大長の検証に通らない格納値の名指しにも使う）。
+/// </para>
 /// <para>
 /// EditModel / Mapper / EF Core / インメモリ / リモートは交差の焦点でないため生成しない
 /// （VO と SQLite 方言エンジンだけを最小構成で焼き付ける）。
@@ -62,6 +67,7 @@ public static class SqliteValueConversionFixtureDefinition
     private static readonly Guid ProbeSessionColId = new("c1000000-0000-0000-0000-000000000004");
     private static readonly Guid ProbeOccurredColId = new("c1000000-0000-0000-0000-000000000005");
     private static readonly Guid ProbeLabelColId = new("c1000000-0000-0000-0000-000000000006");
+    private static readonly Guid ProbeRecordedColId = new("c1000000-0000-0000-0000-000000000007");
 
     /// <summary>非 IConvertible 型の検証用 ER 図を決定的に構築する</summary>
     public static ErDiagram Build()
@@ -108,6 +114,14 @@ public static class SqliteValueConversionFixtureDefinition
                     Id = ProbeLabelColId,
                     Name = "label",
                     DataType = "nvarchar(50)",
+                    IsNullable = true,
+                },
+                // IConvertible を実装する日時の列（格納値の TEXT の読み方を速い読み取りと再ラップでそろえる確認用）
+                new Column
+                {
+                    Id = ProbeRecordedColId,
+                    Name = "recorded_at",
+                    DataType = "datetime2",
                     IsNullable = true,
                 },
             },

@@ -111,6 +111,13 @@ public static class SqliteSchemaBootstrap
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(ddl);
 
+        // Every argument is checked before the connection opens: opening a SQLite connection creates the database file, so
+        // a bad argument found afterwards would leave an empty database behind (and on SQL Server it would cost a round trip)
+        if (commandTimeout is { } requested)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(requested, TimeSpan.Zero, nameof(commandTimeout));
+        }
+
         await using var connection = new SqlConnectionFactory(connectionString).CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
@@ -120,7 +127,6 @@ public static class SqliteSchemaBootstrap
         // The ADO command exposes its timeout in whole seconds, so a requested duration is rounded up (null keeps the provider default)
         if (commandTimeout is { } timeout)
         {
-            ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
             command.CommandTimeout = (int)Math.Ceiling(timeout.TotalSeconds);
         }
 
@@ -524,8 +530,8 @@ public abstract class SqliteRepositoryCore<TEntity, TKey>(
     /// <summary>
     /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key (O(chunk) streaming).
     /// When <paramref name="source"/> is <c>null</c>, sets the column to NULL. A Stream that is not <c>CanSeek</c> requires
-    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>). Returns <c>true</c> when a row was
-    /// updated, <c>false</c> when no row matched.
+    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>), and a stream that does not yield exactly
+    /// that many bytes fails the write. Returns <c>true</c> when a row was updated, <c>false</c> when no row matched.
     /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
     /// </summary>
     protected async Task<bool> WriteUnboundedBinaryColumnAsync(
@@ -718,7 +724,7 @@ public abstract class SqliteRepositoryCore<TEntity, TKey>(
     /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
-    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
+    /// write <c>BEGIN; ... COMMIT;</c> in the SQL within a single call.
     /// Parameter binding is the same as <see cref="QueryBySqlAsync"/>
     /// (<b>always pass values as parameters; string concatenation risks injection</b>).
     /// The implementation delegates to <see cref="ISqlExecutor"/>.
@@ -840,6 +846,13 @@ public static class UnboundedBinaryColumnEngine
         var column = metadata.ColumnByPropertyName(propertyName);
         var quotedColumn = metadata.QuotedColumnName(column);
 
+        // A standalone read resolves the rowid and opens the blob inside one read transaction. Outside one, another
+        // connection could delete the row in between and insert a different row that reuses its rowid (a rowid is reused
+        // once the highest one is gone), and the blob would then be read from that row. Deferred, so it only takes the
+        // shared lock a read needs; an enlisted read already runs inside the caller's transaction
+        await using var ownTransaction = transaction is null ? connection.BeginTransaction(deferred: true) : null;
+        var activeTransaction = transaction ?? ownTransaction;
+
         // Resolve the rowid and test for NULL in a single SELECT (SqliteBlob requires a rowid table; safe because QuickER's
         // SQLite DDL never generates WITHOUT ROWID). IS NULL yields 1 (true)
         long rowid;
@@ -848,7 +861,7 @@ public static class UnboundedBinaryColumnEngine
             var probe = CreateCommand(
                 $"SELECT rowid, {quotedColumn} IS NULL FROM {metadata.TableName} WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
                 connection,
-                transaction
+                activeTransaction
             )
         )
         {
@@ -970,7 +983,9 @@ public static class UnboundedBinaryColumnEngine
                 )
             )
             {
-                await source.CopyToAsync(
+                // The blob was allocated at the declared length, so a short stream would leave its tail as zeros: the
+                // exact-length wrapper fails the copy instead, and the catch below rolls the allocation back
+                await UnboundedBinaryColumns.WithExactLength(source, payloadLength).CopyToAsync(
                     blob,
                     UnboundedBinaryColumns.StreamCopyBufferSize,
                     cancellationToken
@@ -2956,6 +2971,12 @@ public sealed class EntitySaveMetadata
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="ColumnMappingFailure"/> (thrown by the fast path when a value object rejects a stored value).</summary>
+    private static readonly MethodInfo _columnMappingFailureMethod = typeof(EntitySaveMetadata).GetMethod(
+        nameof(ColumnMappingFailure),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
     /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBaseCore.RowState"/>.</summary>
     private static readonly PropertyInfo _rowStateProperty = typeof(EntityBaseCore).GetProperty(
         nameof(EntityBaseCore.RowState)
@@ -3137,6 +3158,26 @@ public sealed class EntitySaveMetadata
                 created = Expression.Convert(created, propertyType);
             }
 
+            // A stored value the value object rejects is reported with the column it came from, the same exception the
+            // fallback (SetColumnValue) throws: Create's own exception names only the value object type
+            var failure = Expression.Parameter(typeof(Exception), "failure");
+            created = Expression.TryCatch(
+                created,
+                Expression.Catch(
+                    failure,
+                    Expression.Throw(
+                        Expression.Call(
+                            _columnMappingFailureMethod,
+                            Expression.Constant(entityExpr.Type, typeof(Type)),
+                            Expression.Constant(property, typeof(PropertyInfo)),
+                            failure
+                        ),
+                        propertyType
+                    ),
+                    Expression.Not(Expression.TypeIs(failure, typeof(OperationCanceledException)))
+                )
+            );
+
             var wrapped = Expression.Condition(
                 Expression.Call(readerParam, _isDbNullMethod, ordinal),
                 Expression.Default(propertyType),
@@ -3301,14 +3342,26 @@ public sealed class EntitySaveMetadata
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw new InvalidOperationException(
-                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
-                    ex
-                );
+                throw ColumnMappingFailure(entity.GetType(), property, ex);
             }
         }
     }
 
+    /// <summary>Wraps a failure to map a stored value into an exception that names the column it came from.</summary>
+    /// <remarks>
+    /// Every row mapping path throws this one shape - the per-column fallback (<see cref="SetColumnValue"/>), the compiled
+    /// fast path that calls a value object's <c>Create</c> directly, and on SQL Server the JSON reader behind
+    /// <c>Query()</c> - so a value the database holds but the model rejects is reported the same way however the row was read.
+    /// </remarks>
+    internal static InvalidOperationException ColumnMappingFailure(
+        Type entityType,
+        PropertyInfo property,
+        Exception inner
+    ) =>
+        new(
+            $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entityType.Name}.{property.Name} ({property.PropertyType.Name}): {inner.Message}",
+            inner
+        );
     /// <summary>
     /// Maps a raw SQL result row to {TEntity} through a plan resolved for this result set. Same strict mapping as
     /// <see cref="MapEntityStrict"/> (the SELECT columns are required; a missing one is reported by
@@ -3502,27 +3555,11 @@ public sealed class EntitySaveMetadata
 
         // Unbounded binary columns are excluded from SELECT by default, so only SelectColumns
         // (the pre-resolved pairs of SelectProperties) are mapped
+        // SetColumnValue re-wraps a value object and coerces a plain column from the SQLite storage type, and names the
+        // column when the stored value cannot be mapped (a value object that rejects it, a text that is not a date)
         for (var i = 0; i < SelectColumns.Count; i++)
         {
-            var property = SelectColumns[i].Property;
-            var value = reader.GetValue(ordinals[i]);
-
-            if (value is DBNull)
-            {
-                property.SetValue(entity, null);
-            }
-            else
-            {
-                // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
-                // Plain columns are coerced from the SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) to the property type
-                var propertyType = property.PropertyType;
-                property.SetValue(
-                    entity,
-                    typeof(IValueObjectCore).IsAssignableFrom(propertyType)
-                        ? SqlValueObjectActivator.Wrap(value, propertyType)
-                        : CoerceScalar(value, propertyType)
-                );
-            }
+            SetColumnValue(entity, SelectColumns[i].Property, reader.GetValue(ordinals[i]));
         }
 
         // Rows read from the database are treated as unchanged (later edits transition them to Updated)
@@ -3538,68 +3575,21 @@ public sealed class EntitySaveMetadata
     /// Coerces the raw value SQLite returns (long / double / string / byte[]) to the target property's CLR type.
     /// </summary>
     /// <remarks>
-    /// Handles the SQLite storage conventions (same as EF Core Sqlite: decimal/Guid/DateTime/DateTimeOffset/TimeSpan
-    /// stored as TEXT, bool as INTEGER). Values already assignable are returned as-is, and Nullable types are judged by
-    /// their underlying type. When conversion is impossible, throws an exception with a clear message.
+    /// The conversion is <see cref="RawValueConverter.ConvertRaw"/>, the one value object rewrapping and raw SQL use, so a
+    /// plain column and a value object column read the same stored value the same way - and the same way the driver's typed
+    /// getters behind <c>GetByIdAsync</c> read it (SQLite storage conventions as in EF Core Sqlite: decimal / Guid / DateTime /
+    /// DateTimeOffset / TimeSpan / DateOnly / TimeOnly stored as TEXT, bool as INTEGER, a Guid also as a 16-byte BLOB).
+    /// A value that cannot be converted throws an exception with a clear message.
     /// </remarks>
-    /// <seealso cref="RawValueConverter.ConvertRaw"/>
-    // The TEXT parsing below is deliberately kept alongside RawValueConverter.ConvertRaw (the shared conversion behind value
-    // object rewrapping and raw SQL) rather than delegating to it: this method reads DateTime with RoundtripKind, which the
-    // shared converter leaves to Convert.ChangeType because DateTime is IConvertible. Both accept the same text for the
-    // types they share (Guid, TimeSpan, DateTimeOffset), so keep them in step when either one changes.
     private static object CoerceScalar(object value, Type targetType)
     {
-        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
-
-        if (underlying.IsInstanceOfType(value))
-        {
-            return value;
-        }
-
-        // Enums are coerced to their underlying integer type first, then converted (RawValueConverter converts a non-text
-        // value to an enum by the same rule)
-        if (underlying.IsEnum)
-        {
-            return Enum.ToObject(underlying, Convert.ChangeType(value, Enum.GetUnderlyingType(underlying), CultureInfo.InvariantCulture));
-        }
-
-        // Types stored as TEXT are restored from the string (ISO 8601 / "N" format)
-        if (value is string text)
-        {
-            if (underlying == typeof(Guid))
-            {
-                return Guid.Parse(text);
-            }
-
-            if (underlying == typeof(DateTime))
-            {
-                return DateTime.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
-            }
-
-            if (underlying == typeof(DateTimeOffset))
-            {
-                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
-            }
-
-            if (underlying == typeof(TimeSpan))
-            {
-                return TimeSpan.Parse(text, CultureInfo.InvariantCulture);
-            }
-        }
-
-        // bool is stored as INTEGER (0/1)
-        if (underlying == typeof(bool) && value is long boolLong)
-        {
-            return boolLong != 0;
-        }
-
         try
         {
-            // Numeric narrowing (long to int/short/byte, double to float/decimal, etc.)
-            return Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture);
+            return RawValueConverter.ConvertRaw(value, targetType);
         }
         catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
         {
+            var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
             throw new InvalidOperationException(
                 $"The value read from SQLite ({value.GetType().Name}) could not be converted to {underlying.Name}.",
                 ex

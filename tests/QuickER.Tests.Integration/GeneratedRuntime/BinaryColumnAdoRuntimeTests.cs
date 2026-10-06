@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
 using Xunit;
@@ -439,6 +440,67 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
         destination.ToArray().Should().Equal(payload);
     }
 
+    /// <summary>
+    /// Stream が length どおりのバイト数を出さない書き込みは ArgumentException で失敗し、既存の blob を変えない。
+    /// SQLite は zeroblob(length) を先に確保するため、短い Stream を黙って受けると末尾が 0 で埋まったまま成功していた
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/Ado] Stream: length と食い違う Stream は例外で既存の blob を変えない"
+    )]
+    public async Task Stream_Write_LengthMismatch_Throws_AndKeepsBlob()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        foreach (var (label, source, length) in BinaryLengthMismatchCases.Create())
+        {
+            var write = async () => await documents.WritePayloadAsync(1, source, length, Ct);
+            (await write.Should().ThrowExactlyAsync<ArgumentException>(label))
+                .Which.ParamName.Should()
+                .Be("length", label);
+
+            using var destination = new MemoryStream();
+            (await documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue(label);
+            destination.ToArray().Should().Equal(Doc1Payload, label);
+        }
+    }
+
+    /// <summary>
+    /// 単独（トランザクションなし）の Read は、rowid の照会から blob の読み取りまでを 1 つの読み取りトランザクションで行う。
+    /// 照会が終わった瞬間に別の接続が「最大 rowid の行を消して別の行を挿入する」（＝同じ rowid を再利用する）と、
+    /// トランザクションの外では blob が別の行から読まれてしまう。
+    /// WAL モードで確かめる：WAL では読み取り中でも別の接続の書き込みがコミットできるので、入れ替えは必ず成功し、
+    /// 差は「照会と blob が同じスナップショットを読むか」だけに出る（rollback ジャーナルでは、フックが呼ばれる時点で
+    /// 照会側がまだ共有ロックを持っており、トランザクションの有無に関わらず入れ替えが失敗して差が出ない）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/Ado] Stream: 単独の Read は rowid の照会の直後に行が入れ替わっても別の行の blob を読まない"
+    )]
+    public async Task Stream_Read_Standalone_DoesNotReadBlobOfRowThatReusedRowid()
+    {
+        await ResetAndSeedAsync();
+
+        await using (var connection = new SqliteConnection(ConnectionString))
+        {
+            await connection.OpenAsync(Ct);
+            await using var walCommand = connection.CreateCommand();
+            walCommand.CommandText = "PRAGMA journal_mode = WAL;";
+            (await walCommand.ExecuteScalarAsync(Ct)).Should().Be("wal");
+        }
+
+        // 文書 3 は最大の rowid を持つ。消してから挿入した行は同じ rowid を受け取る
+        var intrusion = new RowidReuseIntrusion(ConnectionString);
+        var documents = new DocumentRepository(
+            new ProfilingConnectionFactory(ConnectionString, intrusion.OnStatementFinished)
+        );
+
+        using var destination = new MemoryStream();
+        (await documents.ReadPayloadAsync(3, destination, Ct)).Should().BeTrue();
+
+        intrusion.Succeeded.Should().BeTrue("rowid の照会の直後に行を入れ替えている");
+        destination.ToArray().Should().Equal(Doc3Payload, "読むのは照会した行の blob だけ");
+    }
+
     /// <summary>ファイル糖衣（Write...FromFile / Read...ToFile）でファイル⇔DB を往復できる</summary>
     [Fact(DisplayName = "[Binary/Ado] Stream: ファイル糖衣でファイル⇔DB を往復する")]
     public async Task Stream_FileSugar_RoundTrips()
@@ -518,6 +580,82 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
     {
         _provider?.Dispose();
         base.Dispose();
+    }
+
+    /// <summary>
+    /// 開いた接続に SQLite の profile フック（文の実行が終わるたびに呼ばれる）を付ける接続ファクトリ。
+    /// フックが残った接続をプールへ返さないよう、プールは使わない
+    /// </summary>
+    private sealed class ProfilingConnectionFactory(
+        string connectionString,
+        Action<string> onStatementFinished
+    ) : ISqlConnectionFactory
+    {
+        /// <summary>ネイティブ側が呼ぶデリゲート（GC に回収されないようフィールドで保持する）</summary>
+        private readonly SQLitePCL.strdelegate_profile _profile = (_, sql, _) =>
+            onStatementFinished(sql);
+
+        public SqliteConnection CreateConnection()
+        {
+            var connection = new SqliteConnection(
+                new SqliteConnectionStringBuilder(connectionString) { Pooling = false }.ToString()
+            );
+            connection.StateChange += (_, e) =>
+            {
+                if (e.CurrentState == System.Data.ConnectionState.Open)
+                {
+                    SQLitePCL.raw.sqlite3_profile(connection.Handle, _profile, null);
+                }
+            };
+            return connection;
+        }
+    }
+
+    /// <summary>
+    /// 単独の Read の rowid の照会が終わった直後に、別の接続から文書 3 を消して別の文書を挿入する（rowid 3 を再利用させる）。
+    /// 待ちは 1 秒で打ち切る（WAL では待たずにコミットできる）
+    /// </summary>
+    private sealed class RowidReuseIntrusion(string connectionString)
+    {
+        /// <summary>入れ替えを試みたか</summary>
+        private bool _attempted;
+
+        /// <summary>入れ替えがコミットされたか</summary>
+        public bool Succeeded { get; private set; }
+
+        /// <summary>profile フックの本体。ネイティブのコールバックの中なので例外は外へ出さない</summary>
+        public void OnStatementFinished(string sql)
+        {
+            if (_attempted || !sql.StartsWith("SELECT rowid", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _attempted = true;
+
+            try
+            {
+                using var other = new SqliteConnection(
+                    new SqliteConnectionStringBuilder(connectionString)
+                    {
+                        Pooling = false,
+                        DefaultTimeout = 1,
+                    }.ToString()
+                );
+                other.Open();
+                using var command = other.CreateCommand();
+                command.CommandText =
+                    "BEGIN; DELETE FROM documents WHERE document_id = 3; "
+                    + "INSERT INTO documents (document_id, title, is_published, payload, thumb) "
+                    + "VALUES (4, 'intruder', 0, x'EEEEEEEE', x'01'); COMMIT;";
+                command.ExecuteNonQuery();
+                Succeeded = true;
+            }
+            catch (SqliteException)
+            {
+                // 書き込めなかった（Succeeded が false のままなのでテストが失敗として知らせる）
+            }
+        }
     }
 
     /// <summary>CanSeek を持たない読み取り専用ストリーム（length 指定必須経路の検証用）</summary>

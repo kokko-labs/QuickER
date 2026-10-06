@@ -37,6 +37,7 @@ public class CSharpReverseVerbatimTypeTests
             { "text", "varchar(max)" },
             { "image", "varbinary(max)" },
             { "smallmoney", "money" },
+            { "float(24)", "real" },
         };
 
     /// <summary>型表記 1 つを持つ 1 テーブルの図を作る</summary>

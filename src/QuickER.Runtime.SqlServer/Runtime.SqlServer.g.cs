@@ -75,6 +75,13 @@ public static class SqlServerSchemaBootstrap
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(ddl);
 
+        // Every argument is checked before the connection opens: opening a SQLite connection creates the database file, so
+        // a bad argument found afterwards would leave an empty database behind (and on SQL Server it would cost a round trip)
+        if (commandTimeout is { } requested)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(requested, TimeSpan.Zero, nameof(commandTimeout));
+        }
+
         await using var connection = new SqlConnectionFactory(connectionString).CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
@@ -84,7 +91,6 @@ public static class SqlServerSchemaBootstrap
         // The ADO command exposes its timeout in whole seconds, so a requested duration is rounded up (null keeps the provider default)
         if (commandTimeout is { } timeout)
         {
-            ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
             command.CommandTimeout = (int)Math.Ceiling(timeout.TotalSeconds);
         }
 
@@ -333,6 +339,14 @@ public abstract class SqlServerRepositoryCore<TEntity, TKey>(
     /// (<c>FireTriggers</c> is deliberately left off - QuickER's DDL generates no triggers).
     /// </para>
     /// <para>
+    /// A null is stored as NULL: SqlBulkCopy otherwise puts a column's DEFAULT in its place, which the row-at-a-time
+    /// INSERT never does, so <c>KeepNulls</c> is always on as well.
+    /// </para>
+    /// <para>
+    /// The copy is given the connection's command timeout - the connection string's <c>Command Timeout</c>, 30 seconds
+    /// unless it says otherwise. SqlBulkCopy has a timeout of its own that the connection string does not reach.
+    /// </para>
+    /// <para>
     /// Known limitation: SqlBulkCopy cannot return generated values, so for a table with a rowversion column the entities
     /// keep whatever version they had. Re-read them when the version is needed for a later update.
     /// </para>
@@ -356,11 +370,12 @@ public abstract class SqlServerRepositoryCore<TEntity, TKey>(
 
         using var bulkCopy = new SqlBulkCopy(
             connection,
-            SqlBulkCopyOptions.CheckConstraints,
+            SqlBulkCopyOptions.CheckConstraints | SqlBulkCopyOptions.KeepNulls,
             externalTransaction: null
         )
         {
             DestinationTableName = _metadata.TableName,
+            BulkCopyTimeout = connection.CommandTimeout,
         };
 
         // Null elements are dropped before the reader sees them, so they are skipped rather than failing the whole copy
@@ -524,8 +539,8 @@ public abstract class SqlServerRepositoryCore<TEntity, TKey>(
     /// <summary>
     /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key (O(chunk) streaming).
     /// When <paramref name="source"/> is <c>null</c>, sets the column to NULL. A Stream that is not <c>CanSeek</c> requires
-    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>). Returns <c>true</c> when a row was
-    /// updated, <c>false</c> when no row matched.
+    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>), and a stream that does not yield exactly
+    /// that many bytes fails the write. Returns <c>true</c> when a row was updated, <c>false</c> when no row matched.
     /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
     /// </summary>
     protected async Task<bool> WriteUnboundedBinaryColumnAsync(
@@ -927,9 +942,9 @@ public static class UnboundedBinaryColumnEngine
 
         // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
         var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
-        // SqlClient streams the upload when a Stream is passed as Value with SqlDbType.VarBinary and Size=-1 (max)
-        _ = payloadLength;
-
+        // SqlClient streams the upload when a Stream is passed as Value with SqlDbType.VarBinary and Size=-1 (max).
+        // It reads the stream to its end, so the stream goes through the exact-length wrapper: a stream that is shorter or
+        // longer than the length fails the UPDATE instead of storing whatever it happened to hold
         await using var command = CreateCommand(
             $"UPDATE {metadata.TableName} SET {quotedColumn} = @data WHERE {EntitySaveMetadata.QuoteIdentifier(metadata.KeyColumnName)} = @id;",
             connection,
@@ -937,7 +952,7 @@ public static class UnboundedBinaryColumnEngine
         );
         var parameter = new SqlParameter("@data", SqlDbType.VarBinary, -1)
         {
-            Value = source,
+            Value = UnboundedBinaryColumns.WithExactLength(source, payloadLength),
         };
         command.Parameters.Add(parameter);
         metadata.BindKeyParameter(command, key);
@@ -953,6 +968,30 @@ public readonly record struct SqlQueryParameter(string Name, object? Value, stri
 {
     /// <summary>Whether the column's type is applied in its variable-length form (nchar → nvarchar, char → varchar). Set for a LIKE pattern, which a fixed-length type would pad with blanks.</summary>
     public bool VariableLength { get; init; }
+}
+
+/// <summary>Reads one value object property of a FOR JSON row, naming the column when the value object rejects the stored value.</summary>
+/// <remarks>The value itself is read and written by the shared value object converter; this only adds the column to the failure.</remarks>
+internal sealed class ColumnNamingValueObjectConverter<TVo>(Type entityType, PropertyInfo property)
+    : System.Text.Json.Serialization.JsonConverter<TVo>
+    where TVo : class
+{
+    /// <summary>Reads the value through the shared converter, rethrowing a validation failure with the column named.</summary>
+    public override TVo? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        try
+        {
+            return ((System.Text.Json.Serialization.JsonConverter<TVo>)options.GetConverter(typeof(TVo))).Read(ref reader, typeToConvert, options);
+        }
+        catch (ValueObjectValidationException ex)
+        {
+            throw EntitySaveMetadata.ColumnMappingFailure(entityType, property, ex);
+        }
+    }
+
+    /// <summary>Writes the value through the shared converter.</summary>
+    public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) =>
+        ((System.Text.Json.Serialization.JsonConverter<TVo>)options.GetConverter(typeof(TVo))).Write(writer, value, options);
 }
 
 /// <summary>
@@ -980,7 +1019,7 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
         PropertyNameCaseInsensitive = true,
         TypeInfoResolver = new DefaultJsonTypeInfoResolver
         {
-            Modifiers = { IncludeNavigationProperties },
+            Modifiers = { IncludeNavigationProperties, NameRejectedStoredValues },
         },
         Converters = { new ValueObjectJsonConverterFactory() },
     };
@@ -1024,6 +1063,38 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
                 jsonProperty.Get = property.GetValue;
                 jsonProperty.Set = property.SetValue;
                 typeInfo.Properties.Add(jsonProperty);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads every value object column of the restored entities (the root and every Included one) through a converter that
+    /// names the column when the value object rejects the stored value.
+    /// </summary>
+    /// <remarks>
+    /// The shared value object converter knows only the value object type, so a stored value that fails validation would
+    /// otherwise surface with no hint of the table or column it came from. The resolver knows both, so the column is named
+    /// here, in the same exception the plain SELECT paths throw (<c>EntitySaveMetadata.ColumnMappingFailure</c>).
+    /// </remarks>
+    private static void NameRejectedStoredValues(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Kind != JsonTypeInfoKind.Object)
+        {
+            return;
+        }
+
+        foreach (var jsonProperty in typeInfo.Properties)
+        {
+            if (
+                jsonProperty.AttributeProvider is PropertyInfo property
+                && typeof(IValueObjectCore).IsAssignableFrom(jsonProperty.PropertyType)
+            )
+            {
+                jsonProperty.CustomConverter = (System.Text.Json.Serialization.JsonConverter)Activator.CreateInstance(
+                    typeof(ColumnNamingValueObjectConverter<>).MakeGenericType(jsonProperty.PropertyType),
+                    typeInfo.Type,
+                    property
+                )!;
             }
         }
     }
@@ -2806,6 +2877,12 @@ public sealed class EntitySaveMetadata
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="ColumnMappingFailure"/> (thrown by the fast path when a value object rejects a stored value).</summary>
+    private static readonly MethodInfo _columnMappingFailureMethod = typeof(EntitySaveMetadata).GetMethod(
+        nameof(ColumnMappingFailure),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
     /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBaseCore.RowState"/>.</summary>
     private static readonly PropertyInfo _rowStateProperty = typeof(EntityBaseCore).GetProperty(
         nameof(EntityBaseCore.RowState)
@@ -2987,6 +3064,26 @@ public sealed class EntitySaveMetadata
                 created = Expression.Convert(created, propertyType);
             }
 
+            // A stored value the value object rejects is reported with the column it came from, the same exception the
+            // fallback (SetColumnValue) throws: Create's own exception names only the value object type
+            var failure = Expression.Parameter(typeof(Exception), "failure");
+            created = Expression.TryCatch(
+                created,
+                Expression.Catch(
+                    failure,
+                    Expression.Throw(
+                        Expression.Call(
+                            _columnMappingFailureMethod,
+                            Expression.Constant(entityExpr.Type, typeof(Type)),
+                            Expression.Constant(property, typeof(PropertyInfo)),
+                            failure
+                        ),
+                        propertyType
+                    ),
+                    Expression.Not(Expression.TypeIs(failure, typeof(OperationCanceledException)))
+                )
+            );
+
             var wrapped = Expression.Condition(
                 Expression.Call(readerParam, _isDbNullMethod, ordinal),
                 Expression.Default(propertyType),
@@ -3142,14 +3239,26 @@ public sealed class EntitySaveMetadata
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw new InvalidOperationException(
-                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
-                    ex
-                );
+                throw ColumnMappingFailure(entity.GetType(), property, ex);
             }
         }
     }
 
+    /// <summary>Wraps a failure to map a stored value into an exception that names the column it came from.</summary>
+    /// <remarks>
+    /// Every row mapping path throws this one shape - the per-column fallback (<see cref="SetColumnValue"/>), the compiled
+    /// fast path that calls a value object's <c>Create</c> directly, and on SQL Server the JSON reader behind
+    /// <c>Query()</c> - so a value the database holds but the model rejects is reported the same way however the row was read.
+    /// </remarks>
+    internal static InvalidOperationException ColumnMappingFailure(
+        Type entityType,
+        PropertyInfo property,
+        Exception inner
+    ) =>
+        new(
+            $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entityType.Name}.{property.Name} ({property.PropertyType.Name}): {inner.Message}",
+            inner
+        );
     /// <summary>
     /// Maps a raw SQL result row to {TEntity} through a plan resolved for this result set. Same strict mapping as
     /// <see cref="MapEntityStrict"/> (the SELECT columns are required; a missing one is reported by

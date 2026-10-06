@@ -89,7 +89,12 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
                 return true;
 
             case "float":
-                canonical = new CanonicalType(CanonicalTypeKind.Float64);
+                // float(1)〜float(24) は real と同じ単精度（素の float と float(25)〜float(53) は倍精度）
+                canonical = new CanonicalType(
+                    SqlServerTypeNotation.IsSinglePrecisionFloat(nativeType)
+                        ? CanonicalTypeKind.Float32
+                        : CanonicalTypeKind.Float64
+                );
                 return true;
 
             case "money":

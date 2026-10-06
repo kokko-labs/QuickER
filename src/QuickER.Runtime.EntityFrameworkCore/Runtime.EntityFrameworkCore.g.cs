@@ -214,6 +214,12 @@ public sealed class EntitySaveMetadata
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="ColumnMappingFailure"/> (thrown by the fast path when a value object rejects a stored value).</summary>
+    private static readonly MethodInfo _columnMappingFailureMethod = typeof(EntitySaveMetadata).GetMethod(
+        nameof(ColumnMappingFailure),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
     /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBaseCore.RowState"/>.</summary>
     private static readonly PropertyInfo _rowStateProperty = typeof(EntityBaseCore).GetProperty(
         nameof(EntityBaseCore.RowState)
@@ -395,6 +401,26 @@ public sealed class EntitySaveMetadata
                 created = Expression.Convert(created, propertyType);
             }
 
+            // A stored value the value object rejects is reported with the column it came from, the same exception the
+            // fallback (SetColumnValue) throws: Create's own exception names only the value object type
+            var failure = Expression.Parameter(typeof(Exception), "failure");
+            created = Expression.TryCatch(
+                created,
+                Expression.Catch(
+                    failure,
+                    Expression.Throw(
+                        Expression.Call(
+                            _columnMappingFailureMethod,
+                            Expression.Constant(entityExpr.Type, typeof(Type)),
+                            Expression.Constant(property, typeof(PropertyInfo)),
+                            failure
+                        ),
+                        propertyType
+                    ),
+                    Expression.Not(Expression.TypeIs(failure, typeof(OperationCanceledException)))
+                )
+            );
+
             var wrapped = Expression.Condition(
                 Expression.Call(readerParam, _isDbNullMethod, ordinal),
                 Expression.Default(propertyType),
@@ -558,14 +584,26 @@ public sealed class EntitySaveMetadata
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                throw new InvalidOperationException(
-                    $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entity.GetType().Name}.{property.Name} ({property.PropertyType.Name}): {ex.Message}",
-                    ex
-                );
+                throw ColumnMappingFailure(entity.GetType(), property, ex);
             }
         }
     }
 
+    /// <summary>Wraps a failure to map a stored value into an exception that names the column it came from.</summary>
+    /// <remarks>
+    /// Every row mapping path throws this one shape - the per-column fallback (<see cref="SetColumnValue"/>), the compiled
+    /// fast path that calls a value object's <c>Create</c> directly, and on SQL Server the JSON reader behind
+    /// <c>Query()</c> - so a value the database holds but the model rejects is reported the same way however the row was read.
+    /// </remarks>
+    internal static InvalidOperationException ColumnMappingFailure(
+        Type entityType,
+        PropertyInfo property,
+        Exception inner
+    ) =>
+        new(
+            $"The stored value of column '{GetColumnName(property)}' could not be mapped to {entityType.Name}.{property.Name} ({property.PropertyType.Name}): {inner.Message}",
+            inner
+        );
     /// <summary>
     /// Maps a raw SQL result row to {TEntity} through a plan resolved for this result set. Same strict mapping as
     /// <see cref="MapEntityStrict"/> (the SELECT columns are required; a missing one is reported by

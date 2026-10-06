@@ -142,4 +142,38 @@ public sealed class SqliteSchemaBootstrapRuntimeTests : IDisposable
             );
         await negative.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
+
+    /// <summary>
+    /// 不正な引数（負のタイムアウト）は接続を開く前に断る。SQLite は接続を開いた時点で DB ファイルを作るため、
+    /// 開いてから検証すると空の DB ファイルが残る
+    /// </summary>
+    [Fact(
+        DisplayName = "[SQLiteブートストラップ] 負のタイムアウトは DB ファイルを作る前に引数例外"
+    )]
+    public async Task ApplyDdlAsync_RejectsNegativeTimeoutBeforeCreatingTheFile()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetDirectoryName(_db.FilePath)!,
+            "not-created.db"
+        );
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+        }.ToString();
+
+        var negative = async () =>
+            await SqliteSchemaBootstrap.ApplyDdlAsync(
+                connectionString,
+                "CREATE TABLE t (id INTEGER);",
+                TimeSpan.FromSeconds(-1),
+                Ct
+            );
+
+        (await negative.Should().ThrowExactlyAsync<ArgumentOutOfRangeException>())
+            .Which.ParamName.Should()
+            .Be("commandTimeout");
+        System.IO.File.Exists(path).Should().BeFalse("引数の検証は接続を開く前に行う");
+    }
 }

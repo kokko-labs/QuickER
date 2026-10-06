@@ -1,4 +1,4 @@
-﻿# 生成コードの使い方
+# 生成コードの使い方
 
 *[English](code-generation.md) | 日本語*
 
@@ -289,6 +289,8 @@ SQL Server では `SqlBulkCopy` 経由になりますが、`CheckConstraints` �
 外部キー・CHECK 制約が検査されるため、行単位の `InsertAsync` が弾く行は一括追加でも弾かれます。
 `SqlBulkCopy` は指定しない限りこれらを検査せず、放置すると「一括追加だけが不正な行を通す」非対称になるためです。
 トリガーは意図的に発火させません（QuickER の DDL はトリガーを生成しないため）。
+`KeepNulls` も常時付けており、DEFAULT のある列にも `null` は NULL として入ります（`InsertAsync` と同じ）。
+タイムアウトは接続文字列の `Command Timeout` に従います（指定が無ければ 30 秒）。
 
 ### クエリ（式木 → SQL 変換）
 
@@ -1595,7 +1597,7 @@ public sealed partial class QuantityValue
 | EditModel | 確定値プロパティは `NameValue?` などの値オブジェクト。画面バインド用の `BindingXxx`（文字列）は `TryCreate` で検証し、エラーを `INotifyDataErrorInfo` へ載せる |
 | JSON（`ToJson` / `Clone` / リモート転送） | **内包値として**直列化する（`{"customerId": 1}`。値オブジェクトのラッパー構造は JSON に現れない） |
 
-> **注意**: DB や JSON からの読み出しも `Create` 経由で検証されます。検証を通らない値が既存データに残っていると読み出し時に `ValueObjectValidationException` になるため、`OnValidate` で足す追加検証は既存データと整合させてください。
+> **注意**: DB や JSON からの読み出しも `Create` 経由で検証されます。検証を通らない値が既存データに残っていると、DB からの読み出しは列を名指しした `InvalidOperationException`（内側の例外が `ValueObjectValidationException`）に、JSON からの読み出しは `ValueObjectValidationException` になるため、`OnValidate` で足す追加検証は既存データと整合させてください。
 
 ### string 主キーの GUID 化（UseGuidKeyForStringPrimaryKey）
 
@@ -1730,6 +1732,8 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 - **`Write(id, null)`** は、列を `NULL` に設定します（除外列を「未設定」へ戻す手段）。
 - **長さ**: `source` が `CanSeek` なら自動（`Length - Position`）、そうでなければ `length` 引数が必須です（欠落は `ArgumentException`）。
   SQLite の `zeroblob` が書き込み前に長さを要求するためで、契約は方言中立に統一しています。
+  Stream はちょうどその長さのバイトを返す必要があります。
+  シークできる Stream の残りと違う `length`、`length` より先に終わる Stream、`length` を超えて続く Stream は `ArgumentException` になり、保存済みの値は変わりません。
 - **楽観排他（rowversion 等）はスコープ外です**（生 SQL と同格の直接列操作のため）。
 - **INSERT 専用メソッドはありません。**
   新規行は「blob を空にしたまま INSERT、続いて `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
