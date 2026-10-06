@@ -185,6 +185,31 @@ public class CanvasViewportBehaviorDetachTests
         });
     }
 
+    /// <summary>書き換わる静的フィールドがすべて <c>[ThreadStatic]</c> であることを検証する</summary>
+    /// <remarks>
+    /// 下の隔離テストが見るのは 1 つの値だけなので、状態を足したときに属性を付け忘れても気づけない。
+    /// 読み取り専用（依存関係プロパティの登録など）と定数を除く静的フィールドを全部数える
+    /// </remarks>
+    [Fact(DisplayName = "ビューポートの書き換わる静的フィールドはすべて [ThreadStatic]")]
+    public void MutableStaticFields_AreThreadStatic()
+    {
+        var fields = typeof(CanvasViewportBehavior)
+            .GetFields(
+                System.Reflection.BindingFlags.Static
+                    | System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic
+            )
+            .Where(field => !field.IsInitOnly && !field.IsLiteral)
+            .ToList();
+
+        fields.Should().NotBeEmpty();
+        fields
+            .Where(field => !field.IsDefined(typeof(ThreadStaticAttribute), inherit: false))
+            .Select(field => field.Name)
+            .Should()
+            .BeEmpty();
+    }
+
     /// <summary>静的状態がスレッドごとに独立することを検証する</summary>
     /// <remarks>
     /// <c>[ThreadStatic]</c> を外すと、並列実行される他スレッドのキャンバス操作と状態を奪い合う

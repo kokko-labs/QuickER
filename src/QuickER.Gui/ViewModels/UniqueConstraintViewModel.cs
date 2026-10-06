@@ -325,33 +325,7 @@ public sealed class UniqueConstraintMemberViewModel : ObservableObject
     /// <summary>この行を行リストから外れたものとして無効化する</summary>
     internal void Detach() => _isDetached = true;
 
-    /// <summary>選択候補を差分だけ入れ替える</summary>
-    /// <remarks>
-    /// ItemsSource を丸ごと差し替えるとコンボボックスが選択を落とすため、実際に増減した項目だけを反映する
-    /// （並びは所有エンティティのカラム順）
-    /// </remarks>
-    internal void SyncAvailableColumns(IEnumerable<ColumnViewModel> columns)
-    {
-        var desired = columns.ToList();
-
-        for (var i = AvailableColumns.Count - 1; i >= 0; i--)
-        {
-            if (!desired.Contains(AvailableColumns[i]))
-            {
-                AvailableColumns.RemoveAt(i);
-            }
-        }
-
-        for (var i = 0; i < desired.Count; i++)
-        {
-            if (i >= AvailableColumns.Count)
-            {
-                AvailableColumns.Add(desired[i]);
-            }
-            else if (!ReferenceEquals(AvailableColumns[i], desired[i]))
-            {
-                AvailableColumns.Insert(i, desired[i]);
-            }
-        }
-    }
+    /// <summary>選択候補を差分だけ入れ替える（並びは所有エンティティのカラム順）</summary>
+    internal void SyncAvailableColumns(IEnumerable<ColumnViewModel> columns) =>
+        CandidateListSync.SyncTo(AvailableColumns, columns);
 }

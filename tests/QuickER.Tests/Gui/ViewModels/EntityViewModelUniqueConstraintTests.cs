@@ -126,6 +126,32 @@ public class EntityViewModelUniqueConstraintTests
         constraint.ContainsColumn(code.Id).Should().BeTrue();
     }
 
+    [Fact(DisplayName = "列を並べ替えて Undo しても、構成列の行の候補は重複せずカラム順に並ぶ")]
+    public void MemberCandidates_FollowColumnReorderWithoutDuplicates()
+    {
+        var model = NewModelWithCompositeConstraint(out var code, out _);
+        var entity = new EntityViewModel(model);
+        var constraint = entity.UniqueConstraints[0];
+        constraint.SetColumnIds([code.Id]);
+        var member = constraint.Members.Should().ContainSingle().Subject;
+        member.AvailableColumns.Select(c => c.Name).Should().Equal("Id", "Code", "Kind");
+
+        // Code（2 番目）を先頭へ移す
+        var move = new QuickER.UndoRedo.MoveColumnOrderCommand(
+            entity.Columns,
+            entity.Columns[1],
+            0
+        );
+        move.Execute();
+
+        member.AvailableColumns.Select(c => c.Name).Should().Equal("Code", "Id", "Kind");
+
+        move.Undo();
+
+        member.AvailableColumns.Select(c => c.Name).Should().Equal("Id", "Code", "Kind");
+        member.SelectedColumn!.Name.Should().Be("Code");
+    }
+
     [Fact(DisplayName = "全カラムが構成列なら未使用列が無いため行を足せない")]
     public void CanAddMember_IsFalse_WhenEveryColumnIsUsed()
     {
