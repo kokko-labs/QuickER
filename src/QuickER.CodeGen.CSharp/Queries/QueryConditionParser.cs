@@ -313,6 +313,23 @@ public static class QueryConditionParser
         ["ENDSWITH"] = TokenKind.EndsWith,
     };
 
+    /// <summary>識別子（列名）の先頭に置ける文字か</summary>
+    private static bool IsIdentifierStart(char c) => char.IsLetter(c) || c == '_';
+
+    /// <summary>識別子（列名）の 2 文字目以降に置ける文字か</summary>
+    private static bool IsIdentifierPart(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+    /// <summary>
+    /// 名前が条件式の中で列名として読めるか（字句解析と同じ規則。キーワードと同じ綴りは大文字小文字を問わず読めない）。
+    /// 空白・記号を含む名前や数字で始まる名前は、条件式から参照できない
+    /// </summary>
+    /// <param name="name">調べる名前</param>
+    public static bool IsReadableColumnName(string name) =>
+        !string.IsNullOrEmpty(name)
+        && IsIdentifierStart(name[0])
+        && name.All(IsIdentifierPart)
+        && !Keywords.ContainsKey(name);
+
     /// <summary>ASCII の数字か（数値リテラル用。<see cref="char.IsDigit(char)"/> と違い全角数字を受けない）</summary>
     private static bool IsAsciiDigit(char c) => c is >= '0' and <= '9';
 
@@ -526,11 +543,11 @@ public static class QueryConditionParser
                 continue;
             }
 
-            if (char.IsLetter(c) || c == '_')
+            if (IsIdentifierStart(c))
             {
                 var start = i;
 
-                while (i < text.Length && (char.IsLetterOrDigit(text[i]) || text[i] == '_'))
+                while (i < text.Length && IsIdentifierPart(text[i]))
                 {
                     i++;
                 }

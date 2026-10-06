@@ -13,8 +13,13 @@ namespace QuickER.CodeGen.CSharp.Queries;
 public static class QueryConditionRenamer
 {
     /// <summary>
-    /// 条件式内の列参照（旧列名・大文字小文字無視）を新列名へ置換する。パース不能な条件はそのまま返す
+    /// 条件式内の列参照（旧列名・大文字小文字無視）を新列名へ置換する。パース不能な条件と、新列名が条件式の中で
+    /// 列名として読めない名前（空白・記号を含む・数字で始まる・キーワードと同じ綴り）のときはそのまま返す
     /// </summary>
+    /// <remarks>
+    /// 読めない名前を差し込むと条件式が構文エラーになり、以後の追従も止まる（構文エラーの条件は書き換えないため、
+    /// 列名を元に戻しても条件は直らない）。書き換えずに残せば、列名が戻ったときにそのまま有効に戻る。
+    /// </remarks>
     /// <param name="conditionText">ミニ DSL の条件式</param>
     /// <param name="oldColumnName">置換対象の旧列名</param>
     /// <param name="newColumnName">置換後の新列名</param>
@@ -28,8 +33,11 @@ public static class QueryConditionRenamer
         ArgumentNullException.ThrowIfNull(oldColumnName);
         ArgumentNullException.ThrowIfNull(newColumnName);
 
-        // 旧名と新名が同一（大文字小文字も含めて）なら書き換え不要
-        if (string.Equals(oldColumnName, newColumnName, StringComparison.Ordinal))
+        // 旧名と新名が同一（大文字小文字も含めて）なら書き換え不要。新名が条件式で読めない名前なら書き換えない
+        if (
+            string.Equals(oldColumnName, newColumnName, StringComparison.Ordinal)
+            || !QueryConditionParser.IsReadableColumnName(newColumnName)
+        )
         {
             return conditionText;
         }

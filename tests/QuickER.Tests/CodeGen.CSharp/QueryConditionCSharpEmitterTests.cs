@@ -204,6 +204,62 @@ public class QueryConditionCSharpEmitterTests
             .Be("e => !(ids.Contains(e.CustomerId))");
     }
 
+    /// <summary>
+    /// NOT がド・モルガンの法則で原子まで押し下げられ、原子ごとに否定の形になることを検証する
+    /// （等値は演算子の反転・NULL 判定は向きの反転・IN は NOT IN・NULL 許容列の順序比較は「列が NULL」の OR）。
+    /// <c>!(...)</c> で包むと、SQL の UNKNOWN が否定の外へ残って C# の否定と結果が割れる
+    /// </summary>
+    [Fact(
+        DisplayName = "NOT は原子まで押し下げ、NULL 許容列の順序比較の否定は列が NULL の行も一致させる"
+    )]
+    public void Emit_Not_IsPushedDownToAtoms()
+    {
+        var bindings = CreatePlainBindings();
+        bindings[_entity.Columns[1].Id] = new QueryColumnBinding("Amount", "decimal", null, true);
+
+        Emit("NOT Amount < @minAmount", bindings)
+            .Lambda.Should()
+            .Be("e => (e.Amount == null || !(e.Amount < minAmount))");
+        Emit("NOT CustomerId < 3", bindings).Lambda.Should().Be("e => !(e.CustomerId < 3)");
+        Emit("NOT (Amount < @minAmount OR CustomerId = @customerId)", bindings)
+            .Lambda.Should()
+            .Be(
+                "e => ((e.Amount == null || !(e.Amount < minAmount)) && e.CustomerId != customerId)"
+            );
+        Emit("NOT (CustomerId <> 1 AND Memo IS NULL)", bindings)
+            .Lambda.Should()
+            .Be("e => (e.CustomerId == 1 || e.Memo != null)");
+        Emit("NOT NOT Amount < @minAmount", bindings)
+            .Lambda.Should()
+            .Be("e => e.Amount < minAmount");
+        Emit("NOT (CustomerId IN @ids)", bindings)
+            .Lambda.Should()
+            .Be("e => !(ids.Contains(e.CustomerId))");
+        Emit("NOT (CustomerId NOT IN @ids)", bindings)
+            .Lambda.Should()
+            .Be("e => ids.Contains(e.CustomerId)");
+    }
+
+    /// <summary>VO 列でも NOT は原子まで押し下げ、NULL 許容列の順序比較の否定は列が NULL の行も一致させる</summary>
+    [Fact(DisplayName = "VO 列: NULL 許容列の順序比較の否定は列が NULL の行も一致させる")]
+    public void Emit_Not_ValueObjectOrderedComparison()
+    {
+        var bindings = CreateVoBindings();
+        bindings[_entity.Columns[1].Id] = new QueryColumnBinding(
+            "Amount",
+            "decimal",
+            "AmountValue",
+            true
+        );
+
+        Emit("Amount < 1", bindings)
+            .Lambda.Should()
+            .Be("e => (e.Amount != null && e.Amount < AmountValue.Create(1m))");
+        Emit("NOT Amount < 1", bindings)
+            .Lambda.Should()
+            .Be("e => (e.Amount == null || !(e.Amount < AmountValue.Create(1m)))");
+    }
+
     /// <summary>VO 列の比較が VO.Create で包まれることを検証する</summary>
     [Fact(DisplayName = "VO 列の比較は VO.Create で包む")]
     public void Emit_ValueObjectComparison()

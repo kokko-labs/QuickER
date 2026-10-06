@@ -82,6 +82,42 @@ public class QueryConditionRenameFollowerTests
         host.LastReplacedQueries.Should().BeNull();
     }
 
+    /// <summary>
+    /// 条件式がリネームされた列を参照していないクエリしか無ければ、差し替え（自動保存）を行わず、
+    /// 書き換えたクエリがあれば差し替えることを検証する
+    /// </summary>
+    [Fact(DisplayName = "条件式がその列を参照しなければ ReplaceQueries を呼ばない")]
+    public void ColumnRenamed_ConditionWithoutColumn_DoesNotReplace()
+    {
+        var entityId = Guid.NewGuid();
+        var host = new StubErDiagramHost
+        {
+            DiagramToReturn = new ErDiagram
+            {
+                Queries =
+                {
+                    new QueryDefinition
+                    {
+                        EntityId = entityId,
+                        Name = "GetByAmount",
+                        Condition = "Amount > @minAmount",
+                    },
+                },
+            },
+        };
+        var follower = new QueryConditionRenameFollower(host);
+        follower.Attach();
+
+        host.RaiseColumnRenamed(entityId, "CustomerId", "BuyerId");
+
+        host.LastReplacedQueries.Should().BeNull();
+
+        host.RaiseColumnRenamed(entityId, "Amount", "Total");
+
+        host.LastReplacedQueries.Should().NotBeNull();
+        host.LastReplacedQueries!.Single().Condition.Should().Be("Total > @minAmount");
+    }
+
     /// <summary>条件式が null のクエリしか無いエンティティのリネームでも差し替えを行わないことを検証する</summary>
     [Fact(DisplayName = "条件式 null のクエリのみなら ReplaceQueries を呼ばない")]
     public void ColumnRenamed_ConditionlessQueries_DoesNotReplace()

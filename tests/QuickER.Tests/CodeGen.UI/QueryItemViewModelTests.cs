@@ -359,6 +359,90 @@ public class QueryItemViewModelTests
         vm.Parameters[0].SourceColumnId.Should().BeNull("パラメータの列参照も解除される");
     }
 
+    /// <summary>
+    /// エンティティを切り替えて列参照を解除したパラメータ・射影フィールドの型は、外した列の型を中立トークンへ
+    /// 変換した値になり、保存される型トークンに DB の型表記（nvarchar(50) など）が残らないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "エンティティ変更で解除した列参照の型は、列の型の中立トークンで保存される")]
+    public void ChangingEntity_ClearedColumnReference_SavesCanonicalToken()
+    {
+        var entities = CreateEntities(
+            out var order,
+            out var customerColumnId,
+            out var amountColumnId,
+            out var product,
+            out _
+        );
+        var catalog = new QuickER.Provider.SqlServer.SqlServerProvider().TypeCatalog;
+        var source = new QueryDefinition
+        {
+            EntityId = order.Id,
+            Name = "GetByCustomer",
+            Returns = QueryReturnShape.Projection,
+            Fields =
+            {
+                new ProjectionField { Name = "Amount", SourceColumnId = amountColumnId },
+            },
+            Parameters =
+            {
+                new QueryParameter { Name = "typedId", SourceColumnId = customerColumnId },
+            },
+        };
+        var vm = new QueryItemViewModel(
+            source,
+            entities,
+            toCanonicalToken: dataType =>
+                catalog.TryParse(dataType, out var canonical)
+                    ? QuickER.Provider.CanonicalTypeToken.Format(canonical)
+                    : null
+        );
+
+        vm.EntityId = product.Id;
+
+        var model = vm.ToModel();
+        model.Parameters.Single().Type.Should().Be("int32");
+        model.Fields.Single().Type.Should().Be("decimal(12,2)");
+    }
+
+    /// <summary>
+    /// 自由 SQL の読み込み時に、この画面が編集しない方言（sqlserver / sqlite 以外）の SQL を保存時に戻すことを検証する
+    /// （MCP の set_query は 5 方言を受け付けるため、別のクエリだけを触って OK しても消えてはいけない）
+    /// </summary>
+    [Fact(DisplayName = "画面が編集しない方言の自由 SQL は ToModel で保持される")]
+    public void ToModel_KeepsSqlOfDialectsNotEditedHere()
+    {
+        var entities = CreateEntities(out var order, out _, out _, out _, out _);
+        var source = new QueryDefinition
+        {
+            EntityId = order.Id,
+            Name = "FindRaw",
+            Returns = QueryReturnShape.List,
+            Implementation = QueryImplementationKind.Sql,
+            Sql =
+            {
+                ["sqlserver"] = "SELECT 1",
+                ["postgresql"] = "SELECT 2",
+                ["oracle"] = "SELECT 3 FROM dual",
+            },
+        };
+        var vm = new QueryItemViewModel(source, entities) { SqlServerSql = "SELECT 10" };
+
+        vm.ToModel()
+            .Sql.Should()
+            .BeEquivalentTo(
+                new Dictionary<string, string>
+                {
+                    ["sqlserver"] = "SELECT 10",
+                    ["postgresql"] = "SELECT 2",
+                    ["oracle"] = "SELECT 3 FROM dual",
+                }
+            );
+
+        // 生 SQL 以外の実装方式では、ほかの方言の SQL も今の 2 方言と同じく保存しない
+        vm.ImplementationDsl = true;
+        vm.ToModel().Sql.Should().BeEmpty();
+    }
+
     // ===== 条件の即時検証（DSL） =====
 
     /// <summary>DSL 実装で不正な列を参照する条件は診断が出て無効・修正で有効になることを検証する</summary>

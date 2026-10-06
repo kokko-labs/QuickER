@@ -314,7 +314,7 @@
     <value>Named query '{0}': parameter name '{1}' is duplicated.</value>
   </data>
   <data name="CodeGen_Query_ReservedParameterName" xml:space="preserve">
-    <value>Named query '{0}': parameter name '{1}' hides the repository's Query() member and cannot be used.</value>
+    <value>Named query '{0}': parameter name '{1}' is reserved by the generated method (it hides the repository's Query() member, or it is a keyword inside the generated async method) and cannot be used.</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
     <value>Named query '{0}': the type token '{1}' could not be resolved. Check its spelling against the tokens the generation config schema lists; note also that a fixed-length string or binary type needs a length (for example 'fixedstring(10)').</value>

@@ -371,6 +371,12 @@ Negating anything other than an equality or an IN search still produces `NOT (..
 
 > **Known limitation**: the flip only applies when the `!` sits directly on a comparison. `!(a == b && c)` is not rewritten by De Morgan's laws: it becomes `NOT (...)` around individually compensated operands, and `NOT (UNKNOWN)` is still UNKNOWN, so a row that a `NULL` made UNKNOWN inside the parentheses is dropped where C# and the in-memory and EF Core backends would have kept it. Where a `NULL` is possible, write the negation on the comparison itself (`a != b || !c`), which takes the flip and agrees with them.
 
+The mini DSL's `NOT` does not run into this limitation: the code generator pushes every `NOT` down to the individual comparisons by De Morgan's laws before it writes the C#, so `NOT (qty < 10 OR name = 'x')` is generated as `!(e.Qty < 10) && e.Name != "x"` and never reaches the translator as `!(... || ...)`.
+The rule fits in one sentence: `NOT` and `<>` mean the same as C#'s negation, so a `NULL` row matches them, and only string matching keeps a `NULL` row out in both directions.
+An ordered comparison (`<` `<=` `>` `>=`) on a nullable column is negated with an explicit "the column is `NULL`" disjunct, so `NOT qty < 10` is generated as `(e.Qty == null || !(e.Qty < 10))`, because SQL's `NOT (qty < @p)` alone would drop a `NULL` row as UNKNOWN.
+
+> **Known limitation**: a parameter typed by a value-object column can be passed `null`. A negated ordered comparison against that `null` still splits: C# reads the comparison as false and its negation as true, while SQL reads `col < NULL` as UNKNOWN and drops the row.
+
 String matching in the mini DSL (`LIKE` / `CONTAINS` / `STARTSWITH` / `ENDSWITH`) is emitted against a nullable column with an explicit "the column is not `NULL`" conjunct.
 `NOT LIKE` sits inside the same premise, so a `NULL` row matches in neither direction.
 SQL's `LIKE` already drops `NULL` rows as UNKNOWN, so nothing changes on the SQL side.

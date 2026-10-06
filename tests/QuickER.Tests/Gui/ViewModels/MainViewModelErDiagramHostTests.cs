@@ -236,4 +236,54 @@ public class MainViewModelErDiagramHostTests : IDisposable
         received.OldName.Should().Be(oldName);
         received.NewName.Should().Be("RenamedId");
     }
+
+    /// <summary>
+    /// 列名の Undo / Redo でも ColumnRenamed が戻る・進む向きの新旧名で中継発火し、名前付きクエリの条件式の追従が
+    /// 列名と一緒に戻る・進むことを検証する（クエリ自体は Undo 履歴の外のまま）
+    /// </summary>
+    [Fact(
+        DisplayName = "列名の Undo / Redo でも ColumnRenamed が発火し、クエリ条件の追従が列名と一緒に戻る"
+    )]
+    public void ColumnRenamed_UndoRedo_RelaysAndFollowerRewritesBack()
+    {
+        var vm = CreateViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var owner = vm.Entities[0];
+        var column = owner.Columns[0];
+        var oldName = column.Name;
+
+        var host = new MainViewModelErDiagramHost(vm);
+        var follower = new QuickER.CodeGen.UI.QueryConditionRenameFollower(host);
+        follower.Attach();
+        var received = new List<(string Old, string New)>();
+        host.ColumnRenamed += (_, e) => received.Add((e.OldName, e.NewName));
+
+        vm.ReplaceQueries([
+            new QueryDefinition
+            {
+                EntityId = owner.Id,
+                Name = "FindById",
+                Condition = $"{oldName} = @id",
+                Parameters =
+                {
+                    new QueryParameter { Name = "id", Type = "int32" },
+                },
+            },
+        ]);
+
+        column.Name = "RenamedId";
+        vm.Queries.Single().Condition.Should().Be("RenamedId = @id");
+
+        vm.UndoCommand.Execute(null);
+        column.Name.Should().Be(oldName);
+        vm.Queries.Single().Condition.Should().Be($"{oldName} = @id");
+
+        vm.RedoCommand.Execute(null);
+        column.Name.Should().Be("RenamedId");
+        vm.Queries.Single().Condition.Should().Be("RenamedId = @id");
+
+        received
+            .Should()
+            .Equal((oldName, "RenamedId"), ("RenamedId", oldName), (oldName, "RenamedId"));
+    }
 }

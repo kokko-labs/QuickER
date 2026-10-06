@@ -314,7 +314,7 @@
     <value>名前付きクエリ '{0}': パラメータ名 '{1}' が重複しています。</value>
   </data>
   <data name="CodeGen_Query_ReservedParameterName" xml:space="preserve">
-    <value>名前付きクエリ '{0}': パラメータ名 '{1}' はリポジトリの Query() メンバーを隠すため使えません。</value>
+    <value>名前付きクエリ '{0}': パラメータ名 '{1}' は生成するメソッドが使う名前（リポジトリの Query() メンバーを隠す、または生成する async メソッドの中でキーワードになる）のため使えません。</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
     <value>名前付きクエリ '{0}': 型トークン '{1}' を解決できません。設定スキーマが挙げるトークンと綴りを見比べてください。固定長の文字列・バイナリ（fixedstring など）の場合は長さも必要です（例: 'fixedstring(10)'）。</value>

@@ -43,18 +43,21 @@ public sealed class QueryConditionRenameFollower
 
         foreach (var query in queries.Where(query => query.EntityId == e.EntityId))
         {
-            if (query.Condition is { } condition)
+            if (query.Condition is not { } condition)
             {
-                query.Condition = QueryConditionRenamer.RenameColumn(
-                    condition,
-                    e.OldName,
-                    e.NewName
-                );
+                continue;
+            }
+
+            var renamed = QueryConditionRenamer.RenameColumn(condition, e.OldName, e.NewName);
+
+            if (!string.Equals(renamed, condition, StringComparison.Ordinal))
+            {
+                query.Condition = renamed;
                 rewritten = true;
             }
         }
 
-        // 対象エンティティに条件式を持つクエリが 1 件も無ければ書き戻さない（自動保存を抑止する）
+        // 条件式を 1 件も書き換えなければ書き戻さない（自動保存を抑止する）
         if (rewritten)
         {
             _host.ReplaceQueries(queries);

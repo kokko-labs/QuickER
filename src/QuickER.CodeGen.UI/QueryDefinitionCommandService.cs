@@ -30,7 +30,13 @@ public sealed class QueryDefinitionCommandService
     /// <summary>名前付きクエリ定義エディタを開き、確定結果で現在の図のクエリを置き換える（ツールバーボタンから実行）</summary>
     public void Run()
     {
-        var result = _presenter.Show(_host.GetDiagram());
+        var diagram = _host.GetDiagram();
+
+        // 図の方言の型カタログ（列で型付けした行を「なし」へ戻したとき、列の型を中立の型トークンへ変換するのに使う）
+        var typeCatalog = _host.Providers.TryGet(diagram.TargetDbms, out var provider)
+            ? provider.TypeCatalog
+            : null;
+        var result = _presenter.Show(diagram, typeCatalog);
 
         if (result is null)
         {

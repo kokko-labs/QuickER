@@ -108,4 +108,39 @@ public class QueryConditionRenamerTests
 
         result.Should().Be(input);
     }
+
+    /// <summary>
+    /// 新名が条件式で列名として読めない名前（空白・記号を含む・数字で始まる・キーワード）なら書き換えず、
+    /// 列名を元に戻したときに条件がそのまま有効に戻ることを検証する（差し込むと条件が構文エラーになり、
+    /// 構文エラーの条件は以後書き換えないので、元に戻しても直らなかった）
+    /// </summary>
+    [Theory(DisplayName = "RenameColumn: 条件式で読めない新名へは書き換えない")]
+    [InlineData("order status")]
+    [InlineData("1st")]
+    [InlineData("and")]
+    [InlineData("Not")]
+    [InlineData("a-b")]
+    [InlineData("")]
+    public void RenameColumn_UnreadableNewName_LeavesConditionUntouched(string newName)
+    {
+        const string input = "status = @s";
+
+        var renamed = QueryConditionRenamer.RenameColumn(input, "status", newName);
+
+        renamed.Should().Be(input);
+        QueryConditionRenamer.RenameColumn(renamed, newName, "status").Should().Be(input);
+    }
+
+    /// <summary>読める新名（日本語・アンダースコア始まり・キーワードを含む名前）は従来どおり書き換えることを検証する</summary>
+    [Theory(DisplayName = "RenameColumn: 条件式で読める新名へは書き換える")]
+    [InlineData("注文状態")]
+    [InlineData("_status")]
+    [InlineData("android")]
+    public void RenameColumn_ReadableNewName_Replaced(string newName)
+    {
+        QueryConditionRenamer
+            .RenameColumn("status = @s", "status", newName)
+            .Should()
+            .Be($"{newName} = @s");
+    }
 }

@@ -32,6 +32,8 @@ public class QueryConditionTypeCheckTests
     private readonly Column _seenAt;
     private readonly Column _flag;
     private readonly Column _quantity;
+    private readonly Column _tiny;
+    private readonly Column _reorder;
 
     /// <summary>型ファミリを網羅する Order エンティティを用意する</summary>
     public QueryConditionTypeCheckTests()
@@ -95,6 +97,20 @@ public class QueryConditionTypeCheckTests
         _order.Columns.Add(_seenAt);
         _order.Columns.Add(_flag);
         _order.Columns.Add(_quantity);
+        _tiny = new Column
+        {
+            Name = "Tiny",
+            DataType = "tinyint",
+            IsNullable = false,
+        };
+        _reorder = new Column
+        {
+            Name = "Reorder",
+            DataType = "int",
+            IsNullable = false,
+        };
+        _order.Columns.Add(_tiny);
+        _order.Columns.Add(_reorder);
     }
 
     /// <summary>クエリ定義付きの図を作る</summary>
@@ -208,6 +224,14 @@ public class QueryConditionTypeCheckTests
                 "SeenAt = @num",
                 [new QueryParameter { Name = "num", Type = "int32" }]
             },
+            // ulong を超える整数リテラル（"…L" も素のリテラルも CS1021）
+            { "BadIntOverflow", "Big = 99999999999999999999", [] },
+            // long を超える整数リテラル（ulong のリテラル）× int 列（int と ulong は比べられない＝CS0034）
+            { "BadULongOnInt", "Qty = 10000000000000000000", [] },
+            // long を超える整数リテラル × long 列（"…L" が ulong になり long と比べられない）
+            { "BadULongOnLong", "Big = 9223372036854775808", [] },
+            // decimal の範囲を超えるリテラル（"…m" は CS0594）
+            { "BadDecimalRange", "Amount = 99999999999999999999999999999999", [] },
         };
 
     [Theory(DisplayName = "コンパイル不能な型不整合は Warning になり該当クエリだけスキップされる")]
@@ -249,6 +273,9 @@ public class QueryConditionTypeCheckTests
     [Theory(DisplayName = "VO 有効: 整数内包 VO への小数リテラルと別 VO 引数は拒否される")]
     [InlineData("BadVoFraction", "Qty = 1.5")]
     [InlineData("BadVoParam", "Qty = @amount")]
+    [InlineData("BadVoTinyRange", "Tiny < 300")]
+    [InlineData("BadVoTinyNegative", "Tiny <> -1")]
+    [InlineData("BadVoIntRange", "Qty = 3000000000")]
     public void Generate_ValueObjectIncompatibleCondition_IsRejected(
         string queryName,
         string condition
@@ -307,6 +334,13 @@ public class QueryConditionTypeCheckTests
             ),
             // long 列 × 整数リテラル（サフィックス L は整数なら合法）
             ListQuery("LongIntegral", "Big = 2"),
+            // 素の整数列は範囲の外のリテラルとも比べられる（int・long へ昇格する）
+            ListQuery(
+                "WideLiterals",
+                "Tiny < 300 AND Tiny <> -1 AND Qty = 3000000000 AND Qty <> -3000000000"
+            ),
+            // long の両端（"-9223372036854775808L" は long.MinValue のリテラル）
+            ListQuery("LongEdges", "Big = -9223372036854775808 OR Big = 9223372036854775807"),
             // int 列（非 NULL 許容）の IN × long リスト（int → long の暗黙変換で Contains が成立）
             ListQuery(
                 "WideIn",
@@ -357,6 +391,11 @@ public class QueryConditionTypeCheckTests
             ),
             // 整数内包 VO × 整数リテラル（Create(1) は合法）
             ListQuery("VoIntegral", "Qty = 1"),
+            // 内包型の範囲の端は Create へ渡せる
+            ListQuery(
+                "VoEdges",
+                "Tiny = 255 OR Tiny = 0 OR Qty = -2147483648 OR Big = -9223372036854775808"
+            ),
             // 文字列内包 VO の文字列一致と順序なし比較
             ListQuery("VoText", "Name CONTAINS 'x' AND Name = 'exact'")
         );
@@ -375,5 +414,87 @@ public class QueryConditionTypeCheckTests
                 "受理した条件はすべてコンパイルできるべき: "
                     + string.Join(" / ", compilation.Errors.Take(5))
             );
+    }
+
+    /// <summary>
+    /// VO 有効: 同じリストパラメータを VO クラスの違う 2 列の IN に使うと、持ち上げ変数を 2 つ別名で宣言する
+    /// （同名で 2 回宣言すると CS0128）
+    /// </summary>
+    [Fact(
+        DisplayName = "VO 有効: 同じリストを VO クラスの違う 2 列へ使うと持ち上げ変数を別名で宣言する"
+    )]
+    public void Generate_SameListOnTwoValueObjectColumns_LiftsTwoVariables()
+    {
+        var diagram = CreateDiagram(
+            ListQuery(
+                "SharedList",
+                "Qty IN @ids OR Reorder IN @ids",
+                new QueryParameter
+                {
+                    Name = "ids",
+                    Type = "int32",
+                    IsList = true,
+                }
+            )
+        );
+
+        var result = Generate(diagram, CreateOptions(valueObjects: true));
+
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+
+        var content = string.Join("\n", result.Files.Select(f => f.Content));
+        content.Should().Contain("var idsValues = ids.Select(QtyValue.Create).ToList();");
+        content.Should().Contain("var idsValues_ = ids.Select(ReorderValue.Create).ToList();");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QuerySharedListTwoVo");
+        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
+    }
+
+    /// <summary>
+    /// VO 有効: 要素型が VO の内包型と違うリスト（int32 のリスト × bigint の列）は、暗黙の数値変換が効く
+    /// ラムダで VO へ持ち上げる（メソッドグループのままだと CS0123）。要素型が同じなら従来どおりメソッドグループ
+    /// </summary>
+    [Fact(
+        DisplayName = "VO 有効: 要素型が内包型と違うリストの IN は暗黙変換の効くラムダで持ち上げる"
+    )]
+    public void Generate_ValueObjectInWithWideningList_Compiles()
+    {
+        var diagram = CreateDiagram(
+            ListQuery(
+                "WidenedList",
+                "Big IN @ids",
+                new QueryParameter
+                {
+                    Name = "ids",
+                    Type = "int32",
+                    IsList = true,
+                }
+            ),
+            ListQuery(
+                "ExactList",
+                "Big IN @bigs",
+                new QueryParameter
+                {
+                    Name = "bigs",
+                    Type = "int64",
+                    IsList = true,
+                }
+            )
+        );
+
+        var result = Generate(diagram, CreateOptions(valueObjects: true));
+
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+
+        var content = string.Join("\n", result.Files.Select(f => f.Content));
+        content.Should().Contain("var idsValues = ids.Select(e => BigValue.Create(e)).ToList();");
+        content.Should().Contain("var bigsValues = bigs.Select(BigValue.Create).ToList();");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryWidenedVoList");
+        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
     }
 }
