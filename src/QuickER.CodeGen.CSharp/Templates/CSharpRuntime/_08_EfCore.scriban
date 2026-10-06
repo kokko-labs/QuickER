@@ -1,4 +1,4 @@
-﻿{{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
+{{~ if ef_core && render_ef_core && emit_schema_dependent ~}}
 
 /// <summary>
 /// EF Core DbContext that connects to an existing schema.
@@ -640,6 +640,14 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 
         var command = context.Database.GetDbConnection().CreateCommand();
         command.CommandText = sql;
+
+        // A command created from the connection does not see the timeout configured on the DbContext, so it is carried over
+        // (with none configured, the command keeps the connection's own default)
+        if (context.Database.GetCommandTimeout() is { } timeout)
+        {
+            command.CommandTimeout = timeout;
+        }
+
         RawSqlMapper.BindParameters(command, parameters);
         return command;
     }
@@ -1653,14 +1661,33 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
     /// <summary>Builds the primary key equality predicate (e => e.Key == id) from the metadata.</summary>
+    /// <remarks>
+    /// The key is read off a holder object rather than embedded as a constant: EF Core sends a captured member as a
+    /// parameter but writes a constant into the SQL as a literal, which compiles a new query - and gives the database a new
+    /// plan to cache - for every key value.
+    /// </remarks>
     private static Expression<Func<TEntity, bool>> BuildKeyPredicate(TKey id)
     {
         var parameter = Expression.Parameter(typeof(TEntity), "e");
-        var body = Expression.Equal(
-            Expression.Property(parameter, _metadata.KeyProperty),
-            Expression.Constant(id, _metadata.KeyProperty.PropertyType)
+        Expression key = Expression.Field(
+            Expression.Constant(new KeyHolder(id)),
+            nameof(KeyHolder.Value)
         );
+
+        if (key.Type != _metadata.KeyProperty.PropertyType)
+        {
+            key = Expression.Convert(key, _metadata.KeyProperty.PropertyType);
+        }
+
+        var body = Expression.Equal(Expression.Property(parameter, _metadata.KeyProperty), key);
         return Expression.Lambda<Func<TEntity, bool>>(body, parameter);
+    }
+
+    /// <summary>Carries a key value into a predicate as a member EF Core turns into a parameter.</summary>
+    private sealed class KeyHolder(TKey value)
+    {
+        /// <summary>The key value.</summary>
+        public readonly TKey Value = value;
     }
 
     /// <summary>Registers the graph with the DbContext via RowState → EntityState conversion and records save targets (non-Unchanged) into <paramref name="tracked"/> (pre-save processing for the disconnected pattern).</summary>
@@ -1918,6 +1945,14 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         command.CommandText = sql;
         // Participate in the ongoing save transaction (no separate connection or transaction is opened).
         command.Transaction = _context.Database.CurrentTransaction?.GetDbTransaction();
+
+        // A command created from the connection does not see the timeout configured on the DbContext, so it is carried over
+        // (with none configured, the command keeps the connection's own default)
+        if (_context.Database.GetCommandTimeout() is { } timeout)
+        {
+            command.CommandTimeout = timeout;
+        }
+
         RawSqlMapper.BindParameters(command, parameters);
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }

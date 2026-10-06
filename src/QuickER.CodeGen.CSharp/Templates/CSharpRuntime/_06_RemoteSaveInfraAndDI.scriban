@@ -1281,7 +1281,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 {{~ end ~}}
 
-{{~ if repositories || ef_core ~}}
+{{~ if repositories ~}}
     /// <summary>Quotes a single SQL identifier, doubling the closing quote character so that a name containing it cannot escape the quotes.</summary>
     /// <remarks>Table and column names come from the diagram, which accepts free text, so a name may well contain the quote character itself. This mirrors the escaping the DDL generator applies.</remarks>
     internal static string QuoteIdentifier(string name)
@@ -1368,8 +1368,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// <summary>Gets the column name to column property map (used to look up column types when explicitly typing query WHERE-clause parameters).</summary>
     public required IReadOnlyDictionary<string, PropertyInfo> PropertyByColumn { get; init; }
 
-{{~ if repositories || ef_core ~}}
+{{~ if repositories ~}}
     /// <summary>Gets the quoted column list for SELECT (for example: [id], [name]).</summary>
+    public required string ColumnList { get; init; }
+{{~ else if ef_core ~}}
+    /// <summary>Gets the SELECT column names, unquoted (for example: id, name), as error messages name them.</summary>
+    /// <remarks>EF Core builds its own SQL, so nothing here is sent to the database, and quoting in one dialect's style would misname the columns on the others.</remarks>
     public required string ColumnList { get; init; }
 {{~ end ~}}
 
@@ -1527,8 +1531,10 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         var tableName = EntitySaveMetadata.QuoteTableName(tableAttribute.Name);
         var keyColumnName = GetColumnName(keyProperty);
 {{~ end ~}}
-{{~ if repositories || ef_core ~}}
+{{~ if repositories ~}}
         var columnList = string.Join(", ", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
+{{~ else if ef_core ~}}
+        var columnList = string.Join(", ", selectProperties.Select(GetColumnName));
 {{~ end ~}}
 {{~ if repositories ~}}
         // A table whose only columns are the key and columns the update leaves out (the row version, computed columns,
@@ -1596,8 +1602,13 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             // Resolve column names for row mapping at build time to eliminate per-row [Column] reflection
             SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
             ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
+{{~ if repositories ~}}
             // Compile the expression-tree materializer for SelectColumns (the fixed SELECT set) once per type
             SelectMaterializer = BuildSelectMaterializer(entityType, selectProperties),
+{{~ else ~}}
+            // EF Core materializes its own queries, so the materializer is compiled only if a row is mapped through it
+            SelectMaterializer = CompileOnFirstUse(entityType, selectProperties),
+{{~ end ~}}
 {{~ end ~}}
 {{~ if repositories ~}}
             InsertProperties = insertProperties,
@@ -1766,6 +1777,27 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 {{~ end ~}}
 
+{{~ if !repositories ~}}
+    /// <summary>Returns a materializer that compiles <see cref="BuildSelectMaterializer"/> on the first row it maps.</summary>
+    /// <remarks>
+    /// Without a QuickER repository nothing on the hot path maps rows through the materializer (EF Core materializes its
+    /// own queries, and raw SQL goes through the per-column mapping), so compiling it for every type the metadata is built
+    /// for would be work done for nothing. The metadata is shared by every thread, so the compilation is guarded by a
+    /// <see cref="Lazy{T}"/>, which compiles once even when two rows are mapped at the same time.
+    /// </remarks>
+    private static Func<DbDataReader, int[], EntityBaseCore> CompileOnFirstUse(
+        Type entityType,
+        IReadOnlyList<PropertyInfo> properties
+    )
+    {
+        var compiled = new Lazy<Func<DbDataReader, int[], EntityBaseCore>>(
+            () => BuildSelectMaterializer(entityType, properties)
+        );
+
+        return (reader, ordinals) => compiled.Value(reader, ordinals);
+    }
+
+{{~ end ~}}
     /// <summary>
     /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
     /// into an entity using a pre-resolved ordinal array (once per type).
@@ -2977,7 +3009,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
     public static bool HasChanges(EntityBaseCore entity, bool cascade) =>
         entity.HasChanges
-        || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
+        || (cascade && entity.EnumerateCascadeChildren().Any(child => HasChanges(child, true)));
 {{~ if repositories ~}}
 
     /// <summary>Saves the graph and returns the number of saved records (when <paramref name="hooks"/> is provided, fires the save hooks before and after each operation).</summary>
@@ -3013,7 +3045,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             // Deletion removes the children (subtree) first, then the entity itself (FK consistency)
             if (cascadeDelete)
             {
-                foreach (var child in EnumerateCascadeChildren(entity))
+                foreach (var child in entity.EnumerateCascadeChildren())
                 {
                     rows += await DeleteGraphAsync(
                         child,
@@ -3116,7 +3148,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 
         if (cascadeSave)
         {
-            foreach (var child in EnumerateCascadeChildren(entity))
+            foreach (var child in entity.EnumerateCascadeChildren())
             {
                 rows += await SaveAsync(
                     child,
@@ -3165,7 +3197,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 
         if (cascade)
         {
-            foreach (var child in EnumerateCascadeChildren(entity))
+            foreach (var child in entity.EnumerateCascadeChildren())
             {
                 AcceptChanges(child, true, skip);
             }
@@ -3185,7 +3217,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     {
         var rows = 0;
 
-        foreach (var child in EnumerateCascadeChildren(entity))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
             rows += await DeleteGraphAsync(
                 child,
@@ -3456,38 +3488,6 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 {{~ end ~}}
-
-    /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
-    private static IEnumerable<EntityBaseCore> EnumerateCascadeChildren(EntityBaseCore entity)
-    {
-        foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
-        {
-            var value = navigation.Property.GetValue(entity);
-
-            if (value is null)
-            {
-                continue;
-            }
-
-            if (navigation.IsCollection)
-            {
-                if (value is IEnumerable<EntityBaseCore> children)
-                {
-                    foreach (var child in children)
-                    {
-                        if (child is not null)
-                        {
-                            yield return child;
-                        }
-                    }
-                }
-            }
-            else if (value is EntityBaseCore child)
-            {
-                yield return child;
-            }
-        }
-    }
 }
 {{~ end ~}}
 

@@ -3881,7 +3881,7 @@ public static class EntityGraphSaver
     /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
     public static bool HasChanges(EntityBaseCore entity, bool cascade) =>
         entity.HasChanges
-        || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
+        || (cascade && entity.EnumerateCascadeChildren().Any(child => HasChanges(child, true)));
 
     /// <summary>Saves the graph and returns the number of saved records (when <paramref name="hooks"/> is provided, fires the save hooks before and after each operation).</summary>
     /// <remarks>
@@ -3914,7 +3914,7 @@ public static class EntityGraphSaver
             // Deletion removes the children (subtree) first, then the entity itself (FK consistency)
             if (cascadeDelete)
             {
-                foreach (var child in EnumerateCascadeChildren(entity))
+                foreach (var child in entity.EnumerateCascadeChildren())
                 {
                     rows += await DeleteGraphAsync(
                         child,
@@ -4012,7 +4012,7 @@ public static class EntityGraphSaver
 
         if (cascadeSave)
         {
-            foreach (var child in EnumerateCascadeChildren(entity))
+            foreach (var child in entity.EnumerateCascadeChildren())
             {
                 rows += await SaveAsync(
                     child,
@@ -4057,7 +4057,7 @@ public static class EntityGraphSaver
 
         if (cascade)
         {
-            foreach (var child in EnumerateCascadeChildren(entity))
+            foreach (var child in entity.EnumerateCascadeChildren())
             {
                 AcceptChanges(child, true, skip);
             }
@@ -4075,7 +4075,7 @@ public static class EntityGraphSaver
     {
         var rows = 0;
 
-        foreach (var child in EnumerateCascadeChildren(entity))
+        foreach (var child in entity.EnumerateCascadeChildren())
         {
             rows += await DeleteGraphAsync(
                 child,
@@ -4205,37 +4205,5 @@ public static class EntityGraphSaver
         await using var command = new SqliteCommand(sqlSelector(metadata), connection, transaction);
         bind(metadata, command, entity);
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
-    private static IEnumerable<EntityBaseCore> EnumerateCascadeChildren(EntityBaseCore entity)
-    {
-        foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
-        {
-            var value = navigation.Property.GetValue(entity);
-
-            if (value is null)
-            {
-                continue;
-            }
-
-            if (navigation.IsCollection)
-            {
-                if (value is IEnumerable<EntityBaseCore> children)
-                {
-                    foreach (var child in children)
-                    {
-                        if (child is not null)
-                        {
-                            yield return child;
-                        }
-                    }
-                }
-            }
-            else if (value is EntityBaseCore child)
-            {
-                yield return child;
-            }
-        }
     }
 }

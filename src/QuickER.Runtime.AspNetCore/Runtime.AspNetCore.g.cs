@@ -37,27 +37,56 @@ namespace QuickER.Runtime.AspNetCore;
 public static class RemoteServerEngine
 {
     /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (400/409/500, or the status carried by a rejected request such as 413).</summary>
+    /// <remarks>The exceptions are mapped by <see cref="ClassifyFailuresAsync"/>, which every endpoint shares.</remarks>
+    public static Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
+    {
+        return ClassifyFailuresAsync(
+            context,
+            async () =>
+            {
+                var result = await handler().ConfigureAwait(false);
+                await context.Response.WriteAsJsonAsync(
+                    result,
+                    RemoteJson.Options,
+                    context.RequestAborted
+                ).ConfigureAwait(false);
+            }
+        );
+    }
+
+    /// <summary>Runs the work of one endpoint and answers whatever it throws with the HTTP response that failure calls for.</summary>
     /// <remarks>
-    /// Every classifying catch is guarded by <c>!Response.HasStarted</c>: once the status line and headers have gone out
-    /// - a failure part-way through serializing the result, for instance - the status code can no longer be changed, and
-    /// writing an error body would append it to the partial response instead of replacing it. Such a failure is recorded
-    /// on the server side and rethrown, which lets the host abort the connection so that the client sees a truncated
-    /// response rather than a corrupted one.
+    /// <para>
+    /// A request whose client has gone - the connection was reset, closed before the body arrived, or the request was
+    /// cancelled - is left without a response: there is no one to read it, and a write to the dead connection would only
+    /// throw again. The read of a request body fails in exactly that way when the client disconnects part-way through,
+    /// so a disconnect is recognized before anything is classified as a fault in the request.
+    /// </para>
+    /// <para>
+    /// Every other classifying catch is guarded by <c>!Response.HasStarted</c>: once the status line and headers have gone
+    /// out - a failure part-way through serializing the result or streaming a blob, for instance - the status code can no
+    /// longer be changed, and writing an error body would append it to the partial response instead of replacing it.
+    /// Such a failure is recorded on the server side and rethrown, which lets the host abort the connection so that the
+    /// client sees a truncated response rather than a corrupted one.
+    /// </para>
     /// </remarks>
-    public static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
+    private static async Task ClassifyFailuresAsync(HttpContext context, Func<Task> work)
     {
         try
         {
-            var result = await handler().ConfigureAwait(false);
-            await context.Response.WriteAsJsonAsync(
-                result,
-                RemoteJson.Options,
-                context.RequestAborted
-            ).ConfigureAwait(false);
+            await work().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+            when (ex is (OperationCanceledException or System.IO.IOException)
+                && context.RequestAborted.IsCancellationRequested
+            )
+        {
+            // Client disconnected or cancelled: there is no longer a response target, so do nothing.
         }
         catch (RemoteBadRequestException ex) when (!context.Response.HasStarted)
         {
-            // The request itself could not be interpreted: a client-side fault, so it is classified as 400 without server-side logging or the hook.
+            // The request itself could not be interpreted (its body, or the ?id= key of a binary column): a client-side
+            // fault, so it is classified as 400 without server-side logging or the hook.
             await WriteErrorAsync(
                 context,
                 StatusCodes.Status400BadRequest,
@@ -80,10 +109,6 @@ public static class RemoteServerEngine
                 ex.Message,
                 ex
             ).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
-        {
-            // Client disconnected or cancelled: there is no longer a response target, so do nothing.
         }
         catch (Exception ex) when (!context.Response.HasStarted)
         {
@@ -172,7 +197,8 @@ public static class RemoteServerEngine
     /// validation are all faults in the payload the client sent, so they are wrapped in
     /// <see cref="RemoteBadRequestException"/> and answered with 400. Cancellation and
     /// <see cref="BadHttpRequestException"/> (which carries its own status code, for example 413 when the request body
-    /// size limit is exceeded) are left untouched so that the surrounding handler can classify them.
+    /// size limit is exceeded) are left untouched so that the surrounding handler can classify them, and so is any failure
+    /// once the client has disconnected: a body cut off by a reset or a closed connection says nothing about the payload.
     /// </remarks>
     public static async Task<TRequest> ReadRequestAsync<TRequest>(HttpContext context)
     {
@@ -186,7 +212,9 @@ public static class RemoteServerEngine
             ).ConfigureAwait(false);
         }
         catch (Exception ex)
-            when (ex is not (OperationCanceledException or BadHttpRequestException))
+            when (ex is not (OperationCanceledException or BadHttpRequestException)
+                && !context.RequestAborted.IsCancellationRequested
+            )
         {
             throw new RemoteBadRequestException(ex.Message, ex);
         }
@@ -341,55 +369,27 @@ public static class RemoteServerEngine
     /// existence detection with O(chunk) streaming). A key that cannot be interpreted yields 400, and only when the read
     /// function throws before writing any body is a 500 with <see cref="RemoteError"/> returned.
     /// </summary>
-    public static async Task ExecuteDownloadAsync(HttpContext context, Func<Stream, Task<bool>> read)
+    public static Task ExecuteDownloadAsync(HttpContext context, Func<Stream, Task<bool>> read)
     {
         var deferred = new DeferredOctetStreamBody(context.Response);
 
-        try
-        {
-            var wrote = await read(deferred).ConfigureAwait(false);
-
-            if (!wrote)
+        return ClassifyFailuresAsync(
+            context,
+            async () =>
             {
-                // No row / NULL: no body has been sent yet, so the response can resolve to a marked 404.
-                await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
-                return;
-            }
+                var wrote = await read(deferred).ConfigureAwait(false);
 
-            // True even for an empty blob. If nothing was ever written, resolve 200 plus headers here.
-            deferred.EnsureStarted();
-        }
-        catch (RemoteBadRequestException ex) when (!context.Response.HasStarted)
-        {
-            // The request itself could not be interpreted (the ?id= key): a client-side fault, so it is classified as 400 without server-side logging or the hook.
-            await WriteErrorAsync(
-                context,
-                StatusCodes.Status400BadRequest,
-                "BadRequest",
-                ex.Message
-            ).ConfigureAwait(false);
-        }
-        catch (BadHttpRequestException ex) when (!context.Response.HasStarted)
-        {
-            // Rejected by the server infrastructure: pass through the status code it carries.
-            await WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
-        {
-            // Client disconnected or cancelled: there is no longer a response target, so do nothing.
-        }
-        catch (Exception ex) when (!context.Response.HasStarted)
-        {
-            await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // The body is already on the wire, so none of the classified answers can be produced any more. Logging it
-            // here is what keeps the failure from disappearing before it is rethrown for the host to abort the
-            // connection; the OnServerError hook stays out of it, being the extension point of a 500 that is not sent.
-            LogServerError(context, ex);
-            throw;
-        }
+                if (!wrote)
+                {
+                    // No row / NULL: no body has been sent yet, so the response can resolve to a marked 404.
+                    await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
+                    return;
+                }
+
+                // True even for an empty blob. If nothing was ever written, resolve 200 plus headers here.
+                deferred.EnsureStarted();
+            }
+        );
     }
 
     /// <summary>
@@ -400,87 +400,59 @@ public static class RemoteServerEngine
     /// 400. The <see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/> (non-seekable) is passed to the write with its
     /// length.
     /// </summary>
-    public static async Task ExecuteUploadAsync(
+    public static Task ExecuteUploadAsync(
         HttpContext context,
         Func<Stream, long, Task<bool>> write
     )
     {
-        try
-        {
-            var length = context.Request.ContentLength;
-
-            if (length is null)
+        return ClassifyFailuresAsync(
+            context,
+            async () =>
             {
-                // Reject chunked transfers, which violate the length-required contract (for example SQLite's zeroblob).
-                // The body describes the rejection like every other classified failure does
-                await WriteErrorAsync(
-                    context,
-                    StatusCodes.Status411LengthRequired,
-                    "BadRequest",
-                    "A binary column upload requires a Content-Length header (chunked transfer is not supported)."
-                ).ConfigureAwait(false);
-                return;
+                var length = context.Request.ContentLength;
+
+                if (length is null)
+                {
+                    // Reject chunked transfers, which violate the length-required contract (for example SQLite's zeroblob).
+                    // The body describes the rejection like every other classified failure does
+                    await WriteErrorAsync(
+                        context,
+                        StatusCodes.Status411LengthRequired,
+                        "BadRequest",
+                        "A binary column upload requires a Content-Length header (chunked transfer is not supported)."
+                    ).ConfigureAwait(false);
+                    return;
+                }
+
+                // The host's body size limit only fires once the body is actually read, while a write reserves storage for
+                // the declared length before reading anything (SQLite allocates a zeroblob of that length first). An
+                // oversized declaration would therefore reserve that space on a request that never sends the data, so the
+                // declaration is checked against the limit here, ahead of the write. A limit of null means it has been
+                // lifted deliberately, and the declaration passes through.
+                var maxRequestBodySize = EffectiveRequestBodySizeLimit(context);
+
+                if (maxRequestBodySize is not null && length.Value > maxRequestBodySize.Value)
+                {
+                    await WriteErrorAsync(
+                        context,
+                        StatusCodes.Status413PayloadTooLarge,
+                        "BadRequest",
+                        "The declared Content-Length exceeds the request body size limit of this endpoint."
+                    ).ConfigureAwait(false);
+                    return;
+                }
+
+                var updated = await write(context.Request.Body, length.Value).ConfigureAwait(false);
+
+                if (!updated)
+                {
+                    await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
+                    return;
+                }
+
+                context.Response.StatusCode = StatusCodes.Status204NoContent;
             }
-
-            // The host's body size limit only fires once the body is actually read, while a write reserves storage for
-            // the declared length before reading anything (SQLite allocates a zeroblob of that length first). An
-            // oversized declaration would therefore reserve that space on a request that never sends the data, so the
-            // declaration is checked against the limit here, ahead of the write. A limit of null means it has been
-            // lifted deliberately, and the declaration passes through.
-            var maxRequestBodySize = EffectiveRequestBodySizeLimit(context);
-
-            if (maxRequestBodySize is not null && length.Value > maxRequestBodySize.Value)
-            {
-                await WriteErrorAsync(
-                    context,
-                    StatusCodes.Status413PayloadTooLarge,
-                    "BadRequest",
-                    "The declared Content-Length exceeds the request body size limit of this endpoint."
-                ).ConfigureAwait(false);
-                return;
-            }
-
-            var updated = await write(context.Request.Body, length.Value).ConfigureAwait(false);
-
-            if (!updated)
-            {
-                await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
-                return;
-            }
-
-            context.Response.StatusCode = StatusCodes.Status204NoContent;
-        }
-        catch (RemoteBadRequestException ex) when (!context.Response.HasStarted)
-        {
-            // The request itself could not be interpreted (the ?id= key): a client-side fault, so it is classified as 400 without server-side logging or the hook.
-            await WriteErrorAsync(
-                context,
-                StatusCodes.Status400BadRequest,
-                "BadRequest",
-                ex.Message
-            ).ConfigureAwait(false);
-        }
-        catch (BadHttpRequestException ex) when (!context.Response.HasStarted)
-        {
-            // Rejected by the server infrastructure (request body size limit and similar): pass through the status code it carries.
-            await WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
-        {
-            // Client disconnected or cancelled: there is no longer a response target, so do nothing.
-        }
-        catch (Exception ex) when (!context.Response.HasStarted)
-        {
-            await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // The body is already on the wire, so none of the classified answers can be produced any more. Logging it
-            // here is what keeps the failure from disappearing before it is rethrown for the host to abort the
-            // connection; the OnServerError hook stays out of it, being the extension point of a 500 that is not sent.
-            LogServerError(context, ex);
-            throw;
-        }
+        );
     }
 
     /// <summary>Kestrel's out-of-the-box request body size limit, used as the fallback when the host publishes none.</summary>
@@ -526,51 +498,23 @@ public static class RemoteServerEngine
     }
 
     /// <summary>Performs a NULL-out (DELETE) of an unbounded binary column. Success yields 204, a missing row yields a 404 marked as "NotFound", and a key that cannot be interpreted yields 400.</summary>
-    public static async Task ExecuteDeleteAsync(HttpContext context, Func<Task<bool>> deleteToNull)
+    public static Task ExecuteDeleteAsync(HttpContext context, Func<Task<bool>> deleteToNull)
     {
-        try
-        {
-            var updated = await deleteToNull().ConfigureAwait(false);
-
-            if (!updated)
+        return ClassifyFailuresAsync(
+            context,
+            async () =>
             {
-                await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
-                return;
-            }
+                var updated = await deleteToNull().ConfigureAwait(false);
 
-            context.Response.StatusCode = StatusCodes.Status204NoContent;
-        }
-        catch (RemoteBadRequestException ex) when (!context.Response.HasStarted)
-        {
-            // The request itself could not be interpreted (the ?id= key): a client-side fault, so it is classified as 400 without server-side logging or the hook.
-            await WriteErrorAsync(
-                context,
-                StatusCodes.Status400BadRequest,
-                "BadRequest",
-                ex.Message
-            ).ConfigureAwait(false);
-        }
-        catch (BadHttpRequestException ex) when (!context.Response.HasStarted)
-        {
-            // Rejected by the server infrastructure: pass through the status code it carries.
-            await WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
-        {
-            // Client disconnected or cancelled: there is no longer a response target, so do nothing.
-        }
-        catch (Exception ex) when (!context.Response.HasStarted)
-        {
-            await WriteServerErrorAsync(context, ex).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // The body is already on the wire, so none of the classified answers can be produced any more. Logging it
-            // here is what keeps the failure from disappearing before it is rethrown for the host to abort the
-            // connection; the OnServerError hook stays out of it, being the extension point of a 500 that is not sent.
-            LogServerError(context, ex);
-            throw;
-        }
+                if (!updated)
+                {
+                    await WriteBinaryNotFoundAsync(context).ConfigureAwait(false);
+                    return;
+                }
+
+                context.Response.StatusCode = StatusCodes.Status204NoContent;
+            }
+        );
     }
 
     /// <summary>Maps the three verbs of one unbounded binary column (<c>GET</c> / <c>PUT</c> / <c>DELETE {prefix}/{entity}/{column}?id=</c>).</summary>
@@ -998,13 +942,29 @@ public sealed class DeferredOctetStreamBody(HttpResponse response) : Stream
     ) => WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
     /// <inheritdoc />
-    public override void Write(byte[] buffer, int offset, int count) =>
-        WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
-
-    /// <inheritdoc />
-    public override async Task FlushAsync(CancellationToken cancellationToken)
+    /// <remarks>
+    /// The write goes to the response body synchronously, so it follows the host's rule on synchronous I/O: with
+    /// <c>AllowSynchronousIO</c> off (the default) it throws, as any synchronous write to the response does, rather than
+    /// blocking a thread on an asynchronous write.
+    /// </remarks>
+    public override void Write(byte[] buffer, int offset, int count)
     {
         EnsureStarted();
+        response.Body.Write(buffer, offset, count);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Before anything has been written there is nothing to flush, and flushing would start the response: it does nothing
+    /// then, so a read function that flushes before writing can still resolve to the 404 of a missing row.
+    /// </remarks>
+    public override async Task FlushAsync(CancellationToken cancellationToken)
+    {
+        if (!_started)
+        {
+            return;
+        }
+
         await response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 

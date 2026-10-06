@@ -633,6 +633,31 @@ public sealed class InMemoryFixtureRuntimeTests
         (await orders.GetAllAsync(Ct)).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// 循環するカスケード（自己参照の nodes）は、条件に一致する行の数に依らず NotSupportedException で断る。
+    /// SQL 側は構造だけで先に断るので、一致 0 件のときだけ 0 が返る食い違いを作らない。
+    /// </summary>
+    [Theory(
+        DisplayName = "Query.ExecuteDeleteAsync: 循環するカスケードは一致件数に依らず NotSupportedException"
+    )]
+    [InlineData(1)]
+    [InlineData(999)]
+    public async Task ExecuteDelete_CyclicCascade_ThrowsWhateverMatches(int nodeId)
+    {
+        var store = new InMemoryDataStore();
+        var nodes = new InMemoryNodeRepository(store);
+        await nodes.InsertAsync(new NodeEntity { NodeId = 1, Label = "root" }, Ct);
+
+        var act = () =>
+            nodes
+                .Query()
+                .Where(n => n.NodeId == nodeId)
+                .ExecuteDeleteAsync(cascadeDelete: true, Ct);
+
+        await act.Should().ThrowAsync<NotSupportedException>();
+        (await nodes.GetAllAsync(Ct)).Should().ContainSingle("断った削除はストアに触れない");
+    }
+
     [Fact(
         DisplayName = "ToProjectionListAsync: 列参照のみの射影が並び順込みで DTO を返す（刈り込み経路）"
     )]

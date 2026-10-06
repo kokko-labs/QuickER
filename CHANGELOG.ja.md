@@ -38,6 +38,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **値オブジェクトが拒む格納値は、どの読み取りでも列を名指しした `InvalidOperationException` になりました** — 値オブジェクトの `Create` を直接呼ぶ `GetByIdAsync` / `GetAllAsync` と、SQL Server・SQLite の `Query()` は、値オブジェクトの型しか分からない `ValueObjectValidationException` をそのまま投げていました（ほかの読み取り経路は包んでいました）。どの読み取りも、列とエンティティのプロパティを名指しした `InvalidOperationException` を投げ、`ValueObjectValidationException` は内側の例外になります。メッセージから不正な値の場所が分かります。**これらの読み取りを `ValueObjectValidationException` で捕まえているコードは、コンパイルは通りますが失敗を捕まえられなくなります**。`InvalidOperationException` を捕まえ、`InnerException` を見てください。同じく SQLite で、値オブジェクトでないプロパティへ読む Guid・DateTime・TimeSpan・DateTimeOffset の格納値の文字列が形式に合わないときは、素の `FormatException` でなく、`FormatException` を内側に持つ `InvalidOperationException` になります
 - **インメモリが、条件・並び替えに書いたナビゲーションプロパティを断るようになりました** — インメモリのストアはグラフでなく行を持つため、保存行のナビゲーションは常に空です。そのため `Where(c => c.Orders.Any())` は 0 件を、`Where(o => o.Customer == null)` は全件を、エラーなしに返していました。SQL Server・SQLite の QuickER 版 Repository と同じく `NotSupportedException` を投げます。外部キーの列で絞ってください。EF Core は従来どおり翻訳します
 - **ランタイムパッケージ `QuickER.Runtime` から `RemoteEntityGraph.CascadeNavigations` を削除しました** — 使う箇所がなくなったためです。リモートのクライアントとサーバーは、グラフの操作がすべて共有するカスケードの走査 `EntityBaseCore.EnumerateCascadeChildren` でグラフを辿るようになりました。呼んでいたコードは、エンティティの `EnumerateCascadeChildren()` を使ってください
+- **ランタイムパッケージ `QuickER.Runtime.InMemory` の `InMemoryCascade`・`IncludeAttacher`・`InMemoryDataStore.InMemoryReadScope`・`InMemoryDataStore.InMemoryWriteScope` を公開しないようにしました** — どれもストアの内部の仕組みで、公開のコンストラクタとメソッドはストアのロックを取らずに読み書きしていました。そのため、使うコードは書きかけのストアを見たり残したりできました。インメモリのリポジトリの外で使う箇所はありませんでした。読み書きは生成されたリポジトリ（シードと確認には `InMemoryDataStore.Put` / `Snapshot` / `Find`）を使ってください。`LayeredOutput` を有効にしたインライン出力も同じです。それ以外のインライン出力は元から `internal` でした
 
 #### インポート・エクスポート
 
@@ -87,6 +88,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **無制限バイナリ列への Stream の書き込みは、Stream がちょうど `length` バイトを返さないと失敗するようになりました** — `Write{列}Async` は、シークできる Stream と一緒に渡した `length` を無視していました。シークできない Stream では、SQL Server は `length` に関係なく Stream の中身をすべて保存し、先に `length` バイトを確保する SQLite は短い Stream の残りを 0 で埋めたまま成功を返していました。シークできる Stream の残りと違う `length`、`length` より先に終わる Stream、`length` を超えて続く Stream は、SQL Server・SQLite・インメモリのいずれでも `ArgumentException`（`ParamName` は `length`）になり、保存済みの値は変わりません。シークできる Stream で `length` を省略する書き方は従来どおりです
 - **SQL Server の `BulkInsertAsync` は、DEFAULT のある列にも `null` を NULL として入れるようになりました** — `SqlBulkCopy` は指定しない限り `null` の代わりに列の DEFAULT を入れるため、一括追加だけが、`InsertAsync` なら NULL になる列に既定値を入れていました。`SqlBulkCopyOptions.KeepNulls` を常時付けます。QuickER の DDL は DEFAULT を出さないので、変わるのは既存のデータベースから取り込んだテーブルだけです
 - **SQLite で、オフセットつきの文字列で格納された日時を、どの経路でも UTC で読むようになりました** — `GetByIdAsync` / `GetAllAsync` が使うドライバの型つきの読み取りは `2024-01-15 10:00:00+09:00` を UTC の 01:00 に換算しますが、`Query()`・値オブジェクトの列・生 SQL は同じ文字列をローカル時刻に換算しており、同じ行が 2 つの値で返っていました。どの経路もドライバと同じ読み方（オフセットつきは UTC〔`DateTimeKind.Utc`〕・なしは `Unspecified`）にそろえました。QuickER 自身はオフセットを書かないので、変わるのは他のツールが書いた値だけです
+- **バイナリのダウンロードが読み取り処理へ渡すストリームへの同期の書き込みが、ホストの同期 I/O の規則に従うようになりました** — `DeferredOctetStreamBody.Write` は非同期の書き込みを待ってスレッドを塞いでいました。そのため、同期で書く手書きの読み取り処理は、`AllowSynchronousIO` が無効（既定）でも動き、書き込みのたびにスレッドを占有していました。応答の本文へ同期で書くようになったので、既定では応答への同期の書き込みと同じく例外になります（ダウンロードは 500）。`WriteAsync` で書くか、`AllowSynchronousIO` を有効にしてください。生成エンドポイントは非同期でしか書かないので影響しません
 
 #### AI チャット・MCP
 
@@ -260,6 +262,13 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **SQL Server の `BulkInsertAsync` が接続文字列の `Command Timeout` に従うようになりました** — `SqlBulkCopy` は接続文字列の届かない独自のタイムアウト（30 秒）を持つため、一括追加は `Command Timeout` に関係なく 30 秒で打ち切られていました。接続のコマンドタイムアウトを使うようにしました
 - **SQLite で、16 バイトの BLOB で格納された Guid と、手書きエンティティの `DateOnly` / `TimeOnly` の列を、`Query()` と生 SQL でも読めるようになりました** — BLOB の Guid は `GetByIdAsync` では読めましたが、`Query()`・値オブジェクトの列・生 SQL では失敗していました。`DateOnly` / `TimeOnly` のプロパティ（QuickER は生成しませんが、`QueryBySqlAsync` やリポジトリへ渡す手書きのエンティティは持てます）は、どの経路でも読めませんでした
 - **`ApplyDdlAsync` は、負の `commandTimeout` を接続を開く前に断るようになりました** — 検証が接続を開いた後だったため、SQLite では不正な引数の呼び出しが空の DB ファイルを残し、SQL Server では到達できないサーバーを指していると引数の誤りでなく接続エラーが返っていました。例外の `ParamName` は `commandTimeout` になります
+- **インメモリのグラフ保存が、After フックの実行中に他者が挿入した行を消さなくなりました** — 保存が行に達した時点で存在しなかった行を削除すると、公開の時点でそのキーにある行を消していました。その間に他者が挿入した行も消えていました。rowversion 列を持つ型では、代わりに `SaveConflictException`（`Modified`）で失敗していました。この削除は何もしなくなりました。実 DB の `DELETE` も、実行した時点で 0 行に終わるためです
+- **インメモリのカスケードつき `ExecuteDeleteAsync` は、循環するカスケードを一致 0 件でも断るようになりました** — 自己参照の表（など、元へ戻るカスケード）は、条件に一致する行が 1 件以上あるときだけ `NotSupportedException` で断り、0 件のときは黙って `0` を返していました。行を読む前に断るようになりました。SQL Server・SQLite の QuickER 版 Repository と同じです
+- **インメモリの読み取りが除外した blob を写さなくなり、まとめて書く経路の一意制約の検査が行数に比例する手間になりました** — 読み取りは毎回、行を JSON で丸ごと複製してから除外したバイナリ列を捨てていました。そのため、20 MB の blob を持つ行を読むと約 70 MB を割り当てていました。返す列だけを写し、除外した列は読みません。`BulkInsertAsync` とグラフ保存は、書く行ごとにほかの全行と比べていたため、1 万行で数秒かかっていました。行を 1 回だけ索引にして引くようになりました
+- **EF Core の生 SQL と Save フックの `ExecuteSqlAsync` が、DbContext に設定したコマンドタイムアウトに従うようになりました** — どちらも接続から自分でコマンドを作るため、プロバイダのオプションの `CommandTimeout(...)` が届かず、接続の既定（SQL Server では 30 秒）のまま走っていました。設定した値を使うので、それより長く走っていた生 SQL はそのタイムアウトで打ち切られます。設定していなければ変わりません
+- **EF Core の `GetByIdAsync` と `DeleteAsync` が、キーをパラメータで送るようになりました** — キーを SQL へリテラルで書き込んでいたため、キーの値ごとに EF Core がクエリをコンパイルし、DB もプランを増やしていました。あわせてランタイムパッケージでは、テーブルの列を並べる例外文が SQL Server の角括弧で列名を囲まなくなり、EF Core が使わない行の組み立て器をメタデータがコンパイルしなくなりました
+- **リモートサーバーが、本文の途中で切断した要求に応答を書かなくなりました** — 要求の本文を読んでいる間に接続が閉じられる・リセットされると、要求の欠陥（400。バイナリのアップロードでは 500 で、サーバーの失敗としてログに残し `OnServerError` も呼んでいました）として分類していました。切れた接続へその応答を書こうとして、例外もまた起きていました。この要求には応答を書かず、ログもフックも出しません。クライアントが取り消した要求と同じ扱いです
+- **バイナリのダウンロードで、読み取り処理が書く前に Flush しても 404 を返せるようになりました** — 何も書く前にストリームを Flush すると応答が始まり、そのあと読み取り処理が `false`（行なし）を返しても、NotFound 印つきの 404 へ切り替えられませんでした。最初の書き込みより前の Flush は何もしません
 
 #### 双方向同期
 

@@ -37,15 +37,6 @@ public sealed class EntitySaveMetadata
 {
     private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
 
-    /// <summary>Quotes a single SQL identifier, doubling the closing quote character so that a name containing it cannot escape the quotes.</summary>
-    /// <remarks>Table and column names come from the diagram, which accepts free text, so a name may well contain the quote character itself. This mirrors the escaping the DDL generator applies.</remarks>
-    internal static string QuoteIdentifier(string name)
-    {
-        const string close = "]";
-
-        return "[" + name.Replace(close, close + close) + close;
-    }
-
     /// <summary>Gets the property that corresponds to the primary key.</summary>
     public required PropertyInfo KeyProperty { get; init; }
 
@@ -75,7 +66,8 @@ public sealed class EntitySaveMetadata
     /// <summary>Gets the column name to column property map (used to look up column types when explicitly typing query WHERE-clause parameters).</summary>
     public required IReadOnlyDictionary<string, PropertyInfo> PropertyByColumn { get; init; }
 
-    /// <summary>Gets the quoted column list for SELECT (for example: [id], [name]).</summary>
+    /// <summary>Gets the SELECT column names, unquoted (for example: id, name), as error messages name them.</summary>
+    /// <remarks>EF Core builds its own SQL, so nothing here is sent to the database, and quoting in one dialect's style would misname the columns on the others.</remarks>
     public required string ColumnList { get; init; }
 
     /// <summary>Gets the cascade-target child navigations.</summary>
@@ -153,7 +145,7 @@ public sealed class EntitySaveMetadata
         // A store-generated column doubles as the table's concurrency token; a table carries at most one of them
         var rowVersionProperty =
             storeGeneratedColumns.Count == 0 ? null : storeGeneratedColumns[0];
-        var columnList = string.Join(", ", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
+        var columnList = string.Join(", ", selectProperties.Select(GetColumnName));
         var cascades = allProperties
             .Select(property =>
                 (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
@@ -180,8 +172,8 @@ public sealed class EntitySaveMetadata
             // Resolve column names for row mapping at build time to eliminate per-row [Column] reflection
             SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
             ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
-            // Compile the expression-tree materializer for SelectColumns (the fixed SELECT set) once per type
-            SelectMaterializer = BuildSelectMaterializer(entityType, selectProperties),
+            // EF Core materializes its own queries, so the materializer is compiled only if a row is mapped through it
+            SelectMaterializer = CompileOnFirstUse(entityType, selectProperties),
             PropertyByColumn = columns.ToDictionary(
                 GetColumnName,
                 property => property,
@@ -306,6 +298,25 @@ public sealed class EntitySaveMetadata
         );
 
         return create is null ? null : (getter, create);
+    }
+
+    /// <summary>Returns a materializer that compiles <see cref="BuildSelectMaterializer"/> on the first row it maps.</summary>
+    /// <remarks>
+    /// Without a QuickER repository nothing on the hot path maps rows through the materializer (EF Core materializes its
+    /// own queries, and raw SQL goes through the per-column mapping), so compiling it for every type the metadata is built
+    /// for would be work done for nothing. The metadata is shared by every thread, so the compilation is guarded by a
+    /// <see cref="Lazy{T}"/>, which compiles once even when two rows are mapped at the same time.
+    /// </remarks>
+    private static Func<DbDataReader, int[], EntityBaseCore> CompileOnFirstUse(
+        Type entityType,
+        IReadOnlyList<PropertyInfo> properties
+    )
+    {
+        var compiled = new Lazy<Func<DbDataReader, int[], EntityBaseCore>>(
+            () => BuildSelectMaterializer(entityType, properties)
+        );
+
+        return (reader, ordinals) => compiled.Value(reader, ordinals);
     }
 
     /// <summary>
@@ -763,7 +774,7 @@ public static class EntityGraphSaver
     /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
     public static bool HasChanges(EntityBaseCore entity, bool cascade) =>
         entity.HasChanges
-        || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
+        || (cascade && entity.EnumerateCascadeChildren().Any(child => HasChanges(child, true)));
 
     /// <summary>Finalizes saved entities to Unchanged after commit.</summary>
     public static void AcceptChanges(EntityBaseCore entity, bool cascade) =>
@@ -792,44 +803,13 @@ public static class EntityGraphSaver
 
         if (cascade)
         {
-            foreach (var child in EnumerateCascadeChildren(entity))
+            foreach (var child in entity.EnumerateCascadeChildren())
             {
                 AcceptChanges(child, true, skip);
             }
         }
     }
 
-    /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
-    private static IEnumerable<EntityBaseCore> EnumerateCascadeChildren(EntityBaseCore entity)
-    {
-        foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
-        {
-            var value = navigation.Property.GetValue(entity);
-
-            if (value is null)
-            {
-                continue;
-            }
-
-            if (navigation.IsCollection)
-            {
-                if (value is IEnumerable<EntityBaseCore> children)
-                {
-                    foreach (var child in children)
-                    {
-                        if (child is not null)
-                        {
-                            yield return child;
-                        }
-                    }
-                }
-            }
-            else if (value is EntityBaseCore child)
-            {
-                yield return child;
-            }
-        }
-    }
 }
 
 /// <summary>
@@ -1374,6 +1354,14 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 
         var command = context.Database.GetDbConnection().CreateCommand();
         command.CommandText = sql;
+
+        // A command created from the connection does not see the timeout configured on the DbContext, so it is carried over
+        // (with none configured, the command keeps the connection's own default)
+        if (context.Database.GetCommandTimeout() is { } timeout)
+        {
+            command.CommandTimeout = timeout;
+        }
+
         RawSqlMapper.BindParameters(command, parameters);
         return command;
     }
@@ -2387,14 +2375,33 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
     /// <summary>Builds the primary key equality predicate (e => e.Key == id) from the metadata.</summary>
+    /// <remarks>
+    /// The key is read off a holder object rather than embedded as a constant: EF Core sends a captured member as a
+    /// parameter but writes a constant into the SQL as a literal, which compiles a new query - and gives the database a new
+    /// plan to cache - for every key value.
+    /// </remarks>
     private static Expression<Func<TEntity, bool>> BuildKeyPredicate(TKey id)
     {
         var parameter = Expression.Parameter(typeof(TEntity), "e");
-        var body = Expression.Equal(
-            Expression.Property(parameter, _metadata.KeyProperty),
-            Expression.Constant(id, _metadata.KeyProperty.PropertyType)
+        Expression key = Expression.Field(
+            Expression.Constant(new KeyHolder(id)),
+            nameof(KeyHolder.Value)
         );
+
+        if (key.Type != _metadata.KeyProperty.PropertyType)
+        {
+            key = Expression.Convert(key, _metadata.KeyProperty.PropertyType);
+        }
+
+        var body = Expression.Equal(Expression.Property(parameter, _metadata.KeyProperty), key);
         return Expression.Lambda<Func<TEntity, bool>>(body, parameter);
+    }
+
+    /// <summary>Carries a key value into a predicate as a member EF Core turns into a parameter.</summary>
+    private sealed class KeyHolder(TKey value)
+    {
+        /// <summary>The key value.</summary>
+        public readonly TKey Value = value;
     }
 
     /// <summary>Registers the graph with the DbContext via RowState → EntityState conversion and records save targets (non-Unchanged) into <paramref name="tracked"/> (pre-save processing for the disconnected pattern).</summary>
@@ -2652,6 +2659,14 @@ public sealed class EfCoreSaveHookContext(DbContext context) : ISaveHookContext
         command.CommandText = sql;
         // Participate in the ongoing save transaction (no separate connection or transaction is opened).
         command.Transaction = _context.Database.CurrentTransaction?.GetDbTransaction();
+
+        // A command created from the connection does not see the timeout configured on the DbContext, so it is carried over
+        // (with none configured, the command keeps the connection's own default)
+        if (_context.Database.GetCommandTimeout() is { } timeout)
+        {
+            command.CommandTimeout = timeout;
+        }
+
         RawSqlMapper.BindParameters(command, parameters);
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
