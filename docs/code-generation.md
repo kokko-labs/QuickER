@@ -2602,6 +2602,13 @@ The following three endpoints are generated per excluded column, where `{column}
   If you do not pass `length` for a non-seekable Stream, it throws `ArgumentException` before sending, which is the same length contract as the direct path.
   **The Stream you pass in stays yours**: the client neither closes nor disposes it, exactly as a direct connection does not, so switching between the two implementations does not change what happens to the stream.
   The HTTP layer disposes the request content after sending, so the stream is handed to `StreamContent` through a non-closing wrapper.
+- **The `PUT` carries `Expect: 100-continue`.**
+  The client holds the body back until the server has seen the headers, so an upload whose declared length is over the limit gets the 413 as a `RemoteRepositoryException` before any of the body is sent.
+  Without it, the server would close the connection without reading the body, and the reset that follows can discard the 413 and surface as a connection error.
+  The client waits for the server's `100 Continue` for the handler's `Expect100ContinueTimeout`, which is 1 second by default, and then sends the body anyway.
+  Behind a proxy that does not answer `100 Continue`, each upload therefore waits up to that long.
+  To change the wait, register the client with the `HttpClient` factory overload and set the timeout on its `SocketsHttpHandler`.
+  Behind a proxy that rejects the `Expect` header with 417, the upload fails with a `RemoteRepositoryException` of status 417.
 - **Making `WithUnboundedBinary()` / `Query()` / raw SQL remote is out of scope**, as before.
 
 ## Runtime package reference mode (--use-runtime-packages)

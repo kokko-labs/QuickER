@@ -341,59 +341,97 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// 9b. 対照: 既定（オプトインなし）のバイナリ PUT はホストのリクエストサイズ制限が効き、30MB 超は 413 になる。
+    /// 9b. 対照: 既定（オプトインなし）のバイナリ PUT はホストのリクエストサイズ制限が効き、
+    /// 30MB 超は生成クライアントで 413 の <see cref="RemoteRepositoryException"/> になる。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 共有サーバーは <c>MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous)</c>（既定引数＝解除なし）で起動しているため、そのまま使える。
     /// 413 を出すのは宣言長の事前チェック（<see cref="Stream_Put_DeclaredLengthOverLimit_IsRejectedBeforeWriting"/>）で、
-    /// 31MB の宣言長がホストの実効上限（Kestrel 既定の 30,000,000）を超えるため本文を読む前に確定する。クライアントは
-    /// <see cref="RemoteRepositoryException"/> としてその状態コードを保って復元する。応答には他の分類済み拒否と
-    /// 同じ <c>RemoteError</c> 本文が載るため、応答を読めた場合は「本文の文言が復元されていること」まで固定する。
-    /// ただしサーバーは本文を受け取らずに応答するため、フルスイート並列実行などタイミング次第では
-    /// クライアントが 413 を読む前に接続リセット（<see cref="HttpRequestException"/>）を観測し得る
-    /// （タイミング依存の正常系＝単独実行の実測では 10/10 で 413 だが、負荷並列時に窓が開くことが実測されている）。
-    /// どちらの形でも「既定では 31MB の書き込みが拒否される」契約は成立しているため、両方を合格とする。
+    /// 31MB の宣言長がホストの実効上限（Kestrel 既定の 30,000,000）を超えるため本文を読む前に確定する。
+    /// 応答には他の分類済み拒否と同じ <c>RemoteError</c> 本文が載り、クライアントは状態コードと文言を保って復元する。
+    /// </para>
+    /// <para>
+    /// 上限を超える宣言長では Kestrel が本文を読み捨てずに接続を閉じるため、本文を送っている最中のクライアントは
+    /// リセットを受けて 413 を失い得る（31MB では大半がそうなる）。生成クライアントはアップロードに
+    /// <c>Expect: 100-continue</c> を付け、サーバーが答えるまで本文を送らないことでこれを防ぐ。このテストはその
+    /// ガードで、<c>ExpectContinue</c> を外すと接続エラーになって赤になる。
+    /// プロセスで最初のアップロードはサーバー側の JIT で応答が遅れ、本文を受け取り終えてから閉じるので競合が出にくい。
+    /// ほかのテストが先に経路を温めているかに依らずガードが効くよう、同じ 413 の経路を <c>Expect</c> を付けた素の PUT で
+    /// 先に 1 回通してから、生成クライアントで確かめる（上限内のアップロードでは 413 を書く経路が温まらず、
+    /// 単独実行ではガードが効かない）。
+    /// </para>
+    /// <para>
+    /// 100 Continue の待ち時間はハンドラーの設定で、既定の 1 秒を過ぎると本文が送られて同じ競合が戻り得る。
+    /// 全件の並列実行でサーバーの応答が遅れても結果が変わらないよう、このテストのクライアントだけ
+    /// HttpClient ファクトリ版の登録で待ち時間を 30 秒にする（生成クライアントの既定は変えない）。
+    /// </para>
     /// </remarks>
     [Fact(
-        DisplayName = "[Binary/Remote] 9b: 既定（オプトインなし）のバイナリ PUT は 31MB が拒否される（413 または送信中断）"
+        DisplayName = "[Binary/Remote] 9b: 既定（オプトインなし）のバイナリ PUT は 31MB が 413 の RemoteRepositoryException で拒否される"
     )]
     public async Task Stream_Put_WithoutOptIn_IsRejectedByDefaultRequestSizeLimit()
     {
         await SeedAsync(1, null, Doc1Thumb);
 
+        using var httpClient = NewPatientExpectContinueClient(
+            $"{_server!.BaseAddress(RemotePaths.DefaultPrefix)}/"
+        );
+        await using var clientProvider = new ServiceCollection()
+            .AddGeneratedHttpRemoteRepositories(_ => httpClient)
+            .BuildServiceProvider();
+        var documents = clientProvider.GetRequiredService<IDocumentRemoteRepository>();
+
         var payload = new byte[31 * 1024 * 1024];
         new Random(31).NextBytes(payload);
 
+        // 温め: 同じ 413 の経路を、Expect を付けた素の PUT で先に 1 回通してサーバー側を JIT 済みにする（理由は remarks）
+        using (
+            var warmUp = await PutBinaryAsync(
+                httpClient,
+                $"{_server.BaseUrl}/quicker/Document/Payload?id=1",
+                payload
+            )
+        )
+        {
+            warmUp.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        }
+
         var act = async () =>
-            await Documents.WritePayloadAsync(1, new MemoryStream(payload), cancellationToken: Ct);
+            await documents.WritePayloadAsync(1, new MemoryStream(payload), cancellationToken: Ct);
 
-        var thrown = (await act.Should().ThrowAsync<Exception>()).Which;
+        var remote = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
 
-        if (thrown is RemoteRepositoryException remote)
+        remote.StatusCode.Should().Be(413, "既定ではホストのボディサイズ上限がそのまま効く");
+        remote
+            .Message.Should()
+            .NotBe(
+                "The remote call failed (HTTP 413).",
+                "413 にも RemoteError 本文が載るため、汎用の代替文言にはならない"
+            );
+        remote.Message.Should().NotBeEmpty();
+        remote.CorrelationId.Should().BeNull("相関 ID は詳細を伏せた 500 だけに載る");
+    }
+
+    /// <summary>
+    /// 100 Continue を 30 秒まで待つ HttpClient を作る（<paramref name="baseAddress"/> を渡すとそれを既定の宛先にする）。
+    /// </summary>
+    /// <remarks>
+    /// 既定の 1 秒では、負荷でサーバーの応答が遅れたときに本文が送られ、本文を読まずに閉じられた接続の
+    /// リセットで 413 を失い得る。待ち時間を延ばすと「サーバーが答えるまで本文を送らない」が負荷に依らず成り立つ。
+    /// </remarks>
+    private static HttpClient NewPatientExpectContinueClient(string? baseAddress = null)
+    {
+        var client = new HttpClient(
+            new SocketsHttpHandler { Expect100ContinueTimeout = TimeSpan.FromSeconds(30) }
+        );
+
+        if (baseAddress is not null)
         {
-            remote.StatusCode.Should().Be(413, "既定ではホストのボディサイズ上限がそのまま効く");
-            remote
-                .Message.Should()
-                .NotBe(
-                    "The remote call failed (HTTP 413).",
-                    "413 にも RemoteError 本文が載るため、汎用の代替文言にはならない"
-                );
-            remote.Message.Should().NotBeEmpty();
-            remote.CorrelationId.Should().BeNull("相関 ID は詳細を伏せた 500 だけに載る");
+            client.BaseAddress = new Uri(baseAddress);
         }
-        else
-        {
-            // 413 が読めない場合は送信中断＝接続リセット。負荷並列時の観測形は HttpRequestException と
-            // IOException（HTTP スタックが下位のソケット例外をそのまま伝播する枝）の 2 通りがあり、
-            // どちらも「拒否されたこと自体は成立している」という同じ結論を運ぶ
-            thrown.Should().BeAssignableTo<Exception>();
-            thrown
-                .Should()
-                .Match(
-                    e => e is HttpRequestException || e is IOException,
-                    "413 が読めない場合は送信中断＝接続リセット（HttpRequestException / IOException）になる"
-                );
-        }
+
+        return client;
     }
 
     /// <summary>
@@ -417,9 +455,14 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     /// （生成エンドポイント側の実転送は <see cref="Stream_Put_WithOptIn_ExceedsDefaultRequestSizeLimit"/> が担う）。
     /// </para>
     /// <para>
-    /// 上限は Kestrel 既定（30MB）ではなくこのサーバー専用の小さな値へ下げる。既定のままだと本文が 30MB 超になり、
-    /// サーバーが本文を読まずに応答したときの送信中断（接続リセット）が観測へ混ざるため、
-    /// 「小さな本文・さらに小さな上限」で同じ条件を作る。
+    /// 上限は Kestrel 既定（30MB）ではなくこのサーバー専用の小さな値へ下げ、「小さな本文・さらに小さな上限」で
+    /// 同じ条件を作る（30MB 超の本文を送らずに済む）。
+    /// </para>
+    /// <para>
+    /// 上限を超える宣言長では Kestrel が本文を読み捨てずに接続を閉じるため、本文を送っている最中のクライアントは
+    /// リセットを受けて 413 を失い得る（4KB の本文でも負荷時に起きる）。そこで要求は生成クライアントと同じく
+    /// <c>Expect: 100-continue</c> を付けて送り、サーバーが答えるまで本文を送らない。待ち時間は 30 秒に延ばし、
+    /// 負荷でサーバーの応答が遅れても本文を先に送らないようにする（<see cref="NewPatientExpectContinueClient"/>）。
     /// </para>
     /// </remarks>
     [Fact(
@@ -462,10 +505,10 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
                 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 64)
         );
 
-        // 上限（64 バイト）を超える本文。実データも同じ長さなので送信は完結し、観測にリセットが混ざらない
+        // 上限（64 バイト）を超える本文
         var payload = new byte[4096];
 
-        using var raw = new HttpClient();
+        using var raw = NewPatientExpectContinueClient();
 
         using var rejected = await PutBinaryAsync(
             raw,
@@ -525,11 +568,10 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     /// </para>
     /// <para>
     /// 観測は <c>RemoteServerEngine.ExecuteUploadAsync</c> を <see cref="DefaultHttpContext"/> で直接駆動して行う
-    /// （9c の「エンジンの接合部を直接マップする」流儀の延長）。この分岐は<b>本文を 1 バイトも読まないこと</b>が
-    /// 主張の中身なので、実 HTTP で 30MB 超の本文を送ると、サーバーが本文を読まずに応答した際の送信中断
-    /// （<see cref="Stream_Put_WithoutOptIn_IsRejectedByDefaultRequestSizeLimit"/> の remarks にある接続リセット）が
-    /// 観測へ混ざる。<see cref="DefaultHttpContext"/> は feature を 1 つも持たないため
-    /// 「feature が取れないホスト」そのものを再現できる。
+    /// （9c の「エンジンの接合部を直接マップする」流儀の延長）。Kestrel は常に feature を公開するので実 HTTP では
+    /// この配置を作れないのに対し、<see cref="DefaultHttpContext"/> は feature を 1 つも持たないため
+    /// 「feature が取れないホスト」そのものを再現できる。この分岐は<b>本文を 1 バイトも読まないこと</b>が
+    /// 主張の中身なので、30MB 超の本文を実際に用意する必要も無い。
     /// </para>
     /// </remarks>
     [Fact(
@@ -645,10 +687,10 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
 
         var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
 
-        // 413 の拒否は本文を読まずに返り、Kestrel はその接続を閉じる。同じ HttpClient で次の要求を送るとき、
-        // 閉じたことにクライアントが気づく前の接続を再利用すると「強制的に切断されました」で失敗するので、
-        // 要求ごとに接続を閉じて再利用させない
-        request.Headers.ConnectionClose = true;
+        // 413 の拒否は本文を読まずに返り、Kestrel はその接続を閉じる。生成クライアントと同じく 100-continue を待ち、
+        // サーバーが答えるまで本文を送らない。最終応答が先に届いたときは、HttpClient が本文を送らずにその接続を
+        // 閉じるので、閉じられた接続を次の要求で再利用することも無い
+        request.Headers.ExpectContinue = true;
         return client.SendAsync(request, Ct);
     }
 

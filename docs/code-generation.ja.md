@@ -2640,6 +2640,13 @@ JSON エンベロープ（`POST` + Base64）では巨大 blob のメモリ膨張
 - クライアント（`Http{Entity}RemoteRepository`）は、`GET` を `ResponseHeadersRead` で受けて宛先へ O(チャンク) でコピーし、`PUT` は `StreamContent`（`Content-Length` 付き）で送ります。
   非シーク Stream で `length` を渡さない場合は、送信前に `ArgumentException` になります（既存の長さ契約と同一です）。
   **渡した Stream の所有権は呼び出し側のまま**で、クライアントは閉じも破棄もしません（直結実装と同じで、実装を差し替えても Stream の扱いが変わりません。HTTP レイヤは送信後にリクエストコンテンツを破棄するため、Stream は非クローズのラッパー経由で `StreamContent` へ渡しています）。
+- **`PUT` には `Expect: 100-continue` を付けます。**
+  クライアントはサーバーがヘッダーを見るまで本文を送らないので、宣言長が上限を超えるアップロードは、本文を送る前に 413 の `RemoteRepositoryException` になります。
+  付けないと、サーバーは本文を読まずに接続を閉じ、その後のリセットで 413 が失われて接続エラーになることがあります。
+  サーバーの `100 Continue` を待つ時間はハンドラーの `Expect100ContinueTimeout`（既定は 1 秒）で、過ぎると本文を送ります。
+  そのため、`100 Continue` を返さない中継を挟むと、アップロードごとに最大でその時間だけ待ちます。
+  待ち時間を変えるには、`HttpClient` ファクトリ版の登録でクライアントを渡し、その `SocketsHttpHandler` に設定してください。
+  `Expect` ヘッダーを 417 で拒否する中継の下では、アップロードは状態コード 417 の `RemoteRepositoryException` になります。
 - **`WithUnboundedBinary()` / `Query()` / 生 SQL のリモート化はスコープ外です**（従来どおり）。
 
 ## ランタイムパッケージ参照モード（--use-runtime-packages）

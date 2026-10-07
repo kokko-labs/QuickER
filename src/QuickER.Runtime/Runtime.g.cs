@@ -8337,6 +8337,15 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// direct connection, so swapping the two implementations does not change what happens to the stream that was passed
     /// in. (The HTTP layer disposes the request content once the request has been sent, so the stream is handed to
     /// <see cref="StreamContent"/> through a non-closing wrapper.)
+    /// <para>
+    /// The <c>PUT</c> carries <c>Expect: 100-continue</c>, so the body is held back until the server has looked at the
+    /// headers. An upload whose declared length is over the endpoint's limit is then answered with 413 before any of the
+    /// body is sent. Without it the body would already be on the wire when the server, having refused to read it, closes
+    /// the connection; the reset that follows can discard the 413 and surface as an <see cref="HttpRequestException"/>
+    /// instead. The wait for the interim response is the handler's <c>Expect100ContinueTimeout</c> (1 second for
+    /// <see cref="SocketsHttpHandler"/>), after which the body is sent anyway; an <see cref="HttpClient"/> supplied
+    /// through the factory overload of the registration can set a different value.
+    /// </para>
     /// </remarks>
     protected async Task<bool> UploadUnboundedBinaryColumnAsync(
         string columnRoute,
@@ -8373,6 +8382,10 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
         using var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+
+        // Hold the body back until the server has accepted the headers, so a declared length over the limit is
+        // answered with 413 rather than lost to the reset of a connection the server closed mid-upload
+        request.Headers.ExpectContinue = true;
         using var response = await _httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
