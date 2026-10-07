@@ -49,30 +49,24 @@ jobs:
       - name: テスト
         run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
 
-      - name: パッケージ生成（ランタイム7種+CLI）
-        # 上の「ビルド」ステップは Debug 構成だが、dotnet pack は .NET 8 以降の SDK 既定で
-        # Release を対象にするため --no-build だと Release バイナリ不在で失敗する（NU5026）。
-        # ここでは pack に事前ビルドをさせる（-c Release 明示・ci.yml の同名ステップと同じ規約）。
-        # ContinuousIntegrationBuild=true はソースパスを /_/ へ正規化し、配布バイナリに
+      - name: パッケージ生成と検証（ランタイム7種+CLI）
+        # 一覧・pack・検証の本体は scripts/pack-packages.ps1（ci.yml と共有。一覧をここへ写さない）。
+        # 1 本ずつ終了コードを見て、続けて verify-packages.ps1 で dotnet pack 自身が守らない点
+        # （README / アイコンの宣言・tools の .pdb 不在・版の一致・本数）を検証する。push の前段に置き、
+        # dry_run=true でも必ず走らせる＝壊れたパッケージが公開経路へ進めない。
+        # -ContinuousIntegrationBuild はソースパスを /_/ へ正規化し、配布バイナリに
         # ビルドマシンのパス情報を一切残さないための決定的ビルド指定
-        run: |
-          dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.AspNetCore/QuickER.Runtime.AspNetCore.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.Sync/QuickER.Runtime.Sync.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Cli/QuickER.Cli.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
+        run: ./scripts/pack-packages.ps1 -OutputDirectory "${{ runner.temp }}/nupkg" -ContinuousIntegrationBuild
 
       - name: 生成物一覧を表示
         run: Get-ChildItem "${{ runner.temp }}/nupkg" -Recurse
 
-      - name: パッケージ検証（README / アイコンの宣言・tools の .pdb 不在・版の一致）
-        # dotnet pack 自身が守らない 3 点だけを見る（重複した検査は置かない）。push の前段に置き、
-        # dry_run=true でも必ず走らせる＝壊れたパッケージが公開経路へ進めない。
-        # 検証本体は scripts/verify-packages.ps1 で、ローカルでも同じものを実行できる。
-        run: ./scripts/verify-packages.ps1 -NupkgDirectory "${{ runner.temp }}/nupkg"
+      # push の --skip-duplicate は、途中で失敗した公開のやり直しで公開済みのパッケージを飛ばすために
+      # 付けている。その代わり VersionPrefix の上げ忘れは「全部飛ばして成功」になるので、ここで止める
+      # （全部が公開済みなら失敗・一部だけならやり直しとして続行）。nuget.org の状態を見るので dry_run では実行しない
+      - name: 公開済みの版でないかを確認（dry_run=false のときのみ）
+        if: ${{ inputs.dry_run == false }}
+        run: ./scripts/check-unpublished-version.ps1 -NupkgDirectory "${{ runner.temp }}/nupkg"
 
       # 一時キーの有効期限は 1 時間のため、push の直前に取得する
       - name: NuGet.org へログイン（Trusted Publishing・dry_run=false のときのみ）

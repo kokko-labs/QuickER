@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    公開前の .nupkg を検証する（publish.yml の検証ステップ本体・ローカルでも同じものを実行できる）。
+    公開前の .nupkg を検証する（pack-packages.ps1 が pack の後に呼ぶ＝ci.yml・publish.yml の両方で走る）。
 
 .DESCRIPTION
     dotnet pack 自身が守らない 3 点だけを見る。重複した検査は置かない。
@@ -15,22 +15,23 @@
          どれか 1 つの csproj へ Version を書けば pack は成功して版だけがずれる。同梱 README は
          「コードを生成したツールと同じ版を参照せよ」と案内しているため、ずれると案内が破綻する。
 
-    パッケージ本数は既知の 8 本（ランタイム 7＋CLI）で固定する。増減させたときは本スクリプトの
-    ExpectedPackageCount も更新する（黙って通り抜けるより、更新を強制するほうが安全）。
+    あわせて、パッケージがちょうど期待本数だけあることを見る。
+    期待本数は pack-packages.ps1 が自分の一覧の本数を渡す（本数をここに書くと一覧の写しになる）。
+    pack が想定外のパッケージを追加で出したとき（RID 別の tool パッケージ等）もここで落ちる。
 
 .PARAMETER NupkgDirectory
     検証対象の .nupkg が置かれたディレクトリ。
 
 .PARAMETER ExpectedPackageCount
-    期待するパッケージ本数（既定 8）。
+    期待するパッケージ本数（pack-packages.ps1 の一覧の本数）。
 
 .EXAMPLE
-    dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj -c Release --output ./artifacts/nupkg
-    ./scripts/verify-packages.ps1 -NupkgDirectory ./artifacts/nupkg
+    ./scripts/pack-packages.ps1 -OutputDirectory ./artifacts/nupkg
+    （pack を終えると、このスクリプトを期待本数つきで呼ぶ）
 #>
 param(
     [Parameter(Mandatory = $true)][string]$NupkgDirectory,
-    [int]$ExpectedPackageCount = 8
+    [Parameter(Mandatory = $true)][int]$ExpectedPackageCount
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,7 +41,7 @@ $failures = [System.Collections.Generic.List[string]]::new()
 $versions = [ordered]@{}
 
 if ($packages.Count -ne $ExpectedPackageCount) {
-    $failures.Add("パッケージ数が $ExpectedPackageCount 本ではありません（実際: $($packages.Count) 本）。pack 対象を増減させたなら ExpectedPackageCount も更新すること。")
+    $failures.Add("パッケージ数が $ExpectedPackageCount 本ではありません（実際: $($packages.Count) 本）。pack-packages.ps1 の一覧に無いパッケージが出ていないか確かめること。")
 }
 
 foreach ($package in $packages) {

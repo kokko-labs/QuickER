@@ -12,23 +12,19 @@ name: CI
 on:
   push:
     branches: [main]
-    # ドキュメント・作業記録だけの変更ではフル CI（Windows ランナー・約 12 分の枠消費）を
-    # 走らせない。ルート直下の *.md のみ除外し、src/ 配下の README（NuGet 同梱物）や
-    # samples/ 配下の .g.md（ドリフト検知対象）の変更では従来どおり CI を実行する
+    # 除外するのはどのテストも読まないファイルだけ。docs/・ルート直下の *.md・LICENSE は
+    # 文書のガード（DocsIndexParityTests・ClaudeMdParityTests・LicenseDocumentParityTests 等）が
+    # 読むので除外しない＝文書だけの変更でも CI 全体（Windows ランナーと Ubuntu の統合テスト）が走る。
+    # 実行枠は増えるが、ガードが走らずに文書の食い違いがマージされるほうが問題なので受け入れる。
+    # 除外の範囲は WorkflowGuardTests が固定する（pull_request 側も同じ一覧にする）
     paths-ignore:
-      - "docs/**"
       - "tasks/**"
-      - "*.md"
-      - "LICENSE"
       - ".github/*.md"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/FUNDING.yml"
   pull_request:
     paths-ignore:
-      - "docs/**"
       - "tasks/**"
-      - "*.md"
-      - "LICENSE"
       - ".github/*.md"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/FUNDING.yml"
@@ -37,9 +33,11 @@ on:
 permissions:
   contents: read
 
+# 同じ PR へ続けて push したときは古い実行を取り消す。main への push は取り消さない
+# （続けて push すると、前のコミットの検証結果が残らなくなるため）
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # 実 DB 統合テスト（ubuntu＝Linux コンテナが使える唯一の GitHub ホストランナー）。
@@ -99,23 +97,22 @@ jobs:
       - name: テスト
         run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
 
-      - name: サンプルのビルドと実行（samples/ec-order）
+      - name: サンプルの実行（samples/ec-order）
         # 利用者のプロジェクトを模した動くサンプル。QuickER 本体へは参照せず NuGet パッケージのみで、
         # チェックイン済みの生成コード＋DDL で SQLite ファイル DB を作成し CRUD を実演する（外部 DB 不要）。
         # DB ファイルは実行ファイルと同じ bin 配下に作られるため作業ディレクトリを汚さない。
-        run: |
-          dotnet build samples/ec-order/EcOrderSample/EcOrderSample.csproj
-          dotnet run --project samples/ec-order/EcOrderSample/EcOrderSample.csproj --no-build
+        # サンプルの csproj は QuickER.slnx に入っているので、上の「ビルド」ステップでビルド済み
+        run: dotnet run --project samples/ec-order/EcOrderSample/EcOrderSample.csproj --no-build
 
-      - name: 3 階層サンプルのビルドと実行（samples/ec-order-remote）
+      - name: 3 階層サンプルの実行（samples/ec-order-remote）
         # クライアント → HTTP+JSON → サーバー → SQLite の実 2 プロセススモーク。
         # クライアントは接続リトライを内蔵しており、サーバーの起動待ちを吸収する。
         # サーバーは dotnet run ではなくビルド済み DLL を直接起動する（dotnet run は子プロセスに
         # 実体を生むため、親だけを止めるとサーバーが残留する。DLL 直接起動なら単一プロセス）。
+        # サーバーとクライアントの csproj は QuickER.slnx に入っているので、上の「ビルド」ステップで
+        # Debug 構成としてビルド済み（$serverDll のパスもそれを前提にする）
         shell: pwsh
         run: |
-          dotnet build samples/ec-order-remote/EcOrderRemote.Server/EcOrderRemote.Server.csproj
-          dotnet build samples/ec-order-remote/EcOrderRemote.Client/EcOrderRemote.Client.csproj
           $serverDll = "samples/ec-order-remote/EcOrderRemote.Server/bin/Debug/net10.0/EcOrderRemote.Server.dll"
           $server = Start-Process dotnet -ArgumentList $serverDll -PassThru -NoNewWindow
           try {
@@ -128,15 +125,7 @@ jobs:
           }
 
       - name: パッケージ生成検証（ランタイム7種+CLI）
-        # 上の「ビルド」ステップは Debug 構成だが、dotnet pack は .NET 8 以降の SDK 既定で
-        # Release を対象にするため --no-build だと Release バイナリ不在で失敗する（NU5026）。
-        # ここでは pack に事前ビルドをさせる（-c Release 明示・対象 7 プロジェクトのみの小さなグラフ）
-        run: |
-          dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.InMemory/QuickER.Runtime.InMemory.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.AspNetCore/QuickER.Runtime.AspNetCore.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.Sync/QuickER.Runtime.Sync.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Cli/QuickER.Cli.csproj -c Release --output ${{ runner.temp }}/nupkg
+        # 一覧・pack・検証の本体は scripts/pack-packages.ps1（publish.yml と共有。一覧をここへ写さない）。
+        # 1 本ずつ終了コードを見て、続けて verify-packages.ps1 で README / アイコンの宣言・
+        # tools の .pdb 不在・版の一致・本数を検証する
+        run: ./scripts/pack-packages.ps1 -OutputDirectory "${{ runner.temp }}/nupkg"

@@ -94,6 +94,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = @(gh api "/repos/${{ github.repository }}/releases" --paginate --jq '.[].assets[].name')
+          # 照会の失敗を「既存リリースなし」と取り違えると、差分更新パッケージの無いリリースが緑で出る
+          # （GitHub Actions の pwsh はネイティブコマンドの非 0 で止まらない）
+          if ($LASTEXITCODE -ne 0) { Write-Host "既存リリースの照会に失敗しました（終了コード: $LASTEXITCODE）"; exit 1 }
           $full = $assets -contains 'releases.win-full.json'
           $lite = $assets -contains 'releases.win-lite.json'
           "full=$($full.ToString().ToLower())" >> $env:GITHUB_OUTPUT
@@ -138,4 +141,6 @@ jobs:
           # ノートは自動生成しない（--generate-notes を付けない）。コミット単位の羅列は利用者向けの
           # 粒度と合わないため、リリースノートは CHANGELOG の該当版を手で転記する運用とする
           # （CONTRIBUTING のリリース手順 5）
-          gh release create "v${{ steps.version.outputs.version }}" $assets --title "QuickER v${{ steps.version.outputs.version }}" --notes ""
+          # --target でタグをこの実行がビルドしたコミットに付ける（省くと既定ブランチの先頭に付き、
+          # 実行中に main が進んだときや main 以外で起動したときに、配布物とタグのコミットが食い違う）
+          gh release create "v${{ steps.version.outputs.version }}" $assets --target "${{ github.sha }}" --title "QuickER v${{ steps.version.outputs.version }}" --notes ""
