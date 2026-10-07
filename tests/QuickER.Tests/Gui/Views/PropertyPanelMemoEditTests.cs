@@ -22,7 +22,12 @@ namespace QuickER.Tests.Gui.Views;
 /// 束縛の書き方は XAML にしか現れないため、実ウィンドウを表示して確かめる
 /// （<see cref="PanelVisibilityTests"/> と同じ流儀）。
 /// </para>
+/// <para>
+/// 確定はキーボードフォーカスが実際に移ることに頼るので、ほかのテストのウィンドウにアクティブを
+/// 奪われないよう並列に走らせない（<see cref="TestSupport.WindowActivationTestCollection"/>）。
+/// </para>
 /// </remarks>
+[Collection(TestSupport.WindowActivationTestCollection.Name)]
 public class PropertyPanelMemoEditTests
 {
     /// <summary>メモ欄を持つエンティティを 1 つだけ置いた図を作って選択する</summary>

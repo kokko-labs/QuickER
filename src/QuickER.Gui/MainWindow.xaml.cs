@@ -191,7 +191,7 @@ public partial class MainWindow : Window
     /// </param>
     private void ApplyFitToWindow(bool allowShrink)
     {
-        var bounds = ComputeEntitiesBounds();
+        var bounds = _viewModel.ComputeContentBounds();
         var viewport = new Size(
             DiagramScrollViewer.ViewportWidth,
             DiagramScrollViewer.ViewportHeight
@@ -215,32 +215,6 @@ public partial class MainWindow : Window
         DiagramScrollViewer.UpdateLayout();
         DiagramScrollViewer.ScrollToHorizontalOffset(fit.Offset.X);
         DiagramScrollViewer.ScrollToVerticalOffset(fit.Offset.Y);
-    }
-
-    /// <summary>全エンティティを包含するバウンディングボックス（論理座標）を求める。空図なら空矩形を返す</summary>
-    private Rect ComputeEntitiesBounds()
-    {
-        var entities = _viewModel.Entities;
-
-        if (entities.Count == 0)
-        {
-            return Rect.Empty;
-        }
-
-        var minX = double.PositiveInfinity;
-        var minY = double.PositiveInfinity;
-        var maxX = double.NegativeInfinity;
-        var maxY = double.NegativeInfinity;
-
-        foreach (var entity in entities)
-        {
-            minX = Math.Min(minX, entity.X);
-            minY = Math.Min(minY, entity.Y);
-            maxX = Math.Max(maxX, entity.X + entity.Width);
-            maxY = Math.Max(maxY, entity.Y + entity.DisplayHeight);
-        }
-
-        return new Rect(minX, minY, maxX - minX, maxY - minY);
     }
 
     /// <summary>全画面表示へ入る前のウィンドウの枠と状態（解除時にここへ戻す）</summary>

@@ -130,4 +130,44 @@ public sealed class MainViewModelBulkDiagramUpdateTests
 
         (tracker.SnapshotRefreshCountForTests - before).Should().Be(1);
     }
+
+    /// <summary>
+    /// 連動変更（PK の切り替え・リレーションの種別変更）の記録が、スナップショットを 1 回だけ取り直し、
+    /// 1 回の Undo で戻ることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 記録の後処理（外部キー列ルールの再適用）は追跡停止の中で全要素を取り直す。記録の側でも取り直すと、
+    /// 1 回の操作で全要素を 2 回なめる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "PK の切り替えとリレーションの種別変更は、スナップショットを 1 回だけ取り直し 1 回の Undo で戻る"
+    )]
+    public void GroupedPropertyChange_RefreshesOnce_AndUndoesInOneStep()
+    {
+        var vm = new MainViewModel();
+        vm.ReplaceDiagramFromModule(BuildStar(1));
+        var tracker = vm.ChangeTrackerForTests;
+        var child = vm.Entities.Single(e => e.TableName == "Child0");
+        var note = new ColumnViewModel(new Column { Name = "Note", DataType = "int" });
+        child.Columns.Add(note);
+
+        var before = tracker.SnapshotRefreshCountForTests;
+        note.IsPrimaryKey = true;
+        (tracker.SnapshotRefreshCountForTests - before).Should().Be(1, "PK の切り替え");
+        note.IsNullable.Should().BeFalse("PK 化の連動");
+
+        var relationship = vm.Relationships.Single();
+        before = tracker.SnapshotRefreshCountForTests;
+        relationship.Type = RelationshipType.OneToOne;
+        (tracker.SnapshotRefreshCountForTests - before).Should().Be(1, "リレーションの種別変更");
+
+        // スナップショットが正しく取り直されていれば、それぞれ 1 回の Undo で戻り、続く Undo は前の変更へ進む
+        vm.UndoCommand.Execute(null);
+        relationship.Type.Should().Be(RelationshipType.OneToMany);
+        note.IsPrimaryKey.Should().BeTrue();
+
+        vm.UndoCommand.Execute(null);
+        note.IsPrimaryKey.Should().BeFalse();
+        note.IsNullable.Should().BeTrue();
+    }
 }

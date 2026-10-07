@@ -938,23 +938,27 @@ public static class AutoLayoutService
     }
 
     /// <summary>中心座標を各エンティティの左上座標へ変換し、最小 X・Y が <see cref="Margin"/> になるよう平行移動して正規化する</summary>
+    /// <remarks>
+    /// 座標は最後に 1 回だけ代入する（途中の左上座標を代入してから平行移動すると、座標の変更通知が 2 倍になり、
+    /// 線・ミニマップ・キャンバスの大きさの再計算もそのたびに走る）。
+    /// </remarks>
     private static void PlaceAtCenters(
         IList<EntityViewModel> entities,
         (double X, double Y)[] centers
     )
     {
+        var lefts = new double[entities.Count];
+        var tops = new double[entities.Count];
         var minX = double.PositiveInfinity;
         var minY = double.PositiveInfinity;
 
         // いったん中心 → 左上へ直し、全体の最小座標を求める
         for (var i = 0; i < entities.Count; i++)
         {
-            var left = centers[i].X - entities[i].Width / 2;
-            var top = centers[i].Y - entities[i].DisplayHeight / 2;
-            entities[i].X = left;
-            entities[i].Y = top;
-            minX = Math.Min(minX, left);
-            minY = Math.Min(minY, top);
+            lefts[i] = centers[i].X - entities[i].Width / 2;
+            tops[i] = centers[i].Y - entities[i].DisplayHeight / 2;
+            minX = Math.Min(minX, lefts[i]);
+            minY = Math.Min(minY, tops[i]);
         }
 
         // 最小座標が Margin に揃うよう全体を平行移動する（辺の相対位置＝軸整列は保たれる）
@@ -963,8 +967,8 @@ public static class AutoLayoutService
 
         for (var i = 0; i < entities.Count; i++)
         {
-            entities[i].X += offsetX;
-            entities[i].Y += offsetY;
+            entities[i].X = lefts[i] + offsetX;
+            entities[i].Y = tops[i] + offsetY;
         }
     }
 

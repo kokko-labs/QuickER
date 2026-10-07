@@ -2,6 +2,7 @@ using System.ComponentModel;
 using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Model;
+using QuickER.Services;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;
@@ -58,6 +59,63 @@ public class EntityViewModelTests
 
         notified.Should().BeTrue();
         entity.DisplayHeight.Should().BeLessThan(fullHeight);
+    }
+
+    /// <summary>簡易表示中に PK / FK を付け外しすると、表示する行数に合わせて DisplayHeight が変わることを検証する</summary>
+    /// <remarks>
+    /// 簡易表示は PK / FK の列だけを行として数えるので、キー標識の変更でキャッシュを捨てないと、
+    /// 線の接続位置・ミニマップ・自動整列が古い高さを使い続ける（コンパクト表示中にリレーションを作るだけで起きる）。
+    /// </remarks>
+    [Theory(
+        DisplayName = "簡易表示中に PK / FK を付け外しすると DisplayHeight が追従し変更が通知される"
+    )]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void IsCompactView_KeyToggle_RecomputesDisplayHeight(bool primaryKey)
+    {
+        var entity = NewEntityWithMixedColumns();
+        entity.IsCompactView = true;
+        var compactHeight = entity.DisplayHeight;
+        var note = entity.Columns.Single(column => column.Name == "Note1");
+        var notified = 0;
+
+        entity.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(EntityViewModel.DisplayHeight))
+            {
+                notified++;
+            }
+        };
+
+        SetKey(note, primaryKey, true);
+
+        notified.Should().BeGreaterThan(0);
+        entity.DisplayHeight.Should().BeGreaterThan(compactHeight, "行が 1 つ増える");
+        entity
+            .DisplayHeight.Should()
+            .Be(
+                DiagramMetricsService.EstimateEntityHeight(
+                    entity,
+                    entity.ShowDescriptionsInDiagram,
+                    isCompactView: true
+                )
+            );
+
+        SetKey(note, primaryKey, false);
+
+        entity.DisplayHeight.Should().Be(compactHeight, "行が元へ戻る");
+
+        static void SetKey(ColumnViewModel column, bool primaryKey, bool value)
+        {
+            if (primaryKey)
+            {
+                column.IsPrimaryKey = value;
+            }
+            else
+            {
+                column.IsForeignKey = value;
+            }
+        }
     }
 
     /// <summary>PK/FK のみのエンティティは簡易表示でも DisplayHeight が変わらないことを検証する</summary>

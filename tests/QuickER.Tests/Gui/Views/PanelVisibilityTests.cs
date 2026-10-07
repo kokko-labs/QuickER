@@ -21,7 +21,10 @@ namespace QuickER.Tests.Gui.Views;
 /// ビヘイビア単体（<see cref="Gui.Behaviors.CollapsibleColumnBehaviorTests"/>）が正しくても、
 /// XAML の添付が漏れていれば列は畳まれない。WPF は解決できない束縛を無言で捨てるため、
 /// 実ウィンドウを表示して「VM のトグル → 実際に幅 0」まで通す。
+/// フォーカスの移動を表明するテストを含むので、ほかのテストのウィンドウにアクティブを奪われないよう
+/// 並列に走らせない（<see cref="TestSupport.WindowActivationTestCollection"/>）。
 /// </remarks>
+[Collection(TestSupport.WindowActivationTestCollection.Name)]
 public class PanelVisibilityTests
 {
     /// <summary>ツールボックスの列</summary>

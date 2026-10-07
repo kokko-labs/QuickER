@@ -529,7 +529,10 @@ public sealed class DiagramChangeTracker
     /// </summary>
     /// <remarks>
     /// 連動変更（IsPrimaryKey ↔ IsNullable、Type ↔ 列ペア）を
-    /// 1 回の Undo / Redo で往復させるために用いる
+    /// 1 回の Undo / Redo で往復させるために用いる。
+    /// 後処理（<paramref name="afterPush"/>）は <see cref="RunWithoutTracking"/> の中で実行し、スナップショットの
+    /// 再取得はその終了時の 1 回だけにする（呼び出し元は追跡中にしか呼ばないので、ここが最外側になる。
+    /// 後処理の中の <see cref="RunWithoutTracking"/> は入れ子になり、取り直さない）。
     /// </remarks>
     private void PushGroupedPropertyChanges(
         object sender,
@@ -541,8 +544,7 @@ public sealed class DiagramChangeTracker
         if (!_trackedPropertySnapshots.TryGetValue(sender, out var originalSnapshots))
         {
             CaptureTrackedProperties(sender, trackedProperties);
-            afterPush?.Invoke();
-            RefreshTrackedPropertySnapshots(sender);
+            RunWithoutTracking(() => afterPush?.Invoke());
             return;
         }
 
@@ -568,8 +570,7 @@ public sealed class DiagramChangeTracker
         }
 
         _trackedPropertySnapshots[sender] = currentSnapshots;
-        afterPush?.Invoke();
-        RefreshTrackedPropertySnapshots(sender);
+        RunWithoutTracking(() => afterPush?.Invoke());
     }
 
     /// <summary>スナップショット辞書の値を対象オブジェクトへ追跡停止下で一括設定する</summary>
@@ -623,6 +624,7 @@ public sealed class DiagramChangeTracker
     )
     {
         var properties = PropertiesFor(target);
+
         foreach (var (name, value) in snapshot)
         {
             properties.FirstOrDefault(p => p.Name == name)?.SetValue(target, value);

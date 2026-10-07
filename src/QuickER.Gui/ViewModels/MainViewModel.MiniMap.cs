@@ -144,8 +144,11 @@ public partial class MainViewModel
     }
 
     /// <summary>全エンティティを包含するバウンディングボックス（論理座標）を求める。空図なら空矩形</summary>
-    /// <remarks>View 側の fit 計算と同じ「X..X+Width / Y..Y+DisplayHeight」の範囲を用いる</remarks>
-    private Rect ComputeContentBounds()
+    /// <remarks>
+    /// 範囲は「X..X+Width / Y..Y+DisplayHeight」。ミニマップの射影と、View 側の「全体を表示」の倍率計算
+    /// （MainWindow）が同じ範囲を使うよう、ここを唯一の計算にする
+    /// </remarks>
+    internal Rect ComputeContentBounds()
     {
         if (Entities.Count == 0)
         {

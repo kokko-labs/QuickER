@@ -2566,7 +2566,7 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:	emp\Entities.g.cs";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.LayeredOutput = true;
             var namespacesBefore = (vm.EntityNamespace, vm.RepositoryNamespace, vm.MapperNamespace);
 

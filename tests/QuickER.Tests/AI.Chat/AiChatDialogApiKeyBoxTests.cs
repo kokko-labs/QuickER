@@ -15,7 +15,10 @@ namespace QuickER.Tests.AI.Chat;
 /// </summary>
 /// <remarks>
 /// 配線を外しても VM 単体テストは緑のままなので、実ダイアログを画面外へ表示してフォーカスを実際に移す。
+/// フォーカスの移動に頼るので、ほかのテストのウィンドウにアクティブを奪われないよう並列に走らせない
+/// （<see cref="WindowActivationTestCollection"/>）。
 /// </remarks>
+[Collection(WindowActivationTestCollection.Name)]
 public class AiChatDialogApiKeyBoxTests
 {
     private sealed class SyncUiDispatcher : IUiDispatcher

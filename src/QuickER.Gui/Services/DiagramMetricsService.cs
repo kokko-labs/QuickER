@@ -263,6 +263,14 @@ public static class DiagramMetricsService
                     }
                 }
 
+                // サロゲートペア（絵文字など）の途中では切らない。切ると両方の行に単独のサロゲートが残り、
+                // SVG では空白・ベクタ印刷では代替グリフになる。1 文字目のペアも収まらない幅なら、
+                // 最低 1 文字は進める規則に従ってペアごと進める
+                if (char.IsSurrogatePair(paragraph[start + cut - 1], paragraph[start + cut]))
+                {
+                    cut = cut > 1 ? cut - 1 : cut + 1;
+                }
+
                 lines.Add(paragraph.Substring(start, cut).TrimEnd());
                 start += cut;
 

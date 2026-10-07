@@ -21,11 +21,14 @@ public sealed class GroupRemoveEntitiesCommand : IUndoableCommand
     /// <summary>削除対象のエンティティ群</summary>
     private readonly IReadOnlyList<EntityViewModel> _entities;
 
-    /// <summary>巻き添えで削除したリレーション（Undo の復元元）</summary>
-    private List<RelationshipViewModel> _removedRelationships = new();
+    /// <summary>削除したエンティティと元の位置（Undo の復元元）</summary>
+    private List<(int Index, EntityViewModel Item)> _removedEntities = new();
+
+    /// <summary>巻き添えで削除したリレーションと元の位置（Undo の復元元）</summary>
+    private List<(int Index, RelationshipViewModel Item)> _removedRelationships = new();
 
     /// <summary>巻き添えで削除した名前付きクエリと元の位置（Undo の復元元）</summary>
-    private List<(int Index, QueryDefinition Query)> _removedQueries = new();
+    private List<(int Index, QueryDefinition Item)> _removedQueries = new();
 
     /// <summary><see cref="GroupRemoveEntitiesCommand"/> を生成する</summary>
     /// <param name="main">削除を行うメイン ViewModel</param>
@@ -46,19 +49,12 @@ public sealed class GroupRemoveEntitiesCommand : IUndoableCommand
 
         // 削除対象エンティティを端点に持つリレーションも併せて除去する（孤立した線を残さない）。
         // 対象同士を結ぶ線は両端が対象のため一度だけ退避すればよい（集合判定で重複を避ける）。
-        _removedRelationships = _main
-            .Relationships.Where(r => targets.Contains(r.Source) || targets.Contains(r.Target))
-            .ToList();
-
-        foreach (var r in _removedRelationships)
-        {
-            _main.Relationships.Remove(r);
-        }
-
-        foreach (var entity in _entities)
-        {
-            _main.Entities.Remove(entity);
-        }
+        // どちらも元の位置を記録し、Undo で同じ位置へ戻す（末尾へ戻すと図の順序が変わる）
+        _removedRelationships = IndexedRemoval.RemoveWhere(
+            _main.Relationships,
+            r => targets.Contains(r.Source) || targets.Contains(r.Target)
+        );
+        _removedEntities = IndexedRemoval.RemoveWhere(_main.Entities, targets.Contains);
 
         // 削除対象の名前付きクエリも取り除く（残すとどこからも触れない孤児になる）
         _removedQueries = EntityQueryRemoval.Remove(
@@ -70,16 +66,9 @@ public sealed class GroupRemoveEntitiesCommand : IUndoableCommand
     /// <inheritdoc />
     public void Undo()
     {
-        foreach (var entity in _entities)
-        {
-            _main.Entities.Add(entity);
-        }
-
-        foreach (var r in _removedRelationships)
-        {
-            _main.Relationships.Add(r);
-        }
-
+        // リレーションは端点のエンティティが戻ってから戻す
+        IndexedRemoval.Restore(_main.Entities, _removedEntities);
+        IndexedRemoval.Restore(_main.Relationships, _removedRelationships);
         EntityQueryRemoval.Restore(_main, _removedQueries);
 
         // 復元メンバーは IsSelected を保持したまま戻るため、主選択も復元して
