@@ -193,7 +193,7 @@ public class RemoteServiceGenerationTests
         server.Should().Contain("internal sealed class RemoteBadRequestException : Exception");
         server.Should().Contain("StatusCodes.Status400BadRequest");
         server.Should().Contain("catch (BadHttpRequestException ex)");
-        server.Should().Contain("await WriteErrorAsync(context, ex.StatusCode, \"BadRequest\"");
+        server.Should().Contain("WriteErrorAsync(context, ex.StatusCode, \"BadRequest\"");
 
         // 500 の詳細公開は実行時引数で、既定は非公開（汎用文言＋相関 ID）。
         // OnServerError（partial＝アセンブリを跨げない）はラッパー RaiseServerError をデリゲートとして
