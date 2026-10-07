@@ -159,14 +159,9 @@ public static class ReverseMergePostProcessor
     /// </para>
     /// <para>
     /// 引き継ぐのは <b>コードが順序を書いていない</b>（書いていれば不整合で採らなかった場合も含めコードが勝つ）、
-    /// かつ <b>現在図に同じ Id のエンティティがあり、主キー列の集合が列名で一致する</b> ときだけ。
-    /// 主キーの構成が変わったなら、それはコードが語った変更なので古い順序を持ち込まない。
-    /// 列 Id はマージ結果側の列へ列名で張り替える（名前の照合は <see cref="DiagramMergeReconciler"/> と同じ Ordinal）。
-    /// </para>
-    /// <para>
-    /// 引き継ぐのは <b>現在図が明示した順序</b>（<see cref="Entity.PrimaryKeyColumnIds"/> が空でない）だけ。
-    /// 明示していない図は、マージ結果でも明示しないまま残す。列宣言順のフォールバックを書き込むと
-    /// 順序が固定され、以後の列の並べ替えが主キーの順序に反映されなくなる。
+    /// かつ <b>現在図に同じ Id のエンティティがある</b> ときだけ。その先の規則（現在図が明示していること・
+    /// 主キー列の集合が列名で一致すること）は <see cref="Entity.InheritPrimaryKeyOrderFrom"/> が持つ
+    /// （Excel 定義書のマージ取込と共有する）。
     /// </para>
     /// </remarks>
     public static void ApplyPrimaryKeyOrder(
@@ -191,41 +186,7 @@ public static class ReverseMergePostProcessor
                 continue;
             }
 
-            // 現在図が順序を明示していなければ、引き継ぐ順序が無い（未明示は未明示のまま）
-            if (existing.PrimaryKeyColumnIds.Count == 0)
-            {
-                continue;
-            }
-
-            var mergedKeys = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
-
-            // パーサーは重複する列名を警告つきで通す。名前で引けない主キーには順序を引き継げない（どれが誰か決まらない）
-            if (
-                mergedKeys.DistinctBy(column => column.Name, StringComparer.Ordinal).Count()
-                != mergedKeys.Count
-            )
-            {
-                continue;
-            }
-
-            var mergedKeyByName = mergedKeys.ToDictionary(
-                column => column.Name,
-                StringComparer.Ordinal
-            );
-            var currentOrder = existing.GetPrimaryKeyColumnsInOrder();
-
-            // 主キー列の集合が一致しないなら、コードが主キーの構成を変えた＝古い順序は持ち込まない
-            if (
-                currentOrder.Count != mergedKeyByName.Count
-                || currentOrder.Any(column => !mergedKeyByName.ContainsKey(column.Name))
-            )
-            {
-                continue;
-            }
-
-            entity.PrimaryKeyColumnIds = currentOrder
-                .Select(column => mergedKeyByName[column.Name].Id)
-                .ToList();
+            entity.InheritPrimaryKeyOrderFrom(existing);
         }
     }
 

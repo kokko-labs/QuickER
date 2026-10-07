@@ -78,7 +78,7 @@ On creation, **every primary key column of the source is paired with a matching 
 Dots and spaces in the table names become `_` and leading or trailing spaces are dropped, the same rule DDL generation uses for a foreign key that has no name.
 A relationship added by the AI chat or the MCP tools gets the same name.
 A source column with no matching target column stays out of the mapping (fill it in from the properties panel), and no target column is used twice.
-A target primary key column is paired only when its name is the one derived from the source table (`OrderId` / `order_id` for `Orders`), or, for a composite source key, when it has the same name as a source key column, so an identifying relationship such as order lines keyed by `(OrderId, LineNo)` gets its `OrderId` pair, while a target whose primary key is just `id` is not paired with the source's `id`.
+A target primary key column is paired only when its name is the one derived from the source table (`OrderId` / `order_id` for `Orders`), or, for a composite source key, when it has the same name as a source key column other than a lone `id`, so an identifying relationship such as order lines keyed by `(OrderId, LineNo)` gets its `OrderId` pair, while an `id` in the target's primary key is never paired with the source's `id` (each table's `id` is that table's own key, so for a source `Projects(TenantId, Id)` the source's `Id` pairs with the target's `ProjectId`).
 A self-reference never pairs a primary key column.
 
 While creation mode is active the toolbox says so and offers a "Cancel" button for it.

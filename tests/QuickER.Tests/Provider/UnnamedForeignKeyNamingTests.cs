@@ -227,6 +227,74 @@ public class UnnamedForeignKeyNamingTests
         }
     }
 
+    /// <summary>
+    /// <see cref="BuildDiagram"/> の先頭に、同じ組の名前の無い多対多を足した図
+    /// （DDL はこの関係に外部キーを作らないので、既定名を取らせてはいけない）
+    /// </summary>
+    private static ErDiagram BuildDiagramWithManyToManyFirst()
+    {
+        var diagram = BuildDiagram();
+        diagram.Relationships.Insert(
+            0,
+            new Relationship
+            {
+                SourceEntityId = diagram.Entities[0].Id,
+                TargetEntityId = diagram.Entities[1].Id,
+                Type = RelationshipType.ManyToMany,
+            }
+        );
+
+        return diagram;
+    }
+
+    [Fact(
+        DisplayName = "名前の無い多対多が先に並んでも、同じ組の外部キーの名前は変わらない（DDL・5 方言）"
+    )]
+    public void Ddl_ManyToManyFirst_DoesNotShiftForeignKeyNames()
+    {
+        foreach (var provider in Providers)
+        {
+            var ddl = provider.DdlGenerator.Build(BuildDiagramWithManyToManyFirst());
+
+            ddl.Should().NotContain("FK_orders_customers_bill_customer_id", provider.Name);
+            ddl.Should().Contain(ShipName, provider.Name);
+            CountOf(ddl, BillName).Should().Be(2, provider.Name);
+        }
+    }
+
+    [Fact(
+        DisplayName = "名前の無い多対多が先に並ぶ図は、既定名で外部キーを作った live と外部キーの差分を出さない（名前を保存する 4 方言）"
+    )]
+    public void Diff_ManyToManyFirst_MatchesLiveWithDefaultName()
+    {
+        foreach (
+            var provider in Providers.Where(p =>
+                p.SyncCapabilities.PersistsForeignKeyConstraintNames
+            )
+        )
+        {
+            var live = BuildDiagram(BillName, ShipName);
+            var target = BuildDiagramWithManyToManyFirst();
+
+            var diff = new SchemaDiffService().Compute(
+                live.Entities,
+                live.Relationships,
+                target.Entities,
+                target.Relationships,
+                provider.SyncCapabilities
+            );
+
+            diff.Items.Should()
+                .NotContain(
+                    i =>
+                        i.Kind == SchemaDiffKind.AddForeignKey
+                        || i.Kind == SchemaDiffKind.DropForeignKey
+                        || i.Kind == SchemaDiffKind.AlterForeignKey,
+                    provider.Name
+                );
+        }
+    }
+
     private static int CountOf(string text, string value)
     {
         var count = 0;

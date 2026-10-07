@@ -224,6 +224,117 @@ public class TableDefinitionRoundTripTests
         }
     }
 
+    /// <summary>orders の主キーを (b, a)＝列の並びと逆の順序で明示した現在図を組み立てる</summary>
+    private static ErDiagram BuildCurrentWithReorderedPrimaryKey()
+    {
+        var diagram = BuildDiagram();
+        var orders = diagram.Entities[1];
+        var a = orders.Columns.Single(column => column.Name == "a");
+        var b = orders.Columns.Single(column => column.Name == "b");
+        orders.Columns[0].IsPrimaryKey = false;
+        a.IsPrimaryKey = true;
+        a.IsNullable = false;
+        b.IsPrimaryKey = true;
+        b.IsNullable = false;
+        orders.PrimaryKeyColumnIds = [b.Id, a.Id];
+
+        return diagram;
+    }
+
+    /// <summary>エンティティの主キー列名を実効順で返す</summary>
+    private static List<string> KeyOrder(Entity entity) =>
+        entity.GetPrimaryKeyColumnsInOrder().Select(column => column.Name).ToList();
+
+    /// <summary>
+    /// 定義書は複合主キーの順序を書かないが、マージ取込は現在図が明示した順序を引き継ぎ、
+    /// 書き出して読み戻しただけで置換の確認を出さないことを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "Excel のマージ取込: 主キー列の集合が同じなら現在図の主キーの順序を引き継ぎ、置換の確認を出さない"
+    )]
+    public void MergeImport_InheritsPrimaryKeyOrder()
+    {
+        var current = BuildCurrentWithReorderedPrimaryKey();
+        var dir = Directory.CreateDirectory(
+            Path.Combine(Path.GetTempPath(), "quicker-tabledoc-" + Guid.NewGuid().ToString("N"))
+        );
+
+        try
+        {
+            var path = Path.Combine(dir.FullName, "doc.xlsx");
+            TableDefinitionDocumentExporter.SaveTo(current, path);
+
+            // 素の取込では列の並び順へ戻っている（後処理が引き継いでいることの対照）
+            var plain = TableDefinitionDocumentImporter
+                .Load(path)
+                .Entities.Single(entity => entity.TableName == "orders");
+            KeyOrder(plain).Should().Equal("a", "b");
+            plain.PrimaryKeyColumnIds.Should().BeEmpty();
+
+            var host = new StubDiagramTransferHost { Model = current };
+            var dialog = new StubDialogService();
+            var service = new DiagramImportService(host, dialog, new StubFileDialogService());
+
+            service.ImportDiagramFile(DiagramImportFormat.Excel, path);
+
+            var merged = host
+                .MergedReplacements.Should()
+                .ContainSingle()
+                .Subject.Entities.Single(entity => entity.TableName == "orders");
+            KeyOrder(merged).Should().Equal("b", "a");
+            dialog.ConfirmMessages.Should().BeEmpty("構造が同じなので置換の確認は出ない");
+            dialog.WarningConfirmMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact(
+        DisplayName = "Excel のマージ取込: 主キー列の集合が現在図と違えば取込値の主キーの順序のまま"
+    )]
+    public void MergePostProcessor_DifferentPrimaryKeySet_KeepsImportedOrder()
+    {
+        var current = BuildCurrentWithReorderedPrimaryKey();
+        var currentOrders = current.Entities[1];
+        var imported = new Entity
+        {
+            Id = currentOrders.Id,
+            TableName = "orders",
+            Columns = currentOrders
+                .Columns.Select(column => new Column
+                {
+                    Id = column.Id,
+                    Name = column.Name,
+                    DataType = column.DataType,
+                    // 定義書側で customer_id も主キーに加えた
+                    IsPrimaryKey = column.IsPrimaryKey || column.Name == "customer_id",
+                })
+                .ToList(),
+        };
+
+        TableDefinitionMergePostProcessor.Apply(current, [imported]);
+
+        imported.PrimaryKeyColumnIds.Should().BeEmpty();
+        KeyOrder(imported).Should().Equal("customer_id", "a", "b");
+    }
+
+    [Fact(
+        DisplayName = "Excel のマージ取込: 現在図が主キーの順序を明示していなければ明示しないまま"
+    )]
+    public void MergePostProcessor_CurrentOrderNotExplicit_StaysNotExplicit()
+    {
+        var current = BuildCurrentWithReorderedPrimaryKey();
+        var currentOrders = current.Entities[1];
+        currentOrders.PrimaryKeyColumnIds = [];
+        var imported = currentOrders.Clone(preserveId: true);
+
+        TableDefinitionMergePostProcessor.Apply(current, [imported]);
+
+        imported.PrimaryKeyColumnIds.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "Excel のマージ取込: 構成列の集合が現在図と違う一意制約は取込値のまま")]
     public void MergePostProcessor_DifferentColumnSet_KeepsImported()
     {

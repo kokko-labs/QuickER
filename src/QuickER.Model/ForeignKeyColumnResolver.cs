@@ -23,7 +23,7 @@ namespace QuickER.Model;
 /// </para>
 /// <para>
 /// 子の主キー列を候補にするのは、名前が強く一致するときだけ: ①（親テーブル名から導いた名前）と、
-/// 複合主キーの親で同名の子列を先に割り当てる段（<see cref="ResolveColumnPairs"/>）。注文明細の主キー
+/// 複合主キーの親で同名の子列を先に割り当てる段（<see cref="ResolveColumnPairs"/>。名前が単独の <c>id</c> の列は除く）。注文明細の主キー
 /// <c>(OrderId, LineNo)</c> の <c>OrderId</c> のような識別関係の外部キー列は、ここで拾う。
 /// ②〜④では主キー列を外す（単一主キーの親の②で許すと、子の主キーが単独の <c>id</c> のときに親の <c>id</c> と
 /// 取り違える）。自己参照ではどの段でも外す（①の名前が自分自身の主キーを指すため）。
@@ -130,6 +130,10 @@ public static class ForeignKeyColumnResolver
     /// <para>
     /// 同名を先に割り当てる段では子の主キー列も候補にする（自己参照を除く）。<c>Projects(TenantId, ProjectId)</c> から
     /// <c>Tasks(TenantId, ProjectId, TaskId)</c>（3 列とも主キー）への識別関係が、2 列ともペアになる。
+    /// ただし名前が単独の <c>id</c> の子の主キー列は除く。<c>id</c> という列はそれぞれのテーブル自身の代理キーを指すので
+    /// （<c>Projects.Id</c> はプロジェクトの、<c>Tasks.Id</c> はタスクの番号）、同名でも対応しない
+    /// （単一主キーの親で、子の主キーが単独の <c>id</c> のときに対応づけないのと同じ線引き）。
+    /// <c>Projects(TenantId, Id)</c> から <c>Tasks(TenantId, Id, ProjectId)</c> へは、<c>Id</c> が残りの順位（①の <c>ProjectId</c>）で解かれる。
     /// </para>
     /// </remarks>
     public static List<RelationshipColumnPair> ResolveColumnPairs(
@@ -170,7 +174,9 @@ public static class ForeignKeyColumnResolver
                     i,
                     PickBest(
                         BuildCandidates(target, usedColumnIds),
-                        column => IsSameName(column, keyColumn.Name),
+                        column =>
+                            IsSameName(column, keyColumn.Name)
+                            && !(column.IsPrimaryKey && IsBareId(column.Name)),
                         keyColumn.DataType,
                         allowPrimaryKey: !isSelfReference
                     )
@@ -299,6 +305,10 @@ public static class ForeignKeyColumnResolver
             )
             .First();
     }
+
+    /// <summary>列名がテーブル自身の代理キーを表す単独の <c>id</c> か（大文字小文字は区別しない）</summary>
+    private static bool IsBareId(string columnName) =>
+        string.Equals(columnName, "id", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>候補列が参照元キー列と同名か（大文字小文字は区別しない）</summary>
     private static bool IsSameName(CandidateColumn column, string? sourceKeyColumnName) =>

@@ -90,7 +90,8 @@ When that name is already taken, for example by a second relationship between th
 
 Definition documents exported by QuickER can be re-imported.
 In the key column, `UQ{n}` marks unique constraints and the same number means the same constraint, so the columns sharing a number are restored as one constraint (the constraint name is not carried by the document, so it is left unset and synthesized at DDL generation time).
-The document carries neither the order of a constraint's columns nor which columns are computed, so the merge import takes them from the current diagram: a unique constraint over the same set of columns as one in the current diagram keeps that constraint's column order and, if it has one, its name, and a matching column keeps its computed setting.
+The document carries neither the order of a constraint's columns, nor which columns are computed, nor the order of a composite primary key, so the merge import takes them from the current diagram: a unique constraint over the same set of columns as one in the current diagram keeps that constraint's column order and, if it has one, its name, and a matching column keeps its computed setting.
+When the primary key has the same set of column names as in the current diagram, the key keeps the order the current diagram set explicitly (the same rule as the merge import of C# code).
 A relationship whose constraint name cell is empty stays without a name and gets the default `FK_{child}_{parent}` from the DDL, unless that name is already taken, for example by a second such row between the same two tables; then it gets the child's foreign key column names appended, or a number.
 Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import.
 **Excel files created by other applications cannot be imported directly**, though: to migrate definition documents you already have, transcribe them into QuickER's document format once.
@@ -211,7 +212,7 @@ SQL DDL and the definition documents report nothing, because the only things the
 
 Outputs a definition document consisting of a table list, a relationship list, and per-table detail sheets (column types, required flags, keys, descriptions).
 Besides `PK` and `FK{n}`, the key column shows unique constraints as `UQ{n}` (combined as in `PK/UQ1` or `FK1/UQ2`).
-`PK` carries no ordinal, so a composite primary key's own column order is not carried by the document either, and re-importing restores the key in column order.
+`PK` carries no ordinal, so a composite primary key's own column order is not carried by the document either: a merge import keeps the current diagram's order when the key has the same set of columns, and any other import restores the key in column order.
 `n` follows the order the constraints appear in, and **the same number means the same constraint**, so a composite constraint puts the same number on every column it covers (a composite foreign key works the same way).
 
 The relationship list keeps one row per relationship: a composite foreign key lists its columns comma-separated in the referencing and referenced column cells, in declaration order (`TenantRef, RegionRef` / `TenantId, RegionCode`).

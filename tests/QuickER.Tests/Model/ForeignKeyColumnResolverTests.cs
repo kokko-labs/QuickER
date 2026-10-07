@@ -601,6 +601,66 @@ public class ForeignKeyColumnResolverTests
         PairNames(parent, child).Should().Equal("TenantId→TenantId", "ProjectId→ProjectId");
     }
 
+    /// <summary>
+    /// 複合主キーの親の同名の割り当てで、子の主キーのうち単独の id は親の id と対応づけず、
+    /// 親テーブル名由来の列（①）で解くことを検証する（意味のある名前の主キー列は従来どおり付く）
+    /// </summary>
+    /// <param name="key">親子とも主キーに持つ代理キーの列名</param>
+    [Theory(
+        DisplayName = "複合主キーの親でも、子の主キーの単独の id は親の id と対応づけず親テーブル名由来の列へ付ける"
+    )]
+    [InlineData("Id")]
+    [InlineData("id")]
+    [InlineData("ID")]
+    public void ResolveColumnPairs_CompositeKey_BareIdPrimaryKeyIsNotPairedBySameName(string key)
+    {
+        var parent = new Entity
+        {
+            TableName = "Projects",
+            Columns = { NewColumn("TenantId", isPk: true), NewColumn(key, isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "Tasks",
+            Columns =
+            {
+                NewColumn("TenantId", isPk: true),
+                NewColumn(key, isPk: true),
+                NewColumn("ProjectId"),
+            },
+        };
+
+        PairNames(parent, child).Should().Equal("TenantId→TenantId", $"{key}→ProjectId");
+    }
+
+    /// <summary>
+    /// 子の主キーでない列なら、名前が id でも複合主キーの同名の割り当てで付くことを検証する
+    /// （除くのは子自身の代理キー＝主キーの id だけで、それ以外の挙動は変えない。
+    /// 同名の割り当てから外すと、後の段で親テーブル名由来の ProjectId に付く）
+    /// </summary>
+    [Fact(DisplayName = "複合主キーの同名の割り当ては、子の主キーでない id 列には付く")]
+    public void ResolveColumnPairs_CompositeKey_NonKeyIdColumnIsPairedBySameName()
+    {
+        var parent = new Entity
+        {
+            TableName = "Projects",
+            Columns = { NewColumn("TenantId", isPk: true), NewColumn("Id", isPk: true) },
+        };
+        var child = new Entity
+        {
+            TableName = "ProjectSnapshots",
+            Columns =
+            {
+                NewColumn("SnapshotNo", isPk: true),
+                NewColumn("TenantId"),
+                NewColumn("Id"),
+                NewColumn("ProjectId"),
+            },
+        };
+
+        PairNames(parent, child).Should().Equal("TenantId→TenantId", "Id→Id");
+    }
+
     /// <summary>複合主キーの自己参照では、同名の割り当てでも自分自身の主キー列を選ばないことを検証する</summary>
     [Fact(DisplayName = "複合主キーの自己参照は同名の主キー列（自分自身）へ付かない")]
     public void ResolveColumnPairs_CompositeSelfReference_DoesNotPairOwnPrimaryKey()
@@ -626,7 +686,9 @@ public class ForeignKeyColumnResolverTests
     /// 単数形が語尾から 1 つに決まらないテーブル名でも、親テーブル名_id の列が名前一致で選ばれることを検証する
     /// （外部キー印の付いた別の列が先にあっても、順位 3 へ落ちて取り違えない）
     /// </summary>
-    [Theory(DisplayName = "①: courses / warehouses / statuses なども単数形の列名に一致する")]
+    [Theory(
+        DisplayName = "①: courses / warehouses / statuses / movies なども単数形の列名に一致する"
+    )]
     [InlineData("courses", "course_id")]
     [InlineData("purchases", "purchase_id")]
     [InlineData("responses", "response_id")]
@@ -634,6 +696,9 @@ public class ForeignKeyColumnResolverTests
     [InlineData("statuses", "status_id")]
     [InlineData("caches", "cache_id")]
     [InlineData("Courses", "CourseId")]
+    [InlineData("movies", "movie_id")]
+    [InlineData("Cookies", "CookieId")]
+    [InlineData("categories", "category_id")]
     public void Rank1_AmbiguousPluralTableName_MatchesSingularColumn(
         string sourceTable,
         string expectedColumn

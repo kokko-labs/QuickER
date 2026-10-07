@@ -72,6 +72,10 @@ public static class IdentifierNameHelper
     /// 1 つに決め打つとどちらかの語を必ず取り違えるため、両方を候補として返す（外部キー列名の推定は全候補を期待名に加える）。
     /// </para>
     /// <para>
+    /// <c>-ies</c> も同じで、<c>y</c> 由来の語（<c>cities</c>→<c>city</c>）と <c>ie</c> で終わる語（<c>movies</c>→<c>movie</c>）がある。
+    /// <c>y</c> へ戻した形を先に、<c>s</c> だけを落とした形を後に置く。
+    /// </para>
+    /// <para>
     /// 先頭に置く候補は、<c>-sses</c> / <c>-xes</c> / <c>-ches</c> / <c>-shes</c> / <c>-zzes</c> / <c>-oes</c> と、
     /// <c>-uses</c>（<c>-ouses</c> / <c>-auses</c> を除く）で <c>es</c> を落とした形、それ以外の <c>-ses</c> / <c>-zes</c> で
     /// <c>s</c> だけを落とした形（<c>addresses</c>→<c>address</c>・<c>statuses</c>→<c>status</c>・<c>warehouses</c>→<c>warehouse</c>・
@@ -87,9 +91,10 @@ public static class IdentifierNameHelper
 
         var lower = word.ToLowerInvariant();
 
+        // -ies は y 由来（cities→city）と ie で終わる語（movies→movie）のどちらもある。y 由来が大半なので先に置く
         if (lower.EndsWith("ies", StringComparison.Ordinal) && word.Length > 3)
         {
-            return [word[..^3] + "y"];
+            return [word[..^3] + "y", word[..^1]];
         }
 
         string[] ambiguousEndings = ["ses", "xes", "zes", "ches", "shes", "oes"];

@@ -72,7 +72,8 @@ public static class ConstraintNames
     /// <returns>外部キー・主キー・一意制約の名前の集合（大文字小文字を区別しない）</returns>
     /// <remarks>
     /// <para>
-    /// 外部キーは保存された名前、無ければ <see cref="ForeignKey"/> の既定名。主キーは主キー列を持つテーブルの
+    /// 外部キーは保存された名前、無ければ <see cref="ForeignKey"/> の既定名（名前を持たず外部キーを作らない関係＝
+    /// <see cref="DefinesForeignKey"/> が偽のものは、DDL が名前を付けないので数えない）。主キーは主キー列を持つテーブルの
     /// <see cref="PrimaryKey"/>。一意制約は保存された名前、無ければ <see cref="UniqueConstraint.SynthesizeName"/>
     /// （構成列を解決できない一意制約は DDL が出さないので数えない）。
     /// </para>
@@ -100,7 +101,11 @@ public static class ConstraintNames
                 entity.Id == relationship.SourceEntityId
             );
 
-            if (child is not null && parent is not null)
+            if (
+                child is not null
+                && parent is not null
+                && DefinesForeignKey(relationship, parent, child)
+            )
             {
                 names.Add(ForeignKey(child.TableName, parent.TableName));
             }
@@ -158,12 +163,20 @@ public static class ConstraintNames
     /// <returns>
     /// リレーション（参照の同一性で引く）→ 名前。名前を持つリレーションは保存された名前、持たないリレーションは
     /// 既定名 <see cref="ForeignKey"/>、それがほかの制約とぶつかるときは <see cref="UniqueForeignKey"/> の名前。
-    /// 名前を持たず親子を引けないリレーションは含まない
+    /// 名前を持たず、親子を引けないか外部キーを作らない（<see cref="DefinesForeignKey"/> が偽）リレーションは含まない
     /// </returns>
     /// <remarks>
     /// <para>
     /// 予約済みの名前は、主キー・一意制約の名前（<see cref="CollectTableConstraints"/>）と、名前を持つリレーションの名前。
     /// 名前を持たないリレーションを渡された順に見て、決まった名前を予約へ加えていく。
+    /// 名前を持たない多対多・列ペアの無い関係は既定名を取らない（DDL が外部キーを作らないので、取ると同じ組の
+    /// 本物の外部キーが一意化した名前へずれる）。名前を持つ関係は外部キーを作らなくても予約する（保存された名前は
+    /// 利用者に見える名前なので重ねない）。
+    /// </para>
+    /// <para>
+    /// 名前を持たない外部キーどうしは並び順で名前が決まる。名前の無い多対多を後から 1 対多へ切り替えて列ペアを付けると、
+    /// それより後ろに並ぶ同じ組の名前の無い外部キーが一意化した名前へずれ、名前を保存する方言の同期では作り直しになる
+    /// （名前の無いリレーションは取込・古いファイル・手編集でしか生じない。GUI とツールで作るリレーションは名前を持つ）。
     /// </para>
     /// <para>
     /// 同じテーブルの組に名前の無いリレーションが 2 本あると、既定名だけでは同じ名前になり DDL の 2 本目が失敗する。
@@ -203,7 +216,7 @@ public static class ConstraintNames
     /// </para>
     /// <para>
     /// 図を丸ごと組み立てる取込（Mermaid・DBML・Excel 定義書）と C# リバースが、組み立ての最後に呼ぶ。
-    /// 子の列名を一意化に使うので、列ペアを決めた後に呼ぶこと。親子を引けないリレーションは飛ばす
+    /// 子の列名を一意化に使うので、列ペアを決めた後に呼ぶこと。親子を引けないリレーションと、外部キーを作らないリレーションは飛ばす
     /// </para>
     /// </remarks>
     public static void NameUnnamedForeignKeys(
@@ -260,9 +273,11 @@ public static class ConstraintNames
                 continue;
             }
 
+            // 外部キーを作らない関係は DDL が名前を付けないので、既定名を取らない（取ると本物の外部キーがずれる）
             if (
                 !tablesById.TryGetValue(relationship.SourceEntityId, out var parent)
                 || !tablesById.TryGetValue(relationship.TargetEntityId, out var child)
+                || !DefinesForeignKey(relationship, parent, child)
             )
             {
                 continue;
@@ -293,6 +308,26 @@ public static class ConstraintNames
 
         return resolved;
     }
+
+    /// <summary>リレーションが DDL・同期で外部キー制約になるかを判定する</summary>
+    /// <param name="relationship">対象のリレーション</param>
+    /// <param name="parent">参照される側（親）のテーブル</param>
+    /// <param name="child">参照する側（子）のテーブル</param>
+    /// <returns>
+    /// 多対多でなく、列ペアが 1 組以上あり、すべての列ペアの両端の列を親子から引けるとき <c>true</c>
+    /// </returns>
+    /// <remarks>
+    /// DDL・差分・同期計画が外部キーとして扱うリレーションの判定（Provider の <c>ForeignKeyColumnPairResolver</c>）と
+    /// 同じ規則。Model は Provider を参照できないので写しになるため、両者の一致は
+    /// <c>ForeignKeyDefinitionParityTests</c> が固定する
+    /// </remarks>
+    public static bool DefinesForeignKey(Relationship relationship, Entity parent, Entity child) =>
+        relationship.Type != RelationshipType.ManyToMany
+        && relationship.ColumnPairs.Count > 0
+        && relationship.ColumnPairs.All(pair =>
+            parent.Columns.Any(column => column.Id == pair.SourceColumnId)
+            && child.Columns.Any(column => column.Id == pair.TargetColumnId)
+        );
 
     /// <summary>図の中の既存の制約名と衝突しない外部キーの名前を組み立てる</summary>
     /// <param name="childTable">参照する側（外部キーを持つ側）のテーブル名</param>
