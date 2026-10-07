@@ -117,6 +117,60 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
     }
 
     /// <summary>
+    /// 名前の無い多対多が同じ組の外部キーより前に並ぶ図でも、外部キーは既定名で作られ、
+    /// 既定名の外部キーを持つ DB に対して外部キーの差分を出さないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 多対多は DDL が外部キーを作らないので既定名を取らない。取らせると本物の外部キーが
+    /// <c>FK_{子}_{親}_{列}</c> へずれ、既定名で外部キーを作った DB（それまでの版の DDL）との同期で、
+    /// 外部キーの追加と削除が出ていた。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 名前の無い多対多が先に並んでも外部キーは既定名で作られ、既定名の DB と差分を出さない"
+    )]
+    public async Task UnnamedManyToManyFirst_ForeignKeyKeepsDefaultName()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        // 既定名の外部キーを持つ DB（多対多の無い図の DDL）
+        await fixture.ApplyDdlAsync(BuildParentChildDiagram(constraintName: null), Ct);
+
+        var diagram = BuildParentChildDiagram(constraintName: null);
+        diagram.Relationships.Insert(
+            0,
+            new Relationship
+            {
+                SourceEntityId = diagram.Entities[0].Id,
+                TargetEntityId = diagram.Entities[1].Id,
+                Type = RelationshipType.ManyToMany,
+            }
+        );
+
+        var live = await ImportAsync();
+        live.Relationships.Select(r => r.ConstraintName).Should().Equal("FK_sd_child_sd_parent");
+
+        var diff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            diagram.Entities,
+            diagram.Relationships,
+            _provider.SyncCapabilities
+        );
+
+        diff.Items.Should().NotContain(i => IsForeignKeyDiff(i));
+
+        // 多対多が先に並ぶ図の DDL も同じ既定名で外部キーを作る
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ApplyDdlAsync(diagram, Ct);
+
+        (await ImportAsync())
+            .Relationships.Select(r => r.ConstraintName)
+            .Should()
+            .Equal("FK_sd_child_sd_parent");
+    }
+
+    /// <summary>
     /// 参照アクションだけを変えた外部キーは 1 つの外部キー変更になり、既定の選択（未選択）のまま実行しても失敗せず、
     /// 選んで実行すると新しい参照アクションで作り直されることを検証する。
     /// </summary>

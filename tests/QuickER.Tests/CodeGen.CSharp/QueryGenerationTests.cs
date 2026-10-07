@@ -1354,19 +1354,121 @@ public class QueryGenerationTests
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
-        var newline = Environment.NewLine;
 
-        // リテラルの中身は改行 3 連（空行 2 つ）のまま保たれる（EOL は環境改行へ正規化される）
-        content.Should().Contain($"'first{newline}{newline}{newline}second'");
+        // SQL の値は改行 3 連（空行 2 つ）のまま保たれる（改行はエスケープで書くので生成する OS に依らない）
+        ExtractSqlArgument(content, "FindByBlankMemoAsync")
+            .Should()
+            .Be("SELECT * FROM [Order] WHERE [Memo] = 'first\n\n\nsecond'");
 
-        // リテラルの外は従来どおり畳まれている＝3 連以上の改行はこのリテラル内の 1 箇所だけ
+        // 生成コードに連続空行は残らない（SQL の改行は文字列の中へ入り、レンダラーの畳み込みの対象外）
         System
             .Text.RegularExpressions.Regex.Matches(
                 content,
-                $"(?:{System.Text.RegularExpressions.Regex.Escape(newline)}){{3,}}"
+                $"(?:{System.Text.RegularExpressions.Regex.Escape(Environment.NewLine)}){{3,}}"
             )
             .Count.Should()
-            .Be(1, "逐語リテラルの外の連続空行は 1 空行へ畳まれるべき");
+            .Be(0);
+    }
+
+    /// <summary>
+    /// 改行を含む生 SQL の値が、生成コードの中で 1 文字も変わらないことを検証する
+    /// （逐語リテラルに改行を生のまま書くと、レンダラーの改行の正規化が CRLF / LF を生成する OS の改行へ、
+    /// LINE SEPARATOR などを改行へ書き換え、SQL の文字列リテラルの値が変わっていた）。改行を含まない SQL は
+    /// 従来どおり逐語リテラル 1 つ
+    /// </summary>
+    [Fact(
+        DisplayName = "改行を含む生 SQL は値を変えずに埋め込まれ、1 行の SQL は逐語リテラルのまま"
+    )]
+    public void Generate_RawSqlWithLineBreaks_KeepsExactValue()
+    {
+        var separators = $"{(char)0x2028}b{(char)0x2029}c\f{(char)0x85}d";
+        var multiLine = "SELECT *\r\nFROM [Order]\nWHERE [Memo] = 'a" + separators + "\r'\r\n\r\n";
+        var singleLine = "SELECT * FROM [Order] WHERE [Memo] = \"q\"";
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "FindMultiLine",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Sql = { ["sqlserver"] = multiLine },
+            },
+            new QueryDefinition
+            {
+                Name = "CountMultiLine",
+                Returns = QueryReturnShape.Count,
+                Implementation = QueryImplementationKind.Sql,
+                Sql = { ["sqlserver"] = "\n" + multiLine },
+            },
+            new QueryDefinition
+            {
+                Name = "FindSingleLine",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Sql = { ["sqlserver"] = singleLine },
+            }
+        );
+
+        var result = Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Ns",
+                GenerateRepositories = true,
+                IncludeDataAnnotations = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        ExtractSqlArgument(content, "FindMultiLineAsync").Should().Be(multiLine);
+        ExtractSqlArgument(content, "CountMultiLineAsync").Should().Be("\n" + multiLine);
+        ExtractSqlArgument(content, "FindSingleLineAsync").Should().Be(singleLine);
+        content
+            .Should()
+            .Contain(
+                "@\"SELECT * FROM [Order] WHERE [Memo] = \"\"q\"\"\"",
+                "1 行の SQL は従来の形のまま"
+            );
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryRawSqlLineBreaks");
+        compilation.Success.Should().BeTrue(compilation.DescribeErrors());
+    }
+
+    /// <summary>生成コードの指定メソッドで、生 SQL を渡す呼び出しの第 1 引数（文字列リテラルの連結）の値を求める</summary>
+    private static string ExtractSqlArgument(string content, string methodName)
+    {
+        var root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(content).GetRoot();
+        var method = root.DescendantNodes()
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>()
+            .Single(declaration =>
+                declaration.Identifier.Text == methodName && declaration.Body is not null
+                || declaration.Identifier.Text == methodName
+                    && declaration.ExpressionBody is not null
+            );
+        var invocation = method
+            .DescendantNodes()
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
+            .First(call =>
+                call.Expression is Microsoft.CodeAnalysis.CSharp.Syntax.SimpleNameSyntax name
+                && name.Identifier.Text.EndsWith("SqlAsync", StringComparison.Ordinal)
+            );
+
+        static string Evaluate(Microsoft.CodeAnalysis.CSharp.Syntax.ExpressionSyntax expression) =>
+            expression switch
+            {
+                Microsoft.CodeAnalysis.CSharp.Syntax.LiteralExpressionSyntax literal => literal
+                    .Token
+                    .ValueText,
+                Microsoft.CodeAnalysis.CSharp.Syntax.BinaryExpressionSyntax binary => Evaluate(
+                    binary.Left
+                ) + Evaluate(binary.Right),
+                _ => throw new InvalidOperationException(
+                    $"文字列リテラルの連結ではない式です: {expression}"
+                ),
+            };
+
+        return Evaluate(invocation.ArgumentList.Arguments[0].Expression);
     }
 
     /// <summary>診断メッセージを失敗理由として整形する</summary>

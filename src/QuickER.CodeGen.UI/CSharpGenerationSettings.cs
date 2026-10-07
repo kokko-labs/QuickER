@@ -8,7 +8,9 @@ namespace QuickER.CodeGen.UI;
 /// このスキーマは CLI の quicker.json（<c>--config</c>）互換になるよう、CLI の
 /// <c>CodeGenerationOptions</c> とキー集合・意味・既定値を揃えている（<see cref="RootNamespace"/> /
 /// <see cref="RepositoryDialects"/> / <see cref="OutputPath"/> 等）。JSON は camelCase で書き出すが、
-/// CLI は <c>PropertyNameCaseInsensitive</c> で読むため名前が一致すればそのまま解釈される。
+/// CLI も GUI（設定ストア）もキーの大文字小文字を区別せずに読むため、どちら向きでも名前が一致すれば
+/// そのまま解釈される（CLI の PascalCase の quicker.json を GUI の「設定読込」で読める）。
+/// CLI だけのキー <c>OutputFileName</c>（ファイル名のみ・出力フォルダは <c>--out</c>）は GUI では読まない。
 /// <see cref="OutputPath"/> は CLI でも解釈され、CLI はそのファイル名部分のみを出力ファイル名として使う
 /// （出力先ディレクトリは常に <c>--out</c> が正）。
 /// プロパティ宣言順＝JSON 出力順のため、カテゴリ順（出力モード→名前空間→生成対象→…→出力先）に並べている。

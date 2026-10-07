@@ -101,19 +101,26 @@ public static class RubberBandBehavior
         }
     }
 
-    /// <summary>押下位置がエンティティ要素の内側かどうかをビジュアルツリーで判定する</summary>
+    /// <summary>押下位置がエンティティ・リレーションの要素の内側かどうかをビジュアルツリーで判定する</summary>
     /// <remarks>
-    /// Preview 段はエンティティ上の押下でも発火するため、DataContext に
-    /// <see cref="EntityViewModel"/> を持つ要素が press 元の祖先にあれば
-    /// ラバーバンドを開始せず <see cref="DragBehavior"/>（移動・リサイズ・クリック選択）へ委ねる。
+    /// Preview 段はエンティティ・リレーションの上の押下でも発火するため、DataContext に
+    /// <see cref="EntityViewModel"/> か <see cref="RelationshipViewModel"/> を持つ要素が press 元の祖先にあれば
+    /// ラバーバンドを開始しない。エンティティは <see cref="DragBehavior"/>（移動・リサイズ・クリック選択）へ、
+    /// リレーションは線・ラベルのクリック選択へ委ねる（線を押して少し動かしただけで、選んだリレーションが
+    /// ラバーバンドの確定で選択から外れないようにする。帰結として、線の当たり判定の上からは矩形選択を始められない）。
     /// </remarks>
-    private static bool IsInsideEntity(object? originalSource, FrameworkElement surface)
+    private static bool IsInsideDiagramElement(object? originalSource, FrameworkElement surface)
     {
         var current = originalSource as DependencyObject;
 
         while (current is not null && !ReferenceEquals(current, surface))
         {
-            if (current is FrameworkElement { DataContext: EntityViewModel })
+            if (
+                current is FrameworkElement
+                {
+                    DataContext: EntityViewModel or RelationshipViewModel
+                }
+            )
             {
                 return true;
             }
@@ -127,6 +134,15 @@ public static class RubberBandBehavior
     /// <summary>空白部押下でラバーバンドの起点を記録する（この時点では矩形もキャプチャも出さない）</summary>
     private static void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // 成立していない保留（前の押下の解放を受け取れなかったもの）は、押下のたびに捨てる。
+        // 残すと、この押下を下の判定で見送った後も古い起点から距離を測り続け、エンティティのドラッグ中に
+        // ラバーバンドが始まってマウスのキャプチャを奪う
+        if (!_active)
+        {
+            _pending = false;
+            _surface = null;
+        }
+
         // パン中はラバーバンドを開始しない
         if (CanvasViewportBehavior.IsPanActive)
         {
@@ -138,8 +154,8 @@ public static class RubberBandBehavior
             return;
         }
 
-        // エンティティ内側の押下は DragBehavior（移動・リサイズ・クリック選択）の領分
-        if (IsInsideEntity(e.OriginalSource, fe))
+        // エンティティ・リレーションの上の押下は、それぞれのドラッグ・クリック選択の領分
+        if (IsInsideDiagramElement(e.OriginalSource, fe))
         {
             return;
         }

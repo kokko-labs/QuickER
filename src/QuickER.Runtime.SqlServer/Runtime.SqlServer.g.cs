@@ -970,7 +970,7 @@ public readonly record struct SqlQueryParameter(string Name, object? Value, stri
     public bool VariableLength { get; init; }
 }
 
-/// <summary>Reads one value object property of a FOR JSON row, naming the column when the value object rejects the stored value.</summary>
+/// <summary>Reads one value object property of a FOR JSON row (a fetch with Include), naming the column when the value object rejects the stored value.</summary>
 /// <remarks>The value itself is read and written by the shared value object converter; this only adds the column to the failure.</remarks>
 internal sealed class ColumnNamingValueObjectConverter<TVo>(Type entityType, PropertyInfo property)
     : System.Text.Json.Serialization.JsonConverter<TVo>
@@ -997,7 +997,9 @@ internal sealed class ColumnNamingValueObjectConverter<TVo>(Type entityType, Pro
 /// <summary>
 /// The SQL Server ADO executor for <see cref="SqlQuery{TEntity}"/>.
 /// It translates the plan's predicates and orderings to SQL via <see cref="SqlExpressionTranslator"/>, and
-/// fetches the graph as nested JSON in a single query with FOR JSON, then restores it with System.Text.Json.
+/// materializes a fetch without Include with a plain SELECT through the same compiled materializer as GetAllAsync, and
+/// fetches a graph with Include as nested JSON in a single query with FOR JSON, then restores it with System.Text.Json
+/// (one statement, so the parent and its children are read at the same point in time).
 /// </summary>
 /// <remarks>
 /// Dialect SQL (identifier quoting, SELECT syntax, paging clauses) is confined to this executor.
@@ -1014,12 +1016,15 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
 
     // Navigations may carry [JsonIgnore] (to break parent-reference cycles), but loading with Include
     // needs to restore them too, so a resolver modifier adds navigation properties back to the read set.
+    // Numbers may arrive as strings: the FOR JSON projection writes float / real columns as text so they keep every digit
+    // (see JsonQueryPlanner). These options read FOR JSON results only.
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
         TypeInfoResolver = new DefaultJsonTypeInfoResolver
         {
-            Modifiers = { IncludeNavigationProperties, NameRejectedStoredValues },
+            Modifiers = { IncludeNavigationProperties, ReadMissingColumnsAsNull, NameRejectedStoredValues },
         },
         Converters = { new ValueObjectJsonConverterFactory() },
     };
@@ -1065,6 +1070,55 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
                 typeInfo.Properties.Add(jsonProperty);
             }
         }
+    }
+
+    /// <summary>
+    /// Resets the SELECT columns of every restored entity (the root and every Included one) to their default value before its
+    /// JSON is read, so a column whose key is missing reads as null / 0.
+    /// </summary>
+    /// <remarks>
+    /// FOR JSON leaves a NULL column out of the object, which would otherwise leave the property at its initializer (an empty
+    /// string for a column the entity declares non-null). The plain SELECT paths read a NULL as the default value, so this
+    /// makes a fetch with Include read the same values as GetAllAsync. Only the SELECT columns are reset: an excluded
+    /// unbounded binary column keeps its initializer (the unfetched state), and navigations are not columns.
+    /// </remarks>
+    private static void ReadMissingColumnsAsNull(JsonTypeInfo typeInfo)
+    {
+        if (
+            typeInfo.Kind != JsonTypeInfoKind.Object
+            || typeInfo.Type.GetCustomAttribute<TableAttribute>() is null
+        )
+        {
+            return;
+        }
+
+        var instance = Expression.Parameter(typeof(object), "instance");
+        var entity = Expression.Convert(instance, typeInfo.Type);
+        var resets = EntitySaveMetadata
+            .For(typeInfo.Type)
+            .SelectProperties.Where(property => property.CanWrite)
+            .Select(property =>
+                (Expression)Expression.Assign(
+                    Expression.Property(entity, property),
+                    Expression.Default(property.PropertyType)
+                )
+            )
+            .ToList();
+
+        if (resets.Count == 0)
+        {
+            return;
+        }
+
+        var reset = Expression.Lambda<Action<object>>(Expression.Block(resets), instance).Compile();
+        var previous = typeInfo.OnDeserializing;
+        typeInfo.OnDeserializing = previous is null
+            ? reset
+            : value =>
+            {
+                reset(value);
+                previous(value);
+            };
     }
 
     /// <summary>
@@ -1120,6 +1174,24 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
                 cancellationToken
             ).ConfigureAwait(false);
         }
+
+        if (plan.Includes.Count == 0)
+        {
+            // Without Include there is nothing to nest: a plain SELECT read by the compiled materializer reads the same
+            // values as GetAllAsync, without building and parsing JSON
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            return await MaterializeRootsAsync(
+                connection,
+                plan,
+                whereClause,
+                parameters,
+                plan.Take,
+                plan.Skip,
+                cancellationToken
+            ).ConfigureAwait(false);
+        }
+
         var json = await ReadJsonAsync(
             BuildJsonSelect(plan, whereClause, plan.Take, plan.Skip),
             parameters,
@@ -1212,6 +1284,24 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
             ).ConfigureAwait(false);
             return withBinary.Count > 0 ? withBinary[0] : null;
         }
+
+        if (plan.Includes.Count == 0)
+        {
+            // Without Include, read the first row with a plain SELECT (see ToListAsync)
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            var roots = await MaterializeRootsAsync(
+                connection,
+                plan,
+                whereClause,
+                parameters,
+                take: 1,
+                plan.Skip,
+                cancellationToken
+            ).ConfigureAwait(false);
+            return roots.Count > 0 ? roots[0] : null;
+        }
+
         var json = await ReadJsonAsync(
             BuildJsonSelect(plan, whereClause, 1, plan.Skip),
             parameters,
@@ -1318,8 +1408,8 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
 
     /// <summary>
     /// Materialization for WithUnboundedBinary. Plain-SELECTs all columns (including unbounded binary columns)
-    /// without Include, materializing legitimate entities with RowState=Unchanged (shared across dialects).
-    /// On SQL Server this avoids the default JSON path (Base64) and prevents memory inflation. No-Include only (guarded at the terminal).
+    /// without Include, materializing legitimate entities with RowState=Unchanged (shared across dialects). No-Include only (guarded at the terminal).
+    /// <see cref="MaterializeRootsAsync"/> is the other plain SELECT: it reads only the SELECT columns, leaving the excluded ones unset.
     /// </summary>
     private async Task<IReadOnlyList<TEntity>> MaterializeWithUnboundedBinaryAsync(
         SqlQueryPlan<TEntity> plan,
@@ -1360,6 +1450,41 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
         }
 
         return results;
+    }
+
+    /// <summary>Fetches the roots with a plain SELECT and materializes them via a DataReader (the root set before Includes).</summary>
+    /// <remarks>
+    /// Reads the SELECT columns (unbounded binary columns excluded), the same columns as GetAllAsync.
+    /// Each row goes through the compiled materializer GetAllAsync uses, so both read the same values.
+    /// <see cref="MaterializeWithUnboundedBinaryAsync"/> is the other plain SELECT: it reads every column, the excluded ones included.
+    /// </remarks>
+    private async Task<List<TEntity>> MaterializeRootsAsync(
+        SqlConnection connection,
+        SqlQueryPlan<TEntity> plan,
+        string whereClause,
+        IReadOnlyList<SqlQueryParameter> parameters,
+        int? take,
+        int? skip,
+        CancellationToken cancellationToken
+    )
+    {
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        var sql =
+            $"SELECT {metadata.ColumnList} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
+
+        await using var command = CreateCommand(connection, sql, parameters);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        // Column-name-to-ordinal mapping is resolved only once per result set
+        var ordinals = metadata.SelectOrdinals(reader);
+
+        var roots = new List<TEntity>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            roots.Add(metadata.MapEntity<TEntity>(reader, ordinals));
+        }
+
+        return roots;
     }
 
     /// <summary>Concatenates the FOR JSON result (returned as multiple rows of roughly 2KB each) into a single JSON string.</summary>
@@ -1494,9 +1619,6 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
 /// <summary>A planner that builds the FOR JSON SELECT statement from the Include tree and FK metadata (database-independent and pure).</summary>
 public static class JsonQueryPlanner
 {
-    /// <summary>Caches the root column projection for Include-less roots (pure text fixed per type, with the root alias always a0).</summary>
-    private static readonly ConcurrentDictionary<Type, string> _rootProjectionCache = new();
-
     /// <summary>Builds a SELECT statement returning nested JSON from the root type, WHERE clause, ordering/paging clause, and Include tree.</summary>
     public static string BuildSelect(
         Type rootType,
@@ -1507,15 +1629,7 @@ public static class JsonQueryPlanner
     {
         var aliasCounter = new int[1];
         var rootAlias = NextAlias(aliasCounter);
-        // Without Include, the root projection is pure text determined by the type ("a0.[col] AS [Prop], ..."), so pull it from the cache
-        // (the root alias is always a0 on the first NextAlias call; with Include, child aliases vary so it is rebuilt every time)
-        var projection =
-            includes.Count == 0
-                ? _rootProjectionCache.GetOrAdd(
-                    rootType,
-                    static t => BuildProjection(t, "a0", Array.Empty<IncludeNode>(), new int[1])
-                )
-                : BuildProjection(rootType, rootAlias, includes, aliasCounter);
+        var projection = BuildProjection(rootType, rootAlias, includes, aliasCounter);
         var tableName = EntitySaveMetadata.For(rootType).TableName;
         return $"SELECT {projection} FROM {tableName} AS {rootAlias}{whereClause}{orderAndPaging} FOR JSON PATH;";
     }
@@ -1533,11 +1647,19 @@ public static class JsonQueryPlanner
         // Columns are aliased to property names ([col] AS [Prop]) so System.Text.Json can restore them directly. Both sides are
         // quoted: a column or property named like a keyword (group, Order, Key) is otherwise a syntax error, and FOR JSON PATH
         // takes the alias without its brackets as the JSON key
-        foreach (var (propertyName, columnName) in metadata.Columns)
+        foreach (var (property, columnName) in metadata.SelectColumns)
         {
-            parts.Add(
-                $"{alias}.{EntitySaveMetadata.QuoteIdentifier(columnName)} AS {EntitySaveMetadata.QuoteIdentifier(propertyName)}"
-            );
+            var column = $"{alias}.{EntitySaveMetadata.QuoteIdentifier(columnName)}";
+
+            // FOR JSON writes a float with 16 significant digits and a real with 8, which changes values that need more
+            // (0.1 + 0.2 reads back as 0.3, the largest double as infinity). Style 3 is SQL Server's lossless text form
+            // (17 digits for both), read back by the executor's options that accept numbers written as strings
+            if (IsBinaryFloatingPoint(property))
+            {
+                column = $"CONVERT(varchar(30), {column}, 3)";
+            }
+
+            parts.Add($"{column} AS {EntitySaveMetadata.QuoteIdentifier(property.Name)}");
         }
 
         // Included children are embedded as correlated subqueries (FOR JSON)
@@ -1582,6 +1704,42 @@ public static class JsonQueryPlanner
     }
 
     private static string NextAlias(int[] aliasCounter) => "a" + aliasCounter[0]++;
+
+    /// <summary>Caches whether each column property holds a float / real column.</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, bool> _binaryFloatingPointCache = new();
+
+    /// <summary>
+    /// Whether the column is a float / real column: by its [SqlColumnType] when it has one, otherwise by its CLR type
+    /// (double / float, with Nullable and a value object's underlying value unwrapped).
+    /// </summary>
+    /// <remarks>
+    /// The declared column type comes first so that a double property on a decimal column is left alone: style 3 does not
+    /// apply to decimal, and a wide decimal would not fit the varchar the conversion writes.
+    /// </remarks>
+    private static bool IsBinaryFloatingPoint(PropertyInfo property) =>
+        _binaryFloatingPointCache.GetOrAdd(
+            property,
+            static candidate =>
+            {
+                if (candidate.GetCustomAttribute<SqlColumnTypeAttribute>() is { } columnType)
+                {
+                    return columnType.DbType is SqlDbType.Float or SqlDbType.Real;
+                }
+
+                var type = Nullable.GetUnderlyingType(candidate.PropertyType) ?? candidate.PropertyType;
+                var valueObject = Array.Find(
+                    type.GetInterfaces(),
+                    i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+                );
+
+                if (valueObject is not null)
+                {
+                    type = valueObject.GetGenericArguments()[1];
+                }
+
+                return type == typeof(double) || type == typeof(float);
+            }
+        );
 }
 
 /// <summary>Translates lambda expressions (expression trees) into SQL conditions and column references.</summary>

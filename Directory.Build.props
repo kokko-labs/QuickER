@@ -47,6 +47,9 @@
       ロックファイルを評価・生成させる（restore のみに作用し、RuntimeIdentifier〔単数〕は
       設定しないため通常ビルド・pack の出力は不変。これが無いと開発機の再 restore が
       RID セクションを落とし、次のリリースで再発する）。
+      例外は PackAsTool のプロジェクト（QuickER.Cli）で、.NET 10 では RuntimeIdentifiers があると
+      pack が RID 別の tool パッケージを追加で出すため、その csproj で打ち消している。打ち消しが
+      消えると、scripts/verify-packages.ps1 の本数検査が CI で落とす。
     -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>

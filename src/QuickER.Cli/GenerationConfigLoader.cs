@@ -298,7 +298,7 @@ internal static class GenerationConfigLoader
             // 実効方言の解決（未対応方言はここで ArgumentException。CLI 用の例外型へ変換して整形表示へ載せる）
             try
             {
-                _ = options.EffectiveRepositoryDialects;
+                _ = options.ResolveRepositoryDialects();
             }
             catch (ArgumentException ex)
             {

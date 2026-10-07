@@ -126,6 +126,9 @@ public class IdentifierNameHelperTests
     [InlineData("buzzes", "buzz", "buzze")]
     [InlineData("heroes", "hero", "heroe")]
     [InlineData("Courses", "Course", "Cours")]
+    [InlineData("cities", "city", "citie")]
+    [InlineData("movies", "movy", "movie")]
+    [InlineData("Cookies", "Cooky", "Cookie")]
     public void SingularizeCandidates_AmbiguousEndings(string word, string first, string second)
     {
         IdentifierNameHelper.SingularizeCandidates(word).Should().Equal(first, second);
@@ -134,7 +137,6 @@ public class IdentifierNameHelperTests
 
     /// <summary>語尾から 1 つに決まる語・複数形でない語は候補が 1 つであることを検証する</summary>
     [Theory(DisplayName = "SingularizeCandidates: 語尾から決まる語・単数語は候補 1 つ")]
-    [InlineData("cities", "city")]
     [InlineData("orders", "order")]
     [InlineData("types", "type")]
     [InlineData("tables", "table")]

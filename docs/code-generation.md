@@ -54,6 +54,20 @@ Only the fields the user actually edits take on the precision of their input str
 Binary columns are copied defensively, so editing the loaded model never writes into the entity it was loaded from.
 A `date` column (as opposed to `datetime`) is displayed with the culture's short date pattern, without a "0:00:00" tail.
 
+### Navigation property names
+
+A navigation property is named after the table at the other end.
+The parent side gets the plural of the child table (`Orders`), or the singular for a one-to-one relationship, and the child side gets the singular of the parent table (`Customer`).
+
+When two or more relationships join the same parent table and child table, every relationship between them is named after its foreign-key column instead.
+Table names alone would give the class two members with the same name.
+The role name is the foreign-key column in PascalCase without its trailing `Id`, so `ship_customer_id` becomes `ShipCustomer`.
+A column that does not end in `Id`, or is `id` itself, gets the parent table's singular appended, so `shipper` becomes `ShipperCustomer`.
+The child side is the role name (`order.ShipCustomer`).
+The parent side is `{child plural}By{role}` (`customer.OrdersByShipCustomer`), or `{child singular}By{role}` for a one-to-one relationship.
+A table that references itself twice follows the same rule and gets only the parent-side navigations, such as `NodesByParent` and `NodesByOrigin`.
+Adding a second relationship between two tables therefore renames the navigations of the first one.
+
 ### DB-definition metadata attributes
 
 By default, an Entity is decorated with DataAnnotations and DB-definition metadata attributes (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, and so on) and a description.
@@ -233,7 +247,7 @@ A no-row delete is silently accepted by the QuickER repositories but throws in a
 ## QuickER Repository
 
 A lightweight repository with minimal dependencies (ADO only).
-The supported dialects are SQL Server (`FOR JSON` based) and SQLite (plain SELECT plus multi-query), and the DI-registration extensions are generated with per-engine names (`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`).
+The supported dialects are SQL Server (plain SELECT, and `FOR JSON` for a query with `Include`) and SQLite (plain SELECT plus multi-query), and the DI-registration extensions are generated with per-engine names (`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`).
 
 ```csharp
 // DI registration (the generated extension method; choose SqlServer / Sqlite by dialect)
@@ -356,6 +370,12 @@ A negated negation cancels out, so `!(!(a != b))` is translated as `a != b` with
 Negating anything other than an equality or an IN search still produces `NOT (...)`.
 
 > **Known limitation**: the flip only applies when the `!` sits directly on a comparison. `!(a == b && c)` is not rewritten by De Morgan's laws: it becomes `NOT (...)` around individually compensated operands, and `NOT (UNKNOWN)` is still UNKNOWN, so a row that a `NULL` made UNKNOWN inside the parentheses is dropped where C# and the in-memory and EF Core backends would have kept it. Where a `NULL` is possible, write the negation on the comparison itself (`a != b || !c`), which takes the flip and agrees with them.
+
+The mini DSL's `NOT` does not run into this limitation: the code generator pushes every `NOT` down to the individual comparisons by De Morgan's laws before it writes the C#, so `NOT (qty < 10 OR name = 'x')` is generated as `!(e.Qty < 10) && e.Name != "x"` and never reaches the translator as `!(... || ...)`.
+The rule fits in one sentence: `NOT` and `<>` mean the same as C#'s negation, so a `NULL` row matches them, and only string matching keeps a `NULL` row out in both directions.
+An ordered comparison (`<` `<=` `>` `>=`) on a nullable column is negated with an explicit "the column is `NULL`" disjunct, so `NOT qty < 10` is generated as `(e.Qty == null || !(e.Qty < 10))`, because SQL's `NOT (qty < @p)` alone would drop a `NULL` row as UNKNOWN.
+
+> **Known limitation**: a parameter typed by a value-object column can be passed `null`. A negated ordered comparison against that `null` still splits: C# reads the comparison as false and its negation as true, while SQL reads `col < NULL` as UNKNOWN and drops the row.
 
 String matching in the mini DSL (`LIKE` / `CONTAINS` / `STARTSWITH` / `ENDSWITH`) is emitted against a nullable column with an explicit "the column is not `NULL`" conjunct.
 `NOT LIKE` sits inside the same premise, so a `NULL` row matches in neither direction.
@@ -718,6 +738,9 @@ if (!await editModel.ValidateUniqueAsync(repository))
 ```
 
 It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties.
+Every confirmed value goes onto the entity, so a user-defined check sees the whole row, not only the constraint's columns.
+A value-type property with no input cannot reach the entity (its property is not nullable and would hold the CLR default), and neither can a column the edit model leaves out (array and `inet` columns).
+A violation that names such a property is dropped, so a constraint over it is not checked, while every other constraint still is.
 A violation with no property names, or with names that do not belong to the edit model, becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns.
 The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors; it clears its own findings only, so what the check among the siblings reported stays.
 A model marked for removal returns `true` without querying at all, in line with every other read of the validation state.
@@ -1685,7 +1708,7 @@ Constraints and behavior:
 - **Cannot be combined with `Include`**, which throws `InvalidOperationException` when the terminal method runs.
   If you need the unbounded binary column, fetch it with a separate query that has no `Include`.
   SQL Server's `Include` path goes through FOR JSON and Base64, which inflates memory for a huge BLOB by 5 to 6 times at the peak, so this restriction keeps the memory profile predictable for the "handle a huge BLOB" purpose.
-  On SQL Server the opt-in fetches with a plain SELECT rather than FOR JSON.
+  On SQL Server, too, the opt-in fetches with a plain SELECT, as every query without `Include` does.
 - The effect applies to the entity-shaped fetches `ToListAsync` / `FirstOrDefaultAsync`, and to `ToProjectionListAsync` when the projection falls back to materializing the entity in full: a selector whose columns cannot be extracted, or one combined with `Include`.
   It does not affect count, existence check, or a projection whose columns are pruned server-side, because that projection already fetches exactly the columns it references, excluded ones included.
 - The fetched entity is a legitimate entity, but the fact that the excluded column is out of scope for UPDATE does not change.
@@ -1713,6 +1736,7 @@ Semantics:
 
 - **Return value.**
   `Read` returns `true` once it has written to the destination, and an empty blob is also `true`; no row or a NULL column returns `false` and writes nothing to the destination.
+  `Read...ToFileAsync` reads into a temporary file in the same folder and replaces the destination only when `Read` returns `true`, so `false`, an exception or a cancellation leaves an existing file as it was.
   `Write` returns `true` if it could update, `false` if there is no row.
   This matches the bool convention of the existing `UpdateAsync`.
 - **`Write(id, null)`** sets the column to `NULL`, which is how an excluded column returns to the "unset" state.
@@ -2578,6 +2602,13 @@ The following three endpoints are generated per excluded column, where `{column}
   If you do not pass `length` for a non-seekable Stream, it throws `ArgumentException` before sending, which is the same length contract as the direct path.
   **The Stream you pass in stays yours**: the client neither closes nor disposes it, exactly as a direct connection does not, so switching between the two implementations does not change what happens to the stream.
   The HTTP layer disposes the request content after sending, so the stream is handed to `StreamContent` through a non-closing wrapper.
+- **The `PUT` carries `Expect: 100-continue`.**
+  The client holds the body back until the server has seen the headers, so an upload whose declared length is over the limit gets the 413 as a `RemoteRepositoryException` before any of the body is sent.
+  Without it, the server would close the connection without reading the body, and the reset that follows can discard the 413 and surface as a connection error.
+  The client waits for the server's `100 Continue` for the handler's `Expect100ContinueTimeout`, which is 1 second by default, and then sends the body anyway.
+  Behind a proxy that does not answer `100 Continue`, each upload therefore waits up to that long.
+  To change the wait, register the client with the `HttpClient` factory overload and set the timeout on its `SocketsHttpHandler`.
+  Behind a proxy that rejects the `Expect` header with 417, the upload fails with a `RemoteRepositoryException` of status 417.
 - **Making `WithUnboundedBinary()` / `Query()` / raw SQL remote is out of scope**, as before.
 
 ## Runtime package reference mode (--use-runtime-packages)

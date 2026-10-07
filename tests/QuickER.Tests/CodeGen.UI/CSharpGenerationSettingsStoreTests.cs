@@ -353,8 +353,8 @@ public class CSharpGenerationSettingsStoreTests
             // GUI が保存した OutputPath のファイル名部分が CLI 経路で OutputFileName へ導出される
             options.OutputFileName.Should().Be("Acme.g.cs");
             options.GenerateValueObjects.Should().BeTrue();
-            // GUI で選んだ対象 DB が EffectiveRepositoryDialects（リスト優先）でそのまま有効になる
-            options.EffectiveRepositoryDialects.Should().Equal("sqlserver", "sqlite");
+            // GUI で選んだ対象 DB が ResolveRepositoryDialects()（リスト優先）でそのまま有効になる
+            options.ResolveRepositoryDialects().Should().Equal("sqlserver", "sqlite");
             // 層別フォルダ出力（有効フラグ＋層フォルダ 4 つ）も CLI 経路でそのまま解釈される
             options.LayeredOutput.Should().BeTrue();
             options.DomainLayerDirectory.Should().Be("Acme.Domain");

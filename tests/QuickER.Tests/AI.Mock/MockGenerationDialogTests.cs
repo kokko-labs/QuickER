@@ -20,6 +20,11 @@ namespace QuickER.Tests.AI.Mock;
 /// WebView2 コントロールを含む XAML の参照解決・リソース解決の回帰（XamlParseException）を防ぐ。
 /// ヘッドレスでは WebView2 のコア初期化や実描画は検証できないため、実操作の確認は実起動で行う。
 /// </summary>
+/// <remarks>
+/// フォーカスの移動と流したキー入力に頼るテストを含むので、ほかのテストのウィンドウにアクティブを
+/// 奪われないよう並列に走らせない（<see cref="WindowActivationTestCollection"/>）。
+/// </remarks>
+[Collection(WindowActivationTestCollection.Name)]
 public class MockGenerationDialogTests
 {
     /// <summary>同期実行のディスパッチャスタブ</summary>

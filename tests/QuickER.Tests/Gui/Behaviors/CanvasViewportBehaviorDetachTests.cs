@@ -23,11 +23,16 @@ namespace QuickER.Tests.Gui.Behaviors;
 /// </para>
 /// <para>
 /// 進行中状態は <c>[ThreadStatic]</c> なので、並列実行される他クラスとは干渉しない
-/// （下の隔離テストが固定する）。同じ状態を書くテストどうしは
-/// <c>CanvasInteractionState</c> コレクションで直列化する。
+/// （下の隔離テストが固定する）。
+/// </para>
+/// <para>
+/// Space はウィンドウへ流すキー入力で、判断は <c>Deactivated</c> にも左右されるので、ほかのテストの
+/// ウィンドウにアクティブを奪われないよう並列に走らせない
+/// （<see cref="TestSupport.WindowActivationTestCollection"/>。並列のテストが全部終わってから単独で走るので、
+/// 同じ静的状態を書く <c>CanvasInteractionState</c> のクラスとも重ならない）。
 /// </para>
 /// </remarks>
-[Collection("CanvasInteractionState")]
+[Collection(TestSupport.WindowActivationTestCollection.Name)]
 public class CanvasViewportBehaviorDetachTests
 {
     /// <summary>ScrollViewer を 1 つ載せたウィンドウを表示し、ビヘイビアを有効にする</summary>

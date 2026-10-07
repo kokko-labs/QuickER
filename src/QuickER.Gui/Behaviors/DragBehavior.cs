@@ -246,26 +246,39 @@ public static class DragBehavior
         e.Handled = true;
     }
 
-    /// <summary>マウス移動時にリサイズなら幅を、移動なら座標を ViewModel へ反映する</summary>
-    private static void OnMouseMove(object sender, MouseEventArgs e)
+    /// <summary>マウス移動時の処理を、マウス位置の求め方とボタンの状態を添えて <see cref="HandleMouseMove"/> へ渡す</summary>
+    private static void OnMouseMove(object sender, MouseEventArgs e) =>
+        HandleMouseMove(sender as FrameworkElement, e.GetPosition, e.LeftButton);
+
+    /// <summary>
+    /// マウス移動時に、押下前なら右端グリップ上のカーソル形状を切り替え、リサイズなら幅を、移動なら座標を
+    /// ViewModel へ反映する
+    /// </summary>
+    /// <param name="sender">イベントを受けた要素（カード）</param>
+    /// <param name="getPosition">指定要素を基準にしたマウス位置を返す関数</param>
+    /// <param name="leftButton">左ボタンの状態</param>
+    /// <remarks>
+    /// マウス位置を引数で受けるのは、テストから実際のカーソル位置に依らずに呼ぶため
+    /// （擬似のマウスイベントの位置は実際のカーソル位置になる）。
+    /// </remarks>
+    internal static void HandleMouseMove(
+        FrameworkElement? sender,
+        Func<IInputElement, Point> getPosition,
+        MouseButtonState leftButton
+    )
     {
+        // 押下前（ドラッグ・リサイズの対象が無い）は、右端グリップ上でカーソル形状だけを切り替える
         if (_draggedElement is null || _draggedVm is null)
         {
+            if (sender is not null)
+            {
+                sender.Cursor = ResolveHoverCursor(sender, getPosition(sender));
+            }
+
             return;
         }
 
-        // ドラッグ・リサイズ未開始時は右端グリップ上でカーソル形状のみ切り替える
-        if (!_isDragging && !_isResizing && sender is FrameworkElement cursorFe)
-        {
-            var lp = e.GetPosition(cursorFe);
-            cursorFe.Cursor =
-                (lp.X >= cursorFe.ActualWidth - GripWidth && cursorFe.ActualWidth > 0)
-                    ? Cursors.SizeWE
-                    : null;
-            return;
-        }
-
-        if (e.LeftButton != MouseButtonState.Pressed)
+        if (leftButton != MouseButtonState.Pressed)
         {
             EndDrag(treatAsClick: false);
             return;
@@ -278,7 +291,7 @@ public static class DragBehavior
             return;
         }
 
-        var pos = e.GetPosition(canvas);
+        var pos = getPosition(canvas);
 
         if (_isResizing)
         {
@@ -312,6 +325,17 @@ public static class DragBehavior
             _draggedVm.Y = Math.Max(0, newY);
         }
     }
+
+    /// <summary>押下前のカードの上でのカーソル形状を決める（右端グリップ上ならリサイズ、それ以外は既定）</summary>
+    /// <remarks>
+    /// パン中は既定（null）にする。カードのカーソルは ScrollViewer に設定したパンのカーソルより優先されるため。
+    /// </remarks>
+    private static Cursor? ResolveHoverCursor(FrameworkElement element, Point local) =>
+        !CanvasViewportBehavior.IsPanActive
+        && element.ActualWidth > 0
+        && local.X >= element.ActualWidth - GripWidth
+            ? Cursors.SizeWE
+            : null;
 
     /// <summary>マウス解放時に移動量からクリックかドラッグかを判定し、後処理を <see cref="EndDrag"/> へ委譲する</summary>
     private static void OnMouseUp(object sender, MouseButtonEventArgs e)

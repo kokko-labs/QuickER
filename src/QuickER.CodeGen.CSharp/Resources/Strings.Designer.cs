@@ -144,6 +144,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Origin_ClassName {
+            get {
+                return ResourceManager.GetString("CodeGen_Origin_ClassName", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Origin_Column {
             get {
                 return ResourceManager.GetString("CodeGen_Origin_Column", resourceCulture);

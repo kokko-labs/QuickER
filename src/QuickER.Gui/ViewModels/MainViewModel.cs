@@ -92,10 +92,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return groups;
     }
 
-    /// <summary>カラム名がユーザー編集で変更されたときに発火する（フィーチャーモジュールの条件式追従などに使用）</summary>
+    /// <summary>カラム名がユーザー編集・その Undo / Redo で変わったときに発火する（フィーチャーモジュールの条件式追従などに使用）</summary>
     /// <remarks>
     /// <see cref="OnColumnRenamed"/> から、列を保持するエンティティを解決できたときにのみ発火する。
-    /// Undo/Redo 再生中（追跡停止中）や一括置換では発火しない（<see cref="DiagramChangeTracker"/> がその経路を通らない）。
+    /// Undo / Redo ではカラム名が戻る・進む向きの新旧名で発火する（名前付きクエリの条件式を列名と一緒に戻すため）。
+    /// 一括置換では発火しない（<see cref="DiagramChangeTracker"/> がその経路を通らない）。
     /// </remarks>
     public event EventHandler<ColumnRenamedEventArgs>? ColumnRenamed;
 
@@ -355,7 +356,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             OnColumnRenamed
         );
         LanguageSwitch = new LanguageSwitchViewModel(_dialogs);
-        UpdateSettings = new UpdateSettingsViewModel();
+        UpdateSettings = new UpdateSettingsViewModel(_dialogs);
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
@@ -462,7 +463,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// カラム名がユーザー編集で変更されたとき、その列を保持するエンティティを解決して
+    /// カラム名がユーザー編集・その Undo / Redo で変わったとき、その列を保持するエンティティを解決して
     /// <see cref="ColumnRenamed"/> を発火し、フィーチャーモジュールへ通知する
     /// （<see cref="DiagramChangeTracker"/> から通知される）
     /// </summary>

@@ -216,4 +216,29 @@ public class DiagramMetricsServiceTests
 
         compactHeight.Should().Be(fullHeight);
     }
+
+    /// <summary>説明の折り返しが、サロゲートペア（絵文字など）を 2 つの行に分けないことを検証する</summary>
+    /// <remarks>
+    /// 幅の計測を「UTF-16 の単位数 × 10」に差し替え、ペアの直後が幅の境界になる位置を作る。
+    /// ペアを割ると両方の行に単独のサロゲートが残り、SVG では空白・ベクタ印刷では代替グリフになる。
+    /// </remarks>
+    [Theory(DisplayName = "説明の折り返しはサロゲートペアの途中で切らない")]
+    [InlineData("aa\U0001F600bb", 35, new[] { "aa", "\U0001F600b", "b" })]
+    [InlineData("\U0001F600a", 15, new[] { "\U0001F600", "a" })]
+    public void WrapDescription_DoesNotSplitSurrogatePair(
+        string text,
+        double maxWidth,
+        string[] expected
+    )
+    {
+        var lines = DiagramMetricsService.WrapDescription(
+            text,
+            maxWidth,
+            candidate => candidate.Length * 10
+        );
+
+        // ペアを割ると、1 行目が「aa＋上位サロゲート」、2 行目が「下位サロゲート＋b」になる
+        lines.Should().Equal(expected);
+        string.Concat(lines).Should().Be(text);
+    }
 }

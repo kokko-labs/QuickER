@@ -105,6 +105,7 @@ public static class PasswordBoxBehavior
         }
 
         SetUpdating(passwordBox, true);
+
         try
         {
             SetBoundPassword(passwordBox, passwordBox.Password);

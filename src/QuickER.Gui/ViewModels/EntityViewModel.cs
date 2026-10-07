@@ -375,10 +375,20 @@ public partial class EntityViewModel : ObservableObject
         InvalidateDisplayHeight();
     }
 
-    /// <summary>カラムの説明変更時に表示高さキャッシュを無効化し、名前・主キー変更を派生表示へ伝える</summary>
+    /// <summary>
+    /// カラムの説明変更時（簡易表示中はキー標識の変更時も）に表示高さキャッシュを無効化し、名前・主キー変更を
+    /// 派生表示へ伝える
+    /// </summary>
+    /// <remarks>
+    /// 簡易表示は PK / FK の列だけを行として数えるため、キー標識が変わると行数が変わる
+    /// （通常表示では行数がキー標識に依らないので、重い再計測を避けて捨てない）。
+    /// </remarks>
     private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ColumnViewModel.Description))
+        if (
+            e.PropertyName is nameof(ColumnViewModel.Description)
+            || (IsCompactView && e.PropertyName is nameof(ColumnViewModel.KeyMark))
+        )
         {
             InvalidateDisplayHeight();
         }

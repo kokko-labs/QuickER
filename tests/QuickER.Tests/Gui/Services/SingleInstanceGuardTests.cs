@@ -160,7 +160,7 @@ public sealed class SingleInstanceGuardTests
         actions.ReleaseSingleInstanceBeforeRelaunch(current!.Dispose);
         SingleInstanceGuard? relaunched = null;
         var relaunchedOutcome = SingleInstanceOutcome.AlreadyRunning;
-        actions.ScheduleRelaunch(() =>
+        actions.RelaunchWith(() =>
             relaunched = SingleInstanceGuard.TryAcquire(
                 mutexName,
                 eventName,
@@ -168,6 +168,7 @@ public sealed class SingleInstanceGuardTests
                 out relaunchedOutcome
             )
         );
+        actions.RequestRelaunch();
 
         try
         {
@@ -195,6 +196,12 @@ public sealed class SingleInstanceGuardTests
         );
 
         source.Should().Contain("ReleaseSingleInstanceBeforeRelaunch(singleInstance.Dispose)");
+        source
+            .Should()
+            .Contain(
+                "RelaunchWith(WpfApplicationRestartService.StartNewInstance)",
+                "更新の適用に失敗したときの代わりの再起動も、起動時に登録した起動処理を使う"
+            );
         source.Should().Contain("outcome == SingleInstanceOutcome.Inaccessible");
         Regex
             .Matches(source, @"SingleInstanceGuard\.TryAcquire\(\)")

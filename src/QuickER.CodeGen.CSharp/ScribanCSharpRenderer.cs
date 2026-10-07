@@ -200,6 +200,7 @@ internal sealed class ScribanCSharpRenderer
     private static Template ParseTemplate()
     {
         var template = Template.Parse(TemplateText);
+
         if (template.HasErrors)
         {
             var message = string.Join(
@@ -251,10 +252,9 @@ internal sealed class ScribanCSharpRenderer
         // マルチ方言で図の方言が非 sqlserver でも、sqlserver 実装が属性を要するため「sqlserver がターゲットに含まれるか」で判定する
         // （SqlDbTypeName は sqlserver 辞書からサービス側で共有 Entity へ補完済み）。属性の定義・付与は Entity/Runtime を
         // 出力するスペックで行うため、方言実装スペック（Entity を出さない）ではこの条件が空振りして無害。
-        var sqlServerInTargets = options.EffectiveRepositoryDialects.Contains(
-            "sqlserver",
-            StringComparer.OrdinalIgnoreCase
-        );
+        var sqlServerInTargets = options
+            .ResolveRepositoryDialects()
+            .Contains("sqlserver", StringComparer.OrdinalIgnoreCase);
         var emitSqlColumnTypeAttr =
             sqlServerInTargets
             && (options.GenerateRepositories || options.IncludeDataAnnotations)
@@ -310,9 +310,8 @@ internal sealed class ScribanCSharpRenderer
         var storeGeneratedDialectsDiffer =
             options.GenerateRepositories
             && options
-                .EffectiveRepositoryDialects.Select(
-                    RepositoryDialectVariables.AssignsStoreGenerated
-                )
+                .ResolveRepositoryDialects()
+                .Select(RepositoryDialectVariables.AssignsStoreGenerated)
                 .Distinct()
                 .Count() > 1;
 
@@ -385,8 +384,7 @@ internal sealed class ScribanCSharpRenderer
             // per-entity 契約・DI の出力は従来と同一。ON は純粋に追加的で、リモート面と転送 DI 登録が増えるだけ
             // （I{Entity}Repository は全機能面のまま）。固定 infra の基底分割（IRemoteRepositoryCore）は常時出力する（非破壊）。
             // リモートサービス生成（remote_services）はリモート面を前提とするため自動的に含意する。
-            ["remote_contracts"] =
-                options.GenerateRemoteContracts || options.GenerateRemoteServices,
+            ["remote_contracts"] = options.GeneratesRemoteContracts,
             // リモート面の HTTP クライアント／サーバー実装を生成するか。クライアント固定 infra（RemoteJson・
             // RemoteRepositoryException・HttpRemoteRepositoryCore 等）と per-entity クライアント・DI 登録の出力を制御する。
             ["remote_services"] = options.GenerateRemoteServices,

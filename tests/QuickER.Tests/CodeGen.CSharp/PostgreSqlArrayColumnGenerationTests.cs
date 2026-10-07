@@ -397,6 +397,30 @@ public class PostgreSqlArrayColumnGenerationTests
             );
     }
 
+    /// <summary>
+    /// EditModel の DB 照合（<c>ValidateUniqueAsync</c>）が、EditModel に載らない配列列を「照合できない列」として渡すことを検証する
+    /// （Repository 側の照合は配列列を含む制約も調べるが、照合用の Entity の配列列は既定値なので、その結果は捨てる）
+    /// </summary>
+    [Fact(DisplayName = "DB 照合は EditModel に載らない配列列を含む制約の結果を捨てる")]
+    public void Generate_ValidateUnique_PassesArrayColumnsAsUnchecked()
+    {
+        var options = BaseOptions(editModels: true, valueObjects: false) with
+        {
+            GenerateRepositories = true,
+            GenerateEfCoreRepositories = false,
+        };
+        var content = string.Join(
+            "\n",
+            GenerateWithArrayUniqueConstraints(options).Files.Select(file => file.Content)
+        );
+
+        content
+            .Should()
+            .Contain(
+                "var uncheckedProperties = new List<string> { nameof(ArticleEntity.Tags), nameof(ArticleEntity.Labels), nameof(ArticleEntity.Codes) };"
+            );
+    }
+
     /// <summary>EditModel の検証から外した制約を Info が名指しすることを検証する</summary>
     /// <remarks>黙って検証を外さないため。名前を持たない制約は生成側と同じ規則で合成した名前を出す。</remarks>
     [Fact(DisplayName = "配列列を含む UNIQUE 制約は Info で名指しされる")]

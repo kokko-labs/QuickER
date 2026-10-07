@@ -79,7 +79,7 @@ public sealed record AboutInfo(
     {
         ArgumentNullException.ThrowIfNull(uiCulture);
 
-        return uiCulture.TwoLetterISOLanguageName == AppLanguage.Japanese
+        return AppLanguage.IsJapanese(uiCulture)
             ? JapaneseDocumentationUrl
             : EnglishDocumentationUrl;
     }

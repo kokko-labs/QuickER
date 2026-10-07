@@ -87,8 +87,9 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// エンティティを FK トポロジカル順（親が先）へ並べる。
     /// </summary>
     /// <remarks>
-    /// ダウンロードの適用は親→子、削除は子→親でなければ FK 制約に触れる。循環参照や自己参照がある図では
-    /// 完全な順序が存在しないため、解けた分だけ先に出し、残りは図の宣言順で後ろへ付ける（生成は完走させる）。
+    /// ダウンロードの適用は親→子、削除は子→親でなければ FK 制約に触れる。自己参照は辺として数えない。循環参照がある図では
+    /// 完全な順序が存在しないため、行き詰まったら循環に属するテーブルを宣言順で 1 つだけ先に出して続ける
+    /// （循環の外のテーブルは親の後ろに保たれ、循環の中の順序だけが宣言順で決まる。生成は完走させる）。
     /// </remarks>
     private static IReadOnlyList<Entity> OrderEntitiesByForeignKey(ErDiagram diagram)
     {
@@ -135,9 +136,9 @@ internal sealed partial class CSharpGenerationModelBuilder
 
             if (ready.Count == 0)
             {
-                // 循環（相互参照）は解けない。残りを宣言順でそのまま出す
-                ordered.AddRange(remaining);
-                break;
+                // 循環（相互参照）は解けない。循環に属するテーブルを宣言順で 1 つだけ先に出して続ける
+                // （残りを全部出すと、循環の外で循環の誰かを参照する子まで親より前へ出てしまう）
+                ready = [remaining.First(entity => IsOnCycle(entity.Id, remaining, parents))];
             }
 
             foreach (var entity in ready)
@@ -149,6 +150,46 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         return ordered;
+    }
+
+    /// <summary>
+    /// エンティティが、まだ出していないエンティティの間の循環に属するか（親を辿って自分へ戻れるか）
+    /// </summary>
+    /// <remarks>
+    /// 出していないエンティティが 1 つも出せない（全員にまだ出していない親がいる）とき、親を辿ると必ずどこかで循環に入るので、
+    /// 循環に属するエンティティは必ず 1 つ以上ある。
+    /// </remarks>
+    private static bool IsOnCycle(
+        Guid start,
+        IReadOnlyCollection<Entity> remaining,
+        IReadOnlyDictionary<Guid, HashSet<Guid>> parents
+    )
+    {
+        var remainingIds = remaining.Select(entity => entity.Id).ToHashSet();
+        var visited = new HashSet<Guid>();
+        var pending = new Stack<Guid>(parents[start].Where(remainingIds.Contains));
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+
+            if (current == start)
+            {
+                return true;
+            }
+
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+
+            foreach (var parent in parents[current].Where(remainingIds.Contains))
+            {
+                pending.Push(parent);
+            }
+        }
+
+        return false;
     }
 
     /// <summary>1 テーブル分の同期生成モデルを組み立てる</summary>
@@ -165,7 +206,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         // rowversion 列の有無がモードを決める（版あり＝増分＋版ガード／版なし＝後勝ち・キー順全量）
         var rowVersionColumn = FindRowVersionColumn(entity);
         var isVersionless = rowVersionColumn is null;
-        var repositoryName = repository.InterfaceName[1..^"Repository".Length];
+        var repositoryName = ToRepositoryName(repository.EntityClassName);
 
         var keyPropertyName = _nameConverter.ToPropertyName(keyColumn.Name);
         var keyValueObject = ResolveValueObject(keyColumn);
@@ -665,6 +706,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             // （1.5 のまま＝実測）ため、素の ToString だと同じ行のキー文字列がサーバーとローカルで食い違い、
             // 削除伝搬・ack・pending の序数照合がすべて外れる
             "decimal" => $"{access}.ToString(\"G29\", CultureInfo.InvariantCulture)",
+            // TimeSpan は書式を取る ToString(IFormatProvider) を持たない（既定の形ではコンパイルできない）。TimeOnly の既定の形は
+            // 秒を落として往復しない（"HH:mm"）。どちらも不変の往復書式で書く。DateOnly は既定の形（"MM/dd/yyyy"）で往復する
+            "TimeSpan" => $"{access}.ToString(\"c\", CultureInfo.InvariantCulture)",
+            "TimeOnly" => $"{access}.ToString(\"O\", CultureInfo.InvariantCulture)",
             _ => $"{access}.ToString(CultureInfo.InvariantCulture)",
         };
     }
@@ -682,6 +727,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 "DateTime.Parse(keyText, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)",
             "DateTimeOffset" =>
                 "DateTimeOffset.Parse(keyText, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)",
+            "TimeSpan" => "TimeSpan.ParseExact(keyText, \"c\", CultureInfo.InvariantCulture)",
+            "TimeOnly" => "TimeOnly.ParseExact(keyText, \"O\", CultureInfo.InvariantCulture)",
             _ => $"{underlying}.Parse(keyText, CultureInfo.InvariantCulture)",
         };
 

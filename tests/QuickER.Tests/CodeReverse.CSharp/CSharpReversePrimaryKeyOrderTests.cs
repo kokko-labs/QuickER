@@ -277,6 +277,29 @@ public class CSharpReversePrimaryKeyOrderTests
         merged[0].PrimaryKeyColumnIds.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// 主キー列の名前が重複する（パーサーが警告つきで通した）取込結果では、例外にせず順序を引き継がない
+    /// （名前で引く辞書を作っていたため ArgumentException になり、GUI のマージ取込がクラッシュ処理へ入っていた）
+    /// </summary>
+    [Fact(DisplayName = "主キー列の名前が重複していれば、マージ取込は例外にせず順序を引き継がない")]
+    public void ApplyPrimaryKeyOrder_DuplicateKeyNames_IsNotCarried()
+    {
+        var current = Diagram(["order_no", "tenant_id"]);
+        var merged = current.Entities.Select(entity => entity.Clone(preserveId: true)).ToList();
+        merged[0].PrimaryKeyColumnIds = [];
+        merged[0].Columns.Single(column => column.Name == "order_no").Name = "tenant_id";
+
+        var act = () =>
+            ReverseMergePostProcessor.ApplyPrimaryKeyOrder(
+                current,
+                merged,
+                new HashSet<string>(StringComparer.Ordinal)
+            );
+
+        act.Should().NotThrow();
+        merged[0].PrimaryKeyColumnIds.Should().BeEmpty();
+    }
+
     /// <summary>主キー列の集合が変わっていれば、古い順序は持ち込まない（コードが語った構成の変更）</summary>
     [Fact(DisplayName = "主キー列の集合が変わっていれば、マージ取込は古い順序を持ち込まない")]
     public void ApplyPrimaryKeyOrder_KeySetChanged_IsNotCarried()

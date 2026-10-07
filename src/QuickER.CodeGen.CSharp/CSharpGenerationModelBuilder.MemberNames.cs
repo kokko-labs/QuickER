@@ -237,7 +237,11 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>集めたメンバー名を突き合わせ、2 回以上現れた名前を Error 診断として報告する</summary>
-    /// <remarks>報告順を出現順に固定するため、挿入順リストと辞書で集約する（診断の決定性を保つ）</remarks>
+    /// <remarks>
+    /// 報告順を出現順に固定するため、挿入順リストと辞書で集約する（診断の決定性を保つ）。
+    /// 囲むクラス自身の名前も先頭に入れる。メンバー名がクラス名と同じだと CS0542 でコンパイルできないため
+    /// （例: テーブル <c>orders</c> の列 <c>order_entity</c> は <c>OrderEntity</c> クラスに同名のプロパティを作る）。
+    /// </remarks>
     private static void ReportDuplicateMemberNames(
         string className,
         string tableName,
@@ -247,8 +251,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var originsByName = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         var order = new List<string>();
+        var classNameMember = new GeneratedMemberName(
+            className,
+            string.Format(Strings.CodeGen_Origin_ClassName, className)
+        );
 
-        foreach (var member in members)
+        foreach (var member in members.Prepend(classNameMember))
         {
             if (!originsByName.TryGetValue(member.Name, out var origins))
             {

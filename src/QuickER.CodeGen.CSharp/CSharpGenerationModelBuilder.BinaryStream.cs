@@ -91,7 +91,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         // リモート契約が生成される構成では契約とファイル糖衣の対象をリモート面へ移す
         // （リモート面 ON はネットワーク境界を越えられる操作の定義に合致。全機能面はリモート面を継承）。
-        var remoteContracts = options.GenerateRemoteContracts || options.GenerateRemoteServices;
+        var remoteContracts = options.GeneratesRemoteContracts;
         var interfaceName = $"I{repositoryName}Repository";
         var remoteInterfaceName = $"I{repositoryName}RemoteRepository";
         var fileExtensionsTarget = remoteContracts ? remoteInterfaceName : interfaceName;
@@ -251,7 +251,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("    /// <summary>Reads the ")
             .Append(columnNameXmlDoc)
             .Append(
-                " column into a file (delegates to the Stream overload; true = written, false = no row or NULL).</summary>\n"
+                " column into a file (delegates to the Stream overload; true = written, false = no row or NULL, in which case an existing file is left untouched).</summary>\n"
             )
             .Append("    public static async Task<bool> Read")
             .Append(propertyName)
@@ -266,10 +266,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        CancellationToken cancellationToken = default\n")
             .Append("    )\n    {\n")
             .Append("        ArgumentNullException.ThrowIfNull(repository);\n")
-            .Append("        await using var destination = File.Create(path);\n")
-            .Append("        return await repository.Read")
+            .Append("        return await UnboundedBinaryColumns\n")
+            .Append("            .ReadToFileAsync(path, destination => repository.Read")
             .Append(propertyName)
-            .Append("Async(id, destination, cancellationToken).ConfigureAwait(false);\n    }\n\n");
+            .Append("Async(id, destination, cancellationToken))\n")
+            .Append("            .ConfigureAwait(false);\n    }\n\n");
         builder
             .Append("    /// <summary>Writes the ")
             .Append(columnNameXmlDoc)

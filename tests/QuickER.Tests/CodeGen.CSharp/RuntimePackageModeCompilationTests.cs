@@ -539,7 +539,7 @@ public class RuntimePackageModeCompilationTests
         var sqlServer = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
         var sqlite = SqliteCSharpTypeMapper.ResolveColumnTypes(diagram);
 
-        var primaryDialect = options.EffectiveRepositoryDialects[0];
+        var primaryDialect = options.ResolveRepositoryDialects()[0];
         var primary = string.Equals(primaryDialect, "sqlite", StringComparison.OrdinalIgnoreCase)
             ? sqlite
             : sqlServer;

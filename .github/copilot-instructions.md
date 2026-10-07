@@ -1,6 +1,7 @@
 # Copilot Instructions
 
 ## プロジェクト ガイドライン
+- 規約・設計判断・不変条件の正本はリポジトリ直下の CLAUDE.md。ここと食い違うときは CLAUDE.md に従う。
 - コードには他の既存コードと同様、分かりやすい日本語コメント（特にビヘイビアや主要メソッド）を付ける。
 - コード修正時は、共通化・シンプル化を優先し、特殊なパターンの条件分岐や処理をむやみに増やさない。
 - コード修正時は必ずコードレビューとテストを行い、既存コードとの整合性・シンプルさ・可読性を重視する。
@@ -10,9 +11,9 @@
 - `switch` 文の `case` ブロック間（`return` / `break` / `throw` で終わる case の後、次の `case` の前）にも空行（1行）を入れる。
 - コード修正後は必ず `csharpier format` を実行して整形する（空行の最終判断は CSharpier の挙動を優先する）。
 - CSharpier はグローバルにインストールされており、ターミナルから `csharpier format .` を実行できる。
-- Codex.exe の実行は PATH に通っている前提で扱い、フルパス指定を前提にしない。
+- codex（Codex CLI）は利用者にフルパスを設定させず、PATH から探して見つけたフルパスで起動する（PATH の相対要素は読み飛ばす）。
 - ビルド警告は可能な限り解消する。
-- 実装後に各機能のコードレビューとテストを行い、DB接続テストが必要な場合は localhost / TestDB を使用する。
+- 実装後に各機能のコードレビューとテストを行う。実 DB のテスト（tests/QuickER.Tests.Integration）は SQL Server / PostgreSQL / MySQL / Oracle を Testcontainers の実コンテナで動かし（Docker が無ければ自動スキップ・`QUICKER_REQUIRE_DOCKER=1` ではスキップせず失敗）、SQLite は実ファイル DB を使う。localhost / TestDB（Windows 認証）へつなぐのは SqlServerSchemaSyncIntegrationTests の 1 クラスだけで、接続できなければスキップされる。
 - コード修正後は必ずユニットテストを実行し、テストの失敗を見落とさないようにする。
 - 文字列リテラルの扱いは一貫性を重視し、一部の表示文言だけを定数化しない。定数化するなら同種の文言をまとめて整理する。
 - 生成コードは CommunityToolkit など特定 UI フレームワークに依存させず、WPF だけでなく Web 等でも汎用利用できる設計を優先する。

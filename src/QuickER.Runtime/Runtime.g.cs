@@ -353,6 +353,69 @@ public static class UnboundedBinaryColumns
     public const int StreamCopyBufferSize = 81920;
 
     /// <summary>
+    /// Reads a blob into the file at <paramref name="path"/> through <paramref name="read"/> (a streaming read accessor) and
+    /// replaces the file only when the read reports that it wrote the value (returns that result).
+    /// </summary>
+    /// <remarks>
+    /// The value is first read into a temporary file in the same folder, which is moved over <paramref name="path"/> once the read
+    /// returns <c>true</c> (the same folder keeps the move on one volume). When the read returns <c>false</c> (no row, or a
+    /// <c>NULL</c> value), throws, or is cancelled, the temporary file is deleted and an existing file at <paramref name="path"/>
+    /// is left exactly as it was: opening the destination itself would truncate it before the row is even found.
+    /// </remarks>
+    /// <param name="path">The file to write the value to.</param>
+    /// <param name="read">Reads the value into the given stream; returns whether there was a value to write.</param>
+    public static async System.Threading.Tasks.Task<bool> ReadToFileAsync(
+        string path,
+        Func<Stream, System.Threading.Tasks.Task<bool>> read
+    )
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        ArgumentNullException.ThrowIfNull(read);
+
+        var destination = Path.GetFullPath(path);
+        var temporary = Path.Combine(
+            Path.GetDirectoryName(destination)!,
+            $".{Path.GetFileName(destination)}.{Guid.NewGuid():N}.tmp"
+        );
+
+        try
+        {
+            bool written;
+
+            await using (
+                var stream = new FileStream(
+                    temporary,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    StreamCopyBufferSize,
+                    useAsync: true
+                )
+            )
+            {
+                written = await read(stream).ConfigureAwait(false);
+            }
+
+            if (written)
+            {
+                File.Move(temporary, destination, overwrite: true);
+            }
+
+            return written;
+        }
+        finally
+        {
+            // After a successful move the temporary file no longer exists, so this only removes what a false, a failure or a
+            // cancellation left behind. A failed delete must not replace the exception that is already on its way out
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>
     /// Determines the length of the write stream (a shared check that keeps the contract uniform across dialects).
     /// If <paramref name="source"/> is <c>CanSeek</c>, <c>Length - Position</c> is used, and a <paramref name="length"/>
     /// given alongside it must equal that (a different value throws <see cref="ArgumentException"/>); otherwise
@@ -3608,14 +3671,42 @@ public abstract class EditModelBaseCore
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="entity">The entity carrying the values to check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    protected Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(
+        IRemoteRepositoryCore<TEntity, TKey> repository,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        CheckDatabaseUniquenessAsync(repository, entity, [], cancellationToken);
+
+    /// <summary>
+    /// Asks the repository which UNIQUE constraints the given entity violates and registers the findings as duplicate-value
+    /// errors, leaving out the findings on properties whose values could not be carried onto the entity (returns true when
+    /// no finding remains).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same as the overload without <paramref name="uncheckedPropertyNames"/>, except that a finding naming any of those
+    /// properties is dropped. The generated <c>ValidateUniqueAsync</c> passes a value-type property with no input (the entity
+    /// property is not nullable, so the entity carries the CLR default instead) and a property the edit model does not have:
+    /// a constraint over such a property would be checked against a value the user never entered, so its finding means
+    /// nothing. The other constraints are still checked, and their findings are registered as usual.
+    /// </para>
+    /// </remarks>
+    /// <param name="repository">The repository used for the check.</param>
+    /// <param name="entity">The entity carrying the values to check.</param>
+    /// <param name="uncheckedPropertyNames">The properties whose values the entity does not carry; findings naming any of them are dropped.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     protected async Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(
         IRemoteRepositoryCore<TEntity, TKey> repository,
         TEntity entity,
+        IReadOnlyCollection<string> uncheckedPropertyNames,
         CancellationToken cancellationToken
     )
         where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(uncheckedPropertyNames);
 
         if (IsRemoved)
         {
@@ -3635,7 +3726,13 @@ public abstract class EditModelBaseCore
             return false;
         }
 
-        foreach (var violation in violations)
+        var checkedViolations = violations
+            .Where(violation =>
+                !violation.PropertyNames.Any(name => uncheckedPropertyNames.Contains(name))
+            )
+            .ToList();
+
+        foreach (var violation in checkedViolations)
         {
             RegisterDuplicateError(
                 violation.PropertyNames,
@@ -3644,7 +3741,7 @@ public abstract class EditModelBaseCore
             );
         }
 
-        return violations.Count == 0;
+        return checkedViolations.Count == 0;
     }
 
     /// <summary>Writes the confirmed values back to the binding properties and clears the input errors (conversion and missing-required-input).</summary>
@@ -8240,6 +8337,15 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// direct connection, so swapping the two implementations does not change what happens to the stream that was passed
     /// in. (The HTTP layer disposes the request content once the request has been sent, so the stream is handed to
     /// <see cref="StreamContent"/> through a non-closing wrapper.)
+    /// <para>
+    /// The <c>PUT</c> carries <c>Expect: 100-continue</c>, so the body is held back until the server has looked at the
+    /// headers. An upload whose declared length is over the endpoint's limit is then answered with 413 before any of the
+    /// body is sent. Without it the body would already be on the wire when the server, having refused to read it, closes
+    /// the connection; the reset that follows can discard the 413 and surface as an <see cref="HttpRequestException"/>
+    /// instead. The wait for the interim response is the handler's <c>Expect100ContinueTimeout</c> (1 second for
+    /// <see cref="SocketsHttpHandler"/>), after which the body is sent anyway; an <see cref="HttpClient"/> supplied
+    /// through the factory overload of the registration can set a different value.
+    /// </para>
     /// </remarks>
     protected async Task<bool> UploadUnboundedBinaryColumnAsync(
         string columnRoute,
@@ -8276,6 +8382,10 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
         using var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+
+        // Hold the body back until the server has accepted the headers, so a declared length over the limit is
+        // answered with 413 rather than lost to the reset of a connection the server closed mid-upload
+        request.Headers.ExpectContinue = true;
         using var response = await _httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,

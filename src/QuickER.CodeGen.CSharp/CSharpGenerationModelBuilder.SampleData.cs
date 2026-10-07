@@ -290,13 +290,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                 or "decimal"
                 or "double"
                 or "float"
-                or "System.Guid"
                 or "Guid"
-                or "System.DateTime"
                 or "DateTime"
-                or "System.DateTimeOffset"
                 or "DateTimeOffset"
-                or "System.TimeSpan"
                 or "TimeSpan"
                 or "byte[]"
                 or "System.Net.IPAddress"
@@ -361,19 +357,15 @@ internal sealed partial class CSharpGenerationModelBuilder
             case "bool":
                 return "index % 2 == 1";
 
-            case "System.Guid":
             case "Guid":
                 return SampleGuidLiteral();
 
-            case "System.DateTime":
             case "DateTime":
                 return "new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(index)";
 
-            case "System.DateTimeOffset":
             case "DateTimeOffset":
                 return "new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero).AddDays(index)";
 
-            case "System.TimeSpan":
             case "TimeSpan":
                 return "TimeSpan.FromHours(index)";
 

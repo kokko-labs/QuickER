@@ -191,4 +191,53 @@ public class EntityPrimaryKeyOrderTests
 
         entity.Clone(preserveId: false).PrimaryKeyColumnIds.Should().Equal(orphan);
     }
+
+    /// <summary>取込前と取込後で列の Id が違う（主キー列名 b, a・a, b の 2 テーブル）組を組み立てる</summary>
+    private static (Entity Existing, Entity Merged) BuildMergePair()
+    {
+        var existing = new Entity
+        {
+            TableName = "T",
+            Columns =
+            {
+                new Column { Name = "a", IsPrimaryKey = true },
+                new Column { Name = "b", IsPrimaryKey = true },
+                new Column { Name = "memo" },
+            },
+        };
+        existing.PrimaryKeyColumnIds = [existing.Columns[1].Id, existing.Columns[0].Id];
+        var merged = new Entity
+        {
+            TableName = "T",
+            Columns =
+            {
+                new Column { Name = "a", IsPrimaryKey = true },
+                new Column { Name = "b", IsPrimaryKey = true },
+                new Column { Name = "memo" },
+            },
+        };
+
+        return (existing, merged);
+    }
+
+    [Fact(DisplayName = "主キーの順序の引き継ぎは、列名で引いた取込側の列 Id で順序を書く")]
+    public void InheritPrimaryKeyOrderFrom_RebindsByName()
+    {
+        var (existing, merged) = BuildMergePair();
+
+        merged.InheritPrimaryKeyOrderFrom(existing).Should().BeTrue();
+
+        merged.PrimaryKeyColumnIds.Should().Equal(merged.Columns[1].Id, merged.Columns[0].Id);
+    }
+
+    [Fact(DisplayName = "主キーの順序の引き継ぎは、列名が大文字小文字まで一致しなければ行わない")]
+    public void InheritPrimaryKeyOrderFrom_CaseDifferentName_IsNotCarried()
+    {
+        var (existing, merged) = BuildMergePair();
+        merged.Columns[1].Name = "B";
+
+        merged.InheritPrimaryKeyOrderFrom(existing).Should().BeFalse();
+
+        merged.PrimaryKeyColumnIds.Should().BeEmpty();
+    }
 }

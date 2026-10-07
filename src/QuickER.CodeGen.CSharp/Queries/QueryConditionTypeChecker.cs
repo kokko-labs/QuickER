@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Numerics;
+
 namespace QuickER.CodeGen.CSharp.Queries;
 
 /// <summary>
@@ -249,6 +252,7 @@ internal static class QueryConditionTypeChecker
         if (column.ValueObjectClassName is { } columnVo)
         {
             // VO 列: 同一 VO のリストは直接比較・素のリストは Create(要素) の暗黙変換が要る
+            // （要素型が内包型と違えばエミッタはラムダで包むので、暗黙の数値変換が効く）
             compatible = element.ValueObjectClassName is { } elementVo
                 ? elementVo == columnVo
                 : ImplicitlyConvertible(element.TypeName, column.UnderlyingTypeName);
@@ -343,6 +347,11 @@ internal static class QueryConditionTypeChecker
     }
 
     /// <summary>数値リテラルと列の型整合（エミッタのサフィックス規則と VO Create の暗黙変換の鏡）</summary>
+    /// <remarks>
+    /// 値の範囲も見る。エミッタはリテラルを原文のまま出すので、C# のリテラルにならない値（<c>ulong</c> を超える整数）、
+    /// 列の型と比べられない値（素の <c>long</c> 列に <c>long</c> を超える値・素の符号付き整数列に <c>ulong</c> の値・
+    /// 素の <c>ulong</c> 列に負の値）、VO の <c>Create</c> へ渡せない値（内包型の範囲の外）はコンパイルできない。
+    /// </remarks>
     private static bool NumberLiteralCompatible(
         QueryColumnBinding column,
         TypeFamily underlyingFamily,
@@ -355,16 +364,31 @@ internal static class QueryConditionTypeChecker
         switch (underlyingFamily)
         {
             case TypeFamily.Integer when !isFractional:
-                return true;
+                return IntegerLiteralFits(column, literal);
 
             case TypeFamily.Integer:
                 // 小数リテラル × 整数列: VO は Create(1.5)（double → 整数の暗黙変換なし）で CS1503。
                 // 素の long 列はサフィックス L が付いて "1.5L"＝字句エラー。それ以外の素の整数列は
                 // サフィックスなし＝double 比較へ暗黙拡大されてコンパイル・翻訳とも通るため許容する
-                return column.ValueObjectClassName is null && column.UnderlyingTypeName != "long";
+                return column.ValueObjectClassName is null
+                    && column.UnderlyingTypeName != "long"
+                    && FitsDouble(literal);
 
             case TypeFamily.Decimal:
+                // サフィックス m の decimal リテラル（範囲外は CS0594）
+                return decimal.TryParse(
+                    literal,
+                    NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture,
+                    out _
+                );
+
             case TypeFamily.Floating:
+                // サフィックス f / d の浮動小数点リテラル（範囲外は CS0594）
+                return column.UnderlyingTypeName == "float"
+                    ? FitsFloat(literal)
+                    : FitsDouble(literal);
+
             case TypeFamily.Unknown:
                 return true;
 
@@ -373,6 +397,77 @@ internal static class QueryConditionTypeChecker
                 return false;
         }
     }
+
+    /// <summary>小数点の無い整数リテラルが、整数列との比較・VO の生成でコンパイルできる値か</summary>
+    private static bool IntegerLiteralFits(QueryColumnBinding column, string literal)
+    {
+        // C# の整数リテラルは ulong までで、それを超えると CS1021（負は long まで）
+        if (
+            !BigInteger.TryParse(
+                literal,
+                NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture,
+                out var value
+            )
+            || value > ulong.MaxValue
+            || value < long.MinValue
+        )
+        {
+            return false;
+        }
+
+        if (column.ValueObjectClassName is not null)
+        {
+            // VO は Create(リテラル)。定数の暗黙変換は値が内包型の範囲に入るときだけ効く（CS1503）
+            return IntegerRange(column.UnderlyingTypeName) is not { } range
+                || (value >= range.Min && value <= range.Max);
+        }
+
+        return column.UnderlyingTypeName switch
+        {
+            // サフィックス L のリテラルは long を超えると ulong になり、long 列と比べられない
+            "long" => value <= long.MaxValue,
+            // ulong と負の値は比べられない（CS0034）
+            "ulong" => value >= 0,
+            // 符号付き整数と ulong のリテラル（long を超える値）は比べられない（CS0034）
+            "sbyte" or "short" or "int" => value <= long.MaxValue,
+            // byte / ushort / uint は int・long・ulong のどれへも昇格できる
+            _ => true,
+        };
+    }
+
+    /// <summary>整数型の値の範囲（整数型でなければ null）</summary>
+    private static (BigInteger Min, BigInteger Max)? IntegerRange(string clrTypeName) =>
+        clrTypeName switch
+        {
+            "sbyte" => (sbyte.MinValue, sbyte.MaxValue),
+            "byte" => (byte.MinValue, byte.MaxValue),
+            "short" => (short.MinValue, short.MaxValue),
+            "ushort" => (ushort.MinValue, ushort.MaxValue),
+            "int" => (int.MinValue, int.MaxValue),
+            "uint" => (uint.MinValue, uint.MaxValue),
+            "long" => (long.MinValue, long.MaxValue),
+            "ulong" => (ulong.MinValue, ulong.MaxValue),
+            _ => null,
+        };
+
+    /// <summary>数値リテラルが double の有限値として書けるか</summary>
+    private static bool FitsDouble(string literal) =>
+        double.TryParse(
+            literal,
+            NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+            CultureInfo.InvariantCulture,
+            out var value
+        ) && double.IsFinite(value);
+
+    /// <summary>数値リテラルが float の有限値として書けるか</summary>
+    private static bool FitsFloat(string literal) =>
+        float.TryParse(
+            literal,
+            NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+            CultureInfo.InvariantCulture,
+            out var value
+        ) && float.IsFinite(value);
 
     /// <summary>列の生成型に順序比較演算子があるか</summary>
     private static bool SupportsOrdering(QueryColumnBinding column)

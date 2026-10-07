@@ -93,6 +93,57 @@ public class Entity
         return ordered.SequenceEqual(declared) ? null : ordered.Select(c => c.Name).ToList();
     }
 
+    /// <summary>マージ取込の結果（このテーブル）へ、取込前の同じテーブルが明示していた主キーの順序を引き継ぐ</summary>
+    /// <param name="existing">取込前の同じテーブル（Guid 引継で対応づいた現在の図のエンティティ）</param>
+    /// <returns>順序を引き継いだとき <c>true</c>（<see cref="PrimaryKeyColumnIds"/> をその場で書き換える）</returns>
+    /// <remarks>
+    /// <para>
+    /// 取込元が主キーの順序を運ばない（または運ばないことがある）取込で、取り込むたびに列宣言順へ戻らないようにする。
+    /// 戻ると次の DB 同期で主キーの張り直し（AlterPrimaryKey）が出る。C# コード取込（順序を書いていない古い生成コード）と
+    /// Excel 定義書（順序を書く欄が無い）のマージ取込が、同じこの規則を使う。
+    /// </para>
+    /// <para>
+    /// 引き継ぐのは、<paramref name="existing"/> が順序を明示していて（<see cref="PrimaryKeyColumnIds"/> が空でない）、
+    /// 主キー列の集合が列名で一致するときだけ。主キーの構成が変わったなら、それは取込元が語った変更なので古い順序を持ち込まない。
+    /// 明示していない図は明示しないまま残す（列宣言順のフォールバックを書き込むと順序が固定され、以後の列の並べ替えが
+    /// 主キーの順序に反映されなくなる）。
+    /// </para>
+    /// <para>
+    /// 列名は大文字小文字まで一致で引き、列 Id はこのテーブル側の列へ張り替える。主キー列に同じ名前が 2 つ以上あると
+    /// どれが誰か決まらないので引き継がない（C# コード取込のパーサーは重複する列名を警告つきで通す）。
+    /// </para>
+    /// </remarks>
+    public bool InheritPrimaryKeyOrderFrom(Entity existing)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+
+        if (existing.PrimaryKeyColumnIds.Count == 0)
+        {
+            return false;
+        }
+
+        var keys = Columns.Where(column => column.IsPrimaryKey).ToList();
+
+        if (keys.DistinctBy(column => column.Name, StringComparer.Ordinal).Count() != keys.Count)
+        {
+            return false;
+        }
+
+        var keyByName = keys.ToDictionary(column => column.Name, StringComparer.Ordinal);
+        var existingOrder = existing.GetPrimaryKeyColumnsInOrder();
+
+        if (
+            existingOrder.Count != keyByName.Count
+            || existingOrder.Any(column => !keyByName.ContainsKey(column.Name))
+        )
+        {
+            return false;
+        }
+
+        PrimaryKeyColumnIds = existingOrder.Select(column => keyByName[column.Name].Id).ToList();
+        return true;
+    }
+
     /// <summary>指定した列の集合が、このテーブルの候補キー（主キー、または一意制約のいずれか）と一致するか</summary>
     /// <param name="columnIds">外部キーが参照する親側の列（<see cref="Column.Id"/>）。並びは問わない</param>
     /// <returns>

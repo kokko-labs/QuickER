@@ -43,6 +43,7 @@ public abstract class QuickER.Runtime.EditModelBaseCore : System.ComponentModel.
     protected .ctor()
     protected QuickER.Runtime.EditModelCollection<T> GetChildren<T>(QuickER.Runtime.EditModelCollection<T> field)
     protected System.Collections.Generic.IEnumerable<QuickER.Runtime.EditModelError> CollectOwnErrors(string path)
+    protected System.Threading.Tasks.Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey> repository, TEntity entity, System.Collections.Generic.IReadOnlyCollection<string> uncheckedPropertyNames, System.Threading.CancellationToken cancellationToken)
     protected System.Threading.Tasks.Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey> repository, TEntity entity, System.Threading.CancellationToken cancellationToken)
     protected bool AcceptBindingInput(ref string field, string value, string bindingPropertyName, out string normalized)
     protected bool IsLoading { get; }
@@ -601,6 +602,7 @@ public static class QuickER.Runtime.UnboundedBinaryColumns
     public const int StreamCopyBufferSize = 81920
     public static System.IO.Stream WithExactLength(System.IO.Stream source, long length)
     public static System.Reflection.PropertyInfo[] For(System.Type entityType)
+    public static System.Threading.Tasks.Task<bool> ReadToFileAsync(string path, System.Func<System.IO.Stream, System.Threading.Tasks.Task<bool>> read)
     public static long ResolveWriteLength(System.IO.Stream source, long? length)
     public static void PreserveUnset(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.EntityBaseCore stored)
     public static void StripExcluded(QuickER.Runtime.EntityBaseCore entity)

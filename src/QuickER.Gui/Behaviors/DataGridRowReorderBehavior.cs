@@ -69,6 +69,27 @@ public static class DataGridRowReorderBehavior
     private static Point GetDragStartPoint(DependencyObject d) =>
         (Point)d.GetValue(DragStartPointProperty);
 
+    /// <summary>行ヘッダー上で押下したときの、その行のカラムを DataGrid ごとに保持する添付プロパティ（それ以外の押下では null）</summary>
+    private static readonly DependencyProperty DragSourceColumnProperty =
+        DependencyProperty.RegisterAttached(
+            "DragSourceColumn",
+            typeof(ColumnViewModel),
+            typeof(DataGridRowReorderBehavior),
+            new PropertyMetadata(null)
+        );
+
+    /// <summary><see cref="DragSourceColumnProperty"/> を設定する</summary>
+    private static void SetDragSourceColumn(DependencyObject d, ColumnViewModel? value) =>
+        d.SetValue(DragSourceColumnProperty, value);
+
+    /// <summary><see cref="DragSourceColumnProperty"/> を取得する</summary>
+    private static ColumnViewModel? GetDragSourceColumn(DependencyObject d) =>
+        (ColumnViewModel?)d.GetValue(DragSourceColumnProperty);
+
+    /// <summary>テスト専用: 直前の押下で記録したドラッグ元のカラム（行ヘッダー以外の押下では null）</summary>
+    internal static ColumnViewModel? GetDragSourceColumnForTests(DataGrid dataGrid) =>
+        GetDragSourceColumn(dataGrid);
+
     /// <summary><see cref="IsEnabledProperty"/> 変更時にイベントハンドラと <see cref="UIElement.AllowDrop"/> を登録・解除する</summary>
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -94,7 +115,11 @@ public static class DataGridRowReorderBehavior
         }
     }
 
-    /// <summary>左ボタン押下時にドラッグ判定の基準となる開始位置を記録する</summary>
+    /// <summary>左ボタン押下時に、ドラッグ判定の基準となる開始位置と、行ヘッダー上ならその行のカラムを記録する</summary>
+    /// <remarks>
+    /// 行ヘッダーかどうかは押下の起点で決める。移動中の位置で判定すると、セルで押してから行ヘッダーの上へ
+    /// 動かしただけで並べ替えが始まる。
+    /// </remarks>
     private static void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not DataGrid dataGrid)
@@ -103,9 +128,16 @@ public static class DataGridRowReorderBehavior
         }
 
         SetDragStartPoint(dataGrid, e.GetPosition(null));
+
+        // セル編集と競合しないよう、起点が行ヘッダー上の場合のみドラッグ元を記録する
+        var origin = e.OriginalSource as DependencyObject;
+        var sourceColumn = FindVisualParent<DataGridRowHeader>(origin) is not null
+            ? FindVisualParent<DataGridRow>(origin)?.Item as ColumnViewModel
+            : null;
+        SetDragSourceColumn(dataGrid, sourceColumn);
     }
 
-    /// <summary>移動量がシステム既定の閾値を超え、かつ行ヘッダー上の操作のときにドラッグを開始する</summary>
+    /// <summary>移動量がシステム既定の閾値を超え、かつ行ヘッダー上で押下していたときにドラッグを開始する</summary>
     private static void OnMouseMove(object sender, MouseEventArgs e)
     {
         if (sender is not DataGrid dataGrid)
@@ -114,6 +146,11 @@ public static class DataGridRowReorderBehavior
         }
 
         if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        if (GetDragSourceColumn(dataGrid) is not { } sourceColumn)
         {
             return;
         }
@@ -130,21 +167,8 @@ public static class DataGridRowReorderBehavior
             return;
         }
 
-        // セル編集と競合しないよう、起点が行ヘッダー上の場合のみドラッグを許可する
-        var header = FindVisualParent<DataGridRowHeader>(e.OriginalSource as DependencyObject);
-
-        if (header is null)
-        {
-            return;
-        }
-
-        var row = FindVisualParent<DataGridRow>(e.OriginalSource as DependencyObject);
-
-        if (row?.Item is not ColumnViewModel sourceColumn)
-        {
-            return;
-        }
-
+        // 1 回の押下で開始するドラッグは 1 回だけ（ドロップ後に同じ押下のまま動かしても再開しない）
+        SetDragSourceColumn(dataGrid, null);
         DragDrop.DoDragDrop(dataGrid, sourceColumn, DragDropEffects.Move);
     }
 

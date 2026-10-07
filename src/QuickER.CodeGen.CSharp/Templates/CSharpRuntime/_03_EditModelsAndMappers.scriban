@@ -1213,14 +1213,42 @@ public abstract class EditModelBaseCore
     /// <param name="repository">The repository used for the check.</param>
     /// <param name="entity">The entity carrying the values to check.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    protected Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(
+        IRemoteRepositoryCore<TEntity, TKey> repository,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        CheckDatabaseUniquenessAsync(repository, entity, [], cancellationToken);
+
+    /// <summary>
+    /// Asks the repository which UNIQUE constraints the given entity violates and registers the findings as duplicate-value
+    /// errors, leaving out the findings on properties whose values could not be carried onto the entity (returns true when
+    /// no finding remains).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same as the overload without <paramref name="uncheckedPropertyNames"/>, except that a finding naming any of those
+    /// properties is dropped. The generated <c>ValidateUniqueAsync</c> passes a value-type property with no input (the entity
+    /// property is not nullable, so the entity carries the CLR default instead) and a property the edit model does not have:
+    /// a constraint over such a property would be checked against a value the user never entered, so its finding means
+    /// nothing. The other constraints are still checked, and their findings are registered as usual.
+    /// </para>
+    /// </remarks>
+    /// <param name="repository">The repository used for the check.</param>
+    /// <param name="entity">The entity carrying the values to check.</param>
+    /// <param name="uncheckedPropertyNames">The properties whose values the entity does not carry; findings naming any of them are dropped.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     protected async Task<bool> CheckDatabaseUniquenessAsync<TEntity, TKey>(
         IRemoteRepositoryCore<TEntity, TKey> repository,
         TEntity entity,
+        IReadOnlyCollection<string> uncheckedPropertyNames,
         CancellationToken cancellationToken
     )
         where TEntity : EntityBaseCore, new()
     {
         ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(uncheckedPropertyNames);
 
         if (IsRemoved)
         {
@@ -1240,7 +1268,13 @@ public abstract class EditModelBaseCore
             return false;
         }
 
-        foreach (var violation in violations)
+        var checkedViolations = violations
+            .Where(violation =>
+                !violation.PropertyNames.Any(name => uncheckedPropertyNames.Contains(name))
+            )
+            .ToList();
+
+        foreach (var violation in checkedViolations)
         {
             RegisterDuplicateError(
                 violation.PropertyNames,
@@ -1249,7 +1283,7 @@ public abstract class EditModelBaseCore
             );
         }
 
-        return violations.Count == 0;
+        return checkedViolations.Count == 0;
     }
 {{~ end ~}}
 
@@ -2711,11 +2745,9 @@ public abstract partial class EditModelBase<TSelf> : EditModelBaseCore<TSelf>
 public partial class {{ item.class_name }} : EditModelBase<{{ item.class_name }}>
 {
     // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
-{{ for p in item.properties }}{{ if p.field_initializer != "" }}    /// <summary>Confirmed value of {{ p.property_name }}.</summary>
-    private {{ p.type_name }} {{ p.field_name }} = {{ p.field_initializer }};
-{{ else }}    /// <summary>Confirmed value of {{ p.property_name }}.</summary>
+{{ for p in item.properties }}    /// <summary>Confirmed value of {{ p.property_name }}.</summary>
     private {{ p.type_name }} {{ p.field_name }};
-{{ end }}
+
     /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}On-screen input string for {{ p.property_name }}.{{ end }}</summary>
     private string {{ p.binding_field_name }} = {{ p.binding_field_initializer }};
 

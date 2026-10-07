@@ -287,6 +287,12 @@
   <data name="CodeGen_SettingsSaveFailedMessage" xml:space="preserve">
     <value>設定を {0} へ保存できませんでした。</value>
   </data>
+  <data name="CodeGen_SettingsAutoSaveFailedMessage" xml:space="preserve">
+    <value>コード生成の設定を {0} へ保存できませんでした。このダイアログの設定で生成は続けますが、次に開いたときには復元されません。</value>
+  </data>
+  <data name="CodeGen_SettingsFileUnreadable" xml:space="preserve">
+    <value>既存の設定ファイルを読めなかったため、そのまま残しました。</value>
+  </data>
   <data name="CodeGen_SettingsLoadFailedMessage" xml:space="preserve">
     <value>設定ファイル {0} を読み込めませんでした。</value>
   </data>

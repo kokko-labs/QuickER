@@ -1863,7 +1863,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("entity.MarkUpdated();");
     }
 
-    /// <summary>Query の取得が FOR JSON＋STJ に統一され、Include / ThenInclude（多階層）が生成されることを検証する</summary>
+    /// <summary>Include のある Query の取得が FOR JSON＋STJ で生成され、Include / ThenInclude（多階層）が生成されることを検証する（Include の無い取得のプレーン SELECT は SqlServerPlainQueryRuntimeTests が実 DB で固定する）</summary>
     [Fact]
     public void Generate_ShouldCreateJsonIncludeQuery()
     {
@@ -1892,12 +1892,13 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("Expression<Func<TProperty, ICollection<TNext>>> navigationSelector");
-        // 列はプロパティ名へ別名付け、単一参照は WITHOUT_ARRAY_WRAPPER
+        // 列はプロパティ名へ別名付け（float / real の列は可逆な書式の文字列）、単一参照は WITHOUT_ARRAY_WRAPPER
         content
             .Should()
             .Contain(
-                "{EntitySaveMetadata.QuoteIdentifier(columnName)} AS {EntitySaveMetadata.QuoteIdentifier(propertyName)}"
+                "parts.Add($\"{column} AS {EntitySaveMetadata.QuoteIdentifier(property.Name)}\");"
             );
+        content.Should().Contain("column = $\"CONVERT(varchar(30), {column}, 3)\";");
         content.Should().Contain("WITHOUT_ARRAY_WRAPPER");
         // ネストした FOR JSON はそのままだと文字列化されるため JSON_QUERY で包む
         content
@@ -3058,6 +3059,65 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
+    /// 列由来のメンバー名が囲むクラス名と同じになる（CS0542）図はエラーになることを検証する
+    /// （orders の列 order_entity → OrderEntity クラスの OrderEntity プロパティ・
+    /// 列 order_edit_model → OrderEditModel クラスの OrderEditModel プロパティ）
+    /// </summary>
+    [Theory]
+    [InlineData("order_entity", "OrderEntity")]
+    [InlineData("order_edit_model", "OrderEditModel")]
+    public void Generate_MemberNamedAsEnclosingClass_ShouldFailWithError(
+        string columnName,
+        string className
+    )
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "orders",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "order_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = columnName,
+                            DataType = "int",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .ContainSingle(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains($"'{className}'")
+                && diagnostic.Message.Contains("CS0542")
+            );
+    }
+
+    /// <summary>
     /// 列・ナビゲーション・EditModel の派生名がすべて異なる図は生成できることを検証する
     /// （シンボル表検証の偽陽性防止）
     /// </summary>
@@ -3587,6 +3647,116 @@ public class CSharpCodeGenerationServiceTests
         result
             .Diagnostics.Should()
             .NotContain(diagnostic => diagnostic.Message.Contains("RepositoryNamespace"));
+    }
+
+    /// <summary>
+    /// 出力に使われない名前空間オプションは不正でも生成を止めないことを検証する
+    /// （パッケージ参照モードの RuntimeNamespace＝Runtime 系ファイルを出さない・層別出力の RootNamespace＝
+    /// 全名前空間を層フォルダか明示オプションから決める・分割で全カテゴリを明示した RootNamespace）
+    /// </summary>
+    [Theory]
+    [InlineData("package-runtime")]
+    [InlineData("layered-root")]
+    [InlineData("split-all-explicit-root")]
+    public void Generate_InvalidButUnusedNamespaceOption_ShouldSucceed(string scenario)
+    {
+        var options = scenario switch
+        {
+            "package-runtime" => new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                SplitFilesByCategory = true,
+                UseRuntimePackages = true,
+                RuntimeNamespace = "123 bad",
+            },
+            "layered-root" => new CodeGenerationOptions
+            {
+                RootNamespace = "123 bad",
+                LayeredOutput = true,
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlserver", "sqlite"],
+            },
+            _ => new CodeGenerationOptions
+            {
+                RootNamespace = "123 bad",
+                SplitFilesByCategory = true,
+                RuntimeNamespace = "Sample.Runtime",
+                EntityNamespace = "Sample.Entities",
+                EditModelNamespace = "Sample.EditModels",
+                MapperNamespace = "Sample.Mappers",
+                RepositoryNamespace = "Sample.Repositories",
+                ValueObjectNamespace = "Sample.ValueObjects",
+                GenerateRepositories = true,
+                GenerateEfCoreRepositories = true,
+                GenerateInMemoryRepositories = true,
+            },
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+        result.Files.Should().NotBeEmpty();
+        result
+            .Files.Should()
+            .NotContain(file => file.Content.Contains("123 bad"), "使われない値は出力に現れない");
+    }
+
+    /// <summary>
+    /// 出力に使われる名前空間オプションは、モードに依らず従来どおり検証されることを検証する
+    /// （インラインの RuntimeNamespace・分割で導出に使うルート・非分割のルート）
+    /// </summary>
+    [Theory]
+    [InlineData("inline-runtime", "RuntimeNamespace")]
+    [InlineData("split-root-fallback", "RootNamespace")]
+    [InlineData("split-remote-server-root", "RootNamespace")]
+    public void Generate_InvalidAndUsedNamespaceOption_ShouldFailWithError(
+        string scenario,
+        string optionName
+    )
+    {
+        var options = scenario switch
+        {
+            "inline-runtime" => new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                SplitFilesByCategory = true,
+                RuntimeNamespace = "123 bad",
+            },
+            "split-root-fallback" => new CodeGenerationOptions
+            {
+                RootNamespace = "123 bad",
+                SplitFilesByCategory = true,
+                EntityNamespace = "Sample.Entities",
+            },
+            // サーバー実装（{root}.RemoteServer）は明示オプションを持たず、他を全部明示してもルートを使う
+            _ => new CodeGenerationOptions
+            {
+                RootNamespace = "123 bad",
+                SplitFilesByCategory = true,
+                RuntimeNamespace = "Sample.Runtime",
+                EntityNamespace = "Sample.Entities",
+                EditModelNamespace = "Sample.EditModels",
+                MapperNamespace = "Sample.Mappers",
+                RepositoryNamespace = "Sample.Repositories",
+                ValueObjectNamespace = "Sample.ValueObjects",
+                GenerateRepositories = true,
+                GenerateRemoteServices = true,
+            },
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .ContainSingle(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains(optionName)
+                && diagnostic.Message.Contains("123 bad")
+            );
     }
 
     /// <summary>多対多リレーションの警告がエンティティ数に関係なく 1 回だけ追加されることを検証する（重複解消）</summary>

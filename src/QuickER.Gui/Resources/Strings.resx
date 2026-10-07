@@ -98,6 +98,12 @@
   <data name="Settings_CheckUpdatesOnStartup" xml:space="preserve">
     <value>Check for updates on startup</value>
   </data>
+  <data name="Settings_SaveFailed" xml:space="preserve">
+    <value>The setting could not be saved, so it was left as it was.</value>
+  </data>
+  <data name="Settings_FileUnreadable" xml:space="preserve">
+    <value>The settings file could not be read, so it was not overwritten.</value>
+  </data>
   <data name="About_MenuItem" xml:space="preserve">
     <value>About QuickER</value>
   </data>

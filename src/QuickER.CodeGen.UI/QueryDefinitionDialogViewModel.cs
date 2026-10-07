@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using QuickER.CodeGen.CSharp.Queries;
 using QuickER.CodeGen.UI.Resources;
 using QuickER.Model;
+using QuickER.Provider;
 
 namespace QuickER.CodeGen.UI;
 
@@ -21,6 +22,9 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
     /// <summary>列名解決・条件検証・シグネチャプレビューに使う図のエンティティ一覧（モデル）</summary>
     private readonly IReadOnlyList<Entity> _entities;
 
+    /// <summary>列の DB 型表記を中立の型トークンへ変換する関数（型カタログが無ければ null）</summary>
+    private readonly Func<string, string?>? _toCanonicalToken;
+
     /// <summary>確定結果（OK 確定まで null。編集した定義の複製リスト）</summary>
     public List<QueryDefinition>? Result { get; private set; }
 
@@ -29,10 +33,19 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
 
     /// <summary>図からエンティティ一覧・既存クエリを取り込んで ViewModel を構築する</summary>
     /// <param name="diagram">エンティティと既存クエリを含む ER 図（この参照は変更しない）</param>
-    public QueryDefinitionDialogViewModel(ErDiagram diagram)
+    /// <param name="typeCatalog">
+    /// 図の方言の型カタログ（列で型付けした行を「なし」へ戻したとき、列の型を中立トークンへ変換するのに使う。null は変換しない）
+    /// </param>
+    public QueryDefinitionDialogViewModel(ErDiagram diagram, ITypeCatalog? typeCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(diagram);
 
+        _toCanonicalToken = typeCatalog is null
+            ? null
+            : dataType =>
+                typeCatalog.TryParse(dataType, out var canonical)
+                    ? CanonicalTypeToken.Format(canonical)
+                    : null;
         _entities = diagram.Entities.ToList();
         Entities = new ObservableCollection<EntityChoice>(
             _entities.Select(e => new EntityChoice(e.Id, e.TableName))
@@ -40,7 +53,7 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
 
         foreach (var query in diagram.Queries)
         {
-            Queries.Add(new QueryItemViewModel(query, _entities, Revalidate));
+            Queries.Add(new QueryItemViewModel(query, _entities, Revalidate, _toCanonicalToken));
         }
 
         SelectedQuery = Queries.FirstOrDefault();
@@ -75,7 +88,7 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
         {
             EntityId = _entities.FirstOrDefault()?.Id ?? Guid.Empty,
         };
-        var item = new QueryItemViewModel(definition, _entities, Revalidate);
+        var item = new QueryItemViewModel(definition, _entities, Revalidate, _toCanonicalToken);
         Queries.Add(item);
         SelectedQuery = item;
         Revalidate();

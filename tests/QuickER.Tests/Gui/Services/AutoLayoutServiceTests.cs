@@ -231,6 +231,39 @@ public class AutoLayoutServiceTests
         r.X.Should().BeLessThan(b.X);
     }
 
+    /// <summary>力学モデル配置が、各エンティティの座標を 1 回だけ代入することを検証する</summary>
+    /// <remarks>
+    /// 途中の左上座標を代入してから平行移動すると座標の変更通知が 2 倍になり、線・ミニマップ・キャンバスの
+    /// 大きさの再計算もそのたびに走る。結果の座標は同じなので、座標の表明では区別できない。
+    /// </remarks>
+    [Fact(DisplayName = "LayoutForceDirected: 各エンティティの X・Y の変更通知は 1 回だけ")]
+    public void LayoutForceDirected_AssignsEachCoordinateOnce()
+    {
+        var a = NewEntity("A");
+        var b = NewEntity("B");
+        var c = NewEntity("C");
+        var entities = new List<EntityViewModel> { a, b, c };
+        var rels = new List<RelationshipViewModel> { NewRelationship(a, b), NewRelationship(b, c) };
+        var notifications = new Dictionary<(EntityViewModel, string), int>();
+
+        foreach (var entity in entities)
+        {
+            entity.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y))
+                {
+                    var key = (entity, e.PropertyName);
+                    notifications[key] = notifications.GetValueOrDefault(key) + 1;
+                }
+            };
+        }
+
+        AutoLayoutService.LayoutForceDirected(entities, rels);
+
+        notifications.Should().NotBeEmpty("配置で座標が動く");
+        notifications.Values.Should().OnlyContain(count => count == 1);
+    }
+
     /// <summary>力学モデル配置で空コレクションを渡しても例外が発生しないことを検証する</summary>
     [Fact(DisplayName = "LayoutForceDirected: 空コレクションでも例外にならない")]
     public void LayoutForceDirected_Empty_DoesNotThrow()

@@ -205,16 +205,13 @@ internal sealed partial class CSharpGenerationModelBuilder
             var config = new CSharpEfCoreRelationshipConfigModel
             {
                 DependentClassName = _nameConverter.ToEntityClassName(target.TableName),
-                // 親側ナビゲーション名: 1 対多は子の複数形、1 対 1 は子の単数形
-                PrincipalNavigationName = _nameConverter.ToNavigationName(
-                    target.TableName,
-                    collection: isCollection
-                ),
+                // 親側ナビゲーション名（エンティティのナビゲーションと同じ正本＝ResolveNavigationNames）
+                PrincipalNavigationName = _navigationNames[relationship.Id].Principal,
                 // 子側ナビゲーション名: 親への単一参照。ただし自己参照では子（親参照）ナビゲーションを
                 // 生成しない（ResolveAllNavigations と同じ規則）ため空にし、テンプレートで WithOne() を無引数にする
                 DependentNavigationName = isSelfReference
                     ? string.Empty
-                    : _nameConverter.ToNavigationName(source.TableName, collection: false),
+                    : _navigationNames[relationship.Id].Dependent,
                 IsCollection = isCollection,
                 ForeignKeyPropertyNames = [_nameConverter.ToPropertyName(dependentColumn.Name)],
                 PrincipalKeyPropertyNames = referencesPrimaryKey

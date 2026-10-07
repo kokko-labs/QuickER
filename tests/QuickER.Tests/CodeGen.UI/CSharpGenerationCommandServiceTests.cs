@@ -405,6 +405,10 @@ public class CSharpGenerationCommandServiceTests
         return (new CSharpGenerationCommandService(host, dialogs, presenter), dialogs);
     }
 
+    /// <remarks>
+    /// 警告は列ごとに出得るので、件数の上限が無い標準の確認ダイアログ（スクロールしない）には載せず、
+    /// 一覧をスクロールできる詳細領域を持つ警告確認（<c>ConfirmWarningDetails</c>）で全件を見せる。
+    /// </remarks>
     [Fact(DisplayName = "VO 生成時の警告確認: キャンセルなら 1 つも書き出さない")]
     public void Run_ValueObjectWarningAndCancel_WritesNothing()
     {
@@ -414,9 +418,14 @@ public class CSharpGenerationCommandServiceTests
 
         service.Run();
 
-        var message = dialogs.ConfirmMessages.Should().ContainSingle().Subject;
-        message.Should().StartWith(CodeGenStrings.Csharp_WarningIntro);
-        message.Should().EndWith(CodeGenStrings.Csharp_WarningPrompt);
+        dialogs.ConfirmMessages.Should().BeEmpty("一覧を標準の確認ダイアログへ載せない");
+        var confirm = dialogs.WarningConfirmDetailsMessages.Should().ContainSingle().Subject;
+        confirm.Message.Should().StartWith(CodeGenStrings.Csharp_WarningIntro);
+        confirm.Message.Should().EndWith(CodeGenStrings.Csharp_WarningPrompt);
+        confirm.Title.Should().Be(CodeGenStrings.Csharp_WarningTitle);
+        confirm
+            .Details.Should()
+            .StartWith(string.Format(CodeGenStrings.Csharp_WarningLine, string.Empty));
         Directory.GetFiles(output.Path).Should().BeEmpty("キャンセルでは生成物を書き出さない");
         dialogs.InformationDetailsMessages.Should().BeEmpty("完了の通知も出さない");
     }
@@ -429,7 +438,7 @@ public class CSharpGenerationCommandServiceTests
 
         service.Run();
 
-        dialogs.ConfirmMessages.Should().ContainSingle();
+        dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
         Directory.GetFiles(output.Path).Should().NotBeEmpty();
         dialogs.InformationDetailsMessages.Should().ContainSingle();
     }
@@ -443,6 +452,7 @@ public class CSharpGenerationCommandServiceTests
         service.Run();
 
         dialogs.ConfirmMessages.Should().BeEmpty();
+        dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
         Directory.GetFiles(output.Path).Should().NotBeEmpty();
         dialogs.InformationDetailsMessages.Should().ContainSingle();
     }

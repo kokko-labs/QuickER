@@ -1333,6 +1333,89 @@ public class CSharpGenerationDialogViewModelTests
         closed.Should().BeFalse();
     }
 
+    /// <summary>出力に使われるカテゴリ別名前空間が不正なら、従来どおり項目名を添えて止めることを検証する</summary>
+    [Fact(DisplayName = "使われるカテゴリ別名前空間が不正なら項目名を添えて止める")]
+    public void Ok_Split_InvalidUsedChildNamespace_ShowsError()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.SplitFilesByCategory = true;
+        vm.OutputPath = @"C:\temp\Generated";
+        vm.EntityNamespace = "1Invalid";
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should()
+            .Be(
+                string.Format(
+                    CodeGenStrings.CodeGen_Status_NamespaceInvalidFormat,
+                    CodeGenStrings.CodeGen_NamespaceLabel_Entity
+                )
+            );
+    }
+
+    /// <summary>
+    /// 出力に使われない名前空間（パッケージ参照モードの Runtime 名前空間）は、欄が見えていても検証しないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// パッケージ参照モードでは固定コード（Runtime 系ファイル）を出さないので、Runtime 名前空間はどこにも使われない。
+    /// 生成前の検証（コア）と同じく、計画が記録した出所（<c>UsedNamespaceSources</c>）で判定する。
+    /// </remarks>
+    [Fact(DisplayName = "パッケージ参照モードの Runtime 名前空間は不正でも止めない")]
+    public void Ok_RuntimePackages_IgnoresUnusedRuntimeNamespace()
+    {
+        var vm = CreateViewModel(out _);
+        vm.RootNamespace = "Acme.App";
+        vm.SplitFilesByCategory = true;
+        vm.OutputPath = @"C:\temp\Generated";
+        vm.UseRuntimePackages = true;
+        vm.RuntimeNamespace = "1Invalid";
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull("Runtime 名前空間は出力に使われない");
+        vm.StatusMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 層別出力ではルート名前空間が使われないので、空でも不正でも止めず、空のときもプレビューを出すことを検証する
+    /// </summary>
+    /// <remarks>層別出力の名前空間の既定は層フォルダから導出され、ルート名前空間はどこにも使われない</remarks>
+    [Theory(DisplayName = "層別出力ではルート名前空間が空でも不正でも止めずプレビューを出す")]
+    [InlineData("")]
+    [InlineData("1Invalid")]
+    public void Ok_LayeredOutput_IgnoresUnusedRootNamespace(string rootNamespace)
+    {
+        var vm = CreateViewModel(out _);
+        vm.LayeredOutput = true;
+        vm.OutputPath = @"C:\temp\Generated";
+        vm.RootNamespace = rootNamespace;
+
+        vm.PreviewFiles.Should()
+            .NotBeEmpty("ルート名前空間が使われない構成ではプレビューを止めない");
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull("ルート名前空間は出力に使われない");
+    }
+
+    /// <summary>ルート名前空間が使われる構成で空なら、プレビューを出さず OK も必須エラーで止めることを検証する</summary>
+    [Fact(DisplayName = "ルート名前空間が使われる構成で空ならプレビューを出さず必須エラーで止める")]
+    public void Ok_UsedRootNamespaceEmpty_ShowsRequiredError()
+    {
+        var vm = CreateViewModel(out _);
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
+        vm.RootNamespace = string.Empty;
+
+        vm.PreviewFiles.Should().BeEmpty();
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Be(CodeGenStrings.CodeGen_Status_NamespaceRequired);
+    }
+
     /// <summary>参照コマンドで選択したパスが出力先へ反映されることを検証する</summary>
     [Fact(DisplayName = "参照コマンドで出力先ファイルを更新できる")]
     public void BrowseOutputFile_UpdatesPath()
@@ -1525,6 +1608,188 @@ public class CSharpGenerationDialogViewModelTests
                 Directory.Delete(settingsFolder, recursive: true);
             }
         }
+    }
+
+    /// <summary>
+    /// OK で設定を保存できなくても、原因を添えたエラーで知らせたうえで生成は続ける（クラッシュ処理へ入らない）ことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 保存先フォルダの位置に同名のファイルがあると、保存は IOException になる。捕まえないと RelayCommand から
+    /// 例外が抜け、生成も実行されずにアプリがクラッシュ時の処理へ入っていた。設定の保存は生成に付随する処理なので、
+    /// 知らせたうえで生成は続ける。
+    /// </remarks>
+    [Fact(DisplayName = "OK で設定を保存できなくてもエラーで知らせて生成は続ける")]
+    public void Ok_SettingsSaveFails_ShowsErrorAndContinues()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var blockedFolder = Path.Combine(root, "settings");
+        File.WriteAllText(blockedFolder, "not a folder");
+        var store = new CSharpGenerationSettingsStore(blockedFolder);
+        var dialogs = new RecordingDialogService();
+        var vm = new CSharpGenerationDialogViewModel(store, dialogs: dialogs);
+        var closed = false;
+        vm.CloseAction = _ => closed = true;
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
+
+            var act = () => vm.OkCommand.Execute(null);
+
+            act.Should().NotThrow();
+            vm.Result.Should().NotBeNull("設定を保存できなくても生成は続ける");
+            closed.Should().BeTrue();
+            dialogs
+                .ErrorMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .StartWith(
+                    string.Format(
+                        CodeGenStrings.CodeGen_SettingsAutoSaveFailedMessage,
+                        store.SettingsPath
+                    )
+                );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// 既存の設定ファイルを読めないために保存を見送ったときも、その旨をエラーで知らせて生成は続けることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 設定ストアは、読めないファイルを既定値で塗り潰さないよう何も書かずに戻る（例外にならない）。
+    /// 戻り値を見ないと、保存されていないのに何も知らせない形になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "OK で設定ファイルを読めず保存を見送ったときもエラーで知らせて生成は続ける"
+    )]
+    public void Ok_SettingsFileUnreadable_ShowsErrorAndContinues()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var store = new CSharpGenerationSettingsStore(folder);
+        store.Save(new CSharpGenerationSettings());
+        var dialogs = new RecordingDialogService();
+        var vm = new CSharpGenerationDialogViewModel(store, dialogs: dialogs);
+
+        try
+        {
+            vm.RootNamespace = "Acme.App";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
+
+            using (
+                new FileStream(store.SettingsPath, FileMode.Open, FileAccess.Read, FileShare.None)
+            )
+            {
+                vm.OkCommand.Execute(null);
+            }
+
+            vm.Result.Should().NotBeNull("設定を保存できなくても生成は続ける");
+            dialogs
+                .ErrorMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(
+                    string.Format(
+                        CodeGenStrings.CodeGen_SettingsAutoSaveFailedMessage,
+                        store.SettingsPath
+                    )
+                        + Environment.NewLine
+                        + CodeGenStrings.CodeGen_SettingsFileUnreadable
+                );
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// 単一ファイル⇄分割の切替で、出力先がファイルの親フォルダ⇔フォルダ＋直前のファイル名へ変換されることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 出力先の欄は 1 つで、単一ではファイルパス・分割ではフォルダパスを表す。変換しないと、単一の
+    /// <c>C:\out\Foo.g.cs</c> が分割で <c>Foo.g.cs</c> という名前のフォルダになり、分割のフォルダが単一で
+    /// フォルダの隣のファイルになる。層別出力（分割を含意する）の ON も同じ変換を通る。
+    /// </remarks>
+    [Theory(DisplayName = "出力モードの切替で出力先がファイル⇔フォルダへ変換され、往復で元に戻る")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OutputModeToggle_ConvertsOutputPath(bool viaLayeredOutput)
+    {
+        var vm = CreateViewModel(out _);
+        vm.OutputPath = @"C:\out\Foo.g.cs";
+
+        if (viaLayeredOutput)
+        {
+            vm.LayeredOutput = true;
+        }
+        else
+        {
+            vm.SplitFilesByCategory = true;
+        }
+
+        vm.OutputPath.Should().Be(@"C:\out");
+
+        vm.MergeIntoSingleFile = true;
+
+        vm.OutputPath.Should().Be(@"C:\out\Foo.g.cs", "直前に単一で使っていたファイル名へ戻る");
+    }
+
+    /// <summary>分割で開いたフォルダから単一へ切り替えると、既定のファイル名がフォルダの中に付くことを検証する</summary>
+    [Fact(
+        DisplayName = "単一で使ったファイル名が無ければ、分割のフォルダに既定のファイル名を付ける"
+    )]
+    public void OutputModeToggle_FromSplitWithoutRememberedName_UsesDefaultFileName()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var store = new CSharpGenerationSettingsStore(folder);
+        store.Save(
+            new CSharpGenerationSettings
+            {
+                SplitFilesByCategory = true,
+                OutputPath = @"C:\App\Generated",
+            }
+        );
+
+        try
+        {
+            var vm = new CSharpGenerationDialogViewModel(store);
+
+            vm.OutputPath.Should().Be(@"C:\App\Generated", "設定の適用では変換しない");
+
+            vm.MergeIntoSingleFile = true;
+
+            vm.OutputPath.Should()
+                .Be(
+                    Path.Combine(
+                        @"C:\App\Generated",
+                        CSharpGenerationSettings.DefaultOutputFilePath
+                    )
+                );
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>空の出力先は、どちらへ切り替えても空のままであることを検証する</summary>
+    [Fact(DisplayName = "空の出力先は出力モードを切り替えても空のまま")]
+    public void OutputModeToggle_EmptyPath_StaysEmpty()
+    {
+        var vm = CreateViewModel(out _);
+        vm.OutputPath = string.Empty;
+
+        vm.SplitFilesByCategory = true;
+        vm.OutputPath.Should().BeEmpty();
+
+        vm.MergeIntoSingleFile = true;
+        vm.OutputPath.Should().BeEmpty();
     }
 
     /// <summary>メッセージダイアログを表示せず、呼び出し（確認／情報／エラー）を記録するスタブ</summary>
@@ -1857,6 +2122,106 @@ public class CSharpGenerationDialogViewModelTests
             // 読み込み成功は無通知（情報・エラーいずれのダイアログも出さない）
             dialogs.InformationMessages.Should().BeEmpty();
             dialogs.ErrorMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// CLI の設定ファイル（PascalCase のキー）を「設定読込」で読むと、その内容が画面へ反映されることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 中身は samples/ec-order/quicker.json と同じ形。CLI は大文字小文字を区別せずに読むが、GUI は区別していたため
+    /// キーが全部捨てられ、通知もなく画面が既定値へ戻っていた。
+    /// </remarks>
+    [Fact(DisplayName = "設定読込は CLI の quicker.json（PascalCase）を読む")]
+    public void LoadSettingsFrom_CliQuickerJson_IsApplied()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var configPath = Path.Combine(folder, "quicker.json");
+        File.WriteAllText(
+            configPath,
+            """
+            {
+              "RootNamespace": "EcOrderSample.Generated",
+              "GenerateRepositories": true,
+              "OutputPath": "EcOrder.g.cs"
+            }
+            """
+        );
+        var files = new StubFileDialogService { OpenResult = new FileDialogResult(configPath, 1) };
+        var dialogs = new RecordingDialogService();
+        var vm = new CSharpGenerationDialogViewModel(
+            new CSharpGenerationSettingsStore(folder),
+            files,
+            dialogs: dialogs
+        );
+
+        try
+        {
+            vm.LoadSettingsFromCommand.Execute(null);
+
+            vm.RootNamespace.Should().Be("EcOrderSample.Generated");
+            vm.GenerateRepositories.Should().BeTrue();
+            vm.OutputPath.Should().Be("EcOrder.g.cs");
+            dialogs.ErrorMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 設定ファイルの参照型のキーがすべて明示 null でも、ダイアログが開け、生成を確定できることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 手で編集した <c>"repositoryDialects": null</c> はコンストラクタ（ApplySettings）で、
+    /// <c>"codeSubdirectory": null</c> は OK（ToSettings）で NullReferenceException になり、ファイルが残る限り
+    /// 毎回ダイアログが開けなかった。null は「指定なし」として既定値で読む。キーの一覧は設定型から
+    /// 反射で作るので、参照型の設定を足したときもこのテストが自動で対象にする。
+    /// </remarks>
+    [Fact(DisplayName = "設定の参照型のキーがすべて明示 null でも開けて確定できる")]
+    public void ExplicitNullSettings_OpenAndConfirm()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        var nulls = new System.Text.Json.Nodes.JsonObject();
+
+        foreach (var property in typeof(CSharpGenerationSettings).GetProperties())
+        {
+            if (!property.PropertyType.IsValueType)
+            {
+                nulls[System.Text.Json.JsonNamingPolicy.CamelCase.ConvertName(property.Name)] =
+                    null;
+            }
+        }
+
+        nulls.Should().ContainKeys("repositoryDialects", "codeSubdirectory", "rootNamespace");
+        File.WriteAllText(
+            Path.Combine(folder, CSharpGenerationSettingsStore.DefaultFileName),
+            nulls.ToJsonString()
+        );
+
+        try
+        {
+            var vm = new CSharpGenerationDialogViewModel(new CSharpGenerationSettingsStore(folder));
+
+            vm.RootNamespace.Should().Be(CSharpGenerationSettings.DefaultRootNamespace);
+            vm.OutputPath.Should().Be(CSharpGenerationSettings.DefaultOutputFilePath);
+
+            vm.OkCommand.Execute(null);
+
+            vm.Result.Should().NotBeNull();
         }
         finally
         {
@@ -2201,7 +2566,7 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             vm.RootNamespace = "Acme.App";
-            vm.OutputPath = @"C:	emp\Entities.g.cs";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.LayeredOutput = true;
             var namespacesBefore = (vm.EntityNamespace, vm.RepositoryNamespace, vm.MapperNamespace);
 

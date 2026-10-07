@@ -102,7 +102,7 @@ The agent launches this as a child process and communicates over stdin/stdout (J
 
 ## Settings file (quicker.json)
 
-The JSON passed via `--config` lets you specify generation options in bulk. It uses the **same schema** as the GUI's settings save file (`codegen-settings.json`) (the GUI writes it in camelCase, but the CLI interprets it case-insensitively, so you can pass it as is). **Each key in the table below can also be specified from the CLI as a same-named kebab-case flag, which takes precedence over the settings file** (priority: CLI flag > settings file > default; bool keys are three-valued: `--flag` / `--flag false`).
+The JSON passed via `--config` lets you specify generation options in bulk. It uses the **same schema** as the GUI's settings save file (`codegen-settings.json`) (the GUI writes it in camelCase, but the CLI reads keys case-insensitively, so you can pass it as is; the GUI reads keys the same way, so **Load Settings** in the code generation dialog also accepts a `quicker.json` written in PascalCase, except for the CLI-only `OutputFileName`). **Each key in the table below can also be specified from the CLI as a same-named kebab-case flag, which takes precedence over the settings file** (priority: CLI flag > settings file > default; bool keys are three-valued: `--flag` / `--flag false`).
 
 > **Note**: the default of `GenerateRepositories` changed from `true` to `false`. Previously, omitting the key generated a QuickER Repository; **now, generating DB-access code requires explicitly specifying `GenerateRepositories: true` (or `GenerateEfCoreRepositories: true`)** (to align with the GUI's DB-access "None" default).
 

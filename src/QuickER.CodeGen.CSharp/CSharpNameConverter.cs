@@ -12,8 +12,8 @@ namespace QuickER.CodeGen.CSharp;
 /// <list type="bullet">
 /// <item><description>クラス名: テーブル名を単数形化 → PascalCase 化 → 用途別サフィックス（Entity / EditModel / Mapper）を付与。既に同サフィックスで終わる場合は重複付与しない</description></item>
 /// <item><description>プロパティ名: カラム名を PascalCase 化する。生成識別子は先頭が必ず大文字（または <c>_</c>）になるため、小文字綴りしかない C# キーワードとは構造的に衝突せず、<c>@</c> エスケープ機構は持たない</description></item>
-/// <item><description>ナビゲーション名: コレクションは複数形、単一参照は単数形のテーブル名を PascalCase 化する</description></item>
-/// <item><description>PascalCase 化: 単語分割（区切り文字・大小文字境界・数字境界）後、各単語を先頭大文字化して連結。空になる場合は "Generated"、先頭が数字の場合は <c>_</c> を前置する</description></item>
+/// <item><description>ナビゲーション名: コレクションは複数形、単一参照は単数形のテーブル名を PascalCase 化する。同じ 2 表の間に複数のリレーションがあるときは外部キー列由来の役割名を使う（<see cref="ToRoleName"/>。組み立ては <c>CSharpGenerationModelBuilder.ResolveNavigationNames</c>）</description></item>
+/// <item><description>PascalCase 化: 単語分割（区切り文字・大小文字境界・数字境界・大文字小文字の無い文字の並びの境界）後、各単語を先頭大文字化して連結。漢字・かな等はそのまま残す（例: "顧客ID" → "顧客Id"）。空になる場合は "Generated"、先頭が数字の場合は <c>_</c> を前置する</description></item>
 /// <item><description>単数形化・複数形化: 英語の簡易規則のみ対応（ies⇔y、末尾 s の増減）。不規則変化は対象外</description></item>
 /// </list>
 /// </remarks>
@@ -66,6 +66,28 @@ internal sealed partial class CSharpNameConverter
             : ToPascalCase(Singularize(tableName));
 
     /// <summary>
+    /// 外部キー列名から、そのリレーションの役割名を生成する（例: "ship_customer_id" → "ShipCustomer"）
+    /// </summary>
+    /// <param name="foreignKeyColumnName">子側の外部キー列名</param>
+    /// <param name="principalTableName">参照先（親）のテーブル名</param>
+    /// <remarks>
+    /// 列名の PascalCase から末尾の語 <c>Id</c> を除いたもの。末尾が <c>Id</c> でない列・除くと空になる列は
+    /// 「列名＋親の単数形」にする（例: "shipper" → "ShipperCustomer"）。列名そのままにすると、子側の
+    /// 列プロパティと同じ名前になるため。同じ 2 表の間に複数のリレーションがあるときだけ使う
+    /// </remarks>
+    public string ToRoleName(string foreignKeyColumnName, string principalTableName)
+    {
+        var words = TokenizeWords(foreignKeyColumnName).ToList();
+
+        if (words.Count > 1 && string.Equals(words[^1], "id", StringComparison.OrdinalIgnoreCase))
+        {
+            return ToPascalCase(string.Join("_", words.Take(words.Count - 1)));
+        }
+
+        return ToPascalCase(foreignKeyColumnName) + ToPascalCase(Singularize(principalTableName));
+    }
+
+    /// <summary>
     /// 文字列を PascalCase の識別子へ変換する
     /// </summary>
     /// <remarks>
@@ -101,6 +123,7 @@ internal sealed partial class CSharpNameConverter
     private static string Singularize(string value)
     {
         var pascal = ToSimpleToken(value);
+
         if (pascal.EndsWith("ies", StringComparison.OrdinalIgnoreCase) && pascal.Length > 3)
         {
             return pascal[..^3] + "y";
@@ -137,7 +160,11 @@ internal sealed partial class CSharpNameConverter
     /// <remarks>
     /// まず記号・空白などの非英数字で分割し、各断片をさらに PascalCase 境界
     /// （大文字小文字の切り替わり・頭字語の終わり・数字の並び）で分割する。
-    /// 例: "order_itemsV2" → ["order", "items", "V", "2"]
+    /// 例: "order_itemsV2" → ["order", "items", "V", "2"]。
+    /// 大文字小文字の区別を持たない文字（漢字・かな等）の並びもそれ自身を 1 語とし、頭字語はその手前で終わる
+    /// （例: "顧客ID" → ["顧客", "ID"]・"注文ID顧客" → ["注文", "ID", "顧客"]）。
+    /// 断片はこの 4 種類の語で隙間なく覆われる＝どの文字も捨てない。捨てると "顧客ID" と "注文ID" が
+    /// どちらも "Id" になり、別の列・表が同じ名前を名乗る。
     /// </remarks>
     private static IEnumerable<string> TokenizeWords(string value)
     {
@@ -147,15 +174,7 @@ internal sealed partial class CSharpNameConverter
                 .Where(part => !string.IsNullOrWhiteSpace(part))
         )
         {
-            var matches = PascalCaseWordRegex().Matches(part);
-
-            if (matches.Count == 0)
-            {
-                yield return part;
-                continue;
-            }
-
-            foreach (Match match in matches)
+            foreach (Match match in PascalCaseWordRegex().Matches(part))
             {
                 yield return match.Value;
             }
@@ -166,9 +185,15 @@ internal sealed partial class CSharpNameConverter
     [GeneratedRegex(@"[^\p{L}\p{Nd}]+", RegexOptions.CultureInvariant)]
     private static partial Regex WordSplitRegex();
 
-    /// <summary>PascalCase 文字列内の単語（頭字語・通常単語・数字列）を検出する正規表現</summary>
+    /// <summary>
+    /// 断片内の単語（頭字語・通常単語・数字列・大文字小文字の無い文字の並び）を検出する正規表現
+    /// </summary>
+    /// <remarks>
+    /// 断片は文字（<c>\p{L}</c>）と数字（<c>\p{Nd}</c>）だけからなるため、最後の選択肢
+    /// （大文字・小文字・数字以外＝漢字・かな等）で全文字が覆われる。
+    /// </remarks>
     [GeneratedRegex(
-        @"\p{Lu}+(?=\p{Lu}\p{Ll}|\p{Nd}|$)|\p{Lu}?\p{Ll}+|\p{Nd}+",
+        @"\p{Lu}+(?=\p{Lu}\p{Ll}|[^\p{Lu}\p{Ll}]|$)|\p{Lu}?\p{Ll}+|\p{Nd}+|[^\p{Lu}\p{Ll}\p{Nd}]+",
         RegexOptions.CultureInvariant
     )]
     private static partial Regex PascalCaseWordRegex();

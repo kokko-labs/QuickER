@@ -89,11 +89,18 @@ public static class QueryDefinitionRules
     }
 
     /// <summary>
-    /// パラメータ名に使えない名前か。生成メソッドの本体は契約メンバー <c>Query()</c> の呼び出しで組み立てるため、
-    /// 同名（大文字小文字まで一致）の引数はメソッドグループを隠してコンパイル不能になる（小文字の <c>query</c> は合法）
+    /// パラメータ名に使えない名前か（大文字小文字まで一致で判定する）
     /// </summary>
+    /// <remarks>
+    /// <c>Query</c>: 生成メソッドの本体は契約メンバー <c>Query()</c> の呼び出しで組み立てるため、同名の引数は
+    /// メソッドグループを隠してコンパイル不能になる（小文字の <c>query</c> は合法）。
+    /// <c>await</c>: 生 SQL の単一・件数の生成メソッドは async メソッドで、その中では <c>await</c> を識別子に使えない。
+    /// ほかの文脈キーワードは、生成されるどのメソッドの形でもパラメータ名として通る
+    /// （<c>QueryReservedParameterNameTests</c> が全文脈キーワード × 全戻り形 × 実装方式を実コンパイルで固定する）。
+    /// </remarks>
     public static bool IsReservedParameterName(string name) =>
-        string.Equals(name, "Query", StringComparison.Ordinal);
+        string.Equals(name, "Query", StringComparison.Ordinal)
+        || string.Equals(name, "await", StringComparison.Ordinal);
 
     /// <summary>生成メソッドが自分で持つ引数の名前（宣言したパラメータと重なると重複になる）</summary>
     /// <param name="hasPaging">ページングを持つか（持てば <c>take</c> / <c>skip</c> が加わる）</param>
@@ -125,9 +132,11 @@ public static class QueryDefinitionRules
     /// </param>
     /// <returns>違反（無ければ空）</returns>
     /// <remarks>
-    /// 重複の相手に数えるのは、それ自身が名前の規則を満たすクエリだけ（生成器は名前の規則に違反したクエリの名前を
-    /// 登録しない）。生成器は図の並びで後に来たほうへ重複を報告するが、ここは並びに依らず調べる定義の側へ報告する
-    /// （どちらに報告されても、その図は生成で失敗する）。
+    /// メソッド名の重複の相手に数えるのは、それ自身が名前の規則を満たすクエリだけ（生成器は名前の規則に違反した
+    /// クエリの名前を登録しない）。射影の結果型名の重複は、クエリ名がメソッド名になる射影すべてを相手に数える。
+    /// 生成器は警告で飛ばしたクエリ（条件式の型の不整合・列参照の切れなど）の結果型名を登録しないので、
+    /// その相手との重複は生成では衝突しないが、相手を直した時点で衝突するので保存の前に拒否する（安全側）。
+    /// 生成器は図の並びで後に来たほうへ重複を報告するが、ここは並びに依らず調べる定義の側へ報告する。
     /// </remarks>
     public static IReadOnlyList<QueryRuleViolation> Validate(
         Entity entity,

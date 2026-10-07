@@ -186,12 +186,24 @@ public class ConstraintNamesTests
             Entities = { customers, orders, notes },
             Relationships =
             {
-                new Relationship { SourceEntityId = customers.Id, TargetEntityId = orders.Id },
+                new Relationship
+                {
+                    SourceEntityId = customers.Id,
+                    TargetEntityId = orders.Id,
+                    ColumnPairs = [new RelationshipColumnPair(customerId.Id, code.Id)],
+                },
                 new Relationship
                 {
                     SourceEntityId = customers.Id,
                     TargetEntityId = orders.Id,
                     ConstraintName = "FK_Ship",
+                },
+                // 名前を持たない多対多は DDL が外部キーを作らないので数えない（名前を持つ関係は外部キーを作らなくても数える）
+                new Relationship
+                {
+                    SourceEntityId = customers.Id,
+                    TargetEntityId = notes.Id,
+                    Type = RelationshipType.ManyToMany,
                 },
             },
         };
@@ -240,7 +252,12 @@ public class ConstraintNamesTests
             Entities = { customers, orders },
             Relationships =
             {
-                new Relationship { SourceEntityId = customers.Id, TargetEntityId = orders.Id },
+                new Relationship
+                {
+                    SourceEntityId = customers.Id,
+                    TargetEntityId = orders.Id,
+                    ColumnPairs = [new RelationshipColumnPair(customers.Columns[0].Id, code.Id)],
+                },
             },
         };
 
@@ -401,17 +418,105 @@ public class ConstraintNamesTests
             .Be("fk_custom");
     }
 
-    [Fact(DisplayName = "列ペアの無いリレーションは、既定名がふさがっていれば番号を足す")]
-    public void NameUnnamedForeignKeys_NoColumnPairs_AppendsNumber()
+    /// <summary>外部キーを作らない名前の無い関係（多対多・列ペア無し・列を解決できない）を組み立てる</summary>
+    /// <param name="kind">種類（ManyToMany / NoPairs / UnresolvedColumn）</param>
+    private static Relationship NonForeignKeyRelationship(
+        string kind,
+        Entity customers,
+        Entity orders
+    ) =>
+        kind switch
+        {
+            "ManyToMany" => new Relationship
+            {
+                SourceEntityId = customers.Id,
+                TargetEntityId = orders.Id,
+                Type = RelationshipType.ManyToMany,
+            },
+            "NoPairs" => new Relationship
+            {
+                SourceEntityId = customers.Id,
+                TargetEntityId = orders.Id,
+            },
+            "UnresolvedColumn" => new Relationship
+            {
+                SourceEntityId = customers.Id,
+                TargetEntityId = orders.Id,
+                ColumnPairs = [new RelationshipColumnPair(customers.Columns[0].Id, Guid.NewGuid())],
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+
+    /// <summary>
+    /// 外部キーを作らない名前の無い関係が先に並んでも、同じ組の本物の外部キーは既定名を取ることを検証する
+    /// （DDL はその関係に外部キーを作らないので、既定名を取らせると本物の外部キーが一意化した名前へずれる）
+    /// </summary>
+    /// <param name="kind">外部キーを作らない関係の種類</param>
+    [Theory(DisplayName = "外部キーを作らない名前の無い関係は既定名を取らず、名前も求めない")]
+    [InlineData("ManyToMany")]
+    [InlineData("NoPairs")]
+    [InlineData("UnresolvedColumn")]
+    public void ResolveForeignKeyNames_NonForeignKeyRelationship_DoesNotTakeDefault(string kind)
     {
         var (customers, orders) = BuildCustomersAndOrders();
-        var first = new Relationship { SourceEntityId = customers.Id, TargetEntityId = orders.Id };
-        var second = new Relationship { SourceEntityId = customers.Id, TargetEntityId = orders.Id };
+        var other = NonForeignKeyRelationship(kind, customers, orders);
+        var bill = Link(customers, orders, "bill_customer_id");
+        var ship = Link(customers, orders, "ship_customer_id");
 
-        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [first, second]);
+        var names = ConstraintNames.ResolveForeignKeyNames(
+            [customers, orders],
+            [other, bill, ship]
+        );
 
-        first.ConstraintName.Should().BeNull();
-        second.ConstraintName.Should().Be("FK_orders_customers_2");
+        names.Should().NotContainKey(other);
+        names[bill].Should().Be("FK_orders_customers");
+        names[ship].Should().Be("FK_orders_customers_ship_customer_id");
+
+        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [other, bill, ship]);
+
+        other.ConstraintName.Should().BeNull();
+        bill.ConstraintName.Should().BeNull("既定名のままなので名前を書き込まない");
+        ship.ConstraintName.Should().Be("FK_orders_customers_ship_customer_id");
+    }
+
+    /// <summary>名前を持つ多対多は、外部キーを作らなくても名前を予約することを検証する</summary>
+    [Fact(DisplayName = "名前を持つ多対多は外部キーを作らなくても名前を予約する")]
+    public void ResolveForeignKeyNames_NamedManyToMany_StillReservesName()
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var manyToMany = new Relationship
+        {
+            SourceEntityId = customers.Id,
+            TargetEntityId = orders.Id,
+            Type = RelationshipType.ManyToMany,
+            ConstraintName = "FK_orders_customers",
+        };
+        var bill = Link(customers, orders, "bill_customer_id");
+
+        var names = ConstraintNames.ResolveForeignKeyNames([customers, orders], [manyToMany, bill]);
+
+        names[bill].Should().Be("FK_orders_customers_bill_customer_id");
+    }
+
+    /// <summary>既存の制約名の収集も、外部キーを作らない名前の無い関係の既定名を数えないことを検証する</summary>
+    /// <param name="kind">外部キーを作らない関係の種類</param>
+    [Theory(DisplayName = "既存の制約名は外部キーを作らない名前の無い関係の既定名を数えない")]
+    [InlineData("ManyToMany")]
+    [InlineData("NoPairs")]
+    [InlineData("UnresolvedColumn")]
+    public void CollectExisting_NonForeignKeyRelationship_IsNotCounted(string kind)
+    {
+        var (customers, orders) = BuildCustomersAndOrders();
+        var diagram = new ErDiagram
+        {
+            Entities = { customers, orders },
+            Relationships = { NonForeignKeyRelationship(kind, customers, orders) },
+        };
+
+        ConstraintNames
+            .CollectExisting(diagram)
+            .Should()
+            .BeEquivalentTo("PK_customers", "PK_orders");
     }
 
     [Fact(DisplayName = "親子を引けないリレーションは飛ばし、既定名も予約しない")]

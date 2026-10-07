@@ -49,11 +49,17 @@ public static class QueryConditionCSharpEmitter
     /// VO 型で型付けされたパラメータの「名前 → VO クラス名」対応（列参照型付け）。
     /// 条件列と同じ VO 型のパラメータは <c>Create</c> で包まず直接比較する。null は VO 型パラメータなし
     /// </param>
+    /// <param name="parameterTypeNames">
+    /// VO 型でないパラメータの「名前 → 生成メソッド上の要素の C# 型名」対応。VO 列の IN でリストを VO へ
+    /// 持ち上げるとき、要素型が VO の内包型と違えば暗黙変換が効くラムダで包むのに使う。null は型情報なし
+    /// （メソッドグループのまま出す）
+    /// </param>
     public static EmitResult Emit(
         ConditionNode root,
         IReadOnlyDictionary<Guid, QueryColumnBinding> columns,
         IReadOnlyCollection<string> parameterNames,
-        IReadOnlyDictionary<string, string>? parameterValueObjects = null
+        IReadOnlyDictionary<string, string>? parameterValueObjects = null,
+        IReadOnlyDictionary<string, string>? parameterTypeNames = null
     )
     {
         ArgumentNullException.ThrowIfNull(root);
@@ -69,6 +75,8 @@ public static class QueryConditionCSharpEmitter
                 columns,
                 prelude,
                 parameterValueObjects
+                    ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                parameterTypeNames
                     ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 parameterNames
             )
@@ -95,127 +103,145 @@ public static class QueryConditionCSharpEmitter
         }
     }
 
-    /// <summary>エミット中の共有状態（ラムダ変数名・列情報・前置文の収集先・VO 型パラメータ・使用済み名）</summary>
+    /// <summary>エミット中の共有状態（ラムダ変数名・列情報・前置文の収集先・パラメータの型・使用済み名）</summary>
     private sealed record Context(
         string LambdaVar,
         IReadOnlyDictionary<Guid, QueryColumnBinding> Columns,
         List<string> PreludeLines,
         IReadOnlyDictionary<string, string> ParameterValueObjects,
+        IReadOnlyDictionary<string, string> ParameterTypeNames,
         IReadOnlyCollection<string> TakenNames
     )
     {
+        /// <summary>持ち上げ済みのリスト（初期化式 → ローカル変数名）</summary>
+        private readonly Dictionary<string, string> _liftedLists = new(StringComparer.Ordinal);
+
         /// <summary>パラメータが指定 VO クラスで型付けされているか（列参照型付けの直接比較判定）</summary>
         public bool IsParameterOfValueObject(string parameterName, string valueObjectClassName) =>
             ParameterValueObjects.TryGetValue(parameterName, out var vo)
             && vo == valueObjectClassName;
 
         /// <summary>
-        /// IN の持ち上げリスト変数名（<c>{パラメータ名}Values</c>）を選ぶ。メソッド引数名と衝突するとき
-        /// （例: パラメータ <c>ids</c> と <c>idsValues</c> が同居する定義）は <c>_</c> を後置して回避する
-        /// （衝突したままだとローカル変数が引数を隠して CS0136 になる）。決定的なので同じパラメータの
-        /// 複数回出現は同じ名前へ解決され、前置文の重複排除がそのまま効く
+        /// IN のリストをメソッド冒頭のローカル変数へ持ち上げ、その変数名を返す。名前は
+        /// <c>{パラメータ名}Values</c> を基本に、メソッド引数名・別の持ち上げ変数と衝突する限り <c>_</c> を後置する
+        /// （引数と衝突すると CS0136、別の持ち上げと衝突すると CS0128）。同じ初期化式は 1 文にまとめて同じ変数を返し、
+        /// 同じパラメータでも初期化式が違えば（VO クラスの違う 2 列に使ったとき）別の変数にする
         /// </summary>
-        public string PickListVariable(string parameterName)
+        /// <param name="parameterName">持ち上げるリストパラメータの名前</param>
+        /// <param name="initializer">ローカル変数の初期化式</param>
+        public string LiftList(string parameterName, string initializer)
         {
+            if (_liftedLists.TryGetValue(initializer, out var existing))
+            {
+                return existing;
+            }
+
             var candidate = parameterName + "Values";
 
-            while (TakenNames.Contains(candidate))
+            while (TakenNames.Contains(candidate) || _liftedLists.ContainsValue(candidate))
             {
                 candidate += "_";
             }
 
+            _liftedLists.Add(initializer, candidate);
+            PreludeLines.Add($"var {candidate} = {initializer};");
             return candidate;
         }
     }
 
     /// <summary>ノードを C# 式テキストへ変換する</summary>
-    private static string Visit(ConditionNode node, Context context) =>
+    /// <param name="node">変換するノード</param>
+    /// <param name="context">エミット中の共有状態</param>
+    /// <param name="negate">このノードの否定を出すか（NOT を原子まで押し下げる）</param>
+    /// <remarks>
+    /// NOT は <c>!(...)</c> で包まず、ド・モルガンの法則で原子（比較・NULL 判定・文字列一致・IN）まで押し下げ、
+    /// 原子ごとに否定の形を出す。<c>!(...)</c> で包むと、SQL では中の NULL 由来の UNKNOWN が否定しても UNKNOWN の
+    /// まま行を落とす一方、C# は false の否定を true と評価するので、インメモリ実行器と SQL・EF Core とで結果が割れる。
+    /// 原子の否定の意味は「C# の否定と同じ（NULL の行も一致する）」で、例外は文字列一致（NULL の行はどちら向きでも
+    /// 一致しない＝LIKE の意味）。
+    /// </remarks>
+    private static string Visit(ConditionNode node, Context context, bool negate = false) =>
         node switch
         {
-            LogicalNode logical => VisitLogical(logical, context),
-            NotNode not => VisitNot(not, context),
-            ComparisonNode comparison => VisitComparison(comparison, context),
-            NullCheckNode nullCheck => VisitNullCheck(nullCheck, context),
-            StringMatchNode match => VisitStringMatch(match, context),
-            InNode inNode => VisitIn(inNode, context),
+            LogicalNode logical => VisitLogical(logical, context, negate),
+            NotNode not => Visit(not.Operand, context, !negate),
+            ComparisonNode comparison => VisitComparison(comparison, context, negate),
+            NullCheckNode nullCheck => VisitNullCheck(nullCheck, context, negate),
+            StringMatchNode match => VisitStringMatch(
+                negate
+                    ? new StringMatchNode
+                    {
+                        Column = match.Column,
+                        Negated = !match.Negated,
+                        Kind = match.Kind,
+                        Operand = match.Operand,
+                    }
+                    : match,
+                context
+            ),
+            InNode inNode => VisitIn(inNode, context, inNode.Negated ^ negate),
             _ => throw new InvalidOperationException(
                 $"未知の条件ノードです: {node.GetType().Name}"
             ),
         };
 
-    /// <summary>AND / OR（優先順位を明示するため常に括弧で囲む）</summary>
-    private static string VisitLogical(LogicalNode node, Context context)
+    /// <summary>AND / OR（優先順位を明示するため常に括弧で囲む。否定はド・モルガンで子へ渡す）</summary>
+    private static string VisitLogical(LogicalNode node, Context context, bool negate)
     {
-        var op = node.Operator == LogicalOperator.And ? "&&" : "||";
-        return $"({Visit(node.Left, context)} {op} {Visit(node.Right, context)})";
-    }
-
-    /// <summary>前置 NOT（文字列一致には Negated として畳み込み、それ以外は <c>!(...)</c> で包む）</summary>
-    /// <remarks>
-    /// <c>NOT col LIKE '%x%'</c> を <c>!(...)</c> で包むと NULL 前提の外側に出て、<c>col NOT LIKE '%x%'</c>
-    /// （前提の内側で否定＝NULL 行はどちらの向きでも一致しない）と結果が割れる。多重 NOT は偶奇で畳む。
-    /// 文字列一致以外（比較・IN・括弧つき複合条件）は従来どおり素直に包む（等値の反転・IN の畳み込みは
-    /// 実行時の SQL 翻訳器が担う既存の線を変えない）。
-    /// </remarks>
-    private static string VisitNot(NotNode node, Context context)
-    {
-        var negate = true;
-        ConditionNode operand = node.Operand;
-
-        while (operand is NotNode inner)
-        {
-            negate = !negate;
-            operand = inner.Operand;
-        }
-
-        if (operand is StringMatchNode match)
-        {
-            return VisitStringMatch(
-                new StringMatchNode
-                {
-                    Column = match.Column,
-                    Negated = match.Negated ^ negate,
-                    Kind = match.Kind,
-                    Operand = match.Operand,
-                },
-                context
-            );
-        }
-
-        return $"!({Visit(node.Operand, context)})";
+        // NOT (A AND B) = NOT A OR NOT B / NOT (A OR B) = NOT A AND NOT B
+        var isAnd = (node.Operator == LogicalOperator.And) ^ negate;
+        var op = isAnd ? "&&" : "||";
+        return $"({Visit(node.Left, context, negate)} {op} {Visit(node.Right, context, negate)})";
     }
 
     /// <summary>比較（VO 列は VO 同士の比較に揃える）</summary>
-    private static string VisitComparison(ComparisonNode node, Context context)
+    /// <remarks>
+    /// 等値の否定は演算子の反転（<c>==</c> ⇔ <c>!=</c>）。実行時の翻訳器が <c>!=</c> を「NULL の行も一致する」
+    /// 形へ補償するので、C# の否定と同じになる。順序比較の否定は <c>!(...)</c>（演算子の反転にしない＝NaN の扱いを
+    /// C# の否定に合わせる）で、NULL 許容列では「列が NULL」を OR する（SQL の <c>NOT (col &lt; @p)</c> は NULL の行で
+    /// UNKNOWN になり落ちるが、C# の否定はその行を一致させる）。
+    /// </remarks>
+    private static string VisitComparison(ComparisonNode node, Context context, bool negate)
     {
         var column = Bind(node.Column, context);
-        var op = node.Operator switch
-        {
-            ComparisonOperator.Equal => "==",
-            ComparisonOperator.NotEqual => "!=",
-            ComparisonOperator.Less => "<",
-            ComparisonOperator.LessOrEqual => "<=",
-            ComparisonOperator.Greater => ">",
-            ComparisonOperator.GreaterOrEqual => ">=",
-            _ => throw new InvalidOperationException($"未知の比較演算子です: {node.Operator}"),
-        };
-        var operand = RenderOperand(node.Operand, column, context);
-        var access = $"{context.LambdaVar}.{column.PropertyName}";
-        var comparison = $"{access} {op} {operand}";
-
-        // NULL 許容の VO 列への順序比較は「列が NULL でないこと」を AND した形へエミットする（文字列一致の
-        // NULL 前提と同じ流儀）。VO の比較演算子は null を最小として順序付けるため、素のままだとインメモリ
-        // 実行器（式木をコンパイルして評価）だけが < / <= で NULL 行を返し、SQL・EF Core（UNKNOWN で脱落）と
-        // 観測結果が割れる。SQL 側は IS NOT NULL の連言が加わるだけで意味は変わらない。
-        // 素の NULL 許容値型列は C# の持ち上げ演算子（null は常に false）が SQL と一致するため対象外
         var isOrdered =
             node.Operator
             is ComparisonOperator.Less
                 or ComparisonOperator.LessOrEqual
                 or ComparisonOperator.Greater
                 or ComparisonOperator.GreaterOrEqual;
+        var op = (node.Operator, negate && !isOrdered) switch
+        {
+            (ComparisonOperator.Equal, false) or (ComparisonOperator.NotEqual, true) => "==",
+            (ComparisonOperator.NotEqual, false) or (ComparisonOperator.Equal, true) => "!=",
+            (ComparisonOperator.Less, _) => "<",
+            (ComparisonOperator.LessOrEqual, _) => "<=",
+            (ComparisonOperator.Greater, _) => ">",
+            (ComparisonOperator.GreaterOrEqual, _) => ">=",
+            _ => throw new InvalidOperationException($"未知の比較演算子です: {node.Operator}"),
+        };
+        var operand = RenderOperand(node.Operand, column, context);
+        var access = $"{context.LambdaVar}.{column.PropertyName}";
+        var comparison = $"{access} {op} {operand}";
 
-        if (isOrdered && column.ValueObjectClassName is not null && column.IsNullable)
+        if (!isOrdered)
+        {
+            return comparison;
+        }
+
+        if (negate)
+        {
+            return column.IsNullable
+                ? $"({access} == null || !({comparison}))"
+                : $"!({comparison})";
+        }
+
+        // NULL 許容の VO 列への順序比較は「列が NULL でないこと」を AND した形へエミットする（文字列一致の
+        // NULL 前提と同じ流儀）。VO の比較演算子は null を最小として順序付けるため、素のままだとインメモリ
+        // 実行器（式木をコンパイルして評価）だけが < / <= で NULL 行を返し、SQL・EF Core（UNKNOWN で脱落）と
+        // 観測結果が割れる。SQL 側は IS NOT NULL の連言が加わるだけで意味は変わらない。
+        // 素の NULL 許容値型列は C# の持ち上げ演算子（null は常に false）が SQL と一致するため対象外
+        if (column.ValueObjectClassName is not null && column.IsNullable)
         {
             return $"({access} != null && {comparison})";
         }
@@ -223,11 +249,11 @@ public static class QueryConditionCSharpEmitter
         return comparison;
     }
 
-    /// <summary>null 判定（NULL 許容列であることはパーサ側の検証で保証済み）</summary>
-    private static string VisitNullCheck(NullCheckNode node, Context context)
+    /// <summary>null 判定（NULL 許容列であることはパーサ側の検証で保証済み。否定は向きの反転）</summary>
+    private static string VisitNullCheck(NullCheckNode node, Context context, bool negate)
     {
         var column = Bind(node.Column, context);
-        var op = node.IsNotNull ? "!=" : "==";
+        var op = node.IsNotNull ^ negate ? "!=" : "==";
         return $"{context.LambdaVar}.{column.PropertyName} {op} null";
     }
 
@@ -301,7 +327,10 @@ public static class QueryConditionCSharpEmitter
     }
 
     /// <summary>IN（コレクション Contains。VO 列はリストを VO へ持ち上げてから比較する）</summary>
-    private static string VisitIn(InNode node, Context context)
+    /// <param name="node">IN ノード</param>
+    /// <param name="context">エミット中の共有状態</param>
+    /// <param name="negated">NOT IN として出すか（ノード自身の NOT と外側の NOT を合わせた向き）</param>
+    private static string VisitIn(InNode node, Context context, bool negated)
     {
         var column = Bind(node.Column, context);
         var parameter = ParameterName(node.Parameter);
@@ -312,14 +341,15 @@ public static class QueryConditionCSharpEmitter
             && !context.IsParameterOfValueObject(parameter, voClass)
         )
         {
-            // 行ごとの VO 生成を避けるため、メソッド冒頭で一度だけ VO リストへ変換する
-            var listVar = context.PickListVariable(parameter);
-            var prelude = $"var {listVar} = {parameter}.Select({voClass}.Create).ToList();";
-
-            if (!context.PreludeLines.Contains(prelude))
-            {
-                context.PreludeLines.Add(prelude);
-            }
+            // 行ごとの VO 生成を避けるため、メソッド冒頭で一度だけ VO リストへ変換する。要素型が VO の内包型と
+            // 違う（int32 のリストを bigint の列へ使う等）ときはラムダで包む＝メソッドグループの変換は引数型の
+            // 完全一致を求め、暗黙の数値変換が効かない（CS0123）
+            var converter =
+                context.ParameterTypeNames.TryGetValue(parameter, out var elementType)
+                && elementType != column.UnderlyingTypeName
+                    ? $"{context.LambdaVar} => {voClass}.Create({context.LambdaVar})"
+                    : $"{voClass}.Create";
+            var listVar = context.LiftList(parameter, $"{parameter}.Select({converter}).ToList()");
 
             call = $"{listVar}.Contains({context.LambdaVar}.{column.PropertyName})";
         }
@@ -333,14 +363,10 @@ public static class QueryConditionCSharpEmitter
             // 一致せずコンパイルできない（CS1929）。メソッド冒頭で一度だけ T? のリストへ
             // 持ち上げる（VO リストの持ち上げと同じ経路）。列が NULL の行は Contains(null) が
             // false になり、SQL / EF Core の「NULL は非 null 値のリストに含まれない」と揃う
-            var listVar = context.PickListVariable(parameter);
-            var prelude =
-                $"var {listVar} = {parameter}.Cast<{column.UnderlyingTypeName}?>().ToList();";
-
-            if (!context.PreludeLines.Contains(prelude))
-            {
-                context.PreludeLines.Add(prelude);
-            }
+            var listVar = context.LiftList(
+                parameter,
+                $"{parameter}.Cast<{column.UnderlyingTypeName}?>().ToList()"
+            );
 
             call = $"{listVar}.Contains({context.LambdaVar}.{column.PropertyName})";
         }
@@ -350,7 +376,7 @@ public static class QueryConditionCSharpEmitter
             call = $"{parameter}.Contains({context.LambdaVar}.{column.PropertyName})";
         }
 
-        return node.Negated ? $"!({call})" : call;
+        return negated ? $"!({call})" : call;
     }
 
     /// <summary>比較の右辺（パラメータ・数値・文字列。VO 列は Create で包む。VO 型パラメータは直接比較）</summary>

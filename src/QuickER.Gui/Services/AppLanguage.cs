@@ -6,8 +6,8 @@ namespace QuickER.Services;
 /// 表示言語コードの解決を担う純粋関数のヘルパ（UI・WPF に依存しないため単体テスト可能）。
 /// </summary>
 /// <remarks>
-/// サポート言語は日本語（<c>ja</c>）と英語（<c>en</c>）の 2 つ。中立カルチャ＝日本語を正とし、
-/// 英語はサテライトリソースで賄う。設定未指定・不正値のときは OS 言語から導出する
+/// サポート言語は日本語（<c>ja</c>）と英語（<c>en</c>）の 2 つ。中立リソース＝英語を正とし
+/// （<c>NeutralResourcesLanguage</c> は <c>en</c>）、日本語はサテライトリソースで賄う。設定未指定・不正値のときは OS 言語から導出する
 /// （OS が日本語なら <c>ja</c>・それ以外は <c>en</c>）。
 /// </remarks>
 public static class AppLanguage
@@ -39,7 +39,8 @@ public static class AppLanguage
     }
 
     /// <summary>指定カルチャが日本語系（言語が <c>ja</c>）かどうかを判定する</summary>
-    private static bool IsJapanese(CultureInfo culture)
+    /// <remarks>表示言語に合わせる判定（ドキュメントの URL など）はこの 1 つを使う</remarks>
+    internal static bool IsJapanese(CultureInfo culture)
     {
         // ja / ja-JP など地域付きも含めて二文字言語コードで判定する
         return string.Equals(

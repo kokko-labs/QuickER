@@ -112,6 +112,14 @@
     <value>起動時に更新を確認する</value>
     <comment>設定メニューの更新確認トグル</comment>
   </data>
+  <data name="Settings_SaveFailed" xml:space="preserve">
+    <value>設定を保存できなかったため、元のままにしました。</value>
+    <comment>設定メニュー（更新確認・表示言語）の保存に失敗したとき</comment>
+  </data>
+  <data name="Settings_FileUnreadable" xml:space="preserve">
+    <value>設定ファイルを読めなかったため、上書きしませんでした。</value>
+    <comment>Settings_SaveFailed に添える理由（既存ファイルを守るために書かなかった）</comment>
+  </data>
   <data name="About_MenuItem" xml:space="preserve">
     <value>バージョン情報</value>
     <comment>設定メニューのバージョン情報ダイアログを開く項目</comment>

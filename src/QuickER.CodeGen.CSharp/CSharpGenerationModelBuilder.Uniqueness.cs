@@ -375,9 +375,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             constraints.Count > 0
                 ? BuildEditModelConstraintsTable(entity, constraints)
                 : string.Empty,
-            hasRepositoryFace
-                ? BuildEditModelValidateUniqueMethod(entity, constraints, options)
-                : string.Empty,
+            hasRepositoryFace ? BuildEditModelValidateUniqueMethod(entity, options) : string.Empty,
             hasRepositoryFace,
             constraints.Count > 0
         );
@@ -453,33 +451,35 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>DB 照合糖衣 <c>ValidateUniqueAsync</c>（EditModel の現在値から Entity を組んで Repository へ問い合わせる）を構築する</summary>
-    private string BuildEditModelValidateUniqueMethod(
-        Entity entity,
-        IReadOnlyList<ResolvedUniqueConstraint> constraints,
-        CodeGenerationOptions options
-    )
+    private string BuildEditModelValidateUniqueMethod(Entity entity, CodeGenerationOptions options)
     {
         var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
-        var repositoryName = entityClassName.EndsWith("Entity", StringComparison.Ordinal)
-            ? entityClassName[..^"Entity".Length]
-            : entityClassName;
+        var repositoryName = ToRepositoryName(entityClassName);
 
         // 契約面の切り替えは Stream アクセサのファイル糖衣と同じ規則（リモート面 ON なら契約はリモート面へ移設される）
-        var faceName =
-            options.GenerateRemoteContracts || options.GenerateRemoteServices
-                ? $"I{repositoryName}RemoteRepository"
-                : $"I{repositoryName}Repository";
+        var faceName = options.GeneratesRemoteContracts
+            ? $"I{repositoryName}RemoteRepository"
+            : $"I{repositoryName}Repository";
 
-        // 照合に要るのは主キー（自分自身の除外）と制約構成列だけなので、その列だけを写す
-        var required = constraints
-            .SelectMany(constraint => constraint.Members)
-            .Select(member => member.PropertyName)
-            .ToHashSet(StringComparer.Ordinal);
+        // EditModel が持つ列（配列列・inet の列は持たない）。照合用の Entity へは全部写す＝カスタムチェック
+        // （CollectCustomUniquenessChecks）は構成列以外の列も読むため、構成列と主キーだけだと既定値で判定させてしまう
+        var editModelColumns = entity
+            .Columns.Where(column => !IsExcludedFromEditModelColumn(column))
+            .Select(column => (Column: column, Property: BuildProperty(column)))
+            .ToList();
 
-        foreach (var column in entity.Columns.Where(column => column.IsPrimaryKey))
-        {
-            required.Add(_nameConverter.ToPropertyName(column.Name));
-        }
+        // Entity が値を運べない列＝EditModel に載らない列（静的）と、未入力の値型の列（実行時）。その列を含む違反は
+        // 照合した値がユーザーの入力でないので捨てる（ほかの制約は照合する）
+        var excludedNames = entity
+            .Columns.Where(IsExcludedFromEditModelColumn)
+            .Select(column =>
+                $"nameof({entityClassName}.{_nameConverter.ToPropertyName(column.Name)})"
+            )
+            .ToList();
+        var valueTypeNames = editModelColumns
+            .Where(pair => !pair.Property.IsNullable && !pair.Property.IsReferenceType)
+            .Select(pair => pair.Property.PropertyName)
+            .ToList();
 
         var lines = new List<string>
         {
@@ -490,6 +490,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             "    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:",
             "    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,",
             "    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).",
+            "    /// Every confirmed value is copied onto the entity, so a custom check sees the whole row. A constraint that includes a value-type property with no input,",
+            "    /// or a property the edit model does not have, is not checked (the entity would carry a value nobody entered); the other constraints are.",
             "    /// When a confirmed value is edited, the model is reloaded, or another check starts while the call is awaiting, what the query found is about values the model no longer holds:",
             "    /// nothing is registered and the call returns false, meaning that the current values were not confirmed unique. Run the check again after the last edit, before saving.",
             "    /// The errors are registered after the await, which puts them on a thread pool thread rather than the caller's, and ErrorsChanged fires there too.",
@@ -502,48 +504,31 @@ internal sealed partial class CSharpGenerationModelBuilder
             "        CancellationToken cancellationToken = default",
             "    )",
             "    {",
+            "        // Properties whose values the entity cannot carry: findings that name any of them are dropped.",
+            excludedNames.Count == 0
+                ? "        var uncheckedProperties = new List<string>();"
+                : $"        var uncheckedProperties = new List<string> {{ {string.Join(", ", excludedNames)} }};",
         };
 
-        // 値型（NULL 許容でも参照型でもない）構成列は「未入力」を Entity へ写せない（プロパティが非 null 型の
-        // ため、写さずに置くと CLR 既定値 0 のまま照合されて偽の重複を報告する）。未入力ならクエリを出さずに
-        // true を返す（必須検証が保存を止めている状態の助言的チェックなので、照合しないのが安全側）
-        var unsetGuardMembers = constraints
-            .SelectMany(constraint => constraint.Members)
-            .Where(member => !member.IsNullable && !member.IsReferenceType)
-            .Select(member => member.PropertyName)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        foreach (var propertyName in unsetGuardMembers)
+        // 値型（NULL 許容でも参照型でもない）の列は「未入力」を Entity へ写せない（プロパティが非 null 型のため、
+        // 写さずに置くと CLR 既定値 0 のまま照合される）。未入力ならその列を含む違反を捨てる
+        foreach (var propertyName in valueTypeNames)
         {
             lines.AddRange([
-                "        // A value-type constraint member with no input cannot carry its unset state onto the entity",
-                "        // (the entity property is not nullable), so the copy below would silently check the CLR default.",
-                "        // Withdraw the previous findings and answer true without querying; the required check blocks the save while the value is missing.",
+                string.Empty,
                 $"        if ({propertyName} is null)",
                 "        {",
-                "            ClearDuplicateErrors(DuplicateErrorSource.Database);",
-                "            return Task.FromResult(true);",
+                $"            uncheckedProperties.Add(nameof({entityClassName}.{propertyName}));",
                 "        }",
-                string.Empty,
             ]);
         }
 
-        lines.AddRange([
-            "        // Only the columns the check reads are copied: the primary key (to exclude this row) and the constraint members.",
-            $"        var entity = new {entityClassName}();",
-        ]);
+        lines.AddRange([string.Empty, $"        var entity = new {entityClassName}();"]);
 
-        // 未入力（null）の列は写さない＝Entity の初期値のまま。NULL 許容・参照型の構成列は null を含む組が
-        // 照合対象外になるため判定へ影響せず、値型の構成列は上のガードが未入力の照合そのものを止めている
-        foreach (var column in entity.Columns)
+        // 未入力（null）の列は写さない＝Entity の初期値のまま
+        foreach (var (_, property) in editModelColumns)
         {
-            var propertyName = _nameConverter.ToPropertyName(column.Name);
-
-            if (!required.Contains(propertyName))
-            {
-                continue;
-            }
+            var propertyName = property.PropertyName;
 
             lines.AddRange([
                 string.Empty,
@@ -556,7 +541,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         lines.AddRange([
             string.Empty,
-            "        return CheckDatabaseUniquenessAsync(repository, entity, cancellationToken);",
+            "        return CheckDatabaseUniquenessAsync(repository, entity, uncheckedProperties, cancellationToken);",
             "    }",
         ]);
 

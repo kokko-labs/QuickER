@@ -28,6 +28,15 @@ public partial class QueryItemViewModel : ObservableObject
     /// <summary>親（ダイアログ VM）へ変更を通知するためのコールバック（OK 可否・重複名の再評価用）</summary>
     private readonly Action? _notifyParent;
 
+    /// <summary>列の DB 型表記を中立の型トークンへ変換する関数（変換できなければ null。null は変換しない）</summary>
+    private readonly Func<string, string?>? _toCanonicalToken;
+
+    /// <summary>
+    /// 読み込んだ定義の、この画面で編集しない方言（sqlserver / sqlite 以外）の自由 SQL。
+    /// MCP の set_query は 5 方言の SQL を受け付けるので、画面が編集しない方言の分も保存時にそのまま戻す
+    /// </summary>
+    private readonly Dictionary<string, string> _otherDialectSql;
+
     /// <summary>子コレクションの一括入替中に個別変更フックの発火を抑止するフラグ</summary>
     private bool _suppressChildRefresh;
 
@@ -35,10 +44,14 @@ public partial class QueryItemViewModel : ObservableObject
     /// <param name="source">複製元の定義（この参照は変更しない）</param>
     /// <param name="entities">図のエンティティ一覧（列・エンティティ名の解決先）</param>
     /// <param name="notifyParent">編集内容が変わったときに親へ知らせるコールバック</param>
+    /// <param name="toCanonicalToken">
+    /// 列の DB 型表記 → 中立の型トークンの変換（列で型付けした行を「なし」へ戻したときの既定値に使う。省略時は変換しない）
+    /// </param>
     public QueryItemViewModel(
         QueryDefinition source,
         IReadOnlyList<Entity> entities,
-        Action? notifyParent = null
+        Action? notifyParent = null,
+        Func<string, string?>? toCanonicalToken = null
     )
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -47,6 +60,10 @@ public partial class QueryItemViewModel : ObservableObject
         Id = source.Id;
         _entities = entities;
         _notifyParent = notifyParent;
+        _toCanonicalToken = toCanonicalToken;
+        _otherDialectSql = source
+            .Sql.Where(pair => !EditedSqlDialects.Contains(pair.Key))
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
 
         _suppressChildRefresh = true;
         try
@@ -70,7 +87,7 @@ public partial class QueryItemViewModel : ObservableObject
                 // 列参照（Type は保存されない）の表示用型トークンは SourceColumnId 設定時に列から導出される
                 Parameters.Add(
                     Track(
-                        new QueryParameterViewModel(DeriveFieldToken)
+                        new QueryParameterViewModel(DeriveFieldToken, DeriveCanonicalToken)
                         {
                             Name = parameter.Name,
                             Type = parameter.Type ?? string.Empty,
@@ -99,7 +116,7 @@ public partial class QueryItemViewModel : ObservableObject
                 // 列参照（Type は保存されない）の表示用型トークンは SourceColumnId 設定時に列から導出される
                 Fields.Add(
                     Track(
-                        new ProjectionFieldViewModel(DeriveFieldToken)
+                        new ProjectionFieldViewModel(DeriveFieldToken, DeriveCanonicalToken)
                         {
                             Name = field.Name,
                             Type = field.Type ?? string.Empty,
@@ -367,7 +384,7 @@ public partial class QueryItemViewModel : ObservableObject
     /// <summary>エンティティ変更後、新しいエンティティに存在しない列参照を掃除する</summary>
     /// <remarks>
     /// 並び順行は列参照そのものが本体のため行ごと取り除き、射影フィールドは参照元列を
-    /// 「なし（自由フィールド）」へ解除して名前・型トークンは保持する。旧参照を残すと
+    /// 「なし（自由フィールド）」へ解除する（名前は保持し、型トークンは列を選ぶ前の値か外した列の型の中立トークンになる）。旧参照を残すと
     /// ドロップダウンが空欄のまま確定でき、生成時まで気づけない壊れた定義になるため。
     /// 条件テキストはユーザーの入力文言なので保持し、旧エンティティの列参照は
     /// 条件検証の診断（赤字表示・OK 無効化）として表面化させる。
@@ -389,7 +406,7 @@ public partial class QueryItemViewModel : ObservableObject
             }
         }
 
-        // 列参照で型付けされたパラメータも同様に「トークン型付け」へ解除する（名前・型表示は保持）
+        // 列参照で型付けされたパラメータも同様に「トークン型付け」へ解除する（名前は保持・型は射影フィールドと同じ規則）
         foreach (var parameter in Parameters)
         {
             if (
@@ -484,7 +501,13 @@ public partial class QueryItemViewModel : ObservableObject
     private void AddParameter()
     {
         Parameters.Add(
-            Track(new QueryParameterViewModel(DeriveFieldToken) { Name = "param", Type = "int32" })
+            Track(
+                new QueryParameterViewModel(DeriveFieldToken, DeriveCanonicalToken)
+                {
+                    Name = "param",
+                    Type = "int32",
+                }
+            )
         );
         ValidateSql();
     }
@@ -535,7 +558,13 @@ public partial class QueryItemViewModel : ObservableObject
     private void AddField()
     {
         Fields.Add(
-            Track(new ProjectionFieldViewModel(DeriveFieldToken) { Name = "Field", Type = "int32" })
+            Track(
+                new ProjectionFieldViewModel(DeriveFieldToken, DeriveCanonicalToken)
+                {
+                    Name = "Field",
+                    Type = "int32",
+                }
+            )
         );
         _notifyParent?.Invoke();
     }
@@ -559,6 +588,12 @@ public partial class QueryItemViewModel : ObservableObject
 
         if (Implementation == QueryImplementationKind.Sql)
         {
+            // この画面で編集しない方言の SQL は読み込んだまま戻す（黙って捨てない）
+            foreach (var (dialect, text) in _otherDialectSql)
+            {
+                sql[dialect] = text;
+            }
+
             if (!string.IsNullOrWhiteSpace(SqlServerSql))
             {
                 sql["sqlserver"] = SqlServerSql;
@@ -740,6 +775,32 @@ public partial class QueryItemViewModel : ObservableObject
         return entity?.Columns.FirstOrDefault(c => c.Id == id)?.DataType;
     }
 
+    /// <summary>この画面が編集する自由 SQL の方言（キーは生成器と同じく大文字小文字まで一致で照合する）</summary>
+    private static readonly HashSet<string> EditedSqlDialects = new(StringComparer.Ordinal)
+    {
+        "sqlserver",
+        "sqlite",
+    };
+
+    /// <summary>参照元列 ID から中立の型トークンを導出する（列で型付けした行を「なし」へ戻したときの既定値）</summary>
+    /// <remarks>
+    /// 列は図の全エンティティから探す（エンティティを切り替えたとき、外す列は切り替え前のエンティティの列のため）。
+    /// 変換関数が無い・列が見つからない・型を解析できないときは null。
+    /// </remarks>
+    private string? DeriveCanonicalToken(Guid columnId)
+    {
+        if (_toCanonicalToken is null)
+        {
+            return null;
+        }
+
+        var column = _entities
+            .SelectMany(entity => entity.Columns)
+            .FirstOrDefault(c => c.Id == columnId);
+
+        return column is null ? null : _toCanonicalToken(column.DataType);
+    }
+
     /// <summary>シグネチャプレビューの再計算を通知する</summary>
     private void RaiseSignatureChanged() => OnPropertyChanged(nameof(SignaturePreview));
 
@@ -830,8 +891,9 @@ public partial class QueryItemViewModel : ObservableObject
             ValidateSql();
             _notifyParent?.Invoke();
         }
-        else if (sender is ProjectionFieldViewModel)
+        else if (sender is ProjectionFieldViewModel or QueryOrderingViewModel)
         {
+            // 射影フィールドと並び順の列は、ダイアログのフォーム検証（列参照の切れ等）の対象
             _notifyParent?.Invoke();
         }
     }

@@ -298,6 +298,25 @@ public class QueryDefinitionDialogViewModelTests
             );
     }
 
+    /// <summary>
+    /// 並び順の削除済み列参照を、画面で生きている列へ選び直すと検証がやり直され、エラーが消えて OK が押せることを検証する
+    /// （選び直しでは検証が走らず、エラーと OK の無効が残っていた）
+    /// </summary>
+    [Fact(DisplayName = "並び順の列を選び直すと検証がやり直され OK できる")]
+    public void DanglingOrderByColumn_ReselectingColumn_Revalidates()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        diagram.Queries[0].OrderBy.Add(new QueryOrdering { ColumnId = Guid.NewGuid() });
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+
+        var item = vm.Queries[0];
+        item.OrderBy[0].ColumnId = item.AvailableColumns[0].Id!.Value;
+
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+        vm.StatusMessage.Should().BeEmpty();
+    }
+
     /// <summary>射影フィールドの削除済み列参照も検証エラーになることを検証する（CU1）</summary>
     [Fact(DisplayName = "射影フィールドの削除済み列参照は検証エラーになり項目名を示す")]
     public void DanglingProjectionField_BlocksOkAndNamesField()

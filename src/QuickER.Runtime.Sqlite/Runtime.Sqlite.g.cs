@@ -1282,8 +1282,8 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
 
     /// <summary>
     /// Materialization for WithUnboundedBinary. Plain-SELECTs all columns (including unbounded binary columns)
-    /// without Include, materializing legitimate entities with RowState=Unchanged (shared across dialects).
-    /// On SQL Server this avoids the default JSON path (Base64) and prevents memory inflation. No-Include only (guarded at the terminal).
+    /// without Include, materializing legitimate entities with RowState=Unchanged (shared across dialects). No-Include only (guarded at the terminal).
+    /// <see cref="MaterializeRootsAsync"/> is the other plain SELECT: it reads only the SELECT columns, leaving the excluded ones unset.
     /// </summary>
     private async Task<IReadOnlyList<TEntity>> MaterializeWithUnboundedBinaryAsync(
         SqlQueryPlan<TEntity> plan,
@@ -1327,6 +1327,10 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
     }
 
     /// <summary>Fetches the roots with a plain SELECT and materializes them via a DataReader (the root set before Includes).</summary>
+    /// <remarks>
+    /// Reads the SELECT columns (unbounded binary columns excluded), the same columns as GetAllAsync.
+    /// <see cref="MaterializeWithUnboundedBinaryAsync"/> is the other plain SELECT: it reads every column, the excluded ones included.
+    /// </remarks>
     private async Task<List<TEntity>> MaterializeRootsAsync(
         SqliteConnection connection,
         SqlQueryPlan<TEntity> plan,

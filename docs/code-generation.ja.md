@@ -54,6 +54,20 @@ Mapper は確定値を Entity から直接コピーし、`BindingXxx` はその�
 バイナリ列は防御的にコピーするため、ロードした EditModel の編集がロード元の Entity へ波及しません。
 `date` 列（`datetime` ではない）はカルチャの短い日付書式で表示し、末尾に "0:00:00" が付きません。
 
+### ナビゲーションプロパティの名前
+
+ナビゲーションプロパティは、相手側のテーブル名から名付けます。
+親側は子テーブルの複数形（`Orders`。1 対 1 なら単数形）、子側は親テーブルの単数形（`Customer`）です。
+
+同じ親テーブルと子テーブルの間に 2 本以上のリレーションがあるときは、その間の全リレーションを外部キー列から名付けます。
+テーブル名だけで名付けると、同じ名前のメンバーが 2 つできるためです。
+役割名は、外部キー列の PascalCase から末尾の `Id` を除いたものです（`ship_customer_id` なら `ShipCustomer`）。
+末尾が `Id` でない列と、`id` そのものの列は、親テーブルの単数形を後ろに付けます（`shipper` なら `ShipperCustomer`）。
+子側は役割名です（`order.ShipCustomer`）。
+親側は `{子の複数形}By{役割名}`（`customer.OrdersByShipCustomer`）で、1 対 1 なら `{子の単数形}By{役割名}` です。
+自分自身を 2 本で参照するテーブルも同じ規則で、親側のナビゲーションだけを持ちます（`NodesByParent` と `NodesByOrigin` など）。
+このため、2 つのテーブルの間へ 2 本目のリレーションを足すと、1 本目のナビゲーションの名前も変わります。
+
 ### DB 定義メタ属性
 
 Entity には既定で DataAnnotations と DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。
@@ -233,7 +247,7 @@ Mapper の変換も同じ規則で、削除行の未入力の非キー列は必�
 ## QuickER 版 Repository
 
 依存最小（ADO のみ）の軽量 Repository です。
-対象方言は SQL Server（`FOR JSON` ベース）と SQLite（プレーン SELECT ＋ マルチクエリ）で、DI 登録拡張はエンジン別の名前（`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`）で生成されます。
+対象方言は SQL Server（プレーン SELECT・`Include` のある取得は `FOR JSON`）と SQLite（プレーン SELECT ＋ マルチクエリ）で、DI 登録拡張はエンジン別の名前（`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`）で生成されます。
 
 ```csharp
 // DI 登録（生成される拡張メソッド。方言に応じて SqlServer / Sqlite を選ぶ）
@@ -356,6 +370,15 @@ IN 検索には、表に収まらない場合がいくつかあります。
 等値と IN 以外の否定は、従来どおり `NOT (...)` になります。
 
 > **既知の割り切り**: 反転が効くのは `!` が比較に直接乗っている場合だけです。`!(a == b && c)` は De Morgan 展開されず、個別に補償された各項を `NOT (...)` で包んだ形になります。`NOT (UNKNOWN)` は UNKNOWN のままなので、括弧の内側で `NULL` により UNKNOWN になった行は結果から落ち、C#（インメモリ）や EF Core とは割れます。`NULL` があり得る場合は否定を比較側へ書いてください（`a != b || !c`）。こちらは反転を通るため両者と一致します。
+
+簡易 DSL の `NOT` は、この割り切りに当たりません。
+コード生成が C# を書く前に、ド・モルガンの法則で `NOT` を個々の比較まで押し下げるためです。
+`NOT (qty < 10 OR name = 'x')` は `!(e.Qty < 10) && e.Name != "x"` と生成され、`!(... || ...)` の形で翻訳器へ渡ることはありません。
+規則は 1 文で言えます。`NOT` と `<>` は C# の否定と同じで `NULL` の行も一致し、文字列一致だけは `NULL` の行がどちら向きでも一致しません。
+NULL 許容列への順序比較（`<` `<=` `>` `>=`）の否定には「列が `NULL`」を OR し、`NOT qty < 10` は `(e.Qty == null || !(e.Qty < 10))` と生成されます。
+SQL の `NOT (qty < @p)` だけでは、`NULL` の行が UNKNOWN で落ちるためです。
+
+> **既知の割り切り**: 値オブジェクトの列で型付けしたパラメータには `null` を渡せます。その `null` との順序比較を否定した場合は、まだ結果が割れます。C# は比較を false、その否定を true と評価しますが、SQL は `col < NULL` を UNKNOWN として行を落とします。
 
 簡易 DSL の文字列一致（`LIKE` / `CONTAINS` / `STARTSWITH` / `ENDSWITH`）も、NULL 許容列に対しては「列が `NULL` でないこと」を AND した形へエミットされます。
 `NOT LIKE` も同じ前提の内側に入るため、`NULL` の行はどちらの向きでも一致しません。
@@ -719,6 +742,9 @@ if (!await editModel.ValidateUniqueAsync(repository))
 ```
 
 EditModel の確定値から Entity を組み立てて `CheckUniquenessAsync` を呼び、各違反の `PropertyNames` をバインディングプロパティ名へ写します。
+Entity へは確定値をすべて写すので、ユーザー定義チェックは制約の列だけでなく行全体を読めます。
+未入力の値型のプロパティ（Entity 側は NULL を持てず CLR の既定値になる）と、EditModel に載らない列（配列列・`inet` の列）は Entity へ値を運べません。
+そのプロパティを名指しする違反は捨てるため、その列を含む制約は照合されず、ほかの制約は照合されます。
 構成列を持たない違反（および EditModel に無いプロパティ名の違反）は、空のプロパティ名で登録されるモデルレベルエラーになり、`GetErrors(null)` で取得できます。
 呼び出しの先頭で前回の重複エラーを消すため、再検証で古いエラーが残ることはありません（消すのは自分が付けた分だけなので、要素どうしの検証が報告したエラーは残ります）。
 削除マークされた EditModel は、他の検証と同じく照会せずに `true` を返します。
@@ -1702,7 +1728,7 @@ var doc = await documents
 - **`Include` とは併用できません**（終端メソッド実行時に `InvalidOperationException`）。
   無制限バイナリ列が必要な場合は、`Include` なしの別クエリで取得してください。
   これは、SQL Server の `Include` 経路が FOR JSON と Base64 を経由して巨大 BLOB のメモリ膨張（ピーク 5〜6 倍）を招くためです。
-  「巨大 BLOB を扱う」目的では、メモリ特性が予測可能に保たれるようにします（SQL Server では FOR JSON を使わずプレーン SELECT で取得します）。
+  「巨大 BLOB を扱う」目的では、メモリ特性が予測可能に保たれるようにします（SQL Server でも、`Include` の無い取得と同じくプレーン SELECT で取得します）。
 - 効果があるのは、エンティティ形の取得（`ToListAsync` / `FirstOrDefaultAsync`）と、`ToProjectionListAsync` がエンティティを全列取得してから射影するフォールバック経路です（セレクタから列を抽出できない場合や `Include` 併用時）。
   件数・存在確認と、サーバー側で列を刈り込める射影には影響しません（後者は参照した列を、除外列も含めて取得済みのためです）。
 - 取得したエンティティは正当なエンティティですが、除外列が UPDATE 対象外である点は変わりません。
@@ -1727,6 +1753,8 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 意味論です。
 
 - **戻り値**: `Read` は宛先へ書いたら `true`（空 blob も `true`）、行なし・列 NULL は `false`（宛先へ何も書きません）。
+  `Read...ToFileAsync` は同じフォルダの一時ファイルへ読み、`Read` が `true` を返したときだけ宛先と置き換えます。
+  `false`・例外・キャンセルのときは既存のファイルに触れません。
   `Write` は更新できたら `true`、行なしは `false` です。
   既存の `UpdateAsync` の bool 規約に揃えています。
 - **`Write(id, null)`** は、列を `NULL` に設定します（除外列を「未設定」へ戻す手段）。
@@ -2612,6 +2640,13 @@ JSON エンベロープ（`POST` + Base64）では巨大 blob のメモリ膨張
 - クライアント（`Http{Entity}RemoteRepository`）は、`GET` を `ResponseHeadersRead` で受けて宛先へ O(チャンク) でコピーし、`PUT` は `StreamContent`（`Content-Length` 付き）で送ります。
   非シーク Stream で `length` を渡さない場合は、送信前に `ArgumentException` になります（既存の長さ契約と同一です）。
   **渡した Stream の所有権は呼び出し側のまま**で、クライアントは閉じも破棄もしません（直結実装と同じで、実装を差し替えても Stream の扱いが変わりません。HTTP レイヤは送信後にリクエストコンテンツを破棄するため、Stream は非クローズのラッパー経由で `StreamContent` へ渡しています）。
+- **`PUT` には `Expect: 100-continue` を付けます。**
+  クライアントはサーバーがヘッダーを見るまで本文を送らないので、宣言長が上限を超えるアップロードは、本文を送る前に 413 の `RemoteRepositoryException` になります。
+  付けないと、サーバーは本文を読まずに接続を閉じ、その後のリセットで 413 が失われて接続エラーになることがあります。
+  サーバーの `100 Continue` を待つ時間はハンドラーの `Expect100ContinueTimeout`（既定は 1 秒）で、過ぎると本文を送ります。
+  そのため、`100 Continue` を返さない中継を挟むと、アップロードごとに最大でその時間だけ待ちます。
+  待ち時間を変えるには、`HttpClient` ファクトリ版の登録でクライアントを渡し、その `SocketsHttpHandler` に設定してください。
+  `Expect` ヘッダーを 417 で拒否する中継の下では、アップロードは状態コード 417 の `RemoteRepositoryException` になります。
 - **`WithUnboundedBinary()` / `Query()` / 生 SQL のリモート化はスコープ外です**（従来どおり）。
 
 ## ランタイムパッケージ参照モード（--use-runtime-packages）

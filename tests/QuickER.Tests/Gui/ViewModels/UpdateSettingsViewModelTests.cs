@@ -1,6 +1,8 @@
 using System.IO;
 using AwesomeAssertions;
+using QuickER.Resources;
 using QuickER.Services;
+using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;
@@ -20,7 +22,10 @@ public class UpdateSettingsViewModelTests
     [Fact(DisplayName = "未保存なら初期値は確認する")]
     public void Constructor_WhenNoSettings_DefaultsToEnabled()
     {
-        var vm = new UpdateSettingsViewModel(new GuiAppSettingsStore(TempFolder()));
+        var vm = new UpdateSettingsViewModel(
+            new StubDialogService(),
+            new GuiAppSettingsStore(TempFolder())
+        );
 
         vm.IsCheckOnStartupEnabled.Should().BeTrue();
     }
@@ -36,7 +41,7 @@ public class UpdateSettingsViewModelTests
             var store = new GuiAppSettingsStore(folder);
             store.Save(new GuiAppSettings { CheckForUpdatesOnStartup = false });
 
-            var vm = new UpdateSettingsViewModel(store);
+            var vm = new UpdateSettingsViewModel(new StubDialogService(), store);
 
             vm.IsCheckOnStartupEnabled.Should().BeFalse();
         }
@@ -63,7 +68,7 @@ public class UpdateSettingsViewModelTests
             var store = new GuiAppSettingsStore(folder);
             store.Save(new GuiAppSettings { Language = "ja" });
 
-            var vm = new UpdateSettingsViewModel(store);
+            var vm = new UpdateSettingsViewModel(new StubDialogService(), store);
             vm.IsCheckOnStartupEnabled = false;
 
             var reloaded = store.Load();
@@ -80,6 +85,64 @@ public class UpdateSettingsViewModelTests
             {
                 Directory.Delete(folder, recursive: true);
             }
+        }
+    }
+
+    /// <summary>
+    /// 切り替えを保存できなかったときは、表示を元に戻して理由つきのエラーで知らせることを検証する
+    /// </summary>
+    /// <remarks>
+    /// 2 通りを確かめる。設定ファイルが読み取り専用で書き込みが失敗するとき（例外）と、既存ファイルを読めないため
+    /// ストアが書かずに戻ったとき（例外にならない）。どちらも戻さないと、チェックは外れて見えるのに次回起動でも
+    /// 更新を確認する、という食い違いが黙って残っていた。
+    /// </remarks>
+    [Theory(DisplayName = "保存できない切り替えは表示を戻してエラーで知らせる")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Toggle_WhenSaveFails_RevertsAndShowsError(bool readOnlyFile)
+    {
+        var folder = TempFolder();
+        var store = new GuiAppSettingsStore(folder);
+        store.Save(new GuiAppSettings { CheckForUpdatesOnStartup = true });
+        var dialogs = new StubDialogService();
+        var vm = new UpdateSettingsViewModel(dialogs, store);
+
+        try
+        {
+            if (readOnlyFile)
+            {
+                File.SetAttributes(store.SettingsPath, FileAttributes.ReadOnly);
+                vm.IsCheckOnStartupEnabled = false;
+            }
+            else
+            {
+                using (
+                    new FileStream(
+                        store.SettingsPath,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.None
+                    )
+                )
+                {
+                    vm.IsCheckOnStartupEnabled = false;
+                }
+            }
+
+            vm.IsCheckOnStartupEnabled.Should().BeTrue("保存できなかった切り替えは表示も戻す");
+            store.Load().CheckForUpdatesOnStartup.Should().BeTrue();
+            var error = dialogs.ErrorMessages.Should().ContainSingle().Subject;
+            error.Should().StartWith(Strings.Settings_SaveFailed);
+
+            if (!readOnlyFile)
+            {
+                error.Should().EndWith(Strings.Settings_FileUnreadable);
+            }
+        }
+        finally
+        {
+            File.SetAttributes(store.SettingsPath, FileAttributes.Normal);
+            Directory.Delete(folder, recursive: true);
         }
     }
 }

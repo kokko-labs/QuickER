@@ -145,7 +145,10 @@ public sealed class DiagramChangeTracker
     /// <summary>
     /// ユーザー編集でカラム名が変更されたときに通知するコールバック（カラム・旧名・新名）
     /// </summary>
-    /// <remarks>名前付きクエリ条件の列参照書き換えに用いる。Undo/Redo 再生中（追跡停止中）は発火しない</remarks>
+    /// <remarks>
+    /// 名前付きクエリ条件の列参照書き換えに用いる。カラム名の Undo / Redo でも、戻る・進む向きの新旧名で通知する
+    /// （<see cref="CreateAfterPropertyApplyAction"/>）。一括置換など追跡停止中の変更では発火しない
+    /// </remarks>
     private readonly Action<ColumnViewModel, string, string> _onColumnRenamed;
 
     /// <summary>対象オブジェクトごとの直近スナップショット（プロパティ名 → 値）</summary>
@@ -503,13 +506,13 @@ public sealed class DiagramChangeTracker
                 property,
                 oldValue,
                 newValue,
-                CreateAfterPropertyApplyAction(sender, property.Name)
+                CreateAfterPropertyApplyAction(sender, property.Name, oldValue, newValue)
             )
         );
         snapshots[property.Name] = newValue;
 
         // カラム名のユーザー編集は、名前付きクエリ条件の列参照書き換えのため所有側へ通知する
-        // （追跡停止中＝Undo/Redo・一括置換では、この経路自体を通らないため発火しない）
+        // （追跡停止中＝一括置換ではこの経路を通らないため発火しない。Undo / Redo の通知はコマンドの後処理が出す）
         if (
             sender is ColumnViewModel column
             && property.Name == nameof(ColumnViewModel.Name)
@@ -526,7 +529,10 @@ public sealed class DiagramChangeTracker
     /// </summary>
     /// <remarks>
     /// 連動変更（IsPrimaryKey ↔ IsNullable、Type ↔ 列ペア）を
-    /// 1 回の Undo / Redo で往復させるために用いる
+    /// 1 回の Undo / Redo で往復させるために用いる。
+    /// 後処理（<paramref name="afterPush"/>）は <see cref="RunWithoutTracking"/> の中で実行し、スナップショットの
+    /// 再取得はその終了時の 1 回だけにする（呼び出し元は追跡中にしか呼ばないので、ここが最外側になる。
+    /// 後処理の中の <see cref="RunWithoutTracking"/> は入れ子になり、取り直さない）。
     /// </remarks>
     private void PushGroupedPropertyChanges(
         object sender,
@@ -538,8 +544,7 @@ public sealed class DiagramChangeTracker
         if (!_trackedPropertySnapshots.TryGetValue(sender, out var originalSnapshots))
         {
             CaptureTrackedProperties(sender, trackedProperties);
-            afterPush?.Invoke();
-            RefreshTrackedPropertySnapshots(sender);
+            RunWithoutTracking(() => afterPush?.Invoke());
             return;
         }
 
@@ -565,8 +570,7 @@ public sealed class DiagramChangeTracker
         }
 
         _trackedPropertySnapshots[sender] = currentSnapshots;
-        afterPush?.Invoke();
-        RefreshTrackedPropertySnapshots(sender);
+        RunWithoutTracking(() => afterPush?.Invoke());
     }
 
     /// <summary>スナップショット辞書の値を対象オブジェクトへ追跡停止下で一括設定する</summary>
@@ -620,6 +624,7 @@ public sealed class DiagramChangeTracker
     )
     {
         var properties = PropertiesFor(target);
+
         foreach (var (name, value) in snapshot)
         {
             properties.FirstOrDefault(p => p.Name == name)?.SetValue(target, value);
@@ -675,10 +680,43 @@ public sealed class DiagramChangeTracker
         }
     }
 
-    /// <summary>プロパティ適用後に外部キー列ルール再適用が必要な対象に対し、その後処理を生成する</summary>
+    /// <summary>
+    /// プロパティの Undo / Redo の適用後に要る後処理を生成する（外部キー列ルールの再適用・カラム名の変更の通知）
+    /// </summary>
+    /// <param name="sender">プロパティを持つ対象</param>
+    /// <param name="propertyName">プロパティ名</param>
+    /// <param name="oldValue">変更前の値</param>
+    /// <param name="newValue">変更後の値</param>
     /// <returns>後処理が不要な場合は null</returns>
-    private Action? CreateAfterPropertyApplyAction(object sender, string propertyName)
+    private Action? CreateAfterPropertyApplyAction(
+        object sender,
+        string propertyName,
+        object? oldValue,
+        object? newValue
+    )
     {
+        // カラム名の Undo / Redo も、ユーザー編集と同じく所有側へ通知する（名前付きクエリ条件の列参照を書き戻すため）。
+        // 向きは適用後の現在の名前で決める（Undo なら新名 → 旧名、Redo なら旧名 → 新名）
+        if (
+            sender is ColumnViewModel renamedColumn
+            && propertyName == nameof(ColumnViewModel.Name)
+            && oldValue is string oldName
+            && newValue is string newName
+        )
+        {
+            return () =>
+            {
+                if (renamedColumn.Name == newName)
+                {
+                    _onColumnRenamed(renamedColumn, oldName, newName);
+                }
+                else if (renamedColumn.Name == oldName)
+                {
+                    _onColumnRenamed(renamedColumn, newName, oldName);
+                }
+            };
+        }
+
         if (sender is RelationshipViewModel && propertyName == nameof(RelationshipViewModel.Type))
         {
             return () => _applyRelationshipColumnRules(sender);

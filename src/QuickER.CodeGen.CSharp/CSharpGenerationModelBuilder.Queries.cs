@@ -641,7 +641,14 @@ internal sealed partial class CSharpGenerationModelBuilder
                     parsed.Root!,
                     columnBindings,
                     lambdaNames,
-                    parameterValueObjects
+                    parameterValueObjects,
+                    parameterTypes
+                        .Where(pair => pair.Value.ValueObjectClassName is null)
+                        .ToDictionary(
+                            pair => pair.Key,
+                            pair => pair.Value.TypeName,
+                            StringComparer.OrdinalIgnoreCase
+                        )
                 );
             }
         }
@@ -1172,8 +1179,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         string sql
     )
     {
-        // SQL は逐語的文字列リテラルで埋め込む（改行を保持し、" は "" へエスケープ）
-        var sqlLiteral = "@\"" + sql.Replace("\"", "\"\"") + "\"";
+        var sqlLiteral = RenderSqlLiteral(sql);
 
         // 匿名オブジェクトの束縛引数（ページング有効時は take / skip も SQL から @take / @skip で参照できる）
         var boundNames = query.HasPaging
@@ -1259,6 +1265,82 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>自由 SQL を C# の文字列式として書く（値は元の SQL と 1 文字も違わない）</summary>
+    /// <remarks>
+    /// 改行を含まない SQL は逐語的文字列リテラル 1 つ（<c>"</c> は <c>""</c>）。改行を含む SQL は、行ごとの逐語的
+    /// 文字列リテラルと、元の改行文字をエスケープで書いた通常の文字列リテラルを <c>+</c> でつなぐ（定数として畳まれる）。
+    /// 逐語リテラルの中に改行を生のまま書くと、描画後のレンダラーの <see cref="string.ReplaceLineEndings(string)"/> が
+    /// 生成する OS の改行へ書き換え、LINE SEPARATOR などの文字まで改行に変えるため、SQL の文字列リテラルの値が変わる。
+    /// 改行として扱う文字は同メソッドが認識する集合（CR / LF / NEL / FORM FEED / LINE SEPARATOR / PARAGRAPH SEPARATOR）。
+    /// </remarks>
+    private static string RenderSqlLiteral(string sql)
+    {
+        static string Verbatim(string text) => "@\"" + text.Replace("\"", "\"\"") + "\"";
+
+        var lines = new List<string>();
+        var text = new StringBuilder();
+        var breaks = new StringBuilder();
+
+        void Flush()
+        {
+            var parts = new List<string>(2);
+
+            if (text.Length > 0)
+            {
+                parts.Add(Verbatim(text.ToString()));
+            }
+
+            if (breaks.Length > 0)
+            {
+                parts.Add("\"" + breaks + "\"");
+            }
+
+            lines.Add(string.Join(" + ", parts));
+            text.Clear();
+            breaks.Clear();
+        }
+
+        foreach (var c in sql)
+        {
+            var escaped = c switch
+            {
+                '\r' => "\\r",
+                '\n' => "\\n",
+                '\f' => "\\f",
+                '\u0085' => "\\u0085",
+                '\u2028' => "\\u2028",
+                '\u2029' => "\\u2029",
+                _ => null,
+            };
+
+            if (escaped is not null)
+            {
+                breaks.Append(escaped);
+                continue;
+            }
+
+            // 改行の連続の後に文字が来たら、そこまでを 1 行として閉じる
+            if (breaks.Length > 0)
+            {
+                Flush();
+            }
+
+            text.Append(c);
+        }
+
+        if (lines.Count == 0 && breaks.Length == 0)
+        {
+            return Verbatim(text.ToString());
+        }
+
+        if (text.Length > 0 || breaks.Length > 0)
+        {
+            Flush();
+        }
+
+        return string.Join("\n            + ", lines);
     }
 
     /// <summary>Task&lt;T?&gt; 形式の戻り値型からスカラー要素型 T（末尾の NULL 許容 ? を除いた素の型）を取り出す</summary>

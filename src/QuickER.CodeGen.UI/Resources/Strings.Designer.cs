@@ -510,6 +510,18 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_SettingsAutoSaveFailedMessage {
+            get {
+                return ResourceManager.GetString("CodeGen_SettingsAutoSaveFailedMessage", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_SettingsFileUnreadable {
+            get {
+                return ResourceManager.GetString("CodeGen_SettingsFileUnreadable", resourceCulture);
+            }
+        }
+
         public static string CodeGen_SettingsLoadFailedMessage {
             get {
                 return ResourceManager.GetString("CodeGen_SettingsLoadFailedMessage", resourceCulture);

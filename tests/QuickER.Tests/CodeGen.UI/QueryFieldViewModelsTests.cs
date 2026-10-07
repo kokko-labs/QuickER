@@ -70,6 +70,65 @@ public class QueryFieldViewModelsTests
         parameter.IsTypeEditable.Should().BeFalse("列参照時は手入力できない");
     }
 
+    /// <summary>
+    /// 列を選ぶ前に手入力した型トークンは、列を「なし」へ戻すと戻ることを検証する
+    /// （列の宣言型＝DB の型表記を型トークンとして残すと、保存後に生成で解決できない）
+    /// </summary>
+    [Fact(DisplayName = "列を「なし」へ戻すと、列を選ぶ前の手入力値へ戻る")]
+    public void SourceColumn_Cleared_RestoresManualType()
+    {
+        var columnId = Guid.NewGuid();
+        var parameter = new QueryParameterViewModel(
+            id => id == columnId ? "nvarchar(50)" : null,
+            _ => "string(50)"
+        )
+        {
+            Type = "string(20)",
+        };
+
+        parameter.SourceColumnId = columnId;
+        parameter.Type.Should().Be("nvarchar(50)");
+
+        parameter.SourceColumnId = null;
+
+        parameter.Type.Should().Be("string(20)");
+        parameter.IsTypeEditable.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 手入力値が無い（列つきで読み込んだ）行を「なし」へ戻すと、外した列の型の中立トークンになり、
+    /// 変換できなければ空になることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "手入力値が無ければ、外した列の型の中立トークン（変換できなければ空）になる"
+    )]
+    public void SourceColumn_ClearedWithoutManualType_UsesCanonicalTokenOrEmpty()
+    {
+        var columnId = Guid.NewGuid();
+        var field = new ProjectionFieldViewModel(
+            id => id == columnId ? "nvarchar(50)" : null,
+            id => id == columnId ? "string(50)" : null
+        )
+        {
+            Type = string.Empty,
+            SourceColumnId = columnId,
+        };
+
+        field.SourceColumnId = null;
+
+        field.Type.Should().Be("string(50)");
+
+        var unresolvable = new QueryParameterViewModel(_ => "geometry", _ => null)
+        {
+            Type = string.Empty,
+            SourceColumnId = Guid.NewGuid(),
+        };
+
+        unresolvable.SourceColumnId = null;
+
+        unresolvable.Type.Should().BeEmpty();
+    }
+
     /// <summary>導出関数が型を返さない列を選んだ場合、型トークンは据え置きで、編集可否だけが列参照状態になることを検証する</summary>
     [Fact(DisplayName = "導出不能な列選択でも編集不可にはなる（型は据え置き）")]
     public void SourceColumn_WithNullToken_KeepsTypeButBecomesReadOnly()
@@ -82,8 +141,8 @@ public class QueryFieldViewModelsTests
         parameter.IsTypeEditable.Should().BeFalse("列参照（SourceColumnId 非 null）なら編集不可");
     }
 
-    /// <summary>参照元列を「なし」へ戻すと、型トークンは直近の列由来値を保持したまま編集可へ復帰することを検証する</summary>
-    [Fact(DisplayName = "列参照を外すと型を保持したまま編集可へ戻る")]
+    /// <summary>参照元列を「なし」へ戻すと、型トークンは列を選ぶ前の値（既定の int32）へ戻って編集可へ復帰することを検証する</summary>
+    [Fact(DisplayName = "列参照を外すと列を選ぶ前の型へ戻り編集可へ戻る")]
     public void SourceColumn_ResetToNull_RetainsTypeAndBecomesEditable()
     {
         var columnId = Guid.NewGuid();
@@ -94,7 +153,9 @@ public class QueryFieldViewModelsTests
 
         field.SourceColumnId = null;
 
-        field.Type.Should().Be("decimal(12,2)", "「なし」へ戻しても直近の列由来トークンは保持する");
+        field
+            .Type.Should()
+            .Be("int32", "列の宣言型（DB の型表記）は型トークンとして残さず、列を選ぶ前の値へ戻す");
         field.IsTypeEditable.Should().BeTrue();
     }
 

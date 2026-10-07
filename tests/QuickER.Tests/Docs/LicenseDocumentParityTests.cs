@@ -165,19 +165,19 @@ public sealed class LicenseDocumentParityTests
             .Select(match => match.Groups[1].Value)
             .ToList();
 
-    /// <summary>publish.yml が pack する各プロジェクトのライセンスメタデータを読む</summary>
+    /// <summary>scripts/pack-packages.ps1 が pack する各プロジェクトのライセンスメタデータを読む</summary>
     /// <remarks>
-    /// 対象の正本は csproj のプロパティではなく publish.yml の pack 一覧とする。<c>IsPackable</c> を
+    /// 対象の正本は csproj のプロパティではなく pack-packages.ps1 の一覧（ci.yml・publish.yml が共有する）とする。<c>IsPackable</c> を
     /// 見る実装では <c>QuickER.Cli</c>（<c>PackAsTool</c> で成立させており <c>IsPackable</c> を書いていない）が
     /// 漏れ、唯一の NC パッケージが検証対象外になっていた。公開一覧から引けば、パッケージを追加した
     /// のにライセンスメタデータを書き忘れた場合もここで落ちる。
     /// </remarks>
     private static IReadOnlyList<PublishedPackage> PublishedPackages()
     {
-        var workflow = File.ReadAllText(Path.Combine(Root, ".github", "workflows", "publish.yml"));
+        var packScript = File.ReadAllText(Path.Combine(Root, "scripts", "pack-packages.ps1"));
 
         var projectPaths = Regex
-            .Matches(workflow, @"src/(?<dir>[^/\s]+)/[^/\s]+\.csproj")
+            .Matches(packScript, @"src/(?<dir>[^/\s]+)/[^/\s]+\.csproj")
             .Select(match => match.Groups["dir"].Value)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -185,8 +185,8 @@ public sealed class LicenseDocumentParityTests
         projectPaths
             .Should()
             .NotBeEmpty(
-                "publish.yml から pack 対象のプロジェクトを 1 つも読み取れなかった"
-                    + "（ワークフローの書き方を変えたなら本テストの抽出も更新すること）"
+                "pack-packages.ps1 から pack 対象のプロジェクトを 1 つも読み取れなかった"
+                    + "（一覧の書き方を変えたなら本テストの抽出も更新すること）"
             );
 
         return projectPaths
