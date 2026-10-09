@@ -293,6 +293,12 @@
   <data name="Status_Ready" xml:space="preserve">
     <value>Ready</value>
   </data>
+  <data name="Status_TableNameRejected" xml:space="preserve">
+    <value>A table named '{0}' already exists (compared ignoring case and surrounding spaces). The table name was not changed.</value>
+  </data>
+  <data name="Status_ColumnNameRejected" xml:space="preserve">
+    <value>Table '{0}' already has a column named '{1}' (compared ignoring case and surrounding spaces). The column name was not changed.</value>
+  </data>
   <data name="Status_EntitiesLabel" xml:space="preserve">
     <value>Entities:</value>
   </data>
@@ -837,6 +843,9 @@
   <data name="Dbml_DuplicateEntity" xml:space="preserve">
     <value>Entity '{0}' is duplicated.</value>
   </data>
+  <data name="Dbml_DuplicateColumn" xml:space="preserve">
+    <value>Column '{1}' is duplicated in table '{0}' (column names are compared ignoring case and surrounding spaces).</value>
+  </data>
   <data name="Dbml_MissingClosingBrace" xml:space="preserve">
     <value>Entity '{0}' is missing its closing brace '}}'.</value>
   </data>
@@ -894,6 +903,9 @@
   <data name="Mermaid_DuplicateEntity" xml:space="preserve">
     <value>Entity '{0}' is duplicated.</value>
   </data>
+  <data name="Mermaid_DuplicateColumn" xml:space="preserve">
+    <value>Column '{1}' is duplicated in table '{0}' (column names are compared ignoring case and surrounding spaces).</value>
+  </data>
   <data name="Mermaid_MissingClosingBrace" xml:space="preserve">
     <value>Entity '{0}' is missing its closing brace '}}'.</value>
   </data>
@@ -932,6 +944,9 @@
   </data>
   <data name="TableDoc_DetailDuplicateTable" xml:space="preserve">
     <value>The detail sheets contain a duplicate table name '{0}'.</value>
+  </data>
+  <data name="TableDoc_DuplicateColumn" xml:space="preserve">
+    <value>Column '{1}' is duplicated in table '{0}' (column names are compared ignoring case and surrounding spaces).</value>
   </data>
   <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
     <value>The detail sheet for table '{0}' was not found.</value>
@@ -1172,6 +1187,9 @@
   </data>
   <data name="Tool_RelationshipConstraintNameTaken" xml:space="preserve">
     <value>The constraint name '{0}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit constraint_name to get a unique one automatically.</value>
+  </data>
+  <data name="Tool_UniqueConstraintNameTaken" xml:space="preserve">
+    <value>The constraint name '{0}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit name to get a unique one automatically.</value>
   </data>
   <data name="Tool_TableNameTaken" xml:space="preserve">
     <value>A table named '{0}' already exists (table names must be unique, ignoring case).</value>

@@ -230,14 +230,16 @@ public class EntityPrimaryKeyOrderTests
         merged.PrimaryKeyColumnIds.Should().Equal(merged.Columns[1].Id, merged.Columns[0].Id);
     }
 
-    [Fact(DisplayName = "主キーの順序の引き継ぎは、列名が大文字小文字まで一致しなければ行わない")]
-    public void InheritPrimaryKeyOrderFrom_CaseDifferentName_IsNotCarried()
+    [Fact(
+        DisplayName = "主キーの順序の引き継ぎは、大文字小文字だけ違う列名も同じ列として引き継ぐ（SchemaNames の規則）"
+    )]
+    public void InheritPrimaryKeyOrderFrom_CaseDifferentName_IsCarried()
     {
         var (existing, merged) = BuildMergePair();
         merged.Columns[1].Name = "B";
 
-        merged.InheritPrimaryKeyOrderFrom(existing).Should().BeFalse();
+        merged.InheritPrimaryKeyOrderFrom(existing).Should().BeTrue();
 
-        merged.PrimaryKeyColumnIds.Should().BeEmpty();
+        merged.PrimaryKeyColumnIds.Should().Equal(merged.Columns[1].Id, merged.Columns[0].Id);
     }
 }

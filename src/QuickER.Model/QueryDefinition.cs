@@ -25,8 +25,15 @@ public class QueryDefinition
     public Guid EntityId { get; set; }
 
     /// <summary>メソッド名の意味部分（例: <c>GetByCustomer</c>。生成時に Async サフィックスを付与する）</summary>
+    /// <remarks>代入した名前の前後の空白は除く（<see cref="Entity.TableName"/> と同じ規則。<c>null</c> は通す）</remarks>
     [JsonPropertyName("Name")]
-    public string Name { get; set; } = "NewQuery";
+    public string Name
+    {
+        get => _name;
+        set => _name = value?.Trim()!;
+    }
+
+    private string _name = "NewQuery";
 
     /// <summary>クエリの説明（生成メソッドの XML ドキュメントコメントに反映する）</summary>
     [JsonPropertyName("Description")]
@@ -68,8 +75,15 @@ public class QueryDefinition
     public Dictionary<string, string> Sql { get; set; } = new();
 
     /// <summary>戻り形が射影のときの DTO 型名（例: <c>OrderSummaryRow</c>）</summary>
+    /// <remarks>代入した名前の前後の空白は除く（<see cref="Entity.TableName"/> と同じ規則）</remarks>
     [JsonPropertyName("ResultTypeName")]
-    public string? ResultTypeName { get; set; }
+    public string? ResultTypeName
+    {
+        get => _resultTypeName;
+        set => _resultTypeName = value?.Trim();
+    }
+
+    private string? _resultTypeName;
 
     /// <summary>戻り形が射影のときの出力フィールド一覧</summary>
     [JsonPropertyName("Fields")]
@@ -80,8 +94,15 @@ public class QueryDefinition
 public class QueryParameter
 {
     /// <summary>パラメータ名（例: <c>customerId</c>。DSL / SQL では <c>@customerId</c> で参照する）</summary>
+    /// <remarks>代入した名前の前後の空白は除く（<see cref="Entity.TableName"/> と同じ規則。<c>null</c> は通す）</remarks>
     [JsonPropertyName("Name")]
-    public string Name { get; set; } = "param";
+    public string Name
+    {
+        get => _name;
+        set => _name = value?.Trim()!;
+    }
+
+    private string _name = "param";
 
     /// <summary>型（方言中立トークン。例: <c>int32</c> / <c>string(50)</c>）</summary>
     /// <remarks>
@@ -123,8 +144,15 @@ public class QueryOrdering
 public class ProjectionField
 {
     /// <summary>フィールド名（DTO のプロパティ名。自由 SQL では SELECT の列別名と一致させる）</summary>
+    /// <remarks>代入した名前の前後の空白は除く（<see cref="Entity.TableName"/> と同じ規則。<c>null</c> は通す）</remarks>
     [JsonPropertyName("Name")]
-    public string Name { get; set; } = "Field";
+    public string Name
+    {
+        get => _name;
+        set => _name = value?.Trim()!;
+    }
+
+    private string _name = "Field";
 
     /// <summary>型（方言中立トークン。例: <c>string(50)</c> / <c>decimal(12,2)</c>）</summary>
     /// <remarks>

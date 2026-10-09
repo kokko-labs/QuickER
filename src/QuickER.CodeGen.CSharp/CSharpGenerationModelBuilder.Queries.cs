@@ -706,7 +706,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         // ---- 射影 DTO と選択式 ----
         string? dtoClass = null;
         string? projectionSelector = null;
-        var resultTypeName = query.ResultTypeName?.Trim() ?? string.Empty;
+        var resultTypeName = query.ResultTypeName ?? string.Empty;
 
         if (query.Returns == QueryReturnShape.Projection)
         {
@@ -880,6 +880,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             foreach (var (dialect, sql) in query.Sql)
             {
+                // 空・空白だけの SQL は「その方言の SQL は無い」と同じ扱い（手動実装＝契約宣言のみ）。
+                // 手書きの図ファイルにはあり得る（GUI のダイアログと MCP のツールは保存しない）
+                if (string.IsNullOrWhiteSpace(sql))
+                {
+                    continue;
+                }
+
                 if (
                     !CodeGenerationOptions.SupportedRepositoryDialects.Contains(
                         dialect,
@@ -1361,7 +1368,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var hasError = false;
         var properties = new List<string>();
-        var seenFieldNames = new HashSet<string>(StringComparer.Ordinal);
+        // フィールド名の重複は QueryDefinitionRules.Validate と同じく SchemaNames の規則で判定する
+        var seenFieldNames = new HashSet<string>(SchemaNames.Comparer);
 
         foreach (var field in query.Fields)
         {

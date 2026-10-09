@@ -11,9 +11,61 @@ public partial class ColumnViewModel : ObservableObject
     /// <summary>モデルと同一の識別子（保存・読込時のマッチングに用いる）</summary>
     public Guid Id { get; }
 
-    /// <summary>カラム名</summary>
-    [ObservableProperty]
+    /// <summary>カラム名の実体フィールド</summary>
     private string _name;
+
+    /// <summary>カラム名（前後の空白を除いた形で保持する）</summary>
+    /// <remarks>
+    /// 同じテーブルにすでに同じ名前（<see cref="SchemaNames.AreSame"/> の規則）の列があるときは、書き換えを受け付けず
+    /// 入力欄へ元の名前を戻し、<see cref="NameChangeRejected"/> で知らせる（変更履歴にも残らない）。
+    /// 元に戻す・やり直すは <see cref="ApplyName"/> を使い、検査を通さない
+    /// </remarks>
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            var stored = SchemaNames.ToStoredForm(value);
+
+            if (
+                NameScope?.FirstOrDefault(other =>
+                    !ReferenceEquals(other, this) && SchemaNames.AreSame(other.Name, stored)
+                ) is
+                { } clash
+            )
+            {
+                NameChangeRejected?.Invoke(
+                    this,
+                    new NameChangeRejectedEventArgs(stored, clash.Name, null)
+                );
+                OnPropertyChanged();
+
+                return;
+            }
+
+            ApplyName(
+                stored,
+                notifyAlways: !string.Equals(stored, value, StringComparison.Ordinal)
+            );
+        }
+    }
+
+    /// <summary>カラム名を重複の検査なしで書き換える（元に戻す・やり直すの適用用）</summary>
+    /// <param name="name">前後の空白を除いたカラム名</param>
+    /// <param name="notifyAlways">値が変わらなくても入力欄へ通知する（入力された空白を取り除いた形へ戻すため）</param>
+    internal void ApplyName(string name, bool notifyAlways = false)
+    {
+        if (!SetProperty(ref _name, name, nameof(Name)) && notifyAlways)
+        {
+            OnPropertyChanged(nameof(Name));
+        }
+    }
+
+    /// <summary>カラム名の重複を検査する相手（同じテーブルの列の一覧。テーブルに載っていなければ <c>null</c>＝検査しない）</summary>
+    internal IReadOnlyCollection<ColumnViewModel>? NameScope { get; set; }
+
+    /// <summary>カラム名の書き換えを、重複のため受け付けなかったときに発火する（所有するテーブルが転送する）</summary>
+    internal event EventHandler<NameChangeRejectedEventArgs>? NameChangeRejected;
 
     /// <summary>データ型（例: int, varchar(100)）</summary>
     [ObservableProperty]

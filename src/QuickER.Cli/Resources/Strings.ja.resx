@@ -245,7 +245,10 @@
     <value>警告: {0} の外部キー「{1}」は取込範囲外の「{2}」を参照しているため、リレーションを作成していません。</value>
   </data>
   <data name="Cli_ImportWarningTableNameCollision" xml:space="preserve">
-    <value>警告: 「{0}」は「{1}」と大文字小文字だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
+    <value>警告: 「{0}」は「{1}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
+  </data>
+  <data name="Cli_ImportWarningColumnNameCollision" xml:space="preserve">
+    <value>警告: テーブル「{0}」の列「{1}」は「{2}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（図は両者を区別できません）。</value>
   </data>
   <data name="Cli_SchemaReadFailed" xml:space="preserve">
     <value>スキーマファイルを読み取れません: {0}（{1}）</value>

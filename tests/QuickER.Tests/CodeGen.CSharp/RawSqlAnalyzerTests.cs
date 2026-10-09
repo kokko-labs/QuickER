@@ -229,6 +229,18 @@ public class RawSqlAnalyzerTests
         findings.Should().BeEmpty();
     }
 
+    /// <summary>ローカル変数の名前は大文字小文字を区別しない（SQL Server の既定の照合順序と同じ）</summary>
+    [Fact(DisplayName = "DECLARE のローカル変数は参照の大文字小文字が違っても未宣言扱いしない")]
+    public void Analyze_DeclaredLocalVariable_IsCaseInsensitive()
+    {
+        var findings = Analyze(
+            "DECLARE @Total int SELECT @total + @customerId FROM [Order]",
+            "customerId"
+        );
+
+        findings.Should().BeEmpty();
+    }
+
     /// <summary>複数宣言（カンマ区切り）と初期化子つきの DECLARE も認識する</summary>
     [Fact(DisplayName = "DECLARE の複数宣言・初期化子つきも認識する")]
     public void Analyze_MultiDeclareWithInitializer_RecognizesAllLocals()

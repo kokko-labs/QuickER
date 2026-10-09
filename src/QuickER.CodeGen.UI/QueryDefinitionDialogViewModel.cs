@@ -194,16 +194,17 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
             }
         }
 
-        // 同一エンティティ内でのメソッド名重複（大文字小文字を区別しない）
+        // 同一エンティティ内でのメソッド名重複（前後の空白を除き大文字小文字を区別しない＝SchemaNames の規則）
         var duplicate = Queries
-            .GroupBy(q => (q.EntityId, Name: q.Name.Trim().ToLowerInvariant()))
+            .GroupBy(q => q.EntityId)
+            .SelectMany(sameEntity => sameEntity.GroupBy(q => q.Name, SchemaNames.Comparer))
             .FirstOrDefault(g => g.Count() > 1);
 
         if (duplicate is not null)
         {
             return string.Format(
                 Strings.QueryDialog_Status_DuplicateName,
-                duplicate.First().Name.Trim()
+                SchemaNames.ToStoredForm(duplicate.First().Name)
             );
         }
 

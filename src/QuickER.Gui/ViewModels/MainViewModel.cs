@@ -1851,15 +1851,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var normalizedTableName = string.IsNullOrWhiteSpace(originalTableName)
             ? "NewTable"
-            : originalTableName.Trim();
+            : SchemaNames.ToStoredForm(originalTableName);
         var candidate = $"{normalizedTableName}_Copy";
         var suffix = 2;
 
-        while (
-            Entities.Any(entity =>
-                string.Equals(entity.TableName, candidate, StringComparison.OrdinalIgnoreCase)
-            )
-        )
+        while (Entities.Any(entity => SchemaNames.AreSame(entity.TableName, candidate)))
         {
             candidate = $"{normalizedTableName}_Copy{suffix}";
             suffix++;
@@ -2108,6 +2104,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 entity.IsCompactView = IsCompactViewInDiagram;
                 entity.PropertyChanged += OnEntityPropertyChanged;
 
+                // テーブル名・列名の書き換えは、同じ名前があれば受け付けずに戻す。戻したことをステータスバーで知らせる
+                entity.NameScope = Entities;
+                entity.NameChangeRejected += OnEntityNameChangeRejected;
+
                 // 一意制約カードのコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
                 entity.UniqueConstraintMemberSelectionEdited +=
                     OnUniqueConstraintMemberSelectionEdited;
@@ -2147,9 +2147,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         entity.PropertyChanged -= OnEntityPropertyChanged;
+        entity.NameChangeRejected -= OnEntityNameChangeRejected;
+        entity.NameScope = null;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
         _changeTracker.DetachEntity(entity);
     }
+
+    /// <summary>プロパティパネルの名前の書き換えを重複のため受け付けなかったことを、ステータスバーの一時通知で知らせる</summary>
+    private void OnEntityNameChangeRejected(object? sender, NameChangeRejectedEventArgs e) =>
+        NotifyStatus(
+            e.TableName is null
+                ? string.Format(Strings.Status_TableNameRejected, e.ExistingName)
+                : string.Format(Strings.Status_ColumnNameRejected, e.TableName, e.ExistingName)
+        );
 
     /// <summary>リレーション 1 件の購読解除と変更追跡の終了を行う</summary>
     /// <remarks>

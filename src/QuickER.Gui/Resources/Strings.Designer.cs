@@ -598,6 +598,18 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Status_TableNameRejected {
+            get {
+                return ResourceManager.GetString("Status_TableNameRejected", resourceCulture);
+            }
+        }
+        
+        public static string Status_ColumnNameRejected {
+            get {
+                return ResourceManager.GetString("Status_ColumnNameRejected", resourceCulture);
+            }
+        }
+        
         public static string Status_EntitiesLabel {
             get {
                 return ResourceManager.GetString("Status_EntitiesLabel", resourceCulture);
@@ -1896,6 +1908,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Dbml_DuplicateColumn {
+            get {
+                return ResourceManager.GetString("Dbml_DuplicateColumn", resourceCulture);
+            }
+        }
+        
         public static string Dbml_MissingClosingBrace {
             get {
                 return ResourceManager.GetString("Dbml_MissingClosingBrace", resourceCulture);
@@ -2010,6 +2028,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Mermaid_DuplicateColumn {
+            get {
+                return ResourceManager.GetString("Mermaid_DuplicateColumn", resourceCulture);
+            }
+        }
+        
         public static string Mermaid_MissingClosingBrace {
             get {
                 return ResourceManager.GetString("Mermaid_MissingClosingBrace", resourceCulture);
@@ -2085,6 +2109,12 @@ namespace QuickER.Resources {
         public static string TableDoc_DetailDuplicateTable {
             get {
                 return ResourceManager.GetString("TableDoc_DetailDuplicateTable", resourceCulture);
+            }
+        }
+        
+        public static string TableDoc_DuplicateColumn {
+            get {
+                return ResourceManager.GetString("TableDoc_DuplicateColumn", resourceCulture);
             }
         }
         
@@ -2408,6 +2438,12 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipConstraintNameTaken {
             get {
                 return ResourceManager.GetString("Tool_RelationshipConstraintNameTaken", resourceCulture);
+            }
+        }
+
+        public static string Tool_UniqueConstraintNameTaken {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintNameTaken", resourceCulture);
             }
         }
 

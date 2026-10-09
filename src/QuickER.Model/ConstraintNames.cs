@@ -114,6 +114,49 @@ public static class ConstraintNames
         return names;
     }
 
+    /// <summary>
+    /// 一意制約へ付けようとする名前が、図の中の既存の制約名（外部キー・主キー・一意制約）と衝突するか
+    /// </summary>
+    /// <param name="diagram">図</param>
+    /// <param name="name">付けようとする名前（比較は <see cref="SchemaNames.AreSame"/> の規則）</param>
+    /// <param name="replacingUniqueConstraintId">
+    /// 名前を付け替える既存の一意制約の Id（自分自身の現在の名前とは衝突させない）。新規の制約なら <c>null</c>
+    /// </param>
+    /// <remarks>
+    /// 外部キーの名前を付けるツール（<c>add_relationship</c>）と同じ規則を、一意制約の名前にも使う
+    /// （制約名は SQL Server と Oracle では種類をまたいでスキーマ単位で共有される）。
+    /// </remarks>
+    public static bool IsTaken(ErDiagram diagram, string name, Guid? replacingUniqueConstraintId)
+    {
+        var names = new HashSet<string>(CollectExisting(diagram), SchemaNames.Comparer);
+
+        if (replacingUniqueConstraintId is { } id)
+        {
+            foreach (var entity in diagram.Entities)
+            {
+                var own = entity.UniqueConstraints.FirstOrDefault(constraint =>
+                    constraint.Id == id
+                );
+
+                if (own is null)
+                {
+                    continue;
+                }
+
+                var columnNames = own
+                    .ColumnIds.Select(columnId =>
+                        entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name
+                    )
+                    .OfType<string>();
+                names.Remove(
+                    own.Name ?? UniqueConstraint.SynthesizeName(entity.TableName, columnNames)
+                );
+            }
+        }
+
+        return names.Contains(name);
+    }
+
     /// <summary>テーブルが持つ制約（主キー・一意制約）の名前を、DDL が付ける名前で集める</summary>
     /// <param name="entities">対象のテーブル</param>
     /// <returns>主キー・一意制約の名前の集合（大文字小文字を区別しない・呼び出し側で追加してよい）</returns>
@@ -124,7 +167,7 @@ public static class ConstraintNames
     /// </remarks>
     public static HashSet<string> CollectTableConstraints(IEnumerable<Entity> entities)
     {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(SchemaNames.Comparer);
 
         foreach (var entity in entities)
         {
@@ -351,7 +394,7 @@ public static class ConstraintNames
         IEnumerable<string> existingNames
     )
     {
-        var taken = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+        var taken = new HashSet<string>(existingNames, SchemaNames.Comparer);
         var name = ForeignKey(childTable, parentTable);
 
         if (!taken.Contains(name))

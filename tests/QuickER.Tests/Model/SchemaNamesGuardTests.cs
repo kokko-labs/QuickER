@@ -134,6 +134,23 @@ public sealed class SchemaNamesGuardTests
         }
     }
 
+    [Fact(DisplayName = "未移行の項目は一覧に残っていない（SchemaNames へ移し終えている）")]
+    public void Unmigrated_IsEmpty()
+    {
+        var unmigrated = Entries.Where(entry => entry.Kind == Group.Unmigrated).ToList();
+
+        if (unmigrated.Count > 0)
+        {
+            throw new Xunit.Sdk.XunitException(
+                "未移行の項目が残っている（SchemaNames へ移すか、理由つきの例外にする）: "
+                    + string.Join(
+                        " / ",
+                        unmigrated.Select(entry => $"{entry.File}: {entry.Needle}")
+                    )
+            );
+        }
+    }
+
     /// <summary>文の先頭（一覧の項目の照合に使う長さ）</summary>
     private const int NeedleLength = 90;
 
@@ -251,253 +268,7 @@ public sealed class SchemaNamesGuardTests
     /// <summary>一覧（未移行・系統 B・例外）</summary>
     public static readonly IReadOnlyList<Entry> Entries =
     [
-        // ---- 未移行（区切り 22 で SchemaNames へ移して一覧から消す） ----
-        new(
-            "MockDesignDocExporter.cs",
-            "entityisnotnull&&string.Equals(entity.Name,entityName,StringComparison.OrdinalIgnoreCase)",
-            Group.Unmigrated,
-            "モック生成の CRUD 申告のエンティティ名と図のテーブル名の照合"
-        ),
-        new(
-            "MockFolderDesignSession.cs",
-            "names.Add(entity.TableName.Trim());",
-            Group.Unmigrated,
-            "図のテーブル名の集合（モック生成の CRUD 申告の照合に使う）"
-        ),
-        new(
-            "CSharpGenerationModelBuilder.IncludeGraph.cs",
-            "varentitiesByTable=newDictionary<string,Entity>(StringComparer.Ordinal);",
-            Group.Unmigrated,
-            "テーブル名でエンティティを引く辞書（序数一致）"
-        ),
-        new(
-            "CSharpGenerationModelBuilder.Sync.cs",
-            "columnOwners.TryGetValue(pair.SourceColumnId,outvarparent)&&parent.Id==entity.Id&&columnOw",
-            Group.Unmigrated,
-            "同期の対象のテーブル名の集合（序数一致）"
-        ),
-        new(
-            "QueryDefinitionDialogViewModel.cs",
-            "varduplicate=Queries.GroupBy(q=>(q.EntityId,Name:q.Name.Trim().ToLowerInvariant())).FirstO",
-            Group.Unmigrated,
-            "クエリ名の重複の判定（ToLowerInvariant＝OrdinalIgnoreCase と答えが割れる）"
-        ),
-        new(
-            "QueryDefinitionDialogViewModel.cs",
-            "returnstring.Format(Strings.QueryDialog_Status_DuplicateName,duplicate.First().Name.Trim()",
-            Group.Unmigrated,
-            "クエリ名の保存形（Trim を入口に写している）"
-        ),
-        new(
-            "QueryItemViewModel.cs",
-            "returnnewQueryDefinition{Id=Id,EntityId=EntityId,Name=Name.Trim(),Description=Description,",
-            Group.Unmigrated,
-            "クエリ名の保存形（Trim を入口に写している＝モデルの setter へ）"
-        ),
-        new(
-            "QueryItemViewModel.cs",
-            "vardeclared=Parameters.Select(p=>p.Name.Trim()).Where(name=>name.Length>0).ToList();",
-            Group.Unmigrated,
-            "パラメータ名の保存形（Trim を入口に写している）"
-        ),
-        new(
-            "QueryItemViewModel.cs",
-            "varname=string.IsNullOrWhiteSpace(parameter.Name)?\"arg\":parameter.Name.Trim();",
-            Group.Unmigrated,
-            "パラメータ名の保存形（Trim を入口に写している）"
-        ),
-        new(
-            "CSharpReverseParser.cs",
-            "varcolumnsByTable=newDictionary<string,Dictionary<string,Column>>(StringComparer.Ordinal);",
-            Group.Unmigrated,
-            "C# リバース: テーブル名で列を引く辞書（序数一致）"
-        ),
-        new(
-            "CSharpReverseParser.cs",
-            "varentityByTable=newDictionary<string,Entity>(StringComparer.Ordinal);",
-            Group.Unmigrated,
-            "C# リバース: テーブル名でエンティティを引く辞書（序数一致）"
-        ),
-        new(
-            "CSharpReverseParser.cs",
-            "varcolumnIndex=newDictionary<string,Column>(StringComparer.Ordinal);",
-            Group.Unmigrated,
-            "C# リバース: 列名で列を引く辞書（序数一致）"
-        ),
-        new(
-            "DocumentErDiagramToolHost.cs",
-            "varother=document.Schema.Entities.FirstOrDefault(candidate=>!ReferenceEquals(candidate,ent",
-            Group.Unmigrated,
-            "44 / M1: 改名の重複の判定（空白を除かない）"
-        ),
-        new(
-            "DocumentErDiagramToolHost.cs",
-            "returnsourceisnotnull&&targetisnotnull&&string.Equals(source.TableName,sourceTable,StringC",
-            Group.Unmigrated,
-            "リレーションの両端のテーブル名の照合"
-        ),
-        new(
-            "DocumentErDiagramToolHost.cs",
-            "varbyName=matches.Where(r=>string.Equals(r.ConstraintName,constraintName,StringComparison.",
-            Group.Unmigrated,
-            "制約名の照合"
-        ),
-        new(
-            "QueryToolCore.cs",
-            "varexisting=diagram.Queries.FirstOrDefault(query=>query.EntityId==entity.Id&&string.Equals",
-            Group.Unmigrated,
-            "N7: クエリ名の上書きの照合（空白を除かない）"
-        ),
-        new(
-            "QueryToolCore.cs",
-            "varquery=diagram.Queries.FirstOrDefault(candidate=>candidate.EntityId==entity.Id&&string.E",
-            Group.Unmigrated,
-            "N7: クエリ名の削除の照合（空白を除かない）"
-        ),
-        new(
-            "SchemaLookup.cs",
-            "publicstaticEntity?FindEntity(ErDiagramschema,stringtableName)=>schema.Entities.FirstOrDef",
-            Group.Unmigrated,
-            "44 / M1: テーブル名の引き当て（空白を除かない）"
-        ),
-        new(
-            "SchemaLookup.cs",
-            "publicstaticColumn?FindColumn(Entityentity,stringcolumnName)=>entity.Columns.FirstOrDefaul",
-            Group.Unmigrated,
-            "列名の引き当て（空白を除かない）"
-        ),
-        new(
-            "Entity.cs",
-            "keys.DistinctBy(column=>column.Name,StringComparer.Ordinal).Count()!=keys.Count",
-            Group.Unmigrated,
-            "主キーの順序の引き継ぎ（列名の序数一致）"
-        ),
-        new(
-            "Entity.cs",
-            "varkeyByName=keys.ToDictionary(column=>column.Name,StringComparer.Ordinal);",
-            Group.Unmigrated,
-            "主キーの順序の引き継ぎ（列名の序数一致）"
-        ),
-        new(
-            "ForeignKeyColumnResolver.cs",
-            "varranks=new(Func<CandidateColumn,bool>Matches,boolAllowPrimaryKey)[]{(column=>expectedNam",
-            Group.Unmigrated,
-            "外部キーの列の推論（列名の照合）"
-        ),
-        new(
-            "ForeignKeyColumnResolver.cs",
-            "privatestaticboolIsBareId(stringcolumnName)=>string.Equals(columnName,\"id\",StringCompariso",
-            Group.Unmigrated,
-            "外部キーの列の推論（列名の照合）"
-        ),
-        new(
-            "ForeignKeyColumnResolver.cs",
-            "privatestaticboolIsSameName(CandidateColumncolumn,string?sourceKeyColumnName)=>sourceKeyCo",
-            Group.Unmigrated,
-            "外部キーの列の推論（列名の照合）"
-        ),
-        new(
-            "QueryConditionParser.cs",
-            "varresolved=entity.Columns.FirstOrDefault(c=>string.Equals(c.Name,column.Text,StringCompar",
-            Group.Unmigrated,
-            "簡易 DSL の列名の解決（空白を除かない）"
-        ),
-        new(
-            "QueryConditionParser.cs",
-            "varresolved=parameters.FirstOrDefault(p=>string.Equals(p.Name,parameter.Text,StringCompari",
-            Group.Unmigrated,
-            "簡易 DSL のパラメータ名の解決（空白を除かない）"
-        ),
-        new(
-            "QueryConditionParser.cs",
-            "vardefinition=parameters.FirstOrDefault(p=>string.Equals(p.Name,operand.Text,StringCompari",
-            Group.Unmigrated,
-            "簡易 DSL のパラメータ名の解決（空白を除かない）"
-        ),
-        new(
-            "DbmlImporter.cs",
-            "varentities=newDictionary<string,Entity>(StringComparer.OrdinalIgnoreCase);",
-            Group.Unmigrated,
-            "DBML 取込: テーブル名の辞書（空白を除かない）"
-        ),
-        new(
-            "DbmlImporter.cs",
-            "varcolumn=entity.Columns.FirstOrDefault(c=>string.Equals(c.Name,columnName,StringCompariso",
-            Group.Unmigrated,
-            "DBML 取込: 列名の解決"
-        ),
-        new(
-            "DbmlImporter.cs",
-            "varcolumn=entity.Columns.FirstOrDefault(c=>string.Equals(c.Name,columnName,StringCompariso",
-            Group.Unmigrated,
-            "DBML 取込: 列名の解決"
-        ),
-        new(
-            "DbmlImporter.cs",
-            "privatestaticColumn?FindColumn(Entityentity,stringcolumnName)=>entity.Columns.FirstOrDefau",
-            Group.Unmigrated,
-            "DBML 取込: 列名の解決"
-        ),
-        new(
-            "ErDiagramDynamicTools.cs",
-            "varother=vm.Entities.FirstOrDefault(candidate=>!ReferenceEquals(candidate,entity)&&string.",
-            Group.Unmigrated,
-            "44 / M1: 改名の重複の判定（空白を除かない）"
-        ),
-        new(
-            "ErDiagramDynamicTools.cs",
-            "privatestaticEntityViewModel?FindEntity(MainViewModelvm,stringtableName)=>vm.Entities.Firs",
-            Group.Unmigrated,
-            "44 / M1: テーブル名の引き当て（空白を除かない）"
-        ),
-        new(
-            "ErDiagramDynamicTools.cs",
-            "privatestaticColumnViewModel?FindColumn(EntityViewModelentity,stringcolumnName)=>entity.Co",
-            Group.Unmigrated,
-            "列名の引き当て（空白を除かない）"
-        ),
-        new(
-            "ErDiagramDynamicTools.cs",
-            "varmatches=vm.Relationships.Where(r=>string.Equals(r.Source.TableName,sourceTable,StringCo",
-            Group.Unmigrated,
-            "リレーションの両端のテーブル名の照合"
-        ),
-        new(
-            "ErDiagramDynamicTools.cs",
-            "varbyName=matches.Where(r=>string.Equals(r.ConstraintName,constraintName,StringComparison.",
-            Group.Unmigrated,
-            "制約名の照合"
-        ),
-        new(
-            "MermaidImporter.cs",
-            "varentities=newDictionary<string,Entity>(StringComparer.OrdinalIgnoreCase);",
-            Group.Unmigrated,
-            "Mermaid 取込: テーブル名の辞書（空白を除かない）"
-        ),
-        new(
-            "TableDefinitionDocumentImporter.cs",
-            "varentities=newDictionary<string,Entity>(StringComparer.OrdinalIgnoreCase);",
-            Group.Unmigrated,
-            "Excel 定義書の取込: テーブル名の辞書（空白を除かない）"
-        ),
-        new(
-            "TableDefinitionDocumentImporter.cs",
-            "varchildColumn=child.Columns.FirstOrDefault(column=>string.Equals(column.Name,childColumnN",
-            Group.Unmigrated,
-            "Excel 定義書の取込: 列名の解決"
-        ),
-        new(
-            "TableDefinitionDocumentImporter.cs",
-            "varparentColumn=parent.Columns.FirstOrDefault(column=>string.Equals(column.Name,parentColu",
-            Group.Unmigrated,
-            "Excel 定義書の取込: 列名の解決"
-        ),
-        new(
-            "MainViewModel.cs",
-            "Entities.Any(entity=>string.Equals(entity.TableName,candidate,StringComparison.OrdinalIgno",
-            Group.Unmigrated,
-            "複製するテーブルの重複しない名前の判定"
-        ),
+        // ---- 未移行（区切り 22 で SchemaNames へ移して一覧から消す。移し終えた P1 の時点で空） ----
         // ---- 未移行（系統 B の作業範囲＝同期の計画と差分） ----
         new(
             "SchemaDiffService.cs",
@@ -620,6 +391,18 @@ public sealed class SchemaNamesGuardTests
             "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
         ),
         // ---- 例外（理由つきで素の比較を残す） ----
+        new(
+            "ForeignKeyColumnResolver.cs",
+            "varranks=new(Func<CandidateColumn,bool>Matches,boolAllowPrimaryKey)[]{(column=>expectedNam",
+            Group.Exception,
+            "外部キーの列の推論の優先ランク。同名の判定は SchemaNames.AreSame へ移した。残る素の比較は接尾辞の一致（EndsWith）で同一性の判定ではない"
+        ),
+        new(
+            "QueryItemViewModel.cs",
+            "returnnewQueryDefinition{Id=Id,EntityId=EntityId,Name=Name,Description=Description,Returns",
+            Group.Exception,
+            "クエリ定義の組み立て。名前の前後の空白はモデルの setter が除く。残る Trim は型トークン・戻り型の値（名前ではない）"
+        ),
         new(
             "MockDesignDocExporter.cs",
             "varlabels=members.Select(m=>ResolveName(m.Attrs,m.Tag,forLabels,wrappingLabels).Name).Wher",
@@ -763,12 +546,6 @@ public sealed class SchemaNamesGuardTests
             "returnstring.Join(\",\",entity.UniqueConstraints.Select(u=>(u.Name??\"\")+\"(\"+string.Join(\"+\",",
             Group.Exception,
             "変更の検知（綴りの違いも変更として数える署名）"
-        ),
-        new(
-            "SchemaTableEntry.cs",
-            "publicDictionary<string,Column>ColumnsByName{get;}=new(StringComparer.OrdinalIgnoreCase);",
-            Group.Exception,
-            "例外 1: DB 取込のカタログの照合（大小だけ違う列名の扱いは区切り 22＝CLAUDE.md の既知の残件）"
         ),
         new(
             "SqlTypeText.cs",

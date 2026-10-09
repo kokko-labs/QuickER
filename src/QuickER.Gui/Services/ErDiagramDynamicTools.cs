@@ -310,11 +310,7 @@ public static class ErDiagramDynamicTools
             // 自分自身の大文字小文字だけを変える改名は許す
             var other = vm.Entities.FirstOrDefault(candidate =>
                 !ReferenceEquals(candidate, entity)
-                && string.Equals(
-                    candidate.TableName,
-                    newTableName,
-                    StringComparison.OrdinalIgnoreCase
-                )
+                && SchemaNames.AreSame(candidate.TableName, newTableName)
             );
 
             if (other is not null)
@@ -863,17 +859,13 @@ public static class ErDiagramDynamicTools
             .ToHashSet()
             .SetEquals(right.Select(pair => (pair.SourceColumnId, pair.TargetColumnId)));
 
-    /// <summary>テーブル名でエンティティを検索する（大文字小文字を区別しない・最初の一致）</summary>
+    /// <summary>テーブル名でエンティティを検索する（前後の空白を除き大文字小文字を区別しない・最初の一致）</summary>
     private static EntityViewModel? FindEntity(MainViewModel vm, string tableName) =>
-        vm.Entities.FirstOrDefault(entity =>
-            string.Equals(entity.TableName, tableName, StringComparison.OrdinalIgnoreCase)
-        );
+        vm.Entities.FirstOrDefault(entity => SchemaNames.AreSame(entity.TableName, tableName));
 
-    /// <summary>指定テーブルの列を名前で検索する（大文字小文字を区別しない）</summary>
+    /// <summary>指定テーブルの列を名前で検索する（前後の空白を除き大文字小文字を区別しない）</summary>
     private static ColumnViewModel? FindColumn(EntityViewModel entity, string columnName) =>
-        entity.Columns.FirstOrDefault(column =>
-            string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)
-        );
+        entity.Columns.FirstOrDefault(column => SchemaNames.AreSame(column.Name, columnName));
 
     /// <summary>指定した参照元・参照先テーブル間のリレーションを削除する</summary>
     /// <remarks>
@@ -892,12 +884,8 @@ public static class ErDiagramDynamicTools
 
         var matches = vm
             .Relationships.Where(r =>
-                string.Equals(r.Source.TableName, sourceTable, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(
-                    r.Target.TableName,
-                    targetTable,
-                    StringComparison.OrdinalIgnoreCase
-                )
+                SchemaNames.AreSame(r.Source.TableName, sourceTable)
+                && SchemaNames.AreSame(r.Target.TableName, targetTable)
             )
             .ToList();
 
@@ -914,13 +902,7 @@ public static class ErDiagramDynamicTools
         if (!string.IsNullOrWhiteSpace(constraintName))
         {
             var byName = matches
-                .Where(r =>
-                    string.Equals(
-                        r.ConstraintName,
-                        constraintName,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
+                .Where(r => SchemaNames.AreSame(r.ConstraintName, constraintName))
                 .ToList();
 
             if (byName.Count == 0)
@@ -1037,9 +1019,20 @@ public static class ErDiagramDynamicTools
 
         var columnIds = columns!.Select(column => column.Id).ToList();
         var name = GetString(args, "name");
-        var normalizedName = string.IsNullOrWhiteSpace(name) ? string.Empty : name!;
+        var normalizedName = string.IsNullOrWhiteSpace(name)
+            ? string.Empty
+            : SchemaNames.ToStoredForm(name);
         var columnText = string.Join(", ", columns!.Select(column => column.Name));
         var existing = FindUniqueConstraintByColumnSet(entity, columnIds);
+
+        // 外部キーの名前（add_relationship）と同じ規則で、図の中の既存の制約名との衝突を断る
+        if (
+            normalizedName.Length > 0
+            && ConstraintNames.IsTaken(vm.ToDiagramModel(), normalizedName, existing?.Id)
+        )
+        {
+            return (string.Format(Strings.Tool_UniqueConstraintNameTaken, normalizedName), false);
+        }
 
         if (existing is not null)
         {

@@ -31,7 +31,7 @@ public static partial class MermaidImporter
         }
 
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
+        var entities = new Dictionary<string, Entity>(SchemaNames.Comparer);
         var relationships = new List<Relationship>();
         // リレーション行のラベル（relationships と同じ添字）。制約名にするかは全行を読んでから決める
         var labels = new List<string?>();
@@ -75,6 +75,22 @@ public static partial class MermaidImporter
                     }
 
                     var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
+
+                    if (
+                        currentEntity.Columns.Any(existing =>
+                            SchemaNames.AreSame(existing.Name, column.Name)
+                        )
+                    )
+                    {
+                        throw new InvalidDataException(
+                            string.Format(
+                                Strings.Mermaid_DuplicateColumn,
+                                currentEntity.TableName,
+                                column.Name
+                            )
+                        );
+                    }
+
                     currentEntity.Columns.Add(column);
 
                     // UK 標識はその 1 列だけの一意制約を意味する（Mermaid に複合制約の構文が無いため）

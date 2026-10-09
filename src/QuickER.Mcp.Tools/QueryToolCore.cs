@@ -79,6 +79,8 @@ public static class QueryToolCore
             return new QueryToolOutcome { Status = QueryToolStatus.MissingArgument };
         }
 
+        // クエリ名は保存する形（前後の空白を除いた形）で扱う（上書きの照合・応答・保存が同じ名前になる）
+        queryName = SchemaNames.ToStoredForm(queryName);
         var entity = FindEntity(diagram, tableName);
 
         if (entity is null)
@@ -117,7 +119,8 @@ public static class QueryToolCore
         }
 
         var description = GetString(args, "description") ?? string.Empty;
-        var scalarType = GetString(args, "scalar_type");
+        // 型トークンの前後の空白は除いて扱う（GUI のクエリ定義ダイアログと同じ）
+        var scalarType = GetString(args, "scalar_type")?.Trim();
         var condition = GetString(args, "condition");
         var resultTypeName = GetString(args, "result_type_name");
         var paging = GetBool(args, "paging") ?? false;
@@ -254,10 +257,7 @@ public static class QueryToolCore
         }
 
         // 中身のある SQL が 1 方言も無ければ、生成は全方言で手動実装（partial）になる
-        if (
-            implementation == QueryImplementationKind.Sql
-            && sql.Values.All(string.IsNullOrWhiteSpace)
-        )
+        if (implementation == QueryImplementationKind.Sql && sql.Count == 0)
         {
             warnings.Add(
                 new QueryToolDiagnostic(QueryToolDiagnosticCode.SqlImplementationWithoutSql)
@@ -266,8 +266,7 @@ public static class QueryToolCore
 
         // ---- upsert の相手（既存は Id 温存で丸ごと置換・なければ追加） ----
         var existing = diagram.Queries.FirstOrDefault(query =>
-            query.EntityId == entity.Id
-            && string.Equals(query.Name, queryName, StringComparison.OrdinalIgnoreCase)
+            query.EntityId == entity.Id && SchemaNames.AreSame(query.Name, queryName)
         );
 
         var definition = new QueryDefinition
@@ -418,7 +417,8 @@ public static class QueryToolCore
                 {
                     Name = name,
                     // 列参照は列由来で型が決まるため型トークンは保存しない（モデルの規約に合わせる）
-                    Type = hasType ? type : null,
+                    // 型トークンの前後の空白は除いて保存する（GUI のクエリ定義ダイアログと同じ）
+                    Type = hasType ? type!.Trim() : null,
                     IsList = isList,
                     SourceColumnId = sourceColumnId,
                 }
@@ -568,7 +568,8 @@ public static class QueryToolCore
                 new ProjectionField
                 {
                     Name = name,
-                    Type = hasType ? type : null,
+                    // 型トークンの前後の空白は除いて保存する（GUI のクエリ定義ダイアログと同じ）
+                    Type = hasType ? type!.Trim() : null,
                     SourceColumnId = sourceColumnId,
                     // 省略時は null（＝自動: 列参照は列の NULL 許容に従い、自由フィールドは常に NULL 許容）
                     IsNullable = GetBool(item, "is_nullable"),
@@ -620,7 +621,12 @@ public static class QueryToolCore
                 continue;
             }
 
-            sql[canonical] = property.Value.GetString()!;
+            // 空・空白だけの SQL は「その方言の SQL は無い」と同じ扱いで保存しない（GUI のクエリ定義ダイアログと同じ。
+            // 保存すると生成器が空の SQL を実行する実装を作り、手動実装（partial）にならない）
+            if (!string.IsNullOrWhiteSpace(property.Value.GetString()))
+            {
+                sql[canonical] = property.Value.GetString()!;
+            }
         }
 
         return sql;
@@ -736,6 +742,7 @@ public static class QueryToolCore
             return new QueryToolOutcome { Status = QueryToolStatus.MissingArgument };
         }
 
+        queryName = SchemaNames.ToStoredForm(queryName);
         var entity = FindEntity(diagram, tableName);
 
         if (entity is null)
@@ -749,8 +756,7 @@ public static class QueryToolCore
         }
 
         var query = diagram.Queries.FirstOrDefault(candidate =>
-            candidate.EntityId == entity.Id
-            && string.Equals(candidate.Name, queryName, StringComparison.OrdinalIgnoreCase)
+            candidate.EntityId == entity.Id && SchemaNames.AreSame(candidate.Name, queryName)
         );
 
         if (query is null)

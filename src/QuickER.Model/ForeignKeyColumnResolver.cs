@@ -78,10 +78,7 @@ public static class ForeignKeyColumnResolver
         var ranks = new (Func<CandidateColumn, bool> Matches, bool AllowPrimaryKey)[]
         {
             (
-                column =>
-                    expectedNames.Any(name =>
-                        string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase)
-                    ),
+                column => expectedNames.Any(name => SchemaNames.AreSame(column.Name, name)),
                 !isSelfReference
             ),
             (column => IsSameName(column, sourceKeyColumnName), false),
@@ -306,14 +303,12 @@ public static class ForeignKeyColumnResolver
             .First();
     }
 
-    /// <summary>列名がテーブル自身の代理キーを表す単独の <c>id</c> か（大文字小文字は区別しない）</summary>
-    private static bool IsBareId(string columnName) =>
-        string.Equals(columnName, "id", StringComparison.OrdinalIgnoreCase);
+    /// <summary>列名がテーブル自身の代理キーを表す単独の <c>id</c> か（<see cref="SchemaNames.AreSame"/> の規則）</summary>
+    private static bool IsBareId(string columnName) => SchemaNames.AreSame(columnName, "id");
 
-    /// <summary>候補列が参照元キー列と同名か（大文字小文字は区別しない）</summary>
+    /// <summary>候補列が参照元キー列と同名か（<see cref="SchemaNames.AreSame"/> の規則）</summary>
     private static bool IsSameName(CandidateColumn column, string? sourceKeyColumnName) =>
-        sourceKeyColumnName is not null
-        && string.Equals(column.Name, sourceKeyColumnName, StringComparison.OrdinalIgnoreCase);
+        sourceKeyColumnName is not null && SchemaNames.AreSame(column.Name, sourceKeyColumnName);
 
     /// <summary>
     /// 2 つのデータ型表記が同じ型宣言を表すかを判定する（前後の空白と大文字小文字の差を無視。

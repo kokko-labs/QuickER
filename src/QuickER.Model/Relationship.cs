@@ -66,8 +66,15 @@ public class Relationship
     /// </remarks>
     public List<RelationshipColumnPair> ColumnPairs { get; set; } = [];
 
+    private string? _constraintName;
+
     /// <summary>DB から取り込んだ外部キー制約名（手動作成のリレーションでは <c>null</c>）</summary>
-    public string? ConstraintName { get; set; }
+    /// <remarks>代入した名前の前後の空白は除く（<see cref="Entity.TableName"/> と同じ規則）</remarks>
+    public string? ConstraintName
+    {
+        get => _constraintName;
+        set => _constraintName = value?.Trim();
+    }
 
     /// <summary>親行削除時の参照アクション</summary>
     public ForeignKeyReferentialAction OnDelete { get; set; } =

@@ -156,7 +156,8 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
 - A **foreign key that points outside the imported scope** is skipped (on SQLite this covers a key whose parent table does not exist)
 - A **disabled constraint** (`DISABLE` on Oracle, a foreign key turned off with `NOCHECK CONSTRAINT` on SQL Server) is not imported
 - A table whose **columns could not be read at all** is imported without columns
-- One of two tables whose **names differ only in letter case** is skipped, because the import cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, SQL Server does in a database with a case-sensitive collation, and SQLite, which folds only ASCII letters, does for names such as `Äpfel` and `äpfel`)
+- One of two tables whose **names differ only in letter case or surrounding spaces** is skipped, because the diagram cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, SQL Server does in a database with a case-sensitive collation, and SQLite, which folds only ASCII letters, does for names such as `Äpfel` and `äpfel`)
+- Likewise, one of two **columns of a table whose names differ only in letter case or surrounding spaces** is skipped (the later one in declaration order), and the key flags, descriptions and foreign keys of the skipped column do not attach to the one that is kept
 - A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
   The diagram does not model expressions, so generated DDL creates an ordinary column (with a comment asking for the expression to be added by hand).
   Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))

@@ -76,11 +76,11 @@ public static class QueryConditionParser
             return result;
         }
 
-        // 列参照の解決（大文字小文字は区別せず、モデル上の正準名へ寄せる）
+        // 列参照の解決（前後の空白を除き大文字小文字は区別せず、モデル上の正準名へ寄せる）
         foreach (var column in result.ColumnReferences)
         {
             var resolved = entity.Columns.FirstOrDefault(c =>
-                string.Equals(c.Name, column.Text, StringComparison.OrdinalIgnoreCase)
+                SchemaNames.AreSame(c.Name, column.Text)
             );
 
             if (resolved is null)
@@ -108,7 +108,7 @@ public static class QueryConditionParser
         foreach (var parameter in result.ParameterReferences)
         {
             var resolved = parameters.FirstOrDefault(p =>
-                string.Equals(p.Name, parameter.Text, StringComparison.OrdinalIgnoreCase)
+                SchemaNames.AreSame(p.Name, parameter.Text)
             );
 
             if (resolved is null)
@@ -211,9 +211,7 @@ public static class QueryConditionParser
         List<ConditionDiagnostic> diagnostics
     )
     {
-        var definition = parameters.FirstOrDefault(p =>
-            string.Equals(p.Name, operand.Text, StringComparison.OrdinalIgnoreCase)
-        );
+        var definition = parameters.FirstOrDefault(p => SchemaNames.AreSame(p.Name, operand.Text));
 
         if (definition is null)
         {

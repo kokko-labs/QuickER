@@ -290,7 +290,7 @@ WHERE "
         CancellationToken ct
     )
     {
-        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(SchemaTableEntry.KeyComparer);
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -352,6 +352,12 @@ WHERE "
             }
 
             var colName = reader.GetString(1);
+
+            // 同じテーブルに同じ名前（SchemaNames の規則）の列があれば、後着は取り込まずに告げる
+            if (!entry.TryBeginColumn(colName, warnings))
+            {
+                continue;
+            }
             var formatType = reader.GetString(2);
             var domainName = reader.IsDBNull(3) ? null : reader.GetString(3);
             var notNull = reader.GetBoolean(4);
@@ -365,8 +371,7 @@ WHERE "
                 IsComputed = isGenerated,
             };
 
-            entry.Entity.Columns.Add(col);
-            entry.ColumnsByName[colName] = col;
+            entry.AddColumn(col, colName);
 
             // 生成列は式が意味モデルに載らない＝図から DDL を生成すると普通の列になる
             if (isGenerated)
@@ -418,7 +423,7 @@ WHERE "
                 continue;
             }
 
-            if (entry.ColumnsByName.TryGetValue(reader.GetString(1), out var col))
+            if (entry.TryGetColumnExact(reader.GetString(1), out var col))
             {
                 col.IsPrimaryKey = true;
                 col.IsNullable = false;
@@ -456,7 +461,7 @@ WHERE "
             {
                 var colName = reader.GetString(1);
 
-                if (entry.ColumnsByName.TryGetValue(colName, out var col))
+                if (entry.TryGetColumnExact(colName, out var col))
                 {
                     col.Description = reader.GetString(2);
                 }

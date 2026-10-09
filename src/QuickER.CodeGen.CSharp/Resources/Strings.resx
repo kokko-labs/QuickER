@@ -88,6 +88,12 @@
   <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
     <value>Tables {1} all map to the same entity class name '{0}'. Entity classes are partial, so they would merge into a single class and fail to compile. Rename the tables so that the generated class names differ (table names are singularized, so 'customer' and 'customers' both become 'CustomerEntity').</value>
   </data>
+  <data name="CodeGen_Error_DuplicateTableName" xml:space="preserve">
+    <value>Table name '{0}' is used more than once ({1}). Table names are compared ignoring case and surrounding spaces, so the same table cannot appear twice in a diagram. Rename or remove one of them.</value>
+  </data>
+  <data name="CodeGen_Error_DuplicateColumnName" xml:space="preserve">
+    <value>Column name '{1}' is used more than once in table '{0}' ({2}). Column names are compared ignoring case and surrounding spaces. Rename or remove one of them.</value>
+  </data>
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>Columns {2} of table '{0}' all map to the same property name '{1}'. The entity and EditModel classes would declare duplicate members and fail to compile. Rename the columns so that the generated property names differ (column names are converted to Pascal case, so 'user-id', 'user_id', and 'USER_ID' all become 'UserId').</value>
   </data>

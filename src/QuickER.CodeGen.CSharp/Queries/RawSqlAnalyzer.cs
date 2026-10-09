@@ -90,7 +90,10 @@ public static class RawSqlAnalyzer
         // 続く形は宣言リストとして扱わない。文の終端は ; でだけ確定できるため、; の無い SQL では
         // 宣言リストの判定が後続の文まで延び、まれに未宣言の報告が漏れる（緩い側＝従来どおり
         // 実行時に失敗する）ことは許容する
-        var locallyDeclared = new HashSet<string>(StringComparer.Ordinal);
+        //
+        // ローカル変数の名前は大文字小文字を区別しない（SQL Server の既定の照合順序・MySQL のユーザー変数と同じ）。
+        // 実行時のパラメータ束縛は関与しないので、パラメータ（Ordinal）と違って大小の違いで偽の「未宣言」を出さない
+        var locallyDeclared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var inDeclareList = false;
         var expectDeclaredName = false;
         var parenDepth = 0;

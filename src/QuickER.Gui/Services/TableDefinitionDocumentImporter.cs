@@ -139,7 +139,7 @@ public static partial class TableDefinitionDocumentImporter
     /// <summary>テーブル一覧シートからテーブル名・説明・備考を取得する</summary>
     private static Dictionary<string, TableSummaryRow> ReadSummarySheet(IXLWorksheet worksheet)
     {
-        var summaries = new Dictionary<string, TableSummaryRow>(StringComparer.OrdinalIgnoreCase);
+        var summaries = new Dictionary<string, TableSummaryRow>(SchemaNames.Comparer);
 
         for (var row = TableDefinitionDocumentLayout.SummaryDataStartRow; ; row++)
         {
@@ -194,7 +194,7 @@ public static partial class TableDefinitionDocumentImporter
         IReadOnlySet<IXLWorksheet> roleSheets
     )
     {
-        var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
+        var entities = new Dictionary<string, Entity>(SchemaNames.Comparer);
         // 役割シート（一覧 2 枚）以外を詳細シートとみなす（参照比較）
         var detailSheets = workbook.Worksheets.Where(sheet => !roleSheets.Contains(sheet)).ToList();
 
@@ -298,6 +298,14 @@ public static partial class TableDefinitionDocumentImporter
                 IsPrimaryKey = keyText.Contains("PK", StringComparison.OrdinalIgnoreCase),
                 IsForeignKey = keyText.Contains("FK", StringComparison.OrdinalIgnoreCase),
             };
+
+            if (entity.Columns.Any(existing => SchemaNames.AreSame(existing.Name, column.Name)))
+            {
+                throw new InvalidDataException(
+                    string.Format(Strings.TableDoc_DuplicateColumn, entity.TableName, column.Name)
+                );
+            }
+
             entity.Columns.Add(column);
 
             foreach (var number in ParseUniqueConstraintNumbers(keyText))
@@ -461,18 +469,10 @@ public static partial class TableDefinitionDocumentImporter
                 for (var i = 0; i < childColumnNames.Count; i++)
                 {
                     var childColumn = child.Columns.FirstOrDefault(column =>
-                        string.Equals(
-                            column.Name,
-                            childColumnNames[i],
-                            StringComparison.OrdinalIgnoreCase
-                        )
+                        SchemaNames.AreSame(column.Name, childColumnNames[i])
                     );
                     var parentColumn = parent.Columns.FirstOrDefault(column =>
-                        string.Equals(
-                            column.Name,
-                            parentColumnNames[i],
-                            StringComparison.OrdinalIgnoreCase
-                        )
+                        SchemaNames.AreSame(column.Name, parentColumnNames[i])
                     );
 
                     if (childColumn is null)

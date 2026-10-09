@@ -318,6 +318,12 @@
   <data name="Status_Ready" xml:space="preserve">
     <value>準備完了</value>
   </data>
+  <data name="Status_TableNameRejected" xml:space="preserve">
+    <value>テーブル '{0}' は既にあります（大文字小文字と前後の空白を区別せずに比較します）。テーブル名は変更しませんでした。</value>
+  </data>
+  <data name="Status_ColumnNameRejected" xml:space="preserve">
+    <value>テーブル '{0}' には既に列 '{1}' があります（大文字小文字と前後の空白を区別せずに比較します）。列名は変更しませんでした。</value>
+  </data>
   <data name="Status_EntitiesLabel" xml:space="preserve">
     <value>エンティティ:</value>
   </data>
@@ -862,6 +868,9 @@
   <data name="Dbml_DuplicateEntity" xml:space="preserve">
     <value>エンティティ '{0}' が重複しています。</value>
   </data>
+  <data name="Dbml_DuplicateColumn" xml:space="preserve">
+    <value>テーブル '{0}' のカラム '{1}' が重複しています（カラム名は大文字小文字と前後の空白を区別せずに比較します）。</value>
+  </data>
   <data name="Dbml_MissingClosingBrace" xml:space="preserve">
     <value>エンティティ '{0}' の閉じ括弧 '}}' がありません。</value>
   </data>
@@ -919,6 +928,9 @@
   <data name="Mermaid_DuplicateEntity" xml:space="preserve">
     <value>エンティティ '{0}' が重複しています。</value>
   </data>
+  <data name="Mermaid_DuplicateColumn" xml:space="preserve">
+    <value>テーブル '{0}' のカラム '{1}' が重複しています（カラム名は大文字小文字と前後の空白を区別せずに比較します）。</value>
+  </data>
   <data name="Mermaid_MissingClosingBrace" xml:space="preserve">
     <value>エンティティ '{0}' の閉じ括弧 '}}' がありません。</value>
   </data>
@@ -957,6 +969,9 @@
   </data>
   <data name="TableDoc_DetailDuplicateTable" xml:space="preserve">
     <value>詳細シートに重複したテーブル名 '{0}' があります。</value>
+  </data>
+  <data name="TableDoc_DuplicateColumn" xml:space="preserve">
+    <value>テーブル '{0}' の列 '{1}' が重複しています（列名は大文字小文字と前後の空白を区別せずに比較します）。</value>
   </data>
   <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
     <value>テーブル '{0}' の詳細シートが見つかりません。</value>
@@ -1197,6 +1212,9 @@
   </data>
   <data name="Tool_RelationshipConstraintNameTaken" xml:space="preserve">
     <value>制約名 '{0}' はこの図で既に使われています（制約名は外部キー・主キー・一意制約をまたいで、大文字小文字を区別せずに一意である必要があります）。別の名前を指定するか、constraint_name を省いて一意な名前を自動で付けてください。</value>
+  </data>
+  <data name="Tool_UniqueConstraintNameTaken" xml:space="preserve">
+    <value>制約名 '{0}' はこの図で既に使われています（制約名は外部キー・主キー・一意制約をまたいで、大文字小文字を区別せずに一意である必要があります）。別の名前を指定するか、name を省いて一意な名前を自動で付けてください。</value>
   </data>
   <data name="Tool_TableNameTaken" xml:space="preserve">
     <value>テーブル '{0}' は既にあります（テーブル名は大文字小文字を区別せずに一意である必要があります）。</value>

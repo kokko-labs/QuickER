@@ -22,7 +22,7 @@ public sealed class DiagramChangeTracker
         new TrackedProperty<EntityViewModel>(
             nameof(EntityViewModel.TableName),
             x => x.TableName,
-            (x, v) => x.TableName = (string)v!
+            (x, v) => x.ApplyTableName((string)v!)
         ),
         new TrackedProperty<EntityViewModel>(
             nameof(EntityViewModel.Memo),
@@ -87,7 +87,7 @@ public sealed class DiagramChangeTracker
         new TrackedProperty<ColumnViewModel>(
             nameof(ColumnViewModel.Name),
             x => x.Name,
-            (x, v) => x.Name = (string)v!
+            (x, v) => x.ApplyName((string)v!)
         ),
         new TrackedProperty<ColumnViewModel>(
             nameof(ColumnViewModel.DataType),

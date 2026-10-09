@@ -88,6 +88,12 @@
   <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
     <value>テーブル {1} のエンティティクラス名がいずれも '{0}' になります。エンティティクラスは partial のため 1 つのクラスへ統合され、コンパイルできません。生成されるクラス名が異なるようテーブル名を変更してください（テーブル名は単数形化されるため、'customer' と 'customers' はどちらも 'CustomerEntity' になります）。</value>
   </data>
+  <data name="CodeGen_Error_DuplicateTableName" xml:space="preserve">
+    <value>テーブル名 '{0}' が重複しています（{1}）。テーブル名は大文字小文字と前後の空白を区別せずに比較するため、同じテーブルを図に 2 つ置けません。どちらかの名前を変えるか削除してください。</value>
+  </data>
+  <data name="CodeGen_Error_DuplicateColumnName" xml:space="preserve">
+    <value>テーブル '{0}' の列名 '{1}' が重複しています（{2}）。列名は大文字小文字と前後の空白を区別せずに比較します。どちらかの名前を変えるか削除してください。</value>
+  </data>
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>テーブル '{0}' の列 {2} のプロパティ名がいずれも '{1}' になります。エンティティクラスと EditModel クラスに同名メンバーが重複して生成され、コンパイルできません。生成されるプロパティ名が異なるよう列名を変更してください（列名はパスカルケースへ変換されるため、'user-id'・'user_id'・'USER_ID' はいずれも 'UserId' になります）。</value>
   </data>

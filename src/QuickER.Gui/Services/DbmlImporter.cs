@@ -91,7 +91,7 @@ public static partial class DbmlImporter
         }
 
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
+        var entities = new Dictionary<string, Entity>(SchemaNames.Comparer);
         var relationships = new List<Relationship>();
         // Ref 行の列名は、空テーブルへの既定 PK 列補完まで済んだ後にまとめて列ペアへ解決する
         var pendingRelationshipColumns =
@@ -215,6 +215,21 @@ public static partial class DbmlImporter
                         line,
                         currentEntity.TableName
                     );
+                    if (
+                        currentEntity.Columns.Any(existing =>
+                            SchemaNames.AreSame(existing.Name, column.Name)
+                        )
+                    )
+                    {
+                        throw new InvalidDataException(
+                            string.Format(
+                                Strings.Dbml_DuplicateColumn,
+                                currentEntity.TableName,
+                                column.Name
+                            )
+                        );
+                    }
+
                     currentEntity.Columns.Add(column);
                     pendingReferences.AddRange(
                         inlineReferences.Select(endpoints => (endpoints, lineNumber))
@@ -629,7 +644,7 @@ public static partial class DbmlImporter
             foreach (var columnName in columnNames)
             {
                 var column = entity.Columns.FirstOrDefault(c =>
-                    string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+                    SchemaNames.AreSame(c.Name, columnName)
                 );
 
                 if (column is null)
@@ -711,7 +726,7 @@ public static partial class DbmlImporter
             foreach (var columnName in columns)
             {
                 var column = entity.Columns.FirstOrDefault(c =>
-                    string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+                    SchemaNames.AreSame(c.Name, columnName)
                 );
 
                 if (column is null)
@@ -1261,11 +1276,9 @@ public static partial class DbmlImporter
         }
     }
 
-    /// <summary>テーブルの列を名前で検索する（大文字小文字を区別しない）</summary>
+    /// <summary>テーブルの列を名前で検索する（前後の空白を除き大文字小文字を区別しない）</summary>
     private static Column? FindColumn(Entity entity, string columnName) =>
-        entity.Columns.FirstOrDefault(column =>
-            string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)
-        );
+        entity.Columns.FirstOrDefault(column => SchemaNames.AreSame(column.Name, columnName));
 
     /// <summary>
     /// <c>Table 名前 {</c> 形式のテーブル開始行に一致する正規表現を生成する

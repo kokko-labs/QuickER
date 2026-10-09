@@ -15,9 +15,73 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>モデルと同一の識別子</summary>
     public Guid Id { get; }
 
-    /// <summary>テーブル名</summary>
-    [ObservableProperty]
+    /// <summary>テーブル名の実体フィールド</summary>
     private string _tableName;
+
+    /// <summary>テーブル名（前後の空白を除いた形で保持する）</summary>
+    /// <remarks>
+    /// 図の中にすでに同じ名前（<see cref="SchemaNames.AreSame"/> の規則）のテーブルがあるときは、書き換えを受け付けず
+    /// 入力欄へ元の名前を戻し、<see cref="NameChangeRejected"/> で知らせる（変更履歴にも残らない）。
+    /// 検査の対象は <see cref="NameScope"/> が設定されているとき（図に載っているとき）だけ。
+    /// 元に戻す・やり直すは <see cref="ApplyTableName"/> を使い、検査を通さない（履歴の往復は検査の対象外）
+    /// </remarks>
+    public string TableName
+    {
+        get => _tableName;
+        set
+        {
+            var stored = SchemaNames.ToStoredForm(value);
+
+            if (
+                NameScope?.FirstOrDefault(other =>
+                    !ReferenceEquals(other, this) && SchemaNames.AreSame(other.TableName, stored)
+                ) is
+                { } clash
+            )
+            {
+                NameChangeRejected?.Invoke(
+                    this,
+                    new NameChangeRejectedEventArgs(stored, clash.TableName, null)
+                );
+                OnPropertyChanged();
+
+                return;
+            }
+
+            ApplyTableName(
+                stored,
+                notifyAlways: !string.Equals(stored, value, StringComparison.Ordinal)
+            );
+        }
+    }
+
+    /// <summary>テーブル名を重複の検査なしで書き換える（元に戻す・やり直すの適用用）</summary>
+    /// <param name="name">前後の空白を除いたテーブル名</param>
+    /// <param name="notifyAlways">値が変わらなくても入力欄へ通知する（入力された空白を取り除いた形へ戻すため）</param>
+    internal void ApplyTableName(string name, bool notifyAlways = false)
+    {
+        if (SetProperty(ref _tableName, name, nameof(TableName)))
+        {
+            NotifyUniqueConstraintNames();
+        }
+        else if (notifyAlways)
+        {
+            OnPropertyChanged(nameof(TableName));
+        }
+    }
+
+    /// <summary>テーブル名の重複を検査する相手（図に載っているエンティティの一覧。載っていなければ <c>null</c>＝検査しない）</summary>
+    internal IReadOnlyCollection<EntityViewModel>? NameScope { get; set; }
+
+    /// <summary>テーブル名・列名の書き換えを、重複のため受け付けなかったときに発火する（所有者がステータスバーで利用者へ知らせる）</summary>
+    internal event EventHandler<NameChangeRejectedEventArgs>? NameChangeRejected;
+
+    /// <summary>列の名前の書き換えが拒否されたことを、このテーブル名を添えて転送する</summary>
+    private void OnColumnNameChangeRejected(object? sender, NameChangeRejectedEventArgs e) =>
+        NameChangeRejected?.Invoke(
+            this,
+            new NameChangeRejectedEventArgs(e.RequestedName, e.ExistingName, TableName)
+        );
 
     /// <summary>キャンバス上の X 座標 (px)（ドラッグで更新する）</summary>
     [ObservableProperty]
@@ -299,6 +363,8 @@ public partial class EntityViewModel : ObservableObject
         foreach (var column in Columns)
         {
             column.PropertyChanged += OnColumnPropertyChanged;
+            column.NameScope = Columns;
+            column.NameChangeRejected += OnColumnNameChangeRejected;
         }
 
         // 主キーの並び替え行は実効順の解決でカラム一覧を参照するため、カラムの構築後に組み立てる
@@ -335,9 +401,6 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>説明変更時に表示高さキャッシュを無効化する</summary>
     partial void OnDescriptionChanged(string value) => InvalidateDisplayHeight();
 
-    /// <summary>テーブル名の変更を一意制約の合成名プレビューへ反映する</summary>
-    partial void OnTableNameChanged(string value) => NotifyUniqueConstraintNames();
-
     /// <summary>カラムの増減に追従し、購読の着脱と表示高さキャッシュの無効化を行う</summary>
     private void OnColumnsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -346,6 +409,8 @@ public partial class EntityViewModel : ObservableObject
             foreach (ColumnViewModel column in e.OldItems)
             {
                 column.PropertyChanged -= OnColumnPropertyChanged;
+                column.NameChangeRejected -= OnColumnNameChangeRejected;
+                column.NameScope = null;
             }
         }
 
@@ -354,6 +419,8 @@ public partial class EntityViewModel : ObservableObject
             foreach (ColumnViewModel column in e.NewItems)
             {
                 column.PropertyChanged += OnColumnPropertyChanged;
+                column.NameScope = Columns;
+                column.NameChangeRejected += OnColumnNameChangeRejected;
             }
         }
 

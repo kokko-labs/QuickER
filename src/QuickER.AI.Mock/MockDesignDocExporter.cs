@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using QuickER.AI.Mock.Resources;
+using QuickER.Model;
 
 namespace QuickER.AI.Mock;
 
@@ -321,7 +322,7 @@ public static class MockDesignDocExporter
 
     /// <summary>
     /// 画面の指定エンティティ列に対する正規化済み操作文字列を返す（該当宣言が無ければ空文字）。
-    /// 照合は列の同定と同じく大文字小文字無視（<see cref="AppendCrudTable"/> 参照）。
+    /// 照合は列の同定と同じく <see cref="SchemaNames"/> の規則（<see cref="AppendCrudTable"/> 参照）。
     /// </summary>
     private static string FindEntityOperations(MockScreen screen, string entityName)
     {
@@ -332,10 +333,7 @@ public static class MockDesignDocExporter
 
         foreach (var entity in screen.Entities)
         {
-            if (
-                entity is not null
-                && string.Equals(entity.Name, entityName, StringComparison.OrdinalIgnoreCase)
-            )
+            if (entity is not null && SchemaNames.AreSame(entity.Name, entityName))
             {
                 return entity.Operations ?? string.Empty;
             }

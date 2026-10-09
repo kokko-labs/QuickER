@@ -435,16 +435,16 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
         return files.Count == 0 ? "(none)" : string.Join(", ", files);
     }
 
-    /// <summary>会話開始時の ER 図から、宣言照合用のエンティティ名集合（大文字小文字無視）を取り込む</summary>
+    /// <summary>会話開始時の ER 図から、宣言照合用のエンティティ名集合（<see cref="SchemaNames"/> の規則）を取り込む</summary>
     private void CaptureSchemaEntities(ErDiagram diagram)
     {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(SchemaNames.Comparer);
 
         foreach (var entity in diagram.Entities)
         {
             if (!string.IsNullOrWhiteSpace(entity.TableName))
             {
-                names.Add(entity.TableName.Trim());
+                names.Add(entity.TableName);
             }
         }
 

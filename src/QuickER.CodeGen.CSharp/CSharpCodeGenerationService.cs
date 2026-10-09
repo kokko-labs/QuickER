@@ -799,6 +799,7 @@ public sealed partial class CSharpCodeGenerationService
             }
         }
 
+        ValidateSchemaNameDuplicates(diagram, diagnostics);
         ValidateEntityClassNameUniqueness(diagram, diagnostics);
         ValidateColumnPropertyNameUniqueness(diagram, diagnostics);
         ValidateNameControlCharacters(diagram, diagnostics);
@@ -1124,6 +1125,61 @@ public sealed partial class CSharpCodeGenerationService
                             Strings.CodeGen_Error_PrimaryKeyComputedColumn,
                             entity.TableName,
                             column.Name
+                        )
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// テーブル名・同じテーブルの列名が <see cref="SchemaNames"/> の規則（前後の空白を除き大文字小文字を区別しない）で
+    /// 重複していないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// ツール・取込・プロパティパネルは重複を入口で断るが、手で編集した図ファイルや古い版の図は重複を持ち得る。
+    /// 生成する C# の識別子が衝突するかどうか（<see cref="ValidateEntityClassNameUniqueness"/> など）とは別に、
+    /// 図が持ってはいけない状態として名指しで止める（<c>Äpfel</c> と <c>äpfel</c> のように C# では別の名前になる組も含む）。
+    /// </remarks>
+    private static void ValidateSchemaNameDuplicates(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        foreach (
+            var group in diagram
+                .Entities.Where(entity => !string.IsNullOrWhiteSpace(entity.TableName))
+                .GroupBy(entity => entity.TableName, SchemaNames.Comparer)
+                .Where(group => group.Count() > 1)
+        )
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_DuplicateTableName,
+                        SchemaNames.ToStoredForm(group.First().TableName),
+                        string.Join(", ", group.Select(entity => $"'{entity.TableName}'"))
+                    )
+                )
+            );
+        }
+
+        foreach (var entity in diagram.Entities)
+        {
+            foreach (
+                var group in entity
+                    .Columns.Where(column => !string.IsNullOrWhiteSpace(column.Name))
+                    .GroupBy(column => column.Name, SchemaNames.Comparer)
+                    .Where(group => group.Count() > 1)
+            )
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_DuplicateColumnName,
+                            entity.TableName,
+                            SchemaNames.ToStoredForm(group.First().Name),
+                            string.Join(", ", group.Select(column => $"'{column.Name}'"))
                         )
                     )
                 );

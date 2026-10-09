@@ -108,11 +108,11 @@ public sealed class CSharpReverseParser
         // 先にエンティティ・列を復元し、テーブル名 → (列名 → 列) の索引を作る（リレーション解決に使う）
         var entities = new List<Entity>();
         var columnsByTable = new Dictionary<string, Dictionary<string, Column>>(
-            StringComparer.Ordinal
+            SchemaNames.Comparer
         );
-        var entityByTable = new Dictionary<string, Entity>(StringComparer.Ordinal);
+        var entityByTable = new Dictionary<string, Entity>(SchemaNames.Comparer);
         var navigations = new List<NavigationInfo>();
-        var tablesWithPrimaryKeyOrder = new HashSet<string>(StringComparer.Ordinal);
+        var tablesWithPrimaryKeyOrder = new HashSet<string>(SchemaNames.Comparer);
 
         foreach (var classDecl in targetClasses)
         {
@@ -134,7 +134,7 @@ public sealed class CSharpReverseParser
                     ) ?? string.Empty,
             };
 
-            var columnIndex = new Dictionary<string, Column>(StringComparer.Ordinal);
+            var columnIndex = new Dictionary<string, Column>(SchemaNames.Comparer);
             // UNIQUE 制約の構成列は「C# プロパティ名」で書かれているため、逆写像用の索引を作る
             var columnsByPropertyName = new Dictionary<string, Column>(StringComparer.Ordinal);
 

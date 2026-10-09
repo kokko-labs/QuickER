@@ -63,6 +63,7 @@ A `Ref` line or an inline reference may appear before the `Table` block it point
 A line that references a table defined nowhere is still an import error reported with its line number.
 
 Tables with no columns get a default PK column (`ID int`).
+Two tables with the same name, or two columns of one table with the same name, are an import error that names the table (and column); names are compared ignoring letter case and surrounding spaces. The same applies to Mermaid and the Excel definition document.
 DBML carries no dialect information, so the diagram's target DB stays as it was before the import.
 
 ### Mermaid (.mmd / .mermaid)

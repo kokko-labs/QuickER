@@ -21,7 +21,13 @@ public class UniqueConstraint
     /// SQLite の <c>CREATE TABLE</c> 内 <c>UNIQUE</c> 句は <c>sqlite_autoindex_*</c> という自動名しか持たず
     /// 意味を持たないため、取込時は <c>null</c> にする。
     /// </remarks>
-    public string? Name { get; set; }
+    public string? Name
+    {
+        get => _name;
+        set => _name = value?.Trim();
+    }
+
+    private string? _name;
 
     /// <summary>構成列の <see cref="Column.Id"/> 一覧（宣言順）</summary>
     public List<Guid> ColumnIds { get; set; } = new();

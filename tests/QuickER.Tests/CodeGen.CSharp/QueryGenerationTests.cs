@@ -471,6 +471,36 @@ public class QueryGenerationTests
         efClass.Should().NotContain("QueryBySqlAsync").And.NotContain("SpecialLookupAsync");
     }
 
+    /// <summary>空・空白だけの SQL は「その方言の SQL は無い」と同じ扱い（手動実装）で、空の SQL を実行する本体を作らない</summary>
+    [Fact(
+        DisplayName = "生 SQL: 空白だけの SQL は手動実装として扱い、空の SQL を実行する本体を出さない"
+    )]
+    public void Generate_BlankSql_IsTreatedAsManual()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetBlank",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Sql = { ["sqlserver"] = "   \r\n  " },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        // 契約には宣言され、実装の本体（空の SQL を渡す QueryBySqlAsync）は出ない
+        content.Should().Contain("Task<IReadOnlyList<OrderEntity>> GetBlankAsync(");
+        var repository = ExtractClassBody(content, "OrderRepository");
+        repository.Should().Contain("GetByIdAsync", "実装クラスを取り出せていること");
+        repository
+            .Should()
+            .NotContain("GetBlankAsync", "空白だけの SQL を実行する本体を作らない（手動実装）");
+    }
+
     /// <summary>
     /// 自由 SQL の静的検証: 未宣言パラメータのクエリは警告＋該当クエリのみスキップされ、
     /// 有効なクエリは生成される（生成全体は成功する）ことを検証する。

@@ -68,7 +68,7 @@ public sealed class NameIdentitySqliteImportFuzzTests
             names,
             result =>
                 result.Entities.SelectMany(entity => entity.Columns).Select(c => c.Name).ToList(),
-            null
+            SchemaImportWarningKind.ColumnNameCollision
         );
 
     /// <summary>

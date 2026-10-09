@@ -573,11 +573,7 @@ public static partial class DocumentErDiagramToolHost
             // 自分自身の大文字小文字だけを変える改名は許す
             var other = document.Schema.Entities.FirstOrDefault(candidate =>
                 !ReferenceEquals(candidate, entity)
-                && string.Equals(
-                    candidate.TableName,
-                    newTableName,
-                    StringComparison.OrdinalIgnoreCase
-                )
+                && SchemaNames.AreSame(candidate.TableName, newTableName)
             );
 
             if (other is not null)
@@ -1141,16 +1137,8 @@ public static partial class DocumentErDiagramToolHost
 
                 return source is not null
                     && target is not null
-                    && string.Equals(
-                        source.TableName,
-                        sourceTable,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                    && string.Equals(
-                        target.TableName,
-                        targetTable,
-                        StringComparison.OrdinalIgnoreCase
-                    );
+                    && SchemaNames.AreSame(source.TableName, sourceTable)
+                    && SchemaNames.AreSame(target.TableName, targetTable);
             })
             .ToList();
 
@@ -1164,13 +1152,7 @@ public static partial class DocumentErDiagramToolHost
         if (!string.IsNullOrWhiteSpace(constraintName))
         {
             var byName = matches
-                .Where(r =>
-                    string.Equals(
-                        r.ConstraintName,
-                        constraintName,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
+                .Where(r => SchemaNames.AreSame(r.ConstraintName, constraintName))
                 .ToList();
 
             if (byName.Count == 0)
@@ -1290,9 +1272,23 @@ public static partial class DocumentErDiagramToolHost
 
         var columnIds = columns!.Select(column => column.Id).ToList();
         var name = GetString(args, "name");
-        var normalizedName = string.IsNullOrWhiteSpace(name) ? null : name;
+        var normalizedName = string.IsNullOrWhiteSpace(name)
+            ? null
+            : SchemaNames.ToStoredForm(name);
         var existing = FindUniqueConstraintByColumnSet(entity, columnIds);
         var columnText = string.Join(", ", columns!.Select(column => column.Name));
+
+        // 外部キーの名前（add_relationship）と同じ規則で、図の中の既存の制約名との衝突を断る
+        if (
+            normalizedName is not null
+            && ConstraintNames.IsTaken(document.Schema, normalizedName, existing?.Id)
+        )
+        {
+            return (
+                $"The constraint name '{normalizedName}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit name to get a unique one automatically.",
+                false
+            );
+        }
 
         if (existing is not null)
         {

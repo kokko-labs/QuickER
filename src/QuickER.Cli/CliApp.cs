@@ -468,6 +468,12 @@ public static class CliApp
                 subject,
                 detail
             ),
+            SchemaImportWarningKind.ColumnNameCollision => string.Format(
+                Strings.Cli_ImportWarningColumnNameCollision,
+                table,
+                subject,
+                detail
+            ),
             SchemaImportWarningKind.ColumnTypeNotEmittable => string.Format(
                 Strings.Cli_ImportWarningColumnTypeNotEmittable,
                 table,

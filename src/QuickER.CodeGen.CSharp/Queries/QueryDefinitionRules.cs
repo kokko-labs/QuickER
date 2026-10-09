@@ -241,7 +241,7 @@ public static class QueryDefinitionRules
         List<QueryRuleViolation> violations
     )
     {
-        var resultTypeName = query.ResultTypeName?.Trim() ?? string.Empty;
+        var resultTypeName = query.ResultTypeName ?? string.Empty;
 
         if (query.Fields.Count == 0 || resultTypeName.Length == 0)
         {
@@ -259,7 +259,7 @@ public static class QueryDefinitionRules
             .Where(other =>
                 other.Returns == QueryReturnShape.Projection && ToMethodName(other.Name) is not null
             )
-            .Select(other => other.ResultTypeName?.Trim() ?? string.Empty)
+            .Select(other => other.ResultTypeName ?? string.Empty)
             .Where(IsValidIdentifier)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -269,7 +269,9 @@ public static class QueryDefinitionRules
             return;
         }
 
-        var seenFieldNames = new HashSet<string>(StringComparer.Ordinal);
+        // フィールド名の重複は SchemaNames の規則（前後の空白を除き大文字小文字を区別しない）で判定する。
+        // 大小だけ違う名前は C# では別のプロパティだが、生 SQL の列別名の対応づけ・リモートの JSON（大小を区別しない）で衝突する
+        var seenFieldNames = new HashSet<string>(SchemaNames.Comparer);
 
         foreach (var field in query.Fields)
         {
