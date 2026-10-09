@@ -265,6 +265,7 @@ It compares the current state of the database with the contents of the diagram, 
 - Adding and dropping tables
 - Adding, altering (type, nullability), and dropping columns
 - Adding, dropping, and recreating foreign keys (a foreign key whose referential actions, column pairs, or referenced table alone changed)
+- Adding, dropping, and recreating unique constraints (a named unique constraint whose columns alone changed)
 - Changing the primary key (adding or removing it, or changing its column set or column order)
 - Setting, updating, and removing table and column descriptions (SQLite is out of scope)
 - Changes to the column order (syncable on SQLite / MySQL)
@@ -290,6 +291,10 @@ The DDL and the sync script create the foreign key without the clause and add a 
 MySQL (InnoDB) accepts `SET DEFAULT` in `ON DELETE` and `ON UPDATE` but does not apply it: deleting the parent row fails, as with `NO ACTION`.
 It is handled the same way: compared as `NO ACTION`, and left out of the DDL and the sync script with a comment.
 Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
+Recreating a unique constraint works the same way: when a unique constraint keeps its name (or the generated name `UQ_{table}_{columns}` matches the database's name) but its columns change, the drop and the add become one diff item, unselected by default.
+Adding a constraint under the name the database already uses would fail, and re-adding it can fail on duplicate values.
+On PostgreSQL, Oracle, and SQLite, a composite foreign key whose column pairs differ only in their order is not a difference, because these databases do not care about the order (Oracle does not even keep the declared order and returns the pairs in the order of the referenced key).
+SQL Server and MySQL require the referencing columns to follow the order of the referenced key, so there the order is compared.
 
 Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions.
 Adding a column in the middle is therefore not a column-order difference by itself: the new column goes to the end of the table, and the next sync shows the order difference.
@@ -298,11 +303,22 @@ On SQLite and MySQL it can be synced as a selectable diff item (unselected by de
 MySQL's `MODIFY` re-specifies the column from the live catalog, so moving a column keeps its attributes and its comment (see [what MySQL's `MODIFY COLUMN` re-specifies](#what-mysqls-modify-column-re-specifies)).
 On the other three dialects it is shown for information only and is not synced.
 
+A computed column's nullability is never compared, because the database derives it from the expression and the diagram does not hold the expression.
+A computed column's type change can be selected only on PostgreSQL, where `ALTER COLUMN ... TYPE` keeps the expression, and selecting it never changes the column's nullability.
+On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server and MySQL reject the change, and a SQLite rebuild would drop the expression).
+On SQLite and Oracle, adding a unique constraint on exactly the primary key's columns is also shown for information only.
+SQLite does not keep such a constraint, and Oracle rejects it; the primary key already guarantees uniqueness.
+
 ### Safety by design
 
 - **Destructive differences (drops and type changes) are unselected by default**, and executing them shows a confirmation stating that destructive changes are included
 - The generated script is ordered by dependency (add tables → add columns → drop FKs → drop old primary keys → alter columns → add new primary keys → drop columns → drop tables → add FKs → descriptions), with a heading comment per section
 - A foreign-key addition whose FK column cannot be resolved is emitted as a skip comment instead of invalid DDL
+- Dropping a table or a column also drops every foreign key that loses its table or column, even when dropping that foreign key is not selected (on SQLite the surviving child table is rebuilt without it).
+  This also lets a parent table and its child be dropped together whatever order they are listed in
+- A selected change that needs a change you did not select (a new table or column, or a primary key change) is left out of the script, and the confirmation names it together with what it needs.
+  A foreign key you add or change needs the primary key change when it refers to the parent's new primary key, and that key is neither the primary key nor a unique constraint without the change (also when the primary key change is left out on MySQL because only its column order changes).
+  QuickER does not select the needed change for you
 - Composite (multi-column) foreign keys are handled as first-class: a relationship holds an ordered list of column pairs, so import, DDL generation, and sync all carry every pair.
   That includes the implicit drop-and-recreate triggered by a primary-key change and SQLite's table rebuilds, and a composite foreign key is never silently narrowed to a single column
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
@@ -323,15 +339,24 @@ On the other three dialects it is shown for information only and is not synced.
 Changing a table's primary key in the diagram (adding or removing it, or changing the set or order of its key columns) is detected as a single per-table diff item, unselected by default.
 The old primary-key constraint is located by querying the database catalog at run time, so imported databases with arbitrary constraint names work.
 The script drops the old key first, applies any selected column alterations, and then adds the new key, so a change that also makes the old key column nullable succeeds in one sync.
+A column that joins the new key becomes `NOT NULL` as part of the primary-key change, even when that column's own change is not selected (its type stays as it is in the database).
 
-Foreign keys that reference the changed primary key are dropped and re-created automatically around the change (on SQL Server and MySQL, the same applies when altering a column that participates in a foreign key).
+Foreign keys that rely on the changed primary key (they refer to the same columns as the old key; on MySQL also to its leading columns) are dropped and re-created automatically around the change, while foreign keys that refer to a unique constraint are left alone (on SQL Server and MySQL, the same drop and re-create applies when altering a column that participates in a foreign key).
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
+The same applies when dropping a unique constraint whose index is the only one supporting a foreign key (MySQL refuses with error 1553 otherwise).
 On SQL Server, altering the type of a primary key column also drops the primary key and adds it back with the same columns (the re-added key is named `PK_{table}`).
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
 Re-adding it would always fail and, on MySQL / Oracle, leave the foreign key missing.
+On MySQL, string types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch, because MySQL accepts them on the two ends of a foreign key; changing the length of one end drops and re-adds the foreign key as usual.
 The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
+In that case no other foreign key is dropped and re-added either, because the column change fails anyway and the re-adding would never run.
 If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.
 On SQL Server and PostgreSQL such a failure rolls the whole script back, while on MySQL / Oracle it can leave the foreign keys dropped (partially applied).
+The same warning appears when a foreign key you add or change refers to columns that are not exactly a primary key or a unique constraint after the sync.
+SQL Server and MySQL also require the referencing columns to follow the order of the referenced key, so a change that only reorders a referenced composite key, or a foreign key change that only reorders its columns against the key, is warned about too.
+On MySQL such a change is not run at all: it would drop the foreign key and then fail to add it back, leaving it dropped.
+The confirmation dialog lists the skipped changes; to apply one, also select the removal of the foreign key so that it is dropped first, or change it by hand.
+This also skips the change when the re-add would in fact succeed: on MySQL 8.0, or on 8.4 with `restrict_fk_on_non_standard_key=OFF`, a non-unique index you created yourself on the referenced columns in the foreign key's order can support it, but QuickER does not import non-unique indexes and cannot tell.
 
 ### Description sync
 
@@ -361,6 +386,12 @@ QuickER therefore takes the definition from two different places, depending on w
   Such diffs are unselected by default.
 - **Changing the primary key** removes `AUTO_INCREMENT` from an old primary key column before dropping the key, because MySQL refuses to drop it otherwise (error 1075).
   `AUTO_INCREMENT` is not added back because the diagram cannot represent it (the comment, default, and other attributes are carried over from the live definition).
+- **Dropping a foreign key** also drops a non-unique index with the same name as the foreign key, unless another foreign key needs it.
+  MySQL creates such an index for a foreign key that has no suitable index and keeps it after the foreign key is dropped, so re-creating a foreign key of the same name on other columns would fail (error 1061).
+  An index you created yourself with the same name as the foreign key is dropped too, because the catalog cannot tell the two apart.
+  A unique index is never dropped this way.
+  When two foreign keys that start with the same column are both dropped, the index they share can be left behind, because the other foreign key still uses it when the first one is dropped.
+  Re-creating a foreign key with that index's name on other columns can then fail with error 1061.
 
 Two things do not come through the rebuild, both because the catalog does not record them the way they were written:
 

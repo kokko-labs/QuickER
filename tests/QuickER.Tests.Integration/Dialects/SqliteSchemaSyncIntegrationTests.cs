@@ -1267,6 +1267,286 @@ public sealed class SqliteSchemaSyncIntegrationTests
         (await QueryForeignKeyCountAsync(db, "fa_child")).Should().Be(1);
     }
 
+    /// <summary>
+    /// 参照される親の表だけを消すとき、外部キーの削除（既定で未選択）を選ばなくても、子の表を作り直して
+    /// 外部キーを外すことを検証する。子に行があれば <c>foreign_key_check</c> で失敗し、行が無ければ
+    /// 存在しない表を指す外部キーが黙って残っていた（取込が範囲外の外部キーとして告げる）。
+    /// </summary>
+    [Theory(
+        DisplayName = "[Integration] SQLite 同期: 親の表だけを消しても、子の表を作り直して外部キーを外す"
+    )]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DropParentTableOnly_RebuildsChildWithoutForeignKey(bool childHasRows)
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"vp_parent\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_vp_parent\" PRIMARY KEY (\"id\"));",
+            "CREATE TABLE \"vp_child\" ("
+                + "\"id\" INTEGER NOT NULL, \"parent_id\" INTEGER NOT NULL, "
+                + "CONSTRAINT \"PK_vp_child\" PRIMARY KEY (\"id\"), "
+                + "FOREIGN KEY (\"parent_id\") REFERENCES \"vp_parent\" (\"id\"));",
+            "INSERT INTO \"vp_parent\" (\"id\") VALUES (1);"
+        );
+
+        if (childHasRows)
+        {
+            await RunStatementsAsync(
+                db,
+                "INSERT INTO \"vp_child\" (\"id\", \"parent_id\") VALUES (1, 1);"
+            );
+        }
+
+        var (result, script, plan) = await RunSyncWithFreshIdsAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                entities.RemoveAll(e => e.TableName == "vp_parent");
+                relationships.Clear();
+            },
+            item => item.Kind == SchemaDiffKind.DropTable
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        plan.Rebuilds.Should().ContainSingle().Which.TableName.Should().Be("vp_child");
+        var live = await ImportAsync(db, provider);
+        live.Warnings.Should().BeEmpty();
+        live.Entities.Select(e => e.TableName).Should().Equal("vp_child");
+        (await QueryForeignKeyCountAsync(db, "vp_child")).Should().Be(0);
+        (await QueryScalarLongAsync(db, "SELECT COUNT(*) FROM \"vp_child\""))
+            .Should()
+            .Be(childHasRows ? 1 : 0);
+    }
+
+    /// <summary>
+    /// 新しい列を主キーにする変更で、その列の追加を選ばずに主キーの変更だけを選ぶと、主キーの変更を外して名指しし
+    /// 表を変えないことを検証する（以前は再構築が無い列を読み飛ばし、部分的な主キーのまま成功していた）。
+    /// 列の追加も選べば、新しい主キーがそのまま付く。
+    /// </summary>
+    [Theory(
+        DisplayName = "[Integration] SQLite 同期: 新しい列を主キーにする変更は、列の追加を選ばなければ外して警告する"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AlterPrimaryKeyOnNewColumn_RequiresAddColumn(bool selectAddColumn)
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"pk_part\" (\"a\" INTEGER NOT NULL, \"b\" INTEGER NOT NULL, "
+                + "CONSTRAINT \"PK_pk_part\" PRIMARY KEY (\"a\"));"
+        );
+
+        var (result, script, plan) = await RunSyncWithFreshIdsAsync(
+            db,
+            provider,
+            (entities, _) =>
+            {
+                var table = entities.Single(e => e.TableName == "pk_part");
+                var c = new Column
+                {
+                    Name = "c",
+                    DataType = "INTEGER",
+                    IsNullable = false,
+                };
+                table.Columns.Add(c);
+                table.Columns.Single(x => x.Name == "a").IsPrimaryKey = false;
+                table.Columns.Single(x => x.Name == "b").IsPrimaryKey = true;
+                c.IsPrimaryKey = true;
+                table.PrimaryKeyColumnIds = [table.Columns.Single(x => x.Name == "b").Id, c.Id];
+            },
+            item =>
+                item.Kind == SchemaDiffKind.AlterPrimaryKey
+                || (selectAddColumn && item.Kind == SchemaDiffKind.AddColumn)
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        var key = (await ImportAsync(db, provider))
+            .Entities.Single()
+            .GetPrimaryKeyColumnsInOrder()
+            .Select(c => c.Name);
+
+        if (selectAddColumn)
+        {
+            plan.Warnings.Should().BeEmpty();
+            key.Should().Equal("b", "c");
+        }
+        else
+        {
+            plan.Warnings.Should()
+                .ContainSingle()
+                .Which.Detail.Should()
+                .Be("PRIMARY KEY (pk_part.c)");
+            key.Should().Equal("a");
+        }
+    }
+
+    /// <summary>
+    /// 選んでいない新しい表を参照する外部キーは、計画から外して名指しすることを検証する（以前は再構築が存在しない表を
+    /// 参照する外部キーを作って成功扱いになり、その表への INSERT / DELETE が no such table で全部失敗した）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 選んでいない新しい表を参照する外部キーは外して警告する"
+    )]
+    public async Task AddForeignKeyToUnselectedNewTable_IsSkippedWithWarning()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"np_child\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_np_child\" PRIMARY KEY (\"id\"));",
+            "INSERT INTO \"np_child\" (\"id\") VALUES (1);"
+        );
+
+        var (result, script, plan) = await RunSyncWithFreshIdsAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                var parent = new Entity
+                {
+                    TableName = "np_parent",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "INTEGER",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                };
+                entities.Add(parent);
+                var child = entities.Single(e => e.TableName == "np_child");
+                var reference = new Column { Name = "parent_id", DataType = "INTEGER" };
+                child.Columns.Add(reference);
+                relationships.Add(
+                    new Relationship
+                    {
+                        SourceEntityId = parent.Id,
+                        TargetEntityId = child.Id,
+                        ColumnPairs = [new(parent.Columns[0].Id, reference.Id)],
+                    }
+                );
+            },
+            item => item.Kind is SchemaDiffKind.AddColumn or SchemaDiffKind.AddForeignKey
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        plan.Warnings.Should()
+            .ContainSingle()
+            .Which.Detail.Should()
+            .Be("FK_np_child_np_parent (np_parent)");
+        var live = await ImportAsync(db, provider);
+        live.Warnings.Should().BeEmpty();
+        live.Entities.Select(e => e.TableName).Should().Equal("np_child");
+        (await QueryForeignKeyCountAsync(db, "np_child")).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 同じ列ペアに外部キーが 2 本あるとき、片方の参照アクションだけを変える同期が、変えた 1 本を作り直し
+    /// もう 1 本をそのまま残すことを検証する（再構築の合成が同じ列ペアの外部キーを 2 本とも外していた）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 同じ列ペアの外部キー 2 本のうち 1 本だけ変えても、もう 1 本は残る"
+    )]
+    public async Task Rebuild_AlterOneOfDuplicatedForeignKeys_KeepsTheOther()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"dp_parent\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_dp_parent\" PRIMARY KEY (\"id\"));",
+            "CREATE TABLE \"dp_child\" ("
+                + "\"id\" INTEGER NOT NULL, \"parent_id\" INTEGER NOT NULL, "
+                + "CONSTRAINT \"PK_dp_child\" PRIMARY KEY (\"id\"), "
+                + "FOREIGN KEY (\"parent_id\") REFERENCES \"dp_parent\" (\"id\"), "
+                + "FOREIGN KEY (\"parent_id\") REFERENCES \"dp_parent\" (\"id\") ON DELETE CASCADE);",
+            "INSERT INTO \"dp_parent\" (\"id\") VALUES (1);",
+            "INSERT INTO \"dp_child\" (\"id\", \"parent_id\") VALUES (1, 1);"
+        );
+
+        var (result, script, _) = await RunSyncWithFreshIdsAsync(
+            db,
+            provider,
+            (_, relationships) =>
+                relationships
+                    .Single(r => r.OnDelete == ForeignKeyReferentialAction.NoAction)
+                    .OnUpdate = ForeignKeyReferentialAction.Cascade,
+            item => item.Kind == SchemaDiffKind.AlterForeignKey
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        var actions = (await ImportAsync(db, provider))
+            .Relationships.Select(r => (r.OnDelete, r.OnUpdate))
+            .ToList();
+        actions
+            .Should()
+            .BeEquivalentTo([
+                (ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.Cascade),
+                (ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.NoAction),
+            ]);
+    }
+
+    /// <summary>
+    /// 主キーと同じ列集合の一意制約を図に持つと、SQLite の差分が選べない案内項目になり、
+    /// 同期しても同じ案内が出るだけで選べる差分が繰り返し出ないことを検証する
+    /// （SQLite はその一意制約の索引を作らず、取り込んでも現れない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 主キーと同じ列集合の一意制約は案内項目になり、同期しても差分が繰り返し出ない"
+    )]
+    public async Task UniqueConstraintOnPrimaryKey_IsGuideOnlyAndDoesNotRepeat()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"uk_item\" (\"id\" INTEGER NOT NULL, \"name\" TEXT, CONSTRAINT \"PK_uk_item\" PRIMARY KEY (\"id\"));"
+        );
+
+        static void AddUniqueOnPrimaryKey(List<Entity> entities, List<Relationship> _)
+        {
+            var item = entities.Single(e => e.TableName == "uk_item");
+            item.UniqueConstraints.Add(
+                new UniqueConstraint { Name = "UQ_uk_item_id", ColumnIds = [item.Columns[0].Id] }
+            );
+        }
+
+        for (var round = 0; round < 2; round++)
+        {
+            var items = new List<SchemaDiffItem>();
+            var (result, script, plan) = await RunSyncWithFreshIdsAsync(
+                db,
+                provider,
+                AddUniqueOnPrimaryKey,
+                item =>
+                {
+                    items.Add(item);
+                    return item.IsSelectable;
+                }
+            );
+
+            items.Should().ContainSingle();
+            items[0].Kind.Should().Be(SchemaDiffKind.AddUniqueConstraint);
+            items[0].IsSelectable.Should().BeFalse();
+            plan.Rebuilds.Should().BeEmpty();
+            result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        }
+
+        (await ImportAsync(db, provider)).Entities.Single().UniqueConstraints.Should().BeEmpty();
+    }
+
     // ---------------- ビュー・既存の外部キー違反と再構築 ----------------
 
     /// <summary>

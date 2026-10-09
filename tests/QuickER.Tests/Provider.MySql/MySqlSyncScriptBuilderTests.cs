@@ -352,6 +352,47 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE `order` DROP FOREIGN KEY `FK_order_customer`;");
     }
 
+    /// <summary>
+    /// DropForeignKey が、外部キーを外した後に MySQL が残した同じ名前の索引を外す文を続けることを検証する
+    /// （残すと、同じ名前の外部キーを別の列へ付け直すときエラー 1061 になる）。名前が分かる場合も、
+    /// 逆引きする場合も同じ。外すのは一意でなく、ほかの外部キーが先頭の列に使っていない索引だけ。
+    /// </summary>
+    [Theory(DisplayName = "DropForeignKey は外部キーを外した後に残る同じ名前の索引を外す")]
+    [InlineData("FK_order_customer", "s.INDEX_NAME = 'FK_order_customer'")]
+    [InlineData(null, "s.INDEX_NAME = @fk")]
+    public void DropForeignKey_DropsLeftoverIndexOfSameName(
+        string? constraintName,
+        string expectedNameMatch
+    )
+    {
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "order",
+                ParentEntity = new Entity { TableName = "customer" },
+                ChildEntity = new Entity { TableName = "order" },
+                ForeignKeyName = constraintName,
+                IsSelected = true,
+            }
+        );
+
+        var dropForeignKey = sql.IndexOf("DROP FOREIGN KEY", System.StringComparison.Ordinal);
+        var lookup = sql.IndexOf("SELECT s.INDEX_NAME INTO @ix", System.StringComparison.Ordinal);
+        dropForeignKey.Should().BeGreaterThanOrEqualTo(0);
+        lookup.Should().BeGreaterThan(dropForeignKey);
+        sql.Should().Contain("SET @ix = NULL;");
+        sql.Should().Contain(expectedNameMatch);
+        sql.Should().Contain("s.TABLE_SCHEMA = DATABASE()");
+        sql.Should().Contain("s.NON_UNIQUE = 1");
+        sql.Should().Contain("k.REFERENCED_TABLE_NAME IS NOT NULL AND k.ORDINAL_POSITION = 1");
+        sql.Should()
+            .Contain(
+                "SET @sql = IF(@ix IS NULL, 'DO 0', CONCAT('ALTER TABLE `order` "
+                    + "DROP INDEX `', REPLACE(@ix, '`', '``'), '`'));"
+            );
+    }
+
     /// <summary>制約名不明時にプリペアド動的 SQL でカタログ逆引き削除を生成することを検証する</summary>
     [Fact(DisplayName = "DropForeignKey は制約名不明時にプリペアド動的 SQL で逆引き削除する")]
     public void DropForeignKey_UsesPreparedStatementWhenNameUnknown()

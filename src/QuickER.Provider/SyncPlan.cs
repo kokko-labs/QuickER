@@ -96,15 +96,54 @@ public enum SyncPlanWarningKind
 
     /// <summary>
     /// 列定義変更で外部キーの両端の列の型が同期後に一致しなくなるため、その外部キーを外し直さない
-    /// （＝列定義変更が依存エラーで失敗する）。
+    /// （＝列定義変更・主キーの解除が依存エラーで失敗する）。
     /// </summary>
     /// <remarks>
     /// 外部キーの両端の列の型変更を拒否する方言（SQL Server・MySQL）では、外部キーを外して列を変え、付け直す。
-    /// ところが両端の型が食い違うと付け直しが必ず失敗し、DDL が暗黙コミットされる方言では外部キーが消えたまま残る。
-    /// そのため外さずに列定義変更の時点で失敗させ（データも定義も変わらない）、両端の列を揃えるよう知らせる。
-    /// 比較は図側の型表記で、差分の型比較と同じ規則（前後空白・大文字小文字を無視）。
+    /// 主キーの変更でも参照する外部キーを外して付け直す。ところが両端の型が食い違うと付け直しが必ず失敗し、DDL が
+    /// 暗黙コミットされる方言では外部キーが消えたまま残る。そのため外さずに列定義変更・主キーの解除の時点で失敗させ
+    /// （データも定義も変わらない）、両端の列を揃えるよう知らせる。食い違う外部キーが 1 本でもあれば、列の変更が必ず
+    /// 失敗するので、ほかの外部キーも外し直さない。
+    /// 比較は <see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/>（差分の型比較と同じ規則に加え、
+    /// MySQL では同じ文字列型の長さだけの違いを許す）。
     /// </remarks>
     ForeignKeyColumnTypeMismatch,
+
+    /// <summary>
+    /// 選んだ項目が、選んでいない変更（表・列の追加、主キーの変更）に依存するため、その項目を計画から外した。
+    /// </summary>
+    /// <remarks>
+    /// 例: 選んでいない表・列の追加を前提にする外部キー・一意制約・主キー・説明の追加、選んでいない主キーの変更で
+    /// 主キーから外れるはずの列を NULL 許容にする列の変更。そのまま実行すると、存在しない表・列を参照して失敗するか、
+    /// 方言によっては黙って何もしない（SQLite の再構築）ので、外して名指しする。依存先を自動では選ばない
+    /// （利用者が選ばなかった変更を入れることになるため）。
+    /// </remarks>
+    SelectedItemRequiresUnselectedItem,
+
+    /// <summary>
+    /// 選んだ外部キーの追加・作り直しの参照先の列が、同期後の主キーにも一意制約にもちょうど一致しない
+    /// （参照する列の並びを問う方言では並びまで）。
+    /// </summary>
+    /// <remarks>
+    /// 主キーの変更に伴う暗黙の付け直し（<see cref="ForeignKeyRebuildMayLoseCandidateKey"/>）と同じ証明を、利用者が選んだ
+    /// 外部キーの追加・作り直し（作り直しは展開後の追加）に掛ける。証明できなくても取り込んでいない一意索引で通る
+    /// 構成があるので、実行は止めずに警告に留める（追加は失敗しやすく、MySQL / Oracle の作り直しは外部キーが外れたまま
+    /// 残り得る）。
+    /// </remarks>
+    ForeignKeyNotOnCandidateKey,
+
+    /// <summary>
+    /// 参照される複合キーと外部キーの列の並びだけが合わなくなる変更を、計画から外した（MySQL）。
+    /// </summary>
+    /// <remarks>
+    /// 参照する列の並びがキーの並びと一致しないと外部キーを作れず
+    /// （<see cref="SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder"/>）、DDL が巻き戻らない
+    /// （<see cref="SyncDialectCapabilities.TransactionalDdl"/> が <c>false</c>）方言では、付け直しが必ず失敗し、外した外部キーが
+    /// 消えたまま残る。対象は、参照される複合主キーの列の並びだけを入れ替える主キーの変更（その表の主キーの変更を外す）と、
+    /// 列の並びだけが参照先のキーと合わなくなる外部キーの作り直し（その作り直しを外す）。列の集合が違うなど、並び以外が
+    /// 原因の「証明できない付け直し」は従来どおり警告して実行する。
+    /// </remarks>
+    ForeignKeyKeyOrderMismatch,
 }
 
 /// <summary>
@@ -115,7 +154,9 @@ public enum SyncPlanWarningKind
 /// 対象テーブル。<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/> では
 /// 外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/>
 /// では一意制約を削除するテーブル（＝外部キーの参照先）、<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/>
-/// では外部キーを保有する子テーブル。
+/// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> では
+/// 計画から外した項目のテーブル、<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
+/// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> では外部キーを保有する子テーブル。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
@@ -123,6 +164,11 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> では外し直さない外部キーの制約名。
 /// <see cref="SyncPlanWarningKind.TableRebuildDropsColumnAttribute"/> では失われる属性の SQL キーワードを
 /// カンマ区切りで並べたもの（<c>AUTOINCREMENT, DEFAULT</c> 等）。SQL の綴りそのものなので言語中立に扱える。
+/// <see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> では「外した項目の対象 (足りないもの)」
+/// （例 <c>FK_orders_customer (customer)</c>・<c>PRIMARY KEY (orders.code)</c>・<c>code (PRIMARY KEY)</c>）。
+/// <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
+/// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> では外部キーの制約名。
+/// 対象は制約名・列名か <c>PRIMARY KEY</c>、足りないものは表名・<c>表.列</c>か <c>PRIMARY KEY</c>（識別子と SQL の綴り）。
 /// </param>
 public sealed record SyncPlanWarning(
     SyncPlanWarningKind Kind,

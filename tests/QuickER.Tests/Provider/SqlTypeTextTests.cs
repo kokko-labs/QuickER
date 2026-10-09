@@ -351,6 +351,37 @@ public class SqlTypeTextTests
         act.Should().Throw<InvalidOperationException>().WithMessage("*orders.memo*");
     }
 
+    /// <summary>
+    /// 型を書き出さない項目（表の削除など、live の定義を運ぶだけの項目）は型の検証に掛けず、取込が持ち帰った
+    /// 安全でない型の表も同期で消せることを検証する（同じ表の追加は従来どおり拒否する＝対照）。
+    /// </summary>
+    [Fact(DisplayName = "同期スクリプト生成は、型を書き出さない表の削除を安全でない型で止めない")]
+    public void SyncScriptBuilders_AllowDroppingTableWithUnsafeDataType()
+    {
+        var entity = BuildDiagram("int'; DROP TABLE users; --").Entities[0];
+
+        SyncPlan Plan(SchemaDiffKind kind) =>
+            new SyncPlanner().BuildPlan(
+                [
+                    new SchemaDiffItem
+                    {
+                        Kind = kind,
+                        TableName = entity.TableName,
+                        Entity = entity,
+                        IsSelected = true,
+                    },
+                ],
+                new SyncDialectCapabilities()
+            );
+
+        new SqlServerSyncScriptBuilder()
+            .Build(Plan(SchemaDiffKind.DropTable))
+            .Should()
+            .Contain("DROP TABLE");
+        var add = () => new SqlServerSyncScriptBuilder().Build(Plan(SchemaDiffKind.AddTable));
+        add.Should().Throw<InvalidOperationException>();
+    }
+
     /// <summary>orders テーブル（int 主キー＋指定型の memo 列）の最小の図を組み立てる</summary>
     private static ErDiagram BuildDiagram(string memoDataType) =>
         new()

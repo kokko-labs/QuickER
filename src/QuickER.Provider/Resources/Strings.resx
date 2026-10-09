@@ -130,6 +130,9 @@
   <data name="Diff_DropUniqueConstraint" xml:space="preserve">
     <value>Drop unique constraint [{0}] ({1})</value>
   </data>
+  <data name="Diff_AlterUniqueConstraint" xml:space="preserve">
+    <value>Change columns of unique constraint {1} on [{0}]: ({2}) → ({3})</value>
+  </data>
   <data name="Diff_ReorderColumns" xml:space="preserve">
     <value>Reorder the columns of table [{0}] to match the diagram</value>
   </data>
@@ -144,6 +147,13 @@
   </data>
   <data name="Diff_AutoPrimaryKeyRebuild" xml:space="preserve">
     <value>Automatically drops and re-adds the primary key to allow the change: ({0})</value>
+  </data>  <data name="Diff_AutoPrimaryKeyNotNull" xml:space="preserve">
+    <value>Automatically makes the column NOT NULL because it becomes part of the primary key: [{0}].[{1}]</value>
+  </data>  <data name="Diff_ComputedColumnTypeNotSynced" xml:space="preserve">
+    <value>Not synchronized: the type of computed column [{0}].[{1}] changes ({2} → {3}), but the diagram has no expression, so this database cannot change it. Change the column together with its expression in the database.</value>
+  </data>
+  <data name="Diff_UniqueConstraintOnPrimaryKeyNotSynced" xml:space="preserve">
+    <value>Not synchronized: unique constraint [{0}] ({1}) has the same columns as the primary key, which this database cannot hold as a separate constraint (the primary key already guarantees uniqueness).</value>
   </data>
   <data name="Diff_AutoForeignKeyDrop" xml:space="preserve">
     <value>Automatically drops the foreign key to allow the change (the table or column it uses is dropped): [{0}]</value>

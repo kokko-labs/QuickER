@@ -273,27 +273,33 @@ public sealed class CompositeForeignKeyTests
     {
         var (live, parent, child, relationship) = BuildCompositeDiagram();
 
-        // 主キーの構成列順を入れ替える（列集合は (a, b) のまま＝候補キーは維持される）
+        // 主キーの構成列順を入れ替える（列集合は (a, b) のまま。並びを問わない方言では候補キーが維持される）
         var targetParent = parent.Clone(preserveId: true);
         targetParent.Columns.Reverse();
 
-        var plan = new SyncPlanner().BuildPlan(
-            [
-                new SchemaDiffItem
+        SyncPlan Plan(bool requiresSameOrder) =>
+            new SyncPlanner().BuildPlan(
+                [
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.AlterPrimaryKey,
+                        TableName = "parent_t",
+                        Entity = targetParent,
+                        IsSelected = true,
+                    },
+                ],
+                new SyncDialectCapabilities
                 {
-                    Kind = SchemaDiffKind.AlterPrimaryKey,
-                    TableName = "parent_t",
-                    Entity = targetParent,
-                    IsSelected = true,
+                    ReferencedKeyRequiresSameColumnOrder = requiresSameOrder,
                 },
-            ],
-            new SyncDialectCapabilities(),
-            new SyncPlanContext
-            {
-                LiveEntities = [parent, child],
-                LiveRelationships = [relationship],
-            }
-        );
+                new SyncPlanContext
+                {
+                    LiveEntities = [parent, child],
+                    LiveRelationships = [relationship],
+                }
+            );
+
+        var plan = Plan(requiresSameOrder: false);
 
         var drop = plan
             .Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
@@ -313,6 +319,11 @@ public sealed class CompositeForeignKeyTests
 
         // 被参照列集合が同期後の主キーとちょうど一致するため候補キー喪失の警告は出ない
         plan.Warnings.Should().BeEmpty();
+
+        // 参照する列の並びを問う方言（SQL Server・MySQL）では、(a, b) を参照する外部キーは (b, a) の主キーへ付け直せない
+        Plan(requiresSameOrder: true)
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
     }
 
     /// <summary>
@@ -331,6 +342,16 @@ public sealed class CompositeForeignKeyTests
                 Name = "c",
                 DataType = "int",
                 IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+
+        // 新しい主キーの列 c は live に在る（無ければ主キーの変更は「選んでいない列の追加」に依存して外れる）
+        parent.Columns.Add(
+            new Column
+            {
+                Name = "c",
+                DataType = "int",
                 IsNullable = false,
             }
         );
@@ -384,6 +405,16 @@ public sealed class CompositeForeignKeyTests
                 Name = "c",
                 DataType = "int",
                 IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+
+        // 新しい主キーの列 c は live に在る（無ければ主キーの変更は「選んでいない列の追加」に依存して外れる）
+        parent.Columns.Add(
+            new Column
+            {
+                Name = "c",
+                DataType = "int",
                 IsNullable = false,
             }
         );

@@ -757,10 +757,13 @@ public class SchemaSyncDialogViewModelTests
             .DiffItems.Should()
             .ContainSingle(i => i.Kind == SchemaDiffKind.AlterPrimaryKey)
             .Which;
-        vm.DiffItems.Should()
-            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn)
-            .Which.ColumnName.Should()
-            .Be("parent_id");
+        // 列の変更は parent_id の型と、新しく主キーに加わる code の NOT NULL 化。NULL 許容は実効の値
+        // （主キーの列は NOT NULL）で比べるので、図が code の NULL 許容の値を直していなくても NOT NULL 化が出る
+        // （GUI が作る図＝主キーの列を NOT NULL にした図と同じ差分）
+        vm.DiffItems.Where(i => i.Kind == SchemaDiffKind.AlterColumn)
+            .Select(i => i.ColumnName)
+            .Should()
+            .BeEquivalentTo(["parent_id", "code"]);
         vm.DiffItems.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn);
 
         // 主キー変更を選ぶと、暗黙の FK 再作成が全構成列のままスクリプトへ載る

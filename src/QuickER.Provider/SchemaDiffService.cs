@@ -13,7 +13,13 @@ namespace QuickER.Provider;
 /// 式から決まる性質で、図がそれを DB へ強制することはできない（意味モデルは式を持たない）。しかも
 /// 「NOT NULL の計算列はミラー側の DB へ書けない」問題の逃げ道が<b>図で NULL 許容にする</b>ことなので、
 /// 比較すると逃げ道を採った瞬間に取込元の DB へ偽の <c>ALTER COLUMN</c>（NOT NULL → NULL）が出る。
-/// 型など他の差は従来どおり検出する。
+/// 図・DB のどちらか一方だけが計算列の場合も同じ。型の差は検出するが、意味モデルは式を持たないので、式を保ったまま型を
+/// 変えられる方言（<see cref="SyncDialectCapabilities.SupportsComputedColumnTypeChange"/>）でだけ選べる項目にし、
+/// ほかの方言では選択できない案内項目にする（項目は NULL 許容を運ばない）。
+/// </para>
+/// <para>
+/// 図の主キーと同じ列集合の一意制約の追加は、それを別の制約として持てない方言
+/// （<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/> が <c>false</c>）では選択できない案内項目にする。
 /// </para>
 /// </remarks>
 public class SchemaDiffService
@@ -217,14 +223,23 @@ public class SchemaDiffService
                 {
                     // 計算列の NULL 許容は図が DB へ強制できる性質ではない（実 DB の NULL 許容は式が決める）。
                     // 比較すると、NOT NULL の計算列を図側で NULL 許容へ逃がした瞬間に取込元の DB へ
-                    // 「NOT NULL → NULL」の偽 AlterColumn が出る。型など他の差は従来どおり見る
-                    var compareNullability = !tcol.IsComputed;
+                    // 「NOT NULL → NULL」の偽 AlterColumn が出る。DB 側だけが計算列の場合も同じ
+                    var computed = tcol.IsComputed || lcol.IsComputed;
+                    var compareNullability = !computed;
+                    // NULL 許容は実効の値で比べる（主キーの列はモデルの値に依らず NOT NULL）
                     var nullabilityChanged =
-                        compareNullability && lcol.IsNullable != tcol.IsNullable;
+                        compareNullability
+                        && IsEffectivelyNullable(lcol) != IsEffectivelyNullable(tcol);
 
                     var typeChanged = !dialect.AreSameType(lcol.DataType, tcol.DataType);
 
-                    if (typeChanged || nullabilityChanged)
+                    if (computed && typeChanged)
+                    {
+                        diff.Items.Add(
+                            BuildComputedColumnTypeChange(name, target, tcol, lcol, dialect)
+                        );
+                    }
+                    else if (typeChanged || nullabilityChanged)
                     {
                         var changeParts = new List<string>();
 
@@ -240,8 +255,8 @@ public class SchemaDiffService
                             changeParts.Add(
                                 string.Format(
                                     Strings.Diff_NullableChange,
-                                    NullableLabel(lcol.IsNullable),
-                                    NullableLabel(tcol.IsNullable)
+                                    NullableLabel(IsEffectivelyNullable(lcol)),
+                                    NullableLabel(IsEffectivelyNullable(tcol))
                                 )
                             );
                         }
@@ -326,7 +341,7 @@ public class SchemaDiffService
             // 一意制約の差分（列集合で照合し、制約名の差だけでは差分にしない）。
             // 図側は制約名が未設定（null＝合成名）なことが多く、SQLite に至っては実名を持たないため、
             // 名前を比較に含めると恒常的な Drop＋Add の誤検出になる。
-            AppendUniqueConstraintDiffs(diff, name, live, target);
+            AppendUniqueConstraintDiffs(diff, name, live, target, dialect);
 
             foreach (var lcol in live.Columns)
             {
@@ -516,6 +531,52 @@ public class SchemaDiffService
         return diff;
     }
 
+    /// <summary>計算列の型の差分の項目を作る（NULL 許容は運ばない・方言が式を保って変えられなければ選択できない案内項目）</summary>
+    /// <remarks>
+    /// 項目の <see cref="SchemaDiffItem.Column"/> は図の列の複製で、NULL 許容だけを DB の値に戻す＝選んでも計画は
+    /// NULL 許容を変えない（以前は図の NULL 許容まで適用し、説明に出ないまま NOT NULL が外れた）。
+    /// <see cref="SyncDialectCapabilities.SupportsComputedColumnTypeChange"/> が <c>false</c> の方言では、
+    /// 式を書けないので実行すると失敗するか式が消える＝選択できない案内項目にする。
+    /// </remarks>
+    private static SchemaDiffItem BuildComputedColumnTypeChange(
+        string tableName,
+        Entity target,
+        Column targetColumn,
+        Column liveColumn,
+        SyncDialectCapabilities dialect
+    )
+    {
+        var column = targetColumn.Clone(preserveId: true);
+        column.IsNullable = liveColumn.IsNullable;
+        var selectable = dialect.SupportsComputedColumnTypeChange;
+
+        return new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = tableName,
+            ColumnName = targetColumn.Name,
+            Entity = target,
+            Column = column,
+            OldColumn = liveColumn,
+            IsSelected = false,
+            IsSelectable = selectable,
+            Description = selectable
+                ? string.Format(Strings.Diff_ColumnChangePrefix, tableName, targetColumn.Name)
+                    + string.Format(
+                        Strings.Diff_TypeChange,
+                        liveColumn.DataType,
+                        targetColumn.DataType
+                    )
+                : string.Format(
+                    Strings.Diff_ComputedColumnTypeNotSynced,
+                    tableName,
+                    targetColumn.Name,
+                    liveColumn.DataType,
+                    targetColumn.DataType
+                ),
+        };
+    }
+
     /// <summary>1 テーブル分の一意制約差分（追加・削除）を <paramref name="diff"/> へ追加する</summary>
     /// <remarks>
     /// <para>
@@ -526,12 +587,24 @@ public class SchemaDiffService
     /// <para>
     /// 構成列が空・解決不能な制約は差分対象から除外する（DDL 生成が黙って出力しないのと同じ扱い）。
     /// </para>
+    /// <para>
+    /// 図の主キーと同じ列集合の追加は、<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/> が
+    /// <c>false</c> の方言では選択できない案内項目にする（SQLite は冗長な UNIQUE の索引を作らず取り込みにも現れない＝
+    /// 差分が永久に消えない。Oracle は ORA-02261 で断る。主キーが一意性を保証するので失うものは無い）。
+    /// </para>
+    /// <para>
+    /// 同じ実効名（追加側は図の名前か合成名、削除側は DB の実名）の追加候補と削除候補は、
+    /// <see cref="SchemaDiffKind.AlterUniqueConstraint"/>（既定で未選択）の 1 項目へ畳む。2 項目のままだと、既定どおり
+    /// 追加だけを選んで実行したときに同じ名前の制約を足そうとして失敗する。DB 側に名前が無い制約（SQLite の自動名）と、
+    /// 選択できない案内項目の追加は組まない。名前の照合は前後の空白を除き大文字小文字を区別しない。
+    /// </para>
     /// </remarks>
     private static void AppendUniqueConstraintDiffs(
         SchemaDiff diff,
         string tableName,
         Entity live,
-        Entity target
+        Entity target,
+        SyncDialectCapabilities dialect
     )
     {
         var liveConstraints = ResolveUniqueConstraints(live);
@@ -549,6 +622,14 @@ public class SchemaDiffService
             .Select(c => c.Signature)
             .ToHashSet(StringComparer.Ordinal);
 
+        // 図の主キーと同じ列集合の一意制約を、別の制約として持てない方言（SQLite・Oracle）がある
+        var targetKey = target.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList();
+        var targetKeySignature =
+            targetKey.Count == 0 ? null : UniqueConstraintNaming.ColumnSetSignature(targetKey);
+
+        var adds = new List<SchemaDiffItem>();
+        var drops = new List<SchemaDiffItem>();
+
         foreach (var constraint in targetConstraints)
         {
             if (liveSignatures.Contains(constraint.Signature))
@@ -556,7 +637,16 @@ public class SchemaDiffService
                 continue;
             }
 
-            diff.Items.Add(
+            var selectable =
+                dialect.SupportsUniqueConstraintOnPrimaryKey
+                || !string.Equals(
+                    constraint.Signature,
+                    targetKeySignature,
+                    StringComparison.Ordinal
+                );
+            var columns = string.Join(", ", constraint.ColumnNames);
+
+            adds.Add(
                 new SchemaDiffItem
                 {
                     Kind = SchemaDiffKind.AddUniqueConstraint,
@@ -565,11 +655,15 @@ public class SchemaDiffService
                     // 図側の名前は未設定（null）でよい＝レンダラーが UQ_{表}_{列…} を合成する
                     UniqueConstraintName = constraint.Name,
                     UniqueConstraintColumns = constraint.ColumnNames,
-                    Description = string.Format(
-                        Strings.Diff_AddUniqueConstraint,
-                        tableName,
-                        string.Join(", ", constraint.ColumnNames)
-                    ),
+                    IsSelected = selectable,
+                    IsSelectable = selectable,
+                    Description = selectable
+                        ? string.Format(Strings.Diff_AddUniqueConstraint, tableName, columns)
+                        : string.Format(
+                            Strings.Diff_UniqueConstraintOnPrimaryKeyNotSynced,
+                            tableName,
+                            columns
+                        ),
                 }
             );
         }
@@ -581,7 +675,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            diff.Items.Add(
+            drops.Add(
                 new SchemaDiffItem
                 {
                     Kind = SchemaDiffKind.DropUniqueConstraint,
@@ -599,6 +693,68 @@ public class SchemaDiffService
                 }
             );
         }
+
+        diff.Items.AddRange(PairUniqueConstraintAlters(tableName, adds, drops));
+    }
+
+    /// <summary>
+    /// 同じ実効名の一意制約の追加候補と削除候補を、1 つの <see cref="SchemaDiffKind.AlterUniqueConstraint"/> へ畳む
+    /// （規則は <see cref="AppendUniqueConstraintDiffs"/> の remarks）。
+    /// </summary>
+    /// <returns>差分へ並べる順の一意制約項目（畳んだ項目は追加候補の位置に入り、残りの削除候補が後に続く）</returns>
+    private static List<SchemaDiffItem> PairUniqueConstraintAlters(
+        string tableName,
+        List<SchemaDiffItem> adds,
+        List<SchemaDiffItem> drops
+    )
+    {
+        var remainingDrops = new List<SchemaDiffItem>(drops);
+        var result = new List<SchemaDiffItem>();
+
+        foreach (var add in adds)
+        {
+            var name = UniqueConstraintNaming.Resolve(
+                add.UniqueConstraintName,
+                tableName,
+                add.UniqueConstraintColumns
+            );
+            var drop = add.IsSelectable
+                ? remainingDrops.FirstOrDefault(d =>
+                    !string.IsNullOrWhiteSpace(d.UniqueConstraintName)
+                    && NameKey(d.UniqueConstraintName) == NameKey(name)
+                )
+                : null;
+
+            if (drop is null)
+            {
+                result.Add(add);
+                continue;
+            }
+
+            remainingDrops.Remove(drop);
+            result.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterUniqueConstraint,
+                    TableName = tableName,
+                    Entity = add.Entity,
+                    UniqueConstraintName = add.UniqueConstraintName,
+                    UniqueConstraintColumns = add.UniqueConstraintColumns,
+                    ReplacedUniqueConstraint = drop,
+                    IsSelected = false,
+                    Description = string.Format(
+                        Strings.Diff_AlterUniqueConstraint,
+                        tableName,
+                        name,
+                        string.Join(", ", drop.UniqueConstraintColumns),
+                        string.Join(", ", add.UniqueConstraintColumns)
+                    ),
+                }
+            );
+        }
+
+        result.AddRange(remainingDrops);
+        return result;
     }
 
     /// <summary>エンティティの一意制約を「制約名・構成列名・照合シグネチャ」へ解決する（解決不能な制約は除外）</summary>
@@ -761,11 +917,15 @@ public class SchemaDiffService
         SyncDialectCapabilities dialect
     )
     {
-        var pairSignature = string.Join(
-            ",",
-            fk.ColumnPairs.Select(p =>
-                $"{p.ParentColumn.ToLowerInvariant()}>{p.ChildColumn.ToLowerInvariant()}"
-            )
+        // 列ペアの並びを問わない方言（PostgreSQL・Oracle・SQLite）では順不同で比べる
+        // （Oracle のカタログは宣言の並びを残さず、参照先のキーの並びで返す）
+        var pairs = fk.ColumnPairs.Select(p =>
+            SignaturePart(ColumnKey(p.ParentColumn)) + SignaturePart(ColumnKey(p.ChildColumn))
+        );
+        var pairSignature = string.Concat(
+            dialect.ReferencedKeyRequiresSameColumnOrder
+                ? pairs
+                : pairs.Order(StringComparer.Ordinal)
         );
         // 名前は DDL・同期スクリプトが付けるのと同じ実効名で比べる（名前の無いリレーションは既定名、
         // 同じ組の 2 本目は一意化した名前）。素の名前で比べると、名前の無い図と、DDL が既定名で作った
@@ -774,18 +934,28 @@ public class SchemaDiffService
             ? NameKey(foreignKeyNames[fk.Relationship])
             : string.Empty;
 
-        return string.Join(
-            "|",
-            NormalizeTable(fk.Parent).ToLowerInvariant(),
-            NormalizeTable(fk.Child).ToLowerInvariant(),
-            pairSignature,
-            constraintName,
-            dialect.EffectiveOnDelete(fk.Relationship.OnDelete).ToString(),
-            dialect.EffectiveOnUpdate(fk.Relationship.OnUpdate).ToString()
+        // 各部分は長さつきでつなぐ（名前に区切り文字を含む表・列・制約で、別の外部キーと同じ署名にならない）
+        return string.Concat(
+            SignaturePart(NormalizeTable(fk.Parent).ToLowerInvariant()),
+            SignaturePart(NormalizeTable(fk.Child).ToLowerInvariant()),
+            SignaturePart(pairSignature),
+            SignaturePart(constraintName),
+            SignaturePart(dialect.EffectiveOnDelete(fk.Relationship.OnDelete).ToString()),
+            SignaturePart(dialect.EffectiveOnUpdate(fk.Relationship.OnUpdate).ToString())
         );
     }
 
-    /// <summary>外部キーの名前を照合用（前後空白を除き小文字化）に整える</summary>
+    /// <summary>署名の 1 部分を長さつきで表す（<see cref="UniqueConstraintNaming.ColumnSetSignature"/> と同じ形）</summary>
+    private static string SignaturePart(string value) => $"{value.Length}:{value}";
+
+    /// <summary>列名を照合用（前後空白を除き小文字化）に整える（外部キーの署名と作り直しの対応づけが共有する）</summary>
+    private static string ColumnKey(string name) => name.Trim().ToLowerInvariant();
+
+    /// <summary>列の実効の NULL 許容（主キーの列はモデルの値に依らず NOT NULL）</summary>
+    private static bool IsEffectivelyNullable(Column column) =>
+        column.IsNullable && !column.IsPrimaryKey;
+
+    /// <summary>制約の名前を照合用（前後空白を除き小文字化）に整える（外部キーと一意制約の作り直しの対応づけが使う）</summary>
     private static string NameKey(string name) => name.Trim().ToLowerInvariant();
 
     /// <summary>
@@ -804,8 +974,11 @@ public class SchemaDiffService
     /// 旧と新の外部キーが同じ列へ 2 本並ぶ。どちらも「同じ外部キーを作り直す」1 つの操作なので 1 項目にする。
     /// </para>
     /// <para>
-    /// 対応づけは、名前を保存する方言では「子表と実効名」（DB の名前の衝突そのもの）、保存しない方言では
-    /// 「子表・親表・子列の集合」（同じ列に張る外部キー）で行う。1 対 1 で、先に見つかったものと組む。
+    /// 対応づけは、名前を保存する方言では「子表と実効名」、保存しない方言（SQLite）では「子表と子列の集合」
+    /// （同じ列に張る外部キー。参照先だけを変えた外部キーもまとまる）で行う。1 対 1 で、先に見つかったものと組む。
+    /// 外部キー名が一意な範囲は方言で違い（PostgreSQL はテーブル単位、SQL Server・MySQL・Oracle はスキーマ単位）、
+    /// 「子表と実効名」は同じ子表の中の衝突を拾う。同じ名前のまま別の子表へ移す外部キーは組まない（稀な形。スキーマ単位の
+    /// 方言では、既定どおり追加だけを選ぶと名前の衝突で失敗しうる）。
     /// </para>
     /// </remarks>
     private static List<SchemaDiffItem> PairForeignKeyAlters(
@@ -815,31 +988,43 @@ public class SchemaDiffService
         SyncDialectCapabilities dialect
     )
     {
-        var remainingDrops = new List<SchemaDiffItem>(drops);
+        // 削除候補をキーごとに並べておき、追加候補ごとに先頭から 1 つずつ取る（総当たりにしない）
+        var dropsByKey = new Dictionary<string, Queue<SchemaDiffItem>>(StringComparer.Ordinal);
+
+        foreach (var drop in drops)
+        {
+            var key = ForeignKeyPairingKey(drop, includeConstraintName);
+
+            if (!dropsByKey.TryGetValue(key, out var queue))
+            {
+                queue = new Queue<SchemaDiffItem>();
+                dropsByKey[key] = queue;
+            }
+
+            queue.Enqueue(drop);
+        }
+
+        var paired = new HashSet<SchemaDiffItem>(ReferenceEqualityComparer.Instance);
         var result = new List<SchemaDiffItem>();
 
         foreach (var add in adds)
         {
-            var key = ForeignKeyPairingKey(add, includeConstraintName);
-            var drop = remainingDrops.FirstOrDefault(d =>
-                string.Equals(
-                    ForeignKeyPairingKey(d, includeConstraintName),
-                    key,
-                    StringComparison.Ordinal
-                )
-            );
-
-            if (drop is null)
+            if (
+                !dropsByKey.TryGetValue(
+                    ForeignKeyPairingKey(add, includeConstraintName),
+                    out var candidates
+                ) || !candidates.TryDequeue(out var drop)
+            )
             {
                 result.Add(add);
                 continue;
             }
 
-            remainingDrops.Remove(drop);
+            paired.Add(drop);
             result.Add(BuildForeignKeyAlter(add, drop, dialect));
         }
 
-        result.AddRange(remainingDrops);
+        result.AddRange(drops.Where(d => !paired.Contains(d)));
         return result;
     }
 
@@ -857,19 +1042,17 @@ public class SchemaDiffService
                 NormalizeTable(item.ParentEntity!)
             );
 
-            return $"{child}|{NameKey(name)}";
+            return SignaturePart(child) + SignaturePart(NameKey(name));
         }
 
-        var parent = NormalizeTable(item.ParentEntity!).ToLowerInvariant();
-        var childColumns = string.Join(
-            ",",
+        var childColumns = string.Concat(
             ForeignKeyColumnPairResolver
                 .ChildColumns(item.ForeignKeyColumnPairs)
-                .Select(c => c.Trim().ToLowerInvariant())
+                .Select(c => SignaturePart(ColumnKey(c)))
                 .Order(StringComparer.Ordinal)
         );
 
-        return $"{child}|{parent}|{childColumns}";
+        return SignaturePart(child) + childColumns;
     }
 
     /// <summary>対応づいた追加候補（新しい定義）と削除候補（DB の定義）から外部キー変更の項目を作る</summary>
@@ -891,10 +1074,10 @@ public class SchemaDiffService
             add.ForeignKeyColumnPairs
         );
 
+        // 列ペアの並びを問わない方言では、並びだけの違いを参照の変更と言わない（差分のシグネチャと同じ規則）
         var referenceChanged =
             !string.Equals(oldParent, newParent, StringComparison.OrdinalIgnoreCase)
-            || !oldChildColumns.SequenceEqual(newChildColumns, StringComparer.OrdinalIgnoreCase)
-            || !oldParentColumns.SequenceEqual(newParentColumns, StringComparer.OrdinalIgnoreCase);
+            || !SamePairs(drop.ForeignKeyColumnPairs, add.ForeignKeyColumnPairs);
 
         if (referenceChanged)
         {
@@ -959,6 +1142,23 @@ public class SchemaDiffService
                 string.Join(" / ", changes)
             ),
         };
+        bool SamePairs(
+            IReadOnlyList<ForeignKeyColumnNamePair> left,
+            IReadOnlyList<ForeignKeyColumnNamePair> right
+        )
+        {
+            var leftKeys = left.Select(PairKey);
+            var rightKeys = right.Select(PairKey);
+
+            return dialect.ReferencedKeyRequiresSameColumnOrder
+                ? leftKeys.SequenceEqual(rightKeys, StringComparer.Ordinal)
+                : leftKeys
+                    .Order(StringComparer.Ordinal)
+                    .SequenceEqual(rightKeys.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+        }
+
+        static string PairKey(ForeignKeyColumnNamePair pair) =>
+            $"{pair.ParentColumn.ToLowerInvariant()}>{pair.ChildColumn.ToLowerInvariant()}";
     }
 
     /// <summary>外部キーの構成列を差分表示用の列名リストへ整形する（宣言順・カンマ区切り）</summary>
@@ -1022,8 +1222,17 @@ public class SchemaDiffService
     }
 
     /// <summary>説明文を指定長で切り詰め、超過時は末尾に省略記号を付ける</summary>
-    private static string Truncate(string s, int max = 30) =>
-        s.Length <= max ? s : s.Substring(0, max) + "…";
+    /// <remarks>切る位置がサロゲートペアの間なら、その手前で切る（片割れの文字を残さない）。</remarks>
+    private static string Truncate(string s, int max = 30)
+    {
+        if (s.Length <= max)
+        {
+            return s;
+        }
+
+        var length = char.IsHighSurrogate(s[max - 1]) ? max - 1 : max;
+        return s[..length] + "…";
+    }
 
     /// <summary>NULL 許容の可否を表示言語のラベル（許可 / 禁止）へ変換する</summary>
     private static string NullableLabel(bool isNullable) =>

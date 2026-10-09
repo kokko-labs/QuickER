@@ -198,6 +198,12 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Diff_AlterUniqueConstraint {
+            get {
+                return ResourceManager.GetString("Diff_AlterUniqueConstraint", resourceCulture);
+            }
+        }
+
         public static string Diff_ReorderColumns {
             get {
                 return ResourceManager.GetString("Diff_ReorderColumns", resourceCulture);
@@ -225,6 +231,22 @@ namespace QuickER.Provider.Resources {
         public static string Diff_AutoPrimaryKeyRebuild {
             get {
                 return ResourceManager.GetString("Diff_AutoPrimaryKeyRebuild", resourceCulture);
+            }
+        }
+        public static string Diff_AutoPrimaryKeyNotNull {
+            get {
+                return ResourceManager.GetString("Diff_AutoPrimaryKeyNotNull", resourceCulture);
+            }
+        }
+        public static string Diff_ComputedColumnTypeNotSynced {
+            get {
+                return ResourceManager.GetString("Diff_ComputedColumnTypeNotSynced", resourceCulture);
+            }
+        }
+
+        public static string Diff_UniqueConstraintOnPrimaryKeyNotSynced {
+            get {
+                return ResourceManager.GetString("Diff_UniqueConstraintOnPrimaryKeyNotSynced", resourceCulture);
             }
         }
 

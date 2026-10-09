@@ -117,6 +117,54 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
     }
 
     /// <summary>
+    /// 同じ列ペアに名前の違う外部キーが 2 本あるとき、片方の明示削除と両端の列の型変更を同時に選んでも、
+    /// もう片方を外して付け直して成功することを検証する（外部キーの照合が名前を見ず、残る 1 本まで「明示的に外した」
+    /// 扱いになって外し直されず、列の型変更が Msg 5074 で失敗していた）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 同じ列ペアの外部キー 2 本の片方を消して列の型を変えても、もう片方を残して成功する"
+    )]
+    public async Task DropOneOfSamePairForeignKeys_KeepsTheOther()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var diagram = BuildParentChildDiagram(constraintName: "fk_sd_a");
+        var pair = diagram.Relationships[0].ColumnPairs[0];
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                SourceEntityId = diagram.Entities[0].Id,
+                TargetEntityId = diagram.Entities[1].Id,
+                ColumnPairs = [new(pair.SourceColumnId, pair.TargetColumnId)],
+                ConstraintName = "fk_sd_b",
+            }
+        );
+        await fixture.ApplyDdlAsync(diagram, Ct);
+
+        var (result, script, _, _) = await SyncAsync(
+            (entities, relationships) =>
+            {
+                relationships.RemoveAll(r => r.ConstraintName == "fk_sd_b");
+                entities.Single(e => e.TableName == "sd_parent").Columns[0].DataType = "bigint";
+                entities
+                    .Single(e => e.TableName == "sd_child")
+                    .Columns.Single(c => c.Name == "parent_id")
+                    .DataType = "bigint";
+            },
+            select: item => item.Kind is SchemaDiffKind.DropForeignKey or SchemaDiffKind.AlterColumn
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        var live = await ImportAsync();
+        live.Relationships.Should().ContainSingle().Which.ConstraintName.Should().Be("fk_sd_a");
+        live.Entities.Single(e => e.TableName == "sd_child")
+            .Columns.Single(c => c.Name == "parent_id")
+            .DataType.Should()
+            .Be("bigint");
+    }
+
+    /// <summary>
     /// 名前の無い多対多が同じ組の外部キーより前に並ぶ図でも、外部キーは既定名で作られ、
     /// 既定名の外部キーを持つ DB に対して外部キーの差分を出さないことを検証する。
     /// </summary>
@@ -327,14 +375,244 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
         live.Entities[0].GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("code");
     }
 
+    /// <summary>
+    /// 親と子の表の削除だけを選び、外部キーの削除（既定で未選択）を選ばなくても成功することを検証する
+    /// （取込の並びで親が先に来ても、端の消える外部キーを計画が先に外す）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 親と子の表の削除だけを選んでも、親が先に並んで失敗しない"
+    )]
+    public async Task DropParentAndChildTables_WithoutForeignKeyDrop_Succeeds()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        // 取込は名前順＝親（sd_a_parent）が子（sd_b_child）より先に並ぶ
+        await fixture.ApplyDdlAsync(
+            BuildParentChildDiagram(null, parentName: "sd_a_parent", childName: "sd_b_child"),
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "INSERT INTO sd_a_parent (id) VALUES (1); INSERT INTO sd_b_child (id, parent_id) VALUES (1, 1);",
+            Ct
+        );
+
+        var (result, script, diff, plan) = await SyncAsync(
+            (entities, relationships) =>
+            {
+                entities.Clear();
+                relationships.Clear();
+            },
+            select: item => item.Kind == SchemaDiffKind.DropTable
+        );
+
+        diff.Items.Where(i => i.Kind == SchemaDiffKind.DropTable)
+            .Select(i => i.TableName)
+            .Should()
+            .Equal("sd_a_parent", "sd_b_child");
+        plan.Warnings.Should().BeEmpty();
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        (await ImportAsync()).Entities.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 参照される親の表だけ・外部キーの子列だけを消すとき、外部キーの削除を選ばなくても成功し、
+    /// 残った子の表から外部キーが外れていることを検証する。
+    /// </summary>
+    [Theory(
+        DisplayName = "[Integration] SQL Server 同期: 親の表・外部キーの列だけを消しても、端の消える外部キーを外して成功する"
+    )]
+    [InlineData(SchemaDiffKind.DropTable)]
+    [InlineData(SchemaDiffKind.DropColumn)]
+    public async Task DropReferencedEnd_WithoutForeignKeyDrop_Succeeds(SchemaDiffKind dropKind)
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ApplyDdlAsync(BuildParentChildDiagram("FK_sd_child_parent"), Ct);
+        await fixture.ExecuteAsync(
+            "INSERT INTO sd_parent (id) VALUES (1); INSERT INTO sd_child (id, parent_id) VALUES (1, 1);",
+            Ct
+        );
+
+        var (result, script, _, plan) = await SyncAsync(
+            (entities, relationships) =>
+            {
+                relationships.Clear();
+
+                if (dropKind == SchemaDiffKind.DropTable)
+                {
+                    entities.RemoveAll(e => e.TableName == "sd_parent");
+                }
+                else
+                {
+                    entities
+                        .Single(e => e.TableName == "sd_child")
+                        .Columns.RemoveAll(c => c.Name == "parent_id");
+                }
+            },
+            select: item => item.Kind == dropKind
+        );
+
+        plan.Warnings.Should().BeEmpty();
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        var live = await ImportAsync();
+        live.Relationships.Should().BeEmpty();
+        live.Entities.Should().Contain(e => e.TableName == "sd_child");
+    }
+
+    /// <summary>
+    /// 複合主キーの列順だけを入れ替えると、その主キーを (a, b) の並びで参照する外部キーは付け直せない
+    /// （SQL Server は参照する列の並びがキーの並びと一致することを求める＝Msg 1776）ので、事前に警告し、
+    /// 実行の失敗はロールバックされて何も変わらないことを検証する（以前は警告なしに失敗していた）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 参照される複合主キーの列順だけを入れ替えると警告し、失敗しても何も変わらない"
+    )]
+    public async Task ReorderReferencedCompositePrimaryKey_WarnsAndChangesNothing()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE [sd_pair] ([a] int NOT NULL, [b] int NOT NULL, CONSTRAINT [PK_sd_pair] PRIMARY KEY ([a], [b]));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE [sd_ref] ([id] int NOT NULL, [ra] int NOT NULL, [rb] int NOT NULL, "
+                + "CONSTRAINT [PK_sd_ref] PRIMARY KEY ([id]), "
+                + "CONSTRAINT [fk_sd_ref] FOREIGN KEY ([ra], [rb]) REFERENCES [sd_pair] ([a], [b]));",
+            Ct
+        );
+
+        var (result, _, _, plan) = await SyncAsync(
+            (entities, _) =>
+            {
+                var pair = entities.Single(e => e.TableName == "sd_pair");
+                pair.PrimaryKeyColumnIds = [pair.Columns[1].Id, pair.Columns[0].Id];
+            },
+            select: item => item.Kind == SchemaDiffKind.AlterPrimaryKey
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey)
+            .Which.Detail.Should()
+            .Be("fk_sd_ref");
+        result.Committed.Should().BeFalse();
+
+        var live = await ImportAsync();
+        live.Entities.Single(e => e.TableName == "sd_pair")
+            .GetPrimaryKeyColumnsInOrder()
+            .Select(c => c.Name)
+            .Should()
+            .Equal("a", "b");
+        live.Relationships.Should().ContainSingle().Which.ConstraintName.Should().Be("fk_sd_ref");
+    }
+
+    /// <summary>
+    /// 主キーの変更だけを選び、新しく主キーに加わる NULL 許容の列の NOT NULL 化（既定で未選択）を選ばなくても、
+    /// 主キーの変更の一部として NOT NULL にして成功することを検証する（以前は主キーの付与が NULL 許容の列で失敗した）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 主キーの変更だけを選んでも、新しい主キー列を NOT NULL にして成功する"
+    )]
+    public async Task AlterPrimaryKeyOnly_WithNullableNewKeyColumn_Succeeds()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var diagram = BuildParentChildDiagram(constraintName: null);
+        diagram
+            .Entities[1]
+            .Columns.Add(
+                new Column
+                {
+                    Name = "code",
+                    DataType = "int",
+                    IsNullable = true,
+                }
+            );
+        await fixture.ApplyDdlAsync(diagram, Ct);
+        await fixture.ExecuteAsync(
+            "INSERT INTO sd_parent (id) VALUES (1); INSERT INTO sd_child (id, parent_id, code) VALUES (1, 1, 10);",
+            Ct
+        );
+
+        var (result, script, _, plan) = await SyncAsync(
+            (entities, _) =>
+            {
+                var code = entities
+                    .Single(e => e.TableName == "sd_child")
+                    .Columns.Single(c => c.Name == "code");
+                code.IsPrimaryKey = true;
+                code.IsNullable = false;
+            },
+            select: item => item.Kind == SchemaDiffKind.AlterPrimaryKey
+        );
+
+        plan.Warnings.Should()
+            .NotContain(w => w.Kind == SyncPlanWarningKind.SelectedItemRequiresUnselectedItem);
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        var child = (await ImportAsync()).Entities.Single(e => e.TableName == "sd_child");
+        child.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("id", "code");
+        child.Columns.Single(c => c.Name == "code").IsNullable.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 外部キーの追加だけを選び、その子列の追加（列の追加）を選ばないと、外部キーを計画から外して名指しし、
+    /// DB は変えずに成功することを検証する（以前は存在しない列を参照して失敗した）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 選んでいない列の追加を前提にする外部キーは外して警告し、DB を変えない"
+    )]
+    public async Task AddForeignKeyOnUnselectedNewColumn_IsSkippedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ApplyDdlAsync(BuildParentChildDiagram("FK_sd_child_parent"), Ct);
+
+        var (result, script, _, plan) = await SyncAsync(
+            (entities, relationships) =>
+            {
+                var parent = entities.Single(e => e.TableName == "sd_parent");
+                var child = entities.Single(e => e.TableName == "sd_child");
+                var reference = new Column { Name = "other_parent_id", DataType = "int" };
+                child.Columns.Add(reference);
+                relationships.Add(
+                    new Relationship
+                    {
+                        SourceEntityId = parent.Id,
+                        TargetEntityId = child.Id,
+                        ColumnPairs = [new(parent.Columns[0].Id, reference.Id)],
+                        ConstraintName = "FK_sd_child_other",
+                    }
+                );
+            },
+            select: item => item.Kind == SchemaDiffKind.AddForeignKey
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle()
+            .Which.Detail.Should()
+            .Be("FK_sd_child_other (sd_child.other_parent_id)");
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        var live = await ImportAsync();
+        live.Relationships.Should().ContainSingle();
+        live.Entities.Single(e => e.TableName == "sd_child").Columns.Should().HaveCount(2);
+    }
+
     // ---------------- ヘルパー ----------------
 
-    /// <summary>親 sd_parent(id) と子 sd_child(id, parent_id) と、parent_id → id の外部キーを持つ図を作る</summary>
-    private static ErDiagram BuildParentChildDiagram(string? constraintName)
+    /// <summary>親（既定 sd_parent(id)）と子（既定 sd_child(id, parent_id)）と、parent_id → id の外部キーを持つ図を作る</summary>
+    private static ErDiagram BuildParentChildDiagram(
+        string? constraintName,
+        string parentName = "sd_parent",
+        string childName = "sd_child"
+    )
     {
         var parent = new Entity
         {
-            TableName = "sd_parent",
+            TableName = parentName,
             Columns =
             {
                 new Column
@@ -348,7 +626,7 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
         };
         var child = new Entity
         {
-            TableName = "sd_child",
+            TableName = childName,
             Columns =
             {
                 new Column

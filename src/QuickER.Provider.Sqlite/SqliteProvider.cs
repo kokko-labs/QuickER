@@ -47,6 +47,8 @@ public sealed class SqliteProvider : IDatabaseProvider
             SupportsDescriptions = false,
             PersistsForeignKeyConstraintNames = false,
             ColumnReorder = ColumnReorderMode.Rebuild,
+            SupportsUniqueConstraintOnPrimaryKey = false,
+            ReferencedKeyRequiresSameColumnOrder = false,
         };
 
     /// <inheritdoc />

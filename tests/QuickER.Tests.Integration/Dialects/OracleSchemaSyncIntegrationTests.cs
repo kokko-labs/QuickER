@@ -670,6 +670,131 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
         SingleUqItem(await ImportAsync()).UniqueConstraints.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// 名前付き一意制約の列を変えた図の差分が 1 つの作り直し項目（既定で未選択）になり、選べば同じ名前のまま
+    /// 新しい列で作り直されることを検証する（以前は同じ名前の追加が既定で選ばれ、ORA-02264 で失敗した）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] C: 名前付き一意制約の列の変更は作り直し項目になり、選べば同じ名前で作り直す"
+    )]
+    public async Task UniqueConstraintColumnsChanged_AlterUniqueConstraint()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var settings = fixture.ToDbConnectionSettings();
+        var capabilities = new OracleProvider().SyncCapabilities;
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"uq_item\" (\"id\" NUMBER(10) NOT NULL, \"code\" VARCHAR2(20) NOT NULL, "
+                + "\"kind\" VARCHAR2(20) NOT NULL, "
+                + "CONSTRAINT \"PK_uq_item\" PRIMARY KEY (\"id\"), "
+                + "CONSTRAINT \"UQ_uq_item_key\" UNIQUE (\"code\"));",
+            Ct
+        );
+
+        var live = await ImportAsync();
+        var target = CloneAsTarget(SingleUqItem(live));
+        target.UniqueConstraints.Single().ColumnIds =
+        [
+            target.Columns.Single(c => c.Name == "code").Id,
+            target.Columns.Single(c => c.Name == "kind").Id,
+        ];
+        var diff = _diff.Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { target },
+            new List<Relationship>(),
+            capabilities
+        );
+
+        var alter = diff.Items.Should().ContainSingle().Which;
+        alter.Kind.Should().Be(SchemaDiffKind.AlterUniqueConstraint);
+        alter.IsSelected.Should().BeFalse();
+        new SyncPlanner().BuildPlan(diff.Items, capabilities).IsEmpty.Should().BeTrue();
+
+        alter.IsSelected = true;
+        var script = _builder.Build(new SyncPlanner().BuildPlan(diff.Items, capabilities));
+        var result = await _executor.ExecuteAsync(settings, script, Ct);
+        result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
+
+        var item = SingleUqItem(await ImportAsync());
+        var unique = item.UniqueConstraints.Should().ContainSingle().Which;
+        unique.Name.Should().Be("UQ_uq_item_key");
+        unique
+            .ColumnIds.Select(id => item.Columns.Single(c => c.Id == id).Name)
+            .Should()
+            .Equal("code", "kind");
+    }
+
+    /// <summary>
+    /// 主キーの並びと違う並びで宣言した複合外部キーを取り込み、宣言どおりの並びの図と比べても外部キーの差分が
+    /// 出ないことを検証する。Oracle のカタログは外部キーの列を参照先のキーの並びで記録し、宣言の並びを残さない
+    /// （取込の列ペアは参照先のキーの並びになる）ので、並びまで比べると取り込み直すたびに作り直しの差分が出た。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] C: 主キーと違う並びで宣言した複合外部キーは、宣言どおりの図と差分を出さない"
+    )]
+    public async Task CompositeForeignKeyDeclaredInOtherOrder_ProducesNoDiff()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"po_parent\" (\"a\" NUMBER(10) NOT NULL, \"b\" NUMBER(10) NOT NULL, "
+                + "CONSTRAINT \"PK_po_parent\" PRIMARY KEY (\"b\", \"a\"));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"po_child\" (\"id\" NUMBER(10) NOT NULL, \"x\" NUMBER(10), \"y\" NUMBER(10), "
+                + "CONSTRAINT \"PK_po_child\" PRIMARY KEY (\"id\"), "
+                + "CONSTRAINT \"FK_po_child\" FOREIGN KEY (\"x\", \"y\") REFERENCES \"po_parent\" (\"a\", \"b\"));",
+            Ct
+        );
+
+        var live = await ImportAsync();
+        var parent = live.Entities.Single(e => e.TableName == "po_parent");
+        var child = live.Entities.Single(e => e.TableName == "po_child");
+        var imported = live.Relationships.Should().ContainSingle().Which;
+
+        // カタログは参照先のキー (b, a) の並びで返す＝宣言 (x→a, y→b) と逆の並び
+        imported
+            .ColumnPairs.Select(p => child.Columns.Single(c => c.Id == p.TargetColumnId).Name)
+            .Should()
+            .Equal("y", "x");
+
+        var declared = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            ColumnPairs =
+            [
+                new(
+                    parent.Columns.Single(c => c.Name == "a").Id,
+                    child.Columns.Single(c => c.Name == "x").Id
+                ),
+                new(
+                    parent.Columns.Single(c => c.Name == "b").Id,
+                    child.Columns.Single(c => c.Name == "y").Id
+                ),
+            ],
+            ConstraintName = imported.ConstraintName,
+            OnDelete = imported.OnDelete,
+            OnUpdate = imported.OnUpdate,
+        };
+
+        _diff
+            .Compute(
+                live.Entities,
+                live.Relationships,
+                live.Entities.Select(CloneAsTarget).ToList(),
+                [declared],
+                new OracleProvider().SyncCapabilities
+            )
+            .Items.Should()
+            .BeEmpty();
+    }
+
     /// <summary>検証用テーブルの取込エンティティを取り出す</summary>
     private static Entity SingleUqItem(SchemaImportResult result) =>
         result.Entities.Single(e => e.TableName == "uq_item");

@@ -71,6 +71,19 @@ public enum SchemaDiffKind
     /// 列定義変更・主キー変更と同じく破壊的に数えて既定では選択しない。
     /// </remarks>
     AlterForeignKey,
+
+    /// <summary>
+    /// 既存の一意制約を、同じ名前のまま別の構成列で作り直す（既定では非選択）
+    /// </summary>
+    /// <remarks>
+    /// 削除候補（DB の定義＝<see cref="SchemaDiffItem.ReplacedUniqueConstraint"/>）と追加候補（図の定義＝この項目自身の
+    /// <see cref="SchemaDiffItem.UniqueConstraintName"/> / <see cref="SchemaDiffItem.UniqueConstraintColumns"/>）を、
+    /// 実効名が同じとき 1 項目へ畳んだもの。2 項目のままだと、既定どおり追加だけを選んで実行したときに同じ名前の
+    /// 一意制約を足そうとして失敗する。<see cref="SyncPlanner"/> が計画の入口で DROP と ADD の 2 項目へ展開するため、
+    /// 方言別レンダラーは既存の一意制約の DROP / ADD のまま SQL 化できる。作り直しの間は一意性が保証されず、
+    /// 付け直しは重複データで失敗しうるため、破壊的に数えて既定では選択しない。
+    /// </remarks>
+    AlterUniqueConstraint,
 }
 
 /// <summary>
@@ -135,17 +148,25 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// </remarks>
     public SchemaDiffItem? ReplacedForeignKey { get; init; }
 
+    /// <summary>作り直す前の一意制約（DB の定義の DropUniqueConstraint 項目。AlterUniqueConstraint のみ）。</summary>
+    /// <remarks>
+    /// <see cref="SchemaDiffKind.AlterUniqueConstraint"/> では、この項目自身の <see cref="UniqueConstraintName"/>・
+    /// <see cref="UniqueConstraintColumns"/> が新しい定義を、ここが外す側の定義（DB の実名と構成列）を運ぶ。
+    /// </remarks>
+    public SchemaDiffItem? ReplacedUniqueConstraint { get; init; }
+
     /// <summary>
-    /// 対象の一意制約名 (Add/DropUniqueConstraint のみ)。
+    /// 対象の一意制約名 (Add/Drop/AlterUniqueConstraint のみ)。
     /// </summary>
     /// <remarks>
     /// <see cref="SchemaDiffKind.DropUniqueConstraint"/> では live 側（DB）の実名が入る。
     /// <see cref="SchemaDiffKind.AddUniqueConstraint"/> では図側のモデル名で、未設定なら <c>null</c>＝
     /// レンダラーが <see cref="UniqueConstraintNaming.Resolve"/> で <c>UQ_{表}_{列…}</c> を合成する。
+    /// <see cref="SchemaDiffKind.AlterUniqueConstraint"/> では図側（新しい定義）の名前。
     /// </remarks>
     public string? UniqueConstraintName { get; init; }
 
-    /// <summary>対象の一意制約の構成列名（宣言順。Add/DropUniqueConstraint のみ）。</summary>
+    /// <summary>対象の一意制約の構成列名（宣言順。Add/Drop/AlterUniqueConstraint のみ）。</summary>
     /// <remarks>
     /// 差分の同一性判定は列集合（大文字小文字・順序を無視）で行うが、DDL へは宣言順のまま出力するため
     /// 順序を保持した一覧で運ぶ。
@@ -188,6 +209,8 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// 壊しうる（＝取り消すには重複データの解消が要る）ため破壊的に数える。
     /// 外部キーの作り直し（<see cref="SchemaDiffKind.AlterForeignKey"/>）は、MySQL / Oracle では付け直しの失敗で
     /// 外部キーが消えたまま残りうるため破壊的に数える。
+    /// 一意制約の作り直し（<see cref="SchemaDiffKind.AlterUniqueConstraint"/>）は、付け直しが重複データで失敗しうるため
+    /// 破壊的に数える。
     /// </remarks>
     public bool IsDestructive =>
         Kind
@@ -197,7 +220,8 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
                 or SchemaDiffKind.DropTable
                 or SchemaDiffKind.DropForeignKey
                 or SchemaDiffKind.AlterForeignKey
-                or SchemaDiffKind.DropUniqueConstraint;
+                or SchemaDiffKind.DropUniqueConstraint
+                or SchemaDiffKind.AlterUniqueConstraint;
 
     /// <inheritdoc/>
     public event PropertyChangedEventHandler? PropertyChanged;

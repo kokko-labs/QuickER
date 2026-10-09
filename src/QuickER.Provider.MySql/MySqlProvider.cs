@@ -43,7 +43,9 @@ public sealed class MySqlProvider : IDatabaseProvider
         {
             ColumnReorder = ColumnReorderMode.Native,
             AlterColumnRequiresForeignKeyRebuild = true,
-            PrimaryKeyChangeRequiresOwnForeignKeyRebuild = true,
+            ForeignKeyRequiresLeadingIndex = true,
+            ForeignKeyAllowsStringLengthDifference = true,
+            TransactionalDdl = false,
             SupportsSetDefaultAction = false,
             NormalizeTypeNotation = MySqlTypeNotation.Normalize,
         };

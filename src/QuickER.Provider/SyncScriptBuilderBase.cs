@@ -11,8 +11,8 @@ namespace QuickER.Provider;
 /// その連結処理をここへ集約し、各方言は種別ごとの DDL 生成（<c>Append*</c> オーバーライド）だけを実装する。
 /// </para>
 /// <para>
-/// 文の区切り規約が根本的に異なる Oracle（「/」のみの行で連結）はこの基底を継承せず、
-/// <see cref="ISyncScriptBuilder"/> を直接実装する。
+/// 文の区切り規約が根本的に異なる Oracle（通常の文は <c>;</c> で終え、PL/SQL ブロックの後ろにだけ <c>/</c> 行を置く）は
+/// この基底を継承せず、<see cref="ISyncScriptBuilder"/> を直接実装する。
 /// </para>
 /// </remarks>
 public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
