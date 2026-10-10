@@ -97,7 +97,11 @@ public class CSharpReversePrimaryKeyOrderTests
     }
 
     private static CodeReverseResult Reverse(string source) =>
-        new CSharpReverseParser().Parse(source, new SqlServerTypeCatalog());
+        new CSharpReverseParser().Parse(
+            source,
+            new SqlServerTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
 
     /// <summary>リバース結果の主キーを実効順の列名で返す</summary>
     private static List<string> KeyOrder(Entity entity) =>

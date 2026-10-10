@@ -110,11 +110,25 @@ public static partial class DocumentErDiagramToolHost
         }
 
         var managedBefore = CollectRelationshipChildColumnIds(document!.Schema);
+        var namesRefusedBefore = NameLimitNotes.Find(document.Schema);
         var (result, success) = operation(document);
 
         if (success)
         {
             ReleaseForeignKeyMarks(document.Schema, managedBefore);
+
+            // 名前は受け付けて保存する（DDL・同期の入口が断る）。この呼び出しで新しく受け付けられなくなった名前を知らせる
+            if (
+                NameLimitNotes.Describe(
+                    namesRefusedBefore,
+                    NameLimitNotes.Find(document.Schema),
+                    document.Schema.TargetDbms
+                ) is
+                { } nameNote
+            )
+            {
+                result = $"{result} {nameNote}";
+            }
 
             // ユーザーの実ファイルへ書き戻すため原子的に差し替える（書き込み途中の中断・
             // ディスク満杯で既存の図が半端な JSON になるのを防ぐ）
@@ -331,7 +345,7 @@ public static partial class DocumentErDiagramToolHost
             }
 
             AppendPrimaryKeyOrder(sb, entity.GetReorderedPrimaryKeyColumnNames());
-            AppendUniqueConstraints(sb, entity);
+            AppendUniqueConstraints(sb, entity, IdentifierLengthLimits.ForDbms(schema.TargetDbms));
         }
 
         if (schema.Relationships.Count > 0)
@@ -783,7 +797,8 @@ public static partial class DocumentErDiagramToolHost
             target.TableName,
             source.TableName,
             childColumnNames,
-            ConstraintNames.CollectExisting(schema)
+            ConstraintNames.CollectExisting(schema),
+            IdentifierLengthLimits.ForDbms(schema.TargetDbms)
         );
 
         if (nameError is not null)
@@ -942,19 +957,22 @@ public static partial class DocumentErDiagramToolHost
         string childTable,
         string parentTable,
         IReadOnlyList<string> childColumnNames,
-        IReadOnlySet<string> existingNames
+        IReadOnlySet<string> existingNames,
+        IdentifierLengthLimit limit
     )
     {
         var requested = GetString(args, "constraint_name")?.Trim();
 
         if (string.IsNullOrEmpty(requested))
         {
+            // 図へ保存する既定名なので、図の対象 DBMS の上限で縮める（ConstraintNames の XmlDoc の経路）
             return (
                 ConstraintNames.UniqueForeignKey(
                     childTable,
                     parentTable,
                     childColumnNames,
-                    existingNames
+                    existingNames,
+                    limit
                 ),
                 null
             );
@@ -1442,7 +1460,12 @@ public static partial class DocumentErDiagramToolHost
 
     /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>
     /// <remarks>構成列を解決できない制約（空・壊れた参照）は DDL 生成と同じ規則で読み飛ばす</remarks>
-    private static void AppendUniqueConstraints(StringBuilder sb, Entity entity)
+    /// <param name="limit">合成名に使う識別子の長さの上限（図の対象 DBMS の上限＝DDL と同じ名前を見せる）</param>
+    private static void AppendUniqueConstraints(
+        StringBuilder sb,
+        Entity entity,
+        IdentifierLengthLimit limit
+    )
     {
         var lines = new List<string>();
 
@@ -1466,7 +1489,7 @@ public static partial class DocumentErDiagramToolHost
             }
 
             var name = string.IsNullOrWhiteSpace(constraint.Name)
-                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames)
+                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames, limit)
                 : constraint.Name!;
             lines.Add($"    - {name} ({string.Join(", ", columnNames)})");
         }

@@ -1,4 +1,5 @@
 using System.Text;
+using QuickER.Model;
 
 namespace QuickER.Provider;
 
@@ -28,8 +29,9 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
         // 列型は識別子でも文字列リテラルでもなく、SQL へ素通しで補間するしか無い（DDL 生成と同じ関門）
         SqlTypeText.Validate(plan);
 
-        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）
-        SqlNameText.Validate(plan);
+        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）。
+        // あわせて方言の上限を超える名前・方言が表せない文字を含む名前も、場所を名指しして止める
+        SqlNameText.Validate(plan, IdentifierLimit);
 
         var sb = new StringBuilder();
 
@@ -132,6 +134,10 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     }
 
     /// <summary>CREATE TABLE 文（主キー制約を含む）を書き出す</summary>
+    /// <summary>この方言の識別子の長さの上限（既定名を縮めるのに使う＝方言の識別子クラスの <c>Limit</c> を返す）</summary>
+    /// <remarks>経路の正本は <see cref="ConstraintNames"/> の XmlDoc。抽象にして、方言が宣言を忘れたらビルドで止まる形にする。</remarks>
+    protected abstract IdentifierLengthLimit IdentifierLimit { get; }
+
     protected abstract void AppendCreateTable(StringBuilder sb, SchemaDiffItem item);
 
     /// <summary>列追加文を書き出す</summary>

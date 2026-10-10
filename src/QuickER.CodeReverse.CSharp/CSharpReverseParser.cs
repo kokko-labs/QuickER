@@ -67,10 +67,18 @@ public sealed class CSharpReverseParser
     /// <summary>C# ソース文字列を構文解析し、意味モデルへ復元する</summary>
     /// <param name="sourceText">解析対象の C# ソース（QuickER 生成の本体 .g.cs）</param>
     /// <param name="typeCatalog">型トークンをネイティブ型へ展開する対象方言の型カタログ</param>
+    /// <param name="limit">
+    /// 名前の無い外部キーに付ける名前（<see cref="ConstraintNames.NameUnnamedForeignKeys"/>）に使う識別子の長さの上限＝
+    /// 復元した図の対象 DBMS の上限（<paramref name="typeCatalog"/> と同じ方言。経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </param>
     /// <exception cref="CodeReverseException">
     /// ソースに構文エラーがある場合、または解析対象クラスが 1 件も無い場合（いずれも案内メッセージ付き）
     /// </exception>
-    public CodeReverseResult Parse(string sourceText, ITypeCatalog typeCatalog)
+    public CodeReverseResult Parse(
+        string sourceText,
+        ITypeCatalog typeCatalog,
+        IdentifierLengthLimit limit
+    )
     {
         ArgumentNullException.ThrowIfNull(sourceText);
         ArgumentNullException.ThrowIfNull(typeCatalog);
@@ -231,7 +239,7 @@ public sealed class CSharpReverseParser
         // 同じ親子の組に名前の無い外部キーが 2 本あると既定名が重なり、DDL の 2 本目が失敗する。
         // ふさがっている側にだけ一意な名前を付ける（ここで付けた名前は RelationshipMetadata に載らない＝
         // 「コードが指定した名前」ではないので、GUI のマージ取込では現在図の名前による補完が勝つ）
-        ConstraintNames.NameUnnamedForeignKeys(entities, relationships);
+        ConstraintNames.NameUnnamedForeignKeys(entities, relationships, limit);
 
         return new CodeReverseResult
         {

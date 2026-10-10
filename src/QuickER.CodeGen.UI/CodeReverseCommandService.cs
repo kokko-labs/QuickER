@@ -63,7 +63,11 @@ public sealed class CodeReverseCommandService
         try
         {
             var sourceText = File.ReadAllText(picked.Path);
-            reversed = new CSharpReverseParser().Parse(sourceText, provider.TypeCatalog);
+            reversed = new CSharpReverseParser().Parse(
+                sourceText,
+                provider.TypeCatalog,
+                IdentifierLengthLimits.ForDbms(provider.Name)
+            );
         }
         catch (CodeReverseException ex)
         {

@@ -73,17 +73,25 @@ public static partial class DbmlImporter
     /// <summary>
     /// DBML ファイルを読み込み ER 図へ変換する
     /// </summary>
-    public static ErDiagram Load(string path)
+    /// <param name="targetDbms">
+    /// 取り込んだ図の対象 DBMS（返す図の <see cref="ErDiagram.TargetDbms"/> になる。名前の無い外部キーに付ける名前は
+    /// この DBMS の識別子の長さの上限で縮める＝経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </param>
+    public static ErDiagram Load(string path, string targetDbms)
     {
-        return Parse(File.ReadAllText(path));
+        return Parse(File.ReadAllText(path), targetDbms);
     }
 
     /// <summary>
     /// DBML テキストを解析して ER 図を生成する
     /// </summary>
+    /// <param name="targetDbms">
+    /// 取り込んだ図の対象 DBMS（返す図の <see cref="ErDiagram.TargetDbms"/> になる。名前の無い外部キーに付ける名前は
+    /// この DBMS の識別子の長さの上限で縮める＝経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </param>
     /// <returns>復元した <see cref="ErDiagram"/></returns>
     /// <exception cref="InvalidDataException">構文不正・テーブル名重複・未定義テーブル参照などを検出した場合</exception>
-    public static ErDiagram Parse(string text)
+    public static ErDiagram Parse(string text, string targetDbms)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -333,9 +341,18 @@ public static partial class DbmlImporter
         ResolveRelationshipColumns(entities, pendingRelationshipColumns);
 
         // 名前の無い Ref が同じテーブルの組に 2 本あると既定名が重なるため、ふさがった分だけ名前を付ける
-        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships);
+        ConstraintNames.NameUnnamedForeignKeys(
+            entities.Values,
+            relationships,
+            IdentifierLengthLimits.ForDbms(targetDbms)
+        );
 
-        return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
+        return new ErDiagram
+        {
+            Entities = entities.Values.ToList(),
+            Relationships = relationships,
+            TargetDbms = targetDbms,
+        };
     }
 
     /// <summary>

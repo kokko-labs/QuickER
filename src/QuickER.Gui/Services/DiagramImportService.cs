@@ -85,17 +85,19 @@ internal sealed class DiagramImportService(
         {
             using var workbook = new XLWorkbook(path);
             ImportExcelMerging(
-                TableDefinitionDocumentImporter.Load(workbook),
+                TableDefinitionDocumentImporter.Load(workbook, host.BuildModel().TargetDbms),
                 TableDefinitionDocumentImporter.ReadTargetDbms(workbook),
                 Strings.Format_DefinitionDocument
             );
             return;
         }
 
+        // 丸ごと置換でも対象 DBMS は現在の図のまま（取込の名前はその上限で付ける）
+        var targetDbms = host.BuildModel().TargetDbms;
         var diagram = format switch
         {
-            DiagramImportFormat.Mermaid => MermaidImporter.Load(path),
-            DiagramImportFormat.Dbml => DbmlImporter.Load(path),
+            DiagramImportFormat.Mermaid => MermaidImporter.Load(path, targetDbms),
+            DiagramImportFormat.Dbml => DbmlImporter.Load(path, targetDbms),
             _ => throw new InvalidOperationException(Strings.Import_FormatUndetermined),
         };
 

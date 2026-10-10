@@ -23,7 +23,13 @@ namespace QuickER.Tests.Integration.Dialects;
 /// 設計上の制約として流さない組（理由つき）:
 /// (1) ドットを含むテーブル名＝5 方言とも DDL が最初のドットでスキーマ修飾として分割して引用する（CLAUDE.md のプロバイダの対称性の
 /// 「既知の割り切り」）。(2) Oracle の識別子は二重引用符を含められない（引用識別子の規則）。
-/// (3) MySQL の識別子は基本多言語面（BMP）の文字だけ＝サロゲート対の文字を含められない。
+/// </para>
+/// <para>
+/// 方言の識別子の長さの上限を超える名前と、方言が表せない文字を含む名前（MySQL の BMP の外の文字＝MySQL は断らずに黙って
+/// <c>?</c> へ置き換える）は、DDL 生成の入口が場所を名指しして断る（<see cref="IdentifierLengthLimit.Accepts"/> /
+/// <see cref="IdentifierLengthLimit.AcceptsTableName"/>）。総当たりはそれらも流し、「Model の宣言が断る名前は入口で断られ、
+/// 受け付ける名前は実 DB に適用できて取り込み直すと差分が出ない」ことを表明する（断られなかった・断られたのに受け付ける名前だった、の
+/// どちらも失敗として記録する）。
 /// </para>
 /// </remarks>
 public abstract class NameFuzzDdlRoundTripTestsBase
@@ -81,6 +87,7 @@ public abstract class NameFuzzDdlRoundTripTestsBase
                     NameFuzzDiagrams.Classify(name),
                     diagram,
                     $"[{NameFuzz.Describe(name)}]",
+                    role == NameRole.Table ? Limit.AcceptsTableName(name) : Limit.Accepts(name),
                     ct
                 );
             }
@@ -101,6 +108,7 @@ public abstract class NameFuzzDdlRoundTripTestsBase
                 shape,
                 diagram,
                 $"[{NameFuzz.Describe(first)}] / [{NameFuzz.Describe(second)}]",
+                Limit.AcceptsTableName(first) && Limit.AcceptsTableName(second),
                 ct
             );
         }
@@ -116,18 +124,45 @@ public abstract class NameFuzzDdlRoundTripTestsBase
         ledger.AssertMatchesKnown($"ddl:{dialect}:");
     }
 
+    /// <summary>この方言の識別子の長さの上限（入口が断る名前の判定）</summary>
+    private IdentifierLengthLimit Limit => Provider.SyncCapabilities.IdentifierLengthLimit;
+
     /// <summary>DB を空にして図の DDL を流し、取り込み直した結果と図の差分を失敗として記録する</summary>
+    /// <param name="accepted">
+    /// 試す名前を方言が受け付けるか（Model の宣言）。受け付けないなら DDL 生成の入口で断られることだけを確かめる
+    /// </param>
     private async Task RoundTripAsync(
         FuzzFailureLedger ledger,
         string entrance,
         string shape,
         ErDiagram diagram,
         string example,
+        bool accepted,
         CancellationToken ct
     )
     {
         await ResetAsync(ct);
-        var ddl = Provider.DdlGenerator.Build(diagram);
+        string ddl;
+
+        try
+        {
+            ddl = Provider.DdlGenerator.Build(diagram);
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (accepted)
+            {
+                ledger.Record(new(entrance, "ddl-rejected", shape), $"{example} {ex.Message}");
+            }
+
+            return;
+        }
+
+        if (!accepted)
+        {
+            ledger.Record(new(entrance, "not-rejected", shape), example);
+            return;
+        }
 
         try
         {
@@ -263,10 +298,6 @@ public sealed class MySqlNameFuzzDdlRoundTripIntegrationTests(MySqlContainerFixt
         fixture.ExecuteAsync(ddl, ct);
 
     protected override string ConnectionString => fixture.ConnectionString;
-
-    /// <summary>MySQL の識別子は BMP の文字だけ（サロゲート対を含められない）</summary>
-    protected override bool IsOutOfDesign(string name, NameRole role) =>
-        base.IsOutOfDesign(name, role) || name.Any(char.IsSurrogate);
 }
 
 /// <summary>Oracle（Testcontainers）の名前の総当たりの DDL の往復</summary>

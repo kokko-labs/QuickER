@@ -47,6 +47,7 @@ public sealed class SqliteProvider : IDatabaseProvider
             SupportsDescriptions = false,
             PersistsForeignKeyConstraintNames = false,
             ColumnReorder = ColumnReorderMode.Rebuild,
+            IdentifierLengthLimit = SqliteIdentifier.Limit,
         };
 
     /// <inheritdoc />

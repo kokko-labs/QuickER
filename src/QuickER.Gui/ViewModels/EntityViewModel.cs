@@ -73,6 +73,19 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>テーブル名の重複を検査する相手（図に載っているエンティティの一覧。載っていなければ <c>null</c>＝検査しない）</summary>
     internal IReadOnlyCollection<EntityViewModel>? NameScope { get; set; }
 
+    /// <summary>
+    /// 図の対象 DBMS の識別子の長さの上限を返す関数（一意制約の合成名のプレビューを DDL と同じ名前にする。
+    /// 図に載っていなければ <c>null</c>＝上限なしで表示する）
+    /// </summary>
+    internal Func<IdentifierLengthLimit>? IdentifierLimitSource { get; set; }
+
+    /// <summary>図の対象 DBMS の識別子の長さの上限（図に載っていなければ上限なし）</summary>
+    internal IdentifierLengthLimit IdentifierLimit =>
+        IdentifierLimitSource?.Invoke() ?? IdentifierLengthLimit.Unlimited;
+
+    /// <summary>対象 DBMS が変わったとき、一意制約の合成名のプレビューを更新する</summary>
+    internal void NotifyIdentifierLimitChanged() => NotifyUniqueConstraintNames();
+
     /// <summary>テーブル名・列名の書き換えを、重複のため受け付けなかったときに発火する（所有者がステータスバーで利用者へ知らせる）</summary>
     internal event EventHandler<NameChangeRejectedEventArgs>? NameChangeRejected;
 

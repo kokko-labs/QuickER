@@ -610,6 +610,42 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Status_NameTooLong {
+            get {
+                return ResourceManager.GetString("Status_NameTooLong", resourceCulture);
+            }
+        }
+        
+        public static string Status_NameNotRepresentable {
+            get {
+                return ResourceManager.GetString("Status_NameNotRepresentable", resourceCulture);
+            }
+        }
+        
+        public static string IdentifierLimit_Utf16CodeUnits {
+            get {
+                return ResourceManager.GetString("IdentifierLimit_Utf16CodeUnits", resourceCulture);
+            }
+        }
+        
+        public static string IdentifierLimit_Utf8Bytes {
+            get {
+                return ResourceManager.GetString("IdentifierLimit_Utf8Bytes", resourceCulture);
+            }
+        }
+        
+        public static string IdentifierLimit_Characters {
+            get {
+                return ResourceManager.GetString("IdentifierLimit_Characters", resourceCulture);
+            }
+        }
+        
+        public static string IdentifierLimit_CharactersWithTableFile {
+            get {
+                return ResourceManager.GetString("IdentifierLimit_CharactersWithTableFile", resourceCulture);
+            }
+        }
+        
         public static string Status_EntitiesLabel {
             get {
                 return ResourceManager.GetString("Status_EntitiesLabel", resourceCulture);
@@ -1420,6 +1456,48 @@ namespace QuickER.Resources {
         public static string TypeConversion_NullableColumnLine {
             get {
                 return ResourceManager.GetString("TypeConversion_NullableColumnLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitHeader {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitHeader", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitTableLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitTableLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitColumnLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitColumnLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitUniqueLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitUniqueLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitForeignKeyLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitForeignKeyLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitTooLong {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitTooLong", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitNotRepresentable {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitNotRepresentable", resourceCulture);
             }
         }
 

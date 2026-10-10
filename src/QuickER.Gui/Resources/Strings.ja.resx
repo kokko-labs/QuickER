@@ -324,6 +324,24 @@
   <data name="Status_ColumnNameRejected" xml:space="preserve">
     <value>テーブル '{0}' には既に列 '{1}' があります（大文字小文字と前後の空白を区別せずに比較します）。列名は変更しませんでした。</value>
   </data>
+  <data name="Status_NameTooLong" xml:space="preserve">
+    <value>'{0}' は {2} の識別子の上限（{1}）を超えています。短くするまで、DDL の生成と同期はこの名前を断ります。</value>
+  </data>
+  <data name="Status_NameNotRepresentable" xml:space="preserve">
+    <value>'{0}' には基本多言語面の外の文字（絵文字など）が含まれており、{1} は保存できません。その文字を除くまで、DDL の生成と同期はこの名前を断ります。</value>
+  </data>
+  <data name="IdentifierLimit_Utf16CodeUnits" xml:space="preserve">
+    <value>UTF-16 コード単位で {0}</value>
+  </data>
+  <data name="IdentifierLimit_Utf8Bytes" xml:space="preserve">
+    <value>UTF-8 バイトで {0}</value>
+  </data>
+  <data name="IdentifierLimit_Characters" xml:space="preserve">
+    <value>{0} 文字</value>
+  </data>
+  <data name="IdentifierLimit_CharactersWithTableFile" xml:space="preserve">
+    <value>{0} 文字（テーブル名はファイル名としても {1} バイトまで）</value>
+  </data>
   <data name="Status_EntitiesLabel" xml:space="preserve">
     <value>エンティティ:</value>
   </data>
@@ -688,7 +706,7 @@
     <value>対象データベースの変更</value>
   </data>
   <data name="TypeConversion_ConfirmIntro" xml:space="preserve">
-    <value>対象データベースを {0} へ変更すると、以下の列に影響があります。</value>
+    <value>対象データベースを {0} へ変更すると、以下の項目に影響があります。</value>
   </data>
   <data name="TypeConversion_ConfirmNote" xml:space="preserve">
     <value>注意: 変換された型は、後で元の方言へ戻しても元の型に戻らない場合があります（この変更は「元に戻す」で正確に復元できます）。</value>
@@ -707,6 +725,27 @@
   </data>
   <data name="TypeConversion_NullableColumnLine" xml:space="preserve">
     <value>・{0}.{1} ({2})</value>
+  </data>
+  <data name="TypeConversion_NameLimitHeader" xml:space="preserve">
+    <value>{0} が受け付けない名前（変更するまで、DDL の生成と同期は止まります）:</value>
+  </data>
+  <data name="TypeConversion_NameLimitTableLine" xml:space="preserve">
+    <value>テーブル '{0}': {1}</value>
+  </data>
+  <data name="TypeConversion_NameLimitColumnLine" xml:space="preserve">
+    <value>カラム '{0}'.'{1}': {2}</value>
+  </data>
+  <data name="TypeConversion_NameLimitUniqueLine" xml:space="preserve">
+    <value>一意制約 '{0}'.'{1}': {2}</value>
+  </data>
+  <data name="TypeConversion_NameLimitForeignKeyLine" xml:space="preserve">
+    <value>外部キー '{0}': {1}</value>
+  </data>
+  <data name="TypeConversion_NameLimitTooLong" xml:space="preserve">
+    <value>上限（{0}）を超えています</value>
+  </data>
+  <data name="TypeConversion_NameLimitNotRepresentable" xml:space="preserve">
+    <value>基本多言語面の外の文字（絵文字など）を含み、保存できません</value>
   </data>
   <data name="Common_MoreItems" xml:space="preserve">
     <value>…他 {0} 件</value>

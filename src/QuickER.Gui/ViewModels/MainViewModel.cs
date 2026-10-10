@@ -267,6 +267,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>現在の図のターゲット DBMS プロバイダ</summary>
     public IDatabaseProvider CurrentProvider => _currentProvider;
 
+    /// <summary>図の対象 DBMS の識別子の長さの上限</summary>
+    internal IdentifierLengthLimit CurrentIdentifierLimit() =>
+        IdentifierLengthLimits.ForDbms(_currentProvider.Name);
+
     /// <summary>登録済み DB プロバイダのレジストリ（モック生成の型解決など、方言別マッパ解決に用いる）</summary>
     public DatabaseProviderRegistry Providers => _providers;
 
@@ -355,6 +359,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ApplyRelationshipColumnRules,
             OnColumnRenamed
         );
+        _changeTracker.NameEdited += OnNameEdited;
         LanguageSwitch = new LanguageSwitchViewModel(_dialogs);
         UpdateSettings = new UpdateSettingsViewModel(_dialogs);
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
@@ -1359,11 +1364,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     TargetEntityId = entity.Id,
                     Type = PendingRelationshipType,
                     ColumnPairs = columnPairs,
+                    // 図へ保存する既定名なので、図の対象 DBMS の上限で縮める（ConstraintNames の XmlDoc の経路）
                     ConstraintName = ConstraintNames.UniqueForeignKey(
                         entity.TableName,
                         PendingRelationshipSource.TableName,
                         childColumnNames,
-                        ConstraintNames.CollectExisting(ToDiagramModel())
+                        ConstraintNames.CollectExisting(ToDiagramModel()),
+                        CurrentIdentifierLimit()
                     ),
                 },
                 PendingRelationshipSource,
@@ -1907,6 +1914,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(AvailableDataTypes));
 
+        // 一意制約の合成名のプレビューは対象 DBMS の上限で縮めるので、方言が変われば表示し直す
+        foreach (var entity in Entities)
+        {
+            entity.NotifyIdentifierLimitChanged();
+        }
+
         // フィーチャーモジュール（DB 同期ボタンの活性・ツールチップ再評価など）へ方言切替を通知する
         TargetDbmsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -1949,11 +1962,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             )
             .ToList();
 
-        // 変換できないカラム・NOT NULL 解除を伴うカラムがあるときは、適用前に内容を提示して
+        // 切替先の方言が受け付けない名前（識別子の長さの上限を超える・表せない文字を含む）も同じ確認で提示する。
+        // 名前は変換せずそのまま残る＝切替後に DDL・同期が断る名前を、切り替える前に知らせる
+        var rejectedNames = CollectNamesRejectedBy(IdentifierLengthLimits.ForDbms(target.Name));
+
+        // 変換できないカラム・NOT NULL 解除を伴うカラム・切替先が受け付けない名前があるときは、適用前に内容を提示して
         // OK / キャンセルを選ばせる（クリーンに変換できる切替は従来どおり無確認で適用する）
         if (
-            (plan.Unconverted.Count > 0 || nullable.Count > 0)
-            && !ConfirmTypeConversion(target, plan.Unconverted, nullable)
+            (plan.Unconverted.Count > 0 || nullable.Count > 0 || rejectedNames.Count > 0)
+            && !ConfirmTypeConversion(target, plan.Unconverted, nullable, rejectedNames)
         )
         {
             // キャンセル: 図には何も適用しない。暫定値を捨てて ComboBox の表示を現在方言へ戻す
@@ -1992,11 +2009,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <param name="target">切替先のプロバイダ（導入文の表示名に用いる）</param>
     /// <param name="unconverted">変換できないカラム（元の型を保持する）</param>
     /// <param name="nullable">NOT NULL を解除するカラム（主キー列は除外済み）</param>
+    /// <param name="rejectedNames">切替先の方言が受け付けない名前の行（<see cref="CollectNamesRejectedBy"/>）</param>
     /// <returns>OK が選択された場合 true</returns>
     private bool ConfirmTypeConversion(
         IDatabaseProvider target,
         IReadOnlyList<ColumnTypeConversion> unconverted,
-        IReadOnlyList<ColumnTypeConversion> nullable
+        IReadOnlyList<ColumnTypeConversion> nullable,
+        IReadOnlyList<string> rejectedNames
     )
     {
         var message = string.Join(
@@ -2026,11 +2045,108 @@ public partial class MainViewModel : ObservableObject, IDisposable
             );
         }
 
+        if (rejectedNames.Count > 0)
+        {
+            sections.Add(
+                string.Format(Strings.TypeConversion_NameLimitHeader, target.DisplayName)
+                    + Environment.NewLine
+                    + string.Join(Environment.NewLine, rejectedNames)
+            );
+        }
+
         return _dialogs.ConfirmWarningDetails(
             message,
             string.Join(Environment.NewLine + Environment.NewLine, sections),
             Strings.TypeConversion_ConfirmTitle
         );
+    }
+
+    /// <summary>
+    /// 図の名前（テーブル名・カラム名・外部キーと一意制約の保存された名前）のうち、<paramref name="limit"/> の方言が受け付けないものを
+    /// 場所と理由つきの行にして返す（全件・畳まない）
+    /// </summary>
+    /// <remarks>
+    /// 判定は DDL・同期の入口と同じ <see cref="IdentifierLengthLimit.DescribeViolation"/>。QuickER が付ける既定名は
+    /// 生成のときに上限へ収めるので対象外（保存された名前だけ）。
+    /// </remarks>
+    private IReadOnlyList<string> CollectNamesRejectedBy(IdentifierLengthLimit limit)
+    {
+        var lines = new List<string>();
+
+        string? Reason(string? name, bool isTable)
+        {
+            if (string.IsNullOrEmpty(name) || limit.DescribeViolation(name, isTable) is null)
+            {
+                return null;
+            }
+
+            return limit.CanRepresent(name)
+                ? string.Format(
+                    Strings.TypeConversion_NameLimitTooLong,
+                    DescribeIdentifierLimit(limit)
+                )
+                : Strings.TypeConversion_NameLimitNotRepresentable;
+        }
+
+        foreach (var entity in Entities)
+        {
+            if (Reason(entity.TableName, true) is { } tableReason)
+            {
+                lines.Add(
+                    string.Format(
+                        Strings.TypeConversion_NameLimitTableLine,
+                        entity.TableName,
+                        tableReason
+                    )
+                );
+            }
+
+            foreach (var column in entity.Columns)
+            {
+                if (Reason(column.Name, false) is { } columnReason)
+                {
+                    lines.Add(
+                        string.Format(
+                            Strings.TypeConversion_NameLimitColumnLine,
+                            entity.TableName,
+                            column.Name,
+                            columnReason
+                        )
+                    );
+                }
+            }
+
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                if (Reason(constraint.Name, false) is { } uniqueReason)
+                {
+                    lines.Add(
+                        string.Format(
+                            Strings.TypeConversion_NameLimitUniqueLine,
+                            entity.TableName,
+                            constraint.Name,
+                            uniqueReason
+                        )
+                    );
+                }
+            }
+        }
+
+        foreach (var relationship in Relationships)
+        {
+            if (Reason(relationship.ConstraintName, false) is { } foreignKeyReason)
+            {
+                lines.Add(
+                    string.Format(
+                        Strings.TypeConversion_NameLimitForeignKeyLine,
+                        relationship.ConstraintName,
+                        foreignKeyReason
+                    )
+                );
+            }
+        }
+
+        return lines;
     }
 
     /// <summary>Undo コマンドから方言を切り替えるための内部フック（派生通知も発行する）</summary>
@@ -2106,6 +2222,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
                 // テーブル名・列名の書き換えは、同じ名前があれば受け付けずに戻す。戻したことをステータスバーで知らせる
                 entity.NameScope = Entities;
+                entity.IdentifierLimitSource = CurrentIdentifierLimit;
                 entity.NameChangeRejected += OnEntityNameChangeRejected;
 
                 // 一意制約カードのコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
@@ -2149,9 +2266,63 @@ public partial class MainViewModel : ObservableObject, IDisposable
         entity.PropertyChanged -= OnEntityPropertyChanged;
         entity.NameChangeRejected -= OnEntityNameChangeRejected;
         entity.NameScope = null;
+        entity.IdentifierLimitSource = null;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
         _changeTracker.DetachEntity(entity);
     }
+
+    /// <summary>
+    /// 利用者が名前を確定したとき、対象 DBMS の識別子の長さの上限を超えるか、表せない文字を含むなら、ステータスバーの一時通知で警告する
+    /// </summary>
+    /// <remarks>
+    /// 値は受け付ける（DDL・同期の入口が断る）。判定は入口と同じ <see cref="IdentifierLengthLimit.DescribeViolation"/> の
+    /// 条件（<see cref="IdentifierLengthLimit.CanRepresent"/> / <see cref="IdentifierLengthLimit.Fits"/> 系）を使い、写しを作らない。
+    /// Undo / Redo・一括置換では発火しない（<see cref="DiagramChangeTracker.NameEdited"/>）。
+    /// </remarks>
+    private void OnNameEdited(object target, string name)
+    {
+        var limit = CurrentIdentifierLimit();
+        var isTable = target is EntityViewModel;
+
+        if (limit.DescribeViolation(name, isTable) is null)
+        {
+            return;
+        }
+
+        var dbms = _currentProvider.Name;
+
+        NotifyStatus(
+            !limit.CanRepresent(name)
+                ? string.Format(Strings.Status_NameNotRepresentable, name, dbms)
+                : string.Format(
+                    Strings.Status_NameTooLong,
+                    name,
+                    DescribeIdentifierLimit(limit),
+                    dbms
+                )
+        );
+    }
+
+    /// <summary>識別子の長さの上限を、UI 言語で表記する</summary>
+    private static string DescribeIdentifierLimit(IdentifierLengthLimit limit) =>
+        limit.Unit switch
+        {
+            IdentifierLengthUnit.Utf16CodeUnits => string.Format(
+                Strings.IdentifierLimit_Utf16CodeUnits,
+                limit.Max
+            ),
+            IdentifierLengthUnit.Utf8Bytes => string.Format(
+                Strings.IdentifierLimit_Utf8Bytes,
+                limit.Max
+            ),
+            IdentifierLengthUnit.Characters when limit.TableFileNameMax is { } fileMax =>
+                string.Format(Strings.IdentifierLimit_CharactersWithTableFile, limit.Max, fileMax),
+            IdentifierLengthUnit.Characters => string.Format(
+                Strings.IdentifierLimit_Characters,
+                limit.Max
+            ),
+            _ => limit.Describe(),
+        };
 
     /// <summary>プロパティパネルの名前の書き換えを重複のため受け付けなかったことを、ステータスバーの一時通知で知らせる</summary>
     private void OnEntityNameChangeRejected(object? sender, NameChangeRejectedEventArgs e) =>

@@ -71,7 +71,7 @@ public partial class MermaidFormatFidelityTests
         diagram.Entities[0].Columns[0].DataType = string.Empty;
 
         var mermaid = MermaidExporter.Build(diagram);
-        var restored = MermaidImporter.Parse(mermaid).Entities[0].Columns[0];
+        var restored = MermaidImporter.Parse(mermaid, "sqlserver").Entities[0].Columns[0];
 
         mermaid.Should().Contain("_ id PK");
         restored.Name.Should().Be("id");
@@ -102,7 +102,7 @@ public partial class MermaidFormatFidelityTests
         var diagram = BuildSingleTable("items", dataType);
 
         var mermaid = MermaidExporter.Build(diagram);
-        var restored = MermaidImporter.Parse(mermaid).Entities[0].Columns[1];
+        var restored = MermaidImporter.Parse(mermaid, "sqlserver").Entities[0].Columns[1];
 
         var token = mermaid
             .Split('\n')
@@ -148,7 +148,7 @@ public partial class MermaidFormatFidelityTests
         var diagram = BuildParentChild(parentName, childName);
 
         var mermaid = MermaidExporter.Build(diagram);
-        var restored = MermaidImporter.Parse(mermaid);
+        var restored = MermaidImporter.Parse(mermaid, "sqlserver");
 
         mermaid.Should().Contain($"\"{parentName}\" {{");
         restored.Entities.Select(entity => entity.TableName).Should().Equal(parentName, childName);
@@ -171,7 +171,7 @@ public partial class MermaidFormatFidelityTests
         var diagram = BuildParentChild("a\"b c", "a_b c");
         diagram.Entities.Add(BuildSingleTable(@"100% \ done", "int").Entities[0]);
 
-        var restored = MermaidImporter.Parse(MermaidExporter.Build(diagram));
+        var restored = MermaidImporter.Parse(MermaidExporter.Build(diagram), "sqlserver");
 
         restored
             .Entities.Select(entity => entity.TableName)

@@ -10,6 +10,9 @@ namespace QuickER.Provider.PostgreSql;
 /// </remarks>
 public static class PgIdentifier
 {
+    /// <summary>識別子の長さの上限（63 バイト。超えた名前は PostgreSQL が黙って切り詰める。値の正本は <see cref="IdentifierLengthLimits"/>）</summary>
+    public static IdentifierLengthLimit Limit => IdentifierLengthLimits.PostgreSql;
+
     /// <summary>テーブル名を <c>"schema"."name"</c> または <c>"name"</c> 形式へクォートする</summary>
     public static string Quote(string name)
     {

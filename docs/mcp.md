@@ -113,6 +113,10 @@ An unused parameter or a multi-statement SQL is reported as a warning and the sa
 An input that the chosen `implementation` does not use is reported as a warning: `sql` with `dsl` or `manual` (the SQL is not saved, as in the GUI's query definition dialog), and `condition` with `sql` or `manual` (the condition is not saved).
 With `implementation` = `sql` and no SQL for any dialect, a warning says that the generated method is left to be written by hand in every dialect.
 A `sql` value that is empty or only spaces counts as no SQL for that dialect and is not saved.
+
+A tool that takes a name (`add_entity`, `add_column`, `set_entity_property`, `set_column_property`, `add_relationship` with `constraint_name`, `set_unique_constraint`) saves a name that the diagram's target database would refuse (longer than its identifier limit, or holding a character it cannot store) and adds a `Note:` to the response naming the place and the reason.
+The note appears once, in the call that introduced the name.
+DDL generation and sync refuse such a name until it is changed (see [Identifier length limits](database.md#identifier-length-limits)).
 A definition that code generation always rejects is refused with the generator's own message, by the same checks the generator runs: a query name that does not make a method name, or whose method name (the name in PascalCase with `Async`) is a standard repository member such as `GetByIdAsync` or matches another query on the same table; a parameter, field or result type name that is not a C# identifier, a parameter named `Query`, `cancellationToken`, or `take`/`skip` with paging, or the same parameter or field name twice; a result type name already used by another query; `scalar` with `dsl`; `paging` outside `list` and `projection`; and, with `dsl`, a projection field without a `source_column`.
 The GUI's query definition dialog runs the same checks before it lets you confirm.
 

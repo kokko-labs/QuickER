@@ -105,7 +105,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             var name = string.IsNullOrWhiteSpace(constraint.Name)
                 ? UniqueConstraint.SynthesizeName(
                     entity.TableName,
-                    columns.Select(column => column.Name)
+                    columns.Select(column => column.Name),
+                    _identifierLimit
                 )
                 : constraint.Name;
 

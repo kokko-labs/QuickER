@@ -122,7 +122,7 @@ public class DbmlUniqueConstraintTests
             }
         );
 
-        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram));
+        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram), "sqlserver");
 
         var restoredCustomer = restored.Entities.Single();
         Describe(restoredCustomer)
@@ -158,7 +158,7 @@ public class DbmlUniqueConstraintTests
             ]
         );
 
-        var diagram = DbmlImporter.Parse(text);
+        var diagram = DbmlImporter.Parse(text, "sqlserver");
 
         var customer = diagram.Entities.Single();
         Describe(customer)
@@ -187,7 +187,7 @@ public class DbmlUniqueConstraintTests
             ]
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should().Throw<System.IO.InvalidDataException>().WithMessage("*NoSuchColumn*");
     }

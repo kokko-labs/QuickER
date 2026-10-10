@@ -151,6 +151,15 @@ public sealed class DiagramChangeTracker
     /// </remarks>
     private readonly Action<ColumnViewModel, string, string> _onColumnRenamed;
 
+    /// <summary>
+    /// ユーザー編集で名前（テーブル名・カラム名・外部キーの制約名・一意制約の名前）が確定したときに発火する（対象・新しい名前）
+    /// </summary>
+    /// <remarks>
+    /// 履歴へ積んだ編集だけで発火する＝Undo / Redo の適用・一括置換など追跡停止中の変更では発火しない
+    /// （名前の長さの警告を、利用者が名前を確定した瞬間にだけ出すため）。
+    /// </remarks>
+    public event Action<object, string>? NameEdited;
+
     /// <summary>対象オブジェクトごとの直近スナップショット（プロパティ名 → 値）</summary>
     /// <remarks>変更前後の差分算出に用いる</remarks>
     private readonly Dictionary<object, Dictionary<string, object?>> _trackedPropertySnapshots =
@@ -468,6 +477,19 @@ public sealed class DiagramChangeTracker
         TrackPropertyChange(sender, e, TrackedRelationshipProperties);
     }
 
+    /// <summary>プロパティが DDL の識別子になる名前か（テーブル名・カラム名・外部キーの制約名・一意制約の名前）</summary>
+    private static bool IsNameProperty(object target, string propertyName) =>
+        (target is EntityViewModel && propertyName == nameof(EntityViewModel.TableName))
+        || (target is ColumnViewModel && propertyName == nameof(ColumnViewModel.Name))
+        || (
+            target is RelationshipViewModel
+            && propertyName == nameof(RelationshipViewModel.ConstraintName)
+        )
+        || (
+            target is UniqueConstraintViewModel
+            && propertyName == nameof(UniqueConstraintViewModel.Name)
+        );
+
     /// <summary>単一プロパティの変更差分を <see cref="PropertyChangeCommand"/> として記録する</summary>
     private void TrackPropertyChange(
         object? sender,
@@ -510,6 +532,11 @@ public sealed class DiagramChangeTracker
             )
         );
         snapshots[property.Name] = newValue;
+
+        if (newValue is string editedName && IsNameProperty(sender, property.Name))
+        {
+            NameEdited?.Invoke(sender, editedName);
+        }
 
         // カラム名のユーザー編集は、名前付きクエリ条件の列参照書き換えのため所有側へ通知する
         // （追跡停止中＝一括置換ではこの経路を通らないため発火しない。Undo / Redo の通知はコマンドの後処理が出す）

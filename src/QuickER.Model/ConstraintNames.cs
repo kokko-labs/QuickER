@@ -20,6 +20,25 @@ namespace QuickER.Model;
 /// （<see cref="UniqueConstraint.SynthesizeName"/> と同じ理由）。
 /// 識別子の囲み方（クォート）は方言ごとに本当に違うので、ここへは入れず各方言に残す。
 /// </para>
+/// <para>
+/// <b>既定名は識別子の長さの上限に収める</b>（<see cref="IdentifierLengthLimit.Fit"/>＝上限内ならそのまま、超えるときだけ
+/// 末尾を縮める前の名前のハッシュに置き換える）。上限は呼び出し側が引数で渡し、省略できない。渡す上限の経路は 2 つだけ。
+/// </para>
+/// <list type="bullet">
+/// <item>
+/// 図へ保存しない既定名（DDL・同期スクリプトが付ける主キー名・外部キー名・一意制約の合成名と、差分が live と突き合わせる名前）:
+/// <b>DDL・同期の方言の上限</b>。DDL 生成・同期スクリプトは各方言の識別子クラスの <c>Limit</c>
+/// （<c>DdlGeneratorBase.IdentifierLimit</c> / <c>SyncScriptBuilderBase.IdentifierLimit</c>）、差分と同期の計画は
+/// <c>SyncDialectCapabilities.IdentifierLengthLimit</c> を渡す（どれも同じ値を指す＝<c>IdentifierLengthLimitDeclarationTests</c>）。
+/// DDL の方言は図の対象 DBMS と食い違い得る（MCP の <c>generate_ddl</c> は方言を指定できる）ので、図からは引かない。
+/// </item>
+/// <item>
+/// 図へ保存する既定名（ツールと GUI がリレーションに付ける外部キー名・取込と C# リバースの <see cref="NameUnnamedForeignKeys"/>）と、
+/// 図の名前として見せる合成名（C# 生成の <c>[UniqueConstraint(Name = …)]</c>・ツールの要約・プロパティパネル）:
+/// <b>図の対象 DBMS の上限</b>（<see cref="IdentifierLengthLimits.ForDbms"/> に <see cref="ErDiagram.TargetDbms"/> を渡す）。
+/// 図を受け取る <see cref="CollectExisting"/> / <see cref="IsTaken"/> は図の対象 DBMS から自分で引く。
+/// </item>
+/// </list>
 /// </remarks>
 public static class ConstraintNames
 {
@@ -37,14 +56,23 @@ public static class ConstraintNames
     /// <summary>名前を持たない外部キーの既定名を組み立てる</summary>
     /// <param name="childTable">参照する側（外部キーを持つ側）のテーブル名</param>
     /// <param name="parentTable">参照される側のテーブル名</param>
-    /// <returns><c>FK_{子}_{親}</c>（それぞれ <see cref="SafeName"/> を通したもの）</returns>
-    public static string ForeignKey(string childTable, string parentTable) =>
+    /// <param name="limit">識別子の長さの上限（経路は型の XmlDoc）</param>
+    /// <returns><c>FK_{子}_{親}</c>（それぞれ <see cref="SafeName"/> を通したもの。上限を超えるときは <see cref="IdentifierLengthLimit.Fit"/> で縮める）</returns>
+    public static string ForeignKey(
+        string childTable,
+        string parentTable,
+        IdentifierLengthLimit limit
+    ) => limit.Fit(UnshortenedForeignKey(childTable, parentTable));
+
+    /// <summary>縮める前の外部キーの既定名</summary>
+    private static string UnshortenedForeignKey(string childTable, string parentTable) =>
         "FK_" + SafeName(childTable) + "_" + SafeName(parentTable);
 
     /// <summary>外部キーの実効名（保存された名前、無ければ <see cref="ForeignKey"/> の既定名）を返す</summary>
     /// <param name="constraintName">保存された制約名（<c>null</c> や空白だけなら名前を持たない扱い）</param>
     /// <param name="childTable">参照する側（外部キーを持つ側）のテーブル名</param>
     /// <param name="parentTable">参照される側のテーブル名</param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（経路は型の XmlDoc。保存された名前は縮めない）</param>
     /// <returns>保存された名前（そのまま）か、<c>FK_{子}_{親}</c></returns>
     /// <remarks>
     /// DDL・同期スクリプトが外部キーに付ける名前と、同期の差分が live の外部キーと突き合わせる名前は
@@ -56,16 +84,19 @@ public static class ConstraintNames
     public static string EffectiveForeignKey(
         string? constraintName,
         string childTable,
-        string parentTable
+        string parentTable,
+        IdentifierLengthLimit limit
     ) =>
         string.IsNullOrWhiteSpace(constraintName)
-            ? ForeignKey(childTable, parentTable)
+            ? ForeignKey(childTable, parentTable, limit)
             : constraintName;
 
     /// <summary>主キーの既定名を組み立てる</summary>
     /// <param name="tableName">テーブル名</param>
-    /// <returns><c>PK_{テーブル}</c>（<see cref="SafeName"/> を通したもの）</returns>
-    public static string PrimaryKey(string tableName) => "PK_" + SafeName(tableName);
+    /// <param name="limit">識別子の長さの上限（経路は型の XmlDoc）</param>
+    /// <returns><c>PK_{テーブル}</c>（<see cref="SafeName"/> を通したもの。上限を超えるときは <see cref="IdentifierLengthLimit.Fit"/> で縮める）</returns>
+    public static string PrimaryKey(string tableName, IdentifierLengthLimit limit) =>
+        limit.Fit("PK_" + SafeName(tableName));
 
     /// <summary>図の中で既に使われている制約名を、DDL が付ける名前で集める</summary>
     /// <param name="diagram">対象の図</param>
@@ -82,11 +113,13 @@ public static class ConstraintNames
     /// 共有されるため（外部キーに <c>PK_Orders</c> と名付けると DDL が失敗する）。
     /// 大文字小文字を区別しないのは、SQL Server の既定の照合順序と MySQL で大文字小文字だけ違う名前も衝突するため。
     /// </para>
+    /// <para>既定名は図の対象 DBMS の上限で縮めた名前で数える（図へ保存する名前を決めるための集合なので）。</para>
     /// </remarks>
     public static IReadOnlySet<string> CollectExisting(ErDiagram diagram)
     {
         var entities = diagram.Entities;
-        var names = CollectTableConstraints(entities);
+        var limit = IdentifierLengthLimits.ForDbms(diagram.TargetDbms);
+        var names = CollectTableConstraints(entities, limit);
 
         foreach (var relationship in diagram.Relationships)
         {
@@ -107,7 +140,7 @@ public static class ConstraintNames
                 && DefinesForeignKey(relationship, parent, child)
             )
             {
-                names.Add(ForeignKey(child.TableName, parent.TableName));
+                names.Add(ForeignKey(child.TableName, parent.TableName, limit));
             }
         }
 
@@ -149,7 +182,12 @@ public static class ConstraintNames
                     )
                     .OfType<string>();
                 names.Remove(
-                    own.Name ?? UniqueConstraint.SynthesizeName(entity.TableName, columnNames)
+                    own.Name
+                        ?? UniqueConstraint.SynthesizeName(
+                            entity.TableName,
+                            columnNames,
+                            IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+                        )
                 );
             }
         }
@@ -159,13 +197,17 @@ public static class ConstraintNames
 
     /// <summary>テーブルが持つ制約（主キー・一意制約）の名前を、DDL が付ける名前で集める</summary>
     /// <param name="entities">対象のテーブル</param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（経路は型の XmlDoc）</param>
     /// <returns>主キー・一意制約の名前の集合（大文字小文字を区別しない・呼び出し側で追加してよい）</returns>
     /// <remarks>
     /// <see cref="CollectExisting"/> から外部キーを除いた部分で、規則は同じ。
     /// リレーションの名前をまとめて決める処理（Mermaid のラベルの採否・<see cref="NameUnnamedForeignKeys"/>）が、
     /// 予約済みの名前の出発点に使う
     /// </remarks>
-    public static HashSet<string> CollectTableConstraints(IEnumerable<Entity> entities)
+    public static HashSet<string> CollectTableConstraints(
+        IEnumerable<Entity> entities,
+        IdentifierLengthLimit limit
+    )
     {
         var names = new HashSet<string>(SchemaNames.Comparer);
 
@@ -173,7 +215,7 @@ public static class ConstraintNames
         {
             if (entity.Columns.Any(column => column.IsPrimaryKey))
             {
-                names.Add(PrimaryKey(entity.TableName));
+                names.Add(PrimaryKey(entity.TableName, limit));
             }
 
             foreach (var constraint in entity.UniqueConstraints)
@@ -192,7 +234,9 @@ public static class ConstraintNames
 
                 if (columnNames.Count > 0 && columnNames.All(name => name is not null))
                 {
-                    names.Add(UniqueConstraint.SynthesizeName(entity.TableName, columnNames!));
+                    names.Add(
+                        UniqueConstraint.SynthesizeName(entity.TableName, columnNames!, limit)
+                    );
                 }
             }
         }
@@ -203,6 +247,7 @@ public static class ConstraintNames
     /// <summary>リレーションごとに、DDL・同期が外部キーへ付ける名前を求める（図は書き換えない）</summary>
     /// <param name="entities">図のテーブル（リレーションの親子と、主キー・一意制約の名前を引く）</param>
     /// <param name="relationships">図のリレーション</param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（経路は型の XmlDoc）</param>
     /// <returns>
     /// リレーション（参照の同一性で引く）→ 名前。名前を持つリレーションは保存された名前、持たないリレーションは
     /// 既定名 <see cref="ForeignKey"/>、それがほかの制約とぶつかるときは <see cref="UniqueForeignKey"/> の名前。
@@ -230,17 +275,40 @@ public static class ConstraintNames
     /// </remarks>
     public static IReadOnlyDictionary<Relationship, string> ResolveForeignKeyNames(
         IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships
+        IEnumerable<Relationship> relationships,
+        IdentifierLengthLimit limit
+    ) =>
+        ResolveForeignKeyNameDetails(entities, relationships, limit)
+            .ToDictionary(pair => pair.Key, pair => pair.Value.Name);
+
+    /// <summary>
+    /// <see cref="ResolveForeignKeyNames"/> と同じ名前を、縮める前の名前と、保存された名前かどうかと一緒に求める
+    /// </summary>
+    /// <remarks>
+    /// 同期の差分が、旧版の QuickER が長い既定名で作った PostgreSQL の外部キー（PostgreSQL が黙って切り詰めた名前）を
+    /// 同じ外部キーとみなすために、縮める前の名前を使う（<c>SyncDialectCapabilities.TruncatesLongIdentifiers</c>）。
+    /// </remarks>
+    public static IReadOnlyDictionary<
+        Relationship,
+        ResolvedForeignKeyName
+    > ResolveForeignKeyNameDetails(
+        IEnumerable<Entity> entities,
+        IEnumerable<Relationship> relationships,
+        IdentifierLengthLimit limit
     )
     {
         // Relationship は等値を上書きしないので、辞書は参照の同一性で引く
-        var names = new Dictionary<Relationship, string>();
+        var names = new Dictionary<Relationship, ResolvedForeignKeyName>();
 
         foreach (
-            var (relationship, resolved) in ResolveForeignKeyNamesCore(entities, relationships)
+            var (relationship, resolved) in ResolveForeignKeyNamesCore(
+                entities,
+                relationships,
+                limit
+            )
         )
         {
-            names.TryAdd(relationship, resolved.Name);
+            names.TryAdd(relationship, resolved);
         }
 
         return names;
@@ -251,6 +319,7 @@ public static class ConstraintNames
     /// </summary>
     /// <param name="entities">図のテーブル（リレーションの親子と、主キー・一意制約の名前を引く）</param>
     /// <param name="relationships">対象のリレーション（<b>その場で書き換える</b>）</param>
+    /// <param name="limit">名前に使う識別子の長さの上限＝図の対象 DBMS の上限（経路は型の XmlDoc）</param>
     /// <remarks>
     /// <para>
     /// 名前の決め方は <see cref="ResolveForeignKeyNames"/> と同じ。既定名のままでよいリレーションは名前を持たないまま
@@ -264,11 +333,16 @@ public static class ConstraintNames
     /// </remarks>
     public static void NameUnnamedForeignKeys(
         IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships
+        IEnumerable<Relationship> relationships,
+        IdentifierLengthLimit limit
     )
     {
         foreach (
-            var (relationship, resolved) in ResolveForeignKeyNamesCore(entities, relationships)
+            var (relationship, resolved) in ResolveForeignKeyNamesCore(
+                entities,
+                relationships,
+                limit
+            )
         )
         {
             if (!resolved.IsDefault && string.IsNullOrWhiteSpace(relationship.ConstraintName))
@@ -280,20 +354,21 @@ public static class ConstraintNames
 
     /// <summary>
     /// <see cref="ResolveForeignKeyNames"/> と <see cref="NameUnnamedForeignKeys"/> が共有する名前の決め方
-    /// （名前と、それが既定名のままかを返す）
+    /// （名前と、縮める前の名前と、それが保存された名前か・既定名のままかを返す）
     /// </summary>
     private static List<
-        KeyValuePair<Relationship, (string Name, bool IsDefault)>
+        KeyValuePair<Relationship, ResolvedForeignKeyName>
     > ResolveForeignKeyNamesCore(
         IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships
+        IEnumerable<Relationship> relationships,
+        IdentifierLengthLimit limit
     )
     {
         var tables = entities.ToList();
         var targets = relationships.ToList();
-        var reserved = CollectTableConstraints(tables);
+        var reserved = CollectTableConstraints(tables, limit);
         var tablesById = new Dictionary<Guid, Entity>();
-        var resolved = new List<KeyValuePair<Relationship, (string, bool)>>(targets.Count);
+        var resolved = new List<KeyValuePair<Relationship, ResolvedForeignKeyName>>(targets.Count);
 
         foreach (var table in tables)
         {
@@ -312,7 +387,17 @@ public static class ConstraintNames
         {
             if (!string.IsNullOrWhiteSpace(relationship.ConstraintName))
             {
-                resolved.Add(new(relationship, (relationship.ConstraintName, false)));
+                resolved.Add(
+                    new(
+                        relationship,
+                        new ResolvedForeignKeyName(
+                            relationship.ConstraintName,
+                            relationship.ConstraintName,
+                            IsStored: true,
+                            IsDefault: false
+                        )
+                    )
+                );
                 continue;
             }
 
@@ -326,11 +411,22 @@ public static class ConstraintNames
                 continue;
             }
 
-            var defaultName = ForeignKey(child.TableName, parent.TableName);
+            var unshortenedDefault = UnshortenedForeignKey(child.TableName, parent.TableName);
+            var defaultName = limit.Fit(unshortenedDefault);
 
             if (reserved.Add(defaultName))
             {
-                resolved.Add(new(relationship, (defaultName, true)));
+                resolved.Add(
+                    new(
+                        relationship,
+                        new ResolvedForeignKeyName(
+                            defaultName,
+                            unshortenedDefault,
+                            IsStored: false,
+                            IsDefault: true
+                        )
+                    )
+                );
                 continue;
             }
 
@@ -339,14 +435,20 @@ public static class ConstraintNames
                     child.Columns.FirstOrDefault(column => column.Id == pair.TargetColumnId)?.Name
                 )
                 .OfType<string>();
-            var name = UniqueForeignKey(
+            var (name, unshortened) = UniqueForeignKeyCore(
                 child.TableName,
                 parent.TableName,
                 childColumnNames,
-                reserved
+                reserved,
+                limit
             );
             reserved.Add(name);
-            resolved.Add(new(relationship, (name, false)));
+            resolved.Add(
+                new(
+                    relationship,
+                    new ResolvedForeignKeyName(name, unshortened, IsStored: false, IsDefault: false)
+                )
+            );
         }
 
         return resolved;
@@ -377,6 +479,7 @@ public static class ConstraintNames
     /// <param name="parentTable">参照される側のテーブル名</param>
     /// <param name="childColumnNames">外部キーを構成する子の列名（宣言順・無ければ空）</param>
     /// <param name="existingNames">既存の制約名（<see cref="CollectExisting"/> の結果）</param>
+    /// <param name="limit">識別子の長さの上限（経路は型の XmlDoc。図へ保存する名前なので図の対象 DBMS の上限）</param>
     /// <returns>
     /// 空いていれば <see cref="ForeignKey"/> の既定名。ふさがっていれば子の列名を <c>_</c> でつないで足した名前
     /// （<c>FK_Orders_Customers_ShippingCustomerId</c>）。それもふさがっているか列が無いときは、さらに
@@ -385,21 +488,38 @@ public static class ConstraintNames
     /// <remarks>
     /// 同じテーブルの組に役割の違う外部キー（請求先・配送先など）を 2 本張ると、既定名だけでは同じ名前になり、
     /// DDL の 2 本目が失敗し、名前でリレーションを特定することもできなくなる。比較は大文字小文字を区別しない。
-    /// 結果は入力から一意に決まる
+    /// 結果は入力から一意に決まる。候補はそれぞれ <see cref="IdentifierLengthLimit.Fit"/> で縮めてから空きを確かめる
+    /// （縮めた名前どうしは、縮める前の名前のハッシュが違うので重ならない）
     /// </remarks>
     public static string UniqueForeignKey(
         string childTable,
         string parentTable,
         IEnumerable<string> childColumnNames,
-        IEnumerable<string> existingNames
+        IEnumerable<string> existingNames,
+        IdentifierLengthLimit limit
+    ) =>
+        UniqueForeignKeyCore(
+            childTable,
+            parentTable,
+            childColumnNames,
+            new HashSet<string>(existingNames, SchemaNames.Comparer),
+            limit
+        ).Name;
+
+    /// <summary><see cref="UniqueForeignKey"/> の本体（縮めた名前と、縮める前の名前を返す）</summary>
+    private static (string Name, string Unshortened) UniqueForeignKeyCore(
+        string childTable,
+        string parentTable,
+        IEnumerable<string> childColumnNames,
+        HashSet<string> taken,
+        IdentifierLengthLimit limit
     )
     {
-        var taken = new HashSet<string>(existingNames, SchemaNames.Comparer);
-        var name = ForeignKey(childTable, parentTable);
+        var name = UnshortenedForeignKey(childTable, parentTable);
 
-        if (!taken.Contains(name))
+        if (!taken.Contains(limit.Fit(name)))
         {
-            return name;
+            return (limit.Fit(name), name);
         }
 
         var columns = childColumnNames.Select(SafeName).Where(column => column.Length > 0).ToList();
@@ -408,20 +528,46 @@ public static class ConstraintNames
         {
             name += "_" + string.Join("_", columns);
 
-            if (!taken.Contains(name))
+            if (!taken.Contains(limit.Fit(name)))
             {
-                return name;
+                return (limit.Fit(name), name);
             }
         }
 
-        for (var suffix = 2; ; suffix++)
+        // 候補は Fit で縮めてから空きを確かめるので、Fit が候補の違いを保てないと空きが見つからない。
+        // 黙って回り続けず（GUI ごと固まる）、上限で例外にして表に出す
+        for (var suffix = 2; suffix <= MaxNumberedCandidates; suffix++)
         {
             var candidate = name + "_" + suffix;
 
-            if (!taken.Contains(candidate))
+            if (!taken.Contains(limit.Fit(candidate)))
             {
-                return candidate;
+                return (limit.Fit(candidate), candidate);
             }
         }
+
+        throw new InvalidOperationException(
+            $"Could not find a free foreign key name for '{childTable}' -> '{parentTable}' "
+                + $"after {MaxNumberedCandidates - 1} numbered candidates."
+        );
     }
+
+    /// <summary>外部キーの名前を一意にするときに試す番号の上限（<see cref="UniqueForeignKey"/>）</summary>
+    /// <remarks>
+    /// 実際の図でここまで届くことは無い（同じテーブルの組の外部キーがこの本数を超えない）。
+    /// 縮め方（<see cref="IdentifierLengthLimit.Fit"/>）が候補の違いを保てなくなったときに、終わらない繰り返しを例外へ変えるための上限
+    /// </remarks>
+    public const int MaxNumberedCandidates = 1000;
 }
+
+/// <summary>外部キーに付ける名前の解決結果</summary>
+/// <param name="Name">DDL・同期が付ける名前（既定名は上限に収めたもの）</param>
+/// <param name="UnshortenedName">上限に収める前の名前（保存された名前ならそれと同じ）</param>
+/// <param name="IsStored">リレーションに保存された名前か</param>
+/// <param name="IsDefault">既定名 <c>FK_{子}_{親}</c> のままか（一意化した名前・保存された名前は <c>false</c>）</param>
+public sealed record ResolvedForeignKeyName(
+    string Name,
+    string UnshortenedName,
+    bool IsStored,
+    bool IsDefault
+);

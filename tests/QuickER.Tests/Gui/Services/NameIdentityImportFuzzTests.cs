@@ -168,15 +168,15 @@ public sealed class NameIdentityImportFuzzTests
         switch (format)
         {
             case Format.Dbml:
-                return DbmlImporter.Parse(DbmlExporter.Build(diagram));
+                return DbmlImporter.Parse(DbmlExporter.Build(diagram), "sqlserver");
 
             case Format.Mermaid:
-                return MermaidImporter.Parse(MermaidExporter.Build(diagram));
+                return MermaidImporter.Parse(MermaidExporter.Build(diagram), "sqlserver");
 
             default:
                 using (var workbook = TableDefinitionDocumentExporter.BuildWorkbook(diagram))
                 {
-                    return TableDefinitionDocumentImporter.Load(workbook);
+                    return TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
                 }
         }
     }

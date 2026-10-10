@@ -11,6 +11,9 @@ namespace QuickER.Provider.MySql;
 /// </remarks>
 public static class MySqlIdentifier
 {
+    /// <summary>識別子の長さの上限（64 文字と、表の名前のファイル名での 251 バイト。値の正本は <see cref="IdentifierLengthLimits"/>）</summary>
+    public static IdentifierLengthLimit Limit => IdentifierLengthLimits.MySql;
+
     /// <summary>テーブル名を <c>`schema`.`name`</c> または <c>`name`</c> 形式へクォートする</summary>
     public static string Quote(string name)
     {

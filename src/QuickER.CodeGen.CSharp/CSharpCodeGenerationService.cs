@@ -1826,7 +1826,11 @@ public sealed partial class CSharpCodeGenerationService
                             .ColumnIds.Select(id => columnsById[id].Name)
                             .ToList();
                         var name = string.IsNullOrWhiteSpace(constraint.Name)
-                            ? UniqueConstraint.SynthesizeName(entity.TableName, members)
+                            ? UniqueConstraint.SynthesizeName(
+                                entity.TableName,
+                                members,
+                                IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+                            )
                             : constraint.Name;
 
                         return $"{entity.TableName}.{name} ({string.Join(", ", members)})";

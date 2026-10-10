@@ -18,6 +18,9 @@ namespace QuickER.Provider.SqlServer;
 public sealed class SqlServerDdlGenerator : DdlGeneratorBase
 {
     /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => SqlIdentifier.Limit;
+
+    /// <inheritdoc />
     protected override string QuoteQualifiedName(string name) => SqlIdentifier.Bracket(name);
 
     /// <inheritdoc />

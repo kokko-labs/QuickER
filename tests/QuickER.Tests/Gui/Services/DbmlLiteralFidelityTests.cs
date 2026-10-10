@@ -57,7 +57,10 @@ public class DbmlLiteralFidelityTests
     {
         var diagram = BuildSingleColumnDiagram(dataType, description: "note text");
 
-        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram)).Entities[0].Columns[1];
+        var restored = DbmlImporter
+            .Parse(DbmlExporter.Build(diagram), "sqlserver")
+            .Entities[0]
+            .Columns[1];
 
         restored.DataType.Should().Be(dataType);
         restored.Description.Should().Be("note text");
@@ -69,7 +72,10 @@ public class DbmlLiteralFidelityTests
     {
         var diagram = BuildSingleColumnDiagram("varchar(10)", description: @"C:\");
 
-        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram)).Entities[0].Columns[1];
+        var restored = DbmlImporter
+            .Parse(DbmlExporter.Build(diagram), "sqlserver")
+            .Entities[0]
+            .Columns[1];
 
         restored.Description.Should().Be(@"C:\");
     }
@@ -87,7 +93,7 @@ public class DbmlLiteralFidelityTests
             }
             """;
 
-        var entity = DbmlImporter.Parse(Dbml).Entities[0];
+        var entity = DbmlImporter.Parse(Dbml, "sqlserver").Entities[0];
         var column = entity.Columns[1];
 
         column.Description.Should().Be(@"C:\");
@@ -111,7 +117,7 @@ public class DbmlLiteralFidelityTests
             """;
 
         var constraint = DbmlImporter
-            .Parse(Dbml)
+            .Parse(Dbml, "sqlserver")
             .Entities[0]
             .UniqueConstraints.Should()
             .ContainSingle()
@@ -138,7 +144,7 @@ public class DbmlLiteralFidelityTests
             """;
 
         DbmlImporter
-            .Parse(Dbml)
+            .Parse(Dbml, "sqlserver")
             .Relationships.Should()
             .ContainSingle()
             .Which.OnDelete.Should()
@@ -198,7 +204,7 @@ public class DbmlLiteralFidelityTests
             ],
         };
 
-        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram));
+        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram), "sqlserver");
 
         var relationship = restored.Relationships.Should().ContainSingle().Subject;
         var restoredParent = restored.Entities.Single(entity => entity.TableName == "parents");

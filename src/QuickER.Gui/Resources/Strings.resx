@@ -299,6 +299,24 @@
   <data name="Status_ColumnNameRejected" xml:space="preserve">
     <value>Table '{0}' already has a column named '{1}' (compared ignoring case and surrounding spaces). The column name was not changed.</value>
   </data>
+  <data name="Status_NameTooLong" xml:space="preserve">
+    <value>'{0}' is longer than the limit of {1} for {2}. DDL generation and sync will refuse this name until it is shortened.</value>
+  </data>
+  <data name="Status_NameNotRepresentable" xml:space="preserve">
+    <value>'{0}' contains a character outside the Basic Multilingual Plane (such as an emoji), which {1} cannot store. DDL generation and sync will refuse this name until the character is removed.</value>
+  </data>
+  <data name="IdentifierLimit_Utf16CodeUnits" xml:space="preserve">
+    <value>{0} UTF-16 code units</value>
+  </data>
+  <data name="IdentifierLimit_Utf8Bytes" xml:space="preserve">
+    <value>{0} UTF-8 bytes</value>
+  </data>
+  <data name="IdentifierLimit_Characters" xml:space="preserve">
+    <value>{0} characters</value>
+  </data>
+  <data name="IdentifierLimit_CharactersWithTableFile" xml:space="preserve">
+    <value>{0} characters (a table name is also limited to {1} bytes as a file name)</value>
+  </data>
   <data name="Status_EntitiesLabel" xml:space="preserve">
     <value>Entities:</value>
   </data>
@@ -663,7 +681,7 @@
     <value>Change Target Database</value>
   </data>
   <data name="TypeConversion_ConfirmIntro" xml:space="preserve">
-    <value>Switching the target database to {0} affects the columns listed below.</value>
+    <value>Switching the target database to {0} affects the items listed below.</value>
   </data>
   <data name="TypeConversion_ConfirmNote" xml:space="preserve">
     <value>Note: converted types may not be restored by switching the dialect back later (Undo restores this change exactly).</value>
@@ -682,6 +700,27 @@
   </data>
   <data name="TypeConversion_NullableColumnLine" xml:space="preserve">
     <value>• {0}.{1} ({2})</value>
+  </data>
+  <data name="TypeConversion_NameLimitHeader" xml:space="preserve">
+    <value>Names that {0} would refuse (DDL generation and sync stop until they are changed):</value>
+  </data>
+  <data name="TypeConversion_NameLimitTableLine" xml:space="preserve">
+    <value>Table '{0}': {1}</value>
+  </data>
+  <data name="TypeConversion_NameLimitColumnLine" xml:space="preserve">
+    <value>Column '{0}'.'{1}': {2}</value>
+  </data>
+  <data name="TypeConversion_NameLimitUniqueLine" xml:space="preserve">
+    <value>Unique constraint '{0}'.'{1}': {2}</value>
+  </data>
+  <data name="TypeConversion_NameLimitForeignKeyLine" xml:space="preserve">
+    <value>Foreign key '{0}': {1}</value>
+  </data>
+  <data name="TypeConversion_NameLimitTooLong" xml:space="preserve">
+    <value>longer than the limit of {0}</value>
+  </data>
+  <data name="TypeConversion_NameLimitNotRepresentable" xml:space="preserve">
+    <value>contains a character outside the Basic Multilingual Plane, which cannot be stored</value>
   </data>
   <data name="Common_MoreItems" xml:space="preserve">
     <value>…and {0} more</value>

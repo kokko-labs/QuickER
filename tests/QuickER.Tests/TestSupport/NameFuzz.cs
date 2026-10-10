@@ -421,12 +421,27 @@ public sealed record KnownFuzzFailure(FuzzFailureKey Key, string Finding, string
 /// </remarks>
 public sealed class FuzzFailureLedger(IReadOnlyList<KnownFuzzFailure> known)
 {
-    private readonly Dictionary<FuzzFailureKey, string> _observed = [];
+    /// <summary>キーごとに残す例の数（同じキーの失敗が別の原因でないかを見分けられるだけ残す）</summary>
+    private const int MaxExamplesPerKey = 3;
 
-    /// <summary>失敗を記録する（同じキーは最初の例だけを残す）</summary>
+    private readonly Dictionary<FuzzFailureKey, List<string>> _observed = [];
+
+    /// <summary>失敗を記録する（同じキーは最初の 3 つの例を残す）</summary>
     /// <param name="key">失敗のキー</param>
     /// <param name="example">再現の例（シード・名前・結果）</param>
-    public void Record(FuzzFailureKey key, string example) => _observed.TryAdd(key, example);
+    public void Record(FuzzFailureKey key, string example)
+    {
+        if (!_observed.TryGetValue(key, out var examples))
+        {
+            examples = [];
+            _observed[key] = examples;
+        }
+
+        if (examples.Count < MaxExamplesPerKey)
+        {
+            examples.Add(example);
+        }
+    }
 
     /// <summary>入口の接頭辞に属する観測と一覧を厳密に照合する</summary>
     /// <param name="entrancePrefix">このテストが受け持つ入口の接頭辞</param>
@@ -440,7 +455,12 @@ public sealed class FuzzFailureLedger(IReadOnlyList<KnownFuzzFailure> known)
         var knownKeys = known.Where(item => Owned(item.Key)).ToDictionary(item => item.Key);
         var unexpected = _observed
             .Where(pair => Owned(pair.Key) && !knownKeys.ContainsKey(pair.Key))
-            .Select(pair => $"  新しい失敗: {pair.Key}{Environment.NewLine}    例: {pair.Value}")
+            .Select(pair =>
+                $"  新しい失敗: {pair.Key}"
+                + string.Concat(
+                    pair.Value.Select(example => $"{Environment.NewLine}    例: {example}")
+                )
+            )
             .ToList();
         var fixedButListed = knownKeys
             .Values.Where(item => !_observed.ContainsKey(item.Key))

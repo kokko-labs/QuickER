@@ -171,7 +171,7 @@ public class DiagramImportServiceTests
             var (service, host, dialogs) = Create(new FileDialogResult(path, 2));
 
             // DBML と同じ構造の現在図（構造署名は一致する）。クエリ・未保存変更なし
-            host.Model = DbmlImporter.Load(path);
+            host.Model = DbmlImporter.Load(path, "sqlserver");
             host.HasNothingToLose = false;
             dialogs.ConfirmResult = false;
 

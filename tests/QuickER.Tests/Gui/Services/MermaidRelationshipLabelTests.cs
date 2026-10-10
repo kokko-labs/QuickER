@@ -83,7 +83,7 @@ public class MermaidRelationshipLabelTests
             .Should()
             .Equal("customers ||--o{ orders : \"FK orders customer\"");
 
-        var reimported = MermaidImporter.Parse(mermaid);
+        var reimported = MermaidImporter.Parse(mermaid, "sqlserver");
         var relationship = reimported.Relationships.Should().ContainSingle().Subject;
         relationship.Type.Should().Be(RelationshipType.OneToMany);
         reimported
@@ -112,7 +112,7 @@ public class MermaidRelationshipLabelTests
         var mermaid = MermaidExporter.Build(diagram);
 
         RelationshipLines(mermaid).Should().Equal($"customers ||--o{{ orders : {expectedLabel}");
-        MermaidImporter.Parse(mermaid).Relationships.Should().ContainSingle();
+        MermaidImporter.Parse(mermaid, "sqlserver").Relationships.Should().ContainSingle();
         MermaidExporter
             .DetectOmissions(diagram)
             .Should()
@@ -131,7 +131,7 @@ public class MermaidRelationshipLabelTests
 
         RelationshipLines(mermaid).Should().Equal($"customers ||--o{{ orders : {name}");
         MermaidImporter
-            .Parse(mermaid)
+            .Parse(mermaid, "sqlserver")
             .Relationships.Should()
             .ContainSingle()
             .Which.ConstraintName.Should()
@@ -218,7 +218,7 @@ public class MermaidRelationshipLabelTests
             ],
         };
 
-        var reimported = MermaidImporter.Parse(MermaidExporter.Build(diagram));
+        var reimported = MermaidImporter.Parse(MermaidExporter.Build(diagram), "sqlserver");
 
         var child = reimported.Entities.Single(entity => entity.TableName == "OrderLines");
         var pair = reimported

@@ -130,7 +130,12 @@ public sealed class SyncPlanner
         var warnings = new List<SyncPlanWarning>();
 
         // 一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合は警告する（方言に依らず同じ危険）
-        WarnUniqueConstraintDropsBreakingForeignKeys(selected, context, warnings);
+        WarnUniqueConstraintDropsBreakingForeignKeys(
+            selected,
+            context,
+            warnings,
+            capabilities.IdentifierLengthLimit
+        );
 
         // ALTER COLUMN も FK の後付けもできない方言はテーブル再構築が必要になる
         var isRebuildDialect =
@@ -187,7 +192,7 @@ public sealed class SyncPlanner
             );
         }
 
-        return BuildRebuildPlan(selected, context, warnings);
+        return BuildRebuildPlan(selected, context, warnings, capabilities.IdentifierLengthLimit);
     }
 
     /// <summary>
@@ -419,7 +424,12 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            var constraintName = ResolveForeignKeyName(fk.Relationship, childTable, parentTable);
+            var constraintName = ResolveForeignKeyName(
+                fk.Relationship,
+                childTable,
+                parentTable,
+                capabilities.IdentifierLengthLimit
+            );
 
             // 子表・親表・構成列のどれかが同期で消えるなら、外部キーはどのみち残れないので付け直さない
             // （付け直すと消えた表・列を参照して失敗する）。外すほうは残す＝主キーの解除や列の削除は、
@@ -723,7 +733,8 @@ public sealed class SyncPlanner
     private static void WarnRebuildForeignKeysLosingCandidateKey(
         IReadOnlyList<SchemaDiffItem> selected,
         SyncPlanContext context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        IdentifierLengthLimit limit
     )
     {
         var pkChangedTables = CollectPrimaryKeyChanges(selected);
@@ -769,7 +780,7 @@ public sealed class SyncPlanner
                 new SyncPlanWarning(
                     SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey,
                     childTable,
-                    ResolveForeignKeyName(fk.Relationship, childTable, parentTable)
+                    ResolveForeignKeyName(fk.Relationship, childTable, parentTable, limit)
                 )
             );
         }
@@ -1034,7 +1045,8 @@ public sealed class SyncPlanner
     private static void WarnUniqueConstraintDropsBreakingForeignKeys(
         IReadOnlyList<SchemaDiffItem> selected,
         SyncPlanContext? context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        IdentifierLengthLimit limit
     )
     {
         if (context is null)
@@ -1081,7 +1093,8 @@ public sealed class SyncPlanner
                         ResolveForeignKeyName(
                             fk.Relationship,
                             SchemaDiffService.NormalizeTable(fk.Child),
-                            parentTable
+                            parentTable,
+                            limit
                         )
                     )
                 );
@@ -1116,11 +1129,19 @@ public sealed class SyncPlanner
         );
 
     /// <summary>FK 制約名を解決する（未設定なら <c>FK_{子}_{親}</c> の規約名）</summary>
+    /// <remarks>既定名は同期の方言の上限で縮める（<paramref name="limit"/>＝<see cref="SyncDialectCapabilities.IdentifierLengthLimit"/>）</remarks>
     private static string ResolveForeignKeyName(
         Relationship? relationship,
         string childTable,
-        string parentTable
-    ) => ConstraintNames.EffectiveForeignKey(relationship?.ConstraintName, childTable, parentTable);
+        string parentTable,
+        IdentifierLengthLimit limit
+    ) =>
+        ConstraintNames.EffectiveForeignKey(
+            relationship?.ConstraintName,
+            childTable,
+            parentTable,
+            limit
+        );
 
     /// <summary>live のテーブルを名前で引く索引（規則は差分と同じ <see cref="NameLookup{T}"/>）</summary>
     /// <remarks>
@@ -1149,7 +1170,8 @@ public sealed class SyncPlanner
     private static SyncPlan BuildRebuildPlan(
         List<SchemaDiffItem> selected,
         SyncPlanContext context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        IdentifierLengthLimit limit
     )
     {
         // 選択済み AddTable のテーブル名（新規テーブル＝CreateOnly の対象）
@@ -1179,7 +1201,7 @@ public sealed class SyncPlanner
             .ToLookup(fk => SchemaDiffService.NormalizeTable(fk.Child), TableComparer);
 
         var rebuilds = new List<TableRebuildPlan>();
-        rebuilds.AddRange(BuildCreateOnlyRebuilds(selected, addedTables, diverted));
+        rebuilds.AddRange(BuildCreateOnlyRebuilds(selected, addedTables, diverted, limit));
         rebuilds.AddRange(
             BuildExistingTableRebuilds(
                 selected,
@@ -1187,7 +1209,8 @@ public sealed class SyncPlanner
                 liveByName,
                 diverted,
                 context,
-                liveForeignKeysByChild
+                liveForeignKeysByChild,
+                limit
             )
         );
 
@@ -1196,7 +1219,7 @@ public sealed class SyncPlanner
         WarnRebuildDropsColumnAttributes(rebuilds, context, warnings);
 
         // 主キーを付け替える親表を参照する外部キーの、候補キー喪失（逐次 DDL の方言と同じ判定）
-        WarnRebuildForeignKeysLosingCandidateKey(selected, context, warnings);
+        WarnRebuildForeignKeysLosingCandidateKey(selected, context, warnings, limit);
 
         // 転用済みの項目を除いた残りをセクション化する（転用できなかった項目はレンダラーがスキップを明示する）
         var sectionItems = selected.Where(i => !diverted.Contains(i)).ToList();
@@ -1262,7 +1285,8 @@ public sealed class SyncPlanner
     private static IEnumerable<TableRebuildPlan> BuildCreateOnlyRebuilds(
         List<SchemaDiffItem> selected,
         HashSet<string> addedTables,
-        HashSet<SchemaDiffItem> diverted
+        HashSet<SchemaDiffItem> diverted,
+        IdentifierLengthLimit limit
     )
     {
         foreach (var addTable in selected.Where(i => i.Kind == SchemaDiffKind.AddTable))
@@ -1283,7 +1307,7 @@ public sealed class SyncPlanner
 
             foreach (var fkItem in fkItems)
             {
-                var resolved = ResolveAddedForeignKey(fkItem);
+                var resolved = ResolveAddedForeignKey(fkItem, limit);
 
                 if (resolved is null)
                 {
@@ -1317,7 +1341,8 @@ public sealed class SyncPlanner
         NameLookup<Entity> liveByName,
         HashSet<SchemaDiffItem> diverted,
         SyncPlanContext context,
-        ILookup<string, ResolvedForeignKeyRelationship> liveForeignKeysByChild
+        ILookup<string, ResolvedForeignKeyRelationship> liveForeignKeysByChild,
+        IdentifierLengthLimit limit
     )
     {
         foreach (var table in existingRebuildTables)
@@ -1355,7 +1380,11 @@ public sealed class SyncPlanner
             ApplySelectedUniqueConstraintChanges(newDef, tableItems);
 
             // FK 集合 = live の子側 FK − 選択済み DropForeignKey ＋ 選択済み AddForeignKey
-            var foreignKeys = SynthesizeForeignKeys(tableItems, liveForeignKeysByChild[table]);
+            var foreignKeys = SynthesizeForeignKeys(
+                tableItems,
+                liveForeignKeysByChild[table],
+                limit
+            );
 
             // データ移送対象 = live と合成後の両方に存在する列（合成後の列順で並べる）
             var liveColumnNames = live.Columns.Select(c => c.Name).ToHashSet(TableComparer);
@@ -1828,10 +1857,11 @@ public sealed class SyncPlanner
     /// <param name="liveForeignKeys">この表を子に持つ live の外部キー</param>
     private static List<TableRebuildForeignKey> SynthesizeForeignKeys(
         IReadOnlyList<SchemaDiffItem> tableItems,
-        IEnumerable<ResolvedForeignKeyRelationship> liveForeignKeys
+        IEnumerable<ResolvedForeignKeyRelationship> liveForeignKeys,
+        IdentifierLengthLimit limit
     )
     {
-        var foreignKeys = liveForeignKeys.Select(ToRebuildForeignKey).ToList();
+        var foreignKeys = liveForeignKeys.Select(fk => ToRebuildForeignKey(fk, limit)).ToList();
 
         // 選択済み DropForeignKey に一致する live FK を除去する（親テーブル・構成列ペアのシグネチャで照合）
         foreach (var dropFk in tableItems.Where(i => i.Kind == SchemaDiffKind.DropForeignKey))
@@ -1860,7 +1890,7 @@ public sealed class SyncPlanner
         // 選択済み AddForeignKey を追加する
         foreach (var addFk in tableItems.Where(i => i.Kind == SchemaDiffKind.AddForeignKey))
         {
-            var resolved = ResolveAddedForeignKey(addFk);
+            var resolved = ResolveAddedForeignKey(addFk, limit);
 
             if (resolved is not null)
             {
@@ -1872,7 +1902,10 @@ public sealed class SyncPlanner
     }
 
     /// <summary>live の外部キーを、再構築の CREATE TABLE へ載せる FK 仕様へ変換する</summary>
-    private static TableRebuildForeignKey ToRebuildForeignKey(ResolvedForeignKeyRelationship fk)
+    private static TableRebuildForeignKey ToRebuildForeignKey(
+        ResolvedForeignKeyRelationship fk,
+        IdentifierLengthLimit limit
+    )
     {
         var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
 
@@ -1880,7 +1913,8 @@ public sealed class SyncPlanner
             ResolveForeignKeyName(
                 fk.Relationship,
                 SchemaDiffService.NormalizeTable(fk.Child),
-                parentTable
+                parentTable,
+                limit
             ),
             [.. ForeignKeyColumnPairResolver.ChildColumns(fk.ColumnPairs)],
             parentTable,
@@ -1891,7 +1925,10 @@ public sealed class SyncPlanner
     }
 
     /// <summary>選択済み AddForeignKey 差分項目を解決済みの FK 仕様へ変換する（解決不能なら null）</summary>
-    private static TableRebuildForeignKey? ResolveAddedForeignKey(SchemaDiffItem item)
+    private static TableRebuildForeignKey? ResolveAddedForeignKey(
+        SchemaDiffItem item,
+        IdentifierLengthLimit limit
+    )
     {
         if (item.ChildEntity is null || item.ParentEntity is null)
         {
@@ -1909,7 +1946,7 @@ public sealed class SyncPlanner
         var parentTable = SchemaDiffService.NormalizeTable(item.ParentEntity);
 
         return new TableRebuildForeignKey(
-            SyncScriptBuilderHelper.ForeignKeyNameToAdd(item),
+            SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, limit),
             [.. ForeignKeyColumnPairResolver.ChildColumns(columnPairs)],
             parentTable,
             [.. ForeignKeyColumnPairResolver.ParentColumns(columnPairs)],

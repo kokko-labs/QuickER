@@ -72,7 +72,11 @@ public class CSharpReverseMySqlUnsignedTests
         source.Should().Contain(metaAttribute);
         source.Should().Contain($"public {clrType}? Probe {{");
 
-        var reversed = new CSharpReverseParser().Parse(source, new MySqlTypeCatalog());
+        var reversed = new CSharpReverseParser().Parse(
+            source,
+            new MySqlTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
         reversed
             .Entities.Single()
             .Columns.Single(column => column.Name == "probe")

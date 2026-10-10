@@ -23,7 +23,8 @@ public static class ErDiagramDynamicTools
     {
         try
         {
-            return toolName switch
+            var namesRefusedBefore = NameLimitNotes.Find(viewModel.ToDiagramModel());
+            var (result, success) = toolName switch
             {
                 "get_diagram_summary" => (BuildDiagramSummary(viewModel), true),
                 "add_entity" => AddEntity(arguments, viewModel),
@@ -39,6 +40,26 @@ public static class ErDiagramDynamicTools
                 "remove_unique_constraint" => RemoveUniqueConstraint(arguments, viewModel),
                 _ => (string.Format(Strings.Tool_Unsupported, toolName), false),
             };
+
+            // 名前は受け付けて図へ入れる（DDL・同期の入口が断る）。この呼び出しで新しく受け付けられなくなった名前を知らせる
+            if (success)
+            {
+                var diagram = viewModel.ToDiagramModel();
+
+                if (
+                    NameLimitNotes.Describe(
+                        namesRefusedBefore,
+                        NameLimitNotes.Find(diagram),
+                        diagram.TargetDbms
+                    ) is
+                    { } nameNote
+                )
+                {
+                    result = $"{result} {nameNote}";
+                }
+            }
+
+            return (result, success);
         }
         catch (Exception ex)
         {
@@ -98,7 +119,7 @@ public static class ErDiagramDynamicTools
             }
 
             AppendPrimaryKeyOrder(sb, entity);
-            AppendUniqueConstraints(sb, entity);
+            AppendUniqueConstraints(sb, entity, vm.CurrentIdentifierLimit());
         }
 
         if (vm.Relationships.Count > 0)
@@ -528,7 +549,8 @@ public static class ErDiagramDynamicTools
             target.TableName,
             source.TableName,
             childColumnNames,
-            ConstraintNames.CollectExisting(vm.ToDiagramModel())
+            ConstraintNames.CollectExisting(vm.ToDiagramModel()),
+            vm.CurrentIdentifierLimit()
         );
 
         if (nameError is not null)
@@ -617,19 +639,22 @@ public static class ErDiagramDynamicTools
         string childTable,
         string parentTable,
         IReadOnlyList<string> childColumnNames,
-        IReadOnlySet<string> existingNames
+        IReadOnlySet<string> existingNames,
+        IdentifierLengthLimit limit
     )
     {
         var requested = GetString(args, "constraint_name")?.Trim();
 
         if (string.IsNullOrEmpty(requested))
         {
+            // 図へ保存する既定名なので、図の対象 DBMS の上限で縮める（ConstraintNames の XmlDoc の経路）
             return (
                 ConstraintNames.UniqueForeignKey(
                     childTable,
                     parentTable,
                     childColumnNames,
-                    existingNames
+                    existingNames,
+                    limit
                 ),
                 null
             );
@@ -1214,7 +1239,12 @@ public static class ErDiagramDynamicTools
 
     /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>
     /// <remarks>構成列を解決できない制約（空・壊れた参照）は DDL 生成と同じ規則で読み飛ばす</remarks>
-    private static void AppendUniqueConstraints(StringBuilder sb, EntityViewModel entity)
+    /// <param name="limit">合成名に使う識別子の長さの上限（図の対象 DBMS の上限＝DDL と同じ名前を見せる）</param>
+    private static void AppendUniqueConstraints(
+        StringBuilder sb,
+        EntityViewModel entity,
+        IdentifierLengthLimit limit
+    )
     {
         var lines = new List<string>();
 
@@ -1234,7 +1264,7 @@ public static class ErDiagramDynamicTools
             }
 
             var name = string.IsNullOrWhiteSpace(constraint.Name)
-                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames)
+                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames, limit)
                 : constraint.Name;
             lines.Add($"    - {name} ({string.Join(", ", columnNames)})");
         }

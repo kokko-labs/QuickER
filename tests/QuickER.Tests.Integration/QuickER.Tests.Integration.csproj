@@ -100,6 +100,7 @@
       DDL の往復を実 DB で確かめるテストだけがこのプロジェクトにあり、期待値と一覧は 1 か所で持つ）
     -->
     <Compile Include="..\QuickER.Tests\TestSupport\NameFuzz*.cs" LinkBase="TestSupport" />
+    <Compile Include="..\QuickER.Tests\TestSupport\LongNameDiagrams.cs" LinkBase="TestSupport" />
   </ItemGroup>
 
   <ItemGroup>

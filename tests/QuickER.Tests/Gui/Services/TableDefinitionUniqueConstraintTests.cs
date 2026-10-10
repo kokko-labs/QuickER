@@ -112,7 +112,7 @@ public class TableDefinitionUniqueConstraintTests
             culture: new CultureInfo("en")
         );
 
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         var product = diagram.Entities.Single(entity => entity.TableName == "Product");
         var restored = product

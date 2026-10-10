@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.PostgreSql;
 using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.CodeGen.CSharp;
@@ -59,5 +60,58 @@ public class UniqueConstraintNameGenerationTests
         generation.HasErrors.Should().BeFalse();
         ddl.Should().Contain("[UQ_dbo_Orders_code]");
         generation.Files.Single().Content.Should().Contain("Name = \"UQ_dbo_Orders_code\"");
+    }
+
+    [Fact(
+        DisplayName = "既定の一意制約名が上限を超える図では、生成コードの一意制約名も図の対象 DBMS の DDL と同じ縮めた名前になる"
+    )]
+    public void GeneratedUniqueConstraintName_IsShortenedLikeDdl()
+    {
+        var tableName = new string('t', 60);
+        var entity = new Entity
+        {
+            TableName = tableName,
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "integer",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Name = "code",
+                    DataType = "varchar(20)",
+                    IsNullable = false,
+                },
+            },
+        };
+        entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [entity.Columns[1].Id] });
+        var diagram = new ErDiagram { TargetDbms = "postgresql", Entities = { entity } };
+        var expected = UniqueConstraint.SynthesizeName(
+            tableName,
+            ["code"],
+            IdentifierLengthLimits.PostgreSql
+        );
+
+        var provider = new PostgreSqlProvider();
+        var generation = DiagramCodeGenerator.Generate(
+            provider.TypeMapper,
+            provider.TypeCatalog,
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "QuickER.Tests.UniqueConstraintName",
+                SplitFilesByCategory = false,
+            }
+        );
+        var ddl = provider.DdlGenerator.Build(diagram);
+
+        generation.HasErrors.Should().BeFalse();
+        expected.Should().NotBe("UQ_" + tableName + "_code", "上限（63 バイト）を超えるので縮む");
+        ddl.Should().Contain("\"" + expected + "\"");
+        generation.Files.Single().Content.Should().Contain("Name = \"" + expected + "\"");
     }
 }

@@ -78,7 +78,8 @@ public partial class UniqueConstraintViewModel : ObservableObject
         UniqueConstraintNaming.Resolve(
             string.IsNullOrWhiteSpace(Name) ? null : Name,
             _owner.TableName,
-            MemberColumnNames
+            MemberColumnNames,
+            _owner.IdentifierLimit
         );
 
     /// <summary>構成列の名前（宣言順）。解決できない Guid は読み飛ばす</summary>

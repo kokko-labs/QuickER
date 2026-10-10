@@ -618,7 +618,11 @@ public static class CliApp
         try
         {
             var sourceText = File.ReadAllText(sourceFile.FullName);
-            result = new CSharpReverseParser().Parse(sourceText, provider.TypeCatalog);
+            result = new CSharpReverseParser().Parse(
+                sourceText,
+                provider.TypeCatalog,
+                IdentifierLengthLimits.ForDbms(provider.Name)
+            );
         }
         catch (CodeReverseException ex)
         {

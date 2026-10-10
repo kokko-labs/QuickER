@@ -26,6 +26,9 @@ namespace QuickER.Provider.PostgreSql;
 /// </remarks>
 public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 {
+    /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => PgIdentifier.Limit;
+
     // ---------------- 各種 DDL ----------------
 
     /// <summary>CREATE TABLE 文（主キー制約・一意制約を含む）を生成する</summary>
@@ -43,7 +46,8 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             e,
             item.TableName,
             PgIdentifier.QuoteSimple,
-            name => $"\"{PgIdentifier.Escape(name)}\""
+            name => $"\"{PgIdentifier.Escape(name)}\"",
+            IdentifierLimit
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -174,7 +178,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var pkCols = string.Join(", ", pks.Select(p => PgIdentifier.QuoteSimple(p.Name)));
         sb.AppendLine(
-            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName))}\" "
+            $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{PgIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName, IdentifierLimit))}\" "
                 + $"PRIMARY KEY ({pkCols});"
         );
     }
@@ -191,7 +195,8 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns
+            item.UniqueConstraintColumns,
+            IdentifierLimit
         );
         var cols = string.Join(", ", item.UniqueConstraintColumns.Select(PgIdentifier.QuoteSimple));
         sb.AppendLine(
@@ -206,7 +211,8 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns
+            item.UniqueConstraintColumns,
+            IdentifierLimit
         );
         sb.AppendLine(
             $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
@@ -248,7 +254,7 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, IdentifierLimit);
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );

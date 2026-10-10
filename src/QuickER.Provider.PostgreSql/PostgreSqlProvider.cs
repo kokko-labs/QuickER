@@ -35,7 +35,12 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
     /// （素の <c>timestamp</c> は <c>timestamp(6)</c>、<c>numeric(18,0)</c> は <c>numeric(18)</c> として返るため）。
     /// </remarks>
     public SyncDialectCapabilities SyncCapabilities { get; } =
-        new() { NormalizeTypeNotation = PostgreSqlTypeNotation.Normalize };
+        new()
+        {
+            NormalizeTypeNotation = PostgreSqlTypeNotation.Normalize,
+            IdentifierLengthLimit = PgIdentifier.Limit,
+            TruncatesLongIdentifiers = true,
+        };
 
     /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new PostgreSqlSchemaSyncExecutor();

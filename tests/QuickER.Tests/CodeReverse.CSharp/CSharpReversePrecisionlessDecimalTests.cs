@@ -93,7 +93,11 @@ public class CSharpReversePrecisionlessDecimalTests
         source.Should().Contain($"[DbColumnMeta(\"{token}\"");
         source.Should().NotContain("NativeType =");
 
-        var reversed = new CSharpReverseParser().Parse(source, new OracleTypeCatalog());
+        var reversed = new CSharpReverseParser().Parse(
+            source,
+            new OracleTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
         var column = reversed
             .Entities.Single()
             .Columns.Single(candidate => candidate.Name == "PROBE");
@@ -131,7 +135,11 @@ public class CSharpReversePrecisionlessDecimalTests
             _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, "未知の方言"),
         };
 
-        var result = new CSharpReverseParser().Parse(Source, catalog);
+        var result = new CSharpReverseParser().Parse(
+            Source,
+            catalog,
+            IdentifierLengthLimit.Unlimited
+        );
 
         result.Entities.Single().Columns.Single().DataType.Should().Be("decimal(*,2)");
         result

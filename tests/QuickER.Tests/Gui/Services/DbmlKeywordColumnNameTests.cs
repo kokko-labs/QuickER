@@ -72,7 +72,7 @@ public class DbmlKeywordColumnNameTests
         {
             DbmlExporter.SaveTo(BuildDiagram(), path);
 
-            var loaded = DbmlImporter.Load(path);
+            var loaded = DbmlImporter.Load(path, "sqlserver");
             var columns = loaded.Entities.Should().ContainSingle().Subject.Columns;
 
             columns
@@ -110,7 +110,7 @@ public class DbmlKeywordColumnNameTests
                 $"Table Audit {{{Environment.NewLine}  AuditId int [pk]{Environment.NewLine}  {block}{Environment.NewLine}}}{Environment.NewLine}"
             );
 
-            var loaded = DbmlImporter.Load(path);
+            var loaded = DbmlImporter.Load(path, "sqlserver");
 
             loaded
                 .Entities.Should()

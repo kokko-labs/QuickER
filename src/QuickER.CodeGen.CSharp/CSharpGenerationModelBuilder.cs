@@ -20,6 +20,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>テーブル名・カラム名を C# 識別子へ変換するコンバーター</summary>
     private readonly CSharpNameConverter _nameConverter = new();
 
+    /// <summary>
+    /// 一意制約の合成名に使う識別子の長さの上限（図の対象 DBMS の上限＝生成コードの <c>[UniqueConstraint(Name = …)]</c> を
+    /// 対象 DBMS の DDL と同じ名前にする。経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </summary>
+    private IdentifierLengthLimit _identifierLimit = IdentifierLengthLimit.Unlimited;
+
     /// <summary>カラム ID → 解決済み C# 型情報。Build 呼び出し時に外部（SQL Server プロバイダ等）から受け取る。
     /// 生成器自体は DB 非依存で、SQL 型のマッピングは行わない</summary>
     private IReadOnlyDictionary<Guid, CSharpTypeInfo> _columnTypes =
@@ -42,6 +48,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     )
     {
         _columnTypes = columnTypes;
+        _identifierLimit = IdentifierLengthLimits.ForDbms(diagram.TargetDbms);
         _queryTokenTypes =
             queryParameterTypes ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.Ordinal);
         _queriesByEntity = CollectValidQueries(diagram, diagnostics);

@@ -20,6 +20,9 @@ namespace QuickER.Provider.Oracle;
 public sealed class OracleDdlGenerator : DdlGeneratorBase
 {
     /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => OracleIdentifier.Limit;
+
+    /// <inheritdoc />
     protected override string QuoteQualifiedName(string name) => OracleIdentifier.Quote(name);
 
     /// <inheritdoc />
