@@ -170,6 +170,7 @@ public enum QuickER.Runtime.Sync.SyncConflictReason : int
     MissingOnServer = 1
     ModifiedOnServer = 0
     ParentMissingOnServer = 3
+    UniqueValueTakenOnServer = 5
 
 public sealed class QuickER.Runtime.Sync.SyncDownloadContext : System.IEquatable<QuickER.Runtime.Sync.SyncDownloadContext>
     public .ctor()
@@ -182,10 +183,12 @@ public struct QuickER.Runtime.Sync.SyncDownloadOutcome : System.IEquatable<Quick
     public .ctor(int applied, string truncatedAtKeyText)
     public System.Collections.Generic.IReadOnlyList<string> SettledAckKeyTexts { get; init; }
     public int Applied { get; init; }
+    public string MissingParentTableName { get; init; }
     public string TruncatedAtKeyText { get; init; }
 
 public sealed class QuickER.Runtime.Sync.SyncDownloadTruncation : System.IEquatable<QuickER.Runtime.Sync.SyncDownloadTruncation>
     public .ctor(string TableName, string PendingKeyText, string TruncatedByTableName)
+    public string MissingParentTableName { get; init; }
     public string PendingKeyText { get; init; }
     public string TableName { get; init; }
     public string TruncatedByTableName { get; init; }
@@ -236,6 +239,14 @@ public sealed class QuickER.Runtime.Sync.SyncJournalRow
     public string Operation { get; set; }
     public string TableName { get; set; }
     public string UnboundedBinaryColumns { get; set; }
+
+public static class QuickER.Runtime.Sync.SyncKeyText
+    public static string WithoutDateTimeKind(string keyText)
+
+public sealed class QuickER.Runtime.Sync.SyncLocalReference : System.IEquatable<QuickER.Runtime.Sync.SyncLocalReference>
+    public .ctor(string TableName, string Sql)
+    public string Sql { get; init; }
+    public string TableName { get; init; }
 
 public enum QuickER.Runtime.Sync.SyncMode : int
     LastWriteWins = 1
@@ -352,13 +363,16 @@ public sealed class QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> : Qu
     public System.Action<TEntity, byte[]> WriteRowVersion { get; init; }
     public System.Action<TEntity> FillUnsetUnboundedBinaries { get; init; }
     public System.Collections.Generic.IReadOnlyDictionary<string, QuickER.Runtime.Sync.SyncBinaryColumnAccessor<TKey>> UnboundedBinaryAccessors { get; init; }
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncLocalReference> LocalReferences { get; init; }
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncParentReference<TEntity>> ParentReferences { get; init; }
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncUniqueLookup<TEntity>> LocalUniqueLookups { get; init; }
     public System.Collections.Generic.IReadOnlyList<string> ReferencingTableNames { get; init; }
     public System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; init; }
     public System.Func<TEntity, TKey> ReadKey { get; init; }
     public System.Func<TEntity, byte[]> ReadRowVersion { get; init; }
     public System.Func<TKey, string> FormatKey { get; init; }
     public System.Func<string, TKey> ParseKey { get; init; }
+    public System.Func<string, string> NormalizeKeyText { get; init; }
     public System.Type EntityType { get; }
     public bool IsVersionless { get; init; }
     public byte[] ReadEntityRowVersion(QuickER.Runtime.EntityBaseCore entity)
@@ -382,6 +396,11 @@ public sealed class QuickER.Runtime.Sync.SyncUnboundedBinaryColumns : System.IEq
 public sealed class QuickER.Runtime.Sync.SyncUnboundedBinaryLossException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable
     public .ctor(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncUnboundedBinaryColumns> columns)
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncUnboundedBinaryColumns> Columns { get; }
+
+public sealed class QuickER.Runtime.Sync.SyncUniqueLookup<TEntity> : System.IEquatable<QuickER.Runtime.Sync.SyncUniqueLookup<TEntity>>
+    public .ctor(System.Func<TEntity, object[]> ReadValues, string Sql)
+    public System.Func<TEntity, object[]> ReadValues { get; init; }
+    public string Sql { get; init; }
 
 public struct QuickER.Runtime.Sync.SyncUploadOutcome : System.IEquatable<QuickER.Runtime.Sync.SyncUploadOutcome>
     public .ctor(bool Sent, QuickER.Runtime.Sync.SyncConflict Conflict)

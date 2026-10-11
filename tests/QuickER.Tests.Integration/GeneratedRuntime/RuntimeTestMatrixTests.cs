@@ -592,6 +592,11 @@ public class RuntimeTestMatrixTests
         new("SyncSqliteRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         // 同期支援 × 値オブジェクト（ミラー版・キーが VO 型になる経路）
         new("SyncVoRuntimeTests", "SyncSupport", Backend.AdoSqlite),
+        // 同期エンジンのモデルベーステスト（端末 2 台＋サーバー役・乱数の操作の列と指摘ごとの決定的なシナリオ）
+        new("SyncModelRuntimeTests", "SyncSupport", Backend.AdoSqlite),
+        new("SyncKeyTextRuntimeTests", "SyncSupport", Backend.AdoSqlite),
+        new("SyncModelHttpRuntimeTests", "SyncSupport", Backend.Remote),
+        new("SyncModelSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
         new("SyncSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
         new("SyncHttpRuntimeTests", "SyncSupport", Backend.Remote),
         new("SyncSqlServerHttpRuntimeTests", "SyncSupport", Backend.Remote),

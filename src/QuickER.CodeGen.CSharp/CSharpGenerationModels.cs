@@ -141,6 +141,9 @@ internal sealed class CSharpSyncTableModel
     /// <summary>ジャーナルのテキスト形 <c>keyText</c> から主キーを復元する式</summary>
     public required string ParseKeyExpression { get; init; }
 
+    /// <summary>以前の版が書いたキーのテキストを、いまの形へ書き直す関数の式（形が変わっていない型は空文字）</summary>
+    public string NormalizeKeyTextExpression { get; init; } = string.Empty;
+
     /// <summary>デコレータへ追加で挿入する委譲メンバー群（名前付きクエリ・重複事前チェック等。整形済み・無ければ空文字）</summary>
     public string DecoratorDelegationBlock { get; init; } = string.Empty;
 
@@ -184,6 +187,22 @@ internal sealed class CSharpSyncTableModel
     /// 削除の失敗を「サーバーが削除を断った」と報告してよいかの判定材料。
     /// </remarks>
     public string ReferencingTableNamesBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 記述子の初期化子へ挿入する、この表を参照する外部キーの並び（<c>LocalReferences = [...]</c>＝子の表の名前と、
+    /// ローカルで参照されているキーを返す SELECT・整形済み・無ければ空文字）
+    /// </summary>
+    /// <remarks>
+    /// 図の全リレーションのうち、このテーブルの主キーを列ペア 1 組で参照するもの（同期対象かどうかを問わず、自己参照を
+    /// 含む）ごとに 1 本。削除伝搬は、ローカルのどの行からも参照されていない行だけを消す。
+    /// </remarks>
+    public string LocalReferencesBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 記述子の初期化子へ挿入する、一意制約ごとの引き当ての並び（<c>LocalUniqueLookups = [...]</c>＝値を読む関数と、
+    /// その値を持つローカルの行のキーを返す SELECT・整形済み・無ければ空文字）
+    /// </summary>
+    public string LocalUniqueLookupsBlock { get; init; } = string.Empty;
 }
 
 /// <summary>EF Core 用コード（DbContext と OnModelCreating の Fluent 構成）のルート生成モデル</summary>

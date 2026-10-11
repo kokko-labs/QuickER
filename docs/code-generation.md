@@ -1913,7 +1913,7 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 | `Mode` | `Versioned` | The run's semantics. The default syncs the versioned tables incrementally under version guards and leaves the versionless ones alone (the pre-existing behaviour); `LastWriteWins` is [last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins) |
 | `ExcludedEntityTypes` | empty | Entity types this run leaves out. Recording continues, and the next run that covers them replays what accumulated (excluding a table permanently is the construction-time `excludeFromSync` instead). A type the engine does not synchronize is rejected with `ArgumentException` |
 | `DownloadBatchSize` | 500 | How many rows one download batch fetches and applies in a single local transaction |
-| `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large. A key the journal still holds an unsent entry for is spared, as described below |
+| `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large. A key the journal still holds an unsent entry for is spared, and so is a row a local row refers to, as described below |
 | `ConflictPolicy` | `Collect` | How a local change that collides with the server is treated (see [Conflicts](#conflicts)) |
 | `IncludeUnboundedBinary` | `false` | Whether to carry the unbounded binary columns the row transfer leaves out (see [Unbounded binary columns](#unbounded-binary-columns)). Nothing changes for a build without such columns |
 
@@ -1941,6 +1941,25 @@ The protection reaches exactly as far as the journal does: a row written into a 
 A row it spares keeps what it points at.
 Tables are propagated children first, and a spared row's parents are spared in turn, in its own table and in its parents' tables, however many steps up.
 Removing them would fail on the local foreign key, or under `ON DELETE CASCADE` take the spared row with it.
+
+**Delete propagation removes only the rows nothing local refers to.**
+A row missing from the server stays while any local row points at it.
+The referring row can be a row of another table, synchronized or not and in this run's scope or not, a row of the same table, an unsent row, or a row a truncated download has not brought up to date yet.
+Removing the row would fail on the local foreign key, or under `ON DELETE CASCADE` take the referring row with it.
+The check is one query per referring foreign key for every 500 candidate keys, and it repeats until a pass removes nothing.
+A referring table the local database does not have is skipped, since it holds no rows to refer with.
+A chain of parents and children in one table that the server deleted together therefore goes in one run.
+A row kept this way goes on a later run, once nothing refers to it any more.
+The propagation runs before the download as well as after it.
+A row the server deleted is then gone before the server's rows go in, so a row the server recreated under another key with the same unique value does not collide with the old one here.
+
+**The upload reorders what the foreign keys and the unique constraints need.**
+Upserts go parents first and deletes children first, table by table.
+Within a table the entries go in the order they were first recorded, which is not parent first in a table that refers to itself, so a write the server refuses for a foreign key is tried again once the others have gone, as long as another write of the table went through in between.
+Only what is still refused then is reported (or, in a last-write-wins `ServerWins` run, settled).
+A table the run also deletes rows of has each upsert checked against the server's unique constraints first, which costs a round trip per upsert.
+An upsert whose unique value a row still holds on the server goes after the deletes, together with the upserts that refer to it, in the same table or another.
+If it still collides then, because the delete it waited for did not go through, it is reported as `UniqueValueTakenOnServer`.
 
 Replaying one change has three outcomes, not two, and `Uploaded` / `Discarded` / `Conflicts` are exactly those three: sent, nothing to send, refused.
 Folding the middle one into either of the others would report a change as delivered when nothing crossed the wire.
@@ -2127,41 +2146,64 @@ Nothing is resolved silently.
 Under the default policy a local change that collides with the server stays in the journal and comes back in `SyncResult.Conflicts` with the table, the key, the operation, the reason, and both sides' rows attached.
 The local row stays where it is, including when the reason is `MissingOnServer`, because both halves of the download leave every key the journal still holds an entry for alone: the row is not overwritten by the server's copy, and delete propagation does not remove it.
 
-**Leaving such a row alone stops that table's download there, and the tables after it with it.**
+**Leaving such a row alone stops that table's download there.**
 The download applies a table's rows in ascending version order, so skipping one row and carrying on would move the resume point past it, and the change that was being protected would never be seen again.
 It stops at that row instead.
-Every table after it in foreign-key order is left for the next run too, because the rows it would bring down can point at parents that were behind the stopping point.
+Only that table stops; the tables after it in foreign-key order go on.
+A row of a later table can point at a parent that was behind the stopping point, and that parent is brought in from the server first, as described below, or the later table stops at the row when the parent cannot be had.
 What was left unread is reported.
 
 ```csharp
 foreach (var stop in result.Truncations)
 {
-    // stop.TableName, and exactly one of:
-    //   stop.PendingKeyText        - the unsent local change this table stopped at
-    //   stop.TruncatedByTableName  - the table whose stop this one waited for
+    // stop.TableName         - the table that stopped
+    // stop.PendingKeyText    - the row it stopped at
+    // and, when the row stopped for a parent it could not have:
+    //   stop.MissingParentTableName  - the parent's table
 }
 ```
+
+`SyncDownloadTruncation.TruncatedByTableName` is always null: a table's stop does not stop the tables after it.
 
 The rows behind the stopping point are still on the server and come down as soon as the entry that stopped them is settled, whether decided and re-run, or dropped with `SyncJournal.RemoveTableAsync`.
 What a run stops for is an unsent journal entry.
 That is usually a conflict it has just collected, but it is equally an entry an interrupted upload left behind.
 A row also stops the download when the parent it points at was deleted here and the delete has not reached the server: applying it would fail on the local foreign key.
-A run that settles every entry reports no truncations.
+A run that settles every entry and covers every table reports no truncations.
+
+**A row whose parent is not here brings the parent in first.**
+The download applies rows in version order, so a parent changed after its child arrives after it, in a later batch, or above the run's ceiling and not in this run at all.
+Such a parent is read from the server and applied ahead of the row, and its own parents the same way.
+Like a row `ServerWins` puts back, it keeps no mirrored version and gets a receipt, so a later edit to it is guarded by the version just read.
+The rows `ServerWins` puts back and the rows of a refresh are handled the same way.
+When the parent cannot be had, the download stops at the row instead, and `MissingParentTableName` names the parent's table.
+That is the case when the parent's table is outside the run's scope (the run does not write to it), when the parent was deleted here and the run is not discarding that delete (bringing it back would undo the delete without saying so), or when the server does not have it either.
+A parent that a `ServerWins` run is discarding the delete of is brought back, since the server wins over that delete anyway.
+
+**A row whose unique value another local row still holds brings that row up to date first.**
+The download sees each row at its latest version only, so a row that gave a unique value up and was changed again later comes after the row that took the value, and the local copy still holding it refuses the newcomer.
+The local row holding the value is then read from the server and applied first, like a parent brought in (no mirrored version, a receipt recorded), and the batch is tried again; a row the server no longer has is removed instead, when nothing local refers to it and the run propagates deletes.
+It is looked into only after a batch has failed to apply, so a batch that goes in makes no extra call, and a batch is tried at most as many times as it has rows.
+The download stops at the server's row instead, reported in `PendingKeyText` like any other stop, when the local row cannot be brought forward: it has an unsent change the run is not discarding, the server no longer has it and it cannot be removed (it is referred to, or `PropagateDeletes` is off), or the rows hold each other's values.
+`ServerWins` treats such a row like one whose parent cannot be had: it is not put back and its entries stay.
+When the run propagates deletes, `ServerWins` first removes the local rows it is discarding that the server does not have, so a row recreated here under another key with the same value does not stand in the way.
 
 | `SyncConflictPolicy` | What happens |
 |---|---|
 | `Collect` (default) | The entry stays in the journal and is reported; re-run after deciding |
-| `ServerWins` | The run's entries are dropped and each of their rows is read back from the server over the local one (entries of tables outside the run's scope, versionless or excluded ones, stay put) |
+| `ServerWins` | The run's entries are dropped and each of their rows is read back from the server over the local one (entries of tables outside the run's scope, versionless or excluded ones, stay put, and so do the entries of a row whose parent cannot be had) |
 | `LocalWins` | The change is resent with `ConcurrencyMode.ForceOverwrite`, overwriting the server row, and inserted again when the server has no such row, so a row deleted on the server is resurrected by a local edit (the same resolution applies to a key the server already holds under a local insert) |
 
-Two more reasons come from the server's foreign keys, and no policy resolves them by writing rows this device did not change.
+Three more reasons come from the server refusing a write, two for its foreign keys and one for its unique constraints, and no policy resolves them by writing rows this device did not change.
+`ServerWins` settles them by giving up the local change, in a last-write-wins run as well.
 They are reported only after a write to the server has failed, by looking up the state the failure would follow from, so a run where nothing goes wrong makes no extra call.
 A failure they do not explain, such as a dropped connection, is thrown as it was.
 
 | `SyncConflictReason` | When | Ways out |
 |---|---|---|
-| `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` and last-write-wins report it too, rather than bringing the parent back | Run with `ServerWins`, point the row at another parent, or edit the parent locally so it has a change of its own |
-| `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins`, which brings the row back together with what now points at it |
+| `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` reports it too, rather than bringing the parent back, and so does last-write-wins under any other policy | Run with `ServerWins` (in either mode), point the row at another parent, or edit the parent locally so it has a change of its own |
+| `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins` (in either mode), which brings the row back together with what now points at it |
+| `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. `LocalWins` reports it too, rather than taking the value from the other row. It is not tried again within the run, since no other write of the table frees the value | Change the value, or run with `ServerWins` (in either mode) |
 
 **`ServerWins` reads the rows back rather than leaving them to the download.**
 The download carries a row only when its version has moved since it was last mirrored, so a local edit to a row nobody else has touched would otherwise outlive the run that was told to discard it, and with its journal entry gone, no later run would correct it.
@@ -2171,7 +2213,7 @@ A key the server no longer holds has nothing to apply and is left to the delete 
 The rows are read back table by table, right after that table's download, parents first.
 By then the parents the server's rows point at have come down, including a parent the server added since, and a row put back is there before the tables that may point at it are downloaded.
 The entries being dropped do not stop the table's download.
-A table whose download an earlier truncation skipped is not settled in that run; its entries stay for the next one.
+A row put back brings in the parents it refers to first, or stays as it is with its entries when it cannot have them.
 An entry recorded while the run is in flight is not one the run was told to drop, so the row it is about keeps its local content.
 When `UploadAsync` is called on its own, with no download to follow, the rows are read back there instead.
 
@@ -2202,7 +2244,10 @@ Adding a versionless table to a diagram therefore changes nothing about what the
 A `LastWriteWins` run covers every table and gives the whole run one semantics.
 
 - **Uploads are uniform across all tables**: update with `ForceOverwrite`, insert when the update finds no row, delete unconditionally.
-  No version is read, no existence is probed, and nothing is reported as a conflict except the two foreign-key reasons under [Conflicts](#conflicts) (`ConflictPolicy` is ignored).
+  No version is read, no existence is probed, and nothing is reported as a conflict except the three reasons under [Conflicts](#conflicts) for a write the server refuses.
+  `ConflictPolicy` is ignored, with one exception: `ServerWins` settles those three reasons instead of reporting them.
+  The entries go and the row takes the server's content, as in a versioned `ServerWins` run, and they are counted in `Discarded`.
+  It is the only way to settle such a row of a versionless table, since no versioned run reaches it.
   Versioned tables overwrite without their guards too.
   The version the server stamps is still reported to the run, so the same run's download recognizes the row as its own echo and takes nothing but the version from it.
 - **The winner is whoever uploads last, not whoever edited last.**
@@ -2214,6 +2259,7 @@ A `LastWriteWins` run covers every table and gives the whole run one semantics.
 - **A versionless table downloads as a full key-ordered scan on every run** (`SELECT TOP … WHERE key > @afterKey ORDER BY key` paging, plus the ordinary delete propagation).
   The cost is O(table) per run, which is why this mode is meant for small, rarely changing tables, and why a large or busy table is better served by adding a rowversion column and riding the incremental side.
   Versioned tables still download incrementally in this mode; the result is the same, the transfer just smaller.
+  A row the scan skips, for an unsent change or a parent it cannot have, does not stop the scan, but the table is reported as truncated at the first such row once the scan is through.
 
 A table that should never sync, holding local-only data, is declared where the engine is put together rather than per run.
 
@@ -2299,8 +2345,16 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
   Give a table a rowversion column when its conflicts should be detected (see [Versionless tables and last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins)).
 - **Unbounded binary columns are not carried unless you ask for them** (`SyncOptions.IncludeUnboundedBinary`), and carrying them costs one round trip per column per changed row.
   See [Unbounded binary columns](#unbounded-binary-columns).
+- **Two rows whose unique values the server swapped are not applied.**
+  Bringing one of them forward needs the value the other one holds, so neither goes first.
+  When one batch holds rows that swapped a unique value (one row takes the value the other gives up), SQLite checks the constraint statement by statement and refuses the first of them, so that table's download stops at it on every run.
+  `SyncResult.Truncations` shows it as a stop at a row with no unsent change of its own and no missing parent, run after run.
+  `RefreshAsync` rebuilds the table and clears it.
+- **Rows the server deleted that refer to each other in a cycle stay on the device.**
+  Delete propagation removes a row only when nothing local refers to it, and no row of such a cycle qualifies first.
+  It takes the server clearing one of the references and that update reaching the device, which is also how the server itself has to delete them.
 - **Only a single-column foreign key to a synchronized table's primary key is followed.**
-  A foreign key that refers to a unique constraint, or spans several columns, is not: delete propagation does not keep the parents of a kept row through it, the download does not stop at a row whose parent's delete is unsent through it, and a write the server refuses through it is thrown rather than reported.
+  A foreign key that refers to a unique constraint, or spans several columns, is not: delete propagation does not keep a row a local row refers to through it, nor the parents of a kept row, the download neither brings in a missing parent through it nor stops at a row whose parent's delete is unsent through it, and a write the server refuses through it is thrown rather than reported.
 - **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.
 - **The HTTP transport requires `--generate-remote-services`.**
   Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.
@@ -2328,7 +2382,7 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
 - **Writing while a run is in flight is safe only within one process.**
   The locks that make it safe are per process, so another process writing the same local database file is not covered (see [Writing while a run is in flight](#writing-while-a-run-is-in-flight)).
 - **Keys are matched as text, ordinally.**
-  The journal and the receipt table hold the key as a string (a `byte[]` key as uppercase hex, a `Guid` by `ToString()`), and every comparison the engine makes (pending keys, receipts, delete propagation) is ordinal and case-sensitive.
+  The journal and the receipt table hold the key as a string (a `byte[]` key as uppercase hex, a `Guid` by `ToString()`, a `DateTime` key in round-trip form without its kind, since neither database keeps the kind), and every comparison the engine makes (pending keys, receipts, delete propagation) is ordinal and case-sensitive.
   The server, by contrast, looks its rows up with ordinary SQL equality on the key column, under that column's collation.
   On a case-insensitive column, then, `ABC` and `abc` are one row to the server and two separate journal and receipt entries locally.
   Keep the case of a text key stable, the same way [GUID keys](#guid-keys-for-string-primary-keys-useguidkeyforstringprimarykey) have to be.

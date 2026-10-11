@@ -603,7 +603,7 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         (await LocalLinesRaw.GetAllAsync(Ct)).Should().BeEmpty();
     }
 
-    /// <summary>削除伝搬を切ると走査ごとスキップされる（ローカルの行は残る）</summary>
+    /// <summary>削除伝搬を切ると走査ごとスキップされる（どの表のローカルの行も残る）</summary>
     [Fact(DisplayName = "[Sync] 削除伝搬を切るとローカルの行は残る")]
     public async Task DeletePropagation_CanBeTurnedOff()
     {
@@ -617,6 +617,82 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
 
         result.DeletedLocally.Should().Be(0);
         (await LocalOrdersRaw.GetAllAsync(Ct)).Should().HaveCount(1);
+        (await LocalLinesRaw.GetAllAsync(Ct)).Should().HaveCount(1);
+    }
+
+    /// <summary>
+    /// 削除伝搬は、ローカルのどの行からも参照されている行を消さない。候補が 1 回の IN 展開の上限を超えても、
+    /// 境界（500 件）の前後どちらの行への参照も見落とさない。
+    /// </summary>
+    /// <remarks>
+    /// 参照する行は、このランの範囲外の表（明細）に置く。範囲外の表には削除伝搬が触れないので、その行が参照する
+    /// 注文は残らなければならない（消すとローカルの外部キーで失敗する）。参照されていない注文は消える。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync] 削除伝搬はローカルで参照されている行を残す（候補が 500 件を超えても）"
+    )]
+    public async Task DeletePropagation_KeepsLocallyReferencedRows_AcrossInClauseChunks()
+    {
+        const int Count = 600;
+        int[] referenced = [1, 500, 501, Count];
+
+        // 素のリポジトリ＝ジャーナルを通らない（未送信として守られる行ではない）
+        await LocalOrdersRaw.BulkInsertAsync(
+            Enumerable
+                .Range(1, Count)
+                .Select(id => new SyncOrderEntity { OrderId = id, CustomerName = $"local-{id}" })
+                .ToList(),
+            Ct
+        );
+
+        foreach (var id in referenced)
+        {
+            await LocalLinesRaw.InsertAsync(
+                new SyncOrderLineEntity
+                {
+                    LineId = 10_000 + id,
+                    OrderId = id,
+                    Product = "local",
+                },
+                Ct
+            );
+        }
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ExcludedEntityTypes = [typeof(SyncOrderLineEntity)] },
+            Ct
+        );
+
+        result.DeletedLocally.Should().Be(Count - referenced.Length);
+        (await LocalOrdersRaw.GetAllAsync(Ct))
+            .Select(order => order.OrderId)
+            .Should()
+            .BeEquivalentTo(referenced, "範囲外の表の行が参照する注文は残す");
+        (await LocalLinesRaw.GetAllAsync(Ct)).Should().HaveCount(referenced.Length);
+    }
+
+    /// <summary>
+    /// 削除伝搬は、ローカル DB に無い子の表を照会しない（同期対象の表だけでローカル DB を組む構成でも止まらない）。
+    /// </summary>
+    /// <remarks>
+    /// メモの表（版なし・注文を参照する）をローカル DB から消してから、サーバーで消えた注文を伝搬させる。参照の検査が
+    /// 無い表を照会すると "no such table" で同期全体が止まる。表が無ければ参照する行も無いので、注文は消える。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync] 削除伝搬はローカル DB に無い子の表を照会しない")]
+    public async Task DeletePropagation_SkipsReferringTablesMissingLocally()
+    {
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
+            Ct
+        );
+        await Engine.SyncAsync(cancellationToken: Ct);
+        await LocalSql.ExecuteSqlAsync("DROP TABLE \"sync_notes\"", null, Ct);
+
+        await ServerOrders.DeleteAsync(1, Ct);
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.DeletedLocally.Should().Be(1);
+        (await LocalOrdersRaw.GetAllAsync(Ct)).Should().BeEmpty();
     }
 
     /// <summary>
@@ -1850,15 +1926,17 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>
-    /// 未解決の競合はそのテーブルのダウンロードを打ち切り、後続テーブルも同じランでは降ろさない。
+    /// 未解決の競合はそのテーブルのダウンロードを打ち切るが、後続テーブルは続けて降ろす。
     /// </summary>
     /// <remarks>
-    /// 打ち切りの手前までしか適用しないということは、打ち切り点より後ろの<b>新しい親</b>もローカルへ来ないという
-    /// こと。その親を参照する子を子テーブル側が降ろすと外部キー違反でランごと落ちるため、後続テーブルは
-    /// まとめて見送る（どの子が「降ろさなかった親」を指すかは、読まなかったバッチを読まない限り分からない）。
+    /// 打ち切りの手前までしか適用しないので、打ち切り点より後ろの<b>新しい親</b>はそのテーブルのダウンロードでは
+    /// 来ない。その親を参照する子は、子テーブルのダウンロードが親をサーバーから先に読み直してから入れる（外部キー
+    /// 違反にしない）。止まるのは打ち切ったテーブルだけで、<c>TruncatedByTableName</c> は常に null。
     /// </remarks>
-    [Fact(DisplayName = "[Sync] 競合で打ち切ったテーブルの後続テーブルは同じランでは降ろさない")]
-    public async Task CollectedConflict_TruncatesFollowingTablesInsteadOfBreakingForeignKeys()
+    [Fact(
+        DisplayName = "[Sync] 競合で打ち切ったテーブルの後続テーブルも降ろし、打ち切り点より後ろの親は先に読み直す"
+    )]
+    public async Task CollectedConflict_DownloadsFollowingTablesAndBringsParentsIn()
     {
         await ArrangeOrderConflictWithNewerServerRowsAsync();
 
@@ -1871,21 +1949,18 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
             .ContainSingle(truncation => truncation.TableName == "sync_orders")
             .Subject;
         ordersStop.PendingKeyText.Should().Be("1", "打ち切った行のキーを名指しする");
-        ordersStop.TruncatedByTableName.Should().BeNull("自分の未送信の変更で止まった");
-
-        var linesStop = result
+        ordersStop.TruncatedByTableName.Should().BeNull("打ち切りは後ろの表へ連動させない");
+        result
             .Truncations.Should()
-            .ContainSingle(truncation => truncation.TableName == "sync_order_lines")
-            .Subject;
-        linesStop.PendingKeyText.Should().BeNull();
-        linesStop.TruncatedByTableName.Should().Be("sync_orders", "止めたテーブルを名指しする");
+            .ContainSingle("止まるのは打ち切ったテーブルだけ（後ろの表は続ける）");
 
         (await LocalOrdersRaw.GetByIdAsync(2, Ct))
             .Should()
-            .BeNull("打ち切り点より後ろの行は適用しない");
-        (await LocalLinesRaw.GetByIdAsync(12, Ct))
-            .Should()
-            .BeNull("降ろしていない親を参照する子も降ろさない");
+            .NotBeNull("打ち切り点より後ろの親は、それを参照する子のために先に読み直す");
+        (await LocalLinesRaw.GetByIdAsync(12, Ct)).Should().NotBeNull("後ろの表は続けて降ろす");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("local-edit", "競合した行は打ち切ったまま触らない");
     }
 
     /// <summary>
@@ -2467,6 +2542,181 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>
+    /// 後勝ちのランでも ServerWins なら、親がサーバーに無い行は競合として返さず、記録を捨ててサーバーの状態で決着する。
+    /// </summary>
+    /// <remarks>
+    /// サーバーにはその行も無いので戻すものは無く、ローカルの行と親は削除伝搬が片づける（親は復活させない）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/外部キー] 後勝ち＋ServerWins は親がサーバーに無い行の記録を捨ててサーバーの状態で決着させる"
+    )]
+    public async Task LastWriteWinsServerWins_SettlesParentMissingOnServer()
+    {
+        await ArrangeEditedLineWhoseOrderWasDeletedOnServerAsync();
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions
+            {
+                Mode = SyncMode.LastWriteWins,
+                ConflictPolicy = SyncConflictPolicy.ServerWins,
+            },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.Discarded.Should().Be(1);
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+        (await ServerOrders.GetByIdAsync(1, Ct))
+            .Should()
+            .BeNull("サーバーが消した親は復活させない");
+        (await LocalLinesRaw.GetByIdAsync(11, Ct))
+            .Should()
+            .BeNull("サーバーに無い行は削除伝搬が片づける");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// 後勝ちのランでも ServerWins なら、サーバーに断られた削除は競合として返さず、記録を捨てて行を戻す。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/外部キー] 後勝ち＋ServerWins はサーバーに断られた削除の記録を捨てて親を戻し子も降りる"
+    )]
+    public async Task LastWriteWinsServerWins_SettlesDeleteRefusedOnServer()
+    {
+        await ArrangeLocallyDeletedOrderWithChildAddedOnServerAsync();
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions
+            {
+                Mode = SyncMode.LastWriteWins,
+                ConflictPolicy = SyncConflictPolicy.ServerWins,
+            },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.HasTruncations.Should().BeFalse();
+        result.Discarded.Should().Be(1);
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull("サーバーの行が戻る");
+        (await LocalLinesRaw.GetByIdAsync(21, Ct)).Should().NotBeNull("戻った親の下へ子が降りる");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 後勝ちのランの ServerWins が決着させるのは、外部キーに由来する 2 つの競合だけ。ほかの書き込みは今までどおり
+    /// サーバーへ上がる（ポリシーを見ない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/外部キー] 後勝ち＋ServerWins でも外部キーに由来しない変更はそのまま上がる"
+    )]
+    public async Task LastWriteWinsServerWins_UploadsOrdinaryChanges()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+        await EditLocalOrderAsync(1, "local-edit");
+
+        var server = await ServerOrders.GetByIdAsync(1, Ct);
+        server!.CustomerName = "server-edit";
+        await ServerOrders.UpdateAsync(server, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions
+            {
+                Mode = SyncMode.LastWriteWins,
+                ConflictPolicy = SyncConflictPolicy.ServerWins,
+            },
+            Ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(1);
+        (await ServerOrders.GetByIdAsync(1, Ct))!
+            .CustomerName.Should()
+            .Be("local-edit", "後勝ちは版を見ない（ServerWins でも外部キーの競合でなければ同じ）");
+    }
+
+    /// <summary>
+    /// 版なしの表で保留した行（未送信の変更）は飛ばしてほかの行を適用し、走査の後で、最初に保留した行で打ち切りとして
+    /// 報告する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/外部キー] 版なしの表で保留した行は飛ばして続け、走査の後で打ち切りとして報告する"
+    )]
+    public async Task VersionlessDownload_ReportsTheRowItHeldBack()
+    {
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
+            Ct
+        );
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 2, CustomerName = "bob" },
+            Ct
+        );
+        await SeedServerNoteAsync(101, 1, "a");
+        await SeedServerNoteAsync(102, 1, "b");
+        var lastWriteWins = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        await Engine.SyncAsync(lastWriteWins, Ct);
+
+        // ローカルではメモ 101 を注文 2 へ付け替え、サーバーでは注文 2 を消す（付け替えは ParentMissingOnServer で残る）
+        var note = await LocalNotes.GetByIdAsync(101, Ct);
+        note!.OrderId = 2;
+        await LocalNotes.UpdateAsync(note, cancellationToken: Ct);
+        (await ServerOrders.DeleteAsync(2, Ct)).Should().BeTrue();
+        var server = await ServerNotes.GetByIdAsync(102, Ct);
+        server!.Body = "b2";
+        await ServerNotes.UpdateAsync(server, cancellationToken: Ct);
+
+        var result = await Engine.SyncAsync(lastWriteWins, Ct);
+
+        result
+            .Conflicts.Should()
+            .ContainSingle()
+            .Which.Reason.Should()
+            .Be(SyncConflictReason.ParentMissingOnServer);
+        var truncation = result
+            .Truncations.Should()
+            .ContainSingle(truncation => truncation.TableName == "sync_notes")
+            .Which;
+        truncation.PendingKeyText.Should().Be("101");
+        truncation.MissingParentTableName.Should().BeNull();
+        (await LocalNotesRaw.GetByIdAsync(102, Ct))!
+            .Body.Should()
+            .Be("b2", "保留した行のほかは適用する");
+    }
+
+    /// <summary>
+    /// 親の表をランから外すと、ローカルに無い親を参照する子でダウンロードを打ち切り、親の表を名指しする（範囲外の表には
+    /// 書かない）。外さないランで親も子も降りる。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/外部キー] 親の表をランから外すと、ローカルに無い親を参照する子で打ち切り親の表を名指しする"
+    )]
+    public async Task Download_ChildOfExcludedParentTable_StopsAndNamesTheParentTable()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+
+        var result = await Engine.SyncAsync(
+            new SyncOptions { ExcludedEntityTypes = [typeof(SyncOrderEntity)] },
+            Ct
+        );
+
+        var truncation = result
+            .Truncations.Should()
+            .ContainSingle(truncation => truncation.TableName == "sync_order_lines")
+            .Which;
+        truncation.PendingKeyText.Should().Be("11");
+        truncation.TruncatedByTableName.Should().BeNull();
+        truncation.MissingParentTableName.Should().Be("sync_orders");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().BeNull("範囲外の表には書かない");
+        (await LocalLinesRaw.GetByIdAsync(11, Ct)).Should().BeNull();
+
+        var next = await Engine.SyncAsync(cancellationToken: Ct);
+
+        next.HasTruncations.Should().BeFalse();
+        (await LocalLinesRaw.GetByIdAsync(11, Ct)).Should().NotBeNull();
+    }
+
+    /// <summary>
     /// ローカルで削除した親を、サーバーで別端末の子が参照していれば、削除は DeleteRefusedOnServer として報告し、
     /// その子のダウンロードは打ち切る（Collect・LocalWins とも止まらない）。
     /// </summary>
@@ -2491,7 +2741,9 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         result
             .Truncations.Should()
             .Contain(truncation =>
-                truncation.TableName == "sync_order_lines" && truncation.PendingKeyText == "21"
+                truncation.TableName == "sync_order_lines"
+                && truncation.PendingKeyText == "21"
+                && truncation.MissingParentTableName == "sync_orders"
             );
         (await LocalLinesRaw.GetByIdAsync(21, Ct))
             .Should()
