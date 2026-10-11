@@ -258,22 +258,14 @@ public class RuntimeTestMatrixTests
         ),
         ["NamedQuery"] = new(
             "名前付きクエリ（簡易 DSL・射影・手動実装）",
-            Row(
-                Gap(
-                    "名前付きクエリの実 DB 検証は SQLite / EF Core / インメモリ / リモートのみ。"
-                        + "DSL の翻訳は方言に依らず SqlExpressionTranslator が担い、SQL Server 固有経路は "
-                        + "SqlServerQueryPipeline / TranslatorOperator が押さえているため優先度を下げている"
-                ),
-                Covered(),
-                Covered(),
-                Covered(),
-                Covered()
-            )
+            Row(Covered(), Covered(), Covered(), Covered(), Covered())
         ),
         ["NamedQueryRawSql"] = new(
             "名前付きクエリの生 SQL 実装（戻り形・パラメータ展開）",
             Row(
-                Gap("NamedQuery 行と同じ理由（SQL Server 版の名前付きクエリ実行時テストが未整備）"),
+                Gap(
+                    "SQL Server の名前付きクエリの実行時テストは簡易 DSL の総当たりだけで、生 SQL の実装は未整備"
+                ),
                 Covered(),
                 Covered(),
                 NotApplicable(
@@ -554,6 +546,8 @@ public class RuntimeTestMatrixTests
             Backend.InMemory
         ),
         new("NamedQueryAdoRuntimeTests", "NamedQuery", Backend.AdoSqlite),
+        new("DslConditionFuzzSqlServerRuntimeTests", "NamedQuery", Backend.AdoSqlServer),
+        new("DslConditionFuzzSqlServerRuntimeTests", "NamedQuery", Backend.EfCore),
         new("NamedQueryAdoRuntimeTests", "NamedQueryRawSql", Backend.AdoSqlite),
         new("SqlitePortableNamedQueryRuntimeTests", "NamedQuery", Backend.AdoSqlite),
         new("NamedQueryEfCoreRuntimeTests", "NamedQuery", Backend.EfCore),
