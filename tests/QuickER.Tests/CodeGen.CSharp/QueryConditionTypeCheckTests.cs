@@ -230,6 +230,13 @@ public class QueryConditionTypeCheckTests
             { "BadULongOnInt", "Qty = 10000000000000000000", [] },
             // long を超える整数リテラル × long 列（"…L" が ulong になり long と比べられない）
             { "BadULongOnLong", "Big = 9223372036854775808", [] },
+            // 列の型の範囲の外の整数リテラル（C# は常に偽〔または真〕で CS0652・SQL Server は型付きの束縛で例外）。
+            // 判定は VO の内包型と共通で、範囲の両端のすぐ外を断る（符号なしの列の負の値も）
+            { "BadTinyAbove", "Tiny = 256", [] },
+            { "BadTinyBelow", "Tiny <> -1", [] },
+            { "BadIntAbove", "Qty < 3000000000", [] },
+            { "BadIntBelow", "Qty >= -2147483649", [] },
+            { "BadLongBelow", "Big = -9223372036854775809", [] },
             // decimal の範囲を超えるリテラル（"…m" は CS0594）
             { "BadDecimalRange", "Amount = 99999999999999999999999999999999", [] },
         };
@@ -334,10 +341,10 @@ public class QueryConditionTypeCheckTests
             ),
             // long 列 × 整数リテラル（サフィックス L は整数なら合法）
             ListQuery("LongIntegral", "Big = 2"),
-            // 素の整数列は範囲の外のリテラルとも比べられる（int・long へ昇格する）
+            // 列の型の範囲の端は通る（範囲の外は RejectedConditions）
             ListQuery(
-                "WideLiterals",
-                "Tiny < 300 AND Tiny <> -1 AND Qty = 3000000000 AND Qty <> -3000000000"
+                "PlainEdges",
+                "Tiny = 255 OR Tiny = 0 OR Qty = -2147483648 OR Qty = 2147483647"
             ),
             // long の両端（"-9223372036854775808L" は long.MinValue のリテラル）
             ListQuery("LongEdges", "Big = -9223372036854775808 OR Big = 9223372036854775807"),

@@ -385,6 +385,9 @@
   <data name="CodeGen_Query_DuplicateResultTypeName" xml:space="preserve">
     <value>Named query '{0}': result type name '{1}' is already used by another query. Result type names must be unique within the generated namespace.</value>
   </data>
+  <data name="CodeGen_Query_ReservedResultTypeName" xml:space="preserve">
+    <value>Named query '{0}': result type name '{1}' is already a type name of the generated code (a generated class or interface, the runtime, or a library type the generated code uses by its simple name). Choose a different result type name.</value>
+  </data>
   <data name="CodeGen_Query_RawSqlUndeclaredParameter" xml:space="preserve">
     <value>The parameter '@{0}' is used in the raw SQL but is not declared.</value>
   </data>

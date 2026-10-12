@@ -9,12 +9,14 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// <param name="ValueObjectClassName">値オブジェクト列の VO クラス名（VO でなければ null）</param>
 /// <param name="IsNullable">NULL 許容列かどうか</param>
 /// <param name="IsUnderlyingReferenceType">素の C# 型が参照型か（射影 DTO の非 NULL プロパティ初期化子の要否判定と、NULL 許容値型列の IN リスト持ち上げ要否の判定に使う）</param>
+/// <param name="IsGuidKeyValueObject">GuidKey の値オブジェクトか（部分一致のメソッドを持たないため、完全一致以外の文字列一致を型の検査で断る）</param>
 public sealed record QueryColumnBinding(
     string PropertyName,
     string UnderlyingTypeName,
     string? ValueObjectClassName,
     bool IsNullable,
-    bool IsUnderlyingReferenceType = false
+    bool IsUnderlyingReferenceType = false,
+    bool IsGuidKeyValueObject = false
 );
 
 /// <summary>
@@ -262,7 +264,7 @@ public static class QueryConditionCSharpEmitter
     {
         var column = Bind(node.Column, context);
 
-        // 完全一致（ワイルドカードなしの NOT LIKE）は等値比較を NULL 前提の内側で否定する。
+        // 完全一致（ワイルドカードなしの [NOT] LIKE）は等値比較を NULL 前提の内側で否定する。
         // 等値の <> へ畳むと列側の IS NULL 補償で NULL 行が一致に含まれ、LIKE の意味論
         // （NULL 行はどちらの向きでも一致しない）から外れる
         if (node.Kind == StringMatchKind.Exact)
@@ -303,7 +305,7 @@ public static class QueryConditionCSharpEmitter
         return column.IsNullable ? $"({access} != null && {matched})" : matched;
     }
 
-    /// <summary>完全一致（ワイルドカードなしの [NOT] LIKE リテラル）を NULL 前提の内側で組み立てる</summary>
+    /// <summary>完全一致（ワイルドカードなしの [NOT] LIKE リテラル）を組み立てる（否定形は NULL 前提の内側）</summary>
     private static string VisitExactMatch(
         StringMatchNode node,
         QueryColumnBinding column,
@@ -319,11 +321,16 @@ public static class QueryConditionCSharpEmitter
 
         var access = $"{context.LambdaVar}.{column.PropertyName}";
         var comparison = $"{access} == {operand}";
-        var matched = node.Negated ? $"!({comparison})" : comparison;
 
-        // NULL 許容列は「列が NULL でないこと」を前提に AND する（他の一致種別と同じ＝NULL 行は
-        // どちらの向きでも一致しない）。二重否定などで肯定形へ畳まれた場合も同じ前提の内側に置く
-        return column.IsNullable ? $"({access} != null && {matched})" : matched;
+        // 肯定形の等値は NULL 行を元から一致させない（SQL も C# も）ので前提は要らず、素の等値と同じ出力になる
+        if (!node.Negated)
+        {
+            return comparison;
+        }
+
+        // 否定形は NULL 許容列に「列が NULL でないこと」を前提に AND する（他の一致種別と同じ＝NULL 行は
+        // どちらの向きでも一致しない）
+        return column.IsNullable ? $"({access} != null && !({comparison}))" : $"!({comparison})";
     }
 
     /// <summary>IN（コレクション Contains。VO 列はリストを VO へ持ち上げてから比較する）</summary>
@@ -351,7 +358,10 @@ public static class QueryConditionCSharpEmitter
                     : $"{voClass}.Create";
             var listVar = context.LiftList(parameter, $"{parameter}.Select({converter}).ToList()");
 
-            call = $"{listVar}.Contains({context.LambdaVar}.{column.PropertyName})";
+            // NULL 許容の VO 列は、List<Vo>.Contains(Vo item) が NULL を受けない注釈のため CS8604 になる。
+            // 抑止（!）は式木に節点を作らず、翻訳・実行の意味は変わらない（NULL の行は Contains が false）
+            var suppression = column.IsNullable ? "!" : string.Empty;
+            call = $"{listVar}.Contains({context.LambdaVar}.{column.PropertyName}{suppression})";
         }
         else if (
             column.ValueObjectClassName is null

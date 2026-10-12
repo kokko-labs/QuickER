@@ -164,6 +164,28 @@ public class RawSqlAnalyzerTests
         findings.Should().BeEmpty();
     }
 
+    /// <summary>識別子の中のエスケープ（]] と ""）の後ろの @ を、識別子の外として扱う</summary>
+    [Fact(DisplayName = "識別子のエスケープ（]] と \"\"）の後ろの @ はパラメータとして数える")]
+    public void Analyze_EscapedIdentifierQuote_DoesNotEndIdentifierEarly()
+    {
+        // [a]]b] は列 a]b。] を閉じと見誤ると 'b' 以降が識別子の外に出て、@ghost が未宣言になる
+        Analyze("SELECT [a]]@ghost] FROM T WHERE Y = @real", "real").Should().BeEmpty();
+        Analyze("SELECT \"a\"\"@ghost\" FROM T WHERE Y = @real", "real").Should().BeEmpty();
+        // 識別子の外の @ は従来どおり数える
+        OfKind(
+                Analyze("SELECT [a]]b] FROM T WHERE Y = @real", "real"),
+                RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter
+            )
+            .Should()
+            .BeEmpty();
+        OfKind(
+                Analyze("SELECT [a]]b] FROM T WHERE Y = @missing", "real"),
+                RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter
+            )
+            .Should()
+            .ContainSingle();
+    }
+
     /// <summary>@@ で始まるシステム変数はパラメータ扱いしない</summary>
     [Fact(DisplayName = "@@システム変数はパラメータ扱いしない")]
     public void Analyze_SystemVariable_NotTreatedAsParameter()
@@ -182,6 +204,28 @@ public class RawSqlAnalyzerTests
         var findings = Analyze("SELECT 1 FROM T; SELECT 2 FROM U");
 
         OfKind(findings, RawSqlAnalyzer.RawSqlIssueKind.MultipleStatements).Should().HaveCount(1);
+    }
+
+    /// <summary>先頭の ;（<c>;WITH cte AS (…) SELECT …</c>）は文の終端でなく、複文ではない</summary>
+    [Theory(DisplayName = "先頭のセミコロン（;WITH）は複文でない")]
+    [InlineData(";WITH c AS (SELECT 1 AS n) SELECT n FROM c")]
+    [InlineData("  \n ; WITH c AS (SELECT 1 AS n) SELECT n FROM c;")]
+    [InlineData("-- 先頭のコメント\n;WITH c AS (SELECT 1 AS n) SELECT n FROM c")]
+    public void Analyze_LeadingSemicolon_NotMultipleStatements(string sql)
+    {
+        Analyze(sql).Should().BeEmpty();
+    }
+
+    /// <summary>先頭の ; の後でも、文の終端の ; の後にコードが続けば複文として検出する</summary>
+    [Fact(DisplayName = "先頭のセミコロンの後でも、2 つ目の文があれば複文")]
+    public void Analyze_LeadingSemicolonThenSecondStatement_Detected()
+    {
+        OfKind(
+                Analyze(";WITH c AS (SELECT 1 AS n) SELECT n FROM c; SELECT 2"),
+                RawSqlAnalyzer.RawSqlIssueKind.MultipleStatements
+            )
+            .Should()
+            .HaveCount(1);
     }
 
     /// <summary>末尾のセミコロンのみ（後続コードなし）は複文でない</summary>
@@ -218,6 +262,37 @@ public class RawSqlAnalyzerTests
     // ---------------- DECLARE（SQL ローカル変数） ----------------
 
     /// <summary>DECLARE で宣言した SQL ローカル変数は未宣言パラメータとして報告しない</summary>
+    /// <summary>EXEC の名前つき引数の左辺（@Name = @param）はパラメータの参照ではない</summary>
+    [Fact(DisplayName = "EXEC の名前つき引数の左辺は未宣言扱いしない")]
+    public void Analyze_ExecNamedArgument_LeftSideIsNotAParameter()
+    {
+        Analyze("EXEC dbo.GetOrders @CustomerId = @customerId, @Take = @take", "customerId", "take")
+            .Should()
+            .BeEmpty();
+        Analyze("EXECUTE dbo.GetOrders @CustomerId=@customerId", "customerId").Should().BeEmpty();
+        // 右辺が未宣言なら従来どおり報告する
+        OfKind(
+                Analyze("EXEC dbo.GetOrders @CustomerId = @missing", "customerId"),
+                RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter
+            )
+            .Should()
+            .ContainSingle(finding => finding.ParameterName == "missing");
+        // EXEC でない文の @x = は代入でなく比較の左辺ではないが、従来どおり参照として数える
+        OfKind(
+                Analyze("SELECT 1 WHERE @missing = 1", "customerId"),
+                RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter
+            )
+            .Should()
+            .ContainSingle(finding => finding.ParameterName == "missing");
+        // EXEC は ; で終わる。; の後の文の @x = は参照として数える
+        OfKind(
+                Analyze("EXEC p @a = @customerId; SELECT 1 WHERE @missing = 1", "customerId"),
+                RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter
+            )
+            .Should()
+            .ContainSingle(finding => finding.ParameterName == "missing");
+    }
+
     [Fact(DisplayName = "DECLARE のローカル変数は未宣言扱いしない")]
     public void Analyze_DeclaredLocalVariable_NotReportedAsUndeclared()
     {

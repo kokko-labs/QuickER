@@ -970,24 +970,15 @@ public static class QueryConditionParser
                 };
             }
 
-            // ワイルドカードなしのリテラル: 肯定形は等値比較と同じ（NULL 行は一致しない＝LIKE と同じ結論）。
-            // 否定形は等値の <> と違い「NULL 行はどちらの向きでも一致しない」（LIKE の NULL 前提の内側）で
-            // なければならないため、完全一致の文字列一致（Exact）として持ち、エミッタが前提の内側で否定する
-            if (negated)
-            {
-                return new StringMatchNode
-                {
-                    Column = column,
-                    Negated = true,
-                    Kind = StringMatchKind.Exact,
-                    Operand = coreOperand,
-                };
-            }
-
-            return new ComparisonNode
+            // ワイルドカードなしのリテラルは、肯定形も否定形も完全一致の文字列一致（Exact）として持つ。
+            // 肯定形を等値比較（ComparisonNode）にすると、外側の NOT の押し下げで <> へ反転し、
+            // 「NULL 行も一致する」側へ落ちる（LIKE の意味論は NULL 行がどちらの向きでも一致しない）。
+            // エミッタは Exact を、NULL 前提の内側で否定する
+            return new StringMatchNode
             {
                 Column = column,
-                Operator = ComparisonOperator.Equal,
+                Negated = negated,
+                Kind = StringMatchKind.Exact,
                 Operand = coreOperand,
             };
         }

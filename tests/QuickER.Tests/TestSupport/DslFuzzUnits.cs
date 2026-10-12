@@ -23,20 +23,8 @@ public static class DslFuzzUnits
     /// <summary>SQLite の単位（値オブジェクトなし・あり・GuidKey の主キー）</summary>
     public static IEnumerable<DslFuzzUnit> Sqlite(int seed)
     {
-        yield return Build(
-            "sqlite-plain",
-            seed,
-            SqliteColumns(),
-            valueObjects: false,
-            outOfRange: true
-        );
-        yield return Build(
-            "sqlite-vo",
-            seed,
-            SqliteColumns(),
-            valueObjects: true,
-            outOfRange: false
-        );
+        yield return Build("sqlite-plain", seed, SqliteColumns(), valueObjects: false);
+        yield return Build("sqlite-vo", seed, SqliteColumns(), valueObjects: true);
         yield return Build(
             "sqlite-vo-guidkey",
             seed,
@@ -45,28 +33,15 @@ public static class DslFuzzUnits
                 new("s", "TEXT", DslClr.String, Nullable: true),
                 new("i32", "int", DslClr.Int32, Nullable: true),
             ],
-            valueObjects: true,
-            outOfRange: false
+            valueObjects: true
         );
     }
 
     /// <summary>SQL Server の単位（値オブジェクトなし・あり・GuidKey の主キー。Integration の派生が実 DB で流す）</summary>
     public static IEnumerable<DslFuzzUnit> SqlServer(int seed)
     {
-        yield return Build(
-            "sqlserver-plain",
-            seed,
-            SqlServerColumns(),
-            valueObjects: false,
-            outOfRange: true
-        );
-        yield return Build(
-            "sqlserver-vo",
-            seed,
-            SqlServerColumns(),
-            valueObjects: true,
-            outOfRange: false
-        );
+        yield return Build("sqlserver-plain", seed, SqlServerColumns(), valueObjects: false);
+        yield return Build("sqlserver-vo", seed, SqlServerColumns(), valueObjects: true);
         yield return Build(
             "sqlserver-vo-guidkey",
             seed,
@@ -75,22 +50,15 @@ public static class DslFuzzUnits
                 new("s", "nvarchar(50)", DslClr.String, Nullable: true),
                 new("i32", "int", DslClr.Int32, Nullable: true),
             ],
-            valueObjects: true,
-            outOfRange: false
+            valueObjects: true
         );
     }
 
     /// <summary>MySQL の単位（符号なし整数・sbyte。インメモリでだけ実行する）</summary>
     public static IEnumerable<DslFuzzUnit> MySql(int seed)
     {
-        yield return Build(
-            "mysql-plain",
-            seed,
-            MySqlColumns(),
-            valueObjects: false,
-            outOfRange: true
-        );
-        yield return Build("mysql-vo", seed, MySqlColumns(), valueObjects: true, outOfRange: false);
+        yield return Build("mysql-plain", seed, MySqlColumns(), valueObjects: false);
+        yield return Build("mysql-vo", seed, MySqlColumns(), valueObjects: true);
     }
 
     /// <summary>射影の結果の型名を、生成物の既存の型名と衝突させる単位（行なし＝コンパイルだけ）</summary>
@@ -106,11 +74,10 @@ public static class DslFuzzUnits
         string name,
         int seed,
         IReadOnlyList<DslColumn> columns,
-        bool valueObjects,
-        bool outOfRange
+        bool valueObjects
     )
     {
-        var generator = new DslFuzzGenerator(seed, valueObjects, outOfRange);
+        var generator = new DslFuzzGenerator(seed, valueObjects);
 
         return new DslFuzzUnit(
             name,

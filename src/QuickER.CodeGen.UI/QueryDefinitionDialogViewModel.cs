@@ -227,7 +227,7 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
             var definition = definitions[index];
             var entity = _entities.First(e => e.Id == definition.EntityId);
             var others = definitions.Where((_, otherIndex) => otherIndex != index);
-            var violations = QueryDefinitionRules.Validate(entity, definition, others);
+            var violations = QueryDefinitionRules.Validate(entity, definition, others, _entities);
 
             if (violations.Count > 0)
             {

@@ -168,6 +168,36 @@ internal static class DslFuzzRunner
         {
             var current = unit with { Queries = queries };
             var generated = Generate(current, target);
+
+            // 射影の型名を生成型名と衝突させた単位は、生成前の検証で名指しして断られることを表明する
+            if (
+                current.Queries.FirstOrDefault(q => q.TypeNameCollision is not null) is { } collided
+            )
+            {
+                if (
+                    generated.HasErrors
+                    && generated.Diagnostics.Any(d =>
+                        d.Severity == GenerationDiagnosticSeverity.Error
+                        && d.Message.Contains(
+                            $"'{collided.TypeNameCollision}'",
+                            StringComparison.Ordinal
+                        )
+                    )
+                )
+                {
+                    return;
+                }
+
+                ledger.Record(
+                    new(
+                        $"{target.Suite}-generate:{unit.Name}",
+                        "expected-rejection-missing",
+                        $"projection-type-name-collision:{collided.TypeNameCollision}"
+                    ),
+                    $"seed={unit.Seed} {collided.Name}"
+                );
+            }
+
             var rejected = RecordGenerationDiagnostics(ledger, target.Suite, current, generated);
 
             if (generated.HasErrors)
@@ -441,9 +471,9 @@ internal static class DslFuzzRunner
         return null;
     }
 
-    /// <summary>型の検査が断ると決まっているリテラルを含むクエリか</summary>
+    /// <summary>型の検査が断ると決まっている原子（範囲外のリテラル・GuidKey への部分一致）を含むクエリか</summary>
     private static bool ExpectsRejection(DslQuery query) =>
-        query.Atoms.Any(atom => atom is DslCompare { RejectedByTypeCheck: true });
+        query.Atoms.Any(atom => atom.IsRejectedByTypeCheck);
 
     /// <summary>クエリの最初の原子の種類（生成時の拒否のキー）</summary>
     private static string FirstKind(DslQuery query) =>

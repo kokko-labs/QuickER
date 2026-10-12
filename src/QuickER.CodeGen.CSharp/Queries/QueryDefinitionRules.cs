@@ -63,6 +63,16 @@ public static class QueryDefinitionRules
             "CheckUniquenessAsync",
         };
 
+    /// <summary>
+    /// 射影 DTO の型名が、生成コードの型名と衝突するか（衝突すると重複宣言か、単純名で使う型を隠してコンパイルできない）
+    /// </summary>
+    /// <param name="name">DTO の型名</param>
+    /// <param name="generatedTypeNames">図から決まる生成型名（<see cref="GeneratedTypeNames.Collect"/>）</param>
+    internal static bool IsReservedResultTypeName(
+        string name,
+        IReadOnlySet<string> generatedTypeNames
+    ) => GeneratedFixedTypeNames.IsReserved(name) || generatedTypeNames.Contains(name);
+
     /// <summary>C# 識別子として妥当か（先頭は文字か _、以降は文字・数字・_。予約語は不可）</summary>
     /// <remarks>
     /// 生成器は識別子を <c>@</c> エスケープせずそのまま出力するため、予約語（<c>class</c> / <c>int</c> 等）を
@@ -94,13 +104,19 @@ public static class QueryDefinitionRules
     /// <remarks>
     /// <c>Query</c>: 生成メソッドの本体は契約メンバー <c>Query()</c> の呼び出しで組み立てるため、同名の引数は
     /// メソッドグループを隠してコンパイル不能になる（小文字の <c>query</c> は合法）。
+    /// <c>QueryBySqlAsync</c>: 生 SQL の単一・件数の本体が単純名で呼ぶ契約メンバーで、<c>Query</c> と同じ理由で隠される
+    /// （CS0149）。生 SQL の本体が呼ぶほかの契約メンバー（<c>QueryProjectionBySqlAsync</c> など）は、型引数つきの呼び出しや
+    /// 別の経路のため、同名の引数があってもコンパイルできる（<c>ReservedName_IsActuallyUncompilable</c> が確かめている）。
+    /// 値オブジェクトのクラス名と同名の引数（<c>CustomerIdValue</c> など）も、条件式の <c>Create</c> 呼び出しを隠して
+    /// コンパイルできないが、クラス名は図と生成オプションから決まるため、ここの予約には載せない（docs の既知の割り切り）。
     /// <c>await</c>: 生 SQL の単一・件数の生成メソッドは async メソッドで、その中では <c>await</c> を識別子に使えない。
     /// ほかの文脈キーワードは、生成されるどのメソッドの形でもパラメータ名として通る
     /// （<c>QueryReservedParameterNameTests</c> が全文脈キーワード × 全戻り形 × 実装方式を実コンパイルで固定する）。
     /// </remarks>
     public static bool IsReservedParameterName(string name) =>
         string.Equals(name, "Query", StringComparison.Ordinal)
-        || string.Equals(name, "await", StringComparison.Ordinal);
+        || string.Equals(name, "await", StringComparison.Ordinal)
+        || string.Equals(name, "QueryBySqlAsync", StringComparison.Ordinal);
 
     /// <summary>生成メソッドが自分で持つ引数の名前（宣言したパラメータと重なると重複になる）</summary>
     /// <param name="hasPaging">ページングを持つか（持てば <c>take</c> / <c>skip</c> が加わる）</param>
@@ -130,6 +146,11 @@ public static class QueryDefinitionRules
     /// 図のほかのクエリ（<paramref name="query"/> 自身を含めない。置き換える前の同じクエリも含めない）。
     /// 同じテーブルのクエリとはメソッド名の重複を、すべてのクエリとは射影の結果型名の重複を見る
     /// </param>
+    /// <param name="diagramEntities">
+    /// 図のすべてのテーブル。射影の結果型名が、図から決まる生成型名（エンティティ・Repository・値オブジェクトなど）と
+    /// 衝突しないかを見るのに使う。<b>省略すると固定の名簿（ランタイム・外部の型）だけで判定し、図由来の衝突を見逃す</b>ので、
+    /// 図を持つ呼び出し側（GUI のダイアログ・MCP の <c>set_query</c>）は必ず渡す
+    /// </param>
     /// <returns>違反（無ければ空）</returns>
     /// <remarks>
     /// メソッド名の重複の相手に数えるのは、それ自身が名前の規則を満たすクエリだけ（生成器は名前の規則に違反した
@@ -141,7 +162,8 @@ public static class QueryDefinitionRules
     public static IReadOnlyList<QueryRuleViolation> Validate(
         Entity entity,
         QueryDefinition query,
-        IEnumerable<QueryDefinition> otherQueries
+        IEnumerable<QueryDefinition> otherQueries,
+        IEnumerable<Entity>? diagramEntities = null
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -228,7 +250,12 @@ public static class QueryDefinitionRules
 
         if (query.Returns == QueryReturnShape.Projection)
         {
-            AddProjectionViolations(query, others, violations);
+            AddProjectionViolations(
+                query,
+                others,
+                diagramEntities is null ? [] : GeneratedTypeNames.Collect(diagramEntities),
+                violations
+            );
         }
 
         return violations;
@@ -238,6 +265,7 @@ public static class QueryDefinitionRules
     private static void AddProjectionViolations(
         QueryDefinition query,
         IReadOnlyList<QueryDefinition> others,
+        IReadOnlySet<string> generatedTypeNames,
         List<QueryRuleViolation> violations
     )
     {
@@ -252,6 +280,12 @@ public static class QueryDefinitionRules
         if (!IsValidIdentifier(resultTypeName))
         {
             violations.Add(QueryRuleViolation.InvalidResultTypeName(query.Name, resultTypeName));
+            return;
+        }
+
+        if (IsReservedResultTypeName(resultTypeName, generatedTypeNames))
+        {
+            violations.Add(QueryRuleViolation.ReservedResultTypeName(query.Name, resultTypeName));
             return;
         }
 
@@ -339,6 +373,9 @@ public enum QueryRuleKind
 
     /// <summary>結果型名が別のクエリと重複する</summary>
     DuplicateResultTypeName,
+
+    /// <summary>結果型名が生成コードの型名（生成される型・ランタイム・単純名で使う外部の型）と衝突する</summary>
+    ReservedResultTypeName,
 
     /// <summary>フィールド名が C# 識別子でない、または重複する</summary>
     InvalidFieldName,
@@ -441,6 +478,15 @@ public sealed record QueryRuleViolation(QueryRuleKind Kind, QueryDiagnosticText 
         new(
             QueryRuleKind.InvalidResultTypeName,
             Of(nameof(Strings.CodeGen_Query_InvalidResultTypeName), queryName, resultTypeName)
+        );
+
+    internal static QueryRuleViolation ReservedResultTypeName(
+        string queryName,
+        string resultTypeName
+    ) =>
+        new(
+            QueryRuleKind.ReservedResultTypeName,
+            Of(nameof(Strings.CodeGen_Query_ReservedResultTypeName), queryName, resultTypeName)
         );
 
     internal static QueryRuleViolation DuplicateResultTypeName(

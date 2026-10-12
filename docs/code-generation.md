@@ -386,6 +386,31 @@ In a DSL `LIKE` literal, only a leading or trailing `%` is read as a pattern (a 
 Character classes such as SQL Server's `[...]` get no special treatment: they match as strings that contain the brackets themselves.
 Write a raw SQL query when you need pattern syntax.
 
+An integer literal in a DSL condition has to fit the type of the column it is compared with (for a value object column, the type the object wraps).
+`tinyint_col = 256`, `smallint_col = 32768`, `unsigned_col = -1`, and an integer larger than `ulong` are not accepted: QuickER warns and skips that query instead of generating it.
+Generated as written, such a comparison is always false (or always true) and the C# compiler reports CS0652, and a store that binds the literal with the column's type (SQL Server) raises an overflow error when the query runs.
+
+> **Known limitation**: hand-written LINQ is not checked.
+> `Query().Where(x => x.Tiny == 256)` compiles with the CS0652 warning and raises the same overflow error on SQL Server.
+
+> **Known limitation**: a literal compared with a value object column is passed to the object's `Create`, which applies the object's own rules (maximum length, digits and scale).
+> The generator checks only the range of an integer literal, not these rules, so a literal that breaks one throws `ValueObjectValidationException` each time the generated method runs.
+> Keep the literal within the column's definition.
+
+A DSL string match cannot be used on a GuidKey column: `CONTAINS`, `STARTSWITH`, `ENDSWITH`, and a `LIKE` with a leading or trailing `%`.
+A value object limited to the shape of a GUID has no partial-match method, and a partial match on it means little.
+QuickER warns and skips that query.
+An exact `LIKE` (no `%`) and `=` work.
+
+The result type name of a projection becomes a class in the generated namespace, so it must not collide with another type there.
+QuickER refuses a name that is a generated class or interface (`OrderEntity`, `IOrderRepository`, a value object such as `AmountValue`), a runtime type, or a library type the generated code uses by its simple name (`Task`, `Expression`, and the like).
+The error names the query and the type.
+The GUI's query definition dialog and `set_query` run the same check before saving.
+
+> **Known limitation**: a parameter named like a value object class (`CustomerIdValue`, say) hides the class inside the generated condition, and the generated code does not compile.
+> The class names depend on the diagram and the generation options, so the parameter name check does not cover them.
+> Name parameters in camelCase.
+
 #### Letter case, whitespace, and date parts
 
 How a string match treats letter case is left to the store, because the `LIKE` is emitted unqualified: no `LOWER`, no `COLLATE`.

@@ -17,6 +17,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 #### Generated code
 
+- **A named query whose condition compares an integer column with a number outside the column's type is now skipped with a warning** — such as `tinyint_col = 256`, `smallint_col = 32768` or `unsigned_col = -1`. It used to be generated: C# reported CS0652 and the comparison was always false (or true), and on SQL Server the column-typed parameter raised an overflow exception when the query ran. The check was already there for value object columns and is now the same for plain columns. Hand-written LINQ is not checked; see [Code generation](docs/code-generation.md)
+- **A projection whose result type name is already a type of the generated code is now refused** — a generated class or interface (`OrderEntity`, `IOrderRepository`, a value object such as `AmountValue`), a runtime type, or a library type the generated code uses by its simple name (`Task`, `Expression`). It used to produce code that did not compile. The error names the query and the type; the query definition dialog and `set_query` refuse it before saving
+- **A DSL string match on a GuidKey column, other than an exact `LIKE` or `=`, is now skipped with a warning** — `CONTAINS`, `STARTSWITH`, `ENDSWITH` and a `LIKE` with `%`. It used to generate a file that failed to compile (CS1929)
+
 - **PostgreSQL `time with time zone` columns now generate `DateTimeOffset`, and array columns generate an array of the element type** — `timetz` used to become `TimeSpan` and an array column (`integer[]`, `varchar(20)[]`, `bigint[]`) used to become `string`. Both were types the driver never produces, so such a column could be neither read nor written; because an entity is materialized from all of its columns at once, **one such column made the whole table unusable through EF Core**. The property type on generated entities changes for these columns, so code that uses them may need updating — but no working code can break, because none of it worked at run time.
 
   | Column type | Before | After |
@@ -248,6 +252,13 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Starting QuickER again now brings the window that is already open to the front** — a window behind other windows only flashed in the taskbar
 
 #### Database import & generated code
+
+- **`NOT col LIKE 'abc'` (a `LIKE` without wildcards) no longer returns the rows where the column is `NULL`** — a string match never matches a `NULL` row in either direction, but the positive form was read as `=` and an outer `NOT` turned it into `<>`, which does match them. The two forms now behave alike on every backend
+- **Generated query code no longer raises compiler warnings** — an `IN` on a nullable value object column (CS8604), a projection field declared non-null over a nullable string or value object column (CS8601), and the `cref` in the `[DbColumnMeta]` documentation that did not resolve when only the SQLite repository was generated (CS1574)
+- **A skipped projection query no longer holds its result type name** — a later valid query that used the same name failed the whole generation as a duplicate of a DTO that was never emitted
+- **Raw SQL checks** — `;WITH cte AS (…)` is no longer reported as multiple statements, `]]` and `""` inside a quoted identifier no longer end the identifier early, and the argument name in `EXEC proc @Name = @param` is no longer counted as an undeclared parameter
+- **A parameter named `QueryBySqlAsync` is now refused** like `Query` and `await`, because it hid the method the generated raw SQL code calls
+- **An `IN` on a nullable column of a value type the generator does not recognize (PostgreSQL `cidr`) with a list of another type is now skipped with a warning** instead of throwing `InvalidCastException` in the in-memory backend
 
 - **A named query with an empty or whitespace-only SQL no longer generates a method that runs blank SQL** — `set_query` saved the blank text and the generator wrote an implementation for it (SQLite silently returned no rows), instead of leaving the method to be written by hand as the "no SQL for any dialect" warning says. The tool now treats a blank `sql` value as no SQL and does not save it (the GUI dialog already did), and the generator does the same for a diagram file that holds one
 - **A raw SQL's `DECLARE`d local variable is matched ignoring letter case** — `DECLARE @Total INT; ... SELECT @total` was reported as an undeclared parameter and the whole query was left out of generation, although SQL Server treats the two as the same variable. Parameters you declare on the method are still matched exactly, because the driver binds them that way

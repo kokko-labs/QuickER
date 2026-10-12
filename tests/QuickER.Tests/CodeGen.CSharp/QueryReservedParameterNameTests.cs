@@ -211,6 +211,8 @@ public class QueryReservedParameterNameTests
         DisplayName = "予約された名前は、それだけを予約から外すと生成物がコンパイルできない（表に要らない名前を載せない）"
     )]
     [InlineData("await")]
+    [InlineData("Query")]
+    [InlineData("QueryBySqlAsync")]
     public void ReservedName_IsActuallyUncompilable(string name)
     {
         QueryDefinitionRules.IsReservedParameterName(name).Should().BeTrue();

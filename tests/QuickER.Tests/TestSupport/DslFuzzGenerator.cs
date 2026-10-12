@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using QuickER.Model;
 
 namespace QuickER.Tests.TestSupport;
@@ -100,7 +101,7 @@ public sealed record DslFuzzUnit(
 /// <c>%</c> / <c>_</c> は作らない）。整数の型の範囲外のリテラルは値オブジェクトなしの単位でだけ作る（値オブジェクトありでは
 /// 型の検査が警告で飛ばす＝CLAUDE.md の名前付きクエリの節）。
 /// </remarks>
-public sealed class DslFuzzGenerator(int seed, bool valueObjects, bool outOfRangeLiterals)
+public sealed class DslFuzzGenerator(int seed, bool valueObjects)
 {
     private readonly Random _random = new(seed);
     private int _parameterIndex;
@@ -215,21 +216,6 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects, bool outOfRang
             if (literalAllowed)
             {
                 yield return new DslCompare(op, Literal(column)) { Column = column };
-            }
-        }
-
-        if (outOfRangeLiterals && column.IsInteger && OutOfRange(column.Clr) is { } outside)
-        {
-            foreach (var op in new[] { DslOp.Eq, DslOp.Lt })
-            {
-                yield return new DslCompare(
-                    op,
-                    new DslLiteral(outside, DslFuzz.NumberText(outside))
-                )
-                {
-                    Column = column,
-                    LiteralOutOfRange = true,
-                };
             }
         }
 
@@ -440,56 +426,36 @@ public sealed class DslFuzzGenerator(int seed, bool valueObjects, bool outOfRang
         return new DslCompare(op, Param(column)) { Column = column };
     }
 
-    /// <summary>型の範囲のすぐ外の整数（long に収まり、型の検査が飛ばさない種類だけ）</summary>
-    private static long? OutOfRange(DslClr clr) =>
-        clr switch
-        {
-            DslClr.Byte => 256L,
-            DslClr.SByte => 128L,
-            DslClr.Int16 => 32768L,
-            DslClr.UInt16 => -1L,
-            DslClr.Int32 => 3000000000L,
-            DslClr.UInt32 => -1L,
-            _ => null,
-        };
-
     /// <summary>
-    /// 型の検査が断る整数のリテラル（CLAUDE.md の名前付きクエリの節: ulong を超える値・素の ulong の列に負の値・
-    /// 素の符号付きの列に long を超える値・値オブジェクトの内包型の範囲外は警告で飛ばす）
+    /// 型の検査が断る整数のリテラル（docs の簡易 DSL の節: 列の型〔値オブジェクトなら内包型〕の範囲の外と、
+    /// <c>ulong</c> を超える整数は、警告してそのクエリを飛ばす）。範囲の両端のすぐ外と、<c>ulong</c> の上限の次
     /// </summary>
-    private IEnumerable<string> RejectedLiterals(DslColumn column)
+    private static IEnumerable<string> RejectedLiterals(DslColumn column)
     {
         if (!column.IsInteger)
         {
             yield break;
         }
 
-        yield return "18446744073709551616";
-
-        if (valueObjects)
+        var (min, max) = column.Clr switch
         {
-            var outside = column.Clr switch
-            {
-                DslClr.Int64 => "9223372036854775808",
-                DslClr.UInt64 => "-1",
-                _ => OutOfRange(column.Clr) is { } value ? DslFuzz.NumberText(value) : null,
-            };
+            DslClr.Int64 => ((BigInteger)long.MinValue, (BigInteger)long.MaxValue),
+            DslClr.Int32 => (int.MinValue, int.MaxValue),
+            DslClr.Int16 => (short.MinValue, short.MaxValue),
+            DslClr.SByte => (sbyte.MinValue, sbyte.MaxValue),
+            DslClr.Byte => (byte.MinValue, byte.MaxValue),
+            DslClr.UInt16 => (ushort.MinValue, ushort.MaxValue),
+            DslClr.UInt32 => (uint.MinValue, uint.MaxValue),
+            DslClr.UInt64 => (0, ulong.MaxValue),
+            _ => throw new ArgumentOutOfRangeException(nameof(column)),
+        };
 
-            if (outside is not null)
-            {
-                yield return outside;
-            }
+        yield return (max + 1).ToString(CultureInfo.InvariantCulture);
+        yield return (min - 1).ToString(CultureInfo.InvariantCulture);
 
-            yield break;
-        }
-
-        if (column.Clr == DslClr.UInt64)
+        if (max + 1 != ulong.MaxValue + (BigInteger)1)
         {
-            yield return "-1";
-        }
-        else if (column.Clr is DslClr.Int64 or DslClr.Int32 or DslClr.Int16 or DslClr.SByte)
-        {
-            yield return "9223372036854775808";
+            yield return (ulong.MaxValue + (BigInteger)1).ToString(CultureInfo.InvariantCulture);
         }
     }
 

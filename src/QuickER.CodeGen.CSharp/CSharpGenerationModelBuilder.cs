@@ -53,6 +53,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             queryParameterTypes ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.Ordinal);
         _queriesByEntity = CollectValidQueries(diagram, diagnostics);
         _queryDtoNames.Clear();
+        _reservedTypeNames = GeneratedTypeNames.Collect(diagram.Entities);
 
         // ナビゲーション名は Entity / EditModel / Mapper と EF Core の Fluent 構成が共有する（先に 1 回だけ決める）
         _navigationNames = ResolveNavigationNames(diagram);
@@ -449,9 +450,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// （末尾の <c>Entity</c> を外す）
     /// </summary>
     private static string ToRepositoryName(string entityClassName) =>
-        entityClassName.EndsWith("Entity", StringComparison.Ordinal)
-            ? entityClassName[..^"Entity".Length]
-            : entityClassName;
+        GeneratedTypeNames.ToRepositoryName(entityClassName);
 
     /// <summary>エンティティ定義から Repository の生成モデルを構築する</summary>
     /// <returns>単一主キーを持たないテーブルは対象外として null を返す</returns>

@@ -119,7 +119,7 @@ public sealed class SqlColumnTypeAttribute : Attribute
 /// </summary>
 /// <remarks>
 /// <see cref="TypeToken"/> is a dialect-neutral notation (for example <c>string(50)</c> / <c>decimal(10,2)</c> / <c>int32</c>)
-/// that can be recovered into the native type of any dialect. Runtime SQL parameter typing is the responsibility of <see cref="SqlColumnTypeAttribute"/>; this attribute is dedicated purely to definition metadata.
+/// that can be recovered into the native type of any dialect. Runtime SQL parameter typing is the responsibility of <c>SqlColumnTypeAttribute</c>; this attribute is dedicated purely to definition metadata.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class DbColumnMetaAttribute : Attribute

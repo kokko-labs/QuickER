@@ -241,6 +241,61 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
             }
         ),
         new RuleCase(
+            "result type name is a BCL type the generated code uses by its simple name",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "Task",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is a runtime type",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "SqlQuery",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is the generated entity class",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "OrderEntity",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is the generated repository interface",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "IOrderRepository",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is a generated value object",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "AmountValue",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
             "field name is not an identifier",
             QueryRuleKind.InvalidFieldName,
             entity => new QueryDefinition
@@ -348,7 +403,8 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
             .Validate(
                 order,
                 Attach(candidate, order),
-                existing is null ? [] : [Attach(existing, order)]
+                existing is null ? [] : [Attach(existing, order)],
+                [order]
             )
             .Should()
             .ContainSingle(v => v.Kind == ruleCase.Expected)
@@ -456,7 +512,10 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
         var order = CreateOrder();
         var candidate = build(order);
 
-        QueryDefinitionRules.Validate(order, Attach(candidate, order), []).Should().BeEmpty(label);
+        QueryDefinitionRules
+            .Validate(order, Attach(candidate, order), [], [order])
+            .Should()
+            .BeEmpty(label);
 
         var diagram = new ErDiagram
         {

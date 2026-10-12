@@ -385,6 +385,9 @@
   <data name="CodeGen_Query_DuplicateResultTypeName" xml:space="preserve">
     <value>名前付きクエリ '{0}': DTO 型名 '{1}' は別のクエリで使用済みです。DTO 型名は生成 namespace 内で一意にしてください。</value>
   </data>
+  <data name="CodeGen_Query_ReservedResultTypeName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': DTO 型名 '{1}' は生成コードの型名（生成されるクラス・インターフェイス、ランタイム、生成コードが単純名で使うライブラリの型）と衝突します。別の DTO 型名にしてください。</value>
+  </data>
   <data name="CodeGen_Query_RawSqlUndeclaredParameter" xml:space="preserve">
     <value>生 SQL 内で使用されているパラメータ '@{0}' が宣言されていません。</value>
   </data>

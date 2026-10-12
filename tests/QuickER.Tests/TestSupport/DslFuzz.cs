@@ -149,6 +149,12 @@ public abstract record DslAtom : DslNode
     /// <summary>原子自身の否定（NOT LIKE・NOT IN・IS NOT NULL など）</summary>
     public virtual bool InherentNegation => false;
 
+    /// <summary>
+    /// 型の検査が断ると決まっている原子か（生成時に警告して、その原子を含むクエリを飛ばす）。
+    /// 列の型の範囲外の整数リテラル・GuidKey の列への完全一致以外の文字列一致
+    /// </summary>
+    public virtual bool IsRejectedByTypeCheck => false;
+
     /// <summary>このクエリが起こし得る、既知の原因で説明できるコンパイラの診断（コード → 原因の名前）</summary>
     public virtual IEnumerable<(string Code, string Cause)> KnownDiagnostics(bool valueObjects) =>
         [];
@@ -163,20 +169,15 @@ public sealed record DslCompare(DslOp Op, DslOperand Operand) : DslAtom
     private string OperandKind =>
         Operand is DslParam ? "param"
         : RejectedByTypeCheck ? "literal-rejected"
-        : LiteralOutOfRange ? "literal-out-of-range"
         : "literal";
 
-    /// <summary>リテラルが列の型の範囲外か（比較が常に偽／真になり CS0652 が出る形）</summary>
-    public bool LiteralOutOfRange { get; init; }
-
     /// <summary>
-    /// 型の検査が断るリテラルか（C# の整数リテラルにならない値・ulong の列に負の値・符号付きの列に ulong の値・
-    /// 値オブジェクトの内包型の範囲外。生成時に警告で飛ばされることを確かめる）
+    /// 型の検査が断るリテラルか（C# の整数リテラルにならない値と、列の型〔値オブジェクトなら内包型〕の範囲外。
+    /// 生成時に警告で飛ばされることを確かめる）
     /// </summary>
     public bool RejectedByTypeCheck { get; init; }
 
-    public override IEnumerable<(string Code, string Cause)> KnownDiagnostics(bool valueObjects) =>
-        LiteralOutOfRange ? [("CS0652", "literal-out-of-range")] : [];
+    public override bool IsRejectedByTypeCheck => RejectedByTypeCheck;
 }
 
 /// <summary>IS [NOT] NULL</summary>
@@ -200,8 +201,10 @@ public sealed record DslLike(bool Negated, DslOperand Operand) : DslAtom
 
     public override bool InherentNegation => Negated;
 
-    public override IEnumerable<(string Code, string Cause)> KnownDiagnostics(bool valueObjects) =>
-        Column.Clr == DslClr.GuidKey ? [("CS1929", "stringmatch-guidkey")] : [];
+    /// <summary>GuidKey の列は部分一致のメソッドを持たないので、完全一致（ワイルドカードなしのリテラル）以外は断られる</summary>
+    public override bool IsRejectedByTypeCheck =>
+        Column.Clr == DslClr.GuidKey
+        && !(Operand is DslLiteral literal && LikeShape(literal.Text) == "exact");
 
     /// <summary>リテラルのパターンの形（exact・prefix・suffix・contains）</summary>
     public static string LikeShape(string quoted)
@@ -239,8 +242,8 @@ public sealed record DslMatch(DslMatchKind Match, bool Negated, DslOperand Opera
 
     public override bool InherentNegation => Negated;
 
-    public override IEnumerable<(string Code, string Cause)> KnownDiagnostics(bool valueObjects) =>
-        Column.Clr == DslClr.GuidKey ? [("CS1929", "stringmatch-guidkey")] : [];
+    /// <summary>GuidKey の列は部分一致のメソッドを持たないので、CONTAINS 系は断られる</summary>
+    public override bool IsRejectedByTypeCheck => Column.Clr == DslClr.GuidKey;
 }
 
 /// <summary>NOT</summary>

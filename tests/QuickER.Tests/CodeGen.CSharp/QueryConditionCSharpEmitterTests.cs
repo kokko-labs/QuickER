@@ -163,6 +163,31 @@ public class QueryConditionCSharpEmitterTests
     }
 
     /// <summary>
+    /// ワイルドカードなしの LIKE は、肯定形でも否定形でも完全一致の文字列一致として扱われ、
+    /// 外側の NOT を押し下げても NULL 前提の内側で否定されることを検証する
+    /// （肯定形を等値比較にすると NOT が <c>!=</c> へ反転し、NULL の行が一致に混ざる）
+    /// </summary>
+    [Fact(
+        DisplayName = "ワイルドカードなしの LIKE は肯定でも外側の NOT を NULL 前提の内側で否定する"
+    )]
+    public void Emit_ExactLike_NegatesInsideNullPremise()
+    {
+        Emit("Memo LIKE 'abc'", CreatePlainBindings()).Lambda.Should().Be("e => e.Memo == \"abc\"");
+        Emit("Memo NOT LIKE 'abc'", CreatePlainBindings())
+            .Lambda.Should()
+            .Be("e => (e.Memo != null && !(e.Memo == \"abc\"))");
+        Emit("NOT Memo LIKE 'abc'", CreatePlainBindings())
+            .Lambda.Should()
+            .Be("e => (e.Memo != null && !(e.Memo == \"abc\"))");
+        Emit("NOT NOT Memo LIKE 'abc'", CreatePlainBindings())
+            .Lambda.Should()
+            .Be("e => e.Memo == \"abc\"");
+        Emit("NOT (Memo LIKE 'abc' OR CustomerId = 1)", CreatePlainBindings())
+            .Lambda.Should()
+            .Be("e => ((e.Memo != null && !(e.Memo == \"abc\")) && e.CustomerId != 1)");
+    }
+
+    /// <summary>
     /// 前置 NOT の連鎖（NOT NOT ...）が偶奇で畳まれることを検証する。偶数個は肯定形＝素の一致に戻り、
     /// 奇数個は否定形＝NULL 前提の内側の否定になる（畳まずに 1 段ずつ包むと、否定が NULL 前提の外に出て
     /// NOT LIKE と結果が割れる）
@@ -284,6 +309,29 @@ public class QueryConditionCSharpEmitterTests
             .Which.Should()
             .Be("var idsValues = ids.Select(CustomerIdValue.Create).ToList();");
         emitted.Lambda.Should().Be("e => idsValues.Contains(e.CustomerId)");
+    }
+
+    /// <summary>
+    /// NULL 許容の VO 列の IN は、持ち上げた <c>List&lt;Vo&gt;.Contains(Vo)</c> に NULL を渡す形になり CS8604 になるため、
+    /// 列に null 抑止（!）を付けることを検証する（NULL 非許容の列には付けない）
+    /// </summary>
+    [Fact(DisplayName = "NULL 許容の VO 列の IN は列に null 抑止を付ける")]
+    public void Emit_ValueObjectIn_NullableColumn_SuppressesNullWarning()
+    {
+        var bindings = CreateVoBindings();
+        bindings[_entity.Columns[0].Id] = new QueryColumnBinding(
+            "CustomerId",
+            "int",
+            "CustomerIdValue",
+            true
+        );
+
+        Emit("CustomerId IN @ids", bindings)
+            .Lambda.Should()
+            .Be("e => idsValues.Contains(e.CustomerId!)");
+        Emit("CustomerId NOT IN @ids", bindings)
+            .Lambda.Should()
+            .Be("e => !(idsValues.Contains(e.CustomerId!))");
     }
 
     /// <summary>

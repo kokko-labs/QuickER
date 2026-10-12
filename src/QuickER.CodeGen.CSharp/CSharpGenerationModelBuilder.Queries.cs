@@ -36,6 +36,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>ビルド全体で射影 DTO 名の重複を検出するための集合（namespace 単位で一意が必要）</summary>
     private readonly HashSet<string> _queryDtoNames = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 図から決まる生成型名（<see cref="GeneratedTypeNames.Collect"/>）。射影 DTO の型名がこれや
+    /// <see cref="GeneratedFixedTypeNames"/> と衝突しないことを確かめる
+    /// </summary>
+    private HashSet<string> _reservedTypeNames = [];
+
     /// <summary>1 エンティティ分のクエリブロック（テンプレートへ渡す整形済みテキスト群）</summary>
     private sealed record QueryBlocks(
         string InterfaceBlock,
@@ -725,6 +731,15 @@ internal sealed partial class CSharpGenerationModelBuilder
                 return null;
             }
 
+            if (QueryDefinitionRules.IsReservedResultTypeName(resultTypeName, _reservedTypeNames))
+            {
+                AddRuleError(
+                    diagnostics,
+                    QueryRuleViolation.ReservedResultTypeName(query.Name, resultTypeName)
+                );
+                return null;
+            }
+
             if (!_queryDtoNames.Add(resultTypeName))
             {
                 AddRuleError(
@@ -766,6 +781,13 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         if (hasError)
         {
+            // 射影の型名はここまでに登録済み。飛ばすクエリの DTO は出ないので、名前を返す
+            // （残すと、後に来る有効なクエリが同じ型名を使えず、存在しない DTO との重複で生成全体が止まる）
+            if (query.Returns == QueryReturnShape.Projection)
+            {
+                _queryDtoNames.Remove(resultTypeName);
+            }
+
             return null;
         }
 
@@ -1005,7 +1027,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 typeInfo.TypeName,
                 ResolveValueObject(column)?.ClassName,
                 column.IsNullable,
-                typeInfo.IsReferenceType
+                typeInfo.IsReferenceType,
+                ResolveValueObject(column)?.IsGuidKey ?? false
             );
         }
 
@@ -1497,6 +1520,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             // int? → int の暗黙変換が無く必ず CS0266 になる。エミットされる C# がコンパイル不能な
             // 組み合わせなので、Warning＋このクエリだけスキップ（DSL の型整合検査と同じ流儀）。
             // 参照型（string / VO）は null 許容性の警告どまりでコンパイルは通るため対象外
+            // （NULL を除いてから非 NULL で受ける使い方は正当なので、代入に ! を付けて警告を抑止する）
             var fieldIsNullable = field.IsNullable ?? binding.IsNullable;
             var isReference =
                 binding.ValueObjectClassName is not null || binding.IsUnderlyingReferenceType;
@@ -1516,7 +1540,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 return null;
             }
 
-            assignments.Add($"{field.Name} = {lambdaVar}.{binding.PropertyName}");
+            var suppression = !fieldIsNullable && binding.IsNullable ? "!" : string.Empty;
+            assignments.Add($"{field.Name} = {lambdaVar}.{binding.PropertyName}{suppression}");
         }
 
         return $"{lambdaVar} => new {resultTypeName} {{ {string.Join(", ", assignments)} }}";

@@ -294,7 +294,14 @@ public static class QueryToolCore
         // ---- 生成器と同じ構造規則（生成で必ずエラーになる定義を保存しない）。置き換える既存の定義は比較から外す ----
         var otherQueries = diagram.Queries.Where(query => !ReferenceEquals(query, existing));
 
-        foreach (var violation in QueryDefinitionRules.Validate(entity, definition, otherQueries))
+        foreach (
+            var violation in QueryDefinitionRules.Validate(
+                entity,
+                definition,
+                otherQueries,
+                diagram.Entities
+            )
+        )
         {
             if (!RuleKindsReportedByTool.Contains(violation.Kind))
             {

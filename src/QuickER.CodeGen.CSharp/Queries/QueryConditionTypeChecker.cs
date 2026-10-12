@@ -185,19 +185,25 @@ internal static class QueryConditionTypeChecker
             return;
         }
 
-        // 列が文字列（string または内包値が string の VO）でなければ Contains 等のメソッドが存在しない
+        // 列が文字列（string または内包値が string の VO）でなければ Contains 等のメソッドが存在しない。
+        // GuidKey の VO は内包値が string でも、部分一致のメソッド（IStringMatchValueObject）を持たない
+        // （GUID の形に限った値の部分一致は意味が薄い）ので、完全一致（==）以外の文字列一致は使えない
         var underlyingFamily = Classify(column.UnderlyingTypeName);
+        var guidKeyPartialMatch = column.IsGuidKeyValueObject && node.Kind != StringMatchKind.Exact;
 
-        if (underlyingFamily is not TypeFamily.Text and not TypeFamily.Unknown)
+        if (
+            underlyingFamily is not TypeFamily.Text and not TypeFamily.Unknown
+            || guidKeyPartialMatch
+        )
         {
             violations.Add(
                 new Violation(
                     ViolationKind.StringMatchUnsupported,
                     node.Column.ResolvedName ?? node.Column.Text,
                     ColumnTypeText(column),
-                    // Exact はワイルドカードなしの NOT LIKE 由来（診断には DSL の綴りで載せる）
+                    // Exact はワイルドカードなしの [NOT] LIKE 由来（診断には DSL の綴りで載せる）
                     node.Kind == StringMatchKind.Exact
-                        ? "NOT LIKE"
+                        ? (node.Negated ? "NOT LIKE" : "LIKE")
                         : node.Kind.ToString().ToUpperInvariant()
                 )
             );
@@ -262,18 +268,20 @@ internal static class QueryConditionTypeChecker
             // 素の列に VO リストは比較できない（VO 有効の図では列も VO のためここへは来ない）
             compatible = false;
         }
+        else if (column.IsNullable && !column.IsUnderlyingReferenceType)
+        {
+            // NULL 許容の値型列は Cast<T?>() で持ち上げるため、要素型は列型と完全一致が必要
+            // （Cast は参照/ボックス変換しか通さず、long リストを int? へ Cast すると実行時 InvalidCastException）。
+            // 型ファミリが未知でも同じ＝未知の値型（PostgreSQL の cidr など）の列へ string のリストを渡すと、
+            // 持ち上げが実行時に InvalidCastException になるので、未知でも要素型の一致を求める（次の分岐より先に判定する）
+            compatible = element.TypeName == column.UnderlyingTypeName;
+        }
         else if (
             Classify(column.UnderlyingTypeName) == TypeFamily.Unknown
             || Classify(element.TypeName) == TypeFamily.Unknown
         )
         {
             compatible = true;
-        }
-        else if (column.IsNullable && !column.IsUnderlyingReferenceType)
-        {
-            // NULL 許容の値型列は Cast<T?>() で持ち上げるため、要素型は列型と完全一致が必要
-            // （Cast は参照/ボックス変換しか通さず、long リストを int? へ Cast すると実行時 InvalidCastException）
-            compatible = element.TypeName == column.UnderlyingTypeName;
         }
         else
         {
@@ -348,9 +356,10 @@ internal static class QueryConditionTypeChecker
 
     /// <summary>数値リテラルと列の型整合（エミッタのサフィックス規則と VO Create の暗黙変換の鏡）</summary>
     /// <remarks>
-    /// 値の範囲も見る。エミッタはリテラルを原文のまま出すので、C# のリテラルにならない値（<c>ulong</c> を超える整数）、
-    /// 列の型と比べられない値（素の <c>long</c> 列に <c>long</c> を超える値・素の符号付き整数列に <c>ulong</c> の値・
-    /// 素の <c>ulong</c> 列に負の値）、VO の <c>Create</c> へ渡せない値（内包型の範囲の外）はコンパイルできない。
+    /// 値の範囲も見る。エミッタはリテラルを原文のまま出すので、C# のリテラルにならない値（<c>ulong</c> を超える整数）と、
+    /// 列の型（VO の列なら内包型）の範囲の外の値は、素の列でも VO でも断る。範囲外の値を通すと、C# の比較は
+    /// 常に偽（または真）で CS0652 の警告になり、型付きパラメータで束縛する実装先（SQL Server）は変換や算術オーバーフローの
+    /// 例外になる。VO の列は <c>Create</c> へ渡せずコンパイルできない（CS1503）。
     /// </remarks>
     private static bool NumberLiteralCompatible(
         QueryColumnBinding column,
@@ -416,24 +425,10 @@ internal static class QueryConditionTypeChecker
             return false;
         }
 
-        if (column.ValueObjectClassName is not null)
-        {
-            // VO は Create(リテラル)。定数の暗黙変換は値が内包型の範囲に入るときだけ効く（CS1503）
-            return IntegerRange(column.UnderlyingTypeName) is not { } range
-                || (value >= range.Min && value <= range.Max);
-        }
-
-        return column.UnderlyingTypeName switch
-        {
-            // サフィックス L のリテラルは long を超えると ulong になり、long 列と比べられない
-            "long" => value <= long.MaxValue,
-            // ulong と負の値は比べられない（CS0034）
-            "ulong" => value >= 0,
-            // 符号付き整数と ulong のリテラル（long を超える値）は比べられない（CS0034）
-            "sbyte" or "short" or "int" => value <= long.MaxValue,
-            // byte / ushort / uint は int・long・ulong のどれへも昇格できる
-            _ => true,
-        };
+        // 列の型（VO なら内包型）の範囲に入るときだけ通す。判定は VO と素の列で共通（写しを作らない）。
+        // 素の列の範囲外は、long を超えるリテラルが long 列と比べられない（CS0034）形も含めて、範囲の判定に収まる
+        return IntegerRange(column.UnderlyingTypeName) is not { } range
+            || (value >= range.Min && value <= range.Max);
     }
 
     /// <summary>整数型の値の範囲（整数型でなければ null）</summary>

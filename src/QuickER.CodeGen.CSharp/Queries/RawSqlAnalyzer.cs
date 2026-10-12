@@ -28,6 +28,11 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// 参照は「宣言はあるのに束縛・展開されない」形で必ず失敗する＝未宣言として報告する）。
 /// 診断メッセージは CodeGen.CSharp の resx でローカライズ済み。
 /// </para>
+/// <para>
+/// 入れ子のブロックコメント（<c>/* /* */ */</c>）は追わない。入れ子を許すのは SQL Server と PostgreSQL だけで、
+/// SQLite と MySQL では最初の <c>*/</c> で閉じる。方言に依らない走査では閉じ位置を決められないため、
+/// 最初の <c>*/</c> で閉じる側（緩い側）に倒す。
+/// </para>
 /// </remarks>
 public static class RawSqlAnalyzer
 {
@@ -82,6 +87,14 @@ public static class RawSqlAnalyzer
         var usedSet = new HashSet<string>(StringComparer.Ordinal);
         var multipleStatements = false;
         var semicolonSeen = false;
+
+        // ; より前に意味のあるトークンがあったか。先頭の ; は文の終端でない（<c>;WITH cte AS (…) SELECT …</c> は
+        // SQL Server の定番の書き出しで、複文ではない）ので、空の文を終えるだけの ; は数えない
+        var sawToken = false;
+
+        // EXEC / EXECUTE の呼び出しの中か（; で終わる）。<c>EXEC proc @Name = @param</c> の左辺 @Name は
+        // 引数名であってパラメータの参照ではない
+        var inExec = false;
 
         // DECLARE で SQL 内に宣言されたローカル変数（@total 等）はパラメータ扱いしない
         // （未宣言として報告すると、正当な SQL のクエリが偽陽性でスキップされる）。
@@ -160,6 +173,8 @@ public static class RawSqlAnalyzer
                     multipleStatements = true;
                 }
 
+                sawToken = true;
+
                 continue;
             }
 
@@ -168,9 +183,10 @@ public static class RawSqlAnalyzer
             {
                 i++;
 
-                while (i < length && sql[i] != ']')
+                // ]] は識別子の中の ] のエスケープ
+                while (i < length && (sql[i] != ']' || (i + 1 < length && sql[i + 1] == ']')))
                 {
-                    i++;
+                    i += sql[i] == ']' ? 2 : 1;
                 }
 
                 if (i < length)
@@ -182,6 +198,8 @@ public static class RawSqlAnalyzer
                 {
                     multipleStatements = true;
                 }
+
+                sawToken = true;
 
                 continue;
             }
@@ -191,9 +209,10 @@ public static class RawSqlAnalyzer
             {
                 i++;
 
-                while (i < length && sql[i] != '"')
+                // "" は識別子の中の " のエスケープ
+                while (i < length && (sql[i] != '"' || (i + 1 < length && sql[i + 1] == '"')))
                 {
-                    i++;
+                    i += sql[i] == '"' ? 2 : 1;
                 }
 
                 if (i < length)
@@ -205,6 +224,8 @@ public static class RawSqlAnalyzer
                 {
                     multipleStatements = true;
                 }
+
+                sawToken = true;
 
                 continue;
             }
@@ -218,7 +239,8 @@ public static class RawSqlAnalyzer
             // ステートメント区切り（DECLARE の宣言リストもここで終わる）
             if (c == ';')
             {
-                semicolonSeen = true;
+                semicolonSeen |= sawToken;
+                inExec = false;
                 inDeclareList = false;
                 expectDeclaredName = false;
                 i++;
@@ -258,6 +280,10 @@ public static class RawSqlAnalyzer
                             locallyDeclared.Add(name);
                             expectDeclaredName = false;
                         }
+                        else if (inExec && IsNamedArgument(sql, j))
+                        {
+                            // EXEC proc @Name = @param の左辺＝プロシージャの引数名（パラメータの参照ではない）
+                        }
                         else if (!locallyDeclared.Contains(name) && usedSet.Add(name))
                         {
                             usedParameters.Add(name);
@@ -276,6 +302,8 @@ public static class RawSqlAnalyzer
                 {
                     multipleStatements = true;
                 }
+
+                sawToken = true;
 
                 continue;
             }
@@ -298,6 +326,15 @@ public static class RawSqlAnalyzer
                     inDeclareList = true;
                     expectDeclaredName = true;
                 }
+                else if (
+                    sql.AsSpan(wordStart, i - wordStart)
+                        .Equals("EXEC", StringComparison.OrdinalIgnoreCase)
+                    || sql.AsSpan(wordStart, i - wordStart)
+                        .Equals("EXECUTE", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    inExec = true;
+                }
                 else if (expectDeclaredName)
                 {
                     // DECLARE cur CURSOR のように @ 以外の語が続く形＝変数宣言ではない
@@ -309,6 +346,8 @@ public static class RawSqlAnalyzer
                 {
                     multipleStatements = true;
                 }
+
+                sawToken = true;
 
                 continue;
             }
@@ -332,6 +371,8 @@ public static class RawSqlAnalyzer
             {
                 multipleStatements = true;
             }
+
+            sawToken = true;
 
             i++;
         }
@@ -365,6 +406,21 @@ public static class RawSqlAnalyzer
         }
 
         return findings;
+    }
+
+    /// <summary>名前の直後（空白を除く）が代入の <c>=</c> か（<c>==</c> ではない）</summary>
+    /// <param name="sql">SQL 文字列</param>
+    /// <param name="afterName">名前の直後の位置</param>
+    private static bool IsNamedArgument(string sql, int afterName)
+    {
+        var k = afterName;
+
+        while (k < sql.Length && char.IsWhiteSpace(sql[k]))
+        {
+            k++;
+        }
+
+        return k < sql.Length && sql[k] == '=' && !(k + 1 < sql.Length && sql[k + 1] == '=');
     }
 
     /// <summary>

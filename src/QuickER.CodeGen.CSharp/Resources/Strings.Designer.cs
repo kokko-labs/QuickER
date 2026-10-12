@@ -704,6 +704,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("CodeGen_Query_DuplicateResultTypeName", resourceCulture);
             }
         }
+        
+        public static string CodeGen_Query_ReservedResultTypeName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ReservedResultTypeName", resourceCulture);
+            }
+        }
 
         public static string CodeGen_Query_RawSqlUndeclaredParameter {
             get {

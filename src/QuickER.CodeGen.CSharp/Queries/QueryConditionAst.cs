@@ -89,9 +89,9 @@ public enum StringMatchKind
     EndsWith,
 
     /// <summary>
-    /// 完全一致（ワイルドカードなしの <c>NOT LIKE 'abc'</c>）。LIKE の一形態として NULL 前提の内側で
-    /// 否定するために使う（等値の <c>&lt;&gt;</c> と違い、NULL 行はどちらの向きでも一致しない）。
-    /// 肯定形（<c>LIKE 'abc'</c>）は素の等値比較（<see cref="ComparisonNode"/>）のままで、この種別は使わない。
+    /// 完全一致（ワイルドカードなしの <c>[NOT] LIKE 'abc'</c>）。LIKE の一形態として NULL 前提の内側で
+    /// 否定するために、肯定形も否定形もこの種別で持つ（等値の <c>&lt;&gt;</c> と違い、NULL 行はどちらの向きでも
+    /// 一致しない。肯定形を <see cref="ComparisonNode"/> にすると、外側の NOT が <c>&lt;&gt;</c> へ反転して崩れる）。
     /// </summary>
     Exact,
 }
