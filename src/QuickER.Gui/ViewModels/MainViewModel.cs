@@ -812,6 +812,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // 図に居ないエンティティは削除しない（履歴も積まない）。名前付きクエリは Id で取り除くため、
+        // 同じ Id の生きている表のクエリまで消してしまう
+        if (!Entities.Contains(SelectedEntity))
+        {
+            SelectedEntity = null;
+
+            return;
+        }
+
         UndoRedo.Execute(new RemoveEntityCommand(this, SelectedEntity));
         SelectedEntity = null;
     }
@@ -2228,6 +2237,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // 一意制約カードのコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
                 entity.UniqueConstraintMemberSelectionEdited +=
                     OnUniqueConstraintMemberSelectionEdited;
+                entity.Columns.CollectionChanged += OnEntityColumnsChangedForSelection;
                 _changeTracker.AttachEntity(entity);
             }
         }
@@ -2268,7 +2278,52 @@ public partial class MainViewModel : ObservableObject, IDisposable
         entity.NameScope = null;
         entity.IdentifierLimitSource = null;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
+        entity.Columns.CollectionChanged -= OnEntityColumnsChangedForSelection;
         _changeTracker.DetachEntity(entity);
+
+        // 選択・検索結果は、図に居る要素だけを指す（削除・Undo・図の一括置換の全経路）。
+        // 残すと、プロパティパネルが追跡の外れた要素を編集し（履歴にも未保存にもならない）、
+        // Redo で同じインスタンスが戻ると記録のない編集ごと現れ、古い検索結果から選んで削除すると
+        // Id が同じ生きている表の名前付きクエリまで消える。
+        if (SelectedColumn is not null && entity.Columns.Contains(SelectedColumn))
+        {
+            SelectedColumn = null;
+        }
+
+        if (ReferenceEquals(SelectedEntity, entity))
+        {
+            SelectedEntity = null;
+        }
+
+        PruneSearchResults(entity);
+    }
+
+    /// <summary>選択中の列が、所属するエンティティから外れたら選択を解く（列の追加の Undo など）</summary>
+    /// <remarks>
+    /// 並べ替え（<see cref="NotifyCollectionChangedAction.Move"/>）は列が外れないので何もしない。
+    /// 列の削除コマンド自身も選択を解くが、Undo / Redo の経路にはその呼び出しがないため、ここで一元的に扱う。
+    /// </remarks>
+    private void OnEntityColumnsChangedForSelection(
+        object? sender,
+        NotifyCollectionChangedEventArgs e
+    )
+    {
+        if (SelectedColumn is null || e.Action == NotifyCollectionChangedAction.Move)
+        {
+            return;
+        }
+
+        // Reset は外れた要素の一覧を持たないので、選択中の列が図のどのテーブルにも無くなったときだけ解く
+        // （Reset を起こしたのが別のテーブルの列なら、選択中の列はそのまま）
+        var removed =
+            e.Action == NotifyCollectionChangedAction.Reset
+                ? !Entities.Any(entity => entity.Columns.Contains(SelectedColumn))
+                : e.OldItems?.Contains(SelectedColumn) == true;
+
+        if (removed)
+        {
+            SelectedColumn = null;
+        }
     }
 
     /// <summary>
@@ -2343,6 +2398,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         relationship.Detach();
         relationship.ColumnPairSelectionEdited -= OnRelationshipColumnPairSelectionEdited;
         _changeTracker.DetachRelationship(relationship);
+
+        // 選択は図に居る要素だけを指す（理由は DetachEntityViewModel と同じ）
+        if (ReferenceEquals(SelectedRelationship, relationship))
+        {
+            SelectedRelationship = null;
+        }
     }
 
     /// <summary>エンティティ・リレーションを空にし、外れた全要素の購読解除・変更追跡の終了を行う</summary>

@@ -168,6 +168,31 @@ public sealed class DiagramChangeTracker
     /// <summary>追跡を一時停止中かどうか（Undo / Redo の再適用中に多重記録を防ぐ）</summary>
     private bool _suspendUndoTracking;
 
+    /// <summary>主キーの切り替えの最中のカラム（連動する NULL 許容の変更を、単発の履歴にしない）</summary>
+    /// <remarks>
+    /// 主キー化は NULL 許容を連動して落とす。その変更は主キーの変更と同じ 1 履歴
+    /// （<see cref="PushGroupedPropertyChanges"/>）に畳むので、切り替えの最中だけ単発の追跡を止める。
+    /// 切り替えの外の NULL 許容の変更は単発の履歴にする。
+    /// <c>IsPrimaryKeyChanging</c> と <c>IsPrimaryKeyChangeCompleted</c> は必ず対で呼ばれる前提
+    /// （生成コードの <c>OnIsPrimaryKeyChanging</c> → 値の設定 → <c>OnIsPrimaryKeyChanged</c> の順で、間の例外は想定しない）。
+    /// 対にならないと集合に残り、そのカラムの NULL 許容の変更が以後ずっと履歴に残らなくなる。
+    /// </remarks>
+    private readonly HashSet<ColumnViewModel> _columnsChangingPrimaryKey = new(
+        ReferenceEqualityComparer.Instance
+    );
+
+    /// <summary>種別の変更の最中のリレーション（連動する参照アクション・列ペアの変更を、単発の履歴にしない）</summary>
+    /// <remarks>
+    /// 種別を多対多へ変えると参照アクションが既定値へ戻る。その変更は種別の変更と同じ 1 履歴に畳むので、
+    /// 変更の最中だけ単発の追跡を止める（単発で積むと、Undo 1 回では参照アクションが戻らず、
+    /// 畳んだ履歴の変更前スナップショットも書き換わる）。
+    /// <c>TypeChanging</c> と <c>TypeChangeCompleted</c> は必ず対で呼ばれる前提（間の例外は想定しない）。
+    /// 対にならないと集合に残り、そのリレーションの変更が以後ずっと履歴に残らなくなる。
+    /// </remarks>
+    private readonly HashSet<RelationshipViewModel> _relationshipsChangingType = new(
+        ReferenceEqualityComparer.Instance
+    );
+
     /// <summary><see cref="DiagramChangeTracker"/> を生成する</summary>
     /// <param name="undoRedo">Undo / Redo スタック</param>
     /// <param name="entities">追跡対象のエンティティコレクション</param>
@@ -258,6 +283,7 @@ public sealed class DiagramChangeTracker
         column.IsPrimaryKeyChangeCompleted -= OnColumnIsPrimaryKeyChangeCompleted;
         column.PropertyChanged -= OnTrackedColumnPropertyChanged;
         _trackedPropertySnapshots.Remove(column);
+        _columnsChangingPrimaryKey.Remove(column);
     }
 
     /// <summary>リレーションの変更追跡を開始する</summary>
@@ -276,6 +302,7 @@ public sealed class DiagramChangeTracker
         relationship.TypeChangeCompleted -= OnRelationshipTypeChangeCompleted;
         relationship.PropertyChanged -= OnRelationshipPropertyChanged;
         _trackedPropertySnapshots.Remove(relationship);
+        _relationshipsChangingType.Remove(relationship);
     }
 
     /// <summary>テスト専用: 指定対象の基準スナップショットを保持している（＝追跡中）かどうか</summary>
@@ -379,12 +406,18 @@ public sealed class DiagramChangeTracker
         if (sender is ColumnViewModel column && !_suspendUndoTracking)
         {
             CaptureTrackedProperties(column, TrackedColumnProperties);
+            _columnsChangingPrimaryKey.Add(column);
         }
     }
 
     /// <summary>IsPrimaryKey の連動変更完了後にスナップショット差分を Undo スタックへ Push する</summary>
     private void OnColumnIsPrimaryKeyChangeCompleted(object? sender, EventArgs e)
     {
+        if (sender is ColumnViewModel changed)
+        {
+            _columnsChangingPrimaryKey.Remove(changed);
+        }
+
         if (sender is ColumnViewModel column && !_suspendUndoTracking)
         {
             PushGroupedPropertyChanges(
@@ -408,11 +441,14 @@ public sealed class DiagramChangeTracker
             return;
         }
 
-        // IsPrimaryKey/IsNullable の変更は IsPrimaryKeyChanging/IsPrimaryKeyChangeCompleted イベントで処理するためスキップする
+        // IsPrimaryKey の変更と、その最中の連動（NULL 許容）は IsPrimaryKeyChanging/IsPrimaryKeyChangeCompleted
+        // イベントで 1 履歴に畳むためスキップする。切り替えの外の NULL 許容の変更は、ほかのプロパティと同じく単発で記録する
         if (
-            e.PropertyName
-            is nameof(ColumnViewModel.IsPrimaryKey)
-                or nameof(ColumnViewModel.IsNullable)
+            e.PropertyName == nameof(ColumnViewModel.IsPrimaryKey)
+            || (
+                e.PropertyName == nameof(ColumnViewModel.IsNullable)
+                && _columnsChangingPrimaryKey.Contains(column)
+            )
         )
         {
             return;
@@ -439,12 +475,18 @@ public sealed class DiagramChangeTracker
         if (sender is RelationshipViewModel relationship && !_suspendUndoTracking)
         {
             CaptureTrackedProperties(relationship, TrackedRelationshipProperties);
+            _relationshipsChangingType.Add(relationship);
         }
     }
 
     /// <summary>Type の連動変更完了後にスナップショット差分を Undo スタックへ Push する</summary>
     private void OnRelationshipTypeChangeCompleted(object? sender, EventArgs e)
     {
+        if (sender is RelationshipViewModel changed)
+        {
+            _relationshipsChangingType.Remove(changed);
+        }
+
         if (sender is RelationshipViewModel relationship && !_suspendUndoTracking)
         {
             PushGroupedPropertyChanges(
@@ -468,8 +510,12 @@ public sealed class DiagramChangeTracker
             return;
         }
 
-        // Type 変更に関連する変更は TypeChanging/TypeChangeCompleted イベントで処理するためスキップする
-        if (e.PropertyName == nameof(RelationshipViewModel.Type))
+        // Type の変更と、その最中の連動（参照アクション・列ペア）は TypeChanging/TypeChangeCompleted イベントで
+        // 1 履歴に畳むためスキップする
+        if (
+            e.PropertyName == nameof(RelationshipViewModel.Type)
+            || _relationshipsChangingType.Contains(relationship)
+        )
         {
             return;
         }
@@ -744,17 +790,9 @@ public sealed class DiagramChangeTracker
             };
         }
 
-        if (sender is RelationshipViewModel && propertyName == nameof(RelationshipViewModel.Type))
-        {
-            return () => _applyRelationshipColumnRules(sender);
-        }
-
-        if (
-            sender is ColumnViewModel
-            && propertyName
-                is nameof(ColumnViewModel.IsPrimaryKey)
-                    or nameof(ColumnViewModel.IsForeignKey)
-        )
+        // 主キーの切り替えと種別の変更は、連動を含めて 1 履歴に畳む専用の経路（PushGroupedPropertyChanges）で記録し、
+        // その後処理も SnapshotChangeCommand が持つ。単発の記録（ここ）には来ない
+        if (sender is ColumnViewModel && propertyName == nameof(ColumnViewModel.IsForeignKey))
         {
             return () => _applyRelationshipColumnRules(sender);
         }

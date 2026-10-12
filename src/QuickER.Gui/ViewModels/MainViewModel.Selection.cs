@@ -2,6 +2,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Resources;
+using QuickER.Services;
 using QuickER.UndoRedo;
 
 namespace QuickER.ViewModels;
@@ -81,9 +82,12 @@ public partial class MainViewModel
             return;
         }
 
+        // 色は設定時に正規化されるため、比較も適用も正規化した値で行う（生の値で比べると、
+        // 同じ色の別表記で実変更のない履歴を積み、未保存にしてしまう）
+        var normalized = EntityTitleColorPalette.Normalize(colorHex);
         var changes = SelectedEntities
-            .Where(e => e.TitleBackgroundColor != colorHex)
-            .Select(e => (Entity: e, OldColor: e.TitleBackgroundColor, NewColor: colorHex))
+            .Where(e => e.TitleBackgroundColor != normalized)
+            .Select(e => (Entity: e, OldColor: e.TitleBackgroundColor, NewColor: normalized))
             .ToList();
 
         if (changes.Count == 0)

@@ -36,9 +36,9 @@ public partial class MainViewModel
 
     /// <summary>検索クエリ。設定するたびに現在の <see cref="Entities"/> から再評価する</summary>
     /// <remarks>
-    /// 絞り込みは常に現在の Entities を走査する（結果コレクションのライブ同期はしない）。
-    /// オーバーレイを開いたまま図が変わっても、入力・Enter 時の再評価で自然に整合するため
-    /// エンティティ削除・図置換の購読は設けない。
+    /// 絞り込みは常に現在の Entities を走査する。結果コレクションは、図から外れたエンティティを
+    /// <see cref="PruneSearchResults"/> が取り除く（図から外れた要素を指さない）一方、図に増えた一致は
+    /// 入力・Enter 時の再評価（<see cref="RefreshSearchResults"/>）で拾う。
     /// </remarks>
     public string SearchQuery
     {
@@ -124,6 +124,9 @@ public partial class MainViewModel
     [RelayCommand]
     private void GoToNextMatch()
     {
+        // オーバーレイを開いたまま図が変わった（削除・再読込・取込）場合に備え、現在の図で結果を取り直してから進む
+        RefreshSearchResults();
+
         if (SearchResults.Count == 0)
         {
             return;
@@ -139,22 +142,7 @@ public partial class MainViewModel
     /// <summary>現在のクエリで <see cref="Entities"/> を再評価し、結果コレクションと視点を更新する</summary>
     private void RunSearch()
     {
-        SearchResults.Clear();
-
-        var query = _searchQuery?.Trim() ?? string.Empty;
-
-        if (query.Length > 0)
-        {
-            foreach (var entity in Entities)
-            {
-                var result = BuildSearchResult(entity, query);
-
-                if (result is not null)
-                {
-                    SearchResults.Add(result);
-                }
-            }
-        }
+        FillSearchResults();
 
         // 絞り込みのたびにフォーカスを先頭へ戻す（0 件時は -1）
         _currentMatchIndex = SearchResults.Count > 0 ? 0 : -1;
@@ -167,6 +155,81 @@ public partial class MainViewModel
         {
             JumpToCurrentMatch();
         }
+    }
+
+    /// <summary>現在のクエリで <see cref="Entities"/> を走査し、結果コレクションを作り直す（フォーカス位置は触らない）</summary>
+    private void FillSearchResults()
+    {
+        SearchResults.Clear();
+
+        var query = _searchQuery?.Trim() ?? string.Empty;
+
+        if (query.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var entity in Entities)
+        {
+            var result = BuildSearchResult(entity, query);
+
+            if (result is not null)
+            {
+                SearchResults.Add(result);
+            }
+        }
+    }
+
+    /// <summary>現在の図で結果を取り直す。フォーカス中のエンティティが残っていれば、その位置を保つ（視点移動・選択はしない）</summary>
+    private void RefreshSearchResults()
+    {
+        var focused =
+            _currentMatchIndex >= 0 && _currentMatchIndex < SearchResults.Count
+                ? SearchResults[_currentMatchIndex].Entity
+                : null;
+
+        FillSearchResults();
+
+        _currentMatchIndex = focused is null
+            ? -1
+            : SearchResults.ToList().FindIndex(result => ReferenceEquals(result.Entity, focused));
+        OnPropertyChanged(nameof(SelectedSearchResult));
+        OnPropertyChanged(nameof(MatchCountText));
+    }
+
+    /// <summary>図から外れたエンティティの結果を取り除き、フォーカス位置を補正する（視点移動・選択はしない）</summary>
+    /// <param name="entity">図から外れたエンティティ</param>
+    private void PruneSearchResults(EntityViewModel entity)
+    {
+        var changed = false;
+
+        for (var i = SearchResults.Count - 1; i >= 0; i--)
+        {
+            if (!ReferenceEquals(SearchResults[i].Entity, entity))
+            {
+                continue;
+            }
+
+            // フォーカスより前を取り除くときは、同じ結果を指し続けるよう位置を 1 つ詰める
+            if (i < _currentMatchIndex)
+            {
+                _currentMatchIndex--;
+            }
+
+            SearchResults.RemoveAt(i);
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        // フォーカス中の結果が外れたときは、同じ位置の次の結果（末尾なら最後の結果）へ寄せる
+        _currentMatchIndex =
+            SearchResults.Count == 0 ? -1 : Math.Min(_currentMatchIndex, SearchResults.Count - 1);
+        OnPropertyChanged(nameof(SelectedSearchResult));
+        OnPropertyChanged(nameof(MatchCountText));
     }
 
     /// <summary>1 エンティティに対する検索結果を組み立てる。一致しなければ null</summary>
