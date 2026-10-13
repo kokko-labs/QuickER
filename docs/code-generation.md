@@ -386,6 +386,9 @@ In a DSL `LIKE` literal, only a leading or trailing `%` is read as a pattern (a 
 Character classes such as SQL Server's `[...]` get no special treatment: they match as strings that contain the brackets themselves.
 Write a raw SQL query when you need pattern syntax.
 
+A named query that returns a single row (`single`) and is implemented in raw SQL reads every row its SQL returns and keeps the first.
+Limit the SQL yourself when it can return many rows: `TOP 1` on SQL Server, `LIMIT 1` on SQLite (with an `ORDER BY` when it matters which row comes first).
+
 An integer literal in a DSL condition has to fit the type of the column it is compared with (for a value object column, the type the object wraps).
 `tinyint_col = 256`, `smallint_col = 32768`, `unsigned_col = -1`, and an integer larger than `ulong` are not accepted: QuickER warns and skips that query instead of generating it.
 Generated as written, such a comparison is always false (or always true) and the C# compiler reports CS0652, and a store that binds the literal with the column's type (SQL Server) raises an overflow error when the query runs.

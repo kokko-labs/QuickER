@@ -2573,6 +2573,18 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Tool_RelationshipDefaultConstraintName {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipDefaultConstraintName", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipTypeRequired {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipTypeRequired", resourceCulture);
+            }
+        }
+
         public static string Tool_Summary_PrimaryKeyOrder {
             get {
                 return ResourceManager.GetString("Tool_Summary_PrimaryKeyOrder", resourceCulture);

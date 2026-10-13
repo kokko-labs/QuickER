@@ -1,4 +1,5 @@
 using System.Text.Json;
+using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Model;
 using static QuickER.Mcp.Tools.SchemaLookup;
@@ -26,42 +27,14 @@ namespace QuickER.Mcp.Tools;
 /// </remarks>
 public static class QueryToolCore
 {
-    /// <summary>クエリ定義を upsert するツールの名前（全面共通の正本）</summary>
-    public const string SetQueryToolName = "set_query";
+    /// <summary>クエリ定義を upsert するツールの名前（正本は <see cref="ErDiagramToolNames"/>）</summary>
+    public const string SetQueryToolName = ErDiagramToolNames.SetQuery;
 
-    /// <summary>クエリ定義を一覧するツール（読み取り系）の名前（全面共通の正本）</summary>
-    public const string ListQueriesToolName = "list_queries";
+    /// <summary>クエリ定義を一覧するツール（読み取り系）の名前（正本は <see cref="ErDiagramToolNames"/>）</summary>
+    public const string ListQueriesToolName = ErDiagramToolNames.ListQueries;
 
-    /// <summary>クエリ定義を 1 件削除するツールの名前（全面共通の正本）</summary>
-    public const string RemoveQueryToolName = "remove_query";
-
-    /// <summary>
-    /// <see cref="QueryDefinitionRules.Validate"/> の違反のうち、ツール自身の診断（入力の引数名で言う文言）が
-    /// 同じ判定で先に報告するもの。二重に報告しないよう、ここに挙げた種別は構造規則の側から積まない
-    /// </summary>
-    /// <remarks>
-    /// <see cref="QueryRuleKind.ScalarRequiresType"/>＝<see cref="QueryToolDiagnosticCode.ScalarRequiresScalarType"/>・
-    /// <see cref="QueryRuleKind.ProjectionRequiresFields"/>＝<see cref="QueryToolDiagnosticCode.ProjectionRequiresResultTypeName"/> /
-    /// <see cref="QueryToolDiagnosticCode.ProjectionRequiresFields"/>・
-    /// <see cref="QueryRuleKind.OrderByRequiresList"/>＝<see cref="QueryToolDiagnosticCode.OrderByInvalidForReturnShape"/>
-    /// （ツール側は order_by 配列の要素数で判定するので、構造規則より広い）
-    /// </remarks>
-    private static readonly HashSet<QueryRuleKind> RuleKindsReportedByTool =
-    [
-        QueryRuleKind.ScalarRequiresType,
-        QueryRuleKind.ProjectionRequiresFields,
-        QueryRuleKind.OrderByRequiresList,
-    ];
-
-    /// <summary>SQL 方言辞書のキーに指定できるプロバイダ識別名（クエリツール共通の正本）</summary>
-    public static readonly string[] SupportedDbms =
-    [
-        "sqlserver",
-        "postgresql",
-        "mysql",
-        "oracle",
-        "sqlite",
-    ];
+    /// <summary>クエリ定義を 1 件削除するツールの名前（正本は <see cref="ErDiagramToolNames"/>）</summary>
+    public const string RemoveQueryToolName = ErDiagramToolNames.RemoveQuery;
 
     // ---------------- set_query ----------------
 
@@ -129,74 +102,14 @@ public static class QueryToolCore
         var warnings = new List<QueryToolDiagnostic>();
 
         var parameters = BuildParameters(args, entity, tableName, errors);
-        var orderBy = BuildOrderBy(args, entity, tableName, returns, returnsInput!, errors);
+        var orderBy = BuildOrderBy(args, entity, tableName, errors);
         var fields = BuildFields(args, entity, tableName, errors);
-        var sql = BuildSql(args, errors);
+        var sql = BuildSql(args, implementation, errors, warnings);
 
-        // ---- 構造検証 ----
-        if (returns == QueryReturnShape.Scalar && string.IsNullOrWhiteSpace(scalarType))
+        // ---- DSL 構文・参照検証（implementation=dsl） ----
+        if (implementation == QueryImplementationKind.Dsl)
         {
-            errors.Add(new QueryToolDiagnostic(QueryToolDiagnosticCode.ScalarRequiresScalarType));
-        }
-
-        if (returns == QueryReturnShape.Projection)
-        {
-            if (string.IsNullOrWhiteSpace(resultTypeName))
-            {
-                errors.Add(
-                    new QueryToolDiagnostic(
-                        QueryToolDiagnosticCode.ProjectionRequiresResultTypeName
-                    )
-                );
-            }
-
-            if (fields.Count == 0)
-            {
-                errors.Add(
-                    new QueryToolDiagnostic(QueryToolDiagnosticCode.ProjectionRequiresFields)
-                );
-            }
-        }
-
-        // ---- DSL 構文・参照検証（implementation=dsl かつ condition あり） ----
-        if (implementation == QueryImplementationKind.Dsl && !string.IsNullOrWhiteSpace(condition))
-        {
-            var parsed = QueryConditionParser.ParseAndValidate(condition, entity, parameters);
-
-            if (!parsed.Success)
-            {
-                foreach (var diagnostic in parsed.Diagnostics)
-                {
-                    errors.Add(
-                        new QueryToolDiagnostic(
-                            QueryToolDiagnosticCode.ConditionDiagnostic,
-                            DetailText: diagnostic.Text
-                        )
-                    );
-                }
-            }
-            else
-            {
-                // 宣言済みだが条件で未使用のパラメータは警告（生成メソッドの未使用引数になる）
-                var referenced = parsed
-                    .ParameterReferences.Select(reference =>
-                        reference.ResolvedName ?? reference.Text
-                    )
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                foreach (var parameter in parameters)
-                {
-                    if (!referenced.Contains(parameter.Name))
-                    {
-                        warnings.Add(
-                            new QueryToolDiagnostic(
-                                QueryToolDiagnosticCode.ParameterUnusedInCondition,
-                                Name: parameter.Name
-                            )
-                        );
-                    }
-                }
-            }
+            AddDslDiagnostics(condition, entity, parameters, errors, warnings);
         }
 
         // ---- 生 SQL 静的検証（implementation=sql）。未宣言＝拒否・未使用／複文＝警告のみ ----
@@ -241,6 +154,17 @@ public static class QueryToolCore
             warnings.Add(
                 new QueryToolDiagnostic(
                     QueryToolDiagnosticCode.SqlIgnoredForImplementation,
+                    Detail: implementationText
+                )
+            );
+        }
+
+        // 並び順は GUI のクエリ定義ダイアログと同じく保存する（実装方式を dsl へ戻したときに効く）が、今は使われない
+        if (implementation != QueryImplementationKind.Dsl && orderBy.Count > 0)
+        {
+            warnings.Add(
+                new QueryToolDiagnostic(
+                    QueryToolDiagnosticCode.OrderByIgnoredForImplementation,
                     Detail: implementationText
                 )
             );
@@ -303,16 +227,7 @@ public static class QueryToolCore
             )
         )
         {
-            if (!RuleKindsReportedByTool.Contains(violation.Kind))
-            {
-                errors.Add(
-                    new QueryToolDiagnostic(
-                        QueryToolDiagnosticCode.GenerationRule,
-                        Detail: violation.Kind.ToString(),
-                        DetailText: violation.Text
-                    )
-                );
-            }
+            errors.AddRange(ToToolDiagnostics(violation, definition, returnsInput!));
         }
 
         if (errors.Count > 0)
@@ -351,6 +266,177 @@ public static class QueryToolCore
         };
     }
 
+    /// <summary>簡易 DSL の条件の診断を積む（構文・参照のエラーと、条件で使わないパラメータの警告）</summary>
+    /// <remarks>
+    /// 条件を書かないクエリで宣言したパラメータも、条件で使わないパラメータと同じく警告する（生成メソッドの
+    /// 使われない引数になり、全行が返る）。
+    /// </remarks>
+    private static void AddDslDiagnostics(
+        string? condition,
+        Entity entity,
+        List<QueryParameter> parameters,
+        List<QueryToolDiagnostic> errors,
+        List<QueryToolDiagnostic> warnings
+    )
+    {
+        var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(condition))
+        {
+            var parsed = QueryConditionParser.ParseAndValidate(condition, entity, parameters);
+
+            if (!parsed.Success)
+            {
+                foreach (var diagnostic in parsed.Diagnostics)
+                {
+                    errors.Add(
+                        new QueryToolDiagnostic(
+                            QueryToolDiagnosticCode.ConditionDiagnostic,
+                            DetailText: diagnostic.Text
+                        )
+                    );
+                }
+
+                return;
+            }
+
+            referenced.UnionWith(
+                parsed.ParameterReferences.Select(reference =>
+                    reference.ResolvedName ?? reference.Text
+                )
+            );
+        }
+
+        // 宣言済みだが条件で使わないパラメータは警告（生成メソッドの使われない引数になる）
+        foreach (var parameter in parameters)
+        {
+            if (!referenced.Contains(parameter.Name))
+            {
+                warnings.Add(
+                    new QueryToolDiagnostic(
+                        QueryToolDiagnosticCode.ParameterUnusedInCondition,
+                        Name: parameter.Name
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>構造規則の違反を、ツールの引数名で言う診断へ写す（写せない種別は生成時診断と同じ文言のまま）</summary>
+    /// <remarks>
+    /// 判定は <see cref="QueryDefinitionRules.Validate"/> だけが行い、ここは文言を選ぶだけ（ツールで同じ判定を
+    /// 書き直さない）。射影の見出しの違反は、欠けているものを名指しする 2 つの診断へ分ける。
+    /// </remarks>
+    private static IEnumerable<QueryToolDiagnostic> ToToolDiagnostics(
+        QueryRuleViolation violation,
+        QueryDefinition definition,
+        string returnsInput
+    )
+    {
+        switch (violation.Kind)
+        {
+            case QueryRuleKind.ScalarRequiresType:
+                yield return new QueryToolDiagnostic(
+                    QueryToolDiagnosticCode.ScalarRequiresScalarType
+                );
+                break;
+            case QueryRuleKind.ProjectionRequiresFields:
+                if (string.IsNullOrWhiteSpace(definition.ResultTypeName))
+                {
+                    yield return new QueryToolDiagnostic(
+                        QueryToolDiagnosticCode.ProjectionRequiresResultTypeName
+                    );
+                }
+
+                if (definition.Fields.Count == 0)
+                {
+                    yield return new QueryToolDiagnostic(
+                        QueryToolDiagnosticCode.ProjectionRequiresFields
+                    );
+                }
+
+                break;
+            case QueryRuleKind.OrderByRequiresList:
+                yield return new QueryToolDiagnostic(
+                    QueryToolDiagnosticCode.OrderByInvalidForReturnShape,
+                    Detail: returnsInput
+                );
+                break;
+            default:
+                yield return new QueryToolDiagnostic(
+                    QueryToolDiagnosticCode.GenerationRule,
+                    Detail: violation.Kind.ToString(),
+                    DetailText: violation.Text
+                );
+                break;
+        }
+    }
+
+    /// <summary>パラメータ・射影フィールドの要素 1 つの読み取り結果（名前・型トークン・列参照）</summary>
+    private readonly record struct TypedItem(string Name, string? Type, Guid? SourceColumnId);
+
+    /// <summary>パラメータ・射影フィールドの診断の種別（要素の種類ごとに違う）</summary>
+    private readonly record struct TypedItemCodes(
+        QueryToolDiagnosticCode MissingName,
+        QueryToolDiagnosticCode TypeSourceExclusive,
+        QueryToolDiagnosticCode SourceColumnNotFound
+    );
+
+    /// <summary>
+    /// name と、type / source_column のどちらか一方を持つ要素を読む（パラメータと射影フィールドが共有する規則）
+    /// </summary>
+    /// <returns>読めた要素。規則に合わなければ診断を積んで null</returns>
+    private static TypedItem? ReadTypedItem(
+        JsonElement item,
+        Entity entity,
+        string tableName,
+        TypedItemCodes codes,
+        List<QueryToolDiagnostic> errors
+    )
+    {
+        var name = GetString(item, "name");
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            errors.Add(new QueryToolDiagnostic(codes.MissingName));
+            return null;
+        }
+
+        var type = GetString(item, "type");
+        var sourceColumn = GetString(item, "source_column");
+        var hasType = !string.IsNullOrWhiteSpace(type);
+        var hasSource = !string.IsNullOrWhiteSpace(sourceColumn);
+
+        // type と source_column はどちらか一方（両方指定・両方欠落はエラー）
+        if (hasType == hasSource)
+        {
+            errors.Add(new QueryToolDiagnostic(codes.TypeSourceExclusive, Name: name));
+            return null;
+        }
+
+        if (!hasSource)
+        {
+            // 型トークンの前後の空白は除いて保存する（GUI のクエリ定義ダイアログと同じ）
+            return new TypedItem(name, type!.Trim(), null);
+        }
+
+        if (FindColumn(entity, sourceColumn!) is not { } column)
+        {
+            errors.Add(
+                new QueryToolDiagnostic(
+                    codes.SourceColumnNotFound,
+                    Name: name,
+                    Column: sourceColumn,
+                    Table: tableName
+                )
+            );
+            return null;
+        }
+
+        // 列参照は列由来で型が決まるため型トークンは保存しない（モデルの規約に合わせる）
+        return new TypedItem(name, null, column.Id);
+    }
+
     /// <summary>パラメータ配列を読み、モデル化する（type / source_column は排他・source_column は所属エンティティの列に限る）</summary>
     private static List<QueryParameter> BuildParameters(
         JsonElement args,
@@ -369,79 +455,36 @@ public static class QueryToolCore
             return parameters;
         }
 
+        var codes = new TypedItemCodes(
+            QueryToolDiagnosticCode.ParameterMissingName,
+            QueryToolDiagnosticCode.ParameterTypeSourceExclusive,
+            QueryToolDiagnosticCode.ParameterSourceColumnNotFound
+        );
+
         foreach (var item in array.EnumerateArray())
         {
-            var name = GetString(item, "name");
-
-            if (string.IsNullOrWhiteSpace(name))
+            if (ReadTypedItem(item, entity, tableName, codes, errors) is { } read)
             {
-                errors.Add(new QueryToolDiagnostic(QueryToolDiagnosticCode.ParameterMissingName));
-                continue;
-            }
-
-            var type = GetString(item, "type");
-            var sourceColumn = GetString(item, "source_column");
-            var isList = GetBool(item, "is_list") ?? false;
-            var hasType = !string.IsNullOrWhiteSpace(type);
-            var hasSource = !string.IsNullOrWhiteSpace(sourceColumn);
-
-            // type と source_column はどちらか一方（両方指定・両方欠落はエラー）
-            if (hasType == hasSource)
-            {
-                errors.Add(
-                    new QueryToolDiagnostic(
-                        QueryToolDiagnosticCode.ParameterTypeSourceExclusive,
-                        Name: name
-                    )
+                parameters.Add(
+                    new QueryParameter
+                    {
+                        Name = read.Name,
+                        Type = read.Type,
+                        IsList = GetBool(item, "is_list") ?? false,
+                        SourceColumnId = read.SourceColumnId,
+                    }
                 );
-                continue;
             }
-
-            Guid? sourceColumnId = null;
-
-            if (hasSource)
-            {
-                var column = FindColumn(entity, sourceColumn!);
-
-                if (column is null)
-                {
-                    errors.Add(
-                        new QueryToolDiagnostic(
-                            QueryToolDiagnosticCode.ParameterSourceColumnNotFound,
-                            Name: name,
-                            Column: sourceColumn,
-                            Table: tableName
-                        )
-                    );
-                    continue;
-                }
-
-                sourceColumnId = column.Id;
-            }
-
-            parameters.Add(
-                new QueryParameter
-                {
-                    Name = name,
-                    // 列参照は列由来で型が決まるため型トークンは保存しない（モデルの規約に合わせる）
-                    // 型トークンの前後の空白は除いて保存する（GUI のクエリ定義ダイアログと同じ）
-                    Type = hasType ? type!.Trim() : null,
-                    IsList = isList,
-                    SourceColumnId = sourceColumnId,
-                }
-            );
         }
 
         return parameters;
     }
 
-    /// <summary>並び順配列を読み、モデル化する（列名 → 列 ID 解決・戻り形は list / single / projection のみ許可）</summary>
+    /// <summary>並び順配列を読み、モデル化する（列名 → 列 ID 解決。戻り形との整合は構造規則が見る）</summary>
     private static List<QueryOrdering> BuildOrderBy(
         JsonElement args,
         Entity entity,
         string tableName,
-        QueryReturnShape returns,
-        string returnsInput,
         List<QueryToolDiagnostic> errors
     )
     {
@@ -454,20 +497,6 @@ public static class QueryToolCore
         )
         {
             return orderBy;
-        }
-
-        // order_by は一覧・単一（並び替えて先頭 1 件）・射影のときのみ有効
-        if (
-            returns
-            is not (QueryReturnShape.List or QueryReturnShape.Single or QueryReturnShape.Projection)
-        )
-        {
-            errors.Add(
-                new QueryToolDiagnostic(
-                    QueryToolDiagnosticCode.OrderByInvalidForReturnShape,
-                    Detail: returnsInput
-                )
-            );
         }
 
         foreach (var item in array.EnumerateArray())
@@ -521,76 +550,50 @@ public static class QueryToolCore
             return fields;
         }
 
+        var codes = new TypedItemCodes(
+            QueryToolDiagnosticCode.ProjectionFieldMissingName,
+            QueryToolDiagnosticCode.ProjectionFieldTypeSourceExclusive,
+            QueryToolDiagnosticCode.ProjectionFieldSourceColumnNotFound
+        );
+
         foreach (var item in array.EnumerateArray())
         {
-            var name = GetString(item, "name");
-
-            if (string.IsNullOrWhiteSpace(name))
+            if (ReadTypedItem(item, entity, tableName, codes, errors) is { } read)
             {
-                errors.Add(
-                    new QueryToolDiagnostic(QueryToolDiagnosticCode.ProjectionFieldMissingName)
+                fields.Add(
+                    new ProjectionField
+                    {
+                        Name = read.Name,
+                        Type = read.Type,
+                        SourceColumnId = read.SourceColumnId,
+                        // 省略時は null（＝自動: 列参照は列の NULL 許容に従い、自由フィールドは常に NULL 許容）
+                        IsNullable = GetBool(item, "is_nullable"),
+                    }
                 );
-                continue;
             }
-
-            var type = GetString(item, "type");
-            var sourceColumn = GetString(item, "source_column");
-            var hasType = !string.IsNullOrWhiteSpace(type);
-            var hasSource = !string.IsNullOrWhiteSpace(sourceColumn);
-
-            if (hasType == hasSource)
-            {
-                errors.Add(
-                    new QueryToolDiagnostic(
-                        QueryToolDiagnosticCode.ProjectionFieldTypeSourceExclusive,
-                        Name: name
-                    )
-                );
-                continue;
-            }
-
-            Guid? sourceColumnId = null;
-
-            if (hasSource)
-            {
-                var column = FindColumn(entity, sourceColumn!);
-
-                if (column is null)
-                {
-                    errors.Add(
-                        new QueryToolDiagnostic(
-                            QueryToolDiagnosticCode.ProjectionFieldSourceColumnNotFound,
-                            Name: name,
-                            Column: sourceColumn,
-                            Table: tableName
-                        )
-                    );
-                    continue;
-                }
-
-                sourceColumnId = column.Id;
-            }
-
-            fields.Add(
-                new ProjectionField
-                {
-                    Name = name,
-                    // 型トークンの前後の空白は除いて保存する（GUI のクエリ定義ダイアログと同じ）
-                    Type = hasType ? type!.Trim() : null,
-                    SourceColumnId = sourceColumnId,
-                    // 省略時は null（＝自動: 列参照は列の NULL 許容に従い、自由フィールドは常に NULL 許容）
-                    IsNullable = GetBool(item, "is_nullable"),
-                }
-            );
         }
 
         return fields;
     }
 
-    /// <summary>方言別 SQL 辞書を読む（キーは 5 方言名のみ許可・値は文字列。未知方言・非文字列はエラー）</summary>
+    /// <summary>方言別 SQL 辞書を読む（キーは対象 DBMS の名前・値は文字列）</summary>
+    /// <remarks>
+    /// <para>
+    /// 未知の方言・文字列でない値・大文字小文字だけ違う同じ方言のキーは、SQL を使う実装（sql）ではエラー、
+    /// 使わない実装では警告にする（使われない入力の誤りで、正しい定義の保存を止めない）。
+    /// </para>
+    /// <para>
+    /// 生成器が生 SQL の実装を作らない方言（<see cref="CodeGenerationOptions.SupportedRepositoryDialects"/> の外）の SQL は、
+    /// 保存したうえで、その方言ではメソッドが手動実装の契約になることを警告する（生成のたびに分かるのでは遅い）。
+    /// 空・空白だけの SQL は「その方言の SQL は無い」と同じ扱いで保存しない（GUI のクエリ定義ダイアログと同じ。
+    /// 保存すると生成器が空の SQL を実行する実装を作り、手動実装（partial）にならない）。
+    /// </para>
+    /// </remarks>
     private static Dictionary<string, string> BuildSql(
         JsonElement args,
-        List<QueryToolDiagnostic> errors
+        QueryImplementationKind implementation,
+        List<QueryToolDiagnostic> errors,
+        List<QueryToolDiagnostic> warnings
     )
     {
         var sql = new Dictionary<string, string>();
@@ -600,15 +603,15 @@ public static class QueryToolCore
             return sql;
         }
 
+        var usesSql = implementation == QueryImplementationKind.Sql;
+        var problems = usesSql ? errors : warnings;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var property in obj.EnumerateObject())
         {
-            var canonical = SupportedDbms.FirstOrDefault(dbms =>
-                string.Equals(dbms, property.Name, StringComparison.OrdinalIgnoreCase)
-            );
-
-            if (canonical is null)
+            if (TargetDbmsNames.Find(property.Name) is not { } canonical)
             {
-                errors.Add(
+                problems.Add(
                     new QueryToolDiagnostic(
                         QueryToolDiagnosticCode.UnknownSqlDialect,
                         Dialect: property.Name
@@ -617,9 +620,21 @@ public static class QueryToolCore
                 continue;
             }
 
+            if (!seen.Add(canonical))
+            {
+                problems.Add(
+                    new QueryToolDiagnostic(
+                        QueryToolDiagnosticCode.SqlDialectDuplicate,
+                        Dialect: property.Name,
+                        Detail: canonical
+                    )
+                );
+                continue;
+            }
+
             if (property.Value.ValueKind != JsonValueKind.String)
             {
-                errors.Add(
+                problems.Add(
                     new QueryToolDiagnostic(
                         QueryToolDiagnosticCode.SqlDialectNotString,
                         Dialect: property.Name
@@ -628,11 +643,21 @@ public static class QueryToolCore
                 continue;
             }
 
-            // 空・空白だけの SQL は「その方言の SQL は無い」と同じ扱いで保存しない（GUI のクエリ定義ダイアログと同じ。
-            // 保存すると生成器が空の SQL を実行する実装を作り、手動実装（partial）にならない）
-            if (!string.IsNullOrWhiteSpace(property.Value.GetString()))
+            if (string.IsNullOrWhiteSpace(property.Value.GetString()))
             {
-                sql[canonical] = property.Value.GetString()!;
+                continue;
+            }
+
+            sql[canonical] = property.Value.GetString()!;
+
+            if (usesSql && !CodeGenerationOptions.SupportedRepositoryDialects.Contains(canonical))
+            {
+                warnings.Add(
+                    new QueryToolDiagnostic(
+                        QueryToolDiagnosticCode.SqlDialectNotImplemented,
+                        Dialect: canonical
+                    )
+                );
             }
         }
 
@@ -645,23 +670,26 @@ public static class QueryToolCore
     public static QueryToolOutcome ListQueries(ErDiagram diagram)
     {
         var groups = new List<QueryListingGroup>();
+        var queriesByEntity = diagram.Queries.ToLookup(query => query.EntityId);
 
-        // エンティティ順に、そのエンティティ配下のクエリを列挙する
+        // エンティティ順に、そのエンティティ配下のクエリを列挙する（表ごとに全クエリを走査しない）
         foreach (var entity in diagram.Entities)
         {
-            var entityQueries = diagram
-                .Queries.Where(query => query.EntityId == entity.Id)
-                .ToList();
+            var entityQueries = queriesByEntity[entity.Id].ToList();
 
             if (entityQueries.Count == 0)
             {
                 continue;
             }
 
+            var columnNames = entity.Columns.ToDictionary(
+                column => column.Id,
+                column => column.Name
+            );
             groups.Add(
                 new QueryListingGroup(
                     entity.TableName,
-                    entityQueries.Select(query => BuildListingItem(entity, query)).ToList()
+                    entityQueries.Select(query => BuildListingItem(columnNames, query)).ToList()
                 )
             );
         }
@@ -689,8 +717,13 @@ public static class QueryToolCore
         };
     }
 
-    /// <summary>クエリ 1 件を要約データへ変換する（列参照は所属エンティティで名前解決する）</summary>
-    private static QueryListingItem BuildListingItem(Entity? entity, QueryDefinition query)
+    /// <summary>クエリ 1 件を要約データへ変換する（列参照は所属エンティティの列名で解決する）</summary>
+    /// <param name="columnNames">所属エンティティの列 ID → 列名（所属エンティティが無ければ null）</param>
+    /// <param name="query">クエリ</param>
+    private static QueryListingItem BuildListingItem(
+        IReadOnlyDictionary<Guid, string>? columnNames,
+        QueryDefinition query
+    )
     {
         var parameters = query
             .Parameters.Select(parameter => new QueryListingParameter(
@@ -698,7 +731,7 @@ public static class QueryToolCore
                 parameter.Type,
                 parameter.SourceColumnId is not null,
                 parameter.SourceColumnId is { } columnId
-                    ? ResolveColumnName(entity, columnId)
+                    ? ResolveColumnName(columnNames, columnId)
                     : null,
                 parameter.IsList
             ))
@@ -706,7 +739,7 @@ public static class QueryToolCore
 
         var orderBy = query
             .OrderBy.Select(ordering => new QueryListingOrder(
-                ResolveColumnName(entity, ordering.ColumnId),
+                ResolveColumnName(columnNames, ordering.ColumnId),
                 ordering.Descending
             ))
             .ToList();
@@ -716,7 +749,9 @@ public static class QueryToolCore
                 field.Name,
                 field.Type,
                 field.SourceColumnId is not null,
-                field.SourceColumnId is { } columnId ? ResolveColumnName(entity, columnId) : null
+                field.SourceColumnId is { } columnId
+                    ? ResolveColumnName(columnNames, columnId)
+                    : null
             ))
             .ToList();
 
@@ -754,12 +789,7 @@ public static class QueryToolCore
 
         if (entity is null)
         {
-            return new QueryToolOutcome
-            {
-                Status = QueryToolStatus.TableNotFound,
-                TableName = tableName,
-                QueryName = queryName,
-            };
+            return RemoveOrphanQueries(diagram, tableName, queryName);
         }
 
         var query = diagram.Queries.FirstOrDefault(candidate =>
@@ -786,11 +816,57 @@ public static class QueryToolCore
         };
     }
 
+    /// <summary>
+    /// どのテーブルにも属さないクエリ（属していたテーブルが図に無い）を、クエリ名で探して消す。
+    /// 見つからなければテーブルが無いことを返す
+    /// </summary>
+    /// <remarks>
+    /// そうしたクエリは list_queries で見えるのに、テーブル名で照合する remove_query から消せなかった
+    /// （古いファイルや手編集で残る。今の remove_entity はテーブルのクエリも消す）。属していたテーブルの名前は図に
+    /// 残っていないので、テーブル名ではなくクエリ名で照合する。同じ名前が複数あれば全部消す
+    /// （どれも引数で選び分けられず、生成器も読み飛ばしている）。
+    /// </remarks>
+    private static QueryToolOutcome RemoveOrphanQueries(
+        ErDiagram diagram,
+        string tableName,
+        string queryName
+    )
+    {
+        var entityIds = diagram.Entities.Select(entity => entity.Id).ToHashSet();
+        var orphans = diagram
+            .Queries.Where(query =>
+                !entityIds.Contains(query.EntityId) && SchemaNames.AreSame(query.Name, queryName)
+            )
+            .ToList();
+
+        if (orphans.Count == 0)
+        {
+            return new QueryToolOutcome
+            {
+                Status = QueryToolStatus.TableNotFound,
+                TableName = tableName,
+                QueryName = queryName,
+            };
+        }
+
+        diagram.Queries.RemoveAll(orphans.Contains);
+
+        return new QueryToolOutcome
+        {
+            Status = QueryToolStatus.Success,
+            TableName = tableName,
+            QueryName = queryName,
+            RemovedOrphans = orphans.Count,
+        };
+    }
+
     // ---------------- helpers ----------------
 
-    /// <summary>列 ID からエンティティ内の列名を引く（未解決は null＝面側で表示トークンを決める）</summary>
-    private static string? ResolveColumnName(Entity? entity, Guid columnId) =>
-        entity?.Columns.FirstOrDefault(column => column.Id == columnId)?.Name;
+    /// <summary>列 ID から列名を引く（未解決は null＝面側で表示トークンを決める）</summary>
+    private static string? ResolveColumnName(
+        IReadOnlyDictionary<Guid, string>? columnNames,
+        Guid columnId
+    ) => columnNames is not null && columnNames.TryGetValue(columnId, out var name) ? name : null;
 
     /// <summary>戻り形の入力文字列（list/single/count/scalar/projection）を列挙値へ解釈する</summary>
     private static bool TryParseReturnShape(string? value, out QueryReturnShape shape)

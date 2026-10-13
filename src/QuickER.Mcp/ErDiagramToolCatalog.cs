@@ -36,7 +36,7 @@ public static class ErDiagramToolCatalog
         [
             new ToolDefinition
             {
-                Name = "get_diagram_summary",
+                Name = ErDiagramToolNames.GetDiagramSummary,
                 Description =
                     "Returns a text listing of the entities (tables), their unique constraints, and the relationships (foreign keys, each with its constraint name and column pairs) in the current ER diagram.",
                 DeferLoading = false,
@@ -49,7 +49,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "add_entity",
+                Name = ErDiagramToolNames.AddEntity,
                 Description =
                     "Adds a new entity (table) to the ER diagram. No columns are created, so after adding, first define exactly one primary key column with add_column, then define the remaining columns. Unless the user requests a different convention, use PascalCase singular table names (e.g., Customer, OrderItem); if the diagram already has tables, match their existing naming style. The name must not be empty, and must not match an existing table's name ignoring case.",
                 DeferLoading = false,
@@ -70,7 +70,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "remove_entity",
+                Name = ErDiagramToolNames.RemoveEntity,
                 Description =
                     "Removes the entity with the specified table name from the ER diagram, together with every relationship that connects to it and every named query defined on it (the result names the removed queries). No tool brings the removed queries back, and adding a table with the same name again does not restore them.",
                 DeferLoading = false,
@@ -90,7 +90,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "add_column",
+                Name = ErDiagramToolNames.AddColumn,
                 Description =
                     "Adds a column to the specified table. Give each table exactly one primary key column: a second one is not rejected, and the diagram, the generated DDL and the schema sync all support a composite key, but the C# code generator does not. To declare a composite key - or to change which columns the key is made of, and in which order - call set_primary_key. A primary key column is always NOT NULL, so is_nullable is ignored when is_primary_key=true (to allow NULL, first take the column out of the key with set_primary_key). Columns that point at another table are not part of this table's primary key: add them as ordinary columns with is_primary_key=false and define the reference with add_relationship. data_type must not be empty, and a column whose name matches another column of the same table ignoring case is rejected.",
                 DeferLoading = false,
@@ -127,7 +127,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "remove_column",
+                Name = ErDiagramToolNames.RemoveColumn,
                 Description =
                     "Removes a column from the specified table. Any UNIQUE constraint that includes the column is removed together with it (a constraint is never silently narrowed to the remaining columns).",
                 DeferLoading = false,
@@ -148,7 +148,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "set_entity_property",
+                Name = ErDiagramToolNames.SetEntityProperty,
                 Description =
                     "Changes an entity's properties (table name, memo, description). A new table name must not be empty, and must not match another table's name ignoring case (changing only the case of the table's own name is allowed). When the call is rejected, none of the given properties is changed.",
                 DeferLoading = false,
@@ -179,7 +179,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "set_column_property",
+                Name = ErDiagramToolNames.SetColumnProperty,
                 Description =
                     "Changes a column's properties (description, data type, nullability) in the specified table. Specify at least one of description, data_type, or is_nullable. A primary key column is always NOT NULL, so is_nullable is ignored for it (to allow NULL, first take the column out of the key with set_primary_key). An empty data_type is rejected, and then none of the given properties is changed.",
                 DeferLoading = false,
@@ -219,7 +219,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "add_relationship",
+                Name = ErDiagramToolNames.AddRelationship,
                 Description =
                     "Adds a relationship (foreign key) between two tables. To specify the mapping reliably, also provide source_columns (the referenced column names of the parent table) and target_columns (the foreign key column names of the child table). The two arrays are parallel: entry i of source_columns is referenced by entry i of target_columns, they must have the same length, and their order is the declaration order of the foreign key. One entry each is the usual single-column foreign key; two or more entries define a composite foreign key. When both arrays are omitted, every primary key column of the parent table is paired with a child column inferred from the column names (a parent column whose counterpart cannot be inferred is left out of the mapping). Add foreign keys with different roles as separate relationships; a second relationship between the same parent and child over the same column pairs (in any order) is rejected, because it would be the same foreign key again. Each relationship gets a constraint name that no other constraint in the diagram uses: FK_{child}_{parent} by default, with the child's foreign key column names appended (and then a number) when that name is taken, so a second foreign key between the same two tables gets a distinct name. To choose the name yourself, give constraint_name; a name already used by a foreign key, primary key or unique constraint (ignoring case) is rejected. The result reports the name, which remove_relationship accepts.",
                 DeferLoading = false,
@@ -267,7 +267,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "remove_relationship",
+                Name = ErDiagramToolNames.RemoveRelationship,
                 Description =
                     "Removes the relationship between two tables. When several relationships run in the same direction between the same pair of tables, identify the one to remove with constraint_name; without it the call fails and lists the candidate constraint names (get_diagram_summary shows them too).",
                 DeferLoading = false,
@@ -297,7 +297,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "set_primary_key",
+                Name = ErDiagramToolNames.SetPrimaryKey,
                 Description =
                     "Sets the primary key of a table. Matched by table_name alone: a table has at most one primary key, so this call always replaces the current one - the listed columns become the key in the order given, and any other column of the table stops being part of it. Column order matters here (unlike set_unique_constraint): it is the order of the generated PRIMARY KEY constraint and of the index behind it, and get_diagram_summary reports it whenever it differs from the table's column order. The listed columns are also made NOT NULL, because a primary key column cannot be null; a column dropped from the key keeps the nullability it had. Nothing is checked against relationships: dropping a column that a relationship references from the key leaves that foreign key pointing at a column no key or unique constraint covers, and the generated DDL then fails when applied - keep such a column in the key, or cover it with set_unique_constraint. At least one column is required, so this tool cannot leave a table without a primary key. A single-column key needs this tool only to move the key to a different column - add_column is_primary_key=true already defines one.",
                 DeferLoading = false,
@@ -323,7 +323,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "set_unique_constraint",
+                Name = ErDiagramToolNames.SetUniqueConstraint,
                 Description =
                     "Defines or replaces (upsert) a UNIQUE constraint on a table. Matched by (table_name, set of columns): if a constraint over the same columns already exists it is redefined (its id is preserved, and the name and the column order are taken from this call), otherwise a new one is added. Column order does not affect matching or the meaning of the constraint. Omit name to let the DDL generator synthesize one (UQ_{table}_{columns}). A single-column constraint makes that column unique; several columns make the combination unique. The primary key already enforces uniqueness of its own columns, so a constraint over exactly the primary key columns is normally unnecessary.",
                 DeferLoading = false,
@@ -354,7 +354,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "remove_unique_constraint",
+                Name = ErDiagramToolNames.RemoveUniqueConstraint,
                 Description =
                     "Removes a UNIQUE constraint from a table. The constraint is identified by its set of columns (order and letter case do not matter), the same way set_unique_constraint matches. Fails if the table has no constraint over exactly those columns.",
                 DeferLoading = false,
@@ -380,7 +380,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "set_query",
+                Name = ErDiagramToolNames.SetQuery,
                 Description =
                     "Defines or replaces (upsert) a named query on a table. Queries become repository methods when C# code is generated. Matched by (table_name, query_name): if one already exists it is replaced wholesale (its id is preserved), otherwise it is added. Before saving, the definition is validated (structure, mini-DSL condition syntax and references, and raw-SQL static checks); on any error the file is left unchanged. An undeclared @parameter in raw SQL is an error (save refused); an unused or multi-statement SQL, or an unused DSL parameter, is a warning (save proceeds).",
                 DeferLoading = false,
@@ -429,7 +429,7 @@ public static class ErDiagramToolCatalog
                         sql = new
                         {
                             type = "object",
-                            description = "Per-dialect raw SQL (used when implementation=sql). Keys must be dialect names: sqlserver, postgresql, mysql, oracle, sqlite.",
+                            description = $"Per-dialect raw SQL (used when implementation=sql). Keys must be dialect names: {string.Join(", ", TargetDbmsNames.All)}.",
                             additionalProperties = new { type = "string" },
                         },
                         parameters = new
@@ -521,7 +521,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "list_queries",
+                Name = ErDiagramToolNames.ListQueries,
                 Description =
                     "Lists the named queries in the diagram, grouped by table, with each query's return shape, implementation kind, condition/SQL summary, and parameters.",
                 DeferLoading = false,
@@ -529,7 +529,7 @@ public static class ErDiagramToolCatalog
             },
             new ToolDefinition
             {
-                Name = "remove_query",
+                Name = ErDiagramToolNames.RemoveQuery,
                 Description =
                     "Removes a single named query identified by table_name and query_name. Fails if no such query exists.",
                 DeferLoading = false,

@@ -377,7 +377,9 @@ public static class QueryDefinitionRules
     /// <param name="diagramEntities">
     /// 図のすべてのテーブル。射影の結果型名が、図から決まる生成型名（エンティティ・Repository・値オブジェクトなど）と
     /// 衝突しないかを見るのに使う。<b>省略すると固定の名簿（ランタイム・外部の型）だけで判定し、図由来の衝突を見逃す</b>ので、
-    /// 図を持つ呼び出し側（GUI のダイアログ・MCP の <c>set_query</c>）は必ず渡す
+    /// 図を持つ呼び出し側（GUI のダイアログ・MCP の <c>set_query</c>）は必ず渡す。渡したときは、どのテーブルにも属さない
+    /// クエリ（属していたテーブルが図に無い）を重複の相手から外す（生成器はそうしたクエリを読み飛ばすので衝突しない。
+    /// 数えると、どのツールからも消せない残骸が新しい定義の名前を塞ぐ）
     /// </param>
     /// <returns>違反（無ければ空）</returns>
     /// <remarks>
@@ -398,7 +400,11 @@ public static class QueryDefinitionRules
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(otherQueries);
 
-        var others = otherQueries.ToList();
+        var entities = diagramEntities?.ToList();
+        var entityIds = entities?.Select(candidate => candidate.Id).ToHashSet();
+        var others = otherQueries
+            .Where(other => entityIds is null || entityIds.Contains(other.EntityId))
+            .ToList();
         var violations = new List<QueryRuleViolation>();
 
         // ---- メソッド名（違反があればこのクエリの残りは見ない＝生成器と同じ打ち切り） ----
@@ -449,7 +455,7 @@ public static class QueryDefinitionRules
             AddProjectionViolations(
                 query,
                 others,
-                diagramEntities is null ? [] : GeneratedTypeNames.Collect(diagramEntities),
+                entities is null ? [] : GeneratedTypeNames.Collect(entities),
                 violations
             );
         }

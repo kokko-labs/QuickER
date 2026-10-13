@@ -390,6 +390,21 @@ ER 図の作成・変更は必ず提供されたツール（{0}）で行って�
   <data name="QueryTool_Diag_SqlImplementationWithoutSql" xml:space="preserve">
     <value>implementation が 'sql' ですが、どの方言にも SQL がありません。生成コードでは全方言が手動実装（partial クラス）になります。</value>
   </data>
+  <data name="QueryTool_Diag_OrderByIgnoredForImplementation" xml:space="preserve">
+    <value>'order_by' は implementation が 'dsl' のときだけ使われます（指定は '{0}'）。並び順は保存しましたが、生成されるメソッドは使いません。</value>
+  </data>
+  <data name="QueryTool_Diag_SqlDialectNotImplemented" xml:space="preserve">
+    <value>生 SQL の実装を生成するのは {0} だけです。'{1}' の SQL は保存しましたが、その方言ではメソッドが手で実装する契約（partial クラス）として生成されます。</value>
+  </data>
+  <data name="QueryTool_Diag_SqlDialectDuplicate" xml:space="preserve">
+    <value>'sql' に方言 '{0}' のキーが複数あります（大文字小文字だけ違うキー。例 '{1}'）。方言ごとに 1 つにしてください。</value>
+  </data>
+  <data name="QueryTool_RemoveOrphanSuccess" xml:space="preserve">
+    <value>図に無いテーブルに属していたクエリ '{0}' を削除しました。</value>
+  </data>
+  <data name="QueryTool_RemoveOrphansSuccess" xml:space="preserve">
+    <value>図に無いテーブルに属していた '{1}' という名前のクエリを {0} 件削除しました。</value>
+  </data>
   <data name="QueryTool_Diag_Unexpected" xml:space="preserve">
     <value>想定外の診断です: {0}</value>
   </data>
@@ -398,6 +413,12 @@ ER 図の作成・変更は必ず提供されたツール（{0}）で行って�
   </data>
   <data name="QueryTool_ArgumentsNotObject" xml:space="preserve">
     <value>ツール '{0}' の引数は JSON オブジェクトで渡してください。</value>
+  </data>
+  <data name="Tool_ArgumentMissing" xml:space="preserve">
+    <value>引数 '{0}' は必須です。</value>
+  </data>
+  <data name="Tool_ArgumentWrongType" xml:space="preserve">
+    <value>引数 '{0}' は JSON の {1} で渡してください。</value>
   </data>
   <data name="Chat_ShowMarkdown" xml:space="preserve">
     <value>Markdown 表示</value>

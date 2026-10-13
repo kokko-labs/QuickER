@@ -52,7 +52,7 @@ public static class CodeGenToolSet
                     provider = new
                     {
                         type = "string",
-                        @enum = new[] { "sqlserver", "postgresql", "mysql", "oracle", "sqlite" },
+                        @enum = TargetDbmsNames.All,
                         description = "Target DBMS/provider (optional; defaults to the diagram's target DBMS, or sqlserver if unspecified).",
                     },
                     force = new
@@ -86,7 +86,7 @@ public static class CodeGenToolSet
                     provider = new
                     {
                         type = "string",
-                        @enum = new[] { "sqlserver", "postgresql", "mysql", "oracle", "sqlite" },
+                        @enum = TargetDbmsNames.All,
                         description = "Target DBMS/provider (optional; defaults to the diagram's target DBMS, or sqlserver if unspecified).",
                     },
                 },
@@ -311,13 +311,12 @@ public static class CodeGenToolSet
         var sb = new StringBuilder();
         AppendNewerFormatWarning(sb, document);
         AppendWarningLine(sb, providerWarning);
-        sb.AppendLine(
-            $"Generated C# code from '{file}' into '{outDir}' (provider: {provider.Name})."
-        );
+        sb.Append($"Generated C# code from '{file}' into '{outDir}' (provider: {provider.Name}).")
+            .Append('\n');
 
         if (!string.IsNullOrWhiteSpace(diagnostics))
         {
-            sb.AppendLine();
+            sb.Append('\n');
             sb.Append(diagnostics);
         }
 
@@ -434,8 +433,7 @@ public static class CodeGenToolSet
     /// 読み込んで続行し、警告は結果テキストへ付す（<see cref="AppendNewerFormatWarning"/>）。
     /// </summary>
     /// <remarks>
-    /// 形式検証は <see cref="JsonStorageService.TryLoad"/> に委ね、失敗種別の文言は ER 図操作ツールと共有の
-    /// <see cref="DiagramLoadErrors.Describe"/>（英語正本）で作る。不在だけはツール固有の案内文にするため先に判定する。
+    /// 読み込み（不在の案内・形式の検証・失敗の文言）は ER 図操作ツールと共有の <see cref="DiagramFileReader.Read"/>（英語正本）。
     /// 読み取りは <see cref="DiagramFileGate"/> のロックの中で行う（同じプロセスの ER 図操作ツールが同じファイルを
     /// 保存している最中に読むと、共有違反で読み取りが失敗するため）。生成そのものは読み込んだ文書だけを使うので
     /// ロックの外で行う。
@@ -444,30 +442,17 @@ public static class CodeGenToolSet
         DiagramFileGate.Run(() => LoadDiagramCore(file));
 
     /// <summary>図ファイルを読み込む本体（呼び出し側が <see cref="DiagramFileGate"/> のロックを取っている）</summary>
-    private static (DiagramDocument? Document, string? Error) LoadDiagramCore(string file)
-    {
-        if (!File.Exists(file))
-        {
-            return (null, $"Diagram file not found: {file}.");
-        }
-
-        if (JsonStorageService.TryLoad(file, out var document, out var error, out var exception))
-        {
-            return (document, null);
-        }
-
-        return (null, DiagramLoadErrors.Describe(file, error, exception));
-    }
+    /// <remarks>決まり文句（不在の案内・形式の検証）は ER 図操作ツールと共有の <see cref="DiagramFileReader.Read"/></remarks>
+    private static (DiagramDocument? Document, string? Error) LoadDiagramCore(string file) =>
+        DiagramFileReader.Read(file);
 
     /// <summary>新フォーマット文書のときのみ、警告行を結果テキストの先頭へ付す（読み取り系は続行する）</summary>
+    /// <remarks>文言は ER 図操作ツールと共有の <see cref="DiagramFileReader.NewerFormatWarning"/></remarks>
     private static void AppendNewerFormatWarning(StringBuilder sb, DiagramDocument document)
     {
-        if (document.IsNewerFormat)
+        if (DiagramFileReader.NewerFormatWarning(document) is { } warning)
         {
-            sb.AppendLine(
-                $"Warning: this diagram was saved in a newer format (version {document.Version} > supported {DiagramDocument.CurrentVersion}); unknown data may be omitted."
-            );
-            sb.AppendLine();
+            sb.Append(warning).Append('\n').Append('\n');
         }
     }
 
@@ -495,8 +480,8 @@ public static class CodeGenToolSet
     {
         if (warning is not null)
         {
-            sb.AppendLine(warning);
-            sb.AppendLine();
+            sb.Append(warning).Append('\n');
+            sb.Append('\n');
         }
     }
 

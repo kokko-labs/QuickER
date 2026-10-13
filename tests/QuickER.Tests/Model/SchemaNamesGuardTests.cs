@@ -524,10 +524,16 @@ public sealed class SchemaNamesGuardTests
             "モデルの名前ではない（接続プロファイル名の並び）"
         ),
         new(
-            "QueryToolCore.cs",
-            "varcanonical=SupportedDbms.FirstOrDefault(dbms=>string.Equals(dbms,property.Name,StringCom",
+            "ErDiagramHostChatAdapter.cs",
+            "privatestaticreadonlyDictionary<string,object>CatalogSchemas=ErDiagramToolCatalog.GetDefin",
             Group.Exception,
-            "モデルの名前ではない（方言名＝sql のキー）"
+            "モデルの名前ではない（ツール名 → 入力スキーマ）"
+        ),
+        new(
+            "McpToolSet.cs",
+            "_schemas=tools.ToDictionary(tool=>tool.Name,tool=>tool.InputSchema,StringComparer.Ordinal)",
+            Group.Exception,
+            "モデルの名前ではない（ツール名 → 入力スキーマ）"
         ),
         new(
             "DatabaseProviderRegistry.cs",

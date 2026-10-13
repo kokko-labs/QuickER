@@ -27,7 +27,9 @@ public static class StdioMcpServerHost
         CancellationToken cancellationToken = default
     )
     {
-        var builder = Host.CreateApplicationBuilder();
+        // 既定の構成を使わない（作業フォルダ＝外部エージェントが開いている利用者のプロジェクトの appsettings.json を
+        // 読み、変更の監視を張るため。壊れた appsettings.json で起動できず、大きなツリーでは監視が資源を使い切る）
+        var builder = Host.CreateEmptyApplicationBuilder(settings: null);
 
         // stdout は MCP プロトコル専用チャネルのため、コンソールへのログ出力を必ず無効化する
         // （ログが JSON-RPC ストリームへ混入するとプロトコルが壊れる）

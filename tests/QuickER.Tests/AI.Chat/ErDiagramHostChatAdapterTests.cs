@@ -39,11 +39,14 @@ public class ErDiagramHostChatAdapterTests
         var host = new StubErDiagramHost { ToolResultToReturn = ("done", true) };
         var adapter = new ErDiagramHostChatAdapter(host);
 
-        var (result, success) = adapter.ToolHost.Execute("add_entity", "{\"name\":\"Order\"}");
+        var (result, success) = adapter.ToolHost.Execute(
+            "add_entity",
+            "{\"table_name\":\"Order\"}"
+        );
 
         result.Should().Be("done");
         success.Should().BeTrue();
         host.LastToolName.Should().Be("add_entity");
-        host.LastArgumentsJson.Should().Be("{\"name\":\"Order\"}");
+        host.LastArgumentsJson.Should().Be("{\"table_name\":\"Order\"}");
     }
 }

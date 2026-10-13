@@ -1254,6 +1254,12 @@
   <data name="Tool_RelationshipUnnamedConstraint" xml:space="preserve">
     <value>(unnamed)</value>
   </data>
+  <data name="Tool_RelationshipDefaultConstraintName" xml:space="preserve">
+    <value>{0} (default name)</value>
+  </data>
+  <data name="Tool_RelationshipTypeRequired" xml:space="preserve">
+    <value>relationship_type is required (one of: {0}).</value>
+  </data>
   <data name="Tool_Summary_PrimaryKeyOrder" xml:space="preserve">
     <value>Primary key order: {0}</value>
   </data>

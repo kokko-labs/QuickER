@@ -282,6 +282,59 @@ public static class ConstraintNames
             .ToDictionary(pair => pair.Key, pair => pair.Value.Name);
 
     /// <summary>
+    /// 図のリレーションの Id ごとに、DDL・同期が外部キーへ付ける名前を求める（<see cref="ResolveForeignKeyNames"/> の、
+    /// 図の対象 DBMS の上限で求める形）
+    /// </summary>
+    /// <param name="diagram">図</param>
+    /// <returns>リレーションの Id → 名前（含まれるリレーションは <see cref="ResolveForeignKeyNames"/> と同じ）</returns>
+    /// <remarks>
+    /// ER 図操作ツールが、名前の無いリレーションを要約に示し、その名前で <c>remove_relationship</c> から選べるようにするために使う
+    /// （GUI のツールは ViewModel から作り直した図を渡すので、参照でなく Id で引く）。
+    /// </remarks>
+    public static IReadOnlyDictionary<Guid, string> ResolveForeignKeyNamesById(ErDiagram diagram) =>
+        ResolveForeignKeyNames(
+                diagram.Entities,
+                diagram.Relationships,
+                IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+            )
+            .ToDictionary(pair => pair.Key.Id, pair => pair.Value);
+
+    /// <summary>
+    /// 新しい外部キーの名前を決める（ER 図操作ツールの <c>constraint_name</c> の規則。GUI と MCP が共有する）
+    /// </summary>
+    /// <param name="requested">指定された名前（null・空・空白だけは省略として扱い、前後の空白は除く）</param>
+    /// <param name="childTable">参照する側（子）のテーブル名</param>
+    /// <param name="parentTable">参照される側（親）のテーブル名</param>
+    /// <param name="childColumnNames">外部キーを構成する子の列名（宣言順）</param>
+    /// <param name="existingNames">図の中の既存の制約名（<see cref="CollectExisting"/>）</param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（図の対象 DBMS の上限）</param>
+    /// <returns>
+    /// 決めた名前と、指定された名前が既存と衝突したか（衝突したときは黙って付け替えず、呼び出し側が断る＝付け替えると
+    /// その名前での <c>remove_relationship</c> が外れ、受け入れると DDL が失敗する）
+    /// </returns>
+    public static (string Name, bool Taken) ResolveRequestedForeignKey(
+        string? requested,
+        string childTable,
+        string parentTable,
+        IEnumerable<string> childColumnNames,
+        IReadOnlySet<string> existingNames,
+        IdentifierLengthLimit limit
+    )
+    {
+        var trimmed = requested?.Trim();
+
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return (
+                UniqueForeignKey(childTable, parentTable, childColumnNames, existingNames, limit),
+                false
+            );
+        }
+
+        return (trimmed, existingNames.Contains(trimmed));
+    }
+
+    /// <summary>
     /// <see cref="ResolveForeignKeyNames"/> と同じ名前を、縮める前の名前と、保存された名前かどうかと一緒に求める
     /// </summary>
     /// <remarks>

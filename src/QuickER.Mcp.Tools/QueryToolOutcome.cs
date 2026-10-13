@@ -49,6 +49,12 @@ public sealed class QueryToolOutcome
     /// <summary>set_query 成功時の警告一覧（保存は継続するが定義ミスの兆候）。累積順を保持する。</summary>
     public IReadOnlyList<QueryToolDiagnostic> Warnings { get; init; } = [];
 
+    /// <summary>
+    /// remove_query 成功時: どのテーブルにも属さないクエリ（属していたテーブルが図に無い）を消した件数。
+    /// 通常のテーブルのクエリを消したときは 0
+    /// </summary>
+    public int RemovedOrphans { get; init; }
+
     /// <summary>list_queries 成功時の一覧データ（それ以外は null）</summary>
     public QueryListing? Listing { get; init; }
 }
@@ -140,10 +146,10 @@ public enum QueryToolDiagnosticCode
     /// <summary>射影フィールドの source_column が所属テーブルに無い</summary>
     ProjectionFieldSourceColumnNotFound,
 
-    /// <summary>未知の SQL 方言名</summary>
+    /// <summary>未知の SQL 方言名（implementation=sql ならエラー・それ以外は警告）</summary>
     UnknownSqlDialect,
 
-    /// <summary>SQL 方言の値が文字列でない</summary>
+    /// <summary>SQL 方言の値が文字列でない（implementation=sql ならエラー・それ以外は警告）</summary>
     SqlDialectNotString,
 
     /// <summary>DSL 条件の診断（<see cref="QueryToolDiagnostic.DetailText"/>＝描画前の診断文言）</summary>
@@ -176,6 +182,24 @@ public enum QueryToolDiagnosticCode
 
     /// <summary>implementation=sql なのに中身のある SQL が 1 方言も無い（警告。生成すると全方言が手動実装になる）</summary>
     SqlImplementationWithoutSql,
+
+    /// <summary>
+    /// implementation が dsl でないのに order_by を渡した（警告。並び順は GUI と同じく保存するが、生成メソッドは使わない）。
+    /// <see cref="QueryToolDiagnostic.Detail"/>＝実装方式（小文字）
+    /// </summary>
+    OrderByIgnoredForImplementation,
+
+    /// <summary>
+    /// 生成器が生 SQL の実装を作らない方言の SQL（警告。SQL は保存し、その方言ではメソッドが手動実装の契約になる）。
+    /// <see cref="QueryToolDiagnostic.Dialect"/>＝方言名
+    /// </summary>
+    SqlDialectNotImplemented,
+
+    /// <summary>
+    /// sql に大文字小文字だけ違う同じ方言のキーが 2 つ以上ある（黙って片方を捨てない）。
+    /// <see cref="QueryToolDiagnostic.Dialect"/>＝2 つ目のキー（入力そのまま）・<see cref="QueryToolDiagnostic.Detail"/>＝方言名
+    /// </summary>
+    SqlDialectDuplicate,
 }
 
 /// <summary>list_queries の一覧データ（テーブル別グループ＋総件数）</summary>

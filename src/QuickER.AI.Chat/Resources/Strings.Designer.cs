@@ -659,6 +659,36 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+        public static string QueryTool_Diag_OrderByIgnoredForImplementation {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_OrderByIgnoredForImplementation", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_SqlDialectNotImplemented {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_SqlDialectNotImplemented", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_SqlDialectDuplicate {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_SqlDialectDuplicate", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_RemoveOrphanSuccess {
+            get {
+                return ResourceManager.GetString("QueryTool_RemoveOrphanSuccess", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_RemoveOrphansSuccess {
+            get {
+                return ResourceManager.GetString("QueryTool_RemoveOrphansSuccess", resourceCulture);
+            }
+        }
+
         public static string QueryTool_Diag_Unexpected {
             get {
                 return ResourceManager.GetString("QueryTool_Diag_Unexpected", resourceCulture);
@@ -674,6 +704,18 @@ namespace QuickER.AI.Chat.Resources {
         public static string QueryTool_ArgumentsNotObject {
             get {
                 return ResourceManager.GetString("QueryTool_ArgumentsNotObject", resourceCulture);
+            }
+        }
+
+        public static string Tool_ArgumentMissing {
+            get {
+                return ResourceManager.GetString("Tool_ArgumentMissing", resourceCulture);
+            }
+        }
+
+        public static string Tool_ArgumentWrongType {
+            get {
+                return ResourceManager.GetString("Tool_ArgumentWrongType", resourceCulture);
             }
         }
 

@@ -74,22 +74,23 @@ public static class ErDiagramDynamicTools
         var sb = new StringBuilder();
 
         // 型名・制約の書き方は対象 DBMS で変わるので、最初に読む要約の先頭で示す（MCP のツールと同じ）
-        sb.AppendLine(string.Format(Strings.Tool_Summary_TargetDbms, vm.CurrentProvider.Name));
-        sb.AppendLine(string.Format(Strings.Tool_Summary_TableCount, vm.Entities.Count));
-        sb.AppendLine(
-            string.Format(Strings.Tool_Summary_RelationshipCount, vm.Relationships.Count)
-        );
-        sb.AppendLine();
+        sb.Append(string.Format(Strings.Tool_Summary_TargetDbms, vm.CurrentProvider.Name))
+            .Append('\n');
+        sb.Append(string.Format(Strings.Tool_Summary_TableCount, vm.Entities.Count)).Append('\n');
+        sb.Append(string.Format(Strings.Tool_Summary_RelationshipCount, vm.Relationships.Count))
+            .Append('\n');
+        sb.Append('\n');
 
         foreach (var entity in vm.Entities)
         {
-            sb.AppendLine($"[{entity.TableName}]");
+            sb.Append($"[{entity.TableName}]").Append('\n');
 
             if (!string.IsNullOrWhiteSpace(entity.Description))
             {
-                sb.AppendLine(
-                    $"  {string.Format(Strings.Tool_Summary_EntityDescription, entity.Description)}"
-                );
+                sb.Append(
+                        $"  {string.Format(Strings.Tool_Summary_EntityDescription, entity.Description)}"
+                    )
+                    .Append('\n');
             }
 
             foreach (var col in entity.Columns)
@@ -115,7 +116,7 @@ public static class ErDiagramDynamicTools
                 var colDesc = !string.IsNullOrWhiteSpace(col.Description)
                     ? $" // {col.Description}"
                     : string.Empty;
-                sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}");
+                sb.Append($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}").Append('\n');
             }
 
             AppendPrimaryKeyOrder(sb, entity);
@@ -124,14 +125,16 @@ public static class ErDiagramDynamicTools
 
         if (vm.Relationships.Count > 0)
         {
-            sb.AppendLine();
-            sb.AppendLine(Strings.Tool_Summary_RelationshipsHeader);
+            sb.Append('\n');
+            sb.Append(Strings.Tool_Summary_RelationshipsHeader).Append('\n');
+            var ddlNames = DdlNames(vm);
 
             foreach (var rel in vm.Relationships)
             {
-                sb.AppendLine(
-                    $"  {rel.Source.TableName} → {rel.Target.TableName} ({rel.Type}{DescribeColumnPairs(rel)}){DescribeConstraintName(rel)}"
-                );
+                sb.Append(
+                        $"  {rel.Source.TableName} → {rel.Target.TableName} ({rel.Type}{DescribeColumnPairs(rel)}){DescribeConstraintName(rel, ddlNames)}"
+                    )
+                    .Append('\n');
             }
         }
 
@@ -144,7 +147,7 @@ public static class ErDiagramDynamicTools
     /// </remarks>
     private static (string, bool) AddEntity(JsonElement args, MainViewModel vm)
     {
-        var tableName = GetString(args, "table_name") ?? "NewTable";
+        var tableName = GetString(args, "table_name");
         var desc = GetString(args, "description") ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(tableName))
@@ -209,7 +212,7 @@ public static class ErDiagramDynamicTools
     {
         var tableName = GetString(args, "table_name");
         var columnName = GetString(args, "column_name");
-        var dataType = GetString(args, "data_type") ?? "nvarchar(100)";
+        var dataType = GetString(args, "data_type");
 
         if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName))
         {
@@ -494,7 +497,18 @@ public static class ErDiagramDynamicTools
             return (string.Format(Strings.Tool_TableNotFound, targetTable), false);
         }
 
-        if (ParseRelationshipType(typeStr) is not { } relType)
+        if (typeStr is null)
+        {
+            return (
+                string.Format(
+                    Strings.Tool_RelationshipTypeRequired,
+                    string.Join(", ", Enum.GetNames<RelationshipType>())
+                ),
+                false
+            );
+        }
+
+        if (!RelationshipTypeNames.TryParse(typeStr, out var relType))
         {
             return (
                 string.Format(
@@ -521,7 +535,7 @@ public static class ErDiagramDynamicTools
                 : vm.Relationships.FirstOrDefault(existing =>
                     ReferenceEquals(existing.Source, source)
                     && ReferenceEquals(existing.Target, target)
-                    && HasSameColumnPairs(existing.ColumnPairs, columnPairs)
+                    && RelationshipColumnPair.HaveSamePairs(existing.ColumnPairs, columnPairs)
                 );
 
         if (duplicate is not null)
@@ -531,7 +545,7 @@ public static class ErDiagramDynamicTools
                     Strings.Tool_RelationshipDuplicate,
                     source.TableName,
                     target.TableName,
-                    DescribeConstraintNames([duplicate])
+                    DescribeConstraintNames([duplicate], DdlNames(vm))
                 ),
                 false
             );
@@ -629,11 +643,7 @@ public static class ErDiagramDynamicTools
     /// <param name="childColumnNames">外部キーを構成する子の列名（宣言順）</param>
     /// <param name="existingNames">図の中の既存の制約名</param>
     /// <returns>決めた名前。指定された名前が既存と衝突するときはエラー文</returns>
-    /// <remarks>
-    /// 空・空白だけの指定は省略として扱い、前後の空白は除く。指定された名前が既存と衝突するときは、
-    /// 黙って付け替えず拒否する（付け替えるとその名前での remove_relationship が外れ、受け入れると DDL が失敗する）。
-    /// 規則は MCP のツールと共有する（<see cref="ConstraintNames.UniqueForeignKey"/>）
-    /// </remarks>
+    /// <remarks>規則は MCP のツールと共有する <see cref="ConstraintNames.ResolveRequestedForeignKey"/>。ここは文言だけを持つ</remarks>
     private static (string Name, string? Error) ResolveNewForeignKeyName(
         JsonElement args,
         string childTable,
@@ -643,26 +653,18 @@ public static class ErDiagramDynamicTools
         IdentifierLengthLimit limit
     )
     {
-        var requested = GetString(args, "constraint_name")?.Trim();
+        var (name, taken) = ConstraintNames.ResolveRequestedForeignKey(
+            GetString(args, "constraint_name"),
+            childTable,
+            parentTable,
+            childColumnNames,
+            existingNames,
+            limit
+        );
 
-        if (string.IsNullOrEmpty(requested))
-        {
-            // 図へ保存する既定名なので、図の対象 DBMS の上限で縮める（ConstraintNames の XmlDoc の経路）
-            return (
-                ConstraintNames.UniqueForeignKey(
-                    childTable,
-                    parentTable,
-                    childColumnNames,
-                    existingNames,
-                    limit
-                ),
-                null
-            );
-        }
-
-        return existingNames.Contains(requested)
-            ? (requested, string.Format(Strings.Tool_RelationshipConstraintNameTaken, requested))
-            : (requested, null);
+        return taken
+            ? (name, string.Format(Strings.Tool_RelationshipConstraintNameTaken, name))
+            : (name, null);
     }
 
     /// <summary>
@@ -863,27 +865,6 @@ public static class ErDiagramDynamicTools
             : null;
     }
 
-    /// <summary><c>relationship_type</c> を列挙値へ解釈する（列挙子の名前と大文字小文字を無視して一致。未指定は一対多）</summary>
-    /// <returns>解釈した種別。どの列挙子とも一致しなければ null</returns>
-    /// <remarks>MCP 側 <c>DocumentErDiagramToolHost.ParseRelationshipType</c> と同じ規則</remarks>
-    private static RelationshipType? ParseRelationshipType(string? value) =>
-        value is null
-            ? RelationshipType.OneToMany
-            : Enum.GetValues<RelationshipType>()
-                .Cast<RelationshipType?>()
-                .FirstOrDefault(type =>
-                    string.Equals(type.ToString(), value, StringComparison.OrdinalIgnoreCase)
-                );
-
-    /// <summary>2 つの列ペア一覧が、並びを問わず同じ (親列, 子列) の組を持つかを判定する</summary>
-    private static bool HasSameColumnPairs(
-        IReadOnlyCollection<RelationshipColumnPair> left,
-        IReadOnlyCollection<RelationshipColumnPair> right
-    ) =>
-        left.Select(pair => (pair.SourceColumnId, pair.TargetColumnId))
-            .ToHashSet()
-            .SetEquals(right.Select(pair => (pair.SourceColumnId, pair.TargetColumnId)));
-
     /// <summary>テーブル名でエンティティを検索する（前後の空白を除き大文字小文字を区別しない・最初の一致）</summary>
     private static EntityViewModel? FindEntity(MainViewModel vm, string tableName) =>
         vm.Entities.FirstOrDefault(entity => SchemaNames.AreSame(entity.TableName, tableName));
@@ -907,6 +888,7 @@ public static class ErDiagramDynamicTools
             return (Strings.Tool_SourceAndTargetTableRequired, false);
         }
 
+        var ddlNames = DdlNames(vm);
         var matches = vm
             .Relationships.Where(r =>
                 SchemaNames.AreSame(r.Source.TableName, sourceTable)
@@ -927,7 +909,7 @@ public static class ErDiagramDynamicTools
         if (!string.IsNullOrWhiteSpace(constraintName))
         {
             var byName = matches
-                .Where(r => SchemaNames.AreSame(r.ConstraintName, constraintName))
+                .Where(r => SchemaNames.AreSame(ddlNames.GetValueOrDefault(r.Id), constraintName))
                 .ToList();
 
             if (byName.Count == 0)
@@ -938,7 +920,7 @@ public static class ErDiagramDynamicTools
                         sourceTable,
                         targetTable,
                         constraintName,
-                        DescribeConstraintNames(matches)
+                        DescribeConstraintNames(matches, ddlNames)
                     ),
                     false
                 );
@@ -954,7 +936,7 @@ public static class ErDiagramDynamicTools
                     Strings.Tool_RelationshipAmbiguous,
                     sourceTable,
                     targetTable,
-                    DescribeConstraintNames(matches)
+                    DescribeConstraintNames(matches, ddlNames)
                 ),
                 false
             );
@@ -964,18 +946,34 @@ public static class ErDiagramDynamicTools
         return (string.Format(Strings.Tool_RelationshipRemoved, sourceTable, targetTable), true);
     }
 
-    /// <summary>候補リレーションの制約名を列挙する（名前なしは「名前なし」表記）</summary>
+    /// <summary>候補リレーションの制約名を列挙する（書き方は <see cref="DescribeName"/>）</summary>
     private static string DescribeConstraintNames(
-        IEnumerable<RelationshipViewModel> relationships
+        IEnumerable<RelationshipViewModel> relationships,
+        IReadOnlyDictionary<Guid, string> ddlNames
     ) =>
         string.Join(
             Strings.Tool_ListSeparator,
-            relationships.Select(r =>
-                string.IsNullOrWhiteSpace(r.ConstraintName)
-                    ? Strings.Tool_RelationshipUnnamedConstraint
-                    : r.ConstraintName!
-            )
+            relationships.Select(r => DescribeName(r, ddlNames))
         );
+
+    /// <summary>
+    /// リレーションの名前を示す（保存された名前はそのまま・名前が無ければ DDL が付ける名前に「既定の名前」を添える・
+    /// 外部キーを作らない名前の無い関係は「名前なし」）。MCP のツールと同じ規則
+    /// </summary>
+    private static string DescribeName(
+        RelationshipViewModel relationship,
+        IReadOnlyDictionary<Guid, string> ddlNames
+    ) =>
+        !string.IsNullOrWhiteSpace(relationship.ConstraintName) ? relationship.ConstraintName!
+        : ddlNames.TryGetValue(relationship.Id, out var ddlName)
+            ? string.Format(Strings.Tool_RelationshipDefaultConstraintName, ddlName)
+        : Strings.Tool_RelationshipUnnamedConstraint;
+
+    /// <summary>
+    /// リレーションの Id → DDL が付ける名前（名前の無いリレーションを要約に示し、その名前で選べるようにする）
+    /// </summary>
+    private static IReadOnlyDictionary<Guid, string> DdlNames(MainViewModel vm) =>
+        ConstraintNames.ResolveForeignKeyNamesById(vm.ToDiagramModel());
 
     /// <summary>テーブルの主キーを指定列（指定順）へ置き換える</summary>
     /// <remarks>
@@ -1232,9 +1230,10 @@ public static class ErDiagramDynamicTools
             return;
         }
 
-        sb.AppendLine(
-            $"  {string.Format(Strings.Tool_Summary_PrimaryKeyOrder, string.Join(", ", orderedNames))}"
-        );
+        sb.Append(
+                $"  {string.Format(Strings.Tool_Summary_PrimaryKeyOrder, string.Join(", ", orderedNames))}"
+            )
+            .Append('\n');
     }
 
     /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>
@@ -1274,11 +1273,11 @@ public static class ErDiagramDynamicTools
             return;
         }
 
-        sb.AppendLine($"  {Strings.Tool_Summary_UniqueConstraintsHeader}");
+        sb.Append($"  {Strings.Tool_Summary_UniqueConstraintsHeader}").Append('\n');
 
         foreach (var line in lines)
         {
-            sb.AppendLine(line);
+            sb.Append(line).Append('\n');
         }
     }
 
@@ -1313,11 +1312,19 @@ public static class ErDiagramDynamicTools
         return $", FK: ({string.Join(", ", texts)})";
     }
 
-    /// <summary>要約テキスト用に外部キー制約名を <c> [名前]</c> 形式で表す（未設定は空文字）</summary>
-    private static string DescribeConstraintName(RelationshipViewModel relationship) =>
+    /// <summary>要約テキスト用に外部キー制約名を <c> [名前]</c> 形式で表す（名前も DDL が付ける名前も無ければ空文字）</summary>
+    /// <remarks>
+    /// 名前を持たない外部キーには DDL が付ける名前を示す（<see cref="DescribeName"/>）。<c>remove_relationship</c> へ渡す
+    /// 名前を知る手段は要約しかないため
+    /// </remarks>
+    private static string DescribeConstraintName(
+        RelationshipViewModel relationship,
+        IReadOnlyDictionary<Guid, string> ddlNames
+    ) =>
         string.IsNullOrWhiteSpace(relationship.ConstraintName)
+        && !ddlNames.ContainsKey(relationship.Id)
             ? string.Empty
-            : $" [{relationship.ConstraintName}]";
+            : $" [{DescribeName(relationship, ddlNames)}]";
 
     /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>
     private static string? GetString(JsonElement element, string propertyName)

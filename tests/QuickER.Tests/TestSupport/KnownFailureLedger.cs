@@ -31,6 +31,31 @@ public sealed class KnownFailureLedger(IReadOnlyDictionary<string, string> known
             failure = ex;
         }
 
+        Evaluate(caseId, failure, problems);
+    }
+
+    /// <summary>非同期の検証本体の失敗を台帳と突き合わせる（<see cref="Run"/> の非同期版）</summary>
+    /// <param name="caseId">ケース ID</param>
+    /// <param name="body">検証本体</param>
+    public async Task RunAsync(string caseId, Func<Task> body)
+    {
+        Exception? failure = null;
+
+        try
+        {
+            await body();
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
+        Evaluate(caseId, failure, problems: null);
+    }
+
+    /// <summary>起きた失敗（無ければ null）を台帳と突き合わせ、問題があれば報告する</summary>
+    private void Evaluate(string caseId, Exception? failure, List<string>? problems)
+    {
         var problem = (failure, Known.TryGetValue(caseId, out var expected)) switch
         {
             (not null, false) => $"[{caseId}] {failure.Message}",

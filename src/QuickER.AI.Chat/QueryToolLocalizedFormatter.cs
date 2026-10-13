@@ -1,5 +1,7 @@
 using System.Text;
 using QuickER.AI.Chat.Resources;
+using QuickER.CodeGen.CSharp;
+using QuickER.Mcp;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 
@@ -54,13 +56,12 @@ public static class QueryToolLocalizedFormatter
 
             case QueryToolStatus.ValidationFailed:
                 var sb = new StringBuilder();
-                sb.AppendLine(
-                    string.Format(Strings.QueryTool_SetValidationFailed, outcome.QueryName)
-                );
+                sb.Append(string.Format(Strings.QueryTool_SetValidationFailed, outcome.QueryName))
+                    .Append('\n');
 
                 foreach (var error in outcome.Errors)
                 {
-                    sb.AppendLine($"  - {Describe(error)}");
+                    sb.Append($"  - {Describe(error)}").Append('\n');
                 }
 
                 return sb.ToString().TrimEnd();
@@ -75,6 +76,15 @@ public static class QueryToolLocalizedFormatter
     {
         return outcome.Status switch
         {
+            QueryToolStatus.Success when outcome.RemovedOrphans == 1 => string.Format(
+                Strings.QueryTool_RemoveOrphanSuccess,
+                outcome.QueryName
+            ),
+            QueryToolStatus.Success when outcome.RemovedOrphans > 1 => string.Format(
+                Strings.QueryTool_RemoveOrphansSuccess,
+                outcome.RemovedOrphans,
+                outcome.QueryName
+            ),
             QueryToolStatus.Success => string.Format(
                 Strings.QueryTool_RemoveSuccess,
                 outcome.QueryName,
@@ -93,12 +103,12 @@ public static class QueryToolLocalizedFormatter
     public static string FormatListing(QueryListing listing)
     {
         var sb = new StringBuilder();
-        sb.AppendLine(string.Format(Strings.QueryTool_ListHeader, listing.TotalCount));
+        sb.Append(string.Format(Strings.QueryTool_ListHeader, listing.TotalCount)).Append('\n');
 
         foreach (var group in listing.Groups)
         {
-            sb.AppendLine();
-            sb.AppendLine($"[{group.TableName ?? Strings.QueryTool_UnknownEntity}]");
+            sb.Append('\n');
+            sb.Append($"[{group.TableName ?? Strings.QueryTool_UnknownEntity}]").Append('\n');
 
             foreach (var query in group.Queries)
             {
@@ -174,7 +184,7 @@ public static class QueryToolLocalizedFormatter
             QueryToolDiagnosticCode.UnknownSqlDialect => string.Format(
                 Strings.QueryTool_Diag_UnknownSqlDialect,
                 d.Dialect,
-                string.Join(", ", QueryToolCore.SupportedDbms)
+                string.Join(", ", TargetDbmsNames.All)
             ),
             QueryToolDiagnosticCode.SqlDialectNotString => string.Format(
                 Strings.QueryTool_Diag_SqlDialectNotString,
@@ -206,6 +216,20 @@ public static class QueryToolLocalizedFormatter
             ),
             QueryToolDiagnosticCode.SqlImplementationWithoutSql =>
                 Strings.QueryTool_Diag_SqlImplementationWithoutSql,
+            QueryToolDiagnosticCode.OrderByIgnoredForImplementation => string.Format(
+                Strings.QueryTool_Diag_OrderByIgnoredForImplementation,
+                d.Detail
+            ),
+            QueryToolDiagnosticCode.SqlDialectNotImplemented => string.Format(
+                Strings.QueryTool_Diag_SqlDialectNotImplemented,
+                string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects),
+                d.Dialect
+            ),
+            QueryToolDiagnosticCode.SqlDialectDuplicate => string.Format(
+                Strings.QueryTool_Diag_SqlDialectDuplicate,
+                d.Detail,
+                d.Dialect
+            ),
             _ => string.Format(Strings.QueryTool_Diag_Unexpected, d.Code),
         };
     }
@@ -213,68 +237,73 @@ public static class QueryToolLocalizedFormatter
     /// <summary>クエリ 1 件の要約（戻り形・実装方式・条件／SQL・パラメータ等）をテキスト化する</summary>
     private static void AppendQuerySummary(StringBuilder sb, QueryListingItem query)
     {
-        sb.AppendLine($"  - {query.Name}: {Lower(query.Returns)}, {Lower(query.Implementation)}");
+        sb.Append($"  - {query.Name}: {Lower(query.Returns)}, {Lower(query.Implementation)}")
+            .Append('\n');
 
         if (query.Description is not null)
         {
-            sb.AppendLine(
-                $"      {string.Format(Strings.QueryTool_ListDescription, query.Description)}"
-            );
+            sb.Append(
+                    $"      {string.Format(Strings.QueryTool_ListDescription, query.Description)}"
+                )
+                .Append('\n');
         }
 
         if (query.Returns == QueryReturnShape.Scalar && query.ScalarType is not null)
         {
-            sb.AppendLine(
-                $"      {string.Format(Strings.QueryTool_ListScalarType, query.ScalarType)}"
-            );
+            sb.Append($"      {string.Format(Strings.QueryTool_ListScalarType, query.ScalarType)}")
+                .Append('\n');
         }
 
         if (query.Implementation == QueryImplementationKind.Dsl && query.Condition is not null)
         {
-            sb.AppendLine(
-                $"      {string.Format(Strings.QueryTool_ListCondition, query.Condition)}"
-            );
+            sb.Append($"      {string.Format(Strings.QueryTool_ListCondition, query.Condition)}")
+                .Append('\n');
         }
         else if (query.Implementation == QueryImplementationKind.Sql && query.SqlDialects.Count > 0)
         {
-            sb.AppendLine(
-                $"      {string.Format(Strings.QueryTool_ListSqlDialects, string.Join(", ", query.SqlDialects))}"
-            );
+            sb.Append(
+                    $"      {string.Format(Strings.QueryTool_ListSqlDialects, string.Join(", ", query.SqlDialects))}"
+                )
+                .Append('\n');
         }
 
         if (query.Parameters.Count > 0)
         {
             var parts = query.Parameters.Select(DescribeParameter);
-            sb.AppendLine(
-                $"      {string.Format(Strings.QueryTool_ListParameters, string.Join(", ", parts))}"
-            );
+            sb.Append(
+                    $"      {string.Format(Strings.QueryTool_ListParameters, string.Join(", ", parts))}"
+                )
+                .Append('\n');
         }
 
         if (query.OrderBy.Count > 0)
         {
             var parts = query.OrderBy.Select(DescribeOrdering);
-            sb.AppendLine(
-                $"      {string.Format(Strings.QueryTool_ListOrderBy, string.Join(", ", parts))}"
-            );
+            sb.Append(
+                    $"      {string.Format(Strings.QueryTool_ListOrderBy, string.Join(", ", parts))}"
+                )
+                .Append('\n');
         }
 
         if (query.HasPaging)
         {
-            sb.AppendLine($"      {Strings.QueryTool_ListPaging}");
+            sb.Append($"      {Strings.QueryTool_ListPaging}").Append('\n');
         }
 
         if (query.Returns == QueryReturnShape.Projection)
         {
-            sb.AppendLine(
-                $"      {string.Format(Strings.QueryTool_ListResultType, query.ResultTypeName)}"
-            );
+            sb.Append(
+                    $"      {string.Format(Strings.QueryTool_ListResultType, query.ResultTypeName)}"
+                )
+                .Append('\n');
 
             if (query.Fields.Count > 0)
             {
                 var parts = query.Fields.Select(DescribeField);
-                sb.AppendLine(
-                    $"      {string.Format(Strings.QueryTool_ListFields, string.Join(", ", parts))}"
-                );
+                sb.Append(
+                        $"      {string.Format(Strings.QueryTool_ListFields, string.Join(", ", parts))}"
+                    )
+                    .Append('\n');
             }
         }
     }

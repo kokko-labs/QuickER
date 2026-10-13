@@ -2,6 +2,7 @@ using System.Text.Json;
 using QuickER.AI;
 using QuickER.AI.Chat.Resources;
 using QuickER.Extensibility;
+using QuickER.Mcp;
 using QuickER.Mcp.Tools;
 
 namespace QuickER.AI.Chat;
@@ -54,9 +55,23 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
             _host = host;
         }
 
+        /// <summary>カタログのツール名 → 入力スキーマ（引数の形の突き合わせに使う）</summary>
+        private static readonly Dictionary<string, object> CatalogSchemas = ErDiagramToolCatalog
+            .GetDefinitions()
+            .ToDictionary(tool => tool.Name, tool => tool.InputSchema, StringComparer.Ordinal);
+
         /// <inheritdoc />
+        /// <remarks>
+        /// ツールを実行する前に、引数の形を入力スキーマと突き合わせる（<see cref="ToolArgumentShape"/>・MCP の
+        /// <c>McpToolSet.Execute</c> と同じ規則）。必須の欠落・型違いはここで断り、ホストへ届けない。
+        /// </remarks>
         public (string Result, bool Success) Execute(string toolName, string argumentsJson)
         {
+            if (DescribeShapeProblem(toolName, argumentsJson) is { } problem)
+            {
+                return (problem, false);
+            }
+
             // 名前付きクエリツールは共有コアで処理し、成功時のみホストの Queries へ書き戻す（＝全か無か）。
             // それ以外はホストの ExecuteTool（VM 操作）へ委譲する。
             return toolName switch
@@ -65,6 +80,49 @@ public sealed class ErDiagramHostChatAdapter : IErDiagramChatHost
                 QueryToolCore.ListQueriesToolName => ExecuteListQueries(),
                 QueryToolCore.RemoveQueryToolName => ExecuteRemoveQuery(argumentsJson),
                 _ => _host.ExecuteTool(toolName, argumentsJson),
+            };
+        }
+
+        /// <summary>引数の形の問題を表示言語の 1 文にする（カタログに無いツール・読めない引数は null＝各処理に任せる）</summary>
+        private static string? DescribeShapeProblem(string toolName, string argumentsJson)
+        {
+            if (!CatalogSchemas.TryGetValue(toolName, out var schema))
+            {
+                return null;
+            }
+
+            JsonElement arguments;
+
+            try
+            {
+                using var document = JsonDocument.Parse(
+                    string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
+                );
+
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    return null;
+                }
+
+                arguments = document.RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            return ToolArgumentShape.Check(schema, arguments) switch
+            {
+                null => null,
+                { Kind: ToolArgumentProblemKind.Missing } missing => string.Format(
+                    Strings.Tool_ArgumentMissing,
+                    missing.Path
+                ),
+                var wrong => string.Format(
+                    Strings.Tool_ArgumentWrongType,
+                    wrong.Path,
+                    wrong.ExpectedType
+                ),
             };
         }
 

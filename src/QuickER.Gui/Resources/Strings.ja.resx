@@ -1279,6 +1279,12 @@
   <data name="Tool_RelationshipUnnamedConstraint" xml:space="preserve">
     <value>(名前なし)</value>
   </data>
+  <data name="Tool_RelationshipDefaultConstraintName" xml:space="preserve">
+    <value>{0}（既定の名前）</value>
+  </data>
+  <data name="Tool_RelationshipTypeRequired" xml:space="preserve">
+    <value>relationship_type は必須です。次のいずれかを指定してください: {0}。</value>
+  </data>
   <data name="Tool_Summary_PrimaryKeyOrder" xml:space="preserve">
     <value>主キー順: {0}</value>
   </data>
