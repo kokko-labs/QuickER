@@ -903,11 +903,11 @@ public sealed partial class CSharpCodeGenerationService
     /// C0 制御文字（U+0000〜U+001F）・DEL（U+007F）・Unicode の行区切り（U+0085 / U+2028 / U+2029）か。
     /// </summary>
     /// <remarks>
-    /// 行区切り 3 種を含めるのは、これらが C# 言語仕様上の new-line だから（<see cref="FoldNewLines"/> と同じ集合）。
+    /// 行区切り 3 種を含めるのは、これらが C# 言語仕様上の new-line だから（集合の正本は <see cref="GeneratedLiteralText.IsLineBreak"/>）。
     /// <c>///</c> コメントや 1 行リテラルの行またぎを許すと、名前 1 つで生成コードへ任意の C# を注入できる。
     /// </remarks>
     private static bool IsControlCharacter(char ch) =>
-        ch < ' ' || ch == (char)0x7F || ch == '\u0085' || ch == '\u2028' || ch == '\u2029';
+        ch < ' ' || ch == (char)0x7F || GeneratedLiteralText.IsLineBreak(ch);
 
     /// <summary>
     /// rowversion 列の置き方を検証する（1 エンティティに 2 本以上ないこと・主キー列が rowversion でないこと）

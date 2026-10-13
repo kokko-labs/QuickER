@@ -1133,10 +1133,42 @@ internal sealed partial class CSharpGenerationModelBuilder
     private static string EscapeForCSharpInterpolatedString(string? name) =>
         EscapeNameForCSharpString(name).Replace("{", "{{").Replace("}", "}}");
 
-    /// <summary>C# の通常文字列リテラル用のエスケープ本体（バックスラッシュ → 二重引用符 → 改行畳み込みの順）</summary>
-    private static string EscapeCSharpStringCore(string text) =>
-        // バックスラッシュを最初にエスケープする（後続の \" を二重エスケープしないため）
-        FoldNewLines(text.Replace("\\", "\\\\").Replace("\"", "\\\""));
+    /// <summary>C# の通常文字列リテラル用のエスケープ本体（改行は空白 1 つへ畳み、ほかはエスケープして書く）</summary>
+    /// <remarks>
+    /// 改行の畳み込みは <see cref="FoldNewLines"/> と同じ規則（CRLF も空白 1 つ）。改行以外の制御文字と
+    /// 対になっていないサロゲートはエスケープで書く（UTF-8 のファイルで U+FFFD に化けて、列名などの値が変わるため）。
+    /// 文字ごとの扱いの正本は <see cref="GeneratedLiteralText"/>。
+    /// </remarks>
+    private static string EscapeCSharpStringCore(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (GeneratedLiteralText.IsLineBreak(text[i]))
+            {
+                // CRLF は 1 つの改行として空白 1 つへ畳む（2 つの空白にしない）
+                if (text[i] == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+                {
+                    i++;
+                }
+
+                builder.Append(' ');
+                continue;
+            }
+
+            if (!GeneratedLiteralText.MustEscape(text, i, out var length) && length == 2)
+            {
+                builder.Append(text, i, 2);
+                i++;
+                continue;
+            }
+
+            GeneratedLiteralText.AppendRegularLiteralChar(builder, text[i]);
+        }
+
+        return builder.ToString();
+    }
 
     /// <summary>生成出力で改行になり得る文字をすべて空白 1 つへ畳む（1 行リテラル・1 行 summary 前提）</summary>
     /// <remarks>
@@ -1152,7 +1184,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         for (var i = 0; i < text.Length; i++)
         {
-            if (!IsNewLine(text[i]))
+            if (!GeneratedLiteralText.IsLineBreak(text[i]))
             {
                 builder.Append(text[i]);
                 continue;
@@ -1169,11 +1201,4 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return builder.ToString();
     }
-
-    /// <summary>
-    /// 描画後の <see cref="string.ReplaceLineEndings(string)"/> が改行として認識する文字か
-    /// （CR / LF / NEL / FORM FEED / LINE SEPARATOR / PARAGRAPH SEPARATOR）
-    /// </summary>
-    private static bool IsNewLine(char ch) =>
-        ch is '\r' or '\n' or '\f' or (char)0x85 or (char)0x2028 or (char)0x2029;
 }

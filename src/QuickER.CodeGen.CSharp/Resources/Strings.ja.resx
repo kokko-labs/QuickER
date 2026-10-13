@@ -320,7 +320,7 @@
     <value>名前付きクエリ '{0}': パラメータ名 '{1}' が重複しています。</value>
   </data>
   <data name="CodeGen_Query_ReservedParameterName" xml:space="preserve">
-    <value>名前付きクエリ '{0}': パラメータ名 '{1}' は生成するメソッドが使う名前（リポジトリの Query() メンバーを隠す、または生成する async メソッドの中でキーワードになる）のため使えません。</value>
+    <value>名前付きクエリ '{0}': パラメータ名 '{1}' は生成するコードで使えません（生成する async メソッドの中でキーワードになる、または生成するコードのメンバー〔リモートのリクエストの record・射影の選択式のフィールド〕とぶつかる）。</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
     <value>名前付きクエリ '{0}': 型トークン '{1}' を解決できません。設定スキーマが挙げるトークンと綴りを見比べてください。固定長の文字列・バイナリ（fixedstring など）の場合は長さも必要です（例: 'fixedstring(10)'）。</value>
@@ -347,7 +347,7 @@
     <value>名前付きクエリ '{0}': 射影の戻り形には DTO 型名と 1 つ以上のフィールド定義が必要です。</value>
   </data>
   <data name="CodeGen_Query_InvalidResultTypeName" xml:space="preserve">
-    <value>名前付きクエリ '{0}': DTO 型名 '{1}' は有効な C# 識別子ではありません。</value>
+    <value>名前付きクエリ '{0}': DTO 型名 '{1}' は C# の型名として使えません。</value>
   </data>
   <data name="CodeGen_Query_ProjectionDslRequiresColumns" xml:space="preserve">
     <value>名前付きクエリ '{0}': 簡易 DSL の射影では全フィールドに参照元列が必要です（参照元列なしの自由フィールドは生 SQL 専用）。</value>

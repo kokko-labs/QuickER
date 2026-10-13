@@ -44,7 +44,7 @@ public static class QueryConditionParser
             return result;
         }
 
-        var parser = new Parser(tokens, result);
+        var parser = new Parser(tokens, result, conditionText);
         var root = parser.ParseCondition();
 
         if (root is not null && !parser.IsAtEnd)
@@ -211,7 +211,10 @@ public static class QueryConditionParser
         List<ConditionDiagnostic> diagnostics
     )
     {
-        var definition = parameters.FirstOrDefault(p => SchemaNames.AreSame(p.Name, operand.Text));
+        // 引き当ては解決フェーズの結果（正準名）を使う（解決の規則を 2 か所に写さない）
+        var definition = operand.ResolvedName is { } resolvedName
+            ? parameters.FirstOrDefault(p => p.Name == resolvedName)
+            : null;
 
         if (definition is null)
         {
@@ -575,12 +578,18 @@ public static class QueryConditionParser
     // ---------------- 再帰下降パーサ ----------------
 
     /// <summary>トークン列から構文木を組み立てる再帰下降パーサ（構文エラーは最初の 1 件で打ち切り）</summary>
-    private sealed class Parser(List<Token> tokens, ConditionParseResult result)
+    private sealed class Parser(List<Token> tokens, ConditionParseResult result, string text)
     {
         private int _index;
 
         /// <summary>現在のトークン</summary>
         private Token Current => tokens[_index];
+
+        /// <summary>
+        /// 現在のトークンの原文の綴り（文字列は引用符つき・パラメータは @ つき）。診断で利用者が書いたものを名指しするのに使う
+        /// （トークンの <c>Text</c> は文字列なら引用符を外して復号した値、パラメータなら @ を外した名前）
+        /// </summary>
+        private string CurrentSourceText => text.Substring(Current.Position, Current.Length);
 
         /// <summary>すべて消費し終えたか（End のみ残っているか）</summary>
         public bool IsAtEnd => Current.Kind == TokenKind.End;
@@ -621,7 +630,7 @@ public static class QueryConditionParser
                 ? new QueryDiagnosticText(nameof(Strings.CodeGen_Query_UnexpectedEnd))
                 : new QueryDiagnosticText(
                     nameof(Strings.CodeGen_Query_UnexpectedToken),
-                    Current.Text
+                    CurrentSourceText
                 );
             result.Diagnostics.Add(
                 new ConditionDiagnostic(message, Current.Position, Current.Length)
@@ -762,7 +771,7 @@ public static class QueryConditionParser
                                     new QueryDiagnosticText(
                                         nameof(Strings.CodeGen_Query_EndOfInput)
                                     )
-                                : Current.Text
+                                : CurrentSourceText
                         ),
                         Current.Position,
                         Current.Length
@@ -895,6 +904,9 @@ public static class QueryConditionParser
         /// <summary>LIKE の右辺を読み、意味論（リテラルは % 位置で分解・パラメータは部分一致）へ写像する</summary>
         private ConditionNode? ParseLike(ColumnReference column, bool negated)
         {
+            // 右辺のリテラルの位置（未対応のパターンの診断で、列でなくパターンを指すため）
+            var operandPosition = Current.Position;
+            var operandLength = Current.Length;
             var operand = ParseStringOperand();
 
             if (operand is null)
@@ -905,13 +917,7 @@ public static class QueryConditionParser
             if (operand is ParameterOperand)
             {
                 // パラメータ値は実行時までパターンが不明のため、部分一致（値はリテラル扱い）に固定する
-                return new StringMatchNode
-                {
-                    Column = column,
-                    Negated = negated,
-                    Kind = StringMatchKind.Contains,
-                    Operand = operand,
-                };
+                return LikeNode(column, negated, StringMatchKind.Contains, operand);
             }
 
             var pattern = ((StringOperand)operand).Value;
@@ -928,60 +934,43 @@ public static class QueryConditionParser
                             nameof(Strings.CodeGen_Query_UnsupportedLikePattern),
                             pattern
                         ),
-                        column.Position,
-                        column.Length
+                        operandPosition,
+                        operandLength
                     )
                 );
                 return null;
-            }
-
-            var coreOperand = new StringOperand { Value = core };
-
-            if (startsWithWildcard && endsWithWildcard)
-            {
-                return new StringMatchNode
-                {
-                    Column = column,
-                    Negated = negated,
-                    Kind = StringMatchKind.Contains,
-                    Operand = coreOperand,
-                };
-            }
-
-            if (endsWithWildcard)
-            {
-                return new StringMatchNode
-                {
-                    Column = column,
-                    Negated = negated,
-                    Kind = StringMatchKind.StartsWith,
-                    Operand = coreOperand,
-                };
-            }
-
-            if (startsWithWildcard)
-            {
-                return new StringMatchNode
-                {
-                    Column = column,
-                    Negated = negated,
-                    Kind = StringMatchKind.EndsWith,
-                    Operand = coreOperand,
-                };
             }
 
             // ワイルドカードなしのリテラルは、肯定形も否定形も完全一致の文字列一致（Exact）として持つ。
             // 肯定形を等値比較（ComparisonNode）にすると、外側の NOT の押し下げで <> へ反転し、
             // 「NULL 行も一致する」側へ落ちる（LIKE の意味論は NULL 行がどちらの向きでも一致しない）。
             // エミッタは Exact を、NULL 前提の内側で否定する
-            return new StringMatchNode
+            var kind = (startsWithWildcard, endsWithWildcard) switch
+            {
+                (true, true) => StringMatchKind.Contains,
+                (false, true) => StringMatchKind.StartsWith,
+                (true, false) => StringMatchKind.EndsWith,
+                (false, false) => StringMatchKind.Exact,
+            };
+
+            return LikeNode(column, negated, kind, new StringOperand { Value = core });
+        }
+
+        /// <summary>LIKE で書いた文字列一致のノードを作る（LIKE で書いたことを診断のために残す）</summary>
+        private static StringMatchNode LikeNode(
+            ColumnReference column,
+            bool negated,
+            StringMatchKind kind,
+            ConditionOperand operand
+        ) =>
+            new()
             {
                 Column = column,
                 Negated = negated,
-                Kind = StringMatchKind.Exact,
-                Operand = coreOperand,
+                Kind = kind,
+                Operand = operand,
+                WrittenAsLike = true,
             };
-        }
 
         /// <summary>IN の右辺（リストパラメータ）を読む</summary>
         private ConditionNode? ParseIn(ColumnReference column, bool negated)

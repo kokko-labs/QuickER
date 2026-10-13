@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Numerics;
 
@@ -189,20 +190,29 @@ internal static class QueryConditionTypeChecker
         // GuidKey の VO は内包値が string でも、部分一致のメソッド（IStringMatchValueObject）を持たない
         // （GUID の形に限った値の部分一致は意味が薄い）ので、完全一致（==）以外の文字列一致は使えない
         var underlyingFamily = Classify(column.UnderlyingTypeName);
-        var guidKeyPartialMatch = column.IsGuidKeyValueObject && node.Kind != StringMatchKind.Exact;
 
-        if (
-            underlyingFamily is not TypeFamily.Text and not TypeFamily.Unknown
-            || guidKeyPartialMatch
-        )
+        // 値オブジェクトの列は、生成される基底クラスが決まっているので Unknown を寛容に扱わない。
+        // 部分一致のメソッドは文字列の基底だけが持ち（判定の正本は生成器の ValueObjectHasStringMatch）、
+        // 完全一致（== VO.Create(文字列)）は内包値が string の VO（GuidKey を含む）だけが書ける
+        var supported = column.ValueObjectClassName is not null
+            ? node.Kind == StringMatchKind.Exact
+                ? underlyingFamily == TypeFamily.Text
+                : CSharpGenerationModelBuilder.ValueObjectHasStringMatch(
+                    column.UnderlyingTypeName,
+                    column.IsGuidKeyValueObject
+                )
+            : underlyingFamily is TypeFamily.Text or TypeFamily.Unknown;
+
+        if (!supported)
         {
             violations.Add(
                 new Violation(
                     ViolationKind.StringMatchUnsupported,
                     node.Column.ResolvedName ?? node.Column.Text,
                     ColumnTypeText(column),
-                    // Exact はワイルドカードなしの [NOT] LIKE 由来（診断には DSL の綴りで載せる）
-                    node.Kind == StringMatchKind.Exact
+                    // 診断には利用者が書いた演算子の名前で載せる（LIKE のパターン・LIKE @p は一致種別へ写されるので、
+                    // 種別の名前で出すと、書いていない CONTAINS などを名指ししてしまう）
+                    node.WrittenAsLike
                         ? (node.Negated ? "NOT LIKE" : "LIKE")
                         : node.Kind.ToString().ToUpperInvariant()
                 )
@@ -547,10 +557,18 @@ internal static class QueryConditionTypeChecker
             return true;
         }
 
-        var targets = from switch
+        return ImplicitConversions.TryGetValue(from, out var targets) && targets.Contains(to);
+    }
+
+    /// <summary>
+    /// 暗黙変換の表（変換元の型名 → 変換先の型名の集合。C# の暗黙数値変換と DateTime → DateTimeOffset）
+    /// </summary>
+    /// <remarks>型の検査のたびに引くので、呼ぶごとに配列を作らない読み取り専用の表にする</remarks>
+    private static readonly FrozenDictionary<string, FrozenSet<string>> ImplicitConversions =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            "sbyte" => (string[])["short", "int", "long", "float", "double", "decimal"],
-            "byte" =>
+            ["sbyte"] = ["short", "int", "long", "float", "double", "decimal"],
+            ["byte"] =
             [
                 "short",
                 "ushort",
@@ -562,19 +580,19 @@ internal static class QueryConditionTypeChecker
                 "double",
                 "decimal",
             ],
-            "short" => ["int", "long", "float", "double", "decimal"],
-            "ushort" => ["int", "uint", "long", "ulong", "float", "double", "decimal"],
-            "int" => ["long", "float", "double", "decimal"],
-            "uint" => ["long", "ulong", "float", "double", "decimal"],
-            "long" => ["float", "double", "decimal"],
-            "ulong" => ["float", "double", "decimal"],
-            "float" => ["double"],
-            "DateTime" => ["DateTimeOffset"],
-            _ => [],
-        };
-
-        return targets.Contains(to);
-    }
+            ["short"] = ["int", "long", "float", "double", "decimal"],
+            ["ushort"] = ["int", "uint", "long", "ulong", "float", "double", "decimal"],
+            ["int"] = ["long", "float", "double", "decimal"],
+            ["uint"] = ["long", "ulong", "float", "double", "decimal"],
+            ["long"] = ["float", "double", "decimal"],
+            ["ulong"] = ["float", "double", "decimal"],
+            ["float"] = ["double"],
+            ["DateTime"] = ["DateTimeOffset"],
+        }.ToFrozenDictionary(
+            pair => pair.Key,
+            pair => pair.Value.ToFrozenSet(StringComparer.Ordinal),
+            StringComparer.Ordinal
+        );
 
     /// <summary>CLR 型名を互換判定の型ファミリへ分類する（未知の型名は Unknown＝判定しない）</summary>
     private static TypeFamily Classify(string clrTypeName) =>
@@ -662,5 +680,16 @@ internal static class QueryConditionTypeChecker
     }
 
     /// <summary>診断へ載せる文字列リテラルの表記（長すぎる値は先頭だけ）</summary>
-    private static string Truncate(string value) => value.Length <= 20 ? value : value[..20] + "…";
+    private static string Truncate(string value)
+    {
+        if (value.Length <= 20)
+        {
+            return value;
+        }
+
+        // サロゲートの対の間で切らない（対になっていないサロゲートが診断の文言に残り、表示や JSON が壊れる）
+        var length = char.IsHighSurrogate(value[19]) ? 19 : 20;
+
+        return value[..length] + "…";
+    }
 }

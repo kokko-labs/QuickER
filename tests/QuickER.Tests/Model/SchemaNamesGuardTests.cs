@@ -440,12 +440,6 @@ public sealed class SchemaNamesGuardTests
             "モデルの名前ではない（設定ファイルのキー）"
         ),
         new(
-            "CSharpGenerationModelBuilder.Queries.cs",
-            "string.Equals(field.Name,resultTypeName,StringComparison.Ordinal)",
-            Group.Exception,
-            "例外 3: 生成する C# の識別子（言語が区別する綴りで衝突を判定する）＝射影のフィールド名（プロパティ）と結果の型名（クラス）の衝突"
-        ),
-        new(
             "CSharpGenerationModelBuilder.SampleData.cs",
             "var(label,separator)=column.IsPrimaryKey?(column.Name.ToUpperInvariant(),\"-00\"):(column.Na",
             Group.Exception,
@@ -567,9 +561,15 @@ public sealed class SchemaNamesGuardTests
         ),
         new(
             "QueryDefinitionRules.cs",
-            "string.Equals(field.Name,resultTypeName,StringComparison.Ordinal)",
+            "returnstring.Equals(fieldName,resultTypeName,StringComparison.Ordinal)?QueryRuleViolation.",
             Group.Exception,
             "例外 3: 生成する C# の識別子（言語が区別する綴りで衝突を判定する）＝射影のフィールド名（プロパティ）と結果の型名（クラス）の衝突"
+        ),
+        new(
+            "QueryDefinitionRules.cs",
+            "IsReservedParameterName(parameterName)||string.Equals(parameterName,selectorFieldName,Stri",
+            Group.Exception,
+            "例外 3: 生成する C# の識別子（言語が区別する綴りで衝突を判定する）＝パラメータ名と射影の選択式の静的フィールド名の衝突"
         ),
         new(
             "DocumentFileWatcher.cs",

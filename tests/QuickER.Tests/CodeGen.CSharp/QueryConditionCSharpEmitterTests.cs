@@ -51,9 +51,30 @@ public class QueryConditionCSharpEmitterTests
     private Dictionary<Guid, QueryColumnBinding> CreatePlainBindings() =>
         new()
         {
-            [_entity.Columns[0].Id] = new QueryColumnBinding("CustomerId", "int", null, false),
-            [_entity.Columns[1].Id] = new QueryColumnBinding("Amount", "decimal", null, false),
-            [_entity.Columns[2].Id] = new QueryColumnBinding("Memo", "string", null, true),
+            [_entity.Columns[0].Id] = new QueryColumnBinding(
+                "CustomerId",
+                "int",
+                null,
+                false,
+                IsUnderlyingReferenceType: false,
+                IsGuidKeyValueObject: false
+            ),
+            [_entity.Columns[1].Id] = new QueryColumnBinding(
+                "Amount",
+                "decimal",
+                null,
+                false,
+                IsUnderlyingReferenceType: false,
+                IsGuidKeyValueObject: false
+            ),
+            [_entity.Columns[2].Id] = new QueryColumnBinding(
+                "Memo",
+                "string",
+                null,
+                true,
+                IsUnderlyingReferenceType: true,
+                IsGuidKeyValueObject: false
+            ),
         };
 
     /// <summary>VO（全列値オブジェクト）の列バインディングを作る</summary>
@@ -64,15 +85,26 @@ public class QueryConditionCSharpEmitterTests
                 "CustomerId",
                 "int",
                 "CustomerIdValue",
-                false
+                false,
+                IsUnderlyingReferenceType: false,
+                IsGuidKeyValueObject: false
             ),
             [_entity.Columns[1].Id] = new QueryColumnBinding(
                 "Amount",
                 "decimal",
                 "AmountValue",
-                false
+                false,
+                IsUnderlyingReferenceType: false,
+                IsGuidKeyValueObject: false
             ),
-            [_entity.Columns[2].Id] = new QueryColumnBinding("Memo", "string", "MemoValue", true),
+            [_entity.Columns[2].Id] = new QueryColumnBinding(
+                "Memo",
+                "string",
+                "MemoValue",
+                true,
+                IsUnderlyingReferenceType: true,
+                IsGuidKeyValueObject: false
+            ),
         };
 
     /// <summary>条件をパース・検証してエミットする</summary>
@@ -208,7 +240,14 @@ public class QueryConditionCSharpEmitterTests
     public void Emit_StringMatch_NonNullableColumn()
     {
         var bindings = CreatePlainBindings();
-        bindings[_entity.Columns[2].Id] = new QueryColumnBinding("Memo", "string", null, false);
+        bindings[_entity.Columns[2].Id] = new QueryColumnBinding(
+            "Memo",
+            "string",
+            null,
+            false,
+            IsUnderlyingReferenceType: true,
+            IsGuidKeyValueObject: false
+        );
         // Memo を NULL 非許容へ変更（パーサ検証は IsNullable を見るため列側も揃える）
         _entity.Columns[2].IsNullable = false;
 
@@ -240,7 +279,14 @@ public class QueryConditionCSharpEmitterTests
     public void Emit_Not_IsPushedDownToAtoms()
     {
         var bindings = CreatePlainBindings();
-        bindings[_entity.Columns[1].Id] = new QueryColumnBinding("Amount", "decimal", null, true);
+        bindings[_entity.Columns[1].Id] = new QueryColumnBinding(
+            "Amount",
+            "decimal",
+            null,
+            true,
+            IsUnderlyingReferenceType: false,
+            IsGuidKeyValueObject: false
+        );
 
         Emit("NOT Amount < @minAmount", bindings)
             .Lambda.Should()
@@ -274,7 +320,9 @@ public class QueryConditionCSharpEmitterTests
             "Amount",
             "decimal",
             "AmountValue",
-            true
+            true,
+            IsUnderlyingReferenceType: false,
+            IsGuidKeyValueObject: false
         );
 
         Emit("Amount < 1", bindings)
@@ -323,7 +371,9 @@ public class QueryConditionCSharpEmitterTests
             "CustomerId",
             "int",
             "CustomerIdValue",
-            true
+            true,
+            IsUnderlyingReferenceType: false,
+            IsGuidKeyValueObject: false
         );
 
         Emit("CustomerId IN @ids", bindings)

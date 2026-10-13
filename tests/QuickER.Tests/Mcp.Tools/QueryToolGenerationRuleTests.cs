@@ -158,7 +158,7 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
             }
         ),
         new RuleCase(
-            "parameter named Query",
+            "parameter named like a member of the remote request record",
             QueryRuleKind.ReservedParameterName,
             _ => new QueryDefinition
             {
@@ -166,7 +166,7 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
                 Returns = QueryReturnShape.List,
                 Parameters =
                 {
-                    new QueryParameter { Name = "Query", Type = "int32" },
+                    new QueryParameter { Name = "toString", Type = "int32" },
                 },
             }
         ),
@@ -458,6 +458,18 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
                 Parameters =
                 {
                     new QueryParameter { Name = "query", Type = "int32" },
+                },
+            }
+        ),
+        (
+            "a parameter named Query (the generated body calls the member through this.)",
+            _ => new QueryDefinition
+            {
+                Name = "ByCustomer",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = "Query", Type = "int32" },
                 },
             }
         ),

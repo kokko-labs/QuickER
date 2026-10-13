@@ -74,6 +74,12 @@ public sealed class StringMatchNode : ConditionNode
 
     /// <summary>比較値（パラメータまたは文字列リテラル。リテラルはワイルドカード除去済みの素の値）</summary>
     public required ConditionOperand Operand { get; init; }
+
+    /// <summary>
+    /// 利用者が LIKE で書いたか（LIKE のパターン・<c>LIKE @p</c> は一致種別へ写すので、種別からは綴りが分からない）。
+    /// 診断を利用者が書いた演算子の名前で出すのに使う。CONTAINS などのキーワードで書いたものは false
+    /// </summary>
+    public bool WrittenAsLike { get; init; }
 }
 
 /// <summary>文字列一致の種別</summary>

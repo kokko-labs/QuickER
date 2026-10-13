@@ -15,8 +15,8 @@ public sealed record QueryColumnBinding(
     string UnderlyingTypeName,
     string? ValueObjectClassName,
     bool IsNullable,
-    bool IsUnderlyingReferenceType = false,
-    bool IsGuidKeyValueObject = false
+    bool IsUnderlyingReferenceType,
+    bool IsGuidKeyValueObject
 );
 
 /// <summary>
@@ -169,18 +169,7 @@ public static class QueryConditionCSharpEmitter
             NotNode not => Visit(not.Operand, context, !negate),
             ComparisonNode comparison => VisitComparison(comparison, context, negate),
             NullCheckNode nullCheck => VisitNullCheck(nullCheck, context, negate),
-            StringMatchNode match => VisitStringMatch(
-                negate
-                    ? new StringMatchNode
-                    {
-                        Column = match.Column,
-                        Negated = !match.Negated,
-                        Kind = match.Kind,
-                        Operand = match.Operand,
-                    }
-                    : match,
-                context
-            ),
+            StringMatchNode match => VisitStringMatch(match, context, match.Negated ^ negate),
             InNode inNode => VisitIn(inNode, context, inNode.Negated ^ negate),
             _ => throw new InvalidOperationException(
                 $"未知の条件ノードです: {node.GetType().Name}"
@@ -260,7 +249,10 @@ public static class QueryConditionCSharpEmitter
     }
 
     /// <summary>文字列一致（string / VO どちらの列でもインスタンスメソッド呼び出しに揃える）</summary>
-    private static string VisitStringMatch(StringMatchNode node, Context context)
+    /// <param name="node">文字列一致のノード</param>
+    /// <param name="context">エミット中の共有状態</param>
+    /// <param name="negated">否定形として出すか（ノード自身の否定と外側の NOT を合わせた向き）</param>
+    private static string VisitStringMatch(StringMatchNode node, Context context, bool negated)
     {
         var column = Bind(node.Column, context);
 
@@ -269,7 +261,7 @@ public static class QueryConditionCSharpEmitter
         // （NULL 行はどちらの向きでも一致しない）から外れる
         if (node.Kind == StringMatchKind.Exact)
         {
-            return VisitExactMatch(node, column, context);
+            return VisitExactMatch(node, column, context, negated);
         }
 
         var method = node.Kind switch
@@ -300,7 +292,7 @@ public static class QueryConditionCSharpEmitter
         // VO 列の != は利用者定義演算子のためコンパイラの NULL 状態解析が伝播しない。抑止（!）は残す
         var suppression = column.IsNullable ? "!" : string.Empty;
         var call = $"{access}{suppression}.{method}({operand})";
-        var matched = node.Negated ? $"!({call})" : call;
+        var matched = negated ? $"!({call})" : call;
 
         return column.IsNullable ? $"({access} != null && {matched})" : matched;
     }
@@ -309,7 +301,8 @@ public static class QueryConditionCSharpEmitter
     private static string VisitExactMatch(
         StringMatchNode node,
         QueryColumnBinding column,
-        Context context
+        Context context,
+        bool negated
     )
     {
         // Exact のオペランドは常に文字列リテラル（パーサが LIKE のリテラル分解からのみ作る）。
@@ -323,7 +316,7 @@ public static class QueryConditionCSharpEmitter
         var comparison = $"{access} == {operand}";
 
         // 肯定形の等値は NULL 行を元から一致させない（SQL も C# も）ので前提は要らず、素の等値と同じ出力になる
-        if (!node.Negated)
+        if (!negated)
         {
             return comparison;
         }
@@ -432,50 +425,14 @@ public static class QueryConditionCSharpEmitter
 
     /// <summary>C# の文字列リテラルとしてエスケープする</summary>
     /// <remarks>
-    /// CR / LF に加えて、描画後のレンダラーの <c>ReplaceLineEndings</c> が実改行へ変える文字
-    /// （FORM FEED U+000C・NEL U+0085・LINE SEPARATOR U+2028・PARAGRAPH SEPARATOR U+2029）も
-    /// エスケープシーケンスで書く（生のまま出すとリテラルが行をまたいで壊れる）。
+    /// 改行になる文字・制御文字・対になっていないサロゲートはエスケープシーケンスで書く（生のまま出すと、
+    /// リテラルが行をまたいで壊れるか、UTF-8 のファイルで U+FFFD に化けて比較の相手が変わる）。
+    /// 文字ごとの扱いの正本は <see cref="GeneratedLiteralText"/>。
     /// </remarks>
     private static string RenderStringLiteral(string value)
     {
         var builder = new StringBuilder("\"");
-
-        foreach (var c in value)
-        {
-            switch (c)
-            {
-                case '\\':
-                    builder.Append("\\\\");
-                    break;
-                case '"':
-                    builder.Append("\\\"");
-                    break;
-                case '\r':
-                    builder.Append("\\r");
-                    break;
-                case '\n':
-                    builder.Append("\\n");
-                    break;
-                case '\t':
-                    builder.Append("\\t");
-                    break;
-                case '\f':
-                    builder.Append("\\f");
-                    break;
-                case '\u0085':
-                    builder.Append("\\u0085");
-                    break;
-                case '\u2028':
-                    builder.Append("\\u2028");
-                    break;
-                case '\u2029':
-                    builder.Append("\\u2029");
-                    break;
-                default:
-                    builder.Append(c);
-                    break;
-            }
-        }
+        GeneratedLiteralText.AppendRegularLiteralBody(builder, value);
 
         return builder.Append('"').ToString();
     }

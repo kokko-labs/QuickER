@@ -50,7 +50,9 @@ public static partial class CSharpNamespaceValidator
     /// C# の予約語（reserved keywords）。名前空間セグメントに使うとコンパイル不能になるため不正とする
     /// </summary>
     /// <remarks>
-    /// 出典は C# 言語リファレンスの「C# keywords」の予約識別子表（77 語）。
+    /// 出典は C# 言語リファレンスの「C# keywords」の予約識別子表（77 語）に、表に載らないが Roslyn がキーワードとして扱う
+    /// <c>__arglist</c> / <c>__makeref</c> / <c>__reftype</c> / <c>__refvalue</c> を足したもの（Roslyn の予約キーワードの全数と
+    /// 一致することは、名前付きクエリの規則のテストが固定する）。
     /// 文脈キーワード（<c>var</c> / <c>record</c> / <c>partial</c> / <c>where</c> / <c>nint</c> 等）は
     /// 識別子として合法なため対象にしない（拒否すると妥当な名前空間まで弾いてしまう）。
     /// </remarks>
@@ -133,5 +135,10 @@ public static partial class CSharpNamespaceValidator
         "void",
         "volatile",
         "while",
+        // 言語リファレンスの表には無いが、Roslyn がキーワードとして扱う（識別子に使うと構文エラー）
+        "__arglist",
+        "__makeref",
+        "__reftype",
+        "__refvalue",
     }.ToFrozenSet(StringComparer.Ordinal);
 }

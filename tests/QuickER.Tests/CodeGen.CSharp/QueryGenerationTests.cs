@@ -1035,15 +1035,16 @@ public class QueryGenerationTests
     }
 
     /// <summary>
-    /// C# の予約語のパラメータ名と、契約メンバー Query() を隠すパラメータ名「Query」が診断エラーで
-    /// 拒否されることを検証する。生成器は識別子を @ エスケープせずそのまま出力するため、予約語は
-    /// 引数宣言がコンパイル不能になり、Query（大文字小文字まで一致）は生成メソッド本体の Query() 呼び出しが
-    /// メソッドグループを隠されてコンパイル不能になる
+    /// C# の予約語のパラメータ名と、リモートのリクエストの record のメンバー名になるパラメータ名「ToString」が
+    /// 診断エラーで拒否されることを検証する。生成器は識別子を @ エスケープせずそのまま出力するため、予約語は
+    /// 引数宣言がコンパイル不能になり、ToString は record のメンバーとぶつかってコンパイル不能になる
     /// </summary>
-    [Theory(DisplayName = "予約語・Query のパラメータ名は診断エラーで拒否される")]
+    [Theory(
+        DisplayName = "予約語・リモートのリクエストの record のメンバー名のパラメータ名は診断エラーで拒否される"
+    )]
     [InlineData("class")]
     [InlineData("int")]
-    [InlineData("Query")]
+    [InlineData("ToString")]
     public void Generate_ReservedParameterName_IsRejected(string parameterName)
     {
         var diagram = CreateDiagram(
@@ -1071,8 +1072,8 @@ public class QueryGenerationTests
     }
 
     /// <summary>
-    /// 小文字の query は Query() メソッドグループを隠さないため従来どおり使えることを検証する
-    /// （拒否は大文字小文字まで一致する「Query」だけ＝文脈キーワードも予約語ではないので合法）
+    /// 小文字の query が使えることを検証する（生成本体は this.Query() で呼ぶので、Query も query も
+    /// メソッドグループを隠さない。文脈キーワードも予約語ではないので合法）
     /// </summary>
     [Fact(DisplayName = "小文字の query パラメータ名は従来どおり使える")]
     public void Generate_LowercaseQueryParameterName_IsAccepted()
@@ -1231,7 +1232,7 @@ public class QueryGenerationTests
 
         content
             .Should()
-            .Contain("var items_ = await QueryBySqlAsync(")
+            .Contain("var items_ = await this.QueryBySqlAsync(")
             .And.Contain("return items_.Count > 0 ? items_[0] : null;");
 
         var compilation = GeneratedCodeCompiler.Compile(result, "QueryItemsParam");
@@ -1747,7 +1748,17 @@ public class QueryGenerationTests
             .DescendantNodes()
             .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
             .First(call =>
-                call.Expression is Microsoft.CodeAnalysis.CSharp.Syntax.SimpleNameSyntax name
+                // 生成本体は this. で修飾して呼ぶ（this.QueryBySqlAsync(...)）
+                (
+                    call.Expression switch
+                    {
+                        Microsoft.CodeAnalysis.CSharp.Syntax.SimpleNameSyntax simple => simple,
+                        Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax member =>
+                            member.Name,
+                        _ => null,
+                    }
+                )
+                    is { } name
                 && name.Identifier.Text.EndsWith("SqlAsync", StringComparison.Ordinal)
             );
 

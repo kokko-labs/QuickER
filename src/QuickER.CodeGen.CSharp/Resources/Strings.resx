@@ -320,7 +320,7 @@
     <value>Named query '{0}': parameter name '{1}' is duplicated.</value>
   </data>
   <data name="CodeGen_Query_ReservedParameterName" xml:space="preserve">
-    <value>Named query '{0}': parameter name '{1}' is reserved by the generated method (it hides the repository's Query() member, or it is a keyword inside the generated async method) and cannot be used.</value>
+    <value>Named query '{0}': parameter name '{1}' cannot be used by the generated code (it is a keyword inside the generated async method, or it collides with a member of the generated code, such as the remote request record or the projection selector field).</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
     <value>Named query '{0}': the type token '{1}' could not be resolved. Check its spelling against the tokens the generation config schema lists; note also that a fixed-length string or binary type needs a length (for example 'fixedstring(10)').</value>
@@ -347,7 +347,7 @@
     <value>Named query '{0}': the projection return shape requires a result type name and at least one field.</value>
   </data>
   <data name="CodeGen_Query_InvalidResultTypeName" xml:space="preserve">
-    <value>Named query '{0}': result type name '{1}' is not a valid C# identifier.</value>
+    <value>Named query '{0}': result type name '{1}' is not a valid C# type name.</value>
   </data>
   <data name="CodeGen_Query_ProjectionDslRequiresColumns" xml:space="preserve">
     <value>Named query '{0}': every projection field must reference a source column when using the simple DSL (free-form fields without a source column are for raw SQL only).</value>
