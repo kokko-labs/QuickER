@@ -271,6 +271,10 @@ public partial class EntityViewModel : ObservableObject
     /// <remarks>Undo 可能なコマンドとして履歴化するのは <see cref="MainViewModel"/> の責務</remarks>
     internal event EventHandler<UniqueConstraintMemberViewModel>? UniqueConstraintMemberSelectionEdited;
 
+    /// <summary>図（<c>MainViewModel.Entities</c>）から外れているか（外れている間の一意制約の行の書き込みは正本を変えない）</summary>
+    /// <remarks>MainViewModel がエンティティを図から外すときに立て、図へ戻すときに下ろす。単独で組み立てた VM は false のまま</remarks>
+    internal bool IsDetachedFromDiagram { get; set; }
+
     /// <summary>ダイアグラム上の見出し帯に表示する背景色（設定時に正規化する）</summary>
     public string TitleBackgroundColor
     {
@@ -291,17 +295,15 @@ public partial class EntityViewModel : ObservableObject
         }
     }
 
-    /// <summary>ER 図上で NULL 許容表示を行うかどうか（変更時は表示高さキャッシュを無効化する）</summary>
+    /// <summary>ER 図上で NULL 許容表示を行うかどうか</summary>
+    /// <remarks>
+    /// 表示の高さの見積もりは NULL 許容の表示を見ない（幅の自動調整だけが見る）ので、高さのキャッシュは捨てない。
+    /// 捨てると、切り替えのたびに全テーブルの高さの通知・ミニマップの作り直しが走る
+    /// </remarks>
     public bool ShowNullabilityInDiagram
     {
         get => _showNullabilityInDiagram;
-        set
-        {
-            if (SetProperty(ref _showNullabilityInDiagram, value))
-            {
-                InvalidateDisplayHeight();
-            }
-        }
+        set => SetProperty(ref _showNullabilityInDiagram, value);
     }
 
     /// <summary>ER 図上で簡易表示（PK/FK カラムのみ）を行うかどうか（変更時は表示高さキャッシュを無効化する）</summary>
@@ -511,6 +513,7 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>一意制約からの通知（構成列の変化・編集行の選択操作）を購読する</summary>
     private void AttachUniqueConstraint(UniqueConstraintViewModel constraint)
     {
+        constraint.IsDetachedFromOwner = false;
         constraint.ColumnIdsChanged += OnUniqueConstraintColumnIdsChanged;
         constraint.MemberSelectionEdited += OnUniqueConstraintMemberSelectionEdited;
     }
@@ -518,6 +521,7 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>一意制約からの通知の購読を解除する</summary>
     private void DetachUniqueConstraint(UniqueConstraintViewModel constraint)
     {
+        constraint.IsDetachedFromOwner = true;
         constraint.ColumnIdsChanged -= OnUniqueConstraintColumnIdsChanged;
         constraint.MemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
     }
@@ -533,9 +537,13 @@ public partial class EntityViewModel : ObservableObject
         UniqueConstraintMemberViewModel member
     ) => UniqueConstraintMemberSelectionEdited?.Invoke(this, member);
 
+    /// <summary>テスト専用: 一意制約の構成列フラグ（<see cref="RefreshUniqueConstraintColumnFlags"/>）を計算し直した回数</summary>
+    internal int UniqueConstraintFlagRefreshCountForTests { get; private set; }
+
     /// <summary>各カラムの「一意制約の構成列か」フラグを現在の制約一覧から計算し直す（ER 図の UQ 標識の元）</summary>
     private void RefreshUniqueConstraintColumnFlags()
     {
+        UniqueConstraintFlagRefreshCountForTests++;
         var memberIds = UniqueConstraints
             .SelectMany(constraint => constraint.ColumnIds)
             .ToHashSet();

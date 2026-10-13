@@ -107,9 +107,11 @@ public partial class ColumnViewModel : ObservableObject
         get => _isUniqueConstraintMember;
         internal set
         {
+            var before = KeyMark;
+
             if (SetProperty(ref _isUniqueConstraintMember, value))
             {
-                NotifyKeyMarkChanged();
+                NotifyKeyMarkChangedFrom(before);
             }
         }
     }
@@ -124,9 +126,19 @@ public partial class ColumnViewModel : ObservableObject
     /// <summary>キー標識の表示色（#RRGGBB）</summary>
     public string KeyMarkColor => ColumnKeyMarkPalette.GetColor(KeyMark);
 
-    /// <summary>キー標識の派生プロパティ 3 種の変更を通知する</summary>
-    private void NotifyKeyMarkChanged()
+    /// <summary>キー標識が実際に変わったときだけ、派生プロパティ 3 種の変更を通知する</summary>
+    /// <param name="before">変更前の標識</param>
+    /// <remarks>
+    /// 標識は PK &gt; FK &gt; UQ の優先度で 1 つに畳むので、下位のフラグが変わっても表示が変わらないことがある
+    /// （主キーの列が一意制約の構成列になる・外れるなど）。そのときは通知しない
+    /// </remarks>
+    private void NotifyKeyMarkChangedFrom(ColumnKeyMark before)
     {
+        if (KeyMark == before)
+        {
+            return;
+        }
+
         OnPropertyChanged(nameof(KeyMark));
         OnPropertyChanged(nameof(KeyMarkText));
         OnPropertyChanged(nameof(KeyMarkColor));
@@ -183,7 +195,9 @@ public partial class ColumnViewModel : ObservableObject
     partial void OnIsPrimaryKeyChanged(bool value)
     {
         OnPropertyChanged(nameof(IsNullableEditable));
-        NotifyKeyMarkChanged();
+        NotifyKeyMarkChangedFrom(
+            ColumnKeyMarkPalette.Resolve(!value, IsForeignKey, IsUniqueConstraintMember)
+        );
 
         // 主キー化したカラムは NULL 不可とするため IsNullable を連動して落とす
         if (value && IsNullable)
@@ -196,7 +210,10 @@ public partial class ColumnViewModel : ObservableObject
     }
 
     /// <summary>外部キー変更時にキー標識の表示を更新する</summary>
-    partial void OnIsForeignKeyChanged(bool value) => NotifyKeyMarkChanged();
+    partial void OnIsForeignKeyChanged(bool value) =>
+        NotifyKeyMarkChangedFrom(
+            ColumnKeyMarkPalette.Resolve(IsPrimaryKey, !value, IsUniqueConstraintMember)
+        );
 
     /// <summary>現在の状態をモデルへコピーして返す（保存時に使用する）</summary>
     public Column ToModel() =>

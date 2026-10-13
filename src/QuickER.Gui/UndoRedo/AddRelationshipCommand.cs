@@ -26,15 +26,11 @@ public class AddRelationshipCommand : IUndoableCommand
     public void Execute()
     {
         _main.Relationships.Add(_rel);
-        // リレーション追加に伴う外部キー列の付与・更新を再評価する
-        _main.ApplyRelationshipColumnRules();
     }
 
     /// <inheritdoc />
     public void Undo()
     {
         _main.Relationships.Remove(_rel);
-        // 削除後の状態に合わせて外部キー列のルールを再適用する
-        _main.ApplyRelationshipColumnRules();
     }
 }

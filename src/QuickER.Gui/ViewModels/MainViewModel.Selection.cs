@@ -99,7 +99,8 @@ public partial class MainViewModel
             changes,
             action => _changeTracker.RunWithoutTracking(action)
         );
-        UndoRedo.Execute(command);
+        // 色の変更でミニマップを作り直すので、選んだテーブルの数だけ作り直さないよう範囲の終わりの 1 回にまとめる
+        RunDeferringLayoutRefresh(() => UndoRedo.Execute(command));
     }
 
     /// <summary>指定エンティティの選択をトグル（追加／除外）する（Ctrl+クリック用）</summary>
@@ -117,6 +118,9 @@ public partial class MainViewModel
         }
 
         SelectedRelationship = null;
+
+        // 作成中のリレーションも取りやめる（残すと、複数選択の後の普通のクリックが黙ってリレーションを作る）
+        CancelRelationshipMode();
 
         entity.IsSelected = !entity.IsSelected;
 

@@ -126,9 +126,7 @@ public class ModelHistoryComboBoxTests
                     DoEvents();
 
                     // ドロップダウンを開いて項目コンテナ（ComboBoxItem）を生成させる
-                    combo.IsDropDownOpen = true;
-                    combo.UpdateLayout();
-                    DoEvents();
+                    OpenDropDown(combo);
 
                     // カタログ候補（先頭）: × ボタンは Collapsed
                     var catalogButton = FindRemoveButton(RealizeContainer(combo, 0));
@@ -297,9 +295,7 @@ public class ModelHistoryComboBoxTests
                     DoEvents();
 
                     // ドロップダウンを開いて項目コンテナ（ComboBoxItem）を生成させる
-                    combo.IsDropDownOpen = true;
-                    combo.UpdateLayout();
-                    DoEvents();
+                    OpenDropDown(combo);
 
                     // 履歴候補（先頭）: × ボタンが Visible・Command 解決・Execute で削除できる
                     var removeButton = FindRemoveButton(RealizeContainer(combo, 0));
@@ -331,10 +327,14 @@ public class ModelHistoryComboBoxTests
                         .Should()
                         .Equal("hist-model-2");
 
-                    // openai プロバイダへ切替: 静的カタログ候補（IsRemovable=false）の × は Collapsed
-                    connection.CodexModelProvider = "openai";
-                    combo.UpdateLayout();
+                    // openai プロバイダへ切替: 静的カタログ候補（IsRemovable=false）の × は Collapsed。
+                    // 実際の画面と同じく、ドロップダウンを閉じてからプロバイダを切り替え、開き直して項目を作らせる
+                    // （開いたまま候補を作り直すと、全件の並列実行の負荷の下で閉じることがあり、
+                    // 閉じていると項目がレイアウトされず × ボタンが作られない）
+                    combo.IsDropDownOpen = false;
                     DoEvents();
+                    connection.CodexModelProvider = "openai";
+                    OpenDropDown(combo);
 
                     var catalogButton = FindRemoveButton(RealizeContainer(combo, 0));
                     catalogButton
@@ -467,9 +467,7 @@ public class ModelHistoryComboBoxTests
                     DoEvents();
 
                     // ドロップダウンを開いて項目コンテナ（ComboBoxItem）を生成させる
-                    combo.IsDropDownOpen = true;
-                    combo.UpdateLayout();
-                    DoEvents();
+                    OpenDropDown(combo);
 
                     // 実行時列挙候補（先頭）: × ボタンは Collapsed
                     var enumeratedButton = FindRemoveButton(RealizeContainer(combo, 0));
@@ -666,6 +664,34 @@ public class ModelHistoryComboBoxTests
         container!.ApplyTemplate();
         container.UpdateLayout();
         return container;
+    }
+
+    /// <summary>ドロップダウンを開き、先頭の項目が作られて画面に載るまで待つ</summary>
+    /// <remarks>
+    /// 全件の並列実行の負荷の下では、開いた直後のドロップダウンが、このテストの外の要因で閉じることがある
+    /// （何が閉じるのかは特定できていない。別スレッドのウィンドウのアクティブ化・マウスのキャプチャでは閉じないことを確かめた）。
+    /// 閉じていると項目がレイアウトされず、テンプレートの中の × ボタンが作られない。このテストが確かめるのは項目の
+    /// テンプレートの束縛なので、開いた状態で項目が揃うまで開き直す
+    /// </remarks>
+    private static void OpenDropDown(ComboBox combo)
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            combo.IsDropDownOpen = true;
+            combo.UpdateLayout();
+            DoEvents();
+
+            if (
+                combo.IsDropDownOpen
+                && combo.ItemContainerGenerator.ContainerFromIndex(0)
+                    is ComboBoxItem { IsLoaded: true }
+            )
+            {
+                return;
+            }
+        }
+
+        combo.IsDropDownOpen.Should().BeTrue("ドロップダウンが開いて項目が作られる");
     }
 
     /// <summary>ディスパッチャにキューされた処理（Loaded・ポップアップ生成・コンテナ生成・レイアウト）を流す</summary>

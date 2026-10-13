@@ -143,6 +143,137 @@ public class CodexAppServerClientConnectionTests
     }
 
     /// <summary>
+    /// 相手のプロセスを止めてもパイプの読み口がほかに残っている（負荷の下で実際に起きた）ときでも、破棄が詰まった
+    /// 書き込みを自分で取り消し、要求をすぐ接続断で終わらせることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 読み口が残ると、詰まった書き込みは相手が止まっても失敗で終わらず、30 秒のタイムアウトまで残る。
+    /// 偽サーバーの標準入力のハンドルをこのテストのプロセスへ複製して持ち、その状態を決定的に作る
+    /// </remarks>
+    [Fact(
+        DisplayName = "読み口が残っていても、書き込みが詰まっている最中の破棄は詰まった要求をすぐ終わらせる"
+    )]
+    public async Task Dispose_WhileWriteIsStuckAndReadEndStaysOpen_EndsStuckRequest()
+    {
+        await using var server = new FakeCodexAppServerProcess("stdin-handle", "block");
+        var client = server.CreateClient();
+        Task? stuck = null;
+        var heldReadEnd = IntPtr.Zero;
+
+        try
+        {
+            await server.StartAsync(client, TestContext.Current.CancellationToken);
+            await WaitUntilAsync(() =>
+                client.BuildRecentStandardErrorSuffix().Contains("stdin-handle:")
+            );
+
+            // 偽サーバーの標準入力（パイプの読み口）をこのプロセスへ複製し、相手が止まっても読み口が残る状態にする
+            var suffix = client.BuildRecentStandardErrorSuffix();
+            var value = long.Parse(
+                System
+                    .Text.RegularExpressions.Regex.Match(suffix, @"stdin-handle:(\d+)")
+                    .Groups[1]
+                    .Value,
+                System.Globalization.CultureInfo.InvariantCulture
+            );
+            var serverProcess = (System.Diagnostics.Process)
+                typeof(CodexAppServerClient)
+                    .GetField("_process", BindingFlags.NonPublic | BindingFlags.Instance)!
+                    .GetValue(client)!;
+            var source = NativeHandles.OpenProcess(
+                NativeHandles.ProcessDupHandle,
+                false,
+                serverProcess.Id
+            );
+            source.Should().NotBe(IntPtr.Zero, "偽サーバーのプロセスを開ける");
+
+            try
+            {
+                NativeHandles
+                    .DuplicateHandle(
+                        source,
+                        new IntPtr(value),
+                        NativeHandles.GetCurrentProcess(),
+                        out heldReadEnd,
+                        0,
+                        false,
+                        NativeHandles.DuplicateSameAccess
+                    )
+                    .Should()
+                    .BeTrue("偽サーバーの標準入力を複製できる");
+            }
+            finally
+            {
+                NativeHandles.CloseHandle(source);
+            }
+
+            stuck = client.StartTurnAsync("thread", LargePrompt, CancellationToken.None);
+            await WaitUntilAsync(() => GetWriteLock(client).CurrentCount == 0);
+
+            await client.DisposeAsync();
+            (await server.WaitForServersToExitAsync(Patience)).Should().Be(0);
+
+            var completed = await Task.WhenAny(
+                stuck,
+                Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken)
+            );
+
+            completed
+                .Should()
+                .BeSameAs(stuck, "読み口が残っていても 30 秒のタイムアウトを待たずに終わる");
+            stuck.IsFaulted.Should().BeTrue("破棄で取り消した書き込みは接続断の失敗で終わる");
+        }
+        finally
+        {
+            await client.DisposeAsync();
+
+            if (heldReadEnd != IntPtr.Zero)
+            {
+                NativeHandles.CloseHandle(heldReadEnd);
+            }
+
+            if (stuck is not null)
+            {
+                await stuck.ContinueWith(_ => { }, TaskScheduler.Default);
+            }
+        }
+    }
+
+    /// <summary>ハンドルの複製に使う Win32 API</summary>
+    private static class NativeHandles
+    {
+        public const uint ProcessDupHandle = 0x0040;
+
+        public const uint DuplicateSameAccess = 0x0002;
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        [return: System.Runtime.InteropServices.MarshalAs(
+            System.Runtime.InteropServices.UnmanagedType.Bool
+        )]
+        public static extern bool DuplicateHandle(
+            IntPtr sourceProcess,
+            IntPtr sourceHandle,
+            IntPtr targetProcess,
+            out IntPtr targetHandle,
+            uint access,
+            bool inherit,
+            uint options
+        );
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        public static extern IntPtr GetCurrentProcess();
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        [return: System.Runtime.InteropServices.MarshalAs(
+            System.Runtime.InteropServices.UnmanagedType.Bool
+        )]
+        public static extern bool CloseHandle(IntPtr handle);
+    }
+
+    /// <summary>
     /// 再接続した後の標準エラーの直近行に、前の接続（終了したプロセス）の出力が混ざらないことを検証する。
     /// </summary>
     [Fact(DisplayName = "再接続した後の標準エラーに前の接続の出力を混ぜない")]

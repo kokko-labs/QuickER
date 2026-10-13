@@ -36,10 +36,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public UndoRedoManager UndoRedo { get; } = new();
 
     /// <summary>ツールバーの設定メニュー内、言語切替用の子 ViewModel（表示言語の選択・保存）</summary>
-    public LanguageSwitchViewModel LanguageSwitch { get; }
+    public LanguageSwitchViewModel LanguageSwitch { get; private set; }
 
     /// <summary>ツールバーの設定メニュー内、起動時更新チェックのトグル用の子 ViewModel</summary>
-    public UpdateSettingsViewModel UpdateSettings { get; }
+    public UpdateSettingsViewModel UpdateSettings { get; private set; }
 
     /// <summary>フィーチャーモジュールがツールバーへ寄与するボタン群（起動時にホストが設定する）</summary>
     [ObservableProperty]
@@ -255,8 +255,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>図の一括更新（<see cref="RunBulkDiagramUpdate"/>）の入れ子の深さ（0＝一括更新中でない）</summary>
     private int _bulkDiagramUpdateDepth;
 
+    /// <summary>位置・大きさの後回しの範囲（<see cref="RunDeferringLayoutRefresh"/>）の入れ子の深さ</summary>
+    private int _layoutRefreshDeferDepth;
+
+    /// <summary>後回しの範囲の中で、位置・大きさが変わったか（範囲の終わりに 1 回だけ作り直す）</summary>
+    private bool _layoutRefreshPending;
+
     /// <summary>テスト専用: リレーション構成に基づく列ルール（<see cref="ApplyRelationshipColumnRules"/>）を適用した回数</summary>
     internal int RelationshipRuleApplicationCountForTests { get; private set; }
+
+    /// <summary>テスト専用: ミニマップの射影と描画データを作り直した回数</summary>
+    internal int MiniMapRecalculationCountForTests { get; private set; }
+
+    /// <summary>テスト専用: キャンバスサイズの変更通知（<see cref="RefreshCanvasSize"/>）を出した回数</summary>
+    internal int CanvasSizeRefreshCountForTests { get; private set; }
 
     /// <summary>現在の図のターゲット DBMS（プロバイダ識別名。バッキングフィールド）</summary>
     private IDatabaseProvider _currentProvider;
@@ -360,8 +372,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             OnColumnRenamed
         );
         _changeTracker.NameEdited += OnNameEdited;
-        LanguageSwitch = new LanguageSwitchViewModel(_dialogs);
-        UpdateSettings = new UpdateSettingsViewModel(_dialogs);
+        // 設定メニューの小さな VM は、図の設定と同じ保存先を使う（テストで差し替えたときも同じ先を見る）
+        LanguageSwitch = new LanguageSwitchViewModel(_dialogs, _guiSettingsStore);
+        UpdateSettings = new UpdateSettingsViewModel(_dialogs, _guiSettingsStore);
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
@@ -384,8 +397,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>キャンバスサイズを再計算して変更通知を発行する。エンティティの移動・サイズ変更後に呼び出す</summary>
+    /// <remarks>
+    /// 図の一括更新（<see cref="RunBulkDiagramUpdate"/>）と位置・大きさの後回しの範囲（<see cref="RunDeferringLayoutRefresh"/>）の
+    /// 中では通知せず、最外側の終わりに 1 回だけ通知する
+    /// </remarks>
     public void RefreshCanvasSize()
     {
+        if (_bulkDiagramUpdateDepth > 0)
+        {
+            return;
+        }
+
+        if (_layoutRefreshDeferDepth > 0)
+        {
+            _layoutRefreshPending = true;
+
+            return;
+        }
+
+        RefreshCanvasSizeCore();
+    }
+
+    /// <summary>キャンバスサイズの変更を通知する（止める判定を通らない本体）</summary>
+    private void RefreshCanvasSizeCore()
+    {
+        CanvasSizeRefreshCountForTests++;
         OnPropertyChanged(nameof(CanvasWidth));
         OnPropertyChanged(nameof(CanvasHeight));
     }
@@ -524,12 +560,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var before = CaptureEntityLayoutSnapshot();
 
-        // 整列による位置変更が個別のプロパティ変更履歴として二重登録されないよう追跡を抑止する
-        _changeTracker.RunWithoutTracking(() =>
-        {
-            layoutAction();
-            RefreshCanvasSize();
-        });
+        // 整列による位置変更が個別のプロパティ変更履歴として二重登録されないよう追跡を抑止する。
+        // 位置の 1 件ごとの再計算（ミニマップ・キャンバス）は一括更新で終わりの 1 回へまとめる
+        _changeTracker.RunWithoutTracking(() => RunBulkDiagramUpdate(layoutAction));
 
         var after = CaptureEntityLayoutSnapshot();
 
@@ -802,7 +835,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (selected.Count >= 2)
         {
-            UndoRedo.Execute(new GroupRemoveEntitiesCommand(this, selected));
+            // 要素の 1 件ごとの再計算（列ルール・ミニマップほか）は一括更新で終わりの 1 回へまとめる
+            RunBulkDiagramUpdate(() =>
+                UndoRedo.Execute(new GroupRemoveEntitiesCommand(this, selected))
+            );
             SelectedEntity = null;
             return;
         }
@@ -821,7 +857,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        UndoRedo.Execute(new RemoveEntityCommand(this, SelectedEntity));
+        var removing = SelectedEntity;
+        RunBulkDiagramUpdate(() => UndoRedo.Execute(new RemoveEntityCommand(this, removing)));
         SelectedEntity = null;
     }
 
@@ -1591,13 +1628,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // ---------------- Undo/Redo ----------------
 
     /// <summary>直前の操作を取り消す</summary>
-    /// <remarks>履歴の再生による変更が新たな履歴として記録されないよう追跡を抑止する</remarks>
+    /// <remarks>
+    /// 履歴の再生による変更が新たな履歴として記録されないよう追跡を抑止する。
+    /// 要素の 1 件ごとの再計算（列ルール・ミニマップ・キャンバスほか）は一括更新で終わりの 1 回へまとめる。
+    /// 一括更新は追跡の停止の内側に置く＝一括更新の終わりの列ルールの適用も追跡の外で走り、追跡の取り直しは
+    /// 最外側（追跡の停止の終わり）の 1 回だけになる
+    /// </remarks>
     [RelayCommand]
-    private void Undo() => _changeTracker.RunWithoutTracking(() => UndoRedo.Undo());
+    private void Undo() =>
+        _changeTracker.RunWithoutTracking(() => RunBulkDiagramUpdate(() => UndoRedo.Undo()));
 
     /// <summary>取り消した操作をやり直す</summary>
+    /// <remarks>まとめ方は <see cref="Undo"/> と同じ</remarks>
     [RelayCommand]
-    private void Redo() => _changeTracker.RunWithoutTracking(() => UndoRedo.Redo());
+    private void Redo() =>
+        _changeTracker.RunWithoutTracking(() => RunBulkDiagramUpdate(() => UndoRedo.Redo()));
 
     /// <summary>エンティティクリックを処理するコマンド（View のイベントバインド用）</summary>
     [RelayCommand]
@@ -1700,11 +1745,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _changeTracker.RunWithoutTracking(() =>
-        {
-            AutoFitEntityWidths(Entities);
-            AutoLayoutService.LayoutGrid(Entities, Relationships);
-            RefreshCanvasSize();
-        });
+            RunBulkDiagramUpdate(() =>
+            {
+                AutoFitEntityWidths(Entities);
+                AutoLayoutService.LayoutGrid(Entities, Relationships);
+            })
+        );
 
         // 図が新しく現れた経路なので読める大きさ（等倍）を優先する＝縮小しない
         RequestFitToWindow();
@@ -1718,8 +1764,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void AutoFitEntityWidths()
     {
-        var changed = AutoFitEntityWidths(Entities);
-        RefreshCanvasSize();
+        var changed = false;
+
+        // 幅の 1 件ごとの再計算（ミニマップ・キャンバス）は一括更新で終わりの 1 回へまとめる
+        RunBulkDiagramUpdate(() => changed = AutoFitEntityWidths(Entities));
 
         if (changed)
         {
@@ -1748,41 +1796,50 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>リレーション構成に基づいて全カラムの PK/FK 編集可否と FK フラグを同期する</summary>
-    /// <param name="excludedSnapshotTarget">スナップショット再取得から除外する対象（変更途中の値を確定値として誤記録しないために指定）</param>
     /// <remarks>
     /// いったん全カラムを編集可能へリセットし、リレーション管理下の FK フラグも解除したうえで、
-    /// 現存するリレーションのみを根拠にロックと FK フラグを付け直す。リレーション削除時の解除漏れを防ぐ方式
+    /// 現存するリレーションのみを根拠にロックと FK フラグを付け直す。リレーション削除時の解除漏れを防ぐ方式。
+    /// 図の一括更新（<see cref="RunBulkDiagramUpdate"/>）の中では適用せず、一括更新の終わりの 1 回に任せる
+    /// （コマンドの後処理などから直接呼ばれても二重にならない）
     /// </remarks>
-    public void ApplyRelationshipColumnRules(object? excludedSnapshotTarget = null)
+    public void ApplyRelationshipColumnRules()
+    {
+        if (_bulkDiagramUpdateDepth > 0)
+        {
+            return;
+        }
+
+        ApplyRelationshipColumnRulesCore();
+    }
+
+    /// <summary>列ルールを適用する（一括更新の判定を通らない本体）</summary>
+    private void ApplyRelationshipColumnRulesCore()
     {
         RelationshipRuleApplicationCountForTests++;
 
-        _changeTracker.RunWithoutTracking(
-            () =>
+        _changeTracker.RunWithoutTracking(() =>
+        {
+            foreach (var entity in Entities)
             {
-                foreach (var entity in Entities)
+                foreach (var column in entity.Columns)
                 {
-                    foreach (var column in entity.Columns)
-                    {
-                        column.IsPrimaryKeyEditable = true;
-                        column.IsForeignKeyEditable = true;
+                    column.IsPrimaryKeyEditable = true;
+                    column.IsForeignKeyEditable = true;
 
-                        // ユーザーが手動設定した FK は維持し、リレーション由来の FK のみ解除する
-                        if (column.IsForeignKeyManagedByRelationship)
-                        {
-                            column.IsForeignKey = false;
-                            column.IsForeignKeyManagedByRelationship = false;
-                        }
+                    // ユーザーが手動設定した FK は維持し、リレーション由来の FK のみ解除する
+                    if (column.IsForeignKeyManagedByRelationship)
+                    {
+                        column.IsForeignKey = false;
+                        column.IsForeignKeyManagedByRelationship = false;
                     }
                 }
+            }
 
-                foreach (var relationship in Relationships)
-                {
-                    LockRelationshipColumns(relationship);
-                }
-            },
-            excludedSnapshotTarget
-        );
+            foreach (var relationship in Relationships)
+            {
+                LockRelationshipColumns(relationship);
+            }
+        });
     }
 
     /// <summary>指定リレーションが使用する全構成列の編集をロックし、参照先カラムへ FK フラグを設定する</summary>
@@ -2237,6 +2294,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 // 一意制約カードのコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
                 entity.UniqueConstraintMemberSelectionEdited +=
                     OnUniqueConstraintMemberSelectionEdited;
+                entity.IsDetachedFromDiagram = false;
                 entity.Columns.CollectionChanged += OnEntityColumnsChangedForSelection;
                 _changeTracker.AttachEntity(entity);
             }
@@ -2278,6 +2336,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         entity.NameScope = null;
         entity.IdentifierLimitSource = null;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
+        entity.IsDetachedFromDiagram = true;
         entity.Columns.CollectionChanged -= OnEntityColumnsChangedForSelection;
         _changeTracker.DetachEntity(entity);
 
@@ -2481,12 +2540,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>一括更新で止めていたコレクション変更の後段処理を 1 回だけ流す</summary>
     private void RefreshAfterBulkDiagramUpdate()
     {
-        ApplyRelationshipColumnRules();
+        ApplyRelationshipColumnRulesCore();
         OnPropertyChanged(nameof(Entities));
         OnPropertyChanged(nameof(Relationships));
-        RefreshCanvasSize();
+        RefreshCanvasSizeCore();
         UpdateRelatedHighlights();
         RecalculateMiniMap();
+    }
+
+    /// <summary>位置・大きさの変更による再計算（キャンバスサイズ・ミニマップ）を、範囲の終わりの 1 回へまとめて実行する</summary>
+    /// <param name="action">位置・大きさを変える処理</param>
+    /// <remarks>
+    /// <para>
+    /// ドラッグの 1 回の移動のように、要素の出入りを伴わず何度も繰り返す操作のための軽い範囲。
+    /// <see cref="RunBulkDiagramUpdate"/> は列ルールの適用と追跡の取り直しまで行うので、マウスの移動のたびには重すぎる。
+    /// </para>
+    /// <para>
+    /// 範囲は try / finally で必ず閉じる（深さが残ると、以後キャンバスとミニマップが更新されなくなる）。
+    /// </para>
+    /// </remarks>
+    internal void RunDeferringLayoutRefresh(Action action)
+    {
+        _layoutRefreshDeferDepth++;
+
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _layoutRefreshDeferDepth--;
+
+            if (_layoutRefreshDeferDepth == 0 && _layoutRefreshPending)
+            {
+                _layoutRefreshPending = false;
+
+                // 一括更新の中なら、その終わりがまとめて作り直す
+                if (_bulkDiagramUpdateDepth == 0)
+                {
+                    RefreshCanvasSizeCore();
+                    RecalculateMiniMap();
+                }
+            }
+        }
     }
 
     /// <summary>一意制約カードの構成列行で列が選び直されたときに、Undo 可能な差し替えとして確定させる</summary>
@@ -2512,9 +2608,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 or nameof(EntityViewModel.DisplayHeight)
         )
         {
-            RefreshCanvasSize();
+            // 一括更新の中は、その終わりがまとめて作り直す
+            if (_bulkDiagramUpdateDepth > 0)
+            {
+                return;
+            }
 
-            // エンティティの移動・サイズ変更（ドラッグ中含む）でミニマップの射影・描画データを作り直す
+            // 後回しの範囲の中は、範囲の終わりに 1 回だけ作り直す
+            if (_layoutRefreshDeferDepth > 0)
+            {
+                _layoutRefreshPending = true;
+
+                return;
+            }
+
+            RefreshCanvasSizeCore();
+
+            // エンティティの移動・サイズ変更でミニマップの射影・描画データを作り直す
+            RecalculateMiniMap();
+        }
+        else if (e.PropertyName == nameof(EntityViewModel.TitleBackgroundColor))
+        {
+            // ミニマップはタイトルの色で矩形を塗る（位置・大きさは変わらないのでキャンバスサイズはそのまま）
+            if (_bulkDiagramUpdateDepth > 0)
+            {
+                return;
+            }
+
+            if (_layoutRefreshDeferDepth > 0)
+            {
+                _layoutRefreshPending = true;
+
+                return;
+            }
+
             RecalculateMiniMap();
         }
     }

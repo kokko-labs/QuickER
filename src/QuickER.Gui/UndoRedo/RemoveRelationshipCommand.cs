@@ -34,15 +34,11 @@ public class RemoveRelationshipCommand : IUndoableCommand
     public void Execute()
     {
         _removed = IndexedRemoval.RemoveWhere(_main.Relationships, r => ReferenceEquals(r, _rel));
-        // 削除後の状態に合わせて外部キー列のルールを再適用する
-        _main.ApplyRelationshipColumnRules();
     }
 
     /// <inheritdoc />
     public void Undo()
     {
         IndexedRemoval.Restore(_main.Relationships, _removed);
-        // 復元したリレーションに対し外部キー列の付与・更新を再評価する
-        _main.ApplyRelationshipColumnRules();
     }
 }

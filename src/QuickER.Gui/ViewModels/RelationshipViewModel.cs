@@ -197,8 +197,10 @@ public partial class RelationshipViewModel : ObservableObject
             }
         }
 
-        NotifyColumnCandidatesChanged();
+        // 消えた列を指すペアを先に落とす。候補を先に作り直すと、行が選択中の列が候補から消え、
+        // コンボボックスがその選択を落とす（null の書き戻しが利用者の編集として履歴に入る）
         EnsureColumnSelectionConsistency();
+        NotifyColumnCandidatesChanged();
     }
 
     /// <summary>多対多では参照アクションを既定値へ戻し、設定不可状態を保つ</summary>
@@ -214,11 +216,11 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>主キー化・一意制約入り・カラム名の変更時に、選択候補と選択整合性を再評価する</summary>
     private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // 列名は対象にしない：候補は列そのものの集まりで（名前は表示の束縛が追う）、列の整合も名前を見ない
         if (
             e.PropertyName
             is nameof(ColumnViewModel.IsPrimaryKey)
                 or nameof(ColumnViewModel.IsUniqueConstraintMember)
-                or nameof(ColumnViewModel.Name)
         )
         {
             NotifyColumnCandidatesChanged();
@@ -253,7 +255,8 @@ public partial class RelationshipViewModel : ObservableObject
 
         if (!CanSelectForeignKeyColumns)
         {
-            if (_columnPairs.Count > 0)
+            // 片側だけ選んだ空スロットも捨てる（多対多では列ペアを持たない）
+            if (_columnPairs.Count > 0 || _hasPendingSlot)
             {
                 SetColumnPairs([]);
             }
@@ -278,8 +281,10 @@ public partial class RelationshipViewModel : ObservableObject
     /// <param name="columnPairs">新しい列ペア（宣言順）</param>
     internal void SetColumnPairs(IEnumerable<RelationshipColumnPair> columnPairs)
     {
+        // 引数を先に確定させる（自分の ColumnPairs を渡されたとき、消してから読むと空になる）
+        var replacement = columnPairs.Select(pair => pair.Clone()).ToList();
         _columnPairs.Clear();
-        _columnPairs.AddRange(columnPairs.Select(pair => pair.Clone()));
+        _columnPairs.AddRange(replacement);
 
         // 正本が変わった時点で編集途中の空スロットは意味を失うため捨てる（Undo・AI ツール由来の変更も同じ扱い）
         _hasPendingSlot = false;
@@ -348,8 +353,22 @@ public partial class RelationshipViewModel : ObservableObject
             .ToList();
 
     /// <summary>行の列選択がユーザー操作で変わったことを購読側（履歴化する側）へ伝える</summary>
+    /// <remarks>
+    /// 図から外れている間（<see cref="Detach"/> の後）の書き込みは正本を変えず、表示を正本へ戻す。
+    /// 外れたリレーションのコンボボックスの後片付けが選択を落としても、Undo で戻るリレーションを欠けさせないため。
+    /// 図に居る間（<see cref="Attach"/> の後。生成直後もここ）は、履歴化する受け手がいなくても正本へ反映する
+    /// （図に入れずに組み立てた単独のリレーションでも、行の編集が列ペアになる）。
+    /// 印は MainViewModel がリレーションを図へ出し入れするときの <see cref="Attach"/> / <see cref="Detach"/> が立てる
+    /// </remarks>
     internal void NotifyColumnPairSelectionEdited(RelationshipColumnPairViewModel row)
     {
+        if (!_isAttached)
+        {
+            SyncColumnPairRows();
+
+            return;
+        }
+
         // 選択が動いた時点で他行の候補（重複除外）が変わるため、まず候補だけ整える
         RefreshColumnPairCandidates();
         OnPropertyChanged(nameof(CanAddColumnPair));
@@ -391,16 +410,27 @@ public partial class RelationshipViewModel : ObservableObject
 
         while (ColumnPairRows.Count > desired)
         {
-            var removed = ColumnPairRows[^1];
-            ColumnPairRows.RemoveAt(ColumnPairRows.Count - 1);
-
             // 外れた行のコンボボックスが後片付けの過程で選択を落としても、正本を触らせない
+            // （後片付けは行リストからの削除の通知の最中に走り得るので、削除より先に切り離す）
+            var removed = ColumnPairRows[^1];
             removed.Detach();
+            ColumnPairRows.RemoveAt(ColumnPairRows.Count - 1);
         }
 
         while (ColumnPairRows.Count < desired)
         {
             ColumnPairRows.Add(new RelationshipColumnPairViewModel(this));
+        }
+
+        // 選択を当てる前に、当てる列を各行の候補へ足す（候補に無い項目を選択に当てると、
+        // コンボボックスがその選択を受け付けないか落とす）。足した分の余りは最後の絞り込みが外す
+        for (var i = 0; i < ColumnPairRows.Count; i++)
+        {
+            ColumnPairRows[i]
+                .IncludeInCandidates(
+                    i < resolved.Count ? resolved[i].Source : null,
+                    i < resolved.Count ? resolved[i].Target : null
+                );
         }
 
         for (var i = 0; i < ColumnPairRows.Count; i++)
@@ -417,6 +447,9 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(CanAddColumnPair));
     }
 
+    /// <summary>テスト専用: 列ペアの行の選択候補（<see cref="RefreshColumnPairCandidates"/>）を作り直した回数</summary>
+    internal int ColumnPairCandidateRefreshCountForTests { get; private set; }
+
     /// <summary>各行の選択候補を「他行が使っていない列＋自行の現在選択」へ絞り込む</summary>
     /// <remarks>
     /// <para>
@@ -432,6 +465,7 @@ public partial class RelationshipViewModel : ObservableObject
     /// </remarks>
     private void RefreshColumnPairCandidates()
     {
+        ColumnPairCandidateRefreshCountForTests++;
         var rows = ColumnPairRows.ToList();
         var usedSources = rows.Select(row => row.SelectedSourceColumn)
             .Where(column => column is not null)
@@ -565,7 +599,12 @@ public partial class RelationshipViewModel : ObservableObject
     public double Y2 => _y2;
 
     /// <summary>端点座標・マーカー位置・角度・ラベル位置を一括で再計算しキャッシュへ格納する</summary>
-    private void UpdateGeometry()
+    /// <remarks>
+    /// 通知はしない（端点の変更では呼び出し側の <see cref="OnEndpointChanged"/> が続けて通知する）。
+    /// ミニマップが線を作る前にも呼ぶ：テーブルの位置の変更通知はミニマップの作り直しが先に受け、
+    /// このリレーションの再計算はその後になるため、キャッシュのままだと 1 つ前の位置の線になる
+    /// </remarks>
+    internal void UpdateGeometry()
     {
         (_x1, _y1) = GetBoundaryPoint(Source, Target);
         (_x2, _y2) = GetBoundaryPoint(Target, Source);
@@ -965,6 +1004,20 @@ public sealed class RelationshipColumnPairViewModel : ObservableObject
 
     /// <summary>この行を行リストから外れたものとして無効化する</summary>
     internal void Detach() => _isDetached = true;
+
+    /// <summary>これから当てる選択を、まだ無ければ候補へ足す（並びと余りは後の絞り込みが整える）</summary>
+    internal void IncludeInCandidates(ColumnViewModel? sourceColumn, ColumnViewModel? targetColumn)
+    {
+        if (sourceColumn is not null && !AvailableSourceColumns.Contains(sourceColumn))
+        {
+            AvailableSourceColumns.Add(sourceColumn);
+        }
+
+        if (targetColumn is not null && !AvailableTargetColumns.Contains(targetColumn))
+        {
+            AvailableTargetColumns.Add(targetColumn);
+        }
+    }
 
     /// <summary>親列の選択候補を差分だけ入れ替える（並びは所有エンティティのカラム順）</summary>
     internal void SyncAvailableSourceColumns(IEnumerable<ColumnViewModel> columns) =>
