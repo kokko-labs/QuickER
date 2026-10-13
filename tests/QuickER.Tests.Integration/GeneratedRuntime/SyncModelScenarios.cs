@@ -424,6 +424,12 @@ internal static class SyncModelScenarios
                     Item(SV, 422, folder: 420, code: "m1"),
                     new UpdateItemOp(SV, Direct, 421, 420, null, "m2", "later"),
                     Sync(D1),
+                    new ExpectLocalRowChangeOp(
+                        D1,
+                        ModelTables.Items,
+                        "421",
+                        SyncLocalRowChangeReason.ReloadedForUniqueValue
+                    ),
                     Sync(D1),
                     new ExpectLocalOp(
                         D1,
@@ -861,6 +867,24 @@ internal static class SyncModelScenarios
                         "folder=140 label=null code=w1 title=t141"
                     ),
                     new ExpectLocalOp(D1, ModelTables.Items, "142", null),
+                    new ExpectLocalRowChangeOp(
+                        D1,
+                        ModelTables.Items,
+                        "142",
+                        SyncLocalRowChangeReason.RemovedBeforeDownload
+                    ),
+                    new ExpectLocalRowChangeOp(
+                        D1,
+                        ModelTables.Items,
+                        "141",
+                        SyncLocalRowChangeReason.DiscardedByServerWins
+                    ),
+                    new ExpectLocalRowChangeOp(
+                        D1,
+                        ModelTables.Items,
+                        "142",
+                        SyncLocalRowChangeReason.DiscardedByServerWins
+                    ),
                 ]
             ),
             // N2: 同じ形を削除伝搬なしで。142 は残り、141 は 142 とぶつかるので戻さず記録を残す（例外にしない）
@@ -1203,6 +1227,41 @@ internal static class SyncModelScenarios
                     Sync(D1),
                 ]
             ),
+            // rs6 の対照: サーバーに一度も届いていない行をオフラインで作り・消し・作り直しても、削除の記録は版を持たない
+            // ので挿入のまま上がる（作り直しを Update 経路へ回す規則が、偽の競合を出さない）
+            new(
+                "rs6-offline-insert-delete-insert-stays-insert",
+                [Folder(SV, 500)],
+                [
+                    Item(D1, 501, folder: 500),
+                    new DeleteItemOp(D1, Direct, 501),
+                    new AddItemOp(D1, Direct, 501, 500, null, "c-501b", "again", "0A0B0501"),
+                    Sync(D1),
+                    new ExpectLocalOp(
+                        SV,
+                        ModelTables.Items,
+                        "501",
+                        "folder=500 label=null code=c-501b title=again"
+                    ),
+                ]
+            ),
+            // rs6: 作り直しの間にサーバーで行が更新されていれば、その版でガードした更新は ModifiedOnServer になる（本物の競合）
+            new(
+                "rs6-reinsert-after-server-update-conflicts",
+                [Folder(SV, 502), Item(SV, 503, folder: 502)],
+                [
+                    new DeleteItemOp(D1, Direct, 503),
+                    new AddItemOp(D1, Direct, 503, 502, null, "c-503", "again", "0A0B0503"),
+                    new UpdateItemOp(SV, Direct, 503, 502, null, "c-503", "sv"),
+                    Sync(D1),
+                    new ExpectLocalOp(
+                        SV,
+                        ModelTables.Items,
+                        "503",
+                        "folder=502 label=null code=c-503 title=sv"
+                    ),
+                ]
+            ),
             // 3r rs #6: オフラインで削除して同じキーで作り直すと、偽の DuplicateOnServer になる
             new(
                 "rs6-offline-delete-reinsert",
@@ -1271,6 +1330,151 @@ internal static class SyncModelScenarios
                     state.Folders[238].Name == "sv"
                         ? null
                         : $"folder 238: {state.Folders[238].Name}"
+            ),
+            // 新規（案 N10）: フックが飛ばした書き込み（Before が false＝例外にならない）の記録が残り、中身の変わらない書き込みが
+            // 上がって版を進め、別の端末に偽の ModifiedOnServer を出す（#16 と同じ根。種 887・1834 の形）
+            new(
+                "n10-hook-skip-record-spurious-conflict",
+                [Folder(SV, 495)],
+                [
+                    new ArmFaultOp(D2, ModelFaultKind.HookSkip),
+                    new UpdateFolderOp(D2, ModelWriteVia.Graph, 495, null, "skipped"),
+                    Sync(D2),
+                    new UpdateFolderOp(D1, Direct, 495, null, "d1"),
+                    Sync(D1),
+                ]
+            ),
+            // 新規（案 N10）: 同じ形で後勝ち。飛ばした書き込みの記録の再生が、古い内容でサーバーの他者の更新を戻す（種 1766 の形）
+            new(
+                "n10-hook-skip-record-reverts-row",
+                [Folder(SV, 496)],
+                [
+                    new ArmFaultOp(D1, ModelFaultKind.HookSkip),
+                    new UpdateFolderOp(D1, ModelWriteVia.Graph, 496, null, "skipped"),
+                    new UpdateFolderOp(SV, Direct, 496, null, "sv"),
+                    Sync(D1, mode: SyncMode.LastWriteWins),
+                ]
+            ),
+            // 新規（案 N10）: 同じ形で、飛ばした更新の記録の後勝ちの再生が、別の端末の削除の後で行を作り直す（種 726 の形）
+            new(
+                "n10-hook-skip-record-resurrects-deleted-row",
+                [Folder(SV, 507), new AddLabelOp(SV, Direct, "L507", 507, "cap")],
+                [
+                    new ArmFaultOp(D2, ModelFaultKind.HookSkip),
+                    new UpdateLabelOp(D2, ModelWriteVia.Graph, "L507", 507, "skipped"),
+                    new DeleteLabelOp(D1, Direct, "L507"),
+                    Sync(D1, mode: SyncMode.LastWriteWins),
+                    Sync(D2, mode: SyncMode.LastWriteWins),
+                ]
+            ),
+            // N11（種 163・1983 の形）: 後勝ち＋ServerWins のランが、サーバーに断られた削除を決着させた（記録を捨てて行を戻した）
+            // 後で、同じランのダウンロードが例外で終わる。決着は例外の Data で届き、モデルは消えた記録を捨てた行とみなす
+            new(
+                "thrown-serverwins-run-hides-settlement",
+                [Folder(SV, 508), new AddLabelOp(SV, Direct, "L508", 508, "cap")],
+                [
+                    new DeleteLabelOp(D1, Direct, "L508"),
+                    Item(SV, 509, folder: 508, label: "L508"),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                    Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                    // 例外の Data が、例外の前に決着させた行を運ぶ（N11 の案 2）
+                    new ExpectLocalRowChangeOp(
+                        D1,
+                        ModelTables.Labels,
+                        "L508",
+                        SyncLocalRowChangeReason.DiscardedByServerWins
+                    ),
+                ]
+            ),
+            // #23: 挿入になったアップロードの blob の送信が失敗しても、次のランが blob を送る（挿入で全列を送る規則を、
+            // 次のランの更新の経路まで持ち越す。種 491・982・1407 の形）
+            new(
+                "23-inserted-row-blob-retry",
+                [Folder(SV, 510), Item(SV, 511, folder: 510)],
+                [
+                    new DeleteItemOp(D2, Direct, 511),
+                    new UpdateItemOp(D1, Direct, 511, 510, null, "c-511", "d1"),
+                    Sync(D2, mode: SyncMode.LastWriteWins),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobUpload),
+                    Sync(D1, mode: SyncMode.LastWriteWins),
+                    Sync(D1, mode: SyncMode.LastWriteWins),
+                    new ExpectPayloadOp(SV, 511, "0A0B01FF"),
+                ]
+            ),
+            // N12: blob を書いた端末のアップロードが blob の送信で失敗し、その間に別の端末が行を更新すると、
+            // 再送は版の競合になり、静止化の ServerWins が書き込みを捨てて blob は空のままそろう（行の単位の勝ち負け＝O2。
+            // モデルの blob の表明は、書き手の競合と ServerWins の破棄を見ていない。種 1054・971 の形）
+            new(
+                "n12-blob-writer-conflicted-blob-empty",
+                [Folder(SV, 512)],
+                [
+                    new AddItemOp(
+                        D2,
+                        ModelWriteVia.Graph,
+                        513,
+                        512,
+                        null,
+                        "c-513",
+                        "t513",
+                        "0C0C0C0C"
+                    ),
+                    new ArmFaultOp(D2, ModelFaultKind.BlobUpload),
+                    Sync(D2),
+                    Sync(D1),
+                    new UpdateItemOp(D1, Direct, 513, 512, null, "c-513", "d1"),
+                    Sync(D1),
+                ]
+            ),
+            // N12: blob を書いた端末がその行を消し、別の端末の編集が後勝ちで行を作り直すと、作り直した端末の
+            // blob が入る（挿入は全列を送る＝#23）。モデルは、消した端末の blob を期待する（種 477・672・1068 の形）
+            new(
+                "n12-blob-write-then-delete-resurrected",
+                [Folder(SV, 514), Item(SV, 515, folder: 514)],
+                [
+                    new WritePayloadOp(D1, 515, "0E0E0E0E"),
+                    new DeleteItemOp(D1, Direct, 515),
+                    new UpdateItemOp(D2, Direct, 515, 514, null, "c-515", "d2"),
+                    Sync(D1, mode: SyncMode.LastWriteWins),
+                    Sync(D2, mode: SyncMode.LastWriteWins),
+                ]
+            ),
+            // N11 の別の形（種 647・1826）: 後勝ち＋ServerWins のランが、親の無いためにサーバーに断られた追加を決着させ
+            // （記録を捨ててローカルの行も消す）、同じランのダウンロードが例外で終わると、その決着が呼び出し側から見えない
+            new(
+                "thrown-serverwins-run-hides-settled-insert",
+                [Folder(SV, 516), Folder(SV, 518)],
+                [
+                    Folder(D1, 517, parent: 516),
+                    new DeleteFolderOp(SV, Direct, 516),
+                    Item(SV, 519, folder: 518),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                    Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
+                ]
+            ),
+            // N12（種 982 の形）: 消された品目を後勝ちの編集が作り直し、その挿入の blob の送信が失敗する。サーバーには blob の
+            // 空な行が残り、その後のサーバーの更新で、作り直した端末の記録は競合になって ServerWins に捨てられる（行の単位の
+            // 勝ち負け）。作り直した端末を blob の書き手に数え、その記録が捨てられたことを根拠に見逃す
+            new(
+                "n12-recreated-row-blob-failed-then-discarded",
+                [Folder(SV, 534), Item(SV, 535, folder: 534)],
+                [
+                    new DeleteItemOp(D2, Direct, 535),
+                    new UpdateItemOp(D1, Direct, 535, 534, null, "c-535", "d1"),
+                    Sync(D2, mode: SyncMode.LastWriteWins),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobUpload),
+                    Sync(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.LocalWins),
+                    new UpdateItemOp(SV, Direct, 535, 534, null, "c-535", "sv"),
+                ]
+            ),
+            // #27 系: blob を書いた行をキーだけのスタブで消すと、削除が黙って捨てられ、書いた blob も上がらない（種 477 の形）
+            new(
+                "27-stub-delete-after-blob-write",
+                [Folder(SV, 497), Item(SV, 498, folder: 497)],
+                [
+                    new WritePayloadOp(D1, 498, "0D0D0D0D"),
+                    new DeleteStubOp(D1, ModelTables.Items, "498"),
+                    Sync(D1),
+                ]
             ),
             // #19: varchar のキー × SQL_* 照合順序で、キー順のページングが行を黙って飛ばさない（SQL Server でだけ起きていた＝
             // '-' を ORDER BY は文字として並べ、nvarchar で束縛した @afterKey との比較は無視する。@afterKey を列の型へキャストする）

@@ -305,6 +305,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             LocalAnchorSql = isVersionless
                 ? string.Empty
                 : CSharpLiteral($"SELECT MAX({localRowVersion}) FROM {localTable}"),
+            // グラフ保存の削除の記録が、ローカルの行のミラー版を読む（スタブや古い実体は版を持たない＝#27）
+            LocalRowVersionSql = isVersionless
+                ? string.Empty
+                : CSharpLiteral(
+                    $"SELECT {localRowVersion} FROM {localTable} WHERE {localKey} = @key"
+                ),
             LocalKeysSql = CSharpLiteral($"SELECT {localKey} FROM {localTable}"),
             LocalExistingKeysSql = CSharpLiteral(
                 $"SELECT {localKey} FROM {localTable} WHERE {localKey} IN (@keys)"

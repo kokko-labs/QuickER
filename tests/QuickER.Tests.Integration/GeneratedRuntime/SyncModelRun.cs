@@ -69,6 +69,26 @@ internal sealed class SyncModelRun : IAsyncDisposable
     // (表, キー) → 競合を報告された端末
     private readonly Dictionary<(string Table, string Key), HashSet<ModelActor>> _conflictsTo = [];
 
+    /// <summary>端末ごとの、直前の同期が自分から変えたと報告したローカルの行（ExpectLocalRowChangeOp が見る）</summary>
+    private readonly Dictionary<
+        ModelActor,
+        IReadOnlyList<SyncLocalRowChange>
+    > _lastLocalRowChanges = [];
+
+    /// <summary>blob を書いた後でその品目が削除された（作り直されたら blob の期待値を決めない＝N12 (ii)）</summary>
+    private readonly HashSet<string> _blobHistoryCut = new(StringComparer.Ordinal);
+
+    /// <summary>だれかが消したことのある品目（行の書き手の操作として見えたもの）</summary>
+    private readonly HashSet<string> _deletedItems = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 消された後で、その品目の行をサーバーへ上げ直した端末（同期の前にサーバーに無く、その端末の同期の後にある＝挿入の
+    /// 経路になった。N12 の種 982 の形＝作り直しの挿入の blob の送信が失敗し、空の blob が残る）
+    /// </summary>
+    private readonly Dictionary<string, HashSet<ModelActor>> _recreators = new(
+        StringComparer.Ordinal
+    );
+
     // 報告された競合（根拠の確認用）
     private readonly List<(
         ModelActor Device,
@@ -227,6 +247,31 @@ internal sealed class SyncModelRun : IAsyncDisposable
                 break;
             }
 
+            case ExpectLocalRowChangeOp expect:
+            {
+                var reported = _lastLocalRowChanges.GetValueOrDefault(expect.Device) ?? [];
+
+                if (
+                    !reported.Contains(
+                        new SyncLocalRowChange(expect.Table, expect.KeyText, expect.Reason)
+                    )
+                )
+                {
+                    _failures.Add(
+                        new(
+                            $"5/expect-row-change:{expect.Table}",
+                            $"{expect.Describe()}: reported "
+                                + string.Join(
+                                    ", ",
+                                    reported.Select(c => $"{c.TableName}/{c.KeyText}/{c.Reason}")
+                                )
+                        )
+                    );
+                }
+
+                break;
+            }
+
             case ExpectNoAckOp expect:
             {
                 var acks = await _world
@@ -364,6 +409,18 @@ internal sealed class SyncModelRun : IAsyncDisposable
                 if (!string.Equals(oldRow, newRow, StringComparison.Ordinal))
                 {
                     Append(_rows, (table, key), (actor, newRow));
+
+                    // blob を書いた品目が消えたら、それ以前の blob の書き込みは期待値の根拠にならない（作り直した端末の
+                    // blob が入る＝挿入は全列を送る）
+                    if (table == ModelTables.Items && newRow is null && _blobs.ContainsKey(key))
+                    {
+                        _blobHistoryCut.Add(key);
+                    }
+
+                    if (table == ModelTables.Items && newRow is null)
+                    {
+                        _deletedItems.Add(key);
+                    }
                 }
             }
         }
@@ -400,6 +457,14 @@ internal sealed class SyncModelRun : IAsyncDisposable
         ModelSyncOutcome outcome;
         var fired = _world.Faults.Fired;
 
+        // 消された品目をこの同期が上げ直したか（挿入の経路になった）を、サーバーの行の有無の前後で見る
+        var serverItemsBefore =
+            op.Kind != ModelSyncKind.Download
+                ? (await _world.ReadStateAsync(ModelActor.Server, _ct))
+                    .Rows(ModelTables.Items)
+                    .Keys.ToHashSet(StringComparer.Ordinal)
+                : null;
+
         try
         {
             outcome = await _world.SyncAsync(op, _ct);
@@ -412,6 +477,17 @@ internal sealed class SyncModelRun : IAsyncDisposable
             )
         {
             _log.Add($"  -> injected fault: {ex.GetType().Name}");
+            await RecordRecreatorsAsync(op.Device, serverItemsBefore);
+            _lastLocalRowChanges[op.Device] =
+                ex.Data[SyncEngine.LocalRowChangesDataKey] as IReadOnlyList<SyncLocalRowChange>
+                ?? [];
+
+            // 例外で終わった後勝ち＋ServerWins の実行も、例外の前に決着させた変更を捨てている（結果は返らない）。
+            // 実行の前の未送信の記録と突き合わせ、記録が消えた行を捨てた行とみなす（N11 の案 1）
+            if (pendingBefore is not null)
+            {
+                await RecordLastWriteWinsSettlementsAsync(op, pendingBefore);
+            }
 
             return false;
         }
@@ -427,6 +503,16 @@ internal sealed class SyncModelRun : IAsyncDisposable
             );
 
             return false;
+        }
+
+        _lastLocalRowChanges[op.Device] = outcome.LocalRowChanges;
+        await RecordRecreatorsAsync(op.Device, serverItemsBefore);
+
+        foreach (var change in outcome.LocalRowChanges)
+        {
+            _log.Add(
+                $"  -> local {ModelTables.Short(change.TableName)} key={CanonicalKey(change.TableName, change.KeyText)} {change.Reason}"
+            );
         }
 
         foreach (var conflict in outcome.Conflicts)
@@ -464,6 +550,32 @@ internal sealed class SyncModelRun : IAsyncDisposable
         await CheckForeignKeysAsync(op.Device, op.Describe());
 
         return outcome.Conflicts.Count == 0 && outcome.Truncations.Count == 0;
+    }
+
+    /// <summary>消された品目のうち、この同期の前にサーバーに無く、後にあるもの＝この端末が上げ直したものを控える。</summary>
+    private async Task RecordRecreatorsAsync(ModelActor device, HashSet<string>? serverItemsBefore)
+    {
+        if (serverItemsBefore is null)
+        {
+            return;
+        }
+
+        foreach (
+            var key in (await _world.ReadStateAsync(ModelActor.Server, _ct))
+                .Rows(ModelTables.Items)
+                .Keys
+        )
+        {
+            if (!serverItemsBefore.Contains(key) && _deletedItems.Contains(key))
+            {
+                if (!_recreators.TryGetValue(key, out var set))
+                {
+                    _recreators[key] = set = [];
+                }
+
+                set.Add(device);
+            }
+        }
     }
 
     /// <summary>
@@ -748,7 +860,27 @@ internal sealed class SyncModelRun : IAsyncDisposable
 
             if (hex is "" or "NULL")
             {
-                found.Add(new("3/blob-empty:model_items", $"item {key} payload is {hex}"));
+                // 空でそろってよいのは、空でない blob を書いた端末がすべて、その品目の競合を報告されたか、ServerWins に
+                // 変更を捨てられた（＝行の単位で負けた）ときだけ（N12 (i)）。それ以外の根拠では見逃さない
+                // 消された品目を上げ直した端末も、その品目の blob の書き手に数える（作り直しの挿入が blob を運ぶ＝その
+                // 送信が失敗すると空の blob が残る。種 982）。根拠になるのは、その端末の記録が競合として報告されたか、
+                // ServerWins に捨てられたことだけ
+                var nonEmptyWriters = history
+                    .Where(h => h.Hex is not ("" or "NULL"))
+                    .Select(h => h.Actor)
+                    .Concat(_recreators.GetValueOrDefault(key) ?? [])
+                    .Distinct()
+                    .ToList();
+                var lostByPolicy =
+                    nonEmptyWriters.Count > 0
+                    && conflicted is not null
+                    && nonEmptyWriters.All(conflicted.Contains);
+
+                if (!lostByPolicy)
+                {
+                    found.Add(new("3/blob-empty:model_items", $"item {key} payload is {hex}"));
+                }
+
                 continue;
             }
 
@@ -757,6 +889,12 @@ internal sealed class SyncModelRun : IAsyncDisposable
             if (!written.Contains(hex, StringComparer.Ordinal))
             {
                 found.Add(new("3/blob-invented:model_items", $"item {key} payload {hex}"));
+                continue;
+            }
+
+            // blob を書いた後で品目が消え、作り直された（行が残っている）なら、期待値を決めない（N12 (ii)）
+            if (_blobHistoryCut.Contains(key))
+            {
                 continue;
             }
 

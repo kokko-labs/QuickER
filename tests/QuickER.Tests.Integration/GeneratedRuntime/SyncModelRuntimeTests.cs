@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Tests.GeneratedSyncModelFixture;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -215,6 +216,115 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
                     + "\nops:\n"
                     + string.Join("\n", log.Select(l => "  " + l))
             );
+    }
+
+    /// <summary>
+    /// N12 の対照：競合も ServerWins の破棄も削除も無いのに、blob が空でそろう形は、緩めた後も違反として数える。
+    /// </summary>
+    /// <remarks>
+    /// blob を運ばない実行で新しい行を上げると、サーバーの行は blob が空のまま作られ（文書の割り切り＝運ぶかどうかは
+    /// 端末ごとに一貫させる）、書いた端末の記録は blob なしで決着する。モデルの見逃しの条件はこれを根拠にしないので、
+    /// 3/blob-empty が残る。一覧（All）には入れない＝わざと失敗させる形で、ここでだけ流す。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/モデル] 根拠の無い空の blob は、緩めた後も違反として数える（N12 の対照）"
+    )]
+    public async Task EmptyBlobWithoutConflict_IsStillAViolation()
+    {
+        var scenario = new SyncModelScenario(
+            "n12-control-empty-blob-without-cause",
+            [new AddFolderOp(ModelActor.Server, ModelWriteVia.Direct, 530, null, "f530")],
+            [
+                new AddItemOp(
+                    ModelActor.Device1,
+                    ModelWriteVia.Direct,
+                    531,
+                    530,
+                    null,
+                    "c-531",
+                    "t531",
+                    "0D0D0D0D"
+                ),
+                new ModelSyncOp(
+                    ModelActor.Device1,
+                    ModelSyncKind.Sync,
+                    SyncMode.Versioned,
+                    SyncConflictPolicy.Collect,
+                    [],
+                    false,
+                    500
+                ),
+            ]
+        );
+
+        var (failures, _) = await scenario.RunAsync(Ct);
+
+        failures.Select(f => f.Signature).Should().Contain("3/blob-empty:model_items");
+    }
+
+    /// <summary>
+    /// N12 の対照（作り直し）：消された品目を上げ直した端末の記録が、競合にも ServerWins の破棄にもならないのに、blob が空で
+    /// そろう形は、違反として数える。
+    /// </summary>
+    /// <remarks>
+    /// blob を運ばない後勝ちの実行で、別の端末が消した品目を編集から作り直すと、サーバーの行は blob が空のまま作られ、記録は
+    /// blob なしで決着する。上げ直した端末は書き手に数えるが、根拠（競合・破棄）が無いので見逃さない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/モデル] 作り直した端末に根拠が無い空の blob は、違反として数える（N12 の対照）"
+    )]
+    public async Task EmptyBlobOfRecreatedRowWithoutConflict_IsStillAViolation()
+    {
+        var scenario = new SyncModelScenario(
+            "n12-control-recreated-empty-blob-without-cause",
+            [
+                new AddFolderOp(ModelActor.Server, ModelWriteVia.Direct, 532, null, "f532"),
+                new AddItemOp(
+                    ModelActor.Server,
+                    ModelWriteVia.Direct,
+                    533,
+                    532,
+                    null,
+                    "c-533",
+                    "t533",
+                    "0E0E0E0E"
+                ),
+            ],
+            [
+                new DeleteItemOp(ModelActor.Device2, ModelWriteVia.Direct, 533),
+                new UpdateItemOp(
+                    ModelActor.Device1,
+                    ModelWriteVia.Direct,
+                    533,
+                    532,
+                    null,
+                    "c-533",
+                    "d1"
+                ),
+                new ModelSyncOp(
+                    ModelActor.Device2,
+                    ModelSyncKind.Sync,
+                    SyncMode.LastWriteWins,
+                    SyncConflictPolicy.Collect,
+                    [],
+                    true,
+                    500
+                ),
+                new ModelSyncOp(
+                    ModelActor.Device1,
+                    ModelSyncKind.Sync,
+                    SyncMode.LastWriteWins,
+                    SyncConflictPolicy.Collect,
+                    [],
+                    false,
+                    500
+                ),
+            ]
+        );
+
+        var (failures, _) = await scenario.RunAsync(Ct);
+
+        failures.Select(f => f.Signature).Should().Contain("3/blob-empty:model_items");
     }
 
     [Fact(

@@ -1723,25 +1723,30 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>
-    /// 業務削除が失敗して残ったジャーナルエントリは、サーバーへ送られず破棄される（journal-first の無害化）。
+    /// 業務削除が着地しないまま残った削除エントリは、サーバーへ送られず破棄される（journal-first の無害化）。
     /// </summary>
     /// <remarks>
     /// 削除は「送る内容」を持たないため、upsert のようにローカルの現在行を読み直すだけでは無害化されない。
     /// ローカル行がまだ在る＝業務削除が着地しなかったということなので、そのままサーバーを消すと
     /// 「失敗した操作が全体としては完遂される」うえ、続く削除伝搬がローカル行まで道連れにする。
-    /// 失敗は FK 違反で作る（子が残っている親を直接削除する＝記録の後に業務削除だけが落ちる）。
+    /// 業務削除が例外で終わった記録はデコレータが取り消すので（#16）、残るのは記録の後でプロセスごと落ちた場合。
+    /// それをジャーナルへの直接の記録で作る（デコレータの記録の範囲の外＝取り消されない）。
     /// </remarks>
     [Fact(
-        DisplayName = "[Sync] 業務削除が失敗して残った削除エントリは送られず破棄される（journal-first の無害化）"
+        DisplayName = "[Sync] 業務削除が着地しないまま残った削除エントリは送られず破棄される（journal-first の無害化）"
     )]
     public async Task FailedLocalDelete_LeavesEntryThatIsDiscarded()
     {
         await SeedServerAsync(1, "alice", 11, "widget");
         await Engine.SyncAsync(cancellationToken: Ct);
 
-        // 子（明細）が残っている親を直接削除する＝ジャーナルへ記録された後に FK 違反で業務削除が失敗する
+        // 子（明細）が残っている親の削除は FK 違反で失敗し、デコレータはその記録を取り消す
         var deleting = async () => await LocalOrders.DeleteAsync(1, Ct);
         await deleting.Should().ThrowAsync<Exception>();
+        (await Journal.ReadAllAsync(Ct)).Should().BeEmpty("例外で終わった書き込みの記録は取り消す");
+
+        // 記録の後でプロセスごと落ちた形＝記録だけが残り、業務削除は着地していない
+        await Journal.RecordAsync("sync_orders", "1", SyncJournalOperation.Delete, null, Ct);
 
         (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull("業務削除は着地していない");
         var entry = (await Journal.ReadAllAsync(Ct)).Should().ContainSingle().Subject;
@@ -2383,6 +2388,29 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         await syncing;
     }
 
+    /// <summary>エンジンが注文の行を書いたら印を立てる Save フック（エンジンの書き込みでもフックは走る）。</summary>
+    private sealed class BatchWrittenHook : ISaveHook<SyncOrderEntity>
+    {
+        private volatile bool _written;
+
+        /// <summary>エンジンが行を書いたか</summary>
+        public bool Written => _written;
+
+        public Task<bool> BeforeSaveAsync(
+            SyncOrderEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (SyncSession.IsSuppressed)
+            {
+                _written = true;
+            }
+
+            return Task.FromResult(true);
+        }
+    }
+
     /// <summary>最初の保存の業務書き込みを、解放されるまで止める Save フック。</summary>
     private sealed class PausingSaveHook : ISaveHook<SyncOrderEntity>
     {
@@ -2992,8 +3020,9 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// </para>
     /// <para>
     /// 割り込みは、注文テーブルのローカル生 SQL 実行器を包み、バッチ適用の最初の問い合わせ（既存キーの照会）の
-    /// 直前に、実行コンテキストを引き継がない別タスクで編集を始めることで作る。ロックがあれば編集はその場では
-    /// 終わらない（待つ）。ロックが無ければ待ち時間の間に書き終わり、直後のバッチに上書きされる。
+    /// 直前に、実行コンテキストを引き継がない別タスクで編集を始めることで作る。順序は時間でなく、エンジンが
+    /// バッチを書くときに走る Save フックの印で見る（編集が終わった時点で、バッチはもう書かれていなければならない）。
+    /// 編集する行は同期の前に読んでおく＝編集が読む版がバッチの前のものに決まり、次のランの競合が時間に左右されない。
     /// </para>
     /// </remarks>
     [Fact(
@@ -3008,8 +3037,13 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         server!.CustomerName = "alice-server";
         await ServerOrders.UpdateAsync(server, cancellationToken: Ct);
 
+        // バッチの前の版で編集する（読みをバッチより前に決めておく）
+        var editing = (await LocalOrders.GetByIdAsync(1, Ct))!;
+        editing.CustomerName = "alice-local";
+
         Task? edit = null;
-        var editFinishedDuringBatch = false;
+        var batchWritten = new BatchWrittenHook();
+        var editLandedAfterBatch = false;
         var localSql = new InterceptingSqlExecutor(
             LocalSql,
             async (sql, cancellationToken) =>
@@ -3024,21 +3058,21 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
                     edit = Task.Run(
                         async () =>
                         {
-                            var local = await LocalOrders.GetByIdAsync(1, Ct);
-                            local!.CustomerName = "alice-local";
-                            await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+                            await LocalOrders.UpdateAsync(editing, cancellationToken: Ct);
+                            editLandedAfterBatch = batchWritten.Written;
                         },
                         Ct
                     );
                 }
 
-                editFinishedDuringBatch =
-                    await Task.WhenAny(edit, Task.Delay(500, cancellationToken)) == edit;
+                // ロックが無いときに、編集がバッチより先に着地する機会を与えるだけ（ロックがあれば編集は待ち続ける＝
+                // 判定は時間でなく、着地の時点でバッチの印が立っているかで行う）
+                await Task.WhenAny(edit, Task.Delay(200, cancellationToken));
             }
         );
         var engine = CreateEngineWithOrderTable(
             new SyncTable<SyncOrderEntity, int>(
-                LocalOrders,
+                CreateHookedOrders(batchWritten),
                 localSql,
                 _sources.Orders,
                 GeneratedSyncTables.SyncOrder
@@ -3048,7 +3082,10 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         await engine.SyncAsync(cancellationToken: Ct);
         await edit!;
 
-        editFinishedDuringBatch.Should().BeFalse("ロックを持つバッチの間、ローカル書き込みは待つ");
+        batchWritten.Written.Should().BeTrue("バッチは書かれる");
+        editLandedAfterBatch
+            .Should()
+            .BeTrue("ロックを持つバッチの間、ローカル書き込みは待ち、バッチの後に着地する");
         (await LocalOrdersRaw.GetByIdAsync(1, Ct))!
             .CustomerName.Should()
             .Be("alice-local", "待った書き込みはバッチの後に着地する");
@@ -3098,6 +3135,196 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         await second;
 
         secondFinishedFirst.Should().BeFalse("先のランが終わるまで後のランは始まらない");
+    }
+
+    /// <summary>
+    /// ローカルの業務の書き込みが例外で終わったら、その呼び出しが付けた記録を取り消す（#16）。
+    /// </summary>
+    /// <remarks>
+    /// 残すと、着地しなかった書き込みが後のランで上がり、LocalWins・後勝ちの再生が古い内容でサーバーの他者の更新を
+    /// 戻したり、中身の変わらない書き込みが版を進めて別の端末に偽の競合を出したりする。外部キーで拒否される更新で作る。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/記録] 失敗した更新の記録は残らない")]
+    public async Task FailedUpdate_LeavesNoJournalEntry()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var line = (await LocalLines.GetByIdAsync(11, Ct))!;
+        line.OrderId = 999;
+        line.Product = "orphan";
+
+        var update = () => LocalLines.UpdateAsync(line, cancellationToken: Ct);
+
+        await update
+            .Should()
+            .ThrowAsync<Exception>("存在しない注文を参照する更新はローカルの外部キーで拒否される");
+        (await Journal.ReadAllAsync(Ct)).Should().BeEmpty("着地しなかった書き込みの記録は取り消す");
+    }
+
+    /// <summary>
+    /// 失敗した blob の書き込み（ストリームが宣言した長さに足りない）の記録も残らない（#16）。
+    /// </summary>
+    [Fact(DisplayName = "[Sync/記録] 失敗した blob の書き込みの記録は残らない")]
+    public async Task FailedBlobWrite_LeavesNoJournalEntry()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        using var source = new MemoryStream([1, 2, 3]);
+        var write = () => LocalOrders.WriteAttachmentAsync(1, source, 10, Ct);
+
+        await write
+            .Should()
+            .ThrowAsync<ArgumentException>("ストリームが宣言した長さより先に終わる");
+        (await Journal.ReadAllAsync(Ct)).Should().BeEmpty("着地しなかった書き込みの記録は取り消す");
+    }
+
+    /// <summary>
+    /// 取り消すのはその呼び出しが付けた記録だけで、同じ行の前からある記録は残る（#16）。
+    /// </summary>
+    [Fact(DisplayName = "[Sync/記録] 失敗した書き込みは同じ行の前からある記録を消さない")]
+    public async Task FailedUpdate_KeepsEarlierEntriesOfTheSameRow()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+
+        var line = (await LocalLines.GetByIdAsync(11, Ct))!;
+        line.Product = "edited";
+        await LocalLines.UpdateAsync(line, cancellationToken: Ct);
+
+        line.OrderId = 999;
+        var update = () => LocalLines.UpdateAsync(line, cancellationToken: Ct);
+
+        await update.Should().ThrowAsync<Exception>();
+
+        var entry = (await Journal.ReadAllAsync(Ct))
+            .Should()
+            .ContainSingle("前の編集の記録は残す")
+            .Subject;
+        entry.TableName.Should().Be("sync_order_lines");
+        entry.KeyText.Should().Be("11");
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        (await ServerLines.GetByIdAsync(11, Ct))!
+            .Product.Should()
+            .Be("edited", "着地した編集はそのまま上がる");
+    }
+
+    /// <summary>
+    /// 記録の範囲が集める (id, 記録) の組は、1 文の複数行の INSERT で id の昇順が VALUES の並びどおりであることに
+    /// 頼っている（RETURNING の出力順は不定のため昇順に並べ替えて対応づける）。同梱の SQLite でその前提を固定する。
+    /// </summary>
+    /// <remarks>
+    /// 崩れると、書き込みの後の突き合わせ（#28 のキーの書き換え・N10 の取り消し）が別の行の記録を書き換える。キーの
+    /// テキストを VALUES の並びと無関係な順にし、文の境界（100 行）をまたぐ件数で入れる。
+    /// </remarks>
+    [Fact(DisplayName = "[Sync/記録] 1 文の複数行の記録は、id の昇順が記録の並びどおりに振られる")]
+    public async Task RecordedIds_FollowTheOrderOfTheRecords()
+    {
+        var records = Enumerable
+            .Range(0, 250)
+            .Select(index => new SyncJournalRecord(
+                "sync_orders",
+                ((index * 37) % 250).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                SyncJournalOperation.Upsert,
+                null
+            ))
+            .ToList();
+        var scope = new SyncRecordingScope();
+
+        using (scope.Begin())
+        {
+            await Journal.RecordManyAsync(records, Ct);
+        }
+
+        scope.Recorded.Select(pair => pair.Record).Should().Equal(records);
+
+        var stored = (await Journal.ReadAllAsync(Ct)).ToDictionary(
+            entry => entry.Id,
+            entry => entry.KeyText
+        );
+
+        foreach (var (id, record) in scope.Recorded)
+        {
+            stored[id].Should().Be(record.KeyText, "集めた id はその記録の行を指す");
+        }
+    }
+
+    /// <summary>
+    /// グラフ保存の Before フックが、同じ仮のキー（0）を持つ新しい行 2 つにそれぞれ別のキーを決めても、両方の記録が
+    /// 正しいキーへ移り、同期で上がる（#28）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/記録] フックが同じ仮のキーの新しい行 2 つに別々のキーを決めても、記録はそれぞれのキーへ移る"
+    )]
+    public async Task HookAssignedKeys_OfTwoNewRows_AreRecordedEach()
+    {
+        var hook = new LineKeyAssigningHook(101);
+        var orders = new JournalingSyncOrderRepository(
+            new SyncOrderRepository(
+                new SqlConnectionFactory(LocalConnectionString),
+                new SaveHookRegistry().Add<SyncOrderLineEntity>(hook)
+            ),
+            Journal
+        );
+        var order = new SyncOrderEntity { OrderId = 9, CustomerName = "nine" };
+        var first = new SyncOrderLineEntity
+        {
+            LineId = 0,
+            OrderId = 9,
+            Product = "a",
+        };
+        var second = new SyncOrderLineEntity
+        {
+            LineId = 0,
+            OrderId = 9,
+            Product = "b",
+        };
+        order.MarkAdded();
+        first.MarkAdded();
+        second.MarkAdded();
+        order.SyncOrderLines.Add(first);
+        order.SyncOrderLines.Add(second);
+
+        await orders.SaveAsync(order, cancellationToken: Ct);
+
+        (await Journal.ReadAllAsync(Ct))
+            .Where(entry => entry.TableName == "sync_order_lines")
+            .Select(entry => entry.KeyText)
+            .Should()
+            .BeEquivalentTo(["101", "102"], "フックが決めたキーへ移る（仮のキー 0 は残らない）");
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result.Conflicts.Should().BeEmpty();
+        (await ServerLines.GetByIdAsync(101, Ct))!.Product.Should().Be("a");
+        (await ServerLines.GetByIdAsync(102, Ct))!.Product.Should().Be("b");
+        (await LocalLinesRaw.GetByIdAsync(101, Ct))
+            .Should()
+            .NotBeNull("同期は自分で入れた行を消さない");
+    }
+
+    /// <summary>挿入する明細に、決めた順にキーを振る Save フック。</summary>
+    private sealed class LineKeyAssigningHook(int first) : ISaveHook<SyncOrderLineEntity>
+    {
+        private int _next = first;
+
+        public Task<bool> BeforeSaveAsync(
+            SyncOrderLineEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (operation == SaveOperation.Insert)
+            {
+                entity.LineId = _next++;
+            }
+
+            return Task.FromResult(true);
+        }
     }
 
     /// <summary>
@@ -3227,7 +3454,10 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         Func<string, CancellationToken, Task> beforeQuery
     ) : ISqlExecutor
     {
-        /// <summary>ExecuteSqlAsync で実行した文（ロックの外から並行に書かれることは無い前提の観測用）</summary>
+        /// <summary>
+        /// ExecuteSqlAsync と QueryProjectionBySqlAsync で実行した文（ロックの外から並行に書かれることは無い前提の
+        /// 観測用。デコレータの記録は、取り消せるように id を読み戻す形＝QueryProjectionBySqlAsync で書く）
+        /// </summary>
         public List<string> Executed { get; } = [];
 
         public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
@@ -3249,6 +3479,7 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         )
         {
             await beforeQuery(sql, cancellationToken);
+            Executed.Add(sql);
 
             return await inner.QueryProjectionBySqlAsync<TResult>(
                 sql,

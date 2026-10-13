@@ -160,7 +160,11 @@ internal sealed class ModelDbState
 internal sealed record ModelSyncOutcome(
     IReadOnlyList<SyncConflict> Conflicts,
     IReadOnlyList<SyncDownloadTruncation> Truncations
-);
+)
+{
+    /// <summary>同期（SyncAsync）が自分から変えたローカルの行（SyncResult.LocalRowChanges）</summary>
+    public IReadOnlyList<SyncLocalRowChange> LocalRowChanges { get; init; } = [];
+}
 
 /// <summary>端末 1 台（ローカル SQLite・ジャーナル・ジャーナル記録デコレータ・同期エンジン）</summary>
 internal sealed class SyncModelDevice : IDisposable
@@ -542,7 +546,10 @@ internal sealed class SyncModelWorld : IAsyncDisposable
             {
                 var result = await engine.SyncAsync(options, ct);
 
-                return new ModelSyncOutcome(result.Conflicts, result.Truncations);
+                return new ModelSyncOutcome(result.Conflicts, result.Truncations)
+                {
+                    LocalRowChanges = result.LocalRowChanges,
+                };
             }
 
             case ModelSyncKind.Upload:

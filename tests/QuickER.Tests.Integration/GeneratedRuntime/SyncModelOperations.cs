@@ -429,6 +429,21 @@ internal sealed record ExpectNoAckOp(ModelActor Device, string Table, string Key
         $"{Who(Device)} ExpectNoAck {ModelTables.Short(Table)} key={KeyText}";
 }
 
+/// <summary>
+/// シナリオの途中で、端末の直前の同期（SyncAsync）が、その行をその理由で自分から変えたと報告したかを確かめる
+/// （違反は 5/expect-row-change。例外で終わった同期は、例外の Data の一覧を見る）
+/// </summary>
+internal sealed record ExpectLocalRowChangeOp(
+    ModelActor Device,
+    string Table,
+    string KeyText,
+    SyncLocalRowChangeReason Reason
+) : ModelOp
+{
+    public override string Describe() =>
+        $"{Who(Device)} ExpectLocalRowChange {ModelTables.Short(Table)} key={KeyText} reason={Reason}";
+}
+
 /// <summary>シナリオの途中で、端末のローカルの行を確かめる（違反は 5/expect-local）</summary>
 internal sealed record ExpectLocalOp(ModelActor Device, string Table, string KeyText, string? Row)
     : ModelOp

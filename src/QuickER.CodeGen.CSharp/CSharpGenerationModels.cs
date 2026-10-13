@@ -120,6 +120,9 @@ internal sealed class CSharpSyncTableModel
     /// <summary>ローカルのアンカー導出 SQL（C# 文字列リテラル・SQLite クォート・ミラー列の MAX）</summary>
     public required string LocalAnchorSql { get; init; }
 
+    /// <summary>ローカルの 1 行のミラー版を読む SQL（C# 文字列リテラル・SQLite クォート・<c>@key</c>。版なしの表は空文字）</summary>
+    public string LocalRowVersionSql { get; init; } = string.Empty;
+
     /// <summary>ローカルの全キー取得 SQL（C# 文字列リテラル・SQLite クォート）</summary>
     public required string LocalKeysSql { get; init; }
 
