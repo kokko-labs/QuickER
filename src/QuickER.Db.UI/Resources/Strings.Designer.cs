@@ -617,6 +617,23 @@ namespace QuickER.Db.UI.Resources {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmForeignKeyTypeMismatch", resourceCulture);
             }
         }
+        public static string SchemaSync_ExecuteConfirmSelectedItemRequiresUnselected {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmSelectedItemRequiresUnselected", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch", resourceCulture);
+            }
+        }
 
         public static string SchemaSync_ExecuteConfirmRebuildDropsAttributes {
             get {

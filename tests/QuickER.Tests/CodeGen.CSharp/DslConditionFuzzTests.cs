@@ -52,7 +52,11 @@ public class DslConditionFuzzTests
             SqliteFile(
                 "efcore",
                 DslCaseRule.Indeterminate,
-                (probe, cs) => DslFuzzProbe.EfCore(probe, options => options.UseSqlite(cs)),
+                (probe, cs) =>
+                    DslFuzzProbe.EfCore(
+                        probe,
+                        options => options.UseSqlite(cs).IgnoreServiceProviderCacheLimit()
+                    ),
                 ExcludedOnEfCoreSqlite
             ),
             DslFuzzBackend.InMemory,

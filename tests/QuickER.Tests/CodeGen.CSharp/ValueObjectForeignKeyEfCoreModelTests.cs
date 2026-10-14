@@ -5,6 +5,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -146,7 +147,7 @@ public class ValueObjectForeignKeyEfCoreModelTests
             Activator.CreateInstance(
                 typeof(DbContextOptionsBuilder<>).MakeGenericType(contextType)
             )!;
-        builder.UseSqlite("Data Source=:memory:");
+        builder.UseSqlite("Data Source=:memory:").IgnoreServiceProviderCacheLimit();
 
         return (DbContext)Activator.CreateInstance(contextType, builder.Options)!;
     }

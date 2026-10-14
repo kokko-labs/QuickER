@@ -344,6 +344,18 @@ Do you want to run this against {0}?</value>
     <value>Note: changing these columns leaves the two ends of the foreign keys below with different types, so the foreign keys are NOT dropped and re-added and the column change will fail (the database stays unchanged). Change the column on both ends to the same type:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmSelectedItemRequiresUnselected" xml:space="preserve">
+    <value>Note: the selected changes below are skipped because they need a change you did not select (a new table or column, or a primary key change; shown in parentheses). Select that change too to apply them:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey" xml:space="preserve">
+    <value>Note: the referenced columns of the foreign keys below are not exactly a primary key or a unique constraint after the sync (SQL Server and MySQL also need the same column order). Adding them is likely to fail; on MySQL / Oracle, recreating an existing one can leave it dropped:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch" xml:space="preserve">
+    <value>Note: the changes below are skipped because they would leave a foreign key whose column order no longer matches the referenced key, which MySQL cannot re-add (the foreign key would stay dropped). To apply them, drop the foreign key first (select its removal) or change it by hand:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">
     <value>Note: rebuilding a table recreates it from the diagram, which does not model column attributes such as default values or CHECK constraints, constraint clauses, or table options such as WITHOUT ROWID. The attributes below exist in the database today and will NOT be reproduced (indexes and triggers are preserved):
 {0}</value>

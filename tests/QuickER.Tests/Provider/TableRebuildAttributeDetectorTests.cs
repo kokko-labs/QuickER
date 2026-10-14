@@ -184,6 +184,38 @@ public class TableRebuildAttributeDetectorTests
             .BeEmpty();
     }
 
+    /// <summary>
+    /// <c>NOT DEFERRABLE INITIALLY DEFERRED</c>（遅延しない）と、外部キーの参照アクション <c>SET DEFAULT</c>
+    /// （意味モデルが運ぶので失われない）は数えないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "NOT DEFERRABLE INITIALLY DEFERRED と ON DELETE SET DEFAULT は検出しない")]
+    public void DoesNotDetect_NotDeferrableAndSetDefaultAction()
+    {
+        TableRebuildAttributeDetector
+            .Detect(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, p INTEGER, "
+                    + "FOREIGN KEY (p) REFERENCES parent (id) ON DELETE SET DEFAULT ON UPDATE SET  DEFAULT "
+                    + "NOT DEFERRABLE INITIALLY DEFERRED)"
+            )
+            .Should()
+            .BeEmpty();
+    }
+
+    /// <summary>
+    /// 文字列リテラル・コメントを取り除いた跡で隣の語がつながらず、その後ろの属性も検出することを検証する
+    /// （<c>DEFAULT'a'COLLATE</c> が 1 語に見えて COLLATE を漏らしていた）。
+    /// </summary>
+    [Fact(DisplayName = "取り除いたリテラル・コメントの跡で隣の語がつながらない")]
+    public void Detects_KeywordsAdjacentToRemovedLiterals()
+    {
+        TableRebuildAttributeDetector
+            .Detect(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT DEFAULT'a'COLLATE NOCASE, b TEXT/*x*/CHECK(b <> ''))"
+            )
+            .Should()
+            .Equal("DEFAULT", "CHECK", "COLLATE");
+    }
+
     /// <summary>最外の括弧の後ろのテーブルオプション（WITHOUT ROWID・STRICT）を検出する</summary>
     [Fact(DisplayName = "括弧の後ろの WITHOUT ROWID と STRICT を検出する")]
     public void Detects_TableOptions()

@@ -7,6 +7,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -53,7 +54,9 @@ public sealed class EfCoreCommandTimeoutRuntimeTests(SqlServerContainerFixture f
     private ServiceProvider BuildProvider(object? hook = null)
     {
         var services = new ServiceCollection().AddGeneratedEfCoreRepositories(options =>
-            options.UseSqlServer(fixture.ConnectionString, sql => sql.CommandTimeout(1))
+            options
+                .UseSqlServer(fixture.ConnectionString, sql => sql.CommandTimeout(1))
+                .IgnoreServiceProviderCacheLimit()
         );
 
         if (hook is not null)

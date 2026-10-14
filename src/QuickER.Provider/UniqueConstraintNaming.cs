@@ -128,7 +128,9 @@ public static class UniqueConstraintNaming
         return true;
     }
 
-    /// <summary>一意制約の同一性判定に使う列集合シグネチャを作る（大文字小文字を無視し、順序は問わない）</summary>
+    /// <summary>
+    /// 一意制約の同一性判定に使う列集合シグネチャを作る（列名は <see cref="SchemaNames.Key"/> で畳み、順序は問わない）
+    /// </summary>
     /// <param name="columnNames">構成列名</param>
     /// <remarks>
     /// 制約名は DB 側の実名と図側の未設定（<c>null</c>＝合成名）で恒常的に食い違うため、差分・計画の照合は
@@ -140,7 +142,7 @@ public static class UniqueConstraintNaming
     public static string ColumnSetSignature(IEnumerable<string> columnNames) =>
         string.Concat(
             columnNames
-                .Select(name => (name ?? string.Empty).Trim().ToLowerInvariant())
+                .Select(SchemaNames.Key)
                 .OrderBy(name => name, StringComparer.Ordinal)
                 .Select(name => $"{name.Length}:{name}")
         );

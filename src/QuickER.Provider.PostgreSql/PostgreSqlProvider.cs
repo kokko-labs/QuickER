@@ -38,6 +38,8 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
         new()
         {
             NormalizeTypeNotation = PostgreSqlTypeNotation.Normalize,
+            SupportsComputedColumnTypeChange = true,
+            ReferencedKeyRequiresSameColumnOrder = false,
             IdentifierLengthLimit = PgIdentifier.Limit,
             TruncatesLongIdentifiers = true,
         };

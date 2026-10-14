@@ -1232,7 +1232,7 @@ public sealed class InMemoryDataStore
         var prunable =
             plan.Includes.Count == 0
             && ProjectionColumnCollector.TryCollect(selector, out var referenced)
-            && EntitySaveMetadata.For(typeof(TEntity)).ResolveProjectionColumns(referenced) is not null;
+            && EntitySaveMetadata.For(typeof(TEntity)).CanPruneProjection(referenced);
 
         var result = _store.Read(scope =>
         {

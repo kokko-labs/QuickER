@@ -186,10 +186,16 @@ public class SchemaDiffServiceTests
         }
     }
 
-    /// <summary>計算列でも型差は従来どおり AlterColumn として検出されることを検証する（5 方言）</summary>
-    /// <remarks>飛ばすのは NULL 許容の比較だけで、列の比較そのものを止めるわけではない。</remarks>
-    [Fact(DisplayName = "計算列でも型差は AlterColumn になる（5 方言）")]
-    public void ComputedColumn_TypeChange_IsStillDiffed()
+    /// <summary>
+    /// 計算列の型差は AlterColumn として検出するが、NULL 許容は運ばず（項目の列は DB の NULL 許容）、式を保って型を
+    /// 変えられる方言（PostgreSQL）でだけ選べ、ほかの方言では選択できない案内項目になることを検証する（5 方言）。
+    /// </summary>
+    /// <remarks>
+    /// 項目の列が図の NULL 許容を運ぶと、選んだ計画が説明に出ないまま NOT NULL を外した。式を書けない方言で選べると、
+    /// 実行が失敗する（SQL Server・MySQL）か式が消える（SQLite の再構築）。
+    /// </remarks>
+    [Fact(DisplayName = "計算列の型差: NULL 許容は運ばず、PostgreSQL だけ選べる（5 方言）")]
+    public void ComputedColumn_TypeChange_IsSelectableOnlyWhereSupported()
     {
         foreach (var (dialect, capabilities) in DialectCapabilities)
         {
@@ -221,12 +227,205 @@ public class SchemaDiffServiceTests
                 .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn, $"{dialect}")
                 .Which;
             alter.ColumnName.Should().Be("Total", $"{dialect}");
+            alter.Column!.IsNullable.Should().BeFalse($"{dialect}: nullability is not carried");
+            alter.IsSelected.Should().BeFalse($"{dialect}");
 
-            var expectedDescription =
-                string.Format(ProviderStrings.Diff_ColumnChangePrefix, "Item", "Total")
-                + string.Format(ProviderStrings.Diff_TypeChange, "decimal(18,2)", "decimal(21,2)");
+            var selectable = capabilities.SupportsComputedColumnTypeChange;
+            alter.IsSelectable.Should().Be(selectable, $"{dialect}");
+            var expectedDescription = selectable
+                ? string.Format(ProviderStrings.Diff_ColumnChangePrefix, "Item", "Total")
+                    + string.Format(
+                        ProviderStrings.Diff_TypeChange,
+                        "decimal(18,2)",
+                        "decimal(21,2)"
+                    )
+                : string.Format(
+                    ProviderStrings.Diff_ComputedColumnTypeNotSynced,
+                    "Item",
+                    "Total",
+                    "decimal(18,2)",
+                    "decimal(21,2)"
+                );
             alter.Description.Should().Be(expectedDescription, $"{dialect}");
         }
+
+        DialectCapabilities
+            .Where(d => d.Capabilities.SupportsComputedColumnTypeChange)
+            .Select(d => d.Dialect)
+            .Should()
+            .Equal("PostgreSql");
+    }
+
+    /// <summary>
+    /// DB 側だけが計算列（図では通常の列）でも、NULL 許容の差は出さず、型差は計算列と同じ扱いになることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "計算列の型差: DB 側だけが計算列でも NULL 許容は出さず型差は案内項目")]
+    public void LiveOnlyComputedColumn_IsTreatedAsComputed()
+    {
+        var live = new List<Entity>
+        {
+            Tbl("Item", ("Id", "int", true), ("Total", "decimal(18,2)", false)),
+        };
+        live[0].Columns[1].IsNullable = false;
+        live[0].Columns[1].IsComputed = true;
+        var target = new List<Entity>
+        {
+            Tbl("Item", ("Id", "int", true), ("Total", "decimal(18,2)", false)),
+        };
+        target[0].Columns[1].IsNullable = true;
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            [],
+            target,
+            [],
+            new SqlServerProvider().SyncCapabilities
+        );
+
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AlterColumn);
+
+        target[0].Columns[1].DataType = "decimal(21,2)";
+        diff = new SchemaDiffService().Compute(
+            live,
+            [],
+            target,
+            [],
+            new SqlServerProvider().SyncCapabilities
+        );
+
+        diff.Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn)
+            .Which.IsSelectable.Should()
+            .BeFalse();
+    }
+
+    /// <summary>
+    /// 図の主キーと同じ列集合の一意制約の追加は、それを別の制約として持てない方言（SQLite・Oracle）では選択できない
+    /// 案内項目になり、ほかの方言では従来どおり既定で選ばれることを検証する（5 方言）。主キーと違う列集合は全方言で選べる。
+    /// </summary>
+    [Fact(DisplayName = "主キーと同じ列集合の一意制約: SQLite・Oracle は案内項目（5 方言）")]
+    public void UniqueConstraintOnPrimaryKey_IsGuideOnlyWhereUnsupported()
+    {
+        foreach (var (dialect, capabilities) in DialectCapabilities)
+        {
+            var live = new List<Entity>
+            {
+                Tbl("Item", ("Id", "int", true), ("Code", "int", false)),
+            };
+            var target = new List<Entity>
+            {
+                Tbl("Item", ("Id", "int", true), ("Code", "int", false)),
+            };
+            target[0]
+                .UniqueConstraints.Add(
+                    new UniqueConstraint { ColumnIds = [target[0].Columns[0].Id] }
+                );
+            target[0]
+                .UniqueConstraints.Add(
+                    new UniqueConstraint { ColumnIds = [target[0].Columns[1].Id] }
+                );
+
+            var diff = new SchemaDiffService().Compute(live, [], target, [], capabilities);
+
+            var adds = diff.Items.Where(i => i.Kind == SchemaDiffKind.AddUniqueConstraint).ToList();
+            adds.Should().HaveCount(2, $"{dialect}");
+            var onKey = adds.Single(i => i.UniqueConstraintColumns.SequenceEqual(["Id"]));
+            var other = adds.Single(i => i.UniqueConstraintColumns.SequenceEqual(["Code"]));
+            var supported = capabilities.SupportsUniqueConstraintOnPrimaryKey;
+            onKey.IsSelectable.Should().Be(supported, $"{dialect}");
+            onKey.IsSelected.Should().Be(supported, $"{dialect}");
+            other.IsSelectable.Should().BeTrue($"{dialect}");
+            other.IsSelected.Should().BeTrue($"{dialect}");
+
+            if (!supported)
+            {
+                onKey
+                    .Description.Should()
+                    .Be(
+                        string.Format(
+                            ProviderStrings.Diff_UniqueConstraintOnPrimaryKeyNotSynced,
+                            "Item",
+                            "Id"
+                        ),
+                        $"{dialect}"
+                    );
+            }
+        }
+
+        DialectCapabilities
+            .Where(d => !d.Capabilities.SupportsUniqueConstraintOnPrimaryKey)
+            .Select(d => d.Dialect)
+            .Should()
+            .Equal("Oracle", "Sqlite");
+    }
+
+    /// <summary>
+    /// 複合外部キーの列ペアの並びだけが違うとき、並びを問う方言（SQL Server・MySQL）では作り直しの差分になり、
+    /// 問わない方言（PostgreSQL・Oracle・SQLite）では差分にならないことを検証する（5 方言）。
+    /// Oracle のカタログは外部キーの列を参照先のキーの並びで返すので、並びまで比べると取り込み直すたびに差分が出た。
+    /// </summary>
+    [Fact(
+        DisplayName = "複合外部キーの列ペアの並び: 並びを問わない方言では差分にならない（5 方言）"
+    )]
+    public void CompositeForeignKeyPairOrder_IsComparedOnlyWhereItMatters()
+    {
+        (List<Entity>, List<Relationship>) Build(bool reversed)
+        {
+            var parent = Tbl("P", ("A", "int", true), ("B", "int", true));
+            var child = Tbl("C", ("Id", "int", true), ("X", "int", false), ("Y", "int", false));
+            List<RelationshipColumnPair> pairs =
+            [
+                new(parent.Columns[0].Id, child.Columns[1].Id),
+                new(parent.Columns[1].Id, child.Columns[2].Id),
+            ];
+
+            if (reversed)
+            {
+                pairs.Reverse();
+            }
+
+            return (
+                [parent, child],
+                [
+                    new Relationship
+                    {
+                        SourceEntityId = parent.Id,
+                        TargetEntityId = child.Id,
+                        ColumnPairs = pairs,
+                        ConstraintName = "FK_C_P",
+                    },
+                ]
+            );
+        }
+
+        foreach (var (dialect, capabilities) in DialectCapabilities)
+        {
+            var (live, liveRelationships) = Build(reversed: true);
+            var (target, targetRelationships) = Build(reversed: false);
+
+            var items = new SchemaDiffService()
+                .Compute(live, liveRelationships, target, targetRelationships, capabilities)
+                .Items;
+
+            if (capabilities.ReferencedKeyRequiresSameColumnOrder)
+            {
+                items
+                    .Should()
+                    .ContainSingle($"{dialect}")
+                    .Which.Kind.Should()
+                    .Be(SchemaDiffKind.AlterForeignKey, $"{dialect}");
+            }
+            else
+            {
+                items.Should().BeEmpty($"{dialect}");
+            }
+        }
+
+        DialectCapabilities
+            .Where(d => d.Capabilities.ReferencedKeyRequiresSameColumnOrder)
+            .Select(d => d.Dialect)
+            .Should()
+            .Equal("SqlServer", "MySql");
     }
 
     /// <summary>計算列でない列の NULL 許容差は従来どおり検出されることを検証する（スキップの範囲の下限）</summary>
@@ -1162,6 +1361,203 @@ public class SchemaDiffServiceTests
             .Be(string.Format(ProviderStrings.Diff_DropUniqueConstraint, "Customer", "Code, Kind"));
     }
 
+    /// <summary>
+    /// 小文字化すると同じ字になるが <see cref="SchemaNames.AreSame"/> では別の名前（ケルビン記号 U+212A と k）の列で、
+    /// 一意制約の差分が列の差分とそろうことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 列は AreSame の規則で組むので、DB の列 K（ケルビン記号）と図の列 k は削除と追加になる。一意制約の照合が
+    /// 小文字化したキーで比べると 2 つの制約を同じとみなし、追加した列 k に一意制約が付かない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "一意制約の照合: 小文字化だけで同じになる別名の列の一意制約は、列とそろって追加と削除になる"
+    )]
+    public void UniqueConstraint_OnColumnsDifferingOnlyByLowercasing_FollowsColumnIdentity()
+    {
+        var live = WithUnique(
+            Tbl("Customer", ("Id", "int", true), ("\u212A", "nvarchar(20)", false)),
+            "UQ_Customer_Kelvin",
+            "\u212A"
+        );
+        var target = WithUnique(
+            Tbl("Customer", ("Id", "int", true), ("k", "nvarchar(20)", false)),
+            "UQ_Customer_k",
+            "k"
+        );
+
+        var items = UniqueDiff(live, target);
+
+        items.Should().Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "k");
+        items
+            .Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.AddUniqueConstraint
+                && i.UniqueConstraintColumns.SequenceEqual(new[] { "k" })
+            );
+        items
+            .Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.DropUniqueConstraint
+                && i.UniqueConstraintName == "UQ_Customer_Kelvin"
+            );
+    }
+
+    /// <summary>
+    /// 名前を保存する方言で、小文字化すると同じになるが <see cref="SchemaNames.AreSame"/> では別の外部キー名
+    /// （FK_ケルビン記号 と FK_k）を、ほかの名前と同じ規則で別の制約として扱うことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 表名・列名の組み合わせは AreSame（OrdinalIgnoreCase）で行う。外部キー名だけを小文字化して比べると、
+    /// 別の名前の制約を同じとみなして差分を出さず、DB は図と違う名前の外部キーを持ったまま「差分なし」になる。
+    /// 名前の違う外部キーは、ほかの名前の変更と同じく削除と追加になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "外部キーの照合: 小文字化だけで同じになる別の名前の外部キーは、名前の変更として削除と追加になる"
+    )]
+    public void ForeignKey_NamesDifferingOnlyByLowercasing_AreDifferentConstraints()
+    {
+        static (Entity Parent, Entity Child, Relationship Fk) Side(string fkName)
+        {
+            var parent = Tbl("Parent", ("Id", "int", true));
+            var child = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+            var fk = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
+                ConstraintName = fkName,
+            };
+
+            return (parent, child, fk);
+        }
+
+        var live = Side("FK_\u212A");
+        var target = Side("FK_k");
+
+        var items = new SchemaDiffService()
+            .Compute(
+                [live.Parent, live.Child],
+                [live.Fk],
+                [target.Parent, target.Child],
+                [target.Fk],
+                new SqlServerProvider().SyncCapabilities
+            )
+            .Items;
+
+        items
+            .Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AddForeignKey && i.ForeignKeyName == "FK_k");
+        items
+            .Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_\u212A"
+            );
+    }
+
+    /// <summary>一意制約だけの差分を計算する（関係なし）</summary>
+    private static List<SchemaDiffItem> UniqueDiff(
+        Entity live,
+        Entity target,
+        SyncDialectCapabilities? capabilities = null
+    ) =>
+        new SchemaDiffService()
+            .Compute(
+                [live],
+                new List<Relationship>(),
+                [target],
+                new List<Relationship>(),
+                capabilities
+            )
+            .Items;
+
+    /// <summary>
+    /// 同じ名前の一意制約の列を変えると、追加と削除が 1 つの AlterUniqueConstraint（既定で未選択・破壊的）に
+    /// まとまることを検証する（名前の照合は前後の空白を除き大文字小文字を区別しない）。2 項目のままだと、
+    /// 既定どおり追加だけを選んで実行したときに同じ名前の制約を足そうとして失敗した。
+    /// </summary>
+    [Fact(
+        DisplayName = "一意制約の変更: 同じ名前で列を変えると AlterUniqueConstraint 1 項目にまとまり既定で未選択"
+    )]
+    public void UniqueConstraintColumnsChanged_SameName_AlterUniqueConstraint()
+    {
+        var items = UniqueDiff(
+            WithUnique(CustomerTable(), "UQ_Code", "Code"),
+            WithUnique(CustomerTable(), " uq_code ", "Code", "Kind")
+        );
+
+        var item = items.Should().ContainSingle().Which;
+        item.Kind.Should().Be(SchemaDiffKind.AlterUniqueConstraint);
+        item.IsSelected.Should().BeFalse();
+        item.IsDestructive.Should().BeTrue();
+        item.UniqueConstraintName.Should().Be("uq_code");
+        item.UniqueConstraintColumns.Should().Equal("Code", "Kind");
+        item.ReplacedUniqueConstraint!.UniqueConstraintName.Should().Be("UQ_Code");
+        item.ReplacedUniqueConstraint.UniqueConstraintColumns.Should().Equal("Code");
+        item.Description.Should()
+            .Be(
+                string.Format(
+                    ProviderStrings.Diff_AlterUniqueConstraint,
+                    "Customer",
+                    "uq_code",
+                    "Code",
+                    "Code, Kind"
+                )
+            );
+    }
+
+    /// <summary>図の名前が未設定でも、合成名（DDL が付ける名前）が DB の名前と同じなら組むことを検証する</summary>
+    [Fact(DisplayName = "一意制約の変更: 図の名前が未設定でも合成名が DB の名前と同じなら組む")]
+    public void UniqueConstraintColumnsChanged_SynthesizedNameMatches_AlterUniqueConstraint()
+    {
+        var items = UniqueDiff(
+            WithUnique(CustomerTable(), "UQ_Customer_Code", "Code", "Kind"),
+            WithUnique(CustomerTable(), name: null, "Code")
+        );
+
+        items.Should().ContainSingle().Which.Kind.Should().Be(SchemaDiffKind.AlterUniqueConstraint);
+    }
+
+    /// <summary>
+    /// 名前が違う・DB 側に名前が無い（SQLite の自動名）・図の主キーと同じ列集合を持てない方言の案内項目、の
+    /// いずれも組まず、追加と削除のままにすることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "一意制約の変更: 名前違い・DB 側の名前なし・持てない方言の案内項目は組まない"
+    )]
+    public void UniqueConstraintColumnsChanged_NotPaired()
+    {
+        static IEnumerable<SchemaDiffKind> Kinds(List<SchemaDiffItem> items) =>
+            items.Select(i => i.Kind);
+
+        Kinds(
+                UniqueDiff(
+                    WithUnique(CustomerTable(), "UQ_A", "Code"),
+                    WithUnique(CustomerTable(), "UQ_B", "Kind")
+                )
+            )
+            .Should()
+            .Equal(SchemaDiffKind.AddUniqueConstraint, SchemaDiffKind.DropUniqueConstraint);
+        Kinds(
+                UniqueDiff(
+                    WithUnique(CustomerTable(), name: null, "Code"),
+                    WithUnique(CustomerTable(), name: null, "Kind")
+                )
+            )
+            .Should()
+            .Equal(SchemaDiffKind.AddUniqueConstraint, SchemaDiffKind.DropUniqueConstraint);
+
+        var onPrimaryKey = UniqueDiff(
+            WithUnique(CustomerTable(), "UQ_X", "Code"),
+            WithUnique(CustomerTable(), "UQ_X", "Id"),
+            new OracleProvider().SyncCapabilities
+        );
+        Kinds(onPrimaryKey)
+            .Should()
+            .Equal(SchemaDiffKind.AddUniqueConstraint, SchemaDiffKind.DropUniqueConstraint);
+        onPrimaryKey[0].IsSelectable.Should().BeFalse();
+    }
+
     /// <summary>制約名だけが違う（構成列は同じ）一意制約では差分が出ないことを検証する</summary>
     /// <remarks>
     /// 図側の制約名は未設定（null＝合成名）が普通で、SQLite に至っては実名を持たない。
@@ -1475,5 +1871,135 @@ public class SchemaDiffServiceTests
         var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterColumn);
         alter.Entity.Should().BeSameAs(target);
         alter.Column.Should().BeSameAs(target.Columns[1]);
+    }
+
+    // ---------------- 28-6: 署名・NULL 許容・切り詰め・SQLite の作り直しの組み合わせ ----------------
+
+    /// <summary>親表・子表と、1 本の外部キーを持つ図を作る（表名・制約名に区切り文字を含められる）</summary>
+    private static (List<Entity> Entities, List<Relationship> Relationships) ForeignKeyDiagram(
+        string parentName,
+        string childName,
+        string constraintName
+    )
+    {
+        var parent = Tbl(parentName, ("Id", "int", true));
+        var child = Tbl(childName, ("Id", "int", true), ("Ref", "int", false));
+
+        return (
+            [parent, child],
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
+                    ConstraintName = constraintName,
+                },
+            ]
+        );
+    }
+
+    /// <summary>
+    /// 表名に区切り文字を含むとき、親子が違う外部キーが同じ署名にならず、差分に出ることを検証する
+    /// （署名を素の区切り文字でつなぐと、親 "P|Q"・子 "C" と、親 "P"・子 "Q|C" が同じ署名になり、差分が消えた）。
+    /// </summary>
+    [Fact(
+        DisplayName = "外部キーの署名: 名前に区切り文字があっても、親子の違う外部キーを取り違えない"
+    )]
+    public void ForeignKeySignature_NamesWithSeparators_AreNotConfused()
+    {
+        var (liveA, liveARels) = ForeignKeyDiagram("P|Q", "C", "FK_X");
+        var (liveB, _) = ForeignKeyDiagram("P", "Q|C", "FK_X");
+        var (targetA, _) = ForeignKeyDiagram("P|Q", "C", "FK_X");
+        var (targetB, targetBRels) = ForeignKeyDiagram("P", "Q|C", "FK_X");
+
+        var items = new SchemaDiffService()
+            .Compute([.. liveA, .. liveB], liveARels, [.. targetA, .. targetB], targetBRels)
+            .Items;
+
+        items
+            .Select(i => (i.Kind, i.ChildEntity?.TableName))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaDiffKind.AddForeignKey, "Q|C"),
+                (SchemaDiffKind.DropForeignKey, "C"),
+            ]);
+    }
+
+    /// <summary>
+    /// 主キーの列の NULL 許容は実効の値（NOT NULL）で比べ、図がその値を直していなくても NOT NULL → NULL の
+    /// 列の変更を出さないことを検証する（生の値で比べると、実行できない偽の変更が出た）。
+    /// </summary>
+    [Fact(DisplayName = "NULL 許容: 主キーの列は実効の値（NOT NULL）で比べる")]
+    public void PrimaryKeyColumn_NullabilityComparedAsNotNull()
+    {
+        var live = Tbl("Item", ("Id", "int", true));
+        var target = Tbl("Item", ("Id", "int", true));
+        target.Columns[0].IsNullable = true;
+
+        new SchemaDiffService()
+            .Compute([live], new List<Relationship>(), [target], new List<Relationship>())
+            .Items.Should()
+            .BeEmpty();
+    }
+
+    /// <summary>説明の切り詰めが、切る位置のサロゲートペアを割らないことを検証する</summary>
+    [Fact(DisplayName = "説明の切り詰め: サロゲートペアを割らない")]
+    public void DescriptionTruncation_DoesNotSplitSurrogatePair()
+    {
+        var live = Tbl("Item", ("Id", "int", true));
+        var target = Tbl("Item", ("Id", "int", true));
+        // 30 文字目と 31 文字目がサロゲートペア（𠮷）になる説明
+        target.Description = new string('a', 29) + "𠮷" + "b";
+
+        var description = new SchemaDiffService()
+            .Compute([live], new List<Relationship>(), [target], new List<Relationship>())
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.SetTableDescription)
+            .Which.Description;
+
+        for (var i = 0; i < description.Length; i++)
+        {
+            if (char.IsHighSurrogate(description[i]))
+            {
+                (i + 1 < description.Length && char.IsLowSurrogate(description[i + 1]))
+                    .Should()
+                    .BeTrue(description);
+            }
+        }
+
+        description.Should().Contain("…");
+    }
+
+    /// <summary>
+    /// 外部キー名を保存しない方言（SQLite）で、参照先だけを変えた外部キーが、削除と追加でなく 1 つの作り直しに
+    /// まとまることを検証する（組み合わせのキーに親表が入っていて、まとまらなかった＝既定で追加だけが選ばれると、
+    /// 再構築後の表に旧と新の外部キーが同じ列へ 2 本並んだ）。
+    /// </summary>
+    [Fact(
+        DisplayName = "外部キー変更: SQLite で参照先だけを変えた外部キーは 1 つの作り直しにまとまる"
+    )]
+    public void RetargetedForeignKey_Sqlite_IsPairedIntoAlter()
+    {
+        var a = Tbl("A", ("Id", "int", true));
+        var b = Tbl("B", ("Id", "int", true));
+        var child = Tbl("C", ("Id", "int", true), ("Ref", "int", false));
+        var live = new List<Entity> { a, b, child };
+        var targetEntities = live.Select(e => e.Clone(preserveId: true)).ToList();
+
+        Relationship To(Entity parent) =>
+            new()
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
+            };
+
+        new SchemaDiffService()
+            .Compute(live, [To(a)], targetEntities, [To(b)], new SqliteProvider().SyncCapabilities)
+            .Items.Should()
+            .ContainSingle()
+            .Which.Kind.Should()
+            .Be(SchemaDiffKind.AlterForeignKey);
     }
 }

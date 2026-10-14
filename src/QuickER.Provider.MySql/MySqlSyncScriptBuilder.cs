@@ -381,6 +381,11 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
                 $"ALTER TABLE {MySqlIdentifier.Quote(childTbl)} "
                     + $"DROP FOREIGN KEY {MySqlIdentifier.QuoteSimple(item.ForeignKeyName)};"
             );
+            AppendDropForeignKeyIndex(
+                sb,
+                childTbl,
+                $"'{MySqlIdentifier.EscapeStringLiteral(item.ForeignKeyName)}'"
+            );
             return;
         }
 
@@ -417,6 +422,60 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine(
             $"SET @sql = IF(@fk IS NULL, 'DO 0', CONCAT('ALTER TABLE {childQuoted} "
                 + "DROP FOREIGN KEY `', REPLACE(@fk, '`', '``'), '`'));"
+        );
+        sb.AppendLine("PREPARE stmt FROM @sql;");
+        sb.AppendLine("EXECUTE stmt;");
+        sb.AppendLine("DEALLOCATE PREPARE stmt;");
+        AppendDropForeignKeyIndex(sb, childTbl, "@fk");
+    }
+
+    /// <summary>
+    /// 外部キーを外した後に、MySQL がその外部キーのために作った同じ名前の索引が残っていれば外す文を書き出す。
+    /// </summary>
+    /// <param name="sb">書き出し先</param>
+    /// <param name="childTbl">子テーブル</param>
+    /// <param name="nameExpression">外部キーの名前を表す SQL の式（文字列リテラルか、実行時に引いたユーザー変数）</param>
+    /// <remarks>
+    /// <para>
+    /// MySQL は外部キーの子列を先頭に持つ索引が無いと、外部キーと同じ名前の索引を自動で作り、外部キーを外しても
+    /// その索引は残る。同じ名前の外部キーを別の列へ付け直す（作り直しで参照する列が変わる）と、新しい列の索引を同じ名前で
+    /// 作ろうとしてエラー 1061 になり、DDL が暗黙コミットされるので外部キーが消えたまま残った。
+    /// </para>
+    /// <para>
+    /// 外すのは、外部キーと同じ名前で、一意でなく、先頭の列をほかの外部キーが先頭に使っていない索引だけ
+    /// （一意制約の索引・ほかの外部キーを支えている索引は残す）。該当が無ければ何もしない。同じ列へ付け直す場合は
+    /// 付け直しのときに MySQL が索引を作り直す。
+    /// </para>
+    /// </remarks>
+    private static void AppendDropForeignKeyIndex(
+        StringBuilder sb,
+        string childTbl,
+        string nameExpression
+    )
+    {
+        var childName = MySqlIdentifier.EscapeStringLiteral(
+            MySqlIdentifier.TableNameOnly(childTbl)
+        );
+        var childQuoted = MySqlIdentifier.QuoteForDynamicSql(childTbl);
+
+        // SELECT ... INTO は該当行が無いとユーザー変数を書き換えないため、事前に NULL で初期化する
+        sb.AppendLine("SET @ix = NULL;");
+        sb.AppendLine("SELECT s.INDEX_NAME INTO @ix");
+        sb.AppendLine("FROM information_schema.STATISTICS s");
+        sb.AppendLine(
+            $"WHERE {SchemaPredicate("s.TABLE_SCHEMA", childTbl)} "
+                + $"AND s.TABLE_NAME = '{childName}' "
+                + $"AND s.INDEX_NAME = {nameExpression} "
+                + "AND s.SEQ_IN_INDEX = 1 AND s.NON_UNIQUE = 1 "
+                + "AND NOT EXISTS (SELECT 1 FROM information_schema.KEY_COLUMN_USAGE k "
+                + "WHERE k.TABLE_SCHEMA = s.TABLE_SCHEMA AND k.TABLE_NAME = s.TABLE_NAME "
+                + "AND k.REFERENCED_TABLE_NAME IS NOT NULL AND k.ORDINAL_POSITION = 1 "
+                + "AND k.COLUMN_NAME = s.COLUMN_NAME) "
+                + "LIMIT 1;"
+        );
+        sb.AppendLine(
+            $"SET @sql = IF(@ix IS NULL, 'DO 0', CONCAT('ALTER TABLE {childQuoted} "
+                + "DROP INDEX `', REPLACE(@ix, '`', '``'), '`'));"
         );
         sb.AppendLine("PREPARE stmt FROM @sql;");
         sb.AppendLine("EXECUTE stmt;");

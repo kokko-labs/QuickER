@@ -4,12 +4,13 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedSqliteFixture;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
 /// SQLite 方言ランタイムスイートを<b>EF Core Sqlite 版</b>で実行する派生。リポジトリ・エグゼキュータは実運用と
-/// 同じ DI 経路（<c>AddGeneratedEfCoreRepositories(options =&gt; options.UseSqlite(...))</c> →
+/// 同じ DI 経路（<c>AddGeneratedEfCoreRepositories(options =&gt; options.UseSqlite(...).IgnoreServiceProviderCacheLimit())</c> →
 /// <see cref="ServiceProvider"/> から解決）で取得する。接続は基底と同一の一時ファイル DB。
 /// </summary>
 /// <remarks>
@@ -34,7 +35,9 @@ public sealed class GeneratedSqliteEfCoreParityRuntimeTests : GeneratedSqliteRun
     /// <summary>AddGeneratedEfCoreRepositories → UseSqlite の DI 経路でリポジトリ群を解決する</summary>
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedEfCoreRepositories(options => options.UseSqlite(ConnectionString))
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseSqlite(ConnectionString).IgnoreServiceProviderCacheLimit()
+            )
             .BuildServiceProvider();
 
     protected override ICustomerRepository CreateCustomerRepository() =>

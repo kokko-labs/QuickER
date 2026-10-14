@@ -130,6 +130,9 @@
   <data name="Diff_DropUniqueConstraint" xml:space="preserve">
     <value>一意制約 [{0}] ({1}) を削除</value>
   </data>
+  <data name="Diff_AlterUniqueConstraint" xml:space="preserve">
+    <value>[{0}] の一意制約 {1} の列を変更: ({2}) → ({3})</value>
+  </data>
   <data name="Diff_ReorderColumns" xml:space="preserve">
     <value>テーブル [{0}] の列の並び順をダイアグラムに合わせて変更</value>
   </data>
@@ -144,6 +147,13 @@
   </data>
   <data name="Diff_AutoPrimaryKeyRebuild" xml:space="preserve">
     <value>変更を可能にするため主キーを自動的に外して付け直します: ({0})</value>
+  </data>  <data name="Diff_AutoPrimaryKeyNotNull" xml:space="preserve">
+    <value>主キーに加わるため列を自動的に NOT NULL にします: [{0}].[{1}]</value>
+  </data>  <data name="Diff_ComputedColumnTypeNotSynced" xml:space="preserve">
+    <value>同期しません: 計算列 [{0}].[{1}] の型が変わります（{2} → {3}）が、図は式を持たないため、この DB では変えられません。DB 上で式と一緒に変えてください。</value>
+  </data>
+  <data name="Diff_UniqueConstraintOnPrimaryKeyNotSynced" xml:space="preserve">
+    <value>同期しません: 一意制約 [{0}] ({1}) は主キーと同じ列なので、この DB には別の制約として作れません（主キーが一意性を保証します）。</value>
   </data>
   <data name="Diff_AutoForeignKeyDrop" xml:space="preserve">
     <value>変更を可能にするため自動的に削除します（参照する表・列が削除されるため付け直しません）: [{0}]</value>

@@ -22,8 +22,10 @@ namespace QuickER.Provider;
 /// </list>
 /// <para>
 /// 外部キーの遅延は <c>DEFERRABLE INITIALLY DEFERRED</c> の形だけを数える。SQLite で検査が遅延するのは
-/// この形だけで、<c>NOT DEFERRABLE</c> や <c>DEFERRABLE INITIALLY IMMEDIATE</c> は既定と同じ即時検査
-/// （消えても意味が変わらない）のため、数えると本当の喪失が埋もれる。
+/// この形だけで、<c>NOT DEFERRABLE</c>（<c>NOT DEFERRABLE INITIALLY DEFERRED</c> を含む）や
+/// <c>DEFERRABLE INITIALLY IMMEDIATE</c> は既定と同じ即時検査（消えても意味が変わらない）のため、数えると本当の喪失が埋もれる。
+/// 同じ理由で、外部キーの参照アクション <c>SET DEFAULT</c> は列の <c>DEFAULT</c> として数えない（参照アクションは
+/// 意味モデルが運ぶので再構築で失われない）。
 /// </para>
 /// <para>
 /// なお <b>rowid 別名（暗黙の自動採番）は失われない</b>。SQLite では表制約形式の <c>PRIMARY KEY(x)</c> でも
@@ -34,7 +36,8 @@ namespace QuickER.Provider;
 /// <b>検出精度の割り切り</b>: 完全な SQL パーサーは持たず、<c>CREATE TABLE</c> の最外側の括弧の中と、
 /// その後ろ（テーブルオプション）を分けて取り出し、文字列リテラル（<c>'...'</c>）・引用識別子
 /// （<c>"..."</c> / <c>[...]</c> / <c>`...`</c>）・コメント（<c>--</c> / <c>/* */</c>）を取り除いてから
-/// キーワードを語境界付き・大文字小文字非依存で探す。
+/// キーワードを語境界付き・大文字小文字非依存で探す。取り除いた跡には空白を 1 つ置く（隣り合う語がつながって
+/// <c>DEFAULT'a'COLLATE</c> が 1 語に見え、検出を漏らさないため）。
 /// 取り除いた後でも「テーブル名が DEFAULT を含む列の CHECK 式」のような入れ子の誤検出は理屈上あり得るが、
 /// これは実行を止めない警告であり、過剰に出ても害が小さい側（見落としのほうが有害）に倒している。
 /// </para>
@@ -45,7 +48,11 @@ public static class TableRebuildAttributeDetector
     private static readonly (string Token, Regex Pattern)[] Keywords =
     [
         ("AUTOINCREMENT", Word("AUTOINCREMENT")),
-        ("DEFAULT", Word("DEFAULT")),
+        // 外部キーの参照アクション SET DEFAULT は列の DEFAULT ではない
+        (
+            "DEFAULT",
+            new Regex(@"(?<!\bSET\s+)\bDEFAULT\b", RegexOptions.IgnoreCase | RegexOptions.Compiled)
+        ),
         ("CHECK", Word("CHECK")),
         ("COLLATE", Word("COLLATE")),
         ("GENERATED", Word("GENERATED")),
@@ -65,7 +72,14 @@ public static class TableRebuildAttributeDetector
     private static readonly (string Token, Regex Pattern)[] ClauseKeywords =
     [
         ("ON CONFLICT", Words("ON", "CONFLICT")),
-        ("DEFERRABLE", Words("DEFERRABLE", "INITIALLY", "DEFERRED")),
+        // NOT DEFERRABLE INITIALLY DEFERRED は遅延しない（即時検査）ので数えない
+        (
+            "DEFERRABLE",
+            new Regex(
+                @"(?<!\bNOT\s+)\bDEFERRABLE\s+INITIALLY\s+DEFERRED\b",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled
+            )
+        ),
     ];
 
     /// <summary>最外の括弧の後ろで探すテーブルオプション</summary>
@@ -169,6 +183,7 @@ public static class TableRebuildAttributeDetector
                     i++;
                 }
 
+                AppendSeparator();
                 continue;
             }
 
@@ -183,6 +198,7 @@ public static class TableRebuildAttributeDetector
 
                 i++;
 
+                AppendSeparator();
                 continue;
             }
 
@@ -201,6 +217,7 @@ public static class TableRebuildAttributeDetector
                     i++;
                 }
 
+                AppendSeparator();
                 continue;
             }
 
@@ -240,5 +257,18 @@ public static class TableRebuildAttributeDetector
         }
 
         return (builder.ToString(), tail.ToString());
+
+        // 取り除いた跡に空白を置く（いまの位置が本体かテーブルオプションかに合わせる）
+        void AppendSeparator()
+        {
+            if (bodyClosed)
+            {
+                tail.Append(' ');
+            }
+            else if (depth >= 1)
+            {
+                builder.Append(' ');
+            }
+        }
     }
 }

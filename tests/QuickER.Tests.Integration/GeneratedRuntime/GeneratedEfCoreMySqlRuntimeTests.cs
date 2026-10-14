@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.MySql;
 using QuickER.Tests.GeneratedPortableFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -23,7 +24,9 @@ public sealed class GeneratedEfCoreMySqlRuntimeTests(MySqlContainerFixture fixtu
     /// <summary>AddGeneratedEfCoreRepositories → UseMySQL の DI 経路でリポジトリ群を解決する</summary>
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedEfCoreRepositories(options => options.UseMySQL(fixture.ConnectionString))
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseMySQL(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
+            )
             .BuildServiceProvider();
 
     protected override ICustomerRepository CreateCustomerRepository() =>

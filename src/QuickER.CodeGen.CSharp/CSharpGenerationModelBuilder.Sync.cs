@@ -288,7 +288,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                         + $"AND (@ceiling IS NULL OR {serverRowVersion} < CAST(@ceiling AS binary(8))) "
                         + $"ORDER BY {serverRowVersion}"
                 ),
-            // 版なしテーブルの全量走査はキー昇順のページング（@afterKey はキー型の値がそのままバインドされる）
+            // 版なしテーブルの全量走査はキー昇順のページング。@afterKey は型なしでバインドされる（文字列は nvarchar）ので、
+            // 文字列の主キーは列と同じ型へ明示的にキャストする（BuildServerAfterKey）
             ServerPageFirstSql = isVersionless
                 ? CSharpLiteral(
                     $"SELECT TOP (@batchSize) {serverSelectList} FROM {serverTable} ORDER BY {serverKey}"
@@ -297,13 +298,19 @@ internal sealed partial class CSharpGenerationModelBuilder
             ServerPageAfterSql = isVersionless
                 ? CSharpLiteral(
                     $"SELECT TOP (@batchSize) {serverSelectList} FROM {serverTable} "
-                        + $"WHERE {serverKey} > @afterKey ORDER BY {serverKey}"
+                        + $"WHERE {serverKey} > {BuildServerAfterKey(keyColumn)} ORDER BY {serverKey}"
                 )
                 : string.Empty,
             ServerKeysSql = CSharpLiteral($"SELECT {serverKey} FROM {serverTable}"),
             LocalAnchorSql = isVersionless
                 ? string.Empty
                 : CSharpLiteral($"SELECT MAX({localRowVersion}) FROM {localTable}"),
+            // グラフ保存の削除の記録が、ローカルの行のミラー版を読む（スタブや古い実体は版を持たない＝#27）
+            LocalRowVersionSql = isVersionless
+                ? string.Empty
+                : CSharpLiteral(
+                    $"SELECT {localRowVersion} FROM {localTable} WHERE {localKey} = @key"
+                ),
             LocalKeysSql = CSharpLiteral($"SELECT {localKey} FROM {localTable}"),
             LocalExistingKeysSql = CSharpLiteral(
                 $"SELECT {localKey} FROM {localTable} WHERE {localKey} IN (@keys)"
@@ -322,6 +329,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 ),
             FormatKeyExpression = BuildFormatKey("key", keyColumn, keyValueObject),
             ParseKeyExpression = BuildParseKey(keyColumn, keyValueObject),
+            NormalizeKeyTextExpression = BuildNormalizeKeyText(keyColumn),
             DecoratorDelegationBlock = BuildSyncDelegationBlock(repository),
             BinaryColumnPropertyNames = binaryColumns,
             BinaryAccessorsBlock = BuildSyncBinaryAccessorsBlock(
@@ -344,6 +352,11 @@ internal sealed partial class CSharpGenerationModelBuilder
                 syncTargetIds
             ),
             ReferencingTableNamesBlock = BuildSyncReferencingTableNamesBlock(entity, diagram),
+            LocalReferencesBlock = BuildSyncLocalReferencesBlock(entity, diagram),
+            LocalUniqueLookupsBlock = BuildSyncLocalUniqueLookupsBlock(
+                entity,
+                repository.EntityClassName
+            ),
         };
     }
 
@@ -493,6 +506,139 @@ internal sealed partial class CSharpGenerationModelBuilder
             : "            ReferencingTableNames = ["
                 + string.Join(", ", names.Select(name => $"\"{EscapeNameForCSharpString(name)}\""))
                 + "],";
+    }
+
+    /// <summary>記述子の、一意制約ごとの引き当ての並び（<c>LocalUniqueLookups</c>）を組み立てる。</summary>
+    /// <remarks>
+    /// 一意制約ごとに、行から制約の値を読む関数（値オブジェクトは内側の値）と、その値を持つローカルの行のキーを返す
+    /// <c>SELECT "キー" FROM "表" WHERE "列0" = @values0 AND …</c>（ローカル＝SQLite の引用）を 1 組作る。ダウンロードで
+    /// サーバーの行がローカルの行と一意な値でぶつかったとき、値を持つローカルの行を引き当ててサーバーから読み直す。
+    /// 主キーが 1 列でない表・制約の列を解決できない制約は載せない。
+    /// </remarks>
+    private string BuildSyncLocalUniqueLookupsBlock(Entity entity, string entityClassName)
+    {
+        var keys = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
+
+        if (keys.Count != 1 || entity.UniqueConstraints.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var table = QuoteQualified(entity.TableName, "\"", "\"");
+        var key = QuoteIdentifier(keys[0].Name, "\"", "\"");
+        var lookups = new List<string>();
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            var columns = constraint
+                .ColumnIds.Select(id => entity.Columns.FirstOrDefault(column => column.Id == id))
+                .ToList();
+
+            if (columns.Count == 0 || columns.Any(column => column is null))
+            {
+                continue;
+            }
+
+            var reads = columns.Select(
+                (column, index) =>
+                {
+                    var propertyName = _nameConverter.ToPropertyName(column!.Name);
+
+                    return ResolveValueObject(column) is null
+                        ? $"entity.{propertyName}"
+                        : $"entity.{propertyName} is {{ }} value{index} ? (object?)value{index}.Value : null";
+                }
+            );
+            var conditions = columns.Select(
+                (column, index) => $"{QuoteIdentifier(column!.Name, "\"", "\"")} = @values{index}"
+            );
+            var sql = CSharpLiteral(
+                $"SELECT {key} FROM {table} WHERE {string.Join(" AND ", conditions)}"
+            );
+
+            lookups.Add(
+                $"                new SyncUniqueLookup<{entityClassName}>(\n"
+                    + $"                    entity => [{string.Join(", ", reads)}],\n"
+                    + $"                    {sql}\n"
+                    + "                ),"
+            );
+        }
+
+        return lookups.Count == 0
+            ? string.Empty
+            : "            LocalUniqueLookups =\n            [\n"
+                + string.Join("\n", lookups)
+                + "\n            ],";
+    }
+
+    /// <summary>
+    /// 記述子の、この表を参照する外部キーの並び（<c>LocalReferences</c>）を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 図の全リレーションのうち、このテーブルの主キーを列ペア 1 組で参照するものごとに
+    /// <c>SELECT DISTINCT "子の列" FROM "子の表" WHERE "子の列" IN (@keys)</c> を 1 本作る（ローカル＝SQLite の引用）。
+    /// 子の表が同期対象かどうかは問わない＝実行の範囲外の表・構築時に除外した表・自分自身の行も、ローカルで参照して
+    /// いれば削除伝搬はその行を消さない。子の表の名前も載せ、実行時にローカル DB に無い表を照会から外す（同期対象の表
+    /// だけでローカル DB を組む構成で、無い表への照会が同期全体を止めないため）。
+    /// </para>
+    /// <para>
+    /// 一意制約を参照する外部キーと複数列の外部キーは載せない（親のキーを子の行の 1 列から読めない＝
+    /// <c>ParentReferences</c> と同じ線引き）。
+    /// </para>
+    /// </remarks>
+    private static string BuildSyncLocalReferencesBlock(Entity entity, ErDiagram diagram)
+    {
+        var columnOwners = diagram
+            .Entities.SelectMany(owner =>
+                owner.Columns.Select(column => (column.Id, Owner: owner, Column: column))
+            )
+            .ToDictionary(item => item.Id);
+        var keys = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
+        var sqls = new List<string>();
+
+        if (keys.Count != 1)
+        {
+            return string.Empty;
+        }
+
+        foreach (var relationship in diagram.Relationships)
+        {
+            if (relationship.ColumnPairs.Count != 1)
+            {
+                continue;
+            }
+
+            var pair = relationship.ColumnPairs[0];
+
+            if (
+                pair.SourceColumnId != keys[0].Id
+                || !columnOwners.TryGetValue(pair.TargetColumnId, out var child)
+            )
+            {
+                continue;
+            }
+
+            var childTable = QuoteQualified(child.Owner.TableName, "\"", "\"");
+            var childColumn = QuoteIdentifier(child.Column.Name, "\"", "\"");
+            var sql =
+                $"new SyncLocalReference({CSharpLiteral(child.Owner.TableName)}, "
+                + CSharpLiteral(
+                    $"SELECT DISTINCT {childColumn} FROM {childTable} WHERE {childColumn} IN (@keys)"
+                )
+                + ")";
+
+            if (!sqls.Contains(sql, StringComparer.Ordinal))
+            {
+                sqls.Add(sql);
+            }
+        }
+
+        return sqls.Count == 0
+            ? string.Empty
+            : "            LocalReferences =\n            [\n"
+                + string.Join("\n", sqls.Select(sql => $"                {sql},"))
+                + "\n            ],";
     }
 
     /// <summary>
@@ -680,6 +826,37 @@ internal sealed partial class CSharpGenerationModelBuilder
             : $"entity.{propertyName} = {valueObject.ClassName}.Create(rowVersion ?? [])";
     }
 
+    /// <summary>キー順ページングの SQL（サーバー＝SQL Server）で、前のページの最後のキーと比べる式を組み立てる</summary>
+    /// <remarks>
+    /// 生 SQL のパラメータは型なしでバインドされ、文字列は nvarchar になる。varchar / char の主キーを nvarchar と
+    /// 比べると列の側が nvarchar へ変換され、SQL_* 照合順序では比較の規則が ORDER BY の規則（列の型のまま）と
+    /// 食い違う（例: <c>"a-c"</c> と <c>"ab"</c> の順が逆になる）。ページの境目で行を読み飛ばすので、文字列の主キーは
+    /// 列と同じ型へ明示的にキャストする。型の名前と宣言長は SQL Server の型マッパーが渡すもの（<c>SqlDbTypeName</c>・
+    /// <c>SqlDeclaredLength</c>）を使い、それ以外の型はそのまま比べる。
+    /// </remarks>
+    private string BuildServerAfterKey(Column keyColumn)
+    {
+        var typeInfo = _columnTypes[keyColumn.Id];
+        var length = typeInfo.SqlDeclaredLength switch
+        {
+            -1 => "max",
+            > 0 => typeInfo.SqlDeclaredLength.ToString(
+                System.Globalization.CultureInfo.InvariantCulture
+            ),
+            _ => null,
+        };
+        var sqlType = (typeInfo.SqlDbTypeName, length) switch
+        {
+            ("VarChar", { } n) => $"varchar({n})",
+            ("NVarChar", { } n) => $"nvarchar({n})",
+            ("Char", { } n) => $"char({n})",
+            ("NChar", { } n) => $"nchar({n})",
+            _ => null,
+        };
+
+        return sqlType is null ? "@afterKey" : $"CAST(@afterKey AS {sqlType})";
+    }
+
     /// <summary>主キーをジャーナルのテキスト形へ変換する式を組み立てる</summary>
     /// <remarks>
     /// テキスト形は「往復できること」と「同じ値が同じ文字列になること」だけを要求する（照合は序数比較）。
@@ -699,8 +876,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             "string" => access,
             "byte[]" => $"Convert.ToHexString({access})",
             "Guid" => $"{access}.ToString()",
-            "DateTime" or "DateTimeOffset" =>
-                $"{access}.ToString(\"o\", CultureInfo.InvariantCulture)",
+            // DateTime は Kind を落とす（どちらの DB も Kind を持たず、読み戻した行は Unspecified になる＝Kind つきの
+            // テキストは同じ行のテキストと一致しない）。DateTimeOffset はオフセットが値の一部なのでそのまま
+            "DateTime" =>
+                $"DateTime.SpecifyKind({access}, DateTimeKind.Unspecified).ToString(\"o\", CultureInfo.InvariantCulture)",
+            "DateTimeOffset" => $"{access}.ToString(\"o\", CultureInfo.InvariantCulture)",
             // decimal はスケールを正規化する（G29＝末尾ゼロなし）。SQL Server は宣言スケールへ揃えて返し
             // （decimal(10,2) の 1.5 は 1.50）、SQLite（Microsoft.Data.Sqlite）は書き込んだ綴りを保存する
             // （1.5 のまま＝実測）ため、素の ToString だと同じ行のキー文字列がサーバーとローカルで食い違い、
@@ -714,6 +894,16 @@ internal sealed partial class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>以前の版が書いたキーのテキストをいまの形へ書き直す関数の式を組み立てる（形が変わっていない型は空文字）</summary>
+    /// <remarks>
+    /// DateTime の主キーは、以前は Kind つきの往復書式（<c>Z</c> やローカルのオフセット）で書いていた。ローカル DB に
+    /// 残ったジャーナル・受理記録・コピー待ちのテキストを、ランの前に Kind を落とした形へ書き直す。
+    /// </remarks>
+    private string BuildNormalizeKeyText(Column column) =>
+        _columnTypes[column.Id].TypeName.TrimEnd('?') == "DateTime"
+            ? "SyncKeyText.WithoutDateTimeKind"
+            : string.Empty;
+
     /// <summary>ジャーナルのテキスト形から主キーを復元する式を組み立てる</summary>
     private string BuildParseKey(Column column, CSharpValueObjectModel? valueObject)
     {
@@ -724,7 +914,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             "byte[]" => "Convert.FromHexString(keyText)",
             "Guid" => "Guid.Parse(keyText)",
             "DateTime" =>
-                "DateTime.Parse(keyText, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)",
+                "DateTime.Parse(SyncKeyText.WithoutDateTimeKind(keyText), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)",
             "DateTimeOffset" =>
                 "DateTimeOffset.Parse(keyText, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)",
             "TimeSpan" => "TimeSpan.ParseExact(keyText, \"c\", CultureInfo.InvariantCulture)",

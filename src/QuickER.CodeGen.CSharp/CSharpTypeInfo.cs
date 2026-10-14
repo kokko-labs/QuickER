@@ -134,6 +134,18 @@ public sealed record CSharpTypeInfo
     public bool IsArray { get; init; }
 
     /// <summary>
+    /// 列が Unicode でない文字列（正規型の <c>AnsiString</c> / <c>AnsiFixedString</c>＝SQL Server の <c>varchar</c>・
+    /// <c>char</c>・<c>text</c>、Oracle の <c>VARCHAR2</c>・<c>CHAR</c>・<c>CLOB</c> など）かどうか。
+    /// </summary>
+    /// <remarks>
+    /// EF Core の Fluent へ <c>IsUnicode(false)</c> を出す判定に使う。出さないと EF Core はその列を Unicode の型
+    /// （<c>nvarchar</c>）と見なし、検索・更新のパラメータと定数を Unicode で送るので、SQL Server は列の側を変換してから
+    /// 比べ、索引が効きにくくなる。型マッパーは方言の型表記を見るが、この印は方言に依らず正規型の種類から決める
+    /// （<c>CanonicalTypeTokenAttacher</c> が型カタログで解析して付ける）。解析できない型表記の列は false のまま。
+    /// </remarks>
+    public bool IsNonUnicodeString { get; init; }
+
+    /// <summary>
     /// 1 列＝1 テキスト入力として扱えない型（PostgreSQL の <c>inet</c>＝<c>System.Net.IPAddress</c>）かどうか。
     /// </summary>
     /// <remarks>

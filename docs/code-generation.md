@@ -333,6 +333,11 @@ A navigation has no column of its own, so filter on the foreign-key column inste
 The in-memory backend refuses it in the same way, because the rows it stores carry no navigations to evaluate.
 EF Core translates such a predicate into a join of its own, so there the limitation does not apply.
 
+**`ExecuteDeleteAsync` deletes the rows the conditions match.**
+With `cascadeDelete: true` it deletes their descendants along the cascade first, and the number it returns counts every row it deleted, the matching rows and their descendants together.
+A cyclic cascade is refused with `NotSupportedException` before any statement runs.
+On EF Core, where a condition may read a navigation, the keys of the matching rows are read first and the deletes go by those keys, so a condition such as `o => o.OrderLines.Any()` deletes the matching rows together with their descendants (the conditions are not evaluated again once the descendants are gone).
+
 #### Null compensation
 
 Nulls in an equality comparison and in an IN search are compensated so that every backend agrees with C# and EF Core.
@@ -508,6 +513,14 @@ A freshly built aggregate is therefore marked in one call instead of one call pe
 Only `MarkAdded` offers the cascading form.
 Marking a whole graph for update would rewrite every row including the untouched ones, and marking a whole graph for removal is what the graph save's `cascadeDelete` already does from the root alone.
 
+**A child the save deleted leaves its parent's collection.**
+After a successful save, a child marked `Removed` is taken out of the collection of a parent the save kept, and stays `Removed` itself, so a reference you held to it can still tell it was deleted.
+Left in the collection, it would be deleted again by the next save of the same graph.
+A child a save hook skipped was not deleted, so it stays in the collection.
+A single cascade child has no collection to leave, so it stays on its navigation, still `Removed`; assign null to it once the save is confirmed.
+The descendants of a deleted root are left as they are, since the whole subtree went with it.
+Every backend behaves the same way, as an edit model's `AcceptChanges()` does (see [Removing rows](#removing-rows-remove-versus-markremoved)).
+
 ### Save hooks (ISaveHook)
 
 A mechanism that inserts processing before and after each operation of a graph save (`SaveAsync`).
@@ -588,6 +601,7 @@ A skipped row does not get an After call, and its `RowState` is left unchanged, 
 
 Because a skip is isolated, consistency is the hook author's responsibility.
 In particular, deletes run children-first, so **returning `false` for only the root of a subtree delete leaves the children deleted and the root behind**.
+Every backend runs the delete hooks of a deleted entity's descendants children first, and runs them for an `Added` descendant too, although it has no row to delete.
 To stop the parent, the children's hooks must also return `false`.
 An inconsistent skip, such as skipping a new parent while saving a new child, falls to the safe side through an FK constraint violation, an exception, and a full rollback, provided the FK constraint is actually defined in the database.
 
@@ -612,8 +626,8 @@ If `insertWhenUpdateMissing: true` and no update target is found so it switches 
 | Target | Hook firing | Context support |
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
-| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
-| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
+| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt. Running `SaveChanges` again after a statement that matched no row does not run them again | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
+| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction). Every Before runs first, then the writes, then every After in the order the operations ran; they are not interleaved row by row as in the QuickER Repository | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
 | Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
 
 ### Raw SQL escape hatch
@@ -814,14 +828,22 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - Save is a disconnected-graph save that converts `RowState` to EF Core's state.
   Like the QuickER repositories, it registers only the entities the cascade reaches from the root.
   A parent reference (such as `line.Order`) is not followed, so a parent loaded with `Include` is neither written nor deleted.
+  After the save, EF Core's own fix-up may fill a reference to a parent saved in the same call (such as `profile.Customer` when a customer and its profile are saved together).
+  The QuickER repositories set navigations only in the direction an `Include` follows, when reading.
 - Optimistic concurrency is at parity: `ConcurrencyMode` selects the policy, EF Core's `DbUpdateConcurrencyException` is converted to `SaveConflictException`, and the refreshed concurrency token is left on the entity (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
 - An update of a table without a rowversion column that matches no row (a trigger or row-level security discarded it) is reported as a missing row, as the QuickER Repository does: `UpdateAsync` returns `false` and a graph save fails with `SaveConflictException` (`NotFound`).
-  A save that keeps being rejected as a concurrency conflict is attempted at most 10 times and then fails with `SaveConflictException`.
+  A row whose statement keeps matching no row although the stored values were taken over (`ForceOverwrite`) is attempted at most 10 times and then fails with `SaveConflictException`.
+  The limit is per row and applies after the row is found to be still there: a save of many rows that each need resolving runs to the end, and a row found gone is reported as gone however many attempts the save has made.
 - The raw-SQL APIs are at full parity, including the conversion of the values a driver returns in its own storage type (SQLite returns an `int` column as `long`, Oracle a `NUMBER` as `decimal`).
+  One rule is stricter: with [unbounded binary columns excluded](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns), a raw SQL entity query (`QueryBySqlAsync`) must select the excluded columns too.
+  EF Core writes every column when it saves an entity, so an entity read without them would have the stored values overwritten by its next save; a result set that leaves one out is refused with `InvalidOperationException` naming the column.
 - A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
+- A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters and literals are sent as non-Unicode text and the database can compare the column without converting it.
+  The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
 - A retrying execution strategy (such as SQL Server's `EnableRetryOnFailure`) is supported.
   A graph save and a cascading `ExecuteDeleteAsync` run inside the strategy, and every attempt starts over from scratch.
   With save hooks, Before and After run once per attempt: their database writes roll back with the failed attempt, but a side effect outside the database is repeated.
+  A statement that matched no row is a different retry, which stays inside one attempt: the save resolves it (taking over the stored values, or switching to an INSERT) and runs `SaveChanges` again in a new transaction, while Before has already run and After runs once, after the `SaveChanges` that succeeded.
 - A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
   The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
 - A table without a primary key is **excluded from the DbContext** (no DbSet, no Fluent configuration, and navigations to it are ignored via an explicit `modelBuilder.Ignore<T>()`), and a Warning diagnostic names the table.
@@ -852,6 +874,10 @@ They are worth knowing when a test passes in memory and fails against the real t
   A bulk insert is validated in full before any of it is applied, and a graph save is judged by the state it would leave behind, so it can free a value on one row and take it on another within the same save, and a violation drops the save whole.
   The violation is an `InvalidOperationException`, as a duplicate primary key is, whereas a real database raises its provider's own exception (`SqlException` with error 2627, for one), so a test that branches on the exception type is not backed by the database.
   The user-defined checks added through `CollectCustomUniquenessChecks` are not enforced, being rules of the application rather than constraints the database holds, and neither is seeding through `InMemoryDataStore.Put` / `InMemorySampleData.Seed`.
+- **Foreign keys are not enforced, and referential actions are not reproduced.**
+  The store keeps rows and nothing else, so an insert or update may leave a child pointing at a parent that does not exist, and `DeleteAsync(id)` removes the parent alone, leaving its children behind whatever the foreign key's `ON DELETE` says.
+  A real database refuses the first, and refuses the second or (with `ON DELETE CASCADE`) deletes the children along with the parent.
+  A graph save with `cascadeDelete` and a cascading `ExecuteDeleteAsync` behave as they do elsewhere, since they delete the descendants themselves rather than relying on the database's action.
 - **Changing an entity's RowState from a Before hook takes effect here and nowhere else.**
   This backend reads the state again when it carries the operation out, so a `BeforeSaveAsync` that turns `Modified` into `Added` changes what happens.
   The QuickER Repository and EF Core have chosen the statement by then, and the change is ignored.
@@ -1698,6 +1724,7 @@ The key behaviors are these.
 - **A named-query projection** that references an excluded column does fetch it, because a projection is an explicit column selection.
 - It can be fetched by explicitly SELECTing it in **raw SQL** (see the operational example below).
 - **Not applied in EF Core mode** (queries via `DbSet` / `SaveChanges`), because column selection in EF Core is EF Core's responsibility.
+  EF Core writes every column on save, so its raw SQL entity query requires the excluded columns instead of leaving them unread (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
 - The in-memory repository (`GenerateInMemoryRepositories`) has parity with a real DB, that is, the same exclusion behavior.
 - **Bidirectional sync leaves them out too**, and copies them separately when asked to: see [Unbounded binary columns](#unbounded-binary-columns) under the sync support.
 
@@ -1941,7 +1968,7 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 | `Mode` | `Versioned` | The run's semantics. The default syncs the versioned tables incrementally under version guards and leaves the versionless ones alone (the pre-existing behaviour); `LastWriteWins` is [last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins) |
 | `ExcludedEntityTypes` | empty | Entity types this run leaves out. Recording continues, and the next run that covers them replays what accumulated (excluding a table permanently is the construction-time `excludeFromSync` instead). A type the engine does not synchronize is rejected with `ArgumentException` |
 | `DownloadBatchSize` | 500 | How many rows one download batch fetches and applies in a single local transaction |
-| `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large. A key the journal still holds an unsent entry for is spared, as described below |
+| `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large. A key the journal still holds an unsent entry for is spared, and so is a row a local row refers to, as described below |
 | `ConflictPolicy` | `Collect` | How a local change that collides with the server is treated (see [Conflicts](#conflicts)) |
 | `IncludeUnboundedBinary` | `false` | Whether to carry the unbounded binary columns the row transfer leaves out (see [Unbounded binary columns](#unbounded-binary-columns)). Nothing changes for a build without such columns |
 
@@ -1955,6 +1982,20 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 | `Discarded` | Changes settled without being sent: a stale intent whose row is no longer there, or everything the journal held under `ServerWins` |
 | `Conflicts` / `HasConflicts` | The local changes that could not be replayed; they stay in the journal |
 | `Truncations` / `HasTruncations` | The tables whose download stopped before the end of the server's changes (see [Conflicts](#conflicts)) |
+| `LocalRowChanges` | The local rows the run changed on its own rather than by applying the server's change, each with the reason (below) |
+
+**`LocalRowChanges` names the local rows a run changed on its own.**
+The counts above say how many changes were discarded or rows deleted, not which ones, and three things a run does change local rows without a server change coming down for them.
+Each row is listed once per reason, as a `SyncLocalRowChange` (table, key in the journal's text form, reason).
+
+| `SyncLocalRowChangeReason` | What the run did |
+|---|---|
+| `DiscardedByServerWins` | A `ServerWins` run discarded the row's unsent changes and put the server's content back (or left the row to delete propagation when the server no longer has it) |
+| `ReloadedForUniqueValue` | The row held a unique value a downloaded row needed, and was read again from the server (or removed, when the server no longer has it) |
+| `RemovedBeforeDownload` | A `ServerWins` run removed the row, whose changes it was discarding and which the server does not have, before the server's rows came down |
+
+Only `SyncAsync` fills it; `UploadAsync` and `DownloadAsync` called on their own return what they did before.
+A `SyncAsync` that throws has still done what it did up to that point, and hands the rows it had changed on in the exception's `Data`, under `SyncEngine.LocalRowChangesDataKey`, as an `IReadOnlyList<SyncLocalRowChange>`; the exception's type is the same as without it.
 
 **A journal entry is settled the moment the server takes it**, one entry at a time rather than all of them at the end of the run: its receipt is written, then the entry is removed.
 An upload interrupted part way therefore leaves entries for exactly the changes that did not reach the server.
@@ -1969,6 +2010,25 @@ The protection reaches exactly as far as the journal does: a row written into a 
 A row it spares keeps what it points at.
 Tables are propagated children first, and a spared row's parents are spared in turn, in its own table and in its parents' tables, however many steps up.
 Removing them would fail on the local foreign key, or under `ON DELETE CASCADE` take the spared row with it.
+
+**Delete propagation removes only the rows nothing local refers to.**
+A row missing from the server stays while any local row points at it.
+The referring row can be a row of another table, synchronized or not and in this run's scope or not, a row of the same table, an unsent row, or a row a truncated download has not brought up to date yet.
+Removing the row would fail on the local foreign key, or under `ON DELETE CASCADE` take the referring row with it.
+The check is one query per referring foreign key for every 500 candidate keys, and it repeats until a pass removes nothing.
+A referring table the local database does not have is skipped, since it holds no rows to refer with.
+A chain of parents and children in one table that the server deleted together therefore goes in one run.
+A row kept this way goes on a later run, once nothing refers to it any more.
+The propagation runs before the download as well as after it.
+A row the server deleted is then gone before the server's rows go in, so a row the server recreated under another key with the same unique value does not collide with the old one here.
+
+**The upload reorders what the foreign keys and the unique constraints need.**
+Upserts go parents first and deletes children first, table by table.
+Within a table the entries go in the order they were first recorded, which is not parent first in a table that refers to itself, so a write the server refuses for a foreign key is tried again once the others have gone, as long as another write of the table went through in between.
+Only what is still refused then is reported (or, in a last-write-wins `ServerWins` run, settled).
+A table the run also deletes rows of has each upsert checked against the server's unique constraints first, which costs a round trip per upsert.
+An upsert whose unique value a row still holds on the server goes after the deletes, together with the upserts that refer to it, in the same table or another.
+If it still collides then, because the delete it waited for did not go through, it is reported as `UniqueValueTakenOnServer`.
 
 Replaying one change has three outcomes, not two, and `Uploaded` / `Discarded` / `Conflicts` are exactly those three: sent, nothing to send, refused.
 Folding the middle one into either of the others would report a change as delivered when nothing crossed the wire.
@@ -2014,16 +2074,23 @@ A graph save records the whole cascade.
 `SyncGraphRecorder` walks the same cascade navigations the graph saver walks, literally the same enumeration (`EntityBaseCore.EnumerateCascadeChildren`), under the same rules.
 The descendant rows the save writes or deletes are therefore journaled exactly like the root: a save that edits only a child under an unchanged root is not missed, and neither are the children a cascade delete takes along.
 A table on the path that is not synchronized is walked through without an entry of its own.
-The whole graph is recorded before the save runs, so entries left behind by a failed save are settled harmlessly at upload, just as they are for a single write.
+The whole graph is recorded before the save runs, and a save that fails takes its entries back, just as a single write does.
 
 The record is written **before** the business write.
 The generated repositories manage their own connection, so a decorator cannot enlist its INSERT in the transaction of the write it wraps.
 Something has to go first, and recording the intent first is the safe order.
-If the business write then fails, the journal holds an entry for a row that was never written, and the upload discards it, because it re-reads the current local row and finds nothing.
 The opposite order would lose changes outright.
 
-The same re-read protects a delete whose business write failed.
-An entry whose local row is still there says the delete never landed, whether a foreign key refused it or a lock timed out, and the entry is discarded unsent rather than carried out on the server.
+**A business write that throws takes back the entries it recorded.**
+They are removed before the exception reaches the caller, still under the local write lock, and only the entries of that call go: earlier entries for the same row stay.
+Left behind, such an entry would upload content the local database never committed: a `LocalWins` or last-write-wins replay would put an older row or blob back over another writer's newer one, and a write that changed nothing would still move the server's version on and raise a conflict on another device.
+The generated repositories commit as their last step, so an exception means the write did not land; a repository of your own placed behind the decorator has to keep to that, because an exception it throws after committing takes back the entry of a write that did land.
+Should removing the entries fail as well, the write's exception still goes on, carrying that failure in `Exception.Data` under `JournalingRepositoryBase<TEntity, TKey>.JournalCleanupFailureKey`.
+A process that ends between recording and writing still leaves the entries behind, and the upload settles them as below.
+For an insert or an update, it re-reads the current local row, and when the row is not there, there is nothing to send and the entry is discarded.
+
+The same re-read protects a delete whose entry was left that way.
+An entry whose local row is still there says the delete never landed, and the entry is discarded unsent rather than carried out on the server.
 Without that check a failed local delete would complete itself on the server, and the delete propagation of the same run would take the surviving local row with it.
 
 The operation a row's replay sends is decided from what the local row is now and from every entry recorded about it, not from the newest entry alone.
@@ -2031,12 +2098,19 @@ The newest entry can describe a write that never landed, and acting on it alone 
 
 | Local row | Entries for the row | What the replay does |
 |---|---|---|
-| There | Include an insert or an update | Sends its current content |
+| There | Include an insert or an update | Sends its current content (a row deleted and created again under the same key goes as an update guarded by the version its delete recorded) |
 | There | Deletes only | Drops the entries: the delete never landed |
 | Gone | Include a delete, and a version the server held for the row is known | Deletes it on the server, guarded by the latest such version (the versions the deletes recorded and the receipt) |
 | Gone | Otherwise | Drops the entries: the row never reached the server |
 
 A table without a version column has no version to know, so a delete recorded for a row that is gone is sent unconditionally.
+
+**A delete records the version the local row has, not only the one on the entity.**
+A graph save may delete a stub that carries nothing but the key, or an object held since before the row's last download, and either carries no version or an older one than the row has.
+The local row is read for its mirrored version before it goes (one SELECT for each such delete in a versioned table), and the later of the two is recorded, so the delete reaches the server instead of being dropped as a row the server never had.
+The same version lets a row deleted here and created again under the same key go to the server as an update: the server still has the row the delete removed, and inserting the new one there would be refused as a duplicate.
+A later change on the server makes that update a conflict, as for any other edit.
+A row created, deleted and created again without ever reaching the server records no version and is inserted as before.
 A conflict reports the operation decided here.
 
 **Raw SQL is not recorded.**
@@ -2049,8 +2123,12 @@ A row the local database is meant to keep to itself belongs in a table excluded 
 **Save hooks are unaffected.**
 The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exactly as it did before, including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else.
 A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract.
-One consequence is worth knowing: a write a `BeforeSaveAsync` returned `false` for still leaves a journal entry, because the entry is written first.
-For an insert that entry is discarded, since there is no row to read, and for an update the row is uploaded as it stands, with unchanged content, which the server accepts and stamps with a new version.
+The entries of a graph save are written before its hooks run, so they are checked against what the save did once it has succeeded, under the same lock.
+A row a `BeforeSaveAsync` returned `false` for was not written, and its entry is taken back; the save leaves such a row in its old state rather than marking it unchanged, which is how it is told apart.
+Without that, its entry would upload the row's current content, over another writer's newer row or as a write that changes nothing yet moves the server's version on.
+A delete a hook skipped needs nothing: its row is still there, which already makes the upload drop the entry.
+A hook that gives a new row its key moves the row's entry to that key in the same way; the entry, made under the key the row had before, would otherwise name a row that does not exist and be dropped at upload, and the row would then be deleted by the next delete propagation.
+A process that ends between the save and that check leaves the entries as they were recorded.
 
 A bulk insert or a graph save records all of its rows in one go, as multi-row inserts of 100 rows each, rather than one statement per row.
 The entries are separate commits per statement, and that is enough: a recording cut short leaves entries for rows the business write never reached, which the upload discards like any other stale intent.
@@ -2068,6 +2146,7 @@ The engine takes the same lock for the stretches where it reads what is still un
 - `RefreshAsync`: the whole run
 
 A write that arrives during one of these waits for that stretch and then lands where the next read sees it.
+A table class of your own that implements only `ISyncTable` cannot read again before each batch; it is handed what is unsent as its download starts, in `SyncDownloadContext.PendingKeyTexts`, which is a copy taken at that moment, so an edit made after it may be overwritten by a batch that table then applies.
 A row created during a download is therefore not deleted by the same run's delete propagation, and a row edited during it is not overwritten by a batch: the download stops at it, as at any other unsent change.
 The server is read outside the lock, so a write waits for one batch, not for the network.
 The exception is a run that carries the [unbounded binary columns](#unbounded-binary-columns): their copies are part of the batch, so a write can wait for those transfers as well.
@@ -2130,12 +2209,20 @@ A run left at the default uploads the row without the blob and settles the entry
 Each journal entry records which unbounded binary columns its write stored a value in: an insert stores all of them, `Write{Column}Async` stores its own, and an update stores none.
 A run that carries the columns sends only those named by some entry of the row.
 A row that came down in a run that did not carry them has no blob here, and an edit to its ordinary columns does not send that empty column over the server's blob.
+A row the server is given for the first time is the exception, and every column of it is sent, as an ordinary insert writes them: an offline insert, a row a local edit puts back after the server deleted it (`LocalWins`, last-write-wins), and a row whose earlier entries a `ServerWins` run dropped and that is edited here again.
+Otherwise the server would create the row with its blobs empty.
+Should sending them fail after the row has gone in, they stay owed: the entry is made to name every column first, so the next run, which finds the row on the server and updates it, still sends them all.
+
+**An overwrite that skips the version guard owes a copy of the blobs it did not send.**
+`LocalWins` and a last-write-wins run overwrite the server's row without its version guard, and an update leaves the server's blobs in place, which may be another writer's, newer than the ones here.
+The row that then comes down is this device's own echo, which the download takes the version from and nothing else.
+Each column the overwrite did not send is therefore recorded as an owed copy (below), and the next run that carries the columns brings the server's blob down, unless a later local write stored a value in that column.
 
 **A copy that fails is made later, not lost.**
 A download writes a batch of rows and then copies their blobs, and the rows have already moved the resume point past themselves by then.
 The copies a batch owes are therefore recorded in the local table `quicker_sync_blob_pending` before the rows are written and removed once made.
 A copy that fails leaves its record, and the next run that carries the columns makes it first, before anything else of that table.
-That late copy is decided per row and column: a row that is gone here has nothing to copy into, and a column an unsent local change wrote holds a blob written here since, which the server's copy must not replace; in both cases the owed record is dropped.
+That late copy is decided per row and column: a row that is gone here has nothing to copy into, a row the server no longer has has nothing to copy from (it is left to the delete propagation), and a column an unsent local change wrote holds a blob written here since, which the server's copy must not replace; in all three cases the owed record is dropped.
 Otherwise, including a row whose unsent change touched only its ordinary columns, the server's blob is copied down.
 A refresh drops the table's owed records, because it reloads the rows anyway.
 
@@ -2149,47 +2236,75 @@ Both the download's inserts and the upload's inserts on the server put an empty 
 The cost is one round trip per column per changed row, which is why it is off by default.
 A table of large blobs whose rows change often pays for it on every run.
 
+**Choose once per device whether to carry the columns, and keep to it.**
+A run that does not carry them owes nothing for the rows it moves, apart from the copies an overwrite owes (above): a row that came down without its blob is not recorded as owing a copy, and a row sent without one is not either.
+A later run that carries the columns copies only the rows that change from then on, so the blobs of rows moved in between stay different between the two sides for good.
+A device that starts carrying the columns, or that has run without them for a while, should run `RefreshAsync` with `IncludeUnboundedBinary` set to start from a complete copy.
+
 ### Conflicts
 
 Nothing is resolved silently.
 Under the default policy a local change that collides with the server stays in the journal and comes back in `SyncResult.Conflicts` with the table, the key, the operation, the reason, and both sides' rows attached.
 The local row stays where it is, including when the reason is `MissingOnServer`, because both halves of the download leave every key the journal still holds an entry for alone: the row is not overwritten by the server's copy, and delete propagation does not remove it.
 
-**Leaving such a row alone stops that table's download there, and the tables after it with it.**
+**Leaving such a row alone stops that table's download there.**
 The download applies a table's rows in ascending version order, so skipping one row and carrying on would move the resume point past it, and the change that was being protected would never be seen again.
 It stops at that row instead.
-Every table after it in foreign-key order is left for the next run too, because the rows it would bring down can point at parents that were behind the stopping point.
+Only that table stops; the tables after it in foreign-key order go on.
+A row of a later table can point at a parent that was behind the stopping point, and that parent is brought in from the server first, as described below, or the later table stops at the row when the parent cannot be had.
 What was left unread is reported.
 
 ```csharp
 foreach (var stop in result.Truncations)
 {
-    // stop.TableName, and exactly one of:
-    //   stop.PendingKeyText        - the unsent local change this table stopped at
-    //   stop.TruncatedByTableName  - the table whose stop this one waited for
+    // stop.TableName         - the table that stopped
+    // stop.PendingKeyText    - the row it stopped at
+    // and, when the row stopped for a parent it could not have:
+    //   stop.MissingParentTableName  - the parent's table
 }
 ```
+
+`SyncDownloadTruncation.TruncatedByTableName` is always null: a table's stop does not stop the tables after it.
 
 The rows behind the stopping point are still on the server and come down as soon as the entry that stopped them is settled, whether decided and re-run, or dropped with `SyncJournal.RemoveTableAsync`.
 What a run stops for is an unsent journal entry.
 That is usually a conflict it has just collected, but it is equally an entry an interrupted upload left behind.
 A row also stops the download when the parent it points at was deleted here and the delete has not reached the server: applying it would fail on the local foreign key.
-A run that settles every entry reports no truncations.
+A run that settles every entry and covers every table reports no truncations.
+
+**A row whose parent is not here brings the parent in first.**
+The download applies rows in version order, so a parent changed after its child arrives after it, in a later batch, or above the run's ceiling and not in this run at all.
+Such a parent is read from the server and applied ahead of the row, and its own parents the same way.
+Like a row `ServerWins` puts back, it keeps no mirrored version and gets a receipt, so a later edit to it is guarded by the version just read.
+The rows `ServerWins` puts back and the rows of a refresh are handled the same way.
+When the parent cannot be had, the download stops at the row instead, and `MissingParentTableName` names the parent's table.
+That is the case when the parent's table is outside the run's scope (the run does not write to it), when the parent was deleted here and the run is not discarding that delete (bringing it back would undo the delete without saying so), or when the server does not have it either.
+A parent that a `ServerWins` run is discarding the delete of is brought back, since the server wins over that delete anyway.
+
+**A row whose unique value another local row still holds brings that row up to date first.**
+The download sees each row at its latest version only, so a row that gave a unique value up and was changed again later comes after the row that took the value, and the local copy still holding it refuses the newcomer.
+The local row holding the value is then read from the server and applied first, like a parent brought in (no mirrored version, a receipt recorded), and the batch is tried again; a row the server no longer has is removed instead, when nothing local refers to it and the run propagates deletes.
+It is looked into only after a batch has failed to apply, so a batch that goes in makes no extra call, and a batch is tried at most as many times as it has rows.
+The download stops at the server's row instead, reported in `PendingKeyText` like any other stop, when the local row cannot be brought forward: it has an unsent change the run is not discarding, the server no longer has it and it cannot be removed (it is referred to, or `PropagateDeletes` is off), or the rows hold each other's values.
+`ServerWins` treats such a row like one whose parent cannot be had: it is not put back and its entries stay.
+When the run propagates deletes, `ServerWins` first removes the local rows it is discarding that the server does not have, so a row recreated here under another key with the same value does not stand in the way.
 
 | `SyncConflictPolicy` | What happens |
 |---|---|
 | `Collect` (default) | The entry stays in the journal and is reported; re-run after deciding |
-| `ServerWins` | The run's entries are dropped and each of their rows is read back from the server over the local one (entries of tables outside the run's scope, versionless or excluded ones, stay put) |
+| `ServerWins` | The run's entries are dropped and each of their rows is read back from the server over the local one (entries of tables outside the run's scope, versionless or excluded ones, stay put, and so do the entries of a row whose parent cannot be had) |
 | `LocalWins` | The change is resent with `ConcurrencyMode.ForceOverwrite`, overwriting the server row, and inserted again when the server has no such row, so a row deleted on the server is resurrected by a local edit (the same resolution applies to a key the server already holds under a local insert) |
 
-Two more reasons come from the server's foreign keys, and no policy resolves them by writing rows this device did not change.
+Three more reasons come from the server refusing a write, two for its foreign keys and one for its unique constraints, and no policy resolves them by writing rows this device did not change.
+`ServerWins` settles them by giving up the local change, in a last-write-wins run as well.
 They are reported only after a write to the server has failed, by looking up the state the failure would follow from, so a run where nothing goes wrong makes no extra call.
 A failure they do not explain, such as a dropped connection, is thrown as it was.
 
 | `SyncConflictReason` | When | Ways out |
 |---|---|---|
-| `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` and last-write-wins report it too, rather than bringing the parent back | Run with `ServerWins`, point the row at another parent, or edit the parent locally so it has a change of its own |
-| `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins`, which brings the row back together with what now points at it |
+| `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` reports it too, rather than bringing the parent back, and so does last-write-wins under any other policy | Run with `ServerWins` (in either mode), point the row at another parent, or edit the parent locally so it has a change of its own |
+| `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins` (in either mode), which brings the row back together with what now points at it |
+| `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. `LocalWins` reports it too, rather than taking the value from the other row. It is not tried again within the run, since no other write of the table frees the value | Change the value, or run with `ServerWins` (in either mode) |
 
 **`ServerWins` reads the rows back rather than leaving them to the download.**
 The download carries a row only when its version has moved since it was last mirrored, so a local edit to a row nobody else has touched would otherwise outlive the run that was told to discard it, and with its journal entry gone, no later run would correct it.
@@ -2199,7 +2314,7 @@ A key the server no longer holds has nothing to apply and is left to the delete 
 The rows are read back table by table, right after that table's download, parents first.
 By then the parents the server's rows point at have come down, including a parent the server added since, and a row put back is there before the tables that may point at it are downloaded.
 The entries being dropped do not stop the table's download.
-A table whose download an earlier truncation skipped is not settled in that run; its entries stay for the next one.
+A row put back brings in the parents it refers to first, or stays as it is with its entries when it cannot have them.
 An entry recorded while the run is in flight is not one the run was told to drop, so the row it is about keeps its local content.
 When `UploadAsync` is called on its own, with no download to follow, the rows are read back there instead.
 
@@ -2230,7 +2345,10 @@ Adding a versionless table to a diagram therefore changes nothing about what the
 A `LastWriteWins` run covers every table and gives the whole run one semantics.
 
 - **Uploads are uniform across all tables**: update with `ForceOverwrite`, insert when the update finds no row, delete unconditionally.
-  No version is read, no existence is probed, and nothing is reported as a conflict except the two foreign-key reasons under [Conflicts](#conflicts) (`ConflictPolicy` is ignored).
+  No version is read, no existence is probed, and nothing is reported as a conflict except the three reasons under [Conflicts](#conflicts) for a write the server refuses.
+  `ConflictPolicy` is ignored, with one exception: `ServerWins` settles those three reasons instead of reporting them.
+  The entries go and the row takes the server's content, as in a versioned `ServerWins` run, and they are counted in `Discarded`.
+  It is the only way to settle such a row of a versionless table, since no versioned run reaches it.
   Versioned tables overwrite without their guards too.
   The version the server stamps is still reported to the run, so the same run's download recognizes the row as its own echo and takes nothing but the version from it.
 - **The winner is whoever uploads last, not whoever edited last.**
@@ -2239,9 +2357,14 @@ A `LastWriteWins` run covers every table and gives the whole run one semantics.
   A row deleted on the server while it was being edited offline comes back when the upload's update finds nothing and inserts.
   A local delete likewise removes whatever the server did to the row meanwhile.
   Consistent, as last-write-wins goes.
+- **The row is the unit that wins.**
+  An upload sends the whole row, so a device that changed only a blob also sends the ordinary columns it holds, and a change another device made to them since goes back to the older values.
+  The same holds for `LocalWins` in a versioned run.
+  Columns of one row are not merged.
 - **A versionless table downloads as a full key-ordered scan on every run** (`SELECT TOP … WHERE key > @afterKey ORDER BY key` paging, plus the ordinary delete propagation).
   The cost is O(table) per run, which is why this mode is meant for small, rarely changing tables, and why a large or busy table is better served by adding a rowversion column and riding the incremental side.
   Versioned tables still download incrementally in this mode; the result is the same, the transfer just smaller.
+  A row the scan skips, for an unsent change or a parent it cannot have, does not stop the scan, but the table is reported as truncated at the first such row once the scan is through.
 
 A table that should never sync, holding local-only data, is declared where the engine is put together rather than per run.
 
@@ -2327,8 +2450,16 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
   Give a table a rowversion column when its conflicts should be detected (see [Versionless tables and last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins)).
 - **Unbounded binary columns are not carried unless you ask for them** (`SyncOptions.IncludeUnboundedBinary`), and carrying them costs one round trip per column per changed row.
   See [Unbounded binary columns](#unbounded-binary-columns).
+- **Two rows whose unique values the server swapped are not applied.**
+  Bringing one of them forward needs the value the other one holds, so neither goes first.
+  When one batch holds rows that swapped a unique value (one row takes the value the other gives up), SQLite checks the constraint statement by statement and refuses the first of them, so that table's download stops at it on every run.
+  `SyncResult.Truncations` shows it as a stop at a row with no unsent change of its own and no missing parent, run after run.
+  `RefreshAsync` rebuilds the table and clears it.
+- **Rows the server deleted that refer to each other in a cycle stay on the device.**
+  Delete propagation removes a row only when nothing local refers to it, and no row of such a cycle qualifies first.
+  It takes the server clearing one of the references and that update reaching the device, which is also how the server itself has to delete them.
 - **Only a single-column foreign key to a synchronized table's primary key is followed.**
-  A foreign key that refers to a unique constraint, or spans several columns, is not: delete propagation does not keep the parents of a kept row through it, the download does not stop at a row whose parent's delete is unsent through it, and a write the server refuses through it is thrown rather than reported.
+  A foreign key that refers to a unique constraint, or spans several columns, is not: delete propagation does not keep a row a local row refers to through it, nor the parents of a kept row, the download neither brings in a missing parent through it nor stops at a row whose parent's delete is unsent through it, and a write the server refuses through it is thrown rather than reported.
 - **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.
 - **The HTTP transport requires `--generate-remote-services`.**
   Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.
@@ -2356,7 +2487,7 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
 - **Writing while a run is in flight is safe only within one process.**
   The locks that make it safe are per process, so another process writing the same local database file is not covered (see [Writing while a run is in flight](#writing-while-a-run-is-in-flight)).
 - **Keys are matched as text, ordinally.**
-  The journal and the receipt table hold the key as a string (a `byte[]` key as uppercase hex, a `Guid` by `ToString()`), and every comparison the engine makes (pending keys, receipts, delete propagation) is ordinal and case-sensitive.
+  The journal and the receipt table hold the key as a string (a `byte[]` key as uppercase hex, a `Guid` by `ToString()`, a `DateTime` key in round-trip form without its kind, since neither database keeps the kind), and every comparison the engine makes (pending keys, receipts, delete propagation) is ordinal and case-sensitive.
   The server, by contrast, looks its rows up with ordinary SQL equality on the key column, under that column's collation.
   On a case-insensitive column, then, `ABC` and `abc` are one row to the server and two separate journal and receipt entries locally.
   Keep the case of a text key stable, the same way [GUID keys](#guid-keys-for-string-primary-keys-useguidkeyforstringprimarykey) have to be.
@@ -2594,6 +2725,25 @@ That is also why the binary endpoints mark the 404 they produce themselves (see 
 They carry no idempotency key, so a request that in fact succeeded and lost its response on the way back would be applied a second time, producing a duplicate insert, or a second version bump that turns the next save into a spurious conflict.
 Retrying the read-only operations (`GetById`, `GetAll`, the named queries) and the health endpoint is safe, so scope the policy to those rather than to the whole client.
 
+**A request whose client has gone gets no response, and is not recorded as a server failure.**
+A connection the client reset or that was aborted is recognized by its exception type.
+Once the request's `RequestAborted` token has been signalled, a cancellation, an I/O failure, or a database exception (a driver reports the cancellation of its command in a type of its own, as SqlClient's `SqlException` does) counts as well.
+Such a request is recorded once at Debug level in the `QuickER.RemoteServer` category, and neither the error log nor the `OnServerError` hook hears of it.
+Any other failure stays a server failure (500, logged, hook raised) even when the client has gone: a client that gives up on a slow request is ordinary, and a fault on that slow path must still be seen.
+
+**On HTTP/2, a client that resets the stream part-way through the request body can still be recorded as a failure.**
+HTTP/2 reports the reset as a plain `IOException` with no type of its own, so it is recognized only when the request token has already been signalled.
+Under load the token can be signalled after the failure is classified, and the request is then answered as a 400 or a 500 with an Error log entry.
+HTTP/1.1 has no such gap, since its reset carries its own exception type.
+
+**A request the host's request timeout cuts short is answered with 504.**
+With the `RequestTimeouts` middleware (`AddRequestTimeouts`, `UseRequestTimeouts`, and `WithRequestTimeout` on the returned group), the failure the timeout causes is handed back to the middleware as a cancellation, and the middleware answers with its timeout status (504 by default).
+The client raises `RemoteRepositoryException` with that status, so a write that timed out is never reported as done.
+Once the response has started, the host drops the connection instead, and the client sees a truncated response rather than a complete one.
+When an upload times out while its body is still arriving, Kestrel records one Error in the `Microsoft.AspNetCore.Server.Kestrel` category ("automatic draining of the request body failed").
+That is Kestrel's cleanup of the body read the timeout cancelled, outside the generated endpoints, and the 504 still reaches the client.
+Middleware that replaces `RequestAborted` with a linked token of its own, rather than `RequestTimeouts`, cannot be told apart from a client that went away, and such a request ends without a response.
+
 ### Binary transfer endpoints (Stream accessors for unbounded binary columns)
 
 When combined with unbounded-binary exclusion (`--exclude-unbounded-binary-columns`), the excluded column's Stream accessors (`Read/Write{Column}Async`) are streamed over HTTP.
@@ -2619,13 +2769,17 @@ The following three endpoints are generated per excluded column, where `{column}
   The effective limit is the endpoint's own size-limit metadata when it has any, which is how the opt-in below lifts it, otherwise the limit the host publishes.
   Where the host publishes none, as in an out-of-process IIS deployment, Kestrel's default of 30,000,000 bytes stands in, so a deployment that cannot report its limit still rejects the same declarations rather than accepting any size.
   A host that lifts its limit globally without the opt-in is measured against that same default; use the opt-in, or attach size-limit metadata to the group, to lift it for these endpoints.
-  When a request is both oversized and carries a malformed `?id=`, the answer is the 413, because the key is restored inside the write, which this check runs ahead of.
+  The `?id=` key is restored before the length is looked at, so a request that both carries a malformed key and declares no length (411) or an oversized one (413) is answered with the 400 for the key.
 - **Lifting the request-size limit on binary PUT is opt-in**: `MapGeneratedRemoteEndpoints(access, prefix, exposeErrorDetails, allowUnboundedUploads)`.
   It defaults to `false`, so the limit above applies to these endpoints and a larger upload is rejected with 413.
   Pass `allowUnboundedUploads: true` to stream GB-scale blobs, and **pair it with `RemoteAccess.RequireAuthorization`, because an endpoint that accepts a body of any size is a denial-of-service surface**.
   The opt-in also removes the declared-length check, so a caller can make the server reserve storage for an arbitrary declared length on every request without sending a single byte of it; the reservation is rolled back when the request fails, but the I/O is spent regardless.
   Only the binary PUT endpoints are affected, since JSON endpoints always keep the host limit.
-  To set a limit of a different size, override the whole group via the returned `RouteGroupBuilder`.
+  The opt-in cannot be capped again from the returned `RouteGroupBuilder`: it is attached to the upload endpoints themselves, which take precedence over the group.
+  To set a limit of a different size, leave the opt-in off and attach size-limit metadata (such as `RequestSizeLimitAttribute`) to the returned group.
+- **A host that buffers request bodies (`EnableBuffering`) is supported.**
+  The upload reads the body forward from where it stands, for exactly the declared `Content-Length`, whatever length the buffered stream reports.
+  Middleware that reads part of the body before the endpoint must set `Request.Body.Position` back to 0, or the upload receives fewer bytes than declared and fails.
 - The client (`Http{Entity}RemoteRepository`) receives `GET` with `ResponseHeadersRead` and copies to the destination in O(chunks), and sends `PUT` with `StreamContent` including `Content-Length`.
   If you do not pass `length` for a non-seekable Stream, it throws `ArgumentException` before sending, which is the same length contract as the direct path.
   **The Stream you pass in stays yours**: the client neither closes nor disposes it, exactly as a direct connection does not, so switching between the two implementations does not change what happens to the stream.

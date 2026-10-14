@@ -9,6 +9,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider.MySql;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -351,7 +352,7 @@ public sealed class MySqlColumnClrTypeIntegrationTests(MySqlContainerFixture fix
         public DbSet<UnsignedRow> Rows => Set<UnsignedRow>();
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-            optionsBuilder.UseMySQL(connectionString);
+            optionsBuilder.UseMySQL(connectionString).IgnoreServiceProviderCacheLimit();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

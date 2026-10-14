@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using QuickER.Model;
 
 namespace QuickER.Provider;
@@ -26,7 +27,7 @@ public enum ColumnReorderMode
 /// （SQLite のテーブル再構築・MySQL のネイティブ列順変更など）をセクションへ振り分ける。
 /// </para>
 /// </remarks>
-public sealed record SyncDialectCapabilities
+public sealed partial record SyncDialectCapabilities
 {
     /// <summary><c>ALTER COLUMN</c>（型 / NULL 制約の変更）を逐次 DDL で実行できるか。</summary>
     public bool SupportsAlterColumn { get; init; } = true;
@@ -61,14 +62,14 @@ public sealed record SyncDialectCapabilities
     public bool AlterColumnRequiresKeyConstraintRebuild { get; init; }
 
     /// <summary>
-    /// 主キーを変える表自身が持つ外部キーのうち、旧主キーの索引に支えられているものを一旦外す必要があるか。
+    /// 外部キーが、子列を先頭に持つ索引を必要とするか（その索引を外す前に外部キーを一旦外す必要があるか）。
     /// </summary>
     /// <remarks>
-    /// MySQL は外部キーの子列を先頭に持つ索引を必須とし、旧主キーがその唯一の索引だと
-    /// <c>DROP PRIMARY KEY</c> がエラー 1553 になるため <c>true</c>（子列が旧主キーの先頭に乗る外部キーを外して付け直す。
-    /// 付け直しのとき MySQL が必要な索引を自動で作る）。
+    /// MySQL は外部キーの子列を先頭に持つ索引を必須とし、旧主キー・削除する一意制約の索引がその唯一の索引だと、
+    /// <c>DROP PRIMARY KEY</c> / <c>DROP INDEX</c> がエラー 1553 になるため <c>true</c>。<see cref="SyncPlanner"/> は、
+    /// 子列がそれらの索引の先頭に乗る外部キーを外して付け直す（付け直しのとき MySQL が必要な索引を自動で作る）。
     /// </remarks>
-    public bool PrimaryKeyChangeRequiresOwnForeignKeyRebuild { get; init; }
+    public bool ForeignKeyRequiresLeadingIndex { get; init; }
 
     /// <summary>外部キー制約名が DB に永続化されるか（SQLite は制約名が合成名で永続化されない）。</summary>
     public bool PersistsForeignKeyConstraintNames { get; init; } = true;
@@ -108,6 +109,63 @@ public sealed record SyncDialectCapabilities
     /// </remarks>
     public bool SupportsSetDefaultAction { get; init; } = true;
 
+    /// <summary>計算列・生成列の型を、式を変えずに <c>ALTER COLUMN</c> で変えられるか（PostgreSQL だけ）。</summary>
+    /// <remarks>
+    /// <para>
+    /// 意味モデルは計算列の式を持たないので、同期は式を書けない。PostgreSQL は <c>ALTER COLUMN ... TYPE</c> が生成列の
+    /// 式を保ったまま型だけを変える。SQL Server（計算列は <c>ALTER COLUMN</c> できない）と MySQL（式を書かない
+    /// <c>MODIFY</c> は生成列を通常の列へ変えようとして断られる）は失敗し、SQLite の再構築は式を落とす
+    /// （Oracle も式を書かない変更はできない）。
+    /// </para>
+    /// <para>
+    /// <c>false</c> の方言では、計算列の型の差分を選択できない案内項目にする（<see cref="SchemaDiffService"/>）。
+    /// NULL 許容は方言に依らず差分に出さない（計算列の NULL 許容は式が決める性質）。
+    /// </para>
+    /// </remarks>
+    public bool SupportsComputedColumnTypeChange { get; init; }
+
+    /// <summary>主キーと同じ列集合の一意制約を作れるか（SQLite と Oracle は作れない）。</summary>
+    /// <remarks>
+    /// SQLite は主キーと同じ列集合の <c>UNIQUE</c> を冗長として索引を作らず、取り込んでも現れない（差分が永久に消えない）。
+    /// Oracle は ORA-02261 で断る。<c>false</c> の方言では、図の主キーと同じ列集合の一意制約の追加を、
+    /// 選択できない案内項目にする（<see cref="SchemaDiffService"/>）。主キーが一意性を保証するので、失うものは無い。
+    /// </remarks>
+    public bool SupportsUniqueConstraintOnPrimaryKey { get; init; } = true;
+
+    /// <summary>
+    /// 複合外部キーが参照する列の並びが、参照先の主キー・一意制約の列の並びと一致する必要があるか（SQL Server・MySQL）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SQL Server（Msg 1776）と MySQL（Missing unique key）は、参照する列の並びがキーの列の並びと違うと外部キーを作れない。
+    /// PostgreSQL・Oracle・SQLite は列の集合が一致すれば並びを問わない（いずれもコンテナ・実ファイルで確認）。
+    /// </para>
+    /// <para>
+    /// <c>false</c> の方言では、外部キーの列ペアの並びは意味を持たないので、差分は列ペアを順不同で比べる
+    /// （<see cref="SchemaDiffService"/>）。Oracle のカタログは外部キーの列を参照先のキーの並びで記録し、宣言の並びを
+    /// 残さないため、並びまで比べると取り込み直すたびに作り直しの差分が出た。
+    /// </para>
+    /// </remarks>
+    public bool ReferencedKeyRequiresSameColumnOrder { get; init; } = true;
+
+    /// <summary>外部キーの両端の文字列型が、長さだけ違っていてもよいか（MySQL）。</summary>
+    /// <remarks>
+    /// MySQL は外部キーの両端の文字列型（<c>char</c> / <c>varchar</c> / <c>binary</c> / <c>varbinary</c>）の長さの違いを許す
+    /// （文字集合・照合順序は同じでなければならない）。<c>true</c> の方言では、同期後の外部キーの両端の型の照合
+    /// （<see cref="AreForeignKeyCompatibleTypes"/>）が長さだけの違いを食い違いとみなさない。食い違いとみなすと
+    /// 外部キーを外し直さず、片側の長さを変える列の変更が MySQL のエラー 1832 で失敗した。
+    /// </remarks>
+    public bool ForeignKeyAllowsStringLengthDifference { get; init; }
+
+    /// <summary>同期スクリプトの DDL がトランザクションで巻き戻るか（MySQL・Oracle は DDL を暗黙にコミットする）。</summary>
+    /// <remarks>
+    /// <c>false</c> の方言では、途中の文が失敗すると前の文が適用されたまま残る。外部キーを外した後の付け直しが
+    /// 失敗すると外部キーが消えたまま残るため、<see cref="SyncPlanner"/> は付け直しが必ず失敗する変更
+    /// （<see cref="ReferencedKeyRequiresSameColumnOrder"/> の方言で、参照される複合キーの列の並びだけが合わなくなる変更）
+    /// を計画から外して警告する。
+    /// </remarks>
+    public bool TransactionalDdl { get; init; } = true;
+
     /// <summary>この方言の識別子（テーブル名・列名・制約名）の長さの上限</summary>
     /// <remarks>
     /// 各方言の識別子クラスの <c>Limit</c>（値の正本は Model の <see cref="IdentifierLengthLimits"/>）を指す。
@@ -137,6 +195,48 @@ public sealed record SyncDialectCapabilities
             NormalizeTypeNotation(left ?? string.Empty),
             NormalizeTypeNotation(right ?? string.Empty)
         );
+
+    /// <summary>2 つの型表記が、この方言で外部キーの両端に並べられるか（同期後の外部キーの型の照合に使う）</summary>
+    /// <remarks>
+    /// <see cref="AreSameType"/> で同じ型なら並べられる。<see cref="ForeignKeyAllowsStringLengthDifference"/> が
+    /// <c>true</c> の方言では、同じ文字列型で長さだけが違う型（<c>varchar(50)</c> と <c>varchar(100)</c>。括弧の後ろの
+    /// 文字集合などの指定は同じであること）も並べられる。
+    /// </remarks>
+    public bool AreForeignKeyCompatibleTypes(string? left, string? right)
+    {
+        if (AreSameType(left, right))
+        {
+            return true;
+        }
+
+        if (!ForeignKeyAllowsStringLengthDifference)
+        {
+            return false;
+        }
+
+        var l = StringTypePattern().Match(NormalizeTypeNotation(left ?? string.Empty));
+        var r = StringTypePattern().Match(NormalizeTypeNotation(right ?? string.Empty));
+
+        return l.Success
+            && r.Success
+            && string.Equals(
+                l.Groups["base"].Value,
+                r.Groups["base"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+            && string.Equals(
+                l.Groups["rest"].Value.Trim(),
+                r.Groups["rest"].Value.Trim(),
+                StringComparison.OrdinalIgnoreCase
+            );
+    }
+
+    /// <summary>長さを持つ文字列型の表記（基本の型・長さ・括弧の後ろの指定）</summary>
+    [GeneratedRegex(
+        @"^\s*(?<base>char|varchar|binary|varbinary)\s*\(\s*\d+\s*\)(?<rest>.*)$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline
+    )]
+    private static partial Regex StringTypePattern();
 
     /// <summary>この方言の DB で実際に効く <c>ON DELETE</c> の参照アクション</summary>
     public ForeignKeyReferentialAction EffectiveOnDelete(ForeignKeyReferentialAction action) =>

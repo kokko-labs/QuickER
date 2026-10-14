@@ -490,4 +490,99 @@ public sealed class RemoteServerEngineRuntimeTests
         log.Lines.Should().BeEmpty("切断はサーバーの失敗としてログに残さない");
         AssertAbortRequest(probe, reset, timing);
     }
+
+    /// <summary>すでに時間切れになった、サーバーのタイムアウトの機能（RequestTimeouts が置くものの代わり）</summary>
+    private sealed class ExpiredTimeout
+        : Microsoft.AspNetCore.Http.Timeouts.IHttpRequestTimeoutFeature
+    {
+        public CancellationToken RequestTimeoutToken { get; } = new(canceled: true);
+
+        public void DisableTimeout() { }
+    }
+
+    /// <summary>
+    /// サーバーのタイムアウトは、要求のトークンが立つ時期に依らず、取り消しとしてミドルウェアへ返る。
+    /// </summary>
+    /// <remarks>
+    /// RequestTimeouts は、自分のトークン（<c>RequestTimeoutToken</c>）を先に立て、それに連結した要求のトークンが後に続く。
+    /// 本文の読み取りが待っているところでタイムアウトが来ると、Kestrel の本文の読み取りの例外が要求のトークンより先に
+    /// 上がり得るので、判定はタイムアウトの機能のトークンだけを見る。ここでは要求のトークンを一度も立てずに、
+    /// タイムアウトの機能だけを時間切れにして、エンジンが失敗を取り消しとして外へ渡すこと（RequestTimeouts が 504 で
+    /// 答えられる形）と、サーバーの障害として記録しないことを確かめる。
+    /// </remarks>
+    [Theory(
+        DisplayName = "[RemoteServerEngine] サーバーのタイムアウトは、要求のトークンが立っていなくても、取り消しとしてミドルウェアへ返る"
+    )]
+    [InlineData("io")]
+    [InlineData("cancel")]
+    public async Task ServerTimeout_IsHandedBackAsCancellation_WhateverTheRequestToken(
+        string failure
+    )
+    {
+        var log = new ErrorLog();
+        Exception? handedBack = null;
+        var requestAbortedAtClassification = (bool?)null;
+
+        await using var app = await StartAsync(
+            app =>
+            {
+                // RequestTimeouts の代わり: タイムアウトの機能を置き、外へ返った失敗を受け取って 504 で答える
+                app.Use(
+                    async (context, next) =>
+                    {
+                        context.Features.Set<Microsoft.AspNetCore.Http.Timeouts.IHttpRequestTimeoutFeature>(
+                            new ExpiredTimeout()
+                        );
+
+                        try
+                        {
+                            await next(context);
+                        }
+                        catch (Exception ex)
+                        {
+                            handedBack = ex;
+                            context.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+                        }
+                    }
+                );
+                app.MapPost(
+                    "/timed-out",
+                    (HttpContext context) =>
+                        RemoteServerEngine.ExecuteAsync(
+                            context,
+                            () =>
+                            {
+                                requestAbortedAtClassification = context
+                                    .RequestAborted
+                                    .IsCancellationRequested;
+
+                                // 本文の読み取りが先に投げる形（IOException）と、取り消しそのもの
+                                throw failure == "io"
+                                    ? new IOException("The request body read failed.")
+                                    : new OperationCanceledException("The read was cancelled.");
+                            }
+                        )
+                );
+            },
+            log
+        );
+
+        using var client = new HttpClient();
+        using var response = await client.PostAsync(
+            $"{app.Urls.First()}/timed-out",
+            new StringContent("{}"),
+            Ct
+        );
+
+        requestAbortedAtClassification.Should().BeFalse("要求のトークンは立っていない");
+        response.StatusCode.Should().Be(HttpStatusCode.GatewayTimeout);
+        handedBack.Should().BeAssignableTo<OperationCanceledException>();
+
+        if (failure == "io")
+        {
+            handedBack!.InnerException.Should().BeOfType<IOException>("元の失敗は内側に残す");
+        }
+
+        log.Lines.Should().BeEmpty("サーバーのタイムアウトはサーバーの障害として記録しない");
+    }
 }

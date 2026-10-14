@@ -344,6 +344,18 @@
     <value>注意: 列の変更で、以下の外部キーの両端の列の型が一致しなくなります。外部キーは外して付け直さないため、列の変更は失敗します（DB は変わりません）。両端の列を同じ型へ揃えてください:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmSelectedItemRequiresUnselected" xml:space="preserve">
+    <value>注意: 以下の選んだ変更は、選んでいない変更（表・列の追加か主キーの変更。括弧内）を前提にするため実行しません。適用するには、その変更も選んでください:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey" xml:space="preserve">
+    <value>注意: 以下の外部キーは、同期後の参照先の列が主キーにも一意制約にもちょうど一致しません（SQL Server と MySQL は列の並びまでの一致が必要です）。追加は失敗する可能性が高く、既存の外部キーの作り直しでは、MySQL / Oracle で外部キーが外れたまま残り得ます:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch" xml:space="preserve">
+    <value>注意: 以下の変更は実行しません。外部キーの列の並びが参照先のキーの並びと合わなくなり、MySQL ではその外部キーを付け直せない（外れたまま残る）ためです。適用するには、外部キーの削除も選んで先に外すか、手で付け替えてください:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">
     <value>注意: テーブルの再構築は図の定義から作り直すため、既定値や CHECK 制約といった列の属性、制約の句、WITHOUT ROWID などのテーブルオプションは図が持っておらず再現されません。以下は現在の DB にある属性で、再構築後は失われます（インデックス・トリガーは温存されます）:
 {0}</value>

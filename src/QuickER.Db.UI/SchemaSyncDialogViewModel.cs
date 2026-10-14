@@ -571,6 +571,21 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmForeignKeyTypeMismatch,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // 選んでいない表・列の追加・主キーの変更を前提にする項目は計画から外した
+            SyncPlanWarningKind.SelectedItemRequiresUnselectedItem => string.Format(
+                Strings.SchemaSync_ExecuteConfirmSelectedItemRequiresUnselected,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
+            // 選んだ外部キーの追加・作り直しの参照先が、同期後に候補キーでない
+            SyncPlanWarningKind.ForeignKeyNotOnCandidateKey => string.Format(
+                Strings.SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
+            // 参照される複合キーと外部キーの列の並びだけが合わなくなる変更を外した（MySQL）
+            SyncPlanWarningKind.ForeignKeyKeyOrderMismatch => string.Format(
+                Strings.SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

@@ -41,6 +41,9 @@ public sealed class OracleProvider : IDatabaseProvider
         {
             SupportsOnUpdateAction = false,
             SupportsSetDefaultAction = false,
+            SupportsUniqueConstraintOnPrimaryKey = false,
+            ReferencedKeyRequiresSameColumnOrder = false,
+            TransactionalDdl = false,
             NormalizeTypeNotation = OracleTypeNotation.Normalize,
             IdentifierLengthLimit = OracleIdentifier.Limit,
         };

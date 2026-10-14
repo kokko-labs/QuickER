@@ -65,7 +65,11 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
                 Database("ado", (probe, cs) => DslFuzzProbe.Ado(probe, cs)),
                 Database(
                     "efcore",
-                    (probe, cs) => DslFuzzProbe.EfCore(probe, options => options.UseSqlServer(cs))
+                    (probe, cs) =>
+                        DslFuzzProbe.EfCore(
+                            probe,
+                            options => options.UseSqlServer(cs).IgnoreServiceProviderCacheLimit()
+                        )
                 ),
             ]
         );

@@ -64,6 +64,7 @@
     Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken);
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
+    /// <returns>The number of rows deleted, the matching rows and (with cascadeDelete) their descendants together.</returns>
     Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
@@ -438,7 +439,9 @@
     /// The judgement goes through the interface map of <see cref="IStringMatchValueObject{TSelf}"/>, so only the type that
     /// actually implements those members qualifies. Testing the name against a type that merely implements the interface
     /// would also claim a <c>Contains</c> a concrete value object declares for itself, which is an ordinary method call
-    /// rather than a column-side match.
+    /// rather than a column-side match. The methods are compared by handle, so a <see cref="MethodInfo"/> taken from the
+    /// concrete value object type (whose <see cref="MemberInfo.ReflectedType"/> differs from the one the compiler uses) is
+    /// recognized as well.
     /// </remarks>
     private static bool IsValueObjectStringMethod(MethodInfo method) =>
         StringMatchMethodCache.GetOrAdd(
@@ -458,7 +461,10 @@
                 );
 
                 return contract is not null
-                    && Array.IndexOf(declaring.GetInterfaceMap(contract).TargetMethods, m) >= 0;
+                    && Array.Exists(
+                        declaring.GetInterfaceMap(contract).TargetMethods,
+                        target => target.MethodHandle == m.MethodHandle
+                    );
             }
         );
 
@@ -701,6 +707,8 @@ public sealed class SqlQuery<TEntity>
     }
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
+    /// <returns>The number of rows deleted, the matching rows and (with cascadeDelete) their descendants together.</returns>
+    /// <remarks>A cyclic cascade is refused with <see cref="NotSupportedException"/> before any statement runs.</remarks>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
@@ -2652,7 +2660,9 @@ internal sealed class ColumnNamingValueObjectConverter<TVo>(Type entityType, Pro
     /// The judgement goes through the interface map of <see cref="IStringMatchValueObject{TSelf}"/>, so only the type that
     /// actually implements those members qualifies. Testing the name against a type that merely implements the interface
     /// would also claim a <c>Contains</c> a concrete value object declares for itself, which is an ordinary method call
-    /// rather than a column-side match.
+    /// rather than a column-side match. The methods are compared by handle, so a <see cref="MethodInfo"/> taken from the
+    /// concrete value object type (whose <see cref="MemberInfo.ReflectedType"/> differs from the one the compiler uses) is
+    /// recognized as well.
     /// </remarks>
     private static bool IsValueObjectStringMethod(MethodInfo method) =>
         StringMatchMethodCache.GetOrAdd(
@@ -2672,7 +2682,10 @@ internal sealed class ColumnNamingValueObjectConverter<TVo>(Type entityType, Pro
                 );
 
                 return contract is not null
-                    && Array.IndexOf(declaring.GetInterfaceMap(contract).TargetMethods, m) >= 0;
+                    && Array.Exists(
+                        declaring.GetInterfaceMap(contract).TargetMethods,
+                        target => target.MethodHandle == m.MethodHandle
+                    );
             }
         );
 

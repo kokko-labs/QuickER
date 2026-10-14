@@ -1,6 +1,9 @@
 // QuickER 公開 API スナップショット: QuickER.Runtime
 // 手編集しない。更新は QUICKER_REGEN_FIXTURES=1 での再生成（失敗メッセージにコマンドあり）。
 
+public static class QuickER.Runtime.CascadeCollections
+    public static void RemoveDeletedChildren(QuickER.Runtime.EntityBaseCore parent, System.Func<QuickER.Runtime.EntityBaseCore, bool> isSkipped)
+
 public sealed class QuickER.Runtime.CascadeNavigation : System.IEquatable<QuickER.Runtime.CascadeNavigation>
     public .ctor(System.Reflection.PropertyInfo Property, bool IsCollection, System.Type ChildType, string PrincipalColumn, string DependentColumn)
     public System.Reflection.PropertyInfo Property { get; init; }
@@ -516,6 +519,7 @@ public sealed class QuickER.Runtime.SaveConflictException : System.Exception, Sy
     public QuickER.Runtime.SaveConflictReason Reason { get; }
     public static QuickER.Runtime.SaveConflictException Modified(System.Type entityType, object key, string operation)
     public static QuickER.Runtime.SaveConflictException NotFound(System.Type entityType, object key)
+    public static QuickER.Runtime.SaveConflictException NotFound(System.Type entityType, object key, string operation)
     public string EntityTypeName { get; }
     public string Key { get; }
 

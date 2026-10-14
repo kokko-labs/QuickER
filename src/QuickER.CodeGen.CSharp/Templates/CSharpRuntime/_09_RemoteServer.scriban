@@ -42,6 +42,13 @@
     /// response side down before throwing, so the answer is recorded on the server but never reaches the wire.
     /// </para>
     /// <para>
+    /// A request the host's request timeout (the <c>RequestTimeouts</c> middleware) cut short is handed back to that
+    /// middleware as a cancellation (see <see cref="IsServerTimeout"/>), whatever the failure that surfaced: the middleware
+    /// answers it with its timeout status (504 by default), or, once the response has started, lets the host drop the
+    /// connection so that the client sees a truncated response. Treating it as a disconnect would end the request as an
+    /// empty 200, which a client takes for success.
+    /// </para>
+    /// <para>
     /// A request whose client has gone otherwise - the connection was reset or aborted, or the request was cancelled (see
     /// <see cref="IsClientDisconnect"/>) - is left without a response, and the host is told to drop the connection (see
     /// <see cref="AbandonConnection"/>): there is no one to read it. The read of a request
@@ -74,9 +81,25 @@
             // Rejected by the server infrastructure (request body size limit, malformed or truncated request): pass through the status code it carries (413 and similar).
             respond = () => WriteErrorAsync(context, ex.StatusCode, "BadRequest", ex.Message);
         }
+        catch (OperationCanceledException) when (IsServerTimeout(context))
+        {
+            // The host's request timeout fired: the timeout middleware answers it (504 by default)
+            throw;
+        }
+        catch (Exception ex) when (IsServerTimeout(context))
+        {
+            // The same, reported by a component in a type of its own (a storage driver cancelling its command): the
+            // middleware recognizes a cancellation only, so the failure is handed over as one
+            throw new OperationCanceledException(
+                "The request timed out on the server.",
+                ex,
+                context.Features.Get<Microsoft.AspNetCore.Http.Timeouts.IHttpRequestTimeoutFeature>()!.RequestTimeoutToken
+            );
+        }
         catch (Exception ex) when (IsClientDisconnect(context, ex))
         {
             // Client disconnected or cancelled: there is no longer a response target, so nothing is written.
+            LogClientDisconnect(context, ex);
             AbandonConnection(context);
             return;
         }
@@ -120,8 +143,41 @@
         catch (Exception ex) when (IsClientDisconnect(context, ex))
         {
             // The client went away while the answer was being written: there is no one left to receive it.
+            LogClientDisconnect(context, ex);
             AbandonConnection(context);
         }
+    }
+
+    /// <summary>Whether the host's request timeout has cut the request short.</summary>
+    /// <remarks>
+    /// The <c>RequestTimeouts</c> middleware publishes <see cref="Microsoft.AspNetCore.Http.Timeouts.IHttpRequestTimeoutFeature"/>
+    /// and signals its <c>RequestTimeoutToken</c> before the request token it links to it, so the timeout is known by the
+    /// time any failure it causes is classified, whichever failure surfaces first. Middleware that replaces
+    /// <see cref="HttpContext.RequestAborted"/> with a linked token of its own publishes no such feature: its cancellation
+    /// cannot be told apart from a client that went away, and is treated as one.
+    /// </remarks>
+    private static bool IsServerTimeout(HttpContext context) =>
+        context.Features.Get<Microsoft.AspNetCore.Http.Timeouts.IHttpRequestTimeoutFeature>()
+            ?.RequestTimeoutToken.IsCancellationRequested == true;
+
+    /// <summary>Records, at Debug level, a request left without a response because its client had gone.</summary>
+    /// <remarks>
+    /// A disconnect is not a server-side failure, so neither the error log nor the <c>OnServerError</c> hook hears of it;
+    /// this line keeps the failure that reported it findable when the host's log level asks for it.
+    /// </remarks>
+    private static void LogClientDisconnect(HttpContext context, Exception ex)
+    {
+        var loggerFactory = context.RequestServices.GetService<ILoggerFactory>();
+
+        loggerFactory
+            ?.CreateLogger("QuickER.RemoteServer")
+            .LogDebug(
+                ex,
+                "The client went away while {Method} {Path} was being handled; no response is written (correlation id: {CorrelationId}).",
+                context.Request.Method,
+                context.Request.Path,
+                context.TraceIdentifier
+            );
     }
 
     /// <summary>Tells the host that the connection of a request whose client has gone is to be dropped, unless it already knows.</summary>
@@ -152,7 +208,14 @@
     /// Cancellation and other I/O failures count only once <see cref="HttpContext.RequestAborted"/> has been signalled.
     /// The host signals it after the failure that reports the disconnect has already been thrown (Kestrel schedules the
     /// cancellation on the thread pool), so the token alone cannot be relied on to be set by the time a failure is
-    /// classified; the exception types above do not depend on that timing.
+    /// classified; the exception types above do not depend on that timing. An HTTP/2 stream the client reset reports
+    /// itself as a plain <see cref="System.IO.IOException"/>, with no type of its own, so on HTTP/2 that timing remains.
+    /// </para>
+    /// <para>
+    /// A storage driver reports the cancellation of its command in a type of its own (SqlClient throws a
+    /// <c>SqlException</c>), so once the token has been signalled a <see cref="System.Data.Common.DbException"/> anywhere
+    /// in the chain counts as well. Any other failure stays a server-side failure even then: a client that gives up on a
+    /// slow request is ordinary, and a fault on that slow path must still reach the error log and the hook.
     /// </para>
     /// </remarks>
     private static bool IsClientDisconnect(HttpContext context, Exception ex)
@@ -169,8 +232,25 @@
             }
         }
 
-        return ex is (OperationCanceledException or System.IO.IOException)
-            && context.RequestAborted.IsCancellationRequested;
+        if (!context.RequestAborted.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        if (ex is OperationCanceledException or System.IO.IOException)
+        {
+            return true;
+        }
+
+        for (Exception? current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is System.Data.Common.DbException)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The 500 message sent while error details are hidden (the real one stays in the server log).</summary>
@@ -194,7 +274,17 @@
         var policy = context.GetEndpoint()?.Metadata.GetMetadata<RemoteErrorDetailPolicy>();
 
         LogServerError(context, ex);
-        policy?.OnServerError?.Invoke(context, ex);
+
+        // A hook that throws must not replace the failure being reported, nor stop its 500 body from being written: its
+        // own failure is logged as a separate entry
+        try
+        {
+            policy?.OnServerError?.Invoke(context, ex);
+        }
+        catch (Exception hookFailure)
+        {
+            LogServerError(context, hookFailure);
+        }
 
         var expose = policy?.Expose ?? false;
 
@@ -453,12 +543,32 @@
     public static Task ExecuteUploadAsync(
         HttpContext context,
         Func<Stream, long, Task<bool>> write
+    ) => ExecuteUploadCoreAsync(context, readKey: null, write);
+
+    /// <summary>
+    /// The body of <see cref="ExecuteUploadAsync"/>, with an optional step that reads the request's key before the
+    /// Content-Length is looked at (<see cref="MapBinaryColumn{TKey}"/> passes it, so that an unusable key is answered
+    /// with 400 whatever the length declares).
+    /// </summary>
+    /// <remarks>
+    /// The body is handed to the write through <see cref="ForwardOnlyRequestBody"/>. A host that buffers request bodies
+    /// (<c>EnableBuffering</c>) makes <see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/> seekable, with a length
+    /// that covers only what has been buffered so far, and a write takes a seekable stream's remaining length as the
+    /// truth: every upload would fail against the declared Content-Length. The declared length is what the transfer
+    /// promises, and the write reads exactly that much (a body that ends early or runs over is refused).
+    /// </remarks>
+    private static Task ExecuteUploadCoreAsync(
+        HttpContext context,
+        Action? readKey,
+        Func<Stream, long, Task<bool>> write
     )
     {
         return ClassifyFailuresAsync(
             context,
             async () =>
             {
+                readKey?.Invoke();
+
                 var length = context.Request.ContentLength;
 
                 if (length is null)
@@ -492,7 +602,11 @@
                     return;
                 }
 
-                var updated = await write(context.Request.Body, length.Value).ConfigureAwait(false);
+                var updated = await write(
+                        new ForwardOnlyRequestBody(context.Request.Body),
+                        length.Value
+                    )
+                    .ConfigureAwait(false);
 
                 if (!updated)
                 {
@@ -503,6 +617,51 @@
                 context.Response.StatusCode = StatusCodes.Status204NoContent;
             }
         );
+    }
+
+    /// <summary>A forward-only view of a request body: it hides the seekability a buffering host gives the body (see <see cref="ExecuteUploadCoreAsync"/>).</summary>
+    private sealed class ForwardOnlyRequestBody(Stream inner) : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            inner.Read(buffer, offset, count);
+
+        public override int Read(Span<byte> buffer) => inner.Read(buffer);
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken
+        ) => inner.ReadAsync(buffer, offset, count, cancellationToken);
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default
+        ) => inner.ReadAsync(buffer, cancellationToken);
+
+        public override void Flush() { }
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 
     /// <summary>Kestrel's out-of-the-box request body size limit, used as the fallback when the host publishes none.</summary>
@@ -576,8 +735,9 @@
     /// </para>
     /// <para>
     /// The key is restored inside each handler rather than before it, which keeps a malformed <c>?id=</c> inside the try
-    /// of the wrapper that classifies it as 400. A DELETE is a write of a null source, so NULLing the column stays
-    /// structurally distinct from uploading an empty body.
+    /// of the wrapper that classifies it as 400; an upload restores it before checking the declared length, so that the
+    /// key is answered first. A DELETE is a write of a null source, so NULLing the column stays structurally distinct
+    /// from uploading an empty body.
     /// </para>
     /// </remarks>
     public static void MapBinaryColumn<TKey>(
@@ -600,11 +760,16 @@
         var upload = group.MapPut(
             columnRoute,
             (HttpContext context) =>
-                ExecuteUploadAsync(
+            {
+                // The key is read first, ahead of the length checks of the upload (411 / 413)
+                var key = default(TKey)!;
+
+                return ExecuteUploadCoreAsync(
                     context,
-                    (body, length) =>
-                        write(context, ParseKeyFromQuery<TKey>(context), body, length)
-                )
+                    () => key = ParseKeyFromQuery<TKey>(context),
+                    (body, length) => write(context, key, body, length)
+                );
+            }
         );
 
         if (allowUnboundedUploads)
@@ -943,7 +1108,9 @@ public enum RemoteAccess
 /// a larger upload is rejected with HTTP 413. Because an endpoint
 /// that accepts a body of any size is a denial-of-service surface, combining the opt-in with
 /// <see cref="RemoteAccess.RequireAuthorization"/> is recommended.
-/// To set a limit of a different size, override the whole group via the returned <see cref="RouteGroupBuilder"/>.
+/// The opt-in cannot be capped again from the returned <see cref="RouteGroupBuilder"/>: this metadata is attached to the
+/// upload endpoint itself, which comes after the group's metadata and therefore wins. To set a limit of a different size,
+/// leave the opt-in off and attach size-limit metadata (such as <c>RequestSizeLimitAttribute</c>) to the returned group.
 /// </remarks>
 {{ infra_visibility }} sealed class DisableRequestBodySizeLimit : IRequestSizeLimitMetadata
 {
@@ -1158,8 +1325,9 @@ public static partial class GeneratedRemoteEndpoints
     /// request body size limit. It is off by default, so an upload larger than the limit the host applies - 30 MB under
     /// Kestrel's defaults - is rejected with HTTP 413 like any other request. Turn it on to stream blobs of arbitrary
     /// size, and pair it with <see cref="RemoteAccess.RequireAuthorization"/>: an
-    /// endpoint that accepts a body of any size is a denial-of-service surface. Only these endpoints are affected; a
-    /// different limit can be set on the returned group instead.
+    /// endpoint that accepts a body of any size is a denial-of-service surface. Only these endpoints are affected. To set
+    /// a limit of a different size, leave this off and attach size-limit metadata to the returned group: with this on,
+    /// the group's limit no longer applies to the upload endpoints.
     /// </param>
 {{~ end ~}}
     /// <returns>The endpoint group, to which authorization and similar concerns can be applied.</returns>

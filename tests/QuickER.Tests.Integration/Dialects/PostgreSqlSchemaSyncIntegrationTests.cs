@@ -445,6 +445,52 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
         result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
     }
 
+    /// <summary>
+    /// 生成列の型の変更は PostgreSQL では選べて式を保ったまま適用され、図の NULL 許容（NOT NULL を外す）は持ち込まない
+    /// ことを検証する（以前は図の NULL 許容まで適用し、説明に出ないまま NOT NULL が外れ、以後は差分にも出なかった）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] C: 生成列の型の変更は式を保って適用され、NOT NULL を外さない"
+    )]
+    public async Task ComputedColumnTypeChange_KeepsExpressionAndNotNull()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            "CREATE TABLE gen_item (id integer NOT NULL PRIMARY KEY, price integer NOT NULL, "
+                + "total integer GENERATED ALWAYS AS (price + 1) STORED NOT NULL);"
+                + "INSERT INTO gen_item (id, price) VALUES (1, 10);",
+            Ct
+        );
+
+        var live = await ImportAsync();
+        var target = live.Entities.Select(CloneAsTarget).ToList();
+        var total = target.Single().Columns.Single(c => c.Name == "total");
+        total.DataType = "bigint";
+        total.IsNullable = true;
+
+        var diff = _diff.Compute(
+            live.Entities,
+            live.Relationships,
+            target,
+            [],
+            new PostgreSqlProvider().SyncCapabilities
+        );
+        var alter = diff.Items.Should().ContainSingle().Which;
+        alter.IsSelectable.Should().BeTrue();
+        alter.IsSelected = true;
+
+        await ApplyAsync(fixture.ToDbConnectionSettings(), diff.Items);
+
+        var after = (await ImportAsync()).Entities.Single().Columns.Single(c => c.Name == "total");
+        after.DataType.Should().Be("bigint");
+        after.IsComputed.Should().BeTrue();
+        after.IsNullable.Should().BeFalse();
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = new Npgsql.NpgsqlCommand("SELECT total FROM gen_item", conn);
+        (await cmd.ExecuteScalarAsync(Ct)).Should().Be(11L);
+    }
+
     /// <summary>図に足した一意制約が実 DB へ追加され、外した一意制約が実 DB から消えることを検証する</summary>
     [Fact(DisplayName = "[Integration] C: 一意制約の追加・削除が実 DB へ反映される")]
     public async Task UniqueConstraintSync_AddsAndDrops()

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedQueryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -38,7 +39,9 @@ public sealed class IncludeGraphSelfReferenceEfCoreRuntimeTests
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>
-                options.UseSqlite(_db.ReadWriteCreateConnectionString)
+                options
+                    .UseSqlite(_db.ReadWriteCreateConnectionString)
+                    .IgnoreServiceProviderCacheLimit()
             )
             .BuildServiceProvider();
 

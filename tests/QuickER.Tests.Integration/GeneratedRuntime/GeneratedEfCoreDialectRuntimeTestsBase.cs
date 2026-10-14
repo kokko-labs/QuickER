@@ -156,6 +156,33 @@ public abstract class GeneratedEfCoreDialectRuntimeTestsBase
     }
 
     /// <summary>
+    /// 2c. 空文字列の Contains: C# の <c>string.Contains("")</c> と同じく全行に一致し、その否定は 0 行になる。
+    /// </summary>
+    /// <remarks>
+    /// Oracle は空文字列のパラメータを NULL として扱うが、NULL の連結は残りの文字列になるので、パターンは
+    /// <c>'%' || NULL || '%'</c>＝<c>'%%'</c> になり全行に一致する（ほかの方言は空文字列のまま <c>'%%'</c>）。
+    /// 空文字列のこの挙動を固定するテストで、Oracle の翻訳器が null のパターンに添える <c>IS NOT NULL</c> の
+    /// ガードではない（null かどうかは EF Core が C# の値で判断するので、空文字列では <c>IS NOT NULL</c> が SQL から消え、
+    /// 添えても外しても結果が変わらない）。そのガードは Oracle の派生の「null のパターン」のケース。
+    /// </remarks>
+    [Fact(DisplayName = "[Dialect] 2c: 空文字列の Contains は全行に一致し、その否定は 0 行になる")]
+    public async Task Where_ContainsEmptyString_MatchesEveryRow()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var repo = CreateCustomerRepository();
+        await repo.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob"), Ct);
+
+        var empty = "";
+        var contains = await repo.Query().Where(c => c.Name.Contains(empty)).ToListAsync(Ct);
+        contains.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1, 2]);
+
+        var notContains = await repo.Query().Where(c => !c.Name.Contains(empty)).ToListAsync(Ct);
+        notContains.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// 2b. LIKE の <c>[</c> を含む Contains（予見リスク: SQL Server は文字クラス開始のためエスケープ必須。
     /// Oracle は非ワイルドカードのエスケープを ORA-01424 で拒否する）。方言横断でリテラル一致することを検証する。
     /// </summary>

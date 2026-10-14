@@ -8,6 +8,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.Sqlite;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.CodeGen.CSharp;
@@ -142,7 +143,7 @@ public class QueryNegationExecutionTests
             }
 
             Action<DbContextOptionsBuilder> configureEfCore = options =>
-                options.UseSqlite(connectionString);
+                options.UseSqlite(connectionString).IgnoreServiceProviderCacheLimit();
             var results = await (Task<string[]>)
                 probe.GetMethod("RunAllAsync")!.Invoke(null, [connectionString, configureEfCore])!;
 
