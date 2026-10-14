@@ -76,6 +76,7 @@ public sealed class QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata.RawSq
 
 public struct QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior : System.IEquatable<QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior>
     public .ctor(string EscapeChar, bool EscapeBracket, bool EmitEscapeClause)
+    public bool ConcatenationSkipsNull { get; init; }
     public bool EmitEscapeClause { get; init; }
     public bool EscapeBracket { get; init; }
     public static QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior FromProviderName(string providerName)
@@ -89,6 +90,7 @@ public sealed class QuickER.Runtime.EntityFrameworkCore.SaveHookSession
     public void Skip(QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.EntityFrameworkCore.ValueObjectStringMethodTranslator : Microsoft.EntityFrameworkCore.Query.IMethodCallTranslator
+    public .ctor(Microsoft.EntityFrameworkCore.Query.ISqlExpressionFactory sqlExpressionFactory, Microsoft.EntityFrameworkCore.Storage.RelationalTypeMapping stringTypeMapping, Microsoft.EntityFrameworkCore.Storage.RelationalTypeMapping nonUnicodeStringTypeMapping, QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior escapeBehavior)
     public .ctor(Microsoft.EntityFrameworkCore.Query.ISqlExpressionFactory sqlExpressionFactory, Microsoft.EntityFrameworkCore.Storage.RelationalTypeMapping stringTypeMapping, QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior escapeBehavior)
     public Microsoft.EntityFrameworkCore.Query.SqlExpressions.SqlExpression Translate(Microsoft.EntityFrameworkCore.Query.SqlExpressions.SqlExpression instance, System.Reflection.MethodInfo method, System.Collections.Generic.IReadOnlyList<Microsoft.EntityFrameworkCore.Query.SqlExpressions.SqlExpression> arguments, Microsoft.EntityFrameworkCore.Diagnostics.IDiagnosticsLogger<Microsoft.EntityFrameworkCore.DbLoggerCategory.Query> logger)
 

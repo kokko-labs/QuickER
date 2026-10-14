@@ -540,7 +540,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
             .Be(HttpStatusCode.NoContent, "上限を解除した側では同じ宣言長が素通しする");
         unboundedWriteCalled.Should().BeTrue("解除側では書き込みまで到達する");
 
-        // 上限超過と `?id=` 不正が同時に成立する場合は 413 が先（キーの復元は write 側＝この検査の後段で行われる）
+        // 上限超過と `?id=` 不正が同時に成立する場合は 400 が先（キーは宣言長の検査より前に復元する）
         using var both = await PutBinaryAsync(
             raw,
             $"{server.BaseUrl}/bounded/Blob?id=xyz",
@@ -549,8 +549,8 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
 
         both.StatusCode.Should()
             .Be(
-                HttpStatusCode.RequestEntityTooLarge,
-                "宣言長の検査はキーの復元より前にあるため 400 ではなく 413 になる"
+                HttpStatusCode.BadRequest,
+                "キーの復元は宣言長の検査より前にあるため 413 ではなく 400 になる"
             );
     }
 

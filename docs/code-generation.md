@@ -333,6 +333,11 @@ A navigation has no column of its own, so filter on the foreign-key column inste
 The in-memory backend refuses it in the same way, because the rows it stores carry no navigations to evaluate.
 EF Core translates such a predicate into a join of its own, so there the limitation does not apply.
 
+**`ExecuteDeleteAsync` deletes the rows the conditions match.**
+With `cascadeDelete: true` it deletes their descendants along the cascade first, and the number it returns counts every row it deleted, the matching rows and their descendants together.
+A cyclic cascade is refused with `NotSupportedException` before any statement runs.
+On EF Core, where a condition may read a navigation, the keys of the matching rows are read first and the deletes go by those keys, so a condition such as `o => o.OrderLines.Any()` deletes the matching rows together with their descendants (the conditions are not evaluated again once the descendants are gone).
+
 #### Null compensation
 
 Nulls in an equality comparison and in an IN search are compensated so that every backend agrees with C# and EF Core.
@@ -480,6 +485,14 @@ A freshly built aggregate is therefore marked in one call instead of one call pe
 Only `MarkAdded` offers the cascading form.
 Marking a whole graph for update would rewrite every row including the untouched ones, and marking a whole graph for removal is what the graph save's `cascadeDelete` already does from the root alone.
 
+**A child the save deleted leaves its parent's collection.**
+After a successful save, a child marked `Removed` is taken out of the collection of a parent the save kept, and stays `Removed` itself, so a reference you held to it can still tell it was deleted.
+Left in the collection, it would be deleted again by the next save of the same graph.
+A child a save hook skipped was not deleted, so it stays in the collection.
+A single cascade child has no collection to leave, so it stays on its navigation, still `Removed`; assign null to it once the save is confirmed.
+The descendants of a deleted root are left as they are, since the whole subtree went with it.
+Every backend behaves the same way, as an edit model's `AcceptChanges()` does (see [Removing rows](#removing-rows-remove-versus-markremoved)).
+
 ### Save hooks (ISaveHook)
 
 A mechanism that inserts processing before and after each operation of a graph save (`SaveAsync`).
@@ -560,6 +573,7 @@ A skipped row does not get an After call, and its `RowState` is left unchanged, 
 
 Because a skip is isolated, consistency is the hook author's responsibility.
 In particular, deletes run children-first, so **returning `false` for only the root of a subtree delete leaves the children deleted and the root behind**.
+Every backend runs the delete hooks of a deleted entity's descendants children first, and runs them for an `Added` descendant too, although it has no row to delete.
 To stop the parent, the children's hooks must also return `false`.
 An inconsistent skip, such as skipping a new parent while saving a new child, falls to the safe side through an FK constraint violation, an exception, and a full rollback, provided the FK constraint is actually defined in the database.
 
@@ -584,8 +598,8 @@ If `insertWhenUpdateMissing: true` and no update target is found so it switches 
 | Target | Hook firing | Context support |
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
-| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
-| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
+| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt. Running `SaveChanges` again after a statement that matched no row does not run them again | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
+| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction). Every Before runs first, then the writes, then every After in the order the operations ran; they are not interleaved row by row as in the QuickER Repository | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
 | Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
 
 ### Raw SQL escape hatch
@@ -786,14 +800,22 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - Save is a disconnected-graph save that converts `RowState` to EF Core's state.
   Like the QuickER repositories, it registers only the entities the cascade reaches from the root.
   A parent reference (such as `line.Order`) is not followed, so a parent loaded with `Include` is neither written nor deleted.
+  After the save, EF Core's own fix-up may fill a reference to a parent saved in the same call (such as `profile.Customer` when a customer and its profile are saved together).
+  The QuickER repositories set navigations only in the direction an `Include` follows, when reading.
 - Optimistic concurrency is at parity: `ConcurrencyMode` selects the policy, EF Core's `DbUpdateConcurrencyException` is converted to `SaveConflictException`, and the refreshed concurrency token is left on the entity (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
 - An update of a table without a rowversion column that matches no row (a trigger or row-level security discarded it) is reported as a missing row, as the QuickER Repository does: `UpdateAsync` returns `false` and a graph save fails with `SaveConflictException` (`NotFound`).
-  A save that keeps being rejected as a concurrency conflict is attempted at most 10 times and then fails with `SaveConflictException`.
+  A row whose statement keeps matching no row although the stored values were taken over (`ForceOverwrite`) is attempted at most 10 times and then fails with `SaveConflictException`.
+  The limit is per row and applies after the row is found to be still there: a save of many rows that each need resolving runs to the end, and a row found gone is reported as gone however many attempts the save has made.
 - The raw-SQL APIs are at full parity, including the conversion of the values a driver returns in its own storage type (SQLite returns an `int` column as `long`, Oracle a `NUMBER` as `decimal`).
+  One rule is stricter: with [unbounded binary columns excluded](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns), a raw SQL entity query (`QueryBySqlAsync`) must select the excluded columns too.
+  EF Core writes every column when it saves an entity, so an entity read without them would have the stored values overwritten by its next save; a result set that leaves one out is refused with `InvalidOperationException` naming the column.
 - A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
+- A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters and literals are sent as non-Unicode text and the database can compare the column without converting it.
+  The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
 - A retrying execution strategy (such as SQL Server's `EnableRetryOnFailure`) is supported.
   A graph save and a cascading `ExecuteDeleteAsync` run inside the strategy, and every attempt starts over from scratch.
   With save hooks, Before and After run once per attempt: their database writes roll back with the failed attempt, but a side effect outside the database is repeated.
+  A statement that matched no row is a different retry, which stays inside one attempt: the save resolves it (taking over the stored values, or switching to an INSERT) and runs `SaveChanges` again in a new transaction, while Before has already run and After runs once, after the `SaveChanges` that succeeded.
 - A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
   The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
 - A table without a primary key is **excluded from the DbContext** (no DbSet, no Fluent configuration, and navigations to it are ignored via an explicit `modelBuilder.Ignore<T>()`), and a Warning diagnostic names the table.
@@ -824,6 +846,10 @@ They are worth knowing when a test passes in memory and fails against the real t
   A bulk insert is validated in full before any of it is applied, and a graph save is judged by the state it would leave behind, so it can free a value on one row and take it on another within the same save, and a violation drops the save whole.
   The violation is an `InvalidOperationException`, as a duplicate primary key is, whereas a real database raises its provider's own exception (`SqlException` with error 2627, for one), so a test that branches on the exception type is not backed by the database.
   The user-defined checks added through `CollectCustomUniquenessChecks` are not enforced, being rules of the application rather than constraints the database holds, and neither is seeding through `InMemoryDataStore.Put` / `InMemorySampleData.Seed`.
+- **Foreign keys are not enforced, and referential actions are not reproduced.**
+  The store keeps rows and nothing else, so an insert or update may leave a child pointing at a parent that does not exist, and `DeleteAsync(id)` removes the parent alone, leaving its children behind whatever the foreign key's `ON DELETE` says.
+  A real database refuses the first, and refuses the second or (with `ON DELETE CASCADE`) deletes the children along with the parent.
+  A graph save with `cascadeDelete` and a cascading `ExecuteDeleteAsync` behave as they do elsewhere, since they delete the descendants themselves rather than relying on the database's action.
 - **Changing an entity's RowState from a Before hook takes effect here and nowhere else.**
   This backend reads the state again when it carries the operation out, so a `BeforeSaveAsync` that turns `Modified` into `Added` changes what happens.
   The QuickER Repository and EF Core have chosen the statement by then, and the change is ignored.
@@ -1670,6 +1696,7 @@ The key behaviors are these.
 - **A named-query projection** that references an excluded column does fetch it, because a projection is an explicit column selection.
 - It can be fetched by explicitly SELECTing it in **raw SQL** (see the operational example below).
 - **Not applied in EF Core mode** (queries via `DbSet` / `SaveChanges`), because column selection in EF Core is EF Core's responsibility.
+  EF Core writes every column on save, so its raw SQL entity query requires the excluded columns instead of leaving them unread (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
 - The in-memory repository (`GenerateInMemoryRepositories`) has parity with a real DB, that is, the same exclusion behavior.
 - **Bidirectional sync leaves them out too**, and copies them separately when asked to: see [Unbounded binary columns](#unbounded-binary-columns) under the sync support.
 
@@ -2670,6 +2697,25 @@ That is also why the binary endpoints mark the 404 they produce themselves (see 
 They carry no idempotency key, so a request that in fact succeeded and lost its response on the way back would be applied a second time, producing a duplicate insert, or a second version bump that turns the next save into a spurious conflict.
 Retrying the read-only operations (`GetById`, `GetAll`, the named queries) and the health endpoint is safe, so scope the policy to those rather than to the whole client.
 
+**A request whose client has gone gets no response, and is not recorded as a server failure.**
+A connection the client reset or that was aborted is recognized by its exception type.
+Once the request's `RequestAborted` token has been signalled, a cancellation, an I/O failure, or a database exception (a driver reports the cancellation of its command in a type of its own, as SqlClient's `SqlException` does) counts as well.
+Such a request is recorded once at Debug level in the `QuickER.RemoteServer` category, and neither the error log nor the `OnServerError` hook hears of it.
+Any other failure stays a server failure (500, logged, hook raised) even when the client has gone: a client that gives up on a slow request is ordinary, and a fault on that slow path must still be seen.
+
+**On HTTP/2, a client that resets the stream part-way through the request body can still be recorded as a failure.**
+HTTP/2 reports the reset as a plain `IOException` with no type of its own, so it is recognized only when the request token has already been signalled.
+Under load the token can be signalled after the failure is classified, and the request is then answered as a 400 or a 500 with an Error log entry.
+HTTP/1.1 has no such gap, since its reset carries its own exception type.
+
+**A request the host's request timeout cuts short is answered with 504.**
+With the `RequestTimeouts` middleware (`AddRequestTimeouts`, `UseRequestTimeouts`, and `WithRequestTimeout` on the returned group), the failure the timeout causes is handed back to the middleware as a cancellation, and the middleware answers with its timeout status (504 by default).
+The client raises `RemoteRepositoryException` with that status, so a write that timed out is never reported as done.
+Once the response has started, the host drops the connection instead, and the client sees a truncated response rather than a complete one.
+When an upload times out while its body is still arriving, Kestrel records one Error in the `Microsoft.AspNetCore.Server.Kestrel` category ("automatic draining of the request body failed").
+That is Kestrel's cleanup of the body read the timeout cancelled, outside the generated endpoints, and the 504 still reaches the client.
+Middleware that replaces `RequestAborted` with a linked token of its own, rather than `RequestTimeouts`, cannot be told apart from a client that went away, and such a request ends without a response.
+
 ### Binary transfer endpoints (Stream accessors for unbounded binary columns)
 
 When combined with unbounded-binary exclusion (`--exclude-unbounded-binary-columns`), the excluded column's Stream accessors (`Read/Write{Column}Async`) are streamed over HTTP.
@@ -2695,13 +2741,17 @@ The following three endpoints are generated per excluded column, where `{column}
   The effective limit is the endpoint's own size-limit metadata when it has any, which is how the opt-in below lifts it, otherwise the limit the host publishes.
   Where the host publishes none, as in an out-of-process IIS deployment, Kestrel's default of 30,000,000 bytes stands in, so a deployment that cannot report its limit still rejects the same declarations rather than accepting any size.
   A host that lifts its limit globally without the opt-in is measured against that same default; use the opt-in, or attach size-limit metadata to the group, to lift it for these endpoints.
-  When a request is both oversized and carries a malformed `?id=`, the answer is the 413, because the key is restored inside the write, which this check runs ahead of.
+  The `?id=` key is restored before the length is looked at, so a request that both carries a malformed key and declares no length (411) or an oversized one (413) is answered with the 400 for the key.
 - **Lifting the request-size limit on binary PUT is opt-in**: `MapGeneratedRemoteEndpoints(access, prefix, exposeErrorDetails, allowUnboundedUploads)`.
   It defaults to `false`, so the limit above applies to these endpoints and a larger upload is rejected with 413.
   Pass `allowUnboundedUploads: true` to stream GB-scale blobs, and **pair it with `RemoteAccess.RequireAuthorization`, because an endpoint that accepts a body of any size is a denial-of-service surface**.
   The opt-in also removes the declared-length check, so a caller can make the server reserve storage for an arbitrary declared length on every request without sending a single byte of it; the reservation is rolled back when the request fails, but the I/O is spent regardless.
   Only the binary PUT endpoints are affected, since JSON endpoints always keep the host limit.
-  To set a limit of a different size, override the whole group via the returned `RouteGroupBuilder`.
+  The opt-in cannot be capped again from the returned `RouteGroupBuilder`: it is attached to the upload endpoints themselves, which take precedence over the group.
+  To set a limit of a different size, leave the opt-in off and attach size-limit metadata (such as `RequestSizeLimitAttribute`) to the returned group.
+- **A host that buffers request bodies (`EnableBuffering`) is supported.**
+  The upload reads the body forward from where it stands, for exactly the declared `Content-Length`, whatever length the buffered stream reports.
+  Middleware that reads part of the body before the endpoint must set `Request.Body.Position` back to 0, or the upload receives fewer bytes than declared and fails.
 - The client (`Http{Entity}RemoteRepository`) receives `GET` with `ResponseHeadersRead` and copies to the destination in O(chunks), and sends `PUT` with `StreamContent` including `Content-Length`.
   If you do not pass `length` for a non-seekable Stream, it throws `ArgumentException` before sending, which is the same length contract as the direct path.
   **The Stream you pass in stays yours**: the client neither closes nor disposes it, exactly as a direct connection does not, so switching between the two implementations does not change what happens to the stream.

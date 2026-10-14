@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedRemoteContractFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -55,7 +56,9 @@ public sealed class RemoteContractRuntimeTests : IDisposable
         await ApplySchemaAsync();
         var provider = new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>
-                options.UseSqlite(_db.ReadWriteCreateConnectionString)
+                options
+                    .UseSqlite(_db.ReadWriteCreateConnectionString)
+                    .IgnoreServiceProviderCacheLimit()
             )
             .BuildServiceProvider();
         _providers.Add(provider);

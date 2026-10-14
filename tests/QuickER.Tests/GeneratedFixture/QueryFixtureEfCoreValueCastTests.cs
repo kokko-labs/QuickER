@@ -1,6 +1,7 @@
 using System.Linq;
 using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.GeneratedQueryFixture;
@@ -21,6 +22,7 @@ public class QueryFixtureEfCoreValueCastTests
         new(
             new DbContextOptionsBuilder<QuickErDbContext>()
                 .UseSqlServer("Server=localhost;Database=unused;Trusted_Connection=True")
+                .IgnoreServiceProviderCacheLimit()
                 .Options
         );
 

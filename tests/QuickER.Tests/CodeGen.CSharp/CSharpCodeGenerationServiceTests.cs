@@ -5696,7 +5696,10 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("where TContext : DbContext");
 
         // DbContext の接続上で ADO を直接実行し、共有ヘルパー RawSqlMapper のマッピング・束縛を使う
-        content.Should().Contain("context.Database.GetDbConnection().CreateCommand()");
+        content
+            .Should()
+            .Contain("return EfCoreCommands.Create(context.Database, sql, parameters);");
+        content.Should().Contain("var command = database.GetDbConnection().CreateCommand();");
         content
             .Should()
             .Contain("RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken)");

@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -80,7 +81,7 @@ public sealed class EfCoreConcurrencyRuntimeTests(SqlServerContainerFixture fixt
     private ServiceProvider BuildProvider() =>
         new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>
-                options.UseSqlServer(_fixture.ConnectionString)
+                options.UseSqlServer(_fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
             )
             .BuildServiceProvider();
 
@@ -195,7 +196,7 @@ public sealed class EfCoreConcurrencyRuntimeTests(SqlServerContainerFixture fixt
     {
         var provider = new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>
-                options.UseSqlServer(_fixture.ConnectionString)
+                options.UseSqlServer(_fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
             )
             .AddSingleton(hook)
             .BuildServiceProvider();
@@ -290,7 +291,10 @@ public sealed class EfCoreConcurrencyRuntimeTests(SqlServerContainerFixture fixt
         var interceptor = new DiscardDocumentUpdates();
         var provider = new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>
-                options.UseSqlServer(_fixture.ConnectionString).AddInterceptors(interceptor)
+                options
+                    .UseSqlServer(_fixture.ConnectionString)
+                    .IgnoreServiceProviderCacheLimit()
+                    .AddInterceptors(interceptor)
             )
             .BuildServiceProvider();
         _hookProviders.Add(provider);

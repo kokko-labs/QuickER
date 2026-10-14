@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedQueryFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -121,11 +122,13 @@ public sealed class EfCoreExecutionStrategyRuntimeTests : IDisposable
     {
         var services = new ServiceCollection().AddGeneratedEfCoreRepositories(options =>
         {
-            options.UseSqlite(
-                _db.ReadWriteCreateConnectionString,
-                sqlite =>
-                    sqlite.ExecutionStrategy(dependencies => new RetryingStrategy(dependencies))
-            );
+            options
+                .UseSqlite(
+                    _db.ReadWriteCreateConnectionString,
+                    sqlite =>
+                        sqlite.ExecutionStrategy(dependencies => new RetryingStrategy(dependencies))
+                )
+                .IgnoreServiceProviderCacheLimit();
 
             if (interceptor is not null)
             {

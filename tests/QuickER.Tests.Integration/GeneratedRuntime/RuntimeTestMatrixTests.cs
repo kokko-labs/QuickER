@@ -222,6 +222,10 @@ public class RuntimeTestMatrixTests
                 )
             )
         ),
+        ["BackendParity"] = new(
+            "実装先どうしの一致（同じ操作の列を流し、戻り値・保存先・呼び出し側のグラフ・Save フックを QuickER 版と比べる）",
+            Row(Covered(), Covered(), Covered(), Covered(), Covered())
+        ),
         ["EfCoreExecutionStrategy"] = new(
             "再試行する実行戦略のもとで、自前のトランザクションを開く経路（フックありの保存・カスケードの一括削除）を試行ごとに組み直す",
             Row(
@@ -295,6 +299,16 @@ public class RuntimeTestMatrixTests
                 NotApplicable(
                     "インメモリは式木をコンパイルして C# 意味論で評価する（SQL を組み立てない）"
                 ),
+                NotApplicable("Query() はリモート面に無く、式木は転送されない")
+            )
+        ),
+        ["ValueObjectStringMatch"] = new(
+            "値オブジェクトの文字列一致（Contains / StartsWith / EndsWith）の判定を、具象の値オブジェクト型から引いた MethodInfo でも同じにする",
+            Row(
+                Covered(),
+                Covered(),
+                Covered(),
+                Covered(),
                 NotApplicable("Query() はリモート面に無く、式木は転送されない")
             )
         ),
@@ -486,9 +500,17 @@ public class RuntimeTestMatrixTests
         new("GeneratedSqliteEfCoreParityRuntimeTests", "CrudParity", Backend.EfCore),
         new("EfCoreKeyParameterRuntimeTests", "CrudParity", Backend.EfCore),
         new("EfCoreCommandTimeoutRuntimeTests", "CrudParity", Backend.EfCore),
+        new("EfCoreExecuteDeleteRuntimeTests", "CrudParity", Backend.EfCore),
         new("InMemoryFixtureRuntimeTests", "CrudParity", Backend.InMemory),
         new("RemoteServiceAdoRuntimeTests", "CrudParity", Backend.Remote),
         new("RemoteServiceEfCoreRuntimeTests", "CrudParity", Backend.Remote),
+        // --- 実装先どうしの一致 ---
+        new("BackendParitySqlServerRuntimeTests", "BackendParity", Backend.AdoSqlServer),
+        new("BackendParitySqlServerRuntimeTests", "BackendParity", Backend.EfCore),
+        new("BackendParityRuntimeTests", "BackendParity", Backend.AdoSqlite),
+        new("BackendParityRuntimeTests", "BackendParity", Backend.EfCore),
+        new("BackendParityRuntimeTests", "BackendParity", Backend.InMemory),
+        new("BackendParityRuntimeTests", "BackendParity", Backend.Remote),
         // --- 楽観排他 ---
         new("SqlServerConcurrencyRuntimeTests", "Concurrency", Backend.AdoSqlServer),
         new("EfCoreConcurrencyRuntimeTests", "Concurrency", Backend.EfCore),
@@ -570,6 +592,14 @@ public class RuntimeTestMatrixTests
         ),
         new("SqliteTranslatorOperatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
         new("SqliteBoolColumnTranslatorRuntimeTests", "TranslatorOperator", Backend.AdoSqlite),
+        new(
+            "StringMatchMethodSqlServerRuntimeTests",
+            "ValueObjectStringMatch",
+            Backend.AdoSqlServer
+        ),
+        new("StringMatchMethodAdoRuntimeTests", "ValueObjectStringMatch", Backend.AdoSqlite),
+        new("StringMatchMethodEfCoreRuntimeTests", "ValueObjectStringMatch", Backend.EfCore),
+        new("StringMatchMethodInMemoryRuntimeTests", "ValueObjectStringMatch", Backend.InMemory),
         new("TranslatorParitySqlServerRuntimeTests", "TranslatorParity", Backend.AdoSqlServer),
         new("TranslatorParitySqliteRuntimeTests", "TranslatorParity", Backend.AdoSqlite),
         new("TranslatorParityInMemoryRuntimeTests", "TranslatorParity", Backend.InMemory),
@@ -623,6 +653,8 @@ public class RuntimeTestMatrixTests
         new("RemoteResponseBodyRuntimeTests", "RemoteTransport", Backend.Remote),
         new("RemoteValueObjectBodyRuntimeTests", "RemoteTransport", Backend.Remote),
         new("RemoteKeyedRegistrationRuntimeTests", "RemoteTransport", Backend.Remote),
+        new("RemoteHostConfigurationRuntimeTests", "RemoteTransport", Backend.Remote),
+        new("RemoteSqlClientCancellationRuntimeTests", "RemoteTransport", Backend.Remote),
         new("RemoteAccessRuntimeTests", "RemoteTransport", Backend.Remote),
         new("RemoteServerEngineRuntimeTests", "RemoteTransport", Backend.Remote),
         new("SaveConflictDetailsRuntimeTests", "Concurrency", Backend.Remote),

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedQueryFixture;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -13,7 +14,9 @@ public sealed class GraphSaveEfCoreRuntimeTests : GraphSaveSqliteFileRuntimeTest
     /// <summary>AddGeneratedEfCoreRepositories → UseSqlite の DI 経路でリポジトリ群を解決する</summary>
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedEfCoreRepositories(options => options.UseSqlite(ConnectionString))
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseSqlite(ConnectionString).IgnoreServiceProviderCacheLimit()
+            )
             .BuildServiceProvider();
 
     protected override ICustomerRepository CreateCustomerRepository() =>

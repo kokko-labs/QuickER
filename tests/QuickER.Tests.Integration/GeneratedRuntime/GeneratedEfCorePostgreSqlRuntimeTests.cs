@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.PostgreSql;
 using QuickER.Tests.GeneratedPortableFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -23,7 +24,9 @@ public sealed class GeneratedEfCorePostgreSqlRuntimeTests(PostgreSqlContainerFix
     /// <summary>AddGeneratedEfCoreRepositories → UseNpgsql の DI 経路でリポジトリ群を解決する</summary>
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedEfCoreRepositories(options => options.UseNpgsql(fixture.ConnectionString))
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseNpgsql(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
+            )
             .BuildServiceProvider();
 
     protected override ICustomerRepository CreateCustomerRepository() =>

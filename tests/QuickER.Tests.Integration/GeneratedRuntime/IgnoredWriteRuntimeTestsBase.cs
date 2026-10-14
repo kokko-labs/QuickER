@@ -48,8 +48,11 @@ public abstract class IgnoredWriteRuntimeTestsBase : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>スキーマを作り、注文 1 件を投入してから、orders の更新を黙って捨てるトリガーを張る</summary>
-    private async Task<OrderEntity> SeedWithIgnoringTriggerAsync()
+    /// <summary>
+    /// スキーマを作り、注文 1 件を投入してから、orders への <paramref name="statement"/>（UPDATE / DELETE / INSERT）を黙って
+    /// 捨てるトリガーを張る。読み直してメモを書き換えた（Updated の）注文を返す
+    /// </summary>
+    protected async Task<OrderEntity> SeedWithIgnoringTriggerAsync(string statement = "UPDATE")
     {
         await _db.ResetSchemaAsync(Ct);
         await _db.ApplyDdlAsync(QueryFixtureDefinition.Build(), Ct);
@@ -80,7 +83,7 @@ public abstract class IgnoredWriteRuntimeTestsBase : IDisposable
             await connection.OpenAsync(Ct);
             await using var command = connection.CreateCommand();
             command.CommandText =
-                "CREATE TRIGGER ignore_order_updates BEFORE UPDATE ON orders BEGIN SELECT RAISE(IGNORE); END;";
+                $"CREATE TRIGGER ignore_order_writes BEFORE {statement} ON orders BEGIN SELECT RAISE(IGNORE); END;";
             await command.ExecuteNonQueryAsync(Ct);
         }
 

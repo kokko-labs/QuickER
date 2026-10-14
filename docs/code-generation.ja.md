@@ -333,6 +333,11 @@ NULL 許容の列は `.Value` 経由でも読めます（`x.ShippedAt != null &&
 インメモリも同じく断ります（保存している行はナビゲーションを持たず、評価できないため）。
 EF Core はこの述語を独自の結合へ翻訳するので、この制限はありません。
 
+**`ExecuteDeleteAsync` は、条件に合う行を消します。**
+`cascadeDelete: true` では、カスケードに沿って子孫を先に消し、戻り値は消した行の数（条件に合う行と、その子孫を合わせた数）です。
+循環するカスケードは、文を 1 つも流す前に `NotSupportedException` で断ります。
+条件にナビゲーションを書ける EF Core では、条件に合う行のキーを先に読み、そのキーで消すので、`o => o.OrderLines.Any()` のような条件でも、条件に合う行が子孫と一緒に消えます（子孫が消えた後で条件を評価し直しません）。
+
 #### NULL の補償
 
 等値比較と IN 検索の null は、全バックエンドが C# / EF Core と同じ結論になるよう補償されます。
@@ -482,6 +487,14 @@ var affected = await orders.SaveAsync(order);   // RowState に従い INSERT / U
 グラフ全体を更新対象にすると、誰も触っていない行まで書き戻すことになります。
 グラフ全体を削除対象にするのは、グラフ保存の `cascadeDelete` がルートだけで行っていることです。
 
+**保存で削除した子は、親のコレクションから外れます。**
+保存が成功すると、`Removed` の子は、保存で残った親のコレクションから外れ、子自身は `Removed` のままです。持っていた参照からは、削除されたことが分かります。
+コレクションに残したままだと、同じグラフを次に保存したときに、もう一度削除されます。
+Save フックが飛ばした子は削除されていないので、コレクションに残ります。
+単一のカスケードの子は外れるコレクションが無いので、`Removed` のままナビゲーションに残ります。保存が確定したら null を代入してください。
+削除したルートの子孫は、サブツリーごと消えたので、そのままにします。
+どの実装先も同じで、編集モデルの `AcceptChanges()` と同じ規則です（[行の削除](#行の削除-remove-と-markremoved)を参照）。
+
 ### Save フック（ISaveHook）
 
 グラフ保存（`SaveAsync`）の各操作の、前後に処理を差し込む仕組みです。
@@ -561,6 +574,7 @@ Before / After が投げた例外はそのまま伝播し、Save 全体がロー
 
 スキップは単独であるため、整合性はフック実装者の責任です。
 とくに削除は子から順に実行されるため、**サブツリー削除で「root（親）だけ `false`」にすると、子は削除され root だけが残ります**。
+どの実装先も、削除するエンティティの子孫の削除フックを子から順に走らせます。削除する行の無い `Added` の子孫にも走らせます。
 親を止めたいなら、子のフックも `false` を返す必要があります。
 整合しないスキップ（例: 新規の親をスキップしつつ新規の子を保存）は、DB に FK 制約が張られていれば FK 制約違反から例外、そして全体ロールバックとなり、安全側に倒れます。
 
@@ -585,8 +599,8 @@ context が提供する操作は次の 2 つで、生ハンドルは公開しま
 | 実装先 | フック発火 | context の対応 |
 |---|---|---|
 | QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
-| EF Core 版 Repository（`GenerateEfCoreRepositories`） | 対応（After は `SaveChanges` 後に一括）。再試行する実行戦略では、Before と After が試行の回数だけ走る | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
-| インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションはありませんが、copy-on-write で保存単位を all-or-nothing にします。全書き込みをステージングし、最後のフェーズが成功したときだけ一括公開するため、失敗した保存の書き込み（After が書いた blob を含む）は一度も見えず、失敗の巻き添えで並行書き込みが消えることもありません |
+| EF Core 版 Repository（`GenerateEfCoreRepositories`） | 対応（After は `SaveChanges` 後に一括）。再試行する実行戦略では、Before と After が試行の回数だけ走る。1 行も当たらなかった文のあとの `SaveChanges` の流し直しでは走り直さない | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
+| インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション）。Before をすべて走らせてから書き込み、その後に After を操作の順にまとめて走らせます。QuickER 版 Repository のように行ごとに並びません | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションはありませんが、copy-on-write で保存単位を all-or-nothing にします。全書き込みをステージングし、最後のフェーズが成功したときだけ一括公開するため、失敗した保存の書き込み（After が書いた blob を含む）は一度も見えず、失敗の巻き添えで並行書き込みが消えることもありません |
 | リモート（`--generate-remote-services`） | サーバー側の DI に登録したフックが発火します | サーバー側の実体実装に準じます。Before でサーバーがスキップした行は保存応答に載って戻るため、クライアント側の `RowState` も据え置かれます（その行は未保存のまま残り、次回の保存で再試行されます）。直結と同じ挙動です |
 
 ### 生 SQL の逃げ道
@@ -790,18 +804,27 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 
 - 保存は `RowState` を EF Core の状態へ変換する切断グラフ保存です。
   QuickER 版 Repository と同じく、根からカスケードで辿れるエンティティだけを登録します。
-  親への逆参照（`line.Order` など）は辿らないので、`Include` で一緒に読んだ親は書き込みも削除もされません
+  親への逆参照（`line.Order` など）は辿らないので、`Include` で一緒に読んだ親は書き込みも削除もされません。
+  保存の後、EF Core 自身の fix-up が、同じ呼び出しで保存した親への参照を埋めることがあります（顧客とそのプロフィールを一緒に保存したときの `profile.Customer` など）。
+  QuickER 版 Repository がナビゲーションを埋めるのは、読み込みで `Include` がたどった向きだけです
 - 楽観排他もパリティです。`ConcurrencyMode` でポリシーを選び、EF Core の `DbUpdateConcurrencyException` を `SaveConflictException` へ変換し、更新後の並行性トークンをエンティティへ残します（[rowversion による楽観排他](#rowversion-による楽観排他)）
 - rowversion 列の無い表で、更新が 1 行も当たらないとき（トリガーや行レベルセキュリティが文を捨てたとき）は、QuickER 版 Repository と同じく行が無いものとして報告します。
   `UpdateAsync` は `false` を返し、グラフ保存は `SaveConflictException`（`NotFound`）で失敗します。
-  競合として拒否され続ける保存は最大 10 回まで試み、それでも当たらなければ `SaveConflictException` で失敗します
+  保存先の値を取り込んで（`ForceOverwrite`）もまだ当たらない行は、最大 10 回まで試み、それでも当たらなければ `SaveConflictException` で失敗します。
+  上限は行ごとで、行がまだあると分かった後にだけ数えます。解決の要る行が多い保存も最後まで進み、行が消えていれば何回目でも行が無いものとして報告します
 - 生 SQL 系 API も完全パリティです。
+  1 つだけ規則が厳しくなります。[無制限バイナリ列を除外する](#無制限バイナリ列の除外excludeunboundedbinarycolumns)とき、生 SQL のエンティティ取得（`QueryBySqlAsync`）は、除外した列も選ぶ必要があります。
+  EF Core はエンティティを保存するとき全列を書くので、除外した列を読まずに取得したエンティティは、次の保存で保存先の値を上書きしてしまいます。除外した列が欠けた結果は、列を名指しした `InvalidOperationException` で断ります
   ドライバが自分の格納型で返す値（SQLite は `int` 列を `long` で、Oracle は `NUMBER` を `decimal` で返す）もプロパティの型へ変換します
 - 値オブジェクトの列にも、ほかの列と同じく長さと桁（`HasMaxLength` / `HasPrecision`）を構成します。
   そのためパラメータと `.Value` の条件は、EF Core の既定（`nvarchar(max)`・`decimal(18,2)`）でなく列自身の型を使います
+- Unicode でない文字列の列（SQL Server の `varchar`・`char`・`text`、Oracle の `VARCHAR2`・`CHAR`・`CLOB`）は、`IsUnicode(false)` で構成します。
+  パラメータと定数は Unicode でない文字列で送られ、DB は列を変換せずに比べられます。
+  この構成は図の方言の型で決まるので、複数の DB で使う図は、文字列の列を Unicode（`nvarchar` など）にそろえてください
 - 再試行する実行戦略（SQL Server の `EnableRetryOnFailure` など）に対応します。
   グラフ保存とカスケードの `ExecuteDeleteAsync` は実行戦略の中で動き、試行のたびに最初からやり直します。
-  Save フックがあると、Before と After は試行の回数だけ走ります（DB への書き込みは失敗した試行と一緒に巻き戻りますが、DB の外への副作用は繰り返されます）
+  Save フックがあると、Before と After は試行の回数だけ走ります（DB への書き込みは失敗した試行と一緒に巻き戻りますが、DB の外への副作用は繰り返されます）。
+  1 行も当たらなかった文のやり直しは、これとは別で、1 回の試行の中で済みます。保存はその行を解決し（保存先の値の取り込み、または INSERT への切り替え）、新しいトランザクションで `SaveChanges` を流し直します。Before は走った後なので走り直さず、After は成功した `SaveChanges` の後に 1 回だけ走ります
 - 参照先（親側）列が主キーでないリレーション（UNIQUE 列参照・複合主キーの一部参照）は `HasPrincipalKey` を明示して構成され、外部キーは QuickER 版 Repository と同じくその親列へ結合します（EF Core の既定のままだと主キーへ黙って結合されます）
 - 主キーの無いテーブルは **DbContext から除外**されます（DbSet・Fluent 構成を出さず、そのテーブルへのナビゲーションも `modelBuilder.Ignore<T>()` の明示で無視・Warning 診断がテーブルを名指し）。
   EF Core はマップされる全エンティティ型にキーを要求し、キーの無い型が 1 つでもモデルに入ると DbContext 全体が初回使用時に例外になるためで、QuickER 版 Repository の生成スキップと同じ線引きです
@@ -830,6 +853,11 @@ DB なしでユニットテストするためのインメモリ実装を追加�
   BulkInsert はバッチ全体を事前検証してから適用し、グラフ保存は「保存が残していく状態」で判定するため、同じ保存単位で削除する行の値を別の行が引き継げます（違反時は保存単位ごと拒否されます）。
   違反は主キー重複と同じ `InvalidOperationException` ですが、実 DB はプロバイダ固有の例外（SQL Server ならエラー 2627 の `SqlException`）を投げるため、例外型で分岐するテストは実 DB の裏付けにはなりません。
   `CollectCustomUniquenessChecks` で足すユーザー定義チェックは強制の対象外で（アプリ側の規則であって DB が持つ制約ではないため）、`InMemoryDataStore.Put` / `InMemorySampleData.Seed` によるシードも対象外です。
+- **外部キーは検査せず、参照動作も再現しません。**
+  ストアは行しか持たないので、挿入・更新は存在しない親を指す子を残せます。
+  `DeleteAsync(id)` は、外部キーの `ON DELETE` が何であっても親だけを消し、子を残します。
+  実 DB は前者を拒否し、後者は拒否するか（`ON DELETE CASCADE` なら）親と一緒に子も消します。
+  `cascadeDelete` のグラフ保存とカスケードの `ExecuteDeleteAsync` は、DB の参照動作に頼らず子孫を自分で消すので、ほかの実装先と同じに動きます。
 - **Before フックで RowState を書き換えると、インメモリでだけ操作が変わります。**
   このバックエンドは操作を実行する時点で RowState を読み直すため、`BeforeSaveAsync` が `Modified` を `Added` へ変えると実際の操作も変わります。
   QuickER 版 Repository と EF Core はその時点で発行する文を決め終えているため、書き換えは無視されます。
@@ -1689,7 +1717,8 @@ ON にすると、サイズ上限のないバイナリ列の Entity プロパテ
   別アセンブリからは `mapper.CreateEntity()` で Entity を組み立て、そちらへ空の値を入れて INSERT します
 - **名前付きクエリの射影**が除外列を参照する場合は取得されます（射影は明示的な列選択のため）
 - **生 SQL** で明示的に SELECT すれば取得できます（下記の運用例）
-- **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されません**（EF Core の列選択は EF Core の責務です）
+- **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されません**（EF Core の列選択は EF Core の責務です）。
+  EF Core は保存で全列を書くので、EF Core の生 SQL のエンティティ取得は、除外した列を読まないままにせず、選ぶことを求めます（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）
 - インメモリ Repository（`GenerateInMemoryRepositories`）は、実 DB とパリティです（同じ除外挙動）
 - **双方向同期でも、行の転送からは外れます。**
   列単位でコピーさせる方法は、同期支援の[無制限バイナリ列](#無制限バイナリ列)を参照してください
@@ -2710,6 +2739,27 @@ DB には意図的に触らないので、「プロセスが上がっていて�
 冪等キーを持たないため、実際には成功したのに応答が返る途中で失われたリクエストを再送すると、二重に適用されます（挿入の重複、あるいは版が二度進んで次回保存が偽の競合になる、など）。
 リトライしてよいのは読み取り専用の操作（`GetById` / `GetAll` / 名前付きクエリ）と health エンドポイントなので、ポリシーはクライアント全体でなく、それらへ限定してください。
 
+**クライアントがいなくなった要求には応答を返さず、サーバーの障害としても記録しません。**
+クライアントがリセットした接続と、中断された接続は、例外の型で見分けます。
+要求の `RequestAborted` が立った後は、取り消し・I/O の失敗・DB の例外も、これに数えます（ドライバはコマンドの取り消しを自分の型で報告します。SqlClient の `SqlException` がその例です）。
+このような要求は、`QuickER.RemoteServer` のカテゴリに Debug で 1 行だけ記録し、Error のログにも `OnServerError` のフックにも出しません。
+それ以外の失敗は、クライアントがいなくなっていても、サーバーの障害（500・ログ・フック）のままです。
+クライアントが遅い要求をあきらめるのはふつうに起きることで、その遅い経路で起きた不具合は見えなければならないためです。
+
+**HTTP/2 では、本文の途中でクライアントがストリームをリセットすると、障害として記録されることがあります。**
+HTTP/2 はリセットを型を持たない `IOException` で報告するので、見分けられるのは、要求のトークンが既に立っているときだけです。
+負荷の下では、失敗を分類した後にトークンが立つことがあり、そのとき要求は 400 か 500 として答えられ、Error のログが残ります。
+HTTP/1.1 のリセットは自分の例外の型を持つので、この隙間はありません。
+
+**ホストの要求のタイムアウトで打ち切られた要求には、504 で答えます。**
+`RequestTimeouts` のミドルウェア（`AddRequestTimeouts`・`UseRequestTimeouts`・戻り値のグループへの `WithRequestTimeout`）を使うと、タイムアウトが起こした失敗は、取り消しとしてミドルウェアへ返り、ミドルウェアがタイムアウトの状態コード（既定は 504）で答えます。
+クライアントはその状態コードの `RemoteRepositoryException` を投げるので、時間切れになった書き込みを「済んだ」と報告することはありません。
+応答が始まった後なら、ホストは接続を切り、クライアントには完全な応答でなく途切れた応答が届きます。
+本文の受信中にアップロードが時間切れになると、Kestrel が `Microsoft.AspNetCore.Server.Kestrel` のカテゴリに Error を 1 件記録します（「automatic draining of the request body failed」）。
+これは、タイムアウトが取り消した本文の読み取りを Kestrel が片づける処理で、生成したエンドポイントの外のものです。
+504 はクライアントへ届きます。
+`RequestTimeouts` でなく、自分の連結トークンで `RequestAborted` を差し替えるミドルウェアは、クライアントがいなくなったことと見分けられず、その要求は応答なしで終わります。
+
 ### バイナリ転送エンドポイント（無制限バイナリ列の Stream アクセサ）
 
 無制限バイナリ除外（`--exclude-unbounded-binary-columns`）と併用すると、除外列の Stream アクセサ（`Read/Write{Column}Async`）が HTTP でストリーミング転送されます。
@@ -2739,13 +2789,20 @@ JSON エンベロープ（`POST` + Base64）では巨大 blob のメモリ膨張
   ホストが上限を公開しない配置（IIS アウトオブプロセス等）では、Kestrel 既定の 30,000,000 バイトです。
   上限を報告できない配置でも、報告できる配置と同じ宣言長を拒否します（任意サイズを黙って受けません）。
   ホストが上限を全体で解除していても、オプトインしていなければこの既定が効くので、これらのエンドポイントでも解除したい場合は、オプトイン（またはグループへのサイズ上限メタデータ付与）を使ってください。
-  **上限超過と `?id=` 不正が同時に成立する場合は、413 が先です**（キーの復元はこの検査の後段、つまり書き込み側で行われるためです）。
+  `?id=` のキーは長さを見る前に復元するので、キーが不正で、長さの宣言が無い（411）か上限を超える（413）要求には、キーの 400 で答えます。
 - **バイナリ PUT のリクエストサイズ制限解除はオプトインです**（`MapGeneratedRemoteEndpoints(access, prefix, exposeErrorDetails, allowUnboundedUploads)`）。
   既定は `false` で、上記の上限がこのエンドポイントに効き、超過は 413 で拒否されます。
   GB 級を扱うときだけ `allowUnboundedUploads: true` を渡してください。
   **任意サイズの本文を受けるエンドポイントは DoS 面になるため、`RemoteAccess.RequireAuthorization` との併用を強く推奨します。**
   解除すると宣言長の検査も外れるため、本文を 1 バイトも送らずに、宣言長ぶんの blob 先行確保を毎回させられるようになります（確保はリクエスト失敗時にロールバックされますが、その I/O は消費されます）。
-  影響を受けるのはバイナリ PUT のみで（JSON エンドポイントは常にホストの上限のままです）、別の値にする場合は戻り値の `RouteGroupBuilder` でグループ全体を上書きしてください。
+  影響を受けるのはバイナリ PUT のみです（JSON エンドポイントは常にホストの上限のままです）。
+  オプトインは、戻り値の `RouteGroupBuilder` から上限を付け直せません。
+  アップロードのエンドポイント自身に付くので、グループより優先されるためです。
+  別の値にする場合は、オプトインせずに、戻り値のグループへサイズ上限のメタデータ（`RequestSizeLimitAttribute` など）を付けてください。
+- **要求の本文をバッファリングするホスト（`EnableBuffering`）でも受け付けます。**
+  アップロードは、バッファリングしたストリームが報告する長さに依らず、本文を今の位置から、宣言された `Content-Length` ちょうどだけ読みます。
+  エンドポイントより前で本文の一部を読むミドルウェアは、`Request.Body.Position` を 0 に戻してください。
+  戻さないと、アップロードが受け取るバイト数が宣言より少なくなり、失敗します。
 - クライアント（`Http{Entity}RemoteRepository`）は、`GET` を `ResponseHeadersRead` で受けて宛先へ O(チャンク) でコピーし、`PUT` は `StreamContent`（`Content-Length` 付き）で送ります。
   非シーク Stream で `length` を渡さない場合は、送信前に `ArgumentException` になります（既存の長さ契約と同一です）。
   **渡した Stream の所有権は呼び出し側のまま**で、クライアントは閉じも破棄もしません（直結実装と同じで、実装を差し替えても Stream の扱いが変わりません。HTTP レイヤは送信後にリクエストコンテンツを破棄するため、Stream は非クローズのラッパー経由で `StreamContent` へ渡しています）。

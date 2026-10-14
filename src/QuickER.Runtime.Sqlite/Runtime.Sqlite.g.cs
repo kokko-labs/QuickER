@@ -2312,7 +2312,9 @@ public static class SqlExpressionTranslator
     /// The judgement goes through the interface map of <see cref="IStringMatchValueObject{TSelf}"/>, so only the type that
     /// actually implements those members qualifies. Testing the name against a type that merely implements the interface
     /// would also claim a <c>Contains</c> a concrete value object declares for itself, which is an ordinary method call
-    /// rather than a column-side match.
+    /// rather than a column-side match. The methods are compared by handle, so a <see cref="MethodInfo"/> taken from the
+    /// concrete value object type (whose <see cref="MemberInfo.ReflectedType"/> differs from the one the compiler uses) is
+    /// recognized as well.
     /// </remarks>
     private static bool IsValueObjectStringMethod(MethodInfo method) =>
         StringMatchMethodCache.GetOrAdd(
@@ -2332,7 +2334,10 @@ public static class SqlExpressionTranslator
                 );
 
                 return contract is not null
-                    && Array.IndexOf(declaring.GetInterfaceMap(contract).TargetMethods, m) >= 0;
+                    && Array.Exists(
+                        declaring.GetInterfaceMap(contract).TargetMethods,
+                        target => target.MethodHandle == m.MethodHandle
+                    );
             }
         );
 
@@ -2722,6 +2727,7 @@ public sealed class EntitySaveMetadata
     public required string RawTableName { get; init; }
 
     /// <summary>Gets the property that corresponds to the primary key.</summary>
+    /// <remarks>Taken from the entity type itself, so its <see cref="MemberInfo.ReflectedType"/> is that type even when a base class declares the key.</remarks>
     public required PropertyInfo KeyProperty { get; init; }
 
     /// <summary>Gets the column name of the primary key.</summary>
@@ -2901,7 +2907,7 @@ public sealed class EntitySaveMetadata
         var insertValueList = string.Join(", ", insertProperties.Select(property => $"@{property.Name}"));
         var cascades = allProperties
             .Select(property =>
-                (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
+                (property, attribute: NavigationAttribute(property))
             )
             .Where(pair => pair.attribute is { Cascade: true })
             .Select(pair => new CascadeNavigation(
@@ -3035,6 +3041,14 @@ public sealed class EntitySaveMetadata
     ) => _valueObjectReaderCache.GetOrAdd(propertyType, ResolveValueObjectReaderCore);
 
     /// <summary>Performs the uncached resolution behind <see cref="ResolveValueObjectReader"/>.</summary>
+    /// <remarks>
+    /// The <c>Create</c> factory is resolved by the same rule as <c>SqlValueObjectActivator</c>'s factory resolution (the
+    /// <c>IValueObject&lt;TSelf, TValue&gt;</c> interface, <c>FlattenHierarchy</c>, an argument of the underlying value type),
+    /// which the fallback uses: never change the rule in one place only. The rule is written twice because this path embeds
+    /// the <see cref="MethodInfo"/> in an expression tree while the other compiles a converter around it, and sharing it
+    /// would mean a public helper in the core runtime package. <c>HandwrittenValueObjectTests</c> catches the two drifting
+    /// apart on both paths.
+    /// </remarks>
     private static (MethodInfo Getter, MethodInfo Create)? ResolveValueObjectReaderCore(
         Type propertyType
     )
@@ -3256,7 +3270,7 @@ public sealed class EntitySaveMetadata
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
         {
             throw new InvalidOperationException(
-                $"The raw SQL SELECT must include the {KeyProperty.DeclaringType?.Name} columns ({ColumnList}); use SELECT * or list all columns. "
+                $"The raw SQL SELECT must include the {KeyProperty.ReflectedType?.Name} columns ({ColumnList}); use SELECT * or list all columns. "
                     + $"The result set is missing a column: {ex.Message}",
                 ex
             );
@@ -3353,9 +3367,13 @@ public sealed class EntitySaveMetadata
 
     /// <summary>Wraps a failure to map a stored value into an exception that names the column it came from.</summary>
     /// <remarks>
-    /// Every row mapping path throws this one shape - the per-column fallback (<see cref="SetColumnValue"/>), the compiled
-    /// fast path that calls a value object's <c>Create</c> directly, and on SQL Server the JSON reader behind
-    /// <c>Query()</c> - so a value the database holds but the model rejects is reported the same way however the row was read.
+    /// A value the database holds but a value object rejects is reported in this one shape however the row was read: by
+    /// the per-column fallback (<see cref="SetColumnValue"/>), by the compiled fast path that calls a value object's
+    /// <c>Create</c> directly, and on SQL Server by the JSON reader behind <c>Query()</c>. The per-column fallback also
+    /// names the column for any other value it cannot convert. The compiled fast path does not wrap the typed reader
+    /// accessors it calls for plain columns (<c>GetDateTime</c> and friends), so a stored value the driver itself cannot
+    /// read there surfaces as the driver's own exception, without the column name: wrapping every column of every row
+    /// would cost the fast path what it exists to save.
     /// </remarks>
     internal static InvalidOperationException ColumnMappingFailure(
         Type entityType,
@@ -3427,33 +3445,27 @@ public sealed class EntitySaveMetadata
     /// </summary>
     public IReadOnlyList<PropertyInfo>? ResolveProjectionColumns(
         IReadOnlyCollection<string> propertyNames
-    )
-    {
-        // With zero referenced columns there is nothing to SELECT, so a fallback is required (e.g. a constants-only projection)
-        if (propertyNames.Count == 0)
-        {
-            return null;
-        }
+    ) =>
+        CanPruneProjection(propertyNames)
+            ? propertyNames.Select(name => ProjectionColumn(name)!).ToList()
+            : null;
 
-        var resolved = new List<PropertyInfo>(propertyNames.Count);
+    /// <summary>
+    /// Whether a projection that references <paramref name="propertyNames"/> can be pruned to those columns: the same rule
+    /// as <see cref="ResolveProjectionColumns"/>, without building the column list (for the executors that let their own
+    /// query narrow the columns).
+    /// </summary>
+    internal bool CanPruneProjection(IReadOnlyCollection<string> propertyNames) =>
+        // With zero referenced columns there is nothing to SELECT, so a fallback is required (e.g. a constants-only
+        // projection); a non-column (navigation etc.) cannot be pruned safely
+        propertyNames.Count > 0 && propertyNames.All(name => ProjectionColumn(name) is not null);
 
-        foreach (var name in propertyNames)
-        {
-            // Look up by name in the full column set (AllProperties); excluded (unbounded binary) columns
-            // are also fetched when the projection references them
-            var property = AllProperties.FirstOrDefault(candidate => candidate.Name == name);
-
-            if (property is null)
-            {
-                // A non-column (navigation etc.) is present = cannot prune safely
-                return null;
-            }
-
-            resolved.Add(property);
-        }
-
-        return resolved;
-    }
+    /// <summary>
+    /// Looks a referenced name up in the full column set (AllProperties); excluded (unbounded binary) columns are also
+    /// fetched when the projection references them. <c>null</c> for a name that is not a column.
+    /// </summary>
+    private PropertyInfo? ProjectionColumn(string name) =>
+        AllProperties.FirstOrDefault(candidate => candidate.Name == name);
 
     /// <summary>Returns a SELECT column list joining the specified column properties as quoted column names with "," (for example: [id], [name]) (for projection pruning).</summary>
     public string BuildColumnList(IReadOnlyList<PropertyInfo> properties) =>
@@ -4040,7 +4052,9 @@ public static class EntityGraphSaver
 
     /// <summary>
     /// Finalizes saved entities to Unchanged after commit. Entities contained in <paramref name="skip"/> (rows skipped
-    /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched.
+    /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched. With
+    /// <paramref name="cascade"/>, the children the save deleted leave their parent's collection and stay <c>Removed</c>
+    /// (see <see cref="CascadeCollections.RemoveDeletedChildren"/>).
     /// </summary>
     public static void AcceptChanges(
         EntityBaseCore entity,
@@ -4065,6 +4079,9 @@ public static class EntityGraphSaver
             {
                 AcceptChanges(child, true, skip);
             }
+
+            // The children the save deleted leave the collection (they stay Removed themselves)
+            CascadeCollections.RemoveDeletedChildren(entity, child => skip is not null && skip.Contains(child));
         }
     }
 

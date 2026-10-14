@@ -92,6 +92,8 @@
       Include="..\QuickER.Tests\GeneratedFixture\UniquenessSqlServerFixtureCustomCheck.cs"
       LinkBase="GeneratedFixture"
     />
+    <!-- DbContext の構成の共通の設定（内部のサービスプロバイダの数の警告を無視する）。QuickER.Tests と同じ 1 ファイルを使う -->
+    <Compile Include="..\QuickER.Tests\TestSupport\EfCoreTestOptions.cs" LinkBase="TestSupport" />
   </ItemGroup>
 
   <ItemGroup>

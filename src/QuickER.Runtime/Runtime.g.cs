@@ -2268,7 +2268,7 @@ public abstract class EntityBaseCore
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigationCache = new();
 
     /// <summary>Returns the cascade navigation properties of the given type (scanned once per type and cached).</summary>
-    private static PropertyInfo[] GetCascadeNavigations(Type type) =>
+    internal static PropertyInfo[] GetCascadeNavigations(Type type) =>
         _cascadeNavigationCache.GetOrAdd(
             type,
             static resolvedType =>
@@ -2311,7 +2311,7 @@ public abstract class EntityBaseCore
         }
     }
 
-    /// <summary>Marks this entity for removal (it stays in the collection but is deleted on save).</summary>
+    /// <summary>Marks this entity for removal (it stays in its collection until a graph save deletes it; a successful save then takes it out of a kept parent's collection, and it stays Removed).</summary>
     public void MarkRemoved() => RowState = RowState.Removed;
 
     /// <summary>Marks this entity as Unchanged (already persisted).</summary>
@@ -2458,6 +2458,62 @@ public static class GeneratedDisplayNames
     /// <summary>Resolves a display name from the member name and the column/table description (null when unset). The default prefers the description and falls back to the member name. Replace with (name, _) =&gt; name to ignore descriptions.</summary>
     public static Func<string, string?, string> Resolve { get; set; } =
         static (memberName, description) => description ?? memberName;
+}
+
+/// <summary>Settles the cascade collections of a graph after a successful save.</summary>
+public static class CascadeCollections
+{
+    /// <summary>Caches the <c>ICollection&lt;T&gt;.Remove</c> method per collection type.</summary>
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> _removeMethods = new();
+
+    /// <summary>
+    /// Takes the children the save deleted out of <paramref name="parent"/>'s cascade collections.
+    /// </summary>
+    /// <remarks>
+    /// A child marked <see cref="RowState.Removed"/> leaves the collection of a parent the save kept, and stays
+    /// <c>Removed</c> itself, so code that held on to it can still tell it was deleted; leaving it in the collection would make
+    /// the next save of the same graph delete it again. A child a save hook skipped (<paramref name="isSkipped"/>) was not
+    /// deleted, so it stays. A single cascade child is not touched: it has no collection to leave, so it stays on its
+    /// navigation, still <c>Removed</c>, as an edit model's does. Call it for a parent the save kept; the children of a
+    /// deleted parent went with it.
+    /// </remarks>
+    /// <param name="parent">A saved entity that was not deleted.</param>
+    /// <param name="isSkipped">Whether a save hook skipped the child, so that it was not deleted.</param>
+    public static void RemoveDeletedChildren(EntityBaseCore parent, Func<EntityBaseCore, bool> isSkipped)
+    {
+        foreach (var navigation in EntityBaseCore.GetCascadeNavigations(parent.GetType()))
+        {
+            if (navigation.GetValue(parent) is not IEnumerable<EntityBaseCore> children)
+            {
+                continue;
+            }
+
+            var deleted = children.Where(child => child is not null && child.IsRemoved && !isSkipped(child)).ToList();
+
+            if (deleted.Count == 0)
+            {
+                continue;
+            }
+
+            var remove = _removeMethods.GetOrAdd(
+                children.GetType(),
+                static type =>
+                    type.GetInterfaces()
+                        .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICollection<>))
+                        ?.GetMethod(nameof(ICollection<object>.Remove))
+            );
+
+            if (remove is null)
+            {
+                continue;
+            }
+
+            foreach (var child in deleted)
+            {
+                remove.Invoke(children, new object[] { child });
+            }
+        }
+    }
 }
 
 /// <summary>Base class providing change notification, error management, and helper processing common to edit models.</summary>
@@ -6000,6 +6056,13 @@ public static class SqlValueObjectActivator
     }
 
     /// <summary>Resolves TValue and Create(TValue) from the target type's IValueObject&lt;,&gt; and builds the converter (null when not a VO).</summary>
+    /// <remarks>
+    /// The dialect and EF Core engines resolve <c>Create</c> again for their compiled row readers (in
+    /// <c>EntitySaveMetadata</c>), by this same rule (the <c>IValueObject&lt;TSelf, TValue&gt;</c> interface,
+    /// <c>FlattenHierarchy</c>, an argument of the underlying value type): never change the rule in one place only. The rule is
+    /// written twice because those readers embed the <see cref="MethodInfo"/> in an expression tree, and sharing it would mean
+    /// a public helper in this package. <c>HandwrittenValueObjectTests</c> catches the two drifting apart on both paths.
+    /// </remarks>
     private static Func<object, object>? ResolveFactory(Type targetType)
     {
         var iface = Array.Find(
@@ -6463,6 +6526,7 @@ public interface ISqlQueryExecutor<TEntity>
     Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken);
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
+    /// <returns>The number of rows deleted, the matching rows and (with cascadeDelete) their descendants together.</returns>
     Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
@@ -6830,7 +6894,9 @@ public static class QueryStringMatchGuard
     /// The judgement goes through the interface map of <see cref="IStringMatchValueObject{TSelf}"/>, so only the type that
     /// actually implements those members qualifies. Testing the name against a type that merely implements the interface
     /// would also claim a <c>Contains</c> a concrete value object declares for itself, which is an ordinary method call
-    /// rather than a column-side match.
+    /// rather than a column-side match. The methods are compared by handle, so a <see cref="MethodInfo"/> taken from the
+    /// concrete value object type (whose <see cref="MemberInfo.ReflectedType"/> differs from the one the compiler uses) is
+    /// recognized as well.
     /// </remarks>
     private static bool IsValueObjectStringMethod(MethodInfo method) =>
         StringMatchMethodCache.GetOrAdd(
@@ -6850,7 +6916,10 @@ public static class QueryStringMatchGuard
                 );
 
                 return contract is not null
-                    && Array.IndexOf(declaring.GetInterfaceMap(contract).TargetMethods, m) >= 0;
+                    && Array.Exists(
+                        declaring.GetInterfaceMap(contract).TargetMethods,
+                        target => target.MethodHandle == m.MethodHandle
+                    );
             }
         );
 
@@ -7090,6 +7159,8 @@ public sealed class SqlQuery<TEntity>
     }
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
+    /// <returns>The number of rows deleted, the matching rows and (with cascadeDelete) their descendants together.</returns>
+    /// <remarks>A cyclic cascade is refused with <see cref="NotSupportedException"/> before any statement runs.</remarks>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
@@ -7352,8 +7423,15 @@ public sealed class SaveConflictException : Exception
     /// <param name="entityType">The type of the entity whose save was rejected.</param>
     /// <param name="key">The primary key value the save targeted.</param>
     public static SaveConflictException NotFound(Type entityType, object? key) =>
+        NotFound(entityType, key, "update");
+
+    /// <summary>Creates the conflict reported when the row an operation targeted no longer exists (or never matched).</summary>
+    /// <param name="entityType">The type of the entity whose save was rejected.</param>
+    /// <param name="key">The primary key value the save targeted.</param>
+    /// <param name="operation">The lowercase verb of the rejected operation ("update", "delete" or "insert").</param>
+    public static SaveConflictException NotFound(Type entityType, object? key, string operation) =>
         new(
-            $"The record to update was not found ({entityType.Name}, key {key}). It may have been deleted by another user.",
+            $"The record to {operation} was not found ({entityType.Name}, key {key}). It may have been deleted by another user.",
             SaveConflictReason.NotFound,
             entityType.Name,
             key?.ToString()
@@ -7669,10 +7747,15 @@ public static class RemoteEntityGraph
         }
     }
 
-    /// <summary>Collects the rows a completed save left unsaved because a hook's Before declined them (server side; deleted entities are skipped because the client leaves them untouched either way).</summary>
+    /// <summary>Collects the rows a completed save left unsaved because a hook's Before declined them (server side).</summary>
     /// <remarks>
     /// A completed save has finalized every row it operated on to Unchanged and left the skipped ones as they were, so a row
-    /// that still carries changes is exactly a row the hook skipped. The traversal matches <see cref="CollectRowVersions"/>.
+    /// that still carries changes is exactly a row the hook skipped. A deleted row stays <c>Removed</c> either way, so it is
+    /// told apart by where it is: a completed save takes the children it deleted out of a kept parent's collection
+    /// (<see cref="CascadeCollections.RemoveDeletedChildren"/>), so a <c>Removed</c> child still in such a collection is a
+    /// delete the hook skipped. The client needs it to leave that child in its own collection. A deleted root, and a
+    /// <c>Removed</c> single child, are left untouched by the client either way. The traversal matches
+    /// <see cref="CollectRowVersions"/>.
     /// </remarks>
     public static void CollectSkipped(EntityBaseCore entity, bool cascade, List<RemoteEntityRef> into)
     {
@@ -7691,9 +7774,33 @@ public static class RemoteEntityGraph
             return;
         }
 
-        foreach (var child in entity.EnumerateCascadeChildren())
+        foreach (var navigation in EntityBaseCore.GetCascadeNavigations(entity.GetType()))
         {
-            CollectSkipped(child, true, into);
+            switch (navigation.GetValue(entity))
+            {
+                case IEnumerable<EntityBaseCore> children:
+                    foreach (var child in children)
+                    {
+                        if (child is null)
+                        {
+                            continue;
+                        }
+
+                        if (child.IsRemoved)
+                        {
+                            into.Add(new RemoteEntityRef(child.GetType().Name, KeyText(child)));
+                        }
+                        else
+                        {
+                            CollectSkipped(child, true, into);
+                        }
+                    }
+
+                    break;
+                case EntityBaseCore single:
+                    CollectSkipped(single, true, into);
+                    break;
+            }
         }
     }
 
@@ -8282,6 +8389,9 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         {
             AcceptChanges(child, true, rowVersions, skipped);
         }
+
+        // The children the save deleted leave the collection (they stay Removed themselves), as with a direct connection
+        CascadeCollections.RemoveDeletedChildren(entity, child => RemoteEntityGraph.IsSkipped(child, skipped));
     }
 
     /// <summary>Serializes the primary key into a string for the URL query (<c>?id=</c>) using the same JSON rules as the envelopes (value objects use their wrapped value, numbers as-is, strings/Guids quoted).</summary>

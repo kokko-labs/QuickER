@@ -8,6 +8,7 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using QuickER.Provider.PostgreSql;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -264,7 +265,7 @@ public sealed class PostgreSqlColumnClrTypeIntegrationTests(PostgreSqlContainerF
         public DbSet<ArrayRow> Rows => Set<ArrayRow>();
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-            optionsBuilder.UseNpgsql(connectionString);
+            optionsBuilder.UseNpgsql(connectionString).IgnoreServiceProviderCacheLimit();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -301,7 +302,7 @@ public sealed class PostgreSqlColumnClrTypeIntegrationTests(PostgreSqlContainerF
         public DbSet<TimetzRow> Rows => Set<TimetzRow>();
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-            optionsBuilder.UseNpgsql(connectionString);
+            optionsBuilder.UseNpgsql(connectionString).IgnoreServiceProviderCacheLimit();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -326,7 +327,7 @@ public sealed class PostgreSqlColumnClrTypeIntegrationTests(PostgreSqlContainerF
         public DbSet<TimetzRow> Rows => Set<TimetzRow>();
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-            optionsBuilder.UseNpgsql(connectionString);
+            optionsBuilder.UseNpgsql(connectionString).IgnoreServiceProviderCacheLimit();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -344,7 +345,7 @@ public sealed class PostgreSqlColumnClrTypeIntegrationTests(PostgreSqlContainerF
         public DbSet<TimetzRow> Rows => Set<TimetzRow>();
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-            optionsBuilder.UseNpgsql(connectionString);
+            optionsBuilder.UseNpgsql(connectionString).IgnoreServiceProviderCacheLimit();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -451,7 +452,7 @@ public sealed class PostgreSqlColumnClrTypeIntegrationTests(PostgreSqlContainerF
         public DbSet<NetRow> Rows => Set<NetRow>();
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-            optionsBuilder.UseNpgsql(connectionString);
+            optionsBuilder.UseNpgsql(connectionString).IgnoreServiceProviderCacheLimit();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

@@ -125,6 +125,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             // 変換（HasConversion）の先の型にも効く。出さないと VO の列は既定のマッピング（decimal(18,2)・nvarchar(max)）になり、
             // パラメータが既定の桁へ丸められ、.Value を比べる CAST も既定の型になる（検証は VO の Create が別に行う）
             MaxLength = typeInfo.MaxLength,
+            // varchar 系の列は Unicode でないことを宣言する。出さないと EF Core は nvarchar の列と見なし、パラメータと
+            // 定数を Unicode で送るので、SQL Server は列の側を変換してから比べ、索引が効きにくくなる（VO の列にも出す）
+            IsNonUnicode = typeInfo.IsNonUnicodeString,
             Precision = typeInfo.Precision,
             Scale = typeInfo.Scale,
             IsRowVersion = typeInfo.IsRowVersion,

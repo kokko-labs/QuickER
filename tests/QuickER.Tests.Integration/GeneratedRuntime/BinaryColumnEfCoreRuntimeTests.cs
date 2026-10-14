@@ -6,6 +6,7 @@ using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedBinaryFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -22,7 +23,9 @@ public sealed class BinaryColumnEfCoreRuntimeTests : BinaryColumnRuntimeTestsBas
 
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedEfCoreRepositories(options => options.UseSqlite(ConnectionString))
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseSqlite(ConnectionString).IgnoreServiceProviderCacheLimit()
+            )
             .BuildServiceProvider();
 
     protected override IDocumentRepository CreateDocumentRepository() =>

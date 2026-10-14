@@ -276,6 +276,9 @@ internal sealed class CSharpEfCorePropertyConfigModel
     /// <summary>文字列の最大長（HasMaxLength 用）。無指定は null</summary>
     public int? MaxLength { get; init; }
 
+    /// <summary>Unicode でない文字列の列（IsUnicode(false) 用）かどうか</summary>
+    public bool IsNonUnicode { get; init; }
+
     /// <summary>decimal の全体桁数（HasPrecision 用）。無指定・非 decimal は null</summary>
     public int? Precision { get; init; }
 

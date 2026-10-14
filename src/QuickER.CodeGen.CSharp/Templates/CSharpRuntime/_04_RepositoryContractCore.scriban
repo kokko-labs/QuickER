@@ -1000,6 +1000,13 @@ public static class SqlServerSchemaBootstrap
     }
 
     /// <summary>Resolves TValue and Create(TValue) from the target type's IValueObject&lt;,&gt; and builds the converter (null when not a VO).</summary>
+    /// <remarks>
+    /// The dialect and EF Core engines resolve <c>Create</c> again for their compiled row readers (in
+    /// <c>EntitySaveMetadata</c>), by this same rule (the <c>IValueObject&lt;TSelf, TValue&gt;</c> interface,
+    /// <c>FlattenHierarchy</c>, an argument of the underlying value type): never change the rule in one place only. The rule is
+    /// written twice because those readers embed the <see cref="MethodInfo"/> in an expression tree, and sharing it would mean
+    /// a public helper in this package. <c>HandwrittenValueObjectTests</c> catches the two drifting apart on both paths.
+    /// </remarks>
     private static Func<object, object>? ResolveFactory(Type targetType)
     {
         var iface = Array.Find(

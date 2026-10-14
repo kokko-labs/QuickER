@@ -71,7 +71,7 @@ public abstract class EntityBaseCore
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigationCache = new();
 
     /// <summary>Returns the cascade navigation properties of the given type (scanned once per type and cached).</summary>
-    private static PropertyInfo[] GetCascadeNavigations(Type type) =>
+    internal static PropertyInfo[] GetCascadeNavigations(Type type) =>
         _cascadeNavigationCache.GetOrAdd(
             type,
             static resolvedType =>
@@ -114,7 +114,7 @@ public abstract class EntityBaseCore
         }
     }
 
-    /// <summary>Marks this entity for removal (it stays in the collection but is deleted on save).</summary>
+    /// <summary>Marks this entity for removal (it stays in its collection until a graph save deletes it; a successful save then takes it out of a kept parent's collection, and it stays Removed).</summary>
     public void MarkRemoved() => RowState = RowState.Removed;
 
     /// <summary>Marks this entity as Unchanged (already persisted).</summary>
@@ -265,6 +265,62 @@ public static class GeneratedDisplayNames
     /// <summary>Resolves a display name from the member name and the column/table description (null when unset). The default prefers the description and falls back to the member name. Replace with (name, _) =&gt; name to ignore descriptions.</summary>
     public static Func<string, string?, string> Resolve { get; set; } =
         static (memberName, description) => description ?? memberName;
+}
+
+/// <summary>Settles the cascade collections of a graph after a successful save.</summary>
+{{ infra_visibility }} static class CascadeCollections
+{
+    /// <summary>Caches the <c>ICollection&lt;T&gt;.Remove</c> method per collection type.</summary>
+    private static readonly ConcurrentDictionary<Type, MethodInfo?> _removeMethods = new();
+
+    /// <summary>
+    /// Takes the children the save deleted out of <paramref name="parent"/>'s cascade collections.
+    /// </summary>
+    /// <remarks>
+    /// A child marked <see cref="RowState.Removed"/> leaves the collection of a parent the save kept, and stays
+    /// <c>Removed</c> itself, so code that held on to it can still tell it was deleted; leaving it in the collection would make
+    /// the next save of the same graph delete it again. A child a save hook skipped (<paramref name="isSkipped"/>) was not
+    /// deleted, so it stays. A single cascade child is not touched: it has no collection to leave, so it stays on its
+    /// navigation, still <c>Removed</c>, as an edit model's does. Call it for a parent the save kept; the children of a
+    /// deleted parent went with it.
+    /// </remarks>
+    /// <param name="parent">A saved entity that was not deleted.</param>
+    /// <param name="isSkipped">Whether a save hook skipped the child, so that it was not deleted.</param>
+    public static void RemoveDeletedChildren(EntityBaseCore parent, Func<EntityBaseCore, bool> isSkipped)
+    {
+        foreach (var navigation in EntityBaseCore.GetCascadeNavigations(parent.GetType()))
+        {
+            if (navigation.GetValue(parent) is not IEnumerable<EntityBaseCore> children)
+            {
+                continue;
+            }
+
+            var deleted = children.Where(child => child is not null && child.IsRemoved && !isSkipped(child)).ToList();
+
+            if (deleted.Count == 0)
+            {
+                continue;
+            }
+
+            var remove = _removeMethods.GetOrAdd(
+                children.GetType(),
+                static type =>
+                    type.GetInterfaces()
+                        .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ICollection<>))
+                        ?.GetMethod(nameof(ICollection<object>.Remove))
+            );
+
+            if (remove is null)
+            {
+                continue;
+            }
+
+            foreach (var child in deleted)
+            {
+                remove.Invoke(children, new object[] { child });
+            }
+        }
+    }
 }
 {{ end }}
 {{~ if render_entities ~}}

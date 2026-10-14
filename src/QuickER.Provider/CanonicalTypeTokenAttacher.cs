@@ -23,6 +23,10 @@ namespace QuickER.Provider;
 /// 例外は行バージョン列（<see cref="CSharpTypeInfo.IsRowVersion"/>）で、型カタログが解析できてもトークンを載せない
 /// （<c>[DbColumnMeta]</c> を付けない）。詳細は <see cref="Attach"/> 内のコメントを参照。
 /// </para>
+/// <para>
+/// あわせて、正規型の種類が Unicode でない文字列（<c>AnsiString</c> / <c>AnsiFixedString</c>）の列に
+/// <see cref="CSharpTypeInfo.IsNonUnicodeString"/> を立てる（EF Core の Fluent の <c>IsUnicode(false)</c> の正本）。
+/// </para>
 /// </remarks>
 public static class CanonicalTypeTokenAttacher
 {
@@ -81,6 +85,7 @@ public static class CanonicalTypeTokenAttacher
                         resolved.VerbatimDbType,
                         StringComparison.Ordinal
                     )
+                    && typeInfo.IsNonUnicodeString == resolved.IsNonUnicodeString
                 )
             )
             {
@@ -96,6 +101,7 @@ public static class CanonicalTypeTokenAttacher
                 CanonicalTypeToken = resolved.Token,
                 VerbatimDbType = resolved.VerbatimDbType,
                 CanonicalRoundTripDbType = resolved.RoundTripped,
+                IsNonUnicodeString = resolved.IsNonUnicodeString,
             };
         }
 
@@ -122,7 +128,12 @@ public static class CanonicalTypeTokenAttacher
     /// 型として採るため綴りは必ず変わる。この場合も元の表記を刻んで復元できるようにする。
     /// </para>
     /// </remarks>
-    private static (string? Token, string? VerbatimDbType, string? RoundTripped) ResolveToken(
+    private static (
+        string? Token,
+        string? VerbatimDbType,
+        string? RoundTripped,
+        bool IsNonUnicodeString
+    ) ResolveToken(
         Guid columnId,
         IReadOnlyDictionary<Guid, string> dataTypeByColumn,
         ITypeCatalog typeCatalog
@@ -133,16 +144,18 @@ public static class CanonicalTypeTokenAttacher
             || !typeCatalog.TryParse(dataType, out var canonical)
         )
         {
-            return (null, null, null);
+            return (null, null, null, false);
         }
 
         var token = CanonicalTypeToken.Format(canonical);
+        var nonUnicode =
+            canonical.Kind is CanonicalTypeKind.AnsiString or CanonicalTypeKind.AnsiFixedString;
         var roundTripped = typeCatalog.TryFormat(canonical, out var nativeType)
             ? nativeType
             : token;
 
         return DbTypeText.AreEquivalent(dataType, roundTripped)
-            ? (token, null, null)
-            : (token, dataType, roundTripped);
+            ? (token, null, null, nonUnicode)
+            : (token, dataType, roundTripped, nonUnicode);
     }
 }

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -10,7 +11,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <see cref="EfCoreSqlExecutor"/>）で実行する派生。リポジトリ・エグゼキュータは実運用と同じ経路
 /// （<see cref="GeneratedEfCoreRepositoryServiceCollectionExtensions.AddGeneratedEfCoreRepositories"/> →
 /// <see cref="ServiceProvider"/> から解決）で取得する。接続は同一コンテナの接続文字列で
-/// <c>options.UseSqlServer(connectionString)</c> により構成する。
+/// <c>options.UseSqlServer(connectionString).IgnoreServiceProviderCacheLimit()</c> により構成する。
 /// </summary>
 /// <remarks>
 /// これにより「AddGeneratedSqlServerRepositories と AddGeneratedEfCoreRepositories を差し替えるだけで交換可能」
@@ -30,7 +31,7 @@ public sealed class GeneratedRuntimeEfCoreParityTests(SqlServerContainerFixture 
         // AddGeneratedEfCoreRepositories を実運用と同じ形で呼び、UseSqlServer で SQL Server 方言を選択する
         return _provider ??= new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>
-                options.UseSqlServer(Fixture.ConnectionString)
+                options.UseSqlServer(Fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
             )
             .BuildServiceProvider();
     }

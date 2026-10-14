@@ -1,9 +1,12 @@
+using System.Linq;
 using System.Threading.Tasks;
+using AwesomeAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.Oracle;
 using QuickER.Tests.GeneratedPortableFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -24,7 +27,9 @@ public sealed class GeneratedEfCoreOracleRuntimeTests(OracleContainerFixture fix
     /// <summary>AddGeneratedEfCoreRepositories → UseOracle の DI 経路でリポジトリ群を解決する</summary>
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedEfCoreRepositories(options => options.UseOracle(fixture.ConnectionString))
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseOracle(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
+            )
             .BuildServiceProvider();
 
     protected override ICustomerRepository CreateCustomerRepository() =>
@@ -51,6 +56,36 @@ public sealed class GeneratedEfCoreOracleRuntimeTests(OracleContainerFixture fix
 
     /// <summary>Oracle（ODP.NET）は : プレフィックスのプレースホルダを用いる</summary>
     protected override string Param(string name) => $":{name}";
+
+    /// <summary>
+    /// null のパターンの文字列一致は、ほかの方言と同じく一致しない。
+    /// </summary>
+    /// <remarks>
+    /// Oracle は NULL を連結すると残りの文字列になるので、何も補わないとパターンは <c>'%' || NULL || '%'</c>＝<c>'%%'</c>
+    /// になり、全行に一致する。翻訳器はパラメータのパターンに <c>IS NOT NULL</c> を添える。null かどうかは EF Core が
+    /// C# の値で判断するので、空文字列（Oracle では NULL として届く）の一致は変わらない（基底の 2c が固定する）。
+    /// <c>SqlQuery.Where</c> は null を先に断るので、この経路に届くのは DbContext を直接使ったときだけ。
+    /// </remarks>
+    [Fact(DisplayName = "[Dialect] Oracle: null のパターンの Contains は全行に一致しない")]
+    public async Task Where_ContainsNullPattern_MatchesNoRow()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var repo = CreateCustomerRepository();
+        await repo.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob"), Ct);
+
+        using var scope = Provider().CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<QuickErDbContext>();
+        string? pattern = null;
+
+        var matched = await context
+            .Set<CustomerEntity>()
+            .Where(c => c.Name.Contains(pattern!))
+            .ToListAsync(Ct);
+
+        matched.Should().BeEmpty();
+    }
 
     public void Dispose() => _provider?.Dispose();
 }

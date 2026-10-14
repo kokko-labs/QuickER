@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedRemoteServiceFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -923,9 +924,11 @@ public sealed class RemoteServiceEfCoreRuntimeTests : RemoteServiceRuntimeTestsB
         string connectionString
     ) =>
         services.AddGeneratedEfCoreRepositories(options =>
-            Microsoft.EntityFrameworkCore.SqliteDbContextOptionsBuilderExtensions.UseSqlite(
-                options,
-                connectionString
-            )
+            Microsoft
+                .EntityFrameworkCore.SqliteDbContextOptionsBuilderExtensions.UseSqlite(
+                    options,
+                    connectionString
+                )
+                .IgnoreServiceProviderCacheLimit()
         );
 }

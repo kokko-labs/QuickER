@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.Sqlite;
 using QuickER.Tests.GeneratedPortableFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -42,7 +43,9 @@ public sealed class GeneratedEfCoreSqliteRuntimeTests
     /// <summary>AddGeneratedEfCoreRepositories → UseSqlite の DI 経路でリポジトリ群を解決する</summary>
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedEfCoreRepositories(options => options.UseSqlite(ConnectionString))
+            .AddGeneratedEfCoreRepositories(options =>
+                options.UseSqlite(ConnectionString).IgnoreServiceProviderCacheLimit()
+            )
             .BuildServiceProvider();
 
     protected override ICustomerRepository CreateCustomerRepository() =>

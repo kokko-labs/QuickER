@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.GeneratedFixture;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -32,7 +33,7 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>
-                options.UseSqlServer(fixture.ConnectionString)
+                options.UseSqlServer(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
             )
             .BuildServiceProvider();
 
