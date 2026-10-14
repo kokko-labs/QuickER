@@ -26,21 +26,23 @@ namespace QuickER.Tests.Model;
 /// 一覧の項目がどの文にも当たらなければ（直した・消した）赤。
 /// </para>
 /// <para>
-/// 一覧は 3 種類: (1) 未移行＝区切り 22 で <c>SchemaNames</c> へ移して一覧から消す。(2) 未移行（系統 B）＝同期の計画と差分
-/// （系統 B の作業範囲）。(3) 例外＝理由つきで素の比較を残す（DB 取込のカタログの照合・生 SQL のパラメータの束縛・
-/// 生成した C# の識別子、およびモデルの名前ではないもの）。
+/// 一覧は 2 種類: (1) 未移行＝<c>SchemaNames</c> へ移すまでの置き場（<see cref="Unmigrated_IsEmpty"/> が空を保つ）。
+/// (2) 例外＝理由つきで素の比較を残す（DB 取込のカタログの照合・生 SQL のパラメータの束縛・生成した C# の識別子、
+/// 綴りの判定〔<c>SchemaNames</c> が同じとみなす相手と綴りまで一致するかを見る〕、およびモデルの名前ではないもの）。
 /// </para>
 /// </remarks>
 public sealed class SchemaNamesGuardTests
 {
     /// <summary>一覧の項目の種類</summary>
+    /// <remarks>
+    /// 同期の計画と差分（<c>SyncPlanner</c> / <c>SchemaDiffService</c>）の照合も <c>SchemaNames</c> へ移し終えたので、
+    /// 未移行の置き場は 1 つだけにした。素の比較が新しく現れたら、<see cref="Unmigrated"/>（空でなければ赤）か
+    /// <see cref="Exception"/>（理由つき）のどちらかに載る。
+    /// </remarks>
     public enum Group
     {
-        /// <summary>未移行（区切り 22 で SchemaNames へ移す）</summary>
+        /// <summary>未移行（SchemaNames へ移す。<see cref="Unmigrated_IsEmpty"/> が空を保つ）</summary>
         Unmigrated,
-
-        /// <summary>未移行（系統 B の作業範囲＝同期の計画と差分）</summary>
-        UnmigratedSystemB,
 
         /// <summary>例外（理由つきで素の比較を残す）</summary>
         Exception,
@@ -254,203 +256,43 @@ public sealed class SchemaNamesGuardTests
         return null;
     }
 
+    /// <remarks>
+    /// 比較の指定は、修飾を除いた右端の 2 つの名前で見る（<c>StringComparison.Ordinal</c>・<c>System.StringComparison.Ordinal</c>・
+    /// <c>global::System.StringComparison.Ordinal</c> のどの綴りでも当たる）。
+    /// </remarks>
     private static bool IsComparisonOrConversion(SyntaxNode node) =>
         node switch
         {
             MemberAccessExpressionSyntax access => Comparison.IsMatch(
-                $"{access.Expression}.{access.Name.Identifier.Text}"
+                $"{RightmostName(access.Expression)}.{access.Name.Identifier.Text}"
             ),
             InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access } =>
                 CaseOrSpaceConversions.Contains(access.Name.Identifier.Text),
             _ => false,
         };
 
-    /// <summary>一覧（未移行・系統 B・例外）</summary>
+    /// <summary>式の右端の単純名（<c>System.StringComparison</c> なら <c>StringComparison</c>。名前でなければ式そのもの）</summary>
+    private static string RightmostName(ExpressionSyntax expression) =>
+        expression switch
+        {
+            MemberAccessExpressionSyntax member => member.Name.Identifier.Text,
+            AliasQualifiedNameSyntax alias => alias.Name.Identifier.Text,
+            QualifiedNameSyntax qualified => qualified.Right.Identifier.Text,
+            SimpleNameSyntax simple => simple.Identifier.Text,
+            _ => expression.ToString(),
+        };
+
+    /// <summary>一覧（未移行・例外）</summary>
     public static readonly IReadOnlyList<Entry> Entries =
     [
         // ---- 未移行（区切り 22 で SchemaNames へ移して一覧から消す。移し終えた P1 の時点で空） ----
-        // ---- 未移行（系統 B の作業範囲＝同期の計画と差分） ----
-        new(
-            "SchemaDiffService.cs",
-            "varrenamedColumns=liveColumnOf.Where(pair=>!string.Equals(pair.Key.Name,pair.Value.Name,St",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SchemaDiffService.cs",
-            "returne.TableName.Trim();",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "vartouchesPrimaryKey=selected.Any(i=>i.Kind==SchemaDiffKind.AlterColumn&&i.ColumnNameisnot",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "vartable=item.TableName.Trim();",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "byTable.TryGetValue(item.TableName.Trim(),outvarsignatures)",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "varexplicitlyDropped=selected.Where(i=>i.Kind==SchemaDiffKind.DropUniqueConstraint).Select",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "!TableComparer.Equals(drop.TableName.Trim(),parentTable)",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "varaddedTables=selected.Where(i=>i.Kind==SchemaDiffKind.AddTable).Select(i=>i.TableName.Tr",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "varexistingRebuildTables=selected.Where(i=>IsRebuildTriggerKind(i.Kind)&&!addedTables.Cont",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "!context.TableCreateSql.TryGetValue(rebuild.TableName.Trim(),outvarcreateSql)",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "vartable=addTable.TableName.Trim();",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "varfkItems=selected.Where(i=>i.Kind==SchemaDiffKind.AddForeignKey&&TableComparer.Equals(i.",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "varauxiliaryObjects=context.AuxiliaryObjects.Where(a=>TableComparer.Equals(a.TableName.Tri",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "vartable=item.TableName.Trim();",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "vartableSelected=selected.Where(i=>TableComparer.Equals(i.TableName.Trim(),table)).ToList(",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）"
-        ),
-        new(
-            "SchemaDiffService.cs",
-            "returnstring.Concat(SignaturePart(NormalizeTable(fk.Parent).ToLowerInvariant()),SignatureP",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SchemaDiffService.cs:951 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "varprimaryKeyChanges=selected.Where(i=>i.Kind==SchemaDiffKind.AlterPrimaryKey&&i.Entityisn",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:414 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "warnings.Add(newSyncPlanWarning(SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,ite",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:436 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "vartable=change.TableName.Trim();",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:677 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "liveColumnisnot{IsNullable:true}||selected.Any(i=>i.Kind==SchemaDiffKind.AlterColumn&&Tabl",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:691 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "Indexes(drop.TableName.Trim()).Add([..drop.UniqueConstraintColumns]);",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:1220 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "pkChangedTables[item.TableName.Trim()]=[..item.Entity?.GetPrimaryKeyColumnsInOrder().Selec",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:1357 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "privatestaticDictionary<string,Entity>CollectAddedTables(IReadOnlyList<SchemaDiffItem>sele",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:1584 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "return[..selected.Where(i=>!excludedItems.Contains(i)&&!(i.Kind==SchemaDiffKind.AlterPrima",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:1763 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "Signatures(byTable,item.TableName.Trim()).Add(KeySignature(columns,capabilities));",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:1891 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "Signatures(byTable,item.TableName.Trim()).Add(KeySignature(item.UniqueConstraintColumns,ca",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:1914 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "dropped.Tables.Add(item.TableName.Trim());",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:2170 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "varaddedTables=selected.Where(i=>i.Kind==SchemaDiffKind.AddTable).Select(i=>i.TableName.Tr",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:406 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "selected.Where(i=>droppedTables.Contains(i.TableName.Trim())&&(IsRebuildTriggerKind(i.Kind",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:2324 付近・区切り 27・28）"
-        ),
-        new(
-            "SyncPlanner.cs",
-            "varcandidates=selected.Where(i=>TableComparer.Equals(i.TableName.Trim(),table)&&(IsRebuild",
-            Group.UnmigratedSystemB,
-            "系統 B の範囲（同期の計画と差分＝図と DB の照合）・合流で入った文（SyncPlanner.cs:2509 付近・区切り 27・28）"
-        ),
         // ---- 例外（理由つきで素の比較を残す） ----
+        new(
+            "SchemaDiffService.cs",
+            "varrenameColumns=columnPairs.Any(pair=>!string.Equals(pair.Key.Name,pair.Value.Name,String",
+            Group.Exception,
+            "同一性の判定ではなく、SchemaNames が同じとみなして組んだ相手と綴りまで一致するかを見る判定（違えば DB の綴りへ揃える）。同一性は SchemaNames が決める"
+        ),
         new(
             "ForeignKeyColumnResolver.cs",
             "varranks=new(Func<CandidateColumn,bool>Matches,boolAllowPrimaryKey)[]{(column=>expectedNam",

@@ -924,6 +924,57 @@ public class SyncPlannerTests
         );
     }
 
+    /// <summary>
+    /// 列の型の変更に巻き込まれる外部キーの判定が、列名を <see cref="SchemaNames.AreSame"/> の規則で比べることを検証する
+    /// （小文字化すると同じになるケルビン記号 U+212A の列と k の列は別の列）。
+    /// </summary>
+    /// <remarks>
+    /// 列 k の型を変えても、別の列（ケルビン記号）に張った外部キーは型の変更に関わらないので外し直さない。
+    /// 小文字化したキーで比べると 2 つの列を同じとみなし、変えていない外部キーを外して付け直す。
+    /// </remarks>
+    [Fact(
+        DisplayName = "暗黙の付け直し: 小文字化だけで同じになる別の列の型の変更では、外部キーを外し直さない"
+    )]
+    public void ImplicitForeignKeyRebuild_ColumnDifferingOnlyByLowercasing_IsNotRebuilt()
+    {
+        var customer = new Entity { TableName = "customer", Columns = { PkId() } };
+        var kelvin = Col("\u212A", "INT");
+        var plainK = Col("k", "INT");
+        var orders = new Entity { TableName = "orders", Columns = { PkId(), kelvin, plainK } };
+        var rel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = orders.Id,
+            ColumnPairs = [new(customer.Columns[0].Id, kelvin.Id)],
+            ConstraintName = "FK_orders_customer",
+        };
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [rel],
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "orders",
+                    ColumnName = "k",
+                    Column = Col("k", "BIGINT"),
+                    OldColumn = plainK,
+                    IsSelected = true,
+                },
+            ],
+            FkRebuildCaps,
+            context
+        );
+
+        plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.AlterColumn);
+        // 別の列の外部キーを、変える列の外部キーと取り違えて「両端の型が食い違う」と警告しない
+        plan.Warnings.Should().BeEmpty();
+    }
+
     /// <summary>AlterPrimaryKey 差分項目を生成する（target＝新しい主キー構成の源）</summary>
     private static SchemaDiffItem AlterPk(string table, Entity target, bool selected = true) =>
         new()

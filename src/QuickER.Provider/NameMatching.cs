@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Model;
 
 namespace QuickER.Provider;
 
@@ -9,8 +10,15 @@ namespace QuickER.Provider;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 引き当ては 2 段で行う。(1) 名前が序数一致で 1 件だけあればそれ。(2) 序数一致が無く、大文字小文字を
-/// 無視した一致が 1 件だけならそれ。どちらでも 2 件以上なら見つからない扱いにする（並び順で決めない）。
+/// 同じ名前かは <see cref="SchemaNames"/>（前後の空白を除き大文字小文字を無視して一致）が決める。引き当ては 2 段で行う。
+/// (1) 名前が序数一致で 1 件だけあればそれ。(2) 序数一致が無く、<see cref="SchemaNames"/> で同じ名前が 1 件だけならそれ。
+/// どちらでも 2 件以上なら見つからない扱いにする（並び順で決めない）。
+/// </para>
+/// <para>
+/// (1) の序数一致は同一性の判定ではなく、<see cref="SchemaNames"/> が同じとみなす相手が片側に複数あるときに、綴りまで
+/// 一致する 1 件を選ぶ優先順位（同一性は <see cref="SchemaNames"/> が決める）。片側に同じ名前が複数あるのは、名前の重複を
+/// 断る入口を通らずに作られた図（手で編集したファイルなど）だけで、そのとき綴りまで一致する相手を
+/// 組めば、残りだけが追加・削除の候補になる（1 段に畳むと、組めない側の表まで削除の候補に出る）。
 /// </para>
 /// <para>
 /// DB は大文字小文字の扱いが方言・設定ごとに違う（MySQL の <c>lower_case_table_names=1</c> は名前を小文字で返し、
@@ -23,9 +31,7 @@ internal sealed class NameLookup<T>
     where T : class
 {
     private readonly Dictionary<string, (T Item, int Count)> _exact = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (T Item, int Count)> _folded = new(
-        StringComparer.OrdinalIgnoreCase
-    );
+    private readonly Dictionary<string, (T Item, int Count)> _folded = new(SchemaNames.Comparer);
 
     /// <summary>要素と名前の取り出し方から索引を作る</summary>
     /// <param name="items">引き当ての対象</param>

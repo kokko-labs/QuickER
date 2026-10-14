@@ -1361,6 +1361,100 @@ public class SchemaDiffServiceTests
             .Be(string.Format(ProviderStrings.Diff_DropUniqueConstraint, "Customer", "Code, Kind"));
     }
 
+    /// <summary>
+    /// 小文字化すると同じ字になるが <see cref="SchemaNames.AreSame"/> では別の名前（ケルビン記号 U+212A と k）の列で、
+    /// 一意制約の差分が列の差分とそろうことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 列は AreSame の規則で組むので、DB の列 K（ケルビン記号）と図の列 k は削除と追加になる。一意制約の照合が
+    /// 小文字化したキーで比べると 2 つの制約を同じとみなし、追加した列 k に一意制約が付かない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "一意制約の照合: 小文字化だけで同じになる別名の列の一意制約は、列とそろって追加と削除になる"
+    )]
+    public void UniqueConstraint_OnColumnsDifferingOnlyByLowercasing_FollowsColumnIdentity()
+    {
+        var live = WithUnique(
+            Tbl("Customer", ("Id", "int", true), ("\u212A", "nvarchar(20)", false)),
+            "UQ_Customer_Kelvin",
+            "\u212A"
+        );
+        var target = WithUnique(
+            Tbl("Customer", ("Id", "int", true), ("k", "nvarchar(20)", false)),
+            "UQ_Customer_k",
+            "k"
+        );
+
+        var items = UniqueDiff(live, target);
+
+        items.Should().Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "k");
+        items
+            .Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.AddUniqueConstraint
+                && i.UniqueConstraintColumns.SequenceEqual(new[] { "k" })
+            );
+        items
+            .Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.DropUniqueConstraint
+                && i.UniqueConstraintName == "UQ_Customer_Kelvin"
+            );
+    }
+
+    /// <summary>
+    /// 名前を保存する方言で、小文字化すると同じになるが <see cref="SchemaNames.AreSame"/> では別の外部キー名
+    /// （FK_ケルビン記号 と FK_k）を、ほかの名前と同じ規則で別の制約として扱うことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 表名・列名の組み合わせは AreSame（OrdinalIgnoreCase）で行う。外部キー名だけを小文字化して比べると、
+    /// 別の名前の制約を同じとみなして差分を出さず、DB は図と違う名前の外部キーを持ったまま「差分なし」になる。
+    /// 名前の違う外部キーは、ほかの名前の変更と同じく削除と追加になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "外部キーの照合: 小文字化だけで同じになる別の名前の外部キーは、名前の変更として削除と追加になる"
+    )]
+    public void ForeignKey_NamesDifferingOnlyByLowercasing_AreDifferentConstraints()
+    {
+        static (Entity Parent, Entity Child, Relationship Fk) Side(string fkName)
+        {
+            var parent = Tbl("Parent", ("Id", "int", true));
+            var child = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+            var fk = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs = [new(parent.Columns[0].Id, child.Columns[1].Id)],
+                ConstraintName = fkName,
+            };
+
+            return (parent, child, fk);
+        }
+
+        var live = Side("FK_\u212A");
+        var target = Side("FK_k");
+
+        var items = new SchemaDiffService()
+            .Compute(
+                [live.Parent, live.Child],
+                [live.Fk],
+                [target.Parent, target.Child],
+                [target.Fk],
+                new SqlServerProvider().SyncCapabilities
+            )
+            .Items;
+
+        items
+            .Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AddForeignKey && i.ForeignKeyName == "FK_k");
+        items
+            .Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_\u212A"
+            );
+    }
+
     /// <summary>一意制約だけの差分を計算する（関係なし）</summary>
     private static List<SchemaDiffItem> UniqueDiff(
         Entity live,

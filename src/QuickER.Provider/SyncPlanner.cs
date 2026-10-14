@@ -133,9 +133,6 @@ public sealed class SyncPlanner
         (SchemaDiffKind.SetColumnDescription, PrimaryKeyPhase.None),
     ];
 
-    /// <summary>テーブル名の比較は方言横断で大文字小文字を無視する</summary>
-    private static readonly StringComparer TableComparer = StringComparer.OrdinalIgnoreCase;
-
     /// <summary>選択済みの差分項目から実行計画を組み立てる</summary>
     /// <param name="items">全差分項目（未選択・情報表示専用の項目を含んでよい）</param>
     /// <param name="capabilities">対象方言の同期ケーパビリティ（rebuild への振り分けに用いる）</param>
@@ -405,16 +402,16 @@ public sealed class SyncPlanner
         var liveByName = IndexLiveTables(context);
         var addedTables = selected
             .Where(i => i.Kind == SchemaDiffKind.AddTable)
-            .Select(i => i.TableName.Trim())
-            .ToHashSet(TableComparer);
+            .Select(i => SchemaNames.ToStoredForm(i.TableName))
+            .ToHashSet(SchemaNames.Comparer);
         var addedColumns = selected
             .Where(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName is not null)
             .Select(i => ColumnKey(i.TableName, i.ColumnName!))
             .ToHashSet();
         var primaryKeyChanges = selected
             .Where(i => i.Kind == SchemaDiffKind.AlterPrimaryKey && i.Entity is not null)
-            .GroupBy(i => i.TableName.Trim(), TableComparer)
-            .ToDictionary(g => g.Key, g => g.First().Entity!, TableComparer);
+            .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
+            .ToDictionary(g => g.Key, g => g.First().Entity!, SchemaNames.Comparer);
         var postSyncUniques = BuildPostSyncUniqueConstraints(
             ExpandAlters(selected),
             context,
@@ -436,7 +433,7 @@ public sealed class SyncPlanner
             warnings.Add(
                 new SyncPlanWarning(
                     SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
-                    item.TableName.Trim(),
+                    SchemaNames.ToStoredForm(item.TableName),
                     $"{subject} ({string.Join(", ", missing)})"
                 )
             );
@@ -470,7 +467,7 @@ public sealed class SyncPlanner
 
         (string Subject, List<string> Missing) FindMissingDependencies(SchemaDiffItem item)
         {
-            var table = item.TableName.Trim();
+            var table = SchemaNames.ToStoredForm(item.TableName);
             var missing = new List<string>();
 
             switch (item.Kind)
@@ -591,7 +588,7 @@ public sealed class SyncPlanner
             {
                 if (
                     !addedColumns.Contains(ColumnKey(table, column))
-                    && !live.Columns.Any(c => TableComparer.Equals(c.Name, column))
+                    && !live.Columns.Any(c => SchemaNames.AreSame(c.Name, column))
                 )
                 {
                     missing.Add($"{table}.{column}");
@@ -601,7 +598,7 @@ public sealed class SyncPlanner
 
         // 同期後もこの列が主キーに入っているか（主キーの変更を選んでいればその構成、無ければ live の構成）
         bool StaysInPrimaryKey(string table, string column) =>
-            PostSyncPrimaryKey(table).Any(c => TableComparer.Equals(c, column));
+            PostSyncPrimaryKey(table).Any(c => SchemaNames.AreSame(c, column));
 
         // 同期後の主キーの列名（主キーの変更を選んでいればその構成、無ければ live の構成）
         bool RequiresPrimaryKeyChange(
@@ -674,7 +671,7 @@ public sealed class SyncPlanner
             )
         )
         {
-            var table = change.TableName.Trim();
+            var table = SchemaNames.ToStoredForm(change.TableName);
 
             if (!liveByName.TryGet(table, out var live))
             {
@@ -684,15 +681,15 @@ public sealed class SyncPlanner
             foreach (var keyColumn in change.Entity!.GetPrimaryKeyColumnsInOrder())
             {
                 var liveColumn = live.Columns.FirstOrDefault(c =>
-                    TableComparer.Equals(c.Name, keyColumn.Name)
+                    SchemaNames.AreSame(c.Name, keyColumn.Name)
                 );
 
                 if (
                     liveColumn is not { IsNullable: true }
                     || selected.Any(i =>
                         i.Kind == SchemaDiffKind.AlterColumn
-                        && TableComparer.Equals(i.TableName.Trim(), table)
-                        && TableComparer.Equals(i.ColumnName, liveColumn.Name)
+                        && SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
+                        && SchemaNames.AreSame(i.ColumnName, liveColumn.Name)
                     )
                 )
                 {
@@ -934,7 +931,7 @@ public sealed class SyncPlanner
         // (c) 外部キーを支える索引が消える表 → 消える索引の列（旧主キー・削除する一意制約。MySQL のみ対象）
         var lostIndexes = capabilities.ForeignKeyRequiresLeadingIndex
             ? CollectLostIndexes(selected, pkChangedTables.Keys, context)
-            : new Dictionary<string, List<List<string>>>(TableComparer);
+            : new Dictionary<string, List<List<string>>>(SchemaNames.Comparer);
 
         if (pkChangedTables.Count == 0 && alteredColumnTypes.Count == 0 && lostIndexes.Count == 0)
         {
@@ -1192,7 +1189,7 @@ public sealed class SyncPlanner
             return false;
         }
 
-        var leading = indexColumns.Take(columnPairs.Count).ToHashSet(TableComparer);
+        var leading = indexColumns.Take(columnPairs.Count).ToHashSet(SchemaNames.Comparer);
         return ForeignKeyColumnPairResolver.ChildColumns(columnPairs).All(leading.Contains);
     }
 
@@ -1210,7 +1207,7 @@ public sealed class SyncPlanner
         SyncPlanContext context
     )
     {
-        var lost = new Dictionary<string, List<List<string>>>(TableComparer);
+        var lost = new Dictionary<string, List<List<string>>>(SchemaNames.Comparer);
         var liveByName = IndexLiveTables(context);
 
         foreach (var table in primaryKeyChangedTables)
@@ -1223,7 +1220,8 @@ public sealed class SyncPlanner
 
         foreach (var drop in selected.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
         {
-            Indexes(drop.TableName.Trim()).Add([.. drop.UniqueConstraintColumns]);
+            Indexes(SchemaNames.ToStoredForm(drop.TableName))
+                .Add([.. drop.UniqueConstraintColumns]);
         }
 
         return lost;
@@ -1271,7 +1269,7 @@ public sealed class SyncPlanner
         string PostSyncType(Entity entity, string table, string column) =>
             alteredColumnTypes.TryGetValue(ColumnKey(table, column), out var altered)
                 ? altered
-                : entity.Columns.FirstOrDefault(c => TableComparer.Equals(c.Name, column))?.DataType
+                : entity.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))?.DataType
                     ?? string.Empty;
     }
 
@@ -1321,8 +1319,8 @@ public sealed class SyncPlanner
             var touchesPrimaryKey = selected.Any(i =>
                 i.Kind == SchemaDiffKind.AlterColumn
                 && i.ColumnName is not null
-                && TableComparer.Equals(i.TableName.Trim(), table)
-                && pkColumns.Any(c => TableComparer.Equals(c.Name, i.ColumnName))
+                && SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
+                && pkColumns.Any(c => SchemaNames.AreSame(c.Name, i.ColumnName))
             );
 
             if (!touchesPrimaryKey)
@@ -1355,12 +1353,12 @@ public sealed class SyncPlanner
         IReadOnlyList<SchemaDiffItem> selected
     )
     {
-        var pkChangedTables = new Dictionary<string, List<string>>(TableComparer);
+        var pkChangedTables = new Dictionary<string, List<string>>(SchemaNames.Comparer);
 
         foreach (var item in selected.Where(i => i.Kind == SchemaDiffKind.AlterPrimaryKey))
         {
             // 新しい主キーの列を実効順で持つ（参照する列の並びを問う方言の候補キーの証明に使う）
-            pkChangedTables[item.TableName.Trim()] =
+            pkChangedTables[SchemaNames.ToStoredForm(item.TableName)] =
             [
                 .. item.Entity?.GetPrimaryKeyColumnsInOrder().Select(c => c.Name) ?? [],
             ];
@@ -1409,9 +1407,7 @@ public sealed class SyncPlanner
     ) =>
         capabilities.ReferencedKeyRequiresSameColumnOrder
             ? string.Concat(
-                columnNames
-                    .Select(name => (name ?? string.Empty).Trim().ToLowerInvariant())
-                    .Select(name => $"{name.Length}:{name}")
+                columnNames.Select(SchemaNames.Key).Select(name => $"{name.Length}:{name}")
             )
             : UniqueConstraintNaming.ColumnSetSignature(columnNames);
 
@@ -1586,8 +1582,8 @@ public sealed class SyncPlanner
     ) =>
         selected
             .Where(i => i.Kind == SchemaDiffKind.AddTable && i.Entity is not null)
-            .GroupBy(i => i.TableName.Trim(), TableComparer)
-            .ToDictionary(g => g.Key, g => g.First().Entity!, TableComparer);
+            .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
+            .ToDictionary(g => g.Key, g => g.First().Entity!, SchemaNames.Comparer);
 
     /// <summary>
     /// 同期後の表の主キー（実効順）。主キーの変更を選んだ表はその新しい主キー、追加を選んだ表は図の主キー、
@@ -1674,7 +1670,7 @@ public sealed class SyncPlanner
         var unorderedUniques = BuildPostSyncUniqueConstraints(expanded, context, unordered);
         var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(expanded, limit);
         var dropped = DroppedObjects.From(expanded);
-        var excludedKeyTables = new HashSet<string>(TableComparer);
+        var excludedKeyTables = new HashSet<string>(SchemaNames.Comparer);
         var excludedItems = new HashSet<SchemaDiffItem>(ReferenceEqualityComparer.Instance);
 
         // (1) 主キーの変更で、参照する live の外部キーの並びだけが合わなくなる
@@ -1766,7 +1762,7 @@ public sealed class SyncPlanner
                 !excludedItems.Contains(i)
                 && !(
                     i.Kind == SchemaDiffKind.AlterPrimaryKey
-                    && excludedKeyTables.Contains(i.TableName.Trim())
+                    && excludedKeyTables.Contains(SchemaNames.ToStoredForm(i.TableName))
                 )
             ),
         ];
@@ -1842,7 +1838,7 @@ public sealed class SyncPlanner
         SyncDialectCapabilities capabilities
     )
     {
-        var byTable = new Dictionary<string, HashSet<string>>(TableComparer);
+        var byTable = new Dictionary<string, HashSet<string>>(SchemaNames.Comparer);
 
         if (context is null)
         {
@@ -1888,7 +1884,7 @@ public sealed class SyncPlanner
                     )
                 )
                 {
-                    Signatures(byTable, item.TableName.Trim())
+                    Signatures(byTable, SchemaNames.ToStoredForm(item.TableName))
                         .Add(KeySignature(columns, capabilities));
                 }
             }
@@ -1897,7 +1893,7 @@ public sealed class SyncPlanner
         // 選択済みの削除を落とす
         foreach (var item in selected.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
         {
-            if (byTable.TryGetValue(item.TableName.Trim(), out var signatures))
+            if (byTable.TryGetValue(SchemaNames.ToStoredForm(item.TableName), out var signatures))
             {
                 signatures.Remove(KeySignature(item.UniqueConstraintColumns, capabilities));
             }
@@ -1911,7 +1907,7 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            Signatures(byTable, item.TableName.Trim())
+            Signatures(byTable, SchemaNames.ToStoredForm(item.TableName))
                 .Add(KeySignature(item.UniqueConstraintColumns, capabilities));
         }
 
@@ -1977,7 +1973,7 @@ public sealed class SyncPlanner
         var explicitlyDropped = selected
             .Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
             .Select(i => UniqueConstraintKey(i.TableName, i.UniqueConstraintColumns))
-            .ToHashSet(StringComparer.Ordinal);
+            .ToHashSet();
         var dropped = DroppedObjects.From(selected);
 
         var autoDrops = new List<SchemaDiffItem>();
@@ -2109,7 +2105,7 @@ public sealed class SyncPlanner
 
             foreach (var drop in drops)
             {
-                if (!TableComparer.Equals(drop.TableName.Trim(), parentTable))
+                if (!SchemaNames.AreSame(SchemaNames.ToStoredForm(drop.TableName), parentTable))
                 {
                     continue;
                 }
@@ -2142,15 +2138,15 @@ public sealed class SyncPlanner
         }
     }
 
-    /// <summary>一意制約の照合キー（テーブル＋列集合シグネチャ。大文字小文字・列順を無視する）</summary>
+    /// <summary>一意制約の照合キー（テーブル＋列集合シグネチャ。名前は <see cref="SchemaNames.Key"/> で畳み、列順を無視する）</summary>
     private static string UniqueConstraintKey(string table, IEnumerable<string> columnNames) =>
-        $"{table.Trim().ToLowerInvariant()}|{UniqueConstraintNaming.ColumnSetSignature(columnNames)}";
+        $"{SchemaNames.Key(table)}|{UniqueConstraintNaming.ColumnSetSignature(columnNames)}";
 
     /// <summary>選んだ表・列の削除（制約の端が同じ計画で消えるかの判定に使う）</summary>
     private sealed class DroppedObjects
     {
         /// <summary>削除する表</summary>
-        public HashSet<string> Tables { get; } = new(TableComparer);
+        public HashSet<string> Tables { get; } = new(SchemaNames.Comparer);
 
         /// <summary>削除する列（<see cref="ColumnKey"/> の照合キー）</summary>
         public HashSet<string> Columns { get; } = [];
@@ -2167,7 +2163,7 @@ public sealed class SyncPlanner
             {
                 if (item.Kind == SchemaDiffKind.DropTable)
                 {
-                    dropped.Tables.Add(item.TableName.Trim());
+                    dropped.Tables.Add(SchemaNames.ToStoredForm(item.TableName));
                 }
                 else if (item.Kind == SchemaDiffKind.DropColumn && item.ColumnName is not null)
                 {
@@ -2196,13 +2192,13 @@ public sealed class SyncPlanner
             columns.Any(c => Columns.Contains(ColumnKey(table, c)));
     }
 
-    /// <summary>テーブル・列の照合キー（大文字小文字・前後空白を無視する）</summary>
+    /// <summary>テーブル・列の照合キー（名前は <see cref="SchemaNames.Key"/> で畳む）</summary>
     private static string ColumnKey(string table, string column) =>
-        $"{table.Trim().ToLowerInvariant()}|{column.Trim().ToLowerInvariant()}";
+        $"{SchemaNames.Key(table)}|{SchemaNames.Key(column)}";
 
     /// <summary>
     /// 外部キーの照合キー（子テーブル・親テーブル・構成列ペアの宣言順リスト・実効名・参照アクション。
-    /// 大文字小文字・前後空白を無視する）
+    /// 名前は <see cref="SchemaNames.Key"/> で畳む）
     /// </summary>
     /// <param name="childTable">子テーブル</param>
     /// <param name="parentTable">親テーブル</param>
@@ -2222,14 +2218,14 @@ public sealed class SyncPlanner
         Relationship? relationship,
         IdentifierLengthLimit limit
     ) =>
-        $"{childTable.Trim().ToLowerInvariant()}|{parentTable.Trim().ToLowerInvariant()}|"
+        $"{SchemaNames.Key(childTable)}|{SchemaNames.Key(parentTable)}|"
         + string.Join(
             ",",
             columnPairs.Select(p =>
-                $"{p.ParentColumn.Trim().ToLowerInvariant()}>{p.ChildColumn.Trim().ToLowerInvariant()}"
+                $"{SchemaNames.Key(p.ParentColumn)}>{SchemaNames.Key(p.ChildColumn)}"
             )
         )
-        + $"|{ResolveForeignKeyName(relationship, childTable, parentTable, limit).Trim().ToLowerInvariant()}"
+        + $"|{SchemaNames.Key(ResolveForeignKeyName(relationship, childTable, parentTable, limit))}"
         + $"|{relationship?.OnDelete ?? ForeignKeyReferentialAction.NoAction}"
         + $"|{relationship?.OnUpdate ?? ForeignKeyReferentialAction.NoAction}";
 
@@ -2294,8 +2290,8 @@ public sealed class SyncPlanner
         // 選択済み AddTable のテーブル名（新規テーブル＝CreateOnly の対象）
         var addedTables = selected
             .Where(i => i.Kind == SchemaDiffKind.AddTable)
-            .Select(i => i.TableName.Trim())
-            .ToHashSet(TableComparer);
+            .Select(i => SchemaNames.ToStoredForm(i.TableName))
+            .ToHashSet(SchemaNames.Comparer);
 
         // live のテーブル索引（合成の土台）
         var liveByName = IndexLiveTables(context);
@@ -2310,19 +2306,19 @@ public sealed class SyncPlanner
         var existingRebuildTables = selected
             .Where(i =>
                 IsRebuildTriggerKind(i.Kind)
-                && !addedTables.Contains(i.TableName.Trim())
-                && !droppedTables.Contains(i.TableName.Trim())
+                && !addedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
+                && !droppedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
             )
-            .Select(i => i.TableName.Trim())
+            .Select(i => SchemaNames.ToStoredForm(i.TableName))
             .Where(liveByName.Contains)
-            .ToHashSet(TableComparer);
+            .ToHashSet(SchemaNames.Comparer);
 
         // rebuild へ転用（畳み込み）が確定した項目の集合（SchemaDiffItem は参照同一性で比較する）
         var diverted = new HashSet<SchemaDiffItem>();
 
         foreach (
             var item in selected.Where(i =>
-                droppedTables.Contains(i.TableName.Trim())
+                droppedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
                 && (IsRebuildTriggerKind(i.Kind) || i.Kind == SchemaDiffKind.AddColumn)
             )
         )
@@ -2332,7 +2328,7 @@ public sealed class SyncPlanner
 
         // live の外部キーは子表ごとに 1 回だけまとめる（作り直す表ごとに全外部キーを解決し直さない）
         var liveForeignKeysByChild = EnumerateLiveForeignKeys(context)
-            .ToLookup(fk => SchemaDiffService.NormalizeTable(fk.Child), TableComparer);
+            .ToLookup(fk => SchemaDiffService.NormalizeTable(fk.Child), SchemaNames.Comparer);
 
         var rebuilds = new List<TableRebuildPlan>();
         rebuilds.AddRange(BuildCreateOnlyRebuilds(selected, addedTables, diverted, limit));
@@ -2393,7 +2389,12 @@ public sealed class SyncPlanner
                 continue;
             }
 
-            if (!context.TableCreateSql.TryGetValue(rebuild.TableName.Trim(), out var createSql))
+            if (
+                !context.TableCreateSql.TryGetValue(
+                    SchemaNames.ToStoredForm(rebuild.TableName),
+                    out var createSql
+                )
+            )
             {
                 continue;
             }
@@ -2431,7 +2432,7 @@ public sealed class SyncPlanner
 
         foreach (var addTable in selected.Where(i => i.Kind == SchemaDiffKind.AddTable))
         {
-            var table = addTable.TableName.Trim();
+            var table = SchemaNames.ToStoredForm(addTable.TableName);
             diverted.Add(addTable);
 
             // その新テーブルを子とする選択済み AddForeignKey を FK 仕様として畳み込む。
@@ -2439,7 +2440,7 @@ public sealed class SyncPlanner
             var fkItems = selected
                 .Where(i =>
                     i.Kind == SchemaDiffKind.AddForeignKey
-                    && TableComparer.Equals(i.TableName.Trim(), table)
+                    && SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
                 )
                 .ToList();
             var fks = new List<TableRebuildForeignKey>();
@@ -2508,7 +2509,7 @@ public sealed class SyncPlanner
             // このテーブルに畳み込む項目（再構築トリガー種別＋列追加）を確定する
             var candidates = selected
                 .Where(i =>
-                    TableComparer.Equals(i.TableName.Trim(), table)
+                    SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
                     && (IsRebuildTriggerKind(i.Kind) || i.Kind == SchemaDiffKind.AddColumn)
                 )
                 .ToList();
@@ -2551,14 +2552,16 @@ public sealed class SyncPlanner
             );
 
             // データ移送対象 = live と合成後の両方に存在する列（合成後の列順で並べる）
-            var liveColumnNames = live.Columns.Select(c => c.Name).ToHashSet(TableComparer);
+            var liveColumnNames = live.Columns.Select(c => c.Name).ToHashSet(SchemaNames.Comparer);
             var copyColumns = newDef
                 .Columns.Select(c => c.Name)
                 .Where(liveColumnNames.Contains)
                 .ToList();
 
             var auxiliaryObjects = context
-                .AuxiliaryObjects.Where(a => TableComparer.Equals(a.TableName.Trim(), table))
+                .AuxiliaryObjects.Where(a =>
+                    SchemaNames.AreSame(SchemaNames.ToStoredForm(a.TableName), table)
+                )
                 .ToList();
 
             rebuilds.Add(
@@ -2590,7 +2593,7 @@ public sealed class SyncPlanner
     )
     {
         bool HasColumn(Entity entity, string? name) =>
-            name is not null && entity.Columns.Any(c => TableComparer.Equals(c.Name, name));
+            name is not null && entity.Columns.Any(c => SchemaNames.AreSame(c.Name, name));
 
         return item.Kind switch
         {
@@ -2626,7 +2629,7 @@ public sealed class SyncPlanner
         // AlterColumn: 同名の live 列へ、型・NULL 許容・計算列だけを写す（Id・名前・主キー指定は live のまま）
         foreach (var alter in tableItems.Where(i => i.Kind == SchemaDiffKind.AlterColumn))
         {
-            var column = newDef.Columns.Find(c => TableComparer.Equals(c.Name, alter.ColumnName));
+            var column = newDef.Columns.Find(c => SchemaNames.AreSame(c.Name, alter.ColumnName));
 
             if (column is not null && alter.Column is not null)
             {
@@ -2639,7 +2642,7 @@ public sealed class SyncPlanner
         // DropColumn: 同名の列を除去する
         foreach (var drop in tableItems.Where(i => i.Kind == SchemaDiffKind.DropColumn))
         {
-            newDef.Columns.RemoveAll(c => TableComparer.Equals(c.Name, drop.ColumnName));
+            newDef.Columns.RemoveAll(c => SchemaNames.AreSame(c.Name, drop.ColumnName));
         }
 
         // AddColumn: 末尾へ畳み込む（このテーブルが他理由で再構築される場合のみここへ来る）。
@@ -2683,7 +2686,7 @@ public sealed class SyncPlanner
         }
 
         var targetPkColumns = alterPk.Entity.GetPrimaryKeyColumnsInOrder();
-        var pkNames = targetPkColumns.Select(c => c.Name).ToHashSet(TableComparer);
+        var pkNames = targetPkColumns.Select(c => c.Name).ToHashSet(SchemaNames.Comparer);
 
         foreach (var column in newDef.Columns)
         {
@@ -2692,7 +2695,7 @@ public sealed class SyncPlanner
 
         // target の実効順を列名で合成後定義の列 Guid へ写像し直す
         newDef.PrimaryKeyColumnIds = targetPkColumns
-            .Select(pk => newDef.Columns.FirstOrDefault(c => TableComparer.Equals(c.Name, pk.Name)))
+            .Select(pk => newDef.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, pk.Name)))
             .Where(c => c is not null)
             .Select(c => c!.Id)
             .ToList();
@@ -2718,7 +2721,7 @@ public sealed class SyncPlanner
         }
 
         // target 列名 → 目標順インデックス
-        var targetOrder = new Dictionary<string, int>(TableComparer);
+        var targetOrder = new Dictionary<string, int>(SchemaNames.Comparer);
 
         for (var i = 0; i < reorder.Entity.Columns.Count; i++)
         {
@@ -2778,7 +2781,7 @@ public sealed class SyncPlanner
             foreach (var columnName in add.UniqueConstraintColumns)
             {
                 var column = newDef.Columns.FirstOrDefault(c =>
-                    TableComparer.Equals(c.Name, columnName)
+                    SchemaNames.AreSame(c.Name, columnName)
                 );
 
                 if (column is null)
@@ -2835,7 +2838,7 @@ public sealed class SyncPlanner
 
         foreach (var item in reorderItems)
         {
-            var table = item.TableName.Trim();
+            var table = SchemaNames.ToStoredForm(item.TableName);
 
             // live に無いテーブル（そのテーブル自体が同期対象外）・target 不明なら並べ替えられない
             if (!liveByName.TryGet(table, out var live) || item.Entity is null)
@@ -2886,12 +2889,12 @@ public sealed class SyncPlanner
     {
         // このテーブルの選択済み Add / Drop / Alter を集める
         var tableSelected = selected
-            .Where(i => TableComparer.Equals(i.TableName.Trim(), table))
+            .Where(i => SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table))
             .ToList();
         var droppedNames = tableSelected
             .Where(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName is not null)
             .Select(i => i.ColumnName!)
-            .ToHashSet(TableComparer);
+            .ToHashSet(SchemaNames.Comparer);
         var addedColumns = tableSelected
             .Where(i => i.Kind == SchemaDiffKind.AddColumn && i.Column is not null)
             .Select(i => i.Column!)
@@ -2910,11 +2913,11 @@ public sealed class SyncPlanner
 
         effective.AddRange(addedColumns.Select(c => c.Name));
 
-        var effectiveSet = effective.ToHashSet(TableComparer);
+        var effectiveSet = effective.ToHashSet(SchemaNames.Comparer);
 
         // 目標順 = target の列順のうち実効列集合に含まれるもの（＝並べ替え対象になり得る列）
         var targetOrder = target.Columns.Select(c => c.Name).Where(effectiveSet.Contains).ToList();
-        var targetIndex = new Dictionary<string, int>(TableComparer);
+        var targetIndex = new Dictionary<string, int>(SchemaNames.Comparer);
 
         for (var i = 0; i < targetOrder.Count; i++)
         {
@@ -2958,7 +2961,7 @@ public sealed class SyncPlanner
         var add = tableSelected.FirstOrDefault(i =>
             i.Kind == SchemaDiffKind.AddColumn
             && i.Column is not null
-            && TableComparer.Equals(i.Column.Name, name)
+            && SchemaNames.AreSame(i.Column.Name, name)
         );
 
         if (add?.Column is not null)
@@ -2970,7 +2973,7 @@ public sealed class SyncPlanner
         var alter = tableSelected.FirstOrDefault(i =>
             i.Kind == SchemaDiffKind.AlterColumn
             && i.Column is not null
-            && TableComparer.Equals(i.Column.Name, name)
+            && SchemaNames.AreSame(i.Column.Name, name)
         );
 
         if (alter?.Column is not null)
@@ -2978,7 +2981,7 @@ public sealed class SyncPlanner
             return alter.Column;
         }
 
-        return live.Columns.FirstOrDefault(c => TableComparer.Equals(c.Name, name))
+        return live.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, name))
             ?? new Column { Name = name };
     }
 
@@ -3071,14 +3074,14 @@ public sealed class SyncPlanner
             var (parentTable, columnPairs) = signature.Value;
             var candidates = foreignKeys
                 .Where(fk =>
-                    TableComparer.Equals(fk.ParentTable, parentTable)
+                    SchemaNames.AreSame(fk.ParentTable, parentTable)
                     && fk.ChildColumns.SequenceEqual(
                         ForeignKeyColumnPairResolver.ChildColumns(columnPairs),
-                        TableComparer
+                        SchemaNames.Comparer
                     )
                     && fk.ParentColumns.SequenceEqual(
                         ForeignKeyColumnPairResolver.ParentColumns(columnPairs),
-                        TableComparer
+                        SchemaNames.Comparer
                     )
                 )
                 .ToList();
@@ -3094,7 +3097,7 @@ public sealed class SyncPlanner
             var onUpdate = dropFk.Relationship?.OnUpdate ?? ForeignKeyReferentialAction.NoAction;
             var removed =
                 candidates.FirstOrDefault(fk =>
-                    TableComparer.Equals(fk.ConstraintName, dropName)
+                    SchemaNames.AreSame(fk.ConstraintName, dropName)
                     && fk.OnDelete == onDelete
                     && fk.OnUpdate == onUpdate
                 )

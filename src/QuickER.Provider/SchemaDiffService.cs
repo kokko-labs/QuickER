@@ -58,12 +58,12 @@ public class SchemaDiffService
         // 型表記の正規化と参照アクションの畳み込み（capabilities が無ければ恒等＝従来どおり素の比較）
         var dialect = capabilities ?? new SyncDialectCapabilities();
 
+        // 表と列の組を 1 回だけ求める（規則は NameLookup＝同じ名前かは SchemaNames が決め、同じとみなす相手が片側に
+        // 複数あるときは綴りまで一致する 1 件を選ぶ。選べなければ組まず、図側は追加・DB 側は削除の候補になる）。
         // 組になる live と大文字小文字だけ違う図側の表・列は、live の綴りへ揃えた複製で差分を組む
-        targetEntities = AlignNameCaseToLive(targetEntities, liveEntities);
-
-        // テーブルの組（規則は NameLookup＝序数一致を優先し、大文字小文字だけ違う名前は双方で一意なときだけ組む。
-        // 曖昧な名前は組まず、図側は追加・DB 側は削除の候補になる）
-        var livePartnerOf = MatchTables(targetEntities, liveEntities);
+        var matching = MatchSchemas(targetEntities, liveEntities);
+        targetEntities = matching.Targets;
+        var livePartnerOf = matching.LivePartnerOf;
         var matchedLive = livePartnerOf.Values.ToHashSet();
 
         // ---------- テーブル/カラムの差分 ----------
@@ -141,8 +141,8 @@ public class SchemaDiffService
                 continue;
             }
 
-            // 既存テーブル: カラム差分（列の組もテーブルと同じ規則）
-            var liveColumnOf = MatchColumns(target, live);
+            // 既存テーブル: カラム差分（列の組もテーブルと同じ規則・組は MatchSchemas が求めたもの）
+            var liveColumnOf = matching.LiveColumnOf[target];
             var matchedLiveColumns = liveColumnOf.Values.ToHashSet();
 
             // テーブル説明の差分
@@ -518,7 +518,7 @@ public class SchemaDiffService
         {
             foreach (var (target, live) in livePartnerOf)
             {
-                if (!HasColumnOrderChanged(live, target))
+                if (!HasColumnOrderChanged(live, target, matching.LiveColumnOf[target]))
                 {
                     continue;
                 }
@@ -805,29 +805,45 @@ public class SchemaDiffService
         IReadOnlyList<Entity> targetEntities
     )
     {
-        var livePartnerOf = MatchTables(targetEntities, liveEntities);
+        var matching = new SchemaDiffService().MatchSchemas(targetEntities, liveEntities);
 
-        return livePartnerOf
-            .Where(pair => HasColumnOrderChanged(pair.Value, pair.Key))
-            .Select(pair => NormalizeTable(pair.Key))
+        // 表名は、ほかの差分項目と同じく DB の綴りで返す（差分は組になった図の表を DB の綴りへ揃えて組む）
+        return matching
+            .LivePartnerOf.Where(pair =>
+                HasColumnOrderChanged(pair.Value, pair.Key, matching.LiveColumnOf[pair.Key])
+            )
+            .Select(pair => NormalizeTable(pair.Value))
             .ToList();
     }
 
-    /// <summary>図側のテーブル → 組になる DB 側のテーブル（<see cref="NameLookup{T}"/> の規則・図側の並び順）</summary>
-    private static Dictionary<Entity, Entity> MatchTables(
-        IReadOnlyList<Entity> targetEntities,
-        IReadOnlyList<Entity> liveEntities
-    ) =>
-        NameMatching
-            .Match(targetEntities, liveEntities, NormalizeTable, NormalizeTable)
-            .ToDictionary(pair => pair.Left, pair => pair.Right);
+    /// <summary>表と列を組んだ結果（<see cref="MatchSchemas"/>）</summary>
+    /// <param name="Targets">差分を組む図側の表（組になった相手と綴りが違う表は、DB の綴りへ揃えた複製）</param>
+    /// <param name="LivePartnerOf">図側の表（<paramref name="Targets"/> の要素）→ 組になる DB 側の表</param>
+    /// <param name="LiveColumnOf">組になった図側の表 → その列 → 組になる DB 側の列</param>
+    private sealed record SchemaMatching(
+        IReadOnlyList<Entity> Targets,
+        Dictionary<Entity, Entity> LivePartnerOf,
+        Dictionary<Entity, Dictionary<Column, Column>> LiveColumnOf
+    );
+
+    /// <summary>照合の回数（表の組み合わせ・表ごとの列の組み合わせ。テストの観測点）</summary>
+    /// <remarks>
+    /// <see cref="Compute"/> 1 回につき、表の組み合わせは 1 回、組になった表ごとの列の組み合わせは 1 回だけ行う
+    /// （揃えた複製・列の差分・列順の判定が同じ組を使う）。<c>SchemaDiffServiceMatchingCountTests</c> が固定する。
+    /// </remarks>
+    internal int TableMatchings { get; private set; }
+
+    /// <inheritdoc cref="TableMatchings"/>
+    internal int ColumnMatchings { get; private set; }
 
     /// <summary>
-    /// 組になる DB 側と大文字小文字だけ綴りが違う図側の表・列を、DB 側の綴りへ揃えた複製に差し替えたリストを返す
+    /// 図側と DB 側の表・列を 1 回だけ組み、組になった DB 側と大文字小文字だけ綴りが違う図側の表・列を、
+    /// DB 側の綴りへ揃えた複製に差し替える
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 差分は表・列を大文字小文字を無視して組む（<see cref="NameMatching"/>）が、スクリプトは図側の綴りを書く。
+    /// 組の規則は <see cref="NameLookup{T}"/>（同じ名前かは <see cref="SchemaNames"/> が決める）。
+    /// 差分は表・列を大文字小文字を無視して組むが、スクリプトは図側の綴りを書く。
     /// 引用識別子で綴りを区別する方言では、それでは組んだ相手を指せない（Oracle は引用符なしで作られた表を
     /// 大文字で持つので、図の <c>"Orders"</c> では表 <c>ORDERS</c> に届かず ORA-00942。PostgreSQL は小文字で持つ）。
     /// 組になった表・列だけを DB 側の綴りへ揃えれば、項目・計画・スクリプトのすべてが DB に実在する名前を書く。
@@ -835,40 +851,56 @@ public class SchemaDiffService
     /// <para>
     /// 揃えるのは組になった表・列だけで、図にしか無い表（AddTable）・列（AddColumn）は図の綴りのまま作る。
     /// 図そのものは書き換えない（Id を保った複製＝リレーション・一意制約・主キーの順序の参照はそのまま通る）。
-    /// 揃える組が 1 つも無い表は元のオブジェクトのまま返す（出力はバイト不変）。
+    /// 揃える組が 1 つも無い表は元のオブジェクトのまま返す（出力はバイト不変）。複製の列の組は、組み直さずに
+    /// 元の列と同じ Id の列へ写す。
+    /// </para>
+    /// <para>
+    /// 綴りが違うかの判定は序数で比べる（同一性の判定ではなく、SchemaNames が同じとみなす相手と綴りまで一致するかを
+    /// 見る判定。同一性は SchemaNames が決める）。
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<Entity> AlignNameCaseToLive(
+    private SchemaMatching MatchSchemas(
         IReadOnlyList<Entity> targetEntities,
         IReadOnlyList<Entity> liveEntities
     )
     {
-        var livePartnerOf = MatchTables(targetEntities, liveEntities);
-        List<Entity>? aligned = null;
+        TableMatchings++;
+        var tablePairs = NameMatching.Match(
+            targetEntities,
+            liveEntities,
+            NormalizeTable,
+            NormalizeTable
+        );
+        var targets = targetEntities.ToList();
+        var indexOf = new Dictionary<Entity, int>(ReferenceEqualityComparer.Instance);
 
-        for (var i = 0; i < targetEntities.Count; i++)
+        for (var i = 0; i < targets.Count; i++)
         {
-            var target = targetEntities[i];
+            indexOf[targets[i]] = i;
+        }
 
-            if (!livePartnerOf.TryGetValue(target, out var live))
-            {
-                continue;
-            }
+        var livePartnerOf = new Dictionary<Entity, Entity>();
+        var liveColumnOf = new Dictionary<Entity, Dictionary<Column, Column>>();
 
-            var liveColumnOf = MatchColumns(target, live);
+        foreach (var (target, live) in tablePairs)
+        {
+            ColumnMatchings++;
+            var columnPairs = NameMatching
+                .Match(target.Columns, live.Columns, column => column.Name, column => column.Name)
+                .ToDictionary(pair => pair.Left, pair => pair.Right);
             var renameTable = !string.Equals(
                 NormalizeTable(target),
                 NormalizeTable(live),
                 StringComparison.Ordinal
             );
-            var renamedColumns = liveColumnOf
-                .Where(pair =>
-                    !string.Equals(pair.Key.Name, pair.Value.Name, StringComparison.Ordinal)
-                )
-                .ToDictionary(pair => pair.Key.Id, pair => pair.Value.Name);
+            var renameColumns = columnPairs.Any(pair =>
+                !string.Equals(pair.Key.Name, pair.Value.Name, StringComparison.Ordinal)
+            );
 
-            if (!renameTable && renamedColumns.Count == 0)
+            if (!renameTable && !renameColumns)
             {
+                livePartnerOf[target] = live;
+                liveColumnOf[target] = columnPairs;
                 continue;
             }
 
@@ -879,32 +911,33 @@ public class SchemaDiffService
                 clone.TableName = live.TableName;
             }
 
+            var liveColumnById = columnPairs.ToDictionary(pair => pair.Key.Id, pair => pair.Value);
+            var cloneColumnPairs = new Dictionary<Column, Column>();
+
             foreach (var column in clone.Columns)
             {
-                if (renamedColumns.TryGetValue(column.Id, out var liveName))
+                if (liveColumnById.TryGetValue(column.Id, out var liveColumn))
                 {
-                    column.Name = liveName;
+                    column.Name = liveColumn.Name;
+                    cloneColumnPairs[column] = liveColumn;
                 }
             }
 
-            aligned ??= targetEntities.ToList();
-            aligned[i] = clone;
+            targets[indexOf[target]] = clone;
+            livePartnerOf[clone] = live;
+            liveColumnOf[clone] = cloneColumnPairs;
         }
 
-        return aligned ?? targetEntities;
+        // 揃える組が無ければ元のリストのまま返す
+        IReadOnlyList<Entity> result = targets.SequenceEqual(targetEntities)
+            ? targetEntities
+            : targets;
+
+        return new SchemaMatching(result, livePartnerOf, liveColumnOf);
     }
 
-    /// <summary>図側の列 → 組になる DB 側の列（<see cref="NameLookup{T}"/> の規則）</summary>
-    private static Dictionary<Column, Column> MatchColumns(Entity target, Entity live) =>
-        NameMatching
-            .Match(target.Columns, live.Columns, column => column.Name, column => column.Name)
-            .ToDictionary(pair => pair.Left, pair => pair.Right);
-
-    /// <summary>テーブル名を比較用に正規化する（前後空白を除去する）</summary>
-    public static string NormalizeTable(Entity e)
-    {
-        return e.TableName.Trim();
-    }
+    /// <summary>テーブル名を図へ保存する形にする（<see cref="SchemaNames.ToStoredForm"/>・綴りはそのまま）</summary>
+    public static string NormalizeTable(Entity e) => SchemaNames.ToStoredForm(e.TableName);
 
     /// <summary>外部キーの同一性比較に使うシグネチャ（親子・構成列ペア・制約名・参照アクション）を生成する</summary>
     /// <param name="fk">親子・列ペアまで解決済みの外部キー</param>
@@ -949,8 +982,8 @@ public class SchemaDiffService
 
         // 各部分は長さつきでつなぐ（名前に区切り文字を含む表・列・制約で、別の外部キーと同じ署名にならない）
         return string.Concat(
-            SignaturePart(NormalizeTable(fk.Parent).ToLowerInvariant()),
-            SignaturePart(NormalizeTable(fk.Child).ToLowerInvariant()),
+            SignaturePart(SchemaNames.Key(fk.Parent.TableName)),
+            SignaturePart(SchemaNames.Key(fk.Child.TableName)),
             SignaturePart(pairSignature),
             SignaturePart(constraintName),
             SignaturePart(dialect.EffectiveOnDelete(fk.Relationship.OnDelete).ToString()),
@@ -961,15 +994,15 @@ public class SchemaDiffService
     /// <summary>署名の 1 部分を長さつきで表す（<see cref="UniqueConstraintNaming.ColumnSetSignature"/> と同じ形）</summary>
     private static string SignaturePart(string value) => $"{value.Length}:{value}";
 
-    /// <summary>列名を照合用（前後空白を除き小文字化）に整える（外部キーの署名と作り直しの対応づけが共有する）</summary>
-    private static string ColumnKey(string name) => name.Trim().ToLowerInvariant();
+    /// <summary>列名を照合用のキー（<see cref="SchemaNames.Key"/>）にする（外部キーの署名と作り直しの対応づけが共有する）</summary>
+    private static string ColumnKey(string name) => SchemaNames.Key(name);
 
     /// <summary>列の実効の NULL 許容（主キーの列はモデルの値に依らず NOT NULL）</summary>
     private static bool IsEffectivelyNullable(Column column) =>
         column.IsNullable && !column.IsPrimaryKey;
 
-    /// <summary>制約の名前を照合用（前後空白を除き小文字化）に整える（外部キーと一意制約の作り直しの対応づけが使う）</summary>
-    private static string NameKey(string name) => name.Trim().ToLowerInvariant();
+    /// <summary>制約の名前を照合用のキー（<see cref="SchemaNames.Key"/>）にする（外部キーと一意制約の作り直しの対応づけが使う）</summary>
+    private static string NameKey(string name) => SchemaNames.Key(name);
 
     /// <summary>図の外部キーの名前を求める（旧版の PostgreSQL が切り詰めた既定名を吸収する）</summary>
     /// <remarks>
@@ -1132,7 +1165,7 @@ public class SchemaDiffService
         IdentifierLengthLimit limit
     )
     {
-        var child = NormalizeTable(item.ChildEntity!).ToLowerInvariant();
+        var child = SchemaNames.Key(item.ChildEntity!.TableName);
 
         if (includeConstraintName)
         {
@@ -1178,7 +1211,7 @@ public class SchemaDiffService
 
         // 列ペアの並びを問わない方言では、並びだけの違いを参照の変更と言わない（差分のシグネチャと同じ規則）
         var referenceChanged =
-            !string.Equals(oldParent, newParent, StringComparison.OrdinalIgnoreCase)
+            !SchemaNames.AreSame(oldParent, newParent)
             || !SamePairs(drop.ForeignKeyColumnPairs, add.ForeignKeyColumnPairs);
 
         if (referenceChanged)
@@ -1260,7 +1293,7 @@ public class SchemaDiffService
         }
 
         static string PairKey(ForeignKeyColumnNamePair pair) =>
-            $"{pair.ParentColumn.ToLowerInvariant()}>{pair.ChildColumn.ToLowerInvariant()}";
+            $"{SchemaNames.Key(pair.ParentColumn)}>{SchemaNames.Key(pair.ChildColumn)}";
     }
 
     /// <summary>外部キーの構成列を差分表示用の列名リストへ整形する（宣言順・カンマ区切り）</summary>
@@ -1271,7 +1304,7 @@ public class SchemaDiffService
     private static List<string> PrimaryKeyColumnNames(Entity entity) =>
         entity.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList();
 
-    /// <summary>主キー構成（列の順序付き集合）が同一かを判定する（列名の比較規則は列差分と同じ大文字小文字無視）</summary>
+    /// <summary>主キー構成（列の順序付き集合）が同一かを判定する（列名の比較規則は列差分と同じ <see cref="SchemaNames"/>）</summary>
     private static bool IsSamePrimaryKey(IReadOnlyList<string> live, IReadOnlyList<string> target)
     {
         if (live.Count != target.Count)
@@ -1281,7 +1314,7 @@ public class SchemaDiffService
 
         for (var i = 0; i < live.Count; i++)
         {
-            if (!string.Equals(live[i], target[i], StringComparison.OrdinalIgnoreCase))
+            if (!SchemaNames.AreSame(live[i], target[i]))
             {
                 return false;
             }
@@ -1295,11 +1328,13 @@ public class SchemaDiffService
         columns.Count == 0 ? Strings.Diff_PrimaryKey_None : string.Join(", ", columns);
 
     /// <summary>共通列（双方に存在する列）の相対順序が変更されているかを判定する</summary>
-    /// <remarks>共通列は差分と同じ規則（<see cref="MatchColumns"/>）で組になった列</remarks>
-    private static bool HasColumnOrderChanged(Entity live, Entity target)
+    /// <remarks>共通列は差分と同じ組（<see cref="MatchSchemas"/> が求めた <paramref name="liveColumnOf"/>）</remarks>
+    private static bool HasColumnOrderChanged(
+        Entity live,
+        Entity target,
+        Dictionary<Column, Column> liveColumnOf
+    )
     {
-        var liveColumnOf = MatchColumns(target, live);
-
         // 追加・削除を除いた共通列を、それぞれの出現順で取り出す（組なので同数になる）
         var targetCommon = target.Columns.Where(liveColumnOf.ContainsKey).ToList();
         var matchedLive = liveColumnOf.Values.ToHashSet();

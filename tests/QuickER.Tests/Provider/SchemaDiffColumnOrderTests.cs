@@ -35,6 +35,21 @@ public class SchemaDiffColumnOrderTests
         changed.Should().ContainSingle().Which.Should().Be("Customer");
     }
 
+    /// <summary>
+    /// 列順の案内の表名は、ほかの差分項目と同じく DB の綴りで出ることを検証する（差分は組になった図の表を
+    /// DB の綴りへ揃えて組むので、案内だけが図の綴りだと同じ表が 2 つの名前で並ぶ）
+    /// </summary>
+    [Fact(DisplayName = "列順の案内の表名は、大文字小文字だけ違う図でも DB の綴りで出る")]
+    public void DetectColumnOrderChanges_CaseOnlyDifferentTableName_ReturnsLiveSpelling()
+    {
+        var live = new List<Entity> { Tbl("Customer", "Id", "Name", "Email") };
+        var target = new List<Entity> { Tbl("customer", "Id", "Email", "Name") };
+
+        var changed = SchemaDiffService.DetectColumnOrderChanges(live, target);
+
+        changed.Should().ContainSingle().Which.Should().Be("Customer");
+    }
+
     /// <summary>列追加を伴う場合は列順変更として検知しないことを検証する</summary>
     [Fact(DisplayName = "列追加がある場合は列順変更としては検知しない")]
     public void DetectColumnOrderChanges_WithAddedColumn_DoesNotReturnTable()
