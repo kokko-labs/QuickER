@@ -282,7 +282,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         CancellationToken ct
     )
     {
-        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(SchemaTableEntry.KeyComparer);
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -373,6 +373,12 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             }
 
             var colName = reader.GetString(2);
+
+            // 同じテーブルに同じ名前（SchemaNames の規則）の列があれば、後着は取り込まずに告げる
+            if (!entry.TryBeginColumn(colName, warnings))
+            {
+                continue;
+            }
             var dataType = reader.GetString(3);
             int? maxLen = reader.IsDBNull(4) ? null : Convert.ToInt32(reader.GetValue(4));
             int? numPrec = reader.IsDBNull(5) ? null : Convert.ToInt32(reader.GetValue(5));
@@ -428,8 +434,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 );
             }
 
-            entry.Entity.Columns.Add(col);
-            entry.ColumnsByName[colName] = col;
+            entry.AddColumn(col, colName);
         }
     }
 
@@ -460,7 +465,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 continue;
             }
 
-            if (entry.ColumnsByName.TryGetValue(reader.GetString(2), out var col))
+            if (entry.TryGetColumnExact(reader.GetString(2), out var col))
             {
                 col.IsPrimaryKey = true;
                 col.IsNullable = false;
@@ -503,7 +508,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             {
                 var colName = reader.GetString(2);
 
-                if (entry.ColumnsByName.TryGetValue(colName, out var col))
+                if (entry.TryGetColumnExact(colName, out var col))
                 {
                     col.Description = description;
                 }

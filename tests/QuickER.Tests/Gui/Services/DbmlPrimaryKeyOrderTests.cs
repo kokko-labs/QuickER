@@ -83,7 +83,7 @@ public class DbmlPrimaryKeyOrderTests
         text.Should().Contain("  order_no int [not null]");
         text.Should().Contain("    (order_no, tenant_id) [pk]");
 
-        var restored = DbmlImporter.Parse(text).Entities.Single();
+        var restored = DbmlImporter.Parse(text, "sqlserver").Entities.Single();
 
         KeyOrder(restored).Should().Equal("order_no", "tenant_id");
         restored
@@ -121,7 +121,8 @@ public class DbmlPrimaryKeyOrderTests
                 "    (order_no, tenant_id) [pk, name: 'pk_order_lines']",
                 "  }",
                 "}"
-            )
+            ),
+            "sqlserver"
         );
         var entity = diagram.Entities.Single();
 
@@ -142,7 +143,8 @@ public class DbmlPrimaryKeyOrderTests
                 "    (order_no, tenant_id) [pk]",
                 "  }",
                 "}"
-            )
+            ),
+            "sqlserver"
         );
 
         KeyOrder(diagram.Entities.Single()).Should().Equal("order_no", "tenant_id");
@@ -163,7 +165,7 @@ public class DbmlPrimaryKeyOrderTests
             "}"
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -196,7 +198,7 @@ public class DbmlPrimaryKeyOrderTests
             "}"
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -222,7 +224,7 @@ public class DbmlPrimaryKeyOrderTests
             "}"
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -252,7 +254,7 @@ public class DbmlPrimaryKeyOrderTests
             "}"
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should().Throw<InvalidDataException>().WithMessage("*no_such_column*");
     }

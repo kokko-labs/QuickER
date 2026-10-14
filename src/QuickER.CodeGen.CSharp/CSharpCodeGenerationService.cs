@@ -799,6 +799,7 @@ public sealed partial class CSharpCodeGenerationService
             }
         }
 
+        ValidateSchemaNameDuplicates(diagram, diagnostics);
         ValidateEntityClassNameUniqueness(diagram, diagnostics);
         ValidateColumnPropertyNameUniqueness(diagram, diagnostics);
         ValidateNameControlCharacters(diagram, diagnostics);
@@ -902,11 +903,11 @@ public sealed partial class CSharpCodeGenerationService
     /// C0 制御文字（U+0000〜U+001F）・DEL（U+007F）・Unicode の行区切り（U+0085 / U+2028 / U+2029）か。
     /// </summary>
     /// <remarks>
-    /// 行区切り 3 種を含めるのは、これらが C# 言語仕様上の new-line だから（<see cref="FoldNewLines"/> と同じ集合）。
+    /// 行区切り 3 種を含めるのは、これらが C# 言語仕様上の new-line だから（集合の正本は <see cref="GeneratedLiteralText.IsLineBreak"/>）。
     /// <c>///</c> コメントや 1 行リテラルの行またぎを許すと、名前 1 つで生成コードへ任意の C# を注入できる。
     /// </remarks>
     private static bool IsControlCharacter(char ch) =>
-        ch < ' ' || ch == (char)0x7F || ch == '\u0085' || ch == '\u2028' || ch == '\u2029';
+        ch < ' ' || ch == (char)0x7F || GeneratedLiteralText.IsLineBreak(ch);
 
     /// <summary>
     /// rowversion 列の置き方を検証する（1 エンティティに 2 本以上ないこと・主キー列が rowversion でないこと）
@@ -1124,6 +1125,61 @@ public sealed partial class CSharpCodeGenerationService
                             Strings.CodeGen_Error_PrimaryKeyComputedColumn,
                             entity.TableName,
                             column.Name
+                        )
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// テーブル名・同じテーブルの列名が <see cref="SchemaNames"/> の規則（前後の空白を除き大文字小文字を区別しない）で
+    /// 重複していないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// ツール・取込・プロパティパネルは重複を入口で断るが、手で編集した図ファイルや古い版の図は重複を持ち得る。
+    /// 生成する C# の識別子が衝突するかどうか（<see cref="ValidateEntityClassNameUniqueness"/> など）とは別に、
+    /// 図が持ってはいけない状態として名指しで止める（<c>Äpfel</c> と <c>äpfel</c> のように C# では別の名前になる組も含む）。
+    /// </remarks>
+    private static void ValidateSchemaNameDuplicates(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        foreach (
+            var group in diagram
+                .Entities.Where(entity => !string.IsNullOrWhiteSpace(entity.TableName))
+                .GroupBy(entity => entity.TableName, SchemaNames.Comparer)
+                .Where(group => group.Count() > 1)
+        )
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_DuplicateTableName,
+                        SchemaNames.ToStoredForm(group.First().TableName),
+                        string.Join(", ", group.Select(entity => $"'{entity.TableName}'"))
+                    )
+                )
+            );
+        }
+
+        foreach (var entity in diagram.Entities)
+        {
+            foreach (
+                var group in entity
+                    .Columns.Where(column => !string.IsNullOrWhiteSpace(column.Name))
+                    .GroupBy(column => column.Name, SchemaNames.Comparer)
+                    .Where(group => group.Count() > 1)
+            )
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Error(
+                        string.Format(
+                            Strings.CodeGen_Error_DuplicateColumnName,
+                            entity.TableName,
+                            SchemaNames.ToStoredForm(group.First().Name),
+                            string.Join(", ", group.Select(column => $"'{column.Name}'"))
                         )
                     )
                 );
@@ -1770,7 +1826,11 @@ public sealed partial class CSharpCodeGenerationService
                             .ColumnIds.Select(id => columnsById[id].Name)
                             .ToList();
                         var name = string.IsNullOrWhiteSpace(constraint.Name)
-                            ? UniqueConstraint.SynthesizeName(entity.TableName, members)
+                            ? UniqueConstraint.SynthesizeName(
+                                entity.TableName,
+                                members,
+                                IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+                            )
                             : constraint.Name;
 
                         return $"{entity.TableName}.{name} ({string.Join(", ", members)})";

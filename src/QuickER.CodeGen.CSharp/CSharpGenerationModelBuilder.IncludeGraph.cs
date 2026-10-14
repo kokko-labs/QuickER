@@ -79,7 +79,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         // 子方向ナビの行き先はテーブル名で引く（同名テーブルは先勝ちで 1 つに畳む＝ナビ解決側と同じ扱い）
-        var entitiesByTable = new Dictionary<string, Entity>(StringComparer.Ordinal);
+        var entitiesByTable = new Dictionary<string, Entity>(SchemaNames.Comparer);
 
         foreach (var entity in diagram.Entities)
         {

@@ -19,6 +19,9 @@ public partial class UpdateSettingsViewModel : ObservableObject
     /// <summary>設定の永続化ストア</summary>
     private readonly GuiAppSettingsStore _store;
 
+    /// <summary>テスト専用: 設定の保存先</summary>
+    internal GuiAppSettingsStore StoreForTests => _store;
+
     /// <summary>保存の失敗を知らせるダイアログの表示先</summary>
     private readonly IDialogService _dialogs;
 

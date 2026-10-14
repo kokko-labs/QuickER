@@ -46,6 +46,7 @@ public static class SyncScriptBuilderHelper
 
     /// <summary>付ける外部キーの名前を返す（AddForeignKey と再構築の外部キー）</summary>
     /// <param name="item">外部キーを付ける差分項目（子・親のエンティティが解決済み）</param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（同期の方言の上限）</param>
     /// <returns>
     /// 差分が求めた名前（<see cref="SchemaDiffItem.ForeignKeyName"/>）。無ければリレーションの名前、それも無ければ既定名
     /// </returns>
@@ -53,11 +54,12 @@ public static class SyncScriptBuilderHelper
     /// 差分は DDL と同じ規則（<see cref="ConstraintNames.ResolveForeignKeyNames"/>）で名前を求めて項目へ載せる。
     /// リレーションの名前から求め直すと、名前の無い同じ組の 2 本目が DDL と違う名前（既定名）になる。
     /// </remarks>
-    public static string ForeignKeyNameToAdd(SchemaDiffItem item) =>
+    public static string ForeignKeyNameToAdd(SchemaDiffItem item, IdentifierLengthLimit limit) =>
         ConstraintNames.EffectiveForeignKey(
             item.ForeignKeyName ?? item.Relationship?.ConstraintName,
             SchemaDiffService.NormalizeTable(item.ChildEntity!),
-            SchemaDiffService.NormalizeTable(item.ParentEntity!)
+            SchemaDiffService.NormalizeTable(item.ParentEntity!),
+            limit
         );
 
     /// <summary>外部キーの ON DELETE / ON UPDATE 参照アクション句を生成する</summary>

@@ -18,7 +18,11 @@ namespace QuickER.Tests.CodeReverse.CSharp;
 public class CSharpReverseWarningTests
 {
     private static CodeReverseResult Parse(string source) =>
-        new CSharpReverseParser().Parse(source, new SqlServerTypeCatalog());
+        new CSharpReverseParser().Parse(
+            source,
+            new SqlServerTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
 
     /// <summary>
     /// 型メタ（<c>[DbColumnMeta]</c>）を持つ列が 1 つも無い <c>[Table]</c> クラスも、列ゼロのテーブルとして

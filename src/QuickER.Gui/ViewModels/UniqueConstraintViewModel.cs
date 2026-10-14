@@ -37,6 +37,10 @@ public partial class UniqueConstraintViewModel : ObservableObject
     /// <summary>末尾に未選択の空スロット行を出しているかどうか（ビュー状態・モデル未反映）</summary>
     private bool _hasPendingSlot;
 
+    /// <summary>所有エンティティの一意制約の一覧から外れているか（外れている間の行の書き込みは正本を変えない）</summary>
+    /// <remarks>所有エンティティが購読を外すとき（<c>EntityViewModel.DetachUniqueConstraint</c>）に立て、張り直すときに下ろす</remarks>
+    internal bool IsDetachedFromOwner { get; set; }
+
     /// <summary>制約名（空文字＝未設定＝DDL 生成時に列構成から合成する）</summary>
     [ObservableProperty]
     private string _name;
@@ -78,7 +82,8 @@ public partial class UniqueConstraintViewModel : ObservableObject
         UniqueConstraintNaming.Resolve(
             string.IsNullOrWhiteSpace(Name) ? null : Name,
             _owner.TableName,
-            MemberColumnNames
+            MemberColumnNames,
+            _owner.IdentifierLimit
         );
 
     /// <summary>構成列の名前（宣言順）。解決できない Guid は読み飛ばす</summary>
@@ -101,8 +106,10 @@ public partial class UniqueConstraintViewModel : ObservableObject
     /// <param name="columnIds">新しい構成列の Guid（宣言順）</param>
     internal void SetColumnIds(IEnumerable<Guid> columnIds)
     {
+        // 引数を先に確定させる（自分の ColumnIds を渡されたとき、消してから読むと空になる）
+        var replacement = columnIds.ToList();
         _columnIds.Clear();
-        _columnIds.AddRange(columnIds);
+        _columnIds.AddRange(replacement);
 
         // 正本が変わった時点で編集途中の空スロットは意味を失うため捨てる（Undo・MCP 由来の変更も同じ扱い）
         _hasPendingSlot = false;
@@ -113,7 +120,10 @@ public partial class UniqueConstraintViewModel : ObservableObject
     /// <remarks>行は正本（<see cref="ColumnIds"/>）からの導出のため、単純な作り直しで足りる</remarks>
     internal void SyncColumns()
     {
-        NotifyMembershipChanged();
+        // 構成列（正本）は変わらないので ColumnIdsChanged は出さない（所有エンティティの構成列フラグは、
+        // カラムの増減の処理がまとめて 1 回計算し直す）。編集行と、列名から作る合成名は作り直す
+        SyncMembers();
+        OnPropertyChanged(nameof(ResolvedName));
     }
 
     /// <summary>末尾へ未選択の空スロット行を 1 つ追加する（ビュー状態のみ・履歴に残さない）</summary>
@@ -153,8 +163,23 @@ public partial class UniqueConstraintViewModel : ObservableObject
             .ToList();
 
     /// <summary>行の列選択がユーザー操作で変わったことを購読側（履歴化する側）へ伝える</summary>
+    /// <remarks>
+    /// 図から外れている間（所有エンティティの一覧から外れた制約・図から外れたエンティティの制約）の書き込みは、
+    /// 正本を変えずに表示を正本へ戻す。外れた制約のコンボボックスの後片付けが選択を落としても、
+    /// Undo で戻る制約を欠けさせないため。印は <see cref="IsDetachedFromOwner"/>（所有エンティティが立てる）と
+    /// <c>EntityViewModel.IsDetachedFromDiagram</c>（MainViewModel が立てる）。
+    /// 図に居る間は、履歴化する受け手がいなくても正本へ反映する（MainViewModel を伴わない単独の VM でも、
+    /// 行の編集が構成列になる）
+    /// </remarks>
     internal void NotifyMemberSelectionEdited(UniqueConstraintMemberViewModel member)
     {
+        if (IsDetachedFromOwner || _owner.IsDetachedFromDiagram)
+        {
+            SyncMembers();
+
+            return;
+        }
+
         // 選択が動いた時点で他行の候補（重複除外）が変わるため、まず候補だけ整える
         RefreshMemberCandidates();
         OnPropertyChanged(nameof(CanAddMember));
@@ -197,11 +222,11 @@ public partial class UniqueConstraintViewModel : ObservableObject
 
         while (Members.Count > desired)
         {
-            var removed = Members[^1];
-            Members.RemoveAt(Members.Count - 1);
-
             // 外れた行のコンボボックスが後片付けの過程で選択を落としても、正本を触らせない
+            // （後片付けは行リストからの削除の通知の最中に走り得るので、削除より先に切り離す）
+            var removed = Members[^1];
             removed.Detach();
+            Members.RemoveAt(Members.Count - 1);
         }
 
         while (Members.Count < desired)
@@ -209,9 +234,20 @@ public partial class UniqueConstraintViewModel : ObservableObject
             Members.Add(new UniqueConstraintMemberViewModel(this));
         }
 
+        // 選択を当てる前に、当てる列を各行の候補へ足す（候補に無い項目を選択に当てると、
+        // コンボボックスがその選択を受け付けないか落とす）。足した分の余りは最後の絞り込みが外す
         for (var i = 0; i < Members.Count; i++)
         {
-            Members[i].ApplySelection(i < columns.Count ? columns[i] : null);
+            Members[i].IncludeInCandidates(i < columns.Count ? columns[i] : null);
+        }
+
+        for (var i = 0; i < Members.Count; i++)
+        {
+            Members[i]
+                .ApplySelection(
+                    i < columns.Count ? columns[i] : null,
+                    isPendingSlot: i >= columns.Count
+                );
         }
 
         RefreshMemberCandidates();
@@ -274,6 +310,9 @@ public sealed class UniqueConstraintMemberViewModel : ObservableObject
     /// <summary>行リストから外された後かどうか（外れた行の後片付けで正本を触らないためのガード）</summary>
     private bool _isDetached;
 
+    /// <summary>まだ正本へ確定していない行かどうか</summary>
+    private bool _isPendingSlot;
+
     /// <summary><see cref="UniqueConstraintMemberViewModel"/> を生成する</summary>
     public UniqueConstraintMemberViewModel(UniqueConstraintViewModel constraint)
     {
@@ -293,7 +332,7 @@ public sealed class UniqueConstraintMemberViewModel : ObservableObject
 
             _selectedColumn = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(IsPendingSlot));
+            OnPropertyChanged(nameof(IsColumnUnselected));
 
             if (_isApplyingModelState || _isDetached)
             {
@@ -304,11 +343,20 @@ public sealed class UniqueConstraintMemberViewModel : ObservableObject
         }
     }
 
-    /// <summary>まだ列を選んでいない空スロット行かどうか（プレースホルダー表示の判定）</summary>
-    public bool IsPendingSlot => _selectedColumn is null;
+    /// <summary>まだ正本へ確定していない行かどうか（＋で足した空スロット。× は履歴を残さず破棄する）</summary>
+    /// <remarks>
+    /// 選択の有無からは導かない。確定済みの行の選択がコンボボックスの都合で落ちても、その行は正本の構成列を
+    /// 指したままで、× で外せなければならない（列ペアの行と同じ形）
+    /// </remarks>
+    public bool IsPendingSlot => _isPendingSlot;
+
+    /// <summary>列が未選択かどうか（プレースホルダー表示の判定）</summary>
+    public bool IsColumnUnselected => _selectedColumn is null;
 
     /// <summary>正本の構成列をこの行へ反映する（制約への通知は行わない）</summary>
-    internal void ApplySelection(ColumnViewModel? column)
+    /// <param name="column">この行が指す構成列（空スロットは <c>null</c>）</param>
+    /// <param name="isPendingSlot">まだ正本へ確定していない空スロットか</param>
+    internal void ApplySelection(ColumnViewModel? column, bool isPendingSlot)
     {
         _isApplyingModelState = true;
 
@@ -319,6 +367,21 @@ public sealed class UniqueConstraintMemberViewModel : ObservableObject
         finally
         {
             _isApplyingModelState = false;
+        }
+
+        if (_isPendingSlot != isPendingSlot)
+        {
+            _isPendingSlot = isPendingSlot;
+            OnPropertyChanged(nameof(IsPendingSlot));
+        }
+    }
+
+    /// <summary>これから当てる選択を、まだ無ければ候補へ足す（並びと余りは後の絞り込みが整える）</summary>
+    internal void IncludeInCandidates(ColumnViewModel? column)
+    {
+        if (column is not null && !AvailableColumns.Contains(column))
+        {
+            AvailableColumns.Add(column);
         }
     }
 

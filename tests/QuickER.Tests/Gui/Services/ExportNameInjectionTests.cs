@@ -84,7 +84,7 @@ public class ExportNameInjectionTests
     {
         var diagram = BuildDescriptionDiagram(tricky);
 
-        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram));
+        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram), "sqlserver");
 
         restored.Entities.Should().ContainSingle();
         restored.Entities[0].Description.Should().Be(tricky);
@@ -185,7 +185,7 @@ public class ExportNameInjectionTests
             ],
         };
 
-        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram));
+        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram), "sqlserver");
 
         restored
             .Entities.Single(entity => entity.TableName == "customers")

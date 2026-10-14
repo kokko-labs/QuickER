@@ -215,7 +215,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
         CancellationToken ct
     )
     {
-        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(SchemaTableEntry.KeyComparer);
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -283,6 +283,12 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
             }
 
             var colName = reader.GetString(1);
+
+            // 同じテーブルに同じ名前（SchemaNames の規則）の列があれば、後着は取り込まずに告げる
+            if (!entry.TryBeginColumn(colName, warnings))
+            {
+                continue;
+            }
             var columnType = reader.GetString(2);
             var isNullable = string.Equals(
                 reader.GetString(3),
@@ -318,8 +324,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                 );
             }
 
-            entry.Entity.Columns.Add(col);
-            entry.ColumnsByName[colName] = col;
+            entry.AddColumn(col, colName);
         }
     }
 
@@ -344,7 +349,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                 continue;
             }
 
-            if (entry.ColumnsByName.TryGetValue(reader.GetString(1), out var col))
+            if (entry.TryGetColumnExact(reader.GetString(1), out var col))
             {
                 col.IsPrimaryKey = true;
                 col.IsNullable = false;

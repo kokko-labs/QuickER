@@ -21,8 +21,8 @@ public class RemoveColumnCommand : IUndoableCommand
     /// <summary>削除対象のカラム</summary>
     private readonly ColumnViewModel _column;
 
-    /// <summary>削除前のインデックス（Undo 時の復元位置）</summary>
-    private readonly int _index;
+    /// <summary>取り除いたカラムと元の位置（Undo の復元元）</summary>
+    private List<(int Index, ColumnViewModel Item)> _removedColumns = new();
 
     /// <summary>削除前のリレーション列ペアのスナップショット（リレーション VM と全列ペアの対）</summary>
     private readonly IReadOnlyList<(
@@ -30,11 +30,8 @@ public class RemoveColumnCommand : IUndoableCommand
         IReadOnlyList<RelationshipColumnPair> ColumnPairs
     )> _relationshipSnapshots;
 
-    /// <summary>巻き添えで削除する一意制約と、その削除前のインデックス（Undo の復元位置）</summary>
-    private readonly IReadOnlyList<(
-        UniqueConstraintViewModel Constraint,
-        int Index
-    )> _affectedConstraints;
+    /// <summary>巻き添えで取り除いた一意制約と元の位置（Undo の復元元）</summary>
+    private List<(int Index, UniqueConstraintViewModel Item)> _removedConstraints = new();
 
     /// <summary>Undo / Redo 後に FK ルールを再適用する後処理</summary>
     private readonly Action _afterApply;
@@ -53,18 +50,11 @@ public class RemoveColumnCommand : IUndoableCommand
     {
         _entity = entity;
         _column = column;
-        _index = entity.Columns.IndexOf(column);
         _afterApply = afterApply;
 
         // 削除前の列ペアをまるごとスナップショット保存する
         _relationshipSnapshots = affectedRelationships
             .Select(relationship => (relationship, relationship.SnapshotColumnPairs()))
-            .ToList();
-
-        // 削除カラムを構成列に含む一意制約を、復元位置つきで退避する
-        _affectedConstraints = entity
-            .UniqueConstraints.Select((constraint, index) => (Constraint: constraint, Index: index))
-            .Where(item => item.Constraint.ContainsColumn(column.Id))
             .ToList();
     }
 
@@ -74,11 +64,11 @@ public class RemoveColumnCommand : IUndoableCommand
     /// <inheritdoc />
     public void Execute()
     {
-        // 制約を先に外す（カラム削除で構成列候補が作り直される前に取り除く）
-        foreach (var (constraint, _) in _affectedConstraints)
-        {
-            _entity.UniqueConstraints.Remove(constraint);
-        }
+        // 削除カラムを構成列に含む一意制約を、元の位置を記録して先に外す（カラム削除で構成列候補が作り直される前に取り除く）
+        _removedConstraints = IndexedRemoval.RemoveWhere(
+            _entity.UniqueConstraints,
+            constraint => constraint.ContainsColumn(_column.Id)
+        );
 
         // 削除カラムを含むリレーションは列ペアを全クリアする（縮んだ外部キーへ変質させない）
         foreach (var (relationship, _) in _relationshipSnapshots)
@@ -86,21 +76,17 @@ public class RemoveColumnCommand : IUndoableCommand
             relationship.SetColumnPairs([]);
         }
 
-        _entity.Columns.Remove(_column);
+        _removedColumns = IndexedRemoval.RemoveWhere(
+            _entity.Columns,
+            column => ReferenceEquals(column, _column)
+        );
         _afterApply();
     }
 
     /// <inheritdoc />
     public void Undo()
     {
-        // Undo 連打などによる二重挿入を避ける
-        if (_entity.Columns.Contains(_column))
-        {
-            return;
-        }
-
-        var insertIndex = Math.Clamp(_index, 0, _entity.Columns.Count);
-        _entity.Columns.Insert(insertIndex, _column);
+        IndexedRemoval.Restore(_entity.Columns, _removedColumns);
 
         // カラム復元後、リレーションの列ペアもスナップショットから復元する
         foreach (var (relationship, columnPairs) in _relationshipSnapshots)
@@ -118,19 +104,8 @@ public class RemoveColumnCommand : IUndoableCommand
             }
         }
 
-        // 巻き添えで消した一意制約を元の位置へ戻す（前から順に挿せば元の並びが再現できる）
-        foreach (var (constraint, index) in _affectedConstraints)
-        {
-            if (_entity.UniqueConstraints.Contains(constraint))
-            {
-                continue;
-            }
-
-            _entity.UniqueConstraints.Insert(
-                Math.Clamp(index, 0, _entity.UniqueConstraints.Count),
-                constraint
-            );
-        }
+        // 巻き添えで消した一意制約を元の位置へ戻す
+        IndexedRemoval.Restore(_entity.UniqueConstraints, _removedConstraints);
 
         _afterApply();
     }

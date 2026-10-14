@@ -26,6 +26,9 @@ namespace QuickER.Provider.SqlServer;
 /// </remarks>
 public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 {
+    /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => SqlIdentifier.Limit;
+
     // ---------------- 各種 DDL ----------------
 
     /// <summary>CREATE TABLE 文（主キー制約・一意制約を含む）を生成する</summary>
@@ -43,7 +46,8 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
             e,
             item.TableName,
             SqlIdentifier.BracketSimple,
-            name => $"[{SqlIdentifier.Escape(name)}]"
+            name => $"[{SqlIdentifier.Escape(name)}]",
+            IdentifierLimit
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -162,7 +166,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 
         var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName))}] "
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} ADD CONSTRAINT [{SqlIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName, IdentifierLimit))}] "
                 + $"PRIMARY KEY ({pkCols});"
         );
         sb.AppendLine("GO");
@@ -180,7 +184,8 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns
+            item.UniqueConstraintColumns,
+            IdentifierLimit
         );
         var cols = string.Join(
             ", ",
@@ -199,7 +204,8 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns
+            item.UniqueConstraintColumns,
+            IdentifierLimit
         );
         sb.AppendLine(
             $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
@@ -244,7 +250,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, IdentifierLimit);
         var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
             item.Relationship
         );

@@ -390,6 +390,21 @@ Default to English for all responses (the language of the app UI). Switch only i
   <data name="QueryTool_Diag_SqlImplementationWithoutSql" xml:space="preserve">
     <value>implementation is 'sql' but no SQL was given for any dialect, so the generated code leaves the method to be written by hand (partial class) for every dialect.</value>
   </data>
+  <data name="QueryTool_Diag_OrderByIgnoredForImplementation" xml:space="preserve">
+    <value>'order_by' is applied only when implementation is 'dsl' (got '{0}'); the ordering was saved, but the generated method does not use it.</value>
+  </data>
+  <data name="QueryTool_Diag_SqlDialectNotImplemented" xml:space="preserve">
+    <value>The code generator implements raw SQL only for {0}; the SQL for '{1}' was saved, but for that dialect the method is generated as a contract to write by hand (partial class).</value>
+  </data>
+  <data name="QueryTool_Diag_SqlDialectDuplicate" xml:space="preserve">
+    <value>'sql' gives dialect '{0}' more than once (keys that differ only in letter case, such as '{1}'); give each dialect once.</value>
+  </data>
+  <data name="QueryTool_RemoveOrphanSuccess" xml:space="preserve">
+    <value>Removed query '{0}', which belonged to a table that is no longer in the diagram.</value>
+  </data>
+  <data name="QueryTool_RemoveOrphansSuccess" xml:space="preserve">
+    <value>Removed {0} queries named '{1}', which belonged to tables that are no longer in the diagram.</value>
+  </data>
   <data name="QueryTool_Diag_Unexpected" xml:space="preserve">
     <value>Unexpected diagnostic: {0}</value>
   </data>
@@ -398,6 +413,12 @@ Default to English for all responses (the language of the app UI). Switch only i
   </data>
   <data name="QueryTool_ArgumentsNotObject" xml:space="preserve">
     <value>The arguments for tool '{0}' must be a JSON object.</value>
+  </data>
+  <data name="Tool_ArgumentMissing" xml:space="preserve">
+    <value>The argument '{0}' is required.</value>
+  </data>
+  <data name="Tool_ArgumentWrongType" xml:space="preserve">
+    <value>The argument '{0}' must be a JSON {1}.</value>
   </data>
   <data name="Chat_ShowMarkdown" xml:space="preserve">
     <value>Markdown</value>

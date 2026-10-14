@@ -101,7 +101,11 @@ public sealed class CSharpReverseUnnamedForeignKeyTests
         """;
 
     private static CodeReverseResult Parse(string source) =>
-        new CSharpReverseParser().Parse(source, new SqlServerTypeCatalog());
+        new CSharpReverseParser().Parse(
+            source,
+            new SqlServerTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
 
     /// <summary>SQL Server の DDL に現れる外部キーの制約名を出現順に返す</summary>
     private static List<string> ForeignKeyNamesInDdl(

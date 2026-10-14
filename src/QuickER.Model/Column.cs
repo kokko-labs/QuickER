@@ -9,8 +9,18 @@ public class Column
     /// <summary>カラムの一意識別子</summary>
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    private string _name = "NewColumn";
+
     /// <summary>カラム名（例: <c>顧客ID</c>）</summary>
-    public string Name { get; set; } = "NewColumn";
+    /// <remarks>
+    /// 代入した名前の前後の空白は除く（<see cref="Entity.TableName"/> と同じ規則）。<c>null</c> はそのまま通す
+    /// （手で編集した JSON の <c>null</c> は、読込の必須名の検査が場所を名指しして断る）。
+    /// </remarks>
+    public string Name
+    {
+        get => _name;
+        set => _name = value?.Trim()!;
+    }
 
     /// <summary>SQL のデータ型（例: <c>int</c>, <c>varchar(100)</c>）</summary>
     public string DataType { get; set; } = "int";

@@ -666,7 +666,16 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void GetDiagramSummary_ShowsColumnPairsAndConstraintName()
     {
         var file = CreateParentChildFile();
-        Exec("add_relationship", file, new { source_table = "Customer", target_table = "Order" });
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                relationship_type = "OneToMany",
+            }
+        );
 
         var (result, success) = Exec("get_diagram_summary", file, new { });
 
@@ -690,7 +699,16 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
                 is_nullable = false,
             }
         );
-        Exec("add_relationship", file, new { source_table = "Customer", target_table = "Order" });
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                relationship_type = "OneToMany",
+            }
+        );
         Exec(
             "add_relationship",
             file,
@@ -700,6 +718,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
                 source_columns = new[] { "CustomerId" },
                 target_table = "Order",
                 target_columns = new[] { "BillingCustomerId" },
+                relationship_type = "OneToMany",
             }
         );
 
@@ -742,7 +761,16 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void RemoveRelationship_RemovesRelationship()
     {
         var file = CreateParentChildFile();
-        Exec("add_relationship", file, new { source_table = "Customer", target_table = "Order" });
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                relationship_type = "OneToMany",
+            }
+        );
 
         var (_, success) = Exec(
             "remove_relationship",
@@ -758,7 +786,16 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void RemoveColumn_ClearsRelationshipReference()
     {
         var file = CreateParentChildFile();
-        Exec("add_relationship", file, new { source_table = "Customer", target_table = "Order" });
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                relationship_type = "OneToMany",
+            }
+        );
 
         var (_, success) = Exec(
             "remove_column",
@@ -778,7 +815,16 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void RemoveEntity_RemovesRelationshipsAndOrphanLayout()
     {
         var file = CreateParentChildFile();
-        Exec("add_relationship", file, new { source_table = "Customer", target_table = "Order" });
+        Exec(
+            "add_relationship",
+            file,
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                relationship_type = "OneToMany",
+            }
+        );
 
         // Order にレイアウトエントリを付与しておく（削除で孤児になるべきもの）
         var document = JsonStorageService.Load(file);

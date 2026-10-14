@@ -97,6 +97,10 @@ public static class DragBehavior
     [ThreadStatic]
     private static FrameworkElement? _draggedElement;
 
+    /// <summary>ドラッグ中の要素を表示しているウィンドウの ViewModel（無ければ null）</summary>
+    [ThreadStatic]
+    private static MainViewModel? _owner;
+
     /// <summary>ドラッグ中要素に対応するエンティティ ViewModel</summary>
     [ThreadStatic]
     private static EntityViewModel? _draggedVm;
@@ -206,6 +210,7 @@ public static class DragBehavior
 
         _draggedElement = fe;
         _draggedVm = vm;
+        _owner = Window.GetWindow(fe)?.DataContext as MainViewModel;
         _startMouse = e.GetPosition(canvas);
         _startX = vm.X;
         _startY = vm.Y;
@@ -291,13 +296,32 @@ public static class DragBehavior
             return;
         }
 
-        var pos = getPosition(canvas);
+        ApplyMove(getPosition(canvas));
+    }
 
+    /// <summary>進行中のドラッグ・リサイズへ、キャンバス上のマウス位置を反映する</summary>
+    /// <param name="pos">キャンバスを基準にしたマウス位置</param>
+    /// <remarks>マウス入力から切り離して、テストからも 1 回の移動として呼べるようにしてある</remarks>
+    internal static void ApplyMove(Point pos)
+    {
+        if (_draggedVm is null)
+        {
+            return;
+        }
+
+        // 1 回の移動で変わる位置・幅の再計算（キャンバス・ミニマップ）は、移動ごとに 1 回へまとめる
+        // （グループの移動は、まとめないとメンバー数×2 回作り直す）
+        RunInLayoutScope(_owner, () => ApplyMoveCore(_draggedVm, pos));
+    }
+
+    /// <summary>位置・幅を当てる本体</summary>
+    private static void ApplyMoveCore(EntityViewModel draggedVm, Point pos)
+    {
         if (_isResizing)
         {
             var delta = pos.X - _startMouse.X;
             var newWidth = Math.Max(120, _startWidth + delta);
-            _draggedVm.Width = newWidth;
+            draggedVm.Width = newWidth;
         }
         else if (_isDragging && _isGroupDragging)
         {
@@ -321,10 +345,41 @@ public static class DragBehavior
             var newX = _startX + (pos.X - _startMouse.X);
             var newY = _startY + (pos.Y - _startMouse.Y);
             // キャンバスは自動拡大するが負座標は許容しないため下限 0 で丸める
-            _draggedVm.X = Math.Max(0, newX);
-            _draggedVm.Y = Math.Max(0, newY);
+            draggedVm.X = Math.Max(0, newX);
+            draggedVm.Y = Math.Max(0, newY);
         }
     }
+
+    /// <summary>ウィンドウの ViewModel があれば、その位置・大きさの後回しの範囲の中で処理を実行する</summary>
+    /// <remarks>範囲は <see cref="MainViewModel.RunDeferringLayoutRefresh"/> が try / finally で必ず閉じる</remarks>
+    private static void RunInLayoutScope(MainViewModel? owner, Action action)
+    {
+        if (owner is null)
+        {
+            action();
+
+            return;
+        }
+
+        owner.RunDeferringLayoutRefresh(action);
+    }
+
+    /// <summary>グループのメンバーを開始時の位置へ戻す（クリック扱い・取り消し）</summary>
+    private static void RestoreGroup(
+        MainViewModel? owner,
+        IReadOnlyList<(EntityViewModel Entity, double StartX, double StartY)> members
+    ) =>
+        RunInLayoutScope(
+            owner,
+            () =>
+            {
+                foreach (var member in members)
+                {
+                    member.Entity.X = member.StartX;
+                    member.Entity.Y = member.StartY;
+                }
+            }
+        );
 
     /// <summary>押下前のカードの上でのカーソル形状を決める（右端グリップ上ならリサイズ、それ以外は既定）</summary>
     /// <remarks>
@@ -372,6 +427,7 @@ public static class DragBehavior
     {
         var element = _draggedElement;
         var vm = _draggedVm;
+        var owner = _owner;
         var oldX = _startX;
         var oldY = _startY;
         var oldWidth = _startWidth;
@@ -385,6 +441,7 @@ public static class DragBehavior
         GroupMembers = new List<(EntityViewModel, double, double)>();
         _draggedElement = null;
         _draggedVm = null;
+        _owner = null;
 
         if (element is null || vm is null)
         {
@@ -412,11 +469,7 @@ public static class DragBehavior
             // クリック扱い時はドラッグ中の微小な座標変化を取り消す
             if (wasGroupDragging)
             {
-                foreach (var member in groupMembers)
-                {
-                    member.Entity.X = member.StartX;
-                    member.Entity.Y = member.StartY;
-                }
+                RestoreGroup(owner, groupMembers);
             }
             else
             {
@@ -493,6 +546,7 @@ public static class DragBehavior
     {
         var element = _draggedElement;
         var vm = _draggedVm;
+        var owner = _owner;
         var startX = _startX;
         var startY = _startY;
         var startWidth = _startWidth;
@@ -509,6 +563,7 @@ public static class DragBehavior
         GroupMembers = new List<(EntityViewModel, double, double)>();
         _draggedElement = null;
         _draggedVm = null;
+        _owner = null;
 
         if (wasActive && vm is not null)
         {
@@ -518,11 +573,7 @@ public static class DragBehavior
             }
             else if (wasGroupDragging)
             {
-                foreach (var member in groupMembers)
-                {
-                    member.Entity.X = member.StartX;
-                    member.Entity.Y = member.StartY;
-                }
+                RestoreGroup(owner, groupMembers);
             }
             else
             {
@@ -554,6 +605,7 @@ public static class DragBehavior
     /// <param name="startWidth">リサイズ開始時の幅（<paramref name="resizing"/> のときのみ意味を持つ）</param>
     /// <param name="resizing">true なら右端グリップによるリサイズ中として組み立てる</param>
     /// <param name="groupMembers">グループ移動中のメンバーと開始座標（null なら単一移動）</param>
+    /// <param name="owner">ドラッグ中の要素を表示しているウィンドウの ViewModel（null なら持たない）</param>
     /// <remarks>
     /// 押下 → 移動 → 解放の実経路はヘッドレスでは再現できないため、キャンセルの検証だけを
     /// 静的状態の組み立て経由で行う（<see cref="MarkWidthChanged"/> と同じ切り出しの流儀）。
@@ -565,11 +617,14 @@ public static class DragBehavior
         double startY,
         double startWidth = 0,
         bool resizing = false,
-        IReadOnlyList<(EntityViewModel Entity, double StartX, double StartY)>? groupMembers = null
+        IReadOnlyList<(EntityViewModel Entity, double StartX, double StartY)>? groupMembers = null,
+        MainViewModel? owner = null
     )
     {
         _draggedElement = null;
         _draggedVm = target;
+        _owner = owner;
+        _startMouse = default;
         _startX = startX;
         _startY = startY;
         _startWidth = startWidth;

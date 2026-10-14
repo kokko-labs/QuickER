@@ -14,10 +14,12 @@ namespace QuickER.ViewModels;
 ///
 /// 再計算は 2 種類に分ける
 /// <list type="bullet">
-/// <item>軽い更新: スクロール（<see cref="ViewportContentBounds"/> 変更）ではビューポート枠と可視判定のみを更新する</item>
-/// <item>全再計算: エンティティ座標/サイズ変更・コレクション変更・ズーム変更では射影自体と全描画データを作り直す</item>
+/// <item>軽い更新: 表示範囲（<see cref="ViewportContentBounds"/>）の変更ではビューポート枠と可視判定のみを更新する。
+/// スクロールもズームもここへ来る（射影は図の範囲だけで決まり、ズームに依存しない。ズーム後の表示範囲はビューが送る）</item>
+/// <item>全再計算: エンティティ座標/サイズ/タイトルの色の変更・コレクション変更では射影自体と全描画データを作り直す</item>
 /// </list>
-/// 描画データ（数十要素）は毎回再生成し、<see cref="OnPropertyChanged"/> で差し替える。
+/// 描画データは毎回再生成し、<see cref="OnPropertyChanged"/> で差し替える。多くの要素を動かす操作
+/// （整列・Undo / Redo・削除・ドラッグ・まとめての色の変更）は、一括更新や後回しの範囲で 1 回の操作につき 1 回にまとめる。
 /// </remarks>
 public partial class MainViewModel
 {
@@ -94,11 +96,12 @@ public partial class MainViewModel
     public Rect MiniMapViewport { get; private set; } = Rect.Empty;
 
     /// <summary>
-    /// 射影・全描画データを作り直す（エンティティ座標/サイズ変更・コレクション変更・ズーム変更時）
+    /// 射影・全描画データを作り直す（エンティティ座標/サイズ/タイトルの色の変更・コレクション変更時）
     /// </summary>
-    /// <remarks>数十要素の再生成のため毎回作り直し、参照差し替えで変更通知する</remarks>
+    /// <remarks>毎回作り直し、参照差し替えで変更通知する（回数は呼び出し側が操作ごとに 1 回へまとめる）</remarks>
     private void RecalculateMiniMap()
     {
+        MiniMapRecalculationCountForTests++;
         _contentBounds = ComputeContentBounds();
         _miniMapProjection = ViewportCalculator.CalculateMiniMapProjection(
             _contentBounds,
@@ -203,6 +206,10 @@ public partial class MainViewModel
 
         foreach (var relationship in Relationships)
         {
+            // テーブルの位置の変更通知は、リレーションが端点を計算し直すより先にここへ届く（購読の順）。
+            // 端点をここで計算し直し、1 つ前の位置の線を描かない
+            relationship.UpdateGeometry();
+
             var p1 = _miniMapProjection.ToMiniMap(new Point(relationship.X1, relationship.Y1));
             var p2 = _miniMapProjection.ToMiniMap(new Point(relationship.X2, relationship.Y2));
 

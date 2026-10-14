@@ -88,6 +88,12 @@
   <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
     <value>テーブル {1} のエンティティクラス名がいずれも '{0}' になります。エンティティクラスは partial のため 1 つのクラスへ統合され、コンパイルできません。生成されるクラス名が異なるようテーブル名を変更してください（テーブル名は単数形化されるため、'customer' と 'customers' はどちらも 'CustomerEntity' になります）。</value>
   </data>
+  <data name="CodeGen_Error_DuplicateTableName" xml:space="preserve">
+    <value>テーブル名 '{0}' が重複しています（{1}）。テーブル名は大文字小文字と前後の空白を区別せずに比較するため、同じテーブルを図に 2 つ置けません。どちらかの名前を変えるか削除してください。</value>
+  </data>
+  <data name="CodeGen_Error_DuplicateColumnName" xml:space="preserve">
+    <value>テーブル '{0}' の列名 '{1}' が重複しています（{2}）。列名は大文字小文字と前後の空白を区別せずに比較します。どちらかの名前を変えるか削除してください。</value>
+  </data>
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>テーブル '{0}' の列 {2} のプロパティ名がいずれも '{1}' になります。エンティティクラスと EditModel クラスに同名メンバーが重複して生成され、コンパイルできません。生成されるプロパティ名が異なるよう列名を変更してください（列名はパスカルケースへ変換されるため、'user-id'・'user_id'・'USER_ID' はいずれも 'UserId' になります）。</value>
   </data>
@@ -314,7 +320,7 @@
     <value>名前付きクエリ '{0}': パラメータ名 '{1}' が重複しています。</value>
   </data>
   <data name="CodeGen_Query_ReservedParameterName" xml:space="preserve">
-    <value>名前付きクエリ '{0}': パラメータ名 '{1}' は生成するメソッドが使う名前（リポジトリの Query() メンバーを隠す、または生成する async メソッドの中でキーワードになる）のため使えません。</value>
+    <value>名前付きクエリ '{0}': パラメータ名 '{1}' は生成するコードで使えません（生成する async メソッドの中でキーワードになる、または生成するコードのメンバー〔リモートのリクエストの record・射影の選択式のフィールド〕とぶつかる）。</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
     <value>名前付きクエリ '{0}': 型トークン '{1}' を解決できません。設定スキーマが挙げるトークンと綴りを見比べてください。固定長の文字列・バイナリ（fixedstring など）の場合は長さも必要です（例: 'fixedstring(10)'）。</value>
@@ -341,7 +347,7 @@
     <value>名前付きクエリ '{0}': 射影の戻り形には DTO 型名と 1 つ以上のフィールド定義が必要です。</value>
   </data>
   <data name="CodeGen_Query_InvalidResultTypeName" xml:space="preserve">
-    <value>名前付きクエリ '{0}': DTO 型名 '{1}' は有効な C# 識別子ではありません。</value>
+    <value>名前付きクエリ '{0}': DTO 型名 '{1}' は C# の型名として使えません。</value>
   </data>
   <data name="CodeGen_Query_ProjectionDslRequiresColumns" xml:space="preserve">
     <value>名前付きクエリ '{0}': 簡易 DSL の射影では全フィールドに参照元列が必要です（参照元列なしの自由フィールドは生 SQL 専用）。</value>
@@ -378,6 +384,9 @@
   </data>
   <data name="CodeGen_Query_DuplicateResultTypeName" xml:space="preserve">
     <value>名前付きクエリ '{0}': DTO 型名 '{1}' は別のクエリで使用済みです。DTO 型名は生成 namespace 内で一意にしてください。</value>
+  </data>
+  <data name="CodeGen_Query_ReservedResultTypeName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': DTO 型名 '{1}' は生成コードの型名（生成されるクラス・インターフェイス、ランタイム、生成コードが単純名で使うライブラリの型）と衝突します。別の DTO 型名にしてください。</value>
   </data>
   <data name="CodeGen_Query_RawSqlUndeclaredParameter" xml:space="preserve">
     <value>生 SQL 内で使用されているパラメータ '@{0}' が宣言されていません。</value>

@@ -27,12 +27,14 @@ public static class TableConstraintLineBuilder
     /// <param name="tableName">制約名の基にするテーブル名</param>
     /// <param name="quoteSimpleName">カラム名を方言のクォート方式でクォートする関数</param>
     /// <param name="quoteConstraintName">制約名を方言のクォート方式でクォートする関数（エスケープ込み）</param>
+    /// <param name="limit">既定名（主キー・一意制約の合成名）に使う識別子の長さの上限（DDL・同期の方言の上限）</param>
     /// <returns>行頭インデント付きの制約行（区切りカンマは付かない）。該当が無ければ空リスト</returns>
     public static List<string> Build(
         Entity entity,
         string tableName,
         Func<string, string> quoteSimpleName,
-        Func<string, string> quoteConstraintName
+        Func<string, string> quoteConstraintName,
+        IdentifierLengthLimit limit
     )
     {
         var lines = new List<string>();
@@ -43,12 +45,12 @@ public static class TableConstraintLineBuilder
         {
             var pkCols = string.Join(", ", pks.Select(p => quoteSimpleName(p.Name)));
             lines.Add(
-                $"    CONSTRAINT {quoteConstraintName(ConstraintNames.PrimaryKey(tableName))} PRIMARY KEY ({pkCols})"
+                $"    CONSTRAINT {quoteConstraintName(ConstraintNames.PrimaryKey(tableName, limit))} PRIMARY KEY ({pkCols})"
             );
         }
 
         // UNIQUE 制約（制約名が未設定なら UQ_{テーブル}_{列…} を合成する）
-        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, tableName))
+        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, tableName, limit))
         {
             var uniqueCols = string.Join(", ", unique.ColumnNames.Select(quoteSimpleName));
             lines.Add($"    CONSTRAINT {quoteConstraintName(unique.Name)} UNIQUE ({uniqueCols})");

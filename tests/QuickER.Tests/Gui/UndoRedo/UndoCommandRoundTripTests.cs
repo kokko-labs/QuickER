@@ -338,7 +338,7 @@ public class UndoCommandRoundTripTests
         var (parent, child) = AddRelatedEntities(main);
         SeedQueries(main, parent, child);
 
-        // このコマンドの Undo は SelectedEntity を先頭の対象へ戻す（Execute は選択に触らない）非対称を持つ。
+        // このコマンドの Undo は、削除の直前の主選択が対象なら SelectedEntity をそれへ戻す（Execute は選択に触らない）非対称を持つ。
         // 選択もユーザーに見える状態なので物差しへ含め、その非対称が成立する初期状態から検証する。
         main.SelectedEntity = parent;
 

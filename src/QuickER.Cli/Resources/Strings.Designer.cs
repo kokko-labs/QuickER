@@ -431,6 +431,12 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_ImportWarningTableNameCollision", resourceCulture);
             }
         }
+        
+        public static string Cli_ImportWarningColumnNameCollision {
+            get {
+                return ResourceManager.GetString("Cli_ImportWarningColumnNameCollision", resourceCulture);
+            }
+        }
 
         public static string Cli_GenerationAborted {
             get {

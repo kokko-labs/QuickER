@@ -116,7 +116,7 @@ public class DbmlTests
             ]
         );
 
-        var diagram = DbmlImporter.Parse(text);
+        var diagram = DbmlImporter.Parse(text, "sqlserver");
 
         diagram.Entities.Should().HaveCount(2);
         diagram.Relationships.Should().ContainSingle();
@@ -176,7 +176,7 @@ public class DbmlTests
         try
         {
             DbmlExporter.SaveTo(vm.ToDiagramModel(), path);
-            var diagram = DbmlImporter.Load(path);
+            var diagram = DbmlImporter.Load(path, "sqlserver");
 
             diagram.Entities.Should().HaveCount(2);
             diagram.Relationships.Should().ContainSingle();
@@ -206,7 +206,7 @@ public class DbmlTests
                 "Ref FK_TenantUser_TenantRegion: TenantRegion.(TenantId, RegionCode) < TenantUser.(TenantRef, RegionRef)"
             );
 
-        var restored = DbmlImporter.Parse(dbml);
+        var restored = DbmlImporter.Parse(dbml, "sqlserver");
         var parent = restored.Entities.Single(entity => entity.TableName == "TenantRegion");
         var child = restored.Entities.Single(entity => entity.TableName == "TenantUser");
         var relationship = restored.Relationships.Single();
@@ -249,7 +249,7 @@ public class DbmlTests
             ]
         );
 
-        var diagram = DbmlImporter.Parse(text);
+        var diagram = DbmlImporter.Parse(text, "sqlserver");
         var child = diagram.Entities.Single(entity => entity.TableName == "Child");
         var pair = diagram.Relationships.Single().ColumnPairs.Should().ContainSingle().Subject;
 
@@ -284,7 +284,7 @@ public class DbmlTests
             ]
         );
 
-        var diagram = DbmlImporter.Parse(text);
+        var diagram = DbmlImporter.Parse(text, "sqlserver");
         var parent = diagram.Entities.Single(entity => entity.TableName == "Parent");
         var child = diagram.Entities.Single(entity => entity.TableName == "Child");
         var pair = diagram.Relationships.Single().ColumnPairs.Should().ContainSingle().Subject;
@@ -313,7 +313,7 @@ public class DbmlTests
             ]
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -376,7 +376,7 @@ public class DbmlTests
                 "Ref FK_TenantAudit_TenantUser: TenantUser.TenantUserId < TenantAudit.TenantUserId"
             );
 
-        var restored = DbmlImporter.Parse(dbml);
+        var restored = DbmlImporter.Parse(dbml, "sqlserver");
 
         restored
             .Relationships.Single(relationship =>
@@ -474,7 +474,7 @@ public class DbmlTests
             ["Table Customer {", "  CustomerId int [pk]", "  broken", "}"]
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -504,7 +504,7 @@ public class DbmlTests
             ]
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -526,7 +526,7 @@ public class DbmlTests
             ["// comment", "Table Customer {", "  CustomerId int [pk]"]
         );
 
-        var act = () => DbmlImporter.Parse(text);
+        var act = () => DbmlImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -543,7 +543,7 @@ public class DbmlTests
     [Fact(DisplayName = "DBML 取込のファイル全体の診断には行番号を付けない")]
     public void Import_WholeFileDiagnostic_HasNoLineNumber()
     {
-        var act = () => DbmlImporter.Parse("// only a comment");
+        var act = () => DbmlImporter.Parse("// only a comment", "sqlserver");
 
         act.Should().Throw<InvalidDataException>().WithMessage(Strings.Dbml_NoEntities);
     }
@@ -562,7 +562,7 @@ public class DbmlTests
 
         text.Should().Contain("Note: '顧客マスタ'");
         DbmlImporter
-            .Parse(text)
+            .Parse(text, "sqlserver")
             .Entities.Single(entity => entity.TableName == "Customer")
             .Description.Should()
             .Be("顧客マスタ");
@@ -582,7 +582,7 @@ public class DbmlTests
             ]
         );
 
-        var entity = DbmlImporter.Parse(text).Entities.Single();
+        var entity = DbmlImporter.Parse(text, "sqlserver").Entities.Single();
 
         entity.Columns.Should().ContainSingle().Which.Name.Should().Be("CustomerId");
         entity.Description.Should().Be("Stores customers");
@@ -605,7 +605,7 @@ public class DbmlTests
                 "Ref FK_Orders_Customer: Customer.CustomerId < Orders.CustomerId [delete: cascade, update: set null]"
             );
 
-        var restored = DbmlImporter.Parse(text).Relationships.Single();
+        var restored = DbmlImporter.Parse(text, "sqlserver").Relationships.Single();
         restored.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
         restored.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetNull);
         restored.ConstraintName.Should().Be("FK_Orders_Customer");
@@ -696,7 +696,7 @@ public class DbmlTests
             .Equal(ExportOmissionKind.ForeignKeyMarkerWithoutRelationship);
 
         var restored = DbmlImporter
-            .Parse(DbmlExporter.Build(diagram))
+            .Parse(DbmlExporter.Build(diagram), "sqlserver")
             .Entities.Single(entity => entity.TableName == "Orders");
         restored
             .Columns.Single(column => column.Name == "ShipperId")
@@ -764,7 +764,7 @@ public class DbmlTests
 
         DbmlExporter.DetectOmissions(diagram).Should().BeEmpty();
         DbmlImporter
-            .Parse(DbmlExporter.Build(diagram))
+            .Parse(DbmlExporter.Build(diagram), "sqlserver")
             .Entities.Single(entity => entity.TableName == "Orders")
             .Columns.Single(column => column.Name == "OrderId")
             .IsForeignKey.Should()

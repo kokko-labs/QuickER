@@ -11,9 +11,10 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// <para>
 /// 生成器（<c>CSharpGenerationModelBuilder.Queries</c>）は各判定をここの部品で行い、診断の文言も
 /// <see cref="QueryRuleViolation.Text"/> から作る。保存前に同じ判定を通したい面（MCP / 内蔵チャットの
-/// <c>set_query</c>・GUI のクエリ定義ダイアログ）は <see cref="Validate"/> を呼ぶ。生成器は判定の順序と打ち切り
-/// （名前の規則に違反したらそのクエリの残りを見ない等）を自分の流れで持つので、<see cref="Validate"/> も同じ順序・
-/// 同じ打ち切りで組み立てる（同じ定義に対して同じ違反を同じ文言で返す）。
+/// <c>set_query</c>・GUI のクエリ定義ダイアログ）は <see cref="Validate"/> を呼ぶ。規則ごとの順序と打ち切りは
+/// 部品（<c>CheckMethodName</c> / <c>CheckShape</c> / <c>CheckParameterName</c> / <c>CheckProjectionHeader</c> /
+/// <c>CheckFieldName</c>）が 1 か所で持ち、生成器と <see cref="Validate"/> は同じ部品を同じ順に呼ぶ
+/// （同じ定義に対して同じ違反を同じ文言で返す）。生成器はその間に、型の解決に依る検査を差し込む。
 /// </para>
 /// <para>
 /// 対象は生成オプション・方言・型解決に依らない規則だけ。型トークンの解決、条件式の型整合、射影フィールドの
@@ -55,13 +56,44 @@ public static class QueryDefinitionRules
             "SyncChangesAsync",
             "SyncKeysAsync",
             "SyncPageAsync",
-            "Query",
             "QueryBySqlAsync",
             "ExecuteSqlAsync",
             "ExecuteScalarSqlAsync",
             "QueryProjectionBySqlAsync",
             "CheckUniquenessAsync",
         };
+
+    /// <summary>
+    /// 識別子としては合法だが、C# が型の名前として受け付けない文脈キーワード（射影の結果型名に使えない）
+    /// </summary>
+    /// <remarks>
+    /// <c>extension</c> / <c>file</c> / <c>record</c> / <c>required</c> / <c>scoped</c> は、型の宣言に使うと
+    /// 構文エラーかコンパイルエラーになる。パラメータ名・フィールド名には使えるので <see cref="IsValidIdentifier"/> には
+    /// 含めない。表が Roslyn の判定と合っていることは、文脈キーワードの全数を型の名前にしてコンパイルするテストが固定する
+    /// </remarks>
+    private static readonly IReadOnlySet<string> ContextualKeywordsInvalidAsTypeNames =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "extension",
+            "file",
+            "record",
+            "required",
+            "scoped",
+        };
+
+    /// <summary>射影の結果型名（DTO のクラス名）として妥当か（識別子であり、型の名前に使えない文脈キーワードでない）</summary>
+    public static bool IsValidResultTypeName(string name) =>
+        IsValidIdentifier(name) && !ContextualKeywordsInvalidAsTypeNames.Contains(name);
+
+    /// <summary>
+    /// 射影 DTO の型名が、生成コードの型名と衝突するか（衝突すると重複宣言か、単純名で使う型を隠してコンパイルできない）
+    /// </summary>
+    /// <param name="name">DTO の型名</param>
+    /// <param name="generatedTypeNames">図から決まる生成型名（<see cref="GeneratedTypeNames.Collect"/>）</param>
+    internal static bool IsReservedResultTypeName(
+        string name,
+        IReadOnlySet<string> generatedTypeNames
+    ) => GeneratedFixedTypeNames.IsReserved(name) || generatedTypeNames.Contains(name);
 
     /// <summary>C# 識別子として妥当か（先頭は文字か _、以降は文字・数字・_。予約語は不可）</summary>
     /// <remarks>
@@ -89,23 +121,67 @@ public static class QueryDefinitionRules
     }
 
     /// <summary>
-    /// パラメータ名に使えない名前か（大文字小文字まで一致で判定する）
+    /// パラメータ名に使えない名前か
     /// </summary>
     /// <remarks>
-    /// <c>Query</c>: 生成メソッドの本体は契約メンバー <c>Query()</c> の呼び出しで組み立てるため、同名の引数は
-    /// メソッドグループを隠してコンパイル不能になる（小文字の <c>query</c> は合法）。
-    /// <c>await</c>: 生 SQL の単一・件数の生成メソッドは async メソッドで、その中では <c>await</c> を識別子に使えない。
-    /// ほかの文脈キーワードは、生成されるどのメソッドの形でもパラメータ名として通る
+    /// <para>
+    /// 予約するのは、生成したコードがコンパイルできなくなる名前だけ（<c>ReservedName_IsActuallyUncompilable</c> が、
+    /// 予約から外すとコンパイルできないことを名前ごとに確かめる）。生成本体が呼ぶメンバー（<c>Query()</c>・
+    /// <c>QueryBySqlAsync</c>・同期のデコレータの <c>_inner</c>・リモートのクライアントの <c>InvokeAsync</c> など）は
+    /// <c>this.</c> で修飾して呼ぶので、同名のパラメータがあっても隠されない＝予約しない。
+    /// </para>
+    /// <para>
+    /// <c>await</c>（大文字小文字まで一致）: 生 SQL の単一・件数の生成メソッドは async メソッドで、その中では
+    /// <c>await</c> を識別子に使えない。ほかの文脈キーワードは、生成されるどのメソッドの形でもパラメータ名として通る
     /// （<c>QueryReservedParameterNameTests</c> が全文脈キーワード × 全戻り形 × 実装方式を実コンパイルで固定する）。
+    /// </para>
+    /// <para>
+    /// record のメンバーとぶつかる名前（<c>ToString</c> / <c>Equals</c> / <c>GetHashCode</c> / <c>GetType</c> /
+    /// <c>MemberwiseClone</c> / <c>ReferenceEquals</c> / <c>EqualityContract</c> / <c>PrintMembers</c> / <c>Deconstruct</c>）:
+    /// リモートサービスのリクエストは、パラメータ名を PascalCase にしたメンバーを持つ positional record なので、
+    /// object のメンバーや record が合成するメンバーと同じ名前になるとコンパイルできない（CS8866 / CS0102）。
+    /// 照合は PascalCase にした名前で行い（<c>toString</c> も同じ）、リモートを生成しない構成でも予約する
+    /// （後からリモートを ON にした瞬間に既存の定義が壊れる非対称を作らない＝<see cref="ReservedMethodNames"/> と同じ方針）。
+    /// </para>
+    /// <para>
+    /// 値オブジェクトのクラス名と同名の引数（<c>CustomerIdValue</c> など）も、条件式の <c>Create</c> 呼び出しを隠して
+    /// コンパイルできないが、クラス名は図と生成オプションから決まるため、ここの予約には載せない（docs の既知の割り切り）。
+    /// </para>
     /// </remarks>
     public static bool IsReservedParameterName(string name) =>
-        string.Equals(name, "Query", StringComparison.Ordinal)
-        || string.Equals(name, "await", StringComparison.Ordinal);
+        string.Equals(name, "await", StringComparison.Ordinal)
+        || (
+            name.Length > 0
+            && RecordMemberNames.Contains(char.ToUpperInvariant(name[0]) + name[1..])
+        );
+
+    /// <summary>
+    /// リモートのリクエストの record（パラメータ名を PascalCase にしたメンバーを持つ）で、メンバー名にできない名前
+    /// （object のメンバーと、record が合成するメンバー）
+    /// </summary>
+    private static readonly IReadOnlySet<string> RecordMemberNames = new HashSet<string>(
+        StringComparer.Ordinal
+    )
+    {
+        "ToString",
+        "Equals",
+        "GetHashCode",
+        "GetType",
+        "MemberwiseClone",
+        "ReferenceEquals",
+        "EqualityContract",
+        "PrintMembers",
+        "Deconstruct",
+    };
+
+    /// <summary>ページングを持つクエリの生成メソッドが、宣言したパラメータの後ろに足す引数の名前（宣言順）</summary>
+    /// <remarks>生 SQL からは <c>@take</c> / <c>@skip</c> で参照できる（宣言したパラメータと同じく束縛する）</remarks>
+    public static IReadOnlyList<string> PagingParameterNames { get; } = ["take", "skip"];
 
     /// <summary>生成メソッドが自分で持つ引数の名前（宣言したパラメータと重なると重複になる）</summary>
-    /// <param name="hasPaging">ページングを持つか（持てば <c>take</c> / <c>skip</c> が加わる）</param>
+    /// <param name="hasPaging">ページングを持つか（持てば <see cref="PagingParameterNames"/> が加わる）</param>
     public static IEnumerable<string> ImplicitParameterNames(bool hasPaging) =>
-        hasPaging ? ["cancellationToken", "take", "skip"] : ["cancellationToken"];
+        hasPaging ? ["cancellationToken", .. PagingParameterNames] : ["cancellationToken"];
 
     /// <summary>スカラー戻り形を簡易 DSL で組もうとしているか（スカラーは生 SQL / 手動実装専用）</summary>
     public static bool IsScalarDslConflict(
@@ -121,6 +197,174 @@ public static class QueryDefinitionRules
     public static bool SupportsOrderBy(QueryReturnShape returns) =>
         SupportsPaging(returns) || returns == QueryReturnShape.Single;
 
+    // ---- 規則の部品 ----
+    // 生成器と Validate が同じ部品を呼ぶ（規則の中の順序と打ち切りを 2 か所に写さない）。部品どうしの順序
+    // （メソッド名 → 戻り形 → パラメータ名 → 射影）と、型の解決に依る検査を差し込む位置は、それぞれの呼び出し側が持つ
+
+    /// <summary>メソッド名の規則（名前の形 → 予約 → 重複の順。最初の違反で打ち切る）</summary>
+    /// <param name="query">調べる定義</param>
+    /// <param name="tableName">重複の文言に載せるテーブル名</param>
+    /// <param name="tryClaim">メソッド名を使ってよいか（使えるなら確保して true。生成器は確保もする）</param>
+    /// <param name="methodName">クエリ名から作ったメソッド名（名前の形の違反なら null）</param>
+    /// <returns>違反（無ければ null）</returns>
+    internal static QueryRuleViolation? CheckMethodName(
+        QueryDefinition query,
+        string tableName,
+        Func<string, bool> tryClaim,
+        out string? methodName
+    )
+    {
+        methodName = ToMethodName(query.Name);
+
+        if (methodName is null)
+        {
+            return QueryRuleViolation.InvalidName(query.Name);
+        }
+
+        if (ReservedMethodNames.Contains(methodName))
+        {
+            return QueryRuleViolation.ReservedMethodName(query.Name, methodName);
+        }
+
+        return tryClaim(methodName)
+            ? null
+            : QueryRuleViolation.DuplicateMethodName(query.Name, methodName, tableName);
+    }
+
+    /// <summary>戻り形と実装方式の整合の規則（打ち切らずに全部返す）</summary>
+    internal static IEnumerable<QueryRuleViolation> CheckShape(QueryDefinition query)
+    {
+        if (query.Returns == QueryReturnShape.Scalar && string.IsNullOrWhiteSpace(query.ScalarType))
+        {
+            yield return QueryRuleViolation.ScalarRequiresType(query.Name);
+        }
+
+        if (IsScalarDslConflict(query.Returns, query.Implementation))
+        {
+            yield return QueryRuleViolation.ScalarDslUnsupported(query.Name);
+        }
+
+        if (query.HasPaging && !SupportsPaging(query.Returns))
+        {
+            yield return QueryRuleViolation.PagingRequiresList(query.Name);
+        }
+
+        if (query.OrderBy.Count > 0 && !SupportsOrderBy(query.Returns))
+        {
+            yield return QueryRuleViolation.OrderByRequiresList(query.Name);
+        }
+    }
+
+    /// <summary>パラメータ名の重複を数える集合（生成メソッドが自分で持つ引数の名前を最初から含む）</summary>
+    internal static HashSet<string> NewParameterNameSet(bool hasPaging) =>
+        new(ImplicitParameterNames(hasPaging), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>パラメータ名の規則（識別子 → 予約 → 重複の順）。通れば <paramref name="seen"/> へ登録する</summary>
+    /// <param name="queryName">クエリ名（文言用）</param>
+    /// <param name="parameterName">調べるパラメータ名</param>
+    /// <param name="seen">ここまでのパラメータ名（暗黙の引数を含む）</param>
+    /// <param name="selectorFieldName">
+    /// そのクエリの射影の選択式を置く静的フィールドの名前（<see cref="SelectorFieldNameFor"/>。無ければ null）。
+    /// 同名のパラメータはフィールドを隠してコンパイルできない。静的フィールドは <c>this.</c> で修飾できないので予約で断る
+    /// </param>
+    internal static QueryRuleViolation? CheckParameterName(
+        string queryName,
+        string parameterName,
+        HashSet<string> seen,
+        string? selectorFieldName
+    )
+    {
+        if (!IsValidIdentifier(parameterName))
+        {
+            return QueryRuleViolation.InvalidParameterName(queryName, parameterName);
+        }
+
+        if (
+            IsReservedParameterName(parameterName)
+            || string.Equals(parameterName, selectorFieldName, StringComparison.Ordinal)
+        )
+        {
+            return QueryRuleViolation.ReservedParameterName(queryName, parameterName);
+        }
+
+        return seen.Add(parameterName)
+            ? null
+            : QueryRuleViolation.DuplicateParameterName(queryName, parameterName);
+    }
+
+    /// <summary>
+    /// 簡易 DSL の射影の選択式を置く静的フィールドの名前（<c>_</c> ＋小文字始まりのメソッド名＋ <c>Selector</c>）。
+    /// 生成器がフィールドを宣言するときも、パラメータ名の規則も、この関数で名前を作る
+    /// </summary>
+    internal static string ProjectionSelectorFieldName(string methodName) =>
+        "_" + char.ToLowerInvariant(methodName[0]) + methodName[1..] + "Selector";
+
+    /// <summary>そのクエリが選択式のフィールドを持つなら、その名前（簡易 DSL の射影だけ。ほかは null）</summary>
+    internal static string? SelectorFieldNameFor(QueryDefinition query, string methodName) =>
+        query.Returns == QueryReturnShape.Projection
+        && query.Implementation == QueryImplementationKind.Dsl
+            ? ProjectionSelectorFieldName(methodName)
+            : null;
+
+    /// <summary>
+    /// 射影の結果型名の規則（フィールドと型名の有無 → 型名の形 → 生成コードの型名との衝突 → 重複の順。最初の違反で打ち切る）
+    /// </summary>
+    /// <param name="query">調べる射影の定義</param>
+    /// <param name="generatedTypeNames">図から決まる生成型名</param>
+    /// <param name="tryClaim">結果型名を使ってよいか（使えるなら確保して true。生成器は確保もする）</param>
+    internal static QueryRuleViolation? CheckProjectionHeader(
+        QueryDefinition query,
+        IReadOnlySet<string> generatedTypeNames,
+        Func<string, bool> tryClaim
+    )
+    {
+        var resultTypeName = query.ResultTypeName ?? string.Empty;
+
+        if (query.Fields.Count == 0 || resultTypeName.Length == 0)
+        {
+            return QueryRuleViolation.ProjectionRequiresFields(query.Name);
+        }
+
+        if (!IsValidResultTypeName(resultTypeName))
+        {
+            return QueryRuleViolation.InvalidResultTypeName(query.Name, resultTypeName);
+        }
+
+        if (IsReservedResultTypeName(resultTypeName, generatedTypeNames))
+        {
+            return QueryRuleViolation.ReservedResultTypeName(query.Name, resultTypeName);
+        }
+
+        return tryClaim(resultTypeName)
+            ? null
+            : QueryRuleViolation.DuplicateResultTypeName(query.Name, resultTypeName);
+    }
+
+    /// <summary>
+    /// 射影のフィールド名の重複を数える集合（SchemaNames の規則＝前後の空白を除き大文字小文字を区別しない。
+    /// 大小だけ違う名前は C# では別のプロパティだが、生 SQL の列別名の対応づけ・リモートの JSON で衝突する）
+    /// </summary>
+    internal static HashSet<string> NewFieldNameSet() => new(SchemaNames.Comparer);
+
+    /// <summary>射影のフィールド名の規則（識別子・重複 → 結果型名との一致の順）。通れば <paramref name="seen"/> へ登録する</summary>
+    internal static QueryRuleViolation? CheckFieldName(
+        string queryName,
+        string fieldName,
+        string resultTypeName,
+        HashSet<string> seen
+    )
+    {
+        if (!IsValidIdentifier(fieldName) || !seen.Add(fieldName))
+        {
+            return QueryRuleViolation.InvalidFieldName(queryName, fieldName);
+        }
+
+        // DTO 型名と同名のプロパティは C# が禁止する（CS0542＝メンバー名は外側の型名と同じにできない）
+        return string.Equals(fieldName, resultTypeName, StringComparison.Ordinal)
+            ? QueryRuleViolation.FieldNameEqualsResultType(queryName, fieldName)
+            : null;
+    }
+
     /// <summary>
     /// クエリ定義が生成で必ずエラーになる構造規則に違反していないかを調べ、違反を生成器と同じ順序・同じ打ち切りで返す
     /// </summary>
@@ -129,6 +373,13 @@ public static class QueryDefinitionRules
     /// <param name="otherQueries">
     /// 図のほかのクエリ（<paramref name="query"/> 自身を含めない。置き換える前の同じクエリも含めない）。
     /// 同じテーブルのクエリとはメソッド名の重複を、すべてのクエリとは射影の結果型名の重複を見る
+    /// </param>
+    /// <param name="diagramEntities">
+    /// 図のすべてのテーブル。射影の結果型名が、図から決まる生成型名（エンティティ・Repository・値オブジェクトなど）と
+    /// 衝突しないかを見るのに使う。<b>省略すると固定の名簿（ランタイム・外部の型）だけで判定し、図由来の衝突を見逃す</b>ので、
+    /// 図を持つ呼び出し側（GUI のダイアログ・MCP の <c>set_query</c>）は必ず渡す。渡したときは、どのテーブルにも属さない
+    /// クエリ（属していたテーブルが図に無い）を重複の相手から外す（生成器はそうしたクエリを読み飛ばすので衝突しない。
+    /// 数えると、どのツールからも消せない残骸が新しい定義の名前を塞ぐ）
     /// </param>
     /// <returns>違反（無ければ空）</returns>
     /// <remarks>
@@ -141,29 +392,22 @@ public static class QueryDefinitionRules
     public static IReadOnlyList<QueryRuleViolation> Validate(
         Entity entity,
         QueryDefinition query,
-        IEnumerable<QueryDefinition> otherQueries
+        IEnumerable<QueryDefinition> otherQueries,
+        IEnumerable<Entity>? diagramEntities = null
     )
     {
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(otherQueries);
 
-        var others = otherQueries.ToList();
+        var entities = diagramEntities?.ToList();
+        var entityIds = entities?.Select(candidate => candidate.Id).ToHashSet();
+        var others = otherQueries
+            .Where(other => entityIds is null || entityIds.Contains(other.EntityId))
+            .ToList();
         var violations = new List<QueryRuleViolation>();
 
         // ---- メソッド名（違反があればこのクエリの残りは見ない＝生成器と同じ打ち切り） ----
-        var methodName = ToMethodName(query.Name);
-
-        if (methodName is null)
-        {
-            return [QueryRuleViolation.InvalidName(query.Name)];
-        }
-
-        if (ReservedMethodNames.Contains(methodName))
-        {
-            return [QueryRuleViolation.ReservedMethodName(query.Name, methodName)];
-        }
-
         var siblingMethodNames = others
             .Where(other => other.EntityId == query.EntityId)
             .Select(other => ToMethodName(other.Name))
@@ -171,64 +415,49 @@ public static class QueryDefinitionRules
             .Where(name => !ReservedMethodNames.Contains(name))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        if (siblingMethodNames.Contains(methodName))
+        if (
+            CheckMethodName(
+                query,
+                entity.TableName,
+                name => !siblingMethodNames.Contains(name),
+                out var methodName
+            ) is
+            { } methodNameViolation
+        )
         {
-            return
-            [
-                QueryRuleViolation.DuplicateMethodName(query.Name, methodName, entity.TableName),
-            ];
+            return [methodNameViolation];
         }
 
         // ---- 戻り形と実装方式の整合 ----
-        if (query.Returns == QueryReturnShape.Scalar && string.IsNullOrWhiteSpace(query.ScalarType))
-        {
-            violations.Add(QueryRuleViolation.ScalarRequiresType(query.Name));
-        }
-
-        if (IsScalarDslConflict(query.Returns, query.Implementation))
-        {
-            violations.Add(QueryRuleViolation.ScalarDslUnsupported(query.Name));
-        }
-
-        if (query.HasPaging && !SupportsPaging(query.Returns))
-        {
-            violations.Add(QueryRuleViolation.PagingRequiresList(query.Name));
-        }
-
-        if (query.OrderBy.Count > 0 && !SupportsOrderBy(query.Returns))
-        {
-            violations.Add(QueryRuleViolation.OrderByRequiresList(query.Name));
-        }
+        violations.AddRange(CheckShape(query));
 
         // ---- パラメータ名 ----
-        var seenParameterNames = new HashSet<string>(
-            ImplicitParameterNames(query.HasPaging),
-            StringComparer.OrdinalIgnoreCase
-        );
+        var seenParameterNames = NewParameterNameSet(query.HasPaging);
 
         foreach (var parameter in query.Parameters)
         {
-            if (!IsValidIdentifier(parameter.Name))
+            if (
+                CheckParameterName(
+                    query.Name,
+                    parameter.Name,
+                    seenParameterNames,
+                    SelectorFieldNameFor(query, methodName!)
+                ) is
+                { } violation
+            )
             {
-                violations.Add(QueryRuleViolation.InvalidParameterName(query.Name, parameter.Name));
-            }
-            else if (IsReservedParameterName(parameter.Name))
-            {
-                violations.Add(
-                    QueryRuleViolation.ReservedParameterName(query.Name, parameter.Name)
-                );
-            }
-            else if (!seenParameterNames.Add(parameter.Name))
-            {
-                violations.Add(
-                    QueryRuleViolation.DuplicateParameterName(query.Name, parameter.Name)
-                );
+                violations.Add(violation);
             }
         }
 
         if (query.Returns == QueryReturnShape.Projection)
         {
-            AddProjectionViolations(query, others, violations);
+            AddProjectionViolations(
+                query,
+                others,
+                entities is null ? [] : GeneratedTypeNames.Collect(entities),
+                violations
+            );
         }
 
         return violations;
@@ -238,50 +467,42 @@ public static class QueryDefinitionRules
     private static void AddProjectionViolations(
         QueryDefinition query,
         IReadOnlyList<QueryDefinition> others,
+        IReadOnlySet<string> generatedTypeNames,
         List<QueryRuleViolation> violations
     )
     {
-        var resultTypeName = query.ResultTypeName?.Trim() ?? string.Empty;
-
-        if (query.Fields.Count == 0 || resultTypeName.Length == 0)
-        {
-            violations.Add(QueryRuleViolation.ProjectionRequiresFields(query.Name));
-            return;
-        }
-
-        if (!IsValidIdentifier(resultTypeName))
-        {
-            violations.Add(QueryRuleViolation.InvalidResultTypeName(query.Name, resultTypeName));
-            return;
-        }
-
         var otherResultTypeNames = others
             .Where(other =>
                 other.Returns == QueryReturnShape.Projection && ToMethodName(other.Name) is not null
             )
-            .Select(other => other.ResultTypeName?.Trim() ?? string.Empty)
-            .Where(IsValidIdentifier)
+            .Select(other => other.ResultTypeName ?? string.Empty)
+            .Where(IsValidResultTypeName)
             .ToHashSet(StringComparer.Ordinal);
 
-        if (otherResultTypeNames.Contains(resultTypeName))
+        if (
+            CheckProjectionHeader(
+                query,
+                generatedTypeNames,
+                name => !otherResultTypeNames.Contains(name)
+            ) is
+            { } headerViolation
+        )
         {
-            violations.Add(QueryRuleViolation.DuplicateResultTypeName(query.Name, resultTypeName));
+            violations.Add(headerViolation);
             return;
         }
 
-        var seenFieldNames = new HashSet<string>(StringComparer.Ordinal);
+        var resultTypeName = query.ResultTypeName!;
+        var seenFieldNames = NewFieldNameSet();
 
         foreach (var field in query.Fields)
         {
-            if (!IsValidIdentifier(field.Name) || !seenFieldNames.Add(field.Name))
+            if (
+                CheckFieldName(query.Name, field.Name, resultTypeName, seenFieldNames) is
+                { } fieldViolation
+            )
             {
-                violations.Add(QueryRuleViolation.InvalidFieldName(query.Name, field.Name));
-            }
-            else if (string.Equals(field.Name, resultTypeName, StringComparison.Ordinal))
-            {
-                violations.Add(
-                    QueryRuleViolation.FieldNameEqualsResultType(query.Name, field.Name)
-                );
+                violations.Add(fieldViolation);
             }
         }
 
@@ -323,7 +544,7 @@ public enum QueryRuleKind
     /// <summary>パラメータ名が C# 識別子でない</summary>
     InvalidParameterName,
 
-    /// <summary>パラメータ名が <c>Query</c>（契約メンバーを隠す）</summary>
+    /// <summary>パラメータ名が、生成するメソッドの使う名前と衝突する（<see cref="QueryDefinitionRules.IsReservedParameterName"/>）</summary>
     ReservedParameterName,
 
     /// <summary>パラメータ名が重複する（暗黙の引数名を含む）</summary>
@@ -337,6 +558,9 @@ public enum QueryRuleKind
 
     /// <summary>結果型名が別のクエリと重複する</summary>
     DuplicateResultTypeName,
+
+    /// <summary>結果型名が生成コードの型名（生成される型・ランタイム・単純名で使う外部の型）と衝突する</summary>
+    ReservedResultTypeName,
 
     /// <summary>フィールド名が C# 識別子でない、または重複する</summary>
     InvalidFieldName,
@@ -439,6 +663,15 @@ public sealed record QueryRuleViolation(QueryRuleKind Kind, QueryDiagnosticText 
         new(
             QueryRuleKind.InvalidResultTypeName,
             Of(nameof(Strings.CodeGen_Query_InvalidResultTypeName), queryName, resultTypeName)
+        );
+
+    internal static QueryRuleViolation ReservedResultTypeName(
+        string queryName,
+        string resultTypeName
+    ) =>
+        new(
+            QueryRuleKind.ReservedResultTypeName,
+            Of(nameof(Strings.CodeGen_Query_ReservedResultTypeName), queryName, resultTypeName)
         );
 
     internal static QueryRuleViolation DuplicateResultTypeName(

@@ -63,7 +63,8 @@ public class MermaidConstraintNameTests
     public void RoundTrip_UnnamedRelationships_StayUnnamed()
     {
         var diagram = MermaidImporter.Parse(
-            BuildText("    CUSTOMER ||--o{ ORDER : named", "    CUSTOMER ||--o{ INVOICE : named2")
+            BuildText("    CUSTOMER ||--o{ ORDER : named", "    CUSTOMER ||--o{ INVOICE : named2"),
+            "sqlserver"
         );
 
         foreach (var relationship in diagram.Relationships)
@@ -74,7 +75,7 @@ public class MermaidConstraintNameTests
         var text = MermaidExporter.Build(diagram);
         text.Should().Contain($": {MermaidExporter.UnnamedRelationshipLabel}");
 
-        var imported = MermaidImporter.Parse(text);
+        var imported = MermaidImporter.Parse(text, "sqlserver");
 
         Describe(imported)
             .Should()
@@ -90,7 +91,8 @@ public class MermaidConstraintNameTests
                 "    CUSTOMER ||--o{ ORDER : has",
                 "    CUSTOMER ||--o{ INVOICE : HAS",
                 "    ORDER ||--o{ INVOICE : has"
-            )
+            ),
+            "sqlserver"
         );
 
         Describe(diagram)
@@ -118,7 +120,8 @@ public class MermaidConstraintNameTests
             BuildText(
                 $"    CUSTOMER ||--o{{ ORDER : {firstLabel}",
                 $"    CUSTOMER ||--o{{ ORDER : {secondLabel}"
-            )
+            ),
+            "sqlserver"
         );
 
         Describe(diagram)
@@ -133,7 +136,10 @@ public class MermaidConstraintNameTests
     [Fact(DisplayName = "主キー・一意制約の名前と衝突するラベルは制約名に採らない")]
     public void Import_LabelCollidingWithTableConstraint_IsNotAdopted()
     {
-        var diagram = MermaidImporter.Parse(BuildText("    CUSTOMER ||--o{ ORDER : pk_customer"));
+        var diagram = MermaidImporter.Parse(
+            BuildText("    CUSTOMER ||--o{ ORDER : pk_customer"),
+            "sqlserver"
+        );
 
         Describe(diagram).Should().Equal(("CUSTOMER", "ORDER", null));
         ShouldHaveDistinctDdlConstraintNames(diagram);
@@ -145,7 +151,10 @@ public class MermaidConstraintNameTests
     [InlineData("places order")]
     public void Import_PhraseLabel_IsNotAdopted(string label)
     {
-        var diagram = MermaidImporter.Parse(BuildText($"    CUSTOMER ||--o{{ ORDER : {label}"));
+        var diagram = MermaidImporter.Parse(
+            BuildText($"    CUSTOMER ||--o{{ ORDER : {label}"),
+            "sqlserver"
+        );
 
         Describe(diagram).Should().Equal(("CUSTOMER", "ORDER", null));
     }
@@ -160,7 +169,8 @@ public class MermaidConstraintNameTests
             BuildText(
                 "    CUSTOMER ||--o{ INVOICE : relates",
                 "    ORDER ||--o{ INVOICE : FK_INVOICE_CUSTOMER"
-            )
+            ),
+            "sqlserver"
         );
 
         Describe(diagram)
@@ -180,7 +190,8 @@ public class MermaidConstraintNameTests
     public void Import_UniquenessIsCountedAmongCandidatesOnly()
     {
         var diagram = MermaidImporter.Parse(
-            BuildText("    CUSTOMER ||--o{ ORDER : has", "    CUSTOMER ||--o{ INVOICE : \"has\"")
+            BuildText("    CUSTOMER ||--o{ ORDER : has", "    CUSTOMER ||--o{ INVOICE : \"has\""),
+            "sqlserver"
         );
 
         Describe(diagram)
@@ -192,7 +203,10 @@ public class MermaidConstraintNameTests
     [Fact(DisplayName = "ラベル relates は大文字小文字を問わず制約名に採らない")]
     public void Import_PlaceholderLabel_IsNotAdoptedRegardlessOfCase()
     {
-        var diagram = MermaidImporter.Parse(BuildText("    CUSTOMER ||--o{ ORDER : Relates"));
+        var diagram = MermaidImporter.Parse(
+            BuildText("    CUSTOMER ||--o{ ORDER : Relates"),
+            "sqlserver"
+        );
 
         Describe(diagram).Should().Equal(("CUSTOMER", "ORDER", null));
     }

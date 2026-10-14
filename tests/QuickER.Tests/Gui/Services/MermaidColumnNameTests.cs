@@ -143,7 +143,7 @@ public class MermaidColumnNameTests
         };
 
         MermaidImporter
-            .Parse(MermaidExporter.Build(diagram))
+            .Parse(MermaidExporter.Build(diagram), "sqlserver")
             .Entities.Should()
             .ContainSingle()
             .Which.TableName.Should()
@@ -155,7 +155,8 @@ public class MermaidColumnNameTests
     public void RoundTrip_FoldedColumnName_IsReadable()
     {
         var restored = MermaidImporter.Parse(
-            MermaidExporter.Build(BuildDiagram("Order Date", "Order_Date"))
+            MermaidExporter.Build(BuildDiagram("Order Date", "Order_Date")),
+            "sqlserver"
         );
 
         restored

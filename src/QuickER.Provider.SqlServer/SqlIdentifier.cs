@@ -6,6 +6,9 @@ namespace QuickER.Provider.SqlServer;
 /// <remarks>括弧付け・エスケープ・スキーマ分解などを複数の Builder / Importer で共有する</remarks>
 public static class SqlIdentifier
 {
+    /// <summary>識別子の長さの上限（128 の UTF-16 コード単位。値の正本は <see cref="IdentifierLengthLimits"/>）</summary>
+    public static IdentifierLengthLimit Limit => IdentifierLengthLimits.SqlServer;
+
     /// <summary>テーブル名を <c>[schema].[name]</c> または <c>[name]</c> 形式へ括弧付けする</summary>
     public static string Bracket(string name)
     {

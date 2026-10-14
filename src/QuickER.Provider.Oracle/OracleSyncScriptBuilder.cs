@@ -39,8 +39,9 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         // 列型は識別子でも文字列リテラルでもなく、SQL へ素通しで補間するしか無い（逐次 DDL 方言の基底と同じ関門）
         SqlTypeText.Validate(plan);
 
-        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）
-        SqlNameText.Validate(plan);
+        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）。
+        // あわせて方言の上限を超える名前・方言が表せない文字を含む名前も、場所を名指しして止める
+        SqlNameText.Validate(plan, OracleIdentifier.Limit);
 
         var sb = new StringBuilder();
 
@@ -128,7 +129,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             e,
             item.TableName,
             OracleIdentifier.QuoteSimple,
-            name => $"\"{OracleIdentifier.Escape(name)}\""
+            name => $"\"{OracleIdentifier.Escape(name)}\"",
+            OracleIdentifier.Limit
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -271,7 +273,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         }
 
         var pkCols = string.Join(", ", pks.Select(p => OracleIdentifier.QuoteSimple(p.Name)));
-        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName))}\" "
+        return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} ADD CONSTRAINT \"{OracleIdentifier.Escape(ConstraintNames.PrimaryKey(item.TableName, OracleIdentifier.Limit))}\" "
             + $"PRIMARY KEY ({pkCols});";
     }
 
@@ -286,7 +288,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns
+            item.UniqueConstraintColumns,
+            OracleIdentifier.Limit
         );
         var cols = string.Join(
             ", ",
@@ -302,7 +305,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns
+            item.UniqueConstraintColumns,
+            OracleIdentifier.Limit
         );
         return $"ALTER TABLE {OracleIdentifier.Quote(item.TableName)} "
             + $"DROP CONSTRAINT \"{OracleIdentifier.Escape(name)}\";";
@@ -340,7 +344,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, OracleIdentifier.Limit);
 
         var sb = new StringBuilder();
 

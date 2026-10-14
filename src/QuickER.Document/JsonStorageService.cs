@@ -106,6 +106,27 @@ public static class JsonStorageService
         return contents;
     }
 
+    /// <summary>保存文書を新しいファイルとして書き出す（既にファイルがあれば何も変えずに <see cref="IOException"/>）</summary>
+    /// <remarks>
+    /// 新しい図を作る経路（MCP の <c>create_diagram</c>）用。存在を確かめてから <see cref="SaveAtomic"/> で書く形では、
+    /// その隙間に別のプロセスが作った図を上書きする。書き方は <see cref="AtomicFile.CreateText"/>
+    /// （書き切ってから置き換えずに置く）で、内容は <see cref="SaveAtomic"/> と同じ。
+    /// </remarks>
+    /// <param name="path">作るファイルのパス</param>
+    /// <param name="document">保存対象の文書</param>
+    public static void SaveNew(string path, DiagramDocument document) =>
+        AtomicFile.CreateText(path, Serialize(document));
+
+    /// <summary>
+    /// 保存文書を図ファイルの正準形で直列化した文字列を返す（<see cref="SaveAtomic"/> が書く内容と同じ）
+    /// </summary>
+    /// <remarks>
+    /// 変更の前後で図が変わったかを、保存する形のまま比べるのに使う（MCP の変更系ツールが、何も変えない呼び出しで
+    /// ファイルを書き直さないため）。
+    /// </remarks>
+    /// <param name="document">直列化する文書</param>
+    public static string ToJson(DiagramDocument document) => Serialize(document);
+
     /// <summary>保存文書を図ファイルの正準形（<see cref="Options"/>）で JSON 文字列へ直列化する</summary>
     /// <remarks><see cref="Save"/> と <see cref="SaveAtomic"/> で出力を完全に一致させるための共有ヘルパ</remarks>
     private static string Serialize(DiagramDocument document) =>
@@ -202,7 +223,8 @@ public static class JsonStorageService
 
         try
         {
-            rawContents = File.ReadAllBytes(path);
+            // 別のプロセス（GUI・別の MCP サーバ）の保存と重なった一瞬の共有違反では諦めない
+            rawContents = AtomicFile.ReadAllBytes(path);
         }
         catch (Exception ex)
         {

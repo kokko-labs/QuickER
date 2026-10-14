@@ -21,7 +21,8 @@ public class Entity
     /// <c>"Orders "</c> を作り・参照し、同期は <c>"Orders"</c> を探す、という食い違いが起きる。
     /// </para>
     /// <para>
-    /// 列名・制約名は除かない。DDL と同期が同じ名前をそのまま使っており、食い違いが起きていたのはテーブル名だけのため。
+    /// 図に保存する名前（列名・制約名・クエリ名・パラメータ名・射影のフィールド名・結果の型名も）は同じ規則で前後の空白を除く。
+    /// 名前の同一性の判定（重複・引き当て）は <see cref="SchemaNames"/> を通す。
     /// <c>null</c> はそのまま通す（手で編集した JSON の <c>null</c> は、読込の必須名の検査が場所を名指しして断る）。
     /// </para>
     /// </remarks>
@@ -109,8 +110,9 @@ public class Entity
     /// 主キーの順序に反映されなくなる）。
     /// </para>
     /// <para>
-    /// 列名は大文字小文字まで一致で引き、列 Id はこのテーブル側の列へ張り替える。主キー列に同じ名前が 2 つ以上あると
-    /// どれが誰か決まらないので引き継がない（C# コード取込のパーサーは重複する列名を警告つきで通す）。
+    /// 列名は <see cref="SchemaNames.AreSame"/>（前後の空白を除き大文字小文字を区別しない）で引き、列 Id はこのテーブル側の列へ
+    /// 張り替える。主キー列に同じ名前が 2 つ以上あるとどれが誰か決まらないので引き継がない
+    /// （C# コード取込のパーサーは重複する列名を警告つきで通す）。
     /// </para>
     /// </remarks>
     public bool InheritPrimaryKeyOrderFrom(Entity existing)
@@ -124,12 +126,12 @@ public class Entity
 
         var keys = Columns.Where(column => column.IsPrimaryKey).ToList();
 
-        if (keys.DistinctBy(column => column.Name, StringComparer.Ordinal).Count() != keys.Count)
+        if (keys.DistinctBy(column => column.Name, SchemaNames.Comparer).Count() != keys.Count)
         {
             return false;
         }
 
-        var keyByName = keys.ToDictionary(column => column.Name, StringComparer.Ordinal);
+        var keyByName = keys.ToDictionary(column => column.Name, SchemaNames.Comparer);
         var existingOrder = existing.GetPrimaryKeyColumnsInOrder();
 
         if (

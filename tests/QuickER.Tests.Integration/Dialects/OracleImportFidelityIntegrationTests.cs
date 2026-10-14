@@ -481,6 +481,45 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
     }
 
     /// <summary>
+    /// 同じテーブルに <c>SchemaNames</c> の規則で同じ名前の列（大文字小文字だけ違う列）があるとき、
+    /// 後着を捨てて報告し、捨てた列の主キー印・説明が採った列へ混ざらないことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] Oracle: 大文字小文字だけ違う同名の列は片方を捨てて報告し、捨てた列の主キー・説明を混ぜない"
+    )]
+    public async Task Import_ColumnNamesDifferingOnlyInCase_KeepsOneAndWarns()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE CT (ID NUMBER(10) NOT NULL, DUP NUMBER(10), "dup" NUMBER(10) NOT NULL, PRIMARY KEY (ID, "dup"));
+            COMMENT ON COLUMN CT."dup" IS 'second';
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        // 宣言順（column_id）で先に来た DUP を採り、後着の "dup" は捨てる
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        entity.Columns.Select(c => c.Name).Should().Equal("ID", "DUP");
+
+        var kept = entity.Columns.Single(c => c.Name == "DUP");
+        kept.IsPrimaryKey.Should()
+            .BeFalse("捨てた列 dup の主キー印が採った列 DUP へ混ざってはいけない");
+        kept.Description.Should().BeEmpty("捨てた列の説明が採った列へ混ざってはいけない");
+
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.ColumnNameCollision);
+        warning.TableName.Should().Be("CT");
+        warning.Subject.Should().Be("dup");
+        warning.Detail.Should().Be("DUP");
+    }
+
+    /// <summary>
     /// 仮想列が <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、
     /// 式の喪失が報告されることを検証する。
     /// </summary>

@@ -95,6 +95,26 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      名前の総当たりの生成器・既知の失敗の一覧・図の部品（実体は QuickER.Tests の TestSupport。
+      DDL の往復を実 DB で確かめるテストだけがこのプロジェクトにあり、期待値と一覧は 1 か所で持つ）
+    -->
+    <Compile Include="..\QuickER.Tests\TestSupport\NameFuzz*.cs" LinkBase="TestSupport" />
+    <Compile Include="..\QuickER.Tests\TestSupport\LongNameDiagrams.cs" LinkBase="TestSupport" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      簡易 DSL の条件の総当たり（実体は QuickER.Tests の TestSupport と CodeGen.CSharp。
+      生成器・オラクル・既知の失敗の一覧・生成→コンパイル→照合の本体を 1 か所で持ち、ここでは SQL Server の実装先だけを足す）
+    -->
+    <Compile Include="..\QuickER.Tests\TestSupport\DslFuzz*.cs" LinkBase="TestSupport" />
+    <Compile Include="..\QuickER.Tests\CodeGen.CSharp\DslFuzzRunner.cs" LinkBase="CodeGen.CSharp" />
+    <Compile Include="..\QuickER.Tests\CodeGen.CSharp\DslFuzzExecution.cs" LinkBase="CodeGen.CSharp" />
+    <Compile Include="..\QuickER.Tests\CodeGen.CSharp\GeneratedCodeCompiler.cs" LinkBase="CodeGen.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>

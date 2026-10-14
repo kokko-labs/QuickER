@@ -12,6 +12,9 @@ namespace QuickER.Provider.Oracle;
 /// </remarks>
 public static class OracleIdentifier
 {
+    /// <summary>識別子の長さの上限（128 バイト。値の正本は <see cref="IdentifierLengthLimits"/>）</summary>
+    public static IdentifierLengthLimit Limit => IdentifierLengthLimits.Oracle;
+
     /// <summary>テーブル名を <c>"schema"."name"</c> または <c>"name"</c> 形式へクォートする</summary>
     public static string Quote(string name)
     {

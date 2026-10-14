@@ -468,6 +468,12 @@ public static class CliApp
                 subject,
                 detail
             ),
+            SchemaImportWarningKind.ColumnNameCollision => string.Format(
+                Strings.Cli_ImportWarningColumnNameCollision,
+                table,
+                subject,
+                detail
+            ),
             SchemaImportWarningKind.ColumnTypeNotEmittable => string.Format(
                 Strings.Cli_ImportWarningColumnTypeNotEmittable,
                 table,
@@ -612,7 +618,11 @@ public static class CliApp
         try
         {
             var sourceText = File.ReadAllText(sourceFile.FullName);
-            result = new CSharpReverseParser().Parse(sourceText, provider.TypeCatalog);
+            result = new CSharpReverseParser().Parse(
+                sourceText,
+                provider.TypeCatalog,
+                IdentifierLengthLimits.ForDbms(provider.Name)
+            );
         }
         catch (CodeReverseException ex)
         {

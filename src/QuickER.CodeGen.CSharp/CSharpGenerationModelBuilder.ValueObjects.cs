@@ -613,7 +613,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             "DateTime" => $"ValueObjectDateTimeBase<{className}>",
             _ when ValueObjectHasOrderingOperators(valueType) =>
                 $"ValueObjectOrderedBase<{className}, {valueType}>",
-            "string" => $"ValueObjectStringBase<{className}>",
+            // 文字列の基底の対象は ValueObjectHasStringMatch が単一正本（DSL の型整合検査と共有）
+            _ when ValueObjectHasStringMatch(valueType, isGuidKey) =>
+                $"ValueObjectStringBase<{className}>",
             "bool" => $"ValueObjectBooleanBase<{className}>",
             "byte[]" => $"ValueObjectBinaryBase<{className}>",
             // Guid など順序付けしない型は等価のみの基底
@@ -647,4 +649,16 @@ internal sealed partial class CSharpGenerationModelBuilder
                 or "TimeSpan"
                 or "DateTimeOffset"
                 or "DateTime";
+
+    /// <summary>
+    /// その内包値型の VO が部分一致のメソッド（Contains / StartsWith / EndsWith）を持つか（＝文字列の基底へ派生するか）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BuildValueObjectBaseDeclaration"/> の派生規則と、DSL 条件の型整合検査
+    /// （<see cref="Queries.QueryConditionTypeChecker"/>）が共有する単一正本。GuidKey の VO は内包値が string でも
+    /// 専用の基底（部分一致を持たない）へ派生し、内包値が string でない VO は文字列一致のメソッドを持たない
+    /// （型の検査で寛容に扱うと、エミットした <c>Contains</c> などが CS1061 になる）。
+    /// </remarks>
+    internal static bool ValueObjectHasStringMatch(string valueType, bool isGuidKey) =>
+        !isGuidKey && valueType == "string";
 }

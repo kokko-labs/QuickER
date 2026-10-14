@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using QuickER.Resources;
 using QuickER.ViewModels;
@@ -13,8 +14,8 @@ public sealed class RemoveUniqueConstraintCommand : IUndoableCommand
     /// <summary>削除対象の一意制約</summary>
     private readonly UniqueConstraintViewModel _constraint;
 
-    /// <summary>削除前のインデックス（Undo 時の復元位置）</summary>
-    private readonly int _index;
+    /// <summary>取り除いた一意制約と元の位置（Undo の復元元）</summary>
+    private List<(int Index, UniqueConstraintViewModel Item)> _removed = new();
 
     /// <summary><see cref="RemoveUniqueConstraintCommand"/> を生成する</summary>
     public RemoveUniqueConstraintCommand(
@@ -24,7 +25,6 @@ public sealed class RemoveUniqueConstraintCommand : IUndoableCommand
     {
         _constraints = constraints;
         _constraint = constraint;
-        _index = constraints.IndexOf(constraint);
     }
 
     /// <inheritdoc />
@@ -33,19 +33,12 @@ public sealed class RemoveUniqueConstraintCommand : IUndoableCommand
     /// <inheritdoc />
     public void Execute()
     {
-        _constraints.Remove(_constraint);
+        _removed = IndexedRemoval.RemoveWhere(_constraints, c => ReferenceEquals(c, _constraint));
     }
 
     /// <inheritdoc />
     public void Undo()
     {
-        // Undo 連打などによる二重挿入を避ける
-        if (_constraints.Contains(_constraint))
-        {
-            return;
-        }
-
-        // コレクション件数が削除時から変動している場合に備えて範囲内へ丸める
-        _constraints.Insert(Math.Clamp(_index, 0, _constraints.Count), _constraint);
+        IndexedRemoval.Restore(_constraints, _removed);
     }
 }

@@ -18,6 +18,9 @@ namespace QuickER.Provider.PostgreSql;
 public sealed class PostgreSqlDdlGenerator : DdlGeneratorBase
 {
     /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => PgIdentifier.Limit;
+
+    /// <inheritdoc />
     protected override string QuoteQualifiedName(string name) => PgIdentifier.Quote(name);
 
     /// <inheritdoc />

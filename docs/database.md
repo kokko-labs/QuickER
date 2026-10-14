@@ -156,7 +156,8 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
 - A **foreign key that points outside the imported scope** is skipped (on SQLite this covers a key whose parent table does not exist)
 - A **disabled constraint** (`DISABLE` on Oracle, a foreign key turned off with `NOCHECK CONSTRAINT` on SQL Server) is not imported
 - A table whose **columns could not be read at all** is imported without columns
-- One of two tables whose **names differ only in letter case** is skipped, because the import cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, SQL Server does in a database with a case-sensitive collation, and SQLite, which folds only ASCII letters, does for names such as `Äpfel` and `äpfel`)
+- One of two tables whose **names differ only in letter case or surrounding spaces** is skipped, because the diagram cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, SQL Server does in a database with a case-sensitive collation, and SQLite, which folds only ASCII letters, does for names such as `Äpfel` and `äpfel`)
+- Likewise, one of two **columns of a table whose names differ only in letter case or surrounding spaces** is skipped (the later one in declaration order), and the key flags, descriptions and foreign keys of the skipped column do not attach to the one that is kept
 - A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
   The diagram does not model expressions, so generated DDL creates an ordinary column (with a comment asking for the expression to be added by hand).
   Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))
@@ -423,6 +424,9 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - A MySQL integer is converted by the range of values it holds, sign included.
   `int unsigned` becomes a 64-bit integer (`bigint` on SQL Server), `smallint unsigned` a 32-bit one, and `bigint unsigned` becomes `decimal(20,0)`.
   A signed `tinyint` (-128 to 127) becomes a 16-bit integer, because the 8-bit integer the other dialects share is unsigned (0 to 255, like SQL Server's `tinyint`)
+- A name that the target dialect would refuse (longer than its limit, or holding a character it cannot store) is not changed by the switch.
+  The confirmation dialog lists such names, with their place and the reason, together with the columns above, because DDL generation and sync stop on them until they are changed.
+  See [Identifier length limits](#identifier-length-limits)
 - SQL Server's `rowversion` / `timestamp` becomes a plain `BLOB` on SQLite, and its NOT NULL is lifted at the same time (SQLite assigns nothing, so a locally created row has no version until a sync writes one).
   The conversion is one-way: converting that `BLOB` back to SQL Server yields `varbinary(max)`, not a row version.
   See [Multi-target repositories](code-generation.md#multi-target-repositories-sqlserver--sqlite) for what the column means on each side, and [Bidirectional sync support](code-generation.md#bidirectional-sync-support---generate-sync-support) for generating the code that keeps the two databases in step.
@@ -478,6 +482,45 @@ C# code generation reports the same names as a pre-generation error.
 
 Quote characters are deliberately fine: `"`, `'`, `]` and backticks occur in real databases and are escaped where they are written.
 Descriptions are not refused either, because a line break in one is legitimate and is folded to a space where it lands in a `--` comment line.
+
+### Identifier length limits
+
+Each dialect caps how long a table, column or constraint name may be, and the unit it counts in differs.
+
+| Dialect | Limit | Counted in |
+| --- | --- | --- |
+| SQL Server | 128 | UTF-16 code units |
+| PostgreSQL | 63 | UTF-8 bytes |
+| MySQL | 64 | characters (a table name is also limited to 251 bytes as a file name, see below) |
+| Oracle | 128 | UTF-8 bytes (12.2 or later) |
+| SQLite | none | |
+
+- **Names QuickER assigns** (`PK_{table}`, `FK_{child}_{parent}`, `UQ_{table}_{columns}` and the numbered names that keep them unique) are kept within the limit by the target dialect.
+  A name already within the limit is unchanged.
+  A longer one is cut and ends with `_` and 8 hex digits taken from the full name, so two names that differ only after the cut stay different.
+  The result is the same every time
+- **Names you type** are never shortened.
+  DDL generation and schema-sync script generation refuse a name beyond the limit, naming the place and the limit (`TABLE 'x' is longer than the limit of 63 UTF-8 bytes`), and produce nothing.
+  Without this check SQL Server, MySQL and Oracle reject the DDL when it is applied, while PostgreSQL silently cuts the name at 63 bytes and the table you import back has a different name.
+  Two names that differ only after the 63rd byte would even collapse into one
+- **The editor and the AI tools warn when you enter such a name.**
+  The status bar shows a message when you confirm a table name, column name, foreign key name or unique constraint name that the target dialect would refuse, and the AI and MCP tools add a note to their response.
+  The name is accepted as typed, so you can fix it later.
+  Undo and Redo, and loading a file, do not warn
+- **MySQL cannot store a character outside the Basic Multilingual Plane** (emoji and some rare kanji).
+  MySQL does not refuse such a name; it silently replaces the character with `?`.
+  QuickER treats it the same as a name that is too long: the warning above, and refusal at generation
+- **A MySQL table name is limited a second time, as a file name.**
+  InnoDB stores each table in its own file named after the table, with every character other than ASCII letters, digits and `_` written as an escape (3 bytes for letters such as `Ä`, 5 bytes for most others, including all kanji).
+  The file name may be at most 251 bytes, so a table name made of kanji can be at most 50 characters although 64 are allowed for a column.
+  This applies when `innodb_file_per_table` is on (the default); QuickER always applies it
+- **Oracle before 12.2** (a database whose `COMPATIBLE` is below 12.2) limits names to 30 bytes.
+  QuickER does not know the connected database's setting and checks against 128 bytes, so shorten names yourself for such a database
+
+#### Databases created by earlier versions
+
+A PostgreSQL foreign key whose default name was longer than 63 bytes was created by earlier versions under the cut name, because PostgreSQL silently cuts it.
+Diff sync treats such a foreign key (one without a name of your own) as the same as the one in your diagram, so nothing is added or dropped.
 
 This is separate from whether QuickER *understands* a type.
 A type the dialect catalogue cannot parse is still carried as it is; it simply gets no neutral type token and does not convert on a dialect switch.

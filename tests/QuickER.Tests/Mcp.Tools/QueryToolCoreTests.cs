@@ -299,6 +299,31 @@ public sealed class QueryToolCoreTests
             .Contain(QueryToolDiagnosticCode.SqlImplementationWithoutSql);
     }
 
+    [Fact(DisplayName = "SetQuery: 空白だけの SQL は保存せず、中身のある方言の SQL だけを保存する")]
+    public void SetQuery_BlankSql_IsNotSaved()
+    {
+        var diagram = BuildOrders();
+
+        var outcome = SetQuery(
+            diagram,
+            new
+            {
+                table_name = "orders",
+                query_name = "ListAll",
+                returns = "list",
+                implementation = "sql",
+                sql = new Dictionary<string, string>
+                {
+                    ["sqlite"] = "  \r\n ",
+                    ["sqlserver"] = "SELECT 1",
+                },
+            }
+        );
+
+        outcome.Success.Should().BeTrue();
+        diagram.Queries.Single().Sql.Keys.Should().Equal("sqlserver");
+    }
+
     [Fact(DisplayName = "SetQuery: 方式に合った入力では実装方式の警告を出さず SQL を保存する")]
     public void SetQuery_MatchingInputs_NoImplementationWarnings()
     {

@@ -20,18 +20,28 @@ public static partial class TableDefinitionDocumentImporter
 
     /// <summary>テーブル定義書ファイルを読み込み <see cref="ErDiagram" /> として返す</summary>
     /// <param name="path">読み込む Excel ファイルパス</param>
+    /// <param name="fallbackTargetDbms">
+    /// 定義書が対象 DBMS を宣言していないときに使う対象 DBMS（取込先の図の対象 DBMS）。返す図の
+    /// <see cref="ErDiagram.TargetDbms"/> は宣言があればそれ、無ければこの値で、名前の無い外部キーに付ける名前は
+    /// その DBMS の識別子の長さの上限で縮める（経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </param>
     /// <returns>復元した ER 図</returns>
-    public static ErDiagram Load(string path)
+    public static ErDiagram Load(string path, string fallbackTargetDbms)
     {
         using var workbook = new XLWorkbook(path);
-        return Load(workbook);
+        return Load(workbook, fallbackTargetDbms);
     }
 
     /// <summary>読み込み済みのブックから ER 図を復元する</summary>
     /// <param name="workbook">対象ブック</param>
+    /// <param name="fallbackTargetDbms">
+    /// 定義書が対象 DBMS を宣言していないときに使う対象 DBMS（取込先の図の対象 DBMS）。返す図の
+    /// <see cref="ErDiagram.TargetDbms"/> は宣言があればそれ、無ければこの値で、名前の無い外部キーに付ける名前は
+    /// その DBMS の識別子の長さの上限で縮める（経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </param>
     /// <returns>復元した ER 図</returns>
     /// <exception cref="InvalidDataException">必須シートの欠落や整合性不一致を検出した場合にスローする</exception>
-    public static ErDiagram Load(XLWorkbook workbook)
+    public static ErDiagram Load(XLWorkbook workbook, string fallbackTargetDbms)
     {
         EnsureSupportedFormatVersion(workbook);
 
@@ -50,22 +60,22 @@ public static partial class TableDefinitionDocumentImporter
         var entities = ReadDetailSheets(workbook, summaries, roleSheets);
         var relationships = ReadRelationshipSheet(relationshipSheet, entities);
 
-        // 制約名欄が空のリレーションが同じテーブルの組に 2 行あると既定名が重なるため、ふさがった分だけ名前を付ける
-        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships);
+        // 対象 DBMS は言語非依存のカスタムプロパティから復元する（欠落・空値は取込先の図の対象 DBMS＝寛容仕様）
+        var targetDbms = ReadTargetDbms(workbook) ?? fallbackTargetDbms;
 
-        var diagram = new ErDiagram
+        // 制約名欄が空のリレーションが同じテーブルの組に 2 行あると既定名が重なるため、ふさがった分だけ名前を付ける
+        ConstraintNames.NameUnnamedForeignKeys(
+            entities.Values,
+            relationships,
+            IdentifierLengthLimits.ForDbms(targetDbms)
+        );
+
+        return new ErDiagram
         {
             Entities = entities.Values.ToList(),
             Relationships = relationships,
+            TargetDbms = targetDbms,
         };
-
-        // 対象 DBMS は言語非依存のカスタムプロパティから復元する（欠落・空値は既定値のまま＝寛容仕様）
-        if (ReadTargetDbms(workbook) is { } targetDbms)
-        {
-            diagram.TargetDbms = targetDbms;
-        }
-
-        return diagram;
     }
 
     /// <summary>ブックが宣言している対象 DBMS を読む（カスタムプロパティが無い・空なら null＝不明）</summary>
@@ -139,7 +149,7 @@ public static partial class TableDefinitionDocumentImporter
     /// <summary>テーブル一覧シートからテーブル名・説明・備考を取得する</summary>
     private static Dictionary<string, TableSummaryRow> ReadSummarySheet(IXLWorksheet worksheet)
     {
-        var summaries = new Dictionary<string, TableSummaryRow>(StringComparer.OrdinalIgnoreCase);
+        var summaries = new Dictionary<string, TableSummaryRow>(SchemaNames.Comparer);
 
         for (var row = TableDefinitionDocumentLayout.SummaryDataStartRow; ; row++)
         {
@@ -194,7 +204,7 @@ public static partial class TableDefinitionDocumentImporter
         IReadOnlySet<IXLWorksheet> roleSheets
     )
     {
-        var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
+        var entities = new Dictionary<string, Entity>(SchemaNames.Comparer);
         // 役割シート（一覧 2 枚）以外を詳細シートとみなす（参照比較）
         var detailSheets = workbook.Worksheets.Where(sheet => !roleSheets.Contains(sheet)).ToList();
 
@@ -298,6 +308,14 @@ public static partial class TableDefinitionDocumentImporter
                 IsPrimaryKey = keyText.Contains("PK", StringComparison.OrdinalIgnoreCase),
                 IsForeignKey = keyText.Contains("FK", StringComparison.OrdinalIgnoreCase),
             };
+
+            if (entity.Columns.Any(existing => SchemaNames.AreSame(existing.Name, column.Name)))
+            {
+                throw new InvalidDataException(
+                    string.Format(Strings.TableDoc_DuplicateColumn, entity.TableName, column.Name)
+                );
+            }
+
             entity.Columns.Add(column);
 
             foreach (var number in ParseUniqueConstraintNumbers(keyText))
@@ -461,18 +479,10 @@ public static partial class TableDefinitionDocumentImporter
                 for (var i = 0; i < childColumnNames.Count; i++)
                 {
                     var childColumn = child.Columns.FirstOrDefault(column =>
-                        string.Equals(
-                            column.Name,
-                            childColumnNames[i],
-                            StringComparison.OrdinalIgnoreCase
-                        )
+                        SchemaNames.AreSame(column.Name, childColumnNames[i])
                     );
                     var parentColumn = parent.Columns.FirstOrDefault(column =>
-                        string.Equals(
-                            column.Name,
-                            parentColumnNames[i],
-                            StringComparison.OrdinalIgnoreCase
-                        )
+                        SchemaNames.AreSame(column.Name, parentColumnNames[i])
                     );
 
                     if (childColumn is null)

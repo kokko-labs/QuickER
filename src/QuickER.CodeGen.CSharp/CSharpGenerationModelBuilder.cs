@@ -20,6 +20,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>テーブル名・カラム名を C# 識別子へ変換するコンバーター</summary>
     private readonly CSharpNameConverter _nameConverter = new();
 
+    /// <summary>
+    /// 一意制約の合成名に使う識別子の長さの上限（図の対象 DBMS の上限＝生成コードの <c>[UniqueConstraint(Name = …)]</c> を
+    /// 対象 DBMS の DDL と同じ名前にする。経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </summary>
+    private IdentifierLengthLimit _identifierLimit = IdentifierLengthLimit.Unlimited;
+
     /// <summary>カラム ID → 解決済み C# 型情報。Build 呼び出し時に外部（SQL Server プロバイダ等）から受け取る。
     /// 生成器自体は DB 非依存で、SQL 型のマッピングは行わない</summary>
     private IReadOnlyDictionary<Guid, CSharpTypeInfo> _columnTypes =
@@ -42,10 +48,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     )
     {
         _columnTypes = columnTypes;
+        _identifierLimit = IdentifierLengthLimits.ForDbms(diagram.TargetDbms);
         _queryTokenTypes =
             queryParameterTypes ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.Ordinal);
         _queriesByEntity = CollectValidQueries(diagram, diagnostics);
         _queryDtoNames.Clear();
+        _reservedTypeNames = GeneratedTypeNames.Collect(diagram.Entities);
 
         // ナビゲーション名は Entity / EditModel / Mapper と EF Core の Fluent 構成が共有する（先に 1 回だけ決める）
         _navigationNames = ResolveNavigationNames(diagram);
@@ -442,9 +450,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// （末尾の <c>Entity</c> を外す）
     /// </summary>
     private static string ToRepositoryName(string entityClassName) =>
-        entityClassName.EndsWith("Entity", StringComparison.Ordinal)
-            ? entityClassName[..^"Entity".Length]
-            : entityClassName;
+        GeneratedTypeNames.ToRepositoryName(entityClassName);
 
     /// <summary>エンティティ定義から Repository の生成モデルを構築する</summary>
     /// <returns>単一主キーを持たないテーブルは対象外として null を返す</returns>
@@ -1127,10 +1133,42 @@ internal sealed partial class CSharpGenerationModelBuilder
     private static string EscapeForCSharpInterpolatedString(string? name) =>
         EscapeNameForCSharpString(name).Replace("{", "{{").Replace("}", "}}");
 
-    /// <summary>C# の通常文字列リテラル用のエスケープ本体（バックスラッシュ → 二重引用符 → 改行畳み込みの順）</summary>
-    private static string EscapeCSharpStringCore(string text) =>
-        // バックスラッシュを最初にエスケープする（後続の \" を二重エスケープしないため）
-        FoldNewLines(text.Replace("\\", "\\\\").Replace("\"", "\\\""));
+    /// <summary>C# の通常文字列リテラル用のエスケープ本体（改行は空白 1 つへ畳み、ほかはエスケープして書く）</summary>
+    /// <remarks>
+    /// 改行の畳み込みは <see cref="FoldNewLines"/> と同じ規則（CRLF も空白 1 つ）。改行以外の制御文字と
+    /// 対になっていないサロゲートはエスケープで書く（UTF-8 のファイルで U+FFFD に化けて、列名などの値が変わるため）。
+    /// 文字ごとの扱いの正本は <see cref="GeneratedLiteralText"/>。
+    /// </remarks>
+    private static string EscapeCSharpStringCore(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (GeneratedLiteralText.IsLineBreak(text[i]))
+            {
+                // CRLF は 1 つの改行として空白 1 つへ畳む（2 つの空白にしない）
+                if (text[i] == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+                {
+                    i++;
+                }
+
+                builder.Append(' ');
+                continue;
+            }
+
+            if (!GeneratedLiteralText.MustEscape(text, i, out var length) && length == 2)
+            {
+                builder.Append(text, i, 2);
+                i++;
+                continue;
+            }
+
+            GeneratedLiteralText.AppendRegularLiteralChar(builder, text[i]);
+        }
+
+        return builder.ToString();
+    }
 
     /// <summary>生成出力で改行になり得る文字をすべて空白 1 つへ畳む（1 行リテラル・1 行 summary 前提）</summary>
     /// <remarks>
@@ -1146,7 +1184,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         for (var i = 0; i < text.Length; i++)
         {
-            if (!IsNewLine(text[i]))
+            if (!GeneratedLiteralText.IsLineBreak(text[i]))
             {
                 builder.Append(text[i]);
                 continue;
@@ -1163,11 +1201,4 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return builder.ToString();
     }
-
-    /// <summary>
-    /// 描画後の <see cref="string.ReplaceLineEndings(string)"/> が改行として認識する文字か
-    /// （CR / LF / NEL / FORM FEED / LINE SEPARATOR / PARAGRAPH SEPARATOR）
-    /// </summary>
-    private static bool IsNewLine(char ch) =>
-        ch is '\r' or '\n' or '\f' or (char)0x85 or (char)0x2028 or (char)0x2029;
 }

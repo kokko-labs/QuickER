@@ -471,6 +471,36 @@ public class QueryGenerationTests
         efClass.Should().NotContain("QueryBySqlAsync").And.NotContain("SpecialLookupAsync");
     }
 
+    /// <summary>空・空白だけの SQL は「その方言の SQL は無い」と同じ扱い（手動実装）で、空の SQL を実行する本体を作らない</summary>
+    [Fact(
+        DisplayName = "生 SQL: 空白だけの SQL は手動実装として扱い、空の SQL を実行する本体を出さない"
+    )]
+    public void Generate_BlankSql_IsTreatedAsManual()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetBlank",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Sql = { ["sqlserver"] = "   \r\n  " },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        // 契約には宣言され、実装の本体（空の SQL を渡す QueryBySqlAsync）は出ない
+        content.Should().Contain("Task<IReadOnlyList<OrderEntity>> GetBlankAsync(");
+        var repository = ExtractClassBody(content, "OrderRepository");
+        repository.Should().Contain("GetByIdAsync", "実装クラスを取り出せていること");
+        repository
+            .Should()
+            .NotContain("GetBlankAsync", "空白だけの SQL を実行する本体を作らない（手動実装）");
+    }
+
     /// <summary>
     /// 自由 SQL の静的検証: 未宣言パラメータのクエリは警告＋該当クエリのみスキップされ、
     /// 有効なクエリは生成される（生成全体は成功する）ことを検証する。
@@ -1005,15 +1035,16 @@ public class QueryGenerationTests
     }
 
     /// <summary>
-    /// C# の予約語のパラメータ名と、契約メンバー Query() を隠すパラメータ名「Query」が診断エラーで
-    /// 拒否されることを検証する。生成器は識別子を @ エスケープせずそのまま出力するため、予約語は
-    /// 引数宣言がコンパイル不能になり、Query（大文字小文字まで一致）は生成メソッド本体の Query() 呼び出しが
-    /// メソッドグループを隠されてコンパイル不能になる
+    /// C# の予約語のパラメータ名と、リモートのリクエストの record のメンバー名になるパラメータ名「ToString」が
+    /// 診断エラーで拒否されることを検証する。生成器は識別子を @ エスケープせずそのまま出力するため、予約語は
+    /// 引数宣言がコンパイル不能になり、ToString は record のメンバーとぶつかってコンパイル不能になる
     /// </summary>
-    [Theory(DisplayName = "予約語・Query のパラメータ名は診断エラーで拒否される")]
+    [Theory(
+        DisplayName = "予約語・リモートのリクエストの record のメンバー名のパラメータ名は診断エラーで拒否される"
+    )]
     [InlineData("class")]
     [InlineData("int")]
-    [InlineData("Query")]
+    [InlineData("ToString")]
     public void Generate_ReservedParameterName_IsRejected(string parameterName)
     {
         var diagram = CreateDiagram(
@@ -1041,8 +1072,8 @@ public class QueryGenerationTests
     }
 
     /// <summary>
-    /// 小文字の query は Query() メソッドグループを隠さないため従来どおり使えることを検証する
-    /// （拒否は大文字小文字まで一致する「Query」だけ＝文脈キーワードも予約語ではないので合法）
+    /// 小文字の query が使えることを検証する（生成本体は this.Query() で呼ぶので、Query も query も
+    /// メソッドグループを隠さない。文脈キーワードも予約語ではないので合法）
     /// </summary>
     [Fact(DisplayName = "小文字の query パラメータ名は従来どおり使える")]
     public void Generate_LowercaseQueryParameterName_IsAccepted()
@@ -1201,7 +1232,7 @@ public class QueryGenerationTests
 
         content
             .Should()
-            .Contain("var items_ = await QueryBySqlAsync(")
+            .Contain("var items_ = await this.QueryBySqlAsync(")
             .And.Contain("return items_.Count > 0 ? items_[0] : null;");
 
         var compilation = GeneratedCodeCompiler.Compile(result, "QueryItemsParam");
@@ -1319,6 +1350,273 @@ public class QueryGenerationTests
                 "スキップ後の残存生成物はコンパイルできるべき: "
                     + string.Join(" / ", compilation.Errors.Take(5))
             );
+    }
+
+    /// <summary>
+    /// 警告で飛ばされた射影クエリの結果型名は、後に来る有効なクエリが使えることを検証する
+    /// （飛ばしたクエリの DTO は出ないのに名前が登録されたままだと、存在しない DTO との重複で生成全体が止まっていた）
+    /// </summary>
+    [Fact(DisplayName = "警告で飛ばされた射影クエリの結果型名は、後続の有効なクエリが使える")]
+    public void Generate_SkippedProjectionQuery_ReleasesItsResultTypeName()
+    {
+        _order.Columns.Add(
+            new Column
+            {
+                Name = "Quantity",
+                DataType = "int",
+                IsNullable = true,
+            }
+        );
+        var quantity = _order.Columns.First(c => c.Name == "Quantity");
+        var amount = _order.Columns.First(c => c.Name == "Amount");
+        var diagram = CreateDiagram(
+            // NULL 許容の値型列を非 NULL のフィールドへ写す定義＝警告でスキップされる
+            new QueryDefinition
+            {
+                Name = "Skipped",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "SharedRow",
+                Fields =
+                {
+                    new ProjectionField
+                    {
+                        Name = "Quantity",
+                        SourceColumnId = quantity.Id,
+                        IsNullable = false,
+                    },
+                },
+            },
+            new QueryDefinition
+            {
+                Name = "Valid",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "SharedRow",
+                Fields =
+                {
+                    new ProjectionField { Name = "Amount", SourceColumnId = amount.Id },
+                },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+        content.Should().Contain("ValidAsync").And.NotContain("SkippedAsync");
+        GeneratedCodeCompiler
+            .Compile(result, "QuerySkippedProjectionName")
+            .Success.Should()
+            .BeTrue();
+    }
+
+    /// <summary>
+    /// DSL 射影で NULL 許容の参照型の列（string・値オブジェクト）を非 NULL 指定のフィールドへ写す定義は、
+    /// 選択式の代入に null 抑止（!）を付けて生成され、警告なしでコンパイルできることを検証する
+    /// （NULL を除いてから非 NULL で受ける使い方は正当で、抑止しないと CS8601 になる）
+    /// </summary>
+    [Theory(
+        DisplayName = "DSL 射影の非 NULL 上書き × NULL 許容の参照型列は null 抑止つきで警告なしに生成される"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Generate_ProjectionNotNullOverrideOnNullableReferenceColumn_SuppressesWarning(
+        bool valueObjects
+    )
+    {
+        var memo = _order.Columns.First(c => c.Name == "Memo");
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetMemoRows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "MemoRow",
+                Condition = "Memo IS NOT NULL",
+                Fields =
+                {
+                    new ProjectionField
+                    {
+                        Name = "Memo",
+                        SourceColumnId = memo.Id,
+                        IsNullable = false,
+                    },
+                },
+            }
+        );
+
+        var result = Generate(
+            diagram,
+            CreateOptions() with
+            {
+                GenerateValueObjects = valueObjects,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        result
+            .Diagnostics.Should()
+            .NotContain(d => d.Severity != GenerationDiagnosticSeverity.Info);
+        AllContent(result).Should().Contain("Memo = e.Memo!");
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryNotNullOverrideReference");
+
+        compilation.Success.Should().BeTrue(string.Join(" / ", compilation.Errors.Take(5)));
+        compilation
+            .Warnings.Should()
+            .BeEmpty("null 抑止つきの代入は CS8601 にならない: " + compilation.DescribeWarnings());
+    }
+
+    /// <summary>
+    /// GuidKey の値オブジェクト（文字列の主キーを GUID 採番にしたもの）の列には、部分一致（LIKE の前方・後方・部分一致、
+    /// CONTAINS / STARTSWITH / ENDSWITH）を書けず、そのクエリだけが警告で飛ばされることを検証する。
+    /// GuidKey は部分一致のメソッドを持たないので、そのまま生成すると生成ファイル全体が CS1929 でコンパイルできない。
+    /// 完全一致（ワイルドカードなしの LIKE と等値）は <c>==</c> なので書ける
+    /// </summary>
+    [Fact(
+        DisplayName = "GuidKey の列への部分一致は警告でそのクエリだけ飛ばされ、完全一致は生成される"
+    )]
+    public void Generate_StringMatchOnGuidKeyColumn_SkipsOnlyPartialMatches()
+    {
+        var tag = new Entity { TableName = "Tag" };
+        tag.Columns.Add(
+            new Column
+            {
+                Name = "Code",
+                DataType = "nvarchar(36)",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        tag.Columns.Add(new Column { Name = "Label", DataType = "nvarchar(50)" });
+        var diagram = new ErDiagram { Entities = { tag } };
+
+        foreach (
+            var (name, condition) in new[]
+            {
+                ("PartialLike", "Code LIKE 'ab%'"),
+                ("ContainsMatch", "Code CONTAINS 'ab'"),
+                ("NegatedStartsWith", "NOT Code STARTSWITH 'ab'"),
+                ("ExactLike", "Code LIKE 'ab'"),
+                ("NotExactLike", "Code NOT LIKE 'ab'"),
+                ("Equality", "Code = 'ab'"),
+                ("OtherColumnStillMatches", "Label CONTAINS 'x'"),
+            }
+        )
+        {
+            diagram.Queries.Add(
+                new QueryDefinition
+                {
+                    EntityId = tag.Id,
+                    Name = name,
+                    Returns = QueryReturnShape.List,
+                    Condition = condition,
+                }
+            );
+        }
+
+        var result = Generate(
+            diagram,
+            CreateOptions() with
+            {
+                GenerateValueObjects = true,
+                UseGuidKeyForStringPrimaryKey = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+
+        var warned = result
+            .Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Warning)
+            .Select(d => d.Message)
+            .ToList();
+
+        foreach (var skipped in new[] { "PartialLike", "ContainsMatch", "NegatedStartsWith" })
+        {
+            warned.Should().Contain(m => m.Contains(skipped) && m.Contains("Code"));
+        }
+
+        warned.Should().HaveCount(3, "完全一致と別の列のクエリは警告にならない");
+
+        var content = AllContent(result);
+
+        foreach (
+            var generated in new[]
+            {
+                "ExactLikeAsync",
+                "NotExactLikeAsync",
+                "EqualityAsync",
+                "OtherColumnStillMatchesAsync",
+            }
+        )
+        {
+            content.Should().Contain(generated);
+        }
+
+        foreach (
+            var skipped in new[]
+            {
+                "PartialLikeAsync",
+                "ContainsMatchAsync",
+                "NegatedStartsWithAsync",
+            }
+        )
+        {
+            content.Should().NotContain(skipped);
+        }
+
+        var compilation = GeneratedCodeCompiler.Compile(result, "QueryGuidKeyStringMatch");
+
+        compilation.Success.Should().BeTrue(string.Join(" / ", compilation.Errors.Take(5)));
+    }
+
+    /// <summary>
+    /// 射影 DTO の型名が、生成コードの型名（BCL・ランタイム・生成されるクラスやインターフェイス・値オブジェクト）と
+    /// 衝突する定義は、生成前の検証で名指しして断られ、生成全体が止まる（コンパイル不能な出力を作らない）ことを検証する。
+    /// 衝突しない名前の射影は従来どおり生成される
+    /// </summary>
+    [Theory(DisplayName = "射影 DTO の型名が生成コードの型名と衝突する定義は名指しして断られる")]
+    [InlineData("Task")]
+    [InlineData("SqlQuery")]
+    [InlineData("OrderEntity")]
+    [InlineData("IOrderRepository")]
+    [InlineData("AmountValue")]
+    public void Generate_ProjectionResultTypeNameCollidingWithGeneratedType_IsRejected(
+        string typeName
+    )
+    {
+        var amount = _order.Columns.First(c => c.Name == "Amount");
+        QueryDefinition Projection(string name, string resultTypeName) =>
+            new()
+            {
+                Name = name,
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = resultTypeName,
+                Fields =
+                {
+                    new ProjectionField { Name = "Amount", SourceColumnId = amount.Id },
+                },
+            };
+
+        var rejected = Generate(CreateDiagram(Projection("Rows", typeName)), CreateOptions());
+
+        rejected.HasErrors.Should().BeTrue("衝突する DTO 名のまま生成するとコンパイルできない");
+        rejected
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error
+                && d.Message.Contains("Rows")
+                && d.Message.Contains($"'{typeName}'")
+            );
+
+        var accepted = Generate(
+            CreateDiagram(Projection("Rows", "OrderAmountRow")),
+            CreateOptions()
+        );
+
+        accepted.HasErrors.Should().BeFalse(FormatDiagnostics(accepted));
+        GeneratedCodeCompiler
+            .Compile(accepted, "QueryResultTypeNameAccepted")
+            .Success.Should()
+            .BeTrue();
     }
 
     /// <summary>
@@ -1450,7 +1748,17 @@ public class QueryGenerationTests
             .DescendantNodes()
             .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
             .First(call =>
-                call.Expression is Microsoft.CodeAnalysis.CSharp.Syntax.SimpleNameSyntax name
+                // 生成本体は this. で修飾して呼ぶ（this.QueryBySqlAsync(...)）
+                (
+                    call.Expression switch
+                    {
+                        Microsoft.CodeAnalysis.CSharp.Syntax.SimpleNameSyntax simple => simple,
+                        Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax member =>
+                            member.Name,
+                        _ => null,
+                    }
+                )
+                    is { } name
                 && name.Identifier.Text.EndsWith("SqlAsync", StringComparison.Ordinal)
             );
 

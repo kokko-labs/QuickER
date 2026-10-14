@@ -46,6 +46,7 @@ public sealed class MySqlProvider : IDatabaseProvider
             PrimaryKeyChangeRequiresOwnForeignKeyRebuild = true,
             SupportsSetDefaultAction = false,
             NormalizeTypeNotation = MySqlTypeNotation.Normalize,
+            IdentifierLengthLimit = MySqlIdentifier.Limit,
         };
 
     /// <inheritdoc />

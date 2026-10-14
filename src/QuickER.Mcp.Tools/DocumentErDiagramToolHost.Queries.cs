@@ -1,4 +1,3 @@
-using System.IO;
 using System.Text;
 using System.Text.Json;
 using QuickER.Documents;
@@ -16,7 +15,7 @@ namespace QuickER.Mcp.Tools;
 /// 更新した結果を受けて保存する。読み取り系（list）はファイル存在・新フォーマット警告をここで扱う。
 /// </para>
 /// <para>
-/// 次ステージで内蔵チャット面が同じコアを用い、日本語フォーマッタを対で持つ。
+/// 内蔵チャット面も同じコアを使い、表示言語の整形（<c>QueryToolLocalizedFormatter</c>）を対で持つ。
 /// </para>
 /// </remarks>
 public static partial class DocumentErDiagramToolHost
@@ -49,15 +48,7 @@ public static partial class DocumentErDiagramToolHost
     /// <summary>図の名前付きクエリをエンティティ別に一覧する（読み取り系＝新フォーマットは警告付きで続行）</summary>
     private static (string, bool) ListQueries(string file)
     {
-        if (!File.Exists(file))
-        {
-            return (
-                $"Diagram file not found: {file}. To create a new diagram, call {CreateDiagramToolName} first.",
-                false
-            );
-        }
-
-        var (document, error) = TryReadDocument(file);
+        var (document, error) = DiagramFileReader.Read(file);
 
         if (error is not null)
         {
@@ -65,16 +56,9 @@ public static partial class DocumentErDiagramToolHost
         }
 
         var sb = new StringBuilder();
+        AppendNewerFormatWarning(sb, document!);
 
-        if (document!.IsNewerFormat)
-        {
-            sb.AppendLine(
-                $"Warning: this diagram was saved in a newer format (version {document.Version} > supported {DiagramDocument.CurrentVersion}); unknown data may be omitted. Showing a best-effort listing."
-            );
-            sb.AppendLine();
-        }
-
-        var outcome = QueryToolCore.ListQueries(document.Schema);
+        var outcome = QueryToolCore.ListQueries(document!.Schema);
         sb.Append(QueryToolEnglishFormatter.FormatListing(outcome.Listing!));
 
         return (sb.ToString().TrimEnd(), true);

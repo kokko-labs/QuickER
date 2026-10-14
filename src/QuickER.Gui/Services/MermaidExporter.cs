@@ -231,7 +231,7 @@ public static partial class MermaidExporter
 
         try
         {
-            reimported = MermaidImporter.Parse(Build(diagram));
+            reimported = MermaidImporter.Parse(Build(diagram), diagram.TargetDbms);
         }
         catch (InvalidDataException)
         {

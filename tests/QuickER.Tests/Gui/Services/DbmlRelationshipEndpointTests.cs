@@ -92,7 +92,7 @@ public class DbmlRelationshipEndpointTests
         AddRelationship(diagram, type, withPair: false);
 
         var dbml = DbmlExporter.Build(diagram);
-        var restored = DbmlImporter.Parse(dbml);
+        var restored = DbmlImporter.Parse(dbml, "sqlserver");
 
         dbml.Should().NotContain("Ref");
         DbmlExporter
@@ -158,7 +158,7 @@ public class DbmlRelationshipEndpointTests
             .Should()
             .NotContain(ExportOmissionKind.RelationshipWithoutColumns);
         DbmlImporter
-            .Parse(dbml)
+            .Parse(dbml, "sqlserver")
             .Relationships.Should()
             .ContainSingle()
             .Which.Type.Should()
@@ -206,7 +206,7 @@ public class DbmlRelationshipEndpointTests
             }
             """;
 
-        var diagram = DbmlImporter.Parse(Dbml);
+        var diagram = DbmlImporter.Parse(Dbml, "sqlserver");
 
         DescribeSingleRelationship(diagram).Should().Be("OneToMany: users.id -> posts.user_id");
         diagram
@@ -235,7 +235,7 @@ public class DbmlRelationshipEndpointTests
             }
             """;
 
-        DescribeSingleRelationship(DbmlImporter.Parse(Dbml))
+        DescribeSingleRelationship(DbmlImporter.Parse(Dbml, "sqlserver"))
             .Should()
             .Be("OneToMany: users.id -> posts.user_id");
     }
@@ -258,7 +258,7 @@ public class DbmlRelationshipEndpointTests
             }
             """;
 
-        DescribeSingleRelationship(DbmlImporter.Parse(Dbml))
+        DescribeSingleRelationship(DbmlImporter.Parse(Dbml, "sqlserver"))
             .Should()
             .Be("OneToOne: users.id -> user_infos.user_id");
     }
@@ -280,7 +280,7 @@ public class DbmlRelationshipEndpointTests
             Ref: users.id - user_infos.user_id
             """;
 
-        DescribeSingleRelationship(DbmlImporter.Parse(Dbml))
+        DescribeSingleRelationship(DbmlImporter.Parse(Dbml, "sqlserver"))
             .Should()
             .Be("OneToOne: users.id -> user_infos.user_id");
     }
@@ -298,7 +298,9 @@ public class DbmlRelationshipEndpointTests
             }
             """;
 
-        DescribeSingleRelationship(DbmlImporter.Parse(Dbml)).Should().Be("ManyToMany: ");
+        DescribeSingleRelationship(DbmlImporter.Parse(Dbml, "sqlserver"))
+            .Should()
+            .Be("ManyToMany: ");
     }
 
     [Fact(DisplayName = "DBML 取込: Ref 行の多対1（>）は左右を入れ替えた 1 対多として読む")]
@@ -316,7 +318,7 @@ public class DbmlRelationshipEndpointTests
             Ref fk_posts_users: posts.user_id > users.id [delete: cascade]
             """;
 
-        var diagram = DbmlImporter.Parse(Dbml);
+        var diagram = DbmlImporter.Parse(Dbml, "sqlserver");
 
         DescribeSingleRelationship(diagram).Should().Be("OneToMany: users.id -> posts.user_id");
         diagram.Relationships[0].ConstraintName.Should().Be("fk_posts_users");
@@ -338,7 +340,7 @@ public class DbmlRelationshipEndpointTests
             }
             """;
 
-        DescribeSingleRelationship(DbmlImporter.Parse(Dbml))
+        DescribeSingleRelationship(DbmlImporter.Parse(Dbml, "sqlserver"))
             .Should()
             .Be("OneToMany: sales orders.order id -> order lines.order id");
     }
@@ -365,7 +367,7 @@ public class DbmlRelationshipEndpointTests
             Ref last: a.id < c.id
             """;
 
-        var diagram = DbmlImporter.Parse(Dbml);
+        var diagram = DbmlImporter.Parse(Dbml, "sqlserver");
 
         diagram
             .Relationships.Select(relationship => relationship.ConstraintName)
@@ -386,7 +388,7 @@ public class DbmlRelationshipEndpointTests
             }
             """;
 
-        var act = () => DbmlImporter.Parse(Dbml);
+        var act = () => DbmlImporter.Parse(Dbml, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -404,7 +406,7 @@ public class DbmlRelationshipEndpointTests
             }
             """;
 
-        var diagram = DbmlImporter.Parse(Dbml);
+        var diagram = DbmlImporter.Parse(Dbml, "sqlserver");
 
         diagram.Relationships.Should().BeEmpty();
         diagram.Entities[0].Columns[0].IsForeignKey.Should().BeFalse();

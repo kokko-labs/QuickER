@@ -598,6 +598,54 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Status_TableNameRejected {
+            get {
+                return ResourceManager.GetString("Status_TableNameRejected", resourceCulture);
+            }
+        }
+        
+        public static string Status_ColumnNameRejected {
+            get {
+                return ResourceManager.GetString("Status_ColumnNameRejected", resourceCulture);
+            }
+        }
+        
+        public static string Status_NameTooLong {
+            get {
+                return ResourceManager.GetString("Status_NameTooLong", resourceCulture);
+            }
+        }
+        
+        public static string Status_NameNotRepresentable {
+            get {
+                return ResourceManager.GetString("Status_NameNotRepresentable", resourceCulture);
+            }
+        }
+        
+        public static string IdentifierLimit_Utf16CodeUnits {
+            get {
+                return ResourceManager.GetString("IdentifierLimit_Utf16CodeUnits", resourceCulture);
+            }
+        }
+        
+        public static string IdentifierLimit_Utf8Bytes {
+            get {
+                return ResourceManager.GetString("IdentifierLimit_Utf8Bytes", resourceCulture);
+            }
+        }
+        
+        public static string IdentifierLimit_Characters {
+            get {
+                return ResourceManager.GetString("IdentifierLimit_Characters", resourceCulture);
+            }
+        }
+        
+        public static string IdentifierLimit_CharactersWithTableFile {
+            get {
+                return ResourceManager.GetString("IdentifierLimit_CharactersWithTableFile", resourceCulture);
+            }
+        }
+        
         public static string Status_EntitiesLabel {
             get {
                 return ResourceManager.GetString("Status_EntitiesLabel", resourceCulture);
@@ -1410,6 +1458,48 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("TypeConversion_NullableColumnLine", resourceCulture);
             }
         }
+        
+        public static string TypeConversion_NameLimitHeader {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitHeader", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitTableLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitTableLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitColumnLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitColumnLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitUniqueLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitUniqueLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitForeignKeyLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitForeignKeyLine", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitTooLong {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitTooLong", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_NameLimitNotRepresentable {
+            get {
+                return ResourceManager.GetString("TypeConversion_NameLimitNotRepresentable", resourceCulture);
+            }
+        }
 
         public static string Common_MoreItems {
             get {
@@ -1896,6 +1986,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Dbml_DuplicateColumn {
+            get {
+                return ResourceManager.GetString("Dbml_DuplicateColumn", resourceCulture);
+            }
+        }
+        
         public static string Dbml_MissingClosingBrace {
             get {
                 return ResourceManager.GetString("Dbml_MissingClosingBrace", resourceCulture);
@@ -2010,6 +2106,12 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Mermaid_DuplicateColumn {
+            get {
+                return ResourceManager.GetString("Mermaid_DuplicateColumn", resourceCulture);
+            }
+        }
+        
         public static string Mermaid_MissingClosingBrace {
             get {
                 return ResourceManager.GetString("Mermaid_MissingClosingBrace", resourceCulture);
@@ -2085,6 +2187,12 @@ namespace QuickER.Resources {
         public static string TableDoc_DetailDuplicateTable {
             get {
                 return ResourceManager.GetString("TableDoc_DetailDuplicateTable", resourceCulture);
+            }
+        }
+        
+        public static string TableDoc_DuplicateColumn {
+            get {
+                return ResourceManager.GetString("TableDoc_DuplicateColumn", resourceCulture);
             }
         }
         
@@ -2411,6 +2519,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Tool_UniqueConstraintNameTaken {
+            get {
+                return ResourceManager.GetString("Tool_UniqueConstraintNameTaken", resourceCulture);
+            }
+        }
+
         public static string Tool_TableNameTaken {
             get {
                 return ResourceManager.GetString("Tool_TableNameTaken", resourceCulture);
@@ -2456,6 +2570,18 @@ namespace QuickER.Resources {
         public static string Tool_RelationshipUnnamedConstraint {
             get {
                 return ResourceManager.GetString("Tool_RelationshipUnnamedConstraint", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipDefaultConstraintName {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipDefaultConstraintName", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipTypeRequired {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipTypeRequired", resourceCulture);
             }
         }
 

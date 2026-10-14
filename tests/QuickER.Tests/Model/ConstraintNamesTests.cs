@@ -41,7 +41,7 @@ public class ConstraintNamesTests
     public void ForeignKey_ComposesSafeNames()
     {
         ConstraintNames
-            .ForeignKey(" dbo.Orders", "dbo.Customers")
+            .ForeignKey(" dbo.Orders", "dbo.Customers", IdentifierLengthLimit.Unlimited)
             .Should()
             .Be("FK_dbo_Orders_dbo_Customers");
     }
@@ -49,7 +49,10 @@ public class ConstraintNamesTests
     [Fact(DisplayName = "主キーの既定名は PK_{テーブル}（安全化）")]
     public void PrimaryKey_ComposesSafeName()
     {
-        ConstraintNames.PrimaryKey(" dbo.Orders ").Should().Be("PK_dbo_Orders");
+        ConstraintNames
+            .PrimaryKey(" dbo.Orders ", IdentifierLengthLimit.Unlimited)
+            .Should()
+            .Be("PK_dbo_Orders");
     }
 
     /// <summary>
@@ -59,7 +62,11 @@ public class ConstraintNamesTests
     public void UniqueConstraintSynthesizeName_UsesSafeName()
     {
         UniqueConstraint
-            .SynthesizeName(" dbo.Orders", ["order code", "tenant"])
+            .SynthesizeName(
+                " dbo.Orders",
+                ["order code", "tenant"],
+                IdentifierLengthLimit.Unlimited
+            )
             .Should()
             .Be("UQ_dbo_Orders_order_code_tenant");
     }
@@ -71,10 +78,15 @@ public class ConstraintNamesTests
     [Fact(DisplayName = "一意制約の合成名は、先に安全化しても結果が同じ")]
     public void UniqueConstraintSynthesizeName_AgreesWithPresanitizedInput()
     {
-        var direct = UniqueConstraint.SynthesizeName("dbo.Orders", ["code"]);
+        var direct = UniqueConstraint.SynthesizeName(
+            "dbo.Orders",
+            ["code"],
+            IdentifierLengthLimit.Unlimited
+        );
         var presanitized = UniqueConstraint.SynthesizeName(
             ConstraintNames.SafeName("dbo.Orders"),
-            [ConstraintNames.SafeName("code")]
+            [ConstraintNames.SafeName("code")],
+            IdentifierLengthLimit.Unlimited
         );
 
         presanitized.Should().Be(direct);
@@ -84,7 +96,13 @@ public class ConstraintNamesTests
     public void UniqueForeignKey_DefaultNameIsFree_ReturnsDefault()
     {
         ConstraintNames
-            .UniqueForeignKey("Orders", "Customers", ["BillingCustomerId"], ["PK_Orders"])
+            .UniqueForeignKey(
+                "Orders",
+                "Customers",
+                ["BillingCustomerId"],
+                ["PK_Orders"],
+                IdentifierLengthLimit.Unlimited
+            )
             .Should()
             .Be("FK_Orders_Customers");
     }
@@ -97,7 +115,8 @@ public class ConstraintNamesTests
                 "Orders",
                 "Customers",
                 ["ShippingCustomerId"],
-                ["FK_Orders_Customers"]
+                ["FK_Orders_Customers"],
+                IdentifierLengthLimit.Unlimited
             )
             .Should()
             .Be("FK_Orders_Customers_ShippingCustomerId");
@@ -112,7 +131,8 @@ public class ConstraintNamesTests
                 "Orders",
                 "Customers",
                 ["tenant id", "Ship.Code"],
-                ["FK_Orders_Customers"]
+                ["FK_Orders_Customers"],
+                IdentifierLengthLimit.Unlimited
             )
             .Should()
             .Be("FK_Orders_Customers_tenant_id_Ship_Code");
@@ -130,7 +150,8 @@ public class ConstraintNamesTests
                     "FK_Orders_Customers",
                     "FK_Orders_Customers_CustomerId",
                     "FK_Orders_Customers_CustomerId_2",
-                ]
+                ],
+                IdentifierLengthLimit.Unlimited
             )
             .Should()
             .Be("FK_Orders_Customers_CustomerId_3");
@@ -140,7 +161,13 @@ public class ConstraintNamesTests
     public void UniqueForeignKey_NoColumns_AppendsNumberToDefault()
     {
         ConstraintNames
-            .UniqueForeignKey("Orders", "Customers", [], ["FK_Orders_Customers"])
+            .UniqueForeignKey(
+                "Orders",
+                "Customers",
+                [],
+                ["FK_Orders_Customers"],
+                IdentifierLengthLimit.Unlimited
+            )
             .Should()
             .Be("FK_Orders_Customers_2");
     }
@@ -149,7 +176,13 @@ public class ConstraintNamesTests
     public void UniqueForeignKey_IgnoresCase()
     {
         ConstraintNames
-            .UniqueForeignKey("Orders", "Customers", ["ShipTo"], ["fk_orders_customers"])
+            .UniqueForeignKey(
+                "Orders",
+                "Customers",
+                ["ShipTo"],
+                ["fk_orders_customers"],
+                IdentifierLengthLimit.Unlimited
+            )
             .Should()
             .Be("FK_Orders_Customers_ShipTo");
     }
@@ -261,7 +294,10 @@ public class ConstraintNamesTests
             },
         };
 
-        var tableConstraints = ConstraintNames.CollectTableConstraints(diagram.Entities);
+        var tableConstraints = ConstraintNames.CollectTableConstraints(
+            diagram.Entities,
+            IdentifierLengthLimit.Unlimited
+        );
 
         tableConstraints
             .Should()
@@ -345,7 +381,11 @@ public class ConstraintNamesTests
         var (customers, orders) = BuildCustomersAndOrders();
         var relationship = Link(customers, orders, "bill_customer_id");
 
-        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [relationship]);
+        ConstraintNames.NameUnnamedForeignKeys(
+            [customers, orders],
+            [relationship],
+            IdentifierLengthLimit.Unlimited
+        );
 
         relationship.ConstraintName.Should().BeNull();
     }
@@ -359,7 +399,11 @@ public class ConstraintNamesTests
         var bill = Link(customers, orders, "bill_customer_id");
         var ship = Link(customers, orders, "ship_customer_id");
 
-        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [bill, ship]);
+        ConstraintNames.NameUnnamedForeignKeys(
+            [customers, orders],
+            [bill, ship],
+            IdentifierLengthLimit.Unlimited
+        );
 
         bill.ConstraintName.Should().BeNull("渡された順で先のリレーションが既定名を取る");
         ship.ConstraintName.Should().Be("FK_orders_customers_ship_customer_id");
@@ -375,7 +419,11 @@ public class ConstraintNamesTests
         // 名前を持つリレーションが後ろにあっても、先に予約される
         var named = Link(customers, orders, "ship_customer_id", "fk_ORDERS_customers");
 
-        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [unnamed, named]);
+        ConstraintNames.NameUnnamedForeignKeys(
+            [customers, orders],
+            [unnamed, named],
+            IdentifierLengthLimit.Unlimited
+        );
 
         unnamed.ConstraintName.Should().Be("FK_orders_customers_bill_customer_id");
         named.ConstraintName.Should().Be("fk_ORDERS_customers");
@@ -396,7 +444,11 @@ public class ConstraintNamesTests
         );
         var relationship = Link(customers, orders, "bill_customer_id");
 
-        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [relationship]);
+        ConstraintNames.NameUnnamedForeignKeys(
+            [customers, orders],
+            [relationship],
+            IdentifierLengthLimit.Unlimited
+        );
 
         relationship.ConstraintName.Should().Be("FK_orders_customers_bill_customer_id");
     }
@@ -405,15 +457,20 @@ public class ConstraintNamesTests
     public void EffectiveForeignKey_FallsBackToDefaultOnlyWhenUnnamed()
     {
         ConstraintNames
-            .EffectiveForeignKey(null, "orders", "customers")
+            .EffectiveForeignKey(null, "orders", "customers", IdentifierLengthLimit.Unlimited)
             .Should()
             .Be("FK_orders_customers");
         ConstraintNames
-            .EffectiveForeignKey("  ", " orders ", "dbo.customers")
+            .EffectiveForeignKey("  ", " orders ", "dbo.customers", IdentifierLengthLimit.Unlimited)
             .Should()
             .Be("FK_orders_dbo_customers");
         ConstraintNames
-            .EffectiveForeignKey("fk_custom", "orders", "customers")
+            .EffectiveForeignKey(
+                "fk_custom",
+                "orders",
+                "customers",
+                IdentifierLengthLimit.Unlimited
+            )
             .Should()
             .Be("fk_custom");
     }
@@ -465,14 +522,19 @@ public class ConstraintNamesTests
 
         var names = ConstraintNames.ResolveForeignKeyNames(
             [customers, orders],
-            [other, bill, ship]
+            [other, bill, ship],
+            IdentifierLengthLimit.Unlimited
         );
 
         names.Should().NotContainKey(other);
         names[bill].Should().Be("FK_orders_customers");
         names[ship].Should().Be("FK_orders_customers_ship_customer_id");
 
-        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [other, bill, ship]);
+        ConstraintNames.NameUnnamedForeignKeys(
+            [customers, orders],
+            [other, bill, ship],
+            IdentifierLengthLimit.Unlimited
+        );
 
         other.ConstraintName.Should().BeNull();
         bill.ConstraintName.Should().BeNull("既定名のままなので名前を書き込まない");
@@ -493,7 +555,11 @@ public class ConstraintNamesTests
         };
         var bill = Link(customers, orders, "bill_customer_id");
 
-        var names = ConstraintNames.ResolveForeignKeyNames([customers, orders], [manyToMany, bill]);
+        var names = ConstraintNames.ResolveForeignKeyNames(
+            [customers, orders],
+            [manyToMany, bill],
+            IdentifierLengthLimit.Unlimited
+        );
 
         names[bill].Should().Be("FK_orders_customers_bill_customer_id");
     }
@@ -530,7 +596,11 @@ public class ConstraintNamesTests
         };
         var relationship = Link(customers, orders, "bill_customer_id");
 
-        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [dangling, relationship]);
+        ConstraintNames.NameUnnamedForeignKeys(
+            [customers, orders],
+            [dangling, relationship],
+            IdentifierLengthLimit.Unlimited
+        );
 
         dangling.ConstraintName.Should().BeNull();
         relationship.ConstraintName.Should().BeNull();
@@ -548,7 +618,8 @@ public class ConstraintNamesTests
 
         var names = ConstraintNames.ResolveForeignKeyNames(
             [customers, orders],
-            [bill, ship, named]
+            [bill, ship, named],
+            IdentifierLengthLimit.Unlimited
         );
 
         names[bill].Should().Be("FK_orders_customers");
@@ -566,14 +637,48 @@ public class ConstraintNamesTests
         var (customers, orders) = BuildCustomersAndOrders();
         var bill = Link(customers, orders, "bill_customer_id");
         var ship = Link(customers, orders, "ship_customer_id");
-        var resolved = ConstraintNames.ResolveForeignKeyNames([customers, orders], [bill, ship]);
+        var resolved = ConstraintNames.ResolveForeignKeyNames(
+            [customers, orders],
+            [bill, ship],
+            IdentifierLengthLimit.Unlimited
+        );
 
-        ConstraintNames.NameUnnamedForeignKeys([customers, orders], [bill, ship]);
+        ConstraintNames.NameUnnamedForeignKeys(
+            [customers, orders],
+            [bill, ship],
+            IdentifierLengthLimit.Unlimited
+        );
 
         ConstraintNames
-            .EffectiveForeignKey(bill.ConstraintName, orders.TableName, customers.TableName)
+            .EffectiveForeignKey(
+                bill.ConstraintName,
+                orders.TableName,
+                customers.TableName,
+                IdentifierLengthLimit.Unlimited
+            )
             .Should()
             .Be(resolved[bill]);
         ship.ConstraintName.Should().Be(resolved[ship]);
+    }
+
+    [Fact(
+        DisplayName = "UniqueForeignKey: 番号の候補が上限まで埋まっていれば、回り続けずに例外で知らせる（その手前の番号は使える）"
+    )]
+    public void UniqueForeignKey_StopsAtCandidateLimit()
+    {
+        var max = ConstraintNames.MaxNumberedCandidates;
+        var taken = new List<string> { "FK_c_p" };
+        taken.AddRange(Enumerable.Range(2, max - 2).Select(n => $"FK_c_p_{n}"));
+
+        ConstraintNames
+            .UniqueForeignKey("c", "p", [], taken, IdentifierLengthLimit.Unlimited)
+            .Should()
+            .Be($"FK_c_p_{max}");
+
+        taken.Add($"FK_c_p_{max}");
+        var act = () =>
+            ConstraintNames.UniqueForeignKey("c", "p", [], taken, IdentifierLengthLimit.Unlimited);
+
+        act.Should().Throw<InvalidOperationException>();
     }
 }

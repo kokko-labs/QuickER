@@ -480,7 +480,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     columnOwners.TryGetValue(pair.SourceColumnId, out var parent)
                     && parent.Id == entity.Id
                     && columnOwners.TryGetValue(pair.TargetColumnId, out var child)
-                    && !names.Contains(child.TableName, StringComparer.Ordinal)
+                    && !names.Contains(child.TableName, SchemaNames.Comparer)
                 )
                 {
                     names.Add(child.TableName);

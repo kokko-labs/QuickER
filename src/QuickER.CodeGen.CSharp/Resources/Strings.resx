@@ -88,6 +88,12 @@
   <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
     <value>Tables {1} all map to the same entity class name '{0}'. Entity classes are partial, so they would merge into a single class and fail to compile. Rename the tables so that the generated class names differ (table names are singularized, so 'customer' and 'customers' both become 'CustomerEntity').</value>
   </data>
+  <data name="CodeGen_Error_DuplicateTableName" xml:space="preserve">
+    <value>Table name '{0}' is used more than once ({1}). Table names are compared ignoring case and surrounding spaces, so the same table cannot appear twice in a diagram. Rename or remove one of them.</value>
+  </data>
+  <data name="CodeGen_Error_DuplicateColumnName" xml:space="preserve">
+    <value>Column name '{1}' is used more than once in table '{0}' ({2}). Column names are compared ignoring case and surrounding spaces. Rename or remove one of them.</value>
+  </data>
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>Columns {2} of table '{0}' all map to the same property name '{1}'. The entity and EditModel classes would declare duplicate members and fail to compile. Rename the columns so that the generated property names differ (column names are converted to Pascal case, so 'user-id', 'user_id', and 'USER_ID' all become 'UserId').</value>
   </data>
@@ -314,7 +320,7 @@
     <value>Named query '{0}': parameter name '{1}' is duplicated.</value>
   </data>
   <data name="CodeGen_Query_ReservedParameterName" xml:space="preserve">
-    <value>Named query '{0}': parameter name '{1}' is reserved by the generated method (it hides the repository's Query() member, or it is a keyword inside the generated async method) and cannot be used.</value>
+    <value>Named query '{0}': parameter name '{1}' cannot be used by the generated code (it is a keyword inside the generated async method, or it collides with a member of the generated code, such as the remote request record or the projection selector field).</value>
   </data>
   <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
     <value>Named query '{0}': the type token '{1}' could not be resolved. Check its spelling against the tokens the generation config schema lists; note also that a fixed-length string or binary type needs a length (for example 'fixedstring(10)').</value>
@@ -341,7 +347,7 @@
     <value>Named query '{0}': the projection return shape requires a result type name and at least one field.</value>
   </data>
   <data name="CodeGen_Query_InvalidResultTypeName" xml:space="preserve">
-    <value>Named query '{0}': result type name '{1}' is not a valid C# identifier.</value>
+    <value>Named query '{0}': result type name '{1}' is not a valid C# type name.</value>
   </data>
   <data name="CodeGen_Query_ProjectionDslRequiresColumns" xml:space="preserve">
     <value>Named query '{0}': every projection field must reference a source column when using the simple DSL (free-form fields without a source column are for raw SQL only).</value>
@@ -378,6 +384,9 @@
   </data>
   <data name="CodeGen_Query_DuplicateResultTypeName" xml:space="preserve">
     <value>Named query '{0}': result type name '{1}' is already used by another query. Result type names must be unique within the generated namespace.</value>
+  </data>
+  <data name="CodeGen_Query_ReservedResultTypeName" xml:space="preserve">
+    <value>Named query '{0}': result type name '{1}' is already a type name of the generated code (a generated class or interface, the runtime, or a library type the generated code uses by its simple name). Choose a different result type name.</value>
   </data>
   <data name="CodeGen_Query_RawSqlUndeclaredParameter" xml:space="preserve">
     <value>The parameter '@{0}' is used in the raw SQL but is not declared.</value>

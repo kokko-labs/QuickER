@@ -182,6 +182,32 @@ public abstract class TwoHostToolTestBase : IDisposable
         JsonStorageService.SaveAtomic(_file, document);
     }
 
+    /// <summary>
+    /// 選んだホストの図のリレーションの制約名をすべて消す（名前の無いリレーションはツールでは作れず、取込・古いファイル・
+    /// 手編集でしか生じないので、図へ直接入れる）
+    /// </summary>
+    protected void ClearConstraintNames()
+    {
+        if (_host == HostKind.Gui)
+        {
+            foreach (var relationship in _vm.Relationships)
+            {
+                relationship.ConstraintName = null;
+            }
+
+            return;
+        }
+
+        var document = JsonStorageService.Load(_file);
+
+        foreach (var relationship in document.Schema.Relationships)
+        {
+            relationship.ConstraintName = null;
+        }
+
+        JsonStorageService.SaveAtomic(_file, document);
+    }
+
     /// <summary>選んだホストの図にある名前付きクエリの名前（図の中の並び順）</summary>
     protected List<string> QueryNames =>
         _host == HostKind.Gui

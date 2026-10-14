@@ -193,7 +193,7 @@ public sealed class GenerateOverwriteGuardTests : IDisposable
         var (result, success) = GenerateViaMcp(force: "yes");
 
         success.Should().BeFalse();
-        result.Should().Contain("force must be a boolean");
+        result.Should().Contain("The argument 'force' must be a JSON boolean.");
         File.ReadAllText(path).Should().Be(edited);
     }
 }

@@ -25,9 +25,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         // null が正当な結果である操作（単一戻り形・スカラー戻り形＝内側の型が nullable）は InvokeNullableAsync へ、
         // それ以外は「JSON リテラル null の本文」を転送失敗として分類する InvokeAsync へ振り分ける
         // （契約は C# シグネチャの nullability そのもの）
+        // this. で修飾する（同名のパラメータがあっても基底のメソッドを指す）
         var invokeMethod = innerType.EndsWith("?", StringComparison.Ordinal)
-            ? "InvokeNullableAsync"
-            : "InvokeAsync";
+            ? "this.InvokeNullableAsync"
+            : "this.InvokeAsync";
 
         // ペイロード: パラメータ名そのままの匿名型（VO はエンベロープの JSON 化時に VO コンバータで内包値になる）。
         // パラメータなしは null（本文 "null"。サーバー側もリクエストを読まない）

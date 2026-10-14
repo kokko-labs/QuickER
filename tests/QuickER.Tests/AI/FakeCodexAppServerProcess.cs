@@ -19,7 +19,9 @@ namespace QuickER.Tests.AI;
 /// ＝テストは <see cref="CodexAppServerClient.NotificationReceived"/> で、クライアントが何を返したかを見られる。
 /// </para>
 /// <para>
-/// (2) で送る行のうち、次の 3 つだけは送らずに動作の指示として扱う：<c>stderr:文字列</c>（標準エラーへ書く）・
+/// (2) で送る行のうち、次の 4 つだけは送らずに動作の指示として扱う：<c>stderr:文字列</c>（標準エラーへ書く）・
+/// <c>stdin-handle</c>（自分の標準入力のハンドルの値を <c>stdin-handle:値</c> として標準エラーへ書く＝テストが
+/// 読み口を複製して、相手が止まった後もパイプを開いたままにするため）・
 /// <c>exit</c>（終了する）・<c>block</c>（以後は標準入力を読まずに眠り続ける＝書き込みが詰まる相手の代役）。
 /// </para>
 /// <para>
@@ -50,6 +52,10 @@ internal sealed class FakeCodexAppServerProcess : IAsyncDisposable
             } elseif ($method -ceq 'initialized') {
               foreach ($e in [IO.File]::ReadAllLines($EmitFile)) {
                 if ($e.StartsWith('stderr:')) { [Console]::Error.WriteLine($e.Substring(7)); [Console]::Error.Flush() }
+                elseif ($e -ceq 'stdin-handle') {
+                  Add-Type -Namespace QuickERFake -Name Native -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetStdHandle(int n);'
+                  [Console]::Error.WriteLine('stdin-handle:' + [QuickERFake.Native]::GetStdHandle(-10).ToInt64()); [Console]::Error.Flush()
+                }
                 elseif ($e -ceq 'exit') { $out.Flush(); exit 0 }
                 elseif ($e -ceq 'block') { $out.Flush(); Start-Sleep -Seconds 120; exit 0 }
                 else { $out.WriteLine($e) }

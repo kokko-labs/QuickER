@@ -41,7 +41,12 @@ public class QueryNegationExecutionTests
         + "NotNotBelow:2,6;"
         + "NotEqual:1,3,4,5;"
         + "NotIn:1,3,4,5;"
-        + "NotNullCheck:2,3,5";
+        + "NotNullCheck:2,3,5;"
+        // 文字列一致は NULL の行がどちら向きでも一致しない（ワイルドカードなしの LIKE も、外側の NOT を押し下げた形も）
+        + "NotLikeExact:3;"
+        + "NotNotLikeExact:2,5;"
+        + "NotLikeExactOrBelow:3;"
+        + "LikeExactOrNot:2,3,5";
 
     /// <summary>生成物と一緒にコンパイルする検証コード（同じ手順を 3 実装先へ流す）</summary>
     private const string Probe = """
@@ -99,7 +104,11 @@ public class QueryNegationExecutionTests
                     "NotNotBelow:" + Ids(await items.NotNotBelowAsync(10)),
                     "NotEqual:" + Ids(await items.NotEqualAsync(5)),
                     "NotIn:" + Ids(await items.NotInAsync(new List<long> { 5 })),
-                    "NotNullCheck:" + Ids(await items.NotNullCheckAsync())
+                    "NotNullCheck:" + Ids(await items.NotNullCheckAsync()),
+                    "NotLikeExact:" + Ids(await items.NotLikeExactAsync()),
+                    "NotNotLikeExact:" + Ids(await items.NotNotLikeExactAsync()),
+                    "NotLikeExactOrBelow:" + Ids(await items.NotLikeExactOrBelowAsync(10)),
+                    "LikeExactOrNot:" + Ids(await items.LikeExactOrNotAsync())
                 );
         }
         """;
@@ -243,6 +252,10 @@ public class QueryNegationExecutionTests
                     }
                 ),
                 Query("NotNullCheck", "NOT (name IS NULL)"),
+                Query("NotLikeExact", "NOT name LIKE 'x'"),
+                Query("NotNotLikeExact", "NOT NOT name LIKE 'x'"),
+                Query("NotLikeExactOrBelow", "NOT (name LIKE 'x' OR qty < @limit)", Limit()),
+                Query("LikeExactOrNot", "name LIKE 'x' OR NOT (name LIKE 'x' OR name IS NULL)"),
             ],
         };
     }

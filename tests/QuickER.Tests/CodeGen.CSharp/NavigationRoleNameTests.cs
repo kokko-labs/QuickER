@@ -314,7 +314,11 @@ public sealed class NavigationRoleNameTests
             Generate(BuildShipBillDiagram(RelationshipType.OneToMany)).Files.Select(f => f.Content)
         );
 
-        var reversed = new CSharpReverseParser().Parse(source, new SqlServerTypeCatalog());
+        var reversed = new CSharpReverseParser().Parse(
+            source,
+            new SqlServerTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
 
         var orders = reversed.Entities.Single(entity => entity.TableName == "orders");
         reversed

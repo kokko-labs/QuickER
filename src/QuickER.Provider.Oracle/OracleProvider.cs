@@ -42,6 +42,7 @@ public sealed class OracleProvider : IDatabaseProvider
             SupportsOnUpdateAction = false,
             SupportsSetDefaultAction = false,
             NormalizeTypeNotation = OracleTypeNotation.Normalize,
+            IdentifierLengthLimit = OracleIdentifier.Limit,
         };
 
     /// <inheritdoc />
