@@ -124,8 +124,12 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         await _server.ApplyDdlAsync(mirror, Ct);
         await _local.ApplyDdlAsync(SyncFixtureDefinition.BuildSqliteMirror(), Ct);
 
-        var serverFactory = new SqlConnectionFactory(_server.ReadWriteCreateConnectionString);
-        var localFactory = new SqlConnectionFactory(_local.ReadWriteCreateConnectionString);
+        var serverFactory = new LightJournalSyncConnectionFactory(
+            _server.ReadWriteCreateConnectionString
+        );
+        var localFactory = new LightJournalSyncConnectionFactory(
+            _local.ReadWriteCreateConnectionString
+        );
         ServerSql = new SqlExecutor(serverFactory);
         LocalSql = new SqlExecutor(localFactory);
 
@@ -2355,7 +2359,7 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     private JournalingSyncOrderRepository CreateHookedOrders(ISaveHook<SyncOrderEntity> hook) =>
         new(
             new SyncOrderRepository(
-                new SqlConnectionFactory(LocalConnectionString),
+                new LightJournalSyncConnectionFactory(LocalConnectionString),
                 new SaveHookRegistry().Add(hook)
             ),
             Journal
@@ -3265,7 +3269,7 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
         var hook = new LineKeyAssigningHook(101);
         var orders = new JournalingSyncOrderRepository(
             new SyncOrderRepository(
-                new SqlConnectionFactory(LocalConnectionString),
+                new LightJournalSyncConnectionFactory(LocalConnectionString),
                 new SaveHookRegistry().Add<SyncOrderLineEntity>(hook)
             ),
             Journal

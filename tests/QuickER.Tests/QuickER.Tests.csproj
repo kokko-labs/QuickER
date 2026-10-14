@@ -20,6 +20,8 @@
     <ProjectReference Include="..\..\src\QuickER.Mcp\QuickER.Mcp.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Mcp.Tools\QuickER.Mcp.Tools.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Gui\QuickER.Gui.csproj" />
+    <!-- CodexAppServerClient のテストが実プロセスとして起動する偽の app-server（出力へ一緒にコピーされる） -->
+    <ProjectReference Include="..\QuickER.Tests.FakeCodexAppServer\QuickER.Tests.FakeCodexAppServer.csproj" />
     <!--
       配布ランタイム 6 パッケージ。公開 API 面のスナップショット検証（PublicApi/）が
       リフレクションで実アセンブリを読むためだけに参照する（プロダクションコードは参照しない）。

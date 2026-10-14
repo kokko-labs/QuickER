@@ -1168,6 +1168,9 @@
       "quicker.settings": {
         "type": "Project"
       },
+      "quicker.tests.fakecodexappserver": {
+        "type": "Project"
+      },
       "Anthropic": {
         "type": "CentralTransitive",
         "requested": "[12.48.0, )",

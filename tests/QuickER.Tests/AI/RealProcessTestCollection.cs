@@ -5,7 +5,7 @@ namespace QuickER.Tests.AI;
 /// 互いに並列で走らないようにする。
 /// </summary>
 /// <remarks>
-/// powershell.exe・cmd.exe の起動は短時間に CPU を使うため、重なると全スイート実行中の時間に依存するテストの
+/// 実プロセス（偽の app-server・cmd.exe）の起動は短時間に CPU を使うため、重なると全スイート実行中の時間に依存するテストの
 /// 余裕を削る。ここに入れたテストどうしは順に走り、ほかのクラスとは従来どおり並列に走る
 /// </remarks>
 [CollectionDefinition(Name)]

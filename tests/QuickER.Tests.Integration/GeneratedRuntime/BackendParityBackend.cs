@@ -168,6 +168,7 @@ public sealed class ParityBackend : IAsyncDisposable
         var connectionString = db.ReadWriteCreateConnectionString;
         var outsideProvider = new ServiceCollection()
             .AddGeneratedSqliteRepositories(connectionString)
+            .AddLightJournal(connectionString)
             .BuildServiceProvider();
         var sqliteOutside = new ParityRepositories(
             outsideProvider.GetRequiredService<ICustomerRepository>(),
@@ -180,9 +181,9 @@ public sealed class ParityBackend : IAsyncDisposable
         {
             case ParityBackendKind.Ado:
             {
-                var services = new ServiceCollection().AddGeneratedSqliteRepositories(
-                    connectionString
-                );
+                var services = new ServiceCollection()
+                    .AddGeneratedSqliteRepositories(connectionString)
+                    .AddLightJournal(connectionString);
 
                 if (options.WithHooks)
                 {
@@ -212,7 +213,10 @@ public sealed class ParityBackend : IAsyncDisposable
                     }
                     else
                     {
-                        builder.UseSqlite(connectionString).IgnoreServiceProviderCacheLimit();
+                        builder
+                            .UseSqlite(connectionString)
+                            .IgnoreServiceProviderCacheLimit()
+                            .AddInterceptors(SqliteLightJournal.EfCoreInterceptor);
                     }
                 });
 
@@ -236,7 +240,9 @@ public sealed class ParityBackend : IAsyncDisposable
                 var server = await InProcessRemoteServer.StartAsync(
                     services =>
                     {
-                        services.AddGeneratedSqliteRepositories(connectionString);
+                        services
+                            .AddGeneratedSqliteRepositories(connectionString)
+                            .AddLightJournal(connectionString);
 
                         if (options.WithHooks)
                         {
@@ -516,7 +522,6 @@ public static class ParityFormat
         }
 
         var builder = new StringBuilder("throws ").Append(ex.GetType().Name);
-
         switch (ex)
         {
             case SaveConflictException conflict:

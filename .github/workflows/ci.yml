@@ -95,6 +95,12 @@ jobs:
         run: dotnet build QuickER.slnx
 
       - name: テスト
+        # テストが作る一時ファイル（SQLite の実ファイル DB・偽の app-server の一時フォルダなど）を、ランナーの
+        # 一時領域（D: ドライブ）へ置く。既定の TEMP は C: のユーザープロファイルの下で、ファイルの作成と削除が遅い
+        # （SQLite のジャーナルはトランザクションごとにファイルを作って消す）
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
 
       - name: サンプルの実行（samples/ec-order）

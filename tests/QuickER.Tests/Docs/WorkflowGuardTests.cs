@@ -185,6 +185,37 @@ public sealed class WorkflowGuardTests
             .Equal("dotnet build QuickER.slnx");
     }
 
+    /// <summary>Windows のテストの一時ファイルはランナーの一時領域へ置く</summary>
+    /// <remarks>
+    /// テストは SQLite の実ファイル DB や偽の app-server の一時フォルダを Path.GetTempPath() の下に作る。既定の TEMP
+    /// （C: のユーザープロファイルの下）はファイルの作成と削除が遅く、手順の env が消えると全体の時間が静かに延びる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "ci.yml の Windows のテストの手順は TEMP と TMP をランナーの一時領域へ向ける"
+    )]
+    public void WindowsTestStep_PutsTempFilesOnRunnerTemp()
+    {
+        var lines = ReadWorkflow("ci.yml").ReplaceLineEndings("\n").Split('\n');
+        var start = Array.FindIndex(lines, line => line.Trim() == "- name: テスト");
+
+        start.Should().BeGreaterThanOrEqualTo(0, "Windows のジョブにテストの手順がある");
+        var body = string.Join(
+            "\n",
+            lines
+                .Skip(start + 1)
+                .TakeWhile(line => !line.TrimStart().StartsWith("- ", StringComparison.Ordinal))
+        );
+        body.Should().Contain("dotnet test QuickER.slnx --no-build");
+        Regex
+            .IsMatch(body, @"(?m)^\s+TEMP: \$\{\{ runner\.temp \}\}$")
+            .Should()
+            .BeTrue("TEMP はランナーの一時領域を指す");
+        Regex
+            .IsMatch(body, @"(?m)^\s+TMP: \$\{\{ runner\.temp \}\}$")
+            .Should()
+            .BeTrue("TMP はランナーの一時領域を指す");
+    }
+
     /// <summary>リリースのタグはビルドしたコミットに付ける</summary>
     [Fact(DisplayName = "release.yml の gh release create はタグをビルドしたコミットへ付ける")]
     public void ReleaseTag_TargetsBuiltCommit()

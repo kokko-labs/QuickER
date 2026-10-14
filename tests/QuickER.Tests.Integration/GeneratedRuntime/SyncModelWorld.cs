@@ -218,7 +218,9 @@ internal sealed class SyncModelDevice : IDisposable
         var device = new SyncModelDevice(actor, SqliteTempDatabase.Create());
         await device._db.ApplyDdlAsync(SyncModelFixtureDefinition.BuildSqliteMirror(), ct);
 
-        var factory = new SqlConnectionFactory(device._db.ReadWriteCreateConnectionString);
+        var factory = new LightJournalSyncModelConnectionFactory(
+            device._db.ReadWriteCreateConnectionString
+        );
         device._factory = factory;
         device.Sql = new SqlExecutor(factory);
         device.Journal = new SyncJournal(device.Sql);
@@ -291,7 +293,7 @@ internal sealed class SyncModelDevice : IDisposable
     public async Task<int> PendingCountAsync(CancellationToken ct) =>
         (await Journal.ReadAllAsync(ct)).Count;
 
-    private SqlConnectionFactory? _factory;
+    private ISqlConnectionFactory? _factory;
 
     public void Dispose()
     {
@@ -308,7 +310,7 @@ internal sealed class SyncModelDevice : IDisposable
 /// </remarks>
 internal static class SyncModelPools
 {
-    public static void Clear(SqlConnectionFactory? factory)
+    public static void Clear(ISqlConnectionFactory? factory)
     {
         if (factory is null)
         {
@@ -361,7 +363,9 @@ internal sealed class SyncModelServer : ISyncModelServerRole
         await server._db.ApplyDdlAsync(SyncModelFixtureDefinition.BuildSqliteMirror(), ct);
 
         var versions = new SyncTestVersionSequence();
-        var factory = new SqlConnectionFactory(server._db.ReadWriteCreateConnectionString);
+        var factory = new LightJournalSyncModelConnectionFactory(
+            server._db.ReadWriteCreateConnectionString
+        );
         server._factory = factory;
         var sql = new SqlExecutor(factory);
 
@@ -431,7 +435,7 @@ internal sealed class SyncModelServer : ISyncModelServerRole
         return server;
     }
 
-    private SqlConnectionFactory? _factory;
+    private ISqlConnectionFactory? _factory;
 
     public ValueTask DisposeAsync()
     {
