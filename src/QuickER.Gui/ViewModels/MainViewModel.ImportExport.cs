@@ -553,10 +553,16 @@ public partial class MainViewModel : IDiagramTransferHost
     private GuiAppSettingsStore _guiSettingsStore = new();
 
     /// <summary>永続化先（設定ストア・自動保存ファイル）を差し替える（テスト専用。Initialize/AutoSave 前に呼ぶこと）</summary>
+    /// <remarks>
+    /// 設定メニューの小さな VM（言語・更新確認）も差し替えた保存先で作り直す（残すと、テストの切り替えが
+    /// 開発者の実際の gui-settings.json へ書き込まれる）
+    /// </remarks>
     internal void UsePersistenceForTests(GuiAppSettingsStore settingsStore, string autoSavePath)
     {
         _guiSettingsStore = settingsStore;
         _autoSavePath = autoSavePath;
+        LanguageSwitch = new LanguageSwitchViewModel(_dialogs, settingsStore);
+        UpdateSettings = new UpdateSettingsViewModel(_dialogs, settingsStore);
     }
 
     /// <summary>現在パスが変わったら、そこから導出するタイトル関連プロパティと外部変更監視へ反映する</summary>

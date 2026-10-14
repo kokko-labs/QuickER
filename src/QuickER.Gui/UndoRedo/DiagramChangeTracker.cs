@@ -22,7 +22,7 @@ public sealed class DiagramChangeTracker
         new TrackedProperty<EntityViewModel>(
             nameof(EntityViewModel.TableName),
             x => x.TableName,
-            (x, v) => x.TableName = (string)v!
+            (x, v) => x.ApplyTableName((string)v!)
         ),
         new TrackedProperty<EntityViewModel>(
             nameof(EntityViewModel.Memo),
@@ -87,7 +87,7 @@ public sealed class DiagramChangeTracker
         new TrackedProperty<ColumnViewModel>(
             nameof(ColumnViewModel.Name),
             x => x.Name,
-            (x, v) => x.Name = (string)v!
+            (x, v) => x.ApplyName((string)v!)
         ),
         new TrackedProperty<ColumnViewModel>(
             nameof(ColumnViewModel.DataType),
@@ -140,7 +140,7 @@ public sealed class DiagramChangeTracker
     private readonly ObservableCollection<RelationshipViewModel> _relationships;
 
     /// <summary>リレーションに基づく外部キー列ルールを適用するアクション</summary>
-    private readonly Action<object?> _applyRelationshipColumnRules;
+    private readonly Action _applyRelationshipColumnRules;
 
     /// <summary>
     /// ユーザー編集でカラム名が変更されたときに通知するコールバック（カラム・旧名・新名）
@@ -151,6 +151,15 @@ public sealed class DiagramChangeTracker
     /// </remarks>
     private readonly Action<ColumnViewModel, string, string> _onColumnRenamed;
 
+    /// <summary>
+    /// ユーザー編集で名前（テーブル名・カラム名・外部キーの制約名・一意制約の名前）が確定したときに発火する（対象・新しい名前）
+    /// </summary>
+    /// <remarks>
+    /// 履歴へ積んだ編集だけで発火する＝Undo / Redo の適用・一括置換など追跡停止中の変更では発火しない
+    /// （名前の長さの警告を、利用者が名前を確定した瞬間にだけ出すため）。
+    /// </remarks>
+    public event Action<object, string>? NameEdited;
+
     /// <summary>対象オブジェクトごとの直近スナップショット（プロパティ名 → 値）</summary>
     /// <remarks>変更前後の差分算出に用いる</remarks>
     private readonly Dictionary<object, Dictionary<string, object?>> _trackedPropertySnapshots =
@@ -158,6 +167,31 @@ public sealed class DiagramChangeTracker
 
     /// <summary>追跡を一時停止中かどうか（Undo / Redo の再適用中に多重記録を防ぐ）</summary>
     private bool _suspendUndoTracking;
+
+    /// <summary>主キーの切り替えの最中のカラム（連動する NULL 許容の変更を、単発の履歴にしない）</summary>
+    /// <remarks>
+    /// 主キー化は NULL 許容を連動して落とす。その変更は主キーの変更と同じ 1 履歴
+    /// （<see cref="PushGroupedPropertyChanges"/>）に畳むので、切り替えの最中だけ単発の追跡を止める。
+    /// 切り替えの外の NULL 許容の変更は単発の履歴にする。
+    /// <c>IsPrimaryKeyChanging</c> と <c>IsPrimaryKeyChangeCompleted</c> は必ず対で呼ばれる前提
+    /// （生成コードの <c>OnIsPrimaryKeyChanging</c> → 値の設定 → <c>OnIsPrimaryKeyChanged</c> の順で、間の例外は想定しない）。
+    /// 対にならないと集合に残り、そのカラムの NULL 許容の変更が以後ずっと履歴に残らなくなる。
+    /// </remarks>
+    private readonly HashSet<ColumnViewModel> _columnsChangingPrimaryKey = new(
+        ReferenceEqualityComparer.Instance
+    );
+
+    /// <summary>種別の変更の最中のリレーション（連動する参照アクション・列ペアの変更を、単発の履歴にしない）</summary>
+    /// <remarks>
+    /// 種別を多対多へ変えると参照アクションが既定値へ戻る。その変更は種別の変更と同じ 1 履歴に畳むので、
+    /// 変更の最中だけ単発の追跡を止める（単発で積むと、Undo 1 回では参照アクションが戻らず、
+    /// 畳んだ履歴の変更前スナップショットも書き換わる）。
+    /// <c>TypeChanging</c> と <c>TypeChangeCompleted</c> は必ず対で呼ばれる前提（間の例外は想定しない）。
+    /// 対にならないと集合に残り、そのリレーションの変更が以後ずっと履歴に残らなくなる。
+    /// </remarks>
+    private readonly HashSet<RelationshipViewModel> _relationshipsChangingType = new(
+        ReferenceEqualityComparer.Instance
+    );
 
     /// <summary><see cref="DiagramChangeTracker"/> を生成する</summary>
     /// <param name="undoRedo">Undo / Redo スタック</param>
@@ -169,7 +203,7 @@ public sealed class DiagramChangeTracker
         UndoRedoManager undoRedo,
         ObservableCollection<EntityViewModel> entities,
         ObservableCollection<RelationshipViewModel> relationships,
-        Action<object?> applyRelationshipColumnRules,
+        Action applyRelationshipColumnRules,
         Action<ColumnViewModel, string, string> onColumnRenamed
     )
     {
@@ -249,6 +283,7 @@ public sealed class DiagramChangeTracker
         column.IsPrimaryKeyChangeCompleted -= OnColumnIsPrimaryKeyChangeCompleted;
         column.PropertyChanged -= OnTrackedColumnPropertyChanged;
         _trackedPropertySnapshots.Remove(column);
+        _columnsChangingPrimaryKey.Remove(column);
     }
 
     /// <summary>リレーションの変更追跡を開始する</summary>
@@ -267,6 +302,7 @@ public sealed class DiagramChangeTracker
         relationship.TypeChangeCompleted -= OnRelationshipTypeChangeCompleted;
         relationship.PropertyChanged -= OnRelationshipPropertyChanged;
         _trackedPropertySnapshots.Remove(relationship);
+        _relationshipsChangingType.Remove(relationship);
     }
 
     /// <summary>テスト専用: 指定対象の基準スナップショットを保持している（＝追跡中）かどうか</summary>
@@ -279,14 +315,15 @@ public sealed class DiagramChangeTracker
 
     /// <summary>Undo 追跡を一時停止して <paramref name="action"/> を実行し、終了後にスナップショットを更新する</summary>
     /// <param name="action">追跡を止めて実行する処理</param>
-    /// <param name="excludedSnapshotTarget">スナップショット再取得から除外する対象（呼び出し側で別途更新済みの対象）</param>
     /// <remarks>
     /// スナップショットの再取得は<b>最外側の呼び出しの終了時だけ</b>行う。入れ子の内側で取り直しても、
     /// 外側の終了時の全要素の再取得が必ず上書きするため最終状態は変わらず、追跡停止中のハンドラは
     /// スナップショットを読まない（停止中は早期 return する）。内側でも取り直すと、図の一括置換で
     /// リレーションを 1 本足すたびに全要素を取り直すことになり、開く時間が要素数の積で伸びる。
+    /// 取り直しは対象を除かずに全要素へ行う（変更した対象も現在値が正しい基準になる。除くと、外側の
+    /// 追跡停止が無い経路で、その対象の基準だけが変更前の値に残り、続く変更の記録を取りこぼす）。
     /// </remarks>
-    public void RunWithoutTracking(Action action, object? excludedSnapshotTarget = null)
+    public void RunWithoutTracking(Action action)
     {
         var old = _suspendUndoTracking;
         _suspendUndoTracking = true;
@@ -301,7 +338,7 @@ public sealed class DiagramChangeTracker
 
             if (!old)
             {
-                RefreshTrackedPropertySnapshots(excludedSnapshotTarget);
+                RefreshTrackedPropertySnapshots();
             }
         }
     }
@@ -370,18 +407,24 @@ public sealed class DiagramChangeTracker
         if (sender is ColumnViewModel column && !_suspendUndoTracking)
         {
             CaptureTrackedProperties(column, TrackedColumnProperties);
+            _columnsChangingPrimaryKey.Add(column);
         }
     }
 
     /// <summary>IsPrimaryKey の連動変更完了後にスナップショット差分を Undo スタックへ Push する</summary>
     private void OnColumnIsPrimaryKeyChangeCompleted(object? sender, EventArgs e)
     {
+        if (sender is ColumnViewModel changed)
+        {
+            _columnsChangingPrimaryKey.Remove(changed);
+        }
+
         if (sender is ColumnViewModel column && !_suspendUndoTracking)
         {
             PushGroupedPropertyChanges(
                 column,
                 TrackedColumnProperties,
-                afterPush: () => _applyRelationshipColumnRules(column)
+                afterPush: () => _applyRelationshipColumnRules()
             );
         }
     }
@@ -399,11 +442,14 @@ public sealed class DiagramChangeTracker
             return;
         }
 
-        // IsPrimaryKey/IsNullable の変更は IsPrimaryKeyChanging/IsPrimaryKeyChangeCompleted イベントで処理するためスキップする
+        // IsPrimaryKey の変更と、その最中の連動（NULL 許容）は IsPrimaryKeyChanging/IsPrimaryKeyChangeCompleted
+        // イベントで 1 履歴に畳むためスキップする。切り替えの外の NULL 許容の変更は、ほかのプロパティと同じく単発で記録する
         if (
-            e.PropertyName
-            is nameof(ColumnViewModel.IsPrimaryKey)
-                or nameof(ColumnViewModel.IsNullable)
+            e.PropertyName == nameof(ColumnViewModel.IsPrimaryKey)
+            || (
+                e.PropertyName == nameof(ColumnViewModel.IsNullable)
+                && _columnsChangingPrimaryKey.Contains(column)
+            )
         )
         {
             return;
@@ -414,7 +460,7 @@ public sealed class DiagramChangeTracker
         // 外部キー化の切り替えはリレーション側の整合性に影響するためルールを再適用する
         if (e.PropertyName == nameof(ColumnViewModel.IsForeignKey))
         {
-            _applyRelationshipColumnRules(column);
+            _applyRelationshipColumnRules();
         }
     }
 
@@ -430,18 +476,24 @@ public sealed class DiagramChangeTracker
         if (sender is RelationshipViewModel relationship && !_suspendUndoTracking)
         {
             CaptureTrackedProperties(relationship, TrackedRelationshipProperties);
+            _relationshipsChangingType.Add(relationship);
         }
     }
 
     /// <summary>Type の連動変更完了後にスナップショット差分を Undo スタックへ Push する</summary>
     private void OnRelationshipTypeChangeCompleted(object? sender, EventArgs e)
     {
+        if (sender is RelationshipViewModel changed)
+        {
+            _relationshipsChangingType.Remove(changed);
+        }
+
         if (sender is RelationshipViewModel relationship && !_suspendUndoTracking)
         {
             PushGroupedPropertyChanges(
                 relationship,
                 TrackedRelationshipProperties,
-                afterPush: () => _applyRelationshipColumnRules(relationship)
+                afterPush: () => _applyRelationshipColumnRules()
             );
         }
     }
@@ -459,13 +511,48 @@ public sealed class DiagramChangeTracker
             return;
         }
 
-        // Type 変更に関連する変更は TypeChanging/TypeChangeCompleted イベントで処理するためスキップする
-        if (e.PropertyName == nameof(RelationshipViewModel.Type))
+        // Type の変更と、その最中の連動（参照アクション・列ペア）は TypeChanging/TypeChangeCompleted イベントで
+        // 1 履歴に畳むためスキップする
+        if (
+            e.PropertyName == nameof(RelationshipViewModel.Type)
+            || _relationshipsChangingType.Contains(relationship)
+        )
         {
             return;
         }
 
         TrackPropertyChange(sender, e, TrackedRelationshipProperties);
+    }
+
+    /// <summary>プロパティが DDL の識別子になる名前か（テーブル名・カラム名・外部キーの制約名・一意制約の名前）</summary>
+    private static bool IsNameProperty(object target, string propertyName) =>
+        (target is EntityViewModel && propertyName == nameof(EntityViewModel.TableName))
+        || (target is ColumnViewModel && propertyName == nameof(ColumnViewModel.Name))
+        || (
+            target is RelationshipViewModel
+            && propertyName == nameof(RelationshipViewModel.ConstraintName)
+        )
+        || (
+            target is UniqueConstraintViewModel
+            && propertyName == nameof(UniqueConstraintViewModel.Name)
+        );
+
+    /// <summary>追跡一覧から名前の一致するプロパティを探す（無ければ null）</summary>
+    /// <remarks>変更通知のたびに走るため、LINQ のクロージャ・列挙子を作らない</remarks>
+    private static ITrackedProperty? FindTrackedProperty(
+        IReadOnlyList<ITrackedProperty> trackedProperties,
+        string? propertyName
+    )
+    {
+        for (var i = 0; i < trackedProperties.Count; i++)
+        {
+            if (trackedProperties[i].Name == propertyName)
+            {
+                return trackedProperties[i];
+            }
+        }
+
+        return null;
     }
 
     /// <summary>単一プロパティの変更差分を <see cref="PropertyChangeCommand"/> として記録する</summary>
@@ -475,9 +562,15 @@ public sealed class DiagramChangeTracker
         IReadOnlyList<ITrackedProperty> trackedProperties
     )
     {
-        var property = trackedProperties.FirstOrDefault(p => p.Name == e.PropertyName);
+        // 変更通知のたびに走る経路なので、安い判定を先にし、引き当てもクロージャを作らずに回す
+        if (_suspendUndoTracking || sender is null)
+        {
+            return;
+        }
 
-        if (_suspendUndoTracking || sender is null || property is null)
+        var property = FindTrackedProperty(trackedProperties, e.PropertyName);
+
+        if (property is null)
         {
             return;
         }
@@ -511,6 +604,11 @@ public sealed class DiagramChangeTracker
         );
         snapshots[property.Name] = newValue;
 
+        if (newValue is string editedName && IsNameProperty(sender, property.Name))
+        {
+            NameEdited?.Invoke(sender, editedName);
+        }
+
         // カラム名のユーザー編集は、名前付きクエリ条件の列参照書き換えのため所有側へ通知する
         // （追跡停止中＝一括置換ではこの経路を通らないため発火しない。Undo / Redo の通知はコマンドの後処理が出す）
         if (
@@ -540,10 +638,9 @@ public sealed class DiagramChangeTracker
         Action? afterPush = null
     )
     {
-        // 変更前スナップショット未取得時は記録せず現在値で取り直す
+        // 変更前スナップショット未取得時は記録しない（基準は後処理の終わりの取り直しが現在値で作る）
         if (!_trackedPropertySnapshots.TryGetValue(sender, out var originalSnapshots))
         {
-            CaptureTrackedProperties(sender, trackedProperties);
             RunWithoutTracking(() => afterPush?.Invoke());
             return;
         }
@@ -564,12 +661,12 @@ public sealed class DiagramChangeTracker
                     new Dictionary<string, object?>(originalSnapshots),
                     currentSnapshots,
                     applySnapshot: ApplySnapshot,
-                    afterApply: () => _applyRelationshipColumnRules(sender)
+                    afterApply: () => _applyRelationshipColumnRules()
                 )
             );
         }
 
-        _trackedPropertySnapshots[sender] = currentSnapshots;
+        // 基準は後処理の終わりの取り直し（最外側の RunWithoutTracking）が現在値で作り直す
         RunWithoutTracking(() => afterPush?.Invoke());
     }
 
@@ -580,30 +677,27 @@ public sealed class DiagramChangeTracker
     /// </remarks>
     private void ApplySnapshot(object target, IReadOnlyDictionary<string, object?> snapshot)
     {
-        RunWithoutTracking(
-            () =>
+        RunWithoutTracking(() =>
+        {
+            // Type 設定時に列選択整合化が走らないよう抑制する
+            if (target is RelationshipViewModel rel)
             {
-                // Type 設定時に列選択整合化が走らないよう抑制する
-                if (target is RelationshipViewModel rel)
-                {
-                    rel.SuppressColumnSelectionConsistency = true;
+                rel.SuppressColumnSelectionConsistency = true;
 
-                    try
-                    {
-                        ApplySnapshotValues(target, snapshot);
-                    }
-                    finally
-                    {
-                        rel.SuppressColumnSelectionConsistency = false;
-                    }
-                }
-                else
+                try
                 {
                     ApplySnapshotValues(target, snapshot);
                 }
-            },
-            excludedSnapshotTarget: target
-        );
+                finally
+                {
+                    rel.SuppressColumnSelectionConsistency = false;
+                }
+            }
+            else
+            {
+                ApplySnapshotValues(target, snapshot);
+            }
+        });
     }
 
     /// <summary>対象オブジェクトの型に応じた追跡プロパティ一覧を返す</summary>
@@ -617,17 +711,22 @@ public sealed class DiagramChangeTracker
             _ => Array.Empty<ITrackedProperty>(),
         };
 
-    /// <summary>スナップショット辞書の各値を対象オブジェクトの該当プロパティへ設定する</summary>
-    private static void ApplySnapshotValues(
+    /// <summary>スナップショット辞書の各値を、追跡プロパティの宣言順に対象オブジェクトへ設定する</summary>
+    /// <remarks>
+    /// 当てる順は辞書の並びでなく <see cref="PropertiesFor"/> の宣言順に固定する。主キー → NULL 許容の順で
+    /// 当てないと、主キーが true の間は NULL 許容の setter が値を捨てる（辞書の列挙順は仕様で決まっていない）
+    /// </remarks>
+    internal static void ApplySnapshotValues(
         object target,
         IReadOnlyDictionary<string, object?> snapshot
     )
     {
-        var properties = PropertiesFor(target);
-
-        foreach (var (name, value) in snapshot)
+        foreach (var property in PropertiesFor(target))
         {
-            properties.FirstOrDefault(p => p.Name == name)?.SetValue(target, value);
+            if (snapshot.TryGetValue(property.Name, out var value))
+            {
+                property.SetValue(target, value);
+            }
         }
     }
 
@@ -642,41 +741,28 @@ public sealed class DiagramChangeTracker
     }
 
     /// <summary>全エンティティ・カラム・リレーションの基準スナップショットを現在値で取り直す</summary>
-    /// <param name="excludedTarget">再取得から除外する対象（呼び出し側で更新済みの対象）</param>
-    private void RefreshTrackedPropertySnapshots(object? excludedTarget = null)
+    private void RefreshTrackedPropertySnapshots()
     {
         SnapshotRefreshCountForTests++;
 
         foreach (var entity in _entities)
         {
-            if (!ReferenceEquals(entity, excludedTarget))
-            {
-                CaptureTrackedProperties(entity, TrackedEntityProperties);
-            }
+            CaptureTrackedProperties(entity, TrackedEntityProperties);
 
             foreach (var column in entity.Columns)
             {
-                if (!ReferenceEquals(column, excludedTarget))
-                {
-                    CaptureTrackedProperties(column, TrackedColumnProperties);
-                }
+                CaptureTrackedProperties(column, TrackedColumnProperties);
             }
 
             foreach (var constraint in entity.UniqueConstraints)
             {
-                if (!ReferenceEquals(constraint, excludedTarget))
-                {
-                    CaptureTrackedProperties(constraint, TrackedUniqueConstraintProperties);
-                }
+                CaptureTrackedProperties(constraint, TrackedUniqueConstraintProperties);
             }
         }
 
         foreach (var relationship in _relationships)
         {
-            if (!ReferenceEquals(relationship, excludedTarget))
-            {
-                CaptureTrackedProperties(relationship, TrackedRelationshipProperties);
-            }
+            CaptureTrackedProperties(relationship, TrackedRelationshipProperties);
         }
     }
 
@@ -717,19 +803,11 @@ public sealed class DiagramChangeTracker
             };
         }
 
-        if (sender is RelationshipViewModel && propertyName == nameof(RelationshipViewModel.Type))
+        // 主キーの切り替えと種別の変更は、連動を含めて 1 履歴に畳む専用の経路（PushGroupedPropertyChanges）で記録し、
+        // その後処理も SnapshotChangeCommand が持つ。単発の記録（ここ）には来ない
+        if (sender is ColumnViewModel && propertyName == nameof(ColumnViewModel.IsForeignKey))
         {
-            return () => _applyRelationshipColumnRules(sender);
-        }
-
-        if (
-            sender is ColumnViewModel
-            && propertyName
-                is nameof(ColumnViewModel.IsPrimaryKey)
-                    or nameof(ColumnViewModel.IsForeignKey)
-        )
-        {
-            return () => _applyRelationshipColumnRules(sender);
+            return () => _applyRelationshipColumnRules();
         }
 
         return null;

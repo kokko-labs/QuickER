@@ -111,7 +111,7 @@ public class MermaidTests
             ]
         );
 
-        var diagram = MermaidImporter.Parse(text);
+        var diagram = MermaidImporter.Parse(text, "sqlserver");
 
         diagram.Entities.Should().HaveCount(2);
         diagram.Relationships.Should().ContainSingle();
@@ -183,7 +183,7 @@ public class MermaidTests
         try
         {
             MermaidExporter.SaveTo(vm.ToDiagramModel(), path);
-            var diagram = MermaidImporter.Load(path);
+            var diagram = MermaidImporter.Load(path, "sqlserver");
 
             diagram.Entities.Should().HaveCount(2);
             diagram.Relationships.Should().ContainSingle();
@@ -232,7 +232,7 @@ public class MermaidTests
 
         // Act: 出力して Mermaid テキストを確認し、再度読み込む
         var mermaidText = MermaidExporter.Build(vm.ToDiagramModel());
-        var diagram = MermaidImporter.Parse(mermaidText);
+        var diagram = MermaidImporter.Parse(mermaidText, "sqlserver");
 
         // Assert: Mermaid テキスト上では正規化済み形式になっている
         mermaidText.Should().Contain("decimal_10_2");
@@ -266,7 +266,7 @@ public class MermaidTests
             ]
         );
 
-        var diagram = MermaidImporter.Parse(text);
+        var diagram = MermaidImporter.Parse(text, "sqlserver");
         var parent = diagram.Entities.Single(entity => entity.TableName == "TenantRegion");
         var child = diagram.Entities.Single(entity => entity.TableName == "TenantUser");
         var relationship = diagram.Relationships.Single();
@@ -316,7 +316,7 @@ public class MermaidTests
             ]
         );
 
-        var diagram = MermaidImporter.Parse(text);
+        var diagram = MermaidImporter.Parse(text, "sqlserver");
         var parent = diagram.Entities.Single(entity => entity.TableName == parentTable);
         var child = diagram.Entities.Single(entity => entity.TableName == "Child");
 
@@ -342,7 +342,7 @@ public class MermaidTests
             ["erDiagram", "    Customer {", "        int CustomerId PK", "        broken", "    }"]
         );
 
-        var act = () => MermaidImporter.Parse(text);
+        var act = () => MermaidImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -364,7 +364,7 @@ public class MermaidTests
             ["erDiagram", "", "    Customer {", "        int CustomerId PK"]
         );
 
-        var act = () => MermaidImporter.Parse(text);
+        var act = () => MermaidImporter.Parse(text, "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -381,7 +381,7 @@ public class MermaidTests
     [Fact(DisplayName = "Mermaid 取込のファイル全体の診断には行番号を付けない")]
     public void Import_WholeFileDiagnostic_HasNoLineNumber()
     {
-        var act = () => MermaidImporter.Parse("erDiagram");
+        var act = () => MermaidImporter.Parse("erDiagram", "sqlserver");
 
         act.Should().Throw<InvalidDataException>().WithMessage(Strings.Mermaid_NoEntities);
     }

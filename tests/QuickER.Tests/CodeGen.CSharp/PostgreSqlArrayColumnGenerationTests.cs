@@ -300,7 +300,8 @@ public class PostgreSqlArrayColumnGenerationTests
 
         var reversed = new CSharpReverseParser().Parse(
             entityFile.Content,
-            new PostgreSqlTypeCatalog()
+            new PostgreSqlTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
         );
 
         // 例外にならず、配列でない列は復元される

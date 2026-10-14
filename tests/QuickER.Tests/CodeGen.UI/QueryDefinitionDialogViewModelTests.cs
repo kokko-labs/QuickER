@@ -636,10 +636,10 @@ public class QueryDefinitionDialogViewModelTests
         query.ScalarType = "int32";
         vm.OkCommand.CanExecute(null).Should().BeTrue();
 
-        // Query という名前のパラメータは契約メンバーを隠す
-        query.Parameters[0].Name = "Query";
+        // リモートのリクエストの record のメンバーとぶつかる名前のパラメータは使えない
+        query.Parameters[0].Name = "ToString";
         vm.OkCommand.CanExecute(null).Should().BeFalse();
-        query.Parameters[0].Name = "query";
+        query.Parameters[0].Name = "toStringValue";
         vm.OkCommand.CanExecute(null).Should().BeTrue();
     }
 }

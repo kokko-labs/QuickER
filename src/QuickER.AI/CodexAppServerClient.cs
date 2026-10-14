@@ -216,6 +216,20 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>受信ループを停止させるためのキャンセルソース</summary>
     private CancellationTokenSource? _readerCts;
 
+    /// <summary>停止で、詰まっている書き込みを取り消すためのキャンセルソース（接続ごとに作り直す）</summary>
+    /// <remarks>
+    /// 相手のプロセスを止めても、詰まった書き込みがすぐ失敗で終わるとは限らない（負荷の下で、止めた後も 30 秒の
+    /// タイムアウトまで詰まったままの回があった）。停止は相手の終了を当てにせず、書き込みを自分で取り消す
+    /// </remarks>
+    private CancellationTokenSource? _writeCts;
+
+    /// <summary>停止で、取り消した書き込みが書き込みロックを手放すのを待つ上限</summary>
+    /// <remarks>
+    /// アプリの終了時の破棄は全体を 3 秒で打ち切る（<c>EngineShutdown</c>）。その中で待ちきれる長さにし、
+    /// 残りの後始末の分を空ける。越えたら今までどおり先へ進む
+    /// </remarks>
+    private static readonly TimeSpan WriteDrainLimit = TimeSpan.FromSeconds(2);
+
     /// <summary>JSON-RPC リクエスト ID の採番カウンター（<see cref="Interlocked.Increment(ref int)"/> で加算）</summary>
     private int _nextRequestId;
 
@@ -373,6 +387,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         // 取り消し（ターンの中断など）で受信ループだけが止まり、プロセスは生きたまま誰も応答を読まなくなる。
         // 呼び出し元のトークンは下のハンドシェイクの待ちにだけ使う
         _readerCts = new CancellationTokenSource();
+        _writeCts = new CancellationTokenSource();
         _readerTask = Task.Run(
             () => ReadLoopAsync(process.StandardOutput, _readerCts.Token),
             CancellationToken.None
@@ -625,6 +640,26 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             }
         }
 
+        // 詰まっている書き込みを取り消し、書き込みロックが手放されるまで待つ（上限つき）。
+        // 書き込みの途中で標準入力を閉じると閉じる処理が失敗し、ロックを使っている間に破棄（DisposeAsync）すると
+        // 書き込みの側の Release が破棄済みの例外になる
+        if (_writeCts is not null)
+        {
+            _writeCts.Cancel();
+
+            try
+            {
+                if (await _writeLock.WaitAsync(WriteDrainLimit))
+                {
+                    _writeLock.Release();
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // 破棄済み（二重の停止）なら待つものは無い
+            }
+        }
+
         if (_stdin is not null)
         {
             var stdin = _stdin;
@@ -664,6 +699,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         _readerCts?.Dispose();
         _readerCts = null;
+        _writeCts?.Dispose();
+        _writeCts = null;
 
         // 受信ループがキャンセル例外で抜けた場合は末尾の解消処理を通らないため、ここでも取りこぼしを解消する
         FailPendingRequests();
@@ -779,9 +816,21 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
+        // 停止（StopProcessAsync）は、詰まっている書き込みをこのトークンで取り消す
+        var stopToken = _writeCts?.Token ?? CancellationToken.None;
+        using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            stopToken
+        );
+
         try
         {
-            await _stdin!.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
+            await _stdin!.WriteLineAsync(json.AsMemory(), writeCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stopToken.IsCancellationRequested)
+        {
+            // 停止が取り消した。接続は捨てる途中なので、接続断として失敗させる
+            throw new InvalidOperationException(Strings.Codex_ConnectionClosed);
         }
         catch (OperationCanceledException)
         {

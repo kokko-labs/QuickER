@@ -15,9 +15,86 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>モデルと同一の識別子</summary>
     public Guid Id { get; }
 
-    /// <summary>テーブル名</summary>
-    [ObservableProperty]
+    /// <summary>テーブル名の実体フィールド</summary>
     private string _tableName;
+
+    /// <summary>テーブル名（前後の空白を除いた形で保持する）</summary>
+    /// <remarks>
+    /// 図の中にすでに同じ名前（<see cref="SchemaNames.AreSame"/> の規則）のテーブルがあるときは、書き換えを受け付けず
+    /// 入力欄へ元の名前を戻し、<see cref="NameChangeRejected"/> で知らせる（変更履歴にも残らない）。
+    /// 検査の対象は <see cref="NameScope"/> が設定されているとき（図に載っているとき）だけ。
+    /// 元に戻す・やり直すは <see cref="ApplyTableName"/> を使い、検査を通さない（履歴の往復は検査の対象外）
+    /// </remarks>
+    public string TableName
+    {
+        get => _tableName;
+        set
+        {
+            var stored = SchemaNames.ToStoredForm(value);
+
+            if (
+                NameScope?.FirstOrDefault(other =>
+                    !ReferenceEquals(other, this) && SchemaNames.AreSame(other.TableName, stored)
+                ) is
+                { } clash
+            )
+            {
+                NameChangeRejected?.Invoke(
+                    this,
+                    new NameChangeRejectedEventArgs(stored, clash.TableName, null)
+                );
+                OnPropertyChanged();
+
+                return;
+            }
+
+            ApplyTableName(
+                stored,
+                notifyAlways: !string.Equals(stored, value, StringComparison.Ordinal)
+            );
+        }
+    }
+
+    /// <summary>テーブル名を重複の検査なしで書き換える（元に戻す・やり直すの適用用）</summary>
+    /// <param name="name">前後の空白を除いたテーブル名</param>
+    /// <param name="notifyAlways">値が変わらなくても入力欄へ通知する（入力された空白を取り除いた形へ戻すため）</param>
+    internal void ApplyTableName(string name, bool notifyAlways = false)
+    {
+        if (SetProperty(ref _tableName, name, nameof(TableName)))
+        {
+            NotifyUniqueConstraintNames();
+        }
+        else if (notifyAlways)
+        {
+            OnPropertyChanged(nameof(TableName));
+        }
+    }
+
+    /// <summary>テーブル名の重複を検査する相手（図に載っているエンティティの一覧。載っていなければ <c>null</c>＝検査しない）</summary>
+    internal IReadOnlyCollection<EntityViewModel>? NameScope { get; set; }
+
+    /// <summary>
+    /// 図の対象 DBMS の識別子の長さの上限を返す関数（一意制約の合成名のプレビューを DDL と同じ名前にする。
+    /// 図に載っていなければ <c>null</c>＝上限なしで表示する）
+    /// </summary>
+    internal Func<IdentifierLengthLimit>? IdentifierLimitSource { get; set; }
+
+    /// <summary>図の対象 DBMS の識別子の長さの上限（図に載っていなければ上限なし）</summary>
+    internal IdentifierLengthLimit IdentifierLimit =>
+        IdentifierLimitSource?.Invoke() ?? IdentifierLengthLimit.Unlimited;
+
+    /// <summary>対象 DBMS が変わったとき、一意制約の合成名のプレビューを更新する</summary>
+    internal void NotifyIdentifierLimitChanged() => NotifyUniqueConstraintNames();
+
+    /// <summary>テーブル名・列名の書き換えを、重複のため受け付けなかったときに発火する（所有者がステータスバーで利用者へ知らせる）</summary>
+    internal event EventHandler<NameChangeRejectedEventArgs>? NameChangeRejected;
+
+    /// <summary>列の名前の書き換えが拒否されたことを、このテーブル名を添えて転送する</summary>
+    private void OnColumnNameChangeRejected(object? sender, NameChangeRejectedEventArgs e) =>
+        NameChangeRejected?.Invoke(
+            this,
+            new NameChangeRejectedEventArgs(e.RequestedName, e.ExistingName, TableName)
+        );
 
     /// <summary>キャンバス上の X 座標 (px)（ドラッグで更新する）</summary>
     [ObservableProperty]
@@ -194,6 +271,10 @@ public partial class EntityViewModel : ObservableObject
     /// <remarks>Undo 可能なコマンドとして履歴化するのは <see cref="MainViewModel"/> の責務</remarks>
     internal event EventHandler<UniqueConstraintMemberViewModel>? UniqueConstraintMemberSelectionEdited;
 
+    /// <summary>図（<c>MainViewModel.Entities</c>）から外れているか（外れている間の一意制約の行の書き込みは正本を変えない）</summary>
+    /// <remarks>MainViewModel がエンティティを図から外すときに立て、図へ戻すときに下ろす。単独で組み立てた VM は false のまま</remarks>
+    internal bool IsDetachedFromDiagram { get; set; }
+
     /// <summary>ダイアグラム上の見出し帯に表示する背景色（設定時に正規化する）</summary>
     public string TitleBackgroundColor
     {
@@ -214,17 +295,15 @@ public partial class EntityViewModel : ObservableObject
         }
     }
 
-    /// <summary>ER 図上で NULL 許容表示を行うかどうか（変更時は表示高さキャッシュを無効化する）</summary>
+    /// <summary>ER 図上で NULL 許容表示を行うかどうか</summary>
+    /// <remarks>
+    /// 表示の高さの見積もりは NULL 許容の表示を見ない（幅の自動調整だけが見る）ので、高さのキャッシュは捨てない。
+    /// 捨てると、切り替えのたびに全テーブルの高さの通知・ミニマップの作り直しが走る
+    /// </remarks>
     public bool ShowNullabilityInDiagram
     {
         get => _showNullabilityInDiagram;
-        set
-        {
-            if (SetProperty(ref _showNullabilityInDiagram, value))
-            {
-                InvalidateDisplayHeight();
-            }
-        }
+        set => SetProperty(ref _showNullabilityInDiagram, value);
     }
 
     /// <summary>ER 図上で簡易表示（PK/FK カラムのみ）を行うかどうか（変更時は表示高さキャッシュを無効化する）</summary>
@@ -299,6 +378,8 @@ public partial class EntityViewModel : ObservableObject
         foreach (var column in Columns)
         {
             column.PropertyChanged += OnColumnPropertyChanged;
+            column.NameScope = Columns;
+            column.NameChangeRejected += OnColumnNameChangeRejected;
         }
 
         // 主キーの並び替え行は実効順の解決でカラム一覧を参照するため、カラムの構築後に組み立てる
@@ -335,9 +416,6 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>説明変更時に表示高さキャッシュを無効化する</summary>
     partial void OnDescriptionChanged(string value) => InvalidateDisplayHeight();
 
-    /// <summary>テーブル名の変更を一意制約の合成名プレビューへ反映する</summary>
-    partial void OnTableNameChanged(string value) => NotifyUniqueConstraintNames();
-
     /// <summary>カラムの増減に追従し、購読の着脱と表示高さキャッシュの無効化を行う</summary>
     private void OnColumnsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -346,6 +424,8 @@ public partial class EntityViewModel : ObservableObject
             foreach (ColumnViewModel column in e.OldItems)
             {
                 column.PropertyChanged -= OnColumnPropertyChanged;
+                column.NameChangeRejected -= OnColumnNameChangeRejected;
+                column.NameScope = null;
             }
         }
 
@@ -354,6 +434,8 @@ public partial class EntityViewModel : ObservableObject
             foreach (ColumnViewModel column in e.NewItems)
             {
                 column.PropertyChanged += OnColumnPropertyChanged;
+                column.NameScope = Columns;
+                column.NameChangeRejected += OnColumnNameChangeRejected;
             }
         }
 
@@ -431,6 +513,7 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>一意制約からの通知（構成列の変化・編集行の選択操作）を購読する</summary>
     private void AttachUniqueConstraint(UniqueConstraintViewModel constraint)
     {
+        constraint.IsDetachedFromOwner = false;
         constraint.ColumnIdsChanged += OnUniqueConstraintColumnIdsChanged;
         constraint.MemberSelectionEdited += OnUniqueConstraintMemberSelectionEdited;
     }
@@ -438,6 +521,7 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>一意制約からの通知の購読を解除する</summary>
     private void DetachUniqueConstraint(UniqueConstraintViewModel constraint)
     {
+        constraint.IsDetachedFromOwner = true;
         constraint.ColumnIdsChanged -= OnUniqueConstraintColumnIdsChanged;
         constraint.MemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
     }
@@ -453,9 +537,13 @@ public partial class EntityViewModel : ObservableObject
         UniqueConstraintMemberViewModel member
     ) => UniqueConstraintMemberSelectionEdited?.Invoke(this, member);
 
+    /// <summary>テスト専用: 一意制約の構成列フラグ（<see cref="RefreshUniqueConstraintColumnFlags"/>）を計算し直した回数</summary>
+    internal int UniqueConstraintFlagRefreshCountForTests { get; private set; }
+
     /// <summary>各カラムの「一意制約の構成列か」フラグを現在の制約一覧から計算し直す（ER 図の UQ 標識の元）</summary>
     private void RefreshUniqueConstraintColumnFlags()
     {
+        UniqueConstraintFlagRefreshCountForTests++;
         var memberIds = UniqueConstraints
             .SelectMany(constraint => constraint.ColumnIds)
             .ToHashSet();

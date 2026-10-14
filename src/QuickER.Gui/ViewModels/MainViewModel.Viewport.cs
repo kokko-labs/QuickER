@@ -87,10 +87,8 @@ public partial class MainViewModel
                 // 倍率表示ラベル（"100%" など）も併せて更新する
                 OnPropertyChanged(nameof(ZoomPercentText));
 
-                // 倍率変更で表示範囲が変わるため、ミニマップのビューポート枠・可視判定を更新する
-                // （射影データはズームに依存しないため軽い更新で足りる。ScrollChanged が届かない
-                //  ヘッドレス／タイミングでも枠が追従するようここでも呼ぶ）
-                OnViewportContentBoundsChanged();
+                // ミニマップの枠はここでは更新しない。倍率を変えた後の表示範囲はビューが計算して
+                // ViewportContentBounds へ送り、その変更が枠と可視判定を更新する（射影はズームに依存しない）
             }
         }
     }

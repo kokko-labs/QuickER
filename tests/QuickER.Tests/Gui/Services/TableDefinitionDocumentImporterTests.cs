@@ -152,7 +152,7 @@ public class TableDefinitionDocumentImporterTests
         using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(BuildSampleDiagram());
         SetFormatVersion(workbook, "2");
 
-        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+        var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         act.Should().Throw<InvalidDataException>().Which.Message.Should().Contain("2");
     }
@@ -163,7 +163,7 @@ public class TableDefinitionDocumentImporterTests
     {
         using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(BuildSampleDiagram());
 
-        AssertSampleDiagram(TableDefinitionDocumentImporter.Load(workbook));
+        AssertSampleDiagram(TableDefinitionDocumentImporter.Load(workbook, "sqlserver"));
     }
 
     /// <summary>
@@ -179,7 +179,7 @@ public class TableDefinitionDocumentImporterTests
         using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(BuildSampleDiagram());
         SetFormatVersion(workbook, version);
 
-        AssertSampleDiagram(TableDefinitionDocumentImporter.Load(workbook));
+        AssertSampleDiagram(TableDefinitionDocumentImporter.Load(workbook, "sqlserver"));
     }
 
     /// <summary>本アプリが出力した定義書を再取込し、エンティティ・列・リレーションが往復保持されることを検証する</summary>
@@ -187,7 +187,7 @@ public class TableDefinitionDocumentImporterTests
     public void Load_RoundTripsExportedWorkbook()
     {
         using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(BuildSampleDiagram());
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         AssertSampleDiagram(diagram);
     }
@@ -200,7 +200,7 @@ public class TableDefinitionDocumentImporterTests
             BuildSampleDiagram(),
             culture: new CultureInfo("en")
         );
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         AssertSampleDiagram(diagram);
     }
@@ -213,7 +213,7 @@ public class TableDefinitionDocumentImporterTests
             BuildSampleDiagram(),
             culture: new CultureInfo("ja")
         );
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         AssertSampleDiagram(diagram);
     }
@@ -233,7 +233,7 @@ public class TableDefinitionDocumentImporterTests
         ResolveRoleSheet(workbook, TableDefinitionDocumentLayout.RelationshipsDefinedName).Name =
             "Renamed Relationships";
 
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         AssertSampleDiagram(diagram);
     }
@@ -249,7 +249,7 @@ public class TableDefinitionDocumentImporterTests
             source,
             culture: new CultureInfo("en")
         );
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         diagram.TargetDbms.Should().Be("sqlite");
     }
@@ -266,7 +266,7 @@ public class TableDefinitionDocumentImporterTests
         // ユーザーがプロパティを削除した状況を再現（表示セルは残っていても取込は既定値へフォールバック）
         workbook.CustomProperties.Delete(TableDefinitionDocumentLayout.TargetDbmsPropertyName);
 
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         diagram.TargetDbms.Should().Be(new ErDiagram().TargetDbms);
     }
@@ -283,7 +283,7 @@ public class TableDefinitionDocumentImporterTests
         // テーブル一覧タグを剥がすと必須役割が解決できずエラーになる
         workbook.DefinedNames.Delete(TableDefinitionDocumentLayout.SummaryDefinedName);
 
-        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+        var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         act.Should().Throw<InvalidDataException>().WithMessage(GuiStrings.TableDoc_MissingRoleTag);
     }
@@ -319,7 +319,7 @@ public class TableDefinitionDocumentImporterTests
         // 唯一の詳細シートを削除すると一覧 1 件・詳細 0 件で件数不一致になる
         workbook.Worksheet("Users").Delete();
 
-        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+        var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
         act.Should().Throw<InvalidDataException>().WithMessage(GuiStrings.TableDoc_CountMismatch);
@@ -342,7 +342,7 @@ public class TableDefinitionDocumentImporterTests
         relationshipSheet.Cell(TableDefinitionDocumentLayout.RelationshipDataStartRow, 4).Value =
             "MissingColumn";
 
-        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+        var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         // 製品コードと同じ resx キーからフォーマット済みメッセージを導出し、カルチャに依らず完全一致で検証する
         act.Should()

@@ -609,14 +609,15 @@ public partial class QueryItemViewModel : ObservableObject
         {
             Id = Id,
             EntityId = EntityId,
-            Name = Name.Trim(),
+            // 名前の前後の空白はモデルの setter が除く
+            Name = Name,
             Description = Description,
             Returns = Returns,
             ScalarType = string.IsNullOrWhiteSpace(ScalarType) ? null : ScalarType.Trim(),
             Parameters = Parameters
                 .Select(p => new QueryParameter
                 {
-                    Name = p.Name.Trim(),
+                    Name = p.Name,
                     // 列参照型付けは列由来で型が決まるため、表示用の型トークンは保存しない
                     Type = p.SourceColumnId is null ? p.Type.Trim() : null,
                     IsList = p.IsList,
@@ -634,13 +635,11 @@ public partial class QueryItemViewModel : ObservableObject
             HasPaging = HasPaging,
             Implementation = Implementation,
             Sql = sql,
-            ResultTypeName = string.IsNullOrWhiteSpace(ResultTypeName)
-                ? null
-                : ResultTypeName.Trim(),
+            ResultTypeName = string.IsNullOrWhiteSpace(ResultTypeName) ? null : ResultTypeName,
             Fields = Fields
                 .Select(f => new ProjectionField
                 {
-                    Name = f.Name.Trim(),
+                    Name = f.Name,
                     // 列参照は列由来で型が決まるため、表示用の型トークンは保存しない
                     Type = f.SourceColumnId is null ? f.Type.Trim() : null,
                     SourceColumnId = f.SourceColumnId,
@@ -706,7 +705,7 @@ public partial class QueryItemViewModel : ObservableObject
 
         // 生 SQL が参照できるパラメータ＝パラメータ名（＋ページング時の take / skip）
         var declared = Parameters
-            .Select(p => p.Name.Trim())
+            .Select(p => SchemaNames.ToStoredForm(p.Name))
             .Where(name => name.Length > 0)
             .ToList();
 
@@ -846,7 +845,9 @@ public partial class QueryItemViewModel : ObservableObject
                     ? DeriveFieldToken(sourceColumnId) ?? parameter.Type
                     : parameter.Type
             );
-            var name = string.IsNullOrWhiteSpace(parameter.Name) ? "arg" : parameter.Name.Trim();
+            var name = string.IsNullOrWhiteSpace(parameter.Name)
+                ? "arg"
+                : SchemaNames.ToStoredForm(parameter.Name);
             arguments.Add(parameter.IsList ? $"IReadOnlyList<{type}> {name}" : $"{type} {name}");
         }
 

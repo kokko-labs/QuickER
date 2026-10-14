@@ -51,6 +51,9 @@ namespace QuickER.Provider.MySql;
 /// </remarks>
 public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 {
+    /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => MySqlIdentifier.Limit;
+
     /// <summary>
     /// <c>information_schema</c> 検索のスキーマ絞り込み述語を組み立てる。
     /// </summary>
@@ -88,7 +91,8 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
             e,
             item.TableName,
             MySqlIdentifier.QuoteSimple,
-            name => $"`{MySqlIdentifier.Escape(name)}`"
+            name => $"`{MySqlIdentifier.Escape(name)}`",
+            IdentifierLimit
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -258,7 +262,8 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns
+            item.UniqueConstraintColumns,
+            IdentifierLimit
         );
         var cols = string.Join(
             ", ",
@@ -280,7 +285,8 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var name = UniqueConstraintNaming.Resolve(
             item.UniqueConstraintName,
             item.TableName,
-            item.UniqueConstraintColumns
+            item.UniqueConstraintColumns,
+            IdentifierLimit
         );
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
@@ -322,7 +328,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item);
+        var fkName = SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, IdentifierLimit);
         var referentialActions = MySqlReferentialAction.BuildClause(item.Relationship);
 
         // InnoDB で効かない SET DEFAULT は句を省き、その旨を残す（DDL 生成と同じ注意コメント）

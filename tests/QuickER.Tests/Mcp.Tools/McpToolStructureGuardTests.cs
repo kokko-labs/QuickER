@@ -1,0 +1,146 @@
+using System.IO;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using AwesomeAssertions;
+using QuickER.Cli;
+using QuickER.Mcp;
+using QuickER.Mcp.Tools;
+using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
+
+namespace QuickER.Tests.Mcp.Tools;
+
+/// <summary>
+/// MCP ツールの「同じ知識を 1 か所に置く」ことを機械で見張る（方言の一覧・GUI とファイルのホストの補助関数・
+/// 図の読み込みの決まり文句）
+/// </summary>
+public sealed class McpToolStructureGuardTests
+{
+    /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
+    private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
+
+    /// <summary>リポジトリのルート</summary>
+    private static readonly string Root = NeutralResxFiles.FindRepositoryRoot();
+
+    [Fact(
+        DisplayName = "ツールの説明に載る方言の一覧（create_diagram・generate_csharp・generate_ddl の enum と set_query の sql の説明）は、正本の一覧と一致する"
+    )]
+    public void DialectListsInToolSchemas_MatchTheCanonicalList()
+    {
+        var canonical = TargetDbmsNames.All.ToList();
+
+        EnumOf(DocumentErDiagramToolSet.CreateDiagramDefinition, "target_dbms")
+            .Should()
+            .Equal(canonical);
+        EnumOf(CodeGenToolSet.GenerateCSharpDefinition, "provider").Should().Equal(canonical);
+        EnumOf(CodeGenToolSet.GenerateDdlDefinition, "provider").Should().Equal(canonical);
+
+        var setQuery = ErDiagramToolCatalog
+            .GetDefinitions()
+            .Single(tool => tool.Name == "set_query");
+        var sqlDescription = ToolArgumentFuzz.SchemaOf(setQuery.InputSchema)["properties"]!["sql"]![
+            "description"
+        ]!.GetValue<string>();
+
+        foreach (var dialect in canonical)
+        {
+            sqlDescription.Should().Contain(dialect);
+        }
+    }
+
+    [Fact(DisplayName = "方言の一覧の正本は、外から書き換えられない")]
+    public void CanonicalDialectList_IsNotAWritableArray() =>
+        Ledger.Run(
+            "CanonicalDialectList_IsNotAWritableArray",
+            CanonicalDialectList_IsNotAWritableArrayCore
+        );
+
+    private void CanonicalDialectList_IsNotAWritableArrayCore()
+    {
+        TargetDbmsNames
+            .All.Should()
+            .NotBeAssignableTo<string[]>(
+                "配列を公開すると、どこかの書き換えで受け付ける方言がプロセス全体で黙って変わる"
+            );
+        ((ICollection<string>)TargetDbmsNames.All).IsReadOnly.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "方言の一覧の正本は、各プロバイダの名前と一致する")]
+    public void CanonicalDialectList_MatchesProviderNames() =>
+        TargetDbmsNames
+            .All.Should()
+            .BeEquivalentTo([
+                QuickER.Provider.SqlServer.SqlServerProvider.ProviderName,
+                QuickER.Provider.PostgreSql.PostgreSqlProvider.ProviderName,
+                QuickER.Provider.MySql.MySqlProvider.ProviderName,
+                QuickER.Provider.Oracle.OracleProvider.ProviderName,
+                QuickER.Provider.Sqlite.SqliteProvider.ProviderName,
+            ]);
+
+    [Fact(
+        DisplayName = "GUI とファイルの 2 つのホストは、リレーションの種別の解釈と列ペアの比較を自前で持たない（共有の正本を呼ぶ）"
+    )]
+    public void ToolHosts_DoNotDefineSharedRelationshipHelpers() =>
+        Ledger.Run(
+            "ToolHosts_DoNotDefineSharedRelationshipHelpers",
+            ToolHosts_DoNotDefineSharedRelationshipHelpersCore
+        );
+
+    private void ToolHosts_DoNotDefineSharedRelationshipHelpersCore()
+    {
+        var files = new[]
+        {
+            Path.Combine(Root, "src", "QuickER.Mcp.Tools", "DocumentErDiagramToolHost.cs"),
+            Path.Combine(Root, "src", "QuickER.Gui", "Services", "ErDiagramDynamicTools.cs"),
+        };
+        var definition = new Regex(
+            @"private\s+static\s+[^\(\n]*\b(ParseRelationshipType|HasSameColumnPairs)\s*\("
+        );
+
+        foreach (var file in files)
+        {
+            definition
+                .Matches(File.ReadAllText(file))
+                .Select(match => match.Groups[1].Value)
+                .Should()
+                .BeEmpty($"{Path.GetFileName(file)} が写しを持たない");
+        }
+    }
+
+    [Fact(
+        DisplayName = "図を読むツールの「新しい版で保存された」の警告文は、ソースに 1 か所だけ書く（ER 図操作ツールとコード生成ツールで共有）"
+    )]
+    public void NewerFormatWarning_IsWrittenOnce() =>
+        Ledger.Run("NewerFormatWarning_IsWrittenOnce", NewerFormatWarning_IsWrittenOnceCore);
+
+    private void NewerFormatWarning_IsWrittenOnceCore()
+    {
+        var sources = Directory
+            .EnumerateFiles(Path.Combine(Root, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(path =>
+                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+            )
+            .Where(path =>
+                !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+            );
+        var hits = sources
+            .SelectMany(path =>
+                Regex
+                    .Matches(
+                        File.ReadAllText(path),
+                        Regex.Escape("Warning: this diagram was saved in a newer format")
+                    )
+                    .Select(_ => Path.GetFileName(path))
+            )
+            .ToList();
+
+        hits.Should().ContainSingle("文言を直すとき 1 か所で済み、ツールどうしで食い違わない");
+    }
+
+    /// <summary>ツール定義の引数の enum を取り出す</summary>
+    private static List<string> EnumOf(ToolDefinition definition, string property) =>
+        ToolArgumentFuzz.SchemaOf(definition.InputSchema)["properties"]![property]!["enum"]!
+            .AsArray()
+            .Select(node => node!.GetValue<string>())
+            .ToList();
+}

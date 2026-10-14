@@ -474,6 +474,45 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
     }
 
     /// <summary>
+    /// 同じテーブルに <see cref="SchemaNames"/> の規則で同じ名前の列（大文字小文字だけ違う列）があるとき、
+    /// 後着を捨てて報告し、捨てた列の主キー印・説明が採った列へ混ざらないことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] PG: 大文字小文字だけ違う同名の列は片方を捨てて報告し、捨てた列の主キー・説明を混ぜない"
+    )]
+    public async Task Import_ColumnNamesDifferingOnlyInCase_KeepsOneAndWarns()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE ct (id integer NOT NULL, "Dup" integer, dup integer NOT NULL, PRIMARY KEY (id, dup));
+            COMMENT ON COLUMN ct.dup IS 'second';
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+        // 宣言順（attnum）で先に来た "Dup" を採り、後着の dup は捨てる
+        var entity = result.Entities.Should().ContainSingle().Subject;
+        entity.Columns.Select(c => c.Name).Should().Equal("id", "Dup");
+
+        var kept = entity.Columns.Single(c => c.Name == "Dup");
+        kept.IsPrimaryKey.Should()
+            .BeFalse("捨てた列 dup の主キー印が採った列 Dup へ混ざってはいけない");
+        kept.Description.Should().BeEmpty("捨てた列の説明が採った列へ混ざってはいけない");
+
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.ColumnNameCollision);
+        warning.TableName.Should().Be("ct");
+        warning.Subject.Should().Be("dup");
+        warning.Detail.Should().Be("Dup");
+    }
+
+    /// <summary>
     /// DDL へ出せない型表記を持つ列を、取込完了時に名指しで報告することを検証する。
     /// </summary>
     /// <remarks>

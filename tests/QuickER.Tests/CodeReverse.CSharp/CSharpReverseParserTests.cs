@@ -13,7 +13,11 @@ namespace QuickER.Tests.CodeReverse.CSharp;
 public class CSharpReverseParserTests
 {
     private static CodeReverseResult Parse(string source) =>
-        new CSharpReverseParser().Parse(source, new SqlServerTypeCatalog());
+        new CSharpReverseParser().Parse(
+            source,
+            new SqlServerTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
 
     /// <summary>[Table] を持たないインフラクラスは無視され、対象クラスのみ復元される</summary>
     [Fact(DisplayName = "対象外クラス（[Table] なし）は無視される")]

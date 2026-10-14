@@ -4824,7 +4824,8 @@ public class SyncPlannerTests
 
         var expected = ConstraintNames.ResolveForeignKeyNames(
             context.LiveEntities,
-            context.LiveRelationships
+            context.LiveRelationships,
+            FkRebuildCaps.IdentifierLengthLimit
         );
         plan.Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
             .Items.Select(i => i.ForeignKeyName)

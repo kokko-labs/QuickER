@@ -67,6 +67,17 @@ public enum SchemaImportWarningKind
     TableNameCollision,
 
     /// <summary>
+    /// 同じテーブルに、<see cref="SchemaNames"/> の規則（前後の空白を除き大文字小文字を区別しない）で同じ名前の列が
+    /// 複数あったため、後から来たほうを取り込まなかった。
+    /// </summary>
+    /// <remarks>
+    /// 列名は DB によっては大文字小文字だけ違う別の列として共存できる（PostgreSQL・Oracle の引用識別子など）。
+    /// 図は同じテーブルの中に同じ名前の列を持てない（<see cref="TableNameCollision"/> と同じ流儀で、混ぜるより落とすほうが安全）。
+    /// <c>TableName</c> = 列を持つテーブル / <c>Subject</c> = 取り込まなかった列名 / <c>Detail</c> = 取り込んだほうの列名。
+    /// </remarks>
+    ColumnNameCollision,
+
+    /// <summary>
     /// 列の型表記が DDL・同期スクリプトへ出せない形だった。
     /// </summary>
     /// <remarks>

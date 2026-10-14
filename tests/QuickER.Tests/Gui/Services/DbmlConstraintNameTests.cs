@@ -42,7 +42,8 @@ public class DbmlConstraintNameTests
             BuildText(
                 "Ref: customers.id < orders.bill_customer_id",
                 "Ref: customers.id < orders.ship_customer_id"
-            )
+            ),
+            "sqlserver"
         );
 
         Describe(diagram)
@@ -57,7 +58,10 @@ public class DbmlConstraintNameTests
     [Fact(DisplayName = "名前の無い Ref が 1 本だけなら名前を持たないまま")]
     public void Import_SingleUnnamedRef_StaysUnnamed()
     {
-        var diagram = DbmlImporter.Parse(BuildText("Ref: customers.id < orders.bill_customer_id"));
+        var diagram = DbmlImporter.Parse(
+            BuildText("Ref: customers.id < orders.bill_customer_id"),
+            "sqlserver"
+        );
 
         Describe(diagram).Should().Equal(("bill_customer_id", null));
         ShouldHaveDistinctDdlConstraintNames(diagram);
@@ -72,7 +76,8 @@ public class DbmlConstraintNameTests
             BuildText(
                 "Ref: customers.id < orders.bill_customer_id",
                 "Ref FK_orders_customers: customers.id < orders.ship_customer_id"
-            )
+            ),
+            "sqlserver"
         );
 
         Describe(diagram)
@@ -91,7 +96,8 @@ public class DbmlConstraintNameTests
             BuildText(
                 "Ref fk_bill: customers.id < orders.bill_customer_id",
                 "Ref: customers.id < orders.ship_customer_id"
-            )
+            ),
+            "sqlserver"
         );
 
         Describe(diagram)
@@ -109,7 +115,7 @@ public class DbmlConstraintNameTests
         AddLink(source, "bill_customer_id");
         AddLink(source, "ship_customer_id");
 
-        var imported = DbmlImporter.Parse(DbmlExporter.Build(source));
+        var imported = DbmlImporter.Parse(DbmlExporter.Build(source), "sqlserver");
 
         Describe(imported)
             .Should()

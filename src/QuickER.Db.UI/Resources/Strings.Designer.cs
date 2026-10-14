@@ -742,6 +742,12 @@ namespace QuickER.Db.UI.Resources {
                 return ResourceManager.GetString("Db_ImportWarningTableNameCollision", resourceCulture);
             }
         }
+        
+        public static string Db_ImportWarningColumnNameCollision {
+            get {
+                return ResourceManager.GetString("Db_ImportWarningColumnNameCollision", resourceCulture);
+            }
+        }
 
         public static string Db_SyncWriteBack {
             get {

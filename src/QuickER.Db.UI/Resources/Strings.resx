@@ -410,7 +410,10 @@ Do you want to run this against {0}?</value>
     <value>{0}: the foreign key "{1}" references "{2}", which is outside the imported scope, so no relationship was created for it.</value>
   </data>
   <data name="Db_ImportWarningTableNameCollision" xml:space="preserve">
-    <value>"{0}" was not imported because it differs from "{1}" only in letter case, and the import cannot keep both apart.</value>
+    <value>"{0}" was not imported because it differs from "{1}" only in letter case or surrounding spaces, and the import cannot keep both apart.</value>
+  </data>
+  <data name="Db_ImportWarningColumnNameCollision" xml:space="preserve">
+    <value>Column "{1}" of table "{0}" was not imported because it differs from "{2}" only in letter case or surrounding spaces, and the diagram cannot keep both apart.</value>
   </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>Write the current diagram back to the existing DB (review the diff before applying)</value>

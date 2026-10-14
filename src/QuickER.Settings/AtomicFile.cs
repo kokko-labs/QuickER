@@ -238,35 +238,99 @@ public static class AtomicFile
     /// <returns>読み取りの結果分類</returns>
     public static FileReadStatus TryReadAllText(string path, out string? contents)
     {
+        try
+        {
+            contents = ReadWithRetry(path, File.ReadAllText);
+
+            return FileReadStatus.Loaded;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // 保存されたものが無いだけ（IOException の派生なので下の分類より先に捌く）
+            contents = null;
+
+            return FileReadStatus.Missing;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 粘っても読めない。中身は無事なので「空」ではなく「読めない」として返す
+            contents = null;
+
+            return FileReadStatus.Unavailable;
+        }
+    }
+
+    /// <summary>
+    /// ファイルの内容をバイト列で読み出す（別プロセスの保存と重なった一瞬の失敗は、差し替えと同じだけ粘る）
+    /// </summary>
+    /// <remarks>
+    /// <see cref="TryReadAllText"/> と同じ読み取りの本体（<see cref="ReadWithRetry{T}"/>）を使う。分類せずに例外で返すのは、
+    /// 呼び出し側（図の読み込み）が失敗の原因の文を利用者へ見せるため。ファイルが無い・フォルダが無いときは粘らず
+    /// すぐに例外を返す。
+    /// </remarks>
+    /// <param name="path">読み出すファイルのパス</param>
+    /// <returns>読み出した内容</returns>
+    public static byte[] ReadAllBytes(string path) => ReadWithRetry(path, File.ReadAllBytes);
+
+    /// <summary>
+    /// 読み取りの本体。<see cref="IOException"/> / <see cref="UnauthorizedAccessException"/> の一過性の失敗は、差し替え
+    /// （<see cref="ReplaceWithRetry"/>）と同じ回数・同じバックオフで読み直し、それでも駄目なら最後の例外をそのまま返す
+    /// </summary>
+    /// <remarks>
+    /// ファイル・フォルダが無いこと（<see cref="FileNotFoundException"/> / <see cref="DirectoryNotFoundException"/>＝
+    /// <see cref="IOException"/> の派生）は待っても変わらないので、粘らずにすぐ返す。
+    /// </remarks>
+    private static T ReadWithRetry<T>(string path, Func<string, T> read)
+    {
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                contents = File.ReadAllText(path);
-
-                return FileReadStatus.Loaded;
-            }
-            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-            {
-                // 保存されたものが無いだけ（IOException の派生なので下のリトライより先に捌く）
-                contents = null;
-
-                return FileReadStatus.Missing;
+                return read(path);
             }
             catch (Exception ex)
-                when (ex is IOException or UnauthorizedAccessException
+                when (ex is not (FileNotFoundException or DirectoryNotFoundException)
+                    && ex is IOException or UnauthorizedAccessException
                     && attempt < RetryAttemptCount
                 )
             {
                 // 競合相手が保存を終えるまで少し待つ（10 / 20 / 30 / 40ms）
                 Thread.Sleep(RetryDelayStepMilliseconds * attempt);
             }
+        }
+    }
+
+    /// <summary>
+    /// 文字列を新しいファイルとして原子的に書き出す。保存先が既にあれば何も変えずに <see cref="IOException"/> を投げる
+    /// </summary>
+    /// <remarks>
+    /// <see cref="WriteAllText(string, string)"/> と同じく一時ファイルへ書き切ってから置くが、置くのは
+    /// <c>overwrite: false</c> の <see cref="File.Move(string, string, bool)"/> だけ（置き換えない）。存在を確かめてから
+    /// 書く形では、その隙間に別のプロセスが作ったファイルを上書きしてしまう。保存先フォルダの作成は行わない。
+    /// </remarks>
+    /// <param name="path">作るファイルのパス</param>
+    /// <param name="contents">書き込む内容（BOM なし UTF-8）</param>
+    public static void CreateText(string path, string contents)
+    {
+        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+
+        try
+        {
+            WriteAndFlushToDisk(temporaryPath, contents, encoding: null);
+            File.Move(temporaryPath, path, overwrite: false);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // 粘っても読めない。中身は無事なので「空」ではなく「読めない」として返す
-                contents = null;
-
-                return FileReadStatus.Unavailable;
+                // 掃除の失敗で元の例外を握り潰さない（WriteAllText と同じ）
             }
         }
     }

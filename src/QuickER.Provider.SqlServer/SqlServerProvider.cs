@@ -43,6 +43,7 @@ public sealed class SqlServerProvider : IDatabaseProvider
             AlterColumnRequiresForeignKeyRebuild = true,
             AlterColumnRequiresKeyConstraintRebuild = true,
             NormalizeTypeNotation = SqlServerTypeNotation.Normalize,
+            IdentifierLengthLimit = SqlIdentifier.Limit,
         };
 
     /// <inheritdoc />

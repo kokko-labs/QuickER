@@ -970,7 +970,16 @@ public class ErDiagramDynamicToolsTests
                 is_nullable = false,
             }
         );
-        Exec(vm, "add_relationship", new { source_table = "Customer", target_table = "Order" });
+        Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                relationship_type = "OneToMany",
+            }
+        );
 
         var relationship = vm.Relationships.Single();
         var originalTargetColumnId = relationship

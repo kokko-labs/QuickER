@@ -16,14 +16,22 @@ public static partial class MermaidImporter
     private static readonly Regex RelationshipRegex = RelationshipLineRegex();
 
     /// <summary>Mermaid ファイルを読み込み ER 図へ変換する</summary>
-    public static ErDiagram Load(string path)
+    /// <param name="targetDbms">
+    /// 取り込んだ図の対象 DBMS（返す図の <see cref="ErDiagram.TargetDbms"/> になる。名前の無い外部キーに付ける名前は
+    /// この DBMS の識別子の長さの上限で縮める＝経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </param>
+    public static ErDiagram Load(string path, string targetDbms)
     {
-        return Parse(File.ReadAllText(path));
+        return Parse(File.ReadAllText(path), targetDbms);
     }
 
     /// <summary>Mermaid テキストを解析して ER 図を生成する</summary>
+    /// <param name="targetDbms">
+    /// 取り込んだ図の対象 DBMS（返す図の <see cref="ErDiagram.TargetDbms"/> になる。名前の無い外部キーに付ける名前は
+    /// この DBMS の識別子の長さの上限で縮める＝経路は <see cref="ConstraintNames"/> の XmlDoc）
+    /// </param>
     /// <exception cref="InvalidDataException">ヘッダー欠落・構文不正・定義不足の場合にスローする</exception>
-    public static ErDiagram Parse(string text)
+    public static ErDiagram Parse(string text, string targetDbms)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -31,7 +39,7 @@ public static partial class MermaidImporter
         }
 
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
+        var entities = new Dictionary<string, Entity>(SchemaNames.Comparer);
         var relationships = new List<Relationship>();
         // リレーション行のラベル（relationships と同じ添字）。制約名にするかは全行を読んでから決める
         var labels = new List<string?>();
@@ -75,6 +83,22 @@ public static partial class MermaidImporter
                     }
 
                     var (column, isUnique) = ParseColumn(line, currentEntity.TableName);
+
+                    if (
+                        currentEntity.Columns.Any(existing =>
+                            SchemaNames.AreSame(existing.Name, column.Name)
+                        )
+                    )
+                    {
+                        throw new InvalidDataException(
+                            string.Format(
+                                Strings.Mermaid_DuplicateColumn,
+                                currentEntity.TableName,
+                                column.Name
+                            )
+                        );
+                    }
+
                     currentEntity.Columns.Add(column);
 
                     // UK 標識はその 1 列だけの一意制約を意味する（Mermaid に複合制約の構文が無いため）
@@ -140,9 +164,19 @@ public static partial class MermaidImporter
 
         EnsureEntitiesHaveColumns(entities.Values);
         ResolveRelationshipColumns(entities, relationships);
-        AssignConstraintNames(entities, relationships, labels);
+        AssignConstraintNames(
+            entities,
+            relationships,
+            labels,
+            IdentifierLengthLimits.ForDbms(targetDbms)
+        );
 
-        return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
+        return new ErDiagram
+        {
+            Entities = entities.Values.ToList(),
+            Relationships = relationships,
+            TargetDbms = targetDbms,
+        };
     }
 
     /// <summary>カラム定義行を解析して <see cref="Column"/> を生成する（PK / FK / UK マーカーを反映する）</summary>
@@ -275,7 +309,8 @@ public static partial class MermaidImporter
     private static void AssignConstraintNames(
         IReadOnlyDictionary<string, Entity> entities,
         IReadOnlyList<Relationship> relationships,
-        IReadOnlyList<string?> labels
+        IReadOnlyList<string?> labels,
+        IdentifierLengthLimit limit
     )
     {
         var candidates = labels
@@ -289,7 +324,7 @@ public static partial class MermaidImporter
                 group => group.Count(),
                 StringComparer.OrdinalIgnoreCase
             );
-        var reserved = ConstraintNames.CollectTableConstraints(entities.Values);
+        var reserved = ConstraintNames.CollectTableConstraints(entities.Values, limit);
 
         for (var index = 0; index < relationships.Count; index++)
         {
@@ -301,7 +336,7 @@ public static partial class MermaidImporter
             }
         }
 
-        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships);
+        ConstraintNames.NameUnnamedForeignKeys(entities.Values, relationships, limit);
     }
 
     /// <summary>ラベルが制約名の候補になる形か（出力側のプレースホルダでない 1 トークン）を判定する</summary>

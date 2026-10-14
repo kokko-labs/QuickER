@@ -133,7 +133,7 @@ public class TableDefinitionCompositeForeignKeyTests
             culture: new CultureInfo("en")
         );
 
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
         var parent = diagram.Entities.Single(entity => entity.TableName == "TenantRegion");
         var child = diagram.Entities.Single(entity => entity.TableName == "TenantUser");
         var composite = diagram.Relationships.Single(relationship =>
@@ -187,7 +187,7 @@ public class TableDefinitionCompositeForeignKeyTests
 
         sheet.Cell(row, 6).Value = "TenantId";
 
-        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+        var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         act.Should().Throw<System.IO.InvalidDataException>();
     }
@@ -269,7 +269,7 @@ public class TableDefinitionCompositeForeignKeyTests
             culture: new CultureInfo("en")
         );
 
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+        var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
         var address = diagram.Entities.Single(entity => entity.TableName == "Address");
         var order = diagram.Entities.Single(entity => entity.TableName == "Orders");
 
@@ -338,7 +338,7 @@ public class TableDefinitionCompositeForeignKeyTests
 
         sheet.Cell(row, 4).Value = "ShipToAddressId";
 
-        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+        var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         act.Should()
             .Throw<System.IO.InvalidDataException>()

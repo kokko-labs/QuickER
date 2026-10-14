@@ -21,11 +21,13 @@ public static class UniqueConstraintNaming
     /// <param name="constraintName">モデルが保持する制約名（未設定は <c>null</c> / 空）</param>
     /// <param name="tableName">対象テーブル名</param>
     /// <param name="columnNames">構成列名（宣言順）</param>
+    /// <param name="limit">合成名に使う識別子の長さの上限（DDL・同期の方言の上限。経路は <see cref="ConstraintNames"/> の XmlDoc）</param>
     /// <returns>DDL へ出力する制約名（クォートは呼び出し側の責務）</returns>
     public static string Resolve(
         string? constraintName,
         string tableName,
-        IReadOnlyList<string> columnNames
+        IReadOnlyList<string> columnNames,
+        IdentifierLengthLimit limit
     )
     {
         if (!string.IsNullOrWhiteSpace(constraintName))
@@ -34,30 +36,38 @@ public static class UniqueConstraintNaming
         }
 
         // 合成規則（安全化を含む）はモデル側の UniqueConstraint.SynthesizeName が正本
-        return UniqueConstraint.SynthesizeName(tableName, columnNames);
+        return UniqueConstraint.SynthesizeName(tableName, columnNames, limit);
     }
 
     /// <summary>エンティティの一意制約を「解決済み制約名 ＋ 宣言順の構成列名」へ展開する</summary>
     /// <param name="entity">対象エンティティ</param>
+    /// <param name="limit">合成名に使う識別子の長さの上限（DDL・同期の方言の上限）</param>
     /// <returns>DDL へ出力可能な一意制約の一覧（モデルの並び順を保つ）</returns>
     /// <remarks>
     /// 構成列が空の制約、およびエンティティ内で解決できないカラム ID を含む制約は黙って除外する
     /// （SQLite の同期再構築が壊れた参照を無視するのと同じ流儀。DDL 生成は編集操作ではないため
     /// 不整合を例外にせず、出力可能なものだけを出す）。
     /// </remarks>
-    public static List<ResolvedUniqueConstraint> ResolveAll(Entity entity) =>
-        ResolveAll(entity, entity.TableName);
+    public static List<ResolvedUniqueConstraint> ResolveAll(
+        Entity entity,
+        IdentifierLengthLimit limit
+    ) => ResolveAll(entity, entity.TableName, limit);
 
     /// <summary>エンティティの一意制約を、指定したテーブル名を合成名の基として展開する</summary>
     /// <param name="entity">対象エンティティ</param>
     /// <param name="tableName">合成名 <c>UQ_{テーブル}_{列…}</c> の基にするテーブル名</param>
+    /// <param name="limit">合成名に使う識別子の長さの上限（DDL・同期の方言の上限）</param>
     /// <returns>DDL へ出力可能な一意制約の一覧（モデルの並び順を保つ）</returns>
     /// <remarks>
     /// 差分同期はエンティティではなく差分項目の正規化済みテーブル名（<see cref="SchemaDiffService.NormalizeTable"/>）を
     /// 制約名の基にするため、テーブル名を明示できる形を用意する。除外規則（構成列が空・解決できない制約は
-    /// 黙って除外）は <see cref="ResolveAll(Entity)"/> と同じ。
+    /// 黙って除外）は <see cref="ResolveAll(Entity, IdentifierLengthLimit)"/> と同じ。
     /// </remarks>
-    public static List<ResolvedUniqueConstraint> ResolveAll(Entity entity, string tableName)
+    public static List<ResolvedUniqueConstraint> ResolveAll(
+        Entity entity,
+        string tableName,
+        IdentifierLengthLimit limit
+    )
     {
         var resolved = new List<ResolvedUniqueConstraint>();
 
@@ -70,7 +80,7 @@ public static class UniqueConstraintNaming
 
             resolved.Add(
                 new ResolvedUniqueConstraint(
-                    Resolve(constraint.Name, tableName, columnNames),
+                    Resolve(constraint.Name, tableName, columnNames, limit),
                     columnNames
                 )
             );

@@ -194,14 +194,16 @@ public class QueryConditionParserTests
     /// StringMatchNode（Exact・Negated）＝等値の &lt;&gt; へ畳むと列側の IS NULL 補償で NULL 行が
     /// 一致に含まれ、LIKE の意味論（NULL 行はどちらの向きでも一致しない）から外れるため
     /// </summary>
-    [Fact(DisplayName = "ワイルドカードなしの LIKE は肯定形＝等値・否定形＝完全一致ノードになる")]
-    public void Parse_LikeWithoutWildcard_BecomesEquality()
+    [Fact(DisplayName = "ワイルドカードなしの LIKE は肯定形も否定形も完全一致ノードになる")]
+    public void Parse_LikeWithoutWildcard_BecomesExactMatch()
     {
-        ParseValid("Memo LIKE 'abc'")
+        // 肯定形を等値比較にすると外側の NOT が <> へ反転し、NULL の行が一致に混ざる（LIKE は NULL の行を返さない）
+        var positive = ParseValid("Memo LIKE 'abc'")
             .Root.Should()
-            .BeOfType<ComparisonNode>()
-            .Which.Operator.Should()
-            .Be(ComparisonOperator.Equal);
+            .BeOfType<StringMatchNode>()
+            .Which;
+        positive.Kind.Should().Be(StringMatchKind.Exact);
+        positive.Negated.Should().BeFalse();
 
         var negated = ParseValid("Memo NOT LIKE 'abc'")
             .Root.Should()
@@ -436,15 +438,16 @@ public class QueryConditionParserTests
     }
 
     /// <summary>空文字リテラルの LIKE（ワイルドカードなしの退化形）が等値比較になることを検証する</summary>
-    [Fact(DisplayName = "LIKE ''（空文字）は空文字との等値比較になる")]
-    public void Parse_LikeEmptyLiteral_BecomesEmptyEquality()
+    [Fact(DisplayName = "LIKE ''（空文字）は空文字との完全一致になる")]
+    public void Parse_LikeEmptyLiteral_BecomesEmptyExactMatch()
     {
         var result = ParseValid("Memo LIKE ''");
 
         result.Success.Should().BeTrue();
-        var comparison = result.Root.Should().BeOfType<ComparisonNode>().Which;
-        comparison.Operator.Should().Be(ComparisonOperator.Equal);
-        comparison.Operand.Should().BeOfType<StringOperand>().Which.Value.Should().BeEmpty();
+        var match = result.Root.Should().BeOfType<StringMatchNode>().Which;
+        match.Kind.Should().Be(StringMatchKind.Exact);
+        match.Negated.Should().BeFalse();
+        match.Operand.Should().BeOfType<StringOperand>().Which.Value.Should().BeEmpty();
     }
 
     /// <summary>'%' のみの LIKE（全件一致の退化形）が空文字の Contains になることを検証する</summary>

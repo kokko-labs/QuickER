@@ -45,6 +45,7 @@ public sealed class OracleProvider : IDatabaseProvider
             ReferencedKeyRequiresSameColumnOrder = false,
             TransactionalDdl = false,
             NormalizeTypeNotation = OracleTypeNotation.Normalize,
+            IdentifierLengthLimit = OracleIdentifier.Limit,
         };
 
     /// <inheritdoc />

@@ -149,7 +149,7 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     }
 
     [Theory(
-        DisplayName = "add_column は空・空白だけの data_type を拒否し、省略時の既定型は従来どおり"
+        DisplayName = "add_column は data_type の省略と空・空白だけの値を拒否する（既定の型で黙って列を作らない）"
     )]
     [InlineData(HostKind.Gui)]
     [InlineData(HostKind.File)]
@@ -170,13 +170,11 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
             .BeFalse();
         Exec("add_column", new { table_name = "Order", column_name = "Memo" })
             .Success.Should()
-            .BeTrue();
+            .BeFalse("data_type は必須（以前は nvarchar(100) で黙って作っていた）");
 
-        EntityNamed("Order").Columns.Should().NotContain(column => column.Name == "Note");
         EntityNamed("Order")
-            .Columns.Single(column => column.Name == "Memo")
-            .DataType.Should()
-            .Be("nvarchar(100)");
+            .Columns.Should()
+            .NotContain(column => column.Name == "Note" || column.Name == "Memo");
     }
 
     [Theory(
@@ -208,15 +206,11 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
 
     // ---------------- relationship_type ----------------
 
-    [Theory(
-        DisplayName = "add_relationship の relationship_type は大文字小文字を無視して受け、省略時は一対多"
-    )]
+    [Theory(DisplayName = "add_relationship の relationship_type は大文字小文字を無視して受ける")]
     [InlineData(HostKind.Gui, "onetoone", RelationshipType.OneToOne)]
     [InlineData(HostKind.Gui, "ONETOMANY", RelationshipType.OneToMany)]
-    [InlineData(HostKind.Gui, null, RelationshipType.OneToMany)]
     [InlineData(HostKind.File, "onetoone", RelationshipType.OneToOne)]
     [InlineData(HostKind.File, "ONETOMANY", RelationshipType.OneToMany)]
-    [InlineData(HostKind.File, null, RelationshipType.OneToMany)]
     public void AddRelationship_RelationshipType_IsParsedIgnoringCase(
         HostKind host,
         string? relationshipType,
@@ -242,16 +236,51 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
         Schema.Relationships.Should().ContainSingle().Which.Type.Should().Be(expected);
     }
 
-    [Theory(DisplayName = "add_relationship は未知の relationship_type を一対多へ落とさず拒否する")]
+    [Theory(
+        DisplayName = "add_relationship は relationship_type の省略を、無効な値でなく必須の欠落として断る"
+    )]
+    [InlineData(HostKind.Gui)]
+    [InlineData(HostKind.File)]
+    public void AddRelationship_MissingRelationshipType_IsReportedAsRequired(HostKind host)
+    {
+        Setup(host);
+
+        var (result, success) = Exec(
+            "add_relationship",
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                source_columns = new[] { "CustomerId" },
+                target_columns = new[] { "CustomerId" },
+            }
+        );
+
+        success.Should().BeFalse();
+        var expected =
+            host == HostKind.Gui
+                ? string.Format(
+                    QuickER.Resources.Strings.Tool_RelationshipTypeRequired,
+                    "OneToOne, OneToMany, ManyToMany"
+                )
+                : "relationship_type is required (one of: OneToOne, OneToMany, ManyToMany).";
+        result.Should().Be(expected, "省略を「無効な値 ''」と言わず、必須の欠落として名指しする");
+    }
+
+    [Theory(
+        DisplayName = "add_relationship は省略・未知の relationship_type を一対多へ落とさず拒否する"
+    )]
+    [InlineData(HostKind.Gui, null)]
     [InlineData(HostKind.Gui, "one_to_many")]
     [InlineData(HostKind.Gui, "")]
     [InlineData(HostKind.Gui, "1")]
+    [InlineData(HostKind.File, null)]
     [InlineData(HostKind.File, "one_to_many")]
     [InlineData(HostKind.File, "")]
     [InlineData(HostKind.File, "1")]
     public void AddRelationship_UnknownRelationshipType_IsRejected(
         HostKind host,
-        string relationshipType
+        string? relationshipType
     )
     {
         Setup(host);

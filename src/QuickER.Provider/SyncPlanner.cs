@@ -43,15 +43,29 @@ public sealed class SyncPlanContext
     /// <remarks>
     /// 名前の無い同じ組の外部キーが 2 本あると、2 本目は子の列名を足した名前になる
     /// （<see cref="ConstraintNames.ResolveForeignKeyNames"/>）。リレーションごとに既定名を求めると 2 本とも同じ名前になり、
-    /// 警告・外し直しの名前が DDL と食い違う。初回の参照で 1 回だけ求める。
+    /// 警告・外し直しの名前が DDL と食い違う。上限ごとに 1 回だけ求める。
     /// </remarks>
-    internal IReadOnlyDictionary<Relationship, string> LiveForeignKeyNames =>
-        _liveForeignKeyNames ??= ConstraintNames.ResolveForeignKeyNames(
-            LiveEntities,
-            LiveRelationships
-        );
+    /// <param name="limit">既定名を縮める同期の方言の上限（<see cref="SyncDialectCapabilities.IdentifierLengthLimit"/>）</param>
+    internal IReadOnlyDictionary<Relationship, string> LiveForeignKeyNames(
+        IdentifierLengthLimit limit
+    )
+    {
+        if (_liveForeignKeyNames is null || !Equals(_liveForeignKeyNamesLimit, limit))
+        {
+            _liveForeignKeyNames = ConstraintNames.ResolveForeignKeyNames(
+                LiveEntities,
+                LiveRelationships,
+                limit
+            );
+            _liveForeignKeyNamesLimit = limit;
+        }
+
+        return _liveForeignKeyNames;
+    }
 
     private IReadOnlyDictionary<Relationship, string>? _liveForeignKeyNames;
+
+    private IdentifierLengthLimit? _liveForeignKeyNamesLimit;
 }
 
 /// <summary>
@@ -170,11 +184,17 @@ public sealed class SyncPlanner
         selected = InjectVanishingForeignKeyDrops(
             selected,
             context,
-            includeDroppedChildTables: !isRebuildDialect
+            includeDroppedChildTables: !isRebuildDialect,
+            capabilities.IdentifierLengthLimit
         );
 
         // 一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合は警告する（方言に依らず同じ危険）
-        WarnUniqueConstraintDropsBreakingForeignKeys(selected, context, warnings);
+        WarnUniqueConstraintDropsBreakingForeignKeys(
+            selected,
+            context,
+            warnings,
+            capabilities.IdentifierLengthLimit
+        );
 
         // 選んだ外部キーの追加・作り直しの参照先が、同期後に候補キーでない場合も警告する（暗黙の付け直しと同じ証明）
         WarnAddedForeignKeysNotOnCandidateKey(selected, capabilities, context, warnings);
@@ -230,7 +250,13 @@ public sealed class SyncPlanner
             );
         }
 
-        return BuildRebuildPlan(selected, capabilities, context, warnings);
+        return BuildRebuildPlan(
+            selected,
+            capabilities,
+            context,
+            warnings,
+            capabilities.IdentifierLengthLimit
+        );
     }
 
     /// <summary>
@@ -483,7 +509,12 @@ public sealed class SyncPlanner
                     }
 
                     return (
-                        ConstraintNames.EffectiveForeignKey(item.ForeignKeyName, child, parent),
+                        ConstraintNames.EffectiveForeignKey(
+                            item.ForeignKeyName,
+                            child,
+                            parent,
+                            capabilities.IdentifierLengthLimit
+                        ),
                         missing
                     );
                 }
@@ -513,7 +544,11 @@ public sealed class SyncPlanner
 
                     return (
                         item.UniqueConstraintName
-                            ?? UniqueConstraint.SynthesizeName(table, item.UniqueConstraintColumns),
+                            ?? UniqueConstraint.SynthesizeName(
+                                table,
+                                item.UniqueConstraintColumns,
+                                capabilities.IdentifierLengthLimit
+                            ),
                         missing
                     );
 
@@ -716,7 +751,8 @@ public sealed class SyncPlanner
     private static List<SchemaDiffItem> InjectVanishingForeignKeyDrops(
         List<SchemaDiffItem> selected,
         SyncPlanContext? context,
-        bool includeDroppedChildTables
+        bool includeDroppedChildTables,
+        IdentifierLengthLimit limit
     )
     {
         if (context is null)
@@ -731,7 +767,7 @@ public sealed class SyncPlanner
             return selected;
         }
 
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected);
+        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
         var drops = new List<SchemaDiffItem>();
 
         foreach (var fk in EnumerateLiveForeignKeys(context))
@@ -743,7 +779,7 @@ public sealed class SyncPlanner
                 !dropped.Touches(fk, childTable, parentTable)
                 || (dropped.Tables.Contains(childTable) && !includeDroppedChildTables)
                 || explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship)
+                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
                 )
             )
             {
@@ -756,7 +792,13 @@ public sealed class SyncPlanner
                     childTable,
                     string.Format(
                         Strings.Diff_AutoForeignKeyDrop,
-                        ResolveForeignKeyName(fk.Relationship, childTable, parentTable, context)
+                        ResolveForeignKeyName(
+                            fk.Relationship,
+                            childTable,
+                            parentTable,
+                            limit,
+                            context
+                        )
                     )
                 )
             );
@@ -857,6 +899,9 @@ public sealed class SyncPlanner
         List<SyncPlanWarning> warnings
     )
     {
+        // 外部キーの既定名は同期の方言の上限で縮める
+        var limit = capabilities.IdentifierLengthLimit;
+
         if (context is null)
         {
             // live 情報が無ければ既存 FK を復元できない（逐次方言では VM が常に渡すため実質防御）
@@ -901,7 +946,7 @@ public sealed class SyncPlanner
 
         // 明示的に DROP が選択されている FK（自動 DROP の重複も再 ADD も行わない）。
         // 端が消える外部キーは InjectVanishingForeignKeyDrops が先に外す項目として足しているのでここに含まれる
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected);
+        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
 
         // 同期後に両端の型が食い違う外部キーに関わる、変更する列（その列の変更は、残した外部キーに阻まれて必ず失敗する）
         var doomedColumns = new HashSet<string>();
@@ -914,7 +959,7 @@ public sealed class SyncPlanner
             // 明示的に外す外部キーは変更を阻まない
             if (
                 !explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship)
+                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
                 )
                 && HasPostSyncTypeMismatch(
                     fk,
@@ -967,7 +1012,7 @@ public sealed class SyncPlanner
 
             if (
                 explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship)
+                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
                 )
             )
             {
@@ -978,6 +1023,7 @@ public sealed class SyncPlanner
                 fk.Relationship,
                 childTable,
                 parentTable,
+                limit,
                 context
             );
 
@@ -1388,7 +1434,8 @@ public sealed class SyncPlanner
         IReadOnlyList<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
         SyncPlanContext context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        IdentifierLengthLimit limit
     )
     {
         var pkChangedTables = CollectPrimaryKeyChanges(selected);
@@ -1400,7 +1447,7 @@ public sealed class SyncPlanner
 
         var postSyncUniques = BuildPostSyncUniqueConstraints(selected, context, capabilities);
         var dropped = DroppedObjects.From(selected);
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected);
+        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
 
         foreach (var fk in EnumerateLiveForeignKeys(context))
         {
@@ -1411,7 +1458,7 @@ public sealed class SyncPlanner
                 !pkChangedTables.TryGetValue(parentTable, out var newPkColumns)
                 || dropped.Tables.Contains(childTable)
                 || explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship)
+                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
                 )
             )
             {
@@ -1439,7 +1486,7 @@ public sealed class SyncPlanner
                 new SyncPlanWarning(
                     SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey,
                     childTable,
-                    ResolveForeignKeyName(fk.Relationship, childTable, parentTable, context)
+                    ResolveForeignKeyName(fk.Relationship, childTable, parentTable, limit, context)
                 )
             );
         }
@@ -1522,7 +1569,12 @@ public sealed class SyncPlanner
                 new SyncPlanWarning(
                     SyncPlanWarningKind.ForeignKeyNotOnCandidateKey,
                     childTable,
-                    ResolveForeignKeyName(add.Relationship, childTable, parentTable)
+                    ResolveForeignKeyName(
+                        add.Relationship,
+                        childTable,
+                        parentTable,
+                        capabilities.IdentifierLengthLimit
+                    )
                 )
             );
         }
@@ -1601,6 +1653,9 @@ public sealed class SyncPlanner
         List<SyncPlanWarning> warnings
     )
     {
+        // 外部キーの既定名は同期の方言の上限で縮める
+        var limit = capabilities.IdentifierLengthLimit;
+
         if (
             context is null
             || capabilities.TransactionalDdl
@@ -1617,7 +1672,7 @@ public sealed class SyncPlanner
         var liveByName = IndexLiveTables(context);
         var orderedUniques = BuildPostSyncUniqueConstraints(expanded, context, capabilities);
         var unorderedUniques = BuildPostSyncUniqueConstraints(expanded, context, unordered);
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(expanded);
+        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(expanded, limit);
         var dropped = DroppedObjects.From(expanded);
         var excludedKeyTables = new HashSet<string>(TableComparer);
         var excludedItems = new HashSet<SchemaDiffItem>(ReferenceEqualityComparer.Instance);
@@ -1632,7 +1687,7 @@ public sealed class SyncPlanner
                 !pkChangedTables.TryGetValue(parentTable, out var newKey)
                 || dropped.Touches(fk, childTable, parentTable)
                 || explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship)
+                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
                 )
             )
             {
@@ -1650,7 +1705,13 @@ public sealed class SyncPlanner
                     new SyncPlanWarning(
                         SyncPlanWarningKind.ForeignKeyKeyOrderMismatch,
                         childTable,
-                        ResolveForeignKeyName(fk.Relationship, childTable, parentTable, context)
+                        ResolveForeignKeyName(
+                            fk.Relationship,
+                            childTable,
+                            parentTable,
+                            capabilities.IdentifierLengthLimit,
+                            context
+                        )
                     )
                 );
             }
@@ -1688,7 +1749,12 @@ public sealed class SyncPlanner
                     new SyncPlanWarning(
                         SyncPlanWarningKind.ForeignKeyKeyOrderMismatch,
                         childTable,
-                        ResolveForeignKeyName(alter.Relationship, childTable, parentTable)
+                        ResolveForeignKeyName(
+                            alter.Relationship,
+                            childTable,
+                            parentTable,
+                            capabilities.IdentifierLengthLimit
+                        )
                     )
                 );
             }
@@ -1728,7 +1794,8 @@ public sealed class SyncPlanner
 
     /// <summary>明示的に削除が選ばれた外部キー（選択済み DropForeignKey）の照合キーを集める</summary>
     private static HashSet<string> CollectExplicitlyDroppedForeignKeys(
-        IReadOnlyList<SchemaDiffItem> selected
+        IReadOnlyList<SchemaDiffItem> selected,
+        IdentifierLengthLimit limit
     )
     {
         var explicitlyDropped = new HashSet<string>();
@@ -1748,7 +1815,8 @@ public sealed class SyncPlanner
                     SchemaDiffService.NormalizeTable(dropFk.ChildEntity),
                     parentTable,
                     columnPairs,
-                    dropFk.Relationship
+                    dropFk.Relationship,
+                    limit
                 )
             );
         }
@@ -2000,7 +2068,8 @@ public sealed class SyncPlanner
     private static void WarnUniqueConstraintDropsBreakingForeignKeys(
         IReadOnlyList<SchemaDiffItem> selected,
         SyncPlanContext? context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        IdentifierLengthLimit limit
     )
     {
         if (context is null)
@@ -2016,7 +2085,7 @@ public sealed class SyncPlanner
         }
 
         // 同期で外す外部キー（明示的に外す・端が消える＝計画の入口で外す項目を足している）は壊れようがないので警告しない
-        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected);
+        var explicitlyDropped = CollectExplicitlyDroppedForeignKeys(selected, limit);
         var dropped = DroppedObjects.From(selected);
 
         foreach (var fk in EnumerateLiveForeignKeys(context))
@@ -2027,7 +2096,7 @@ public sealed class SyncPlanner
             if (
                 dropped.Touches(fk, childTable, parentTable)
                 || explicitlyDropped.Contains(
-                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship)
+                    ForeignKeyKey(childTable, parentTable, fk.ColumnPairs, fk.Relationship, limit)
                 )
             )
             {
@@ -2064,6 +2133,7 @@ public sealed class SyncPlanner
                             fk.Relationship,
                             SchemaDiffService.NormalizeTable(fk.Child),
                             parentTable,
+                            limit,
                             context
                         )
                     )
@@ -2149,7 +2219,8 @@ public sealed class SyncPlanner
         string childTable,
         string parentTable,
         IEnumerable<ForeignKeyColumnNamePair> columnPairs,
-        Relationship? relationship
+        Relationship? relationship,
+        IdentifierLengthLimit limit
     ) =>
         $"{childTable.Trim().ToLowerInvariant()}|{parentTable.Trim().ToLowerInvariant()}|"
         + string.Join(
@@ -2158,7 +2229,7 @@ public sealed class SyncPlanner
                 $"{p.ParentColumn.Trim().ToLowerInvariant()}>{p.ChildColumn.Trim().ToLowerInvariant()}"
             )
         )
-        + $"|{ResolveForeignKeyName(relationship, childTable, parentTable).Trim().ToLowerInvariant()}"
+        + $"|{ResolveForeignKeyName(relationship, childTable, parentTable, limit).Trim().ToLowerInvariant()}"
         + $"|{relationship?.OnDelete ?? ForeignKeyReferentialAction.NoAction}"
         + $"|{relationship?.OnUpdate ?? ForeignKeyReferentialAction.NoAction}";
 
@@ -2166,6 +2237,7 @@ public sealed class SyncPlanner
     /// <param name="relationship">外部キーのリレーション</param>
     /// <param name="childTable">子表</param>
     /// <param name="parentTable">親表</param>
+    /// <param name="limit">既定名を縮める同期の方言の上限（<see cref="SyncDialectCapabilities.IdentifierLengthLimit"/>）</param>
     /// <param name="context">
     /// live の文脈。live のリレーションなら、図全体から求めた実効名（<see cref="SyncPlanContext.LiveForeignKeyNames"/>）を使う
     /// </param>
@@ -2173,16 +2245,18 @@ public sealed class SyncPlanner
         Relationship? relationship,
         string childTable,
         string parentTable,
+        IdentifierLengthLimit limit,
         SyncPlanContext? context = null
     ) =>
         relationship is not null
         && context is not null
-        && context.LiveForeignKeyNames.TryGetValue(relationship, out var resolved)
+        && context.LiveForeignKeyNames(limit).TryGetValue(relationship, out var resolved)
             ? resolved
             : ConstraintNames.EffectiveForeignKey(
                 relationship?.ConstraintName,
                 childTable,
-                parentTable
+                parentTable,
+                limit
             );
 
     /// <summary>live のテーブルを名前で引く索引（規則は差分と同じ <see cref="NameLookup{T}"/>）</summary>
@@ -2213,7 +2287,8 @@ public sealed class SyncPlanner
         List<SchemaDiffItem> selected,
         SyncDialectCapabilities capabilities,
         SyncPlanContext context,
-        List<SyncPlanWarning> warnings
+        List<SyncPlanWarning> warnings,
+        IdentifierLengthLimit limit
     )
     {
         // 選択済み AddTable のテーブル名（新規テーブル＝CreateOnly の対象）
@@ -2260,7 +2335,7 @@ public sealed class SyncPlanner
             .ToLookup(fk => SchemaDiffService.NormalizeTable(fk.Child), TableComparer);
 
         var rebuilds = new List<TableRebuildPlan>();
-        rebuilds.AddRange(BuildCreateOnlyRebuilds(selected, addedTables, diverted));
+        rebuilds.AddRange(BuildCreateOnlyRebuilds(selected, addedTables, diverted, limit));
         rebuilds.AddRange(
             BuildExistingTableRebuilds(
                 selected,
@@ -2268,7 +2343,8 @@ public sealed class SyncPlanner
                 liveByName,
                 diverted,
                 context,
-                liveForeignKeysByChild
+                liveForeignKeysByChild,
+                limit
             )
         );
 
@@ -2277,7 +2353,7 @@ public sealed class SyncPlanner
         WarnRebuildDropsColumnAttributes(rebuilds, context, warnings);
 
         // 主キーを付け替える親表を参照する外部キーの、候補キー喪失（逐次 DDL の方言と同じ判定）
-        WarnRebuildForeignKeysLosingCandidateKey(selected, capabilities, context, warnings);
+        WarnRebuildForeignKeysLosingCandidateKey(selected, capabilities, context, warnings, limit);
 
         // 転用済みの項目を除いた残りをセクション化する（転用できなかった項目はレンダラーがスキップを明示する）
         var sectionItems = selected.Where(i => !diverted.Contains(i)).ToList();
@@ -2347,7 +2423,8 @@ public sealed class SyncPlanner
     private static List<TableRebuildPlan> BuildCreateOnlyRebuilds(
         List<SchemaDiffItem> selected,
         HashSet<string> addedTables,
-        HashSet<SchemaDiffItem> diverted
+        HashSet<SchemaDiffItem> diverted,
+        IdentifierLengthLimit limit
     )
     {
         var rebuilds = new List<TableRebuildPlan>();
@@ -2370,7 +2447,7 @@ public sealed class SyncPlanner
 
             foreach (var fkItem in fkItems)
             {
-                var resolved = ResolveAddedForeignKey(fkItem);
+                var resolved = ResolveAddedForeignKey(fkItem, limit);
 
                 if (resolved is null)
                 {
@@ -2414,7 +2491,8 @@ public sealed class SyncPlanner
         NameLookup<Entity> liveByName,
         HashSet<SchemaDiffItem> diverted,
         SyncPlanContext context,
-        ILookup<string, ResolvedForeignKeyRelationship> liveForeignKeysByChild
+        ILookup<string, ResolvedForeignKeyRelationship> liveForeignKeysByChild,
+        IdentifierLengthLimit limit
     )
     {
         var rebuilds = new List<TableRebuildPlan>();
@@ -2439,7 +2517,7 @@ public sealed class SyncPlanner
             var columnsOnly = live.Clone(preserveId: true);
             ApplySelectedColumnChanges(columnsOnly, candidates);
             var tableItems = candidates
-                .Where(i => IsResolvableInRebuild(i, live, columnsOnly))
+                .Where(i => IsResolvableInRebuild(i, live, columnsOnly, limit))
                 .ToList();
 
             if (!tableItems.Any(i => IsRebuildTriggerKind(i.Kind)))
@@ -2466,7 +2544,11 @@ public sealed class SyncPlanner
             ApplySelectedUniqueConstraintChanges(newDef, tableItems);
 
             // FK 集合 = live の子側 FK − 選択済み DropForeignKey ＋ 選択済み AddForeignKey
-            var foreignKeys = SynthesizeForeignKeys(tableItems, liveForeignKeysByChild[table]);
+            var foreignKeys = SynthesizeForeignKeys(
+                tableItems,
+                liveForeignKeysByChild[table],
+                limit
+            );
 
             // データ移送対象 = live と合成後の両方に存在する列（合成後の列順で並べる）
             var liveColumnNames = live.Columns.Select(c => c.Name).ToHashSet(TableComparer);
@@ -2503,7 +2585,8 @@ public sealed class SyncPlanner
     private static bool IsResolvableInRebuild(
         SchemaDiffItem item,
         Entity live,
-        Entity columnsApplied
+        Entity columnsApplied,
+        IdentifierLengthLimit limit
     )
     {
         bool HasColumn(Entity entity, string? name) =>
@@ -2514,7 +2597,7 @@ public sealed class SyncPlanner
             SchemaDiffKind.AlterColumn => HasColumn(live, item.ColumnName),
             SchemaDiffKind.AddUniqueConstraint => item.UniqueConstraintColumns.Count > 0
                 && item.UniqueConstraintColumns.All(c => HasColumn(columnsApplied, c)),
-            SchemaDiffKind.AddForeignKey => ResolveAddedForeignKey(item) is { } fk
+            SchemaDiffKind.AddForeignKey => ResolveAddedForeignKey(item, limit) is { } fk
                 && fk.ChildColumns.All(c => HasColumn(columnsApplied, c)),
             _ => true,
         };
@@ -2967,10 +3050,11 @@ public sealed class SyncPlanner
     /// <param name="liveForeignKeys">この表を子に持つ live の外部キー</param>
     private static List<TableRebuildForeignKey> SynthesizeForeignKeys(
         IReadOnlyList<SchemaDiffItem> tableItems,
-        IEnumerable<ResolvedForeignKeyRelationship> liveForeignKeys
+        IEnumerable<ResolvedForeignKeyRelationship> liveForeignKeys,
+        IdentifierLengthLimit limit
     )
     {
-        var foreignKeys = liveForeignKeys.Select(ToRebuildForeignKey).ToList();
+        var foreignKeys = liveForeignKeys.Select(fk => ToRebuildForeignKey(fk, limit)).ToList();
 
         // 選択済み DropForeignKey に一致する live FK を 1 本だけ除去する（親テーブル・構成列ペアで候補を絞り、
         // 名前・参照アクションまで合うものを優先する）。同じ列ペアに外部キーが 2 本ある構成で、1 本の削除・作り直しが
@@ -3003,7 +3087,8 @@ public sealed class SyncPlanner
                 : ResolveForeignKeyName(
                     dropFk.Relationship,
                     SchemaDiffService.NormalizeTable(dropFk.ChildEntity),
-                    parentTable
+                    parentTable,
+                    limit
                 );
             var onDelete = dropFk.Relationship?.OnDelete ?? ForeignKeyReferentialAction.NoAction;
             var onUpdate = dropFk.Relationship?.OnUpdate ?? ForeignKeyReferentialAction.NoAction;
@@ -3027,7 +3112,7 @@ public sealed class SyncPlanner
         // 選択済み AddForeignKey を追加する
         foreach (var addFk in tableItems.Where(i => i.Kind == SchemaDiffKind.AddForeignKey))
         {
-            var resolved = ResolveAddedForeignKey(addFk);
+            var resolved = ResolveAddedForeignKey(addFk, limit);
 
             if (resolved is not null)
             {
@@ -3039,7 +3124,10 @@ public sealed class SyncPlanner
     }
 
     /// <summary>live の外部キーを、再構築の CREATE TABLE へ載せる FK 仕様へ変換する</summary>
-    private static TableRebuildForeignKey ToRebuildForeignKey(ResolvedForeignKeyRelationship fk)
+    private static TableRebuildForeignKey ToRebuildForeignKey(
+        ResolvedForeignKeyRelationship fk,
+        IdentifierLengthLimit limit
+    )
     {
         var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
 
@@ -3047,7 +3135,8 @@ public sealed class SyncPlanner
             ResolveForeignKeyName(
                 fk.Relationship,
                 SchemaDiffService.NormalizeTable(fk.Child),
-                parentTable
+                parentTable,
+                limit
             ),
             [.. ForeignKeyColumnPairResolver.ChildColumns(fk.ColumnPairs)],
             parentTable,
@@ -3058,7 +3147,10 @@ public sealed class SyncPlanner
     }
 
     /// <summary>選択済み AddForeignKey 差分項目を解決済みの FK 仕様へ変換する（解決不能なら null）</summary>
-    private static TableRebuildForeignKey? ResolveAddedForeignKey(SchemaDiffItem item)
+    private static TableRebuildForeignKey? ResolveAddedForeignKey(
+        SchemaDiffItem item,
+        IdentifierLengthLimit limit
+    )
     {
         if (item.ChildEntity is null || item.ParentEntity is null)
         {
@@ -3076,7 +3168,7 @@ public sealed class SyncPlanner
         var parentTable = SchemaDiffService.NormalizeTable(item.ParentEntity);
 
         return new TableRebuildForeignKey(
-            SyncScriptBuilderHelper.ForeignKeyNameToAdd(item),
+            SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, limit),
             [.. ForeignKeyColumnPairResolver.ChildColumns(columnPairs)],
             parentTable,
             [.. ForeignKeyColumnPairResolver.ParentColumns(columnPairs)],

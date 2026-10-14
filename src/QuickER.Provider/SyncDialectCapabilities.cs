@@ -166,6 +166,25 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public bool TransactionalDdl { get; init; } = true;
 
+    /// <summary>この方言の識別子（テーブル名・列名・制約名）の長さの上限</summary>
+    /// <remarks>
+    /// 各方言の識別子クラスの <c>Limit</c>（値の正本は Model の <see cref="IdentifierLengthLimits"/>）を指す。
+    /// 既定は上限なし（方言を指定しない差分の比較のため）。5 方言のプロバイダーがそれぞれの値を宣言していることは
+    /// <c>IdentifierLengthLimitDeclarationTests</c> が固定する。
+    /// </remarks>
+    public IdentifierLengthLimit IdentifierLengthLimit { get; init; } =
+        IdentifierLengthLimit.Unlimited;
+
+    /// <summary>上限を超える識別子を断らずに黙って切り詰める方言か（PostgreSQL）</summary>
+    /// <remarks>
+    /// <c>true</c> の方言では、差分が名前の無いリレーションの外部キーを live と突き合わせるとき、live の名前が
+    /// 「縮める前の既定名を <see cref="IdentifierLengthLimit.Truncate"/> で切ったもの」と一致すれば同じ外部キーとみなす。
+    /// 旧版の QuickER は長い既定名をそのまま DDL へ書き、PostgreSQL が 63 バイトで切って保存していたため、
+    /// 吸収しないと既定名を縮めるようにした版で同期すると、同じ外部キーが追加と削除の 2 項目に化ける
+    /// （<c>PostgreSqlLegacyTruncatedNameIntegrationTests</c> が固定）。
+    /// </remarks>
+    public bool TruncatesLongIdentifiers { get; init; }
+
     /// <summary>2 つの型表記が、この方言の DB で同じ宣言として保存されるか</summary>
     /// <remarks>
     /// 両側を <see cref="NormalizeTypeNotation"/> に通したうえで <see cref="DbTypeText.AreEquivalent"/>

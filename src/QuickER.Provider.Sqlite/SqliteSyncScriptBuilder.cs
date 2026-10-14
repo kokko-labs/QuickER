@@ -37,6 +37,9 @@ namespace QuickER.Provider.Sqlite;
 /// </remarks>
 public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
 {
+    /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => SqliteIdentifier.Limit;
+
     /// <summary>再構築で作る一時テーブル名の接尾辞（衝突は考慮しない前提＝スキーマ内で一意と仮定）</summary>
     private const string RebuildSuffix = "_quicker_rebuild";
 
@@ -47,8 +50,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // （基底の Build を経由しない再構築方式なので、ここで同じ関門を通す）
         SqlTypeText.Validate(plan);
 
-        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）
-        SqlNameText.Validate(plan);
+        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）。
+        // あわせて方言の上限を超える名前・方言が表せない文字を含む名前も、場所を名指しして止める
+        SqlNameText.Validate(plan, IdentifierLimit);
 
         // 空の計画は空文字列（実行側は空スクリプトを no-op として COMMIT する）
         if (plan.Sections.Count == 0 && plan.Rebuilds.Count == 0)
@@ -212,7 +216,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // （選択した列削除で構成列が消えた等）は ResolveAll が黙って除外する。
         // 合成名 UQ_{表}_{列…} の基になるテーブル名は definition.TableName＝実テーブル名
         // （再構築の一時テーブル名ではない）ため、リネーム後に自然な制約名になる
-        foreach (var unique in UniqueConstraintNaming.ResolveAll(definition))
+        foreach (
+            var unique in UniqueConstraintNaming.ResolveAll(definition, SqliteIdentifier.Limit)
+        )
         {
             trailingConstraints.Add(
                 SqliteDdlGenerator.BuildUniqueConstraintLine(unique.Name, unique.ColumnNames)

@@ -410,7 +410,10 @@
     <value>{0}: 外部キー「{1}」は取込範囲外の「{2}」を参照しているため、リレーションを作成していません。</value>
   </data>
   <data name="Db_ImportWarningTableNameCollision" xml:space="preserve">
-    <value>「{0}」は「{1}」と大文字小文字だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
+    <value>「{0}」は「{1}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
+  </data>
+  <data name="Db_ImportWarningColumnNameCollision" xml:space="preserve">
+    <value>テーブル「{0}」の列「{1}」は「{2}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（図は両者を区別できません）。</value>
   </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>現在の図を既存 DB へ書き戻す（差分を確認してから実行）</value>

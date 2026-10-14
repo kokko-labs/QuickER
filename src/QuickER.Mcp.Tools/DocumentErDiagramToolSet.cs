@@ -33,7 +33,7 @@ public static class DocumentErDiagramToolSet
                     target_dbms = new
                     {
                         type = "string",
-                        @enum = new[] { "sqlserver", "postgresql", "mysql", "oracle", "sqlite" },
+                        @enum = TargetDbmsNames.All,
                         description = "Target DBMS (database dialect) of the new diagram.",
                     },
                 },

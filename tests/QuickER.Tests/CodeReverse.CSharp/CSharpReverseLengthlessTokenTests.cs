@@ -1,6 +1,7 @@
 using System;
 using AwesomeAssertions;
 using QuickER.CodeReverse.CSharp;
+using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
 using QuickER.Provider.Oracle;
@@ -50,7 +51,11 @@ public class CSharpReverseLengthlessTokenTests
     [InlineData("Oracle", "binary")]
     public void Parse_LengthlessToken_KeepsTokenTextAndWarns(string dialect, string token)
     {
-        var result = new CSharpReverseParser().Parse(Source(token), CatalogOf(dialect));
+        var result = new CSharpReverseParser().Parse(
+            Source(token),
+            CatalogOf(dialect),
+            IdentifierLengthLimit.Unlimited
+        );
 
         var column = result
             .Entities.Should()
@@ -77,7 +82,11 @@ public class CSharpReverseLengthlessTokenTests
         string expectedType
     )
     {
-        var result = new CSharpReverseParser().Parse(Source(token), new PostgreSqlTypeCatalog());
+        var result = new CSharpReverseParser().Parse(
+            Source(token),
+            new PostgreSqlTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
 
         result.Entities[0].Columns[0].DataType.Should().Be(expectedType);
         result.Warnings.Should().BeEmpty();
@@ -90,7 +99,11 @@ public class CSharpReverseLengthlessTokenTests
     [InlineData("Oracle", "NVARCHAR2(50)")]
     public void Parse_TokenWithLength_ExpandsWithoutWarning(string dialect, string expectedType)
     {
-        var result = new CSharpReverseParser().Parse(Source("string(50)"), CatalogOf(dialect));
+        var result = new CSharpReverseParser().Parse(
+            Source("string(50)"),
+            CatalogOf(dialect),
+            IdentifierLengthLimit.Unlimited
+        );
 
         result.Entities[0].Columns[0].DataType.Should().Be(expectedType);
         result.Warnings.Should().BeEmpty();

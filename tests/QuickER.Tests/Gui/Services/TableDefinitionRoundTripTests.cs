@@ -60,7 +60,7 @@ public class TableDefinitionRoundTripTests
     {
         using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(diagram);
 
-        return TableDefinitionDocumentImporter.Load(workbook);
+        return TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
     }
 
     [Fact(
@@ -140,7 +140,7 @@ public class TableDefinitionRoundTripTests
             .Worksheet.Cell(TableDefinitionDocumentLayout.RelationshipDataStartRow, 4)
             .Value = string.Empty;
 
-        var act = () => TableDefinitionDocumentImporter.Load(workbook);
+        var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
 
         act.Should().Throw<InvalidDataException>();
     }
@@ -180,7 +180,7 @@ public class TableDefinitionRoundTripTests
 
             // 素の取込では落ちている（後処理が引き継いでいることの対照）
             var plain = TableDefinitionDocumentImporter
-                .Load(path)
+                .Load(path, "sqlserver")
                 .Entities.Single(entity => entity.TableName == "orders");
             plain.Columns.Single(column => column.Name == "a").IsComputed.Should().BeFalse();
             plain.UniqueConstraints[0].Name.Should().BeNull();
@@ -266,7 +266,7 @@ public class TableDefinitionRoundTripTests
 
             // 素の取込では列の並び順へ戻っている（後処理が引き継いでいることの対照）
             var plain = TableDefinitionDocumentImporter
-                .Load(path)
+                .Load(path, "sqlserver")
                 .Entities.Single(entity => entity.TableName == "orders");
             KeyOrder(plain).Should().Equal("a", "b");
             plain.PrimaryKeyColumnIds.Should().BeEmpty();

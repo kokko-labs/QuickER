@@ -158,7 +158,7 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
             }
         ),
         new RuleCase(
-            "parameter named Query",
+            "parameter named like a member of the remote request record",
             QueryRuleKind.ReservedParameterName,
             _ => new QueryDefinition
             {
@@ -166,7 +166,7 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
                 Returns = QueryReturnShape.List,
                 Parameters =
                 {
-                    new QueryParameter { Name = "Query", Type = "int32" },
+                    new QueryParameter { Name = "toString", Type = "int32" },
                 },
             }
         ),
@@ -237,6 +237,61 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
                 Name = "Rows",
                 Returns = QueryReturnShape.Projection,
                 ResultTypeName = "OrderRow",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is a BCL type the generated code uses by its simple name",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "Task",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is a runtime type",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "SqlQuery",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is the generated entity class",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "OrderEntity",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is the generated repository interface",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "IOrderRepository",
+                Fields = { AmountField(entity) },
+            }
+        ),
+        new RuleCase(
+            "result type name is a generated value object",
+            QueryRuleKind.ReservedResultTypeName,
+            entity => new QueryDefinition
+            {
+                Name = "Rows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "AmountValue",
                 Fields = { AmountField(entity) },
             }
         ),
@@ -348,7 +403,8 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
             .Validate(
                 order,
                 Attach(candidate, order),
-                existing is null ? [] : [Attach(existing, order)]
+                existing is null ? [] : [Attach(existing, order)],
+                [order]
             )
             .Should()
             .ContainSingle(v => v.Kind == ruleCase.Expected)
@@ -406,6 +462,18 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
             }
         ),
         (
+            "a parameter named Query (the generated body calls the member through this.)",
+            _ => new QueryDefinition
+            {
+                Name = "ByCustomer",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = "Query", Type = "int32" },
+                },
+            }
+        ),
+        (
             "a name that already ends in Async",
             _ => new QueryDefinition { Name = "LookupAsync", Returns = QueryReturnShape.List }
         ),
@@ -456,7 +524,10 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
         var order = CreateOrder();
         var candidate = build(order);
 
-        QueryDefinitionRules.Validate(order, Attach(candidate, order), []).Should().BeEmpty(label);
+        QueryDefinitionRules
+            .Validate(order, Attach(candidate, order), [], [order])
+            .Should()
+            .BeEmpty(label);
 
         var diagram = new ErDiagram
         {

@@ -44,7 +44,7 @@ public class TableDefinitionConstraintNameTests
             editRelationshipSheet(defined!.Ranges.First().Worksheet);
         }
 
-        return TableDefinitionDocumentImporter.Load(workbook);
+        return TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
     }
 
     /// <summary>リレーション一覧の制約名欄（2 列目）を、データ行の先頭から指定行数だけ空にする</summary>

@@ -113,6 +113,18 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("CodeGen_Error_EntityClassNameCollision", resourceCulture);
             }
         }
+        
+        public static string CodeGen_Error_DuplicateTableName {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_DuplicateTableName", resourceCulture);
+            }
+        }
+        
+        public static string CodeGen_Error_DuplicateColumnName {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_DuplicateColumnName", resourceCulture);
+            }
+        }
 
         public static string CodeGen_Error_ColumnPropertyNameCollision {
             get {
@@ -690,6 +702,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
         public static string CodeGen_Query_DuplicateResultTypeName {
             get {
                 return ResourceManager.GetString("CodeGen_Query_DuplicateResultTypeName", resourceCulture);
+            }
+        }
+        
+        public static string CodeGen_Query_ReservedResultTypeName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ReservedResultTypeName", resourceCulture);
             }
         }
 

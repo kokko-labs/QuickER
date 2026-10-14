@@ -25,11 +25,23 @@ Select an entity and the properties panel lets you edit the following.
 
 | Item | Contents |
 |---|---|
-| Table Name | The physical name of the table |
+| Table Name | The physical name of the table. Surrounding spaces are removed, and a name that matches another table's name ignoring letter case is rejected (see "Names" below) |
 | Description | The table description. On SQL Server it syncs with the extended property (MS_Description) |
 | Title Background | The card's title color (Blue / Green / Yellow / Purple / Pink / Gray) |
 | Columns | The column list (next section) |
 | Notes | A free-form field that goes neither to the database nor to the generated code. It is written out to the Excel and HTML definition documents, and re-importing an Excel definition document restores it |
+
+### Names
+
+The names kept in a diagram (tables, columns, constraints, named queries, their parameters and projection fields) follow one rule:
+
+- **Surrounding spaces are removed** when a name enters the diagram, from every route (the properties panel, the AI tools, imports, a diagram file you edited by hand). The spelling, including upper and lower case, is kept as typed.
+- **Two names are the same name** when they match ignoring letter case, after the surrounding spaces are removed. A diagram never holds two tables with the same name, or two columns of one table with the same name.
+- **The properties panel rejects a duplicate**: the name goes back to what it was, the status bar says which table or column already has the name, and nothing is added to Undo.
+- **The status bar warns when a name is longer than the target database allows** (or holds a character it cannot store), for tables, columns, foreign keys and unique constraints.
+  The name is accepted as typed; DDL generation and sync refuse it until it is shortened (see [Identifier length limits](database.md#identifier-length-limits))
+
+The name is not a database identifier you have to match exactly: when you [sync](database.md) with a database, a table or column whose name differs only in letter case counts as the same element (see the sync notes).
 
 ### Editing columns
 

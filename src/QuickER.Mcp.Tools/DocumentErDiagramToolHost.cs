@@ -10,8 +10,8 @@ namespace QuickER.Mcp.Tools;
 
 /// <summary>
 /// ファイルベースの ER 図ツール実行ホスト。各ツール呼び出しを
-/// 「<see cref="JsonStorageService.Load"/>（DiagramDocument 読込）→ 意味モデル（<see cref="ErDiagram"/>）変更 →
-/// <see cref="JsonStorageService.SaveAtomic"/>（保存）」で完結させるステートレスな実行器。
+/// 「<see cref="DiagramFileReader.Read"/>（形式を検証して DiagramDocument を読込）→ 意味モデル（<see cref="ErDiagram"/>）変更 →
+/// <see cref="JsonStorageService.SaveAtomic"/>（変わったときだけ保存）」で完結させるステートレスな実行器。
 /// </summary>
 /// <remarks>
 /// 意味論は GUI 側 <c>QuickER.Services.ErDiagramDynamicTools</c>（ViewModel 操作）を忠実にミラーするが、
@@ -25,15 +25,6 @@ public static partial class DocumentErDiagramToolHost
 {
     /// <summary>作成専用ツール（既存ファイルを変更しない）の名前</summary>
     public const string CreateDiagramToolName = "create_diagram";
-
-    /// <summary>読み取り系ツール（新しいフォーマットでも警告付きで続行する）の名前</summary>
-    private const string GetSummaryToolName = "get_diagram_summary";
-
-    /// <summary>
-    /// <c>target_dbms</c> に指定できるプロバイダ識別名（tool 定義の enum と一致させる）。
-    /// 正本は <see cref="QueryToolCore.SupportedDbms"/>（クエリツールの SQL 方言キーと同一集合）。
-    /// </summary>
-    private static string[] SupportedDbms => QueryToolCore.SupportedDbms;
 
     /// <summary>ツール名でディスパッチし、対象ファイルに対してツールを実行する</summary>
     /// <param name="toolName">ツール名</param>
@@ -68,21 +59,36 @@ public static partial class DocumentErDiagramToolHost
         toolName switch
         {
             CreateDiagramToolName => CreateDiagram(file, arguments),
-            GetSummaryToolName => GetDiagramSummary(file),
+            ErDiagramToolNames.GetDiagramSummary => GetDiagramSummary(file),
             ListQueriesToolName => ListQueries(file),
             SetQueryToolName => Mutate(file, doc => SetQuery(doc, arguments)),
             RemoveQueryToolName => Mutate(file, doc => RemoveQuery(doc, arguments)),
-            "add_entity" => Mutate(file, doc => AddEntity(doc, arguments)),
-            "remove_entity" => Mutate(file, doc => RemoveEntity(doc, arguments)),
-            "add_column" => Mutate(file, doc => AddColumn(doc, arguments)),
-            "remove_column" => Mutate(file, doc => RemoveColumn(doc, arguments)),
-            "set_entity_property" => Mutate(file, doc => SetEntityProperty(doc, arguments)),
-            "set_column_property" => Mutate(file, doc => SetColumnProperty(doc, arguments)),
-            "add_relationship" => Mutate(file, doc => AddRelationship(doc, arguments)),
-            "remove_relationship" => Mutate(file, doc => RemoveRelationship(doc, arguments)),
-            "set_primary_key" => Mutate(file, doc => SetPrimaryKey(doc, arguments)),
-            "set_unique_constraint" => Mutate(file, doc => SetUniqueConstraint(doc, arguments)),
-            "remove_unique_constraint" => Mutate(
+            ErDiagramToolNames.AddEntity => Mutate(file, doc => AddEntity(doc, arguments)),
+            ErDiagramToolNames.RemoveEntity => Mutate(file, doc => RemoveEntity(doc, arguments)),
+            ErDiagramToolNames.AddColumn => Mutate(file, doc => AddColumn(doc, arguments)),
+            ErDiagramToolNames.RemoveColumn => Mutate(file, doc => RemoveColumn(doc, arguments)),
+            ErDiagramToolNames.SetEntityProperty => Mutate(
+                file,
+                doc => SetEntityProperty(doc, arguments)
+            ),
+            ErDiagramToolNames.SetColumnProperty => Mutate(
+                file,
+                doc => SetColumnProperty(doc, arguments)
+            ),
+            ErDiagramToolNames.AddRelationship => Mutate(
+                file,
+                doc => AddRelationship(doc, arguments)
+            ),
+            ErDiagramToolNames.RemoveRelationship => Mutate(
+                file,
+                doc => RemoveRelationship(doc, arguments)
+            ),
+            ErDiagramToolNames.SetPrimaryKey => Mutate(file, doc => SetPrimaryKey(doc, arguments)),
+            ErDiagramToolNames.SetUniqueConstraint => Mutate(
+                file,
+                doc => SetUniqueConstraint(doc, arguments)
+            ),
+            ErDiagramToolNames.RemoveUniqueConstraint => Mutate(
                 file,
                 doc => RemoveUniqueConstraint(doc, arguments)
             ),
@@ -95,6 +101,12 @@ public static partial class DocumentErDiagramToolHost
     /// 変更系ツールの共通処理。読込・ガードを行い、変更が成功したときのみ外部キー印を当て直して
     /// （<see cref="ReleaseForeignKeyMarks"/>）保存する
     /// </summary>
+    /// <remarks>
+    /// 成功しても図が変わっていなければ書かない（主キー列への <c>is_nullable=true</c> のように無視しただけの呼び出し・
+    /// 同じ値の設定・同じ定義の upsert）。比べるのは変更の前後を保存する形で直列化したもの
+    /// （<see cref="JsonStorageService.ToJson"/>）で、ツールごとに「変えたか」を返させる形より取りこぼしが無い。
+    /// 書くとファイルの更新日時が動き、GUI がその図を開いていれば再読込や外部変更の確認が起きる。
+    /// </remarks>
     /// <param name="file">対象ファイル</param>
     /// <param name="operation">読み込んだ文書を変更し結果を返す処理（成功時のみ保存される）</param>
     private static (string, bool) Mutate(
@@ -109,16 +121,35 @@ public static partial class DocumentErDiagramToolHost
             return (error, false);
         }
 
-        var managedBefore = CollectRelationshipChildColumnIds(document!.Schema);
-        var (result, success) = operation(document);
+        var loaded = document!;
+        var before = JsonStorageService.ToJson(loaded);
+        var managedBefore = CollectRelationshipChildColumnIds(loaded.Schema);
+        var namesRefusedBefore = NameLimitNotes.Find(loaded.Schema);
+        var (result, success) = operation(loaded);
 
         if (success)
         {
-            ReleaseForeignKeyMarks(document.Schema, managedBefore);
+            ReleaseForeignKeyMarks(loaded.Schema, managedBefore);
+
+            // 名前は受け付けて保存する（DDL・同期の入口が断る）。この呼び出しで新しく受け付けられなくなった名前を知らせる
+            if (
+                NameLimitNotes.Describe(
+                    namesRefusedBefore,
+                    NameLimitNotes.Find(loaded.Schema),
+                    loaded.Schema.TargetDbms
+                ) is
+                { } nameNote
+            )
+            {
+                result = $"{result} {nameNote}";
+            }
 
             // ユーザーの実ファイルへ書き戻すため原子的に差し替える（書き込み途中の中断・
-            // ディスク満杯で既存の図が半端な JSON になるのを防ぐ）
-            JsonStorageService.SaveAtomic(file, document!);
+            // ディスク満杯で既存の図が半端な JSON になるのを防ぐ）。何も変わっていなければ書かない
+            if (JsonStorageService.ToJson(loaded) != before)
+            {
+                JsonStorageService.SaveAtomic(file, loaded);
+            }
         }
 
         return (result, success);
@@ -157,15 +188,7 @@ public static partial class DocumentErDiagramToolHost
     /// <summary>変更系ツール向けに文書を読み込む（不在・非 DiagramDocument・新フォーマットは拒否）</summary>
     private static (DiagramDocument? Document, string? Error) LoadForMutation(string file)
     {
-        if (!File.Exists(file))
-        {
-            return (
-                null,
-                $"Diagram file not found: {file}. To create a new diagram, call {CreateDiagramToolName} first."
-            );
-        }
-
-        var (document, error) = TryReadDocument(file);
+        var (document, error) = DiagramFileReader.Read(file);
 
         if (error is not null)
         {
@@ -183,21 +206,6 @@ public static partial class DocumentErDiagramToolHost
         return (document, null);
     }
 
-    /// <summary>ファイルを読み、DiagramDocument として妥当か検証したうえで読み込む</summary>
-    /// <remarks>
-    /// 検証は <see cref="JsonStorageService.TryLoad"/> に委ね、失敗種別を MCP ツールの応答文言
-    /// （英語正本）へ翻訳するだけを担う。
-    /// </remarks>
-    private static (DiagramDocument? Document, string? Error) TryReadDocument(string file)
-    {
-        if (JsonStorageService.TryLoad(file, out var document, out var error, out var exception))
-        {
-            return (document, null);
-        }
-
-        return (null, DiagramLoadErrors.Describe(file, error, exception));
-    }
-
     // ---------------- create_diagram ----------------
 
     /// <summary>新規のスキーマのみ文書（レイアウトなし）を作成する。既存ファイルは上書きしない</summary>
@@ -208,29 +216,24 @@ public static partial class DocumentErDiagramToolHost
         if (string.IsNullOrWhiteSpace(dbmsInput))
         {
             return (
-                $"target_dbms is required (one of: {string.Join(", ", SupportedDbms)}).",
+                $"target_dbms is required (one of: {string.Join(", ", TargetDbmsNames.All)}).",
                 false
             );
         }
 
-        var dbms = SupportedDbms.FirstOrDefault(d =>
-            string.Equals(d, dbmsInput, StringComparison.OrdinalIgnoreCase)
-        );
+        var dbms = TargetDbmsNames.Find(dbmsInput);
 
         if (dbms is null)
         {
             return (
-                $"Invalid target_dbms '{dbmsInput}'. Must be one of: {string.Join(", ", SupportedDbms)}.",
+                $"Invalid target_dbms '{dbmsInput}'. Must be one of: {string.Join(", ", TargetDbmsNames.All)}.",
                 false
             );
         }
 
         if (File.Exists(file))
         {
-            return (
-                $"Diagram file already exists: {file}. {CreateDiagramToolName} only creates new files; use the other tools to modify an existing diagram.",
-                false
-            );
+            return (DescribeAlreadyExists(file), false);
         }
 
         // 親ディレクトリを黙って掘らない（存在しなければエラー）
@@ -251,25 +254,39 @@ public static partial class DocumentErDiagramToolHost
             Schema = new ErDiagram { TargetDbms = dbms },
             Layout = null,
         };
-        JsonStorageService.SaveAtomic(file, document);
+
+        try
+        {
+            // 置き換えない書き込みで作る（上の確認から書くまでの間に別のプロセスが作った図を上書きしない）
+            JsonStorageService.SaveNew(file, document);
+        }
+        catch (IOException) when (File.Exists(file))
+        {
+            return (DescribeAlreadyExists(file), false);
+        }
 
         return ($"Created diagram '{file}' (target DBMS: {dbms}).", true);
     }
+
+    /// <summary>新しい版の図のときだけ、読み取り系の応答の先頭へ警告と空行を付ける（文言は <see cref="DiagramFileReader.NewerFormatWarning"/>）</summary>
+    internal static void AppendNewerFormatWarning(StringBuilder sb, DiagramDocument document)
+    {
+        if (DiagramFileReader.NewerFormatWarning(document) is { } warning)
+        {
+            sb.Append(warning).Append('\n').Append('\n');
+        }
+    }
+
+    /// <summary>create_diagram が既存のファイルを断るときの文言</summary>
+    private static string DescribeAlreadyExists(string file) =>
+        $"Diagram file already exists: {file}. {CreateDiagramToolName} only creates new files; use the other tools to modify an existing diagram.";
 
     // ---------------- get_diagram_summary ----------------
 
     /// <summary>ER 図の概要（テーブル・カラム・リレーション）を英語テキスト化する</summary>
     private static (string, bool) GetDiagramSummary(string file)
     {
-        if (!File.Exists(file))
-        {
-            return (
-                $"Diagram file not found: {file}. To create a new diagram, call {CreateDiagramToolName} first.",
-                false
-            );
-        }
-
-        var (document, error) = TryReadDocument(file);
+        var (document, error) = DiagramFileReader.Read(file);
 
         if (error is not null)
         {
@@ -279,29 +296,23 @@ public static partial class DocumentErDiagramToolHost
         var sb = new StringBuilder();
 
         // 読み取り系は新フォーマットでも警告付きで続行する（CLI と同方針）
-        if (document!.IsNewerFormat)
-        {
-            sb.AppendLine(
-                $"Warning: this diagram was saved in a newer format (version {document.Version} > supported {DiagramDocument.CurrentVersion}); unknown data may be omitted. Showing a best-effort summary."
-            );
-            sb.AppendLine();
-        }
+        AppendNewerFormatWarning(sb, document!);
 
-        var schema = document.Schema;
+        var schema = document!.Schema;
 
         // 型名・制約の書き方は対象 DBMS で変わるので、最初に読む要約の先頭で示す
-        sb.AppendLine($"Target DBMS: {schema.TargetDbms}");
-        sb.AppendLine($"Tables: {schema.Entities.Count}");
-        sb.AppendLine($"Relationships: {schema.Relationships.Count}");
-        sb.AppendLine();
+        sb.Append($"Target DBMS: {schema.TargetDbms}").Append('\n');
+        sb.Append($"Tables: {schema.Entities.Count}").Append('\n');
+        sb.Append($"Relationships: {schema.Relationships.Count}").Append('\n');
+        sb.Append('\n');
 
         foreach (var entity in schema.Entities)
         {
-            sb.AppendLine($"[{entity.TableName}]");
+            sb.Append($"[{entity.TableName}]").Append('\n');
 
             if (!string.IsNullOrWhiteSpace(entity.Description))
             {
-                sb.AppendLine($"  Description: {entity.Description}");
+                sb.Append($"  Description: {entity.Description}").Append('\n');
             }
 
             foreach (var col in entity.Columns)
@@ -327,17 +338,18 @@ public static partial class DocumentErDiagramToolHost
                 var colDesc = !string.IsNullOrWhiteSpace(col.Description)
                     ? $" // {col.Description}"
                     : string.Empty;
-                sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}");
+                sb.Append($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}").Append('\n');
             }
 
             AppendPrimaryKeyOrder(sb, entity.GetReorderedPrimaryKeyColumnNames());
-            AppendUniqueConstraints(sb, entity);
+            AppendUniqueConstraints(sb, entity, IdentifierLengthLimits.ForDbms(schema.TargetDbms));
         }
 
         if (schema.Relationships.Count > 0)
         {
-            sb.AppendLine();
-            sb.AppendLine("Relationships:");
+            var ddlNames = ConstraintNames.ResolveForeignKeyNamesById(schema);
+            sb.Append('\n');
+            sb.Append("Relationships:").Append('\n');
 
             foreach (var rel in schema.Relationships)
             {
@@ -345,9 +357,10 @@ public static partial class DocumentErDiagramToolHost
                 var target = FindEntityById(schema, rel.TargetEntityId);
                 var sourceName = source?.TableName ?? "(unknown)";
                 var targetName = target?.TableName ?? "(unknown)";
-                sb.AppendLine(
-                    $"  {sourceName} → {targetName} ({rel.Type}{DescribeColumnPairs(rel, source, target)}){DescribeConstraintName(rel)}"
-                );
+                sb.Append(
+                        $"  {sourceName} → {targetName} ({rel.Type}{DescribeColumnPairs(rel, source, target)}){DescribeConstraintName(rel, ddlNames)}"
+                    )
+                    .Append('\n');
             }
         }
 
@@ -363,12 +376,12 @@ public static partial class DocumentErDiagramToolHost
     /// </remarks>
     private static (string, bool) AddEntity(DiagramDocument document, JsonElement args)
     {
-        var tableName = GetString(args, "table_name") ?? "NewTable";
+        var tableName = GetString(args, "table_name");
         var desc = GetString(args, "description") ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(tableName))
         {
-            return ("table_name is required.", false);
+            return (TableNameRequiredMessage, false);
         }
 
         if (FindEntity(document.Schema, tableName) is { } existing)
@@ -393,7 +406,7 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(tableName))
         {
-            return ("table_name is required.", false);
+            return (TableNameRequiredMessage, false);
         }
 
         var schema = document.Schema;
@@ -401,7 +414,7 @@ public static partial class DocumentErDiagramToolHost
 
         if (entity is null)
         {
-            return ($"Table '{tableName}' not found.", false);
+            return (DescribeTableNotFound(tableName), false);
         }
 
         // 削除エンティティを端点に持つリレーションも併せて除去する（孤立した線を残さない）
@@ -433,11 +446,11 @@ public static partial class DocumentErDiagramToolHost
     {
         var tableName = GetString(args, "table_name");
         var columnName = GetString(args, "column_name");
-        var dataType = GetString(args, "data_type") ?? "nvarchar(100)";
+        var dataType = GetString(args, "data_type");
 
         if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName))
         {
-            return ("table_name and column_name are required.", false);
+            return (TableAndColumnNameRequiredMessage, false);
         }
 
         if (string.IsNullOrWhiteSpace(dataType))
@@ -449,7 +462,7 @@ public static partial class DocumentErDiagramToolHost
 
         if (entity is null)
         {
-            return ($"Table '{tableName}' not found.", false);
+            return (DescribeTableNotFound(tableName), false);
         }
 
         // 同じテーブルに大文字小文字だけ違う同名の列を作らない（列名で照合する他のツールから 2 本目に触れなくなる）
@@ -500,21 +513,21 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName))
         {
-            return ("table_name and column_name are required.", false);
+            return (TableAndColumnNameRequiredMessage, false);
         }
 
         var entity = FindEntity(document.Schema, tableName);
 
         if (entity is null)
         {
-            return ($"Table '{tableName}' not found.", false);
+            return (DescribeTableNotFound(tableName), false);
         }
 
         var column = FindColumn(entity, columnName);
 
         if (column is null)
         {
-            return ($"Column '{columnName}' not found.", false);
+            return (DescribeColumnNotFound(columnName), false);
         }
 
         entity.Columns.Remove(column);
@@ -546,14 +559,14 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(tableName))
         {
-            return ("table_name is required.", false);
+            return (TableNameRequiredMessage, false);
         }
 
         var entity = FindEntity(document.Schema, tableName);
 
         if (entity is null)
         {
-            return ($"Table '{tableName}' not found.", false);
+            return (DescribeTableNotFound(tableName), false);
         }
 
         var changed = new List<string>();
@@ -573,11 +586,7 @@ public static partial class DocumentErDiagramToolHost
             // 自分自身の大文字小文字だけを変える改名は許す
             var other = document.Schema.Entities.FirstOrDefault(candidate =>
                 !ReferenceEquals(candidate, entity)
-                && string.Equals(
-                    candidate.TableName,
-                    newTableName,
-                    StringComparison.OrdinalIgnoreCase
-                )
+                && SchemaNames.AreSame(candidate.TableName, newTableName)
             );
 
             if (other is not null)
@@ -620,21 +629,21 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName))
         {
-            return ("table_name and column_name are required.", false);
+            return (TableAndColumnNameRequiredMessage, false);
         }
 
         var entity = FindEntity(document.Schema, tableName);
 
         if (entity is null)
         {
-            return ($"Table '{tableName}' not found.", false);
+            return (DescribeTableNotFound(tableName), false);
         }
 
         var column = FindColumn(entity, columnName);
 
         if (column is null)
         {
-            return ($"Column '{columnName}' not found.", false);
+            return (DescribeColumnNotFound(columnName), false);
         }
 
         // 検証はどの変更よりも先に行う（GUI 側ツールは変更をその場で反映するので、途中で失敗すると一部だけ反映される）
@@ -717,7 +726,7 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(sourceTable) || string.IsNullOrWhiteSpace(targetTable))
         {
-            return ("source_table and target_table are required.", false);
+            return (SourceAndTargetTableRequiredMessage, false);
         }
 
         var schema = document.Schema;
@@ -726,15 +735,23 @@ public static partial class DocumentErDiagramToolHost
 
         if (source is null)
         {
-            return ($"Table '{sourceTable}' not found.", false);
+            return (DescribeTableNotFound(sourceTable), false);
         }
 
         if (target is null)
         {
-            return ($"Table '{targetTable}' not found.", false);
+            return (DescribeTableNotFound(targetTable), false);
         }
 
-        if (ParseRelationshipType(typeStr) is not { } relType)
+        if (typeStr is null)
+        {
+            return (
+                $"relationship_type is required (one of: {string.Join(", ", Enum.GetNames<RelationshipType>())}).",
+                false
+            );
+        }
+
+        if (!RelationshipTypeNames.TryParse(typeStr, out var relType))
         {
             return (
                 $"Invalid relationship_type '{typeStr}'. Must be one of: {string.Join(", ", Enum.GetNames<RelationshipType>())}.",
@@ -768,13 +785,13 @@ public static partial class DocumentErDiagramToolHost
                 : schema.Relationships.FirstOrDefault(existing =>
                     existing.SourceEntityId == source.Id
                     && existing.TargetEntityId == target.Id
-                    && HasSameColumnPairs(existing.ColumnPairs, columnPairs)
+                    && RelationshipColumnPair.HaveSamePairs(existing.ColumnPairs, columnPairs)
                 );
 
         if (duplicate is not null)
         {
             return (
-                $"A relationship '{source.TableName}' → '{target.TableName}' over the same column pairs already exists (constraint name: {DescribeConstraintNames([duplicate])}). The same foreign key can be defined only once.",
+                $"A relationship '{source.TableName}' → '{target.TableName}' over the same column pairs already exists (constraint name: {DescribeConstraintNames([duplicate], ConstraintNames.ResolveForeignKeyNamesById(schema))}). The same foreign key can be defined only once.",
                 false
             );
         }
@@ -787,7 +804,8 @@ public static partial class DocumentErDiagramToolHost
             target.TableName,
             source.TableName,
             childColumnNames,
-            ConstraintNames.CollectExisting(schema)
+            ConstraintNames.CollectExisting(schema),
+            IdentifierLengthLimits.ForDbms(schema.TargetDbms)
         );
 
         if (nameError is not null)
@@ -900,27 +918,6 @@ public static partial class DocumentErDiagramToolHost
             : null;
     }
 
-    /// <summary><c>relationship_type</c> を列挙値へ解釈する（列挙子の名前と大文字小文字を無視して一致。未指定は一対多）</summary>
-    /// <returns>解釈した種別。どの列挙子とも一致しなければ null</returns>
-    /// <remarks>GUI 側 <c>ErDiagramDynamicTools.ParseRelationshipType</c> と同じ規則</remarks>
-    private static RelationshipType? ParseRelationshipType(string? value) =>
-        value is null
-            ? RelationshipType.OneToMany
-            : Enum.GetValues<RelationshipType>()
-                .Cast<RelationshipType?>()
-                .FirstOrDefault(type =>
-                    string.Equals(type.ToString(), value, StringComparison.OrdinalIgnoreCase)
-                );
-
-    /// <summary>2 つの列ペア一覧が、並びを問わず同じ (親列, 子列) の組を持つかを判定する</summary>
-    private static bool HasSameColumnPairs(
-        IReadOnlyCollection<RelationshipColumnPair> left,
-        IReadOnlyCollection<RelationshipColumnPair> right
-    ) =>
-        left.Select(pair => (pair.SourceColumnId, pair.TargetColumnId))
-            .ToHashSet()
-            .SetEquals(right.Select(pair => (pair.SourceColumnId, pair.TargetColumnId)));
-
     /// <summary>テーブル名の重複を拒否するときの文言</summary>
     /// <param name="existingTableName">既に使われているテーブル名（図に書かれているとおり）</param>
     private static string DescribeTableNameTaken(string existingTableName) =>
@@ -929,6 +926,25 @@ public static partial class DocumentErDiagramToolHost
     /// <summary>空・空白だけのデータ型を拒否するときの文言</summary>
     private const string DataTypeEmptyMessage = "data_type must not be empty.";
 
+    /// <summary>テーブル名が無いときの文言</summary>
+    private const string TableNameRequiredMessage = "table_name is required.";
+
+    /// <summary>テーブル名・列名が無いときの文言</summary>
+    private const string TableAndColumnNameRequiredMessage =
+        "table_name and column_name are required.";
+
+    /// <summary>リレーションの両端のテーブル名が無いときの文言</summary>
+    private const string SourceAndTargetTableRequiredMessage =
+        "source_table and target_table are required.";
+
+    /// <summary>テーブルが見つからないときの文言</summary>
+    private static string DescribeTableNotFound(string tableName) =>
+        $"Table '{tableName}' not found.";
+
+    /// <summary>列が見つからないときの文言</summary>
+    private static string DescribeColumnNotFound(string columnName) =>
+        $"Column '{columnName}' not found.";
+
     /// <summary>新しいリレーションの制約名を決める（<c>constraint_name</c> の指定、無ければ衝突しない既定名）</summary>
     /// <param name="args">ツール引数</param>
     /// <param name="childTable">参照する側（子）のテーブル名</param>
@@ -936,40 +952,31 @@ public static partial class DocumentErDiagramToolHost
     /// <param name="childColumnNames">外部キーを構成する子の列名（宣言順）</param>
     /// <param name="existingNames">図の中の既存の制約名</param>
     /// <returns>決めた名前。指定された名前が既存と衝突するときはエラー文</returns>
-    /// <remarks>
-    /// GUI 側 <c>ErDiagramDynamicTools.ResolveNewForeignKeyName</c> のミラー。空・空白だけの指定は省略として扱い、
-    /// 前後の空白は除く。指定された名前が既存と衝突するときは、黙って付け替えず拒否する
-    /// （付け替えるとその名前での remove_relationship が外れ、受け入れると DDL が失敗する）
-    /// </remarks>
+    /// <remarks>規則は GUI のツールと共有する <see cref="ConstraintNames.ResolveRequestedForeignKey"/>。ここは文言だけを持つ</remarks>
     private static (string Name, string? Error) ResolveNewForeignKeyName(
         JsonElement args,
         string childTable,
         string parentTable,
         IReadOnlyList<string> childColumnNames,
-        IReadOnlySet<string> existingNames
+        IReadOnlySet<string> existingNames,
+        IdentifierLengthLimit limit
     )
     {
-        var requested = GetString(args, "constraint_name")?.Trim();
+        var (name, taken) = ConstraintNames.ResolveRequestedForeignKey(
+            GetString(args, "constraint_name"),
+            childTable,
+            parentTable,
+            childColumnNames,
+            existingNames,
+            limit
+        );
 
-        if (string.IsNullOrEmpty(requested))
-        {
-            return (
-                ConstraintNames.UniqueForeignKey(
-                    childTable,
-                    parentTable,
-                    childColumnNames,
-                    existingNames
-                ),
-                null
-            );
-        }
-
-        return existingNames.Contains(requested)
+        return taken
             ? (
-                requested,
-                $"The constraint name '{requested}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit constraint_name to get a unique one automatically."
+                name,
+                $"The constraint name '{name}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit constraint_name to get a unique one automatically."
             )
-            : (requested, null);
+            : (name, null);
     }
 
     /// <summary>
@@ -1119,7 +1126,9 @@ public static partial class DocumentErDiagramToolHost
     /// <summary>指定した参照元・参照先テーブル間のリレーションを削除する</summary>
     /// <remarks>
     /// 同じ向きのテーブル対に複数のリレーションがある場合は <c>constraint_name</c> で特定する。
-    /// 無指定で複数一致したときは黙って先頭を消さず、候補の制約名を挙げてエラーにする
+    /// 無指定で複数一致したときは黙って先頭を消さず、候補の制約名を挙げてエラーにする。
+    /// 名前を持たないリレーションは、DDL が付ける名前（<see cref="ConstraintNames.ResolveForeignKeyNamesById"/>）で選べる
+    /// （要約と候補の一覧もその名前を示す）。GUI のツールと同じ規則
     /// </remarks>
     private static (string, bool) RemoveRelationship(DiagramDocument document, JsonElement args)
     {
@@ -1128,10 +1137,11 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(sourceTable) || string.IsNullOrWhiteSpace(targetTable))
         {
-            return ("source_table and target_table are required.", false);
+            return (SourceAndTargetTableRequiredMessage, false);
         }
 
         var schema = document.Schema;
+        var ddlNames = ConstraintNames.ResolveForeignKeyNamesById(schema);
 
         var matches = schema
             .Relationships.Where(r =>
@@ -1141,16 +1151,8 @@ public static partial class DocumentErDiagramToolHost
 
                 return source is not null
                     && target is not null
-                    && string.Equals(
-                        source.TableName,
-                        sourceTable,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                    && string.Equals(
-                        target.TableName,
-                        targetTable,
-                        StringComparison.OrdinalIgnoreCase
-                    );
+                    && SchemaNames.AreSame(source.TableName, sourceTable)
+                    && SchemaNames.AreSame(target.TableName, targetTable);
             })
             .ToList();
 
@@ -1164,19 +1166,13 @@ public static partial class DocumentErDiagramToolHost
         if (!string.IsNullOrWhiteSpace(constraintName))
         {
             var byName = matches
-                .Where(r =>
-                    string.Equals(
-                        r.ConstraintName,
-                        constraintName,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
+                .Where(r => SchemaNames.AreSame(ddlNames.GetValueOrDefault(r.Id), constraintName))
                 .ToList();
 
             if (byName.Count == 0)
             {
                 return (
-                    $"Relationship '{sourceTable}' → '{targetTable}' with constraint name '{constraintName}' not found. Candidates: {DescribeConstraintNames(matches)}.",
+                    $"Relationship '{sourceTable}' → '{targetTable}' with constraint name '{constraintName}' not found. Candidates: {DescribeConstraintNames(matches, ddlNames)}.",
                     false
                 );
             }
@@ -1187,7 +1183,7 @@ public static partial class DocumentErDiagramToolHost
         if (matches.Count > 1)
         {
             return (
-                $"Several relationships connect '{sourceTable}' → '{targetTable}'; specify constraint_name to choose one. Candidates: {DescribeConstraintNames(matches)}.",
+                $"Several relationships connect '{sourceTable}' → '{targetTable}'; specify constraint_name to choose one. Candidates: {DescribeConstraintNames(matches, ddlNames)}.",
                 false
             );
         }
@@ -1197,14 +1193,25 @@ public static partial class DocumentErDiagramToolHost
         return ($"Removed relationship '{sourceTable}' → '{targetTable}'.", true);
     }
 
-    /// <summary>候補リレーションの制約名を列挙する（名前なしは <c>(unnamed)</c>）</summary>
-    private static string DescribeConstraintNames(IEnumerable<Relationship> relationships) =>
-        string.Join(
-            ", ",
-            relationships.Select(r =>
-                string.IsNullOrWhiteSpace(r.ConstraintName) ? "(unnamed)" : r.ConstraintName!
-            )
-        );
+    /// <summary>候補リレーションの制約名を列挙する（書き方は <see cref="DescribeName"/>）</summary>
+    /// <param name="relationships">候補</param>
+    /// <param name="ddlNames">リレーションの Id → DDL が付ける名前（<see cref="ConstraintNames.ResolveForeignKeyNamesById"/>）</param>
+    private static string DescribeConstraintNames(
+        IEnumerable<Relationship> relationships,
+        IReadOnlyDictionary<Guid, string> ddlNames
+    ) => string.Join(", ", relationships.Select(r => DescribeName(r, ddlNames)));
+
+    /// <summary>
+    /// リレーションの名前を示す（保存された名前はそのまま・名前が無ければ DDL が付ける名前に <c>(default name)</c> を添える・
+    /// 外部キーを作らない名前の無い関係は <c>(unnamed)</c>）
+    /// </summary>
+    private static string DescribeName(
+        Relationship relationship,
+        IReadOnlyDictionary<Guid, string> ddlNames
+    ) =>
+        !string.IsNullOrWhiteSpace(relationship.ConstraintName) ? relationship.ConstraintName!
+        : ddlNames.TryGetValue(relationship.Id, out var ddlName) ? $"{ddlName} (default name)"
+        : "(unnamed)";
 
     // ---------------- primary key operations ----------------
 
@@ -1221,14 +1228,14 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(tableName))
         {
-            return ("table_name is required.", false);
+            return (TableNameRequiredMessage, false);
         }
 
         var entity = FindEntity(document.Schema, tableName);
 
         if (entity is null)
         {
-            return ($"Table '{tableName}' not found.", false);
+            return (DescribeTableNotFound(tableName), false);
         }
 
         var (columns, error) = ResolveConstraintColumns(entity, args);
@@ -1271,14 +1278,14 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(tableName))
         {
-            return ("table_name is required.", false);
+            return (TableNameRequiredMessage, false);
         }
 
         var entity = FindEntity(document.Schema, tableName);
 
         if (entity is null)
         {
-            return ($"Table '{tableName}' not found.", false);
+            return (DescribeTableNotFound(tableName), false);
         }
 
         var (columns, error) = ResolveConstraintColumns(entity, args);
@@ -1290,9 +1297,23 @@ public static partial class DocumentErDiagramToolHost
 
         var columnIds = columns!.Select(column => column.Id).ToList();
         var name = GetString(args, "name");
-        var normalizedName = string.IsNullOrWhiteSpace(name) ? null : name;
+        var normalizedName = string.IsNullOrWhiteSpace(name)
+            ? null
+            : SchemaNames.ToStoredForm(name);
         var existing = FindUniqueConstraintByColumnSet(entity, columnIds);
         var columnText = string.Join(", ", columns!.Select(column => column.Name));
+
+        // 外部キーの名前（add_relationship）と同じ規則で、図の中の既存の制約名との衝突を断る
+        if (
+            normalizedName is not null
+            && ConstraintNames.IsTaken(document.Schema, normalizedName, existing?.Id)
+        )
+        {
+            return (
+                $"The constraint name '{normalizedName}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit name to get a unique one automatically.",
+                false
+            );
+        }
 
         if (existing is not null)
         {
@@ -1322,14 +1343,14 @@ public static partial class DocumentErDiagramToolHost
 
         if (string.IsNullOrWhiteSpace(tableName))
         {
-            return ("table_name is required.", false);
+            return (TableNameRequiredMessage, false);
         }
 
         var entity = FindEntity(document.Schema, tableName);
 
         if (entity is null)
         {
-            return ($"Table '{tableName}' not found.", false);
+            return (DescribeTableNotFound(tableName), false);
         }
 
         var (columns, error) = ResolveConstraintColumns(entity, args);
@@ -1441,12 +1462,17 @@ public static partial class DocumentErDiagramToolHost
             return;
         }
 
-        sb.AppendLine($"  Primary key order: {string.Join(", ", orderedNames)}");
+        sb.Append($"  Primary key order: {string.Join(", ", orderedNames)}").Append('\n');
     }
 
     /// <summary>要約テキストへエンティティの一意制約（解決済み名＋構成列）を追記する</summary>
     /// <remarks>構成列を解決できない制約（空・壊れた参照）は DDL 生成と同じ規則で読み飛ばす</remarks>
-    private static void AppendUniqueConstraints(StringBuilder sb, Entity entity)
+    /// <param name="limit">合成名に使う識別子の長さの上限（図の対象 DBMS の上限＝DDL と同じ名前を見せる）</param>
+    private static void AppendUniqueConstraints(
+        StringBuilder sb,
+        Entity entity,
+        IdentifierLengthLimit limit
+    )
     {
         var lines = new List<string>();
 
@@ -1470,7 +1496,7 @@ public static partial class DocumentErDiagramToolHost
             }
 
             var name = string.IsNullOrWhiteSpace(constraint.Name)
-                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames)
+                ? UniqueConstraint.SynthesizeName(entity.TableName, columnNames, limit)
                 : constraint.Name!;
             lines.Add($"    - {name} ({string.Join(", ", columnNames)})");
         }
@@ -1480,11 +1506,11 @@ public static partial class DocumentErDiagramToolHost
             return;
         }
 
-        sb.AppendLine("  Unique constraints:");
+        sb.Append("  Unique constraints:").Append('\n');
 
         foreach (var line in lines)
         {
-            sb.AppendLine(line);
+            sb.Append(line).Append('\n');
         }
     }
 
@@ -1519,9 +1545,17 @@ public static partial class DocumentErDiagramToolHost
         return $", FK: ({string.Join(", ", texts)})";
     }
 
-    /// <summary>要約テキスト用に外部キー制約名を <c> [名前]</c> 形式で表す（未設定は空文字）</summary>
-    private static string DescribeConstraintName(Relationship relationship) =>
+    /// <summary>要約テキスト用に外部キー制約名を <c> [名前]</c> 形式で表す（名前も DDL が付ける名前も無ければ空文字）</summary>
+    /// <remarks>
+    /// 名前を持たない外部キーには DDL が付ける名前を示す（<see cref="DescribeName"/>）。<c>remove_relationship</c> へ渡す
+    /// 名前を知る手段は要約しかないため
+    /// </remarks>
+    private static string DescribeConstraintName(
+        Relationship relationship,
+        IReadOnlyDictionary<Guid, string> ddlNames
+    ) =>
         string.IsNullOrWhiteSpace(relationship.ConstraintName)
+        && !ddlNames.ContainsKey(relationship.Id)
             ? string.Empty
-            : $" [{relationship.ConstraintName}]";
+            : $" [{DescribeName(relationship, ddlNames)}]";
 }

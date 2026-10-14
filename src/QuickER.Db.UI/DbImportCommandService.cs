@@ -224,6 +224,12 @@ public sealed class DbImportCommandService
                 subject,
                 detail
             ),
+            SchemaImportWarningKind.ColumnNameCollision => string.Format(
+                Strings.Db_ImportWarningColumnNameCollision,
+                table,
+                subject,
+                detail
+            ),
             SchemaImportWarningKind.ColumnTypeNotEmittable => string.Format(
                 Strings.Db_ImportWarningColumnTypeNotEmittable,
                 table,

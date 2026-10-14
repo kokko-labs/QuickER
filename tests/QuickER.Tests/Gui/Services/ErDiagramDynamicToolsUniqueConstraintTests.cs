@@ -249,7 +249,15 @@ public class ErDiagramDynamicToolsUniqueConstraintTests
         var (result, success) = Exec(vm, "get_diagram_summary", new { });
 
         success.Should().BeTrue();
-        result.Should().Contain(UniqueConstraint.SynthesizeName("Customer", ["Email"]));
+        result
+            .Should()
+            .Contain(
+                UniqueConstraint.SynthesizeName(
+                    "Customer",
+                    ["Email"],
+                    IdentifierLengthLimit.Unlimited
+                )
+            );
         result.Should().Contain("UQ_Tenant_Code (TenantId, Code)");
     }
 }

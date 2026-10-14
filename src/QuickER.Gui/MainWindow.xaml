@@ -1003,6 +1003,8 @@
             末尾の「バージョン情報」はダイアログを開くだけで設定は持たない。
             キャプション・ツールチップは resx 参照。
             ContextMenu は配置対象の DataContext（MainViewModel）を引き継いでチェック状態を束縛する。
+            言語の項目は IsCheckable にしない（クリックでチェックを自分で切り替えると、同じ言語を選び直したときや
+            保存に失敗したときに、チェックが保存した設定と食い違う。チェックは束縛だけが決める）。
           -->
           <Button
             x:Name="SettingsButton"
@@ -1025,14 +1027,12 @@
                 >
                   <MenuItem
                     Header="{x:Static resources:Strings.Language_English}"
-                    IsCheckable="True"
                     IsChecked="{Binding LanguageSwitch.IsEnglishChecked, Mode=OneWay}"
                     Command="{Binding LanguageSwitch.SelectLanguageCommand}"
                     CommandParameter="en"
                   />
                   <MenuItem
                     Header="{x:Static resources:Strings.Language_Japanese}"
-                    IsCheckable="True"
                     IsChecked="{Binding LanguageSwitch.IsJapaneseChecked, Mode=OneWay}"
                     Command="{Binding LanguageSwitch.SelectLanguageCommand}"
                     CommandParameter="ja"
@@ -2626,7 +2626,7 @@
                                           VerticalAlignment="Center"
                                           IsHitTestVisible="False"
                                           Text="{x:Static resources:Strings.Property_UniqueConstraintColumnPlaceholder}"
-                                          Visibility="{Binding IsPendingSlot, Converter={StaticResource BoolToVisibilityConverter}}"
+                                          Visibility="{Binding IsColumnUnselected, Converter={StaticResource BoolToVisibilityConverter}}"
                                         />
                                       </Grid>
                                       <Button

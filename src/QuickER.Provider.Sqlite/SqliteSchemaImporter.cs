@@ -167,8 +167,8 @@ ORDER BY name;";
         var tableTypes = await LoadTableTypesAsync(conn, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
 
-        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
-        var createSql = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(SchemaTableEntry.KeyComparer);
+        var createSql = new Dictionary<string, string>(SchemaNames.Comparer);
         var withoutRowidByTable = new Dictionary<string, bool>(StringComparer.Ordinal);
         var warnings = new List<SchemaImportWarning>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
@@ -335,6 +335,12 @@ ORDER BY name;";
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var colName = reader.GetString(1);
+
+            // 同じテーブルに同じ名前（SchemaNames の規則）の列があれば、後着は取り込まずに告げる
+            if (!entry.TryBeginColumn(colName, warnings))
+            {
+                continue;
+            }
             var declaredType = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
             var notNull = reader.GetInt64(3) != 0;
             var pkOrdinal = reader.GetInt64(5);
@@ -372,8 +378,7 @@ ORDER BY name;";
                 );
             }
 
-            entry.Entity.Columns.Add(col);
-            entry.ColumnsByName[colName] = col;
+            entry.AddColumn(col, colName);
 
             if (pkOrdinal > 0)
             {

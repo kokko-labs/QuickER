@@ -245,6 +245,48 @@ public class MainViewModelBulkOperationTests
         vm.UndoRedo.CanUndo.Should().BeFalse();
     }
 
+    [Fact(
+        DisplayName = "一括色変更: 同じ色の別表記（小文字・色名）を指定しても、履歴を積まず未保存にならない"
+    )]
+    public void BulkColorChange_NoOpWhenSameColorInOtherNotation()
+    {
+        var vm = new MainViewModel();
+        AddEntity(vm, "A", titleColor: "#FFCC00");
+        AddEntity(vm, "B", titleColor: "#FFCC00");
+        vm.SelectAllEntitiesCommand.Execute(null);
+        var generation = vm.UndoRedo.ChangeGeneration;
+
+        vm.BulkChangeTitleColorCommand.Execute("#ffcc00");
+        vm.BulkChangeTitleColorCommand.Execute(" #FFCC00 ");
+
+        vm.UndoRedo.CanUndo.Should().BeFalse("実変更のない履歴を積まない");
+        vm.UndoRedo.ChangeGeneration.Should().Be(generation, "未保存の判定も動かさない");
+    }
+
+    [Fact(DisplayName = "一括色変更: 別表記で指定した色は正規化して適用し、Undo / Redo で往復する")]
+    public void BulkColorChange_NormalizesNotationAndRoundTrips()
+    {
+        var vm = new MainViewModel();
+        var a = AddEntity(vm, "A", titleColor: "#111111");
+        var b = AddEntity(vm, "B", titleColor: "#FFCC00");
+        vm.SelectAllEntitiesCommand.Execute(null);
+
+        vm.BulkChangeTitleColorCommand.Execute("#ffcc00");
+
+        a.TitleBackgroundColor.Should().Be("#FFCC00");
+        b.TitleBackgroundColor.Should().Be("#FFCC00", "既に同じ色のメンバーは変更対象から外れる");
+
+        vm.UndoCommand.Execute(null);
+
+        a.TitleBackgroundColor.Should().Be("#111111");
+        b.TitleBackgroundColor.Should().Be("#FFCC00");
+        vm.UndoRedo.CanUndo.Should().BeFalse("履歴は 1 件だけ");
+
+        vm.RedoCommand.Execute(null);
+
+        a.TitleBackgroundColor.Should().Be("#FFCC00");
+    }
+
     // ---------------- 単一選択時の従来挙動（非回帰） ----------------
 
     [Fact(DisplayName = "単一選択: 削除は単一エンティティに作用（複合化しない）")]

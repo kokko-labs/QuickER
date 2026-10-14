@@ -1396,7 +1396,7 @@ public class SchemaDiffServiceTests
         item.Kind.Should().Be(SchemaDiffKind.AlterUniqueConstraint);
         item.IsSelected.Should().BeFalse();
         item.IsDestructive.Should().BeTrue();
-        item.UniqueConstraintName.Should().Be(" uq_code ");
+        item.UniqueConstraintName.Should().Be("uq_code");
         item.UniqueConstraintColumns.Should().Equal("Code", "Kind");
         item.ReplacedUniqueConstraint!.UniqueConstraintName.Should().Be("UQ_Code");
         item.ReplacedUniqueConstraint.UniqueConstraintColumns.Should().Equal("Code");
@@ -1405,7 +1405,7 @@ public class SchemaDiffServiceTests
                 string.Format(
                     ProviderStrings.Diff_AlterUniqueConstraint,
                     "Customer",
-                    " uq_code ",
+                    "uq_code",
                     "Code",
                     "Code, Kind"
                 )

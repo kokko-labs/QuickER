@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Cli;
 
@@ -20,6 +21,9 @@ namespace QuickER.Tests.Cli;
 /// </remarks>
 public class McpServerE2ETests
 {
+    /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
+    private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
+
     /// <summary>CJK 文字の検出パターン（CodeGenToolSetEnglishGuardTests と同じ範囲）</summary>
     private static readonly System.Text.RegularExpressions.Regex CjkPattern = new("[　-鿿＀-￯]");
 
@@ -405,6 +409,93 @@ public class McpServerE2ETests
             // 短いリトライで解放を待ち、それでも消せなければ放置する（一時フォルダはランナー側で回収される。
             // 検証本体が通ったテストを後始末の失敗で赤にしない）
 
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    if (Directory.Exists(workDir))
+                    {
+                        Directory.Delete(workDir, recursive: true);
+                    }
+
+                    break;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    if (attempt == 4)
+                    {
+                        break;
+                    }
+
+                    await Task.Delay(200, TestContext.Current.CancellationToken);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 作業フォルダ（＝エージェントが開いている利用者のプロジェクト）にある設定ファイルを読まないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 汎用ホストの既定の構成は作業フォルダの <c>appsettings.json</c> を読み、変更の監視を張る。壊れた
+    /// <c>appsettings.json</c> を置いた作業フォルダで起動して、初期化とツールの一覧が通ることで確かめる
+    /// （読めば起動の時点で例外になり、サーバが立ち上がらない）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "quicker mcp は作業フォルダの appsettings.json を読まない（壊れていても起動する）"
+    )]
+    public Task McpServer_IgnoresAppSettingsInWorkingDirectory() =>
+        Ledger.RunAsync(
+            "McpServer_IgnoresAppSettingsInWorkingDirectory",
+            McpServer_IgnoresAppSettingsInWorkingDirectoryCore
+        );
+
+    private async Task McpServer_IgnoresAppSettingsInWorkingDirectoryCore()
+    {
+        var workDir = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERMcpE2E",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(workDir);
+        File.WriteAllText(Path.Combine(workDir, "appsettings.json"), "{ this is not json");
+        var stderrLines = new ConcurrentQueue<string>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+
+        var transport = new StdioClientTransport(
+            new StdioClientTransportOptions
+            {
+                Name = "quicker-mcp",
+                Command = "dotnet",
+                Arguments = [CliDllPath, "mcp"],
+                WorkingDirectory = workDir,
+                StandardErrorLines = line => stderrLines.Enqueue(line),
+            }
+        );
+
+        try
+        {
+            McpClient client;
+
+            try
+            {
+                client = await McpClient.CreateAsync(transport, cancellationToken: cts.Token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new Xunit.Sdk.XunitException(
+                    $"サーバが起動しなかった（{ex.GetType().Name}: {ex.Message}）。{Diagnostics(stderrLines)}"
+                );
+            }
+
+            await using (client)
+            {
+                var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
+                tools.Should().NotBeEmpty(Diagnostics(stderrLines));
+            }
+        }
+        finally
+        {
             for (var attempt = 0; attempt < 5; attempt++)
             {
                 try

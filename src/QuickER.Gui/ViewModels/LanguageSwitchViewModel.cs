@@ -23,10 +23,17 @@ public partial class LanguageSwitchViewModel : ObservableObject
     /// <summary>言語設定の永続化ストア</summary>
     private readonly GuiAppSettingsStore _store;
 
+    /// <summary>テスト専用: 設定の保存先</summary>
+    internal GuiAppSettingsStore StoreForTests => _store;
+
     /// <summary>アプリ再起動サービス（確認で OK のとき呼び出す）</summary>
     private readonly IApplicationRestartService _restart;
 
-    /// <summary>現在選択されている表示言語コード（<c>"ja"</c> / <c>"en"</c>。メニューのチェック表示に使う）</summary>
+    /// <summary>次の起動で使う表示言語コード（<c>"ja"</c> / <c>"en"</c>。メニューのチェック表示に使う）</summary>
+    /// <remarks>
+    /// 保存した設定を示す。再起動を断ったあとは、いま表示中の言語と食い違ってよい
+    /// （チェックは「次に起動したときの言語」を表す）
+    /// </remarks>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsJapaneseChecked))]
     [NotifyPropertyChangedFor(nameof(IsEnglishChecked))]
@@ -52,7 +59,7 @@ public partial class LanguageSwitchViewModel : ObservableObject
         _store = store ?? new GuiAppSettingsStore();
         _restart = restart ?? new WpfApplicationRestartService();
 
-        // 現在の実効言語は、起動時に App が適用したカルチャ（＝設定＋OS 導出の結果）を正とする
+        // 次の起動で使う言語＝保存した設定（未設定・不正値は OS のカルチャから導く。起動時に App が適用するのと同じ規則）
         var settings = _store.Load();
         _currentLanguage = AppLanguage.Resolve(
             settings.Language,
@@ -88,6 +95,18 @@ public partial class LanguageSwitchViewModel : ObservableObject
         }
 
         CurrentLanguage = resolved;
+
+        // いま表示中の言語へ戻しただけなら、再起動しても何も変わらないので尋ねない
+        // （別の言語を選んで再起動を断ったあと、元の言語を選び直した場合）
+        var displayed = AppLanguage.Resolve(
+            null,
+            System.Globalization.CultureInfo.CurrentUICulture
+        );
+
+        if (resolved == displayed)
+        {
+            return;
+        }
 
         // 再起動反映方式のため、今すぐ再起動するか確認する。OK なら再起動して即座に反映する。
         // 断った場合も設定は保存済みで、次回起動時に反映される。

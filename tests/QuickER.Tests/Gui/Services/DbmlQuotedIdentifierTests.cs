@@ -63,7 +63,7 @@ public class DbmlQuotedIdentifierTests
     {
         var dbml = DbmlExporter.Build(BuildDiagram(tableName, columnName, "date"));
 
-        var restored = DbmlImporter.Parse(dbml);
+        var restored = DbmlImporter.Parse(dbml, "sqlserver");
 
         var entity = restored.Entities.Should().ContainSingle().Subject;
         entity.TableName.Should().Be(tableName);
@@ -78,7 +78,8 @@ public class DbmlQuotedIdentifierTests
         const string ColumnName = @"a""b\c";
 
         var restored = DbmlImporter.Parse(
-            DbmlExporter.Build(BuildDiagram(TableName, ColumnName, "int"))
+            DbmlExporter.Build(BuildDiagram(TableName, ColumnName, "int")),
+            "sqlserver"
         );
 
         var entity = restored.Entities.Should().ContainSingle().Subject;
@@ -108,7 +109,11 @@ public class DbmlQuotedIdentifierTests
         dbml.Should().Contain("Table \"受注明細\" {");
         dbml.Should().Contain("\"受注日\" date [");
 
-        var entity = DbmlImporter.Parse(dbml).Entities.Should().ContainSingle().Subject;
+        var entity = DbmlImporter
+            .Parse(dbml, "sqlserver")
+            .Entities.Should()
+            .ContainSingle()
+            .Subject;
         entity.TableName.Should().Be("受注明細");
         entity.Columns.Select(column => column.Name).Should().Contain("受注日");
     }
@@ -131,7 +136,7 @@ public class DbmlQuotedIdentifierTests
 
         dbml.Should().Contain(expected);
         DbmlImporter
-            .Parse(dbml)
+            .Parse(dbml, "sqlserver")
             .Relationships.Should()
             .ContainSingle()
             .Which.ConstraintName.Should()
@@ -221,7 +226,7 @@ public class DbmlQuotedIdentifierTests
             ],
         };
 
-        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram));
+        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram), "sqlserver");
 
         var restoredParent = restored.Entities.Single(e => e.TableName == "Order Header");
         var restoredChild = restored.Entities.Single(e => e.TableName == "Order Details");
@@ -264,7 +269,8 @@ public class DbmlQuotedIdentifierTests
         };
 
         var restored = DbmlImporter.Parse(
-            DbmlExporter.Build(new ErDiagram { Entities = [entity] })
+            DbmlExporter.Build(new ErDiagram { Entities = [entity] }),
+            "sqlserver"
         );
 
         var restoredEntity = restored.Entities.Should().ContainSingle().Subject;
@@ -288,7 +294,7 @@ public class DbmlQuotedIdentifierTests
 
         dbml.Should().Contain($"c \"{dataType}\" [");
         DbmlImporter
-            .Parse(dbml)
+            .Parse(dbml, "sqlserver")
             .Entities.Single()
             .Columns.Single(column => column.Name == "c")
             .DataType.Should()
@@ -309,7 +315,7 @@ public class DbmlQuotedIdentifierTests
 
         dbml.Should().Contain("tags \"integer[]\" [");
         DbmlImporter
-            .Parse(dbml)
+            .Parse(dbml, "sqlserver")
             .Entities.Single()
             .Columns.Single(column => column.Name == "tags")
             .DataType.Should()
@@ -326,7 +332,7 @@ public class DbmlQuotedIdentifierTests
         );
 
         DbmlImporter
-            .Parse(text)
+            .Parse(text, "sqlserver")
             .Entities.Single()
             .Columns.Single(column => column.Name == "tags")
             .DataType.Should()

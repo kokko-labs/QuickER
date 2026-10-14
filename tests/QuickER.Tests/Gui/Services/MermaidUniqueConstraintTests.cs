@@ -106,7 +106,7 @@ public class MermaidUniqueConstraintTests
             ]
         );
 
-        var diagram = MermaidImporter.Parse(text);
+        var diagram = MermaidImporter.Parse(text, "sqlserver");
 
         var customer = diagram.Entities.Single();
         var constraint = customer.UniqueConstraints.Should().ContainSingle().Subject;
@@ -124,7 +124,7 @@ public class MermaidUniqueConstraintTests
             new UniqueConstraint { ColumnIds = [customer.Columns[1].Id] }
         );
 
-        var restored = MermaidImporter.Parse(MermaidExporter.Build(diagram));
+        var restored = MermaidImporter.Parse(MermaidExporter.Build(diagram), "sqlserver");
 
         var restoredCustomer = restored.Entities.Single();
         restoredCustomer

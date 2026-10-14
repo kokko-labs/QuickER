@@ -2448,7 +2448,9 @@ public class MockGenerationDialogViewModelTests
             vm.StartConversationCommand.Execute(null);
             engineBox[0].DisposeCount.Should().Be(0, "会話中はまだ破棄されない");
 
-            vm.ShutdownEngines(TimeSpan.FromSeconds(5));
+            // 破棄はスレッドプールで走る。全件の並列実行でプールが詰まっても届くまで待てる上限にする
+            // （届いた時点で戻るので遅くはならない。上限で戻ること自体は別のテストが見る）
+            vm.ShutdownEngines(TimeSpan.FromSeconds(60));
 
             engineBox[0].DisposeCount.Should().Be(1);
         }

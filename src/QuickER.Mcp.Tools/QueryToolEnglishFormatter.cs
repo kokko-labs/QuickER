@@ -1,4 +1,5 @@
 using System.Text;
+using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 
 namespace QuickER.Mcp.Tools;
@@ -37,13 +38,14 @@ public static class QueryToolEnglishFormatter
 
             case QueryToolStatus.ValidationFailed:
                 var sb = new StringBuilder();
-                sb.AppendLine(
-                    $"Cannot set query '{outcome.QueryName}': validation failed. The file was not modified."
-                );
+                sb.Append(
+                        $"Cannot set query '{outcome.QueryName}': validation failed. The file was not modified."
+                    )
+                    .Append('\n');
 
                 foreach (var error in outcome.Errors)
                 {
-                    sb.AppendLine($"  - {Describe(error)}");
+                    sb.Append($"  - {Describe(error)}").Append('\n');
                 }
 
                 return sb.ToString().TrimEnd();
@@ -58,6 +60,10 @@ public static class QueryToolEnglishFormatter
     {
         return outcome.Status switch
         {
+            QueryToolStatus.Success when outcome.RemovedOrphans == 1 =>
+                $"Removed query '{outcome.QueryName}', which belonged to a table that is no longer in the diagram.",
+            QueryToolStatus.Success when outcome.RemovedOrphans > 1 =>
+                $"Removed {outcome.RemovedOrphans} queries named '{outcome.QueryName}', which belonged to tables that are no longer in the diagram.",
             QueryToolStatus.Success =>
                 $"Removed query '{outcome.QueryName}' from table '{outcome.TableName}'.",
             QueryToolStatus.QueryNotFound =>
@@ -70,12 +76,12 @@ public static class QueryToolEnglishFormatter
     public static string FormatListing(QueryListing listing)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Queries: {listing.TotalCount}");
+        sb.Append($"Queries: {listing.TotalCount}").Append('\n');
 
         foreach (var group in listing.Groups)
         {
-            sb.AppendLine();
-            sb.AppendLine($"[{group.TableName ?? "(unknown entity)"}]");
+            sb.Append('\n');
+            sb.Append($"[{group.TableName ?? "(unknown entity)"}]").Append('\n');
 
             foreach (var query in group.Queries)
             {
@@ -131,7 +137,7 @@ public static class QueryToolEnglishFormatter
             QueryToolDiagnosticCode.ProjectionFieldSourceColumnNotFound =>
                 $"Projection field '{d.Name}': source_column '{d.Column}' not found in table '{d.Table}'.",
             QueryToolDiagnosticCode.UnknownSqlDialect =>
-                $"Unknown SQL dialect '{d.Dialect}' (must be one of: {string.Join(", ", QueryToolCore.SupportedDbms)}).",
+                $"Unknown SQL dialect '{d.Dialect}' (must be one of: {string.Join(", ", TargetDbmsNames.All)}).",
             QueryToolDiagnosticCode.SqlDialectNotString =>
                 $"SQL for dialect '{d.Dialect}' must be a string.",
             // DSL パーサ・生 SQL アナライザの診断は、UI 言語に依らず中立言語（英語）で描画する
@@ -149,6 +155,12 @@ public static class QueryToolEnglishFormatter
                 $"'condition' is used only when implementation is 'dsl' (got '{d.Detail}'); the condition was not saved.",
             QueryToolDiagnosticCode.SqlImplementationWithoutSql =>
                 "implementation is 'sql' but no SQL was given for any dialect, so the generated code leaves the method to be written by hand (partial class) for every dialect.",
+            QueryToolDiagnosticCode.OrderByIgnoredForImplementation =>
+                $"'order_by' is applied only when implementation is 'dsl' (got '{d.Detail}'); the ordering was saved, but the generated method does not use it.",
+            QueryToolDiagnosticCode.SqlDialectNotImplemented =>
+                $"The code generator implements raw SQL only for {string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects)}; the SQL for '{d.Dialect}' was saved, but for that dialect the method is generated as a contract to write by hand (partial class).",
+            QueryToolDiagnosticCode.SqlDialectDuplicate =>
+                $"'sql' gives dialect '{d.Detail}' more than once (keys that differ only in letter case, such as '{d.Dialect}'); give each dialect once.",
             _ => $"Unexpected diagnostic: {d.Code}",
         };
     }
@@ -156,52 +168,53 @@ public static class QueryToolEnglishFormatter
     /// <summary>クエリ 1 件の要約（戻り形・実装方式・条件／SQL・パラメータ等）をテキスト化する</summary>
     private static void AppendQuerySummary(StringBuilder sb, QueryListingItem query)
     {
-        sb.AppendLine($"  - {query.Name}: {Lower(query.Returns)}, {Lower(query.Implementation)}");
+        sb.Append($"  - {query.Name}: {Lower(query.Returns)}, {Lower(query.Implementation)}")
+            .Append('\n');
 
         if (query.Description is not null)
         {
-            sb.AppendLine($"      description: {query.Description}");
+            sb.Append($"      description: {query.Description}").Append('\n');
         }
 
         if (query.Returns == QueryReturnShape.Scalar && query.ScalarType is not null)
         {
-            sb.AppendLine($"      scalar type: {query.ScalarType}");
+            sb.Append($"      scalar type: {query.ScalarType}").Append('\n');
         }
 
         if (query.Implementation == QueryImplementationKind.Dsl && query.Condition is not null)
         {
-            sb.AppendLine($"      condition: {query.Condition}");
+            sb.Append($"      condition: {query.Condition}").Append('\n');
         }
         else if (query.Implementation == QueryImplementationKind.Sql && query.SqlDialects.Count > 0)
         {
-            sb.AppendLine($"      sql dialects: {string.Join(", ", query.SqlDialects)}");
+            sb.Append($"      sql dialects: {string.Join(", ", query.SqlDialects)}").Append('\n');
         }
 
         if (query.Parameters.Count > 0)
         {
             var parts = query.Parameters.Select(DescribeParameter);
-            sb.AppendLine($"      parameters: {string.Join(", ", parts)}");
+            sb.Append($"      parameters: {string.Join(", ", parts)}").Append('\n');
         }
 
         if (query.OrderBy.Count > 0)
         {
             var parts = query.OrderBy.Select(DescribeOrdering);
-            sb.AppendLine($"      order by: {string.Join(", ", parts)}");
+            sb.Append($"      order by: {string.Join(", ", parts)}").Append('\n');
         }
 
         if (query.HasPaging)
         {
-            sb.AppendLine("      paging: yes");
+            sb.Append("      paging: yes").Append('\n');
         }
 
         if (query.Returns == QueryReturnShape.Projection)
         {
-            sb.AppendLine($"      result type: {query.ResultTypeName}");
+            sb.Append($"      result type: {query.ResultTypeName}").Append('\n');
 
             if (query.Fields.Count > 0)
             {
                 var parts = query.Fields.Select(DescribeField);
-                sb.AppendLine($"      fields: {string.Join(", ", parts)}");
+                sb.Append($"      fields: {string.Join(", ", parts)}").Append('\n');
             }
         }
     }

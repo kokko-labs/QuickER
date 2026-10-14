@@ -40,7 +40,7 @@ public class DbmlUnsupportedSyntaxTests
     [InlineData("records t(id) {\n  1\n}")]
     public void Import_SkippableTopLevelBlocks_AreIgnored(string block)
     {
-        var diagram = DbmlImporter.Parse(Lines(block, string.Empty, MinimalTable));
+        var diagram = DbmlImporter.Parse(Lines(block, string.Empty, MinimalTable), "sqlserver");
 
         diagram.Entities.Should().ContainSingle().Which.TableName.Should().Be("t");
     }
@@ -50,7 +50,10 @@ public class DbmlUnsupportedSyntaxTests
     [InlineData("  records {\n    1\n  }")]
     public void Import_SkippableTableBlocks_DoNotCreatePhantomColumns(string block)
     {
-        var diagram = DbmlImporter.Parse(Lines("Table t {", "  id int [pk, not null]", block, "}"));
+        var diagram = DbmlImporter.Parse(
+            Lines("Table t {", "  id int [pk, not null]", block, "}"),
+            "sqlserver"
+        );
 
         diagram.Entities.Single().Columns.Select(column => column.Name).Should().Equal("id");
     }
@@ -69,7 +72,8 @@ public class DbmlUnsupportedSyntaxTests
                 "}",
                 string.Empty,
                 MinimalTable
-            )
+            ),
+            "sqlserver"
         );
 
         diagram.Entities.Should().ContainSingle().Which.TableName.Should().Be("t");
@@ -89,7 +93,8 @@ public class DbmlUnsupportedSyntaxTests
                 "}",
                 string.Empty,
                 MinimalTable
-            )
+            ),
+            "sqlserver"
         );
 
         diagram.Entities.Should().ContainSingle().Which.TableName.Should().Be("t");
@@ -100,7 +105,8 @@ public class DbmlUnsupportedSyntaxTests
     [Fact(DisplayName = "DBML 取込: 解釈できないトップレベル行は行番号つきで拒否する")]
     public void Import_UnknownTopLevelLine_ThrowsWithLineNumber()
     {
-        var act = () => DbmlImporter.Parse(Lines(MinimalTable, string.Empty, "Gibberish here"));
+        var act = () =>
+            DbmlImporter.Parse(Lines(MinimalTable, string.Empty, "Gibberish here"), "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -119,7 +125,7 @@ public class DbmlUnsupportedSyntaxTests
     [InlineData("Ref \"fk name\" {")]
     public void Import_UnsupportedRelationshipForms_ThrowWithLineNumber(string line)
     {
-        var act = () => DbmlImporter.Parse(Lines(MinimalTable, string.Empty, line));
+        var act = () => DbmlImporter.Parse(Lines(MinimalTable, string.Empty, line), "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -147,7 +153,8 @@ public class DbmlUnsupportedSyntaxTests
                 "  pid int",
                 "}",
                 "Ref fk_c_p: p.id < c.pid [delete: cascade]"
-            )
+            ),
+            "sqlserver"
         );
 
         var relationship = diagram.Relationships.Should().ContainSingle().Subject;
@@ -168,7 +175,7 @@ public class DbmlUnsupportedSyntaxTests
     {
         const string RefLine = "Ref: [note: 'FK_x'] t.id < t.id";
 
-        var act = () => DbmlImporter.Parse(Lines(MinimalTable, string.Empty, RefLine));
+        var act = () => DbmlImporter.Parse(Lines(MinimalTable, string.Empty, RefLine), "sqlserver");
 
         act.Should()
             .Throw<InvalidDataException>()
@@ -190,7 +197,8 @@ public class DbmlUnsupportedSyntaxTests
     {
         var column = DbmlImporter
             .Parse(
-                Lines("Table t {", "  id int [pk]", "  owner int [ref, not null, note: 'x']", "}")
+                Lines("Table t {", "  id int [pk]", "  owner int [ref, not null, note: 'x']", "}"),
+                "sqlserver"
             )
             .Entities.Single()
             .Columns.Single(column => column.Name == "owner");
@@ -208,7 +216,8 @@ public class DbmlUnsupportedSyntaxTests
     {
         var act = () =>
             DbmlImporter.Parse(
-                Lines(MinimalTable, string.Empty, "Table very_long_name as U {", "  id int", "}")
+                Lines(MinimalTable, string.Empty, "Table very_long_name as U {", "  id int", "}"),
+                "sqlserver"
             );
 
         act.Should().Throw<InvalidDataException>().WithMessage("*Table very_long_name as U {*");
@@ -220,7 +229,8 @@ public class DbmlUnsupportedSyntaxTests
     {
         var act = () =>
             DbmlImporter.Parse(
-                Lines("Table t {", "  id int [pk, not null]", "  Note: '''", "  x", "  '''", "}")
+                Lines("Table t {", "  id int [pk, not null]", "  Note: '''", "  x", "  '''", "}"),
+                "sqlserver"
             );
 
         act.Should()
@@ -248,7 +258,8 @@ public class DbmlUnsupportedSyntaxTests
                 "  // inside the block",
                 "  id int [pk, not null] // after the column",
                 "}"
-            )
+            ),
+            "sqlserver"
         );
 
         diagram.Entities.Single().Columns.Select(column => column.Name).Should().Equal("id");
@@ -265,7 +276,8 @@ public class DbmlUnsupportedSyntaxTests
                 "  /* inside */",
                 "  id int [pk, not null] /* after */",
                 "}"
-            )
+            ),
+            "sqlserver"
         );
 
         diagram.Entities.Single().Columns.Select(column => column.Name).Should().Equal("id");
@@ -280,7 +292,8 @@ public class DbmlUnsupportedSyntaxTests
         const string Note = "see https://example.com/docs";
 
         var diagram = DbmlImporter.Parse(
-            Lines("Table t {", $"  id int [pk, not null, note: '{Note}']", "}")
+            Lines("Table t {", $"  id int [pk, not null, note: '{Note}']", "}"),
+            "sqlserver"
         );
 
         diagram.Entities.Single().Columns.Single().Description.Should().Be(Note);
@@ -314,7 +327,7 @@ public class DbmlUnsupportedSyntaxTests
             ],
         };
 
-        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram));
+        var restored = DbmlImporter.Parse(DbmlExporter.Build(diagram), "sqlserver");
 
         restored.Entities.Single().Description.Should().Be(Note);
     }
@@ -345,7 +358,8 @@ public class DbmlUnsupportedSyntaxTests
                 "  parent_id int [not null]",
                 "}",
                 "ref: parent.id < child.parent_id"
-            )
+            ),
+            "sqlserver"
         );
 
         diagram.Entities.Should().HaveCount(2);

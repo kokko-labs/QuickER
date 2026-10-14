@@ -21,6 +21,9 @@ namespace QuickER.Provider.Sqlite;
 /// </remarks>
 public static class SqliteIdentifier
 {
+    /// <summary>識別子の長さの上限（SQLite は上限なし。値の正本は <see cref="IdentifierLengthLimits"/>）</summary>
+    public static IdentifierLengthLimit Limit => IdentifierLengthLimits.Sqlite;
+
     /// <summary>テーブル名を <c>"schema"."name"</c> または <c>"name"</c> 形式へクォートする（DDL 専用）</summary>
     /// <remarks>
     /// ドットをスキーマ区切りとして 2 分割する。PRAGMA の引数のように「ドットも含めた 1 つの識別子」を

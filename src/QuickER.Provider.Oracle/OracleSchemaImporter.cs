@@ -269,7 +269,7 @@ ORDER BY constraint_name";
         CancellationToken ct
     )
     {
-        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(SchemaTableEntry.KeyComparer);
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -431,6 +431,12 @@ ORDER BY constraint_name";
             }
 
             var colName = reader.GetString(1);
+
+            // 同じテーブルに同じ名前（SchemaNames の規則）の列があれば、後着は取り込まずに告げる
+            if (!entry.TryBeginColumn(colName, warnings))
+            {
+                continue;
+            }
             var dataType = reader.GetString(2);
             int? dataPrecision = reader.IsDBNull(3) ? null : Convert.ToInt32(reader.GetValue(3));
             int? dataScale = reader.IsDBNull(4) ? null : Convert.ToInt32(reader.GetValue(4));
@@ -478,8 +484,7 @@ ORDER BY constraint_name";
                 );
             }
 
-            entry.Entity.Columns.Add(col);
-            entry.ColumnsByName[colName] = col;
+            entry.AddColumn(col, colName);
         }
     }
 
@@ -504,7 +509,7 @@ ORDER BY constraint_name";
                 continue;
             }
 
-            if (entry.ColumnsByName.TryGetValue(reader.GetString(1), out var col))
+            if (entry.TryGetColumnExact(reader.GetString(1), out var col))
             {
                 col.IsPrimaryKey = true;
                 col.IsNullable = false;
@@ -551,8 +556,7 @@ ORDER BY constraint_name";
                 }
 
                 if (
-                    !reader.IsDBNull(2)
-                    && entry.ColumnsByName.TryGetValue(reader.GetString(1), out var col)
+                    !reader.IsDBNull(2) && entry.TryGetColumnExact(reader.GetString(1), out var col)
                 )
                 {
                     col.Description = reader.GetString(2);

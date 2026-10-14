@@ -510,7 +510,12 @@ internal static class SyncPlanFuzzRunner
         );
         var name = capabilities.PersistsForeignKeyConstraintNames
             ? ConstraintNames
-                .EffectiveForeignKey(item.ForeignKeyName, child, parent)
+                .EffectiveForeignKey(
+                    item.ForeignKeyName,
+                    child,
+                    parent,
+                    capabilities.IdentifierLengthLimit
+                )
                 .ToLowerInvariant()
             : string.Empty;
 
@@ -531,7 +536,11 @@ internal static class SyncPlanFuzzRunner
     )
     {
         var keys = new List<string>();
-        var names = ConstraintNames.ResolveForeignKeyNames(schema.Entities, schema.Relationships);
+        var names = ConstraintNames.ResolveForeignKeyNames(
+            schema.Entities,
+            schema.Relationships,
+            capabilities.IdentifierLengthLimit
+        );
 
         foreach (var relationship in schema.Relationships)
         {

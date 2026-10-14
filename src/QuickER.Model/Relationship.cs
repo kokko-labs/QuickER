@@ -35,6 +35,20 @@ public class RelationshipColumnPair
     public RelationshipColumnPair Clone(IReadOnlyDictionary<Guid, Guid>? columnIdMap = null) =>
         new(MapId(SourceColumnId, columnIdMap), MapId(TargetColumnId, columnIdMap));
 
+    /// <summary>2 つの列ペア一覧が、並びを問わず同じ (親列, 子列) の組を持つかを判定する</summary>
+    /// <param name="left">一方の列ペア</param>
+    /// <param name="right">もう一方の列ペア</param>
+    /// <remarks>
+    /// 同じ親子・同じ列ペアの外部キーを 2 本作らないための判定で、GUI と MCP の 2 つの ER 図操作ツールが共有する
+    /// </remarks>
+    public static bool HaveSamePairs(
+        IEnumerable<RelationshipColumnPair> left,
+        IEnumerable<RelationshipColumnPair> right
+    ) =>
+        left.Select(pair => (pair.SourceColumnId, pair.TargetColumnId))
+            .ToHashSet()
+            .SetEquals(right.Select(pair => (pair.SourceColumnId, pair.TargetColumnId)));
+
     /// <summary>対応表があれば ID を差し替える（無ければそのまま返す）</summary>
     private static Guid MapId(Guid id, IReadOnlyDictionary<Guid, Guid>? columnIdMap) =>
         columnIdMap is not null && columnIdMap.TryGetValue(id, out var mapped) ? mapped : id;
@@ -66,8 +80,15 @@ public class Relationship
     /// </remarks>
     public List<RelationshipColumnPair> ColumnPairs { get; set; } = [];
 
+    private string? _constraintName;
+
     /// <summary>DB から取り込んだ外部キー制約名（手動作成のリレーションでは <c>null</c>）</summary>
-    public string? ConstraintName { get; set; }
+    /// <remarks>代入した名前の前後の空白は除く（<see cref="Entity.TableName"/> と同じ規則）</remarks>
+    public string? ConstraintName
+    {
+        get => _constraintName;
+        set => _constraintName = value?.Trim();
+    }
 
     /// <summary>親行削除時の参照アクション</summary>
     public ForeignKeyReferentialAction OnDelete { get; set; } =

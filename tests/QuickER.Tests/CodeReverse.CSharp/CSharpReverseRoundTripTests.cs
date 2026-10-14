@@ -448,7 +448,11 @@ public class CSharpReverseRoundTripTests
 
         var source = generation.Files.Single().Content;
 
-        var reversed = new CSharpReverseParser().Parse(source, provider.TypeCatalog);
+        var reversed = new CSharpReverseParser().Parse(
+            source,
+            provider.TypeCatalog,
+            IdentifierLengthLimit.Unlimited
+        );
 
         // テーブル名の集合が一致する
         reversed
@@ -500,7 +504,11 @@ public class CSharpReverseRoundTripTests
 
                 return new UniqueConstraintProjection(
                     constraint.Name
-                        ?? UniqueConstraint.SynthesizeName(entity.TableName, columnNames),
+                        ?? UniqueConstraint.SynthesizeName(
+                            entity.TableName,
+                            columnNames,
+                            IdentifierLengthLimit.Unlimited
+                        ),
                     columnNames
                 );
             })

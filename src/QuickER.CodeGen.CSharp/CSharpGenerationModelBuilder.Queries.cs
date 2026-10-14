@@ -36,6 +36,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>ビルド全体で射影 DTO 名の重複を検出するための集合（namespace 単位で一意が必要）</summary>
     private readonly HashSet<string> _queryDtoNames = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 図から決まる生成型名（<see cref="GeneratedTypeNames.Collect"/>）。射影 DTO の型名がこれや
+    /// <see cref="GeneratedFixedTypeNames"/> と衝突しないことを確かめる
+    /// </summary>
+    private HashSet<string> _reservedTypeNames = [];
+
     /// <summary>1 エンティティ分のクエリブロック（テンプレートへ渡す整形済みテキスト群）</summary>
     private sealed record QueryBlocks(
         string InterfaceBlock,
@@ -116,6 +122,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
         var result = new Dictionary<Guid, List<QueryDefinition>>();
 
+        // 列 ID の集合はエンティティだけで決まるので、クエリごとに作り直さない
+        var columnIdsByEntity = new Dictionary<Guid, HashSet<Guid>>();
+
         foreach (var query in diagram.Queries)
         {
             // 参照先エンティティが存在しないクエリ定義（削除済みエンティティの残骸等）
@@ -129,7 +138,12 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
-            var columnIds = entity.Columns.Select(column => column.Id).ToHashSet();
+            if (!columnIdsByEntity.TryGetValue(entity.Id, out var columnIds))
+            {
+                columnIds = entity.Columns.Select(column => column.Id).ToHashSet();
+                columnIdsByEntity[entity.Id] = columnIds;
+            }
+
             var valid = true;
 
             // 列参照型付けパラメータの参照先列（クエリが属するエンティティの列に限る）
@@ -232,9 +246,25 @@ internal sealed partial class CSharpGenerationModelBuilder
             StringComparer.OrdinalIgnoreCase
         );
 
+        // 列バインディング（プロパティ名・値オブジェクトの解決）はエンティティだけで決まるので、クエリごとに作り直さない
+        var columnBindings = BuildQueryColumnBindings(entity);
+
+        // この生成で生 SQL の実装を出す方言（QuickER 版 Repository を生成しないなら無い＝生 SQL のクエリは手動実装）。
+        // 生 SQL の未宣言パラメータでクエリを飛ばすのは、これらの方言の SQL だけ
+        var emittedSqlDialects = options.GenerateRepositories
+            ? options.ResolveRepositoryDialects().ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var query in queries)
         {
-            var members = BuildQueryMethod(entity, query, usedMethodNames, diagnostics);
+            var members = BuildQueryMethod(
+                entity,
+                query,
+                columnBindings,
+                emittedSqlDialects,
+                usedMethodNames,
+                diagnostics
+            );
 
             if (members is null)
             {
@@ -318,7 +348,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             shape.ParameterList
         );
         builder
-            .Append(" =>\n        _inner.")
+            // this. で修飾する（同名のパラメータがあってもフィールドを指す）
+            .Append(" =>\n        this._inner.")
             .Append(shape.MethodName)
             .Append('(')
             .Append(string.Join(", ", shape.ArgumentNames))
@@ -338,7 +369,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         string ReturnTypeName,
         string ParameterList,
         string Summary,
-        IReadOnlyList<string> ArgumentNames,
+        IReadOnlyList<string> BoundArgumentNames,
         IReadOnlyList<QueryPayloadParameter> PayloadParameters,
         QueryConditionCSharpEmitter.EmitResult? Condition,
         IReadOnlyList<string> OrderCalls,
@@ -354,11 +385,20 @@ internal sealed partial class CSharpGenerationModelBuilder
     private QueryMethodMembers? BuildQueryMethod(
         Entity entity,
         QueryDefinition query,
+        IReadOnlyDictionary<Guid, QueryColumnBinding> columnBindings,
+        IReadOnlySet<string> emittedSqlDialects,
         HashSet<string> usedMethodNames,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        var plan = PlanQueryMethod(entity, query, usedMethodNames, diagnostics);
+        var plan = PlanQueryMethod(
+            entity,
+            query,
+            columnBindings,
+            emittedSqlDialects,
+            usedMethodNames,
+            diagnostics
+        );
 
         return plan is null ? null : EmitQueryMethod(query, plan, diagnostics);
     }
@@ -367,6 +407,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     private QueryMethodPlan? PlanQueryMethod(
         Entity entity,
         QueryDefinition query,
+        IReadOnlyDictionary<Guid, QueryColumnBinding> columnBindings,
+        IReadOnlySet<string> emittedSqlDialects,
         HashSet<string> usedMethodNames,
         ICollection<GenerationDiagnostic> diagnostics
     )
@@ -374,69 +416,35 @@ internal sealed partial class CSharpGenerationModelBuilder
         var hasError = false;
 
         // ---- メソッド名（PascalCase ＋ Async。既存メンバー・他クエリとの衝突を弾く） ----
-        // 判定と文言の正本は QueryDefinitionRules（保存前に同じ判定を通す set_query・クエリ定義ダイアログと共有）
-        var methodName = QueryDefinitionRules.ToMethodName(query.Name);
-
-        if (methodName is null)
+        // 規則の部品と文言の正本は QueryDefinitionRules（保存前に同じ判定を通す set_query・クエリ定義ダイアログと共有）
+        if (
+            QueryDefinitionRules.CheckMethodName(
+                query,
+                entity.TableName,
+                usedMethodNames.Add,
+                out var claimedMethodName
+            ) is
+            { } methodNameViolation
+        )
         {
-            AddRuleError(diagnostics, QueryRuleViolation.InvalidName(query.Name));
+            AddRuleError(diagnostics, methodNameViolation);
             return null;
         }
 
-        if (QueryDefinitionRules.ReservedMethodNames.Contains(methodName))
-        {
-            AddRuleError(
-                diagnostics,
-                QueryRuleViolation.ReservedMethodName(query.Name, methodName)
-            );
-            return null;
-        }
-
-        if (!usedMethodNames.Add(methodName))
-        {
-            AddRuleError(
-                diagnostics,
-                QueryRuleViolation.DuplicateMethodName(query.Name, methodName, entity.TableName)
-            );
-            return null;
-        }
+        var methodName = claimedMethodName!;
 
         // ---- 戻り形と実装方式の整合 ----
-        if (query.Returns == QueryReturnShape.Scalar && string.IsNullOrWhiteSpace(query.ScalarType))
+        foreach (var violation in QueryDefinitionRules.CheckShape(query))
         {
-            AddRuleError(diagnostics, QueryRuleViolation.ScalarRequiresType(query.Name));
+            AddRuleError(diagnostics, violation);
             hasError = true;
         }
 
-        if (QueryDefinitionRules.IsScalarDslConflict(query.Returns, query.Implementation))
-        {
-            AddRuleError(diagnostics, QueryRuleViolation.ScalarDslUnsupported(query.Name));
-            hasError = true;
-        }
-
-        if (query.HasPaging && !QueryDefinitionRules.SupportsPaging(query.Returns))
-        {
-            AddRuleError(diagnostics, QueryRuleViolation.PagingRequiresList(query.Name));
-            hasError = true;
-        }
-
-        if (query.OrderBy.Count > 0 && !QueryDefinitionRules.SupportsOrderBy(query.Returns))
-        {
-            AddRuleError(diagnostics, QueryRuleViolation.OrderByRequiresList(query.Name));
-            hasError = true;
-        }
-
-        // ---- パラメータ（識別子・重複・型トークン解決） ----
+        // ---- パラメータ（識別子・予約・重複は規則の部品、型トークン解決はここ） ----
         var parameterDecls = new List<string>();
         var argumentNames = new List<string>();
         var payloadParameters = new List<QueryPayloadParameter>();
-        var seenParameterNames = new HashSet<string>(
-            QueryDefinitionRules.ImplicitParameterNames(query.HasPaging),
-            StringComparer.OrdinalIgnoreCase
-        );
-
-        // ---- 列バインディング（条件・並び順・射影・列参照パラメータが参照する列 → 生成コード上の姿） ----
-        var columnBindings = BuildQueryColumnBindings(entity);
+        var seenParameterNames = QueryDefinitionRules.NewParameterNameSet(query.HasPaging);
 
         // VO 型で型付けされたパラメータ（列参照）の「名前 → VO クラス名」対応（エミッタの直接比較判定用）
         var parameterValueObjects = new Dictionary<string, string>(
@@ -450,35 +458,17 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         foreach (var parameter in query.Parameters)
         {
-            if (!QueryDefinitionRules.IsValidIdentifier(parameter.Name))
+            if (
+                QueryDefinitionRules.CheckParameterName(
+                    query.Name,
+                    parameter.Name,
+                    seenParameterNames,
+                    QueryDefinitionRules.SelectorFieldNameFor(query, methodName)
+                ) is
+                { } parameterViolation
+            )
             {
-                AddRuleError(
-                    diagnostics,
-                    QueryRuleViolation.InvalidParameterName(query.Name, parameter.Name)
-                );
-                hasError = true;
-                continue;
-            }
-
-            // 生成メソッドの本体は契約メンバー Query() の呼び出しで組み立てる。同名（大文字小文字まで一致）の
-            // 引数はメソッドグループを隠して Query() がコンパイル不能になるため名指しで拒否する
-            // （小文字の query は隠さないので合法のまま）
-            if (QueryDefinitionRules.IsReservedParameterName(parameter.Name))
-            {
-                AddRuleError(
-                    diagnostics,
-                    QueryRuleViolation.ReservedParameterName(query.Name, parameter.Name)
-                );
-                hasError = true;
-                continue;
-            }
-
-            if (!seenParameterNames.Add(parameter.Name))
-            {
-                AddRuleError(
-                    diagnostics,
-                    QueryRuleViolation.DuplicateParameterName(query.Name, parameter.Name)
-                );
+                AddRuleError(diagnostics, parameterViolation);
                 hasError = true;
                 continue;
             }
@@ -544,23 +534,47 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
         }
 
+        var pagingNames = query.HasPaging
+            ? QueryDefinitionRules.PagingParameterNames
+            : (IReadOnlyList<string>)[];
+
         if (query.HasPaging)
         {
-            parameterDecls.Add("int take");
-            parameterDecls.Add("int skip = 0");
-            payloadParameters.Add(new QueryPayloadParameter("int", "take", false, IsPaging: true));
-            payloadParameters.Add(new QueryPayloadParameter("int", "skip", false, IsPaging: true));
+            parameterDecls.Add($"int {pagingNames[0]}");
+            parameterDecls.Add($"int {pagingNames[1]} = 0");
+
+            foreach (var pagingName in pagingNames)
+            {
+                payloadParameters.Add(
+                    new QueryPayloadParameter("int", pagingName, false, IsPaging: true)
+                );
+            }
         }
 
         parameterDecls.Add("CancellationToken cancellationToken = default");
 
+        // メソッドの実引数のうち、生 SQL の束縛と委譲で渡す名前（宣言順＝パラメータの後にページング）
+        var boundArgumentNames = argumentNames.Concat(pagingNames).ToList();
+
         // ---- 自由 SQL の静的検証（レベル 1・方言非依存。未宣言＝スキップ・未使用/複文＝警告のみ） ----
-        if (!ValidateRawSql(query, argumentNames, diagnostics))
+        // 宣言済みとして数えるのは、名前が識別子として正しいパラメータすべて。型の解決などの別の理由で
+        // ここまでに落ちたパラメータを未宣言と報告すると、本当の原因と違う問題を探させることになる
+        var declaredNames = query
+            .Parameters.Select(parameter => parameter.Name)
+            .Where(QueryDefinitionRules.IsValidIdentifier)
+            .Concat(pagingNames)
+            .ToList();
+
+        if (!ValidateRawSql(query, declaredNames, emittedSqlDialects, diagnostics))
         {
             hasError = true;
         }
 
-        var lambdaNames = argumentNames.Concat(["take", "skip", "cancellationToken"]).ToList();
+        // ラムダ変数は、ページングの有無に依らず生成メソッドが持ちうる引数名すべてと衝突しない名前にする
+        var lambdaNames = argumentNames
+            .Concat(QueryDefinitionRules.PagingParameterNames)
+            .Append("cancellationToken")
+            .ToList();
         var lambdaVar = QueryConditionCSharpEmitter.PickLambdaVariable(lambdaNames);
 
         // ---- 条件（ミニ DSL のみ） ----
@@ -706,31 +720,20 @@ internal sealed partial class CSharpGenerationModelBuilder
         // ---- 射影 DTO と選択式 ----
         string? dtoClass = null;
         string? projectionSelector = null;
-        var resultTypeName = query.ResultTypeName?.Trim() ?? string.Empty;
+        var resultTypeName = query.ResultTypeName ?? string.Empty;
 
         if (query.Returns == QueryReturnShape.Projection)
         {
-            if (query.Fields.Count == 0 || string.IsNullOrEmpty(resultTypeName))
+            if (
+                QueryDefinitionRules.CheckProjectionHeader(
+                    query,
+                    _reservedTypeNames,
+                    _queryDtoNames.Add
+                ) is
+                { } headerViolation
+            )
             {
-                AddRuleError(diagnostics, QueryRuleViolation.ProjectionRequiresFields(query.Name));
-                return null;
-            }
-
-            if (!QueryDefinitionRules.IsValidIdentifier(resultTypeName))
-            {
-                AddRuleError(
-                    diagnostics,
-                    QueryRuleViolation.InvalidResultTypeName(query.Name, resultTypeName)
-                );
-                return null;
-            }
-
-            if (!_queryDtoNames.Add(resultTypeName))
-            {
-                AddRuleError(
-                    diagnostics,
-                    QueryRuleViolation.DuplicateResultTypeName(query.Name, resultTypeName)
-                );
+                AddRuleError(diagnostics, headerViolation);
                 return null;
             }
 
@@ -750,6 +753,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (query.Implementation == QueryImplementationKind.Dsl)
             {
                 projectionSelector = BuildProjectionSelector(
+                    entity,
                     query,
                     resultTypeName,
                     columnBindings,
@@ -766,6 +770,13 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         if (hasError)
         {
+            // 射影の型名はここまでに登録済み。飛ばすクエリの DTO は出ないので、名前を返す
+            // （残すと、後に来る有効なクエリが同じ型名を使えず、存在しない DTO との重複で生成全体が止まる）
+            if (query.Returns == QueryReturnShape.Projection)
+            {
+                _queryDtoNames.Remove(resultTypeName);
+            }
+
             return null;
         }
 
@@ -797,7 +808,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             returnTypeName,
             parameterList,
             summary,
-            argumentNames,
+            boundArgumentNames,
             payloadParameters,
             condition,
             orderCalls,
@@ -813,12 +824,17 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <remarks>
     /// 未宣言パラメータは実行時に必ず失敗するため「警告＋該当クエリのみ生成スキップ」（Guid 参照検証と同じ方針）、
     /// 未使用パラメータ・複文は「警告のみ・生成継続」。診断は方言名を含む（GUI / CLI 双方に効く）。
+    /// クエリを飛ばすのは、この生成で実装を出す方言の SQL の未宣言パラメータだけ。ほかの方言の SQL（対応しない方言・
+    /// この生成で選んでいない方言・QuickER 版 Repository を生成しない構成のすべて）は出力されないので、
+    /// その誤りは警告にとどめ、使われる方言の実装と契約まで止めない。
     /// </remarks>
-    /// <param name="argumentNames">メソッド引数になるパラメータ名（ページング時は take / skip も SQL から参照できる）</param>
-    /// <returns>未宣言パラメータが 1 件でもあれば false（このクエリはスキップする）</returns>
+    /// <param name="declared">SQL から参照できる名前（宣言したパラメータとページングの引数）</param>
+    /// <param name="emittedSqlDialects">この生成で生 SQL の実装を出す方言</param>
+    /// <returns>実装を出す方言の SQL に未宣言パラメータが 1 件でもあれば false（このクエリはスキップする）</returns>
     private static bool ValidateRawSql(
         QueryDefinition query,
-        IReadOnlyList<string> argumentNames,
+        IReadOnlyList<string> declared,
+        IReadOnlySet<string> emittedSqlDialects,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
@@ -826,11 +842,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             return true;
         }
-
-        // 生 SQL が参照できるパラメータ＝メソッド引数（＋ページング時の take / skip）
-        var declared = query.HasPaging
-            ? argumentNames.Concat(["take", "skip"]).ToList()
-            : argumentNames.ToList();
 
         var ok = true;
 
@@ -849,7 +860,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                     )
                 );
 
-                if (finding.Kind == RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter)
+                if (
+                    finding.Kind == RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter
+                    && emittedSqlDialects.Contains(dialect)
+                )
                 {
                     ok = false;
                 }
@@ -880,6 +894,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             foreach (var (dialect, sql) in query.Sql)
             {
+                // 空・空白だけの SQL は「その方言の SQL は無い」と同じ扱い（手動実装＝契約宣言のみ）。
+                // 手書きの図ファイルにはあり得る（GUI のダイアログと MCP のツールは保存しない）
+                if (string.IsNullOrWhiteSpace(sql))
+                {
+                    continue;
+                }
+
                 if (
                     !CodeGenerationOptions.SupportedRepositoryDialects.Contains(
                         dialect,
@@ -915,13 +936,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 plan.Summary,
                 plan.PayloadParameters,
                 // 委譲メンバー用の完全な実引数列（宣言順＝ページング引数と CancellationToken まで含む）
-                (
-                    query.HasPaging
-                        ? plan.ArgumentNames.Concat(["take", "skip"])
-                        : plan.ArgumentNames
-                )
-                    .Concat(["cancellationToken"])
-                    .ToList()
+                plan.BoundArgumentNames.Concat(["cancellationToken"]).ToList()
             )
         );
     }
@@ -993,12 +1008,14 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
+            var valueObject = ResolveValueObject(column);
             bindings[column.Id] = new QueryColumnBinding(
                 _nameConverter.ToPropertyName(column.Name),
                 typeInfo.TypeName,
-                ResolveValueObject(column)?.ClassName,
+                valueObject?.ClassName,
                 column.IsNullable,
-                typeInfo.IsReferenceType
+                typeInfo.IsReferenceType,
+                valueObject?.IsGuidKey ?? false
             );
         }
 
@@ -1098,7 +1115,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// </remarks>
     private static string BuildDslImplMember(QueryDefinition query, QueryMethodPlan plan)
     {
-        var chain = new StringBuilder("Query()");
+        // 生成本体が呼ぶメンバーは this. で修飾する（同名のパラメータがメンバーを隠さないため。予約名を増やさずに済む）
+        var chain = new StringBuilder("this.Query()");
 
         if (plan.Condition is not null)
         {
@@ -1118,7 +1136,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         // 射影のときだけ選択式フィールドを立て、終端呼び出しにはフィールド名を渡す（射影以外は書式に {0} が無く未使用）
         var selectorField = plan.ProjectionSelector is null
             ? null
-            : ToFieldName(plan.MethodName) + "Selector";
+            : QueryDefinitionRules.ProjectionSelectorFieldName(plan.MethodName);
 
         chain.Append(
             string.Format(
@@ -1182,9 +1200,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         var sqlLiteral = RenderSqlLiteral(sql);
 
         // 匿名オブジェクトの束縛引数（ページング有効時は take / skip も SQL から @take / @skip で参照できる）
-        var boundNames = query.HasPaging
-            ? plan.ArgumentNames.Concat(["take", "skip"]).ToList()
-            : plan.ArgumentNames.ToList();
+        var boundNames = plan.BoundArgumentNames;
         var args = boundNames.Count == 0 ? "null" : $"new {{ {string.Join(", ", boundNames)} }}";
 
         var builder = AppendDocSummary(new StringBuilder(), plan.Summary);
@@ -1193,7 +1209,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             case QueryReturnShape.List:
                 AppendMethodHeader(builder, "public ", plan)
-                    .Append(" =>\n        QueryBySqlAsync(\n            ")
+                    .Append(" =>\n        this.QueryBySqlAsync(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
                     .Append(args)
@@ -1213,7 +1229,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 AppendMethodHeader(builder, "public async ", plan)
                     .Append("\n    {\n        var ")
                     .Append(itemsVar)
-                    .Append(" = await QueryBySqlAsync(\n            ")
+                    .Append(" = await this.QueryBySqlAsync(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
                     .Append(args)
@@ -1228,7 +1244,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
             case QueryReturnShape.Count:
                 AppendMethodHeader(builder, "public async ", plan)
-                    .Append(" =>\n        await ExecuteScalarSqlAsync<int?>(\n            ")
+                    .Append(" =>\n        await this.ExecuteScalarSqlAsync<int?>(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
                     .Append(args)
@@ -1240,7 +1256,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             case QueryReturnShape.Scalar:
                 // 非制約ジェネリックの TResult? は値型に効かないため、Nullable 型を明示して Task<T?> に合わせる
                 AppendMethodHeader(builder, "public ", plan)
-                    .Append(" =>\n        ExecuteScalarSqlAsync<")
+                    .Append(" =>\n        this.ExecuteScalarSqlAsync<")
                     .Append(ScalarElementType(plan.ReturnTypeName))
                     .Append("?>(\n            ")
                     .Append(sqlLiteral)
@@ -1251,7 +1267,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
             case QueryReturnShape.Projection:
                 AppendMethodHeader(builder, "public ", plan)
-                    .Append(" =>\n        QueryProjectionBySqlAsync<")
+                    .Append(" =>\n        this.QueryProjectionBySqlAsync<")
                     .Append(plan.ResultTypeName)
                     .Append(">(\n            ")
                     .Append(sqlLiteral)
@@ -1274,6 +1290,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 逐語リテラルの中に改行を生のまま書くと、描画後のレンダラーの <see cref="string.ReplaceLineEndings(string)"/> が
     /// 生成する OS の改行へ書き換え、LINE SEPARATOR などの文字まで改行に変えるため、SQL の文字列リテラルの値が変わる。
     /// 改行として扱う文字は同メソッドが認識する集合（CR / LF / NEL / FORM FEED / LINE SEPARATOR / PARAGRAPH SEPARATOR）。
+    /// 制御文字と対になっていないサロゲートも同じく通常のリテラルの断片へ回す（UTF-8 のファイルで U+FFFD に化けないよう
+    /// エスケープで書く）。文字ごとの扱いの正本は <see cref="GeneratedLiteralText"/>。
     /// </remarks>
     private static string RenderSqlLiteral(string sql)
     {
@@ -1302,32 +1320,24 @@ internal sealed partial class CSharpGenerationModelBuilder
             breaks.Clear();
         }
 
-        foreach (var c in sql)
+        for (var i = 0; i < sql.Length; i++)
         {
-            var escaped = c switch
+            // 改行になる文字・制御文字・対になっていないサロゲートは逐語リテラルに生のまま書けないので、
+            // エスケープで書く通常のリテラルの断片へ回す（文字ごとの扱いの正本は GeneratedLiteralText）
+            if (GeneratedLiteralText.MustEscape(sql, i, out var length))
             {
-                '\r' => "\\r",
-                '\n' => "\\n",
-                '\f' => "\\f",
-                '\u0085' => "\\u0085",
-                '\u2028' => "\\u2028",
-                '\u2029' => "\\u2029",
-                _ => null,
-            };
-
-            if (escaped is not null)
-            {
-                breaks.Append(escaped);
+                GeneratedLiteralText.AppendRegularLiteralChar(breaks, sql[i]);
                 continue;
             }
 
-            // 改行の連続の後に文字が来たら、そこまでを 1 行として閉じる
+            // エスケープの連続の後に文字が来たら、そこまでを 1 行として閉じる
             if (breaks.Length > 0)
             {
                 Flush();
             }
 
-            text.Append(c);
+            text.Append(sql, i, length);
+            i += length - 1;
         }
 
         if (lines.Count == 0 && breaks.Length == 0)
@@ -1361,30 +1371,22 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var hasError = false;
         var properties = new List<string>();
-        var seenFieldNames = new HashSet<string>(StringComparer.Ordinal);
+        var seenFieldNames = QueryDefinitionRules.NewFieldNameSet();
 
         foreach (var field in query.Fields)
         {
+            // フィールド名の規則の部品と文言の正本は QueryDefinitionRules（Validate と共有）
             if (
-                !QueryDefinitionRules.IsValidIdentifier(field.Name)
-                || !seenFieldNames.Add(field.Name)
+                QueryDefinitionRules.CheckFieldName(
+                    query.Name,
+                    field.Name,
+                    resultTypeName,
+                    seenFieldNames
+                ) is
+                { } fieldViolation
             )
             {
-                AddRuleError(
-                    diagnostics,
-                    QueryRuleViolation.InvalidFieldName(query.Name, field.Name)
-                );
-                hasError = true;
-                continue;
-            }
-
-            // DTO 型名と同名のプロパティは C# が禁止する（CS0542＝メンバー名は外側の型名と同じにできない）
-            if (string.Equals(field.Name, resultTypeName, StringComparison.Ordinal))
-            {
-                AddRuleError(
-                    diagnostics,
-                    QueryRuleViolation.FieldNameEqualsResultType(query.Name, field.Name)
-                );
+                AddRuleError(diagnostics, fieldViolation);
                 hasError = true;
                 continue;
             }
@@ -1462,6 +1464,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>ミニ DSL 射影の選択式（{v} =&gt; new Dto { F = {v}.Prop, ... }）を構築する（検証エラーは null）</summary>
     private static string? BuildProjectionSelector(
+        Entity entity,
         QueryDefinition query,
         string resultTypeName,
         IReadOnlyDictionary<Guid, QueryColumnBinding> columnBindings,
@@ -1489,6 +1492,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             // int? → int の暗黙変換が無く必ず CS0266 になる。エミットされる C# がコンパイル不能な
             // 組み合わせなので、Warning＋このクエリだけスキップ（DSL の型整合検査と同じ流儀）。
             // 参照型（string / VO）は null 許容性の警告どまりでコンパイルは通るため対象外
+            // （NULL を除いてから非 NULL で受ける使い方は正当なので、代入に ! を付けて警告を抑止する）
             var fieldIsNullable = field.IsNullable ?? binding.IsNullable;
             var isReference =
                 binding.ValueObjectClassName is not null || binding.IsUnderlyingReferenceType;
@@ -1501,14 +1505,16 @@ internal sealed partial class CSharpGenerationModelBuilder
                             Strings.CodeGen_Query_ProjectionFieldNotNullOverride,
                             query.Name,
                             field.Name,
-                            binding.PropertyName
+                            // 利用者が図で見る名前（DB の列名）で名指しする（C# のプロパティ名は図に無い）
+                            entity.Columns.First(column => column.Id == columnId).Name
                         )
                     )
                 );
                 return null;
             }
 
-            assignments.Add($"{field.Name} = {lambdaVar}.{binding.PropertyName}");
+            var suppression = !fieldIsNullable && binding.IsNullable ? "!" : string.Empty;
+            assignments.Add($"{field.Name} = {lambdaVar}.{binding.PropertyName}{suppression}");
         }
 
         return $"{lambdaVar} => new {resultTypeName} {{ {string.Join(", ", assignments)} }}";

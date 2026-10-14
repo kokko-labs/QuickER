@@ -53,4 +53,24 @@ public sealed record QueryDiagnosticText(string ResourceKey, params object?[] Ar
 
     /// <summary>中立言語（英語）で描画する。ヘッドレス実行（外部 MCP サーバ）向けの固定言語</summary>
     public string FormatEnglish() => Format(CultureInfo.InvariantCulture);
+
+    /// <summary>資源キーと書式引数の中身（要素ごとの等値）で比べる（合成された record の等値は配列を参照で比べるため置き換える）</summary>
+    public bool Equals(QueryDiagnosticText? other) =>
+        other is not null
+        && string.Equals(ResourceKey, other.ResourceKey, StringComparison.Ordinal)
+        && Arguments.SequenceEqual(other.Arguments);
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(ResourceKey, StringComparer.Ordinal);
+
+        foreach (var argument in Arguments)
+        {
+            hash.Add(argument);
+        }
+
+        return hash.ToHashCode();
+    }
 }

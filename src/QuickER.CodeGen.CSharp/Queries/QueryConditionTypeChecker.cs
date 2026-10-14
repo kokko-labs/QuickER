@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Numerics;
 
@@ -185,19 +186,34 @@ internal static class QueryConditionTypeChecker
             return;
         }
 
-        // 列が文字列（string または内包値が string の VO）でなければ Contains 等のメソッドが存在しない
+        // 列が文字列（string または内包値が string の VO）でなければ Contains 等のメソッドが存在しない。
+        // GuidKey の VO は内包値が string でも、部分一致のメソッド（IStringMatchValueObject）を持たない
+        // （GUID の形に限った値の部分一致は意味が薄い）ので、完全一致（==）以外の文字列一致は使えない
         var underlyingFamily = Classify(column.UnderlyingTypeName);
 
-        if (underlyingFamily is not TypeFamily.Text and not TypeFamily.Unknown)
+        // 値オブジェクトの列は、生成される基底クラスが決まっているので Unknown を寛容に扱わない。
+        // 部分一致のメソッドは文字列の基底だけが持ち（判定の正本は生成器の ValueObjectHasStringMatch）、
+        // 完全一致（== VO.Create(文字列)）は内包値が string の VO（GuidKey を含む）だけが書ける
+        var supported = column.ValueObjectClassName is not null
+            ? node.Kind == StringMatchKind.Exact
+                ? underlyingFamily == TypeFamily.Text
+                : CSharpGenerationModelBuilder.ValueObjectHasStringMatch(
+                    column.UnderlyingTypeName,
+                    column.IsGuidKeyValueObject
+                )
+            : underlyingFamily is TypeFamily.Text or TypeFamily.Unknown;
+
+        if (!supported)
         {
             violations.Add(
                 new Violation(
                     ViolationKind.StringMatchUnsupported,
                     node.Column.ResolvedName ?? node.Column.Text,
                     ColumnTypeText(column),
-                    // Exact はワイルドカードなしの NOT LIKE 由来（診断には DSL の綴りで載せる）
-                    node.Kind == StringMatchKind.Exact
-                        ? "NOT LIKE"
+                    // 診断には利用者が書いた演算子の名前で載せる（LIKE のパターン・LIKE @p は一致種別へ写されるので、
+                    // 種別の名前で出すと、書いていない CONTAINS などを名指ししてしまう）
+                    node.WrittenAsLike
+                        ? (node.Negated ? "NOT LIKE" : "LIKE")
                         : node.Kind.ToString().ToUpperInvariant()
                 )
             );
@@ -262,18 +278,20 @@ internal static class QueryConditionTypeChecker
             // 素の列に VO リストは比較できない（VO 有効の図では列も VO のためここへは来ない）
             compatible = false;
         }
+        else if (column.IsNullable && !column.IsUnderlyingReferenceType)
+        {
+            // NULL 許容の値型列は Cast<T?>() で持ち上げるため、要素型は列型と完全一致が必要
+            // （Cast は参照/ボックス変換しか通さず、long リストを int? へ Cast すると実行時 InvalidCastException）。
+            // 型ファミリが未知でも同じ＝未知の値型（PostgreSQL の cidr など）の列へ string のリストを渡すと、
+            // 持ち上げが実行時に InvalidCastException になるので、未知でも要素型の一致を求める（次の分岐より先に判定する）
+            compatible = element.TypeName == column.UnderlyingTypeName;
+        }
         else if (
             Classify(column.UnderlyingTypeName) == TypeFamily.Unknown
             || Classify(element.TypeName) == TypeFamily.Unknown
         )
         {
             compatible = true;
-        }
-        else if (column.IsNullable && !column.IsUnderlyingReferenceType)
-        {
-            // NULL 許容の値型列は Cast<T?>() で持ち上げるため、要素型は列型と完全一致が必要
-            // （Cast は参照/ボックス変換しか通さず、long リストを int? へ Cast すると実行時 InvalidCastException）
-            compatible = element.TypeName == column.UnderlyingTypeName;
         }
         else
         {
@@ -348,9 +366,10 @@ internal static class QueryConditionTypeChecker
 
     /// <summary>数値リテラルと列の型整合（エミッタのサフィックス規則と VO Create の暗黙変換の鏡）</summary>
     /// <remarks>
-    /// 値の範囲も見る。エミッタはリテラルを原文のまま出すので、C# のリテラルにならない値（<c>ulong</c> を超える整数）、
-    /// 列の型と比べられない値（素の <c>long</c> 列に <c>long</c> を超える値・素の符号付き整数列に <c>ulong</c> の値・
-    /// 素の <c>ulong</c> 列に負の値）、VO の <c>Create</c> へ渡せない値（内包型の範囲の外）はコンパイルできない。
+    /// 値の範囲も見る。エミッタはリテラルを原文のまま出すので、C# のリテラルにならない値（<c>ulong</c> を超える整数）と、
+    /// 列の型（VO の列なら内包型）の範囲の外の値は、素の列でも VO でも断る。範囲外の値を通すと、C# の比較は
+    /// 常に偽（または真）で CS0652 の警告になり、型付きパラメータで束縛する実装先（SQL Server）は変換や算術オーバーフローの
+    /// 例外になる。VO の列は <c>Create</c> へ渡せずコンパイルできない（CS1503）。
     /// </remarks>
     private static bool NumberLiteralCompatible(
         QueryColumnBinding column,
@@ -416,24 +435,10 @@ internal static class QueryConditionTypeChecker
             return false;
         }
 
-        if (column.ValueObjectClassName is not null)
-        {
-            // VO は Create(リテラル)。定数の暗黙変換は値が内包型の範囲に入るときだけ効く（CS1503）
-            return IntegerRange(column.UnderlyingTypeName) is not { } range
-                || (value >= range.Min && value <= range.Max);
-        }
-
-        return column.UnderlyingTypeName switch
-        {
-            // サフィックス L のリテラルは long を超えると ulong になり、long 列と比べられない
-            "long" => value <= long.MaxValue,
-            // ulong と負の値は比べられない（CS0034）
-            "ulong" => value >= 0,
-            // 符号付き整数と ulong のリテラル（long を超える値）は比べられない（CS0034）
-            "sbyte" or "short" or "int" => value <= long.MaxValue,
-            // byte / ushort / uint は int・long・ulong のどれへも昇格できる
-            _ => true,
-        };
+        // 列の型（VO なら内包型）の範囲に入るときだけ通す。判定は VO と素の列で共通（写しを作らない）。
+        // 素の列の範囲外は、long を超えるリテラルが long 列と比べられない（CS0034）形も含めて、範囲の判定に収まる
+        return IntegerRange(column.UnderlyingTypeName) is not { } range
+            || (value >= range.Min && value <= range.Max);
     }
 
     /// <summary>整数型の値の範囲（整数型でなければ null）</summary>
@@ -552,10 +557,18 @@ internal static class QueryConditionTypeChecker
             return true;
         }
 
-        var targets = from switch
+        return ImplicitConversions.TryGetValue(from, out var targets) && targets.Contains(to);
+    }
+
+    /// <summary>
+    /// 暗黙変換の表（変換元の型名 → 変換先の型名の集合。C# の暗黙数値変換と DateTime → DateTimeOffset）
+    /// </summary>
+    /// <remarks>型の検査のたびに引くので、呼ぶごとに配列を作らない読み取り専用の表にする</remarks>
+    private static readonly FrozenDictionary<string, FrozenSet<string>> ImplicitConversions =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            "sbyte" => (string[])["short", "int", "long", "float", "double", "decimal"],
-            "byte" =>
+            ["sbyte"] = ["short", "int", "long", "float", "double", "decimal"],
+            ["byte"] =
             [
                 "short",
                 "ushort",
@@ -567,19 +580,19 @@ internal static class QueryConditionTypeChecker
                 "double",
                 "decimal",
             ],
-            "short" => ["int", "long", "float", "double", "decimal"],
-            "ushort" => ["int", "uint", "long", "ulong", "float", "double", "decimal"],
-            "int" => ["long", "float", "double", "decimal"],
-            "uint" => ["long", "ulong", "float", "double", "decimal"],
-            "long" => ["float", "double", "decimal"],
-            "ulong" => ["float", "double", "decimal"],
-            "float" => ["double"],
-            "DateTime" => ["DateTimeOffset"],
-            _ => [],
-        };
-
-        return targets.Contains(to);
-    }
+            ["short"] = ["int", "long", "float", "double", "decimal"],
+            ["ushort"] = ["int", "uint", "long", "ulong", "float", "double", "decimal"],
+            ["int"] = ["long", "float", "double", "decimal"],
+            ["uint"] = ["long", "ulong", "float", "double", "decimal"],
+            ["long"] = ["float", "double", "decimal"],
+            ["ulong"] = ["float", "double", "decimal"],
+            ["float"] = ["double"],
+            ["DateTime"] = ["DateTimeOffset"],
+        }.ToFrozenDictionary(
+            pair => pair.Key,
+            pair => pair.Value.ToFrozenSet(StringComparer.Ordinal),
+            StringComparer.Ordinal
+        );
 
     /// <summary>CLR 型名を互換判定の型ファミリへ分類する（未知の型名は Unknown＝判定しない）</summary>
     private static TypeFamily Classify(string clrTypeName) =>
@@ -667,5 +680,16 @@ internal static class QueryConditionTypeChecker
     }
 
     /// <summary>診断へ載せる文字列リテラルの表記（長すぎる値は先頭だけ）</summary>
-    private static string Truncate(string value) => value.Length <= 20 ? value : value[..20] + "…";
+    private static string Truncate(string value)
+    {
+        if (value.Length <= 20)
+        {
+            return value;
+        }
+
+        // サロゲートの対の間で切らない（対になっていないサロゲートが診断の文言に残り、表示や JSON が壊れる）
+        var length = char.IsHighSurrogate(value[19]) ? 19 : 20;
+
+        return value[..length] + "…";
+    }
 }

@@ -101,7 +101,11 @@ public class CSharpReverseVerbatimTypeTests
         // 生成物は「元の表記」を verbatim 引数として持つ（トークンだけでは綴りを復元できないため）
         source.Should().Contain($"NativeType = \"{dataType}\"");
 
-        var reversed = new CSharpReverseParser().Parse(source, new SqlServerTypeCatalog());
+        var reversed = new CSharpReverseParser().Parse(
+            source,
+            new SqlServerTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
         var column = reversed
             .Entities.Single()
             .Columns.Single(candidate => candidate.Name == "probe");
@@ -182,7 +186,11 @@ public class CSharpReverseVerbatimTypeTests
             }
             """;
 
-        var result = new CSharpReverseParser().Parse(source, new SqlServerTypeCatalog());
+        var result = new CSharpReverseParser().Parse(
+            source,
+            new SqlServerTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
 
         result.Entities.Single().Columns.Single().DataType.Should().Be("int");
         result
@@ -213,7 +221,8 @@ public class CSharpReverseVerbatimTypeTests
         // SQL Server の 'datetime' を PostgreSQL 方言でリバースする（PostgreSQL に datetime は無い）
         var result = new CSharpReverseParser().Parse(
             source,
-            new QuickER.Provider.PostgreSql.PostgreSqlTypeCatalog()
+            new QuickER.Provider.PostgreSql.PostgreSqlTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
         );
 
         result

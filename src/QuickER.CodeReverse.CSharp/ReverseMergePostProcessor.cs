@@ -133,9 +133,11 @@ public static class ReverseMergePostProcessor
         // 解析時に付けた名前は null へ戻る（この修正より前のリバースで作った図は、同じ組に名前の無い 2 本を
         // 持っているのが普通）。多対多は渡さない＝(b) で温存したインスタンスは現在図と共有しており、
         // DDL も外部キー制約として出さないため
+        // マージ結果は現在図の対象 DBMS を引き継ぐので、名前もその上限で縮める（ConstraintNames の XmlDoc の経路）
         ConstraintNames.NameUnnamedForeignKeys(
             mergedEntities,
-            result.Where(relationship => relationship.Type != RelationshipType.ManyToMany)
+            result.Where(relationship => relationship.Type != RelationshipType.ManyToMany),
+            IdentifierLengthLimits.ForDbms(current.TargetDbms)
         );
 
         return result;

@@ -293,6 +293,30 @@
   <data name="Status_Ready" xml:space="preserve">
     <value>Ready</value>
   </data>
+  <data name="Status_TableNameRejected" xml:space="preserve">
+    <value>A table named '{0}' already exists (compared ignoring case and surrounding spaces). The table name was not changed.</value>
+  </data>
+  <data name="Status_ColumnNameRejected" xml:space="preserve">
+    <value>Table '{0}' already has a column named '{1}' (compared ignoring case and surrounding spaces). The column name was not changed.</value>
+  </data>
+  <data name="Status_NameTooLong" xml:space="preserve">
+    <value>'{0}' is longer than the limit of {1} for {2}. DDL generation and sync will refuse this name until it is shortened.</value>
+  </data>
+  <data name="Status_NameNotRepresentable" xml:space="preserve">
+    <value>'{0}' contains a character outside the Basic Multilingual Plane (such as an emoji), which {1} cannot store. DDL generation and sync will refuse this name until the character is removed.</value>
+  </data>
+  <data name="IdentifierLimit_Utf16CodeUnits" xml:space="preserve">
+    <value>{0} UTF-16 code units</value>
+  </data>
+  <data name="IdentifierLimit_Utf8Bytes" xml:space="preserve">
+    <value>{0} UTF-8 bytes</value>
+  </data>
+  <data name="IdentifierLimit_Characters" xml:space="preserve">
+    <value>{0} characters</value>
+  </data>
+  <data name="IdentifierLimit_CharactersWithTableFile" xml:space="preserve">
+    <value>{0} characters (a table name is also limited to {1} bytes as a file name)</value>
+  </data>
   <data name="Status_EntitiesLabel" xml:space="preserve">
     <value>Entities:</value>
   </data>
@@ -657,7 +681,7 @@
     <value>Change Target Database</value>
   </data>
   <data name="TypeConversion_ConfirmIntro" xml:space="preserve">
-    <value>Switching the target database to {0} affects the columns listed below.</value>
+    <value>Switching the target database to {0} affects the items listed below.</value>
   </data>
   <data name="TypeConversion_ConfirmNote" xml:space="preserve">
     <value>Note: converted types may not be restored by switching the dialect back later (Undo restores this change exactly).</value>
@@ -676,6 +700,27 @@
   </data>
   <data name="TypeConversion_NullableColumnLine" xml:space="preserve">
     <value>• {0}.{1} ({2})</value>
+  </data>
+  <data name="TypeConversion_NameLimitHeader" xml:space="preserve">
+    <value>Names that {0} would refuse (DDL generation and sync stop until they are changed):</value>
+  </data>
+  <data name="TypeConversion_NameLimitTableLine" xml:space="preserve">
+    <value>Table '{0}': {1}</value>
+  </data>
+  <data name="TypeConversion_NameLimitColumnLine" xml:space="preserve">
+    <value>Column '{0}'.'{1}': {2}</value>
+  </data>
+  <data name="TypeConversion_NameLimitUniqueLine" xml:space="preserve">
+    <value>Unique constraint '{0}'.'{1}': {2}</value>
+  </data>
+  <data name="TypeConversion_NameLimitForeignKeyLine" xml:space="preserve">
+    <value>Foreign key '{0}': {1}</value>
+  </data>
+  <data name="TypeConversion_NameLimitTooLong" xml:space="preserve">
+    <value>longer than the limit of {0}</value>
+  </data>
+  <data name="TypeConversion_NameLimitNotRepresentable" xml:space="preserve">
+    <value>contains a character outside the Basic Multilingual Plane, which cannot be stored</value>
   </data>
   <data name="Common_MoreItems" xml:space="preserve">
     <value>…and {0} more</value>
@@ -837,6 +882,9 @@
   <data name="Dbml_DuplicateEntity" xml:space="preserve">
     <value>Entity '{0}' is duplicated.</value>
   </data>
+  <data name="Dbml_DuplicateColumn" xml:space="preserve">
+    <value>Column '{1}' is duplicated in table '{0}' (column names are compared ignoring case and surrounding spaces).</value>
+  </data>
   <data name="Dbml_MissingClosingBrace" xml:space="preserve">
     <value>Entity '{0}' is missing its closing brace '}}'.</value>
   </data>
@@ -894,6 +942,9 @@
   <data name="Mermaid_DuplicateEntity" xml:space="preserve">
     <value>Entity '{0}' is duplicated.</value>
   </data>
+  <data name="Mermaid_DuplicateColumn" xml:space="preserve">
+    <value>Column '{1}' is duplicated in table '{0}' (column names are compared ignoring case and surrounding spaces).</value>
+  </data>
   <data name="Mermaid_MissingClosingBrace" xml:space="preserve">
     <value>Entity '{0}' is missing its closing brace '}}'.</value>
   </data>
@@ -932,6 +983,9 @@
   </data>
   <data name="TableDoc_DetailDuplicateTable" xml:space="preserve">
     <value>The detail sheets contain a duplicate table name '{0}'.</value>
+  </data>
+  <data name="TableDoc_DuplicateColumn" xml:space="preserve">
+    <value>Column '{1}' is duplicated in table '{0}' (column names are compared ignoring case and surrounding spaces).</value>
   </data>
   <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
     <value>The detail sheet for table '{0}' was not found.</value>
@@ -1173,6 +1227,9 @@
   <data name="Tool_RelationshipConstraintNameTaken" xml:space="preserve">
     <value>The constraint name '{0}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit constraint_name to get a unique one automatically.</value>
   </data>
+  <data name="Tool_UniqueConstraintNameTaken" xml:space="preserve">
+    <value>The constraint name '{0}' is already used in this diagram (constraint names must be unique across foreign keys, primary keys and unique constraints, ignoring case). Choose another name, or omit name to get a unique one automatically.</value>
+  </data>
   <data name="Tool_TableNameTaken" xml:space="preserve">
     <value>A table named '{0}' already exists (table names must be unique, ignoring case).</value>
   </data>
@@ -1196,6 +1253,12 @@
   </data>
   <data name="Tool_RelationshipUnnamedConstraint" xml:space="preserve">
     <value>(unnamed)</value>
+  </data>
+  <data name="Tool_RelationshipDefaultConstraintName" xml:space="preserve">
+    <value>{0} (default name)</value>
+  </data>
+  <data name="Tool_RelationshipTypeRequired" xml:space="preserve">
+    <value>relationship_type is required (one of: {0}).</value>
   </data>
   <data name="Tool_Summary_PrimaryKeyOrder" xml:space="preserve">
     <value>Primary key order: {0}</value>

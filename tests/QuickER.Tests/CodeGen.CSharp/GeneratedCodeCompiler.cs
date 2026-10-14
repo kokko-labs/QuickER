@@ -110,6 +110,31 @@ internal static class GeneratedCodeCompiler
     }
 
     /// <summary>
+    /// ソース群の Roslyn コンパイルを作って返す（emit はしない。意味モデルで型の参照を調べる検証用）
+    /// </summary>
+    /// <param name="sources">ファイル名と内容の組</param>
+    /// <param name="assemblyName">アセンブリ名</param>
+    public static CSharpCompilation CreateCompilation(
+        IEnumerable<(string FileName, string Content)> sources,
+        string assemblyName
+    ) =>
+        CSharpCompilation.Create(
+            assemblyName,
+            sources.Select(source =>
+                CSharpSyntaxTree.ParseText(
+                    source.Content,
+                    new CSharpParseOptions(LanguageVersion.Latest),
+                    path: source.FileName
+                )
+            ),
+            MetadataReferences.Value,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+
+    /// <summary>
     /// 生成結果をコンパイルし、成功時にロード済みアセンブリを返す（生成コードを実際に動かす検証用）
     /// </summary>
     /// <param name="result">検証対象の生成結果</param>

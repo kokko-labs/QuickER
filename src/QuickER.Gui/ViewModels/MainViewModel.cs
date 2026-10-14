@@ -36,10 +36,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public UndoRedoManager UndoRedo { get; } = new();
 
     /// <summary>ツールバーの設定メニュー内、言語切替用の子 ViewModel（表示言語の選択・保存）</summary>
-    public LanguageSwitchViewModel LanguageSwitch { get; }
+    public LanguageSwitchViewModel LanguageSwitch { get; private set; }
 
     /// <summary>ツールバーの設定メニュー内、起動時更新チェックのトグル用の子 ViewModel</summary>
-    public UpdateSettingsViewModel UpdateSettings { get; }
+    public UpdateSettingsViewModel UpdateSettings { get; private set; }
 
     /// <summary>フィーチャーモジュールがツールバーへ寄与するボタン群（起動時にホストが設定する）</summary>
     [ObservableProperty]
@@ -255,8 +255,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>図の一括更新（<see cref="RunBulkDiagramUpdate"/>）の入れ子の深さ（0＝一括更新中でない）</summary>
     private int _bulkDiagramUpdateDepth;
 
+    /// <summary>位置・大きさの後回しの範囲（<see cref="RunDeferringLayoutRefresh"/>）の入れ子の深さ</summary>
+    private int _layoutRefreshDeferDepth;
+
+    /// <summary>後回しの範囲の中で、位置・大きさが変わったか（範囲の終わりに 1 回だけ作り直す）</summary>
+    private bool _layoutRefreshPending;
+
     /// <summary>テスト専用: リレーション構成に基づく列ルール（<see cref="ApplyRelationshipColumnRules"/>）を適用した回数</summary>
     internal int RelationshipRuleApplicationCountForTests { get; private set; }
+
+    /// <summary>テスト専用: ミニマップの射影と描画データを作り直した回数</summary>
+    internal int MiniMapRecalculationCountForTests { get; private set; }
+
+    /// <summary>テスト専用: キャンバスサイズの変更通知（<see cref="RefreshCanvasSize"/>）を出した回数</summary>
+    internal int CanvasSizeRefreshCountForTests { get; private set; }
 
     /// <summary>現在の図のターゲット DBMS（プロバイダ識別名。バッキングフィールド）</summary>
     private IDatabaseProvider _currentProvider;
@@ -266,6 +278,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>現在の図のターゲット DBMS プロバイダ</summary>
     public IDatabaseProvider CurrentProvider => _currentProvider;
+
+    /// <summary>図の対象 DBMS の識別子の長さの上限</summary>
+    internal IdentifierLengthLimit CurrentIdentifierLimit() =>
+        IdentifierLengthLimits.ForDbms(_currentProvider.Name);
 
     /// <summary>登録済み DB プロバイダのレジストリ（モック生成の型解決など、方言別マッパ解決に用いる）</summary>
     public DatabaseProviderRegistry Providers => _providers;
@@ -355,8 +371,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ApplyRelationshipColumnRules,
             OnColumnRenamed
         );
-        LanguageSwitch = new LanguageSwitchViewModel(_dialogs);
-        UpdateSettings = new UpdateSettingsViewModel(_dialogs);
+        _changeTracker.NameEdited += OnNameEdited;
+        // 設定メニューの小さな VM は、図の設定と同じ保存先を使う（テストで差し替えたときも同じ先を見る）
+        LanguageSwitch = new LanguageSwitchViewModel(_dialogs, _guiSettingsStore);
+        UpdateSettings = new UpdateSettingsViewModel(_dialogs, _guiSettingsStore);
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
@@ -379,8 +397,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>キャンバスサイズを再計算して変更通知を発行する。エンティティの移動・サイズ変更後に呼び出す</summary>
+    /// <remarks>
+    /// 図の一括更新（<see cref="RunBulkDiagramUpdate"/>）と位置・大きさの後回しの範囲（<see cref="RunDeferringLayoutRefresh"/>）の
+    /// 中では通知せず、最外側の終わりに 1 回だけ通知する
+    /// </remarks>
     public void RefreshCanvasSize()
     {
+        if (_bulkDiagramUpdateDepth > 0)
+        {
+            return;
+        }
+
+        if (_layoutRefreshDeferDepth > 0)
+        {
+            _layoutRefreshPending = true;
+
+            return;
+        }
+
+        RefreshCanvasSizeCore();
+    }
+
+    /// <summary>キャンバスサイズの変更を通知する（止める判定を通らない本体）</summary>
+    private void RefreshCanvasSizeCore()
+    {
+        CanvasSizeRefreshCountForTests++;
         OnPropertyChanged(nameof(CanvasWidth));
         OnPropertyChanged(nameof(CanvasHeight));
     }
@@ -519,12 +560,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var before = CaptureEntityLayoutSnapshot();
 
-        // 整列による位置変更が個別のプロパティ変更履歴として二重登録されないよう追跡を抑止する
-        _changeTracker.RunWithoutTracking(() =>
-        {
-            layoutAction();
-            RefreshCanvasSize();
-        });
+        // 整列による位置変更が個別のプロパティ変更履歴として二重登録されないよう追跡を抑止する。
+        // 位置の 1 件ごとの再計算（ミニマップ・キャンバス）は一括更新で終わりの 1 回へまとめる
+        _changeTracker.RunWithoutTracking(() => RunBulkDiagramUpdate(layoutAction));
 
         var after = CaptureEntityLayoutSnapshot();
 
@@ -797,7 +835,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (selected.Count >= 2)
         {
-            UndoRedo.Execute(new GroupRemoveEntitiesCommand(this, selected));
+            // 要素の 1 件ごとの再計算（列ルール・ミニマップほか）は一括更新で終わりの 1 回へまとめる
+            RunBulkDiagramUpdate(() =>
+                UndoRedo.Execute(new GroupRemoveEntitiesCommand(this, selected))
+            );
             SelectedEntity = null;
             return;
         }
@@ -807,7 +848,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        UndoRedo.Execute(new RemoveEntityCommand(this, SelectedEntity));
+        // 図に居ないエンティティは削除しない（履歴も積まない）。名前付きクエリは Id で取り除くため、
+        // 同じ Id の生きている表のクエリまで消してしまう
+        if (!Entities.Contains(SelectedEntity))
+        {
+            SelectedEntity = null;
+
+            return;
+        }
+
+        var removing = SelectedEntity;
+        RunBulkDiagramUpdate(() => UndoRedo.Execute(new RemoveEntityCommand(this, removing)));
         SelectedEntity = null;
     }
 
@@ -1359,11 +1410,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     TargetEntityId = entity.Id,
                     Type = PendingRelationshipType,
                     ColumnPairs = columnPairs,
+                    // 図へ保存する既定名なので、図の対象 DBMS の上限で縮める（ConstraintNames の XmlDoc の経路）
                     ConstraintName = ConstraintNames.UniqueForeignKey(
                         entity.TableName,
                         PendingRelationshipSource.TableName,
                         childColumnNames,
-                        ConstraintNames.CollectExisting(ToDiagramModel())
+                        ConstraintNames.CollectExisting(ToDiagramModel()),
+                        CurrentIdentifierLimit()
                     ),
                 },
                 PendingRelationshipSource,
@@ -1575,13 +1628,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // ---------------- Undo/Redo ----------------
 
     /// <summary>直前の操作を取り消す</summary>
-    /// <remarks>履歴の再生による変更が新たな履歴として記録されないよう追跡を抑止する</remarks>
+    /// <remarks>
+    /// 履歴の再生による変更が新たな履歴として記録されないよう追跡を抑止する。
+    /// 要素の 1 件ごとの再計算（列ルール・ミニマップ・キャンバスほか）は一括更新で終わりの 1 回へまとめる。
+    /// 一括更新は追跡の停止の内側に置く＝一括更新の終わりの列ルールの適用も追跡の外で走り、追跡の取り直しは
+    /// 最外側（追跡の停止の終わり）の 1 回だけになる
+    /// </remarks>
     [RelayCommand]
-    private void Undo() => _changeTracker.RunWithoutTracking(() => UndoRedo.Undo());
+    private void Undo() =>
+        _changeTracker.RunWithoutTracking(() => RunBulkDiagramUpdate(() => UndoRedo.Undo()));
 
     /// <summary>取り消した操作をやり直す</summary>
+    /// <remarks>まとめ方は <see cref="Undo"/> と同じ</remarks>
     [RelayCommand]
-    private void Redo() => _changeTracker.RunWithoutTracking(() => UndoRedo.Redo());
+    private void Redo() =>
+        _changeTracker.RunWithoutTracking(() => RunBulkDiagramUpdate(() => UndoRedo.Redo()));
 
     /// <summary>エンティティクリックを処理するコマンド（View のイベントバインド用）</summary>
     [RelayCommand]
@@ -1684,11 +1745,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _changeTracker.RunWithoutTracking(() =>
-        {
-            AutoFitEntityWidths(Entities);
-            AutoLayoutService.LayoutGrid(Entities, Relationships);
-            RefreshCanvasSize();
-        });
+            RunBulkDiagramUpdate(() =>
+            {
+                AutoFitEntityWidths(Entities);
+                AutoLayoutService.LayoutGrid(Entities, Relationships);
+            })
+        );
 
         // 図が新しく現れた経路なので読める大きさ（等倍）を優先する＝縮小しない
         RequestFitToWindow();
@@ -1702,8 +1764,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void AutoFitEntityWidths()
     {
-        var changed = AutoFitEntityWidths(Entities);
-        RefreshCanvasSize();
+        var changed = false;
+
+        // 幅の 1 件ごとの再計算（ミニマップ・キャンバス）は一括更新で終わりの 1 回へまとめる
+        RunBulkDiagramUpdate(() => changed = AutoFitEntityWidths(Entities));
 
         if (changed)
         {
@@ -1732,41 +1796,50 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>リレーション構成に基づいて全カラムの PK/FK 編集可否と FK フラグを同期する</summary>
-    /// <param name="excludedSnapshotTarget">スナップショット再取得から除外する対象（変更途中の値を確定値として誤記録しないために指定）</param>
     /// <remarks>
     /// いったん全カラムを編集可能へリセットし、リレーション管理下の FK フラグも解除したうえで、
-    /// 現存するリレーションのみを根拠にロックと FK フラグを付け直す。リレーション削除時の解除漏れを防ぐ方式
+    /// 現存するリレーションのみを根拠にロックと FK フラグを付け直す。リレーション削除時の解除漏れを防ぐ方式。
+    /// 図の一括更新（<see cref="RunBulkDiagramUpdate"/>）の中では適用せず、一括更新の終わりの 1 回に任せる
+    /// （コマンドの後処理などから直接呼ばれても二重にならない）
     /// </remarks>
-    public void ApplyRelationshipColumnRules(object? excludedSnapshotTarget = null)
+    public void ApplyRelationshipColumnRules()
+    {
+        if (_bulkDiagramUpdateDepth > 0)
+        {
+            return;
+        }
+
+        ApplyRelationshipColumnRulesCore();
+    }
+
+    /// <summary>列ルールを適用する（一括更新の判定を通らない本体）</summary>
+    private void ApplyRelationshipColumnRulesCore()
     {
         RelationshipRuleApplicationCountForTests++;
 
-        _changeTracker.RunWithoutTracking(
-            () =>
+        _changeTracker.RunWithoutTracking(() =>
+        {
+            foreach (var entity in Entities)
             {
-                foreach (var entity in Entities)
+                foreach (var column in entity.Columns)
                 {
-                    foreach (var column in entity.Columns)
-                    {
-                        column.IsPrimaryKeyEditable = true;
-                        column.IsForeignKeyEditable = true;
+                    column.IsPrimaryKeyEditable = true;
+                    column.IsForeignKeyEditable = true;
 
-                        // ユーザーが手動設定した FK は維持し、リレーション由来の FK のみ解除する
-                        if (column.IsForeignKeyManagedByRelationship)
-                        {
-                            column.IsForeignKey = false;
-                            column.IsForeignKeyManagedByRelationship = false;
-                        }
+                    // ユーザーが手動設定した FK は維持し、リレーション由来の FK のみ解除する
+                    if (column.IsForeignKeyManagedByRelationship)
+                    {
+                        column.IsForeignKey = false;
+                        column.IsForeignKeyManagedByRelationship = false;
                     }
                 }
+            }
 
-                foreach (var relationship in Relationships)
-                {
-                    LockRelationshipColumns(relationship);
-                }
-            },
-            excludedSnapshotTarget
-        );
+            foreach (var relationship in Relationships)
+            {
+                LockRelationshipColumns(relationship);
+            }
+        });
     }
 
     /// <summary>指定リレーションが使用する全構成列の編集をロックし、参照先カラムへ FK フラグを設定する</summary>
@@ -1851,15 +1924,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var normalizedTableName = string.IsNullOrWhiteSpace(originalTableName)
             ? "NewTable"
-            : originalTableName.Trim();
+            : SchemaNames.ToStoredForm(originalTableName);
         var candidate = $"{normalizedTableName}_Copy";
         var suffix = 2;
 
-        while (
-            Entities.Any(entity =>
-                string.Equals(entity.TableName, candidate, StringComparison.OrdinalIgnoreCase)
-            )
-        )
+        while (Entities.Any(entity => SchemaNames.AreSame(entity.TableName, candidate)))
         {
             candidate = $"{normalizedTableName}_Copy{suffix}";
             suffix++;
@@ -1911,6 +1980,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(AvailableDataTypes));
 
+        // 一意制約の合成名のプレビューは対象 DBMS の上限で縮めるので、方言が変われば表示し直す
+        foreach (var entity in Entities)
+        {
+            entity.NotifyIdentifierLimitChanged();
+        }
+
         // フィーチャーモジュール（DB 同期ボタンの活性・ツールチップ再評価など）へ方言切替を通知する
         TargetDbmsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -1953,11 +2028,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
             )
             .ToList();
 
-        // 変換できないカラム・NOT NULL 解除を伴うカラムがあるときは、適用前に内容を提示して
+        // 切替先の方言が受け付けない名前（識別子の長さの上限を超える・表せない文字を含む）も同じ確認で提示する。
+        // 名前は変換せずそのまま残る＝切替後に DDL・同期が断る名前を、切り替える前に知らせる
+        var rejectedNames = CollectNamesRejectedBy(IdentifierLengthLimits.ForDbms(target.Name));
+
+        // 変換できないカラム・NOT NULL 解除を伴うカラム・切替先が受け付けない名前があるときは、適用前に内容を提示して
         // OK / キャンセルを選ばせる（クリーンに変換できる切替は従来どおり無確認で適用する）
         if (
-            (plan.Unconverted.Count > 0 || nullable.Count > 0)
-            && !ConfirmTypeConversion(target, plan.Unconverted, nullable)
+            (plan.Unconverted.Count > 0 || nullable.Count > 0 || rejectedNames.Count > 0)
+            && !ConfirmTypeConversion(target, plan.Unconverted, nullable, rejectedNames)
         )
         {
             // キャンセル: 図には何も適用しない。暫定値を捨てて ComboBox の表示を現在方言へ戻す
@@ -1996,11 +2075,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <param name="target">切替先のプロバイダ（導入文の表示名に用いる）</param>
     /// <param name="unconverted">変換できないカラム（元の型を保持する）</param>
     /// <param name="nullable">NOT NULL を解除するカラム（主キー列は除外済み）</param>
+    /// <param name="rejectedNames">切替先の方言が受け付けない名前の行（<see cref="CollectNamesRejectedBy"/>）</param>
     /// <returns>OK が選択された場合 true</returns>
     private bool ConfirmTypeConversion(
         IDatabaseProvider target,
         IReadOnlyList<ColumnTypeConversion> unconverted,
-        IReadOnlyList<ColumnTypeConversion> nullable
+        IReadOnlyList<ColumnTypeConversion> nullable,
+        IReadOnlyList<string> rejectedNames
     )
     {
         var message = string.Join(
@@ -2030,11 +2111,108 @@ public partial class MainViewModel : ObservableObject, IDisposable
             );
         }
 
+        if (rejectedNames.Count > 0)
+        {
+            sections.Add(
+                string.Format(Strings.TypeConversion_NameLimitHeader, target.DisplayName)
+                    + Environment.NewLine
+                    + string.Join(Environment.NewLine, rejectedNames)
+            );
+        }
+
         return _dialogs.ConfirmWarningDetails(
             message,
             string.Join(Environment.NewLine + Environment.NewLine, sections),
             Strings.TypeConversion_ConfirmTitle
         );
+    }
+
+    /// <summary>
+    /// 図の名前（テーブル名・カラム名・外部キーと一意制約の保存された名前）のうち、<paramref name="limit"/> の方言が受け付けないものを
+    /// 場所と理由つきの行にして返す（全件・畳まない）
+    /// </summary>
+    /// <remarks>
+    /// 判定は DDL・同期の入口と同じ <see cref="IdentifierLengthLimit.DescribeViolation"/>。QuickER が付ける既定名は
+    /// 生成のときに上限へ収めるので対象外（保存された名前だけ）。
+    /// </remarks>
+    private IReadOnlyList<string> CollectNamesRejectedBy(IdentifierLengthLimit limit)
+    {
+        var lines = new List<string>();
+
+        string? Reason(string? name, bool isTable)
+        {
+            if (string.IsNullOrEmpty(name) || limit.DescribeViolation(name, isTable) is null)
+            {
+                return null;
+            }
+
+            return limit.CanRepresent(name)
+                ? string.Format(
+                    Strings.TypeConversion_NameLimitTooLong,
+                    DescribeIdentifierLimit(limit)
+                )
+                : Strings.TypeConversion_NameLimitNotRepresentable;
+        }
+
+        foreach (var entity in Entities)
+        {
+            if (Reason(entity.TableName, true) is { } tableReason)
+            {
+                lines.Add(
+                    string.Format(
+                        Strings.TypeConversion_NameLimitTableLine,
+                        entity.TableName,
+                        tableReason
+                    )
+                );
+            }
+
+            foreach (var column in entity.Columns)
+            {
+                if (Reason(column.Name, false) is { } columnReason)
+                {
+                    lines.Add(
+                        string.Format(
+                            Strings.TypeConversion_NameLimitColumnLine,
+                            entity.TableName,
+                            column.Name,
+                            columnReason
+                        )
+                    );
+                }
+            }
+
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                if (Reason(constraint.Name, false) is { } uniqueReason)
+                {
+                    lines.Add(
+                        string.Format(
+                            Strings.TypeConversion_NameLimitUniqueLine,
+                            entity.TableName,
+                            constraint.Name,
+                            uniqueReason
+                        )
+                    );
+                }
+            }
+        }
+
+        foreach (var relationship in Relationships)
+        {
+            if (Reason(relationship.ConstraintName, false) is { } foreignKeyReason)
+            {
+                lines.Add(
+                    string.Format(
+                        Strings.TypeConversion_NameLimitForeignKeyLine,
+                        relationship.ConstraintName,
+                        foreignKeyReason
+                    )
+                );
+            }
+        }
+
+        return lines;
     }
 
     /// <summary>Undo コマンドから方言を切り替えるための内部フック（派生通知も発行する）</summary>
@@ -2108,9 +2286,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 entity.IsCompactView = IsCompactViewInDiagram;
                 entity.PropertyChanged += OnEntityPropertyChanged;
 
+                // テーブル名・列名の書き換えは、同じ名前があれば受け付けずに戻す。戻したことをステータスバーで知らせる
+                entity.NameScope = Entities;
+                entity.IdentifierLimitSource = CurrentIdentifierLimit;
+                entity.NameChangeRejected += OnEntityNameChangeRejected;
+
                 // 一意制約カードのコンボボックス操作は VM 経由で届くため、ここで履歴化の入口へ結ぶ
                 entity.UniqueConstraintMemberSelectionEdited +=
                     OnUniqueConstraintMemberSelectionEdited;
+                entity.IsDetachedFromDiagram = false;
+                entity.Columns.CollectionChanged += OnEntityColumnsChangedForSelection;
                 _changeTracker.AttachEntity(entity);
             }
         }
@@ -2147,9 +2332,119 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         entity.PropertyChanged -= OnEntityPropertyChanged;
+        entity.NameChangeRejected -= OnEntityNameChangeRejected;
+        entity.NameScope = null;
+        entity.IdentifierLimitSource = null;
         entity.UniqueConstraintMemberSelectionEdited -= OnUniqueConstraintMemberSelectionEdited;
+        entity.IsDetachedFromDiagram = true;
+        entity.Columns.CollectionChanged -= OnEntityColumnsChangedForSelection;
         _changeTracker.DetachEntity(entity);
+
+        // 選択・検索結果は、図に居る要素だけを指す（削除・Undo・図の一括置換の全経路）。
+        // 残すと、プロパティパネルが追跡の外れた要素を編集し（履歴にも未保存にもならない）、
+        // Redo で同じインスタンスが戻ると記録のない編集ごと現れ、古い検索結果から選んで削除すると
+        // Id が同じ生きている表の名前付きクエリまで消える。
+        if (SelectedColumn is not null && entity.Columns.Contains(SelectedColumn))
+        {
+            SelectedColumn = null;
+        }
+
+        if (ReferenceEquals(SelectedEntity, entity))
+        {
+            SelectedEntity = null;
+        }
+
+        PruneSearchResults(entity);
     }
+
+    /// <summary>選択中の列が、所属するエンティティから外れたら選択を解く（列の追加の Undo など）</summary>
+    /// <remarks>
+    /// 並べ替え（<see cref="NotifyCollectionChangedAction.Move"/>）は列が外れないので何もしない。
+    /// 列の削除コマンド自身も選択を解くが、Undo / Redo の経路にはその呼び出しがないため、ここで一元的に扱う。
+    /// </remarks>
+    private void OnEntityColumnsChangedForSelection(
+        object? sender,
+        NotifyCollectionChangedEventArgs e
+    )
+    {
+        if (SelectedColumn is null || e.Action == NotifyCollectionChangedAction.Move)
+        {
+            return;
+        }
+
+        // Reset は外れた要素の一覧を持たないので、選択中の列が図のどのテーブルにも無くなったときだけ解く
+        // （Reset を起こしたのが別のテーブルの列なら、選択中の列はそのまま）
+        var removed =
+            e.Action == NotifyCollectionChangedAction.Reset
+                ? !Entities.Any(entity => entity.Columns.Contains(SelectedColumn))
+                : e.OldItems?.Contains(SelectedColumn) == true;
+
+        if (removed)
+        {
+            SelectedColumn = null;
+        }
+    }
+
+    /// <summary>
+    /// 利用者が名前を確定したとき、対象 DBMS の識別子の長さの上限を超えるか、表せない文字を含むなら、ステータスバーの一時通知で警告する
+    /// </summary>
+    /// <remarks>
+    /// 値は受け付ける（DDL・同期の入口が断る）。判定は入口と同じ <see cref="IdentifierLengthLimit.DescribeViolation"/> の
+    /// 条件（<see cref="IdentifierLengthLimit.CanRepresent"/> / <see cref="IdentifierLengthLimit.Fits"/> 系）を使い、写しを作らない。
+    /// Undo / Redo・一括置換では発火しない（<see cref="DiagramChangeTracker.NameEdited"/>）。
+    /// </remarks>
+    private void OnNameEdited(object target, string name)
+    {
+        var limit = CurrentIdentifierLimit();
+        var isTable = target is EntityViewModel;
+
+        if (limit.DescribeViolation(name, isTable) is null)
+        {
+            return;
+        }
+
+        var dbms = _currentProvider.Name;
+
+        NotifyStatus(
+            !limit.CanRepresent(name)
+                ? string.Format(Strings.Status_NameNotRepresentable, name, dbms)
+                : string.Format(
+                    Strings.Status_NameTooLong,
+                    name,
+                    DescribeIdentifierLimit(limit),
+                    dbms
+                )
+        );
+    }
+
+    /// <summary>識別子の長さの上限を、UI 言語で表記する</summary>
+    private static string DescribeIdentifierLimit(IdentifierLengthLimit limit) =>
+        limit.Unit switch
+        {
+            IdentifierLengthUnit.Utf16CodeUnits => string.Format(
+                Strings.IdentifierLimit_Utf16CodeUnits,
+                limit.Max
+            ),
+            IdentifierLengthUnit.Utf8Bytes => string.Format(
+                Strings.IdentifierLimit_Utf8Bytes,
+                limit.Max
+            ),
+            IdentifierLengthUnit.Characters when limit.TableFileNameMax is { } fileMax =>
+                string.Format(Strings.IdentifierLimit_CharactersWithTableFile, limit.Max, fileMax),
+            IdentifierLengthUnit.Characters => string.Format(
+                Strings.IdentifierLimit_Characters,
+                limit.Max
+            ),
+            _ => limit.Describe(),
+        };
+
+    /// <summary>プロパティパネルの名前の書き換えを重複のため受け付けなかったことを、ステータスバーの一時通知で知らせる</summary>
+    private void OnEntityNameChangeRejected(object? sender, NameChangeRejectedEventArgs e) =>
+        NotifyStatus(
+            e.TableName is null
+                ? string.Format(Strings.Status_TableNameRejected, e.ExistingName)
+                : string.Format(Strings.Status_ColumnNameRejected, e.TableName, e.ExistingName)
+        );
 
     /// <summary>リレーション 1 件の購読解除と変更追跡の終了を行う</summary>
     /// <remarks>
@@ -2162,6 +2457,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         relationship.Detach();
         relationship.ColumnPairSelectionEdited -= OnRelationshipColumnPairSelectionEdited;
         _changeTracker.DetachRelationship(relationship);
+
+        // 選択は図に居る要素だけを指す（理由は DetachEntityViewModel と同じ）
+        if (ReferenceEquals(SelectedRelationship, relationship))
+        {
+            SelectedRelationship = null;
+        }
     }
 
     /// <summary>エンティティ・リレーションを空にし、外れた全要素の購読解除・変更追跡の終了を行う</summary>
@@ -2239,12 +2540,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>一括更新で止めていたコレクション変更の後段処理を 1 回だけ流す</summary>
     private void RefreshAfterBulkDiagramUpdate()
     {
-        ApplyRelationshipColumnRules();
+        ApplyRelationshipColumnRulesCore();
         OnPropertyChanged(nameof(Entities));
         OnPropertyChanged(nameof(Relationships));
-        RefreshCanvasSize();
+        RefreshCanvasSizeCore();
         UpdateRelatedHighlights();
         RecalculateMiniMap();
+    }
+
+    /// <summary>位置・大きさの変更による再計算（キャンバスサイズ・ミニマップ）を、範囲の終わりの 1 回へまとめて実行する</summary>
+    /// <param name="action">位置・大きさを変える処理</param>
+    /// <remarks>
+    /// <para>
+    /// ドラッグの 1 回の移動のように、要素の出入りを伴わず何度も繰り返す操作のための軽い範囲。
+    /// <see cref="RunBulkDiagramUpdate"/> は列ルールの適用と追跡の取り直しまで行うので、マウスの移動のたびには重すぎる。
+    /// </para>
+    /// <para>
+    /// 範囲は try / finally で必ず閉じる（深さが残ると、以後キャンバスとミニマップが更新されなくなる）。
+    /// </para>
+    /// </remarks>
+    internal void RunDeferringLayoutRefresh(Action action)
+    {
+        _layoutRefreshDeferDepth++;
+
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _layoutRefreshDeferDepth--;
+
+            if (_layoutRefreshDeferDepth == 0 && _layoutRefreshPending)
+            {
+                _layoutRefreshPending = false;
+
+                // 一括更新の中なら、その終わりがまとめて作り直す
+                if (_bulkDiagramUpdateDepth == 0)
+                {
+                    RefreshCanvasSizeCore();
+                    RecalculateMiniMap();
+                }
+            }
+        }
     }
 
     /// <summary>一意制約カードの構成列行で列が選び直されたときに、Undo 可能な差し替えとして確定させる</summary>
@@ -2270,9 +2608,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 or nameof(EntityViewModel.DisplayHeight)
         )
         {
-            RefreshCanvasSize();
+            // 一括更新の中は、その終わりがまとめて作り直す
+            if (_bulkDiagramUpdateDepth > 0)
+            {
+                return;
+            }
 
-            // エンティティの移動・サイズ変更（ドラッグ中含む）でミニマップの射影・描画データを作り直す
+            // 後回しの範囲の中は、範囲の終わりに 1 回だけ作り直す
+            if (_layoutRefreshDeferDepth > 0)
+            {
+                _layoutRefreshPending = true;
+
+                return;
+            }
+
+            RefreshCanvasSizeCore();
+
+            // エンティティの移動・サイズ変更でミニマップの射影・描画データを作り直す
+            RecalculateMiniMap();
+        }
+        else if (e.PropertyName == nameof(EntityViewModel.TitleBackgroundColor))
+        {
+            // ミニマップはタイトルの色で矩形を塗る（位置・大きさは変わらないのでキャンバスサイズはそのまま）
+            if (_bulkDiagramUpdateDepth > 0)
+            {
+                return;
+            }
+
+            if (_layoutRefreshDeferDepth > 0)
+            {
+                _layoutRefreshPending = true;
+
+                return;
+            }
+
             RecalculateMiniMap();
         }
     }

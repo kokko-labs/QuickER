@@ -13,7 +13,10 @@ public class UniqueConstraintNamingTests
     [Fact(DisplayName = "Resolve: モデルの制約名があればそのまま使う")]
     public void Resolve_UsesModelName()
     {
-        UniqueConstraintNaming.Resolve("UQ_Custom", "Shop", ["Code"]).Should().Be("UQ_Custom");
+        UniqueConstraintNaming
+            .Resolve("UQ_Custom", "Shop", ["Code"], IdentifierLengthLimit.Unlimited)
+            .Should()
+            .Be("UQ_Custom");
     }
 
     /// <summary>制約名が null / 空白なら UQ_{テーブル}_{列…} を宣言順で合成することを検証する</summary>
@@ -24,7 +27,7 @@ public class UniqueConstraintNamingTests
     public void Resolve_SynthesizesName(string? name)
     {
         UniqueConstraintNaming
-            .Resolve(name, "Shop", ["Region", "Code"])
+            .Resolve(name, "Shop", ["Region", "Code"], IdentifierLengthLimit.Unlimited)
             .Should()
             .Be("UQ_Shop_Region_Code");
     }
@@ -34,7 +37,7 @@ public class UniqueConstraintNamingTests
     public void Resolve_AppliesSafeNameToAllParts()
     {
         UniqueConstraintNaming
-            .Resolve(null, "sales.Shop", ["Zip Code"])
+            .Resolve(null, "sales.Shop", ["Zip Code"], IdentifierLengthLimit.Unlimited)
             .Should()
             .Be("UQ_sales_Shop_Zip_Code");
     }
@@ -51,7 +54,7 @@ public class UniqueConstraintNamingTests
         );
         entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = [code.Id] });
 
-        var resolved = UniqueConstraintNaming.ResolveAll(entity);
+        var resolved = UniqueConstraintNaming.ResolveAll(entity, IdentifierLengthLimit.Unlimited);
 
         resolved.Should().HaveCount(2);
         resolved[0].Name.Should().Be("UQ_Named");
@@ -72,7 +75,10 @@ public class UniqueConstraintNamingTests
             new UniqueConstraint { ColumnIds = [code.Id, Guid.NewGuid()] }
         );
 
-        UniqueConstraintNaming.ResolveAll(entity).Should().BeEmpty();
+        UniqueConstraintNaming
+            .ResolveAll(entity, IdentifierLengthLimit.Unlimited)
+            .Should()
+            .BeEmpty();
     }
 
     /// <summary>区切り文字を含む列名 1 本と、2 列の組が同じシグネチャにならないことを検証する</summary>

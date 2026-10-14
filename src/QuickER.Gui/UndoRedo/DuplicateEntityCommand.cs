@@ -1,4 +1,5 @@
-﻿using QuickER.Model;
+﻿using System.Collections.Generic;
+using QuickER.Model;
 using QuickER.Resources;
 using QuickER.ViewModels;
 
@@ -19,6 +20,13 @@ public class DuplicateEntityCommand : IUndoableCommand
 
     /// <summary>生成済みの複製エンティティ（Redo で再利用するため保持する）</summary>
     private EntityViewModel? _duplicate;
+
+    /// <summary>Undo で一緒に外した、このエンティティの名前付きクエリと元の位置（Redo の復元元）</summary>
+    /// <remarks>
+    /// クエリの定義は履歴の外なので、追加の後に定義したクエリがあり得る。エンティティだけを外すと、
+    /// どこからも触れない孤児が残る（<see cref="EntityQueryRemoval"/>）
+    /// </remarks>
+    private List<(int Index, QueryDefinition Item)> _removedQueries = new();
 
     /// <summary><see cref="DuplicateEntityCommand"/> を生成する</summary>
     /// <param name="main">追加先のメイン ViewModel</param>
@@ -45,6 +53,10 @@ public class DuplicateEntityCommand : IUndoableCommand
         }
 
         _main.Entities.Add(_duplicate);
+
+        // Redo では、Undo で一緒に外したクエリを元の位置へ戻す
+        EntityQueryRemoval.Restore(_main, _removedQueries);
+        _removedQueries = new();
     }
 
     /// <inheritdoc />
@@ -56,5 +68,6 @@ public class DuplicateEntityCommand : IUndoableCommand
         }
 
         _main.Entities.Remove(_duplicate);
+        _removedQueries = EntityQueryRemoval.Remove(_main, new HashSet<Guid> { _duplicate.Id });
     }
 }

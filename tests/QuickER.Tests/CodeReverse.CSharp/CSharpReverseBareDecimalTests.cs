@@ -106,7 +106,11 @@ public class CSharpReverseBareDecimalTests
                 && diagnostic.Message.Contains("samples.amount", StringComparison.Ordinal)
             );
 
-        var reversed = new CSharpReverseParser().Parse(source, catalog);
+        var reversed = new CSharpReverseParser().Parse(
+            source,
+            catalog,
+            IdentifierLengthLimit.Unlimited
+        );
         reversed
             .Entities.Single()
             .Columns.Single(column => column.Name == "amount")

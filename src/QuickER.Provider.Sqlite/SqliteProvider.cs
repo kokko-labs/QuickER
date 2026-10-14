@@ -49,6 +49,7 @@ public sealed class SqliteProvider : IDatabaseProvider
             ColumnReorder = ColumnReorderMode.Rebuild,
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,
+            IdentifierLengthLimit = SqliteIdentifier.Limit,
         };
 
     /// <inheritdoc />

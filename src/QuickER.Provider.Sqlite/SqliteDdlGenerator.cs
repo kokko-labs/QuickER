@@ -26,6 +26,9 @@ namespace QuickER.Provider.Sqlite;
 /// </remarks>
 public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
 {
+    /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => SqliteIdentifier.Limit;
+
     // ---- 以下の抽象メンバは基底の共通経路向け。本クラスは Build を上書きするため直接は使わないが、
     //      契約充足のため他方言と同じ SQLite クォート方式を提供する ----
 
@@ -49,8 +52,9 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         //  後段の FormatDeclaredType は「SQLite の型名文法に載せるためのクォート」で検証ではない）
         SqlTypeText.Validate(diagram);
 
-        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）
-        SqlNameText.Validate(diagram);
+        // 名前の改行・制御文字も入口で止める（コメントのサニタイズ・識別子のエスケープとの二重化）。
+        // あわせて方言の上限を超える名前・方言が表せない文字を含む名前も、場所を名指しして止める
+        SqlNameText.Validate(diagram, IdentifierLimit);
 
         var sb = new StringBuilder();
         // ヘッダは他方言と揃える（DdlGeneratorBase と同一文言）
@@ -126,7 +130,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         }
 
         // UNIQUE 制約は PK 行と FK 行の間に出力する（他方言の並びと揃える）
-        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity))
+        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, SqliteIdentifier.Limit))
         {
             trailingConstraints.Add(BuildUniqueConstraintLine(unique.Name, unique.ColumnNames));
         }
@@ -182,7 +186,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     )
     {
         var pkCols = string.Join(", ", pks.Select(p => SqliteIdentifier.QuoteSimple(p.Name)));
-        return $"    CONSTRAINT \"{SqliteIdentifier.Escape(ConstraintNames.PrimaryKey(tableName))}\" PRIMARY KEY ({pkCols})";
+        return $"    CONSTRAINT \"{SqliteIdentifier.Escape(ConstraintNames.PrimaryKey(tableName, SqliteIdentifier.Limit))}\" PRIMARY KEY ({pkCols})";
     }
 
     /// <summary>一意制約行（<c>CONSTRAINT "…" UNIQUE (…)</c>）を組み立てる</summary>
@@ -287,7 +291,8 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         // 外部キー名は同期の差分・スクリプトと同じ規則で求める（名前の無い同じ組の 2 本目は一意化される）
         var foreignKeyNames = ConstraintNames.ResolveForeignKeyNames(
             diagram.Entities,
-            diagram.Relationships
+            diagram.Relationships,
+            SqliteIdentifier.Limit
         );
 
         foreach (var rel in diagram.Relationships)

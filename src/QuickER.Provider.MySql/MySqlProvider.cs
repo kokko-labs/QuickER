@@ -48,6 +48,7 @@ public sealed class MySqlProvider : IDatabaseProvider
             TransactionalDdl = false,
             SupportsSetDefaultAction = false,
             NormalizeTypeNotation = MySqlTypeNotation.Normalize,
+            IdentifierLengthLimit = MySqlIdentifier.Limit,
         };
 
     /// <inheritdoc />

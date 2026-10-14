@@ -13,8 +13,22 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// <summary>
 /// 言語切替 VM の挙動を検証する。切替は再起動反映方式で、確認 OK のときのみ再起動する。
 /// </summary>
-public class LanguageSwitchViewModelTests
+/// <remarks>
+/// 再起動の確認は「選んだ言語がいま表示中の言語と違うとき」だけ出るので、表示中の言語（UI カルチャ）を
+/// 初期言語に合わせて固定する（起動時に App が保存した言語を適用するのと同じ状態。テストを動かす機械の
+/// カルチャに結果を左右させない）
+/// </remarks>
+public sealed class LanguageSwitchViewModelTests : IDisposable
 {
+    /// <summary>テストの前の UI カルチャ（終わりに戻す）</summary>
+    private readonly System.Globalization.CultureInfo _originalUiCulture = System
+        .Globalization
+        .CultureInfo
+        .CurrentUICulture;
+
+    /// <summary>テストで変えた UI カルチャを元へ戻す</summary>
+    public void Dispose() => System.Globalization.CultureInfo.CurrentUICulture = _originalUiCulture;
+
     /// <summary>再起動サービスのスタブ（実際には再起動せず、呼び出し回数だけ記録する）</summary>
     private sealed class FakeRestartService : IApplicationRestartService
     {
@@ -37,6 +51,9 @@ public class LanguageSwitchViewModelTests
         );
         var store = new GuiAppSettingsStore(folder);
         store.Save(new GuiAppSettings { Language = initialLanguage });
+        System.Globalization.CultureInfo.CurrentUICulture = new System.Globalization.CultureInfo(
+            initialLanguage == "ja" ? "ja-JP" : "en-US"
+        );
 
         var dialogs = new StubDialogService();
         var restart = new FakeRestartService();

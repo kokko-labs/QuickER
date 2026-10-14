@@ -395,11 +395,20 @@ public class SchemaDiffService
         var fkAdds = new List<SchemaDiffItem>();
         var fkDrops = new List<SchemaDiffItem>();
 
-        // 外部キー名は DDL・同期スクリプトが付けるのと同じ規則で求める（名前の無い同じ組の 2 本目は一意化される）
-        var liveFkNames = ConstraintNames.ResolveForeignKeyNames(liveEntities, liveRelationships);
-        var targetFkNames = ConstraintNames.ResolveForeignKeyNames(
+        // 外部キー名は DDL・同期スクリプトが付けるのと同じ規則で求める（名前の無い同じ組の 2 本目は一意化される。
+        // 既定名は同期の方言の上限で縮める）
+        var liveFkNames = ConstraintNames.ResolveForeignKeyNames(
+            liveEntities,
+            liveRelationships,
+            dialect.IdentifierLengthLimit
+        );
+        var targetFkNames = ResolveTargetForeignKeyNames(
             targetEntities,
-            targetRelationships
+            targetRelationships,
+            liveEntities,
+            liveFkNames,
+            includeFkConstraintName,
+            dialect
         );
         // 外部キーとして扱えるリレーションを両側で 1 回ずつ解決し、シグネチャも 1 回ずつ求める
         var liveFks = ForeignKeyColumnPairResolver
@@ -694,7 +703,9 @@ public class SchemaDiffService
             );
         }
 
-        diff.Items.AddRange(PairUniqueConstraintAlters(tableName, adds, drops));
+        diff.Items.AddRange(
+            PairUniqueConstraintAlters(tableName, adds, drops, dialect.IdentifierLengthLimit)
+        );
     }
 
     /// <summary>
@@ -705,7 +716,8 @@ public class SchemaDiffService
     private static List<SchemaDiffItem> PairUniqueConstraintAlters(
         string tableName,
         List<SchemaDiffItem> adds,
-        List<SchemaDiffItem> drops
+        List<SchemaDiffItem> drops,
+        IdentifierLengthLimit limit
     )
     {
         var remainingDrops = new List<SchemaDiffItem>(drops);
@@ -716,7 +728,8 @@ public class SchemaDiffService
             var name = UniqueConstraintNaming.Resolve(
                 add.UniqueConstraintName,
                 tableName,
-                add.UniqueConstraintColumns
+                add.UniqueConstraintColumns,
+                limit
             );
             var drop = add.IsSelectable
                 ? remainingDrops.FirstOrDefault(d =>
@@ -958,6 +971,86 @@ public class SchemaDiffService
     /// <summary>制約の名前を照合用（前後空白を除き小文字化）に整える（外部キーと一意制約の作り直しの対応づけが使う）</summary>
     private static string NameKey(string name) => name.Trim().ToLowerInvariant();
 
+    /// <summary>図の外部キーの名前を求める（旧版の PostgreSQL が切り詰めた既定名を吸収する）</summary>
+    /// <remarks>
+    /// <para>
+    /// 名前は DDL と同じ規則（<see cref="ConstraintNames.ResolveForeignKeyNameDetails"/>・同期の方言の上限で既定名を縮める）。
+    /// </para>
+    /// <para>
+    /// 上限を超える識別子を黙って切り詰める方言（<see cref="SyncDialectCapabilities.TruncatesLongIdentifiers"/>＝PostgreSQL）
+    /// では、名前の無いリレーションに限り、同じ子テーブルの live の外部キーに「縮める前の名前を方言の切り方で切った名前」
+    /// があれば、その名前を図の外部キーの名前とする（同じ外部キーとみなす）。旧版の QuickER は長い既定名をそのまま
+    /// DDL へ書き、PostgreSQL が切り詰めて保存していたため、吸収しないと既定名を縮める版で同期したときに同じ外部キーが
+    /// 追加と削除の 2 項目になる。保存された名前（利用者が付けた名前）は対象にしない。
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyDictionary<Relationship, string> ResolveTargetForeignKeyNames(
+        IReadOnlyList<Entity> targetEntities,
+        IReadOnlyList<Relationship> targetRelationships,
+        IReadOnlyList<Entity> liveEntities,
+        IReadOnlyDictionary<Relationship, string> liveFkNames,
+        bool includeConstraintName,
+        SyncDialectCapabilities dialect
+    )
+    {
+        var limit = dialect.IdentifierLengthLimit;
+        var details = ConstraintNames.ResolveForeignKeyNameDetails(
+            targetEntities,
+            targetRelationships,
+            limit
+        );
+        var names = details.ToDictionary(pair => pair.Key, pair => pair.Value.Name);
+
+        if (!dialect.TruncatesLongIdentifiers || !includeConstraintName)
+        {
+            return names;
+        }
+
+        // live の外部キーを「子テーブル＋名前」で引けるようにする
+        var liveTables = liveEntities.ToDictionary(entity => entity.Id);
+        var liveKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var (relationship, name) in liveFkNames)
+        {
+            if (liveTables.TryGetValue(relationship.TargetEntityId, out var child))
+            {
+                liveKeys.Add(LegacyForeignKeyKey(NormalizeTable(child), name));
+            }
+        }
+
+        var targetTables = targetEntities.ToDictionary(entity => entity.Id);
+
+        foreach (var (relationship, resolved) in details)
+        {
+            if (
+                resolved.IsStored
+                || !targetTables.TryGetValue(relationship.TargetEntityId, out var child)
+            )
+            {
+                continue;
+            }
+
+            // 上限内の名前は縮めていない＝旧版と同じ名前なので吸収の対象外
+            if (limit.Fits(resolved.UnshortenedName))
+            {
+                continue;
+            }
+
+            var legacy = limit.Truncate(resolved.UnshortenedName);
+
+            if (liveKeys.Contains(LegacyForeignKeyKey(NormalizeTable(child), legacy)))
+            {
+                names[relationship] = legacy;
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>旧版の切り詰めた名前を引くキー（子テーブル＋名前。名前の比べ方はシグネチャと同じ）</summary>
+    private static string LegacyForeignKeyKey(string childTable, string name) =>
+        NameKey(childTable) + "|" + NameKey(name);
+
     /// <summary>
     /// 同じ外部キーの作り直しにあたる削除候補と追加候補を、1 つの <see cref="SchemaDiffKind.AlterForeignKey"/> へ畳む。
     /// </summary>
@@ -993,7 +1086,11 @@ public class SchemaDiffService
 
         foreach (var drop in drops)
         {
-            var key = ForeignKeyPairingKey(drop, includeConstraintName);
+            var key = ForeignKeyPairingKey(
+                drop,
+                includeConstraintName,
+                dialect.IdentifierLengthLimit
+            );
 
             if (!dropsByKey.TryGetValue(key, out var queue))
             {
@@ -1011,7 +1108,7 @@ public class SchemaDiffService
         {
             if (
                 !dropsByKey.TryGetValue(
-                    ForeignKeyPairingKey(add, includeConstraintName),
+                    ForeignKeyPairingKey(add, includeConstraintName, dialect.IdentifierLengthLimit),
                     out var candidates
                 ) || !candidates.TryDequeue(out var drop)
             )
@@ -1029,7 +1126,11 @@ public class SchemaDiffService
     }
 
     /// <summary>削除候補と追加候補を対応づけるキー（<see cref="PairForeignKeyAlters"/> の規則）</summary>
-    private static string ForeignKeyPairingKey(SchemaDiffItem item, bool includeConstraintName)
+    private static string ForeignKeyPairingKey(
+        SchemaDiffItem item,
+        bool includeConstraintName,
+        IdentifierLengthLimit limit
+    )
     {
         var child = NormalizeTable(item.ChildEntity!).ToLowerInvariant();
 
@@ -1039,7 +1140,8 @@ public class SchemaDiffService
             var name = ConstraintNames.EffectiveForeignKey(
                 item.ForeignKeyName,
                 NormalizeTable(item.ChildEntity!),
-                NormalizeTable(item.ParentEntity!)
+                NormalizeTable(item.ParentEntity!),
+                limit
             );
 
             return SignaturePart(child) + SignaturePart(NameKey(name));

@@ -9,12 +9,14 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// <param name="ValueObjectClassName">値オブジェクト列の VO クラス名（VO でなければ null）</param>
 /// <param name="IsNullable">NULL 許容列かどうか</param>
 /// <param name="IsUnderlyingReferenceType">素の C# 型が参照型か（射影 DTO の非 NULL プロパティ初期化子の要否判定と、NULL 許容値型列の IN リスト持ち上げ要否の判定に使う）</param>
+/// <param name="IsGuidKeyValueObject">GuidKey の値オブジェクトか（部分一致のメソッドを持たないため、完全一致以外の文字列一致を型の検査で断る）</param>
 public sealed record QueryColumnBinding(
     string PropertyName,
     string UnderlyingTypeName,
     string? ValueObjectClassName,
     bool IsNullable,
-    bool IsUnderlyingReferenceType = false
+    bool IsUnderlyingReferenceType,
+    bool IsGuidKeyValueObject
 );
 
 /// <summary>
@@ -167,18 +169,7 @@ public static class QueryConditionCSharpEmitter
             NotNode not => Visit(not.Operand, context, !negate),
             ComparisonNode comparison => VisitComparison(comparison, context, negate),
             NullCheckNode nullCheck => VisitNullCheck(nullCheck, context, negate),
-            StringMatchNode match => VisitStringMatch(
-                negate
-                    ? new StringMatchNode
-                    {
-                        Column = match.Column,
-                        Negated = !match.Negated,
-                        Kind = match.Kind,
-                        Operand = match.Operand,
-                    }
-                    : match,
-                context
-            ),
+            StringMatchNode match => VisitStringMatch(match, context, match.Negated ^ negate),
             InNode inNode => VisitIn(inNode, context, inNode.Negated ^ negate),
             _ => throw new InvalidOperationException(
                 $"未知の条件ノードです: {node.GetType().Name}"
@@ -258,16 +249,19 @@ public static class QueryConditionCSharpEmitter
     }
 
     /// <summary>文字列一致（string / VO どちらの列でもインスタンスメソッド呼び出しに揃える）</summary>
-    private static string VisitStringMatch(StringMatchNode node, Context context)
+    /// <param name="node">文字列一致のノード</param>
+    /// <param name="context">エミット中の共有状態</param>
+    /// <param name="negated">否定形として出すか（ノード自身の否定と外側の NOT を合わせた向き）</param>
+    private static string VisitStringMatch(StringMatchNode node, Context context, bool negated)
     {
         var column = Bind(node.Column, context);
 
-        // 完全一致（ワイルドカードなしの NOT LIKE）は等値比較を NULL 前提の内側で否定する。
+        // 完全一致（ワイルドカードなしの [NOT] LIKE）は等値比較を NULL 前提の内側で否定する。
         // 等値の <> へ畳むと列側の IS NULL 補償で NULL 行が一致に含まれ、LIKE の意味論
         // （NULL 行はどちらの向きでも一致しない）から外れる
         if (node.Kind == StringMatchKind.Exact)
         {
-            return VisitExactMatch(node, column, context);
+            return VisitExactMatch(node, column, context, negated);
         }
 
         var method = node.Kind switch
@@ -298,16 +292,17 @@ public static class QueryConditionCSharpEmitter
         // VO 列の != は利用者定義演算子のためコンパイラの NULL 状態解析が伝播しない。抑止（!）は残す
         var suppression = column.IsNullable ? "!" : string.Empty;
         var call = $"{access}{suppression}.{method}({operand})";
-        var matched = node.Negated ? $"!({call})" : call;
+        var matched = negated ? $"!({call})" : call;
 
         return column.IsNullable ? $"({access} != null && {matched})" : matched;
     }
 
-    /// <summary>完全一致（ワイルドカードなしの [NOT] LIKE リテラル）を NULL 前提の内側で組み立てる</summary>
+    /// <summary>完全一致（ワイルドカードなしの [NOT] LIKE リテラル）を組み立てる（否定形は NULL 前提の内側）</summary>
     private static string VisitExactMatch(
         StringMatchNode node,
         QueryColumnBinding column,
-        Context context
+        Context context,
+        bool negated
     )
     {
         // Exact のオペランドは常に文字列リテラル（パーサが LIKE のリテラル分解からのみ作る）。
@@ -319,11 +314,16 @@ public static class QueryConditionCSharpEmitter
 
         var access = $"{context.LambdaVar}.{column.PropertyName}";
         var comparison = $"{access} == {operand}";
-        var matched = node.Negated ? $"!({comparison})" : comparison;
 
-        // NULL 許容列は「列が NULL でないこと」を前提に AND する（他の一致種別と同じ＝NULL 行は
-        // どちらの向きでも一致しない）。二重否定などで肯定形へ畳まれた場合も同じ前提の内側に置く
-        return column.IsNullable ? $"({access} != null && {matched})" : matched;
+        // 肯定形の等値は NULL 行を元から一致させない（SQL も C# も）ので前提は要らず、素の等値と同じ出力になる
+        if (!negated)
+        {
+            return comparison;
+        }
+
+        // 否定形は NULL 許容列に「列が NULL でないこと」を前提に AND する（他の一致種別と同じ＝NULL 行は
+        // どちらの向きでも一致しない）
+        return column.IsNullable ? $"({access} != null && !({comparison}))" : $"!({comparison})";
     }
 
     /// <summary>IN（コレクション Contains。VO 列はリストを VO へ持ち上げてから比較する）</summary>
@@ -351,7 +351,10 @@ public static class QueryConditionCSharpEmitter
                     : $"{voClass}.Create";
             var listVar = context.LiftList(parameter, $"{parameter}.Select({converter}).ToList()");
 
-            call = $"{listVar}.Contains({context.LambdaVar}.{column.PropertyName})";
+            // NULL 許容の VO 列は、List<Vo>.Contains(Vo item) が NULL を受けない注釈のため CS8604 になる。
+            // 抑止（!）は式木に節点を作らず、翻訳・実行の意味は変わらない（NULL の行は Contains が false）
+            var suppression = column.IsNullable ? "!" : string.Empty;
+            call = $"{listVar}.Contains({context.LambdaVar}.{column.PropertyName}{suppression})";
         }
         else if (
             column.ValueObjectClassName is null
@@ -422,50 +425,14 @@ public static class QueryConditionCSharpEmitter
 
     /// <summary>C# の文字列リテラルとしてエスケープする</summary>
     /// <remarks>
-    /// CR / LF に加えて、描画後のレンダラーの <c>ReplaceLineEndings</c> が実改行へ変える文字
-    /// （FORM FEED U+000C・NEL U+0085・LINE SEPARATOR U+2028・PARAGRAPH SEPARATOR U+2029）も
-    /// エスケープシーケンスで書く（生のまま出すとリテラルが行をまたいで壊れる）。
+    /// 改行になる文字・制御文字・対になっていないサロゲートはエスケープシーケンスで書く（生のまま出すと、
+    /// リテラルが行をまたいで壊れるか、UTF-8 のファイルで U+FFFD に化けて比較の相手が変わる）。
+    /// 文字ごとの扱いの正本は <see cref="GeneratedLiteralText"/>。
     /// </remarks>
     private static string RenderStringLiteral(string value)
     {
         var builder = new StringBuilder("\"");
-
-        foreach (var c in value)
-        {
-            switch (c)
-            {
-                case '\\':
-                    builder.Append("\\\\");
-                    break;
-                case '"':
-                    builder.Append("\\\"");
-                    break;
-                case '\r':
-                    builder.Append("\\r");
-                    break;
-                case '\n':
-                    builder.Append("\\n");
-                    break;
-                case '\t':
-                    builder.Append("\\t");
-                    break;
-                case '\f':
-                    builder.Append("\\f");
-                    break;
-                case '\u0085':
-                    builder.Append("\\u0085");
-                    break;
-                case '\u2028':
-                    builder.Append("\\u2028");
-                    break;
-                case '\u2029':
-                    builder.Append("\\u2029");
-                    break;
-                default:
-                    builder.Append(c);
-                    break;
-            }
-        }
+        GeneratedLiteralText.AppendRegularLiteralBody(builder, value);
 
         return builder.Append('"').ToString();
     }

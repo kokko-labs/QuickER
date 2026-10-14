@@ -44,6 +44,18 @@ public partial class UndoRedoManager : ObservableObject
 
     /// <summary>コマンドを実行し Undo スタックへ積む（Redo スタックは破棄する）</summary>
     /// <param name="command">実行するコマンド</param>
+    /// <remarks>
+    /// <para>
+    /// コマンドの <see cref="IUndoableCommand.Execute"/> が途中で例外を投げると、それまでの変更は図に残ったまま、
+    /// 履歴にも積まれず、世代（<see cref="ChangeGeneration"/>）も進まない。途中まで進んだコマンドを汎用に巻き戻す
+    /// 手段は無いので、ここでは例外を捕まえない。
+    /// </para>
+    /// <para>
+    /// 前提は、画面の操作から出た例外は未処理例外としてクラッシュ処理へ渡り（緊急保存してから終了する）、
+    /// 不整合な図のまま編集を続けることは無い、ということ。そのためコマンドは、検証を変更より前に置き、
+    /// 変更を始めてから投げない形で書く。
+    /// </para>
+    /// </remarks>
     public void Execute(IUndoableCommand command)
     {
         command.Execute();

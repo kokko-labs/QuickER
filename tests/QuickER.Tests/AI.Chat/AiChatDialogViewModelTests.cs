@@ -1294,7 +1294,9 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.ShutdownEngines(TimeSpan.FromSeconds(5));
+            // 破棄はスレッドプールで走る。全件の並列実行でプールが詰まっても届くまで待てる上限にする
+            // （届いた時点で戻るので遅くはならない。上限で戻ること自体は「ハングしても上限で戻る」が見る）
+            vm.ShutdownEngines(TimeSpan.FromSeconds(60));
 
             codex.DisposeCount.Should().Be(1, "codex app-server は常駐するため破棄が要る");
             claudeCode.DisposeCount.Should().Be(1);

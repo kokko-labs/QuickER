@@ -19,6 +19,9 @@ namespace QuickER.Provider.MySql;
 public sealed class MySqlDdlGenerator : DdlGeneratorBase
 {
     /// <inheritdoc />
+    protected override IdentifierLengthLimit IdentifierLimit => MySqlIdentifier.Limit;
+
+    /// <inheritdoc />
     protected override string QuoteQualifiedName(string name) => MySqlIdentifier.Quote(name);
 
     /// <inheritdoc />

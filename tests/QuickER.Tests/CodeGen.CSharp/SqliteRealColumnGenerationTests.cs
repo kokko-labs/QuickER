@@ -75,7 +75,11 @@ public class SqliteRealColumnGenerationTests
         source.Should().Contain("public double Value { get; set; }");
         source.Should().Contain("[DbColumnMeta(\"float64\", NativeType = \"REAL\"");
 
-        var reversed = new CSharpReverseParser().Parse(source, new SqliteTypeCatalog());
+        var reversed = new CSharpReverseParser().Parse(
+            source,
+            new SqliteTypeCatalog(),
+            IdentifierLengthLimit.Unlimited
+        );
         reversed
             .Entities.Single()
             .Columns.Single(column => column.Name == "value")
