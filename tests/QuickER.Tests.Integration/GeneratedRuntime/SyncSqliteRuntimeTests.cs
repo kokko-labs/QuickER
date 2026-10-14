@@ -121,7 +121,7 @@ public sealed class SyncSqliteRuntimeTests : SyncRuntimeTestsBase
         var hook = new SyncInsideHook(() => Engine);
         var orders = new JournalingSyncOrderRepository(
             new SyncOrderRepository(
-                new SqlConnectionFactory(LocalConnectionString),
+                new LightJournalSyncConnectionFactory(LocalConnectionString),
                 new SaveHookRegistry().Add<SyncOrderEntity>(hook)
             ),
             Journal

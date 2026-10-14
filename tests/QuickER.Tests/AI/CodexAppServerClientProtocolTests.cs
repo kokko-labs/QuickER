@@ -11,7 +11,7 @@ namespace QuickER.Tests.AI;
 /// JSON-RPC の応答規則を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// 偽サーバーは <see cref="FakeCodexAppServerProcess"/>（powershell.exe）。待ちの上限は並列実行で
+/// 偽サーバーは <see cref="FakeCodexAppServerProcess"/>（テストの出力にある console exe）。待ちの上限は並列実行で
 /// 揺れないよう 30 秒に取る（通常は 1 秒以内に終わる）。各テストは最後に偽サーバーが残っていないことも確かめる。
 /// </remarks>
 [Collection(RealProcessTestCollection.Name)]

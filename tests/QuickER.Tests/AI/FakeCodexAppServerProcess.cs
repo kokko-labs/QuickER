@@ -7,7 +7,7 @@ namespace QuickER.Tests.AI;
 
 /// <summary>
 /// <see cref="CodexAppServerClient"/> を実プロセス越しに検証するための偽の app-server
-/// （powershell.exe で動く 1 行 1 JSON のスクリプト）。
+/// （テストの出力へ一緒にコピーされる console exe＝QuickER.Tests.FakeCodexAppServer。1 行 1 JSON）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,49 +25,18 @@ namespace QuickER.Tests.AI;
 /// <c>exit</c>（終了する）・<c>block</c>（以後は標準入力を読まずに眠り続ける＝書き込みが詰まる相手の代役）。
 /// </para>
 /// <para>
-/// 後始末: クライアントの破棄が stdin を閉じてプロセスツリーごと止める。それに加えてスクリプト自身も stdin の
+/// 後始末: クライアントの破棄が stdin を閉じてプロセスツリーごと止める。それに加えて偽サーバー自身も stdin の
 /// EOF で終わる（テストのプロセスが落ちても孤児にならない）。<see cref="DisposeAsync"/> は念のため、
-/// <see cref="StartAsync"/> で起動した powershell.exe が残っていれば止めてから一時フォルダを消す。
+/// <see cref="StartAsync"/> で起動した偽サーバーが残っていれば止めてから一時フォルダを消す。
 /// </para>
 /// </remarks>
 internal sealed class FakeCodexAppServerProcess : IAsyncDisposable
 {
-    /// <summary>偽サーバーのスクリプトのファイル名（残存プロセスの検出にも使う目印）</summary>
-    internal const string ScriptFileName = "quicker-fake-codex-app-server.ps1";
+    /// <summary>偽サーバーの実行ファイル名（テストの出力のフォルダにある）</summary>
+    internal const string ExecutableFileName = "QuickER.Tests.FakeCodexAppServer.exe";
 
     /// <summary>クライアントの応答を送り返す通知のメソッド名</summary>
     internal const string EchoMethod = "test/echo";
-
-    private const string Script = """
-        param([string]$EmitFile)
-        $out = [Console]::Out
-        while ($true) {
-          $line = [Console]::In.ReadLine()
-          if ($null -eq $line) { break }
-          if ($line -cmatch '"method":"([^"]+)"') {
-            $method = $Matches[1]
-            if ($line -cmatch '"id":(\d+)') {
-              $out.WriteLine('{"id":' + $Matches[1] + ',"result":{}}')
-              $out.Flush()
-            } elseif ($method -ceq 'initialized') {
-              foreach ($e in [IO.File]::ReadAllLines($EmitFile)) {
-                if ($e.StartsWith('stderr:')) { [Console]::Error.WriteLine($e.Substring(7)); [Console]::Error.Flush() }
-                elseif ($e -ceq 'stdin-handle') {
-                  Add-Type -Namespace QuickERFake -Name Native -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetStdHandle(int n);'
-                  [Console]::Error.WriteLine('stdin-handle:' + [QuickERFake.Native]::GetStdHandle(-10).ToInt64()); [Console]::Error.Flush()
-                }
-                elseif ($e -ceq 'exit') { $out.Flush(); exit 0 }
-                elseif ($e -ceq 'block') { $out.Flush(); Start-Sleep -Seconds 120; exit 0 }
-                else { $out.WriteLine($e) }
-              }
-              $out.Flush()
-            }
-          } elseif ($line -cmatch '"id":') {
-            $out.WriteLine('{"method":"test/echo","params":' + $line + '}')
-            $out.Flush()
-          }
-        }
-        """;
 
     private readonly string _directory;
 
@@ -81,11 +50,8 @@ internal sealed class FakeCodexAppServerProcess : IAsyncDisposable
             Guid.NewGuid().ToString("N")
         );
         Directory.CreateDirectory(_directory);
-        File.WriteAllText(ScriptPath, Script, new UTF8Encoding(false));
         File.WriteAllLines(EmitPath, serverMessages, new UTF8Encoding(false));
     }
-
-    private string ScriptPath => Path.Combine(_directory, ScriptFileName);
 
     /// <summary>次に起動する偽サーバーが <c>initialized</c> の直後に送る行を差し替える（再接続の検証用）</summary>
     public void ReplaceServerMessages(params string[] serverMessages) =>
@@ -95,20 +61,10 @@ internal sealed class FakeCodexAppServerProcess : IAsyncDisposable
 
     /// <summary>この偽サーバーを起動するクライアントを作る</summary>
     public CodexAppServerClient CreateClient() =>
-        new(() =>
-            (
-                Path.Combine(
-                    Environment.SystemDirectory,
-                    "WindowsPowerShell",
-                    "v1.0",
-                    "powershell.exe"
-                ),
-                $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{ScriptPath}\" \"{EmitPath}\""
-            )
-        );
+        new(() => (Path.Combine(AppContext.BaseDirectory, ExecutableFileName), $"\"{EmitPath}\""));
 
     /// <summary>
-    /// クライアントを起動する。偽サーバーが立ち上がらない（実行ポリシー・powershell.exe の不在など）ときは、
+    /// クライアントを起動する。偽サーバーが立ち上がらない（実行ファイルの不在など）ときは、
     /// その旨と偽サーバーの標準エラー出力を添えてテストの失敗にする
     /// </summary>
     public async Task StartAsync(CodexAppServerClient client, CancellationToken cancellationToken)
@@ -127,7 +83,7 @@ internal sealed class FakeCodexAppServerProcess : IAsyncDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw new Xunit.Sdk.XunitException(
-                $"偽の app-server（powershell.exe）を起動できませんでした: {ex.GetType().Name}: {ex.Message}"
+                $"偽の app-server（{ExecutableFileName}）を起動できませんでした: {ex.GetType().Name}: {ex.Message}"
                     + $" / {client.BuildRecentStandardErrorSuffix()}"
             );
         }

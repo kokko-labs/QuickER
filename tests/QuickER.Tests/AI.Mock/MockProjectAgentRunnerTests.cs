@@ -1,6 +1,7 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
+using QuickER.Tests.TestSupport;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
 
 namespace QuickER.Tests.AI.Mock;
@@ -879,8 +880,9 @@ public class MockProjectAgentRunnerTests
 
     /// <summary>
     /// 変更検知のスナップショット（全ファイルのハッシュ）が呼び出し元のスレッド（UI スレッド）で走らないことを
-    /// 検証する。単一スレッドの同期コンテキストからランを始め、エージェントが別のスレッドで呼ばれることを見る
-    /// （エージェントの前にある await はスナップショットだけなので、同期で走ればエージェントも同じスレッドになる）。
+    /// 検証する。スナップショットが読むファイルへ oplock を掛けて、スナップショットをそのファイルを開く途中で止め、
+    /// その間に単一スレッドの同期コンテキスト（呼び出し元の代役）へ戻りが返り、そのスレッドが別の処理を受け付けることを見る
+    /// （スナップショットが呼び出し元で同期に走れば、止まっている間はランが戻らず、そのスレッドも空かない）。
     /// </summary>
     [Fact(DisplayName = "スナップショットは呼び出し元のスレッドで走らない")]
     public async Task RunAsync_CapturesSnapshotOffCallerThread()
@@ -893,24 +895,63 @@ public class MockProjectAgentRunnerTests
             confirmBuild: _ => true
         );
 
+        // 拡張子が比較の対象（UI 層のソース・静的資産でない）なので、スナップショットはこのファイルを開いてハッシュする
+        var held = Path.Combine(folder, "held.json");
+        File.WriteAllText(held, "{}");
+        var oplock = FileOplock.Acquire(held);
+        var callerFree = new TaskCompletionSource<int>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        Task? run = null;
+
         try
         {
-            var callerThreadId = await SingleThreadContext.RunAsync(() =>
-                runner.RunAsync(
+            var running = SingleThreadContext.RunAsync(() =>
+            {
+                run = runner.RunAsync(
                     folder,
                     ProjectName,
                     additionalInstructions: null,
                     string.Empty,
                     _ => { },
                     TestContext.Current.CancellationToken
-                )
-            );
+                );
 
+                // ランが戻ったあと、呼び出し元のスレッドが次の処理を受け付けるか
+                SynchronizationContext.Current!.Post(
+                    _ => callerFree.TrySetResult(Environment.CurrentManagedThreadId),
+                    null
+                );
+
+                return run;
+            });
+
+            oplock
+                .WaitForBreak(TimeSpan.FromSeconds(30))
+                .Should()
+                .BeTrue("スナップショットは held.json を開こうとして止まる");
+            var freeThreadId = await callerFree
+                .Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken)
+                .ContinueWith(
+                    task => task.IsCompletedSuccessfully ? task.Result : (int?)null,
+                    TaskScheduler.Default
+                );
+
+            freeThreadId
+                .Should()
+                .NotBeNull("スナップショットが止まっている間に、呼び出し元のスレッドは空いている");
+            run!.IsCompleted.Should().BeFalse("スナップショットは止まったまま");
+
+            oplock.Dispose();
+            var callerThreadId = await running;
+
+            freeThreadId.Should().Be(callerThreadId);
             agent.RunThreadId.Should().NotBeNull();
             agent.RunThreadId.Should().NotBe(callerThreadId);
         }
         finally
         {
+            oplock.Dispose();
             Cleanup(folder);
         }
     }
