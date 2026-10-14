@@ -38,8 +38,13 @@
     /// <para>
     /// A rejection by the server infrastructure (<see cref="BadHttpRequestException"/>) is answered first, with the status
     /// code it carries (413 for an oversized body, for instance). That includes a body that ended before its declared
-    /// length because the client closed its side of the connection: Kestrel classifies it as 400 and has already shut the
-    /// response side down before throwing, so the answer is recorded on the server but never reaches the wire.
+    /// length because the client closed its side of the connection, when the read sees the end of the body first: Kestrel
+    /// classifies it as 400 and has already shut the response side down before throwing, so the answer is recorded on the
+    /// server but never reaches the wire. Kestrel also signals <see cref="HttpContext.RequestAborted"/> for that close,
+    /// and a read that observes the token first ends in a cancellation instead, which is treated as the client having
+    /// gone (below): no response, and the recorded status code stays 200. Either way nothing reaches the wire, and neither
+    /// the error log, the hook nor an abort request is involved; only middleware that reads the response status after the
+    /// endpoint can tell the two apart.
     /// </para>
     /// <para>
     /// A request the host's request timeout (the <c>RequestTimeouts</c> middleware) cut short is handed back to that

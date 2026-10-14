@@ -170,9 +170,16 @@ public sealed class RemoteServerEngineRuntimeTests
     /// 切断を知らせる <see cref="HttpContext.RequestAborted"/> が、分類から見ていつ立っているか。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Kestrel はこのトークンをスレッドプールへ予約して後から立てるため、本文の読み取りの例外より先に立つ保証がない
     /// （空いているワーカーが多い機械では先に立ち、CI のように混んでいる機械では後になる）。
     /// <see cref="Late"/> と <see cref="Early"/> は要求の寿命の機能を差し替えて、その両極をテストが決める。
+    /// </para>
+    /// <para>
+    /// FIN でも Kestrel はこのトークンを立てる。本文の読み取りが本文の終わりを先に見れば
+    /// <see cref="Microsoft.AspNetCore.Http.BadHttpRequestException"/>（400）、トークンを先に見れば取り消し（切断）になり、
+    /// <see cref="Kestrel"/> ではどちらになるかが実行環境で決まる。<see cref="HostKnowsFirst"/> は後者を実 Kestrel のまま決める。
+    /// </para>
     /// </remarks>
     public enum AbortTiming
     {
@@ -184,10 +191,19 @@ public sealed class RemoteServerEngineRuntimeTests
 
         /// <summary>本文の読み取りが失敗した直後、分類の前に立つ（空いている機械の順序）</summary>
         Early,
+
+        /// <summary>
+        /// Kestrel のトークンのまま、ホストが切断を知ってトークンが立つまで本文の読み取りを始めない
+        /// （負荷でエンドポイントが本文の読み取りへ入るのが遅れた形）
+        /// </summary>
+        HostKnowsFirst,
     }
 
-    /// <summary>RequestAborted だけをテストの持つトークンへ差し替え、接続の中断は記録して元の機能へ渡す要求の寿命</summary>
-    private sealed class ControlledLifetime(IHttpRequestLifetimeFeature inner)
+    /// <summary>
+    /// 要求の寿命の機能を包み、接続の中断の依頼を記録して元の機能へ渡す。
+    /// <paramref name="controlled"/> のときは RequestAborted をテストの持つトークンへ差し替える（そうでなければ Kestrel のトークンのまま）。
+    /// </summary>
+    private sealed class ControlledLifetime(IHttpRequestLifetimeFeature inner, bool controlled)
         : IHttpRequestLifetimeFeature
     {
         private readonly CancellationTokenSource _source = new();
@@ -195,9 +211,12 @@ public sealed class RemoteServerEngineRuntimeTests
         /// <summary>エンジンが接続の中断を頼んだか</summary>
         public bool AbortRequested { get; private set; }
 
+        /// <summary>Kestrel 自身のトークン（ホストが切断を知ると立つ）</summary>
+        public CancellationToken HostToken => inner.RequestAborted;
+
         public CancellationToken RequestAborted
         {
-            get => _source.Token;
+            get => controlled ? _source.Token : inner.RequestAborted;
             set { }
         }
 
@@ -215,57 +234,216 @@ public sealed class RemoteServerEngineRuntimeTests
         }
     }
 
-    /// <summary>1 件の要求で差し替えた要求の寿命を、テストの表明まで運ぶ入れ物</summary>
+    /// <summary>
+    /// 1 件の要求の観測点。差し替えた要求の寿命・切断してよい合図・フックの呼び出し回数と、失敗したときにだけ書き出す記録を持つ。
+    /// </summary>
     private sealed class LifetimeProbe
     {
+        private int _hookCalls;
+
         public ControlledLifetime? Lifetime { get; set; }
+
+        /// <summary>クライアントが接続を切ってよい合図（サーバーの本文の読み取りが本文の到着を待っている）</summary>
+        public TaskCompletionSource ReadyToDisconnect { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>OnServerError のフックが呼ばれた回数</summary>
+        public int HookCalls => Volatile.Read(ref _hookCalls);
+
+        /// <summary>失敗したときにだけ書き出す記録（待ちの途中では書き出さない）</summary>
+        public ConcurrentQueue<string> Notes { get; } = new();
+
+        public void RecordHook(Exception ex)
+        {
+            Interlocked.Increment(ref _hookCalls);
+            Notes.Enqueue($"hook: {Chain(ex)}");
+        }
+
+        /// <summary>失敗した表明と、ためた記録・Error のログをテストの出力へ書き出す</summary>
+        public void WriteOnFailure(Exception failure, ErrorLog log)
+        {
+            var output = TestContext.Current.TestOutputHelper;
+
+            if (output is null)
+            {
+                return;
+            }
+
+            output.WriteLine($"failure: {Chain(failure)}");
+            output.WriteLine(
+                $"runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}; Kestrel {System.Diagnostics.FileVersionInfo.GetVersionInfo(typeof(KestrelServerOptions).Assembly.Location).ProductVersion}"
+            );
+
+            foreach (var note in Notes)
+            {
+                output.WriteLine(note);
+            }
+
+            foreach (var line in log.Lines)
+            {
+                output.WriteLine($"error log: {line}");
+            }
+        }
+
+        /// <summary>例外の型とメッセージを、内側の例外まで連ねた 1 行</summary>
+        public static string Chain(Exception? ex)
+        {
+            var text = new StringBuilder();
+
+            for (var current = ex; current is not null; current = current.InnerException)
+            {
+                text.Append(current.GetType().FullName)
+                    .Append(": ")
+                    .Append(current.Message)
+                    .Append(" | ");
+            }
+
+            return text.ToString();
+        }
     }
 
     /// <summary>
-    /// <paramref name="timing"/> に従って要求の寿命を差し替え、本文を読む処理を包んで返す
-    /// （<see cref="AbortTiming.Early"/> では、その処理が失敗した直後にホストが切断を知った状態にする）。
+    /// 読み取りが本文の到着を待つところまで進んだこと（すぐに返らなかった読み取り）を知らせ、あとは元の本文へ渡す要求の本文
     /// </summary>
-    private static Func<Task<T>> ControlAbortTiming<T>(
-        HttpContext context,
-        AbortTiming timing,
-        LifetimeProbe probe,
-        Func<Task<T>> read
-    )
+    private sealed class SignalingRequestBody(Stream inner, TaskCompletionSource waiting) : Stream
     {
-        if (timing == AbortTiming.Kestrel)
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
         {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            waiting.TrySetResult();
+            return inner.Read(buffer, offset, count);
+        }
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken
+        )
+        {
+            var read = inner.ReadAsync(buffer, offset, count, cancellationToken);
+
+            if (!read.IsCompleted)
+            {
+                waiting.TrySetResult();
+            }
+
             return read;
         }
 
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
+        {
+            var read = inner.ReadAsync(buffer, cancellationToken);
+
+            if (!read.IsCompleted)
+            {
+                waiting.TrySetResult();
+            }
+
+            return read;
+        }
+
+        public override void Flush() { }
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// エンドポイントの先頭で呼び、本文を読み取りの待ちを知らせる形へ包み、要求の寿命を <paramref name="timing"/> に従って差し替える
+    /// （<see cref="AbortTiming.Kestrel"/> と <see cref="AbortTiming.HostKnowsFirst"/> は Kestrel のトークンのまま、中断の依頼だけを記録する）。
+    /// </summary>
+    private static void PrepareRequest(HttpContext context, AbortTiming timing, LifetimeProbe probe)
+    {
+        context.Request.Body = new SignalingRequestBody(
+            context.Request.Body,
+            probe.ReadyToDisconnect
+        );
         var lifetime = new ControlledLifetime(
-            context.Features.GetRequiredFeature<IHttpRequestLifetimeFeature>()
+            context.Features.GetRequiredFeature<IHttpRequestLifetimeFeature>(),
+            controlled: timing is AbortTiming.Late or AbortTiming.Early
         );
         context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
         probe.Lifetime = lifetime;
+    }
 
-        return async () =>
+    /// <summary>
+    /// 本文を読む処理を <paramref name="timing"/> に従って包んで返す（<see cref="AbortTiming.Early"/> では、その処理が失敗した直後に
+    /// ホストが切断を知った状態にし、<see cref="AbortTiming.HostKnowsFirst"/> では、ホストのトークンが立つまで読み取りを始めない）。
+    /// </summary>
+    private static Func<Task<T>> ControlAbortTiming<T>(
+        AbortTiming timing,
+        LifetimeProbe probe,
+        Func<Task<T>> read
+    ) =>
+        async () =>
         {
+            if (timing == AbortTiming.HostKnowsFirst)
+            {
+                // 本文の読み取りより前に、クライアントに切ってもらう
+                probe.ReadyToDisconnect.TrySetResult();
+                await WhenCanceledAsync(probe.Lifetime!.HostToken);
+            }
+
             try
             {
                 return await read();
             }
-            catch when (timing == AbortTiming.Early)
+            catch (Exception ex)
             {
-                lifetime.SignalHostKnows();
+                probe.Notes.Enqueue($"read threw: {LifetimeProbe.Chain(ex)}");
+
+                if (timing == AbortTiming.Early)
+                {
+                    probe.Lifetime!.SignalHostKnows();
+                }
+
                 throw;
             }
         };
+
+    /// <summary><paramref name="token"/> が立つまで待つ（10 秒で打ち切る）</summary>
+    private static async Task WhenCanceledAsync(CancellationToken token)
+    {
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using (token.Register(() => canceled.TrySetResult()))
+        {
+            await canceled.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        }
     }
 
     /// <summary>
     /// エンジンが接続の中断をホストへ頼んだかを確かめる。頼むのは、ホストがまだ知らない切断（RST）を見つけたときだけ
-    /// （FIN は Kestrel が例外を投げる前に自分で中断済み、<see cref="AbortTiming.Early"/> はホストが知っている）。
+    /// （FIN は Kestrel が例外を投げる前に自分で中断済み、<see cref="AbortTiming.Early"/> と
+    /// <see cref="AbortTiming.HostKnowsFirst"/> はホストが知っている）。
     /// </summary>
     private static void AssertAbortRequest(LifetimeProbe probe, bool reset, AbortTiming timing)
     {
-        if (timing == AbortTiming.Kestrel)
+        if (timing == AbortTiming.Kestrel && reset)
         {
-            // 実際の Kestrel では、ホストが先に知るかどうかが実行環境次第なので表明しない
+            // 実際の Kestrel の RST では、ホストが先に知るかどうかが実行環境次第なので表明しない
             return;
         }
 
@@ -278,14 +456,15 @@ public sealed class RemoteServerEngineRuntimeTests
     }
 
     /// <summary>
-    /// 本文を途中まで送ったあと、FIN または RST で接続を切る。
+    /// 本文を途中まで送り、サーバーの本文の読み取りが待ちに入った合図（<paramref name="readyToDisconnect"/>）を待ってから、FIN または RST で接続を切る。
     /// FIN では送信側だけを閉じて応答を最後まで読み、受け取ったバイト数を返す（RST では 0）。
     /// </summary>
     private static async Task<int> SendPartialBodyAndDisconnectAsync(
         Uri baseUri,
         string method,
         string path,
-        bool reset
+        bool reset,
+        Task readyToDisconnect
     )
     {
         using var client = new TcpClient();
@@ -296,8 +475,8 @@ public sealed class RemoteServerEngineRuntimeTests
         await stream.WriteAsync(Encoding.ASCII.GetBytes(head), Ct);
         await stream.FlushAsync(Ct);
 
-        // サーバーが本文の読み取りに入るまで待つ
-        await Task.Delay(300, Ct);
+        // サーバーの本文の読み取りが、続きの到着を待つところまで進むのを待つ
+        await readyToDisconnect.WaitAsync(TimeSpan.FromSeconds(10), Ct);
 
         if (reset)
         {
@@ -336,7 +515,7 @@ public sealed class RemoteServerEngineRuntimeTests
         return received;
     }
 
-    /// <summary>アップロードの本文を最後まで読み捨てる書き込み処理（<paramref name="timing"/> に従って要求の寿命を差し替える）</summary>
+    /// <summary>アップロードの本文を最後まで読み捨てる書き込み処理（<paramref name="timing"/> に従って包む）</summary>
     private static Func<Stream, long, Task<bool>> DrainBody(
         HttpContext context,
         AbortTiming timing,
@@ -344,7 +523,6 @@ public sealed class RemoteServerEngineRuntimeTests
     ) =>
         (body, _) =>
             ControlAbortTiming(
-                context,
                 timing,
                 probe,
                 async () =>
@@ -354,11 +532,25 @@ public sealed class RemoteServerEngineRuntimeTests
                 }
             )();
 
-    /// <summary>切断の種類ごとの期待値（FIN は Kestrel の分類どおり 400、RST は無応答）</summary>
-    private static string ExpectedOutcome(bool reset) => reset ? "returned:200" : "returned:400";
+    /// <summary>
+    /// 切断の種類と時期ごとに許す結果。RST は無応答。FIN は本文の読み取りが本文の終わりを先に見れば Kestrel の分類どおり 400、
+    /// 要求のトークンを先に見れば切断（無応答・StatusCode は 200 のまま）で、実 Kestrel のままではどちらになるかが実行環境で決まる。
+    /// </summary>
+    private static string[] ExpectedOutcomes(bool reset, AbortTiming timing) =>
+        (reset, timing) switch
+        {
+            (true, _) => ["returned:200"],
+            (false, AbortTiming.Kestrel) => ["returned:400", "returned:200"],
+            (false, AbortTiming.HostKnowsFirst) => ["returned:200"],
+            (false, _) => ["returned:400"],
+        };
+
+    /// <summary>500 の応答の拡張点を観測するためのエンドポイントのメタデータ（呼ばれたらフックの回数を数える）</summary>
+    private static RemoteErrorDetailPolicy CountHooks(LifetimeProbe probe) =>
+        new(expose: false, onServerError: (_, ex) => probe.RecordHook(ex));
 
     [Theory(
-        DisplayName = "[RemoteServerEngine] 本文の途中で切れた要求は、FIN なら 400（回線には何も出ない）・RST なら無応答で終え、ログも例外も出さない"
+        DisplayName = "[RemoteServerEngine] 本文の途中で切れた要求は、FIN なら 400 か切断（本文の終わりとトークンのどちらを先に見たか）・RST なら無応答で終え、回線にもログにもフックにも出さない"
     )]
     [InlineData(false, AbortTiming.Kestrel)]
     [InlineData(true, AbortTiming.Kestrel)]
@@ -366,6 +558,7 @@ public sealed class RemoteServerEngineRuntimeTests
     [InlineData(true, AbortTiming.Late)]
     [InlineData(false, AbortTiming.Early)]
     [InlineData(true, AbortTiming.Early)]
+    [InlineData(false, AbortTiming.HostKnowsFirst)]
     public async Task Json_ClientDisconnectsMidBody_IsNotAnsweredAsFault(
         bool reset,
         AbortTiming timing
@@ -380,55 +573,71 @@ public sealed class RemoteServerEngineRuntimeTests
         await using var app = await StartAsync(
             app =>
                 app.MapPost(
-                    "/json",
-                    async (HttpContext context) =>
-                    {
-                        try
+                        "/json",
+                        async (HttpContext context) =>
                         {
-                            var read = ControlAbortTiming<object?>(
-                                context,
-                                timing,
-                                probe,
-                                async () =>
-                                    await RemoteServerEngine.ReadRequestAsync<
-                                        Dictionary<string, int>
-                                    >(context)
-                            );
-                            await RemoteServerEngine.ExecuteAsync(context, read);
-                            outcome.TrySetResult($"returned:{context.Response.StatusCode}");
+                            PrepareRequest(context, timing, probe);
+
+                            try
+                            {
+                                var read = ControlAbortTiming<object?>(
+                                    timing,
+                                    probe,
+                                    async () =>
+                                        await RemoteServerEngine.ReadRequestAsync<
+                                            Dictionary<string, int>
+                                        >(context)
+                                );
+                                await RemoteServerEngine.ExecuteAsync(context, read);
+                                probe.Notes.Enqueue(
+                                    $"returned: status={context.Response.StatusCode} started={context.Response.HasStarted} abortRequested={probe.Lifetime!.AbortRequested}"
+                                );
+                                outcome.TrySetResult($"returned:{context.Response.StatusCode}");
+                            }
+                            catch (Exception ex)
+                            {
+                                probe.Notes.Enqueue($"endpoint threw: {LifetimeProbe.Chain(ex)}");
+                                outcome.TrySetResult($"threw:{ex.GetType().Name}");
+                                throw;
+                            }
                         }
-                        catch (Exception ex)
-                        {
-                            outcome.TrySetResult($"threw:{ex.GetType().Name}");
-                            throw;
-                        }
-                    }
-                ),
+                    )
+                    .WithMetadata(CountHooks(probe)),
             log
         );
 
-        var received = await SendPartialBodyAndDisconnectAsync(
-            new Uri(app.Urls.First()),
-            "POST",
-            "/json",
-            reset
-        );
-
-        (await outcome.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct))
-            .Should()
-            .Be(
-                ExpectedOutcome(reset),
-                "RST は応答を書かず、FIN は Kestrel の分類どおり 400 とし、どちらも例外を漏らさない"
+        try
+        {
+            var received = await SendPartialBodyAndDisconnectAsync(
+                new Uri(app.Urls.First()),
+                "POST",
+                "/json",
+                reset,
+                probe.ReadyToDisconnect.Task
             );
-        received
-            .Should()
-            .Be(0, "Kestrel は本文の途中の FIN で応答の側を閉じるので、400 も回線には出ない");
-        log.Lines.Should().BeEmpty("切断はサーバーの失敗としてログに残さない");
-        AssertAbortRequest(probe, reset, timing);
+
+            (await outcome.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct))
+                .Should()
+                .BeOneOf(
+                    ExpectedOutcomes(reset, timing),
+                    "RST は応答を書かず、FIN は 400 か切断とし、どちらも例外を漏らさない"
+                );
+            received
+                .Should()
+                .Be(0, "Kestrel は本文の途中の FIN で応答の側を閉じるので、400 も回線には出ない");
+            log.Lines.Should().BeEmpty("切断はサーバーの失敗としてログに残さない");
+            probe.HookCalls.Should().Be(0, "切断は 500 の応答の拡張点を呼ばない");
+            AssertAbortRequest(probe, reset, timing);
+        }
+        catch (Exception ex)
+        {
+            probe.WriteOnFailure(ex, log);
+            throw;
+        }
     }
 
     [Theory(
-        DisplayName = "[RemoteServerEngine] blob のアップロードの途中で切れた要求は、FIN なら 400（回線には何も出ない）・RST なら無応答で終え、500 にもログにもしない"
+        DisplayName = "[RemoteServerEngine] blob のアップロードの途中で切れた要求は、FIN なら 400 か切断（本文の終わりとトークンのどちらを先に見たか）・RST なら無応答で終え、回線にもログにもフックにも出さない"
     )]
     [InlineData(false, AbortTiming.Kestrel)]
     [InlineData(true, AbortTiming.Kestrel)]
@@ -436,6 +645,7 @@ public sealed class RemoteServerEngineRuntimeTests
     [InlineData(true, AbortTiming.Late)]
     [InlineData(false, AbortTiming.Early)]
     [InlineData(true, AbortTiming.Early)]
+    [InlineData(false, AbortTiming.HostKnowsFirst)]
     public async Task Upload_ClientDisconnectsMidBody_IsNotAnsweredAsFault(
         bool reset,
         AbortTiming timing
@@ -450,45 +660,62 @@ public sealed class RemoteServerEngineRuntimeTests
         await using var app = await StartAsync(
             app =>
                 app.MapPut(
-                    "/blob",
-                    async (HttpContext context) =>
-                    {
-                        try
+                        "/blob",
+                        async (HttpContext context) =>
                         {
-                            await RemoteServerEngine.ExecuteUploadAsync(
-                                context,
-                                DrainBody(context, timing, probe)
-                            );
-                            outcome.TrySetResult($"returned:{context.Response.StatusCode}");
+                            PrepareRequest(context, timing, probe);
+
+                            try
+                            {
+                                await RemoteServerEngine.ExecuteUploadAsync(
+                                    context,
+                                    DrainBody(context, timing, probe)
+                                );
+                                probe.Notes.Enqueue(
+                                    $"returned: status={context.Response.StatusCode} started={context.Response.HasStarted} abortRequested={probe.Lifetime!.AbortRequested}"
+                                );
+                                outcome.TrySetResult($"returned:{context.Response.StatusCode}");
+                            }
+                            catch (Exception ex)
+                            {
+                                probe.Notes.Enqueue($"endpoint threw: {LifetimeProbe.Chain(ex)}");
+                                outcome.TrySetResult($"threw:{ex.GetType().Name}");
+                                throw;
+                            }
                         }
-                        catch (Exception ex)
-                        {
-                            outcome.TrySetResult($"threw:{ex.GetType().Name}");
-                            throw;
-                        }
-                    }
-                ),
+                    )
+                    .WithMetadata(CountHooks(probe)),
             log
         );
 
-        var received = await SendPartialBodyAndDisconnectAsync(
-            new Uri(app.Urls.First()),
-            "PUT",
-            "/blob",
-            reset
-        );
-
-        (await outcome.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct))
-            .Should()
-            .Be(
-                ExpectedOutcome(reset),
-                "RST は応答を書かず、FIN は Kestrel の分類どおり 400 とし、どちらも例外を漏らさない"
+        try
+        {
+            var received = await SendPartialBodyAndDisconnectAsync(
+                new Uri(app.Urls.First()),
+                "PUT",
+                "/blob",
+                reset,
+                probe.ReadyToDisconnect.Task
             );
-        received
-            .Should()
-            .Be(0, "Kestrel は本文の途中の FIN で応答の側を閉じるので、400 も回線には出ない");
-        log.Lines.Should().BeEmpty("切断はサーバーの失敗としてログに残さない");
-        AssertAbortRequest(probe, reset, timing);
+
+            (await outcome.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct))
+                .Should()
+                .BeOneOf(
+                    ExpectedOutcomes(reset, timing),
+                    "RST は応答を書かず、FIN は 400 か切断とし、どちらも例外を漏らさない"
+                );
+            received
+                .Should()
+                .Be(0, "Kestrel は本文の途中の FIN で応答の側を閉じるので、400 も回線には出ない");
+            log.Lines.Should().BeEmpty("切断はサーバーの失敗としてログに残さない");
+            probe.HookCalls.Should().Be(0, "切断は 500 の応答の拡張点を呼ばない");
+            AssertAbortRequest(probe, reset, timing);
+        }
+        catch (Exception ex)
+        {
+            probe.WriteOnFailure(ex, log);
+            throw;
+        }
     }
 
     /// <summary>すでに時間切れになった、サーバーのタイムアウトの機能（RequestTimeouts が置くものの代わり）</summary>
