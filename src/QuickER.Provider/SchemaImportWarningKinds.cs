@@ -49,6 +49,17 @@ public static class SchemaImportWarningKinds
                 UnsupportedDefinitionKind.TemporaryTable,
             SchemaImportWarningKind.ForeignKeyToExcludedTable =>
                 UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
+            SchemaImportWarningKind.ColumnDefaultLost => UnsupportedDefinitionKind.DefaultValue,
+            SchemaImportWarningKind.AutoIncrementLost =>
+                UnsupportedDefinitionKind.IdentityAcceptingValues,
+            SchemaImportWarningKind.ColumnCollationLost => UnsupportedDefinitionKind.Collation,
+            SchemaImportWarningKind.InvisibleColumnLost =>
+                UnsupportedDefinitionKind.InvisibleColumn,
+            SchemaImportWarningKind.ColumnOnUpdateLost => UnsupportedDefinitionKind.ColumnOnUpdate,
+            SchemaImportWarningKind.SpatialReferenceIdLost =>
+                UnsupportedDefinitionKind.SpatialReferenceId,
+            SchemaImportWarningKind.AliasTypeFlattened => UnsupportedDefinitionKind.FlattenedType,
+            SchemaImportWarningKind.NameTrimmed => UnsupportedDefinitionKind.PaddedName,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

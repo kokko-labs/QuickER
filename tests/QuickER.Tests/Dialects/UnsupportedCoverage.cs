@@ -252,6 +252,144 @@ public static class UnsupportedCoverage
             ]
         ),
         (
+            DialectNames.SqlServer,
+            UnsupportedDefinitionKind.DefaultValue,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_ColumnAttributesAndPartitionedTable_AreReported",
+            ]
+        ),
+        (
+            DialectNames.PostgreSql,
+            UnsupportedDefinitionKind.DefaultValue,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
+            ]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.DefaultValue,
+            ["MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported"]
+        ),
+        (
+            DialectNames.Oracle,
+            UnsupportedDefinitionKind.DefaultValue,
+            [
+                "OracleImportFidelityIntegrationTests.Import_ColumnDefaultsAndIdentityByDefault_AreReported",
+            ]
+        ),
+        (
+            DialectNames.Sqlite,
+            UnsupportedDefinitionKind.DefaultValue,
+            [
+                "SqliteImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
+            ]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.Collation,
+            ["MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported"]
+        ),
+        (
+            DialectNames.PostgreSql,
+            UnsupportedDefinitionKind.IdentityAcceptingValues,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
+            ]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.IdentityAcceptingValues,
+            ["MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported"]
+        ),
+        (
+            DialectNames.Oracle,
+            UnsupportedDefinitionKind.IdentityAcceptingValues,
+            [
+                "OracleImportFidelityIntegrationTests.Import_ColumnDefaultsAndIdentityByDefault_AreReported",
+            ]
+        ),
+        (
+            DialectNames.Sqlite,
+            UnsupportedDefinitionKind.IdentityAcceptingValues,
+            [
+                "SqliteImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
+            ]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.InvisibleColumn,
+            ["MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported"]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.ColumnOnUpdate,
+            ["MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported"]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.SpatialReferenceId,
+            ["MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported"]
+        ),
+        (
+            DialectNames.SqlServer,
+            UnsupportedDefinitionKind.PartitionedTable,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_ColumnAttributesAndPartitionedTable_AreReported",
+            ]
+        ),
+        (
+            DialectNames.SqlServer,
+            UnsupportedDefinitionKind.FlattenedType,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_ColumnAttributesAndPartitionedTable_AreReported",
+            ]
+        ),
+        (
+            DialectNames.SqlServer,
+            UnsupportedDefinitionKind.PaddedName,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "SchemaImportWarningsHelperTests.DetectTrimmedNames_ReportsTableColumnAndConstraint",
+                "SchemaImportWarningsHelperTests.AllImporters_CallDetectTrimmedNames",
+            ]
+        ),
+        (
+            DialectNames.PostgreSql,
+            UnsupportedDefinitionKind.PaddedName,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "SchemaImportWarningsHelperTests.DetectTrimmedNames_ReportsTableColumnAndConstraint",
+                "SchemaImportWarningsHelperTests.AllImporters_CallDetectTrimmedNames",
+            ]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.PaddedName,
+            [
+                "MySqlImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "SchemaImportWarningsHelperTests.DetectTrimmedNames_ReportsTableColumnAndConstraint",
+                "SchemaImportWarningsHelperTests.AllImporters_CallDetectTrimmedNames",
+            ]
+        ),
+        (
+            DialectNames.Oracle,
+            UnsupportedDefinitionKind.PaddedName,
+            [
+                "OracleImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "SchemaImportWarningsHelperTests.DetectTrimmedNames_ReportsTableColumnAndConstraint",
+                "SchemaImportWarningsHelperTests.AllImporters_CallDetectTrimmedNames",
+            ]
+        ),
+        (
+            DialectNames.Sqlite,
+            UnsupportedDefinitionKind.PaddedName,
+            [
+                "SqliteImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "SchemaImportWarningsHelperTests.DetectTrimmedNames_ReportsTableColumnAndConstraint",
+                "SchemaImportWarningsHelperTests.AllImporters_CallDetectTrimmedNames",
+            ]
+        ),
+        (
             DialectNames.PostgreSql,
             UnsupportedDefinitionKind.TableWithoutReadableColumns,
             ["PostgreSqlImportFidelityIntegrationTests.Import_TableWithoutColumns_IsReported"]
@@ -270,26 +408,6 @@ public static class UnsupportedCoverage
         string Phase
     )[] PendingDetections =
     [
-        (DialectNames.SqlServer, UnsupportedDefinitionKind.DefaultValue, "2c"),
-        (DialectNames.PostgreSql, UnsupportedDefinitionKind.DefaultValue, "2c"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.DefaultValue, "2c"),
-        (DialectNames.Oracle, UnsupportedDefinitionKind.DefaultValue, "2c"),
-        (DialectNames.Sqlite, UnsupportedDefinitionKind.DefaultValue, "2c"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.Collation, "2c"),
-        (DialectNames.PostgreSql, UnsupportedDefinitionKind.IdentityAcceptingValues, "2c"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.IdentityAcceptingValues, "2c"),
-        (DialectNames.Oracle, UnsupportedDefinitionKind.IdentityAcceptingValues, "2c"),
-        (DialectNames.Sqlite, UnsupportedDefinitionKind.IdentityAcceptingValues, "2c"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.InvisibleColumn, "2c"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.ColumnOnUpdate, "2c"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.SpatialReferenceId, "2c"),
-        (DialectNames.SqlServer, UnsupportedDefinitionKind.PartitionedTable, "2c"),
-        (DialectNames.SqlServer, UnsupportedDefinitionKind.FlattenedType, "2c"),
-        (DialectNames.SqlServer, UnsupportedDefinitionKind.PaddedName, "2c"),
-        (DialectNames.PostgreSql, UnsupportedDefinitionKind.PaddedName, "2c"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.PaddedName, "2c"),
-        (DialectNames.Oracle, UnsupportedDefinitionKind.PaddedName, "2c"),
-        (DialectNames.Sqlite, UnsupportedDefinitionKind.PaddedName, "2c"),
         (DialectNames.SqlServer, UnsupportedDefinitionKind.IdentityRejectingValues, "2d"),
         (DialectNames.PostgreSql, UnsupportedDefinitionKind.IdentityRejectingValues, "2d"),
         (DialectNames.Oracle, UnsupportedDefinitionKind.IdentityRejectingValues, "2d"),
@@ -438,6 +556,98 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.Sqlite,
             ["SqliteSchemaSyncIntegrationTests.Rebuild_PreservesDataAndAuxiliaryObjects"]
+        ),
+        (
+            UnsupportedDefinitionKind.DefaultValue,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_ColumnAttributesAndPartitionedTable_AreReported",
+                "PostgreSqlImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
+                "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
+                "OracleImportFidelityIntegrationTests.Import_ColumnDefaultsAndIdentityByDefault_AreReported",
+                "SqliteImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.Collation,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.IdentityAcceptingValues,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
+                "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
+                "OracleImportFidelityIntegrationTests.Import_ColumnDefaultsAndIdentityByDefault_AreReported",
+                "SqliteImportFidelityIntegrationTests.Import_ColumnDefaultsAndAutoIncrement_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.InvisibleColumn,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.ColumnOnUpdate,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.SpatialReferenceId,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.PaddedName,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "PostgreSqlImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "MySqlImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "OracleImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "SqliteImportFidelityIntegrationTests.Import_PaddedNames_AreTrimmedAndReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.PartitionedTable,
+            UnsupportedFeature.Import,
+            DialectNames.SqlServer,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_ColumnAttributesAndPartitionedTable_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.FlattenedType,
+            UnsupportedFeature.Import,
+            DialectNames.SqlServer,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_ColumnAttributesAndPartitionedTable_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
         ),
         (
             UnsupportedDefinitionKind.View,
@@ -915,25 +1125,6 @@ public static class UnsupportedCoverage
         string Phase
     )[] PendingTreatments =
     [
-        (UnsupportedDefinitionKind.DefaultValue, UnsupportedFeature.Import, null, "2c"),
-        (UnsupportedDefinitionKind.Collation, UnsupportedFeature.Import, null, "2c"),
-        (UnsupportedDefinitionKind.IdentityAcceptingValues, UnsupportedFeature.Import, null, "2c"),
-        (UnsupportedDefinitionKind.InvisibleColumn, UnsupportedFeature.Import, null, "2c"),
-        (UnsupportedDefinitionKind.ColumnOnUpdate, UnsupportedFeature.Import, null, "2c"),
-        (UnsupportedDefinitionKind.SpatialReferenceId, UnsupportedFeature.Import, null, "2c"),
-        (UnsupportedDefinitionKind.PaddedName, UnsupportedFeature.Import, null, "2c"),
-        (
-            UnsupportedDefinitionKind.PartitionedTable,
-            UnsupportedFeature.Import,
-            DialectNames.SqlServer,
-            "2c"
-        ),
-        (
-            UnsupportedDefinitionKind.FlattenedType,
-            UnsupportedFeature.Import,
-            DialectNames.SqlServer,
-            "2c"
-        ),
         (UnsupportedDefinitionKind.IdentityRejectingValues, UnsupportedFeature.Import, null, "2d"),
         (UnsupportedDefinitionKind.IdentityRejectingValues, UnsupportedFeature.Sync, null, "2d"),
         (UnsupportedDefinitionKind.IdentityRejectingValues, UnsupportedFeature.Ddl, null, "2d"),

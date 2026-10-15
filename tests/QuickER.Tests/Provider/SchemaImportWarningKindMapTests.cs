@@ -27,13 +27,6 @@ public sealed class SchemaImportWarningKindMapTests
     /// <summary>取込で告知するが、告げる種別がまだ無い種類（足すフェーズ）</summary>
     private static readonly (UnsupportedDefinitionKind Kind, string Phase)[] PendingKinds =
     [
-        (UnsupportedDefinitionKind.DefaultValue, "2c"),
-        (UnsupportedDefinitionKind.Collation, "2c"),
-        (UnsupportedDefinitionKind.IdentityAcceptingValues, "2c"),
-        (UnsupportedDefinitionKind.InvisibleColumn, "2c"),
-        (UnsupportedDefinitionKind.ColumnOnUpdate, "2c"),
-        (UnsupportedDefinitionKind.SpatialReferenceId, "2c"),
-        (UnsupportedDefinitionKind.PaddedName, "2c"),
         (UnsupportedDefinitionKind.IdentityRejectingValues, "2d"),
     ];
 
@@ -109,6 +102,21 @@ public sealed class SchemaImportWarningKindMapTests
                 kind => !SchemaImportWarningKinds.IsAggregated(kind),
                 "種類の外の種別（範囲の外・名前の衝突）は箇所ごとの文で告げる"
             );
+    }
+
+    [Fact(
+        DisplayName = "別名型（SQL Server）とドメイン型（PostgreSQL）はどちらも D1a（基底型へ平坦化される型）へ写る"
+    )]
+    public void AliasAndDomainTypes_MapToFlattenedType()
+    {
+        SchemaImportWarningKinds
+            .DefinitionKind(SchemaImportWarningKind.AliasTypeFlattened)
+            .Should()
+            .Be(UnsupportedDefinitionKind.FlattenedType);
+        SchemaImportWarningKinds
+            .DefinitionKind(SchemaImportWarningKind.DomainTypeFlattened)
+            .Should()
+            .Be(UnsupportedDefinitionKind.FlattenedType);
     }
 
     /// <summary>取込で（告知しない除外以外の）扱いを持つ方言が 1 つでもあるか</summary>

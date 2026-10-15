@@ -275,4 +275,52 @@
   <data name="ImportWarningItem_TemporalHistoryTableExcluded" xml:space="preserve">
     <value>{0} (history table of {1})</value>
   </data>
+  <data name="ImportWarning_ColumnDefaultLost" xml:space="preserve">
+    <value>{0}.{1}: imported without its default value ({2}). The diagram does not model defaults, so generated DDL creates the column without DEFAULT.</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnDefaultLost" xml:space="preserve">
+    <value>Columns imported without their default value ({0}):</value>
+  </data>
+  <data name="ImportWarning_AutoIncrementLost" xml:space="preserve">
+    <value>{0}.{1}: imported without its automatic numbering ({2}). The diagram does not model it, so generated DDL creates an ordinary column.</value>
+  </data>
+  <data name="ImportWarningHeading_AutoIncrementLost" xml:space="preserve">
+    <value>Columns imported without their automatic numbering ({0}):</value>
+  </data>
+  <data name="ImportWarning_ColumnCollationLost" xml:space="preserve">
+    <value>{0}.{1}: imported without its collation ({2}), which differs from the table default. Generated DDL creates the column with the table default collation.</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnCollationLost" xml:space="preserve">
+    <value>Columns imported without their own collation ({0}):</value>
+  </data>
+  <data name="ImportWarning_InvisibleColumnLost" xml:space="preserve">
+    <value>{0}.{1}: imported as a visible column. The diagram does not model INVISIBLE, so generated DDL creates the column visible.</value>
+  </data>
+  <data name="ImportWarningHeading_InvisibleColumnLost" xml:space="preserve">
+    <value>INVISIBLE columns imported as visible columns ({0}):</value>
+  </data>
+  <data name="ImportWarning_ColumnOnUpdateLost" xml:space="preserve">
+    <value>{0}.{1}: imported without ON UPDATE {2}. Generated DDL creates the column without it, so the value is no longer refreshed when the row is updated.</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnOnUpdateLost" xml:space="preserve">
+    <value>Columns imported without their ON UPDATE attribute ({0}):</value>
+  </data>
+  <data name="ImportWarning_SpatialReferenceIdLost" xml:space="preserve">
+    <value>{0}.{1}: imported without its SRID ({2}). Generated DDL creates the column without SRID, so values in any spatial reference system are accepted.</value>
+  </data>
+  <data name="ImportWarningHeading_SpatialReferenceIdLost" xml:space="preserve">
+    <value>Spatial columns imported without their SRID ({0}):</value>
+  </data>
+  <data name="ImportWarning_AliasTypeFlattened" xml:space="preserve">
+    <value>{0}.{1}: imported as the base type of the alias type "{2}". The diagram does not model alias types, so generated DDL uses the base type.</value>
+  </data>
+  <data name="ImportWarningHeading_AliasTypeFlattened" xml:space="preserve">
+    <value>Columns imported as the base type of an alias type ({0}):</value>
+  </data>
+  <data name="ImportWarning_NameTrimmed" xml:space="preserve">
+    <value>{0}: the name "{1}" was imported as "{2}" without the spaces around it. The diagram does not keep spaces around a name.</value>
+  </data>
+  <data name="ImportWarningHeading_NameTrimmed" xml:space="preserve">
+    <value>Names imported without the spaces around them ({0}):</value>
+  </data>
 </root>

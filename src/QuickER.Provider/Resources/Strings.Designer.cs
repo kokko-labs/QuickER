@@ -489,5 +489,101 @@ namespace QuickER.Provider.Resources {
                 return ResourceManager.GetString("ImportWarningItem_TemporalHistoryTableExcluded", resourceCulture);
             }
         }
+
+        public static string ImportWarning_ColumnDefaultLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_ColumnDefaultLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnDefaultLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnDefaultLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_AutoIncrementLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_AutoIncrementLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_AutoIncrementLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_AutoIncrementLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ColumnCollationLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_ColumnCollationLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnCollationLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnCollationLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_InvisibleColumnLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_InvisibleColumnLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_InvisibleColumnLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_InvisibleColumnLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ColumnOnUpdateLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_ColumnOnUpdateLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnOnUpdateLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnOnUpdateLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_SpatialReferenceIdLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_SpatialReferenceIdLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_SpatialReferenceIdLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_SpatialReferenceIdLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_AliasTypeFlattened {
+            get {
+                return ResourceManager.GetString("ImportWarning_AliasTypeFlattened", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_AliasTypeFlattened {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_AliasTypeFlattened", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_NameTrimmed {
+            get {
+                return ResourceManager.GetString("ImportWarning_NameTrimmed", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_NameTrimmed {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_NameTrimmed", resourceCulture);
+            }
+        }
     }
 }

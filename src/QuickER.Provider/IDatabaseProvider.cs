@@ -42,6 +42,14 @@ public sealed class SchemaImportResult
     /// <see cref="SchemaImportWarningText.Describe"/> で同じ文言にする。警告が無い取込では空のまま＝従来どおり単文の完了通知になる。
     /// </remarks>
     public IReadOnlyList<SchemaImportWarning> Warnings { get; init; } = [];
+
+    /// <summary>取り込んだ列の既定値（DEFAULT）の事実（図には保存しない）</summary>
+    /// <remarks>
+    /// 意味モデルは既定値を持たないので、取込は既定値を告げて（<see cref="SchemaImportWarningKind.ColumnDefaultLost"/>）
+    /// 図には入れない。同期が列の変更で既定値を保つ・事前に警告するための材料として、ここにだけ持つ。
+    /// 自動採番・計算列の式・値が NULL の既定値は含めない（告げるものと同じ集合）。
+    /// </remarks>
+    public IReadOnlyList<SchemaColumnDefault> ColumnDefaults { get; init; } = [];
 }
 
 /// <summary>接続文字列から DB スキーマを取得して意味モデルへ変換するインポーター（DB 方言ごとに実装）</summary>

@@ -69,6 +69,8 @@ public class SqliteSchemaImporter : ISchemaImporter
             await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
 
         // 各テーブルの列・主キーは PRAGMA table_xinfo でまとめて取得する
+        var defaults = new List<SchemaColumnDefault>();
+
         foreach (var entry in tables.Values)
         {
             var isWithoutRowid =
@@ -78,11 +80,30 @@ public class SqliteSchemaImporter : ISchemaImporter
                     conn,
                     entry,
                     tableWarnings,
+                    defaults,
                     isWithoutRowid,
                     commandTimeoutSeconds,
                     ct
                 )
                 .ConfigureAwait(false);
+
+            // AUTOINCREMENT は CREATE 文にしか現れない（再構築の喪失の警告と同じ検出で見る）。
+            // 付けられるのは rowid 別名の主キー列だけ（rowid 別名そのものは型の文字列で保たれるので告げない）
+            if (
+                tableCreateSql.TryGetValue(entry.Key, out var createSql)
+                && TableRebuildAttributeDetector.Detect(createSql).Contains("AUTOINCREMENT")
+                && entry.Entity.GetPrimaryKeyColumnsInOrder() is [var autoIncrementColumn]
+            )
+            {
+                tableWarnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.AutoIncrementLost,
+                        entry.Entity.TableName,
+                        autoIncrementColumn.Name,
+                        "AUTOINCREMENT"
+                    )
+                );
+            }
         }
 
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
@@ -107,6 +128,8 @@ public class SqliteSchemaImporter : ISchemaImporter
                     tables.Values.Select(entry => entry.Entity)
                 )
             )
+            // 前後に空白のある DB の名前は、図では空白を除いた名前になる。取込完了時に名指しする
+            .Concat(SchemaImportWarnings.DetectTrimmedNames(tables.Values))
             .ToList();
 
         return new SchemaImportResult
@@ -116,6 +139,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             AuxiliaryObjects = aux,
             TableCreateSql = tableCreateSql,
             Warnings = warnings,
+            ColumnDefaults = defaults,
         };
     }
 
@@ -332,6 +356,7 @@ ORDER BY name;";
         SqliteConnection conn,
         SchemaTableEntry entry,
         List<SchemaImportWarning> warnings,
+        List<SchemaColumnDefault> defaults,
         bool isWithoutRowid,
         int commandTimeoutSeconds,
         CancellationToken ct
@@ -392,6 +417,25 @@ ORDER BY name;";
                         entry.Entity.TableName,
                         colName
                     )
+                );
+            }
+            else if (
+                !reader.IsDBNull(4)
+                && reader.GetString(4) is var columnDefault
+                && !SchemaImportWarnings.IsNullDefault(columnDefault, NullDefaultForms)
+            )
+            {
+                // dflt_value は宣言どおりの式（文字列は引用符つき）。値が NULL の既定値は告げない
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ColumnDefaultLost,
+                        entry.Entity.TableName,
+                        col.Name,
+                        columnDefault
+                    )
+                );
+                defaults.Add(
+                    new SchemaColumnDefault(entry.Entity.TableName, col.Name, columnDefault)
                 );
             }
 
@@ -544,6 +588,9 @@ ORDER BY name;";
 
         UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
+
+    /// <summary>SQLite が <c>DEFAULT NULL</c> を <c>dflt_value</c> に書く表記（宣言どおりの綴り）</summary>
+    private static readonly string[] NullDefaultForms = ["NULL"];
 
     /// <summary>外部キーを PRAGMA foreign_key_list で読み込み、リレーションへ変換する</summary>
     /// <remarks>

@@ -128,6 +128,12 @@ public sealed class UniqueConstraintImportBuilder
                 entry.Entity.UniqueConstraints.Add(
                     new UniqueConstraint { Name = constraint.Name, ColumnIds = columnIds }
                 );
+
+                // 図の制約名は前後の空白を除いた形になるので、DB の名前を記録して取込の最後に告げる
+                if (constraint.Name is { } name && name != name.Trim())
+                {
+                    entry.PaddedConstraintNames.Add(name);
+                }
             }
         }
     }

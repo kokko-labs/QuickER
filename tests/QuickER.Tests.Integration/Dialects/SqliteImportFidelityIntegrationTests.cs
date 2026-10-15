@@ -675,7 +675,13 @@ CREATE INDEX ix_upper ON ""Äpfel"" (upper_only);
         var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
 
         result.Entities.Select(e => e.TableName).Should().Equal("items");
-        result.Warnings.Should().BeEmpty();
+
+        // 内部表（sqlite_sequence）については何も告げない。告げるのは AUTOINCREMENT の列だけ
+        result
+            .Warnings.Should()
+            .ContainSingle()
+            .Which.Kind.Should()
+            .Be(SchemaImportWarningKind.AutoIncrementLost);
     }
 
     /// <summary>
@@ -765,5 +771,95 @@ CREATE TABLE note (id INTEGER PRIMARY KEY, doc_id INTEGER REFERENCES docs(rowid)
             .Subject;
         warning.TableName.Should().Be("note");
         warning.Detail.Should().Be("docs");
+    }
+
+    /// <summary>
+    /// 既定値と AUTOINCREMENT を列ごとに名指しし、既定値の事実を結果に持つ。値が NULL の既定値と、
+    /// AUTOINCREMENT の無い rowid 別名（型の文字列で保たれる）は告げない
+    /// </summary>
+    [Fact(DisplayName = "[Integration] SQLite: 既定値と AUTOINCREMENT を列ごとに名指しする")]
+    public async Task Import_ColumnDefaultsAndAutoIncrement_AreReported()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE attrs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'new',
+    note TEXT DEFAULT NULL,
+    created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE plain (id INTEGER PRIMARY KEY, qty INTEGER NOT NULL DEFAULT 0);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.AutoIncrementLost, "attrs", "id", "AUTOINCREMENT"),
+                (SchemaImportWarningKind.ColumnDefaultLost, "attrs", "status", "'new'"),
+                (
+                    SchemaImportWarningKind.ColumnDefaultLost,
+                    "attrs",
+                    "created",
+                    "CURRENT_TIMESTAMP"
+                ),
+                (SchemaImportWarningKind.ColumnDefaultLost, "plain", "qty", "0"),
+            ]);
+        result
+            .ColumnDefaults.Select(d => (d.TableName, d.ColumnName, d.Expression))
+            .Should()
+            .BeEquivalentTo([
+                ("attrs", "status", "'new'"),
+                ("attrs", "created", "CURRENT_TIMESTAMP"),
+                ("plain", "qty", "0"),
+            ]);
+    }
+
+    /// <summary>
+    /// 前後に空白のある名前（テーブル名・列名・外部キー名・一意制約名）は、空白を除いて取り込み、名前ごとに告げる（N1）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 前後に空白のある名前は空白を除いて取り込み、名前ごとに告げる"
+    )]
+    public async Task Import_PaddedNames_AreTrimmedAndReported()
+    {
+        using var db = SqliteTempDatabase.Create();
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE "" pad_parent"" (id INTEGER PRIMARY KEY);
+CREATE TABLE ""pad_child "" (
+    id INTEGER PRIMARY KEY,
+    ""  col"" INTEGER,
+    CONSTRAINT "" fk_pad"" FOREIGN KEY (""  col"") REFERENCES "" pad_parent"" (id),
+    CONSTRAINT ""uq_pad "" UNIQUE (""  col"")
+);
+",
+            Ct
+        );
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("pad_parent", "pad_child");
+        // SQLite は外部キー名を保存しない（取込が合成する）ので、外部キー名は告げる対象にならない
+        result.Relationships.Should().ContainSingle();
+        result
+            .Entities.Single(e => e.TableName == "pad_child")
+            .UniqueConstraints.Should()
+            .ContainSingle("一意制約は取り込む（名前は SQLite の自動の索引名なので持たない）");
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.NameTrimmed, "pad_parent", " pad_parent", "pad_parent"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", "pad_child ", "pad_child"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", "  col", "col"),
+            ]);
     }
 }

@@ -87,6 +87,21 @@ public static class SchemaImportWarningText
                     Strings.ImportWarningHeading_TemporaryTableExcluded,
                 SchemaImportWarningKind.ForeignKeyToExcludedTable =>
                     Strings.ImportWarningHeading_ForeignKeyToExcludedTable,
+                SchemaImportWarningKind.ColumnDefaultLost =>
+                    Strings.ImportWarningHeading_ColumnDefaultLost,
+                SchemaImportWarningKind.AutoIncrementLost =>
+                    Strings.ImportWarningHeading_AutoIncrementLost,
+                SchemaImportWarningKind.ColumnCollationLost =>
+                    Strings.ImportWarningHeading_ColumnCollationLost,
+                SchemaImportWarningKind.InvisibleColumnLost =>
+                    Strings.ImportWarningHeading_InvisibleColumnLost,
+                SchemaImportWarningKind.ColumnOnUpdateLost =>
+                    Strings.ImportWarningHeading_ColumnOnUpdateLost,
+                SchemaImportWarningKind.SpatialReferenceIdLost =>
+                    Strings.ImportWarningHeading_SpatialReferenceIdLost,
+                SchemaImportWarningKind.AliasTypeFlattened =>
+                    Strings.ImportWarningHeading_AliasTypeFlattened,
+                SchemaImportWarningKind.NameTrimmed => Strings.ImportWarningHeading_NameTrimmed,
                 _ => throw new ArgumentOutOfRangeException(
                     nameof(kind),
                     kind,
@@ -167,6 +182,54 @@ public static class SchemaImportWarningText
             ),
             SchemaImportWarningKind.ForeignKeyToExcludedTable => string.Format(
                 Strings.ImportWarning_ForeignKeyToExcludedTable,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.ColumnDefaultLost => string.Format(
+                Strings.ImportWarning_ColumnDefaultLost,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.AutoIncrementLost => string.Format(
+                Strings.ImportWarning_AutoIncrementLost,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.ColumnCollationLost => string.Format(
+                Strings.ImportWarning_ColumnCollationLost,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.InvisibleColumnLost => string.Format(
+                Strings.ImportWarning_InvisibleColumnLost,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.ColumnOnUpdateLost => string.Format(
+                Strings.ImportWarning_ColumnOnUpdateLost,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.SpatialReferenceIdLost => string.Format(
+                Strings.ImportWarning_SpatialReferenceIdLost,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.AliasTypeFlattened => string.Format(
+                Strings.ImportWarning_AliasTypeFlattened,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.NameTrimmed => string.Format(
+                Strings.ImportWarning_NameTrimmed,
                 table,
                 subject,
                 detail

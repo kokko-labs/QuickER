@@ -82,6 +82,16 @@ public class SqlServerSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         await LoadDisabledForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+        await LoadPartitionedTablesAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
+        var defaults = await LoadColumnAttributesAsync(
+                conn,
+                tables,
+                commandTimeoutSeconds,
+                warnings,
+                ct
+            )
+            .ConfigureAwait(false);
 
         // DDL へ出せない型表記は、後で DDL / 同期を叩いた瞬間に図全体を止める。取込完了時に名指しする
         warnings.AddRange(
@@ -90,11 +100,15 @@ public class SqlServerSchemaImporter : ISchemaImporter
             )
         );
 
+        // 前後に空白のある DB の名前は、図では空白を除いた名前になる。取込完了時に名指しする
+        warnings.AddRange(SchemaImportWarnings.DetectTrimmedNames(tables.Values));
+
         return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
             Warnings = warnings,
+            ColumnDefaults = defaults,
         };
     }
 
@@ -332,11 +346,143 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             dict[key] = new SchemaTableEntry
             {
                 Key = key,
+                RawName = displayName,
                 Entity = new Entity { TableName = displayName, Columns = new List<Column>() },
             };
         }
 
         return dict;
+    }
+
+    /// <summary>パーティション表（ヒープ・クラスター化インデックスのデータ領域がパーティション構成）を名指しするクエリ</summary>
+    private const string PartitionedTablesSql =
+        @"
+SELECT s.name AS TABLE_SCHEMA, t.name AS TABLE_NAME
+FROM sys.tables t
+JOIN sys.schemas s ON t.schema_id = s.schema_id
+WHERE EXISTS (
+    SELECT 1
+    FROM sys.indexes i
+    JOIN sys.partition_schemes ps ON i.data_space_id = ps.data_space_id
+    WHERE i.object_id = t.object_id AND i.index_id IN (0, 1)
+)
+ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2;";
+
+    /// <summary>図が持たない列の属性（既定値・別名型）を名指しするクエリ</summary>
+    /// <remarks>
+    /// 取込の列の読み込みは変えず、告げるためだけに読む。別名型は利用者が定義した型のうち、
+    /// CLR 型（<c>is_assembly_type</c>）とテーブル型（<c>is_table_type</c>）でないもの（<c>CREATE TYPE … FROM</c>）。
+    /// </remarks>
+    private const string ColumnAttributesSql =
+        @"
+SELECT s.name AS TABLE_SCHEMA, t.name AS TABLE_NAME, c.name AS COLUMN_NAME,
+       dc.definition AS DEFAULT_DEFINITION,
+       CASE WHEN ty.is_user_defined = 1 AND ty.is_assembly_type = 0 AND ty.is_table_type = 0
+            THEN SCHEMA_NAME(ty.schema_id) + N'.' + ty.name END AS ALIAS_TYPE
+FROM sys.columns c
+JOIN sys.tables t ON c.object_id = t.object_id
+JOIN sys.schemas s ON t.schema_id = s.schema_id
+JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
+WHERE dc.object_id IS NOT NULL
+   OR (ty.is_user_defined = 1 AND ty.is_assembly_type = 0 AND ty.is_table_type = 0)
+ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2, c.column_id;";
+
+    /// <summary>パーティション表を、パーティション定義を持たない通常の表として取り込んだことを告げる</summary>
+    private static async Task LoadPartitionedTablesAsync(
+        SqlConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(conn, PartitionedTablesSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (
+                SchemaTableEntry.TryGetExact(
+                    tables,
+                    TableKey(reader.GetString(0), reader.GetString(1)),
+                    out var entry
+                )
+            )
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.PartitionDefinitionLost,
+                        entry.Entity.TableName
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>SQL Server が <c>DEFAULT NULL</c> をカタログ（<c>sys.default_constraints.definition</c>）に書く表記</summary>
+    private static readonly string[] NullDefaultForms = ["(NULL)", "((NULL))"];
+
+    /// <summary>図が持たない列の属性を、列ごとの取込警告（段 1）で名指しし、既定値の事実を返す</summary>
+    /// <remarks>
+    /// SQL Server の IDENTITY は既定値を持てないので、既定値は自動採番と重ならない。値が NULL の既定値
+    /// （<c>(NULL)</c>）は告げない。
+    /// </remarks>
+    private static async Task<List<SchemaColumnDefault>> LoadColumnAttributesAsync(
+        SqlConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        var defaults = new List<SchemaColumnDefault>();
+        await using var cmd = DbCommands.Create(conn, ColumnAttributesSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (
+                !SchemaTableEntry.TryGetExact(
+                    tables,
+                    TableKey(reader.GetString(0), reader.GetString(1)),
+                    out var entry
+                ) || !entry.TryGetColumnExact(reader.GetString(2), out var column)
+            )
+            {
+                continue;
+            }
+
+            var table = entry.Entity.TableName;
+            var definition = reader.IsDBNull(3) ? null : reader.GetString(3);
+
+            if (!SchemaImportWarnings.IsNullDefault(definition, NullDefaultForms))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ColumnDefaultLost,
+                        table,
+                        column.Name,
+                        definition!
+                    )
+                );
+                defaults.Add(new SchemaColumnDefault(table, column.Name, definition!));
+            }
+
+            if (!reader.IsDBNull(4))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.AliasTypeFlattened,
+                        table,
+                        column.Name,
+                        reader.GetString(4)
+                    )
+                );
+            }
+        }
+
+        return defaults;
     }
 
     /// <summary>取り込まないオブジェクトを、種別ごとの取込警告（段 2）で名指しする</summary>

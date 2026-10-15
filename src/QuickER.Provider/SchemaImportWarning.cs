@@ -219,6 +219,38 @@ public enum SchemaImportWarningKind
     /// <c>Detail</c> = 参照先の表。
     /// </remarks>
     ForeignKeyToExcludedTable,
+
+    /// <summary>列の既定値（DEFAULT）を持たずに取り込んだ。</summary>
+    /// <remarks>意味モデルは既定値を持たないため、生成 DDL は DEFAULT なしで列を作る。DB の自動採番（<see cref="AutoIncrementLost"/>）と計算列の式は既定値に数えず、値が NULL の既定値（<c>DEFAULT NULL</c>）は DEFAULT の無い NULL 許容の列と同じ意味なので告げない。<c>Subject</c> = 列名 / <c>Detail</c> = 既定値の式（DB が返す表記のまま）。</remarks>
+    ColumnDefaultLost,
+
+    /// <summary>指定した値も受け付ける自動採番を持たずに取り込んだ（MySQL の AUTO_INCREMENT・PostgreSQL の serial と BY DEFAULT・Oracle の BY DEFAULT・SQLite の AUTOINCREMENT）。</summary>
+    /// <remarks>意味モデルは自動採番を持たないため、生成 DDL は普通の列を作る。指定した値を拒む自動採番（IDENTITY・ALWAYS）は別の扱い。<c>Subject</c> = 列名 / <c>Detail</c> = 仕組み（<c>AUTO_INCREMENT</c> など）。</remarks>
+    AutoIncrementLost,
+
+    /// <summary>テーブルの既定と違う照合順序を持つ列を、照合順序を持たずに取り込んだ（MySQL）。</summary>
+    /// <remarks><c>Subject</c> = 列名 / <c>Detail</c> = 列の照合順序。</remarks>
+    ColumnCollationLost,
+
+    /// <summary>INVISIBLE 列を見える列として取り込んだ（MySQL）。</summary>
+    /// <remarks><c>Subject</c> = 列名 / <c>Detail</c> は空。</remarks>
+    InvisibleColumnLost,
+
+    /// <summary>列の ON UPDATE 属性（MySQL の ON UPDATE CURRENT_TIMESTAMP）を持たずに取り込んだ。</summary>
+    /// <remarks><c>Subject</c> = 列名 / <c>Detail</c> = ON UPDATE の式。</remarks>
+    ColumnOnUpdateLost,
+
+    /// <summary>空間列の SRID 属性を持たずに取り込んだ（MySQL）。</summary>
+    /// <remarks><c>Subject</c> = 列名 / <c>Detail</c> = SRID。</remarks>
+    SpatialReferenceIdLost,
+
+    /// <summary>SQL Server の別名型（<c>CREATE TYPE … FROM</c>）の列を、基底型として取り込んだ。</summary>
+    /// <remarks><see cref="DomainTypeFlattened"/> と同じく基底型へ落として取り込む告知。<c>Subject</c> = 列名 / <c>Detail</c> = 別名型の名前（<c>スキーマ.名前</c>）。</remarks>
+    AliasTypeFlattened,
+
+    /// <summary>前後に空白のある名前（テーブル名・列名・外部キー名・一意制約名）を、空白を除いて取り込んだ。</summary>
+    /// <remarks>図の名前は前後の空白を持たない（モデルの setter が除く）。<c>TableName</c> = 名前を持つテーブル（図での名前）/ <c>Subject</c> = DB の名前（空白つき）/ <c>Detail</c> = 図での名前。</remarks>
+    NameTrimmed,
 }
 
 /// <summary>
@@ -244,6 +276,94 @@ public sealed record SchemaImportWarning(
 public static class SchemaImportWarnings
 {
     /// <summary>
+    /// 前後に空白のある DB の名前（テーブル名・列名・外部キー名・一意制約名）を、空白を除いて取り込んだことを告げる
+    /// </summary>
+    /// <remarks>
+    /// 5 方言すべてが取込の最後に呼ぶ。図の名前はモデルの setter が前後の空白を除いた形なので、DB の綴りは
+    /// テーブルのエントリ（<see cref="SchemaTableEntry.RawName"/> / <see cref="SchemaTableEntry.Key"/>・
+    /// 列の索引のキー・<see cref="SchemaTableEntry.PaddedConstraintNames"/>）に残っているものと比べる。
+    /// </remarks>
+    public static IEnumerable<SchemaImportWarning> DetectTrimmedNames(
+        IEnumerable<SchemaTableEntry> tables
+    )
+    {
+        foreach (var entry in tables)
+        {
+            var table = entry.Entity.TableName;
+            var rawTable = entry.RawName ?? entry.Key;
+
+            if (rawTable != table)
+            {
+                yield return new SchemaImportWarning(
+                    SchemaImportWarningKind.NameTrimmed,
+                    table,
+                    rawTable,
+                    table
+                );
+            }
+
+            foreach (var (rawColumn, column) in entry.ColumnsByName)
+            {
+                if (rawColumn != column.Name)
+                {
+                    yield return new SchemaImportWarning(
+                        SchemaImportWarningKind.NameTrimmed,
+                        table,
+                        rawColumn,
+                        column.Name
+                    );
+                }
+            }
+
+            foreach (var rawConstraint in entry.PaddedConstraintNames)
+            {
+                yield return new SchemaImportWarning(
+                    SchemaImportWarningKind.NameTrimmed,
+                    table,
+                    rawConstraint,
+                    rawConstraint.Trim()
+                );
+            }
+        }
+    }
+
+    /// <summary>既定値の式が、方言がカタログに書く「値が NULL の既定値（<c>DEFAULT NULL</c>）」の表記か</summary>
+    /// <param name="expression">カタログが返した既定値の式（式そのものが無ければ <c>null</c>）</param>
+    /// <param name="nullForms">その方言が <c>DEFAULT NULL</c> を書く表記（前後の空白を除いて、大文字小文字を無視した完全一致で比べる）</param>
+    /// <param name="typedNullCast">
+    /// 型の付記つきの <c>NULL::型</c> も NULL とみなすか（PostgreSQL は型つきの列の <c>DEFAULT NULL</c> をこの形で書く。
+    /// 型の部分が引用符を含むものは文字列なので含めない）
+    /// </param>
+    /// <remarks>
+    /// <c>DEFAULT NULL</c> は DEFAULT の無い NULL 許容の列と同じ意味なので、既定値として告げない。
+    /// 判定は方言ごとの表記の完全一致で行い、括弧を外すなどの一般化はしない（文字列の <c>'NULL'</c>・<c>('NULL')</c>・
+    /// <c>'NULL'::text</c> は本物の既定値で、取り違えない）。式そのものが無い（DB の NULL）のは既定値が無いことなので
+    /// <c>true</c>。空の文字列は既定値として扱う（MySQL は <c>DEFAULT ''</c> を空の文字列で返す）。
+    /// </remarks>
+    public static bool IsNullDefault(
+        string? expression,
+        IReadOnlyCollection<string> nullForms,
+        bool typedNullCast = false
+    )
+    {
+        if (expression is null)
+        {
+            return true;
+        }
+
+        var text = expression.Trim();
+
+        if (nullForms.Any(form => string.Equals(form, text, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return typedNullCast
+            && text.StartsWith("NULL::", StringComparison.OrdinalIgnoreCase)
+            && !text.Contains('\'');
+    }
+
+    /// <summary>
     /// DDL・同期スクリプトへ出せない型表記を持つ列を、方言に依らず洗い出す。
     /// </summary>
     /// <remarks>
@@ -267,3 +387,9 @@ public static class SchemaImportWarnings
                 ))
         );
 }
+
+/// <summary>取り込んだ列の既定値の事実</summary>
+/// <param name="TableName">テーブル名（図での名前）</param>
+/// <param name="ColumnName">列名（図での名前）</param>
+/// <param name="Expression">既定値の式（DB が返す表記のまま）</param>
+public sealed record SchemaColumnDefault(string TableName, string ColumnName, string Expression);

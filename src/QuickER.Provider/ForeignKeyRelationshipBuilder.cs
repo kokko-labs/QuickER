@@ -158,6 +158,12 @@ public sealed class ForeignKeyRelationshipBuilder
                     OnUpdate = g.OnUpdate,
                 }
             );
+
+            // 図の制約名は前後の空白を除いた形になるので、DB の名前を記録して取込の最後に告げる
+            if (g.ConstraintName is { } name && name != name.Trim())
+            {
+                parent.PaddedConstraintNames.Add(name);
+            }
         }
 
         return rels;

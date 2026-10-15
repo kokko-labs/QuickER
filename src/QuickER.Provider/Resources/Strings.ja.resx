@@ -275,4 +275,52 @@
   <data name="ImportWarningItem_TemporalHistoryTableExcluded" xml:space="preserve">
     <value>{0}（{1} の履歴表）</value>
   </data>
+  <data name="ImportWarning_ColumnDefaultLost" xml:space="preserve">
+    <value>{0}.{1}: 既定値（{2}）なしで取り込みました。図は既定値を持たないため、生成 DDL は DEFAULT なしで列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnDefaultLost" xml:space="preserve">
+    <value>既定値なしで取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_AutoIncrementLost" xml:space="preserve">
+    <value>{0}.{1}: 自動採番（{2}）なしで取り込みました。図は自動採番を持たないため、生成 DDL は普通の列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_AutoIncrementLost" xml:space="preserve">
+    <value>自動採番なしで取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_ColumnCollationLost" xml:space="preserve">
+    <value>{0}.{1}: テーブルの既定と違う照合順序（{2}）なしで取り込みました。生成 DDL はテーブルの既定の照合順序で列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnCollationLost" xml:space="preserve">
+    <value>固有の照合順序なしで取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_InvisibleColumnLost" xml:space="preserve">
+    <value>{0}.{1}: 見える列として取り込みました。図は INVISIBLE を持たないため、生成 DDL は見える列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_InvisibleColumnLost" xml:space="preserve">
+    <value>見える列として取り込んだ INVISIBLE 列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_ColumnOnUpdateLost" xml:space="preserve">
+    <value>{0}.{1}: ON UPDATE {2} なしで取り込みました。生成 DDL はこれを付けずに列を作るため、行の更新時に値が自動で更新されなくなります。</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnOnUpdateLost" xml:space="preserve">
+    <value>ON UPDATE 属性なしで取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_SpatialReferenceIdLost" xml:space="preserve">
+    <value>{0}.{1}: SRID（{2}）なしで取り込みました。生成 DDL は SRID を付けずに列を作るため、どの空間参照系の値も受け付けます。</value>
+  </data>
+  <data name="ImportWarningHeading_SpatialReferenceIdLost" xml:space="preserve">
+    <value>SRID なしで取り込んだ空間列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_AliasTypeFlattened" xml:space="preserve">
+    <value>{0}.{1}: 別名型「{2}」の基底型として取り込みました。図は別名型を持たないため、生成 DDL は基底型を使います。</value>
+  </data>
+  <data name="ImportWarningHeading_AliasTypeFlattened" xml:space="preserve">
+    <value>別名型の基底型として取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_NameTrimmed" xml:space="preserve">
+    <value>{0}: 名前「{1}」は前後の空白を除いた「{2}」として取り込みました。図は名前の前後の空白を持ちません。</value>
+  </data>
+  <data name="ImportWarningHeading_NameTrimmed" xml:space="preserve">
+    <value>前後の空白を除いて取り込んだ名前（{0} 件）:</value>
+  </data>
 </root>

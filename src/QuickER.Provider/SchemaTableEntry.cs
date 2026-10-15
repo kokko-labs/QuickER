@@ -32,6 +32,20 @@ public sealed class SchemaTableEntry
     /// <summary>テーブルを一意に識別するキー（書式は方言依存）</summary>
     public string Key { get; init; } = "";
 
+    /// <summary>DB のテーブル名（綴りのまま。<see cref="Key"/> がテーブル名そのものでない方言だけが設定する）</summary>
+    /// <remarks>
+    /// <see cref="Entity.TableName"/> は前後の空白を除いた形（モデルの setter が除く）。前後に空白のある名前を
+    /// 告げるため、DB の綴りをここか <see cref="Key"/> に残す（<see cref="SchemaImportWarnings.DetectTrimmedNames"/>）。
+    /// </remarks>
+    public string? RawName { get; init; }
+
+    /// <summary>このテーブルの制約のうち、DB の名前に前後の空白があったもの（綴りのまま）</summary>
+    /// <remarks>
+    /// 外部キー名・一意制約名を取り込む共通部品（<see cref="ForeignKeyRelationshipBuilder"/>・
+    /// <see cref="UniqueConstraintImportBuilder.Attach"/>）が記録し、<see cref="SchemaImportWarnings.DetectTrimmedNames"/> が告げる。
+    /// </remarks>
+    public List<string> PaddedConstraintNames { get; } = new();
+
     /// <summary>
     /// 採用するテーブルを引く辞書の比較器（<see cref="SchemaNames"/> の規則）。キーが <c>[schema].[name]</c> の形（SQL Server）の
     /// ときは角括弧の内側の前後の空白も除いて比べる
