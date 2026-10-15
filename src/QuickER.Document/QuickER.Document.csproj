@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
-    <!-- 原子的ファイル書き込み（AtomicFile）の共有のみに使う（依存ゼロの汎用永続化層。設定固有の型には依存しない） -->
-    <ProjectReference Include="..\QuickER.Settings\QuickER.Settings.csproj" />
+    <ProjectReference Include="..\QuickER.Platform\QuickER.Platform.csproj" />
   </ItemGroup>
 </Project>

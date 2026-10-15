@@ -25,10 +25,9 @@ public static class OracleIdentifier
         }
 
         // ドットを含む場合はスキーマ修飾名として 2 分割し、各部を個別にクォートする
-        if (name.Contains('.'))
+        if (SchemaQualifiedName.TrySplit(name, out var schema, out var table))
         {
-            var parts = name.Split('.', 2);
-            return $"\"{Escape(parts[0])}\".\"{Escape(parts[1])}\"";
+            return $"\"{Escape(schema)}\".\"{Escape(table)}\"";
         }
 
         return $"\"{Escape(name)}\"";
@@ -42,9 +41,7 @@ public static class OracleIdentifier
 
     /// <summary><c>schema.table</c> 形式から <c>table</c> 部分のみを抽出する</summary>
     public static string TableNameOnly(string fullName) =>
-        string.IsNullOrEmpty(fullName) ? string.Empty
-        : fullName.Contains('.') ? fullName.Split('.', 2)[1]
-        : fullName;
+        string.IsNullOrEmpty(fullName) ? string.Empty : SchemaQualifiedName.Split(fullName).Name;
 
     /// <summary>SQL 文字列リテラル用に <c>'</c> を二重化してエスケープする</summary>
     public static string EscapeStringLiteral(string s) => (s ?? string.Empty).Replace("'", "''");

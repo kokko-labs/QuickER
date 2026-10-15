@@ -2,6 +2,7 @@ using System.IO;
 using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Settings;
@@ -47,7 +48,7 @@ public sealed class MainViewModelSaveHashRaceTests : IDisposable
     /// <summary>単一テーブルの図をファイルへ書き出す（外部プロセスの書き込みを模す）</summary>
     private static void WriteDiagram(string path, string tableName)
     {
-        JsonStorageService.Save(
+        JsonStorageService.SaveAtomic(
             path,
             new DiagramDocument
             {

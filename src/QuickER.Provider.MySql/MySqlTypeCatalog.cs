@@ -48,7 +48,7 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
     // 末尾に unsigned / zerofill / signed の修飾子を任意個許容する。
     [GeneratedRegex(
         @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\((?<args>.*)\))?\s*(?<mods>(\s*(unsigned|zerofill|signed))*)\s*$",
-        RegexOptions.IgnoreCase
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TypePattern();
 
@@ -563,7 +563,10 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             return name;
         }
 
-        return scale is null ? $"{name}({precision})" : $"{name}({precision},{scale})";
+        // 負のスケールは書式のカルチャによって負号が変わる（sv-SE は U+2212）ので、インバリアントで書く
+        return scale is null
+            ? string.Create(CultureInfo.InvariantCulture, $"{name}({precision})")
+            : string.Create(CultureInfo.InvariantCulture, $"{name}({precision},{scale})");
     }
 
     private static string FormatPrecisionOnly(string name, int? precision) =>

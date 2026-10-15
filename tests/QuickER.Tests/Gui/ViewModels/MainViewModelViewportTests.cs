@@ -201,7 +201,7 @@ public class MainViewModelViewportTests
                 Entities = { new Entity { TableName = "T1" } },
             },
         };
-        JsonStorageService.Save(path, document);
+        JsonStorageService.SaveAtomic(path, document);
 
         var files = new StubFileDialogService { OpenResult = new FileDialogResult(path, 1) };
         var vm = new MainViewModel(new StubDialogService(), files: files);

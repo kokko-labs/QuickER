@@ -102,7 +102,9 @@ public sealed class GeneratedHeaderStampTests
     [MemberData(nameof(OutputModes))]
     public void Generate_AllCSharpFiles_AreStamped(string mode, CodeGenerationOptions options)
     {
-        var files = Generate(options).Files.Where(file => file.FileName.EndsWith(".g.cs")).ToList();
+        var files = Generate(options)
+            .Files.Where(file => file.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .ToList();
 
         files.Should().NotBeEmpty(mode);
 
@@ -139,7 +141,7 @@ public sealed class GeneratedHeaderStampTests
                 ApiDocsLanguage = ApiDocsLanguage.Both,
             }
         )
-            .Files.Where(file => file.FileName.EndsWith(".g.md"))
+            .Files.Where(file => file.FileName.EndsWith(".g.md", StringComparison.Ordinal))
             .ToList();
 
         docs.Should().HaveCount(2);

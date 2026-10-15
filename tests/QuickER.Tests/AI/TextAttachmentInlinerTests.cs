@@ -47,7 +47,10 @@ public class TextAttachmentInlinerTests
         result.Should().Contain("one");
         result.Should().Contain("Attached file: 2.txt");
         result.Should().Contain("two");
-        result.IndexOf("1.txt").Should().BeLessThan(result.IndexOf("2.txt"));
+        result
+            .IndexOf("1.txt", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(result.IndexOf("2.txt", StringComparison.Ordinal));
     }
 
     /// <summary>画像・PDF・バイナリ添付はインライン対象外（無視される）ことを検証する</summary>

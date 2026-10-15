@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text;
 
-namespace QuickER.Settings;
+namespace QuickER.Platform;
 
 /// <summary>ファイル読み取りの結果分類（<see cref="AtomicFile.TryReadAllText"/> が返す）</summary>
 /// <remarks>
@@ -33,7 +33,7 @@ public enum FileReadStatus
 /// <remarks>
 /// <para>
 /// <b>原子的書き込みの単一正本。</b>図ファイル（<c>QuickER.Documents.JsonStorageService.SaveAtomic</c>）・
-/// 設定ファイル（<see cref="JsonSettingsStore{TSettings}"/>）・接続プロファイル
+/// 設定ファイル（<c>QuickER.Settings.JsonSettingsStore</c>）・接続プロファイル
 /// （<c>QuickER.Db.UI.SqlConnectionProfileStore</c>）はいずれもここを経由する。同じアルゴリズムを
 /// 各所へ逐語コピーすると、一時ファイル名の付け方のような細部が 1 箇所だけ取り残されても
 /// 揃っているかを保証する仕組みが無いため、実装はここ 1 箇所に閉じる。
@@ -58,12 +58,6 @@ public enum FileReadStatus
 /// 差し替え時の短時間リトライ（下記）も、他プロセスと衝突したときの<b>失敗率を下げる</b>だけで、
 /// どちらの内容を残すかを調停するものではない（＝並行保存は後勝ちのまま）。
 /// </para>
-/// <para>
-/// <b>収容先について:</b> 依存ゼロ・net10.0 でどの層からも参照できる汎用永続化ユーティリティ層として
-/// このプロジェクトへ置いた（40 行のユーティリティのために新規プロジェクトを立てるのは過剰と判断）。
-/// このため <c>QuickER.Document</c>（文書層）も「設定」プロジェクトを参照する形になるが、参照するのは
-/// 本クラスのみで設定固有の型（<see cref="JsonSettingsStore{TSettings}"/> 等）には依存しない。
-/// </para>
 /// </remarks>
 public static class AtomicFile
 {
@@ -79,15 +73,6 @@ public static class AtomicFile
     /// <remarks>回数と同じ理由で差し替えと読み取りで共有する</remarks>
     private const int RetryDelayStepMilliseconds = 10;
 
-    /// <summary>
-    /// 文字コード未指定時の既定。<see cref="File.WriteAllText(string, string?)"/> の既定と同一
-    /// （BOM なし UTF-8・不正なサロゲートは置換せず例外）にして、書き出し方の変更で挙動が変わらないようにする。
-    /// </summary>
-    private static readonly Encoding DefaultEncoding = new UTF8Encoding(
-        encoderShouldEmitUTF8Identifier: false,
-        throwOnInvalidBytes: true
-    );
-
     /// <summary>文字列を原子的にファイルへ書き出す（全量を書き切ってから保存先へ差し替える）</summary>
     /// <remarks>
     /// 保存先フォルダの作成は行わない（呼び出し側の責務）。差し替えに失敗した場合は一時ファイルを
@@ -97,7 +82,7 @@ public static class AtomicFile
     /// <param name="path">書き込み先のファイルパス</param>
     /// <param name="contents">書き込む内容</param>
     public static void WriteAllText(string path, string contents) =>
-        WriteAllTextCore(path, contents, encoding: null);
+        WriteAllText(path, contents, TextEncodings.Utf8NoBom);
 
     /// <summary>文字コードを明示して文字列を原子的にファイルへ書き出す</summary>
     /// <remarks>
@@ -109,10 +94,29 @@ public static class AtomicFile
     /// <param name="contents">書き込む内容</param>
     /// <param name="encoding">書き出しに用いる文字コード</param>
     public static void WriteAllText(string path, string contents, Encoding encoding) =>
-        WriteAllTextCore(path, contents, encoding);
+        Write(path, stream => WriteText(stream, contents, encoding));
 
-    /// <summary>原子的書き込みの本体（<paramref name="encoding"/> が null なら既定＝BOM なし UTF-8）</summary>
-    private static void WriteAllTextCore(string path, string contents, Encoding? encoding)
+    /// <summary>バイト列を原子的にファイルへ書き出す</summary>
+    /// <remarks>意味論は <see cref="WriteAllText(string, string)"/> と同一で、違いは書き出す内容がバイト列であることだけ。</remarks>
+    /// <param name="path">書き込み先のファイルパス</param>
+    /// <param name="bytes">書き込む内容</param>
+    public static void WriteAllBytes(string path, byte[] bytes) =>
+        Write(path, stream => stream.Write(bytes));
+
+    /// <summary>ストリームへ書き出す処理の結果を、原子的にファイルへ書き出す</summary>
+    /// <remarks>
+    /// <para>
+    /// 意味論は <see cref="WriteAllText(string, string)"/> と同一。<paramref name="write"/> は一時ファイルのストリームへ
+    /// 全量を書く（ストリームを閉じてはいけない。ディスクへの確定はこちらが行う）。画像のエンコーダや
+    /// ブックの保存のように、書き出し先をストリームで受け取る出力向け。
+    /// </para>
+    /// <para>
+    /// <paramref name="write"/> が例外を投げたときは、一時ファイルを掃除して例外をそのまま伝える（保存先は無傷）。
+    /// </para>
+    /// </remarks>
+    /// <param name="path">書き込み先のファイルパス</param>
+    /// <param name="write">一時ファイルのストリームへ全量を書く処理</param>
+    public static void Write(string path, Action<Stream> write)
     {
         // 一時ファイルは保存先と同じディレクトリに作る（別ボリュームをまたがないため、
         // 差し替え（File.Replace / File.Move）が同一ボリューム内の操作で完結する）。
@@ -123,7 +127,7 @@ public static class AtomicFile
 
         try
         {
-            WriteAndFlushToDisk(temporaryPath, contents, encoding);
+            WriteAndFlushToDisk(temporaryPath, write);
 
             // 保存先への差し替え。別プロセス（GUI と MCP サーバ）が同じファイルを同時に保存すると
             // 一過性の失敗（相手が保存先を開いている・保存先の有無が入れ替わる）が起きるため、
@@ -158,23 +162,25 @@ public static class AtomicFile
     /// <see cref="FileStream.Flush(bool)"/> でディスクへ確定させてから差し替えることで、
     /// 保存先に現れる内容が常に「書き切った 1 回分」になる。
     /// </para>
-    /// <para>
-    /// 文字コードの既定（<paramref name="encoding"/> が null）は
-    /// <see cref="File.WriteAllText(string, string?)"/> と同一の「BOM なし UTF-8・不正なサロゲートは例外」。
-    /// BOM（プリアンブル）は新規作成した一時ファイルの先頭へ書かれるため、明示指定時の出力も変わらない。
-    /// </para>
     /// </remarks>
-    private static void WriteAndFlushToDisk(string path, string contents, Encoding? encoding)
+    private static void WriteAndFlushToDisk(string path, Action<Stream> write)
     {
         using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        write(stream);
 
-        using (var writer = new StreamWriter(stream, encoding ?? DefaultEncoding, leaveOpen: true))
-        {
-            writer.Write(contents);
-        }
-
-        // StreamWriter の破棄でエンコード済みバイトはストリームへ出ている。ここでディスクへ確定させる
+        // 書き出し処理が渡したバイトはストリームへ出ている。ここでディスクへ確定させる
         stream.Flush(flushToDisk: true);
+    }
+
+    /// <summary>文字列をストリームへ符号化して書く（ストリームは閉じない）</summary>
+    /// <remarks>
+    /// BOM（プリアンブル）は新規作成した一時ファイルの先頭へ書かれるため、BOM 付きの符号化を指定すれば
+    /// 出力の先頭に BOM が付く。
+    /// </remarks>
+    private static void WriteText(Stream stream, string contents, Encoding encoding)
+    {
+        using var writer = new StreamWriter(stream, encoding, leaveOpen: true);
+        writer.Write(contents);
     }
 
     /// <summary>一時ファイルを保存先へ差し替える（同時保存による一過性の失敗は短いバックオフでリトライする）</summary>
@@ -316,7 +322,10 @@ public static class AtomicFile
 
         try
         {
-            WriteAndFlushToDisk(temporaryPath, contents, encoding: null);
+            WriteAndFlushToDisk(
+                temporaryPath,
+                stream => WriteText(stream, contents, TextEncodings.Utf8NoBom)
+            );
             File.Move(temporaryPath, path, overwrite: false);
         }
         finally

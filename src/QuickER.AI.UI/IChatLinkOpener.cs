@@ -4,6 +4,6 @@ namespace QuickER.AI.UI;
 public interface IChatLinkOpener
 {
     /// <summary>リンクを開く</summary>
-    /// <param name="uri"><see cref="ChatLinkPolicy"/> で検証済みの URL</param>
+    /// <param name="uri"><see cref="QuickER.Platform.UrlPolicy"/> で検証済みの URL</param>
     void Open(Uri uri);
 }

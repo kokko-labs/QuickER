@@ -8,6 +8,7 @@ using Markdig.Extensions.Tables;
 using Markdig.Helpers;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
+using QuickER.Platform;
 using MdBlock = Markdig.Syntax.Block;
 using MdInline = Markdig.Syntax.Inlines.Inline;
 using MdTable = Markdig.Extensions.Tables.Table;
@@ -33,7 +34,7 @@ namespace QuickER.AI.UI;
 /// （自動リンクを含む）。パイプラインは必要な拡張だけを明示的に有効にする（一括有効化は使わない）。
 /// </para>
 /// <para>
-/// AI の回答は外部の入力として扱う。(1) リンクは <see cref="ChatLinkPolicy"/> が通した http / https の絶対 URL だけを
+/// AI の回答は外部の入力として扱う。(1) リンクは <see cref="QuickER.Platform.UrlPolicy"/> が通した http / https の絶対 URL だけを
 /// クリックできるようにし、それ以外はリンク文字列をただの文字として出す。 (2) 画像は読み込まず代替テキストだけを出す
 /// （外部 URL の画像で通信を起こさない）。 (3) 生の HTML は解釈せず文字として出す（解析段階で
 /// <c>DisableHtml</c> により HTML として扱わせないうえ、HTML の節点が来ても文字として出す二重化）。
@@ -528,7 +529,7 @@ public static class ChatMarkdownRenderer
             return;
         }
 
-        if (!ChatLinkPolicy.TryGetSafeUri(link.Url, out var uri))
+        if (!UrlPolicy.TryGetSafeUri(link.Url, out var uri))
         {
             AddInlines(target, link, context);
             return;
@@ -554,7 +555,7 @@ public static class ChatMarkdownRenderer
         RenderContext context
     )
     {
-        if (!autolink.IsEmail && ChatLinkPolicy.TryGetSafeUri(autolink.Url, out var uri))
+        if (!autolink.IsEmail && UrlPolicy.TryGetSafeUri(autolink.Url, out var uri))
         {
             var hyperlink = CreateHyperlink(uri!, context);
             hyperlink.Inlines.Add(new Run(autolink.Url));

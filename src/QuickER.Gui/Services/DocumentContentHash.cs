@@ -1,6 +1,7 @@
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using QuickER.Platform;
 
 namespace QuickER.Services;
 
@@ -39,8 +40,8 @@ public static class DocumentContentHash
     /// 記録してしまい（かつ監視は一時停止中でイベントも捨てられる）、以後どの検知経路も
     /// メモリの図とディスクの食い違いを見つけられなくなる。
     /// <para>
-    /// 符号化は <see cref="Settings.AtomicFile.WriteAllText(string, string)"/> の既定（BOM なし UTF-8）と
-    /// 揃える。ここが食い違うと <see cref="TryCompute"/> の値と一致せず、保存直後に毎回
+    /// 符号化は <see cref="AtomicFile.WriteAllText(string, string)"/> の既定（<see cref="TextEncodings.Utf8NoBom"/>）と
+    /// 同じインスタンスを使う。ここが食い違うと <see cref="TryCompute"/> の値と一致せず、保存直後に毎回
     /// 「外部変更あり」と判定されて再読込が暴発する。
     /// </para>
     /// </remarks>
@@ -62,11 +63,8 @@ public static class DocumentContentHash
     public static string ComputeForBytes(ReadOnlySpan<byte> contents) =>
         Convert.ToHexString(SHA256.HashData(contents));
 
-    /// <summary>書き出しに使う符号化（<see cref="Settings.AtomicFile"/> の既定＝BOM なし UTF-8）</summary>
-    private static readonly Encoding WriteEncoding = new UTF8Encoding(
-        encoderShouldEmitUTF8Identifier: false,
-        throwOnInvalidBytes: true
-    );
+    /// <summary>書き出しに使う符号化（<see cref="AtomicFile"/> の既定と同じ <see cref="TextEncodings.Utf8NoBom"/>）</summary>
+    private static readonly Encoding WriteEncoding = TextEncodings.Utf8NoBom;
 
     /// <summary>短いリトライを挟みつつファイル内容の SHA-256 を計算する（書き込み途中の共有違反対策）</summary>
     /// <param name="path">対象ファイルのパス</param>

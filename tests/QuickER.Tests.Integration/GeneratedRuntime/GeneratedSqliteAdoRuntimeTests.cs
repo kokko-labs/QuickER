@@ -191,7 +191,9 @@ public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTests
         (await MatchesAsync(endsWith, "defx", "def")).Should().Be(0);
 
         // --- Equals / Equals(IgnoreCase） ---
+#pragma warning disable CA1309 // 翻訳器が受け付ける呼び出しの形（Equals(string)）そのものを式木で確かめる
         var equals = Condition(p => p.A.Equals(p.B));
+#pragma warning restore CA1309
         (await MatchesAsync(equals, "same", "same")).Should().Be(1);
         (await MatchesAsync(equals, "a", "b")).Should().Be(0);
 

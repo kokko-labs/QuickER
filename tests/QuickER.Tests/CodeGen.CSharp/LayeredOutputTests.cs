@@ -566,6 +566,9 @@ public sealed class LayeredOutputTests
     [InlineData("/rooted", false)]
     [InlineData(@"\rooted", false)]
     [InlineData("a//b", false)]
+    [InlineData("a /b", false)]
+    [InlineData("a/ b", false)]
+    [InlineData(" a /b ", false)]
     public void Validator_AcceptsOnlyContainedRelativePaths(string value, bool expected)
     {
         LayerDirectoryValidator.IsValid(value).Should().Be(expected);

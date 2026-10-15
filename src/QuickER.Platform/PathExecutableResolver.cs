@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace QuickER.AI;
+namespace QuickER.Platform;
 
 /// <summary>
 /// PATH 環境変数を走査してコマンドの実行ファイルを解決する共有ロジック。
@@ -21,7 +21,7 @@ public static class PathExecutableResolver
     /// <param name="commandName">拡張子なしのコマンド名</param>
     /// <param name="pathValue">走査対象の PATH 値（区切りは <see cref="Path.PathSeparator"/>）</param>
     /// <param name="fileExists">ファイル存在判定</param>
-    internal static string? Resolve(
+    public static string? Resolve(
         string commandName,
         string? pathValue,
         Func<string, bool> fileExists

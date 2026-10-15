@@ -3,8 +3,8 @@ using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Dialects;
 using QuickER.Model;
+using static QuickER.Mcp.ToolArguments;
 using static QuickER.Mcp.Tools.SchemaLookup;
-using static QuickER.Mcp.Tools.ToolArguments;
 
 namespace QuickER.Mcp.Tools;
 

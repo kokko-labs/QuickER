@@ -16,6 +16,9 @@
         "dependencies": {
           "QuickER.Dialects": "[0.2.0, )"
         }
+      },
+      "quicker.platform": {
+        "type": "Project"
       }
     },
     "net10.0/win-x64": {}

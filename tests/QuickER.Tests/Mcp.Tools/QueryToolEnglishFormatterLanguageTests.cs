@@ -27,7 +27,7 @@ namespace QuickER.Tests.Mcp.Tools;
 public class QueryToolEnglishFormatterLanguageTests
 {
     /// <summary>CJK 文字の検出パターン（ErDiagramToolCatalogEnglishGuardTests と同じ範囲）</summary>
-    private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
+    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     /// <summary>指定カルチャを CurrentUICulture に設定して関数を評価し、必ず元へ復元する</summary>
     private static T WithCulture<T>(string culture, Func<T> body)

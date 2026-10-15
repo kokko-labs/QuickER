@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows.Media;
 using QuickER.Documents;
 using QuickER.Gui.Abstractions;
+using QuickER.Platform;
 using QuickER.Resources;
 
 namespace QuickER.Services;
@@ -167,7 +168,7 @@ internal sealed class DiagramExportService(
                 break;
 
             case DiagramExportFormat.Sql:
-                File.WriteAllText(
+                AtomicFile.WriteAllText(
                     path,
                     host.CurrentProvider.DdlGenerator.Build(host.BuildModel()),
                     System.Text.Encoding.UTF8

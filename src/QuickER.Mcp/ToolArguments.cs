@@ -1,9 +1,11 @@
 using System.Text.Json;
 
-namespace QuickER.Mcp.Tools;
+namespace QuickER.Mcp;
 
-/// <summary>ツール引数（JSON）から値を読み取る共通処理（図ツールとクエリツールが共有する）</summary>
-internal static class ToolArguments
+/// <summary>
+/// ツール引数（JSON）から値を読み取る共通処理（MCP のツールホスト・内蔵チャットのツール・コード生成のツール・モック生成のツールが共有する）
+/// </summary>
+public static class ToolArguments
 {
     /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>
     /// <param name="element">引数オブジェクト（オブジェクトでなければ null を返す）</param>

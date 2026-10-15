@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using QuickER.AI.Resources;
+using QuickER.Platform;
 
 namespace QuickER.AI;
 
@@ -263,7 +264,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             // 引数を積み終えてからシムガードを通す（claude が .cmd で入っている場合に cmd.exe 経由へ包み直す）
             ApplyBatchShimGuard(startInfo);
 
-            using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            using var process = ExternalLauncher.CreateProcess(startInfo);
 
             if (!process.Start())
             {
@@ -345,7 +346,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         startInfo.ArgumentList.Add("json");
         ApplyBatchShimGuard(startInfo);
 
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        using var process = ExternalLauncher.CreateProcess(startInfo);
 
         if (!process.Start())
         {
@@ -431,7 +432,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     /// </summary>
     private static ProcessStartInfo CreateStartInfo(string executable, string workingDirectory)
     {
-        var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        var utf8NoBom = TextEncodings.Utf8NoBomLenient;
 
         var startInfo = new ProcessStartInfo
         {
@@ -457,7 +458,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
     /// <summary>システムプロンプトの一時ファイルを置くフォルダ（<c>%TEMP%\QuickER\claude-code</c>）</summary>
     private static string SystemPromptDirectory =>
-        Path.Combine(Path.GetTempPath(), "QuickER", "claude-code");
+        Path.Combine(AppDataPaths.TempRoot, "claude-code");
 
     /// <summary>
     /// システムプロンプトを一時ファイルへ書き出し、<c>--append-system-prompt-file</c> の引数として積む。
@@ -486,11 +487,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         Directory.CreateDirectory(SystemPromptDirectory);
 
         var path = Path.Combine(SystemPromptDirectory, $"{Guid.NewGuid():N}.txt");
-        File.WriteAllText(
-            path,
-            systemPrompt,
-            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-        );
+        File.WriteAllText(path, systemPrompt, TextEncodings.Utf8NoBomLenient);
 
         startInfo.ArgumentList.Add("--append-system-prompt-file");
         startInfo.ArgumentList.Add(path);

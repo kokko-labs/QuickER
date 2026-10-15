@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Resources;
 
 namespace QuickER.Services;
@@ -33,7 +34,7 @@ public static class TableDefinitionHtmlExporter
     /// <param name="path">出力先ファイルパス</param>
     public static void SaveTo(ErDiagram diagram, string path)
     {
-        File.WriteAllText(path, Build(diagram), Encoding.UTF8);
+        AtomicFile.WriteAllText(path, Build(diagram), Encoding.UTF8);
     }
 
     /// <summary>1 回の HTML 生成で共有するカルチャを保持しつつ組み立てるビルダー</summary>

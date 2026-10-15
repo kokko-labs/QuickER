@@ -42,7 +42,7 @@ public sealed class JsonStorageServiceIdIntegrityTests : IDisposable
     private string WriteSchema(ErDiagram schema)
     {
         var path = Path.Combine(_folder, $"{Guid.NewGuid():N}.json");
-        JsonStorageService.Save(path, new DiagramDocument { Schema = schema, Layout = null });
+        JsonStorageService.SaveAtomic(path, new DiagramDocument { Schema = schema, Layout = null });
         return path;
     }
 

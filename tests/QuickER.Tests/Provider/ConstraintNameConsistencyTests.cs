@@ -238,8 +238,13 @@ public class ConstraintNameConsistencyTests
 
             var ddl = ddlGenerator.Build(diagram);
             var createLine = ddl.Split('\n')
-                .Single(line => line.StartsWith("CREATE TABLE ") && line.Contains("Orders"));
-            var tableIdentifier = createLine["CREATE TABLE ".Length..createLine.LastIndexOf(" (")];
+                .Single(line =>
+                    line.StartsWith("CREATE TABLE ", StringComparison.Ordinal)
+                    && line.Contains("Orders")
+                );
+            var tableIdentifier = createLine[
+                "CREATE TABLE ".Length..createLine.LastIndexOf(" (", StringComparison.Ordinal)
+            ];
 
             var sync = syncBuilder.Build(
                 new SyncPlanner().BuildPlan(

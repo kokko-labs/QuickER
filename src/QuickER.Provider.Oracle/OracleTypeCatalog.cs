@@ -50,7 +50,7 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
     // （単位まで含めた元の表記は CanonicalTypeTokenAttacher の verbatim 併記が保つ）。
     [GeneratedRegex(
         @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?\d+|\*)\s*(?<unit>byte|char)?\s*(,\s*(?<arg2>-?\d+)\s*)?\)\s*(?<suffix>[a-zA-Z][a-zA-Z0-9_ ]*?)?)?\s*$",
-        RegexOptions.IgnoreCase
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TypePattern();
 
@@ -496,10 +496,15 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
     {
         if (precision is null)
         {
-            return scale is null ? "NUMBER" : $"NUMBER(*,{scale})";
+            // 負のスケールは書式のカルチャによって負号が変わる（sv-SE は U+2212）ので、インバリアントで書く
+            return scale is null
+                ? "NUMBER"
+                : string.Create(CultureInfo.InvariantCulture, $"NUMBER(*,{scale})");
         }
 
-        return scale is null ? $"NUMBER({precision})" : $"NUMBER({precision},{scale})";
+        return scale is null
+            ? string.Create(CultureInfo.InvariantCulture, $"NUMBER({precision})")
+            : string.Create(CultureInfo.InvariantCulture, $"NUMBER({precision},{scale})");
     }
 
     /// <summary>可変長文字列を <c>型(n)</c> または LOB（max）へ整形する</summary>

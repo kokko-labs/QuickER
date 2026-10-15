@@ -574,7 +574,10 @@ public static partial class TableDefinitionDocumentImporter
         string.IsNullOrWhiteSpace(value) ? null : value;
 
     /// <summary>キー表記中の一意制約ラベル（<c>UQ{n}</c>）に一致する正規表現を生成する</summary>
-    [GeneratedRegex(@"UQ(?<number>\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"UQ(?<number>\d+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
     private static partial Regex UniqueConstraintKeyLabelRegex();
 
     /// <summary>テーブル一覧シート 1 行分の情報</summary>

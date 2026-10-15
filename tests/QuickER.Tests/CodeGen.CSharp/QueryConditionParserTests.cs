@@ -391,7 +391,10 @@ public class QueryConditionParserTests
         result.ColumnReferences.Should().HaveCount(2);
         result.ColumnReferences[0].Position.Should().Be(0);
         result.ColumnReferences[0].Length.Should().Be("CustomerId".Length);
-        result.ColumnReferences[1].Position.Should().Be(text.IndexOf("Amount"));
+        result
+            .ColumnReferences[1]
+            .Position.Should()
+            .Be(text.IndexOf("Amount", StringComparison.Ordinal));
         result.ColumnReferences[1].ResolvedName.Should().BeNull();
     }
 

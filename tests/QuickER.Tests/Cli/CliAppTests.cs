@@ -35,7 +35,7 @@ public class CliAppTests
         );
         entity.Columns.Add(new Column { Name = "Name", DataType = "nvarchar(100)" });
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(schemaPath, document);
+        JsonStorageService.SaveAtomic(schemaPath, document);
 
         return (schemaPath, Path.Combine(root, "out"), root);
     }
@@ -94,7 +94,7 @@ public class CliAppTests
                 Condition = "Name LIKE @keyword",
             }
         );
-        JsonStorageService.Save(schemaPath, document);
+        JsonStorageService.SaveAtomic(schemaPath, document);
 
         var configPath = Path.Combine(root, "quicker.json");
         File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
@@ -140,7 +140,7 @@ public class CliAppTests
         // 保存済みスキーマを CurrentVersion より新しいフォーマットバージョンへ書き換える
         var document = JsonStorageService.Load(schemaPath);
         document.Version = DiagramDocument.CurrentVersion + 1;
-        JsonStorageService.Save(schemaPath, document);
+        JsonStorageService.SaveAtomic(schemaPath, document);
 
         // 出力は注入版オーバーロードで捕捉する（Console を差し替えるとクラス並列実行で競合するため）
         var stdout = new StringWriter();
@@ -758,7 +758,7 @@ public class CliAppTests
             }
         );
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(schemaPath, document);
+        JsonStorageService.SaveAtomic(schemaPath, document);
 
         return (schemaPath, Path.Combine(root, "out"), root);
     }
@@ -1669,7 +1669,7 @@ public class CliAppTests
         );
         entity.Columns.Add(new Column { Name = "Payload", DataType = "varbinary(max)" });
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(schemaPath, document);
+        JsonStorageService.SaveAtomic(schemaPath, document);
 
         return (schemaPath, Path.Combine(root, "out"), root);
     }

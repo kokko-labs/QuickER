@@ -19,22 +19,22 @@ public static class MockBundleExporter
 {
     private static readonly Regex BodyRegex = new(
         "<body[^>]*>([\\s\\S]*?)</body>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex HeadRegex = new(
         "<head[^>]*>([\\s\\S]*?)</head>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex StyleRegex = new(
         "<style[^>]*>[\\s\\S]*?</style>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex ScriptRegex = new(
         "<script[\\s\\S]*?</script>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>モックフォルダ内容を単一 HTML へ結合する</summary>

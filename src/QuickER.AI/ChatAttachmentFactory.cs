@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using QuickER.AI.Resources;
+using QuickER.Platform;
 
 namespace QuickER.AI;
 
@@ -407,11 +408,7 @@ public static class ChatAttachmentFactory
         // 最後に UTF-8 として厳格デコードできるかを確認する（不正シーケンスは例外→バイナリ）
         try
         {
-            var strict = new UTF8Encoding(
-                encoderShouldEmitUTF8Identifier: false,
-                throwOnInvalidBytes: true
-            );
-            strict.GetString(data);
+            TextEncodings.Utf8NoBom.GetString(data);
             return true;
         }
         catch (DecoderFallbackException)

@@ -69,7 +69,7 @@ public sealed class MainViewModelOpenSaveRobustnessTests : IDisposable
     private string WriteValidDiagram(string fileName, string tableName)
     {
         var path = Path.Combine(_folder, fileName);
-        JsonStorageService.Save(
+        JsonStorageService.SaveAtomic(
             path,
             new DiagramDocument
             {

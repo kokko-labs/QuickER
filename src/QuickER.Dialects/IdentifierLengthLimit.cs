@@ -86,9 +86,7 @@ public sealed record IdentifierLengthLimit(
             return true;
         }
 
-        var dot = tableName.IndexOf('.');
-        var schema = dot < 0 ? null : tableName[..dot];
-        var table = dot < 0 ? tableName : tableName[(dot + 1)..];
+        var (schema, table) = SchemaQualifiedName.Split(tableName);
 
         if (schema is not null && !Fits(schema))
         {

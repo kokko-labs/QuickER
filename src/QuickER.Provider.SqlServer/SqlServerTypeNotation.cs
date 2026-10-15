@@ -75,7 +75,9 @@ public static partial class SqlServerTypeNotation
             }
 
             var scale = int.Parse(numeric.Groups["s"].Value, CultureInfo.InvariantCulture);
-            return scale == 0 ? $"{name}({precision})" : $"{name}({precision},{scale})";
+            return scale == 0
+                ? string.Create(CultureInfo.InvariantCulture, $"{name}({precision})")
+                : string.Create(CultureInfo.InvariantCulture, $"{name}({precision},{scale})");
         }
 
         if (string.Equals(text, "rowversion", StringComparison.OrdinalIgnoreCase))

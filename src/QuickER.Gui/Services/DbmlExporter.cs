@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Provider;
 
 namespace QuickER.Services;
@@ -71,7 +72,7 @@ public static partial class DbmlExporter
     /// </summary>
     public static IReadOnlyList<ExportOmissionKind> SaveTo(ErDiagram diagram, string path)
     {
-        File.WriteAllText(path, Build(diagram), Encoding.UTF8);
+        AtomicFile.WriteAllText(path, Build(diagram), Encoding.UTF8);
 
         return DetectOmissions(diagram);
     }

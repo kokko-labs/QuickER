@@ -49,7 +49,7 @@ public sealed class MainViewModelNewerFormatSaveTests : IDisposable
     /// <summary>指定フォーマット版の図をファイルへ書き出す</summary>
     private static void WriteDiagram(string path, string tableName, int version)
     {
-        JsonStorageService.Save(
+        JsonStorageService.SaveAtomic(
             path,
             new DiagramDocument
             {

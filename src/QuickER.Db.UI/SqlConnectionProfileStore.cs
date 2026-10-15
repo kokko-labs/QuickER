@@ -4,7 +4,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using QuickER.Settings;
+using QuickER.Platform;
 
 namespace QuickER.Db.UI;
 
@@ -104,20 +104,13 @@ public class SqlConnectionProfileStore
     /// <summary>パスワード暗号ファイルの格納フォルダ</summary>
     public string SecretsFolder => Path.Combine(_folder, "connection-secrets");
 
-    /// <summary>既定（<c>%LOCALAPPDATA%\QuickER</c>・DPAPI 有効）のストアを生成する</summary>
+    /// <summary>既定（<see cref="AppDataPaths.LocalRoot"/>＝<c>%LOCALAPPDATA%\QuickER</c>・DPAPI 有効）のストアを生成する</summary>
     /// <remarks>
-    /// 保存先がローミング（<c>%APPDATA%</c>）ではなくローカルである理由は
-    /// <see cref="JsonSettingsStore{TSettings}"/> の既定コンストラクタを参照（DPAPI で保護した
-    /// パスワードは他端末では復号できないため、複製されて困る筆頭がここ）。
+    /// 保存先がローミング（<c>%APPDATA%</c>）ではなくローカルである理由は <see cref="AppDataPaths.LocalRoot"/> を参照
+    /// （DPAPI で保護したパスワードは他端末では復号できないため、複製されて困る筆頭がここ）。
     /// </remarks>
     public SqlConnectionProfileStore()
-        : this(
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "QuickER"
-            ),
-            true
-        ) { }
+        : this(AppDataPaths.LocalRoot, true) { }
 
     /// <summary>保存先フォルダと DPAPI 利用可否を指定してストアを生成する（テスト用）</summary>
     /// <param name="folder">保存先ディレクトリ</param>
@@ -555,7 +548,7 @@ public class SqlConnectionProfileStore
                 scope: DataProtectionScope.CurrentUser
             )
             : raw;
-        File.WriteAllBytes(path, bytes);
+        AtomicFile.WriteAllBytes(path, bytes);
     }
 
     /// <summary>プロファイル ID に対応する暗号ファイルを削除する</summary>

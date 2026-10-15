@@ -1,18 +1,16 @@
-namespace QuickER.AI.UI;
+namespace QuickER.Platform;
 
-/// <summary>
-/// チャットの回答に含まれるリンクのうち、クリックで開いてよいものを決める規則
-/// （Markdown の組み立てと、実際に開く処理の両方が使う）。
-/// </summary>
+/// <summary>既定のブラウザで開いてよい URL を決める規則</summary>
 /// <remarks>
-/// 開いてよいのは http / https の絶対 URL だけ。AI の回答は外部の入力なので、<c>file:</c>・UNC（<c>\\server</c>）・
-/// <c>javascript:</c>・<c>ms-settings:</c> のようなアプリ起動 URI・相対 URL を通すと、クリック 1 つで
-/// ローカルのファイルやアプリを起動させられる。既定のブラウザへ渡す前に、ここで閉じる。
+/// 開いてよいのは http / https の絶対 URL でホストを持つものだけ。AI の回答や外部の CLI が返す URL は外部の入力なので、
+/// <c>file:</c>・UNC（<c>\\server</c>）・<c>//server/share</c>・<c>javascript:</c>・<c>ms-settings:</c> のようなアプリ起動 URI・
+/// 相対 URL を通すと、クリック 1 つでローカルのファイルやアプリを起動させられる。既定のブラウザへ渡す前に、ここで閉じる。
+/// 開く処理（<see cref="ExternalLauncher.OpenUrl"/>）もこの規則で確かめ直す。
 /// </remarks>
-public static class ChatLinkPolicy
+public static class UrlPolicy
 {
-    /// <summary>リンク先の文字列を、開いてよい URL として解釈する</summary>
-    /// <param name="url">リンク先の文字列（Markdown のリンクや自動リンクの URL）</param>
+    /// <summary>文字列を、開いてよい URL として解釈する</summary>
+    /// <param name="url">URL の文字列（リンク先・CLI が返した URL など）</param>
     /// <param name="uri">開いてよい場合はその URL。開いてはいけない場合は null</param>
     /// <returns>開いてよい（http / https の絶対 URL でホストを持つ）とき true</returns>
     public static bool TryGetSafeUri(string? url, out Uri? uri)

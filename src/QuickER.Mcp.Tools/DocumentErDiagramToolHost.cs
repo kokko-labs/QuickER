@@ -4,8 +4,8 @@ using System.Text.Json;
 using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Model;
+using static QuickER.Mcp.ToolArguments;
 using static QuickER.Mcp.Tools.SchemaLookup;
-using static QuickER.Mcp.Tools.ToolArguments;
 
 namespace QuickER.Mcp.Tools;
 

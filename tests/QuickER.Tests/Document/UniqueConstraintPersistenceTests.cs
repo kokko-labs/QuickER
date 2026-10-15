@@ -37,7 +37,7 @@ public class UniqueConstraintPersistenceTests
 
         try
         {
-            JsonStorageService.Save(path, document);
+            JsonStorageService.SaveAtomic(path, document);
             var loaded = JsonStorageService.Load(path);
 
             var loadedEntity = loaded.Schema.Entities.Should().ContainSingle().Which;

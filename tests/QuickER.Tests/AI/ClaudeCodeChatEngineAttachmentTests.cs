@@ -298,7 +298,7 @@ public class ClaudeCodeChatEngineAttachmentTests
         var pathLines = client
             .Prompts[0]
             .Split('\n')
-            .Where(l => l.TrimStart().StartsWith("- "))
+            .Where(l => l.TrimStart().StartsWith("- ", StringComparison.Ordinal))
             .Select(l => l.TrimStart('-', ' '))
             .ToList();
 

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -876,12 +877,19 @@ ORDER BY constraint_name";
                     // NUMBER(*,s) は「精度は上限なし・スケールは s」の宣言で、data_precision が null・
                     // data_scale が非 null で返る（INTEGER / SMALLINT はスケール 0）。早期 return すると
                     // スケールが落ちて素の NUMBER（浮動）に化ける
-                    return dataScale is null ? "NUMBER" : $"NUMBER(*,{dataScale})";
+                    return dataScale is null
+                        ? "NUMBER"
+                        : string.Create(CultureInfo.InvariantCulture, $"NUMBER(*,{dataScale})");
                 }
 
                 // スケール 0 と未指定は user_tab_cols 上で区別できないため精度のみ（正規化が (p,0) を (p) へ畳む）。
                 // 負のスケール（NUMBER(10,-2) = 100 の倍数へ丸める）は宣言どおりに書き出す
-                return OracleTypeNotation.Normalize($"NUMBER({dataPrecision},{dataScale ?? 0})");
+                return OracleTypeNotation.Normalize(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"NUMBER({dataPrecision},{dataScale ?? 0})"
+                    )
+                );
 
             case "VARCHAR2":
             case "CHAR":

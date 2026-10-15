@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
+using QuickER.Platform;
 using QuickER.Tests.AI;
 
 namespace QuickER.Tests.AI.Mock;
@@ -39,7 +40,8 @@ public class DotnetBuildRunnerCancellationTests
     {
         var startInfo = new ProcessStartInfo
         {
-            FileName = "cmd.exe",
+            // 子プロセスはフルパスで起動する（ExternalLauncher.CreateProcess が名前だけの起動を断る）
+            FileName = BatchShimProcessGuard.CmdExePath,
             ArgumentList = { "/c", "ping", "-n", "30", "127.0.0.1" },
             UseShellExecute = false,
             CreateNoWindow = true,

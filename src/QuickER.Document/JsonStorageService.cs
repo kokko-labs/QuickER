@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using QuickER.Model;
-using QuickER.Settings;
+using QuickER.Platform;
 
 namespace QuickER.Documents;
 
@@ -69,27 +69,14 @@ public static class JsonStorageService
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    /// <summary>保存文書をファイルへ単純に書き出す（JSON は <c>{ version, schema, layout }</c> 形式）</summary>
-    /// <remarks>
-    /// 既存ファイルを切り詰めてから書くため、書き込み途中の中断で保存先が破損し得る。
-    /// プロダクションのファイル書き出しはすべて <see cref="SaveAtomic"/> を使うこと
-    /// （本メソッドはテストのフィクスチャ書き出し等、破損しても影響のない用途に残している）。
-    /// </remarks>
-    /// <param name="path">保存先のファイルパス</param>
-    /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>
-    public static void Save(string path, DiagramDocument document)
-    {
-        File.WriteAllText(path, Serialize(document));
-    }
-
     /// <summary>保存文書をアトミックに（書き込み途中の中断で既存ファイルを壊さずに）保存する</summary>
     /// <remarks>
-    /// 素の <see cref="Save"/>（<see cref="File.WriteAllText(string, string?)"/>）は既存ファイルを
+    /// 素の <see cref="File.WriteAllText(string, string?)"/> は既存ファイルを
     /// 切り詰めてから書くため、途中でプロセスが落ちる・ディスクが満杯になるとユーザーの図ファイルが
     /// 破損した JSON として残る。これを防ぐため、書き込みは <see cref="AtomicFile.WriteAllText"/>
     /// （一時ファイルへ全量を書き切ってから本体へ差し替える。アルゴリズムの詳細はそちらを参照）へ委譲する。
-    /// <b>プロダクションのファイル書き出し（GUI の上書き／別名保存・スキーマのみ JSON のエクスポート・
-    /// MCP のツール実行・CLI のリバース出力・クラッシュ時の緊急保存）はすべてこちらを使う。</b>
+    /// 図ファイルの書き出し（GUI の上書き／別名保存・スキーマのみ JSON のエクスポート・MCP のツール実行・
+    /// CLI のリバース出力・クラッシュ時の緊急保存）はすべてこちらを使う（新規作成で置き換えないときは <see cref="SaveNew"/>）。
     /// </remarks>
     /// <param name="path">保存先のファイルパス</param>
     /// <param name="document">保存対象の文書（意味モデル＋レイアウト）</param>
@@ -128,7 +115,7 @@ public static class JsonStorageService
     public static string ToJson(DiagramDocument document) => Serialize(document);
 
     /// <summary>保存文書を図ファイルの正準形（<see cref="Options"/>）で JSON 文字列へ直列化する</summary>
-    /// <remarks><see cref="Save"/> と <see cref="SaveAtomic"/> で出力を完全に一致させるための共有ヘルパ</remarks>
+    /// <remarks><see cref="SaveAtomic"/>・<see cref="SaveNew"/>・<see cref="ToJson"/> で出力を完全に一致させるための共有ヘルパ</remarks>
     private static string Serialize(DiagramDocument document) =>
         JsonSerializer.Serialize(document, Options);
 

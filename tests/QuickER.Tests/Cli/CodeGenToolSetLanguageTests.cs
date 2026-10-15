@@ -27,7 +27,7 @@ namespace QuickER.Tests.Cli;
 public class CodeGenToolSetLanguageTests
 {
     /// <summary>CJK 文字の検出パターン（CodeGenToolSetEnglishGuardTests と同じ範囲）</summary>
-    private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
+    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     private static readonly CultureInfo Japanese = CultureInfo.GetCultureInfo("ja-JP");
 
@@ -177,7 +177,7 @@ public class CodeGenToolSetLanguageTests
         );
         entity.Columns.Add(new Column { Name = "Name", DataType = "TEXT" });
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(Path.Combine(root, "diagram.json"), document);
+        JsonStorageService.SaveAtomic(Path.Combine(root, "diagram.json"), document);
 
         return root;
     }

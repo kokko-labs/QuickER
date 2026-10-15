@@ -61,7 +61,7 @@ public class ErDiagramTargetDbmsTests
 
         try
         {
-            JsonStorageService.Save(path, document);
+            JsonStorageService.SaveAtomic(path, document);
             var loaded = JsonStorageService.Load(path);
 
             loaded.Schema.TargetDbms.Should().Be("postgresql");

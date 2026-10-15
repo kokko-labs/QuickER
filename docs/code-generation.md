@@ -2914,7 +2914,7 @@ The bucket-to-layer mapping is fixed.
 
 Each layer's folder can be overridden with `--domain-layer-dir` / `--presentation-layer-dir` / `--infrastructure-layer-dir` / `--server-layer-dir` (config keys `DomainLayerDirectory`, `PresentationLayerDirectory`, `InfrastructureLayerDirectory`, `ServerLayerDirectory`).
 A value is a relative path under the output directory and may have several segments (`MyApp.Domain/Generated`), so you can point the output directory at your solution's source folder and generate straight into the layer projects.
-Absolute paths, drive letters, and `..` are rejected as a generation error, and a blank value falls back to the default folder name.
+Absolute paths, drive letters, `.` and `..`, empty segments, characters not allowed in file names, whitespace at the start of a segment, a `.` or whitespace at the end of a segment, `~`, reserved device names (`CON` and so on), and segments longer than 255 characters are rejected as a generation error (the error names the rule), and a blank value falls back to the default folder name.
 
 **The default namespaces follow the layer folders**, so folders and namespaces stay aligned.
 Each layer's namespace root is its folder path with the separators turned into dots (folder `MyApp.Domain/Generated` gives the root `MyApp.Domain.Generated`), which matches the "project folder name = RootNamespace" csproj convention.
@@ -2958,7 +2958,7 @@ SDK-style projects glob `**/*.cs`, so digging a subfolder needs no csproj change
 What you gain is folder-level handling: wiping and regenerating in one go, or excluding the folder from analyzers.
 
 The value may have several segments (`Generated/QuickER`).
-Absolute paths, drive letters, and `..` are a generation error, but **it does not have to be a valid C# identifier** because it never reaches a namespace, so `generated-code` works.
+The same forms as for the layer folders are a generation error, but **it does not have to be a valid C# identifier** because it never reaches a namespace, so `generated-code` works.
 The API reference (`.g.md`) does not follow it, because the only thing that decides where the documentation goes is `--api-docs-subdir`.
 
 In the GUI it sits in the generation dialog's "Output destination" card, on the row right below the output path, as the "Subfolder" box.

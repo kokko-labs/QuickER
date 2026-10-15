@@ -6075,7 +6075,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // マーカー属性クラスの定義が出る
         content.Should().Contain("public sealed class UnboundedBinaryColumnAttribute : Attribute");
@@ -6115,7 +6117,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // 付与・Info 診断はいずれも出ない
         content.Should().NotContain("[UnboundedBinaryColumn]");
@@ -6152,7 +6156,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // (a) Mapper: 除外列は「入力があるときだけ代入」＝欠落を例外にしない
         content
@@ -6191,7 +6197,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         content.Should().Contain("Required(editModel.Seal, nameof(editModel.Seal))");
         content.Should().MatchRegex(@"nameof\(BindingSeal\),\s+true,");
@@ -6267,7 +6275,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // マーカー属性クラスの定義が出る
         content.Should().Contain("public sealed class StoreGeneratedColumnAttribute : Attribute");
@@ -6308,7 +6318,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // 契約: enum と、リモート面（＝全機能面の基底）のシグネチャへ mode が載る
         content
@@ -6354,7 +6366,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // 付与は起きない
         content.Should().NotContain("[StoreGeneratedColumn]");
@@ -6380,7 +6394,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // 全機能インターフェイスへ Read/Write の Stream 版が載る
         content
@@ -6411,7 +6427,9 @@ public class CSharpCodeGenerationServiceTests
             new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
         );
 
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
         content.Should().NotContain("ReadPhotoAsync");
         content.Should().NotContain("BinaryStreamExtensions");
     }
@@ -6435,7 +6453,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
         content.Should().NotContain("ReadPhotoAsync");
         content.Should().NotContain("BinaryStreamExtensions");
     }
@@ -6462,7 +6482,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // リモート面（インターフェイス宣言直後の本体）に Read/Write が載る
         content
@@ -6496,7 +6518,9 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        var content = result
+            .Files.Single(f => f.FileName.EndsWith(".g.cs", StringComparison.Ordinal))
+            .Content;
 
         // 全機能面（インターフェイス宣言直後の本体）へ直接載る
         content

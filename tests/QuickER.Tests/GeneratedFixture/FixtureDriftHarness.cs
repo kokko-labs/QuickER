@@ -350,7 +350,7 @@ internal static partial class FixtureDriftHarness
     }
 
     /// <summary>再生成モードが要求されているか（<see cref="RegenEnvVar"/> が 1 / true）</summary>
-    private static bool IsRegenerationRequested()
+    internal static bool IsRegenerationRequested()
     {
         var value = Environment.GetEnvironmentVariable(RegenEnvVar);
 

@@ -204,6 +204,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_InvalidGeneratedFileName {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_InvalidGeneratedFileName", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_InvalidOutputSubdirectory {
             get {
                 return ResourceManager.GetString("CodeGen_Error_InvalidOutputSubdirectory", resourceCulture);

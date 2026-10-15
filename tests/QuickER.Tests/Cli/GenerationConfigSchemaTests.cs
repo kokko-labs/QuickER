@@ -24,7 +24,7 @@ namespace QuickER.Tests.Cli;
 public sealed class GenerationConfigSchemaTests
 {
     /// <summary>CJK 文字の検出パターン（ErDiagramToolCatalogEnglishGuardTests と同一範囲）</summary>
-    private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
+    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     /// <summary>設定ローダーが認識する正となるキー集合＝init 設定可能なインスタンスプロパティ</summary>
     private static IReadOnlyList<PropertyInfo> RecognizedProperties =>

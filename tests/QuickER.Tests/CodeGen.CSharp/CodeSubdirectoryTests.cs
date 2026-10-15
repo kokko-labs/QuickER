@@ -186,7 +186,9 @@ public sealed class CodeSubdirectoryTests
             }
         );
 
-        var markdown = result.Files.Where(file => file.FileName.EndsWith(".g.md")).ToList();
+        var markdown = result
+            .Files.Where(file => file.FileName.EndsWith(".g.md", StringComparison.Ordinal))
+            .ToList();
         markdown.Should().NotBeEmpty();
         markdown.Should().OnlyContain(file => file.RelativeDirectory == null);
 
@@ -205,7 +207,7 @@ public sealed class CodeSubdirectoryTests
         );
 
         withApiDocsSubdirectory
-            .Files.Where(file => file.FileName.EndsWith(".g.md"))
+            .Files.Where(file => file.FileName.EndsWith(".g.md", StringComparison.Ordinal))
             .Should()
             .OnlyContain(file => file.RelativeDirectory == "docs");
     }

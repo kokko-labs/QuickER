@@ -88,8 +88,7 @@
     <ProjectReference Include="..\QuickER.Provider.Oracle\QuickER.Provider.Oracle.csproj" />
     <ProjectReference Include="..\QuickER.Provider.PostgreSql\QuickER.Provider.PostgreSql.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
-    <!-- generate_ddl の出力を原子的に書き出すための AtomicFile（原子的書き込みの単一正本） -->
-    <ProjectReference Include="..\QuickER.Settings\QuickER.Settings.csproj" />
+    <ProjectReference Include="..\QuickER.Platform\QuickER.Platform.csproj" />
     <ProjectReference Include="..\QuickER.Provider.Sqlite\QuickER.Provider.Sqlite.csproj" />
     <ProjectReference Include="..\QuickER.Provider.SqlServer\QuickER.Provider.SqlServer.csproj" />
   </ItemGroup>

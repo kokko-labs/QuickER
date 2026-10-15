@@ -36,7 +36,7 @@ public sealed class DdlOutputEnglishGuardTests
     /// CJK 文字の検出パターン（U+3000-U+9FFF＝CJK 記号・ひらがな・カタカナ・CJK 統合漢字、
     /// U+FF00-U+FFEF＝全角英数記号・半角カナ）。
     /// </summary>
-    private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
+    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     /// <summary>
     /// 5 方言の <c>DdlGenerator</c> が ASCII のみの図から出力する DDL に CJK が含まれないことを検証する。

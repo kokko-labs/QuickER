@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -903,7 +904,9 @@ ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2,
                     return dt;
                 }
 
-                return SqlServerTypeNotation.Normalize($"{dt}({precision},{scale ?? 0})");
+                return SqlServerTypeNotation.Normalize(
+                    string.Create(CultureInfo.InvariantCulture, $"{dt}({precision},{scale ?? 0})")
+                );
 
             case "datetime2":
             case "time":

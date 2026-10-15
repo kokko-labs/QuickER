@@ -1,12 +1,12 @@
-using System.Diagnostics;
 using QuickER.AI.UI.Resources;
 using QuickER.Gui.Abstractions;
+using QuickER.Platform;
 
 namespace QuickER.AI.UI;
 
 /// <summary>チャットの回答の中のリンクを、確認なしで既定のブラウザで開く</summary>
 /// <remarks>
-/// 受け取った URL も <see cref="ChatLinkPolicy.IsSafe"/> でもう一度確かめる。組み立て側が通したものしか来ない前提だが、
+/// 受け取った URL も <see cref="UrlPolicy.IsSafe"/> でもう一度確かめる。組み立て側が通したものしか来ない前提だが、
 /// 開く経路はここ 1 本なので、規則を外れた URL が渡ってもシェルへは渡さない（二重化）。
 /// 開けなかったとき（既定のブラウザが無い等）は、原因の例外文を添えてエラーのモーダルで知らせる
 /// （失敗の報告は提示先に依らずモーダル＝<see cref="IDialogService"/> の規約）。
@@ -34,14 +34,13 @@ public sealed class ShellChatLinkOpener : IChatLinkOpener
     {
         _dialogs = dialogs;
         _errorTitle = errorTitle;
-        _launch =
-            launch ?? (url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }));
+        _launch = launch ?? (url => ExternalLauncher.OpenUrl(new Uri(url)));
     }
 
     /// <inheritdoc />
     public void Open(Uri uri)
     {
-        if (!ChatLinkPolicy.IsSafe(uri))
+        if (!UrlPolicy.IsSafe(uri))
         {
             return;
         }

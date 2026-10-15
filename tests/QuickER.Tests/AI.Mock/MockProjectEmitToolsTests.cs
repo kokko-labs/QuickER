@@ -193,10 +193,14 @@ public class MockProjectEmitToolsTests
     }
 
     /// <summary>
-    /// すり抜け対策の後も、正当な UI 層のパス（カレントフォルダ "." で始まるもの・名前の途中にドットを含むもの）は通ることを検証する
+    /// すり抜け対策の後も、正当な UI 層のパス（カレントフォルダ "." で始まるもの・空の区間を含むもの・
+    /// 前後に空白のあるもの・名前の途中にドットを含むもの）は通ることを検証する
     /// </summary>
     [Theory(DisplayName = "正当な UI 層パスは引き続き通る")]
     [InlineData("./MockApp/Views/OrderList.xaml")]
+    [InlineData("MockApp//Views/OrderList.xaml")]
+    [InlineData("MockApp/./Views/OrderList.xaml")]
+    [InlineData(" MockApp/Views/OrderList.xaml ")]
     [InlineData("MockApp/Views/Order.Detail.xaml.cs")]
     [InlineData("MockApp/Generated.Views/OrderList.xaml")]
     public void ResolveEmitPath_AllowsLegitimatePathsAfterAliasGuards(string path)
@@ -206,6 +210,43 @@ public class MockProjectEmitToolsTests
             .ResolveEmitPath(Work, Blazor, "Components/Pages/Orders.razor")
             .Ok.Should()
             .BeTrue();
+    }
+
+    /// <summary>
+    /// 空の区間と "." の区間を落とした後のパスで保護フォルダを照合する（落とす前処理が保護フォルダのすり抜けにならない）ことを検証する
+    /// </summary>
+    [Theory(DisplayName = "'.' と空の区間を落とした後も、保護フォルダは断る")]
+    [InlineData("./Generated/x.cs")]
+    [InlineData("MockApp/./Generated/Entities.cs")]
+    [InlineData(".//obj/x.cs")]
+    [InlineData("MockApp//design/mock/x.cs")]
+    public void ResolveEmitPath_RejectsProtectedFolderAfterDroppingDotSegments(string path)
+    {
+        var result = MockProjectEmitTools.ResolveEmitPath(Work, Wpf, path);
+
+        result.Ok.Should().BeFalse();
+        result.Error.Should().Contain("folder");
+    }
+
+    /// <summary>"." と空の区間を落とすと何も残らないパスは、空のパスとして断ることを検証する</summary>
+    [Theory(DisplayName = "'.' だけ・'./' だけのパスは空として断る")]
+    [InlineData(".")]
+    [InlineData("./")]
+    [InlineData("././")]
+    [InlineData(@".\")]
+    public void ResolveEmitPath_RejectsPathOfOnlyDotSegmentsAsEmpty(string path)
+    {
+        var result = MockProjectEmitTools.ResolveEmitPath(Work, Wpf, path);
+
+        result.Ok.Should().BeFalse();
+        result
+            .Error.Should()
+            .Contain(
+                QuickER.Platform.PathSegments.Describe(
+                    QuickER.Platform.PathSegmentViolation.Empty,
+                    System.Globalization.CultureInfo.InvariantCulture
+                )
+            );
     }
 
     /// <summary>正規化後の出力フォルダ相対セグメントでも保護フォルダを照合する（セグメント検査の二重化）ことを検証する</summary>

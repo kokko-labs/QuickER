@@ -14,25 +14,25 @@ public static class MockContentValidator
     /// <summary>src= / href= 属性内の絶対 URL（http/https）</summary>
     private static readonly Regex ExternalAttributeUrl = new(
         "(?:src|href)\\s*=\\s*[\"']?\\s*(https?://[^\"'\\s>]+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>CSS の url(...) 内の絶対 URL（@import url(...) も含む）</summary>
     private static readonly Regex ExternalCssUrl = new(
         "url\\(\\s*[\"']?\\s*(https?://[^\"')\\s]+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>@import "..."（url() を伴わない形）内の絶対 URL</summary>
     private static readonly Regex ExternalImportUrl = new(
         "@import\\s+[\"'](https?://[^\"']+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>style.css への link 参照</summary>
     private static readonly Regex StylesheetLink = new(
         "href\\s*=\\s*[\"'][^\"']*style\\.css[\"']",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>

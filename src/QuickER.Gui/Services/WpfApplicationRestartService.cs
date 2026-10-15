@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using QuickER.Gui.Abstractions;
+using QuickER.Platform;
 
 namespace QuickER.Services;
 
@@ -40,6 +41,6 @@ public sealed class WpfApplicationRestartService : IApplicationRestartService
             return;
         }
 
-        Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+        ExternalLauncher.StartExecutable(exePath);
     }
 }

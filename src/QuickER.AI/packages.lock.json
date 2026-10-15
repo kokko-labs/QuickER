@@ -80,8 +80,14 @@
           "QuickER.Dialects": "[0.2.0, )"
         }
       },
-      "quicker.settings": {
+      "quicker.platform": {
         "type": "Project"
+      },
+      "quicker.settings": {
+        "type": "Project",
+        "dependencies": {
+          "QuickER.Platform": "[0.2.0, )"
+        }
       },
       "ModelContextProtocol": {
         "type": "CentralTransitive",

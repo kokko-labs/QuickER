@@ -19,7 +19,7 @@ internal static class MockScreenLinks
     /// </summary>
     internal static readonly Regex RelativeScreenLink = new(
         "href\\s*=\\s*([\"'])([^\"']+?\\.html)(#[^\"']*)?\\1",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>

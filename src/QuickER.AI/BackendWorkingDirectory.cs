@@ -1,4 +1,5 @@
 using System.IO;
+using QuickER.Platform;
 
 namespace QuickER.AI;
 
@@ -17,12 +18,7 @@ internal static class BackendWorkingDirectory
     /// <param name="backend">バックエンド名（フォルダ名の 1 段目。例 <c>codex</c>）</param>
     public static string Create(string backend)
     {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            "QuickER",
-            backend,
-            Guid.NewGuid().ToString("N")
-        );
+        var path = Path.Combine(AppDataPaths.TempRoot, backend, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
     }

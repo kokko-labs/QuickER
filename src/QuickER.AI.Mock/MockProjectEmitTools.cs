@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.IO;
 using QuickER.Mcp;
+using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
 
@@ -115,9 +117,14 @@ public static class MockProjectEmitTools
     /// 新規の UI 層ファイル（App.xaml・Views/・ViewModels/・Components/Pages/ 等）はプロジェクト配下なら自由に追加できる。
     /// </para>
     /// <para>
+    /// 判定の前に、区切りを <c>/</c> へ揃え、値全体の前後の空白を除き、空の区間と <c>.</c> の区間を落とす
+    /// （AI の出力の境界の前処理。どちらも保護フォルダの別名にはならない。落とした後に区間が残らなければ空パスとして断る）。
+    /// </para>
+    /// <para>
     /// 拒否条件（いずれも英語メッセージで失敗を返す）:
-    /// 空パス／絶対パス・ドライブ文字・先頭スラッシュ／<c>".."</c>／末尾が <c>.</c> または空白のセグメント・
-    /// <c>~</c> を含むセグメント（保護フォルダ名のすり抜け防止）／保護フォルダのセグメント配下（正規化の前後で照合）／
+    /// 空パス／相対パスとして断る形（<see cref="PathSegments.CheckRelativePath"/>＝絶対パス・ドライブ・<c>..</c>・
+    /// 使えない文字・先頭と末尾の空白と <c>.</c>・<c>~</c>〔8.3 の別名で保護フォルダ名をすり抜けさせない〕・予約名・長さ）／
+    /// 保護フォルダのセグメント配下（正規化の前後で照合）／
     /// <c>README-QuickER.md</c>／<c>NuGet.Config</c>（パッケージソース設定の追加禁止）／
     /// 拡張子 <c>.sln</c>・<c>.csproj</c>（スキャフォールドが作成済みのため上書き不可）／
     /// 実効の許可集合に無い拡張子（拡張子なしを含む）／正規化後に出力フォルダ外へ出るパス。
@@ -136,67 +143,35 @@ public static class MockProjectEmitTools
             return new EmitPathResult(false, string.Empty, string.Empty, "path is empty.");
         }
 
+        // AI の出力の境界の前処理：区切りを '/' へ揃えて値全体の前後の空白を除き、空の区間と '.' の区間を落とす
+        // （AI がよく書く "./MockApp/…" や "MockApp//Views/…" を断らない。どちらも保護フォルダの別名にはならない）。
+        // 先頭の '/'（ルート・UNC）は落とさずに共有の判定へ渡して断る（落とすと "/a" が "a" になる）。
+        // ドライブ指定（"C:…"）は区間を落としても先頭に残るので、そのまま共有の判定が断る
         var normalized = path.Replace('\\', '/').Trim();
+        var cleaned = normalized.StartsWith('/')
+            ? normalized
+            : string.Join(
+                '/',
+                normalized.Split('/').Where(segment => segment.Length > 0 && segment != ".")
+            );
 
-        // 絶対パス・ドライブ文字・先頭スラッシュは拒否（出力フォルダ外への書き込みを防ぐ）
-        if (
-            normalized.StartsWith('/')
-            || Path.IsPathRooted(path)
-            || normalized.Contains(':', StringComparison.Ordinal)
-        )
+        // 相対パスとして断る形は共有の判定（PathSegments）で断る。'~' を断るのは 8.3 の別名（"GENERA~1"）で
+        // 保護フォルダ名との照合をすり抜けさせないため、末尾の '.' と空白を断るのは Windows がそれを落として開く
+        // （"Generated./x.cs" は Generated/ への書き込みになる）ため
+        if (PathSegments.CheckRelativePath(cleaned) is { } violation)
         {
             return new EmitPathResult(
                 false,
                 string.Empty,
                 string.Empty,
-                $"path must be a relative path (absolute paths and drive letters are not allowed): {path}"
+                $"path is invalid ({PathSegments.Describe(violation, CultureInfo.InvariantCulture)}): {path}"
             );
         }
 
-        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
-
-        if (segments.Length == 0)
-        {
-            return new EmitPathResult(false, string.Empty, string.Empty, "path is empty.");
-        }
+        var segments = PathSegments.SplitRelativePath(cleaned);
 
         foreach (var segment in segments)
         {
-            if (segment == "..")
-            {
-                return new EmitPathResult(
-                    false,
-                    string.Empty,
-                    string.Empty,
-                    $"path must not contain '..': {path}"
-                );
-            }
-
-            // Windows はセグメント末尾の "." と空白を落として開く（"Generated./x.cs" は Generated/ への書き込みになる）
-            // ため、保護フォルダ名との照合をすり抜けられないよう末尾が "." / 空白のセグメントを拒否する
-            // （カレントフォルダを表す "." 単独は除く）
-            if (segment != "." && (segment[^1] == '.' || char.IsWhiteSpace(segment[^1])))
-            {
-                return new EmitPathResult(
-                    false,
-                    string.Empty,
-                    string.Empty,
-                    $"path segments must not end with '.' or whitespace: {path}"
-                );
-            }
-
-            // 8.3 短縮名（"GENERA~1" 等）は実在フォルダの別名として解決され、保護フォルダ名との照合では
-            // 見分けられないため、"~" を含むセグメントを拒否する
-            if (segment.Contains('~', StringComparison.Ordinal))
-            {
-                return new EmitPathResult(
-                    false,
-                    string.Empty,
-                    string.Empty,
-                    $"path must not contain '~' (short 8.3 names are not allowed): {path}"
-                );
-            }
-
             // スキャフォールドが所有するフォルダ（データ層・デザイン仕様）とビルドの入出力フォルダは保護する
             if (FindBlockedFolder([segment]) is { } blocked)
             {

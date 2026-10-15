@@ -45,7 +45,7 @@ public class ProviderMismatchWarningTests : IDisposable
             }
         );
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(_schemaPath, document);
+        JsonStorageService.SaveAtomic(_schemaPath, document);
     }
 
     public void Dispose()
@@ -298,7 +298,7 @@ public class ProviderMismatchWarningTests : IDisposable
             }
         );
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(path, document);
+        JsonStorageService.SaveAtomic(path, document);
 
         return path;
     }

@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 
-namespace QuickER.AI;
+namespace QuickER.Platform;
 
 /// <summary>
 /// Windows の <c>.cmd</c> / <c>.bat</c> シム（npm 製 CLI の典型的な入り方）を起動するときの、

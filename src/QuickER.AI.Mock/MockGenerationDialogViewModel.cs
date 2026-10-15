@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -13,6 +14,7 @@ using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
 using QuickER.Model;
+using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
 
@@ -92,8 +94,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private bool _suppressPreviewRequest;
 
     /// <summary>フォルダをエクスプローラで開く処理（テスト時に差し替え可能）</summary>
-    internal Action<string> OpenFolder { get; set; } =
-        path => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    internal Action<string> OpenFolder { get; set; } = ExternalLauncher.OpenFolder;
 
     /// <summary>チャットメッセージ一覧</summary>
     public ObservableCollection<ErChatMessage> Messages { get; } = new();
@@ -457,9 +458,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 return Strings.Mock_DisabledReason_ProjectName;
             }
 
-            if (!MockProjectScaffoldService.IsValidProjectName(ProjectName))
+            if (MockProjectScaffoldService.CheckProjectName(ProjectName) is { } violation)
             {
-                return Strings.Mock_DisabledReason_ProjectNameInvalid;
+                return string.Format(
+                    Strings.Mock_DisabledReason_ProjectNameInvalid,
+                    PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
+                );
             }
 
             return string.Empty;
@@ -1089,11 +1093,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         try
         {
-            File.WriteAllText(
-                picked.Path,
-                html,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            );
+            AtomicFile.WriteAllText(picked.Path, html, TextEncodings.Utf8NoBomLenient);
             StatusMessage = Strings.Mock_HtmlSaved;
             // 保存先パス付きの完了メッセージを明示する（ステータスバーだけでは見落としやすいため）
             _dialogs.ShowInformation(
@@ -1130,11 +1130,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             // 差し替えられている等）も同じ経路で拾い、未処理例外でアプリを落とさない
             // （RegenerateDesignDocIfPresent と同じ形）。
             var markdown = MockDesignDocExporter.Export(_store);
-            File.WriteAllText(
-                path,
-                markdown,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            );
+            AtomicFile.WriteAllText(path, markdown, TextEncodings.Utf8NoBomLenient);
             StatusMessage = Strings.Mock_DesignDocSaved;
             // 保存先パス付きの完了メッセージを明示する（ステータスバーだけでは見落としやすいため）
             _dialogs.ShowInformation(
@@ -1173,11 +1169,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         try
         {
             var markdown = MockDesignDocExporter.Export(_store);
-            File.WriteAllText(
-                path,
-                markdown,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            );
+            AtomicFile.WriteAllText(path, markdown, TextEncodings.Utf8NoBomLenient);
         }
         catch (Exception ex)
         {

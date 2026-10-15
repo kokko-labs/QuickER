@@ -4,6 +4,7 @@ using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Resources;
 using QuickER.ViewModels;
+using static QuickER.Mcp.ToolArguments;
 
 namespace QuickER.Services;
 
@@ -1340,14 +1341,4 @@ public static class ErDiagramDynamicTools
         && !ddlNames.ContainsKey(relationship.Id)
             ? string.Empty
             : $" [{DescribeName(relationship, ddlNames)}]";
-
-    /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>
-    private static string? GetString(JsonElement element, string propertyName)
-    {
-        return
-            element.TryGetProperty(propertyName, out var val)
-            && val.ValueKind == JsonValueKind.String
-            ? val.GetString()
-            : null;
-    }
 }

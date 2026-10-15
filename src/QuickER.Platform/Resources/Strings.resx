@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="PathSegment_Empty" xml:space="preserve">
+    <value>an empty name or an empty path segment</value>
+  </data>
+  <data name="PathSegment_DotSegment" xml:space="preserve">
+    <value>'.' or '..'</value>
+  </data>
+  <data name="PathSegment_Separator" xml:space="preserve">
+    <value>a path separator ('/' or '')</value>
+  </data>
+  <data name="PathSegment_Rooted" xml:space="preserve">
+    <value>an absolute path or a drive letter</value>
+  </data>
+  <data name="PathSegment_InvalidCharacter" xml:space="preserve">
+    <value>a character not allowed in file names (control characters and " * : &lt; &gt; ? |)</value>
+  </data>
+  <data name="PathSegment_LeadingWhitespace" xml:space="preserve">
+    <value>leading whitespace</value>
+  </data>
+  <data name="PathSegment_TrailingDotOrWhitespace" xml:space="preserve">
+    <value>a trailing '.' or whitespace</value>
+  </data>
+  <data name="PathSegment_Tilde" xml:space="preserve">
+    <value>'~' (it can form a short 8.3 name)</value>
+  </data>
+  <data name="PathSegment_ReservedDeviceName" xml:space="preserve">
+    <value>a reserved device name (CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM1 to COM9, LPT1 to LPT9, and COM or LPT followed by a superscript 1 to 3)</value>
+  </data>
+  <data name="PathSegment_TooLong" xml:space="preserve">
+    <value>a name longer than 255 characters</value>
+  </data>
+</root>

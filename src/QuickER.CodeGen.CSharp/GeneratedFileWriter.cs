@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text;
 using QuickER.CodeGen.CSharp.Resources;
+using QuickER.Platform;
 
 namespace QuickER.CodeGen.CSharp;
 
@@ -43,11 +45,7 @@ public sealed class GeneratedFileWriter
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
             // BOM なし UTF-8 で出力する（git 差分やツール間の互換性を考慮）
-            File.WriteAllText(
-                path,
-                file.Content,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            );
+            AtomicFile.WriteAllText(path, file.Content, TextEncodings.Utf8NoBomLenient);
             writtenPaths.Add(path);
         }
 
@@ -114,6 +112,19 @@ public sealed class GeneratedFileWriter
         )
         {
             throw new InvalidOperationException(Strings.CodeGen_Error_NonGeneratedFileOverwrite);
+        }
+
+        // ファイル名は利用者の設定（出力ファイル名）から来るので、1 区間の名前として断る形（予約名・'~'・先頭の空白など）を
+        // 層フォルダと同じ正本で断る
+        if (PathSegments.CheckSegment(fileName) is { } violation)
+        {
+            throw new InvalidOperationException(
+                string.Format(
+                    Strings.CodeGen_Error_InvalidGeneratedFileName,
+                    fileName,
+                    PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
+                )
+            );
         }
 
         // 層別出力の層フォルダ。生成前の診断が検証済みだが、ここでも同じ規則（LayerDirectoryValidator）で

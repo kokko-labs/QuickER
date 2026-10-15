@@ -1684,7 +1684,7 @@ public sealed class SyncPlanner
                 }
             )
             {
-                if (name is null || !name.Contains('.'))
+                if (name is null || !SchemaQualifiedName.IsQualified(name))
                 {
                     continue;
                 }

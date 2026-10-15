@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.CSharp;
@@ -773,7 +774,9 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 同じテーブルを指せなくなる（2 つ目以降のドットは名前の一部として扱う）。
     /// </remarks>
     private static string QuoteQualified(string name, string open, string close) =>
-        string.Join(".", name.Split('.', 2).Select(part => QuoteIdentifier(part, open, close)));
+        SchemaQualifiedName.TrySplit(name, out var schema, out var table)
+            ? $"{QuoteIdentifier(schema, open, close)}.{QuoteIdentifier(table, open, close)}"
+            : QuoteIdentifier(name, open, close);
 
     /// <summary>SQL 識別子を方言のクォートで包む（終端クォート文字を二重化してクォートの脱出を防ぐ）</summary>
     /// <remarks>
