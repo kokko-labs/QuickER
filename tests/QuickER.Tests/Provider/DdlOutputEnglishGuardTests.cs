@@ -8,6 +8,7 @@ using QuickER.Provider.Oracle;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Provider;
@@ -70,7 +71,7 @@ public sealed class DdlOutputEnglishGuardTests
     public void SyncScriptBuilders_ProduceNoCjk()
     {
         var items = BuildAsciiDiffItems();
-        var plan = new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities());
+        var plan = new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral);
 
         var outputs = new (string Dialect, string Sql)[]
         {
@@ -122,7 +123,10 @@ public sealed class DdlOutputEnglishGuardTests
         };
         var plan = new SyncPlanner().BuildPlan(
             [item],
-            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native },
+            TestDialectCapabilities.Neutral with
+            {
+                ColumnReorder = ColumnReorderMode.Native,
+            },
             new SyncPlanContext { LiveEntities = [live] }
         );
         return new MySqlSyncScriptBuilder().Build(plan);

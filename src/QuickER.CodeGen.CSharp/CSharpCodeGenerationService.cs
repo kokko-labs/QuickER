@@ -1830,7 +1830,7 @@ public sealed partial class CSharpCodeGenerationService
                             ? UniqueConstraint.SynthesizeName(
                                 entity.TableName,
                                 members,
-                                IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+                                IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms)
                             )
                             : constraint.Name;
 

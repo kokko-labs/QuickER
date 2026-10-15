@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider.MySql;
 
@@ -12,7 +13,7 @@ public class MySqlSyncScriptBuilderTests
 {
     private static string Build(params SchemaDiffItem[] items) =>
         new MySqlSyncScriptBuilder().Build(
-            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral)
         );
 
     /// <summary>AddTable が主キー制約を含む CREATE TABLE 文を生成することを検証する</summary>
@@ -872,7 +873,10 @@ public class MySqlSyncScriptBuilderTests
         var context = new SyncPlanContext { LiveEntities = tables.Select(t => t.Live).ToArray() };
         var plan = new SyncPlanner().BuildPlan(
             items,
-            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native },
+            TestDialectCapabilities.Neutral with
+            {
+                ColumnReorder = ColumnReorderMode.Native,
+            },
             context
         );
         return new MySqlSyncScriptBuilder().Build(plan);

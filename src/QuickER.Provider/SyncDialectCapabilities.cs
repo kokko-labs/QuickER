@@ -27,17 +27,21 @@ public enum ColumnReorderMode
 /// <see cref="SyncPlanner"/> がこの宣言を参照し、逐次 DDL で表現できない変更
 /// （SQLite のテーブル再構築・MySQL のネイティブ列順変更など）をセクションへ振り分ける。
 /// </para>
+/// <para>
+/// 全プロパティが <c>required</c> で既定値を持たない（方言が書き忘れた項目が既定値の側へ黙って倒れないため。
+/// <c>SyncDialectCapabilitiesNoDefaultsTests</c> が固定）。
+/// </para>
 /// </remarks>
 public sealed partial record SyncDialectCapabilities
 {
     /// <summary><c>ALTER COLUMN</c>（型 / NULL 制約の変更）を逐次 DDL で実行できるか。</summary>
-    public bool SupportsAlterColumn { get; init; } = true;
+    public required bool SupportsAlterColumn { get; init; }
 
     /// <summary>外部キーの <c>ADD</c> / <c>DROP CONSTRAINT</c> を逐次 DDL で実行できるか。</summary>
-    public bool SupportsForeignKeyAlter { get; init; } = true;
+    public required bool SupportsForeignKeyAlter { get; init; }
 
     /// <summary>テーブル / 列コメント（説明）を設定する機構を持つか。</summary>
-    public bool SupportsDescriptions { get; init; } = true;
+    public required bool SupportsDescriptions { get; init; }
 
     /// <summary>
     /// 列定義変更（<c>ALTER COLUMN</c>）の前に、その列が関与する外部キーを一旦外す必要があるか。
@@ -49,7 +53,7 @@ public sealed partial record SyncDialectCapabilities
     /// （ユーザーが明示的に DROP を選択している FK は対象外＝二重削除も再作成もしない。同期後に両端の列の型が
     /// 一致しない FK も対象外＝付け直しが必ず失敗するため、外さずに列定義変更の時点で失敗させて警告する）。
     /// </remarks>
-    public bool AlterColumnRequiresForeignKeyRebuild { get; init; }
+    public required bool AlterColumnRequiresForeignKeyRebuild { get; init; }
 
     /// <summary>
     /// 列定義変更（<c>ALTER COLUMN</c>）の前に、その列を構成列に持つ主キー・一意制約を一旦外す必要があるか。
@@ -60,7 +64,7 @@ public sealed partial record SyncDialectCapabilities
     /// 外して付け直す項目を計画へ注入する。MySQL は <c>MODIFY</c> で構成列の型を変えられるうえ、一意索引が
     /// 外部キーを支えていると外す段で失敗する（エラー 1553）ため <c>false</c>。
     /// </remarks>
-    public bool AlterColumnRequiresKeyConstraintRebuild { get; init; }
+    public required bool AlterColumnRequiresKeyConstraintRebuild { get; init; }
 
     /// <summary>
     /// 外部キーが、子列を先頭に持つ索引を必要とするか（その索引を外す前に外部キーを一旦外す必要があるか）。
@@ -70,16 +74,16 @@ public sealed partial record SyncDialectCapabilities
     /// <c>DROP PRIMARY KEY</c> / <c>DROP INDEX</c> がエラー 1553 になるため <c>true</c>。<see cref="SyncPlanner"/> は、
     /// 子列がそれらの索引の先頭に乗る外部キーを外して付け直す（付け直しのとき MySQL が必要な索引を自動で作る）。
     /// </remarks>
-    public bool ForeignKeyRequiresLeadingIndex { get; init; }
+    public required bool ForeignKeyRequiresLeadingIndex { get; init; }
 
     /// <summary>外部キー制約名が DB に永続化されるか（SQLite は制約名が合成名で永続化されない）。</summary>
-    public bool PersistsForeignKeyConstraintNames { get; init; } = true;
+    public required bool PersistsForeignKeyConstraintNames { get; init; }
 
     /// <summary>列順同期の実現方式。</summary>
-    public ColumnReorderMode ColumnReorder { get; init; } = ColumnReorderMode.None;
+    public required ColumnReorderMode ColumnReorder { get; init; }
 
     /// <summary>
-    /// 型表記を「その表記で宣言した列を取り込むと返る表記」へ寄せる関数（既定は恒等）。
+    /// 型表記を「その表記で宣言した列を取り込むと返る表記」へ寄せる関数（DB が宣言の綴りをそのまま返す方言は恒等）。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -93,14 +97,14 @@ public sealed partial record SyncDialectCapabilities
     /// 契約は「取込の出力は不動点（正規化しても変わらない）」「冪等」の 2 つ。
     /// </para>
     /// </remarks>
-    public Func<string, string> NormalizeTypeNotation { get; init; } = static type => type;
+    public required Func<string, string> NormalizeTypeNotation { get; init; }
 
     /// <summary>外部キーの <c>ON UPDATE</c> 句を持つか（Oracle は持たない）。</summary>
     /// <remarks>
     /// <c>false</c> の方言では差分の比較で図側の <c>ON UPDATE</c> を <c>NO ACTION</c> へ畳む
     /// （<see cref="EffectiveOnUpdate"/>）。畳まないと、DB が表せない参照アクションの差分が同期しても消えない。
     /// </remarks>
-    public bool SupportsOnUpdateAction { get; init; } = true;
+    public required bool SupportsOnUpdateAction { get; init; }
 
     /// <summary>外部キーの参照アクション <c>SET DEFAULT</c> が効くか（Oracle は持たず、MySQL の InnoDB は受け付けても効かない）。</summary>
     /// <remarks>
@@ -108,7 +112,7 @@ public sealed partial record SyncDialectCapabilities
     /// （<see cref="EffectiveOnDelete"/> / <see cref="EffectiveOnUpdate"/>）。MySQL は <c>SET DEFAULT</c> を宣言として保存するが、
     /// 親を消すと外部キーエラーになる＝実際の動きは <c>NO ACTION</c>（<c>RESTRICT</c>）と同じ。
     /// </remarks>
-    public bool SupportsSetDefaultAction { get; init; } = true;
+    public required bool SupportsSetDefaultAction { get; init; }
 
     /// <summary>計算列・生成列の型を、式を変えずに <c>ALTER COLUMN</c> で変えられるか（PostgreSQL だけ）。</summary>
     /// <remarks>
@@ -123,7 +127,7 @@ public sealed partial record SyncDialectCapabilities
     /// NULL 許容は方言に依らず差分に出さない（計算列の NULL 許容は式が決める性質）。
     /// </para>
     /// </remarks>
-    public bool SupportsComputedColumnTypeChange { get; init; }
+    public required bool SupportsComputedColumnTypeChange { get; init; }
 
     /// <summary>主キーと同じ列集合の一意制約を作れるか（SQLite と Oracle は作れない）。</summary>
     /// <remarks>
@@ -131,7 +135,7 @@ public sealed partial record SyncDialectCapabilities
     /// Oracle は ORA-02261 で断る。<c>false</c> の方言では、図の主キーと同じ列集合の一意制約の追加を、
     /// 選択できない案内項目にする（<see cref="SchemaDiffService"/>）。主キーが一意性を保証するので、失うものは無い。
     /// </remarks>
-    public bool SupportsUniqueConstraintOnPrimaryKey { get; init; } = true;
+    public required bool SupportsUniqueConstraintOnPrimaryKey { get; init; }
 
     /// <summary>
     /// 複合外部キーが参照する列の並びが、参照先の主キー・一意制約の列の並びと一致する必要があるか（SQL Server・MySQL）。
@@ -147,7 +151,7 @@ public sealed partial record SyncDialectCapabilities
     /// 残さないため、並びまで比べると取り込み直すたびに作り直しの差分が出た。
     /// </para>
     /// </remarks>
-    public bool ReferencedKeyRequiresSameColumnOrder { get; init; } = true;
+    public required bool ReferencedKeyRequiresSameColumnOrder { get; init; }
 
     /// <summary>外部キーの両端の文字列型が、長さだけ違っていてもよいか（MySQL）。</summary>
     /// <remarks>
@@ -156,7 +160,7 @@ public sealed partial record SyncDialectCapabilities
     /// （<see cref="AreForeignKeyCompatibleTypes"/>）が長さだけの違いを食い違いとみなさない。食い違いとみなすと
     /// 外部キーを外し直さず、片側の長さを変える列の変更が MySQL のエラー 1832 で失敗した。
     /// </remarks>
-    public bool ForeignKeyAllowsStringLengthDifference { get; init; }
+    public required bool ForeignKeyAllowsStringLengthDifference { get; init; }
 
     /// <summary>同期スクリプトの DDL がトランザクションで巻き戻るか（MySQL・Oracle は DDL を暗黙にコミットする）。</summary>
     /// <remarks>
@@ -165,16 +169,15 @@ public sealed partial record SyncDialectCapabilities
     /// （<see cref="ReferencedKeyRequiresSameColumnOrder"/> の方言で、参照される複合キーの列の並びだけが合わなくなる変更）
     /// を計画から外して警告する。
     /// </remarks>
-    public bool TransactionalDdl { get; init; } = true;
+    public required bool TransactionalDdl { get; init; }
 
     /// <summary>この方言の識別子（テーブル名・列名・制約名）の長さの上限</summary>
     /// <remarks>
     /// 各方言の識別子クラスの <c>Limit</c>（値の正本は Model の <see cref="IdentifierLengthLimits"/>）を指す。
-    /// 既定は上限なし（方言を指定しない差分の比較のため）。5 方言のプロバイダーがそれぞれの値を宣言していることは
+    /// 5 方言のプロバイダーがそれぞれの値を宣言していることは
     /// <c>IdentifierLengthLimitDeclarationTests</c> が固定する。
     /// </remarks>
-    public IdentifierLengthLimit IdentifierLengthLimit { get; init; } =
-        IdentifierLengthLimit.Unlimited;
+    public required IdentifierLengthLimit IdentifierLengthLimit { get; init; }
 
     /// <summary>上限を超える識別子を断らずに黙って切り詰める方言か（PostgreSQL）</summary>
     /// <remarks>
@@ -184,7 +187,7 @@ public sealed partial record SyncDialectCapabilities
     /// 吸収しないと既定名を縮めるようにした版で同期すると、同じ外部キーが追加と削除の 2 項目に化ける
     /// （<c>PostgreSqlLegacyTruncatedNameIntegrationTests</c> が固定）。
     /// </remarks>
-    public bool TruncatesLongIdentifiers { get; init; }
+    public required bool TruncatesLongIdentifiers { get; init; }
 
     /// <summary>2 つの型表記が、この方言の DB で同じ宣言として保存されるか</summary>
     /// <remarks>

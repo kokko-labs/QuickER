@@ -150,19 +150,46 @@ public class IdentifierLengthLimitTests
         IdentifierLengthLimits.MySql.FitsTableName("s." + Repeat(Kanji, 51)).Should().BeFalse();
     }
 
-    [Theory(
-        DisplayName = "ForDbms: 方言名は大文字小文字と前後の空白を無視し、知らない方言は上限なし"
-    )]
+    [Theory(DisplayName = "ForDbms: 方言名は大文字小文字と前後の空白を無視する")]
     [InlineData("SqlServer", IdentifierLengthUnit.Utf16CodeUnits, 128)]
     [InlineData(" postgresql ", IdentifierLengthUnit.Utf8Bytes, 63)]
     [InlineData("MYSQL", IdentifierLengthUnit.Characters, 64)]
     [InlineData("Oracle", IdentifierLengthUnit.Utf8Bytes, 128)]
     [InlineData("sqlite", IdentifierLengthUnit.Unlimited, 0)]
-    [InlineData("db2", IdentifierLengthUnit.Unlimited, 0)]
-    [InlineData(null, IdentifierLengthUnit.Unlimited, 0)]
-    public void ForDbms_ResolvesByName(string? dbms, IdentifierLengthUnit unit, int max)
+    public void ForDbms_ResolvesByName(string dbms, IdentifierLengthUnit unit, int max)
     {
         var limit = IdentifierLengthLimits.ForDbms(dbms);
+
+        limit.Unit.Should().Be(unit);
+        limit.Max.Should().Be(max);
+    }
+
+    [Theory(DisplayName = "ForDbms: 知らない方言名は既定値へ倒さず例外にする")]
+    [InlineData("db2")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void ForDbms_UnknownName_Throws(string? dbms)
+    {
+        var act = () => IdentifierLengthLimits.ForDbms(dbms!);
+
+        act.Should().Throw<ArgumentException>().WithParameterName("dbms");
+    }
+
+    [Theory(
+        DisplayName = "ForDiagramTarget: 図の対象 DBMS は方言名と同じ上限、知らない名前なら上限を検査しない"
+    )]
+    [InlineData(" PostgreSQL ", IdentifierLengthUnit.Utf8Bytes, 63)]
+    [InlineData("oracle", IdentifierLengthUnit.Utf8Bytes, 128)]
+    [InlineData("foo", IdentifierLengthUnit.Unlimited, 0)]
+    [InlineData("", IdentifierLengthUnit.Unlimited, 0)]
+    [InlineData(null, IdentifierLengthUnit.Unlimited, 0)]
+    public void ForDiagramTarget_ResolvesOrSkips(
+        string? targetDbms,
+        IdentifierLengthUnit unit,
+        int max
+    )
+    {
+        var limit = IdentifierLengthLimits.ForDiagramTarget(targetDbms);
 
         limit.Unit.Should().Be(unit);
         limit.Max.Should().Be(max);

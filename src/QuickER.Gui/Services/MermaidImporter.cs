@@ -169,7 +169,7 @@ public static partial class MermaidImporter
             entities,
             relationships,
             labels,
-            IdentifierLengthLimits.ForDbms(targetDbms)
+            IdentifierLengthLimits.ForDiagramTarget(targetDbms)
         );
 
         return new ErDiagram

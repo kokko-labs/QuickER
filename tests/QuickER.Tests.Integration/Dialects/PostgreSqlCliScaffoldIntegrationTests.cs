@@ -13,7 +13,7 @@ namespace QuickER.Tests.Integration.Dialects;
 /// </summary>
 /// <remarks>
 /// GUI 側（<c>DbImportCommandService</c>）はモーダルの内訳で同じ警告を提示する。両者は同じ
-/// 言語中立の <c>SchemaImportWarning</c> を、それぞれ自前の resx で文言化する。
+/// 言語中立の <c>SchemaImportWarning</c> を、同じ文言（<c>SchemaImportWarningText</c>）で出す。CLI は 1 行ずつ「Warning:」を付ける。
 /// 取込警告を実際に生む構成（ドメイン型）は PostgreSQL でしか作れないため、ここはコンテナを使う。
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -64,7 +64,7 @@ public sealed class PostgreSqlCliScaffoldIntegrationTests(PostgreSqlContainerFix
             exit.Should().Be(0);
             Directory.GetFiles(outDir, "*.g.cs").Should().NotBeEmpty();
 
-            var warningPrefix = CliStrings.Cli_ImportWarningDomainTypeFlattened.Split("{0}")[0];
+            var warningPrefix = CliStrings.Cli_ImportWarningLine.Split("{0}")[0];
             var text = stderr.ToString();
             text.Should().Contain(warningPrefix);
             text.Should().Contain("email_dom");
@@ -115,7 +115,7 @@ public sealed class PostgreSqlCliScaffoldIntegrationTests(PostgreSqlContainerFix
 
             exit.Should().Be(0);
 
-            var warningPrefix = CliStrings.Cli_ImportWarningDomainTypeFlattened.Split("{0}")[0];
+            var warningPrefix = CliStrings.Cli_ImportWarningLine.Split("{0}")[0];
             stderr.ToString().Should().NotContain(warningPrefix);
         }
         finally

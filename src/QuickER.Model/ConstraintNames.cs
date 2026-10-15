@@ -37,7 +37,7 @@ namespace QuickER.Model;
 /// <item>
 /// 図へ保存する既定名（ツールと GUI がリレーションに付ける外部キー名・取込と C# リバースの <see cref="NameUnnamedForeignKeys"/>）と、
 /// 図の名前として見せる合成名（C# 生成の <c>[UniqueConstraint(Name = …)]</c>・ツールの要約・プロパティパネル）:
-/// <b>図の対象 DBMS の上限</b>（呼び出し側が <see cref="IdentifierLengthLimits.ForDbms"/> に <see cref="ErDiagram.TargetDbms"/> を渡して引く）。
+/// <b>図の対象 DBMS の上限</b>（呼び出し側が <see cref="IdentifierLengthLimits.ForDiagramTarget"/> に <see cref="ErDiagram.TargetDbms"/> を渡して引く）。
 /// 図を受け取る <see cref="CollectExisting"/> / <see cref="IsTaken"/> / <see cref="ResolveForeignKeyNamesById"/> も上限を引数で受ける
 /// （Model は方言名から上限を引かない＝<c>ModelDialectLookupGuardTests</c>）。
 /// </item>

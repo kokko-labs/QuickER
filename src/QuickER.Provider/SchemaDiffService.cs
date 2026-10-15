@@ -31,7 +31,7 @@ public class SchemaDiffService
     /// <param name="targetEntities">ダイアグラム上のエンティティ（期待状態）</param>
     /// <param name="targetRelationships">ダイアグラム上のリレーション</param>
     /// <param name="capabilities">
-    /// 対象方言の同期ケーパビリティ。<c>null</c>（既定）なら全差分を生成する。
+    /// 対象方言の同期ケーパビリティ（省略できない＝方言を決めずに比べる経路を持たない）。
     /// <see cref="SyncDialectCapabilities.SupportsDescriptions"/> が <c>false</c> の方言（SQLite）では
     /// 説明差分を生成しない（コメント機構が無く live 側が常に空＝恒常的な幻の差分になるため）。
     /// <see cref="SyncDialectCapabilities.PersistsForeignKeyConstraintNames"/> が <c>false</c> の方言（SQLite）では
@@ -45,19 +45,19 @@ public class SchemaDiffService
         IReadOnlyList<Relationship> liveRelationships,
         IReadOnlyList<Entity> targetEntities,
         IReadOnlyList<Relationship> targetRelationships,
-        SyncDialectCapabilities? capabilities = null
+        SyncDialectCapabilities capabilities
     )
     {
         var diff = new SchemaDiff();
 
         // 説明差分を出すか（SQLite などコメント機構が無い方言では出さない）
-        var emitDescriptions = capabilities?.SupportsDescriptions ?? true;
+        var emitDescriptions = capabilities.SupportsDescriptions;
 
         // FK 比較で制約名を含めるか（SQLite は合成名で永続化されないため名前を除いて比較する）
-        var includeFkConstraintName = capabilities?.PersistsForeignKeyConstraintNames ?? true;
+        var includeFkConstraintName = capabilities.PersistsForeignKeyConstraintNames;
 
-        // 型表記の正規化と参照アクションの畳み込み（capabilities が無ければ恒等＝従来どおり素の比較）
-        var dialect = capabilities ?? new SyncDialectCapabilities();
+        // 型表記の正規化と参照アクションの畳み込み
+        var dialect = capabilities;
 
         // 表と列の組を 1 回だけ求める（規則は NameLookup＝同じ名前かは SchemaNames が決め、同じとみなす相手が片側に
         // 複数あるときは綴りまで一致する 1 件を選ぶ。選べなければ組まず、図側は追加・DB 側は削除の候補になる）。
@@ -515,7 +515,7 @@ public class SchemaDiffService
         // ---------- 列順の差分（対応方言のみ・既定では非選択） ----------
         // 列順同期は SQLite（テーブル再構築）と MySQL（ネイティブ MODIFY ... AFTER）だけが実現できる。
         // 非対応方言（ColumnReorder=None）では幻の差分を出さない（案内表示は UI 側が担う）。
-        if (capabilities is not null && capabilities.ColumnReorder != ColumnReorderMode.None)
+        if (capabilities.ColumnReorder != ColumnReorderMode.None)
         {
             foreach (var (target, live) in livePartnerOf)
             {

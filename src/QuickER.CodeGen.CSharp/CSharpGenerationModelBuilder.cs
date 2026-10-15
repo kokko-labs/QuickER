@@ -49,7 +49,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     )
     {
         _columnTypes = columnTypes;
-        _identifierLimit = IdentifierLengthLimits.ForDbms(diagram.TargetDbms);
+        _identifierLimit = IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms);
         _queryTokenTypes =
             queryParameterTypes ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.Ordinal);
         _queriesByEntity = CollectValidQueries(diagram, diagnostics);

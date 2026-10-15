@@ -55,7 +55,7 @@ public static class ErDiagramDynamicTools
                         namesRefusedBefore,
                         NameLimitNotes.Find(
                             diagram,
-                            IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+                            IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms)
                         ),
                         diagram.TargetDbms
                     ) is

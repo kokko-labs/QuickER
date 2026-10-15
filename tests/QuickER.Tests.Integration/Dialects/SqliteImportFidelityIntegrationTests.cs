@@ -656,4 +656,57 @@ CREATE INDEX ix_upper ON ""Äpfel"" (upper_only);
             .Should()
             .BeEquivalentTo([("ix_upper", "Äpfel")]);
     }
+
+    /// <summary>
+    /// SQLite の内部表（<c>sqlite_</c> で始まる表。AUTOINCREMENT が作る <c>sqlite_sequence</c> など）を、取り込まず告知もしないことを検証する
+    /// </summary>
+    /// <remarks>扱いの表の C7c（取込＝告知しない除外）を固定する。</remarks>
+    [Fact(DisplayName = "SQLite の内部表（sqlite_sequence）は取り込まず、告知もしない")]
+    public async Task Import_InternalSqliteTables_AreExcludedSilently()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().Equal("items");
+        result.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 制約でない一意インデックス・式の索引・部分索引を、一意制約にせず補助オブジェクト（CREATE 文の全文）として取り込むことを検証する
+    /// </summary>
+    /// <remarks>扱いの表の B2（SQLite は補助オブジェクトとして温存）を固定する。告知はしない。</remarks>
+    [Fact(
+        DisplayName = "制約でない一意インデックス・式・部分索引は、補助オブジェクトとして取り込み、一意制約にしない"
+    )]
+    public async Task Import_NonConstraintUniqueIndexes_AreKeptAsAuxiliaryObjects()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, deleted INTEGER NOT NULL);
+CREATE UNIQUE INDEX ux_users_email ON users (email);
+CREATE UNIQUE INDEX ux_users_email_lower ON users (lower(email));
+CREATE UNIQUE INDEX ux_users_live_email ON users (email) WHERE deleted = 0;
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Single().UniqueConstraints.Should().BeEmpty();
+        result
+            .AuxiliaryObjects.Select(a => a.Name)
+            .Should()
+            .BeEquivalentTo(["ux_users_email", "ux_users_email_lower", "ux_users_live_email"]);
+        result.Warnings.Should().BeEmpty();
+    }
 }

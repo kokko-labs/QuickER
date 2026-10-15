@@ -400,49 +400,10 @@
   <data name="Db_ImportWarningsHeader" xml:space="preserve">
     <value>スキーマの一部は、宣言どおりの形では取り込めませんでした:</value>
   </data>
-  <data name="Db_ImportWarningDomainTypeFlattened" xml:space="preserve">
-    <value>{0}.{1}: ドメイン型「{2}」の基底型として取り込みました（図はドメイン型を持たないため、その CHECK 制約は失われます）。</value>
-  </data>
-  <data name="Db_ImportWarningTableColumnsUnavailable" xml:space="preserve">
-    <value>{0}: 列を 1 つも取得できませんでした。列なしのテーブルとして取り込んでいます。接続ユーザーがこのテーブルへアクセスできるか確認してください。</value>
-  </data>
-  <data name="Db_ImportWarningForeignKeyOutsideScope" xml:space="preserve">
-    <value>{0}: 外部キー「{1}」は取込範囲外の「{2}」を参照しているため、リレーションを作成していません。</value>
-  </data>
-  <data name="Db_ImportWarningTableNameCollision" xml:space="preserve">
-    <value>「{0}」は「{1}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
-  </data>
-  <data name="Db_ImportWarningColumnNameCollision" xml:space="preserve">
-    <value>テーブル「{0}」の列「{1}」は「{2}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（図は両者を区別できません）。</value>
-  </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>現在の図を既存 DB へ書き戻す（差分を確認してから実行）</value>
   </data>
   <data name="Db_SyncTitle" xml:space="preserve">
     <value>データベースと同期</value>
-  </data>
-  <data name="Db_ImportWarningColumnTypeNotEmittable" xml:space="preserve">
-    <value>{0}.{1}: 型「{2}」は SQL へ安全に書き出せない表記です。直すまで、DDL 生成とスキーマ同期は図全体を拒否します。</value>
-  </data>
-  <data name="Db_ImportWarningPartitionDefinitionLost" xml:space="preserve">
-    <value>{0}: 通常テーブルとして取り込みました。図はパーティションを持たないため、生成 DDL はパーティションなしで作成します。</value>
-  </data>
-  <data name="Db_ImportWarningVirtualTableExcluded" xml:space="preserve">
-    <value>{0}: 仮想テーブルのため取り込みませんでした。通常テーブルの形で写し取れないため、付属表（シャドウテーブル）も合わせて除外しています。</value>
-  </data>
-  <data name="Db_ImportWarningComputedColumnExpressionLost" xml:space="preserve">
-    <value>{0}.{1}: 通常の列として取り込みました。図は生成列の式を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
-  </data>
-  <data name="Db_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
-    <value>{0}.{1}: 通常の列として取り込みました。図は生成列の式（{2}）を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
-  </data>
-  <data name="Db_ImportWarningDisabledConstraintExcluded" xml:space="preserve">
-    <value>{0}: {2} 制約「{1}」は無効化されており何も強制しないため、取り込みませんでした。</value>
-  </data>
-  <data name="Db_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
-    <value>{0}: システムバージョニングされたテーブル「{1}」の履歴表のため取り込みませんでした。単独のエンティティとしては取り込みません。</value>
-  </data>
-  <data name="Db_ImportWarningPrimaryKeyNullabilityAdjusted" xml:space="preserve">
-    <value>{0}.{1}: 主キー列を NOT NULL へ補正しました。SQLite の rowid 表は、単一列 INTEGER（rowid 別名）の主キー以外は NULL を許すため、既存行に NULL があると、この図からの同期（テーブル再構築）でデータ移送が失敗し得ます。</value>
   </data>
 </root>

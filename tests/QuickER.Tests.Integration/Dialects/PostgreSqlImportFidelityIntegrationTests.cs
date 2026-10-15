@@ -601,4 +601,24 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
         // PostgreSQL は式を持ち帰れる
         warning.Detail.Should().Contain("qty").And.Contain("price");
     }
+
+    /// <summary>
+    /// 列を 1 本も持たない表（PostgreSQL は列なしの表を作れる）を、名指しで告知することを検証する
+    /// </summary>
+    /// <remarks>扱いの表の T1（取込＝箇所ごとの告知）を固定する。DDL は列なしの表を出せないため、黙って通さない。</remarks>
+    [Fact(DisplayName = "列が 1 本も無い表は、表を名指しして告知する")]
+    public async Task Import_TableWithoutColumns_IsReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync("CREATE TABLE empty_table ();", Ct);
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.TableColumnsUnavailable);
+        warning.TableName.Should().Be("empty_table");
+    }
 }

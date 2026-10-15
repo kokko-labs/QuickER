@@ -176,7 +176,7 @@ public sealed class DbImportCommandService
         // スクロールしない標準 MessageBox 用＝コード取込・エクスポート欠落告知と同じ流儀）
         var details = string.Join(
             Environment.NewLine,
-            warnings.Select(warning => "  • " + DescribeImportWarning(warning))
+            warnings.Select(warning => "  • " + SchemaImportWarningText.Describe(warning))
         );
 
         _dialogs.ShowInformationDetails(
@@ -187,98 +187,5 @@ public sealed class DbImportCommandService
             details,
             Strings.Common_Complete
         );
-    }
-
-    /// <summary>言語中立の取込警告を UI 言語の 1 行へ整形する</summary>
-    /// <remarks>
-    /// <see cref="SchemaImportWarning.Subject"/> / <see cref="SchemaImportWarning.Detail"/> の意味は
-    /// <see cref="SchemaImportWarningKind"/> ごとに決まる（各 Kind の XmlDoc が正本）。
-    /// </remarks>
-    private static string DescribeImportWarning(SchemaImportWarning warning)
-    {
-        // 名前は DB 由来の任意文字列で改行を含み得る。1 行 1 件の内訳を崩さないよう畳んでおく
-        var table = SqlComment.Sanitize(warning.TableName);
-        var subject = SqlComment.Sanitize(warning.Subject);
-        var detail = SqlComment.Sanitize(warning.Detail);
-
-        return warning.Kind switch
-        {
-            SchemaImportWarningKind.DomainTypeFlattened => string.Format(
-                Strings.Db_ImportWarningDomainTypeFlattened,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.TableColumnsUnavailable => string.Format(
-                Strings.Db_ImportWarningTableColumnsUnavailable,
-                table
-            ),
-            SchemaImportWarningKind.ForeignKeyOutsideScope => string.Format(
-                Strings.Db_ImportWarningForeignKeyOutsideScope,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.TableNameCollision => string.Format(
-                Strings.Db_ImportWarningTableNameCollision,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.ColumnNameCollision => string.Format(
-                Strings.Db_ImportWarningColumnNameCollision,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.ColumnTypeNotEmittable => string.Format(
-                Strings.Db_ImportWarningColumnTypeNotEmittable,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.PartitionDefinitionLost => string.Format(
-                Strings.Db_ImportWarningPartitionDefinitionLost,
-                table
-            ),
-            SchemaImportWarningKind.VirtualTableExcluded => string.Format(
-                Strings.Db_ImportWarningVirtualTableExcluded,
-                table
-            ),
-            // 式は取れない方言（SQLite）があるため、載せられるときだけ括弧書きの文面へ振り分ける
-            SchemaImportWarningKind.ComputedColumnExpressionLost => detail.Length == 0
-                ? string.Format(
-                    Strings.Db_ImportWarningComputedColumnExpressionLost,
-                    table,
-                    subject
-                )
-                : string.Format(
-                    Strings.Db_ImportWarningComputedColumnExpressionLostWithExpression,
-                    table,
-                    subject,
-                    detail
-                ),
-            SchemaImportWarningKind.DisabledConstraintExcluded => string.Format(
-                Strings.Db_ImportWarningDisabledConstraintExcluded,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.TemporalHistoryTableExcluded => string.Format(
-                Strings.Db_ImportWarningTemporalHistoryTableExcluded,
-                table,
-                detail
-            ),
-            SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted => string.Format(
-                Strings.Db_ImportWarningPrimaryKeyNullabilityAdjusted,
-                table,
-                subject
-            ),
-            // 未知の種別を黙って空行にしない（ConcurrencyModes.Validated と同じ流儀）
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(warning),
-                warning.Kind,
-                "Unknown schema import warning kind."
-            ),
-        };
     }
 }

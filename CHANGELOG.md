@@ -114,6 +114,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 #### Code generation dialog & CLI
 
+- **`quicker scaffold` now words import warnings the same way as the DB import in the GUI** — each warning still goes to stderr on its own line starting with `Warning:`, but the rest of the line is now the sentence the GUI shows in the import details (for example `Warning: person.mail: imported as the base type of the domain type "email_dom" (…)` where it used to read `Warning: person.mail was imported as the base type of the domain type "email_dom" (…)`). Scripts that match the old sentences in stderr need updating; the exit code and the generated files are unchanged
 - **The code generation dialog now lists value object warnings in a scrollable box** — with value objects on, the warnings found during generation were put into the body of a standard confirmation, which does not scroll, so a diagram that raised a warning per column pushed the buttons off the screen. The confirmation now shows the question at the top and every warning in a scrollable list below it, as the confirmation before overwriting edited files already did
 
 #### Generated code

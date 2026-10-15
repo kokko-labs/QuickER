@@ -41,10 +41,24 @@ public sealed class SqlServerProvider : IDatabaseProvider
     public SyncDialectCapabilities SyncCapabilities { get; } =
         new()
         {
+            SupportsAlterColumn = true,
+            SupportsForeignKeyAlter = true,
+            SupportsDescriptions = true,
             AlterColumnRequiresForeignKeyRebuild = true,
             AlterColumnRequiresKeyConstraintRebuild = true,
+            ForeignKeyRequiresLeadingIndex = false,
+            PersistsForeignKeyConstraintNames = true,
+            ColumnReorder = ColumnReorderMode.None,
             NormalizeTypeNotation = SqlServerTypeNotation.Normalize,
+            SupportsOnUpdateAction = true,
+            SupportsSetDefaultAction = true,
+            SupportsComputedColumnTypeChange = false,
+            SupportsUniqueConstraintOnPrimaryKey = true,
+            ReferencedKeyRequiresSameColumnOrder = true,
+            ForeignKeyAllowsStringLengthDifference = false,
+            TransactionalDdl = true,
             IdentifierLengthLimit = SqlIdentifier.Limit,
+            TruncatesLongIdentifiers = false,
         };
 
     /// <inheritdoc />

@@ -127,7 +127,7 @@ public static partial class DocumentErDiagramToolHost
         var managedBefore = CollectRelationshipChildColumnIds(loaded.Schema);
         var namesRefusedBefore = NameLimitNotes.Find(
             loaded.Schema,
-            IdentifierLengthLimits.ForDbms(loaded.Schema.TargetDbms)
+            IdentifierLengthLimits.ForDiagramTarget(loaded.Schema.TargetDbms)
         );
         var (result, success) = operation(loaded);
 
@@ -141,7 +141,7 @@ public static partial class DocumentErDiagramToolHost
                     namesRefusedBefore,
                     NameLimitNotes.Find(
                         loaded.Schema,
-                        IdentifierLengthLimits.ForDbms(loaded.Schema.TargetDbms)
+                        IdentifierLengthLimits.ForDiagramTarget(loaded.Schema.TargetDbms)
                     ),
                     loaded.Schema.TargetDbms
                 ) is
@@ -349,14 +349,18 @@ public static partial class DocumentErDiagramToolHost
             }
 
             AppendPrimaryKeyOrder(sb, entity.GetReorderedPrimaryKeyColumnNames());
-            AppendUniqueConstraints(sb, entity, IdentifierLengthLimits.ForDbms(schema.TargetDbms));
+            AppendUniqueConstraints(
+                sb,
+                entity,
+                IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
+            );
         }
 
         if (schema.Relationships.Count > 0)
         {
             var ddlNames = ConstraintNames.ResolveForeignKeyNamesById(
                 schema,
-                IdentifierLengthLimits.ForDbms(schema.TargetDbms)
+                IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
             );
             sb.Append('\n');
             sb.Append("Relationships:").Append('\n');
@@ -801,7 +805,7 @@ public static partial class DocumentErDiagramToolHost
         if (duplicate is not null)
         {
             return (
-                $"A relationship '{source.TableName}' → '{target.TableName}' over the same column pairs already exists (constraint name: {DescribeConstraintNames([duplicate], ConstraintNames.ResolveForeignKeyNamesById(schema, IdentifierLengthLimits.ForDbms(schema.TargetDbms)))}). The same foreign key can be defined only once.",
+                $"A relationship '{source.TableName}' → '{target.TableName}' over the same column pairs already exists (constraint name: {DescribeConstraintNames([duplicate], ConstraintNames.ResolveForeignKeyNamesById(schema, IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)))}). The same foreign key can be defined only once.",
                 false
             );
         }
@@ -816,9 +820,9 @@ public static partial class DocumentErDiagramToolHost
             childColumnNames,
             ConstraintNames.CollectExisting(
                 schema,
-                IdentifierLengthLimits.ForDbms(schema.TargetDbms)
+                IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
             ),
-            IdentifierLengthLimits.ForDbms(schema.TargetDbms)
+            IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
         );
 
         if (nameError is not null)
@@ -1156,7 +1160,7 @@ public static partial class DocumentErDiagramToolHost
         var schema = document.Schema;
         var ddlNames = ConstraintNames.ResolveForeignKeyNamesById(
             schema,
-            IdentifierLengthLimits.ForDbms(schema.TargetDbms)
+            IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
         );
 
         var matches = schema
@@ -1326,7 +1330,7 @@ public static partial class DocumentErDiagramToolHost
                 document.Schema,
                 normalizedName,
                 existing?.Id,
-                IdentifierLengthLimits.ForDbms(document.Schema.TargetDbms)
+                IdentifierLengthLimits.ForDiagramTarget(document.Schema.TargetDbms)
             )
         )
         {

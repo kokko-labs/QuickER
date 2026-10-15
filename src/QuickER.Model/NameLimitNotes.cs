@@ -10,7 +10,7 @@ namespace QuickER.Model;
 /// <para>
 /// 判定は DDL・同期の入口と同じ <see cref="IdentifierLengthLimit.DescribeViolation"/>（写しを作らない）。
 /// 対象は図に保存された名前＝テーブル名・カラム名・外部キーと一意制約の保存された名前（QuickER が付ける既定名は生成のときに
-/// 上限へ収めるので対象外）。上限は図の対象 DBMS のもので、呼び出し側が <see cref="IdentifierLengthLimits.ForDbms"/> で引いて渡す
+/// 上限へ収めるので対象外）。上限は図の対象 DBMS のもので、呼び出し側が <see cref="IdentifierLengthLimits.ForDiagramTarget"/> で引いて渡す
 /// （Model は方言名から上限を引かない＝<c>ModelDialectLookupGuardTests</c>）。
 /// </para>
 /// <para>

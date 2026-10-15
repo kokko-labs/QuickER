@@ -7,6 +7,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.PostgreSql;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -67,7 +68,8 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             live0.Entities,
             live0.Relationships,
             new[] { parent, child },
-            new[] { rel }
+            new[] { rel },
+            TestDialectCapabilities.Neutral
         );
         diff1
             .Items.Should()
@@ -132,7 +134,8 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             live1.Entities,
             live1.Relationships,
             new[] { parentTarget, child2 },
-            new[] { relKeep }
+            new[] { relKeep },
+            TestDialectCapabilities.Neutral
         );
         diff2
             .Items.Should()
@@ -168,7 +171,8 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             live2.Entities,
             live2.Relationships,
             new[] { parentTarget3, childTarget3 },
-            new List<Relationship>() // FK 無し
+            new List<Relationship>(), // FK 無し
+            TestDialectCapabilities.Neutral
         );
         var dropFk = diff3.Items.Single(i => i.Kind == SchemaDiffKind.DropForeignKey);
         dropFk.ForeignKeyName.Should().Be("FK_child_parent"); // 制約名既知
@@ -210,7 +214,8 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             live5.Entities,
             live5.Relationships,
             new[] { childTarget5 },
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         var dropTable = diff5.Items.Single(i =>
             i.Kind == SchemaDiffKind.DropTable && i.TableName == "parent"
@@ -255,7 +260,7 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
         };
 
         var script = _builder.Build(
-            new SyncPlanner().BuildPlan(new[] { invalidAlter }, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(new[] { invalidAlter }, TestDialectCapabilities.Neutral)
         );
         var result = await _executor.ExecuteAsync(settings, script, Ct);
 
@@ -439,7 +444,7 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
     private async Task ApplyAsync(DbConnectionSettings settings, IEnumerable<SchemaDiffItem> items)
     {
         var script = _builder.Build(
-            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral)
         );
         var result = await _executor.ExecuteAsync(settings, script, Ct);
         result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
@@ -513,7 +518,8 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             live.Entities,
             live.Relationships,
             new[] { target },
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         // 一意制約の追加は既定で選択される（制約を増やすだけで既存定義を壊さないため）
         addDiff
@@ -539,7 +545,8 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             live2.Entities,
             live2.Relationships,
             new[] { target2 },
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         var drop = dropDiff
             .Items.Should()
@@ -598,7 +605,8 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             live.Entities,
             live.Relationships,
             new[] { parentTarget, childTarget },
-            new[] { targetRel }
+            new[] { targetRel },
+            TestDialectCapabilities.Neutral
         );
         var add = addDiff
             .Items.Should()
@@ -619,7 +627,8 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             live2.Entities,
             live2.Relationships,
             live2.Entities.Select(CloneAsTarget).ToArray(),
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         var drop = dropDiff
             .Items.Should()

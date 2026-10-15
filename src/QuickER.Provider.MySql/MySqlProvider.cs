@@ -42,14 +42,24 @@ public sealed class MySqlProvider : IDatabaseProvider
     public SyncDialectCapabilities SyncCapabilities { get; } =
         new()
         {
-            ColumnReorder = ColumnReorderMode.Native,
+            SupportsAlterColumn = true,
+            SupportsForeignKeyAlter = true,
+            SupportsDescriptions = true,
             AlterColumnRequiresForeignKeyRebuild = true,
+            AlterColumnRequiresKeyConstraintRebuild = false,
             ForeignKeyRequiresLeadingIndex = true,
+            PersistsForeignKeyConstraintNames = true,
+            ColumnReorder = ColumnReorderMode.Native,
+            NormalizeTypeNotation = MySqlTypeNotation.Normalize,
+            SupportsOnUpdateAction = true,
+            SupportsSetDefaultAction = false,
+            SupportsComputedColumnTypeChange = false,
+            SupportsUniqueConstraintOnPrimaryKey = true,
+            ReferencedKeyRequiresSameColumnOrder = true,
             ForeignKeyAllowsStringLengthDifference = true,
             TransactionalDdl = false,
-            SupportsSetDefaultAction = false,
-            NormalizeTypeNotation = MySqlTypeNotation.Normalize,
             IdentifierLengthLimit = MySqlIdentifier.Limit,
+            TruncatesLongIdentifiers = false,
         };
 
     /// <inheritdoc />

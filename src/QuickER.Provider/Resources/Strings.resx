@@ -179,4 +179,43 @@
   <data name="Sync_Error_RolledBack" xml:space="preserve">
     <value>{0} (The transaction was rolled back, so no changes were applied.)</value>
   </data>
+  <data name="ImportWarning_ColumnNameCollision" xml:space="preserve">
+    <value>Column "{1}" of table "{0}" was not imported because it differs from "{2}" only in letter case or surrounding spaces, and the diagram cannot keep both apart.</value>
+  </data>
+  <data name="ImportWarning_ColumnTypeNotEmittable" xml:space="preserve">
+    <value>{0}.{1}: the data type "{2}" cannot be written into SQL safely, so DDL and schema sync will refuse the whole diagram until it is corrected.</value>
+  </data>
+  <data name="ImportWarning_ComputedColumnExpressionLost" xml:space="preserve">
+    <value>{0}.{1}: imported as an ordinary column. The diagram does not model the generated-column expression, so generated DDL creates a plain column and generated code leaves it out of INSERT / UPDATE.</value>
+  </data>
+  <data name="ImportWarning_ComputedColumnExpressionLostWithExpression" xml:space="preserve">
+    <value>{0}.{1}: imported as an ordinary column. The diagram does not model the generated-column expression ({2}), so generated DDL creates a plain column and generated code leaves it out of INSERT / UPDATE.</value>
+  </data>
+  <data name="ImportWarning_DisabledConstraintExcluded" xml:space="preserve">
+    <value>{0}: the {2} constraint "{1}" is disabled and enforces nothing, so it was not imported.</value>
+  </data>
+  <data name="ImportWarning_DomainTypeFlattened" xml:space="preserve">
+    <value>{0}.{1}: imported as the base type of the domain type "{2}" (the diagram does not model domain types, so its CHECK constraints are lost).</value>
+  </data>
+  <data name="ImportWarning_ForeignKeyOutsideScope" xml:space="preserve">
+    <value>{0}: the foreign key "{1}" references "{2}", which is outside the imported scope, so no relationship was created for it.</value>
+  </data>
+  <data name="ImportWarning_PartitionDefinitionLost" xml:space="preserve">
+    <value>{0}: imported as an ordinary table. The diagram does not model partitioning, so generated DDL creates it unpartitioned.</value>
+  </data>
+  <data name="ImportWarning_PrimaryKeyNullabilityAdjusted" xml:space="preserve">
+    <value>{0}.{1}: primary key column corrected to NOT NULL. SQLite's rowid tables allow NULL there unless the primary key is a single INTEGER column (a rowid alias); if existing rows have NULL in it, syncing (table rebuild) from this diagram may fail to migrate the data.</value>
+  </data>
+  <data name="ImportWarning_TableColumnsUnavailable" xml:space="preserve">
+    <value>{0}: no columns could be read. The table was imported without columns; check that the connecting user may access it.</value>
+  </data>
+  <data name="ImportWarning_TableNameCollision" xml:space="preserve">
+    <value>"{0}" was not imported because it differs from "{1}" only in letter case or surrounding spaces, and the import cannot keep both apart.</value>
+  </data>
+  <data name="ImportWarning_TemporalHistoryTableExcluded" xml:space="preserve">
+    <value>{0}: excluded as the history table of the system-versioned table "{1}". It is not imported as an entity of its own.</value>
+  </data>
+  <data name="ImportWarning_VirtualTableExcluded" xml:space="preserve">
+    <value>{0}: excluded as a virtual table. It cannot be represented as an ordinary table, so its shadow tables were excluded along with it.</value>
+  </data>
 </root>

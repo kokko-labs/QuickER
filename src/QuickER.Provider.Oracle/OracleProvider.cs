@@ -40,13 +40,24 @@ public sealed class OracleProvider : IDatabaseProvider
     public SyncDialectCapabilities SyncCapabilities { get; } =
         new()
         {
+            SupportsAlterColumn = true,
+            SupportsForeignKeyAlter = true,
+            SupportsDescriptions = true,
+            AlterColumnRequiresForeignKeyRebuild = false,
+            AlterColumnRequiresKeyConstraintRebuild = false,
+            ForeignKeyRequiresLeadingIndex = false,
+            PersistsForeignKeyConstraintNames = true,
+            ColumnReorder = ColumnReorderMode.None,
+            NormalizeTypeNotation = OracleTypeNotation.Normalize,
             SupportsOnUpdateAction = false,
             SupportsSetDefaultAction = false,
+            SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,
+            ForeignKeyAllowsStringLengthDifference = false,
             TransactionalDdl = false,
-            NormalizeTypeNotation = OracleTypeNotation.Normalize,
             IdentifierLengthLimit = OracleIdentifier.Limit,
+            TruncatesLongIdentifiers = false,
         };
 
     /// <inheritdoc />

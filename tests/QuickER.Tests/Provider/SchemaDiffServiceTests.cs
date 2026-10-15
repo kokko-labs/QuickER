@@ -10,6 +10,7 @@ using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Services;
+using QuickER.Tests.TestSupport;
 using ProviderStrings = QuickER.Provider.Resources.Strings;
 
 namespace QuickER.Tests.Provider;
@@ -52,7 +53,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         diff.Items.Should()
             .ContainSingle(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "Customer");
@@ -72,7 +74,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         diff.Items.Should()
             .ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "Name");
@@ -96,7 +99,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         var alter = diff
             .Items.Should()
@@ -124,7 +128,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         var alter = diff
             .Items.Should()
@@ -445,7 +450,13 @@ public class SchemaDiffServiceTests
         target[0].Columns[1].IsNullable = true;
 
         new SchemaDiffService()
-            .Compute(live, new List<Relationship>(), target, new List<Relationship>())
+            .Compute(
+                live,
+                new List<Relationship>(),
+                target,
+                new List<Relationship>(),
+                TestDialectCapabilities.Neutral
+            )
             .Items.Should()
             .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn);
     }
@@ -473,7 +484,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         var drop = diff
             .Items.Should()
@@ -493,7 +505,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         diff.Items.Should()
             .ContainSingle(i => i.Kind == SchemaDiffKind.DropTable && i.TableName == "Old");
@@ -523,7 +536,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship> { rel }
+            new List<Relationship> { rel },
+            TestDialectCapabilities.Neutral
         );
 
         var fk = diff
@@ -572,7 +586,8 @@ public class SchemaDiffServiceTests
             new List<Entity> { customerLive, orderLive },
             new List<Relationship> { liveRel },
             new List<Entity> { customerTarget, orderTarget },
-            new List<Relationship> { targetRel }
+            new List<Relationship> { targetRel },
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should()
@@ -628,7 +643,8 @@ public class SchemaDiffServiceTests
             new List<Entity> { parentLive, childLive },
             new List<Relationship> { liveRel },
             new List<Entity> { parentTarget, childTarget },
-            new List<Relationship> { targetRel }
+            new List<Relationship> { targetRel },
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should()
@@ -662,7 +678,13 @@ public class SchemaDiffServiceTests
             targetName: null
         );
 
-        var diff = new SchemaDiffService().Compute(live, liveRels, target, targetRels);
+        var diff = new SchemaDiffService().Compute(
+            live,
+            liveRels,
+            target,
+            targetRels,
+            TestDialectCapabilities.Neutral
+        );
 
         diff.Items.Should().NotContain(i => IsForeignKeyDiff(i));
     }
@@ -705,7 +727,13 @@ public class SchemaDiffServiceTests
             targetName: "fk_new"
         );
 
-        var diff = new SchemaDiffService().Compute(live, liveRels, target, targetRels);
+        var diff = new SchemaDiffService().Compute(
+            live,
+            liveRels,
+            target,
+            targetRels,
+            TestDialectCapabilities.Neutral
+        );
 
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey);
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey);
@@ -756,7 +784,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         diff.Items.Should().BeEmpty();
     }
@@ -774,7 +803,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         var item = diff
@@ -807,7 +837,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         var item = diff
@@ -832,7 +863,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         diff.Items.Should().BeEmpty();
     }
@@ -854,7 +886,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddTable);
@@ -893,7 +926,7 @@ public class SchemaDiffServiceTests
         target[0].Columns[1].Description = "新列説明";
         target[1].Description = "新規テーブルの説明";
 
-        var capabilities = new SyncDialectCapabilities { SupportsDescriptions = false };
+        var capabilities = TestDialectCapabilities.Neutral with { SupportsDescriptions = false };
 
         var diff = new SchemaDiffService().Compute(
             live,
@@ -941,7 +974,7 @@ public class SchemaDiffServiceTests
             ConstraintName = null,
         };
 
-        var capabilities = new SyncDialectCapabilities
+        var capabilities = TestDialectCapabilities.Neutral with
         {
             PersistsForeignKeyConstraintNames = false,
         };
@@ -992,7 +1025,8 @@ public class SchemaDiffServiceTests
             new List<Entity> { parentLive, childLive },
             new List<Relationship> { liveRel },
             new List<Entity> { parentTarget, childTarget },
-            new List<Relationship> { targetRel }
+            new List<Relationship> { targetRel },
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.DropForeignKey);
@@ -1036,7 +1070,10 @@ public class SchemaDiffServiceTests
             new List<Relationship>(),
             target,
             new List<Relationship>(),
-            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native }
+            TestDialectCapabilities.Neutral with
+            {
+                ColumnReorder = ColumnReorderMode.Native,
+            }
         );
 
         var reorder = diff
@@ -1061,7 +1098,7 @@ public class SchemaDiffServiceTests
             new List<Relationship>(),
             target,
             new List<Relationship>(),
-            new SyncDialectCapabilities
+            TestDialectCapabilities.Neutral with
             {
                 SupportsAlterColumn = false,
                 SupportsForeignKeyAlter = false,
@@ -1086,7 +1123,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         diffDefault.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
 
@@ -1096,7 +1134,10 @@ public class SchemaDiffServiceTests
             new List<Relationship>(),
             target,
             new List<Relationship>(),
-            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.None }
+            TestDialectCapabilities.Neutral with
+            {
+                ColumnReorder = ColumnReorderMode.None,
+            }
         );
         diffNone.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
     }
@@ -1139,7 +1180,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         // 主キー以外は同一のため、差分は AlterPrimaryKey の 1 件だけになる
@@ -1174,7 +1216,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         var item = diff
@@ -1206,7 +1249,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         var item = diff.Items.Should().ContainSingle().Which;
@@ -1240,7 +1284,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         var item = diff
@@ -1276,7 +1321,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AlterPrimaryKey);
@@ -1319,7 +1365,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         var item = diff
@@ -1345,7 +1392,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         var item = diff
@@ -1467,7 +1515,7 @@ public class SchemaDiffServiceTests
                 new List<Relationship>(),
                 [target],
                 new List<Relationship>(),
-                capabilities
+                capabilities ?? TestDialectCapabilities.Neutral
             )
             .Items;
 
@@ -1573,7 +1621,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should()
@@ -1600,7 +1649,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should()
@@ -1623,7 +1673,8 @@ public class SchemaDiffServiceTests
             new List<Entity> { CustomerTable() },
             new List<Relationship>(),
             new List<Entity> { targetTable },
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AddUniqueConstraint);
@@ -1663,7 +1714,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         var item = diff.Items.Should().ContainSingle().Which;
@@ -1682,7 +1734,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should().BeEmpty();
@@ -1700,7 +1753,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should().BeEmpty();
@@ -1733,7 +1787,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should()
@@ -1761,7 +1816,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Select(i => (i.Kind, i.TableName))
@@ -1790,7 +1846,8 @@ public class SchemaDiffServiceTests
             live,
             new List<Relationship>(),
             target,
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should().BeEmpty();
@@ -1830,7 +1887,8 @@ public class SchemaDiffServiceTests
             [liveOrders, liveCustomers],
             [],
             [targetOrders, targetCustomers, targetItems],
-            [relationship]
+            [relationship],
+            TestDialectCapabilities.Neutral
         );
 
         var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterColumn);
@@ -1866,7 +1924,13 @@ public class SchemaDiffServiceTests
         var live = Tbl("orders", ("id", "int", true), ("name", "varchar(50)", false));
         var target = Tbl("orders", ("id", "int", true), ("name", "varchar(100)", false));
 
-        var diff = new SchemaDiffService().Compute([live], [], [target], []);
+        var diff = new SchemaDiffService().Compute(
+            [live],
+            [],
+            [target],
+            [],
+            TestDialectCapabilities.Neutral
+        );
 
         var alter = diff.Items.Single(i => i.Kind == SchemaDiffKind.AlterColumn);
         alter.Entity.Should().BeSameAs(target);
@@ -1914,7 +1978,13 @@ public class SchemaDiffServiceTests
         var (targetB, targetBRels) = ForeignKeyDiagram("P", "Q|C", "FK_X");
 
         var items = new SchemaDiffService()
-            .Compute([.. liveA, .. liveB], liveARels, [.. targetA, .. targetB], targetBRels)
+            .Compute(
+                [.. liveA, .. liveB],
+                liveARels,
+                [.. targetA, .. targetB],
+                targetBRels,
+                TestDialectCapabilities.Neutral
+            )
             .Items;
 
         items
@@ -1938,7 +2008,13 @@ public class SchemaDiffServiceTests
         target.Columns[0].IsNullable = true;
 
         new SchemaDiffService()
-            .Compute([live], new List<Relationship>(), [target], new List<Relationship>())
+            .Compute(
+                [live],
+                new List<Relationship>(),
+                [target],
+                new List<Relationship>(),
+                TestDialectCapabilities.Neutral
+            )
             .Items.Should()
             .BeEmpty();
     }
@@ -1953,7 +2029,13 @@ public class SchemaDiffServiceTests
         target.Description = new string('a', 29) + "𠮷" + "b";
 
         var description = new SchemaDiffService()
-            .Compute([live], new List<Relationship>(), [target], new List<Relationship>())
+            .Compute(
+                [live],
+                new List<Relationship>(),
+                [target],
+                new List<Relationship>(),
+                TestDialectCapabilities.Neutral
+            )
             .Items.Should()
             .ContainSingle(i => i.Kind == SchemaDiffKind.SetTableDescription)
             .Which.Description;

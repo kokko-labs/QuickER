@@ -38,9 +38,22 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
     public SyncDialectCapabilities SyncCapabilities { get; } =
         new()
         {
+            SupportsAlterColumn = true,
+            SupportsForeignKeyAlter = true,
+            SupportsDescriptions = true,
+            AlterColumnRequiresForeignKeyRebuild = false,
+            AlterColumnRequiresKeyConstraintRebuild = false,
+            ForeignKeyRequiresLeadingIndex = false,
+            PersistsForeignKeyConstraintNames = true,
+            ColumnReorder = ColumnReorderMode.None,
             NormalizeTypeNotation = PostgreSqlTypeNotation.Normalize,
+            SupportsOnUpdateAction = true,
+            SupportsSetDefaultAction = true,
             SupportsComputedColumnTypeChange = true,
+            SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = false,
+            ForeignKeyAllowsStringLengthDifference = false,
+            TransactionalDdl = true,
             IdentifierLengthLimit = PgIdentifier.Limit,
             TruncatesLongIdentifiers = true,
         };

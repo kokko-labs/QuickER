@@ -5,6 +5,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -62,7 +63,8 @@ public class SchemaDiffDialectNormalizationTests
             [Table("t", live)],
             [],
             [Table("t", target)],
-            []
+            [],
+            TestDialectCapabilities.Neutral
         );
 
         withDialect.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AlterColumn);
@@ -126,11 +128,12 @@ public class SchemaDiffDialectNormalizationTests
     }
 
     /// <summary>ON UPDATE と ON DELETE SET DEFAULT を持たない方言（Oracle）の宣言を模した capabilities</summary>
-    private static readonly SyncDialectCapabilities NoOnUpdateNoSetDefault = new()
-    {
-        SupportsOnUpdateAction = false,
-        SupportsSetDefaultAction = false,
-    };
+    private static readonly SyncDialectCapabilities NoOnUpdateNoSetDefault =
+        TestDialectCapabilities.Neutral with
+        {
+            SupportsOnUpdateAction = false,
+            SupportsSetDefaultAction = false,
+        };
 
     /// <summary>
     /// ON UPDATE と ON DELETE SET DEFAULT を持たない方言では、図のそれらを実効値（NO ACTION）として比べるので、
@@ -164,7 +167,7 @@ public class SchemaDiffDialectNormalizationTests
             liveRels,
             target,
             targetRels,
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         folded.Items.Should().NotContain(i => IsForeignKeyDiff(i));

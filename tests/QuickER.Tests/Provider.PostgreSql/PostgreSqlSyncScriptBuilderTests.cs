@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.PostgreSql;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider.PostgreSql;
 
@@ -10,7 +11,7 @@ public class PostgreSqlSyncScriptBuilderTests
 {
     private static string Build(params SchemaDiffItem[] items) =>
         new PostgreSqlSyncScriptBuilder().Build(
-            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral)
         );
 
     /// <summary>AddTable が主キー制約を含む CREATE TABLE 文を生成し、GO を使わないことを検証する</summary>

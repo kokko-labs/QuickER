@@ -273,9 +273,15 @@ public static class IdentifierLengthLimits
     /// <summary>SQLite</summary>
     public static IdentifierLengthLimit Sqlite { get; } = IdentifierLengthLimit.Unlimited;
 
-    /// <summary>方言名（図の対象 DBMS の値。<see cref="DialectNames"/>）から上限を引く。知らない方言は上限なし。</summary>
-    /// <remarks>方言名の照合は、方言プロバイダーの解決と同じく大文字小文字を区別しない。</remarks>
-    public static IdentifierLengthLimit ForDbms(string? dbms)
+    /// <summary>方言名（<see cref="DialectNames"/>）から上限を引く。知らない方言名は例外にする。</summary>
+    /// <param name="dbms">方言名（プロバイダの名前など、方言が決まっている値）</param>
+    /// <remarks>
+    /// 方言名の照合は、方言プロバイダーの解決と同じく大文字小文字を区別しない。方言の宣言は既定値を持たないので、
+    /// 知らない方言名を「上限なし」へ黙って倒さない。図から取った方言名（手で編集した図は知らない名前を持ち得る）は
+    /// <see cref="ForDiagramTarget"/> を通す。
+    /// </remarks>
+    /// <exception cref="ArgumentException">知らない方言名</exception>
+    public static IdentifierLengthLimit ForDbms(string dbms)
     {
         foreach (var (name, limit) in ByDbms)
         {
@@ -285,8 +291,20 @@ public static class IdentifierLengthLimits
             }
         }
 
-        return IdentifierLengthLimit.Unlimited;
+        throw new ArgumentException($"Unknown dialect name: '{dbms}'.", nameof(dbms));
     }
+
+    /// <summary>図の対象 DBMS（図の <c>TargetDbms</c>）から上限を引く。知らない方言名なら上限を検査しない。</summary>
+    /// <param name="targetDbms">図の対象 DBMS の値</param>
+    /// <remarks>
+    /// 図の読込は知らない方言名を断らない（手で編集した図や、新しい版が足した方言の図を開けるようにするため）。
+    /// 方言が分からなければ、その方言が受け付ける名前も分からないので、上限を検査しない（何も断らず、既定名も縮めない）。
+    /// 知らない方言名をこの扱いにするのはこの関数だけで、方言が決まっている呼び出しは <see cref="ForDbms"/> を使う。
+    /// </remarks>
+    public static IdentifierLengthLimit ForDiagramTarget(string? targetDbms) =>
+        DialectNames.Find(targetDbms?.Trim()) is { } name
+            ? ForDbms(name)
+            : IdentifierLengthLimit.Unlimited;
 
     /// <summary>方言名と上限の表</summary>
     private static readonly (string Name, IdentifierLengthLimit Limit)[] ByDbms =

@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.Oracle;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider.Oracle;
 
@@ -31,7 +32,7 @@ public class OracleCommentStatementTests
             IsSelected = true,
         };
 
-        var plan = new SyncPlanner().BuildPlan([item], new SyncDialectCapabilities());
+        var plan = new SyncPlanner().BuildPlan([item], TestDialectCapabilities.Neutral);
         return new OracleSyncScriptBuilder().Build(plan).ReplaceLineEndings("\n");
     }
 

@@ -68,7 +68,7 @@ public static partial class TableDefinitionDocumentImporter
         ConstraintNames.NameUnnamedForeignKeys(
             entities.Values,
             relationships,
-            IdentifierLengthLimits.ForDbms(targetDbms)
+            IdentifierLengthLimits.ForDiagramTarget(targetDbms)
         );
 
         return new ErDiagram

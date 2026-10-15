@@ -10,7 +10,7 @@ namespace QuickER.Provider;
 /// <remarks>
 /// <para>
 /// 表示文言は持たない（言語中立）。GUI（DB 取込の完了通知）と CLI（<c>scaffold</c> の stderr）が
-/// それぞれ自前の resx で整形する＝<see cref="SyncPlanWarningKind"/> と同じ流儀。
+/// 同じ文言を出す（文言は <see cref="SchemaImportWarningText"/> に 1 つだけ置く）。
 /// </para>
 /// <para>
 /// ここに載るのは「取込自体は成功しているが、DB の宣言と図の間に説明できる差が生まれた」ものだけで、
@@ -181,7 +181,7 @@ public enum SchemaImportWarningKind
 /// 取込で意味モデルへ宣言どおりには写し取れなかった箇所の構造化警告（取込自体は成功している）。
 /// </summary>
 /// <remarks>
-/// <see cref="SyncPlanWarning"/> と同じ「言語中立 record ＋ 表示側で resx 文言化」の形。
+/// 言語中立の record で、文言は <see cref="SchemaImportWarningText.Describe"/> が UI 言語で作る。
 /// <see cref="Subject"/> / <see cref="Detail"/> の意味は <see cref="Kind"/> ごとに決まる
 /// （各 <see cref="SchemaImportWarningKind"/> の XmlDoc が正本）。
 /// </remarks>

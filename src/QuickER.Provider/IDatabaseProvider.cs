@@ -39,7 +39,7 @@ public sealed class SchemaImportResult
     /// </summary>
     /// <remarks>
     /// 表示文言は持たない（言語中立）ため、GUI（DB 取込の完了通知）と CLI（<c>scaffold</c> の stderr）が
-    /// 各自の resx で整形する。警告が無い取込では空のまま＝従来どおり単文の完了通知になる。
+    /// <see cref="SchemaImportWarningText.Describe"/> で同じ文言にする。警告が無い取込では空のまま＝従来どおり単文の完了通知になる。
     /// </remarks>
     public IReadOnlyList<SchemaImportWarning> Warnings { get; init; } = [];
 }
