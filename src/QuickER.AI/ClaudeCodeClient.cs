@@ -432,7 +432,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
     /// </summary>
     private static ProcessStartInfo CreateStartInfo(string executable, string workingDirectory)
     {
-        var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        var utf8NoBom = TextEncodings.Utf8NoBomLenient;
 
         var startInfo = new ProcessStartInfo
         {
@@ -487,11 +487,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         Directory.CreateDirectory(SystemPromptDirectory);
 
         var path = Path.Combine(SystemPromptDirectory, $"{Guid.NewGuid():N}.txt");
-        File.WriteAllText(
-            path,
-            systemPrompt,
-            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-        );
+        File.WriteAllText(path, systemPrompt, TextEncodings.Utf8NoBomLenient);
 
         startInfo.ArgumentList.Add("--append-system-prompt-file");
         startInfo.ArgumentList.Add(path);

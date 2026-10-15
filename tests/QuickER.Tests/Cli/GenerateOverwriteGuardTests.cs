@@ -47,7 +47,7 @@ public sealed class GenerateOverwriteGuardTests : IDisposable
             }
         );
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(_schemaPath, document);
+        JsonStorageService.SaveAtomic(_schemaPath, document);
     }
 
     public void Dispose()

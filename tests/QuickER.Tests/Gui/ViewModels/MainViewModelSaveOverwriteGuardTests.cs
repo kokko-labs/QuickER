@@ -45,7 +45,7 @@ public sealed class MainViewModelSaveOverwriteGuardTests : IDisposable
     /// <summary>単一テーブルの図をファイルへ書き出し、その内容ハッシュを返す（外部書き込みの模擬）</summary>
     private static string WriteDiagram(string path, string tableName)
     {
-        JsonStorageService.Save(
+        JsonStorageService.SaveAtomic(
             path,
             new DiagramDocument
             {

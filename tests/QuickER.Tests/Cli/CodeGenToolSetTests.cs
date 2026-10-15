@@ -45,7 +45,7 @@ public class CodeGenToolSetTests
         );
         entity.Columns.Add(new Column { Name = "Name", DataType = "nvarchar(100)" });
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(file, document);
+        JsonStorageService.SaveAtomic(file, document);
 
         return (file, root);
     }

@@ -172,6 +172,9 @@ The CLI's `quicker reverse` writes a fresh, merge-free diagram (schema-only JSON
 
 Choose a format from the "Export" button.
 The diagram file that is open cannot be the target, whatever the format: the export writes nothing and says so (use Save for the diagram itself).
+Writes are atomic: the export writes everything to a temporary file in the same folder and then swaps it in, so a failure partway leaves the existing file intact.
+While it writes, a `name.<GUID>.tmp` file appears briefly in the target folder (a tool that watches the folder for changes may notice it).
+If the target is a symbolic link to a file, the link itself is replaced by a regular file instead of the file it points to.
 
 ### SQL DDL (.sql)
 

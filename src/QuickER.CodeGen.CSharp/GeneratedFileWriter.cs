@@ -1,5 +1,6 @@
 using System.Text;
 using QuickER.CodeGen.CSharp.Resources;
+using QuickER.Platform;
 
 namespace QuickER.CodeGen.CSharp;
 
@@ -43,11 +44,7 @@ public sealed class GeneratedFileWriter
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
             // BOM なし UTF-8 で出力する（git 差分やツール間の互換性を考慮）
-            File.WriteAllText(
-                path,
-                file.Content,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            );
+            AtomicFile.WriteAllText(path, file.Content, TextEncodings.Utf8NoBomLenient);
             writtenPaths.Add(path);
         }
 

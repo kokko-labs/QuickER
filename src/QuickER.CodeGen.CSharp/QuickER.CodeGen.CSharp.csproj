@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
+    <ProjectReference Include="..\QuickER.Platform\QuickER.Platform.csproj" />
   </ItemGroup>
 
   <ItemGroup>

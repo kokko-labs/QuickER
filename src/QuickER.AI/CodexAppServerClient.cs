@@ -5,6 +5,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using QuickER.AI.Resources;
+using QuickER.Platform;
 
 namespace QuickER.AI;
 
@@ -356,15 +357,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             UseShellExecute = false,
             CreateNoWindow = true,
             // BOM なし UTF-8 を使用する（BOM 付きだとサーバー側のJSONパースが失敗するため）
-            StandardInputEncoding = new System.Text.UTF8Encoding(
-                encoderShouldEmitUTF8Identifier: false
-            ),
-            StandardOutputEncoding = new System.Text.UTF8Encoding(
-                encoderShouldEmitUTF8Identifier: false
-            ),
-            StandardErrorEncoding = new System.Text.UTF8Encoding(
-                encoderShouldEmitUTF8Identifier: false
-            ),
+            StandardInputEncoding = TextEncodings.Utf8NoBomLenient,
+            StandardOutputEncoding = TextEncodings.Utf8NoBomLenient,
+            StandardErrorEncoding = TextEncodings.Utf8NoBomLenient,
         };
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };

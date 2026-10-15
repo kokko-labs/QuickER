@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Xml;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.ViewModels;
 
 namespace QuickER.Services;
@@ -105,8 +106,7 @@ public static class ImageExportService
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(rtb));
 
-        using var fs = File.Create(path);
-        encoder.Save(fs);
+        AtomicFile.Write(path, encoder.Save);
 
         return new PngExportResult(sourceWidth, sourceHeight, pixelWidth, pixelHeight);
     }
@@ -182,7 +182,7 @@ public static class ImageExportService
     /// <param name="vm">対象の <see cref="MainViewModel"/></param>
     /// <param name="path">出力先パス</param>
     public static void ExportSvg(MainViewModel vm, string path) =>
-        File.WriteAllText(path, BuildSvg(vm), Encoding.UTF8);
+        AtomicFile.WriteAllText(path, BuildSvg(vm), Encoding.UTF8);
 
     // SVG の text はベースライン Y 指定のため、テキスト上端へフォントサイズ相当のオフセットを加える
     private const double BodyBaselineOffset = 13;

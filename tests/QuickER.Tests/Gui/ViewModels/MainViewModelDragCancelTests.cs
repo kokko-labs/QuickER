@@ -67,7 +67,7 @@ public sealed class MainViewModelDragCancelTests : IDisposable
             },
             Layout = null,
         };
-        JsonStorageService.Save(path, document);
+        JsonStorageService.SaveAtomic(path, document);
         return DocumentContentHash.TryCompute(path)!;
     }
 

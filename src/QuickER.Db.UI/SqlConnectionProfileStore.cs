@@ -548,7 +548,7 @@ public class SqlConnectionProfileStore
                 scope: DataProtectionScope.CurrentUser
             )
             : raw;
-        File.WriteAllBytes(path, bytes);
+        AtomicFile.WriteAllBytes(path, bytes);
     }
 
     /// <summary>プロファイル ID に対応する暗号ファイルを削除する</summary>

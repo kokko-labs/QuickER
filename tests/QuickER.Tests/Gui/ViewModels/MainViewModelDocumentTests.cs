@@ -315,7 +315,7 @@ public class MainViewModelDocumentTests : IDisposable
         var autoSave = Path.Combine(_folder, "last_diagram.json");
         var duplicated = Guid.NewGuid();
 
-        JsonStorageService.Save(
+        JsonStorageService.SaveAtomic(
             autoSave,
             new DiagramDocument
             {

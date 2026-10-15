@@ -55,7 +55,7 @@ public static class ApiKeyStore
             optionalEntropy: null,
             scope: DataProtectionScope.CurrentUser
         );
-        File.WriteAllBytes(p, encrypted);
+        AtomicFile.WriteAllBytes(p, encrypted);
     }
 
     /// <summary>名前付きで保存された API キーを復号して返す</summary>

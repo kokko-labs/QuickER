@@ -6,6 +6,7 @@
         "type": "Project",
         "dependencies": {
           "QuickER.Model": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "Scriban": "[7.4.0, )"
         }
       },
@@ -17,6 +18,9 @@
         "dependencies": {
           "QuickER.Dialects": "[0.2.0, )"
         }
+      },
+      "quicker.platform": {
+        "type": "Project"
       },
       "Scriban": {
         "type": "CentralTransitive",

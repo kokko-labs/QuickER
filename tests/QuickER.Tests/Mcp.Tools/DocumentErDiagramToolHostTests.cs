@@ -832,7 +832,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         var orderId = order.Id;
         document.Layout ??= new();
         document.Layout[orderId] = new EntityLayout { X = 10, Y = 20 };
-        JsonStorageService.Save(file, document);
+        JsonStorageService.SaveAtomic(file, document);
 
         var (_, success) = Exec("remove_entity", file, new { table_name = "Order" });
 
@@ -856,7 +856,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         var book = document.Schema.Entities.Single();
         document.Layout ??= new();
         document.Layout[book.Id] = new EntityLayout { X = 111, Y = 222 };
-        JsonStorageService.Save(file, document);
+        JsonStorageService.SaveAtomic(file, document);
 
         Exec(
             "add_column",
@@ -887,7 +887,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
         document.Schema.Queries.Add(
             new QueryDefinition { Name = "GetAllBooks", EntityId = book.Id }
         );
-        JsonStorageService.Save(file, document);
+        JsonStorageService.SaveAtomic(file, document);
 
         Exec("add_entity", file, new { table_name = "Author" });
 
@@ -1293,5 +1293,5 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
 
     /// <summary>JsonStorageService をそのまま使い、任意バージョンの文書をファイルへ保存する</summary>
     private static void SaveRaw(string file, DiagramDocument document) =>
-        JsonStorageService.Save(file, document);
+        JsonStorageService.SaveAtomic(file, document);
 }

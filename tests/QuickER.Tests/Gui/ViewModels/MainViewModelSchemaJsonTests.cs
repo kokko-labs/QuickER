@@ -101,7 +101,7 @@ public class MainViewModelSchemaJsonTests
 
         try
         {
-            JsonStorageService.Save(path, document);
+            JsonStorageService.SaveAtomic(path, document);
 
             var vm = new MainViewModel(
                 new StubDialogService(),

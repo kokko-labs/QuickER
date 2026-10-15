@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using QuickER.AI.Mock.Resources;
+using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
 
@@ -716,11 +717,7 @@ public sealed class MockProjectAgentRunner
                 Directory.CreateDirectory(directory);
             }
 
-            File.WriteAllText(
-                logPath,
-                content,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            );
+            AtomicFile.WriteAllText(logPath, content, TextEncodings.Utf8NoBomLenient);
         }
         catch (IOException)
         {

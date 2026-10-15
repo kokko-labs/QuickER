@@ -1,6 +1,7 @@
 using System.Globalization;
 using ClosedXML.Excel;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Resources;
 
 namespace QuickER.Services;
@@ -63,7 +64,7 @@ public static class TableDefinitionDocumentExporter
     public static void SaveTo(ErDiagram diagram, string path)
     {
         using var workbook = BuildWorkbook(diagram);
-        workbook.SaveAs(path);
+        AtomicFile.Write(path, stream => workbook.SaveAs(stream));
     }
 
     /// <summary>ブック全体の基本書式を設定する</summary>

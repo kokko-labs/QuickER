@@ -57,7 +57,7 @@ public sealed class MainViewModelDiscardConfirmTests : IDisposable
             },
             Layout = null,
         };
-        JsonStorageService.Save(path, document);
+        JsonStorageService.SaveAtomic(path, document);
     }
 
     /// <summary>指定内容の図を書き出してから、その図を開いた（現在パス紐付き・クリーン）VM を返す</summary>
@@ -276,7 +276,7 @@ public sealed class MainViewModelDiscardConfirmTests : IDisposable
             );
         }
 
-        JsonStorageService.Save(path, new DiagramDocument { Schema = schema, Layout = null });
+        JsonStorageService.SaveAtomic(path, new DiagramDocument { Schema = schema, Layout = null });
     }
 
     /// <summary><see cref="BuildCustomerEntity"/> と構造署名が一致する Mermaid ファイルを書き出す</summary>

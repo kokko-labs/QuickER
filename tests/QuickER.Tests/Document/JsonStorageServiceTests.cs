@@ -48,7 +48,7 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(path, vm.ToDocument());
+            JsonStorageService.SaveAtomic(path, vm.ToDocument());
             File.Exists(path).Should().BeTrue();
 
             var loaded = JsonStorageService.Load(path);
@@ -149,7 +149,7 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(path, document);
+            JsonStorageService.SaveAtomic(path, document);
             var loaded = JsonStorageService
                 .Load(path)
                 .Schema.Queries.Should()
@@ -229,7 +229,7 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(path, document);
+            JsonStorageService.SaveAtomic(path, document);
             var json = File.ReadAllText(path);
 
             json.Should().NotContain("\"ScalarType\"", "null プロパティはキーごと省略される");
@@ -538,7 +538,7 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(path, document);
+            JsonStorageService.SaveAtomic(path, document);
             var json = File.ReadAllText(path);
 
             json.Should().NotContain("\"Layout\"", "スキーマのみ文書は layout キーを出力しない");
@@ -600,14 +600,14 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(
+            JsonStorageService.SaveAtomic(
                 path,
                 new DiagramDocument { Version = DiagramDocument.CurrentVersion + 1 }
             );
 
             JsonStorageService.Load(path).IsNewerFormat.Should().BeTrue();
 
-            JsonStorageService.Save(path, new DiagramDocument());
+            JsonStorageService.SaveAtomic(path, new DiagramDocument());
 
             JsonStorageService.Load(path).IsNewerFormat.Should().BeFalse();
         }
@@ -705,7 +705,7 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(path, BuildDocument("Old", DiagramDocument.CurrentVersion));
+            JsonStorageService.SaveAtomic(path, BuildDocument("Old", DiagramDocument.CurrentVersion));
             JsonStorageService.SaveAtomic(
                 path,
                 BuildDocument("New", DiagramDocument.CurrentVersion)
@@ -773,7 +773,7 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(
+            JsonStorageService.SaveAtomic(
                 plainPath,
                 BuildDocument("Customer", DiagramDocument.CurrentVersion)
             );
@@ -850,7 +850,7 @@ public class JsonStorageServiceTests
                 Entities = { new Entity { TableName = "T1" } },
             },
         };
-        JsonStorageService.Save(path, document);
+        JsonStorageService.SaveAtomic(path, document);
         return path;
     }
 

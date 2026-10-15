@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using QuickER.Model;
+using QuickER.Platform;
 
 namespace QuickER.Services;
 
@@ -72,7 +73,7 @@ public static partial class MermaidExporter
     /// <summary>Mermaid 文字列をファイルへ保存し、この形式では表現できず落ちた情報の種類を返す</summary>
     public static IReadOnlyList<ExportOmissionKind> SaveTo(ErDiagram diagram, string path)
     {
-        File.WriteAllText(path, Build(diagram), Encoding.UTF8);
+        AtomicFile.WriteAllText(path, Build(diagram), Encoding.UTF8);
 
         return DetectOmissions(diagram);
     }

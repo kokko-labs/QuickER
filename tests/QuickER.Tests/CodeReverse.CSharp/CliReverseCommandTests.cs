@@ -430,7 +430,7 @@ public class CliReverseCommandTests
         var (sourcePath, outPath, root) = CreateGeneratedSource();
         var existing = new DiagramDocument();
         existing.Schema.Entities.Add(new Entity { TableName = "kept" });
-        JsonStorageService.Save(outPath, existing);
+        JsonStorageService.SaveAtomic(outPath, existing);
         var before = File.ReadAllText(outPath);
         var stdout = new StringWriter();
         var stderr = new StringWriter();
@@ -463,7 +463,7 @@ public class CliReverseCommandTests
         var (sourcePath, outPath, root) = CreateGeneratedSource();
         var existing = new DiagramDocument();
         existing.Schema.Entities.Add(new Entity { TableName = "kept" });
-        JsonStorageService.Save(outPath, existing);
+        JsonStorageService.SaveAtomic(outPath, existing);
 
         try
         {

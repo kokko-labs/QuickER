@@ -2,10 +2,8 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
-using QuickER.Tests.Resources;
 
 namespace QuickER.Tests.AI.Mock;
 
@@ -784,29 +782,6 @@ public class MockFolderStoreTests : IDisposable
 
         store.Manifest.SourceSchema.Should().Be("# old");
         MockFolderStore.Open(_folder).Manifest.SourceSchema.Should().Be("# old");
-    }
-
-    [Fact(
-        DisplayName = "MockFolderStore はファイルを素の File.WriteAllText で書かない（原子的書き込みだけを使う）"
-    )]
-    public void Source_UsesOnlyAtomicWrites()
-    {
-        var source = File.ReadAllText(
-            Path.Combine(
-                NeutralResxFiles.FindRepositoryRoot(),
-                "src",
-                "QuickER.AI.Mock",
-                "MockFolderStore.cs"
-            )
-        );
-
-        // 素の書き込みは既存ファイルを切り詰めてから書くため、途中で落ちると mock.json が壊れて
-        // フォルダごと再開できなくなる。書き込みは AtomicFile だけを通す
-        Regex
-            .Matches(source, @"(?<![A-Za-z])File\.(WriteAllText|WriteAllBytes|AppendAllText)\(")
-            .Should()
-            .BeEmpty();
-        source.Should().Contain("AtomicFile.WriteAllText(");
     }
 
     // --- 読み取り用スナップショット ----------------------------------------

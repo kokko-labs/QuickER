@@ -177,7 +177,7 @@ public class CodeGenToolSetLanguageTests
         );
         entity.Columns.Add(new Column { Name = "Name", DataType = "TEXT" });
         document.Schema.Entities.Add(entity);
-        JsonStorageService.Save(Path.Combine(root, "diagram.json"), document);
+        JsonStorageService.SaveAtomic(Path.Combine(root, "diagram.json"), document);
 
         return root;
     }

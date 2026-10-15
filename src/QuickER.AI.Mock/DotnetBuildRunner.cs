@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using QuickER.AI.Mock.Resources;
+using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
 
@@ -143,7 +144,7 @@ public sealed class DotnetBuildRunner : IBuildRunner
     /// </remarks>
     private static ProcessStartInfo CreateStartInfo(string workingDirectory)
     {
-        var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        var utf8NoBom = TextEncodings.Utf8NoBomLenient;
 
         return new ProcessStartInfo
         {

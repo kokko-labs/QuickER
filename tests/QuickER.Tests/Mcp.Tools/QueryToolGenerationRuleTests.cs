@@ -589,7 +589,7 @@ public sealed class QueryToolGenerationRuleTests : IDisposable
         {
             Schema = new ErDiagram { TargetDbms = "sqlserver", Entities = { CreateOrder() } },
         };
-        JsonStorageService.Save(file, document);
+        JsonStorageService.SaveAtomic(file, document);
 
         if (existingArguments is not null)
         {

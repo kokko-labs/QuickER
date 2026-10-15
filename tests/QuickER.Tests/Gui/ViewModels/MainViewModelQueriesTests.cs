@@ -56,7 +56,7 @@ public class MainViewModelQueriesTests
         };
 
         var path = Path.Combine(Path.GetTempPath(), $"er-vm-query-{Guid.NewGuid()}.json");
-        JsonStorageService.Save(path, document);
+        JsonStorageService.SaveAtomic(path, document);
         return path;
     }
 

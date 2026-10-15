@@ -236,7 +236,7 @@ public static class CrashHandlingService
 
         // File.WriteAllText と同じ BOM なし UTF-8 で書く
         using (stream)
-        using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+        using (var writer = new StreamWriter(stream, TextEncodings.Utf8NoBomLenient))
         {
             writer.Write(content);
         }

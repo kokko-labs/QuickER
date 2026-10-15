@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using QuickER.AI;
 using QuickER.AI.Mock.Resources;
+using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
 
@@ -372,11 +373,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
                 Directory.CreateDirectory(directory);
             }
 
-            File.WriteAllText(
-                resolved.FullPath,
-                content,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-            );
+            AtomicFile.WriteAllText(resolved.FullPath, content, TextEncodings.Utf8NoBomLenient);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

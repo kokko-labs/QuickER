@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Provider;
 
 namespace QuickER.AI.Mock;
@@ -493,7 +494,7 @@ public sealed class MockProjectScaffoldService
         foreach (var source in Directory.EnumerateFiles(mockFolder))
         {
             var destination = Path.Combine(designFolder, Path.GetFileName(source));
-            File.Copy(source, destination, overwrite: true);
+            AtomicFile.WriteAllBytes(destination, File.ReadAllBytes(source));
             written.Add(destination);
         }
     }
@@ -508,7 +509,7 @@ public sealed class MockProjectScaffoldService
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(path, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        AtomicFile.WriteAllText(path, content, TextEncodings.Utf8NoBomLenient);
         written.Add(path);
     }
 }

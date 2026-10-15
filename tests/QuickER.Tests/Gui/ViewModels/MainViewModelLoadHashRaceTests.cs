@@ -53,7 +53,7 @@ public sealed class MainViewModelLoadHashRaceTests : IDisposable
     /// <summary>単一テーブルの図をファイルへ書き出し、その内容ハッシュを返す（外部プロセスの書き込みを模す）</summary>
     private static string WriteDiagram(string path, string tableName)
     {
-        JsonStorageService.Save(path, CreateDocument(tableName));
+        JsonStorageService.SaveAtomic(path, CreateDocument(tableName));
         return DocumentContentHash.TryCompute(path)!;
     }
 

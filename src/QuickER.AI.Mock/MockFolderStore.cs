@@ -20,7 +20,7 @@ namespace QuickER.AI.Mock;
 public sealed class MockFolderStore
 {
     /// <summary>BOM なし UTF-8 エンコーディング（全書き出しで共用）</summary>
-    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+    private static readonly Encoding Utf8NoBom = TextEncodings.Utf8NoBomLenient;
 
     /// <summary>対象フォルダ</summary>
     private readonly string _folder;

@@ -81,7 +81,7 @@ public sealed class MainViewModelExternalChangeTests : IDisposable
             },
             Layout = null,
         };
-        JsonStorageService.Save(path, document);
+        JsonStorageService.SaveAtomic(path, document);
         return DocumentContentHash.TryCompute(path)!;
     }
 
