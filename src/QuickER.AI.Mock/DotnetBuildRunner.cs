@@ -171,7 +171,7 @@ public sealed class DotnetBuildRunner : IBuildRunner
         CancellationToken cancellationToken
     )
     {
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        using var process = ExternalLauncher.CreateProcess(startInfo);
 
         if (!process.Start())
         {

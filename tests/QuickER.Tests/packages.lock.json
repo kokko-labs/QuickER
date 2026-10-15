@@ -939,7 +939,8 @@
           "QuickER.Gui.Abstractions": "[0.2.0, )",
           "QuickER.Gui.Common": "[0.2.0, )",
           "QuickER.Mcp": "[0.2.0, )",
-          "QuickER.Mcp.Tools": "[0.2.0, )"
+          "QuickER.Mcp.Tools": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )"
         }
       },
       "quicker.ai.mock": {

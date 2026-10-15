@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using AwesomeAssertions;
 using QuickER.AI.UI;
+using QuickER.Platform;
 using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI.UI;
@@ -293,7 +294,7 @@ public class ChatMarkdownRendererTests
     [InlineData(null, false)]
     public void Policy_AllowsOnlyHttpAndHttps(string? url, bool expected)
     {
-        ChatLinkPolicy.TryGetSafeUri(url, out var uri).Should().Be(expected);
+        UrlPolicy.TryGetSafeUri(url, out var uri).Should().Be(expected);
         (uri is not null).Should().Be(expected);
     }
 

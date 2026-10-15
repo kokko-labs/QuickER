@@ -133,11 +133,14 @@
   <data name="CodeGen_Error_NonGeneratedFileOverwrite" xml:space="preserve">
     <value>Only generated files can be overwritten. The output file name must end with .g.cs or .g.md.</value>
   </data>
+  <data name="CodeGen_Error_InvalidGeneratedFileName" xml:space="preserve">
+    <value>The generated file name is invalid: '{0}' ({1}). Check the output file name option.</value>
+  </data>
   <data name="CodeGen_Error_InvalidOutputSubdirectory" xml:space="preserve">
-    <value>The '{0}' option has an invalid output subfolder: '{1}'. Specify a relative path inside the output directory (absolute paths, drive letters, '..', and characters not allowed in file names are rejected).</value>
+    <value>The '{0}' option has an invalid output subfolder: '{1}' ({2}). Specify a relative path inside the output directory.</value>
   </data>
   <data name="CodeGen_Error_InvalidApiDocsFileName" xml:space="preserve">
-    <value>The 'ApiDocsFileName' option has an invalid file name: '{0}'. Specify a file name only (path separators, drive letters, and characters not allowed in file names are rejected); use 'ApiDocsSubdirectory' to choose the folder.</value>
+    <value>The 'ApiDocsFileName' option has an invalid file name: '{0}' ({1}). Specify a file name only; use 'ApiDocsSubdirectory' to choose the folder.</value>
   </data>
   <data name="CodeGen_Error_InvalidApiDocsLanguage" xml:space="preserve">
     <value>The 'ApiDocsLanguage' option has an undefined value: {0}. Specify one of: {1}.</value>

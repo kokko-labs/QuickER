@@ -93,8 +93,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private bool _suppressPreviewRequest;
 
     /// <summary>フォルダをエクスプローラで開く処理（テスト時に差し替え可能）</summary>
-    internal Action<string> OpenFolder { get; set; } =
-        path => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    internal Action<string> OpenFolder { get; set; } = ExternalLauncher.OpenFolder;
 
     /// <summary>チャットメッセージ一覧</summary>
     public ObservableCollection<ErChatMessage> Messages { get; } = new();
@@ -458,9 +457,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 return Strings.Mock_DisabledReason_ProjectName;
             }
 
-            if (!MockProjectScaffoldService.IsValidProjectName(ProjectName))
+            if (MockProjectScaffoldService.CheckProjectName(ProjectName) is { } violation)
             {
-                return Strings.Mock_DisabledReason_ProjectNameInvalid;
+                return string.Format(
+                    Strings.Mock_DisabledReason_ProjectNameInvalid,
+                    PathSegments.Describe(violation)
+                );
             }
 
             return string.Empty;

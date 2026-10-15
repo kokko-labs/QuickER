@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Navigation;
+using QuickER.Platform;
 using QuickER.Resources;
 using QuickER.Services;
 
@@ -57,10 +58,14 @@ public partial class AboutDialog : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+            ExternalLauncher.OpenUrl(e.Uri);
         }
         catch (Exception ex)
-            when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+            when (ex
+                    is System.ComponentModel.Win32Exception
+                        or InvalidOperationException
+                        or ArgumentException
+            )
         {
             // 既定のブラウザーが無い等で開けない。URL は画面に出ているので、コピー結果の欄で知らせるだけにする
             CopyStatusText.Text = Strings.About_OpenLinkFailed;

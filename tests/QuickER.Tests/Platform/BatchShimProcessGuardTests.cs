@@ -2,8 +2,9 @@ using System.Diagnostics;
 using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
+using QuickER.Platform;
 
-namespace QuickER.Tests.AI;
+namespace QuickER.Tests.Platform;
 
 /// <summary>
 /// <see cref="BatchShimProcessGuard"/>（.cmd / .bat シム起動のコマンド挿入ガード）を検証するテストクラス。

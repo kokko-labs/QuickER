@@ -118,10 +118,10 @@ public sealed class MockProjectScaffoldService
 
         // プロジェクト名はプロジェクトフォルダ名・csproj 名・.sln 内の相対パスへそのまま使われるため、
         // 出力フォルダ外への書き込みを防ぐ目的で単一セグメント名として妥当か検証する
-        if (!IsValidProjectName(projectName))
+        if (CheckProjectName(projectName) is { } violation)
         {
             throw new ArgumentException(
-                $"The project name must be a single folder name: it cannot contain path separators, an absolute path, \".\" or \"..\", characters that are invalid in file or folder names, leading or trailing spaces, or a trailing period: {projectName}",
+                $"The project name must be a single folder name ({PathSegments.Describe(violation, System.Globalization.CultureInfo.InvariantCulture)}): {projectName}",
                 nameof(projectName)
             );
         }
@@ -394,48 +394,21 @@ public sealed class MockProjectScaffoldService
     }
 
     /// <summary>
-    /// プロジェクト名が単一セグメントのフォルダ／ファイル名として妥当か判定する。
+    /// プロジェクト名を単一セグメントのフォルダ／ファイル名として断る理由を返す（断らないなら <c>null</c>）。
     /// </summary>
     /// <remarks>
     /// プロジェクト名はそのまま <c>{出力フォルダ}/{ProjectName}/</c>（プロジェクトフォルダ名）・
-    /// <c>{ProjectName}.csproj</c>・.sln 内の相対パスへ使われるため、出力フォルダ外への書き込みを防ぐ目的で検証する。
-    /// パス区切り文字・絶対パス・<c>"."</c>/<c>".."</c>・<see cref="Path.GetInvalidFileNameChars"/> に含まれる文字を拒否する
-    /// （検証水準は <see cref="MockFolderStore"/> の画面ファイル名検証に合わせる。Windows 予約名 (<c>CON</c> 等) は
-    /// 画面ファイル名検証と同様に対象外＝同水準）。加えて前後の空白・末尾のピリオドも拒否する
-    /// （Windows がフォルダ名の末尾空白・ピリオドを切り捨てるため、指定名と実フォルダ名が食い違って
-    /// 途中の書き込みが失敗し、生成物の残骸だけが残るのを防ぐ）。第2ステップの生成可否判定（<see cref="MockGenerationDialogViewModel"/>）と
-    /// <see cref="Scaffold"/> の入力検証の双方から呼ばれる共有ロジック。
+    /// <c>{ProjectName}.csproj</c>・.sln 内の相対パスへ使われるため、出力フォルダ外への書き込みと、Windows が名前を
+    /// 書き換えて（末尾の空白・'.' を落とす・予約名をデバイスとして開く）指定名と実フォルダ名が食い違うのを防ぐ。
+    /// 判定の正本は <see cref="PathSegments.CheckSegment"/>。第2ステップの生成可否判定（<see cref="MockGenerationDialogViewModel"/>）と
+    /// <see cref="Scaffold"/> の入力検証の双方から呼ばれる。
     /// </remarks>
-    internal static bool IsValidProjectName(string? projectName)
-    {
-        if (string.IsNullOrWhiteSpace(projectName))
-        {
-            return false;
-        }
+    internal static PathSegmentViolation? CheckProjectName(string? projectName) =>
+        PathSegments.CheckSegment(projectName ?? string.Empty);
 
-        if (
-            projectName.Contains('/', StringComparison.Ordinal)
-            || projectName.Contains('\\', StringComparison.Ordinal)
-            || Path.IsPathRooted(projectName)
-        )
-        {
-            return false;
-        }
-
-        if (projectName is "." or "..")
-        {
-            return false;
-        }
-
-        // 末尾の空白・ピリオドは Windows のフォルダ作成で切り捨てられ、指定名と実フォルダ名が食い違う
-        // （末尾空白では途中の書き込みが失敗して残骸を残す）。先頭の空白も同じ流儀で一貫して弾く
-        if (projectName != projectName.Trim() || projectName.EndsWith('.'))
-        {
-            return false;
-        }
-
-        return projectName.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
-    }
+    /// <summary>プロジェクト名が単一セグメントのフォルダ／ファイル名として妥当か判定する（<see cref="CheckProjectName"/>）</summary>
+    internal static bool IsValidProjectName(string? projectName) =>
+        CheckProjectName(projectName) is null;
 
     /// <summary>プロジェクト名を C# 名前空間として妥当な形へ正規化する（識別子でない文字を除去・数字始まりを回避）</summary>
     private static string SanitizeNamespace(string projectName)

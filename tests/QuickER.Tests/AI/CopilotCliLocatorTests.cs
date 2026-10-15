@@ -1,6 +1,7 @@
 using System.IO;
 using AwesomeAssertions;
 using QuickER.AI;
+using QuickER.Platform;
 using AiStrings = QuickER.AI.Resources.Strings;
 
 namespace QuickER.Tests.AI;

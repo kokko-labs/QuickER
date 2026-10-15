@@ -264,7 +264,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             // 引数を積み終えてからシムガードを通す（claude が .cmd で入っている場合に cmd.exe 経由へ包み直す）
             ApplyBatchShimGuard(startInfo);
 
-            using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            using var process = ExternalLauncher.CreateProcess(startInfo);
 
             if (!process.Start())
             {
@@ -346,7 +346,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         startInfo.ArgumentList.Add("json");
         ApplyBatchShimGuard(startInfo);
 
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        using var process = ExternalLauncher.CreateProcess(startInfo);
 
         if (!process.Start())
         {

@@ -10,6 +10,7 @@ using QuickER.AI.Chat.Resources;
 using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
+using QuickER.Platform;
 
 namespace QuickER.AI.Chat;
 
@@ -40,7 +41,7 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     /// <summary>ブラウザで URL を開く処理（テスト時に差し替え可能）</summary>
     internal Action<string> OpenBrowser { get; set; } =
-        url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        url => ExternalLauncher.OpenUrl(new Uri(url));
 
     /// <summary>チャットメッセージ一覧</summary>
     public ObservableCollection<ErChatMessage> Messages { get; } = new();
@@ -566,10 +567,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>ブラウザで開いてよい URL か（絶対 URI かつ scheme が http / https）を判定する</summary>
-    internal static bool IsBrowsableUrl(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri)
-        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+    /// <summary>ブラウザで開いてよい URL か（<see cref="UrlPolicy"/>＝http / https の絶対 URL でホストを持つ）を判定する</summary>
+    internal static bool IsBrowsableUrl(string url) => UrlPolicy.TryGetSafeUri(url, out _);
 
     /// <summary>Codex からログアウトする</summary>
     [RelayCommand]

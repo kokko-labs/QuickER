@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Dialects;
 using QuickER.Model;
+using QuickER.Platform;
 
 namespace QuickER.CodeGen.CSharp;
 
@@ -1440,14 +1441,18 @@ public sealed partial class CSharpCodeGenerationService
             var source = GeneratedFilePlanner.LayerDirectorySource(layer);
             var (name, value) = GeneratedFilePlanner.DescribeNamespaceSource(options, source);
 
-            if (!string.IsNullOrWhiteSpace(value) && !LayerDirectoryValidator.IsValid(value))
+            if (
+                !string.IsNullOrWhiteSpace(value)
+                && LayerDirectoryValidator.Check(value) is { } violation
+            )
             {
                 diagnostics.Add(
                     GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Error_InvalidOutputSubdirectory,
                             name,
-                            value.Trim()
+                            value.Trim(),
+                            PathSegments.Describe(violation)
                         )
                     )
                 );
@@ -1532,7 +1537,10 @@ public sealed partial class CSharpCodeGenerationService
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        if (string.IsNullOrWhiteSpace(value) || LayerDirectoryValidator.IsValid(value))
+        if (
+            string.IsNullOrWhiteSpace(value)
+            || LayerDirectoryValidator.Check(value) is not { } violation
+        )
         {
             return;
         }
@@ -1542,7 +1550,8 @@ public sealed partial class CSharpCodeGenerationService
                 string.Format(
                     Strings.CodeGen_Error_InvalidOutputSubdirectory,
                     optionName,
-                    value.Trim()
+                    value.Trim(),
+                    PathSegments.Describe(violation)
                 )
             )
         );
@@ -1565,14 +1574,15 @@ public sealed partial class CSharpCodeGenerationService
         if (
             options.GenerateApiDocs
             && !string.IsNullOrWhiteSpace(options.ApiDocsFileName)
-            && !IsValidApiDocsFileName(options.ApiDocsFileName)
+            && CheckApiDocsFileName(options.ApiDocsFileName) is { } violation
         )
         {
             diagnostics.Add(
                 GenerationDiagnostic.Error(
                     string.Format(
                         Strings.CodeGen_Error_InvalidApiDocsFileName,
-                        options.ApiDocsFileName.Trim()
+                        options.ApiDocsFileName.Trim(),
+                        PathSegments.Describe(violation)
                     )
                 )
             );
@@ -1621,28 +1631,21 @@ public sealed partial class CSharpCodeGenerationService
         };
 
     /// <summary>
-    /// API リファレンスの出力ファイル名として妥当か（単一のファイル名で、ベース名が空でないか）を判定する
+    /// API リファレンスの出力ファイル名として断る理由を返す（単一のファイル名で、ベース名が空でないこと。断らないなら <c>null</c>）
     /// </summary>
-    /// <remarks>
-    /// パス区切りとドライブ指定は <see cref="LayerDirectoryValidator"/> と同じ理由で明示的に拒否する
-    /// （<c>Path.GetInvalidFileNameChars</c> は Windows 以外では区切り文字を含まない）。
-    /// </remarks>
-    private static bool IsValidApiDocsFileName(string value)
+    /// <remarks>1 区間の名前の判定は <see cref="PathSegments.CheckSegment"/>（パス区切り・ドライブ指定も断る）。</remarks>
+    private static PathSegmentViolation? CheckApiDocsFileName(string value)
     {
+        // 値全体の前後の空白は取り除いてから判定する（ファイル名を決める側も同じく取り除いて使う）
         var trimmed = value.Trim();
 
-        if (trimmed.Contains('/') || trimmed.Contains('\\') || trimmed.Contains(':'))
+        if (PathSegments.CheckSegment(trimmed) is { } violation)
         {
-            return false;
-        }
-
-        if (trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            return false;
+            return violation;
         }
 
         // 拡張子だけの指定（".g.md" 等）はベース名が空＝隠しファイルになるため拒否する
-        return StripApiDocsSuffix(trimmed).Length > 0;
+        return StripApiDocsSuffix(trimmed).Length > 0 ? null : PathSegmentViolation.Empty;
     }
 
     /// <summary>名前空間オプションが非空かつ不正な形式のときだけエラー診断を追加する</summary>

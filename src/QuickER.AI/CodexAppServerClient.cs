@@ -362,7 +362,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             StandardErrorEncoding = TextEncodings.Utf8NoBomLenient,
         };
 
-        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        var process = ExternalLauncher.CreateProcess(startInfo);
 
         if (!process.Start())
         {

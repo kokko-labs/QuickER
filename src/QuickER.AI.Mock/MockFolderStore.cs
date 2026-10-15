@@ -637,7 +637,7 @@ public sealed class MockFolderStore
             ?? new MockManifest();
     }
 
-    /// <summary>画面ファイル名の妥当性を検証する（フォルダ直下・<c>.html</c>・パス区切りや <c>".."</c> 不可）</summary>
+    /// <summary>画面ファイル名の妥当性を検証する（フォルダ直下の 1 区間の名前＝<see cref="PathSegments.CheckSegment"/>・<c>.html</c>）</summary>
     /// <remarks>例外文言はツール結果として AI へ返る機械向けメッセージのため英語で固定する。</remarks>
     private static void ValidateScreenFileName(string file)
     {
@@ -646,22 +646,11 @@ public sealed class MockFolderStore
             throw new ArgumentException("The screen file name is empty.", nameof(file));
         }
 
-        if (
-            file.Contains('/', StringComparison.Ordinal)
-            || file.Contains('\\', StringComparison.Ordinal)
-            || file.Contains("..", StringComparison.Ordinal)
-        )
+        // 1 区間の名前の判定の正本（パス区切り・'.' と '..'・使えない文字・先頭と末尾の空白・'~'・予約名・長さ）
+        if (PathSegments.CheckSegment(file) is { } violation)
         {
             throw new ArgumentException(
-                $"The screen file name must not contain path separators or '..': {file}",
-                nameof(file)
-            );
-        }
-
-        if (file.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            throw new ArgumentException(
-                $"The screen file name contains characters that cannot be used: {file}",
+                $"The screen file name is invalid ({PathSegments.Describe(violation, System.Globalization.CultureInfo.InvariantCulture)}): {file}",
                 nameof(file)
             );
         }

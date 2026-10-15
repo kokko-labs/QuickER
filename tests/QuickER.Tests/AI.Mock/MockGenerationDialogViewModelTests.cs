@@ -9,6 +9,7 @@ using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Tests.TestDoubles;
 using AiStrings = QuickER.AI.Resources.Strings;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
@@ -1254,11 +1255,15 @@ public class MockGenerationDialogViewModelTests
     /// <c>MockProjectScaffoldServiceTests.Scaffold_InvalidProjectName_Throws</c> が検証する）。
     /// </summary>
     [Theory(DisplayName = "不正なプロジェクト名では生成不可・専用の理由が出る")]
-    [InlineData("..\\outside")]
-    [InlineData("../outside")]
-    [InlineData("sub/dir")]
-    [InlineData("bad:name")]
-    public async Task CanGenerateMockProject_FalseForInvalidProjectName(string invalidName)
+    [InlineData("..\\outside", PathSegmentViolation.Separator)]
+    [InlineData("../outside", PathSegmentViolation.Separator)]
+    [InlineData("sub/dir", PathSegmentViolation.Separator)]
+    [InlineData("bad:name", PathSegmentViolation.InvalidCharacter)]
+    [InlineData("CON", PathSegmentViolation.ReservedDeviceName)]
+    public async Task CanGenerateMockProject_FalseForInvalidProjectName(
+        string invalidName,
+        PathSegmentViolation violation
+    )
     {
         var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
             NonEmptyDiagram()
@@ -1277,11 +1282,16 @@ public class MockGenerationDialogViewModelTests
             // 妥当な名前では条件が揃う
             vm.CanGenerateMockProject.Should().BeTrue();
 
-            // 不正な名前にすると不可になり、専用の理由が出る（空欄時の理由とは区別される）
+            // 不正な名前にすると不可になり、当たった規則を名指しする専用の理由が出る（空欄時の理由とは区別される）
             vm.ProjectName = invalidName;
             vm.CanGenerateMockProject.Should().BeFalse();
             vm.MockGenDisabledReason.Should()
-                .Be(MockStrings.Mock_DisabledReason_ProjectNameInvalid);
+                .Be(
+                    string.Format(
+                        MockStrings.Mock_DisabledReason_ProjectNameInvalid,
+                        PathSegments.Describe(violation)
+                    )
+                );
         }
         finally
         {

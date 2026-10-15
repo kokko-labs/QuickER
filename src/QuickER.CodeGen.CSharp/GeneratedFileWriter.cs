@@ -113,6 +113,19 @@ public sealed class GeneratedFileWriter
             throw new InvalidOperationException(Strings.CodeGen_Error_NonGeneratedFileOverwrite);
         }
 
+        // ファイル名は利用者の設定（出力ファイル名）から来るので、1 区間の名前として断る形（予約名・'~'・先頭の空白など）を
+        // 層フォルダと同じ正本で断る
+        if (PathSegments.CheckSegment(fileName) is { } violation)
+        {
+            throw new InvalidOperationException(
+                string.Format(
+                    Strings.CodeGen_Error_InvalidGeneratedFileName,
+                    fileName,
+                    PathSegments.Describe(violation)
+                )
+            );
+        }
+
         // 層別出力の層フォルダ。生成前の診断が検証済みだが、ここでも同じ規則（LayerDirectoryValidator）で
         // 防御し、出力ディレクトリ外への書き込みを構造的に不可能にする（診断を素通りする呼び出し経路への備え）
         var targetDirectory = outputDirectory;

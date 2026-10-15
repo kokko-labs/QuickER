@@ -133,11 +133,14 @@
   <data name="CodeGen_Error_NonGeneratedFileOverwrite" xml:space="preserve">
     <value>生成ファイル以外は上書きできません。出力ファイル名は .g.cs または .g.md で終わる必要があります。</value>
   </data>
+  <data name="CodeGen_Error_InvalidGeneratedFileName" xml:space="preserve">
+    <value>生成ファイルの名前が不正です: '{0}'（{1}）。出力ファイル名のオプションを確認してください。</value>
+  </data>
   <data name="CodeGen_Error_InvalidOutputSubdirectory" xml:space="preserve">
-    <value>オプション '{0}' の出力サブフォルダが不正です: '{1}'。出力ディレクトリ内に収まる相対パスを指定してください（絶対パス・ドライブ指定・'..'・ファイル名に使えない文字は拒否されます）。</value>
+    <value>オプション '{0}' の出力サブフォルダが不正です: '{1}'（{2}）。出力ディレクトリ内に収まる相対パスを指定してください。</value>
   </data>
   <data name="CodeGen_Error_InvalidApiDocsFileName" xml:space="preserve">
-    <value>オプション 'ApiDocsFileName' のファイル名が不正です: '{0}'。ファイル名だけを指定してください（パス区切り・ドライブ指定・ファイル名に使えない文字は拒否されます）。出力先フォルダは 'ApiDocsSubdirectory' で指定します。</value>
+    <value>オプション 'ApiDocsFileName' のファイル名が不正です: '{0}'（{1}）。ファイル名だけを指定してください。出力先フォルダは 'ApiDocsSubdirectory' で指定します。</value>
   </data>
   <data name="CodeGen_Error_InvalidApiDocsLanguage" xml:space="preserve">
     <value>オプション 'ApiDocsLanguage' の値が未定義です: {0}。次のいずれかを指定してください: {1}。</value>

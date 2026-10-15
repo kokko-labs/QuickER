@@ -134,7 +134,7 @@ quicker mcp
 |---|---|
 | `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
 | `LayeredOutput`（`false`） | 分割ファイルを出力ディレクトリ配下の層別サブフォルダ（ドメイン／プレゼンテーション／インフラ／サーバー）へ振り分け、各層を独立プロジェクトにできるようにする。`SplitFilesByCategory` を自動含意（[生成コードの使い方](code-generation.ja.md#層別フォルダ出力--layered-output) 参照） |
-| `DomainLayerDirectory` / `PresentationLayerDirectory` / `InfrastructureLayerDirectory` / `ServerLayerDirectory`（`Domain` / `Presentation` / `Infrastructure` / `Server`） | `LayeredOutput` の層別フォルダ（出力ディレクトリからの相対パス）。複数階層（`MyApp.Domain/Generated`）も可。`LayeredOutput` では空の名前空間キーの既定もこのフォルダから導出され、フォルダと名前空間が揃う。絶対パス・ドライブ指定・`..` は生成時エラーで拒否され、空の値は既定へフォールバックする。`ServerLayerDirectory` は `GenerateRemoteServices` のときのみ使われる |
+| `DomainLayerDirectory` / `PresentationLayerDirectory` / `InfrastructureLayerDirectory` / `ServerLayerDirectory`（`Domain` / `Presentation` / `Infrastructure` / `Server`） | `LayeredOutput` の層別フォルダ（出力ディレクトリからの相対パス）。複数階層（`MyApp.Domain/Generated`）も可。`LayeredOutput` では空の名前空間キーの既定もこのフォルダから導出され、フォルダと名前空間が揃う。絶対パス・ドライブ指定・`.` と `..`・空の区間・ファイル名に使えない文字・区間の先頭の空白・区間の末尾の `.` と空白・`~`・予約されたデバイス名（`CON` など）・255 文字を超える区間は生成時エラーで拒否され（エラーに当たった規則が出る）、空の値は既定へフォールバックする。`ServerLayerDirectory` は `GenerateRemoteServices` のときのみ使われる |
 | `CodeSubdirectory`（未指定＝サブフォルダなし） | 生成コード（`*.g.cs`）の出力先サブフォルダ。`LayeredOutput` では層フォルダの下、そうでなければ出力ディレクトリの下へ 1 段（例: `Generated`・複数階層可）。全出力モードで有効で、**名前空間には影響しない**ため C# 識別子である必要もない。絶対パスと `..` は拒否。API リファレンス Markdown は追随しない（CLI の `--code-subdir` に対応） |
 | `RootNamespace`（`Generated`） | 生成コードのルート名前空間 |
 | `GenerateEditModels` / `GenerateMappers`（ともに `true`） | 各カテゴリの生成有無。**Entity クラスは常時生成**され、専用キーはない |
