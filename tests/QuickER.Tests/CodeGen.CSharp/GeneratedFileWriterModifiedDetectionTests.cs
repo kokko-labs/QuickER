@@ -97,7 +97,9 @@ public sealed class GeneratedFileWriterModifiedDetectionTests : IDisposable
     {
         var result = Generate(SplitWithDocs);
         var written = _writer.WriteFiles(_directory, result);
-        var target = written.Single(path => path.EndsWith("Entities.g.cs"));
+        var target = written.Single(path =>
+            path.EndsWith("Entities.g.cs", StringComparison.Ordinal)
+        );
 
         File.WriteAllText(target, File.ReadAllText(target).Replace("OrderId", "OrderKey"));
 
@@ -110,7 +112,9 @@ public sealed class GeneratedFileWriterModifiedDetectionTests : IDisposable
         var result = Generate(SplitWithDocs);
         var written = _writer.WriteFiles(_directory, result);
 
-        foreach (var path in written.Where(path => path.EndsWith(".g.cs")))
+        foreach (
+            var path in written.Where(path => path.EndsWith(".g.cs", StringComparison.Ordinal))
+        )
         {
             File.WriteAllText(
                 path,
@@ -126,14 +130,18 @@ public sealed class GeneratedFileWriterModifiedDetectionTests : IDisposable
     {
         var result = Generate(SplitWithDocs);
         var written = _writer.WriteFiles(_directory, result);
-        var target = written.Single(path => path.EndsWith("Entities.g.cs"));
+        var target = written.Single(path =>
+            path.EndsWith("Entities.g.cs", StringComparison.Ordinal)
+        );
 
         // この機能より前の版の生成物に相当する（ハッシュ行を消したうえで本文も編集されている）
         var withoutHash = string.Join(
             "\r\n",
             File.ReadAllText(target)
                 .Split("\r\n")
-                .Where(line => !line.StartsWith(GeneratedContentHash.HashLinePrefix))
+                .Where(line =>
+                    !line.StartsWith(GeneratedContentHash.HashLinePrefix, StringComparison.Ordinal)
+                )
         );
         File.WriteAllText(target, withoutHash.Replace("OrderId", "OrderKey"));
 
@@ -145,7 +153,7 @@ public sealed class GeneratedFileWriterModifiedDetectionTests : IDisposable
     {
         var result = Generate(SplitWithDocs);
         var written = _writer.WriteFiles(_directory, result);
-        var markdown = written.Single(path => path.EndsWith(".g.md"));
+        var markdown = written.Single(path => path.EndsWith(".g.md", StringComparison.Ordinal));
 
         File.AppendAllText(markdown, "\nhand-written note\n");
 
@@ -165,7 +173,9 @@ public sealed class GeneratedFileWriterModifiedDetectionTests : IDisposable
             }
         );
         var written = _writer.WriteFiles(_directory, result);
-        var target = written.Single(path => path.EndsWith("Entities.g.cs"));
+        var target = written.Single(path =>
+            path.EndsWith("Entities.g.cs", StringComparison.Ordinal)
+        );
 
         target.Should().Be(Path.Combine(_directory, "Domain", "Generated", "Entities.g.cs"));
         File.AppendAllText(target, "// hand-written\r\n");

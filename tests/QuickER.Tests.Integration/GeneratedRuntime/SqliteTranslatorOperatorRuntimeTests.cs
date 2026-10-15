@@ -184,7 +184,9 @@ public sealed class SqliteTranslatorOperatorRuntimeTests : IDisposable
         var repo = await SeedCustomersAsync();
 
         // Equals(値): "name" = @p → "Bob" のみ
+#pragma warning disable CA1309 // 翻訳器が受け付ける呼び出しの形（Equals(string)）そのものを式木で確かめる
         var equals = await repo.Query().Where(c => c.Name.Value.Equals("Bob")).ToListAsync(Ct);
+#pragma warning restore CA1309
         equals.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([2]);
 
         // StartsWith(値): "name" LIKE 'Al%' → Alice(1) / Alicia(3)

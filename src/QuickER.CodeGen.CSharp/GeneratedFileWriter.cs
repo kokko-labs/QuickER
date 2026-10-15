@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Platform;
@@ -121,7 +122,7 @@ public sealed class GeneratedFileWriter
                 string.Format(
                     Strings.CodeGen_Error_InvalidGeneratedFileName,
                     fileName,
-                    PathSegments.Describe(violation)
+                    PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
                 )
             );
         }

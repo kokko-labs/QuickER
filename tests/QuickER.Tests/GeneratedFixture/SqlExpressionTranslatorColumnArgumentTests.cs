@@ -101,11 +101,13 @@ public sealed class SqlExpressionTranslatorColumnArgumentTests
     [Fact(DisplayName = "列引数の Equals は列同士の等値比較へ変換される")]
     public void Equals_ColumnArgument_EmitsColumnToColumnEquality()
     {
+#pragma warning disable CA1309 // 翻訳器が受け付ける呼び出しの形（Equals(string)）そのものを式木で確かめる
         var sqlServer = RunSqlServer(p => p.Name1.Equals(p.Name2));
         sqlServer.Sql.Should().Be("[Name1] = [Name2]");
         sqlServer.Parameters.Should().BeEmpty();
 
         var sqlite = RunSqlite(p => p.Name1.Equals(p.Name2));
+#pragma warning restore CA1309
         sqlite.Sql.Should().Be("\"Name1\" = \"Name2\"");
         sqlite.Parameters.Should().BeEmpty();
     }
@@ -175,6 +177,7 @@ public sealed class SqlExpressionTranslatorColumnArgumentTests
     [Fact(DisplayName = "ガード: 値の位置に ToUpper() を置くと NotSupportedException（両方言）")]
     public void ToUpperInValuePosition_Throws()
     {
+#pragma warning disable CA1304, CA1311 // 翻訳器が断る呼び出しの形（カルチャを渡さない ToUpper()）そのものを式木で確かめる
         var sqlServer = () => RunSqlServer(p => p.Name1.ToUpper() == "A");
         sqlServer
             .Should()
@@ -182,6 +185,7 @@ public sealed class SqlExpressionTranslatorColumnArgumentTests
             .WithMessage("*cannot be translated to SQL*");
 
         var sqlite = () => RunSqlite(p => p.Name1.ToUpper() == "A");
+#pragma warning restore CA1304, CA1311
         sqlite.Should().Throw<NotSupportedException>().WithMessage("*cannot be translated to SQL*");
     }
 

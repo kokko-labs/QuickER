@@ -705,7 +705,10 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.SaveAtomic(path, BuildDocument("Old", DiagramDocument.CurrentVersion));
+            JsonStorageService.SaveAtomic(
+                path,
+                BuildDocument("Old", DiagramDocument.CurrentVersion)
+            );
             JsonStorageService.SaveAtomic(
                 path,
                 BuildDocument("New", DiagramDocument.CurrentVersion)

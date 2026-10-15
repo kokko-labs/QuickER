@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -461,7 +462,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             {
                 return string.Format(
                     Strings.Mock_DisabledReason_ProjectNameInvalid,
-                    PathSegments.Describe(violation)
+                    PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
                 );
             }
 

@@ -72,7 +72,10 @@ public sealed class SqlServerSchemaSyncExecutor : ISchemaSyncExecutor
     }
 
     /// <summary>バッチ区切り（<c>GO</c> のみの行・前後空白と大文字小文字を許容）の判定パターン</summary>
-    private static readonly Regex GoPattern = new(@"^\s*GO\s*$", RegexOptions.IgnoreCase);
+    private static readonly Regex GoPattern = new(
+        @"^\s*GO\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    );
 
     /// <summary>スクリプトを行頭の <c>GO</c> で分割する（大文字小文字を無視し、前後空白を許容する）</summary>
     /// <remarks>

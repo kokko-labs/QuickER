@@ -244,7 +244,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
             Build: form => form,
             Reject: value =>
                 MockProjectScaffoldService.CheckProjectName(value) is { } violation
-                    ? PathSegments.Describe(violation)
+                    ? PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
                     : null,
             ui
         );

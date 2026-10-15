@@ -184,11 +184,10 @@ public static class PathSegments
         return path.TrimEnd(Separators).Split(Separators);
     }
 
-    /// <summary>断る理由の説明を、現在の UI 言語で返す</summary>
-    public static string Describe(PathSegmentViolation violation) =>
-        Describe(violation, CultureInfo.CurrentUICulture);
-
-    /// <summary>断る理由の説明を、指定した言語で返す（機械向けの英語固定の文言には InvariantCulture を渡す）</summary>
+    /// <summary>
+    /// 断る理由の説明を、指定した言語で返す（画面の文言には CultureInfo.CurrentUICulture、機械向けの英語固定の文言には
+    /// CultureInfo.InvariantCulture を渡す）
+    /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">未定義の理由</exception>
     public static string Describe(PathSegmentViolation violation, CultureInfo culture)
     {

@@ -24,13 +24,13 @@ public static class MockDesignDocExporter
     /// <summary>&lt;script&gt; ブロック（抽出対象外にするため除去する）</summary>
     private static readonly Regex ScriptBlock = new(
         "<script[\\s\\S]*?</script>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>&lt;style&gt; ブロック（抽出対象外にするため除去する）</summary>
     private static readonly Regex StyleBlock = new(
         "<style[\\s\\S]*?</style>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>任意の HTML タグ（テキスト化の際に除去する）</summary>
@@ -53,68 +53,68 @@ public static class MockDesignDocExporter
 
     private static readonly Regex InputTag = new(
         "<input\\b[^>]*>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex TextareaTag = new(
         "<textarea\\b([^>]*)>([\\s\\S]*?)</textarea>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex SelectBlock = new(
         "<select\\b([^>]*)>([\\s\\S]*?)</select>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex OptionBlock = new(
         "<option\\b[^>]*>([\\s\\S]*?)</option>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex ButtonBlock = new(
         "<button\\b[^>]*>([\\s\\S]*?)</button>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex AnchorBlock = new(
         "<a\\b([^>]*)>([\\s\\S]*?)</a>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex LabelBlock = new(
         "<label\\b([^>]*)>([\\s\\S]*?)</label>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>ラベル内の必須マーカー（class に required を含む span。項目名から除いて備考「必須」へ移す）</summary>
     private static readonly Regex RequiredMarkerSpan = new(
         "<span\\b[^>]*class\\s*=\\s*(?:\"[^\"]*required[^\"]*\"|'[^']*required[^']*')[^>]*>[\\s\\S]*?</span>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex TableBlock = new(
         "<table\\b[^>]*>([\\s\\S]*?)</table>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex CaptionBlock = new(
         "<caption\\b[^>]*>([\\s\\S]*?)</caption>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex TheadBlock = new(
         "<thead\\b[^>]*>([\\s\\S]*?)</thead>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex TrBlock = new(
         "<tr\\b[^>]*>([\\s\\S]*?)</tr>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex ThBlock = new(
         "<th\\b[^>]*>([\\s\\S]*?)</th>",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>モックフォルダの内容から画面設計書 Markdown を生成する</summary>

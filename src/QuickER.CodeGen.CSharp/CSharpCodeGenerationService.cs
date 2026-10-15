@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Dialects;
@@ -1452,7 +1453,7 @@ public sealed partial class CSharpCodeGenerationService
                             Strings.CodeGen_Error_InvalidOutputSubdirectory,
                             name,
                             value.Trim(),
-                            PathSegments.Describe(violation)
+                            PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
                         )
                     )
                 );
@@ -1551,7 +1552,7 @@ public sealed partial class CSharpCodeGenerationService
                     Strings.CodeGen_Error_InvalidOutputSubdirectory,
                     optionName,
                     value.Trim(),
-                    PathSegments.Describe(violation)
+                    PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
                 )
             )
         );
@@ -1582,7 +1583,7 @@ public sealed partial class CSharpCodeGenerationService
                     string.Format(
                         Strings.CodeGen_Error_InvalidApiDocsFileName,
                         options.ApiDocsFileName.Trim(),
-                        PathSegments.Describe(violation)
+                        PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
                     )
                 )
             );

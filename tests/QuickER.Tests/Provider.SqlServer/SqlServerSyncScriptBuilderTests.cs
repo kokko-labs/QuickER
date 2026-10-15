@@ -343,8 +343,11 @@ public class SqlServerSyncScriptBuilderTests
         };
 
         var sql = BuildScript(new SqlServerSyncScriptBuilder(), items);
-        var iDropFk = sql.IndexOf("DROP CONSTRAINT [FK_Order_CustomerRef]");
-        var iAlter = sql.IndexOf("ALTER COLUMN [CustomerId]");
+        var iDropFk = sql.IndexOf(
+            "DROP CONSTRAINT [FK_Order_CustomerRef]",
+            StringComparison.Ordinal
+        );
+        var iAlter = sql.IndexOf("ALTER COLUMN [CustomerId]", StringComparison.Ordinal);
         iDropFk.Should().BeGreaterThan(-1);
         iAlter.Should().BeGreaterThan(iDropFk);
     }
@@ -402,9 +405,9 @@ public class SqlServerSyncScriptBuilderTests
         };
 
         var sql = BuildScript(new SqlServerSyncScriptBuilder(), items);
-        var iCreate = sql.IndexOf("CREATE TABLE");
-        var iAdd = sql.IndexOf("ADD [Customer_Id]");
-        var iFk = sql.IndexOf("ADD CONSTRAINT");
+        var iCreate = sql.IndexOf("CREATE TABLE", StringComparison.Ordinal);
+        var iAdd = sql.IndexOf("ADD [Customer_Id]", StringComparison.Ordinal);
+        var iFk = sql.IndexOf("ADD CONSTRAINT", StringComparison.Ordinal);
         iCreate.Should().BeGreaterThan(-1);
         iAdd.Should().BeGreaterThan(iCreate);
         iFk.Should().BeGreaterThan(iAdd);

@@ -133,7 +133,9 @@ public class RemoteServiceGenerationTests
             .Equal(mainName, expectedBaseName + ".RemoteServer.g.cs", expectedBaseName + ".g.md");
 
         // 構成表は正規化前の名前（Shop.cs 等）を載せず、実際に書き出す名前を載せる
-        var doc = result.Files.Single(f => f.FileName.EndsWith(".g.md")).Content;
+        var doc = result
+            .Files.Single(f => f.FileName.EndsWith(".g.md", StringComparison.Ordinal))
+            .Content;
         doc.Should().Contain(mainName).And.Contain(expectedBaseName + ".RemoteServer.g.cs");
         doc.Should().NotContain(expectedBaseName + ".cs");
     }

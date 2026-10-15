@@ -278,3 +278,21 @@ dotnet_naming_rule.locals_should_be_camel.severity = warning
 dotnet_naming_symbols.locals.applicable_kinds = local, parameter
 
 dotnet_naming_style.camel_case.capitalization = camel_case
+
+#### カルチャに依存する文字列操作の検査 ####
+
+# 大文字小文字の変換と、照合の方法を書かない比較は、実行環境のカルチャで結果が変わる
+# （トルコ語の i と I が対応しない）。カルチャ・照合の方法を明示させる次の 4 つだけを警告（＝ビルドエラー）にする。
+#   CA1304: CultureInfo を受ける多重定義があるのに渡していない
+#   CA1309: 照合の方法が Ordinal / OrdinalIgnoreCase でない
+#   CA1310: StringComparison を受ける多重定義があるのに渡していない（既定がカルチャ依存の比較）
+#   CA1311: ToUpper / ToLower にカルチャを渡していない
+# CA1305（IFormatProvider を渡していない）は入れない。画面・ログ・例外に出す文言の多くは、意図して実行環境の
+# カルチャで書式化しており、規則にすると意図した書式化まで機械的に CultureInfo.CurrentCulture を書かせることになる。
+# CA1307（StringComparison を渡していない）も入れない。対象の Equals / Contains / Replace などは既定が序数の比較で、
+# 結果は変わらず、明示を求めるだけの規則になるため。
+# 生成物・SQL・ファイルへ書く文字列がカルチャに依らないことは、出力の総当たり（CultureInvariant*Tests）が確かめる。
+dotnet_diagnostic.CA1304.severity = warning
+dotnet_diagnostic.CA1309.severity = warning
+dotnet_diagnostic.CA1310.severity = warning
+dotnet_diagnostic.CA1311.severity = warning

@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -1289,7 +1290,7 @@ public class MockGenerationDialogViewModelTests
                 .Be(
                     string.Format(
                         MockStrings.Mock_DisabledReason_ProjectNameInvalid,
-                        PathSegments.Describe(violation)
+                        PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
                     )
                 );
         }

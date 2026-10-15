@@ -51,7 +51,10 @@ public static class TableRebuildAttributeDetector
         // 外部キーの参照アクション SET DEFAULT は列の DEFAULT ではない
         (
             "DEFAULT",
-            new Regex(@"(?<!\bSET\s+)\bDEFAULT\b", RegexOptions.IgnoreCase | RegexOptions.Compiled)
+            new Regex(
+                @"(?<!\bSET\s+)\bDEFAULT\b",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
+            )
         ),
         ("CHECK", Word("CHECK")),
         ("COLLATE", Word("COLLATE")),
@@ -61,7 +64,7 @@ public static class TableRebuildAttributeDetector
     /// <summary>生成列の省略形（<c>col AS (expr)</c>）。<c>GENERATED</c> と同じ喪失なので同じトークンで報告する</summary>
     private static readonly Regex ShorthandGeneratedColumn = new(
         @"\bAS\s*\(",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     /// <summary>括弧の中で探す制約の句（列の属性の後ろに並べて報告する）</summary>
@@ -77,7 +80,7 @@ public static class TableRebuildAttributeDetector
             "DEFERRABLE",
             new Regex(
                 @"(?<!\bNOT\s+)\bDEFERRABLE\s+INITIALLY\s+DEFERRED\b",
-                RegexOptions.IgnoreCase | RegexOptions.Compiled
+                RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
             )
         ),
     ];
@@ -142,13 +145,16 @@ public static class TableRebuildAttributeDetector
 
     /// <summary>語境界付き・大文字小文字非依存のキーワード検索パターンを作る</summary>
     private static Regex Word(string keyword) =>
-        new($@"\b{keyword}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        new(
+            $@"\b{keyword}\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
+        );
 
     /// <summary>空白で区切られた語の並びを、語境界付き・大文字小文字非依存で探すパターンを作る</summary>
     private static Regex Words(params string[] keywords) =>
         new(
             $@"\b{string.Join(@"\s+", keywords)}\b",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled
+            RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant
         );
 
     /// <summary>

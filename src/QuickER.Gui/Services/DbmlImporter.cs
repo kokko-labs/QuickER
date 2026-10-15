@@ -1308,7 +1308,7 @@ public static partial class DbmlImporter
     /// </remarks>
     [GeneratedRegex(
         """^Table\s+(?<table>"(?:\\.|[^"\\])*"|\S+)\s*(?:\[[^\]]*\]\s*)?\{$""",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TableHeaderLineRegex();
 
@@ -1322,7 +1322,7 @@ public static partial class DbmlImporter
     /// </remarks>
     [GeneratedRegex(
         @"^(project|enum|tablegroup|tablepartial|note|records)\b",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex SkippableBlockLineRegex();
 
@@ -1341,12 +1341,15 @@ public static partial class DbmlImporter
     /// </remarks>
     [GeneratedRegex(
         @"^(checks|records)\b[^\[\r\n]*\{",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex SkippableTableBlockLineRegex();
 
     /// <summary><c>Ref</c> で始まる行に一致する正規表現を生成する（未対応形式の検出に使う）</summary>
-    [GeneratedRegex(@"^ref\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"^ref\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
     private static partial Regex RefKeywordLineRegex();
 
     /// <summary><c>Note</c> で始まる行に一致する正規表現を生成する（未対応の複数行 Note の検出に使う）</summary>
@@ -1356,7 +1359,10 @@ public static partial class DbmlImporter
     /// <c>:</c> か <c>{</c> のときだけ一致させる（1 行の <c>Note: 'テキスト'</c> は手前の
     /// <see cref="TableNoteLineRegex"/> が先に食べる）。
     /// </remarks>
-    [GeneratedRegex(@"^note\s*[:{]", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"^note\s*[:{]",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
     private static partial Regex NoteKeywordLineRegex();
 
     /// <summary>テーブルの説明を表す <c>Note: '...'</c> 行に一致する正規表現を生成する</summary>
@@ -1366,14 +1372,14 @@ public static partial class DbmlImporter
     /// </remarks>
     [GeneratedRegex(
         @"^Note:\s*'(?<note>(?:\\.|[^'\\])*)'$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TableNoteLineRegex();
 
     /// <summary><c>Ref</c> 行の設定ブロック内の <c>delete: ...</c> / <c>update: ...</c> に一致する正規表現を生成する</summary>
     [GeneratedRegex(
         @"^(?<kind>delete|update):\s*(?<action>.+)$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex ReferentialActionSettingRegex();
 
@@ -1390,7 +1396,7 @@ public static partial class DbmlImporter
     /// </remarks>
     [GeneratedRegex(
         """^Ref(?:\s+(?<name>"(?:\\.|[^"\\])*"|\w+))?\s*:\s*(?<leftTable>"(?:\\.|[^"\\])*"|\w+)\.(?:\((?<leftColumns>(?:"(?:\\.|[^"\\])*"|[^)"])*)\)|(?<leftColumn>"(?:\\.|[^"\\])*"|\w+))\s*(?<symbol><>|<|>|-)\s*(?<rightTable>"(?:\\.|[^"\\])*"|\w+)\.(?:\((?<rightColumns>(?:"(?:\\.|[^"\\])*"|[^)"])*)\)|(?<rightColumn>"(?:\\.|[^"\\])*"|\w+))\s*(?:\[(?<settings>(?:'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[^\]'"])*)\])?\s*$""",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex RelationshipLineRegex();
 
@@ -1404,13 +1410,16 @@ public static partial class DbmlImporter
     /// </remarks>
     [GeneratedRegex(
         """^Ref(?:\s+(?:"(?:\\.|[^"\\])*"|\w+))?\s*:""",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex RelationshipLineStartRegex();
 
     /// <summary>カラム設定のうち値つきの <c>ref:</c>（インライン参照）の書き出しに一致する正規表現を生成する</summary>
     /// <remarks>ここに一致して <see cref="InlineReferenceLineRegex"/> に一致しない設定は、項目を名指しして断る</remarks>
-    [GeneratedRegex(@"^ref\s*:", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"^ref\s*:",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
     private static partial Regex InlineReferenceStartLineRegex();
 
     /// <summary>カラム設定のインライン参照 <c>ref: 記号 テーブル.列</c> に一致する正規表現を生成する</summary>
@@ -1420,25 +1429,28 @@ public static partial class DbmlImporter
     /// </remarks>
     [GeneratedRegex(
         """^ref\s*:\s*(?<symbol><>|<|>|-)\s*(?<table>"(?:\\.|[^"\\])*"|\w+)\.(?<column>"(?:\\.|[^"\\])*"|\w+)$""",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex InlineReferenceLineRegex();
 
     /// <summary>カラム設定の <c>note: '...'</c>（<c>\'</c> エスケープ対応）に一致する正規表現を生成する</summary>
     [GeneratedRegex(
         @"^note:\s*'(?<note>(?:\\.|[^'\\])*)'$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex ColumnNoteRegex();
 
     /// <summary><c>Indexes {</c> 形式のブロック開始行に一致する正規表現を生成する</summary>
-    [GeneratedRegex(@"^Indexes\s*\{$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"^Indexes\s*\{$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
     private static partial Regex IndexesHeaderLineRegex();
 
     /// <summary>索引設定の <c>name: '...'</c>（<c>\'</c> エスケープ対応）に一致する正規表現を生成する</summary>
     [GeneratedRegex(
         @"^name:\s*'(?<name>(?:\\.|[^'\\])*)'$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex IndexSettingNameRegex();
 }
