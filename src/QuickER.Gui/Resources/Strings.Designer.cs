@@ -1459,6 +1459,18 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string TypeConversion_IdentityMarkHeader {
+            get {
+                return ResourceManager.GetString("TypeConversion_IdentityMarkHeader", resourceCulture);
+            }
+        }
+        
+        public static string TypeConversion_IdentityMarkLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_IdentityMarkLine", resourceCulture);
+            }
+        }
+        
         public static string TypeConversion_NameLimitHeader {
             get {
                 return ResourceManager.GetString("TypeConversion_NameLimitHeader", resourceCulture);
@@ -1881,6 +1893,12 @@ namespace QuickER.Resources {
         public static string ExportOmission_ComputedColumn {
             get {
                 return ResourceManager.GetString("ExportOmission_ComputedColumn", resourceCulture);
+            }
+        }
+
+        public static string ExportOmission_IdentityColumn {
+            get {
+                return ResourceManager.GetString("ExportOmission_IdentityColumn", resourceCulture);
             }
         }
 

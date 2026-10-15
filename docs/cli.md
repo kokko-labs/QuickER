@@ -32,7 +32,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 |---|:-:|---|
 | `--schema <file>` | ✅ | The input ER diagram JSON file (the application's save format) |
 | `--out <dir>` | ✅ | The output folder for the generated code |
-| `--provider <name>` | | Target database type. `sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`. Defaults to the diagram's target DBMS (`TargetDbms`), or `sqlserver` when the diagram has none. A value that differs from the diagram's target DBMS prints a warning on stderr: column types are not converted and are read as written under that dialect's rules (to change the dialect, switch the target DBMS in the GUI, which converts the types first) |
+| `--provider <name>` | | Target database type. `sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`. Defaults to the diagram's target DBMS (`TargetDbms`), or `sqlserver` when the diagram has none. A value that differs from the diagram's target DBMS prints a warning on stderr: column types are not converted and are read as written under that dialect's rules (to change the dialect, switch the target DBMS in the GUI, which converts the types first). When that dialect cannot have columns the database numbers (`mysql` / `sqlite`), the warning also names the marked columns (a dialect that can have them gets a note on those columns in the generated DDL instead, so no warning is given; see [columns the database numbers](code-generation.md#columns-the-database-numbers)) |
 | `--config <file>` | | Generation option settings file (quicker.json). See below |
 | `--force` | | Overwrite generated files even if they have been edited by hand since they were generated |
 

@@ -55,6 +55,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <inheritdoc />
     protected override IdentifierLengthLimit IdentifierLimit => MySqlIdentifier.Limit;
 
+    /// <inheritdoc/>
+    protected override string DialectName => MySqlProvider.ProviderName;
+
     /// <summary>
     /// <c>information_schema</c> 検索のスキーマ絞り込み述語を組み立てる。
     /// </summary>
@@ -102,6 +105,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 
             // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
             ComputedColumnComment.Append(sb, col, "    ");
+
+            // 採番の定義は図に無い＝ここで出すのは普通の列。扱いの表が注記とする方言だけ書き添える
+            IdentityColumnComment.Append(sb, col, "    ", DialectName, UnsupportedFeature.Sync);
             var line =
                 $"    {MySqlIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
@@ -126,6 +132,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         ComputedColumnComment.Append(sb, col, string.Empty);
+
+        // 採番の定義は図に無い＝ここで足すのは普通の列。扱いの表が注記とする方言だけ書き添える
+        IdentityColumnComment.Append(sb, col, string.Empty, DialectName, UnsupportedFeature.Sync);
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
                 + $"ADD COLUMN {MySqlIdentifier.QuoteSimple(col.Name)} {BuildColumnDefinition(col)};"

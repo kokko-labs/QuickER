@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 
@@ -33,6 +34,9 @@ namespace QuickER.Provider.Oracle;
 /// </remarks>
 public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 {
+    /// <summary>このスクリプトが対象とする方言の名前（図で表せない定義の扱いをこの方言のマスで引くのに使う）</summary>
+    private const string DialectName = OracleProvider.ProviderName;
+
     /// <summary>実行計画を Oracle DDL へ変換する</summary>
     public string Build(SyncPlan plan)
     {
@@ -140,6 +144,9 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
             ComputedColumnComment.Append(sb, col, "    ");
 
+            // 採番の定義は図に無い＝ここで出すのは普通の列。扱いの表が注記とする方言だけ書き添える
+            IdentityColumnComment.Append(sb, col, "    ", DialectName, UnsupportedFeature.Sync);
+
             var line =
                 $"    {OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
@@ -171,9 +178,13 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         // （Oracle は 1 文＝1 文字列で組み立てるため、コメント行は同じ文字列の先頭へ前置する）
-        return ComputedColumnComment.Build(col) is { } note
-            ? note + Environment.NewLine + statement
-            : statement;
+        var notes = new[]
+        {
+            ComputedColumnComment.Build(col),
+            IdentityColumnComment.Build(col, DialectName, UnsupportedFeature.Sync),
+        }.OfType<string>();
+
+        return string.Concat(notes.Select(note => note + Environment.NewLine)) + statement;
     }
 
     /// <summary>ALTER TABLE ... MODIFY（列定義変更）文を生成する</summary>

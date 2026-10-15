@@ -41,6 +41,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     /// <inheritdoc />
     protected override IdentifierLengthLimit IdentifierLimit => SqliteIdentifier.Limit;
 
+    /// <inheritdoc/>
+    protected override string DialectName => SqliteProvider.ProviderName;
+
     /// <summary>再構築で作る一時テーブル名の接尾辞（衝突は考慮しない前提＝スキーマ内で一意と仮定）</summary>
     private const string RebuildSuffix = "_quicker_rebuild";
 
@@ -125,7 +128,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>CreateOnly（新規テーブル）の <c>CREATE TABLE</c> を出力する（FK 句インライン）</summary>
-    private static void AppendCreateOnlyTable(StringBuilder sb, TableRebuildPlan rebuild)
+    private void AppendCreateOnlyTable(StringBuilder sb, TableRebuildPlan rebuild)
     {
         AppendCreateTableBody(
             sb,
@@ -137,7 +140,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>1 テーブル分の再構築ブロック（新テーブル作成 → 移送 → DROP → RENAME → 補助再作成）を出力する</summary>
-    private static void AppendRebuildBlock(StringBuilder sb, TableRebuildPlan rebuild)
+    private void AppendRebuildBlock(StringBuilder sb, TableRebuildPlan rebuild)
     {
         var table = rebuild.TableName;
         var tempName = table + RebuildSuffix;
@@ -191,7 +194,7 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
     /// </param>
     /// <param name="definition">合成後のテーブル定義（一意制約もここが正本）</param>
     /// <param name="foreignKeys">インライン出力する FK 仕様</param>
-    private static void AppendCreateTableBody(
+    private void AppendCreateTableBody(
         StringBuilder sb,
         string quotedTableName,
         string constraintTableName,
@@ -246,6 +249,15 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
             // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
             ComputedColumnComment.Append(sb, definition.Columns[i], "    ");
 
+            // 採番の定義は図に無い＝ここで出すのは普通の列。扱いの表が注記とする方言だけ書き添える
+            IdentityColumnComment.Append(
+                sb,
+                definition.Columns[i],
+                "    ",
+                DialectName,
+                UnsupportedFeature.Sync
+            );
+
             var line = SqliteDdlGenerator.BuildColumnDefinition(definition.Columns[i]);
             var hasMoreColumns = i < definition.Columns.Count - 1;
 
@@ -275,6 +287,9 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         ComputedColumnComment.Append(sb, col, string.Empty);
+
+        // 採番の定義は図に無い＝ここで足すのは普通の列。扱いの表が注記とする方言だけ書き添える
+        IdentityColumnComment.Append(sb, col, string.Empty, DialectName, UnsupportedFeature.Sync);
 
         // 列定義の組み立ては DDL 生成と共有する（先頭インデントのみ除去してインライン化）
         var definition = SqliteDdlGenerator.BuildColumnDefinition(col).TrimStart();

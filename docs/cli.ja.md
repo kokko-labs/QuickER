@@ -32,7 +32,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 |---|:-:|---|
 | `--schema <file>` | ✅ | 入力する ER 図 JSON ファイル（アプリの保存形式） |
 | `--out <dir>` | ✅ | 生成コードの出力先フォルダ |
-| `--provider <name>` | | 対象データベースの種類。`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`。省略すると図の対象 DBMS（`TargetDbms`）を使い、図に無ければ `sqlserver`。図の対象 DBMS と違う値を指定すると、標準エラーへ警告を出す（列の型は変換されず、書かれたままその方言の規則で解釈される。方言を変えるには、型を変換してくれる GUI の対象 DBMS の切替を使う） |
+| `--provider <name>` | | 対象データベースの種類。`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`。省略すると図の対象 DBMS（`TargetDbms`）を使い、図に無ければ `sqlserver`。図の対象 DBMS と違う値を指定すると、標準エラーへ警告を出す（列の型は変換されず、書かれたままその方言の規則で解釈される。方言を変えるには、型を変換してくれる GUI の対象 DBMS の切替を使う）。指定した方言が DB の採番する列を持てない（`mysql` / `sqlite`）ときは、その印の付いた列も警告で名指しする（持てる方言では、生成 DDL がその列に注記を付けるので警告しない。[DB が採番する列](code-generation.ja.md#db-が採番する列)） |
 | `--config <file>` | | 生成オプション設定ファイル（quicker.json）。下記参照 |
 | `--force` | | 生成後に手で編集された生成ファイルがあっても上書きする |
 

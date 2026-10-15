@@ -2905,17 +2905,19 @@ public sealed class EntitySaveMetadata
         // A store-generated column doubles as the table's concurrency token; a table carries at most one of them
         var rowVersionProperty =
             storeGeneratedColumns.Count == 0 ? null : storeGeneratedColumns[0];
-        // Computed / generated columns (ComputedColumnAttribute) are excluded from INSERT / BulkInsert / UPDATE on every
-        // dialect: the database derives them from an expression and rejects an explicit write. Being computed is a property
-        // of the column itself, not of the dialect, so there is no capability gate here. They are still fetched by SELECT
-        var computedColumns = columns
+        // Computed / generated columns (ComputedColumnAttribute) and identity columns (IdentityColumnAttribute) are excluded
+        // from INSERT / BulkInsert / UPDATE on every dialect: the database derives or numbers them and rejects an explicit
+        // write. Both are properties of the column itself, not of the dialect, so there is no capability gate here.
+        // They are still fetched by SELECT
+        var dbAssignedColumns = columns
             .Where(property =>
                 property.GetCustomAttribute<ComputedColumnAttribute>() is not null
+                || property.GetCustomAttribute<IdentityColumnAttribute>() is not null
             )
             .ToList();
-        // Columns the write statements must leave out. Only the computed ones: the store-generated marker changes nothing
-        // on this dialect (see the note above)
-        var readOnlyColumns = computedColumns;
+        // Columns the write statements must leave out. Only the computed and identity ones: the store-generated marker
+        // changes nothing on this dialect (see the note above)
+        var readOnlyColumns = dbAssignedColumns;
         // INSERT / BulkInsert targets are all columns minus those (identical to all columns when there are none)
         var insertProperties =
             readOnlyColumns.Count == 0
@@ -2928,7 +2930,7 @@ public sealed class EntitySaveMetadata
         var keyColumnName = GetColumnName(keyProperty);
         var columnList = string.Join(", ", selectProperties.Select(property => EntitySaveMetadata.QuoteIdentifier(GetColumnName(property))));
         // A table whose only columns are the key and columns the update leaves out (the row version, computed columns,
-        // excluded binary columns) has nothing to assign, and "UPDATE t SET WHERE ..." is a syntax error. Assigning the key to
+        // identity columns, excluded binary columns) has nothing to assign, and "UPDATE t SET WHERE ..." is a syntax error. Assigning the key to
         // itself keeps every path that reads the statement - the affected-row count, the row-version guard and OUTPUT - as it
         // is. A key set to the value it already holds changes nothing elsewhere: SQL Server does not run ON UPDATE CASCADE
         // for it (no child row is rewritten, no child row version moves, no child trigger fires), and a key referenced by a

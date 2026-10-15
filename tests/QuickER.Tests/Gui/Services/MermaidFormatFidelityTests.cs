@@ -228,4 +228,22 @@ public partial class MermaidFormatFidelityTests
             .Should()
             .Contain(ExportOmissionKind.ComputedColumn);
     }
+
+    [Fact(DisplayName = "Mermaid の欠落: 採番列があるときだけ採番列の指定を告知する")]
+    public void DetectOmissions_IdentityColumn_IsReportedOnlyWhenPresent()
+    {
+        var diagram = BuildSingleTable("items", "int");
+
+        MermaidExporter
+            .DetectOmissions(diagram)
+            .Should()
+            .NotContain(ExportOmissionKind.IdentityColumn);
+
+        diagram.Entities[0].Columns[1].IsIdentity = true;
+
+        MermaidExporter
+            .DetectOmissions(diagram)
+            .Should()
+            .Contain(ExportOmissionKind.IdentityColumn);
+    }
 }

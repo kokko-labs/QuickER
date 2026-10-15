@@ -67,6 +67,9 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
                 ComputedColumnComment.Append(sb, col, "    ");
 
+                // 採番の定義は図に無い＝ここで出すのは普通の列。扱いの表が注記とする方言だけ書き添える
+                IdentityColumnComment.Append(sb, col, "    ", DialectName, UnsupportedFeature.Ddl);
+
                 // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する。
                 // 列定義の末尾には方言固有の句（MySQL のインライン COMMENT 等）を付ける
                 var line =
@@ -170,6 +173,13 @@ public abstract class DdlGeneratorBase : IDdlGenerator
     /// （経路の正本は <see cref="ConstraintNames"/> の XmlDoc）。抽象にして、方言が宣言を忘れたらビルドで止まる形にする。
     /// </remarks>
     protected abstract IdentifierLengthLimit IdentifierLimit { get; }
+
+    /// <summary>この生成器が出力する方言の名前（<see cref="DialectNames"/>）</summary>
+    /// <remarks>
+    /// 図で表せない定義の扱い（<see cref="UnsupportedTreatments"/>）をこの方言のマスで引くのに使う。
+    /// DDL の方言は図の対象 DBMS と食い違い得るので図からは引かない。抽象にして、方言が宣言を忘れたらビルドで止まる形にする。
+    /// </remarks>
+    protected abstract string DialectName { get; }
 
     /// <summary>カラム名など単一識別子を方言のクォート方式でクォートする</summary>
     protected abstract string QuoteSimpleName(string name);

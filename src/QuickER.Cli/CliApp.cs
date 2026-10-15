@@ -213,6 +213,24 @@ public static class CliApp
                     SqlComment.Sanitize(diagram.TargetDbms)
                 )
             );
+
+            // 指定した方言が DB の採番する列を持てないなら、印の付いた列も名指しする（値がどこからも書かれなくなる）
+            var targetProviderName = GenerationExecutor.ResolveProvider(resolvedProviderName).Name;
+            var identityColumns = IdentityColumnMarks.NamesUnsupportedBy(
+                diagram,
+                targetProviderName
+            );
+
+            if (identityColumns.Count > 0)
+            {
+                stderr.WriteLine(
+                    string.Format(
+                        Strings.Cli_IdentityColumnsUnsupportedByProvider,
+                        targetProviderName,
+                        string.Join(", ", identityColumns)
+                    )
+                );
+            }
         }
 
         return GenerationExecutor.RunAsync(

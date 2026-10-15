@@ -251,6 +251,17 @@ public enum SchemaImportWarningKind
     /// <summary>前後に空白のある名前（テーブル名・列名・外部キー名・一意制約名）を、空白を除いて取り込んだ。</summary>
     /// <remarks>図の名前は前後の空白を持たない（モデルの setter が除く）。<c>TableName</c> = 名前を持つテーブル（図での名前）/ <c>Subject</c> = DB の名前（空白つき）/ <c>Detail</c> = 図での名前。</remarks>
     NameTrimmed,
+
+    /// <summary>
+    /// DB が採番し、指定した値を拒む列（SQL Server の IDENTITY・PostgreSQL / Oracle の <c>GENERATED ALWAYS AS IDENTITY</c>）に
+    /// <see cref="Column.IsIdentity"/> の印を付けて取り込んだ。
+    /// </summary>
+    /// <remarks>
+    /// 採番の定義は意味モデルに載らないため、生成 DDL は普通の列を作る（<see cref="ComputedColumnExpressionLost"/> と同じ
+    /// 「印を付けて告げる」形）。<c>Subject</c> = 列名 / <c>Detail</c> = 仕組み（<c>IDENTITY(1,1)</c>・
+    /// <c>GENERATED ALWAYS AS IDENTITY</c>）。
+    /// </remarks>
+    IdentityColumnMarked,
 }
 
 /// <summary>

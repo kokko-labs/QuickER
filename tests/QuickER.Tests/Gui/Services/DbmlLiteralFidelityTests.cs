@@ -234,4 +234,19 @@ public class DbmlLiteralFidelityTests
 
         DbmlExporter.DetectOmissions(diagram).Should().Contain(ExportOmissionKind.ComputedColumn);
     }
+
+    [Fact(DisplayName = "DBML の欠落: 採番列があるときだけ採番列の指定を告知する")]
+    public void DetectOmissions_IdentityColumn_IsReportedOnlyWhenPresent()
+    {
+        var diagram = BuildSingleColumnDiagram("int");
+
+        DbmlExporter
+            .DetectOmissions(diagram)
+            .Should()
+            .NotContain(ExportOmissionKind.IdentityColumn);
+
+        diagram.Entities[0].Columns[1].IsIdentity = true;
+
+        DbmlExporter.DetectOmissions(diagram).Should().Contain(ExportOmissionKind.IdentityColumn);
+    }
 }

@@ -111,6 +111,9 @@ public sealed class CodeReverseCommandService
             reversed.TablesWithPrimaryKeyOrder
         );
 
+        // 主キーの採番の印も温存する（生成コードは主キーの列に印を刻まず、取り込むと消えるため）
+        ReverseMergePostProcessor.ApplyPrimaryKeyIdentityMarks(current, merged.Entities);
+
         // 構造差分・壊れクエリがある場合のみ置換確認を行う（DB 取込と同じ規則）
         if (!ConfirmDiagramReplacement(current, merged, finalRelationships))
         {

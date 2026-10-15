@@ -323,4 +323,10 @@
   <data name="ImportWarningHeading_NameTrimmed" xml:space="preserve">
     <value>Names imported without the spaces around them ({0}):</value>
   </data>
+  <data name="ImportWarning_IdentityColumnMarked" xml:space="preserve">
+    <value>{0}.{1}: imported as a column the database numbers ({2}). The diagram keeps only that fact: generated code leaves the column out of INSERT / UPDATE unless it is part of the primary key, and generated DDL creates an ordinary column.</value>
+  </data>
+  <data name="ImportWarningHeading_IdentityColumnMarked" xml:space="preserve">
+    <value>Columns the database numbers, imported without their numbering definition ({0}):</value>
+  </data>
 </root>

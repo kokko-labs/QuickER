@@ -29,9 +29,10 @@ public static class SchemaSignature
                             + c.DataType
                             + (c.IsPrimaryKey ? "*PK" : "")
                             + (c.IsNullable ? "*NULL" : "*NOTNULL")
-                            // 計算列は生成コードの INSERT / UPDATE を変え、外部キー印は取込で落ちると黙って消える。
-                            // どちらも図の構造なので、変われば置き換えの確認を省かない（立っているときだけ足す）
+                            // 計算列・DB が採番する列は生成コードの INSERT / UPDATE を変え、外部キー印は取込で落ちると黙って消える。
+                            // どれも図の構造なので、変われば置き換えの確認を省かない（立っているときだけ足す）
                             + (c.IsComputed ? "*COMPUTED" : "")
+                            + (c.IsIdentity ? "*IDENTITY" : "")
                             + (c.IsForeignKey ? "*FK" : "")
                             + ")"
                         )

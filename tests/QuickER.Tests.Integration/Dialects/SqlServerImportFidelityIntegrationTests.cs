@@ -431,9 +431,9 @@ public sealed class SqlServerImportFidelityIntegrationTests(SqlServerContainerFi
     /// 既定値・別名型の列とパーティション表を名指しし、既定値の事実を結果に持つ。値が NULL の既定値は告げない
     /// </summary>
     [Fact(
-        DisplayName = "[Integration] SQL Server: 既定値・別名型の列とパーティション表を名指しする"
+        DisplayName = "[Integration] SQL Server: 既定値・別名型・IDENTITY（印）の列とパーティション表を名指しする"
     )]
-    public async Task Import_ColumnAttributesAndPartitionedTable_AreReported()
+    public async Task Import_ColumnAttributesIdentityAndPartitionedTable_AreReported()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
         await fixture.ResetSchemaAsync(Ct);
@@ -454,6 +454,7 @@ public sealed class SqlServerImportFidelityIntegrationTests(SqlServerContainerFi
                 CREATE TABLE parted (id int NOT NULL CONSTRAINT PK_parted PRIMARY KEY CLUSTERED) ON ps_probe (id);
                 CREATE TABLE attrs (
                     id int NOT NULL PRIMARY KEY,
+                    seq int IDENTITY(10, 5) NOT NULL,
                     status nvarchar(10) NOT NULL DEFAULT N'new',
                     note nvarchar(10) NULL DEFAULT NULL,
                     phone dbo.PhoneNumber,
@@ -484,11 +485,23 @@ public sealed class SqlServerImportFidelityIntegrationTests(SqlServerContainerFi
                         "phone",
                         "dbo.PhoneNumber"
                     ),
+                    (
+                        SchemaImportWarningKind.IdentityColumnMarked,
+                        "attrs",
+                        "seq",
+                        "IDENTITY(10,5)"
+                    ),
                 ]);
             result
                 .ColumnDefaults.Select(d => (d.ColumnName, d.Expression))
                 .Should()
                 .BeEquivalentTo([("status", "(N'new')"), ("created", "(sysdatetime())")]);
+            result
+                .Entities.Single(e => e.TableName == "attrs")
+                .Columns.Where(c => c.IsIdentity)
+                .Select(c => c.Name)
+                .Should()
+                .Equal("seq");
         }
         finally
         {

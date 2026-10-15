@@ -94,6 +94,9 @@
   <data name="Cli_ProviderDiffersFromDiagram" xml:space="preserve">
     <value>Warning: --provider {0} differs from the diagram's target DBMS {1}. Column types were not converted; they are read as written under {0}'s rules. To change the dialect, switch the target DBMS in the QuickER GUI, which converts the types first.</value>
   </data>
+  <data name="Cli_IdentityColumnsUnsupportedByProvider" xml:space="preserve">
+    <value>Warning: the diagram marks columns the database numbers (identity columns), which {0} cannot have: {1}. Generated DDL creates them as ordinary columns and generated code leaves them out of INSERT / UPDATE, so their values are never written. Switching the target DBMS in the QuickER GUI removes the mark.</value>
+  </data>
   <data name="Cli_Opt_GenerateProvider" xml:space="preserve">
     <value>Target database type (default: the diagram's target DBMS, or sqlserver if the diagram has none)</value>
   </data>

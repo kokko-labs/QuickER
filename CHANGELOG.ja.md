@@ -95,6 +95,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 #### 生成コード
 
 - **複合主キー自身の列順序を、生成 Entity の `[DbTableMeta]` へ記録するようになりました** — 主キーの順序がキー列の宣言順と食い違うテーブルにだけ、`[DbTableMeta(PrimaryKeyOrder = new[] { "B", "A" })]` の形でプロパティ名を主キーの順に並べます。順序を明示していない図・単一列の主キー・宣言順どおりの図の生成物は変わりません。付くのは `[DbTableMeta]` を出す構成（データアノテーションを生成するとき）だけです。ランタイムパッケージ `QuickER.Runtime` の `DbTableMetaAttribute` には `PrimaryKeyOrder` プロパティが加わります
+- **DB が値を採番して指定した値を拒む列を、取込で印を付けて取り込み、生成コードが書き込みから外すようになりました** — SQL Server の `IDENTITY`、PostgreSQL と Oracle の `GENERATED ALWAYS AS IDENTITY` の列です。これまでは普通の列として取り込み、生成コードの INSERT / UPDATE がその列へ値を送って、実行時にエラーになっていました。取込はこうした列に印を付けて取込警告で名指しし、生成コードは主キーでないその列に `[IdentityColumn]` を刻んで INSERT・一括追加・UPDATE から外します（SELECT では読みます。EF Core は `ValueGeneratedOnAddOrUpdate()`）。主キーの列は生成される Repository がキーを書き込む前提のため外さず、Repository を生成するときは警告します（GUI のコード取込はこの印を現在の図から引き継ぎます）。マルチターゲットで SQLite のミラーへ書けない NOT NULL の印の列も、生成時に警告します。図は採番の定義（開始値・増分）を持たないので、DDL とスキーマ同期は普通の列を作り、SQL Server・PostgreSQL・Oracle では列の直前に手で足すよう促すコメントを付けます。C# の取込は `[IdentityColumn]` を読んで印を戻し、Mermaid・DBML のエクスポートは印を運べないことを告げます。MySQL と SQLite はこの種類の列を持てないので、対象 DBMS をどちらかへ切り替えると印を外し（切替の確認で列を挙げ、1 回の元に戻すで戻ります）、図と違うこの 2 つの方言で生成する CLI の `--provider` と MCP の `provider` は印の付いた列を警告で名指しします。ランタイムパッケージ `QuickER.Runtime` には `IdentityColumnAttribute` が加わります。印の付いた列の無い図の生成物は変わりません。[コード生成](docs/code-generation.ja.md#db-が採番する列)を参照してください
 
 #### インポート・エクスポート
 

@@ -126,6 +126,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_IdentityColumnsUnsupportedByProvider {
+            get {
+                return ResourceManager.GetString("Cli_IdentityColumnsUnsupportedByProvider", resourceCulture);
+            }
+        }
+
         public static string Cli_Opt_GenerateProvider {
             get {
                 return ResourceManager.GetString("Cli_Opt_GenerateProvider", resourceCulture);

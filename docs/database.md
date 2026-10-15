@@ -171,6 +171,9 @@ The list has one heading per kind with the count, followed by one line per place
 - A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
   The diagram does not model expressions, so generated DDL creates an ordinary column (with a comment asking for the expression to be added by hand).
   Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))
+- A column with **automatic numbering that refuses given values** (SQL Server `IDENTITY`, PostgreSQL and Oracle `GENERATED ALWAYS AS IDENTITY`) is imported with a mark, as a column the database numbers, without its numbering definition (seed and increment), and is named column by column.
+  The diagram does not model the numbering definition, so generated DDL creates an ordinary column (with a comment asking for the identity property to be added by hand).
+  Generated code leaves such a column out of INSERT / UPDATE unless it is part of the primary key (see [the code generation notes](code-generation.md#columns-the-database-numbers))
 - A SQLite **virtual table** (FTS5, R*Tree and the like) is not imported.
   It cannot be represented as an ordinary table; its shadow tables are excluded along with it, and each virtual table is reported once
 - **Objects the diagram does not hold** are left out and listed by name.
@@ -250,7 +253,7 @@ It is not imported, it never appears in generated DDL, and the diff sync neither
 | `CHECK` constraint | Not imported | Not emitted | Lost |
 | `COLLATE` | Not imported | Not emitted | Lost |
 | Generated / computed column | Imported as an ordinary column; the expression is lost | Emitted as an ordinary column | Lost |
-| `IDENTITY` / `AUTO_INCREMENT` / `AUTOINCREMENT` | Not imported | Not emitted | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
+| `IDENTITY` / `AUTO_INCREMENT` / `AUTOINCREMENT` | Automatic numbering that refuses given values (SQL Server `IDENTITY`, PostgreSQL and Oracle `GENERATED ALWAYS AS IDENTITY`) is imported as the mark of a column the database numbers (the numbering definition is lost); the rest is not imported | Not emitted (a marked column gets a note) | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
 | Non-unique index | Not imported | Not emitted | Preserved (captured as its `CREATE` statement and replayed) |
 | Trigger | Not imported | Not emitted | Preserved (same) |
 | View, stored procedure, function, sequence | Not imported | Not emitted | Not applicable |

@@ -94,6 +94,9 @@
   <data name="Cli_ProviderDiffersFromDiagram" xml:space="preserve">
     <value>警告: --provider {0} は図の対象 DBMS {1} と異なります。列の型は変換せず、書かれたまま {0} の規則で解釈します。方言を変えるには、型を変換してくれる QuickER GUI の対象 DBMS の切替を使ってください。</value>
   </data>
+  <data name="Cli_IdentityColumnsUnsupportedByProvider" xml:space="preserve">
+    <value>警告: 図には DB が採番する列の印が付いていますが、{0} はこの種類の列を持てません: {1}。生成 DDL は普通の列を作り、生成コードはこの列を INSERT / UPDATE から外すので、値がどこからも書かれません。QuickER GUI で対象 DBMS を切り替えると印が外れます。</value>
+  </data>
   <data name="Cli_Opt_GenerateProvider" xml:space="preserve">
     <value>対象データベースの種類（既定: 図の対象 DBMS。図に無ければ sqlserver）</value>
   </data>

@@ -7,7 +7,7 @@ namespace QuickER.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 定義書は計算列の指定と、一意制約の構成列の順序・名前と、複合主キーの順序を書かない（キー欄の <c>UQ{n}</c> と
+/// 定義書は計算列・採番列の指定と、一意制約の構成列の順序・名前と、複合主キーの順序を書かない（キー欄の <c>UQ{n}</c> と
 /// <c>PK</c> は列の行に付くので、取込は構成列を列の並び順で組み直し、一意制約の名前は持たない）。マージ取込でこれらを
 /// 取込値のまま採ると、定義書を書き出して読み戻しただけで計算列が通常の列に戻り、<c>UNIQUE (b, a)</c> が
 /// <c>(a, b)</c>・名前つき制約が合成名に変わり、<c>PRIMARY KEY (b, a)</c> が <c>(a, b)</c> に変わる
@@ -21,12 +21,13 @@ namespace QuickER.Services;
 /// </remarks>
 internal static class TableDefinitionMergePostProcessor
 {
-    /// <summary>Guid 引継済みのマージ結果へ、現在図の計算列の指定と一意制約の順序・名前と主キーの順序を書き戻す</summary>
+    /// <summary>Guid 引継済みのマージ結果へ、現在図の計算列・採番列の指定と一意制約の順序・名前と主キーの順序を書き戻す</summary>
     /// <param name="current">取込前の現在図</param>
     /// <param name="mergedEntities">Guid 引継済みのマージ結果エンティティ（その場で書き換える）</param>
     /// <remarks>
     /// <list type="bullet">
-    /// <item>計算列: 現在図と同じ Id の列（＝名前で一致した列）の <see cref="Column.IsComputed"/> を引き継ぐ</item>
+    /// <item>計算列・採番列: 現在図と同じ Id の列（＝名前で一致した列）の <see cref="Column.IsComputed"/> と
+    ///   <see cref="Column.IsIdentity"/> を引き継ぐ</item>
     /// <item>一意制約: 構成列の集合が現在図のいずれかの制約と同じなら、その制約の構成列の順序を引き継ぎ、
     ///   現在図に名前があれば名前も引き継ぐ（現在図の各制約は 1 回だけ使う）。集合が違う制約は取込値のまま</item>
     /// <item>主キーの順序: 現在図が明示していて、主キー列の集合が列名で一致するなら、その順序を引き継ぐ
@@ -51,6 +52,7 @@ internal static class TableDefinitionMergePostProcessor
                 if (existingColumns.TryGetValue(column.Id, out var existingColumn))
                 {
                     column.IsComputed = existingColumn.IsComputed;
+                    column.IsIdentity = existingColumn.IsIdentity;
                 }
             }
 

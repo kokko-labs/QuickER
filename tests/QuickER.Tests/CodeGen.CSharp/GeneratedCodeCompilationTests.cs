@@ -935,6 +935,17 @@ public class GeneratedCodeCompilationTests
                             IsNullable = false,
                             IsComputed = true,
                         },
+                        // 主キーでない NOT NULL の採番列（値型）。計算列と同じく Mapper の「入力があるときだけ代入」が
+                        // .Value で取り出す経路と、[IdentityColumn] の付与・EF Core の ValueGeneratedOnAddOrUpdate を
+                        // 全マトリクスケースでコンパイル水準に通す
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "seq_no",
+                            DataType = "bigint",
+                            IsNullable = false,
+                            IsIdentity = true,
+                        },
                     ],
                     // 単一列・複合の 2 本（Entity の [UniqueConstraint] 属性と EditModel の制約テーブルの両方を発火させる）
                     UniqueConstraints =

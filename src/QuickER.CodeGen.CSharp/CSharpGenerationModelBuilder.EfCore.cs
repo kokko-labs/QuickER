@@ -132,6 +132,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             Scale = typeInfo.Scale,
             IsRowVersion = typeInfo.IsRowVersion,
             IsComputed = column.IsComputed,
+            // 主キーでない ID 列も DB が値を作るので、EF Core にも書かせない（主キーはアプリが書くため対象外）
+            IsIdentity = IsWriteExcludedIdentity(column),
             IsValueObject = valueObject is not null,
             ValueObjectClassName = valueObject?.ClassName ?? string.Empty,
         };

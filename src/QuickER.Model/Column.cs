@@ -53,6 +53,22 @@ public class Column
     /// </remarks>
     public bool IsComputed { get; set; }
 
+    /// <summary>
+    /// DB が値を採番し、指定した値を拒む列か（SQL Server の IDENTITY・PostgreSQL / Oracle の
+    /// <c>GENERATED ALWAYS AS IDENTITY</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 採番の定義（開始値・増分）は意味モデルに載らない＝この図から生成する DDL は普通の列を作る。
+    /// 運ぶのは「DB が採番し、明示の書き込みを受け付けない」という事実だけで、生成コードは主キーでないこの列を
+    /// INSERT / UPDATE の対象から外す（主キーの列は外さず、生成時に警告する）。
+    /// </para>
+    /// <para>
+    /// 指定した値も受け付ける自動採番（MySQL の AUTO_INCREMENT など）は印を付けない（取込が告げるだけ）。
+    /// </para>
+    /// </remarks>
+    public bool IsIdentity { get; set; }
+
     /// <summary>カラムを複製する</summary>
     /// <param name="preserveId"><c>true</c> の場合は同じ ID を維持し、<c>false</c> の場合は新しい ID を割り当てる</param>
     /// <returns>複製された <see cref="Column"/></returns>
@@ -67,5 +83,6 @@ public class Column
             IsNullable = IsNullable,
             Description = Description,
             IsComputed = IsComputed,
+            IsIdentity = IsIdentity,
         };
 }

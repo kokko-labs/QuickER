@@ -348,6 +348,7 @@ public abstract partial class EntityBase : EntityBaseCore { }
 {{ end }}{{ if exclude_unbounded_binary && property.is_unbounded_binary }}    [UnboundedBinaryColumn]
 {{ end }}{{ if property.is_row_version }}    [StoreGeneratedColumn]
 {{ end }}{{ if property.is_computed }}    [ComputedColumn]
+{{ end }}{{ if property.is_identity }}    [IdentityColumn]
 {{ end }}    public {{ if property.property_name == "DisplayName" }}new {{ end }}{{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
 {{ end }}{{ for navigation in item.navigations }}
     /// <summary>{{ navigation.property_name }} navigation property</summary>

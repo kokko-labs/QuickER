@@ -107,6 +107,10 @@ public static partial class DbmlExporter
                 diagram.Entities.Any(entity => entity.Columns.Any(column => column.IsComputed)),
                 ExportOmissionKind.ComputedColumn
             ),
+            (
+                diagram.Entities.Any(entity => entity.Columns.Any(column => column.IsIdentity)),
+                ExportOmissionKind.IdentityColumn
+            ),
         };
 
         return checks.Where(check => check.Detected).Select(check => check.Kind).ToList();

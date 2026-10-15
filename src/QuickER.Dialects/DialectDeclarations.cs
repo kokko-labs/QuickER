@@ -47,6 +47,13 @@ public static class DialectDeclarations
         return All[name][kind];
     }
 
+    /// <summary>その方言でこの種類の定義があり得るか（宣言が「あり得ない」でない）</summary>
+    /// <param name="dialect">方言名（大文字小文字を問わない）</param>
+    /// <param name="kind">種類</param>
+    /// <exception cref="ArgumentException">知らない方言名</exception>
+    public static bool CanOccur(string dialect, UnsupportedDefinitionKind kind) =>
+        For(dialect, kind).Occurrence != DialectOccurrence.Impossible;
+
     // 検出しない理由（表 2 の備考から。種類ごとに 1 つ）
     private const string CheckConstraintReason =
         "保存後の機能の振る舞いを変えず、取込で検出を足す対象に入っていない（SQLite の再構築は CHECK の喪失を警告する）";

@@ -2033,11 +2033,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // 名前は変換せずそのまま残る＝切替後に DDL・同期が断る名前を、切り替える前に知らせる
         var rejectedNames = CollectNamesRejectedBy(IdentifierLengthLimits.ForDbms(target.Name));
 
-        // 変換できないカラム・NOT NULL 解除を伴うカラム・切替先が受け付けない名前があるときは、適用前に内容を提示して
-        // OK / キャンセルを選ばせる（クリーンに変換できる切替は従来どおり無確認で適用する）
+        // 切替先が DB の採番する列を持てない方言なら、採番の印を外す（印を残すと、生成コードはその列を書かず、
+        // 切替先の DDL は普通の列を作るので、値がどこからも書かれない）。持てるかは方言の宣言が決める
+        var identityMarks = IdentityColumnMarks.CanBeHeldBy(target.Name)
+            ? []
+            : Entities
+                .SelectMany(entity => entity.Columns.Where(column => column.IsIdentity))
+                .ToList();
+
+        // 変換できないカラム・NOT NULL 解除を伴うカラム・切替先が受け付けない名前・外す採番の印があるときは、
+        // 適用前に内容を提示して OK / キャンセルを選ばせる（クリーンに変換できる切替は従来どおり無確認で適用する）
         if (
-            (plan.Unconverted.Count > 0 || nullable.Count > 0 || rejectedNames.Count > 0)
-            && !ConfirmTypeConversion(target, plan.Unconverted, nullable, rejectedNames)
+            (
+                plan.Unconverted.Count > 0
+                || nullable.Count > 0
+                || rejectedNames.Count > 0
+                || identityMarks.Count > 0
+            )
+            && !ConfirmTypeConversion(
+                target,
+                plan.Unconverted,
+                nullable,
+                rejectedNames,
+                identityMarks
+            )
         )
         {
             // キャンセル: 図には何も適用しない。暫定値を捨てて ComboBox の表示を現在方言へ戻す
@@ -2051,6 +2070,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             target,
             plan.Converted,
             columnsById,
+            identityMarks,
             applyProvider: SetProviderInternal
         );
 
@@ -2077,12 +2097,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// <param name="unconverted">変換できないカラム（元の型を保持する）</param>
     /// <param name="nullable">NOT NULL を解除するカラム（主キー列は除外済み）</param>
     /// <param name="rejectedNames">切替先の方言が受け付けない名前の行（<see cref="CollectNamesRejectedBy"/>）</param>
+    /// <param name="identityMarks">採番の印を外す列（切替先がこの種類の列を持てないとき）</param>
     /// <returns>OK が選択された場合 true</returns>
     private bool ConfirmTypeConversion(
         IDatabaseProvider target,
         IReadOnlyList<ColumnTypeConversion> unconverted,
         IReadOnlyList<ColumnTypeConversion> nullable,
-        IReadOnlyList<string> rejectedNames
+        IReadOnlyList<string> rejectedNames,
+        IReadOnlyList<ColumnViewModel> identityMarks
     )
     {
         var message = string.Join(
@@ -2118,6 +2140,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 string.Format(Strings.TypeConversion_NameLimitHeader, target.DisplayName)
                     + Environment.NewLine
                     + string.Join(Environment.NewLine, rejectedNames)
+            );
+        }
+
+        if (identityMarks.Count > 0)
+        {
+            var tableByColumn = Entities
+                .SelectMany(entity => entity.Columns.Select(column => (column, entity.TableName)))
+                .ToDictionary(pair => pair.column, pair => pair.TableName);
+
+            sections.Add(
+                string.Format(Strings.TypeConversion_IdentityMarkHeader, target.DisplayName)
+                    + Environment.NewLine
+                    + string.Join(
+                        Environment.NewLine,
+                        identityMarks.Select(column =>
+                            string.Format(
+                                Strings.TypeConversion_IdentityMarkLine,
+                                tableByColumn[column],
+                                column.Name
+                            )
+                        )
+                    )
             );
         }
 

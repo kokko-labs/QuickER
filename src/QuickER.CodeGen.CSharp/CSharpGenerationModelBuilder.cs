@@ -402,6 +402,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                     IsRowVersion = editModelProperty.IsRowVersion,
                     // 計算列・生成列も同じく「入力があるときだけ代入」へ倒す（DB が式から作るため未入力が正常）
                     IsComputed = editModelProperty.IsComputed,
+                    // 主キーでない ID 列も同じく「入力があるときだけ代入」へ倒す（DB が採番するため未入力が正常）
+                    IsIdentity = editModelProperty.IsIdentity,
                     // 除外された無制限バイナリ列も同じく「入力があるときだけ代入」へ倒す。
                     // 通常フェッチでは SELECT されず未取得状態のままなので、未入力を欠落として例外にすると
                     // 「取得 → 通常列だけ編集 → 保存」の往復が成立しない
@@ -521,6 +523,19 @@ internal sealed partial class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>
+    /// 書き込みから外す ID 列か（<see cref="Column.IsIdentity"/> かつ主キーでない列）を判定する
+    /// </summary>
+    /// <remarks>
+    /// <c>[IdentityColumn]</c> の付与・EF Core の <c>ValueGeneratedOnAddOrUpdate</c>・EditModel の必須除外は
+    /// すべてこの判定に従う。主キーの ID 列は生成 Repository がアプリ側でキーを書く前提のため外さない
+    /// （書き込みを拒む DB では挿入が失敗するので、生成時に警告で知らせる）。
+    /// </remarks>
+    /// <param name="column">対象のカラム定義</param>
+    /// <returns>書き込みから外す ID 列なら <c>true</c></returns>
+    internal static bool IsWriteExcludedIdentity(Column column) =>
+        column.IsIdentity && !column.IsPrimaryKey;
+
     /// <summary>カラム定義からエンティティのスカラープロパティ生成モデルを構築する</summary>
     /// <param name="column">対象のカラム定義</param>
     /// <param name="entityClassName">
@@ -571,6 +586,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsRowVersion = typeInfo.IsRowVersion,
             // 計算列・生成列のマーカー（[ComputedColumn] 付与判定用）。列自身の事実なのでオプション・方言に依らず常時転記する
             IsComputed = column.IsComputed,
+            // 主キーでない ID 列のマーカー（[IdentityColumn] 付与判定用）。計算列と同じく常時転記する
+            IsIdentity = IsWriteExcludedIdentity(column),
             // DB 定義メタ属性（[DbColumnMeta]）用。方言中立トークンと列の説明（型解決とは独立にモデルから引く）
             CanonicalTypeToken = typeInfo.CanonicalTypeToken,
             // 中立トークンでは綴りが復元できない列だけに載る元の型表記。C# リテラルとして埋め込むためエスケープする
@@ -676,15 +693,18 @@ internal sealed partial class CSharpGenerationModelBuilder
             // Entity 側が非 NULL（必須）で EditModel 側は入力途中を許容して NULL 許容にした項目を必須とみなす。
             // ただし行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）。
             // 計算列・生成列も同じく非 NULL でも入力必須にしない（DB が式から作るため未入力が正常）。
+            // 主キーでない ID 列も同じく非 NULL でも入力必須にしない（DB が採番するため未入力が正常）。
             // 除外された無制限バイナリ列も同じく非 NULL でも入力必須にしない（通常フェッチでは未取得が正常）
             IsRequired =
                 editModelIsNullable
                 && !column.IsNullable
                 && !typeInfo.IsRowVersion
                 && !column.IsComputed
+                && !IsWriteExcludedIdentity(column)
                 && !isExcludedUnboundedBinary,
             IsRowVersion = typeInfo.IsRowVersion,
             IsComputed = column.IsComputed,
+            IsIdentity = IsWriteExcludedIdentity(column),
             IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
             // NOT NULL の除外列だけは新規行（Added）で必須にする。未入力のまま INSERT すると DB の
             // NOT NULL 違反で必ず落ちるため、行が DB に無い間だけ画面で止める（rowversion 列は

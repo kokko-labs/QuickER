@@ -701,6 +701,12 @@
   <data name="TypeConversion_NullableColumnLine" xml:space="preserve">
     <value>• {0}.{1} ({2})</value>
   </data>
+  <data name="TypeConversion_IdentityMarkHeader" xml:space="preserve">
+    <value>Columns whose mark as numbered by the database is removed, because {0} cannot have such columns (generated code writes these columns again):</value>
+  </data>
+  <data name="TypeConversion_IdentityMarkLine" xml:space="preserve">
+    <value>• {0}.{1}</value>
+  </data>
   <data name="TypeConversion_NameLimitHeader" xml:space="preserve">
     <value>Names that {0} would refuse (DDL generation and sync stop until they are changed):</value>
   </data>
@@ -832,6 +838,9 @@
   </data>
   <data name="ExportOmission_ComputedColumn" xml:space="preserve">
     <value>Computed column settings (the columns are imported as ordinary columns)</value>
+  </data>
+  <data name="ExportOmission_IdentityColumn" xml:space="preserve">
+    <value>Settings of columns the database numbers (identity columns; the columns are imported as ordinary columns)</value>
   </data>
   <data name="ExportOmission_TableNameNormalized" xml:space="preserve">
     <value>Table names that the format cannot spell even in quotes (", % and \ are folded to "_")</value>

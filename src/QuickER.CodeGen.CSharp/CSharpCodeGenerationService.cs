@@ -198,6 +198,9 @@ public sealed partial class CSharpCodeGenerationService
         // 計算列は型解決に依らず図（Column.IsComputed）で決まるが、診断の並びを揃えてここで検証する
         ValidateComputedPrimaryKeys(diagram, diagnostics);
 
+        // 主キーの採番列（Column.IsIdentity）も同じ位置で検証する。計算列と違い生成は止めず警告にとどめる
+        WarnIdentityPrimaryKeys(diagram, options, diagnostics);
+
         // 同期支援の前提（方言構成・Repository 実装・行バージョン列の存在）も列型辞書が確定した後で検証する
         ValidateSyncSupport(diagram, columnTypes, options, effectiveDialects, diagnostics);
 
@@ -255,6 +258,15 @@ public sealed partial class CSharpCodeGenerationService
         );
 
         AddNotNullComputedColumnWarning(model, options, diagnostics);
+
+        AddNotNullIdentityColumnWarning(model, options, diagnostics);
+
+        // 主キーでない採番列も計算列と同じく常に効く除外なので、ここで一度だけ名指しする
+        AddListInfo(
+            diagnostics,
+            Strings.CodeGen_Info_IdentityColumns,
+            BuildIdentityColumnLines(model)
+        );
 
         // 型表記が中立トークン経由で復元できない列（[DbColumnMeta] へ元の表記も刻んだ列）を Info 診断で通知する。
         // 「同義だが綴りの違う型」は生成物を読んでも気づけず、コード取込の往復で図の型表記が変わる／変わらない
@@ -1134,6 +1146,51 @@ public sealed partial class CSharpCodeGenerationService
     }
 
     /// <summary>
+    /// 主キー列が DB の採番列（<see cref="Column.IsIdentity"/>）なら警告する
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 生成 Repository は単一キーをアプリ側で決めて書き込む前提のため、主キーの採番列には <c>[IdentityColumn]</c> を
+    /// 付けず、普通の列として INSERT へ載せる。指定した値を拒む DB では行の追加が失敗するので、生成時に名指しする。
+    /// </para>
+    /// <para>
+    /// 計算列の主キー（<see cref="ValidateComputedPrimaryKeys"/>）と違い Error にはしない。DB 側で明示の値を許す
+    /// 設定（SQL Server の IDENTITY_INSERT 等）で動かす構成があり、図からはそれを判定できないため。
+    /// </para>
+    /// <para>
+    /// 出すのは Repository 契約（QuickER 版・EF Core・インメモリのどれか）を生成するときだけ。
+    /// キーを書き込む前提が効くのはそのときで、エンティティだけを生成する構成では行を追加する生成コードが無い。
+    /// </para>
+    /// </remarks>
+    private static void WarnIdentityPrimaryKeys(
+        ErDiagram diagram,
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (!options.GeneratesRepositoryContract)
+        {
+            return;
+        }
+
+        foreach (var entity in diagram.Entities)
+        {
+            foreach (var column in entity.Columns.Where(c => c.IsPrimaryKey && c.IsIdentity))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Warning_IdentityPrimaryKeyColumn,
+                            entity.TableName,
+                            column.Name
+                        )
+                    )
+                );
+            }
+        }
+    }
+
+    /// <summary>
     /// テーブル名・同じテーブルの列名が <see cref="SchemaNames"/> の規則（前後の空白を除き大文字小文字を区別しない）で
     /// 重複していないことを検証する
     /// </summary>
@@ -1960,6 +2017,73 @@ public sealed partial class CSharpCodeGenerationService
     }
 
     /// <summary>
+    /// 主キーでない NOT NULL の採番列（<see cref="Column.IsIdentity"/>）を、その種類の列を持てない方言
+    /// （<see cref="UnsupportedDefinitionKind.IdentityRejectingValues"/> の宣言が「あり得ない」）を含む
+    /// マルチターゲットのときだけ Warning 診断で名指しする。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 採番列は方言に依らず INSERT / UPDATE の対象から外れる。ところが持てない方言のミラー（SQLite）には
+    /// 普通の列として作られ、そこへ行を追加すると送られない列の NOT NULL 制約で必ず落ちる
+    /// （<see cref="AddNotNullComputedColumnWarning"/> と同じ乖離）。持てるかは方言の宣言で決め、方言名で分岐しない。
+    /// </para>
+    /// <para>
+    /// Error にはしない。ミラー側のスキーマを既定値などで整えてあれば動く構成があり、図からは判定できないため。
+    /// </para>
+    /// </remarks>
+    private static void AddNotNullIdentityColumnWarning(
+        CSharpGenerationModel model,
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (!options.GenerateRepositories)
+        {
+            return;
+        }
+
+        var dialects = options.ResolveRepositoryDialects();
+
+        if (
+            dialects.Count < 2
+            || dialects.All(dialect =>
+                DialectDeclarations.CanOccur(
+                    dialect,
+                    UnsupportedDefinitionKind.IdentityRejectingValues
+                )
+            )
+        )
+        {
+            return;
+        }
+
+        var lines = model
+            .EntityClasses.SelectMany(entity =>
+                entity
+                    .Properties.Where(property => property.IsIdentity && !property.IsNullable)
+                    .Select(property =>
+                        $"{entity.ClassName}.{property.PropertyName} ({entity.TableName}.{property.ColumnName})"
+                    )
+            )
+            .ToList();
+
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        diagnostics.Add(
+            GenerationDiagnostic.Warning(
+                string.Format(
+                    Strings.CodeGen_Warning_NotNullIdentityColumns,
+                    Environment.NewLine
+                        + string.Join(Environment.NewLine, lines.Select(l => "  " + l))
+                )
+            )
+        );
+    }
+
+    /// <summary>
     /// 計算列・生成列の一覧を <c>{EntityClass}.{Property} ({テーブル}.{列名})</c> 形式の行で組み立てる。
     /// </summary>
     /// <remarks>
@@ -1971,6 +2095,24 @@ public sealed partial class CSharpCodeGenerationService
             .EntityClasses.SelectMany(entity =>
                 entity
                     .Properties.Where(property => property.IsComputed)
+                    .Select(property =>
+                        $"{entity.ClassName}.{property.PropertyName} ({entity.TableName}.{property.ColumnName})"
+                    )
+            )
+            .ToList();
+
+    /// <summary>
+    /// 主キーでない採番列の一覧を <c>{EntityClass}.{Property} ({テーブル}.{列名})</c> 形式の行で組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsIdentity"/> のものを対象にする
+    /// （マーカー属性 <c>[IdentityColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
+    /// </remarks>
+    private static IReadOnlyList<string> BuildIdentityColumnLines(CSharpGenerationModel model) =>
+        model
+            .EntityClasses.SelectMany(entity =>
+                entity
+                    .Properties.Where(property => property.IsIdentity)
                     .Select(property =>
                         $"{entity.ClassName}.{property.PropertyName} ({entity.TableName}.{property.ColumnName})"
                     )

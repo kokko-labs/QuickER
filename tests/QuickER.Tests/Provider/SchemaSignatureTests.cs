@@ -173,6 +173,18 @@ public class SchemaSignatureTests
         Sign(computed).Should().NotBe(Sign(plain));
     }
 
+    /// <summary>採番の印だけが違うと署名が変わることを検証する</summary>
+    /// <remarks>採番の印も計算列と同じく生成コードの INSERT / UPDATE を変えるため</remarks>
+    [Fact(DisplayName = "Compute: 採番の印だけが違えば署名が変わる")]
+    public void Compute_IdentityFlag_ChangesSignature()
+    {
+        var plain = BuildEntity();
+        var identity = BuildEntity();
+        identity.Columns[0].IsIdentity = true;
+
+        Sign(identity).Should().NotBe(Sign(plain));
+    }
+
     /// <summary>外部キー印だけが違うと署名が変わることを検証する</summary>
     /// <remarks>手で付けた外部キー印は、取込の結果に無ければ置き換えで黙って消えるため</remarks>
     [Fact(DisplayName = "Compute: 外部キー印だけが違えば署名が変わる")]

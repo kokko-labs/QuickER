@@ -23,6 +23,9 @@ public sealed class OracleDdlGenerator : DdlGeneratorBase
     /// <inheritdoc />
     protected override IdentifierLengthLimit IdentifierLimit => OracleIdentifier.Limit;
 
+    /// <inheritdoc/>
+    protected override string DialectName => OracleProvider.ProviderName;
+
     /// <inheritdoc />
     protected override string QuoteQualifiedName(string name) => OracleIdentifier.Quote(name);
 

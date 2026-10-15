@@ -585,5 +585,17 @@ namespace QuickER.Provider.Resources {
                 return ResourceManager.GetString("ImportWarningHeading_NameTrimmed", resourceCulture);
             }
         }
+
+        public static string ImportWarning_IdentityColumnMarked {
+            get {
+                return ResourceManager.GetString("ImportWarning_IdentityColumnMarked", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_IdentityColumnMarked {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_IdentityColumnMarked", resourceCulture);
+            }
+        }
     }
 }

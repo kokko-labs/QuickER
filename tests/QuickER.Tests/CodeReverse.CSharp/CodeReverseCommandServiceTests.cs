@@ -320,6 +320,72 @@ public class CodeReverseCommandServiceTests
         }
     }
 
+    /// <summary>
+    /// 主キーの採番の印を持つ図を、その図から生成したコードで取り込み直しても、確認を出さず印を保つことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 生成コードは主キーの列に <c>[IdentityColumn]</c> を刻まないので、引き継がないと印が消えて署名
+    /// （<c>*IDENTITY</c>）の差として置換の確認が出る。
+    /// </remarks>
+    [Fact(DisplayName = "主キーの採番の印を持つ図を取り込み直しても、確認を出さず印を保つ")]
+    public void Run_IdentityPrimaryKey_NoConfirmAndKeepsMark()
+    {
+        var schema = new ErDiagram
+        {
+            TargetDbms = "sqlserver",
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "customers",
+                    Description = "Customers",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                            IsIdentity = true,
+                            Description = "Customer identifier",
+                        },
+                    },
+                },
+            },
+        };
+        var (picked, root) = WriteGeneratedSource(schema);
+
+        try
+        {
+            var host = new StubErDiagramHost
+            {
+                DiagramToReturn = schema,
+                ProvidersToReturn = SqlServerRegistry(),
+                TargetDbmsToReturn = "sqlserver",
+            };
+            var dialogs = new StubDialogService();
+            var files = new StubFileDialogService { OpenResult = picked };
+            var service = new CodeReverseCommandService(host, dialogs, files);
+
+            service.Run();
+
+            dialogs.ConfirmMessages.Should().BeEmpty();
+            dialogs.WarningConfirmMessages.Should().BeEmpty();
+            host.LastReplacedDiagram!.Entities.Single()
+                .Columns.Single()
+                .IsIdentity.Should()
+                .BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>置換確認を拒否（キャンセル）すると図を差し替えない</summary>
     [Fact(DisplayName = "置換確認の拒否では図を差し替えない")]
     public void Run_ReplacementDeclined_DoesNotReplace()

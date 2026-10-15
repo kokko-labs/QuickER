@@ -157,6 +157,10 @@ public static partial class MermaidExporter
                 ExportOmissionKind.ComputedColumn
             ),
             (
+                diagram.Entities.Any(entity => entity.Columns.Any(column => column.IsIdentity)),
+                ExportOmissionKind.IdentityColumn
+            ),
+            (
                 // 型トークンに書けない文字を畳んだ結果、取込の復元で元の表記へ戻らない型（nvarchar(max)・double precision 等）。
                 // 判定は書き出し（NormalizeDataType）と取込の復元（DenormalizeDataType）を実際に往復させて行う
                 diagram.Entities.Any(entity =>

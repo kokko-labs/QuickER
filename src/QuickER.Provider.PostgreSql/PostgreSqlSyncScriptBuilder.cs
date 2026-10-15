@@ -30,6 +30,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <inheritdoc />
     protected override IdentifierLengthLimit IdentifierLimit => PgIdentifier.Limit;
 
+    /// <inheritdoc/>
+    protected override string DialectName => PostgreSqlProvider.ProviderName;
+
     // ---------------- 各種 DDL ----------------
 
     /// <summary>CREATE TABLE 文（主キー制約・一意制約を含む）を生成する</summary>
@@ -57,6 +60,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
             // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
             ComputedColumnComment.Append(sb, col, "    ");
+
+            // 採番の定義は図に無い＝ここで出すのは普通の列。扱いの表が注記とする方言だけ書き添える
+            IdentityColumnComment.Append(sb, col, "    ", DialectName, UnsupportedFeature.Sync);
             var line =
                 $"    {PgIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
@@ -81,6 +87,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         ComputedColumnComment.Append(sb, col, string.Empty);
+
+        // 採番の定義は図に無い＝ここで足すのは普通の列。扱いの表が注記とする方言だけ書き添える
+        IdentityColumnComment.Append(sb, col, string.Empty, DialectName, UnsupportedFeature.Sync);
         sb.AppendLine(
             $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
                 + $"ADD COLUMN {PgIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"
