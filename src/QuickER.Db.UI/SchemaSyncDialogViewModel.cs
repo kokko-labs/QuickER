@@ -586,6 +586,16 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // SET DEFAULT の外部キーの NOT NULL の子の列は、DB 側に DEFAULT 制約が無いと作れない（SQL Server）
+            SyncPlanWarningKind.SetDefaultOnNotNullColumn => string.Format(
+                Strings.SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
+            // ドットを含む表名は、SQLite では添付したデータベースの表と読まれる
+            SyncPlanWarningKind.SchemaQualifiedTableName => string.Format(
+                Strings.SchemaSync_ExecuteConfirmSchemaQualifiedTableName,
+                BulletList(warnings.Select(w => w.TableName))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

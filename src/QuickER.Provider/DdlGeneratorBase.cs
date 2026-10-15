@@ -47,6 +47,10 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         foreach (var entity in diagram.Entities)
         {
             var table = entity.TableName;
+
+            // ドットを含む表名を表せない方言だけ、扱いの表のマスに従って書き添える
+            SchemaQualifiedTableNameNote.Append(sb, table, DialectName);
+
             sb.AppendLine($"CREATE TABLE {QuoteQualifiedName(table)} (");
 
             // 列定義の後に続く制約行（PRIMARY KEY → UNIQUE の順）を先に組み立てる。
@@ -57,7 +61,9 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 table,
                 QuoteSimpleName,
                 QuoteConstraintName,
-                IdentifierLimit
+                IdentifierLimit,
+                DialectName,
+                UnsupportedFeature.Ddl
             );
 
             for (var i = 0; i < entity.Columns.Count; i++)
@@ -132,12 +138,25 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 continue;
             }
 
+            // 参照先のキーの並びを求める方言（SQL Server・MySQL）では、扱いの表のマスに従ってキーの並びへ並べ替える
+            if (
+                UnsupportedTreatments.For(
+                    UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder,
+                    UnsupportedFeature.Ddl,
+                    DialectName
+                ) == UnsupportedTreatment.Reorder
+            )
+            {
+                columnPairs = ForeignKeyColumnOrder.ArrangeToReferencedKey(columnPairs, pkEntity);
+            }
+
             var fkTable = fkEntity.TableName;
             var pkTable = pkEntity.TableName;
             // 親子を引けたリレーションは必ず名前を持つ（モデルの名前、無ければ既定名か一意化した名前）
             var constraintName = foreignKeyNames[rel];
 
             AppendBeforeForeignKeyStatement(sb, rel);
+            ForeignKeyStatementNotes.Append(sb, rel, pkEntity, fkEntity, DialectName);
 
             var referentialActions = BuildReferentialActionClause(rel);
 

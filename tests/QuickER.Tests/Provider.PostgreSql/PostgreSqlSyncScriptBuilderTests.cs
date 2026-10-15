@@ -299,8 +299,35 @@ public class PostgreSqlSyncScriptBuilderTests
 
         sql.Should().Contain("DO $$");
         sql.Should().Contain("pg_constraint");
-        sql.Should().Contain("child.relname = 'order'");
-        sql.Should().Contain("parent.relname = 'customer'");
+        sql.Should().Contain("con.conrelid = to_regclass('\"order\"')");
+        sql.Should().Contain("con.confrelid = to_regclass('\"customer\"');");
+    }
+
+    /// <summary>
+    /// 逆引きは ALTER TABLE と同じ 1 つの表に絞る＝ドット付きの名前はスキーマごとクォートして <c>to_regclass</c> へ渡し、
+    /// 名前の <c>'</c> は文字列リテラルとして二重化することを検証する（public に固定しない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "逆引き: ドット付きの表名はスキーマごと to_regclass へ渡す（public に固定しない）"
+    )]
+    public void RuntimeLookup_DottedTableName_UsesRegclassOfQualifiedName()
+    {
+        var primaryKey = Build(AlterPk("sales.orders", PkTarget("sales.orders", "code")));
+        var foreignKey = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "sales.lines",
+                ParentEntity = new Entity { TableName = "sales.o'rders" },
+                ChildEntity = new Entity { TableName = "sales.lines" },
+                IsSelected = true,
+            }
+        );
+
+        primaryKey.Should().Contain("con.conrelid = to_regclass('\"sales\".\"orders\"');");
+        foreignKey.Should().Contain("con.conrelid = to_regclass('\"sales\".\"lines\"')");
+        foreignKey.Should().Contain("con.confrelid = to_regclass('\"sales\".\"o''rders\"');");
+        (primaryKey + foreignKey).Should().NotContain("regnamespace");
     }
 
     /// <summary>SetTableDescription が COMMENT ON TABLE を生成することを検証する</summary>
@@ -516,8 +543,8 @@ public class PostgreSqlSyncScriptBuilderTests
         // 旧主キーの制約名は差分に無いため pg_constraint から逆引きして DO ブロックで外す
         sql.Should().Contain("DO $$");
         sql.Should().Contain("FROM pg_constraint con");
-        sql.Should().Contain("WHERE con.contype = 'p' AND tbl.relname = 'orders'");
-        sql.Should().Contain("AND tbl.relnamespace = 'public'::regnamespace;");
+        sql.Should()
+            .Contain("WHERE con.contype = 'p' AND con.conrelid = to_regclass('\"orders\"');");
         sql.Should().Contain("IF pk_name IS NOT NULL THEN");
         sql.Should()
             .Contain("EXECUTE 'ALTER TABLE \"orders\" DROP CONSTRAINT ' || quote_ident(pk_name);");

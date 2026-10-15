@@ -356,6 +356,14 @@
     <value>注意: 以下の変更は実行しません。外部キーの列の並びが参照先のキーの並びと合わなくなり、MySQL ではその外部キーを付け直せない（外れたまま残る）ためです。適用するには、外部キーの削除も選んで先に外すか、手で付け替えてください:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmSchemaQualifiedTableName" xml:space="preserve">
+    <value>注意: 以下の表は名前にドットを含みます。SQLite はそうした名前を、添付したデータベース（ドットより前の部分）の表として読むため、そのデータベースを添付していなければ同期は失敗します:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn" xml:space="preserve">
+    <value>注意: 以下の外部キーは、NOT NULL の子の列（括弧内）に SET DEFAULT を使っています。SQL Server は、その列に DB 側で DEFAULT 制約があるときだけこの外部キーを作れます。図は列の既定値を持たないため、DEFAULT 制約が無ければ失敗します（エラー 1762。既にあれば通ります）:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">
     <value>注意: テーブルの再構築は図の定義から作り直すため、既定値や CHECK 制約といった列の属性、制約の句、WITHOUT ROWID などのテーブルオプションは図が持っておらず再現されません。以下は現在の DB にある属性で、再構築後は失われます（インデックス・トリガーは温存されます）:
 {0}</value>

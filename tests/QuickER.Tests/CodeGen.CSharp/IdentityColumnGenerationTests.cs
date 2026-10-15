@@ -250,13 +250,26 @@ public class IdentityColumnGenerationTests
         HasMirrorWarning(result).Should().BeTrue();
     }
 
-    /// <summary>単一方言・NULL 許容の採番列では、ミラーの警告を出さないことを検証する（対照）</summary>
-    [Fact(DisplayName = "単一方言・NULL 許容の採番列では、ミラーの Warning は出ない")]
+    /// <summary>
+    /// 単一方言でも、採番列を持てない方言（SQLite）なら NOT NULL の採番列を Warning で名指しすることを検証する
+    /// </summary>
+    /// <remarks>生成コードはその列を INSERT から外し、SQLite の DDL は普通の列を作るので、ミラーと同じく落ちる。</remarks>
+    [Fact(DisplayName = "単一方言の SQLite でも、NOT NULL の採番列を Warning で名指しする")]
+    public void Generate_SingleSqlite_NotNullIdentityColumn_Warns()
+    {
+        var result = GenerateRepositories(Diagram(identity: true), DialectNames.Sqlite);
+
+        result.HasErrors.Should().BeFalse();
+        HasMirrorWarning(result).Should().BeTrue();
+    }
+
+    /// <summary>持てる方言だけ・NULL 許容の採番列では、警告を出さないことを検証する（対照）</summary>
+    [Fact(DisplayName = "持てる方言だけ・NULL 許容の採番列では、ミラーの Warning は出ない")]
     public void Generate_MirrorWarning_IsNotEmittedWithoutMirrorOrForNullableColumn()
     {
         HasMirrorWarning(GenerateRepositories(Diagram(identity: true), DialectNames.SqlServer))
             .Should()
-            .BeFalse("ミラーが無い");
+            .BeFalse("持てる方言だけ");
 
         var nullable = Diagram(identity: true);
         nullable.Entities[0].Columns.Single(c => c.Name == "seq").IsNullable = true;

@@ -144,6 +144,24 @@ public enum SyncPlanWarningKind
     /// 原因の「証明できない付け直し」は従来どおり警告して実行する。
     /// </remarks>
     ForeignKeyKeyOrderMismatch,
+
+    /// <summary>
+    /// 選んだ外部キーの追加・作り直しが参照アクション <c>SET DEFAULT</c> を使い、子の列に NOT NULL の列がある（SQL Server）。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は NOT NULL の子の列に DEFAULT 制約が無いと、この外部キーを作れない（エラー 1762）。図は列の既定値を
+    /// 持たないので、DB 側の列に DEFAULT 制約があるかは分からない。あれば通るので、実行は止めずに警告に留める
+    /// （<see cref="SyncDialectCapabilities.SetDefaultRequiresColumnDefault"/>）。
+    /// </remarks>
+    SetDefaultOnNotNullColumn,
+
+    /// <summary>選んだ項目が、ドットを含む名前の表に触れる（SQLite）。</summary>
+    /// <remarks>
+    /// SQLite は <c>"a"."b"</c> を「添付したデータベース a の表 b」と読むので、a を添付していない限り失敗する
+    /// （<see cref="SyncDialectCapabilities.SupportsSchemaQualifiedTableNames"/>）。添付していれば通るので、実行は止めずに
+    /// 警告に留める。表ごとに 1 件。
+    /// </remarks>
+    SchemaQualifiedTableName,
 }
 
 /// <summary>
@@ -156,7 +174,8 @@ public enum SyncPlanWarningKind
 /// では一意制約を削除するテーブル（＝外部キーの参照先）、<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/>
 /// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> では
 /// 計画から外した項目のテーブル、<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
-/// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> では外部キーを保有する子テーブル。
+/// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> と <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/>
+/// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
@@ -168,6 +187,7 @@ public enum SyncPlanWarningKind
 /// （例 <c>FK_orders_customer (customer)</c>・<c>PRIMARY KEY (orders.code)</c>・<c>code (PRIMARY KEY)</c>）。
 /// <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
 /// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> では外部キーの制約名。
+/// <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> では「外部キーの制約名 (NOT NULL の子の列, …)」。
 /// 対象は制約名・列名か <c>PRIMARY KEY</c>、足りないものは表名・<c>表.列</c>か <c>PRIMARY KEY</c>（識別子と SQL の綴り）。
 /// </param>
 public sealed record SyncPlanWarning(

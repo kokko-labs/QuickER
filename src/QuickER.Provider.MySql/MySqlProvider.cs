@@ -53,6 +53,8 @@ public sealed class MySqlProvider : IDatabaseProvider
             NormalizeTypeNotation = MySqlTypeNotation.Normalize,
             SupportsOnUpdateAction = true,
             SupportsSetDefaultAction = false,
+            SetDefaultRequiresColumnDefault = false,
+            SupportsSchemaQualifiedTableNames = true,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

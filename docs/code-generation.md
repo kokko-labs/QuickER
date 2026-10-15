@@ -1093,8 +1093,8 @@ MySQL and SQLite cannot have such columns.
 Switching the target DBMS of a diagram with marked columns to one of them therefore lists the marked columns in the confirmation of the switch and removes the mark (a single undo brings back the switch and the marks together).
 Generated code then writes those columns again, as ordinary columns.
 Generating for one of these two dialects through the CLI's `--provider` or MCP's `provider`, without switching the target DBMS, names the marked columns in a warning (DDL creates ordinary columns and generated code does not write them, so their values are never written).
-The same holds for a multi-target build (SQL Server as the server, SQLite locally): a NOT NULL marked column outside the primary key makes every insert on the mirror side fail on NOT NULL.
-Generation names such columns in a warning; make the column nullable in the diagram or give the mirror's column a default value.
+The same holds when the QuickER Repository is generated for SQLite (as the only dialect, or locally in a multi-target build with SQL Server as the server): a NOT NULL marked column outside the primary key makes every insert into SQLite fail on NOT NULL.
+Generation names such columns in a warning; make the column nullable in the diagram or give the SQLite column a default value.
 
 ## Extending the generated base classes
 

@@ -51,7 +51,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             item.TableName,
             PgIdentifier.QuoteSimple,
             name => $"\"{PgIdentifier.Escape(name)}\"",
-            IdentifierLimit
+            IdentifierLimit,
+            DialectName,
+            UnsupportedFeature.Sync
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -126,14 +128,13 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// DO ブロックで動的に DROP する（主キーが無いテーブルなら何も実行しない）。
     /// 実行時に読んだ制約名は図の外から来る値なので、動的 SQL へは必ず <c>quote_ident</c> を通して埋める
     /// （<c>"</c> を含む名前で構文が崩れないように。外部キー側の逆引きも同じ）。
+    /// 表は <c>to_regclass('クォートした名前')</c> で、<c>ALTER TABLE</c> と同じ 1 つの表に絞る（ドット付きの名前は
+    /// そのスキーマの表、修飾の無い名前は検索パスの表）。表が無ければ NULL になり、何もしない（外部キー側も同じ）。
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
         // クォートした名前を EXECUTE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
         var table = PgIdentifier.QuoteForDynamicSql(item.TableName);
-        var tableName = PgIdentifier.EscapeStringLiteral(
-            PgIdentifier.TableNameOnly(item.TableName)
-        );
 
         // 旧主キーの制約名はシステムカタログを逆引きして特定し、見つかったときだけ DROP する
         var body = new StringBuilder();
@@ -141,10 +142,8 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         body.AppendLine("BEGIN");
         body.AppendLine("    SELECT con.conname INTO pk_name");
         body.AppendLine("    FROM pg_constraint con");
-        body.AppendLine("    JOIN pg_class tbl ON con.conrelid = tbl.oid");
-        body.AppendLine($"    WHERE con.contype = 'p' AND tbl.relname = '{tableName}'");
-        // 別スキーマの同名テーブルを誤って対象にしないよう public に限定する（取込と同じスコープ）
-        body.AppendLine("        AND tbl.relnamespace = 'public'::regnamespace;");
+        // ALTER TABLE と同じ 1 つの表に絞る（別スキーマの同名の表を取り違えない・表が無ければ NULL で何もしない）
+        body.AppendLine($"    WHERE con.contype = 'p' AND con.conrelid = to_regclass('{table}');");
         body.AppendLine("    IF pk_name IS NOT NULL THEN");
         body.AppendLine(
             $"        EXECUTE 'ALTER TABLE {table} DROP CONSTRAINT ' || quote_ident(pk_name);"
@@ -311,21 +310,17 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         // 制約名不明時は親子テーブル名からシステムカタログを逆引きして DO ブロックで削除する
-        var childName = PgIdentifier.EscapeStringLiteral(PgIdentifier.TableNameOnly(childTbl));
-        var parentName = PgIdentifier.EscapeStringLiteral(PgIdentifier.TableNameOnly(parentTbl));
         var body = new StringBuilder();
         body.AppendLine("DECLARE fk_name text;");
         body.AppendLine("BEGIN");
         body.AppendLine("    SELECT con.conname INTO fk_name");
         body.AppendLine("    FROM pg_constraint con");
-        body.AppendLine("    JOIN pg_class child ON con.conrelid = child.oid");
-        body.AppendLine("    JOIN pg_class parent ON con.confrelid = parent.oid");
+        // 親子とも ALTER TABLE と同じ 1 つの表に絞る（別スキーマの同名の表を取り違えない・表が無ければ NULL で何もしない）
         body.AppendLine(
-            $"    WHERE con.contype = 'f' AND child.relname = '{childName}' AND parent.relname = '{parentName}'"
+            $"    WHERE con.contype = 'f' AND con.conrelid = to_regclass('{PgIdentifier.QuoteForDynamicSql(childTbl)}')"
         );
-        // 別スキーマの同名テーブルを誤って対象にしないよう public に限定する（取込と同じスコープ）
         body.AppendLine(
-            "        AND child.relnamespace = 'public'::regnamespace AND parent.relnamespace = 'public'::regnamespace;"
+            $"        AND con.confrelid = to_regclass('{PgIdentifier.QuoteForDynamicSql(parentTbl)}');"
         );
         body.AppendLine("    IF fk_name IS NOT NULL THEN");
         body.AppendLine(

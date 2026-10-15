@@ -1091,9 +1091,41 @@ public static class UnsupportedCoverage
         ),
         (
             UnsupportedDefinitionKind.SetDefaultReferentialAction,
+            UnsupportedFeature.Sync,
+            DialectNames.Oracle,
+            ["OracleSyncScriptBuilderTests.AddForeignKey_OnDeleteSetDefault_OmitsClauseWithNote"]
+        ),
+        (
+            UnsupportedDefinitionKind.SetDefaultReferentialAction,
+            UnsupportedFeature.Sync,
+            DialectNames.SqlServer,
+            [
+                "ForeignKeyStatementNotesTests.Plan_SetDefaultOnNotNullColumn_WarnsOnlyWhereDeclared",
+                "ForeignKeyStatementNotesTests.Plan_SetDefaultOnNullableColumn_DoesNotWarn",
+                "ForeignKeyStatementNotesTests.Plan_AlterForeignKeyToSetDefault_OnNotNullColumn_WarnsOnlyWhereDeclared",
+                "SqlServerSyncDependencyIntegrationTests.AddSetDefaultForeignKey_OnNotNullColumn_WarnsAndNeedsDefault",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.SetDefaultReferentialAction,
             UnsupportedFeature.Ddl,
             DialectNames.MySql,
             ["MySqlDdlGeneratorTests.Build_SetDefault_IsOmittedWithNote"]
+        ),
+        (
+            UnsupportedDefinitionKind.SetDefaultReferentialAction,
+            UnsupportedFeature.Ddl,
+            DialectNames.Oracle,
+            ["OracleDdlGeneratorTests.Build_OnDeleteSetDefault_OmitsClauseWithNote"]
+        ),
+        (
+            UnsupportedDefinitionKind.SetDefaultReferentialAction,
+            UnsupportedFeature.Ddl,
+            DialectNames.SqlServer,
+            [
+                "ForeignKeyStatementNotesTests.Ddl_SetDefaultOnNotNullColumn_IsAnnotatedOnlyWhereDeclared",
+                "ForeignKeyStatementNotesTests.Ddl_SetDefaultOnNullableColumn_IsNotAnnotated",
+            ]
         ),
         (
             UnsupportedDefinitionKind.SetDefaultReferentialAction,
@@ -1158,8 +1190,20 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Diff,
             null,
             [
-                "SchemaDiffServiceTests.CompositeForeignKeyPairOrder_IsComparedOnlyWhereItMatters",
+                "SchemaDiffServiceTests.CompositeForeignKeyPairOrder_IsNeverADifference",
                 "OracleSchemaSyncIntegrationTests.CompositeForeignKeyDeclaredInOtherOrder_ProducesNoDiff",
+                "SqlServerSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
+                "MySqlSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder,
+            UnsupportedFeature.Ddl,
+            null,
+            [
+                "ForeignKeyColumnOrderTests.Ddl_CompositeForeignKey_IsReorderedOnlyWhereDeclared",
+                "SqlServerSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
+                "MySqlSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
             ]
         ),
         (
@@ -1174,10 +1218,22 @@ public static class UnsupportedCoverage
         (
             UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
             UnsupportedFeature.Diff,
-            DialectNames.MySql,
+            null,
             [
                 "SyncPlannerTests.AlterColumn_StringLengthOnOneSide_RebuildsWhereLengthMayDiffer",
                 "SyncPlannerTests.AreForeignKeyCompatibleTypes_AllowsStringLengthOnly",
+                "SyncPlannerTests.AlterPrimaryKey_StringLengthOnlyForeignKey_FollowsDialectDeclaration",
+                "PostgreSqlSchemaSyncIntegrationTests.PrimaryKeyChange_WithStringLengthOnlyForeignKey_Succeeds",
+                "OracleSchemaSyncIntegrationTests.PrimaryKeyChange_WithStringLengthOnlyForeignKey_Succeeds",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
+            UnsupportedFeature.Ddl,
+            DialectNames.SqlServer,
+            [
+                "ForeignKeyStatementNotesTests.Ddl_StringLengthMismatch_IsAnnotatedOnlyWhereDeclared",
+                "ForeignKeyStatementNotesTests.Ddl_NotLengthOnlyDifference_IsNotAnnotated",
             ]
         ),
         (
@@ -1202,6 +1258,51 @@ public static class UnsupportedCoverage
             null,
             ["ErDiagramToolResponseNoteTests.AddRelationship_ExplicitNonCandidateKey_IsReported"]
         ),
+        (
+            UnsupportedDefinitionKind.UniqueConstraintOnPrimaryKey,
+            UnsupportedFeature.Diff,
+            null,
+            [
+                "SchemaDiffServiceTests.UniqueConstraintOnPrimaryKey_IsFoldedWhereUnsupported",
+                "SchemaDiffServiceTests.UniqueConstraintColumnsChanged_NotPaired",
+                "SqliteSchemaSyncIntegrationTests.UniqueConstraintOnPrimaryKey_IsFoldedAndDoesNotRepeat",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.UniqueConstraintOnPrimaryKey,
+            UnsupportedFeature.Sync,
+            null,
+            [
+                "UniqueConstraintOnPrimaryKeyNoteTests.Sync_AddTable_OmitsUniqueConstraintOnPrimaryKeyWhereDeclared",
+                "UniqueConstraintOnPrimaryKeyNoteTests.Sync_SqliteRebuild_OmitsUniqueConstraintThatBecomesPrimaryKey",
+                "SyncPlannerTests.AddUniqueOnStayingPrimaryKey_IsExcludedWhereUnsupported",
+                "OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.UniqueConstraintOnPrimaryKey,
+            UnsupportedFeature.Ddl,
+            null,
+            [
+                "UniqueConstraintOnPrimaryKeyNoteTests.Ddl_OmitsUniqueConstraintOnPrimaryKeyWhereDeclared",
+                "OracleDdlRoundTripIntegrationTests.UniqueConstraintOnPrimaryKey_IsOmittedAndApplies",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.SchemaQualifiedTableName,
+            UnsupportedFeature.Sync,
+            null,
+            [
+                "SchemaQualifiedTableNameTests.Plan_DottedTableName_WarnsOnlyWhereDeclared",
+                "SqliteSchemaSyncIntegrationTests.DottedTableName_WarnsAndFailsAsUnknownDatabase",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.SchemaQualifiedTableName,
+            UnsupportedFeature.Ddl,
+            null,
+            ["SchemaQualifiedTableNameTests.Ddl_DottedTableName_IsAnnotatedOnlyWhereDeclared"]
+        ),
     ];
 
     /// <summary>扱いの未実装（種類・機能・方言〔null は「なし」以外の全方言〕・実装するフェーズ）</summary>
@@ -1212,80 +1313,6 @@ public static class UnsupportedCoverage
         string Phase
     )[] PendingTreatments =
     [
-        (
-            UnsupportedDefinitionKind.UniqueConstraintOnPrimaryKey,
-            UnsupportedFeature.Diff,
-            null,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.UniqueConstraintOnPrimaryKey,
-            UnsupportedFeature.Sync,
-            null,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.UniqueConstraintOnPrimaryKey,
-            UnsupportedFeature.Ddl,
-            null,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.SetDefaultReferentialAction,
-            UnsupportedFeature.Sync,
-            DialectNames.SqlServer,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.SetDefaultReferentialAction,
-            UnsupportedFeature.Sync,
-            DialectNames.Oracle,
-            "2e"
-        ),
-        (UnsupportedDefinitionKind.SchemaQualifiedTableName, UnsupportedFeature.Sync, null, "2e"),
-        (
-            UnsupportedDefinitionKind.SetDefaultReferentialAction,
-            UnsupportedFeature.Ddl,
-            DialectNames.SqlServer,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.SetDefaultReferentialAction,
-            UnsupportedFeature.Ddl,
-            DialectNames.Oracle,
-            "2e"
-        ),
-        (UnsupportedDefinitionKind.SchemaQualifiedTableName, UnsupportedFeature.Ddl, null, "2e"),
-        (
-            UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder,
-            UnsupportedFeature.Ddl,
-            null,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
-            UnsupportedFeature.Diff,
-            DialectNames.PostgreSql,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
-            UnsupportedFeature.Diff,
-            DialectNames.Oracle,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
-            UnsupportedFeature.Diff,
-            DialectNames.Sqlite,
-            "2e"
-        ),
-        (
-            UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
-            UnsupportedFeature.Ddl,
-            DialectNames.SqlServer,
-            "2e"
-        ),
         (
             UnsupportedDefinitionKind.DefaultValue,
             UnsupportedFeature.Sync,

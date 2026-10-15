@@ -1109,17 +1109,17 @@ public static class UnsupportedTreatments
             diff: Same(None), // なし
             sync: new TreatmentCell(
                 SqlServer: None,
-                PostgreSql: Warning, // ドット付き名の同期の失敗を計画の警告で名指し
+                PostgreSql: None, // 逆引きは to_regclass で ALTER TABLE と同じ表に絞る
                 MySql: None,
                 Oracle: None,
-                Sqlite: Warning // dbo 以外のスキーマ付き名を計画の警告で名指し
+                Sqlite: Warning // ドットを含む表名を計画の警告で名指し
             ),
             ddl: new TreatmentCell(
                 SqlServer: None,
                 PostgreSql: None,
                 MySql: None,
                 Oracle: None,
-                Sqlite: Annotation // dbo 以外のスキーマ付き名を DDL に注記
+                Sqlite: Annotation // ドットを含む表名を DDL に注記
             ),
             cSharpGeneration: Same(None), // なし
             export: Same(None), // なし
@@ -1178,13 +1178,7 @@ public static class UnsupportedTreatments
             cells,
             Kind.CompositeForeignKeyColumnOrder,
             import: Same(None), // なし
-            diff: new TreatmentCell(
-                SqlServer: None,
-                PostgreSql: Fold, // 比較で畳む（列ペアを順不同で比べる）
-                MySql: None,
-                Oracle: Fold,
-                Sqlite: Fold
-            ),
+            diff: Same(Fold), // 比較で畳む（列ペアを並びを見ずに比べる。並べ替えは DDL の出力で行う）
             sync: new TreatmentCell(
                 SqlServer: None,
                 PostgreSql: None,

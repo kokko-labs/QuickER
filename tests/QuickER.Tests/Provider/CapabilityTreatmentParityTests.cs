@@ -74,11 +74,11 @@ public sealed class CapabilityTreatmentParityTests
         (
             nameof(SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder),
             UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder,
-            UnsupportedFeature.Diff,
+            UnsupportedFeature.Ddl,
             c =>
                 c.ReferencedKeyRequiresSameColumnOrder
-                    ? UnsupportedTreatment.None
-                    : UnsupportedTreatment.Fold
+                    ? UnsupportedTreatment.Reorder
+                    : UnsupportedTreatment.None
         ),
         (
             nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
@@ -88,6 +88,24 @@ public sealed class CapabilityTreatmentParityTests
                 c.ForeignKeyAllowsStringLengthDifference
                     ? UnsupportedTreatment.Fold
                     : UnsupportedTreatment.None
+        ),
+        (
+            nameof(SyncDialectCapabilities.SetDefaultRequiresColumnDefault),
+            UnsupportedDefinitionKind.SetDefaultReferentialAction,
+            UnsupportedFeature.Sync,
+            c =>
+                c.SetDefaultRequiresColumnDefault ? UnsupportedTreatment.Warning
+                : c.SupportsSetDefaultAction ? UnsupportedTreatment.None
+                : UnsupportedTreatment.OmitWithAnnotation
+        ),
+        (
+            nameof(SyncDialectCapabilities.SupportsSchemaQualifiedTableNames),
+            UnsupportedDefinitionKind.SchemaQualifiedTableName,
+            UnsupportedFeature.Sync,
+            c =>
+                c.SupportsSchemaQualifiedTableNames
+                    ? UnsupportedTreatment.None
+                    : UnsupportedTreatment.Warning
         ),
         (
             nameof(SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey),
@@ -131,24 +149,7 @@ public sealed class CapabilityTreatmentParityTests
     ];
 
     /// <summary>表が終わりの姿を書き、フラグがまだ今の姿のマス（方言・フラグ・直すフェーズ）</summary>
-    private static readonly (string Dialect, string Flag, string Phase)[] Pending =
-    [
-        (
-            DialectNames.PostgreSql,
-            nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
-            "2e（J9）"
-        ),
-        (
-            DialectNames.Oracle,
-            nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
-            "2e（J9）"
-        ),
-        (
-            DialectNames.Sqlite,
-            nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
-            "2e（J9）"
-        ),
-    ];
+    private static readonly (string Dialect, string Flag, string Phase)[] Pending = [];
 
     [Fact(
         DisplayName = "能力の宣言のフラグと扱いの表のマスが、5 方言で食い違わない（未実装の一覧を除く）"

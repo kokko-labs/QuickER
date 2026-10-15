@@ -31,6 +31,8 @@ public static class TestDialectCapabilities
             NormalizeTypeNotation = static type => type,
             SupportsOnUpdateAction = true,
             SupportsSetDefaultAction = true,
+            SetDefaultRequiresColumnDefault = false,
+            SupportsSchemaQualifiedTableNames = true,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

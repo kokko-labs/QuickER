@@ -220,9 +220,15 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
         // （選択した列削除で構成列が消えた等）は ResolveAll が黙って除外する。
         // 合成名 UQ_{表}_{列…} の基になるテーブル名は definition.TableName＝実テーブル名
         // （再構築の一時テーブル名ではない）ため、リネーム後に自然な制約名になる
-        foreach (
-            var unique in UniqueConstraintNaming.ResolveAll(definition, SqliteIdentifier.Limit)
-        )
+        // 主キーと同じ列集合の一意制約は省いて注記する（扱いの表の SQLite の同期のマス）
+        var (uniques, uniqueNotes) = UniqueConstraintOnPrimaryKeyNote.Split(
+            definition,
+            UniqueConstraintNaming.ResolveAll(definition, SqliteIdentifier.Limit),
+            DialectName,
+            UnsupportedFeature.Sync
+        );
+
+        foreach (var unique in uniques)
         {
             trailingConstraints.Add(
                 SqliteDdlGenerator.BuildUniqueConstraintLine(unique.Name, unique.ColumnNames)
@@ -267,6 +273,11 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
             }
 
             sb.AppendLine(line);
+        }
+
+        foreach (var note in uniqueNotes)
+        {
+            sb.AppendLine(note);
         }
 
         for (var i = 0; i < trailingConstraints.Count; i++)

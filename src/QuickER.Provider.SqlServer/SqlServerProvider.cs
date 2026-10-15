@@ -52,6 +52,8 @@ public sealed class SqlServerProvider : IDatabaseProvider
             NormalizeTypeNotation = SqlServerTypeNotation.Normalize,
             SupportsOnUpdateAction = true,
             SupportsSetDefaultAction = true,
+            SetDefaultRequiresColumnDefault = true,
+            SupportsSchemaQualifiedTableNames = true,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

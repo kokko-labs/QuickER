@@ -299,6 +299,78 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
     }
 
     /// <summary>
+    /// NOT NULL の子の列へ SET DEFAULT の外部キーを足す同期は、計画が警告し、DB 側の列に DEFAULT 制約が無ければ
+    /// 失敗し（エラー 1762）、あれば通ることを検証する（警告の文言「DEFAULT 制約があれば通る」の裏付け）。
+    /// </summary>
+    [Theory(
+        DisplayName = "[Integration] SQL Server 同期: NOT NULL の子の列への SET DEFAULT の追加は警告し、DEFAULT 制約があれば通る"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddSetDefaultForeignKey_OnNotNullColumn_WarnsAndNeedsDefault(bool hasDefault)
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE [sd_parent] ([id] int NOT NULL, CONSTRAINT [PK_sd_parent] PRIMARY KEY ([id]));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE [sd_child] ([id] int NOT NULL, [parent_id] int NOT NULL"
+                + (hasDefault ? " CONSTRAINT [DF_sd_child_parent_id] DEFAULT 1" : string.Empty)
+                + ", CONSTRAINT [PK_sd_child] PRIMARY KEY ([id]));",
+            Ct
+        );
+
+        var (result, script, _, plan) = await SyncAsync(
+            (entities, relationships) =>
+            {
+                var parent = entities.Single(e => e.TableName == "sd_parent");
+                var child = entities.Single(e => e.TableName == "sd_child");
+                relationships.Add(
+                    new Relationship
+                    {
+                        SourceEntityId = parent.Id,
+                        TargetEntityId = child.Id,
+                        Type = RelationshipType.OneToMany,
+                        ColumnPairs =
+                        [
+                            new(
+                                parent.Columns.Single(c => c.Name == "id").Id,
+                                child.Columns.Single(c => c.Name == "parent_id").Id
+                            ),
+                        ],
+                        ConstraintName = "FK_sd_child_sd_parent",
+                        OnDelete = ForeignKeyReferentialAction.SetDefault,
+                    }
+                );
+            },
+            select: item => item.Kind == SchemaDiffKind.AddForeignKey
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.SetDefaultOnNotNullColumn)
+            .Which.Detail.Should()
+            .Be("FK_sd_child_sd_parent (parent_id)");
+
+        if (hasDefault)
+        {
+            result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+            (await ImportAsync())
+                .Relationships.Should()
+                .ContainSingle()
+                .Which.OnDelete.Should()
+                .Be(ForeignKeyReferentialAction.SetDefault);
+        }
+        else
+        {
+            result.Committed.Should().BeFalse(script);
+            result.Error.Should().Contain("default constraint");
+        }
+    }
+
+    /// <summary>
     /// 外部キーの片側の列だけ型を変える同期は、外部キーを外し直さずに警告し、実行は列の変更で失敗して
     /// 何も変わらない（外部キーも型も元のまま）ことを検証する。
     /// </summary>
@@ -763,6 +835,99 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
     }
 
     /// <summary>コンテナの DB からスキーマを取り込む</summary>
+    /// <summary>
+    /// 列ペアの並びが参照先の主キーの並びと違う複合外部キーの DDL が、キーの並びへ並べ替えて出るので適用でき
+    /// （図の並びのままだと SQL Server は外部キーを作れない）、取り込み直しても差分が出ないことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server: 列ペアの並びが参照先のキーと違う複合外部キーの DDL は適用でき、取り込み直しても差分が出ない"
+    )]
+    public async Task CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var parent = new Entity { TableName = "ko_parent" };
+        parent.Columns.Add(
+            new Column
+            {
+                Name = "a",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        parent.Columns.Add(
+            new Column
+            {
+                Name = "b",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        var child = new Entity { TableName = "ko_child" };
+        child.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        child.Columns.Add(
+            new Column
+            {
+                Name = "x",
+                DataType = "int",
+                IsNullable = false,
+            }
+        );
+        child.Columns.Add(
+            new Column
+            {
+                Name = "y",
+                DataType = "int",
+                IsNullable = false,
+            }
+        );
+        // 宣言は (b → y, a → x)＝主キー (a, b) の並びと逆
+        var diagram = new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    ColumnPairs =
+                    [
+                        new(parent.Columns[1].Id, child.Columns[2].Id),
+                        new(parent.Columns[0].Id, child.Columns[1].Id),
+                    ],
+                    ConstraintName = "FK_ko_child",
+                },
+            ],
+        };
+
+        await fixture.ExecuteAsync(new SqlServerDdlGenerator().Build(diagram), Ct);
+
+        var live = await ImportAsync();
+        live.Relationships.Should().ContainSingle();
+        new SchemaDiffService()
+            .Compute(
+                live.Entities,
+                live.Relationships,
+                diagram.Entities,
+                diagram.Relationships,
+                _provider.SyncCapabilities
+            )
+            .Items.Should()
+            .BeEmpty();
+    }
+
     private Task<SchemaImportResult> ImportAsync() =>
         _provider.SchemaImporter.ImportAsync(fixture.ConnectionString, 120, Ct);
 

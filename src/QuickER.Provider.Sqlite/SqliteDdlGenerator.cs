@@ -123,6 +123,9 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             );
         }
 
+        // ドットを含む表名は添付したデータベースの表と読まれる（扱いの表が注記とする方言だけ書き添える）
+        SchemaQualifiedTableNameNote.Append(sb, entity.TableName, DialectName);
+
         sb.AppendLine($"CREATE TABLE {SqliteIdentifier.Quote(entity.TableName)} (");
 
         // 末尾に別立てで出す制約行（PK・UNIQUE・全 FK）を収集する
@@ -133,8 +136,16 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             trailingConstraints.Add(BuildPrimaryKeyConstraintLine(entity.TableName, pks));
         }
 
-        // UNIQUE 制約は PK 行と FK 行の間に出力する（他方言の並びと揃える）
-        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, SqliteIdentifier.Limit))
+        // UNIQUE 制約は PK 行と FK 行の間に出力する（他方言の並びと揃える）。
+        // 主キーと同じ列集合の一意制約は省いて注記する（扱いの表の SQLite の DDL のマス）
+        var (uniques, uniqueNotes) = UniqueConstraintOnPrimaryKeyNote.Split(
+            entity,
+            UniqueConstraintNaming.ResolveAll(entity, SqliteIdentifier.Limit),
+            DialectName,
+            UnsupportedFeature.Ddl
+        );
+
+        foreach (var unique in uniques)
         {
             trailingConstraints.Add(BuildUniqueConstraintLine(unique.Name, unique.ColumnNames));
         }
@@ -174,6 +185,11 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
                     $"    -- {SqlComment.Sanitize(col.Name)}: {SqlComment.Sanitize(col.Description)}"
                 );
             }
+        }
+
+        foreach (var note in uniqueNotes)
+        {
+            sb.AppendLine(note);
         }
 
         for (var i = 0; i < trailingConstraints.Count; i++)

@@ -506,6 +506,112 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
     // ---------------- ヘルパー ----------------
 
     /// <summary>主キー変更の検証用テーブルの行を取得する（データ温存の確認用）</summary>
+    /// <summary>
+    /// 参照される主キーを付け替え、外部キーの子の列の長さだけを変える同期が、外部キーを外して付け直して成功することを検証する
+    /// （Oracle は外部キーの両端の文字列の長さの違いを許す。以前は長さの違いを型の食い違いとみなして外部キーを外さず、
+    /// 主キーの解除が外部キーに阻まれて失敗した）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] C: 主キーの付け替えと外部キーの片側の長さだけの変更は、外部キーを保って成功する"
+    )]
+    public async Task PrimaryKeyChange_WithStringLengthOnlyForeignKey_Succeeds()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var settings = fixture.ToDbConnectionSettings();
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"lp_parent\" (\"id\" NUMBER(10) NOT NULL, \"code\" VARCHAR2(10) NOT NULL, "
+                + "CONSTRAINT \"PK_lp_parent\" PRIMARY KEY (\"code\"))",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"lp_child\" (\"id\" NUMBER(10) NOT NULL, \"parent_code\" VARCHAR2(10) NOT NULL, "
+                + "CONSTRAINT \"PK_lp_child\" PRIMARY KEY (\"id\"), "
+                + "CONSTRAINT \"FK_lp_child\" FOREIGN KEY (\"parent_code\") REFERENCES \"lp_parent\" (\"code\"))",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "INSERT INTO \"lp_parent\" (\"id\", \"code\") VALUES (1, 'a')",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "INSERT INTO \"lp_child\" (\"id\", \"parent_code\") VALUES (1, 'a')",
+            Ct
+        );
+
+        var live = await ImportAsync();
+        var liveParent = live.Entities.Single(e => e.TableName == "lp_parent");
+        var liveChild = live.Entities.Single(e => e.TableName == "lp_child");
+
+        // 目標: 親の主キーを code から id へ移し、code には一意制約を置く（外部キーの参照先は候補キーのまま）。
+        // 子の列は長さだけを変える
+        var parentTarget = CloneAsTarget(liveParent);
+        parentTarget.Columns.Single(c => c.Name == "code").IsPrimaryKey = false;
+        parentTarget.Columns.Single(c => c.Name == "id").IsPrimaryKey = true;
+        parentTarget.UniqueConstraints.Add(
+            new UniqueConstraint
+            {
+                Name = "UQ_lp_parent_code",
+                ColumnIds = [parentTarget.Columns.Single(c => c.Name == "code").Id],
+            }
+        );
+        var childTarget = CloneAsTarget(liveChild);
+        childTarget.Columns.Single(c => c.Name == "parent_code").DataType = "VARCHAR2(20)";
+
+        var caps = new OracleProvider().SyncCapabilities;
+        var diff = _diff.Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { parentTarget, childTarget },
+            live.Relationships,
+            caps
+        );
+
+        foreach (var item in diff.Items)
+        {
+            item.IsSelected =
+                item.Kind
+                    is SchemaDiffKind.AlterPrimaryKey
+                        or SchemaDiffKind.AlterColumn
+                        or SchemaDiffKind.AddUniqueConstraint;
+        }
+
+        var plan = new SyncPlanner().BuildPlan(
+            diff.Items,
+            caps,
+            new SyncPlanContext
+            {
+                LiveEntities = live.Entities,
+                LiveRelationships = live.Relationships,
+            }
+        );
+
+        plan.Warnings.Should().BeEmpty();
+
+        var script = _builder.Build(plan);
+        var result = await _executor.ExecuteAsync(settings, script, Ct);
+
+        result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
+        var after = await ImportAsync();
+        after
+            .Entities.Single(e => e.TableName == "lp_child")
+            .Columns.Single(c => c.Name == "parent_code")
+            .DataType.Should()
+            .Be("VARCHAR2(20)");
+        after
+            .Entities.Single(e => e.TableName == "lp_parent")
+            .Columns.Single(c => c.Name == "id")
+            .IsPrimaryKey.Should()
+            .BeTrue();
+        after
+            .Relationships.Should()
+            .ContainSingle()
+            .Which.ConstraintName.Should()
+            .Be("FK_lp_child");
+    }
+
     private async Task<List<(string Code, int Id)>> QueryPkItemRowsAsync()
     {
         var rows = new List<(string Code, int Id)>();
@@ -743,7 +849,7 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
     /// <summary>
     /// 主キーの並びと違う並びで宣言した複合外部キーを取り込み、宣言どおりの並びの図と比べても外部キーの差分が
     /// 出ないことを検証する。Oracle のカタログは外部キーの列を参照先のキーの並びで記録し、宣言の並びを残さない
-    /// （取込の列ペアは参照先のキーの並びになる）ので、並びまで比べると取り込み直すたびに作り直しの差分が出た。
+    /// （取込の列ペアは参照先のキーの並びになる）。差分は 5 方言とも列ペアを並びを見ずに比べるので、ここでも差分は出ない。
     /// </summary>
     [Fact(
         DisplayName = "[Integration] C: 主キーと違う並びで宣言した複合外部キーは、宣言どおりの図と差分を出さない"

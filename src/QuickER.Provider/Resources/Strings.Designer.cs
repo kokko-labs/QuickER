@@ -244,12 +244,6 @@ namespace QuickER.Provider.Resources {
             }
         }
 
-        public static string Diff_UniqueConstraintOnPrimaryKeyNotSynced {
-            get {
-                return ResourceManager.GetString("Diff_UniqueConstraintOnPrimaryKeyNotSynced", resourceCulture);
-            }
-        }
-
         public static string Diff_AutoForeignKeyDrop {
             get {
                 return ResourceManager.GetString("Diff_AutoForeignKeyDrop", resourceCulture);

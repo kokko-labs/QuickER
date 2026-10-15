@@ -197,6 +197,12 @@ public sealed class SyncPlanner
         // 選んだ外部キーの追加・作り直しの参照先が、同期後に候補キーでない場合も警告する（暗黙の付け直しと同じ証明）
         WarnAddedForeignKeysNotOnCandidateKey(selected, capabilities, context, warnings);
 
+        // SET DEFAULT の外部キーの NOT NULL の子の列は、DEFAULT 制約が無いと作れない方言（SQL Server）で名指しする
+        WarnSetDefaultOnNotNullColumns(selected, capabilities, warnings);
+
+        // ドットを含む表名を表せない方言（SQLite）では、選んだ項目が触れるその表を名指しする
+        WarnSchemaQualifiedTableNames(selected, capabilities, warnings);
+
         if (!isRebuildDialect)
         {
             // 逐次 DDL 方言: 全差分をそのままセクション化する。
@@ -1577,6 +1583,118 @@ public sealed class SyncPlanner
         }
     }
 
+    /// <summary>
+    /// 選んだ外部キーの追加（作り直しは展開後の追加）のうち、参照アクション <c>SET DEFAULT</c> を使い、子の列に NOT NULL の
+    /// 列があるものを <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> で名指しする
+    /// （<see cref="SyncDialectCapabilities.SetDefaultRequiresColumnDefault"/> が <c>true</c> の方言のみ）。
+    /// </summary>
+    /// <remarks>
+    /// 子の列の NULL 許容は図（項目の子の表）の値で見る。主キーの変更などに伴う暗黙の付け直しは対象外
+    /// （live に既にある外部キーなので、DB の列は DEFAULT 制約を持っている）。
+    /// </remarks>
+    private static void WarnSetDefaultOnNotNullColumns(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        if (!capabilities.SetDefaultRequiresColumnDefault)
+        {
+            return;
+        }
+
+        foreach (
+            var add in selected.Where(i =>
+                i.Kind == SchemaDiffKind.AddForeignKey
+                && i.Relationship is not null
+                && i.ChildEntity is not null
+                && i.ParentEntity is not null
+                && ForeignKeyStatementNotes.UsesSetDefault(i.Relationship)
+            )
+        )
+        {
+            var child = add.ChildEntity!;
+            var notNull = ForeignKeyColumnPairResolver
+                .ChildColumns(SyncScriptBuilderHelper.ResolveColumnPairs(add))
+                .Where(name =>
+                    child.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, name))
+                        is { IsNullable: false }
+                )
+                .ToList();
+
+            if (notNull.Count == 0)
+            {
+                continue;
+            }
+
+            var childTable = SchemaDiffService.NormalizeTable(child);
+            var name = ResolveForeignKeyName(
+                add.Relationship,
+                childTable,
+                SchemaDiffService.NormalizeTable(add.ParentEntity!),
+                capabilities.IdentifierLengthLimit
+            );
+
+            warnings.Add(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.SetDefaultOnNotNullColumn,
+                    childTable,
+                    $"{name} ({string.Join(", ", notNull)})"
+                )
+            );
+        }
+    }
+
+    /// <summary>
+    /// 選んだ項目が触れる表（項目の表と、外部キーの親子の表）のうち、ドットを含む名前のものを
+    /// <see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> で表ごとに 1 件名指しする
+    /// （<see cref="SyncDialectCapabilities.SupportsSchemaQualifiedTableNames"/> が <c>false</c> の方言のみ）。
+    /// </summary>
+    private static void WarnSchemaQualifiedTableNames(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        if (capabilities.SupportsSchemaQualifiedTableNames)
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>(SchemaNames.Comparer);
+
+        foreach (var item in selected)
+        {
+            foreach (
+                var name in new[]
+                {
+                    item.TableName,
+                    item.ChildEntity?.TableName,
+                    item.ParentEntity?.TableName,
+                }
+            )
+            {
+                if (name is null || !name.Contains('.'))
+                {
+                    continue;
+                }
+
+                var table = SchemaNames.ToStoredForm(name);
+
+                if (seen.Add(table))
+                {
+                    warnings.Add(
+                        new SyncPlanWarning(
+                            SyncPlanWarningKind.SchemaQualifiedTableName,
+                            table,
+                            string.Empty
+                        )
+                    );
+                }
+            }
+        }
+    }
+
     /// <summary>追加を選んだ表（表名 → 図のエンティティ）</summary>
     private static Dictionary<string, Entity> CollectAddedTables(
         IReadOnlyList<SchemaDiffItem> selected
@@ -1633,6 +1751,8 @@ public sealed class SyncPlanner
     /// (1) 主キーの変更: その表を参照する live の外部キー（明示的に外すもの・端が消えるものを除く）に並びだけが原因の
     /// ものがあれば、その表の主キーの変更を外す（外部キーを外さずに主キーを外そうとすると失敗する）。
     /// (2) 外部キーの作り直し: 新しい定義の参照先が並びだけで同期後のキーと合わなければ、その作り直しを外す
+    /// （差分は列ペアを並びを見ずに比べるので、並びだけの違いは作り直しにならない。ここへ来るのは参照アクションなど
+    /// 並び以外の理由の作り直しで、図の列ペアの並びがキーの並びと違うとき。同期は図の並びのまま付け直すため）
     /// （外部キーの追加だけなら失敗しても何も失わないので、外さずに
     /// <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> で警告する）。並び以外が原因（列の集合が違う）の
     /// 証明できない付け直しは、取り込んでいない索引で通る構成があるので従来どおり警告して実行する。

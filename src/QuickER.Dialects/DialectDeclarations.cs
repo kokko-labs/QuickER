@@ -245,7 +245,7 @@ public static class DialectDeclarations
             { Kind.OnUpdateReferentialAction, Expressible() }, // E1 ○
             { Kind.SetDefaultReferentialAction, Expressible() }, // E2 ○
             { Kind.Description, Expressible() }, // E5 ○
-            { Kind.SchemaQualifiedTableName, PartlyExpressible() }, // E6 △
+            { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○（逆引きは to_regclass）
             { Kind.ColumnOrder, NotExpressible() }, // X1 ×
             { Kind.ForeignKeyConstraintName, Expressible() }, // X2 ○
             { Kind.CompositeForeignKeyColumnOrder, Expressible() }, // X3 ○（並び不問）

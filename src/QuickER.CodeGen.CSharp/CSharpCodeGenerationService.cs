@@ -2017,18 +2017,19 @@ public sealed partial class CSharpCodeGenerationService
     }
 
     /// <summary>
-    /// 主キーでない NOT NULL の採番列（<see cref="Column.IsIdentity"/>）を、その種類の列を持てない方言
-    /// （<see cref="UnsupportedDefinitionKind.IdentityRejectingValues"/> の宣言が「あり得ない」）を含む
-    /// マルチターゲットのときだけ Warning 診断で名指しする。
+    /// 主キーでない NOT NULL の採番列（<see cref="Column.IsIdentity"/>）を、QuickER 版 Repository の実効方言の
+    /// どれかがその種類の列を持てない（<see cref="UnsupportedDefinitionKind.IdentityRejectingValues"/> の宣言が
+    /// 「あり得ない」）とき Warning 診断で名指しする。
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 採番列は方言に依らず INSERT / UPDATE の対象から外れる。ところが持てない方言のミラー（SQLite）には
-    /// 普通の列として作られ、そこへ行を追加すると送られない列の NOT NULL 制約で必ず落ちる
-    /// （<see cref="AddNotNullComputedColumnWarning"/> と同じ乖離）。持てるかは方言の宣言で決め、方言名で分岐しない。
+    /// 採番列は方言に依らず INSERT / UPDATE の対象から外れる。ところが持てない方言の DB（SQLite。単一方言の生成でも、
+    /// マルチターゲットのミラーでも）には普通の列として作られ、そこへ行を追加すると送られない列の NOT NULL 制約で
+    /// 必ず落ちる（<see cref="AddNotNullComputedColumnWarning"/> と同じ乖離）。方言の数では絞らない
+    /// （単一方言の SQLite も同じく落ちる）。持てるかは方言の宣言で決め、方言名で分岐しない。
     /// </para>
     /// <para>
-    /// Error にはしない。ミラー側のスキーマを既定値などで整えてあれば動く構成があり、図からは判定できないため。
+    /// Error にはしない。その DB のスキーマを既定値などで整えてあれば動く構成があり、図からは判定できないため。
     /// </para>
     /// </remarks>
     private static void AddNotNullIdentityColumnWarning(
@@ -2045,8 +2046,7 @@ public sealed partial class CSharpCodeGenerationService
         var dialects = options.ResolveRepositoryDialects();
 
         if (
-            dialects.Count < 2
-            || dialects.All(dialect =>
+            dialects.All(dialect =>
                 DialectDeclarations.CanOccur(
                     dialect,
                     UnsupportedDefinitionKind.IdentityRejectingValues

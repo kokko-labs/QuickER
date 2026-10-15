@@ -598,15 +598,17 @@ public class SchemaDiffService
     /// 構成列が空・解決不能な制約は差分対象から除外する（DDL 生成が黙って出力しないのと同じ扱い）。
     /// </para>
     /// <para>
-    /// 図の主キーと同じ列集合の追加は、<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/> が
-    /// <c>false</c> の方言では選択できない案内項目にする（SQLite は冗長な UNIQUE の索引を作らず取り込みにも現れない＝
-    /// 差分が永久に消えない。Oracle は ORA-02261 で断る。主キーが一意性を保証するので失うものは無い）。
+    /// 図の主キーと同じ列集合の一意制約は、<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/> が
+    /// <c>false</c> の方言では追加の比較から外す（項目にしない。主キーが一意性を保証するので、図と DB は一意性について
+    /// 食い違っていない。SQLite は冗長な UNIQUE の索引を作らず取り込みにも現れない＝項目にすると差分が永久に消えない。
+    /// Oracle は ORA-02261 で断る）。図側の署名には残すので、DB に同じ列集合の一意制約があっても削除の項目は出さない。
+    /// DDL と同期の <c>CREATE TABLE</c> も同じ方言で省いて注記する（<see cref="UniqueConstraintOnPrimaryKeyNote"/>）。
     /// </para>
     /// <para>
     /// 同じ実効名（追加側は図の名前か合成名、削除側は DB の実名）の追加候補と削除候補は、
     /// <see cref="SchemaDiffKind.AlterUniqueConstraint"/>（既定で未選択）の 1 項目へ畳む。2 項目のままだと、既定どおり
-    /// 追加だけを選んで実行したときに同じ名前の制約を足そうとして失敗する。DB 側に名前が無い制約（SQLite の自動名）と、
-    /// 選択できない案内項目の追加は組まない。名前の照合は前後の空白を除き大文字小文字を区別しない。
+    /// 追加だけを選んで実行したときに同じ名前の制約を足そうとして失敗する。DB 側に名前が無い制約（SQLite の自動名）は
+    /// 組まない。名前の照合は前後の空白を除き大文字小文字を区別しない。
     /// </para>
     /// </remarks>
     private static void AppendUniqueConstraintDiffs(
@@ -647,13 +649,15 @@ public class SchemaDiffService
                 continue;
             }
 
-            var selectable =
-                dialect.SupportsUniqueConstraintOnPrimaryKey
-                || !string.Equals(
-                    constraint.Signature,
-                    targetKeySignature,
-                    StringComparison.Ordinal
-                );
+            // 主キーと同じ列集合の一意制約を持てない方言では、主キーが一意性を保証するので比較から外す
+            if (
+                !dialect.SupportsUniqueConstraintOnPrimaryKey
+                && string.Equals(constraint.Signature, targetKeySignature, StringComparison.Ordinal)
+            )
+            {
+                continue;
+            }
+
             var columns = string.Join(", ", constraint.ColumnNames);
 
             adds.Add(
@@ -665,15 +669,12 @@ public class SchemaDiffService
                     // 図側の名前は未設定（null）でよい＝レンダラーが UQ_{表}_{列…} を合成する
                     UniqueConstraintName = constraint.Name,
                     UniqueConstraintColumns = constraint.ColumnNames,
-                    IsSelected = selectable,
-                    IsSelectable = selectable,
-                    Description = selectable
-                        ? string.Format(Strings.Diff_AddUniqueConstraint, tableName, columns)
-                        : string.Format(
-                            Strings.Diff_UniqueConstraintOnPrimaryKeyNotSynced,
-                            tableName,
-                            columns
-                        ),
+                    IsSelected = true,
+                    Description = string.Format(
+                        Strings.Diff_AddUniqueConstraint,
+                        tableName,
+                        columns
+                    ),
                 }
             );
         }
@@ -732,12 +733,10 @@ public class SchemaDiffService
                 add.UniqueConstraintColumns,
                 limit
             );
-            var drop = add.IsSelectable
-                ? remainingDrops.FirstOrDefault(d =>
-                    !string.IsNullOrWhiteSpace(d.UniqueConstraintName)
-                    && NameKey(d.UniqueConstraintName) == NameKey(name)
-                )
-                : null;
+            var drop = remainingDrops.FirstOrDefault(d =>
+                !string.IsNullOrWhiteSpace(d.UniqueConstraintName)
+                && NameKey(d.UniqueConstraintName) == NameKey(name)
+            );
 
             if (drop is null)
             {
@@ -947,8 +946,9 @@ public class SchemaDiffService
     /// 制約名を比較キーへ含めるか。<c>false</c>（SQLite）のときは制約名を空にして名前差を無視する。
     /// </param>
     /// <returns>
-    /// 複合外部キーは列ペアを宣言順に並べて畳むため、構成列の順序が違う外部キーは別物として扱われる
-    /// （DDL の意味が異なるため）
+    /// 複合外部キーの列ペアは対応の集合として並びを見ずに畳む（並びは意味を持たない。参照先のキーの並びを求める
+    /// SQL Server・MySQL の DDL は出力の時点で並べ替える＝<see cref="ForeignKeyColumnOrder"/>。Oracle のカタログは
+    /// 宣言の並びを残さず参照先のキーの並びで返し、並べ替えて作った外部キーも取り込むとキーの並びで返る）
     /// </returns>
     /// <param name="dialect">
     /// 参照アクションを方言の実効値へ畳むためのケーパビリティ（Oracle は <c>ON UPDATE</c> と
@@ -964,15 +964,13 @@ public class SchemaDiffService
         SyncDialectCapabilities dialect
     )
     {
-        // 列ペアの並びを問わない方言（PostgreSQL・Oracle・SQLite）では順不同で比べる
-        // （Oracle のカタログは宣言の並びを残さず、参照先のキーの並びで返す）
-        var pairs = fk.ColumnPairs.Select(p =>
-            SignaturePart(ColumnKey(p.ParentColumn)) + SignaturePart(ColumnKey(p.ChildColumn))
-        );
+        // 列ペアは対応の集合として、5 方言とも並びを見ずに比べる
         var pairSignature = string.Concat(
-            dialect.ReferencedKeyRequiresSameColumnOrder
-                ? pairs
-                : pairs.Order(StringComparer.Ordinal)
+            fk.ColumnPairs.Select(p =>
+                    SignaturePart(ColumnKey(p.ParentColumn))
+                    + SignaturePart(ColumnKey(p.ChildColumn))
+                )
+                .Order(StringComparer.Ordinal)
         );
         // 名前は DDL・同期スクリプトが付けるのと同じ実効名で比べる（名前の無いリレーションは既定名、
         // 同じ組の 2 本目は一意化した名前）。素の名前で比べると、名前の無い図と、DDL が既定名で作った
@@ -1286,11 +1284,9 @@ public class SchemaDiffService
             var leftKeys = left.Select(PairKey);
             var rightKeys = right.Select(PairKey);
 
-            return dialect.ReferencedKeyRequiresSameColumnOrder
-                ? leftKeys.SequenceEqual(rightKeys, StringComparer.Ordinal)
-                : leftKeys
-                    .Order(StringComparer.Ordinal)
-                    .SequenceEqual(rightKeys.Order(StringComparer.Ordinal), StringComparer.Ordinal);
+            return leftKeys
+                .Order(StringComparer.Ordinal)
+                .SequenceEqual(rightKeys.Order(StringComparer.Ordinal), StringComparer.Ordinal);
         }
 
         static string PairKey(ForeignKeyColumnNamePair pair) =>

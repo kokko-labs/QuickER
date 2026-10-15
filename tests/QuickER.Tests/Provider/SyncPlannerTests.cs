@@ -4,6 +4,10 @@ using System.Linq;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Oracle;
+using QuickER.Provider.PostgreSql;
+using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestSupport;
 using Xunit;
@@ -3209,6 +3213,14 @@ public class SyncPlannerTests
     [InlineData("varchar(50) CHARACTER SET latin1", "varchar(100)", false)]
     [InlineData("int", "bigint", false)]
     [InlineData("decimal(10,2)", "decimal(12,2)", false)]
+    [InlineData("nchar(2)", "NCHAR(4)", true)]
+    [InlineData("nvarchar(10)", "nvarchar(20)", true)]
+    [InlineData("VARCHAR2(50 CHAR)", "varchar2(100 char)", true)]
+    [InlineData("NVARCHAR2(10)", "NVARCHAR2(20)", true)]
+    [InlineData("RAW(16)", "RAW(32)", true)]
+    [InlineData("VARCHAR2(50 CHAR)", "VARCHAR2(100 BYTE)", false)]
+    [InlineData("VARCHAR2(50)", "VARCHAR2(100 BYTE)", false)]
+    [InlineData("VARCHAR2(10)", "NVARCHAR2(10)", false)]
     public void AreForeignKeyCompatibleTypes_AllowsStringLengthOnly(
         string left,
         string right,
@@ -3225,6 +3237,91 @@ public class SyncPlannerTests
             .Neutral.AreForeignKeyCompatibleTypes(left, right)
             .Should()
             .Be(left.Equals(right, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 主キーの変更で付け直す外部キーの片側の長さだけを変えるとき、長さの違いを許す方言（SQL Server 以外の 4 方言）では
+    /// 外部キーを外して付け直し、SQL Server では両端の型の食い違いとして警告することを、5 方言の実際の能力の宣言で検証する。
+    /// Oracle の長さの単位語が両端で違うときは長さだけの違いではないので、従来の食い違いの扱いへ落ちる。
+    /// </summary>
+    [Theory(
+        DisplayName = "型の食い違い: 長さだけ違う外部キーの付け直しは SQL Server 以外の方言で許す（単位語の違いは食い違い）"
+    )]
+    [InlineData(SqlServerProvider.ProviderName, "varchar(10)", "varchar(20)", false)]
+    [InlineData(PostgreSqlProvider.ProviderName, "varchar(10)", "varchar(20)", true)]
+    [InlineData(MySqlProvider.ProviderName, "varchar(10)", "varchar(20)", true)]
+    [InlineData(OracleProvider.ProviderName, "VARCHAR2(10 CHAR)", "VARCHAR2(20 CHAR)", true)]
+    [InlineData(OracleProvider.ProviderName, "VARCHAR2(10 CHAR)", "VARCHAR2(20 BYTE)", false)]
+    [InlineData(SqliteProvider.ProviderName, "VARCHAR(10)", "VARCHAR(20)", true)]
+    public void AlterPrimaryKey_StringLengthOnlyForeignKey_FollowsDialectDeclaration(
+        string dialect,
+        string keyType,
+        string newChildType,
+        bool rebuilds
+    )
+    {
+        IDatabaseProvider[] providers =
+        [
+            new SqlServerProvider(),
+            new PostgreSqlProvider(),
+            new MySqlProvider(),
+            new OracleProvider(),
+            new SqliteProvider(),
+        ];
+        var capabilities = providers.Single(p => p.Name == dialect).SyncCapabilities;
+        var (customer, orders, _, context) = LiveFkScenario();
+        customer.Columns[0].DataType = keyType;
+        orders.Columns[1].DataType = keyType;
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "code",
+                DataType = "INT",
+                IsNullable = false,
+            }
+        );
+        // 主キーを外しても外部キーの参照先が候補キーのまま残るよう、id に一意制約を置く
+        WithUnique(customer, "UQ_customer_id", "id");
+        var target = customer.Clone(preserveId: true);
+        target.Columns[0].IsPrimaryKey = false;
+        target.Columns.Single(c => c.Name == "code").IsPrimaryKey = true;
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                AlterPk("customer", target),
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "orders",
+                    ColumnName = "customer_id",
+                    Column = Col("customer_id", newChildType),
+                    IsSelected = true,
+                },
+            ],
+            capabilities,
+            context
+        );
+
+        if (rebuilds && capabilities.ColumnReorder == ColumnReorderMode.Rebuild)
+        {
+            // テーブル再構築の方言（SQLite）は、外部キーを子表の作り直しで外して付け直す
+            plan.Warnings.Should().BeEmpty();
+            plan.Rebuilds.Should().NotBeEmpty();
+        }
+        else if (rebuilds)
+        {
+            plan.Warnings.Should().BeEmpty();
+            plan.Sections.Select(s => s.Kind)
+                .Should()
+                .Contain(SchemaDiffKind.DropForeignKey)
+                .And.Contain(SchemaDiffKind.AddForeignKey);
+        }
+        else
+        {
+            plan.Sections.Should().NotContain(s => s.Kind == SchemaDiffKind.DropForeignKey);
+            plan.Warnings.Should()
+                .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch);
+        }
     }
 
     /// <summary>両端を同じ型へ変えれば外部キーを外して付け直し、警告は出さない（大文字小文字の違いは同じ型）</summary>
@@ -4425,11 +4522,12 @@ public class SyncPlannerTests
     }
 
     /// <summary>
-    /// MySQL では、列の並びだけが参照先のキーと合わなくなる外部キーの作り直しを計画から外して警告することを検証する
-    /// （外して付け直すと、付け直しが失敗して外部キーが消えたまま残る）。巻き戻る方言では警告して計画に入れる。
+    /// MySQL では、図の列ペアの並びが参照先のキーと合わない外部キーの作り直しを計画から外して警告することを検証する
+    /// （同期は図の並びのまま付け直すので、外して付け直すと付け直しが失敗して外部キーが消えたまま残る）。巻き戻る方言では
+    /// 警告して計画に入れる。差分は列ペアを並びを見ずに比べるので、作り直しは並び以外の変更（ここでは参照アクション）で起きる。
     /// </summary>
     [Fact(
-        DisplayName = "並びの不一致: MySQL では並びだけが参照先のキーと合わなくなる外部キーの作り直しを外して警告する"
+        DisplayName = "並びの不一致: MySQL では図の並びが参照先のキーと合わない外部キーの作り直しを外して警告する"
     )]
     public void AlterForeignKeyIntoOtherOrder_NonTransactional_IsExcluded()
     {
@@ -4441,6 +4539,7 @@ public class SyncPlannerTests
             TargetEntityId = fk.TargetEntityId,
             ColumnPairs = [.. fk.ColumnPairs.Select(p => p.Clone()).Reverse()],
             ConstraintName = fk.ConstraintName,
+            OnDelete = ForeignKeyReferentialAction.Cascade,
         };
 
         SyncPlan Plan(SyncDialectCapabilities capabilities)

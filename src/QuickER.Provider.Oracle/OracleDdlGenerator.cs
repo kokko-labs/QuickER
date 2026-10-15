@@ -40,17 +40,11 @@ public sealed class OracleDdlGenerator : DdlGeneratorBase
     protected override string BuildReferentialActionClause(Relationship relationship) =>
         OracleReferentialAction.BuildOnDeleteClause(relationship.OnDelete);
 
-    /// <summary>ON UPDATE が指定されていても Oracle では無視される旨を注意コメントで残す</summary>
+    /// <summary>Oracle が持たない ON UPDATE・ON DELETE SET DEFAULT を省いた旨を注意コメントで残す</summary>
     protected override void AppendBeforeForeignKeyStatement(
         StringBuilder sb,
         Relationship relationship
-    )
-    {
-        if (relationship.OnUpdate != ForeignKeyReferentialAction.NoAction)
-        {
-            sb.AppendLine("-- Note: Oracle does not support ON UPDATE; ignoring it");
-        }
-    }
+    ) => OracleReferentialAction.AppendNotes(sb, relationship);
 
     /// <summary>テーブル・列の説明を <c>COMMENT ON</c> 文として出力する</summary>
     /// <remarks>

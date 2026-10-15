@@ -134,7 +134,9 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             item.TableName,
             OracleIdentifier.QuoteSimple,
             name => $"\"{OracleIdentifier.Escape(name)}\"",
-            OracleIdentifier.Limit
+            OracleIdentifier.Limit,
+            DialectName,
+            UnsupportedFeature.Sync
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -359,14 +361,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var sb = new StringBuilder();
 
-        // ON UPDATE が指定されていても Oracle では無視される旨を注意コメントで残す
-        if (
-            item.Relationship is not null
-            && item.Relationship.OnUpdate != ForeignKeyReferentialAction.NoAction
-        )
-        {
-            sb.AppendLine("-- Note: Oracle does not support ON UPDATE; ignoring it");
-        }
+        // Oracle が持たない ON UPDATE・ON DELETE SET DEFAULT を省いた旨を注意コメントで残す
+        OracleReferentialAction.AppendNotes(sb, item.Relationship);
 
         var deleteClause = item.Relationship is null
             ? string.Empty

@@ -32,7 +32,8 @@ namespace QuickER.Provider.MySql;
 ///   <item>
 ///   列変更はすべて <c>MODIFY COLUMN</c> による列定義の完全再指定で行うが、定義の出どころが 2 系統ある。
 ///   <b>AlterColumn</b>（型・NULL 制約を変える操作）はモデル（<see cref="SchemaDiffItem.Column"/>）を正とした再指定で、
-///   図に無い列属性（DEFAULT / AUTO_INCREMENT / 照合順序 / ON UPDATE / INVISIBLE / SRID / 生成列）は落ちる。
+///   図に無い列属性（DEFAULT / AUTO_INCREMENT / 照合順序 / ON UPDATE / INVISIBLE / SRID / 生成列の式）は落ちる
+///   （生成列は、<c>STORED</c> なら普通の列になり、<c>VIRTUAL</c> なら MODIFY がエラー 3106 で断られる）。
 ///   <b>SetColumnDescription / ReorderColumns</b>（末尾句だけを変える操作）はモデルを使わず、
 ///   <c>information_schema</c> から実行時点の実定義を再構成して COMMENT・位置だけを差し替える
 ///   （<c>AppendLiveColumnDefinitionLookup</c>）。
@@ -96,7 +97,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
             item.TableName,
             MySqlIdentifier.QuoteSimple,
             name => $"`{MySqlIdentifier.Escape(name)}`",
-            IdentifierLimit
+            IdentifierLimit,
+            DialectName,
+            UnsupportedFeature.Sync
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -150,7 +153,8 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// </para>
     /// <para>
     /// <b>MODIFY は図に無い列属性を落とす</b>: 意味モデルが持たない DEFAULT / AUTO_INCREMENT /
-    /// 照合順序 / ON UPDATE / INVISIBLE / SRID / 生成列は、この再指定で実 DB から消える。
+    /// 照合順序 / ON UPDATE / INVISIBLE / SRID は、この再指定で実 DB から消える（生成列の式は、<c>STORED</c> の生成列なら
+    /// 消えて普通の列になり、<c>VIRTUAL</c> の生成列なら MODIFY がエラー 3106 で断られる）。
     /// AlterColumn は型そのものを変える操作＝モデルが正なので、これは意図した挙動（既定未選択の差分項目）。
     /// 末尾句だけを変える SetColumnDescription / ReorderColumns は逆にライブ再構成を使い、
     /// 列属性を温存する（<c>AppendLiveColumnDefinitionLookup</c>）。

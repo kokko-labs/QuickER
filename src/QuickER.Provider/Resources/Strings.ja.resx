@@ -152,9 +152,6 @@
   </data>  <data name="Diff_ComputedColumnTypeNotSynced" xml:space="preserve">
     <value>同期しません: 計算列 [{0}].[{1}] の型が変わります（{2} → {3}）が、図は式を持たないため、この DB では変えられません。DB 上で式と一緒に変えてください。</value>
   </data>
-  <data name="Diff_UniqueConstraintOnPrimaryKeyNotSynced" xml:space="preserve">
-    <value>同期しません: 一意制約 [{0}] ({1}) は主キーと同じ列なので、この DB には別の制約として作れません（主キーが一意性を保証します）。</value>
-  </data>
   <data name="Diff_AutoForeignKeyDrop" xml:space="preserve">
     <value>変更を可能にするため自動的に削除します（参照する表・列が削除されるため付け直しません）: [{0}]</value>
   </data>

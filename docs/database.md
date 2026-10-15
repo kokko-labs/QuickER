@@ -308,11 +308,17 @@ Oracle foreign keys have no `ON UPDATE` and no `ON DELETE SET DEFAULT`, so those
 The DDL and the sync script create the foreign key without the clause and add a comment saying so.
 MySQL (InnoDB) accepts `SET DEFAULT` in `ON DELETE` and `ON UPDATE` but does not apply it: deleting the parent row fails, as with `NO ACTION`.
 It is handled the same way: compared as `NO ACTION`, and left out of the DDL and the sync script with a comment.
+SQL Server cannot create a `SET DEFAULT` foreign key when a NOT NULL referencing column has no DEFAULT constraint (error 1762).
+The diagram does not carry column defaults, so the DDL adds a comment before such a foreign key, and the sync names the foreign keys it adds or recreates in the confirmation dialog.
+It does not stop the sync, because the foreign key is created when the database column has a DEFAULT constraint.
 Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
 Recreating a unique constraint works the same way: when a unique constraint keeps its name (or the generated name `UQ_{table}_{columns}` matches the database's name) but its columns change, the drop and the add become one diff item, unselected by default.
 Adding a constraint under the name the database already uses would fail, and re-adding it can fail on duplicate values.
-On PostgreSQL, Oracle, and SQLite, a composite foreign key whose column pairs differ only in their order is not a difference, because these databases do not care about the order (Oracle does not even keep the declared order and returns the pairs in the order of the referenced key).
-SQL Server and MySQL require the referencing columns to follow the order of the referenced key, so there the order is compared.
+On every dialect, a composite foreign key whose column pairs differ only in their order is not a difference, because the pairs map parent columns to child columns and their order carries no meaning (Oracle does not even keep the declared order and returns the pairs in the order of the referenced key).
+SQL Server and MySQL require the referencing columns to follow the order of the referenced key, so the DDL writes the pairs in the order of the referenced key (the primary key, or else a unique constraint).
+A foreign key the sync adds or recreates is written in the diagram's order, so on SQL Server and MySQL it fails when that order differs from the referenced key (the confirmation dialog shows it).
+SQLite reads a table name with a dot such as `a.b` as table b in an attached database a, so the DDL and the sync for that table fail unless that database is attached.
+The DDL adds a comment before the table, and the sync lists such tables in the confirmation dialog.
 
 Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions.
 Adding a column in the middle is therefore not a column-order difference by itself: the new column goes to the end of the table, and the next sync shows the order difference.
@@ -323,9 +329,12 @@ On the other three dialects it is shown for information only and is not synced.
 
 A computed column's nullability is never compared, because the database derives it from the expression and the diagram does not hold the expression.
 A computed column's type change can be selected only on PostgreSQL, where `ALTER COLUMN ... TYPE` keeps the expression, and selecting it never changes the column's nullability.
-On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server and MySQL reject the change, and a SQLite rebuild would drop the expression).
-On SQLite and Oracle, adding a unique constraint on exactly the primary key's columns is also shown for information only.
+On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server rejects the change; MySQL turns a `STORED` generated column into an ordinary column without the expression and rejects the change for a `VIRTUAL` one; a SQLite rebuild would drop the expression).
+On SQLite and Oracle, a unique constraint on exactly the primary key's columns is not compared and does not become a diff item.
 SQLite does not keep such a constraint, and Oracle rejects it; the primary key already guarantees uniqueness.
+The DDL and the tables the sync creates leave that unique constraint out and add a comment saying so.
+On Oracle, a sync that moves the primary key onto the columns of a unique constraint the database already has fails with ORA-02261.
+Remove that unique constraint from the diagram and select its drop as well, or drop it in the database first.
 
 ### Safety by design
 
@@ -365,7 +374,9 @@ The same applies when dropping a unique constraint whose index is the only one s
 On SQL Server, altering the type of a primary key column also drops the primary key and adds it back with the same columns (the re-added key is named `PK_{table}`).
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
 Re-adding it would always fail and, on MySQL / Oracle, leave the foreign key missing.
-On MySQL, string types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch, because MySQL accepts them on the two ends of a foreign key; changing the length of one end drops and re-adds the foreign key as usual.
+On every dialect but SQL Server, string types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch, because PostgreSQL, MySQL, Oracle and SQLite accept them on the two ends of a foreign key; on Oracle the length unit (`CHAR` / `BYTE`) must be the same on both ends.
+Changing the length of one end drops and re-adds the foreign key as usual.
+SQL Server cannot create a foreign key whose ends differ in length (error 1753), so the DDL adds a comment before such a foreign key.
 The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
 In that case no other foreign key is dropped and re-added either, because the column change fails anyway and the re-adding would never run.
 If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.

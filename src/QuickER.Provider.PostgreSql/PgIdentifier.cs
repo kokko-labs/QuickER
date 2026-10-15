@@ -38,18 +38,6 @@ public static class PgIdentifier
     /// <summary>識別子内の <c>"</c> を PostgreSQL の規則（二重化）に従ってエスケープする</summary>
     public static string Escape(string name) => (name ?? string.Empty).Replace("\"", "\"\"");
 
-    /// <summary><c>schema.table</c> 形式から <c>table</c> 部分のみを抽出する</summary>
-    public static string TableNameOnly(string fullName) =>
-        string.IsNullOrEmpty(fullName) ? string.Empty
-        : fullName.Contains('.') ? fullName.Split('.', 2)[1]
-        : fullName;
-
-    /// <summary><c>schema.table</c> 形式から <c>schema</c> 部分を抽出する（省略時は <c>public</c>）</summary>
-    public static string SchemaOf(string fullName) =>
-        string.IsNullOrEmpty(fullName) ? "public"
-        : fullName.Contains('.') ? fullName.Split('.', 2)[0]
-        : "public";
-
     /// <summary>SQL 文字列リテラル用に <c>'</c> を二重化してエスケープする</summary>
     public static string EscapeStringLiteral(string s) => (s ?? string.Empty).Replace("'", "''");
 
