@@ -395,4 +395,35 @@ public sealed class SqlServerImportFidelityIntegrationTests(SqlServerContainerFi
             );
         }
     }
+
+    /// <summary>ビューは取り込まず、ビューごとに ViewExcluded で名指しする（dbo 以外はスキーマ修飾つき）</summary>
+    [Fact(DisplayName = "[Integration] SQL Server: ビューは取り込まずに名指しする")]
+    public async Task Import_View_IsExcludedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            "CREATE TABLE customers (id INT PRIMARY KEY, name NVARCHAR(50) NOT NULL);",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE VIEW v_customers AS SELECT id, name FROM customers;",
+            Ct
+        );
+
+        try
+        {
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("customers");
+            var warning = result.Warnings.Should().ContainSingle().Subject;
+            warning.Kind.Should().Be(SchemaImportWarningKind.ViewExcluded);
+            warning.TableName.Should().Be("v_customers");
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP VIEW IF EXISTS v_customers;", Ct);
+        }
+    }
 }

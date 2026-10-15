@@ -70,7 +70,7 @@ public enum UnsupportedTreatment
     /// <summary>同期：計画から外して警告する</summary>
     ExcludeWithWarning,
 
-    /// <summary>同期：DB から読み直して保つ</summary>
+    /// <summary>同期：DB の定義を保つ（DB から読み直して付け直す、または触らずに残す）</summary>
     Preserve,
 
     /// <summary>同期：逐次 DDL で直接実行する</summary>

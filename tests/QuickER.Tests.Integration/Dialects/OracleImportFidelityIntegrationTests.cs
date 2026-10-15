@@ -272,6 +272,15 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
 
             // どちらも user_tables には通常テーブルとして現れるが、ER 図のエンティティではない
             result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("MV_BASE");
+
+            // 一時表と MV 本体は名指しし、MV のコンテナ表（MV と同名の表）は DB の内部のものとして告げない
+            result
+                .Warnings.Select(w => (w.Kind, w.TableName))
+                .Should()
+                .BeEquivalentTo([
+                    (SchemaImportWarningKind.TemporaryTableExcluded, "SCRATCH_T"),
+                    (SchemaImportWarningKind.MaterializedViewExcluded, "MV_PROBE"),
+                ]);
         }
         finally
         {
@@ -407,6 +416,7 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
 
             // MLOG$_LOG_BASE は user_tables に通常テーブルとして現れるが、ビューの更新のための変更記録
             result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("LOG_BASE");
+            result.Warnings.Should().BeEmpty("MV ログ表は DB の内部のものとして告げない");
         }
         finally
         {
@@ -647,5 +657,59 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
         var stored = (string?)await cmd.ExecuteScalarAsync(Ct);
 
         stored.Should().Be("2", "作り直した列も整数の列であり、1.5 は 2 へ丸められること");
+    }
+
+    /// <summary>
+    /// ビューと外部テーブルは取り込まず、種別ごとに名指しする（外部テーブルは以前は通常の表として取り込んでいた）
+    /// </summary>
+    [Fact(DisplayName = "[Integration] Oracle: ビューと外部テーブルは取り込まずに名指しする")]
+    public async Task Import_ViewAndExternalTable_AreExcludedAndReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        // DIRECTORY の作成と権限の付与は SYSTEM が要る（アプリユーザーは CREATE ANY DIRECTORY を持たない）
+        await fixture.ExecuteAsSystemAsync(
+            """
+            CREATE OR REPLACE DIRECTORY QER_EXT_DIR AS '/tmp';
+            GRANT READ, WRITE ON DIRECTORY QER_EXT_DIR TO ORACLE;
+            """,
+            Ct
+        );
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                CREATE TABLE CUSTOMERS (ID NUMBER(10) PRIMARY KEY, NAME VARCHAR2(50) NOT NULL);
+                CREATE VIEW V_CUSTOMERS AS SELECT ID, NAME FROM CUSTOMERS;
+                CREATE TABLE EXT_PROBE (ID NUMBER(10))
+                    ORGANIZATION EXTERNAL (
+                        TYPE ORACLE_LOADER
+                        DEFAULT DIRECTORY QER_EXT_DIR
+                        ACCESS PARAMETERS (RECORDS DELIMITED BY NEWLINE FIELDS TERMINATED BY ',')
+                        LOCATION ('ext_probe.csv')
+                    );
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("CUSTOMERS");
+            result
+                .Warnings.Select(w => (w.Kind, w.TableName))
+                .Should()
+                .BeEquivalentTo([
+                    (SchemaImportWarningKind.ExternalTableExcluded, "EXT_PROBE"),
+                    (SchemaImportWarningKind.ViewExcluded, "V_CUSTOMERS"),
+                ]);
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP VIEW V_CUSTOMERS;", Ct);
+            await fixture.ExecuteAsSystemAsync("DROP DIRECTORY QER_EXT_DIR;", Ct);
+        }
     }
 }

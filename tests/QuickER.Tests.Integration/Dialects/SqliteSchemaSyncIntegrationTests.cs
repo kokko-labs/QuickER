@@ -112,6 +112,56 @@ public sealed class SqliteSchemaSyncIntegrationTests
             );
     }
 
+    /// <summary>
+    /// 制約でない一意索引（式・条件付きを含む）は、再構築でも DB から読み直して作り直す（B2）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 再構築で制約でない一意索引（式・条件付き）を温存"
+    )]
+    public async Task Rebuild_PreservesNonConstraintUniqueIndexes()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, deleted INTEGER NOT NULL, note TEXT NULL);",
+            "CREATE UNIQUE INDEX ux_users_email ON users (email);",
+            "CREATE UNIQUE INDEX ux_users_email_lower ON users (lower(email));",
+            "CREATE UNIQUE INDEX ux_users_live_email ON users (email) WHERE deleted = 0;",
+            "INSERT INTO users (id, email, deleted, note) VALUES (1, 'a@example.com', 0, 'x');"
+        );
+
+        var (result, _) = await RunSyncAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                entities.Single().Columns.Single(c => c.Name == "note").DataType = "VARCHAR(200)";
+                return (entities, relationships);
+            }
+        );
+
+        result.Committed.Should().BeTrue(result.Error);
+
+        var reimported = await ImportAsync(db, provider);
+        reimported
+            .Entities.Single()
+            .Columns.Single(c => c.Name == "note")
+            .DataType.Should()
+            .Be("VARCHAR(200)", "再構築が実際に走った");
+        reimported
+            .AuxiliaryObjects.Where(a => a.Kind == SchemaAuxiliaryObjectKind.Index)
+            .Select(a => a.Name)
+            .Should()
+            .BeEquivalentTo("ux_users_email", "ux_users_email_lower", "ux_users_live_email");
+        reimported
+            .AuxiliaryObjects.Single(a => a.Name == "ux_users_live_email")
+            .CreateSql.Should()
+            .Contain("WHERE deleted = 0");
+        reimported.Entities.Single().UniqueConstraints.Should().BeEmpty();
+    }
+
     /// <summary>整合的なデータに対する FK 追加の再構築が成功し、FK が張られることを検証する</summary>
     [Fact(DisplayName = "[Integration] SQLite 同期: FK 追加の再構築が成功する（整合データ）")]
     public async Task Rebuild_AddForeignKey_Succeeds()

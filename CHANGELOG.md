@@ -79,6 +79,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Every tool now refuses an argument of the wrong JSON type** — a number where a string is expected, `"true"` where a boolean is expected, an object where an array is expected, an array element that is not an object where objects are expected, a `sql` value that is not a string, and so on. These used to be ignored silently (`is_primary_key: "true"` made a column that is not a primary key, `order_by: {...}` saved an unordered query), and a non-object element in `set_query`'s `parameters`, `order_by` or `fields` returned a raw .NET error. This applies to the built-in chat and to all MCP tools, including `generate_csharp` and `generate_ddl`. An optional argument given as `null` still counts as omitted
 - **`quicker mcp` no longer reads `appsettings.json` from the folder it is started in** — the server used the .NET host's default configuration, which loaded that file from the working folder (usually the agent's project) and watched it for changes, so a malformed `appsettings.json` there stopped the server from starting and a large project tree held a recursive file watcher. Nothing in QuickER read those settings
 
+#### DB import & connections
+
+- **DB import no longer imports external tables (Oracle and SQL Server)** — an Oracle `ORGANIZATION EXTERNAL` table and a SQL Server external table (`is_external` in `sys.tables`) used to be imported as an ordinary entity, although their data lives outside the database and the generated DDL and schema sync cannot recreate them. They are now left out and named in the import warnings, like PostgreSQL's foreign tables. Importing such a database again into a diagram that already has the table lists the table among the tables that would disappear in the replacement confirmation
+
 ### Added
 
 #### Code generation dialog & CLI
@@ -112,9 +116,13 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ### Changed
 
+#### DB import & connections
+
+- **Import warnings are now listed by kind, in the GUI and in `quicker scaffold`** — each kind of warning gets one heading with the count, followed by one line per place. A table left out of the diagram (a view, a virtual table, a history table and so on) is listed by name under its heading; a definition that was imported in a reduced form keeps its one-sentence description. The sentences are now the same in the GUI's import details and in `quicker scaffold`'s stderr, where the heading starts with `Warning:` and each place is indented with `  - `. Scripts that matched the old one-line warnings in stderr need updating; the exit code and the generated files are unchanged
+- **DB import now names the objects it leaves out of the diagram** — views (all five DBMSs), materialized views (PostgreSQL, Oracle), foreign tables (PostgreSQL), partitions (PostgreSQL, with the parent table they belong to) and temporary tables (Oracle) used to be skipped without a word. A foreign key that references a table the import left out (a PostgreSQL partition, an SQLite virtual table or view) is now reported as such; SQLite used to report it as referencing a table outside the imported scope
+
 #### Code generation dialog & CLI
 
-- **`quicker scaffold` now words import warnings the same way as the DB import in the GUI** — each warning still goes to stderr on its own line starting with `Warning:`, but the rest of the line is now the sentence the GUI shows in the import details (for example `Warning: person.mail: imported as the base type of the domain type "email_dom" (…)` where it used to read `Warning: person.mail was imported as the base type of the domain type "email_dom" (…)`). Scripts that match the old sentences in stderr need updating; the exit code and the generated files are unchanged
 - **The code generation dialog now lists value object warnings in a scrollable box** — with value objects on, the warnings found during generation were put into the body of a standard confirmation, which does not scroll, so a diagram that raised a warning per column pushed the buttons off the screen. The confirmation now shows the question at the top and every warning in a scrollable list below it, as the confirmation before overwriting edited files already did
 
 #### Generated code

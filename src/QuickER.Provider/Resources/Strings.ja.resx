@@ -212,10 +212,67 @@
   <data name="ImportWarning_TableNameCollision" xml:space="preserve">
     <value>「{0}」は「{1}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
   </data>
-  <data name="ImportWarning_TemporalHistoryTableExcluded" xml:space="preserve">
-    <value>{0}: システムバージョニングされたテーブル「{1}」の履歴表のため取り込みませんでした。単独のエンティティとしては取り込みません。</value>
+  <data name="ImportWarningHeading_DomainTypeFlattened" xml:space="preserve">
+    <value>ドメイン型の基底型として取り込んだ列（{0} 件）:</value>
   </data>
-  <data name="ImportWarning_VirtualTableExcluded" xml:space="preserve">
-    <value>{0}: 仮想テーブルのため取り込みませんでした。通常テーブルの形で写し取れないため、付属表（シャドウテーブル）も合わせて除外しています。</value>
+  <data name="ImportWarningHeading_TableColumnsUnavailable" xml:space="preserve">
+    <value>列なしで取り込んだテーブル（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ForeignKeyOutsideScope" xml:space="preserve">
+    <value>取込範囲の外を参照する外部キー（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_TableNameCollision" xml:space="preserve">
+    <value>名前の衝突で取り込まなかったテーブル（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnNameCollision" xml:space="preserve">
+    <value>名前の衝突で取り込まなかった列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnTypeNotEmittable" xml:space="preserve">
+    <value>型を SQL へ書き出せない列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_PartitionDefinitionLost" xml:space="preserve">
+    <value>パーティション定義なしで取り込んだテーブル（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_VirtualTableExcluded" xml:space="preserve">
+    <value>取り込まなかった仮想テーブル（付属表を含む・{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ComputedColumnExpressionLost" xml:space="preserve">
+    <value>通常の列として取り込んだ生成列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_DisabledConstraintExcluded" xml:space="preserve">
+    <value>取り込まなかった無効化された制約（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_TemporalHistoryTableExcluded" xml:space="preserve">
+    <value>取り込まなかったテンポラルテーブルの履歴表（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_PrimaryKeyNullabilityAdjusted" xml:space="preserve">
+    <value>NOT NULL へ補正した主キー列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ViewExcluded" xml:space="preserve">
+    <value>取り込まなかったビュー（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_MaterializedViewExcluded" xml:space="preserve">
+    <value>取り込まなかったマテリアライズドビュー（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ExternalTableExcluded" xml:space="preserve">
+    <value>取り込まなかった外部テーブル（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ChildPartitionExcluded" xml:space="preserve">
+    <value>取り込まなかった子パーティション（親テーブルは取り込み済み・{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_TemporaryTableExcluded" xml:space="preserve">
+    <value>取り込まなかった一時表（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ForeignKeyToExcludedTable" xml:space="preserve">
+    <value>取り込まなかった表を参照する外部キー（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_ForeignKeyToExcludedTable" xml:space="preserve">
+    <value>{0}: 外部キー「{1}」は取り込まなかった「{2}」を参照しているため、リレーションを作成していません。</value>
+  </data>
+  <data name="ImportWarningItem_ChildPartitionExcluded" xml:space="preserve">
+    <value>{0}（{1} のパーティション）</value>
+  </data>
+  <data name="ImportWarningItem_TemporalHistoryTableExcluded" xml:space="preserve">
+    <value>{0}（{1} の履歴表）</value>
   </data>
 </root>

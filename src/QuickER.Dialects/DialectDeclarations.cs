@@ -285,7 +285,7 @@ public static class DialectDeclarations
             { Kind.UnparsableType, NotDetected(NotApplicable, UnparsableTypeReason) }, // D2a ○ 無 該
             { Kind.UnemittableTypeNotation, Detected(NotApplicable) }, // D2b ○ 既 該
             { Kind.PaddedName, Detected(NotApplicable) }, // N1 ○ 33 該
-            { Kind.TableWithoutReadableColumns, Detected(NotApplicable) }, // T1 ○ 既 該
+            { Kind.TableWithoutReadableColumns, Detected(NotApplicable) }, // T1 ○ 既 該（TRIGGER・DROP・INDEX・SHOW VIEW だけの表単位の権限では表が見えて列が 0 本。実機で確認）
             // 向き 2
             { Kind.ComputedColumnTypeChange, NotExpressible() }, // A1b ×（?）
             { Kind.UniqueConstraintOnPrimaryKey, Expressible() }, // B6 ○
@@ -347,7 +347,7 @@ public static class DialectDeclarations
             { Kind.UnparsableType, NotDetected(NotApplicable, UnparsableTypeReason) }, // D2a ○ 無 該
             { Kind.UnemittableTypeNotation, Detected(NotApplicable) }, // D2b ○ 既 該
             { Kind.PaddedName, Detected(NotApplicable) }, // N1 ○ 33 該
-            { Kind.TableWithoutReadableColumns, Detected(NotApplicable) }, // T1 ○ 既 該
+            { Kind.TableWithoutReadableColumns, Impossible() }, // T1 ×（自スキーマの表は見える列を必ず 1 本持つ＝全列 INVISIBLE は ORA-54039・最後の列の SET UNUSED は ORA-12983。実機で確認）
             // 向き 2
             { Kind.ComputedColumnTypeChange, NotExpressible() }, // A1b ×
             { Kind.UniqueConstraintOnPrimaryKey, NotExpressible() }, // B6 ×

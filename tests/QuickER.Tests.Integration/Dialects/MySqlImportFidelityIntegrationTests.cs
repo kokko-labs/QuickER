@@ -373,4 +373,77 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
         warning.Kind.Should().Be(SchemaImportWarningKind.PartitionDefinitionLost);
         warning.TableName.Should().Be("sales");
     }
+
+    /// <summary>表は見えるが列を 1 本も読めないユーザーで取り込むと、列なしの表として取り込んで告げる（T1）</summary>
+    /// <remarks>
+    /// MySQL は表単位の権限があれば表を <c>information_schema.TABLES</c> に見せるが、
+    /// <c>COLUMNS</c> に見せる列は列を扱う権限（SELECT・INSERT・UPDATE・REFERENCES）のある列だけで、
+    /// TRIGGER・DROP・INDEX・SHOW VIEW だけの権限では列が 0 本になる（実機で確認）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] MY5: 列を読む権限の無いユーザーの取込は、列なしの表として取り込んで告げる"
+    )]
+    public async Task Import_TableWithoutReadableColumns_IsReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync("CREATE TABLE secret (id INT PRIMARY KEY, body TEXT);", Ct);
+        var builder = new MySqlConnectionStringBuilder(fixture.ConnectionString);
+        await fixture.ExecuteAsRootAsync(
+            $"""
+            DROP USER IF EXISTS 'trigger_only'@'%';
+            CREATE USER 'trigger_only'@'%' IDENTIFIED BY 'Trigger#12345';
+            GRANT TRIGGER ON `{builder.Database}`.secret TO 'trigger_only'@'%';
+            """,
+            Ct
+        );
+
+        try
+        {
+            builder.UserID = "trigger_only";
+            builder.Password = "Trigger#12345";
+            await using var conn = new MySqlConnection(builder.ConnectionString);
+            await conn.OpenAsync(Ct);
+            var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Should().ContainSingle().Which.Columns.Should().BeEmpty();
+            var warning = result.Warnings.Should().ContainSingle().Subject;
+            warning.Kind.Should().Be(SchemaImportWarningKind.TableColumnsUnavailable);
+            warning.TableName.Should().Be("secret");
+        }
+        finally
+        {
+            await fixture.ExecuteAsRootAsync("DROP USER IF EXISTS 'trigger_only'@'%';", Ct);
+        }
+    }
+
+    /// <summary>ビューは取り込まず、ビューごとに ViewExcluded で名指しする（表示は種別ごとにまとめる）</summary>
+    [Fact(DisplayName = "[Integration] MY6: ビューは取り込まずに名指しする")]
+    public async Task Import_View_IsExcludedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE customers (id INT PRIMARY KEY, name VARCHAR(50) NOT NULL);
+            CREATE VIEW v_customers AS SELECT id, name FROM customers;
+            """,
+            Ct
+        );
+
+        try
+        {
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("customers");
+            var warning = result.Warnings.Should().ContainSingle().Subject;
+            warning.Kind.Should().Be(SchemaImportWarningKind.ViewExcluded);
+            warning.TableName.Should().Be("v_customers");
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP VIEW IF EXISTS v_customers;", Ct);
+        }
+    }
 }

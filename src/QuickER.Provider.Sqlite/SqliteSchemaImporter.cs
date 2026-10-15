@@ -65,12 +65,8 @@ public class SqliteSchemaImporter : ISchemaImporter
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var (tables, tableCreateSql, withoutRowidByTable, tableWarnings) = await LoadTablesAsync(
-                conn,
-                commandTimeoutSeconds,
-                ct
-            )
-            .ConfigureAwait(false);
+        var (tables, tableCreateSql, withoutRowidByTable, tableWarnings, excludedNames) =
+            await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
 
         // 各テーブルの列・主キーは PRAGMA table_xinfo でまとめて取得する
         foreach (var entry in tables.Values)
@@ -95,6 +91,7 @@ public class SqliteSchemaImporter : ISchemaImporter
         var rels = await LoadForeignKeysAsync(
                 conn,
                 tables,
+                excludedNames,
                 tableWarnings,
                 commandTimeoutSeconds,
                 ct
@@ -161,7 +158,8 @@ ORDER BY name;";
         Dictionary<string, SchemaTableEntry> Tables,
         Dictionary<string, string> CreateSql,
         Dictionary<string, bool> WithoutRowidByTable,
-        List<SchemaImportWarning> Warnings
+        List<SchemaImportWarning> Warnings,
+        List<string> ExcludedNames
     )> LoadTablesAsync(SqliteConnection conn, int commandTimeoutSeconds, CancellationToken ct)
     {
         var tableTypes = await LoadTableTypesAsync(conn, commandTimeoutSeconds, ct)
@@ -171,6 +169,9 @@ ORDER BY name;";
         var createSql = new Dictionary<string, string>(SchemaNames.Comparer);
         var withoutRowidByTable = new Dictionary<string, bool>(StringComparer.Ordinal);
         var warnings = new List<SchemaImportWarning>();
+
+        // 取り込まない表・ビューの名前（外部キーの参照先が「DB にあるが外した表」かを見分けるため）
+        var excludedNames = new List<string>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -192,6 +193,7 @@ ORDER BY name;";
                     warnings.Add(
                         new SchemaImportWarning(SchemaImportWarningKind.VirtualTableExcluded, name)
                     );
+                    excludedNames.Add(name);
                     continue;
                 }
 
@@ -200,6 +202,7 @@ ORDER BY name;";
                 )
                 {
                     // 付属表は本体の VirtualTableExcluded 警告 1 件が代表するため無言で除外する
+                    excludedNames.Add(name);
                     continue;
                 }
             }
@@ -232,7 +235,21 @@ ORDER BY name;";
             }
         }
 
-        return (dict, createSql, withoutRowidByTable, warnings);
+        // ビューは sqlite_master の type='table' に現れないので、table_list の種別から名指しする
+        foreach (
+            var view in tableTypes
+                .Where(pair =>
+                    string.Equals(pair.Value.Type, "view", StringComparison.OrdinalIgnoreCase)
+                )
+                .Select(pair => pair.Key)
+                .Order(StringComparer.Ordinal)
+        )
+        {
+            warnings.Add(new SchemaImportWarning(SchemaImportWarningKind.ViewExcluded, view));
+            excludedNames.Add(view);
+        }
+
+        return (dict, createSql, withoutRowidByTable, warnings, excludedNames);
     }
 
     /// <summary>
@@ -552,6 +569,7 @@ ORDER BY name;";
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        IReadOnlyList<string> excludedNames,
         List<SchemaImportWarning> warnings,
         int commandTimeoutSeconds,
         CancellationToken ct
@@ -603,13 +621,13 @@ ORDER BY name;";
 
                     if (missingRefWarned.Add(id))
                     {
+                        // 参照先が DB にあって取込が外した表（仮想テーブル・付属表・ビュー）なら、
+                        // 範囲の外ではなく「外した表への参照」として告げる
+                        var kind = excludedNames.Any(name => SqliteNameEquals(name, refTable))
+                            ? SchemaImportWarningKind.ForeignKeyToExcludedTable
+                            : SchemaImportWarningKind.ForeignKeyOutsideScope;
                         warnings.Add(
-                            new SchemaImportWarning(
-                                SchemaImportWarningKind.ForeignKeyOutsideScope,
-                                entry.Entity.TableName,
-                                fkName,
-                                refTable
-                            )
+                            new SchemaImportWarning(kind, entry.Entity.TableName, fkName, refTable)
                         );
                     }
 

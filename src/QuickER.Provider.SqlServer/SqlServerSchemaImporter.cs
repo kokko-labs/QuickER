@@ -69,6 +69,8 @@ public class SqlServerSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         await LoadTemporalHistoryTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+        await LoadExcludedObjectsAsync(conn, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
@@ -114,6 +116,8 @@ public class SqlServerSchemaImporter : ISchemaImporter
     /// （<see cref="TemporalHistoryTablesSql"/> が別途拾って警告に載せる。本表＝
     /// <c>temporal_type = 2</c> は通常テーブルとして取り込む＝この条件では除外しない）。
     /// <c>temporal_type</c> は SQL Server 2016 で追加された列。
+    /// 外部テーブル（<c>is_external = 1</c>）も、データが DB の外にあり DDL・同期で作り直せないため除外する
+    /// （<see cref="ExcludedObjectsSql"/> が名指しして告げる）。
     /// </remarks>
     private const string TablesSql =
         @"
@@ -122,6 +126,7 @@ FROM sys.tables t
 JOIN sys.schemas s ON t.schema_id = s.schema_id
 WHERE t.is_ms_shipped = 0
   AND t.temporal_type <> 1
+  AND t.is_external = 0
   AND NOT EXISTS (
       SELECT 1
       FROM sys.extended_properties ep
@@ -133,6 +138,24 @@ WHERE t.is_ms_shipped = 0
 -- COLLATE ... BIN2 で並べるのは、DB の既定照合順序次第で Dup と dup の順序が変わるため
 -- （衝突時にどちらを採るかを決定的にする。PostgreSQL の COLLATE C / Oracle の NLSSORT BINARY と同じ狙い）
 ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2;";
+
+    /// <summary>取り込まないオブジェクト（ビュー・外部テーブル）を名指しするクエリ</summary>
+    /// <remarks>取込の対象（<see cref="TablesSql"/>）は変えず、告げるためだけに読む。</remarks>
+    private const string ExcludedObjectsSql =
+        @"
+SELECT o.OBJECT_SCHEMA, o.OBJECT_NAME, o.KIND
+FROM (
+    SELECT s.name AS OBJECT_SCHEMA, v.name AS OBJECT_NAME, 'view' AS KIND
+    FROM sys.views v
+    JOIN sys.schemas s ON v.schema_id = s.schema_id
+    WHERE v.is_ms_shipped = 0
+    UNION ALL
+    SELECT s.name, t.name, 'external'
+    FROM sys.tables t
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE t.is_ms_shipped = 0 AND t.is_external = 1
+) o
+ORDER BY o.OBJECT_SCHEMA COLLATE Latin1_General_BIN2, o.OBJECT_NAME COLLATE Latin1_General_BIN2;";
 
     /// <summary>テンポラルテーブルの履歴表と、その本表名を取得するクエリ</summary>
     /// <remarks>
@@ -314,6 +337,32 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         }
 
         return dict;
+    }
+
+    /// <summary>取り込まないオブジェクトを、種別ごとの取込警告（段 2）で名指しする</summary>
+    private static async Task LoadExcludedObjectsAsync(
+        SqlConnection conn,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(conn, ExcludedObjectsSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var name = DisplayTableName(reader.GetString(0), reader.GetString(1));
+            var kind = reader.GetString(2) switch
+            {
+                "view" => SchemaImportWarningKind.ViewExcluded,
+                "external" => SchemaImportWarningKind.ExternalTableExcluded,
+                var other => throw new InvalidOperationException(
+                    $"Unexpected object kind '{other}' for '{name}'."
+                ),
+            };
+            warnings.Add(new SchemaImportWarning(kind, name));
+        }
     }
 
     /// <summary>テンポラルテーブルの履歴表を洗い出し、取り込まなかったことを本表名つきで告げる</summary>

@@ -38,6 +38,37 @@ public static class SchemaImportWarningKinds
                 UnsupportedDefinitionKind.TemporalHistoryTable,
             SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted =>
                 UnsupportedDefinitionKind.PrimaryKeyNullabilityAdjusted,
+            SchemaImportWarningKind.ViewExcluded => UnsupportedDefinitionKind.View,
+            SchemaImportWarningKind.MaterializedViewExcluded =>
+                UnsupportedDefinitionKind.MaterializedView,
+            SchemaImportWarningKind.ExternalTableExcluded =>
+                UnsupportedDefinitionKind.ExternalTable,
+            SchemaImportWarningKind.ChildPartitionExcluded =>
+                UnsupportedDefinitionKind.ChildPartition,
+            SchemaImportWarningKind.TemporaryTableExcluded =>
+                UnsupportedDefinitionKind.TemporaryTable,
+            SchemaImportWarningKind.ForeignKeyToExcludedTable =>
+                UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+        };
+
+    /// <summary>種別ごとに件数と名前の一覧へまとめて告げる種別か（段 2＝図に入らないオブジェクトを外したもの）</summary>
+    /// <remarks>
+    /// <c>false</c> の種別（段 1）は箇所ごとの 1 文を項目にする。どちらも表示は種別ごとに見出しの下へ並べる。
+    /// 扱いの表の取込のマス（「外す＋まとめて告知」）と一致することは <c>SchemaImportWarningKindMapTests</c> が確かめる。
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">定義されていない種別</exception>
+    public static bool IsAggregated(SchemaImportWarningKind kind) =>
+        kind switch
+        {
+            SchemaImportWarningKind.VirtualTableExcluded
+            or SchemaImportWarningKind.TemporalHistoryTableExcluded
+            or SchemaImportWarningKind.ViewExcluded
+            or SchemaImportWarningKind.MaterializedViewExcluded
+            or SchemaImportWarningKind.ExternalTableExcluded
+            or SchemaImportWarningKind.ChildPartitionExcluded
+            or SchemaImportWarningKind.TemporaryTableExcluded => true,
+            _ when Enum.IsDefined(kind) => false,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 }

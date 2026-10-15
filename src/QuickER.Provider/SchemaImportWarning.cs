@@ -175,6 +175,50 @@ public enum SchemaImportWarningKind
     /// <c>Subject</c> = 列名 / <c>Detail</c> は空。
     /// </remarks>
     PrimaryKeyNullabilityAdjusted,
+
+    /// <summary>ビューを取り込まなかった（図はビューを持たない）。</summary>
+    /// <remarks>
+    /// <c>TableName</c> = ビュー名（SQL Server はスキーマ修飾つき）/ <c>Subject</c> / <c>Detail</c> ともに空。
+    /// 表示は種別ごとに件数と名前の一覧へまとめる（段 2）。
+    /// </remarks>
+    ViewExcluded,
+
+    /// <summary>マテリアライズドビューを取り込まなかった（PostgreSQL・Oracle）。</summary>
+    /// <remarks>
+    /// Oracle の MV の中身の表（コンテナ表）と MV ログ表は DB の内部のものとして黙って外す（告げるのは MV 本体だけ）。
+    /// <c>TableName</c> = MV 名 / <c>Subject</c> / <c>Detail</c> ともに空。表示は段 2。
+    /// </remarks>
+    MaterializedViewExcluded,
+
+    /// <summary>外部テーブル（DB の外のデータを見せる表）を取り込まなかった（SQL Server・PostgreSQL・Oracle）。</summary>
+    /// <remarks>
+    /// 実体のデータが DB の外にあり、図の表として DDL・同期で作り直せないため外す。
+    /// <c>TableName</c> = 外部テーブル名（SQL Server はスキーマ修飾つき）/ <c>Subject</c> / <c>Detail</c> ともに空。表示は段 2。
+    /// </remarks>
+    ExternalTableExcluded,
+
+    /// <summary>子パーティションを取り込まなかった（PostgreSQL）。</summary>
+    /// <remarks>
+    /// 子パーティションはパーティション親の実体であり、親を通常のテーブルとして取り込む
+    /// （<see cref="PartitionDefinitionLost"/>）。<c>TableName</c> = 子パーティション名 /
+    /// <c>Subject</c> は空 / <c>Detail</c> = 親テーブル名。表示は段 2。
+    /// </remarks>
+    ChildPartitionExcluded,
+
+    /// <summary>一時表を取り込まなかった（Oracle のグローバル一時表）。</summary>
+    /// <remarks>
+    /// <c>TableName</c> = 一時表名 / <c>Subject</c> / <c>Detail</c> ともに空。表示は段 2。
+    /// </remarks>
+    TemporaryTableExcluded,
+
+    /// <summary>取込から外した表を参照する外部キーを、リレーションにしなかった。</summary>
+    /// <remarks>
+    /// 参照先が DB にはあるが、取込が外した表（PostgreSQL の子パーティション・SQLite の仮想テーブル）のとき。
+    /// 参照先が取込範囲の外（別スキーマ・DB に無い表）のときは <see cref="ForeignKeyOutsideScope"/>。
+    /// <c>TableName</c> = 外部キーを持つ表 / <c>Subject</c> = 制約名（SQLite は名前を持たないので空）/
+    /// <c>Detail</c> = 参照先の表。
+    /// </remarks>
+    ForeignKeyToExcludedTable,
 }
 
 /// <summary>

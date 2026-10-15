@@ -212,10 +212,67 @@
   <data name="ImportWarning_TableNameCollision" xml:space="preserve">
     <value>"{0}" was not imported because it differs from "{1}" only in letter case or surrounding spaces, and the import cannot keep both apart.</value>
   </data>
-  <data name="ImportWarning_TemporalHistoryTableExcluded" xml:space="preserve">
-    <value>{0}: excluded as the history table of the system-versioned table "{1}". It is not imported as an entity of its own.</value>
+  <data name="ImportWarningHeading_DomainTypeFlattened" xml:space="preserve">
+    <value>Columns imported as the base type of a domain type ({0}):</value>
   </data>
-  <data name="ImportWarning_VirtualTableExcluded" xml:space="preserve">
-    <value>{0}: excluded as a virtual table. It cannot be represented as an ordinary table, so its shadow tables were excluded along with it.</value>
+  <data name="ImportWarningHeading_TableColumnsUnavailable" xml:space="preserve">
+    <value>Tables imported without columns ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_ForeignKeyOutsideScope" xml:space="preserve">
+    <value>Foreign keys that reference tables outside the imported scope ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_TableNameCollision" xml:space="preserve">
+    <value>Tables not imported because of a name collision ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnNameCollision" xml:space="preserve">
+    <value>Columns not imported because of a name collision ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnTypeNotEmittable" xml:space="preserve">
+    <value>Columns whose data type cannot be written into SQL ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_PartitionDefinitionLost" xml:space="preserve">
+    <value>Partitioned tables imported without their partitioning ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_VirtualTableExcluded" xml:space="preserve">
+    <value>Virtual tables not imported, together with their shadow tables ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_ComputedColumnExpressionLost" xml:space="preserve">
+    <value>Generated columns imported as ordinary columns ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_DisabledConstraintExcluded" xml:space="preserve">
+    <value>Disabled constraints not imported ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_TemporalHistoryTableExcluded" xml:space="preserve">
+    <value>History tables of system-versioned tables not imported ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_PrimaryKeyNullabilityAdjusted" xml:space="preserve">
+    <value>Primary key columns corrected to NOT NULL ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_ViewExcluded" xml:space="preserve">
+    <value>Views not imported ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_MaterializedViewExcluded" xml:space="preserve">
+    <value>Materialized views not imported ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_ExternalTableExcluded" xml:space="preserve">
+    <value>External tables not imported ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_ChildPartitionExcluded" xml:space="preserve">
+    <value>Partitions not imported; their parent tables are imported ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_TemporaryTableExcluded" xml:space="preserve">
+    <value>Temporary tables not imported ({0}):</value>
+  </data>
+  <data name="ImportWarningHeading_ForeignKeyToExcludedTable" xml:space="preserve">
+    <value>Foreign keys that reference a table that was not imported ({0}):</value>
+  </data>
+  <data name="ImportWarning_ForeignKeyToExcludedTable" xml:space="preserve">
+    <value>{0}: the foreign key "{1}" references "{2}", which was not imported, so no relationship was created for it.</value>
+  </data>
+  <data name="ImportWarningItem_ChildPartitionExcluded" xml:space="preserve">
+    <value>{0} (partition of {1})</value>
+  </data>
+  <data name="ImportWarningItem_TemporalHistoryTableExcluded" xml:space="preserve">
+    <value>{0} (history table of {1})</value>
   </data>
 </root>

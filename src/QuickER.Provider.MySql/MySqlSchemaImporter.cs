@@ -54,6 +54,7 @@ public class MySqlSchemaImporter : ISchemaImporter
         var warnings = new List<SchemaImportWarning>();
         var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+        await LoadViewsAsync(conn, commandTimeoutSeconds, warnings, ct).ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
@@ -117,6 +118,14 @@ WHERE t.TABLE_SCHEMA = DATABASE() AND t.TABLE_TYPE = 'BASE TABLE'
 -- `Dup` と `dup` の順序が環境依存になるため（衝突時にどちらを採るかを決定的にする）
 ORDER BY BINARY t.TABLE_NAME;";
 
+    /// <summary>接続先 DB のビューを名指しするクエリ（取り込まず、告げるためだけに読む）</summary>
+    private const string ViewsSql =
+        @"
+SELECT t.TABLE_NAME
+FROM information_schema.TABLES t
+WHERE t.TABLE_SCHEMA = DATABASE() AND t.TABLE_TYPE = 'VIEW'
+ORDER BY BINARY t.TABLE_NAME;";
+
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
     /// <para>
@@ -169,6 +178,25 @@ WHERE s.TABLE_SCHEMA = DATABASE() AND s.NON_UNIQUE = 0 AND s.INDEX_NAME <> 'PRIM
         AND (x.SUB_PART IS NOT NULL OR x.COLUMN_NAME IS NULL)
   )
 ORDER BY s.TABLE_NAME, s.INDEX_NAME, s.SEQ_IN_INDEX;";
+
+    /// <summary>ビューを取込警告（段 2）で名指しする（図はビューを持たない）</summary>
+    private static async Task LoadViewsAsync(
+        MySqlConnection conn,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(conn, ViewsSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            warnings.Add(
+                new SchemaImportWarning(SchemaImportWarningKind.ViewExcluded, reader.GetString(0))
+            );
+        }
+    }
 
     /// <summary>外部キーの親子テーブル・列・参照アクションを取得するクエリ</summary>
     /// <remarks>

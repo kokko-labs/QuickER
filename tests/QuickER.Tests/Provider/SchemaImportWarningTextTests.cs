@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Provider;
@@ -66,7 +67,67 @@ public sealed class SchemaImportWarningTextTests
         (text.Contains("tbl_x") || text.Contains("subj_y"))
             .Should()
             .BeTrue("対象の名前を名指しする");
-        text.Should().NotBe(other, "英語と日本語の文言がそれぞれある");
+
+        if (SchemaImportWarningKinds.IsAggregated(kind))
+        {
+            // 外した種別の項目は名前（と、あれば親・本表の名前）だけ。内容は見出しが言う
+            text.Should().StartWith("tbl_x");
+        }
+        else
+        {
+            text.Should().NotBe(other, "英語と日本語の文言がそれぞれある");
+        }
+    }
+
+    [Theory(DisplayName = "すべての種別の見出しは件数を入れて英日で書ける")]
+    [MemberData(nameof(HeadingCases))]
+    public void Heading_EveryKind_IncludesCountInBothCultures(SchemaImportWarningKind kind)
+    {
+        var en = WithCulture("en", () => SchemaImportWarningText.Heading(kind, 37));
+        var ja = WithCulture("ja", () => SchemaImportWarningText.Heading(kind, 37));
+
+        en.Should().Contain("37").And.NotBe(ja, "英語と日本語の見出しがそれぞれある");
+        ja.Should().Contain("37");
+        Placeholder.IsMatch(en).Should().BeFalse();
+        Placeholder.IsMatch(ja).Should().BeFalse();
+    }
+
+    public static TheoryData<SchemaImportWarningKind> HeadingCases() =>
+        new(Enum.GetValues<SchemaImportWarningKind>());
+
+    [Fact(DisplayName = "警告は種別ごとに 1 項目へまとまり、見出しに件数、その下に箇所が並ぶ")]
+    public void Group_CollectsByKindInFirstAppearanceOrder()
+    {
+        SchemaImportWarning[] warnings =
+        [
+            new(SchemaImportWarningKind.ViewExcluded, "v1"),
+            new(SchemaImportWarningKind.PartitionDefinitionLost, "sales"),
+            new(SchemaImportWarningKind.ViewExcluded, "v2"),
+            new(SchemaImportWarningKind.ChildPartitionExcluded, "sales_p0", Detail: "sales"),
+            new(SchemaImportWarningKind.ViewExcluded, "v3"),
+        ];
+
+        var groups = WithCulture("en", () => SchemaImportWarningText.Group(warnings));
+
+        groups
+            .Select(g => g.Kind)
+            .Should()
+            .Equal(
+                SchemaImportWarningKind.ViewExcluded,
+                SchemaImportWarningKind.PartitionDefinitionLost,
+                SchemaImportWarningKind.ChildPartitionExcluded
+            );
+        groups[0].Items.Should().Equal("v1", "v2", "v3");
+        groups[0]
+            .Heading.Should()
+            .Be(
+                WithCulture(
+                    "en",
+                    () => SchemaImportWarningText.Heading(SchemaImportWarningKind.ViewExcluded, 3)
+                )
+            );
+        groups[1].Items.Should().ContainSingle().Which.Should().Contain("sales");
+        groups[2].Items.Should().ContainSingle().Which.Should().Be("sales_p0 (partition of sales)");
     }
 
     [Fact(DisplayName = "名前の改行は 1 行 1 件を崩さないよう畳む")]
@@ -112,11 +173,12 @@ public sealed class SchemaImportWarningTextTests
                     )
                     .GetRoot(TestContext.Current.CancellationToken)
                     .DescendantNodes()
+                    // 種別で分岐する形（switch のアームの定数パターン・is のパターン・case ラベル・== / != の比較）だけを見る。
+                    // 種別を作る式（方言のインポータの「"view" => ViewExcluded」の右辺）は分岐ではない
                     .Where(node =>
-                        node
-                            is SwitchExpressionArmSyntax
-                                or CaseSwitchLabelSyntax
-                                or ConstantPatternSyntax
+                        node is CaseSwitchLabelSyntax or ConstantPatternSyntax
+                        || node.IsKind(SyntaxKind.EqualsExpression)
+                        || node.IsKind(SyntaxKind.NotEqualsExpression)
                     )
                     .Where(node =>
                         node.ToString()

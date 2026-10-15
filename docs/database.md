@@ -108,7 +108,7 @@ If the file turns out to be corrupted, it is moved aside once to `connections.js
 
 ### What gets imported
 
-- Tables (views, temporary tables, and the container and log tables behind materialized views are excluded) and columns (type, length, precision, nullability)
+- Tables (views, materialized views, external tables, partitions, temporary tables, and the container and log tables behind materialized views are excluded) and columns (type, length, precision, nullability)
 - Primary keys, preserving a composite key's own column order.
   `PRIMARY KEY (b, a)` imports as exactly that, and generated DDL emits the constraint's declared order rather than the order the columns happen to appear in the table, so the column order of the backing index survives the round trip
 - Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions).
@@ -150,6 +150,7 @@ A SQL Server foreign key added `WITH NOCHECK` but currently enabled *is* importe
 
 The import always succeeds, but some parts of a schema cannot be carried into the diagram exactly as they were declared.
 When that happens the completion dialog lists what was affected (`quicker scaffold` writes the same list to standard error), so the difference is visible instead of silent.
+The list has one heading per kind with the count, followed by one line per place.
 
 - A PostgreSQL **domain type** column is imported as its base type.
   The diagram has no notion of domains, so the domain's `CHECK` constraint is lost
@@ -163,6 +164,10 @@ When that happens the completion dialog lists what was affected (`quicker scaffo
   Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))
 - A SQLite **virtual table** (FTS5, R*Tree and the like) is not imported.
   It cannot be represented as an ordinary table; its shadow tables are excluded along with it, and each virtual table is reported once
+- **Objects the diagram does not hold** are left out and listed by name.
+  These are views (all five DBMSs), materialized views (PostgreSQL, Oracle), external tables (PostgreSQL foreign tables, Oracle `ORGANIZATION EXTERNAL` tables, SQL Server external tables), partitions (PostgreSQL, with the parent table each belongs to; the parent itself is imported as described below) and temporary tables (Oracle).
+  Objects the database or an extension owns (system tables, the container and log tables behind materialized views, tables an extension installs) are left out without a mention
+- A **foreign key that references a table the import left out** (a PostgreSQL partition, an SQLite virtual table or view) is skipped and reported
 - A SQL Server **temporal table** is imported as its current-data table only.
   The history table is an attachment the system maintains for it rather than an entity of its own.
   The current table's period columns (`GENERATED ALWAYS AS ROW START / END`) are values the database produces, so they are treated as computed columns, and a `HIDDEN` period column is imported the same way.

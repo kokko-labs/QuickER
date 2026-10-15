@@ -419,14 +419,15 @@ public static class CliApp
         }
 
         // 宣言どおりに写し取れなかった箇所は stderr へ（取込自体は成功なので stdout の成果物は出す）
-        foreach (var warning in imported.Warnings)
+        // 種別ごとに「Warning: 見出し」の行を出し、その下に箇所を字下げして並べる
+        foreach (var group in SchemaImportWarningText.Group(imported.Warnings))
         {
-            stderr.WriteLine(
-                string.Format(
-                    Strings.Cli_ImportWarningLine,
-                    SchemaImportWarningText.Describe(warning)
-                )
-            );
+            stderr.WriteLine(string.Format(Strings.Cli_ImportWarningLine, group.Heading));
+
+            foreach (var item in group.Items)
+            {
+                stderr.WriteLine("  - " + item);
+            }
         }
 
         // 取り込んだ方言を図の対象 DBMS にする（reverse と同じ。型は --provider の方言で書かれている）

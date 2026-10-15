@@ -306,9 +306,19 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
         result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("sales");
 
         // パーティション定義は意味モデルに無い＝この図から作る DDL はパーティションなしのテーブルになる
-        var partitionWarning = result.Warnings.Should().ContainSingle().Subject;
-        partitionWarning.Kind.Should().Be(SchemaImportWarningKind.PartitionDefinitionLost);
+        var partitionWarning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.PartitionDefinitionLost)
+            .Subject;
         partitionWarning.TableName.Should().Be("sales");
+
+        // 子パーティションは取り込まず、親の名前つきで名指しする（表示は種別ごとにまとめる）
+        result
+            .Warnings.Where(w => w.Kind == SchemaImportWarningKind.ChildPartitionExcluded)
+            .Select(w => (w.TableName, w.Detail))
+            .Should()
+            .BeEquivalentTo([("sales_p1", "sales"), ("sales_p2", "sales")]);
+        result.Warnings.Should().HaveCount(3);
         result
             .Entities.Single()
             .Columns.Select(c => (c.Name, c.DataType))
@@ -620,5 +630,99 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
         var warning = result.Warnings.Should().ContainSingle().Subject;
         warning.Kind.Should().Be(SchemaImportWarningKind.TableColumnsUnavailable);
         warning.TableName.Should().Be("empty_table");
+    }
+
+    /// <summary>
+    /// ビュー・マテリアライズドビュー・外部テーブル・子パーティションは取り込まず、種別ごとに名指しする（段 2）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] PG: ビュー・MV・外部テーブル・子パーティションは取り込まずに名指しする"
+    )]
+    public async Task Import_ExcludedRelations_AreReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                CREATE TABLE base (id integer PRIMARY KEY);
+                CREATE VIEW v_base AS SELECT id FROM base;
+                CREATE MATERIALIZED VIEW mv_base AS SELECT id FROM base;
+                CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+                CREATE SERVER probe_remote FOREIGN DATA WRAPPER postgres_fdw OPTIONS (dbname 'nowhere');
+                CREATE FOREIGN TABLE ft_remote (id integer) SERVER probe_remote;
+                CREATE TABLE sales (id integer PRIMARY KEY) PARTITION BY RANGE (id);
+                CREATE TABLE sales_p0 PARTITION OF sales FOR VALUES FROM (0) TO (100);
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("base", "sales");
+            result
+                .Warnings.Select(w => (w.Kind, w.TableName, w.Detail))
+                .Should()
+                .BeEquivalentTo([
+                    (SchemaImportWarningKind.PartitionDefinitionLost, "sales", ""),
+                    (SchemaImportWarningKind.ViewExcluded, "v_base", ""),
+                    (SchemaImportWarningKind.MaterializedViewExcluded, "mv_base", ""),
+                    (SchemaImportWarningKind.ExternalTableExcluded, "ft_remote", ""),
+                    (SchemaImportWarningKind.ChildPartitionExcluded, "sales_p0", "sales"),
+                ]);
+        }
+        finally
+        {
+            await fixture.ExecuteAsync(
+                "DROP SERVER IF EXISTS probe_remote CASCADE; DROP EXTENSION IF EXISTS postgres_fdw CASCADE;",
+                Ct
+            );
+        }
+    }
+
+    /// <summary>
+    /// 子パーティションを直接参照する外部キーは ForeignKeyToExcludedTable で告げる（C9）。
+    /// パーティション親を参照する外部キーはリレーションにし、PG が子パーティションへ複製した制約は告げない
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] PG: 子パーティションを参照する外部キーは告げ、親への外部キーの複製は告げない"
+    )]
+    public async Task Import_ForeignKeyToChildPartition_IsReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE sales (id integer PRIMARY KEY) PARTITION BY RANGE (id);
+            CREATE TABLE sales_p0 PARTITION OF sales FOR VALUES FROM (0) TO (100);
+            CREATE TABLE sales_p1 PARTITION OF sales FOR VALUES FROM (100) TO (200);
+            CREATE TABLE to_partition (id integer PRIMARY KEY, sale_id integer CONSTRAINT fk_to_partition REFERENCES sales_p0 (id));
+            CREATE TABLE to_parent (id integer PRIMARY KEY, sale_id integer CONSTRAINT fk_to_parent REFERENCES sales (id));
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+        result
+            .Relationships.Should()
+            .ContainSingle()
+            .Which.ConstraintName.Should()
+            .Be("fk_to_parent");
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.ForeignKeyToExcludedTable)
+            .Subject;
+        warning.TableName.Should().Be("to_partition");
+        warning.Subject.Should().Be("fk_to_partition");
+        warning.Detail.Should().Be("sales_p0");
+        result
+            .Warnings.Should()
+            .NotContain(w => w.Kind == SchemaImportWarningKind.ForeignKeyOutsideScope);
     }
 }

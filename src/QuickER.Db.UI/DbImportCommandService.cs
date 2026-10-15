@@ -173,10 +173,15 @@ public sealed class DbImportCommandService
         }
 
         // 詳細領域はスクロール可能なため全件を畳まず載せる（DialogItemList.Format の 30 件畳みは
-        // スクロールしない標準 MessageBox 用＝コード取込・エクスポート欠落告知と同じ流儀）
+        // スクロールしない標準 MessageBox 用＝コード取込・エクスポート欠落告知と同じ流儀）。
+        // 種別ごとに見出し（件数入り）を置き、その下に箇所を並べる
         var details = string.Join(
             Environment.NewLine,
-            warnings.Select(warning => "  • " + SchemaImportWarningText.Describe(warning))
+            SchemaImportWarningText
+                .Group(warnings)
+                .SelectMany(group =>
+                    group.Items.Select(item => "  • " + item).Prepend(group.Heading)
+                )
         );
 
         _dialogs.ShowInformationDetails(

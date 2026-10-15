@@ -364,15 +364,129 @@ namespace QuickER.Provider.Resources {
             }
         }
 
-        public static string ImportWarning_TemporalHistoryTableExcluded {
+        public static string ImportWarningHeading_DomainTypeFlattened {
             get {
-                return ResourceManager.GetString("ImportWarning_TemporalHistoryTableExcluded", resourceCulture);
+                return ResourceManager.GetString("ImportWarningHeading_DomainTypeFlattened", resourceCulture);
             }
         }
 
-        public static string ImportWarning_VirtualTableExcluded {
+        public static string ImportWarningHeading_TableColumnsUnavailable {
             get {
-                return ResourceManager.GetString("ImportWarning_VirtualTableExcluded", resourceCulture);
+                return ResourceManager.GetString("ImportWarningHeading_TableColumnsUnavailable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ForeignKeyOutsideScope {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ForeignKeyOutsideScope", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_TableNameCollision {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_TableNameCollision", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnNameCollision {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnNameCollision", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnTypeNotEmittable {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnTypeNotEmittable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_PartitionDefinitionLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_PartitionDefinitionLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_VirtualTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_VirtualTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ComputedColumnExpressionLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ComputedColumnExpressionLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_DisabledConstraintExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_DisabledConstraintExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_TemporalHistoryTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_TemporalHistoryTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_PrimaryKeyNullabilityAdjusted {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_PrimaryKeyNullabilityAdjusted", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ViewExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ViewExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_MaterializedViewExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_MaterializedViewExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ExternalTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ExternalTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ChildPartitionExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ChildPartitionExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_TemporaryTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_TemporaryTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ForeignKeyToExcludedTable {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ForeignKeyToExcludedTable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ForeignKeyToExcludedTable {
+            get {
+                return ResourceManager.GetString("ImportWarning_ForeignKeyToExcludedTable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningItem_ChildPartitionExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningItem_ChildPartitionExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningItem_TemporalHistoryTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningItem_TemporalHistoryTableExcluded", resourceCulture);
             }
         }
     }

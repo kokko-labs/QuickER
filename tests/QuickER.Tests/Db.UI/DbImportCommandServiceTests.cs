@@ -258,6 +258,14 @@ public class DbImportCommandServiceTests
         details.Should().Contain("kind");
         details.Should().Contain("sales");
         details.Should().Contain("docs");
+
+        // 種別ごとに見出し（件数入り）を置き、その下に箇所を「  • 」で並べる
+        details
+            .Should()
+            .Contain(
+                SchemaImportWarningText.Heading(SchemaImportWarningKind.VirtualTableExcluded, 1)
+            )
+            .And.Contain("  • docs");
         // 計算列: 式が取れた方言は式まで、取れない方言は列名までが載る
         details.Should().Contain("invoices.total");
         details.Should().Contain("([qty]*[price])");
@@ -269,11 +277,16 @@ public class DbImportCommandServiceTests
             .Should()
             .NotContain("line" + Environment.NewLine, "名前の改行が行区切りに化けてはいけない");
 
-        // 内訳は「1 行 1 件」を保つ（件数ぶんの行しか無い）
-        details
-            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+        // 内訳は「1 行 1 件」を保ち（項目の行は件数ぶん）、種別ごとに見出しが 1 行ずつ付く
+        var lines = details.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        lines
+            .Count(line => line.StartsWith("  • ", StringComparison.Ordinal))
             .Should()
-            .HaveCount(8, "警告 8 件が 1 行 1 件で並ぶこと");
+            .Be(8, "警告 8 件が 1 行 1 件で並ぶこと");
+        lines
+            .Count(line => !line.StartsWith("  • ", StringComparison.Ordinal))
+            .Should()
+            .Be(7, "見出しは種別ごとに 1 行（計算列の 2 件は同じ見出しの下）");
     }
 
     /// <summary>警告の整形で落ちても「取込に失敗しました」へは化けない（取込は既に成功している）</summary>

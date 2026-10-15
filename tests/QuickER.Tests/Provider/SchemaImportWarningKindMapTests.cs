@@ -27,12 +27,6 @@ public sealed class SchemaImportWarningKindMapTests
     /// <summary>取込で告知するが、告げる種別がまだ無い種類（足すフェーズ）</summary>
     private static readonly (UnsupportedDefinitionKind Kind, string Phase)[] PendingKinds =
     [
-        (UnsupportedDefinitionKind.View, "2b"),
-        (UnsupportedDefinitionKind.MaterializedView, "2b"),
-        (UnsupportedDefinitionKind.ExternalTable, "2b"),
-        (UnsupportedDefinitionKind.ChildPartition, "2b"),
-        (UnsupportedDefinitionKind.TemporaryTable, "2b"),
-        (UnsupportedDefinitionKind.ForeignKeyToExcludedTable, "2b"),
         (UnsupportedDefinitionKind.DefaultValue, "2c"),
         (UnsupportedDefinitionKind.Collation, "2c"),
         (UnsupportedDefinitionKind.IdentityAcceptingValues, "2c"),
@@ -82,6 +76,39 @@ public sealed class SchemaImportWarningKindMapTests
 
         withoutWarning.Except(pending).Should().BeEmpty("取込で告知する種類には告げる種別が要る");
         pending.Except(withoutWarning).Should().BeEmpty("種別を足した種類は未実装の一覧から消す");
+    }
+
+    [Fact(
+        DisplayName = "まとめて告げる種別（段 2）は、扱いの表の取込が「外す＋まとめて告知」の種類と一致する"
+    )]
+    public void AggregatedKinds_MatchTreatmentTable()
+    {
+        var mismatched = Enum.GetValues<SchemaImportWarningKind>()
+            .Where(kind => SchemaImportWarningKinds.DefinitionKind(kind) is not null)
+            .Where(kind =>
+            {
+                var definition = SchemaImportWarningKinds.DefinitionKind(kind)!.Value;
+                var treatments = DialectNames
+                    .All.Select(dialect =>
+                        UnsupportedTreatments.For(definition, UnsupportedFeature.Import, dialect)
+                    )
+                    .Where(t => t != UnsupportedTreatment.None)
+                    .ToList();
+                var aggregatedInTable =
+                    treatments.Count > 0
+                    && treatments.All(t => t == UnsupportedTreatment.ExcludeWithAggregatedNotice);
+                return SchemaImportWarningKinds.IsAggregated(kind) != aggregatedInTable;
+            })
+            .ToList();
+
+        mismatched.Should().BeEmpty("表示の段は扱いの表の取込のマスに従う");
+        Enum.GetValues<SchemaImportWarningKind>()
+            .Where(kind => SchemaImportWarningKinds.DefinitionKind(kind) is null)
+            .Should()
+            .OnlyContain(
+                kind => !SchemaImportWarningKinds.IsAggregated(kind),
+                "種類の外の種別（範囲の外・名前の衝突）は箇所ごとの文で告げる"
+            );
     }
 
     /// <summary>取込で（告知しない除外以外の）扱いを持つ方言が 1 つでもあるか</summary>

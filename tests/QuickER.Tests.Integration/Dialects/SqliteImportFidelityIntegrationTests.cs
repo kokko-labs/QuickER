@@ -709,4 +709,61 @@ CREATE UNIQUE INDEX ux_users_live_email ON users (email) WHERE deleted = 0;
             .BeEquivalentTo(["ux_users_email", "ux_users_email_lower", "ux_users_live_email"]);
         result.Warnings.Should().BeEmpty();
     }
+
+    /// <summary>ビューは取り込まず、ビューごとに ViewExcluded で名指しする（表示は種別ごとにまとめる）</summary>
+    [Fact(DisplayName = "[Integration] SQLite: ビューは取り込まずに名指しする")]
+    public async Task Import_View_IsExcludedWithWarning()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE VIEW v_customers AS SELECT id, name FROM customers;
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["customers"]);
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.ViewExcluded);
+        warning.TableName.Should().Be("v_customers");
+    }
+
+    /// <summary>
+    /// 外した仮想テーブルを参照する外部キーは、範囲の外ではなく「外した表への参照」として告げる（C9）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 外した仮想テーブルを参照する外部キーは ForeignKeyToExcludedTable で告げる"
+    )]
+    public async Task Import_ForeignKeyToExcludedVirtualTable_IsReported()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE VIRTUAL TABLE docs USING fts5(title);
+CREATE TABLE note (id INTEGER PRIMARY KEY, doc_id INTEGER REFERENCES docs(rowid));
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["note"]);
+        result.Relationships.Should().BeEmpty();
+        result
+            .Warnings.Should()
+            .NotContain(w => w.Kind == SchemaImportWarningKind.ForeignKeyOutsideScope);
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.ForeignKeyToExcludedTable)
+            .Subject;
+        warning.TableName.Should().Be("note");
+        warning.Detail.Should().Be("docs");
+    }
 }

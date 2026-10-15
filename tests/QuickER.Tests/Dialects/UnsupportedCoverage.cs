@@ -11,7 +11,7 @@ namespace QuickER.Tests.Dialects;
 /// </para>
 /// <para>
 /// まだ実装していないセル・マスは未実装の一覧に、実装するフェーズ（区切り 33 の 2b〜2f）を添えて載せる。
-/// 検出の未実装は 2d の終わりに、扱いの未実装は 2f の終わりに空になる。「要判断」はレビューで判断を仰いでいるもの。
+/// 検出の未実装は 2d の終わりに、扱いの未実装は 2f の終わりに空になる。
 /// </para>
 /// </remarks>
 public static class UnsupportedCoverage
@@ -167,9 +167,99 @@ public static class UnsupportedCoverage
             ]
         ),
         (
+            DialectNames.SqlServer,
+            UnsupportedDefinitionKind.View,
+            ["SqlServerImportFidelityIntegrationTests.Import_View_IsExcludedWithWarning"]
+        ),
+        (
+            DialectNames.PostgreSql,
+            UnsupportedDefinitionKind.View,
+            ["PostgreSqlImportFidelityIntegrationTests.Import_ExcludedRelations_AreReported"]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.View,
+            ["MySqlImportFidelityIntegrationTests.Import_View_IsExcludedWithWarning"]
+        ),
+        (
+            DialectNames.Oracle,
+            UnsupportedDefinitionKind.View,
+            [
+                "OracleImportFidelityIntegrationTests.Import_ViewAndExternalTable_AreExcludedAndReported",
+            ]
+        ),
+        (
+            DialectNames.Sqlite,
+            UnsupportedDefinitionKind.View,
+            ["SqliteImportFidelityIntegrationTests.Import_View_IsExcludedWithWarning"]
+        ),
+        (
+            DialectNames.PostgreSql,
+            UnsupportedDefinitionKind.MaterializedView,
+            ["PostgreSqlImportFidelityIntegrationTests.Import_ExcludedRelations_AreReported"]
+        ),
+        (
+            DialectNames.Oracle,
+            UnsupportedDefinitionKind.MaterializedView,
+            [
+                "OracleImportFidelityIntegrationTests.Import_ExcludesTemporaryTablesAndMaterializedViews",
+            ]
+        ),
+        (
+            DialectNames.SqlServer,
+            UnsupportedDefinitionKind.ExternalTable,
+            ["SqlServerSchemaImporterTests.ExternalTables_AreFilteredAndReportedInSql"]
+        ),
+        (
+            DialectNames.PostgreSql,
+            UnsupportedDefinitionKind.ExternalTable,
+            ["PostgreSqlImportFidelityIntegrationTests.Import_ExcludedRelations_AreReported"]
+        ),
+        (
+            DialectNames.Oracle,
+            UnsupportedDefinitionKind.ExternalTable,
+            [
+                "OracleImportFidelityIntegrationTests.Import_ViewAndExternalTable_AreExcludedAndReported",
+            ]
+        ),
+        (
+            DialectNames.PostgreSql,
+            UnsupportedDefinitionKind.ChildPartition,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ExcludedRelations_AreReported",
+                "PostgreSqlImportFidelityIntegrationTests.Import_IncludesPartitionParent_ExcludesPartitions",
+            ]
+        ),
+        (
+            DialectNames.Oracle,
+            UnsupportedDefinitionKind.TemporaryTable,
+            [
+                "OracleImportFidelityIntegrationTests.Import_ExcludesTemporaryTablesAndMaterializedViews",
+            ]
+        ),
+        (
+            DialectNames.PostgreSql,
+            UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ForeignKeyToChildPartition_IsReported",
+            ]
+        ),
+        (
+            DialectNames.Sqlite,
+            UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
+            [
+                "SqliteImportFidelityIntegrationTests.Import_ForeignKeyToExcludedVirtualTable_IsReported",
+            ]
+        ),
+        (
             DialectNames.PostgreSql,
             UnsupportedDefinitionKind.TableWithoutReadableColumns,
             ["PostgreSqlImportFidelityIntegrationTests.Import_TableWithoutColumns_IsReported"]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.TableWithoutReadableColumns,
+            ["MySqlImportFidelityIntegrationTests.Import_TableWithoutReadableColumns_IsReported"]
         ),
     ];
 
@@ -180,20 +270,6 @@ public static class UnsupportedCoverage
         string Phase
     )[] PendingDetections =
     [
-        (DialectNames.SqlServer, UnsupportedDefinitionKind.View, "2b"),
-        (DialectNames.PostgreSql, UnsupportedDefinitionKind.View, "2b"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.View, "2b"),
-        (DialectNames.Oracle, UnsupportedDefinitionKind.View, "2b"),
-        (DialectNames.Sqlite, UnsupportedDefinitionKind.View, "2b"),
-        (DialectNames.PostgreSql, UnsupportedDefinitionKind.MaterializedView, "2b"),
-        (DialectNames.Oracle, UnsupportedDefinitionKind.MaterializedView, "2b"),
-        (DialectNames.SqlServer, UnsupportedDefinitionKind.ExternalTable, "2b"),
-        (DialectNames.PostgreSql, UnsupportedDefinitionKind.ExternalTable, "2b"),
-        (DialectNames.Oracle, UnsupportedDefinitionKind.ExternalTable, "2b"),
-        (DialectNames.PostgreSql, UnsupportedDefinitionKind.ChildPartition, "2b"),
-        (DialectNames.Oracle, UnsupportedDefinitionKind.TemporaryTable, "2b"),
-        (DialectNames.PostgreSql, UnsupportedDefinitionKind.ForeignKeyToExcludedTable, "2b"),
-        (DialectNames.Sqlite, UnsupportedDefinitionKind.ForeignKeyToExcludedTable, "2b"),
         (DialectNames.SqlServer, UnsupportedDefinitionKind.DefaultValue, "2c"),
         (DialectNames.PostgreSql, UnsupportedDefinitionKind.DefaultValue, "2c"),
         (DialectNames.MySql, UnsupportedDefinitionKind.DefaultValue, "2c"),
@@ -217,8 +293,6 @@ public static class UnsupportedCoverage
         (DialectNames.SqlServer, UnsupportedDefinitionKind.IdentityRejectingValues, "2d"),
         (DialectNames.PostgreSql, UnsupportedDefinitionKind.IdentityRejectingValues, "2d"),
         (DialectNames.Oracle, UnsupportedDefinitionKind.IdentityRejectingValues, "2d"),
-        (DialectNames.MySql, UnsupportedDefinitionKind.TableWithoutReadableColumns, "要判断"),
-        (DialectNames.Oracle, UnsupportedDefinitionKind.TableWithoutReadableColumns, "要判断"),
     ];
 
     /// <summary>扱いのテスト（種類・機能・方言〔null は「なし」以外の全方言〕・テスト）</summary>
@@ -345,6 +419,107 @@ public static class UnsupportedCoverage
                 "SqliteSchemaSyncIntegrationTests.Rebuild_WarnsTableOptionsAndConstraintClausesLost",
                 "TableRebuildAttributeDetectorTests.Detects_OnConflict",
                 "TableRebuildAttributeDetectorTests.Detects_DeferredForeignKey",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.NonUniqueIndex,
+            UnsupportedFeature.Sync,
+            DialectNames.Sqlite,
+            ["SqliteSchemaSyncIntegrationTests.Rebuild_PreservesDataAndAuxiliaryObjects"]
+        ),
+        (
+            UnsupportedDefinitionKind.NonConstraintUniqueIndex,
+            UnsupportedFeature.Sync,
+            DialectNames.Sqlite,
+            ["SqliteSchemaSyncIntegrationTests.Rebuild_PreservesNonConstraintUniqueIndexes"]
+        ),
+        (
+            UnsupportedDefinitionKind.Trigger,
+            UnsupportedFeature.Sync,
+            DialectNames.Sqlite,
+            ["SqliteSchemaSyncIntegrationTests.Rebuild_PreservesDataAndAuxiliaryObjects"]
+        ),
+        (
+            UnsupportedDefinitionKind.View,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_View_IsExcludedWithWarning",
+                "PostgreSqlImportFidelityIntegrationTests.Import_ExcludedRelations_AreReported",
+                "MySqlImportFidelityIntegrationTests.Import_View_IsExcludedWithWarning",
+                "OracleImportFidelityIntegrationTests.Import_ViewAndExternalTable_AreExcludedAndReported",
+                "SqliteImportFidelityIntegrationTests.Import_View_IsExcludedWithWarning",
+                "SchemaImportWarningTextTests.Group_CollectsByKindInFirstAppearanceOrder",
+                "SchemaImportWarningKindMapTests.AggregatedKinds_MatchTreatmentTable",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.MaterializedView,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ExcludedRelations_AreReported",
+                "OracleImportFidelityIntegrationTests.Import_ExcludesTemporaryTablesAndMaterializedViews",
+                "SchemaImportWarningKindMapTests.AggregatedKinds_MatchTreatmentTable",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.VirtualTable,
+            UnsupportedFeature.Import,
+            DialectNames.Sqlite,
+            [
+                "SqliteImportFidelityIntegrationTests.Import_Fts5VirtualTable_ExcludedWithSingleWarning",
+                "SqliteImportFidelityIntegrationTests.Import_RTreeVirtualTable_ExcludedWithSingleWarning",
+                "SchemaImportWarningKindMapTests.AggregatedKinds_MatchTreatmentTable",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.ExternalTable,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ExcludedRelations_AreReported",
+                "OracleImportFidelityIntegrationTests.Import_ViewAndExternalTable_AreExcludedAndReported",
+                "SqlServerSchemaImporterTests.ExternalTables_AreFilteredAndReportedInSql",
+                "SchemaImportWarningKindMapTests.AggregatedKinds_MatchTreatmentTable",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.ChildPartition,
+            UnsupportedFeature.Import,
+            DialectNames.PostgreSql,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ExcludedRelations_AreReported",
+                "PostgreSqlImportFidelityIntegrationTests.Import_IncludesPartitionParent_ExcludesPartitions",
+                "SchemaImportWarningTextTests.Group_CollectsByKindInFirstAppearanceOrder",
+                "SchemaImportWarningKindMapTests.AggregatedKinds_MatchTreatmentTable",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.TemporalHistoryTable,
+            UnsupportedFeature.Import,
+            DialectNames.SqlServer,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_TemporalTable_ExcludesHistoryAndMarksPeriodColumns",
+                "SchemaImportWarningKindMapTests.AggregatedKinds_MatchTreatmentTable",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.TemporaryTable,
+            UnsupportedFeature.Import,
+            DialectNames.Oracle,
+            [
+                "OracleImportFidelityIntegrationTests.Import_ExcludesTemporaryTablesAndMaterializedViews",
+                "SchemaImportWarningKindMapTests.AggregatedKinds_MatchTreatmentTable",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "PostgreSqlImportFidelityIntegrationTests.Import_ForeignKeyToChildPartition_IsReported",
+                "SqliteImportFidelityIntegrationTests.Import_ForeignKeyToExcludedVirtualTable_IsReported",
             ]
         ),
         (
@@ -476,6 +651,12 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Import,
             DialectNames.PostgreSql,
             ["PostgreSqlImportFidelityIntegrationTests.Import_TableWithoutColumns_IsReported"]
+        ),
+        (
+            UnsupportedDefinitionKind.TableWithoutReadableColumns,
+            UnsupportedFeature.Import,
+            DialectNames.MySql,
+            ["MySqlImportFidelityIntegrationTests.Import_TableWithoutReadableColumns_IsReported"]
         ),
         (
             UnsupportedDefinitionKind.ComputedColumnTypeChange,
@@ -734,19 +915,6 @@ public static class UnsupportedCoverage
         string Phase
     )[] PendingTreatments =
     [
-        (UnsupportedDefinitionKind.View, UnsupportedFeature.Import, null, "2b"),
-        (UnsupportedDefinitionKind.MaterializedView, UnsupportedFeature.Import, null, "2b"),
-        (UnsupportedDefinitionKind.VirtualTable, UnsupportedFeature.Import, null, "2b"),
-        (UnsupportedDefinitionKind.ExternalTable, UnsupportedFeature.Import, null, "2b"),
-        (UnsupportedDefinitionKind.ChildPartition, UnsupportedFeature.Import, null, "2b"),
-        (UnsupportedDefinitionKind.TemporalHistoryTable, UnsupportedFeature.Import, null, "2b"),
-        (UnsupportedDefinitionKind.TemporaryTable, UnsupportedFeature.Import, null, "2b"),
-        (
-            UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
-            UnsupportedFeature.Import,
-            null,
-            "2b"
-        ),
         (UnsupportedDefinitionKind.DefaultValue, UnsupportedFeature.Import, null, "2c"),
         (UnsupportedDefinitionKind.Collation, UnsupportedFeature.Import, null, "2c"),
         (UnsupportedDefinitionKind.IdentityAcceptingValues, UnsupportedFeature.Import, null, "2c"),
@@ -912,18 +1080,6 @@ public static class UnsupportedCoverage
             UnsupportedFeature.Sync,
             DialectNames.MySql,
             "2f"
-        ),
-        (
-            UnsupportedDefinitionKind.TableWithoutReadableColumns,
-            UnsupportedFeature.Import,
-            DialectNames.MySql,
-            "要判断"
-        ),
-        (
-            UnsupportedDefinitionKind.TableWithoutReadableColumns,
-            UnsupportedFeature.Import,
-            DialectNames.Oracle,
-            "要判断"
         ),
     ];
 }

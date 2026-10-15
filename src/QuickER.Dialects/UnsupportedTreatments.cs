@@ -176,7 +176,7 @@ public static class UnsupportedTreatments
             import: Same(Notice), // 告知（段 1）。5 方言で検出を追加
             diff: Same(None), // なし
             sync: new TreatmentCell(
-                SqlServer: Preserve, // 読み直し外して付け直す（J1）
+                SqlServer: Preserve, // 列の変更で DEFAULT 制約を読み直し、外して付け直す（J1）。J2 の事前の警告（型の種類の変更）は別の経路で、このマスには表さない
                 PostgreSql: Warning, // DEFAULT のある列の型の種類の変更を事前に警告（J2）
                 MySql: Preserve, // 型変更のとき読み直して保つ
                 Oracle: Warning, // 同上（J2）
@@ -401,9 +401,15 @@ public static class UnsupportedTreatments
         Add(
             cells,
             Kind.NonUniqueIndex,
-            import: Same(None), // SQLite は補助オブジェクトとして取り込む。他は検出しない
+            import: Same(None), // SQLite は再構築で作り直すために補助オブジェクトとして読む（告知はしない）。他は検出しない
             diff: Same(None), // なし
-            sync: Same(None), // SQLite: 再構築で温存。MySQL の自動索引の外しは既存の実装
+            sync: new TreatmentCell(
+                SqlServer: None,
+                PostgreSql: None,
+                MySql: None, // 外部キー用の自動索引を外すのは外部キーの削除の実装（この種類の扱いではない）
+                Oracle: None,
+                Sqlite: Preserve // 再構築は CREATE 文を DB から読み直して作り直す
+            ),
             ddl: Same(None), // なし
             cSharpGeneration: Same(None), // なし
             export: Same(None), // なし
@@ -415,9 +421,15 @@ public static class UnsupportedTreatments
         Add(
             cells,
             Kind.NonConstraintUniqueIndex,
-            import: Same(None), // 検出しない。MySQL は一意制約、SQLite は補助オブジェクト
+            import: Same(None), // 告知しない。MySQL は一意制約として取り込み、SQLite は再構築で作り直すために補助オブジェクトとして読む
             diff: Same(None), // なし
-            sync: Same(None), // SQLite: 再構築で温存
+            sync: new TreatmentCell(
+                SqlServer: None,
+                PostgreSql: None,
+                MySql: None,
+                Oracle: None,
+                Sqlite: Preserve // 再構築は CREATE 文を DB から読み直して作り直す（式・条件付きの索引も）
+            ),
             ddl: Same(None), // なし
             cSharpGeneration: Same(None), // なし
             export: Same(None), // なし
@@ -429,9 +441,15 @@ public static class UnsupportedTreatments
         Add(
             cells,
             Kind.Trigger,
-            import: Same(None), // SQLite は補助オブジェクトとして取り込む。他は検出しない
+            import: Same(None), // SQLite は再構築で作り直すために補助オブジェクトとして読む（告知はしない）。他は検出しない
             diff: Same(None), // なし
-            sync: Same(None), // SQLite: 再構築で温存。他は触らない
+            sync: new TreatmentCell(
+                SqlServer: None, // 同期は触らない
+                PostgreSql: None,
+                MySql: None,
+                Oracle: None,
+                Sqlite: Preserve // 再構築は CREATE 文を DB から読み直して作り直す
+            ),
             ddl: Same(None), // なし
             cSharpGeneration: Same(None), // なし
             export: Same(None), // なし
@@ -504,7 +522,7 @@ public static class UnsupportedTreatments
                 PostgreSql: None,
                 MySql: None,
                 Oracle: None,
-                Sqlite: Warning // 再構築でビューが壊れたら失敗にする（前後比較）
+                Sqlite: Preserve // ビューは触らずに残す（再構築はビューを作り直さない）。再構築でビューが壊れるときは前後比較で失敗にしてロールバックする（警告ではなく失敗）
             ),
             ddl: Same(None), // なし
             cSharpGeneration: Same(None), // なし
@@ -856,8 +874,8 @@ public static class UnsupportedTreatments
             import: new TreatmentCell(
                 SqlServer: None, // あり得ない（J5）
                 PostgreSql: Notice, // 告知（段 1）
-                MySql: Notice,
-                Oracle: Notice,
+                MySql: Notice, // 列を扱う権限の無い表単位の権限だけのとき（実機で確認）
+                Oracle: None, // あり得ない（見える列を必ず 1 本持つ。実機で確認）
                 Sqlite: None // あり得ない（J5）
             ),
             diff: Same(None), // なし
