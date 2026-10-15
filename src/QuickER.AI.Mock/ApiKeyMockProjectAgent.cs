@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using QuickER.AI;
 using QuickER.AI.Mock.Resources;
+using QuickER.Mcp;
 using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
@@ -333,8 +334,8 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
                 string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
             );
             var root = document.RootElement;
-            path = GetString(root, "path");
-            content = GetString(root, "content");
+            path = ToolArguments.GetString(root, "path") ?? string.Empty;
+            content = ToolArguments.GetString(root, "content") ?? string.Empty;
         }
         catch (JsonException ex)
         {
@@ -862,11 +863,4 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
         return members;
     }
-
-    /// <summary>JSON オブジェクトから文字列プロパティを取り出す（未設定・非文字列は空文字）</summary>
-    private static string GetString(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString() ?? string.Empty
-            : string.Empty;
 }

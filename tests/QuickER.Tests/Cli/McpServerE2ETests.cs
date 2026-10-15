@@ -25,7 +25,9 @@ public class McpServerE2ETests
     private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
 
     /// <summary>CJK 文字の検出パターン（CodeGenToolSetEnglishGuardTests と同じ範囲）</summary>
-    private static readonly System.Text.RegularExpressions.Regex CjkPattern = new("[　-鿿＀-￯]");
+    private static readonly System.Text.RegularExpressions.Regex CjkPattern = TestSupport
+        .CjkText
+        .Pattern;
 
     /// <summary>
     /// QuickER.Cli 自身のビルド出力（<c>src/QuickER.Cli/bin/&lt;Config&gt;/net10.0/QuickER.Cli.dll</c>）の絶対パス。

@@ -38,10 +38,9 @@ public static class SqliteIdentifier
         }
 
         // ドットを含む場合はスキーマ修飾名として 2 分割し、各部を個別にクォートする
-        if (name.Contains('.'))
+        if (SchemaQualifiedName.TrySplit(name, out var schema, out var table))
         {
-            var parts = name.Split('.', 2);
-            return $"\"{Escape(parts[0])}\".\"{Escape(parts[1])}\"";
+            return $"\"{Escape(schema)}\".\"{Escape(table)}\"";
         }
 
         return $"\"{Escape(name)}\"";

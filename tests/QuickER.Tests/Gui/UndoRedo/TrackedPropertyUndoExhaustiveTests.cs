@@ -11,7 +11,7 @@ using QuickER.ViewModels;
 namespace QuickER.Tests.Gui.UndoRedo;
 
 /// <summary>
-/// 図の ViewModel（エンティティ・カラム・リレーション・一意制約）の公開プロパティを全数列挙し、
+/// 図の ViewModel（エンティティ・カラム・リレーション・一意制約と、その行・MainViewModel）の読み書きプロパティを全数列挙し、
 /// 「変更したら履歴が 1 件積まれ、Undo 1 回で元に戻り、未保存になる」ことを網羅して固定するテストクラス。
 /// </summary>
 /// <remarks>
@@ -22,7 +22,7 @@ namespace QuickER.Tests.Gui.UndoRedo;
 /// ここは次の 3 つを機械で表明する。
 /// </para>
 /// <list type="number">
-///   <item>公開の読み書きプロパティは、すべて下の宣言表（追跡する／除外）のどちらかに載っている（新しいプロパティは判断を強制される）。</item>
+///   <item>公開・internal の読み書きプロパティは、すべて下の宣言表（追跡する／除外）のどちらかに載っている（新しいプロパティは判断を強制される）。対象は図の ViewModel 4 型に加えて、行の ViewModel 3 型（一意制約の構成列・列ペア・主キーの順序）と MainViewModel。</item>
 ///   <item>追跡する宣言は、トラッカーの追跡一覧と一致する。</item>
 ///   <item>追跡するプロパティごとに、変更→Undo 1 回→元・Redo→変更後を、図全体の保存内容の比較で確かめる。連動する組（主キー↔NULL 許容、種別↔参照アクション・列ペア）は全組合せで 1 履歴に畳まれる。</item>
 /// </list>
@@ -126,6 +126,101 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
         ["RelationshipViewModel.IsSelected"] = (Exclusion.OutsideHistory, "選択の表示状態"),
         ["RelationshipViewModel.IsDimmed"] = (Exclusion.OutsideHistory, "強調表示の表示状態"),
         ["RelationshipViewModel.IsEmphasized"] = (Exclusion.OutsideHistory, "強調表示の表示状態"),
+        ["ColumnViewModel.IsUniqueConstraintMember"] = (
+            Exclusion.OutsideHistory,
+            "一意制約から導出する表示状態（キー欄の UQ）"
+        ),
+        ["ColumnViewModel.IsIdentity"] = (
+            Exclusion.DedicatedCommand,
+            "ChangeTargetDbmsCommand（対象 DBMS の切替で印を外す。図の読込でだけ付く）"
+        ),
+        ["UniqueConstraintMemberViewModel.SelectedColumn"] = (
+            Exclusion.DedicatedCommand,
+            "ChangeUniqueConstraintColumnsCommand（行の選択を 1 履歴に畳む）"
+        ),
+        ["RelationshipColumnPairViewModel.SelectedSourceColumn"] = (
+            Exclusion.DedicatedCommand,
+            "ChangeRelationshipColumnPairsCommand（両側が決まった時点で 1 履歴）"
+        ),
+        ["RelationshipColumnPairViewModel.SelectedTargetColumn"] = (
+            Exclusion.DedicatedCommand,
+            "ChangeRelationshipColumnPairsCommand（両側が決まった時点で 1 履歴）"
+        ),
+        ["PrimaryKeyMemberViewModel.Column"] = (
+            Exclusion.OutsideHistory,
+            "主キーの順序（正本）から導出する行。並べ替えは SetPrimaryKeyCommand"
+        ),
+        ["PrimaryKeyMemberViewModel.CanMoveUp"] = (
+            Exclusion.OutsideHistory,
+            "行の位置から導出する編集可否"
+        ),
+        ["PrimaryKeyMemberViewModel.CanMoveDown"] = (
+            Exclusion.OutsideHistory,
+            "行の位置から導出する編集可否"
+        ),
+        ["MainViewModel.SelectedProvider"] = (
+            Exclusion.DedicatedCommand,
+            "ChangeTargetDbmsCommand（型・NULL 許容・採番の印の変換と 1 履歴）"
+        ),
+        ["MainViewModel.ShowNullabilityInDiagram"] = (
+            Exclusion.OutsideHistory,
+            "ツールバーの表示設定"
+        ),
+        ["MainViewModel.IsCompactViewInDiagram"] = (
+            Exclusion.OutsideHistory,
+            "ツールバーの表示設定"
+        ),
+        ["MainViewModel.ShowColumnDescriptionsInDiagram"] = (
+            Exclusion.OutsideHistory,
+            "ツールバーの表示設定"
+        ),
+        ["MainViewModel.IsMiniMapEnabled"] = (Exclusion.OutsideHistory, "ツールバーの表示設定"),
+        ["MainViewModel.IsToolboxVisible"] = (Exclusion.OutsideHistory, "パネルの表示設定"),
+        ["MainViewModel.IsPropertyPanelVisible"] = (Exclusion.OutsideHistory, "パネルの表示設定"),
+        ["MainViewModel.IsFullScreen"] = (Exclusion.OutsideHistory, "ウィンドウの表示設定"),
+        ["MainViewModel.IsUniqueConstraintCardExpanded"] = (
+            Exclusion.OutsideHistory,
+            "プロパティパネルの開閉状態"
+        ),
+        ["MainViewModel.IsSearchOverlayVisible"] = (Exclusion.OutsideHistory, "検索の表示状態"),
+        ["MainViewModel.SearchQuery"] = (Exclusion.OutsideHistory, "検索の表示状態"),
+        ["MainViewModel.SelectedSearchResult"] = (Exclusion.OutsideHistory, "検索の表示状態"),
+        ["MainViewModel.ViewportContentBounds"] = (
+            Exclusion.OutsideHistory,
+            "ビューポート（表示位置）"
+        ),
+        ["MainViewModel.ZoomLevel"] = (Exclusion.OutsideHistory, "ビューポート（表示倍率）"),
+        ["MainViewModel.FeatureToolbarItems"] = (
+            Exclusion.OutsideHistory,
+            "起動時に組み立てる機能モジュールのツールバー"
+        ),
+        ["MainViewModel.SelectedEntity"] = (Exclusion.OutsideHistory, "選択の表示状態"),
+        ["MainViewModel.SelectedRelationship"] = (Exclusion.OutsideHistory, "選択の表示状態"),
+        ["MainViewModel.SelectedColumn"] = (Exclusion.OutsideHistory, "選択の表示状態"),
+        ["MainViewModel.PendingRelationshipSource"] = (
+            Exclusion.OutsideHistory,
+            "リレーション作成の途中状態（作成は AddRelationshipCommand）"
+        ),
+        ["MainViewModel.PendingRelationshipType"] = (
+            Exclusion.OutsideHistory,
+            "リレーション作成の途中状態（作成は AddRelationshipCommand）"
+        ),
+        ["MainViewModel.IsRelationshipMode"] = (
+            Exclusion.OutsideHistory,
+            "リレーション作成の途中状態（作成は AddRelationshipCommand）"
+        ),
+        ["MainViewModel.CurrentFilePath"] = (
+            Exclusion.OutsideHistory,
+            "文書の識別（開く・名前を付けて保存・新規作成で遷移する）"
+        ),
+        ["MainViewModel.IsRubberBandVisible"] = (
+            Exclusion.OutsideHistory,
+            "ラバーバンド選択の表示"
+        ),
+        ["MainViewModel.RubberBandX"] = (Exclusion.OutsideHistory, "ラバーバンド選択の表示"),
+        ["MainViewModel.RubberBandY"] = (Exclusion.OutsideHistory, "ラバーバンド選択の表示"),
+        ["MainViewModel.RubberBandWidth"] = (Exclusion.OutsideHistory, "ラバーバンド選択の表示"),
+        ["MainViewModel.RubberBandHeight"] = (Exclusion.OutsideHistory, "ラバーバンド選択の表示"),
     };
 
     private static readonly Type[] ViewModelTypes =
@@ -134,6 +229,10 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
         typeof(ColumnViewModel),
         typeof(RelationshipViewModel),
         typeof(UniqueConstraintViewModel),
+        typeof(UniqueConstraintMemberViewModel),
+        typeof(RelationshipColumnPairViewModel),
+        typeof(PrimaryKeyMemberViewModel),
+        typeof(MainViewModel),
     ];
 
     /// <summary>テスト用の図（親子 2 テーブル＋リレーション 1 本＋一意制約 1 本）と、その ViewModel</summary>
@@ -308,14 +407,14 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
     }
 
     [Fact(
-        DisplayName = "公開の読み書きプロパティは、追跡する宣言か履歴の外の宣言のどちらかに必ず載っている"
+        DisplayName = "公開・internal の読み書きプロパティは、追跡する宣言か履歴の外の宣言のどちらかに必ず載っている"
     )]
     public void EveryPublicSettableProperty_IsClassified()
     {
         var actual = ViewModelTypes
             .SelectMany(type =>
                 type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(p => p.SetMethod is { IsPublic: true })
+                    .Where(p => p.SetMethod is { IsPublic: true } or { IsAssembly: true })
                     .Select(p => $"{type.Name}.{p.Name}")
             )
             .ToHashSet();
@@ -323,9 +422,16 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
 
         actual
             .Except(declared)
+            .Order(StringComparer.Ordinal)
+            .ToList()
             .Should()
             .BeEmpty("分類されていないプロパティは履歴に載せるか除外するかを決める");
-        declared.Except(actual).Should().BeEmpty("存在しないプロパティの宣言が残っている");
+        declared
+            .Except(actual)
+            .Order(StringComparer.Ordinal)
+            .ToList()
+            .Should()
+            .BeEmpty("存在しないプロパティの宣言が残っている");
         Tracked.Intersect(Excluded.Keys).Should().BeEmpty("追跡と除外の両方には載せない");
     }
 

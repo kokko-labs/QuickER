@@ -25,7 +25,7 @@ public class MockProjectPromptEnglishGuardTests
     /// CJK 文字の検出パターン。既存の英語ガードと同じ範囲
     /// （U+3000-U+9FFF＝CJK 記号・ひらがな・カタカナ・CJK 統合漢字、U+FF00-U+FFEF＝全角英数記号・半角カナ）を対象にする。
     /// </summary>
-    private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
+    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     /// <summary>走査対象の 2 プロファイル（WPF / Blazor）</summary>
     public static TheoryData<string> ProfileNames =>

@@ -1,3 +1,5 @@
+using QuickER.Dialects;
+
 namespace QuickER.Provider.SqlServer;
 
 /// <summary>
@@ -28,7 +30,8 @@ public static class SqlServerExtendedProperty
         "DECLARE " + DefaultSchemaVariable + " sysname = SCHEMA_NAME();";
 
     /// <summary>表名がスキーマで修飾されていない（＝既定スキーマを指す）か</summary>
-    public static bool UsesDefaultSchema(string tableName) => !tableName.Contains('.');
+    public static bool UsesDefaultSchema(string tableName) =>
+        !SchemaQualifiedName.IsQualified(tableName);
 
     /// <summary><c>@level0type</c> 〜 <c>@level2name</c> の引数を組み立てる（<paramref name="columnName"/> が null ならテーブルの説明）</summary>
     public static string LevelArguments(string tableName, string? columnName)

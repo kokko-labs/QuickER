@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using QuickER.AI;
 using QuickER.AI.Mock.Resources;
+using QuickER.Mcp;
 using QuickER.Model;
 
 namespace QuickER.AI.Mock;
@@ -310,11 +311,11 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// <summary>save_screen: 画面 HTML を保存し、警告を連結して受領文言を返す</summary>
     private (string Result, bool Success) ExecuteSaveScreen(JsonElement root)
     {
-        var file = GetString(root, "file");
-        var name = GetString(root, "name");
-        var description = GetString(root, "description");
-        var html = GetString(root, "html");
-        var revisionNote = GetString(root, "revision_note");
+        var file = ToolArguments.GetString(root, "file") ?? string.Empty;
+        var name = ToolArguments.GetString(root, "name") ?? string.Empty;
+        var description = ToolArguments.GetString(root, "description") ?? string.Empty;
+        var html = ToolArguments.GetString(root, "html") ?? string.Empty;
+        var revisionNote = ToolArguments.GetString(root, "revision_note") ?? string.Empty;
         var transitions = ParseTransitions(root, file);
 
         // エンティティ宣言をパースし、宣言由来の警告（壊れた要素・正規化破棄・図に無い名前）を先に集める
@@ -357,7 +358,7 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// <summary>remove_screen: 画面を削除する（未存在は失敗）</summary>
     private (string Result, bool Success) ExecuteRemoveScreen(JsonElement root)
     {
-        var file = GetString(root, "file");
+        var file = ToolArguments.GetString(root, "file") ?? string.Empty;
 
         try
         {
@@ -384,8 +385,8 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// <summary>save_stylesheet: 共有スタイルシートを保存し、警告を連結して受領文言を返す</summary>
     private (string Result, bool Success) ExecuteSaveStylesheet(JsonElement root)
     {
-        var css = GetString(root, "css");
-        var revisionNote = GetString(root, "revision_note");
+        var css = ToolArguments.GetString(root, "css") ?? string.Empty;
+        var revisionNote = ToolArguments.GetString(root, "revision_note") ?? string.Empty;
 
         var warnings = _store.SaveStylesheet(css, revisionNote);
 
@@ -399,7 +400,7 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// <summary>get_screen: 画面 HTML を返す（未存在は利用可能な画面一覧を添えて失敗）</summary>
     private (string Result, bool Success) ExecuteGetScreen(JsonElement root)
     {
-        var file = GetString(root, "file");
+        var file = ToolArguments.GetString(root, "file") ?? string.Empty;
 
         string? html;
 
@@ -481,7 +482,7 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
                 continue;
             }
 
-            var entityName = GetString(element, "name").Trim();
+            var entityName = (ToolArguments.GetString(element, "name") ?? string.Empty).Trim();
 
             // 名前が無い壊れた要素は警告して読み飛ばす
             if (string.IsNullOrEmpty(entityName))
@@ -494,7 +495,7 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
                 new MockScreenEntity
                 {
                     Name = entityName,
-                    Operations = GetString(element, "operations"),
+                    Operations = ToolArguments.GetString(element, "operations") ?? string.Empty,
                 }
             );
         }
@@ -553,8 +554,8 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
                 new MockTransition
                 {
                     From = file,
-                    To = GetString(element, "to"),
-                    Trigger = GetString(element, "trigger"),
+                    To = ToolArguments.GetString(element, "to") ?? string.Empty,
+                    Trigger = ToolArguments.GetString(element, "trigger") ?? string.Empty,
                 }
             );
         }
@@ -588,11 +589,4 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
 
         return builder.ToString();
     }
-
-    /// <summary>JSON オブジェクトから文字列プロパティを取り出す（未設定・非文字列は空文字）</summary>
-    private static string GetString(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString() ?? string.Empty
-            : string.Empty;
 }

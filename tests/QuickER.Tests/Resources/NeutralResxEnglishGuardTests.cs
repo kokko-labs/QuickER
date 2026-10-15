@@ -37,7 +37,7 @@ public class NeutralResxEnglishGuardTests
     /// CJK 文字の検出パターン。ErDiagramToolCatalogEnglishGuardTests / GeneratedOutputEnglishGuardTests と同じ範囲
     /// （U+3000-U+9FFF＝CJK 記号・ひらがな・カタカナ・CJK 統合漢字、U+FF00-U+FFEF＝全角英数記号・半角カナ）を対象にする。
     /// </summary>
-    private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
+    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     /// <summary>
     /// 中立 resx に CJK を含んでよいキー名の許可リスト。言語切替 UI が母語表記で言語名を並べるための値

@@ -20,7 +20,7 @@ namespace QuickER.Tests.AI.Chat;
 public class QueryToolDiagnosticCoverageTests
 {
     /// <summary>CJK 文字の検出パターン（ErDiagramToolCatalogEnglishGuardTests と同じ範囲）</summary>
-    private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
+    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     /// <summary>全診断種別</summary>
     public static TheoryData<QueryToolDiagnosticCode> AllCodes =>

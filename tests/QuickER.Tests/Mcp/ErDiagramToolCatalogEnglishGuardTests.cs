@@ -19,7 +19,7 @@ public sealed class ErDiagramToolCatalogEnglishGuardTests
     /// CJK 文字の検出パターン。GeneratedOutputEnglishGuardTests と同じ範囲
     /// （U+3000-U+9FFF＝CJK 記号・ひらがな・カタカナ・CJK 統合漢字、U+FF00-U+FFEF＝全角英数記号・半角カナ）を対象にする。
     /// </summary>
-    private static readonly Regex CjkPattern = new("[　-鿿＀-￯]", RegexOptions.Compiled);
+    private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     /// <summary>全 ER 図操作ツール定義（名前・説明・入力スキーマ）に日本語（CJK）が含まれないことを検証する</summary>
     [Fact(DisplayName = "ER 図操作ツール定義に日本語（CJK）が含まれない")]

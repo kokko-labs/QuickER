@@ -21,7 +21,7 @@ public static class SchemaQualifiedTableNameNote
     public static void Append(StringBuilder sb, string tableName, string dialect)
     {
         if (
-            !tableName.Contains('.')
+            !SchemaQualifiedName.IsQualified(tableName)
             || UnsupportedTreatments.For(
                 UnsupportedDefinitionKind.SchemaQualifiedTableName,
                 UnsupportedFeature.Ddl,
@@ -32,10 +32,10 @@ public static class SchemaQualifiedTableNameNote
             return;
         }
 
-        var parts = tableName.Split('.', 2);
+        var (schema, table) = SchemaQualifiedName.Split(tableName);
         sb.AppendLine(
             $"-- Note: this database reads {SqlComment.Sanitize(tableName)} as table "
-                + $"{SqlComment.Sanitize(parts[1])} in the attached database {SqlComment.Sanitize(parts[0])}; "
+                + $"{SqlComment.Sanitize(table)} in the attached database {SqlComment.Sanitize(schema ?? string.Empty)}; "
                 + "the statement fails unless that database is attached"
         );
     }

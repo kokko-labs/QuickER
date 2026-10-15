@@ -9,6 +9,7 @@ using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Platform;
 using QuickER.Provider;
+using static QuickER.Mcp.ToolArguments;
 
 namespace QuickER.Cli;
 
@@ -510,10 +511,4 @@ public static class CodeGenToolSet
     /// <summary>捕捉した診断テキストと固定メッセージを結合する（診断が空ならメッセージのみ）</summary>
     private static string Combine(string diagnostics, string message) =>
         string.IsNullOrWhiteSpace(diagnostics) ? message : $"{message}\n{diagnostics}";
-
-    /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>
-    private static string? GetString(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var val) && val.ValueKind == JsonValueKind.String
-            ? val.GetString()
-            : null;
 }
