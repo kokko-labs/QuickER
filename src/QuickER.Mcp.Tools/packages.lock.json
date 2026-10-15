@@ -280,7 +280,7 @@
         "type": "Project",
         "dependencies": {
           "QuickER.Model": "[0.2.0, )",
-          "QuickER.Settings": "[0.2.0, )"
+          "QuickER.Platform": "[0.2.0, )"
         }
       },
       "quicker.mcp": {
@@ -297,7 +297,7 @@
           "QuickER.Dialects": "[0.2.0, )"
         }
       },
-      "quicker.settings": {
+      "quicker.platform": {
         "type": "Project"
       },
       "Microsoft.Extensions.DependencyInjection": {

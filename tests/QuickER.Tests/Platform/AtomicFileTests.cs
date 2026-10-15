@@ -1,8 +1,8 @@
 using System.IO;
 using AwesomeAssertions;
-using QuickER.Settings;
+using QuickER.Platform;
 
-namespace QuickER.Tests.Settings;
+namespace QuickER.Tests.Platform;
 
 /// <summary><see cref="AtomicFile"/> の原子的書き込み（新規作成・置換・失敗時の巻き戻り）を検証するテストクラス</summary>
 /// <remarks>
@@ -110,6 +110,58 @@ public class AtomicFileTests : IDisposable
         }
 
         File.ReadAllText(path).Should().Be("original", "失敗しても保存先は書き込み前のまま");
+    }
+
+    /// <summary>バイト列を原子的に書き、既存ファイルを置換して一時ファイルを残さないことを検証する</summary>
+    [Fact(DisplayName = "WriteAllBytes: 既存ファイルを置換し .tmp を残さない")]
+    public void WriteAllBytes_ExistingFile_ReplacesContentWithoutTemporaryLeftover()
+    {
+        var path = Path.Combine(_folder, "secret.dat");
+        File.WriteAllBytes(path, [1, 2, 3, 4, 5]);
+
+        AtomicFile.WriteAllBytes(path, [9, 8]);
+
+        File.ReadAllBytes(path).Should().Equal(9, 8);
+        FindTemporaryLeftovers().Should().BeEmpty("一時ファイルは差し替え後に残らない");
+    }
+
+    /// <summary>ストリームへ書いた内容がそのまま保存先になり、一時ファイルを残さないことを検証する</summary>
+    [Fact(DisplayName = "Write: ストリームへ書いた内容で保存先を置換し .tmp を残さない")]
+    public void Write_StreamContent_ReplacesFileWithoutTemporaryLeftover()
+    {
+        var path = Path.Combine(_folder, "image.png");
+        File.WriteAllText(path, "old");
+
+        AtomicFile.Write(path, stream => stream.Write([0x89, 0x50, 0x4E, 0x47]));
+
+        File.ReadAllBytes(path).Should().Equal(0x89, 0x50, 0x4E, 0x47);
+        FindTemporaryLeftovers().Should().BeEmpty("一時ファイルは差し替え後に残らない");
+    }
+
+    /// <summary>書き出し処理が途中で例外を投げても、保存先を無傷のまま残し、一時ファイルを掃除して例外を伝えることを検証する</summary>
+    /// <remarks>
+    /// 画像のエンコーダやブックの保存が途中で失敗する形。保存先へ直接書く実装なら、保存先は書きかけで残る。
+    /// </remarks>
+    [Fact(DisplayName = "Write: 書き出し処理の途中の失敗で元ファイル無傷・.tmp なし・例外を伝播")]
+    public void Write_WriterThrowsMidway_KeepsOriginalAndRemovesTemporary()
+    {
+        var path = Path.Combine(_folder, "book.xlsx");
+        File.WriteAllText(path, "original");
+
+        var act = () =>
+            AtomicFile.Write(
+                path,
+                stream =>
+                {
+                    stream.Write([1, 2, 3]);
+
+                    throw new InvalidOperationException("途中で失敗");
+                }
+            );
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("途中で失敗");
+        File.ReadAllText(path).Should().Be("original", "失敗しても保存先は書き込み前のまま");
+        FindTemporaryLeftovers().Should().BeEmpty("失敗時に一時ファイルを残さない");
     }
 
     /// <summary>保存先がディレクトリ等で書き込めない場合も一時ファイルを残さないことを検証する</summary>

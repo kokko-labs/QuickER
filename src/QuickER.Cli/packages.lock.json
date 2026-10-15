@@ -469,7 +469,7 @@
         "type": "Project",
         "dependencies": {
           "QuickER.Model": "[0.2.0, )",
-          "QuickER.Settings": "[0.2.0, )"
+          "QuickER.Platform": "[0.2.0, )"
         }
       },
       "quicker.mcp": {
@@ -494,6 +494,9 @@
         "dependencies": {
           "QuickER.Dialects": "[0.2.0, )"
         }
+      },
+      "quicker.platform": {
+        "type": "Project"
       },
       "quicker.provider": {
         "type": "Project",
@@ -547,9 +550,6 @@
           "QuickER.Model": "[0.2.0, )",
           "QuickER.Provider": "[0.2.0, )"
         }
-      },
-      "quicker.settings": {
-        "type": "Project"
       },
       "Microsoft.CodeAnalysis.CSharp": {
         "type": "CentralTransitive",

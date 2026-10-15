@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\QuickER.AI\QuickER.AI.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
+    <ProjectReference Include="..\QuickER.Platform\QuickER.Platform.csproj" />
   </ItemGroup>
 
   <!--

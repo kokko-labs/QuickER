@@ -297,6 +297,7 @@
           "OpenAI": "[2.14.0, )",
           "QuickER.Mcp": "[0.2.0, )",
           "QuickER.Model": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "QuickER.Settings": "[0.2.0, )"
         }
       },
@@ -320,8 +321,14 @@
           "QuickER.Dialects": "[0.2.0, )"
         }
       },
-      "quicker.settings": {
+      "quicker.platform": {
         "type": "Project"
+      },
+      "quicker.settings": {
+        "type": "Project",
+        "dependencies": {
+          "QuickER.Platform": "[0.2.0, )"
+        }
       },
       "Anthropic": {
         "type": "CentralTransitive",

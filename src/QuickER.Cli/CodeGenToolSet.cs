@@ -7,8 +7,8 @@ using QuickER.Documents;
 using QuickER.Mcp;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Provider;
-using QuickER.Settings;
 
 namespace QuickER.Cli;
 

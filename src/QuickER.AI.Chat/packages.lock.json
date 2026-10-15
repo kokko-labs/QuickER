@@ -291,6 +291,7 @@
           "OpenAI": "[2.14.0, )",
           "QuickER.Mcp": "[0.2.0, )",
           "QuickER.Model": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "QuickER.Settings": "[0.2.0, )"
         }
       },
@@ -300,7 +301,8 @@
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "Markdig": "[1.4.0, )",
           "QuickER.AI": "[0.2.0, )",
-          "QuickER.Gui.Abstractions": "[0.2.0, )"
+          "QuickER.Gui.Abstractions": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )"
         }
       },
       "quicker.codegen.csharp": {
@@ -317,7 +319,7 @@
         "type": "Project",
         "dependencies": {
           "QuickER.Model": "[0.2.0, )",
-          "QuickER.Settings": "[0.2.0, )"
+          "QuickER.Platform": "[0.2.0, )"
         }
       },
       "quicker.extensibility": {
@@ -360,6 +362,9 @@
           "QuickER.Dialects": "[0.2.0, )"
         }
       },
+      "quicker.platform": {
+        "type": "Project"
+      },
       "quicker.provider": {
         "type": "Project",
         "dependencies": {
@@ -368,7 +373,10 @@
         }
       },
       "quicker.settings": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "QuickER.Platform": "[0.2.0, )"
+        }
       },
       "Anthropic": {
         "type": "CentralTransitive",

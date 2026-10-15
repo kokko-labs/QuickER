@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using QuickER.Platform;
 
 namespace QuickER.Services;
 
@@ -20,9 +21,6 @@ namespace QuickER.Services;
 /// </remarks>
 public static class CrashHandlingService
 {
-    /// <summary>クラッシュログの保存先フォルダ名（<c>%LOCALAPPDATA%\QuickER</c>＝設定ストアと同じ規約）</summary>
-    private const string LogFolderName = "QuickER";
-
     /// <summary>バージョンを解決できなかった場合に記録する代替表記</summary>
     private const string UnknownVersion = "unknown";
 
@@ -368,12 +366,8 @@ public static class CrashHandlingService
         return true;
     }
 
-    /// <summary>クラッシュログの既定保存先（<c>%LOCALAPPDATA%\QuickER</c>）を返す</summary>
-    private static string DefaultLogFolder() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            LogFolderName
-        );
+    /// <summary>クラッシュログの既定保存先（<see cref="AppDataPaths.LocalRoot"/>＝<c>%LOCALAPPDATA%\QuickER</c>）を返す</summary>
+    private static string DefaultLogFolder() => AppDataPaths.LocalRoot;
 
     /// <summary>再入ガードを初期化する（テスト専用。複数ケースで <see cref="HandleCrash"/> を検証するため）</summary>
     internal static void ResetForTests() => Interlocked.Exchange(ref _crashHandled, 0);

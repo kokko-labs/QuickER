@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using QuickER.AI.Resources;
+using QuickER.Platform;
 
 namespace QuickER.AI;
 
@@ -457,7 +458,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
     /// <summary>システムプロンプトの一時ファイルを置くフォルダ（<c>%TEMP%\QuickER\claude-code</c>）</summary>
     private static string SystemPromptDirectory =>
-        Path.Combine(Path.GetTempPath(), "QuickER", "claude-code");
+        Path.Combine(AppDataPaths.TempRoot, "claude-code");
 
     /// <summary>
     /// システムプロンプトを一時ファイルへ書き出し、<c>--append-system-prompt-file</c> の引数として積む。

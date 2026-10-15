@@ -10,6 +10,7 @@ using QuickER.Behaviors;
 using QuickER.Documents;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Provider;
 using QuickER.Resources;
 using QuickER.Services;
@@ -538,11 +539,10 @@ public partial class MainViewModel : IDiagramTransferHost
     /// <summary>ダイアグラム自動保存ファイルの既定パス（%LOCALAPPDATA%\QuickER\last_diagram.json）</summary>
     /// <remarks>
     /// 保存先がローミング（<c>%APPDATA%</c>）ではなくローカルなのは、この PC に固有の作業状態だから
-    /// （理由の正本は <c>JsonSettingsStore</c> の既定コンストラクタ）。
+    /// （理由の正本は <see cref="AppDataPaths.LocalRoot"/>）。
     /// </remarks>
     private static readonly string DefaultAutoSavePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "QuickER",
+        AppDataPaths.LocalRoot,
         "last_diagram.json"
     );
 

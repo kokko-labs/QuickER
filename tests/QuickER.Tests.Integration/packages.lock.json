@@ -588,13 +588,13 @@
           "QuickER.Mcp": "[0.2.0, )",
           "QuickER.Mcp.Tools": "[0.2.0, )",
           "QuickER.Model": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "QuickER.Provider": "[0.2.0, )",
           "QuickER.Provider.MySql": "[0.2.0, )",
           "QuickER.Provider.Oracle": "[0.2.0, )",
           "QuickER.Provider.PostgreSql": "[0.2.0, )",
           "QuickER.Provider.SqlServer": "[0.2.0, )",
           "QuickER.Provider.Sqlite": "[0.2.0, )",
-          "QuickER.Settings": "[0.2.0, )",
           "System.CommandLine": "[2.0.12, )"
         }
       },
@@ -620,7 +620,7 @@
         "type": "Project",
         "dependencies": {
           "QuickER.Model": "[0.2.0, )",
-          "QuickER.Settings": "[0.2.0, )"
+          "QuickER.Platform": "[0.2.0, )"
         }
       },
       "quicker.mcp": {
@@ -644,6 +644,9 @@
         "dependencies": {
           "QuickER.Dialects": "[0.2.0, )"
         }
+      },
+      "quicker.platform": {
+        "type": "Project"
       },
       "quicker.provider": {
         "type": "Project",
@@ -697,9 +700,6 @@
           "QuickER.Model": "[0.2.0, )",
           "QuickER.Provider": "[0.2.0, )"
         }
-      },
-      "quicker.settings": {
-        "type": "Project"
       },
       "Microsoft.CodeAnalysis.CSharp": {
         "type": "CentralTransitive",

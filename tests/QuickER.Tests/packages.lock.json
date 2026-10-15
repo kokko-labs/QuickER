@@ -905,6 +905,7 @@
           "QuickER.Gui.Abstractions": "[0.2.0, )",
           "QuickER.Gui.Common": "[0.2.0, )",
           "QuickER.Model": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "QuickER.Provider": "[0.2.0, )",
           "QuickER.Provider.MySql": "[0.2.0, )",
           "QuickER.Provider.Oracle": "[0.2.0, )",
@@ -924,6 +925,7 @@
           "OpenAI": "[2.14.0, )",
           "QuickER.Mcp": "[0.2.0, )",
           "QuickER.Model": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "QuickER.Settings": "[0.2.0, )"
         }
       },
@@ -952,6 +954,7 @@
           "QuickER.Gui.Abstractions": "[0.2.0, )",
           "QuickER.Gui.Common": "[0.2.0, )",
           "QuickER.Mcp": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "QuickER.Provider": "[0.2.0, )"
         }
       },
@@ -961,7 +964,8 @@
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "Markdig": "[1.4.0, )",
           "QuickER.AI": "[0.2.0, )",
-          "QuickER.Gui.Abstractions": "[0.2.0, )"
+          "QuickER.Gui.Abstractions": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )"
         }
       },
       "quicker.cli": {
@@ -973,13 +977,13 @@
           "QuickER.Mcp": "[0.2.0, )",
           "QuickER.Mcp.Tools": "[0.2.0, )",
           "QuickER.Model": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "QuickER.Provider": "[0.2.0, )",
           "QuickER.Provider.MySql": "[0.2.0, )",
           "QuickER.Provider.Oracle": "[0.2.0, )",
           "QuickER.Provider.PostgreSql": "[0.2.0, )",
           "QuickER.Provider.SqlServer": "[0.2.0, )",
           "QuickER.Provider.Sqlite": "[0.2.0, )",
-          "QuickER.Settings": "[0.2.0, )",
           "System.CommandLine": "[2.0.12, )"
         }
       },
@@ -1020,10 +1024,10 @@
           "QuickER.Extensibility": "[0.2.0, )",
           "QuickER.Gui.Abstractions": "[0.2.0, )",
           "QuickER.Gui.Common": "[0.2.0, )",
+          "QuickER.Platform": "[0.2.0, )",
           "QuickER.Provider": "[0.2.0, )",
           "QuickER.Provider.SqlServer": "[0.2.0, )",
-          "QuickER.Provider.Sqlite": "[0.2.0, )",
-          "QuickER.Settings": "[0.2.0, )"
+          "QuickER.Provider.Sqlite": "[0.2.0, )"
         }
       },
       "quicker.dialects": {
@@ -1033,7 +1037,7 @@
         "type": "Project",
         "dependencies": {
           "QuickER.Model": "[0.2.0, )",
-          "QuickER.Settings": "[0.2.0, )"
+          "QuickER.Platform": "[0.2.0, )"
         }
       },
       "quicker.extensibility": {
@@ -1075,6 +1079,9 @@
         "dependencies": {
           "QuickER.Dialects": "[0.2.0, )"
         }
+      },
+      "quicker.platform": {
+        "type": "Project"
       },
       "quicker.provider": {
         "type": "Project",
@@ -1173,7 +1180,10 @@
         }
       },
       "quicker.settings": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "QuickER.Platform": "[0.2.0, )"
+        }
       },
       "quicker.tests.fakecodexappserver": {
         "type": "Project"

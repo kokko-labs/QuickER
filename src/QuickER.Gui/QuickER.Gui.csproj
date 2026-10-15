@@ -84,6 +84,7 @@
     <ProjectReference Include="..\QuickER.Provider.PostgreSql\QuickER.Provider.PostgreSql.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
     <ProjectReference Include="..\QuickER.Settings\QuickER.Settings.csproj" />
+    <ProjectReference Include="..\QuickER.Platform\QuickER.Platform.csproj" />
     <ProjectReference Include="..\QuickER.Provider.Sqlite\QuickER.Provider.Sqlite.csproj" />
     <ProjectReference Include="..\QuickER.Provider.SqlServer\QuickER.Provider.SqlServer.csproj" />
   </ItemGroup>

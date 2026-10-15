@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using QuickER.Platform;
 
 namespace QuickER.AI.UI;
 
@@ -9,16 +10,13 @@ namespace QuickER.AI.UI;
 /// </summary>
 public static class ApiKeyStore
 {
-    /// <summary>暗号化ファイルの既定の保存先フォルダ (%LOCALAPPDATA%\QuickER)</summary>
+    /// <summary>暗号化ファイルの既定の保存先フォルダ (<see cref="AppDataPaths.LocalRoot"/>＝%LOCALAPPDATA%\QuickER)</summary>
     /// <remarks>
     /// ローミング (%APPDATA%) ではなくローカルへ置く。DPAPI (CurrentUser) の保護はこの PC に
     /// 紐づくため、ローミングプロファイルで他端末へ複製されても復号できない (理由の正本は
-    /// <c>JsonSettingsStore</c> の既定コンストラクタ)。
+    /// <see cref="AppDataPaths.LocalRoot"/>)。
     /// </remarks>
-    private static readonly string DefaultFolder = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "QuickER"
-    );
+    private static readonly string DefaultFolder = AppDataPaths.LocalRoot;
 
     /// <summary>キー名に対応する保存ファイルのフルパスを返す</summary>
     private static string PathFor(string name, string folder) =>

@@ -201,6 +201,9 @@
           "QuickER.Dialects": "[0.2.0, )"
         }
       },
+      "quicker.platform": {
+        "type": "Project"
+      },
       "quicker.provider": {
         "type": "Project",
         "dependencies": {
@@ -226,9 +229,6 @@
           "QuickER.Model": "[0.2.0, )",
           "QuickER.Provider": "[0.2.0, )"
         }
-      },
-      "quicker.settings": {
-        "type": "Project"
       },
       "Microsoft.Data.SqlClient": {
         "type": "CentralTransitive",

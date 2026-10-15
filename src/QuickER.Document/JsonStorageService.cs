@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using QuickER.Model;
-using QuickER.Settings;
+using QuickER.Platform;
 
 namespace QuickER.Documents;
 

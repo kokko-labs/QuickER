@@ -2,7 +2,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using QuickER.AI.Mock.Resources;
-using QuickER.Settings;
+using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
 
