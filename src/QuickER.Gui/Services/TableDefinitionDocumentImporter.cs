@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Resources;
 

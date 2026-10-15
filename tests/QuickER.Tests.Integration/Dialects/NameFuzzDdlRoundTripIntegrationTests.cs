@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;

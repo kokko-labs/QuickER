@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Text.Json;
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;

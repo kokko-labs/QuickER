@@ -8,6 +8,7 @@ using AwesomeAssertions;
 using Microsoft.Data.SqlClient;
 using MySqlConnector;
 using Npgsql;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider.MySql;
 using QuickER.Provider.Oracle;

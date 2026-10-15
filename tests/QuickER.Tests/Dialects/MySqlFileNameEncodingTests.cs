@@ -1,7 +1,8 @@
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 
-namespace QuickER.Tests.Model;
+namespace QuickER.Tests.Dialects;
 
 /// <summary>
 /// MySQL の表の名前のファイル名への符号化の長さ（<see cref="MySqlFileNameEncoding"/>）を検証するテストクラス

@@ -64,14 +64,21 @@
         "resolved": "10.0.9",
         "contentHash": "YweovHiLUoEdbr2Xv8eRqCSkTu1vMms4a6xBHaQiMSFVy32PL+hXv6Vhol2NWOmLHjaVgTyhJ3R52U6JxS6w3Q=="
       },
+      "quicker.dialects": {
+        "type": "Project"
+      },
       "quicker.mcp": {
         "type": "Project",
         "dependencies": {
-          "ModelContextProtocol": "[2.2.0, )"
+          "ModelContextProtocol": "[2.2.0, )",
+          "QuickER.Dialects": "[0.2.0, )"
         }
       },
       "quicker.model": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "QuickER.Dialects": "[0.2.0, )"
+        }
       },
       "quicker.settings": {
         "type": "Project"

@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.Oracle;
@@ -6,7 +7,7 @@ namespace QuickER.Provider.Oracle;
 public sealed class OracleProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "oracle";
+    public const string ProviderName = DialectNames.Oracle;
 
     /// <inheritdoc />
     public string Name => ProviderName;

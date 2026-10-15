@@ -1,4 +1,4 @@
-namespace QuickER.Model;
+namespace QuickER.Dialects;
 
 /// <summary>
 /// MySQL が表の名前をファイル名へ符号化したときの長さ（<c>my_charset_filename</c> の移植）

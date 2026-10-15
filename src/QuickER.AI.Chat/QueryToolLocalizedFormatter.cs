@@ -1,6 +1,7 @@
 using System.Text;
 using QuickER.AI.Chat.Resources;
 using QuickER.CodeGen.CSharp;
+using QuickER.Dialects;
 using QuickER.Mcp;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
@@ -184,7 +185,7 @@ public static class QueryToolLocalizedFormatter
             QueryToolDiagnosticCode.UnknownSqlDialect => string.Format(
                 Strings.QueryTool_Diag_UnknownSqlDialect,
                 d.Dialect,
-                string.Join(", ", TargetDbmsNames.All)
+                string.Join(", ", DialectNames.All)
             ),
             QueryToolDiagnosticCode.SqlDialectNotString => string.Format(
                 Strings.QueryTool_Diag_SqlDialectNotString,

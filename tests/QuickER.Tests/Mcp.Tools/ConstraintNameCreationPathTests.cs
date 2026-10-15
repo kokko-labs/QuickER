@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
@@ -351,7 +352,10 @@ public sealed class ConstraintNameCreationPathTests : IDisposable
         ]);
         var schema = JsonStorageService.Load(file).Schema;
         var ddl = new SqlServerDdlGenerator().Build(schema);
-        var existing = ConstraintNames.CollectExisting(schema);
+        var existing = ConstraintNames.CollectExisting(
+            schema,
+            IdentifierLengthLimits.ForDbms(schema.TargetDbms)
+        );
 
         existing
             .Should()

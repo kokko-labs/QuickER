@@ -1,6 +1,7 @@
 using System.Text.Json;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Queries;
+using QuickER.Dialects;
 using QuickER.Model;
 using static QuickER.Mcp.Tools.SchemaLookup;
 using static QuickER.Mcp.Tools.ToolArguments;
@@ -609,7 +610,7 @@ public static class QueryToolCore
 
         foreach (var property in obj.EnumerateObject())
         {
-            if (TargetDbmsNames.Find(property.Name) is not { } canonical)
+            if (DialectNames.Find(property.Name) is not { } canonical)
             {
                 problems.Add(
                     new QueryToolDiagnostic(

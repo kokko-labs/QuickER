@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Cli;
+using QuickER.Dialects;
 using QuickER.Mcp;
 using QuickER.Mcp.Tools;
 using QuickER.Tests.Resources;
@@ -27,7 +28,7 @@ public sealed class McpToolStructureGuardTests
     )]
     public void DialectListsInToolSchemas_MatchTheCanonicalList()
     {
-        var canonical = TargetDbmsNames.All.ToList();
+        var canonical = DialectNames.All.ToList();
 
         EnumOf(DocumentErDiagramToolSet.CreateDiagramDefinition, "target_dbms")
             .Should()
@@ -57,17 +58,17 @@ public sealed class McpToolStructureGuardTests
 
     private void CanonicalDialectList_IsNotAWritableArrayCore()
     {
-        TargetDbmsNames
+        DialectNames
             .All.Should()
             .NotBeAssignableTo<string[]>(
                 "配列を公開すると、どこかの書き換えで受け付ける方言がプロセス全体で黙って変わる"
             );
-        ((ICollection<string>)TargetDbmsNames.All).IsReadOnly.Should().BeTrue();
+        ((ICollection<string>)DialectNames.All).IsReadOnly.Should().BeTrue();
     }
 
     [Fact(DisplayName = "方言の一覧の正本は、各プロバイダの名前と一致する")]
     public void CanonicalDialectList_MatchesProviderNames() =>
-        TargetDbmsNames
+        DialectNames
             .All.Should()
             .BeEquivalentTo([
                 QuickER.Provider.SqlServer.SqlServerProvider.ProviderName,

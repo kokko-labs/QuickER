@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;

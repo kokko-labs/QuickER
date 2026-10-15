@@ -1,6 +1,7 @@
 using System.CommandLine;
 using QuickER.Cli.Resources;
 using QuickER.CodeReverse.CSharp;
+using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Mcp;
 using QuickER.Mcp.Tools;

@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.Tests.Mcp.Tools;
@@ -117,6 +118,158 @@ public sealed class ErDiagramToolLongDefaultNameTests : TwoHostToolTestBase
                     ["parent_id"],
                     IdentifierLengthLimit.Unlimited
                 )
+            );
+    }
+
+    /// <summary>
+    /// 名前の無いリレーション（取込・古いファイル・手編集で生じる）を 1 本持つ図を作る。
+    /// その外部キーの DDL 上の名前は、上限で縮めた既定名 <c>FK_{子}_{親}</c> になる
+    /// </summary>
+    private void ArrangeUnnamedRelationship()
+    {
+        ArrangeLongTables();
+        Arrange(
+            "add_relationship",
+            new
+            {
+                source_table = Parent,
+                target_table = Child,
+                relationship_type = "OneToMany",
+                source_columns = new[] { "id" },
+                target_columns = new[] { "parent_id" },
+            }
+        );
+        ClearConstraintNames();
+    }
+
+    [Theory(
+        DisplayName = "add_relationship: 名前の無い外部キーが持つ、上限で縮めた既定名と同じ constraint_name は断る"
+    )]
+    [InlineData(HostKind.Gui)]
+    [InlineData(HostKind.File)]
+    public void AddRelationship_NameEqualToShortenedDefaultOfUnnamed_IsRejected(HostKind host)
+    {
+        Setup(host);
+        ArrangeUnnamedRelationship();
+        Arrange(
+            "add_column",
+            new
+            {
+                table_name = Child,
+                column_name = "parent_id2",
+                data_type = "int",
+            }
+        );
+        var shortened = ConstraintNames.ForeignKey(Child, Parent, IdentifierLengthLimits.SqlServer);
+
+        var (result, success) = Exec(
+            "add_relationship",
+            new
+            {
+                source_table = Parent,
+                target_table = Child,
+                relationship_type = "OneToMany",
+                source_columns = new[] { "id" },
+                target_columns = new[] { "parent_id2" },
+                constraint_name = shortened,
+            }
+        );
+
+        success
+            .Should()
+            .BeFalse("DDL では名前の無い外部キーがこの名前になり、同じ名前の制約が 2 つできる");
+        result.Should().Contain(shortened, "衝突した名前を名指しする");
+        Schema.Relationships.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "set_unique_constraint: 主キーの、上限で縮めた既定名と同じ name は断る")]
+    [InlineData(HostKind.Gui)]
+    [InlineData(HostKind.File)]
+    public void SetUniqueConstraint_NameEqualToShortenedPrimaryKeyName_IsRejected(HostKind host)
+    {
+        Setup(host);
+        ArrangeLongTables();
+        var shortened = ConstraintNames.PrimaryKey(Child, IdentifierLengthLimits.SqlServer);
+
+        var (result, success) = Exec(
+            "set_unique_constraint",
+            new
+            {
+                table_name = Child,
+                columns = new[] { "parent_id" },
+                name = shortened,
+            }
+        );
+
+        success.Should().BeFalse("DDL では主キーがこの名前になり、同じ名前の制約が 2 つできる");
+        result.Should().Contain(shortened, "衝突した名前を名指しする");
+        EntityNamed(Child).UniqueConstraints.Should().BeEmpty();
+    }
+
+    [Theory(
+        DisplayName = "名前の無い外部キーは、上限で縮めた既定名（DDL と同じ）で要約に出て、その名前で消せる"
+    )]
+    [InlineData(HostKind.Gui)]
+    [InlineData(HostKind.File)]
+    public void UnnamedRelationship_IsShownAndRemovedByShortenedDefaultName(HostKind host)
+    {
+        Setup(host);
+        ArrangeUnnamedRelationship();
+        var shortened = ConstraintNames.ForeignKey(Child, Parent, IdentifierLengthLimits.SqlServer);
+        var unshortened = ConstraintNames.ForeignKey(
+            Child,
+            Parent,
+            IdentifierLengthLimit.Unlimited
+        );
+
+        var (summary, summarized) = Exec("get_diagram_summary", new { });
+
+        summarized.Should().BeTrue(summary);
+        summary.Should().Contain(shortened);
+        summary.Should().NotContain(unshortened);
+
+        var (result, success) = Exec(
+            "remove_relationship",
+            new
+            {
+                source_table = Parent,
+                target_table = Child,
+                constraint_name = shortened,
+            }
+        );
+
+        success.Should().BeTrue(result);
+        Schema.Relationships.Should().BeEmpty();
+    }
+
+    [Theory(
+        DisplayName = "add_relationship: 名前の無い外部キーと同じ列ペアの重複は、上限で縮めた既定名でその外部キーを名指しして断る"
+    )]
+    [InlineData(HostKind.Gui)]
+    [InlineData(HostKind.File)]
+    public void AddRelationship_DuplicateOfUnnamed_NamesItByShortenedDefaultName(HostKind host)
+    {
+        Setup(host);
+        ArrangeUnnamedRelationship();
+
+        var (result, success) = Exec(
+            "add_relationship",
+            new
+            {
+                source_table = Parent,
+                target_table = Child,
+                relationship_type = "OneToMany",
+                source_columns = new[] { "id" },
+                target_columns = new[] { "parent_id" },
+            }
+        );
+
+        success.Should().BeFalse(result);
+        result
+            .Should()
+            .Contain(ConstraintNames.ForeignKey(Child, Parent, IdentifierLengthLimits.SqlServer))
+            .And.NotContain(
+                ConstraintNames.ForeignKey(Child, Parent, IdentifierLengthLimit.Unlimited)
             );
     }
 }

@@ -316,6 +316,9 @@
           "Scriban": "[7.4.0, )"
         }
       },
+      "quicker.dialects": {
+        "type": "Project"
+      },
       "quicker.extensibility": {
         "type": "Project",
         "dependencies": {
@@ -337,11 +340,15 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.Hosting": "[10.0.12, )",
-          "ModelContextProtocol": "[2.2.0, )"
+          "ModelContextProtocol": "[2.2.0, )",
+          "QuickER.Dialects": "[0.2.0, )"
         }
       },
       "quicker.model": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "QuickER.Dialects": "[0.2.0, )"
+        }
       },
       "quicker.provider": {
         "type": "Project",

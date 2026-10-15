@@ -1,3 +1,5 @@
+using QuickER.Dialects;
+
 namespace QuickER.Model;
 
 /// <summary>
@@ -35,8 +37,9 @@ namespace QuickER.Model;
 /// <item>
 /// 図へ保存する既定名（ツールと GUI がリレーションに付ける外部キー名・取込と C# リバースの <see cref="NameUnnamedForeignKeys"/>）と、
 /// 図の名前として見せる合成名（C# 生成の <c>[UniqueConstraint(Name = …)]</c>・ツールの要約・プロパティパネル）:
-/// <b>図の対象 DBMS の上限</b>（<see cref="IdentifierLengthLimits.ForDbms"/> に <see cref="ErDiagram.TargetDbms"/> を渡す）。
-/// 図を受け取る <see cref="CollectExisting"/> / <see cref="IsTaken"/> は図の対象 DBMS から自分で引く。
+/// <b>図の対象 DBMS の上限</b>（呼び出し側が <see cref="IdentifierLengthLimits.ForDbms"/> に <see cref="ErDiagram.TargetDbms"/> を渡して引く）。
+/// 図を受け取る <see cref="CollectExisting"/> / <see cref="IsTaken"/> / <see cref="ResolveForeignKeyNamesById"/> も上限を引数で受ける
+/// （Model は方言名から上限を引かない＝<c>ModelDialectLookupGuardTests</c>）。
 /// </item>
 /// </list>
 /// </remarks>
@@ -100,6 +103,7 @@ public static class ConstraintNames
 
     /// <summary>図の中で既に使われている制約名を、DDL が付ける名前で集める</summary>
     /// <param name="diagram">対象の図</param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（図の対象 DBMS の上限。経路は型の XmlDoc）</param>
     /// <returns>外部キー・主キー・一意制約の名前の集合（大文字小文字を区別しない）</returns>
     /// <remarks>
     /// <para>
@@ -115,10 +119,12 @@ public static class ConstraintNames
     /// </para>
     /// <para>既定名は図の対象 DBMS の上限で縮めた名前で数える（図へ保存する名前を決めるための集合なので）。</para>
     /// </remarks>
-    public static IReadOnlySet<string> CollectExisting(ErDiagram diagram)
+    public static IReadOnlySet<string> CollectExisting(
+        ErDiagram diagram,
+        IdentifierLengthLimit limit
+    )
     {
         var entities = diagram.Entities;
-        var limit = IdentifierLengthLimits.ForDbms(diagram.TargetDbms);
         var names = CollectTableConstraints(entities, limit);
 
         foreach (var relationship in diagram.Relationships)
@@ -155,13 +161,19 @@ public static class ConstraintNames
     /// <param name="replacingUniqueConstraintId">
     /// 名前を付け替える既存の一意制約の Id（自分自身の現在の名前とは衝突させない）。新規の制約なら <c>null</c>
     /// </param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（図の対象 DBMS の上限。経路は型の XmlDoc）</param>
     /// <remarks>
     /// 外部キーの名前を付けるツール（<c>add_relationship</c>）と同じ規則を、一意制約の名前にも使う
     /// （制約名は SQL Server と Oracle では種類をまたいでスキーマ単位で共有される）。
     /// </remarks>
-    public static bool IsTaken(ErDiagram diagram, string name, Guid? replacingUniqueConstraintId)
+    public static bool IsTaken(
+        ErDiagram diagram,
+        string name,
+        Guid? replacingUniqueConstraintId,
+        IdentifierLengthLimit limit
+    )
     {
-        var names = new HashSet<string>(CollectExisting(diagram), SchemaNames.Comparer);
+        var names = new HashSet<string>(CollectExisting(diagram, limit), SchemaNames.Comparer);
 
         if (replacingUniqueConstraintId is { } id)
         {
@@ -183,11 +195,7 @@ public static class ConstraintNames
                     .OfType<string>();
                 names.Remove(
                     own.Name
-                        ?? UniqueConstraint.SynthesizeName(
-                            entity.TableName,
-                            columnNames,
-                            IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
-                        )
+                        ?? UniqueConstraint.SynthesizeName(entity.TableName, columnNames, limit)
                 );
             }
         }
@@ -286,17 +294,17 @@ public static class ConstraintNames
     /// 図の対象 DBMS の上限で求める形）
     /// </summary>
     /// <param name="diagram">図</param>
+    /// <param name="limit">既定名に使う識別子の長さの上限（図の対象 DBMS の上限。経路は型の XmlDoc）</param>
     /// <returns>リレーションの Id → 名前（含まれるリレーションは <see cref="ResolveForeignKeyNames"/> と同じ）</returns>
     /// <remarks>
     /// ER 図操作ツールが、名前の無いリレーションを要約に示し、その名前で <c>remove_relationship</c> から選べるようにするために使う
     /// （GUI のツールは ViewModel から作り直した図を渡すので、参照でなく Id で引く）。
     /// </remarks>
-    public static IReadOnlyDictionary<Guid, string> ResolveForeignKeyNamesById(ErDiagram diagram) =>
-        ResolveForeignKeyNames(
-                diagram.Entities,
-                diagram.Relationships,
-                IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
-            )
+    public static IReadOnlyDictionary<Guid, string> ResolveForeignKeyNamesById(
+        ErDiagram diagram,
+        IdentifierLengthLimit limit
+    ) =>
+        ResolveForeignKeyNames(diagram.Entities, diagram.Relationships, limit)
             .ToDictionary(pair => pair.Key.Id, pair => pair.Value);
 
     /// <summary>

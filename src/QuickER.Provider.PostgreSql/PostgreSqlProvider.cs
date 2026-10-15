@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.PostgreSql;
@@ -6,7 +7,7 @@ namespace QuickER.Provider.PostgreSql;
 public sealed class PostgreSqlProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "postgresql";
+    public const string ProviderName = DialectNames.PostgreSql;
 
     /// <inheritdoc />
     public string Name => ProviderName;

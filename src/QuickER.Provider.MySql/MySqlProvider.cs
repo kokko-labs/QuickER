@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.MySql;
@@ -6,7 +7,7 @@ namespace QuickER.Provider.MySql;
 public sealed class MySqlProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "mysql";
+    public const string ProviderName = DialectNames.MySql;
 
     /// <inheritdoc />
     public string Name => ProviderName;

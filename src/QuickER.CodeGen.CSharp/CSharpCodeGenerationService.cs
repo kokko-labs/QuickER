@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using QuickER.CodeGen.CSharp.Resources;
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.CSharp;

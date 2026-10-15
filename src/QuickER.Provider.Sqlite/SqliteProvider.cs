@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.Sqlite;
@@ -11,7 +12,7 @@ namespace QuickER.Provider.Sqlite;
 public sealed class SqliteProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "sqlite";
+    public const string ProviderName = DialectNames.Sqlite;
 
     /// <inheritdoc />
     public string Name => ProviderName;

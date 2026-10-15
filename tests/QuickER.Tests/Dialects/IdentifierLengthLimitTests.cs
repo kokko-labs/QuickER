@@ -1,8 +1,9 @@
 using System.Text;
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 
-namespace QuickER.Tests.Model;
+namespace QuickER.Tests.Dialects;
 
 /// <summary>
 /// 識別子の長さの上限（<see cref="IdentifierLengthLimit"/> / <see cref="IdentifierLengthLimits"/>）の測り方を検証するテストクラス

@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace QuickER.Model;
+namespace QuickER.Dialects;
 
 /// <summary>識別子の長さを数える単位</summary>
 public enum IdentifierLengthUnit
@@ -25,8 +25,8 @@ public enum IdentifierLengthUnit
 /// <remarks>
 /// <para>
 /// 値の正本は <see cref="IdentifierLengthLimits"/>（方言名の表）で、各方言の識別子クラスの <c>Limit</c> と
-/// 同期のケーパビリティはそれを指すだけ（写しを作らない）。Model に置くのは、Provider を参照しない MCP のツールホストも
-/// 名前を受けたときに上限を検査するため。
+/// 同期のケーパビリティはそれを指すだけ（写しを作らない）。方言の宣言のプロジェクト（依存ゼロ）に置くのは、
+/// Provider を参照しない意味モデルと MCP のツールホストも、名前を受けたときに上限を検査するため。
 /// </para>
 /// <para>
 /// テーブル名は、各方言の識別子クラスの <c>Quote</c> と同じく最初の <c>.</c> でスキーマ修飾と表の名前へ分け、
@@ -156,7 +156,7 @@ public sealed record IdentifierLengthLimit(
     /// </para>
     /// <para>
     /// 利用者が付けた名前には使わない（利用者の名前は縮めずに、DDL・同期の入口で場所を示して断る）。
-    /// どの上限を渡すかの経路は <see cref="ConstraintNames"/> の XmlDoc を参照。
+    /// どの上限を渡すかの経路は、意味モデルの <c>ConstraintNames</c> の XmlDoc を参照。
     /// </para>
     /// </remarks>
     public string Fit(string name)
@@ -273,7 +273,7 @@ public static class IdentifierLengthLimits
     /// <summary>SQLite</summary>
     public static IdentifierLengthLimit Sqlite { get; } = IdentifierLengthLimit.Unlimited;
 
-    /// <summary>方言名（<see cref="ErDiagram.TargetDbms"/> の値）から上限を引く。知らない方言は上限なし。</summary>
+    /// <summary>方言名（図の対象 DBMS の値。<see cref="DialectNames"/>）から上限を引く。知らない方言は上限なし。</summary>
     /// <remarks>方言名の照合は、方言プロバイダーの解決と同じく大文字小文字を区別しない。</remarks>
     public static IdentifierLengthLimit ForDbms(string? dbms)
     {
@@ -291,10 +291,10 @@ public static class IdentifierLengthLimits
     /// <summary>方言名と上限の表</summary>
     private static readonly (string Name, IdentifierLengthLimit Limit)[] ByDbms =
     [
-        ("sqlserver", SqlServer),
-        ("postgresql", PostgreSql),
-        ("mysql", MySql),
-        ("oracle", Oracle),
-        ("sqlite", Sqlite),
+        (DialectNames.SqlServer, SqlServer),
+        (DialectNames.PostgreSql, PostgreSql),
+        (DialectNames.MySql, MySql),
+        (DialectNames.Oracle, Oracle),
+        (DialectNames.Sqlite, Sqlite),
     ];
 }

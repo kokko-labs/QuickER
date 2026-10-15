@@ -1,3 +1,5 @@
+using QuickER.Dialects;
+
 namespace QuickER.Mcp;
 
 /// <summary>
@@ -429,7 +431,7 @@ public static class ErDiagramToolCatalog
                         sql = new
                         {
                             type = "object",
-                            description = $"Per-dialect raw SQL (used when implementation=sql). Keys must be dialect names: {string.Join(", ", TargetDbmsNames.All)}.",
+                            description = $"Per-dialect raw SQL (used when implementation=sql). Keys must be dialect names: {string.Join(", ", DialectNames.All)}.",
                             additionalProperties = new { type = "string" },
                         },
                         parameters = new

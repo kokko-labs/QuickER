@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Mcp;
 using QuickER.Mcp.Tools;
@@ -52,7 +53,7 @@ public static class CodeGenToolSet
                     provider = new
                     {
                         type = "string",
-                        @enum = TargetDbmsNames.All,
+                        @enum = DialectNames.All,
                         description = "Target DBMS/provider (optional; defaults to the diagram's target DBMS, or sqlserver if unspecified).",
                     },
                     force = new
@@ -86,7 +87,7 @@ public static class CodeGenToolSet
                     provider = new
                     {
                         type = "string",
-                        @enum = TargetDbmsNames.All,
+                        @enum = DialectNames.All,
                         description = "Target DBMS/provider (optional; defaults to the diagram's target DBMS, or sqlserver if unspecified).",
                     },
                 },

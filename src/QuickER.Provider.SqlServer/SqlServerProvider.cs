@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.SqlServer;
@@ -6,7 +7,7 @@ namespace QuickER.Provider.SqlServer;
 public sealed class SqlServerProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "sqlserver";
+    public const string ProviderName = DialectNames.SqlServer;
 
     /// <inheritdoc />
     public string Name => ProviderName;
