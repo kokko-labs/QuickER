@@ -269,6 +269,15 @@ SQLite checks foreign keys only when a connection asks it to, so without this th
 Since the schema declares the constraints, enforcing them is the correct default.
 An explicit `Foreign Keys` keyword in the connection string is honored exactly as written, so `Foreign Keys=False` restores the provider's own behavior.
 
+Every time it opens a connection, including a pooled one coming back, the SQLite factory also sets SQLite's busy timeout to the connection string's `Default Timeout` (30 seconds unless you set it), so a statement that finds the database locked by another connection waits instead of failing at once.
+The provider itself retries a locked database only on a statement's first step, and a write that commits on a later step, such as an `INSERT`, `UPDATE` or `DELETE` with `RETURNING` passed to `QueryBySqlAsync` / `QueryProjectionBySqlAsync` / `ExecuteScalarSqlAsync` / `ExecuteSqlAsync` outside a transaction, would otherwise fail with "database is locked" whenever another connection was reading.
+`Default Timeout=0` means no limit, as it does for the provider's own commands.
+Three things follow from this:
+
+- While SQLite waits, the cancellation token is not observed; a cancelled call returns only when the lock is released or the timeout runs out.
+- The wait applies only to connections that the generated `SqlConnectionFactory` opens. A repository given your own `ISqlConnectionFactory` does not get it unless your factory sets the busy timeout itself.
+- The connection string has no keyword for the busy timeout. To use another value, run `PRAGMA busy_timeout` on the opened connection; the value you set last replaces the factory's for that connection until it opens again.
+
 For creating a schema from the DDL QuickER generates, `SqliteSchemaBootstrap.ApplyDdlAsync` / `SqlServerSchemaBootstrap.ApplyDdlAsync` open a connection and run the whole script in one call.
 
 ```csharp

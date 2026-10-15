@@ -269,6 +269,18 @@ SQLite が外部キーを検査するのは接続側が要求したときだけ�
 スキーマが制約を宣言している以上、強制されるのが既定として正しいという判断です。
 接続文字列の `Foreign Keys` 指定はそのまま尊重するので、`Foreign Keys=False` を明示すればプロバイダ本来の挙動に戻せます。
 
+SQLite のファクトリは、接続を開くたびに（プールから戻った接続も含めて）SQLite の busy timeout を接続文字列の `Default Timeout`（指定しなければ 30 秒）に合わせます。
+別の接続がデータベースをロックしているとき、文はすぐに失敗せず、ロックが解けるのを待ちます。
+プロバイダ自身がロックで待ってやり直すのは各文の最初の step だけです。
+2 回目以降の step で確定する書き込み（トランザクションの外で `QueryBySqlAsync` / `QueryProjectionBySqlAsync` / `ExecuteScalarSqlAsync` / `ExecuteSqlAsync` へ渡した `RETURNING` つきの `INSERT`・`UPDATE`・`DELETE` など）は、これが無いと、別の接続が読んでいるだけで「database is locked」で失敗します。
+`Default Timeout=0` は、プロバイダ自身のコマンドと同じく上限なしの意味です。
+
+この仕組みから、次の 3 つのことが言えます。
+
+- SQLite が待っている間は、キャンセルトークンを見ません。取り消した呼び出しが戻るのは、ロックが解けたときか上限に達したときです。
+- 待つのは、生成された `SqlConnectionFactory` が開いた接続だけです。自前の `ISqlConnectionFactory` を渡したリポジトリでは、そのファクトリが busy timeout を当てない限り待ちません。
+- 接続文字列には busy timeout のキーワードがありません。別の値にしたいときは、開いた接続で `PRAGMA busy_timeout` を実行してください。後から設定した値が、その接続を次に開くまでファクトリの値に代わります。
+
 QuickER が生成した DDL からスキーマを作る用途には、`SqliteSchemaBootstrap.ApplyDdlAsync` / `SqlServerSchemaBootstrap.ApplyDdlAsync` があります。
 接続を開いてスクリプト全文を 1 回で実行します。
 
