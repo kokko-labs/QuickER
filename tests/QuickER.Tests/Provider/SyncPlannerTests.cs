@@ -1860,7 +1860,14 @@ public class SyncPlannerTests
             Kind = SchemaDiffKind.AlterColumn,
             TableName = "T",
             ColumnName = "Memo",
-            Column = Col("Memo", "nvarchar(50)"),
+            // 文字列型でない列の NULL 許容だけの変更＝照合順序も DEFAULT 制約も読み直さない素の ALTER COLUMN になる
+            Column = Col("Memo", "int"),
+            OldColumn = new Column
+            {
+                Name = "Memo",
+                DataType = "int",
+                IsNullable = false,
+            },
             IsSelected = true,
         };
 
@@ -1877,7 +1884,7 @@ public class SyncPlannerTests
             "GO",
             "",
             "-- ===== AlterColumn (1 items) =====",
-            "ALTER TABLE [T] ALTER COLUMN [Memo] nvarchar(50) NULL;",
+            "ALTER TABLE [T] ALTER COLUMN [Memo] int NULL;",
             "GO",
             "",
             ""

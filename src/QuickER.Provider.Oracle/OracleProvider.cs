@@ -53,6 +53,7 @@ public sealed class OracleProvider : IDatabaseProvider
             SupportsSetDefaultAction = false,
             SetDefaultRequiresColumnDefault = false,
             SupportsSchemaQualifiedTableNames = true,
+            ChecksDefaultOnColumnTypeChange = true,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,

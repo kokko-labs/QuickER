@@ -311,6 +311,11 @@ It is handled the same way: compared as `NO ACTION`, and left out of the DDL and
 SQL Server cannot create a `SET DEFAULT` foreign key when a NOT NULL referencing column has no DEFAULT constraint (error 1762).
 The diagram does not carry column defaults, so the DDL adds a comment before such a foreign key, and the sync names the foreign keys it adds or recreates in the confirmation dialog.
 It does not stop the sync, because the foreign key is created when the database column has a DEFAULT constraint.
+On SQL Server and PostgreSQL, altering a column reads the column's collation back at execution time and writes it again when the new type is a string type (without it, the column goes back to the database's default collation; PostgreSQL writes it only when it differs from the type's default).
+On SQL Server, a type change drops the column's DEFAULT constraint, changes the type, and adds the constraint back with the same name and definition (keeping it would make the change fail with error 5074).
+A sync that changes the kind of type of a column with a default value is shown in the confirmation dialog on every dialect except SQLite (SQL Server, PostgreSQL, MySQL and Oracle).
+When the default does not fit the new type, the sync fails on PostgreSQL and Oracle, the sync fails with error 1067 on MySQL, and an insert that uses the default fails on SQL Server.
+When the sync fails on MySQL or Oracle, DDL is not rolled back, so the statements before it stay applied.
 Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
 Recreating a unique constraint works the same way: when a unique constraint keeps its name (or the generated name `UQ_{table}_{columns}` matches the database's name) but its columns change, the drop and the add become one diff item, unselected by default.
 Adding a constraint under the name the database already uses would fail, and re-adding it can fail on duplicate values.
@@ -329,7 +334,7 @@ On the other three dialects it is shown for information only and is not synced.
 
 A computed column's nullability is never compared, because the database derives it from the expression and the diagram does not hold the expression.
 A computed column's type change can be selected only on PostgreSQL, where `ALTER COLUMN ... TYPE` keeps the expression, and selecting it never changes the column's nullability.
-On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server rejects the change; MySQL turns a `STORED` generated column into an ordinary column without the expression and rejects the change for a `VIRTUAL` one; a SQLite rebuild would drop the expression).
+On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server rejects the change and a SQLite rebuild would drop the expression; MySQL is shown for information only as well).
 On SQLite and Oracle, a unique constraint on exactly the primary key's columns is not compared and does not become a diff item.
 SQLite does not keep such a constraint, and Oracle rejects it; the primary key already guarantees uniqueness.
 The DDL and the tables the sync creates leave that unique constraint out and add a comment saying so.
@@ -404,14 +409,13 @@ MySQL has no statement that changes only a column's comment, and none that chang
 Both go through `ALTER TABLE ... MODIFY COLUMN`, which re-states the **whole** column definition: whatever the new definition leaves out is dropped from the column.
 MySQL commits DDL implicitly, so there is no rolling that back.
 
-QuickER therefore takes the definition from two different places, depending on what the change is about.
+QuickER therefore rebuilds the definition from `information_schema.COLUMNS` at execution time and replaces only what the change is about.
 
-- **Description sync and column-order sync** rebuild the definition from `information_schema.COLUMNS` at execution time and replace only the trailing clause they exist to change: the comment, or `AFTER` / `FIRST`.
+- **Description sync and column-order sync** replace only the trailing clause they exist to change (the comment, or `AFTER` / `FIRST`), and **altering a column** (a type or nullability change) replaces only the type and the nullability.
   Everything the diagram does not model is carried over untouched: `DEFAULT` (literal and expression, `BIT` and binary literals included), `AUTO_INCREMENT`, the collation and with it the character set, `ON UPDATE CURRENT_TIMESTAMP`, `INVISIBLE`, a spatial `SRID`, and generated (`VIRTUAL` / `STORED`) columns.
-  Column-order sync preserves the column's existing comment as well.
-- **Altering a column** (a type or nullability change) re-specifies from the diagram, because the diagram is what that change expresses.
-  It therefore **does** drop the attributes listed above, none of which the diagram can represent.
-  The comment alone is re-stated from the live database and kept (changing it is the job of the description sync item).
+  Column-order sync and altering a column preserve the column's existing comment as well (changing it is the job of the description sync item).
+- **Altering a column** writes the collation only when the new type is a string type (`JSON` and some other types do not accept `COLLATE`).
+  When a kept attribute does not fit the new type (a default of `'abc'` kept while changing to `int`, for example), the change fails with a MySQL error.
   Such diffs are unselected by default.
 - **Changing the primary key** removes `AUTO_INCREMENT` from an old primary key column before dropping the key, because MySQL refuses to drop it otherwise (error 1075).
   `AUTO_INCREMENT` is not added back because the diagram cannot represent it (the comment, default, and other attributes are carried over from the live definition).
@@ -428,7 +432,8 @@ Two things do not come through the rebuild, both because the catalog does not re
 - A character-set introducer on a string literal inside a generated-column expression (`_latin1'x'`) is re-parsed and written back under the connection's character set (`_utf8mb4'x'`).
   The expression still means the same thing; only the text the catalog records for it changes.
 
-If the column no longer exists when the script runs, its statement folds into a no-op, and the run is still reported as successful, since nothing failed.
+For description sync and column-order sync, if the column no longer exists when the script runs, its statement folds into a no-op, and the run is still reported as successful, since nothing failed.
+Altering a column fails when the column does not exist, because a selected change that silently does nothing would be wrong.
 If the column does exist but its definition cannot be rebuilt, the statement fails instead, so a half-applied column order is never reported as a success.
 
 Before running the script, the sync clears `NO_BACKSLASH_ESCAPES` from its own session's `sql_mode`; the global setting is not touched.

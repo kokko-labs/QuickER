@@ -178,7 +178,7 @@ public static class UnsupportedTreatments
             sync: new TreatmentCell(
                 SqlServer: Preserve, // 列の変更で DEFAULT 制約を読み直し、外して付け直す（J1）。J2 の事前の警告（型の種類の変更）は別の経路で、このマスには表さない
                 PostgreSql: Warning, // DEFAULT のある列の型の種類の変更を事前に警告（J2）
-                MySql: Preserve, // 型変更のとき読み直して保つ
+                MySql: Preserve, // 型変更のとき読み直して保つ。J2 の事前の警告は SQL Server と同じく別の経路で、このマスには表さない
                 Oracle: Warning, // 同上（J2）
                 Sqlite: Warning // 再構築は警告
             ),

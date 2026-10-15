@@ -1,3 +1,4 @@
+using System;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -97,7 +98,10 @@ public class PostgreSqlSyncScriptBuilderTests
             }
         );
 
-        sql.Should().Contain("ALTER TABLE \"customer\" ALTER COLUMN \"name\" TYPE varchar(100);");
+        sql.Should()
+            .Contain(
+                "EXECUTE 'ALTER TABLE \"customer\" ALTER COLUMN \"name\" TYPE varchar(100)' || COALESCE(' COLLATE ' || coll, '') || '';"
+            );
         sql.Should().Contain("ALTER TABLE \"customer\" ALTER COLUMN \"name\" SET NOT NULL;");
     }
 
@@ -148,10 +152,42 @@ public class PostgreSqlSyncScriptBuilderTests
             }
         );
 
-        var expected = expectsUsing
-            ? $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType} USING \"code\"::{newType};"
-            : $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType};";
+        var usingClause = expectsUsing ? $" USING \"code\"::{newType}" : string.Empty;
+        // 文字列型への変更は、照合順序を読み直す DO ブロックの中で実行する（COLLATE は USING より前）
+        var expected = newType.StartsWith("varchar", StringComparison.Ordinal)
+            ? $"EXECUTE 'ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType}' || COALESCE(' COLLATE ' || coll, '') || '{usingClause}';"
+            : $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType}{usingClause};";
         sql.Should().Contain(expected);
+    }
+
+    /// <summary>
+    /// 文字列型への列の変更は、実行時に列の照合順序を読み、型の既定と違うときだけ COLLATE を書き添えることを検証する
+    /// （表は to_regclass で ALTER TABLE と同じ表に絞る。文字列型でない型への変更は照合順序を読まない）
+    /// </summary>
+    [Fact(DisplayName = "AlterColumn は文字列型への変更で、型の既定と違う照合順序だけを書き添える")]
+    public void AlterColumn_StringType_ReadsBackNonDefaultCollation()
+    {
+        SchemaDiffItem Alter(string type) =>
+            new()
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "sales.orders",
+                ColumnName = "code",
+                Column = new Column
+                {
+                    Name = "code",
+                    DataType = type,
+                    IsNullable = true,
+                },
+                IsSelected = true,
+            };
+
+        var text = Build(Alter("text"));
+        text.Should()
+            .Contain("CASE WHEN a.attcollation = 0 OR a.attcollation = t.typcollation THEN NULL");
+        text.Should().Contain("a.attrelid = to_regclass('\"sales\".\"orders\"')");
+        text.Should().Contain("quote_ident(n.nspname) || '.' || quote_ident(co.collname)");
+        Build(Alter("integer")).Should().NotContain("attcollation");
     }
 
     /// <summary>NULL 許容へ変更する AlterColumn が DROP NOT NULL を生成することを検証する</summary>

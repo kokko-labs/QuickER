@@ -33,6 +33,7 @@ public static class TestDialectCapabilities
             SupportsSetDefaultAction = true,
             SetDefaultRequiresColumnDefault = false,
             SupportsSchemaQualifiedTableNames = true,
+            ChecksDefaultOnColumnTypeChange = false,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

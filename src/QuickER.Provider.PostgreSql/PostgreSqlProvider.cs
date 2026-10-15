@@ -51,6 +51,7 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
             SupportsSetDefaultAction = true,
             SetDefaultRequiresColumnDefault = false,
             SupportsSchemaQualifiedTableNames = true,
+            ChecksDefaultOnColumnTypeChange = true,
             SupportsComputedColumnTypeChange = true,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = false,

@@ -103,15 +103,103 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>ALTER TABLE ... ALTER COLUMN（列定義変更）文を生成する</summary>
+    /// <remarks>
+    /// <para>
+    /// 図に無い列属性を実行時に読み直して保つ。<c>ALTER COLUMN</c> は照合順序を書かなければ DB の既定へ戻すので、
+    /// 新しい型が文字列型なら <c>sys.columns.collation_name</c> を読んで書き添える。型が変わるときは、DEFAULT 制約
+    /// （<c>sys.default_constraints</c>）を読み、外して型を変えてから同じ名前・同じ定義で付け直す（残したままだと
+    /// エラー 5074 で断られる）。付け直しでは既定値が新しい型に合うかを確かめないので、合わなくても同期は通り、
+    /// 既定値を使う行の追加で失敗する（計画が事前に警告する）。NULL 許容だけの変更では DEFAULT 制約に触れない。
+    /// </para>
+    /// <para>
+    /// 実行時に読んだ名前は <c>QUOTENAME</c> を通し、文は <c>nvarchar(max)</c> の変数に組み立てて <c>sp_executesql</c> で
+    /// 実行する。表は <c>OBJECT_ID</c> で <c>ALTER TABLE</c> と同じ 1 つの表に絞る。
+    /// </para>
+    /// </remarks>
     protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
+        var nullability = SyncScriptBuilderHelper.GetNullabilityClause(col);
+        var keepsCollation = IsCollatableType(col.DataType);
+        var typeChanges =
+            item.OldColumn is null
+            || !DbTypeText.AreEquivalent(item.OldColumn.DataType, col.DataType);
+
+        // 照合順序も DEFAULT 制約も関わらない変更（文字列型でない列の NULL 許容だけの変更）は、素の ALTER COLUMN で足りる
+        if (!keepsCollation && !typeChanges)
+        {
+            sb.AppendLine(
+                $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
+                    + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {nullability};"
+            );
+            sb.AppendLine("GO");
+            return;
+        }
+
+        // 動的 SQL の文字列リテラルへ埋める名前・型は、リテラルエスケープ込みで組む
+        var table = SqlIdentifier.QuoteForDynamicSql(item.TableName);
+        var column = SqlIdentifier.EscapeStringLiteral(SqlIdentifier.BracketSimple(col.Name));
+        var columnName = SqlIdentifier.EscapeStringLiteral(col.Name);
+        var type = SqlIdentifier.EscapeStringLiteral(col.DataType);
+
+        // 照合順序と DEFAULT 制約は実行時にカタログから読む（ALTER TABLE と同じ 1 つの表に OBJECT_ID で絞る）
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
-                + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"
+            "DECLARE @df sysname, @dfdef nvarchar(max), @coll sysname, @sql nvarchar(max);"
         );
+
+        if (typeChanges)
+        {
+            sb.AppendLine("SELECT @df = dc.name, @dfdef = dc.definition");
+            sb.AppendLine("FROM sys.default_constraints dc");
+            sb.AppendLine(
+                "JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id"
+            );
+            sb.AppendLine(
+                $"WHERE dc.parent_object_id = OBJECT_ID(N'{table}') AND c.name = N'{columnName}';"
+            );
+            // 型を変える前に DEFAULT 制約を外す（残すとエラー 5074 で ALTER COLUMN が断られる）
+            sb.AppendLine($"SET @sql = N'ALTER TABLE {table} DROP CONSTRAINT ' + QUOTENAME(@df);");
+            sb.AppendLine("IF @df IS NOT NULL EXEC sys.sp_executesql @sql;");
+        }
+
+        if (keepsCollation)
+        {
+            sb.AppendLine("SELECT @coll = c.collation_name FROM sys.columns c");
+            sb.AppendLine(
+                $"WHERE c.object_id = OBJECT_ID(N'{table}') AND c.name = N'{columnName}';"
+            );
+        }
+
+        // 照合順序を書かない ALTER COLUMN は DB の既定へ戻すので、読んだ照合順序を書き添える（名前はカタログの値＝識別子）
+        sb.AppendLine(
+            $"SET @sql = N'ALTER TABLE {table} ALTER COLUMN {column} {type}'"
+                + " + ISNULL(N' COLLATE ' + @coll, N'')"
+                + $" + N' {nullability}';"
+        );
+        sb.AppendLine("EXEC sys.sp_executesql @sql;");
+
+        if (typeChanges)
+        {
+            // 同じ名前・同じ定義で付け直す。定義はカタログが SQL の式の形で持つ（('it''s') など）ので、文字列リテラルへ
+            // 埋めるのでなく変数のまま連結する（二重化すると式が変わる）
+            sb.AppendLine(
+                $"SET @sql = N'ALTER TABLE {table} ADD CONSTRAINT ' + QUOTENAME(@df) + N' DEFAULT ' + @dfdef + N' FOR {column}';"
+            );
+            sb.AppendLine("IF @df IS NOT NULL EXEC sys.sp_executesql @sql;");
+        }
+
         sb.AppendLine("GO");
     }
+
+    /// <summary>型の表記が照合順序を持つ文字列型（<c>char</c> / <c>varchar</c> / <c>nchar</c> / <c>nvarchar</c> / <c>text</c> / <c>ntext</c>）か</summary>
+    private static bool IsCollatableType(string type) =>
+        type.Split('(')[0].Trim().ToLowerInvariant()
+            is "char"
+                or "varchar"
+                or "nchar"
+                or "nvarchar"
+                or "text"
+                or "ntext";
 
     /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）文を生成する</summary>
     /// <remarks>

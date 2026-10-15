@@ -162,6 +162,14 @@ public enum SyncPlanWarningKind
     /// 警告に留める。表ごとに 1 件。
     /// </remarks>
     SchemaQualifiedTableName,
+
+    /// <summary>選んだ列の変更が、既定値のある列の型の種類を変える（SQLite 以外の 4 方言）。</summary>
+    /// <remarks>
+    /// 同期は DB の既定値を保つので、既定値が新しい型に合わないと、同期そのものか既定値を使う行の追加が失敗する
+    /// （<see cref="SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange"/>）。合うかは図からは分からないので、
+    /// 実行は止めずに警告に留める。
+    /// </remarks>
+    DefaultOnColumnTypeKindChange,
 }
 
 /// <summary>
@@ -175,7 +183,8 @@ public enum SyncPlanWarningKind
 /// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> では
 /// 計画から外した項目のテーブル、<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
 /// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> と <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/>
-/// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）。
+/// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
+/// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。

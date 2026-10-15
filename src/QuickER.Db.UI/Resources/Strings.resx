@@ -356,6 +356,10 @@ Do you want to run this against {0}?</value>
     <value>Note: the changes below are skipped because they would leave a foreign key whose column order no longer matches the referenced key, which MySQL cannot re-add (the foreign key would stay dropped). To apply them, drop the foreign key first (select its removal) or change it by hand:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange" xml:space="preserve">
+    <value>Note: the columns below have a default value in the database and their type changes kind (old type → new type). The sync keeps the database's default; if it does not fit the new type, the sync or a later insert that uses the default fails (when the sync fails on MySQL or Oracle, DDL is not rolled back and the statements before it stay applied):
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmSchemaQualifiedTableName" xml:space="preserve">
     <value>Note: the tables below have a dot in their name. SQLite reads such a name as a table in an attached database (the part before the dot), so the sync fails unless that database is attached:
 {0}</value>

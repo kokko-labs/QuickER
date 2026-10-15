@@ -1191,6 +1191,7 @@ public static class UnsupportedCoverage
             null,
             [
                 "SchemaDiffServiceTests.CompositeForeignKeyPairOrder_IsNeverADifference",
+                "SchemaDiffServiceTests.CompositeForeignKeyPairOrder_IsNotDescribedAsReferenceChange",
                 "OracleSchemaSyncIntegrationTests.CompositeForeignKeyDeclaredInOtherOrder_ProducesNoDiff",
                 "SqlServerSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
                 "MySqlSyncDependencyIntegrationTests.CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff",
@@ -1303,6 +1304,100 @@ public static class UnsupportedCoverage
             null,
             ["SchemaQualifiedTableNameTests.Ddl_DottedTableName_IsAnnotatedOnlyWhereDeclared"]
         ),
+        (
+            UnsupportedDefinitionKind.DefaultValue,
+            UnsupportedFeature.Sync,
+            DialectNames.SqlServer,
+            [
+                "SqlServerColumnAttributeSyncIntegrationTests.AlterColumn_WithDefaultConstraint_ReaddsSameDefault",
+                "SqlServerColumnAttributeSyncIntegrationTests.AlterColumn_IncompatibleDefault_SucceedsButInsertFails",
+                "SqlServerColumnAttributeSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
+                "SchemaSyncDialogViewModelTests.Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults",
+                "SqlServerSyncScriptBuilderTests.AlterColumn_ReadsBackOnlyWhatMatters",
+                "DefaultOnColumnTypeKindChangeTests.TypeKindChangeWithDefault_WarnsOnlyWhereDeclared",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.DefaultValue,
+            UnsupportedFeature.Sync,
+            DialectNames.PostgreSql,
+            [
+                "PostgreSqlColumnAttributeSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
+                "DefaultOnColumnTypeKindChangeTests.TypeKindChangeWithDefault_WarnsOnlyWhereDeclared",
+                "DefaultOnColumnTypeKindChangeTests.SameKindOrNoDefault_DoesNotWarn",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.DefaultValue,
+            UnsupportedFeature.Sync,
+            DialectNames.MySql,
+            [
+                "MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability",
+                "MySqlColumnAttributeSyncIntegrationTests.TypeKindChangeWithIncompatibleDefault_IsWarnedAndFails",
+                "MySqlSyncScriptBuilderTests.AlterColumn_RebuildsLiveDefinitionWithTypeAndNullability",
+                "DefaultOnColumnTypeKindChangeTests.TypeKindChangeWithDefault_WarnsOnlyWhereDeclared",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.DefaultValue,
+            UnsupportedFeature.Sync,
+            DialectNames.Oracle,
+            [
+                "OracleSchemaSyncIntegrationTests.TypeKindChangeWithDefault_IsWarned",
+                "DefaultOnColumnTypeKindChangeTests.TypeKindChangeWithDefault_WarnsOnlyWhereDeclared",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.Collation,
+            UnsupportedFeature.Sync,
+            DialectNames.SqlServer,
+            [
+                "SqlServerColumnAttributeSyncIntegrationTests.AlterColumn_KeepsCollation",
+                "SqlServerSyncScriptBuilderTests.AlterColumn_GeneratesAlterColumn",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.Collation,
+            UnsupportedFeature.Sync,
+            DialectNames.PostgreSql,
+            [
+                "PostgreSqlColumnAttributeSyncIntegrationTests.AlterColumn_KeepsNonDefaultCollation",
+                "PostgreSqlSyncScriptBuilderTests.AlterColumn_StringType_ReadsBackNonDefaultCollation",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.Collation,
+            UnsupportedFeature.Sync,
+            DialectNames.MySql,
+            [
+                "MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability",
+                "MySqlSyncScriptBuilderTests.AlterColumn_KeepsCollationOnlyForStringTypes",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.IdentityAcceptingValues,
+            UnsupportedFeature.Sync,
+            DialectNames.MySql,
+            ["MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability"]
+        ),
+        (
+            UnsupportedDefinitionKind.InvisibleColumn,
+            UnsupportedFeature.Sync,
+            DialectNames.MySql,
+            ["MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability"]
+        ),
+        (
+            UnsupportedDefinitionKind.ColumnOnUpdate,
+            UnsupportedFeature.Sync,
+            DialectNames.MySql,
+            ["MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability"]
+        ),
+        (
+            UnsupportedDefinitionKind.SpatialReferenceId,
+            UnsupportedFeature.Sync,
+            DialectNames.MySql,
+            ["MySqlColumnAttributeSyncIntegrationTests.AlterColumn_ChangesOnlyTypeAndNullability"]
+        ),
     ];
 
     /// <summary>扱いの未実装（種類・機能・方言〔null は「なし」以外の全方言〕・実装するフェーズ）</summary>
@@ -1311,63 +1406,5 @@ public static class UnsupportedCoverage
         UnsupportedFeature Feature,
         string? Dialect,
         string Phase
-    )[] PendingTreatments =
-    [
-        (
-            UnsupportedDefinitionKind.DefaultValue,
-            UnsupportedFeature.Sync,
-            DialectNames.SqlServer,
-            "2f"
-        ),
-        (
-            UnsupportedDefinitionKind.DefaultValue,
-            UnsupportedFeature.Sync,
-            DialectNames.PostgreSql,
-            "2f"
-        ),
-        (UnsupportedDefinitionKind.DefaultValue, UnsupportedFeature.Sync, DialectNames.MySql, "2f"),
-        (
-            UnsupportedDefinitionKind.DefaultValue,
-            UnsupportedFeature.Sync,
-            DialectNames.Oracle,
-            "2f"
-        ),
-        (
-            UnsupportedDefinitionKind.Collation,
-            UnsupportedFeature.Sync,
-            DialectNames.SqlServer,
-            "2f"
-        ),
-        (
-            UnsupportedDefinitionKind.Collation,
-            UnsupportedFeature.Sync,
-            DialectNames.PostgreSql,
-            "2f"
-        ),
-        (UnsupportedDefinitionKind.Collation, UnsupportedFeature.Sync, DialectNames.MySql, "2f"),
-        (
-            UnsupportedDefinitionKind.IdentityAcceptingValues,
-            UnsupportedFeature.Sync,
-            DialectNames.MySql,
-            "2f"
-        ),
-        (
-            UnsupportedDefinitionKind.InvisibleColumn,
-            UnsupportedFeature.Sync,
-            DialectNames.MySql,
-            "2f"
-        ),
-        (
-            UnsupportedDefinitionKind.ColumnOnUpdate,
-            UnsupportedFeature.Sync,
-            DialectNames.MySql,
-            "2f"
-        ),
-        (
-            UnsupportedDefinitionKind.SpatialReferenceId,
-            UnsupportedFeature.Sync,
-            DialectNames.MySql,
-            "2f"
-        ),
-    ];
+    )[] PendingTreatments = [];
 }

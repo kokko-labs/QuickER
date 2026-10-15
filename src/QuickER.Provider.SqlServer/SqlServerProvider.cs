@@ -54,6 +54,7 @@ public sealed class SqlServerProvider : IDatabaseProvider
             SupportsSetDefaultAction = true,
             SetDefaultRequiresColumnDefault = true,
             SupportsSchemaQualifiedTableNames = true,
+            ChecksDefaultOnColumnTypeChange = true,
             SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,

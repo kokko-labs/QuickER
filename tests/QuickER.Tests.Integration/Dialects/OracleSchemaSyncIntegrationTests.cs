@@ -612,6 +612,67 @@ public sealed class OracleSchemaSyncIntegrationTests(OracleContainerFixture fixt
             .Be("FK_lp_child");
     }
 
+    /// <summary>
+    /// 既定値のある列の型の種類を変える同期で、取込の既定値が計画の文脈へ渡り、計画が事前に警告することを検証する（J2）。
+    /// 実行したときの結果も固定する（Oracle も型の変更で既定値を新しい型で確かめるので、合わない既定値では同期が失敗する）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] Oracle 同期: 既定値のある列の型の種類の変更は事前に警告される"
+    )]
+    public async Task TypeKindChangeWithDefault_IsWarned()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            "CREATE TABLE \"jd\" (\"id\" NUMBER(10) NOT NULL PRIMARY KEY, \"v\" VARCHAR2(20) DEFAULT 'abc' NOT NULL)",
+            Ct
+        );
+
+        var provider = new OracleProvider();
+        var live = await provider.SchemaImporter.ImportAsync(fixture.ConnectionString, 120, Ct);
+        var target = live.Entities.Select(e => e.Clone(preserveId: true)).ToList();
+        target.Single(e => e.TableName == "jd").Columns.Single(c => c.Name == "v").DataType =
+            "NUMBER(10)";
+        var items = new SchemaDiffService()
+            .Compute(
+                live.Entities,
+                live.Relationships,
+                target,
+                live.Relationships,
+                provider.SyncCapabilities
+            )
+            .Items;
+
+        foreach (var item in items)
+        {
+            item.IsSelected = item.Kind == SchemaDiffKind.AlterColumn;
+        }
+
+        var plan = new SyncPlanner().BuildPlan(
+            items,
+            provider.SyncCapabilities,
+            new SyncPlanContext
+            {
+                LiveEntities = live.Entities,
+                LiveRelationships = live.Relationships,
+                ColumnDefaults = live.ColumnDefaults,
+            }
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.DefaultOnColumnTypeKindChange)
+            .Which.Detail.Should()
+            .StartWith("v (");
+
+        var script = provider.SyncScriptBuilder.Build(plan);
+        var result = await provider.SyncExecutor.ExecuteAsync(
+            fixture.ToDbConnectionSettings(),
+            script,
+            Ct
+        );
+        result.Committed.Should().Be(false, $"{result.Error}{System.Environment.NewLine}{script}");
+    }
+
     private async Task<List<(string Code, int Id)>> QueryPkItemRowsAsync()
     {
         var rows = new List<(string Code, int Id)>();

@@ -419,6 +419,53 @@ public class SchemaDiffServiceTests
         }
     }
 
+    /// <summary>
+    /// 並び以外の理由（参照アクション）で作り直す複合外部キーの説明に、列ペアの並びだけの違いを「参照の変更」として
+    /// 出さないことを検証する（5 方言。差分のシグネチャと同じく並びを見ない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "複合外部キーの列ペアの並び: 作り直しの説明に並びだけの違いを参照の変更として出さない（5 方言）"
+    )]
+    public void CompositeForeignKeyPairOrder_IsNotDescribedAsReferenceChange()
+    {
+        var referencePrefix = ProviderStrings.Diff_ForeignKeyChange_Reference.Split('{')[0];
+
+        foreach (var (dialect, capabilities) in DialectCapabilities)
+        {
+            var parent = Tbl("P", ("A", "int", true), ("B", "int", true));
+            var child = Tbl("C", ("Id", "int", true), ("X", "int", false), ("Y", "int", false));
+            List<RelationshipColumnPair> pairs =
+            [
+                new(parent.Columns[0].Id, child.Columns[1].Id),
+                new(parent.Columns[1].Id, child.Columns[2].Id),
+            ];
+            var live = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ColumnPairs = [.. pairs.AsEnumerable().Reverse()],
+                ConstraintName = "FK_C_P",
+            };
+            var target = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ColumnPairs = pairs,
+                ConstraintName = "FK_C_P",
+                OnDelete = ForeignKeyReferentialAction.Cascade,
+            };
+
+            var alter = new SchemaDiffService()
+                .Compute([parent, child], [live], [parent, child], [target], capabilities)
+                .Items.Should()
+                .ContainSingle($"{dialect}")
+                .Which;
+
+            alter.Kind.Should().Be(SchemaDiffKind.AlterForeignKey, $"{dialect}");
+            alter.Description.Should().NotContain(referencePrefix, $"{dialect}");
+        }
+    }
+
     /// <summary>計算列でない列の NULL 許容差は従来どおり検出されることを検証する（スキップの範囲の下限）</summary>
     [Fact(DisplayName = "計算列でなければ NULL 許容差は従来どおり AlterColumn になる")]
     public void NonComputedColumn_NullabilityChange_IsStillDiffed()

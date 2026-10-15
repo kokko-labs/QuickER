@@ -30,13 +30,11 @@ namespace QuickER.Provider.MySql;
 /// MySQL 固有の重要事項:
 /// <list type="bullet">
 ///   <item>
-///   列変更はすべて <c>MODIFY COLUMN</c> による列定義の完全再指定で行うが、定義の出どころが 2 系統ある。
-///   <b>AlterColumn</b>（型・NULL 制約を変える操作）はモデル（<see cref="SchemaDiffItem.Column"/>）を正とした再指定で、
-///   図に無い列属性（DEFAULT / AUTO_INCREMENT / 照合順序 / ON UPDATE / INVISIBLE / SRID / 生成列の式）は落ちる
-///   （生成列は、<c>STORED</c> なら普通の列になり、<c>VIRTUAL</c> なら MODIFY がエラー 3106 で断られる）。
-///   <b>SetColumnDescription / ReorderColumns</b>（末尾句だけを変える操作）はモデルを使わず、
-///   <c>information_schema</c> から実行時点の実定義を再構成して COMMENT・位置だけを差し替える
-///   （<c>AppendLiveColumnDefinitionLookup</c>）。
+///   列変更はすべて <c>MODIFY COLUMN</c> による列定義の完全再指定で行う。定義は 3 つの操作とも
+///   <c>information_schema</c> から実行時点の実定義を再構成し（<c>AppendLiveColumnDefinitionLookup</c>）、変える部分だけを
+///   差し替える。<b>AlterColumn</b> は型と NULL 許容（図の値）、<b>SetColumnDescription</b> は COMMENT、
+///   <b>ReorderColumns</b> は位置。図に無い列属性（DEFAULT / AUTO_INCREMENT / 照合順序と文字集合 / ON UPDATE /
+///   INVISIBLE / SRID / 生成列の式）は保つ。実行時に列が無ければ、AlterColumn は失敗させ、ほかの 2 つは何もしない。
 ///   </item>
 ///   <item>テーブル説明は <c>ALTER TABLE ... COMMENT = '…'</c>（削除は空文字）で設定する。</item>
 ///   <item>
@@ -147,37 +145,40 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <summary>ALTER TABLE ... MODIFY COLUMN（列定義変更）文を生成する</summary>
     /// <remarks>
     /// <para>
-    /// MySQL の MODIFY は列定義を完全に再指定するため、型・NULL 制約に加えて COMMENT も含める
-    /// （含めないと既存コメントが消える）。COMMENT は DB の現在の説明（<see cref="SchemaDiffItem.OldColumn"/>）で書き、
-    /// 図の説明は使わない＝説明を変えるのは説明の同期の項目（SetColumnDescription）だけにする。
+    /// MySQL の MODIFY は列定義の完全再指定なので、定義は実行時点のカタログから再構成し
+    /// （<see cref="AppendLiveColumnDefinitionLookup(StringBuilder, string, string, bool, string?, bool?)"/>）、
+    /// 型と NULL 許容だけを図の値へ差し替える。DEFAULT / AUTO_INCREMENT / 照合順序と文字集合 / ON UPDATE / INVISIBLE /
+    /// SRID / 生成列の式 / COMMENT は DB のまま保つ（図はこれらを持たず、MySQL の DDL は暗黙コミットで取り消せない）。
+    /// COMMENT を DB の値で書くので、説明を変えるのは説明の同期の項目（SetColumnDescription）だけになる。
     /// </para>
     /// <para>
-    /// <b>MODIFY は図に無い列属性を落とす</b>: 意味モデルが持たない DEFAULT / AUTO_INCREMENT /
-    /// 照合順序 / ON UPDATE / INVISIBLE / SRID は、この再指定で実 DB から消える（生成列の式は、<c>STORED</c> の生成列なら
-    /// 消えて普通の列になり、<c>VIRTUAL</c> の生成列なら MODIFY がエラー 3106 で断られる）。
-    /// AlterColumn は型そのものを変える操作＝モデルが正なので、これは意図した挙動（既定未選択の差分項目）。
-    /// 末尾句だけを変える SetColumnDescription / ReorderColumns は逆にライブ再構成を使い、
-    /// 列属性を温存する（<c>AppendLiveColumnDefinitionLookup</c>）。
+    /// 照合順序は、新しい型が文字列型のときだけ書き添える（JSON 型などへ変えるとき <c>COLLATE</c> を付けると文が通らない。
+    /// 数値型は黙って無視する＝実 DB で確認）。
+    /// 保った属性が新しい型に合わない（既定値 <c>'abc'</c> のまま <c>int</c> へ変える等）と、MODIFY は MySQL のエラーで失敗する。
+    /// </para>
+    /// <para>
+    /// 実行時に列が無ければ失敗させる（選んだ列の変更が黙って何もしないのは誤り）。説明・列順の同期は、列が無ければ
+    /// 何もしない（<see cref="AppendModifyColumnStatement"/>）。
     /// </para>
     /// </remarks>
     protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
 
-        // COMMENT は DB の現在の説明（取り込んだ live の列）で書く。図の説明で書くと、説明の変更を選んでいないのに
-        // 型の変更だけで説明が消える・変わる。説明の変更を選んでいれば、後段の説明のセクションが上書きする
-        var definition = new Column
-        {
-            Name = col.Name,
-            DataType = col.DataType,
-            IsNullable = col.IsNullable,
-            IsPrimaryKey = col.IsPrimaryKey,
-            Description = item.OldColumn?.Description ?? col.Description,
-        };
-
-        sb.AppendLine(
-            $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
-                + $"MODIFY COLUMN {MySqlIdentifier.QuoteSimple(col.Name)} {BuildColumnDefinition(definition)};"
+        AppendLiveColumnDefinitionLookup(
+            sb,
+            item.TableName,
+            $"'{MySqlIdentifier.EscapeStringLiteral(col.Name)}'",
+            includeAutoIncrement: true,
+            typeOverride: col.DataType,
+            nullableOverride: !(col.IsPrimaryKey || !col.IsNullable)
+        );
+        AppendModifyColumnStatement(
+            sb,
+            item.TableName,
+            col.Name,
+            position: null,
+            missingColumnFails: true
         );
     }
 
@@ -575,11 +576,18 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <param name="includeAutoIncrement">
     /// 再構成した定義に <c>AUTO_INCREMENT</c> を残すか。主キーを外す前にその列から外したいときだけ <c>false</c>。
     /// </param>
+    /// <param name="typeOverride">
+    /// 型を DB の <c>COLUMN_TYPE</c> の代わりにこの表記にする（列の変更）。<c>null</c> なら DB の型のまま。
+    /// 新しい型が文字列型でなければ照合順序を書き添えない。
+    /// </param>
+    /// <param name="nullableOverride">NULL 許容を DB の値の代わりにこの値にする（列の変更）。<c>null</c> なら DB のまま。</param>
     private static void AppendLiveColumnDefinitionLookup(
         StringBuilder sb,
         string tableName,
         string columnNameExpression,
-        bool includeAutoIncrement
+        bool includeAutoIncrement,
+        string? typeOverride = null,
+        bool? nullableOverride = null
     )
     {
         var table = MySqlIdentifier.EscapeStringLiteral(MySqlIdentifier.TableNameOnly(tableName));
@@ -615,15 +623,31 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         // 2 段目: 復元した式を織り込みつつ列定義（COMMENT を除く）を組み立てる
         sb.AppendLine("SET @def = NULL;");
         sb.AppendLine("SELECT CONCAT(");
-        sb.AppendLine("c.COLUMN_TYPE,");
-        // 照合順序は文字列型にだけ付く（非文字列型は COLLATION_NAME が NULL）
-        sb.AppendLine("IF(c.COLLATION_NAME IS NULL, '', CONCAT(' COLLATE ', c.COLLATION_NAME)),");
+        sb.AppendLine(
+            typeOverride is null
+                ? "c.COLUMN_TYPE,"
+                : $"'{MySqlIdentifier.EscapeStringLiteral(typeOverride)}',"
+        );
+        // 照合順序は文字列型にだけ付く（非文字列型は COLLATION_NAME が NULL）。型を変えるときは、新しい型が
+        // 文字列型のときだけ書き添える（JSON 型などへ変えるときに COLLATE を付けると文が通らない）
+        sb.AppendLine(
+            typeOverride is null || IsStringType(typeOverride)
+                ? "IF(c.COLLATION_NAME IS NULL, '', CONCAT(' COLLATE ', c.COLLATION_NAME)),"
+                : "'',"
+        );
         // 生成列は式と VIRTUAL / STORED の別を復元する（DEFAULT_GENERATED とは別物なので文字列判定を分ける）
         sb.AppendLine(
             "IF(@gen = '', '', CONCAT(' GENERATED ALWAYS AS (', @gen, ') ', "
                 + "IF(INSTR(c.EXTRA, 'STORED GENERATED') > 0, 'STORED', 'VIRTUAL'))),"
         );
-        sb.AppendLine("IF(c.IS_NULLABLE = 'YES', ' NULL', ' NOT NULL'),");
+        sb.AppendLine(
+            nullableOverride switch
+            {
+                null => "IF(c.IS_NULLABLE = 'YES', ' NULL', ' NOT NULL'),",
+                true => "' NULL',",
+                false => "' NOT NULL',",
+            }
+        );
         // 空間列は空間参照系を保つ（SRS_ID が非 NULL のときだけ SRID を付ける）
         sb.AppendLine("IF(c.SRS_ID IS NULL, '', CONCAT(' SRID ', c.SRS_ID)),");
         // DEFAULT は 4 分岐。CURRENT_TIMESTAMP の判定を DEFAULT_GENERATED より先に置くのは、
@@ -674,11 +698,16 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 位置指定句（<c>" AFTER `x`"</c> / <c>" FIRST"</c>。動的 SQL のリテラル内へ入るため
     /// 識別子はリテラルエスケープ済みであること）。位置を変えないときは <c>null</c>。
     /// </param>
+    /// <param name="missingColumnFails">
+    /// 実行時に列が無いとき失敗させるか。列の変更（AlterColumn）は <c>true</c>＝選んだ変更が黙って何もしないのは誤り。
+    /// 説明・列順の同期は <c>false</c>＝無害な <c>DO 0</c>（その列が無ければ変えるものも無い）。
+    /// </param>
     private static void AppendModifyColumnStatement(
         StringBuilder sb,
         string tableName,
         string columnName,
-        string? position
+        string? position,
+        bool missingColumnFails = false
     )
     {
         // クォートした名前を CONCAT の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
@@ -689,6 +718,13 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         var failure = MySqlIdentifier.EscapeStringLiteral(
             $"QuickER sync: {tableName}.{columnName} definition could not be rebuilt"
         );
+        var missing = missingColumnFails
+            ? "'"
+                + MySqlIdentifier.EscapeStringLiteral(
+                    $"QuickER sync: {tableName}.{columnName} does not exist"
+                )
+                + "'"
+            : "'DO 0'";
 
         // 3 分岐にするのは、@def が NULL になる理由が 2 通りあり意味が正反対だから。
         //   列が実行時に無い（@exists = 0）  → 何もしないのが正しい＝無害な DO 0
@@ -698,7 +734,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.AppendLine(
             $"SET @sql = IF(@def IS NOT NULL, CONCAT('ALTER TABLE {table} "
                 + $"MODIFY COLUMN {column} ', @def, ' COMMENT ', QUOTE(@cmt){positionArg}), "
-                + $"IF(@exists = 0, 'DO 0', '{failure}'));"
+                + $"IF(@exists = 0, {missing}, '{failure}'));"
         );
         AppendExecutePrepared(sb);
     }
@@ -751,11 +787,33 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         }
     }
 
+    /// <summary>型の表記が文字列型（照合順序を持てる型）か</summary>
+    /// <remarks>判定は括弧より前の基本の名前で行う（<c>varchar(20)</c> / <c>enum('a','b')</c> / <c>national char(3)</c>）。</remarks>
+    private static bool IsStringType(string type)
+    {
+        var name = type.Split('(')[0].Trim().ToLowerInvariant();
+
+        return name
+            is "char"
+                or "varchar"
+                or "tinytext"
+                or "text"
+                or "mediumtext"
+                or "longtext"
+                or "enum"
+                or "set"
+                or "nchar"
+                or "nvarchar"
+                or "national char"
+                or "national varchar"
+                or "character"
+                or "character varying";
+    }
+
     /// <summary>モデルを正とした列定義（型・NULL 制約・COMMENT）を組み立てる</summary>
     /// <remarks>
-    /// AddColumn（新しい列＝ライブに定義が無い）と AlterColumn（型を変える＝モデルが正）で用いる。
-    /// 説明が設定されていれば COMMENT を付与し、既存コメントの消失を防ぐ。
-    /// 末尾句だけを変える経路（SetColumnDescription / ReorderColumns）では使わない
+    /// 表の追加・列の追加（新しい列＝ライブに定義が無い）で用いる。説明が設定されていれば COMMENT を付与する。
+    /// 既存の列を変える経路（AlterColumn / SetColumnDescription / ReorderColumns）では使わない
     /// ——モデルに無い列属性を落とすため、そちらはライブ再構成を通す。
     /// </remarks>
     private static string BuildColumnDefinition(Column column)

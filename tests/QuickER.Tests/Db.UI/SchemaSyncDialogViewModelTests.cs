@@ -879,6 +879,40 @@ public class SchemaSyncDialogViewModelTests
     }
 
     /// <summary>
+    /// 取込で分かった列の既定値が計画の文脈へ渡り、既定値のある列の型の種類の変更が実行確認の詳細に載ることを検証する（J2）。
+    /// </summary>
+    [Fact(DisplayName = "取込の既定値が計画へ渡り、既定値のある列の型の種類の変更を実行確認に出す")]
+    public async Task Execute_TypeKindChangeWithDefault_ShowsWarningFromImportedDefaults()
+    {
+        var live = new SchemaImportResult
+        {
+            Entities = [Table("item", Col("id", "int", pk: true), Col("v", "varchar(20)"))],
+            ColumnDefaults = [new SchemaColumnDefault("item", "v", "('abc')")],
+        };
+        var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
+        var target = live.Entities[0].Clone(preserveId: true);
+        target.Columns.Single(c => c.Name == "v").DataType = "int";
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings { Database = "shop" },
+            [target],
+            [],
+            dialogs
+        );
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.DiffItems.Single(i => i.Kind == SchemaDiffKind.AlterColumn).IsSelected = true;
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        dialogs
+            .WarningConfirmDetailsMessages.Should()
+            .ContainSingle()
+            .Which.Item2.Should()
+            .Contain("item / v (varchar(20) → int)");
+    }
+
+    /// <summary>
     /// rebuild 方言（SQLite）で複合外部キーの子テーブルも通常どおり再構築されることを検証する。
     /// </summary>
     /// <remarks>

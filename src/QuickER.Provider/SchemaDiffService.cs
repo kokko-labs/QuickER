@@ -1208,7 +1208,7 @@ public class SchemaDiffService
             add.ForeignKeyColumnPairs
         );
 
-        // 列ペアの並びを問わない方言では、並びだけの違いを参照の変更と言わない（差分のシグネチャと同じ規則）
+        // 列ペアの並びだけの違いは参照の変更と言わない（差分のシグネチャと同じ規則＝5 方言とも並びを見ない）
         var referenceChanged =
             !SchemaNames.AreSame(oldParent, newParent)
             || !SamePairs(drop.ForeignKeyColumnPairs, add.ForeignKeyColumnPairs);

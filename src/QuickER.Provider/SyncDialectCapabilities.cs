@@ -134,13 +134,31 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public required bool SupportsSchemaQualifiedTableNames { get; init; }
 
+    /// <summary>
+    /// 列の型を変える同期が DB の既定値を保つので、既定値が新しい型に合うかを確かめる必要があるか
+    /// （SQLite 以外の 4 方言）。
+    /// </summary>
+    /// <remarks>
+    /// 図は既定値を持たないので、同期は DB の既定値をそのまま保つ（SQL Server は DEFAULT 制約を外して付け直し、
+    /// MySQL は実行時のカタログから列定義を組み直す）。既定値が新しい型に合わないと、同期そのもの（PostgreSQL・Oracle は
+    /// 型の変更で既定値を新しい型へ変換し、MySQL はエラー 1067 で断る）か、既定値を使う行の追加（SQL Server は
+    /// 付け直しで既定値を確かめない）が失敗する。SQLite はテーブルの再構築で既定値を落とすので <c>false</c>
+    /// （落とすことは再構築の警告が告げる）。<c>true</c> の方言では
+    /// <see cref="SyncPlanner"/> が、取込で分かった既定値（<see cref="SyncPlanContext.ColumnDefaults"/>）のある列の型の種類
+    /// （括弧より前の基本の名前）を変える列の変更を <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> で名指しする。
+    /// </remarks>
+    public required bool ChecksDefaultOnColumnTypeChange { get; init; }
+
     /// <summary>計算列・生成列の型を、式を変えずに <c>ALTER COLUMN</c> で変えられるか（PostgreSQL だけ）。</summary>
     /// <remarks>
     /// <para>
     /// 意味モデルは計算列の式を持たないので、同期は式を書けない。PostgreSQL は <c>ALTER COLUMN ... TYPE</c> が生成列の
-    /// 式を保ったまま型だけを変える。SQL Server は計算列を <c>ALTER COLUMN</c> できずに失敗する。MySQL の式を書かない
-    /// <c>MODIFY</c> は、<c>STORED</c> の生成列では式を黙って落として普通の列にし、<c>VIRTUAL</c> の生成列では断られる
-    /// （エラー 3106）。SQLite の再構築は式を落とし、Oracle も式を書かない変更はできない。
+    /// 式を保ったまま型だけを変える。SQL Server は計算列を <c>ALTER COLUMN</c> できずに失敗する。SQLite の再構築は式を落とし、
+    /// Oracle も式を書かない変更はできない。MySQL は列の変更を実行時のカタログから組み直すので、生成列も式と種別
+    /// （<c>VIRTUAL</c> / <c>STORED</c>）を保ったまま型を変えられる（実 DB で確認＝
+    /// <c>MySqlColumnAttributeSyncIntegrationTests.AlterColumn_GeneratedColumn_KeepsExpression</c>）が、宣言は <c>false</c>
+    /// のままにしてある（式を書かない <c>MODIFY</c> なら、<c>STORED</c> は式を落として普通の列になり、<c>VIRTUAL</c> は
+    /// エラー 3106 で断られる。<c>true</c> にするかは残件）。
     /// </para>
     /// <para>
     /// <c>false</c> の方言では、計算列の型の差分を選択できない案内項目にする（<see cref="SchemaDiffService"/>）。

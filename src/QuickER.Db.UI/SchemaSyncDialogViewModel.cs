@@ -47,6 +47,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     private IReadOnlyDictionary<string, string> _liveTableCreateSql =
         new Dictionary<string, string>();
 
+    /// <summary>直近の取込で得た列の既定値（既定値のある列の型の種類の変更の警告に用いる）</summary>
+    private IReadOnlyList<SchemaColumnDefault> _liveColumnDefaults = [];
+
     /// <summary>直近の <see cref="UpdatePreview"/> で組み立てた実行計画（実行確認の文言分岐に用いる）</summary>
     private SyncPlan _currentPlan = new();
 
@@ -179,6 +182,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             _liveRelationships = live.Relationships;
             _liveAuxiliaryObjects = live.AuxiliaryObjects;
             _liveTableCreateSql = live.TableCreateSql;
+            _liveColumnDefaults = live.ColumnDefaults;
 
             // 対象方言のケーパビリティを渡す（SQLite は説明差分を抑止し FK 制約名を比較から除外する）
             var diff = new SchemaDiffService().Compute(
@@ -259,6 +263,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         _liveRelationships = [];
         _liveAuxiliaryObjects = [];
         _liveTableCreateSql = new Dictionary<string, string>();
+        _liveColumnDefaults = [];
         _currentPlan = new SyncPlan();
         ScriptPreview = string.Empty;
     }
@@ -271,6 +276,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             LiveRelationships = _liveRelationships,
             AuxiliaryObjects = _liveAuxiliaryObjects,
             TableCreateSql = _liveTableCreateSql,
+            ColumnDefaults = _liveColumnDefaults,
         };
 
     /// <summary>選択中の差分から実行計画を組み立て、スクリプトプレビューを再生成する（選択変更時に呼ぶ）</summary>
@@ -592,6 +598,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
             // ドットを含む表名は、SQLite では添付したデータベースの表と読まれる
+            // 既定値のある列の型の種類を変えると、既定値が新しい型に合わなければ失敗する
+            SyncPlanWarningKind.DefaultOnColumnTypeKindChange => string.Format(
+                Strings.SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             SyncPlanWarningKind.SchemaQualifiedTableName => string.Format(
                 Strings.SchemaSync_ExecuteConfirmSchemaQualifiedTableName,
                 BulletList(warnings.Select(w => w.TableName))

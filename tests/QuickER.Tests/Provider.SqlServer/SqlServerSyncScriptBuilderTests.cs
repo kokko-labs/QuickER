@@ -92,7 +92,61 @@ public class SqlServerSyncScriptBuilderTests
         };
 
         var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
-        sql.Should().Contain("ALTER TABLE [Customer] ALTER COLUMN [Name] nvarchar(100) NOT NULL;");
+
+        // 文字列型の列は照合順序を読み直して書き添える。型の変わる変更は DEFAULT 制約を外して付け直す
+        sql.Should().Contain("SELECT @coll = c.collation_name FROM sys.columns c");
+        sql.Should()
+            .Contain(
+                "SET @sql = N'ALTER TABLE [Customer] ALTER COLUMN [Name] nvarchar(100)' + ISNULL(N' COLLATE ' + @coll, N'') + N' NOT NULL';"
+            );
+        sql.Should()
+            .Contain("WHERE dc.parent_object_id = OBJECT_ID(N'[Customer]') AND c.name = N'Name';");
+        sql.Should().Contain("QUOTENAME(@df) + N' DEFAULT ' + @dfdef + N' FOR [Name]';");
+    }
+
+    /// <summary>
+    /// 照合順序も DEFAULT 制約も関わらない変更（文字列型でない列の NULL 許容だけの変更）は、素の ALTER COLUMN で書き、
+    /// 型の変わらない変更は DEFAULT 制約に触れないことを検証する
+    /// </summary>
+    [Theory(
+        DisplayName = "AlterColumn は、照合順序も DEFAULT 制約も関わらない変更を素の ALTER COLUMN で書く"
+    )]
+    [InlineData("int", "int", false, true)]
+    [InlineData("int", "bigint", true, true)]
+    [InlineData("nvarchar(10)", "nvarchar(10)", false, false)]
+    public void AlterColumn_ReadsBackOnlyWhatMatters(
+        string oldType,
+        string newType,
+        bool readsDefault,
+        bool plain
+    )
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "Customer",
+            ColumnName = "Code",
+            Column = new Column
+            {
+                Name = "Code",
+                DataType = newType,
+                IsNullable = true,
+            },
+            OldColumn = new Column
+            {
+                Name = "Code",
+                DataType = oldType,
+                IsNullable = false,
+            },
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
+
+        sql.Contains("sys.default_constraints").Should().Be(readsDefault);
+        sql.Contains($"ALTER TABLE [Customer] ALTER COLUMN [Code] {newType} NULL;")
+            .Should()
+            .Be(plain && !readsDefault);
     }
 
     /// <summary>DropColumn が ALTER TABLE ... DROP COLUMN 文を生成することを検証する</summary>

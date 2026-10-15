@@ -356,6 +356,10 @@
     <value>注意: 以下の変更は実行しません。外部キーの列の並びが参照先のキーの並びと合わなくなり、MySQL ではその外部キーを付け直せない（外れたまま残る）ためです。適用するには、外部キーの削除も選んで先に外すか、手で付け替えてください:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange" xml:space="preserve">
+    <value>注意: 以下の列はデータベースに既定値があり、型の種類が変わります（旧の型 → 新しい型）。同期はデータベースの既定値を保つため、既定値が新しい型に合わなければ、同期か、既定値を使う行の追加が失敗します（MySQL と Oracle の同期の失敗では DDL が巻き戻らず、それより前の文は適用されたまま残ります）:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmSchemaQualifiedTableName" xml:space="preserve">
     <value>注意: 以下の表は名前にドットを含みます。SQLite はそうした名前を、添付したデータベース（ドットより前の部分）の表として読むため、そのデータベースを添付していなければ同期は失敗します:
 {0}</value>

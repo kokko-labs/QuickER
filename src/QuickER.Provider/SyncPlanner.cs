@@ -40,6 +40,13 @@ public sealed class SyncPlanContext
     public IReadOnlyDictionary<string, string> TableCreateSql { get; init; } =
         new Dictionary<string, string>();
 
+    /// <summary>DB から取得した列の既定値（取込の結果＝<see cref="SchemaImportResult.ColumnDefaults"/>）。</summary>
+    /// <remarks>
+    /// 合成には使わない（図は既定値を持たない）。既定値のある列の型の種類の変更を事前に警告するためだけに参照する
+    /// （<see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/>）。
+    /// </remarks>
+    public IReadOnlyList<SchemaColumnDefault> ColumnDefaults { get; init; } = [];
+
     /// <summary>live の外部キーの実効名（図全体から求めた名前＝DDL が付けるのと同じ規則）</summary>
     /// <remarks>
     /// 名前の無い同じ組の外部キーが 2 本あると、2 本目は子の列名を足した名前になる
@@ -202,6 +209,9 @@ public sealed class SyncPlanner
 
         // ドットを含む表名を表せない方言（SQLite）では、選んだ項目が触れるその表を名指しする
         WarnSchemaQualifiedTableNames(selected, capabilities, warnings);
+
+        // 既定値のある列の型の種類を変える列の変更を名指しする（SQL Server・PostgreSQL・Oracle）
+        WarnDefaultsOnColumnTypeKindChange(selected, capabilities, context, warnings);
 
         if (!isRebuildDialect)
         {
@@ -1693,6 +1703,63 @@ public sealed class SyncPlanner
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// 選んだ列の変更のうち、取込で既定値の分かった列の型の種類（方言の正規化を通した、括弧より前の基本の名前）を
+    /// 変えるものを <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> で名指しする
+    /// （<see cref="SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange"/> が <c>true</c> の方言のみ）。
+    /// </summary>
+    private static void WarnDefaultsOnColumnTypeKindChange(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        if (
+            !capabilities.ChecksDefaultOnColumnTypeChange
+            || context is null
+            || context.ColumnDefaults.Count == 0
+        )
+        {
+            return;
+        }
+
+        foreach (
+            var alter in selected.Where(i =>
+                i.Kind == SchemaDiffKind.AlterColumn
+                && i.ColumnName is not null
+                && i.Column is not null
+                && i.OldColumn is not null
+            )
+        )
+        {
+            var oldType = alter.OldColumn!.DataType;
+            var newType = alter.Column!.DataType;
+
+            if (
+                DbTypeText.AreEquivalent(BaseTypeName(oldType), BaseTypeName(newType))
+                || !context.ColumnDefaults.Any(d =>
+                    SchemaNames.AreSame(d.TableName, alter.TableName)
+                    && SchemaNames.AreSame(d.ColumnName, alter.ColumnName!)
+                )
+            )
+            {
+                continue;
+            }
+
+            warnings.Add(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.DefaultOnColumnTypeKindChange,
+                    SchemaNames.ToStoredForm(alter.TableName),
+                    $"{alter.ColumnName} ({oldType} → {newType})"
+                )
+            );
+        }
+
+        string BaseTypeName(string type) =>
+            capabilities.NormalizeTypeNotation(type ?? string.Empty).Split('(')[0];
     }
 
     /// <summary>追加を選んだ表（表名 → 図のエンティティ）</summary>

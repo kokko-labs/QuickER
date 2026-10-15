@@ -102,7 +102,10 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <remarks>
     /// PostgreSQL は型変更と NULL 制約変更を別の文で表現する。
     /// 型は <c>ALTER COLUMN ... TYPE 新型</c>、NULL 制約は <c>SET NOT NULL</c> / <c>DROP NOT NULL</c> を用いる。
-    /// 型の系統が変わる変更（<c>varchar</c> → <c>integer</c> 等）には <c>USING 列::新型</c> を付ける（<see cref="NeedsUsingCast"/>）
+    /// 型の系統が変わる変更（<c>varchar</c> → <c>integer</c> 等）には <c>USING 列::新型</c> を付ける（<see cref="NeedsUsingCast"/>）。
+    /// 新しい型が文字列型なら、実行時に列の照合順序（<c>pg_attribute.attcollation</c>）を読み、型の既定と違うときだけ
+    /// <c>COLLATE</c> を書き添える（書かなければ新しい型の既定へ戻る）。表は <c>to_regclass</c> で <c>ALTER TABLE</c> と同じ
+    /// 1 つの表に絞り、照合順序の名前は <c>quote_ident</c> で組む。
     /// </remarks>
     protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
@@ -113,14 +116,58 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             ? $" USING {column}::{col.DataType}"
             : string.Empty;
 
-        sb.AppendLine(
-            $"ALTER TABLE {table} ALTER COLUMN {column} TYPE {col.DataType}{usingClause};"
-        );
+        if (IsCollatableType(col.DataType))
+        {
+            // ALTER COLUMN … TYPE は COLLATE を書かなければ照合順序を新しい型の既定へ戻す。実行時に列の照合順序を読み、
+            // 型の既定と違うときだけ書き添える（表は ALTER TABLE と同じ 1 つの表に to_regclass で絞る）。
+            // COLLATE は USING より前に書く構文
+            var dynamicTable = PgIdentifier.QuoteForDynamicSql(item.TableName);
+            var body = new StringBuilder();
+            body.AppendLine("DECLARE coll text;");
+            body.AppendLine("BEGIN");
+            body.AppendLine(
+                "    SELECT CASE WHEN a.attcollation = 0 OR a.attcollation = t.typcollation THEN NULL"
+            );
+            body.AppendLine(
+                "        ELSE quote_ident(n.nspname) || '.' || quote_ident(co.collname) END INTO coll"
+            );
+            body.AppendLine("    FROM pg_attribute a");
+            body.AppendLine("    JOIN pg_type t ON t.oid = a.atttypid");
+            body.AppendLine("    LEFT JOIN pg_collation co ON co.oid = a.attcollation");
+            body.AppendLine("    LEFT JOIN pg_namespace n ON n.oid = co.collnamespace");
+            body.AppendLine(
+                $"    WHERE a.attrelid = to_regclass('{dynamicTable}') "
+                    + $"AND a.attname = '{PgIdentifier.EscapeStringLiteral(col.Name)}' AND NOT a.attisdropped;"
+            );
+            body.AppendLine(
+                $"    EXECUTE '{PgIdentifier.EscapeStringLiteral($"ALTER TABLE {table} ALTER COLUMN {column} TYPE {col.DataType}")}'"
+                    + $" || COALESCE(' COLLATE ' || coll, '') || '{PgIdentifier.EscapeStringLiteral(usingClause)}';"
+            );
+            AppendDoBlock(sb, body.ToString());
+        }
+        else
+        {
+            sb.AppendLine(
+                $"ALTER TABLE {table} ALTER COLUMN {column} TYPE {col.DataType}{usingClause};"
+            );
+        }
 
         // 主キー列または NULL 非許容なら NOT NULL を設定し、それ以外は NOT NULL を外す
         var nullClause = col.IsPrimaryKey || !col.IsNullable ? "SET NOT NULL" : "DROP NOT NULL";
         sb.AppendLine($"ALTER TABLE {table} ALTER COLUMN {column} {nullClause};");
     }
+
+    /// <summary>型の表記が照合順序を持つ文字列型（配列を含む）か</summary>
+    private static bool IsCollatableType(string type) =>
+        type.Split('(')[0].Replace("[]", string.Empty).Trim().ToLowerInvariant()
+            is "text"
+                or "varchar"
+                or "character varying"
+                or "char"
+                or "character"
+                or "bpchar"
+                or "citext"
+                or "name";
 
     /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）文を生成する</summary>
     /// <remarks>
