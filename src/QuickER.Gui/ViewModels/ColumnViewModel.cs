@@ -82,6 +82,9 @@ public partial class ColumnViewModel : ObservableObject
     /// <summary>NULL を許容するかどうかの実体フィールド</summary>
     private bool _isNullable;
 
+    /// <summary>DB が採番する列の印の実体フィールド</summary>
+    private bool _isIdentity;
+
     /// <summary>主キーチェックを編集可能にするかどうか</summary>
     [ObservableProperty]
     private bool _isPrimaryKeyEditable = true;
@@ -165,6 +168,19 @@ public partial class ColumnViewModel : ObservableObject
     /// </remarks>
     public bool IsComputed { get; }
 
+    /// <summary>DB が採番し、指定した値を拒む列かどうか（取込で確定し、GUI では編集しない）</summary>
+    /// <remarks>
+    /// 編集 UI を持たない。値を運ばないと「取込 → GUI で編集 → 保存」で
+    /// <see cref="Column.IsIdentity"/> が黙って消え、生成コードが書き込み対象へ戻してしまう。
+    /// 書き換えるのは、この種類の列を持てない方言への対象 DBMS の切替（<c>ChangeTargetDbmsCommand</c>）が印を外すときだけ
+    /// （切替の 1 履歴で戻す）。
+    /// </remarks>
+    public bool IsIdentity
+    {
+        get => _isIdentity;
+        internal set => SetProperty(ref _isIdentity, value);
+    }
+
     /// <summary>モデルから ViewModel を生成する</summary>
     /// <param name="model">コピー元の <see cref="Column"/> モデル</param>
     public ColumnViewModel(Column model)
@@ -177,6 +193,7 @@ public partial class ColumnViewModel : ObservableObject
         _isNullable = model.IsPrimaryKey ? false : model.IsNullable;
         _description = model.Description ?? string.Empty;
         IsComputed = model.IsComputed;
+        _isIdentity = model.IsIdentity;
     }
 
     /// <summary>IsPrimaryKey 変更直前に発火する（変更前スナップショット取得のためのフック）</summary>
@@ -227,5 +244,6 @@ public partial class ColumnViewModel : ObservableObject
             IsNullable = IsPrimaryKey ? false : IsNullable,
             Description = Description ?? string.Empty,
             IsComputed = IsComputed,
+            IsIdentity = IsIdentity,
         };
 }

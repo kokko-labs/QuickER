@@ -102,6 +102,8 @@ public static class SchemaImportWarningText
                 SchemaImportWarningKind.AliasTypeFlattened =>
                     Strings.ImportWarningHeading_AliasTypeFlattened,
                 SchemaImportWarningKind.NameTrimmed => Strings.ImportWarningHeading_NameTrimmed,
+                SchemaImportWarningKind.IdentityColumnMarked =>
+                    Strings.ImportWarningHeading_IdentityColumnMarked,
                 _ => throw new ArgumentOutOfRangeException(
                     nameof(kind),
                     kind,
@@ -230,6 +232,12 @@ public static class SchemaImportWarningText
             ),
             SchemaImportWarningKind.NameTrimmed => string.Format(
                 Strings.ImportWarning_NameTrimmed,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.IdentityColumnMarked => string.Format(
+                Strings.ImportWarning_IdentityColumnMarked,
                 table,
                 subject,
                 detail

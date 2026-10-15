@@ -651,6 +651,9 @@ public sealed class CSharpReverseParser
             // 計算列マーカーは属性の有無がそのまま正（付いていない＝計算列でない）。
             // 生成側はオプションに依らず常に付けるため、フォールバックの推測は置かない
             IsComputed = HasAttribute(property.AttributeLists, "ComputedColumn"),
+            // 採番列マーカーも同じく属性の有無が正。生成側は主キーの採番列には属性を付けないため、
+            // 主キーの採番列はコードから復元できない（コードはその列を普通の列として書き込む）
+            IsIdentity = HasAttribute(property.AttributeLists, "IdentityColumn"),
         };
     }
 

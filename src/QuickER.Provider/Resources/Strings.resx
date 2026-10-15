@@ -152,9 +152,6 @@
   </data>  <data name="Diff_ComputedColumnTypeNotSynced" xml:space="preserve">
     <value>Not synchronized: the type of computed column [{0}].[{1}] changes ({2} → {3}), but the diagram has no expression, so this database cannot change it. Change the column together with its expression in the database.</value>
   </data>
-  <data name="Diff_UniqueConstraintOnPrimaryKeyNotSynced" xml:space="preserve">
-    <value>Not synchronized: unique constraint [{0}] ({1}) has the same columns as the primary key, which this database cannot hold as a separate constraint (the primary key already guarantees uniqueness).</value>
-  </data>
   <data name="Diff_AutoForeignKeyDrop" xml:space="preserve">
     <value>Automatically drops the foreign key to allow the change (the table or column it uses is dropped): [{0}]</value>
   </data>
@@ -322,5 +319,11 @@
   </data>
   <data name="ImportWarningHeading_NameTrimmed" xml:space="preserve">
     <value>Names imported without the spaces around them ({0}):</value>
+  </data>
+  <data name="ImportWarning_IdentityColumnMarked" xml:space="preserve">
+    <value>{0}.{1}: imported as a column the database numbers ({2}). The diagram keeps only that fact: generated code leaves the column out of INSERT / UPDATE unless it is part of the primary key, and generated DDL creates an ordinary column.</value>
+  </data>
+  <data name="ImportWarningHeading_IdentityColumnMarked" xml:space="preserve">
+    <value>Columns the database numbers, imported without their numbering definition ({0}):</value>
   </data>
 </root>

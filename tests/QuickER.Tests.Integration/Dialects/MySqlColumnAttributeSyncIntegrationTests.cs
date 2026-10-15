@@ -460,6 +460,259 @@ public sealed class MySqlColumnAttributeSyncIntegrationTests(MySqlContainerFixtu
     }
 
     /// <summary>列説明の差分項目を組み立てる（列定義はライブ再構成のため Entity は使われない）</summary>
+    /// <summary>
+    /// 列の変更（型・NULL 許容）が、図の型と NULL 許容だけを差し替え、ほかの列属性（DEFAULT・AUTO_INCREMENT・照合順序と
+    /// 文字集合・ON UPDATE・INVISIBLE・SRID・COMMENT）を保つことを検証する（以前は MODIFY を図から組み、これらを落としていた）。
+    /// 文字列型から JSON 型へ変える列は、照合順序を書き添えずに通る（JSON は COLLATE を受け付けない）。変えない列は 1 項目も動かない。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] B: 列の変更は型と NULL 許容だけを変え、ほかの列属性を保つ")]
+    public async Task AlterColumn_ChangesOnlyTypeAndNullability()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(CreateAttrsTable, Ct);
+        await fixture.ExecuteAsync(
+            "ALTER TABLE `attrs` MODIFY COLUMN `n` int NOT NULL DEFAULT -1 COMMENT 'keep me';",
+            Ct
+        );
+
+        var before = await ReadColumnMetadataAsync("attrs");
+
+        // 列名 → (新しい型, NULL 許容, 主キーか)
+        var changes = new Dictionary<string, (string Type, bool Nullable, bool Key)>
+        {
+            ["id"] = ("bigint", false, true),
+            ["s"] = ("varchar(40)", true, false),
+            ["n"] = ("bigint", false, false),
+            ["ts"] = ("timestamp(6)", true, false),
+            ["cs"] = ("varchar(20)", true, false),
+            ["inv"] = ("bigint", true, false),
+            ["ivu"] = ("timestamp(3)", true, false),
+            ["geo"] = ("geometry", false, false),
+            ["nl"] = ("json", true, false),
+        };
+
+        await ApplyAsync(
+            changes.Select(c => new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "attrs",
+                ColumnName = c.Key,
+                Column = new Column
+                {
+                    Name = c.Key,
+                    DataType = c.Value.Type,
+                    IsNullable = c.Value.Nullable,
+                    IsPrimaryKey = c.Value.Key,
+                },
+                IsSelected = true,
+            })
+        );
+
+        var after = await ReadColumnMetadataAsync("attrs");
+        string[] typeFields =
+        [
+            "COLUMN_TYPE",
+            "DATA_TYPE",
+            "CHARACTER_MAXIMUM_LENGTH",
+            "NUMERIC_PRECISION",
+            "NUMERIC_SCALE",
+            "IS_NULLABLE",
+        ];
+
+        // 変えない列は 1 項目も動かない
+        AssertMetadataUnchanged(
+            before.Where(c => !changes.ContainsKey(c.Key)).ToDictionary(),
+            after.Where(c => !changes.ContainsKey(c.Key)).ToDictionary(),
+            except: []
+        );
+
+        foreach (var (column, change) in changes)
+        {
+            after[column]["COLUMN_TYPE"].Should().StartWith(change.Type, column);
+            after[column]["IS_NULLABLE"].Should().Be(change.Nullable ? "YES" : "NO", column);
+
+            // 文字列型から JSON 型へ変える列は、照合順序・文字集合が無くなるのが正しい
+            var except =
+                column == "nl"
+                    ? typeFields.Concat(["CHARACTER_SET_NAME", "COLLATION_NAME"]).ToArray()
+                    : typeFields;
+
+            foreach (var (field, value) in before[column])
+            {
+                if (!except.Contains(field))
+                {
+                    after[column]
+                        [field]
+                        .Should()
+                        .Be(value, $"{column}.{field} は列の変更で変わらないこと");
+                }
+            }
+        }
+
+        // 自己点検：保つべき属性を実際に持っていたこと
+        after["id"]["EXTRA"].Should().Contain("auto_increment");
+        after["s"]["COLLATION_NAME"].Should().Be("utf8mb4_bin");
+        after["s"]["COLUMN_DEFAULT"].Should().Be("a'b");
+        after["n"]["COLUMN_COMMENT"].Should().Be("keep me");
+        after["cs"]["CHARACTER_SET_NAME"].Should().Be("latin1");
+        after["ts"]["EXTRA"].Should().Contain("on update CURRENT_TIMESTAMP(6)");
+        after["inv"]["EXTRA"].Should().Contain("INVISIBLE");
+        after["geo"]["SRS_ID"].Should().Be("4326");
+    }
+
+    /// <summary>
+    /// 生成列（VIRTUAL・STORED）の列の変更が、ライブの再構成で式と種別を保ったまま型だけを変えることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 差分は MySQL の計算列の型の変更を選べない案内項目にしている（<c>SupportsComputedColumnTypeChange</c> が false）ので、
+    /// この経路には差分からは届かない。宣言を true にできるかの判断材料として、同期スクリプトの組み立てだけを固定する。
+    /// </remarks>
+    [Fact(DisplayName = "[Integration] B: 生成列の列の変更は式と種別を保って型だけを変える")]
+    public async Task AlterColumn_GeneratedColumn_KeepsExpression()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(CreateAttrsTable, Ct);
+
+        var before = await ReadColumnMetadataAsync("attrs");
+
+        await ApplyAsync(
+            new[] { "gv", "gs" }.Select(column => new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "attrs",
+                ColumnName = column,
+                Column = new Column
+                {
+                    Name = column,
+                    DataType = "bigint",
+                    IsNullable = true,
+                },
+                IsSelected = true,
+            })
+        );
+
+        var after = await ReadColumnMetadataAsync("attrs");
+
+        foreach (var column in new[] { "gv", "gs" })
+        {
+            after[column]["COLUMN_TYPE"].Should().Be("bigint", column);
+            after[column]
+                ["GENERATION_EXPRESSION"]
+                .Should()
+                .Be(before[column]["GENERATION_EXPRESSION"], column);
+            after[column]["EXTRA"].Should().Be(before[column]["EXTRA"], column);
+        }
+    }
+
+    /// <summary>
+    /// 列の変更は、実行時に列が無ければ失敗させることを検証する（選んだ列の変更が黙って何もしないのは誤り）。
+    /// 説明・列順の同期は、列が無ければ何もしない（<see cref="CommentSync_MixedPresentAndMissingColumns_TouchesOnlyExisting"/>）。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] B: 列の変更は、実行時に列が無ければ失敗する")]
+    public async Task AlterColumn_MissingColumn_Fails()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `t` (`id` int NOT NULL, CONSTRAINT `PK_t` PRIMARY KEY (`id`));",
+            Ct
+        );
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "t",
+                    ColumnName = "ghost",
+                    Column = new Column { Name = "ghost", DataType = "int" },
+                    IsSelected = true,
+                },
+            ],
+            TestDialectCapabilities.Neutral
+        );
+        var script = new MySqlSyncScriptBuilder().Build(plan);
+        var result = await new MySqlSchemaSyncExecutor().ExecuteAsync(
+            fixture.ToDbConnectionSettings(),
+            script,
+            Ct
+        );
+
+        result.Committed.Should().BeFalse(script);
+        result.Error.Should().Contain("t.ghost");
+    }
+
+    /// <summary>
+    /// 既定値のある列の型の種類を変える列の変更を、計画が事前に警告し（J2）、既定値が新しい型に合わなければ
+    /// 実行が MySQL のエラー 1067 で失敗する（列は変わらない）ことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] B: 合わない既定値のある列の型の種類の変更は、事前に警告され、実行はエラー 1067 で失敗する"
+    )]
+    public async Task TypeKindChangeWithIncompatibleDefault_IsWarnedAndFails()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `jd` (`id` int NOT NULL, `v` varchar(20) NOT NULL DEFAULT 'abc', CONSTRAINT `PK_jd` PRIMARY KEY (`id`));",
+            Ct
+        );
+
+        var provider = new MySqlProvider();
+        var live = await provider.SchemaImporter.ImportAsync(fixture.ConnectionString, 120, Ct);
+        var target = live.Entities.Select(e => e.Clone(preserveId: true)).ToList();
+        target.Single(e => e.TableName == "jd").Columns.Single(c => c.Name == "v").DataType = "int";
+        var items = new SchemaDiffService()
+            .Compute(
+                live.Entities,
+                live.Relationships,
+                target,
+                live.Relationships,
+                provider.SyncCapabilities
+            )
+            .Items;
+
+        foreach (var item in items)
+        {
+            item.IsSelected = item.Kind == SchemaDiffKind.AlterColumn;
+        }
+
+        var plan = new SyncPlanner().BuildPlan(
+            items,
+            provider.SyncCapabilities,
+            new SyncPlanContext
+            {
+                LiveEntities = live.Entities,
+                LiveRelationships = live.Relationships,
+                ColumnDefaults = live.ColumnDefaults,
+            }
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.DefaultOnColumnTypeKindChange)
+            .Which.Detail.Should()
+            .StartWith("v (");
+
+        var script = provider.SyncScriptBuilder.Build(plan);
+        var result = await provider.SyncExecutor.ExecuteAsync(
+            fixture.ToDbConnectionSettings(),
+            script,
+            Ct
+        );
+        result.Committed.Should().BeFalse(script);
+        result
+            .Batches.Should()
+            .ContainSingle(b => !b.Success)
+            .Which.Error.Should()
+            .Contain("Invalid default value", "エラー 1067");
+
+        var after = await ReadColumnMetadataAsync("jd");
+        after["v"]["COLUMN_TYPE"].Should().Be("varchar(20)", "失敗した変更は列を変えない");
+        after["v"]["COLUMN_DEFAULT"].Should().Be("abc");
+    }
+
     private static SchemaDiffItem ColumnDescriptionItem(
         string table,
         string column,

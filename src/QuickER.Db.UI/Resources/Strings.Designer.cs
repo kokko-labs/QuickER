@@ -635,6 +635,24 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_ExecuteConfirmSchemaQualifiedTableName {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmSchemaQualifiedTableName", resourceCulture);
+            }
+        }
+
+        public static string SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_ExecuteConfirmRebuildDropsAttributes {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuildDropsAttributes", resourceCulture);

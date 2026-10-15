@@ -30,6 +30,9 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     /// <inheritdoc />
     protected override IdentifierLengthLimit IdentifierLimit => SqliteIdentifier.Limit;
 
+    /// <inheritdoc/>
+    protected override string DialectName => SqliteProvider.ProviderName;
+
     // ---- 以下の抽象メンバは基底の共通経路向け。本クラスは Build を上書きするため直接は使わないが、
     //      契約充足のため他方言と同じ SQLite クォート方式を提供する ----
 
@@ -100,7 +103,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     }
 
     /// <summary>1 テーブル分の <c>CREATE TABLE</c>（インライン PK / FK / 説明コメント）を出力する</summary>
-    private static void AppendCreateTable(
+    private void AppendCreateTable(
         StringBuilder sb,
         Entity entity,
         IReadOnlyDictionary<Guid, List<ResolvedForeignKey>> foreignKeysByChild
@@ -120,6 +123,9 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             );
         }
 
+        // ドットを含む表名は添付したデータベースの表と読まれる（扱いの表が注記とする方言だけ書き添える）
+        SchemaQualifiedTableNameNote.Append(sb, entity.TableName, DialectName);
+
         sb.AppendLine($"CREATE TABLE {SqliteIdentifier.Quote(entity.TableName)} (");
 
         // 末尾に別立てで出す制約行（PK・UNIQUE・全 FK）を収集する
@@ -130,8 +136,16 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             trailingConstraints.Add(BuildPrimaryKeyConstraintLine(entity.TableName, pks));
         }
 
-        // UNIQUE 制約は PK 行と FK 行の間に出力する（他方言の並びと揃える）
-        foreach (var unique in UniqueConstraintNaming.ResolveAll(entity, SqliteIdentifier.Limit))
+        // UNIQUE 制約は PK 行と FK 行の間に出力する（他方言の並びと揃える）。
+        // 主キーと同じ列集合の一意制約は省いて注記する（扱いの表の SQLite の DDL のマス）
+        var (uniques, uniqueNotes) = UniqueConstraintOnPrimaryKeyNote.Split(
+            entity,
+            UniqueConstraintNaming.ResolveAll(entity, SqliteIdentifier.Limit),
+            DialectName,
+            UnsupportedFeature.Ddl
+        );
+
+        foreach (var unique in uniques)
         {
             trailingConstraints.Add(BuildUniqueConstraintLine(unique.Name, unique.ColumnNames));
         }
@@ -148,6 +162,9 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
 
             // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
             ComputedColumnComment.Append(sb, col, "    ");
+
+            // 採番の定義は図に無い＝ここで出すのは普通の列。扱いの表が注記とする方言だけ書き添える
+            IdentityColumnComment.Append(sb, col, "    ", DialectName, UnsupportedFeature.Ddl);
 
             var line = BuildColumnDefinition(col);
 
@@ -168,6 +185,11 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
                     $"    -- {SqlComment.Sanitize(col.Name)}: {SqlComment.Sanitize(col.Description)}"
                 );
             }
+        }
+
+        foreach (var note in uniqueNotes)
+        {
+            sb.AppendLine(note);
         }
 
         for (var i = 0; i < trailingConstraints.Count; i++)

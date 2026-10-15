@@ -30,6 +30,10 @@ namespace QuickER.CodeReverse.CSharp;
 /// 形で温存する（<c>[DbTableMeta]</c> の <c>PrimaryKeyOrder</c> は食い違うときだけ出るため、属性が無いことは
 /// 「宣言順」とも「古い生成コードで書けなかった」とも読める）。
 /// </para>
+/// <para>
+/// 主キーの採番の印は <see cref="ApplyPrimaryKeyIdentityMarks"/> が現在図から引き継ぐ（生成コードは主キーの列に
+/// <c>[IdentityColumn]</c> を刻まないため、コードからは読めない）。
+/// </para>
 /// </remarks>
 public static class ReverseMergePostProcessor
 {
@@ -190,6 +194,55 @@ public static class ReverseMergePostProcessor
             }
 
             entity.InheritPrimaryKeyOrderFrom(existing);
+        }
+    }
+
+    /// <summary>主キーの列の採番の印（<see cref="Column.IsIdentity"/>）を現在図の同じ列から引き継ぐ</summary>
+    /// <param name="current">コード取込前の現在図（印の供給元）</param>
+    /// <param name="mergedEntities">
+    /// Guid 引継済みのマージ結果エンティティ（現在図の Id を引き継いでいる）。該当する列の印をその場で書き換える
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// 生成コードは主キーの採番列を書き込みから外さず、<c>[IdentityColumn]</c> も刻まない（キーをアプリが決めて
+    /// 書き込む前提のため）。そのためコードからは主キーの印を読めず、取り込み直すと印が消えて
+    /// 署名（<c>*IDENTITY</c>）の差として置換の確認が出る。
+    /// </para>
+    /// <para>
+    /// 引き継ぐのは、マージ結果で主キーの列が、現在図の同じ Id の列（同じ Id のエンティティの中）でも主キーで、
+    /// 印を持つときだけ。主キーでない列の印はコードの <c>[IdentityColumn]</c> が正本（属性が無ければ印なし）。
+    /// </para>
+    /// </remarks>
+    public static void ApplyPrimaryKeyIdentityMarks(
+        ErDiagram current,
+        IReadOnlyList<Entity> mergedEntities
+    )
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(mergedEntities);
+
+        var currentById = current.Entities.ToDictionary(entity => entity.Id);
+
+        foreach (var entity in mergedEntities)
+        {
+            if (!currentById.TryGetValue(entity.Id, out var existing))
+            {
+                continue;
+            }
+
+            var existingColumns = existing.Columns.ToDictionary(column => column.Id);
+
+            foreach (var column in entity.Columns.Where(column => column.IsPrimaryKey))
+            {
+                if (
+                    existingColumns.TryGetValue(column.Id, out var existingColumn)
+                    && existingColumn.IsPrimaryKey
+                    && existingColumn.IsIdentity
+                )
+                {
+                    column.IsIdentity = true;
+                }
+            }
         }
     }
 

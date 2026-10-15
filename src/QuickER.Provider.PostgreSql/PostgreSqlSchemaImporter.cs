@@ -544,7 +544,7 @@ ORDER BY c.relname COLLATE ""C"", a.attnum;";
     /// <summary>図が持たない列の属性を、列ごとの取込警告（段 1）で名指しし、既定値の事実を返す</summary>
     /// <remarks>
     /// 自動採番を先に判定する（serial の <c>nextval</c> は既定値として二重に告げない）。指定した値を拒む
-    /// <c>GENERATED ALWAYS AS IDENTITY</c> は別の扱いなのでここでは告げない。生成列の式と値が NULL の既定値は
+    /// <c>GENERATED ALWAYS AS IDENTITY</c> は列に <see cref="Column.IsIdentity"/> の印を付けて告げる。生成列の式と値が NULL の既定値は
     /// 既定値に数えない。
     /// </remarks>
     private static async Task<List<SchemaColumnDefault>> LoadColumnAttributesAsync(
@@ -575,8 +575,18 @@ ORDER BY c.relname COLLATE ""C"", a.attnum;";
             var generated = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
             var serialSequence = reader.IsDBNull(5) ? null : reader.GetString(5);
 
+            // 指定した値を拒む IDENTITY は図に印を付けて告げる（DB が採番する事実を生成コードへ運ぶ）
             if (identity == "a")
             {
+                column.IsIdentity = true;
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.IdentityColumnMarked,
+                        table,
+                        column.Name,
+                        "GENERATED ALWAYS AS IDENTITY"
+                    )
+                );
                 continue;
             }
 

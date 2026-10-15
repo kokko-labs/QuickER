@@ -25,10 +25,7 @@ public sealed class SchemaImportWarningKindMapTests
     ];
 
     /// <summary>取込で告知するが、告げる種別がまだ無い種類（足すフェーズ）</summary>
-    private static readonly (UnsupportedDefinitionKind Kind, string Phase)[] PendingKinds =
-    [
-        (UnsupportedDefinitionKind.IdentityRejectingValues, "2d"),
-    ];
+    private static readonly (UnsupportedDefinitionKind Kind, string Phase)[] PendingKinds = [];
 
     [Fact(
         DisplayName = "すべての取込警告の種別が対応を持ち、種類の外は取込範囲の外と名前の衝突の 3 種別だけ"

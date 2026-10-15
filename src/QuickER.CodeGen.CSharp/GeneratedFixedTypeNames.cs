@@ -76,6 +76,7 @@ public static class GeneratedFixedTypeNames
             "ISyncTableRunSupport",
             "IValueObject",
             "IValueObjectCore",
+            "IdentityColumnAttribute",
             "InMemoryCascade",
             "InMemoryDataStore",
             "InMemoryKeyComparer",

@@ -305,11 +305,12 @@ public class SchemaDiffServiceTests
     }
 
     /// <summary>
-    /// 図の主キーと同じ列集合の一意制約の追加は、それを別の制約として持てない方言（SQLite・Oracle）では選択できない
-    /// 案内項目になり、ほかの方言では従来どおり既定で選ばれることを検証する（5 方言）。主キーと違う列集合は全方言で選べる。
+    /// 図の主キーと同じ列集合の一意制約は、それを別の制約として持てない方言（SQLite・Oracle）では比較から外れて項目に
+    /// ならず（主キーが一意性を保証する）、ほかの方言では従来どおり既定で選ばれる追加になることを検証する（5 方言）。
+    /// 主キーと違う列集合は全方言で選べる。DB に同じ列集合の一意制約があっても、削除の項目は出さない。
     /// </summary>
-    [Fact(DisplayName = "主キーと同じ列集合の一意制約: SQLite・Oracle は案内項目（5 方言）")]
-    public void UniqueConstraintOnPrimaryKey_IsGuideOnlyWhereUnsupported()
+    [Fact(DisplayName = "主キーと同じ列集合の一意制約: SQLite・Oracle は比較から外す（5 方言）")]
+    public void UniqueConstraintOnPrimaryKey_IsFoldedWhereUnsupported()
     {
         foreach (var (dialect, capabilities) in DialectCapabilities)
         {
@@ -333,28 +334,32 @@ public class SchemaDiffServiceTests
             var diff = new SchemaDiffService().Compute(live, [], target, [], capabilities);
 
             var adds = diff.Items.Where(i => i.Kind == SchemaDiffKind.AddUniqueConstraint).ToList();
-            adds.Should().HaveCount(2, $"{dialect}");
-            var onKey = adds.Single(i => i.UniqueConstraintColumns.SequenceEqual(["Id"]));
-            var other = adds.Single(i => i.UniqueConstraintColumns.SequenceEqual(["Code"]));
             var supported = capabilities.SupportsUniqueConstraintOnPrimaryKey;
-            onKey.IsSelectable.Should().Be(supported, $"{dialect}");
-            onKey.IsSelected.Should().Be(supported, $"{dialect}");
-            other.IsSelectable.Should().BeTrue($"{dialect}");
-            other.IsSelected.Should().BeTrue($"{dialect}");
+            adds.Should().HaveCount(supported ? 2 : 1, $"{dialect}");
+            adds.Should().OnlyContain(i => i.IsSelectable && i.IsSelected, $"{dialect}");
+            adds.Should()
+                .ContainSingle(
+                    i => i.UniqueConstraintColumns.SequenceEqual(new[] { "Code" }),
+                    $"{dialect}"
+                );
 
-            if (!supported)
+            // DB に主キーと同じ列集合の一意制約があっても、図が同じ制約を持てば削除の項目は出さない
+            var liveWithUnique = new List<Entity>
             {
-                onKey
-                    .Description.Should()
-                    .Be(
-                        string.Format(
-                            ProviderStrings.Diff_UniqueConstraintOnPrimaryKeyNotSynced,
-                            "Item",
-                            "Id"
-                        ),
-                        $"{dialect}"
-                    );
-            }
+                Tbl("Item", ("Id", "int", true), ("Code", "int", false)),
+            };
+            liveWithUnique[0]
+                .UniqueConstraints.Add(
+                    new UniqueConstraint
+                    {
+                        Name = "UQ_Item_Id",
+                        ColumnIds = [liveWithUnique[0].Columns[0].Id],
+                    }
+                );
+            new SchemaDiffService()
+                .Compute(liveWithUnique, [], target, [], capabilities)
+                .Items.Should()
+                .NotContain(i => i.Kind == SchemaDiffKind.DropUniqueConstraint, $"{dialect}");
         }
 
         DialectCapabilities
@@ -365,14 +370,12 @@ public class SchemaDiffServiceTests
     }
 
     /// <summary>
-    /// 複合外部キーの列ペアの並びだけが違うとき、並びを問う方言（SQL Server・MySQL）では作り直しの差分になり、
-    /// 問わない方言（PostgreSQL・Oracle・SQLite）では差分にならないことを検証する（5 方言）。
-    /// Oracle のカタログは外部キーの列を参照先のキーの並びで返すので、並びまで比べると取り込み直すたびに差分が出た。
+    /// 複合外部キーの列ペアの並びだけが違うとき、5 方言とも差分にならないことを検証する（列ペアは対応の集合で並びは意味を
+    /// 持たない。参照先のキーの並びを求める SQL Server・MySQL の DDL は出力の時点で並べ替えるので、図の並びのままでも
+    /// 取り込み直した live はキーの並びになる。Oracle のカタログは宣言の並びを残さない）。
     /// </summary>
-    [Fact(
-        DisplayName = "複合外部キーの列ペアの並び: 並びを問わない方言では差分にならない（5 方言）"
-    )]
-    public void CompositeForeignKeyPairOrder_IsComparedOnlyWhereItMatters()
+    [Fact(DisplayName = "複合外部キーの列ペアの並び: 5 方言とも差分にならない")]
+    public void CompositeForeignKeyPairOrder_IsNeverADifference()
     {
         (List<Entity>, List<Relationship>) Build(bool reversed)
         {
@@ -412,25 +415,55 @@ public class SchemaDiffServiceTests
                 .Compute(live, liveRelationships, target, targetRelationships, capabilities)
                 .Items;
 
-            if (capabilities.ReferencedKeyRequiresSameColumnOrder)
-            {
-                items
-                    .Should()
-                    .ContainSingle($"{dialect}")
-                    .Which.Kind.Should()
-                    .Be(SchemaDiffKind.AlterForeignKey, $"{dialect}");
-            }
-            else
-            {
-                items.Should().BeEmpty($"{dialect}");
-            }
+            items.Should().BeEmpty($"{dialect}");
         }
+    }
 
-        DialectCapabilities
-            .Where(d => d.Capabilities.ReferencedKeyRequiresSameColumnOrder)
-            .Select(d => d.Dialect)
-            .Should()
-            .Equal("SqlServer", "MySql");
+    /// <summary>
+    /// 並び以外の理由（参照アクション）で作り直す複合外部キーの説明に、列ペアの並びだけの違いを「参照の変更」として
+    /// 出さないことを検証する（5 方言。差分のシグネチャと同じく並びを見ない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "複合外部キーの列ペアの並び: 作り直しの説明に並びだけの違いを参照の変更として出さない（5 方言）"
+    )]
+    public void CompositeForeignKeyPairOrder_IsNotDescribedAsReferenceChange()
+    {
+        var referencePrefix = ProviderStrings.Diff_ForeignKeyChange_Reference.Split('{')[0];
+
+        foreach (var (dialect, capabilities) in DialectCapabilities)
+        {
+            var parent = Tbl("P", ("A", "int", true), ("B", "int", true));
+            var child = Tbl("C", ("Id", "int", true), ("X", "int", false), ("Y", "int", false));
+            List<RelationshipColumnPair> pairs =
+            [
+                new(parent.Columns[0].Id, child.Columns[1].Id),
+                new(parent.Columns[1].Id, child.Columns[2].Id),
+            ];
+            var live = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ColumnPairs = [.. pairs.AsEnumerable().Reverse()],
+                ConstraintName = "FK_C_P",
+            };
+            var target = new Relationship
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ColumnPairs = pairs,
+                ConstraintName = "FK_C_P",
+                OnDelete = ForeignKeyReferentialAction.Cascade,
+            };
+
+            var alter = new SchemaDiffService()
+                .Compute([parent, child], [live], [parent, child], [target], capabilities)
+                .Items.Should()
+                .ContainSingle($"{dialect}")
+                .Which;
+
+            alter.Kind.Should().Be(SchemaDiffKind.AlterForeignKey, $"{dialect}");
+            alter.Description.Should().NotContain(referencePrefix, $"{dialect}");
+        }
     }
 
     /// <summary>計算列でない列の NULL 許容差は従来どおり検出されることを検証する（スキップの範囲の下限）</summary>
@@ -1567,11 +1600,11 @@ public class SchemaDiffServiceTests
     }
 
     /// <summary>
-    /// 名前が違う・DB 側に名前が無い（SQLite の自動名）・図の主キーと同じ列集合を持てない方言の案内項目、の
-    /// いずれも組まず、追加と削除のままにすることを検証する。
+    /// 名前が違う・DB 側に名前が無い（SQLite の自動名）ときは組まず、追加と削除のままにすることを検証する。
+    /// 図の主キーと同じ列集合を持てない方言では、その追加は比較から外れるので、DB 側の削除だけが残る。
     /// </summary>
     [Fact(
-        DisplayName = "一意制約の変更: 名前違い・DB 側の名前なし・持てない方言の案内項目は組まない"
+        DisplayName = "一意制約の変更: 名前違い・DB 側の名前なしは組まず、持てない方言の主キーと同じ列集合は削除だけ"
     )]
     public void UniqueConstraintColumnsChanged_NotPaired()
     {
@@ -1600,10 +1633,7 @@ public class SchemaDiffServiceTests
             WithUnique(CustomerTable(), "UQ_X", "Id"),
             new OracleProvider().SyncCapabilities
         );
-        Kinds(onPrimaryKey)
-            .Should()
-            .Equal(SchemaDiffKind.AddUniqueConstraint, SchemaDiffKind.DropUniqueConstraint);
-        onPrimaryKey[0].IsSelectable.Should().BeFalse();
+        Kinds(onPrimaryKey).Should().Equal(SchemaDiffKind.DropUniqueConstraint);
     }
 
     /// <summary>制約名だけが違う（構成列は同じ）一意制約では差分が出ないことを検証する</summary>

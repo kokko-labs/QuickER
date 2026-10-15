@@ -301,6 +301,7 @@ internal sealed class DiagramExportService(
                 Strings.ExportOmission_UniqueConstraintOnForeignKeyColumn,
             ExportOmissionKind.RelationshipConstraintName =>
                 Strings.ExportOmission_RelationshipConstraintName,
+            ExportOmissionKind.IdentityColumn => Strings.ExportOmission_IdentityColumn,
             _ => kind.ToString(),
         };
 }

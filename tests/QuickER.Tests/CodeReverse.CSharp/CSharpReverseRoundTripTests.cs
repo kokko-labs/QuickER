@@ -20,14 +20,15 @@ namespace QuickER.Tests.CodeReverse.CSharp;
 /// </remarks>
 public class CSharpReverseRoundTripTests
 {
-    /// <summary>比較用の列射影（名前・型・PK・NULL 許容・説明・計算列）</summary>
+    /// <summary>比較用の列射影（名前・型・PK・NULL 許容・説明・計算列・採番列）</summary>
     private sealed record ColumnProjection(
         string Name,
         string DataType,
         bool IsPrimaryKey,
         bool IsNullable,
         string Description,
-        bool IsComputed
+        bool IsComputed,
+        bool IsIdentity
     );
 
     /// <summary>比較用の UNIQUE 制約射影（実効制約名・宣言順の構成列名）</summary>
@@ -317,6 +318,169 @@ public class CSharpReverseRoundTripTests
     }
 
     /// <summary>
+    /// 主キーでない採番列（<see cref="Column.IsIdentity"/>）が <c>[IdentityColumn]</c> として往復する。
+    /// </summary>
+    /// <remarks>
+    /// 往復しないと「コードから図へ戻した瞬間に採番列が普通の列に化け、次の生成物がその列へ書き込む」形で
+    /// 静かに壊れる。採番列でない列に属性が付かないこと（＝復元が false へ戻ること）も同じ図で確かめる。
+    /// </remarks>
+    [Fact(DisplayName = "主キーでない採番列が [IdentityColumn] として往復で一致する")]
+    public void RoundTrip_IdentityColumn_Matches()
+    {
+        var items = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "items",
+            Columns =
+            {
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "item_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "qty",
+                    DataType = "int",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "seq",
+                    DataType = "bigint",
+                    IsNullable = false,
+                    IsIdentity = true,
+                },
+            },
+        };
+
+        var diagram = new ErDiagram { TargetDbms = "sqlserver", Entities = { items } };
+        var options = new CodeGenerationOptions
+        {
+            RootNamespace = "Sample.Identity",
+            OutputFileName = "Identity.g.cs",
+            GenerateRepositories = true,
+            IncludeDataAnnotations = true,
+        };
+
+        AssertRoundTrips(diagram, options);
+    }
+
+    /// <summary>
+    /// 主キーの採番列はコードに印が残らないため、リバースすると普通の列に戻ることを検証する（既知の割り切り）。
+    /// </summary>
+    /// <remarks>
+    /// 生成側は主キーの採番列に <c>[IdentityColumn]</c> を付けず普通の列として書き込むので、コードが運ぶ事実も
+    /// 「普通の列」になる。印を推測で復元しないことを固定する。
+    /// </remarks>
+    [Fact(DisplayName = "主キーの採番列はリバースで普通の列に戻る")]
+    public void Reverse_IdentityPrimaryKey_ComesBackAsOrdinaryColumn()
+    {
+        var (_, reversed) = ReverseIdentityPrimaryKeyDiagram();
+
+        reversed.Entities.Single().Columns.Single().IsIdentity.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// コードの取込（GUI のマージ）は、主キーの採番の印を現在図から引き継ぎ、取り込み直しても置換の確認を出さないことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 引き継がないと印が消え、署名（<c>*IDENTITY</c>）の差として置換の確認が出る。GUI と同じ手順
+    /// （Guid 引継マージ → 後処理）を通し、引き継ぐ前は確認が要ることも表明する（テストが空振りしないため）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "コードの取込は主キーの採番の印を現在図から引き継ぎ、取り込み直しても置換の確認を出さない"
+    )]
+    public void Merge_IdentityPrimaryKey_KeepsMarkAndNeedsNoReplacementConfirmation()
+    {
+        var (current, reversed) = ReverseIdentityPrimaryKeyDiagram();
+        var merged = DiagramMergeReconciler.Reconcile(
+            current,
+            reversed.Entities.ToList(),
+            reversed.Relationships.ToList(),
+            preserveExistingMemo: true
+        );
+        var relationships = ReverseMergePostProcessor.Apply(
+            current,
+            merged.Entities,
+            merged.Relationships,
+            reversed.RelationshipMetadata
+        );
+
+        DiagramReplacementCheck
+            .CanSkipConfirmation(false, current, merged, relationships)
+            .Should()
+            .BeFalse("引き継ぐ前は印が消えて署名が食い違う");
+
+        ReverseMergePostProcessor.ApplyPrimaryKeyIdentityMarks(current, merged.Entities);
+
+        merged.Entities.Single().Columns.Single().IsIdentity.Should().BeTrue();
+        DiagramReplacementCheck
+            .CanSkipConfirmation(false, current, merged, relationships)
+            .Should()
+            .BeTrue();
+    }
+
+    /// <summary>主キー item_id が採番列の 1 テーブルの図を生成し、生成コードをリバースする</summary>
+    private static (
+        ErDiagram Diagram,
+        CodeReverseResult Reversed
+    ) ReverseIdentityPrimaryKeyDiagram()
+    {
+        var diagram = new ErDiagram
+        {
+            TargetDbms = "sqlserver",
+            Entities =
+            {
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "item_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                            IsIdentity = true,
+                        },
+                    },
+                },
+            },
+        };
+        var provider = new SqlServerProvider();
+        var generation = DiagramCodeGenerator.Generate(
+            provider.TypeMapper,
+            provider.TypeCatalog,
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.IdentityKey",
+                OutputFileName = "IdentityKey.g.cs",
+                GenerateRepositories = true,
+                IncludeDataAnnotations = true,
+            }
+        );
+        generation.HasErrors.Should().BeFalse("主キーの採番列は警告であって生成は止めない");
+
+        var reversed = new CSharpReverseParser().Parse(
+            generation.Files.Single().Content,
+            provider.TypeCatalog,
+            IdentifierLengthLimit.Unlimited
+        );
+
+        return (diagram, reversed);
+    }
+
+    /// <summary>
     /// UNIQUE 制約（単一・複合／実名・名前なし）と外部キーメタデータ（制約名・ON DELETE / ON UPDATE）を
     /// 持つ図が往復する。制約は <c>[UniqueConstraint]</c>、参照アクションは <c>[NavigationReference]</c> の
     /// 名前付き引数として往復する。
@@ -524,7 +688,8 @@ public class CSharpReverseRoundTripTests
                 column.IsPrimaryKey,
                 column.IsNullable,
                 column.Description,
-                column.IsComputed
+                column.IsComputed,
+                column.IsIdentity
             ))
             .ToList();
 

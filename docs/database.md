@@ -171,6 +171,9 @@ The list has one heading per kind with the count, followed by one line per place
 - A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
   The diagram does not model expressions, so generated DDL creates an ordinary column (with a comment asking for the expression to be added by hand).
   Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))
+- A column with **automatic numbering that refuses given values** (SQL Server `IDENTITY`, PostgreSQL and Oracle `GENERATED ALWAYS AS IDENTITY`) is imported with a mark, as a column the database numbers, without its numbering definition (seed and increment), and is named column by column.
+  The diagram does not model the numbering definition, so generated DDL creates an ordinary column (with a comment asking for the identity property to be added by hand).
+  Generated code leaves such a column out of INSERT / UPDATE unless it is part of the primary key (see [the code generation notes](code-generation.md#columns-the-database-numbers))
 - A SQLite **virtual table** (FTS5, R*Tree and the like) is not imported.
   It cannot be represented as an ordinary table; its shadow tables are excluded along with it, and each virtual table is reported once
 - **Objects the diagram does not hold** are left out and listed by name.
@@ -250,7 +253,7 @@ It is not imported, it never appears in generated DDL, and the diff sync neither
 | `CHECK` constraint | Not imported | Not emitted | Lost |
 | `COLLATE` | Not imported | Not emitted | Lost |
 | Generated / computed column | Imported as an ordinary column; the expression is lost | Emitted as an ordinary column | Lost |
-| `IDENTITY` / `AUTO_INCREMENT` / `AUTOINCREMENT` | Not imported | Not emitted | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
+| `IDENTITY` / `AUTO_INCREMENT` / `AUTOINCREMENT` | Automatic numbering that refuses given values (SQL Server `IDENTITY`, PostgreSQL and Oracle `GENERATED ALWAYS AS IDENTITY`) is imported as the mark of a column the database numbers (the numbering definition is lost); the rest is not imported | Not emitted (a marked column gets a note) | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
 | Non-unique index | Not imported | Not emitted | Preserved (captured as its `CREATE` statement and replayed) |
 | Trigger | Not imported | Not emitted | Preserved (same) |
 | View, stored procedure, function, sequence | Not imported | Not emitted | Not applicable |
@@ -305,11 +308,22 @@ Oracle foreign keys have no `ON UPDATE` and no `ON DELETE SET DEFAULT`, so those
 The DDL and the sync script create the foreign key without the clause and add a comment saying so.
 MySQL (InnoDB) accepts `SET DEFAULT` in `ON DELETE` and `ON UPDATE` but does not apply it: deleting the parent row fails, as with `NO ACTION`.
 It is handled the same way: compared as `NO ACTION`, and left out of the DDL and the sync script with a comment.
+SQL Server cannot create a `SET DEFAULT` foreign key when a NOT NULL referencing column has no DEFAULT constraint (error 1762).
+The diagram does not carry column defaults, so the DDL adds a comment before such a foreign key, and the sync names the foreign keys it adds or recreates in the confirmation dialog.
+It does not stop the sync, because the foreign key is created when the database column has a DEFAULT constraint.
+On SQL Server and PostgreSQL, altering a column reads the column's collation back at execution time and writes it again when the new type is a string type (without it, the column goes back to the database's default collation; PostgreSQL writes it only when it differs from the type's default).
+On SQL Server, a type change drops the column's DEFAULT constraint, changes the type, and adds the constraint back with the same name and definition (keeping it would make the change fail with error 5074).
+A sync that changes the kind of type of a column with a default value is shown in the confirmation dialog on every dialect except SQLite (SQL Server, PostgreSQL, MySQL and Oracle).
+When the default does not fit the new type, the sync fails on PostgreSQL and Oracle, the sync fails with error 1067 on MySQL, and an insert that uses the default fails on SQL Server.
+When the sync fails on MySQL or Oracle, DDL is not rolled back, so the statements before it stay applied.
 Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
 Recreating a unique constraint works the same way: when a unique constraint keeps its name (or the generated name `UQ_{table}_{columns}` matches the database's name) but its columns change, the drop and the add become one diff item, unselected by default.
 Adding a constraint under the name the database already uses would fail, and re-adding it can fail on duplicate values.
-On PostgreSQL, Oracle, and SQLite, a composite foreign key whose column pairs differ only in their order is not a difference, because these databases do not care about the order (Oracle does not even keep the declared order and returns the pairs in the order of the referenced key).
-SQL Server and MySQL require the referencing columns to follow the order of the referenced key, so there the order is compared.
+On every dialect, a composite foreign key whose column pairs differ only in their order is not a difference, because the pairs map parent columns to child columns and their order carries no meaning (Oracle does not even keep the declared order and returns the pairs in the order of the referenced key).
+SQL Server and MySQL require the referencing columns to follow the order of the referenced key, so the DDL writes the pairs in the order of the referenced key (the primary key, or else a unique constraint).
+A foreign key the sync adds or recreates is written in the diagram's order, so on SQL Server and MySQL it fails when that order differs from the referenced key (the confirmation dialog shows it).
+SQLite reads a table name with a dot such as `a.b` as table b in an attached database a, so the DDL and the sync for that table fail unless that database is attached.
+The DDL adds a comment before the table, and the sync lists such tables in the confirmation dialog.
 
 Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions.
 Adding a column in the middle is therefore not a column-order difference by itself: the new column goes to the end of the table, and the next sync shows the order difference.
@@ -320,9 +334,12 @@ On the other three dialects it is shown for information only and is not synced.
 
 A computed column's nullability is never compared, because the database derives it from the expression and the diagram does not hold the expression.
 A computed column's type change can be selected only on PostgreSQL, where `ALTER COLUMN ... TYPE` keeps the expression, and selecting it never changes the column's nullability.
-On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server and MySQL reject the change, and a SQLite rebuild would drop the expression).
-On SQLite and Oracle, adding a unique constraint on exactly the primary key's columns is also shown for information only.
+On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server rejects the change and a SQLite rebuild would drop the expression; MySQL is shown for information only as well).
+On SQLite and Oracle, a unique constraint on exactly the primary key's columns is not compared and does not become a diff item.
 SQLite does not keep such a constraint, and Oracle rejects it; the primary key already guarantees uniqueness.
+The DDL and the tables the sync creates leave that unique constraint out and add a comment saying so.
+On Oracle, a sync that moves the primary key onto the columns of a unique constraint the database already has fails with ORA-02261.
+Remove that unique constraint from the diagram and select its drop as well, or drop it in the database first.
 
 ### Safety by design
 
@@ -362,7 +379,9 @@ The same applies when dropping a unique constraint whose index is the only one s
 On SQL Server, altering the type of a primary key column also drops the primary key and adds it back with the same columns (the re-added key is named `PK_{table}`).
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
 Re-adding it would always fail and, on MySQL / Oracle, leave the foreign key missing.
-On MySQL, string types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch, because MySQL accepts them on the two ends of a foreign key; changing the length of one end drops and re-adds the foreign key as usual.
+On every dialect but SQL Server, string types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch, because PostgreSQL, MySQL, Oracle and SQLite accept them on the two ends of a foreign key; on Oracle the length unit (`CHAR` / `BYTE`) must be the same on both ends.
+Changing the length of one end drops and re-adds the foreign key as usual.
+SQL Server cannot create a foreign key whose ends differ in length (error 1753), so the DDL adds a comment before such a foreign key.
 The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
 In that case no other foreign key is dropped and re-added either, because the column change fails anyway and the re-adding would never run.
 If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.
@@ -390,14 +409,13 @@ MySQL has no statement that changes only a column's comment, and none that chang
 Both go through `ALTER TABLE ... MODIFY COLUMN`, which re-states the **whole** column definition: whatever the new definition leaves out is dropped from the column.
 MySQL commits DDL implicitly, so there is no rolling that back.
 
-QuickER therefore takes the definition from two different places, depending on what the change is about.
+QuickER therefore rebuilds the definition from `information_schema.COLUMNS` at execution time and replaces only what the change is about.
 
-- **Description sync and column-order sync** rebuild the definition from `information_schema.COLUMNS` at execution time and replace only the trailing clause they exist to change: the comment, or `AFTER` / `FIRST`.
+- **Description sync and column-order sync** replace only the trailing clause they exist to change (the comment, or `AFTER` / `FIRST`), and **altering a column** (a type or nullability change) replaces only the type and the nullability.
   Everything the diagram does not model is carried over untouched: `DEFAULT` (literal and expression, `BIT` and binary literals included), `AUTO_INCREMENT`, the collation and with it the character set, `ON UPDATE CURRENT_TIMESTAMP`, `INVISIBLE`, a spatial `SRID`, and generated (`VIRTUAL` / `STORED`) columns.
-  Column-order sync preserves the column's existing comment as well.
-- **Altering a column** (a type or nullability change) re-specifies from the diagram, because the diagram is what that change expresses.
-  It therefore **does** drop the attributes listed above, none of which the diagram can represent.
-  The comment alone is re-stated from the live database and kept (changing it is the job of the description sync item).
+  Column-order sync and altering a column preserve the column's existing comment as well (changing it is the job of the description sync item).
+- **Altering a column** writes the collation only when the new type is a string type (`JSON` and some other types do not accept `COLLATE`).
+  When a kept attribute does not fit the new type (a default of `'abc'` kept while changing to `int`, for example), the change fails with a MySQL error.
   Such diffs are unselected by default.
 - **Changing the primary key** removes `AUTO_INCREMENT` from an old primary key column before dropping the key, because MySQL refuses to drop it otherwise (error 1075).
   `AUTO_INCREMENT` is not added back because the diagram cannot represent it (the comment, default, and other attributes are carried over from the live definition).
@@ -414,7 +432,8 @@ Two things do not come through the rebuild, both because the catalog does not re
 - A character-set introducer on a string literal inside a generated-column expression (`_latin1'x'`) is re-parsed and written back under the connection's character set (`_utf8mb4'x'`).
   The expression still means the same thing; only the text the catalog records for it changes.
 
-If the column no longer exists when the script runs, its statement folds into a no-op, and the run is still reported as successful, since nothing failed.
+For description sync and column-order sync, if the column no longer exists when the script runs, its statement folds into a no-op, and the run is still reported as successful, since nothing failed.
+Altering a column fails when the column does not exist, because a selected change that silently does nothing would be wrong.
 If the column does exist but its definition cannot be rebuilt, the statement fails instead, so a half-applied column order is never reported as a success.
 
 Before running the script, the sync clears `NO_BACKSLASH_ESCAPES` from its own session's `sql_mode`; the global setting is not touched.

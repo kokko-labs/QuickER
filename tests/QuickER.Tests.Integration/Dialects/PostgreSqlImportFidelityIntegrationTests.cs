@@ -731,9 +731,9 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
     /// serial の nextval は既定値として二重に告げず、ALWAYS の IDENTITY・生成列の式・値が NULL の既定値も既定値に数えない
     /// </summary>
     [Fact(
-        DisplayName = "[Integration] PG: 既定値と自動採番（serial・BY DEFAULT）を列ごとに名指しする"
+        DisplayName = "[Integration] PG: 既定値と自動採番（serial・BY DEFAULT は告知・ALWAYS は印）を列ごとに名指しする"
     )]
-    public async Task Import_ColumnDefaultsAndAutoIncrement_AreReported()
+    public async Task Import_ColumnDefaultsAndIdentity_AreReportedOrMarked()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
         await fixture.ResetSchemaAsync(Ct);
@@ -770,6 +770,11 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
                 ),
                 (SchemaImportWarningKind.ColumnDefaultLost, "status", "'new'::character varying"),
                 (SchemaImportWarningKind.ColumnDefaultLost, "marker", "'NULL'::text"),
+                (
+                    SchemaImportWarningKind.IdentityColumnMarked,
+                    "strict_id",
+                    "GENERATED ALWAYS AS IDENTITY"
+                ),
                 (SchemaImportWarningKind.ColumnDefaultLost, "created", "now()"),
             ]);
         result
@@ -780,6 +785,14 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
                 ("marker", "'NULL'::text"),
                 ("created", "now()"),
             ]);
+
+        // 指定した値を拒む IDENTITY（ALWAYS）にだけ印を付ける。BY DEFAULT・serial には付けない
+        result
+            .Entities.Single()
+            .Columns.Where(c => c.IsIdentity)
+            .Select(c => c.Name)
+            .Should()
+            .Equal("strict_id");
     }
 
     /// <summary>

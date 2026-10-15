@@ -531,14 +531,17 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsBinary = isBinary,
             // 行バージョン列は DB が採番するため非 NULL でも入力必須にしない（新規行は未入力が正常）。
             // 計算列・生成列も同じく非 NULL でも入力必須にしない（DB が式から作るため未入力が正常）。
+            // 主キーでない ID 列も同じく非 NULL でも入力必須にしない（DB が採番するため未入力が正常）。
             // 除外された無制限バイナリ列も同じく非 NULL でも入力必須にしない（通常フェッチでは未取得が正常）
             IsRequired =
                 !column.IsNullable
                 && !_columnTypes[column.Id].IsRowVersion
                 && !column.IsComputed
+                && !IsWriteExcludedIdentity(column)
                 && !isExcludedUnboundedBinary,
             IsRowVersion = _columnTypes[column.Id].IsRowVersion,
             IsComputed = column.IsComputed,
+            IsIdentity = IsWriteExcludedIdentity(column),
             IsExcludedUnboundedBinary = isExcludedUnboundedBinary,
             // NOT NULL の除外列だけは新規行（Added）で必須にする。未入力のまま INSERT すると DB の
             // NOT NULL 違反で必ず落ちるため、行が DB に無い間だけ画面で止める（rowversion 列は

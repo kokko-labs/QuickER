@@ -244,12 +244,6 @@ namespace QuickER.Provider.Resources {
             }
         }
 
-        public static string Diff_UniqueConstraintOnPrimaryKeyNotSynced {
-            get {
-                return ResourceManager.GetString("Diff_UniqueConstraintOnPrimaryKeyNotSynced", resourceCulture);
-            }
-        }
-
         public static string Diff_AutoForeignKeyDrop {
             get {
                 return ResourceManager.GetString("Diff_AutoForeignKeyDrop", resourceCulture);
@@ -583,6 +577,18 @@ namespace QuickER.Provider.Resources {
         public static string ImportWarningHeading_NameTrimmed {
             get {
                 return ResourceManager.GetString("ImportWarningHeading_NameTrimmed", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_IdentityColumnMarked {
+            get {
+                return ResourceManager.GetString("ImportWarning_IdentityColumnMarked", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_IdentityColumnMarked {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_IdentityColumnMarked", resourceCulture);
             }
         }
     }

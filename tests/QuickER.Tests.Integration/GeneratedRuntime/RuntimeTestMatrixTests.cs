@@ -375,6 +375,23 @@ public class RuntimeTestMatrixTests
                 )
             )
         ),
+        ["IdentityColumn"] = new(
+            "非主キーの自動採番列（[IdentityColumn] による INSERT / UPDATE 除外・EF Core の ValueGeneratedOnAddOrUpdate・SELECT では読む）",
+            Row(
+                Covered(),
+                NotApplicable(
+                    "自動採番列を持つ図は SQL Server 方言の図で、SQLite 単独の図に IDENTITY の概念が無い"
+                        + "（除外は列自身の事実で方言に依らないため、SQL Server の実 DB で代表させている）"
+                ),
+                Covered(),
+                NotApplicable(
+                    "インメモリは採番を行わない＝自動採番列も普通のプロパティとして値を保つ（意図的な割り切り）"
+                ),
+                Gap(
+                    "リモート面越しの専用テストは無い（除外は転送経路でなく EntitySaveMetadata の側で効く）"
+                )
+            )
+        ),
         ["SyncSupport"] = new(
             "双方向同期支援（差分ダウンロード・ジャーナル再生・削除伝搬・競合収集・ループ防止）",
             Row(
@@ -625,6 +642,10 @@ public class RuntimeTestMatrixTests
         // 「図から作った DDL」を当てた側（＝式を持たない普通の列になるミラー）の両アーム:
         // NULL 許容なら書けて NULL のまま読める（逃げ道）／NOT NULL なら NOT NULL 制約で落ちる（正しい失敗）
         new("SqliteComputedColumnDiagramDdlRuntimeTests", "ComputedColumn", Backend.AdoSqlite),
+        // --- 自動採番列 ---
+        new("SqlServerIdentityColumnRuntimeTests", "IdentityColumn", Backend.AdoSqlServer),
+        new("SqlServerIdentityColumnRuntimeTests", "IdentityColumn", Backend.EfCore),
+        new("PostgreSqlIdentityColumnRuntimeTests", "IdentityColumn", Backend.EfCore),
         new("SyncSqliteRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         // 同期支援 × 値オブジェクト（ミラー版・キーが VO 型になる経路）
         new("SyncVoRuntimeTests", "SyncSupport", Backend.AdoSqlite),

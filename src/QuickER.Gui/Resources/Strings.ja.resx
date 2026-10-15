@@ -726,6 +726,12 @@
   <data name="TypeConversion_NullableColumnLine" xml:space="preserve">
     <value>・{0}.{1} ({2})</value>
   </data>
+  <data name="TypeConversion_IdentityMarkHeader" xml:space="preserve">
+    <value>{0} は DB が採番する列を持てないため、採番の印を外す列（生成コードはこの列を再び書き込みます）:</value>
+  </data>
+  <data name="TypeConversion_IdentityMarkLine" xml:space="preserve">
+    <value>・{0}.{1}</value>
+  </data>
   <data name="TypeConversion_NameLimitHeader" xml:space="preserve">
     <value>{0} が受け付けない名前（変更するまで、DDL の生成と同期は止まります）:</value>
   </data>
@@ -857,6 +863,9 @@
   </data>
   <data name="ExportOmission_ComputedColumn" xml:space="preserve">
     <value>計算列の指定（取り込むと通常の列になります）</value>
+  </data>
+  <data name="ExportOmission_IdentityColumn" xml:space="preserve">
+    <value>DB が採番する列（ID 列）の指定（取り込むと通常の列になります）</value>
   </data>
   <data name="ExportOmission_TableNameNormalized" xml:space="preserve">
     <value>引用してもこの形式で書けないテーブル名（「"」「%」「\」は「_」へ置き換わります）</value>

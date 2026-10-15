@@ -1,3 +1,4 @@
+using System;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -97,7 +98,10 @@ public class PostgreSqlSyncScriptBuilderTests
             }
         );
 
-        sql.Should().Contain("ALTER TABLE \"customer\" ALTER COLUMN \"name\" TYPE varchar(100);");
+        sql.Should()
+            .Contain(
+                "EXECUTE 'ALTER TABLE \"customer\" ALTER COLUMN \"name\" TYPE varchar(100)' || COALESCE(' COLLATE ' || coll, '') || '';"
+            );
         sql.Should().Contain("ALTER TABLE \"customer\" ALTER COLUMN \"name\" SET NOT NULL;");
     }
 
@@ -148,10 +152,42 @@ public class PostgreSqlSyncScriptBuilderTests
             }
         );
 
-        var expected = expectsUsing
-            ? $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType} USING \"code\"::{newType};"
-            : $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType};";
+        var usingClause = expectsUsing ? $" USING \"code\"::{newType}" : string.Empty;
+        // 文字列型への変更は、照合順序を読み直す DO ブロックの中で実行する（COLLATE は USING より前）
+        var expected = newType.StartsWith("varchar", StringComparison.Ordinal)
+            ? $"EXECUTE 'ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType}' || COALESCE(' COLLATE ' || coll, '') || '{usingClause}';"
+            : $"ALTER TABLE \"customer\" ALTER COLUMN \"code\" TYPE {newType}{usingClause};";
         sql.Should().Contain(expected);
+    }
+
+    /// <summary>
+    /// 文字列型への列の変更は、実行時に列の照合順序を読み、型の既定と違うときだけ COLLATE を書き添えることを検証する
+    /// （表は to_regclass で ALTER TABLE と同じ表に絞る。文字列型でない型への変更は照合順序を読まない）
+    /// </summary>
+    [Fact(DisplayName = "AlterColumn は文字列型への変更で、型の既定と違う照合順序だけを書き添える")]
+    public void AlterColumn_StringType_ReadsBackNonDefaultCollation()
+    {
+        SchemaDiffItem Alter(string type) =>
+            new()
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "sales.orders",
+                ColumnName = "code",
+                Column = new Column
+                {
+                    Name = "code",
+                    DataType = type,
+                    IsNullable = true,
+                },
+                IsSelected = true,
+            };
+
+        var text = Build(Alter("text"));
+        text.Should()
+            .Contain("CASE WHEN a.attcollation = 0 OR a.attcollation = t.typcollation THEN NULL");
+        text.Should().Contain("a.attrelid = to_regclass('\"sales\".\"orders\"')");
+        text.Should().Contain("quote_ident(n.nspname) || '.' || quote_ident(co.collname)");
+        Build(Alter("integer")).Should().NotContain("attcollation");
     }
 
     /// <summary>NULL 許容へ変更する AlterColumn が DROP NOT NULL を生成することを検証する</summary>
@@ -299,8 +335,35 @@ public class PostgreSqlSyncScriptBuilderTests
 
         sql.Should().Contain("DO $$");
         sql.Should().Contain("pg_constraint");
-        sql.Should().Contain("child.relname = 'order'");
-        sql.Should().Contain("parent.relname = 'customer'");
+        sql.Should().Contain("con.conrelid = to_regclass('\"order\"')");
+        sql.Should().Contain("con.confrelid = to_regclass('\"customer\"');");
+    }
+
+    /// <summary>
+    /// 逆引きは ALTER TABLE と同じ 1 つの表に絞る＝ドット付きの名前はスキーマごとクォートして <c>to_regclass</c> へ渡し、
+    /// 名前の <c>'</c> は文字列リテラルとして二重化することを検証する（public に固定しない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "逆引き: ドット付きの表名はスキーマごと to_regclass へ渡す（public に固定しない）"
+    )]
+    public void RuntimeLookup_DottedTableName_UsesRegclassOfQualifiedName()
+    {
+        var primaryKey = Build(AlterPk("sales.orders", PkTarget("sales.orders", "code")));
+        var foreignKey = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "sales.lines",
+                ParentEntity = new Entity { TableName = "sales.o'rders" },
+                ChildEntity = new Entity { TableName = "sales.lines" },
+                IsSelected = true,
+            }
+        );
+
+        primaryKey.Should().Contain("con.conrelid = to_regclass('\"sales\".\"orders\"');");
+        foreignKey.Should().Contain("con.conrelid = to_regclass('\"sales\".\"lines\"')");
+        foreignKey.Should().Contain("con.confrelid = to_regclass('\"sales\".\"o''rders\"');");
+        (primaryKey + foreignKey).Should().NotContain("regnamespace");
     }
 
     /// <summary>SetTableDescription が COMMENT ON TABLE を生成することを検証する</summary>
@@ -516,8 +579,8 @@ public class PostgreSqlSyncScriptBuilderTests
         // 旧主キーの制約名は差分に無いため pg_constraint から逆引きして DO ブロックで外す
         sql.Should().Contain("DO $$");
         sql.Should().Contain("FROM pg_constraint con");
-        sql.Should().Contain("WHERE con.contype = 'p' AND tbl.relname = 'orders'");
-        sql.Should().Contain("AND tbl.relnamespace = 'public'::regnamespace;");
+        sql.Should()
+            .Contain("WHERE con.contype = 'p' AND con.conrelid = to_regclass('\"orders\"');");
         sql.Should().Contain("IF pk_name IS NOT NULL THEN");
         sql.Should()
             .Contain("EXECUTE 'ALTER TABLE \"orders\" DROP CONSTRAINT ' || quote_ident(pk_name);");

@@ -789,9 +789,27 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Warning_NotNullIdentityColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_NotNullIdentityColumns", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Warning_NotNullComputedColumns {
             get {
                 return ResourceManager.GetString("CodeGen_Warning_NotNullComputedColumns", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Info_IdentityColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Info_IdentityColumns", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Warning_IdentityPrimaryKeyColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_IdentityPrimaryKeyColumn", resourceCulture);
             }
         }
     }

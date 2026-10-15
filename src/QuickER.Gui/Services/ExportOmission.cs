@@ -66,4 +66,7 @@ public enum ExportOmissionKind
 
     /// <summary>リレーションの制約名（取込で同じ名前に戻らないもの）</summary>
     RelationshipConstraintName,
+
+    /// <summary>DB が採番する列（ID 列）の指定（取り込むと通常の列になる）</summary>
+    IdentityColumn,
 }

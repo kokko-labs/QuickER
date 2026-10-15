@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Provider.Oracle;
 using QuickER.Tests.Integration;
 
@@ -362,6 +363,87 @@ public sealed class OracleDdlRoundTripIntegrationTests(OracleContainerFixture fi
             .ColumnIds.Select(cid => columnNamesById[cid])
             .Should()
             .Equal("warehouse", "slot");
+    }
+
+    /// <summary>
+    /// 主キーと同じ列集合の一意制約を持つ表を、DDL と同期の表の追加の両方で実 DB へ流し、その一意制約を省いて
+    /// 適用できること（以前は ORA-02261 で失敗した）と、主キーと違う列集合の一意制約は残ることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] A: 主キーと同じ列集合の一意制約は DDL・同期とも省かれて適用できる"
+    )]
+    public async Task UniqueConstraintOnPrimaryKey_IsOmittedAndApplies()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        static Entity Table(string name)
+        {
+            var entity = new Entity { TableName = name };
+            var id = new Column
+            {
+                Name = "id",
+                DataType = "NUMBER(10)",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            };
+            var code = new Column
+            {
+                Name = "code",
+                DataType = "NUMBER(10)",
+                IsNullable = false,
+            };
+            entity.Columns.AddRange([id, code]);
+            entity.UniqueConstraints.Add(
+                new UniqueConstraint { Name = $"UQ_{name}_id", ColumnIds = [id.Id] }
+            );
+            entity.UniqueConstraints.Add(
+                new UniqueConstraint { Name = $"UQ_{name}_code", ColumnIds = [code.Id] }
+            );
+            return entity;
+        }
+
+        await fixture.ExecuteAsync(
+            new OracleDdlGenerator().Build(new ErDiagram { Entities = { Table("uqpk_ddl") } }),
+            Ct
+        );
+
+        var provider = new OracleProvider();
+        var synced = Table("uqpk_sync");
+        var script = provider.SyncScriptBuilder.Build(
+            new SyncPlanner().BuildPlan(
+                [
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.AddTable,
+                        TableName = synced.TableName,
+                        Entity = synced,
+                        IsSelected = true,
+                    },
+                ],
+                provider.SyncCapabilities,
+                new SyncPlanContext()
+            )
+        );
+        var result = await provider.SyncExecutor.ExecuteAsync(
+            fixture.ToDbConnectionSettings(),
+            script,
+            Ct
+        );
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var imported = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        foreach (var name in new[] { "uqpk_ddl", "uqpk_sync" })
+        {
+            var table = imported.Entities.Single(e => e.TableName == name);
+            table
+                .UniqueConstraints.Should()
+                .ContainSingle()
+                .Which.Name.Should()
+                .Be($"UQ_{name}_code");
+        }
     }
 
     /// <summary>

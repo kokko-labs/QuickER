@@ -60,6 +60,8 @@ public static class SchemaImportWarningKinds
                 UnsupportedDefinitionKind.SpatialReferenceId,
             SchemaImportWarningKind.AliasTypeFlattened => UnsupportedDefinitionKind.FlattenedType,
             SchemaImportWarningKind.NameTrimmed => UnsupportedDefinitionKind.PaddedName,
+            SchemaImportWarningKind.IdentityColumnMarked =>
+                UnsupportedDefinitionKind.IdentityRejectingValues,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

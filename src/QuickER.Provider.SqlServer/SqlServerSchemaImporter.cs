@@ -368,7 +368,7 @@ WHERE EXISTS (
 )
 ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2;";
 
-    /// <summary>図が持たない列の属性（既定値・別名型）を名指しするクエリ</summary>
+    /// <summary>図が持たない列の属性（既定値・別名型・IDENTITY）を名指しするクエリ</summary>
     /// <remarks>
     /// 取込の列の読み込みは変えず、告げるためだけに読む。別名型は利用者が定義した型のうち、
     /// CLR 型（<c>is_assembly_type</c>）とテーブル型（<c>is_table_type</c>）でないもの（<c>CREATE TYPE … FROM</c>）。
@@ -378,13 +378,18 @@ ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2;
 SELECT s.name AS TABLE_SCHEMA, t.name AS TABLE_NAME, c.name AS COLUMN_NAME,
        dc.definition AS DEFAULT_DEFINITION,
        CASE WHEN ty.is_user_defined = 1 AND ty.is_assembly_type = 0 AND ty.is_table_type = 0
-            THEN SCHEMA_NAME(ty.schema_id) + N'.' + ty.name END AS ALIAS_TYPE
+            THEN SCHEMA_NAME(ty.schema_id) + N'.' + ty.name END AS ALIAS_TYPE,
+       c.is_identity AS IS_IDENTITY,
+       CAST(ic.seed_value AS nvarchar(40)) AS IDENTITY_SEED,
+       CAST(ic.increment_value AS nvarchar(40)) AS IDENTITY_INCREMENT
 FROM sys.columns c
 JOIN sys.tables t ON c.object_id = t.object_id
 JOIN sys.schemas s ON t.schema_id = s.schema_id
 JOIN sys.types ty ON ty.user_type_id = c.user_type_id
 LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
+LEFT JOIN sys.identity_columns ic ON ic.object_id = c.object_id AND ic.column_id = c.column_id
 WHERE dc.object_id IS NOT NULL
+   OR c.is_identity = 1
    OR (ty.is_user_defined = 1 AND ty.is_assembly_type = 0 AND ty.is_table_type = 0)
 ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2, c.column_id;";
 
@@ -477,6 +482,20 @@ ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2,
                         table,
                         column.Name,
                         reader.GetString(4)
+                    )
+                );
+            }
+
+            // IDENTITY は指定した値を拒む（IDENTITY_INSERT を除く）ので、図に印を付けて告げる
+            if (reader.GetBoolean(5))
+            {
+                column.IsIdentity = true;
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.IdentityColumnMarked,
+                        table,
+                        column.Name,
+                        $"IDENTITY({reader.GetString(6)},{reader.GetString(7)})"
                     )
                 );
             }

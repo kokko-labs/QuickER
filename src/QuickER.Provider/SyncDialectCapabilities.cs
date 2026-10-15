@@ -114,13 +114,51 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public required bool SupportsSetDefaultAction { get; init; }
 
+    /// <summary>
+    /// 参照アクション <c>SET DEFAULT</c> の外部キーを作るのに、NOT NULL の子の列の DEFAULT 制約が要るか（SQL Server）。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server は NOT NULL の子の列に DEFAULT 制約が無いと <c>SET DEFAULT</c> の外部キーを作れない（エラー 1762。NULL を許す
+    /// 子の列では作れ、動きは <c>SET NULL</c> と同じ）。図は列の既定値を持たないので、<c>true</c> の方言では
+    /// <see cref="SyncPlanner"/> が、選んだ外部キーの追加・作り直しのうちこの形のものを
+    /// <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> で名指しする（DB 側の列に DEFAULT 制約があれば通るので、
+    /// 実行は止めない）。
+    /// </remarks>
+    public required bool SetDefaultRequiresColumnDefault { get; init; }
+
+    /// <summary>ドットを含む表名（<c>schema.table</c>）を、スキーマ付きの表として扱えるか（SQLite は扱えない）。</summary>
+    /// <remarks>
+    /// SQLite は <c>"a"."b"</c> を「添付したデータベース a の表 b」と読むので、a を添付していない限り、その表を触る文は
+    /// 失敗する（unknown database）。<c>false</c> の方言では <see cref="SyncPlanner"/> が、選んだ項目が触れるドット付きの表を
+    /// <see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> で名指しする（添付していれば通るので、実行は止めない）。
+    /// </remarks>
+    public required bool SupportsSchemaQualifiedTableNames { get; init; }
+
+    /// <summary>
+    /// 列の型を変える同期が DB の既定値を保つので、既定値が新しい型に合うかを確かめる必要があるか
+    /// （SQLite 以外の 4 方言）。
+    /// </summary>
+    /// <remarks>
+    /// 図は既定値を持たないので、同期は DB の既定値をそのまま保つ（SQL Server は DEFAULT 制約を外して付け直し、
+    /// MySQL は実行時のカタログから列定義を組み直す）。既定値が新しい型に合わないと、同期そのもの（PostgreSQL・Oracle は
+    /// 型の変更で既定値を新しい型へ変換し、MySQL はエラー 1067 で断る）か、既定値を使う行の追加（SQL Server は
+    /// 付け直しで既定値を確かめない）が失敗する。SQLite はテーブルの再構築で既定値を落とすので <c>false</c>
+    /// （落とすことは再構築の警告が告げる）。<c>true</c> の方言では
+    /// <see cref="SyncPlanner"/> が、取込で分かった既定値（<see cref="SyncPlanContext.ColumnDefaults"/>）のある列の型の種類
+    /// （括弧より前の基本の名前）を変える列の変更を <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> で名指しする。
+    /// </remarks>
+    public required bool ChecksDefaultOnColumnTypeChange { get; init; }
+
     /// <summary>計算列・生成列の型を、式を変えずに <c>ALTER COLUMN</c> で変えられるか（PostgreSQL だけ）。</summary>
     /// <remarks>
     /// <para>
     /// 意味モデルは計算列の式を持たないので、同期は式を書けない。PostgreSQL は <c>ALTER COLUMN ... TYPE</c> が生成列の
-    /// 式を保ったまま型だけを変える。SQL Server（計算列は <c>ALTER COLUMN</c> できない）と MySQL（式を書かない
-    /// <c>MODIFY</c> は生成列を通常の列へ変えようとして断られる）は失敗し、SQLite の再構築は式を落とす
-    /// （Oracle も式を書かない変更はできない）。
+    /// 式を保ったまま型だけを変える。SQL Server は計算列を <c>ALTER COLUMN</c> できずに失敗する。SQLite の再構築は式を落とし、
+    /// Oracle も式を書かない変更はできない。MySQL は列の変更を実行時のカタログから組み直すので、生成列も式と種別
+    /// （<c>VIRTUAL</c> / <c>STORED</c>）を保ったまま型を変えられる（実 DB で確認＝
+    /// <c>MySqlColumnAttributeSyncIntegrationTests.AlterColumn_GeneratedColumn_KeepsExpression</c>）が、宣言は <c>false</c>
+    /// のままにしてある（式を書かない <c>MODIFY</c> なら、<c>STORED</c> は式を落として普通の列になり、<c>VIRTUAL</c> は
+    /// エラー 3106 で断られる。<c>true</c> にするかは残件）。
     /// </para>
     /// <para>
     /// <c>false</c> の方言では、計算列の型の差分を選択できない案内項目にする（<see cref="SchemaDiffService"/>）。
@@ -146,19 +184,23 @@ public sealed partial record SyncDialectCapabilities
     /// PostgreSQL・Oracle・SQLite は列の集合が一致すれば並びを問わない（いずれもコンテナ・実ファイルで確認）。
     /// </para>
     /// <para>
-    /// <c>false</c> の方言では、外部キーの列ペアの並びは意味を持たないので、差分は列ペアを順不同で比べる
-    /// （<see cref="SchemaDiffService"/>）。Oracle のカタログは外部キーの列を参照先のキーの並びで記録し、宣言の並びを
-    /// 残さないため、並びまで比べると取り込み直すたびに作り直しの差分が出た。
+    /// 差分はこの値に依らず列ペアを並びを見ずに比べる（<see cref="SchemaDiffService"/>）。<c>true</c> の方言の DDL は、
+    /// 列ペアを参照先のキーの並びへ並べ替えて出す（<see cref="ForeignKeyColumnOrder"/>・扱いの表の DDL のマス）。
+    /// 計画は、候補キーの証明（<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/>）と、並びだけが合わなくなる
+    /// 変更の除外（<see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/>）で並びまで見る（同期で足す・作り直す
+    /// 外部キーは図の並びのまま出すため）。
     /// </para>
     /// </remarks>
     public required bool ReferencedKeyRequiresSameColumnOrder { get; init; }
 
-    /// <summary>外部キーの両端の文字列型が、長さだけ違っていてもよいか（MySQL）。</summary>
+    /// <summary>外部キーの両端の文字列型が、長さだけ違っていてもよいか（SQL Server 以外の 4 方言）。</summary>
     /// <remarks>
-    /// MySQL は外部キーの両端の文字列型（<c>char</c> / <c>varchar</c> / <c>binary</c> / <c>varbinary</c>）の長さの違いを許す
-    /// （文字集合・照合順序は同じでなければならない）。<c>true</c> の方言では、同期後の外部キーの両端の型の照合
+    /// PostgreSQL・MySQL・Oracle・SQLite は、外部キーの両端の文字列型の長さの違いを両方向とも許す
+    /// （MySQL は文字集合・照合順序が同じであること。いずれもコンテナ・実ファイルで確認）。SQL Server は長さも一致しないと
+    /// 外部キーを作れない（エラー 1753）。<c>true</c> の方言では、同期後の外部キーの両端の型の照合
     /// （<see cref="AreForeignKeyCompatibleTypes"/>）が長さだけの違いを食い違いとみなさない。食い違いとみなすと
-    /// 外部キーを外し直さず、片側の長さを変える列の変更が MySQL のエラー 1832 で失敗した。
+    /// 外部キーを外し直さず、片側の長さを変える列の変更（MySQL のエラー 1832）や、主キーの変更に伴う付け直しが
+    /// 不要に止まる。
     /// </remarks>
     public required bool ForeignKeyAllowsStringLengthDifference { get; init; }
 
@@ -204,7 +246,9 @@ public sealed partial record SyncDialectCapabilities
     /// <remarks>
     /// <see cref="AreSameType"/> で同じ型なら並べられる。<see cref="ForeignKeyAllowsStringLengthDifference"/> が
     /// <c>true</c> の方言では、同じ文字列型で長さだけが違う型（<c>varchar(50)</c> と <c>varchar(100)</c>。括弧の後ろの
-    /// 文字集合などの指定は同じであること）も並べられる。
+    /// 文字集合などの指定は同じであること）も並べられる。対象の型は <c>char</c> / <c>varchar</c> / <c>nchar</c> /
+    /// <c>nvarchar</c> / <c>binary</c> / <c>varbinary</c> / <c>varchar2</c> / <c>nvarchar2</c> / <c>raw</c> で、
+    /// Oracle の長さの単位語（<c>CHAR</c> / <c>BYTE</c>）は両端で同じであること（単位語の無い表記と、ある表記は別とみなす）。
     /// </remarks>
     public bool AreForeignKeyCompatibleTypes(string? left, string? right)
     {
@@ -213,13 +257,23 @@ public sealed partial record SyncDialectCapabilities
             return true;
         }
 
-        if (!ForeignKeyAllowsStringLengthDifference)
-        {
-            return false;
-        }
+        return ForeignKeyAllowsStringLengthDifference
+            && DiffersOnlyInStringLength(
+                NormalizeTypeNotation(left ?? string.Empty),
+                NormalizeTypeNotation(right ?? string.Empty)
+            );
+    }
 
-        var l = StringTypePattern().Match(NormalizeTypeNotation(left ?? string.Empty));
-        var r = StringTypePattern().Match(NormalizeTypeNotation(right ?? string.Empty));
+    /// <summary>2 つの型表記が、同じ文字列型で長さだけが違うか（長さが同じでも真）</summary>
+    /// <remarks>
+    /// 対象の型と単位語の条件は <see cref="AreForeignKeyCompatibleTypes"/> と同じ。表記の正規化はしないので、
+    /// 方言の正規化が要る比較では呼び出し側が先に通す。外部キーの両端の長さの違いを DDL の注記で名指しするのにも使う
+    /// （<see cref="ForeignKeyStatementNotes"/>）。
+    /// </remarks>
+    public static bool DiffersOnlyInStringLength(string? left, string? right)
+    {
+        var l = StringTypePattern().Match(left ?? string.Empty);
+        var r = StringTypePattern().Match(right ?? string.Empty);
 
         return l.Success
             && r.Success
@@ -229,15 +283,20 @@ public sealed partial record SyncDialectCapabilities
                 StringComparison.OrdinalIgnoreCase
             )
             && string.Equals(
+                l.Groups["unit"].Value,
+                r.Groups["unit"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+            && string.Equals(
                 l.Groups["rest"].Value.Trim(),
                 r.Groups["rest"].Value.Trim(),
                 StringComparison.OrdinalIgnoreCase
             );
     }
 
-    /// <summary>長さを持つ文字列型の表記（基本の型・長さ・括弧の後ろの指定）</summary>
+    /// <summary>長さを持つ文字列型の表記（基本の型・長さ・Oracle の単位語・括弧の後ろの指定）</summary>
     [GeneratedRegex(
-        @"^\s*(?<base>char|varchar|binary|varbinary)\s*\(\s*\d+\s*\)(?<rest>.*)$",
+        @"^\s*(?<base>char|varchar|nchar|nvarchar|binary|varbinary|varchar2|nvarchar2|raw)\s*\(\s*\d+\s*(?<unit>char|byte)?\s*\)(?<rest>.*)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline
     )]
     private static partial Regex StringTypePattern();

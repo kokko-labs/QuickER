@@ -326,6 +326,11 @@ internal sealed class ScribanCSharpRenderer
         // [StoreGeneratedColumn] とは意図的に別属性にする（版列の解決が「その属性の先頭 1 本＝版」を前提にしているため）
         const bool emitComputedColumnAttr = true;
 
+        // ID 列のマーカー属性 [IdentityColumn] も同じ扱い（主キーでない ID 列へ無条件で付与し、EntitySaveMetadata が
+        // INSERT / UPDATE から除外する）。[StoreGeneratedColumn] / [ComputedColumn] とは別属性にする
+        // （版列の解決を巻き込まず、取込が告げる事実も「式」と「採番」で別物のため）
+        const bool emitIdentityColumnAttr = true;
+
         // using は呼び出し側（GeneratedFileUsings）がバケット単位で解決済み。EF Core など外部依存の
         // 出し分けもそこで完結するため、レンダラーでは受け取った集合をそのまま流し込む
         var scriptObject = new Scriban.Runtime.ScriptObject
@@ -359,6 +364,8 @@ internal sealed class ScribanCSharpRenderer
             ["emit_store_generated_attr"] = emitStoreGeneratedAttr,
             // 計算列・生成列のマーカー属性の定義出力可否（付与は property.is_computed により無条件）。
             ["emit_computed_column_attr"] = emitComputedColumnAttr,
+            // ID 列のマーカー属性の定義出力可否（付与は property.is_identity により無条件）。
+            ["emit_identity_column_attr"] = emitIdentityColumnAttr,
             // マーカー属性 [UnboundedBinaryColumn] を Entity プロパティへ付与するか（オプション ON のときのみ真）。
             ["exclude_unbounded_binary"] = options.ExcludeUnboundedBinaryColumns,
             // バイナリ列アップロード（PUT）エンドポイントが 1 本でも生成されるか（allowUnboundedUploads 引数の出力条件）。

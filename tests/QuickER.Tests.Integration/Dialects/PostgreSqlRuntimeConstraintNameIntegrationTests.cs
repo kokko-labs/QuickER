@@ -134,6 +134,118 @@ public sealed class PostgreSqlRuntimeConstraintNameIntegrationTests(
         );
     }
 
+    /// <summary>
+    /// ドット付きの表（別スキーマの表）でも主キーの付け替えが成功し、public の同名の表を取り違えないことを、
+    /// 両方向（スキーマ付きの表を変える・修飾の無い表を変える）で検証する（以前は逆引きが public 固定で、
+    /// ドット付きの表の旧主キーを見つけられずに失敗した）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] ドット付きの表の主キーの付け替えが成功し、別スキーマの同名の表を取り違えない"
+    )]
+    public async Task AlterPrimaryKey_DottedTableName_SucceedsAndKeepsSameNamedTable()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            "DROP SCHEMA IF EXISTS \"sales\" CASCADE; CREATE SCHEMA \"sales\";"
+                + "CREATE TABLE \"sales\".\"orders\" (\"id\" integer NOT NULL, \"code\" integer NOT NULL, "
+                + "CONSTRAINT \"pk_sales_orders\" PRIMARY KEY (\"id\"));"
+                + "CREATE TABLE \"orders\" (\"id\" integer NOT NULL, \"code\" integer NOT NULL, "
+                + "CONSTRAINT \"pk_orders\" PRIMARY KEY (\"id\"));",
+            Ct
+        );
+
+        try
+        {
+            var script = await ApplyAsync(MovePrimaryKeyToCode("sales.orders"));
+
+            (await AllPrimaryKeysAsync())
+                .Should()
+                .Equal(
+                    ["orders -> pk_orders (id)", "sales.orders -> PK_sales_orders (code)"],
+                    $"sales.orders だけが付け替わるはず\nSQL:\n{script}"
+                );
+
+            script = await ApplyAsync(MovePrimaryKeyToCode("orders"));
+
+            (await AllPrimaryKeysAsync())
+                .Should()
+                .Equal(
+                    ["orders -> PK_orders (code)", "sales.orders -> PK_sales_orders (code)"],
+                    $"public の orders だけが付け替わるはず\nSQL:\n{script}"
+                );
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP SCHEMA IF EXISTS \"sales\" CASCADE;", Ct);
+        }
+    }
+
+    /// <summary>
+    /// 名前の分からない外部キーの削除が、ドット付きの表の外部キーだけを外し、public の同名の表の外部キーは残すことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] 名前不明の外部キー削除はドット付きの表の外部キーだけを外し、同名の表は触らない"
+    )]
+    public async Task DropForeignKey_WithoutName_DottedTables_KeepsSameNamedTables()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            "DROP SCHEMA IF EXISTS \"sales\" CASCADE; CREATE SCHEMA \"sales\";"
+                + "CREATE TABLE \"sales\".\"parent\" (\"id\" integer NOT NULL, CONSTRAINT \"pk_sp\" PRIMARY KEY (\"id\"));"
+                + "CREATE TABLE \"sales\".\"child\" (\"id\" integer NOT NULL, \"parent_id\" integer NOT NULL, "
+                + "CONSTRAINT \"pk_sc\" PRIMARY KEY (\"id\"), "
+                + "CONSTRAINT \"fk_sales\" FOREIGN KEY (\"parent_id\") REFERENCES \"sales\".\"parent\" (\"id\"));"
+                + "CREATE TABLE \"parent\" (\"id\" integer NOT NULL, CONSTRAINT \"pk_parent\" PRIMARY KEY (\"id\"));"
+                + "CREATE TABLE \"child\" (\"id\" integer NOT NULL, \"parent_id\" integer NOT NULL, "
+                + "CONSTRAINT \"pk_child\" PRIMARY KEY (\"id\"), "
+                + "CONSTRAINT \"fk_public\" FOREIGN KEY (\"parent_id\") REFERENCES \"parent\" (\"id\"));",
+            Ct
+        );
+
+        try
+        {
+            var script = await ApplyAsync(DropForeignKeyWithoutName("sales.child", "sales.parent"));
+
+            (
+                await QueryStringsAsync(
+                    """
+                    SELECT con.conrelid::regclass::text || ' -> ' || con.conname
+                    FROM pg_constraint con
+                    WHERE con.contype = 'f' AND con.connamespace IN ('public'::regnamespace, 'sales'::regnamespace)
+                    ORDER BY 1;
+                    """
+                )
+            ).Should().Equal(["child -> fk_public"], $"sales の外部キーだけが外れるはず\nSQL:\n{script}");
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP SCHEMA IF EXISTS \"sales\" CASCADE;", Ct);
+        }
+    }
+
+    /// <summary>ドット付きの名前のスキーマが無いときも、主キー・外部キーの動的 DROP は何もせず成功することを検証する</summary>
+    [Fact(
+        DisplayName = "[Integration] スキーマが無いドット付きの表でも動的 DROP は何もせず成功する"
+    )]
+    public async Task DynamicDrop_MissingSchema_IsNoOp()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await ApplyAsync(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AlterPrimaryKey,
+                TableName = "nosuch.missing_table",
+                Entity = new Entity { TableName = "nosuch.missing_table" },
+                IsSelected = true,
+            },
+            DropForeignKeyWithoutName("nosuch.missing_child", "nosuch.missing_parent")
+        );
+    }
+
     // ---------------- ヘルパー ----------------
 
     /// <summary>取込→主キーを <c>code</c> へ付け替えた目標→差分→同期、を実行し、使ったスクリプトを返す</summary>
@@ -194,6 +306,50 @@ public sealed class PostgreSqlRuntimeConstraintNameIntegrationTests(
         result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
         return script;
     }
+
+    /// <summary>主キーを id から code へ付け替える差分項目（表 id / code の 2 列）を作る</summary>
+    private static SchemaDiffItem MovePrimaryKeyToCode(string tableName)
+    {
+        var target = new Entity { TableName = tableName };
+        target.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "integer",
+                IsNullable = false,
+            }
+        );
+        target.Columns.Add(
+            new Column
+            {
+                Name = "code",
+                DataType = "integer",
+                IsNullable = false,
+                IsPrimaryKey = true,
+            }
+        );
+
+        return new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterPrimaryKey,
+            TableName = tableName,
+            Entity = target,
+            IsSelected = true,
+        };
+    }
+
+    /// <summary>public と sales の主キーを「表（検索パスの外はスキーマ付き） -&gt; 制約名 (構成列)」の形で並べて返す</summary>
+    private Task<List<string>> AllPrimaryKeysAsync() =>
+        QueryStringsAsync(
+            """
+            SELECT con.conrelid::regclass::text || ' -> ' || con.conname || ' (' || string_agg(a.attname, ',' ORDER BY a.attnum) || ')'
+            FROM pg_constraint con
+            JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey)
+            WHERE con.contype = 'p' AND con.connamespace IN ('public'::regnamespace, 'sales'::regnamespace)
+            GROUP BY con.conrelid, con.conname
+            ORDER BY 1;
+            """
+        );
 
     /// <summary>制約名を持たない外部キー削除の差分項目（名前不明パスを通す）を作る</summary>
     private static SchemaDiffItem DropForeignKeyWithoutName(string child, string parent) =>

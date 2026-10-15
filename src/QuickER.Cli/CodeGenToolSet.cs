@@ -464,17 +464,34 @@ public static class CodeGenToolSet
     /// 判定は CLI の generate と共有（<see cref="GenerationExecutor.ProviderDiffersFromDiagram"/>）。生成は続ける＝
     /// 型は変換されず、指定した方言の規則でそのまま解釈されることを、呼び手（AI エージェント）へ伝える。
     /// 図の対象 DBMS はファイル由来の任意文字列なので、1 行に収まるよう改行・制御文字を畳む。
+    /// 指定した方言が DB の採番する列を持てないときは、印の付いた列を同じ行で名指しする（<see cref="IdentityColumnMarks"/>）。
     /// </remarks>
     private static string? DescribeProviderMismatch(
         JsonElement args,
         ErDiagram schema,
         IDatabaseProvider provider
-    ) =>
-        GenerationExecutor.ProviderDiffersFromDiagram(GetString(args, "provider"), schema)
-            ? $"Warning: provider '{provider.Name}' differs from the diagram's target DBMS '{SqlComment.Sanitize(schema.TargetDbms)}'. "
-                + $"Column types were not converted; they are read as written under {provider.Name}'s rules. "
-                + "To change the dialect, switch the target DBMS in the QuickER GUI, which converts the types first."
-            : null;
+    )
+    {
+        if (!GenerationExecutor.ProviderDiffersFromDiagram(GetString(args, "provider"), schema))
+        {
+            return null;
+        }
+
+        var warning =
+            $"Warning: provider '{provider.Name}' differs from the diagram's target DBMS '{SqlComment.Sanitize(schema.TargetDbms)}'. "
+            + $"Column types were not converted; they are read as written under {provider.Name}'s rules. "
+            + "To change the dialect, switch the target DBMS in the QuickER GUI, which converts the types first.";
+
+        var identityColumns = IdentityColumnMarks.NamesUnsupportedBy(schema, provider.Name);
+
+        return identityColumns.Count == 0
+            ? warning
+            : warning
+                + $" The diagram marks columns the database numbers (identity columns), which {provider.Name} cannot have: "
+                + string.Join(", ", identityColumns)
+                + ". Generated DDL creates them as ordinary columns and generated code leaves them out of INSERT / UPDATE,"
+                + " so their values are never written. Switching the target DBMS in the QuickER GUI removes the mark.";
+    }
 
     /// <summary>警告があれば、その行と空行を結果テキストへ足す（無ければ何もしない）</summary>
     private static void AppendWarningLine(StringBuilder sb, string? warning)

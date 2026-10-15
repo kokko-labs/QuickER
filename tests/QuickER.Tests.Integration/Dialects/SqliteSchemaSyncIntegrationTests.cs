@@ -1548,14 +1548,14 @@ public sealed class SqliteSchemaSyncIntegrationTests
     }
 
     /// <summary>
-    /// 主キーと同じ列集合の一意制約を図に持つと、SQLite の差分が選べない案内項目になり、
-    /// 同期しても同じ案内が出るだけで選べる差分が繰り返し出ないことを検証する
-    /// （SQLite はその一意制約の索引を作らず、取り込んでも現れない）。
+    /// 主キーと同じ列集合の一意制約を図に持っても、SQLite では差分の比較から外れて項目にならず、
+    /// 同期を繰り返しても差分が出ないことを検証する
+    /// （SQLite はその一意制約の索引を作らず、取り込んでも現れない。一意性は主キーが保証する）。
     /// </summary>
     [Fact(
-        DisplayName = "[Integration] SQLite 同期: 主キーと同じ列集合の一意制約は案内項目になり、同期しても差分が繰り返し出ない"
+        DisplayName = "[Integration] SQLite 同期: 主キーと同じ列集合の一意制約は差分にならず、同期を繰り返しても差分が出ない"
     )]
-    public async Task UniqueConstraintOnPrimaryKey_IsGuideOnlyAndDoesNotRepeat()
+    public async Task UniqueConstraintOnPrimaryKey_IsFoldedAndDoesNotRepeat()
     {
         using var db = SqliteTempDatabase.Create();
         var provider = new SqliteProvider();
@@ -1587,14 +1587,57 @@ public sealed class SqliteSchemaSyncIntegrationTests
                 }
             );
 
-            items.Should().ContainSingle();
-            items[0].Kind.Should().Be(SchemaDiffKind.AddUniqueConstraint);
-            items[0].IsSelectable.Should().BeFalse();
+            items.Should().BeEmpty();
             plan.Rebuilds.Should().BeEmpty();
             result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
         }
 
         (await ImportAsync(db, provider)).Entities.Single().UniqueConstraints.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// ドットを含む名前の表を足す同期は、計画がその表を警告し、添付していないデータベースの表として読まれて失敗することを
+    /// 検証する（警告の文言「添付していなければ失敗する」の裏付け）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: ドットを含む表名は警告され、添付していないデータベースの表として失敗する"
+    )]
+    public async Task DottedTableName_WarnsAndFailsAsUnknownDatabase()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"plain\" (\"id\" INTEGER NOT NULL, CONSTRAINT \"PK_plain\" PRIMARY KEY (\"id\"));"
+        );
+
+        var (result, script, plan) = await RunSyncWithFreshIdsAsync(
+            db,
+            provider,
+            (entities, _) =>
+            {
+                var table = new Entity { TableName = "sales.items" };
+                table.Columns.Add(
+                    new Column
+                    {
+                        Name = "id",
+                        DataType = "INTEGER",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                    }
+                );
+                entities.Add(table);
+            },
+            item => item.Kind == SchemaDiffKind.AddTable
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.SchemaQualifiedTableName)
+            .Which.TableName.Should()
+            .Be("sales.items");
+        result.Committed.Should().BeFalse(script);
+        result.Error.Should().Contain("unknown database");
     }
 
     // ---------------- ビュー・既存の外部キー違反と再構築 ----------------

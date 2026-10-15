@@ -274,6 +274,85 @@ public class MainViewModelTargetDbmsTests
         key.IsNullable.Should().BeFalse();
     }
 
+    /// <summary>
+    /// DB の採番する列を持てない方言（SQLite）への切替は、印の列を確認の一覧で名指しして印を外し、
+    /// 切替ごと 1 回の Undo で印も戻ることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "採番の列を持てない方言への切替は印の列を確認に名指しして外し、1 回の Undo で戻す"
+    )]
+    public void ChangeDbms_ToDialectWithoutIdentity_ListsAndRemovesMarkInOneUndo()
+    {
+        var (vm, sqlite, dialogs) = CreateSqliteVm();
+        vm.AddEntityCommand.Execute(null);
+        var seq = AddColumn(vm, "seq", "int");
+        seq.IsIdentity = true;
+        var table = vm.Entities[0].TableName;
+
+        vm.SelectedProvider = sqlite;
+
+        var entry = dialogs.WarningConfirmDetailsMessages.Should().ContainSingle().Subject;
+        entry
+            .Details.Should()
+            .Contain(
+                string.Format(GuiStrings.TypeConversion_IdentityMarkHeader, sqlite.DisplayName)
+            )
+            .And.Contain(string.Format(GuiStrings.TypeConversion_IdentityMarkLine, table, "seq"));
+        vm.CurrentProvider.Name.Should().Be(DialectNames.Sqlite);
+        seq.IsIdentity.Should().BeFalse();
+        vm.ToDiagramModel()
+            .Entities[0]
+            .Columns.Single(c => c.Name == "seq")
+            .IsIdentity.Should()
+            .BeFalse();
+
+        vm.UndoCommand.Execute(null);
+
+        vm.CurrentProvider.Name.Should().Be(DialectNames.SqlServer);
+        seq.IsIdentity.Should().BeTrue();
+
+        vm.RedoCommand.Execute(null);
+
+        vm.CurrentProvider.Name.Should().Be(DialectNames.Sqlite);
+        seq.IsIdentity.Should().BeFalse();
+    }
+
+    /// <summary>印を外す確認をキャンセルすると、切替も印の変更も適用されないことを検証する</summary>
+    [Fact(DisplayName = "採番の印を外す確認をキャンセルすると、切替も印も変わらない")]
+    public void ChangeDbms_ToDialectWithoutIdentity_CancelKeepsMark()
+    {
+        var (vm, sqlite, dialogs) = CreateSqliteVm();
+        vm.AddEntityCommand.Execute(null);
+        var seq = AddColumn(vm, "seq", "int");
+        seq.IsIdentity = true;
+        dialogs.ConfirmResult = false;
+
+        vm.SelectedProvider = sqlite;
+
+        dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
+        vm.CurrentProvider.Name.Should().Be(DialectNames.SqlServer);
+        seq.IsIdentity.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 採番の列を持てる方言（PostgreSQL の名前を名乗る擬似プロバイダ）への切替は、印を残し、
+    /// 印だけを理由に確認を出さないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "採番の列を持てる方言への切替は印を残し、印だけでは確認を出さない")]
+    public void ChangeDbms_ToDialectWithIdentity_KeepsMarkWithoutConfirm()
+    {
+        var (vm, fake, dialogs) = CreateVm();
+        vm.AddEntityCommand.Execute(null);
+        var seq = AddColumn(vm, "seq", "int");
+        seq.IsIdentity = true;
+
+        vm.SelectedProvider = fake;
+
+        dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
+        vm.CurrentProvider.Name.Should().Be(FakeProvider.FakeName);
+        seq.IsIdentity.Should().BeTrue();
+    }
+
     /// <summary>未知の TargetDbms を持つ図の読込相当で、SQL Server として動作することを検証する</summary>
     [Fact(DisplayName = "未知 TargetDbms はレジストリで SQL Server にフォールバックする")]
     public void UnknownTargetDbms_FallsBackToSqlServer()

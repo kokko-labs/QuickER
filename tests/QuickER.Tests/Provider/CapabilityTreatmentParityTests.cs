@@ -74,11 +74,11 @@ public sealed class CapabilityTreatmentParityTests
         (
             nameof(SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder),
             UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder,
-            UnsupportedFeature.Diff,
+            UnsupportedFeature.Ddl,
             c =>
                 c.ReferencedKeyRequiresSameColumnOrder
-                    ? UnsupportedTreatment.None
-                    : UnsupportedTreatment.Fold
+                    ? UnsupportedTreatment.Reorder
+                    : UnsupportedTreatment.None
         ),
         (
             nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
@@ -88,6 +88,24 @@ public sealed class CapabilityTreatmentParityTests
                 c.ForeignKeyAllowsStringLengthDifference
                     ? UnsupportedTreatment.Fold
                     : UnsupportedTreatment.None
+        ),
+        (
+            nameof(SyncDialectCapabilities.SetDefaultRequiresColumnDefault),
+            UnsupportedDefinitionKind.SetDefaultReferentialAction,
+            UnsupportedFeature.Sync,
+            c =>
+                c.SetDefaultRequiresColumnDefault ? UnsupportedTreatment.Warning
+                : c.SupportsSetDefaultAction ? UnsupportedTreatment.None
+                : UnsupportedTreatment.OmitWithAnnotation
+        ),
+        (
+            nameof(SyncDialectCapabilities.SupportsSchemaQualifiedTableNames),
+            UnsupportedDefinitionKind.SchemaQualifiedTableName,
+            UnsupportedFeature.Sync,
+            c =>
+                c.SupportsSchemaQualifiedTableNames
+                    ? UnsupportedTreatment.None
+                    : UnsupportedTreatment.Warning
         ),
         (
             nameof(SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey),
@@ -130,25 +148,37 @@ public sealed class CapabilityTreatmentParityTests
         ),
     ];
 
-    /// <summary>表が終わりの姿を書き、フラグがまだ今の姿のマス（方言・フラグ・直すフェーズ）</summary>
-    private static readonly (string Dialect, string Flag, string Phase)[] Pending =
+    /// <summary>
+    /// フラグ 1 つと表のマス 1 つの対応のうち、フラグの値からマスが 1 つに決まらないもの（フラグの値から、表が持ってよい
+    /// 扱いの集合を決める）
+    /// </summary>
+    /// <remarks>
+    /// 既定値の同期のマスは、同期が既定値を能動的に読み直して保つ方言（SQL Server・MySQL）を <c>Preserve</c>、DB が
+    /// 型の変更で既定値を保ち、計画の事前の警告だけが扱いになる方言（PostgreSQL・Oracle）を <c>Warning</c> と書き分ける。
+    /// どちらも <see cref="SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange"/> が <c>true</c> の姿なので、フラグからは
+    /// 2 つのどちらかとしか言えない。<c>false</c> は再構築で既定値を落とす方言で、そのマスは再構築の警告になる。
+    /// </remarks>
+    private static readonly (
+        string Flag,
+        UnsupportedDefinitionKind Kind,
+        UnsupportedFeature Feature,
+        Func<SyncDialectCapabilities, UnsupportedTreatment[]> Allowed
+    )[] SetRules =
     [
         (
-            DialectNames.PostgreSql,
-            nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
-            "2e（J9）"
-        ),
-        (
-            DialectNames.Oracle,
-            nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
-            "2e（J9）"
-        ),
-        (
-            DialectNames.Sqlite,
-            nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
-            "2e（J9）"
+            nameof(SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange),
+            UnsupportedDefinitionKind.DefaultValue,
+            UnsupportedFeature.Sync,
+            c =>
+                c.ChecksDefaultOnColumnTypeChange
+                    ? [UnsupportedTreatment.Preserve, UnsupportedTreatment.Warning]
+                : c.ColumnReorder == ColumnReorderMode.Rebuild ? [UnsupportedTreatment.Warning]
+                : [UnsupportedTreatment.None]
         ),
     ];
+
+    /// <summary>表が終わりの姿を書き、フラグがまだ今の姿のマス（方言・フラグ・直すフェーズ）</summary>
+    private static readonly (string Dialect, string Flag, string Phase)[] Pending = [];
 
     [Fact(
         DisplayName = "能力の宣言のフラグと扱いの表のマスが、5 方言で食い違わない（未実装の一覧を除く）"
@@ -166,7 +196,20 @@ public sealed class CapabilityTreatmentParityTests
                 rule.Flag,
                 Detail: $"{rule.Kind} {rule.Feature}: フラグからは {expected}・表は {actual}"
             )
-        ).ToList();
+        )
+            .Concat(
+                from provider in Providers
+                from rule in SetRules
+                let allowed = rule.Allowed(provider.SyncCapabilities)
+                let actual = UnsupportedTreatments.For(rule.Kind, rule.Feature, provider.Name)
+                where !allowed.Contains(actual)
+                select (
+                    Dialect: provider.Name,
+                    rule.Flag,
+                    Detail: $"{rule.Kind} {rule.Feature}: フラグからは {string.Join(" か ", allowed)}・表は {actual}"
+                )
+            )
+            .ToList();
 
         var unexpected = mismatches
             .Where(m => !Pending.Any(p => p.Dialect == m.Dialect && p.Flag == m.Flag))

@@ -290,6 +290,50 @@ public class OracleSyncScriptBuilderTests
         // 注意コメントには "ON UPDATE" が含まれるが、SQL の句としては出力しない
         sql.Should().NotContain("REFERENCES \"customer\" (\"id\") ON DELETE CASCADE ON UPDATE");
         sql.Should().Contain("-- Note: Oracle does not support ON UPDATE; ignoring it");
+        sql.Should().NotContain(OracleReferentialAction.SetDefaultNote);
+    }
+
+    /// <summary>AddForeignKey の ON DELETE SET DEFAULT は句を出さず、NO ACTION として扱う旨の注意コメントを付けることを検証する</summary>
+    [Fact(DisplayName = "AddForeignKey は ON DELETE SET DEFAULT の句を省いて注意コメントを付ける")]
+    public void AddForeignKey_OnDeleteSetDefault_OmitsClauseWithNote()
+    {
+        var customer = new Entity { TableName = "customer" };
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "NUMBER(10)",
+                IsPrimaryKey = true,
+            }
+        );
+        var order = new Entity { TableName = "order" };
+        order.Columns.Add(new Column { Name = "customer_id", DataType = "NUMBER(10)" });
+        var rel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = order.Id,
+            Type = RelationshipType.OneToMany,
+            ColumnPairs = [new(customer.Columns[0].Id, order.Columns[0].Id)],
+            ConstraintName = "FK_order_customer",
+            OnDelete = ForeignKeyReferentialAction.SetDefault,
+        };
+
+        var sql = Build(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddForeignKey,
+                TableName = "order",
+                ColumnName = "customer_id",
+                ForeignKeyColumnPairs = [new("id", "customer_id")],
+                ParentEntity = customer,
+                ChildEntity = order,
+                Relationship = rel,
+                IsSelected = true,
+            }
+        );
+
+        sql.Should().Contain(OracleReferentialAction.SetDefaultNote);
+        sql.Should().Contain("REFERENCES \"customer\" (\"id\");");
     }
 
     /// <summary>DropForeignKey が制約名判明時に DROP CONSTRAINT を生成することを検証する</summary>

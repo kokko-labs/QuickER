@@ -30,6 +30,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <inheritdoc />
     protected override IdentifierLengthLimit IdentifierLimit => PgIdentifier.Limit;
 
+    /// <inheritdoc/>
+    protected override string DialectName => PostgreSqlProvider.ProviderName;
+
     // ---------------- 各種 DDL ----------------
 
     /// <summary>CREATE TABLE 文（主キー制約・一意制約を含む）を生成する</summary>
@@ -48,7 +51,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             item.TableName,
             PgIdentifier.QuoteSimple,
             name => $"\"{PgIdentifier.Escape(name)}\"",
-            IdentifierLimit
+            IdentifierLimit,
+            DialectName,
+            UnsupportedFeature.Sync
         );
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -57,6 +62,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
             // 計算列は式が図に無い＝ここで出すのは普通の列。手で式を足す必要があることを添える
             ComputedColumnComment.Append(sb, col, "    ");
+
+            // 採番の定義は図に無い＝ここで出すのは普通の列。扱いの表が注記とする方言だけ書き添える
+            IdentityColumnComment.Append(sb, col, "    ", DialectName, UnsupportedFeature.Sync);
             var line =
                 $"    {PgIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
@@ -81,6 +89,9 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
 
         // 計算列は式が図に無い＝ここで足すのは普通の列。手で式を足す必要があることを添える
         ComputedColumnComment.Append(sb, col, string.Empty);
+
+        // 採番の定義は図に無い＝ここで足すのは普通の列。扱いの表が注記とする方言だけ書き添える
+        IdentityColumnComment.Append(sb, col, string.Empty, DialectName, UnsupportedFeature.Sync);
         sb.AppendLine(
             $"ALTER TABLE {PgIdentifier.Quote(item.TableName)} "
                 + $"ADD COLUMN {PgIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"
@@ -91,7 +102,10 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <remarks>
     /// PostgreSQL は型変更と NULL 制約変更を別の文で表現する。
     /// 型は <c>ALTER COLUMN ... TYPE 新型</c>、NULL 制約は <c>SET NOT NULL</c> / <c>DROP NOT NULL</c> を用いる。
-    /// 型の系統が変わる変更（<c>varchar</c> → <c>integer</c> 等）には <c>USING 列::新型</c> を付ける（<see cref="NeedsUsingCast"/>）
+    /// 型の系統が変わる変更（<c>varchar</c> → <c>integer</c> 等）には <c>USING 列::新型</c> を付ける（<see cref="NeedsUsingCast"/>）。
+    /// 新しい型が文字列型なら、実行時に列の照合順序（<c>pg_attribute.attcollation</c>）を読み、型の既定と違うときだけ
+    /// <c>COLLATE</c> を書き添える（書かなければ新しい型の既定へ戻る）。表は <c>to_regclass</c> で <c>ALTER TABLE</c> と同じ
+    /// 1 つの表に絞り、照合順序の名前は <c>quote_ident</c> で組む。
     /// </remarks>
     protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
@@ -102,14 +116,58 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
             ? $" USING {column}::{col.DataType}"
             : string.Empty;
 
-        sb.AppendLine(
-            $"ALTER TABLE {table} ALTER COLUMN {column} TYPE {col.DataType}{usingClause};"
-        );
+        if (IsCollatableType(col.DataType))
+        {
+            // ALTER COLUMN … TYPE は COLLATE を書かなければ照合順序を新しい型の既定へ戻す。実行時に列の照合順序を読み、
+            // 型の既定と違うときだけ書き添える（表は ALTER TABLE と同じ 1 つの表に to_regclass で絞る）。
+            // COLLATE は USING より前に書く構文
+            var dynamicTable = PgIdentifier.QuoteForDynamicSql(item.TableName);
+            var body = new StringBuilder();
+            body.AppendLine("DECLARE coll text;");
+            body.AppendLine("BEGIN");
+            body.AppendLine(
+                "    SELECT CASE WHEN a.attcollation = 0 OR a.attcollation = t.typcollation THEN NULL"
+            );
+            body.AppendLine(
+                "        ELSE quote_ident(n.nspname) || '.' || quote_ident(co.collname) END INTO coll"
+            );
+            body.AppendLine("    FROM pg_attribute a");
+            body.AppendLine("    JOIN pg_type t ON t.oid = a.atttypid");
+            body.AppendLine("    LEFT JOIN pg_collation co ON co.oid = a.attcollation");
+            body.AppendLine("    LEFT JOIN pg_namespace n ON n.oid = co.collnamespace");
+            body.AppendLine(
+                $"    WHERE a.attrelid = to_regclass('{dynamicTable}') "
+                    + $"AND a.attname = '{PgIdentifier.EscapeStringLiteral(col.Name)}' AND NOT a.attisdropped;"
+            );
+            body.AppendLine(
+                $"    EXECUTE '{PgIdentifier.EscapeStringLiteral($"ALTER TABLE {table} ALTER COLUMN {column} TYPE {col.DataType}")}'"
+                    + $" || COALESCE(' COLLATE ' || coll, '') || '{PgIdentifier.EscapeStringLiteral(usingClause)}';"
+            );
+            AppendDoBlock(sb, body.ToString());
+        }
+        else
+        {
+            sb.AppendLine(
+                $"ALTER TABLE {table} ALTER COLUMN {column} TYPE {col.DataType}{usingClause};"
+            );
+        }
 
         // 主キー列または NULL 非許容なら NOT NULL を設定し、それ以外は NOT NULL を外す
         var nullClause = col.IsPrimaryKey || !col.IsNullable ? "SET NOT NULL" : "DROP NOT NULL";
         sb.AppendLine($"ALTER TABLE {table} ALTER COLUMN {column} {nullClause};");
     }
+
+    /// <summary>型の表記が照合順序を持つ文字列型（配列を含む）か</summary>
+    private static bool IsCollatableType(string type) =>
+        type.Split('(')[0].Replace("[]", string.Empty).Trim().ToLowerInvariant()
+            is "text"
+                or "varchar"
+                or "character varying"
+                or "char"
+                or "character"
+                or "bpchar"
+                or "citext"
+                or "name";
 
     /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）文を生成する</summary>
     /// <remarks>
@@ -117,14 +175,13 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// DO ブロックで動的に DROP する（主キーが無いテーブルなら何も実行しない）。
     /// 実行時に読んだ制約名は図の外から来る値なので、動的 SQL へは必ず <c>quote_ident</c> を通して埋める
     /// （<c>"</c> を含む名前で構文が崩れないように。外部キー側の逆引きも同じ）。
+    /// 表は <c>to_regclass('クォートした名前')</c> で、<c>ALTER TABLE</c> と同じ 1 つの表に絞る（ドット付きの名前は
+    /// そのスキーマの表、修飾の無い名前は検索パスの表）。表が無ければ NULL になり、何もしない（外部キー側も同じ）。
     /// </remarks>
     protected override void AppendDropPrimaryKey(StringBuilder sb, SchemaDiffItem item)
     {
         // クォートした名前を EXECUTE の文字列リテラルへ埋めるため、リテラルエスケープ込みのヘルパーを通す
         var table = PgIdentifier.QuoteForDynamicSql(item.TableName);
-        var tableName = PgIdentifier.EscapeStringLiteral(
-            PgIdentifier.TableNameOnly(item.TableName)
-        );
 
         // 旧主キーの制約名はシステムカタログを逆引きして特定し、見つかったときだけ DROP する
         var body = new StringBuilder();
@@ -132,10 +189,8 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         body.AppendLine("BEGIN");
         body.AppendLine("    SELECT con.conname INTO pk_name");
         body.AppendLine("    FROM pg_constraint con");
-        body.AppendLine("    JOIN pg_class tbl ON con.conrelid = tbl.oid");
-        body.AppendLine($"    WHERE con.contype = 'p' AND tbl.relname = '{tableName}'");
-        // 別スキーマの同名テーブルを誤って対象にしないよう public に限定する（取込と同じスコープ）
-        body.AppendLine("        AND tbl.relnamespace = 'public'::regnamespace;");
+        // ALTER TABLE と同じ 1 つの表に絞る（別スキーマの同名の表を取り違えない・表が無ければ NULL で何もしない）
+        body.AppendLine($"    WHERE con.contype = 'p' AND con.conrelid = to_regclass('{table}');");
         body.AppendLine("    IF pk_name IS NOT NULL THEN");
         body.AppendLine(
             $"        EXECUTE 'ALTER TABLE {table} DROP CONSTRAINT ' || quote_ident(pk_name);"
@@ -302,21 +357,17 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
         }
 
         // 制約名不明時は親子テーブル名からシステムカタログを逆引きして DO ブロックで削除する
-        var childName = PgIdentifier.EscapeStringLiteral(PgIdentifier.TableNameOnly(childTbl));
-        var parentName = PgIdentifier.EscapeStringLiteral(PgIdentifier.TableNameOnly(parentTbl));
         var body = new StringBuilder();
         body.AppendLine("DECLARE fk_name text;");
         body.AppendLine("BEGIN");
         body.AppendLine("    SELECT con.conname INTO fk_name");
         body.AppendLine("    FROM pg_constraint con");
-        body.AppendLine("    JOIN pg_class child ON con.conrelid = child.oid");
-        body.AppendLine("    JOIN pg_class parent ON con.confrelid = parent.oid");
+        // 親子とも ALTER TABLE と同じ 1 つの表に絞る（別スキーマの同名の表を取り違えない・表が無ければ NULL で何もしない）
         body.AppendLine(
-            $"    WHERE con.contype = 'f' AND child.relname = '{childName}' AND parent.relname = '{parentName}'"
+            $"    WHERE con.contype = 'f' AND con.conrelid = to_regclass('{PgIdentifier.QuoteForDynamicSql(childTbl)}')"
         );
-        // 別スキーマの同名テーブルを誤って対象にしないよう public に限定する（取込と同じスコープ）
         body.AppendLine(
-            "        AND child.relnamespace = 'public'::regnamespace AND parent.relnamespace = 'public'::regnamespace;"
+            $"        AND con.confrelid = to_regclass('{PgIdentifier.QuoteForDynamicSql(parentTbl)}');"
         );
         body.AppendLine("    IF fk_name IS NOT NULL THEN");
         body.AppendLine(

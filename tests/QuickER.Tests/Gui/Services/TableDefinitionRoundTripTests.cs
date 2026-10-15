@@ -224,6 +224,50 @@ public class TableDefinitionRoundTripTests
         }
     }
 
+    [Fact(DisplayName = "Excel のマージ取込: 採番列の指定を現在図から引き継ぐ")]
+    public void MergeImport_InheritsIdentity()
+    {
+        var current = BuildDiagram();
+        current.Entities[1].Columns.Single(column => column.Name == "b").IsIdentity = true;
+        var dir = Directory.CreateDirectory(
+            Path.Combine(Path.GetTempPath(), "quicker-tabledoc-" + Guid.NewGuid().ToString("N"))
+        );
+
+        try
+        {
+            var path = Path.Combine(dir.FullName, "doc.xlsx");
+            TableDefinitionDocumentExporter.SaveTo(current, path);
+
+            // 素の取込では落ちている（後処理が引き継いでいることの対照）
+            TableDefinitionDocumentImporter
+                .Load(path, "sqlserver")
+                .Entities.Single(entity => entity.TableName == "orders")
+                .Columns.Single(column => column.Name == "b")
+                .IsIdentity.Should()
+                .BeFalse();
+
+            var host = new StubDiagramTransferHost { Model = current };
+            var service = new DiagramImportService(
+                host,
+                new StubDialogService(),
+                new StubFileDialogService()
+            );
+
+            service.ImportDiagramFile(DiagramImportFormat.Excel, path);
+
+            var merged = host
+                .MergedReplacements.Should()
+                .ContainSingle()
+                .Subject.Entities.Single(entity => entity.TableName == "orders");
+            merged.Columns.Single(column => column.Name == "b").IsIdentity.Should().BeTrue();
+            merged.Columns.Single(column => column.Name == "a").IsIdentity.Should().BeFalse();
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
     /// <summary>orders の主キーを (b, a)＝列の並びと逆の順序で明示した現在図を組み立てる</summary>
     private static ErDiagram BuildCurrentWithReorderedPrimaryKey()
     {

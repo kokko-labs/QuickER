@@ -718,6 +718,99 @@ public sealed class MySqlSyncDependencyIntegrationTests(MySqlContainerFixture fi
     }
 
     /// <summary>コンテナの DB からスキーマを取り込む</summary>
+    /// <summary>
+    /// 列ペアの並びが参照先の主キーの並びと違う複合外部キーの DDL が、キーの並びへ並べ替えて出るので適用でき
+    /// （図の並びのままだと MySQL は外部キーを作れない）、取り込み直しても差分が出ないことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL: 列ペアの並びが参照先のキーと違う複合外部キーの DDL は適用でき、取り込み直しても差分が出ない"
+    )]
+    public async Task CompositeForeignKeyInOtherOrder_DdlAppliesAndLeavesNoDiff()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var parent = new Entity { TableName = "ko_parent" };
+        parent.Columns.Add(
+            new Column
+            {
+                Name = "a",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        parent.Columns.Add(
+            new Column
+            {
+                Name = "b",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        var child = new Entity { TableName = "ko_child" };
+        child.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        child.Columns.Add(
+            new Column
+            {
+                Name = "x",
+                DataType = "int",
+                IsNullable = false,
+            }
+        );
+        child.Columns.Add(
+            new Column
+            {
+                Name = "y",
+                DataType = "int",
+                IsNullable = false,
+            }
+        );
+        // 宣言は (b → y, a → x)＝主キー (a, b) の並びと逆
+        var diagram = new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    ColumnPairs =
+                    [
+                        new(parent.Columns[1].Id, child.Columns[2].Id),
+                        new(parent.Columns[0].Id, child.Columns[1].Id),
+                    ],
+                    ConstraintName = "FK_ko_child",
+                },
+            ],
+        };
+
+        await fixture.ExecuteAsync(new MySqlDdlGenerator().Build(diagram), Ct);
+
+        var live = await ImportAsync();
+        live.Relationships.Should().ContainSingle();
+        new SchemaDiffService()
+            .Compute(
+                live.Entities,
+                live.Relationships,
+                diagram.Entities,
+                diagram.Relationships,
+                _provider.SyncCapabilities
+            )
+            .Items.Should()
+            .BeEmpty();
+    }
+
     private Task<SchemaImportResult> ImportAsync() =>
         _provider.SchemaImporter.ImportAsync(fixture.ConnectionString, 120, Ct);
 }

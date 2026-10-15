@@ -291,6 +291,9 @@ internal sealed class CSharpEfCorePropertyConfigModel
     /// <summary>計算列・生成列（ValueGeneratedOnAddOrUpdate 用）かどうか</summary>
     public required bool IsComputed { get; init; }
 
+    /// <summary>主キーでない ID 列（ValueGeneratedOnAddOrUpdate 用）かどうか</summary>
+    public required bool IsIdentity { get; init; }
+
     /// <summary>値オブジェクト型かどうか（HasConversion 構成の要否判定）</summary>
     public required bool IsValueObject { get; init; }
 
@@ -535,6 +538,13 @@ internal sealed class CSharpPropertyModel
     public bool IsComputed { get; init; }
 
     /// <summary>
+    /// 主キーでない ID 列（DB が採番し、明示の書き込みを受け付けない列）かどうか。オプション非依存で常にマーカー属性
+    /// [IdentityColumn] を付与する対象の識別に使う（判定は図の <c>Column.IsIdentity</c> かつ主キーでないこと）。
+    /// QuickER 版 Repository の INSERT / UPDATE 対象から除外される。主キーの ID 列は Repository がキーを書くため対象にしない。
+    /// </summary>
+    public bool IsIdentity { get; init; }
+
+    /// <summary>
     /// DB 定義メタ属性（[DbColumnMeta]）へ刻む方言中立の型トークン（例 "string(50)"）。型カタログで解析できない自由記述型は null で属性を省略する。
     /// </summary>
     public string? CanonicalTypeToken { get; init; }
@@ -707,6 +717,15 @@ internal sealed class CSharpMappingPropertyPair
     /// DB が式から作るため新規行では未入力が正常であり、未入力を欠落として例外にすると新規保存が成立しない。
     /// </remarks>
     public required bool IsComputed { get; init; }
+
+    /// <summary>
+    /// 主キーでない ID 列かどうか。
+    /// </summary>
+    /// <remarks>
+    /// true のとき Mapper の Entity へのコピーは「入力があるときだけ代入」に切り替える。
+    /// DB が採番するため新規行では未入力が正常であり、未入力を欠落として例外にすると新規保存が成立しない。
+    /// </remarks>
+    public required bool IsIdentity { get; init; }
 
     /// <summary>
     /// 除外された無制限バイナリ列（<see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/> が
@@ -990,6 +1009,7 @@ internal sealed record CSharpEditModelPropertyModel
     /// <remarks>
     /// 行バージョン列（<see cref="IsRowVersion"/>）は DB 採番のため非 NULL でも必須にしない。
     /// 計算列・生成列（<see cref="IsComputed"/>）も DB が式から作るため非 NULL でも必須にしない。
+    /// 主キーでない ID 列（<see cref="IsIdentity"/>）も DB が採番するため非 NULL でも必須にしない。
     /// 除外された無制限バイナリ列（<see cref="IsExcludedUnboundedBinary"/>）も通常フェッチでは未取得のため必須にしない
     /// （ただし NOT NULL の除外列は新規行のあいだだけ必須にする＝<see cref="IsRequiredWhenAdded"/>）。
     /// </remarks>
@@ -1006,6 +1026,12 @@ internal sealed record CSharpEditModelPropertyModel
     /// </summary>
     /// <remarks>必須検証の除外と、Mapper の「入力があるときだけ代入」への切り替えに使う。</remarks>
     public bool IsComputed { get; init; }
+
+    /// <summary>
+    /// 主キーでない ID 列かどうか。
+    /// </summary>
+    /// <remarks>必須検証の除外と、Mapper の「入力があるときだけ代入」への切り替えに使う。</remarks>
+    public bool IsIdentity { get; init; }
 
     /// <summary>
     /// 除外された無制限バイナリ列（<see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/> が

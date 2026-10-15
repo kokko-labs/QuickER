@@ -16,6 +16,7 @@ namespace QuickER.UndoRedo;
 /// Undo では元プロバイダと元の型へ同時に巻き戻す（両者が常に一体で戻ることを保証する）。
 /// 型変換にあわせて NOT NULL を解除する列（<see cref="ColumnTypeConversion.MakeNullable"/>＝行バージョン列が
 /// ただのバイナリ列へ落ちるケース）は、その NULL 許容の変更も同じ 1 履歴に含めて巻き戻す。
+/// 切替先が DB の採番する列を持てない方言なら、外す採番の印（<see cref="ColumnViewModel.IsIdentity"/>）も同じ 1 履歴に含める。
 /// </remarks>
 public sealed class ChangeTargetDbmsCommand : IUndoableCommand
 {
@@ -36,21 +37,27 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
         bool MakeNullable
     )> _changes;
 
+    /// <summary>切替で採番の印を外す列（Execute で外し、Undo で付け直す）</summary>
+    private readonly IReadOnlyList<ColumnViewModel> _identityMarksToRemove;
+
     /// <summary><see cref="ChangeTargetDbmsCommand"/> を生成する</summary>
     /// <param name="from">切替前のプロバイダ</param>
     /// <param name="to">切替後のプロバイダ</param>
     /// <param name="conversions">適用する型変換計画（変換成功分のみ）</param>
     /// <param name="columnsById">カラム ID から ViewModel を引くための索引</param>
+    /// <param name="identityMarksToRemove">採番の印を外す列（切替先が持てない方言のとき。それ以外は空）</param>
     /// <param name="applyProvider">方言切替を反映するデリゲート</param>
     public ChangeTargetDbmsCommand(
         IDatabaseProvider from,
         IDatabaseProvider to,
         IReadOnlyList<ColumnTypeConversion> conversions,
         IReadOnlyDictionary<Guid, ColumnViewModel> columnsById,
+        IReadOnlyList<ColumnViewModel> identityMarksToRemove,
         Action<IDatabaseProvider> applyProvider
     )
     {
         _from = from;
+        _identityMarksToRemove = identityMarksToRemove;
         _to = to;
         _applyProvider = applyProvider;
         _changes = new List<(ColumnViewModel, string, string, bool)>();
@@ -87,6 +94,11 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
             }
         }
 
+        foreach (var column in _identityMarksToRemove)
+        {
+            column.IsIdentity = false;
+        }
+
         _applyProvider(_to);
     }
 
@@ -101,6 +113,11 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
             {
                 change.Column.IsNullable = false;
             }
+        }
+
+        foreach (var column in _identityMarksToRemove)
+        {
+            column.IsIdentity = true;
         }
 
         _applyProvider(_from);

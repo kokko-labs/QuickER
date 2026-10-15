@@ -171,6 +171,77 @@ public class ProviderMismatchWarningTests : IDisposable
         omittedStderr.Should().NotContain(warningPrefix);
     }
 
+    [Theory(
+        DisplayName = "MCP: 採番の列を持てない provider で生成すると、方言違いの警告で印の列を名指しする"
+    )]
+    [InlineData("generate_ddl")]
+    [InlineData("generate_csharp")]
+    public void Mcp_ProviderWithoutIdentity_NamesMarkedColumns(string tool)
+    {
+        var schemaPath = WriteSqlServerDiagramWithIdentity();
+
+        var (result, success) = Execute(tool, ToolArgs(tool, schemaPath, "sqlite"));
+
+        success.Should().BeTrue(result);
+        result.Should().StartWith(McpWarningPrefix);
+        result
+            .Should()
+            .Contain(
+                "The diagram marks columns the database numbers (identity columns), which sqlite cannot have: Orders.Seq."
+            );
+    }
+
+    [Theory(DisplayName = "MCP: 採番の列を持てる provider・図と同じ方言では、印の列を名指ししない")]
+    [InlineData("generate_ddl", "postgresql")]
+    [InlineData("generate_ddl", "sqlserver")]
+    [InlineData("generate_csharp", "postgresql")]
+    public void Mcp_ProviderWithIdentity_DoesNotNameMarkedColumns(string tool, string provider)
+    {
+        var schemaPath = WriteSqlServerDiagramWithIdentity();
+
+        var (result, success) = Execute(tool, ToolArgs(tool, schemaPath, provider));
+
+        success.Should().BeTrue(result);
+        result.Should().NotContain("The diagram marks columns the database numbers");
+    }
+
+    [Fact(
+        DisplayName = "CLI: generate は採番の列を持てない --provider で、印の列を標準エラーで名指しする"
+    )]
+    public async Task Cli_ProviderWithoutIdentity_NamesMarkedColumns()
+    {
+        var schemaPath = WriteSqlServerDiagramWithIdentity();
+
+        var (exit, stderr) = await RunGenerateWithSchemaAsync(schemaPath, "--provider", "sqlite");
+
+        exit.Should().Be(0, stderr);
+        stderr
+            .Should()
+            .Contain(
+                string.Format(
+                    CliStrings.Cli_IdentityColumnsUnsupportedByProvider,
+                    "sqlite",
+                    "Orders.Seq"
+                )
+            );
+    }
+
+    [Fact(DisplayName = "CLI: generate は採番の列を持てる --provider では、印の列を名指ししない")]
+    public async Task Cli_ProviderWithIdentity_DoesNotNameMarkedColumns()
+    {
+        var schemaPath = WriteSqlServerDiagramWithIdentity();
+        var prefix = CliStrings.Cli_IdentityColumnsUnsupportedByProvider.Split("{0}")[0];
+
+        var (exit, stderr) = await RunGenerateWithSchemaAsync(
+            schemaPath,
+            "--provider",
+            "postgresql"
+        );
+
+        exit.Should().Be(0, stderr);
+        stderr.Should().NotContain(prefix);
+    }
+
     /// <summary>
     /// 図の読込失敗の文言は、コード生成ツールと ER 図操作ツールで同じ（共有の <see cref="DiagramLoadErrors"/>）
     /// </summary>
@@ -202,14 +273,66 @@ public class ProviderMismatchWarningTests : IDisposable
     private static (string Result, bool Success) Execute(string tool, object args) =>
         CodeGenToolSet.Create().Execute(tool, JsonSerializer.Serialize(args));
 
-    private async Task<(int Exit, string Stderr)> RunGenerateAsync(params string[] extra)
+    /// <summary>SQL Server の図（主キーでない採番の列 Orders.Seq を持つ）を書き出し、そのパスを返す</summary>
+    private string WriteSqlServerDiagramWithIdentity()
+    {
+        var path = Path.Combine(_root, "identity-" + Guid.NewGuid().ToString("N") + ".json");
+        var document = new DiagramDocument { Schema = { TargetDbms = "sqlserver" } };
+        var entity = new Entity { TableName = "Orders" };
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "Seq",
+                DataType = "int",
+                IsNullable = false,
+                IsIdentity = true,
+            }
+        );
+        document.Schema.Entities.Add(entity);
+        JsonStorageService.Save(path, document);
+
+        return path;
+    }
+
+    /// <summary>コード生成ツールの引数（出力先はツールごとに違う）</summary>
+    private object ToolArgs(string tool, string schemaPath, string provider) =>
+        tool == "generate_ddl"
+            ? new
+            {
+                file = schemaPath,
+                out_file = Path.Combine(_root, Guid.NewGuid().ToString("N") + ".sql"),
+                provider,
+            }
+            : new
+            {
+                file = schemaPath,
+                out_dir = Path.Combine(_root, "out-" + Guid.NewGuid().ToString("N")),
+                provider,
+            };
+
+    private Task<(int Exit, string Stderr)> RunGenerateAsync(params string[] extra) =>
+        RunGenerateWithSchemaAsync(_schemaPath, extra);
+
+    private async Task<(int Exit, string Stderr)> RunGenerateWithSchemaAsync(
+        string schemaPath,
+        params string[] extra
+    )
     {
         var stderr = new StringWriter();
         string[] args =
         [
             "generate",
             "--schema",
-            _schemaPath,
+            schemaPath,
             "--out",
             Path.Combine(_root, "cli-out-" + Guid.NewGuid().ToString("N")),
             .. extra,

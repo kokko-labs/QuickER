@@ -427,7 +427,16 @@
   <data name="CodeGen_Info_ComputedColumns" xml:space="preserve">
     <value>計算列を INSERT / UPDATE 対象から除外しました:{0}</value>
   </data>
+  <data name="CodeGen_Warning_NotNullIdentityColumns" xml:space="preserve">
+    <value>NOT NULL の DB が採番する列は、その種類の列を持てない方言の DB（SQLite。単一の方言でも、マルチターゲットのミラー側でも）へ書き込めません。生成コードはこの列を INSERT から外し、その DB の DDL は普通の列を作るので、行の追加が NOT NULL 制約で失敗します。図で NULL 許容にするか、その DB の列に既定値を付けてください。対象の列:{0}</value>
+  </data>
   <data name="CodeGen_Warning_NotNullComputedColumns" xml:space="preserve">
     <value>NOT NULL の計算列は、式を評価しないエンジン（マルチターゲットのミラー側・双方向同期のローカル側）へ書き込めないため、その DB への行の追加が NOT NULL 制約で失敗します。図で NULL 許容にする（ミラー側の値は NULL のままになります）か、そのテーブルを同期対象から外す（そのテーブルは同期されません）かのどちらかで解消してください。対象の列:{0}</value>
+  </data>
+  <data name="CodeGen_Info_IdentityColumns" xml:space="preserve">
+    <value>DB が採番する列（ID 列）を INSERT / UPDATE 対象から除外しました:{0}</value>
+  </data>
+  <data name="CodeGen_Warning_IdentityPrimaryKeyColumn" xml:space="preserve">
+    <value>テーブル '{0}' の列 '{1}' は主キーで、かつ指定した値を拒む DB が採番する列（ID 列）です。生成されるリポジトリはキーをアプリ側で決めて書き込むため、DB が明示の値を受け付けない限り（例: SQL Server の IDENTITY_INSERT）行の追加は失敗します。この列は普通の列として書き込みます。</value>
   </data>
 </root>

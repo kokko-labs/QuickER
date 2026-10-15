@@ -427,7 +427,16 @@
   <data name="CodeGen_Info_ComputedColumns" xml:space="preserve">
     <value>Excluded computed columns from INSERT / UPDATE:{0}</value>
   </data>
+  <data name="CodeGen_Warning_NotNullIdentityColumns" xml:space="preserve">
+    <value>Columns the database numbers that are NOT NULL cannot be written to a database whose dialect cannot have such columns (SQLite, as the only dialect or as the mirror side of a multi-target build): generated code leaves them out of INSERT and that database's DDL creates them as ordinary columns, so inserting a row there fails on the NOT NULL constraint. Either make the column nullable in the diagram or give that database's column a default value. Affected columns:{0}</value>
+  </data>
   <data name="CodeGen_Warning_NotNullComputedColumns" xml:space="preserve">
     <value>Computed columns that are NOT NULL cannot be written by engines that do not evaluate the expression (the mirror side of a multi-target build, and the local side of bidirectional sync), so inserting a row there fails on the NOT NULL constraint. Either make the column nullable in the diagram (the mirror then keeps NULL for it) or leave the table out of synchronization (that table is then not synchronized). Affected columns:{0}</value>
+  </data>
+  <data name="CodeGen_Info_IdentityColumns" xml:space="preserve">
+    <value>Excluded columns the database numbers (identity columns) from INSERT / UPDATE:{0}</value>
+  </data>
+  <data name="CodeGen_Warning_IdentityPrimaryKeyColumn" xml:space="preserve">
+    <value>Column '{1}' of table '{0}' is the primary key and a column the database numbers (an identity column) that refuses explicitly written values. The generated repositories assign the key in the application and write it, so inserting a row fails unless the database accepts explicit values (for example SQL Server's IDENTITY_INSERT). The column is written like an ordinary column.</value>
   </data>
 </root>

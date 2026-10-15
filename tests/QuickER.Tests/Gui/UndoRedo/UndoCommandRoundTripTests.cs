@@ -550,6 +550,7 @@ public class UndoCommandRoundTripTests
     {
         // rowversion（SQL Server）→ BLOB（SQLite）は、型だけでなく NOT NULL の解除も伴う唯一の変換。
         // 「型は戻るが NULL 許容が戻らない」型の欠陥をここで固定する。
+        // あわせて SQLite は DB の採番する列を持てないので、採番の印（seq）も同じ 1 履歴で外れて戻る。
         var model = new Entity
         {
             Id = Guid.NewGuid(),
@@ -570,6 +571,14 @@ public class UndoCommandRoundTripTests
                     Name = "row_ver",
                     DataType = "rowversion",
                     IsNullable = false,
+                },
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "seq",
+                    DataType = "int",
+                    IsNullable = false,
+                    IsIdentity = true,
                 },
             },
         };
@@ -594,6 +603,7 @@ public class UndoCommandRoundTripTests
             to,
             plan.Converted,
             entity.Columns.ToDictionary(column => column.Id),
+            entity.Columns.Where(column => column.IsIdentity).ToList(),
             provider => current = provider
         );
 
@@ -792,6 +802,8 @@ public class UndoCommandRoundTripTests
                 .Append(column.IsForeignKeyEditable)
                 .Append(",fkManaged=")
                 .Append(column.IsForeignKeyManagedByRelationship)
+                .Append(",identity=")
+                .Append(column.IsIdentity)
                 .Append(")\n");
         }
 

@@ -139,6 +139,13 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     /// <remarks>経路の正本は <see cref="ConstraintNames"/> の XmlDoc。抽象にして、方言が宣言を忘れたらビルドで止まる形にする。</remarks>
     protected abstract IdentifierLengthLimit IdentifierLimit { get; }
 
+    /// <summary>このスクリプトが対象とする方言の名前（<see cref="DialectNames"/>）</summary>
+    /// <remarks>
+    /// 図で表せない定義の扱い（<see cref="UnsupportedTreatments"/>）をこの方言のマスで引くのに使う。
+    /// 抽象にして、方言が宣言を忘れたらビルドで止まる形にする。
+    /// </remarks>
+    protected abstract string DialectName { get; }
+
     protected abstract void AppendCreateTable(StringBuilder sb, SchemaDiffItem item);
 
     /// <summary>列追加文を書き出す</summary>

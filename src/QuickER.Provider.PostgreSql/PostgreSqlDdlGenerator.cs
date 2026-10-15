@@ -21,6 +21,9 @@ public sealed class PostgreSqlDdlGenerator : DdlGeneratorBase
     /// <inheritdoc />
     protected override IdentifierLengthLimit IdentifierLimit => PgIdentifier.Limit;
 
+    /// <inheritdoc/>
+    protected override string DialectName => PostgreSqlProvider.ProviderName;
+
     /// <inheritdoc />
     protected override string QuoteQualifiedName(string name) => PgIdentifier.Quote(name);
 

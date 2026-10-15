@@ -152,9 +152,6 @@
   </data>  <data name="Diff_ComputedColumnTypeNotSynced" xml:space="preserve">
     <value>同期しません: 計算列 [{0}].[{1}] の型が変わります（{2} → {3}）が、図は式を持たないため、この DB では変えられません。DB 上で式と一緒に変えてください。</value>
   </data>
-  <data name="Diff_UniqueConstraintOnPrimaryKeyNotSynced" xml:space="preserve">
-    <value>同期しません: 一意制約 [{0}] ({1}) は主キーと同じ列なので、この DB には別の制約として作れません（主キーが一意性を保証します）。</value>
-  </data>
   <data name="Diff_AutoForeignKeyDrop" xml:space="preserve">
     <value>変更を可能にするため自動的に削除します（参照する表・列が削除されるため付け直しません）: [{0}]</value>
   </data>
@@ -322,5 +319,11 @@
   </data>
   <data name="ImportWarningHeading_NameTrimmed" xml:space="preserve">
     <value>前後の空白を除いて取り込んだ名前（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_IdentityColumnMarked" xml:space="preserve">
+    <value>{0}.{1}: DB が採番する列（{2}）として取り込みました。図はその事実だけを持ち、生成コードは主キーの列でない限り INSERT / UPDATE からこの列を外し、生成 DDL は普通の列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_IdentityColumnMarked" xml:space="preserve">
+    <value>採番の定義なしで取り込んだ、DB が採番する列（{0} 件）:</value>
   </data>
 </root>

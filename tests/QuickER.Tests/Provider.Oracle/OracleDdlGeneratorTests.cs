@@ -187,6 +187,54 @@ public class OracleDdlGeneratorTests
 
         sql.Should().Contain("ON DELETE SET NULL");
         sql.Should().NotContain("Oracle does not support ON UPDATE");
+        sql.Should().NotContain(OracleReferentialAction.SetDefaultNote);
+    }
+
+    /// <summary>ON DELETE SET DEFAULT は句を出さず、NO ACTION として扱う旨の注意コメントを付けることを検証する</summary>
+    [Fact(DisplayName = "Build: ON DELETE SET DEFAULT は句を省いて注意コメントを付ける")]
+    public void Build_OnDeleteSetDefault_OmitsClauseWithNote()
+    {
+        var parent = new Entity
+        {
+            TableName = "parent",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "NUMBER(10)",
+                    IsPrimaryKey = true,
+                },
+            },
+        };
+        var child = new Entity
+        {
+            TableName = "child",
+            Columns =
+            {
+                new Column { Name = "parent_id", DataType = "NUMBER(10)" },
+            },
+        };
+        var diagram = new ErDiagram
+        {
+            Entities = [parent, child],
+            Relationships =
+            [
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    ColumnPairs = [new(parent.Columns[0].Id, child.Columns[0].Id)],
+                    OnDelete = ForeignKeyReferentialAction.SetDefault,
+                },
+            ],
+        };
+
+        var sql = new OracleDdlGenerator().Build(diagram);
+
+        sql.Should().Contain(OracleReferentialAction.SetDefaultNote);
+        sql.Should().MatchRegex(@"REFERENCES ""parent"" \(""id""\);");
     }
 
     /// <summary>ON DELETE NO ACTION は句を省略することを検証する（既定）</summary>

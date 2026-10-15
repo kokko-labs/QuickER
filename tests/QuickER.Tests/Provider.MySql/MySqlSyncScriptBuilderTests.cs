@@ -77,115 +77,104 @@ public class MySqlSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE `customer` ADD COLUMN `email` varchar(200) NOT NULL;");
     }
 
-    /// <summary>AlterColumn が MODIFY COLUMN で型と NULL 制約を再指定することを検証する</summary>
-    [Fact(DisplayName = "AlterColumn は MODIFY COLUMN で型と NOT NULL を再指定する")]
-    public void AlterColumn_GeneratesModifyColumn()
-    {
-        var sql = Build(
-            new SchemaDiffItem
-            {
-                Kind = SchemaDiffKind.AlterColumn,
-                TableName = "customer",
-                ColumnName = "name",
-                Column = new Column
-                {
-                    Name = "name",
-                    DataType = "varchar(100)",
-                    IsNullable = false,
-                },
-                IsSelected = true,
-            }
-        );
-
-        sql.Should().Contain("ALTER TABLE `customer` MODIFY COLUMN `name` varchar(100) NOT NULL;");
-    }
-
-    /// <summary>AlterColumn は説明がある場合 COMMENT を含めて既存コメントの消失を防ぐことを検証する</summary>
-    [Fact(DisplayName = "AlterColumn は説明があれば COMMENT を含める")]
-    public void AlterColumn_WithDescription_IncludesComment()
-    {
-        var sql = Build(
-            new SchemaDiffItem
-            {
-                Kind = SchemaDiffKind.AlterColumn,
-                TableName = "customer",
-                ColumnName = "name",
-                Column = new Column
-                {
-                    Name = "name",
-                    DataType = "varchar(100)",
-                    IsNullable = false,
-                    Description = "顧客名",
-                },
-                IsSelected = true,
-            }
-        );
-
-        sql.Should().Contain("MODIFY COLUMN `name` varchar(100) NOT NULL COMMENT '顧客名';");
-    }
-
     /// <summary>
-    /// AlterColumn の COMMENT は DB の現在の説明（変更前の列）で書き、図の説明は使わないことを検証する
-    /// （説明の変更を選んでいないのに、型の変更だけで説明が消える・変わるのを防ぐ）。
+    /// AlterColumn は列定義を実行時のカタログから再構成し、型と NULL 許容だけを図の値へ差し替えることを検証する
+    /// （DEFAULT・照合順序・ON UPDATE・INVISIBLE・SRID・COMMENT は DB の値のまま）。実行時に列が無ければ失敗させる。
     /// </summary>
-    [Theory(DisplayName = "AlterColumn の COMMENT は DB の現在の説明を保つ")]
-    [InlineData("", "顧客名", " COMMENT '顧客名'")]
-    [InlineData("図の説明", "", "")]
-    public void AlterColumn_KeepsLiveComment(
-        string diagramDescription,
-        string liveDescription,
-        string expectedComment
+    [Theory(DisplayName = "AlterColumn は実行時の定義から組み、型と NULL 許容だけを差し替える")]
+    [InlineData(false, "' NOT NULL',")]
+    [InlineData(true, "' NULL',")]
+    public void AlterColumn_RebuildsLiveDefinitionWithTypeAndNullability(
+        bool nullable,
+        string nullClause
     )
     {
-        var sql = Build(
-            new SchemaDiffItem
-            {
-                Kind = SchemaDiffKind.AlterColumn,
-                TableName = "customer",
-                ColumnName = "name",
-                Column = new Column
-                {
-                    Name = "name",
-                    DataType = "varchar(100)",
-                    IsNullable = false,
-                    Description = diagramDescription,
-                },
-                OldColumn = new Column
-                {
-                    Name = "name",
-                    DataType = "varchar(50)",
-                    IsNullable = false,
-                    Description = liveDescription,
-                },
-                IsSelected = true,
-            }
-        );
+        var sql = Build(AlterColumn("name", "varchar(100)", nullable, description: "図の説明"));
 
-        sql.Should().Contain($"MODIFY COLUMN `name` varchar(100) NOT NULL{expectedComment};");
+        sql.Should().Contain("SELECT CONCAT(" + Environment.NewLine + "'varchar(100)',");
+        sql.Should().Contain(nullClause);
+        // 図に無い列属性はカタログから組み立て直す
+        sql.Should().Contain("c.COLUMN_DEFAULT");
+        sql.Should().Contain("INSTR(c.EXTRA, 'INVISIBLE')");
+        sql.Should().Contain("c.SRS_ID");
+        sql.Should().Contain("' AUTO_INCREMENT'");
+        // COMMENT は DB の値（@cmt）で書き、図の説明は使わない
+        sql.Should().Contain("' COMMENT ', QUOTE(@cmt)");
+        sql.Should().NotContain("図の説明");
+        // 実行時に列が無ければ失敗させる（説明・列順の同期は DO 0）
+        sql.Should().Contain("IF(@exists = 0, 'QuickER sync: customer.name does not exist'");
+        sql.Should().NotContain("'DO 0'");
     }
 
-    /// <summary>NULL 許容へ変更する AlterColumn が NULL を再指定することを検証する</summary>
-    [Fact(DisplayName = "AlterColumn は NULL 許容化で NULL を再指定する")]
-    public void AlterColumn_NullableGeneratesNull()
+    /// <summary>照合順序は、新しい型が文字列型のときだけ書き添えることを検証する</summary>
+    [Theory(DisplayName = "AlterColumn は新しい型が文字列型のときだけ照合順序を書き添える")]
+    [InlineData("varchar(100)", true)]
+    [InlineData("enum('a','b')", true)]
+    [InlineData("longtext", true)]
+    [InlineData("int", false)]
+    [InlineData("decimal(5,2)", false)]
+    public void AlterColumn_KeepsCollationOnlyForStringTypes(string type, bool keepsCollation)
     {
-        var sql = Build(
-            new SchemaDiffItem
-            {
-                Kind = SchemaDiffKind.AlterColumn,
-                TableName = "customer",
-                ColumnName = "note",
-                Column = new Column
-                {
-                    Name = "note",
-                    DataType = "text",
-                    IsNullable = true,
-                },
-                IsSelected = true,
-            }
-        );
+        var sql = Build(AlterColumn("name", type, nullable: true));
+        const string collation = "CONCAT(' COLLATE ', c.COLLATION_NAME)";
 
-        sql.Should().Contain("ALTER TABLE `customer` MODIFY COLUMN `note` text NULL;");
+        if (keepsCollation)
+        {
+            sql.Should().Contain(collation);
+        }
+        else
+        {
+            sql.Should().NotContain(collation);
+        }
     }
+
+    /// <summary>型の表記の <c>'</c> は文字列リテラルとして二重化して埋めることを検証する</summary>
+    [Fact(DisplayName = "AlterColumn は型の表記の ' を二重化して埋める")]
+    public void AlterColumn_EscapesQuotesInType()
+    {
+        Build(AlterColumn("name", "enum('a','b')", nullable: true))
+            .Should()
+            .Contain("'enum(''a'',''b'')',");
+    }
+
+    /// <summary>説明の同期は、実行時に列が無ければ何もしない（列の変更とは分かれる）ことを検証する</summary>
+    [Fact(DisplayName = "説明の同期は、実行時に列が無ければ DO 0 で何もしない")]
+    public void SetColumnDescription_MissingColumn_IsNoOp()
+    {
+        Build(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.SetColumnDescription,
+                    TableName = "customer",
+                    ColumnName = "name",
+                    NewDescription = "x",
+                    IsSelected = true,
+                }
+            )
+            .Should()
+            .Contain("IF(@exists = 0, 'DO 0'");
+    }
+
+    private static SchemaDiffItem AlterColumn(
+        string column,
+        string type,
+        bool nullable,
+        string description = ""
+    ) =>
+        new()
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "customer",
+            ColumnName = column,
+            Column = new Column
+            {
+                Name = column,
+                DataType = type,
+                IsNullable = nullable,
+                Description = description,
+            },
+            IsSelected = true,
+        };
 
     /// <summary>DropColumn が ALTER TABLE ... DROP COLUMN 文を生成することを検証する</summary>
     [Fact(DisplayName = "DropColumn は DROP COLUMN を生成する")]
