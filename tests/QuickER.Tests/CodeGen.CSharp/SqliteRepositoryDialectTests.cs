@@ -131,8 +131,10 @@ public class SqliteRepositoryDialectTests
         code.Should().Contain("builder.ForeignKeys = true;");
         // 解釈はコンストラクタで 1 回だけ（接続生成ごとに再パースしない）
         code.Should().Contain("_connectionString = ApplyForeignKeysDefault(connectionString);");
-        code.Should()
-            .Contain("public SqliteConnection CreateConnection() => new(_connectionString);");
+        code.Should().Contain("var connection = new SqliteConnection(_connectionString);");
+        // 開くたびに SQLite の busy timeout を Default Timeout へ合わせる（実行時の挙動は
+        // SqliteBusyTimeoutDefaultRuntimeTests が固定する）
+        code.Should().Contain("connection.StateChange += ApplyBusyTimeout;");
 
         // DDL 適用ヘルパー（開発・テスト・サンプル向けブートストラップ）
         code.Should().Contain("public static class SqliteSchemaBootstrap");

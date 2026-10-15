@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using Microsoft.Data.Sqlite;
 using QuickER.Tests.GeneratedSyncFixture;
 using QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite;
 using QuickER.Tests.Integration;
@@ -3104,6 +3105,91 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
             .Which.Reason.Should()
             .Be(SyncConflictReason.ModifiedOnServer);
         (await LocalOrdersRaw.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("alice-local");
+    }
+
+    /// <summary>
+    /// ジャーナルに記録する書き込みは、同じローカル DB を別の接続が読んでいる間に記録の確定が来ても、読み取りが
+    /// 終わるのを待ってから成功する。
+    /// </summary>
+    /// <remarks>
+    /// 記録は 1 文の <c>INSERT … RETURNING id</c> で、自動コミットの確定は最初の行を返した後の step で起きる。
+    /// ロールバックジャーナルの確定には排他のロックが要るので、別の接続が読み取り（共有のロック）を持っている間は
+    /// 確定できない。読み取りを持ったまま書き込みを始め、上限の時間まで終わらない（待っている）ことと、読み取りを
+    /// 終えた後に成功することを見る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/並行] 別の接続の読み取りと重なったジャーナル記録の書き込みは、読み取りの後に成功する"
+    )]
+    public async Task JournaledWrite_WaitsForReaderOnAnotherConnection()
+    {
+        await using var reader = new SqliteConnection(LocalConnectionString);
+        await reader.OpenAsync(Ct);
+        var readTransaction = reader.BeginTransaction(deferred: true);
+
+        await using (var read = new SqliteCommand("SELECT count(*) FROM sync_orders", reader))
+        {
+            read.Transaction = readTransaction;
+            await read.ExecuteScalarAsync(Ct);
+        }
+
+        // SQLite の待ちは呼び出したスレッドを止める（プロバイダの処理は同期）ので、書き込みは別のタスクで始める
+        var insert = Task.Run(
+            () =>
+                LocalOrders.InsertAsync(
+                    new SyncOrderEntity { OrderId = 5, CustomerName = "while-read" },
+                    Ct
+                ),
+            Ct
+        );
+        var first = await Task.WhenAny(insert, Task.Delay(TimeSpan.FromSeconds(2), Ct));
+
+        first.Should().NotBeSameAs(insert, "読み取りが終わるまで記録は確定できず、待っている");
+
+        readTransaction.Commit();
+        readTransaction.Dispose();
+        await insert;
+
+        (await LocalOrdersRaw.GetByIdAsync(5, Ct)).Should().NotBeNull();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(1);
+    }
+
+    /// <summary>
+    /// 生 SQL の実行器へ渡した <c>INSERT … RETURNING</c> も、別の接続の読み取りが終わるのを待ってから成功する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/並行] 生 SQL の INSERT … RETURNING は、別の接続の読み取りの後に成功する"
+    )]
+    public async Task RawSqlReturning_WaitsForReaderOnAnotherConnection()
+    {
+        await using var reader = new SqliteConnection(LocalConnectionString);
+        await reader.OpenAsync(Ct);
+        var readTransaction = reader.BeginTransaction(deferred: true);
+
+        await using (var read = new SqliteCommand("SELECT count(*) FROM sync_orders", reader))
+        {
+            read.Transaction = readTransaction;
+            await read.ExecuteScalarAsync(Ct);
+        }
+
+        // SQLite の待ちは呼び出したスレッドを止める（プロバイダの処理は同期）ので、書き込みは別のタスクで始める
+        var insert = Task.Run(
+            () =>
+                LocalSql.QueryProjectionBySqlAsync<long>(
+                    "INSERT INTO sync_orders (order_id, customer_name) VALUES (7, 'raw') RETURNING order_id",
+                    null,
+                    Ct
+                ),
+            Ct
+        );
+        var first = await Task.WhenAny(insert, Task.Delay(TimeSpan.FromSeconds(2), Ct));
+
+        first.Should().NotBeSameAs(insert, "読み取りが終わるまで書き込みは確定できず、待っている");
+
+        readTransaction.Commit();
+        readTransaction.Dispose();
+
+        (await insert).Should().Equal(7L);
+        (await LocalOrdersRaw.GetByIdAsync(7, Ct)).Should().NotBeNull();
     }
 
     /// <summary>同じローカル DB に対する 2 つのランは重ならない（後から来たほうが待つ）。</summary>

@@ -467,6 +467,18 @@ public class RuntimeTestMatrixTests
                 NotApplicable("接続はサーバー側の構成")
             )
         ),
+        ["BusyTimeoutDefault"] = new(
+            "生成 SqlConnectionFactory が開くたびに busy timeout を Default Timeout へ合わせること",
+            Row(
+                NotApplicable(
+                    "SQL Server のロック待ちは CommandTimeout が決め、接続に当てる設定が無い"
+                ),
+                Covered(),
+                NotApplicable("接続の組み立ては QuickER 版 Repository の責務"),
+                NotApplicable("インメモリに接続が無い"),
+                NotApplicable("接続はサーバー側の構成")
+            )
+        ),
         ["ValueConversion"] = new(
             "SQLite の TEXT 値から IConvertible でない CLR 型（TimeSpan 等）への変換",
             Row(
@@ -655,6 +667,7 @@ public class RuntimeTestMatrixTests
         // --- その他の単発機能 ---
         new("SqlExecutorInjectionRuntimeTests", "SqlExecutorInjection", Backend.AdoSqlite),
         new("SqliteForeignKeyDefaultRuntimeTests", "ForeignKeyDefault", Backend.AdoSqlite),
+        new("SqliteBusyTimeoutDefaultRuntimeTests", "BusyTimeoutDefault", Backend.AdoSqlite),
         new("SqliteValueConversionRuntimeTests", "ValueConversion", Backend.AdoSqlite),
     ];
 
