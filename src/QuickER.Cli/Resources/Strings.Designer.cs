@@ -408,36 +408,6 @@ namespace QuickER.Cli.Resources {
             }
         }
 
-        public static string Cli_ImportWarningDomainTypeFlattened {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningDomainTypeFlattened", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningTableColumnsUnavailable {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningTableColumnsUnavailable", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningForeignKeyOutsideScope {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningForeignKeyOutsideScope", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningTableNameCollision {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningTableNameCollision", resourceCulture);
-            }
-        }
-        
-        public static string Cli_ImportWarningColumnNameCollision {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningColumnNameCollision", resourceCulture);
-            }
-        }
-
         public static string Cli_GenerationAborted {
             get {
                 return ResourceManager.GetString("Cli_GenerationAborted", resourceCulture);
@@ -555,51 +525,10 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_SchemaMissingRequiredText", resourceCulture);
             }
         }
-        public static string Cli_ImportWarningColumnTypeNotEmittable {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningColumnTypeNotEmittable", resourceCulture);
-            }
-        }
 
-        public static string Cli_ImportWarningPartitionDefinitionLost {
+        public static string Cli_ImportWarningLine {
             get {
-                return ResourceManager.GetString("Cli_ImportWarningPartitionDefinitionLost", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningVirtualTableExcluded {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningVirtualTableExcluded", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningComputedColumnExpressionLost {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningComputedColumnExpressionLost", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningComputedColumnExpressionLostWithExpression {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningComputedColumnExpressionLostWithExpression", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningDisabledConstraintExcluded {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningDisabledConstraintExcluded", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningTemporalHistoryTableExcluded {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningTemporalHistoryTableExcluded", resourceCulture);
-            }
-        }
-
-        public static string Cli_ImportWarningPrimaryKeyNullabilityAdjusted {
-            get {
-                return ResourceManager.GetString("Cli_ImportWarningPrimaryKeyNullabilityAdjusted", resourceCulture);
+                return ResourceManager.GetString("Cli_ImportWarningLine", resourceCulture);
             }
         }
 

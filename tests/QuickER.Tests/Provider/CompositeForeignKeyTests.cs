@@ -8,6 +8,7 @@ using QuickER.Provider.Oracle;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Provider;
@@ -189,7 +190,8 @@ public sealed class CompositeForeignKeyTests
             live.Entities,
             live.Relationships,
             target.Entities,
-            target.Relationships
+            target.Relationships,
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should()
@@ -220,7 +222,8 @@ public sealed class CompositeForeignKeyTests
             live.Entities,
             live.Relationships,
             target.Entities,
-            target.Relationships
+            target.Relationships,
+            TestDialectCapabilities.Neutral
         );
 
         var add = diff
@@ -249,12 +252,13 @@ public sealed class CompositeForeignKeyTests
             live.Entities,
             [],
             target.Entities,
-            target.Relationships
+            target.Relationships,
+            TestDialectCapabilities.Neutral
         );
         var addItem = diff.Items.Single(i => i.Kind == SchemaDiffKind.AddForeignKey);
         addItem.IsSelected = true;
 
-        var plan = new SyncPlanner().BuildPlan([addItem], new SyncDialectCapabilities());
+        var plan = new SyncPlanner().BuildPlan([addItem], TestDialectCapabilities.Neutral);
         var sql = new SqlServerSyncScriptBuilder().Build(plan);
 
         sql.Should().Contain("FOREIGN KEY ([a_ref], [b_ref]) REFERENCES [parent_t] ([a], [b])");
@@ -288,7 +292,7 @@ public sealed class CompositeForeignKeyTests
                         IsSelected = true,
                     },
                 ],
-                new SyncDialectCapabilities
+                TestDialectCapabilities.Neutral with
                 {
                     ReferencedKeyRequiresSameColumnOrder = requiresSameOrder,
                 },
@@ -366,7 +370,7 @@ public sealed class CompositeForeignKeyTests
                     IsSelected = true,
                 },
             ],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             new SyncPlanContext
             {
                 LiveEntities = [parent, child],
@@ -429,7 +433,7 @@ public sealed class CompositeForeignKeyTests
                     IsSelected = true,
                 },
             ],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             new SyncPlanContext
             {
                 LiveEntities = [parent, child],

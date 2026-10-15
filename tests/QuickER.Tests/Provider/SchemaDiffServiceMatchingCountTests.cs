@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -52,7 +53,10 @@ public sealed class SchemaDiffServiceMatchingCountTests
             [],
             target,
             [],
-            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native }
+            TestDialectCapabilities.Neutral with
+            {
+                ColumnReorder = ColumnReorderMode.Native,
+            }
         );
 
         service.TableMatchings.Should().Be(1);

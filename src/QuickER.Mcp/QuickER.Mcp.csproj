@@ -16,4 +16,9 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="ModelContextProtocol" />
   </ItemGroup>
+
+  <!-- ツールが受け付ける方言の名前（DialectNames）の正本。依存ゼロの方言の宣言だけを参照する -->
+  <ItemGroup>
+    <ProjectReference Include="..\QuickER.Dialects\QuickER.Dialects.csproj" />
+  </ItemGroup>
 </Project>

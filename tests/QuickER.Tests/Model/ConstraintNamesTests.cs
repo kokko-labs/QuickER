@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.Tests.Model;
@@ -242,7 +243,7 @@ public class ConstraintNamesTests
         };
 
         ConstraintNames
-            .CollectExisting(diagram)
+            .CollectExisting(diagram, IdentifierLengthLimits.ForDbms(diagram.TargetDbms))
             .Should()
             .BeEquivalentTo(
                 "FK_dbo_Orders_Customers",
@@ -304,7 +305,7 @@ public class ConstraintNamesTests
             .BeEquivalentTo("PK_Customers", "PK_dbo_Orders", "UQ_dbo_Orders_code");
         tableConstraints.Contains("pk_customers").Should().BeTrue("大文字小文字を区別しない");
         ConstraintNames
-            .CollectExisting(diagram)
+            .CollectExisting(diagram, IdentifierLengthLimits.ForDbms(diagram.TargetDbms))
             .Except(tableConstraints)
             .Should()
             .BeEquivalentTo("FK_dbo_Orders_Customers");
@@ -323,7 +324,10 @@ public class ConstraintNamesTests
         };
 
         ConstraintNames
-            .CollectExisting(new ErDiagram { Entities = { customers } })
+            .CollectExisting(
+                new ErDiagram { Entities = { customers } },
+                IdentifierLengthLimits.SqlServer
+            )
             .Contains("pk_customers")
             .Should()
             .BeTrue();
@@ -580,7 +584,7 @@ public class ConstraintNamesTests
         };
 
         ConstraintNames
-            .CollectExisting(diagram)
+            .CollectExisting(diagram, IdentifierLengthLimits.ForDbms(diagram.TargetDbms))
             .Should()
             .BeEquivalentTo("PK_customers", "PK_orders");
     }

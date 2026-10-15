@@ -395,4 +395,156 @@ public sealed class SqlServerImportFidelityIntegrationTests(SqlServerContainerFi
             );
         }
     }
+
+    /// <summary>ビューは取り込まず、ビューごとに ViewExcluded で名指しする（dbo 以外はスキーマ修飾つき）</summary>
+    [Fact(DisplayName = "[Integration] SQL Server: ビューは取り込まずに名指しする")]
+    public async Task Import_View_IsExcludedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            "CREATE TABLE customers (id INT PRIMARY KEY, name NVARCHAR(50) NOT NULL);",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE VIEW v_customers AS SELECT id, name FROM customers;",
+            Ct
+        );
+
+        try
+        {
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("customers");
+            var warning = result.Warnings.Should().ContainSingle().Subject;
+            warning.Kind.Should().Be(SchemaImportWarningKind.ViewExcluded);
+            warning.TableName.Should().Be("v_customers");
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP VIEW IF EXISTS v_customers;", Ct);
+        }
+    }
+
+    /// <summary>
+    /// 既定値・別名型の列とパーティション表を名指しし、既定値の事実を結果に持つ。値が NULL の既定値は告げない
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server: 既定値・別名型の列とパーティション表を名指しする"
+    )]
+    public async Task Import_ColumnAttributesAndPartitionedTable_AreReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync("CREATE TYPE dbo.PhoneNumber FROM varchar(20) NULL;", Ct);
+        await fixture.ExecuteAsync(
+            "CREATE PARTITION FUNCTION pf_probe (int) AS RANGE LEFT FOR VALUES (100);",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE PARTITION SCHEME ps_probe AS PARTITION pf_probe ALL TO ([PRIMARY]);",
+            Ct
+        );
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                CREATE TABLE parted (id int NOT NULL CONSTRAINT PK_parted PRIMARY KEY CLUSTERED) ON ps_probe (id);
+                CREATE TABLE attrs (
+                    id int NOT NULL PRIMARY KEY,
+                    status nvarchar(10) NOT NULL DEFAULT N'new',
+                    note nvarchar(10) NULL DEFAULT NULL,
+                    phone dbo.PhoneNumber,
+                    created datetime2 NOT NULL CONSTRAINT DF_attrs_created DEFAULT (sysdatetime())
+                );
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+            result
+                .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+                .Should()
+                .BeEquivalentTo([
+                    (SchemaImportWarningKind.PartitionDefinitionLost, "parted", "", ""),
+                    (SchemaImportWarningKind.ColumnDefaultLost, "attrs", "status", "(N'new')"),
+                    (
+                        SchemaImportWarningKind.ColumnDefaultLost,
+                        "attrs",
+                        "created",
+                        "(sysdatetime())"
+                    ),
+                    (
+                        SchemaImportWarningKind.AliasTypeFlattened,
+                        "attrs",
+                        "phone",
+                        "dbo.PhoneNumber"
+                    ),
+                ]);
+            result
+                .ColumnDefaults.Select(d => (d.ColumnName, d.Expression))
+                .Should()
+                .BeEquivalentTo([("status", "(N'new')"), ("created", "(sysdatetime())")]);
+        }
+        finally
+        {
+            await fixture.ExecuteAsync(
+                "DROP TABLE IF EXISTS parted; DROP TABLE IF EXISTS attrs;",
+                Ct
+            );
+            await fixture.ExecuteAsync(
+                "DROP PARTITION SCHEME ps_probe; DROP PARTITION FUNCTION pf_probe; DROP TYPE dbo.PhoneNumber;",
+                Ct
+            );
+        }
+    }
+
+    /// <summary>
+    /// 前後に空白のある名前（テーブル名・列名・外部キー名・一意制約名）は、空白を除いて取り込み、名前ごとに告げる（N1）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server: 前後に空白のある名前は空白を除いて取り込み、名前ごとに告げる"
+    )]
+    public async Task Import_PaddedNames_AreTrimmedAndReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE [ pad_parent] (id int PRIMARY KEY);
+            CREATE TABLE [pad_child ] (
+                id int PRIMARY KEY,
+                [  col] int,
+                CONSTRAINT [ fk_pad] FOREIGN KEY ([  col]) REFERENCES [ pad_parent] (id),
+                CONSTRAINT [uq_pad ] UNIQUE ([  col])
+            );
+            """,
+            Ct
+        );
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("pad_parent", "pad_child");
+        result.Relationships.Should().ContainSingle().Which.ConstraintName.Should().Be("fk_pad");
+        result
+            .Entities.Single(e => e.TableName == "pad_child")
+            .UniqueConstraints.Should()
+            .ContainSingle()
+            .Which.Name.Should()
+            .Be("uq_pad");
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.NameTrimmed, "pad_parent", " pad_parent", "pad_parent"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", "pad_child ", "pad_child"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", "  col", "col"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", " fk_pad", "fk_pad"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", "uq_pad ", "uq_pad"),
+            ]);
+    }
 }

@@ -7,6 +7,7 @@ using Microsoft.Data.SqlClient;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -145,7 +146,8 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
             live1.Entities,
             live1.Relationships,
             new[] { parent, child },
-            new[] { rel }
+            new[] { rel },
+            TestDialectCapabilities.Neutral
         );
 
         diff1
@@ -158,7 +160,7 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
 
         // ---------- 3) 実行 ----------
         var script1 = new SqlServerSyncScriptBuilder().Build(
-            new SyncPlanner().BuildPlan(diff1.Items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(diff1.Items, TestDialectCapabilities.Neutral)
         );
         var exec = new SqlServerSchemaSyncExecutor();
         var result1 = await exec.ExecuteAsync(
@@ -176,7 +178,8 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
             live2.Entities,
             live2.Relationships,
             new[] { parent, child },
-            new[] { rel }
+            new[] { rel },
+            TestDialectCapabilities.Neutral
         );
         // ID は importer が新しい Guid を振り直すので、リレーションは「FK が DB 側に存在するか」で判定される
         diff2.Items.Where(i => i.Kind == SchemaDiffKind.AddTable).Should().BeEmpty();
@@ -193,7 +196,8 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
             live2.Entities,
             live2.Relationships,
             new[] { parent, child },
-            new[] { rel }
+            new[] { rel },
+            TestDialectCapabilities.Neutral
         );
         diff3
             .Items.Should()
@@ -202,7 +206,7 @@ IF OBJECT_ID(N'{ItemTable}', N'U') IS NOT NULL DROP TABLE [{ItemTable}];";
         var script3 = new SqlServerSyncScriptBuilder().Build(
             new SyncPlanner().BuildPlan(
                 diff3.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn),
-                new SyncDialectCapabilities()
+                TestDialectCapabilities.Neutral
             )
         );
         var result3 = await exec.ExecuteAsync(
@@ -271,7 +275,8 @@ CREATE TABLE [{ChildTable}] (
             live.Entities,
             live.Relationships,
             new[] { child },
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff.Items.Should()
@@ -289,7 +294,7 @@ CREATE TABLE [{ChildTable}] (
         }
 
         var script = new SqlServerSyncScriptBuilder().Build(
-            new SyncPlanner().BuildPlan(diff.Items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(diff.Items, TestDialectCapabilities.Neutral)
         );
         var exec = new SqlServerSchemaSyncExecutor();
         var result = await exec.ExecuteAsync(
@@ -367,7 +372,8 @@ CREATE TABLE [{ChildTable}] (
             live1.Entities,
             live1.Relationships,
             new[] { parent },
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
 
         diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddTable);
@@ -386,7 +392,7 @@ CREATE TABLE [{ChildTable}] (
             );
 
         var script = new SqlServerSyncScriptBuilder().Build(
-            new SyncPlanner().BuildPlan(diff1.Items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(diff1.Items, TestDialectCapabilities.Neutral)
         );
         var exec = new SqlServerSchemaSyncExecutor();
         var result = await exec.ExecuteAsync(
@@ -434,7 +440,8 @@ CREATE TABLE [{ChildTable}] (
             live2.Entities,
             live2.Relationships,
             new[] { updatedTarget },
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         diff2
             .Items.Should()
@@ -450,7 +457,7 @@ CREATE TABLE [{ChildTable}] (
             );
 
         var script2 = new SqlServerSyncScriptBuilder().Build(
-            new SyncPlanner().BuildPlan(diff2.Items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(diff2.Items, TestDialectCapabilities.Neutral)
         );
         var result2 = await exec.ExecuteAsync(
             Settings.ToDbConnectionSettings(),

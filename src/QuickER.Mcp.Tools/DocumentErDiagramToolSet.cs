@@ -1,4 +1,5 @@
 using System.Text.Json;
+using QuickER.Dialects;
 
 namespace QuickER.Mcp.Tools;
 
@@ -33,7 +34,7 @@ public static class DocumentErDiagramToolSet
                     target_dbms = new
                     {
                         type = "string",
-                        @enum = TargetDbmsNames.All,
+                        @enum = DialectNames.All,
                         description = "Target DBMS (database dialect) of the new diagram.",
                     },
                 },

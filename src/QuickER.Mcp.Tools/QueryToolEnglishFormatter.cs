@@ -1,5 +1,6 @@
 using System.Text;
 using QuickER.CodeGen.CSharp;
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.Mcp.Tools;
@@ -137,7 +138,7 @@ public static class QueryToolEnglishFormatter
             QueryToolDiagnosticCode.ProjectionFieldSourceColumnNotFound =>
                 $"Projection field '{d.Name}': source_column '{d.Column}' not found in table '{d.Table}'.",
             QueryToolDiagnosticCode.UnknownSqlDialect =>
-                $"Unknown SQL dialect '{d.Dialect}' (must be one of: {string.Join(", ", TargetDbmsNames.All)}).",
+                $"Unknown SQL dialect '{d.Dialect}' (must be one of: {string.Join(", ", DialectNames.All)}).",
             QueryToolDiagnosticCode.SqlDialectNotString =>
                 $"SQL for dialect '{d.Dialect}' must be a string.",
             // DSL パーサ・生 SQL アナライザの診断は、UI 言語に依らず中立言語（英語）で描画する

@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.Oracle;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider.Oracle;
 
@@ -11,7 +12,7 @@ public class OracleSyncScriptBuilderTests
 {
     private static string Build(params SchemaDiffItem[] items) =>
         new OracleSyncScriptBuilder().Build(
-            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral)
         );
 
     /// <summary>AddTable が主キー制約を含む CREATE TABLE 文を生成することを検証する</summary>

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using QuickER.CodeGen.CSharp.Resources;
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.CSharp;
@@ -1829,7 +1830,7 @@ public sealed partial class CSharpCodeGenerationService
                             ? UniqueConstraint.SynthesizeName(
                                 entity.TableName,
                                 members,
-                                IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+                                IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms)
                             )
                             : constraint.Name;
 

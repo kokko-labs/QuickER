@@ -1,3 +1,5 @@
+using QuickER.Dialects;
+
 namespace QuickER.Model;
 
 /// <summary>
@@ -11,7 +13,7 @@ public class ErDiagram
     /// 宣言順が JSON の出力順になるため先頭に置く（ファイルを開いたとき対象 DB がすぐ分かるようにする。
     /// 読み込みはキー順に依存しないため、旧順序で保存されたファイルもそのまま読める）
     /// </remarks>
-    public string TargetDbms { get; set; } = "sqlserver";
+    public string TargetDbms { get; set; } = DialectNames.SqlServer;
 
     /// <summary>ER 図に含まれる全エンティティ</summary>
     public List<Entity> Entities { get; set; } = new();

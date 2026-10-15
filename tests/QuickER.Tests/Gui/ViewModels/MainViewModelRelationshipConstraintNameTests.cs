@@ -1,5 +1,6 @@
 using System.IO;
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
@@ -142,5 +143,47 @@ public class MainViewModelRelationshipConstraintNameTests : IDisposable
         vm.Relationships.Select(relationship => relationship.ConstraintName)
             .Should()
             .Equal("FK_A_B_C", "FK_A_B_C_B_CId");
+    }
+
+    [Fact(
+        DisplayName = "名前の無い外部キーの既定名が上限で縮められているとき、作成時の制約名はその縮めた名前を避ける"
+    )]
+    public void CreateRelationship_AvoidsShortenedDefaultNameOfUnnamedRelationship()
+    {
+        // 子 {A}_B・親 C と、子 {A}・親 B_C は、既定名が同じ FK_{A}_B_C になる（クラスの XmlDoc）。
+        // A を 128 文字にすると既定名は SQL Server（図の既定の対象 DBMS）の上限 128 を超え、縮めて付く
+        var longName = new string('a', 128);
+        var vm = new MainViewModel(new StubDialogService());
+        vm.UsePersistenceForTests(
+            new GuiAppSettingsStore(_folder),
+            Path.Combine(_folder, "last_diagram.json")
+        );
+        vm.DisableFileWatchingForTests();
+        vm.Entities.Add(CreateEntity("C", "CId"));
+        vm.Entities.Add(CreateEntity(longName + "_B", "ABId", "CId"));
+        vm.Entities.Add(CreateEntity("B_C", "B_CId"));
+        vm.Entities.Add(CreateEntity(longName, "AId", "B_CId"));
+        vm.UndoRedo.Clear();
+        var shortened = ConstraintNames.ForeignKey(
+            longName + "_B",
+            "C",
+            IdentifierLengthLimits.SqlServer
+        );
+
+        // 取込・古いファイルで生じる、名前の無い外部キー（DDL では縮めた既定名になる）
+        var unnamed = Connect(vm, "C", longName + "_B");
+        unnamed.ConstraintName = null;
+        unnamed.ColumnPairs.Should().NotBeEmpty("外部キーを作る関係でなければ既定名を取らない");
+
+        var created = Connect(vm, "B_C", longName);
+
+        created.Should().NotBeSameAs(unnamed);
+        created
+            .ConstraintName.Should()
+            .NotBe(
+                shortened,
+                "名前の無い外部キーが DDL でこの名前になり、同じ名前の制約が 2 つできる"
+            );
+        IdentifierLengthLimits.SqlServer.Fits(created.ConstraintName!).Should().BeTrue();
     }
 }

@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.Oracle;
@@ -6,7 +7,7 @@ namespace QuickER.Provider.Oracle;
 public sealed class OracleProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "oracle";
+    public const string ProviderName = DialectNames.Oracle;
 
     /// <inheritdoc />
     public string Name => ProviderName;
@@ -39,13 +40,24 @@ public sealed class OracleProvider : IDatabaseProvider
     public SyncDialectCapabilities SyncCapabilities { get; } =
         new()
         {
+            SupportsAlterColumn = true,
+            SupportsForeignKeyAlter = true,
+            SupportsDescriptions = true,
+            AlterColumnRequiresForeignKeyRebuild = false,
+            AlterColumnRequiresKeyConstraintRebuild = false,
+            ForeignKeyRequiresLeadingIndex = false,
+            PersistsForeignKeyConstraintNames = true,
+            ColumnReorder = ColumnReorderMode.None,
+            NormalizeTypeNotation = OracleTypeNotation.Normalize,
             SupportsOnUpdateAction = false,
             SupportsSetDefaultAction = false,
+            SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,
+            ForeignKeyAllowsStringLengthDifference = false,
             TransactionalDdl = false,
-            NormalizeTypeNotation = OracleTypeNotation.Normalize,
             IdentifierLengthLimit = OracleIdentifier.Limit,
+            TruncatesLongIdentifiers = false,
         };
 
     /// <inheritdoc />

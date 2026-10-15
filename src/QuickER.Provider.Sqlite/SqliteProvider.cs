@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.Sqlite;
@@ -11,7 +12,7 @@ namespace QuickER.Provider.Sqlite;
 public sealed class SqliteProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "sqlite";
+    public const string ProviderName = DialectNames.Sqlite;
 
     /// <inheritdoc />
     public string Name => ProviderName;
@@ -45,11 +46,22 @@ public sealed class SqliteProvider : IDatabaseProvider
             SupportsAlterColumn = false,
             SupportsForeignKeyAlter = false,
             SupportsDescriptions = false,
+            AlterColumnRequiresForeignKeyRebuild = false,
+            AlterColumnRequiresKeyConstraintRebuild = false,
+            ForeignKeyRequiresLeadingIndex = false,
             PersistsForeignKeyConstraintNames = false,
             ColumnReorder = ColumnReorderMode.Rebuild,
+            // SQLite は宣言した型の綴りをそのまま返すので、型表記の正規化は恒等
+            NormalizeTypeNotation = static type => type,
+            SupportsOnUpdateAction = true,
+            SupportsSetDefaultAction = true,
+            SupportsComputedColumnTypeChange = false,
             SupportsUniqueConstraintOnPrimaryKey = false,
             ReferencedKeyRequiresSameColumnOrder = false,
+            ForeignKeyAllowsStringLengthDifference = false,
+            TransactionalDdl = true,
             IdentifierLengthLimit = SqliteIdentifier.Limit,
+            TruncatesLongIdentifiers = false,
         };
 
     /// <inheritdoc />

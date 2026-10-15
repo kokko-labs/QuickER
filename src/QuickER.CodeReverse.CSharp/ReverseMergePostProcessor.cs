@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.CodeReverse.CSharp;
@@ -137,7 +138,7 @@ public static class ReverseMergePostProcessor
         ConstraintNames.NameUnnamedForeignKeys(
             mergedEntities,
             result.Where(relationship => relationship.Type != RelationshipType.ManyToMany),
-            IdentifierLengthLimits.ForDbms(current.TargetDbms)
+            IdentifierLengthLimits.ForDiagramTarget(current.TargetDbms)
         );
 
         return result;

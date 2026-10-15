@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider.Resources;
 

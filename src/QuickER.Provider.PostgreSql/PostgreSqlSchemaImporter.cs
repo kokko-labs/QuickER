@@ -55,6 +55,8 @@ public partial class PostgreSqlSchemaImporter : ISchemaImporter
         var warnings = new List<SchemaImportWarning>();
         var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+        await LoadExcludedRelationsAsync(conn, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
@@ -63,6 +65,14 @@ public partial class PostgreSqlSchemaImporter : ISchemaImporter
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
+        var defaults = await LoadColumnAttributesAsync(
+                conn,
+                tables,
+                commandTimeoutSeconds,
+                warnings,
+                ct
+            )
             .ConfigureAwait(false);
 
         // 列が 1 本も取れなかったテーブルは DDL を生成できないため、黙って通さず名指しで告げる
@@ -82,11 +92,15 @@ public partial class PostgreSqlSchemaImporter : ISchemaImporter
             )
         );
 
+        // 前後に空白のある DB の名前は、図では空白を除いた名前になる。取込完了時に名指しする
+        warnings.AddRange(SchemaImportWarnings.DetectTrimmedNames(tables.Values));
+
         return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
             Warnings = warnings,
+            ColumnDefaults = defaults,
         };
     }
 
@@ -126,6 +140,35 @@ WHERE "
         + @"
 -- COLLATE ""C"" で並べるのは、DB のロケール次第で Dup と dup の順序が変わるため
 -- （衝突時にどちらを採るかを決定的にする）
+ORDER BY c.relname COLLATE ""C"";";
+
+    /// <summary>public スキーマの取り込まない関係（ビュー・MV・外部テーブル・子パーティション）を名指しするクエリ</summary>
+    /// <remarks>
+    /// 取込の対象（<see cref="TableScopePredicate"/>）は変えず、告げるためだけに読む。子パーティションは
+    /// 種別（<c>relkind</c>）より先に判定する（外部テーブルも子パーティションになり得るが、親の実体として告げる）。
+    /// 拡張が所有する関係は DB の内部のものとして告げない。
+    /// </remarks>
+    private const string ExcludedRelationsSql =
+        @"
+SELECT c.relname AS name,
+       CASE WHEN c.relispartition THEN 'partition' ELSE c.relkind::text END AS kind,
+       (SELECT p.relname
+        FROM pg_catalog.pg_inherits i
+        JOIN pg_catalog.pg_class p ON p.oid = i.inhparent
+        WHERE i.inhrelid = c.oid
+        LIMIT 1) AS parent_name
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+WHERE n.nspname = 'public'
+  AND (c.relkind IN ('v', 'm', 'f') OR (c.relispartition AND c.relkind IN ('r', 'p')))
+  AND NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_depend d
+      WHERE d.classid = 'pg_catalog.pg_class'::regclass
+        AND d.objid = c.oid
+        AND d.refclassid = 'pg_catalog.pg_extension'::regclass
+        AND d.deptype = 'e'
+  )
 ORDER BY c.relname COLLATE ""C"";";
 
     /// <summary>取込対象テーブルのカラム定義を序数順に取得するクエリ</summary>
@@ -248,7 +291,10 @@ SELECT
     -- Npgsql が String として読めるよう text へキャストする
     con.confdeltype::text AS delete_action,
     con.confupdtype::text AS update_action,
-    parent_ns.nspname AS ref_schema
+    parent_ns.nspname AS ref_schema,
+    -- パーティション親への外部キーから PG が子パーティションへ複製した制約（conparentid <> 0）は、
+    -- 利用者が宣言した外部キーではないので告げない
+    con.conparentid = 0 AS is_declared
 FROM pg_catalog.pg_constraint con
 JOIN pg_catalog.pg_class child ON con.conrelid = child.oid
 JOIN pg_catalog.pg_namespace ns ON child.relnamespace = ns.oid
@@ -469,6 +515,159 @@ WHERE "
         }
     }
 
+    /// <summary>図が持たない列の属性（既定値・自動採番）を名指しするクエリ</summary>
+    /// <remarks>
+    /// 取込の列の読み込みは変えず、告げるためだけに読む。<c>pg_get_serial_sequence</c> は列が所有するシーケンス
+    /// （serial）を返す（1 つ目の引数はスキーマ修飾の表名で、引用符の規則に従うので <c>format('%I.%I')</c> で渡す）。
+    /// </remarks>
+    private const string ColumnAttributesSql =
+        @"
+SELECT c.relname AS table_name, a.attname AS column_name,
+       pg_get_expr(d.adbin, d.adrelid) AS default_expr,
+       a.attidentity::text AS identity_kind,
+       a.attgenerated::text AS generated_kind,
+       pg_get_serial_sequence(format('%I.%I', n.nspname, c.relname), a.attname) AS serial_sequence
+FROM pg_catalog.pg_attribute a
+JOIN pg_catalog.pg_class c ON a.attrelid = c.oid
+JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+WHERE "
+        + TableScopePredicate
+        + @"
+  AND a.attnum > 0 AND NOT a.attisdropped
+  AND (d.adbin IS NOT NULL OR a.attidentity <> '')
+ORDER BY c.relname COLLATE ""C"", a.attnum;";
+
+    /// <summary>PostgreSQL が <c>DEFAULT NULL</c> を書く表記（型つきの列は <c>NULL::型</c>。text・integer などは既定値の行を作らない）</summary>
+    private static readonly string[] NullDefaultForms = ["NULL"];
+
+    /// <summary>図が持たない列の属性を、列ごとの取込警告（段 1）で名指しし、既定値の事実を返す</summary>
+    /// <remarks>
+    /// 自動採番を先に判定する（serial の <c>nextval</c> は既定値として二重に告げない）。指定した値を拒む
+    /// <c>GENERATED ALWAYS AS IDENTITY</c> は別の扱いなのでここでは告げない。生成列の式と値が NULL の既定値は
+    /// 既定値に数えない。
+    /// </remarks>
+    private static async Task<List<SchemaColumnDefault>> LoadColumnAttributesAsync(
+        NpgsqlConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        var defaults = new List<SchemaColumnDefault>();
+        await using var cmd = DbCommands.Create(conn, ColumnAttributesSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (
+                !SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry)
+                || !entry.TryGetColumnExact(reader.GetString(1), out var column)
+            )
+            {
+                continue;
+            }
+
+            var table = entry.Entity.TableName;
+            var expression = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var identity = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+            var generated = reader.IsDBNull(4) ? string.Empty : reader.GetString(4);
+            var serialSequence = reader.IsDBNull(5) ? null : reader.GetString(5);
+
+            if (identity == "a")
+            {
+                continue;
+            }
+
+            if (identity == "d")
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.AutoIncrementLost,
+                        table,
+                        column.Name,
+                        "GENERATED BY DEFAULT AS IDENTITY"
+                    )
+                );
+                continue;
+            }
+
+            if (serialSequence is not null)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.AutoIncrementLost,
+                        table,
+                        column.Name,
+                        $"serial ({serialSequence})"
+                    )
+                );
+                continue;
+            }
+
+            if (
+                generated.Length > 0
+                || SchemaImportWarnings.IsNullDefault(
+                    expression,
+                    NullDefaultForms,
+                    typedNullCast: true
+                )
+            )
+            {
+                continue;
+            }
+
+            warnings.Add(
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.ColumnDefaultLost,
+                    table,
+                    column.Name,
+                    expression!
+                )
+            );
+            defaults.Add(new SchemaColumnDefault(table, column.Name, expression!));
+        }
+
+        return defaults;
+    }
+
+    /// <summary>取り込まない関係を、種別ごとの取込警告（段 2）で名指しする</summary>
+    private static async Task LoadExcludedRelationsAsync(
+        NpgsqlConnection conn,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(conn, ExcludedRelationsSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var name = reader.GetString(0);
+            var parent = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+            var warning = reader.GetString(1) switch
+            {
+                "partition" => new SchemaImportWarning(
+                    SchemaImportWarningKind.ChildPartitionExcluded,
+                    name,
+                    Detail: parent
+                ),
+                "v" => new SchemaImportWarning(SchemaImportWarningKind.ViewExcluded, name),
+                "m" => new SchemaImportWarning(
+                    SchemaImportWarningKind.MaterializedViewExcluded,
+                    name
+                ),
+                "f" => new SchemaImportWarning(SchemaImportWarningKind.ExternalTableExcluded, name),
+                var kind => throw new InvalidOperationException(
+                    $"Unexpected relation kind '{kind}' for '{name}'."
+                ),
+            };
+            warnings.Add(warning);
+        }
+    }
+
     /// <summary>外部キーを読み込み、複合列を集約してリレーションへ変換する</summary>
     /// <remarks>
     /// 参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する。
@@ -503,6 +702,7 @@ WHERE "
                 reader.IsDBNull(7) ? null : reader.GetString(7)
             );
             var refSchema = reader.GetString(8);
+            var isDeclared = reader.GetBoolean(9);
 
             // 参照先が public 以外＝図に親テーブルが無いのでリレーションを作れない。除外して告げる
             // （取り込まなかった子表＝大文字小文字の衝突で捨てた表の外部キーは、図に載らないので名指ししない）
@@ -523,6 +723,26 @@ WHERE "
                     );
                 }
 
+                continue;
+            }
+
+            // 参照先が public にあって取込が外した表（子パーティション・拡張が所有する表）なら、
+            // リレーションにできないことを告げる（衝突で捨てた表は TableNameCollision が告げているので黙る）
+            if (
+                isDeclared
+                && SchemaTableEntry.TryGetExact(tables, parentKey, out _)
+                && !tables.ContainsKey(refKey)
+                && reportedOutOfScope.Add((parentKey, fkName))
+            )
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ForeignKeyToExcludedTable,
+                        parentKey,
+                        fkName,
+                        refKey
+                    )
+                );
                 continue;
             }
 

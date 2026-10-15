@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Text;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 

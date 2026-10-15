@@ -59,6 +59,8 @@ public class OracleSchemaImporter : ISchemaImporter
         var warnings = new List<SchemaImportWarning>();
         var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+        await LoadExcludedObjectsAsync(conn, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
@@ -71,6 +73,14 @@ public class OracleSchemaImporter : ISchemaImporter
         await LoadOutOfScopeForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
         await LoadDisabledConstraintsAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
+        var defaults = await LoadColumnAttributesAsync(
+                conn,
+                tables,
+                commandTimeoutSeconds,
+                warnings,
+                ct
+            )
             .ConfigureAwait(false);
 
         // 列が 1 本も取れなかったテーブルは DDL を生成できないため、黙って通さず名指しで告げる
@@ -90,11 +100,15 @@ public class OracleSchemaImporter : ISchemaImporter
             )
         );
 
+        // 前後に空白のある DB の名前は、図では空白を除いた名前になる。取込完了時に名指しする
+        warnings.AddRange(SchemaImportWarnings.DetectTrimmedNames(tables.Values));
+
         return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
             Warnings = warnings,
+            ColumnDefaults = defaults,
         };
     }
 
@@ -113,6 +127,9 @@ public class OracleSchemaImporter : ISchemaImporter
     /// （<c>MLOG$_…</c>＝<c>user_mview_logs.log_table</c>）も除外する。
     /// どれも <c>user_tables</c> には通常テーブルとして現れるが、実体はセッション作業域・ビューの結果・
     /// ビューの更新のための変更記録で、ER 図のエンティティではない（「ビューは取り込まない」という取込範囲の宣言に実装を合わせる）。
+    /// 外部テーブル（<c>user_external_tables</c>）も、データが DB の外にあり DDL・同期で作り直せないため除外する。
+    /// 一時表・外部テーブル（と、ビュー・マテリアライズドビュー本体）は <see cref="ExcludedObjectsSql"/> が名指しして告げ、
+    /// コンテナ表と MV ログ表は DB の内部のものとして告げない。
     /// </para>
     /// <para>
     /// 2 列目の <c>partitioned</c> はパーティション表かどうか（<c>'YES'</c> / <c>'NO'</c>）。パーティション定義は
@@ -128,9 +145,36 @@ WHERE dropped = 'NO'
   AND (iot_type IS NULL OR iot_type = 'IOT')
   AND table_name NOT IN (SELECT mview_name FROM user_mviews)
   AND table_name NOT IN (SELECT log_table FROM user_mview_logs)
+  AND table_name NOT IN (SELECT table_name FROM user_external_tables)
 -- NLSSORT の BINARY 指定は、セッションの NLS_SORT 次第で DUP と 小文字の dup の順序が変わるため
 -- （衝突時にどちらを採るかを決定的にする）
 ORDER BY NLSSORT(table_name, 'NLS_SORT=BINARY')";
+
+    /// <summary>自スキーマの取り込まないオブジェクト（ビュー・MV・外部テーブル・一時表）を名指しするクエリ</summary>
+    /// <remarks>取込の対象（<see cref="TablesSql"/>）は変えず、告げるためだけに読む。</remarks>
+    private const string ExcludedObjectsSql =
+        @"SELECT name, kind FROM (
+    SELECT view_name AS name, 'view' AS kind FROM user_views
+    UNION ALL SELECT mview_name, 'mview' FROM user_mviews
+    UNION ALL SELECT table_name, 'external' FROM user_external_tables
+    UNION ALL SELECT table_name, 'temporary' FROM user_tables WHERE temporary = 'Y' AND dropped = 'NO'
+)
+ORDER BY NLSSORT(name, 'NLS_SORT=BINARY')";
+
+    /// <summary>図が持たない列の属性（既定値・自動採番）を名指しするクエリ</summary>
+    /// <remarks>
+    /// 取込の列の読み込みは変えず、告げるためだけに読む。<c>data_default</c> は LONG 型で WHERE に書けないので、
+    /// 既定値の有無は <c>default_length</c> で絞る。IDENTITY 列は <c>user_tab_identity_cols</c> の
+    /// <c>generation_type</c>（<c>ALWAYS</c> / <c>BY DEFAULT</c>）で見分け、ON NULL は <c>default_on_null</c> から読む。
+    /// </remarks>
+    private const string ColumnAttributesSql =
+        @"SELECT c.table_name, c.column_name, c.data_default, c.virtual_column, i.generation_type,
+       c.default_on_null
+FROM user_tab_cols c
+LEFT JOIN user_tab_identity_cols i ON i.table_name = c.table_name AND i.column_name = c.column_name
+WHERE c.user_generated = 'YES'
+  AND (c.default_length > 0 OR i.generation_type IS NOT NULL)
+ORDER BY NLSSORT(c.table_name, 'NLS_SORT=BINARY'), c.column_id";
 
     /// <summary>自スキーマ全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
@@ -307,6 +351,115 @@ ORDER BY constraint_name";
         }
 
         return dict;
+    }
+
+    /// <summary>Oracle が <c>DEFAULT NULL</c> を <c>data_default</c> に書く表記（書いたとおりの綴りなので大文字小文字を無視して比べる）</summary>
+    private static readonly string[] NullDefaultForms = ["NULL"];
+
+    /// <summary>図が持たない列の属性を、列ごとの取込警告（段 1）で名指しし、既定値の事実を返す</summary>
+    /// <remarks>
+    /// IDENTITY を先に判定する（IDENTITY 列の <c>data_default</c> はシーケンスの nextval で、既定値として二重に告げない）。
+    /// 指定した値を拒む <c>ALWAYS</c> は別の扱いなのでここでは告げない。仮想列の式と値が NULL の既定値は既定値に数えない。
+    /// </remarks>
+    private static async Task<List<SchemaColumnDefault>> LoadColumnAttributesAsync(
+        OracleConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        var defaults = new List<SchemaColumnDefault>();
+        await using var cmd = DbCommands.Create(conn, ColumnAttributesSql, commandTimeoutSeconds);
+
+        // data_default は LONG 型。ODP.NET は既定では LONG を取得しない（空文字が返る）
+        if (cmd is OracleCommand oracleCommand)
+        {
+            oracleCommand.InitialLONGFetchSize = -1;
+        }
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (
+                !SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry)
+                || !entry.TryGetColumnExact(reader.GetString(1), out var column)
+            )
+            {
+                continue;
+            }
+
+            var table = entry.Entity.TableName;
+            var expression = reader.IsDBNull(2) ? null : reader.GetString(2).Trim();
+            var isVirtual = !reader.IsDBNull(3) && reader.GetString(3) == "YES";
+            var generation = reader.IsDBNull(4) ? null : reader.GetString(4);
+
+            if (generation is not null)
+            {
+                if (generation.StartsWith("BY DEFAULT", StringComparison.Ordinal))
+                {
+                    var onNull = !reader.IsDBNull(5) && reader.GetString(5) == "YES";
+                    warnings.Add(
+                        new SchemaImportWarning(
+                            SchemaImportWarningKind.AutoIncrementLost,
+                            table,
+                            column.Name,
+                            onNull
+                                ? "GENERATED BY DEFAULT ON NULL AS IDENTITY"
+                                : "GENERATED BY DEFAULT AS IDENTITY"
+                        )
+                    );
+                }
+
+                continue;
+            }
+
+            if (isVirtual || SchemaImportWarnings.IsNullDefault(expression, NullDefaultForms))
+            {
+                continue;
+            }
+
+            warnings.Add(
+                new SchemaImportWarning(
+                    SchemaImportWarningKind.ColumnDefaultLost,
+                    table,
+                    column.Name,
+                    expression!
+                )
+            );
+            defaults.Add(new SchemaColumnDefault(table, column.Name, expression!));
+        }
+
+        return defaults;
+    }
+
+    /// <summary>取り込まないオブジェクトを、種別ごとの取込警告（段 2）で名指しする</summary>
+    private static async Task LoadExcludedObjectsAsync(
+        OracleConnection conn,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(conn, ExcludedObjectsSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var name = reader.GetString(0);
+            var kind = reader.GetString(1) switch
+            {
+                "view" => SchemaImportWarningKind.ViewExcluded,
+                "mview" => SchemaImportWarningKind.MaterializedViewExcluded,
+                "external" => SchemaImportWarningKind.ExternalTableExcluded,
+                "temporary" => SchemaImportWarningKind.TemporaryTableExcluded,
+                var other => throw new InvalidOperationException(
+                    $"Unexpected object kind '{other}' for '{name}'."
+                ),
+            };
+            warnings.Add(new SchemaImportWarning(kind, name));
+        }
     }
 
     /// <summary>取込範囲外を参照する外部キーを拾い、除外したことを警告として積む</summary>

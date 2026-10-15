@@ -65,14 +65,12 @@ public class SqliteSchemaImporter : ISchemaImporter
         int commandTimeoutSeconds = DbCommands.DefaultTimeoutSeconds
     )
     {
-        var (tables, tableCreateSql, withoutRowidByTable, tableWarnings) = await LoadTablesAsync(
-                conn,
-                commandTimeoutSeconds,
-                ct
-            )
-            .ConfigureAwait(false);
+        var (tables, tableCreateSql, withoutRowidByTable, tableWarnings, excludedNames) =
+            await LoadTablesAsync(conn, commandTimeoutSeconds, ct).ConfigureAwait(false);
 
         // 各テーブルの列・主キーは PRAGMA table_xinfo でまとめて取得する
+        var defaults = new List<SchemaColumnDefault>();
+
         foreach (var entry in tables.Values)
         {
             var isWithoutRowid =
@@ -82,11 +80,30 @@ public class SqliteSchemaImporter : ISchemaImporter
                     conn,
                     entry,
                     tableWarnings,
+                    defaults,
                     isWithoutRowid,
                     commandTimeoutSeconds,
                     ct
                 )
                 .ConfigureAwait(false);
+
+            // AUTOINCREMENT は CREATE 文にしか現れない（再構築の喪失の警告と同じ検出で見る）。
+            // 付けられるのは rowid 別名の主キー列だけ（rowid 別名そのものは型の文字列で保たれるので告げない）
+            if (
+                tableCreateSql.TryGetValue(entry.Key, out var createSql)
+                && TableRebuildAttributeDetector.Detect(createSql).Contains("AUTOINCREMENT")
+                && entry.Entity.GetPrimaryKeyColumnsInOrder() is [var autoIncrementColumn]
+            )
+            {
+                tableWarnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.AutoIncrementLost,
+                        entry.Entity.TableName,
+                        autoIncrementColumn.Name,
+                        "AUTOINCREMENT"
+                    )
+                );
+            }
         }
 
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
@@ -95,6 +112,7 @@ public class SqliteSchemaImporter : ISchemaImporter
         var rels = await LoadForeignKeysAsync(
                 conn,
                 tables,
+                excludedNames,
                 tableWarnings,
                 commandTimeoutSeconds,
                 ct
@@ -110,6 +128,8 @@ public class SqliteSchemaImporter : ISchemaImporter
                     tables.Values.Select(entry => entry.Entity)
                 )
             )
+            // 前後に空白のある DB の名前は、図では空白を除いた名前になる。取込完了時に名指しする
+            .Concat(SchemaImportWarnings.DetectTrimmedNames(tables.Values))
             .ToList();
 
         return new SchemaImportResult
@@ -119,6 +139,7 @@ public class SqliteSchemaImporter : ISchemaImporter
             AuxiliaryObjects = aux,
             TableCreateSql = tableCreateSql,
             Warnings = warnings,
+            ColumnDefaults = defaults,
         };
     }
 
@@ -161,7 +182,8 @@ ORDER BY name;";
         Dictionary<string, SchemaTableEntry> Tables,
         Dictionary<string, string> CreateSql,
         Dictionary<string, bool> WithoutRowidByTable,
-        List<SchemaImportWarning> Warnings
+        List<SchemaImportWarning> Warnings,
+        List<string> ExcludedNames
     )> LoadTablesAsync(SqliteConnection conn, int commandTimeoutSeconds, CancellationToken ct)
     {
         var tableTypes = await LoadTableTypesAsync(conn, commandTimeoutSeconds, ct)
@@ -171,6 +193,9 @@ ORDER BY name;";
         var createSql = new Dictionary<string, string>(SchemaNames.Comparer);
         var withoutRowidByTable = new Dictionary<string, bool>(StringComparer.Ordinal);
         var warnings = new List<SchemaImportWarning>();
+
+        // 取り込まない表・ビューの名前（外部キーの参照先が「DB にあるが外した表」かを見分けるため）
+        var excludedNames = new List<string>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -192,6 +217,7 @@ ORDER BY name;";
                     warnings.Add(
                         new SchemaImportWarning(SchemaImportWarningKind.VirtualTableExcluded, name)
                     );
+                    excludedNames.Add(name);
                     continue;
                 }
 
@@ -200,6 +226,7 @@ ORDER BY name;";
                 )
                 {
                     // 付属表は本体の VirtualTableExcluded 警告 1 件が代表するため無言で除外する
+                    excludedNames.Add(name);
                     continue;
                 }
             }
@@ -232,7 +259,21 @@ ORDER BY name;";
             }
         }
 
-        return (dict, createSql, withoutRowidByTable, warnings);
+        // ビューは sqlite_master の type='table' に現れないので、table_list の種別から名指しする
+        foreach (
+            var view in tableTypes
+                .Where(pair =>
+                    string.Equals(pair.Value.Type, "view", StringComparison.OrdinalIgnoreCase)
+                )
+                .Select(pair => pair.Key)
+                .Order(StringComparer.Ordinal)
+        )
+        {
+            warnings.Add(new SchemaImportWarning(SchemaImportWarningKind.ViewExcluded, view));
+            excludedNames.Add(view);
+        }
+
+        return (dict, createSql, withoutRowidByTable, warnings, excludedNames);
     }
 
     /// <summary>
@@ -315,6 +356,7 @@ ORDER BY name;";
         SqliteConnection conn,
         SchemaTableEntry entry,
         List<SchemaImportWarning> warnings,
+        List<SchemaColumnDefault> defaults,
         bool isWithoutRowid,
         int commandTimeoutSeconds,
         CancellationToken ct
@@ -375,6 +417,25 @@ ORDER BY name;";
                         entry.Entity.TableName,
                         colName
                     )
+                );
+            }
+            else if (
+                !reader.IsDBNull(4)
+                && reader.GetString(4) is var columnDefault
+                && !SchemaImportWarnings.IsNullDefault(columnDefault, NullDefaultForms)
+            )
+            {
+                // dflt_value は宣言どおりの式（文字列は引用符つき）。値が NULL の既定値は告げない
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ColumnDefaultLost,
+                        entry.Entity.TableName,
+                        col.Name,
+                        columnDefault
+                    )
+                );
+                defaults.Add(
+                    new SchemaColumnDefault(entry.Entity.TableName, col.Name, columnDefault)
                 );
             }
 
@@ -528,6 +589,9 @@ ORDER BY name;";
         UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
 
+    /// <summary>SQLite が <c>DEFAULT NULL</c> を <c>dflt_value</c> に書く表記（宣言どおりの綴り）</summary>
+    private static readonly string[] NullDefaultForms = ["NULL"];
+
     /// <summary>外部キーを PRAGMA foreign_key_list で読み込み、リレーションへ変換する</summary>
     /// <remarks>
     /// <para>
@@ -552,6 +616,7 @@ ORDER BY name;";
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         SqliteConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        IReadOnlyList<string> excludedNames,
         List<SchemaImportWarning> warnings,
         int commandTimeoutSeconds,
         CancellationToken ct
@@ -603,13 +668,13 @@ ORDER BY name;";
 
                     if (missingRefWarned.Add(id))
                     {
+                        // 参照先が DB にあって取込が外した表（仮想テーブル・付属表・ビュー）なら、
+                        // 範囲の外ではなく「外した表への参照」として告げる
+                        var kind = excludedNames.Any(name => SqliteNameEquals(name, refTable))
+                            ? SchemaImportWarningKind.ForeignKeyToExcludedTable
+                            : SchemaImportWarningKind.ForeignKeyOutsideScope;
                         warnings.Add(
-                            new SchemaImportWarning(
-                                SchemaImportWarningKind.ForeignKeyOutsideScope,
-                                entry.Entity.TableName,
-                                fkName,
-                                refTable
-                            )
+                            new SchemaImportWarning(kind, entry.Entity.TableName, fkName, refTable)
                         );
                     }
 

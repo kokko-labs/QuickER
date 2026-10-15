@@ -5,6 +5,7 @@ using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 using Xunit;
 using ProviderStrings = QuickER.Provider.Resources.Strings;
 
@@ -35,7 +36,7 @@ public class SyncPlannerTests
                 Item(SchemaDiffKind.AddTable, selected: false),
                 Item(SchemaDiffKind.AddColumn, selected: true),
             ],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         plan.Sections.Should().ContainSingle();
@@ -60,7 +61,7 @@ public class SyncPlannerTests
                 Item(SchemaDiffKind.AddColumn),
                 Item(SchemaDiffKind.AddTable),
             ],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         // DropForeignKey が AlterColumn より先なのは意図的:
@@ -100,7 +101,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("T", target)],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         var section = plan.Sections.Should().ContainSingle().Which;
@@ -116,7 +117,7 @@ public class SyncPlannerTests
         var b = Item(SchemaDiffKind.AddColumn, table: "B");
         var c = Item(SchemaDiffKind.AddColumn, table: "C");
 
-        var plan = new SyncPlanner().BuildPlan([a, b, c], new SyncDialectCapabilities());
+        var plan = new SyncPlanner().BuildPlan([a, b, c], TestDialectCapabilities.Neutral);
 
         plan.Sections.Should().ContainSingle();
         plan.Sections[0].Items.Should().Equal(a, b, c);
@@ -128,7 +129,7 @@ public class SyncPlannerTests
     {
         var plan = new SyncPlanner().BuildPlan(
             [Item(SchemaDiffKind.AddTable)],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         plan.Sections.Should().ContainSingle();
@@ -144,7 +145,7 @@ public class SyncPlannerTests
                 Item(SchemaDiffKind.RebuildTable, selected: true),
                 Item(SchemaDiffKind.AddTable, selected: true),
             ],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         plan.Sections.Should().ContainSingle();
@@ -161,7 +162,7 @@ public class SyncPlannerTests
                 Item(SchemaDiffKind.AddTable, selected: false),
                 Item(SchemaDiffKind.DropTable, selected: false),
             ],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         plan.IsEmpty.Should().BeTrue();
@@ -182,12 +183,15 @@ public class SyncPlannerTests
         ];
 
         var planner = new SyncPlanner();
-        var defaultPlan = planner.BuildPlan(items, new SyncDialectCapabilities());
+        var defaultPlan = planner.BuildPlan(items, TestDialectCapabilities.Neutral);
 
         // SupportsDescriptions=false だけでは rebuild 方言にならない（ALTER・FK 変更は可能なまま）
         var variantPlan = planner.BuildPlan(
             items,
-            new SyncDialectCapabilities { SupportsDescriptions = false }
+            TestDialectCapabilities.Neutral with
+            {
+                SupportsDescriptions = false,
+            }
         );
 
         variantPlan
@@ -200,14 +204,15 @@ public class SyncPlannerTests
     // ---------------- テーブル再構築（rebuild）方言の集約 ----------------
 
     /// <summary>ALTER COLUMN も FK の後付けもできない再構築方言のケーパビリティ</summary>
-    private static readonly SyncDialectCapabilities RebuildCaps = new()
-    {
-        SupportsAlterColumn = false,
-        SupportsForeignKeyAlter = false,
-        SupportsDescriptions = false,
-        PersistsForeignKeyConstraintNames = false,
-        ColumnReorder = ColumnReorderMode.Rebuild,
-    };
+    private static readonly SyncDialectCapabilities RebuildCaps =
+        TestDialectCapabilities.Neutral with
+        {
+            SupportsAlterColumn = false,
+            SupportsForeignKeyAlter = false,
+            SupportsDescriptions = false,
+            PersistsForeignKeyConstraintNames = false,
+            ColumnReorder = ColumnReorderMode.Rebuild,
+        };
 
     /// <summary>単純な非 NULL 主キー列 id を生成する</summary>
     private static Column PkId() =>
@@ -624,10 +629,11 @@ public class SyncPlannerTests
     // ---------------- 列順変更（ReorderColumns） ----------------
 
     /// <summary>ネイティブ列順変更方言（MySQL 相当）のケーパビリティ</summary>
-    private static readonly SyncDialectCapabilities NativeCaps = new()
-    {
-        ColumnReorder = ColumnReorderMode.Native,
-    };
+    private static readonly SyncDialectCapabilities NativeCaps =
+        TestDialectCapabilities.Neutral with
+        {
+            ColumnReorder = ColumnReorderMode.Native,
+        };
 
     /// <summary>指定名・順のエンティティを組み立てる（列は NULL 許容の通常列）</summary>
     private static Entity Ent(string table, params string[] cols)
@@ -888,11 +894,12 @@ public class SyncPlannerTests
     /// <summary>
     /// FK 参加列・主キー／一意制約の構成列の型変更に、制約の外し直しが必要な方言（SQL Server 相当）のケーパビリティ
     /// </summary>
-    private static readonly SyncDialectCapabilities FkRebuildCaps = new()
-    {
-        AlterColumnRequiresForeignKeyRebuild = true,
-        AlterColumnRequiresKeyConstraintRebuild = true,
-    };
+    private static readonly SyncDialectCapabilities FkRebuildCaps =
+        TestDialectCapabilities.Neutral with
+        {
+            AlterColumnRequiresForeignKeyRebuild = true,
+            AlterColumnRequiresKeyConstraintRebuild = true,
+        };
 
     /// <summary>customer(id) ← orders(customer_id) の live スキーマと、その FK リレーションを組み立てる</summary>
     private static (
@@ -1021,7 +1028,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("customer", targetCustomer)],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -1080,7 +1087,7 @@ public class SyncPlannerTests
         // 主キーを変えるのは子テーブル orders 自身（customer を参照する外向き FK は影響を受けない）
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("orders", targetOrders)],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -1166,7 +1173,7 @@ public class SyncPlannerTests
             IsSelected = true,
         };
 
-        var plan = new SyncPlanner().BuildPlan([alter], new SyncDialectCapabilities(), context);
+        var plan = new SyncPlanner().BuildPlan([alter], TestDialectCapabilities.Neutral, context);
 
         plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.AlterColumn);
     }
@@ -1194,7 +1201,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("customer", targetCustomer), explicitDrop],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -1259,7 +1266,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("customer", targetCustomer)],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -1314,7 +1321,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("customer", targetCustomer)],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -1369,7 +1376,10 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("customer", targetCustomer)],
-            new SyncDialectCapabilities { ForeignKeyRequiresLeadingIndex = true },
+            TestDialectCapabilities.Neutral with
+            {
+                ForeignKeyRequiresLeadingIndex = true,
+            },
             context
         );
 
@@ -1464,7 +1474,10 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("parent", targetParent)],
-            new SyncDialectCapabilities { ReferencedKeyRequiresSameColumnOrder = false },
+            TestDialectCapabilities.Neutral with
+            {
+                ReferencedKeyRequiresSameColumnOrder = false,
+            },
             context
         );
 
@@ -1506,7 +1519,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("vendor", targetVendor)],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -1623,7 +1636,7 @@ public class SyncPlannerTests
             IsSelected = true,
         };
 
-        var plan = new SyncPlanner().BuildPlan([alter], new SyncDialectCapabilities(), context);
+        var plan = new SyncPlanner().BuildPlan([alter], TestDialectCapabilities.Neutral, context);
 
         plan.Sections.Should().ContainSingle().Which.Items.Should().Equal(alter);
         plan.Warnings.Should().BeEmpty();
@@ -1802,7 +1815,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("T", target), alterColumn],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
         var sql = new SqlServerSyncScriptBuilder().Build(plan);
 
@@ -1849,7 +1862,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [alterColumn, addColumn],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
         var sql = new SqlServerSyncScriptBuilder().Build(plan);
 
@@ -1878,7 +1891,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [Reorder("t", target)],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         plan.Reorders.Should().BeEmpty();
@@ -1934,7 +1947,7 @@ public class SyncPlannerTests
                 UniqueItem(SchemaDiffKind.DropUniqueConstraint, "T", "uq_old", ["memo"]),
                 Item(SchemaDiffKind.DropForeignKey),
             ],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         plan.Sections.Select(s => s.Kind)
@@ -1987,7 +2000,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("customer", targetCustomer)],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -2030,7 +2043,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [AlterPk("customer", targetCustomer)],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -2084,7 +2097,7 @@ public class SyncPlannerTests
                     ["id"]
                 ),
             ],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -2133,7 +2146,7 @@ public class SyncPlannerTests
                     selected: false
                 ),
             ],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -2256,7 +2269,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [UniqueItem(SchemaDiffKind.DropUniqueConstraint, "customer", "UQ_customer_id", ["id"])],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -2294,7 +2307,7 @@ public class SyncPlannerTests
                     ["code"]
                 ),
             ],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -2863,7 +2876,7 @@ public class SyncPlannerTests
                 context.LiveRelationships,
                 targetEntities,
                 [targetRel],
-                capabilities
+                capabilities ?? TestDialectCapabilities.Neutral
             )
             .Items.Single(i => i.Kind == SchemaDiffKind.AlterForeignKey);
         alter.IsSelected = true;
@@ -2878,7 +2891,7 @@ public class SyncPlannerTests
 
         var plan = new SyncPlanner().BuildPlan(
             [SelectedForeignKeyAlter(context)],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -2906,7 +2919,7 @@ public class SyncPlannerTests
         alter.IsSelected = false;
 
         new SyncPlanner()
-            .BuildPlan([alter], new SyncDialectCapabilities(), context)
+            .BuildPlan([alter], TestDialectCapabilities.Neutral, context)
             .IsEmpty.Should()
             .BeTrue();
     }
@@ -2925,7 +2938,7 @@ public class SyncPlannerTests
                 SelectedForeignKeyAlter(context),
                 AlterPk("customer", customer.Clone(preserveId: false)),
             ],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 
@@ -2942,12 +2955,13 @@ public class SyncPlannerTests
     // ---------------- 主キー・外部キーの暗黙の外し直し（SQL Server・MySQL） ----------------
 
     /// <summary>MySQL 相当のケーパビリティ（外部キーは外し直す・主キー／一意制約は外さない・自表の外部キーも外し直す）</summary>
-    private static readonly SyncDialectCapabilities MySqlLikeCaps = new()
-    {
-        ColumnReorder = ColumnReorderMode.Native,
-        AlterColumnRequiresForeignKeyRebuild = true,
-        ForeignKeyRequiresLeadingIndex = true,
-    };
+    private static readonly SyncDialectCapabilities MySqlLikeCaps =
+        TestDialectCapabilities.Neutral with
+        {
+            ColumnReorder = ColumnReorderMode.Native,
+            AlterColumnRequiresForeignKeyRebuild = true,
+            ForeignKeyRequiresLeadingIndex = true,
+        };
 
     /// <summary>
     /// 主キーの構成列の型を変えると、主キー変更を選んでいなくても、同じ構成の主キーを外して付け直す項目が
@@ -3201,11 +3215,14 @@ public class SyncPlannerTests
         bool expected
     )
     {
-        var lenient = new SyncDialectCapabilities { ForeignKeyAllowsStringLengthDifference = true };
+        var lenient = TestDialectCapabilities.Neutral with
+        {
+            ForeignKeyAllowsStringLengthDifference = true,
+        };
 
         lenient.AreForeignKeyCompatibleTypes(left, right).Should().Be(expected);
-        new SyncDialectCapabilities()
-            .AreForeignKeyCompatibleTypes(left, right)
+        TestDialectCapabilities
+            .Neutral.AreForeignKeyCompatibleTypes(left, right)
             .Should()
             .Be(left.Equals(right, StringComparison.OrdinalIgnoreCase));
     }
@@ -3770,7 +3787,7 @@ public class SyncPlannerTests
             IsSelected = true,
         };
 
-        var plan = new SyncPlanner().BuildPlan([item], new SyncDialectCapabilities(), context);
+        var plan = new SyncPlanner().BuildPlan([item], TestDialectCapabilities.Neutral, context);
 
         plan.Warnings.Should()
             .ContainSingle(w => w.Kind == SyncPlanWarningKind.SelectedItemRequiresUnselectedItem)
@@ -4673,7 +4690,7 @@ public class SyncPlannerTests
                     IsSelected = true,
                 },
             ],
-            new SyncDialectCapabilities(),
+            TestDialectCapabilities.Neutral,
             context
         );
 

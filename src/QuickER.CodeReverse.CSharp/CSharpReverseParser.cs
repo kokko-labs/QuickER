@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.CodeReverse.CSharp.Resources;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
 

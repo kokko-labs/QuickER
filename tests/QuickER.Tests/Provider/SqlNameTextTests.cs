@@ -6,6 +6,7 @@ using QuickER.Provider.Oracle;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Provider;
@@ -133,7 +134,7 @@ public class SqlNameTextTests
                     IsSelected = true,
                 },
             ],
-            new SyncDialectCapabilities()
+            TestDialectCapabilities.Neutral
         );
 
         foreach (var builder in SyncScriptBuilders())
@@ -185,7 +186,10 @@ public class SqlNameTextTests
                     IsSelected = true,
                 },
             ],
-            new SyncDialectCapabilities { SupportsAlterColumn = true }
+            TestDialectCapabilities.Neutral with
+            {
+                SupportsAlterColumn = true,
+            }
         );
 
         var act = () => new SqlServerSyncScriptBuilder().Build(plan);

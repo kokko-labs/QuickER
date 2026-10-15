@@ -235,21 +235,6 @@
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>データベースからのスキーマ取得に失敗しました: {0}</value>
   </data>
-  <data name="Cli_ImportWarningDomainTypeFlattened" xml:space="preserve">
-    <value>警告: {0}.{1} はドメイン型「{2}」の基底型として取り込みました（図はドメイン型を持たないため、その CHECK 制約は失われます）。</value>
-  </data>
-  <data name="Cli_ImportWarningTableColumnsUnavailable" xml:space="preserve">
-    <value>警告: {0} の列を 1 つも取得できませんでした。列なしのテーブルとして取り込んでいます。接続ユーザーがこのテーブルへアクセスできるか確認してください。</value>
-  </data>
-  <data name="Cli_ImportWarningForeignKeyOutsideScope" xml:space="preserve">
-    <value>警告: {0} の外部キー「{1}」は取込範囲外の「{2}」を参照しているため、リレーションを作成していません。</value>
-  </data>
-  <data name="Cli_ImportWarningTableNameCollision" xml:space="preserve">
-    <value>警告: 「{0}」は「{1}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
-  </data>
-  <data name="Cli_ImportWarningColumnNameCollision" xml:space="preserve">
-    <value>警告: テーブル「{0}」の列「{1}」は「{2}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（図は両者を区別できません）。</value>
-  </data>
   <data name="Cli_SchemaReadFailed" xml:space="preserve">
     <value>スキーマファイルを読み取れません: {0}（{1}）</value>
   </data>
@@ -310,28 +295,7 @@
   <data name="Cli_UnhandledError" xml:space="preserve">
     <value>エラー: {0}</value>
   </data>
-  <data name="Cli_ImportWarningPartitionDefinitionLost" xml:space="preserve">
-    <value>警告: {0} は通常テーブルとして取り込みました。図はパーティションを持たないため、生成 DDL はパーティションなしで作成します。</value>
-  </data>
-  <data name="Cli_ImportWarningColumnTypeNotEmittable" xml:space="preserve">
-    <value>警告: {0}.{1} の型「{2}」は SQL へ安全に書き出せない表記です。直すまで、DDL 生成とスキーマ同期は図全体を拒否します。</value>
-  </data>
-  <data name="Cli_ImportWarningVirtualTableExcluded" xml:space="preserve">
-    <value>警告: {0} は仮想テーブルのため取り込みませんでした。通常テーブルの形で写し取れないため、付属表（シャドウテーブル）も合わせて除外しています。</value>
-  </data>
-  <data name="Cli_ImportWarningComputedColumnExpressionLost" xml:space="preserve">
-    <value>警告: {0}.{1} は通常の列として取り込みました。図は生成列の式を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
-  </data>
-  <data name="Cli_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
-    <value>警告: {0}.{1} は通常の列として取り込みました。図は生成列の式（{2}）を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
-  </data>
-  <data name="Cli_ImportWarningDisabledConstraintExcluded" xml:space="preserve">
-    <value>警告: {0}: {2} 制約「{1}」は無効化されており何も強制しないため、取り込みませんでした。</value>
-  </data>
-  <data name="Cli_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
-    <value>警告: {0} はシステムバージョニングされたテーブル「{1}」の履歴表のため取り込みませんでした。単独のエンティティとしては取り込みません。</value>
-  </data>
-  <data name="Cli_ImportWarningPrimaryKeyNullabilityAdjusted" xml:space="preserve">
-    <value>警告: {0}.{1} を主キー列として NOT NULL へ補正しました。SQLite の rowid 表は、単一列 INTEGER（rowid 別名）の主キー以外は NULL を許すため、既存行に NULL があると、この図からの同期（テーブル再構築）でデータ移送が失敗し得ます。</value>
+  <data name="Cli_ImportWarningLine" xml:space="preserve">
+    <value>警告: {0}</value>
   </data>
 </root>

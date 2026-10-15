@@ -8,6 +8,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -478,7 +479,7 @@ public sealed class MySqlColumnAttributeSyncIntegrationTests(MySqlContainerFixtu
     /// <summary>差分項目から同期スクリプトを組み立てて実行する</summary>
     private async Task ApplyAsync(IEnumerable<SchemaDiffItem> items)
     {
-        var plan = new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities());
+        var plan = new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral);
         await ExecuteAsync(new MySqlSyncScriptBuilder().Build(plan));
     }
 
@@ -503,7 +504,10 @@ public sealed class MySqlColumnAttributeSyncIntegrationTests(MySqlContainerFixtu
         };
         var plan = new SyncPlanner().BuildPlan(
             [item],
-            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native },
+            TestDialectCapabilities.Neutral with
+            {
+                ColumnReorder = ColumnReorderMode.Native,
+            },
             context
         );
         plan.Reorders.Should().NotBeEmpty("列順差分が検出されていること");

@@ -297,5 +297,293 @@ namespace QuickER.Provider.Resources {
                 return ResourceManager.GetString("Sync_Error_RolledBack", resourceCulture);
             }
         }
+
+        public static string ImportWarning_ColumnNameCollision {
+            get {
+                return ResourceManager.GetString("ImportWarning_ColumnNameCollision", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ColumnTypeNotEmittable {
+            get {
+                return ResourceManager.GetString("ImportWarning_ColumnTypeNotEmittable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ComputedColumnExpressionLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_ComputedColumnExpressionLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ComputedColumnExpressionLostWithExpression {
+            get {
+                return ResourceManager.GetString("ImportWarning_ComputedColumnExpressionLostWithExpression", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_DisabledConstraintExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarning_DisabledConstraintExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_DomainTypeFlattened {
+            get {
+                return ResourceManager.GetString("ImportWarning_DomainTypeFlattened", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ForeignKeyOutsideScope {
+            get {
+                return ResourceManager.GetString("ImportWarning_ForeignKeyOutsideScope", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_PartitionDefinitionLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_PartitionDefinitionLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_PrimaryKeyNullabilityAdjusted {
+            get {
+                return ResourceManager.GetString("ImportWarning_PrimaryKeyNullabilityAdjusted", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_TableColumnsUnavailable {
+            get {
+                return ResourceManager.GetString("ImportWarning_TableColumnsUnavailable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_TableNameCollision {
+            get {
+                return ResourceManager.GetString("ImportWarning_TableNameCollision", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_DomainTypeFlattened {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_DomainTypeFlattened", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_TableColumnsUnavailable {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_TableColumnsUnavailable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ForeignKeyOutsideScope {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ForeignKeyOutsideScope", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_TableNameCollision {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_TableNameCollision", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnNameCollision {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnNameCollision", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnTypeNotEmittable {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnTypeNotEmittable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_PartitionDefinitionLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_PartitionDefinitionLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_VirtualTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_VirtualTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ComputedColumnExpressionLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ComputedColumnExpressionLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_DisabledConstraintExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_DisabledConstraintExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_TemporalHistoryTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_TemporalHistoryTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_PrimaryKeyNullabilityAdjusted {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_PrimaryKeyNullabilityAdjusted", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ViewExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ViewExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_MaterializedViewExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_MaterializedViewExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ExternalTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ExternalTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ChildPartitionExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ChildPartitionExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_TemporaryTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_TemporaryTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ForeignKeyToExcludedTable {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ForeignKeyToExcludedTable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ForeignKeyToExcludedTable {
+            get {
+                return ResourceManager.GetString("ImportWarning_ForeignKeyToExcludedTable", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningItem_ChildPartitionExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningItem_ChildPartitionExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningItem_TemporalHistoryTableExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningItem_TemporalHistoryTableExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ColumnDefaultLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_ColumnDefaultLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnDefaultLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnDefaultLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_AutoIncrementLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_AutoIncrementLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_AutoIncrementLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_AutoIncrementLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ColumnCollationLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_ColumnCollationLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnCollationLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnCollationLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_InvisibleColumnLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_InvisibleColumnLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_InvisibleColumnLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_InvisibleColumnLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_ColumnOnUpdateLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_ColumnOnUpdateLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_ColumnOnUpdateLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_ColumnOnUpdateLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_SpatialReferenceIdLost {
+            get {
+                return ResourceManager.GetString("ImportWarning_SpatialReferenceIdLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_SpatialReferenceIdLost {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_SpatialReferenceIdLost", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_AliasTypeFlattened {
+            get {
+                return ResourceManager.GetString("ImportWarning_AliasTypeFlattened", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_AliasTypeFlattened {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_AliasTypeFlattened", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_NameTrimmed {
+            get {
+                return ResourceManager.GetString("ImportWarning_NameTrimmed", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_NameTrimmed {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_NameTrimmed", resourceCulture);
+            }
+        }
     }
 }

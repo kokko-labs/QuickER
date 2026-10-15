@@ -1,3 +1,5 @@
+using QuickER.Dialects;
+
 namespace QuickER.Model;
 
 /// <summary>
@@ -8,7 +10,8 @@ namespace QuickER.Model;
 /// <para>
 /// 判定は DDL・同期の入口と同じ <see cref="IdentifierLengthLimit.DescribeViolation"/>（写しを作らない）。
 /// 対象は図に保存された名前＝テーブル名・カラム名・外部キーと一意制約の保存された名前（QuickER が付ける既定名は生成のときに
-/// 上限へ収めるので対象外）。上限は図の対象 DBMS のもの（<see cref="IdentifierLengthLimits.ForDbms"/>）。
+/// 上限へ収めるので対象外）。上限は図の対象 DBMS のもので、呼び出し側が <see cref="IdentifierLengthLimits.ForDiagramTarget"/> で引いて渡す
+/// （Model は方言名から上限を引かない＝<c>ModelDialectLookupGuardTests</c>）。
 /// </para>
 /// <para>
 /// ツールは名前を受け付けて図へ保存し（DDL・同期の入口が断るのは生成のとき）、変更の前後で見つけた違反を比べて、
@@ -18,10 +21,10 @@ namespace QuickER.Model;
 public static class NameLimitNotes
 {
     /// <summary>図の中の、対象 DBMS が受け付けない名前を、場所と理由つきの行にして返す</summary>
-    /// <param name="diagram">図（<see cref="ErDiagram.TargetDbms"/> の上限で判定する）</param>
-    public static IReadOnlyList<string> Find(ErDiagram diagram)
+    /// <param name="diagram">図</param>
+    /// <param name="limit">判定に使う識別子の長さの上限（図の対象 DBMS の上限）</param>
+    public static IReadOnlyList<string> Find(ErDiagram diagram, IdentifierLengthLimit limit)
     {
-        var limit = IdentifierLengthLimits.ForDbms(diagram.TargetDbms);
         var violations = new List<string>();
 
         if (limit.IsUnlimited && limit.RepresentsSupplementaryCharacters)

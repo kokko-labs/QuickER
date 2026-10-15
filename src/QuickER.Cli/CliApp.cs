@@ -1,6 +1,7 @@
 using System.CommandLine;
 using QuickER.Cli.Resources;
 using QuickER.CodeReverse.CSharp;
+using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Mcp;
 using QuickER.Mcp.Tools;
@@ -418,9 +419,15 @@ public static class CliApp
         }
 
         // 宣言どおりに写し取れなかった箇所は stderr へ（取込自体は成功なので stdout の成果物は出す）
-        foreach (var warning in imported.Warnings)
+        // 種別ごとに「Warning: 見出し」の行を出し、その下に箇所を字下げして並べる
+        foreach (var group in SchemaImportWarningText.Group(imported.Warnings))
         {
-            stderr.WriteLine(DescribeImportWarning(warning));
+            stderr.WriteLine(string.Format(Strings.Cli_ImportWarningLine, group.Heading));
+
+            foreach (var item in group.Items)
+            {
+                stderr.WriteLine("  - " + item);
+            }
         }
 
         // 取り込んだ方言を図の対象 DBMS にする（reverse と同じ。型は --provider の方言で書かれている）
@@ -429,100 +436,6 @@ public static class CliApp
             Entities = imported.Entities.ToList(),
             Relationships = imported.Relationships.ToList(),
             TargetDbms = provider.Name,
-        };
-    }
-
-    /// <summary>言語中立の取込警告を UI 言語の 1 行へ整形する</summary>
-    /// <remarks>
-    /// <see cref="SchemaImportWarning.Subject"/> / <see cref="SchemaImportWarning.Detail"/> の意味は
-    /// <see cref="SchemaImportWarningKind"/> ごとに決まる（各 Kind の XmlDoc が正本）。
-    /// GUI 側（<c>DbImportCommandService</c>）と同じ種別を、CLI 自身の resx で整形する。
-    /// </remarks>
-    private static string DescribeImportWarning(SchemaImportWarning warning)
-    {
-        // 名前は DB 由来の任意文字列で改行を含み得る。stderr の 1 行 1 件を崩さないよう畳んでおく
-        var table = SqlComment.Sanitize(warning.TableName);
-        var subject = SqlComment.Sanitize(warning.Subject);
-        var detail = SqlComment.Sanitize(warning.Detail);
-
-        return warning.Kind switch
-        {
-            SchemaImportWarningKind.DomainTypeFlattened => string.Format(
-                Strings.Cli_ImportWarningDomainTypeFlattened,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.TableColumnsUnavailable => string.Format(
-                Strings.Cli_ImportWarningTableColumnsUnavailable,
-                table
-            ),
-            SchemaImportWarningKind.ForeignKeyOutsideScope => string.Format(
-                Strings.Cli_ImportWarningForeignKeyOutsideScope,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.TableNameCollision => string.Format(
-                Strings.Cli_ImportWarningTableNameCollision,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.ColumnNameCollision => string.Format(
-                Strings.Cli_ImportWarningColumnNameCollision,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.ColumnTypeNotEmittable => string.Format(
-                Strings.Cli_ImportWarningColumnTypeNotEmittable,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.PartitionDefinitionLost => string.Format(
-                Strings.Cli_ImportWarningPartitionDefinitionLost,
-                table
-            ),
-            SchemaImportWarningKind.VirtualTableExcluded => string.Format(
-                Strings.Cli_ImportWarningVirtualTableExcluded,
-                table
-            ),
-            // 式は取れない方言（SQLite）があるため、載せられるときだけ括弧書きの文面へ振り分ける
-            SchemaImportWarningKind.ComputedColumnExpressionLost => detail.Length == 0
-                ? string.Format(
-                    Strings.Cli_ImportWarningComputedColumnExpressionLost,
-                    table,
-                    subject
-                )
-                : string.Format(
-                    Strings.Cli_ImportWarningComputedColumnExpressionLostWithExpression,
-                    table,
-                    subject,
-                    detail
-                ),
-            SchemaImportWarningKind.DisabledConstraintExcluded => string.Format(
-                Strings.Cli_ImportWarningDisabledConstraintExcluded,
-                table,
-                subject,
-                detail
-            ),
-            SchemaImportWarningKind.TemporalHistoryTableExcluded => string.Format(
-                Strings.Cli_ImportWarningTemporalHistoryTableExcluded,
-                table,
-                detail
-            ),
-            SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted => string.Format(
-                Strings.Cli_ImportWarningPrimaryKeyNullabilityAdjusted,
-                table,
-                subject
-            ),
-            // 未知の種別を黙って空行にしない（ConcurrencyModes.Validated と同じ流儀）
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(warning),
-                warning.Kind,
-                "Unknown schema import warning kind."
-            ),
         };
     }
 

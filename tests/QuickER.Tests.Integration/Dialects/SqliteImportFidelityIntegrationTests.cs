@@ -656,4 +656,210 @@ CREATE INDEX ix_upper ON ""Äpfel"" (upper_only);
             .Should()
             .BeEquivalentTo([("ix_upper", "Äpfel")]);
     }
+
+    /// <summary>
+    /// SQLite の内部表（<c>sqlite_</c> で始まる表。AUTOINCREMENT が作る <c>sqlite_sequence</c> など）を、取り込まず告知もしないことを検証する
+    /// </summary>
+    /// <remarks>扱いの表の C7c（取込＝告知しない除外）を固定する。</remarks>
+    [Fact(DisplayName = "SQLite の内部表（sqlite_sequence）は取り込まず、告知もしない")]
+    public async Task Import_InternalSqliteTables_AreExcludedSilently()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().Equal("items");
+
+        // 内部表（sqlite_sequence）については何も告げない。告げるのは AUTOINCREMENT の列だけ
+        result
+            .Warnings.Should()
+            .ContainSingle()
+            .Which.Kind.Should()
+            .Be(SchemaImportWarningKind.AutoIncrementLost);
+    }
+
+    /// <summary>
+    /// 制約でない一意インデックス・式の索引・部分索引を、一意制約にせず補助オブジェクト（CREATE 文の全文）として取り込むことを検証する
+    /// </summary>
+    /// <remarks>扱いの表の B2（SQLite は補助オブジェクトとして温存）を固定する。告知はしない。</remarks>
+    [Fact(
+        DisplayName = "制約でない一意インデックス・式・部分索引は、補助オブジェクトとして取り込み、一意制約にしない"
+    )]
+    public async Task Import_NonConstraintUniqueIndexes_AreKeptAsAuxiliaryObjects()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, deleted INTEGER NOT NULL);
+CREATE UNIQUE INDEX ux_users_email ON users (email);
+CREATE UNIQUE INDEX ux_users_email_lower ON users (lower(email));
+CREATE UNIQUE INDEX ux_users_live_email ON users (email) WHERE deleted = 0;
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Single().UniqueConstraints.Should().BeEmpty();
+        result
+            .AuxiliaryObjects.Select(a => a.Name)
+            .Should()
+            .BeEquivalentTo(["ux_users_email", "ux_users_email_lower", "ux_users_live_email"]);
+        result.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>ビューは取り込まず、ビューごとに ViewExcluded で名指しする（表示は種別ごとにまとめる）</summary>
+    [Fact(DisplayName = "[Integration] SQLite: ビューは取り込まずに名指しする")]
+    public async Task Import_View_IsExcludedWithWarning()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE VIEW v_customers AS SELECT id, name FROM customers;
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["customers"]);
+        var warning = result.Warnings.Should().ContainSingle().Subject;
+        warning.Kind.Should().Be(SchemaImportWarningKind.ViewExcluded);
+        warning.TableName.Should().Be("v_customers");
+    }
+
+    /// <summary>
+    /// 外した仮想テーブルを参照する外部キーは、範囲の外ではなく「外した表への参照」として告げる（C9）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 外した仮想テーブルを参照する外部キーは ForeignKeyToExcludedTable で告げる"
+    )]
+    public async Task Import_ForeignKeyToExcludedVirtualTable_IsReported()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE VIRTUAL TABLE docs USING fts5(title);
+CREATE TABLE note (id INTEGER PRIMARY KEY, doc_id INTEGER REFERENCES docs(rowid));
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["note"]);
+        result.Relationships.Should().BeEmpty();
+        result
+            .Warnings.Should()
+            .NotContain(w => w.Kind == SchemaImportWarningKind.ForeignKeyOutsideScope);
+        var warning = result
+            .Warnings.Should()
+            .ContainSingle(w => w.Kind == SchemaImportWarningKind.ForeignKeyToExcludedTable)
+            .Subject;
+        warning.TableName.Should().Be("note");
+        warning.Detail.Should().Be("docs");
+    }
+
+    /// <summary>
+    /// 既定値と AUTOINCREMENT を列ごとに名指しし、既定値の事実を結果に持つ。値が NULL の既定値と、
+    /// AUTOINCREMENT の無い rowid 別名（型の文字列で保たれる）は告げない
+    /// </summary>
+    [Fact(DisplayName = "[Integration] SQLite: 既定値と AUTOINCREMENT を列ごとに名指しする")]
+    public async Task Import_ColumnDefaultsAndAutoIncrement_AreReported()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE attrs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'new',
+    note TEXT DEFAULT NULL,
+    created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE plain (id INTEGER PRIMARY KEY, qty INTEGER NOT NULL DEFAULT 0);
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.AutoIncrementLost, "attrs", "id", "AUTOINCREMENT"),
+                (SchemaImportWarningKind.ColumnDefaultLost, "attrs", "status", "'new'"),
+                (
+                    SchemaImportWarningKind.ColumnDefaultLost,
+                    "attrs",
+                    "created",
+                    "CURRENT_TIMESTAMP"
+                ),
+                (SchemaImportWarningKind.ColumnDefaultLost, "plain", "qty", "0"),
+            ]);
+        result
+            .ColumnDefaults.Select(d => (d.TableName, d.ColumnName, d.Expression))
+            .Should()
+            .BeEquivalentTo([
+                ("attrs", "status", "'new'"),
+                ("attrs", "created", "CURRENT_TIMESTAMP"),
+                ("plain", "qty", "0"),
+            ]);
+    }
+
+    /// <summary>
+    /// 前後に空白のある名前（テーブル名・列名・外部キー名・一意制約名）は、空白を除いて取り込み、名前ごとに告げる（N1）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 前後に空白のある名前は空白を除いて取り込み、名前ごとに告げる"
+    )]
+    public async Task Import_PaddedNames_AreTrimmedAndReported()
+    {
+        using var db = SqliteTempDatabase.Create();
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE "" pad_parent"" (id INTEGER PRIMARY KEY);
+CREATE TABLE ""pad_child "" (
+    id INTEGER PRIMARY KEY,
+    ""  col"" INTEGER,
+    CONSTRAINT "" fk_pad"" FOREIGN KEY (""  col"") REFERENCES "" pad_parent"" (id),
+    CONSTRAINT ""uq_pad "" UNIQUE (""  col"")
+);
+",
+            Ct
+        );
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("pad_parent", "pad_child");
+        // SQLite は外部キー名を保存しない（取込が合成する）ので、外部キー名は告げる対象にならない
+        result.Relationships.Should().ContainSingle();
+        result
+            .Entities.Single(e => e.TableName == "pad_child")
+            .UniqueConstraints.Should()
+            .ContainSingle("一意制約は取り込む（名前は SQLite の自動の索引名なので持たない）");
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.NameTrimmed, "pad_parent", " pad_parent", "pad_parent"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", "pad_child ", "pad_child"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", "  col", "col"),
+            ]);
+    }
 }

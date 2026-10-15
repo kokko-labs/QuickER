@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Resources;
 using QuickER.ViewModels;
@@ -23,7 +24,10 @@ public static class ErDiagramDynamicTools
     {
         try
         {
-            var namesRefusedBefore = NameLimitNotes.Find(viewModel.ToDiagramModel());
+            var namesRefusedBefore = NameLimitNotes.Find(
+                viewModel.ToDiagramModel(),
+                viewModel.CurrentIdentifierLimit()
+            );
             var (result, success) = toolName switch
             {
                 "get_diagram_summary" => (BuildDiagramSummary(viewModel), true),
@@ -49,7 +53,10 @@ public static class ErDiagramDynamicTools
                 if (
                     NameLimitNotes.Describe(
                         namesRefusedBefore,
-                        NameLimitNotes.Find(diagram),
+                        NameLimitNotes.Find(
+                            diagram,
+                            IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms)
+                        ),
                         diagram.TargetDbms
                     ) is
                     { } nameNote
@@ -563,7 +570,7 @@ public static class ErDiagramDynamicTools
             target.TableName,
             source.TableName,
             childColumnNames,
-            ConstraintNames.CollectExisting(vm.ToDiagramModel()),
+            ConstraintNames.CollectExisting(vm.ToDiagramModel(), vm.CurrentIdentifierLimit()),
             vm.CurrentIdentifierLimit()
         );
 
@@ -973,7 +980,10 @@ public static class ErDiagramDynamicTools
     /// リレーションの Id → DDL が付ける名前（名前の無いリレーションを要約に示し、その名前で選べるようにする）
     /// </summary>
     private static IReadOnlyDictionary<Guid, string> DdlNames(MainViewModel vm) =>
-        ConstraintNames.ResolveForeignKeyNamesById(vm.ToDiagramModel());
+        ConstraintNames.ResolveForeignKeyNamesById(
+            vm.ToDiagramModel(),
+            vm.CurrentIdentifierLimit()
+        );
 
     /// <summary>テーブルの主キーを指定列（指定順）へ置き換える</summary>
     /// <remarks>
@@ -1051,7 +1061,12 @@ public static class ErDiagramDynamicTools
         // 外部キーの名前（add_relationship）と同じ規則で、図の中の既存の制約名との衝突を断る
         if (
             normalizedName.Length > 0
-            && ConstraintNames.IsTaken(vm.ToDiagramModel(), normalizedName, existing?.Id)
+            && ConstraintNames.IsTaken(
+                vm.ToDiagramModel(),
+                normalizedName,
+                existing?.Id,
+                vm.CurrentIdentifierLimit()
+            )
         )
         {
             return (string.Format(Strings.Tool_UniqueConstraintNameTaken, normalizedName), false);

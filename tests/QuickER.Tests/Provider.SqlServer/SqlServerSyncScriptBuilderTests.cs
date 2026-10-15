@@ -3,6 +3,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
 using QuickER.Services;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider.SqlServer;
 
@@ -11,7 +12,7 @@ public class SqlServerSyncScriptBuilderTests
 {
     /// <summary>差分項目からプランナー経由で同期スクリプトを生成する（新 API へのアダプタ）</summary>
     private static string BuildScript(ISyncScriptBuilder builder, params SchemaDiffItem[] items) =>
-        builder.Build(new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities()));
+        builder.Build(new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral));
 
     /// <summary>AddTable が主キー制約を含む CREATE TABLE 文を生成することを検証する</summary>
     [Fact(DisplayName = "AddTable は CREATE TABLE と PK を含む")]

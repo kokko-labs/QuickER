@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using MySqlConnector;
@@ -54,6 +56,7 @@ public class MySqlSchemaImporter : ISchemaImporter
         var warnings = new List<SchemaImportWarning>();
         var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
+        await LoadViewsAsync(conn, commandTimeoutSeconds, warnings, ct).ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, commandTimeoutSeconds, ct).ConfigureAwait(false);
@@ -61,6 +64,14 @@ public class MySqlSchemaImporter : ISchemaImporter
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
+            .ConfigureAwait(false);
+        var defaults = await LoadColumnAttributesAsync(
+                conn,
+                tables,
+                commandTimeoutSeconds,
+                warnings,
+                ct
+            )
             .ConfigureAwait(false);
 
         // 列が 1 本も取れなかったテーブルは DDL を生成できないため、黙って通さず名指しで告げる
@@ -81,11 +92,15 @@ public class MySqlSchemaImporter : ISchemaImporter
             )
         );
 
+        // 前後に空白のある DB の名前は、図では空白を除いた名前になる。取込完了時に名指しする
+        warnings.AddRange(SchemaImportWarnings.DetectTrimmedNames(tables.Values));
+
         return new SchemaImportResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
             Warnings = warnings,
+            ColumnDefaults = defaults,
         };
     }
 
@@ -115,6 +130,14 @@ FROM information_schema.TABLES t
 WHERE t.TABLE_SCHEMA = DATABASE() AND t.TABLE_TYPE = 'BASE TABLE'
 -- BINARY で並べるのは、information_schema の既定照合順序が大文字小文字を区別せず
 -- `Dup` と `dup` の順序が環境依存になるため（衝突時にどちらを採るかを決定的にする）
+ORDER BY BINARY t.TABLE_NAME;";
+
+    /// <summary>接続先 DB のビューを名指しするクエリ（取り込まず、告げるためだけに読む）</summary>
+    private const string ViewsSql =
+        @"
+SELECT t.TABLE_NAME
+FROM information_schema.TABLES t
+WHERE t.TABLE_SCHEMA = DATABASE() AND t.TABLE_TYPE = 'VIEW'
 ORDER BY BINARY t.TABLE_NAME;";
 
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
@@ -169,6 +192,164 @@ WHERE s.TABLE_SCHEMA = DATABASE() AND s.NON_UNIQUE = 0 AND s.INDEX_NAME <> 'PRIM
         AND (x.SUB_PART IS NOT NULL OR x.COLUMN_NAME IS NULL)
   )
 ORDER BY s.TABLE_NAME, s.INDEX_NAME, s.SEQ_IN_INDEX;";
+
+    /// <summary>図が持たない列の属性（既定値・自動採番・照合順序・INVISIBLE・ON UPDATE・SRID）を名指しするクエリ</summary>
+    /// <remarks>
+    /// 取込の列の読み込み（<see cref="ColumnsSql"/>）は変えず、告げるためだけに読む。照合順序はテーブルの既定
+    /// （<c>TABLES.TABLE_COLLATION</c>）と違う列だけを告げる。<c>SRS_ID</c> は MySQL 8.0 の列。
+    /// </remarks>
+    private const string ColumnAttributesSql =
+        @"
+SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_DEFAULT, c.EXTRA, c.COLLATION_NAME,
+       t.TABLE_COLLATION, c.SRS_ID, c.GENERATION_EXPRESSION
+FROM information_schema.COLUMNS c
+JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
+WHERE c.TABLE_SCHEMA = DATABASE() AND t.TABLE_TYPE = 'BASE TABLE'
+ORDER BY BINARY c.TABLE_NAME, c.ORDINAL_POSITION;";
+
+    /// <summary>図が持たない列の属性を、列ごとの取込警告（段 1）で名指しし、既定値の事実を返す</summary>
+    /// <remarks>
+    /// 自動採番の列は既定値を持たない（MySQL が断る）ので、既定値として二重に告げることはない。
+    /// 値が NULL の既定値と生成列は既定値に数えない（MySQL は <c>DEFAULT NULL</c> を DB の NULL で返し、文字列の <c>NULL</c> は
+    /// <c>DEFAULT 'NULL'</c> の値なので、文字列の表記で NULL とみなすものは無い）。
+    /// </remarks>
+    private static async Task<List<SchemaColumnDefault>> LoadColumnAttributesAsync(
+        MySqlConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        var defaults = new List<SchemaColumnDefault>();
+        await using var cmd = DbCommands.Create(conn, ColumnAttributesSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (
+                !SchemaTableEntry.TryGetExact(tables, reader.GetString(0), out var entry)
+                || !entry.TryGetColumnExact(reader.GetString(1), out var column)
+            )
+            {
+                continue;
+            }
+
+            var table = entry.Entity.TableName;
+            var columnDefault = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var extra = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+            var collation = reader.IsDBNull(4) ? null : reader.GetString(4);
+            var tableCollation = reader.IsDBNull(5) ? null : reader.GetString(5);
+            var generated = !reader.IsDBNull(7) && reader.GetString(7).Length > 0;
+
+            if (extra.Contains("auto_increment", StringComparison.OrdinalIgnoreCase))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.AutoIncrementLost,
+                        table,
+                        column.Name,
+                        "AUTO_INCREMENT"
+                    )
+                );
+            }
+            else if (!generated && !SchemaImportWarnings.IsNullDefault(columnDefault, []))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ColumnDefaultLost,
+                        table,
+                        column.Name,
+                        columnDefault!
+                    )
+                );
+                defaults.Add(new SchemaColumnDefault(table, column.Name, columnDefault!));
+            }
+
+            if (OnUpdatePattern.Match(extra) is { Success: true } onUpdate)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ColumnOnUpdateLost,
+                        table,
+                        column.Name,
+                        onUpdate.Groups[1].Value
+                    )
+                );
+            }
+
+            if (
+                extra
+                    .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Contains("INVISIBLE", StringComparer.OrdinalIgnoreCase)
+            )
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.InvisibleColumnLost,
+                        table,
+                        column.Name
+                    )
+                );
+            }
+
+            if (!reader.IsDBNull(6))
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.SpatialReferenceIdLost,
+                        table,
+                        column.Name,
+                        Convert.ToString(reader.GetValue(6), CultureInfo.InvariantCulture)
+                            ?? string.Empty
+                    )
+                );
+            }
+
+            if (
+                collation is not null
+                && tableCollation is not null
+                && !string.Equals(collation, tableCollation, StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.ColumnCollationLost,
+                        table,
+                        column.Name,
+                        collation
+                    )
+                );
+            }
+        }
+
+        return defaults;
+    }
+
+    /// <summary><c>EXTRA</c> の「on update 式」から式を取り出す</summary>
+    private static readonly Regex OnUpdatePattern = new(
+        @"\bon update (\S+)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    );
+
+    /// <summary>ビューを取込警告（段 2）で名指しする（図はビューを持たない）</summary>
+    private static async Task LoadViewsAsync(
+        MySqlConnection conn,
+        int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = DbCommands.Create(conn, ViewsSql, commandTimeoutSeconds);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            warnings.Add(
+                new SchemaImportWarning(SchemaImportWarningKind.ViewExcluded, reader.GetString(0))
+            );
+        }
+    }
 
     /// <summary>外部キーの親子テーブル・列・参照アクションを取得するクエリ</summary>
     /// <remarks>

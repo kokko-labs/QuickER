@@ -274,4 +274,43 @@ public class SqlServerSchemaImporterTests
 
         sigA.Should().NotBe(sigB);
     }
+
+    /// <summary>外部テーブルは取り込まず（<c>is_external = 0</c>）、名指しのクエリで告げる（<c>is_external = 1</c>）</summary>
+    /// <remarks>
+    /// <para>
+    /// 実 DB では確かめられない。テストに使う SQL Server のコンテナ（<c>mcr.microsoft.com/mssql/server:2022-latest</c>）は
+    /// PolyBase を持たず、<c>sp_configure 'polybase enabled'</c> は「PolyBase feature is not installed」、
+    /// <c>CREATE EXTERNAL DATA SOURCE</c> は「External data sources are not supported with type GENERIC」で断られ、
+    /// 外部テーブルを作れない（2026-10-15 に確認）。そのため SQL の形だけを固定する。
+    /// </para>
+    /// <para>
+    /// <c>sys.tables.is_external</c> は SQL Server 2016 で追加された列で、docs の対応 DBMS の表が宣言する下限
+    /// （SQL Server 2016 以降）と一致する（<c>temporal_type</c> と同じく、下限の版で必ず在る列だけを使う）。
+    /// </para>
+    /// </remarks>
+    [Fact(
+        DisplayName = "外部テーブルは取込の対象から外し（is_external = 0）、名指しのクエリで告げる（is_external = 1）"
+    )]
+    public void ExternalTables_AreFilteredAndReportedInSql()
+    {
+        static string Sql(string name) =>
+            System.Text.RegularExpressions.Regex.Replace(
+                (string)
+                    typeof(SqlServerSchemaImporter)
+                        .GetField(
+                            name,
+                            System.Reflection.BindingFlags.NonPublic
+                                | System.Reflection.BindingFlags.Static
+                        )!
+                        .GetValue(null)!,
+                @"\s+",
+                " "
+            );
+
+        Sql("TablesSql").Should().Contain("AND t.is_external = 0");
+        Sql("ExcludedObjectsSql")
+            .Should()
+            .Contain("WHERE t.is_ms_shipped = 0 AND t.is_external = 1")
+            .And.Contain("'external'");
+    }
 }

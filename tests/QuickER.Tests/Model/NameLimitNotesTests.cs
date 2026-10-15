@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.Tests.Model;
@@ -34,7 +35,10 @@ public class NameLimitNotesTests
         diagram.Entities[0].UniqueConstraints[0].Name = new string('u', 64);
         diagram.Relationships.Add(new Relationship { ConstraintName = new string('f', 64) });
 
-        var found = NameLimitNotes.Find(diagram);
+        var found = NameLimitNotes.Find(
+            diagram,
+            IdentifierLengthLimits.ForDbms(diagram.TargetDbms)
+        );
 
         found.Should().HaveCount(4);
         found
@@ -48,15 +52,27 @@ public class NameLimitNotesTests
     [Fact(DisplayName = "Find: 上限内の名前・上限なしの対象 DBMS では何も返さない")]
     public void Find_WithinLimit_ReturnsNothing()
     {
-        NameLimitNotes.Find(Diagram("postgresql", "orders", "id")).Should().BeEmpty();
-        NameLimitNotes.Find(Diagram("sqlite", new string('t', 500), "id")).Should().BeEmpty();
+        NameLimitNotes
+            .Find(Diagram("postgresql", "orders", "id"), IdentifierLengthLimits.PostgreSql)
+            .Should()
+            .BeEmpty();
+        NameLimitNotes
+            .Find(Diagram("sqlite", new string('t', 500), "id"), IdentifierLengthLimits.Sqlite)
+            .Should()
+            .BeEmpty();
     }
 
     [Fact(DisplayName = "Find: MySQL では BMP の外の文字を含む名前を返し、PostgreSQL では返さない")]
     public void Find_Unrepresentable_OnlyOnMySql()
     {
-        NameLimitNotes.Find(Diagram("mysql", "orders", Emoji)).Should().ContainSingle();
-        NameLimitNotes.Find(Diagram("postgresql", "orders", Emoji)).Should().BeEmpty();
+        NameLimitNotes
+            .Find(Diagram("mysql", "orders", Emoji), IdentifierLengthLimits.MySql)
+            .Should()
+            .ContainSingle();
+        NameLimitNotes
+            .Find(Diagram("postgresql", "orders", Emoji), IdentifierLengthLimits.PostgreSql)
+            .Should()
+            .BeEmpty();
     }
 
     [Fact(DisplayName = "Describe: 変更で新しく生じた違反だけを注意文にし、無ければ null")]

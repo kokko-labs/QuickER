@@ -179,4 +179,148 @@
   <data name="Sync_Error_RolledBack" xml:space="preserve">
     <value>{0}（トランザクションはロールバックされたため、変更は適用されていません）</value>
   </data>
+  <data name="ImportWarning_ColumnNameCollision" xml:space="preserve">
+    <value>テーブル「{0}」の列「{1}」は「{2}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（図は両者を区別できません）。</value>
+  </data>
+  <data name="ImportWarning_ColumnTypeNotEmittable" xml:space="preserve">
+    <value>{0}.{1}: 型「{2}」は SQL へ安全に書き出せない表記です。直すまで、DDL 生成とスキーマ同期は図全体を拒否します。</value>
+  </data>
+  <data name="ImportWarning_ComputedColumnExpressionLost" xml:space="preserve">
+    <value>{0}.{1}: 通常の列として取り込みました。図は生成列の式を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
+  </data>
+  <data name="ImportWarning_ComputedColumnExpressionLostWithExpression" xml:space="preserve">
+    <value>{0}.{1}: 通常の列として取り込みました。図は生成列の式（{2}）を持たないため、生成 DDL は普通の列を作り、生成コードは INSERT / UPDATE の対象から外します。</value>
+  </data>
+  <data name="ImportWarning_DisabledConstraintExcluded" xml:space="preserve">
+    <value>{0}: {2} 制約「{1}」は無効化されており何も強制しないため、取り込みませんでした。</value>
+  </data>
+  <data name="ImportWarning_DomainTypeFlattened" xml:space="preserve">
+    <value>{0}.{1}: ドメイン型「{2}」の基底型として取り込みました（図はドメイン型を持たないため、その CHECK 制約は失われます）。</value>
+  </data>
+  <data name="ImportWarning_ForeignKeyOutsideScope" xml:space="preserve">
+    <value>{0}: 外部キー「{1}」は取込範囲外の「{2}」を参照しているため、リレーションを作成していません。</value>
+  </data>
+  <data name="ImportWarning_PartitionDefinitionLost" xml:space="preserve">
+    <value>{0}: 通常テーブルとして取り込みました。図はパーティションを持たないため、生成 DDL はパーティションなしで作成します。</value>
+  </data>
+  <data name="ImportWarning_PrimaryKeyNullabilityAdjusted" xml:space="preserve">
+    <value>{0}.{1}: 主キー列を NOT NULL へ補正しました。SQLite の rowid 表は、単一列 INTEGER（rowid 別名）の主キー以外は NULL を許すため、既存行に NULL があると、この図からの同期（テーブル再構築）でデータ移送が失敗し得ます。</value>
+  </data>
+  <data name="ImportWarning_TableColumnsUnavailable" xml:space="preserve">
+    <value>{0}: 列を 1 つも取得できませんでした。列なしのテーブルとして取り込んでいます。接続ユーザーがこのテーブルへアクセスできるか確認してください。</value>
+  </data>
+  <data name="ImportWarning_TableNameCollision" xml:space="preserve">
+    <value>「{0}」は「{1}」と大文字小文字または前後の空白だけが違うため取り込みませんでした（取込は両者を区別できません）。</value>
+  </data>
+  <data name="ImportWarningHeading_DomainTypeFlattened" xml:space="preserve">
+    <value>ドメイン型の基底型として取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_TableColumnsUnavailable" xml:space="preserve">
+    <value>列なしで取り込んだテーブル（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ForeignKeyOutsideScope" xml:space="preserve">
+    <value>取込範囲の外を参照する外部キー（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_TableNameCollision" xml:space="preserve">
+    <value>名前の衝突で取り込まなかったテーブル（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnNameCollision" xml:space="preserve">
+    <value>名前の衝突で取り込まなかった列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnTypeNotEmittable" xml:space="preserve">
+    <value>型を SQL へ書き出せない列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_PartitionDefinitionLost" xml:space="preserve">
+    <value>パーティション定義なしで取り込んだテーブル（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_VirtualTableExcluded" xml:space="preserve">
+    <value>取り込まなかった仮想テーブル（付属表を含む・{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ComputedColumnExpressionLost" xml:space="preserve">
+    <value>通常の列として取り込んだ生成列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_DisabledConstraintExcluded" xml:space="preserve">
+    <value>取り込まなかった無効化された制約（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_TemporalHistoryTableExcluded" xml:space="preserve">
+    <value>取り込まなかったテンポラルテーブルの履歴表（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_PrimaryKeyNullabilityAdjusted" xml:space="preserve">
+    <value>NOT NULL へ補正した主キー列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ViewExcluded" xml:space="preserve">
+    <value>取り込まなかったビュー（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_MaterializedViewExcluded" xml:space="preserve">
+    <value>取り込まなかったマテリアライズドビュー（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ExternalTableExcluded" xml:space="preserve">
+    <value>取り込まなかった外部テーブル（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ChildPartitionExcluded" xml:space="preserve">
+    <value>取り込まなかった子パーティション（親テーブルは取り込み済み・{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_TemporaryTableExcluded" xml:space="preserve">
+    <value>取り込まなかった一時表（{0} 件）:</value>
+  </data>
+  <data name="ImportWarningHeading_ForeignKeyToExcludedTable" xml:space="preserve">
+    <value>取り込まなかった表を参照する外部キー（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_ForeignKeyToExcludedTable" xml:space="preserve">
+    <value>{0}: 外部キー「{1}」は取り込まなかった「{2}」を参照しているため、リレーションを作成していません。</value>
+  </data>
+  <data name="ImportWarningItem_ChildPartitionExcluded" xml:space="preserve">
+    <value>{0}（{1} のパーティション）</value>
+  </data>
+  <data name="ImportWarningItem_TemporalHistoryTableExcluded" xml:space="preserve">
+    <value>{0}（{1} の履歴表）</value>
+  </data>
+  <data name="ImportWarning_ColumnDefaultLost" xml:space="preserve">
+    <value>{0}.{1}: 既定値（{2}）なしで取り込みました。図は既定値を持たないため、生成 DDL は DEFAULT なしで列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnDefaultLost" xml:space="preserve">
+    <value>既定値なしで取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_AutoIncrementLost" xml:space="preserve">
+    <value>{0}.{1}: 自動採番（{2}）なしで取り込みました。図は自動採番を持たないため、生成 DDL は普通の列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_AutoIncrementLost" xml:space="preserve">
+    <value>自動採番なしで取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_ColumnCollationLost" xml:space="preserve">
+    <value>{0}.{1}: テーブルの既定と違う照合順序（{2}）なしで取り込みました。生成 DDL はテーブルの既定の照合順序で列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnCollationLost" xml:space="preserve">
+    <value>固有の照合順序なしで取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_InvisibleColumnLost" xml:space="preserve">
+    <value>{0}.{1}: 見える列として取り込みました。図は INVISIBLE を持たないため、生成 DDL は見える列を作ります。</value>
+  </data>
+  <data name="ImportWarningHeading_InvisibleColumnLost" xml:space="preserve">
+    <value>見える列として取り込んだ INVISIBLE 列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_ColumnOnUpdateLost" xml:space="preserve">
+    <value>{0}.{1}: ON UPDATE {2} なしで取り込みました。生成 DDL はこれを付けずに列を作るため、行の更新時に値が自動で更新されなくなります。</value>
+  </data>
+  <data name="ImportWarningHeading_ColumnOnUpdateLost" xml:space="preserve">
+    <value>ON UPDATE 属性なしで取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_SpatialReferenceIdLost" xml:space="preserve">
+    <value>{0}.{1}: SRID（{2}）なしで取り込みました。生成 DDL は SRID を付けずに列を作るため、どの空間参照系の値も受け付けます。</value>
+  </data>
+  <data name="ImportWarningHeading_SpatialReferenceIdLost" xml:space="preserve">
+    <value>SRID なしで取り込んだ空間列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_AliasTypeFlattened" xml:space="preserve">
+    <value>{0}.{1}: 別名型「{2}」の基底型として取り込みました。図は別名型を持たないため、生成 DDL は基底型を使います。</value>
+  </data>
+  <data name="ImportWarningHeading_AliasTypeFlattened" xml:space="preserve">
+    <value>別名型の基底型として取り込んだ列（{0} 件）:</value>
+  </data>
+  <data name="ImportWarning_NameTrimmed" xml:space="preserve">
+    <value>{0}: 名前「{1}」は前後の空白を除いた「{2}」として取り込みました。図は名前の前後の空白を持ちません。</value>
+  </data>
+  <data name="ImportWarningHeading_NameTrimmed" xml:space="preserve">
+    <value>前後の空白を除いて取り込んだ名前（{0} 件）:</value>
+  </data>
 </root>

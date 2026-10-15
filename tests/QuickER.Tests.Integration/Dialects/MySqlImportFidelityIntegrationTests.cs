@@ -373,4 +373,170 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
         warning.Kind.Should().Be(SchemaImportWarningKind.PartitionDefinitionLost);
         warning.TableName.Should().Be("sales");
     }
+
+    /// <summary>表は見えるが列を 1 本も読めないユーザーで取り込むと、列なしの表として取り込んで告げる（T1）</summary>
+    /// <remarks>
+    /// MySQL は表単位の権限があれば表を <c>information_schema.TABLES</c> に見せるが、
+    /// <c>COLUMNS</c> に見せる列は列を扱う権限（SELECT・INSERT・UPDATE・REFERENCES）のある列だけで、
+    /// TRIGGER・DROP・INDEX・SHOW VIEW だけの権限では列が 0 本になる（実機で確認）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] MY5: 列を読む権限の無いユーザーの取込は、列なしの表として取り込んで告げる"
+    )]
+    public async Task Import_TableWithoutReadableColumns_IsReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync("CREATE TABLE secret (id INT PRIMARY KEY, body TEXT);", Ct);
+        var builder = new MySqlConnectionStringBuilder(fixture.ConnectionString);
+        await fixture.ExecuteAsRootAsync(
+            $"""
+            DROP USER IF EXISTS 'trigger_only'@'%';
+            CREATE USER 'trigger_only'@'%' IDENTIFIED BY 'Trigger#12345';
+            GRANT TRIGGER ON `{builder.Database}`.secret TO 'trigger_only'@'%';
+            """,
+            Ct
+        );
+
+        try
+        {
+            builder.UserID = "trigger_only";
+            builder.Password = "Trigger#12345";
+            await using var conn = new MySqlConnection(builder.ConnectionString);
+            await conn.OpenAsync(Ct);
+            var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Should().ContainSingle().Which.Columns.Should().BeEmpty();
+            var warning = result.Warnings.Should().ContainSingle().Subject;
+            warning.Kind.Should().Be(SchemaImportWarningKind.TableColumnsUnavailable);
+            warning.TableName.Should().Be("secret");
+        }
+        finally
+        {
+            await fixture.ExecuteAsRootAsync("DROP USER IF EXISTS 'trigger_only'@'%';", Ct);
+        }
+    }
+
+    /// <summary>ビューは取り込まず、ビューごとに ViewExcluded で名指しする（表示は種別ごとにまとめる）</summary>
+    [Fact(DisplayName = "[Integration] MY6: ビューは取り込まずに名指しする")]
+    public async Task Import_View_IsExcludedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE customers (id INT PRIMARY KEY, name VARCHAR(50) NOT NULL);
+            CREATE VIEW v_customers AS SELECT id, name FROM customers;
+            """,
+            Ct
+        );
+
+        try
+        {
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("customers");
+            var warning = result.Warnings.Should().ContainSingle().Subject;
+            warning.Kind.Should().Be(SchemaImportWarningKind.ViewExcluded);
+            warning.TableName.Should().Be("v_customers");
+        }
+        finally
+        {
+            await fixture.ExecuteAsync("DROP VIEW IF EXISTS v_customers;", Ct);
+        }
+    }
+
+    /// <summary>
+    /// 図が持たない列の属性（自動採番・既定値・ON UPDATE・INVISIBLE・SRID・テーブルの既定と違う照合順序）を列ごとに名指しし、
+    /// 既定値の事実を結果に持つ。値が NULL の既定値は告げない
+    /// </summary>
+    [Fact(DisplayName = "[Integration] MY7: 図が持たない列の属性を列ごとに名指しする")]
+    public async Task Import_ColumnAttributes_AreReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE attrs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                status VARCHAR(10) NOT NULL DEFAULT 'new',
+                note VARCHAR(10) NULL DEFAULT NULL,
+                created DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                secret INT NULL INVISIBLE,
+                pos POINT NOT NULL SRID 4326,
+                code VARCHAR(10) CHARACTER SET latin1 COLLATE latin1_bin NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        result
+            .Warnings.Select(w => (w.Kind, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.AutoIncrementLost, "id", "AUTO_INCREMENT"),
+                (SchemaImportWarningKind.ColumnDefaultLost, "status", "new"),
+                (SchemaImportWarningKind.ColumnDefaultLost, "created", "CURRENT_TIMESTAMP"),
+                (SchemaImportWarningKind.ColumnOnUpdateLost, "created", "CURRENT_TIMESTAMP"),
+                (SchemaImportWarningKind.InvisibleColumnLost, "secret", ""),
+                (SchemaImportWarningKind.SpatialReferenceIdLost, "pos", "4326"),
+                (SchemaImportWarningKind.ColumnCollationLost, "code", "latin1_bin"),
+            ]);
+        result
+            .ColumnDefaults.Select(d => (d.TableName, d.ColumnName, d.Expression))
+            .Should()
+            .BeEquivalentTo([
+                ("attrs", "status", "new"),
+                ("attrs", "created", "CURRENT_TIMESTAMP"),
+            ]);
+    }
+
+    /// <summary>
+    /// 前後に空白のある名前（テーブル名・列名・外部キー名・一意制約名）は、空白を除いて取り込み、名前ごとに告げる（N1）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MY8: 前後に空白のある名前は空白を除いて取り込み、名前ごとに告げる"
+    )]
+    public async Task Import_PaddedNames_AreTrimmedAndReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE ` pad_parent` (id INT PRIMARY KEY);
+            CREATE TABLE ` pad_child` (
+                id INT PRIMARY KEY,
+                `  col` INT,
+                CONSTRAINT ` fk_pad` FOREIGN KEY (`  col`) REFERENCES ` pad_parent` (id),
+                CONSTRAINT ` uq_pad` UNIQUE (`  col`)
+            );
+            """,
+            Ct
+        );
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("pad_parent", "pad_child");
+        result.Relationships.Should().ContainSingle().Which.ConstraintName.Should().Be("fk_pad");
+        result
+            .Entities.Single(e => e.TableName == "pad_child")
+            .UniqueConstraints.Should()
+            .ContainSingle()
+            .Which.Name.Should()
+            .Be("uq_pad");
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.NameTrimmed, "pad_parent", " pad_parent", "pad_parent"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", " pad_child", "pad_child"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", "  col", "col"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", " fk_pad", "fk_pad"),
+                (SchemaImportWarningKind.NameTrimmed, "pad_child", " uq_pad", "uq_pad"),
+            ]);
+    }
 }

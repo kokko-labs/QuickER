@@ -7,6 +7,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -60,7 +61,8 @@ public sealed class SqlServerCompositeForeignKeySyncIntegrationTests(
             live.Entities,
             live.Relationships,
             new[] { parentTarget, childTarget },
-            new[] { targetRel }
+            new[] { targetRel },
+            TestDialectCapabilities.Neutral
         );
         var add = addDiff
             .Items.Should()
@@ -81,7 +83,8 @@ public sealed class SqlServerCompositeForeignKeySyncIntegrationTests(
             live2.Entities,
             live2.Relationships,
             live2.Entities.Select(CloneAsTarget).ToArray(),
-            new List<Relationship>()
+            new List<Relationship>(),
+            TestDialectCapabilities.Neutral
         );
         var drop = dropDiff
             .Items.Should()

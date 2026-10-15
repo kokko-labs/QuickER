@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.PostgreSql;
@@ -6,7 +7,7 @@ namespace QuickER.Provider.PostgreSql;
 public sealed class PostgreSqlProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "postgresql";
+    public const string ProviderName = DialectNames.PostgreSql;
 
     /// <inheritdoc />
     public string Name => ProviderName;
@@ -37,9 +38,22 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
     public SyncDialectCapabilities SyncCapabilities { get; } =
         new()
         {
+            SupportsAlterColumn = true,
+            SupportsForeignKeyAlter = true,
+            SupportsDescriptions = true,
+            AlterColumnRequiresForeignKeyRebuild = false,
+            AlterColumnRequiresKeyConstraintRebuild = false,
+            ForeignKeyRequiresLeadingIndex = false,
+            PersistsForeignKeyConstraintNames = true,
+            ColumnReorder = ColumnReorderMode.None,
             NormalizeTypeNotation = PostgreSqlTypeNotation.Normalize,
+            SupportsOnUpdateAction = true,
+            SupportsSetDefaultAction = true,
             SupportsComputedColumnTypeChange = true,
+            SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = false,
+            ForeignKeyAllowsStringLengthDifference = false,
+            TransactionalDdl = true,
             IdentifierLengthLimit = PgIdentifier.Limit,
             TruncatesLongIdentifiers = true,
         };

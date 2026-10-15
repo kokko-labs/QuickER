@@ -2,6 +2,7 @@
 using System.Linq;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
+using QuickER.Dialects;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -9,6 +10,7 @@ using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
+using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 using GuiStrings = QuickER.Resources.Strings;
 
@@ -314,9 +316,13 @@ public class MainViewModelTargetDbmsTests
     // ---------------- 擬似プロバイダ・スタブ ----------------
 
     /// <summary>int↔integer のみ変換し、uniqueidentifier は変換不能とする擬似プロバイダ</summary>
+    /// <remarks>
+    /// プロバイダの名前は方言名（識別子の長さの上限などを方言名で引くため、知らない名前は断られる）。
+    /// レジストリに無い方言の名前を借り、型の変換だけを差し替える。
+    /// </remarks>
     private sealed class FakeProvider : IDatabaseProvider
     {
-        public const string FakeName = "fakedb";
+        public const string FakeName = DialectNames.PostgreSql;
 
         public string Name => FakeName;
 
@@ -332,7 +338,7 @@ public class MainViewModelTargetDbmsTests
 
         public ISyncScriptBuilder SyncScriptBuilder { get; } = new NullSyncScriptBuilder();
 
-        public SyncDialectCapabilities SyncCapabilities { get; } = new();
+        public SyncDialectCapabilities SyncCapabilities { get; } = TestDialectCapabilities.Neutral;
 
         public ISchemaSyncExecutor SyncExecutor { get; } = new NullSyncExecutor();
 

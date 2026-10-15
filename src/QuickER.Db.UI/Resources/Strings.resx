@@ -400,49 +400,10 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportWarningsHeader" xml:space="preserve">
     <value>Some parts of the schema could not be imported exactly as declared:</value>
   </data>
-  <data name="Db_ImportWarningDomainTypeFlattened" xml:space="preserve">
-    <value>{0}.{1}: imported as the base type of the domain type "{2}" (the diagram does not model domain types, so its CHECK constraints are lost).</value>
-  </data>
-  <data name="Db_ImportWarningTableColumnsUnavailable" xml:space="preserve">
-    <value>{0}: no columns could be read. The table was imported without columns; check that the connecting user may access it.</value>
-  </data>
-  <data name="Db_ImportWarningForeignKeyOutsideScope" xml:space="preserve">
-    <value>{0}: the foreign key "{1}" references "{2}", which is outside the imported scope, so no relationship was created for it.</value>
-  </data>
-  <data name="Db_ImportWarningTableNameCollision" xml:space="preserve">
-    <value>"{0}" was not imported because it differs from "{1}" only in letter case or surrounding spaces, and the import cannot keep both apart.</value>
-  </data>
-  <data name="Db_ImportWarningColumnNameCollision" xml:space="preserve">
-    <value>Column "{1}" of table "{0}" was not imported because it differs from "{2}" only in letter case or surrounding spaces, and the diagram cannot keep both apart.</value>
-  </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>Write the current diagram back to the existing DB (review the diff before applying)</value>
   </data>
   <data name="Db_SyncTitle" xml:space="preserve">
     <value>Sync with Database</value>
-  </data>
-  <data name="Db_ImportWarningColumnTypeNotEmittable" xml:space="preserve">
-    <value>{0}.{1}: the data type "{2}" cannot be written into SQL safely, so DDL and schema sync will refuse the whole diagram until it is corrected.</value>
-  </data>
-  <data name="Db_ImportWarningPartitionDefinitionLost" xml:space="preserve">
-    <value>{0}: imported as an ordinary table. The diagram does not model partitioning, so generated DDL creates it unpartitioned.</value>
-  </data>
-  <data name="Db_ImportWarningVirtualTableExcluded" xml:space="preserve">
-    <value>{0}: excluded as a virtual table. It cannot be represented as an ordinary table, so its shadow tables were excluded along with it.</value>
-  </data>
-  <data name="Db_ImportWarningComputedColumnExpressionLost" xml:space="preserve">
-    <value>{0}.{1}: imported as an ordinary column. The diagram does not model the generated-column expression, so generated DDL creates a plain column and generated code leaves it out of INSERT / UPDATE.</value>
-  </data>
-  <data name="Db_ImportWarningComputedColumnExpressionLostWithExpression" xml:space="preserve">
-    <value>{0}.{1}: imported as an ordinary column. The diagram does not model the generated-column expression ({2}), so generated DDL creates a plain column and generated code leaves it out of INSERT / UPDATE.</value>
-  </data>
-  <data name="Db_ImportWarningDisabledConstraintExcluded" xml:space="preserve">
-    <value>{0}: the {2} constraint "{1}" is disabled and enforces nothing, so it was not imported.</value>
-  </data>
-  <data name="Db_ImportWarningTemporalHistoryTableExcluded" xml:space="preserve">
-    <value>{0}: excluded as the history table of the system-versioned table "{1}". It is not imported as an entity of its own.</value>
-  </data>
-  <data name="Db_ImportWarningPrimaryKeyNullabilityAdjusted" xml:space="preserve">
-    <value>{0}.{1}: primary key column corrected to NOT NULL. SQLite's rowid tables allow NULL there unless the primary key is a single INTEGER column (a rowid alias); if existing rows have NULL in it, syncing (table rebuild) from this diagram may fail to migrate the data.</value>
   </data>
 </root>

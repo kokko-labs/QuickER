@@ -1,3 +1,4 @@
+using QuickER.Dialects;
 using QuickER.Provider;
 
 namespace QuickER.Provider.SqlServer;
@@ -6,7 +7,7 @@ namespace QuickER.Provider.SqlServer;
 public sealed class SqlServerProvider : IDatabaseProvider
 {
     /// <summary>CLI の <c>--provider</c> 値</summary>
-    public const string ProviderName = "sqlserver";
+    public const string ProviderName = DialectNames.SqlServer;
 
     /// <inheritdoc />
     public string Name => ProviderName;
@@ -40,10 +41,24 @@ public sealed class SqlServerProvider : IDatabaseProvider
     public SyncDialectCapabilities SyncCapabilities { get; } =
         new()
         {
+            SupportsAlterColumn = true,
+            SupportsForeignKeyAlter = true,
+            SupportsDescriptions = true,
             AlterColumnRequiresForeignKeyRebuild = true,
             AlterColumnRequiresKeyConstraintRebuild = true,
+            ForeignKeyRequiresLeadingIndex = false,
+            PersistsForeignKeyConstraintNames = true,
+            ColumnReorder = ColumnReorderMode.None,
             NormalizeTypeNotation = SqlServerTypeNotation.Normalize,
+            SupportsOnUpdateAction = true,
+            SupportsSetDefaultAction = true,
+            SupportsComputedColumnTypeChange = false,
+            SupportsUniqueConstraintOnPrimaryKey = true,
+            ReferencedKeyRequiresSameColumnOrder = true,
+            ForeignKeyAllowsStringLengthDifference = false,
+            TransactionalDdl = true,
             IdentifierLengthLimit = SqlIdentifier.Limit,
+            TruncatesLongIdentifiers = false,
         };
 
     /// <inheritdoc />

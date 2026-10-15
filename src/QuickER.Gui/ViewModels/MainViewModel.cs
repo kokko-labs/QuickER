@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
@@ -1415,7 +1416,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         entity.TableName,
                         PendingRelationshipSource.TableName,
                         childColumnNames,
-                        ConstraintNames.CollectExisting(ToDiagramModel()),
+                        ConstraintNames.CollectExisting(ToDiagramModel(), CurrentIdentifierLimit()),
                         CurrentIdentifierLimit()
                     ),
                 },

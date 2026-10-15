@@ -7,6 +7,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
 using QuickER.Tests.Integration;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -199,7 +200,7 @@ public sealed class MySqlCommentSyncIntegrationTests(MySqlContainerFixture fixtu
     )
     {
         var script = builder.Build(
-            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+            new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral)
         );
         var result = await executor.ExecuteAsync(settings, script, Ct);
         result.Committed.Should().BeTrue($"COMMENT 同期に失敗: {result.Error}\nSQL:\n{script}");

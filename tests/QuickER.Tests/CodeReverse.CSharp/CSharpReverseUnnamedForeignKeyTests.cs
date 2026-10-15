@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.CodeGen.UI;
 using QuickER.CodeReverse.CSharp;
+using QuickER.Dialects;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;

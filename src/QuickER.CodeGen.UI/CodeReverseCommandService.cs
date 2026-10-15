@@ -1,6 +1,7 @@
 using System.IO;
 using QuickER.CodeGen.UI.Resources;
 using QuickER.CodeReverse.CSharp;
+using QuickER.Dialects;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;

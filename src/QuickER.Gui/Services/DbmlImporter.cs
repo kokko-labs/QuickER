@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Resources;
 
@@ -344,7 +345,7 @@ public static partial class DbmlImporter
         ConstraintNames.NameUnnamedForeignKeys(
             entities.Values,
             relationships,
-            IdentifierLengthLimits.ForDbms(targetDbms)
+            IdentifierLengthLimits.ForDiagramTarget(targetDbms)
         );
 
         return new ErDiagram

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using QuickER.Dialects;
 using QuickER.Documents;
 using QuickER.Model;
 using static QuickER.Mcp.Tools.SchemaLookup;
@@ -124,7 +125,10 @@ public static partial class DocumentErDiagramToolHost
         var loaded = document!;
         var before = JsonStorageService.ToJson(loaded);
         var managedBefore = CollectRelationshipChildColumnIds(loaded.Schema);
-        var namesRefusedBefore = NameLimitNotes.Find(loaded.Schema);
+        var namesRefusedBefore = NameLimitNotes.Find(
+            loaded.Schema,
+            IdentifierLengthLimits.ForDiagramTarget(loaded.Schema.TargetDbms)
+        );
         var (result, success) = operation(loaded);
 
         if (success)
@@ -135,7 +139,10 @@ public static partial class DocumentErDiagramToolHost
             if (
                 NameLimitNotes.Describe(
                     namesRefusedBefore,
-                    NameLimitNotes.Find(loaded.Schema),
+                    NameLimitNotes.Find(
+                        loaded.Schema,
+                        IdentifierLengthLimits.ForDiagramTarget(loaded.Schema.TargetDbms)
+                    ),
                     loaded.Schema.TargetDbms
                 ) is
                 { } nameNote
@@ -216,17 +223,17 @@ public static partial class DocumentErDiagramToolHost
         if (string.IsNullOrWhiteSpace(dbmsInput))
         {
             return (
-                $"target_dbms is required (one of: {string.Join(", ", TargetDbmsNames.All)}).",
+                $"target_dbms is required (one of: {string.Join(", ", DialectNames.All)}).",
                 false
             );
         }
 
-        var dbms = TargetDbmsNames.Find(dbmsInput);
+        var dbms = DialectNames.Find(dbmsInput);
 
         if (dbms is null)
         {
             return (
-                $"Invalid target_dbms '{dbmsInput}'. Must be one of: {string.Join(", ", TargetDbmsNames.All)}.",
+                $"Invalid target_dbms '{dbmsInput}'. Must be one of: {string.Join(", ", DialectNames.All)}.",
                 false
             );
         }
@@ -342,12 +349,19 @@ public static partial class DocumentErDiagramToolHost
             }
 
             AppendPrimaryKeyOrder(sb, entity.GetReorderedPrimaryKeyColumnNames());
-            AppendUniqueConstraints(sb, entity, IdentifierLengthLimits.ForDbms(schema.TargetDbms));
+            AppendUniqueConstraints(
+                sb,
+                entity,
+                IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
+            );
         }
 
         if (schema.Relationships.Count > 0)
         {
-            var ddlNames = ConstraintNames.ResolveForeignKeyNamesById(schema);
+            var ddlNames = ConstraintNames.ResolveForeignKeyNamesById(
+                schema,
+                IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
+            );
             sb.Append('\n');
             sb.Append("Relationships:").Append('\n');
 
@@ -791,7 +805,7 @@ public static partial class DocumentErDiagramToolHost
         if (duplicate is not null)
         {
             return (
-                $"A relationship '{source.TableName}' → '{target.TableName}' over the same column pairs already exists (constraint name: {DescribeConstraintNames([duplicate], ConstraintNames.ResolveForeignKeyNamesById(schema))}). The same foreign key can be defined only once.",
+                $"A relationship '{source.TableName}' → '{target.TableName}' over the same column pairs already exists (constraint name: {DescribeConstraintNames([duplicate], ConstraintNames.ResolveForeignKeyNamesById(schema, IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)))}). The same foreign key can be defined only once.",
                 false
             );
         }
@@ -804,8 +818,11 @@ public static partial class DocumentErDiagramToolHost
             target.TableName,
             source.TableName,
             childColumnNames,
-            ConstraintNames.CollectExisting(schema),
-            IdentifierLengthLimits.ForDbms(schema.TargetDbms)
+            ConstraintNames.CollectExisting(
+                schema,
+                IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
+            ),
+            IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
         );
 
         if (nameError is not null)
@@ -1141,7 +1158,10 @@ public static partial class DocumentErDiagramToolHost
         }
 
         var schema = document.Schema;
-        var ddlNames = ConstraintNames.ResolveForeignKeyNamesById(schema);
+        var ddlNames = ConstraintNames.ResolveForeignKeyNamesById(
+            schema,
+            IdentifierLengthLimits.ForDiagramTarget(schema.TargetDbms)
+        );
 
         var matches = schema
             .Relationships.Where(r =>
@@ -1306,7 +1326,12 @@ public static partial class DocumentErDiagramToolHost
         // 外部キーの名前（add_relationship）と同じ規則で、図の中の既存の制約名との衝突を断る
         if (
             normalizedName is not null
-            && ConstraintNames.IsTaken(document.Schema, normalizedName, existing?.Id)
+            && ConstraintNames.IsTaken(
+                document.Schema,
+                normalizedName,
+                existing?.Id,
+                IdentifierLengthLimits.ForDiagramTarget(document.Schema.TargetDbms)
+            )
         )
         {
             return (

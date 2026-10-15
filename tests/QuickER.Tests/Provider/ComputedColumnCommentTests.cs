@@ -9,6 +9,7 @@ using QuickER.Provider.Oracle;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Provider;
@@ -82,7 +83,7 @@ public class ComputedColumnCommentTests
         new() { Entities = { BuildEntity(computed) } };
 
     private static string BuildScript(ISyncScriptBuilder builder, params SchemaDiffItem[] items) =>
-        builder.Build(new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities()));
+        builder.Build(new SyncPlanner().BuildPlan(items, TestDialectCapabilities.Neutral));
 
     /// <summary>5 方言の DDL が計算列の直前に注意コメントを出すことを検証する</summary>
     [Fact(DisplayName = "DDL: 5 方言とも計算列の直前に注意コメントを出す")]

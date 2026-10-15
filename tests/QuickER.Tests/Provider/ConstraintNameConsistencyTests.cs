@@ -6,6 +6,7 @@ using QuickER.Provider.Oracle;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -133,7 +134,7 @@ public class ConstraintNameConsistencyTests
                             IsSelected = true,
                         },
                     ],
-                    new SyncDialectCapabilities()
+                    TestDialectCapabilities.Neutral
                 )
             );
 
@@ -164,7 +165,7 @@ public class ConstraintNameConsistencyTests
                             IsSelected = true,
                         },
                     ],
-                    new SyncDialectCapabilities()
+                    TestDialectCapabilities.Neutral
                 )
             );
 
@@ -258,7 +259,7 @@ public class ConstraintNameConsistencyTests
                             IsSelected = true,
                         },
                     ],
-                    new SyncDialectCapabilities()
+                    TestDialectCapabilities.Neutral
                 )
             );
 

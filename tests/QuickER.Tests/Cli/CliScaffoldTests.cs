@@ -99,6 +99,54 @@ public class CliScaffoldTests
     }
 
     /// <summary>
+    /// 取込警告は種類ごとに「Warning: 見出し」の行を出し、その下に箇所を字下げして並べる（GUI と同じ文言）
+    /// </summary>
+    [Fact(DisplayName = "scaffold の取込警告は種類ごとの見出しの下に箇所を並べて stderr へ出す")]
+    public async Task ImportDiagram_WritesWarningsGroupedByKind()
+    {
+        var entity = new Entity { TableName = "orders" };
+        entity.Columns.Add(new Column { Name = "id", DataType = "INTEGER" });
+        SchemaImportWarning[] warnings =
+        [
+            new(SchemaImportWarningKind.ViewExcluded, "v_one"),
+            new(SchemaImportWarningKind.ColumnDefaultLost, "orders", "status", "'new'"),
+            new(SchemaImportWarningKind.ViewExcluded, "v_two"),
+        ];
+        var provider = new FakeImportProvider(
+            (_, _) =>
+                Task.FromResult(new SchemaImportResult { Entities = [entity], Warnings = warnings })
+        );
+        var stderr = new StringWriter();
+
+        await CliApp.ImportDiagramAsync(
+            provider,
+            "Data Source=x",
+            60,
+            stderr,
+            CancellationToken.None
+        );
+
+        var lines = stderr
+            .ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        lines
+            .Should()
+            .Equal(
+                string.Format(
+                    Strings.Cli_ImportWarningLine,
+                    SchemaImportWarningText.Heading(SchemaImportWarningKind.ViewExcluded, 2)
+                ),
+                "  - v_one",
+                "  - v_two",
+                string.Format(
+                    Strings.Cli_ImportWarningLine,
+                    SchemaImportWarningText.Heading(SchemaImportWarningKind.ColumnDefaultLost, 1)
+                ),
+                "  - " + SchemaImportWarningText.Describe(warnings[1])
+            );
+    }
+
+    /// <summary>
     /// 設定ファイルの誤りは、DB への取込より前に報告する（取込を終えてから設定の誤りに気づかない）
     /// </summary>
     /// <remarks>
