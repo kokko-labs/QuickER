@@ -26,7 +26,7 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
     public string DefaultDataType => "int";
 
     [GeneratedRegex(
-        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*(\(\s*(?<arg1>max|-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\))?\s*$",
+        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*(\(\s*(?<arg1>max|-?[0-9]+)\s*(,\s*(?<arg2>-?[0-9]+)\s*)?\))?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TypePattern();

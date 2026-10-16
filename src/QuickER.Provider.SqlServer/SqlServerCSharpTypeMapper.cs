@@ -296,10 +296,10 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
     }
 
     /// <summary>長さ指定 "(数値)" または "(max)" を検出する正規表現</summary>
-    [GeneratedRegex(@"\((max|\d+)\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\((max|[0-9]+)\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex LengthRegex();
 
     /// <summary>decimal/numeric の "(精度)" または "(精度,スケール)" を検出する正規表現</summary>
-    [GeneratedRegex(@"\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\(\s*([0-9]+)\s*(?:,\s*([0-9]+)\s*)?\)", RegexOptions.CultureInvariant)]
     private static partial Regex PrecisionScaleRegex();
 }

@@ -450,6 +450,18 @@ public sealed class SchemaNamesGuardTests
             "変更の検知（綴りの違いも変更として数える署名）"
         ),
         new(
+            "SchemaSignature.cs",
+            "vare=string.Join(\"|\",entities.OrderBy(x=>x.TableName,StringComparer.Ordinal).Select(x=>x.T",
+            Group.Exception,
+            "変更の検知（綴りの違いも変更として数える署名）＝テーブルの並びを序数の全順序で決める"
+        ),
+        new(
+            "SchemaSignature.cs",
+            "varr=string.Join(\"|\",relationships.Select(x=>x.SourceEntityId+\">\"+x.TargetEntityId+\":\"+x.T",
+            Group.Exception,
+            "変更の検知（綴りの違いも変更として数える署名）＝リレーションの並びを序数の全順序で決める"
+        ),
+        new(
             "SqlTypeText.cs",
             "varoffenders=columns.Where(pair=>!IsSafe(pair.Column.DataType)).Select(pair=>$\"{SqlComment",
             Group.Exception,

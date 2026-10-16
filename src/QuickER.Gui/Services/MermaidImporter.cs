@@ -438,7 +438,7 @@ public static partial class MermaidImporter
         // 「識別子 + (_数値)の繰り返し」に一致する型のみ復元対象とする
         var match = System.Text.RegularExpressions.Regex.Match(
             dataType,
-            @"^([A-Za-z][A-Za-z0-9]*)(_\d+)+$"
+            @"^([A-Za-z][A-Za-z0-9]*)(_[0-9]+)+$"
         );
 
         if (!match.Success)
@@ -447,7 +447,7 @@ public static partial class MermaidImporter
         }
 
         // 最初の「_数値」位置で型名部分と引数部分を分割する
-        var firstUnderscoreDigit = System.Text.RegularExpressions.Regex.Match(dataType, @"_\d");
+        var firstUnderscoreDigit = System.Text.RegularExpressions.Regex.Match(dataType, @"_[0-9]");
         var typeName = dataType[..firstUnderscoreDigit.Index];
         var argsPart = dataType[(firstUnderscoreDigit.Index + 1)..];
         var args = argsPart.Replace('_', ',');

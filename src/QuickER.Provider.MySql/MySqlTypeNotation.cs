@@ -57,7 +57,7 @@ public static partial class MySqlTypeNotation
 
     // decimal / numeric（引数なし・精度のみ・精度とスケール）と、後ろの unsigned / zerofill
     [GeneratedRegex(
-        @"^(?:decimal|numeric|dec)(?:\s*\(\s*(?<p>\d{1,9})\s*(?:,\s*(?<s>\d{1,9})\s*)?\))?(?<mods>(?:\s+(?:unsigned|zerofill))*)$",
+        @"^(?:decimal|numeric|dec)(?:\s*\(\s*(?<p>[0-9]{1,9})\s*(?:,\s*(?<s>[0-9]{1,9})\s*)?\))?(?<mods>(?:\s+(?:unsigned|zerofill))*)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DecimalPattern();

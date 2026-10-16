@@ -2016,7 +2016,7 @@ public sealed partial class CSharpCodeGenerationService
         dataType is not null && NegativeScaleRegex().IsMatch(dataType);
 
     /// <summary>"(精度,-スケール)" を検出する正規表現（診断専用・型マッパーの読み取りには使わない）</summary>
-    [GeneratedRegex(@"\(\s*\d+\s*,\s*-\s*\d+\s*\)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\(\s*[0-9]+\s*,\s*-\s*[0-9]+\s*\)", RegexOptions.CultureInvariant)]
     private static partial Regex NegativeScaleRegex();
 
     /// <summary>

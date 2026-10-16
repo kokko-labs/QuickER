@@ -13,7 +13,7 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 /// </summary>
 /// <remarks>
 /// SQL 実装は列の実バイトを比較するのに対し、C# の <c>==</c> は配列を参照比較する。インメモリストアは
-/// 取得のたびに複製した配列を返す設計なので、書き換え（<c>ByteArrayEqualityRewriter</c>）が無いと
+/// 取得のたびに複製した配列を返す設計なので、書き換え（<c>PredicateComparisonRewriter</c>）が無いと
 /// 「同じ内容の blob を持つ行」への等値述語がインメモリだけ 1 件も一致しない
 /// （名前付きクエリの DSL 等値・一意性チェックの byte[] 構成列も同じ経路で壊れていた）。
 /// null の扱いも SQL の観測結果へ揃える＝null 値との等値は NULL 行だけに一致し、非 null 値は NULL 行に一致しない。

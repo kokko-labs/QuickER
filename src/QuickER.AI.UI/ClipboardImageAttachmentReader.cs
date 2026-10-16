@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -22,7 +23,10 @@ public static class ClipboardImageAttachmentReader
     /// <summary>クリップボード画像のファイル名を組み立てる（yyyyMMdd_HHmmss のタイムスタンプ付き PNG）</summary>
     /// <param name="timestamp">ファイル名に埋め込む時刻</param>
     public static string BuildFileName(DateTime timestamp) =>
-        $"{FileNamePrefix}_{timestamp:yyyyMMdd_HHmmss}.png";
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{FileNamePrefix}_{timestamp:yyyyMMdd_HHmmss}.png"
+        );
 
     /// <summary>
     /// PNG バイト列から画像添付を生成する変換ロジック（WPF 非依存・テスト対象）。

@@ -31,7 +31,7 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
     // suffix（括弧後の語）を括弧グループの内側に持つ。取込は正規化して短縮表記を渡すのでここは通らないが、
     // GUI で正準表記を手入力した図・他ツール由来の図が解析不能にならないための受理形の拡張。
     [GeneratedRegex(
-        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\)\s*(?<suffix>[a-zA-Z][a-zA-Z0-9_ ]*?)?)?\s*$",
+        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?[0-9]+)\s*(,\s*(?<arg2>-?[0-9]+)\s*)?\)\s*(?<suffix>[a-zA-Z][a-zA-Z0-9_ ]*?)?)?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TypePattern();

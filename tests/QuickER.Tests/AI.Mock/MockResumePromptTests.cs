@@ -1,6 +1,7 @@
 using System.Globalization;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI.Mock;
 
@@ -156,5 +157,19 @@ public class MockResumePromptTests
         var manifest = SampleManifest("# 旧スキーマ");
 
         MockResumePrompt.IsSchemaChanged("# 新スキーマ", manifest).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "改訂の日時は、書式のカルチャに依らず西暦の同じ書式で AI へ渡す")]
+    public void Build_RevisionTimestamp_IsCultureInvariant()
+    {
+        foreach (var culture in CultureScope.Cultures)
+        {
+            using var scope = new CultureScope(culture);
+
+            MockResumePrompt
+                .Build("# schema", SampleManifest(), schemaChanged: false)
+                .Should()
+                .Contain("- 2026-07-20 09:00", culture);
+        }
     }
 }

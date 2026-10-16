@@ -124,21 +124,21 @@ public static partial class PostgreSqlTypeNotation
 
     // timestamp / time の正準表記（"timestamp(3) without time zone" 等）。修飾子は名称の直後に入る
     [GeneratedRegex(
-        @"^(?<name>timestamp|time)(?:\((?<p>\d+)\))? (?<zone>with|without) time zone$",
+        @"^(?<name>timestamp|time)(?:\((?<p>[0-9]+)\))? (?<zone>with|without) time zone$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DateTimeTypePattern();
 
     // 短縮語彙の timestamp / timestamptz / time（精度の有無を問わない）。図・選択肢・TryFormat が書く形
     [GeneratedRegex(
-        @"^(?<name>timestamp|timestamptz|time)\s*(?:\(\s*(?<p>\d+)\s*\))?$",
+        @"^(?<name>timestamp|timestamptz|time)\s*(?:\(\s*(?<p>[0-9]+)\s*\))?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex ShortDateTimeTypePattern();
 
     // character varying(n) / character(n)（長さ無しの正準表記も一応受ける）
     [GeneratedRegex(
-        @"^character(?<varying> varying)?(?<args>\(\d+\))?$",
+        @"^character(?<varying> varying)?(?<args>\([0-9]+\))?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex CharacterTypePattern();
@@ -146,7 +146,7 @@ public static partial class PostgreSqlTypeNotation
     // format_type はスケール 0 も必ず書き下ろすため、QuickER の従来表記 numeric(p) へ畳む
     // （図・選択肢・TryFormat が書く numeric(18,0) も同じ形へ寄せる）
     [GeneratedRegex(
-        @"^numeric\s*\(\s*(?<p>\d+)\s*,\s*0\s*\)$",
+        @"^numeric\s*\(\s*(?<p>[0-9]+)\s*,\s*0\s*\)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex ZeroScaleNumericPattern();

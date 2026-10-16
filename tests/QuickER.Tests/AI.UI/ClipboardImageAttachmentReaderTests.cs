@@ -5,6 +5,7 @@ using System.Windows.Media.Imaging;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.UI;
+using QuickER.Tests.TestSupport;
 using AiUiStrings = QuickER.AI.UI.Resources.Strings;
 
 namespace QuickER.Tests.AI.UI;
@@ -31,6 +32,21 @@ public class ClipboardImageAttachmentReaderTests
         var name = ClipboardImageAttachmentReader.BuildFileName(new DateTime(2026, 7, 6, 13, 5, 9));
 
         name.Should().Be($"{AiUiStrings.Attachment_ClipboardImagePrefix}_20260706_130509.png");
+    }
+
+    /// <summary>ファイル名の日時が書式のカルチャに依らない（タイ語の仏暦にならない）ことを検証する</summary>
+    [Fact(DisplayName = "ファイル名の日時は書式のカルチャに依らず西暦")]
+    public void BuildFileName_IsCultureInvariant()
+    {
+        foreach (var culture in CultureScope.Cultures)
+        {
+            using var scope = new CultureScope(culture);
+
+            ClipboardImageAttachmentReader
+                .BuildFileName(new DateTime(2026, 7, 6, 13, 5, 9))
+                .Should()
+                .Be($"{AiUiStrings.Attachment_ClipboardImagePrefix}_20260706_130509.png", culture);
+        }
     }
 
     /// <summary>PNG バイト列から画像添付が生成され、名前・種別・MIME が正しいことを検証する</summary>

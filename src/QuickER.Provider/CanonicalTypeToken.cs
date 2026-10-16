@@ -81,7 +81,7 @@ public static partial class CanonicalTypeToken
         };
 
     [GeneratedRegex(
-        @"^\s*(?<name>[a-z0-9]+)\s*(\(\s*(?<arg1>max|-?\d+|\*)\s*(,\s*(?<arg2>-?\d+)\s*)?\))?\s*$"
+        @"^\s*(?<name>[a-z0-9]+)\s*(\(\s*(?<arg1>max|-?[0-9]+|\*)\s*(,\s*(?<arg2>-?[0-9]+)\s*)?\))?\s*$"
     )]
     private static partial Regex TokenPattern();
 

@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -10,12 +11,12 @@ namespace QuickER.Tests.Provider;
 public class SchemaSignatureTests
 {
     /// <summary>2 列を持つエンティティを生成する（一意制約はテスト側で足す）</summary>
-    private static Entity BuildEntity()
+    private static Entity BuildEntity(string tableName = "Shop")
     {
         var code = new Column { Name = "Code", DataType = "nvarchar(20)" };
         var region = new Column { Name = "Region", DataType = "nvarchar(10)" };
 
-        return new Entity { TableName = "Shop", Columns = { code, region } };
+        return new Entity { TableName = tableName, Columns = { code, region } };
     }
 
     /// <summary>エンティティ単体の署名を計算する</summary>
@@ -195,5 +196,51 @@ public class SchemaSignatureTests
         marked.Columns[0].IsForeignKey = true;
 
         Sign(marked).Should().NotBe(Sign(plain));
+    }
+
+    /// <summary>テーブルの並び順だけが違う同じスキーマは同じ署名になることを検証する</summary>
+    /// <remarks>
+    /// 合成済みの「が」と分解形の「か＋濁点」はカルチャの比較では等しいので、既定の比較で並べると入力の順がそのまま署名に残り、
+    /// 同じ図でも置き換えの確認が出ていた。テーブル名は序数で並べる
+    /// </remarks>
+    [Fact(
+        DisplayName = "Compute: カルチャの比較で等しいテーブル名でも、並び順だけの違いは署名を変えない"
+    )]
+    public void Compute_EntityOrder_IsOrdinal()
+    {
+        using var scope = new CultureScope("ja-JP");
+        var composed = BuildEntity("\u304C");
+        var decomposed = BuildEntity("\u304B\u3099");
+
+        SchemaSignature
+            .Compute([decomposed, composed], [])
+            .Should()
+            .Be(SchemaSignature.Compute([composed, decomposed], []));
+    }
+
+    /// <summary>リレーションの並び順だけが違う同じスキーマは同じ署名になることを検証する</summary>
+    /// <remarks>ソフトハイフンの有無だけが違う制約名はカルチャの比較では等しい。リレーションの署名も序数で並べる</remarks>
+    [Fact(
+        DisplayName = "Compute: カルチャの比較で等しい制約名でも、リレーションの並び順だけの違いは署名を変えない"
+    )]
+    public void Compute_RelationshipOrder_IsOrdinal()
+    {
+        using var scope = new CultureScope("ja-JP");
+        var parent = BuildEntity("Parent");
+        var child = BuildEntity("Child");
+        Relationship Link(string name) =>
+            new()
+            {
+                SourceEntityId = parent.Id,
+                TargetEntityId = child.Id,
+                ConstraintName = name,
+            };
+        var plain = Link("FK_ab");
+        var hyphenated = Link("FK_a\u00ADb");
+
+        SchemaSignature
+            .Compute([parent, child], [hyphenated, plain])
+            .Should()
+            .Be(SchemaSignature.Compute([parent, child], [plain, hyphenated]));
     }
 }
