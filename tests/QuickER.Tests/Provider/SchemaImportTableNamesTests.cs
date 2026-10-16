@@ -26,6 +26,8 @@ public sealed class SchemaImportTableNamesTests
     [InlineData("a.b", "a", "b", true)]
     [InlineData("a.b.t", "a", "b.t", true)]
     [InlineData("a.b.t", "a.b", "t", false)]
+    // 名前を作る関数と食い違う入力（図の名前のスキーマが DB のスキーマと違う）。方言の関数の結果を渡す限り起きないが、スキーマも比べる
+    [InlineData("x.T", "y", "T", false)]
     public void RoundTrips_OnlyWhenTheNameReadsAsTheSameTable(
         string diagramName,
         string? schema,
