@@ -326,4 +326,13 @@
   <data name="ImportWarningHeading_IdentityColumnMarked" xml:space="preserve">
     <value>採番の定義なしで取り込んだ、DB が採番する列（{0} 件）:</value>
   </data>
+  <data name="ImportWarning_DottedTableNameExcluded" xml:space="preserve">
+    <value>「{0}」は、名前の「.」を QuickER がスキーマとテーブルの区切りと読むため、取り込みませんでした。</value>
+  </data>
+  <data name="ImportWarning_DottedTableNameExcludedInSchema" xml:space="preserve">
+    <value>スキーマ「{1}」のテーブル「{0}」は、テーブル名かスキーマ名の「.」を QuickER がスキーマとテーブルの区切りと読むため、取り込みませんでした。</value>
+  </data>
+  <data name="ImportWarningHeading_DottedTableNameExcluded" xml:space="preserve">
+    <value>名前に「.」を含むため取り込まなかったテーブル（{0} 件）:</value>
+  </data>
 </root>

@@ -591,5 +591,23 @@ namespace QuickER.Provider.Resources {
                 return ResourceManager.GetString("ImportWarningHeading_IdentityColumnMarked", resourceCulture);
             }
         }
+
+        public static string ImportWarning_DottedTableNameExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarning_DottedTableNameExcluded", resourceCulture);
+            }
+        }
+
+        public static string ImportWarning_DottedTableNameExcludedInSchema {
+            get {
+                return ResourceManager.GetString("ImportWarning_DottedTableNameExcludedInSchema", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_DottedTableNameExcluded {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_DottedTableNameExcluded", resourceCulture);
+            }
+        }
     }
 }

@@ -66,7 +66,15 @@ public class SqlServerSchemaImporter : ISchemaImporter
     )
     {
         var warnings = new List<SchemaImportWarning>();
-        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
+        // 名前に . を含むため取り込まなかったテーブル（そのテーブルを参照する外部キーを名指しするため）
+        var excludedTables = new HashSet<string>(StringComparer.Ordinal);
+        var tables = await LoadTablesAsync(
+                conn,
+                commandTimeoutSeconds,
+                warnings,
+                excludedTables,
+                ct
+            )
             .ConfigureAwait(false);
         await LoadTemporalHistoryTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
@@ -79,7 +87,14 @@ public class SqlServerSchemaImporter : ISchemaImporter
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
+        var rels = await LoadForeignKeysAsync(
+                conn,
+                tables,
+                excludedTables,
+                commandTimeoutSeconds,
+                warnings,
+                ct
+            )
             .ConfigureAwait(false);
         await LoadDisabledForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
@@ -312,11 +327,14 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     /// （例: <c>Latin1_General_100_CS_AS</c>）の DB では <c>Dup</c> と <c>dup</c> が共存する。
     /// 黙って上書きすると 1 エンティティへ潰れて両テーブルの列が混ざるため、
     /// 後着（<c>BIN2</c> 昇順で後ろ）を取り込まず警告として告げる。
+    /// テーブル名かスキーマ名に <c>.</c> を含むテーブルは、図に入れる名前が別のテーブルとして読まれるので取り込まない
+    /// （<see cref="SchemaImportTableNames"/>。衝突の判定より先に見る）。
     /// </remarks>
     private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         SqlConnection conn,
         int commandTimeoutSeconds,
         List<SchemaImportWarning> warnings,
+        HashSet<string> excludedTables,
         CancellationToken ct
     )
     {
@@ -330,6 +348,12 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var name = reader.GetString(1);
             var key = TableKey(schema, name);
             var displayName = DisplayTableName(schema, name);
+
+            if (SchemaImportTableNames.ExcludeIfNotRoundTrip(displayName, schema, name, warnings))
+            {
+                excludedTables.Add(key);
+                continue;
+            }
 
             if (dict.TryGetValue(key, out var existing))
             {
@@ -735,15 +759,20 @@ ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2,
     /// <remarks>
     /// 参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する。
     /// 衝突して捨てたテーブルが親・子どちらか一方でも該当する外部キーは取り込まない。
+    /// 名前に <c>.</c> を含むため取り込まなかったテーブルを参照する外部キーは、制約ごとに 1 度だけ名指しする。
     /// </remarks>
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         SqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        HashSet<string> excludedTables,
         int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
         CancellationToken ct
     )
     {
         var builder = new ForeignKeyRelationshipBuilder();
+        // 複合外部キーは行が複数出るので、制約（子のテーブルと制約名）ごとに 1 度だけ告げる
+        var reportedExcluded = new HashSet<(string, string)>();
 
         await using var cmd = DbCommands.Create(conn, ForeignKeysSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -764,17 +793,39 @@ ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2,
                 reader.IsDBNull(9) ? null : reader.GetString(9)
             );
 
+            var parentKey = TableKey(parentSchema, parentTable);
+            var refKey = TableKey(refSchema, refTable);
+
+            // 名前に . を含むため取り込まなかったテーブルを参照する外部キーは、リレーションにできないことを告げる
+            // （取り込まなかったテーブルが子のときは、テーブルごと図に載らないので名指ししない）
+            if (
+                excludedTables.Contains(refKey)
+                && SchemaTableEntry.TryGetExact(tables, parentKey, out var child)
+            )
+            {
+                if (reportedExcluded.Add((parentKey, fkName)))
+                {
+                    warnings.Add(
+                        new SchemaImportWarning(
+                            SchemaImportWarningKind.ForeignKeyToExcludedTable,
+                            child.Entity.TableName,
+                            fkName,
+                            DisplayTableName(refSchema, refTable)
+                        )
+                    );
+                }
+
+                continue;
+            }
+
             // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
             if (
-                !SchemaTableEntry.TryGetExact(tables, TableKey(parentSchema, parentTable), out _)
-                || !SchemaTableEntry.TryGetExact(tables, TableKey(refSchema, refTable), out _)
+                !SchemaTableEntry.TryGetExact(tables, parentKey, out _)
+                || !SchemaTableEntry.TryGetExact(tables, refKey, out _)
             )
             {
                 continue;
             }
-
-            var parentKey = TableKey(parentSchema, parentTable);
-            var refKey = TableKey(refSchema, refTable);
 
             builder.Add(fkName, parentKey, parentCol, refKey, refCol, deleteAction, updateAction);
         }

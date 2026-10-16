@@ -213,9 +213,9 @@ public enum SchemaImportWarningKind
 
     /// <summary>取込から外した表を参照する外部キーを、リレーションにしなかった。</summary>
     /// <remarks>
-    /// 参照先が DB にはあるが、取込が外した表（PostgreSQL の子パーティション・SQLite の仮想テーブル）のとき。
+    /// 参照先が DB にはあるが、取込が外した表（PostgreSQL の子パーティション・SQLite の仮想テーブル・5 方言の名前に <c>.</c> を含むテーブル）のとき。
     /// 参照先が取込範囲の外（別スキーマ・DB に無い表）のときは <see cref="ForeignKeyOutsideScope"/>。
-    /// <c>TableName</c> = 外部キーを持つ表 / <c>Subject</c> = 制約名（SQLite は名前を持たないので空）/
+    /// <c>TableName</c> = 外部キーを持つ表 / <c>Subject</c> = 制約名（名前を持たない SQLite は、取込が識別に付ける <c>FK_{子}_{親}_{id}</c>）/
     /// <c>Detail</c> = 参照先の表。
     /// </remarks>
     ForeignKeyToExcludedTable,
@@ -262,6 +262,17 @@ public enum SchemaImportWarningKind
     /// <c>GENERATED ALWAYS AS IDENTITY</c>）。
     /// </remarks>
     IdentityColumnMarked,
+
+    /// <summary>
+    /// 名前に <c>.</c> を含むテーブル（SQL Server ではスキーマ名に含むものも）を取り込まなかった。
+    /// </summary>
+    /// <remarks>
+    /// QuickER は図のテーブル名を最初の <c>.</c> でスキーマとテーブルに分けて読むので、図に入れると別のテーブルとして読まれ、
+    /// 生成コードの読み書き・DDL・同期が別のテーブルを指す（判定は <see cref="SchemaImportTableNames"/>）。
+    /// <see cref="TableNameCollision"/> と同じく、混ぜるより落とすほうが安全なので名指しで捨てる。
+    /// <c>TableName</c> = DB のテーブル名 / <c>Subject</c> = DB のスキーマ名（SQL Server だけ。ほかの方言は空）/ <c>Detail</c> は空。
+    /// </remarks>
+    DottedTableNameExcluded,
 }
 
 /// <summary>

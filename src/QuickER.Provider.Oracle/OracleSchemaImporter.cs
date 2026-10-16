@@ -58,7 +58,15 @@ public class OracleSchemaImporter : ISchemaImporter
     )
     {
         var warnings = new List<SchemaImportWarning>();
-        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
+        // 名前に . を含むため取り込まなかったテーブル（そのテーブルを参照する外部キーを名指しするため）
+        var excludedTables = new HashSet<string>(StringComparer.Ordinal);
+        var tables = await LoadTablesAsync(
+                conn,
+                commandTimeoutSeconds,
+                warnings,
+                excludedTables,
+                ct
+            )
             .ConfigureAwait(false);
         await LoadExcludedObjectsAsync(conn, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
@@ -69,7 +77,14 @@ public class OracleSchemaImporter : ISchemaImporter
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, ct)
+        var rels = await LoadForeignKeysAsync(
+                conn,
+                tables,
+                excludedTables,
+                commandTimeoutSeconds,
+                warnings,
+                ct
+            )
             .ConfigureAwait(false);
         await LoadOutOfScopeForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
             .ConfigureAwait(false);
@@ -311,6 +326,7 @@ ORDER BY constraint_name";
         OracleConnection conn,
         int commandTimeoutSeconds,
         List<SchemaImportWarning> warnings,
+        HashSet<string> excludedTables,
         CancellationToken ct
     )
     {
@@ -321,6 +337,15 @@ ORDER BY constraint_name";
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var name = reader.GetString(0);
+
+            // 名前に . を含むテーブルは、図に入れる名前が別のテーブルとして読まれるので取り込まない（衝突の判定より先に見る）。
+            // 取込は自スキーマの素の名前だけを返すので、同期の制約名の逆引き（表名だけで user_constraints を引く）へ
+            // スキーマで修飾された名前が届く経路も、ここで塞がれる
+            if (SchemaImportTableNames.ExcludeIfNotRoundTrip(name, null, name, warnings))
+            {
+                excludedTables.Add(name);
+                continue;
+            }
 
             if (dict.TryGetValue(name, out var existing))
             {
@@ -739,11 +764,15 @@ ORDER BY constraint_name";
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         OracleConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        HashSet<string> excludedTables,
         int commandTimeoutSeconds,
+        List<SchemaImportWarning> warnings,
         CancellationToken ct
     )
     {
         var builder = new ForeignKeyRelationshipBuilder();
+        // 複合外部キーは行が複数出るので、制約ごとに 1 度だけ告げる
+        var reportedExcluded = new HashSet<string>(StringComparer.Ordinal);
 
         await using var cmd = DbCommands.Create(conn, ForeignKeysSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -758,6 +787,28 @@ ORDER BY constraint_name";
             var deleteAction = MapReferentialAction(
                 reader.IsDBNull(6) ? null : reader.GetString(6)
             );
+
+            // 名前に . を含むため取り込まなかったテーブルを参照する外部キーは、リレーションにできないことを告げる
+            // （取り込まなかったテーブルが子のときは、テーブルごと図に載らないので名指ししない）
+            if (
+                excludedTables.Contains(refKey)
+                && SchemaTableEntry.TryGetExact(tables, childKey, out _)
+            )
+            {
+                if (reportedExcluded.Add(fkName))
+                {
+                    warnings.Add(
+                        new SchemaImportWarning(
+                            SchemaImportWarningKind.ForeignKeyToExcludedTable,
+                            childKey,
+                            fkName,
+                            refKey
+                        )
+                    );
+                }
+
+                continue;
+            }
 
             // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
             if (
