@@ -66,6 +66,24 @@ namespace QuickER.AI.UI.Resources {
             }
         }
 
+        public static string Connection_SettingsFileUnreadable {
+            get {
+                return ResourceManager.GetString("Connection_SettingsFileUnreadable", resourceCulture);
+            }
+        }
+
+        public static string Connection_ModelHistoryRemoveFailedFormat {
+            get {
+                return ResourceManager.GetString("Connection_ModelHistoryRemoveFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Connection_SavedApiKeyUnreadable {
+            get {
+                return ResourceManager.GetString("Connection_SavedApiKeyUnreadable", resourceCulture);
+            }
+        }
+
         public static string Connection_Refresh {
             get {
                 return ResourceManager.GetString("Connection_Refresh", resourceCulture);

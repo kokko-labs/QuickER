@@ -2,6 +2,7 @@ using System.IO;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
 using QuickER.Model;
+using QuickER.Platform;
 using QuickER.Provider;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
@@ -133,6 +134,36 @@ public class MockProjectScaffoldRegenerationTests
             ReparsePointTestHelper.DeleteTree(output);
             ReparsePointTestHelper.DeleteTree(firstMock);
             ReparsePointTestHelper.DeleteTree(secondMock);
+        }
+    }
+
+    /// <summary>
+    /// モックフォルダに残った原子的な書き込みの一時ファイル（書き込みの途中で落ちた残骸）は、<c>design/mock/</c> へ写さない
+    /// </summary>
+    [Fact(DisplayName = "モックフォルダに残った一時ファイルの残骸は design/mock/ へ写さない")]
+    public void Scaffold_SkipsAtomicWriteLeftoversInMockFolder()
+    {
+        var output = NewTempFolder();
+        var mock = SeedMockFolder("CustomerList.html");
+
+        try
+        {
+            var leftover = Path.GetFileName(
+                AtomicFile.TemporaryPathFor(Path.Combine(mock, "mock.json"))
+            );
+            File.WriteAllText(Path.Combine(mock, leftover), "{ half");
+
+            var result = Scaffold(output, mock);
+
+            File.Exists(Path.Combine(result.DesignFolderPath, leftover)).Should().BeFalse();
+            File.Exists(Path.Combine(result.DesignFolderPath, "CustomerList.html"))
+                .Should()
+                .BeTrue();
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(output);
+            ReparsePointTestHelper.DeleteTree(mock);
         }
     }
 

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Platform;
 using Xunit;
 using RuntimeBinaryColumns = QuickER.Runtime.UnboundedBinaryColumns;
 
@@ -127,6 +128,62 @@ public sealed class UnboundedBinaryReadToFileTests : IDisposable
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         File.ReadAllBytes(Destination).Should().Equal("old"u8.ToArray());
+        ShouldLeaveOnlyDestination();
+    }
+
+    /// <remarks>
+    /// ランタイムのパッケージは QuickER.Platform を参照できないので、一時ファイルの名前の規則を写しで持つ。
+    /// アプリの原子的な書き込み（<see cref="AtomicFile.TemporaryPathFor"/>）と同じ形であることを、読み取りの途中に
+    /// できる一時ファイルの名前で確かめる（同じ判定で残骸として扱える）。
+    /// </remarks>
+    [Theory(
+        DisplayName = "一時ファイルの名前は、アプリの原子的な書き込みと同じ形で、長い名前でも 255 文字に収まる"
+    )]
+    [InlineData("out.bin")]
+    [InlineData(null)]
+    public async Task TemporaryFile_FollowsAtomicFileNaming(string? fileName)
+    {
+        var destination = Path.Combine(
+            _directory.FullName,
+            fileName ?? new string('x', 250) + ".bin"
+        );
+        string? temporaryName = null;
+
+        await RuntimeBinaryColumns.ReadToFileAsync(
+            destination,
+            async stream =>
+            {
+                await stream.WriteAsync("v"u8.ToArray());
+                temporaryName = _directory
+                    .GetFiles()
+                    .Select(file => file.Name)
+                    .Single(name => name != "out.bin" && name != Path.GetFileName(destination));
+                return true;
+            }
+        );
+
+        temporaryName.Should().NotBeNull();
+        AtomicFile.IsTemporaryFileName(temporaryName!).Should().BeTrue();
+        temporaryName!.Length.Should().BeLessThanOrEqualTo(255);
+        File.ReadAllBytes(destination).Should().Equal("v"u8.ToArray());
+    }
+
+    [Fact(DisplayName = "隠し属性の宛先を置き換えても、隠し属性は残る")]
+    public async Task HiddenDestination_KeepsHidden()
+    {
+        File.SetAttributes(Destination, FileAttributes.Hidden);
+
+        await RuntimeBinaryColumns.ReadToFileAsync(
+            Destination,
+            async stream =>
+            {
+                await stream.WriteAsync("new"u8.ToArray());
+                return true;
+            }
+        );
+
+        File.ReadAllBytes(Destination).Should().Equal("new"u8.ToArray());
+        File.GetAttributes(Destination).Should().HaveFlag(FileAttributes.Hidden);
         ShouldLeaveOnlyDestination();
     }
 }

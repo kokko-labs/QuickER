@@ -36,7 +36,7 @@ public class ApiKeyStoreTests
         {
             ApiKeyStore.Save(keyName, expected, folder);
             var actual = ApiKeyStore.Load(keyName, folder);
-            actual.Should().Be(expected);
+            actual.Should().Be(new SavedApiKey(SavedApiKeyStatus.Loaded, expected));
         }
         finally
         {
@@ -44,8 +44,8 @@ public class ApiKeyStoreTests
         }
     }
 
-    /// <summary>空文字を保存すると鍵が削除され、Load が空文字を返すことを検証する</summary>
-    [Fact(DisplayName = "空文字を Save すると削除され、Load は空文字を返す")]
+    /// <summary>空文字を保存すると鍵が削除され、Load が「保存されていない」を返すことを検証する</summary>
+    [Fact(DisplayName = "空文字を Save すると削除され、Load は保存されていないを返す")]
     public void SaveEmpty_Deletes()
     {
         var folder = NewTempFolder();
@@ -55,7 +55,34 @@ public class ApiKeyStoreTests
         {
             ApiKeyStore.Save(keyName, "temp-key", folder);
             ApiKeyStore.Save(keyName, string.Empty, folder);
-            ApiKeyStore.Load(keyName, folder).Should().BeEmpty();
+            ApiKeyStore.Load(keyName, folder).Should().Be(SavedApiKey.Missing);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <remarks>
+    /// 別のユーザー・別の PC で暗号化したファイルや壊れたファイルは復号できない。空のキーとして返すと、
+    /// 呼び出し側が空の値を保存したとき（保存をやめたとき）に暗号ファイルを消してしまう。
+    /// </remarks>
+    [Fact(
+        DisplayName = "復号できない暗号ファイルは、保存されていないではなく読めないとして返し、ファイルは残す"
+    )]
+    public void Load_UndecryptableFile_IsUnreadable()
+    {
+        var folder = NewTempFolder();
+        const string keyName = "ApiKeyStoreTests";
+
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, keyName + ".dat");
+            File.WriteAllBytes(path, [1, 2, 3, 4]);
+
+            ApiKeyStore.Load(keyName, folder).Should().Be(SavedApiKey.Unreadable);
+            File.Exists(path).Should().BeTrue();
         }
         finally
         {

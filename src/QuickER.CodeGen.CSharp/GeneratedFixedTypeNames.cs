@@ -462,6 +462,7 @@ public static class GeneratedFixedTypeNames
             "OverflowException",
             "ParameterExpression",
             "Path",
+            "PlatformNotSupportedException",
             "PropertyChangedEventArgs",
             "PropertyChangedEventHandler",
             "PropertyInfo",

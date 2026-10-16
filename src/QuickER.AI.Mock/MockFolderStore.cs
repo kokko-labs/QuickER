@@ -79,13 +79,7 @@ public sealed class MockFolderStore
 
         if (File.Exists(manifestPath))
         {
-            throw new InvalidOperationException(
-                string.Format(
-                    Strings.Mock_FolderAlreadyExistsFormat,
-                    MockManifest.ManifestFileName,
-                    folder
-                )
-            );
+            throw AlreadyExists(folder);
         }
 
         Directory.CreateDirectory(folder);
@@ -97,10 +91,32 @@ public sealed class MockFolderStore
             SourceSchema = sourceSchema ?? string.Empty,
         };
 
-        WriteManifest(folder, manifest);
+        // 置き換えない書き込みで作る。存在の確認と書き込みの間に別のプロセスが作った mock.json を上書きしない
+        try
+        {
+            AtomicFile.CreateText(
+                manifestPath,
+                JsonSerializer.Serialize(manifest, MockManifest.SerializerOptions),
+                Utf8NoBom
+            );
+        }
+        catch (IOException) when (File.Exists(manifestPath))
+        {
+            throw AlreadyExists(folder);
+        }
 
         return new MockFolderStore(folder, manifest, clock ?? (() => DateTimeOffset.Now));
     }
+
+    /// <summary>作成先に mock.json が既にあることを伝える例外</summary>
+    private static InvalidOperationException AlreadyExists(string folder) =>
+        new(
+            string.Format(
+                Strings.Mock_FolderAlreadyExistsFormat,
+                MockManifest.ManifestFileName,
+                folder
+            )
+        );
 
     /// <summary>
     /// 既存のモックフォルダを開く。<c>mock.json</c> 不在・JSON 破損・新フォーマット（Version 超過）・

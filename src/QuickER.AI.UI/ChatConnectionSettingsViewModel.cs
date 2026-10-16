@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -53,7 +54,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     private readonly Func<CodexConfigToml> _codexConfigReader;
 
     /// <summary>API キー読込 seam（テスト隔離用。既定は <see cref="ApiKeyStore.Load(string)"/>）</summary>
-    private readonly Func<string, string?> _apiKeyLoader;
+    private readonly Func<string, SavedApiKey?> _apiKeyLoader;
 
     /// <summary>API キー保存 seam（テスト隔離用。既定は <see cref="ApiKeyStore.Save(string, string)"/>）</summary>
     private readonly Action<string, string> _apiKeySaver;
@@ -88,14 +89,14 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         AiDialogKind dialogKind,
         AiSettingsStore? settingsStore = null,
         Func<CodexConfigToml>? codexConfigReader = null,
-        Func<string, string?>? apiKeyLoader = null,
+        Func<string, SavedApiKey?>? apiKeyLoader = null,
         Action<string, string>? apiKeySaver = null
     )
     {
         _dialogKind = dialogKind;
         _settingsStore = settingsStore ?? new AiSettingsStore();
         _codexConfigReader = codexConfigReader ?? CodexConfigTomlReader.Read;
-        _apiKeyLoader = apiKeyLoader ?? ApiKeyStore.Load;
+        _apiKeyLoader = apiKeyLoader ?? (name => ApiKeyStore.Load(name));
         _apiKeySaver = apiKeySaver ?? ApiKeyStore.Save;
     }
 
@@ -277,10 +278,28 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     public void Initialize()
     {
         _isInitializing = true;
-        ApiKey = CurrentApiKeyStoreName is { } slot
-            ? _apiKeyLoader(slot) ?? string.Empty
-            : string.Empty;
+        LoadApiKeyForCurrentProvider();
         _isInitializing = false;
+    }
+
+    /// <summary>
+    /// 保存されている API キーが読めなかったか（別のユーザー・別の PC で保存したもの・壊れたファイル）。
+    /// 読めない間は、利用者が新しいキーを入力するまで暗号ファイルを上書きも削除もしない
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSavedApiKeyUnreadable;
+
+    /// <summary>保存されている API キーが読めなかったときの注記（接続パネルのキー欄の直下に出す）</summary>
+    public string SavedApiKeyUnreadableNote => Strings.Connection_SavedApiKeyUnreadable;
+
+    /// <summary>現在のプロバイダーの保存済みのキーを読み、欄と「読めない」の印へ反映する（保存の抑止は呼び出し側）</summary>
+    private void LoadApiKeyForCurrentProvider()
+    {
+        var saved = CurrentApiKeyStoreName is { } slot
+            ? _apiKeyLoader(slot) ?? SavedApiKey.Missing
+            : SavedApiKey.Missing;
+        ApiKey = saved.Key;
+        IsSavedApiKeyUnreadable = saved.Status == SavedApiKeyStatus.Unreadable;
     }
 
     /// <summary>保存済み設定と config.toml の候補を読み込む（親が PropertyChanged 購読確立後に呼ぶ）</summary>
@@ -475,7 +494,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
         if (settings.ApiModelHistory.Touch(ApiProviderKey, model))
         {
-            _settingsStore.Save(settings);
+            SaveOrThrow(settings);
         }
 
         RefreshApiModelCandidates(settings);
@@ -493,9 +512,17 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
         var settings = _settingsStore.Load();
 
-        if (settings.ApiModelHistory.Remove(ApiProviderKey, model))
+        // 読めなかったときの設定は既定値なので、候補をそこから作り直すと履歴が消えて見える
+        if (_settingsStore.LastLoadUnavailable)
         {
-            _settingsStore.Save(settings);
+            NotifyRemovalFailed(null);
+            return;
+        }
+
+        if (settings.ApiModelHistory.Remove(ApiProviderKey, model) && !TrySaveForRemoval(settings))
+        {
+            // 保存できなかったので、候補は保存の内容（＝消していない状態）に合わせる
+            settings = _settingsStore.Load();
         }
 
         // 選択中の項目を消しても Text（＝双方向バインドの ApiModel）が保たれる（再構築側が退避・復元する）
@@ -519,7 +546,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
         if (settings.CodexModelHistory.Touch(CodexModelProvider.Trim(), CodexModel.Trim()))
         {
-            _settingsStore.Save(settings);
+            SaveOrThrow(settings);
         }
 
         RefreshCodexModelCandidates(settings);
@@ -537,9 +564,20 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
         var settings = _settingsStore.Load();
 
-        if (settings.CodexModelHistory.Remove(CodexModelProvider?.Trim() ?? string.Empty, model))
+        // 読めなかったときの設定は既定値なので、候補をそこから作り直すと履歴が消えて見える
+        if (_settingsStore.LastLoadUnavailable)
         {
-            _settingsStore.Save(settings);
+            NotifyRemovalFailed(null);
+            return;
+        }
+
+        if (
+            settings.CodexModelHistory.Remove(CodexModelProvider?.Trim() ?? string.Empty, model)
+            && !TrySaveForRemoval(settings)
+        )
+        {
+            // 保存できなかったので、候補は保存の内容（＝消していない状態）に合わせる
+            settings = _settingsStore.Load();
         }
 
         // 選択中の項目を消しても Text（＝双方向バインドの CodexModel）が保たれる（再構築側が退避・復元する）
@@ -570,7 +608,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             )
         )
         {
-            _settingsStore.Save(settings);
+            SaveOrThrow(settings);
         }
 
         RefreshCopilotModelCandidates(settings);
@@ -588,9 +626,20 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
         var settings = _settingsStore.Load();
 
-        if (settings.CopilotModelHistory.Remove(CopilotSettings.HistoryProviderKey, model))
+        // 読めなかったときの設定は既定値なので、候補をそこから作り直すと履歴が消えて見える
+        if (_settingsStore.LastLoadUnavailable)
         {
-            _settingsStore.Save(settings);
+            NotifyRemovalFailed(null);
+            return;
+        }
+
+        if (
+            settings.CopilotModelHistory.Remove(CopilotSettings.HistoryProviderKey, model)
+            && !TrySaveForRemoval(settings)
+        )
+        {
+            // 保存できなかったので、候補は保存の内容（＝消していない状態）に合わせる
+            settings = _settingsStore.Load();
         }
 
         // 選択中の項目を消しても Text（＝双方向バインドの CopilotModel）が保たれる（再構築側が退避・復元する）
@@ -672,8 +721,54 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         ui.ApiProvider = ApiProvider.ToString();
         ui.EndpointOverride = EndpointOverride?.Trim() ?? string.Empty;
 
-        _settingsStore.Save(settings);
+        SaveOrThrow(settings);
     }
+
+    /// <summary>
+    /// モデルの履歴から削除した設定を保存できなかったとき（× の操作）に、知らせる文言を渡す
+    /// （親のダイアログがステータスへ出す）
+    /// </summary>
+    public event EventHandler<string>? ModelHistoryRemoveFailed;
+
+    /// <summary>設定を保存する。読めない既存ファイルを守るために書かなかったときも例外にする</summary>
+    /// <remarks>
+    /// 呼び出し側（成功したターンの記録・ウィンドウを閉じるときの保存）は、保存の失敗を例外で受けて知らせる。
+    /// <see cref="JsonSettingsStore{TSettings}.Save"/> の <c>false</c> を黙って捨てると、表示は変わったのに保存されない。
+    /// </remarks>
+    private void SaveOrThrow(AiSettings settings)
+    {
+        if (!_settingsStore.Save(settings))
+        {
+            throw new IOException(Strings.Connection_SettingsFileUnreadable);
+        }
+    }
+
+    /// <summary>
+    /// モデルの履歴から削除した設定を保存する。保存できなければ <see cref="ModelHistoryRemoveFailed"/> で知らせて <c>false</c>
+    /// </summary>
+    /// <remarks>
+    /// × のコマンドから例外を漏らすと、UI の例外の受け皿がアプリを終了させる。
+    /// </remarks>
+    private bool TrySaveForRemoval(AiSettings settings)
+    {
+        if (_settingsStore.TrySave(settings, out var failure))
+        {
+            return true;
+        }
+
+        NotifyRemovalFailed(failure);
+        return false;
+    }
+
+    /// <summary>履歴から削除できなかったことを知らせる（理由が無ければ、読めないファイルを上書きしなかったとする）</summary>
+    private void NotifyRemovalFailed(Exception? failure) =>
+        ModelHistoryRemoveFailed?.Invoke(
+            this,
+            string.Format(
+                Strings.Connection_ModelHistoryRemoveFailedFormat,
+                failure?.Message ?? Strings.Connection_SettingsFileUnreadable
+            )
+        );
 
     /// <summary>config.toml から Codex のプロバイダー・モデル候補を読み込む</summary>
     private void LoadCodexModelCandidates()
@@ -789,9 +884,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         // （読み込みで OnApiKeyChanged が走っても上書き保存しないよう _isInitializing で抑止する）
         var wasInitializing = _isInitializing;
         _isInitializing = true;
-        ApiKey = CurrentApiKeyStoreName is { } slot
-            ? _apiKeyLoader(slot) ?? string.Empty
-            : string.Empty;
+        LoadApiKeyForCurrentProvider();
         _isInitializing = wasInitializing;
     }
 
@@ -857,10 +950,19 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             return;
         }
 
+        // 読めなかったキーは、新しいキーが入力されるまで上書きも削除もしない
+        // （空のまま保存すると、別の PC で保存した・一時的に読めなかっただけの暗号ファイルが消える）
+        if (IsSavedApiKeyUnreadable && string.IsNullOrEmpty(ApiKey))
+        {
+            _apiKeyDirty = false;
+            return;
+        }
+
         try
         {
             _apiKeySaver(slot, SaveApiKey ? ApiKey : string.Empty);
             _apiKeyDirty = false;
+            IsSavedApiKeyUnreadable = false;
         }
         catch (Exception ex)
             when (ex

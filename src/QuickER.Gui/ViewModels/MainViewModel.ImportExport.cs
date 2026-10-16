@@ -650,7 +650,7 @@ public partial class MainViewModel : IDiagramTransferHost
 
             // 復旧ファイルはアトミックに書き換える。クラッシュ時の緊急保存もこの経路を通るため、
             // 書き込み途中で落ちても直前の自動保存内容が壊れずに残る
-            JsonStorageService.SaveAtomic(_autoSavePath, ToDocument());
+            var autoSaved = JsonStorageService.SaveAtomic(_autoSavePath, ToDocument());
 
             // UI 表示状態・文書メタは GUI 全体設定の各セクション。他のセクション（言語など）を消さないよう
             // Load → 該当セクションのみ差し替え → Save の read-modify-write で書き込む
@@ -671,6 +671,7 @@ public partial class MainViewModel : IDiagramTransferHost
                 FilePath = CurrentFilePath,
                 LastKnownHash = _lastKnownFileHash,
                 IsDirty = IsDirty,
+                AutoSaveHash = DocumentContentHash.ComputeForText(autoSaved),
             };
             _guiSettingsStore.Save(settings);
         }
@@ -712,8 +713,13 @@ public partial class MainViewModel : IDiagramTransferHost
             // 復元も形式検証込みの経路を通す。手編集・外部の書き換えで Id が重複した作業状態を
             // 復元すると、以後の上書き保存も自動保存も失敗し続ける（＝作業を保存する手段が消える）
             if (
-                !JsonStorageService.TryLoad(_autoSavePath, out var document, out _, out _)
-                || document is null
+                !JsonStorageService.TryLoad(
+                    _autoSavePath,
+                    out var document,
+                    out _,
+                    out _,
+                    out var autoSavedBytes
+                ) || document is null
             )
             {
                 return;
@@ -726,6 +732,31 @@ public partial class MainViewModel : IDiagramTransferHost
             // 作業状態は自動保存ファイルが正のため、ハッシュは再計算せず記録値をそのまま引き継ぐ
             // （ステージ B の外部変更判定で現ファイルと比較するのは復元したこの値）。
             var meta = settings.CurrentDocument;
+
+            // メタが別の自動保存のものなら（メタだけ書けなかった・2 つの書き込みの間で落ちた）、パスを信じない。
+            // 図の内容は残し、無題・未保存として開く（Ctrl+S は名前を付けて保存になり、前のファイルを確認なしに上書きしない）
+            if (
+                meta.AutoSaveHash is { } recorded
+                && (
+                    autoSavedBytes is null
+                    || !string.Equals(
+                        recorded,
+                        DocumentContentHash.ComputeForBytes(autoSavedBytes),
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+            )
+            {
+                CurrentFilePath = null;
+                _lastKnownFileHash = null;
+                MarkClean();
+                _restoredDirty = true;
+                OnPropertyChanged(nameof(IsDirty));
+                OnPropertyChanged(nameof(WindowTitle));
+                NotifyStatus(Strings.Status_AutoSaveRestoredUntitled);
+                return;
+            }
+
             CurrentFilePath = meta.FilePath;
             _lastKnownFileHash = meta.LastKnownHash;
             MarkClean();

@@ -236,7 +236,53 @@ public class JsonSettingsStore<TSettings>
 
         AtomicFile.WriteAllText(SettingsPath, json);
 
+        // 書けたファイルはもう壊れていない。印を残すと、退避に失敗したあとの次の保存が
+        // 正常なファイルを .corrupt へ写す
+        LastLoadCorrupt = false;
+
         return true;
+    }
+
+    /// <summary>
+    /// 設定を読み直して変更を当て、保存する（利用者の 1 操作を保存する用途。例外を投げない）
+    /// </summary>
+    /// <param name="change">読み直した設定へ当てる変更</param>
+    /// <param name="settings">変更を当てた設定（保存できなかったときも、当てた後の値）</param>
+    /// <param name="failure">
+    /// 保存できなかった理由。書き込みの例外か、読めない既存ファイルを守るために書かなかったときは <c>null</c>
+    /// </param>
+    /// <returns>保存できたら <c>true</c></returns>
+    /// <remarks>
+    /// 保存できないのは 2 通り。書き込みの失敗（アクセス拒否・保存先フォルダの位置に同名のファイルがある等）と、
+    /// 読めない既存ファイルを既定値で塗り潰さないために <see cref="Save"/> が書かずに戻ったとき。
+    /// 呼び出し側はどちらでも表示を保存の内容に合わせて知らせ、表示と保存の食い違いを残さないこと。
+    /// </remarks>
+    public bool TryUpdate(Action<TSettings> change, out TSettings settings, out Exception? failure)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        settings = Load();
+        change(settings);
+        return TrySave(settings, out failure);
+    }
+
+    /// <summary><see cref="Save"/> の、例外を投げない形</summary>
+    /// <param name="settings">保存する設定</param>
+    /// <param name="failure">
+    /// 保存できなかった理由。書き込みの例外か、読めない既存ファイルを守るために書かなかったときは <c>null</c>
+    /// </param>
+    /// <returns>保存できたら <c>true</c></returns>
+    public bool TrySave(TSettings settings, out Exception? failure)
+    {
+        try
+        {
+            failure = null;
+            return Save(settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            failure = ex;
+            return false;
+        }
     }
 
     /// <summary>

@@ -541,7 +541,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         IMockProjectGenerator? mockProjectGenerator = null,
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
         IDialogService? dialogService = null,
-        Func<string, string?>? apiKeyLoader = null,
+        Func<string, SavedApiKey?>? apiKeyLoader = null,
         Action<string, string>? apiKeySaver = null,
         Action<Action>? scheduleLogFlush = null
     )
@@ -626,6 +626,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // ctor 順序厳守: Connection 生成 → PropertyChanged 購読 → Connection.LoadSettings
         // （購読前にロードするとモデル同期・可否再評価が漏れる）
         Connection.PropertyChanged += OnConnectionPropertyChanged;
+        Connection.ModelHistoryRemoveFailed += (_, message) => StatusMessage = message;
         // タブへの中継は、上の会話リセットなどの後に走るよう、ここで購読させる
         BackendSelection = new BackendTabSelection(Connection, TryChangeBackend);
         Connection.LoadSettings();

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.AccessControl;
 using System.Text;
 
 namespace QuickER.Platform;
@@ -73,6 +74,65 @@ public static class AtomicFile
     /// <remarks>回数と同じ理由で差し替えと読み取りで共有する</remarks>
     private const int RetryDelayStepMilliseconds = 10;
 
+    /// <summary>一時ファイル名の、元の名前の後ろに足す部分の長さ（<c>.</c>＋GUID の 32 桁＋<c>.tmp</c>）</summary>
+    private const int TemporarySuffixLength = 37;
+
+    /// <summary>ファイル名の 1 区間の上限（NTFS などの 255 文字）</summary>
+    private const int MaxFileNameLength = 255;
+
+    /// <summary>
+    /// 保存先と同じフォルダに置く一時ファイルのパス（<c>{元の名前}.{GUID}.tmp</c>。元の名前は 1 区間の上限に収まるよう先頭を残して切る）
+    /// </summary>
+    /// <remarks>
+    /// 元の名前をそのまま前に付けると、218 文字を超える名前の保存先では一時ファイルの名前が 255 文字を超え、
+    /// 保存先そのものは作れるのに書き込みが必ず失敗する。切ったあとも、残った一時ファイルが何の保存のものかは
+    /// 名前の先頭で分かる。名前の判定は <see cref="IsTemporaryFileName"/>。
+    /// </remarks>
+    /// <param name="path">保存先のパス</param>
+    /// <returns>一時ファイルのパス</returns>
+    public static string TemporaryPathFor(string path)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        var folder = Path.GetDirectoryName(path);
+        var name = Path.GetFileName(path);
+        var keep = MaxFileNameLength - TemporarySuffixLength;
+
+        if (name.Length > keep)
+        {
+            // サロゲートペアの途中で切らない
+            keep -= char.IsHighSurrogate(name[keep - 1]) ? 1 : 0;
+            name = name[..keep];
+        }
+
+        var temporaryName = name + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        return string.IsNullOrEmpty(folder) ? temporaryName : Path.Combine(folder, temporaryName);
+    }
+
+    /// <summary>名前が <see cref="TemporaryPathFor"/> の作る一時ファイルの形（<c>….{32 桁の 16 進}.tmp</c>）か</summary>
+    /// <remarks>
+    /// 書き込みの途中で落ちると一時ファイルが残る。フォルダの中身を丸ごと写す処理（モックフォルダの同梱など）は、
+    /// これで残骸を除く。
+    /// </remarks>
+    /// <param name="fileName">ファイル名（パスでなく名前だけ）</param>
+    /// <returns>一時ファイルの形なら <c>true</c></returns>
+    public static bool IsTemporaryFileName(string fileName)
+    {
+        ArgumentNullException.ThrowIfNull(fileName);
+
+        if (
+            fileName.Length <= TemporarySuffixLength
+            || !fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return false;
+        }
+
+        var start = fileName.Length - TemporarySuffixLength;
+
+        return fileName[start] == '.'
+            && fileName.AsSpan(start + 1, 32).IndexOfAnyExcept("0123456789abcdef") < 0;
+    }
+
     /// <summary>文字列を原子的にファイルへ書き出す（全量を書き切ってから保存先へ差し替える）</summary>
     /// <remarks>
     /// 保存先フォルダの作成は行わない（呼び出し側の責務）。差し替えに失敗した場合は一時ファイルを
@@ -123,7 +183,7 @@ public static class AtomicFile
         // 名前に GUID を挟むのは、同じファイルを複数プロセス（GUI と MCP サーバ）が同時に
         // 保存したとき tmp が衝突して「書き途中の混線した内容を本体へ差し替える」破損へ
         // 昇格するのを防ぐため。
-        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var temporaryPath = TemporaryPathFor(path);
 
         try
         {
@@ -316,16 +376,21 @@ public static class AtomicFile
     /// </remarks>
     /// <param name="path">作るファイルのパス</param>
     /// <param name="contents">書き込む内容（BOM なし UTF-8）</param>
-    public static void CreateText(string path, string contents)
+    public static void CreateText(string path, string contents) =>
+        CreateText(path, contents, TextEncodings.Utf8NoBom);
+
+    /// <summary>文字コードを明示して、文字列を新しいファイルとして原子的に書き出す</summary>
+    /// <remarks>意味論は <see cref="CreateText(string, string)"/> と同一で、違いは書き出しの文字コードだけ。</remarks>
+    /// <param name="path">作るファイルのパス</param>
+    /// <param name="contents">書き込む内容</param>
+    /// <param name="encoding">書き出しに用いる文字コード</param>
+    public static void CreateText(string path, string contents, Encoding encoding)
     {
-        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        var temporaryPath = TemporaryPathFor(path);
 
         try
         {
-            WriteAndFlushToDisk(
-                temporaryPath,
-                stream => WriteText(stream, contents, TextEncodings.Utf8NoBom)
-            );
+            WriteAndFlushToDisk(temporaryPath, stream => WriteText(stream, contents, encoding));
             File.Move(temporaryPath, path, overwrite: false);
         }
         finally
@@ -363,12 +428,75 @@ public static class AtomicFile
             {
                 // クラウド同期フォルダ等、File.Replace が使えない環境向けのフォールバック
                 // （OS 水準の原子性は落ちるが「全量を書き切ってから差し替える」保護は保たれる）
-                File.Move(temporaryPath, path, overwrite: true);
+                MoveOverPreservingMetadata(temporaryPath, path);
             }
         }
         else
         {
             File.Move(temporaryPath, path, overwrite: true);
+        }
+    }
+
+    /// <summary>
+    /// 一時ファイルを既存の保存先へ移して置き換え、保存先が持っていた属性と ACL を移した先へ写す
+    /// （<see cref="File.Replace(string, string, string?)"/> が使えないときの代わり）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="File.Replace(string, string, string?)"/> は保存先の属性（隠し・システムなど）と ACL を引き継ぐが、
+    /// <see cref="File.Move(string, string, bool)"/> は一時ファイルのもの（既定の属性・親フォルダから継いだ ACL）を
+    /// 持ち込む。そのため移す前に保存先のものを読み、移した後に写す。
+    /// </para>
+    /// <para>
+    /// 写すのは最善努力：読み取り・写しに失敗しても保存そのもの（内容の置き換え）は成功させる。ACL は Windows でだけ写し、
+    /// それ以外の OS では何もしない（属性は OS を問わず写す）。読み取り専用の属性は写さない（読み取り専用の保存先は
+    /// 置き換えの前に失敗するのでここへは来ないが、写すと次の保存が自分の付けた印で止まる）。
+    /// </para>
+    /// </remarks>
+    /// <param name="temporaryPath">書き切った一時ファイルのパス</param>
+    /// <param name="path">置き換える保存先のパス</param>
+    internal static void MoveOverPreservingMetadata(string temporaryPath, string path)
+    {
+        FileAttributes? attributes = null;
+        string? accessSddl = null;
+
+        try
+        {
+            attributes = File.GetAttributes(path) & ~FileAttributes.ReadOnly;
+
+            if (OperatingSystem.IsWindows())
+            {
+                accessSddl = new FileInfo(path)
+                    .GetAccessControl(AccessControlSections.Access)
+                    .GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 読めなければ写さない（保存は続ける）
+        }
+
+        File.Move(temporaryPath, path, overwrite: true);
+
+        try
+        {
+            if (attributes is { } kept)
+            {
+                File.SetAttributes(path, kept);
+            }
+
+            // 読み取ったオブジェクトをそのまま渡しても、変更の印が無いので何も書かれない。
+            // SDDL から作り直した記述子を渡す（DACL と継承の保護の有無を写す）
+            if (accessSddl is not null && OperatingSystem.IsWindows())
+            {
+                var security = new FileSecurity();
+                security.SetSecurityDescriptorSddlForm(accessSddl, AccessControlSections.Access);
+                new FileInfo(path).SetAccessControl(security);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 写せなくても内容は置き換わっている（保存は成功）
         }
     }
 }

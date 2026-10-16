@@ -64,6 +64,15 @@
   <data name="Attachment_RemoveTooltip" xml:space="preserve">
     <value>削除</value>
   </data>
+  <data name="Connection_SettingsFileUnreadable" xml:space="preserve">
+    <value>設定ファイルを読めなかったため、上書きしませんでした。</value>
+  </data>
+  <data name="Connection_ModelHistoryRemoveFailedFormat" xml:space="preserve">
+    <value>モデルを履歴から削除できませんでした: {0}</value>
+  </data>
+  <data name="Connection_SavedApiKeyUnreadable" xml:space="preserve">
+    <value>保存されている API キーを読めませんでした（別のユーザー・別の PC で保存したもの、またはファイルが壊れている可能性があります）。新しいキーを入力するまで、保存されているものはそのまま残します。</value>
+  </data>
   <data name="Connection_Refresh" xml:space="preserve">
     <value>再確認</value>
   </data>

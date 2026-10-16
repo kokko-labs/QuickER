@@ -52,6 +52,15 @@ public class CurrentDocumentSettings
 
     /// <summary>最終読込／上書き保存以降に未保存の変更があるか（次回起動時にタイトルの * 表示へ反映する）</summary>
     public bool IsDirty { get; set; }
+
+    /// <summary>このメタと一緒に書いた自動保存ファイル（last_diagram.json）の内容の SHA-256（16 進）</summary>
+    /// <remarks>
+    /// 自動保存は図（last_diagram.json）とこのメタ（gui-settings.json）を別々のファイルへ書くので、メタだけが書けない・
+    /// 2 つの書き込みの間で落ちると、別の図の内容に前のファイルのパスが付いて復元される。起動時はこの値と
+    /// 自動保存ファイルの内容を照らし合わせ、食い違えばパスを捨てて無題として復元する。
+    /// null（この値を持たない旧版が書いたメタ）は照合せずに信じる。
+    /// </remarks>
+    public string? AutoSaveHash { get; set; }
 }
 
 /// <summary>ダイアグラム上の表示トグル（次回起動時に復元する自動保存対象）</summary>
@@ -113,24 +122,13 @@ public class GuiAppSettingsStore : JsonSettingsStore<GuiAppSettings>
     /// </remarks>
     public bool TryUpdate(Action<GuiAppSettings> change, out string failureReason)
     {
-        try
+        if (TryUpdate(change, out _, out var failure))
         {
-            var settings = Load();
-            change(settings);
-
-            if (Save(settings))
-            {
-                failureReason = string.Empty;
-                return true;
-            }
-
-            failureReason = Strings.Settings_FileUnreadable;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            failureReason = ex.Message;
+            failureReason = string.Empty;
+            return true;
         }
 
+        failureReason = failure?.Message ?? Strings.Settings_FileUnreadable;
         return false;
     }
 }

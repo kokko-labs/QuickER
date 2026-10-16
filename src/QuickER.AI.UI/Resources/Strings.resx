@@ -64,6 +64,15 @@
   <data name="Attachment_RemoveTooltip" xml:space="preserve">
     <value>Remove</value>
   </data>
+  <data name="Connection_SettingsFileUnreadable" xml:space="preserve">
+    <value>The settings file could not be read, so it was not overwritten.</value>
+  </data>
+  <data name="Connection_ModelHistoryRemoveFailedFormat" xml:space="preserve">
+    <value>The model could not be removed from the history: {0}</value>
+  </data>
+  <data name="Connection_SavedApiKeyUnreadable" xml:space="preserve">
+    <value>The saved API key could not be read (it may have been saved by another user or on another PC, or the file may be damaged). It is kept as it is until you enter a new key.</value>
+  </data>
   <data name="Connection_Refresh" xml:space="preserve">
     <value>Recheck</value>
   </data>

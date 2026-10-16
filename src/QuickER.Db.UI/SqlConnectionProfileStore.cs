@@ -240,10 +240,11 @@ public class SqlConnectionProfileStore
     /// connections.json が破損した JSON になり、読込側（<see cref="LoadData"/>）が空データへ
     /// フォールバックした状態のまま次の read-modify-write 保存（<see cref="SaveAll"/> /
     /// <see cref="SaveLastUsed"/>）で他のプロファイル・前回接続情報が巻き添えで消失する。
-    /// これを防ぐのがここでの原子的書き込みの目的（なお DPAPI 暗号ファイルの書き出しは
-    /// <see cref="SaveSecret(string, string)"/> の単純書き込みのままで、本メソッドの対象外）。
-    /// <see cref="SaveSecret(string, string)"/> が失敗すると <c>SavePassword=true</c> だけが確定するが、
-    /// 読み出しは空パスワード＝再入力へ安全に劣化するため、原子性の対象へは含めない（意図的な割り切り）。
+    /// これを防ぐのがここでの原子的書き込みの目的。DPAPI の暗号ファイルは <see cref="SaveSecret(string, string)"/> が
+    /// 別のファイルとして（同じく原子的に）書く。2 つのファイルなので、こちらが書けて暗号ファイルが書けなかった
+    /// 状態（<c>SavePassword=true</c> なのに暗号ファイルが無い）は残り得る。そのとき <see cref="LoadSecret"/> は
+    /// <see cref="SavedPasswordStatus.Missing"/> を返し、パスワードは空欄＝再入力になる。暗号ファイルがあるのに
+    /// 読めないときは <see cref="SavedPasswordStatus.Unreadable"/> を返し、空の値で暗号ファイルを消さない。
     /// </remarks>
     private void SaveData(SqlConnectionData data)
     {

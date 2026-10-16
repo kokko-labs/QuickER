@@ -458,7 +458,8 @@ public sealed class MockProjectScaffoldService
     /// </summary>
     /// <remarks>
     /// モックフォルダはフラット構成（サブフォルダなし）が前提のため、直下のファイルのみを対象にする。
-    /// 同名ファイルは上書きし、コピーしたパスを書き出し記録へ加える。
+    /// 同名ファイルは上書きし、コピーしたパスを書き出し記録へ加える。書き込みの途中で落ちて残った
+    /// 原子的な書き込みの一時ファイル（<see cref="AtomicFile.IsTemporaryFileName"/>）は写さない。
     /// </remarks>
     private static void CopyMockFolder(string mockFolder, string designFolder, List<string> written)
     {
@@ -466,8 +467,15 @@ public sealed class MockProjectScaffoldService
 
         foreach (var source in Directory.EnumerateFiles(mockFolder))
         {
-            var destination = Path.Combine(designFolder, Path.GetFileName(source));
-            AtomicFile.WriteAllBytes(destination, File.ReadAllBytes(source));
+            var name = Path.GetFileName(source);
+
+            if (AtomicFile.IsTemporaryFileName(name))
+            {
+                continue;
+            }
+
+            var destination = Path.Combine(designFolder, name);
+            AtomicFile.WriteAllBytes(destination, AtomicFile.ReadAllBytes(source));
             written.Add(destination);
         }
     }

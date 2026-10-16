@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
+using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
 
@@ -53,15 +54,36 @@ public partial class MockPreviewPanel : UserControl
     public MockPreviewPanel()
     {
         InitializeComponent();
-        CoreWebViewInitializer = () => WebView.EnsureCoreWebView2Async();
+        CoreWebViewInitializer = InitializeCoreWithUserDataFolderAsync;
         Loaded += OnLoaded;
     }
 
+    /// <summary>WebView2 のユーザーデータ（キャッシュ・ストレージ）の既定の置き場所（%LOCALAPPDATA%\QuickER\WebView2）</summary>
+    /// <remarks>
+    /// 既定の置き場所は実行ファイルの隣（<c>QuickER.exe.WebView2</c>）で、インストール先は更新のたびに入れ替わる
+    /// （Velopack の <c>current</c>）か、書き込めない場所（ポータブル版を置いたフォルダ）になる。
+    /// 保存先の方針（<see cref="AppDataPaths.LocalRoot"/>）に合わせてローカルのアプリのデータへ置く。
+    /// </remarks>
+    internal static string DefaultUserDataFolder =>
+        Path.Combine(AppDataPaths.LocalRoot, "WebView2");
+
+    /// <summary>このパネルが使うユーザーデータの置き場所（既定は <see cref="DefaultUserDataFolder"/>。テストは一時フォルダへ向ける）</summary>
+    internal string UserDataFolder { get; set; } = DefaultUserDataFolder;
+
     /// <summary>
-    /// WebView2 コアを初期化する処理（既定は <c>WebView.EnsureCoreWebView2Async()</c>）。
+    /// WebView2 コアを初期化する処理（既定は <see cref="UserDataFolder"/> を使う環境で <c>EnsureCoreWebView2Async</c>）。
     /// 実ランタイムなしに初期化の回数を確かめるためのテスト用の差し替え口。
     /// </summary>
     internal Func<Task> CoreWebViewInitializer { get; set; }
+
+    /// <summary><see cref="UserDataFolder"/> を使う環境を作ってコアを初期化する</summary>
+    private async Task InitializeCoreWithUserDataFolderAsync()
+    {
+        var environment = await CoreWebView2Environment
+            .CreateAsync(browserExecutableFolder: null, userDataFolder: UserDataFolder)
+            .ConfigureAwait(true);
+        await WebView.EnsureCoreWebView2Async(environment).ConfigureAwait(true);
+    }
 
     /// <summary>現在表示中（許可済み）のプレビューファイル URI（テストからの確認用）</summary>
     internal Uri? CurrentSource => _currentSource;

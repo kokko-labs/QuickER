@@ -151,6 +151,31 @@ public class JsonSettingsStoreTests : IDisposable
     /// 残したいのは「最後に正しく読めていた状態にいちばん近いもの」＝最も古い退避。
     /// 毎回上書きすると、既定値で書き直したあとの無害なファイルへ入れ替わって手掛かりが消える。
     /// </remarks>
+    /// <remarks>
+    /// 退避に失敗しても保存は続ける。書けたファイルはもう壊れていないので、壊れていた印を残すと、
+    /// 読み直さずに続けた次の保存が正常なファイルを退避先へ写す（壊れたファイルの手掛かりの代わりに正常な内容が残る）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "Save: 退避に失敗したあとの次の保存は、正常なファイルを .corrupt へ写さない"
+    )]
+    public void Save_AfterFailedBackup_DoesNotBackUpHealthyFile()
+    {
+        var store = CreateStore();
+        File.WriteAllText(store.SettingsPath, "壊れた");
+        store.Load();
+
+        // 退避先にフォルダがあると File.Copy が失敗する（退避はベストエフォートで、保存は続く）
+        Directory.CreateDirectory(store.CorruptBackupPath);
+        store.Save(new ProbeSettings { Language = "ja" }).Should().BeTrue();
+        Directory.Delete(store.CorruptBackupPath);
+
+        store.Save(new ProbeSettings { Language = "en" }).Should().BeTrue();
+
+        File.Exists(store.CorruptBackupPath)
+            .Should()
+            .BeFalse("書けたファイルはもう壊れていないので退避しない");
+    }
+
     [Fact(DisplayName = "Save: 壊れた JSON は最初の 1 回だけ .corrupt へ退避する")]
     public void Save_CorruptJson_BacksUpOnlyOnce()
     {
