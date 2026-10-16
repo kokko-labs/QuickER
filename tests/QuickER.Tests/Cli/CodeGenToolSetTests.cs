@@ -335,7 +335,7 @@ public class CodeGenToolSetTests
     /// </summary>
     /// <remarks>
     /// 出力先を検証しないと、MCP 経由のエージェントが任意パス・任意拡張子のファイルを DDL で上書きできる。
-    /// 柵は <c>create_diagram</c>（親ディレクトリを黙って掘らない）と同じ流儀＝拡張子と親ディレクトリだけを見る。
+    /// 柵は拡張子と親ディレクトリだけを見る（親ディレクトリを黙って掘らない点は <c>create_diagram</c> と同じ）。
     /// </remarks>
     [Theory(DisplayName = "generate_ddl は .sql 以外の拡張子を書き込まずに拒否する")]
     [InlineData("schema.txt")]

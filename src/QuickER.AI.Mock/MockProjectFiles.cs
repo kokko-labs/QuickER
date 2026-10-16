@@ -1,6 +1,7 @@
 using System.IO;
 using System.IO.Enumeration;
 using System.Linq;
+using QuickER.Platform;
 
 namespace QuickER.AI.Mock;
 
@@ -204,7 +205,7 @@ internal static class MockProjectFiles
             return true;
         }
 
-        return IsSameOrUnder(a, b) || IsSameOrUnder(b, a);
+        return PathContainment.IsSameOrUnder(a, b) || PathContainment.IsSameOrUnder(b, a);
     }
 
     /// <summary>
@@ -284,14 +285,6 @@ internal static class MockProjectFiles
 
         return null;
     }
-
-    /// <summary><paramref name="path"/> が <paramref name="parent"/> と同じか、その配下か（大文字小文字は区別しない）</summary>
-    private static bool IsSameOrUnder(string path, string parent) =>
-        path.Equals(parent, StringComparison.OrdinalIgnoreCase)
-        || path.StartsWith(
-            Path.EndsInDirectorySeparator(parent) ? parent : parent + Path.DirectorySeparatorChar,
-            StringComparison.OrdinalIgnoreCase
-        );
 
     /// <summary>
     /// フォルダを削除する（読み取り専用を外してから・リンクはリンクだけ外す）。失敗は握る

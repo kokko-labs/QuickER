@@ -378,7 +378,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         && IsSelectedBackendReadyForMockGen
         && IsDotnetAvailable
         && !string.IsNullOrWhiteSpace(OutputFolder)
-        && MockProjectScaffoldService.IsValidProjectName(ProjectName)
+        && MockProjectScaffoldService.IsValidProjectName(ProjectName.Trim())
         && !IsMockGenInProgress
         && !IsTurnInProgress;
 
@@ -458,12 +458,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 return Strings.Mock_DisabledReason_ProjectName;
             }
 
-            if (MockProjectScaffoldService.CheckProjectName(ProjectName) is { } violation)
+            // 実行は前後の空白を取り除いた名前を使うので、判定も取り除いた名前で行う
+            if (
+                MockProjectScaffoldService.CheckProjectName(
+                    ProjectName.Trim(),
+                    CultureInfo.CurrentUICulture
+                ) is
+                { } reason
+            )
             {
-                return string.Format(
-                    Strings.Mock_DisabledReason_ProjectNameInvalid,
-                    PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
-                );
+                return reason;
             }
 
             return string.Empty;

@@ -142,6 +142,9 @@
   <data name="CodeGen_Error_InvalidApiDocsFileName" xml:space="preserve">
     <value>The 'ApiDocsFileName' option has an invalid file name: '{0}' ({1}). Specify a file name only; use 'ApiDocsSubdirectory' to choose the folder.</value>
   </data>
+  <data name="CodeGen_Error_InvalidOutputFileName" xml:space="preserve">
+    <value>The 'OutputFileName' option has an invalid file name: '{0}' ({1}). Specify a file name only; the folder is set by the output folder and 'CodeSubdirectory'.</value>
+  </data>
   <data name="CodeGen_Error_InvalidApiDocsLanguage" xml:space="preserve">
     <value>The 'ApiDocsLanguage' option has an undefined value: {0}. Specify one of: {1}.</value>
   </data>

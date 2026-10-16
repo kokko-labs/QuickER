@@ -343,33 +343,9 @@ public partial class MockPreviewPanel : UserControl
             return false;
         }
 
-        if (!path.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        try
-        {
-            // `..` を含む相対経路もフルパス化で正規化され、フォルダ外なら親フォルダが一致しない
-            var directory = Path.GetDirectoryName(Path.GetFullPath(path));
-
-            if (directory is null)
-            {
-                return false;
-            }
-
-            var root = Path.GetFullPath(allowedRootFolder);
-
-            return string.Equals(
-                Path.TrimEndingDirectorySeparator(directory),
-                Path.TrimEndingDirectorySeparator(root),
-                StringComparison.OrdinalIgnoreCase
-            );
-        }
-        catch (Exception)
-        {
-            return false;
-        }
+        // `..` を含む経路も正規化され、フォルダ外なら直下と判定されない
+        return path.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+            && PathContainment.IsDirectChild(path, allowedRootFolder);
     }
 
     /// <summary>
@@ -432,23 +408,10 @@ public partial class MockPreviewPanel : UserControl
 
         try
         {
-            // `..` を含む相対経路もフルパス化で正規化され、フォルダ外なら親フォルダが一致しない
-            var directory = Path.GetDirectoryName(Path.GetFullPath(target.LocalPath));
-
-            if (directory is null)
-            {
-                return false;
-            }
-
-            var root = Path.GetFullPath(allowedRootFolder);
-
-            return string.Equals(
-                Path.TrimEndingDirectorySeparator(directory),
-                Path.TrimEndingDirectorySeparator(root),
-                StringComparison.OrdinalIgnoreCase
-            );
+            // `..` を含む経路も正規化され、フォルダ外なら直下と判定されない
+            return PathContainment.IsDirectChild(target.LocalPath, allowedRootFolder);
         }
-        catch (Exception)
+        catch (InvalidOperationException)
         {
             return false;
         }

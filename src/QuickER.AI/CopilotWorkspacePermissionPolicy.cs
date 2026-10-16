@@ -1,6 +1,7 @@
 using System.IO;
 using System.Linq;
 using GitHub.Copilot;
+using QuickER.Platform;
 
 namespace QuickER.AI;
 
@@ -112,27 +113,10 @@ internal static class CopilotWorkspacePermissionPolicy
             return false;
         }
 
-        string full;
-
-        try
-        {
-            // 相対パスはセッションの作業フォルダ基準。".." を含む脱出は GetFullPath が正規化して露見する
-            full = NormalizeRoot(Path.Combine(approvalRoot, path));
-        }
-        catch (Exception)
-        {
-            // 不正な文字などで解決できないパスは承認しない
-            return false;
-        }
-
-        return string.Equals(full, approvalRoot, StringComparison.OrdinalIgnoreCase)
-            || full.StartsWith(
-                approvalRoot + Path.DirectorySeparatorChar,
-                StringComparison.OrdinalIgnoreCase
-            );
+        // 相対パスはセッションの作業フォルダ基準。".." を含む脱出は正規化で露見し、解決できないパスは承認しない
+        return PathContainment.IsSameOrUnder(Path.Combine(approvalRoot, path), approvalRoot);
     }
 
-    /// <summary>パスを絶対パスへ正規化し、末尾の区切り文字を落とす（前方一致判定の基準を揃える）</summary>
-    internal static string NormalizeRoot(string path) =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    /// <summary>パスを絶対パスへ正規化し、末尾の区切り文字を落とす（<see cref="PathContainment.Normalize"/>）</summary>
+    internal static string NormalizeRoot(string path) => PathContainment.Normalize(path);
 }

@@ -111,7 +111,8 @@ public static class AtomicFile
     /// <summary>名前が <see cref="TemporaryPathFor"/> の作る一時ファイルの形（<c>….{32 桁の 16 進}.tmp</c>）か</summary>
     /// <remarks>
     /// 書き込みの途中で落ちると一時ファイルが残る。フォルダの中身を丸ごと写す処理（モックフォルダの同梱など）は、
-    /// これで残骸を除く。
+    /// これで残骸を除く。判定は名前の形だけで行うので、利用者が偶然この形の名前で置いたファイルも一時ファイルと見なす
+    /// （その処理では写されない）。
     /// </remarks>
     /// <param name="fileName">ファイル名（パスでなく名前だけ）</param>
     /// <returns>一時ファイルの形なら <c>true</c></returns>

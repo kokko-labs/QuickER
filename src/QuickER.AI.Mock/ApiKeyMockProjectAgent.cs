@@ -473,10 +473,14 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         }
     }
 
-    /// <summary>画面ファイルの HTML を読む（不在は空文字）</summary>
-    private static string ReadScreenHtml(string designFolder, string file)
+    /// <summary>画面ファイルの HTML を読む（不在と、画面のファイル名として断る名前は空文字＝読まない）</summary>
+    /// <remarks>
+    /// 名前はマニフェストから来るので、ストアと同じ判定（<see cref="MockFolderStore.CheckScreenFileName"/>）を通す。
+    /// 開いた後に書き換えられた <c>mock.json</c> の絶対パスや <c>..</c> で、設計フォルダの外を読まない。
+    /// </remarks>
+    internal static string ReadScreenHtml(string designFolder, string file)
     {
-        if (string.IsNullOrWhiteSpace(file))
+        if (MockFolderStore.CheckScreenFileName(file) is not null)
         {
             return string.Empty;
         }

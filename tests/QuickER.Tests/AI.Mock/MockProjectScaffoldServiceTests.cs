@@ -189,6 +189,9 @@ public class MockProjectScaffoldServiceTests
     [InlineData("sub\\dir")]
     [InlineData("bad:name")]
     [InlineData("bad*name")]
+    // 生成するプロジェクトが自分用に使うフォルダの名前（API キー方式の提出がすべて断られる）
+    [InlineData("Design")]
+    [InlineData("obj")]
     public void Scaffold_InvalidProjectName_Throws(string projectName)
     {
         var folder = NewTempFolder();
@@ -244,8 +247,42 @@ public class MockProjectScaffoldServiceTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData(null)]
+    [InlineData("Generated")]
+    [InlineData("BIN")]
     public void IsValidProjectName_RejectsInvalidNames(string? projectName) =>
         MockProjectScaffoldService.IsValidProjectName(projectName).Should().BeFalse();
+
+    /// <summary>
+    /// プロジェクト名で断るフォルダの名前は、API キー方式の提出が断る名前と同じ一覧から作る（写しを持たない）。
+    /// その名前のプロジェクトフォルダへの提出は必ず断られるので、生成を始める前に断る理由がある
+    /// </summary>
+    [Fact(
+        DisplayName = "プロジェクト名で断るフォルダの名前は、プロジェクトフォルダにすると提出がすべて断られる名前と同じ"
+    )]
+    public void ProtectedFolderNames_AreExactlyTheNamesThatBlockEverySubmission()
+    {
+        MockProjectEmitTools
+            .ProtectedFolderNames.Should()
+            .BeEquivalentTo(
+                MockProjectScaffoldService.GeneratedFolderName,
+                MockProjectScaffoldService.DesignRootFolderName,
+                "obj",
+                "bin"
+            );
+
+        foreach (var name in MockProjectEmitTools.ProtectedFolderNames)
+        {
+            MockProjectScaffoldService.IsValidProjectName(name).Should().BeFalse(name);
+            MockProjectEmitTools
+                .ResolveEmitPath(
+                    Path.GetTempPath(),
+                    MockProjectTargetProfile.Blazor,
+                    $"{name}/Components/Pages/Home.razor"
+                )
+                .Ok.Should()
+                .BeFalse(name);
+        }
+    }
 
     /// <summary>SQL Server 方言の図ではQuickER の SQL Server Repository（と SqlClient 依存）が出力されることを検証する</summary>
     [Fact(DisplayName = "SQL Server 方言ではQuickER 版 Repository と SqlClient 依存を出す")]
