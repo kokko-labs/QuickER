@@ -77,14 +77,14 @@ public static partial class OracleTypeNotation
 
     // TIMESTAMP [(n)] [WITH [LOCAL] TIME ZONE]（大文字小文字・空白の量を問わない）
     [GeneratedRegex(
-        @"^TIMESTAMP\s*(?:\(\s*(?<p>\d{1,9})\s*\))?(?<zone>\s+WITH\s+(?<local>LOCAL\s+)?TIME\s+ZONE)?$",
+        @"^TIMESTAMP\s*(?:\(\s*(?<p>[0-9]{1,9})\s*\))?(?<zone>\s+WITH\s+(?<local>LOCAL\s+)?TIME\s+ZONE)?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TimestampPattern();
 
     // NUMBER(p) / NUMBER(p,s) / NUMBER(*) / NUMBER(*,s)（素の NUMBER はそのまま）
     [GeneratedRegex(
-        @"^NUMBER\s*\(\s*(?<p>\d{1,9}|\*)\s*(?:,\s*(?<s>-?\d{1,9})\s*)?\)$",
+        @"^NUMBER\s*\(\s*(?<p>[0-9]{1,9}|\*)\s*(?:,\s*(?<s>-?[0-9]{1,9})\s*)?\)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex NumberPattern();

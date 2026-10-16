@@ -276,10 +276,10 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
     private static partial Regex WhitespaceRegex();
 
     /// <summary>長さ指定 "(数値)" を検出する正規表現</summary>
-    [GeneratedRegex(@"\((\d+)\)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\(([0-9]+)\)", RegexOptions.CultureInvariant)]
     private static partial Regex LengthRegex();
 
     /// <summary>numeric の "(精度)" または "(精度,スケール)" を検出する正規表現</summary>
-    [GeneratedRegex(@"\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\(\s*([0-9]+)\s*(?:,\s*([0-9]+)\s*)?\)", RegexOptions.CultureInvariant)]
     private static partial Regex PrecisionScaleRegex();
 }

@@ -74,4 +74,21 @@
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
+
+  <!--
+    生成コードへ掛けるカルチャのアナライザ（GeneratedCodeCultureAnalyzerTests）の場所を、テストアセンブリの
+    AssemblyMetadata として渡す。src のビルドが使うのと同じ SDK 同梱の DLL を使う（パッケージを足すと、テストだけ版が変わる）。
+  -->
+  <Target Name="EmbedNetAnalyzerPaths" BeforeTargets="GetAssemblyAttributes">
+    <ItemGroup>
+      <_QuickERNetAnalyzer
+        Include="@(Analyzer)"
+        Condition="'%(Filename)' == 'Microsoft.CodeAnalysis.NetAnalyzers' Or '%(Filename)' == 'Microsoft.CodeAnalysis.CSharp.NetAnalyzers'"
+      />
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>QuickER.NetAnalyzers</_Parameter1>
+        <_Parameter2>@(_QuickERNetAnalyzer->'%(FullPath)')</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
 </Project>

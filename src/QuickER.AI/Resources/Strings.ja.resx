@@ -418,6 +418,9 @@
   <data name="Copilot_PathHasEnvExpansion" xml:space="preserve">
     <value>copilot コマンドのパスに cmd が展開する '%' が含まれるため起動できません: {0}</value>
   </data>
+  <data name="Copilot_PathHasNewline" xml:space="preserve">
+    <value>copilot コマンドのパスに改行が含まれるため起動できません（cmd は改行から後ろを捨てます）: {0}</value>
+  </data>
   <data name="Copilot_PathHasDelayedExpansion" xml:space="preserve">
     <value>copilot コマンドのパスに、遅延展開が有効な cmd が展開する '!' が含まれるため起動できません: {0}</value>
   </data>

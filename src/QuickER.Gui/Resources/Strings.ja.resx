@@ -372,6 +372,9 @@
   <data name="Status_ExternalReloaded" xml:space="preserve">
     <value>外部プログラムによる変更を検知し、再読込しました。</value>
   </data>
+  <data name="Status_AutoSaveRestoredUntitled" xml:space="preserve">
+    <value>前回の作業を、ファイルとの対応を確かめられなかったため無題として復元しました。「名前を付けて保存」で保存先を選んでください。</value>
+  </data>
   <data name="Status_ExternalFileDeleted" xml:space="preserve">
     <value>ファイルが外部で削除されました（監視は継続。保存で再作成されます）。</value>
   </data>

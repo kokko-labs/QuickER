@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using QuickER.AI.Mock.Resources;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Platform;
@@ -118,10 +120,10 @@ public sealed class MockProjectScaffoldService
 
         // プロジェクト名はプロジェクトフォルダ名・csproj 名・.sln 内の相対パスへそのまま使われるため、
         // 出力フォルダ外への書き込みを防ぐ目的で単一セグメント名として妥当か検証する
-        if (CheckProjectName(projectName) is { } violation)
+        if (CheckProjectName(projectName, CultureInfo.InvariantCulture) is { } reason)
         {
             throw new ArgumentException(
-                $"The project name must be a single folder name ({PathSegments.Describe(violation, System.Globalization.CultureInfo.InvariantCulture)}): {projectName}",
+                $"{reason} Project name: {projectName}",
                 nameof(projectName)
             );
         }
@@ -394,21 +396,62 @@ public sealed class MockProjectScaffoldService
     }
 
     /// <summary>
-    /// プロジェクト名を単一セグメントのフォルダ／ファイル名として断る理由を返す（断らないなら <c>null</c>）。
+    /// プロジェクト名を断る理由の文言を返す（断らないなら <c>null</c>）。
     /// </summary>
+    /// <param name="projectName">プロジェクト名（前後の空白は取り除かずに判定する＝取り除くのは呼び出し側）</param>
+    /// <param name="culture">文言の言語</param>
     /// <remarks>
+    /// <para>
     /// プロジェクト名はそのまま <c>{出力フォルダ}/{ProjectName}/</c>（プロジェクトフォルダ名）・
     /// <c>{ProjectName}.csproj</c>・.sln 内の相対パスへ使われるため、出力フォルダ外への書き込みと、Windows が名前を
     /// 書き換えて（末尾の空白・'.' を落とす・予約名をデバイスとして開く）指定名と実フォルダ名が食い違うのを防ぐ。
-    /// 判定の正本は <see cref="PathSegments.CheckSegment"/>。第2ステップの生成可否判定（<see cref="MockGenerationDialogViewModel"/>）と
-    /// <see cref="Scaffold"/> の入力検証の双方から呼ばれる。
+    /// 1 区間の判定の正本は <see cref="PathSegments.CheckSegment"/>。
+    /// </para>
+    /// <para>
+    /// あわせて、生成するプロジェクトが自分用に使うフォルダの名前（<see cref="MockProjectEmitTools.ProtectedFolderNames"/>＝
+    /// <c>Generated</c>・<c>design</c>・<c>obj</c>・<c>bin</c>、大文字小文字を問わない）も断る。API キー方式の提出は
+    /// パスのどの区間でもこれらの名前を断るので、プロジェクトフォルダがこの名前だと提出がすべて断られて生成が必ず失敗する。
+    /// </para>
+    /// <para>
+    /// 第2ステップの生成可否判定（<see cref="MockGenerationDialogViewModel"/>）と <see cref="Scaffold"/> の入力検証の双方から呼ばれる。
+    /// </para>
     /// </remarks>
-    internal static PathSegmentViolation? CheckProjectName(string? projectName) =>
-        PathSegments.CheckSegment(projectName ?? string.Empty);
+    internal static string? CheckProjectName(string? projectName, CultureInfo culture)
+    {
+        if (PathSegments.CheckSegment(projectName ?? string.Empty) is { } violation)
+        {
+            return string.Format(
+                culture,
+                Text("Mock_DisabledReason_ProjectNameInvalid", culture),
+                PathSegments.Describe(violation, culture)
+            );
+        }
 
-    /// <summary>プロジェクト名が単一セグメントのフォルダ／ファイル名として妥当か判定する（<see cref="CheckProjectName"/>）</summary>
+        if (
+            MockProjectEmitTools.ProtectedFolderNames.Contains(
+                projectName,
+                StringComparer.OrdinalIgnoreCase
+            )
+        )
+        {
+            return string.Format(
+                culture,
+                Text("Mock_DisabledReason_ProjectNameReserved", culture),
+                projectName,
+                string.Join(", ", MockProjectEmitTools.ProtectedFolderNames)
+            );
+        }
+
+        return null;
+    }
+
+    /// <summary>プロジェクト名を受け付けるか（<see cref="CheckProjectName"/>）</summary>
     internal static bool IsValidProjectName(string? projectName) =>
-        CheckProjectName(projectName) is null;
+        CheckProjectName(projectName, CultureInfo.InvariantCulture) is null;
+
+    private static string Text(string name, CultureInfo culture) =>
+        Strings.ResourceManager.GetString(name, culture)
+        ?? throw new InvalidOperationException($"No text for {name}.");
 
     /// <summary>プロジェクト名を C# 名前空間として妥当な形へ正規化する（識別子でない文字を除去・数字始まりを回避）</summary>
     private static string SanitizeNamespace(string projectName)
@@ -458,7 +501,8 @@ public sealed class MockProjectScaffoldService
     /// </summary>
     /// <remarks>
     /// モックフォルダはフラット構成（サブフォルダなし）が前提のため、直下のファイルのみを対象にする。
-    /// 同名ファイルは上書きし、コピーしたパスを書き出し記録へ加える。
+    /// 同名ファイルは上書きし、コピーしたパスを書き出し記録へ加える。書き込みの途中で落ちて残った
+    /// 原子的な書き込みの一時ファイル（<see cref="AtomicFile.IsTemporaryFileName"/>）は写さない。
     /// </remarks>
     private static void CopyMockFolder(string mockFolder, string designFolder, List<string> written)
     {
@@ -466,8 +510,15 @@ public sealed class MockProjectScaffoldService
 
         foreach (var source in Directory.EnumerateFiles(mockFolder))
         {
-            var destination = Path.Combine(designFolder, Path.GetFileName(source));
-            AtomicFile.WriteAllBytes(destination, File.ReadAllBytes(source));
+            var name = Path.GetFileName(source);
+
+            if (AtomicFile.IsTemporaryFileName(name))
+            {
+                continue;
+            }
+
+            var destination = Path.Combine(designFolder, name);
+            AtomicFile.WriteAllBytes(destination, AtomicFile.ReadAllBytes(source));
             written.Add(destination);
         }
     }

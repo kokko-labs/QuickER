@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using QuickER.AI.Mock.Resources;
 
@@ -178,7 +179,11 @@ public static class MockResumePrompt
         foreach (var revision in recent)
         {
             builder.AppendLine(
-                $"- {revision.Timestamp:yyyy-MM-dd HH:mm} {revision.Note}".TrimEnd()
+                string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"- {revision.Timestamp:yyyy-MM-dd HH:mm} {revision.Note}"
+                    )
+                    .TrimEnd()
             );
         }
 

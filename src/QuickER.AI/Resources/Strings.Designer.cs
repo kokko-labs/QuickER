@@ -774,6 +774,12 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Copilot_PathHasNewline {
+            get {
+                return ResourceManager.GetString("Copilot_PathHasNewline", resourceCulture);
+            }
+        }
+
         public static string Copilot_PathHasDelayedExpansion {
             get {
                 return ResourceManager.GetString("Copilot_PathHasDelayedExpansion", resourceCulture);

@@ -49,7 +49,7 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
     // 解釈では捨てるが、受理しないと TryParse ごと失敗して型トークンが列から丸ごと消える
     // （単位まで含めた元の表記は CanonicalTypeTokenAttacher の verbatim 併記が保つ）。
     [GeneratedRegex(
-        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?\d+|\*)\s*(?<unit>byte|char)?\s*(,\s*(?<arg2>-?\d+)\s*)?\)\s*(?<suffix>[a-zA-Z][a-zA-Z0-9_ ]*?)?)?\s*$",
+        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_ ]*?)\s*(\(\s*(?<arg1>-?[0-9]+|\*)\s*(?<unit>byte|char)?\s*(,\s*(?<arg2>-?[0-9]+)\s*)?\)\s*(?<suffix>[a-zA-Z][a-zA-Z0-9_ ]*?)?)?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TypePattern();

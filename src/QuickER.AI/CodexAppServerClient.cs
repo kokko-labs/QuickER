@@ -345,23 +345,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
 
         var (fileName, arguments) = _resolveLaunch();
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = arguments,
-            WorkingDirectory = Environment.CurrentDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            // BOM なし UTF-8 を使用する（BOM 付きだとサーバー側のJSONパースが失敗するため）
-            StandardInputEncoding = TextEncodings.Utf8NoBomLenient,
-            StandardOutputEncoding = TextEncodings.Utf8NoBomLenient,
-            StandardErrorEncoding = TextEncodings.Utf8NoBomLenient,
-        };
-
+        var startInfo = CreateStartInfo(fileName, arguments);
         var process = ExternalLauncher.CreateProcess(startInfo);
 
         if (!process.Start())
@@ -421,6 +405,32 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             throw;
         }
     }
+
+    /// <summary>app-server を起動する情報を組み立てる</summary>
+    /// <remarks>
+    /// 作業フォルダはアプリのカレントフォルダでなく、中身の無い <c>%TEMP%\QuickER\codex</c>
+    /// （<see cref="BackendWorkingDirectory.ProcessRoot"/>）。実測（codex-cli 0.157.1）では、プロセスの作業フォルダの
+    /// <c>.codex/config.toml</c>・<c>AGENTS.md</c> は読まれず、読まれるのはスレッドの cwd（会話ごとに隔離）の側だが、
+    /// 版の変更で読むようになっても QuickER の実行フォルダの中身に触れないよう、置き場所を固定する。
+    /// </remarks>
+    /// <param name="fileName">起動する実行ファイル（包み直し済み）</param>
+    /// <param name="arguments">連結済みの引数</param>
+    internal static ProcessStartInfo CreateStartInfo(string fileName, string arguments) =>
+        new()
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            WorkingDirectory = BackendWorkingDirectory.ProcessRoot("codex"),
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            // BOM なし UTF-8 を使用する（BOM 付きだとサーバー側のJSONパースが失敗するため）
+            StandardInputEncoding = TextEncodings.Utf8NoBomLenient,
+            StandardOutputEncoding = TextEncodings.Utf8NoBomLenient,
+            StandardErrorEncoding = TextEncodings.Utf8NoBomLenient,
+        };
 
     /// <inheritdoc />
     public async Task<CodexAccountInfo> ReadAccountAsync(

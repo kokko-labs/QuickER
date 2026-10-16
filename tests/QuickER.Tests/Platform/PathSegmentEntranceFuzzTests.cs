@@ -16,15 +16,16 @@ namespace QuickER.Tests.Platform;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 入口は 8 つ：層フォルダ（<see cref="CodeGenerationOptions.DomainLayerDirectory"/>）・生成コードのサブフォルダ・
-/// API リファレンスのサブフォルダとファイル名・生成物のファイル名（<see cref="GeneratedFileWriter"/>）・モックのプロジェクト名・
+/// 入口は 9 つ：層フォルダ（<see cref="CodeGenerationOptions.DomainLayerDirectory"/>）・生成コードのサブフォルダ・
+/// API リファレンスのサブフォルダとファイル名・非分割の出力ファイル名（<see cref="CodeGenerationOptions.OutputFileName"/>）・
+/// 生成物のファイル名（<see cref="GeneratedFileWriter"/>）・モックのプロジェクト名・
 /// 画面のファイル名（<see cref="MockFolderStore.SaveScreen"/>）・API キー方式の提出のパス（<see cref="MockProjectEmitTools.ResolveEmitPath"/>）。
 /// 入口ごとに判定を持つと、断る形が入口ごとに食い違う（ある入口だけ <c>..</c> や 8.3 の別名を通す）。
 /// </para>
 /// <para>
 /// 各入口は、断るべき形のうち、その入口で成り立つもの（拡張子を付けると消える形・区切りが正当な相対パスの区切りは除く）を
 /// すべて断り、メッセージに当たった規則の文言（<see cref="PathSegments.Describe(PathSegmentViolation, CultureInfo)"/>）を含める。
-/// 正当な名前の表も流して、断りすぎないことも確かめる。
+/// 正当な名前の表も流して、断りすぎないことも確かめる（250 文字の名前は、書き込む入口では実際に書けることまで確かめる）。
 /// </para>
 /// <para>
 /// 設定の値と提出のパスは、値全体の前後の空白を取り除いてから判定し、提出のパスはさらに空の区間と <c>.</c> の区間を
@@ -93,6 +94,8 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
         "x.y.z",
         "COM10",
         "CONSOLE",
+        // 拡張子を付けても 1 区間の上限（255 文字）に収まる長い名前
+        new string('a', 250),
     ];
 
     /// <summary>テスト用の一時フォルダ</summary>
@@ -149,7 +152,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
             )
         );
 
-    /// <summary>8 つの入口</summary>
+    /// <summary>9 つの入口</summary>
     private IEnumerable<Entrance> Entrances()
     {
         var ui = CultureInfo.CurrentUICulture;
@@ -221,6 +224,19 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
             ui,
             TrimsWholeValue: true
         );
+        yield return new Entrance(
+            "OutputFileName",
+            Relative: false,
+            Applies: (_, _) => true,
+            Build: form => form,
+            Reject: value =>
+                GenerationError(
+                    new CodeGenerationOptions { OutputFileName = value },
+                    MessagePrefix(CodeGenStrings.CodeGen_Error_InvalidOutputFileName, value.Trim())
+                ),
+            ui,
+            TrimsWholeValue: true
+        );
         // 生成物のファイル名は「.g.cs」が付き、ディレクトリ要素（区切り・ドライブ）は Path.GetFileName が先に落とす
         yield return new Entrance(
             "GeneratedFileName",
@@ -242,10 +258,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
             Relative: false,
             Applies: (_, _) => true,
             Build: form => form,
-            Reject: value =>
-                MockProjectScaffoldService.CheckProjectName(value) is { } violation
-                    ? PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
-                    : null,
+            Reject: value => MockProjectScaffoldService.CheckProjectName(value, ui),
             ui
         );
         // 画面のファイル名は「.html」が付くので、末尾の形と '.'・'..' は成り立たない
@@ -279,7 +292,7 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
     }
 
     [Fact(
-        DisplayName = "パスの名前を受け取る 8 つの入口は、断るべき形をすべて断り、当たった規則を名指しする"
+        DisplayName = "パスの名前を受け取る 9 つの入口は、断るべき形をすべて断り、当たった規則を名指しする"
     )]
     public void Entrances_RejectEveryHostileForm_NamingTheRule()
     {
@@ -344,7 +357,9 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
         failures.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "パスの名前を受け取る 8 つの入口は、正当な名前を断らない")]
+    [Fact(
+        DisplayName = "パスの名前を受け取る 9 つの入口は、正当な名前を断らない（長い名前も書ける）"
+    )]
     public void Entrances_AcceptOrdinaryNames()
     {
         var failures = new List<string>();
@@ -379,6 +394,31 @@ public sealed class PathSegmentEntranceFuzzTests : IDisposable
         }
 
         failures.Should().BeEmpty();
+    }
+
+    [Theory(
+        DisplayName = "プロジェクト名の入口は、生成するプロジェクトが自分用に使うフォルダの名前を大文字小文字を問わず断る"
+    )]
+    [InlineData("Generated")]
+    [InlineData("generated")]
+    [InlineData("design")]
+    [InlineData("Design")]
+    [InlineData("obj")]
+    [InlineData("Obj")]
+    [InlineData("bin")]
+    [InlineData("BIN")]
+    public void ProjectName_RejectsProtectedFolderNames(string name)
+    {
+        var message = MockProjectScaffoldService.CheckProjectName(
+            name,
+            CultureInfo.CurrentUICulture
+        );
+
+        message.Should().NotBeNull();
+        message.Should().Contain(name);
+        MockProjectEmitTools
+            .ProtectedFolderNames.Should()
+            .Contain(folder => string.Equals(folder, name, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

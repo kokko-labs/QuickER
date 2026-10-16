@@ -79,6 +79,21 @@ public class MockFolderStoreTests : IDisposable
         return $"<!DOCTYPE html><html><head>{link}</head><body>{body}{bodyExtra}</body></html>";
     }
 
+    /// <remarks>
+    /// 画面のファイル名は 1 区間 255 文字までを受け付ける。原子的な書き込みの一時ファイルの名前が上限を超えると、
+    /// 受け付けた名前の保存が必ず失敗する。
+    /// </remarks>
+    [Fact(DisplayName = "SaveScreen: 受け付ける長さの画面のファイル名（235 文字）へ保存できる")]
+    public void SaveScreen_LongFileName_Succeeds()
+    {
+        var file = new string('a', 230) + ".html";
+        var store = CreateNew();
+
+        store.SaveScreen(file, "n", "d", "<html><body></body></html>", [], "r");
+
+        File.Exists(Path.Combine(_folder, file)).Should().BeTrue();
+    }
+
     [Fact(DisplayName = "IsMockFolder は mock.json の有無を返す")]
     public void IsMockFolder_ReflectsManifestPresence()
     {

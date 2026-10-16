@@ -222,6 +222,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_InvalidOutputFileName {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_InvalidOutputFileName", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_InvalidApiDocsLanguage {
             get {
                 return ResourceManager.GetString("CodeGen_Error_InvalidApiDocsLanguage", resourceCulture);

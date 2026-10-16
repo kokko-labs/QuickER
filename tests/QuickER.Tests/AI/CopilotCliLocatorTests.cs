@@ -246,6 +246,22 @@ public class CopilotCliLocatorTests
             .WithMessage(string.Format(AiStrings.Copilot_PathHasDelayedExpansion, path));
     }
 
+    /// <summary>
+    /// 改行を含む cmd シムのパスは起動前に拒否する（cmd は改行から後ろを捨てる。判定は包み直しの入口と共有する
+    /// <see cref="BatchShimProcessGuard.ContainsNewline"/>）
+    /// </summary>
+    [Theory(DisplayName = "改行を含む cmd シムのパスは起動前に拒否する")]
+    [InlineData("C:\\npm\nx\\copilot.cmd")]
+    [InlineData("C:\\npm\rx\\copilot.cmd")]
+    public void EnsureSafeToLaunch_NewlineInShimPath_Throws(string path)
+    {
+        var act = () => CopilotCliLocator.EnsureSafeToLaunch(path);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.Copilot_PathHasNewline, path));
+    }
+
     /// <summary>正当なパス（シム・実行ファイルとも）はそのまま通ることを検証する</summary>
     /// <remarks>実行ファイルは cmd を経由しないため、パスに <c>%</c> があっても通す。</remarks>
     [Theory]

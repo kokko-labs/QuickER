@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
@@ -17,7 +18,7 @@ public static class SchemaSignature
         var e = string.Join(
             "|",
             entities
-                .OrderBy(x => x.TableName)
+                .OrderBy(x => x.TableName, StringComparer.Ordinal)
                 .Select(x =>
                     x.TableName
                     + ":"
@@ -66,7 +67,7 @@ public static class SchemaSignature
                     + ":"
                     + x.OnUpdate
                 )
-                .OrderBy(s => s)
+                .OrderBy(s => s, StringComparer.Ordinal)
         );
         return e + "##" + r;
     }

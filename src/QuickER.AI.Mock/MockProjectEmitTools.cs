@@ -52,6 +52,9 @@ public static class MockProjectEmitTools
         .. MockProjectFiles.BuildOutputDirectoryNames,
     ];
 
+    /// <summary>提出を拒否するフォルダ名（プロジェクト名もこの名前を断る＝<see cref="MockProjectScaffoldService.CheckProjectName"/>）</summary>
+    internal static IReadOnlyList<string> ProtectedFolderNames => BlockedFolderNames;
+
     /// <summary>API キー方式の固定パイプラインで公開するツール定義一覧を返す（<c>emit_file</c> の 1 つ）</summary>
     public static IReadOnlyList<ToolDefinition> GetDefinitions()
     {
@@ -242,11 +245,7 @@ public static class MockProjectEmitTools
         var full = Path.GetFullPath(Path.Combine(baseFull, relative));
 
         // 正規化後に出力フォルダ外へ出ていないか最終防御（symlink 等ではなく単純な脱出を弾く）
-        var basePrefix = baseFull.EndsWith(Path.DirectorySeparatorChar)
-            ? baseFull
-            : baseFull + Path.DirectorySeparatorChar;
-
-        if (!full.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
+        if (!PathContainment.IsUnder(full, baseFull))
         {
             return new EmitPathResult(
                 false,

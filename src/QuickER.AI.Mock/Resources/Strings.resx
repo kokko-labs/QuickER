@@ -224,6 +224,9 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   <data name="Mock_DisabledReason_ProjectNameInvalid" xml:space="preserve">
     <value>The project name cannot be used as a folder or file name ({0}).</value>
   </data>
+  <data name="Mock_DisabledReason_ProjectNameReserved" xml:space="preserve">
+    <value>The project name '{0}' cannot be used: it is the name of a folder the generated project uses for itself ({1}).</value>
+  </data>
   <data name="Mock_ConversationStarted" xml:space="preserve">
     <value>Conversation started. Enter and send your requests for the mock (e.g., a simple admin screen).</value>
   </data>

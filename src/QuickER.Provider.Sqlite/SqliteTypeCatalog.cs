@@ -41,7 +41,7 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
     // character varying のような複数語の別名を含む。語の間の空白は SqliteTypeAlias が 1 つへ畳む）。
     // 末尾の括弧内には長さ（数値または MAX）／精度・スケールを取る。
     [GeneratedRegex(
-        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_]*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)*)\s*(\(\s*(?<arg1>max|-?\d+)\s*(,\s*(?<arg2>-?\d+)\s*)?\))?\s*$",
+        @"^\s*(?<name>[a-zA-Z_][a-zA-Z0-9_]*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)*)\s*(\(\s*(?<arg1>max|-?[0-9]+)\s*(,\s*(?<arg2>-?[0-9]+)\s*)?\))?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex TypePattern();

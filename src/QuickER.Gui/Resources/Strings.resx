@@ -347,6 +347,9 @@
   <data name="Status_ExternalReloaded" xml:space="preserve">
     <value>Reloaded: the file was changed by another program.</value>
   </data>
+  <data name="Status_AutoSaveRestoredUntitled" xml:space="preserve">
+    <value>The previous work was restored as untitled because its file could not be confirmed. Use Save As to choose where to save it.</value>
+  </data>
   <data name="Status_ExternalFileDeleted" xml:space="preserve">
     <value>The file was deleted externally (still tracked; save to recreate it).</value>
   </data>

@@ -220,6 +220,14 @@ public class ChatMarkdownRendererTests
     [InlineData("see https://example.com/x here", "https://example.com/x", "https://example.com/x")]
     [InlineData("<https://example.com/y>", "https://example.com/y", "https://example.com/y")]
     [InlineData("visit www.example.com now", "www.example.com", "http://www.example.com/")]
+    // 国際化ドメイン名のホストは punycode で出す（キリル文字の U+0430 を使った \u0430pple.com を apple.com と見分けられるように）
+    [InlineData("[apple](https://\u0430pple.com/)", "apple", "https://xn--pple-43d.com/")]
+    [InlineData(
+        "[j](https://例え.jp/パス?q=値)",
+        "j",
+        "https://xn--r8jz45g.jp/%E3%83%91%E3%82%B9?q=%E5%80%A4"
+    )]
+    [InlineData("[p](https://example.com:8443/a#f)", "p", "https://example.com:8443/a#f")]
     public void SafeLink_BecomesHyperlink(string markdown, string text, string url)
     {
         Render(
@@ -290,6 +298,12 @@ public class ChatMarkdownRendererTests
     [InlineData("vscode://file/c:/x", false)]
     [InlineData("/relative", false)]
     [InlineData("relative.html", false)]
+    // ユーザー情報を持つ URL は、ホストの前に別のホスト名に見える文字列を置けるので断る
+    [InlineData("https://a@b/", false)]
+    [InlineData("https://user:pass@host/", false)]
+    [InlineData("https://example.com@evil.test/", false)]
+    // 国際化ドメイン名は開いてよい（表記だけ punycode にする）
+    [InlineData("https://例え.jp/", true)]
     [InlineData("", false)]
     [InlineData(null, false)]
     public void Policy_AllowsOnlyHttpAndHttps(string? url, bool expected)

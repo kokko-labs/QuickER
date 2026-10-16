@@ -31,7 +31,7 @@ public class ChatConnectionSettingsViewModelTests
         string folder,
         AiDialogKind dialogKind = AiDialogKind.AiChat,
         Func<CodexConfigToml>? codexConfigReader = null,
-        Func<string, string?>? apiKeyLoader = null,
+        Func<string, SavedApiKey?>? apiKeyLoader = null,
         Action<string, string>? apiKeySaver = null
     ) =>
         new(

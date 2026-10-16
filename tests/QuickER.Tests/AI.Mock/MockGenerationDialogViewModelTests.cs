@@ -1300,6 +1300,56 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// 生成するプロジェクトが自分用に使うフォルダの名前（Design・Bin・Obj・Generated）では、生成を始められず理由を名指しする。
+    /// 前後の空白は実行と同じく取り除いてから判定する（取り除けば有効な名前を断らない）
+    /// </summary>
+    [Theory(
+        DisplayName = "予約されたフォルダ名のプロジェクト名では生成不可・前後の空白は除いて判定する"
+    )]
+    [InlineData("Design")]
+    [InlineData("Bin")]
+    [InlineData("Obj")]
+    [InlineData("Generated")]
+    public async Task CanGenerateMockProject_ProtectedFolderName_IsRejected_AndSpacesAreTrimmed(
+        string reservedName
+    )
+    {
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
+
+        try
+        {
+            generator.ClaudeAvailable = true;
+            generator.DotnetAvailable = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+
+            vm.ProjectName = reservedName;
+            vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should()
+                .Be(
+                    string.Format(
+                        MockStrings.Mock_DisabledReason_ProjectNameReserved,
+                        reservedName,
+                        string.Join(", ", MockProjectEmitTools.ProtectedFolderNames)
+                    )
+                );
+
+            // 前後に空白があっても、実行は取り除いた名前を使うので、取り除いた名前で判定する
+            vm.ProjectName = " AcmeMock ";
+            vm.CanGenerateMockProject.Should().BeTrue();
+            vm.MockGenDisabledReason.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>claude CLI 未検出では生成不可・理由が案内されることを検証する</summary>
     [Fact(DisplayName = "claude 未検出では生成不可")]
     public async Task CanGenerateMockProject_FalseWhenClaudeMissing()

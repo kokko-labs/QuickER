@@ -251,7 +251,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         IDialogService? dialogService = null,
         IFileDialogService? files = null,
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
-        Func<string, string?>? apiKeyLoader = null,
+        Func<string, SavedApiKey?>? apiKeyLoader = null,
         Action<string, string>? apiKeySaver = null
     )
     {
@@ -311,6 +311,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         // ctor 順序厳守: エンジン確立 → Connection.PropertyChanged 購読 → Connection.LoadSettings
         // （購読前にロードするとエンジンのモデル同期が漏れる）
         Connection.PropertyChanged += OnConnectionPropertyChanged;
+        Connection.ModelHistoryRemoveFailed += (_, message) => StatusMessage = message;
         // 接続確認とタブの中継は、上のエンジン差し替えの後に走るよう、ここで購読させる
         _connectionChecks = new BackendConnectionChecks(
             Connection,

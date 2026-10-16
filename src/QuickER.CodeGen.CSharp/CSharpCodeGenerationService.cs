@@ -789,6 +789,7 @@ public sealed partial class CSharpCodeGenerationService
         ValidateLayerDirectories(options, usedNamespaceSources, diagnostics);
         ValidateCodeSubdirectory(options, diagnostics);
         ValidateApiDocsSubdirectory(options, diagnostics);
+        ValidateOutputFileName(options, diagnostics);
         ValidateApiDocsFileName(options, diagnostics);
         ValidateApiDocsLanguage(options, diagnostics);
 
@@ -1559,6 +1560,85 @@ public sealed partial class CSharpCodeGenerationService
     }
 
     /// <summary>
+    /// 非分割の出力ファイル名（<see cref="CodeGenerationOptions.OutputFileName"/>）を検証する
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 許すのは「ディレクトリ要素を含まない単一のファイル名」だけ（置き場を決めるのは出力先と
+    /// <see cref="CodeGenerationOptions.CodeSubdirectory"/> の役割）。診断がないと、<c>sub/Foo.g.cs</c> は
+    /// <see cref="GeneratedFileWriter"/> の <c>Path.GetFileName</c> がディレクトリ要素を落として黙って <c>Foo.g.cs</c> になり、
+    /// 予約名・8.3 の別名は書き込みの時点まで通ってから例外になる。
+    /// </para>
+    /// <para>
+    /// 判定するのは利用者の値（前後の空白を除く）と、そこから作るファイル名すべて（<c>.g.cs</c> へ正規化した本体・
+    /// サーバー実装の <c>.RemoteServer.g.cs</c>・ファイル名を指定していない API リファレンス）。付け足す分で長さの上限を超える名前も断る。
+    /// 分割出力ではこの値を使わないので検証しない（使われない値で生成を止めない）。空白は既定のため対象外。
+    /// </para>
+    /// </remarks>
+    private static void ValidateOutputFileName(
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (
+            !options.EffectiveSplitFilesByCategory
+            && !string.IsNullOrWhiteSpace(options.OutputFileName)
+            && CheckOutputFileName(options) is { } violation
+        )
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_InvalidOutputFileName,
+                        options.OutputFileName.Trim(),
+                        PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
+                    )
+                )
+            );
+        }
+    }
+
+    /// <summary>非分割の出力ファイル名と、そこから作るファイル名を断る理由を返す（断らないなら <c>null</c>）</summary>
+    private static PathSegmentViolation? CheckOutputFileName(CodeGenerationOptions options)
+    {
+        var trimmed = options.OutputFileName.Trim();
+
+        if (PathSegments.CheckSegment(trimmed) is { } violation)
+        {
+            return violation;
+        }
+
+        var normalized = GeneratedFilePlanner.NormalizeOutputFileName(trimmed);
+
+        // 拡張子だけの指定（".g.cs" 等）はベース名が空＝隠しファイルになるため拒否する
+        if (GeneratedFilePlanner.StripGeneratedCSharpSuffix(normalized).Length == 0)
+        {
+            return PathSegmentViolation.Empty;
+        }
+
+        var derived = new List<string> { normalized };
+
+        if (options.GenerateRemoteServices)
+        {
+            derived.Add(GeneratedFilePlanner.RemoteServerFileName(trimmed));
+        }
+
+        // 未定義の言語は言語の診断（ValidateApiDocsLanguage）が名指しするので、ここでは名前を求めない
+        if (
+            options.GenerateApiDocs
+            && string.IsNullOrWhiteSpace(options.ApiDocsFileName)
+            && Enum.IsDefined(options.ApiDocsLanguage)
+        )
+        {
+            derived.AddRange(ResolveApiDocsFileNames(options));
+        }
+
+        return derived
+            .Select(name => PathSegments.CheckSegment(name))
+            .FirstOrDefault(result => result is not null);
+    }
+
+    /// <summary>
     /// API リファレンスの出力ファイル名（<see cref="CodeGenerationOptions.ApiDocsFileName"/>）を検証する
     /// </summary>
     /// <remarks>
@@ -1936,7 +2016,7 @@ public sealed partial class CSharpCodeGenerationService
         dataType is not null && NegativeScaleRegex().IsMatch(dataType);
 
     /// <summary>"(精度,-スケール)" を検出する正規表現（診断専用・型マッパーの読み取りには使わない）</summary>
-    [GeneratedRegex(@"\(\s*\d+\s*,\s*-\s*\d+\s*\)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\(\s*[0-9]+\s*,\s*-\s*[0-9]+\s*\)", RegexOptions.CultureInvariant)]
     private static partial Regex NegativeScaleRegex();
 
     /// <summary>

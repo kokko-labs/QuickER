@@ -142,6 +142,9 @@
   <data name="CodeGen_Error_InvalidApiDocsFileName" xml:space="preserve">
     <value>オプション 'ApiDocsFileName' のファイル名が不正です: '{0}'（{1}）。ファイル名だけを指定してください。出力先フォルダは 'ApiDocsSubdirectory' で指定します。</value>
   </data>
+  <data name="CodeGen_Error_InvalidOutputFileName" xml:space="preserve">
+    <value>オプション 'OutputFileName' のファイル名が不正です: '{0}'（{1}）。ファイル名だけを指定してください。フォルダは出力先と 'CodeSubdirectory' で指定します。</value>
+  </data>
   <data name="CodeGen_Error_InvalidApiDocsLanguage" xml:space="preserve">
     <value>オプション 'ApiDocsLanguage' の値が未定義です: {0}。次のいずれかを指定してください: {1}。</value>
   </data>

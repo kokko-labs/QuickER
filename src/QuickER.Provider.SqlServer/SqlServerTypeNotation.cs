@@ -121,21 +121,21 @@ public static partial class SqlServerTypeNotation
 
     // float(n)（括弧内の空白と大文字小文字を許す。桁数を 9 までに絞って int へ必ず収める）
     [GeneratedRegex(
-        @"^float\s*\(\s*(?<n>\d{1,9})\s*\)$",
+        @"^float\s*\(\s*(?<n>[0-9]{1,9})\s*\)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex FloatPattern();
 
     // datetime2(n) / time(n) / datetimeoffset(n)（括弧内の空白と大文字小文字を許す。桁数を 9 までに絞って int へ必ず収める）
     [GeneratedRegex(
-        @"^(?<name>datetime2|time|datetimeoffset)\s*\(\s*(?<p>\d{1,9})\s*\)$",
+        @"^(?<name>datetime2|time|datetimeoffset)\s*\(\s*(?<p>[0-9]{1,9})\s*\)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex FractionalSecondsPattern();
 
     // decimal / numeric（引数なし・精度のみ・精度とスケール）
     [GeneratedRegex(
-        @"^(?<name>decimal|numeric)(?:\s*\(\s*(?<p>\d{1,9})\s*(?:,\s*(?<s>\d{1,9})\s*)?\))?$",
+        @"^(?<name>decimal|numeric)(?:\s*\(\s*(?<p>[0-9]{1,9})\s*(?:,\s*(?<s>[0-9]{1,9})\s*)?\))?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex DecimalPattern();

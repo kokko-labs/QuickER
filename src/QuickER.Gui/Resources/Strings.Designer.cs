@@ -706,6 +706,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Status_AutoSaveRestoredUntitled {
+            get {
+                return ResourceManager.GetString("Status_AutoSaveRestoredUntitled", resourceCulture);
+            }
+        }
+
         public static string Status_ExternalFileDeleted {
             get {
                 return ResourceManager.GetString("Status_ExternalFileDeleted", resourceCulture);

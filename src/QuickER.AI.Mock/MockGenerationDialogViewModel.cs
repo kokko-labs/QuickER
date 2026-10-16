@@ -378,7 +378,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         && IsSelectedBackendReadyForMockGen
         && IsDotnetAvailable
         && !string.IsNullOrWhiteSpace(OutputFolder)
-        && MockProjectScaffoldService.IsValidProjectName(ProjectName)
+        && MockProjectScaffoldService.IsValidProjectName(ProjectName.Trim())
         && !IsMockGenInProgress
         && !IsTurnInProgress;
 
@@ -458,12 +458,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 return Strings.Mock_DisabledReason_ProjectName;
             }
 
-            if (MockProjectScaffoldService.CheckProjectName(ProjectName) is { } violation)
+            // 実行は前後の空白を取り除いた名前を使うので、判定も取り除いた名前で行う
+            if (
+                MockProjectScaffoldService.CheckProjectName(
+                    ProjectName.Trim(),
+                    CultureInfo.CurrentUICulture
+                ) is
+                { } reason
+            )
             {
-                return string.Format(
-                    Strings.Mock_DisabledReason_ProjectNameInvalid,
-                    PathSegments.Describe(violation, CultureInfo.CurrentUICulture)
-                );
+                return reason;
             }
 
             return string.Empty;
@@ -541,7 +545,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         IMockProjectGenerator? mockProjectGenerator = null,
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
         IDialogService? dialogService = null,
-        Func<string, string?>? apiKeyLoader = null,
+        Func<string, SavedApiKey?>? apiKeyLoader = null,
         Action<string, string>? apiKeySaver = null,
         Action<Action>? scheduleLogFlush = null
     )
@@ -626,6 +630,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // ctor 順序厳守: Connection 生成 → PropertyChanged 購読 → Connection.LoadSettings
         // （購読前にロードするとモデル同期・可否再評価が漏れる）
         Connection.PropertyChanged += OnConnectionPropertyChanged;
+        Connection.ModelHistoryRemoveFailed += (_, message) => StatusMessage = message;
         // タブへの中継は、上の会話リセットなどの後に走るよう、ここで購読させる
         BackendSelection = new BackendTabSelection(Connection, TryChangeBackend);
         Connection.LoadSettings();

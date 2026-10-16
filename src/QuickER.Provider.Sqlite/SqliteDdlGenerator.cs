@@ -268,7 +268,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
 
     // 型名 ＋ 省略可能な括弧引数（符号付き数値 1 個または 2 個）。SQLite の type-name 文法に対応する。
     [System.Text.RegularExpressions.GeneratedRegex(
-        @"^\s*[a-zA-Z_][a-zA-Z0-9_]*(\s+[a-zA-Z_][a-zA-Z0-9_]*)*\s*(\(\s*[+-]?\d+\s*(,\s*[+-]?\d+\s*)?\))?\s*$",
+        @"^\s*[a-zA-Z_][a-zA-Z0-9_]*(\s+[a-zA-Z_][a-zA-Z0-9_]*)*\s*(\(\s*[+-]?[0-9]+\s*(,\s*[+-]?[0-9]+\s*)?\))?\s*$",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase
             | System.Text.RegularExpressions.RegexOptions.CultureInvariant
     )]

@@ -58,10 +58,10 @@ public static class ApiKeyStore
         AtomicFile.WriteAllBytes(p, encrypted);
     }
 
-    /// <summary>名前付きで保存された API キーを復号して返す</summary>
+    /// <summary>名前付きで保存された API キーを復号して返す（読めたか・無いか・読めないかを含む）</summary>
     /// <param name="name">キーの識別名</param>
-    /// <returns>復号した API キー。未保存または復号失敗時は空文字</returns>
-    public static string Load(string name) => Load(name, DefaultFolder);
+    /// <returns>読み取りの結果分類と、読めたときのキー</returns>
+    public static SavedApiKey Load(string name) => Load(name, DefaultFolder);
 
     /// <summary>
     /// 保存先フォルダを指定して、保存された API キーを復号して返す。
@@ -69,19 +69,23 @@ public static class ApiKeyStore
     /// </summary>
     /// <param name="name">キーの識別名</param>
     /// <param name="folder">保存先フォルダ</param>
-    /// <returns>復号した API キー。未保存または復号失敗時は空文字</returns>
-    public static string Load(string name, string folder)
+    /// <returns>読み取りの結果分類と、読めたときのキー</returns>
+    /// <remarks>
+    /// 「無い」と「あるのに読めない」を分けて返す（接続パスワードの <c>SqlConnectionProfileStore.LoadPassword</c> と同じ形）。
+    /// 読めないものを空のキーとして返すと、呼び出し側が空の値を保存したとき（保存をやめたとき）に暗号ファイルを消してしまう。
+    /// </remarks>
+    public static SavedApiKey Load(string name, string folder)
     {
         var p = PathFor(name, folder);
 
         if (!File.Exists(p))
         {
-            return string.Empty;
+            return SavedApiKey.Missing;
         }
 
         try
         {
-            var encrypted = File.ReadAllBytes(p);
+            var encrypted = AtomicFile.ReadAllBytes(p);
             var data = ProtectedData.Unprotect(
                 encrypted,
                 optionalEntropy: null,
@@ -89,10 +93,16 @@ public static class ApiKeyStore
             );
             return Encoding.UTF8.GetString(data);
         }
-        catch
+        catch (FileNotFoundException)
         {
-            // 別ユーザー・別マシンで暗号化されたファイルや破損ファイルは復号できないため、キー未設定として扱う
-            return string.Empty;
+            // 存在の確認の後に消えた
+            return SavedApiKey.Missing;
+        }
+        catch (Exception ex)
+            when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            // 別ユーザー・別 PC で暗号化されたファイル・壊れたファイル・一時的なロック（ファイルは残っている）
+            return SavedApiKey.Unreadable;
         }
     }
 }

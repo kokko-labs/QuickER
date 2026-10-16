@@ -296,7 +296,7 @@ public sealed partial record SyncDialectCapabilities
 
     /// <summary>長さを持つ文字列型の表記（基本の型・長さ・Oracle の単位語・括弧の後ろの指定）</summary>
     [GeneratedRegex(
-        @"^\s*(?<base>char|varchar|nchar|nvarchar|binary|varbinary|varchar2|nvarchar2|raw)\s*\(\s*\d+\s*(?<unit>char|byte)?\s*\)(?<rest>.*)$",
+        @"^\s*(?<base>char|varchar|nchar|nvarchar|binary|varbinary|varchar2|nvarchar2|raw)\s*\(\s*[0-9]+\s*(?<unit>char|byte)?\s*\)(?<rest>.*)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline
     )]
     private static partial Regex StringTypePattern();

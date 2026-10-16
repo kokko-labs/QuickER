@@ -224,6 +224,9 @@
   <data name="Mock_DisabledReason_ProjectNameInvalid" xml:space="preserve">
     <value>プロジェクト名はフォルダ名・ファイル名として使えません（{0}）。</value>
   </data>
+  <data name="Mock_DisabledReason_ProjectNameReserved" xml:space="preserve">
+    <value>プロジェクト名「{0}」は使えません。生成するプロジェクトが自分用に使うフォルダの名前（{1}）と同じです。</value>
+  </data>
   <data name="Mock_ConversationStarted" xml:space="preserve">
     <value>会話を開始しました。モックへの要望を入力して送信してください（例: シンプルな管理画面で）。</value>
   </data>

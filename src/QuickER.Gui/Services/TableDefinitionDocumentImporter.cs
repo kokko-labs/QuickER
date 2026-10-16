@@ -346,11 +346,18 @@ public static partial class TableDefinitionDocumentImporter
     /// 1 列が複数の制約に参加する場合はカンマ連結（例: <c>UQ1,UQ2</c>）で、他のキー表記とは
     /// <c>/</c> 区切り（例: <c>PK/UQ1</c>）で並ぶ。番号なしの <c>UQ</c> は制約を特定できないため無視する
     /// </remarks>
-    private static IEnumerable<int> ParseUniqueConstraintNumbers(string keyText)
+    internal static IEnumerable<int> ParseUniqueConstraintNumbers(string keyText)
     {
         foreach (Match match in UniqueConstraintLabelRegex.Matches(keyText))
         {
-            if (int.TryParse(match.Groups["number"].Value, out var number))
+            if (
+                int.TryParse(
+                    match.Groups["number"].Value,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var number
+                )
+            )
             {
                 yield return number;
             }
@@ -574,8 +581,9 @@ public static partial class TableDefinitionDocumentImporter
         string.IsNullOrWhiteSpace(value) ? null : value;
 
     /// <summary>キー表記中の一意制約ラベル（<c>UQ{n}</c>）に一致する正規表現を生成する</summary>
+    /// <remarks>番号は ASCII の数字だけ。全角などの数字が続くラベル（<c>UQ1２</c>）は、途中までの番号として読まずに無視する</remarks>
     [GeneratedRegex(
-        @"UQ(?<number>\d+)",
+        @"UQ(?<number>[0-9]+)(?!\p{Nd})",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     )]
     private static partial Regex UniqueConstraintKeyLabelRegex();

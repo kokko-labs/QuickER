@@ -402,6 +402,15 @@
             />
           </Grid>
 
+          <!-- 保存されている API キーが読めないとき、欄の直下に注記する（新しいキーを入力するまで上書きも削除もしない） -->
+          <TextBlock
+            Margin="0,4,0,0"
+            TextWrapping="Wrap"
+            Foreground="{StaticResource MutedText}"
+            Text="{Binding Connection.SavedApiKeyUnreadableNote, Mode=OneTime}"
+            Visibility="{Binding Connection.IsSavedApiKeyUnreadable, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+
           <!-- ローカル LLM はキーが任意なので、その旨を欄の直下に注記する -->
           <TextBlock
             Margin="0,4,0,0"

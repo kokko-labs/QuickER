@@ -79,13 +79,7 @@ public sealed class MockFolderStore
 
         if (File.Exists(manifestPath))
         {
-            throw new InvalidOperationException(
-                string.Format(
-                    Strings.Mock_FolderAlreadyExistsFormat,
-                    MockManifest.ManifestFileName,
-                    folder
-                )
-            );
+            throw AlreadyExists(folder);
         }
 
         Directory.CreateDirectory(folder);
@@ -97,10 +91,32 @@ public sealed class MockFolderStore
             SourceSchema = sourceSchema ?? string.Empty,
         };
 
-        WriteManifest(folder, manifest);
+        // 置き換えない書き込みで作る。存在の確認と書き込みの間に別のプロセスが作った mock.json を上書きしない
+        try
+        {
+            AtomicFile.CreateText(
+                manifestPath,
+                JsonSerializer.Serialize(manifest, MockManifest.SerializerOptions),
+                Utf8NoBom
+            );
+        }
+        catch (IOException) when (File.Exists(manifestPath))
+        {
+            throw AlreadyExists(folder);
+        }
 
         return new MockFolderStore(folder, manifest, clock ?? (() => DateTimeOffset.Now));
     }
+
+    /// <summary>作成先に mock.json が既にあることを伝える例外</summary>
+    private static InvalidOperationException AlreadyExists(string folder) =>
+        new(
+            string.Format(
+                Strings.Mock_FolderAlreadyExistsFormat,
+                MockManifest.ManifestFileName,
+                folder
+            )
+        );
 
     /// <summary>
     /// 既存のモックフォルダを開く。<c>mock.json</c> 不在・JSON 破損・新フォーマット（Version 超過）・
@@ -637,31 +653,43 @@ public sealed class MockFolderStore
             ?? new MockManifest();
     }
 
-    /// <summary>画面ファイル名の妥当性を検証する（フォルダ直下の 1 区間の名前＝<see cref="PathSegments.CheckSegment"/>・<c>.html</c>）</summary>
-    /// <remarks>例外文言はツール結果として AI へ返る機械向けメッセージのため英語で固定する。</remarks>
+    /// <summary>画面ファイル名の妥当性を検証する（<see cref="CheckScreenFileName"/> が断る名前は例外）</summary>
+    /// <exception cref="ArgumentException">断る名前（文言は <see cref="CheckScreenFileName"/>）</exception>
     private static void ValidateScreenFileName(string file)
+    {
+        if (CheckScreenFileName(file) is { } reason)
+        {
+            throw new ArgumentException(reason, nameof(file));
+        }
+    }
+
+    /// <summary>
+    /// 画面ファイル名を断る理由を返す（フォルダ直下の 1 区間の名前＝<see cref="PathSegments.CheckSegment"/>・<c>.html</c>。断らないなら <c>null</c>）
+    /// </summary>
+    /// <remarks>
+    /// 保存・削除・読み取り・マニフェストの読み込みと、マニフェストの画面を読む API キー方式の素材読み
+    /// （<see cref="ApiKeyMockProjectAgent"/>）が共有する。文言はツール結果として AI へ返る機械向けメッセージのため英語で固定する。
+    /// </remarks>
+    /// <param name="file">画面ファイル名</param>
+    internal static string? CheckScreenFileName(string? file)
     {
         if (string.IsNullOrWhiteSpace(file))
         {
-            throw new ArgumentException("The screen file name is empty.", nameof(file));
+            return "The screen file name is empty.";
         }
 
         // 1 区間の名前の判定の正本（パス区切り・'.' と '..'・使えない文字・先頭と末尾の空白・'~'・予約名・長さ）
         if (PathSegments.CheckSegment(file) is { } violation)
         {
-            throw new ArgumentException(
-                $"The screen file name is invalid ({PathSegments.Describe(violation, System.Globalization.CultureInfo.InvariantCulture)}): {file}",
-                nameof(file)
-            );
+            return $"The screen file name is invalid ({PathSegments.Describe(violation, System.Globalization.CultureInfo.InvariantCulture)}): {file}";
         }
 
         if (!file.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
         {
-            throw new ArgumentException(
-                $"The screen file name must end with .html: {file}",
-                nameof(file)
-            );
+            return $"The screen file name must end with .html: {file}";
         }
+
+        return null;
     }
 }
 
