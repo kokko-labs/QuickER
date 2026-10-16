@@ -775,13 +775,7 @@ public static class UnsupportedTreatments
         Add(
             cells,
             Kind.ForeignKeyToExcludedTable,
-            import: new TreatmentCell(
-                SqlServer: None,
-                PostgreSql: Notice, // 告知（段 1）
-                MySql: None,
-                Oracle: None,
-                Sqlite: Notice
-            ),
+            import: Same(Notice), // 告知（段 1）
             diff: Same(None), // なし
             sync: Same(None), // なし
             ddl: Same(None), // なし

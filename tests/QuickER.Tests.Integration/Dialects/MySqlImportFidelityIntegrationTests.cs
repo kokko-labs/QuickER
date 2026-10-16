@@ -539,4 +539,41 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
                 (SchemaImportWarningKind.NameTrimmed, "pad_child", " uq_pad", "uq_pad"),
             ]);
     }
+
+    /// <summary>
+    /// 名前に . を含むテーブルは、図に入れると別のテーブル（スキーマ Order の Lines）として読まれるので取り込まず、
+    /// それを参照する外部キーを名指しし、近い名前のテーブルに何も混ざらない
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL: 名前に . を含むテーブルは取り込まず、参照する外部キーを名指しし、ほかの表に混ざらない"
+    )]
+    public async Task Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE `Lines` (id int NOT NULL PRIMARY KEY, qty int NULL) ENGINE=InnoDB;
+            CREATE TABLE `Order.Lines` (
+                id int NOT NULL PRIMARY KEY,
+                code varchar(10) NOT NULL,
+                note varchar(20) NULL,
+                line_id int NULL,
+                CONSTRAINT uq_dotted_code UNIQUE (code),
+                CONSTRAINT fk_dotted_lines FOREIGN KEY (line_id) REFERENCES `Lines` (id)
+            ) ENGINE=InnoDB COMMENT='dotted';
+            CREATE TABLE `child` (
+                id int NOT NULL PRIMARY KEY,
+                dotted_id int NULL,
+                CONSTRAINT fk_child_dotted FOREIGN KEY (dotted_id) REFERENCES `Order.Lines` (id)
+            ) ENGINE=InnoDB;
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        DottedTableNameImportAssertions.ShouldExcludeDottedTable(result, "");
+    }
 }

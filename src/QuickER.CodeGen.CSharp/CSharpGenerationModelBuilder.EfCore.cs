@@ -1,4 +1,5 @@
 using QuickER.CodeGen.CSharp.Resources;
+using QuickER.Dialects;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.CSharp;
@@ -77,8 +78,15 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Select(entity => new CSharpEfCoreEntityConfigModel
             {
                 EntityClassName = _nameConverter.ToEntityClassName(entity.TableName),
-                // Fluent の ToTable("...") へ C# リテラルとして埋め込むためエスケープする（[Table] と同じ規則）
-                TableName = EscapeNameForCSharpString(entity.TableName),
+                // EF Core の ToTable は名前を . で分けないので、スキーマで修飾された図の名前（sales.Orders）は
+                // QuickER 版 Repository と同じ規則（SchemaQualifiedName＝最初の . で分ける）で分けて ToTable("Orders", "sales") にする。
+                // どちらも C# リテラルとして埋め込むためエスケープする（[Table] と同じ規則）
+                TableName = EscapeNameForCSharpString(
+                    SchemaQualifiedName.Split(entity.TableName).Name
+                ),
+                SchemaName = SchemaQualifiedName.Split(entity.TableName).Schema is { } schema
+                    ? EscapeNameForCSharpString(schema)
+                    : null,
                 // 複合キーの HasKey は並びが意味を持つため、主キー列は実効順で取り出す
                 KeyPropertyNames = entity
                     .GetPrimaryKeyColumnsInOrder()

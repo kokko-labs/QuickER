@@ -9,26 +9,27 @@ namespace QuickER.Tests.Provider;
 /// </summary>
 /// <remarks>
 /// <para>
-/// (1) すべての種別が対応を持つ（種類の外は 3 種別だけ）。(2) 種別が告げる種類は、取込で告知する方言を持つ。
+/// (1) すべての種別が対応を持つ（種類の外は 4 種別だけ）。(2) 種別が告げる種類は、取込で告知する方言を持つ。
 /// (3) 取込で告知する種類は、それを告げる種別を持つ。区切り 33 で検出と一緒に種別を足す種類は <see cref="PendingKinds"/> に載せ、
 /// 足したフェーズで消す（照合は厳密）。
 /// </para>
 /// </remarks>
 public sealed class SchemaImportWarningKindMapTests
 {
-    /// <summary>種類の外の種別（取込範囲の外・名前の衝突）</summary>
+    /// <summary>種類の外の種別（取込範囲の外・名前の衝突・名前に . を含むテーブル）</summary>
     private static readonly SchemaImportWarningKind[] OutsideKinds =
     [
         SchemaImportWarningKind.ForeignKeyOutsideScope,
         SchemaImportWarningKind.TableNameCollision,
         SchemaImportWarningKind.ColumnNameCollision,
+        SchemaImportWarningKind.DottedTableNameExcluded,
     ];
 
     /// <summary>取込で告知するが、告げる種別がまだ無い種類（足すフェーズ）</summary>
     private static readonly (UnsupportedDefinitionKind Kind, string Phase)[] PendingKinds = [];
 
     [Fact(
-        DisplayName = "すべての取込警告の種別が対応を持ち、種類の外は取込範囲の外と名前の衝突の 3 種別だけ"
+        DisplayName = "すべての取込警告の種別が対応を持ち、種類の外は取込範囲の外・名前の衝突・名前に . を含むテーブルの 4 種別だけ"
     )]
     public void EveryWarningKind_IsMapped()
     {

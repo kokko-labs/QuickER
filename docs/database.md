@@ -141,7 +141,8 @@ The system-generated columns a function-based index adds to the table (`SYS_NC�
 A foreign key that points outside this scope cannot become a relationship, because its parent table is not in the diagram.
 Such a key is skipped and reported (see below) rather than dropped silently.
 SQLite does not check that a foreign key's parent table exists when the table is created, so a database can carry keys that point at a table that is not there; those are treated the same way.
-A dot in a SQLite table name is part of the name rather than a schema qualifier, because the import only ever looks at the single connected file.
+A table whose name contains a dot is not imported, on SQLite as on the other DBMSs, because the diagram reads the first dot of a table name as a schema qualifier (on SQLite, the name of an attached database).
+See the import warnings below.
 
 Constraints that are disabled are not imported either (`DISABLE` on Oracle, `NOCHECK CONSTRAINT` on SQL Server): a disabled constraint enforces nothing, so importing it would make the diagram claim a guarantee the database does not provide.
 A SQL Server foreign key added `WITH NOCHECK` but currently enabled *is* imported, because it is enforced from then on.
@@ -167,6 +168,11 @@ The list has one heading per kind with the count, followed by one line per place
 - A **disabled constraint** (`DISABLE` on Oracle, a foreign key turned off with `NOCHECK CONSTRAINT` on SQL Server) is not imported
 - A table whose **columns could not be read at all** is imported without columns
 - One of two tables whose **names differ only in letter case or surrounding spaces** is skipped, because the diagram cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, SQL Server does in a database with a case-sensitive collation, and SQLite, which folds only ASCII letters, does for names such as `Äpfel` and `äpfel`)
+- A **table whose name contains a dot** is not imported on any of the five DBMSs, and each such table is named.
+  The diagram reads the first dot of a table name as the separator between a schema and a table, so `Order.Lines` would be read as the table `Lines` in the schema `Order`.
+  Imported as it is, the table would be another table to the rest of QuickER: the generated QuickER Repository would report that the table does not exist, and DDL and schema sync would create another table, or fail when that schema does not exist.
+  On SQL Server this covers a table in `dbo` whose name contains a dot and every table in a schema whose name contains a dot.
+  A dotted table name in another schema reads back as the same table (`a.b.t` is the table `b.t` in the schema `a`), so it is imported
 - Likewise, one of two **columns of a table whose names differ only in letter case or surrounding spaces** is skipped (the later one in declaration order), and the key flags, descriptions and foreign keys of the skipped column do not attach to the one that is kept
 - A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
   The diagram does not model expressions, so generated DDL creates an ordinary column (with a comment asking for the expression to be added by hand).
@@ -179,7 +185,7 @@ The list has one heading per kind with the count, followed by one line per place
 - **Objects the diagram does not hold** are left out and listed by name.
   These are views (all five DBMSs), materialized views (PostgreSQL, Oracle), external tables (PostgreSQL foreign tables, Oracle `ORGANIZATION EXTERNAL` tables, SQL Server external tables), partitions (PostgreSQL, with the parent table each belongs to; the parent itself is imported as described below) and temporary tables (Oracle).
   Objects the database or an extension owns (system tables, the container and log tables behind materialized views, tables an extension installs) are left out without a mention
-- A **foreign key that references a table the import left out** (a PostgreSQL partition, an SQLite virtual table or view) is skipped and reported
+- A **foreign key that references a table the import left out** (a PostgreSQL partition, an SQLite virtual table or view, a table whose name contains a dot) is skipped and reported
 - A SQL Server **temporal table** is imported as its current-data table only.
   The history table is an attachment the system maintains for it rather than an entity of its own.
   The current table's period columns (`GENERATED ALWAYS AS ROW START / END`) are values the database produces, so they are treated as computed columns, and a `HIDDEN` period column is imported the same way.

@@ -839,4 +839,39 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
                 (SchemaImportWarningKind.NameTrimmed, "pad_child", "uq_pad ", "uq_pad"),
             ]);
     }
+
+    /// <summary>
+    /// 名前に . を含むテーブルは、図に入れると別のテーブル（スキーマ Order の Lines）として読まれるので取り込まず、
+    /// それを参照する外部キーを名指しし、近い名前のテーブルに何も混ざらない
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] PG: 名前に . を含むテーブルは取り込まず、参照する外部キーを名指しし、ほかの表に混ざらない"
+    )]
+    public async Task Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE "Lines" (id integer PRIMARY KEY, qty integer);
+            CREATE TABLE "Order.Lines" (
+                id integer PRIMARY KEY,
+                code varchar(10) NOT NULL CONSTRAINT uq_dotted_code UNIQUE,
+                note varchar(20),
+                line_id integer CONSTRAINT fk_dotted_lines REFERENCES "Lines" (id)
+            );
+            CREATE TABLE child (
+                id integer PRIMARY KEY,
+                dotted_id integer CONSTRAINT fk_child_dotted REFERENCES "Order.Lines" (id)
+            );
+            COMMENT ON TABLE "Order.Lines" IS 'dotted';
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+        DottedTableNameImportAssertions.ShouldExcludeDottedTable(result, "");
+    }
 }

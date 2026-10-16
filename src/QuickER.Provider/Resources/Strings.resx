@@ -326,4 +326,13 @@
   <data name="ImportWarningHeading_IdentityColumnMarked" xml:space="preserve">
     <value>Columns the database numbers, imported without their numbering definition ({0}):</value>
   </data>
+  <data name="ImportWarning_DottedTableNameExcluded" xml:space="preserve">
+    <value>"{0}" was not imported because its name contains a dot, which QuickER reads as the separator between a schema and a table.</value>
+  </data>
+  <data name="ImportWarning_DottedTableNameExcludedInSchema" xml:space="preserve">
+    <value>Table "{0}" in schema "{1}" was not imported because the table or schema name contains a dot, which QuickER reads as the separator between a schema and a table.</value>
+  </data>
+  <data name="ImportWarningHeading_DottedTableNameExcluded" xml:space="preserve">
+    <value>Tables not imported because their name contains a dot ({0}):</value>
+  </data>
 </root>

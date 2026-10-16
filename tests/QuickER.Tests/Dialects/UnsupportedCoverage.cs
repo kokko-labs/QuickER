@@ -238,10 +238,32 @@ public static class UnsupportedCoverage
             ]
         ),
         (
+            DialectNames.SqlServer,
+            UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
+            [
+                "SqlServerImportFidelityIntegrationTests.Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported",
+            ]
+        ),
+        (
             DialectNames.PostgreSql,
             UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
             [
                 "PostgreSqlImportFidelityIntegrationTests.Import_ForeignKeyToChildPartition_IsReported",
+                "PostgreSqlImportFidelityIntegrationTests.Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported",
+            ]
+        ),
+        (
+            DialectNames.MySql,
+            UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
+            [
+                "MySqlImportFidelityIntegrationTests.Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported",
+            ]
+        ),
+        (
+            DialectNames.Oracle,
+            UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
+            [
+                "OracleImportFidelityIntegrationTests.Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported",
             ]
         ),
         (
@@ -249,6 +271,7 @@ public static class UnsupportedCoverage
             UnsupportedDefinitionKind.ForeignKeyToExcludedTable,
             [
                 "SqliteImportFidelityIntegrationTests.Import_ForeignKeyToExcludedVirtualTable_IsReported",
+                "SqliteImportFidelityIntegrationTests.Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported",
             ]
         ),
         (
@@ -817,6 +840,9 @@ public static class UnsupportedCoverage
             [
                 "PostgreSqlImportFidelityIntegrationTests.Import_ForeignKeyToChildPartition_IsReported",
                 "SqliteImportFidelityIntegrationTests.Import_ForeignKeyToExcludedVirtualTable_IsReported",
+                "SqlServerImportFidelityIntegrationTests.Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported",
+                "MySqlImportFidelityIntegrationTests.Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported",
+                "OracleImportFidelityIntegrationTests.Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported",
             ]
         ),
         (

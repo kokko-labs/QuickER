@@ -560,4 +560,100 @@ public sealed class SqlServerImportFidelityIntegrationTests(SqlServerContainerFi
                 (SchemaImportWarningKind.NameTrimmed, "pad_child", "uq_pad ", "uq_pad"),
             ]);
     }
+
+    /// <summary>
+    /// 名前に . を含む dbo のテーブルは、図に入れると別のテーブル（スキーマ Order の Lines）として読まれるので取り込まず、
+    /// それを参照する外部キーを名指しし、近い名前のテーブルに何も混ざらない
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SS: 名前に . を含む dbo のテーブルは取り込まず、参照する外部キーを名指しし、ほかの表に混ざらない"
+    )]
+    public async Task Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE [dbo].[Lines] (id int NOT NULL PRIMARY KEY, qty int NULL);
+            CREATE TABLE [dbo].[Order.Lines] (
+                id int NOT NULL PRIMARY KEY,
+                code nvarchar(10) NOT NULL CONSTRAINT uq_dotted_code UNIQUE,
+                note nvarchar(20) NULL,
+                line_id int NULL CONSTRAINT fk_dotted_lines REFERENCES [dbo].[Lines] (id)
+            );
+            CREATE TABLE [dbo].[child] (
+                id int NOT NULL PRIMARY KEY,
+                dotted_id int NULL CONSTRAINT fk_child_dotted REFERENCES [dbo].[Order.Lines] (id)
+            );
+            EXEC sp_addextendedproperty N'MS_Description', N'dotted', N'SCHEMA', N'dbo', N'TABLE', N'Order.Lines';
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+        DottedTableNameImportAssertions.ShouldExcludeDottedTable(result, "dbo");
+    }
+
+    /// <summary>
+    /// 外すのは、図に入れる名前を最初の . で分けたとき元のテーブルへ戻らないものだけ。dbo のテーブル a.b と、スキーマ a.b の
+    /// テーブル t は外し、スキーマ a のテーブル b（図では a.b）と、スキーマ a のテーブル b.t（図では a.b.t）は取り込む。
+    /// 外す前は dbo の a.b とスキーマ a の b が同じ図の名前 a.b になって、両方とも図に入っていた
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SS: 外すのは dbo のテーブル名とスキーマ名の . だけで、スキーマ a の b と b.t は取り込む"
+    )]
+    public async Task Import_DottedNamesAcrossSchemas_ExcludeOnlyNamesThatReadAsAnotherTable()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                """
+                IF SCHEMA_ID(N'a') IS NULL EXEC (N'CREATE SCHEMA [a]');
+                IF SCHEMA_ID(N'a.b') IS NULL EXEC (N'CREATE SCHEMA [a.b]');
+                CREATE TABLE [dbo].[a.b] (dbo_only int NULL);
+                CREATE TABLE [a].[b] (a_only int NULL);
+                CREATE TABLE [a.b].[t] (ab_only int NULL);
+                CREATE TABLE [a].[b.t] (abt_only int NULL);
+                """,
+                Ct
+            );
+
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+            result
+                .Entities.Select(e =>
+                    (e.TableName, string.Join(",", e.Columns.Select(c => c.Name)))
+                )
+                .Should()
+                .BeEquivalentTo([("a.b", "a_only"), ("a.b.t", "abt_only")]);
+            result
+                .Warnings.Where(w => w.Kind == SchemaImportWarningKind.DottedTableNameExcluded)
+                .Select(w => (w.TableName, w.Subject))
+                .Should()
+                .BeEquivalentTo([("a.b", "dbo"), ("t", "a.b")]);
+            result
+                .Warnings.Should()
+                .NotContain(
+                    w => w.Kind == SchemaImportWarningKind.TableNameCollision,
+                    "外した dbo の a.b と、残したスキーマ a の b は衝突しない"
+                );
+        }
+        finally
+        {
+            await fixture.ResetSchemaAsync(Ct);
+            await fixture.ExecuteAsync(
+                """
+                IF SCHEMA_ID(N'a.b') IS NOT NULL EXEC (N'DROP SCHEMA [a.b]');
+                IF SCHEMA_ID(N'a') IS NOT NULL EXEC (N'DROP SCHEMA [a]');
+                """,
+                Ct
+            );
+        }
+    }
 }

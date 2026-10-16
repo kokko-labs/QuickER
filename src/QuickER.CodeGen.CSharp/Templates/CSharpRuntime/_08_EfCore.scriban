@@ -51,7 +51,7 @@ public partial class QuickErDbContext : DbContext
 {{ if !for.first }}
 {{ end }}        modelBuilder.Entity<{{ cfg.entity_class_name }}>(entity =>
         {
-            entity.ToTable("{{ cfg.table_name }}");
+            entity.ToTable("{{ cfg.table_name }}"{{ if cfg.schema_name != null }}, "{{ cfg.schema_name }}"{{ end }});
 {{~ if cfg.key_property_names.size == 1 ~}}
             entity.HasKey(e => e.{{ cfg.key_property_names[0] }});
 {{~ else if cfg.key_property_names.size > 1 ~}}

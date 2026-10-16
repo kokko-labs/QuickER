@@ -344,6 +344,13 @@ WHERE "
         {
             var name = reader.GetString(0);
 
+            // 名前に . を含むテーブルは、図に入れる名前が別のテーブルとして読まれるので取り込まない（衝突の判定より先に見る）。
+            // 辞書に入らないので、そのテーブルを参照する外部キーは外した表への外部キーとして名指しされる
+            if (SchemaImportTableNames.ExcludeIfNotRoundTrip(name, null, name, warnings))
+            {
+                continue;
+            }
+
             if (dict.TryGetValue(name, out var existing))
             {
                 warnings.Add(

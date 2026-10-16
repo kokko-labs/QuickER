@@ -6,7 +6,7 @@ namespace QuickER.Provider;
 /// <remarks>
 /// <para>
 /// 取込警告の文言化の網羅は警告の種別の単位、方言の宣言の網羅は種類の単位で行うので、両者の対応をここに 1 つだけ置く。
-/// 取込範囲の外を参照する外部キーと名前の衝突は、図で表せない定義の種類に入れない（種類の外＝<c>null</c>）。
+/// 取込範囲の外を参照する外部キーと、名前の衝突・名前に <c>.</c> を含むテーブルは、図で表せない定義の種類に入れない（種類の外＝<c>null</c>）。
 /// </para>
 /// <para>
 /// 対応の網羅（すべての種別が対応を持つ・取込で告知する種類が種別を持つ）は <c>SchemaImportWarningKindMapTests</c> が確かめる。
@@ -62,6 +62,7 @@ public static class SchemaImportWarningKinds
             SchemaImportWarningKind.NameTrimmed => UnsupportedDefinitionKind.PaddedName,
             SchemaImportWarningKind.IdentityColumnMarked =>
                 UnsupportedDefinitionKind.IdentityRejectingValues,
+            SchemaImportWarningKind.DottedTableNameExcluded => null,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

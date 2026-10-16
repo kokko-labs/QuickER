@@ -54,7 +54,15 @@ public class MySqlSchemaImporter : ISchemaImporter
     )
     {
         var warnings = new List<SchemaImportWarning>();
-        var tables = await LoadTablesAsync(conn, commandTimeoutSeconds, warnings, ct)
+        // 名前に . を含むため取り込まなかったテーブル（そのテーブルを参照する外部キーを名指しするため）
+        var excludedTables = new HashSet<string>(StringComparer.Ordinal);
+        var tables = await LoadTablesAsync(
+                conn,
+                commandTimeoutSeconds,
+                warnings,
+                excludedTables,
+                ct
+            )
             .ConfigureAwait(false);
         await LoadViewsAsync(conn, commandTimeoutSeconds, warnings, ct).ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, warnings, commandTimeoutSeconds, ct)
@@ -63,7 +71,14 @@ public class MySqlSchemaImporter : ISchemaImporter
         // 一意制約は FK の 1 対 1 判定の材料になるため、外部キーより先にモデルへ載せる
         await LoadUniqueConstraintsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
-        var rels = await LoadForeignKeysAsync(conn, tables, commandTimeoutSeconds, warnings, ct)
+        var rels = await LoadForeignKeysAsync(
+                conn,
+                tables,
+                excludedTables,
+                commandTimeoutSeconds,
+                warnings,
+                ct
+            )
             .ConfigureAwait(false);
         var defaults = await LoadColumnAttributesAsync(
                 conn,
@@ -388,11 +403,14 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     /// 辞書は 5 方言共通の大文字小文字非依存だが、MySQL も <c>lower_case_table_names = 0</c>
     /// （Linux の既定）では <c>Dup</c> と <c>dup</c> が共存する。黙って上書きすると 1 エンティティへ潰れて
     /// 両テーブルの列が混ざるため、後着（<c>BINARY TABLE_NAME</c> 昇順で後ろ）を取り込まず警告として告げる。
+    /// 名前に <c>.</c> を含むテーブルは、図に入れる名前が別のテーブルとして読まれるので取り込まない
+    /// （<see cref="SchemaImportTableNames"/>。衝突の判定より先に見る）。
     /// </remarks>
     private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         MySqlConnection conn,
         int commandTimeoutSeconds,
         List<SchemaImportWarning> warnings,
+        HashSet<string> excludedTables,
         CancellationToken ct
     )
     {
@@ -404,6 +422,12 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
         {
             var name = reader.GetString(0);
             var comment = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+
+            if (SchemaImportTableNames.ExcludeIfNotRoundTrip(name, null, name, warnings))
+            {
+                excludedTables.Add(name);
+                continue;
+            }
 
             if (dict.TryGetValue(name, out var existing))
             {
@@ -546,13 +570,14 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
+        HashSet<string> excludedTables,
         int commandTimeoutSeconds,
         List<SchemaImportWarning> warnings,
         CancellationToken ct
     )
     {
         var builder = new ForeignKeyRelationshipBuilder();
-        // 取込範囲外を参照する FK は制約単位で 1 度だけ告げる（複合 FK は行が複数出るため）
+        // 取込範囲外・取り込まなかったテーブルを参照する FK は制約単位で 1 度だけ告げる（複合 FK は行が複数出るため）
         var reportedOutOfScope = new HashSet<string>(StringComparer.Ordinal);
 
         await using (var cmd = DbCommands.Create(conn, ForeignKeysSql, commandTimeoutSeconds))
@@ -588,6 +613,28 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                                 parentKey,
                                 fkName,
                                 $"{refSchema}.{refKey}"
+                            )
+                        );
+                    }
+
+                    continue;
+                }
+
+                // 名前に . を含むため取り込まなかったテーブルを参照する外部キーは、リレーションにできないことを告げる
+                // （取り込まなかったテーブルが子のときは、テーブルごと図に載らないので名指ししない）
+                if (
+                    excludedTables.Contains(refKey)
+                    && SchemaTableEntry.TryGetExact(tables, parentKey, out _)
+                )
+                {
+                    if (reportedOutOfScope.Add(fkName))
+                    {
+                        warnings.Add(
+                            new SchemaImportWarning(
+                                SchemaImportWarningKind.ForeignKeyToExcludedTable,
+                                parentKey,
+                                fkName,
+                                refKey
                             )
                         );
                     }

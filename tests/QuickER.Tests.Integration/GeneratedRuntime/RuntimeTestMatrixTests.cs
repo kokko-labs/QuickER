@@ -522,6 +522,8 @@ public class RuntimeTestMatrixTests
         new("EfCoreKeyParameterRuntimeTests", "CrudParity", Backend.EfCore),
         new("EfCoreCommandTimeoutRuntimeTests", "CrudParity", Backend.EfCore),
         new("EfCoreExecuteDeleteRuntimeTests", "CrudParity", Backend.EfCore),
+        new("SchemaQualifiedTableRuntimeTests", "CrudParity", Backend.EfCore),
+        new("SchemaQualifiedTableRuntimeTests", "CrudParity", Backend.AdoSqlServer),
         new("InMemoryFixtureRuntimeTests", "CrudParity", Backend.InMemory),
         new("RemoteServiceAdoRuntimeTests", "CrudParity", Backend.Remote),
         new("RemoteServiceEfCoreRuntimeTests", "CrudParity", Backend.Remote),

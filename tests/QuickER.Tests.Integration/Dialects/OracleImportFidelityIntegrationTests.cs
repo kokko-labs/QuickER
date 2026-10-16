@@ -827,4 +827,43 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
                 (SchemaImportWarningKind.NameTrimmed, "pad_child", "uq_pad ", "uq_pad"),
             ]);
     }
+
+    /// <summary>
+    /// 名前に . を含むテーブルは、図に入れると別のテーブル（スキーマ Order の Lines）として読まれるので取り込まず、
+    /// それを参照する外部キーを名指しし、近い名前のテーブルに何も混ざらない
+    /// </summary>
+    /// <remarks>
+    /// 取込は自スキーマの素の名前だけを返すので、名前に . を含むテーブルを外せば、同期の制約名の逆引き（表名だけで
+    /// <c>user_constraints</c> を引く）へスキーマで修飾された名前が届く経路は残らない（その経路の入口を、このテストが固定する）
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] Oracle: 名前に . を含むテーブルは取り込まず、参照する外部キーを名指しし、ほかの表に混ざらない"
+    )]
+    public async Task Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE "Lines" ("id" NUMBER(10) PRIMARY KEY, "qty" NUMBER(10));
+            CREATE TABLE "Order.Lines" (
+                "id" NUMBER(10) PRIMARY KEY,
+                "code" VARCHAR2(10) NOT NULL CONSTRAINT "uq_dotted_code" UNIQUE,
+                "note" VARCHAR2(20),
+                "line_id" NUMBER(10) CONSTRAINT "fk_dotted_lines" REFERENCES "Lines" ("id")
+            );
+            CREATE TABLE "child" (
+                "id" NUMBER(10) PRIMARY KEY,
+                "dotted_id" NUMBER(10) CONSTRAINT "fk_child_dotted" REFERENCES "Order.Lines" ("id")
+            );
+            COMMENT ON TABLE "Order.Lines" IS 'dotted';
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        DottedTableNameImportAssertions.ShouldExcludeDottedTable(result, "");
+    }
 }

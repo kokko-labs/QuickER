@@ -104,6 +104,8 @@ public static class SchemaImportWarningText
                 SchemaImportWarningKind.NameTrimmed => Strings.ImportWarningHeading_NameTrimmed,
                 SchemaImportWarningKind.IdentityColumnMarked =>
                     Strings.ImportWarningHeading_IdentityColumnMarked,
+                SchemaImportWarningKind.DottedTableNameExcluded =>
+                    Strings.ImportWarningHeading_DottedTableNameExcluded,
                 _ => throw new ArgumentOutOfRangeException(
                     nameof(kind),
                     kind,
@@ -242,6 +244,14 @@ public static class SchemaImportWarningText
                 subject,
                 detail
             ),
+            // スキーマを図に入れない方言はスキーマ名が空なので、空のスキーマ名を書かない文面へ振り分ける
+            SchemaImportWarningKind.DottedTableNameExcluded => subject.Length == 0
+                ? string.Format(Strings.ImportWarning_DottedTableNameExcluded, table)
+                : string.Format(
+                    Strings.ImportWarning_DottedTableNameExcludedInSchema,
+                    table,
+                    subject
+                ),
             // 図に入らないオブジェクトを外した種別は、見出しが内容を言うので項目は名前だけ
             SchemaImportWarningKind.TemporalHistoryTableExcluded => string.Format(
                 Strings.ImportWarningItem_TemporalHistoryTableExcluded,

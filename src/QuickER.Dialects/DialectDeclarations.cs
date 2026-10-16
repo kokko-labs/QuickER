@@ -168,7 +168,7 @@ public static class DialectDeclarations
             { Kind.TemporaryTable, Impossible() }, // C7a ×
             { Kind.ExtensionOwnedTable, Impossible() }, // C7b ×
             { Kind.SystemTable, NotDetected(NotApplicable, SystemTableReason) }, // C7c ○ 無 該
-            { Kind.ForeignKeyToExcludedTable, Impossible() }, // C9 ×
+            { Kind.ForeignKeyToExcludedTable, Detected(NotApplicable) }, // C9 ○ 36 該（名前に . を含むため外したテーブルを参照する外部キー）
             { Kind.FlattenedType, Detected(NotApplicable) }, // D1a ○ 33 該
             { Kind.UserDefinedType, NotDetected(NotApplicable, UserDefinedTypeReason) }, // D1b ○ 無 該
             { Kind.UnparsableType, NotDetected(NotApplicable, UnparsableTypeReason) }, // D2a ○ 無 該
@@ -286,7 +286,7 @@ public static class DialectDeclarations
             { Kind.TemporaryTable, Impossible() }, // C7a ×
             { Kind.ExtensionOwnedTable, Impossible() }, // C7b ×
             { Kind.SystemTable, Impossible() }, // C7c ×
-            { Kind.ForeignKeyToExcludedTable, Impossible() }, // C9 ×
+            { Kind.ForeignKeyToExcludedTable, Detected(NotApplicable) }, // C9 ○ 36 該（名前に . を含むため外したテーブルを参照する外部キー）
             { Kind.FlattenedType, Impossible() }, // D1a ×
             { Kind.UserDefinedType, Impossible() }, // D1b ×
             { Kind.UnparsableType, NotDetected(NotApplicable, UnparsableTypeReason) }, // D2a ○ 無 該
@@ -348,7 +348,7 @@ public static class DialectDeclarations
             { Kind.TemporaryTable, Detected(NotApplicable) }, // C7a ○ 33 該
             { Kind.ExtensionOwnedTable, Impossible() }, // C7b ×
             { Kind.SystemTable, Impossible() }, // C7c ×
-            { Kind.ForeignKeyToExcludedTable, Impossible() }, // C9 ×
+            { Kind.ForeignKeyToExcludedTable, Detected(NotApplicable) }, // C9 ○ 36 該（名前に . を含むため外したテーブルを参照する外部キー）
             { Kind.FlattenedType, Impossible() }, // D1a ×
             { Kind.UserDefinedType, NotDetected(NotApplicable, UserDefinedTypeReason) }, // D1b ○ 無 該
             { Kind.UnparsableType, NotDetected(NotApplicable, UnparsableTypeReason) }, // D2a ○ 無 該

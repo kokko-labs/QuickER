@@ -248,8 +248,11 @@ internal sealed class CSharpEfCoreEntityConfigModel
     /// <summary>対象の Entity クラス名</summary>
     public required string EntityClassName { get; init; }
 
-    /// <summary>マッピング先テーブル名（ToTable 用）</summary>
+    /// <summary>マッピング先テーブル名（ToTable の第 1 引数。スキーマで修飾された図の名前ならテーブルの部分だけ）</summary>
     public required string TableName { get; init; }
+
+    /// <summary>マッピング先スキーマ名（ToTable の第 2 引数。図の名前がスキーマで修飾されていなければ <c>null</c>＝引数を出さない）</summary>
+    public string? SchemaName { get; init; }
 
     /// <summary>主キーを構成するプロパティ名一覧（HasKey 用。単一・複合の両方に対応）</summary>
     public required IReadOnlyList<string> KeyPropertyNames { get; init; }

@@ -237,15 +237,17 @@ CREATE TABLE invoices (
     }
 
     /// <summary>
-    /// テーブル名にドットを含む DB でも取込が例外にならない（SL1）。
+    /// テーブル名にドットを含む DB でも取込が例外にならず、そのテーブルを外して名指しし、ほかのテーブルは取り込む（SL1）。
     /// </summary>
     /// <remarks>
     /// PRAGMA の引数へ <see cref="SqliteIdentifier.Quote"/>（ドット分割クォート）を渡すと
     /// <c>PRAGMA table_xinfo("a"."b")</c> のように誤って 2 分割クォートされ、取込全体が例外で失敗していた。
     /// PRAGMA の引数は「ドットも含めた 1 つの識別子」のため <see cref="SqliteIdentifier.QuoteSimple"/> を使う。
+    /// 名前にドットを含むテーブルは PRAGMA を読む前に外すので、いまはドットを含む名前が PRAGMA へ届かない
+    /// （<see cref="SqliteIdentifier.QuoteSimple"/> は二重の守りとして残す）。
     /// </remarks>
     [Fact(
-        DisplayName = "[Integration] SQLite: テーブル名にドットを含む DB でも取込が例外にならない"
+        DisplayName = "[Integration] SQLite: テーブル名にドットを含む DB でも取込が例外にならず、そのテーブルは外して名指しする"
     )]
     public async Task Import_TableNameContainingDot_DoesNotThrow()
     {
@@ -268,12 +270,11 @@ CREATE TABLE customers (
         await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
         var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
 
-        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo(["a.b", "customers"]);
-
-        var dotted = result.Entities.Single(e => e.TableName == "a.b");
-        dotted.Columns.Select(c => c.Name).Should().Equal("id", "name");
-        dotted.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).Should().Equal("id");
-        result.Warnings.Should().BeEmpty();
+        result.Entities.Select(e => e.TableName).Should().Equal("customers");
+        result.Entities.Single().Columns.Select(c => c.Name).Should().Equal("id", "name");
+        result
+            .Warnings.Should()
+            .Equal(new SchemaImportWarning(SchemaImportWarningKind.DottedTableNameExcluded, "a.b"));
     }
 
     /// <summary>
@@ -861,5 +862,45 @@ CREATE TABLE ""pad_child "" (
                 (SchemaImportWarningKind.NameTrimmed, "pad_child", "pad_child ", "pad_child"),
                 (SchemaImportWarningKind.NameTrimmed, "pad_child", "  col", "col"),
             ]);
+    }
+
+    /// <summary>
+    /// 名前に . を含むテーブルは、図に入れると添付データベースのテーブル（Order の Lines）として読まれるので取り込まず、
+    /// それを参照する外部キーを名指しし、近い名前のテーブルに何も混ざらない
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 名前に . を含むテーブルは取り込まず、参照する外部キーを名指しし、ほかの表に混ざらない"
+    )]
+    public async Task Import_DottedTableName_IsExcludedAndReferencingForeignKeysAreReported()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            """
+            CREATE TABLE "Lines" (id INTEGER PRIMARY KEY, qty INTEGER);
+            CREATE TABLE "Order.Lines" (
+                id INTEGER PRIMARY KEY,
+                code TEXT NOT NULL CONSTRAINT uq_dotted_code UNIQUE,
+                note TEXT,
+                line_id INTEGER CONSTRAINT fk_dotted_lines REFERENCES "Lines" (id)
+            );
+            CREATE INDEX ix_dotted_note ON "Order.Lines" (note);
+            CREATE TABLE child (
+                id INTEGER PRIMARY KEY,
+                dotted_id INTEGER CONSTRAINT fk_child_dotted REFERENCES "Order.Lines" (id)
+            );
+            """,
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        // 外部キーは名前を持たないので、取込が識別に付ける名前で名指しする
+        DottedTableNameImportAssertions.ShouldExcludeDottedTable(
+            result,
+            "",
+            foreignKeyName: "FK_child_Order.Lines_0"
+        );
     }
 }
