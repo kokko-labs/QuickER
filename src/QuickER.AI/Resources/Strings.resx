@@ -418,6 +418,9 @@
   <data name="Copilot_PathHasEnvExpansion" xml:space="preserve">
     <value>Cannot launch because the copilot command path contains '%', which cmd expands: {0}</value>
   </data>
+  <data name="Copilot_PathHasNewline" xml:space="preserve">
+    <value>Cannot launch because the copilot command path contains a line break, after which cmd drops the rest of the command: {0}</value>
+  </data>
   <data name="Copilot_PathHasDelayedExpansion" xml:space="preserve">
     <value>Cannot launch because the copilot command path contains '!', which cmd expands when delayed expansion is enabled: {0}</value>
   </data>

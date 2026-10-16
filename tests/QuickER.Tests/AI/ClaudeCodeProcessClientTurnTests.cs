@@ -75,4 +75,81 @@ public class ClaudeCodeProcessClientTurnTests
             }
         }
     }
+
+    /// <summary>
+    /// 取り消し以外の例外（ここでは本文の通知の失敗）でターンを抜けても、claude の子プロセスは止まり、残らないことを検証する。
+    /// 偽の claude は本文の差分を 1 行出したあと、ファイルへ 1 秒ごとに追記し続ける（止まっていれば追記が止まる）
+    /// </summary>
+    [Fact(DisplayName = "取り消し以外の例外でターンを抜けても、claude の子プロセスを止める")]
+    public async Task RunTurn_WhenCallbackThrows_KillsClaude()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "QuickER.Tests",
+            "fake-claude-orphan",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(directory);
+        var alive = Path.Combine(directory, "alive.txt");
+        var scriptPath = Path.Combine(directory, "claude.cmd");
+        File.WriteAllLines(
+            scriptPath,
+            [
+                "@echo off",
+                """echo {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}""",
+                ":loop",
+                """echo x>>"%~dp0alive.txt" """,
+                "ping -n 2 127.0.0.1 >nul",
+                "goto loop",
+            ],
+            Encoding.ASCII
+        );
+        var client = new ClaudeCodeProcessClient(
+            () => scriptPath,
+            ClaudeCodeProcessClient.DefaultProbeTimeout
+        );
+
+        try
+        {
+            var act = () =>
+                client
+                    .RunTurnAsync(
+                        "prompt",
+                        resumeSessionId: null,
+                        new ClaudeCodeLaunchOptions(
+                            string.Empty,
+                            string.Empty,
+                            string.Empty,
+                            string.Empty,
+                            directory
+                        ),
+                        _ => throw new InvalidOperationException("injected"),
+                        TestContext.Current.CancellationToken
+                    )
+                    .WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+            await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("injected");
+
+            // 止まっていれば、追記はこれ以上増えない（Kill はプロセスの木ごと＝cmd と ping の両方）
+            await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+            var before = File.Exists(alive) ? new FileInfo(alive).Length : 0;
+            await Task.Delay(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
+            var after = File.Exists(alive) ? new FileInfo(alive).Length : 0;
+
+            after.Should().Be(before, "子プロセスは止まっていて、もう書き込まない");
+        }
+        finally
+        {
+            await client.DisposeAsync();
+
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (IOException)
+            {
+                // 消せなくてもテストの結果には関係しない（一時フォルダ）
+            }
+        }
+    }
 }

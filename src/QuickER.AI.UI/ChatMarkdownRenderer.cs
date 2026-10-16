@@ -572,11 +572,16 @@ public static class ChatMarkdownRenderer
     /// <remarks>
     /// <see cref="Hyperlink.NavigateUri"/> は設定しない。設定すると WPF の既定のナビゲーション経路
     /// （RequestNavigate・ナビゲーションホスト）が開く処理を担い得るため、開く経路を opener の 1 本に限る。
-    /// ツールチップは実際に開く URL をそのまま出す（表示文字列と行き先の食い違いを確かめられるように）。
+    /// ツールチップは実際に開く URL を出す（表示文字列と行き先の食い違いを確かめられるように）。ホストは
+    /// <see cref="UrlPolicy.ToDisplayText"/> で punycode にする（見た目の似た別の文字のホストを見分けられるように）。
     /// </remarks>
     private static Hyperlink CreateHyperlink(Uri uri, RenderContext context)
     {
-        var hyperlink = new Hyperlink { ToolTip = uri.AbsoluteUri, Foreground = LinkForeground };
+        var hyperlink = new Hyperlink
+        {
+            ToolTip = UrlPolicy.ToDisplayText(uri),
+            Foreground = LinkForeground,
+        };
         var opener = context.LinkOpener;
         hyperlink.Click += (_, e) =>
         {

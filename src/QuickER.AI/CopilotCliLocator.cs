@@ -44,7 +44,7 @@ public static class CopilotCliLocator
     /// 例外を投げないよう、検証は解決ではなくこの起動直前の関門に置く。
     /// </remarks>
     /// <param name="executablePath">解決済みの copilot 実行ファイルパス</param>
-    /// <exception cref="InvalidOperationException">シムのパスに引用符・<c>%</c>・<c>!</c> のいずれかが含まれる場合</exception>
+    /// <exception cref="InvalidOperationException">シムのパスに引用符・<c>%</c>・<c>!</c>・改行のいずれかが含まれる場合</exception>
     public static string EnsureSafeToLaunch(string executablePath)
     {
         if (!BatchShimProcessGuard.IsBatchShim(executablePath))
@@ -70,6 +70,13 @@ public static class CopilotCliLocator
         {
             throw new InvalidOperationException(
                 string.Format(Resources.Strings.Copilot_PathHasDelayedExpansion, executablePath)
+            );
+        }
+
+        if (BatchShimProcessGuard.ContainsNewline(executablePath))
+        {
+            throw new InvalidOperationException(
+                string.Format(Resources.Strings.Copilot_PathHasNewline, executablePath)
             );
         }
 

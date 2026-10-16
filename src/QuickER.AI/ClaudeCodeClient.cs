@@ -282,6 +282,9 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             // 子プロセスが write でブロックして stdout も進まなくなる＝ReadLineAsync が返らなくなる）
             var standardError = new StandardErrorDrain(process);
 
+            // 終了を見届けたか。取り消し以外の例外（通知の失敗・読み取りの失敗）で抜けても子プロセスを残さない
+            var exited = false;
+
             try
             {
                 try
@@ -302,6 +305,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
                     .ConfigureAwait(false);
 
                 await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                exited = true;
 
                 // 終了コードと stderr を判定材料に含めるため、読み切りを（上限付きで）待ってから評価する
                 await standardError.WaitForCompletionAsync().ConfigureAwait(false);
@@ -310,11 +314,15 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             }
             catch (OperationCanceledException)
             {
-                TryKill(process);
                 return new ClaudeCodeTurnOutcome(false, null, resumeSessionId, false);
             }
             finally
             {
+                if (!exited)
+                {
+                    TryKill(process);
+                }
+
                 _currentProcess = null;
             }
         }
@@ -363,6 +371,9 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(_probeTimeout);
 
+        // 終了を見届けたか。取り消し以外の例外で抜けても子プロセスを残さない
+        var exited = false;
+
         try
         {
             try
@@ -382,17 +393,22 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
                 .StandardOutput.ReadToEndAsync(timeoutCts.Token)
                 .ConfigureAwait(false);
             await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+            exited = true;
             await standardError.WaitForCompletionAsync().ConfigureAwait(false);
 
             return InterpretProbe(output);
         }
         catch (OperationCanceledException)
         {
-            TryKill(process);
             return ClaudeLoginProbeResult.Unavailable;
         }
         finally
         {
+            if (!exited)
+            {
+                TryKill(process);
+            }
+
             // 自分が載せたものだけを外す
             Interlocked.CompareExchange(ref _probeProcess, null, process);
         }

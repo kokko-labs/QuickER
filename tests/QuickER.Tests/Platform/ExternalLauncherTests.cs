@@ -19,6 +19,7 @@ public sealed class ExternalLauncherTests
             "ms-settings:display",
             "mailto:someone@example.com",
             "ftp://example.com/file",
+            "https://example.com@evil.test/",
         };
 
     [Theory(

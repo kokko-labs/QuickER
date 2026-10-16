@@ -11,11 +11,12 @@ namespace QuickER.AI.Mock;
 /// </summary>
 /// <remarks>
 /// セキュリティのため、許可されたモックフォルダ直下の <c>*.html</c> ファイルへの遷移のみを許可し、
-/// それ以外（外部サイト・フォルダ外・新規ウィンドウ・DevTools）は遮断する
+/// それ以外（外部サイト・フォルダ外・新規ウィンドウ・DevTools・ダウンロード）は遮断する
 /// （ページ内アンカー遷移 <c>#fragment</c> は許可＝同一ファイル扱い）。さらにサブリソース要求
 /// （画像・スクリプト・スタイルシート・fetch/XHR・WebSocket）も既定拒否で遮断し、許可フォルダ内の
 /// ファイルだけを通す＝モックはオフライン完結という <see cref="MockContentValidator"/> の規約を
-/// プレビューでも実施する。ページ内リンクで別画面へ
+/// プレビューでも実施する。ダウンロード（<c>download</c> 属性つきのリンク・スクリプトが作った blob / data の保存を含む）は
+/// すべて取り消す＝AI の HTML がダウンロードフォルダへファイルを置き、WebView2 の UI から開かれるのを防ぐ。ページ内リンクで別画面へ
 /// 遷移したら <see cref="CurrentFileChanged"/> で通知する。WebView2 ランタイム未導入時は
 /// 初期化失敗を捕捉し、案内文へフォールバックしてアプリ全体は落とさない。
 /// 許可フォルダが決まるのは <see cref="Navigate"/> の時点だが、それ以前は WebView 自体が
@@ -34,6 +35,19 @@ public partial class MockPreviewPanel : UserControl
 
     /// <summary>初期化失敗などでプレビューを表示できない状態か</summary>
     private bool _unavailable;
+
+    /// <summary>許可しないサブリソース要求へ返す拒否の応答（初期化のときに 1 つ作って使い回す）</summary>
+    private CoreWebView2WebResourceResponse? _blockedResponse;
+
+    /// <summary>
+    /// 拒否の応答を作る処理（既定は空の 403）。作れなければプレビューを使えない扱いにする（閉じる側へ倒す）ことを
+    /// 確かめるためのテスト用の差し替え口
+    /// </summary>
+    internal Func<
+        CoreWebView2Environment,
+        CoreWebView2WebResourceResponse
+    > BlockedResponseFactory { get; set; } =
+        environment => environment.CreateWebResourceResponse(null, 403, "Blocked", string.Empty);
 
     /// <summary>初期化完了前に Navigate を要求された場合の保留（URI・許可フォルダ）</summary>
     private (Uri Uri, string Folder)? _pendingNavigation;
@@ -118,6 +132,18 @@ public partial class MockPreviewPanel : UserControl
         }
 
         var core = WebView.CoreWebView2;
+
+        try
+        {
+            _blockedResponse = BlockedResponseFactory(core.Environment);
+        }
+        catch (Exception)
+        {
+            // 拒否の応答を作れなければ、許可しない要求を止められない＝プレビューを使わない
+            ShowUnavailable();
+            return;
+        }
+
         core.Settings.AreDevToolsEnabled = false;
         core.Settings.AreDefaultContextMenusEnabled = true;
         core.Settings.IsStatusBarEnabled = false;
@@ -129,6 +155,8 @@ public partial class MockPreviewPanel : UserControl
         core.FrameNavigationStarting += OnFrameNavigationStarting;
         // 新規ウィンドウ要求（target=_blank・window.open）を遮断する
         core.NewWindowRequested += OnNewWindowRequested;
+        // ダウンロードはすべて取り消す（ダウンロードフォルダへ AI の作ったファイルを置かせない）
+        core.DownloadStarting += OnDownloadStarting;
 
         // ドキュメント遷移だけでなくサブリソース要求（img/script/fetch/XHR/WebSocket 等）も
         // すべて拾い、許可フォルダ内のファイル以外を既定拒否する
@@ -355,7 +383,8 @@ public partial class MockPreviewPanel : UserControl
     /// <remarks>
     /// 遮断は無言で行う（プレビュー上へ通知を出さない）。外部参照は保存時に
     /// <see cref="MockContentValidator"/> が既に警告しており、二重通知にしないため。
-    /// ハンドラ内で例外を投げるとプレビュー全体が壊れるので、失敗時も握り潰して素通しにしない。
+    /// 拒否の応答は初期化のときに作った 1 つを使い回す（要求ごとに作ると、作れなかった要求がそのまま通る）。
+    /// それでも応答を付けられなかったときは、例外を外へ出さずにプレビューを止める（その要求を黙って通さない）。
     /// </remarks>
     private void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
     {
@@ -369,17 +398,39 @@ public partial class MockPreviewPanel : UserControl
             }
 
             // 空の 403 を返して要求を打ち切る（ネットワークへは出さない）
-            e.Response = WebView.CoreWebView2.Environment.CreateWebResourceResponse(
-                null,
-                403,
-                "Blocked",
-                string.Empty
-            );
+            e.Response =
+                _blockedResponse
+                ?? throw new InvalidOperationException("The blocked response is not ready.");
         }
         catch (Exception)
         {
-            // 応答生成に失敗した場合も例外は外へ出さない（プレビューを落とさない）
+            StopPreview();
         }
+    }
+
+    /// <summary>
+    /// 許可しない要求を止められなかったときに、プレビューを止めて使えない扱いにする（閉じる側へ倒す）
+    /// </summary>
+    private void StopPreview()
+    {
+        try
+        {
+            // about:blank への遷移は遷移の判定が取り消すので使わない（止めて、表示を外す）
+            WebView.CoreWebView2?.Stop();
+        }
+        catch (Exception)
+        {
+            // 止められなくても、表示は使えない扱いへ切り替える
+        }
+
+        ShowUnavailable();
+    }
+
+    /// <summary>ダウンロードをすべて取り消す（AI の HTML がダウンロードフォルダへファイルを置けないようにする）</summary>
+    private void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e)
+    {
+        e.Cancel = true;
+        e.Handled = true;
     }
 
     /// <summary>

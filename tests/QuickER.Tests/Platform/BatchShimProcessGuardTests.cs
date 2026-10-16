@@ -45,6 +45,11 @@ public class BatchShimProcessGuardTests
     [InlineData(@"C:\tools\codex.cmd", true)]
     [InlineData(@"C:\tools\codex.BAT", true)]
     [InlineData(@"C:\tools\codex.exe", false)]
+    // Windows が落とす末尾の空白と . は、拡張子を見る前に落とす
+    [InlineData(@"C:\tools\codex.cmd ", true)]
+    [InlineData(@"C:\tools\codex.cmd.", true)]
+    [InlineData(@"C:\tools\codex.bat. .", true)]
+    [InlineData(@"C:\tools\codex.exe ", false)]
     [InlineData(@"/usr/local/bin/codex", false)]
     [InlineData(null, false)]
     public void IsBatchShim_拡張子でシムを判定する(string? path, bool expected)

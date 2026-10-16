@@ -23,6 +23,21 @@ internal static class BackendWorkingDirectory
         return path;
     }
 
+    /// <summary>
+    /// バックエンドの常駐プロセス自身の作業フォルダ（<c>%TEMP%\QuickER\{backend}</c>）を作り、そのフルパスを返す（消さない）
+    /// </summary>
+    /// <remarks>
+    /// 会話ごとの作業フォルダ（<see cref="Create"/>）はスレッドに渡すもので、プロセスの起動時には決まっていない。
+    /// プロセスをアプリのカレントフォルダのまま起動しないための置き場所（中身は持たない）。
+    /// </remarks>
+    /// <param name="backend">バックエンド名（例 <c>codex</c>）</param>
+    public static string ProcessRoot(string backend)
+    {
+        var path = Path.Combine(AppDataPaths.TempRoot, backend);
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
     /// <summary>一時作業フォルダを削除する（ベストエフォート。空文字なら何もしない）</summary>
     /// <remarks>子プロセスが掴んでいると消せないので、子プロセスを止めてから呼ぶ</remarks>
     /// <param name="path"><see cref="Create"/> が返したパス</param>

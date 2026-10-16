@@ -68,6 +68,11 @@ public static class BatchShimProcessGuard
     public static string CmdExePath => Path.Combine(Environment.SystemDirectory, "cmd.exe");
 
     /// <summary>指定パスが <c>.cmd</c> / <c>.bat</c> シムか（拡張子で判定・大文字小文字は無視）</summary>
+    /// <remarks>
+    /// 拡張子を見る前に、末尾の空白と <c>.</c> を落とす。Windows はファイル名の末尾の空白と <c>.</c> を黙って落として開くので、
+    /// <c>x.cmd </c> や <c>x.cmd.</c> も <c>x.cmd</c> として cmd 経由で起動される（落とさずに判定すると、包み直しも引数の検査も
+    /// 通らずに cmd が引数を解釈する）。
+    /// </remarks>
     /// <param name="executablePath">判定する実行ファイルパス</param>
     public static bool IsBatchShim(string? executablePath)
     {
@@ -76,7 +81,7 @@ public static class BatchShimProcessGuard
             return false;
         }
 
-        var extension = Path.GetExtension(executablePath);
+        var extension = Path.GetExtension(executablePath.TrimEnd(' ', '.'));
 
         return extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase);
@@ -248,11 +253,20 @@ public static class BatchShimProcessGuard
     /// </remarks>
     private static void EnsureNoNewline(string value, string messageFormat)
     {
-        if (value.IndexOfAny(NewlineCharacters) >= 0)
+        if (ContainsNewline(value))
         {
             throw new InvalidOperationException(string.Format(messageFormat, value));
         }
     }
+
+    /// <summary>
+    /// 値に、cmd の <c>%*</c> の展開が行を切る改行（<c>\r</c> / <c>\n</c>）が含まれるか
+    /// </summary>
+    /// <remarks>
+    /// 包み直す 2 つの入口と、引数を自分で組み立てない Copilot のシムのパスの検査（<c>CopilotCliLocator.EnsureSafeToLaunch</c>）が共有する。
+    /// </remarks>
+    /// <param name="value">調べる値</param>
+    public static bool ContainsNewline(string value) => value.IndexOfAny(NewlineCharacters) >= 0;
 
     /// <summary>
     /// 引数 1 つを、cmd と C ランタイムの両方が同じ 1 トークンとして読む形へ引用して追記する。
