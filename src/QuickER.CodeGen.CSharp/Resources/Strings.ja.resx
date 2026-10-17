@@ -121,6 +121,9 @@
   <data name="CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase" xml:space="preserve">
     <value>クラス '{0}'（テーブル '{1}'）で生成されるメンバー名 {2} は、大文字小文字だけが違います（由来: {3}）。コンパイルはできますが、エンティティを読み書きする JSON の設定（リモートサービス・SQL Server の Include の読み込み）がプロパティ名の大文字小文字を区別しないため、実行時にこのエンティティの設定を組み立てる時点で失敗します。リモートサービスを生成しない構成でも止めます。プロパティ名が大文字小文字のほかでも違うよう列名を変更してください。基底クラスはメンバー RowState・IsAdded・IsUpdated・IsRemoved・HasChanges・DisplayName を持つので、'isadded' という列は 'IsAdded' とぶつかります。列のプロパティ名がナビゲーションプロパティ名と大文字小文字だけ違う場合（例: 'order_lines' から参照されるテーブルにある 'orderlines' 列と、ナビゲーション 'OrderLines'）もぶつかります。</value>
   </data>
+  <data name="CodeGen_Error_DuplicateForeignKey" xml:space="preserve">
+    <value>外部キー {0} は、どれも子の列 {1} を親の列 {2} へ結んでいます。同じ外部キーが 2 回以上定義されているため、ナビゲーションプロパティが二重に宣言され、コンパイルできません。1 本だけ残して削除してください。</value>
+  </data>
   <data name="CodeGen_Origin_ClassName" xml:space="preserve">
     <value>クラス名 '{0}'</value>
   </data>

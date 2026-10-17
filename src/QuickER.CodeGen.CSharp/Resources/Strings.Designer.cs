@@ -198,6 +198,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_DuplicateForeignKey {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_DuplicateForeignKey", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Origin_ClassName {
             get {
                 return ResourceManager.GetString("CodeGen_Origin_ClassName", resourceCulture);

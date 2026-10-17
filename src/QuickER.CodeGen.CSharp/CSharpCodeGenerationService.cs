@@ -818,7 +818,82 @@ public sealed partial class CSharpCodeGenerationService
         ValidateSchemaNameDuplicates(diagram, diagnostics);
         ValidateGeneratedTypeNames(diagram, diagnostics);
         ValidateColumnPropertyNameUniqueness(diagram, diagnostics);
+        ValidateDuplicateForeignKeys(diagram, diagnostics);
         ValidateNameControlCharacters(diagram, diagnostics);
+    }
+
+    /// <summary>同じ親・子・列ペアの外部キーが 2 本以上ないことを検証する</summary>
+    /// <remarks>
+    /// <para>
+    /// ナビゲーションを作るリレーション（単一列の列ペア・多対多でない）が同じ親列と子列を 2 回結ぶと、同じ定義の重複で、
+    /// ナビゲーション名は外部キー列由来の役割名でも区別できない（同じ名前のメンバーが 2 つできてコンパイルできない）。
+    /// 片方を消せば直るので、両方の制約名と列を名指しして止める（MCP のツールと Excel 定義書の取込が入力で断るのと同じ扱い）。
+    /// 制約名は DDL と同じ実効名（名前の無いリレーションは既定名＝<see cref="ConstraintNames.ResolveForeignKeyNames"/>）を出す。
+    /// </para>
+    /// <para>
+    /// 列ペアが 2 組以上の外部キーはナビゲーションを作らない（生成コードの対象外）ので見ない。
+    /// </para>
+    /// </remarks>
+    private static void ValidateDuplicateForeignKeys(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        var entitiesById = diagram
+            .Entities.GroupBy(entity => entity.Id)
+            .ToDictionary(group => group.Key, group => group.First());
+        var duplicates = diagram
+            .Relationships.Where(relationship =>
+                relationship.Type != RelationshipType.ManyToMany
+                && relationship.ColumnPairs.Count == 1
+            )
+            .GroupBy(relationship =>
+                (
+                    relationship.SourceEntityId,
+                    relationship.TargetEntityId,
+                    relationship.ColumnPairs[0].SourceColumnId,
+                    relationship.ColumnPairs[0].TargetColumnId
+                )
+            )
+            .Where(group => group.Count() > 1)
+            .ToList();
+
+        if (duplicates.Count == 0)
+        {
+            return;
+        }
+
+        var constraintNames = ConstraintNames.ResolveForeignKeyNames(
+            diagram.Entities,
+            diagram.Relationships,
+            IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms)
+        );
+
+        foreach (var group in duplicates)
+        {
+            if (
+                !entitiesById.TryGetValue(group.Key.SourceEntityId, out var parent)
+                || !entitiesById.TryGetValue(group.Key.TargetEntityId, out var child)
+                || parent.Columns.FirstOrDefault(column => column.Id == group.Key.SourceColumnId)
+                    is not { } parentColumn
+                || child.Columns.FirstOrDefault(column => column.Id == group.Key.TargetColumnId)
+                    is not { } childColumn
+            )
+            {
+                continue;
+            }
+
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_DuplicateForeignKey,
+                        QuoteNames(group.Select(relationship => constraintNames[relationship])),
+                        $"'{child.TableName}'.'{childColumn.Name}'",
+                        $"'{parent.TableName}'.'{parentColumn.Name}'"
+                    )
+                )
+            );
+        }
     }
 
     /// <summary>図の名前（テーブル・列・制約・クエリ）に改行・制御文字が含まれていないかを検証する</summary>

@@ -98,6 +98,14 @@ The parent side is `{child plural}By{role}` (`customer.OrdersByShipCustomer`), o
 A table that references itself twice follows the same rule and gets only the parent-side navigations, such as `NodesByParent` and `NodesByOrigin`.
 Adding a second relationship between two tables therefore renames the navigations of the first one.
 
+Relationships in both directions between two tables keep their table-based names unless those names would clash in one class.
+For example, a one-to-one relationship from `customers` to `profiles` and another from `profiles` to `customers` would both give `customers` a member `Profile`.
+Only then are all the relationships between the two tables named after their foreign-key columns, in both directions (`customer.Profile` and `customer.ProfileByCustomer`).
+Two one-to-many relationships in opposite directions do not clash and keep their names (`customer.Profiles` and `customer.Profile`).
+
+Two foreign keys that join the same child column to the same parent column are the same foreign key defined twice, and role names cannot tell them apart.
+Generation stops with an error that names both constraints; delete one of them.
+
 ### DB-definition metadata attributes
 
 By default, an Entity is decorated with DataAnnotations and DB-definition metadata attributes (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, and so on) and a description.

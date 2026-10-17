@@ -37,6 +37,15 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// リレーションの並び順に依らない。自己参照（親表＝子表）も同じ規則で、子側のナビゲーションは作られない。
     /// </para>
     /// <para>
+    /// 2 つのテーブルの間に両方向のリレーションがあると、向きごとの組の規則だけでは名前がぶつかることがある
+    /// （customers を親とする 1 対 1 と profiles を親とする 1 対 1 は、customers に子側の <c>Profile</c> と親側の
+    /// <c>Profile</c> を作る）。そこで 2 つのテーブルの間の全リレーション（向きを問わない）について、上の規則で
+    /// 決めた名前が同じクラスで重なるか（大文字小文字を区別して）を見て、重なるときだけ、その全リレーションを役割名で
+    /// 名付け直す。重ならない組（両方向とも 1 対多など）は従来の名前のまま＝名前が変わるのは、従来はメンバー名の
+    /// 重複で生成エラーになっていた図だけ。同じ親・子・列ペアの外部キーが 2 本ある図は役割名でも区別できないので、
+    /// 生成前の検証（<c>CSharpCodeGenerationService.ValidateDuplicateForeignKeys</c>）が先に止める。
+    /// </para>
+    /// <para>
     /// 対象は <c>ResolveAllNavigations</c> がナビゲーションを作るリレーションと同じ（多対多・端点不明・
     /// 複合外部キー・列ペアを解決できないものは除く）。
     /// </para>
@@ -77,32 +86,99 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         var names = new Dictionary<Guid, RelationshipNavigationNames>();
 
-        foreach (var group in navigable.GroupBy(item => (item.Source.Id, item.Target.Id)))
+        // 2 つのテーブルの間の全リレーション（向きを問わない）ごとに名付ける
+        foreach (
+            var pair in navigable.GroupBy(item => UnorderedPair(item.Source.Id, item.Target.Id))
+        )
         {
-            var useRoleNames = group.Count() > 1;
+            var pairNames = new Dictionary<Guid, RelationshipNavigationNames>();
 
-            foreach (var (relationship, source, target, dependent) in group)
+            // 向きごとの組の規則: 同じ（親表, 子表）の組に 2 本以上あれば役割名
+            foreach (var group in pair.GroupBy(item => (item.Source.Id, item.Target.Id)))
             {
-                var collection = relationship.Type == RelationshipType.OneToMany;
-                var childNavigation = _nameConverter.ToNavigationName(target.TableName, collection);
+                var useRoleNames = group.Count() > 1;
 
-                if (!useRoleNames)
+                foreach (var item in group)
                 {
-                    names[relationship.Id] = new RelationshipNavigationNames(
-                        childNavigation,
-                        _nameConverter.ToNavigationName(source.TableName, collection: false)
-                    );
-                    continue;
+                    pairNames[item.Relationship.Id] = NameNavigation(item, useRoleNames);
                 }
+            }
 
-                var role = _nameConverter.ToRoleName(dependent.Name, source.TableName);
-                names[relationship.Id] = new RelationshipNavigationNames(
-                    $"{childNavigation}By{role}",
-                    role
-                );
+            // 両方向のリレーションで名前が同じクラスに重なるときだけ、2 つのテーブルの間の全リレーションを役割名にする
+            if (HasCollidingNavigations(pair, pairNames))
+            {
+                foreach (var item in pair)
+                {
+                    pairNames[item.Relationship.Id] = NameNavigation(item, useRoleNames: true);
+                }
+            }
+
+            foreach (var (id, navigationNames) in pairNames)
+            {
+                names[id] = navigationNames;
             }
         }
 
         return names;
     }
+
+    /// <summary>1 本のリレーションの親側・子側のナビゲーション名（役割名を使うかを指定する）</summary>
+    private RelationshipNavigationNames NameNavigation(
+        (Relationship Relationship, Entity Source, Entity Target, Column Dependent) item,
+        bool useRoleNames
+    )
+    {
+        var collection = item.Relationship.Type == RelationshipType.OneToMany;
+        var childNavigation = _nameConverter.ToNavigationName(item.Target.TableName, collection);
+
+        if (!useRoleNames)
+        {
+            return new RelationshipNavigationNames(
+                childNavigation,
+                _nameConverter.ToNavigationName(item.Source.TableName, collection: false)
+            );
+        }
+
+        var role = _nameConverter.ToRoleName(item.Dependent.Name, item.Source.TableName);
+        return new RelationshipNavigationNames($"{childNavigation}By{role}", role);
+    }
+
+    /// <summary>
+    /// 2 つのテーブルの間のリレーションに付けた名前が、同じクラスで重なるか（大文字小文字を区別して）。
+    /// 親側の名前は親表のクラスに、子側の名前は子表のクラスに付く（自己参照は子側のナビゲーションを作らない）
+    /// </summary>
+    private static bool HasCollidingNavigations(
+        IEnumerable<(
+            Relationship Relationship,
+            Entity Source,
+            Entity Target,
+            Column Dependent
+        )> pair,
+        IReadOnlyDictionary<Guid, RelationshipNavigationNames> pairNames
+    )
+    {
+        // 生成する C# の識別子どうしの比較（言語が区別する綴りで重なりを判定する）
+        var seen = new HashSet<(Guid EntityId, string Name)>();
+
+        foreach (var (relationship, source, target, _) in pair)
+        {
+            var navigationNames = pairNames[relationship.Id];
+
+            if (!seen.Add((source.Id, navigationNames.Principal)))
+            {
+                return true;
+            }
+
+            if (source.Id != target.Id && !seen.Add((target.Id, navigationNames.Dependent)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>2 つのテーブルの ID を、並び順に依らない組にする</summary>
+    private static (Guid First, Guid Second) UnorderedPair(Guid a, Guid b) =>
+        a.CompareTo(b) <= 0 ? (a, b) : (b, a);
 }
