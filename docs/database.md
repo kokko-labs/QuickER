@@ -104,6 +104,10 @@ It changes only the name of the selected profile to the one in the box, keeping 
 Typing a new name and pressing "Save" stores a separate profile instead of renaming.
 Saving, renaming, and deleting all re-read `connections.json` before writing it back. When that read fails, for instance because another program is holding the file, the operation is **cancelled without writing anything** and says so in the status line (the saved profiles are left untouched; try again in a moment).
 When a write fails partway (a full disk, a failure to write or delete an encrypted password file, and so on), the change may have been applied only partly, so the status line says so and the list is reloaded from the file.
+A partly applied change never leaves a profile with the saved password of another connection.
+The old encrypted password file is removed before `connections.json` is written, and the new one is written after it.
+If `connections.json` then cannot be written, the profile keeps its old settings without a saved password, and you enter the password again.
+When recording the last connection on OK fails, the connection still goes ahead, and a message tells you that it was not recorded.
 If the file turns out to be corrupted, it is moved aside once to `connections.json.corrupt` before being overwritten.
 
 ### What gets imported

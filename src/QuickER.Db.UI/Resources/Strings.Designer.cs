@@ -437,6 +437,12 @@ namespace QuickER.Db.UI.Resources {
                 return ResourceManager.GetString("DbConnection_ProfileWriteFailed", resourceCulture);
             }
         }
+
+        public static string DbConnection_LastUsedSaveFailed {
+            get {
+                return ResourceManager.GetString("DbConnection_LastUsedSaveFailed", resourceCulture);
+            }
+        }
         
         public static string DbConnection_ProfileNotFound {
             get {
