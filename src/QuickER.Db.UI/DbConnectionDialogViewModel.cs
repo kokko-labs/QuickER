@@ -846,7 +846,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         }
         catch (Exception ex) when (IsStoreWriteFailure(ex))
         {
-            // 一覧からは消えたが暗号ファイルが残った、などがあり得る。ディスクの実体で一覧を出し直す
+            // 暗号ファイルを消せなければ何も書いていない。消した後で JSON を書けなければ、パスワードの無い
+            // プロファイルが一覧に残る。どちらでもディスクの実体で一覧を出し直す
             ReportStoreWriteFailure(ex, id);
             return;
         }
@@ -971,9 +972,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             when (ex is ConnectionProfileStoreUnavailableException || IsStoreWriteFailure(ex))
         {
             // ここでの保存は確定の「ついで」の記録で、書けなくても失うのは前回接続の記録だけ
-            // （次回ダイアログの初期値が前々回のものになるか、パスワードが空で復元されるだけ）。
-            // 利用者が頼んだのは接続の確定なので、記録できないことを理由に確定そのものを止めるのは
-            // 釣り合わない。黙って諦めて先へ進む（ダイアログはこの直後に閉じ、ステータスを読む場所も無い）。
+            // （次回ダイアログの初期値が前々回のものになるか、パスワードが空で復元されるだけ。別の接続先の
+            // パスワードと組になることはストアの書き込み順が防ぐ）。利用者が頼んだのは接続の確定なので、
+            // 確定そのものは止めない。ダイアログはこの直後に閉じてステータスを読む場所が無いため、
+            // 記録できなかったことは閉じる前にエラーで知らせる
+            _dialogs.ShowError(
+                string.Format(Strings.DbConnection_LastUsedSaveFailed, ex.Message),
+                Strings.DbConnection_Title
+            );
         }
 
         Result = ToSettings();

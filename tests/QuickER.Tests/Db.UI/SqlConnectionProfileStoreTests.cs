@@ -291,9 +291,9 @@ public class SqlConnectionProfileStoreTests : IDisposable
         store.LoadAll().Should().BeEmpty();
     }
 
-    /// <summary>SaveAll が前回接続情報（LastUsed）を消さないことを検証する（read-modify-write の相互不干渉）</summary>
-    [Fact(DisplayName = "SaveAll は前回接続情報を消さない")]
-    public void SaveAll_PreservesLastUsed()
+    /// <summary>Upsert が前回接続情報（LastUsed）を消さないことを検証する（read-modify-write の相互不干渉）</summary>
+    [Fact(DisplayName = "Upsert は前回接続情報を消さない")]
+    public void Upsert_PreservesLastUsed()
     {
         var store = CreateStore();
         store.SaveLastUsed(
@@ -306,17 +306,15 @@ public class SqlConnectionProfileStoreTests : IDisposable
             password: ""
         );
 
-        // プロファイル一覧を保存しても前回接続情報は温存されるべき
-        store.SaveAll(
-            new[]
+        // プロファイルを保存しても前回接続情報は温存されるべき
+        store.Upsert(
+            new SqlConnectionProfile
             {
-                new SqlConnectionProfile
-                {
-                    Name = "P",
-                    Server = "s",
-                    Database = "d",
-                },
-            }
+                Name = "P",
+                Server = "s",
+                Database = "d",
+            },
+            password: ""
         );
 
         var lastUsed = store.LoadLastUsed();
@@ -644,7 +642,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
                 .Should()
                 .Throw<ConnectionProfileStoreUnavailableException>();
             FluentActions
-                .Invoking(() => store.SaveAll(new List<SqlConnectionProfile>()))
+                .Invoking(() => store.Rename(kept.Id, "別名"))
                 .Should()
                 .Throw<ConnectionProfileStoreUnavailableException>();
             FluentActions

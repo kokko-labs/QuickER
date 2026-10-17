@@ -80,8 +80,20 @@ public sealed class ConnectionProfileStoreUnavailableException : InvalidOperatio
 
 /// <summary>SQL 接続プロファイルを JSON ファイルへ保存・読込するストア</summary>
 /// <remarks>
+/// <para>
 /// パスワードはプロファイル本体とは分離し、Windows DPAPI（CurrentUser スコープ）で
-/// 暗号化した別ファイルへ保存する
+/// 暗号化した別ファイルへ保存する。
+/// </para>
+/// <para>
+/// <b>暗号ファイルを消すのは JSON の書き込みの前、書くのは JSON の書き込みの後。</b>暗号ファイルのパスは
+/// 接続先に依らない（前回接続は固定名・プロファイルは Id ごと）ので、2 つの書き込みのどちらかだけが成功すると、
+/// 接続先と別の接続先のパスワードが組になり得る（そのまま接続すると、前の接続先の資格情報を別のサーバーへ送る）。
+/// この順序なら、どの段で失敗しても（途中でプロセスが落ちても）残るのは「暗号ファイルの無いプロファイル」
+/// （パスワードは空欄で復元される＝再入力）か書き終えた状態だけで、残った暗号ファイルはいつも、JSON がその位置に
+/// 持つプロファイルのために書いたものになる。孤児の暗号ファイルも残らない。
+/// 引き換えに、JSON の書き込みが失敗すると、古いプロファイルの保存済みパスワードは消えたままになる（再入力）。
+/// 先頭の削除が失敗したときは何も書かずに例外になる（ファイルの中身は操作前のまま）。
+/// </para>
 /// </remarks>
 public class SqlConnectionProfileStore
 {
@@ -238,11 +250,11 @@ public class SqlConnectionProfileStore
     /// 書き込みは <see cref="AtomicFile.WriteAllText"/> による原子的書き込み。素の
     /// <c>File.WriteAllText</c> は既存ファイルを切り詰めてから書くため、途中でプロセスが落ちると
     /// connections.json が破損した JSON になり、読込側（<see cref="LoadData"/>）が空データへ
-    /// フォールバックした状態のまま次の read-modify-write 保存（<see cref="SaveAll"/> /
+    /// フォールバックした状態のまま次の read-modify-write 保存（<see cref="Upsert"/> /
     /// <see cref="SaveLastUsed"/>）で他のプロファイル・前回接続情報が巻き添えで消失する。
     /// これを防ぐのがここでの原子的書き込みの目的。DPAPI の暗号ファイルは <see cref="SaveSecret(string, string)"/> が
-    /// 別のファイルとして（同じく原子的に）書く。2 つのファイルなので、こちらが書けて暗号ファイルが書けなかった
-    /// 状態（<c>SavePassword=true</c> なのに暗号ファイルが無い）は残り得る。そのとき <see cref="LoadSecret"/> は
+    /// 別のファイルとして（同じく原子的に）書く。2 つのファイルの書き込みの順序はクラスの説明を参照。
+    /// 暗号ファイルが無い（<c>SavePassword=true</c> なのに暗号ファイルが無い）とき <see cref="LoadSecret"/> は
     /// <see cref="SavedPasswordStatus.Missing"/> を返し、パスワードは空欄＝再入力になる。暗号ファイルがあるのに
     /// 読めないときは <see cref="SavedPasswordStatus.Unreadable"/> を返し、空の値で暗号ファイルを消さない。
     /// </remarks>
@@ -303,18 +315,6 @@ public class SqlConnectionProfileStore
         return (profile, password);
     }
 
-    /// <summary>すべてのプロファイルを保存する（前回接続情報は温存する）</summary>
-    /// <exception cref="ConnectionProfileStoreUnavailableException">
-    /// 接続情報ファイルを読み取れず保存を中止した（ファイルの中身は操作前のまま）
-    /// </exception>
-    public void SaveAll(IEnumerable<SqlConnectionProfile> profiles)
-    {
-        // read-modify-write で Profiles のみ差し替え、LastUsed を消さない
-        var data = LoadDataForWrite();
-        data.Profiles = profiles.ToList();
-        SaveData(data);
-    }
-
     /// <summary>前回使用した接続情報を保存する</summary>
     /// <remarks>
     /// 登録済みプロファイル一覧とは別セクションで管理し、次回ダイアログ表示時の初期値復元に用いる。
@@ -331,17 +331,15 @@ public class SqlConnectionProfileStore
         // read-modify-write で LastUsed のみ差し替え、Profiles を消さない
         var data = LoadDataForWrite();
         var hasPassword = NormalizeSavePassword(profile, password);
+
+        // 前の接続先の暗号ファイルを JSON より先に消す（順序の理由はクラスの説明）
+        DeleteSecret(LastConnectionSecretPath());
         data.LastUsed = profile;
         SaveData(data);
 
-        // パスワード保存が無効化された場合は残存する暗号ファイルを確実に削除する
         if (hasPassword)
         {
             SaveSecret(LastConnectionSecretPath(), password);
-        }
-        else
-        {
-            DeleteSecret(LastConnectionSecretPath());
         }
     }
 
@@ -409,23 +407,19 @@ public class SqlConnectionProfileStore
             data.Profiles.Add(profile);
         }
 
-        SaveData(data);
+        // 対象と置き換え先の暗号ファイルは JSON より先に消す（順序の理由はクラスの説明）
+        DeleteSecret(profile.Id);
 
-        // 置き換えたプロファイルの暗号ファイルは、JSON の書き込みが成功したあとで消す
-        // （先に消すと、書き込みに失敗したとき「一覧には居るのにパスワードだけ無い」状態が残る）
         if (replacedProfileId is { } removedId && removedId != profile.Id)
         {
             DeleteSecret(removedId);
         }
 
-        // 保存無効・空パスワード時は残存する暗号ファイルを削除する
+        SaveData(data);
+
         if (hasPassword)
         {
             SaveSecret(profile.Id, password);
-        }
-        else
-        {
-            DeleteSecret(profile.Id);
         }
     }
 
@@ -443,7 +437,7 @@ public class SqlConnectionProfileStore
     /// 正規化（<see cref="NormalizeSavePassword"/>）で暗号ファイルごと消える。Id は変わらないので、
     /// 暗号ファイルはそのまま引き継がれる。
     /// </para>
-    /// <para>読み取りが 1 回だけである理由と、置き換え先の暗号ファイルを書き込みの後に消す理由は <see cref="Upsert"/> と同じ。</para>
+    /// <para>読み取りが 1 回だけである理由は <see cref="Upsert"/> と同じ。置き換え先の暗号ファイルを JSON より先に消す理由はクラスの説明を参照。</para>
     /// </remarks>
     /// <exception cref="ConnectionProfileStoreUnavailableException">
     /// 接続情報ファイルを読み取れず変更を中止した（ファイルの中身は操作前のまま）
@@ -465,18 +459,21 @@ public class SqlConnectionProfileStore
             data.Profiles.RemoveAll(p => p.Id == replacedId);
         }
 
-        SaveData(data);
-
+        // 置き換え先の暗号ファイルは JSON より先に消す（順序の理由はクラスの説明）
         if (replacedProfileId is { } removedId && removedId != id)
         {
             DeleteSecret(removedId);
         }
 
+        SaveData(data);
         return true;
     }
 
     /// <summary>指定 ID のプロファイルと暗号化パスワードを削除する</summary>
-    /// <remarks>読み取りが 1 回だけである理由は <see cref="Upsert"/> と同じ</remarks>
+    /// <remarks>
+    /// 読み取りが 1 回だけである理由は <see cref="Upsert"/> と同じ。暗号ファイルは JSON より先に消す
+    /// （後に回すと、削除が失敗したとき持ち主のいない暗号ファイルが残る。順序の理由はクラスの説明）。
+    /// </remarks>
     /// <exception cref="ConnectionProfileStoreUnavailableException">
     /// 接続情報ファイルを読み取れず削除を中止した（ファイルの中身は操作前のまま・暗号ファイルも消さない）
     /// </exception>
@@ -484,8 +481,8 @@ public class SqlConnectionProfileStore
     {
         var data = LoadDataForWrite();
         data.Profiles.RemoveAll(p => p.Id == id);
-        SaveData(data);
         DeleteSecret(id);
+        SaveData(data);
     }
 
     /// <summary>指定 ID のプロファイルに紐づくパスワードを復号して返す（読めたか・無いか・読めないかを含む）</summary>

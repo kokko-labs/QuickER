@@ -2828,10 +2828,18 @@ The following three endpoints are generated per excluded column, where `{column}
 - **A host that buffers request bodies (`EnableBuffering`) is supported.**
   The upload reads the body forward from where it stands, for exactly the declared `Content-Length`, whatever length the buffered stream reports.
   Middleware that reads part of the body before the endpoint must set `Request.Body.Position` back to 0, or the upload receives fewer bytes than declared and fails.
-- The client (`Http{Entity}RemoteRepository`) receives `GET` with `ResponseHeadersRead` and copies to the destination in O(chunks), and sends `PUT` with `StreamContent` including `Content-Length`.
+- The client (`Http{Entity}RemoteRepository`) receives `GET` with `ResponseHeadersRead` and copies to the destination in O(chunks), and sends `PUT` with `Content-Length`.
   If you do not pass `length` for a non-seekable Stream, it throws `ArgumentException` before sending, which is the same length contract as the direct path.
+  The body is read with the same exact-length check as the direct path: a stream that ends before `length` or goes on past it throws `ArgumentException` (`ParamName` is `length`) before the whole declared body has been sent, so the server stores nothing.
+  When the HTTP layer sends the body again to follow a redirect, a seekable stream is read again from where the first send began.
+  A stream that cannot seek cannot be sent twice, so following a redirect with one fails with `HttpRequestException`.
   **The Stream you pass in stays yours**: the client neither closes nor disposes it, exactly as a direct connection does not, so switching between the two implementations does not change what happens to the stream.
-  The HTTP layer disposes the request content after sending, so the stream is handed to `StreamContent` through a non-closing wrapper.
+- **The client accepts only the success response the endpoint answers with**: `GET` succeeds on 200 with `application/octet-stream`, and `PUT` and `DELETE` on 204.
+  Any other success response throws `RemoteRepositoryException` with its status code, and `GET` then writes nothing to the destination.
+  Such a response comes from something in front of the endpoint, such as an authentication proxy that sends an expired session to its sign-in page.
+  Read as success, it would store that page as the blob, or report as stored a write that never reached the server.
+  The JSON operations refuse a success response whose body is not the expected JSON for the same reason.
+  The blob copy of bidirectional sync over HTTP goes through the same client, so it follows the same rule.
 - **The `PUT` carries `Expect: 100-continue`.**
   The client holds the body back until the server has seen the headers, so an upload whose declared length is over the limit gets the 413 as a `RemoteRepositoryException` before any of the body is sent.
   Without it, the server would close the connection without reading the body, and the reset that follows can discard the 413 and surface as a connection error.

@@ -1678,8 +1678,11 @@ public class DbConnectionDialogViewModelTests : IDisposable
         }
 
         vm.StatusMessage.Should().StartWith(WriteFailedPrefix);
-        vm.Profiles.Should().BeEmpty("JSON からは消えているので、一覧もディスクに合わせる");
-        vm.SelectedProfile.Should().BeNull();
+        vm.Profiles.Should()
+            .ContainSingle("暗号ファイルを消せなかったので JSON も書いていない")
+            .Which.Profile.Id.Should()
+            .Be(id);
+        store.LoadPassword(id).Status.Should().Be(SavedPasswordStatus.Loaded);
     }
 
     /// <summary>名前の変更で置き換え先の暗号ファイルを消せなくても落ちない（1-9 #1）</summary>
@@ -1706,17 +1709,26 @@ public class DbConnectionDialogViewModelTests : IDisposable
         }
 
         vm.StatusMessage.Should().StartWith(WriteFailedPrefix);
-        vm.Profiles.Should().ContainSingle().Which.Profile.Id.Should().Be(targetId);
+        vm.Profiles.Select(item => item.Profile.Id)
+            .Should()
+            .BeEquivalentTo(
+                [targetId, conflictId],
+                "置き換え先の暗号ファイルを消せなかったので JSON も書いていない"
+            );
         vm.SelectedProfile!.Id.Should().Be(targetId);
+        vm.SelectedProfile.Name.Should().Be("本番DB");
     }
 
-    /// <summary>OK の前回接続の記録で書き込み側が失敗しても、確定は続ける（1-9 #1）</summary>
-    [Fact(DisplayName = "Ok: 前回接続のパスワードを書けなくても確定は続行する")]
+    /// <summary>OK の前回接続の記録で書き込み側が失敗しても、確定は続け、記録できなかったことをエラーで知らせる</summary>
+    [Fact(
+        DisplayName = "Ok: 前回接続のパスワードを書けなくても確定は続行し、記録できなかったことをエラーで知らせる"
+    )]
     public void Ok_WhenLastUsedSecretWriteFails_StillConfirms()
     {
         var store = CreateStore();
         File.WriteAllText(store.SecretsFolder, "not a folder");
-        var vm = CreateVm(store, new StubDialogService());
+        var dialogs = new StubDialogService();
+        var vm = CreateVm(store, dialogs);
         vm.Host = "srv";
         vm.Database = "db";
         vm.SavePassword = true;
@@ -1728,6 +1740,11 @@ public class DbConnectionDialogViewModelTests : IDisposable
 
         closed.Should().BeTrue();
         vm.Result.Should().NotBeNull();
+        dialogs
+            .ErrorMessages.Should()
+            .ContainSingle("記録できなかったことを黙って捨てない")
+            .Which.Should()
+            .StartWith(Strings.DbConnection_LastUsedSaveFailed.Split("{0}")[0]);
     }
 
     /// <summary>

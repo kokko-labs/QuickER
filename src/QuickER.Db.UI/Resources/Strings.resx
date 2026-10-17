@@ -418,4 +418,7 @@ Do you want to run this against {0}?</value>
   <data name="Db_SyncTitle" xml:space="preserve">
     <value>Sync with Database</value>
   </data>
+  <data name="DbConnection_LastUsedSaveFailed" xml:space="preserve">
+    <value>Could not record this connection for the next time the dialog opens. The connection continues: {0}</value>
+  </data>
 </root>

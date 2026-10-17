@@ -170,6 +170,7 @@ Interrupting stops the run at any point, including while the final build is runn
   For those two backends, QuickER records the output folder right after scaffolding, compares file contents again right before the build, and asks you to confirm when anything outside UI-layer sources and static assets (`.cs`, `.razor`, `.xaml`, `.css`, `.js`, `.html`, images) was added or changed.
   The list is shown in full, so a legitimate addition such as an `appsettings.json` appears there too.
   A folder link (junction or symbolic link) is listed as a single entry and not followed, whatever its name.
+  A folder whose contents QuickER cannot list, the output folder itself included, is listed every time, because what it holds cannot be compared (the output folder is shown as `.`).
   Anything QuickER could not delete from the project's `obj` / `bin` before the build is listed as well, because the build would read it.
   If you cancel, the build is not run and generation finishes with the project left **unverified**, with the files and the log still in the output folder for you to review.
   Claude Code and the API key method are not asked: Claude Code already runs any command it likes through `Bash`, so the build crosses no new boundary, and the API key method cannot submit a build file at all.
