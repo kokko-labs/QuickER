@@ -94,19 +94,32 @@ public static class GeneratedTypeNames
     /// </para>
     /// <para>
     /// 値オブジェクトの型名は列名から作るので、別のテーブルの同じ綴りの列は同じ型を共有する（衝突ではない）。
-    /// 綴りが大文字小文字だけ違う型名は、止めずに警告の対象として返す（エラーになる名前とエラーの表の名前を除く）。
+    /// 綴りが大文字小文字だけ違う型名は、止めずに警告の対象として返す（エラーになる名前と、ルート名でエラーにした表の名前と、
+    /// プロパティ名が同じか大小だけ違うためにエラーにした列〔<see cref="ColumnPropertyNameCollisions"/>〕の値オブジェクトの名前を除く）。
     /// </para>
     /// </remarks>
     internal static GeneratedTypeNameReport Analyze(IEnumerable<Entity> entities)
     {
         var entries = new List<(string Name, GeneratedTypeNameSource Source)>();
         var tables = new List<string>();
+        var refusedColumns = new HashSet<GeneratedTypeNameSource>();
 
         foreach (
             var entity in entities.Where(entity => !string.IsNullOrWhiteSpace(entity.TableName))
         )
         {
             tables.Add(entity.TableName);
+
+            // プロパティ名が同じか大小だけ違う列は生成前の検証がエラーにするので、警告の出どころから外す
+            foreach (var collision in ColumnPropertyNameCollisions.Find(entity))
+            {
+                refusedColumns.UnionWith(
+                    collision.Columns.Select(column => new GeneratedTypeNameSource(
+                        entity.TableName,
+                        column
+                    ))
+                );
+            }
 
             foreach (var name in ForTable(entity.TableName))
             {
@@ -170,7 +183,9 @@ public static class GeneratedTypeNames
                 name,
                 byName[name]
                     .Where(source =>
-                        source.ColumnName is not null || !refusedTables.Contains(source.TableName)
+                        source.ColumnName is null
+                            ? !refusedTables.Contains(source.TableName)
+                            : !refusedColumns.Contains(source)
                     )
                     .ToList()
             ))

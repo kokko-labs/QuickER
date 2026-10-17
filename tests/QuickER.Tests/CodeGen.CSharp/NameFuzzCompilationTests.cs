@@ -41,7 +41,10 @@ public sealed class NameFuzzCompilationTests
         var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
         var entrance = $"compile:{config}";
         var (dialect, provider, options) = Configure(config);
-        var (diagram, names) = NameFuzzDiagrams.BuildAll(dialect, NameFuzzDiagrams.NamesForRun());
+        var (diagram, names) = NameFuzzDiagrams.BuildAll(
+            dialect,
+            NameFuzzDiagrams.NamesForRun().Concat(CaseOnlyNames)
+        );
         AddQueries(diagram, names);
 
         // 図を作れずに名前が入らないまま緑にならないよう、代表の名前の半分以上は入っていること
@@ -95,9 +98,54 @@ public sealed class NameFuzzCompilationTests
                     $"{example} / {group.First()} / {SourceLine(result, group.First())}"
                 );
             }
+
+            // コンパイルでは分からない実行時の失敗（大文字小文字を区別しない JSON とルーティング）も見る
+            if (config == Config.SqlServerFull && compiled.Success)
+            {
+                RecordRuntimeProblems(ledger, entrance, result, config, example);
+            }
         }
 
         ledger.AssertMatchesKnown(entrance);
+    }
+
+    /// <summary>
+    /// どの種でも必ず図へ置く、大文字小文字だけ違う生成名（エンティティのメンバー名・リモートのルート名）を作る名前
+    /// </summary>
+    /// <remarks>
+    /// 図の表は列 <c>Id</c> と、表と同じ名前の列を持つ。<c>i_d</c> は <c>Id</c> と大小だけ違う <c>ID</c> を、<c>rowstate</c> は基底の
+    /// <c>RowState</c> と大小だけ違う <c>Rowstate</c> を作り、<c>case_route</c> と <c>caseroute</c> はルート名 <c>CaseRoute</c> と
+    /// <c>Caseroute</c> を作る。生成時のエラーが表を名指しして外すのが正しく、止めないと実行時の段
+    /// （<see cref="RecordRuntimeProblems"/>）が JSON の設定の組み立ての失敗・エンドポイントの重なりとして記録する。
+    /// </remarks>
+    private static readonly string[] CaseOnlyNames = ["i_d", "rowstate", "case_route", "caseroute"];
+
+    /// <summary>
+    /// 生成物を読み込み、全エンティティの JSON の設定（リモート・SQL Server の FOR JSON）の組み立てと、
+    /// リモートのエンドポイントの大文字小文字だけ違うパターンを確かめる
+    /// </summary>
+    private static void RecordRuntimeProblems(
+        FuzzFailureLedger ledger,
+        string entrance,
+        CodeGenerationResult result,
+        Config config,
+        string example
+    )
+    {
+        var assembly = GeneratedCodeCompiler.CompileAndLoad(
+            result,
+            $"QuickER.NameFuzz.Runtime.{config}.{Guid.NewGuid():N}"
+        );
+
+        foreach (var (kind, detail) in GeneratedRuntimeProbe.FindJsonProblems(assembly))
+        {
+            ledger.Record(new(entrance, kind, null), $"{example} / {detail}");
+        }
+
+        foreach (var collision in GeneratedRuntimeProbe.FindRouteCaseCollisions(assembly))
+        {
+            ledger.Record(new(entrance, "route-case-collision", null), $"{example} / {collision}");
+        }
     }
 
     /// <summary>診断の位置の生成コードの行（報告用）</summary>

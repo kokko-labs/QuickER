@@ -72,6 +72,18 @@ The exception is the name of the remote endpoints, which is the entity class nam
 Other generated type names that differ only in case, such as `UserIdValue` and `UseridValue` from columns `user_id` and `userid` of two tables, are reported as a warning.
 The generated code works as it is; spell the names the same way to remove the warning.
 
+### Entity member names
+
+An entity's properties are named after its columns in Pascal case: `user_id` gives `UserId`.
+Generation stops with an error that names the table and columns when two columns of one table give the same property name, as `user-id`, `user_id` and `USER_ID` all do.
+
+It also stops when two member names of one entity differ only in case.
+The members compared are the column properties, the navigation properties and the members every entity inherits: `RowState`, `IsAdded`, `IsUpdated`, `IsRemoved`, `HasChanges` and `DisplayName`.
+For example, columns `user_id` and `userid` of one table give `UserId` and `Userid`, a column `isadded` gives `Isadded` next to `IsAdded`, and a column `orderlines` gives `Orderlines` next to the navigation `OrderLines` to a child table `order_lines`.
+Such code compiles, but the JSON that reads and writes entities (remote services and SQL Server `Include` loading) matches property names ignoring case, so it fails at run time.
+The check applies whatever the options, so turning on remote services never breaks a diagram that generated before.
+Edit models are not read or written as JSON, so their members are compared with case.
+
 ### Navigation property names
 
 A navigation property is named after the table at the other end.

@@ -103,6 +103,9 @@
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>Columns {2} of table '{0}' all map to the same property name '{1}'. The entity and EditModel classes would declare duplicate members and fail to compile. Rename the columns so that the generated property names differ (column names are converted to Pascal case, so 'user-id', 'user_id', and 'USER_ID' all become 'UserId').</value>
   </data>
+  <data name="CodeGen_Error_ColumnPropertyNamesDifferOnlyInCase" xml:space="preserve">
+    <value>Columns {2} of table '{0}' map to property names {1}, which differ only in case. The code compiles, but the JSON settings that read and write entities (remote services and SQL Server Include loading) match property names ignoring case, so building them for this entity fails at run time. Generation stops in every configuration, including those without remote services. Rename the columns so that the property names differ in more than case (column names are converted to Pascal case, so 'user_id' becomes 'UserId' and 'userid' becomes 'Userid').</value>
+  </data>
   <data name="CodeGen_Error_MultipleRowVersionColumns" xml:space="preserve">
     <value>Table '{0}' has more than one rowversion column ({1}). Optimistic concurrency reads and writes a single version column per table, and SQL Server allows only one as well, so the DDL would fail on the second one. Keep one rowversion column and give the others another type.</value>
   </data>
@@ -114,6 +117,9 @@
   </data>
   <data name="CodeGen_Error_GeneratedMemberNameCollision" xml:space="preserve">
     <value>Class '{0}' (table '{1}') generates the member name '{2}' more than once (from {3}). The same member would be declared twice (CS0102), or a member would have the same name as its enclosing class (CS0542), and the code would fail to compile. Rename the columns so that every generated member name is unique and differs from the class name. Note that an EditModel generates several members per column (Name, _name, BindingName, _bindingName, OnNameChanging, OnNameChanged), so a column named 'binding_id' collides with the members generated for a column named 'id', and a column whose property name equals a navigation property name (for example a column named 'customer' on a table that references the 'customers' table) collides on the entity class as well. When two or more relationships join the same pair of tables, their navigations are named after the foreign-key columns (for example 'ShipCustomer' for 'ship_customer_id'), so a column named 'ship_customer' on that table collides with them.</value>
+  </data>
+  <data name="CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase" xml:space="preserve">
+    <value>Class '{0}' (table '{1}') generates member names {2}, which differ only in case (from {3}). The code compiles, but the JSON settings that read and write entities (remote services and SQL Server Include loading) match property names ignoring case, so building them for this entity fails at run time. Generation stops in every configuration, including those without remote services. Rename the column so that its property name differs in more than case. The base class already has the members RowState, IsAdded, IsUpdated, IsRemoved, HasChanges and DisplayName, so a column named 'isadded' collides with 'IsAdded'; a column whose property name differs only in case from a navigation property name (for example a column named 'orderlines' on a table that 'order_lines' references, next to the navigation 'OrderLines') collides as well.</value>
   </data>
   <data name="CodeGen_Origin_ClassName" xml:space="preserve">
     <value>class name '{0}'</value>

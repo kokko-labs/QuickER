@@ -162,6 +162,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Error_ColumnPropertyNamesDifferOnlyInCase {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_ColumnPropertyNamesDifferOnlyInCase", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_MultipleRowVersionColumns {
             get {
                 return ResourceManager.GetString("CodeGen_Error_MultipleRowVersionColumns", resourceCulture);
@@ -183,6 +189,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
         public static string CodeGen_Error_GeneratedMemberNameCollision {
             get {
                 return ResourceManager.GetString("CodeGen_Error_GeneratedMemberNameCollision", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase", resourceCulture);
             }
         }
 

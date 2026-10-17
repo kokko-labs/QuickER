@@ -360,6 +360,12 @@ public sealed class SchemaNamesGuardTests
             "例外 3: 生成する C# の識別子＝大文字小文字だけ違う型名の組（警告。綴りは言語が区別するので止めない）"
         ),
         new(
+            "CSharpGenerationModelBuilder.MemberNames.cs",
+            "varspellings=group.Select(member=>member.Name).Distinct(StringComparer.Ordinal).ToList();",
+            Group.Exception,
+            "例外 3: 生成する C# の識別子＝JSON の規則（大小無視）でまとめたメンバー名の綴りを数える（綴りが 2 つ以上ならエラー）"
+        ),
+        new(
             "CSharpGenerationModelBuilder.ValueObjects.cs",
             "!string.Equals(key,_nameConverter.ToColumnKey(column.Name),StringComparison.Ordinal)",
             Group.Exception,

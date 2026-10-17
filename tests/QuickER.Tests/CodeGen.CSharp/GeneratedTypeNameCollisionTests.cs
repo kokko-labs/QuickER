@@ -203,12 +203,22 @@ public sealed class GeneratedTypeNameCollisionTests
             );
     }
 
-    [Fact(
-        DisplayName = "型名の大小違い: エラーになる組（大小だけ違うルート名）の型名は重ねて警告しない"
+    [Theory(
+        DisplayName = "型名の大小違い: エラーになる組（大小だけ違うルート名・固定の型名と大小だけ違う型名）は重ねて警告しない"
     )]
-    public void RefusedPair_IsNotAlsoWarned()
+    [InlineData("route")]
+    [InlineData("reserved")]
+    public void RefusedPair_IsNotAlsoWarned(string shape)
     {
-        var result = Generate(Diagram(Table("order_item"), Table("orderitem")), Output.Single);
+        // reserved: 列 sql_parameter は固定の型名 SqlParameterValue と同じでエラー、別の表の sqlparameter は SqlparameterValue
+        var diagram =
+            shape == "route"
+                ? Diagram(Table("order_item"), Table("orderitem"))
+                : Diagram(
+                    Table("accounts", Int("sql_parameter")),
+                    Table("profiles", Int("sqlparameter"))
+                );
+        var result = Generate(diagram, Output.Single);
 
         result.HasErrors.Should().BeTrue(Describe(result));
         result

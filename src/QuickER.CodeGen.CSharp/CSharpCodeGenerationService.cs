@@ -1348,17 +1348,20 @@ public sealed partial class CSharpCodeGenerationService
         string.Join(", ", names.Select(name => $"'{name}'"));
 
     /// <summary>
-    /// 列由来のプロパティ名がエンティティごとに一意であることを検証する
+    /// 列由来のプロパティ名がエンティティごとに一意で、大文字小文字だけ違う組も無いことを検証する
     /// </summary>
     /// <remarks>
     /// 列名はパスカルケースへ正規化してからプロパティ名にするため、<c>user-id</c> / <c>user_id</c> / <c>USER_ID</c> の
     /// ように綴りが違う列でも同じプロパティ名（<c>UserId</c>）になりうる。同一エンティティ内で衝突すると
     /// Entity / EditModel に同名メンバーが重複宣言され（CS0102）、EditModel の partial メソッドも二重宣言になる
-    /// （CS0111）ため、コンパイル不能な出力が診断なしに書き出される。ここで衝突を検出して生成を止める。
+    /// （CS0111）ため、コンパイル不能な出力が診断なしに書き出される。<c>user_id</c> と <c>userid</c> のように
+    /// 大文字小文字だけ違うプロパティ名（<c>UserId</c> と <c>Userid</c>）はコンパイルできるが、エンティティを読み書きする
+    /// JSON の設定が大文字小文字を区別しないので実行時に失敗する（構成に依らず止める）。判定の本体は
+    /// <see cref="ColumnPropertyNameCollisions.Find"/>。
     /// 衝突判定はエンティティ単位＝別テーブルの同名列は別クラスのメンバーになるため衝突ではない。
     /// なお、生成メンバー名の衝突全般（EditModel の派生名 <c>Binding…</c> / <c>_…</c> / <c>…Snapshot</c>、
-    /// 列とナビゲーションの衝突）は <c>CSharpGenerationModelBuilder</c> のシンボル表検証が担う。本メソッドは
-    /// 最頻の誤り（同名列）へ「どの列同士か」を挙げた具体的なメッセージで先に答える早期検証として残す。
+    /// 列とナビゲーション・基底の公開プロパティの衝突）は <c>CSharpGenerationModelBuilder</c> のシンボル表検証が担う。
+    /// 本メソッドは最頻の誤り（同名列）へ「どの列同士か」を挙げた具体的なメッセージで先に答える早期検証として残す。
     /// ここでエラーになるとビルダーへ到達しないため、両者の診断が同時に出ることはない。
     /// </remarks>
     private static void ValidateColumnPropertyNameUniqueness(
@@ -1366,51 +1369,31 @@ public sealed partial class CSharpCodeGenerationService
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        var converter = new CSharpNameConverter();
-
         foreach (
             var entity in diagram.Entities.Where(entity =>
                 !string.IsNullOrWhiteSpace(entity.TableName)
             )
         )
         {
-            // 列の並び順で最初に現れたプロパティ名から順に報告するため、挿入順を保つ辞書へ集約する
-            var columnsByPropertyName = new Dictionary<string, List<string>>(
-                StringComparer.Ordinal
-            );
-            var order = new List<string>();
-
-            foreach (
-                var column in entity.Columns.Where(column =>
-                    !string.IsNullOrWhiteSpace(column.Name)
-                )
-            )
+            foreach (var collision in ColumnPropertyNameCollisions.Find(entity))
             {
-                var propertyName = converter.ToPropertyName(column.Name);
+                var columns = string.Join(", ", collision.Columns.Select(name => $"'{name}'"));
 
-                if (!columnsByPropertyName.TryGetValue(propertyName, out var columns))
-                {
-                    columns = [];
-                    columnsByPropertyName.Add(propertyName, columns);
-                    order.Add(propertyName);
-                }
-
-                columns.Add(column.Name);
-            }
-
-            foreach (var propertyName in order.Where(name => columnsByPropertyName[name].Count > 1))
-            {
                 diagnostics.Add(
                     GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Error_ColumnPropertyNameCollision,
-                            entity.TableName,
-                            propertyName,
-                            string.Join(
-                                ", ",
-                                columnsByPropertyName[propertyName].Select(name => $"'{name}'")
+                        collision.PropertyNames.Count == 1
+                            ? string.Format(
+                                Strings.CodeGen_Error_ColumnPropertyNameCollision,
+                                entity.TableName,
+                                collision.PropertyNames[0],
+                                columns
                             )
-                        )
+                            : string.Format(
+                                Strings.CodeGen_Error_ColumnPropertyNamesDifferOnlyInCase,
+                                entity.TableName,
+                                QuoteNames(collision.PropertyNames),
+                                columns
+                            )
                     )
                 );
             }
