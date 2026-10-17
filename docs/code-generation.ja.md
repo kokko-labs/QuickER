@@ -55,6 +55,35 @@ Mapper は確定値を Entity から直接コピーし、`BindingXxx` はその�
 バイナリ列は防御的にコピーするため、ロードした EditModel の編集がロード元の Entity へ波及しません。
 `date` 列（`datetime` ではない）はカルチャの短い日付書式で表示し、末尾に "0:00:00" が付きません。
 
+### 生成される型の名前
+
+テーブルの型の名前は、テーブル名を単数形にして接尾辞を付けたものです。`order_items` から `OrderItemEntity`・`OrderItemEditModel`・`OrderItemMapper` と、`IOrderItemRepository` などの Repository の型ができます。
+接尾辞は、名前がまだその語で終わっていないときだけ付けます。
+値オブジェクトの型の名前は列名から作り（`customer_id` から `CustomerIdValue`）、同じ綴りの列は、テーブルが違っても 1 つの型を共有します。
+
+2 つのテーブル・列が同じ型名を作るときは、生成がそれらを名指しするエラーで止まります。
+たとえば、`customer` と `customers` はどちらも `CustomerEntity` を作り、`order_edit_model` は `order` の EditModel と同じ `OrderEditModel` を、`i_order` は `order` の Repository 契約と同じ `IOrderRepository` を作ります。
+生成コードがすでに使っている型の名前になるテーブル・列（テーブル `raw_sql` の `RawSqlMapper`、列 `sql_parameter` の `SqlParameterValue` など）も止まります。
+判定は、オプションと出力の形に依らず、生成し得るすべての名前で行うので、オプションを有効にしても、それまで生成できていた図は壊れません。
+その代わり、使っている構成ではぶつからない組でも断ります。
+
+型名は、C# と同じく大文字小文字を区別して比べます。
+例外はリモートのエンドポイントの名前（エンティティのクラス名から `Entity` を外したもの）です。ルーティングは大文字小文字を区別しないので、`order_item` と `orderitem`（`OrderItem` と `Orderitem`）のような 2 つのテーブルは、リモートサービスを生成するかどうかに依らず断ります。
+それ以外の、大文字小文字だけ違う生成型名（2 つのテーブルの列 `user_id` と `userid` から作る `UserIdValue` と `UseridValue` など）は警告で知らせます。
+生成物はこのままで動きます。綴りをそろえると、警告は出なくなります。
+
+### エンティティのメンバー名
+
+エンティティのプロパティの名前は、列名をパスカルケースにしたものです。`user_id` から `UserId` ができます。
+1 つのテーブルの 2 つの列が同じプロパティ名を作るとき（`user-id`・`user_id`・`USER_ID` はどれも `UserId`）は、生成がテーブルと列を名指しするエラーで止まります。
+
+1 つのエンティティの 2 つのメンバー名が大文字小文字だけ違うときも止まります。
+比べるメンバーは、列のプロパティ・ナビゲーションプロパティと、どのエンティティも受け継ぐ `RowState`・`IsAdded`・`IsUpdated`・`IsRemoved`・`HasChanges`・`DisplayName` です。
+たとえば、1 つのテーブルの列 `user_id` と `userid` は `UserId` と `Userid` を作り、列 `isadded` は `IsAdded` と並ぶ `Isadded` を、列 `orderlines` は子テーブル `order_lines` へのナビゲーション `OrderLines` と並ぶ `Orderlines` を作ります。
+このコードはコンパイルできますが、エンティティを読み書きする JSON（リモートサービスと SQL Server の `Include` の読み込み）がプロパティ名の大文字小文字を区別しないので、実行時に失敗します。
+判定はオプションに依らないので、リモートサービスを有効にしても、それまで生成できていた図は壊れません。
+EditModel は JSON で読み書きしないので、メンバー名は大文字小文字を区別して比べます。
+
 ### ナビゲーションプロパティの名前
 
 ナビゲーションプロパティは、相手側のテーブル名から名付けます。
@@ -68,6 +97,14 @@ Mapper は確定値を Entity から直接コピーし、`BindingXxx` はその�
 親側は `{子の複数形}By{役割名}`（`customer.OrdersByShipCustomer`）で、1 対 1 なら `{子の単数形}By{役割名}` です。
 自分自身を 2 本で参照するテーブルも同じ規則で、親側のナビゲーションだけを持ちます（`NodesByParent` と `NodesByOrigin` など）。
 このため、2 つのテーブルの間へ 2 本目のリレーションを足すと、1 本目のナビゲーションの名前も変わります。
+
+2 つのテーブルの間の両方向のリレーションは、テーブル名から作る名前が 1 つのクラスでぶつからない限り、その名前のままです。
+たとえば、`customers` から `profiles` への 1 対 1 と、`profiles` から `customers` への 1 対 1 は、どちらも `customers` にメンバー `Profile` を作ります。
+このときだけ、2 つのテーブルの間の全リレーションを、向きを問わず外部キー列から名付けます（`customer.Profile` と `customer.ProfileByCustomer`）。
+逆向きの 1 対多どうしはぶつからないので、名前は変わりません（`customer.Profiles` と `customer.Profile`）。
+
+同じ子の列を同じ親の列へ結ぶ外部キーが 2 本あるときは、同じ外部キーを 2 回定義したもので、役割名でも区別できません。
+生成は両方の制約名を名指しするエラーで止まります。片方を削除してください。
 
 ### DB 定義メタ属性
 

@@ -55,6 +55,35 @@ Only the fields the user actually edits take on the precision of their input str
 Binary columns are copied defensively, so editing the loaded model never writes into the entity it was loaded from.
 A `date` column (as opposed to `datetime`) is displayed with the culture's short date pattern, without a "0:00:00" tail.
 
+### Generated type names
+
+A table's types are named after the table in the singular with a suffix: `order_items` gives `OrderItemEntity`, `OrderItemEditModel`, `OrderItemMapper` and repository types such as `IOrderItemRepository`.
+The suffix is added only when the name does not already end with it.
+Value object types are named after the column (`customer_id` gives `CustomerIdValue`), and columns spelled the same way in different tables share one type.
+
+Generation stops with an error that names the tables and columns when two of them would give the same type name.
+For example, `customer` and `customers` both give `CustomerEntity`, `order_edit_model` gives `OrderEditModel`, the edit model of `order`, and `i_order` gives `IOrderRepository`, the repository contract of `order`.
+It also stops when a table or column would give the name of a type the generated code already uses, such as `RawSqlMapper` for table `raw_sql`, or `SqlParameterValue` for column `sql_parameter`.
+The check covers every name the generator can emit, whatever the options and the output layout, so turning on an option never breaks a diagram that generated before.
+In return, a diagram is refused even where the clash would not have come up in your configuration.
+
+Type names are compared with case, as C# compares them.
+The exception is the name of the remote endpoints, which is the entity class name without `Entity`: routing ignores case, so two tables such as `order_item` and `orderitem` (`OrderItem` and `Orderitem`) are refused, whether or not remote services are generated.
+Other generated type names that differ only in case, such as `UserIdValue` and `UseridValue` from columns `user_id` and `userid` of two tables, are reported as a warning.
+The generated code works as it is; spell the names the same way to remove the warning.
+
+### Entity member names
+
+An entity's properties are named after its columns in Pascal case: `user_id` gives `UserId`.
+Generation stops with an error that names the table and columns when two columns of one table give the same property name, as `user-id`, `user_id` and `USER_ID` all do.
+
+It also stops when two member names of one entity differ only in case.
+The members compared are the column properties, the navigation properties and the members every entity inherits: `RowState`, `IsAdded`, `IsUpdated`, `IsRemoved`, `HasChanges` and `DisplayName`.
+For example, columns `user_id` and `userid` of one table give `UserId` and `Userid`, a column `isadded` gives `Isadded` next to `IsAdded`, and a column `orderlines` gives `Orderlines` next to the navigation `OrderLines` to a child table `order_lines`.
+Such code compiles, but the JSON that reads and writes entities (remote services and SQL Server `Include` loading) matches property names ignoring case, so it fails at run time.
+The check applies whatever the options, so turning on remote services never breaks a diagram that generated before.
+Edit models are not read or written as JSON, so their members are compared with case.
+
 ### Navigation property names
 
 A navigation property is named after the table at the other end.
@@ -68,6 +97,14 @@ The child side is the role name (`order.ShipCustomer`).
 The parent side is `{child plural}By{role}` (`customer.OrdersByShipCustomer`), or `{child singular}By{role}` for a one-to-one relationship.
 A table that references itself twice follows the same rule and gets only the parent-side navigations, such as `NodesByParent` and `NodesByOrigin`.
 Adding a second relationship between two tables therefore renames the navigations of the first one.
+
+Relationships in both directions between two tables keep their table-based names unless those names would clash in one class.
+For example, a one-to-one relationship from `customers` to `profiles` and another from `profiles` to `customers` would both give `customers` a member `Profile`.
+Only then are all the relationships between the two tables named after their foreign-key columns, in both directions (`customer.Profile` and `customer.ProfileByCustomer`).
+Two one-to-many relationships in opposite directions do not clash and keep their names (`customer.Profiles` and `customer.Profile`).
+
+Two foreign keys that join the same child column to the same parent column are the same foreign key defined twice, and role names cannot tell them apart.
+Generation stops with an error that names both constraints; delete one of them.
 
 ### DB-definition metadata attributes
 

@@ -246,6 +246,28 @@ public sealed class GeneratedFixedMemberDriftTests
     /// 残余の算出は「宣言メンバー − 派生名」なので、派生名の中に固定メンバー名が混ざると
     /// その固定メンバーが差し引かれて残余から消え、名簿から欠けても気づけない。図の側の安全性を明示的に守る。
     /// </remarks>
+    /// <summary>
+    /// 大文字小文字だけ違う名前の検査に使う基底の名簿（<see cref="GeneratedFixedMemberNames.EntityJsonVisibleBase"/>）が、
+    /// エンティティの基底の公開インスタンスプロパティ（JSON に出る基底のメンバー）と完全一致することを表明する
+    /// </summary>
+    /// <remarks>
+    /// 基底に公開プロパティが増えたのに名簿へ足し忘れると、その名前と大小だけ違う列が生成時に止まらず、
+    /// JSON の設定を組み立てる時点で実行時に失敗する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "大小違いの検査に使う基底の名簿は、エンティティの基底の公開プロパティと完全一致する"
+    )]
+    public void EntityJsonVisibleBase_ShouldMatchBasePublicProperties()
+    {
+        var properties = typeof(QuickER.Runtime.EntityBaseCore)
+            .GetProperties(
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance
+            )
+            .Select(property => property.Name);
+
+        GeneratedFixedMemberNames.EntityJsonVisibleBase.Should().BeEquivalentTo(properties);
+    }
+
     [Fact(DisplayName = "検証用の図の派生名は固定メンバー名と重ならない")]
     public void DerivedMemberNames_ShouldNotOverlapFixedMemberRoster()
     {

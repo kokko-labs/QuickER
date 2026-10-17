@@ -85,8 +85,14 @@
   <data name="CodeGen_Error_NameContainsControlCharacter" xml:space="preserve">
     <value>These names contain a line break or a control character: {0}. Such a character breaks the generated C# string literals and the comment lines the DDL writes, and no database accepts it inside an identifier. Remove it from the names in the diagram.</value>
   </data>
-  <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
-    <value>Tables {1} all map to the same entity class name '{0}'. Entity classes are partial, so they would merge into a single class and fail to compile. Rename the tables so that the generated class names differ (table names are singularized, so 'customer' and 'customers' both become 'CustomerEntity').</value>
+  <data name="CodeGen_Error_GeneratedTypeNameCollision" xml:space="preserve">
+    <value>{0} would all generate the type names {1}, so the same type would be declared more than once and the code would fail to compile. Rename the tables or columns so that the generated type names differ. Table names are singularized and given a suffix such as 'Entity', 'EditModel', 'Mapper' or 'Repository' only when they do not already end with it, so 'customer' and 'customers' both become 'CustomerEntity', 'order_edit_model' gives 'OrderEditModel', the EditModel of 'order', and 'i_order' gives 'IOrderRepository', the repository contract of 'order'. The check covers every name the generator can emit, whatever the options and the output layout.</value>
+  </data>
+  <data name="CodeGen_Error_GeneratedTypeNameReserved" xml:space="preserve">
+    <value>{0} would generate the type name '{1}', which the generated code already declares or refers to by its simple name (a QuickER runtime type, a fixed generated type, or a .NET type). The two would clash and the code would fail to compile. Rename the table or column. The check covers every name the generator can emit, whatever the options and the output layout.</value>
+  </data>
+  <data name="CodeGen_Error_RemoteRouteNameCaseCollision" xml:space="preserve">
+    <value>Tables {0} give the names {1}, which differ only in case. The generated remote endpoints are routed by these names, and routing ignores case, so the endpoints of the tables would clash. This is refused whether or not remote services are generated, so that turning them on later does not break the diagram. Rename one of the tables.</value>
   </data>
   <data name="CodeGen_Error_DuplicateTableName" xml:space="preserve">
     <value>Table name '{0}' is used more than once ({1}). Table names are compared ignoring case and surrounding spaces, so the same table cannot appear twice in a diagram. Rename or remove one of them.</value>
@@ -96,6 +102,9 @@
   </data>
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>Columns {2} of table '{0}' all map to the same property name '{1}'. The entity and EditModel classes would declare duplicate members and fail to compile. Rename the columns so that the generated property names differ (column names are converted to Pascal case, so 'user-id', 'user_id', and 'USER_ID' all become 'UserId').</value>
+  </data>
+  <data name="CodeGen_Error_ColumnPropertyNamesDifferOnlyInCase" xml:space="preserve">
+    <value>Columns {2} of table '{0}' map to property names {1}, which differ only in case. The code compiles, but the JSON settings that read and write entities (remote services and SQL Server Include loading) match property names ignoring case, so building them for this entity fails at run time. Generation stops in every configuration, including those without remote services. Rename the columns so that the property names differ in more than case (column names are converted to Pascal case, so 'user_id' becomes 'UserId' and 'userid' becomes 'Userid').</value>
   </data>
   <data name="CodeGen_Error_MultipleRowVersionColumns" xml:space="preserve">
     <value>Table '{0}' has more than one rowversion column ({1}). Optimistic concurrency reads and writes a single version column per table, and SQL Server allows only one as well, so the DDL would fail on the second one. Keep one rowversion column and give the others another type.</value>
@@ -109,11 +118,23 @@
   <data name="CodeGen_Error_GeneratedMemberNameCollision" xml:space="preserve">
     <value>Class '{0}' (table '{1}') generates the member name '{2}' more than once (from {3}). The same member would be declared twice (CS0102), or a member would have the same name as its enclosing class (CS0542), and the code would fail to compile. Rename the columns so that every generated member name is unique and differs from the class name. Note that an EditModel generates several members per column (Name, _name, BindingName, _bindingName, OnNameChanging, OnNameChanged), so a column named 'binding_id' collides with the members generated for a column named 'id', and a column whose property name equals a navigation property name (for example a column named 'customer' on a table that references the 'customers' table) collides on the entity class as well. When two or more relationships join the same pair of tables, their navigations are named after the foreign-key columns (for example 'ShipCustomer' for 'ship_customer_id'), so a column named 'ship_customer' on that table collides with them.</value>
   </data>
+  <data name="CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase" xml:space="preserve">
+    <value>Class '{0}' (table '{1}') generates member names {2}, which differ only in case (from {3}). The code compiles, but the JSON settings that read and write entities (remote services and SQL Server Include loading) match property names ignoring case, so building them for this entity fails at run time. Generation stops in every configuration, including those without remote services. Rename the column so that its property name differs in more than case. The base class already has the members RowState, IsAdded, IsUpdated, IsRemoved, HasChanges and DisplayName, so a column named 'isadded' collides with 'IsAdded'; a column whose property name differs only in case from a navigation property name (for example a column named 'orderlines' on a table that 'order_lines' references, next to the navigation 'OrderLines') collides as well.</value>
+  </data>
+  <data name="CodeGen_Error_DuplicateForeignKey" xml:space="preserve">
+    <value>Foreign keys {0} each join the child column {1} to the parent column {2}. The same foreign key is defined more than once, so its navigation properties would be declared twice and the code would fail to compile. Delete all but one of them.</value>
+  </data>
   <data name="CodeGen_Origin_ClassName" xml:space="preserve">
     <value>class name '{0}'</value>
   </data>
   <data name="CodeGen_Origin_Column" xml:space="preserve">
     <value>column '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_Table" xml:space="preserve">
+    <value>table '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_TableColumn" xml:space="preserve">
+    <value>column '{0}'.'{1}'</value>
   </data>
   <data name="CodeGen_Origin_Navigation" xml:space="preserve">
     <value>navigation '{0}'</value>
@@ -237,6 +258,9 @@
   </data>
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>The definitions of the same-named columns aggregated into value object '{0}' do not match. Generation proceeds with the PK definition preferred (otherwise the largest definition), but unifying the definitions in the ER diagram is recommended: {1}</value>
+  </data>
+  <data name="CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase" xml:space="preserve">
+    <value>The generated type names {0} differ only in case. The generated code works as it is, but this usually means that the same name is spelled differently in different places. Spell them the same way to remove this warning.</value>
   </data>
   <data name="CodeGen_Warning_GuidKeyColumnShorterThanGuid" xml:space="preserve">
     <value>The GUID key primary key column '{0}' is declared as {1} characters, which is shorter than the {2} characters produced by the parameterless Create(). Auto-numbering always fails length validation at run time; widen the column, or supply a shorter key explicitly instead of auto-numbering.</value>

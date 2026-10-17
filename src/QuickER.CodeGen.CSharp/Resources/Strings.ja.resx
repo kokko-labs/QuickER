@@ -85,8 +85,14 @@
   <data name="CodeGen_Error_NameContainsControlCharacter" xml:space="preserve">
     <value>次の名前に改行または制御文字が含まれています: {0}。これらの文字は生成される C# の文字列リテラルと DDL が書き出すコメント行を壊し、識別子として受け付ける DB もありません。図の名前から取り除いてください。</value>
   </data>
-  <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
-    <value>テーブル {1} のエンティティクラス名がいずれも '{0}' になります。エンティティクラスは partial のため 1 つのクラスへ統合され、コンパイルできません。生成されるクラス名が異なるようテーブル名を変更してください（テーブル名は単数形化されるため、'customer' と 'customers' はどちらも 'CustomerEntity' になります）。</value>
+  <data name="CodeGen_Error_GeneratedTypeNameCollision" xml:space="preserve">
+    <value>{0} がいずれも型名 {1} を作るため、同じ型が重複して宣言され、コンパイルできません。生成される型名が重ならないように、テーブルか列の名前を変えてください。テーブル名は単数形にしてから、まだその語で終わっていないときだけ 'Entity'・'EditModel'・'Mapper'・'Repository' などの接尾辞を付けるため、'customer' と 'customers' はどちらも 'CustomerEntity' になり、'order_edit_model' は 'order' の EditModel と同じ 'OrderEditModel' に、'i_order' は 'order' の Repository 契約と同じ 'IOrderRepository' になります。判定は、オプションと出力の形に依らず、生成し得るすべての名前で行います。</value>
+  </data>
+  <data name="CodeGen_Error_GeneratedTypeNameReserved" xml:space="preserve">
+    <value>{0} が型名 '{1}' を作りますが、この名前は生成コードがすでに宣言しているか、単純名で参照している型（QuickER のランタイムの型・固定の生成物・.NET の型）と同じです。2 つがぶつかり、コンパイルできません。テーブルか列の名前を変えてください。判定は、オプションと出力の形に依らず、生成し得るすべての名前で行います。</value>
+  </data>
+  <data name="CodeGen_Error_RemoteRouteNameCaseCollision" xml:space="preserve">
+    <value>テーブル {0} から作る名前 {1} は、大文字小文字だけが違います。生成されるリモートのエンドポイントはこの名前でルーティングされ、ルーティングは大文字小文字を区別しないため、テーブルどうしのエンドポイントがぶつかります。後からリモートサービスを有効にしても図が壊れないよう、リモートサービスを生成するかどうかに依らず断ります。どちらかのテーブルの名前を変えてください。</value>
   </data>
   <data name="CodeGen_Error_DuplicateTableName" xml:space="preserve">
     <value>テーブル名 '{0}' が重複しています（{1}）。テーブル名は大文字小文字と前後の空白を区別せずに比較するため、同じテーブルを図に 2 つ置けません。どちらかの名前を変えるか削除してください。</value>
@@ -96,6 +102,9 @@
   </data>
   <data name="CodeGen_Error_ColumnPropertyNameCollision" xml:space="preserve">
     <value>テーブル '{0}' の列 {2} のプロパティ名がいずれも '{1}' になります。エンティティクラスと EditModel クラスに同名メンバーが重複して生成され、コンパイルできません。生成されるプロパティ名が異なるよう列名を変更してください（列名はパスカルケースへ変換されるため、'user-id'・'user_id'・'USER_ID' はいずれも 'UserId' になります）。</value>
+  </data>
+  <data name="CodeGen_Error_ColumnPropertyNamesDifferOnlyInCase" xml:space="preserve">
+    <value>テーブル '{0}' の列 {2} のプロパティ名 {1} は、大文字小文字だけが違います。コンパイルはできますが、エンティティを読み書きする JSON の設定（リモートサービス・SQL Server の Include の読み込み）がプロパティ名の大文字小文字を区別しないため、実行時にこのエンティティの設定を組み立てる時点で失敗します。リモートサービスを生成しない構成でも止めます。プロパティ名が大文字小文字のほかでも違うよう列名を変更してください（列名はパスカルケースへ変換されるため、'user_id' は 'UserId'、'userid' は 'Userid' になります）。</value>
   </data>
   <data name="CodeGen_Error_MultipleRowVersionColumns" xml:space="preserve">
     <value>テーブル '{0}' に rowversion 列が複数あります（{1}）。楽観排他は 1 テーブルにつき版列 1 本を読み書きし、SQL Server も 1 本しか許さないため、2 本目は DDL 適用時に失敗します。rowversion 列は 1 本だけ残し、他は別の型に変更してください。</value>
@@ -109,11 +118,23 @@
   <data name="CodeGen_Error_GeneratedMemberNameCollision" xml:space="preserve">
     <value>クラス '{0}'（テーブル '{1}'）で生成されるメンバー名 '{2}' が重複します（由来: {3}）。同名メンバーが二重に宣言されるか（CS0102）、メンバー名が囲むクラス名と同じになり（CS0542）、コンパイルできません。生成されるメンバー名が一意で、かつクラス名と違う名前になるよう列名を変更してください。EditModel は 1 列につき複数のメンバー（Name・_name・BindingName・_bindingName・OnNameChanging・OnNameChanged）を生成するため、'binding_id' という列は 'id' という列が生成するメンバーと衝突します。また列のプロパティ名がナビゲーションプロパティ名と一致する場合（例: 'customers' を参照するテーブルにある 'customer' 列）は、エンティティクラスでも衝突します。同じ 2 つのテーブルの間に 2 本以上のリレーションがあるときはナビゲーションを外部キー列から名付けるため（例: 'ship_customer_id' なら 'ShipCustomer'）、そのテーブルにある 'ship_customer' 列とも衝突します。</value>
   </data>
+  <data name="CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase" xml:space="preserve">
+    <value>クラス '{0}'（テーブル '{1}'）で生成されるメンバー名 {2} は、大文字小文字だけが違います（由来: {3}）。コンパイルはできますが、エンティティを読み書きする JSON の設定（リモートサービス・SQL Server の Include の読み込み）がプロパティ名の大文字小文字を区別しないため、実行時にこのエンティティの設定を組み立てる時点で失敗します。リモートサービスを生成しない構成でも止めます。プロパティ名が大文字小文字のほかでも違うよう列名を変更してください。基底クラスはメンバー RowState・IsAdded・IsUpdated・IsRemoved・HasChanges・DisplayName を持つので、'isadded' という列は 'IsAdded' とぶつかります。列のプロパティ名がナビゲーションプロパティ名と大文字小文字だけ違う場合（例: 'order_lines' から参照されるテーブルにある 'orderlines' 列と、ナビゲーション 'OrderLines'）もぶつかります。</value>
+  </data>
+  <data name="CodeGen_Error_DuplicateForeignKey" xml:space="preserve">
+    <value>外部キー {0} は、どれも子の列 {1} を親の列 {2} へ結んでいます。同じ外部キーが 2 回以上定義されているため、ナビゲーションプロパティが二重に宣言され、コンパイルできません。1 本だけ残して削除してください。</value>
+  </data>
   <data name="CodeGen_Origin_ClassName" xml:space="preserve">
     <value>クラス名 '{0}'</value>
   </data>
   <data name="CodeGen_Origin_Column" xml:space="preserve">
     <value>列 '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_Table" xml:space="preserve">
+    <value>テーブル '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_TableColumn" xml:space="preserve">
+    <value>列 '{0}'.'{1}'</value>
   </data>
   <data name="CodeGen_Origin_Navigation" xml:space="preserve">
     <value>ナビゲーション '{0}'</value>
@@ -237,6 +258,9 @@
   </data>
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>値オブジェクト '{0}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {1}</value>
+  </data>
+  <data name="CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase" xml:space="preserve">
+    <value>生成される型名 {0} は、大文字小文字だけが違います。生成物はこのままで動きますが、同じ名前を場所によって違う綴りで書いていることが多い組です。綴りをそろえると、この警告は出なくなります。</value>
   </data>
   <data name="CodeGen_Warning_GuidKeyColumnShorterThanGuid" xml:space="preserve">
     <value>GUID キーの主キー列 '{0}' は宣言幅が {1} 文字で、引数なし Create() が採番する {2} 文字より短いため、自動採番は実行時に必ず長さ検証で失敗します。列幅を広げるか、自動採番を使わずに短いキーを明示的に与えてください。</value>

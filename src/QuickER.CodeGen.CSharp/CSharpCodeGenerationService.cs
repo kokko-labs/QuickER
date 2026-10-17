@@ -816,9 +816,84 @@ public sealed partial class CSharpCodeGenerationService
         }
 
         ValidateSchemaNameDuplicates(diagram, diagnostics);
-        ValidateEntityClassNameUniqueness(diagram, diagnostics);
+        ValidateGeneratedTypeNames(diagram, diagnostics);
         ValidateColumnPropertyNameUniqueness(diagram, diagnostics);
+        ValidateDuplicateForeignKeys(diagram, diagnostics);
         ValidateNameControlCharacters(diagram, diagnostics);
+    }
+
+    /// <summary>同じ親・子・列ペアの外部キーが 2 本以上ないことを検証する</summary>
+    /// <remarks>
+    /// <para>
+    /// ナビゲーションを作るリレーション（単一列の列ペア・多対多でない）が同じ親列と子列を 2 回結ぶと、同じ定義の重複で、
+    /// ナビゲーション名は外部キー列由来の役割名でも区別できない（同じ名前のメンバーが 2 つできてコンパイルできない）。
+    /// 片方を消せば直るので、両方の制約名と列を名指しして止める（MCP のツールと Excel 定義書の取込が入力で断るのと同じ扱い）。
+    /// 制約名は DDL と同じ実効名（名前の無いリレーションは既定名＝<see cref="ConstraintNames.ResolveForeignKeyNames"/>）を出す。
+    /// </para>
+    /// <para>
+    /// 列ペアが 2 組以上の外部キーはナビゲーションを作らない（生成コードの対象外）ので見ない。
+    /// </para>
+    /// </remarks>
+    private static void ValidateDuplicateForeignKeys(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        var entitiesById = diagram
+            .Entities.GroupBy(entity => entity.Id)
+            .ToDictionary(group => group.Key, group => group.First());
+        var duplicates = diagram
+            .Relationships.Where(relationship =>
+                relationship.Type != RelationshipType.ManyToMany
+                && relationship.ColumnPairs.Count == 1
+            )
+            .GroupBy(relationship =>
+                (
+                    relationship.SourceEntityId,
+                    relationship.TargetEntityId,
+                    relationship.ColumnPairs[0].SourceColumnId,
+                    relationship.ColumnPairs[0].TargetColumnId
+                )
+            )
+            .Where(group => group.Count() > 1)
+            .ToList();
+
+        if (duplicates.Count == 0)
+        {
+            return;
+        }
+
+        var constraintNames = ConstraintNames.ResolveForeignKeyNames(
+            diagram.Entities,
+            diagram.Relationships,
+            IdentifierLengthLimits.ForDiagramTarget(diagram.TargetDbms)
+        );
+
+        foreach (var group in duplicates)
+        {
+            if (
+                !entitiesById.TryGetValue(group.Key.SourceEntityId, out var parent)
+                || !entitiesById.TryGetValue(group.Key.TargetEntityId, out var child)
+                || parent.Columns.FirstOrDefault(column => column.Id == group.Key.SourceColumnId)
+                    is not { } parentColumn
+                || child.Columns.FirstOrDefault(column => column.Id == group.Key.TargetColumnId)
+                    is not { } childColumn
+            )
+            {
+                continue;
+            }
+
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_DuplicateForeignKey,
+                        QuoteNames(group.Select(relationship => constraintNames[relationship])),
+                        $"'{child.TableName}'.'{childColumn.Name}'",
+                        $"'{parent.TableName}'.'{parentColumn.Name}'"
+                    )
+                )
+            );
+        }
     }
 
     /// <summary>図の名前（テーブル・列・制約・クエリ）に改行・制御文字が含まれていないかを検証する</summary>
@@ -1199,7 +1274,7 @@ public sealed partial class CSharpCodeGenerationService
     /// </summary>
     /// <remarks>
     /// ツール・取込・プロパティパネルは重複を入口で断るが、手で編集した図ファイルや古い版の図は重複を持ち得る。
-    /// 生成する C# の識別子が衝突するかどうか（<see cref="ValidateEntityClassNameUniqueness"/> など）とは別に、
+    /// 生成する C# の識別子が衝突するかどうか（<see cref="ValidateGeneratedTypeNames"/> など）とは別に、
     /// 図が持ってはいけない状態として名指しで止める（<c>Äpfel</c> と <c>äpfel</c> のように C# では別の名前になる組も含む）。
     /// </remarks>
     private static void ValidateSchemaNameDuplicates(
@@ -1249,70 +1324,119 @@ public sealed partial class CSharpCodeGenerationService
     }
 
     /// <summary>
-    /// エンティティクラス名（テーブル名由来）が図の中で一意であることを検証する
+    /// テーブル・列から決まる生成型名がほかの出どころの型名・生成コードの固定の型名とぶつからず、リモートのルート名が
+    /// 大文字小文字だけ違わないことを検証する（エラー）。大文字小文字だけ違う型名は警告する
     /// </summary>
     /// <remarks>
-    /// テーブル名は単数形化してからクラス名にするため、<c>customer</c> と <c>customers</c> のように
-    /// 綴りが違うテーブルでも同じクラス名（<c>CustomerEntity</c>）になりうる。生成 Entity は partial クラスのため
-    /// 同名クラスは 1 つへ統合され、EditModel の partial メソッド重複などでコンパイル不能な出力が
-    /// 診断なしに書き出される。ここで衝突を検出して生成を止める。
-    /// EditModel / Mapper / VO も同じ基底名から導出されるため、Entity クラス名の一意性検証で足りる
-    /// （射影 DTO 名の衝突は <see cref="CSharpGenerationModelBuilder"/> のクエリ検証が別途担う）。
+    /// <para>
+    /// 型名は単数形化と接尾辞で作り、名前がすでに接尾辞で終わっていれば付け足さないため、綴りの違うテーブルでも同じ型名になる
+    /// （<c>customer</c> と <c>customers</c> はどちらも <c>CustomerEntity</c>・<c>order_edit_model</c> は <c>order</c> の EditModel と同じ
+    /// <c>OrderEditModel</c>・<c>i_order</c> は <c>order</c> の <c>IOrderRepository</c>）。ランタイム・固定の生成物・単純名で使う外部の型と
+    /// 同じ名前になる表・列もある（表 <c>raw_sql</c> の Mapper が <c>RawSqlMapper</c>）。どれも診断なしではコンパイルできない出力になる。
+    /// </para>
+    /// <para>
+    /// 判定の本体と範囲（構成と名前空間に依らない・型名は Ordinal・ルート名だけ大小無視）は
+    /// <see cref="GeneratedTypeNames.Analyze"/> が持ち、ここは診断の文面を組み立てるだけ。
+    /// </para>
     /// </remarks>
-    private static void ValidateEntityClassNameUniqueness(
+    private static void ValidateGeneratedTypeNames(
         ErDiagram diagram,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        var converter = new CSharpNameConverter();
-        // 図の並び順で最初に現れたクラス名から順に報告するため、挿入順を保つ辞書へ集約する
-        var tablesByClassName = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        var order = new List<string>();
+        var report = GeneratedTypeNames.Analyze(diagram.Entities);
 
-        foreach (
-            var entity in diagram.Entities.Where(entity =>
-                !string.IsNullOrWhiteSpace(entity.TableName)
-            )
-        )
-        {
-            var className = converter.ToEntityClassName(entity.TableName);
-
-            if (!tablesByClassName.TryGetValue(className, out var tables))
-            {
-                tables = [];
-                tablesByClassName.Add(className, tables);
-                order.Add(className);
-            }
-
-            tables.Add(entity.TableName);
-        }
-
-        foreach (var className in order.Where(name => tablesByClassName[name].Count > 1))
+        foreach (var collision in report.Collisions)
         {
             diagnostics.Add(
                 GenerationDiagnostic.Error(
                     string.Format(
-                        Strings.CodeGen_Error_EntityClassNameCollision,
-                        className,
-                        string.Join(", ", tablesByClassName[className].Select(name => $"'{name}'"))
+                        Strings.CodeGen_Error_GeneratedTypeNameCollision,
+                        DescribeTypeNameSources(collision.Sources),
+                        QuoteNames(collision.Names)
+                    )
+                )
+            );
+        }
+
+        foreach (var use in report.Reserved)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_GeneratedTypeNameReserved,
+                        DescribeTypeNameSources(use.Sources),
+                        use.Name
+                    )
+                )
+            );
+        }
+
+        foreach (var collision in report.RouteCaseCollisions)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_RemoteRouteNameCaseCollision,
+                        QuoteNames(collision.Tables),
+                        QuoteNames(collision.RouteNames)
+                    )
+                )
+            );
+        }
+
+        foreach (var variants in report.CaseVariants)
+        {
+            diagnostics.Add(
+                GenerationDiagnostic.Warning(
+                    string.Format(
+                        Strings.CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase,
+                        string.Join(
+                            ", ",
+                            variants.Select(use =>
+                                $"'{use.Name}' ({DescribeTypeNameSources(use.Sources)})"
+                            )
+                        )
                     )
                 )
             );
         }
     }
 
+    /// <summary>型名の出どころ（テーブル・列）を診断の文面へ並べる</summary>
+    private static string DescribeTypeNameSources(IEnumerable<GeneratedTypeNameSource> sources) =>
+        string.Join(
+            ", ",
+            sources.Select(source =>
+                source.ColumnName is null
+                    ? string.Format(Strings.CodeGen_Origin_Table, source.TableName)
+                    : string.Format(
+                        Strings.CodeGen_Origin_TableColumn,
+                        source.TableName,
+                        source.ColumnName
+                    )
+            )
+        );
+
+    /// <summary>名前を引用符で囲んで並べる</summary>
+    private static string QuoteNames(IEnumerable<string> names) =>
+        string.Join(", ", names.Select(name => $"'{name}'"));
+
     /// <summary>
-    /// 列由来のプロパティ名がエンティティごとに一意であることを検証する
+    /// 列由来のプロパティ名がエンティティごとに一意で、大文字小文字だけ違う組も無いことを検証する
     /// </summary>
     /// <remarks>
     /// 列名はパスカルケースへ正規化してからプロパティ名にするため、<c>user-id</c> / <c>user_id</c> / <c>USER_ID</c> の
     /// ように綴りが違う列でも同じプロパティ名（<c>UserId</c>）になりうる。同一エンティティ内で衝突すると
     /// Entity / EditModel に同名メンバーが重複宣言され（CS0102）、EditModel の partial メソッドも二重宣言になる
-    /// （CS0111）ため、コンパイル不能な出力が診断なしに書き出される。ここで衝突を検出して生成を止める。
+    /// （CS0111）ため、コンパイル不能な出力が診断なしに書き出される。<c>user_id</c> と <c>userid</c> のように
+    /// 大文字小文字だけ違うプロパティ名（<c>UserId</c> と <c>Userid</c>）はコンパイルできるが、エンティティを読み書きする
+    /// JSON の設定が大文字小文字を区別しないので実行時に失敗する（構成に依らず止める）。判定の本体は
+    /// <see cref="ColumnPropertyNameCollisions.Find"/>。
     /// 衝突判定はエンティティ単位＝別テーブルの同名列は別クラスのメンバーになるため衝突ではない。
     /// なお、生成メンバー名の衝突全般（EditModel の派生名 <c>Binding…</c> / <c>_…</c> / <c>…Snapshot</c>、
-    /// 列とナビゲーションの衝突）は <c>CSharpGenerationModelBuilder</c> のシンボル表検証が担う。本メソッドは
-    /// 最頻の誤り（同名列）へ「どの列同士か」を挙げた具体的なメッセージで先に答える早期検証として残す。
+    /// 列とナビゲーション・基底の公開プロパティの衝突）は <c>CSharpGenerationModelBuilder</c> のシンボル表検証が担う。
+    /// 本メソッドは最頻の誤り（同名列）へ「どの列同士か」を挙げた具体的なメッセージで先に答える早期検証として残す。
     /// ここでエラーになるとビルダーへ到達しないため、両者の診断が同時に出ることはない。
     /// </remarks>
     private static void ValidateColumnPropertyNameUniqueness(
@@ -1320,51 +1444,31 @@ public sealed partial class CSharpCodeGenerationService
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        var converter = new CSharpNameConverter();
-
         foreach (
             var entity in diagram.Entities.Where(entity =>
                 !string.IsNullOrWhiteSpace(entity.TableName)
             )
         )
         {
-            // 列の並び順で最初に現れたプロパティ名から順に報告するため、挿入順を保つ辞書へ集約する
-            var columnsByPropertyName = new Dictionary<string, List<string>>(
-                StringComparer.Ordinal
-            );
-            var order = new List<string>();
-
-            foreach (
-                var column in entity.Columns.Where(column =>
-                    !string.IsNullOrWhiteSpace(column.Name)
-                )
-            )
+            foreach (var collision in ColumnPropertyNameCollisions.Find(entity))
             {
-                var propertyName = converter.ToPropertyName(column.Name);
+                var columns = string.Join(", ", collision.Columns.Select(name => $"'{name}'"));
 
-                if (!columnsByPropertyName.TryGetValue(propertyName, out var columns))
-                {
-                    columns = [];
-                    columnsByPropertyName.Add(propertyName, columns);
-                    order.Add(propertyName);
-                }
-
-                columns.Add(column.Name);
-            }
-
-            foreach (var propertyName in order.Where(name => columnsByPropertyName[name].Count > 1))
-            {
                 diagnostics.Add(
                     GenerationDiagnostic.Error(
-                        string.Format(
-                            Strings.CodeGen_Error_ColumnPropertyNameCollision,
-                            entity.TableName,
-                            propertyName,
-                            string.Join(
-                                ", ",
-                                columnsByPropertyName[propertyName].Select(name => $"'{name}'")
+                        collision.PropertyNames.Count == 1
+                            ? string.Format(
+                                Strings.CodeGen_Error_ColumnPropertyNameCollision,
+                                entity.TableName,
+                                collision.PropertyNames[0],
+                                columns
                             )
-                        )
+                            : string.Format(
+                                Strings.CodeGen_Error_ColumnPropertyNamesDifferOnlyInCase,
+                                entity.TableName,
+                                QuoteNames(collision.PropertyNames),
+                                columns
+                            )
                     )
                 );
             }

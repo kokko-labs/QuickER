@@ -46,6 +46,12 @@ internal sealed partial class CSharpGenerationModelBuilder
                 CollectEntityMemberNames(entity),
                 diagnostics
             );
+            ReportCaseOnlyMemberNames(
+                entity.ClassName,
+                entity.TableName,
+                CollectEntityJsonMemberNames(entity),
+                diagnostics
+            );
         }
 
         foreach (var editModel in model.EditModelClasses)
@@ -109,6 +115,41 @@ internal sealed partial class CSharpGenerationModelBuilder
         // 基底の状態管理メンバー（RowState）は Mapper の状態転送が名前で束縛するため予約する
         // （理由の正本は GeneratedFixedMemberNames.StateTransferReserved の XmlDoc）
         foreach (var name in GeneratedFixedMemberNames.StateTransferReserved)
+        {
+            yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
+        }
+    }
+
+    /// <summary>
+    /// エンティティを読み書きする JSON に出るメンバー名（列・ナビゲーション・基底の公開プロパティ）を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// JSON の設定（リモートの転送 <c>RemoteJson.Options</c>・SQL Server の Include の読み込み）はどちらもプロパティ名の
+    /// 大文字小文字を区別しない。親参照のナビゲーションは <c>[JsonIgnore]</c> が付き得るが、Include の読み込みは
+    /// ナビゲーションを読み込み対象へ戻すので数える。EditModel は JSON で読み書きしないので対象外（大文字小文字を区別して
+    /// 比べる <see cref="ReportDuplicateMemberNames"/> だけが見る）。
+    /// </remarks>
+    private static IEnumerable<GeneratedMemberName> CollectEntityJsonMemberNames(
+        CSharpClassModel entity
+    )
+    {
+        foreach (var property in entity.Properties)
+        {
+            yield return new GeneratedMemberName(
+                property.PropertyName,
+                FormatColumnOrigin(property.ColumnName)
+            );
+        }
+
+        foreach (var navigation in entity.Navigations)
+        {
+            yield return new GeneratedMemberName(
+                navigation.PropertyName,
+                FormatNavigationOrigin(navigation.PropertyName)
+            );
+        }
+
+        foreach (var name in GeneratedFixedMemberNames.EntityJsonVisibleBase)
         {
             yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
         }
@@ -278,6 +319,66 @@ internal sealed partial class CSharpGenerationModelBuilder
                         tableName,
                         name,
                         string.Join(", ", originsByName[name])
+                    )
+                )
+            );
+        }
+    }
+
+    /// <summary>
+    /// 集めたメンバー名のうち、大文字小文字だけ違う綴りの組を Error 診断として報告する（綴りまで同じ名前は
+    /// <see cref="ReportDuplicateMemberNames"/> の担当で、ここでは見ない）
+    /// </summary>
+    /// <remarks>
+    /// エンティティを読み書きする JSON の設定が大文字小文字を区別しないので、コンパイルは通っても実行時に失敗する。
+    /// リモートを生成しない構成でも止める（後からリモートを有効にしても図が壊れない・GUI と MCP は構成を知らない）。
+    /// 報告順は出現順に固定する（診断の決定性）。
+    /// </remarks>
+    private static void ReportCaseOnlyMemberNames(
+        string className,
+        string tableName,
+        IEnumerable<GeneratedMemberName> members,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        // 生成する識別子どうしを JSON の規則（大文字小文字を区別しない）で比べる。図の名前の同一性ではない
+        var groups = new Dictionary<string, List<GeneratedMemberName>>(
+            StringComparer.OrdinalIgnoreCase
+        );
+        var order = new List<string>();
+
+        foreach (var member in members)
+        {
+            if (!groups.TryGetValue(member.Name, out var group))
+            {
+                group = [];
+                groups.Add(member.Name, group);
+                order.Add(member.Name);
+            }
+
+            group.Add(member);
+        }
+
+        foreach (var group in order.Select(key => groups[key]))
+        {
+            var spellings = group
+                .Select(member => member.Name)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (spellings.Count < 2)
+            {
+                continue;
+            }
+
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(
+                        Strings.CodeGen_Error_GeneratedMemberNamesDifferOnlyInCase,
+                        className,
+                        tableName,
+                        string.Join(", ", spellings.Select(name => $"'{name}'")),
+                        string.Join(", ", group.Select(member => member.Origin).Distinct())
                     )
                 )
             );

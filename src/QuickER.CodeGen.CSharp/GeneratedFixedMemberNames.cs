@@ -139,6 +139,20 @@ public static class GeneratedFixedMemberNames
     /// </remarks>
     public static IReadOnlySet<string> StateTransferReserved { get; } = Create("RowState");
 
+    /// <summary>
+    /// Entity の基底（<c>EntityBaseCore</c>）の公開インスタンスプロパティ名＝エンティティを読み書きする JSON に出る基底のメンバー。
+    /// </summary>
+    /// <remarks>
+    /// 大文字小文字だけ違う名前の検査（<c>CSharpGenerationModelBuilder.ValidateGeneratedMemberNames</c>）でだけ使う。
+    /// エンティティを読み書きする JSON の設定（リモートの転送・SQL Server の Include の読み込み）はプロパティ名の
+    /// 大文字小文字を区別しないので、列 <c>isadded</c> の <c>Isadded</c> は基底の <c>IsAdded</c> とぶつかり、実行時に型の情報を
+    /// 組み立てる時点で例外になる。綴りまで同じ名前は従来どおり（<see cref="StateTransferReserved"/>・
+    /// <see cref="EntityDisplayNameReserved"/>・CS0108 の警告）で、この集合では見ない。基底の公開プロパティと一致し続けることは
+    /// <c>GeneratedFixedMemberDriftTests</c> が固定する。
+    /// </remarks>
+    public static IReadOnlySet<string> EntityJsonVisibleBase { get; } =
+        Create("RowState", "IsAdded", "IsUpdated", "IsRemoved", "HasChanges", "DisplayName");
+
     /// <summary>序数比較の読み取り専用集合を組み立てる（メンバー名は識別子なので大文字小文字を区別する）</summary>
     private static IReadOnlySet<string> Create(params string[] names) =>
         new HashSet<string>(names, StringComparer.Ordinal);
