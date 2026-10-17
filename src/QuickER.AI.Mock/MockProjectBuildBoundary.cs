@@ -96,6 +96,22 @@ internal static class MockProjectBuildBoundary
         AttributesToSkip = 0,
     };
 
+    /// <summary>
+    /// 変更検知が 1 段ずつフォルダを開くときの走査オプション（読めないフォルダを黙って飛ばさない・属性で何も飛ばさない）。
+    /// </summary>
+    /// <remarks>
+    /// 成果物の探索（<see cref="MockProjectFiles.Enumerate"/>）はアクセス拒否を無視するが、変更検知はそうしてはいけない。
+    /// エージェントは出力フォルダの ACL を変えて自分に「一覧の読み取り」だけを拒否でき、ファイルは名前で開けるので
+    /// MSBuild は読むのに、無視する走査では差分が空になって確認なしでビルドへ進む。開けなかったフォルダは
+    /// <see cref="EnumerateComparedEntries"/> がフォルダ自身を 1 件として返し、比較は毎回「変更」として一覧に出す。
+    /// </remarks>
+    private static readonly EnumerationOptions ComparedLevelOptions = new()
+    {
+        RecurseSubdirectories = false,
+        IgnoreInaccessible = false,
+        AttributesToSkip = 0,
+    };
+
     /// <summary>ディレクトリのリンクをスナップショットへ記録するときの値の接頭辞（ファイルのハッシュと衝突しない）</summary>
     private const string DirectoryLinkMarker = "link:";
 
@@ -268,30 +284,44 @@ internal static class MockProjectBuildBoundary
         }
     }
 
-    /// <summary>走査で見つけた 1 件（ファイル、または中へ入らなかったディレクトリ）</summary>
-    /// <param name="Relative">出力フォルダからの相対パス（区切りは <c>/</c>）</param>
+    /// <summary>走査で見つけた 1 件（ファイル、中へ入らなかったディレクトリ、または一覧を読めなかったディレクトリ）</summary>
+    /// <param name="Relative">出力フォルダからの相対パス（区切りは <c>/</c>。出力フォルダ自身は <c>.</c>）</param>
     /// <param name="FullPath">絶対パス</param>
     /// <param name="IsOpaqueDirectory">
     /// 中へ入らなかったディレクトリ（リンク、または中を列挙できない reparse フォルダ）か
     /// </param>
-    private readonly record struct Entry(string Relative, string FullPath, bool IsOpaqueDirectory);
+    /// <param name="IsUnlistable">一覧を読めなかったディレクトリ（アクセス拒否など）か</param>
+    private readonly record struct Entry(
+        string Relative,
+        string FullPath,
+        bool IsOpaqueDirectory,
+        bool IsUnlistable = false
+    );
 
     /// <summary>
-    /// 比較から外すか＝<see cref="SafeExtensions"/> に当たる<b>ファイル</b>。中へ入らなかったディレクトリは
-    /// 名前に依らず必ず比較する（<c>assets.css</c> という名前のジャンクションで素通りさせない）。
+    /// 比較から外すか＝<see cref="SafeExtensions"/> に当たる<b>ファイル</b>。中へ入らなかったディレクトリと
+    /// 一覧を読めなかったディレクトリは名前に依らず必ず比較する（<c>assets.css</c> という名前のジャンクションで
+    /// 素通りさせない）。
     /// </summary>
     private static bool IsExemptFromComparison(Entry entry) =>
-        !entry.IsOpaqueDirectory && SafeExtensions.Contains(Path.GetExtension(entry.Relative));
+        !entry.IsOpaqueDirectory
+        && !entry.IsUnlistable
+        && SafeExtensions.Contains(Path.GetExtension(entry.Relative));
 
     /// <summary>
     /// 比較に使う値（ファイルは内容の SHA-256・ディレクトリのリンクは接頭辞付きのリンク先）。読めなければ null。
     /// </summary>
     /// <remarks>
-    /// リンクでないのに中を列挙できない reparse フォルダは null を返す＝記録されず、比較では毎回「変更」として
-    /// 一覧に出る（中身を確かめられない以上、変わっていないとは言えないため）。
+    /// 一覧を読めなかったディレクトリと、リンクでないのに中を列挙できない reparse フォルダは null を返す＝記録されず、
+    /// 比較では毎回「変更」として一覧に出る（中身を確かめられない以上、変わっていないとは言えないため）。
     /// </remarks>
     private static string? Fingerprint(Entry entry)
     {
+        if (entry.IsUnlistable)
+        {
+            return null;
+        }
+
         if (!entry.IsOpaqueDirectory)
         {
             return TryComputeHash(entry.FullPath);
@@ -319,6 +349,11 @@ internal static class MockProjectBuildBoundary
     /// <summary>
     /// 比較の対象を列挙する＝出力フォルダ配下（<c>{プロジェクト}/obj</c>・<c>bin</c> はフォルダ自身も含めて除く）。
     /// </summary>
+    /// <remarks>
+    /// フォルダは 1 段ずつ開き（<see cref="ComparedLevelOptions"/>）、開けなかったフォルダ（出力フォルダ自身を含む）は
+    /// 中を読まずにフォルダ自身を 1 件として返す（<see cref="Entry.IsUnlistable"/>）。リンクと中を列挙できない reparse
+    /// フォルダの中へは入らない・属性で何も飛ばさない、は <see cref="EnumerateEntries"/> と同じ。
+    /// </remarks>
     private static IEnumerable<Entry> EnumerateComparedEntries(
         string outputDirectory,
         string projectName
@@ -339,12 +374,74 @@ internal static class MockProjectBuildBoundary
                 || relative.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase)
             );
 
-        return EnumerateEntries(
-            outputDirectory,
-            outputDirectory,
-            IsBuildOutput,
-            MockProjectFiles.AllEntriesOptions
-        );
+        var entries = new List<Entry>();
+        CollectComparedEntries(outputDirectory, outputDirectory, IsBuildOutput, entries);
+        return entries;
+    }
+
+    /// <summary>
+    /// フォルダを 1 段開いて、ファイル・中へ入らないディレクトリを集め、入れるディレクトリへ再帰する。
+    /// </summary>
+    /// <param name="directory">開くフォルダ</param>
+    /// <param name="outputDirectory">相対パスの基準（出力フォルダ）</param>
+    /// <param name="isExcluded">除外する相対パスか（除外したディレクトリの中へも入らない）</param>
+    /// <param name="entries">集めた項目</param>
+    /// <remarks>
+    /// 開けなかったとき・途中で列挙が失敗したときは、そのフォルダで読めた分も捨ててフォルダ自身を 1 件として返す
+    /// （一部だけ比べると、読めなかった残りの変更を「変わっていない」として見逃す）。
+    /// </remarks>
+    private static void CollectComparedEntries(
+        string directory,
+        string outputDirectory,
+        Func<string, bool> isExcluded,
+        List<Entry> entries
+    )
+    {
+        List<(string FullPath, bool IsDirectory, bool IsOpaque)> children;
+
+        try
+        {
+            children = new FileSystemEnumerable<(string, bool, bool)>(
+                directory,
+                (ref FileSystemEntry entry) =>
+                    (
+                        entry.ToFullPath(),
+                        entry.IsDirectory,
+                        MockProjectFiles.IsOpaqueDirectory(ref entry)
+                    ),
+                ComparedLevelOptions
+            ).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            entries.Add(
+                new Entry(
+                    ToRelative(outputDirectory, directory),
+                    directory,
+                    IsOpaqueDirectory: false,
+                    IsUnlistable: true
+                )
+            );
+            return;
+        }
+
+        foreach (var (fullPath, isDirectory, isOpaque) in children)
+        {
+            var relative = ToRelative(outputDirectory, fullPath);
+
+            if (isExcluded(relative))
+            {
+                continue;
+            }
+
+            if (!isDirectory || isOpaque)
+            {
+                entries.Add(new Entry(relative, fullPath, isDirectory));
+                continue;
+            }
+
+            CollectComparedEntries(fullPath, outputDirectory, isExcluded, entries);
+        }
     }
 
     /// <summary>

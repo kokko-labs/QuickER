@@ -48,12 +48,14 @@ internal static class MockProjectFiles
     };
 
     /// <summary>
-    /// 属性で何も飛ばさない再帰列挙のオプション（変更検知と読み取り専用属性の解除が使う）。
+    /// 属性で何も飛ばさない再帰列挙のオプション（最終ビルド前の読み取り専用属性の解除が使う）。
     /// </summary>
     /// <remarks>
     /// 既定の <see cref="EnumerationOptions"/> は Hidden / System を飛ばすため、隠し属性を付けた
     /// <c>*.csproj.user</c> のようなファイルが列挙から消える＝検知の回避路になる。reparse point も属性では
     /// 飛ばさない（外を指すファイルのシンボリックリンクまで消える）＝再帰を止めるのは再帰判定の仕事。
+    /// アクセス拒否は無視する（解除できなかった中身は、削除の後の残存検査が拾う）。変更検知はアクセス拒否を
+    /// 無視してはいけないので、このオプションを使わない（<see cref="MockProjectBuildBoundary"/> の 1 段ずつの走査）。
     /// </remarks>
     internal static readonly EnumerationOptions AllEntriesOptions = new()
     {
