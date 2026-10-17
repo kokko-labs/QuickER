@@ -558,6 +558,8 @@ public class RuntimeTestMatrixTests
         new("BinaryColumnEfCoreRuntimeTests", "BinaryColumn", Backend.EfCore),
         new("BinaryInMemoryFixtureRuntimeTests", "BinaryColumn", Backend.InMemory),
         new("BinaryColumnRemoteRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("BinaryTransferResponseRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("BinaryRemoteLengthRuntimeTests", "BinaryColumn", Backend.Remote),
         new("BinaryVoEditModelRuntimeTests", "BinaryColumnEditModel", Backend.AdoSqlite),
         // --- 一意性の事前チェック ---
         new("UniquenessCheckSqlServerRuntimeTests", "UniquenessCheck", Backend.AdoSqlServer),
@@ -658,6 +660,7 @@ public class RuntimeTestMatrixTests
         new("SyncModelSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
         new("SyncSqlServerRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
         new("SyncHttpRuntimeTests", "SyncSupport", Backend.Remote),
+        new("SyncBinaryTransferResponseRuntimeTests", "SyncSupport", Backend.Remote),
         new("SyncSqlServerHttpRuntimeTests", "SyncSupport", Backend.Remote),
         // 同期エンドポイントのマップ時 fail-fast＝ソース未登録の起動時検出
         new("SyncEndpointRegistrationRuntimeTests", "SyncSupport", Backend.Remote),

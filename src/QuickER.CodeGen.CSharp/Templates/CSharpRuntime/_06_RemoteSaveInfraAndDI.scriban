@@ -1068,10 +1068,11 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// <summary>
     /// Streams an unbounded binary column (excluded column) down from the server (<c>GET {entity}/{column}?id=</c>).
     /// Reads only the response headers up front (<see cref="HttpCompletionOption.ResponseHeadersRead"/>) and copies the body
-    /// to the destination in O(chunk) (the whole blob is never loaded into memory; no Base64). 200 = data was written
-    /// (<c>true</c>; an empty blob is also true) / 404 marked by the endpoint = no row or NULL (<c>false</c>; nothing is
-    /// written to the destination). Any other failure - a 404 the endpoint did not produce included - restores exceptions
-    /// per the existing rules.
+    /// to the destination in O(chunk) (the whole blob is never loaded into memory; no Base64). 200 with
+    /// <c>application/octet-stream</c> = data was written (<c>true</c>; an empty blob is also true) / 404 marked by the
+    /// endpoint = no row or NULL (<c>false</c>; nothing is written to the destination). Any other failure - a 404 the endpoint
+    /// did not produce included - restores exceptions per the existing rules, and any other success response throws
+    /// <see cref="RemoteRepositoryException"/> without writing to the destination (see <see cref="EnsureBinaryEndpointAnswered"/>).
     /// </summary>
     protected async Task<bool> DownloadUnboundedBinaryColumnAsync(
         string columnRoute,
@@ -1095,6 +1096,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         }
 
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        EnsureBinaryEndpointAnswered(response, HttpStatusCode.OK, requireOctetStream: true);
 
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
@@ -1105,8 +1107,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// Streams an unbounded binary column (excluded column) up to the server. When <paramref name="source"/> is <c>null</c>,
     /// sends <c>DELETE</c> (sets the column to NULL); when non-<c>null</c>, sends <c>PUT</c> (<see cref="StreamContent"/> with
     /// Content-Length). A zero-byte PUT (empty body) and setting NULL (DELETE) are structurally distinct. The length contract
-    /// is validated before sending (a non-<c>CanSeek</c> Stream requires <paramref name="length"/>). 204 = success (<c>true</c>) /
-    /// 404 marked by the endpoint = no row (<c>false</c>). Anything else restores exceptions.
+    /// is validated before sending (a non-<c>CanSeek</c> Stream requires <paramref name="length"/>), and the stream is read
+    /// through <see cref="UnboundedBinaryColumns.WithExactLength"/>, as on a direct connection: a stream that does not yield
+    /// exactly that many bytes fails with <see cref="ArgumentException"/> (<c>length</c>) before the whole declared body is
+    /// sent, so the server stores nothing. 204 = success (<c>true</c>) / 404 marked by the endpoint = no row (<c>false</c>).
+    /// Any other failure restores exceptions, and any other success response throws <see cref="RemoteRepositoryException"/>
+    /// (see <see cref="EnsureBinaryEndpointAnswered"/>).
     /// </summary>
     /// <remarks>
     /// <paramref name="source"/> stays owned by the caller: it is neither closed nor disposed here, exactly as with a
@@ -1144,6 +1150,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             }
 
             await EnsureSuccessAsync(deleteResponse, cancellationToken).ConfigureAwait(false);
+            EnsureBinaryEndpointAnswered(deleteResponse, HttpStatusCode.NoContent, requireOctetStream: false);
             return true;
         }
 
@@ -1151,9 +1158,9 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         // aligns with Content-Length; a missing length throws before sending)
         var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-        // The wrapper is what keeps the caller's stream open: HttpClient disposes the request content after sending,
-        // and StreamContent's disposal reaches through to the stream it was built on
-        using var content = new StreamContent(new NonClosingStream(source));
+        // The body is read through the exact-length check, and the caller's stream is neither closed nor disposed
+        // (see ExactLengthContent)
+        using var content = new ExactLengthContent(source, payloadLength);
         content.Headers.ContentLength = payloadLength;
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
@@ -1174,7 +1181,93 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         }
 
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        EnsureBinaryEndpointAnswered(response, HttpStatusCode.NoContent, requireOctetStream: false);
         return true;
+    }
+
+    /// <summary>
+    /// Refuses a success response that is not the one the binary endpoint answers with (GET: 200 with
+    /// <c>application/octet-stream</c>; PUT and DELETE: 204), throwing <see cref="RemoteRepositoryException"/>.
+    /// </summary>
+    /// <remarks>
+    /// A 2xx that the generated endpoint did not produce comes from something in front of it - an authentication proxy
+    /// that redirects an expired session to its sign-in page, a gateway that answers 200 to anything - and reading it as
+    /// success would store that page as the blob, or report as stored a write that never reached the server. The JSON
+    /// operations refuse a success response whose body is not the expected JSON for the same reason. The media type is
+    /// compared without its parameters and ignoring case.
+    /// </remarks>
+    private static void EnsureBinaryEndpointAnswered(
+        HttpResponseMessage response,
+        HttpStatusCode expected,
+        bool requireOctetStream
+    )
+    {
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+
+        if (
+            response.StatusCode == expected
+            && (!requireOctetStream || string.Equals(mediaType, "application/octet-stream", StringComparison.OrdinalIgnoreCase))
+        )
+        {
+            return;
+        }
+
+        var answered = mediaType is null ? "no content type" : mediaType;
+        var wanted = requireOctetStream ? $"{(int)expected} with application/octet-stream" : $"{(int)expected}";
+        throw new RemoteRepositoryException(
+            (int)response.StatusCode,
+            $"The binary transfer was answered with HTTP {(int)response.StatusCode} ({answered}), where the endpoint answers {wanted}: something other than the generated endpoint answered."
+        );
+    }
+
+    /// <summary>
+    /// Request content of a blob upload: sends the caller's stream through
+    /// <see cref="UnboundedBinaryColumns.WithExactLength"/>, as the direct engines read it.
+    /// </summary>
+    /// <remarks>
+    /// A stream that ends early or runs on is refused before the last of the declared body is sent, so the server never
+    /// receives a complete body to commit. When the HTTP layer sends the body again (following a redirect), a seekable
+    /// stream is moved back to where the first send began and checked afresh; a stream that cannot seek cannot be sent
+    /// twice. The content never closes or disposes the stream: it stays owned by the caller.
+    /// </remarks>
+    private sealed class ExactLengthContent(Stream source, long length) : HttpContent
+    {
+        private readonly long _start = source.CanSeek ? source.Position : 0;
+        private bool _sent;
+
+        /// <inheritdoc />
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+        /// <inheritdoc />
+        protected override async Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context,
+            CancellationToken cancellationToken
+        )
+        {
+            if (_sent)
+            {
+                if (!source.CanSeek)
+                {
+                    throw new InvalidOperationException("The stream was already consumed. It cannot be read again.");
+                }
+
+                source.Position = _start;
+            }
+
+            _sent = true;
+            await UnboundedBinaryColumns.WithExactLength(source, length)
+                .CopyToAsync(stream, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
+        protected override bool TryComputeLength(out long computed)
+        {
+            computed = length;
+            return true;
+        }
     }
 
     /// <summary>Decides what a 404 from a binary endpoint means, returning <c>false</c> for the contractual "no row / NULL" and throwing otherwise.</summary>
@@ -1208,10 +1301,9 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 /// <summary>Read-only pass-through wrapper that keeps the wrapped stream open when the HTTP layer disposes the request content.</summary>
 /// <remarks>
 /// <see cref="HttpClient"/> disposes the request content once a request has been sent, and disposing
-/// <see cref="StreamContent"/> reaches through to the stream it was built on. A direct-connection write leaves the
-/// stream the caller passed in untouched, so without this wrapper the same call would close it on a remote client
-/// and not on a direct one. Every member forwards to the wrapped stream except disposal, which does nothing:
-/// the stream stays owned by the caller.
+/// <see cref="StreamContent"/> reaches through to the stream it was built on. Wrapping a stream the caller still owns in
+/// this before handing it to <see cref="StreamContent"/> keeps it open. Every member forwards to the wrapped stream except
+/// disposal, which does nothing: the stream stays owned by the caller.
 /// </remarks>
 {{ infra_visibility }} sealed class NonClosingStream(Stream inner) : Stream
 {

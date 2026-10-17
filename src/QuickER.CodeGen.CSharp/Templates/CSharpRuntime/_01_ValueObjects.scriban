@@ -218,7 +218,11 @@
     /// The engines read the source until it ends, so the declared length alone does not say what gets stored: SQL Server
     /// would store whatever the stream holds and SQLite, which allocates the declared length first, would leave the missing
     /// tail as zeros and report success. Reading through this wrapper turns both into a failure the write rolls back.
-    /// Whether the source has data left is found out by reading one more byte, which is consumed - the write fails anyway.
+    /// Whether the source has data left is found out by reading one more byte <b>before the read that reaches the declared
+    /// length returns</b>, so a source that is too long is rejected before the last bytes are handed on: a remote upload has
+    /// then not sent the whole declared body, and the server, which would commit a complete body, writes nothing. A source of
+    /// exactly the declared length only shows its end there (a read of 0 bytes), so no byte past the length is consumed;
+    /// the extra byte of a source that is too long is consumed, but the write fails anyway.
     /// The wrapper never closes or disposes <paramref name="source"/>; it stays owned by the caller.
     /// </remarks>
     /// <param name="source">The stream to write from.</param>
@@ -288,7 +292,16 @@
                 return 0;
             }
 
-            return Consume(_source.Read(buffer[..Allowed(buffer.Length)]));
+            var read = Consume(_source.Read(buffer[..Allowed(buffer.Length)]));
+
+            // Check the end before handing on the bytes that reach the declared length (see WithExactLength)
+            if (_remaining == 0)
+            {
+                Span<byte> probe = stackalloc byte[1];
+                VerifyEnd(_source.Read(probe));
+            }
+
+            return read;
         }
 
         public override System.Threading.Tasks.Task<int> ReadAsync(
@@ -319,9 +332,18 @@
                 return 0;
             }
 
-            return Consume(
+            var read = Consume(
                 await _source.ReadAsync(buffer[..Allowed(buffer.Length)], cancellationToken).ConfigureAwait(false)
             );
+
+            // Check the end before handing on the bytes that reach the declared length (see WithExactLength)
+            if (_remaining == 0)
+            {
+                var probe = new byte[1];
+                VerifyEnd(await _source.ReadAsync(probe, cancellationToken).ConfigureAwait(false));
+            }
+
+            return read;
         }
 
         /// <summary>Caps a read at the bytes still owed, so the source is never read past the declared length.</summary>
