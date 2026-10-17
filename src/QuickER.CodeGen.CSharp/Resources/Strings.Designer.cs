@@ -108,9 +108,39 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
-        public static string CodeGen_Error_EntityClassNameCollision {
+        public static string CodeGen_Error_GeneratedTypeNameCollision {
             get {
-                return ResourceManager.GetString("CodeGen_Error_EntityClassNameCollision", resourceCulture);
+                return ResourceManager.GetString("CodeGen_Error_GeneratedTypeNameCollision", resourceCulture);
+            }
+        }
+        
+        public static string CodeGen_Error_GeneratedTypeNameReserved {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_GeneratedTypeNameReserved", resourceCulture);
+            }
+        }
+        
+        public static string CodeGen_Error_RemoteRouteNameCaseCollision {
+            get {
+                return ResourceManager.GetString("CodeGen_Error_RemoteRouteNameCaseCollision", resourceCulture);
+            }
+        }
+        
+        public static string CodeGen_Origin_Table {
+            get {
+                return ResourceManager.GetString("CodeGen_Origin_Table", resourceCulture);
+            }
+        }
+        
+        public static string CodeGen_Origin_TableColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Origin_TableColumn", resourceCulture);
+            }
+        }
+        
+        public static string CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase", resourceCulture);
             }
         }
         

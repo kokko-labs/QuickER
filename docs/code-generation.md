@@ -55,6 +55,23 @@ Only the fields the user actually edits take on the precision of their input str
 Binary columns are copied defensively, so editing the loaded model never writes into the entity it was loaded from.
 A `date` column (as opposed to `datetime`) is displayed with the culture's short date pattern, without a "0:00:00" tail.
 
+### Generated type names
+
+A table's types are named after the table in the singular with a suffix: `order_items` gives `OrderItemEntity`, `OrderItemEditModel`, `OrderItemMapper` and repository types such as `IOrderItemRepository`.
+The suffix is added only when the name does not already end with it.
+Value object types are named after the column (`customer_id` gives `CustomerIdValue`), and columns spelled the same way in different tables share one type.
+
+Generation stops with an error that names the tables and columns when two of them would give the same type name.
+For example, `customer` and `customers` both give `CustomerEntity`, `order_edit_model` gives `OrderEditModel`, the edit model of `order`, and `i_order` gives `IOrderRepository`, the repository contract of `order`.
+It also stops when a table or column would give the name of a type the generated code already uses, such as `RawSqlMapper` for table `raw_sql`, or `SqlParameterValue` for column `sql_parameter`.
+The check covers every name the generator can emit, whatever the options and the output layout, so turning on an option never breaks a diagram that generated before.
+In return, a diagram is refused even where the clash would not have come up in your configuration.
+
+Type names are compared with case, as C# compares them.
+The exception is the name of the remote endpoints, which is the entity class name without `Entity`: routing ignores case, so two tables such as `order_item` and `orderitem` (`OrderItem` and `Orderitem`) are refused, whether or not remote services are generated.
+Other generated type names that differ only in case, such as `UserIdValue` and `UseridValue` from columns `user_id` and `userid` of two tables, are reported as a warning.
+The generated code works as it is; spell the names the same way to remove the warning.
+
 ### Navigation property names
 
 A navigation property is named after the table at the other end.

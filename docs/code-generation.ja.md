@@ -55,6 +55,23 @@ Mapper は確定値を Entity から直接コピーし、`BindingXxx` はその�
 バイナリ列は防御的にコピーするため、ロードした EditModel の編集がロード元の Entity へ波及しません。
 `date` 列（`datetime` ではない）はカルチャの短い日付書式で表示し、末尾に "0:00:00" が付きません。
 
+### 生成される型の名前
+
+テーブルの型の名前は、テーブル名を単数形にして接尾辞を付けたものです。`order_items` から `OrderItemEntity`・`OrderItemEditModel`・`OrderItemMapper` と、`IOrderItemRepository` などの Repository の型ができます。
+接尾辞は、名前がまだその語で終わっていないときだけ付けます。
+値オブジェクトの型の名前は列名から作り（`customer_id` から `CustomerIdValue`）、同じ綴りの列は、テーブルが違っても 1 つの型を共有します。
+
+2 つのテーブル・列が同じ型名を作るときは、生成がそれらを名指しするエラーで止まります。
+たとえば、`customer` と `customers` はどちらも `CustomerEntity` を作り、`order_edit_model` は `order` の EditModel と同じ `OrderEditModel` を、`i_order` は `order` の Repository 契約と同じ `IOrderRepository` を作ります。
+生成コードがすでに使っている型の名前になるテーブル・列（テーブル `raw_sql` の `RawSqlMapper`、列 `sql_parameter` の `SqlParameterValue` など）も止まります。
+判定は、オプションと出力の形に依らず、生成し得るすべての名前で行うので、オプションを有効にしても、それまで生成できていた図は壊れません。
+その代わり、使っている構成ではぶつからない組でも断ります。
+
+型名は、C# と同じく大文字小文字を区別して比べます。
+例外はリモートのエンドポイントの名前（エンティティのクラス名から `Entity` を外したもの）です。ルーティングは大文字小文字を区別しないので、`order_item` と `orderitem`（`OrderItem` と `Orderitem`）のような 2 つのテーブルは、リモートサービスを生成するかどうかに依らず断ります。
+それ以外の、大文字小文字だけ違う生成型名（2 つのテーブルの列 `user_id` と `userid` から作る `UserIdValue` と `UseridValue` など）は警告で知らせます。
+生成物はこのままで動きます。綴りをそろえると、警告は出なくなります。
+
 ### ナビゲーションプロパティの名前
 
 ナビゲーションプロパティは、相手側のテーブル名から名付けます。

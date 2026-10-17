@@ -85,8 +85,14 @@
   <data name="CodeGen_Error_NameContainsControlCharacter" xml:space="preserve">
     <value>These names contain a line break or a control character: {0}. Such a character breaks the generated C# string literals and the comment lines the DDL writes, and no database accepts it inside an identifier. Remove it from the names in the diagram.</value>
   </data>
-  <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
-    <value>Tables {1} all map to the same entity class name '{0}'. Entity classes are partial, so they would merge into a single class and fail to compile. Rename the tables so that the generated class names differ (table names are singularized, so 'customer' and 'customers' both become 'CustomerEntity').</value>
+  <data name="CodeGen_Error_GeneratedTypeNameCollision" xml:space="preserve">
+    <value>{0} would all generate the type names {1}, so the same type would be declared more than once and the code would fail to compile. Rename the tables or columns so that the generated type names differ. Table names are singularized and given a suffix such as 'Entity', 'EditModel', 'Mapper' or 'Repository' only when they do not already end with it, so 'customer' and 'customers' both become 'CustomerEntity', 'order_edit_model' gives 'OrderEditModel', the EditModel of 'order', and 'i_order' gives 'IOrderRepository', the repository contract of 'order'. The check covers every name the generator can emit, whatever the options and the output layout.</value>
+  </data>
+  <data name="CodeGen_Error_GeneratedTypeNameReserved" xml:space="preserve">
+    <value>{0} would generate the type name '{1}', which the generated code already declares or refers to by its simple name (a QuickER runtime type, a fixed generated type, or a .NET type). The two would clash and the code would fail to compile. Rename the table or column. The check covers every name the generator can emit, whatever the options and the output layout.</value>
+  </data>
+  <data name="CodeGen_Error_RemoteRouteNameCaseCollision" xml:space="preserve">
+    <value>Tables {0} give the names {1}, which differ only in case. The generated remote endpoints are routed by these names, and routing ignores case, so the endpoints of the tables would clash. This is refused whether or not remote services are generated, so that turning them on later does not break the diagram. Rename one of the tables.</value>
   </data>
   <data name="CodeGen_Error_DuplicateTableName" xml:space="preserve">
     <value>Table name '{0}' is used more than once ({1}). Table names are compared ignoring case and surrounding spaces, so the same table cannot appear twice in a diagram. Rename or remove one of them.</value>
@@ -114,6 +120,12 @@
   </data>
   <data name="CodeGen_Origin_Column" xml:space="preserve">
     <value>column '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_Table" xml:space="preserve">
+    <value>table '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_TableColumn" xml:space="preserve">
+    <value>column '{0}'.'{1}'</value>
   </data>
   <data name="CodeGen_Origin_Navigation" xml:space="preserve">
     <value>navigation '{0}'</value>
@@ -237,6 +249,9 @@
   </data>
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>The definitions of the same-named columns aggregated into value object '{0}' do not match. Generation proceeds with the PK definition preferred (otherwise the largest definition), but unifying the definitions in the ER diagram is recommended: {1}</value>
+  </data>
+  <data name="CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase" xml:space="preserve">
+    <value>The generated type names {0} differ only in case. The generated code works as it is, but this usually means that the same name is spelled differently in different places. Spell them the same way to remove this warning.</value>
   </data>
   <data name="CodeGen_Warning_GuidKeyColumnShorterThanGuid" xml:space="preserve">
     <value>The GUID key primary key column '{0}' is declared as {1} characters, which is shorter than the {2} characters produced by the parameterless Create(). Auto-numbering always fails length validation at run time; widen the column, or supply a shorter key explicitly instead of auto-numbering.</value>

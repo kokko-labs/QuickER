@@ -85,8 +85,14 @@
   <data name="CodeGen_Error_NameContainsControlCharacter" xml:space="preserve">
     <value>次の名前に改行または制御文字が含まれています: {0}。これらの文字は生成される C# の文字列リテラルと DDL が書き出すコメント行を壊し、識別子として受け付ける DB もありません。図の名前から取り除いてください。</value>
   </data>
-  <data name="CodeGen_Error_EntityClassNameCollision" xml:space="preserve">
-    <value>テーブル {1} のエンティティクラス名がいずれも '{0}' になります。エンティティクラスは partial のため 1 つのクラスへ統合され、コンパイルできません。生成されるクラス名が異なるようテーブル名を変更してください（テーブル名は単数形化されるため、'customer' と 'customers' はどちらも 'CustomerEntity' になります）。</value>
+  <data name="CodeGen_Error_GeneratedTypeNameCollision" xml:space="preserve">
+    <value>{0} がいずれも型名 {1} を作るため、同じ型が重複して宣言され、コンパイルできません。生成される型名が重ならないように、テーブルか列の名前を変えてください。テーブル名は単数形にしてから、まだその語で終わっていないときだけ 'Entity'・'EditModel'・'Mapper'・'Repository' などの接尾辞を付けるため、'customer' と 'customers' はどちらも 'CustomerEntity' になり、'order_edit_model' は 'order' の EditModel と同じ 'OrderEditModel' に、'i_order' は 'order' の Repository 契約と同じ 'IOrderRepository' になります。判定は、オプションと出力の形に依らず、生成し得るすべての名前で行います。</value>
+  </data>
+  <data name="CodeGen_Error_GeneratedTypeNameReserved" xml:space="preserve">
+    <value>{0} が型名 '{1}' を作りますが、この名前は生成コードがすでに宣言しているか、単純名で参照している型（QuickER のランタイムの型・固定の生成物・.NET の型）と同じです。2 つがぶつかり、コンパイルできません。テーブルか列の名前を変えてください。判定は、オプションと出力の形に依らず、生成し得るすべての名前で行います。</value>
+  </data>
+  <data name="CodeGen_Error_RemoteRouteNameCaseCollision" xml:space="preserve">
+    <value>テーブル {0} から作る名前 {1} は、大文字小文字だけが違います。生成されるリモートのエンドポイントはこの名前でルーティングされ、ルーティングは大文字小文字を区別しないため、テーブルどうしのエンドポイントがぶつかります。後からリモートサービスを有効にしても図が壊れないよう、リモートサービスを生成するかどうかに依らず断ります。どちらかのテーブルの名前を変えてください。</value>
   </data>
   <data name="CodeGen_Error_DuplicateTableName" xml:space="preserve">
     <value>テーブル名 '{0}' が重複しています（{1}）。テーブル名は大文字小文字と前後の空白を区別せずに比較するため、同じテーブルを図に 2 つ置けません。どちらかの名前を変えるか削除してください。</value>
@@ -114,6 +120,12 @@
   </data>
   <data name="CodeGen_Origin_Column" xml:space="preserve">
     <value>列 '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_Table" xml:space="preserve">
+    <value>テーブル '{0}'</value>
+  </data>
+  <data name="CodeGen_Origin_TableColumn" xml:space="preserve">
+    <value>列 '{0}'.'{1}'</value>
   </data>
   <data name="CodeGen_Origin_Navigation" xml:space="preserve">
     <value>ナビゲーション '{0}'</value>
@@ -237,6 +249,9 @@
   </data>
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>値オブジェクト '{0}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {1}</value>
+  </data>
+  <data name="CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase" xml:space="preserve">
+    <value>生成される型名 {0} は、大文字小文字だけが違います。生成物はこのままで動きますが、同じ名前を場所によって違う綴りで書いていることが多い組です。綴りをそろえると、この警告は出なくなります。</value>
   </data>
   <data name="CodeGen_Warning_GuidKeyColumnShorterThanGuid" xml:space="preserve">
     <value>GUID キーの主キー列 '{0}' は宣言幅が {1} 文字で、引数なし Create() が採番する {2} 文字より短いため、自動採番は実行時に必ず長さ検証で失敗します。列幅を広げるか、自動採番を使わずに短いキーを明示的に与えてください。</value>
