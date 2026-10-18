@@ -352,8 +352,11 @@ public abstract class QuickER.Runtime.MapperBaseCore<TEntity, TEditModel>
     protected abstract void LoadColumns(TEntity entity, TEditModel editModel)
     protected static T Required<T>(T value, string propertyName)
     protected static T Required<T>(T? value, string propertyName)
+    protected static bool IsLeftOutOfSave(QuickER.Runtime.EditModelBaseCore child, bool includeRemoved)
     protected virtual void AfterEditModelCreated(TEditModel editModel)
     protected virtual void AfterEntityCreated(TEntity entity)
+    protected virtual void LoadSavedColumns(TEntity entity, TEditModel editModel)
+    protected void RememberApplied(TEditModel editModel, TEntity entity)
     public QuickER.Runtime.EditModelCollection<TEditModel> CreateEditModels(System.Collections.Generic.IEnumerable<TEntity> entities)
     public System.Collections.Generic.List<TEntity> CreateEntities(QuickER.Runtime.EditModelCollection<TEditModel> editModels, bool includeRemoved)
     public TEditModel CreateEditModel()
@@ -361,6 +364,8 @@ public abstract class QuickER.Runtime.MapperBaseCore<TEntity, TEditModel>
     public TEntity CreateEntity()
     public TEntity CreateEntity(TEditModel editModel, bool includeRemoved)
     public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved)
+    public void AcceptSaved(QuickER.Runtime.EditModelCollection<TEditModel> editModels, System.Collections.Generic.IEnumerable<TEntity> entities)
+    public void AcceptSaved(TEditModel editModel, TEntity entity)
     public void ApplyToEditModel(TEntity entity, TEditModel editModel)
 
 public sealed class QuickER.Runtime.NavigationReferenceAttribute : System.Attribute

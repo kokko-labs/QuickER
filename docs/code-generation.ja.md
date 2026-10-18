@@ -224,12 +224,43 @@ if (!editModel.Validate())
 mapper.ApplyToEntity(editModel, entity!, includeRemoved: true);
 await customers.SaveAsync(entity!);
 
-// 保存できたのでグラフを未変更状態へ戻す
-editModel.AcceptChanges();
+// 保存できたので、保存の結果を EditModel へ戻す
+mapper.AcceptSaved(editModel, entity!);
 ```
 
 新規行は、既存 Entity へ適用するのではなく組み立てます。
 `mapper.CreateEntity(editModel, includeRemoved: true)` を使い、コレクションごとなら `CreateEntities(collection, includeRemoved: true)` を使います。
+保存の後は、同じ EditModel と Entity（またはコレクションと Entity の並び）を `AcceptSaved` へ渡します。
+
+```csharp
+var newEntity = mapper.CreateEntity(newModel, includeRemoved: true);
+await customers.SaveAsync(newEntity);
+mapper.AcceptSaved(newModel, newEntity);
+
+var entities = mapper.CreateEntities(editModels, includeRemoved: true);
+await customers.SaveAsync(entities);
+mapper.AcceptSaved(editModels, entities);
+```
+
+**`AcceptSaved` は、保存の結果を EditModel へ戻します。**
+Mapper が組み立てた Entity ごとに、保存の後の状態を見ます。
+
+- 保存で書いた行は、Entity の列の値を読み戻してから Unchanged にします。
+  新しい版、DB が作った値のうち実装先が Entity へ書き戻したもの、Before フックが入れた値（キーなど）が戻ります。
+  そのため次の保存は、正しい行を正しい版で更新します。
+  子コレクションは作り直さないので、画面の選択は残ります。
+- 除外した無制限バイナリ列の扱いは、生成するリポジトリで変わります。
+  EF Core のリポジトリを生成しないときは、未取得として読み戻し、Entity の列も未取得の状態へ戻します。どちらを次に保存しても、保存済みの blob には触れません。
+  EF Core のリポジトリは全列を読み書きするので、生成するときは EditModel が持っている blob をそのまま残し、次の EF Core の保存がこれまでどおり書きます。
+  QuickER 版のリポジトリも一緒に生成するときは、blob を持つ EditModel を QuickER 版で保存すると、更新のガードに断られます。その保存の前に行を取得し直すか、生 SQL で列を書いてください。
+- Save フックが飛ばした行は、状態も値もそのまま残ります。次の保存で、もう一度試します。
+- フックが飛ばした子の削除は、削除待ちのまま残ります。`Remove()` した行は削除の追跡に、`MarkRemoved()` した行はコレクションに残ります。
+- 削除した行の後始末は、[行の削除](#行の削除-remove-と-markremoved)のとおりです。
+  削除したルートは `Removed` のまま残ります。削除した単一のカスケード子も同じです。
+
+EditModel 自身の `AcceptChanges()` は、保存を見ずに EditModel を受け入れます。
+フックが飛ばした行も含めてすべての行を Unchanged にし、何も読み戻しません。
+保存の後は `AcceptSaved` を使ってください。
 
 **EditModel へのロードは子コレクションを作り直します。**
 `mapper.ApplyToEditModel(entity, editModel)` は、それまでの子コレクションのインスタンスを新しいものへ差し替えます（`CreateEditModel` が行うロードであり、画面が手元の EditModel を再読込するときの経路でもあります）。
@@ -268,7 +299,7 @@ editModel.AcceptChanges();
 Mapper の変換も同じ規則で、削除行の未入力の非キー列は必須扱いにせずスキップします。
 エラー自体は行に登録されたまま残るため、行単位の表示（`HasErrors` / `GetErrors` ＝ `INotifyDataErrorInfo`）には出続け、行を戻せばそのまま検証へ戻ってきます。
 
-保存が確定して `AcceptChanges()` を呼んだあとの後始末は自動です。
+保存が確定して `mapper.AcceptSaved` か `AcceptChanges()` を呼んだあとの後始末は自動です。
 
 - `Remove()` で退避されていた行は、追跡リストから解放されて部分木ごと Added に戻ります。
   行の実体はカスケード子孫ごと消えたので、同じインスタンスを戻せばグラフ全体が新しい行の挿入になります。
@@ -280,6 +311,11 @@ Mapper の変換も同じ規則で、削除行の未入力の非キー列は必�
 `MarkRemoved()` した単一子は、受理後も `Removed` のままナビゲーションプロパティに残ります。
 保存が確定したら、アプリ側で null を代入してください。
 放置すると、次の保存が同じ行の削除を再び試みます。
+
+**一度も保存していない新しい行を削除すると、そのまま捨てます。**
+保存先に削除する行が無いので、Mapper はその行を Entity のグラフに入れません。キーが未入力でもかまいません。
+保存を受け入れると、その行はコレクションから外れます。
+この形の単一のカスケード子は、上と同じく `Removed` のままナビゲーションに残ります。
 行なし削除は QuickER 版 Repository では黙認、EF Core のグラフ保存では例外という既知の非対称があるため、null にしておくのが安全です。
 
 ## QuickER 版 Repository
@@ -573,7 +609,7 @@ var affected = await orders.SaveAsync(order);   // RowState に従い INSERT / U
 Save フックが飛ばした子は削除されていないので、コレクションに残ります。
 単一のカスケードの子は外れるコレクションが無いので、`Removed` のままナビゲーションに残ります。保存が確定したら null を代入してください。
 削除したルートの子孫は、サブツリーごと消えたので、そのままにします。
-どの実装先も同じで、編集モデルの `AcceptChanges()` と同じ規則です（[行の削除](#行の削除-remove-と-markremoved)を参照）。
+どの実装先も同じで、Mapper の `AcceptSaved` が保存を受け入れたときの EditModel も同じ規則です（[行の削除](#行の削除-remove-と-markremoved)を参照）。
 
 **削除する行の値を取る新しい行は、削除の後に書きます。**
 グラフ保存は、それぞれのルートをグラフの順にたどります。削除する行はサブツリーを子から順に削除し、新しい行と更新する行は子より先に書きます。
@@ -666,7 +702,11 @@ Before / After が投げた例外はそのまま伝播し、Save 全体がロー
 #### Before とスキップの意味論
 
 `false` は、そのエンティティの操作 1 件のみをスキップします（他の行は続行）。
-スキップされた行は After が呼ばれず、`RowState` も据え置かれます（`AcceptChanges` の対象外）。
+スキップされた行は After が呼ばれず、`RowState` も据え置かれます。
+そのため Mapper の `AcceptSaved` は、スキップされた挿入・更新の EditModel をそのまま残し、次の保存でもう一度試します（[EditModel の保存ワークフロー](#editmodel-の保存ワークフロー)を参照）。
+コレクションの子の削除をスキップした場合も、子は親のコレクションに残るので、削除待ちのまま残ります。
+ルートと単一のカスケード子の削除をスキップした場合は、実際に削除した場合と見分けられません。どちらも Entity が `Removed` のまま残ります。
+`AcceptSaved` は、これを削除したものとして扱い、EditModel を `Removed` のままにします。
 
 スキップは単独であるため、整合性はフック実装者の責任です。
 とくに削除は子から順に実行されるため、**サブツリー削除で「root（親）だけ `false`」にすると、子は削除され root だけが残ります**。

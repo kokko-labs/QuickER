@@ -224,12 +224,43 @@ if (!editModel.Validate())
 mapper.ApplyToEntity(editModel, entity!, includeRemoved: true);
 await customers.SaveAsync(entity!);
 
-// The save succeeded, so reset the graph to the unchanged state
-editModel.AcceptChanges();
+// The save succeeded, so take its result back into the edit model
+mapper.AcceptSaved(editModel, entity!);
 ```
 
 For a brand-new row, build the entity instead of applying to one.
 Use `mapper.CreateEntity(editModel, includeRemoved: true)`, or `CreateEntities(collection, includeRemoved: true)` for a whole collection.
+After the save, pass the same edit model and entity, or the same collection and entities, to `AcceptSaved`:
+
+```csharp
+var newEntity = mapper.CreateEntity(newModel, includeRemoved: true);
+await customers.SaveAsync(newEntity);
+mapper.AcceptSaved(newModel, newEntity);
+
+var entities = mapper.CreateEntities(editModels, includeRemoved: true);
+await customers.SaveAsync(entities);
+mapper.AcceptSaved(editModels, entities);
+```
+
+**`AcceptSaved` takes the outcome of the save back into the edit model.**
+It looks at each entity the mapper built, and at its state after the save:
+
+- A row the save wrote has its column values read back from the entity and becomes Unchanged.
+  That brings back the new row version, values the database produced that the backend wrote back to the entity, and values a Before hook set, such as a key.
+  The next save then updates the right row with the right version.
+  Child collections are not rebuilt, so the screen's selection stays.
+- An excluded unbounded binary column depends on the repositories you generate.
+  Without the EF Core repositories, it is read back as not fetched, and the entity's column is set back to not fetched too, so the next save of either one leaves the stored blob alone.
+  With the EF Core repositories, which read and write every column, the edit model keeps the blob it holds, and the next EF Core save writes it as before.
+  When the QuickER repositories are generated alongside them, a QuickER save of an edit model that holds a blob is refused by the update guard; fetch the row again before that save, or write the column with raw SQL.
+- A row a Save hook skipped keeps its state and its values, so the next save tries it again.
+- A child deletion a hook skipped stays pending: a `Remove()` row stays in the deletion tracking, and a `MarkRemoved()` row stays in the collection.
+- A deleted row is cleaned up as described in [Removing rows](#removing-rows-remove-versus-markremoved).
+  A deleted root stays `Removed`, and so does a deleted single cascade child.
+
+The edit model's own `AcceptChanges()` accepts the edit model without looking at the save.
+It marks every row Unchanged, rows a hook skipped included, and reads nothing back.
+Use `AcceptSaved` after a save.
 
 **Loading into an edit model rebuilds its child collections.**
 `mapper.ApplyToEditModel(entity, editModel)` replaces the previous collection instances with new ones.
@@ -268,7 +299,7 @@ An unfinished, unconvertible, or duplicate value on a row the user has deleted c
 The mapper follows the same rule and skips a removed row's absent non-key values instead of requiring them.
 The errors themselves stay registered on the row, so a per-row display (`HasErrors` / `GetErrors`, that is `INotifyDataErrorInfo`) keeps showing them, and putting the row back brings them straight back into the validation.
 
-The cleanup after a confirmed save (`AcceptChanges()`) is automatic.
+The cleanup after a confirmed save (`mapper.AcceptSaved` or `AcceptChanges()`) is automatic.
 
 - Rows set aside by `Remove()` leave the tracking list and become Added again, subtree and all.
   Their stored rows are gone together with their cascade descendants, so adding the same instance back means inserting the whole graph as new rows.
@@ -281,6 +312,11 @@ A `MarkRemoved()` single child stays on the navigation property, still `Removed`
 Assign null to it once the save is confirmed.
 Left in place, the next save attempts the same delete again.
 A no-row delete is silently accepted by the QuickER repositories but throws in an EF Core graph save, a known asymmetry, so nulling it out is the safe move.
+
+**A new row removed before it was ever saved is simply dropped.**
+It has no stored row to delete, so the mapper leaves it out of the entity graph, and its key does not need to be filled in.
+Accepting the save takes it out of its collection.
+A single cascade child of this kind stays on its navigation, still `Removed`, as above.
 
 ## QuickER Repository
 
@@ -566,7 +602,7 @@ Left in the collection, it would be deleted again by the next save of the same g
 A child a save hook skipped was not deleted, so it stays in the collection.
 A single cascade child has no collection to leave, so it stays on its navigation, still `Removed`; assign null to it once the save is confirmed.
 The descendants of a deleted root are left as they are, since the whole subtree went with it.
-Every backend behaves the same way, as an edit model's `AcceptChanges()` does (see [Removing rows](#removing-rows-remove-versus-markremoved)).
+Every backend behaves the same way, and so does an edit model when the mapper's `AcceptSaved` accepts the save (see [Removing rows](#removing-rows-remove-versus-markremoved)).
 
 **A new row that takes a deleted row's value is written after the deletion.**
 A graph save walks each root in graph order: a deleted row deletes its subtree children first, and a new or updated row is written before its children.
@@ -660,7 +696,11 @@ Direct calls to the low-level APIs `InsertAsync` / `UpdateAsync` / `DeleteAsync`
 #### Before and skip semantics
 
 `false` skips only that entity's single operation; other rows proceed.
-A skipped row does not get an After call, and its `RowState` is left unchanged, which excludes it from `AcceptChanges`.
+A skipped row does not get an After call, and its `RowState` is left unchanged.
+The mapper's `AcceptSaved` therefore keeps the edit model of a skipped insert or update as it was, and the next save tries it again (see [Edit model save workflow](#edit-model-save-workflow)).
+A skipped deletion of a child in a collection also stays pending, because the child stays in its parent's collection.
+A skipped deletion of a root or of a single cascade child cannot be told apart from a deletion that ran: both leave the entity `Removed`.
+`AcceptSaved` treats it as deleted and leaves the edit model `Removed`.
 
 Because a skip is isolated, consistency is the hook author's responsibility.
 In particular, deletes run children-first, so **returning `false` for only the root of a subtree delete leaves the children deleted and the root behind**.

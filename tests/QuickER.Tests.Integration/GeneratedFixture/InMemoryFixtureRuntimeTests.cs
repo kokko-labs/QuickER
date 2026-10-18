@@ -837,4 +837,35 @@ public sealed class InMemoryFixtureRuntimeTests
 
         (await orders.GetSummariesAsync(999, Ct)).Should().BeEmpty();
     }
+
+    [Fact(
+        DisplayName = "EditModel: 足してすぐ削除の印を付けた単一の子は、キーが未入力でもエンティティに入らず、保存と AcceptSaved を素通りする"
+    )]
+    public async Task EditModel_SingleChildAddedThenMarkedRemoved_IsLeftOutOfTheSave()
+    {
+        var (_, customers, _, profiles) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        var mapper = new CustomerMapper();
+        var editModel = mapper.CreateEditModel((await customers.GetByIdAsync(1, Ct))!);
+
+        // 新しい単一の子を足し、主キーも入力しないまま削除の印を付ける
+        var profile = new CustomerProfileMapper().CreateEditModel();
+        editModel.CustomerProfile = profile;
+        profile.MarkRemoved();
+        editModel.BindingName = "Alice2";
+
+        var entity = mapper.CreateEntity(editModel, includeRemoved: true);
+        entity
+            .CustomerProfile.Should()
+            .BeNull("保存先に行の無い新しい行は、削除する行としても渡さない");
+
+        await customers.SaveAsync(entity, cancellationToken: Ct);
+        mapper.AcceptSaved(editModel, entity);
+
+        editModel.RowState.Should().Be(RowState.Unchanged);
+        editModel.CustomerProfile.Should().BeSameAs(profile, "単一の子は外れるコレクションが無い");
+        profile.RowState.Should().Be(RowState.Removed);
+        (await profiles.GetAllAsync(Ct)).Should().BeEmpty();
+        (await customers.GetByIdAsync(1, Ct))!.Name.Should().Be("Alice2");
+    }
 }
