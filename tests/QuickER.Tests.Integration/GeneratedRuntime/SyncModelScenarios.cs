@@ -1331,6 +1331,23 @@ internal static class SyncModelScenarios
                         ? null
                         : $"folder 238: {state.Folders[238].Name}"
             ),
+            // 区切り 40-4（型 5 #7）: エンジンがローカルへ行を適用するとき、ローカルの Before フックが 1 行を飛ばす。その表は
+            // その行で止まり、次の同期で降りる（後ろの行を書くと再開点が飛ばした行を越え、その行が二度と降りない）
+            new(
+                "apply-skip-stops-table",
+                [],
+                [
+                    Folder(SV, 620),
+                    Folder(SV, 621),
+                    Folder(SV, 622),
+                    new ArmFaultOp(D1, ModelFaultKind.ApplySkip),
+                    Sync(D1),
+                    new ExpectLocalOp(D1, ModelTables.Folders, "620", null),
+                    new ExpectLocalOp(D1, ModelTables.Folders, "621", null),
+                    new ExpectLocalOp(D1, ModelTables.Folders, "622", null),
+                    Sync(D1),
+                ]
+            ),
             // 新規（案 N10）: フックが飛ばした書き込み（Before が false＝例外にならない）の記録が残り、中身の変わらない書き込みが
             // 上がって版を進め、別の端末に偽の ModifiedOnServer を出す（#16 と同じ根。種 887・1834 の形）
             new(

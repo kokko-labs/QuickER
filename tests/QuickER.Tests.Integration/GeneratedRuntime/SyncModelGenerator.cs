@@ -147,7 +147,9 @@ internal sealed class SyncModelGenerator
         if (Faults && _random.NextDouble() < 0.12)
         {
             var device = _random.Next(2) == 0 ? ModelActor.Device1 : ModelActor.Device2;
-            var kinds = Enum.GetValues<ModelFaultKind>();
+            var kinds = Enum.GetValues<ModelFaultKind>()
+                .Where(kind => kind != ModelFaultKind.ApplySkip)
+                .ToArray();
 
             return [new ArmFaultOp(device, kinds[_random.Next(kinds.Length)])];
         }

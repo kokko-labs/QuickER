@@ -256,25 +256,29 @@ internal sealed class SyncModelDevice : IDisposable
                 device.Folders,
                 device.Sql,
                 server.FolderSource,
-                GeneratedSyncTables.ModelFolder
+                GeneratedSyncTables.ModelFolder,
+                hooks
             ),
             new VersionlessSyncTable<ModelLabelEntity, string>(
                 device.Labels,
                 device.Sql,
                 server.LabelSource,
-                GeneratedSyncTables.ModelLabel
+                GeneratedSyncTables.ModelLabel,
+                hooks
             ),
             new SyncTable<ModelItemEntity, int>(
                 device.Items,
                 device.Sql,
                 server.ItemSource,
-                GeneratedSyncTables.ModelItem
+                GeneratedSyncTables.ModelItem,
+                hooks
             ),
             new SyncTable<ModelEventEntity, DateTime>(
                 device.Events,
                 device.Sql,
                 server.EventSource,
-                GeneratedSyncTables.ModelEvent
+                GeneratedSyncTables.ModelEvent,
+                hooks
             ),
         ];
 

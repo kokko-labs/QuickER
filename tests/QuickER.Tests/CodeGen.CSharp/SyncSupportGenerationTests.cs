@@ -777,7 +777,7 @@ public class SyncSupportGenerationTests
         var orderDescriptor = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
         orderDescriptor.Should().Contain("IsVersionless = false,");
         content.Should().Contain("new VersionlessSyncTable<TEntity, TKey>(");
-        content.Should().Contain("new SyncTable<TEntity, TKey>(local, localSqlExecutor, server");
+        content.Should().Contain("return new SyncTable<TEntity, TKey>(");
         content.Should().Contain("new VersionlessDirectSyncSource<TEntity, TKey>(");
 
         // ② 走査の形（版あり＝版の昇順／版なし＝キー順ページング）は固定側が持ち、

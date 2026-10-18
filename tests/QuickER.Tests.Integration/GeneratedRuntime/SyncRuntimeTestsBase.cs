@@ -3397,6 +3397,38 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
             .NotBeNull("同期は自分で入れた行を消さない");
     }
 
+    /// <summary>注文の Before か After で、渡した処理を実行する Save フック。</summary>
+    private sealed class ActionHook(bool inBefore, Func<CancellationToken, Task> action)
+        : ISaveHook<SyncOrderEntity>
+    {
+        public async Task<bool> BeforeSaveAsync(
+            SyncOrderEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (inBefore)
+            {
+                await action(cancellationToken);
+            }
+
+            return true;
+        }
+
+        public async Task AfterSaveAsync(
+            SyncOrderEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (!inBefore)
+            {
+                await action(cancellationToken);
+            }
+        }
+    }
+
     /// <summary>
     /// 注文の After で、context を通して blob を書く Save フック（書く行は保存した行か、指定したキーの行。キーは
     /// フックが渡すとおりの型で渡す）。
@@ -4549,6 +4581,305 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
 
         (await ReadServerBlobAsync(2)).Should().Equal([4, 4]);
         (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// ローカルの Before / After フックがほかの DB（サーバー）のリポジトリで保存し、その保存のフックが blob を書いても、
+    /// ローカルのジャーナルの記録とは扱わない（サーバーの DB へ記録を書きに行かず、サーバーの保存は成功する）。
+    /// </summary>
+    [Theory(
+        DisplayName = "[Sync/blob] ローカルのフックから始めた別の DB の保存でフックが書いた blob は、ローカルの記録にしない"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BlobWrittenByHookOfSaveStartedInLocalHook_IsNotRecorded(bool fromBefore)
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerAsync(2, "dave", 21, "gadget");
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        var serverOrders = new SyncOrderRepository(
+            new LightJournalSyncConnectionFactory(_server.ReadWriteCreateConnectionString),
+            new SaveHookRegistry().Add(new BlobWritingHook(key: null, [3, 3]))
+        );
+        var hooked = CreateHookedOrders(
+            new ActionHook(
+                fromBefore,
+                async cancellationToken =>
+                {
+                    var server = (await serverOrders.GetByIdAsync(2, cancellationToken))!;
+                    server.CustomerName = "erin";
+                    server.MarkUpdated();
+                    await serverOrders.SaveAsync(server, cancellationToken: cancellationToken);
+                }
+            )
+        );
+        var local = (await hooked.GetByIdAsync(1, Ct))!;
+        local.CustomerName = "bob";
+        local.MarkUpdated();
+        await hooked.SaveAsync(local, cancellationToken: Ct);
+
+        (await ReadServerBlobAsync(2)).Should().Equal([3, 3]);
+        (await serverOrders.GetByIdAsync(2, Ct))!.CustomerName.Should().Be("erin");
+        (await Journal.ReadAllAsync(Ct))
+            .Should()
+            .ContainSingle("ローカルの更新の記録だけ")
+            .Which.KeyText.Should()
+            .Be("1");
+    }
+
+    // ---- ダウンロードの適用とローカルの Save フック ----
+
+    /// <summary>
+    /// ダウンロードの適用でローカルの Before フックが行を飛ばすと、その表はその行で止まり（後ろの行も適用しない）、
+    /// 打ち切りに「フックが飛ばした」印が付く。飛ばすのをやめれば、次の回でその行から降りる。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/フック] ダウンロードの適用でローカルの Before フックが行を飛ばすと、その表はその行で止まり、次の回で降りる"
+    )]
+    public async Task Download_RowSkippedByLocalHook_StopsTableAndComesDownLater()
+    {
+        foreach (var (id, name) in new[] { (1, "alice"), (2, "bob"), (3, "carol") })
+        {
+            await ServerOrders.InsertAsync(
+                new SyncOrderEntity { OrderId = id, CustomerName = name },
+                Ct
+            );
+        }
+
+        var skip = new SkipRowHook<SyncOrderEntity>(order => order.OrderId == 2);
+        var engine = CreateEngineWithLocalHooks(new SaveHookRegistry().Add(skip));
+
+        var first = await engine.SyncAsync(cancellationToken: Ct);
+
+        var stop = first
+            .Truncations.Should()
+            .ContainSingle(truncation => truncation.TableName == "sync_orders")
+            .Subject;
+        stop.PendingKeyText.Should().Be("2", "フックが飛ばした行");
+        stop.SkippedBySaveHook.Should().BeTrue();
+        stop.MissingParentTableName.Should().BeNull();
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct)).Should().NotBeNull();
+        (await LocalOrdersRaw.GetByIdAsync(2, Ct))
+            .Should()
+            .BeNull("フックが飛ばした行は書かれない");
+        (await LocalOrdersRaw.GetByIdAsync(3, Ct))
+            .Should()
+            .BeNull("飛ばした行より後ろを適用すると、再開点が飛ばした行を越える");
+
+        skip.Skipping = false;
+        var second = await engine.SyncAsync(cancellationToken: Ct);
+
+        second.Truncations.Should().BeEmpty();
+        (await LocalOrdersRaw.GetByIdAsync(2, Ct))!.CustomerName.Should().Be("bob");
+        (await LocalOrdersRaw.GetByIdAsync(3, Ct))!.CustomerName.Should().Be("carol");
+    }
+
+    /// <summary>
+    /// 子の行の親をサーバーから読み直すとき、ローカルの Before フックがその親を飛ばすと、子の表はその子で止まり、
+    /// 親の表を名指しする（親の無い子を書かない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/フック] 読み直した親をローカルの Before フックが飛ばすと、子の表は親の表を名指しして止まる"
+    )]
+    public async Task ParentReadBackSkippedByLocalHook_StopsChildTable()
+    {
+        await SeedServerAsync(2, "bob", 12, "gadget");
+
+        var skip = new SkipRowHook<SyncOrderEntity>(order => order.OrderId == 2);
+        var engine = CreateEngineWithLocalHooks(new SaveHookRegistry().Add(skip));
+
+        var result = await engine.SyncAsync(cancellationToken: Ct);
+
+        result
+            .Truncations.Should()
+            .ContainSingle(truncation => truncation.TableName == "sync_orders")
+            .Which.SkippedBySaveHook.Should()
+            .BeTrue();
+        var lines = result
+            .Truncations.Should()
+            .ContainSingle(truncation => truncation.TableName == "sync_order_lines")
+            .Subject;
+        lines.PendingKeyText.Should().Be("12");
+        lines.MissingParentTableName.Should().Be("sync_orders");
+        (await LocalLinesRaw.GetByIdAsync(12, Ct)).Should().BeNull();
+
+        skip.Skipping = false;
+        (await engine.SyncAsync(cancellationToken: Ct)).Truncations.Should().BeEmpty();
+        (await LocalLinesRaw.GetByIdAsync(12, Ct)).Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// ServerWins で捨てる記録の行をサーバーから読み直すとき、ローカルの Before フックがその行を飛ばすと、記録を残す
+    /// （ローカルの編集を黙って残したまま記録だけを捨てない）。飛ばすのをやめれば、次の回で決着する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/フック] ServerWins の読み直しをローカルの Before フックが飛ばすと、記録を残し、次の回で決着する"
+    )]
+    public async Task ServerWinsReadBackSkippedByLocalHook_KeepsEntry()
+    {
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
+            Ct
+        );
+        var skip = new SkipRowHook<SyncOrderEntity>(order => order.OrderId == 1)
+        {
+            Skipping = false,
+        };
+        var engine = CreateEngineWithLocalHooks(new SaveHookRegistry().Add(skip));
+        await engine.SyncAsync(cancellationToken: Ct);
+
+        var local = (await LocalOrders.GetByIdAsync(1, Ct))!;
+        local.CustomerName = "local";
+        await LocalOrders.UpdateAsync(local, cancellationToken: Ct);
+        var server = (await ServerOrders.GetByIdAsync(1, Ct))!;
+        server.CustomerName = "server";
+        await ServerOrders.UpdateAsync(server, cancellationToken: Ct);
+
+        var serverWins = new SyncOptions { ConflictPolicy = SyncConflictPolicy.ServerWins };
+        skip.Skipping = true;
+        await engine.SyncAsync(serverWins, Ct);
+
+        (await Journal.CountPendingAsync(Ct))
+            .Should()
+            .Be(1, "読み直しが書かれなかった行の記録は残す");
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("local");
+
+        skip.Skipping = false;
+        await engine.SyncAsync(serverWins, Ct);
+
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("server");
+    }
+
+    /// <summary>版なしの表でも、ローカルの Before フックが行を飛ばすと、その表はその行で止まる。</summary>
+    [Fact(
+        DisplayName = "[Sync/フック] 版なしの表でローカルの Before フックが行を飛ばすと、その表はその行で止まり、次の回で降りる"
+    )]
+    public async Task VersionlessDownload_RowSkippedByLocalHook_StopsTable()
+    {
+        await ServerOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
+            Ct
+        );
+        await SeedServerNoteAsync(1, 1, "first");
+        await SeedServerNoteAsync(2, 1, "second");
+        await SeedServerNoteAsync(3, 1, "third");
+
+        var skip = new SkipRowHook<SyncNoteEntity>(note => note.NoteId == 2);
+        var engine = CreateEngineWithLocalHooks(new SaveHookRegistry().Add(skip));
+
+        // 1 行ずつのバッチ＝止めた後の行は後のバッチにある（走査そのものが止まることを見る）
+        var options = new SyncOptions { Mode = SyncMode.LastWriteWins, DownloadBatchSize = 1 };
+
+        var first = await engine.SyncAsync(options, Ct);
+
+        var stop = first
+            .Truncations.Should()
+            .ContainSingle(truncation => truncation.TableName == "sync_notes")
+            .Subject;
+        stop.PendingKeyText.Should().Be("2");
+        stop.SkippedBySaveHook.Should().BeTrue();
+        (await LocalNotesRaw.GetByIdAsync(1, Ct)).Should().NotBeNull();
+        (await LocalNotesRaw.GetByIdAsync(2, Ct)).Should().BeNull();
+        (await LocalNotesRaw.GetByIdAsync(3, Ct)).Should().BeNull("止まった行より後ろは適用しない");
+
+        skip.Skipping = false;
+        (await engine.SyncAsync(options, Ct)).Truncations.Should().BeEmpty();
+        (await LocalNotesRaw.GetByIdAsync(3, Ct))!.Body.Should().Be("third");
+    }
+
+    /// <summary>
+    /// フックの登録簿を渡さずに組んだ表で、ローカルの Before フックが適用の行を飛ばすと、黙って先へ進まず例外にする
+    /// （1 回の保存で書いた後ろの行が再開点を飛ばした行の先へ進めるため）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/フック] 登録簿を渡さずに組んだ表でローカルの Before フックが行を飛ばすと、例外にする"
+    )]
+    public async Task Download_RowSkippedByHookOfTableBuiltWithoutRegistry_Throws()
+    {
+        foreach (var (id, name) in new[] { (1, "alice"), (2, "bob"), (3, "carol") })
+        {
+            await ServerOrders.InsertAsync(
+                new SyncOrderEntity { OrderId = id, CustomerName = name },
+                Ct
+            );
+        }
+
+        var skip = new SkipRowHook<SyncOrderEntity>(order => order.OrderId == 2);
+        var engine = CreateEngineWithLocalHooks(
+            new SaveHookRegistry().Add(skip),
+            passToTables: false
+        );
+
+        var sync = () => engine.SyncAsync(cancellationToken: Ct);
+
+        (await sync.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should()
+            .Contain("sync_orders")
+            .And.Contain("save hook");
+    }
+
+    /// <summary>
+    /// ローカルの 3 つの表のリポジトリへ同じ Save フックの登録簿を渡して、ジャーナルを共有するエンジンを組む
+    /// （<paramref name="passToTables"/> が false なら、表へは登録簿を渡さない）。
+    /// </summary>
+    private SyncEngine CreateEngineWithLocalHooks(SaveHookRegistry hooks, bool passToTables = true)
+    {
+        var factory = new LightJournalSyncConnectionFactory(LocalConnectionString);
+        var registry = passToTables ? hooks : null;
+        var orders = new JournalingSyncOrderRepository(
+            new SyncOrderRepository(factory, hooks),
+            Journal
+        );
+        var lines = new JournalingSyncOrderLineRepository(
+            new SyncOrderLineRepository(factory, hooks),
+            Journal
+        );
+        var notes = new JournalingSyncNoteRepository(
+            new SyncNoteRepository(factory, hooks),
+            Journal
+        );
+
+        return new SyncEngine(
+            [
+                new SyncTable<SyncOrderEntity, int>(
+                    orders,
+                    LocalSql,
+                    _sources.Orders,
+                    GeneratedSyncTables.SyncOrder,
+                    registry
+                ),
+                new SyncTable<SyncOrderLineEntity, int>(
+                    lines,
+                    LocalSql,
+                    _sources.Lines,
+                    GeneratedSyncTables.SyncOrderLine,
+                    registry
+                ),
+                new VersionlessSyncTable<SyncNoteEntity, int>(
+                    notes,
+                    LocalSql,
+                    _sources.Notes,
+                    GeneratedSyncTables.SyncNote,
+                    registry
+                ),
+            ],
+            Journal
+        );
+    }
+
+    /// <summary>条件に合う行の保存を Before で飛ばす Save フック（<see cref="Skipping"/> が false の間は飛ばさない）。</summary>
+    private sealed class SkipRowHook<TEntity>(Func<TEntity, bool> match) : ISaveHook<TEntity>
+        where TEntity : EntityBaseCore
+    {
+        public bool Skipping { get; set; } = true;
+
+        public Task<bool> BeforeSaveAsync(
+            TEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(!(Skipping && match(entity)));
     }
 
     /// <summary>After フックが blob を書いた後に保存が失敗すると、blob も記録も残らない。</summary>

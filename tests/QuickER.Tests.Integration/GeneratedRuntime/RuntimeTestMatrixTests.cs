@@ -689,6 +689,7 @@ public class RuntimeTestMatrixTests
         new("SyncEndpointRegistrationRuntimeTests", "SyncSupport", Backend.Remote),
         // 構築時除外（excludeFromSync）＝ローカル専用宣言の 2 点セットと登録時 fail-fast
         new("SyncConstructionExclusionTests", "SyncSupport", Backend.AdoSqlite),
+        new("SyncLocalSaveHookRegistrationTests", "SyncSupport", Backend.AdoSqlite),
         new("SyncSqliteRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
         new("SyncRefreshBenchmarkRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
         new("SyncSqlServerRuntimeTests", "SyncRefresh", Backend.AdoSqlServer),

@@ -239,42 +239,66 @@ public sealed class SaveHookSession(
     public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
-    public Task<bool> InvokeBeforeAsync(
+    /// <remarks>The hooks run with the write registration taken away (see <see cref="SaveHookContextWrites"/>), so a save they start is not reported to it.</remarks>
+    public async Task<bool> InvokeBeforeAsync(
         EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
     {
         var invoker = _registry.GetInvoker(entity.GetType());
-        return invoker is null
-            ? Task.FromResult(true)
-            : invoker.InvokeBeforeAsync(entity, operation, cancellationToken);
+
+        if (invoker is null)
+        {
+            return true;
+        }
+
+        using (SaveHookContextWrites.Detach(out _))
+        {
+            return await invoker
+                .InvokeBeforeAsync(entity, operation, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
-    public Task InvokeAfterAsync(
+    /// <remarks>
+    /// The hooks run with the write registration taken away (see <see cref="SaveHookContextWrites"/>): the columns they
+    /// write through the context are reported to it by the context, and a save they start is not.
+    /// </remarks>
+    public async Task InvokeAfterAsync(
         EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
     {
         var invoker = _registry.GetInvoker(entity.GetType());
-        return invoker is null
-            ? Task.CompletedTask
-            : invoker.InvokeAfterAsync(
-                entity,
-                operation,
-                new WriteNotingContext(_contextFactory(entity), this, entity.GetType()),
-                cancellationToken
-            );
+
+        if (invoker is null)
+        {
+            return;
+        }
+
+        using (SaveHookContextWrites.Detach(out var observer))
+        {
+            await invoker
+                .InvokeAfterAsync(
+                    entity,
+                    operation,
+                    new WriteNotingContext(_contextFactory(entity), this, entity.GetType(), observer),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Hands every call on to the backend's context, noting on the session that a hook wrote an unbounded binary column through it.</summary>
-    /// <remarks>A write that stored a value in a row is also reported to <see cref="SaveHookContextWrites"/>, before the hook goes on.</remarks>
+    /// <remarks>A write that stored a value in a row is also reported to the observer the session took from <see cref="SaveHookContextWrites"/>, before the hook goes on.</remarks>
     private sealed class WriteNotingContext(
         ISaveHookContext inner,
         SaveHookSession session,
-        Type entityType
+        Type entityType,
+        Func<SaveHookBinaryColumnWrite, CancellationToken, Task>? observer
     ) : ISaveHookContext
     {
         public Task<int> ExecuteSqlAsync(
@@ -296,10 +320,9 @@ public sealed class SaveHookSession(
                 .WriteBinaryColumnAsync(propertyName, key, source, length, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (written)
+            if (written && observer is not null)
             {
-                await SaveHookContextWrites
-                    .NotifyBinaryColumnWrittenAsync(
+                await observer(
                         new SaveHookBinaryColumnWrite(entityType, propertyName, key, inner),
                         cancellationToken
                     )

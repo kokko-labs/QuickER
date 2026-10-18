@@ -2289,6 +2289,17 @@ A row the local database is meant to keep to itself belongs in a table excluded 
 **Save hooks are unaffected.**
 The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exactly as it did before, including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else.
 A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract.
+
+**A row a local save hook skips stops its table's download.**
+A `BeforeSaveAsync` that returns `false` for a row the engine applies leaves the row unwritten, and the table's download stops at that row, as for an unsent entry (see below); the stop has `SkippedBySaveHook` set.
+The row comes down, with the rows behind it, in the first run after the hook lets it through.
+A hook that keeps skipping the same row keeps the table's download stopped, so a Before hook cannot be used to keep rows out of the local database.
+To leave the rows the engine applies alone, return `true` without doing anything while `SyncSession.IsSuppressed` is true.
+A row `ServerWins` puts back, a parent brought in, and a row brought up to date for a unique value are left as they are when a hook skips them, and the entry of a row `ServerWins` was putting back stays in the journal.
+A refresh that brings a parent in fails when a hook skips that parent.
+To tell the skipped row from the rows after it, the engine applies the downloaded rows of a table one at a time, each in its own local transaction, when the local repository runs a save hook for the table's entity, so such a table downloads several times slower than a table without one.
+The generated registration (`AddGeneratedSyncEngine`) gives the tables the hooks the local repositories run; a table built by hand takes them as its `localSaveHooks` argument.
+A hook that skips a row of a table built without them makes the run throw, because the rows after the skipped one have been written by then and the resume point has moved past it.
 The entries of a graph save are written before its hooks run, so they are checked against what the save did once it has succeeded, under the same lock.
 A row a `BeforeSaveAsync` returned `false` for was not written, and its entry is taken back; the save leaves such a row in its old state rather than marking it unchanged, which is how it is told apart.
 Without that, its entry would upload the row's current content, over another writer's newer row or as a write that changes nothing yet moves the server's version on.
@@ -2374,7 +2385,7 @@ A run left at the default uploads the row without the blob and settles the entry
 **A blob a save hook writes is tracked too.**
 An After hook of a graph save can write an unbounded binary column through its context, of a row the save wrote or of another row.
 The decorator records that write as well, inside the save's transaction, so the entry commits with the save or rolls back with it.
-A write that matched no row records nothing.
+A write that matched no row records nothing, and neither does a save a hook starts on another database, such as the server.
 The key the hook passes is read as the table's key type, converting a value of another type such as a `long` for an `int` key; a key that cannot be read fails the save.
 A hook that runs while the engine applies a download writes without a record, like every write the engine makes, so a blob such a hook writes is not uploaded.
 
@@ -2434,6 +2445,8 @@ foreach (var stop in result.Truncations)
     // stop.PendingKeyText    - the row it stopped at
     // and, when the row stopped for a parent it could not have:
     //   stop.MissingParentTableName  - the parent's table
+    // and, when a local save hook skipped the row:
+    //   stop.SkippedBySaveHook       - true
 }
 ```
 
