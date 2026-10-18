@@ -477,8 +477,15 @@ internal sealed partial class CSharpGenerationModelBuilder
                 $"nameof({entityClassName}.{_nameConverter.ToPropertyName(column.Name)})"
             )
             .ToList();
+        // 写さずに置くと Entity の初期値で照合される列＝値型（CLR 既定値）と、NOT NULL の文字列・バイナリ
+        // （初期化子の空文字列・空配列）。値オブジェクトの初期化子は null なので、写さなければ照合されない
         var valueTypeNames = editModelColumns
-            .Where(pair => !pair.Property.IsNullable && !pair.Property.IsReferenceType)
+            .Where(pair =>
+                !pair.Property.IsNullable
+                && (
+                    !pair.Property.IsReferenceType || pair.Property.TypeName is "string" or "byte[]"
+                )
+            )
             .Select(pair => pair.Property.PropertyName)
             .ToList();
 
@@ -491,7 +498,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             "    /// The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors (only the ones this check registered:",
             "    /// what the check among the siblings reported stays). Rows that share the primary key are excluded,",
             "    /// so the same call is correct for both insert and update (a model whose key is not set yet excludes nothing). The result is advisory only: the definitive guarantee is the database's own UNIQUE constraint (TOCTOU).",
-            "    /// Every confirmed value is copied onto the entity, so a custom check sees the whole row. A constraint that includes a value-type property with no input,",
+            "    /// Every confirmed value is copied onto the entity, so a custom check sees the whole row. A constraint that includes a property with no input that the entity cannot leave empty (a value type, or a text or binary column that is not nullable),",
             "    /// or a property the edit model does not have, is not checked (the entity would carry a value nobody entered); the other constraints are.",
             "    /// When a confirmed value is edited, the model is reloaded, or another check starts while the call is awaiting, what the query found is about values the model no longer holds:",
             "    /// nothing is registered and the call returns false, meaning that the current values were not confirmed unique. Run the check again after the last edit, before saving.",
@@ -511,8 +518,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 : $"        var uncheckedProperties = new List<string> {{ {string.Join(", ", excludedNames)} }};",
         };
 
-        // 値型（NULL 許容でも参照型でもない）の列は「未入力」を Entity へ写せない（プロパティが非 null 型のため、
-        // 写さずに置くと CLR 既定値 0 のまま照合される）。未入力ならその列を含む違反を捨てる
+        // これらの列は「未入力」を Entity へ写せない（プロパティが非 null 型のため、写さずに置くと既定値 0 や
+        // 空文字列のまま照合される）。未入力ならその列を含む違反を捨てる
         foreach (var propertyName in valueTypeNames)
         {
             lines.AddRange([

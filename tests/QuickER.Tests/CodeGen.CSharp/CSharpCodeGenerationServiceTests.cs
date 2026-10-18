@@ -791,7 +791,13 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "protected override void LoadColumns(ProductEntity entity, ProductEditModel editModel)"
             );
-        result.Files[0].Content.Should().Contain("editModel.Name = entity.Name;");
+        // 新しい行の空文字列は未入力として読む（保存済みの行の空文字列は値のまま）
+        result
+            .Files[0]
+            .Content.Should()
+            .Contain(
+                "editModel.Name = entity.IsAdded && entity.Name is \"\" ? null : entity.Name;"
+            );
         result.Files[0].Content.Should().Contain("editModel.RevertInput();");
         result.Files[0].Content.Should().NotContain("editModel.BindingName = entity.");
         result.Files[0].Content.Should().NotContain("LoadFrom");
@@ -2112,9 +2118,14 @@ public class CSharpCodeGenerationServiceTests
             );
         content.Should().Contain("static model => model.FileId?.ToString() ?? string.Empty,");
         // Mapper のロードは確定値の直接代入（byte[] も Base64 を経由しない＝無損失）。
-        // ただしバイナリ列だけは防御的コピーを挟む（配列を共有すると EditModel の編集が Entity へ波及する）
+        // ただしバイナリ列だけは防御的コピーを挟む（配列を共有すると EditModel の編集が Entity へ波及する）。
+        // 新しい行の空配列は未入力として読む
         content.Should().Contain("editModel.IsActive = entity.IsActive;");
-        content.Should().Contain("editModel.Filedata = (byte[]?)entity.Filedata?.Clone();");
+        content
+            .Should()
+            .Contain(
+                "editModel.Filedata = entity.IsAdded && entity.Filedata is [] ? null : (byte[]?)entity.Filedata?.Clone();"
+            );
         content.Should().NotContain("editModel.BindingIsActive = entity.");
         content.Should().NotContain("Convert.ToBase64String(entity.Filedata)");
         content.Should().NotContain("private string? _errorFiledata;");

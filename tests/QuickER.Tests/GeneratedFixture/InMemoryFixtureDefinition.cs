@@ -23,6 +23,8 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 ///   <item>名前付きクエリ（ミニ DSL の一覧＋ページング・単一・件数・射影）＝DSL 共有本体が
 ///     インメモリ実装にも出力されることの実行検証用</item>
 ///   <item>空欄入力の意味論（VO 無効の parse / binary 列）検証用の独立テーブル <c>blank_probes</c></item>
+///   <item>新しい行の文字列の空欄（文字列の主キー・一意な NOT NULL の文字列・NULL 許容の文字列）検証用の独立テーブル
+///     <c>blank_codes</c></item>
 /// </list>
 /// namespace は既存フィクスチャと衝突させない専用 namespace を使う。
 /// </para>
@@ -88,6 +90,14 @@ public static class InMemoryFixtureDefinition
         "abababab-0000-0000-0000-000000000007"
     );
     private static readonly Guid BlankProbeStampColId = new("abababab-0000-0000-0000-000000000008");
+
+    private static readonly Guid BlankCodeId = new("acacacac-0000-0000-0000-000000000001");
+    private static readonly Guid BlankCodePkColId = new("acacacac-0000-0000-0000-000000000002");
+    private static readonly Guid BlankCodeLabelColId = new("acacacac-0000-0000-0000-000000000003");
+    private static readonly Guid BlankCodeNoteColId = new("acacacac-0000-0000-0000-000000000004");
+    private static readonly Guid BlankCodeLabelUniqueId = new(
+        "acacacac-0000-0000-0000-000000000005"
+    );
 
     // 名前付きクエリの ID も決定的でなければならないため固定 GUID を用いる
     private static readonly Guid QueryGetByCustomer = new("99999999-0000-0000-0000-000000000001");
@@ -279,9 +289,51 @@ public static class InMemoryFixtureDefinition
             },
         };
 
+        // 新しい行の文字列の空欄の検証用の独立テーブル（EditModelBlankInputTests が使用）。
+        // 文字列の主キー・一意制約つきの NOT NULL の文字列・NULL 許容の文字列を 1 つずつ持つ
+        var blankCode = new Entity
+        {
+            Id = BlankCodeId,
+            TableName = "blank_codes",
+            Columns =
+            {
+                new Column
+                {
+                    Id = BlankCodePkColId,
+                    Name = "code",
+                    DataType = "nvarchar(20)",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = BlankCodeLabelColId,
+                    Name = "label",
+                    DataType = "nvarchar(20)",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = BlankCodeNoteColId,
+                    Name = "note",
+                    DataType = "nvarchar(20)",
+                    IsNullable = true,
+                },
+            },
+            UniqueConstraints =
+            {
+                new UniqueConstraint
+                {
+                    Id = BlankCodeLabelUniqueId,
+                    Name = "UQ_blank_codes_label",
+                    ColumnIds = { BlankCodeLabelColId },
+                },
+            },
+        };
+
         var diagram = new ErDiagram
         {
-            Entities = { customer, order, profile, blankProbe },
+            Entities = { customer, order, profile, blankProbe, blankCode },
             Relationships =
             {
                 // 1対多: customers -> orders（ON DELETE CASCADE）

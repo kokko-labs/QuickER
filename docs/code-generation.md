@@ -609,6 +609,7 @@ A graph save walks each root in graph order: a deleted row deletes its subtree c
 A new row that takes the primary key or a unique value of a row the same save deletes waits, with the rows below it, until every root has been walked.
 It can therefore take that value wherever the two sit in the collection or in the list of roots.
 Text is compared without regard to case, and a value with a null part takes nothing.
+SQL Server is the exception: its unique constraint allows a single NULL, so a new row that takes the NULL of a row the same save deletes is not held back and can be refused there.
 For a key, removing a row and adding a new row with the same key in one save replaces the row, whichever comes first.
 Where no row with that key exists, the deletion does nothing and the new row stays; an EF Core graph save reports that deletion as a conflict instead, the no-row delete asymmetry described in [Removing rows](#removing-rows-remove-versus-markremoved).
 An EF Core graph save counts the replacement as one row, where the other backends count the deletion and the insert.
@@ -857,6 +858,12 @@ Every error is owned by the check that registered it, and a check only ever adds
   It is the only thing that can produce them again, so nothing else clears them.
   A blank input is never a conversion error: it sets the confirmed value to null and withdraws the setter's own error, and whether null is acceptable is the required check's call.
   This rule holds regardless of value objects and of the column's type (numeric, date/time, bool, binary, string), so a nullable column can be set back to NULL from the screen.
+  A new row reads its empty values the same way.
+  When the mapper loads an entity that is `Added`, an empty string or an empty byte array of a column that is not a value object becomes null.
+  A new row nobody typed into therefore fails the required check instead of saving the entity's initial empty value, and new rows left blank are not reported as duplicates of each other.
+  An empty string an `OnEntityCreated` hook sets is read the same way, nullable columns included, and is saved as NULL.
+  A stored row's empty values are loaded as they are.
+  An excluded unbounded binary column keeps its empty array, which lets a new row be inserted empty and written with a stream afterwards.
 - **The required-field check** (generated `ValidateSelf`) adds a missing-input error only when the property carries no other input error, so a field that holds unconvertible text never has its message silently relabelled to "is required" instead.
   It clears its own error as soon as the value is present, even when the value was assigned straight to the committed property rather than typed.
 - **The two uniqueness checks** each have their own slot on a property, addressed by `DuplicateErrorSource` (`Siblings` for the check among the elements of a collection, `Database` for the check against the stored rows).
@@ -885,7 +892,8 @@ if (!await editModel.ValidateUniqueAsync(repository))
 
 It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties.
 Every confirmed value goes onto the entity, so a user-defined check sees the whole row, not only the constraint's columns.
-A value-type property with no input cannot reach the entity (its property is not nullable and would hold the CLR default), and neither can a column the edit model leaves out (array and `inet` columns).
+A property with no input that the entity cannot leave empty cannot reach the entity: a value type would hold the CLR default, and a text or binary column that is not nullable would hold its empty initial value.
+Neither can a column the edit model leaves out (array and `inet` columns).
 A violation that names such a property is dropped, so a constraint over it is not checked, while every other constraint still is.
 A violation with no property names, or with names that do not belong to the edit model, becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns.
 The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors; it clears its own findings only, so what the check among the siblings reported stays.

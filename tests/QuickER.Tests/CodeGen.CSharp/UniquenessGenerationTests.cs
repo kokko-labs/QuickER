@@ -333,7 +333,9 @@ public class UniquenessGenerationTests
     /// 照合する。旧実装はメソッド全体を true で打ち切り、無関係な制約の照合と DB 照合の所見まで消していた）。
     /// 参照型の列（string）は null の組が照合対象外になるため判定は出ない
     /// </summary>
-    [Fact(DisplayName = "値型の列が未入力なら照合できない列として渡し、メソッド全体は打ち切らない")]
+    [Fact(
+        DisplayName = "値型と NOT NULL の文字列の列が未入力なら照合できない列として渡し、メソッド全体は打ち切らない"
+    )]
     public void Generate_ValueTypeConstraintMember_EmitsUnsetGuard()
     {
         var qty = new Column
@@ -361,7 +363,16 @@ public class UniquenessGenerationTests
             );
         content
             .Should()
-            .NotContain("if (Code is null)", "参照型の構成列は null の組が照合対象外＝ガード不要");
+            .Contain(
+                "uncheckedProperties.Add(nameof(OrderEntity.Code));",
+                "NOT NULL の文字列は写さないと初期値の空文字列で照合される"
+            );
+        content
+            .Should()
+            .NotContain(
+                "uncheckedProperties.Add(nameof(OrderEntity.Memo));",
+                "NULL 許容の列は写さなければ null のまま＝null を含む組は照合対象外"
+            );
     }
 
     /// <summary>名前付きクエリが CheckUniqueness という名前を取ると予約名として拒否される</summary>
