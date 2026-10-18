@@ -428,6 +428,7 @@ public static class GeneratedFixedTypeNames
             "InvalidOperationException",
             "JsonConverter",
             "JsonConverterFactory",
+            "JsonElement",
             "JsonException",
             "JsonIgnore",
             "JsonIgnoreAttribute",

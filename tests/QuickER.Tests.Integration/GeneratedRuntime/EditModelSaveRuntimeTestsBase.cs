@@ -43,9 +43,6 @@ public abstract class EditModelSaveRuntimeTestsBase
     /// <summary>gadget をメモつきで取得する</summary>
     protected abstract Task<GadgetEntity?> GetWithNotesAsync(int id);
 
-    /// <summary>Before フックがエンティティに書いた値が、保存の後に呼び出し側のエンティティへ届くか（リモートは届かない＝区切り 40 の担当）</summary>
-    protected virtual bool BeforeHookWritesReachEntity => true;
-
     /// <summary>種を入れる（派生の <see cref="ResetAsync"/> が保存先を空にした後に呼ぶ）</summary>
     protected async Task SeedAsync()
     {
@@ -234,11 +231,7 @@ public abstract class EditModelSaveRuntimeTestsBase
         editModel
             .BindingName.Should()
             .Be(entity.Name.Value, "入力の文字列も読み戻した値から作り直す");
-
-        if (BeforeHookWritesReachEntity)
-        {
-            editModel.Name.Value.Should().Be("hooked*");
-        }
+        editModel.Name.Value.Should().Be("hooked*");
     }
 
     [Fact(

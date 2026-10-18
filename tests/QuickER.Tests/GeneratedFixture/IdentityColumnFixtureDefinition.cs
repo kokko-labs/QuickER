@@ -23,7 +23,9 @@ namespace QuickER.Tests.GeneratedIdentityColumnFixture;
 ///   <c>seq</c>（int・NOT NULL・<b>非主キーの自動採番列</b>）／<c>name</c>（nvarchar(50)・NOT NULL）</item>
 /// </list>
 /// <para>
-/// EditModel / Mapper / VO / インメモリ / リモートは交差の焦点でないため生成しない。
+/// リモートサービスは、EF Core のサーバーが書き戻した採番値がリモートのクライアントへ戻ることの検証用に生成する
+/// （本体＋ <c>IdentityColumnFixture.RemoteServer.g.cs</c> の 2 ファイル構成）。
+/// EditModel / Mapper / VO / インメモリは交差の焦点でないため生成しない。
 /// 実スキーマはテスト側の DDL が作る（SQL Server は <c>IDENTITY(1,1)</c>、PostgreSQL は <c>GENERATED ALWAYS AS IDENTITY</c>）。
 /// </para>
 /// </remarks>
@@ -34,6 +36,9 @@ public static class IdentityColumnFixtureDefinition
 
     /// <summary>コミット済みフィクスチャファイル名</summary>
     public const string OutputFileName = "IdentityColumnFixture.g.cs";
+
+    /// <summary>リモートサービスのサーバー側の出力ファイル名</summary>
+    public const string ServerOutputFileName = "IdentityColumnFixture.RemoteServer.g.cs";
 
     /// <summary>
     /// フィクスチャ生成に用いる決定的なオプション。
@@ -50,6 +55,7 @@ public static class IdentityColumnFixtureDefinition
             GenerateValueObjects = false,
             GenerateEfCoreRepositories = true,
             RepositoryDialects = ["sqlserver"],
+            GenerateRemoteServices = true,
             SplitFilesByCategory = false,
         };
 

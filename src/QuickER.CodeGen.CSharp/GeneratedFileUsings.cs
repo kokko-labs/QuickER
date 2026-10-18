@@ -516,6 +516,12 @@ internal static class GeneratedFileUsings
                 yield return "Microsoft.Extensions.DependencyInjection";
                 yield return "Microsoft.Extensions.Logging";
 
+                // 固定 infra（RemoteServerEngine）を持つファイル: 保存した行の列の値の収集（JsonElement＝System.Text.Json）
+                if (spec.EmitSharedInfra && !options.ExcludeUnboundedBinaryColumns)
+                {
+                    yield return "System.Text.Json";
+                }
+
                 // 無制限バイナリ列のバイナリエンドポイント: 応答遅延ストリーム（Stream＝System.IO）・
                 // キー復元（JsonSerializer＝System.Text.Json）・CancellationToken（System.Threading）・
                 // サイズ制限解除メタデータ（IRequestSizeLimitMetadata＝Microsoft.AspNetCore.Http.Metadata）・

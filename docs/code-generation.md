@@ -733,7 +733,7 @@ If `insertWhenUpdateMissing: true` and no update target is found so it switches 
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
 | EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt. Running `SaveChanges` again after a statement that matched no row does not run them again | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
 | In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction). Every Before runs first, then the writes, then every After in the order the operations ran; they are not interleaved row by row as in the QuickER Repository | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
-| Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
+| Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection. The values a Before hook set on the rows the server saved travel back too |
 
 ### Raw SQL escape hatch
 
@@ -2758,6 +2758,16 @@ After a successful graph save (Save), the local RowState is also committed, the 
 **Optimistic concurrency travels over the wire.**
 The `ConcurrencyMode` argument is part of the Update / Save request, and the Insert / Update / Save responses carry the row versions the save assigned, keyed by entity type and primary key, which the client writes back onto the local graph.
 A remote client therefore ends up holding the same versions a direct connection would, and can keep saving the same entities without re-reading them.
+
+**What the server set travels back too.**
+The Insert / Update / Save responses also carry the column values the server's entities hold after the save, which the client writes onto its own entities.
+That covers a value a server-side save hook set, such as an audit column or a key it assigned, and a value the server's repository wrote back after the save, such as one the database generated that an EF Core repository reads back.
+A Save response matches the values to the rows by their position in the graph as it was sent, walking the rows that are not deleted in cascade order, rather than by key, so a key a hook assigned still reaches the right row.
+The server lists the rows before the save, so what the save does to the collections (taking deleted children out, or EF Core moving a child into its parent's collection) does not shift the positions.
+Where the version list and the values disagree, the values win.
+A row a hook skipped gets nothing back, and an excluded unbounded binary column is never carried, so the client's update guard keeps applying.
+A response without the values, from a server generated before they were carried, is settled the way it was before: by the version list and the skipped rows alone.
+Because a Save response carries every column of every saved row, a large SaveMany gets a response roughly as large as its request.
 
 ### How errors are classified
 

@@ -864,9 +864,12 @@ public static class RemoteServerEngine
                         var entity = Required(request.Entity, "Entity");
                         await Repository<TRepository>(context)
                             .InsertAsync(entity, context.RequestAborted).ConfigureAwait(false);
-                        // The insert leaves the newly assigned version on the entity, which the client writes back
+                        // The insert leaves the newly assigned version, and any value the backend wrote back, on the entity, which the client writes back
                         return (object?)
-                            new RemoteInsertResult(RemoteEntityGraph.ReadRowVersion(entity));
+                            new RemoteInsertResult(
+                                RemoteEntityGraph.ReadRowVersion(entity),
+                                RemoteEntityGraph.ReadColumnValues(entity)
+                            );
                     }
                 )
         );
@@ -885,11 +888,12 @@ public static class RemoteServerEngine
                                 ValidatedMode(request.Mode),
                                 context.RequestAborted
                             ).ConfigureAwait(false);
-                        // A successful update leaves the newly assigned version on the entity, which the client writes back
+                        // A successful update leaves the newly assigned version, and any value the backend wrote back, on the entity, which the client writes back
                         return (object?)
                             new RemoteUpdateResult(
                                 updated,
-                                updated ? RemoteEntityGraph.ReadRowVersion(entity) : null
+                                updated ? RemoteEntityGraph.ReadRowVersion(entity) : null,
+                                updated ? RemoteEntityGraph.ReadColumnValues(entity) : null
                             );
                     }
                 )
@@ -920,6 +924,8 @@ public static class RemoteServerEngine
                     {
                         var request = await ReadRequestAsync<RemoteSaveRequest<TEntity>>(context).ConfigureAwait(false);
                         var entity = Required(request.Entity, "Entity");
+                        // Listed before the save, which may change the collections the values are matched along
+                        var rows = RemoteEntityGraph.CollectSaveRows([entity], request.CascadeSave);
                         var affected = await Repository<TRepository>(context)
                             .SaveAsync(
                                 entity,
@@ -933,7 +939,8 @@ public static class RemoteServerEngine
                             new RemoteSaveResult(
                                 affected,
                                 CollectRowVersions([entity], request.CascadeSave),
-                                CollectSkipped([entity], request.CascadeSave)
+                                CollectSkipped([entity], request.CascadeSave),
+                                RemoteEntityGraph.ReadSavedValues(rows)
                             );
                     }
                 )
@@ -949,6 +956,7 @@ public static class RemoteServerEngine
                             context
                         ).ConfigureAwait(false);
                         var entities = Required(request.Entities, "Entities");
+                        var rows = RemoteEntityGraph.CollectSaveRows(entities, request.CascadeSave);
                         var affected = await Repository<TRepository>(context)
                             .SaveAsync(
                                 entities,
@@ -962,7 +970,8 @@ public static class RemoteServerEngine
                             new RemoteSaveResult(
                                 affected,
                                 CollectRowVersions(entities, request.CascadeSave),
-                                CollectSkipped(entities, request.CascadeSave)
+                                CollectSkipped(entities, request.CascadeSave),
+                                RemoteEntityGraph.ReadSavedValues(rows)
                             );
                     }
                 )
@@ -1057,6 +1066,7 @@ public static class RemoteServerEngine
 
         return skipped;
     }
+
 }
 
 /// <summary>

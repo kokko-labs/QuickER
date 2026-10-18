@@ -45,9 +45,6 @@ public sealed class EditModelSaveRemoteRuntimeTests : EditModelSaveRuntimeTestsB
     protected override IGadgetNoteRemoteRepository Notes =>
         _clientProvider!.GetRequiredService<IGadgetNoteRemoteRepository>();
 
-    /// <summary>サーバーの Before フックがエンティティに書いた値はクライアントへ戻らない（区切り 40 で扱う）</summary>
-    protected override bool BeforeHookWritesReachEntity => false;
-
     /// <summary>サーバーはテストごとに空で起動する</summary>
     protected override Task ResetAsync() => SeedAsync();
 

@@ -400,9 +400,7 @@ public class RuntimeTestMatrixTests
                 NotApplicable(
                     "インメモリは採番を行わない＝自動採番列も普通のプロパティとして値を保つ（意図的な割り切り）"
                 ),
-                Gap(
-                    "リモート面越しの専用テストは無い（除外は転送経路でなく EntitySaveMetadata の側で効く）"
-                )
+                Covered()
             )
         ),
         ["SyncSupport"] = new(
@@ -569,6 +567,8 @@ public class RuntimeTestMatrixTests
         new("SaveHookInMemoryRuntimeTests", "SaveHook", Backend.InMemory),
         new("SaveHookRegistrationRuntimeTests", "SaveHook", Backend.InMemory),
         new("SaveHookRemoteRuntimeTests", "SaveHook", Backend.Remote),
+        new("RemoteSaveWriteBackRuntimeTests", "SaveHook", Backend.Remote),
+        new("RemoteSaveRowOrderRuntimeTests", "SaveHook", Backend.Remote),
         // --- 無制限バイナリ列 ---
         new("SqlServerBinaryColumnRuntimeTests", "BinaryColumn", Backend.AdoSqlServer),
         new("BinaryColumnAdoRuntimeTests", "BinaryColumn", Backend.AdoSqlite),
@@ -668,6 +668,7 @@ public class RuntimeTestMatrixTests
         new("SqlServerIdentityColumnRuntimeTests", "IdentityColumn", Backend.AdoSqlServer),
         new("SqlServerIdentityColumnRuntimeTests", "IdentityColumn", Backend.EfCore),
         new("PostgreSqlIdentityColumnRuntimeTests", "IdentityColumn", Backend.EfCore),
+        new("RemoteEfCoreGeneratedValuesRuntimeTests", "IdentityColumn", Backend.Remote),
         new("SyncSqliteRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         // 同期支援 × 値オブジェクト（ミラー版・キーが VO 型になる経路）
         new("SyncVoRuntimeTests", "SyncSupport", Backend.AdoSqlite),
