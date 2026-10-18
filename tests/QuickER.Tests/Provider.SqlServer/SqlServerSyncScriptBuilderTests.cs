@@ -165,6 +165,36 @@ public class SqlServerSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE [Customer] DROP COLUMN [Old];");
     }
 
+    /// <summary>
+    /// DropColumn は、列の DEFAULT 制約を同じ表に絞って読み、列を消す前に外す（残すとエラー 5074）ことを検証する。
+    /// 名前に <c>'</c> と <c>]</c> を含む表・列でも、動的 SQL の文字列リテラルが閉じないことも見る。
+    /// </summary>
+    [Fact(DisplayName = "DropColumn は列の DEFAULT 制約を同じ表に絞って読み、列を消す前に外す")]
+    public void DropColumn_DropsDefaultConstraintFirst()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropColumn,
+            TableName = "Cu]st'omer",
+            ColumnName = "O'ld",
+            IsSelected = true,
+        };
+
+        var sql = BuildScript(new SqlServerSyncScriptBuilder(), new[] { item });
+
+        sql.Should().Contain("FROM sys.default_constraints dc");
+        sql.Should()
+            .Contain(
+                "WHERE dc.parent_object_id = OBJECT_ID(N'[Cu]]st''omer]') AND c.name = N'O''ld';"
+            );
+        sql.Should()
+            .Contain("SET @sql = N'ALTER TABLE [Cu]]st''omer] DROP CONSTRAINT ' + QUOTENAME(@df);");
+        sql.IndexOf("DROP CONSTRAINT", StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(sql.IndexOf("DROP COLUMN", StringComparison.Ordinal));
+        sql.Should().NotContain("ADD CONSTRAINT", "列ごと消えるので付け直さない");
+    }
+
     /// <summary>未選択の差分項目がスクリプトへ出力されないことを検証する</summary>
     [Fact(DisplayName = "選択されていない項目はスクリプトに含まれない")]
     public void Unselected_Excluded()

@@ -149,17 +149,8 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 
         if (typeChanges)
         {
-            sb.AppendLine("SELECT @df = dc.name, @dfdef = dc.definition");
-            sb.AppendLine("FROM sys.default_constraints dc");
-            sb.AppendLine(
-                "JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id"
-            );
-            sb.AppendLine(
-                $"WHERE dc.parent_object_id = OBJECT_ID(N'{table}') AND c.name = N'{columnName}';"
-            );
             // 型を変える前に DEFAULT 制約を外す（残すとエラー 5074 で ALTER COLUMN が断られる）
-            sb.AppendLine($"SET @sql = N'ALTER TABLE {table} DROP CONSTRAINT ' + QUOTENAME(@df);");
-            sb.AppendLine("IF @df IS NOT NULL EXEC sys.sp_executesql @sql;");
+            AppendDropDefaultConstraint(sb, table, columnName);
         }
 
         if (keepsCollation)
@@ -315,13 +306,52 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
+    /// <remarks>
+    /// 列の DEFAULT 制約を先に外す（残したままだとエラー 5074 で断られる）。列ごと消えるので付け直さない。名前は実行時に
+    /// カタログから読み、列の変更と同じく <c>QUOTENAME</c> と <c>OBJECT_ID</c> で扱う。同じ列を参照する CHECK 制約や索引は
+    /// 外さない（図が持たないもので、残っていれば列の削除は断られ、同期はトランザクションごと戻る）。
+    /// </remarks>
     protected override void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
     {
+        sb.AppendLine("DECLARE @df sysname, @dfdef nvarchar(max), @sql nvarchar(max);");
+        AppendDropDefaultConstraint(
+            sb,
+            SqlIdentifier.QuoteForDynamicSql(item.TableName),
+            SqlIdentifier.EscapeStringLiteral(item.ColumnName!)
+        );
         sb.AppendLine(
             $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
                 + $"DROP COLUMN {SqlIdentifier.BracketSimple(item.ColumnName!)};"
         );
         sb.AppendLine("GO");
+    }
+
+    /// <summary>
+    /// 列の DEFAULT 制約の名前と定義を <c>@df</c> / <c>@dfdef</c> へ読み、あれば外す文を出す（変数は呼び出し側が宣言する）。
+    /// </summary>
+    /// <remarks>
+    /// 表は <c>OBJECT_ID</c> で <c>ALTER TABLE</c> と同じ 1 つの表に絞り、読んだ名前は <c>QUOTENAME</c> を通して
+    /// <c>nvarchar(max)</c> の変数に組んだ文を <c>sp_executesql</c> で実行する。
+    /// </remarks>
+    /// <param name="sb">出力先</param>
+    /// <param name="table">動的 SQL の文字列リテラルへ埋める表の名前（<see cref="SqlIdentifier.QuoteForDynamicSql"/> 済み）</param>
+    /// <param name="columnName">文字列リテラルへ埋める列名（<see cref="SqlIdentifier.EscapeStringLiteral"/> 済み）</param>
+    private static void AppendDropDefaultConstraint(
+        StringBuilder sb,
+        string table,
+        string columnName
+    )
+    {
+        sb.AppendLine("SELECT @df = dc.name, @dfdef = dc.definition");
+        sb.AppendLine("FROM sys.default_constraints dc");
+        sb.AppendLine(
+            "JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id"
+        );
+        sb.AppendLine(
+            $"WHERE dc.parent_object_id = OBJECT_ID(N'{table}') AND c.name = N'{columnName}';"
+        );
+        sb.AppendLine($"SET @sql = N'ALTER TABLE {table} DROP CONSTRAINT ' + QUOTENAME(@df);");
+        sb.AppendLine("IF @df IS NOT NULL EXEC sys.sp_executesql @sql;");
     }
 
     /// <summary>DROP TABLE（テーブル削除）文を生成する</summary>

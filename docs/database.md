@@ -323,6 +323,8 @@ The diagram does not carry column defaults, so the DDL adds a comment before suc
 It does not stop the sync, because the foreign key is created when the database column has a DEFAULT constraint.
 On SQL Server and PostgreSQL, altering a column reads the column's collation back at execution time and writes it again when the new type is a string type (without it, the column goes back to the database's default collation; PostgreSQL writes it only when it differs from the type's default).
 On SQL Server, a type change drops the column's DEFAULT constraint, changes the type, and adds the constraint back with the same name and definition (keeping it would make the change fail with error 5074).
+Dropping a column on SQL Server drops its DEFAULT constraint first, for the same reason.
+A CHECK constraint or an index of your own that refers to the column is not dropped: the diagram does not carry them, so the drop fails with error 5074 and the sync is rolled back.
 A sync that changes the kind of type of a column with a default value is shown in the confirmation dialog on every dialect except SQLite (SQL Server, PostgreSQL, MySQL and Oracle).
 When the default does not fit the new type, the sync fails on PostgreSQL and Oracle, the sync fails with error 1067 on MySQL, and an insert that uses the default fails on SQL Server.
 When the sync fails on MySQL or Oracle, DDL is not rolled back, so the statements before it stay applied.
