@@ -173,6 +173,68 @@ public sealed class SqlServerColumnAttributeSyncIntegrationTests(SqlServerContai
         result.Committed.Should().Be(true, $"{result.Error}{System.Environment.NewLine}{script}");
     }
 
+    /// <summary>
+    /// DEFAULT 制約のある列の削除が、制約を外してから列を消して成功することを検証する（以前はエラー 5074 で失敗した）。
+    /// 制約名に <c>]</c> と <c>'</c> を含め、同じ名前の列を持つ別の表の DEFAULT 制約は残ることも確かめる（表は OBJECT_ID
+    /// で絞る）。DEFAULT 制約の無い列の削除も同じ文で通る。
+    /// </summary>
+    [Theory(
+        DisplayName = "[Integration] SQL Server 同期: DEFAULT 制約のある列の削除は、制約を外して成功する"
+    )]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DropColumn_WithDefaultConstraint_Succeeds(bool withDefault)
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        var constraint = withDefault ? " CONSTRAINT [DF_a]]b'c] DEFAULT ((5))" : "";
+        await fixture.ExecuteAsync(
+            $"CREATE TABLE [dd] ([id] int NOT NULL PRIMARY KEY, [v] int NOT NULL{constraint});"
+                + "CREATE TABLE [dd2] ([id] int NOT NULL PRIMARY KEY, "
+                + "[v] int NOT NULL CONSTRAINT [DF_other] DEFAULT ((7)));",
+            Ct
+        );
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.DropColumn,
+                    TableName = "dd",
+                    ColumnName = "v",
+                    IsSelected = true,
+                },
+            ],
+            TestDialectCapabilities.Neutral
+        );
+        var script = new SqlServerSyncScriptBuilder().Build(plan);
+        var result = await new SqlServerSchemaSyncExecutor().ExecuteAsync(
+            fixture.ToDbConnectionSettings(),
+            script,
+            Ct
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}\nSQL:\n{script}");
+        (await ColumnCountAsync("dd", "v")).Should().Be(0);
+        (await ColumnAsync("dd2", "v"))
+            .DefaultName.Should()
+            .Be("DF_other", "別の表の DEFAULT 制約は残る");
+    }
+
+    /// <summary>表の列の数を数える（列が無ければ 0）</summary>
+    private async Task<int> ColumnCountAsync(string table, string column)
+    {
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = new SqlCommand(
+            "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(@t) AND name = @c;",
+            conn
+        );
+        cmd.Parameters.AddWithValue("@t", table);
+        cmd.Parameters.AddWithValue("@c", column);
+
+        return (int)(await cmd.ExecuteScalarAsync(Ct))!;
+    }
+
     /// <summary>1 列の変更を同期として実行する（変更前の列は DB の型を持つ）</summary>
     private async Task<(SchemaSyncResult Result, string Script)> AlterAsync(
         string table,

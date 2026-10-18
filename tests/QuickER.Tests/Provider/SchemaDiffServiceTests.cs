@@ -1599,6 +1599,99 @@ public class SchemaDiffServiceTests
         items.Should().ContainSingle().Which.Kind.Should().Be(SchemaDiffKind.AlterUniqueConstraint);
     }
 
+    /// <summary>5 方言の同期のケーパビリティ</summary>
+    public static TheoryData<string> UniqueNameStepDialects() =>
+        new() { "sqlserver", "postgresql", "mysql", "oracle", "sqlite" };
+
+    /// <summary>
+    /// 一意制約は、図で名前を付けたものを先に DB の同じ名前の制約と組み、残りを列集合で組むことを 5 方言で検証する。
+    /// 列集合だけで組むと、名前を保った制約の列を変え、元の列に名前の無い制約を足した図（総当たりの種 75 の形）で、
+    /// 名前の無い制約が DB の制約と組んでしまい、名前を保った制約の追加が同じ名前で失敗した。
+    /// </summary>
+    [Theory(
+        DisplayName = "一意制約の名前の段: 図の名前を先に DB の同じ名前と組み、残りを列集合で組む"
+    )]
+    [MemberData(nameof(UniqueNameStepDialects))]
+    public void UniqueConstraints_PairByDiagramNameFirst(string dialect)
+    {
+        var capabilities = dialect switch
+        {
+            "postgresql" => new PostgreSqlProvider().SyncCapabilities,
+            "mysql" => new MySqlProvider().SyncCapabilities,
+            "oracle" => new OracleProvider().SyncCapabilities,
+            "sqlite" => new SqliteProvider().SyncCapabilities,
+            _ => new SqlServerProvider().SyncCapabilities,
+        };
+
+        // 種 75 の形: 名前を保って列を変え、元の列に名前の無い制約を足す → 名前の段の作り直し＋名前の無い追加
+        var seed75 = UniqueDiff(
+            WithUnique(CustomerTable(), "UQ_x", "Code"),
+            WithUnique(WithUnique(CustomerTable(), "UQ_x", "Kind"), name: null, "Code"),
+            capabilities
+        );
+        seed75
+            .Select(i =>
+                (i.Kind, i.UniqueConstraintName, string.Join(",", i.UniqueConstraintColumns))
+            )
+            .Should()
+            .Equal(
+                (SchemaDiffKind.AlterUniqueConstraint, "UQ_x", "Kind"),
+                (SchemaDiffKind.AddUniqueConstraint, null, "Code")
+            );
+        seed75[0].ReplacedUniqueConstraint!.UniqueConstraintColumns.Should().Equal("Code");
+
+        // 名前が同じで列が違う → 作り直し
+        UniqueDiff(
+                WithUnique(CustomerTable(), "UQ_x", "Code"),
+                WithUnique(CustomerTable(), "uq_X", "Kind"),
+                capabilities
+            )
+            .Select(i => i.Kind)
+            .Should()
+            .Equal(SchemaDiffKind.AlterUniqueConstraint);
+
+        // 名前が違って列が同じ → 差分なし（名前だけの違いは差分にしない）
+        UniqueDiff(
+                WithUnique(CustomerTable(), "UQ_x", "Code"),
+                WithUnique(CustomerTable(), "UQ_y", "Code"),
+                capabilities
+            )
+            .Should()
+            .BeEmpty();
+
+        // DB 側に名前の無い制約（SQLite の自動名）は名前の段で組まない → 列集合で組み、名前つきは追加
+        UniqueDiff(
+                WithUnique(CustomerTable(), name: null, "Code"),
+                WithUnique(WithUnique(CustomerTable(), "UQ_x", "Kind"), name: null, "Code"),
+                capabilities
+            )
+            .Select(i => (i.Kind, i.UniqueConstraintName))
+            .Should()
+            .Equal((SchemaDiffKind.AddUniqueConstraint, "UQ_x"));
+    }
+
+    /// <summary>
+    /// 名前の段は図で名前を付けた制約だけを使い、名前の無い制約の合成名では組まないことを検証する。
+    /// 名前の無い制約は「名前を問わない」意味なので、同じ列集合の DB の制約で満たされる（合成名と同じ名前の、
+    /// 別の列の DB の制約と組むと、満たされている制約を作り直してしまう）。
+    /// </summary>
+    [Fact(
+        DisplayName = "一意制約の名前の段: 名前の無い制約の合成名では組まず、列集合で満たされていれば作り直さない"
+    )]
+    public void UniqueConstraints_NameStepIgnoresSynthesizedNames()
+    {
+        var live = WithUnique(
+            WithUnique(CustomerTable(), "UQ_Customer_Code", "Kind"),
+            "UQ_other",
+            "Code"
+        );
+
+        UniqueDiff(live, WithUnique(CustomerTable(), name: null, "Code"))
+            .Select(i => (i.Kind, i.UniqueConstraintName))
+            .Should()
+            .Equal((SchemaDiffKind.DropUniqueConstraint, "UQ_Customer_Code"));
+    }
+
     /// <summary>
     /// 名前が違う・DB 側に名前が無い（SQLite の自動名）ときは組まず、追加と削除のままにすることを検証する。
     /// 図の主キーと同じ列集合を持てない方言では、その追加は比較から外れるので、DB 側の削除だけが残る。

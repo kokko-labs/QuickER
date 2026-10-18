@@ -453,14 +453,17 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// 文と文の間には常に「/」行が入るので、ブロックでもそのまま実行される
     /// </remarks>
     private static string AppendSetTableDescription(SchemaDiffItem item) =>
-        OracleCommentStatement.ForTable(item.TableName, item.NewDescription ?? string.Empty);
+        OracleCommentStatement.ForTable(
+            item.TableName,
+            DescriptionText.Normalize(item.NewDescription)
+        );
 
     /// <summary>カラムの説明（COMMENT ON COLUMN）設定文を生成する</summary>
     private static string AppendSetColumnDescription(SchemaDiffItem item) =>
         OracleCommentStatement.ForColumn(
             item.TableName,
             item.ColumnName!,
-            item.NewDescription ?? string.Empty
+            DescriptionText.Normalize(item.NewDescription)
         );
 
     /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL、それ以外は空）</summary>

@@ -384,10 +384,10 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <summary>テーブルの説明（COMMENT ON TABLE）設定文を生成する</summary>
     protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item)
     {
-        var newVal = item.NewDescription ?? string.Empty;
+        var newVal = DescriptionText.Normalize(item.NewDescription);
         var target = PgIdentifier.Quote(item.TableName);
         // 新値が空なら IS NULL で説明を削除、それ以外は文字列リテラルで設定する
-        var isClause = string.IsNullOrEmpty(newVal)
+        var isClause = !DescriptionText.IsPresent(newVal)
             ? "NULL"
             : $"'{PgIdentifier.EscapeStringLiteral(newVal)}'";
         sb.AppendLine($"COMMENT ON TABLE {target} IS {isClause};");
@@ -396,10 +396,10 @@ public sealed class PostgreSqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <summary>カラムの説明（COMMENT ON COLUMN）設定文を生成する</summary>
     protected override void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item)
     {
-        var newVal = item.NewDescription ?? string.Empty;
+        var newVal = DescriptionText.Normalize(item.NewDescription);
         var target =
             $"{PgIdentifier.Quote(item.TableName)}.{PgIdentifier.QuoteSimple(item.ColumnName!)}";
-        var isClause = string.IsNullOrEmpty(newVal)
+        var isClause = !DescriptionText.IsPresent(newVal)
             ? "NULL"
             : $"'{PgIdentifier.EscapeStringLiteral(newVal)}'";
         sb.AppendLine($"COMMENT ON COLUMN {target} IS {isClause};");

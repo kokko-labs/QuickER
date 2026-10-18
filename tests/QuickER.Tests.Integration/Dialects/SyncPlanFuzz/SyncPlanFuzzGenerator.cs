@@ -37,6 +37,12 @@ internal static class FuzzShape
     /// <summary>文字列の主キー</summary>
     public const string StringPrimaryKey = "string-pk";
 
+    /// <summary>主キーの列の削除を、その表の主キーの変更を選ばずに選んだ</summary>
+    public const string DropPrimaryKeyColumnAlone = "drop-pk-column-alone";
+
+    /// <summary>一意制約の構成列の削除を、その一意制約の削除を選ばずに選んだ</summary>
+    public const string DropUniqueMemberAlone = "drop-unique-member-alone";
+
     /// <summary>種の集合全体で必ず出ていなければならない形</summary>
     public static readonly IReadOnlyList<string> Required =
     [
@@ -49,6 +55,8 @@ internal static class FuzzShape
         UniqueOnForeignKey,
         CompositePrimaryKey,
         StringPrimaryKey,
+        DropPrimaryKeyColumnAlone,
+        DropUniqueMemberAlone,
     ];
 }
 
@@ -549,6 +557,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             (1, () => DropParentAndChild(entities, relationships)),
             (1, () => AddPlainColumn(entities, live)),
             (1, () => DropColumn(entities, relationships, live)),
+            (3, () => DropKeyMemberColumn(entities, relationships, live)),
             (2, () => AlterType(entities, relationships, live)),
             (1, () => ToggleNullable(entities, relationships, live)),
             (3, () => ChangePrimaryKey(entities, live)),
@@ -760,9 +769,14 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         FuzzLiveSchema live
     )
     {
+        // 主キーの列も、主キーを縮めてもデータが壊れないときは候補にする（その表の主キーの変更を選ばずに列の削除だけを
+        // 選ぶ形を作るため）
         var entity = Pick(entities);
         var column = entity
-            ?.Columns.Where(c => !c.IsPrimaryKey && !(Info(live, entity!, c)?.Pinned ?? false))
+            ?.Columns.Where(c =>
+                !(Info(live, entity!, c)?.Pinned ?? false)
+                && (!c.IsPrimaryKey || CanShrinkPrimaryKey(live, entity!, c))
+            )
             .OrderBy(_ => rng.Next())
             .FirstOrDefault();
 
@@ -771,13 +785,66 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             return false;
         }
 
+        RemoveColumn(entity, column, relationships);
+        return true;
+    }
+
+    /// <summary>
+    /// 主キーか一意制約の構成列を 1 つ消す（差分の列の削除だけを選ぶと、その主キー・一意制約が消える形を作る）。
+    /// </summary>
+    private bool DropKeyMemberColumn(
+        List<Entity> entities,
+        List<Relationship> relationships,
+        FuzzLiveSchema live
+    )
+    {
+        // 主キーの列と一意制約の構成列を半々で選ぶ（どちらの形も種の集合で必ず出るように）
+        var primaryKey = rng.Next(2) == 0;
+        var candidates = entities
+            .SelectMany(e =>
+                e.Columns.Where(c =>
+                        !(Info(live, e, c)?.Pinned ?? false)
+                        && (
+                            primaryKey
+                                ? c.IsPrimaryKey && CanShrinkPrimaryKey(live, e, c)
+                                : e.UniqueConstraints.Any(u => u.ColumnIds.Contains(c.Id))
+                        )
+                    )
+                    .Select(c => (Entity: e, Column: c))
+            )
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return false;
+        }
+
+        var (entity, column) = candidates[rng.Next(candidates.Count)];
+        RemoveColumn(entity, column, relationships);
+        return true;
+    }
+
+    /// <summary>
+    /// 主キーからこの列を外しても DB の行が主キーを満たすか（行が無い・残りの主キーが無い・残りの列に値が重ならない列がある）
+    /// </summary>
+    private static bool CanShrinkPrimaryKey(FuzzLiveSchema live, Entity entity, Column column)
+    {
+        var remaining = entity.GetPrimaryKeyColumnsInOrder().Where(c => c.Id != column.Id).ToList();
+
+        return RowCount(live, entity) == 0
+            || remaining.Count == 0
+            || remaining.Any(c => Info(live, entity, c)?.IsDistinct == true);
+    }
+
+    /// <summary>目標の図から列を消し、その列を含む一意制約・外部キーも消す</summary>
+    private void RemoveColumn(Entity entity, Column column, List<Relationship> relationships)
+    {
         entity.Columns.Remove(column);
         entity.UniqueConstraints.RemoveAll(u => u.ColumnIds.Contains(column.Id));
         relationships.RemoveAll(r =>
             r.ColumnPairs.Any(p => p.SourceColumnId == column.Id || p.TargetColumnId == column.Id)
         );
         Mutations.Add($"drop column {entity.TableName}.{column.Name}");
-        return true;
     }
 
     private bool AlterType(

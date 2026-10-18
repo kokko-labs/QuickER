@@ -71,26 +71,28 @@ public class SyncPlannerTests
         // DropForeignKey が AlterColumn より先なのは意図的:
         // FK 依存列の型変更を通すため、先に FK を外しておく必要がある（SQL Server は Msg 5074 で失敗する）
         // AlterPrimaryKey は 2 フェーズ: 解除は AlterColumn の前（旧 PK 列の NULL 許容化を通すため）・
-        // 付与は AlterColumn の後（新 PK 列の NOT NULL 化を先に済ませるため）。いずれも DropColumn より前
+        // 付与は AlterColumn の後（新 PK 列の NOT NULL 化を先に済ませるため）。いずれも DropColumn より前。
+        // DropTable は AddTable より前（表の名前を変える同期で、新しい表が古い表の一意制約の名前を引き継いでも
+        // スキーマの中の名前がぶつからないため）
         plan.Sections.Select(s => s.Kind)
             .Should()
             .Equal(
+                SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.DropTable,
                 SchemaDiffKind.AddTable,
                 SchemaDiffKind.AddColumn,
-                SchemaDiffKind.DropForeignKey,
                 SchemaDiffKind.AlterPrimaryKey,
                 SchemaDiffKind.AlterColumn,
                 SchemaDiffKind.AlterPrimaryKey,
                 SchemaDiffKind.DropColumn,
-                SchemaDiffKind.DropTable,
                 SchemaDiffKind.AddForeignKey,
                 SchemaDiffKind.SetTableDescription,
                 SchemaDiffKind.SetColumnDescription
             );
 
         // フェーズは主キー変更セクションだけが持ち、他は既定の None のまま
-        plan.Sections[3].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Drop);
-        plan.Sections[5].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Add);
+        plan.Sections[4].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Drop);
+        plan.Sections[6].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Add);
         plan.Sections.Where(s => s.Kind != SchemaDiffKind.AlterPrimaryKey)
             .Should()
             .OnlyContain(s => s.PrimaryKeyPhase == PrimaryKeyPhase.None);
@@ -3409,6 +3411,7 @@ public class SyncPlannerTests
     /// <summary>
     /// 選んだ表・列の削除で端が消える live の外部キーは、外部キーの削除を選んでいなくても外すだけの項目として
     /// 計画に入る（表・列の削除より前のセクション・付け直さない）ことを、消える端の種類ごとに検証する。
+    /// 親の主キーの列の削除は、その列を外す主キーの変更も選ぶ（選ばなければ列の削除そのものを外す）。
     /// </summary>
     [Theory(DisplayName = "消える端: 表・列の削除だけを選んでも、端の消える外部キーを先に外す")]
     [InlineData("customer", null)]
@@ -3427,9 +3430,29 @@ public class SyncPlannerTests
             IsSelected = true,
         };
 
-        var plan = new SyncPlanner().BuildPlan([drop], FkRebuildCaps, context);
+        List<SchemaDiffItem> items = [drop];
+        List<SchemaDiffKind> expected = [SchemaDiffKind.DropForeignKey, drop.Kind];
 
-        plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.DropForeignKey, drop.Kind);
+        // 親の主キーの列の削除は、その列を外す主キーの変更（主キーを外すだけ）と一緒に選ぶ
+        if (table == "customer" && column == "id")
+        {
+            var keyless = customer.Clone(preserveId: true);
+            keyless.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
+            items.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterPrimaryKey,
+                    TableName = "customer",
+                    Entity = keyless,
+                    IsSelected = true,
+                }
+            );
+            expected = [SchemaDiffKind.DropForeignKey, SchemaDiffKind.AlterPrimaryKey, drop.Kind];
+        }
+
+        var plan = new SyncPlanner().BuildPlan(items, FkRebuildCaps, context);
+
+        plan.Sections.Select(s => s.Kind).Should().Equal(expected);
         plan.Sections[0]
             .Items.Should()
             .ContainSingle()

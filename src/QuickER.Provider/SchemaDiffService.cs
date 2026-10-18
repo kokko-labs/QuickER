@@ -39,6 +39,8 @@ public class SchemaDiffService
     /// 型の比較は <see cref="SyncDialectCapabilities.AreSameType"/>（両側を方言の取込表記へ寄せてから比べる）、
     /// 外部キーの参照アクションは <see cref="SyncDialectCapabilities.EffectiveOnDelete"/> /
     /// <see cref="SyncDialectCapabilities.EffectiveOnUpdate"/>（方言の実効値）で比べる。
+    /// 説明は方言が保存する形（<see cref="SyncDialectCapabilities.IdentifierLengthLimit"/> の
+    /// <see cref="QuickER.Dialects.IdentifierLengthLimit.StoredText"/>＝MySQL では BMP の外の文字を <c>?</c> にした形）で比べる。
     /// </param>
     public SchemaDiff Compute(
         IReadOnlyList<Entity> liveEntities,
@@ -52,6 +54,16 @@ public class SchemaDiffService
 
         // 説明差分を出すか（SQLite などコメント機構が無い方言では出さない）
         var emitDescriptions = capabilities.SupportsDescriptions;
+
+        // 説明は方言が保存する形で比べる（MySQL は BMP の外の文字を ? に置き換えて保存するので、図の絵文字と DB の ? を同じとみなす）
+        var descriptionLimit = capabilities.IdentifierLengthLimit;
+
+        bool AreSameStoredDescription(string target, string live) =>
+            string.Equals(
+                descriptionLimit.StoredText(target),
+                descriptionLimit.StoredText(live),
+                StringComparison.Ordinal
+            );
 
         // FK 比較で制約名を含めるか（SQLite は合成名で永続化されないため名前を除いて比較する）
         var includeFkConstraintName = capabilities.PersistsForeignKeyConstraintNames;
@@ -90,9 +102,9 @@ public class SchemaDiffService
                 );
 
                 // 新規テーブル: テーブル説明
-                var newTblDesc = target.Description ?? string.Empty;
+                var newTblDesc = DescriptionText.Normalize(target.Description);
 
-                if (emitDescriptions && !string.IsNullOrEmpty(newTblDesc))
+                if (emitDescriptions && DescriptionText.IsPresent(newTblDesc))
                 {
                     diff.Items.Add(
                         new SchemaDiffItem
@@ -114,7 +126,7 @@ public class SchemaDiffService
                 // 新規テーブル: 各列の説明
                 foreach (var c in target.Columns)
                 {
-                    if (!emitDescriptions || string.IsNullOrEmpty(c.Description))
+                    if (!emitDescriptions || !DescriptionText.IsPresent(c.Description))
                     {
                         continue;
                     }
@@ -147,13 +159,10 @@ public class SchemaDiffService
             var matchedLiveColumns = liveColumnOf.Values.ToHashSet();
 
             // テーブル説明の差分
-            var targetTableDesc = target.Description ?? string.Empty;
-            var liveTableDesc = live.Description ?? string.Empty;
+            var targetTableDesc = DescriptionText.Normalize(target.Description);
+            var liveTableDesc = DescriptionText.Normalize(live.Description);
 
-            if (
-                emitDescriptions
-                && !string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal)
-            )
+            if (emitDescriptions && !AreSameStoredDescription(targetTableDesc, liveTableDesc))
             {
                 diff.Items.Add(
                     new SchemaDiffItem
@@ -163,7 +172,7 @@ public class SchemaDiffService
                         Entity = target,
                         NewDescription = targetTableDesc,
                         OldDescription = liveTableDesc,
-                        Description = string.IsNullOrEmpty(targetTableDesc)
+                        Description = !DescriptionText.IsPresent(targetTableDesc)
                             ? string.Format(Strings.Diff_RemoveTableDescription, name)
                             : string.Format(
                                 Strings.Diff_UpdateTableDescription,
@@ -198,7 +207,7 @@ public class SchemaDiffService
                     );
 
                     // 新規列に説明があれば、列追加と一緒に説明を設定する
-                    if (emitDescriptions && !string.IsNullOrEmpty(tcol.Description))
+                    if (emitDescriptions && DescriptionText.IsPresent(tcol.Description))
                     {
                         diff.Items.Add(
                             new SchemaDiffItem
@@ -279,13 +288,10 @@ public class SchemaDiffService
                         );
                     }
 
-                    var newColDesc = tcol.Description ?? string.Empty;
-                    var oldColDesc = lcol.Description ?? string.Empty;
+                    var newColDesc = DescriptionText.Normalize(tcol.Description);
+                    var oldColDesc = DescriptionText.Normalize(lcol.Description);
 
-                    if (
-                        emitDescriptions
-                        && !string.Equals(newColDesc, oldColDesc, StringComparison.Ordinal)
-                    )
+                    if (emitDescriptions && !AreSameStoredDescription(newColDesc, oldColDesc))
                     {
                         diff.Items.Add(
                             new SchemaDiffItem
@@ -297,7 +303,7 @@ public class SchemaDiffService
                                 Column = tcol,
                                 NewDescription = newColDesc,
                                 OldDescription = oldColDesc,
-                                Description = string.IsNullOrEmpty(newColDesc)
+                                Description = !DescriptionText.IsPresent(newColDesc)
                                     ? string.Format(
                                         Strings.Diff_RemoveColumnDescription,
                                         name,
@@ -590,9 +596,15 @@ public class SchemaDiffService
     /// <summary>1 テーブル分の一意制約差分（追加・削除）を <paramref name="diff"/> へ追加する</summary>
     /// <remarks>
     /// <para>
-    /// 照合は <see cref="UniqueConstraintNaming.ColumnSetSignature"/>（大文字小文字・順序を無視した列集合）で行う。
+    /// 照合は 2 段で行う。先に、図で名前を付けた一意制約を、DB の同じ名前の一意制約と組む（名前の段。名前の照合は前後の
+    /// 空白を除き大文字小文字を区別しない。DB 側に名前が無い制約＝SQLite の自動名は組まない）。列集合が同じなら差分なし、
+    /// 違えば <see cref="SchemaDiffKind.AlterUniqueConstraint"/> にする。名前の段は図の名前だけを使い、名前の無い制約の
+    /// 合成名では組まない（名前の無い制約は名前を問わないので、同じ列集合の DB の制約で満たされる）。
+    /// 残りは <see cref="UniqueConstraintNaming.ColumnSetSignature"/>（大文字小文字・順序を無視した列集合）で組み、
     /// target 側にだけ在る組は <see cref="SchemaDiffKind.AddUniqueConstraint"/>（既定で選択）、live 側にだけ在る組は
-    /// <see cref="SchemaDiffKind.DropUniqueConstraint"/>（既定で未選択＝破壊的）になる。
+    /// <see cref="SchemaDiffKind.DropUniqueConstraint"/>（既定で未選択＝破壊的）になる。名前の段を列集合の段より先に
+    /// 置くのは、名前を保って列を変え、元の列に名前の無い制約を足した図で、名前の無い制約が DB の制約と組み、名前を保った
+    /// 制約の追加が同じ名前で失敗しないようにするため。
     /// </para>
     /// <para>
     /// 構成列が空・解決不能な制約は差分対象から除外する（DDL 生成が黙って出力しないのと同じ扱い）。
@@ -605,7 +617,7 @@ public class SchemaDiffService
     /// DDL と同期の <c>CREATE TABLE</c> も同じ方言で省いて注記する（<see cref="UniqueConstraintOnPrimaryKeyNote"/>）。
     /// </para>
     /// <para>
-    /// 同じ実効名（追加側は図の名前か合成名、削除側は DB の実名）の追加候補と削除候補は、
+    /// 名前の段で組まなかった、同じ実効名（追加側は図の名前か合成名、削除側は DB の実名）の追加候補と削除候補は、
     /// <see cref="SchemaDiffKind.AlterUniqueConstraint"/>（既定で未選択）の 1 項目へ畳む。2 項目のままだと、既定どおり
     /// 追加だけを選んで実行したときに同じ名前の制約を足そうとして失敗する。DB 側に名前が無い制約（SQLite の自動名）は
     /// 組まない。名前の照合は前後の空白を除き大文字小文字を区別しない。
@@ -627,87 +639,169 @@ public class SchemaDiffService
             return;
         }
 
-        var liveSignatures = liveConstraints
-            .Select(c => c.Signature)
-            .ToHashSet(StringComparer.Ordinal);
-        var targetSignatures = targetConstraints
-            .Select(c => c.Signature)
-            .ToHashSet(StringComparer.Ordinal);
-
         // 図の主キーと同じ列集合の一意制約を、別の制約として持てない方言（SQLite・Oracle）がある
         var targetKey = target.GetPrimaryKeyColumnsInOrder().Select(c => c.Name).ToList();
         var targetKeySignature =
             targetKey.Count == 0 ? null : UniqueConstraintNaming.ColumnSetSignature(targetKey);
 
-        var adds = new List<SchemaDiffItem>();
-        var drops = new List<SchemaDiffItem>();
+        // 主キーと同じ列集合の一意制約を持てない方言では、主キーが一意性を保証するので比較から外す
+        // （名前の段でも組まず、列集合の段で図側の署名に残す＝DB 側の同じ列集合の削除を出さない）
+        bool ExcludedAsPrimaryKey(string signature) =>
+            !dialect.SupportsUniqueConstraintOnPrimaryKey
+            && string.Equals(signature, targetKeySignature, StringComparison.Ordinal);
 
+        var limit = dialect.IdentifierLengthLimit;
+        var remainingLive = liveConstraints.ToList();
+        var remainingTarget =
+            new List<(string? Name, List<string> ColumnNames, string Signature)>();
+
+        // 項目は図の制約の順に並べる（名前の段の作り直しと列集合の段の追加が同じ並びに入り、残りの削除が後に続く）
+        var adds = new List<SchemaDiffItem>();
+
+        // 名前の段: 図で名前を付けた制約を、DB の同じ名前の制約と組む（合成名は使わない）
         foreach (var constraint in targetConstraints)
         {
-            if (liveSignatures.Contains(constraint.Signature))
+            var paired =
+                string.IsNullOrWhiteSpace(constraint.Name)
+                || ExcludedAsPrimaryKey(constraint.Signature)
+                    ? -1
+                    : remainingLive.FindIndex(l =>
+                        !string.IsNullOrWhiteSpace(l.Name)
+                        && NameKey(l.Name) == NameKey(constraint.Name)
+                    );
+
+            if (paired < 0)
             {
+                remainingTarget.Add(constraint);
                 continue;
             }
 
-            // 主キーと同じ列集合の一意制約を持てない方言では、主キーが一意性を保証するので比較から外す
+            var liveConstraint = remainingLive[paired];
+            remainingLive.RemoveAt(paired);
+
             if (
-                !dialect.SupportsUniqueConstraintOnPrimaryKey
-                && string.Equals(constraint.Signature, targetKeySignature, StringComparison.Ordinal)
+                !string.Equals(
+                    liveConstraint.Signature,
+                    constraint.Signature,
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                adds.Add(
+                    AlterUniqueConstraintItem(
+                        tableName,
+                        AddUniqueConstraintItem(tableName, target, constraint),
+                        DropUniqueConstraintItem(tableName, live, liveConstraint),
+                        limit
+                    )
+                );
+            }
+        }
+
+        // 列集合の段: 残りを列集合で組む
+        var liveSignatures = remainingLive
+            .Select(c => c.Signature)
+            .ToHashSet(StringComparer.Ordinal);
+        var targetSignatures = remainingTarget
+            .Select(c => c.Signature)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var constraint in remainingTarget)
+        {
+            if (
+                liveSignatures.Contains(constraint.Signature)
+                || ExcludedAsPrimaryKey(constraint.Signature)
             )
             {
                 continue;
             }
 
-            var columns = string.Join(", ", constraint.ColumnNames);
-
-            adds.Add(
-                new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.AddUniqueConstraint,
-                    TableName = tableName,
-                    Entity = target,
-                    // 図側の名前は未設定（null）でよい＝レンダラーが UQ_{表}_{列…} を合成する
-                    UniqueConstraintName = constraint.Name,
-                    UniqueConstraintColumns = constraint.ColumnNames,
-                    IsSelected = true,
-                    Description = string.Format(
-                        Strings.Diff_AddUniqueConstraint,
-                        tableName,
-                        columns
-                    ),
-                }
-            );
+            adds.Add(AddUniqueConstraintItem(tableName, target, constraint));
         }
 
-        foreach (var constraint in liveConstraints)
+        var drops = remainingLive
+            .Where(c => !targetSignatures.Contains(c.Signature))
+            .Select(c => DropUniqueConstraintItem(tableName, live, c))
+            .ToList();
+
+        diff.Items.AddRange(PairUniqueConstraintAlters(tableName, adds, drops, limit));
+    }
+
+    /// <summary>図にだけ在る一意制約の追加の項目（既定で選択）</summary>
+    private static SchemaDiffItem AddUniqueConstraintItem(
+        string tableName,
+        Entity target,
+        (string? Name, List<string> ColumnNames, string Signature) constraint
+    ) =>
+        new()
         {
-            if (targetSignatures.Contains(constraint.Signature))
-            {
-                continue;
-            }
+            Kind = SchemaDiffKind.AddUniqueConstraint,
+            TableName = tableName,
+            Entity = target,
+            // 図側の名前は未設定（null）でよい＝レンダラーが UQ_{表}_{列…} を合成する
+            UniqueConstraintName = constraint.Name,
+            UniqueConstraintColumns = constraint.ColumnNames,
+            IsSelected = true,
+            Description = string.Format(
+                Strings.Diff_AddUniqueConstraint,
+                tableName,
+                string.Join(", ", constraint.ColumnNames)
+            ),
+        };
 
-            drops.Add(
-                new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.DropUniqueConstraint,
-                    TableName = tableName,
-                    Entity = live,
-                    // DROP には DB 側の実名が要る（4 逐次方言は取込済み・SQLite は再構築へ畳まれる）
-                    UniqueConstraintName = constraint.Name,
-                    UniqueConstraintColumns = constraint.ColumnNames,
-                    IsSelected = false,
-                    Description = string.Format(
-                        Strings.Diff_DropUniqueConstraint,
-                        tableName,
-                        string.Join(", ", constraint.ColumnNames)
-                    ),
-                }
-            );
-        }
+    /// <summary>DB にだけ在る一意制約の削除の項目（既定で未選択＝破壊的）</summary>
+    private static SchemaDiffItem DropUniqueConstraintItem(
+        string tableName,
+        Entity live,
+        (string? Name, List<string> ColumnNames, string Signature) constraint
+    ) =>
+        new()
+        {
+            Kind = SchemaDiffKind.DropUniqueConstraint,
+            TableName = tableName,
+            Entity = live,
+            // DROP には DB 側の実名が要る（4 逐次方言は取込済み・SQLite は再構築へ畳まれる）
+            UniqueConstraintName = constraint.Name,
+            UniqueConstraintColumns = constraint.ColumnNames,
+            IsSelected = false,
+            Description = string.Format(
+                Strings.Diff_DropUniqueConstraint,
+                tableName,
+                string.Join(", ", constraint.ColumnNames)
+            ),
+        };
 
-        diff.Items.AddRange(
-            PairUniqueConstraintAlters(tableName, adds, drops, dialect.IdentifierLengthLimit)
+    /// <summary>追加と削除を 1 つに畳んだ一意制約の作り直しの項目（既定で未選択）</summary>
+    private static SchemaDiffItem AlterUniqueConstraintItem(
+        string tableName,
+        SchemaDiffItem add,
+        SchemaDiffItem drop,
+        IdentifierLengthLimit limit
+    )
+    {
+        var name = UniqueConstraintNaming.Resolve(
+            add.UniqueConstraintName,
+            tableName,
+            add.UniqueConstraintColumns,
+            limit
         );
+        return new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterUniqueConstraint,
+            TableName = tableName,
+            Entity = add.Entity,
+            UniqueConstraintName = add.UniqueConstraintName,
+            UniqueConstraintColumns = add.UniqueConstraintColumns,
+            ReplacedUniqueConstraint = drop,
+            IsSelected = false,
+            Description = string.Format(
+                Strings.Diff_AlterUniqueConstraint,
+                tableName,
+                name,
+                string.Join(", ", drop.UniqueConstraintColumns),
+                string.Join(", ", add.UniqueConstraintColumns)
+            ),
+        };
     }
 
     /// <summary>
@@ -727,6 +821,13 @@ public class SchemaDiffService
 
         foreach (var add in adds)
         {
+            // 名前の段で作り直しにした項目はそのまま並べる
+            if (add.Kind != SchemaDiffKind.AddUniqueConstraint)
+            {
+                result.Add(add);
+                continue;
+            }
+
             var name = UniqueConstraintNaming.Resolve(
                 add.UniqueConstraintName,
                 tableName,
@@ -745,25 +846,7 @@ public class SchemaDiffService
             }
 
             remainingDrops.Remove(drop);
-            result.Add(
-                new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.AlterUniqueConstraint,
-                    TableName = tableName,
-                    Entity = add.Entity,
-                    UniqueConstraintName = add.UniqueConstraintName,
-                    UniqueConstraintColumns = add.UniqueConstraintColumns,
-                    ReplacedUniqueConstraint = drop,
-                    IsSelected = false,
-                    Description = string.Format(
-                        Strings.Diff_AlterUniqueConstraint,
-                        tableName,
-                        name,
-                        string.Join(", ", drop.UniqueConstraintColumns),
-                        string.Join(", ", add.UniqueConstraintColumns)
-                    ),
-                }
-            );
+            result.Add(AlterUniqueConstraintItem(tableName, add, drop, limit));
         }
 
         result.AddRange(remainingDrops);

@@ -323,12 +323,19 @@ The diagram does not carry column defaults, so the DDL adds a comment before suc
 It does not stop the sync, because the foreign key is created when the database column has a DEFAULT constraint.
 On SQL Server and PostgreSQL, altering a column reads the column's collation back at execution time and writes it again when the new type is a string type (without it, the column goes back to the database's default collation; PostgreSQL writes it only when it differs from the type's default).
 On SQL Server, a type change drops the column's DEFAULT constraint, changes the type, and adds the constraint back with the same name and definition (keeping it would make the change fail with error 5074).
+Dropping a column on SQL Server drops its DEFAULT constraint first, for the same reason.
+A CHECK constraint or an index of your own that refers to the column is not dropped: the diagram does not carry them, so the drop fails with error 5074 and the sync is rolled back.
 A sync that changes the kind of type of a column with a default value is shown in the confirmation dialog on every dialect except SQLite (SQL Server, PostgreSQL, MySQL and Oracle).
 When the default does not fit the new type, the sync fails on PostgreSQL and Oracle, the sync fails with error 1067 on MySQL, and an insert that uses the default fails on SQL Server.
 When the sync fails on MySQL or Oracle, DDL is not rolled back, so the statements before it stay applied.
 Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
 Recreating a unique constraint works the same way: when a unique constraint keeps its name (or the generated name `UQ_{table}_{columns}` matches the database's name) but its columns change, the drop and the add become one diff item, unselected by default.
 Adding a constraint under the name the database already uses would fail, and re-adding it can fail on duplicate values.
+Unique constraints are paired in two steps.
+First, each unique constraint you named in the diagram is paired with the database's constraint of the same name, so the same columns make no difference and other columns make a recreate.
+The remaining constraints are then paired by their set of columns, so a unique constraint without a name in the diagram matches a database constraint on the same columns whatever its name.
+Names generated for unnamed constraints are not used in the first step.
+A constraint without a name in the database (SQLite) is paired by its columns only.
 On every dialect, a composite foreign key whose column pairs differ only in their order is not a difference, because the pairs map parent columns to child columns and their order carries no meaning (Oracle does not even keep the declared order and returns the pairs in the order of the referenced key).
 SQL Server and MySQL require the referencing columns to follow the order of the referenced key, so the DDL writes the pairs in the order of the referenced key (the primary key, or else a unique constraint).
 A foreign key the sync adds or recreates is written in the diagram's order, so on SQL Server and MySQL it fails when that order differs from the referenced key (the confirmation dialog shows it).
@@ -354,11 +361,17 @@ Remove that unique constraint from the diagram and select its drop as well, or d
 ### Safety by design
 
 - **Destructive differences (drops and type changes) are unselected by default**, and executing them shows a confirmation stating that destructive changes are included
-- The generated script is ordered by dependency (add tables → add columns → drop FKs → drop old primary keys → alter columns → add new primary keys → drop columns → drop tables → add FKs → descriptions), with a heading comment per section
+- The generated script is ordered by dependency (drop FKs → drop unique constraints → drop tables → add tables → add columns → drop old primary keys → alter columns → add new primary keys → drop columns → add unique constraints → add FKs → descriptions), with a heading comment per section.
+  Tables are dropped before tables are added, so a table you rename in the diagram can keep the unique constraint names of the old table.
+  On MySQL and Oracle, where DDL is committed implicitly, the old table stays dropped if adding the new one fails; running the sync again adds it.
+  SQLite rebuilds tables and uses its own order
 - A foreign-key addition whose FK column cannot be resolved is emitted as a skip comment instead of invalid DDL
 - Dropping a table or a column also drops every foreign key that loses its table or column, even when dropping that foreign key is not selected (on SQLite the surviving child table is rebuilt without it).
   This also lets a parent table and its child be dropped together whatever order they are listed in
+- Dropping a column also drops every unique constraint that uses the column, even when dropping that constraint is not selected, and the confirmation names each one.
+  The constraint is not re-created on the remaining columns, so add a unique constraint to the diagram if you still need one
 - A selected change that needs a change you did not select (a new table or column, or a primary key change) is left out of the script, and the confirmation names it together with what it needs.
+  Dropping a column of the primary key needs the primary key change that removes the column.
   A foreign key you add or change needs the primary key change when it refers to the parent's new primary key, and that key is neither the primary key nor a unique constraint without the change (also when the primary key change is left out on MySQL because only its column order changes).
   QuickER does not select the needed change for you
 - Composite (multi-column) foreign keys are handled as first-class: a relationship holds an ordered list of column pairs, so import, DDL generation, and sync all carry every pair.
@@ -408,6 +421,11 @@ Table and column descriptions sync on the four dialects that have a description 
 SQL Server uses MS_Description extended properties, PostgreSQL and Oracle use `COMMENT ON`, and MySQL uses `COMMENT` clauses.
 Checking for an existing description to choose between add and update applies to SQL Server's extended properties only; PostgreSQL and Oracle simply re-run `COMMENT ON`, and MySQL re-runs the `COMMENT` clause (both idempotent in themselves).
 Clearing a description in the diagram removes it.
+A description made only of spaces counts as no description: the DDL does not write it, the diff treats it as empty, and syncing it removes the description from the database.
+A description is written only by its own description item, so adding a column does not set the column's description unless that item is selected too (on every dialect, including MySQL).
+MySQL cannot store characters outside the Basic Multilingual Plane (such as emoji) in a description, and saves each one as `?`.
+The comparison therefore compares the diagram's description with those characters turned into `?`, so syncing or applying the DDL does not leave a difference behind.
+The sync confirmation names each such description, and the DDL writes a note before it.
 SQLite has no description mechanism, so descriptions are neither diffed nor synced there.
 
 On SQL Server, a table name without a schema refers to the connecting login's default schema, as it does in `CREATE TABLE`, and its description goes to the same table (the schema is taken from `SCHEMA_NAME()`).
