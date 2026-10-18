@@ -1047,7 +1047,6 @@
 
         return skipped;
     }
-
 }
 
 /// <summary>

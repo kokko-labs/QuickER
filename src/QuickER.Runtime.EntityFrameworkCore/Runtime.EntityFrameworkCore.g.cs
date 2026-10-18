@@ -726,7 +726,9 @@ public sealed class EntitySaveMetadata
 /// <remarks>
 /// The context factory is supplied by the backend (QuickER dialect, EF Core, InMemory) with the in-progress transaction
 /// context captured inside. The skip set is tracked by reference equality (<see cref="ReferenceEqualityComparer"/>) and
-/// used by the post-commit <c>AcceptChanges</c> to leave states untouched.
+/// used by the post-commit <c>AcceptChanges</c> to leave states untouched. The session hands After a context that notes
+/// an unbounded binary column written through it (<see cref="BinaryColumnWritten"/>), so a backend can tell whether the
+/// row versions its own statements returned may have moved on.
 /// </remarks>
 public sealed class SaveHookSession(
     ISaveHookRegistry registry,
@@ -739,6 +741,21 @@ public sealed class SaveHookSession(
 
     /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
     public IReadOnlySet<EntityBaseCore> Skipped => _skipped;
+
+    /// <summary>Gets whether a hook's After wrote an unbounded binary column through the context it was handed, whether or not the write succeeded.</summary>
+    /// <remarks>
+    /// <para>
+    /// Such a write can touch a row the save itself wrote. The column is one the save's statements leave alone, so the
+    /// row's other values stay as the entity holds them, but its version moves on past the one the save's own statement
+    /// returned: a backend that carries versions back reads them again before committing when this is set.
+    /// </para>
+    /// <para>
+    /// Raw SQL (<see cref="ISaveHookContext.ExecuteSqlAsync"/>) is not counted. It can change any column, which a version
+    /// read again would hide from the next save, so a saved row it writes keeps the version the save returned and the next
+    /// save of the same instance reports a conflict.
+    /// </para>
+    /// </remarks>
+    public bool BinaryColumnWritten { get; private set; }
 
     /// <summary>Adds an entity to the skip set.</summary>
     public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
@@ -769,9 +786,31 @@ public sealed class SaveHookSession(
             : invoker.InvokeAfterAsync(
                 entity,
                 operation,
-                _contextFactory(entity),
+                new WriteNotingContext(_contextFactory(entity), this),
                 cancellationToken
             );
+    }
+
+    /// <summary>Hands every call on to the backend's context, noting on the session that a hook wrote an unbounded binary column through it.</summary>
+    private sealed class WriteNotingContext(ISaveHookContext inner, SaveHookSession session) : ISaveHookContext
+    {
+        public Task<int> ExecuteSqlAsync(
+            string sql,
+            object? parameters = null,
+            CancellationToken cancellationToken = default
+        ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
+
+        public Task<bool> WriteBinaryColumnAsync(
+            string propertyName,
+            object key,
+            Stream? source,
+            long? length = null,
+            CancellationToken cancellationToken = default
+        )
+        {
+            session.BinaryColumnWritten = true;
+            return inner.WriteBinaryColumnAsync(propertyName, key, source, length, cancellationToken);
+        }
     }
 }
 

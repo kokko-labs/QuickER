@@ -569,6 +569,10 @@ public class RuntimeTestMatrixTests
         new("SaveHookRemoteRuntimeTests", "SaveHook", Backend.Remote),
         new("RemoteSaveWriteBackRuntimeTests", "SaveHook", Backend.Remote),
         new("RemoteSaveRowOrderRuntimeTests", "SaveHook", Backend.Remote),
+        new("SaveHookContextWriteVersionSqlServerRuntimeTests", "SaveHook", Backend.AdoSqlServer),
+        new("SaveHookContextWriteVersionSqlServerRuntimeTests", "SaveHook", Backend.EfCore),
+        new("SaveHookBinaryWriteSqlServerRuntimeTests", "SaveHook", Backend.AdoSqlServer),
+        new("SaveHookBinaryWriteSqliteRuntimeTests", "SaveHook", Backend.AdoSqlite),
         // --- 無制限バイナリ列 ---
         new("SqlServerBinaryColumnRuntimeTests", "BinaryColumn", Backend.AdoSqlServer),
         new("BinaryColumnAdoRuntimeTests", "BinaryColumn", Backend.AdoSqlite),

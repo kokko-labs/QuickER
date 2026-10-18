@@ -729,6 +729,13 @@ context が提供する操作は次の 2 つで、生ハンドルは公開しま
 - `ExecuteSqlAsync(sql, parameters)`。
   任意の DML です（監査行・関連テーブルへの書き込みなど）。
 
+失敗した書き込みは、フックが例外を握りつぶして保存がそのままコミットしても、列を元のまま残します。
+SQLite では書き込みをセーブポイントの中で行ってそこまで戻し、SQL Server では書き込みが 1 つの文です。
+
+保存する行の値を変えたいときは、After で SQL を書かず、Before でエンティティのプロパティに値を入れます。
+After の SQL は監査ログなど別の表への書き込みに向いています。
+保存した行を書いた場合は、次の保存の前にその行を読み直します（[rowversion による楽観排他](#rowversion-による楽観排他)を参照）。
+
 `operation` には、実際に行われた操作が渡ります。
 `insertWhenUpdateMissing: true` で更新対象が見つからず INSERT に切り替わった場合、Before は `Update` で 1 回呼ばれ、After は実操作の `Insert` で呼ばれます。
 
@@ -1108,6 +1115,10 @@ catch (SaveConflictException ex) when (ex.Reason == SaveConflictReason.Modified)
 - **新しい版が反映されます。**
   挿入・更新・グラフ保存が成功すると、エンティティは DB が採番した版を保持するため、再取得せずに同じインスタンスをそのまま保存できます。
   Save フックの `AfterSaveAsync` はコミット前に走るため、この時点ではまだ古い版が見えます。
+  After フックが context で無制限バイナリ列を書くと、書いた行の版が進むので、SQL Server の QuickER 版 Repository は、保存が書いた行の版をコミットの前に読み直し、コミットの後に書き戻します。
+  読み直すのは保存が書いた行だけです。グラフの中の変更のない行をフックが書いた場合、その行は読んだときの版のままなので、読み直してから保存します。
+  After の SQL（`ExecuteSqlAsync`）はどの列でも変えられるので、読み直しません。保存した行を SQL で書くと、同じインスタンスの次の保存は競合になるので、読み直してから保存します。
+  版を持たない SQLite では、次の保存がフックの書いた列を上書きします。
 - **どのバックエンドでも契約は同じです。**
   QuickER 版 Repository は `WHERE ... AND <rowversion> = @original` で文を守り、`OUTPUT` 句で新しい版を読み戻します。
   EF Core は自前の並行性トークン（`IsRowVersion()`）を使い、`DbUpdateConcurrencyException` を同じ例外へ変換します。
@@ -1976,6 +1987,12 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
   Stream はちょうどその長さのバイトを返す必要があります。
   シークできる Stream の残りと違う `length`、`length` より先に終わる Stream、`length` を超えて続く Stream は `ArgumentException` になり、保存済みの値は変わりません。
 - **楽観排他（rowversion 等）はスコープ外です**（生 SQL と同格の直接列操作のため）。
+  それでも書き込みは同じ行を UPDATE するので、版のある表では行の版が進み、手元のエンティティの版は古いまま残ります。
+  そのエンティティを次に保存すると競合になるので、書いた後は行を読み直してから保存します。
+  保存の After フックの context から書いた場合は別で、保存が書いた行の版を読み直します（[rowversion による楽観排他](#rowversion-による楽観排他)を参照）。
+- **blob は別の表に置く形がいちばん安全です。**
+  版で守る本体の行と同じ行に blob を置くと、blob を書くたびに本体の版が進みます。
+  本体の行を参照する別の表に blob を置けば、blob の書き込みは本体の版に触れません。
 - **INSERT 専用メソッドはありません。**
   新規行は「blob を空にしたまま INSERT、続いて `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
   NULL 許容列なら「空」は `null` で構いませんが、NOT NULL 列では実体のある空の値（値オブジェクト有効なら `ThumbValue.Create([])`・無効なら `[]`）が必要です（`null` の INSERT は DB に拒否されるため）。

@@ -723,6 +723,12 @@ The context provides two operations and does not expose raw handles.
   Both stream-write to an excluded column (when `ExcludeUnboundedBinaryColumns` is enabled); name the column with `nameof`.
 - `ExecuteSqlAsync(sql, parameters)` for arbitrary DML, such as an audit row or a write to a related table.
 
+A write that fails leaves the column as it was, even when the hook catches the exception and the save goes on to commit.
+On SQLite the write runs inside a savepoint and rolls back to it; on SQL Server it is a single statement.
+
+To change a value of a row the save writes, set the entity's property in Before rather than writing the row with SQL in After.
+SQL in After suits writes to other tables, such as an audit row; a saved row it writes has to be read again before its next save (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
+
 `operation` receives the operation that actually happened.
 If `insertWhenUpdateMissing: true` and no update target is found so it switches to INSERT, Before is called once with `Update` and After is called with the actual `Insert`.
 
@@ -1094,6 +1100,10 @@ Reload-and-reapply is the honest answer when the two edits can be merged.
 - **The new version is written back.**
   After a successful insert, update, or graph save, the entity holds the version the database assigned, so the same instance can be saved again without being re-read.
   A save hook's `AfterSaveAsync` runs before the commit and therefore still sees the old version.
+  When an After hook writes an unbounded binary column through its context, the write moves on the version of the row it touches, so the QuickER Repository for SQL Server reads the versions of the rows the save wrote again before the commit and writes those back after it.
+  Only the rows the save wrote are read again: a row of the graph the save left alone keeps the version it was read with, so read it again before saving it if a hook wrote it.
+  Raw SQL from After (`ExecuteSqlAsync`) reads nothing again, since it may have changed any column: when it writes a row the save wrote, the next save of the same instance reports a conflict, so read the row again before saving it.
+  On SQLite, which carries no row version, that next save writes over the columns the hook set.
 - **Every backend follows the same contract.**
   The QuickER Repository guards the statement with `WHERE ... AND <rowversion> = @original` and reads the new version back through an `OUTPUT` clause.
   EF Core uses its own concurrency token (`IsRowVersion()`) and converts `DbUpdateConcurrencyException` into the same exception.
@@ -1951,6 +1961,12 @@ Semantics:
   The stream must yield exactly that many bytes.
   A `length` that differs from what is left in a seekable stream, and a stream that ends before `length` or goes on past it, throw `ArgumentException` and leave the stored value as it was.
 - **Optimistic concurrency (rowversion and the like) is out of scope**, since this is direct column manipulation on par with raw SQL.
+  The write still updates the row, so on a table with a row version it moves the row's version on, while the entity you hold keeps the old one.
+  Saving that entity next reports a conflict, so read the row again after the write and before saving it.
+  A write made from a save's After hook through its context is different: the save reads the versions of the rows it wrote again (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
+- **Keeping the blob in a table of its own is the safest layout.**
+  A blob in the same row as data guarded by a row version moves that version on every time it is written.
+  Put the blob in a separate table that references the main row, and writing it never touches the main row's version.
 - **The generated code has no INSERT-only method.**
   Write a new row in two steps: INSERT with the blob left empty, then stream in the body with `Write{Column}Async`.
   On a nullable column, `null` is what "left empty" means.

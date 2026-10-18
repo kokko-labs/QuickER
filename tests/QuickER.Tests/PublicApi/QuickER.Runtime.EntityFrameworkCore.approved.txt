@@ -87,6 +87,7 @@ public sealed class QuickER.Runtime.EntityFrameworkCore.SaveHookSession
     public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> Skipped { get; }
     public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
     public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public bool BinaryColumnWritten { get; }
     public void Skip(QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.EntityFrameworkCore.ValueObjectStringMethodTranslator : Microsoft.EntityFrameworkCore.Query.IMethodCallTranslator

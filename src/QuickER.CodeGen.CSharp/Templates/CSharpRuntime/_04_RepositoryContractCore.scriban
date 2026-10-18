@@ -2097,6 +2097,15 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
                 mode: mode,
                 versions: versions{{ end }}
             ).ConfigureAwait(false);
+{{~ if repository_dialect == "sqlserver" ~}}
+
+            // A hook that wrote an unbounded binary column through its context may have moved on the version of a row the save wrote
+            if (hooks?.BinaryColumnWritten == true)
+            {
+                await versions.RereadAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+            }
+
+{{~ end ~}}
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -2188,6 +2197,14 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
                 mode: mode,
                 versions: versions{{ end }}
             ).ConfigureAwait(false);
+{{~ if repository_dialect == "sqlserver" ~}}
+
+            // A hook that wrote an unbounded binary column through its context may have moved on the version of a row the save wrote
+            if (hooks?.BinaryColumnWritten == true)
+            {
+                await versions.RereadAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+            }
+{{~ end ~}}
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -2344,6 +2361,8 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 /// <b>Beware the enlisted/standalone split</b>: a write allocates a zeroblob, resolves the rowid, and copies via
 /// SqliteBlob within one transaction. Standalone mode opens its own transaction and commits it, whereas enlisted mode uses
 /// the in-progress transaction as is and does not commit (the outer Save commits). Mixing these up loses the blob.
+/// Enlisted mode runs the write inside a savepoint and rolls back to it when the write fails, so a failed write leaves the
+/// column as it was even when the hook catches the exception and the outer Save commits.
 /// </para>
 {{~ end ~}}
 /// </remarks>
@@ -2501,12 +2520,18 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
 {{~ else ~}}
 
-        // Enlisted mode (transaction given) uses the outer transaction and does not commit.
+        // Enlisted mode (transaction given) uses the outer transaction and does not commit; the write runs inside a
+        // savepoint, so a failure undoes the zeroblob and whatever was copied without undoing the outer Save.
         // Standalone mode (no transaction) opens its own transaction and commits on success
         var ownsTransaction = transaction is null;
         var activeTransaction =
             transaction
             ?? ({{ sql_transaction_type }})await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!ownsTransaction)
+        {
+            await activeTransaction.SaveAsync(EnlistedWriteSavepoint, cancellationToken).ConfigureAwait(false);
+        }
 
         try
         {
@@ -2523,11 +2548,16 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 
                 if (await allocate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
                 {
-                    // No matching row (the zeroblob could not be allocated). Roll back only in standalone mode (enlisted mode defers to the outer transaction).
+                    // No matching row (the zeroblob could not be allocated), so nothing was written. Roll back only in
+                    // standalone mode (enlisted mode releases its savepoint and defers to the outer transaction).
                     // CancellationToken.None, as everywhere else: a canceled token must not be able to interrupt a rollback.
                     if (ownsTransaction)
                     {
                         await activeTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await activeTransaction.ReleaseAsync(EnlistedWriteSavepoint, CancellationToken.None).ConfigureAwait(false);
                     }
 
                     return false;
@@ -2572,6 +2602,10 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
             {
                 await activeTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
+            else
+            {
+                await activeTransaction.ReleaseAsync(EnlistedWriteSavepoint, CancellationToken.None).ConfigureAwait(false);
+            }
 
             return true;
         }
@@ -2580,6 +2614,10 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
             if (ownsTransaction)
             {
                 await SqlTransactions.RollbackQuietlyAsync(activeTransaction).ConfigureAwait(false);
+            }
+            else
+            {
+                await RollbackEnlistedWriteQuietlyAsync(activeTransaction).ConfigureAwait(false);
             }
 
             throw;
@@ -2593,6 +2631,25 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
         }
 {{~ end ~}}
     }
+{{~ if repository_dialect != "sqlserver" ~}}
+
+    /// <summary>The savepoint an enlisted write runs inside, so that a failed write can be undone without undoing the outer Save.</summary>
+    private const string EnlistedWriteSavepoint = "quicker_unbounded_binary_write";
+
+    /// <summary>Rolls an enlisted write back to its savepoint and releases it, swallowing a failure of its own so that the write's exception is the one that surfaces.</summary>
+    private static async Task RollbackEnlistedWriteQuietlyAsync({{ sql_transaction_type }} transaction)
+    {
+        try
+        {
+            await transaction.RollbackAsync(EnlistedWriteSavepoint, CancellationToken.None).ConfigureAwait(false);
+            await transaction.ReleaseAsync(EnlistedWriteSavepoint, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The write's own exception is rethrown by the caller; a failed rollback must not replace it
+        }
+    }
+{{~ end ~}}
 }
 {{~ end ~}}
 
