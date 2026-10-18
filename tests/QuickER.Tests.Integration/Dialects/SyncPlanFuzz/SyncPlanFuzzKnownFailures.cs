@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
@@ -30,62 +29,7 @@ internal sealed record SyncPlanFuzzKnownFailure(
 internal static class SyncPlanFuzzKnownFailures
 {
     /// <summary>一覧</summary>
-    public static readonly IReadOnlyList<SyncPlanFuzzKnownFailure> All =
-    [
-        new(
-            "名前つきの一意制約の列を変え、同じ列に名前の無い一意制約を足すと、同じ名前の追加で失敗する",
-            ["sqlserver", "mysql"],
-            "41-5（予定・ユーザー判断待ち）",
-            AddsUniqueConstraintWithNameStillInUse
-        ),
-    ];
-
-    private static readonly Regex ChangeUnique = new(
-        @"^change unique (?<table>\S+) (?<name>\S+) -> \(",
-        RegexOptions.CultureInvariant
-    );
-
-    /// <summary>
-    /// 名前つきの一意制約の列を変え（<c>change unique T N -> (…)</c>）、同じ表に名前の無い一意制約を足した
-    /// （<c>add unique T(…)</c>）種が、警告なしに N の名前の重なりで失敗した形か
-    /// </summary>
-    private static bool AddsUniqueConstraintWithNameStillInUse(FuzzSeedOutcome outcome)
-    {
-        if (
-            outcome.Committed
-            || outcome.Violations.Count != 1
-            || !outcome
-                .Violations[0]
-                .StartsWith("failed without a warning:", StringComparison.Ordinal)
-            || outcome.Error is not { } error
-        )
-        {
-            return false;
-        }
-
-        foreach (var mutation in outcome.Mutations)
-        {
-            var change = ChangeUnique.Match(mutation);
-
-            if (!change.Success)
-            {
-                continue;
-            }
-
-            var table = change.Groups["table"].Value;
-            var name = change.Groups["name"].Value;
-            var addsUnnamed = outcome.Mutations.Any(m =>
-                m.StartsWith($"add unique {table}(", StringComparison.Ordinal) && m.EndsWith(')')
-            );
-
-            if (addsUnnamed && error.Contains(name, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    public static readonly IReadOnlyList<SyncPlanFuzzKnownFailure> All = [];
 
     /// <summary>
     /// 方言の失敗した種を一覧と照合し、一覧に無い失敗と、一覧に載っているのに起きなかった項目を返す

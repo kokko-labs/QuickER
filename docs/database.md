@@ -331,6 +331,11 @@ When the sync fails on MySQL or Oracle, DDL is not rolled back, so the statement
 Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
 Recreating a unique constraint works the same way: when a unique constraint keeps its name (or the generated name `UQ_{table}_{columns}` matches the database's name) but its columns change, the drop and the add become one diff item, unselected by default.
 Adding a constraint under the name the database already uses would fail, and re-adding it can fail on duplicate values.
+Unique constraints are paired in two steps.
+First, each unique constraint you named in the diagram is paired with the database's constraint of the same name, so the same columns make no difference and other columns make a recreate.
+The remaining constraints are then paired by their set of columns, so a unique constraint without a name in the diagram matches a database constraint on the same columns whatever its name.
+Names generated for unnamed constraints are not used in the first step.
+A constraint without a name in the database (SQLite) is paired by its columns only.
 On every dialect, a composite foreign key whose column pairs differ only in their order is not a difference, because the pairs map parent columns to child columns and their order carries no meaning (Oracle does not even keep the declared order and returns the pairs in the order of the referenced key).
 SQL Server and MySQL require the referencing columns to follow the order of the referenced key, so the DDL writes the pairs in the order of the referenced key (the primary key, or else a unique constraint).
 A foreign key the sync adds or recreates is written in the diagram's order, so on SQL Server and MySQL it fails when that order differs from the referenced key (the confirmation dialog shows it).
