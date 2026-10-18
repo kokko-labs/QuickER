@@ -228,6 +228,9 @@ public sealed class SyncPlanner
         // 既定値のある列の型の種類を変える列の変更を名指しする（SQL Server・PostgreSQL・Oracle）
         WarnDefaultsOnColumnTypeKindChange(selected, capabilities, context, warnings);
 
+        // 説明の BMP の外の文字を保存できない方言（MySQL）では、その文字を書く説明の項目を名指しする
+        WarnDescriptionCharactersReplaced(selected, capabilities, warnings);
+
         if (!isRebuildDialect)
         {
             // 逐次 DDL 方言: 全差分をそのままセクション化する。
@@ -1783,6 +1786,48 @@ public sealed class SyncPlanner
                     SyncPlanWarningKind.SetDefaultOnNotNullColumn,
                     childTable,
                     $"{name} ({string.Join(", ", notNull)})"
+                )
+            );
+        }
+    }
+
+    /// <summary>
+    /// 選んだ説明の項目のうち、方言が保存できない文字（BMP の外の文字）を書くものを
+    /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> で表・列ごとに名指しする
+    /// （判定は <see cref="SyncDialectCapabilities.IdentifierLengthLimit"/> の宣言＝MySQL だけ置き換わる）。
+    /// </summary>
+    private static void WarnDescriptionCharactersReplaced(
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        List<SyncPlanWarning> warnings
+    )
+    {
+        var limit = capabilities.IdentifierLengthLimit;
+
+        foreach (var item in selected)
+        {
+            var target = item.Kind switch
+            {
+                SchemaDiffKind.SetTableDescription => item.TableName,
+                SchemaDiffKind.SetColumnDescription when item.ColumnName is not null =>
+                    $"{item.TableName}.{item.ColumnName}",
+                _ => null,
+            };
+
+            if (
+                target is null
+                || !DescriptionText.IsPresent(item.NewDescription)
+                || limit.CanRepresent(item.NewDescription)
+            )
+            {
+                continue;
+            }
+
+            warnings.Add(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.DescriptionCharactersReplaced,
+                    item.TableName,
+                    target
                 )
             );
         }

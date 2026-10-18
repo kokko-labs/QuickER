@@ -416,6 +416,11 @@ Table and column descriptions sync on the four dialects that have a description 
 SQL Server uses MS_Description extended properties, PostgreSQL and Oracle use `COMMENT ON`, and MySQL uses `COMMENT` clauses.
 Checking for an existing description to choose between add and update applies to SQL Server's extended properties only; PostgreSQL and Oracle simply re-run `COMMENT ON`, and MySQL re-runs the `COMMENT` clause (both idempotent in themselves).
 Clearing a description in the diagram removes it.
+A description made only of spaces counts as no description: the DDL does not write it, the diff treats it as empty, and syncing it removes the description from the database.
+A description is written only by its own description item, so adding a column does not set the column's description unless that item is selected too (on every dialect, including MySQL).
+MySQL cannot store characters outside the Basic Multilingual Plane (such as emoji) in a description, and saves each one as `?`.
+The comparison therefore compares the diagram's description with those characters turned into `?`, so syncing or applying the DDL does not leave a difference behind.
+The sync confirmation names each such description, and the DDL writes a note before it.
 SQLite has no description mechanism, so descriptions are neither diffed nor synced there.
 
 On SQL Server, a table name without a schema refers to the connecting login's default schema, as it does in `CREATE TABLE`, and its description goes to the same table (the schema is taken from `SCHEMA_NAME()`).

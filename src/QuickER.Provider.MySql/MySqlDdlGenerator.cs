@@ -58,7 +58,7 @@ public sealed class MySqlDdlGenerator : DdlGeneratorBase
 
     /// <summary>テーブル定義の閉じ括弧後へ <c>COMMENT='…'</c> 句を付ける（説明が空なら何も付けない）</summary>
     protected override string BuildTableOptionsSuffix(Entity entity) =>
-        string.IsNullOrWhiteSpace(entity.Description)
+        !DescriptionText.IsPresent(entity.Description)
             ? string.Empty
             : $" COMMENT='{MySqlIdentifier.EscapeStringLiteral(entity.Description)}'";
 }

@@ -344,6 +344,10 @@ Do you want to run this against {0}?</value>
     <value>Note: changing these columns leaves the two ends of the foreign keys below with different types, so the foreign keys are NOT dropped and re-added and the column change will fail (the database stays unchanged). Change the column on both ends to the same type:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmDescriptionCharactersReplaced" xml:space="preserve">
+    <value>Note: the descriptions below contain characters outside the Basic Multilingual Plane (such as emoji). This database cannot store them and saves each one as "?":
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmUniqueConstraintDroppedWithColumn" xml:space="preserve">
     <value>Note: the unique constraints below are dropped because a column they use is dropped, even though dropping them is not selected. They are not re-created; add a unique constraint on the remaining columns if you need one:
 {0}</value>

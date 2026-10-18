@@ -713,6 +713,62 @@ public sealed class MySqlColumnAttributeSyncIntegrationTests(MySqlContainerFixtu
         after["v"]["COLUMN_DEFAULT"].Should().Be("abc");
     }
 
+    /// <summary>
+    /// 列の追加は説明（COMMENT）を書かず、説明は選んだ説明の同期の項目だけが書くことを検証する。あわせて、同じ同期で
+    /// 既存の列へ説明を書く MODIFY（ライブ再構成）が、COMMENT 以外の列属性（DEFAULT・照合順序・ON UPDATE など）を
+    /// 1 つも変えないことも確かめる。
+    /// </summary>
+    /// <remarks>
+    /// 以前は列の追加が図の説明を ADD COLUMN の COMMENT 句へ書いており、説明の項目を選ばなくても説明が入った
+    /// （ほかの方言は説明の項目だけが書く）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] B: 列の追加は説明を書かず、選んだ説明の項目だけが書く（ほかの列属性は変えない）"
+    )]
+    public async Task AddColumn_WritesDescriptionOnlyThroughSelectedDescriptionItem()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(CreateAttrsTable, Ct);
+        var before = await ReadColumnMetadataAsync("attrs");
+
+        SchemaDiffItem AddColumn(string name, string description) =>
+            new()
+            {
+                Kind = SchemaDiffKind.AddColumn,
+                TableName = "attrs",
+                ColumnName = name,
+                Column = new Column
+                {
+                    Name = name,
+                    DataType = "varchar(10)",
+                    IsNullable = true,
+                    Description = description,
+                },
+                IsSelected = true,
+            };
+
+        await ApplyAsync([
+            AddColumn("memo", "selected note"),
+            AddColumn("memo2", "unselected note"),
+            ColumnDescriptionItem("attrs", "memo", "selected note"),
+            ColumnDescriptionItem("attrs", "s", "s note"),
+        ]);
+
+        var after = await ReadColumnMetadataAsync("attrs");
+        after["memo"]["COLUMN_COMMENT"].Should().Be("selected note");
+        after["memo2"]
+            ["COLUMN_COMMENT"]
+            .Should()
+            .BeEmpty("説明の項目を選んでいない列には説明が入らない");
+        after["s"]["COLUMN_COMMENT"].Should().Be("s note");
+        after.Remove("memo");
+        after.Remove("memo2");
+        AssertMetadataUnchanged(before, after, except: ["COLUMN_COMMENT"]);
+        after["s"]["COLUMN_DEFAULT"].Should().Be("a'b");
+        after["s"]["COLLATION_NAME"].Should().Be("utf8mb4_bin");
+    }
+
     private static SchemaDiffItem ColumnDescriptionItem(
         string table,
         string column,

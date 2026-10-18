@@ -39,6 +39,8 @@ public class SchemaDiffService
     /// 型の比較は <see cref="SyncDialectCapabilities.AreSameType"/>（両側を方言の取込表記へ寄せてから比べる）、
     /// 外部キーの参照アクションは <see cref="SyncDialectCapabilities.EffectiveOnDelete"/> /
     /// <see cref="SyncDialectCapabilities.EffectiveOnUpdate"/>（方言の実効値）で比べる。
+    /// 説明は方言が保存する形（<see cref="SyncDialectCapabilities.IdentifierLengthLimit"/> の
+    /// <see cref="QuickER.Dialects.IdentifierLengthLimit.StoredText"/>＝MySQL では BMP の外の文字を <c>?</c> にした形）で比べる。
     /// </param>
     public SchemaDiff Compute(
         IReadOnlyList<Entity> liveEntities,
@@ -52,6 +54,16 @@ public class SchemaDiffService
 
         // 説明差分を出すか（SQLite などコメント機構が無い方言では出さない）
         var emitDescriptions = capabilities.SupportsDescriptions;
+
+        // 説明は方言が保存する形で比べる（MySQL は BMP の外の文字を ? に置き換えて保存するので、図の絵文字と DB の ? を同じとみなす）
+        var descriptionLimit = capabilities.IdentifierLengthLimit;
+
+        bool AreSameStoredDescription(string target, string live) =>
+            string.Equals(
+                descriptionLimit.StoredText(target),
+                descriptionLimit.StoredText(live),
+                StringComparison.Ordinal
+            );
 
         // FK 比較で制約名を含めるか（SQLite は合成名で永続化されないため名前を除いて比較する）
         var includeFkConstraintName = capabilities.PersistsForeignKeyConstraintNames;
@@ -90,9 +102,9 @@ public class SchemaDiffService
                 );
 
                 // 新規テーブル: テーブル説明
-                var newTblDesc = target.Description ?? string.Empty;
+                var newTblDesc = DescriptionText.Normalize(target.Description);
 
-                if (emitDescriptions && !string.IsNullOrEmpty(newTblDesc))
+                if (emitDescriptions && DescriptionText.IsPresent(newTblDesc))
                 {
                     diff.Items.Add(
                         new SchemaDiffItem
@@ -114,7 +126,7 @@ public class SchemaDiffService
                 // 新規テーブル: 各列の説明
                 foreach (var c in target.Columns)
                 {
-                    if (!emitDescriptions || string.IsNullOrEmpty(c.Description))
+                    if (!emitDescriptions || !DescriptionText.IsPresent(c.Description))
                     {
                         continue;
                     }
@@ -147,13 +159,10 @@ public class SchemaDiffService
             var matchedLiveColumns = liveColumnOf.Values.ToHashSet();
 
             // テーブル説明の差分
-            var targetTableDesc = target.Description ?? string.Empty;
-            var liveTableDesc = live.Description ?? string.Empty;
+            var targetTableDesc = DescriptionText.Normalize(target.Description);
+            var liveTableDesc = DescriptionText.Normalize(live.Description);
 
-            if (
-                emitDescriptions
-                && !string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal)
-            )
+            if (emitDescriptions && !AreSameStoredDescription(targetTableDesc, liveTableDesc))
             {
                 diff.Items.Add(
                     new SchemaDiffItem
@@ -163,7 +172,7 @@ public class SchemaDiffService
                         Entity = target,
                         NewDescription = targetTableDesc,
                         OldDescription = liveTableDesc,
-                        Description = string.IsNullOrEmpty(targetTableDesc)
+                        Description = !DescriptionText.IsPresent(targetTableDesc)
                             ? string.Format(Strings.Diff_RemoveTableDescription, name)
                             : string.Format(
                                 Strings.Diff_UpdateTableDescription,
@@ -198,7 +207,7 @@ public class SchemaDiffService
                     );
 
                     // 新規列に説明があれば、列追加と一緒に説明を設定する
-                    if (emitDescriptions && !string.IsNullOrEmpty(tcol.Description))
+                    if (emitDescriptions && DescriptionText.IsPresent(tcol.Description))
                     {
                         diff.Items.Add(
                             new SchemaDiffItem
@@ -279,13 +288,10 @@ public class SchemaDiffService
                         );
                     }
 
-                    var newColDesc = tcol.Description ?? string.Empty;
-                    var oldColDesc = lcol.Description ?? string.Empty;
+                    var newColDesc = DescriptionText.Normalize(tcol.Description);
+                    var oldColDesc = DescriptionText.Normalize(lcol.Description);
 
-                    if (
-                        emitDescriptions
-                        && !string.Equals(newColDesc, oldColDesc, StringComparison.Ordinal)
-                    )
+                    if (emitDescriptions && !AreSameStoredDescription(newColDesc, oldColDesc))
                     {
                         diff.Items.Add(
                             new SchemaDiffItem
@@ -297,7 +303,7 @@ public class SchemaDiffService
                                 Column = tcol,
                                 NewDescription = newColDesc,
                                 OldDescription = oldColDesc,
-                                Description = string.IsNullOrEmpty(newColDesc)
+                                Description = !DescriptionText.IsPresent(newColDesc)
                                     ? string.Format(
                                         Strings.Diff_RemoveColumnDescription,
                                         name,

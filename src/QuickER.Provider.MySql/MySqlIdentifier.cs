@@ -89,7 +89,7 @@ public static class MySqlIdentifier
     /// 列定義再指定）で同じインライン COMMENT 表記を共有し、二重定義を避ける。
     /// </remarks>
     public static string ColumnCommentClause(string? description) =>
-        string.IsNullOrWhiteSpace(description)
+        !DescriptionText.IsPresent(description)
             ? string.Empty
             : $" COMMENT '{EscapeStringLiteral(description)}'";
 }

@@ -597,12 +597,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
-            // ドットを含む表名は、SQLite では添付したデータベースの表と読まれる
             // 既定値のある列の型の種類を変えると、既定値が新しい型に合わなければ失敗する
             SyncPlanWarningKind.DefaultOnColumnTypeKindChange => string.Format(
                 Strings.SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // ドットを含む表名は、SQLite では添付したデータベースの表と読まれる
             SyncPlanWarningKind.SchemaQualifiedTableName => string.Format(
                 Strings.SchemaSync_ExecuteConfirmSchemaQualifiedTableName,
                 BulletList(warnings.Select(w => w.TableName))
@@ -611,6 +611,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             SyncPlanWarningKind.UniqueConstraintDroppedWithColumn => string.Format(
                 Strings.SchemaSync_ExecuteConfirmUniqueConstraintDroppedWithColumn,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
+            // 説明の BMP の外の文字は、保存できない方言（MySQL）では ? として保存される
+            SyncPlanWarningKind.DescriptionCharactersReplaced => string.Format(
+                Strings.SchemaSync_ExecuteConfirmDescriptionCharactersReplaced,
+                BulletList(warnings.Select(w => w.Detail))
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };

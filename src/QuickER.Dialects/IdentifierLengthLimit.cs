@@ -36,6 +36,7 @@ public enum IdentifierLengthUnit
 /// 長さに加えて、方言が表せない文字を宣言する（<see cref="RepresentsSupplementaryCharacters"/>）。MySQL は識別子の文字集合が
 /// <c>utf8mb3</c> で、BMP の外の文字（サロゲート対）を断らずに黙って <c>?</c> へ置き換えるため、名前の入口で断る
 /// （<see cref="Accepts"/> / <see cref="AcceptsTableName"/> が長さと文字の両方を見る）。
+/// MySQL の説明（<c>COMMENT</c>）も同じ文字集合のデータ辞書に入るので、同じ宣言で保存する形を求める（<see cref="StoredText"/>）。
 /// </para>
 /// </remarks>
 /// <param name="Unit">数える単位</param>
@@ -45,7 +46,7 @@ public enum IdentifierLengthUnit
 /// <c>null</c> は検査しない。
 /// </param>
 /// <param name="RepresentsSupplementaryCharacters">
-/// BMP の外の文字（サロゲート対）を識別子に保存できるか（MySQL だけ <c>false</c>＝黙って <c>?</c> へ置き換える）
+/// BMP の外の文字（サロゲート対）を識別子と説明に保存できるか（MySQL だけ <c>false</c>＝黙って <c>?</c> へ置き換える）
 /// </param>
 public sealed record IdentifierLengthLimit(
     IdentifierLengthUnit Unit,
@@ -103,6 +104,39 @@ public sealed record IdentifierLengthLimit(
     /// <summary>名前の文字をすべて保存できるか（BMP の外の文字を保存できない方言で、それを含めば <c>false</c>）</summary>
     public bool CanRepresent(string name) =>
         RepresentsSupplementaryCharacters || !name.Any(char.IsSurrogate);
+
+    /// <summary>説明などの文字列を、この方言が保存して読み戻す形にする</summary>
+    /// <remarks>
+    /// BMP の外の文字を保存できない方言（<see cref="RepresentsSupplementaryCharacters"/> が <c>false</c>）では、サロゲート対を
+    /// 1 つの <c>?</c> に、対になっていないサロゲートを U+FFFD にする（MySQL の実測。対になっていないサロゲートはクライアントが
+    /// 送る前に U+FFFD へ置き換える）。保存できる方言では、そのまま返す。
+    /// </remarks>
+    public string StoredText(string text)
+    {
+        if (CanRepresent(text))
+        {
+            return text;
+        }
+
+        var stored = new StringBuilder(text.Length);
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+
+            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                stored.Append('?');
+                i++;
+            }
+            else
+            {
+                stored.Append(char.IsSurrogate(c) ? '\uFFFD' : c);
+            }
+        }
+
+        return stored.ToString();
+    }
 
     /// <summary>列名・制約名として受け付けられるか（長さと文字）</summary>
     public bool Accepts(string name) => Fits(name) && CanRepresent(name);

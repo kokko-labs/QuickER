@@ -56,6 +56,9 @@ public abstract class DdlGeneratorBase : IDdlGenerator
             // ドットを含む表名を表せない方言だけ、扱いの表のマスに従って書き添える
             SchemaQualifiedTableNameNote.Append(sb, table, DialectName);
 
+            // 説明の BMP の外の文字を保存できない方言（MySQL）では、置き換わることを書き添える
+            DescriptionCharacterNote.AppendForTable(sb, entity, IdentifierLimit);
+
             sb.AppendLine($"CREATE TABLE {QuoteQualifiedName(table)} (");
 
             // 列定義の後に続く制約行（PRIMARY KEY → UNIQUE の順）を先に組み立てる。
@@ -80,6 +83,9 @@ public abstract class DdlGeneratorBase : IDdlGenerator
 
                 // 採番の定義は図に無い＝ここで出すのは普通の列。扱いの表が注記とする方言だけ書き添える
                 IdentityColumnComment.Append(sb, col, "    ", DialectName, UnsupportedFeature.Ddl);
+
+                // 説明の BMP の外の文字を保存できない方言（MySQL）では、置き換わることを書き添える
+                DescriptionCharacterNote.AppendForColumn(sb, table, col, "    ", IdentifierLimit);
 
                 // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する。
                 // 列定義の末尾には方言固有の句（MySQL のインライン COMMENT 等）を付ける
@@ -265,14 +271,14 @@ public abstract class DdlGeneratorBase : IDdlGenerator
 
         foreach (var entity in diagram.Entities)
         {
-            if (!string.IsNullOrWhiteSpace(entity.Description))
+            if (DescriptionText.IsPresent(entity.Description))
             {
                 statements.Add(tableStatement(entity));
             }
 
             foreach (var col in entity.Columns)
             {
-                if (!string.IsNullOrWhiteSpace(col.Description))
+                if (DescriptionText.IsPresent(col.Description))
                 {
                     statements.Add(columnStatement(entity, col));
                 }

@@ -178,6 +178,14 @@ public enum SyncPlanWarningKind
     /// （外部キーの消える端は参照する列が消えれば意味を失うので、外すだけで名指ししない）。
     /// </remarks>
     UniqueConstraintDroppedWithColumn,
+
+    /// <summary>選んだ説明の項目が、この方言が保存できない文字を書く（MySQL）。</summary>
+    /// <remarks>
+    /// MySQL は説明の BMP の外の文字（絵文字など）を断らずに 1 文字ずつ <c>?</c> へ置き換えて保存する
+    /// （<see cref="QuickER.Dialects.IdentifierLengthLimit.RepresentsSupplementaryCharacters"/>）。差分は置き換えた形で比べるので、
+    /// 同期した後に差分は出ないが、DB の説明は図と違う文字になる。表・列ごとに 1 件。
+    /// </remarks>
+    DescriptionCharactersReplaced,
 }
 
 /// <summary>
@@ -193,7 +201,8 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> と <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/>
 /// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
 /// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
-/// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）。
+/// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
+/// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。

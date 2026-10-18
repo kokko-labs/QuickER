@@ -468,7 +468,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
         bool columnLevel
     )
     {
-        var newVal = item.NewDescription ?? string.Empty;
+        var newVal = DescriptionText.Normalize(item.NewDescription);
         var levelArgs = SqlServerExtendedProperty.LevelArguments(
             item.TableName,
             columnLevel ? item.ColumnName! : null
@@ -484,7 +484,7 @@ public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
             ? $"      AND ep.minor_id = COLUMNPROPERTY({objectIdLiteral}, N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}', 'ColumnId')"
             : $"      AND ep.minor_id = 0";
 
-        if (string.IsNullOrEmpty(newVal))
+        if (!DescriptionText.IsPresent(newVal))
         {
             // 新値が空の場合は既存の拡張プロパティを存在チェックのうえ削除する
             sb.AppendLine($"IF EXISTS (");

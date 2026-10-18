@@ -120,7 +120,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             : new List<ResolvedForeignKey>();
 
         // SQLite にはコメント構文が無いため、テーブルの説明は -- コメントで前置する
-        if (!string.IsNullOrWhiteSpace(entity.Description))
+        if (DescriptionText.IsPresent(entity.Description))
         {
             // テーブル名・説明とも自由入力なので改行・制御文字を畳んでコメント行の突き破りを防ぐ
             sb.AppendLine(
@@ -183,7 +183,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             sb.AppendLine(line);
 
             // カラムの説明は -- コメントで各列行の直後に添える
-            if (!string.IsNullOrWhiteSpace(col.Description))
+            if (DescriptionText.IsPresent(col.Description))
             {
                 // 列名・説明とも自由入力なので改行・制御文字を畳んでコメント行の突き破りを防ぐ
                 sb.AppendLine(

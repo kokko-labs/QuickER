@@ -503,7 +503,7 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// <remarks>新値が空なら空文字コメントを設定して説明を削除する</remarks>
     protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item)
     {
-        var newVal = item.NewDescription ?? string.Empty;
+        var newVal = DescriptionText.Normalize(item.NewDescription);
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
                 + $"COMMENT = '{MySqlIdentifier.EscapeStringLiteral(newVal)}';"
@@ -523,7 +523,9 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 
         // ライブ再構成が拾った既存コメントを、同期する新しい説明で上書きする（順序が逆だと新値が消える）。
         // QUOTE() が実行時に安全な文字列リテラルへ再引用するため、ここでのエスケープは SET 文の 1 段だけ
-        var newVal = MySqlIdentifier.EscapeStringLiteral(item.NewDescription ?? string.Empty);
+        var newVal = MySqlIdentifier.EscapeStringLiteral(
+            DescriptionText.Normalize(item.NewDescription)
+        );
         sb.AppendLine($"SET @cmt = '{newVal}';");
         AppendModifyColumnStatement(sb, item.TableName, columnName, position: null);
     }
@@ -810,9 +812,10 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
                 or "character varying";
     }
 
-    /// <summary>モデルを正とした列定義（型・NULL 制約・COMMENT）を組み立てる</summary>
+    /// <summary>モデルを正とした列定義（型・NULL 制約）を組み立てる</summary>
     /// <remarks>
-    /// 表の追加・列の追加（新しい列＝ライブに定義が無い）で用いる。説明が設定されていれば COMMENT を付与する。
+    /// 列の追加（新しい列＝ライブに定義が無い）で用いる。説明（COMMENT）は書かない＝説明は説明の同期の項目
+    /// （SetColumnDescription）だけが書く（ほかの方言と同じく、その項目を選ばなければ説明は入らない）。
     /// 既存の列を変える経路（AlterColumn / SetColumnDescription / ReorderColumns）では使わない
     /// ——モデルに無い列属性を落とすため、そちらはライブ再構成を通す。
     /// </remarks>
@@ -822,8 +825,6 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.Append(column.DataType);
         sb.Append(' ');
         sb.Append(SyncScriptBuilderHelper.GetNullabilityClause(column));
-        // インライン COMMENT 句は DDL 生成と同じ表記を共有する（説明が空なら付かない）
-        sb.Append(MySqlIdentifier.ColumnCommentClause(column.Description));
         return sb.ToString();
     }
 }

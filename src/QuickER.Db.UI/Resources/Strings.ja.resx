@@ -344,6 +344,10 @@
     <value>注意: 列の変更で、以下の外部キーの両端の列の型が一致しなくなります。外部キーは外して付け直さないため、列の変更は失敗します（DB は変わりません）。両端の列を同じ型へ揃えてください:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmDescriptionCharactersReplaced" xml:space="preserve">
+    <value>注意: 以下の説明は BMP の外の文字（絵文字など）を含みます。この DB はそれらを保存できず、1 文字ずつ「?」として保存します:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmUniqueConstraintDroppedWithColumn" xml:space="preserve">
     <value>注意: 以下の一意制約は、使っている列を削除するため、削除を選んでいなくても外します。作り直さないので、必要なら残りの列で一意制約を足してください:
 {0}</value>
