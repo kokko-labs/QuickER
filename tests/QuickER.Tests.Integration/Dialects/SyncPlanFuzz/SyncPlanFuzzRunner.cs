@@ -98,10 +98,12 @@ internal sealed class FuzzSeedOutcome
 /// 警告なしに計画から消えた項目は、選んだのに残った違反になる。選択できない案内項目（同期できない差分を知らせるだけ）は
 /// 表明 2・2b・3 のどれでも差分として数えない。</item>
 /// <item>選ばなかった項目は残っている。ただし、選んだ項目から必然的に消えるものは比べない＝
-/// (a) 選んだ AddTable / DropTable の表に関わる項目（子・親として関わる外部キーを含む）
-/// (b) 選んだ AddColumn / DropColumn の列に関わる項目（その列を含む一意制約・外部キー、その表の主キーの変更）
+/// (a) 選んだ AddTable / DropTable の表に関わる項目（子・親として関わる外部キーを含む。外部キーの作り直しは作り直す前の外部キーの表も）
+/// (b) 選んだ AddColumn / DropColumn の列に関わる項目（その列を含む一意制約・外部キー。主キーの変更は含めない＝
+/// 主キーの列の削除は、その表の主キーの変更を選んだときだけ計画に残るので、選ばなかった主キーの変更は残っている）
 /// (c) 選んだ項目がある表の列順の変更（再構築・並べ替えが列の並びを作り直すため）
-/// (d) 選んだ主キーの変更の新しい主キー列の列定義の変更（主キー列は NOT NULL になる）。</item>
+/// (d) 選んだ主キーの変更の新しい主キー列の列定義の変更（主キー列は NOT NULL になる）
+/// (e) 主キーと同じ列集合の一意制約を持てない方言で、選んだ主キーの変更の新しい主キーと同じ列集合の一意制約の削除。</item>
 /// <item>DB 側の列の属性（型・NULL 許容・計算列か・主キーの構成と順序）は、選んだ項目が述べた変更以外は変わらない
 /// （型＝選んだ AlterColumn が型の変更を述べている・NULL 許容＝選んだ AlterColumn が NULL 許容の変更を述べているか、
 /// 選んだ主キーの変更の新しい主キー列・計算列か＝再構築の喪失の警告がその表に出ている・主キー＝選んだ主キーの変更）。</item>
@@ -161,6 +163,7 @@ internal static class SyncPlanFuzzRunner
         var unselected = diff.Items.Where(i => !i.IsSelected).ToList();
         outcome.Selected.AddRange(selected.Select(i => $"{i.Kind}: {i.Description}"));
         outcome.Unselected.AddRange(unselected.Select(i => $"{i.Kind}: {i.Description}"));
+        outcome.Shapes.UnionWith(SelectionShapes(before, selected));
 
         SyncPlan plan;
 
@@ -367,7 +370,9 @@ internal static class SyncPlanFuzzRunner
         // 表明 3: 選ばなかった項目は残っている（選んだ項目から必然的に消えるものは除く）
         foreach (
             var (key, count) in CountKeys(
-                unselected.Where(i => i.IsSelectable && !IsImpliedBySelection(i, selected)),
+                unselected.Where(i =>
+                    i.IsSelectable && !IsImpliedBySelection(i, selected, capabilities)
+                ),
                 capabilities
             )
         )
@@ -661,8 +666,63 @@ internal static class SyncPlanFuzzRunner
         return false;
     }
 
+    /// <summary>
+    /// 選び方の形（主キー・一意制約の構成列の削除を、それを前提にする変更を選ばずに選んだか）を返す
+    /// </summary>
+    private static IEnumerable<string> SelectionShapes(
+        SchemaImportResult before,
+        List<SchemaDiffItem> selected
+    )
+    {
+        foreach (var drop in selected.Where(i => i.Kind == SchemaDiffKind.DropColumn))
+        {
+            var table = before.Entities.FirstOrDefault(e =>
+                e.TableName.Trim().Equals(drop.TableName.Trim(), StringComparison.OrdinalIgnoreCase)
+            );
+            var column = table?.Columns.FirstOrDefault(c =>
+                c.Name.Equals(drop.ColumnName, StringComparison.OrdinalIgnoreCase)
+            );
+
+            if (table is null || column is null)
+            {
+                continue;
+            }
+
+            if (
+                column.IsPrimaryKey
+                && !selected.Any(s =>
+                    s.Kind == SchemaDiffKind.AlterPrimaryKey
+                    && s.TableName.Trim()
+                        .Equals(table.TableName.Trim(), StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            {
+                yield return FuzzShape.DropPrimaryKeyColumnAlone;
+            }
+
+            if (
+                table.UniqueConstraints.Any(u => u.ColumnIds.Contains(column.Id))
+                && !selected.Any(s =>
+                    s.Kind == SchemaDiffKind.DropUniqueConstraint
+                    && s.TableName.Trim()
+                        .Equals(table.TableName.Trim(), StringComparison.OrdinalIgnoreCase)
+                    && s.UniqueConstraintColumns.Any(c =>
+                        c.Equals(column.Name, StringComparison.OrdinalIgnoreCase)
+                    )
+                )
+            )
+            {
+                yield return FuzzShape.DropUniqueMemberAlone;
+            }
+        }
+    }
+
     /// <summary>選ばなかった項目が、選んだ項目から必然的に消えるものか（規則は <see cref="SyncPlanFuzzRunner"/> の remarks）</summary>
-    private static bool IsImpliedBySelection(SchemaDiffItem item, List<SchemaDiffItem> selected)
+    private static bool IsImpliedBySelection(
+        SchemaDiffItem item,
+        List<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities
+    )
     {
         var tables = TablesOf(item);
         var touchedTables = selected
@@ -689,9 +749,21 @@ internal static class SyncPlanFuzzRunner
 
         var table = item.TableName.Trim().ToLowerInvariant();
 
+        // 主キーと同じ列集合の一意制約を持てない方言では、選んだ主キーの変更で主キーと同じ列集合になる一意制約は消える
         if (
-            item.Kind == SchemaDiffKind.AlterPrimaryKey
-            && touchedColumns.Any(c => c.StartsWith(table + "|", StringComparison.Ordinal))
+            item.Kind == SchemaDiffKind.DropUniqueConstraint
+            && !capabilities.SupportsUniqueConstraintOnPrimaryKey
+            && selected.Any(s =>
+                s.Kind == SchemaDiffKind.AlterPrimaryKey
+                && s.TableName.Trim()
+                    .Equals(item.TableName.Trim(), StringComparison.OrdinalIgnoreCase)
+                && s.Entity!.GetPrimaryKeyColumnsInOrder()
+                    .Select(c => c.Name.Trim().ToLowerInvariant())
+                    .ToHashSet()
+                    .SetEquals(
+                        item.UniqueConstraintColumns.Select(c => c.Trim().ToLowerInvariant())
+                    )
+            )
         )
         {
             return true;
@@ -740,6 +812,12 @@ internal static class SyncPlanFuzzRunner
             tables.Add(parent.TableName.Trim().ToLowerInvariant());
         }
 
+        // 外部キーの作り直しは、作り直す前の外部キー（DB の定義）の表にも関わる
+        if (item.ReplacedForeignKey is { } replaced)
+        {
+            tables.UnionWith(TablesOf(replaced));
+        }
+
         return tables;
     }
 
@@ -768,6 +846,15 @@ internal static class SyncPlanFuzzRunner
             {
                 yield return $"{child.TableName.Trim().ToLowerInvariant()}|{pair.ChildColumn.Trim().ToLowerInvariant()}";
                 yield return $"{parent.TableName.Trim().ToLowerInvariant()}|{pair.ParentColumn.Trim().ToLowerInvariant()}";
+            }
+        }
+
+        // 外部キーの作り直しは、作り直す前の外部キー（DB の定義）の列にも関わる
+        if (item.ReplacedForeignKey is { } replaced)
+        {
+            foreach (var replacedColumn in ColumnsOf(replaced))
+            {
+                yield return replacedColumn;
             }
         }
     }

@@ -193,6 +193,14 @@ public sealed class SyncPlanner
             capabilities.IdentifierLengthLimit
         );
 
+        // 選んだ列の削除で構成列が消える live の一意制約も、削除を選んでいなくても暗黙に外して名指しする
+        selected = InjectVanishingUniqueConstraintDrops(
+            selected,
+            context,
+            warnings,
+            capabilities.IdentifierLengthLimit
+        );
+
         // 一意制約の削除が既存 FK の被参照列を候補キーでなくしうる場合は警告する（方言に依らず同じ危険）
         WarnUniqueConstraintDropsBreakingForeignKeys(
             selected,
@@ -425,8 +433,17 @@ public sealed class SyncPlanner
             .Where(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName is not null)
             .Select(i => ColumnKey(i.TableName, i.ColumnName!))
             .ToHashSet();
+        // この段で外す主キーの変更（構成列が同期後に無い）は、同期後の主キーに数えない（数えると、その変更の後にだけ
+        // 主キーから外れる列の削除を残してしまう）
         var primaryKeyChanges = selected
-            .Where(i => i.Kind == SchemaDiffKind.AlterPrimaryKey && i.Entity is not null)
+            .Where(i =>
+                i.Kind == SchemaDiffKind.AlterPrimaryKey
+                && i.Entity is not null
+                && HasAllColumns(
+                    SchemaNames.ToStoredForm(i.TableName),
+                    i.Entity.GetPrimaryKeyColumnsInOrder().Select(c => c.Name)
+                )
+            )
             .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
             .ToDictionary(g => g.Key, g => g.First().Entity!, SchemaNames.Comparer);
         var postSyncUniques = BuildPostSyncUniqueConstraints(
@@ -582,9 +599,24 @@ public sealed class SyncPlanner
                     missing.Add("PRIMARY KEY");
                     return (item.ColumnName, missing);
 
+                // 同期後も主キーに入っている列の削除は、その列を外す主キーの変更を前提にする（選ばずに消すと、
+                // 方言によって主キーが黙って消える・縮む・削除が断られる）
+                case SchemaDiffKind.DropColumn
+                    when item.ColumnName is not null && StaysInPrimaryKey(table, item.ColumnName):
+                    missing.Add("PRIMARY KEY");
+                    return (item.ColumnName, missing);
+
                 default:
                     return (string.Empty, missing);
             }
+        }
+
+        // 表と列が同期後にすべて在るか
+        bool HasAllColumns(string table, IEnumerable<string> columns)
+        {
+            var missing = new List<string>();
+            RequireColumns(table, columns, missing);
+            return missing.Count == 0;
         }
 
         // 表と列が同期後に在るか（無いものを missing へ「表」「表.列」で足す）
@@ -816,6 +848,100 @@ public sealed class SyncPlanner
                     )
                 )
             );
+        }
+
+        return drops.Count == 0 ? selected : [.. drops, .. selected];
+    }
+
+    /// <summary>
+    /// 選んだ列の削除で構成列が消える live の一意制約を、暗黙の <see cref="SchemaDiffKind.DropUniqueConstraint"/> として
+    /// 先頭へ足し、<see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> で名指しする（付け直さない）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 構成列が消える一意制約は同期後に残れないが、差分の一意制約の削除は既定で未選択なので、列の削除だけを選ぶと
+    /// 方言で結果が割れる（SQL Server は削除が断られる・Oracle は複数列の制約で断られる・PostgreSQL は黙って消す・
+    /// MySQL は残りの列の別の制約へ縮める・SQLite の再構築は黙って消す）。そこで外部キーの消える端と同じく暗黙に外す。
+    /// 外部キーの消える端と違って警告を出すのは、外部キーは参照する列が消えれば意味を失うのに対し、一意制約は残りの列で
+    /// 作り直せる（その判断を利用者に委ねる）ため。
+    /// </para>
+    /// <para>
+    /// 表を消す計画の表は対象外（表の削除が制約ごと消す）。利用者が同じ一意制約の削除を選んでいれば足さない。
+    /// 足した項目はそれ以降の段（暗黙の外し直し・候補キーの警告・索引の喪失・再構築の合成）から、明示的に外す一意制約と
+    /// 同じに見える。
+    /// </para>
+    /// </remarks>
+    private static List<SchemaDiffItem> InjectVanishingUniqueConstraintDrops(
+        List<SchemaDiffItem> selected,
+        SyncPlanContext? context,
+        List<SyncPlanWarning> warnings,
+        IdentifierLengthLimit limit
+    )
+    {
+        if (context is null)
+        {
+            return selected;
+        }
+
+        var dropped = DroppedObjects.From(selected);
+
+        if (dropped.Columns.Count == 0)
+        {
+            return selected;
+        }
+
+        var explicitlyDropped = selected
+            .Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint)
+            .Select(i => UniqueConstraintKey(i.TableName, i.UniqueConstraintColumns))
+            .ToHashSet();
+        var drops = new List<SchemaDiffItem>();
+
+        foreach (var entity in context.LiveEntities)
+        {
+            var table = SchemaDiffService.NormalizeTable(entity);
+
+            if (dropped.Tables.Contains(table))
+            {
+                continue;
+            }
+
+            foreach (var constraint in entity.UniqueConstraints)
+            {
+                if (
+                    !UniqueConstraintNaming.TryResolveColumnNames(
+                        entity,
+                        constraint,
+                        out var columns
+                    )
+                    || !dropped.TouchesColumns(table, columns)
+                    || explicitlyDropped.Contains(UniqueConstraintKey(table, columns))
+                )
+                {
+                    continue;
+                }
+
+                drops.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.DropUniqueConstraint,
+                        TableName = table,
+                        Entity = entity,
+                        UniqueConstraintName = constraint.Name,
+                        UniqueConstraintColumns = columns,
+                        Description = string.Format(
+                            Strings.Diff_AutoUniqueConstraintDrop,
+                            string.Join(", ", columns)
+                        ),
+                    }
+                );
+                warnings.Add(
+                    new SyncPlanWarning(
+                        SyncPlanWarningKind.UniqueConstraintDroppedWithColumn,
+                        table,
+                        $"{constraint.Name ?? UniqueConstraint.SynthesizeName(table, columns, limit)} ({string.Join(", ", columns)})"
+                    )
+                );
+            }
         }
 
         return drops.Count == 0 ? selected : [.. drops, .. selected];
@@ -2721,6 +2847,10 @@ public sealed class SyncPlanner
 
             // live 定義の深いコピーに、選択された差分のみを適用して合成する
             var newDef = live.Clone(preserveId: true);
+
+            // 一意制約の削除は、列を消す前の live の列で照合する（列を先に消すと構成列を引き当てられず、
+            // 消える列を含む一意制約が合成後の定義に残る）
+            ApplySelectedUniqueConstraintDrops(newDef, tableItems);
             ApplySelectedColumnChanges(newDef, tableItems);
 
             // 主キー変更（AlterPrimaryKey）が選択されていれば、合成後の列へ target の主キー構成を反映する
@@ -2729,8 +2859,8 @@ public sealed class SyncPlanner
             // 列順変更（ReorderColumns）が選択されていれば、合成後の列を target の列名順へ並べ替える
             ApplySelectedReorder(newDef, tableItems);
 
-            // 一意制約の追加・削除が選択されていれば、合成後の一意制約集合へ反映する
-            ApplySelectedUniqueConstraintChanges(newDef, tableItems);
+            // 一意制約の追加が選択されていれば、合成後の一意制約集合へ反映する
+            ApplySelectedUniqueConstraintAdds(newDef, tableItems);
 
             // FK 集合 = live の子側 FK − 選択済み DropForeignKey ＋ 選択済み AddForeignKey
             var foreignKeys = SynthesizeForeignKeys(
@@ -2929,16 +3059,13 @@ public sealed class SyncPlanner
     }
 
     /// <summary>
-    /// 選択された一意制約の追加・削除を、合成後の定義（<paramref name="newDef"/>）の
-    /// <see cref="Entity.UniqueConstraints"/> へ反映する。
+    /// 選択された一意制約の削除を、合成後の定義（<paramref name="newDef"/>）の <see cref="Entity.UniqueConstraints"/>
+    /// へ反映する。列の変更を当てる前に呼ぶ（構成列を live の列で引き当てるため）。
     /// </summary>
     /// <remarks>
-    /// 削除は列集合シグネチャの一致で除去する（制約名は live と図で食い違うため照合に使えない）。
-    /// 追加は差分項目が運ぶ<b>列名</b>を合成後の列へ引き当てて新しい構成列 ID を作る
-    /// （差分項目の Entity は図側＝列 ID が live のクローンと一致しないため、ID をそのまま持ち込めない）。
-    /// 引き当てられない列を含む追加は黙って捨てる（DDL 生成が解決不能な制約を出力しないのと同じ流儀）。
+    /// 列集合シグネチャの一致で除去する（制約名は live と図で食い違うため照合に使えない）。
     /// </remarks>
-    private static void ApplySelectedUniqueConstraintChanges(
+    private static void ApplySelectedUniqueConstraintDrops(
         Entity newDef,
         IReadOnlyList<SchemaDiffItem> tableItems
     )
@@ -2955,7 +3082,22 @@ public sealed class SyncPlanner
                 )
             );
         }
+    }
 
+    /// <summary>
+    /// 選択された一意制約の追加を、合成後の定義（<paramref name="newDef"/>）の <see cref="Entity.UniqueConstraints"/>
+    /// へ反映する。
+    /// </summary>
+    /// <remarks>
+    /// 差分項目が運ぶ<b>列名</b>を合成後の列へ引き当てて新しい構成列 ID を作る
+    /// （差分項目の Entity は図側＝列 ID が live のクローンと一致しないため、ID をそのまま持ち込めない）。
+    /// 引き当てられない列を含む追加は黙って捨てる（DDL 生成が解決不能な制約を出力しないのと同じ流儀）。
+    /// </remarks>
+    private static void ApplySelectedUniqueConstraintAdds(
+        Entity newDef,
+        IReadOnlyList<SchemaDiffItem> tableItems
+    )
+    {
         foreach (var add in tableItems.Where(i => i.Kind == SchemaDiffKind.AddUniqueConstraint))
         {
             if (add.UniqueConstraintColumns.Count == 0)

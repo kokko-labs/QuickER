@@ -3409,6 +3409,7 @@ public class SyncPlannerTests
     /// <summary>
     /// 選んだ表・列の削除で端が消える live の外部キーは、外部キーの削除を選んでいなくても外すだけの項目として
     /// 計画に入る（表・列の削除より前のセクション・付け直さない）ことを、消える端の種類ごとに検証する。
+    /// 親の主キーの列の削除は、その列を外す主キーの変更も選ぶ（選ばなければ列の削除そのものを外す）。
     /// </summary>
     [Theory(DisplayName = "消える端: 表・列の削除だけを選んでも、端の消える外部キーを先に外す")]
     [InlineData("customer", null)]
@@ -3427,9 +3428,29 @@ public class SyncPlannerTests
             IsSelected = true,
         };
 
-        var plan = new SyncPlanner().BuildPlan([drop], FkRebuildCaps, context);
+        List<SchemaDiffItem> items = [drop];
+        List<SchemaDiffKind> expected = [SchemaDiffKind.DropForeignKey, drop.Kind];
 
-        plan.Sections.Select(s => s.Kind).Should().Equal(SchemaDiffKind.DropForeignKey, drop.Kind);
+        // 親の主キーの列の削除は、その列を外す主キーの変更（主キーを外すだけ）と一緒に選ぶ
+        if (table == "customer" && column == "id")
+        {
+            var keyless = customer.Clone(preserveId: true);
+            keyless.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
+            items.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterPrimaryKey,
+                    TableName = "customer",
+                    Entity = keyless,
+                    IsSelected = true,
+                }
+            );
+            expected = [SchemaDiffKind.DropForeignKey, SchemaDiffKind.AlterPrimaryKey, drop.Kind];
+        }
+
+        var plan = new SyncPlanner().BuildPlan(items, FkRebuildCaps, context);
+
+        plan.Sections.Select(s => s.Kind).Should().Equal(expected);
         plan.Sections[0]
             .Items.Should()
             .ContainSingle()

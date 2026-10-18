@@ -607,6 +607,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmSchemaQualifiedTableName,
                 BulletList(warnings.Select(w => w.TableName))
             ),
+            // 選んだ列の削除で構成列が消える一意制約は、削除を選んでいなくても外す
+            SyncPlanWarningKind.UniqueConstraintDroppedWithColumn => string.Format(
+                Strings.SchemaSync_ExecuteConfirmUniqueConstraintDroppedWithColumn,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

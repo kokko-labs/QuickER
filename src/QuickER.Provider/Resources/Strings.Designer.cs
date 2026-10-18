@@ -250,6 +250,12 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Diff_AutoUniqueConstraintDrop {
+            get {
+                return ResourceManager.GetString("Diff_AutoUniqueConstraintDrop", resourceCulture);
+            }
+        }
+
         public static string Diff_AutoUniqueConstraintRebuild {
             get {
                 return ResourceManager.GetString("Diff_AutoUniqueConstraintRebuild", resourceCulture);

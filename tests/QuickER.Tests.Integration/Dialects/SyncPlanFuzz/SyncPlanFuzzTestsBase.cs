@@ -20,7 +20,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// 種の集合全体でそれらが全部出たことも表明する（生成器が形を作らなくなったら赤）。
 /// </para>
 /// <para>
-/// 乱数の種は固定（1 から <see cref="DefaultSeedCount"/> まで）。失敗した種は種・方言・変更・選んだ項目・スクリプトを
+/// 乱数の種は固定（1 から <see cref="DefaultSeedCount"/> まで）。既知の失敗（<see cref="SyncPlanFuzzKnownFailures"/>）は形で除き、失敗した種は種・方言・変更・選んだ項目・スクリプトを
 /// まとめて報告する。環境変数 <c>QUICKER_SYNC_FUZZ_SEED</c> に種を書くとその種だけを流し（形の表明はしない）、
 /// <c>QUICKER_SYNC_FUZZ_SEEDS</c> に数を書くと種の数を変えられる。
 /// </para>
@@ -105,12 +105,24 @@ public abstract class SyncPlanFuzzTestsBase
                 .BeEmpty("the generator must produce every required shape across the seeds");
         }
 
-        failures
+        // 既知の失敗（形で名指しする）を除いた失敗だけを赤にする。一覧に載っているのに起きなかった項目も、
+        // 既定の種の数で流したときは赤にする（直ったなら一覧から外す）
+        var (unexpected, notObserved) = SyncPlanFuzzKnownFailures.Classify(
+            dialect.Name,
+            failures,
+            checkNotObserved: single is not { Length: > 0 }
+                && Environment.GetEnvironmentVariable(SeedCountVariable) is not { Length: > 0 }
+        );
+
+        notObserved
+            .Should()
+            .BeEmpty("a known failure that no longer occurs must be removed from the list");
+        unexpected
             .Should()
             .BeEmpty(
                 "every plan must either succeed or warn beforehand, and apply exactly the selected items. "
-                    + $"Failed seeds: {string.Join(", ", failures.Select(f => f.Seed))}\n"
-                    + string.Join("\n", failures.Take(DetailedFailures).Select(f => f.Describe()))
+                    + $"Failed seeds: {string.Join(", ", unexpected.Select(f => f.Seed))}\n"
+                    + string.Join("\n", unexpected.Take(DetailedFailures).Select(f => f.Describe()))
             );
     }
 

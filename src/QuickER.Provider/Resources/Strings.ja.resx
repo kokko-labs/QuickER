@@ -155,6 +155,9 @@
   <data name="Diff_AutoForeignKeyDrop" xml:space="preserve">
     <value>変更を可能にするため自動的に削除します（参照する表・列が削除されるため付け直しません）: [{0}]</value>
   </data>
+  <data name="Diff_AutoUniqueConstraintDrop" xml:space="preserve">
+    <value>使っている列を削除するため一意制約を自動的に削除します（作り直しません）: ({0})</value>
+  </data>
   <data name="Diff_AutoUniqueConstraintRebuild" xml:space="preserve">
     <value>変更を可能にするため一意制約を自動的に削除して再作成します: ({0})</value>
   </data>

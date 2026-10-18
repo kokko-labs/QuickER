@@ -360,7 +360,10 @@ Remove that unique constraint from the diagram and select its drop as well, or d
 - A foreign-key addition whose FK column cannot be resolved is emitted as a skip comment instead of invalid DDL
 - Dropping a table or a column also drops every foreign key that loses its table or column, even when dropping that foreign key is not selected (on SQLite the surviving child table is rebuilt without it).
   This also lets a parent table and its child be dropped together whatever order they are listed in
+- Dropping a column also drops every unique constraint that uses the column, even when dropping that constraint is not selected, and the confirmation names each one.
+  The constraint is not re-created on the remaining columns, so add a unique constraint to the diagram if you still need one
 - A selected change that needs a change you did not select (a new table or column, or a primary key change) is left out of the script, and the confirmation names it together with what it needs.
+  Dropping a column of the primary key needs the primary key change that removes the column.
   A foreign key you add or change needs the primary key change when it refers to the parent's new primary key, and that key is neither the primary key nor a unique constraint without the change (also when the primary key change is left out on MySQL because only its column order changes).
   QuickER does not select the needed change for you
 - Composite (multi-column) foreign keys are handled as first-class: a relationship holds an ordered list of column pairs, so import, DDL generation, and sync all carry every pair.

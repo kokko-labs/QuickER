@@ -170,6 +170,14 @@ public enum SyncPlanWarningKind
     /// 実行は止めずに警告に留める。
     /// </remarks>
     DefaultOnColumnTypeKindChange,
+
+    /// <summary>選んだ列の削除で構成列が消える一意制約を、削除を選んでいなくても外した。</summary>
+    /// <remarks>
+    /// 構成列が消える一意制約は同期後に残れない。外さないと、方言によって列の削除が断られるか、一意制約が黙って消える・
+    /// 残りの列の制約へ縮む。外したことを名指しするのは、残りの列で作り直すかを利用者が決められるようにするため
+    /// （外部キーの消える端は参照する列が消えれば意味を失うので、外すだけで名指ししない）。
+    /// </remarks>
+    UniqueConstraintDroppedWithColumn,
 }
 
 /// <summary>
@@ -184,7 +192,8 @@ public enum SyncPlanWarningKind
 /// 計画から外した項目のテーブル、<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
 /// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> と <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/>
 /// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
-/// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）。
+/// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
+/// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
