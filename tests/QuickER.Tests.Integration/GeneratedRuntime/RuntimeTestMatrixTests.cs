@@ -576,6 +576,7 @@ public class RuntimeTestMatrixTests
         new("GraphSaveEfCoreRuntimeTests", "GraphSave", Backend.EfCore),
         new("GraphSaveEfCoreSqlServerRuntimeTests", "GraphSave", Backend.EfCore),
         new("GraphSaveInMemoryRuntimeTests", "GraphSave", Backend.InMemory),
+        new("GraphSaveOrderRuntimeTests", "GraphSave", Backend.AdoSqlite),
         new("IncludeGraphSqlServerRuntimeTests", "IncludeGraph", Backend.AdoSqlServer),
         new("IncludeGraphAdoRuntimeTests", "IncludeGraph", Backend.AdoSqlite),
         new("IncludeGraphEfCoreRuntimeTests", "IncludeGraph", Backend.EfCore),

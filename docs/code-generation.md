@@ -568,6 +568,22 @@ A single cascade child has no collection to leave, so it stays on its navigation
 The descendants of a deleted root are left as they are, since the whole subtree went with it.
 Every backend behaves the same way, as an edit model's `AcceptChanges()` does (see [Removing rows](#removing-rows-remove-versus-markremoved)).
 
+**A new row that takes a deleted row's value is written after the deletion.**
+A graph save walks each root in graph order: a deleted row deletes its subtree children first, and a new or updated row is written before its children.
+A new row that takes the primary key or a unique value of a row the same save deletes waits, with the rows below it, until every root has been walked.
+It can therefore take that value wherever the two sit in the collection or in the list of roots.
+Text is compared without regard to case, and a value with a null part takes nothing.
+For a key, removing a row and adding a new row with the same key in one save replaces the row, whichever comes first.
+Where no row with that key exists, the deletion does nothing and the new row stays; an EF Core graph save reports that deletion as a conflict instead, the no-row delete asymmetry described in [Removing rows](#removing-rows-remove-versus-markremoved).
+An EF Core graph save counts the replacement as one row, where the other backends count the deletion and the insert.
+Every other row is written in graph order: a row that refers to a new row is written after it, and a child moved under a new parent is moved before its old parent is deleted.
+Every backend uses this order, and the save hooks fire in it.
+
+One shape cannot be saved in a single call: deleting a row, adding a new row that takes its unique value, and pointing the rows that referred to the deleted row at the new one, such as moving the children of a parent under its replacement.
+With a `NO ACTION` foreign key, writing the new row first is refused by the unique constraint, and deleting the old row first is refused by the foreign key of the rows that still point to it.
+Split it into three saves around a temporary value: add the new row with a temporary value and point the rows at it, then delete the old row, then give the new row its value.
+The in-memory repository accepts the single save, as it does not check foreign keys (see [In-memory repositories for tests](#in-memory-repositories-for-tests-generateinmemoryrepositories)).
+
 ### Save hooks (ISaveHook)
 
 A mechanism that inserts processing before and after each operation of a graph save (`SaveAsync`).
@@ -649,6 +665,7 @@ A skipped row does not get an After call, and its `RowState` is left unchanged, 
 Because a skip is isolated, consistency is the hook author's responsibility.
 In particular, deletes run children-first, so **returning `false` for only the root of a subtree delete leaves the children deleted and the root behind**.
 Every backend runs the delete hooks of a deleted entity's descendants children first, and runs them for an `Added` descendant too, although it has no row to delete.
+The hooks of a new row that takes a value of a row the same save deletes, and of the rows below it, come after the hooks of the other rows, in the order the rows are written (see [Graph save](#graph-save-save-parent-and-children-in-one-call)).
 To stop the parent, the children's hooks must also return `false`.
 An inconsistent skip, such as skipping a new parent while saving a new child, falls to the safe side through an FK constraint violation, an exception, and a full rollback, provided the FK constraint is actually defined in the database.
 

@@ -222,6 +222,11 @@ public abstract class QuickER.Runtime.EntityBaseCore
 public static class QuickER.Runtime.GeneratedDisplayNames
     public static System.Func<string, string, string> Resolve { get; set; }
 
+public sealed class QuickER.Runtime.GraphSaveOrder
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> HeldBack { get; }
+    public bool TryHoldBack(QuickER.Runtime.EntityBaseCore entity)
+    public static QuickER.Runtime.GraphSaveOrder For(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascadeSave, bool cascadeDelete)
+
 public abstract class QuickER.Runtime.HttpRemoteRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>
     protected .ctor(System.Net.Http.HttpClient httpClient, string entityRoute)
     protected System.Threading.Tasks.Task<TResult> InvokeAsync<TResult>(string operation, object payload, System.Threading.CancellationToken cancellationToken)

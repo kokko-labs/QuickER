@@ -56,6 +56,7 @@ public static class GeneratedFixedTypeNames
             "EntityGraphSaver",
             "EntitySaveMetadata",
             "GeneratedDisplayNames",
+            "GraphSaveOrder",
             "HttpRemoteRepositoryCore",
             "HttpSyncServerSource",
             "IRemoteRepositoryCore",

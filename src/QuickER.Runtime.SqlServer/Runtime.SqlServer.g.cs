@@ -615,9 +615,9 @@ public abstract class SqlServerRepositoryCore<TEntity, TKey>(
 
         try
         {
-            // HasChanges was already checked before this call, so skip the redundant internal graph traversal
-            rows = await EntityGraphSaver.SaveAsync(
-                entity,
+            // HasChanges was already checked before this call, so the graph is known to have changes
+            rows = await EntityGraphSaver.SaveGraphsAsync(
+                [entity],
                 connection,
                 transaction,
                 cascadeSave,
@@ -625,7 +625,6 @@ public abstract class SqlServerRepositoryCore<TEntity, TKey>(
                 insertWhenUpdateMissing,
                 cancellationToken,
                 hooks,
-                changesAlreadyVerified: true,
                 mode: mode,
                 versions: versions
             ).ConfigureAwait(false);
@@ -700,23 +699,20 @@ public abstract class SqlServerRepositoryCore<TEntity, TKey>(
 
         try
         {
-            foreach (var entity in targets)
-            {
-                // targets is already filtered by HasChanges, so skip the redundant internal graph traversal
-                rows += await EntityGraphSaver.SaveAsync(
-                    entity,
-                    connection,
-                    transaction,
-                    cascadeSave,
-                    cascadeDelete,
-                    insertWhenUpdateMissing,
-                    cancellationToken,
-                    hooks,
-                    changesAlreadyVerified: true,
-                    mode: mode,
-                    versions: versions
-                ).ConfigureAwait(false);
-            }
+            // targets is already filtered by HasChanges. All the roots go through one call, so the subtrees of new rows
+            // are saved after the deletions of every root (a new root can take a unique value a deleted root held)
+            rows = await EntityGraphSaver.SaveGraphsAsync(
+                targets,
+                connection,
+                transaction,
+                cascadeSave,
+                cascadeDelete,
+                insertWhenUpdateMissing,
+                cancellationToken,
+                hooks,
+                mode: mode,
+                versions: versions
+            ).ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -4171,9 +4167,10 @@ public static class EntityGraphSaver
     /// When <c>changesAlreadyVerified</c> is <c>true</c> (the caller has already checked <see cref="HasChanges"/>, i.e.
     /// changes are known to exist), the redundant graph traversal (change detection) at the start is skipped. Recursion
     /// into children passes the default <c>false</c>, so per-subtree change detection (pruning clean branches) is still
-    /// performed.
+    /// performed. The operations run in graph order; <see cref="SaveGraphsAsync"/> is the entry point the repositories
+    /// use, which saves the subtrees made only of new rows after the deletions.
     /// </remarks>
-    public static async Task<int> SaveAsync(
+    public static Task<int> SaveAsync(
         EntityBaseCore entity,
         SqlConnection connection,
         SqlTransaction transaction,
@@ -4185,9 +4182,110 @@ public static class EntityGraphSaver
         bool changesAlreadyVerified = false,
         ConcurrencyMode mode = ConcurrencyMode.Optimistic,
         RowVersionCollector? versions = null
+    ) =>
+        SaveNodeAsync(
+            entity,
+            connection,
+            transaction,
+            cascadeSave,
+            cascadeDelete,
+            insertWhenUpdateMissing,
+            cancellationToken,
+            hooks,
+            changesAlreadyVerified,
+            order: null,
+            mode,
+            versions
+        );
+
+    /// <summary>
+    /// Saves the graphs of the given roots and returns the number of saved records (when <paramref name="hooks"/> is
+    /// provided, fires the save hooks before and after each operation).
+    /// </summary>
+    /// <remarks>
+    /// The operations run in the order <see cref="GraphSaveOrder"/> describes: a new row that takes the primary key or a
+    /// unique value of a row the save deletes is saved, with the rows below it, after the walk of every root. The roots are
+    /// expected to have changes already (<see cref="HasChanges"/>); clean branches below them are still pruned.
+    /// </remarks>
+    public static async Task<int> SaveGraphsAsync(
+        IReadOnlyList<EntityBaseCore> roots,
+        SqlConnection connection,
+        SqlTransaction transaction,
+        bool cascadeSave,
+        bool cascadeDelete,
+        bool insertWhenUpdateMissing,
+        CancellationToken cancellationToken,
+        SaveHookSession? hooks = null,
+        ConcurrencyMode mode = ConcurrencyMode.Optimistic,
+        RowVersionCollector? versions = null
+    )
+    {
+        var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
+        var rows = 0;
+
+        foreach (var root in roots)
+        {
+            rows += await SaveNodeAsync(
+                root,
+                connection,
+                transaction,
+                cascadeSave,
+                cascadeDelete,
+                insertWhenUpdateMissing,
+                cancellationToken,
+                hooks,
+                changesAlreadyVerified: true,
+                order,
+                mode,
+                versions
+            ).ConfigureAwait(false);
+        }
+
+        // The rows held back go after every deletion, so the value a deleted row held is free again
+        foreach (var subtree in order?.HeldBack ?? [])
+        {
+            rows += await SaveNodeAsync(
+                subtree,
+                connection,
+                transaction,
+                cascadeSave,
+                cascadeDelete,
+                insertWhenUpdateMissing,
+                cancellationToken,
+                hooks,
+                changesAlreadyVerified: true,
+                order: null,
+                mode,
+                versions
+            ).ConfigureAwait(false);
+        }
+
+        return rows;
+    }
+
+    /// <summary>Saves one node and its subtree (<paramref name="order"/> holds back the rows to save later; null saves everything in graph order).</summary>
+    private static async Task<int> SaveNodeAsync(
+        EntityBaseCore entity,
+        SqlConnection connection,
+        SqlTransaction transaction,
+        bool cascadeSave,
+        bool cascadeDelete,
+        bool insertWhenUpdateMissing,
+        CancellationToken cancellationToken,
+        SaveHookSession? hooks,
+        bool changesAlreadyVerified,
+        GraphSaveOrder? order,
+        ConcurrencyMode mode,
+        RowVersionCollector? versions
     )
     {
         if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
+        // A new row that takes a deleted row's value waits until the deletions are done (see SaveGraphsAsync)
+        if (order is not null && order.TryHoldBack(entity))
         {
             return 0;
         }
@@ -4304,7 +4402,7 @@ public static class EntityGraphSaver
         {
             foreach (var child in entity.EnumerateCascadeChildren())
             {
-                rows += await SaveAsync(
+                rows += await SaveNodeAsync(
                     child,
                     connection,
                     transaction,
@@ -4314,6 +4412,7 @@ public static class EntityGraphSaver
                     cancellationToken,
                     hooks,
                     changesAlreadyVerified: false,
+                    order,
                     mode,
                     versions
                 ).ConfigureAwait(false);

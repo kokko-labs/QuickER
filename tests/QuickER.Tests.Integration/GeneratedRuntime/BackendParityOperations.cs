@@ -15,8 +15,9 @@ public abstract record ParityRow
     public abstract EntityBaseCore Build();
 }
 
-/// <summary>顧客の行</summary>
-public sealed record CustomerRow(int Id, string Name, string? Note = null) : ParityRow
+/// <summary>顧客の行（<paramref name="Referrer"/> は紹介者＝自己参照の親の顧客）</summary>
+public sealed record CustomerRow(int Id, string Name, string? Note = null, int? Referrer = null)
+    : ParityRow
 {
     public override EntityBaseCore Build() =>
         new CustomerEntity
@@ -24,6 +25,7 @@ public sealed record CustomerRow(int Id, string Name, string? Note = null) : Par
             CustomerId = CustomerIdValue.Create(Id),
             Name = NameValue.Create(Name),
             Note = Note is null ? null : NoteValue.Create(Note),
+            ReferrerId = Referrer is null ? null : CustomerIdValue.Create(Referrer.Value),
         };
 }
 
@@ -334,6 +336,37 @@ public sealed record AddLineOp(string Slot, LineRow Row) : ParityOp
     }
 }
 
+/// <summary>顧客をリモート面で 1 行読み、スロットの根（顧客）の紹介先のコレクションへ足す</summary>
+public sealed record AttachChildCustomerOp(string Slot, int CustomerId) : ParityOp
+{
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var child = await backend.Customers.GetByIdAsync(CustomerIdValue.Create(CustomerId), ct);
+
+        if (child is null)
+        {
+            return "null";
+        }
+
+        ((CustomerEntity)Root(backend, Slot)).Customers.Add(child);
+
+        return "attached";
+    }
+}
+
+/// <summary>新しい顧客を Added でスロットの根（顧客）の紹介先のコレクションへ足す</summary>
+public sealed record AddChildCustomerOp(string Slot, CustomerRow Row) : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var child = (CustomerEntity)Row.Build();
+        child.MarkAdded();
+        ((CustomerEntity)Root(backend, Slot)).Customers.Add(child);
+
+        return Task.FromResult("added");
+    }
+}
+
 /// <summary>スロットのグラフの注文のメモを書き換え、Updated にする（Added のままの行は Added のまま）</summary>
 public sealed record EditMemoOp(string Slot, int OrderId, string? Memo) : ParityOp
 {
@@ -414,6 +447,20 @@ public sealed record SaveManyOrdersOp(
             options.Mode,
             ct
         );
+
+        return $"rows={rows}";
+    }
+}
+
+/// <summary>複数のスロットの根（すべて顧客）を、顧客のリポジトリの複数形のグラフ保存で 1 回に保存する</summary>
+public sealed record SaveManyCustomersOp(IReadOnlyList<string> SlotNames) : ParityOp
+{
+    public override string Name => "SaveManyCustomers";
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var roots = SlotNames.Select(s => (CustomerEntity)Root(backend, s)).ToList();
+        var rows = await backend.Customers.SaveAsync(roots, cancellationToken: ct);
 
         return $"rows={rows}";
     }

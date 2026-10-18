@@ -39,6 +39,22 @@ public static class BackendParityKnownDifferences
         // インメモリ・リモートは 0 行の削除を黙認し、EF Core は行なしとして NotFound にする（「行なし削除」の既知の非対称）
         new("save-removed-child-again", EfCore, "outcome", "行なし削除の非対称（受容）", 0),
         new("save-removed-child-again", EfCore, "hooks-after", "行なし削除の非対称（受容）", 0),
+        // 区切り 39 の決定（受容・直さない）: DB にある行を消し、同じキーの新しい行を足す保存は、どの実装先も同じく
+        // 置き換わる（保存先・フックは一致）。EF Core は同じキーの削除と挿入を 1 つの UPDATE に畳むので、戻り値の行数だけが 1 になる
+        new(
+            "graph-remove-and-add-same-key-roots-added-first",
+            EfCore,
+            "outcome",
+            "同じキーの削除と挿入の行数（受容）",
+            0
+        ),
+        new(
+            "graph-remove-and-add-same-key-roots-removed-first",
+            EfCore,
+            "outcome",
+            "同じキーの削除と挿入の行数（受容）",
+            0
+        ),
         // P1・P2（受容・直さない）: インメモリは外部キーを検査せず、参照動作（ON DELETE CASCADE など）も再現しない。
         // DeleteAsync(id) で親を消しても子は残り（P1）、親の無い明細・無い顧客を指す注文も挿入する（P2）。
         // インメモリの振る舞いは変えず、docs の「実 DB との既知の違い」に書く（決定 2026-10-13・docs は区切り 25）
