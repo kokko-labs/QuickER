@@ -726,7 +726,9 @@ public sealed class EntitySaveMetadata
 /// <remarks>
 /// The context factory is supplied by the backend (QuickER dialect, EF Core, InMemory) with the in-progress transaction
 /// context captured inside. The skip set is tracked by reference equality (<see cref="ReferenceEqualityComparer"/>) and
-/// used by the post-commit <c>AcceptChanges</c> to leave states untouched.
+/// used by the post-commit <c>AcceptChanges</c> to leave states untouched. The session hands After a context that notes
+/// an unbounded binary column written through it (<see cref="BinaryColumnWritten"/>), so a backend can tell whether the
+/// row versions its own statements returned may have moved on.
 /// </remarks>
 public sealed class SaveHookSession(
     ISaveHookRegistry registry,
@@ -740,38 +742,117 @@ public sealed class SaveHookSession(
     /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
     public IReadOnlySet<EntityBaseCore> Skipped => _skipped;
 
+    /// <summary>Gets whether a hook's After wrote an unbounded binary column through the context it was handed, whether or not the write succeeded.</summary>
+    /// <remarks>
+    /// <para>
+    /// Such a write can touch a row the save itself wrote. The column is one the save's statements leave alone, so the
+    /// row's other values stay as the entity holds them, but its version moves on past the one the save's own statement
+    /// returned: a backend that carries versions back reads them again before committing when this is set.
+    /// </para>
+    /// <para>
+    /// Raw SQL (<see cref="ISaveHookContext.ExecuteSqlAsync"/>) is not counted. It can change any column, which a version
+    /// read again would hide from the next save, so a saved row it writes keeps the version the save returned and the next
+    /// save of the same instance reports a conflict.
+    /// </para>
+    /// </remarks>
+    public bool BinaryColumnWritten { get; private set; }
+
     /// <summary>Adds an entity to the skip set.</summary>
     public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
-    public Task<bool> InvokeBeforeAsync(
+    /// <remarks>The hooks run with the write registration taken away (see <see cref="SaveHookContextWrites"/>), so a save they start is not reported to it.</remarks>
+    public async Task<bool> InvokeBeforeAsync(
         EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
     {
         var invoker = _registry.GetInvoker(entity.GetType());
-        return invoker is null
-            ? Task.FromResult(true)
-            : invoker.InvokeBeforeAsync(entity, operation, cancellationToken);
+
+        if (invoker is null)
+        {
+            return true;
+        }
+
+        using (SaveHookContextWrites.Detach(out _))
+        {
+            return await invoker
+                .InvokeBeforeAsync(entity, operation, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
-    public Task InvokeAfterAsync(
+    /// <remarks>
+    /// The hooks run with the write registration taken away (see <see cref="SaveHookContextWrites"/>): the columns they
+    /// write through the context are reported to it by the context, and a save they start is not.
+    /// </remarks>
+    public async Task InvokeAfterAsync(
         EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
     {
         var invoker = _registry.GetInvoker(entity.GetType());
-        return invoker is null
-            ? Task.CompletedTask
-            : invoker.InvokeAfterAsync(
-                entity,
-                operation,
-                _contextFactory(entity),
-                cancellationToken
-            );
+
+        if (invoker is null)
+        {
+            return;
+        }
+
+        using (SaveHookContextWrites.Detach(out var observer))
+        {
+            await invoker
+                .InvokeAfterAsync(
+                    entity,
+                    operation,
+                    new WriteNotingContext(_contextFactory(entity), this, entity.GetType(), observer),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Hands every call on to the backend's context, noting on the session that a hook wrote an unbounded binary column through it.</summary>
+    /// <remarks>A write that stored a value in a row is also reported to the observer the session took from <see cref="SaveHookContextWrites"/>, before the hook goes on.</remarks>
+    private sealed class WriteNotingContext(
+        ISaveHookContext inner,
+        SaveHookSession session,
+        Type entityType,
+        Func<SaveHookBinaryColumnWrite, CancellationToken, Task>? observer
+    ) : ISaveHookContext
+    {
+        public Task<int> ExecuteSqlAsync(
+            string sql,
+            object? parameters = null,
+            CancellationToken cancellationToken = default
+        ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
+
+        public async Task<bool> WriteBinaryColumnAsync(
+            string propertyName,
+            object key,
+            Stream? source,
+            long? length = null,
+            CancellationToken cancellationToken = default
+        )
+        {
+            session.BinaryColumnWritten = true;
+            var written = await inner
+                .WriteBinaryColumnAsync(propertyName, key, source, length, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (written && observer is not null)
+            {
+                await observer(
+                        new SaveHookBinaryColumnWrite(entityType, propertyName, key, inner),
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+
+            return written;
+        }
     }
 }
 

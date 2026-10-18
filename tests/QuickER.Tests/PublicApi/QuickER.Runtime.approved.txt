@@ -432,7 +432,11 @@ public static class QuickER.Runtime.RawValueConverter
 
 public static class QuickER.Runtime.RemoteEntityGraph
     public static System.Collections.Generic.Dictionary<System.ValueTuple<string, string>, byte[]> RowVersionLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> entries)
+    public static System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> ReadColumnValues(QuickER.Runtime.EntityBaseCore entity)
     public static System.Collections.Generic.HashSet<System.ValueTuple<string, string>> SkippedLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> entries)
+    public static System.Collections.Generic.List<QuickER.Runtime.EntityBaseCore> CollectSaveRows(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascade)
+    public static System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> ReadSavedValues(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> rows)
+    public static System.Collections.Generic.List<System.ValueTuple<QuickER.Runtime.EntityBaseCore, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>>> MatchSavedValues(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascade, System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> saved)
     public static System.Reflection.PropertyInfo RowVersionProperty(System.Type entityType)
     public static bool IsSkipped(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.HashSet<System.ValueTuple<string, string>> lookup)
     public static byte[] ReadRowVersion(QuickER.Runtime.EntityBaseCore entity)
@@ -440,6 +444,7 @@ public static class QuickER.Runtime.RemoteEntityGraph
     public static void ApplyRowVersion(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.Dictionary<System.ValueTuple<string, string>, byte[]> lookup)
     public static void CollectRowVersions(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> into)
     public static void CollectSkipped(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> into)
+    public static void WriteColumnValues(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> values)
     public static void WriteRowVersion(QuickER.Runtime.EntityBaseCore entity, byte[] rowVersion)
 
 public sealed class QuickER.Runtime.RemoteEntityRef : System.IEquatable<QuickER.Runtime.RemoteEntityRef>
@@ -465,7 +470,8 @@ public sealed class QuickER.Runtime.RemoteIdRequest<TKey> : System.IEquatable<Qu
     public TKey Id { get; init; }
 
 public sealed class QuickER.Runtime.RemoteInsertResult : System.IEquatable<QuickER.Runtime.RemoteInsertResult>
-    public .ctor(byte[] RowVersion)
+    public .ctor(byte[] RowVersion, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values = null)
+    public System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values { get; init; }
     public byte[] RowVersion { get; init; }
 
 public static class QuickER.Runtime.RemoteJson
@@ -504,9 +510,10 @@ public sealed class QuickER.Runtime.RemoteSaveRequest<TEntity> : System.IEquatab
     public bool InsertWhenUpdateMissing { get; init; }
 
 public sealed class QuickER.Runtime.RemoteSaveResult : System.IEquatable<QuickER.Runtime.RemoteSaveResult>
-    public .ctor(int Affected, System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> RowVersions, System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> Skipped = null)
+    public .ctor(int Affected, System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> RowVersions, System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> Skipped = null, System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> Saved = null)
     public System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> Skipped { get; init; }
     public System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> RowVersions { get; init; }
+    public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> Saved { get; init; }
     public int Affected { get; init; }
 
 public sealed class QuickER.Runtime.RemoteUpdateRequest<TEntity> : System.IEquatable<QuickER.Runtime.RemoteUpdateRequest<TEntity>>
@@ -515,7 +522,8 @@ public sealed class QuickER.Runtime.RemoteUpdateRequest<TEntity> : System.IEquat
     public TEntity Entity { get; init; }
 
 public sealed class QuickER.Runtime.RemoteUpdateResult : System.IEquatable<QuickER.Runtime.RemoteUpdateResult>
-    public .ctor(bool Updated, byte[] RowVersion)
+    public .ctor(bool Updated, byte[] RowVersion, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values = null)
+    public System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values { get; init; }
     public bool Updated { get; init; }
     public byte[] RowVersion { get; init; }
 
@@ -540,6 +548,17 @@ public enum QuickER.Runtime.SaveConflictReason : int
     Modified = 2
     NotFound = 1
     Unknown = 0
+
+public sealed class QuickER.Runtime.SaveHookBinaryColumnWrite : System.IEquatable<QuickER.Runtime.SaveHookBinaryColumnWrite>
+    public .ctor(System.Type EntityType, string PropertyName, object Key, QuickER.Runtime.ISaveHookContext Context)
+    public QuickER.Runtime.ISaveHookContext Context { get; init; }
+    public System.Type EntityType { get; init; }
+    public object Key { get; init; }
+    public string PropertyName { get; init; }
+
+public static class QuickER.Runtime.SaveHookContextWrites
+    public static System.IDisposable Detach(out System.Func<QuickER.Runtime.SaveHookBinaryColumnWrite, System.Threading.CancellationToken, System.Threading.Tasks.Task> observer)
+    public static System.IDisposable Observe(System.Func<QuickER.Runtime.SaveHookBinaryColumnWrite, System.Threading.CancellationToken, System.Threading.Tasks.Task> observer)
 
 public sealed class QuickER.Runtime.SaveHookInvoker<TEntity> : QuickER.Runtime.ISaveHookInvoker
     public .ctor(System.Collections.Generic.IEnumerable<QuickER.Runtime.ISaveHook<TEntity>> hooks)

@@ -856,6 +856,8 @@ public sealed class SqlSaveHookContext(
 /// <b>Beware the enlisted/standalone split</b>: a write allocates a zeroblob, resolves the rowid, and copies via
 /// SqliteBlob within one transaction. Standalone mode opens its own transaction and commits it, whereas enlisted mode uses
 /// the in-progress transaction as is and does not commit (the outer Save commits). Mixing these up loses the blob.
+/// Enlisted mode runs the write inside a savepoint and rolls back to it when the write fails, so a failed write leaves the
+/// column as it was even when the hook catches the exception and the outer Save commits.
 /// </para>
 /// </remarks>
 public static class UnboundedBinaryColumnEngine
@@ -961,12 +963,18 @@ public static class UnboundedBinaryColumnEngine
         // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
         var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-        // Enlisted mode (transaction given) uses the outer transaction and does not commit.
+        // Enlisted mode (transaction given) uses the outer transaction and does not commit; the write runs inside a
+        // savepoint, so a failure undoes the zeroblob and whatever was copied without undoing the outer Save.
         // Standalone mode (no transaction) opens its own transaction and commits on success
         var ownsTransaction = transaction is null;
         var activeTransaction =
             transaction
             ?? (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!ownsTransaction)
+        {
+            await activeTransaction.SaveAsync(EnlistedWriteSavepoint, cancellationToken).ConfigureAwait(false);
+        }
 
         try
         {
@@ -983,11 +991,16 @@ public static class UnboundedBinaryColumnEngine
 
                 if (await allocate.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
                 {
-                    // No matching row (the zeroblob could not be allocated). Roll back only in standalone mode (enlisted mode defers to the outer transaction).
+                    // No matching row (the zeroblob could not be allocated), so nothing was written. Roll back only in
+                    // standalone mode (enlisted mode releases its savepoint and defers to the outer transaction).
                     // CancellationToken.None, as everywhere else: a canceled token must not be able to interrupt a rollback.
                     if (ownsTransaction)
                     {
                         await activeTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await activeTransaction.ReleaseAsync(EnlistedWriteSavepoint, CancellationToken.None).ConfigureAwait(false);
                     }
 
                     return false;
@@ -1032,6 +1045,10 @@ public static class UnboundedBinaryColumnEngine
             {
                 await activeTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             }
+            else
+            {
+                await activeTransaction.ReleaseAsync(EnlistedWriteSavepoint, CancellationToken.None).ConfigureAwait(false);
+            }
 
             return true;
         }
@@ -1040,6 +1057,10 @@ public static class UnboundedBinaryColumnEngine
             if (ownsTransaction)
             {
                 await SqlTransactions.RollbackQuietlyAsync(activeTransaction).ConfigureAwait(false);
+            }
+            else
+            {
+                await RollbackEnlistedWriteQuietlyAsync(activeTransaction).ConfigureAwait(false);
             }
 
             throw;
@@ -1050,6 +1071,23 @@ public static class UnboundedBinaryColumnEngine
             {
                 await activeTransaction.DisposeAsync().ConfigureAwait(false);
             }
+        }
+    }
+
+    /// <summary>The savepoint an enlisted write runs inside, so that a failed write can be undone without undoing the outer Save.</summary>
+    private const string EnlistedWriteSavepoint = "quicker_unbounded_binary_write";
+
+    /// <summary>Rolls an enlisted write back to its savepoint and releases it, swallowing a failure of its own so that the write's exception is the one that surfaces.</summary>
+    private static async Task RollbackEnlistedWriteQuietlyAsync(SqliteTransaction transaction)
+    {
+        try
+        {
+            await transaction.RollbackAsync(EnlistedWriteSavepoint, CancellationToken.None).ConfigureAwait(false);
+            await transaction.ReleaseAsync(EnlistedWriteSavepoint, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The write's own exception is rethrown by the caller; a failed rollback must not replace it
         }
     }
 }
@@ -3879,7 +3917,9 @@ public static class CascadeDeletePlanner
 /// <remarks>
 /// The context factory is supplied by the backend (QuickER dialect, EF Core, InMemory) with the in-progress transaction
 /// context captured inside. The skip set is tracked by reference equality (<see cref="ReferenceEqualityComparer"/>) and
-/// used by the post-commit <c>AcceptChanges</c> to leave states untouched.
+/// used by the post-commit <c>AcceptChanges</c> to leave states untouched. The session hands After a context that notes
+/// an unbounded binary column written through it (<see cref="BinaryColumnWritten"/>), so a backend can tell whether the
+/// row versions its own statements returned may have moved on.
 /// </remarks>
 public sealed class SaveHookSession(
     ISaveHookRegistry registry,
@@ -3893,38 +3933,117 @@ public sealed class SaveHookSession(
     /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
     public IReadOnlySet<EntityBaseCore> Skipped => _skipped;
 
+    /// <summary>Gets whether a hook's After wrote an unbounded binary column through the context it was handed, whether or not the write succeeded.</summary>
+    /// <remarks>
+    /// <para>
+    /// Such a write can touch a row the save itself wrote. The column is one the save's statements leave alone, so the
+    /// row's other values stay as the entity holds them, but its version moves on past the one the save's own statement
+    /// returned: a backend that carries versions back reads them again before committing when this is set.
+    /// </para>
+    /// <para>
+    /// Raw SQL (<see cref="ISaveHookContext.ExecuteSqlAsync"/>) is not counted. It can change any column, which a version
+    /// read again would hide from the next save, so a saved row it writes keeps the version the save returned and the next
+    /// save of the same instance reports a conflict.
+    /// </para>
+    /// </remarks>
+    public bool BinaryColumnWritten { get; private set; }
+
     /// <summary>Adds an entity to the skip set.</summary>
     public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
-    public Task<bool> InvokeBeforeAsync(
+    /// <remarks>The hooks run with the write registration taken away (see <see cref="SaveHookContextWrites"/>), so a save they start is not reported to it.</remarks>
+    public async Task<bool> InvokeBeforeAsync(
         EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
     {
         var invoker = _registry.GetInvoker(entity.GetType());
-        return invoker is null
-            ? Task.FromResult(true)
-            : invoker.InvokeBeforeAsync(entity, operation, cancellationToken);
+
+        if (invoker is null)
+        {
+            return true;
+        }
+
+        using (SaveHookContextWrites.Detach(out _))
+        {
+            return await invoker
+                .InvokeBeforeAsync(entity, operation, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
-    public Task InvokeAfterAsync(
+    /// <remarks>
+    /// The hooks run with the write registration taken away (see <see cref="SaveHookContextWrites"/>): the columns they
+    /// write through the context are reported to it by the context, and a save they start is not.
+    /// </remarks>
+    public async Task InvokeAfterAsync(
         EntityBaseCore entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     )
     {
         var invoker = _registry.GetInvoker(entity.GetType());
-        return invoker is null
-            ? Task.CompletedTask
-            : invoker.InvokeAfterAsync(
-                entity,
-                operation,
-                _contextFactory(entity),
-                cancellationToken
-            );
+
+        if (invoker is null)
+        {
+            return;
+        }
+
+        using (SaveHookContextWrites.Detach(out var observer))
+        {
+            await invoker
+                .InvokeAfterAsync(
+                    entity,
+                    operation,
+                    new WriteNotingContext(_contextFactory(entity), this, entity.GetType(), observer),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Hands every call on to the backend's context, noting on the session that a hook wrote an unbounded binary column through it.</summary>
+    /// <remarks>A write that stored a value in a row is also reported to the observer the session took from <see cref="SaveHookContextWrites"/>, before the hook goes on.</remarks>
+    private sealed class WriteNotingContext(
+        ISaveHookContext inner,
+        SaveHookSession session,
+        Type entityType,
+        Func<SaveHookBinaryColumnWrite, CancellationToken, Task>? observer
+    ) : ISaveHookContext
+    {
+        public Task<int> ExecuteSqlAsync(
+            string sql,
+            object? parameters = null,
+            CancellationToken cancellationToken = default
+        ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
+
+        public async Task<bool> WriteBinaryColumnAsync(
+            string propertyName,
+            object key,
+            Stream? source,
+            long? length = null,
+            CancellationToken cancellationToken = default
+        )
+        {
+            session.BinaryColumnWritten = true;
+            var written = await inner
+                .WriteBinaryColumnAsync(propertyName, key, source, length, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (written && observer is not null)
+            {
+                await observer(
+                        new SaveHookBinaryColumnWrite(entityType, propertyName, key, inner),
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+
+            return written;
+        }
     }
 }
 

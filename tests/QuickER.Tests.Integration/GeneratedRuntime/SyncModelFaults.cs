@@ -30,6 +30,10 @@ internal enum ModelFaultKind
 
     /// <summary>端末のグラフ保存の Before フックが挿入する行の主キーを変える（キーを決めるフック）</summary>
     HookRekey,
+
+    /// <summary>端末の同期中の、エンジンがローカルへ行を適用するときの Before フックが false を返す（その行を飛ばす）</summary>
+    /// <remarks>乱数の操作の列には混ぜない（既存の種の操作の列を変えないため）。決定的なシナリオだけが使う。</remarks>
+    ApplySkip,
 }
 
 /// <summary>注入した失敗（モデルは、これを原因とする例外を違反として数えない）</summary>
@@ -125,7 +129,10 @@ internal sealed class SyncModelHook<TEntity>(SyncModelFaults faults, Action<TEnt
         CancellationToken cancellationToken = default
     )
     {
-        if (faults.TryFire(ModelFaultKind.HookSkip, faults.Writing))
+        if (
+            faults.TryFire(ModelFaultKind.HookSkip, faults.Writing)
+            || faults.TryFire(ModelFaultKind.ApplySkip, faults.Syncing)
+        )
         {
             return Task.FromResult(false);
         }

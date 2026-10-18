@@ -52,6 +52,7 @@ public sealed class QuickER.Runtime.SqlServer.EntitySaveMetadata
     public string RawTableName { get; init; }
     public string SelectAllSql { get; init; }
     public string SelectByIdSql { get; init; }
+    public string SelectRowVersionByIdSql { get; init; }
     public string TableName { get; init; }
     public string UpdateForcedSql { get; init; }
     public string UpdateSql { get; init; }
@@ -77,6 +78,7 @@ public static class QuickER.Runtime.SqlServer.JsonQueryPlanner
 
 public sealed class QuickER.Runtime.SqlServer.RowVersionCollector
     public .ctor()
+    public System.Threading.Tasks.Task RereadAsync(Microsoft.Data.SqlClient.SqlConnection connection, Microsoft.Data.SqlClient.SqlTransaction transaction, System.Threading.CancellationToken cancellationToken)
     public void Apply()
     public void Record(QuickER.Runtime.EntityBaseCore entity, byte[] version)
 
@@ -91,6 +93,7 @@ public sealed class QuickER.Runtime.SqlServer.SaveHookSession
     public System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> Skipped { get; }
     public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
     public System.Threading.Tasks.Task<bool> InvokeBeforeAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, System.Threading.CancellationToken cancellationToken)
+    public bool BinaryColumnWritten { get; }
     public void Skip(QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.SqlServer.SqlConnectionFactory : QuickER.Runtime.SqlServer.ISqlConnectionFactory

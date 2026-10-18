@@ -723,6 +723,12 @@ The context provides two operations and does not expose raw handles.
   Both stream-write to an excluded column (when `ExcludeUnboundedBinaryColumns` is enabled); name the column with `nameof`.
 - `ExecuteSqlAsync(sql, parameters)` for arbitrary DML, such as an audit row or a write to a related table.
 
+A write that fails leaves the column as it was, even when the hook catches the exception and the save goes on to commit.
+On SQLite the write runs inside a savepoint and rolls back to it; on SQL Server it is a single statement.
+
+To change a value of a row the save writes, set the entity's property in Before rather than writing the row with SQL in After.
+SQL in After suits writes to other tables, such as an audit row; a saved row it writes has to be read again before its next save (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
+
 `operation` receives the operation that actually happened.
 If `insertWhenUpdateMissing: true` and no update target is found so it switches to INSERT, Before is called once with `Update` and After is called with the actual `Insert`.
 
@@ -733,7 +739,7 @@ If `insertWhenUpdateMissing: true` and no update target is found so it switches 
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
 | EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt. Running `SaveChanges` again after a statement that matched no row does not run them again | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
 | In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction). Every Before runs first, then the writes, then every After in the order the operations ran; they are not interleaved row by row as in the QuickER Repository | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
-| Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection |
+| Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection. The values a Before hook set on the rows the server saved travel back too |
 
 ### Raw SQL escape hatch
 
@@ -1094,6 +1100,10 @@ Reload-and-reapply is the honest answer when the two edits can be merged.
 - **The new version is written back.**
   After a successful insert, update, or graph save, the entity holds the version the database assigned, so the same instance can be saved again without being re-read.
   A save hook's `AfterSaveAsync` runs before the commit and therefore still sees the old version.
+  When an After hook writes an unbounded binary column through its context, the write moves on the version of the row it touches, so the QuickER Repository for SQL Server reads the versions of the rows the save wrote again before the commit and writes those back after it.
+  Only the rows the save wrote are read again: a row of the graph the save left alone keeps the version it was read with, so read it again before saving it if a hook wrote it.
+  Raw SQL from After (`ExecuteSqlAsync`) reads nothing again, since it may have changed any column: when it writes a row the save wrote, the next save of the same instance reports a conflict, so read the row again before saving it.
+  On SQLite, which carries no row version, that next save writes over the columns the hook set.
 - **Every backend follows the same contract.**
   The QuickER Repository guards the statement with `WHERE ... AND <rowversion> = @original` and reads the new version back through an `OUTPUT` clause.
   EF Core uses its own concurrency token (`IsRowVersion()`) and converts `DbUpdateConcurrencyException` into the same exception.
@@ -1951,6 +1961,12 @@ Semantics:
   The stream must yield exactly that many bytes.
   A `length` that differs from what is left in a seekable stream, and a stream that ends before `length` or goes on past it, throw `ArgumentException` and leave the stored value as it was.
 - **Optimistic concurrency (rowversion and the like) is out of scope**, since this is direct column manipulation on par with raw SQL.
+  The write still updates the row, so on a table with a row version it moves the row's version on, while the entity you hold keeps the old one.
+  Saving that entity next reports a conflict, so read the row again after the write and before saving it.
+  A write made from a save's After hook through its context is different: the save reads the versions of the rows it wrote again (see [Optimistic concurrency (rowversion)](#optimistic-concurrency-rowversion)).
+- **Keeping the blob in a table of its own is the safest layout.**
+  A blob in the same row as data guarded by a row version moves that version on every time it is written.
+  Put the blob in a separate table that references the main row, and writing it never touches the main row's version.
 - **The generated code has no INSERT-only method.**
   Write a new row in two steps: INSERT with the blob left empty, then stream in the body with `Write{Column}Async`.
   On a nullable column, `null` is what "left empty" means.
@@ -2273,6 +2289,17 @@ A row the local database is meant to keep to itself belongs in a table excluded 
 **Save hooks are unaffected.**
 The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exactly as it did before, including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else.
 A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract.
+
+**A row a local save hook skips stops its table's download.**
+A `BeforeSaveAsync` that returns `false` for a row the engine applies leaves the row unwritten, and the table's download stops at that row, as for an unsent entry (see below); the stop has `SkippedBySaveHook` set.
+The row comes down, with the rows behind it, in the first run after the hook lets it through.
+A hook that keeps skipping the same row keeps the table's download stopped, so a Before hook cannot be used to keep rows out of the local database.
+To leave the rows the engine applies alone, return `true` without doing anything while `SyncSession.IsSuppressed` is true.
+A row `ServerWins` puts back, a parent brought in, and a row brought up to date for a unique value are left as they are when a hook skips them, and the entry of a row `ServerWins` was putting back stays in the journal.
+A refresh that brings a parent in fails when a hook skips that parent.
+To tell the skipped row from the rows after it, the engine applies the downloaded rows of a table one at a time, each in its own local transaction, when the local repository runs a save hook for the table's entity, so such a table downloads several times slower than a table without one.
+The generated registration (`AddGeneratedSyncEngine`) gives the tables the hooks the local repositories run; a table built by hand takes them as its `localSaveHooks` argument.
+A hook that skips a row of a table built without them makes the run throw, because the rows after the skipped one have been written by then and the resume point has moved past it.
 The entries of a graph save are written before its hooks run, so they are checked against what the save did once it has succeeded, under the same lock.
 A row a `BeforeSaveAsync` returned `false` for was not written, and its entry is taken back; the save leaves such a row in its old state rather than marking it unchanged, which is how it is told apart.
 Without that, its entry would upload the row's current content, over another writer's newer row or as a write that changes nothing yet moves the server's version on.
@@ -2355,6 +2382,13 @@ Two details follow from copying columns separately.
 The recording does not depend on `IncludeUnboundedBinary`, because what to send is decided when sending, not when generating.
 A run left at the default uploads the row without the blob and settles the entry.
 
+**A blob a save hook writes is tracked too.**
+An After hook of a graph save can write an unbounded binary column through its context, of a row the save wrote or of another row.
+The decorator records that write as well, inside the save's transaction, so the entry commits with the save or rolls back with it.
+A write that matched no row records nothing, and neither does a save a hook starts on another database, such as the server.
+The key the hook passes is read as the table's key type, converting a value of another type such as a `long` for an `int` key; a key that cannot be read fails the save.
+A hook that runs while the engine applies a download writes without a record, like every write the engine makes, so a blob such a hook writes is not uploaded.
+
 **Only the columns this device wrote are sent.**
 Each journal entry records which unbounded binary columns its write stored a value in: an insert stores all of them, `Write{Column}Async` stores its own, and an update stores none.
 A run that carries the columns sends only those named by some entry of the row.
@@ -2411,6 +2445,8 @@ foreach (var stop in result.Truncations)
     // stop.PendingKeyText    - the row it stopped at
     // and, when the row stopped for a parent it could not have:
     //   stop.MissingParentTableName  - the parent's table
+    // and, when a local save hook skipped the row:
+    //   stop.SkippedBySaveHook       - true
 }
 ```
 
@@ -2758,6 +2794,16 @@ After a successful graph save (Save), the local RowState is also committed, the 
 **Optimistic concurrency travels over the wire.**
 The `ConcurrencyMode` argument is part of the Update / Save request, and the Insert / Update / Save responses carry the row versions the save assigned, keyed by entity type and primary key, which the client writes back onto the local graph.
 A remote client therefore ends up holding the same versions a direct connection would, and can keep saving the same entities without re-reading them.
+
+**What the server set travels back too.**
+The Insert / Update / Save responses also carry the column values the server's entities hold after the save, which the client writes onto its own entities.
+That covers a value a server-side save hook set, such as an audit column or a key it assigned, and a value the server's repository wrote back after the save, such as one the database generated that an EF Core repository reads back.
+A Save response matches the values to the rows by their position in the graph as it was sent, walking the rows that are not deleted in cascade order, rather than by key, so a key a hook assigned still reaches the right row.
+The server lists the rows before the save, so what the save does to the collections (taking deleted children out, or EF Core moving a child into its parent's collection) does not shift the positions.
+Where the version list and the values disagree, the values win.
+A row a hook skipped gets nothing back, and an excluded unbounded binary column is never carried, so the client's update guard keeps applying.
+A response without the values, from a server generated before they were carried, is settled the way it was before: by the version list and the skipped rows alone.
+Because a Save response carries every column of every saved row, a large SaveMany gets a response roughly as large as its request.
 
 ### How errors are classified
 

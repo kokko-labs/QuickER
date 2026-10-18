@@ -4,7 +4,7 @@ using Xunit;
 namespace QuickER.Tests.GeneratedIdentityColumnFixture;
 
 /// <summary>
-/// コミット済みフィクスチャ <c>IdentityColumnFixture.g.cs</c> が、現在のテンプレート・型解決から
+/// コミット済みフィクスチャ <c>IdentityColumnFixture.g.cs</c>（＋ <c>IdentityColumnFixture.RemoteServer.g.cs</c>）が、現在のテンプレート・型解決から
 /// 再生成したコードと文字列完全一致することを検証するドリフト検知テスト。
 /// </summary>
 /// <remarks>
@@ -19,16 +19,19 @@ public sealed class IdentityColumnFixtureDriftTests
     /// コミット済みフィクスチャと完全一致することを検証する。
     /// </summary>
     [Fact(
-        DisplayName = "コミット済み自動採番列フィクスチャが現在のテンプレートからの再生成と完全一致する（ドリフト検知）"
+        DisplayName = "コミット済み自動採番列フィクスチャ（本体＋サーバー）が現在のテンプレートからの再生成と完全一致する（ドリフト検知）"
     )]
     public void CommittedIdentityColumnFixture_MatchesRegeneratedOutput()
     {
         FixtureDriftHarness.VerifyOrRegenerate(
             IdentityColumnFixtureDefinition.Build(),
             IdentityColumnFixtureDefinition.Options,
-            IdentityColumnFixtureDefinition.OutputFileName,
+            [
+                IdentityColumnFixtureDefinition.OutputFileName,
+                IdentityColumnFixtureDefinition.ServerOutputFileName,
+            ],
             "コミット済み自動採番列フィクスチャが現在のテンプレート出力と乖離しています。"
-                + "IdentityColumnFixtureDefinition（SQL Server 方言・QuickER 版 Repository・EF Core）から再生成が必要です。"
+                + "IdentityColumnFixtureDefinition（SQL Server 方言・QuickER 版 Repository・EF Core・リモートサービス）から再生成が必要です。"
         );
     }
 }
