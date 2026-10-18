@@ -136,6 +136,95 @@ public static class BackendParityScenarios
                 ),
             ]
         ),
+        // 一意な値を持つ行を消し、同じ値の新しい行を足して 1 回で保存する（複数の根。新しい行が先・消す行が先の両方）。
+        // 削除が挿入より先に走らないと、一意制約に阻まれる（区切り 39＝新しい行だけの部分木を削除と更新の後へ回す）
+        new(
+            "graph-delete-then-add-same-unique-value-roots-added-first",
+            [.. Basic, new SeedOp(new CustomerRow(4, "Dan"))],
+            [
+                new NewRootOp(S, new CustomerRow(5, "Dan"), RowState.Added),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new SaveManyCustomersOp([S, "B"]),
+                new LoadOp("C", "customers", 5),
+            ]
+        ),
+        new(
+            "graph-delete-then-add-same-unique-value-roots-removed-first",
+            [.. Basic, new SeedOp(new CustomerRow(4, "Dan"))],
+            [
+                new NewRootOp(S, new CustomerRow(5, "Dan"), RowState.Added),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new SaveManyCustomersOp(["B", S]),
+                new LoadOp("C", "customers", 5),
+            ]
+        ),
+        // 同じことを子のコレクションの中で行う（EditModel の Remove() は消した行を後ろへ並べるので、新しい行が先に並ぶ形）
+        new(
+            "graph-delete-then-add-same-unique-value-children",
+            [.. Basic, new SeedOp(new CustomerRow(5, "Eve", Referrer: 1))],
+            [
+                new LoadOp(S, "customers", 1),
+                new AddChildCustomerOp(S, new CustomerRow(6, "Eve", Referrer: 1)),
+                new AttachChildCustomerOp(S, 5),
+                new MarkRemovedOp(S, "customers/5"),
+                new SaveOp(S),
+                new LoadOp("C", "customers", 6),
+            ]
+        ),
+        // DB にある行を消し、同じキーの新しい行を足して 1 回で保存すると、削除が先に走り、行が置き換わる（ルートの並びに依らない）
+        new(
+            "graph-remove-and-add-same-key-roots-added-first",
+            [.. Basic, new SeedOp(new CustomerRow(4, "Dan"))],
+            [
+                new NewRootOp(S, new CustomerRow(4, "Dana"), RowState.Added),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new SaveManyCustomersOp([S, "B"]),
+                new LoadOp("C", "customers", 4),
+            ]
+        ),
+        new(
+            "graph-remove-and-add-same-key-roots-removed-first",
+            [.. Basic, new SeedOp(new CustomerRow(4, "Dan"))],
+            [
+                new NewRootOp(S, new CustomerRow(4, "Dana"), RowState.Added),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new SaveManyCustomersOp(["B", S]),
+                new LoadOp("C", "customers", 4),
+            ]
+        ),
+        // 削除を含む保存でも、削除する行と主キー・一意な値の重ならない新しい行は、並びどおりに保存する
+        new(
+            "graph-save-new-row-without-shared-value-keeps-order",
+            [.. Basic, new SeedOp(new CustomerRow(4, "Dan"))],
+            [
+                new NewRootOp(S, new CustomerRow(5, "Eve"), RowState.Added),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new SaveManyCustomersOp([S, "B"]),
+                ParityExpect.Hooks(
+                    "graph-order-new-row-without-shared-value",
+                    "Before",
+                    "Insert:customers/5",
+                    "Delete:customers/4"
+                ),
+            ]
+        ),
+        // 何も削除しない保存は、新しい行も並びどおりに保存する（後回しにするのは削除を含む保存だけ）
+        new(
+            "graph-save-without-deletion-keeps-order",
+            Basic,
+            [
+                new NewRootOp(S, new OrderRow(13, 1, 5m), RowState.Added),
+                new LoadOp("B", "orders", 10),
+                new EditMemoOp("B", 10, "edited"),
+                new SaveManyOrdersOp([S, "B"]),
+                ParityExpect.Hooks(
+                    "graph-order-without-deletion",
+                    "Before",
+                    "Insert:orders/13",
+                    "Update:orders/10"
+                ),
+            ]
+        ),
         // 他者が消した行を、insertWhenUpdateMissing で保存し直す（1 行・境界の下）
         new(
             "insert-when-missing-single",

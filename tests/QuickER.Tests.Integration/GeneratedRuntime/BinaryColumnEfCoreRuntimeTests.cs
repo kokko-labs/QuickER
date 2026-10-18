@@ -70,6 +70,45 @@ public sealed class BinaryColumnEfCoreRuntimeTests : BinaryColumnRuntimeTestsBas
         reread.Payload.Should().Equal([42, 43], "EF Core は除外列 payload を通常どおり書き込む");
     }
 
+    /// <summary>
+    /// 2b. EditModel が AcceptSaved で保存を受け入れても、除外列の blob は EditModel に残る（EF Core は全列を書くので、
+    /// 未取得へ戻すと次の保存が空の値で blob を消す）。作り直した Entity でも、使い回した Entity でも消えない。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/EF Core] 2b: AcceptSaved の後の 2 回目の保存でも、除外列の blob は消えない"
+    )]
+    public async Task AcceptSaved_ThenSaveAgain_KeepsStoredBlobs()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+        var mapper = new DocumentMapper();
+
+        var editModel = mapper.CreateEditModel((await documents.GetByIdAsync(1, Ct))!);
+        editModel.BindingTitle = "first";
+        var entity = mapper.CreateEntity(editModel, includeRemoved: true);
+        await documents.SaveAsync(entity, cancellationToken: Ct);
+        mapper.AcceptSaved(editModel, entity);
+
+        // 作り直した Entity で保存する
+        editModel.BindingTitle = "second";
+        await documents.SaveAsync(
+            mapper.CreateEntity(editModel, includeRemoved: true),
+            cancellationToken: Ct
+        );
+
+        // 保存した Entity へ書き戻して保存する
+        editModel.BindingTitle = "third";
+        mapper.ApplyToEntity(editModel, entity, includeRemoved: true);
+        await documents.SaveAsync(entity, cancellationToken: Ct);
+
+        var reread = await documents.GetByIdAsync(1, Ct);
+        reread!.Title.Should().Be("third");
+        reread
+            .Payload.Should()
+            .Equal(Doc1Payload, "AcceptSaved は EF Core の構成で blob を未取得へ戻さない");
+        reread.Thumb.Should().Equal(Doc1Thumb);
+    }
+
     /// <summary>3. 共有 DSL 実装の名前付きクエリ（射影・件数）は EF Core でも同じ結果を返す</summary>
     [Fact(DisplayName = "[Binary/EF Core] 3: 名前付きクエリ（射影・件数）が EF Core でも動く")]
     public async Task NamedQueries_WorkOnEfCore()

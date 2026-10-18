@@ -132,6 +132,41 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
         payloadLength.Should().Be(Doc1Payload.Length);
     }
 
+    /// <summary>
+    /// 5b. 新しい行の EditModel では、NOT NULL の除外列は空配列のまま残り（未入力に読まない）、Validate を通る。
+    /// 空配列の INSERT の後に Stream で書き込む 2 段の書き込みが EditModel からも成り立つ。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/Ado] 5b: 新しい行の EditModel は NOT NULL の除外列を空配列のまま渡し、INSERT の後に書き込める"
+    )]
+    public async Task NewEditModel_KeepsEmptyExcludedBlob_AndTwoStepWriteWorks()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+        var mapper = new DocumentMapper();
+
+        var model = mapper.CreateEditModel();
+        model
+            .Thumb.Should()
+            .Equal([], "除外列の空配列は 2 段の書き込みのための値で、未入力ではない");
+
+        model.BindingDocumentId = "9";
+        model.BindingTitle = "new";
+        model.BindingIsPublished = "false";
+        model.Validate().Should().BeTrue();
+
+        var entity = mapper.CreateEntity(model, includeRemoved: true);
+        entity.Thumb.Should().Equal([]);
+        await documents.SaveAsync(entity, cancellationToken: Ct);
+
+        using var source = new MemoryStream([7, 7, 7]);
+        (await documents.WriteThumbAsync(9, source, cancellationToken: Ct)).Should().BeTrue();
+
+        using var destination = new MemoryStream();
+        (await documents.ReadThumbAsync(9, destination, Ct)).Should().BeTrue();
+        destination.ToArray().Should().Equal([7, 7, 7]);
+    }
+
     /// <summary>6. INSERT は全列書き込み＝生 SQL で DB に blob が実在することを確認する</summary>
     [Fact(DisplayName = "[Binary/Ado] 6: INSERT は全列書き込み（DB に blob が実在する）")]
     public async Task Insert_WritesAllColumns_BlobPersisted()

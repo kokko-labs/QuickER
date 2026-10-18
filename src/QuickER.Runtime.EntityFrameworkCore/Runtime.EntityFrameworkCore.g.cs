@@ -2489,9 +2489,18 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
 
                     var tracked = new List<TrackedOperation>();
 
+                    // The same order as the QuickER repositories (GraphSaveOrder): a new row that takes a deleted row's value
+                    // is recorded after the walk of every root, so the save hooks fire in the same sequence
+                    var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
+
                     foreach (var root in roots)
                     {
-                        TrackNode(context, root, cascadeSave, cascadeDelete, tracked);
+                        TrackNode(context, root, cascadeSave, cascadeDelete, tracked, order);
+                    }
+
+                    foreach (var subtree in order?.HeldBack ?? [])
+                    {
+                        TrackNode(context, subtree, cascadeSave, cascadeDelete, tracked, order: null);
                     }
 
                     return await SaveTrackedGraphAsync(
@@ -2799,9 +2808,16 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         EntityBaseCore entity,
         bool cascadeSave,
         bool cascadeDelete,
-        List<TrackedOperation> tracked
+        List<TrackedOperation> tracked,
+        GraphSaveOrder? order
     )
     {
+        // A new row that takes a deleted row's value is recorded after the walk of every root (see GraphSaveOrder)
+        if (order is not null && order.TryHoldBack(entity))
+        {
+            return;
+        }
+
         if (entity.IsRemoved)
         {
             // Children first, as the QuickER repositories delete them
@@ -2832,7 +2848,7 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         // Unchanged entities are also registered (EntityState.Unchanged) so the walk reaches changed entities below them
         foreach (var child in entity.EnumerateCascadeChildren())
         {
-            TrackNode(context, child, cascadeSave, cascadeDelete, tracked);
+            TrackNode(context, child, cascadeSave, cascadeDelete, tracked, order);
         }
     }
 

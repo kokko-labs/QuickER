@@ -424,9 +424,20 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>Entity → EditModel のロードで確定値へ代入する式を組み立てる（バイナリ列だけ防御的コピーを挟む）</summary>
     /// <remarks>
+    /// <para>
     /// <c>byte[]</c> は参照型なので素の代入だと Entity と EditModel が同じ配列を指し、EditModel 側の書き換えが
     /// ロード元のエンティティへ黙って波及する（無損失ロード＝確定値の直接代入にした副作用）。値オブジェクト列は
     /// VO 自身が配列を複製しない契約のため、写した配列から VO を作り直す（VO の Create 契約は変えない）。
+    /// </para>
+    /// <para>
+    /// 新しい行（Added の Entity）では、値オブジェクトでない文字列の空文字列とバイナリの空配列を未入力（null）として読む。
+    /// NOT NULL の列の初期化子（<c>string.Empty</c> / 空配列）や OnEntityCreated のフックが入れた空の値を入力済みと
+    /// 数えると、何も入力していない新しい行が必須の検査を素通りして空の値で保存され、兄弟の重複も空の値どうしで報告される。
+    /// 画面で入力して消した空欄が null になるのと同じ規則で、NULL 許容の列も同じに扱う。既存の行の空の値は保存されている値
+    /// なのでそのまま読む。除外した無制限バイナリ列の空配列は、空で INSERT してから Stream で書く 2 段の書き込みのための
+    /// 値なので未入力にしない。行バージョン列は DB が採番するので読み方を変えない
+    /// （Mapper は入力があるときだけ書き戻すので、どちらでも同じ）。
+    /// </para>
     /// </remarks>
     private static string BuildEditModelLoadExpression(
         string propertyName,
@@ -435,7 +446,15 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         if (!editModelProperty.IsBinary)
         {
-            return $"entity.{propertyName}";
+            return
+                !editModelProperty.IsValueObject
+                && string.Equals(
+                    editModelProperty.TypeName.TrimEnd('?'),
+                    "string",
+                    StringComparison.Ordinal
+                )
+                ? $"entity.IsAdded && entity.{propertyName} is \"\" ? null : entity.{propertyName}"
+                : $"entity.{propertyName}";
         }
 
         // 値オブジェクトは基底の CopyValue()（配列を写した同値の VO を返す）で複製する。
@@ -445,7 +464,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             return $"entity.{propertyName}?.CopyValue()";
         }
 
-        return $"(byte[]?)entity.{propertyName}?.Clone()";
+        return editModelProperty.IsExcludedUnboundedBinary || editModelProperty.IsRowVersion
+            ? $"(byte[]?)entity.{propertyName}?.Clone()"
+            : $"entity.IsAdded && entity.{propertyName} is [] ? null : (byte[]?)entity.{propertyName}?.Clone()";
     }
 
     /// <summary>

@@ -224,12 +224,43 @@ if (!editModel.Validate())
 mapper.ApplyToEntity(editModel, entity!, includeRemoved: true);
 await customers.SaveAsync(entity!);
 
-// The save succeeded, so reset the graph to the unchanged state
-editModel.AcceptChanges();
+// The save succeeded, so take its result back into the edit model
+mapper.AcceptSaved(editModel, entity!);
 ```
 
 For a brand-new row, build the entity instead of applying to one.
 Use `mapper.CreateEntity(editModel, includeRemoved: true)`, or `CreateEntities(collection, includeRemoved: true)` for a whole collection.
+After the save, pass the same edit model and entity, or the same collection and entities, to `AcceptSaved`:
+
+```csharp
+var newEntity = mapper.CreateEntity(newModel, includeRemoved: true);
+await customers.SaveAsync(newEntity);
+mapper.AcceptSaved(newModel, newEntity);
+
+var entities = mapper.CreateEntities(editModels, includeRemoved: true);
+await customers.SaveAsync(entities);
+mapper.AcceptSaved(editModels, entities);
+```
+
+**`AcceptSaved` takes the outcome of the save back into the edit model.**
+It looks at each entity the mapper built, and at its state after the save:
+
+- A row the save wrote has its column values read back from the entity and becomes Unchanged.
+  That brings back the new row version, values the database produced that the backend wrote back to the entity, and values a Before hook set, such as a key.
+  The next save then updates the right row with the right version.
+  Child collections are not rebuilt, so the screen's selection stays.
+- An excluded unbounded binary column depends on the repositories you generate.
+  Without the EF Core repositories, it is read back as not fetched, and the entity's column is set back to not fetched too, so the next save of either one leaves the stored blob alone.
+  With the EF Core repositories, which read and write every column, the edit model keeps the blob it holds, and the next EF Core save writes it as before.
+  When the QuickER repositories are generated alongside them, a QuickER save of an edit model that holds a blob is refused by the update guard; fetch the row again before that save, or write the column with raw SQL.
+- A row a Save hook skipped keeps its state and its values, so the next save tries it again.
+- A child deletion a hook skipped stays pending: a `Remove()` row stays in the deletion tracking, and a `MarkRemoved()` row stays in the collection.
+- A deleted row is cleaned up as described in [Removing rows](#removing-rows-remove-versus-markremoved).
+  A deleted root stays `Removed`, and so does a deleted single cascade child.
+
+The edit model's own `AcceptChanges()` accepts the edit model without looking at the save.
+It marks every row Unchanged, rows a hook skipped included, and reads nothing back.
+Use `AcceptSaved` after a save.
 
 **Loading into an edit model rebuilds its child collections.**
 `mapper.ApplyToEditModel(entity, editModel)` replaces the previous collection instances with new ones.
@@ -268,7 +299,7 @@ An unfinished, unconvertible, or duplicate value on a row the user has deleted c
 The mapper follows the same rule and skips a removed row's absent non-key values instead of requiring them.
 The errors themselves stay registered on the row, so a per-row display (`HasErrors` / `GetErrors`, that is `INotifyDataErrorInfo`) keeps showing them, and putting the row back brings them straight back into the validation.
 
-The cleanup after a confirmed save (`AcceptChanges()`) is automatic.
+The cleanup after a confirmed save (`mapper.AcceptSaved` or `AcceptChanges()`) is automatic.
 
 - Rows set aside by `Remove()` leave the tracking list and become Added again, subtree and all.
   Their stored rows are gone together with their cascade descendants, so adding the same instance back means inserting the whole graph as new rows.
@@ -281,6 +312,11 @@ A `MarkRemoved()` single child stays on the navigation property, still `Removed`
 Assign null to it once the save is confirmed.
 Left in place, the next save attempts the same delete again.
 A no-row delete is silently accepted by the QuickER repositories but throws in an EF Core graph save, a known asymmetry, so nulling it out is the safe move.
+
+**A new row removed before it was ever saved is simply dropped.**
+It has no stored row to delete, so the mapper leaves it out of the entity graph, and its key does not need to be filled in.
+Accepting the save takes it out of its collection.
+A single cascade child of this kind stays on its navigation, still `Removed`, as above.
 
 ## QuickER Repository
 
@@ -566,7 +602,24 @@ Left in the collection, it would be deleted again by the next save of the same g
 A child a save hook skipped was not deleted, so it stays in the collection.
 A single cascade child has no collection to leave, so it stays on its navigation, still `Removed`; assign null to it once the save is confirmed.
 The descendants of a deleted root are left as they are, since the whole subtree went with it.
-Every backend behaves the same way, as an edit model's `AcceptChanges()` does (see [Removing rows](#removing-rows-remove-versus-markremoved)).
+Every backend behaves the same way, and so does an edit model when the mapper's `AcceptSaved` accepts the save (see [Removing rows](#removing-rows-remove-versus-markremoved)).
+
+**A new row that takes a deleted row's value is written after the deletion.**
+A graph save walks each root in graph order: a deleted row deletes its subtree children first, and a new or updated row is written before its children.
+A new row that takes the primary key or a unique value of a row the same save deletes waits, with the rows below it, until every root has been walked.
+It can therefore take that value wherever the two sit in the collection or in the list of roots.
+Text is compared without regard to case, and a value with a null part takes nothing.
+SQL Server is the exception: its unique constraint allows a single NULL, so a new row that takes the NULL of a row the same save deletes is not held back and can be refused there.
+For a key, removing a row and adding a new row with the same key in one save replaces the row, whichever comes first.
+Where no row with that key exists, the deletion does nothing and the new row stays; an EF Core graph save reports that deletion as a conflict instead, the no-row delete asymmetry described in [Removing rows](#removing-rows-remove-versus-markremoved).
+An EF Core graph save counts the replacement as one row, where the other backends count the deletion and the insert.
+Every other row is written in graph order: a row that refers to a new row is written after it, and a child moved under a new parent is moved before its old parent is deleted.
+Every backend uses this order, and the save hooks fire in it.
+
+One shape cannot be saved in a single call: deleting a row, adding a new row that takes its unique value, and pointing the rows that referred to the deleted row at the new one, such as moving the children of a parent under its replacement.
+With a `NO ACTION` foreign key, writing the new row first is refused by the unique constraint, and deleting the old row first is refused by the foreign key of the rows that still point to it.
+Split it into three saves around a temporary value: add the new row with a temporary value and point the rows at it, then delete the old row, then give the new row its value.
+The in-memory repository accepts the single save, as it does not check foreign keys (see [In-memory repositories for tests](#in-memory-repositories-for-tests-generateinmemoryrepositories)).
 
 ### Save hooks (ISaveHook)
 
@@ -644,11 +697,16 @@ Direct calls to the low-level APIs `InsertAsync` / `UpdateAsync` / `DeleteAsync`
 #### Before and skip semantics
 
 `false` skips only that entity's single operation; other rows proceed.
-A skipped row does not get an After call, and its `RowState` is left unchanged, which excludes it from `AcceptChanges`.
+A skipped row does not get an After call, and its `RowState` is left unchanged.
+The mapper's `AcceptSaved` therefore keeps the edit model of a skipped insert or update as it was, and the next save tries it again (see [Edit model save workflow](#edit-model-save-workflow)).
+A skipped deletion of a child in a collection also stays pending, because the child stays in its parent's collection.
+A skipped deletion of a root or of a single cascade child cannot be told apart from a deletion that ran: both leave the entity `Removed`.
+`AcceptSaved` treats it as deleted and leaves the edit model `Removed`.
 
 Because a skip is isolated, consistency is the hook author's responsibility.
 In particular, deletes run children-first, so **returning `false` for only the root of a subtree delete leaves the children deleted and the root behind**.
 Every backend runs the delete hooks of a deleted entity's descendants children first, and runs them for an `Added` descendant too, although it has no row to delete.
+The hooks of a new row that takes a value of a row the same save deletes, and of the rows below it, come after the hooks of the other rows, in the order the rows are written (see [Graph save](#graph-save-save-parent-and-children-in-one-call)).
 To stop the parent, the children's hooks must also return `false`.
 An inconsistent skip, such as skipping a new parent while saving a new child, falls to the safe side through an FK constraint violation, an exception, and a full rollback, provided the FK constraint is actually defined in the database.
 
@@ -800,6 +858,12 @@ Every error is owned by the check that registered it, and a check only ever adds
   It is the only thing that can produce them again, so nothing else clears them.
   A blank input is never a conversion error: it sets the confirmed value to null and withdraws the setter's own error, and whether null is acceptable is the required check's call.
   This rule holds regardless of value objects and of the column's type (numeric, date/time, bool, binary, string), so a nullable column can be set back to NULL from the screen.
+  A new row reads its empty values the same way.
+  When the mapper loads an entity that is `Added`, an empty string or an empty byte array of a column that is not a value object becomes null.
+  A new row nobody typed into therefore fails the required check instead of saving the entity's initial empty value, and new rows left blank are not reported as duplicates of each other.
+  An empty string an `OnEntityCreated` hook sets is read the same way, nullable columns included, and is saved as NULL.
+  A stored row's empty values are loaded as they are.
+  An excluded unbounded binary column keeps its empty array, which lets a new row be inserted empty and written with a stream afterwards.
 - **The required-field check** (generated `ValidateSelf`) adds a missing-input error only when the property carries no other input error, so a field that holds unconvertible text never has its message silently relabelled to "is required" instead.
   It clears its own error as soon as the value is present, even when the value was assigned straight to the committed property rather than typed.
 - **The two uniqueness checks** each have their own slot on a property, addressed by `DuplicateErrorSource` (`Siblings` for the check among the elements of a collection, `Database` for the check against the stored rows).
@@ -828,7 +892,8 @@ if (!await editModel.ValidateUniqueAsync(repository))
 
 It builds an entity from the edit model's confirmed values, calls `CheckUniquenessAsync`, and maps each violation's `PropertyNames` back to the binding properties.
 Every confirmed value goes onto the entity, so a user-defined check sees the whole row, not only the constraint's columns.
-A value-type property with no input cannot reach the entity (its property is not nullable and would hold the CLR default), and neither can a column the edit model leaves out (array and `inet` columns).
+A property with no input that the entity cannot leave empty cannot reach the entity: a value type would hold the CLR default, and a text or binary column that is not nullable would hold its empty initial value.
+Neither can a column the edit model leaves out (array and `inet` columns).
 A violation that names such a property is dropped, so a constraint over it is not checked, while every other constraint still is.
 A violation with no property names, or with names that do not belong to the edit model, becomes a model-level error registered under the empty property name, which `GetErrors(null)` returns.
 The duplicate-value errors registered by the previous call are cleared first, so re-checking never leaves stale errors; it clears its own findings only, so what the check among the siblings reported stays.

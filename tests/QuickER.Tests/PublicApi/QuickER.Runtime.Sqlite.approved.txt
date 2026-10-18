@@ -6,6 +6,7 @@ public static class QuickER.Runtime.Sqlite.CascadeDeletePlanner
 
 public static class QuickER.Runtime.Sqlite.EntityGraphSaver
     public static System.Threading.Tasks.Task<int> SaveAsync(QuickER.Runtime.EntityBaseCore entity, Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, System.Threading.CancellationToken cancellationToken, QuickER.Runtime.Sqlite.SaveHookSession hooks = null, bool changesAlreadyVerified = false)
+    public static System.Threading.Tasks.Task<int> SaveGraphsAsync(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> roots, Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, System.Threading.CancellationToken cancellationToken, QuickER.Runtime.Sqlite.SaveHookSession hooks = null)
     public static bool HasChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
     public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade)
     public static void AcceptChanges(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.IReadOnlySet<QuickER.Runtime.EntityBaseCore> skip)

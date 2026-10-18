@@ -2084,17 +2084,16 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 
         try
         {
-            // HasChanges was already checked before this call, so skip the redundant internal graph traversal
-            rows = await EntityGraphSaver.SaveAsync(
-                entity,
+            // HasChanges was already checked before this call, so the graph is known to have changes
+            rows = await EntityGraphSaver.SaveGraphsAsync(
+                [entity],
                 connection,
                 transaction,
                 cascadeSave,
                 cascadeDelete,
                 insertWhenUpdateMissing,
                 cancellationToken,
-                hooks,
-                changesAlreadyVerified: true{{ if repository_dialect == "sqlserver" }},
+                hooks{{ if repository_dialect == "sqlserver" }},
                 mode: mode,
                 versions: versions{{ end }}
             ).ConfigureAwait(false);
@@ -2175,23 +2174,20 @@ public abstract class {{ repository_base_class }}Core<TEntity, TKey>(
 
         try
         {
-            foreach (var entity in targets)
-            {
-                // targets is already filtered by HasChanges, so skip the redundant internal graph traversal
-                rows += await EntityGraphSaver.SaveAsync(
-                    entity,
-                    connection,
-                    transaction,
-                    cascadeSave,
-                    cascadeDelete,
-                    insertWhenUpdateMissing,
-                    cancellationToken,
-                    hooks,
-                    changesAlreadyVerified: true{{ if repository_dialect == "sqlserver" }},
-                    mode: mode,
-                    versions: versions{{ end }}
-                ).ConfigureAwait(false);
-            }
+            // targets is already filtered by HasChanges. All the roots go through one call, so the subtrees of new rows
+            // are saved after the deletions of every root (a new root can take a unique value a deleted root held)
+            rows = await EntityGraphSaver.SaveGraphsAsync(
+                targets,
+                connection,
+                transaction,
+                cascadeSave,
+                cascadeDelete,
+                insertWhenUpdateMissing,
+                cancellationToken,
+                hooks{{ if repository_dialect == "sqlserver" }},
+                mode: mode,
+                versions: versions{{ end }}
+            ).ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }

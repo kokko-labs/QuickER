@@ -144,6 +144,19 @@ public class RuntimeTestMatrixTests
                 Covered()
             )
         ),
+        ["EditModelSave"] = new(
+            "EditModel の保存の受け入れ（AcceptSaved＝版・DB とフックが書いた値の読み戻し・フックが飛ばした行・足して消した子）",
+            Row(
+                Covered(),
+                NotApplicable(
+                    "シナリオは rowversion 列の版を読み戻す形で、SQLite 単独の図に rowversion 列は生まれない。"
+                        + "読み戻しの処理は実装先に依らない（マッパーの共通部）"
+                ),
+                Covered(),
+                Covered(),
+                Covered()
+            )
+        ),
         ["ConcurrencyVo"] = new(
             "楽観排他 × 値オブジェクト（版プロパティが VO 型になる経路の Wrap/Unwrap）",
             Row(
@@ -541,6 +554,10 @@ public class RuntimeTestMatrixTests
         new("SaveConflictDetailsRuntimeTests", "Concurrency", Backend.InMemory),
         new("RemoteConcurrencyRuntimeTests", "Concurrency", Backend.Remote),
         new("ConcurrencyVoSqlServerRuntimeTests", "ConcurrencyVo", Backend.AdoSqlServer),
+        new("EditModelSaveSqlServerRuntimeTests", "EditModelSave", Backend.AdoSqlServer),
+        new("EditModelSaveEfCoreRuntimeTests", "EditModelSave", Backend.EfCore),
+        new("EditModelSaveInMemoryRuntimeTests", "EditModelSave", Backend.InMemory),
+        new("EditModelSaveRemoteRuntimeTests", "EditModelSave", Backend.Remote),
         new("ConcurrencyVoEfCoreRuntimeTests", "ConcurrencyVo", Backend.EfCore),
         new("ConcurrencyVoInMemoryRuntimeTests", "ConcurrencyVo", Backend.InMemory),
         new("ConcurrencyVoRemoteRuntimeTests", "ConcurrencyVo", Backend.Remote),
@@ -576,6 +593,7 @@ public class RuntimeTestMatrixTests
         new("GraphSaveEfCoreRuntimeTests", "GraphSave", Backend.EfCore),
         new("GraphSaveEfCoreSqlServerRuntimeTests", "GraphSave", Backend.EfCore),
         new("GraphSaveInMemoryRuntimeTests", "GraphSave", Backend.InMemory),
+        new("GraphSaveOrderRuntimeTests", "GraphSave", Backend.AdoSqlite),
         new("IncludeGraphSqlServerRuntimeTests", "IncludeGraph", Backend.AdoSqlServer),
         new("IncludeGraphAdoRuntimeTests", "IncludeGraph", Backend.AdoSqlite),
         new("IncludeGraphEfCoreRuntimeTests", "IncludeGraph", Backend.EfCore),

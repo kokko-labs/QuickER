@@ -147,6 +147,47 @@ public sealed class BinaryVoEditModelRuntimeTests : IDisposable
     }
 
     /// <summary>NULL 許容の除外列だけを持つ行（note_blob=NULL）でも同じ往復が成立する</summary>
+    [Fact(
+        DisplayName = "[BinaryVo] EditModel 往復: blob つきの新しい行を AcceptSaved すると、エンティティを使い回しても作り直しても次の保存が blob を送らず温存する"
+    )]
+    public async Task AcceptSaved_NewRowWithBlobs_NextSaveKeepsStoredBlobs()
+    {
+        await ResetAsync();
+        var items = Repository();
+        var mapper = new VaultItemMapper();
+
+        var input = NewInput(3, "gamma", Seal, NoteBlob);
+        var entity = mapper.CreateEntity(input, includeRemoved: true);
+        await items.SaveAsync(entity, cancellationToken: Ct);
+        mapper.AcceptSaved(input, entity);
+
+        input.RowState.Should().Be(RowState.Unchanged);
+        input
+            .Seal.Should()
+            .BeNull("保存の後の除外列は、取得したときと同じ未取得の状態として読み戻す");
+        input.NoteBlob.Should().BeNull();
+        entity
+            .Seal.Should()
+            .BeNull("エンティティも未取得の状態へ戻す（使い回すと blob を送り直さない）");
+
+        // 使い回したエンティティで通常列を更新しても、UPDATE のガードに当たらず blob を温存する
+        input.BindingLabel = "gamma-2";
+        mapper.ApplyToEntity(input, entity, includeRemoved: true);
+        await items.SaveAsync(entity, cancellationToken: Ct);
+        mapper.AcceptSaved(input, entity);
+
+        // 作り直したエンティティでも同じ
+        input.BindingLabel = "gamma-3";
+        await items.SaveAsync(
+            mapper.CreateEntity(input, includeRemoved: true),
+            cancellationToken: Ct
+        );
+
+        (await items.GetByIdAsync(ItemIdValue.Create(3), Ct))!.Label.Value.Should().Be("gamma-3");
+        (await ColumnLengthAsync("seal", 3)).Should().Be(Seal.Length);
+        (await ColumnLengthAsync("note_blob", 3)).Should().Be(NoteBlob.Length);
+    }
+
     [Fact(DisplayName = "[BinaryVo] EditModel 往復: NULL 許容の除外列（値なし）でも成立する")]
     public async Task EditModelRoundTrip_WithNullableExcludedColumn()
     {

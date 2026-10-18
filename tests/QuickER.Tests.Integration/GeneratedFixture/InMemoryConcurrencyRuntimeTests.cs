@@ -517,25 +517,33 @@ public sealed class InMemoryConcurrencyRuntimeTests
     }
 
     /// <summary>
-    /// 同じ保存単位の中で挿入してから削除した行（取り込み時は無し・ステージは削除）は、公開後も作られない。
+    /// 同じ保存単位の中で、同じキーの削除と挿入を並べると、削除が先に走り、新しい行が残る（リストの並びに依らない）。
+    /// 削除する行の主キーを取る新しい行は削除の後に書く（<c>GraphSaveOrder</c>）。キーは取り込み時に無いので、削除は
+    /// 何もしない（取り込み時に行が無かった削除は検証も適用もしない＝上の 2 件と同じ扱い）。
     /// </summary>
-    [Fact(
-        DisplayName = "[Concurrency/InMemory] SaveAsync: 同じ保存で挿入して削除した行は作られない"
+    [Theory(
+        DisplayName = "[Concurrency/InMemory] SaveAsync: 同じ保存で同じキーを削除して足すと、並びに依らず新しい行が残る"
     )]
-    public async Task SaveAsync_InsertThenRemoveInOneSave_LeavesNoRow()
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SaveAsync_RemoveAndAddSameKeyInOneSave_KeepsNewRow(bool addedFirst)
     {
         await ResetAndSeedAsync();
 
         (
             await Notes.SaveAsync(
-                [Transient(RowState.Added), Transient(RowState.Removed)],
+                addedFirst
+                    ? [Transient(RowState.Added), Transient(RowState.Removed)]
+                    : [Transient(RowState.Removed), Transient(RowState.Added)],
                 cancellationToken: Ct
             )
         )
             .Should()
-            .Be(2, "挿入と削除の 2 操作を数える");
+            .Be(1, "行の無い削除は数えず、挿入の 1 行だけを数える");
 
-        (await ReadChildNoteAsync(778)).Should().BeNull("挿入して削除した行は残らない");
+        (await ReadChildNoteAsync(778))
+            .Should()
+            .Be("transient", "削除が先に走り、挿入した行が残る");
 
         static DocumentNoteEntity Transient(RowState state) =>
             new()
