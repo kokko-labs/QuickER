@@ -6474,6 +6474,83 @@ public interface ISaveHookContext
     }
 }
 
+/// <summary>An unbounded binary column a save hook wrote through its <see cref="ISaveHookContext"/>.</summary>
+/// <param name="EntityType">The entity type whose column was written (the type the context is bound to).</param>
+/// <param name="PropertyName">The C# property name of the column.</param>
+/// <param name="Key">The primary key value the hook passed.</param>
+/// <param name="Context">The context of the save that wrote it (the same transaction).</param>
+public sealed record SaveHookBinaryColumnWrite(
+    Type EntityType,
+    string PropertyName,
+    object Key,
+    ISaveHookContext Context
+);
+
+/// <summary>Lets the code around a save see the unbounded binary columns its save hooks write, while the save is still open.</summary>
+/// <remarks>
+/// <para>
+/// A save hook's After writes inside the save's transaction, out of sight of the code that called the save. The sync
+/// journal is the one that has to know: a column written locally and not recorded is never uploaded, and the next
+/// download puts the server's value back over it. <see cref="Observe"/> registers what to do for the current flow,
+/// and the save hook session reports each write that stored a value in a row through
+/// <see cref="NotifyBinaryColumnWrittenAsync"/>, before the hook goes on. The observer runs inside the save's
+/// transaction (through <see cref="SaveHookBinaryColumnWrite.Context"/>), so what it writes commits or rolls back with
+/// the save, and an exception it throws fails the save.
+/// </para>
+/// <para>
+/// The registration flows with the async call (<see cref="AsyncLocal{T}"/>), so a save made elsewhere at the same time
+/// is not seen. Registrations nest: the innermost one sees the writes, and disposing it brings back the one around it.
+/// </para>
+/// </remarks>
+public static class SaveHookContextWrites
+{
+    private static readonly AsyncLocal<Func<SaveHookBinaryColumnWrite, CancellationToken, Task>?> _observer = new();
+
+    /// <summary>Registers what to do with each unbounded binary column a save hook writes in the current flow, until the result is disposed.</summary>
+    /// <param name="observer">Called with each write, inside the save's transaction.</param>
+    public static IDisposable Observe(Func<SaveHookBinaryColumnWrite, CancellationToken, Task> observer)
+    {
+        ArgumentNullException.ThrowIfNull(observer);
+        var outer = _observer.Value;
+        _observer.Value = observer;
+
+        return new Registration(outer);
+    }
+
+    /// <summary>Reports a write that stored a value in a row (does nothing when no one observes the current flow).</summary>
+    /// <param name="write">The write.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task NotifyBinaryColumnWrittenAsync(
+        SaveHookBinaryColumnWrite write,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(write);
+
+        return _observer.Value is { } observer
+            ? observer(write, cancellationToken)
+            : Task.CompletedTask;
+    }
+
+    /// <summary>Brings back the registration around this one when disposed (only once).</summary>
+    private sealed class Registration(Func<SaveHookBinaryColumnWrite, CancellationToken, Task>? outer)
+        : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _observer.Value = outer;
+        }
+    }
+}
+
 /// <summary>A non-generic surface for invoking the save hooks of a specific entity type (across the mixed types of a graph).</summary>
 /// <remarks>Calls Before in registration order, short-circuiting on the first <c>false</c>; calls After sequentially in registration order. Built once per type.</remarks>
 public interface ISaveHookInvoker

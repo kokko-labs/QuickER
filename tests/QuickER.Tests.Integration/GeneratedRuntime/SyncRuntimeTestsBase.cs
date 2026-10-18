@@ -3397,6 +3397,37 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
             .NotBeNull("同期は自分で入れた行を消さない");
     }
 
+    /// <summary>
+    /// 注文の After で、context を通して blob を書く Save フック（書く行は保存した行か、指定したキーの行。キーは
+    /// フックが渡すとおりの型で渡す）。
+    /// </summary>
+    private sealed class BlobWritingHook(object? key, byte[] content, bool throwAfter = false)
+        : ISaveHook<SyncOrderEntity>
+    {
+        public bool? LastWritten { get; private set; }
+
+        public async Task AfterSaveAsync(
+            SyncOrderEntity entity,
+            SaveOperation operation,
+            ISaveHookContext context,
+            CancellationToken cancellationToken = default
+        )
+        {
+            using var source = new MemoryStream(content);
+            LastWritten = await context.WriteBinaryColumnAsync(
+                nameof(SyncOrderEntity.Attachment),
+                key ?? entity.OrderId,
+                source,
+                cancellationToken: cancellationToken
+            );
+
+            if (throwAfter)
+            {
+                throw new InvalidOperationException("The hook failed after writing the blob.");
+            }
+        }
+    }
+
     /// <summary>挿入する明細に、決めた順にキーを振る Save フック。</summary>
     private sealed class LineKeyAssigningHook(int first) : ISaveHook<SyncOrderLineEntity>
     {
@@ -4428,6 +4459,142 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// <summary>
     /// 挿入は全除外列を書いたものとして記録され、blob を運ぶ回でそのまま上がる。
     /// </summary>
+    /// <summary>
+    /// 既存の行を更新するグラフ保存で、ローカルの After フックが context でその行の blob を書くと、その blob も記録され、
+    /// blob を運ぶ回でサーバーへ上がる（後のダウンロードが上書きしない）。
+    /// </summary>
+    /// <remarks>
+    /// 記録は保存の前に作り、更新の記録は blob の列を持たない。フックの書き込みは保存と同じトランザクションの中で
+    /// 記録されるので、blob と記録は一緒にコミットされる。記録が無いと blob は上がらず、サーバーで行が変わった後の
+    /// ダウンロードがサーバーの古い blob をローカルへ写していた。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/blob] 更新のグラフ保存で After フックが書いた blob も記録され、サーバーへ上がる"
+    )]
+    public async Task BlobWrittenByAfterHookOnUpdate_IsRecordedAndUploaded()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await WriteServerBlobAsync(1, [1]);
+        await Engine.SyncAsync(BlobOptions, Ct);
+        (await ReadLocalBlobAsync(1)).Should().Equal([1]);
+
+        var hooked = CreateHookedOrders(new BlobWritingHook(key: null, [7, 7]));
+        var local = (await hooked.GetByIdAsync(1, Ct))!;
+        local.CustomerName = "bob";
+        local.MarkUpdated();
+        await hooked.SaveAsync(local, cancellationToken: Ct);
+        (await ReadLocalBlobAsync(1)).Should().Equal([7, 7]);
+
+        await Engine.SyncAsync(BlobOptions, Ct);
+        (await ReadServerBlobAsync(1)).Should().Equal([7, 7], "フックが書いた blob も上がる");
+
+        // サーバーで行が変わってから降りても、ローカルの blob はフックの値のまま
+        var stored = (await ServerOrders.GetByIdAsync(1, Ct))!;
+        stored.CustomerName = "carol";
+        await ServerOrders.UpdateAsync(stored, cancellationToken: Ct);
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        (await ReadLocalBlobAsync(1)).Should().Equal([7, 7]);
+        (await LocalOrders.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("carol");
+    }
+
+    /// <summary>After フックが、保存したグラフの外の行の blob を context で書いても、その行の blob が記録されて上がる。</summary>
+    [Fact(
+        DisplayName = "[Sync/blob] After フックが保存したグラフの外の行に書いた blob も記録され、サーバーへ上がる"
+    )]
+    public async Task BlobWrittenByAfterHookOnAnotherRow_IsRecordedAndUploaded()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerAsync(2, "dave", 21, "gadget");
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        var hooked = CreateHookedOrders(new BlobWritingHook(key: 2, [5, 5]));
+        var local = (await hooked.GetByIdAsync(1, Ct))!;
+        local.CustomerName = "bob";
+        local.MarkUpdated();
+        await hooked.SaveAsync(local, cancellationToken: Ct);
+
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        (await ReadServerBlobAsync(2)).Should().Equal([5, 5]);
+        (await ServerOrders.GetByIdAsync(2, Ct))!.CustomerName.Should().Be("dave");
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>
+    /// After フックが主キーの型と違う型（int の主キーに long）でキーを渡しても、記録は主キーの型のキーのテキストで残り、
+    /// 上がる。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/blob] After フックが主キーの型と違う型でキーを渡して書いた blob も、行のキーで記録され上がる"
+    )]
+    public async Task BlobWrittenByAfterHookWithOtherKeyType_IsRecordedUnderRowKey()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerAsync(2, "dave", 21, "gadget");
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        var hooked = CreateHookedOrders(new BlobWritingHook(key: 2L, [4, 4]));
+        var local = (await hooked.GetByIdAsync(1, Ct))!;
+        local.CustomerName = "bob";
+        local.MarkUpdated();
+        await hooked.SaveAsync(local, cancellationToken: Ct);
+
+        (await Journal.ReadAllAsync(Ct))
+            .Select(entry => (entry.TableName, entry.KeyText))
+            .Should()
+            .Contain(("sync_orders", "2"));
+
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        (await ReadServerBlobAsync(2)).Should().Equal([4, 4]);
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+    }
+
+    /// <summary>After フックが blob を書いた後に保存が失敗すると、blob も記録も残らない。</summary>
+    [Fact(
+        DisplayName = "[Sync/blob] After フックが blob を書いた後に保存が失敗すると、blob も記録も残らない"
+    )]
+    public async Task SaveFailingAfterHookBlobWrite_LeavesNoBlobAndNoRecord()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await WriteServerBlobAsync(1, [1]);
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        var hooked = CreateHookedOrders(new BlobWritingHook(key: null, [7, 7], throwAfter: true));
+        var local = (await hooked.GetByIdAsync(1, Ct))!;
+        local.CustomerName = "bob";
+        local.MarkUpdated();
+        var save = () => hooked.SaveAsync(local, cancellationToken: Ct);
+
+        await save.Should().ThrowAsync<InvalidOperationException>();
+        (await Journal.CountPendingAsync(Ct)).Should().Be(0);
+        (await ReadLocalBlobAsync(1)).Should().Equal([1]);
+
+        await Engine.SyncAsync(BlobOptions, Ct);
+        (await ReadServerBlobAsync(1)).Should().Equal([1]);
+    }
+
+    /// <summary>After フックの書き込みが行に当たらなかった（false）なら、記録を足さない。</summary>
+    [Fact(
+        DisplayName = "[Sync/blob] After フックの blob の書き込みが行に当たらなければ、記録を足さない"
+    )]
+    public async Task BlobWriteByAfterHookMatchingNoRow_IsNotRecorded()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(BlobOptions, Ct);
+
+        var hook = new BlobWritingHook(key: 99, [5, 5]);
+        var hooked = CreateHookedOrders(hook);
+        var local = (await hooked.GetByIdAsync(1, Ct))!;
+        local.CustomerName = "bob";
+        local.MarkUpdated();
+        await hooked.SaveAsync(local, cancellationToken: Ct);
+
+        hook.LastWritten.Should().BeFalse("書く行が無い");
+        (await Journal.ReadAllAsync(Ct)).Should().ContainSingle("更新の記録だけ");
+    }
+
     [Fact(DisplayName = "[Sync/blob] 挿入した行の blob は記録され blob を運ぶ回で上がる")]
     public async Task InsertedRowsBlob_IsRecordedAndUploaded()
     {

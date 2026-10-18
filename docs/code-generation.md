@@ -2371,6 +2371,13 @@ Two details follow from copying columns separately.
 The recording does not depend on `IncludeUnboundedBinary`, because what to send is decided when sending, not when generating.
 A run left at the default uploads the row without the blob and settles the entry.
 
+**A blob a save hook writes is tracked too.**
+An After hook of a graph save can write an unbounded binary column through its context, of a row the save wrote or of another row.
+The decorator records that write as well, inside the save's transaction, so the entry commits with the save or rolls back with it.
+A write that matched no row records nothing.
+The key the hook passes is read as the table's key type, converting a value of another type such as a `long` for an `int` key; a key that cannot be read fails the save.
+A hook that runs while the engine applies a download writes without a record, like every write the engine makes, so a blob such a hook writes is not uploaded.
+
 **Only the columns this device wrote are sent.**
 Each journal entry records which unbounded binary columns its write stored a value in: an insert stores all of them, `Write{Column}Async` stores its own, and an update stores none.
 A run that carries the columns sends only those named by some entry of the row.

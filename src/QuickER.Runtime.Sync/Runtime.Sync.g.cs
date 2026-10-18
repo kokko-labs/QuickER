@@ -1224,6 +1224,44 @@ public sealed class SyncJournal
         }
     }
 
+    /// <summary>Records a write of one unbounded binary column inside the transaction of the save that made it.</summary>
+    /// <remarks>
+    /// What a save hook writes through its context goes through here (see <see cref="SaveHookContextWrites"/>): the entry
+    /// is written by the save's own connection, so it commits or rolls back with the save, and a save that does not
+    /// commit leaves no entry behind. The table has to exist already, since the save holds the database's write lock and
+    /// another connection could not create it.
+    /// </remarks>
+    /// <param name="context">The context of the save that wrote the column.</param>
+    /// <param name="tableName">The table the row belongs to.</param>
+    /// <param name="keyText">The row's key text.</param>
+    /// <param name="columnName">The property name of the column written.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    internal Task RecordWithinSaveAsync(
+        ISaveHookContext context,
+        string tableName,
+        string keyText,
+        string columnName,
+        CancellationToken cancellationToken
+    ) =>
+        context.ExecuteSqlAsync(
+            "INSERT INTO quicker_sync_journal "
+                + "(table_name, key_text, operation, original_row_version, "
+                + "unbounded_binary_columns, recorded_at) "
+                + "VALUES (@tableName, @keyText, @operation, NULL, @unboundedBinaryColumns, @recordedAt)",
+            new
+            {
+                tableName,
+                keyText,
+                operation = SyncJournalOperation.Upsert.ToString(),
+                unboundedBinaryColumns = columnName,
+                recordedAt = DateTime.UtcNow.ToString(
+                    "o",
+                    System.Globalization.CultureInfo.InvariantCulture
+                ),
+            },
+            cancellationToken
+        );
+
     /// <summary>How many entries one multi-row insert of <see cref="RecordManyAsync"/> carries.</summary>
     /// <remarks>
     /// Each entry binds one parameter per column, so the statement stays well inside 999 - the limit an SQLite build
@@ -1766,7 +1804,10 @@ public interface ISyncTableDescriptor
 /// </remarks>
 /// <typeparam name="TEntity">The entity type.</typeparam>
 /// <typeparam name="TKey">The primary key type.</typeparam>
-public sealed class SyncTableDescriptor<TEntity, TKey> : ISyncTableDescriptor, ISyncLocalRowVersionReader
+public sealed class SyncTableDescriptor<TEntity, TKey>
+    : ISyncTableDescriptor,
+        ISyncLocalRowVersionReader,
+        ISyncHookKeyFormatter
     where TEntity : EntityBaseCore, new()
 {
     /// <inheritdoc />
@@ -1907,6 +1948,37 @@ public sealed class SyncTableDescriptor<TEntity, TKey> : ISyncTableDescriptor, I
     }
 
     /// <inheritdoc />
+    string ISyncHookKeyFormatter.FormatHookKey(object key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+
+        if (key is TKey typed)
+        {
+            return FormatKey(typed);
+        }
+
+        try
+        {
+            var raw = SqlParameterValue.Unwrap(key)!;
+
+            return FormatKey(
+                SqlValueObjectActivator.Wrap(raw, typeof(TKey)) is TKey wrapped
+                    ? wrapped
+                    : (TKey)RawValueConverter.ConvertRaw(raw, typeof(TKey))
+            );
+        }
+        catch (Exception failure)
+        {
+            throw new InvalidOperationException(
+                $"A save hook wrote an unbounded binary column of {typeof(TEntity).Name} with a key of type "
+                    + $"{key.GetType().Name}, which cannot be read as the table's key type {typeof(TKey).Name}, so the "
+                    + "write cannot be recorded for the sync journal. Pass the key as the table's key type.",
+                failure
+            );
+        }
+    }
+
+    /// <inheritdoc />
     async Task<byte[]?> ISyncLocalRowVersionReader.ReadLocalRowVersionAsync(
         ISqlExecutor local,
         string keyText,
@@ -1926,6 +1998,15 @@ public sealed class SyncTableDescriptor<TEntity, TKey> : ISyncTableDescriptor, I
             )
             .ConfigureAwait(false);
     }
+}
+
+/// <summary>Turns the key a save hook passed when it wrote an unbounded binary column into the journal's key text.</summary>
+internal interface ISyncHookKeyFormatter
+{
+    /// <summary>The key text of the row, from the key as the hook passed it (the key type, or a value convertible to it).</summary>
+    /// <param name="key">The key the hook passed.</param>
+    /// <exception cref="InvalidOperationException">The key cannot be read as the table's key type.</exception>
+    string FormatHookKey(object key);
 }
 
 /// <summary>Reads the mirrored version of one local row by its key text (what a recorded delete is guarded by).</summary>
@@ -7944,6 +8025,10 @@ public sealed class SyncGraphRecorder
     /// <summary>Finds the descriptor of the node's table, or null when the table is not synchronised.</summary>
     private ISyncTableDescriptor? Find(EntityBaseCore entity) =>
         _descriptors.GetValueOrDefault(entity.GetType());
+
+    /// <summary>Finds the descriptor of the given entity type's table, or null when the table is not synchronised.</summary>
+    internal ISyncTableDescriptor? Find(Type entityType) =>
+        _descriptors.GetValueOrDefault(entityType);
 }
 
 /// <summary>
@@ -8080,6 +8165,11 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     /// When the write succeeds, the entries are checked against what it did (see <see cref="SettleRecordedAsync"/>): an
     /// entry for a row a save hook skipped is taken back, and one whose row a save hook gave its key is moved to that key.
     /// </para>
+    /// <para>
+    /// An unbounded binary column a save hook writes through its context during the write is recorded as well, inside
+    /// the save's transaction (see <see cref="RecordHookBinaryWriteAsync"/>), so the entry goes with the save whichever
+    /// way it ends.
+    /// </para>
     /// </remarks>
     /// <param name="record">Records the intent (called first).</param>
     /// <param name="write">Performs the business write (called second).</param>
@@ -8106,12 +8196,18 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
 
                 try
                 {
+                    // A save hook's write is recorded by the save's own connection, which cannot create the table
+                    await Journal.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+
                     using (recorded.Begin())
                     {
                         await record().ConfigureAwait(false);
                     }
 
-                    result = await write().ConfigureAwait(false);
+                    using (SaveHookContextWrites.Observe(RecordHookBinaryWriteAsync))
+                    {
+                        result = await write().ConfigureAwait(false);
+                    }
                 }
                 catch (Exception failure) when (recorded.Ids.Count > 0)
                 {
@@ -8124,6 +8220,51 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
 
                 return result;
             },
+            cancellationToken
+        );
+    }
+
+    /// <summary>Records an unbounded binary column a save hook wrote during a write, inside the save's transaction.</summary>
+    /// <remarks>
+    /// <para>
+    /// The entries a graph save records are made before it runs, from what the graph holds, and an After hook can write
+    /// a column of a row the save wrote, or of another row, through its context. Left out of the journal, that blob would
+    /// never be uploaded, and the next download would put the server's value back over it. The entry is written by the
+    /// save's own connection, so it commits or rolls back with the save; a write that matched no row is not reported.
+    /// </para>
+    /// <para>
+    /// A table that is not synchronised, and a column the table does not leave out of the row transfer, record nothing.
+    /// A key that cannot be read as the table's key type fails the save rather than leaving the blob unrecorded.
+    /// </para>
+    /// </remarks>
+    /// <param name="write">The column the hook wrote.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private Task RecordHookBinaryWriteAsync(
+        SaveHookBinaryColumnWrite write,
+        CancellationToken cancellationToken
+    )
+    {
+        if (
+            GraphRecorder.Find(write.EntityType) is not { } descriptor
+            || !descriptor.UnboundedBinaryColumnNames.Contains(write.PropertyName, StringComparer.Ordinal)
+        )
+        {
+            return Task.CompletedTask;
+        }
+
+        if (descriptor is not ISyncHookKeyFormatter formatter)
+        {
+            throw new InvalidOperationException(
+                $"The sync descriptor of {descriptor.TableName} cannot read the key a save hook passed, so the "
+                    + "unbounded binary column the hook wrote cannot be recorded for the sync journal."
+            );
+        }
+
+        return Journal.RecordWithinSaveAsync(
+            write.Context,
+            descriptor.TableName,
+            formatter.FormatHookKey(write.Key),
+            write.PropertyName,
             cancellationToken
         );
     }

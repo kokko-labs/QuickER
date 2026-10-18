@@ -3977,13 +3977,18 @@ public sealed class SaveHookSession(
             : invoker.InvokeAfterAsync(
                 entity,
                 operation,
-                new WriteNotingContext(_contextFactory(entity), this),
+                new WriteNotingContext(_contextFactory(entity), this, entity.GetType()),
                 cancellationToken
             );
     }
 
     /// <summary>Hands every call on to the backend's context, noting on the session that a hook wrote an unbounded binary column through it.</summary>
-    private sealed class WriteNotingContext(ISaveHookContext inner, SaveHookSession session) : ISaveHookContext
+    /// <remarks>A write that stored a value in a row is also reported to <see cref="SaveHookContextWrites"/>, before the hook goes on.</remarks>
+    private sealed class WriteNotingContext(
+        ISaveHookContext inner,
+        SaveHookSession session,
+        Type entityType
+    ) : ISaveHookContext
     {
         public Task<int> ExecuteSqlAsync(
             string sql,
@@ -3991,7 +3996,7 @@ public sealed class SaveHookSession(
             CancellationToken cancellationToken = default
         ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
 
-        public Task<bool> WriteBinaryColumnAsync(
+        public async Task<bool> WriteBinaryColumnAsync(
             string propertyName,
             object key,
             Stream? source,
@@ -4000,7 +4005,21 @@ public sealed class SaveHookSession(
         )
         {
             session.BinaryColumnWritten = true;
-            return inner.WriteBinaryColumnAsync(propertyName, key, source, length, cancellationToken);
+            var written = await inner
+                .WriteBinaryColumnAsync(propertyName, key, source, length, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (written)
+            {
+                await SaveHookContextWrites
+                    .NotifyBinaryColumnWrittenAsync(
+                        new SaveHookBinaryColumnWrite(entityType, propertyName, key, inner),
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+
+            return written;
         }
     }
 }

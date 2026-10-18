@@ -549,6 +549,17 @@ public enum QuickER.Runtime.SaveConflictReason : int
     NotFound = 1
     Unknown = 0
 
+public sealed class QuickER.Runtime.SaveHookBinaryColumnWrite : System.IEquatable<QuickER.Runtime.SaveHookBinaryColumnWrite>
+    public .ctor(System.Type EntityType, string PropertyName, object Key, QuickER.Runtime.ISaveHookContext Context)
+    public QuickER.Runtime.ISaveHookContext Context { get; init; }
+    public System.Type EntityType { get; init; }
+    public object Key { get; init; }
+    public string PropertyName { get; init; }
+
+public static class QuickER.Runtime.SaveHookContextWrites
+    public static System.IDisposable Observe(System.Func<QuickER.Runtime.SaveHookBinaryColumnWrite, System.Threading.CancellationToken, System.Threading.Tasks.Task> observer)
+    public static System.Threading.Tasks.Task NotifyBinaryColumnWrittenAsync(QuickER.Runtime.SaveHookBinaryColumnWrite write, System.Threading.CancellationToken cancellationToken)
+
 public sealed class QuickER.Runtime.SaveHookInvoker<TEntity> : QuickER.Runtime.ISaveHookInvoker
     public .ctor(System.Collections.Generic.IEnumerable<QuickER.Runtime.ISaveHook<TEntity>> hooks)
     public System.Threading.Tasks.Task InvokeAfterAsync(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.SaveOperation operation, QuickER.Runtime.ISaveHookContext context, System.Threading.CancellationToken cancellationToken)
