@@ -71,26 +71,28 @@ public class SyncPlannerTests
         // DropForeignKey が AlterColumn より先なのは意図的:
         // FK 依存列の型変更を通すため、先に FK を外しておく必要がある（SQL Server は Msg 5074 で失敗する）
         // AlterPrimaryKey は 2 フェーズ: 解除は AlterColumn の前（旧 PK 列の NULL 許容化を通すため）・
-        // 付与は AlterColumn の後（新 PK 列の NOT NULL 化を先に済ませるため）。いずれも DropColumn より前
+        // 付与は AlterColumn の後（新 PK 列の NOT NULL 化を先に済ませるため）。いずれも DropColumn より前。
+        // DropTable は AddTable より前（表の名前を変える同期で、新しい表が古い表の一意制約の名前を引き継いでも
+        // スキーマの中の名前がぶつからないため）
         plan.Sections.Select(s => s.Kind)
             .Should()
             .Equal(
+                SchemaDiffKind.DropForeignKey,
+                SchemaDiffKind.DropTable,
                 SchemaDiffKind.AddTable,
                 SchemaDiffKind.AddColumn,
-                SchemaDiffKind.DropForeignKey,
                 SchemaDiffKind.AlterPrimaryKey,
                 SchemaDiffKind.AlterColumn,
                 SchemaDiffKind.AlterPrimaryKey,
                 SchemaDiffKind.DropColumn,
-                SchemaDiffKind.DropTable,
                 SchemaDiffKind.AddForeignKey,
                 SchemaDiffKind.SetTableDescription,
                 SchemaDiffKind.SetColumnDescription
             );
 
         // フェーズは主キー変更セクションだけが持ち、他は既定の None のまま
-        plan.Sections[3].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Drop);
-        plan.Sections[5].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Add);
+        plan.Sections[4].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Drop);
+        plan.Sections[6].PrimaryKeyPhase.Should().Be(PrimaryKeyPhase.Add);
         plan.Sections.Where(s => s.Kind != SchemaDiffKind.AlterPrimaryKey)
             .Should()
             .OnlyContain(s => s.PrimaryKeyPhase == PrimaryKeyPhase.None);

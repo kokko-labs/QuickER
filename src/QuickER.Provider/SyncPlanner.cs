@@ -97,10 +97,17 @@ public sealed class SyncPlanner
 {
     /// <summary>
     /// セクションの出力順序。依存関係による失敗を避けるため、
-    /// テーブル / 列の追加 → FK 解除 → <b>一意制約解除</b> → <b>主キー解除</b> → 列定義変更 → <b>主キー付与</b> →
-    /// 列 / テーブル削除 → <b>一意制約追加</b> → FK 追加 → 説明設定の順に並べる。
+    /// FK 解除 → <b>一意制約解除</b> → テーブル削除 → テーブル / 列の追加 → <b>主キー解除</b> → 列定義変更 →
+    /// <b>主キー付与</b> → 列削除 → <b>一意制約追加</b> → FK 追加 → 説明設定の順に並べる。
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// テーブル削除（DropTable）はテーブル追加（AddTable）より前に置く。表の名前を変える同期は古い表の削除と新しい表の
+    /// 追加になり、新しい表が古い表の一意制約の名前を引き継ぐと、制約名がスキーマの中で一意な方言（SQL Server・
+    /// PostgreSQL・Oracle）では、追加が先だと同じ名前の制約がまだ在って失敗するため。削除する表を参照する外部キーは
+    /// その前の FK 解除で外れている（<see cref="InjectVanishingForeignKeyDrops"/>）。DDL が暗黙コミットされる方言
+    /// （MySQL・Oracle）では、削除の後の追加が失敗すると古い表は消えたまま残る（同期をやり直すと追加される）。
+    /// </para>
     /// <para>
     /// FK 解除（DropForeignKey）を列定義変更（AlterColumn）より前に置くのは、FK が張られた列の型を変更しようとすると
     /// 依存エラーになる方言があるため（SQL Server の Msg 5074）。「FK を外す」と「同じ列の型を変える」を同時に
@@ -115,7 +122,7 @@ public sealed class SyncPlanner
     /// </para>
     /// <para>
     /// 依存 FK の自動 DROP → 再 ADD（<see cref="InjectImplicitForeignKeyRebuilds"/>）と合わせると、
-    /// 「FK 解除 → 主キー解除 → 列定義変更 → 主キー付与 → …（列 / テーブル削除）… → FK 追加」となり、
+    /// 「FK 解除 → …（テーブル削除・追加）… → 主キー解除 → 列定義変更 → 主キー付与 → …（列削除）… → FK 追加」となり、
     /// 主キーを参照する FK は主キーが存在しない区間の外側で解除・再作成される。
     /// </para>
     /// <para>
@@ -126,15 +133,15 @@ public sealed class SyncPlanner
     /// </remarks>
     private static readonly (SchemaDiffKind Kind, PrimaryKeyPhase Phase)[] SectionOrder =
     [
-        (SchemaDiffKind.AddTable, PrimaryKeyPhase.None),
-        (SchemaDiffKind.AddColumn, PrimaryKeyPhase.None),
         (SchemaDiffKind.DropForeignKey, PrimaryKeyPhase.None),
         (SchemaDiffKind.DropUniqueConstraint, PrimaryKeyPhase.None),
+        (SchemaDiffKind.DropTable, PrimaryKeyPhase.None),
+        (SchemaDiffKind.AddTable, PrimaryKeyPhase.None),
+        (SchemaDiffKind.AddColumn, PrimaryKeyPhase.None),
         (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Drop),
         (SchemaDiffKind.AlterColumn, PrimaryKeyPhase.None),
         (SchemaDiffKind.AlterPrimaryKey, PrimaryKeyPhase.Add),
         (SchemaDiffKind.DropColumn, PrimaryKeyPhase.None),
-        (SchemaDiffKind.DropTable, PrimaryKeyPhase.None),
         (SchemaDiffKind.AddUniqueConstraint, PrimaryKeyPhase.None),
         (SchemaDiffKind.AddForeignKey, PrimaryKeyPhase.None),
         (SchemaDiffKind.SetTableDescription, PrimaryKeyPhase.None),

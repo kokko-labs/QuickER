@@ -356,7 +356,10 @@ Remove that unique constraint from the diagram and select its drop as well, or d
 ### Safety by design
 
 - **Destructive differences (drops and type changes) are unselected by default**, and executing them shows a confirmation stating that destructive changes are included
-- The generated script is ordered by dependency (add tables → add columns → drop FKs → drop old primary keys → alter columns → add new primary keys → drop columns → drop tables → add FKs → descriptions), with a heading comment per section
+- The generated script is ordered by dependency (drop FKs → drop unique constraints → drop tables → add tables → add columns → drop old primary keys → alter columns → add new primary keys → drop columns → add unique constraints → add FKs → descriptions), with a heading comment per section.
+  Tables are dropped before tables are added, so a table you rename in the diagram can keep the unique constraint names of the old table.
+  On MySQL and Oracle, where DDL is committed implicitly, the old table stays dropped if adding the new one fails; running the sync again adds it.
+  SQLite rebuilds tables and uses its own order
 - A foreign-key addition whose FK column cannot be resolved is emitted as a skip comment instead of invalid DDL
 - Dropping a table or a column also drops every foreign key that loses its table or column, even when dropping that foreign key is not selected (on SQLite the surviving child table is rebuilt without it).
   This also lets a parent table and its child be dropped together whatever order they are listed in
