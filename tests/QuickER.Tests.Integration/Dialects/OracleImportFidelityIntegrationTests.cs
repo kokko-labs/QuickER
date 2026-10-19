@@ -748,6 +748,53 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
     }
 
     /// <summary>
+    /// 空文字列と括弧で包んだ NULL の既定値（<c>DEFAULT ''</c>・<c>DEFAULT (NULL)</c> など）は、既定値として告げず、
+    /// 既定値の事実にも数えないことを検証する（Oracle では空文字列は NULL）。空白 1 文字は NULL ではないので告げる
+    /// </summary>
+    /// <remarks>
+    /// 既定値の事実（<see cref="SchemaImportResult.ColumnDefaults"/>）は、同期の計画が既定値のある列の型の種類の変更を
+    /// 警告するのに使う。NULL を既定値と数えると、その警告が根拠なく出る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] Oracle: DEFAULT '' と括弧で包んだ DEFAULT NULL は既定値として告げない"
+    )]
+    public async Task Import_EmptyStringAndParenthesizedNullDefaults_AreNotDefaults()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE NULLISH (
+                ID NUMBER(10) PRIMARY KEY,
+                A VARCHAR2(10) DEFAULT '',
+                B VARCHAR2(10) DEFAULT (NULL),
+                C VARCHAR2(10) DEFAULT ( '' ),
+                D VARCHAR2(10) DEFAULT ((null)),
+                E NVARCHAR2(10) DEFAULT N'',
+                F VARCHAR2(10) DEFAULT 'a',
+                G VARCHAR2(10) DEFAULT ' '
+            );
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.ColumnDefaultLost, "NULLISH", "F", "'a'"),
+                (SchemaImportWarningKind.ColumnDefaultLost, "NULLISH", "G", "' '"),
+            ]);
+        result
+            .ColumnDefaults.Select(d => (d.ColumnName, d.Expression))
+            .Should()
+            .BeEquivalentTo([("F", "'a'"), ("G", "' '")]);
+    }
+
+    /// <summary>
     /// 既定値と、指定した値も受け付ける IDENTITY（BY DEFAULT・BY DEFAULT ON NULL）を列ごとに名指しし、既定値の事実を結果に持つ。
     /// IDENTITY の nextval は既定値として二重に告げず、ALWAYS の IDENTITY・仮想列の式・値が NULL の既定値も既定値に数えない
     /// </summary>
