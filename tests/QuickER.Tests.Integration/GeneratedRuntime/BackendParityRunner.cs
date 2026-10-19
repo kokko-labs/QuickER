@@ -111,9 +111,15 @@ public sealed record ParityScenario(
 
             try
             {
+                // 期待の手が続くときも、期待でない直前の手を見る
                 outcome = op is ExpectOp expect
-                    ? expect.Check(new ParityExpectation(kind, backend, steps[^1]))
-                        ?? ParityStep.ExpectationMet
+                    ? expect.Check(
+                        new ParityExpectation(
+                            kind,
+                            backend,
+                            steps.Last(step => !step.IsExpectation)
+                        )
+                    ) ?? ParityStep.ExpectationMet
                     : await op.RunAsync(backend, ct);
             }
             catch (Exception ex)

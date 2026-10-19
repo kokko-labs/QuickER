@@ -8804,13 +8804,20 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     /// <param name="columnName">The column the write stores a value in.</param>
     /// <param name="write">Performs the business write.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null (refused before anything is recorded).</exception>
     protected Task<TResult> RecordUnboundedBinaryWriteAsync<TResult>(
         TKey id,
         string columnName,
         Func<Task<TResult>> write,
         CancellationToken cancellationToken
-    ) =>
-        RecordAndWriteAsync(
+    )
+    {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        return RecordAndWriteAsync(
             () =>
                 Journal.RecordManyAsync(
                     [
@@ -8829,6 +8836,7 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
             write,
             cancellationToken
         );
+    }
 
     /// <inheritdoc />
     public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
@@ -8879,12 +8887,20 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     }
 
     /// <inheritdoc />
-    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
-        RecordAndWriteAsync(
+    /// <remarks>A null key is refused before anything is recorded, as the repository it wraps refuses it.</remarks>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        return RecordAndWriteAsync(
             () => RecordDeleteAsync(id, cancellationToken),
             () => Inner.DeleteAsync(id, cancellationToken),
             cancellationToken
         );
+    }
 
     /// <inheritdoc />
     /// <remarks>Every row is recorded in one call to <see cref="SyncJournal.RecordManyAsync"/>, not one statement per row.</remarks>

@@ -223,8 +223,10 @@ public static class QuickER.Runtime.GeneratedDisplayNames
     public static System.Func<string, string, string> Resolve { get; set; }
 
 public sealed class QuickER.Runtime.GraphSaveOrder
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> Deletions { get; }
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> HeldBack { get; }
-    public bool TryHoldBack(QuickER.Runtime.EntityBaseCore entity)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> StartingPoints { get; }
+    public bool Defers(QuickER.Runtime.EntityBaseCore entity)
     public static QuickER.Runtime.GraphSaveOrder For(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascadeSave, bool cascadeDelete)
 
 public abstract class QuickER.Runtime.HttpRemoteRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>
@@ -636,12 +638,15 @@ public sealed class QuickER.Runtime.UnboundedBinaryColumnAttribute : System.Attr
 
 public static class QuickER.Runtime.UnboundedBinaryColumns
     public const int StreamCopyBufferSize = 81920
+    public static System.IDisposable EnterRemoteRequest()
     public static System.IO.Stream WithExactLength(System.IO.Stream source, long length)
     public static System.Reflection.PropertyInfo[] For(System.Type entityType)
     public static System.Threading.Tasks.Task<bool> ReadToFileAsync(string path, System.Func<System.IO.Stream, System.Threading.Tasks.Task<bool>> read)
+    public static bool InRemoteRequest { get; }
     public static long ResolveWriteLength(System.IO.Stream source, long? length)
     public static void PreserveUnset(QuickER.Runtime.EntityBaseCore entity, QuickER.Runtime.EntityBaseCore stored)
     public static void StripExcluded(QuickER.Runtime.EntityBaseCore entity)
+    public static void StripExcludedFromResult(object result)
     public static void ThrowIfExcludedAssigned(QuickER.Runtime.EntityBaseCore entity)
 
 public sealed class QuickER.Runtime.UniqueConstraintAttribute : System.Attribute

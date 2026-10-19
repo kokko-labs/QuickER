@@ -64,7 +64,9 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "mars-deleted-then-missing",
             "no-mars-added-then-missing",
             "attempt-limit-then-row-gone-update",
-            "attempt-limit-then-row-gone-graph-save"
+            "attempt-limit-then-row-gone-graph-save",
+            "move-stale-note-and-delete-old-gadget",
+            "move-stale-note-and-delete-old-gadget-no-hooks"
         );
 
     [Theory(
@@ -266,6 +268,56 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             .BeNull();
     }
 
+    /// <summary>
+    /// 区切り 43（外1）：SQL Server でも、Count・Any は Take・Skip を取得と同じ意味で当て（OFFSET / FETCH の副問い合わせ）、
+    /// Take・Skip つきの ExecuteDelete は NotSupportedException で断って何も消さない（QuickER 版と EF Core）
+    /// </summary>
+    [Theory(
+        DisplayName = "[Parity/SqlServer] Take・Skip つきの Count・Any は取得の件数とそろい、ExecuteDelete は断る（QuickER 版と EF Core）"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PagedCountAnyAndDelete_FollowFetch(bool efCore)
+    {
+        await _fixture.ResetSchemaAsync(Ct);
+        await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
+        await using var provider = Build(efCore, withHooks: false);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+
+        foreach (var id in new[] { 1, 2, 3 })
+        {
+            await gadgets.InsertAsync(NewGadget(id, $"g{id}"), Ct);
+        }
+
+        SqlQuery<GadgetEntity> Paged(int? skip, int? take)
+        {
+            var query = gadgets.Query().OrderBy(g => g.GadgetId);
+
+            if (skip is { } s)
+            {
+                query = query.Skip(s);
+            }
+
+            if (take is { } t)
+            {
+                query = query.Take(t);
+            }
+
+            return query;
+        }
+
+        (await Paged(null, 1).CountAsync(Ct)).Should().Be(1);
+        (await Paged(1, null).CountAsync(Ct)).Should().Be(2);
+        (await Paged(1, 1).CountAsync(Ct)).Should().Be(1);
+        (await Paged(3, null).CountAsync(Ct)).Should().Be(0);
+        (await Paged(2, null).AnyAsync(Ct)).Should().BeTrue();
+        (await Paged(3, null).AnyAsync(Ct)).Should().BeFalse();
+
+        var delete = () => Paged(null, 1).ExecuteDeleteAsync(cancellationToken: Ct);
+        await delete.Should().ThrowAsync<NotSupportedException>();
+        (await StateAsync()).Should().HaveCount(3);
+    }
+
     /// <summary>1 つのケースを空のスキーマから流し、戻り値と保存先を並べて返す</summary>
     private async Task<IReadOnlyList<string>> RunAsync(string name, bool efCore)
     {
@@ -303,6 +355,14 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "attempt-limit-then-row-gone-graph-save" => await AttemptLimitThenGoneAsync(
                 efCore,
                 graphSave: true
+            ),
+            "move-stale-note-and-delete-old-gadget" => await MoveStaleNoteAsync(
+                efCore,
+                withHooks: true
+            ),
+            "move-stale-note-and-delete-old-gadget-no-hooks" => await MoveStaleNoteAsync(
+                efCore,
+                withHooks: false
             ),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
@@ -431,6 +491,70 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             );
 
         return [outcome, .. await StateAsync()];
+    }
+
+    /// <summary>
+    /// 区切り 43（判断 D・E）：メモ 10 を gadget 1 から 2 へ付け替え、gadget 1 を消す（gadget → メモは CASCADE）。メモは読んだ後に
+    /// 他者が更新したので版が古く、ForceOverwrite の保存は EF Core では 1 回当たらずにやり直す。やり直しの後も付け替えを
+    /// 削除より先に書く（QuickER 版は版を照合せず後勝ちで書く）
+    /// </summary>
+    private async Task<IReadOnlyList<string>> MoveStaleNoteAsync(bool efCore, bool withHooks)
+    {
+        await using var provider = Build(efCore, withHooks: withHooks);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var notes = provider.GetRequiredService<IGadgetNoteRepository>();
+        await gadgets.InsertAsync(NewGadget(1, "g1"), Ct);
+        await gadgets.InsertAsync(NewGadget(2, "g2"), Ct);
+        await notes.InsertAsync(
+            new GadgetNoteEntity
+            {
+                NoteId = NoteIdValue.Create(10),
+                GadgetId = GadgetIdValue.Create(1),
+                Note = NoteValue.Create("n"),
+            },
+            Ct
+        );
+
+        var oldParent = (await gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct))!;
+        var newParent = (await gadgets.GetByIdAsync(GadgetIdValue.Create(2), Ct))!;
+        var note = (await notes.GetByIdAsync(NoteIdValue.Create(10), Ct))!;
+        await _fixture.ExecuteAsync(
+            "UPDATE gadget_notes SET note = N'other' WHERE note_id = 10",
+            Ct
+        );
+
+        note.GadgetId = GadgetIdValue.Create(2);
+        note.Note = NoteValue.Create("moved");
+        note.MarkUpdated();
+        newParent.GadgetNotes.Add(note);
+        oldParent.MarkRemoved();
+
+        var outcome = await OutcomeAsync(() =>
+            gadgets.SaveAsync(
+                [oldParent, newParent],
+                mode: ConcurrencyMode.ForceOverwrite,
+                cancellationToken: Ct
+            )
+        );
+
+        return [outcome, .. await StateAsync(), .. await NotesStateAsync()];
+    }
+
+    /// <summary>保存先のメモの全行（キー順・版は比べない）</summary>
+    private async Task<IReadOnlyList<string>> NotesStateAsync()
+    {
+        await using var provider = new ServiceCollection()
+            .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)
+            .BuildServiceProvider();
+        var all = await provider.GetRequiredService<IGadgetNoteRepository>().GetAllAsync(Ct);
+
+        return
+        [
+            .. all.OrderBy(n => n.NoteId.Value)
+                .Select(n =>
+                    $"gadget_notes/{n.NoteId.Value} gadget={n.GadgetId.Value} note={n.Note.Value}"
+                ),
+        ];
     }
 
     /// <summary>実装先のリポジトリを組み立てる</summary>

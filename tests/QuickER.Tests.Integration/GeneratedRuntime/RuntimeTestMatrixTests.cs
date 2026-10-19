@@ -581,6 +581,9 @@ public class RuntimeTestMatrixTests
         new("BinaryColumnRemoteRuntimeTests", "BinaryColumn", Backend.Remote),
         new("BinaryTransferResponseRuntimeTests", "BinaryColumn", Backend.Remote),
         new("BinaryRemoteLengthRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("RemoteEfCoreUnboundedBinaryRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("RemoteEfCoreUnboundedBinarySqlServerRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("RemoteRequestMarkRuntimeTests", "BinaryColumn", Backend.Remote),
         new("BinaryVoEditModelRuntimeTests", "BinaryColumnEditModel", Backend.AdoSqlite),
         // --- 一意性の事前チェック ---
         new("UniquenessCheckSqlServerRuntimeTests", "UniquenessCheck", Backend.AdoSqlServer),
@@ -689,6 +692,7 @@ public class RuntimeTestMatrixTests
         new("SyncEndpointRegistrationRuntimeTests", "SyncSupport", Backend.Remote),
         // 構築時除外（excludeFromSync）＝ローカル専用宣言の 2 点セットと登録時 fail-fast
         new("SyncConstructionExclusionTests", "SyncSupport", Backend.AdoSqlite),
+        new("SyncNullKeyRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         new("SyncLocalSaveHookRegistrationTests", "SyncSupport", Backend.AdoSqlite),
         new("SyncSqliteRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
         new("SyncRefreshBenchmarkRuntimeTests", "SyncRefresh", Backend.AdoSqlite),

@@ -208,6 +208,205 @@ public static class BackendParityScenarios
                 ),
             ]
         ),
+        // 区切り 43（判断 D）: 削除を含む保存は、削除しない書き込み → 削除 → 後回しの行の 3 段で保存する。子を別の親へ
+        // 付け替えて元の親を消す保存は、根の並びに依らず、付け替え（更新）が削除より先に走る
+        MoveChildAndDeleteOldParent(
+            "graph-move-child-and-delete-old-parent-removed-first",
+            ["A", "B"]
+        ),
+        MoveChildAndDeleteOldParent(
+            "graph-move-child-and-delete-old-parent-kept-first",
+            ["B", "A"]
+        ),
+        // 同じ親のコレクションの中で、先に並ぶ兄弟を消し、その子を後ろの兄弟の下へ移す
+        new(
+            "graph-move-grandchild-between-siblings-and-delete-old-sibling",
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(4, "Root")),
+                new SeedOp(new CustomerRow(5, "Old", Referrer: 4)),
+                new SeedOp(new CustomerRow(6, "New", Referrer: 4)),
+                new SeedOp(new CustomerRow(7, "Leaf", Referrer: 5)),
+            ],
+            [
+                new NewRootOp(S, new CustomerRow(4, "Root"), RowState.Unchanged),
+                new AddChildOp(
+                    S,
+                    "customers/4",
+                    new CustomerRow(5, "Old", Referrer: 4),
+                    RowState.Removed
+                ),
+                new AddChildOp(
+                    S,
+                    "customers/4",
+                    new CustomerRow(6, "New", Referrer: 4),
+                    RowState.Unchanged
+                ),
+                new AddChildOp(
+                    S,
+                    "customers/6",
+                    new CustomerRow(7, "Leaf", Referrer: 6),
+                    RowState.Updated
+                ),
+                new SaveOp(S),
+                ParityExpect.Succeeds("D-sibling-move-succeeds"),
+                ParityExpect.Hooks(
+                    "D-sibling-move-update-before-delete",
+                    "Before",
+                    "Update:customers/7",
+                    "Delete:customers/5"
+                ),
+                new LoadOp("C", "customers", 7),
+            ]
+        ),
+        // 明細を別の注文へ付け替え、元の注文を消す（注文→明細は CASCADE。削除が先に走ると付け替えた明細まで消え、続く
+        // 更新が「行なし」になる）
+        MoveLineAndDeleteOldOrder("graph-move-line-and-delete-old-order-removed-first", ["A", "B"]),
+        MoveLineAndDeleteOldOrder("graph-move-line-and-delete-old-order-kept-first", ["B", "A"]),
+        // 削除する行の一意な値（主キーでない）を取る更新する行は、削除の後へ回す（J3）
+        UpdatedTakesDeletedUniqueValue(
+            "graph-updated-row-takes-deleted-unique-value-updated-first",
+            ["A", "B"]
+        ),
+        UpdatedTakesDeletedUniqueValue(
+            "graph-updated-row-takes-deleted-unique-value-removed-first",
+            ["B", "A"]
+        ),
+        // 区切り 43（外1）: Count・Any は Take・Skip を、取得と同じ意味で当てる（取得の件数とそろう）。Take・Skip つきの
+        // ExecuteDelete は NotSupportedException で断り、何も消さない
+        new(
+            "paged-count-and-any-follow-fetch",
+            Basic,
+            [
+                new PagedOrdersOp(ParityPagedTerminal.Fetch, Take: 1),
+                ParityExpect.Outcome("paged-fetch-take-1", "fetched=1"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Take: 1),
+                ParityExpect.Outcome("paged-count-take-1", "count=1"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Skip: 1),
+                ParityExpect.Outcome("paged-count-skip-1", "count=2"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Skip: 1, Take: 1),
+                ParityExpect.Outcome("paged-count-skip-1-take-1", "count=1"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Skip: 3),
+                ParityExpect.Outcome("paged-count-skip-all", "count=0"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Skip: 1, MinAmount: 50m),
+                ParityExpect.Outcome("paged-count-condition-skip-1", "count=1"),
+                new PagedOrdersOp(ParityPagedTerminal.Any, Skip: 2),
+                ParityExpect.Outcome("paged-any-skip-2", "any=True"),
+                new PagedOrdersOp(ParityPagedTerminal.Any, Skip: 3),
+                ParityExpect.Outcome("paged-any-skip-all", "any=False"),
+                new PagedOrdersOp(ParityPagedTerminal.Any, Skip: 2, Take: 1, MinAmount: 50m),
+                ParityExpect.Outcome("paged-any-condition-skip-past", "any=False"),
+            ]
+        ),
+        new(
+            "paged-execute-delete-is-refused",
+            Basic,
+            [
+                new PagedOrdersOp(ParityPagedTerminal.Delete, Take: 1),
+                ParityExpect.Throws("paged-delete-take-refused", "NotSupportedException"),
+                new PagedOrdersOp(ParityPagedTerminal.Delete, Skip: 2),
+                ParityExpect.Throws("paged-delete-skip-refused", "NotSupportedException"),
+                new PagedOrdersOp(ParityPagedTerminal.CascadeDelete, Skip: 1, Take: 1),
+                ParityExpect.Throws("paged-cascade-delete-refused", "NotSupportedException"),
+                ParityExpect.StateRows("paged-delete-changes-nothing", 8),
+            ]
+        ),
+        // 区切り 43（#7・判断 B）: null のキーの GetById・Delete は、どの実装先も ArgumentNullException（ParamName = "id"）
+        new(
+            "null-key-is-refused",
+            Basic,
+            [
+                new NullKeyOp("customers", Delete: false),
+                ParityExpect.Outcome(
+                    "null-key-get-customer",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyOp("customers", Delete: true),
+                ParityExpect.Outcome(
+                    "null-key-delete-customer",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyOp("orders", Delete: false),
+                ParityExpect.Outcome("null-key-get-order", "throws ArgumentNullException param=id"),
+                new NullKeyOp("orders", Delete: true),
+                ParityExpect.Outcome(
+                    "null-key-delete-order",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyBlobOp(Write: false, ViaFile: false),
+                ParityExpect.Outcome("null-key-read-blob", "throws ArgumentNullException param=id"),
+                new NullKeyBlobOp(Write: true, ViaFile: false),
+                ParityExpect.Outcome(
+                    "null-key-write-blob",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyBlobOp(Write: false, ViaFile: true),
+                ParityExpect.Outcome(
+                    "null-key-read-blob-to-file",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyBlobOp(Write: true, ViaFile: true),
+                ParityExpect.Outcome(
+                    "null-key-write-blob-from-file",
+                    "throws ArgumentNullException param=id"
+                ),
+                ParityExpect.StateRows("null-key-changes-nothing", 8),
+            ]
+        ),
+        // 区切り 43（#6）: 取り消し済みのトークンの操作は、どの実装先も OperationCanceledException で終わり、何も書かない
+        // （読み取りも取り消しで終わる）
+        new(
+            "canceled-token-is-honored",
+            Basic,
+            [
+                new CanceledOp(new InsertOp(new CustomerRow(3, "Carol"))),
+                ParityExpect.Outcome("canceled-insert", "throws canceled"),
+                new CanceledOp(new LoadOp(S, "orders", 10)),
+                ParityExpect.Outcome("canceled-get-by-id", "throws canceled"),
+                new LoadOp(S, "orders", 10),
+                new EditMemoOp(S, 10, "edited"),
+                new CanceledOp(new UpdateOrderOp(S)),
+                ParityExpect.Outcome("canceled-update", "throws canceled"),
+                new CanceledOp(new SaveOp(S)),
+                ParityExpect.Outcome("canceled-save", "throws canceled"),
+                new CanceledOp(new SaveManyOrdersOp([S])),
+                ParityExpect.Outcome("canceled-save-many", "throws canceled"),
+                new CanceledOp(new DeleteOp("order_lines", 100)),
+                ParityExpect.Outcome("canceled-delete", "throws canceled"),
+                new CanceledOp(
+                    new ExecuteDeleteOrdersOp(
+                        ParityOrderPredicate.AmountAtLeast100,
+                        CascadeDelete: true
+                    )
+                ),
+                ParityExpect.Outcome("canceled-execute-delete", "throws canceled"),
+                new CanceledOp(new PagedOrdersOp(ParityPagedTerminal.Fetch)),
+                ParityExpect.Outcome("canceled-fetch", "throws canceled"),
+                new CanceledOp(new PagedOrdersOp(ParityPagedTerminal.Count)),
+                ParityExpect.Outcome("canceled-count", "throws canceled"),
+                new CanceledOp(new PagedOrdersOp(ParityPagedTerminal.Any)),
+                ParityExpect.Outcome("canceled-any", "throws canceled"),
+                ParityExpect.StateRows("canceled-changes-nothing", 8),
+            ]
+        ),
+        // 区切り 43（#1）: 主キー 0 の行も、アプリが決めたキーのまま挿入・グラフ保存する。同じ 0 の 2 行目は主キーの重複。
+        // このフィクスチャのキーは値オブジェクト（EF Core は変換のある列の値を作らない）。素の int のキーは
+        // BinaryColumnRuntimeTestsBase と SqlServerIdentityColumnRuntimeTests が見る
+        new(
+            "insert-and-save-key-zero",
+            Basic,
+            [
+                new InsertOp(new CustomerRow(0, "Zed")),
+                ParityExpect.Succeeds("key-zero-insert-succeeds"),
+                new NewRootOp(S, new OrderRow(0, 0, 1m), RowState.Added),
+                new SaveOp(S),
+                ParityExpect.Succeeds("key-zero-save-succeeds"),
+                new LoadOp("C", "orders", 0),
+                ParityExpect.Outcome("key-zero-row-is-stored", "loaded"),
+                new InsertOp(new CustomerRow(0, "Again")),
+                ParityExpect.Throws("key-zero-duplicate-is-refused", "store-rejected"),
+            ]
+        ),
         // 何も削除しない保存は、新しい行も並びどおりに保存する（後回しにするのは削除を含む保存だけ）
         new(
             "graph-save-without-deletion-keeps-order",
@@ -358,6 +557,116 @@ public static class BackendParityScenarios
     /// <summary>名前でシナリオを引く</summary>
     public static ParityScenario Get(string name) => All.Single(s => s.Name == name);
 
+    /// <summary>
+    /// 顧客 6 を紹介者 4 から 5 へ付け替え、4 を消す（紹介者の外部キーは NO ACTION。削除が先に走ると外部キーに断られる）。
+    /// 根の並びは <paramref name="roots"/>（A＝消す顧客・B＝付け替え先）
+    /// </summary>
+    private static ParityScenario MoveChildAndDeleteOldParent(
+        string name,
+        IReadOnlyList<string> roots
+    ) =>
+        new(
+            name,
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(4, "Dan")),
+                new SeedOp(new CustomerRow(5, "Eve")),
+                new SeedOp(new CustomerRow(6, "Fay", Referrer: 4)),
+            ],
+            [
+                new NewRootOp("A", new CustomerRow(4, "Dan"), RowState.Removed),
+                new NewRootOp("B", new CustomerRow(5, "Eve"), RowState.Unchanged),
+                new AddChildOp(
+                    "B",
+                    "customers/5",
+                    new CustomerRow(6, "Fay", Referrer: 5),
+                    RowState.Updated
+                ),
+                new SaveManyCustomersOp(roots),
+                ParityExpect.Succeeds("D-move-succeeds"),
+                ParityExpect.Hooks(
+                    "D-move-update-before-delete",
+                    "Before",
+                    "Update:customers/6",
+                    "Delete:customers/4"
+                ),
+                new LoadOp("C", "customers", 6),
+            ]
+        );
+
+    /// <summary>
+    /// 明細 100 を注文 10 から 11 へ付け替え、10 を、残った明細 101 ごと消す。根の並びは <paramref name="roots"/>
+    /// （A＝消す注文・B＝付け替え先）
+    /// </summary>
+    private static ParityScenario MoveLineAndDeleteOldOrder(
+        string name,
+        IReadOnlyList<string> roots
+    ) =>
+        new(
+            name,
+            Basic,
+            [
+                new NewRootOp(
+                    "A",
+                    new OrderRow(10, 1, 100m, "first", Payload: [0x01, 0x02], Thumb: [0x0A]),
+                    RowState.Removed
+                ),
+                new AddChildOp(
+                    "A",
+                    "orders/10",
+                    new LineRow(101, 10, "ink", 5),
+                    RowState.Unchanged
+                ),
+                new NewRootOp("B", new OrderRow(11, 1, 50m), RowState.Unchanged),
+                new AddChildOp(
+                    "B",
+                    "orders/11",
+                    new LineRow(100, 11, "pen", 2, 0.5m),
+                    RowState.Updated
+                ),
+                new SaveManyOrdersOp(roots),
+                ParityExpect.Succeeds("D-cascade-move-succeeds"),
+                ParityExpect.Hooks(
+                    "D-cascade-move-update-before-delete",
+                    "Before",
+                    "Update:order_lines/100",
+                    "Delete:order_lines/101",
+                    "Delete:orders/10"
+                ),
+                new LoadOp("C", "order_lines", 100),
+            ]
+        );
+
+    /// <summary>
+    /// 顧客 5 の名前を、消す顧客 4 の名前（一意制約）に変える。根の並びは <paramref name="roots"/>（A＝更新する顧客・B＝消す顧客）。
+    /// EF Core は 1 回の SaveChanges の中で文の順を自分で決める（このシナリオは、EF Core の並べ方がそれを通すことを固定する）
+    /// </summary>
+    private static ParityScenario UpdatedTakesDeletedUniqueValue(
+        string name,
+        IReadOnlyList<string> roots
+    ) =>
+        new(
+            name,
+            [
+                .. Basic,
+                new SeedOp(new CustomerRow(4, "Dan")),
+                new SeedOp(new CustomerRow(5, "Eve")),
+            ],
+            [
+                new NewRootOp("A", new CustomerRow(5, "Dan"), RowState.Updated),
+                new NewRootOp("B", new CustomerRow(4, "Dan"), RowState.Removed),
+                new SaveManyCustomersOp(roots),
+                ParityExpect.Succeeds("J3-succeeds"),
+                ParityExpect.Hooks(
+                    "J3-delete-before-update",
+                    "Before",
+                    "Delete:customers/4",
+                    "Update:customers/5"
+                ),
+                new LoadOp("C", "customers", 5),
+            ]
+        );
+
     /// <summary>xunit の MemberData（シナリオ名）</summary>
     public static TheoryData<string> Names()
     {
@@ -450,6 +759,46 @@ public static class ParityExpect
                     ? null
                     : $"children [{string.Join(",", actual)}], expected [{string.Join(",", lineIds)}]";
             }
+        );
+
+    /// <summary>直前の手の戻り値</summary>
+    public static ExpectOp Outcome(string label, string expected) =>
+        new(
+            label,
+            e =>
+                e.Previous.Outcome == expected
+                    ? null
+                    : $"outcome {e.Previous.Outcome}, expected {expected}"
+        );
+
+    /// <summary>直前の手が、指定の型の例外で終わった</summary>
+    public static ExpectOp Throws(string label, string exceptionType) =>
+        new(
+            label,
+            e =>
+                e.Previous.Outcome.StartsWith($"throws {exceptionType}", StringComparison.Ordinal)
+                    ? null
+                    : $"outcome {e.Previous.Outcome}, expected throws {exceptionType}"
+        );
+
+    /// <summary>直前の手の後の保存先が、指定の数の行を持つ</summary>
+    public static ExpectOp StateRows(string label, int count) =>
+        new(
+            label,
+            e =>
+                e.Previous.State.Count == count
+                    ? null
+                    : $"rows {e.Previous.State.Count}, expected {count}"
+        );
+
+    /// <summary>直前の手が例外にならずに終わった</summary>
+    public static ExpectOp Succeeds(string label) =>
+        new(
+            label,
+            e =>
+                e.Previous.Outcome.StartsWith("throws", StringComparison.Ordinal)
+                    ? $"outcome {e.Previous.Outcome}"
+                    : null
         );
 
     /// <summary>スロットの根の RowState</summary>

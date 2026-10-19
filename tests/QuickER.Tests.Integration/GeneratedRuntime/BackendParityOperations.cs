@@ -367,6 +367,40 @@ public sealed record AddChildCustomerOp(string Slot, CustomerRow Row) : ParityOp
     }
 }
 
+/// <summary>
+/// 行を組み立てて指定の状態にし、スロットのグラフの行（<paramref name="ParentKey"/>）の子のコレクションへ足す
+/// （顧客の下の顧客・顧客の下の注文・注文の下の明細）。保存先の行を読まずに組み立てるので、付け替えた子の元の親は
+/// 保存先にしか無い（リモートや切り離したエンティティの形）
+/// </summary>
+public sealed record AddChildOp(string Slot, string ParentKey, ParityRow Row, RowState State)
+    : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var child = Row.Build();
+        NewRootOp.ApplyState(child, State);
+
+        switch (Find(backend, Slot, ParentKey), child)
+        {
+            case (CustomerEntity parent, CustomerEntity customer):
+                parent.Customers.Add(customer);
+                break;
+            case (CustomerEntity parent, OrderEntity order):
+                parent.Orders.Add(order);
+                break;
+            case (OrderEntity parent, OrderLineEntity line):
+                parent.OrderLines.Add(line);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"'{ParentKey}' cannot hold {child.GetType().Name}."
+                );
+        }
+
+        return Task.FromResult("added");
+    }
+}
+
 /// <summary>スロットのグラフの注文のメモを書き換え、Updated にする（Added のままの行は Added のまま）</summary>
 public sealed record EditMemoOp(string Slot, int OrderId, string? Memo) : ParityOp
 {
@@ -544,6 +578,132 @@ public enum ParityOrderPredicate
     HasLines,
 }
 
+/// <summary>リモート面の <c>GetByIdAsync</c> か <c>DeleteAsync</c> を、null のキーで呼ぶ</summary>
+public sealed record NullKeyOp(string Table, bool Delete) : ParityOp
+{
+    public override string Name => $"NullKey:{Table}:{(Delete ? "Delete" : "GetById")}";
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct) =>
+        (Table, Delete) switch
+        {
+            ("customers", false) =>
+                $"found={await backend.Customers.GetByIdAsync(null!, ct) is not null}",
+            ("customers", true) => $"deleted={await backend.Customers.DeleteAsync(null!, ct)}",
+            ("orders", false) =>
+                $"found={await backend.Orders.GetByIdAsync(null!, ct) is not null}",
+            ("orders", true) => $"deleted={await backend.Orders.DeleteAsync(null!, ct)}",
+            _ => throw new ArgumentException(Table),
+        };
+}
+
+/// <summary>
+/// 注文の除外 blob の Stream アクセサ（とファイル糖衣）を、null のキーで呼ぶ（EF Core は Stream アクセサを持たない＝NotSupported）
+/// </summary>
+public sealed record NullKeyBlobOp(bool Write, bool ViaFile) : ParityOp
+{
+    public override string Name =>
+        $"NullKeyBlob:{(Write ? "Write" : "Read")}{(ViaFile ? ":File" : "")}";
+
+    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.EfCore;
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        // ファイル糖衣は、ファイルに触れる前に断る（書き込み元のファイルが無くても、null のキーを先に報告する）
+        var missing = Path.Combine(Path.GetTempPath(), $"quicker-null-key-{Guid.NewGuid():N}.bin");
+
+        return (Write, ViaFile) switch
+        {
+            (false, false) =>
+                $"read={await backend.Orders.ReadPayloadAsync(null!, new MemoryStream(), ct)}",
+            (true, false) =>
+                $"written={await backend.Orders.WritePayloadAsync(null!, new MemoryStream([1, 2]), null, ct)}",
+            (false, true) =>
+                $"read={await backend.Orders.ReadPayloadToFileAsync(null!, missing, ct)}",
+            (true, true) =>
+                $"written={await backend.Orders.WritePayloadFromFileAsync(null!, missing, ct)}",
+        };
+    }
+}
+
+/// <summary>ほかの操作を、取り消し済みのトークンで流す</summary>
+public sealed record CanceledOp(ParityOp Inner) : ParityOp
+{
+    public override string Name => "Canceled:" + Inner.Name;
+
+    public override bool Supports(ParityBackendKind kind) => Inner.Supports(kind);
+
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct) =>
+        Inner.RunAsync(backend, new CancellationToken(canceled: true));
+}
+
+/// <summary>ページングした <c>Query()</c> の終端</summary>
+public enum ParityPagedTerminal
+{
+    /// <summary><c>ToListAsync</c>（読んだ行の数を返す）</summary>
+    Fetch,
+
+    /// <summary><c>CountAsync</c></summary>
+    Count,
+
+    /// <summary><c>AnyAsync</c></summary>
+    Any,
+
+    /// <summary><c>ExecuteDeleteAsync</c>（カスケードなし）</summary>
+    Delete,
+
+    /// <summary><c>ExecuteDeleteAsync</c>（カスケードあり）</summary>
+    CascadeDelete,
+}
+
+/// <summary>
+/// 全機能面の <c>Query()</c> に、条件（<paramref name="MinAmount"/> 以上の金額）・注文 ID の昇順・Skip・Take を当てて、
+/// 終端を呼ぶ（リモートには無い）
+/// </summary>
+public sealed record PagedOrdersOp(
+    ParityPagedTerminal Terminal,
+    int? Skip = null,
+    int? Take = null,
+    decimal? MinAmount = null
+) : ParityOp
+{
+    public override string Name =>
+        $"PagedOrders:{Terminal}:skip={Skip?.ToString() ?? "-"}:take={Take?.ToString() ?? "-"}";
+
+    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.Remote;
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var query = backend.FullOrders.Query();
+
+        if (MinAmount is { } min)
+        {
+            query = query.Where(o => o.Amount.Value >= min);
+        }
+
+        query = query.OrderBy(o => o.OrderId);
+
+        if (Skip is { } skip)
+        {
+            query = query.Skip(skip);
+        }
+
+        if (Take is { } take)
+        {
+            query = query.Take(take);
+        }
+
+        return Terminal switch
+        {
+            ParityPagedTerminal.Fetch => $"fetched={(await query.ToListAsync(ct)).Count}",
+            ParityPagedTerminal.Count => $"count={await query.CountAsync(ct)}",
+            ParityPagedTerminal.Any => $"any={await query.AnyAsync(ct)}",
+            ParityPagedTerminal.Delete => $"rows={await query.ExecuteDeleteAsync(false, ct)}",
+            ParityPagedTerminal.CascadeDelete => $"rows={await query.ExecuteDeleteAsync(true, ct)}",
+            _ => throw new ArgumentOutOfRangeException(nameof(Terminal)),
+        };
+    }
+}
+
 /// <summary>全機能面の <c>Query().Where(…).ExecuteDeleteAsync</c> で注文を消す（リモートには無い）</summary>
 public sealed record ExecuteDeleteOrdersOp(ParityOrderPredicate Predicate, bool CascadeDelete)
     : ParityOp
@@ -622,7 +782,7 @@ public sealed record ReadBlobOp(int OrderId, string Column) : ParityOp
 /// <summary>期待を確かめるときに渡す、実装先と直前の手の観測</summary>
 /// <param name="Kind">実装先</param>
 /// <param name="Backend">実装先（スロットを読む）</param>
-/// <param name="Previous">直前の手の観測（戻り値・保存先・フックの生の呼び出し）</param>
+/// <param name="Previous">直前の手（期待の手を除く）の観測（戻り値・保存先・フックの生の呼び出し）</param>
 public sealed record ParityExpectation(
     ParityBackendKind Kind,
     ParityBackend Backend,

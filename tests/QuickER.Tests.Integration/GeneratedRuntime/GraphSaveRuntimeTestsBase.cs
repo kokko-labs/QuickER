@@ -188,6 +188,72 @@ public abstract class GraphSaveRuntimeTestsBase
         (await LineIdsAsync()).Should().Equal(102);
     }
 
+    /// <summary>
+    /// 区切り 43（判断 D）: 注文を別の顧客へ付け替えて元の顧客を消す保存は、根の並びに依らず成功する（付け替えた更新が
+    /// 削除より先に走る。EF Core は保存先の外部キーを読んで、付け替えを知る）
+    /// </summary>
+    [Theory(
+        DisplayName = "グラフ保存: 注文を別の顧客へ付け替えて元の顧客を削除する保存は、根の並びに依らず成功する"
+    )]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MovingOrderAndDeletingOldCustomer_Succeeds(bool removedFirst)
+    {
+        await ResetAndSeedAsync();
+
+        var customers = CreateCustomerRepository();
+        var oldCustomer = (await customers.GetByIdAsync(CustomerIdValue.Create(2), Ct))!;
+        oldCustomer.MarkRemoved();
+        var newCustomer = (await customers.GetByIdAsync(CustomerIdValue.Create(3), Ct))!;
+        var order = (await CreateOrderRepository().GetByIdAsync(OrderIdValue.Create(12), Ct))!;
+        order.CustomerId = CustomerIdValue.Create(3);
+        order.MarkUpdated();
+        newCustomer.Orders.Add(order);
+        CustomerEntity[] roots = removedFirst
+            ? [oldCustomer, newCustomer]
+            : [newCustomer, oldCustomer];
+
+        var rows = await customers.SaveAsync(roots, cancellationToken: Ct);
+
+        rows.Should().Be(2);
+        (await CustomerIdsAsync()).Should().Equal(1, 3);
+        (await CreateOrderRepository().GetByIdAsync(OrderIdValue.Create(12), Ct))!
+            .CustomerId.Value.Should()
+            .Be(3);
+        (await LineIdsAsync()).Should().Equal(100, 101, 102);
+    }
+
+    /// <summary>
+    /// 区切り 43（判断 D・J3）: 削除する注文の一意な値（メモ）を取る更新は、根の並びに依らず成功する（QuickER 版とインメモリは
+    /// 更新を削除の後へ回し、EF Core は 1 回の SaveChanges の中で自分で並べる）
+    /// </summary>
+    [Theory(
+        DisplayName = "グラフ保存: 削除する注文の一意な値を別の注文の更新で取る保存は、根の並びに依らず成功する"
+    )]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdatingToDeletedRowsUniqueValue_Succeeds(bool updatedFirst)
+    {
+        await ResetAndSeedAsync();
+
+        var orders = CreateOrderRepository();
+        var deleted = await orders
+            .Query()
+            .Include(o => o.OrderLines)
+            .GetByIdAsync(OrderIdValue.Create(10), Ct);
+        deleted!.MarkRemoved();
+        var updated = (await orders.GetByIdAsync(OrderIdValue.Create(12), Ct))!;
+        updated.Memo = MemoValue.Create("apple pie");
+        updated.MarkUpdated();
+        OrderEntity[] roots = updatedFirst ? [updated, deleted] : [deleted, updated];
+
+        await orders.SaveAsync(roots, cancellationToken: Ct);
+
+        (await OrderIdsAsync()).Should().Equal(11, 12);
+        (await MemoOfAsync(12)).Should().Be("apple pie");
+        (await LineIdsAsync()).Should().Equal(102);
+    }
+
     /// <summary>顧客を Include して注文 1 件を読む（呼び出しごとに別インスタンスの顧客が付く）</summary>
     private async Task<OrderEntity> FetchOrderWithCustomerAsync(int orderId)
     {
@@ -207,6 +273,13 @@ public abstract class GraphSaveRuntimeTestsBase
     private async Task<IReadOnlyList<int>> OrderIdsAsync() =>
         (await CreateOrderRepository().Query().ToListAsync(Ct))
             .Select(o => o.OrderId.Value)
+            .Order()
+            .ToList();
+
+    /// <summary>保存先に残っている顧客の ID（昇順）</summary>
+    private async Task<IReadOnlyList<int>> CustomerIdsAsync() =>
+        (await CreateCustomerRepository().Query().ToListAsync(Ct))
+            .Select(c => c.CustomerId.Value)
             .Order()
             .ToList();
 

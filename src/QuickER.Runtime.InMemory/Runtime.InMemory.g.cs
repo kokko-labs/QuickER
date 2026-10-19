@@ -1566,6 +1566,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
 
@@ -1601,6 +1602,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var project = QuerySelectorCache.GetOrCompile(selector);
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
@@ -1647,6 +1649,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
 
@@ -1670,18 +1673,39 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         return Task.FromResult(result);
     }
 
-    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include play no part).</summary>
+    /// <summary>Returns the count of rows matching the conditions within the plan's page (orderings and Include play no part in the count).</summary>
     public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
-        return Task.FromResult(_store.Read(_ => FilterRaw(predicates).Count()));
+        return Task.FromResult(_store.Read(_ => ApplyPaging(FilterRaw(predicates), plan).Count()));
     }
 
-    /// <summary>Returns whether any row matches the conditions.</summary>
+    /// <summary>Returns whether any row matches the conditions within the plan's page.</summary>
     public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
-        return Task.FromResult(_store.Read(_ => FilterRaw(predicates).Any()));
+        return Task.FromResult(_store.Read(_ => ApplyPaging(FilterRaw(predicates), plan).Any()));
+    }
+
+    /// <summary>Applies Skip/Take without ordering (for Count and Any, where only the number of rows in the page matters).</summary>
+    private static IEnumerable<EntityBaseCore> ApplyPaging(
+        IEnumerable<EntityBaseCore> source,
+        SqlQueryPlan<TEntity> plan
+    )
+    {
+        if (plan.Skip is { } skip)
+        {
+            source = source.Skip(skip);
+        }
+
+        if (plan.Take is { } take)
+        {
+            source = source.Take(take);
+        }
+
+        return source;
     }
 
     /// <summary>Deletes rows matching the conditions. With cascadeDelete=true, descendants are also deleted along the FK chain.</summary>
@@ -1700,6 +1724,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
 
         if (cascadeDelete)
@@ -2288,12 +2313,6 @@ internal static class InMemoryCascade
             return 0;
         }
 
-        // A new row that takes a deleted row's value waits until every root has been walked (see GraphSaveOrder)
-        if (order is not null && order.TryHoldBack(entity))
-        {
-            return 0;
-        }
-
         var rows = 0;
         var entityType = entity.GetType();
         var key = InMemoryDataStore.KeyOf(entity);
@@ -2377,6 +2396,12 @@ internal static class InMemoryCascade
         {
             foreach (var child in entity.EnumerateCascadeChildren())
             {
+                // A deleted or held-back child starts a later stage (see GraphSaveOrder)
+                if (order is not null && order.Defers(child))
+                {
+                    continue;
+                }
+
                 rows += Save(
                     child,
                     scope,
@@ -2408,12 +2433,6 @@ internal static class InMemoryCascade
     {
         // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
         if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
-        {
-            return;
-        }
-
-        // The same hold-back as Save, so Before fires in the order the rows are written
-        if (order is not null && order.TryHoldBack(entity))
         {
             return;
         }
@@ -2456,6 +2475,12 @@ internal static class InMemoryCascade
         {
             foreach (var child in entity.EnumerateCascadeChildren())
             {
+                // The same stages as Save, so Before fires in the order the rows are written
+                if (order is not null && order.Defers(child))
+                {
+                    continue;
+                }
+
                 await InvokeBeforeGraphAsync(
                     child,
                     hooks,
@@ -2660,12 +2685,19 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         "The in-memory repository cannot execute raw SQL. Switch to a real database repository.";
 
     /// <summary>Gets a single entity by primary key (null if not found).</summary>
-    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Store.Find<TEntity>(NormalizeKey(id)));
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        var key = NormalizeKey(id);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Store.Find<TEntity>(key));
+    }
 
     /// <summary>Gets all entities.</summary>
-    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(Store.Snapshot<TEntity>());
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Store.Snapshot<TEntity>());
+    }
 
     /// <summary>Inserts an entity (an existing primary key, or a value another row already holds on a UNIQUE constraint, is rejected as a real database would).</summary>
     /// <remarks>
@@ -2676,6 +2708,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
+        cancellationToken.ThrowIfCancellationRequested();
         Store.Insert(entity);
         return Task.CompletedTask;
     }
@@ -2764,6 +2797,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
 
         // As with a real database, reject updates that still carry values in unbounded binary columns (checked here individually because this path does not go through BindUpdateParameters).
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var updated = Store.Write(scope =>
         {
@@ -2790,8 +2824,12 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     }
 
     /// <inheritdoc />
-    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Store.Remove(typeof(TEntity), NormalizeKey(id)));
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        var key = NormalizeKey(id);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Store.Remove(typeof(TEntity), key));
+    }
 
     /// <summary>Starts a query that fetches entities with chained filter conditions, orderings, and Includes.</summary>
     public SqlQuery<TEntity> Query() => new(new InMemoryQueryExecutor<TEntity>(Store));
@@ -2843,6 +2881,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(destination);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var column = EntitySaveMetadata.For(typeof(TEntity)).ColumnByPropertyName(propertyName);
         var value = Store.ReadColumnValue(typeof(TEntity), NormalizeKey(id), column, out var rowExists);
@@ -2879,6 +2918,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var column = EntitySaveMetadata.For(typeof(TEntity)).ColumnByPropertyName(propertyName);
         object? stored;
 
@@ -2995,6 +3035,8 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Copy-on-write staging shared by every root, so the whole call is one all-or-nothing unit: every write goes here and
         // reaches the store only once the last phase has succeeded.
         var staging = new InMemorySaveStaging();
@@ -3008,36 +3050,25 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
                     e => new InMemorySaveHookContext(Store, e.GetType(), staging)
                 );
 
-        // The order every backend shares (GraphSaveOrder): a new row that takes a deleted row's value goes after the walk of
-        // every root. Both phases below follow it (each with its own plan), so Before, the writes and After keep one sequence.
+        // The order every backend shares (GraphSaveOrder): when the save deletes rows, the new and updated rows come first,
+        // then the deletions, then the rows held back because they take a value a deleted row holds. Both phases below follow
+        // the same plan, so Before, the writes and After keep one sequence.
+        var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
+        IReadOnlyList<EntityBaseCore> startingPoints = order?.StartingPoints ?? roots;
 
         // Phase 1 (outside the lock): traverse the graphs of all roots in the same order as Save, fire Before, and build the skip set.
         if (hooks is not null)
         {
-            var beforeOrder = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
-
-            foreach (var entity in roots)
+            foreach (var start in startingPoints)
             {
                 await InMemoryCascade.InvokeBeforeGraphAsync(
-                    entity,
+                    start,
                     hooks,
                     cascadeSave,
                     cascadeDelete,
                     cancellationToken,
                     changesAlreadyVerified: true,
-                    order: beforeOrder
-                ).ConfigureAwait(false);
-            }
-
-            foreach (var subtree in beforeOrder?.HeldBack ?? [])
-            {
-                await InMemoryCascade.InvokeBeforeGraphAsync(
-                    subtree,
-                    hooks,
-                    cascadeSave,
-                    cascadeDelete,
-                    cancellationToken,
-                    changesAlreadyVerified: true
+                    order: order
                 ).ConfigureAwait(false);
             }
         }
@@ -3049,12 +3080,11 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
             scope =>
             {
                 var total = 0;
-                var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
 
-                foreach (var entity in roots)
+                foreach (var start in startingPoints)
                 {
                     total += InMemoryCascade.Save(
-                        entity,
+                        start,
                         scope,
                         cascadeSave,
                         cascadeDelete,
@@ -3064,21 +3094,6 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
                         records,
                         changesAlreadyVerified: true,
                         order: order
-                    );
-                }
-
-                foreach (var subtree in order?.HeldBack ?? [])
-                {
-                    total += InMemoryCascade.Save(
-                        subtree,
-                        scope,
-                        cascadeSave,
-                        cascadeDelete,
-                        insertWhenUpdateMissing,
-                        mode,
-                        hooks,
-                        records,
-                        changesAlreadyVerified: true
                     );
                 }
 

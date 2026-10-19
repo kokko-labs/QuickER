@@ -92,7 +92,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                     .GetPrimaryKeyColumnsInOrder()
                     .Select(column => _nameConverter.ToPropertyName(column.Name))
                     .ToList(),
-                Properties = entity.Columns.Select(BuildEfCorePropertyConfig).ToList(),
+                Properties = entity
+                    .Columns.Select(column => BuildEfCorePropertyConfig(entity, column))
+                    .ToList(),
+                UniqueIndexes = BuildEfCoreUniqueIndexes(entity),
                 Relationships = relationshipsByPrincipal.TryGetValue(
                     entity.Id,
                     out var relationships
@@ -113,15 +116,48 @@ internal sealed partial class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>一意制約ごとの EF Core の一意インデックス（構成列のプロパティ名を制約の列の並びで・制約の宣言の並びで返す）</summary>
+    /// <remarks>
+    /// EF Core は 1 回の SaveChanges の中で文の順を自分で決め、モデルの一意インデックスを見て、一意な値が削除する行から
+    /// 別の行（更新・挿入）へ移るときに削除を先に並べる。インデックスが無いと、更新が削除より先に走って一意制約に断られる
+    /// ことがある。インデックスは文の並べ方にだけ使い、DB には何も作らない（Migrations / EnsureCreated を使わない前提）。
+    /// 名前（HasDatabaseName）は付けない：文の並べ方に名前は関係せず、DB に作らない名前を DDL の規則（図の名前か合成名・
+    /// 対象 DBMS の上限）とそろえて保つ理由が無い。構成列を引き当てられない制約は出さない。
+    /// </remarks>
+    private IReadOnlyList<IReadOnlyList<string>> BuildEfCoreUniqueIndexes(Entity entity)
+    {
+        var indexes = new List<IReadOnlyList<string>>();
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            var columns = constraint
+                .ColumnIds.Select(id => entity.Columns.FirstOrDefault(column => column.Id == id))
+                .ToList();
+
+            if (columns.Count == 0 || columns.Any(column => column is null))
+            {
+                continue;
+            }
+
+            indexes.Add(
+                columns.Select(column => _nameConverter.ToPropertyName(column!.Name)).ToList()
+            );
+        }
+
+        return indexes;
+    }
+
     /// <summary>主キー列を 1 つ以上持つか（EF Core の DbContext へマップできるか）</summary>
     private static bool HasAnyPrimaryKey(Entity entity) =>
         entity.Columns.Any(column => column.IsPrimaryKey);
 
     /// <summary>カラム定義から EF Core のスカラープロパティ構成モデルを構築する</summary>
-    private CSharpEfCorePropertyConfigModel BuildEfCorePropertyConfig(Column column)
+    private CSharpEfCorePropertyConfigModel BuildEfCorePropertyConfig(Entity entity, Column column)
     {
         var typeInfo = _columnTypes[column.Id];
         var valueObject = ResolveValueObject(column);
+        // 素の CLR 型が Guid か（ValueGeneratedNever を出さない主キーの判定に使う。下の IsValueGeneratedNever を参照）
+        var isGuid = typeInfo.TypeName.TrimEnd('?') == "Guid";
 
         return new CSharpEfCorePropertyConfigModel
         {
@@ -142,6 +178,17 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsComputed = column.IsComputed,
             // 主キーでない ID 列も DB が値を作るので、EF Core にも書かせない（主キーはアプリが書くため対象外）
             IsIdentity = IsWriteExcludedIdentity(column),
+            // EF Core が意味のある値を作れない単一列の主キー（整数など）は、アプリが決めたキーをそのまま送らせる。EF Core は
+            // 整数の単一列の主キーを既定で DB が値を作る列とみなし、0 を「キー未設定」として送らない（QuickER 版は 0 もそのまま書く）。
+            // 規約のままにするのは 2 つ＝採番の主キー（IsIdentity。DB の採番で動く挿入を壊さない）と Guid の主キー（EF Core は
+            // Guid.Empty のとき値を作って挿入するので、付けると Guid.Empty がそのまま書かれ、EF Core の採番に頼るコードが 2 行目から
+            // 主キーの重複になる）。Guid の判定は素の CLR 型で行う（値オブジェクトの Guid のキーは変換がある列で、EF Core は
+            // もともと値を作らないので、付けても付けなくても同じ）。複合主キーは EF Core が値を作らないので出さない
+            IsValueGeneratedNever =
+                column.IsPrimaryKey
+                && !column.IsIdentity
+                && !isGuid
+                && entity.Columns.Count(other => other.IsPrimaryKey) == 1,
             IsValueObject = valueObject is not null,
             ValueObjectClassName = valueObject?.ClassName ?? string.Empty,
         };

@@ -100,6 +100,31 @@ public abstract class BinaryColumnRuntimeTestsBase : IDisposable
             Note = note,
         };
 
+    /// <summary>
+    /// 区切り 43（#1）：素の int の主キーが 0 の行も、アプリが決めたキーのまま挿入・グラフ保存する。EF Core は単一列の主キーを
+    /// <c>ValueGeneratedNever()</c> で構成するので、0 を「キー未設定」とみなして送らないことをしない（QuickER 版と同じ）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary] 主キー 0 の文書を挿入し、主キー 0 のメモをグラフ保存で足せ、同じ 0 の 2 行目は主キーの重複になる"
+    )]
+    public async Task KeyZero_IsWrittenAsGiven()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+        var notes = CreateDocumentNoteRepository();
+
+        await documents.InsertAsync(NewDocument(0, "zero", null, [7], null), Ct);
+        var note = NewNote(0, 0, "n");
+        note.MarkAdded();
+        (await notes.SaveAsync(note, cancellationToken: Ct)).Should().Be(1);
+
+        (await documents.GetByIdAsync(0, Ct))!.Title.Should().Be("zero");
+        (await notes.GetByIdAsync(0, Ct))!.Note.Should().Be("n");
+
+        var duplicate = () => documents.InsertAsync(NewDocument(0, "again", null, [7], null), Ct);
+        await duplicate.Should().ThrowAsync<Exception>();
+    }
+
     // ── 読み取りオプトイン WithUnboundedBinary() の検証 ──
     // 「除外列を含めて取得する」効果はQuickER 版 Repository と EF Core で結果が同一（EF Core は元々全列）のため、
     // パリティを担保するべく本基底に [Fact] を置き、Ado / EF Core 両派生で同じテストを実行させる。

@@ -1038,8 +1038,16 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
-    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
-        InvokeNullableAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
+    /// <remarks>A null key is refused before the request is sent, as the direct implementations refuse it.</remarks>
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        return InvokeNullableAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
+    }
 
     /// <summary>Gets all entities.</summary>
     public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
@@ -1107,8 +1115,16 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 
     /// <inheritdoc />
-    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
-        InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
+    /// <remarks>A null key is refused before the request is sent, as the direct implementations refuse it.</remarks>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        return InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
+    }
 
     /// <summary>Saves inserts, updates, and deletes according to RowState in a single transaction (cascades to children by default).</summary>
     /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graph ends up with the same versions a direct connection would leave behind. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response replays the whole graph.</remarks>
@@ -1331,6 +1347,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         CancellationToken cancellationToken
     )
     {
+        // A null key is refused before the request is sent, as the direct implementations refuse it
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         ArgumentNullException.ThrowIfNull(destination);
 
         var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
@@ -1387,6 +1409,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         CancellationToken cancellationToken
     )
     {
+        // A null key is refused before the request is sent, as the direct implementations refuse it
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
 
         // source=null sets the column to NULL (DELETE); this differs in meaning from a zero-byte PUT (empty body)
@@ -3545,7 +3573,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// changes are known to exist), the redundant graph traversal (change detection) at the start is skipped. Recursion
     /// into children passes the default <c>false</c>, so per-subtree change detection (pruning clean branches) is still
     /// performed. The operations run in graph order; <see cref="SaveGraphsAsync"/> is the entry point the repositories
-    /// use, which saves the subtrees made only of new rows after the deletions.
+    /// use, which runs them in the stages <see cref="GraphSaveOrder"/> describes.
     /// </remarks>
     public static Task<int> SaveAsync(
         EntityBaseCore entity,
@@ -3580,9 +3608,9 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// provided, fires the save hooks before and after each operation).
     /// </summary>
     /// <remarks>
-    /// The operations run in the order <see cref="GraphSaveOrder"/> describes: a new row that takes the primary key or a
-    /// unique value of a row the save deletes is saved, with the rows below it, after the walk of every root. The roots are
-    /// expected to have changes already (<see cref="HasChanges"/>); clean branches below them are still pruned.
+    /// The operations run in the order <see cref="GraphSaveOrder"/> describes: when the save deletes rows, the new and
+    /// updated rows come first, then the deletions, then the rows held back because they take a value a deleted row holds.
+    /// The roots are expected to have changes already (<see cref="HasChanges"/>); clean branches below them are still pruned.
     /// </remarks>
     public static async Task<int> SaveGraphsAsync(
         IReadOnlyList<EntityBaseCore> roots,
@@ -3600,10 +3628,11 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
         var rows = 0;
 
-        foreach (var root in roots)
+        // Each stage starts from its own points: the roots, then the deleted rows, then the rows held back
+        foreach (var start in order?.StartingPoints ?? roots)
         {
             rows += await SaveNodeAsync(
-                root,
+                start,
                 connection,
                 transaction,
                 cascadeSave,
@@ -3618,29 +3647,10 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             ).ConfigureAwait(false);
         }
 
-        // The rows held back go after every deletion, so the value a deleted row held is free again
-        foreach (var subtree in order?.HeldBack ?? [])
-        {
-            rows += await SaveNodeAsync(
-                subtree,
-                connection,
-                transaction,
-                cascadeSave,
-                cascadeDelete,
-                insertWhenUpdateMissing,
-                cancellationToken,
-                hooks,
-                changesAlreadyVerified: true,
-                order: null{{ if repository_dialect == "sqlserver" }},
-                mode,
-                versions{{ end }}
-            ).ConfigureAwait(false);
-        }
-
         return rows;
     }
 
-    /// <summary>Saves one node and its subtree (<paramref name="order"/> holds back the rows to save later; null saves everything in graph order).</summary>
+    /// <summary>Saves one node and its subtree (the walk skips the children <paramref name="order"/> leaves to another stage; null saves everything in graph order).</summary>
     private static async Task<int> SaveNodeAsync(
         EntityBaseCore entity,
         {{ sql_connection_type }} connection,
@@ -3657,12 +3667,6 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     )
     {
         if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
-        {
-            return 0;
-        }
-
-        // A new row that takes a deleted row's value waits until the deletions are done (see SaveGraphsAsync)
-        if (order is not null && order.TryHoldBack(entity))
         {
             return 0;
         }
@@ -3779,6 +3783,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         {
             foreach (var child in entity.EnumerateCascadeChildren())
             {
+                // A deleted or held-back child starts a later stage (see GraphSaveOrder)
+                if (order is not null && order.Defers(child))
+                {
+                    continue;
+                }
+
                 rows += await SaveNodeAsync(
                     child,
                     connection,

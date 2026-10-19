@@ -99,6 +99,45 @@ public sealed class SqlServerIdentityColumnRuntimeTests(SqlServerContainerFixtur
             Name = name,
         };
 
+    /// <summary>
+    /// 区切り 43（#1）：採番でない素の int の主キーが 0 の行も、アプリが決めたキーのまま書く（QuickER 版と EF Core）。
+    /// 片方の経路で 0 を書いた後、もう片方の経路で同じ 0 を書くと主キーの重複になる
+    /// </summary>
+    [Theory(
+        DisplayName = "[Identity/SqlServer] 主キー 0 の挿入とグラフ保存は、アプリが決めたキーのまま書く（QuickER 版と EF Core）"
+    )]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task KeyZero_IsWrittenAsGiven(bool efCore, bool viaSave)
+    {
+        var repository = efCore ? EfCoreItems() : AdoItems();
+
+        async Task WriteAsync(bool save, string name)
+        {
+            var item = NewItem(0, name);
+
+            if (save)
+            {
+                item.MarkAdded();
+                await repository.SaveAsync(item, cancellationToken: Ct);
+            }
+            else
+            {
+                await repository.InsertAsync(item, Ct);
+            }
+        }
+
+        await WriteAsync(viaSave, "zero");
+
+        (await repository.GetByIdAsync(0, Ct))!.Name.Should().Be("zero");
+
+        var duplicate = () => WriteAsync(!viaSave, "again");
+        await duplicate.Should().ThrowAsync<Exception>();
+        (await repository.GetByIdAsync(0, Ct))!.Name.Should().Be("zero");
+    }
+
     /// <summary>QuickER 版の INSERT が自動採番列へ値を送らず、DB の採番値を読み戻せることを検証する</summary>
     [Fact(
         DisplayName = "[Identity/SqlServer] QuickER 版 INSERT は自動採番列を書かずに成功し、DB の採番値を読み戻せる"
