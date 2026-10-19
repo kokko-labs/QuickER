@@ -100,6 +100,8 @@ Point the tool at an empty folder to start fresh, or at an existing mock folder 
 Give the folder as a full path; a relative path such as `mock` cannot start a conversation.
 What you type in the folder field is applied when you stop typing, leave the field, or press Enter, and the folder's contents are read at that point.
 No chat log is kept: resuming restores from the folder contents alone, so it works the same on every backend.
+When you resume, QuickER tells the AI whether the ER diagram has changed since the conversation that last succeeded.
+The diagram it compares with is recorded when the first turn of a conversation succeeds; a first turn that fails or is interrupted records nothing, and your next message starts the conversation again.
 The screen-list sidebar lets you click through the screens, and the preview follows the links between them.
 You can export the whole mock as a single self-contained HTML file.
 In that file a link to another screen opens that screen but does not scroll to a `#section` inside it, and a link within a page keeps the current screen shown.

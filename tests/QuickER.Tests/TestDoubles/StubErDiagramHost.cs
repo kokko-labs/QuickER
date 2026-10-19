@@ -59,6 +59,12 @@ internal sealed class StubErDiagramHost : IErDiagramHost
     /// <inheritdoc />
     public bool IsDirty => IsDirtyToReturn;
 
+    /// <summary><see cref="DiagramRevision"/> が返す世代（テストから図の変化を模すため set 可能）</summary>
+    public long DiagramRevisionToReturn { get; set; }
+
+    /// <inheritdoc />
+    public long DiagramRevision => DiagramRevisionToReturn;
+
     /// <inheritdoc />
     public DatabaseProviderRegistry Providers => ProvidersToReturn;
 

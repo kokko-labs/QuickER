@@ -26,6 +26,14 @@ public interface IErDiagramHost
     /// <summary>図に未保存の変更があるかどうか（図の内容を失う操作の確認で警告水準の選択に使用）</summary>
     bool IsDirty { get; }
 
+    /// <summary>図の内容の世代（図を変える操作のたびに値が変わる。値そのものに意味は無い）</summary>
+    /// <remarks>
+    /// 確認ダイアログの前後で比べ、確認の間に図が変わったか（ダイアログの入れ子のメッセージループの中で走った
+    /// 外部変更の自動再読込・AI のツールの編集など）を知るために使う。確認の前に読んだ図から作った結果を、
+    /// 変わった後の図へ当てると、その間の変更を黙って捨てる
+    /// </remarks>
+    long DiagramRevision { get; }
+
     /// <summary>現在の ER 図を意味モデル（<see cref="ErDiagram"/>・視覚情報なし）として取得する</summary>
     ErDiagram GetDiagram();
 

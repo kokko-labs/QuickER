@@ -283,6 +283,15 @@ public static partial class TableDefinitionDocumentImporter
 
             if (string.IsNullOrWhiteSpace(columnName))
             {
+                // カラム名の無い行は、ほかのセル（No. を除く）も空なら表の終わり、値があれば断る
+                // （表の終わりとみなすと、その行と後ろの行のカラムが黙って消える）
+                if (HasColumnRowContent(worksheet, row))
+                {
+                    throw new InvalidDataException(
+                        string.Format(Strings.TableDoc_ColumnMissingName, entity.TableName, row)
+                    );
+                }
+
                 break;
             }
 
@@ -339,6 +348,23 @@ public static partial class TableDefinitionDocumentImporter
         {
             entity.UniqueConstraints.Add(new UniqueConstraint { ColumnIds = columnIds });
         }
+    }
+
+    /// <summary>
+    /// カラムの行の、カラム名の後ろのセル（説明・データ型・必須・キー・参照先・備考）のどれかに値があるか。
+    /// No. の列は行の番号を振っただけなので数えない
+    /// </summary>
+    private static bool HasColumnRowContent(IXLWorksheet worksheet, int row)
+    {
+        for (var column = 3; column <= TableDefinitionDocumentLayout.DetailColumnCount; column++)
+        {
+            if (!string.IsNullOrWhiteSpace(GetCellText(worksheet, row, column)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>キー表記から一意制約の番号（<c>UQ{n}</c> の n）を抽出する</summary>

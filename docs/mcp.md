@@ -170,6 +170,8 @@ Before writing a `config` for `generate_csharp`, call `get_generation_config_sch
   If the folder holding the diagram becomes briefly unreachable (a dropped network share or USB drive), the GUI keeps retrying the watch and, once the folder is back, picks up any change made in the meantime (the status bar says once that watching stopped and once that it resumed).
   A mouse gesture in progress (moving or resizing a table, or a rubber-band selection) is cancelled back to where it started on either path.
   Dialogs that are already open (database sync, query definitions, and so on) are **not** closed, however: they still show the diagram as it was when they opened, so confirming one after a reload can act on stale content.
+  The confirmations of a target DBMS switch and of an import (a file, a database, or C# code) are the exception: if the diagram changed while one was open, confirming it does nothing, and QuickER says so (the switch in the status bar, an import in a dialog).
+  Run it again.
   Keeping diagram files under git is still recommended so changes stay reviewable.
 - **DiagramDocument validation.**
   The editing tools refuse a file that does not exist, JSON that is not a `DiagramDocument` (an object with `Version` and `Schema`), and documents saved in a newer format version than this tool supports (to avoid discarding unknown data).

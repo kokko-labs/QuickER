@@ -708,6 +708,9 @@
   <data name="TypeConversion_ConfirmTitle" xml:space="preserve">
     <value>対象データベースの変更</value>
   </data>
+  <data name="TypeConversion_DiagramChangedDuringConfirm" xml:space="preserve">
+    <value>確認の間に図が変わったため、対象 DBMS を切り替えませんでした。もう一度選んでください。</value>
+  </data>
   <data name="TypeConversion_ConfirmIntro" xml:space="preserve">
     <value>対象データベースを {0} へ変更すると、以下の項目に影響があります。</value>
   </data>
@@ -885,6 +888,9 @@
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
   </data>
+  <data name="Import_DiagramChangedDuringConfirm" xml:space="preserve">
+    <value>確認の間に図が変わったため、{0}を取り込みませんでした。もう一度取り込んでください。</value>
+  </data>
   <data name="Import_BrokenQueriesWarning" xml:space="preserve">
     <value>次の名前付きクエリは参照先のテーブル・列が失われるため削除されます:
 {0}</value>
@@ -1029,6 +1035,9 @@
   </data>
   <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
     <value>テーブル '{0}' のカラム '{1}' にデータ型がありません。</value>
+  </data>
+  <data name="TableDoc_ColumnMissingName" xml:space="preserve">
+    <value>テーブル '{0}' の {1} 行目にカラム名がありません（同じ行のほかのセルには値があります）。</value>
   </data>
   <data name="TableDoc_RelMissingTableName" xml:space="preserve">
     <value>リレーション一覧シートの {0} 行目に参照元または参照先テーブル名がありません。</value>

@@ -465,6 +465,85 @@ public class CodeReverseCommandServiceTests
         }
     }
 
+    /// <summary>確認の最中に図が変わったら（外部変更の自動再読込など）、確認の前の図から作った結果を当てない</summary>
+    [Fact(
+        DisplayName = "置換確認の最中に図が変わったら、取り込まずに取りやめをダイアログで知らせる"
+    )]
+    public void Run_DiagramChangedDuringConfirm_IsAbandoned()
+    {
+        var current = new ErDiagram
+        {
+            TargetDbms = "sqlserver",
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "existing",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+        var codeDiagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "imported",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+        var (picked, root) = WriteGeneratedSource(codeDiagram);
+
+        try
+        {
+            var host = new StubErDiagramHost
+            {
+                DiagramToReturn = current,
+                ProvidersToReturn = SqlServerRegistry(),
+                TargetDbmsToReturn = "sqlserver",
+            };
+            var dialogs = new StubDialogService { ConfirmResult = true };
+            dialogs.OnConfirm = () => host.DiagramRevisionToReturn++;
+            var files = new StubFileDialogService { OpenResult = picked };
+            var service = new CodeReverseCommandService(host, dialogs, files);
+
+            service.Run();
+
+            dialogs.ConfirmMessages.Should().ContainSingle("確認は出た");
+            host.LastReplacedDiagram.Should().BeNull("確認の前の図から作ったマージ結果を当てない");
+            dialogs
+                .InformationMessages.Should()
+                .Equal(CodeGenStrings.Reverse_DiagramChangedDuringConfirm);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>ホストに未保存変更があるときの置換確認は、警告水準（ConfirmWarning）で表示される</summary>
     [Fact(DisplayName = "ダーティ時の置換確認は警告水準（Warning）になる")]
     public void Run_DirtyHost_UsesWarningConfirmation()

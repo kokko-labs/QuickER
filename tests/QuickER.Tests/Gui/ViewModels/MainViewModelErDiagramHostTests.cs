@@ -61,6 +61,39 @@ public class MainViewModelErDiagramHostTests : IDisposable
         return vm;
     }
 
+    /// <summary>
+    /// DiagramRevision が、履歴へ積む編集・Undo・未保存にする変更・図の置き換えのたびに変わり、
+    /// 何もしなければ変わらないことを検証する（確認の前後の比較に使う）
+    /// </summary>
+    [Fact(DisplayName = "DiagramRevision は図を変える操作のたびに変わり、何もしなければ変わらない")]
+    public void DiagramRevision_ChangesWithEveryDiagramChange()
+    {
+        var vm = CreateViewModel();
+        var host = new MainViewModelErDiagramHost(vm);
+
+        var start = host.DiagramRevision;
+        host.DiagramRevision.Should().Be(start, "何もしなければ変わらない");
+
+        vm.AddEntityCommand.Execute(null);
+        var afterAdd = host.DiagramRevision;
+        afterAdd.Should().NotBe(start, "履歴へ積む編集で変わる");
+
+        vm.Entities[0].Columns[0].DataType = "bigint";
+        var afterEdit = host.DiagramRevision;
+        afterEdit.Should().NotBe(afterAdd, "プロパティの編集で変わる");
+
+        vm.UndoCommand.Execute(null);
+        var afterUndo = host.DiagramRevision;
+        afterUndo.Should().NotBe(afterEdit, "Undo で変わる");
+
+        vm.ReplaceQueries([]);
+        var afterQueries = host.DiagramRevision;
+        afterQueries.Should().NotBe(afterUndo, "未保存にする変更（クエリの差し替え）で変わる");
+
+        host.ReplaceDiagram(new ErDiagram { TargetDbms = vm.CurrentProvider.Name });
+        host.DiagramRevision.Should().NotBe(afterQueries, "図の置き換えで変わる");
+    }
+
     /// <summary>IsEmpty が VM のエンティティ有無を反映することを検証する</summary>
     [Fact(DisplayName = "IsEmpty は VM のエンティティ有無を反映する")]
     public void IsEmpty_ReflectsViewModelEntities()

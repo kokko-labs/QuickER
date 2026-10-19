@@ -58,6 +58,7 @@ public sealed class CodeReverseCommandService
             return;
         }
 
+        var revision = _host.DiagramRevision;
         var current = _host.GetDiagram();
 
         CodeReverseResult reversed;
@@ -117,6 +118,18 @@ public sealed class CodeReverseCommandService
         // 構造差分・壊れクエリがある場合のみ置換確認を行う（DB 取込と同じ規則）
         if (!ConfirmDiagramReplacement(current, merged, finalRelationships))
         {
+            return;
+        }
+
+        // 確認の間に図が変わっていたら（確認の入れ子のメッセージループの中で走った外部変更の自動再読込・
+        // AI のツールの編集など）、確認の前の図から作ったマージ結果を当てずに取りやめる（当てるとその間の変更を捨てる）
+        if (_host.DiagramRevision != revision)
+        {
+            _dialogs.ShowInformation(
+                Strings.Reverse_DiagramChangedDuringConfirm,
+                Strings.Common_Confirm
+            );
+
             return;
         }
 

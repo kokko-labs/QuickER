@@ -115,6 +115,73 @@ public class MainViewModelTargetDbmsTests
         CountUndoable(vm).Should().Be(undoCountBefore);
     }
 
+    [Fact(
+        DisplayName = "切替の確認の最中に図が置き換わると、切替を取りやめ、今の図を変えずにステータスバーで知らせる"
+    )]
+    public void ChangeDbms_DiagramReplacedDuringConfirm_IsAbandoned()
+    {
+        var (vm, fake, dialogs) = CreateVm();
+        vm.AddEntityCommand.Execute(null);
+        // 擬似プロバイダが変換できない型にして、確認を出させる
+        vm.Entities[0].Columns[0].DataType = "uniqueidentifier";
+        var original = vm.CurrentProvider;
+
+        // 確認の入れ子のメッセージループの中で、外部変更の自動再読込などが図を置き換えたことを模す
+        var replacement = new ErDiagram { TargetDbms = original.Name };
+        var entity = new Entity { TableName = "Replaced" };
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        replacement.Entities.Add(entity);
+        dialogs.OnConfirmWarningDetails = () => vm.ReplaceDiagramFromModule(replacement);
+
+        vm.SelectedProvider = fake;
+
+        dialogs.WarningConfirmDetailsMessages.Should().ContainSingle("確認は出た");
+        vm.CurrentProvider.Should().BeSameAs(original, "確認の間に図が変わったので切り替えない");
+        vm.SelectedProvider.Should().BeSameAs(original, "選択の表示も今の方言へ戻る");
+        vm.Entities.Should().ContainSingle().Which.TableName.Should().Be("Replaced");
+        vm.Entities[0].Columns[0].DataType.Should().Be("int", "今の図の列は変換しない");
+        vm.ToDiagramModel().TargetDbms.Should().Be(original.Name);
+        vm.UndoRedo.CanUndo.Should().BeFalse("切替は履歴に積まれない");
+        vm.StatusMessage.Should().Be(GuiStrings.TypeConversion_DiagramChangedDuringConfirm);
+    }
+
+    [Fact(
+        DisplayName = "切替の確認の最中に図が編集されると（ツールの編集など）、切替を取りやめ、その編集を残す"
+    )]
+    public void ChangeDbms_DiagramEditedDuringConfirm_IsAbandoned()
+    {
+        var (vm, fake, dialogs) = CreateVm();
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[0].Columns[0].DataType = "uniqueidentifier";
+        var memo = AddColumn(vm, "Memo", "int", isNullable: true);
+        var original = vm.CurrentProvider;
+
+        dialogs.OnConfirmWarningDetails = () => memo.DataType = "bigint";
+
+        vm.SelectedProvider = fake;
+
+        vm.CurrentProvider.Should().BeSameAs(original);
+        vm.SelectedProvider.Should()
+            .BeSameAs(original, "方言の選択も元の方言へ戻す（切替先を表示したままにしない）");
+        memo.DataType.Should().Be("bigint", "確認の間の編集は残り、変換されない");
+        vm.Entities[0].Columns[0].DataType.Should().Be("uniqueidentifier");
+        vm.StatusMessage.Should().Be(GuiStrings.TypeConversion_DiagramChangedDuringConfirm);
+
+        // 最後の履歴は確認の間の編集（切替は積まれていない）＝Undo 1 回でその編集だけが戻る
+        vm.UndoCommand.Execute(null);
+
+        memo.DataType.Should().Be("int");
+        vm.CurrentProvider.Should().BeSameAs(original);
+    }
+
     /// <summary>変換できない型がある場合に、適用前の続行確認へ未変換一覧が列挙されることを検証する</summary>
     [Fact(DisplayName = "未変換の列は適用前の続行確認に列挙される")]
     public void ChangeDbms_Unconverted_ConfirmsBeforeApply()

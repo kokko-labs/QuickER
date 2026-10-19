@@ -978,6 +978,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string Reverse_DiagramChangedDuringConfirm {
+            get {
+                return ResourceManager.GetString("Reverse_DiagramChangedDuringConfirm", resourceCulture);
+            }
+        }
+
         public static string Reverse_BrokenQueriesWarning {
             get {
                 return ResourceManager.GetString("Reverse_BrokenQueriesWarning", resourceCulture);

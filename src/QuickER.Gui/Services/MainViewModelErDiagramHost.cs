@@ -46,6 +46,9 @@ public sealed class MainViewModelErDiagramHost : IErDiagramHost
     public bool IsDirty => _viewModel.IsDirty;
 
     /// <inheritdoc />
+    public long DiagramRevision => _viewModel.DiagramRevision;
+
+    /// <inheritdoc />
     public ErDiagram GetDiagram() => _viewModel.ToDiagramModel();
 
     /// <inheritdoc />

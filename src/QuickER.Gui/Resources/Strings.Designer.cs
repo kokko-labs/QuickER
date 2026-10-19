@@ -1423,6 +1423,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string TypeConversion_DiagramChangedDuringConfirm {
+            get {
+                return ResourceManager.GetString("TypeConversion_DiagramChangedDuringConfirm", resourceCulture);
+            }
+        }
+
         public static string TypeConversion_ConfirmIntro {
             get {
                 return ResourceManager.GetString("TypeConversion_ConfirmIntro", resourceCulture);
@@ -1938,6 +1944,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string Import_DiagramChangedDuringConfirm {
+            get {
+                return ResourceManager.GetString("Import_DiagramChangedDuringConfirm", resourceCulture);
+            }
+        }
+
         public static string Import_BrokenQueriesWarning {
             get {
                 return ResourceManager.GetString("Import_BrokenQueriesWarning", resourceCulture);
@@ -2229,6 +2241,12 @@ namespace QuickER.Resources {
         public static string TableDoc_ColumnMissingDataType {
             get {
                 return ResourceManager.GetString("TableDoc_ColumnMissingDataType", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_ColumnMissingName {
+            get {
+                return ResourceManager.GetString("TableDoc_ColumnMissingName", resourceCulture);
             }
         }
         

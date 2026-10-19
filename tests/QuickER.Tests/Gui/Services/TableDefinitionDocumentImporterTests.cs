@@ -355,4 +355,106 @@ public class TableDefinitionDocumentImporterTests
                 )
             );
     }
+
+    /// <summary>サンプル図の定義書を作り、Category の詳細シートを返す（カラムはデータ開始行から 2 行）</summary>
+    private static (XLWorkbook Workbook, IXLWorksheet Category) BuildSampleWorkbook()
+    {
+        var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+            BuildSampleDiagram(),
+            culture: new CultureInfo("en")
+        );
+
+        return (workbook, workbook.Worksheet("Category"));
+    }
+
+    /// <summary>
+    /// カラムの行の下に、カラム名が空でほかのセルに値がある行があると、テーブルと行を名指しして取込を断ることを検証する
+    /// （黙ってテーブルの終わりとみなすと、その行と後ろの行のカラムが消える）。No. の列は数えない
+    /// </summary>
+    [Theory(DisplayName = "カラム名が空でほかのセルに値がある行は、テーブルと行を名指しして断る")]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void Load_RowWithoutColumnNameButOtherContent_Throws(int filledColumn)
+    {
+        var (workbook, category) = BuildSampleWorkbook();
+
+        using (workbook)
+        {
+            // 判定する列の数は、出力するカラムの表の列の数と同じ
+            category
+                .Row(TableDefinitionDocumentLayout.DetailColumnHeaderRow)
+                .LastCellUsed()!
+                .Address.ColumnNumber.Should()
+                .Be(TableDefinitionDocumentLayout.DetailColumnCount);
+
+            var row = TableDefinitionDocumentLayout.DetailColumnDataStartRow + 2;
+            category.Cell(row, filledColumn).Value = "x";
+
+            var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
+
+            act.Should()
+                .Throw<InvalidDataException>()
+                .WithMessage(string.Format(GuiStrings.TableDoc_ColumnMissingName, "Category", row));
+        }
+    }
+
+    /// <summary>
+    /// カラムの途中の行のカラム名だけを消すと、その行を名指しして断ることを検証する
+    /// （従来はそこで表が終わり、その行と後ろのカラムが黙って消えていた）
+    /// </summary>
+    [Fact(DisplayName = "途中のカラムの名前だけを消した行は、テーブルと行を名指しして断る")]
+    public void Load_MiddleRowWithoutColumnName_Throws()
+    {
+        var (workbook, category) = BuildSampleWorkbook();
+
+        using (workbook)
+        {
+            var row = TableDefinitionDocumentLayout.DetailColumnDataStartRow;
+            category.Cell(row, 2).Value = string.Empty;
+
+            var act = () => TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
+
+            act.Should()
+                .Throw<InvalidDataException>()
+                .WithMessage(string.Format(GuiStrings.TableDoc_ColumnMissingName, "Category", row));
+        }
+    }
+
+    /// <summary>
+    /// No. の列だけに値がある行と、すべてのセルが空の行は、表の終わりとして受けることを検証する
+    /// （すべてが空の行より下の行は読まない）
+    /// </summary>
+    [Theory(DisplayName = "No. だけの行・すべて空の行は表の終わりとして受ける")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Load_RowWithOnlyNumberOrEmpty_EndsTable(bool numberOnly)
+    {
+        var (workbook, category) = BuildSampleWorkbook();
+
+        using (workbook)
+        {
+            var row = TableDefinitionDocumentLayout.DetailColumnDataStartRow + 2;
+
+            if (numberOnly)
+            {
+                category.Cell(row, 1).Value = 3;
+            }
+
+            // 表の終わりより下の行は読まない
+            category.Cell(row + 1, 2).Value = "Ignored";
+            category.Cell(row + 1, 4).Value = "int";
+
+            var diagram = TableDefinitionDocumentImporter.Load(workbook, "sqlserver");
+
+            diagram
+                .Entities.Single(entity => entity.TableName == "Category")
+                .Columns.Select(column => column.Name)
+                .Should()
+                .Equal("CategoryId", "CategoryName");
+        }
+    }
 }

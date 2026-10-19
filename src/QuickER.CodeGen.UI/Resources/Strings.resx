@@ -476,6 +476,9 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="Reverse_ReplaceConfirm" xml:space="preserve">
     <value>This will merge the C# file into the current diagram and replace it. Are you sure?</value>
   </data>
+  <data name="Reverse_DiagramChangedDuringConfirm" xml:space="preserve">
+    <value>The diagram changed while the confirmation was open, so the C# code was not imported. Import it again.</value>
+  </data>
   <data name="Reverse_BrokenQueriesWarning" xml:space="preserve">
     <value>The following named queries reference tables or columns that no longer exist and will be deleted:
 {0}</value>

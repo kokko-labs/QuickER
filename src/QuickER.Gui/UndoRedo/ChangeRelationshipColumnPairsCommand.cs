@@ -25,6 +25,9 @@ public sealed class ChangeRelationshipColumnPairsCommand : IUndoableCommand
     /// <summary>適用後に呼ぶ後処理（外部キー列ルールの再適用）</summary>
     private readonly Action? _afterApply;
 
+    /// <summary>変更の直前の、変更後に子列になる列の外部キーの印（Undo で戻す）</summary>
+    private ForeignKeyMarkSnapshot? _marks;
+
     /// <summary><see cref="ChangeRelationshipColumnPairsCommand"/> を生成する</summary>
     public ChangeRelationshipColumnPairsCommand(
         RelationshipViewModel relationship,
@@ -45,6 +48,8 @@ public sealed class ChangeRelationshipColumnPairsCommand : IUndoableCommand
     /// <inheritdoc />
     public void Execute()
     {
+        // 子列になる列の印を控える（手で付けた印は、子列になるとリレーションの管理に移る）
+        _marks = ForeignKeyMarkSnapshot.Capture(_relationship.Target, _after);
         _relationship.SetColumnPairs(_after);
         _afterApply?.Invoke();
     }
@@ -53,6 +58,7 @@ public sealed class ChangeRelationshipColumnPairsCommand : IUndoableCommand
     public void Undo()
     {
         _relationship.SetColumnPairs(_before);
+        _marks?.Restore();
         _afterApply?.Invoke();
     }
 }

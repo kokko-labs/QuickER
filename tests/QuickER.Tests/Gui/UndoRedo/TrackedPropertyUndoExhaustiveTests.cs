@@ -235,7 +235,14 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
         typeof(MainViewModel),
     ];
 
-    /// <summary>テスト用の図（親子 2 テーブル＋リレーション 1 本＋一意制約 1 本）と、その ViewModel</summary>
+    /// <summary>
+    /// テスト用の図（親子 2 テーブル＋リレーション 1 本＋一意制約 1 本に、子の表の手で外部キーの印を付けた列
+    /// Child.OtherId〔どの列ペアにもいない〕と、その列を子列にできる親 Other を加えたもの）と、その ViewModel
+    /// </summary>
+    /// <remarks>
+    /// 手で付けた印の列を初期図に置くのは、その列を子列にする操作（リレーションの作成・列ペアの変更）の Undo で
+    /// 印が消えないことを、全数の往復と同じ物差しで確かめるため（全テストがこの列を含む図で流れる）。
+    /// </remarks>
     private sealed class Fixture
     {
         public required MainViewModel Vm { get; init; }
@@ -243,6 +250,10 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
         public required EntityViewModel Parent { get; init; }
 
         public required EntityViewModel Child { get; init; }
+
+        public required EntityViewModel Other { get; init; }
+
+        public required ColumnViewModel ChildOtherId { get; init; }
 
         public required ColumnViewModel ParentName { get; init; }
 
@@ -293,9 +304,29 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
             DataType = "int",
             IsNullable = true,
         };
+        // 手で外部キーの印を付けた列（どの列ペアにもいない＝リレーションの管理下にない）
+        var childOtherId = new Column
+        {
+            Name = "OtherId",
+            DataType = "int",
+            IsNullable = true,
+            IsForeignKey = true,
+        };
         var child = new Entity { TableName = "Child" };
         child.Columns.Add(childId);
         child.Columns.Add(childParentId);
+        child.Columns.Add(childOtherId);
+
+        var other = new Entity { TableName = "Other" };
+        other.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
 
         var relationship = new Relationship
         {
@@ -329,7 +360,7 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
         );
         vm.DisableFileWatchingForTests();
         vm.ReplaceDiagramFromModule(
-            new ErDiagram { Entities = { parent, child }, Relationships = { relationship } }
+            new ErDiagram { Entities = { parent, child, other }, Relationships = { relationship } }
         );
 
         // 読み込み直後の状態を「保存済み」にして、未保存の判定を変更の有無だけで見られるようにする
@@ -338,12 +369,15 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
         vm.UndoRedo.CanUndo.Should().BeFalse("読み込み直後の履歴は空");
 
         var parentVm = vm.Entities.Single(e => e.TableName == "Parent");
+        var childVm = vm.Entities.Single(e => e.TableName == "Child");
 
         return new Fixture
         {
             Vm = vm,
             Parent = parentVm,
-            Child = vm.Entities.Single(e => e.TableName == "Child"),
+            Child = childVm,
+            Other = vm.Entities.Single(e => e.TableName == "Other"),
+            ChildOtherId = childVm.Columns.Single(c => c.Name == "OtherId"),
             ParentName = parentVm.Columns.Single(c => c.Name == "Name"),
             Relationship = vm.Relationships.Single(),
             Unique = parentVm.UniqueConstraints.Single(),
@@ -743,6 +777,131 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
 
                 afterUndo.Should().BeGreaterThan(afterToggle, "Undo のあとにルールを再適用する");
                 afterRedo.Should().BeGreaterThan(afterUndo, "Redo のあとにルールを再適用する");
+            }
+        );
+
+    /// <summary>
+    /// 手で外部キーの印を付けた列（Child.OtherId）を子列にする操作を実行し、Undo 1 回で印ごと図全体が元に戻ること、
+    /// Redo の後の印は控えた値でなくリレーションの列のルールが決めること（操作の直後と同じ）を確かめる
+    /// </summary>
+    /// <param name="fx">テスト用の図</param>
+    /// <param name="makeChild">OtherId を子列にする操作（履歴に 1 件積む）</param>
+    private static void AssertManualForeignKeyMarkSurvivesUndo(Fixture fx, Action makeChild)
+    {
+        var column = fx.ChildOtherId;
+        column.IsForeignKey.Should().BeTrue("手で外部キーの印を付けてある");
+        column.IsForeignKeyManagedByRelationship.Should().BeFalse("どの列ペアにもいない");
+        var before = Snapshot(fx.Vm);
+
+        makeChild();
+
+        fx.Vm.UndoRedo.CanUndo.Should().BeTrue("子列にする操作が履歴に積まれる");
+        var after = Snapshot(fx.Vm);
+        after.Should().NotBe(before);
+        var marksAfter = (column.IsForeignKey, column.IsForeignKeyManagedByRelationship);
+        marksAfter.Should().Be((true, true), "子列になった列の印はリレーションの管理になる");
+
+        fx.Vm.UndoCommand.Execute(null);
+
+        column.IsForeignKey.Should().BeTrue("Undo で手で付けた印へ戻る");
+        column.IsForeignKeyManagedByRelationship.Should().BeFalse("Undo で管理外へ戻る");
+        Snapshot(fx.Vm).Should().Be(before, "Undo 1 回で図全体が元に戻る");
+        fx.Vm.UndoRedo.CanUndo.Should().BeFalse("履歴は 1 件だけ");
+
+        fx.Vm.RedoCommand.Execute(null);
+
+        Snapshot(fx.Vm).Should().Be(after);
+        (column.IsForeignKey, column.IsForeignKeyManagedByRelationship)
+            .Should()
+            .Be(marksAfter, "Redo の後の印は控えた値でなくルールの再適用が決める");
+        fx.Vm.UndoRedo.CanRedo.Should().BeFalse();
+    }
+
+    [Fact(
+        DisplayName = "手で外部キーの印を付けた列を子列にするリレーションの作成（画面の操作）は、Undo 1 回で印ごと元に戻る"
+    )]
+    public void ManualForeignKeyMark_SurvivesUndoOfRelationshipCreation() =>
+        UndoKnownFailures.Run(
+            nameof(ManualForeignKeyMark_SurvivesUndoOfRelationshipCreation),
+            () =>
+            {
+                var fx = Build();
+
+                AssertManualForeignKeyMarkSurvivesUndo(
+                    fx,
+                    () =>
+                    {
+                        // Other の主キー Id は、名前の一致で Child.OtherId と組になる
+                        fx.Vm.StartAddOneToManyCommand.Execute(null);
+                        fx.Vm.OnEntityClicked(fx.Other);
+                        fx.Vm.OnEntityClicked(fx.Child);
+                        fx.Vm.Relationships.Should().HaveCount(2, "リレーションが作られる");
+                        fx.Vm.Relationships[1]
+                            .ColumnPairs.Should()
+                            .ContainSingle()
+                            .Which.TargetColumnId.Should()
+                            .Be(fx.ChildOtherId.Id, "子列は手で印を付けた列");
+                    }
+                );
+            }
+        );
+
+    [Fact(
+        DisplayName = "手で外部キーの印を付けた列を子列にするリレーションの作成（内蔵チャットのツール）は、Undo 1 回で印ごと元に戻る"
+    )]
+    public void ManualForeignKeyMark_SurvivesUndoOfToolRelationshipCreation() =>
+        UndoKnownFailures.Run(
+            nameof(ManualForeignKeyMark_SurvivesUndoOfToolRelationshipCreation),
+            () =>
+            {
+                var fx = Build();
+
+                AssertManualForeignKeyMarkSurvivesUndo(
+                    fx,
+                    () =>
+                        ErDiagramDynamicTools
+                            .Execute(
+                                "add_relationship",
+                                JsonSerializer.SerializeToElement(
+                                    new
+                                    {
+                                        source_table = "Other",
+                                        target_table = "Child",
+                                        relationship_type = "OneToMany",
+                                        source_columns = new[] { "Id" },
+                                        target_columns = new[] { "OtherId" },
+                                    }
+                                ),
+                                fx.Vm
+                            )
+                            .Success.Should()
+                            .BeTrue()
+                );
+            }
+        );
+
+    [Fact(
+        DisplayName = "手で外部キーの印を付けた列へ列ペアの子列を差し替える操作は、Undo 1 回で印ごと元に戻る"
+    )]
+    public void ManualForeignKeyMark_SurvivesUndoOfColumnPairChange() =>
+        UndoKnownFailures.Run(
+            nameof(ManualForeignKeyMark_SurvivesUndoOfColumnPairChange),
+            () =>
+            {
+                var fx = Build();
+
+                AssertManualForeignKeyMarkSurvivesUndo(
+                    fx,
+                    () =>
+                    {
+                        // 列ペアの行の子列を ParentId から OtherId へ選び直す（画面のコンボボックスの選択と同じ経路）
+                        fx.Relationship.ColumnPairRows[0].SelectedTargetColumn = fx.ChildOtherId;
+                        fx.Relationship.ColumnPairs.Should()
+                            .ContainSingle()
+                            .Which.TargetColumnId.Should()
+                            .Be(fx.ChildOtherId.Id);
+                    }
+                );
             }
         );
 

@@ -683,6 +683,9 @@
   <data name="TypeConversion_ConfirmTitle" xml:space="preserve">
     <value>Change Target Database</value>
   </data>
+  <data name="TypeConversion_DiagramChangedDuringConfirm" xml:space="preserve">
+    <value>The diagram changed while the confirmation was open, so the target DBMS was not switched. Select it again.</value>
+  </data>
   <data name="TypeConversion_ConfirmIntro" xml:space="preserve">
     <value>Switching the target database to {0} affects the items listed below.</value>
   </data>
@@ -860,6 +863,9 @@
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
   </data>
+  <data name="Import_DiagramChangedDuringConfirm" xml:space="preserve">
+    <value>The diagram changed while the confirmation was open, so nothing was imported: {0}. Import it again.</value>
+  </data>
   <data name="Import_BrokenQueriesWarning" xml:space="preserve">
     <value>The following named queries reference tables or columns that no longer exist and will be deleted:
 {0}</value>
@@ -1004,6 +1010,9 @@
   </data>
   <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
     <value>Column '{1}' of table '{0}' has no data type.</value>
+  </data>
+  <data name="TableDoc_ColumnMissingName" xml:space="preserve">
+    <value>Row {1} of table '{0}' has no column name, although other cells in the row have values.</value>
   </data>
   <data name="TableDoc_RelMissingTableName" xml:space="preserve">
     <value>Row {0} of the Relationship List sheet is missing a source or target table name.</value>

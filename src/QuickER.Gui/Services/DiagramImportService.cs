@@ -108,7 +108,14 @@ internal sealed class DiagramImportService(
             _ => Strings.Format_File,
         };
 
+        var revision = host.DiagramRevision;
+
         if (!ConfirmDiagramReplacement(string.Format(Strings.Import_ReplaceConfirm, displayName)))
+        {
+            return;
+        }
+
+        if (AbandonIfChangedDuringConfirm(revision, displayName))
         {
             return;
         }
@@ -140,6 +147,7 @@ internal sealed class DiagramImportService(
         string displayName
     )
     {
+        var revision = host.DiagramRevision;
         var current = host.BuildModel();
         var merged = DiagramMergeReconciler.Reconcile(
             current,
@@ -163,6 +171,11 @@ internal sealed class DiagramImportService(
             return;
         }
 
+        if (AbandonIfChangedDuringConfirm(revision, displayName))
+        {
+            return;
+        }
+
         // Excel 定義書は対象 DBMS を保持しているため方言も復元する（マージ置換内で採用）。
         // 宣言の無い定義書は方言が分からないので現在の図の方言を保つ。
         // 生存クエリのみを引き継ぐ（壊れクエリは確認のうえ削除済み）。
@@ -179,6 +192,30 @@ internal sealed class DiagramImportService(
             string.Format(Strings.Import_Completed, displayName),
             Strings.Common_Complete
         );
+    }
+
+    /// <summary>確認の間に図が変わっていたら取込を取りやめ、その旨をダイアログで知らせる</summary>
+    /// <remarks>
+    /// 確認の入れ子のメッセージループの中で外部変更の自動再読込や AI のツールの編集が走ると、確認の前の図から作った
+    /// マージ結果（または確認した内容）が今の図と食い違う。そのまま置き換えると、その間の変更を黙って捨てる
+    /// （自動再読込の後なら、次の上書き保存が外部の変更を消す）ので、何もせずに取りやめる
+    /// </remarks>
+    /// <param name="revision">確認の前に読んだ図の世代</param>
+    /// <param name="displayName">取込の形式名（知らせの文言に使う）</param>
+    /// <returns>取りやめた場合 true</returns>
+    private bool AbandonIfChangedDuringConfirm(long revision, string displayName)
+    {
+        if (host.DiagramRevision == revision)
+        {
+            return false;
+        }
+
+        dialogs.ShowInformation(
+            string.Format(Strings.Import_DiagramChangedDuringConfirm, displayName),
+            Strings.Common_Confirm
+        );
+
+        return true;
     }
 
     /// <summary>置換で失うものがある場合のみ確認ダイアログを表示する（Mermaid / DBML の丸ごと置換用）</summary>

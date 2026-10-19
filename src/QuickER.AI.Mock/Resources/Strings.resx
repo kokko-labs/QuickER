@@ -233,6 +233,9 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   <data name="Mock_SendFailedFormat" xml:space="preserve">
     <value>Failed to send: {0}</value>
   </data>
+  <data name="Mock_SourceSchemaSaveFailedFormat" xml:space="preserve">
+    <value>The ER diagram contents for the next resume could not be saved: {0}</value>
+  </data>
   <data name="Mock_HtmlFileFilter" xml:space="preserve">
     <value>HTML Files (*.html)|*.html</value>
   </data>

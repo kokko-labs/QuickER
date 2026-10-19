@@ -20,6 +20,9 @@ internal sealed class StubDiagramTransferHost : IDiagramTransferHost
     /// <summary>未保存変更の有無</summary>
     public bool IsDirty { get; set; }
 
+    /// <summary>図の内容の世代（テストから図の変化を模すため set 可能）</summary>
+    public long DiagramRevision { get; set; }
+
     /// <summary>図が空で失うものが無いか（既定 true＝無確認で通る側）</summary>
     public bool HasNothingToLose { get; set; } = true;
 
