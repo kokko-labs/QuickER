@@ -1036,6 +1036,9 @@
   <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
     <value>テーブル '{0}' のカラム '{1}' にデータ型がありません。</value>
   </data>
+  <data name="TableDoc_ColumnMissingName" xml:space="preserve">
+    <value>テーブル '{0}' の {1} 行目にカラム名がありません（同じ行のほかのセルには値があります）。</value>
+  </data>
   <data name="TableDoc_RelMissingTableName" xml:space="preserve">
     <value>リレーション一覧シートの {0} 行目に参照元または参照先テーブル名がありません。</value>
   </data>

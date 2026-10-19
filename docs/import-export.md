@@ -103,6 +103,8 @@ Count mismatches, duplicates, and references to undefined tables are import erro
 A relationship row counts as a duplicate only when another row has the same pair of tables **and the same columns**, so a diagram with more than one foreign key between the same two tables (a shipping address and a billing address both pointing at the same table, say) round-trips.
 A one-to-one or one-to-many row whose referencing and referenced column cells are both empty is a relationship without a column mapping (the export writes such rows), is never counted as a duplicate, and a row with only one of the two cells empty is an import error.
 A detail sheet with no column rows is a table without columns.
+On a detail sheet, the column rows end at the first row whose cells are all empty (the No. column is not counted).
+A row with an empty column name but a value in another cell is an import error that names the table and the row.
 
 The import has no size limit of its own: every worksheet other than the two role sheets is read as a table-detail sheet, and rows are scanned until the first blank one.
 It also runs on the UI thread, so a very large workbook leaves the window unresponsive until it finishes, with nothing to cancel it.

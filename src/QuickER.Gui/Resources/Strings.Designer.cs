@@ -2243,6 +2243,12 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("TableDoc_ColumnMissingDataType", resourceCulture);
             }
         }
+
+        public static string TableDoc_ColumnMissingName {
+            get {
+                return ResourceManager.GetString("TableDoc_ColumnMissingName", resourceCulture);
+            }
+        }
         
         public static string TableDoc_RelMissingTableName {
             get {

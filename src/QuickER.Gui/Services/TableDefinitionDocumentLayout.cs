@@ -41,6 +41,9 @@ internal static class TableDefinitionDocumentLayout
     /// <summary>詳細シートでカラム定義が始まる行</summary>
     public const int DetailColumnDataStartRow = 4;
 
+    /// <summary>詳細シートのカラムの表の列数（No.・カラム名・説明・データ型・必須・キー・参照先・備考）</summary>
+    public const int DetailColumnCount = 8;
+
     /// <summary>テーブル一覧シートを指す非表示の定義名</summary>
     public const string SummaryDefinedName = "QuickER_TableDoc_Summary";
 

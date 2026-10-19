@@ -1011,6 +1011,9 @@
   <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
     <value>Column '{1}' of table '{0}' has no data type.</value>
   </data>
+  <data name="TableDoc_ColumnMissingName" xml:space="preserve">
+    <value>Row {1} of table '{0}' has no column name, although other cells in the row have values.</value>
+  </data>
   <data name="TableDoc_RelMissingTableName" xml:space="preserve">
     <value>Row {0} of the Relationship List sheet is missing a source or target table name.</value>
   </data>
