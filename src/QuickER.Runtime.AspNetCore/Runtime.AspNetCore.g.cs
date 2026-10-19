@@ -44,7 +44,19 @@ public static class RemoteServerEngine
             context,
             async () =>
             {
-                var result = await handler().ConfigureAwait(false);
+                object? result;
+
+                // The wire does not carry the values of the excluded columns: a repository that writes every column on an
+                // update leaves them as they are stored while the request is served (see UnboundedBinaryColumns.EnterRemoteRequest)
+                using (UnboundedBinaryColumns.EnterRemoteRequest())
+                {
+                    result = await handler().ConfigureAwait(false);
+                }
+
+                // The entities a handler returns are reset in place: nothing in the request saves them again, and the
+                // repositories hand out entities no change tracker holds (EF Core reads through a context disposed before the
+                // read returns, the in-memory store returns copies)
+                UnboundedBinaryColumns.StripExcludedFromResult(result);
                 await context.Response.WriteAsJsonAsync(
                     result,
                     RemoteJson.Options,

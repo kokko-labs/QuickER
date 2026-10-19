@@ -35,6 +35,88 @@
     }
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
+    // Whether the current flow serves a request of the generated remote endpoints (see EnterRemoteRequest)
+    private static readonly System.Threading.AsyncLocal<bool> _inRemoteRequest = new();
+
+    /// <summary>Gets whether the current flow serves a request of the generated remote endpoints (see <see cref="EnterRemoteRequest"/>).</summary>
+    public static bool InRemoteRequest => _inRemoteRequest.Value;
+
+    /// <summary>Marks the current flow as serving a request of the generated remote endpoints until the result is disposed.</summary>
+    /// <remarks>
+    /// <para>
+    /// The remote wire never carries the values of the excluded columns: the server returns entities with them in the
+    /// "not-fetched" state, the client sends them that way on an update, and a blob travels through the binary endpoints
+    /// only. A repository that writes every column on an update (EF Core) reads this mark and leaves the excluded columns of
+    /// an updated row as they are stored, as the UPDATE of the QuickER repositories does; an insert still writes the values
+    /// that were sent.
+    /// </para>
+    /// <para>
+    /// The mark flows with the async call (<see cref="System.Threading.AsyncLocal{T}"/>), so a request served at the same time and the code
+    /// that started the request do not see it. Marks nest: disposing one brings back the state around it.
+    /// </para>
+    /// </remarks>
+    public static IDisposable EnterRemoteRequest()
+    {
+        var outer = _inRemoteRequest.Value;
+        _inRemoteRequest.Value = true;
+
+        return new RemoteRequestMark(outer);
+    }
+
+    /// <summary>
+    /// Resets the excluded columns of the entities in an endpoint's result to the "not-fetched" state: an entity or a sequence
+    /// of entities, with their cascade children. Any other result (a projection, a count, an envelope) is left alone.
+    /// </summary>
+    /// <param name="result">The result the endpoint is about to write.</param>
+    public static void StripExcludedFromResult(object? result)
+    {
+        switch (result)
+        {
+            case EntityBaseCore entity:
+                StripExcludedFromGraph(entity);
+                break;
+
+            case System.Collections.IEnumerable items when result is not string and not byte[]:
+                foreach (var item in items)
+                {
+                    if (item is EntityBaseCore element)
+                    {
+                        StripExcludedFromGraph(element);
+                    }
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>Resets the excluded columns of an entity and of its cascade children to the "not-fetched" state.</summary>
+    private static void StripExcludedFromGraph(EntityBaseCore entity)
+    {
+        StripExcluded(entity);
+
+        foreach (var child in entity.EnumerateCascadeChildren())
+        {
+            StripExcludedFromGraph(child);
+        }
+    }
+
+    /// <summary>Brings back the state around a mark when disposed (only once).</summary>
+    private sealed class RemoteRequestMark(bool outer) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _inRemoteRequest.Value = outer;
+        }
+    }
+
     /// <summary>Default buffer size for the chunked copy used by the streaming accessors (O(chunk); never loads the whole blob into memory).</summary>
     public const int StreamCopyBufferSize = 81920;
 

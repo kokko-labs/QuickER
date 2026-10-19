@@ -581,6 +581,9 @@ public class RuntimeTestMatrixTests
         new("BinaryColumnRemoteRuntimeTests", "BinaryColumn", Backend.Remote),
         new("BinaryTransferResponseRuntimeTests", "BinaryColumn", Backend.Remote),
         new("BinaryRemoteLengthRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("RemoteEfCoreUnboundedBinaryRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("RemoteEfCoreUnboundedBinarySqlServerRuntimeTests", "BinaryColumn", Backend.Remote),
+        new("RemoteRequestMarkRuntimeTests", "BinaryColumn", Backend.Remote),
         new("BinaryVoEditModelRuntimeTests", "BinaryColumnEditModel", Backend.AdoSqlite),
         // --- 一意性の事前チェック ---
         new("UniquenessCheckSqlServerRuntimeTests", "UniquenessCheck", Backend.AdoSqlServer),

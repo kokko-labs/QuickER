@@ -64,6 +64,7 @@ public static class ConcurrencyFixtureDefinition
             GenerateRemoteServices = true,
             RepositoryDialects = ["sqlserver"],
             SplitFilesByCategory = false,
+            ExcludeUnboundedBinaryColumns = true,
         };
 
     // 図の要素 ID は決定的でなければ再生成時に差分が出るため、固定 GUID を用いる。
@@ -71,6 +72,9 @@ public static class ConcurrencyFixtureDefinition
     private static readonly Guid GadgetPkColId = new("a1000000-0000-0000-0000-000000000002");
     private static readonly Guid GadgetNameColId = new("a1000000-0000-0000-0000-000000000003");
     private static readonly Guid GadgetRowVerColId = new("a1000000-0000-0000-0000-000000000004");
+    private static readonly Guid GadgetAttachmentColId = new(
+        "a1000000-0000-0000-0000-000000000005"
+    );
 
     private static readonly Guid NoteId = new("a2000000-0000-0000-0000-000000000001");
     private static readonly Guid NotePkColId = new("a2000000-0000-0000-0000-000000000002");
@@ -113,6 +117,15 @@ public static class ConcurrencyFixtureDefinition
                     Name = "row_ver",
                     DataType = "rowversion",
                     IsNullable = false,
+                },
+                // 除外する無制限バイナリ列＝EF Core のサーバーのリモートで、版の古い ForceOverwrite のやり直しの後も
+                // blob を書かないことを確かめる（RemoteEfCoreUnboundedBinarySqlServerRuntimeTests）
+                new Column
+                {
+                    Id = GadgetAttachmentColId,
+                    Name = "attachment",
+                    DataType = "varbinary(max)",
+                    IsNullable = true,
                 },
             },
         };

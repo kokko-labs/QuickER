@@ -1890,6 +1890,11 @@ The key behaviors are these.
 - It can be fetched by explicitly SELECTing it in **raw SQL** (see the operational example below).
 - **Not applied in EF Core mode** (queries via `DbSet` / `SaveChanges`), because column selection in EF Core is EF Core's responsibility.
   EF Core writes every column on save, so its raw SQL entity query requires the excluded columns instead of leaving them unread (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
+- **The remote services do not carry them as values**, whatever the repository behind the server reads.
+  The server returns entities with the excluded columns not fetched, and the client sends them that way on an update; a blob travels through the [binary transfer endpoints](#binary-transfer-endpoints-stream-accessors-for-unbounded-binary-columns) only.
+  An EF Core repository behind the server, which writes every column of an update on its own, leaves the excluded columns of an updated row as they are stored while it serves a remote request, so an update sent without them keeps the stored blobs.
+  An insert writes the values that were sent.
+  A named-query projection that references an excluded column still carries its value, because a projection is not an entity.
 - The in-memory repository (`GenerateInMemoryRepositories`) has parity with a real DB, that is, the same exclusion behavior.
 - **Bidirectional sync leaves them out too**, and copies them separately when asked to: see [Unbounded binary columns](#unbounded-binary-columns) under the sync support.
 

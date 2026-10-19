@@ -2317,6 +2317,7 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         {
             try
             {
+                KeepStoredUnboundedBinaries(context);
                 await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 return true;
             }
@@ -2397,6 +2398,40 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         entry.OriginalValues.SetValues(stored);
 
         return false;
+    }
+
+    /// <summary>
+    /// Within a request of the generated remote endpoints, leaves the excluded columns of every updated entry as they are
+    /// stored (see <see cref="UnboundedBinaryColumns.EnterRemoteRequest"/>); outside one, does nothing.
+    /// </summary>
+    /// <remarks>
+    /// The remote wire does not carry the values of the excluded columns, so an updated entity arrives with them in the
+    /// "not-fetched" state, and writing every column would wipe the stored blobs. The excluded columns are taken out of the
+    /// UPDATE by making their original value the current one and marking them unmodified. It runs before every SaveChanges,
+    /// because adopting the stored values on a last-write-wins retry makes the original values differ again, and the change
+    /// detection of the next SaveChanges would mark the columns modified. An inserted entry writes the values sent.
+    /// </remarks>
+    private static void KeepStoredUnboundedBinaries(DbContext context)
+    {
+        if (!UnboundedBinaryColumns.InRemoteRequest)
+        {
+            return;
+        }
+
+        foreach (var entry in context.ChangeTracker.Entries())
+        {
+            if (entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            foreach (var excluded in UnboundedBinaryColumns.For(entry.Entity.GetType()))
+            {
+                var property = entry.Property(excluded.Name);
+                property.OriginalValue = property.CurrentValue;
+                property.IsModified = false;
+            }
+        }
     }
 
     /// <summary>Whether the entry's entity type carries a concurrency token (a rowversion column).</summary>
@@ -2692,6 +2727,7 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
 
             try
             {
+                KeepStoredUnboundedBinaries(context);
                 rows = await context.SaveChangesAsync(
                     acceptAllChangesOnSuccess: false,
                     cancellationToken
@@ -3010,6 +3046,7 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         {
             try
             {
+                KeepStoredUnboundedBinaries(context);
                 return await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (DbUpdateConcurrencyException ex)

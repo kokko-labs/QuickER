@@ -473,6 +473,7 @@ public static class GeneratedFixedTypeNames
             "PlatformNotSupportedException",
             "PropertyChangedEventArgs",
             "PropertyChangedEventHandler",
+            "PropertyEntry",
             "PropertyInfo",
             "PropertyValues",
             "Query",
