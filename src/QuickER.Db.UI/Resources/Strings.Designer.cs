@@ -725,6 +725,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string Db_ImportDiagramChangedDuringConfirm {
+            get {
+                return ResourceManager.GetString("Db_ImportDiagramChangedDuringConfirm", resourceCulture);
+            }
+        }
+
         public static string Db_ImportBrokenQueriesWarning {
             get {
                 return ResourceManager.GetString("Db_ImportBrokenQueriesWarning", resourceCulture);

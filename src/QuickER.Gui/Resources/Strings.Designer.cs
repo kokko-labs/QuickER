@@ -1423,6 +1423,12 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string TypeConversion_DiagramChangedDuringConfirm {
+            get {
+                return ResourceManager.GetString("TypeConversion_DiagramChangedDuringConfirm", resourceCulture);
+            }
+        }
+
         public static string TypeConversion_ConfirmIntro {
             get {
                 return ResourceManager.GetString("TypeConversion_ConfirmIntro", resourceCulture);
@@ -1935,6 +1941,12 @@ namespace QuickER.Resources {
         public static string Import_ReplaceConfirm {
             get {
                 return ResourceManager.GetString("Import_ReplaceConfirm", resourceCulture);
+            }
+        }
+
+        public static string Import_DiagramChangedDuringConfirm {
+            get {
+                return ResourceManager.GetString("Import_DiagramChangedDuringConfirm", resourceCulture);
             }
         }
 

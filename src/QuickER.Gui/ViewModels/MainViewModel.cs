@@ -445,6 +445,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IReadOnlyList<QueryDefinition>? queries = null
     )
     {
+        // 図が丸ごと入れ替わる（履歴を消さない置き換えでも、確認の前後の比較が気付けるようにする）
+        _diagramRevision++;
+
         // ファイル由来のときだけクエリを復元し、それ以外の置換ではクエリを空にする
         // （旧図のクエリが新図に残ると列・エンティティの Guid 参照が壊れるため）
         Queries = queries?.ToList() ?? new List<QueryDefinition>();
@@ -2006,6 +2009,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // 計画を作る前の図の世代（確認の後で比べる）
+        var revision = DiagramRevision;
         var from = _currentProvider;
         var plan = DiagramTypeConverter.CreatePlan(
             ToDiagramModel(),
@@ -2062,6 +2067,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // キャンセル: 図には何も適用しない。暫定値を捨てて ComboBox の表示を現在方言へ戻す
             // （本メソッドはバインディングの外＝uiPost 経由で呼ばれるため同期発行でよい）
             ClearPendingProvider();
+            return;
+        }
+
+        // 確認の間に図が変わっていたら（確認の入れ子のメッセージループの中で走った外部変更の自動再読込・
+        // AI のツールの編集など）、確認の前の図から作った計画を当てずに取りやめる。当てると、置き換わった図では
+        // 方言だけが切り替わって列は古い方言の型のまま残り、編集された図では確認していない変換が適用される
+        if (DiagramRevision != revision)
+        {
+            ClearPendingProvider();
+            NotifyStatus(Strings.TypeConversion_DiagramChangedDuringConfirm);
             return;
         }
 

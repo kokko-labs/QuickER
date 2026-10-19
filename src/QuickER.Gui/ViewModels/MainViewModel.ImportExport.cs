@@ -598,11 +598,23 @@ public partial class MainViewModel : IDiagramTransferHost
         _fileWatcher.Stop();
     }
 
+    /// <summary>図の内容の世代の実体（<see cref="DiagramRevision"/>）</summary>
+    private long _diagramRevision;
+
+    /// <summary>図の内容の世代。変更の世代が進むたびと、図を丸ごと置き換えるたびに進む（値そのものに意味は無い）</summary>
+    /// <remarks>
+    /// 確認ダイアログの前後で比べ、確認の間に図が変わったか（入れ子のメッセージループの中で走った外部変更の
+    /// 自動再読込・AI のツールの編集など）を知るために使う。確認の前に読んだ図から作った結果を、変わった後の図へ
+    /// 当てると、その間の変更を黙って捨てる（対象 DBMS の切替・Excel 定義書・DB・C# コードの取込）
+    /// </remarks>
+    internal long DiagramRevision => _diagramRevision;
+
     /// <summary>Undo 世代が動いたらダーティ／タイトルを再評価する（コンストラクタで購読する）</summary>
     private void OnUndoRedoStateChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(UndoRedo.ChangeGeneration))
         {
+            _diagramRevision++;
             OnPropertyChanged(nameof(IsDirty));
             OnPropertyChanged(nameof(WindowTitle));
         }
@@ -856,6 +868,9 @@ public partial class MainViewModel : IDiagramTransferHost
 
     /// <inheritdoc />
     bool IDiagramTransferHost.IsDirty => IsDirty;
+
+    /// <inheritdoc />
+    long IDiagramTransferHost.DiagramRevision => DiagramRevision;
 
     /// <inheritdoc />
     bool IDiagramTransferHost.HasNothingToLose => HasNothingToLose;

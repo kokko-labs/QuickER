@@ -47,10 +47,17 @@ public sealed class StubDialogService : IDialogService
     public List<(string Message, string Details, string Title)> ErrorDetailsMessages { get; } =
         new();
 
+    /// <summary>
+    /// <see cref="Confirm"/> の記録の直後・応答を返す前に実行するフック（既定は無し）。
+    /// 本物のダイアログが回す入れ子のメッセージループの最中に起きる処理（外部変更の自動再読込など）を模すために使う。
+    /// </summary>
+    public Action? OnConfirm { get; set; }
+
     /// <summary>メッセージを記録し <see cref="ConfirmResult"/> を返す</summary>
     public bool Confirm(string message, string title)
     {
         ConfirmMessages.Add(message);
+        OnConfirm?.Invoke();
         return ConfirmResult;
     }
 
@@ -68,10 +75,17 @@ public sealed class StubDialogService : IDialogService
         return ConfirmResult;
     }
 
+    /// <summary>
+    /// <see cref="ConfirmWarningDetails"/> の記録の直後・応答を返す前に実行するフック（既定は無し）。
+    /// 本物のダイアログが回す入れ子のメッセージループの最中に起きる処理を模すために使う。
+    /// </summary>
+    public Action? OnConfirmWarningDetails { get; set; }
+
     /// <summary>(要約, 詳細, タイトル) を記録し <see cref="ConfirmResult"/> を返す</summary>
     public bool ConfirmWarningDetails(string message, string details, string title)
     {
         WarningConfirmDetailsMessages.Add((message, details, title));
+        OnConfirmWarningDetails?.Invoke();
         return ConfirmResult;
     }
 

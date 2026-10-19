@@ -273,6 +273,136 @@ public class DiagramImportServiceTests
         }
     }
 
+    [Fact(
+        DisplayName = "Excel のマージ取込: 確認の最中に図が変わったら、取り込まずに取りやめをダイアログで知らせる"
+    )]
+    public void ImportExcel_DiagramChangedDuringConfirm_IsAbandoned()
+    {
+        var dir = Directory
+            .CreateDirectory(
+                System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(),
+                    "quicker-import-" + Guid.NewGuid().ToString("N")
+                )
+            )
+            .FullName;
+
+        try
+        {
+            var current = new ErDiagram
+            {
+                TargetDbms = "sqlserver",
+                Entities =
+                [
+                    new Entity
+                    {
+                        TableName = "Customer",
+                        Columns =
+                        [
+                            new Column
+                            {
+                                Name = "CustomerId",
+                                DataType = "int",
+                                IsPrimaryKey = true,
+                                IsNullable = false,
+                            },
+                        ],
+                    },
+                ],
+            };
+
+            // 構造の違う定義書（列が 1 つ多い）＝置換の確認が出る
+            var exported = new ErDiagram
+            {
+                TargetDbms = "sqlserver",
+                Entities =
+                [
+                    new Entity
+                    {
+                        TableName = "Customer",
+                        Columns =
+                        [
+                            new Column
+                            {
+                                Name = "CustomerId",
+                                DataType = "int",
+                                IsPrimaryKey = true,
+                                IsNullable = false,
+                            },
+                            new Column { Name = "Name", DataType = "nvarchar(50)" },
+                        ],
+                    },
+                ],
+            };
+            var path = System.IO.Path.Combine(dir, "definition.xlsx");
+
+            using (
+                var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+                    exported,
+                    culture: new CultureInfo("en")
+                )
+            )
+            {
+                workbook.SaveAs(path);
+            }
+
+            var (service, host, dialogs) = Create(new FileDialogResult(path, 3));
+            host.Model = current;
+            host.HasNothingToLose = false;
+            dialogs.ConfirmResult = true;
+
+            // 確認の入れ子のメッセージループの中で、外部変更の自動再読込などが図を変えたことを模す
+            dialogs.OnConfirm = () => host.DiagramRevision++;
+
+            service.Import();
+
+            dialogs.ConfirmMessages.Should().ContainSingle("確認は出た");
+            host.MergedReplacements.Should().BeEmpty("確認の前の図から作ったマージ結果を当てない");
+            dialogs
+                .InformationMessages.Should()
+                .Equal(
+                    string.Format(
+                        Strings.Import_DiagramChangedDuringConfirm,
+                        Strings.Format_DefinitionDocument
+                    )
+                );
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact(
+        DisplayName = "丸ごと置換の取込: 確認の最中に図が変わったら、取り込まずに取りやめをダイアログで知らせる"
+    )]
+    public void ImportDbml_DiagramChangedDuringConfirm_IsAbandoned()
+    {
+        var (dir, path) = WriteMinimalDbml();
+
+        try
+        {
+            var (service, host, dialogs) = Create(new FileDialogResult(path, 2));
+            host.HasNothingToLose = false;
+            dialogs.ConfirmResult = true;
+            dialogs.OnConfirm = () => host.DiagramRevision++;
+
+            service.Import();
+
+            dialogs.ConfirmMessages.Should().ContainSingle("確認は出た");
+            host.WholesaleReplacements.Should().BeEmpty("確認した後に変わった図を置き換えない");
+            dialogs
+                .InformationMessages.Should()
+                .Equal(
+                    string.Format(Strings.Import_DiagramChangedDuringConfirm, Strings.Format_Dbml)
+                );
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "ファイル選択のキャンセルは何も取り込まない")]
     public void Import_DoesNothingWhenDialogCancelled()
     {

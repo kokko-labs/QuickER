@@ -110,6 +110,32 @@ public class DbImportCommandServiceTests
         host.LastReplacedDiagram.Should().BeNull();
     }
 
+    /// <summary>確認の最中に図が変わったら（外部変更の自動再読込など）、確認の前の図から作った結果を当てない</summary>
+    [Fact(
+        DisplayName = "置換確認の最中に図が変わったら、取り込まずに取りやめをダイアログで知らせる"
+    )]
+    public async Task RunAsync_DiagramChangedDuringConfirm_IsAbandoned()
+    {
+        var host = new StubErDiagramHost { DiagramToReturn = DiagramWith("Existing") };
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        dialogs.OnConfirm = () => host.DiagramRevisionToReturn++;
+        var provider = new FakeImportProvider(ImportedEntities("Imported"));
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        dialogs.ConfirmMessages.Should().ContainSingle("確認は出た");
+        host.LastReplacedDiagram.Should().BeNull("確認の前の図から作ったマージ結果を当てない");
+        dialogs.InformationMessages.Should().Equal(DbStrings.Db_ImportDiagramChangedDuringConfirm);
+        dialogs.ErrorMessages.Should().BeEmpty();
+    }
+
     /// <summary>ホストに未保存変更があるときの置換確認は、警告水準（ConfirmWarning）で表示される</summary>
     [Fact(DisplayName = "ダーティ時の置換確認は警告水準（Warning）になる")]
     public async Task RunAsync_DirtyHost_UsesWarningConfirmation()

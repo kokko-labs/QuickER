@@ -74,6 +74,7 @@ public sealed class DbImportCommandService
             // Guid 引継マージ: 取込結果の Id を現在図の Guid へ寄せ、クエリ定義・レイアウトを温存できるようにする。
             // DB には Memo に対応する情報がないため、一致エンティティの Memo は現在図の値を温存する。
             // 署名比較は「マージ後」に行う（新規 Guid のままだとリレーションのある図で署名が常に不一致になるため）。
+            var revision = _host.DiagramRevision;
             var current = _host.GetDiagram();
             var merged = DiagramMergeReconciler.Reconcile(
                 current,
@@ -85,6 +86,18 @@ public sealed class DbImportCommandService
             // 構造差分がある場合のみ置換確認を行う（壊れクエリがあれば削除対象名を確認メッセージへ付加する）
             if (!ConfirmDiagramReplacement(current, merged, Strings.Db_ImportReplaceConfirm))
             {
+                return;
+            }
+
+            // 確認の間に図が変わっていたら（確認の入れ子のメッセージループの中で走った外部変更の自動再読込・
+            // AI のツールの編集など）、確認の前の図から作ったマージ結果を当てずに取りやめる（当てるとその間の変更を捨てる）
+            if (_host.DiagramRevision != revision)
+            {
+                _dialogs.ShowInformation(
+                    Strings.Db_ImportDiagramChangedDuringConfirm,
+                    Strings.Common_Confirm
+                );
+
                 return;
             }
 

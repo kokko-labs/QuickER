@@ -404,6 +404,9 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the retrieved result. Are you sure?</value>
   </data>
+  <data name="Db_ImportDiagramChangedDuringConfirm" xml:space="preserve">
+    <value>The diagram changed while the confirmation was open, so the database schema was not imported. Import it again.</value>
+  </data>
   <data name="Db_ImportBrokenQueriesWarning" xml:space="preserve">
     <value>The following named queries reference tables or columns that no longer exist and will be deleted:
 {0}</value>

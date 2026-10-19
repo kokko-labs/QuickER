@@ -64,6 +64,9 @@ internal interface IDiagramTransferHost
     /// <summary>未保存の変更があるか（置換確認の警告水準の選択に使う）</summary>
     bool IsDirty { get; }
 
+    /// <summary>図の内容の世代（図を変える操作のたびに値が変わる＝確認の間に図が変わったかを知るために使う）</summary>
+    long DiagramRevision { get; }
+
     /// <summary>図が空で失うものが何も無いか（置換を無確認で通す条件）</summary>
     bool HasNothingToLose { get; }
 
