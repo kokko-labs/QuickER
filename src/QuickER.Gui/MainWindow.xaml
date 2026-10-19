@@ -2267,11 +2267,21 @@
                     CanUserSortColumns="False"
                     CanUserResizeRows="False"
                     CanUserAddRows="False"
+                    CanUserDeleteRows="False"
                     VerticalAlignment="Stretch"
                     beh:DataGridRowReorderBehavior.IsEnabled="True"
                     beh:DataGridRowReorderBehavior.UndoRedoManager="{Binding UndoRedo}"
                   >
+                    <!-- 行の追加・削除は DataGrid の既定（正本のコレクションを直接書き換える＝履歴に残らない）を切り、コマンドを通す。
+                         Delete は行の削除ボタンと同じ列の削除のコマンドへ結ぶ（Undo でき、その列を含む一意制約も外れる）。
+                         列を選んでいなければ何もしない（窓全体の Delete＝テーブルの削除へは倒れない）。
+                         セルの編集中の Delete は入力欄が先に処理するので、ここへは届かない -->
                     <DataGrid.InputBindings>
+                      <KeyBinding
+                        Key="Delete"
+                        Command="{Binding RemoveColumnCommand}"
+                        CommandParameter="{Binding SelectedColumn}"
+                      />
                       <KeyBinding
                         Key="C"
                         Modifiers="Control"
