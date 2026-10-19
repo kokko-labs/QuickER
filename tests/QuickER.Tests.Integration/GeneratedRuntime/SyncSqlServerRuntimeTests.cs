@@ -790,4 +790,185 @@ public sealed class SyncSqlServerRuntimeTests(
             );
         (await LocalLines().GetByIdAsync(21, Ct)).Should().BeNull();
     }
+
+    /// <summary>サーバー側（SQL Server）のマーカーリポジトリ</summary>
+    private ISyncMarkerRepository ServerMarkers() =>
+        _provider.GetRequiredKeyedService<ISyncMarkerRepository>(ServerKey);
+
+    /// <summary>ローカル側（SQLite）のマーカーリポジトリ＝ジャーナル記録デコレータが被さっている</summary>
+    private ISyncMarkerRepository LocalMarkers() =>
+        _provider.GetRequiredKeyedService<ISyncMarkerRepository>(LocalKey);
+
+    /// <summary>
+    /// サーバーに NULL の値の行があるとき、ローカルで作った 2 行目の NULL の行は、Collect・LocalWins では
+    /// UniqueValueTakenOnServer として報告されて記録が残り、ServerWins では決着する（どのポリシー・モードでも止まらない）。
+    /// </summary>
+    /// <remarks>
+    /// SQL Server の UNIQUE 制約は NULL を値として比べ、同じ組の 2 行目の NULL を断る（エラー 2627）。サーバーの事前チェック
+    /// （QuickER 版 Repository の <c>CheckUniquenessAsync</c>）が NULL を照合から外していると、エンジンは断られた書き込みの
+    /// 理由を見つけられずに元の例外を投げ直し、同期が毎回止まる。単一列の制約と、NULL を含む複合の制約の両方で確かめる。
+    /// </remarks>
+    [Theory(
+        DisplayName = "[Sync/SqlServer] NULL の一意な値がサーバーで埋まっていると、どのポリシーとモードでも同期は止まらない"
+    )]
+    [InlineData(SyncConflictPolicy.Collect, SyncMode.Versioned, false)]
+    [InlineData(SyncConflictPolicy.LocalWins, SyncMode.Versioned, false)]
+    [InlineData(SyncConflictPolicy.ServerWins, SyncMode.Versioned, false)]
+    [InlineData(SyncConflictPolicy.Collect, SyncMode.LastWriteWins, false)]
+    [InlineData(SyncConflictPolicy.LocalWins, SyncMode.LastWriteWins, false)]
+    [InlineData(SyncConflictPolicy.ServerWins, SyncMode.LastWriteWins, false)]
+    [InlineData(SyncConflictPolicy.Collect, SyncMode.Versioned, true)]
+    [InlineData(SyncConflictPolicy.ServerWins, SyncMode.LastWriteWins, true)]
+    public async Task NullUniqueValueTakenOnServer_IsReportedOrSettled(
+        SyncConflictPolicy policy,
+        SyncMode mode,
+        bool composite
+    )
+    {
+        await ServerMarkers().InsertAsync(NewMarker(1, composite), Ct);
+        var options = new SyncOptions { ConflictPolicy = policy, Mode = mode };
+        await Engine().SyncAsync(options, Ct);
+        await LocalMarkers().InsertAsync(NewMarker(2, composite), Ct);
+
+        var result = await Engine().SyncAsync(options, Ct);
+
+        if (policy == SyncConflictPolicy.ServerWins)
+        {
+            result.Conflicts.Should().BeEmpty();
+            (await Journal().CountPendingAsync(Ct)).Should().Be(0);
+            (await LocalMarkers().GetAllAsync(Ct))
+                .Select(marker => marker.MarkerId)
+                .Should()
+                .Equal(1);
+        }
+        else
+        {
+            result
+                .Conflicts.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Match<SyncConflict>(conflict =>
+                    conflict.TableName == "sync_markers"
+                    && conflict.KeyText == "2"
+                    && conflict.Reason == SyncConflictReason.UniqueValueTakenOnServer
+                );
+            (await Journal().ReadAllAsync(Ct))
+                .Should()
+                .ContainSingle(entry => entry.KeyText == "2");
+            (await LocalMarkers().GetByIdAsync(2, Ct)).Should().NotBeNull();
+        }
+
+        (await ServerMarkers().GetAllAsync(Ct)).Select(marker => marker.MarkerId).Should().Equal(1);
+    }
+
+    /// <summary>
+    /// SQL Server の QuickER 版 Repository の事前チェックは、UNIQUE 制約と同じく NULL を値として比べる
+    /// （単一列の NULL・複合の制約の NULL を含む組・全部が NULL の組は重複、NULL 以外の値が違えば重複ではない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/SqlServer] SQL Server の CheckUniquenessAsync は NULL を値として比べる（単一列・複合）"
+    )]
+    public async Task ServerCheckUniqueness_ComparesNullsAsValues()
+    {
+        await ServerMarkers()
+            .InsertAsync(
+                new SyncMarkerEntity
+                {
+                    MarkerId = 1,
+                    GroupName = null,
+                    Slot = 1,
+                },
+                Ct
+            );
+        await ServerMarkers()
+            .InsertAsync(
+                new SyncMarkerEntity
+                {
+                    MarkerId = 2,
+                    Code = "a",
+                    GroupName = "g",
+                },
+                Ct
+            );
+
+        async Task<string[]> Check(SyncMarkerEntity marker) =>
+            (await ServerMarkers().CheckUniquenessAsync(marker, Ct))
+                .Select(violation => violation.ConstraintName)
+                .ToArray();
+
+        // 行 1 の code は NULL＝NULL の code は重複・(NULL, 1) も重複
+        (
+            await Check(
+                new SyncMarkerEntity
+                {
+                    MarkerId = 9,
+                    Code = null,
+                    GroupName = "x",
+                    Slot = 9,
+                }
+            )
+        )
+            .Should()
+            .Equal("UQ_sync_markers_code");
+        (
+            await Check(
+                new SyncMarkerEntity
+                {
+                    MarkerId = 9,
+                    Code = "b",
+                    GroupName = null,
+                    Slot = 1,
+                }
+            )
+        ).Should().Equal("UQ_sync_markers_group_name_slot");
+
+        // 行 2 の (g, NULL)＝NULL を含む組でも NULL 以外の列が一致すれば重複・違えば重複ではない
+        (
+            await Check(
+                new SyncMarkerEntity
+                {
+                    MarkerId = 9,
+                    Code = "b",
+                    GroupName = "g",
+                    Slot = null,
+                }
+            )
+        )
+            .Should()
+            .Equal("UQ_sync_markers_group_name_slot");
+        (
+            await Check(
+                new SyncMarkerEntity
+                {
+                    MarkerId = 9,
+                    Code = "b",
+                    GroupName = null,
+                    Slot = 2,
+                }
+            )
+        ).Should().BeEmpty();
+
+        // 自分自身は除外する（行 1 を同じ値で確かめても重複にならない）
+        (await Check((await ServerMarkers().GetByIdAsync(1, Ct))!))
+            .Should()
+            .BeEmpty();
+    }
+
+    /// <summary>マーカーを組み立てる（composite なら複合の制約だけがぶつかる値、そうでなければ code だけが NULL でぶつかる値）</summary>
+    private static SyncMarkerEntity NewMarker(int id, bool composite) =>
+        composite
+            ? new SyncMarkerEntity
+            {
+                MarkerId = id,
+                Code = $"c{id}",
+                GroupName = null,
+                Slot = 1,
+            }
+            : new SyncMarkerEntity
+            {
+                MarkerId = id,
+                Code = null,
+                GroupName = $"g{id}",
+                Slot = id,
+            };
 }

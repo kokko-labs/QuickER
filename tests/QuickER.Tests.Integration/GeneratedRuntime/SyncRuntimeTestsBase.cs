@@ -70,6 +70,12 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// <summary>サーバー役のメモ（版なしテーブル）リポジトリ（版採番なし＝素のリポジトリそのまま）</summary>
     protected ISyncNoteRepository ServerNotes { get; private set; } = null!;
 
+    /// <summary>
+    /// サーバー役のマーカー（素のリポジトリ）。この基底のエンジンは注文・明細・メモの 3 表だけで組むので、マーカーは
+    /// HTTP の同期エンドポイントが全表の差分ソースを求める分を満たすためだけにある
+    /// </summary>
+    protected ISyncMarkerRepository ServerMarkers { get; private set; } = null!;
+
     /// <summary>ローカルの素の注文リポジトリ（ジャーナル記録を通らない観測用）</summary>
     protected ISyncOrderRepository LocalOrdersRaw { get; private set; } = null!;
 
@@ -154,6 +160,7 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
 
         // 版なしテーブルのサーバー役は素のリポジトリ（版の採番も版ガードも存在しないのが本物の意味論）
         ServerNotes = new SyncNoteRepository(serverFactory);
+        ServerMarkers = new SyncMarkerRepository(serverFactory);
 
         LocalOrdersRaw = new SyncOrderRepository(localFactory);
         LocalLinesRaw = new SyncOrderLineRepository(localFactory);
@@ -227,6 +234,10 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     /// <summary>サーバー役のメモ（版なしテーブル）差分ソース（SQLite 版）を組み立てる</summary>
     protected ISyncServerSource<SyncNoteEntity, int> CreateNoteTestSource() =>
         SyncTestServerSources.CreateNotes(ServerSql, ServerNotes);
+
+    /// <summary>サーバー役のマーカーの差分ソース（SQLite 版。HTTP のサーバー側登録を満たすためだけに使う）</summary>
+    protected ISyncServerSource<SyncMarkerEntity, int> CreateMarkerTestSource() =>
+        SyncTestServerSources.CreateMarkers(ServerSql, ServerMarkers);
 
     /// <summary>
     /// 注文の差分ソースだけを差し替えた同期エンジンを組み立てる（他の部品は本体の <see cref="Engine"/> と同じ）。

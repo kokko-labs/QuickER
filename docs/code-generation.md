@@ -798,7 +798,12 @@ Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
 For each UNIQUE constraint of the table it asks whether a row with the same value tuple already exists, excluding rows that share this entity's primary key.
 Because the same-key row is excluded, the same call is correct both before an insert and before an update.
 When the primary key can be null (a value object or `string` key) and has not been assigned yet, which is the normal state of a new row, the exclusion is left out entirely and the check really does search every row.
-Constraint member values that contain a `null` are skipped, since NULL collision semantics differ per dialect.
+A value tuple that contains a `null` is checked by the rule of the store's UNIQUE constraint.
+The QuickER Repository for SQL Server compares NULL as a value, as a SQL Server UNIQUE constraint does: a row that holds NULL in the same members, with the other members equal, is reported as a duplicate, and so is a row whose members are all NULL like this entity's.
+The QuickER Repository for SQLite, EF Core and the in-memory store skip such a tuple, since SQLite and most other databases accept any number of rows holding NULL.
+EF Core skips it on SQL Server too, so with EF Core the check does not report a second NULL that SQL Server refuses.
+A diagram that declares a UNIQUE constraint the database implements as a filtered unique index (`WHERE col IS NOT NULL`), which accepts any number of NULLs, makes the QuickER Repository for SQL Server report a second NULL that the database would accept.
+Import does not produce that diagram, since it reads only true UNIQUE constraints.
 
 > **Note**: the result is advisory. The definitive guarantee is the database's own UNIQUE constraint: a concurrent insert between the check and the save can still make the save fail (TOCTOU). Use the check to give a friendly message, and keep handling the save exception.
 
@@ -988,7 +993,7 @@ They are worth knowing when a test passes in memory and fails against the real t
   A direct insert, update or bulk insert, and a graph save, are rejected when they would leave two rows holding the same values on a constraint the diagram declares.
   The rules are `CheckUniquenessAsync`'s: a value tuple containing a `null` is not compared, and the row being written is excluded by its primary key.
   Skipping null tuples follows the ANSI semantics most dialects use, where SQLite, PostgreSQL and others accept any number of NULL rows.
-  A SQL Server UNIQUE constraint instead treats NULLs as equal and allows only one NULL row, and the in-memory store does not reproduce that SQL Server behavior.
+  A SQL Server UNIQUE constraint instead treats NULLs as equal and allows only one NULL row, and the in-memory store does not reproduce that SQL Server behavior (the QuickER Repository for SQL Server checks by that rule, see [Uniqueness pre-check](#uniqueness-pre-check-checkuniquenessasync)).
   A bulk insert is validated in full before any of it is applied, and a graph save is judged by the state it would leave behind, so it can free a value on one row and take it on another within the same save, and a violation drops the save whole.
   The violation is an `InvalidOperationException`, as a duplicate primary key is, whereas a real database raises its provider's own exception (`SqlException` with error 2627, for one), so a test that branches on the exception type is not backed by the database.
   The user-defined checks added through `CollectCustomUniquenessChecks` are not enforced, being rules of the application rather than constraints the database holds, and neither is seeding through `InMemoryDataStore.Put` / `InMemorySampleData.Seed`.
@@ -2490,7 +2495,7 @@ A failure they do not explain, such as a dropped connection, is thrown as it was
 |---|---|---|
 | `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` reports it too, rather than bringing the parent back, and so does last-write-wins under any other policy | Run with `ServerWins` (in either mode), point the row at another parent, or edit the parent locally so it has a change of its own |
 | `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins` (in either mode), which brings the row back together with what now points at it |
-| `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. `LocalWins` reports it too, rather than taking the value from the other row. It is not tried again within the run, since no other write of the table frees the value | Change the value, or run with `ServerWins` (in either mode) |
+| `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. On a SQL Server server a NULL counts as a value, so a second row holding NULL in the same unique members is reported this way too (see [Uniqueness pre-check](#uniqueness-pre-check-checkuniquenessasync)). `LocalWins` reports it too, rather than taking the value from the other row. It is not tried again within the run, since no other write of the table frees the value | Change the value, or run with `ServerWins` (in either mode) |
 
 **`ServerWins` reads the rows back rather than leaving them to the download.**
 The download carries a row only when its version has moved since it was last mirrored, so a local edit to a row nobody else has touched would otherwise outlive the run that was told to discard it, and with its journal entry gone, no later run would correct it.

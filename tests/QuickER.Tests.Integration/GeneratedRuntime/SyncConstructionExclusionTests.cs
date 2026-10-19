@@ -83,7 +83,7 @@ public sealed class SyncConstructionExclusionTests : IDisposable
             .ServiceProvider.GetServices<ISyncTable>()
             .Select(table => table.TableName)
             .Should()
-            .BeEquivalentTo(["sync_orders", "sync_order_lines"]);
+            .BeEquivalentTo(["sync_orders", "sync_order_lines", "sync_markers"]);
     }
 
     /// <summary>実際に書き込んでも除外テーブルの書き込みはジャーナルへ記録されない</summary>
@@ -147,6 +147,7 @@ public sealed class SyncConstructionExclusionTests : IDisposable
                     typeof(SyncOrderEntity),
                     typeof(SyncOrderLineEntity),
                     typeof(SyncNoteEntity),
+                    typeof(SyncMarkerEntity),
                 ]
             );
 

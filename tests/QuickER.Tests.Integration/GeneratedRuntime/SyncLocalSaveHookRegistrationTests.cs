@@ -66,6 +66,12 @@ public sealed class SyncLocalSaveHookRegistrationTests : IDisposable
                 provider.GetRequiredKeyedService<ISyncOrderLineRepository>(ServerKey)
             )
         );
+        services.AddScoped(provider =>
+            SyncTestServerSources.CreateMarkers(
+                provider.GetRequiredKeyedService<ISqlExecutor>(ServerKey),
+                provider.GetRequiredKeyedService<ISyncMarkerRepository>(ServerKey)
+            )
+        );
         await using var provider = services.BuildServiceProvider();
 
         await using (var seed = provider.CreateAsyncScope())

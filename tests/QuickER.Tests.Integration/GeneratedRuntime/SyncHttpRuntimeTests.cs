@@ -44,6 +44,7 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
         var serverOrderSource = CreateOrderTestSource();
         var serverLineSource = CreateLineTestSource();
         var serverNoteSource = CreateNoteTestSource();
+        var serverMarkerSource = CreateMarkerTestSource();
 
         _remoteServer = await InProcessRemoteServer.StartAsync(
             services =>
@@ -54,6 +55,7 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
                     serverLineSource
                 );
                 services.AddSingleton<ISyncServerSource<SyncNoteEntity, int>>(serverNoteSource);
+                services.AddSingleton<ISyncServerSource<SyncMarkerEntity, int>>(serverMarkerSource);
 
                 // アップロード（既存の CRUD／保存エンドポイント）が使う面。版採番ラッパーを噛ませる
                 // （版なしのメモは採番なし＝素のリポジトリへ委譲するだけのアダプタ）

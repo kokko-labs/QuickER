@@ -222,4 +222,30 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
             .Should()
             .Be(1, "解決していないエントリはジャーナルに残る");
     }
+
+    /// <summary>
+    /// サーバーに NULL の値の行があるとき、ローカルで作った 2 行目の NULL の行は、HTTP 越しでも UniqueValueTakenOnServer として
+    /// 報告されて記録が残り、同期は止まらない（サーバーの事前チェックのエンドポイントが SQL Server の規則で答える）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/SqlServer/HTTP] NULL の一意な値がサーバーで埋まっていると、HTTP 越しでも報告されて止まらない"
+    )]
+    public async Task NullUniqueValueTakenOnServer_IsReportedOverHttp()
+    {
+        var serverMarkers = _serverSideProvider.GetRequiredService<ISyncMarkerRepository>();
+        var localMarkers = _clientProvider.GetRequiredKeyedService<ISyncMarkerRepository>(LocalKey);
+        await serverMarkers.InsertAsync(new SyncMarkerEntity { MarkerId = 1, Code = null }, Ct);
+        await Engine.SyncAsync(cancellationToken: Ct);
+        await localMarkers.InsertAsync(new SyncMarkerEntity { MarkerId = 2, Code = null }, Ct);
+
+        var result = await Engine.SyncAsync(cancellationToken: Ct);
+
+        result
+            .Conflicts.Should()
+            .ContainSingle()
+            .Which.Reason.Should()
+            .Be(SyncConflictReason.UniqueValueTakenOnServer);
+        (await Journal.ReadAllAsync(Ct)).Should().ContainSingle(entry => entry.KeyText == "2");
+        (await serverMarkers.GetAllAsync(Ct)).Select(marker => marker.MarkerId).Should().Equal(1);
+    }
 }

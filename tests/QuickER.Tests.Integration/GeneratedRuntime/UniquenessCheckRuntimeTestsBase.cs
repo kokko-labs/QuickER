@@ -33,7 +33,7 @@ public sealed record UniquenessViolationRow(
 /// <list type="bullet">
 ///   <item>重複あり→違反（制約名・構成列・メッセージ）</item>
 ///   <item>自分自身（同一主キーの行）は除外</item>
-///   <item>NULL を含む組はスキップ</item>
+///   <item>NULL を含む組は既定でスキップ（SQL Server の QuickER 版 Repository は UNIQUE 制約と同じく NULL を値として比べる＝派生が期待を上書きする）</item>
 ///   <item>複合制約は全列一致のときだけ違反・名前は合成名</item>
 ///   <item>複数制約の同時違反は宣言順</item>
 ///   <item>ユーザー定義フック（テスト側の partial 実装）の違反が生成分の後ろへ合流</item>
@@ -125,17 +125,24 @@ public abstract class UniquenessCheckRuntimeTestsBase<TOrder>
         (await CheckUniquenessAsync(loaded!)).Should().BeEmpty();
     }
 
-    /// <summary>3. 構成列の値に null を含む組は判定対象外（既存の NULL 行があっても違反にならない）</summary>
-    [Fact(DisplayName = "[Uniqueness] 3: NULL を含む組は判定対象外になる")]
-    public async Task NullMember_IsSkipped()
+    /// <summary>3. 構成列の値に null を含む組は、実装先の DB の UNIQUE 制約の規則で判定される</summary>
+    [Fact(DisplayName = "[Uniqueness] 3: NULL を含む組は実装先の UNIQUE 制約の規則で判定される")]
+    public async Task NullMember_FollowsTheStoreRule()
     {
         await ResetAndSeedAsync();
 
-        // 注文 11 は memo が NULL。memo が NULL の新規エンティティは単一列制約の対象外
-        (await CheckUniquenessAsync(NewOrder(99, 2, 12m, memo: null)))
-            .Should()
-            .BeEmpty();
+        // 注文 11 は memo が NULL。memo が NULL の新規エンティティを確かめる
+        AssertNullMemberOutcome(await CheckUniquenessAsync(NewOrder(99, 2, 12m, memo: null)));
     }
+
+    /// <summary>
+    /// 既存の NULL 行と同じ NULL の値を持つエンティティの結果を表明する（既定は判定対象外＝違反なし。NULL を値として
+    /// 比べる実装先の派生が上書きする）
+    /// </summary>
+    /// <param name="violations">memo が NULL の新規エンティティの違反</param>
+    protected virtual void AssertNullMemberOutcome(
+        IReadOnlyList<UniquenessViolationRow> violations
+    ) => violations.Should().BeEmpty("NULL を含む組は判定対象外");
 
     // ── 4〜5. 複合制約 ──
 
