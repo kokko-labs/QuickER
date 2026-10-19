@@ -269,6 +269,9 @@ internal sealed class CSharpEfCoreEntityConfigModel
     /// <summary>スカラープロパティの構成一覧</summary>
     public required IReadOnlyList<CSharpEfCorePropertyConfigModel> Properties { get; init; }
 
+    /// <summary>一意制約ごとの一意インデックス（HasIndex(...).IsUnique() 用。構成列のプロパティ名・制約の列の並び）</summary>
+    public required IReadOnlyList<IReadOnlyList<string>> UniqueIndexes { get; init; }
+
     /// <summary>このエンティティが principal（親）となるリレーションの構成一覧（HasOne/WithMany 等）</summary>
     public required IReadOnlyList<CSharpEfCoreRelationshipConfigModel> Relationships { get; init; }
 }

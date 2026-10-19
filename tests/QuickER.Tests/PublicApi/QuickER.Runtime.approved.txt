@@ -223,8 +223,10 @@ public static class QuickER.Runtime.GeneratedDisplayNames
     public static System.Func<string, string, string> Resolve { get; set; }
 
 public sealed class QuickER.Runtime.GraphSaveOrder
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> Deletions { get; }
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> HeldBack { get; }
-    public bool TryHoldBack(QuickER.Runtime.EntityBaseCore entity)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> StartingPoints { get; }
+    public bool Defers(QuickER.Runtime.EntityBaseCore entity)
     public static QuickER.Runtime.GraphSaveOrder For(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascadeSave, bool cascadeDelete)
 
 public abstract class QuickER.Runtime.HttpRemoteRepositoryCore<TEntity, TKey> : QuickER.Runtime.IRemoteRepositoryCore<TEntity, TKey>

@@ -64,7 +64,9 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             "mars-deleted-then-missing",
             "no-mars-added-then-missing",
             "attempt-limit-then-row-gone-update",
-            "attempt-limit-then-row-gone-graph-save"
+            "attempt-limit-then-row-gone-graph-save",
+            "move-stale-note-and-delete-old-gadget",
+            "move-stale-note-and-delete-old-gadget-no-hooks"
         );
 
     [Theory(
@@ -304,6 +306,14 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
                 efCore,
                 graphSave: true
             ),
+            "move-stale-note-and-delete-old-gadget" => await MoveStaleNoteAsync(
+                efCore,
+                withHooks: true
+            ),
+            "move-stale-note-and-delete-old-gadget-no-hooks" => await MoveStaleNoteAsync(
+                efCore,
+                withHooks: false
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(name)),
         };
     }
@@ -431,6 +441,70 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             );
 
         return [outcome, .. await StateAsync()];
+    }
+
+    /// <summary>
+    /// 区切り 43（判断 D・E）：メモ 10 を gadget 1 から 2 へ付け替え、gadget 1 を消す（gadget → メモは CASCADE）。メモは読んだ後に
+    /// 他者が更新したので版が古く、ForceOverwrite の保存は EF Core では 1 回当たらずにやり直す。やり直しの後も付け替えを
+    /// 削除より先に書く（QuickER 版は版を照合せず後勝ちで書く）
+    /// </summary>
+    private async Task<IReadOnlyList<string>> MoveStaleNoteAsync(bool efCore, bool withHooks)
+    {
+        await using var provider = Build(efCore, withHooks: withHooks);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+        var notes = provider.GetRequiredService<IGadgetNoteRepository>();
+        await gadgets.InsertAsync(NewGadget(1, "g1"), Ct);
+        await gadgets.InsertAsync(NewGadget(2, "g2"), Ct);
+        await notes.InsertAsync(
+            new GadgetNoteEntity
+            {
+                NoteId = NoteIdValue.Create(10),
+                GadgetId = GadgetIdValue.Create(1),
+                Note = NoteValue.Create("n"),
+            },
+            Ct
+        );
+
+        var oldParent = (await gadgets.GetByIdAsync(GadgetIdValue.Create(1), Ct))!;
+        var newParent = (await gadgets.GetByIdAsync(GadgetIdValue.Create(2), Ct))!;
+        var note = (await notes.GetByIdAsync(NoteIdValue.Create(10), Ct))!;
+        await _fixture.ExecuteAsync(
+            "UPDATE gadget_notes SET note = N'other' WHERE note_id = 10",
+            Ct
+        );
+
+        note.GadgetId = GadgetIdValue.Create(2);
+        note.Note = NoteValue.Create("moved");
+        note.MarkUpdated();
+        newParent.GadgetNotes.Add(note);
+        oldParent.MarkRemoved();
+
+        var outcome = await OutcomeAsync(() =>
+            gadgets.SaveAsync(
+                [oldParent, newParent],
+                mode: ConcurrencyMode.ForceOverwrite,
+                cancellationToken: Ct
+            )
+        );
+
+        return [outcome, .. await StateAsync(), .. await NotesStateAsync()];
+    }
+
+    /// <summary>保存先のメモの全行（キー順・版は比べない）</summary>
+    private async Task<IReadOnlyList<string>> NotesStateAsync()
+    {
+        await using var provider = new ServiceCollection()
+            .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)
+            .BuildServiceProvider();
+        var all = await provider.GetRequiredService<IGadgetNoteRepository>().GetAllAsync(Ct);
+
+        return
+        [
+            .. all.OrderBy(n => n.NoteId.Value)
+                .Select(n =>
+                    $"gadget_notes/{n.NoteId.Value} gadget={n.GadgetId.Value} note={n.Note.Value}"
+                ),
+        ];
     }
 
     /// <summary>実装先のリポジトリを組み立てる</summary>

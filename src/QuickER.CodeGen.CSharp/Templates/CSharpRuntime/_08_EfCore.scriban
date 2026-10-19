@@ -63,6 +63,9 @@ public partial class QuickErDbContext : DbContext
 {{~ for prop in cfg.properties ~}}
             entity.Property(e => e.{{ prop.property_name }}).HasColumnName("{{ prop.column_name }}"){{ if prop.is_required }}.IsRequired(){{ end }}{{ if prop.max_length }}.HasMaxLength({{ prop.max_length }}){{ end }}{{ if prop.is_non_unicode }}.IsUnicode(false){{ end }}{{ if prop.precision }}.HasPrecision({{ prop.precision }}{{ if prop.scale }}, {{ prop.scale }}{{ end }}){{ end }}{{ if prop.is_row_version }}.IsRowVersion(){{ end }}{{ if prop.is_computed || prop.is_identity }}.ValueGeneratedOnAddOrUpdate(){{ end }}{{ if prop.is_value_object }}.HasConversion(v => v!.Value, v => {{ prop.value_object_class_name }}.Create(v!)){{ end }};
 {{~ end ~}}
+{{~ for unique in cfg.unique_indexes ~}}
+            entity.HasIndex(e => {{ if unique.size == 1 }}e.{{ unique[0] }}{{ else }}new { {{ for p in unique }}e.{{ p }}{{ if !for.last }}, {{ end }}{{ end }} }{{ end }}).IsUnique();
+{{~ end ~}}
 {{~ for rel in cfg.relationships ~}}
 {{~ if rel.is_collection ~}}
             entity
@@ -1631,6 +1634,144 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     }
 
 {{~ end ~}}
+    /// <summary>Whether the recorded operations delete a stored row and update another (see <see cref="AdoptStoredForeignKeysAsync"/>).</summary>
+    private static bool DeletesAndUpdates(IReadOnlyList<TrackedOperation> tracked) =>
+        tracked.Any(op => op.Operation == SaveOperation.Delete && op.Entry is not null)
+        && tracked.Any(op => op.Operation == SaveOperation.Update);
+
+    /// <summary>
+    /// When the save deletes rows, gives the foreign keys of every updated entry the values the database holds as their
+    /// original values, so that EF Core orders the statements by where the rows stand.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// EF Core orders the statements of one SaveChanges by the original values of the foreign keys: an updated row whose
+    /// original foreign key points at a deleted row is written before that deletion. An entity the graph save registers was
+    /// not loaded by this context, so its original values are its current ones, and a row moved away from a parent the same
+    /// save deletes looks as if it had always pointed at its new parent. EF Core would then delete the old parent first,
+    /// which the foreign key refuses, or which (when deleting cascades) takes the moved row with it, so that its UPDATE
+    /// matches no row.
+    /// </para>
+    /// <para>
+    /// It runs inside the transaction of the SaveChanges it prepares, on every attempt: a retry of the execution strategy
+    /// registers the graph again from scratch, so the values read for an earlier attempt are gone. Only the foreign keys are
+    /// read, in one query per updated entry (an excluded blob is not read); a row that is gone is left as it is, for the
+    /// SaveChanges to report.
+    /// </para>
+    /// </remarks>
+    private static async Task AdoptStoredForeignKeysAsync(DbContext context, CancellationToken cancellationToken)
+    {
+        var entries = context.ChangeTracker.Entries().ToList();
+
+        if (!entries.Any(entry => entry.State == EntityState.Deleted))
+        {
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            if (entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            var foreignKeys = entry
+                .Metadata.GetForeignKeys()
+                .SelectMany(foreignKey => foreignKey.Properties)
+                .Distinct()
+                .Select(property => (property.Name, property.ClrType))
+                .ToArray();
+
+            if (foreignKeys.Length == 0)
+            {
+                continue;
+            }
+
+            var keys = entry
+                .Metadata.FindPrimaryKey()!
+                .Properties.Select(property => (property.Name, property.ClrType))
+                .ToArray();
+            var keyValues = keys.Select(key => entry.Property(key.Name).CurrentValue).ToArray();
+            var read = _readStoredValues.GetOrAdd(
+                entry.Metadata.ClrType,
+                static type => _readStoredValuesDefinition.MakeGenericMethod(type)
+            );
+            var stored = await (
+                (Task<object?[]?>)read.Invoke(null, [context, keys, keyValues, foreignKeys, cancellationToken])!
+            ).ConfigureAwait(false);
+
+            if (stored is null)
+            {
+                continue;
+            }
+
+            for (var index = 0; index < foreignKeys.Length; index++)
+            {
+                entry.Property(foreignKeys[index].Name).OriginalValue = stored[index];
+            }
+        }
+    }
+
+    /// <summary>The open definition of <see cref="ReadStoredValuesAsync{TRow}"/>.</summary>
+    private static readonly MethodInfo _readStoredValuesDefinition = typeof(EfCoreRepositoryCore<TEntity, TKey, TContext>).GetMethod(
+        nameof(ReadStoredValuesAsync),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
+    /// <summary>Caches <see cref="ReadStoredValuesAsync{TRow}"/> closed over each entity type.</summary>
+    private static readonly ConcurrentDictionary<Type, MethodInfo> _readStoredValues = new();
+
+    /// <summary>Reads the stored values of <paramref name="columns"/> of the row with the given key (null when the row is gone).</summary>
+    private static Task<object?[]?> ReadStoredValuesAsync<TRow>(
+        DbContext context,
+        (string Name, Type ClrType)[] keys,
+        object?[] keyValues,
+        (string Name, Type ClrType)[] columns,
+        CancellationToken cancellationToken
+    )
+        where TRow : class
+    {
+        var row = Expression.Parameter(typeof(TRow), "row");
+        Expression? match = null;
+
+        for (var index = 0; index < keys.Length; index++)
+        {
+            // The key is read off a holder, so EF Core sends it as a parameter (see BuildKeyPredicate)
+            var value = Expression.Convert(
+                Expression.Field(
+                    Expression.Constant(new StoredValueHolder(keyValues[index])),
+                    nameof(StoredValueHolder.Value)
+                ),
+                keys[index].ClrType
+            );
+            var equal = Expression.Equal(StoredColumn(row, keys[index]), value);
+            match = match is null ? equal : Expression.AndAlso(match, equal);
+        }
+
+        var values = Expression.NewArrayInit(
+            typeof(object),
+            columns.Select(column => Expression.Convert(StoredColumn(row, column), typeof(object)))
+        );
+
+        return context
+            .Set<TRow>()
+            .AsNoTracking()
+            .Where(Expression.Lambda<Func<TRow, bool>>(match!, row))
+            .Select(Expression.Lambda<Func<TRow, object?[]>>(values, row))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>Reads one column of the row in a query (<c>EF.Property</c>).</summary>
+    private static MethodCallExpression StoredColumn(ParameterExpression row, (string Name, Type ClrType) column) =>
+        Expression.Call(typeof(EF), nameof(EF.Property), [column.ClrType], row, Expression.Constant(column.Name));
+
+    /// <summary>Carries a key value into a query as a member EF Core turns into a parameter.</summary>
+    private sealed class StoredValueHolder(object? value)
+    {
+        /// <summary>The key value.</summary>
+        public readonly object? Value = value;
+    }
+
     /// <summary>Whether the entry's entity type carries a concurrency token (a rowversion column).</summary>
     private static bool HasConcurrencyToken(EntityEntry entry) =>
         entry.Metadata.GetProperties().Any(property => property.IsConcurrencyToken);
@@ -1775,7 +1916,8 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     /// <summary>Runs one graph save through the DbContext's execution strategy, building every attempt from scratch.</summary>
     /// <remarks>
     /// A retrying execution strategy (such as SQL Server's <c>EnableRetryOnFailure</c>) refuses a transaction opened
-    /// outside it, and the hook path opens one, so the whole save is handed to the strategy. Every attempt starts from an
+    /// outside it, and the hook path (and a save that deletes some rows and updates others) opens one, so the whole save is
+    /// handed to the strategy. Every attempt starts from an
     /// empty change tracker and registers the graph again with a fresh hook session, so a failed attempt leaves nothing
     /// behind for the next one (the entities' RowState is settled only after a successful commit). As a consequence a save
     /// hook runs once per attempt: its database writes roll back with the failed attempt, but a side effect outside the
@@ -1802,18 +1944,14 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
 
                     var tracked = new List<TrackedOperation>();
 
-                    // The same order as the QuickER repositories (GraphSaveOrder): a new row that takes a deleted row's value
-                    // is recorded after the walk of every root, so the save hooks fire in the same sequence
+                    // The same stages as the QuickER repositories (GraphSaveOrder), so the save hooks fire in the same
+                    // sequence; EF Core still orders the statements of its SaveChanges itself
                     var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
+                    IReadOnlyList<EntityBaseCore> startingPoints = order?.StartingPoints ?? roots;
 
-                    foreach (var root in roots)
+                    foreach (var start in startingPoints)
                     {
-                        TrackNode(context, root, cascadeSave, cascadeDelete, tracked, order);
-                    }
-
-                    foreach (var subtree in order?.HeldBack ?? [])
-                    {
-                        TrackNode(context, subtree, cascadeSave, cascadeDelete, tracked, order: null);
+                        TrackNode(context, start, cascadeSave, cascadeDelete, tracked, order);
                     }
 
                     return await SaveTrackedGraphAsync(
@@ -1831,9 +1969,10 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     }
 
     /// <summary>
-    /// Saves the tracked graph. It enters the hook path (Before → SaveChanges → After → Commit within an explicit transaction)
-    /// only when any of the recorded types has a save hook registration; when none do, SaveChanges runs without an explicit
-    /// transaction (each SaveChanges call is a transaction of its own).
+    /// Saves the tracked graph. It runs SaveChanges within an explicit transaction (Before → SaveChanges → After → Commit) when
+    /// any of the recorded types has a save hook registration, or when the save deletes some rows and updates others (the
+    /// stored foreign keys are read in the same transaction, see <see cref="AdoptStoredForeignKeysAsync"/>); otherwise
+    /// SaveChanges runs without an explicit transaction (each SaveChanges call is a transaction of its own).
     /// </summary>
     /// <remarks>
     /// Either way, a statement that matched no row makes the save resolve the reported entries and run SaveChanges again
@@ -1859,7 +1998,11 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
             _saveHooks is not null
             && tracked.Any(op => _saveHooks.GetInvoker(op.Entity.GetType()) is not null);
 
-        if (!hasHooks)
+        // A save that deletes some rows and updates others reads the stored foreign keys of the updated rows within the
+        // transaction of its SaveChanges, so it takes the explicit-transaction path even without hooks
+        var readsStoredForeignKeys = DeletesAndUpdates(tracked);
+
+        if (!hasHooks && !readsStoredForeignKeys)
         {
             // Pre-existing path: SaveChanges without an explicit transaction (executed internally as a single transaction).
             var rowsWithoutHooks = await SaveTrackedChangesAsync(
@@ -1881,14 +2024,19 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         }
 
         // Hook path: a session that supplies After with a context enclosing the in-progress context (and its CurrentTransaction).
-        var hooks = new SaveHookSession(_saveHooks!, _ => new EfCoreSaveHookContext(context));
+        var hooks = hasHooks
+            ? new SaveHookSession(_saveHooks!, _ => new EfCoreSaveHookContext(context))
+            : null;
 
         // Before pass (prior to SaveChanges): fires in recorded order; false demotes the Entry to Unchanged and removes it from the save targets.
         var survivors = new List<TrackedOperation>(tracked.Count);
 
         foreach (var op in tracked)
         {
-            if (await hooks.InvokeBeforeAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false))
+            if (
+                hooks is null
+                || await hooks.InvokeBeforeAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false)
+            )
             {
                 survivors.Add(op);
             }
@@ -1911,7 +2059,8 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         // commit. After therefore still sees the values the entities were read with, and a save that does not commit (an
         // exception from After, a failed commit, a retry) never leaves a value on the entities that the database does not
         // hold - a later save of the same instance would otherwise fail as a phantom conflict.
-        // To fire After "post-operation, pre-commit", SaveChanges is performed within an explicit transaction. Each
+        // To fire After "post-operation, pre-commit", and to read the stored foreign keys next to the statements they order,
+        // SaveChanges is performed within an explicit transaction. Each
         // attempt has a transaction of its own, rolled back as a whole when a statement matches no row, so a retry
         // never runs on top of the statements an earlier attempt already executed. Retrying inside one transaction
         // would rely on EF Core's automatic savepoints, which EF Core turns off under SQL Server MARS (and which
@@ -1927,6 +2076,12 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
                 KeepStoredUnboundedBinaries(context);
 {{~ end ~}}
+
+                if (readsStoredForeignKeys)
+                {
+                    await AdoptStoredForeignKeysAsync(context, cancellationToken).ConfigureAwait(false);
+                }
+
                 rows = await context.SaveChangesAsync(
                     acceptAllChangesOnSuccess: false,
                     cancellationToken
@@ -1953,9 +2108,12 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
             }
 
             // After pass (pre-commit): fires in recorded order with the operation actually performed (Insert when switched).
-            foreach (var op in survivors)
+            if (hooks is not null)
             {
-                await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false);
+                foreach (var op in survivors)
+                {
+                    await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -1968,7 +2126,7 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         // After a successful save, finalize the state (Added/Updated → Unchanged), leaving skipped rows as-is.
         foreach (var root in roots)
         {
-            EntityGraphSaver.AcceptChanges(root, cascadeSave, hooks.Skipped);
+            EntityGraphSaver.AcceptChanges(root, cascadeSave, hooks?.Skipped);
         }
 
         RestoreSingleChildren(deletedSingleChildren);
@@ -2111,7 +2269,8 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     /// parent, and would write a parent the save was never asked to write.
     /// </para>
     /// <para>
-    /// The recording order is the order the save hooks' Before/After fire in, and it follows the QuickER repositories: an
+    /// The recording order is the order the save hooks' Before/After fire in, and it follows the QuickER repositories (the
+    /// stages of <see cref="GraphSaveOrder"/>; a child <paramref name="order"/> leaves to another stage is skipped): an
     /// entity that is kept is recorded before its children, and a deleted entity after its descendants (children first). The
     /// descendants of a deleted entity are recorded as a deletion group when <paramref name="cascadeDelete"/> is
     /// <c>true</c>, whatever <paramref name="cascadeSave"/> says (the QuickER repositories delete the children of a removed
@@ -2128,12 +2287,6 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         GraphSaveOrder? order
     )
     {
-        // A new row that takes a deleted row's value is recorded after the walk of every root (see GraphSaveOrder)
-        if (order is not null && order.TryHoldBack(entity))
-        {
-            return;
-        }
-
         if (entity.IsRemoved)
         {
             // Children first, as the QuickER repositories delete them
@@ -2164,6 +2317,12 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         // Unchanged entities are also registered (EntityState.Unchanged) so the walk reaches changed entities below them
         foreach (var child in entity.EnumerateCascadeChildren())
         {
+            // A deleted or held-back child starts a later stage (see GraphSaveOrder)
+            if (order is not null && order.Defers(child))
+            {
+                continue;
+            }
+
             TrackNode(context, child, cascadeSave, cascadeDelete, tracked, order);
         }
     }

@@ -8,12 +8,13 @@ using Xunit;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// ランタイムパッケージの <see cref="GraphSaveOrder"/> が、削除する行と主キー・一意な値が重なる新しい行だけを後回しにすることを
-/// 検証するテストクラス。
+/// ランタイムパッケージの <see cref="GraphSaveOrder"/> が、削除を含む保存を「削除しない書き込み → 削除 → 後回しの行」の
+/// 3 段に分け、削除する行の値を取る行だけを後回しにすることを検証するテストクラス。
 /// </summary>
 /// <remarks>
 /// 実装先ごとの書く順は実行時のテスト（BackendParity・GraphSaveOrderRuntimeTests）が見る。ここでは規則そのもの
-/// （どの値を削除する行の値として集めるか・どう突き合わせるか）を、手書きのエンティティで直接確かめる。
+/// （段の始点の並び・どの値を削除する行の値として集めるか・どう突き合わせるか・どの行を飛ばすか）を、手書きのエンティティで
+/// 直接確かめる。
 /// </remarks>
 public class GraphSaveOrderTests
 {
@@ -64,7 +65,9 @@ public class GraphSaveOrderTests
             RowState = state,
         };
 
-    [Fact(DisplayName = "GraphSaveOrder: 行を削除しない保存は計画を作らない（何も後回しにしない）")]
+    [Fact(
+        DisplayName = "GraphSaveOrder: 行を削除しない保存は計画を作らない（グラフの順のまま保存する）"
+    )]
     public void For_WithoutDeletion_ReturnsNull()
     {
         var roots = new[] { Parent(1, "A", RowState.Added), Parent(2, "B", RowState.Updated) };
@@ -73,38 +76,75 @@ public class GraphSaveOrderTests
     }
 
     [Fact(
-        DisplayName = "GraphSaveOrder: 削除する行の一意な値・主キーを取る新しい行だけを後回しにし、拾った順に並べる"
+        DisplayName = "GraphSaveOrder: 削除を含む保存は、削除しない書き込み・削除・後回しの行の順に段の始点を並べる"
     )]
-    public void TryHoldBack_HoldsBackOnlyNewRowsThatTakeDeletedValues()
+    public void For_OrdersStartingPointsInThreeStages()
+    {
+        var deleted = Parent(1, "A", RowState.Removed);
+        var updated = Parent(2, "B", RowState.Updated);
+        var added = Parent(3, "C", RowState.Added);
+        var takesValue = Parent(4, "A", RowState.Added);
+
+        var order = GraphSaveOrder.For(
+            [deleted, takesValue, updated, added],
+            cascadeSave: true,
+            cascadeDelete: true
+        )!;
+
+        order.StartingPoints.Should().Equal(updated, added, deleted, takesValue);
+        order.Deletions.Should().Equal(deleted);
+        order.HeldBack.Should().Equal(takesValue);
+    }
+
+    [Fact(
+        DisplayName = "GraphSaveOrder: 削除する行の主キー・一意な値を取る新しい行と、一意な値（主キーを除く）を取る更新する行を後回しにし、拾った順に並べる"
+    )]
+    public void For_HoldsBackOnlyRowsThatTakeDeletedValues()
     {
         var deleted = Parent(1, "Dan", RowState.Removed);
         var takesName = Parent(2, "Dan", RowState.Added);
         var takesKey = Parent(1, "Other", RowState.Added);
         var unrelated = Parent(3, "Eve", RowState.Added);
-        var updated = Parent(4, "Dan", RowState.Updated);
+        var updatedTakesName = Parent(4, "Dan", RowState.Updated);
+        var updatedSameKey = Parent(1, "Zed", RowState.Updated);
 
-        var order = GraphSaveOrder.For([deleted], cascadeSave: true, cascadeDelete: true)!;
+        var order = GraphSaveOrder.For(
+            [deleted, takesName, unrelated, updatedTakesName, takesKey, updatedSameKey],
+            cascadeSave: true,
+            cascadeDelete: true
+        )!;
 
-        order.TryHoldBack(unrelated).Should().BeFalse("値が重ならない新しい行は並びどおり");
-        order.TryHoldBack(updated).Should().BeFalse("後回しにするのは新しい行だけ");
-        order.TryHoldBack(takesName).Should().BeTrue("一意制約の値が重なる");
-        order.TryHoldBack(takesKey).Should().BeTrue("主キーが重なる");
-        order.HeldBack.Should().Equal(takesName, takesKey);
+        order
+            .HeldBack.Should()
+            .Equal(
+                [takesName, updatedTakesName, takesKey],
+                "値が重ならない行と、主キーが重なるだけの更新する行は並びどおり"
+            );
+        order.Defers(unrelated).Should().BeFalse();
+        order.Defers(updatedSameKey).Should().BeFalse("更新する行の主キーは数えない");
     }
 
     [Fact(
         DisplayName = "GraphSaveOrder: 文字列は大文字小文字を区別せずに突き合わせ、null を含む値は何にも重ならない"
     )]
-    public void TryHoldBack_MatchesTextIgnoringCase_AndNullMatchesNothing()
+    public void For_MatchesTextIgnoringCase_AndNullMatchesNothing()
     {
+        var upperCase = Parent(3, "DAN", RowState.Added);
+        var withoutName = Parent(4, null, RowState.Added);
+
         var order = GraphSaveOrder.For(
-            [Parent(1, "dan", RowState.Removed), Parent(2, null, RowState.Removed)],
+            [
+                Parent(1, "dan", RowState.Removed),
+                Parent(2, null, RowState.Removed),
+                upperCase,
+                withoutName,
+            ],
             cascadeSave: true,
             cascadeDelete: true
         )!;
 
-        order.TryHoldBack(Parent(3, "DAN", RowState.Added)).Should().BeTrue();
-        order.TryHoldBack(Parent(4, null, RowState.Added)).Should().BeFalse();
+        order.HeldBack.Should().Equal(upperCase);
+        order.Defers(withoutName).Should().BeFalse();
     }
 
     [Fact(
@@ -112,46 +152,90 @@ public class GraphSaveOrderTests
     )]
     public void For_CollectsTheSubtreeOfADeletedRow_WhenDeletionCascades()
     {
-        var deleted = Parent(1, "A", RowState.Removed);
-        deleted.Children.Add(Child(10, 1, "x", RowState.Unchanged));
-        deleted.Children.Add(Child(11, 1, "y", RowState.Added));
+        GraphSaveOrder Plan(
+            bool cascadeDelete,
+            out ChildEntity takesExisting,
+            out ChildEntity takesNew
+        )
+        {
+            var deleted = Parent(1, "A", RowState.Removed);
+            deleted.Children.Add(Child(10, 1, "x", RowState.Unchanged));
+            deleted.Children.Add(Child(11, 1, "y", RowState.Added));
+            var other = Parent(2, "B", RowState.Unchanged);
+            takesExisting = Child(20, 1, "x", RowState.Added);
+            takesNew = Child(21, 1, "y", RowState.Added);
+            other.Children.Add(takesExisting);
+            other.Children.Add(takesNew);
 
-        var cascading = GraphSaveOrder.For([deleted], cascadeSave: true, cascadeDelete: true)!;
-        cascading
-            .TryHoldBack(Child(20, 1, "x", RowState.Added))
-            .Should()
-            .BeTrue("既存の子の値は削除で空く");
-        cascading
-            .TryHoldBack(Child(21, 1, "y", RowState.Added))
-            .Should()
-            .BeFalse("新しい子は保存先に行を持たない");
+            return GraphSaveOrder.For([deleted, other], cascadeSave: true, cascadeDelete)!;
+        }
 
-        var notCascading = GraphSaveOrder.For([deleted], cascadeSave: true, cascadeDelete: false)!;
-        notCascading
-            .TryHoldBack(Child(20, 1, "x", RowState.Added))
-            .Should()
-            .BeFalse("子は削除されない");
+        var cascading = Plan(cascadeDelete: true, out var existing, out var added);
+        cascading
+            .HeldBack.Should()
+            .Equal([existing], "既存の子の値は削除で空き、新しい子は保存先に行を持たない");
+        cascading.Defers(added).Should().BeFalse();
+
+        var notCascading = Plan(cascadeDelete: false, out existing, out _);
+        notCascading.HeldBack.Should().BeEmpty("子は削除されない");
+        notCascading.Defers(existing).Should().BeFalse();
     }
 
     [Fact(DisplayName = "GraphSaveOrder: カスケードの子をたどらない保存は、子の削除の印を数えない")]
     public void For_WithoutCascadeSave_IgnoresRemovedChildren()
     {
         var root = Parent(1, "A", RowState.Unchanged);
-        root.Children.Add(Child(10, 1, "x", RowState.Removed));
+        var removed = Child(10, 1, "x", RowState.Removed);
+        root.Children.Add(removed);
 
         GraphSaveOrder.For([root], cascadeSave: false, cascadeDelete: true).Should().BeNull();
-        GraphSaveOrder.For([root], cascadeSave: true, cascadeDelete: true).Should().NotBeNull();
+
+        var order = GraphSaveOrder.For([root], cascadeSave: true, cascadeDelete: true)!;
+        order.StartingPoints.Should().Equal(root, removed);
+        order.Defers(removed).Should().BeTrue("子の削除は 2 段目の始点になる");
     }
 
     [Fact(DisplayName = "GraphSaveOrder: 型の違う行どうしは、主キーの値が同じでも重ならない")]
-    public void TryHoldBack_DoesNotMatchAcrossEntityTypes()
+    public void For_DoesNotMatchAcrossEntityTypes()
     {
+        var root = Parent(2, "B", RowState.Unchanged);
+        var child = Child(1, 2, "z", RowState.Added);
+        root.Children.Add(child);
+
         var order = GraphSaveOrder.For(
-            [Parent(1, "A", RowState.Removed)],
+            [Parent(1, "A", RowState.Removed), root],
             cascadeSave: true,
             cascadeDelete: true
         )!;
 
-        order.TryHoldBack(Child(1, 9, "z", RowState.Added)).Should().BeFalse();
+        order.HeldBack.Should().BeEmpty();
+        order.Defers(child).Should().BeFalse();
+    }
+
+    [Fact(
+        DisplayName = "GraphSaveOrder: 後回しの行の下の削除は 2 段目へ回し、後回しの行の下の行は個別には後回しにしない"
+    )]
+    public void For_DeletionsBelowAHeldBackRowGoToTheSecondStage()
+    {
+        var deleted = Parent(1, "Dan", RowState.Removed);
+        var heldBack = Parent(2, "Dan", RowState.Updated);
+        var removedChild = Child(10, 2, "a", RowState.Removed);
+        var addedChild = Child(11, 2, "a", RowState.Added);
+        heldBack.Children.Add(removedChild);
+        heldBack.Children.Add(addedChild);
+
+        var order = GraphSaveOrder.For(
+            [deleted, heldBack],
+            cascadeSave: true,
+            cascadeDelete: true
+        )!;
+
+        order.StartingPoints.Should().Equal(deleted, removedChild, heldBack);
+        order.Defers(heldBack).Should().BeTrue();
+        order.Defers(removedChild).Should().BeTrue("削除は 2 段目で済ませ、3 段目の歩きでは飛ばす");
+        order
+            .Defers(addedChild)
+            .Should()
+            .BeFalse("後回しの行の下の行は、後回しの行と一緒に 3 段目で書く");
     }
 }

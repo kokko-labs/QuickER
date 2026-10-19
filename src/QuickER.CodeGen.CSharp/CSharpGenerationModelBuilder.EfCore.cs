@@ -93,6 +93,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     .Select(column => _nameConverter.ToPropertyName(column.Name))
                     .ToList(),
                 Properties = entity.Columns.Select(BuildEfCorePropertyConfig).ToList(),
+                UniqueIndexes = BuildEfCoreUniqueIndexes(entity),
                 Relationships = relationshipsByPrincipal.TryGetValue(
                     entity.Id,
                     out var relationships
@@ -111,6 +112,37 @@ internal sealed partial class CSharpGenerationModelBuilder
                 .ToList(),
             IgnoredBaseMembers = EntityBaseIgnoredMembers,
         };
+    }
+
+    /// <summary>一意制約ごとの EF Core の一意インデックス（構成列のプロパティ名を制約の列の並びで・制約の宣言の並びで返す）</summary>
+    /// <remarks>
+    /// EF Core は 1 回の SaveChanges の中で文の順を自分で決め、モデルの一意インデックスを見て、一意な値が削除する行から
+    /// 別の行（更新・挿入）へ移るときに削除を先に並べる。インデックスが無いと、更新が削除より先に走って一意制約に断られる
+    /// ことがある。インデックスは文の並べ方にだけ使い、DB には何も作らない（Migrations / EnsureCreated を使わない前提）。
+    /// 名前（HasDatabaseName）は付けない：文の並べ方に名前は関係せず、DB に作らない名前を DDL の規則（図の名前か合成名・
+    /// 対象 DBMS の上限）とそろえて保つ理由が無い。構成列を引き当てられない制約は出さない。
+    /// </remarks>
+    private IReadOnlyList<IReadOnlyList<string>> BuildEfCoreUniqueIndexes(Entity entity)
+    {
+        var indexes = new List<IReadOnlyList<string>>();
+
+        foreach (var constraint in entity.UniqueConstraints)
+        {
+            var columns = constraint
+                .ColumnIds.Select(id => entity.Columns.FirstOrDefault(column => column.Id == id))
+                .ToList();
+
+            if (columns.Count == 0 || columns.Any(column => column is null))
+            {
+                continue;
+            }
+
+            indexes.Add(
+                columns.Select(column => _nameConverter.ToPropertyName(column!.Name)).ToList()
+            );
+        }
+
+        return indexes;
     }
 
     /// <summary>主キー列を 1 つ以上持つか（EF Core の DbContext へマップできるか）</summary>

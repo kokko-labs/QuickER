@@ -604,17 +604,25 @@ A single cascade child has no collection to leave, so it stays on its navigation
 The descendants of a deleted root are left as they are, since the whole subtree went with it.
 Every backend behaves the same way, and so does an edit model when the mapper's `AcceptSaved` accepts the save (see [Removing rows](#removing-rows-remove-versus-markremoved)).
 
-**A new row that takes a deleted row's value is written after the deletion.**
-A graph save walks each root in graph order: a deleted row deletes its subtree children first, and a new or updated row is written before its children.
-A new row that takes the primary key or a unique value of a row the same save deletes waits, with the rows below it, until every root has been walked.
-It can therefore take that value wherever the two sit in the collection or in the list of roots.
+**A save that deletes rows writes in three stages.**
+A graph save that deletes no row walks each root in graph order: a new or updated row is written before its children.
+A save that deletes rows runs in three stages:
+
+1. the new and updated rows, walking each root in graph order;
+2. the deletions, in the order the walk reached them, each deleting its subtree children first;
+3. the rows held back, with the rows below them, in the order the walk reached them.
+
+A row is held back when it takes a value that a row the same save deletes still holds: a new row that takes the primary key or a unique value of a deleted row, or an updated row that takes a unique value (other than the primary key) of one.
+A row can therefore move away from a parent the same save deletes, and take a deleted row's value, wherever the rows sit in the collection or in the list of roots.
 Text is compared without regard to case, and a value with a null part takes nothing.
 SQL Server is the exception: its unique constraint allows a single NULL, so a new row that takes the NULL of a row the same save deletes is not held back and can be refused there.
 For a key, removing a row and adding a new row with the same key in one save replaces the row, whichever comes first.
 Where no row with that key exists, the deletion does nothing and the new row stays; an EF Core graph save reports that deletion as a conflict instead, the no-row delete asymmetry described in [Removing rows](#removing-rows-remove-versus-markremoved).
 An EF Core graph save counts the replacement as one row, where the other backends count the deletion and the insert.
-Every other row is written in graph order: a row that refers to a new row is written after it, and a child moved under a new parent is moved before its old parent is deleted.
+Within a stage, rows keep graph order, so a row that refers to a new row is written after it.
 Every backend uses this order, and the save hooks fire in it.
+EF Core orders the statements of its single `SaveChanges` itself; how it follows the same rules is described in [EF Core mode](#ef-core-mode-generateefcorerepositories).
+Swapping unique values between two rows in one save is refused by the database at the first update; the in-memory repository accepts it.
 
 One shape cannot be saved in a single call: deleting a row, adding a new row that takes its unique value, and pointing the rows that referred to the deleted row at the new one, such as moving the children of a parent under its replacement.
 With a `NO ACTION` foreign key, writing the new row first is refused by the unique constraint, and deleting the old row first is refused by the foreign key of the rows that still point to it.
@@ -706,7 +714,7 @@ A skipped deletion of a root or of a single cascade child cannot be told apart f
 Because a skip is isolated, consistency is the hook author's responsibility.
 In particular, deletes run children-first, so **returning `false` for only the root of a subtree delete leaves the children deleted and the root behind**.
 Every backend runs the delete hooks of a deleted entity's descendants children first, and runs them for an `Added` descendant too, although it has no row to delete.
-The hooks of a new row that takes a value of a row the same save deletes, and of the rows below it, come after the hooks of the other rows, in the order the rows are written (see [Graph save](#graph-save-save-parent-and-children-in-one-call)).
+When a save deletes rows, the hooks follow its three stages: the hooks of the new and updated rows, then those of the deletions, then those of the rows held back and the rows below them (see [Graph save](#graph-save-save-parent-and-children-in-one-call)).
 To stop the parent, the children's hooks must also return `false`.
 An inconsistent skip, such as skipping a new parent while saving a new child, falls to the safe side through an FK constraint violation, an exception, and a full rollback, provided the FK constraint is actually defined in the database.
 
@@ -963,6 +971,12 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
 - A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters and literals are sent as non-Unicode text and the database can compare the column without converting it.
   The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
+- Each unique constraint of the diagram is declared as a unique index (`HasIndex(...).IsUnique()`) in the generated `DbContext`.
+  EF Core orders the statements of one `SaveChanges` itself, and the index lets it run a deletion that frees a unique value before the update or insert that takes the value.
+  Nothing is created in the database: the schema comes from DDL generation, and Migrations and `EnsureCreated` are not used.
+- A graph save that deletes rows reads the stored foreign keys of the rows it updates before each `SaveChanges`, in the same transaction.
+  EF Core then knows that a row moved away from a parent the save deletes, and updates it before the deletion.
+  Without the read, an entity built outside the context looks as if it had always pointed at its new parent.
 - A retrying execution strategy (such as SQL Server's `EnableRetryOnFailure`) is supported.
   A graph save and a cascading `ExecuteDeleteAsync` run inside the strategy, and every attempt starts over from scratch.
   With save hooks, Before and After run once per attempt: their database writes roll back with the failed attempt, but a side effect outside the database is repeated.

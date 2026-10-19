@@ -4064,7 +4064,7 @@ public static class EntityGraphSaver
     /// changes are known to exist), the redundant graph traversal (change detection) at the start is skipped. Recursion
     /// into children passes the default <c>false</c>, so per-subtree change detection (pruning clean branches) is still
     /// performed. The operations run in graph order; <see cref="SaveGraphsAsync"/> is the entry point the repositories
-    /// use, which saves the subtrees made only of new rows after the deletions.
+    /// use, which runs them in the stages <see cref="GraphSaveOrder"/> describes.
     /// </remarks>
     public static Task<int> SaveAsync(
         EntityBaseCore entity,
@@ -4095,9 +4095,9 @@ public static class EntityGraphSaver
     /// provided, fires the save hooks before and after each operation).
     /// </summary>
     /// <remarks>
-    /// The operations run in the order <see cref="GraphSaveOrder"/> describes: a new row that takes the primary key or a
-    /// unique value of a row the save deletes is saved, with the rows below it, after the walk of every root. The roots are
-    /// expected to have changes already (<see cref="HasChanges"/>); clean branches below them are still pruned.
+    /// The operations run in the order <see cref="GraphSaveOrder"/> describes: when the save deletes rows, the new and
+    /// updated rows come first, then the deletions, then the rows held back because they take a value a deleted row holds.
+    /// The roots are expected to have changes already (<see cref="HasChanges"/>); clean branches below them are still pruned.
     /// </remarks>
     public static async Task<int> SaveGraphsAsync(
         IReadOnlyList<EntityBaseCore> roots,
@@ -4113,10 +4113,11 @@ public static class EntityGraphSaver
         var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
         var rows = 0;
 
-        foreach (var root in roots)
+        // Each stage starts from its own points: the roots, then the deleted rows, then the rows held back
+        foreach (var start in order?.StartingPoints ?? roots)
         {
             rows += await SaveNodeAsync(
-                root,
+                start,
                 connection,
                 transaction,
                 cascadeSave,
@@ -4129,27 +4130,10 @@ public static class EntityGraphSaver
             ).ConfigureAwait(false);
         }
 
-        // The rows held back go after every deletion, so the value a deleted row held is free again
-        foreach (var subtree in order?.HeldBack ?? [])
-        {
-            rows += await SaveNodeAsync(
-                subtree,
-                connection,
-                transaction,
-                cascadeSave,
-                cascadeDelete,
-                insertWhenUpdateMissing,
-                cancellationToken,
-                hooks,
-                changesAlreadyVerified: true,
-                order: null
-            ).ConfigureAwait(false);
-        }
-
         return rows;
     }
 
-    /// <summary>Saves one node and its subtree (<paramref name="order"/> holds back the rows to save later; null saves everything in graph order).</summary>
+    /// <summary>Saves one node and its subtree (the walk skips the children <paramref name="order"/> leaves to another stage; null saves everything in graph order).</summary>
     private static async Task<int> SaveNodeAsync(
         EntityBaseCore entity,
         SqliteConnection connection,
@@ -4164,12 +4148,6 @@ public static class EntityGraphSaver
     )
     {
         if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
-        {
-            return 0;
-        }
-
-        // A new row that takes a deleted row's value waits until the deletions are done (see SaveGraphsAsync)
-        if (order is not null && order.TryHoldBack(entity))
         {
             return 0;
         }
@@ -4281,6 +4259,12 @@ public static class EntityGraphSaver
         {
             foreach (var child in entity.EnumerateCascadeChildren())
             {
+                // A deleted or held-back child starts a later stage (see GraphSaveOrder)
+                if (order is not null && order.Defers(child))
+                {
+                    continue;
+                }
+
                 rows += await SaveNodeAsync(
                     child,
                     connection,

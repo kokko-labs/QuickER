@@ -2288,12 +2288,6 @@ internal static class InMemoryCascade
             return 0;
         }
 
-        // A new row that takes a deleted row's value waits until every root has been walked (see GraphSaveOrder)
-        if (order is not null && order.TryHoldBack(entity))
-        {
-            return 0;
-        }
-
         var rows = 0;
         var entityType = entity.GetType();
         var key = InMemoryDataStore.KeyOf(entity);
@@ -2377,6 +2371,12 @@ internal static class InMemoryCascade
         {
             foreach (var child in entity.EnumerateCascadeChildren())
             {
+                // A deleted or held-back child starts a later stage (see GraphSaveOrder)
+                if (order is not null && order.Defers(child))
+                {
+                    continue;
+                }
+
                 rows += Save(
                     child,
                     scope,
@@ -2408,12 +2408,6 @@ internal static class InMemoryCascade
     {
         // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
         if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
-        {
-            return;
-        }
-
-        // The same hold-back as Save, so Before fires in the order the rows are written
-        if (order is not null && order.TryHoldBack(entity))
         {
             return;
         }
@@ -2456,6 +2450,12 @@ internal static class InMemoryCascade
         {
             foreach (var child in entity.EnumerateCascadeChildren())
             {
+                // The same stages as Save, so Before fires in the order the rows are written
+                if (order is not null && order.Defers(child))
+                {
+                    continue;
+                }
+
                 await InvokeBeforeGraphAsync(
                     child,
                     hooks,
@@ -3008,36 +3008,25 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
                     e => new InMemorySaveHookContext(Store, e.GetType(), staging)
                 );
 
-        // The order every backend shares (GraphSaveOrder): a new row that takes a deleted row's value goes after the walk of
-        // every root. Both phases below follow it (each with its own plan), so Before, the writes and After keep one sequence.
+        // The order every backend shares (GraphSaveOrder): when the save deletes rows, the new and updated rows come first,
+        // then the deletions, then the rows held back because they take a value a deleted row holds. Both phases below follow
+        // the same plan, so Before, the writes and After keep one sequence.
+        var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
+        IReadOnlyList<EntityBaseCore> startingPoints = order?.StartingPoints ?? roots;
 
         // Phase 1 (outside the lock): traverse the graphs of all roots in the same order as Save, fire Before, and build the skip set.
         if (hooks is not null)
         {
-            var beforeOrder = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
-
-            foreach (var entity in roots)
+            foreach (var start in startingPoints)
             {
                 await InMemoryCascade.InvokeBeforeGraphAsync(
-                    entity,
+                    start,
                     hooks,
                     cascadeSave,
                     cascadeDelete,
                     cancellationToken,
                     changesAlreadyVerified: true,
-                    order: beforeOrder
-                ).ConfigureAwait(false);
-            }
-
-            foreach (var subtree in beforeOrder?.HeldBack ?? [])
-            {
-                await InMemoryCascade.InvokeBeforeGraphAsync(
-                    subtree,
-                    hooks,
-                    cascadeSave,
-                    cascadeDelete,
-                    cancellationToken,
-                    changesAlreadyVerified: true
+                    order: order
                 ).ConfigureAwait(false);
             }
         }
@@ -3049,12 +3038,11 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
             scope =>
             {
                 var total = 0;
-                var order = GraphSaveOrder.For(roots, cascadeSave, cascadeDelete);
 
-                foreach (var entity in roots)
+                foreach (var start in startingPoints)
                 {
                     total += InMemoryCascade.Save(
-                        entity,
+                        start,
                         scope,
                         cascadeSave,
                         cascadeDelete,
@@ -3064,21 +3052,6 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
                         records,
                         changesAlreadyVerified: true,
                         order: order
-                    );
-                }
-
-                foreach (var subtree in order?.HeldBack ?? [])
-                {
-                    total += InMemoryCascade.Save(
-                        subtree,
-                        scope,
-                        cascadeSave,
-                        cascadeDelete,
-                        insertWhenUpdateMissing,
-                        mode,
-                        hooks,
-                        records,
-                        changesAlreadyVerified: true
                     );
                 }
 

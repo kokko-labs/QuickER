@@ -271,66 +271,155 @@ public static class GeneratedDisplayNames
 /// <summary>The order every backend's graph save runs its operations (and fires its save hooks) in.</summary>
 /// <remarks>
 /// <para>
-/// A graph save walks each root in graph order: a deleted row deletes its subtree children-first, and a new or updated row is
-/// written before its children. A new row that takes the primary key or a unique value of a row the same save deletes waits,
-/// with the rows below it, until every root has been walked, and is then saved in the order the roots reached it: inserting
-/// it before the deletion would be refused by the database.
+/// A graph save that deletes no row runs in graph order: it walks each root, and a new or updated row is written before its
+/// children. A save that deletes rows runs in three stages:
+/// </para>
+/// <list type="number">
+///   <item>the new and updated rows, walking each root in graph order and leaving out the deleted rows and the held-back rows,
+///     with the rows below them;</item>
+///   <item>the deleted rows, in the order the walk reached them, each deleting its subtree children first;</item>
+///   <item>the held-back rows, in the order the walk reached them, each with the rows below it.</item>
+/// </list>
+/// <para>
+/// A row is held back when it takes a value a row the same save deletes still holds: a new row that takes the primary key or
+/// a unique value of a deleted row, or an updated row that takes a unique value (other than the primary key) of a deleted
+/// row. Writing it before the deletion would be refused by the database. The other writes come before the deletions, so a
+/// row that moves away from a deleted parent is updated first, whatever order the roots come in, and the parent can then be
+/// deleted (a cascading deletion no longer takes the moved row with it).
 /// </para>
 /// <para>
-/// No other row waits, so a save in which no new row takes a value of a deleted row runs in graph order: a child moved under
-/// a new parent is updated before its old parent is deleted, and a row that refers to a new row is written after it. Values
-/// are matched in the form <see cref="IncludeKeys.Normalize"/> gives them, text without regard to case (a collation that
+/// Values are matched in the form <see cref="IncludeKeys.Normalize"/> gives them, text without regard to case (a collation that
 /// ignores case sees the same value); a value with a null part matches nothing. The QuickER repositories, EF Core and the
-/// in-memory repository share this order, so their save hooks fire in the same sequence.
+/// in-memory repository share this order, so their save hooks fire in the same sequence; EF Core still orders the statements
+/// of its single SaveChanges itself.
+/// </para>
+/// <para>
+/// A walk starts from each of <see cref="StartingPoints"/> in turn and skips a child for which <see cref="Defers"/> returns
+/// <c>true</c>: that child starts a later stage of its own, or (a deleted row below a held-back row) was deleted in the second
+/// stage already.
 /// </para>
 /// </remarks>
 {{ infra_visibility }} sealed class GraphSaveOrder
 {
     /// <summary>Caches, per entity type, the property groups whose values must be unique (the primary key first).</summary>
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[][]> _uniqueGroups = new();
+    private static readonly ConcurrentDictionary<Type, UniqueGroups> _uniqueGroups = new();
 
-    private readonly HashSet<UniqueValue> _deletedValues;
+    private readonly List<EntityBaseCore> _deletions = [];
     private readonly List<EntityBaseCore> _heldBack = [];
+    private readonly HashSet<EntityBaseCore> _deferred = new(ReferenceEqualityComparer.Instance);
+    private readonly List<EntityBaseCore> _startingPoints = [];
 
-    private GraphSaveOrder(HashSet<UniqueValue> deletedValues) => _deletedValues = deletedValues;
+    private GraphSaveOrder() { }
 
-    /// <summary>Gets the rows held back so far, in the order the walk reached them (each is saved with the rows below it).</summary>
+    /// <summary>
+    /// Gets where the walks start, in the order they run: the roots that are neither deleted nor held back, then
+    /// <see cref="Deletions"/>, then <see cref="HeldBack"/>.
+    /// </summary>
+    public IReadOnlyList<EntityBaseCore> StartingPoints => _startingPoints;
+
+    /// <summary>Gets the deleted rows the second stage starts from, in the order the walk reached them.</summary>
+    public IReadOnlyList<EntityBaseCore> Deletions => _deletions;
+
+    /// <summary>Gets the held-back rows the third stage starts from, in the order the walk reached them (each is saved with the rows below it).</summary>
     public IReadOnlyList<EntityBaseCore> HeldBack => _heldBack;
 
-    /// <summary>Plans one save over <paramref name="roots"/>; null when the save deletes no row whose values a new row could take.</summary>
+    /// <summary>Plans one save over <paramref name="roots"/>; null when the save deletes no row (it then runs in graph order).</summary>
     /// <param name="roots">The roots the save walks.</param>
     /// <param name="cascadeSave">Whether the save walks the cascade children.</param>
     /// <param name="cascadeDelete">Whether deleting a row deletes the rows below it.</param>
     public static GraphSaveOrder? For(IEnumerable<EntityBaseCore> roots, bool cascadeSave, bool cascadeDelete)
     {
+        var rootList = roots.ToList();
         var deleted = new HashSet<UniqueValue>();
+        var deletes = false;
 
-        foreach (var root in roots)
+        foreach (var root in rootList)
         {
-            CollectDeleted(root, cascadeSave, cascadeDelete, deleted);
+            deletes |= CollectDeleted(root, cascadeSave, cascadeDelete, deleted);
         }
 
-        return deleted.Count == 0 ? null : new GraphSaveOrder(deleted);
+        if (!deletes)
+        {
+            return null;
+        }
+
+        var order = new GraphSaveOrder();
+
+        foreach (var root in rootList)
+        {
+            order.Plan(root, cascadeSave, deleted, belowHeldBack: false);
+        }
+
+        order._startingPoints.AddRange(rootList.Where(root => !order._deferred.Contains(root)));
+        order._startingPoints.AddRange(order._deletions);
+        order._startingPoints.AddRange(order._heldBack);
+        return order;
     }
 
     /// <summary>
-    /// Holds <paramref name="entity"/> back when it is a new row that takes a value of a row the save deletes, and returns
-    /// whether it did (the caller then skips it and the rows below it until the walk of every root is done).
+    /// Returns whether the walk leaves <paramref name="entity"/> and the rows below it out (it starts a later stage, or was
+    /// deleted in the second stage already).
     /// </summary>
-    /// <param name="entity">The entity the walk reached.</param>
-    public bool TryHoldBack(EntityBaseCore entity)
+    /// <param name="entity">A child the walk reached.</param>
+    public bool Defers(EntityBaseCore entity) => _deferred.Contains(entity);
+
+    /// <summary>Sorts a row the walk reaches into the stage that writes it.</summary>
+    private void Plan(
+        EntityBaseCore entity,
+        bool cascadeSave,
+        HashSet<UniqueValue> deleted,
+        bool belowHeldBack
+    )
     {
-        if (!entity.IsAdded || !ValuesOf(entity).Any(_deletedValues.Contains))
+        if (entity.IsRemoved)
+        {
+            _deletions.Add(entity);
+            _deferred.Add(entity);
+            return;
+        }
+
+        if (!belowHeldBack && TakesDeletedValue(entity, deleted))
+        {
+            _heldBack.Add(entity);
+            _deferred.Add(entity);
+            belowHeldBack = true;
+        }
+
+        if (!cascadeSave)
+        {
+            return;
+        }
+
+        foreach (var child in entity.EnumerateCascadeChildren())
+        {
+            Plan(child, cascadeSave, deleted, belowHeldBack);
+        }
+    }
+
+    /// <summary>
+    /// Returns whether a new row takes the primary key or a unique value of a deleted row, or an updated row takes a unique
+    /// value (other than the primary key) of one.
+    /// </summary>
+    private static bool TakesDeletedValue(EntityBaseCore entity, HashSet<UniqueValue> deleted)
+    {
+        if (deleted.Count == 0)
         {
             return false;
         }
 
-        _heldBack.Add(entity);
-        return true;
+        if (entity.IsAdded)
+        {
+            return ValuesOf(entity, includeKey: true).Any(deleted.Contains);
+        }
+
+        return entity.IsUpdated && ValuesOf(entity, includeKey: false).Any(deleted.Contains);
     }
 
-    /// <summary>Collects the values of the rows the save deletes (a deleted row's subtree too, when deleting cascades).</summary>
-    private static void CollectDeleted(
+    /// <summary>
+    /// Collects the values of the rows the save deletes (a deleted row's subtree too, when deleting cascades) and returns
+    /// whether the walk from <paramref name="entity"/> reaches a deleted row.
+    /// </summary>
+    private static bool CollectDeleted(
         EntityBaseCore entity,
         bool cascadeSave,
         bool cascadeDelete,
@@ -349,16 +438,20 @@ public static class GeneratedDisplayNames
                 }
             }
 
-            return;
+            return true;
         }
+
+        var deletes = false;
 
         if (cascadeSave)
         {
             foreach (var child in entity.EnumerateCascadeChildren())
             {
-                CollectDeleted(child, true, cascadeDelete, deleted);
+                deletes |= CollectDeleted(child, true, cascadeDelete, deleted);
             }
         }
+
+        return deletes;
     }
 
     /// <summary>Collects the values of a subtree a deletion takes with it (a new row there has no stored row to free).</summary>
@@ -377,19 +470,20 @@ public static class GeneratedDisplayNames
 
     private static void AddValues(EntityBaseCore entity, HashSet<UniqueValue> deleted)
     {
-        foreach (var value in ValuesOf(entity))
+        foreach (var value in ValuesOf(entity, includeKey: true))
         {
             deleted.Add(value);
         }
     }
 
-    /// <summary>Returns the entity's primary key and unique values (a group with a null part is left out).</summary>
-    private static IEnumerable<UniqueValue> ValuesOf(EntityBaseCore entity)
+    /// <summary>Returns the entity's unique values, with or without the primary key (a group with a null part is left out).</summary>
+    private static IEnumerable<UniqueValue> ValuesOf(EntityBaseCore entity, bool includeKey)
     {
         var type = entity.GetType();
-        var groups = _uniqueGroups.GetOrAdd(type, ResolveUniqueGroups);
+        var resolved = _uniqueGroups.GetOrAdd(type, ResolveUniqueGroups);
+        var groups = resolved.Groups;
 
-        for (var index = 0; index < groups.Length; index++)
+        for (var index = includeKey || !resolved.FirstIsKey ? 0 : 1; index < groups.Length; index++)
         {
             var properties = groups[index];
             var parts = new object[properties.Length];
@@ -414,12 +508,13 @@ public static class GeneratedDisplayNames
     }
 
     /// <summary>Resolves the primary key ([Key]){{ if emit_unique_constraint_attr || runtime_package_export }} and the [UniqueConstraint] groups{{ end }} of an entity type.</summary>
-    private static PropertyInfo[][] ResolveUniqueGroups(Type type)
+    private static UniqueGroups ResolveUniqueGroups(Type type)
     {
         var groups = new List<PropertyInfo[]>();
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var key = properties.FirstOrDefault(property => property.GetCustomAttribute<KeyAttribute>() is not null);
 
-        if (properties.FirstOrDefault(property => property.GetCustomAttribute<KeyAttribute>() is not null) is { } key)
+        if (key is not null)
         {
             groups.Add([key]);
         }
@@ -438,7 +533,15 @@ public static class GeneratedDisplayNames
         }
 {{~ end ~}}
 
-        return [.. groups];
+        return new UniqueGroups([.. groups], key is not null);
+    }
+
+    /// <summary>The property groups of an entity type whose values must be unique, and whether the first is the primary key.</summary>
+    private sealed class UniqueGroups(PropertyInfo[][] groups, bool firstIsKey)
+    {
+        public PropertyInfo[][] Groups { get; } = groups;
+
+        public bool FirstIsKey { get; } = firstIsKey;
     }
 
     /// <summary>One unique value of a row: the entity type, the property group and the normalized values.</summary>

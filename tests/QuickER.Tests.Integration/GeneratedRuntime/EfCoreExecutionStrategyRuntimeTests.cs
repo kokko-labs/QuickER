@@ -192,6 +192,64 @@ public sealed class EfCoreExecutionStrategyRuntimeTests : IDisposable
             Quantity = QuantityValue.Create(1),
         };
 
+    /// <summary>
+    /// 区切り 43（判断 E）: 付け替えて元の親を消す保存は、保存先の外部キーを試行ごとに読み直す。2 回目の試行は変更追跡を空にして
+    /// 登録し直すので、1 回目に読んだ値は残っていない
+    /// </summary>
+    [Fact(
+        DisplayName = "EF Core: 再試行する実行戦略で 1 回目のコミットが失敗しても、注文を付け替えて元の顧客を消す保存は 2 回目の試行で成立する"
+    )]
+    public async Task MoveAndDelete_UnderRetryingStrategy_ReadsStoredForeignKeysAgain()
+    {
+        await ResetAndSeedAsync();
+        var seeding = BuildProvider();
+        var seedCustomers = seeding.GetRequiredService<ICustomerRepository>();
+
+        foreach (var (id, name) in new[] { (2, "Bob"), (3, "Carol") })
+        {
+            await seedCustomers.InsertAsync(
+                new CustomerEntity
+                {
+                    CustomerId = CustomerIdValue.Create(id),
+                    Name = NameValue.Create(name),
+                },
+                Ct
+            );
+        }
+
+        var seedOrder = NewOrder(20);
+        seedOrder.CustomerId = CustomerIdValue.Create(2);
+        await seeding.GetRequiredService<IOrderRepository>().InsertAsync(seedOrder, Ct);
+
+        var interceptor = new FailFirstCommit();
+        var provider = BuildProvider(interceptor);
+        var customers = provider.GetRequiredService<ICustomerRepository>();
+        var oldCustomer = (await customers.GetByIdAsync(CustomerIdValue.Create(2), Ct))!;
+        oldCustomer.MarkRemoved();
+        var newCustomer = (await customers.GetByIdAsync(CustomerIdValue.Create(3), Ct))!;
+        var order = (
+            await provider
+                .GetRequiredService<IOrderRepository>()
+                .GetByIdAsync(OrderIdValue.Create(20), Ct)
+        )!;
+        order.CustomerId = CustomerIdValue.Create(3);
+        order.MarkUpdated();
+        newCustomer.Orders.Add(order);
+
+        var rows = await customers.SaveAsync([oldCustomer, newCustomer], cancellationToken: Ct);
+
+        rows.Should().Be(2);
+        interceptor.Commits.Should().Be(2, "1 回目のコミットは失敗し、2 回目の試行でやり直した");
+        (await customers.GetByIdAsync(CustomerIdValue.Create(2), Ct)).Should().BeNull();
+        (
+            await provider
+                .GetRequiredService<IOrderRepository>()
+                .GetByIdAsync(OrderIdValue.Create(20), Ct)
+        )!
+            .CustomerId.Value.Should()
+            .Be(3);
+    }
+
     [Fact(DisplayName = "EF Core: 再試行する実行戦略でも Save フックありの保存が成立する")]
     public async Task SaveWithHooks_UnderRetryingStrategy_Succeeds()
     {

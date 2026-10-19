@@ -367,6 +367,40 @@ public sealed record AddChildCustomerOp(string Slot, CustomerRow Row) : ParityOp
     }
 }
 
+/// <summary>
+/// 行を組み立てて指定の状態にし、スロットのグラフの行（<paramref name="ParentKey"/>）の子のコレクションへ足す
+/// （顧客の下の顧客・顧客の下の注文・注文の下の明細）。保存先の行を読まずに組み立てるので、付け替えた子の元の親は
+/// 保存先にしか無い（リモートや切り離したエンティティの形）
+/// </summary>
+public sealed record AddChildOp(string Slot, string ParentKey, ParityRow Row, RowState State)
+    : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var child = Row.Build();
+        NewRootOp.ApplyState(child, State);
+
+        switch (Find(backend, Slot, ParentKey), child)
+        {
+            case (CustomerEntity parent, CustomerEntity customer):
+                parent.Customers.Add(customer);
+                break;
+            case (CustomerEntity parent, OrderEntity order):
+                parent.Orders.Add(order);
+                break;
+            case (OrderEntity parent, OrderLineEntity line):
+                parent.OrderLines.Add(line);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"'{ParentKey}' cannot hold {child.GetType().Name}."
+                );
+        }
+
+        return Task.FromResult("added");
+    }
+}
+
 /// <summary>スロットのグラフの注文のメモを書き換え、Updated にする（Added のままの行は Added のまま）</summary>
 public sealed record EditMemoOp(string Slot, int OrderId, string? Memo) : ParityOp
 {
@@ -622,7 +656,7 @@ public sealed record ReadBlobOp(int OrderId, string Column) : ParityOp
 /// <summary>期待を確かめるときに渡す、実装先と直前の手の観測</summary>
 /// <param name="Kind">実装先</param>
 /// <param name="Backend">実装先（スロットを読む）</param>
-/// <param name="Previous">直前の手の観測（戻り値・保存先・フックの生の呼び出し）</param>
+/// <param name="Previous">直前の手（期待の手を除く）の観測（戻り値・保存先・フックの生の呼び出し）</param>
 public sealed record ParityExpectation(
     ParityBackendKind Kind,
     ParityBackend Backend,

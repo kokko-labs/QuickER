@@ -342,6 +342,7 @@ public static class GeneratedFixedTypeNames
             "DeleteBehavior",
             "Dictionary",
             "DisplayAttribute",
+            "EF",
             "EntityEntry",
             "EntityState",
             "Enum",
