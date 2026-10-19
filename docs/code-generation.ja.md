@@ -999,6 +999,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - 行を削除するグラフ保存は、`SaveChanges` の前ごとに、同じトランザクションの中で、更新する行の保存先の外部キーを読みます。
   これで EF Core は、保存で削除する親から移した行を知り、その行を削除より先に更新します。
   読まないと、コンテキストの外で組み立てたエンティティは、はじめから新しい親を指していたように見えます
+- 単一列の整数の主キー（ほかに EF Core が値を作れない単一列の主キー）は `ValueGeneratedNever()` で構成します。EF Core も、アプリが決めたキーを、`0` を含めて、QuickER 版 Repository と同じくそのまま送ります。
+  構成しないと、EF Core は整数のキーを DB が値を作る列とみなし、`0` のキーを送りません。
+  採番の列（IDENTITY）である主キーは EF Core の規約のままにし、DB が値を決めます。
+  `Guid` の主キーも EF Core の規約のままです。EF Core はキーが `Guid.Empty` のとき値を作り、QuickER 版 Repository は `Guid.Empty` をそのまま書きます
 - 再試行する実行戦略（SQL Server の `EnableRetryOnFailure` など）に対応します。
   グラフ保存とカスケードの `ExecuteDeleteAsync` は実行戦略の中で動き、試行のたびに最初からやり直します。
   Save フックがあると、Before と After は試行の回数だけ走ります（DB への書き込みは失敗した試行と一緒に巻き戻りますが、DB の外への副作用は繰り返されます）。

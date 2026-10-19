@@ -309,6 +309,9 @@ internal sealed class CSharpEfCorePropertyConfigModel
     /// <summary>主キーでない ID 列（ValueGeneratedOnAddOrUpdate 用）かどうか</summary>
     public required bool IsIdentity { get; init; }
 
+    /// <summary>採番でない単一列の主キー（ValueGeneratedNever 用）かどうか</summary>
+    public required bool IsValueGeneratedNever { get; init; }
+
     /// <summary>値オブジェクト型かどうか（HasConversion 構成の要否判定）</summary>
     public required bool IsValueObject { get; init; }
 

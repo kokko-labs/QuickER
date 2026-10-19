@@ -983,6 +983,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - A graph save that deletes rows reads the stored foreign keys of the rows it updates before each `SaveChanges`, in the same transaction.
   EF Core then knows that a row moved away from a parent the save deletes, and updates it before the deletion.
   Without the read, an entity built outside the context looks as if it had always pointed at its new parent.
+- A single-column integer primary key, or another single-column key EF Core cannot generate a value for, is configured with `ValueGeneratedNever()`, so EF Core sends the key the application set, `0` included, as the QuickER Repository does.
+  Without it, EF Core treats an integer key as one the database generates, and leaves out a key of `0`.
+  A primary key marked as an identity column keeps EF Core's convention, so the database assigns it.
+  A `Guid` primary key keeps EF Core's convention too: EF Core generates a value when the key is `Guid.Empty`, where the QuickER Repository writes `Guid.Empty` as it is.
 - A retrying execution strategy (such as SQL Server's `EnableRetryOnFailure`) is supported.
   A graph save and a cascading `ExecuteDeleteAsync` run inside the strategy, and every attempt starts over from scratch.
   With save hooks, Before and After run once per attempt: their database writes roll back with the failed attempt, but a side effect outside the database is repeated.

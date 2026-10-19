@@ -92,7 +92,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                     .GetPrimaryKeyColumnsInOrder()
                     .Select(column => _nameConverter.ToPropertyName(column.Name))
                     .ToList(),
-                Properties = entity.Columns.Select(BuildEfCorePropertyConfig).ToList(),
+                Properties = entity
+                    .Columns.Select(column => BuildEfCorePropertyConfig(entity, column))
+                    .ToList(),
                 UniqueIndexes = BuildEfCoreUniqueIndexes(entity),
                 Relationships = relationshipsByPrincipal.TryGetValue(
                     entity.Id,
@@ -150,10 +152,12 @@ internal sealed partial class CSharpGenerationModelBuilder
         entity.Columns.Any(column => column.IsPrimaryKey);
 
     /// <summary>カラム定義から EF Core のスカラープロパティ構成モデルを構築する</summary>
-    private CSharpEfCorePropertyConfigModel BuildEfCorePropertyConfig(Column column)
+    private CSharpEfCorePropertyConfigModel BuildEfCorePropertyConfig(Entity entity, Column column)
     {
         var typeInfo = _columnTypes[column.Id];
         var valueObject = ResolveValueObject(column);
+        // 素の CLR 型が Guid か（ValueGeneratedNever を出さない主キーの判定に使う。下の IsValueGeneratedNever を参照）
+        var isGuid = typeInfo.TypeName.TrimEnd('?') == "Guid";
 
         return new CSharpEfCorePropertyConfigModel
         {
@@ -174,6 +178,17 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsComputed = column.IsComputed,
             // 主キーでない ID 列も DB が値を作るので、EF Core にも書かせない（主キーはアプリが書くため対象外）
             IsIdentity = IsWriteExcludedIdentity(column),
+            // EF Core が意味のある値を作れない単一列の主キー（整数など）は、アプリが決めたキーをそのまま送らせる。EF Core は
+            // 整数の単一列の主キーを既定で DB が値を作る列とみなし、0 を「キー未設定」として送らない（QuickER 版は 0 もそのまま書く）。
+            // 規約のままにするのは 2 つ＝採番の主キー（IsIdentity。DB の採番で動く挿入を壊さない）と Guid の主キー（EF Core は
+            // Guid.Empty のとき値を作って挿入するので、付けると Guid.Empty がそのまま書かれ、EF Core の採番に頼るコードが 2 行目から
+            // 主キーの重複になる）。Guid の判定は素の CLR 型で行う（値オブジェクトの Guid のキーは変換がある列で、EF Core は
+            // もともと値を作らないので、付けても付けなくても同じ）。複合主キーは EF Core が値を作らないので出さない
+            IsValueGeneratedNever =
+                column.IsPrimaryKey
+                && !column.IsIdentity
+                && !isGuid
+                && entity.Columns.Count(other => other.IsPrimaryKey) == 1,
             IsValueObject = valueObject is not null,
             ValueObjectClassName = valueObject?.ClassName ?? string.Empty,
         };

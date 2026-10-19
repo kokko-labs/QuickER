@@ -311,6 +311,24 @@ public static class BackendParityScenarios
                 ParityExpect.StateRows("paged-delete-changes-nothing", 8),
             ]
         ),
+        // 区切り 43（#1）: 主キー 0 の行も、アプリが決めたキーのまま挿入・グラフ保存する。同じ 0 の 2 行目は主キーの重複。
+        // このフィクスチャのキーは値オブジェクト（EF Core は変換のある列の値を作らない）。素の int のキーは
+        // BinaryColumnRuntimeTestsBase と SqlServerIdentityColumnRuntimeTests が見る
+        new(
+            "insert-and-save-key-zero",
+            Basic,
+            [
+                new InsertOp(new CustomerRow(0, "Zed")),
+                ParityExpect.Succeeds("key-zero-insert-succeeds"),
+                new NewRootOp(S, new OrderRow(0, 0, 1m), RowState.Added),
+                new SaveOp(S),
+                ParityExpect.Succeeds("key-zero-save-succeeds"),
+                new LoadOp("C", "orders", 0),
+                ParityExpect.Outcome("key-zero-row-is-stored", "loaded"),
+                new InsertOp(new CustomerRow(0, "Again")),
+                ParityExpect.Throws("key-zero-duplicate-is-refused", "store-rejected"),
+            ]
+        ),
         // 何も削除しない保存は、新しい行も並びどおりに保存する（後回しにするのは削除を含む保存だけ）
         new(
             "graph-save-without-deletion-keeps-order",

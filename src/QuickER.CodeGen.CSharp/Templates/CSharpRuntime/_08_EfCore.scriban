@@ -61,7 +61,7 @@ public partial class QuickErDbContext : DbContext
             entity.Ignore(e => e.{{ member }});
 {{~ end ~}}
 {{~ for prop in cfg.properties ~}}
-            entity.Property(e => e.{{ prop.property_name }}).HasColumnName("{{ prop.column_name }}"){{ if prop.is_required }}.IsRequired(){{ end }}{{ if prop.max_length }}.HasMaxLength({{ prop.max_length }}){{ end }}{{ if prop.is_non_unicode }}.IsUnicode(false){{ end }}{{ if prop.precision }}.HasPrecision({{ prop.precision }}{{ if prop.scale }}, {{ prop.scale }}{{ end }}){{ end }}{{ if prop.is_row_version }}.IsRowVersion(){{ end }}{{ if prop.is_computed || prop.is_identity }}.ValueGeneratedOnAddOrUpdate(){{ end }}{{ if prop.is_value_object }}.HasConversion(v => v!.Value, v => {{ prop.value_object_class_name }}.Create(v!)){{ end }};
+            entity.Property(e => e.{{ prop.property_name }}).HasColumnName("{{ prop.column_name }}"){{ if prop.is_required }}.IsRequired(){{ end }}{{ if prop.max_length }}.HasMaxLength({{ prop.max_length }}){{ end }}{{ if prop.is_non_unicode }}.IsUnicode(false){{ end }}{{ if prop.precision }}.HasPrecision({{ prop.precision }}{{ if prop.scale }}, {{ prop.scale }}{{ end }}){{ end }}{{ if prop.is_row_version }}.IsRowVersion(){{ end }}{{ if prop.is_computed || prop.is_identity }}.ValueGeneratedOnAddOrUpdate(){{ end }}{{ if prop.is_value_generated_never }}.ValueGeneratedNever(){{ end }}{{ if prop.is_value_object }}.HasConversion(v => v!.Value, v => {{ prop.value_object_class_name }}.Create(v!)){{ end }};
 {{~ end ~}}
 {{~ for unique in cfg.unique_indexes ~}}
             entity.HasIndex(e => {{ if unique.size == 1 }}e.{{ unique[0] }}{{ else }}new { {{ for p in unique }}e.{{ p }}{{ if !for.last }}, {{ end }}{{ end }} }{{ end }}).IsUnique();
