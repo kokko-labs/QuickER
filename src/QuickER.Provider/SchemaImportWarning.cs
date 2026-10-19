@@ -52,6 +52,11 @@ public enum SchemaImportWarningKind
     /// 「取込時に参照先テーブルが実在しなかった」ことを指す（<c>CREATE TABLE</c> 時に参照先の実在を
     /// 検査しないため、存在しないテーブルを参照する定義・参照先を後から DROP した定義が起こり得る）。
     /// </para>
+    /// <para>
+    /// MySQL も、接続先 DB に無い表を参照する外部キー（<c>FOREIGN_KEY_CHECKS = 0</c> で作った・参照先を後から落とした）を
+    /// この警告で告げる（<c>Detail</c> は範囲外と同じ <c>スキーマ.テーブル</c>）。大文字小文字の衝突で捨てた表への参照は
+    /// <see cref="TableNameCollision"/> が告げるので、この警告にしない。
+    /// </para>
     /// </remarks>
     ForeignKeyOutsideScope,
 

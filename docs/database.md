@@ -145,6 +145,7 @@ The system-generated columns a function-based index adds to the table (`SYS_NC�
 A foreign key that points outside this scope cannot become a relationship, because its parent table is not in the diagram.
 Such a key is skipped and reported (see below) rather than dropped silently.
 SQLite does not check that a foreign key's parent table exists when the table is created, so a database can carry keys that point at a table that is not there; those are treated the same way.
+So are MySQL keys whose parent table is not in the connected database (created with `FOREIGN_KEY_CHECKS = 0`, or left behind when the parent table was dropped that way).
 A table whose name contains a dot is not imported, on SQLite as on the other DBMSs, because the diagram reads the first dot of a table name as a schema qualifier (on SQLite, the name of an attached database).
 See the import warnings below.
 
@@ -169,7 +170,7 @@ The list has one heading per kind with the count, followed by one line per place
 - On MySQL, a column's own **collation** (when it differs from the table default), **`INVISIBLE`**, **`ON UPDATE`** and **`SRID`** are not imported, and each column is named
 - A **name with spaces around it** (a table, column, foreign key or unique constraint name) is imported without the spaces, and each name is reported.
   MySQL does not allow trailing spaces, so only leading ones occur there
-- A **foreign key that points outside the imported scope** is skipped (on SQLite this covers a key whose parent table does not exist)
+- A **foreign key that points outside the imported scope** is skipped (on SQLite and MySQL this covers a key whose parent table does not exist)
 - A **disabled constraint** (`DISABLE` on Oracle, a foreign key turned off with `NOCHECK CONSTRAINT` on SQL Server) is not imported
 - A table whose **columns could not be read at all** is imported without columns
 - One of two tables whose **names differ only in letter case or surrounding spaces** is skipped, because the diagram cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, SQL Server does in a database with a case-sensitive collation, and SQLite, which folds only ASCII letters, does for names such as `Äpfel` and `äpfel`)
