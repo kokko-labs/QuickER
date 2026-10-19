@@ -626,8 +626,8 @@ public class SyncSupportGenerationTests
         CountOccurrences(journalingBase, "return RecordAndWriteAsync(")
             .Should()
             .Be(
-                5,
-                "Update・BulkInsert・Delete・SaveAsync×2 はロックの内側で記録と書き込みを 1 組にする"
+                6,
+                "Update・BulkInsert・Delete・SaveAsync×2・無制限バイナリ列の書き込みはロックの内側で記録と書き込みを 1 組にする"
             );
         journalingBase.Should().Contain("await RecordAndWriteAsync(", "Insert も同じ");
         journalingBase.Should().Contain("Journal.Gate.WriteExclusiveAsync(");

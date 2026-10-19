@@ -596,6 +596,35 @@ public sealed record NullKeyOp(string Table, bool Delete) : ParityOp
         };
 }
 
+/// <summary>
+/// 注文の除外 blob の Stream アクセサ（とファイル糖衣）を、null のキーで呼ぶ（EF Core は Stream アクセサを持たない＝NotSupported）
+/// </summary>
+public sealed record NullKeyBlobOp(bool Write, bool ViaFile) : ParityOp
+{
+    public override string Name =>
+        $"NullKeyBlob:{(Write ? "Write" : "Read")}{(ViaFile ? ":File" : "")}";
+
+    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.EfCore;
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        // ファイル糖衣は、ファイルに触れる前に断る（書き込み元のファイルが無くても、null のキーを先に報告する）
+        var missing = Path.Combine(Path.GetTempPath(), $"quicker-null-key-{Guid.NewGuid():N}.bin");
+
+        return (Write, ViaFile) switch
+        {
+            (false, false) =>
+                $"read={await backend.Orders.ReadPayloadAsync(null!, new MemoryStream(), ct)}",
+            (true, false) =>
+                $"written={await backend.Orders.WritePayloadAsync(null!, new MemoryStream([1, 2]), null, ct)}",
+            (false, true) =>
+                $"read={await backend.Orders.ReadPayloadToFileAsync(null!, missing, ct)}",
+            (true, true) =>
+                $"written={await backend.Orders.WritePayloadFromFileAsync(null!, missing, ct)}",
+        };
+    }
+}
+
 /// <summary>ほかの操作を、取り消し済みのトークンで流す</summary>
 public sealed record CanceledOp(ParityOp Inner) : ParityOp
 {

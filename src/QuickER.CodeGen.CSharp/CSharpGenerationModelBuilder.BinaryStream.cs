@@ -89,6 +89,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             return EmptyBinaryStreamBlocks;
         }
 
+        // キーが参照型（文字列・値オブジェクト・byte[]）なら null を渡され得る。契約の XmlDoc とファイル糖衣の入口の検査は
+        // そのときだけ出す（値型のキーに null の検査を書くと、常に偽の比較として警告になる）
+        var keyColumn = entity.Columns.First(column => column.IsPrimaryKey);
+        var keyCanBeNull =
+            ResolveValueObject(keyColumn) is not null || _columnTypes[keyColumn.Id].IsReferenceType;
+
         // リモート契約が生成される構成では契約とファイル糖衣の対象をリモート面へ移す
         // （リモート面 ON はネットワーク境界を越えられる操作の定義に合致。全機能面はリモート面を継承）。
         var remoteContracts = options.GeneratesRemoteContracts;
@@ -106,7 +112,12 @@ internal sealed partial class CSharpGenerationModelBuilder
         foreach (var (columnNameXmlDoc, propertyName) in columns)
         {
             contractMembers.Add(
-                BuildBinaryStreamContractMember(columnNameXmlDoc, propertyName, keyTypeName)
+                BuildBinaryStreamContractMember(
+                    columnNameXmlDoc,
+                    propertyName,
+                    keyTypeName,
+                    keyCanBeNull
+                )
             );
             thinMembers.Add(
                 BuildBinaryStreamThinImplMember(entityClassName, propertyName, keyTypeName)
@@ -117,7 +128,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                     columnNameXmlDoc,
                     propertyName,
                     fileExtensionsTarget,
-                    keyTypeName
+                    keyTypeName,
+                    keyCanBeNull
                 )
             );
             remoteClientMembers.Add(BuildBinaryStreamRemoteClientMember(propertyName, keyTypeName));
@@ -145,9 +157,14 @@ internal sealed partial class CSharpGenerationModelBuilder
     private static string BuildBinaryStreamContractMember(
         string columnNameXmlDoc,
         string propertyName,
-        string keyTypeName
+        string keyTypeName,
+        bool keyCanBeNull
     )
     {
+        // 参照型のキーの null は、Stream アクセサを持つ実装（EF Core 版は NotSupportedException）が読み書きの前に断る
+        var nullKey = keyCanBeNull
+            ? "    /// <exception cref=\"ArgumentNullException\"><paramref name=\"id\"/> is null (refused before anything is read, written or sent).</exception>\n"
+            : string.Empty;
         var builder = new StringBuilder();
         builder
             .Append("    /// <summary>Reads the ")
@@ -155,6 +172,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append(
                 " column into the destination stream (unbounded binary column, O(chunk) streaming; true = written, false = no row or NULL).</summary>\n"
             )
+            .Append(nullKey)
             .Append("    Task<bool> Read")
             .Append(propertyName)
             .Append("Async(")
@@ -166,6 +184,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append(
                 " column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length, and a stream that does not yield exactly that many bytes fails; true = updated, false = no row).</summary>\n"
             )
+            .Append(nullKey)
             .Append("    Task<bool> Write")
             .Append(propertyName)
             .Append("Async(")
@@ -243,9 +262,14 @@ internal sealed partial class CSharpGenerationModelBuilder
         string columnNameXmlDoc,
         string propertyName,
         string interfaceName,
-        string keyTypeName
+        string keyTypeName,
+        bool keyCanBeNull
     )
     {
+        // null のキーは、ファイルに触れる前に断る（Stream 版へ委譲する前に一時ファイルを作り、書き込み元のファイルを開くため）
+        var nullKeyCheck = keyCanBeNull
+            ? "        ArgumentNullException.ThrowIfNull(id);\n"
+            : string.Empty;
         var builder = new StringBuilder();
         builder
             .Append("    /// <summary>Reads the ")
@@ -266,6 +290,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        CancellationToken cancellationToken = default\n")
             .Append("    )\n    {\n")
             .Append("        ArgumentNullException.ThrowIfNull(repository);\n")
+            .Append(nullKeyCheck)
             .Append("        return await UnboundedBinaryColumns\n")
             .Append("            .ReadToFileAsync(path, destination => repository.Read")
             .Append(propertyName)
@@ -290,6 +315,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        CancellationToken cancellationToken = default\n")
             .Append("    )\n    {\n")
             .Append("        ArgumentNullException.ThrowIfNull(repository);\n")
+            .Append(nullKeyCheck)
             .Append("        await using var source = File.OpenRead(path);\n")
             .Append("        return await repository.Write")
             .Append(propertyName)

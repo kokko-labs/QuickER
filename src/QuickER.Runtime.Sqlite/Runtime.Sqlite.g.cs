@@ -562,6 +562,11 @@ public abstract class SqliteRepositoryCore<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         ArgumentNullException.ThrowIfNull(destination);
 
         await using var connection = _connectionFactory.CreateConnection();
@@ -594,6 +599,11 @@ public abstract class SqliteRepositoryCore<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 

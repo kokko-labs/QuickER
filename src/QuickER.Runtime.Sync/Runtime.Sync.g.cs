@@ -8804,13 +8804,20 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     /// <param name="columnName">The column the write stores a value in.</param>
     /// <param name="write">Performs the business write.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null (refused before anything is recorded).</exception>
     protected Task<TResult> RecordUnboundedBinaryWriteAsync<TResult>(
         TKey id,
         string columnName,
         Func<Task<TResult>> write,
         CancellationToken cancellationToken
-    ) =>
-        RecordAndWriteAsync(
+    )
+    {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        return RecordAndWriteAsync(
             () =>
                 Journal.RecordManyAsync(
                     [
@@ -8829,6 +8836,7 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
             write,
             cancellationToken
         );
+    }
 
     /// <inheritdoc />
     public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>

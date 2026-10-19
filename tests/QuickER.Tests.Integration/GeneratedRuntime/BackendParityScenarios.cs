@@ -333,6 +333,23 @@ public static class BackendParityScenarios
                     "null-key-delete-order",
                     "throws ArgumentNullException param=id"
                 ),
+                new NullKeyBlobOp(Write: false, ViaFile: false),
+                ParityExpect.Outcome("null-key-read-blob", "throws ArgumentNullException param=id"),
+                new NullKeyBlobOp(Write: true, ViaFile: false),
+                ParityExpect.Outcome(
+                    "null-key-write-blob",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyBlobOp(Write: false, ViaFile: true),
+                ParityExpect.Outcome(
+                    "null-key-read-blob-to-file",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyBlobOp(Write: true, ViaFile: true),
+                ParityExpect.Outcome(
+                    "null-key-write-blob-from-file",
+                    "throws ArgumentNullException param=id"
+                ),
                 ParityExpect.StateRows("null-key-changes-nothing", 8),
             ]
         ),

@@ -9591,6 +9591,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         CancellationToken cancellationToken
     )
     {
+        // A null key is refused before the request is sent, as the direct implementations refuse it
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         ArgumentNullException.ThrowIfNull(destination);
 
         var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
@@ -9647,6 +9653,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         CancellationToken cancellationToken
     )
     {
+        // A null key is refused before the request is sent, as the direct implementations refuse it
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
 
         // source=null sets the column to NULL (DELETE); this differs in meaning from a zero-byte PUT (empty body)
