@@ -530,6 +530,40 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
     }
 
     /// <summary>
+    /// 大文字小文字だけ違う列名の衝突で捨てた列の一意制約と外部キーが、採用した列へ付け替わらないことを検証する
+    /// （主キーと説明と同じく、一意制約・外部キーの構成列も綴りまで一致で引き当てる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] Oracle: 衝突で捨てた列の一意制約・外部キーは、採用した列へ付け替わらない"
+    )]
+    public async Task Import_ColumnNamesDifferingOnlyInCase_DoNotMoveConstraints()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE P (ID NUMBER(10) PRIMARY KEY, DUP NUMBER(10), "dup" NUMBER(10) UNIQUE);
+            CREATE TABLE T (ID NUMBER(10) PRIMARY KEY, DUP NUMBER(10), "dup" NUMBER(10) UNIQUE REFERENCES P (ID), R NUMBER(10) REFERENCES P ("dup"));
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        CollidedColumnImportAssertions.ShouldNotMoveConstraintsOfDroppedColumns(
+            result,
+            "P",
+            "T",
+            "ID",
+            "DUP",
+            "dup",
+            "R"
+        );
+    }
+
+    /// <summary>
     /// 仮想列が <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、
     /// 式の喪失が報告されることを検証する。
     /// </summary>

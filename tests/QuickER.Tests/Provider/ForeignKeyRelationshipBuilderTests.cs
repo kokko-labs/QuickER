@@ -30,8 +30,7 @@ public class ForeignKeyRelationshipBuilderTests
 
         foreach (var c in columns)
         {
-            entry.Entity.Columns.Add(c);
-            entry.ColumnsByName[c.Name] = c;
+            entry.AddColumn(c, c.Name);
         }
 
         return entry;
@@ -469,7 +468,7 @@ public class ForeignKeyRelationshipBuilderTests
     [Fact(DisplayName = "複合 FK の列順が主キーと逆でも集合一致で 1 対 1")]
     public void CompositeForeignKey_OrderInsensitiveSetMatch()
     {
-        // Child の PK は (A,B)。FK 列は逆順 (B,A) かつ大小混在で投入する
+        // Child の PK は (A,B)。FK 列は逆順 (B,A) で投入する（構成列は綴りまで一致で引くので、カタログと同じく表の列の綴りで渡す）
         var child = Table("Child", "Child", Col("A", pk: true), Col("B", pk: true));
         var parent = Table("Parent", "Parent", Col("PA", pk: true), Col("PB", pk: true));
 
@@ -483,7 +482,7 @@ public class ForeignKeyRelationshipBuilderTests
         builder.Add(
             "FK_Child_Parent",
             "Child",
-            "b",
+            "B",
             "Parent",
             "PB",
             ForeignKeyReferentialAction.NoAction,
@@ -492,7 +491,7 @@ public class ForeignKeyRelationshipBuilderTests
         builder.Add(
             "FK_Child_Parent",
             "Child",
-            "a",
+            "A",
             "Parent",
             "PA",
             ForeignKeyReferentialAction.NoAction,
@@ -523,8 +522,7 @@ public class UniqueConstraintImportBuilderTests
         foreach (var name in columnNames)
         {
             var column = new Column { Name = name, DataType = "int" };
-            entry.Entity.Columns.Add(column);
-            entry.ColumnsByName[name] = column;
+            entry.AddColumn(column, name);
         }
 
         return entry;

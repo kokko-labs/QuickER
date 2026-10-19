@@ -86,6 +86,8 @@ public sealed class UniqueConstraintImportBuilder
     /// <remarks>
     /// 列名 → カラム ID の解決に失敗する列を 1 つでも含む制約はスキップする（列一覧に現れない
     /// 式インデックス等を意味モデルへ載せないため）。5 方言のインポーターが共有する変換経路。
+    /// 構成列は綴りまで一致で引く（<see cref="SchemaTableEntry.TryGetColumnExact"/>）＝大文字小文字・前後の空白だけ違う名前の
+    /// 衝突で捨てた列の制約を、採用した列へ付け替えない（5 方言のカタログは構成列を表の列の綴りで返す）。
     /// </remarks>
     public static void Attach(
         IReadOnlyDictionary<string, SchemaTableEntry> tables,
@@ -111,7 +113,7 @@ public sealed class UniqueConstraintImportBuilder
 
                 foreach (var columnName in constraint.ColumnNames)
                 {
-                    if (!entry.ColumnsByName.TryGetValue(columnName, out var column))
+                    if (!entry.TryGetColumnExact(columnName, out var column))
                     {
                         allResolved = false;
                         break;

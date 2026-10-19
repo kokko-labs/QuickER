@@ -177,7 +177,8 @@ The list has one heading per kind with the count, followed by one line per place
   Imported as it is, the table would be another table to the rest of QuickER: the generated QuickER Repository would report that the table does not exist, and DDL and schema sync would create another table, or fail when that schema does not exist.
   On SQL Server this covers a table in `dbo` whose name contains a dot and every table in a schema whose name contains a dot.
   A dotted table name in another schema reads back as the same table (`a.b.t` is the table `b.t` in the schema `a`), so it is imported
-- Likewise, one of two **columns of a table whose names differ only in letter case or surrounding spaces** is skipped (the later one in declaration order), and the key flags, descriptions and foreign keys of the skipped column do not attach to the one that is kept
+- Likewise, one of two **columns of a table whose names differ only in letter case or surrounding spaces** is skipped (the later one in declaration order).
+  The key flags, descriptions, unique constraints and foreign keys of the skipped column do not attach to the one that is kept (a unique constraint or foreign key that includes the skipped column is not imported)
 - A **computed or generated column** (a SQL Server computed column, `GENERATED ALWAYS AS` on MySQL / PostgreSQL / SQLite, an Oracle virtual column) is imported as a read-only column without its expression.
   The diagram does not model expressions, so generated DDL creates an ordinary column (with a comment asking for the expression to be added by hand).
   Generated code leaves the column out of INSERT / UPDATE (see [the code generation notes](code-generation.md#computed--generated-columns))

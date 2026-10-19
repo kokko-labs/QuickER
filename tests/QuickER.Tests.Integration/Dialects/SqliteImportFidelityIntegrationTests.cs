@@ -603,6 +603,89 @@ CREATE TABLE mixed_pk (
     }
 
     /// <summary>
+    /// ASCII 以外の大文字小文字だけが違う列名の衝突で捨てた列の一意制約と外部キーが、採用した列へ付け替わらないことを検証する
+    /// （主キーと説明と同じく、一意制約・外部キーの構成列も綴りまで一致で引き当てる。親の列は宣言の綴りで返るので、
+    /// SQLite と同じ照合〔ASCII だけ大文字小文字を無視〕で採用した列の綴りへ直す＝捨てた "ä" は "Ä" に一致しない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 衝突で捨てた列の一意制約・外部キーは、採用した列へ付け替わらない"
+    )]
+    public async Task Import_ColumnNamesDifferingOnlyInCase_DoNotMoveConstraints()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE p (id INTEGER PRIMARY KEY, ""Ä"" INT, ""ä"" INT UNIQUE);
+CREATE TABLE t (id INTEGER PRIMARY KEY, ""Ä"" INT, ""ä"" INT UNIQUE REFERENCES p (id), r INT REFERENCES p (""ä""));
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        CollidedColumnImportAssertions.ShouldNotMoveConstraintsOfDroppedColumns(
+            result,
+            "p",
+            "t",
+            "id",
+            "Ä",
+            "ä",
+            "r"
+        );
+    }
+
+    /// <summary>
+    /// 外部キーの親の列を表の列と違う綴りで書いても（<c>REFERENCES P (ID)</c>）、親の列を省いて前後に空白のある主キーを
+    /// 暗黙に参照しても、取り込まれることを検証する（親の列は宣言の綴りで返るので、採用した列の綴りへ直してから引く）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 親の列を違う綴りで書いた外部キー・暗黙の主キー参照は取り込まれる"
+    )]
+    public async Task Import_ForeignKeyParentColumnInOtherSpelling_IsImported()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE p (id INTEGER PRIMARY KEY, code INT UNIQUE);
+CREATE TABLE q ("" key "" INTEGER PRIMARY KEY);
+CREATE TABLE u (id INTEGER PRIMARY KEY, a INT REFERENCES P (ID), b INT REFERENCES Q, c INT REFERENCES p (CODE));
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        var p = result.Entities.Single(e => e.TableName == "p");
+        var q = result.Entities.Single(e => e.TableName == "q");
+        var u = result.Entities.Single(e => e.TableName == "u");
+        var pairs = result
+            .Relationships.SelectMany(r => r.ColumnPairs)
+            .Select(pair => (pair.SourceColumnId, pair.TargetColumnId));
+
+        pairs
+            .Should()
+            .BeEquivalentTo([
+                (p.Columns.Single(c => c.Name == "id").Id, u.Columns.Single(c => c.Name == "a").Id),
+                (
+                    q.Columns.Single(c => c.Name == "key").Id,
+                    u.Columns.Single(c => c.Name == "b").Id
+                ),
+                (
+                    p.Columns.Single(c => c.Name == "code").Id,
+                    u.Columns.Single(c => c.Name == "c").Id
+                ),
+            ]);
+        u.Columns.Where(c => c.IsForeignKey)
+            .Select(c => c.Name)
+            .Should()
+            .BeEquivalentTo(["a", "b", "c"]);
+    }
+
+    /// <summary>
     /// ASCII 以外の大文字小文字だけが違う同名テーブル（SQLite は ASCII しか畳まないので共存する）を、列を混ぜずに
     /// 片方だけ取り込み、警告として報告することを検証する。捨てた表の外部キー・索引は図に載せず、
     /// <c>REFERENCES</c> の綴りは SQLite と同じく ASCII だけ大文字小文字を無視して残った表へ結ぶ。

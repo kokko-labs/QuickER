@@ -114,6 +114,55 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
     }
 
     /// <summary>
+    /// 外部キー・一意制約の列を表の列と違う大文字小文字で書いても、取り込まれることを検証する
+    /// （構成列は綴りまで一致で引き当てるので、カタログが宣言の綴りを返すなら表の列の綴りへ直してから引く）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL: 外部キー・一意制約の列を違う大文字小文字で書いても取り込まれる"
+    )]
+    public async Task Import_ConstraintColumnsInOtherCase_AreImported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE vendor (id int NOT NULL PRIMARY KEY, code int NOT NULL, UNIQUE KEY uq_vendor_code (CODE)) ENGINE=InnoDB;
+            CREATE TABLE po (
+                id int NOT NULL PRIMARY KEY,
+                vendor_id int NULL,
+                CONSTRAINT FK_po_vendor FOREIGN KEY (VENDOR_ID) REFERENCES vendor (ID)
+            ) ENGINE=InnoDB;
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        var vendor = result.Entities.Single(e => e.TableName == "vendor");
+        var po = result.Entities.Single(e => e.TableName == "po");
+        vendor
+            .UniqueConstraints.Should()
+            .ContainSingle()
+            .Which.ColumnIds.Should()
+            .Equal(vendor.Columns.Single(c => c.Name == "code").Id);
+
+        var relationship = result.Relationships.Should().ContainSingle().Subject;
+        relationship
+            .ColumnPairs.Select(pair => (pair.SourceColumnId, pair.TargetColumnId))
+            .Should()
+            .Equal(
+                (
+                    vendor.Columns.Single(c => c.Name == "id").Id,
+                    po.Columns.Single(c => c.Name == "vendor_id").Id
+                )
+            );
+        po.Columns.Single(c => c.Name == "vendor_id").IsForeignKey.Should().BeTrue();
+        result.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// 大文字小文字だけが違う同名テーブルを、列を混ぜずに片方だけ取り込み、警告として報告することを検証する。
     /// </summary>
     /// <remarks>
