@@ -169,6 +169,8 @@ public class MainViewModelTargetDbmsTests
         vm.SelectedProvider = fake;
 
         vm.CurrentProvider.Should().BeSameAs(original);
+        vm.SelectedProvider.Should()
+            .BeSameAs(original, "方言の選択も元の方言へ戻す（切替先を表示したままにしない）");
         memo.DataType.Should().Be("bigint", "確認の間の編集は残り、変換されない");
         vm.Entities[0].Columns[0].DataType.Should().Be("uniqueidentifier");
         vm.StatusMessage.Should().Be(GuiStrings.TypeConversion_DiagramChangedDuringConfirm);
