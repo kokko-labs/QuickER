@@ -405,17 +405,31 @@ ORDER BY name;";
             // hidden = 2（VIRTUAL）/ 3（STORED）は生成列
             var isComputed = hidden is 2 or 3;
 
+            // 宣言型が空（型なし宣言）の列は BLOB アフィニティでどの型の値も入るが、図は型の無い列を表せないので
+            // BLOB として取り込み、そのことを名指しする（生成コードは byte[] で読むので、BLOB 以外の値の行は読めない）
+            var isUndeclaredType = string.IsNullOrWhiteSpace(declaredType);
+
             var col = new Column
             {
                 Name = colName,
-                // 宣言型が空（型なし宣言）の場合は SQLite の親和性上 BLOB 相当だが、
-                // 生成・型変換のため既定型としてカタログ既定を補う
-                DataType = string.IsNullOrWhiteSpace(declaredType) ? "BLOB" : declaredType,
+                DataType = isUndeclaredType ? UndeclaredColumnDataType : declaredType,
                 IsPrimaryKey = pkOrdinal > 0,
                 // PK 列は NULL 非許容へ補正する
                 IsNullable = pkOrdinal > 0 ? false : !notNull,
                 IsComputed = isComputed,
             };
+
+            if (isUndeclaredType)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.UndeclaredColumnType,
+                        entry.Entity.TableName,
+                        col.Name,
+                        UndeclaredColumnDataType
+                    )
+                );
+            }
 
             if (isComputed)
             {
@@ -596,6 +610,9 @@ ORDER BY name;";
 
         UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
+
+    /// <summary>型を宣言していない列を取り込む型（SQLite の型なしの列は BLOB アフィニティ）</summary>
+    private const string UndeclaredColumnDataType = "BLOB";
 
     /// <summary>SQLite が <c>DEFAULT NULL</c> を <c>dflt_value</c> に書く表記（宣言どおりの綴り）</summary>
     private static readonly string[] NullDefaultForms = ["NULL"];

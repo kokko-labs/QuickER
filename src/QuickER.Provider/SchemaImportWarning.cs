@@ -278,6 +278,14 @@ public enum SchemaImportWarningKind
     /// <c>TableName</c> = DB のテーブル名 / <c>Subject</c> = DB のスキーマ名（SQL Server だけ。ほかの方言は空）/ <c>Detail</c> は空。
     /// </remarks>
     DottedTableNameExcluded,
+
+    /// <summary>型を宣言していない列（SQLite）を、BLOB として取り込んだ。</summary>
+    /// <remarks>
+    /// SQLite の型を宣言していない列は BLOB アフィニティで、整数・文字列などどの型の値もそのまま入る。図は型を持たない列を
+    /// 表せないので <c>BLOB</c> で取り込み、生成コードはその列を <c>byte[]</c> で読む（BLOB 以外の値の行は読み取りで失敗し得る）。
+    /// <c>Subject</c> = 列名 / <c>Detail</c> = 取り込んだ型（<c>BLOB</c>）。
+    /// </remarks>
+    UndeclaredColumnType,
 }
 
 /// <summary>

@@ -603,6 +603,61 @@ CREATE TABLE mixed_pk (
     }
 
     /// <summary>
+    /// 型を宣言していない列（生成列を含む）は BLOB として取り込み、列ごとに <see cref="SchemaImportWarningKind.UndeclaredColumnType"/>
+    /// で名指しすることを検証する（BLOB と宣言した列は告げない）
+    /// </summary>
+    /// <remarks>
+    /// SQLite の型を宣言していない列はどの型の値もそのまま入れるが、図は <c>BLOB</c>、生成コードは <c>byte[]</c> で扱うので、
+    /// BLOB 以外の値を持つ行は読み取りで失敗し得る。黙って BLOB にすると、その失敗まで気付けない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] SQLite: 型を宣言していない列は BLOB として取り込み、列ごとに名指しする"
+    )]
+    public async Task Import_UndeclaredColumnType_IsImportedAsBlobAndReported()
+    {
+        using var db = SqliteTempDatabase.Create();
+
+        await db.ApplyDdlAsync(
+            @"
+CREATE TABLE loose (id INTEGER PRIMARY KEY, anything, ""with space"", data BLOB, typed TEXT, doubled AS (id * 2));
+",
+            Ct
+        );
+
+        await using var conn = await db.OpenReadOnlyConnectionAsync(Ct);
+        var result = await new SqliteSchemaImporter().ImportAsync(conn, Ct);
+
+        result
+            .Entities.Single()
+            .Columns.Select(c => (c.Name, c.DataType))
+            .Should()
+            .Equal(
+                ("id", "INTEGER"),
+                ("anything", "BLOB"),
+                ("with space", "BLOB"),
+                ("data", "BLOB"),
+                ("typed", "TEXT"),
+                ("doubled", "BLOB")
+            );
+        result
+            .Warnings.Where(w => w.Kind == SchemaImportWarningKind.UndeclaredColumnType)
+            .Select(w => (w.TableName, w.Subject, w.Detail))
+            .Should()
+            .Equal(
+                ("loose", "anything", "BLOB"),
+                ("loose", "with space", "BLOB"),
+                ("loose", "doubled", "BLOB")
+            );
+        result
+            .Warnings.Select(w => w.Kind)
+            .Should()
+            .OnlyContain(kind =>
+                kind == SchemaImportWarningKind.UndeclaredColumnType
+                || kind == SchemaImportWarningKind.ComputedColumnExpressionLost
+            );
+    }
+
+    /// <summary>
     /// ASCII 以外の大文字小文字だけが違う列名の衝突で捨てた列の一意制約と外部キーが、採用した列へ付け替わらないことを検証する
     /// （主キーと説明と同じく、一意制約・外部キーの構成列も綴りまで一致で引き当てる。親の列は宣言の綴りで返るので、
     /// SQLite と同じ照合〔ASCII だけ大文字小文字を無視〕で採用した列の綴りへ直す＝捨てた "ä" は "Ä" に一致しない）。

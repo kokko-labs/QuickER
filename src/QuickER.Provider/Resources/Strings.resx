@@ -317,6 +317,12 @@
   <data name="ImportWarningHeading_AliasTypeFlattened" xml:space="preserve">
     <value>Columns imported as the base type of an alias type ({0}):</value>
   </data>
+  <data name="ImportWarning_UndeclaredColumnType" xml:space="preserve">
+    <value>{0}.{1}: the column declares no type, so it was imported as {2}. SQLite stores values of any type in such a column, and generated code reads it as byte[], so a row holding another kind of value fails to read.</value>
+  </data>
+  <data name="ImportWarningHeading_UndeclaredColumnType" xml:space="preserve">
+    <value>Columns that declare no type, imported as BLOB ({0}):</value>
+  </data>
   <data name="ImportWarning_NameTrimmed" xml:space="preserve">
     <value>{0}: the name "{1}" was imported as "{2}" without the spaces around it. The diagram does not keep spaces around a name.</value>
   </data>

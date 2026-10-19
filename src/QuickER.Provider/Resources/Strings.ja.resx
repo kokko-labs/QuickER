@@ -317,6 +317,12 @@
   <data name="ImportWarningHeading_AliasTypeFlattened" xml:space="preserve">
     <value>別名型の基底型として取り込んだ列（{0} 件）:</value>
   </data>
+  <data name="ImportWarning_UndeclaredColumnType" xml:space="preserve">
+    <value>{0}.{1}: 型を宣言していない列なので、{2} として取り込みました。SQLite はこうした列にどの型の値も入れられ、生成コードは byte[] で読むので、ほかの種類の値を持つ行は読み取りで失敗します。</value>
+  </data>
+  <data name="ImportWarningHeading_UndeclaredColumnType" xml:space="preserve">
+    <value>型を宣言していないため BLOB として取り込んだ列（{0} 件）:</value>
+  </data>
   <data name="ImportWarning_NameTrimmed" xml:space="preserve">
     <value>{0}: 名前「{1}」は前後の空白を除いた「{2}」として取り込みました。図は名前の前後の空白を持ちません。</value>
   </data>

@@ -161,6 +161,8 @@ The list has one heading per kind with the count, followed by one line per place
 - A PostgreSQL **domain type** column is imported as its base type.
   The diagram has no notion of domains, so the domain's `CHECK` constraint is lost
 - A SQL Server **alias type** column (`CREATE TYPE … FROM`) is likewise imported as its base type
+- A SQLite **column that declares no type** is imported as `BLOB`, and each such column is named.
+  SQLite stores values of any type in such a column, while generated code reads it as `byte[]`, so a row holding another kind of value fails to read
 - A column's **default value** is not imported, and each such column is named with its default (all five DBMSs).
   The diagram has no notion of defaults, so generated DDL creates the column without `DEFAULT`.
   A default of `NULL` means the same as having no default and is not reported.

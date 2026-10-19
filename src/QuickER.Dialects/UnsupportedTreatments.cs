@@ -847,6 +847,26 @@ public static class UnsupportedTreatments
             reverse: Same(None) // なし
         );
 
+        // D2c 型を宣言していない列
+        Add(
+            cells,
+            Kind.UndeclaredColumnType,
+            import: new TreatmentCell(
+                SqlServer: None,
+                PostgreSql: None,
+                MySql: None,
+                Oracle: None,
+                Sqlite: Notice // BLOB として取り込み告知（段 1）
+            ),
+            diff: Same(None), // なし
+            sync: Same(None), // なし
+            ddl: Same(None), // なし
+            cSharpGeneration: Same(None), // なし
+            export: Same(None), // なし
+            toolHosts: Same(None), // なし
+            reverse: Same(None) // なし
+        );
+
         // N1 前後に空白のある表名・列名・制約名
         Add(
             cells,
