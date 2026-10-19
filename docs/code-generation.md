@@ -2692,6 +2692,10 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
   The server, by contrast, looks its rows up with ordinary SQL equality on the key column, under that column's collation.
   On a case-insensitive column, then, `ABC` and `abc` are one row to the server and two separate journal and receipt entries locally.
   Keep the case of a text key stable, the same way [GUID keys](#guid-keys-for-string-primary-keys-useguidkeyforstringprimarykey) have to be.
+- **A fixed-length string primary key (`nchar(n)` / `char(n)`) does not keep its local spelling.**
+  SQL Server pads such a value with spaces to the declared length, so a row created locally under `cd` comes back as `cd` followed by eight spaces after a sync, and the local row is replaced by the padded one.
+  A local child row that refers to the unpadded key keeps the old row in place, so the device holds both rows and they do not converge.
+  Code generation names such a key with a warning; use a variable-length type (`nvarchar` / `varchar`) for the primary key of a synchronized table.
 - The runtime package for this is `QuickER.Runtime.Sync`.
 
 ## Remote-capable interfaces (--generate-remote-contracts)

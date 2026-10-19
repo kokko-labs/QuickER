@@ -86,6 +86,7 @@ public static class CanonicalTypeTokenAttacher
                         StringComparison.Ordinal
                     )
                     && typeInfo.IsNonUnicodeString == resolved.IsNonUnicodeString
+                    && typeInfo.IsFixedLengthString == resolved.IsFixedLengthString
                 )
             )
             {
@@ -102,6 +103,7 @@ public static class CanonicalTypeTokenAttacher
                 VerbatimDbType = resolved.VerbatimDbType,
                 CanonicalRoundTripDbType = resolved.RoundTripped,
                 IsNonUnicodeString = resolved.IsNonUnicodeString,
+                IsFixedLengthString = resolved.IsFixedLengthString,
             };
         }
 
@@ -132,7 +134,8 @@ public static class CanonicalTypeTokenAttacher
         string? Token,
         string? VerbatimDbType,
         string? RoundTripped,
-        bool IsNonUnicodeString
+        bool IsNonUnicodeString,
+        bool IsFixedLengthString
     ) ResolveToken(
         Guid columnId,
         IReadOnlyDictionary<Guid, string> dataTypeByColumn,
@@ -144,18 +147,20 @@ public static class CanonicalTypeTokenAttacher
             || !typeCatalog.TryParse(dataType, out var canonical)
         )
         {
-            return (null, null, null, false);
+            return (null, null, null, false, false);
         }
 
         var token = CanonicalTypeToken.Format(canonical);
         var nonUnicode =
             canonical.Kind is CanonicalTypeKind.AnsiString or CanonicalTypeKind.AnsiFixedString;
+        var fixedLength =
+            canonical.Kind is CanonicalTypeKind.FixedString or CanonicalTypeKind.AnsiFixedString;
         var roundTripped = typeCatalog.TryFormat(canonical, out var nativeType)
             ? nativeType
             : token;
 
         return DbTypeText.AreEquivalent(dataType, roundTripped)
-            ? (token, null, null, nonUnicode)
-            : (token, dataType, roundTripped, nonUnicode);
+            ? (token, null, null, nonUnicode, fixedLength)
+            : (token, dataType, roundTripped, nonUnicode, fixedLength);
     }
 }

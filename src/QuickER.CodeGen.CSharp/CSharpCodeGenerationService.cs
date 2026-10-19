@@ -365,6 +365,16 @@ public sealed partial class CSharpCodeGenerationService
                     )
                     .ToList()
             );
+
+            // 同期の対象の表の主キーが固定長の文字列なら名指しする。SQL Server は値を宣言の長さまで空白で詰めて返すので、
+            // ローカルで作った行のキーが同期の後に空白詰めのキーへ置き換わり、ローカルに子の行があると 2 行のまま
+            // 収束しない（判定は正規型の固定長の種類＝CSharpTypeInfo.IsFixedLengthString）
+            AddListDiagnostic(
+                diagnostics,
+                GenerationDiagnostic.Warning,
+                Strings.CodeGen_Warning_SyncFixedLengthStringPrimaryKeys,
+                BuildSyncFixedLengthKeyLines(model, diagram, columnTypes)
+            );
         }
         // 出力ファイルの構成（非分割=1 ファイル、分割=カテゴリごと、マルチ方言=契約＋方言別実装）を決め、
         // 各ファイルを範囲を絞って描画する。1 ファイルに複数スペック（非分割マルチ方言）が対応する場合は連結する。
@@ -452,6 +462,15 @@ public sealed partial class CSharpCodeGenerationService
         string format,
         IReadOnlyCollection<string> lines,
         params object[] leadingArguments
+    ) => AddListDiagnostic(diagnostics, GenerationDiagnostic.Info, format, lines, leadingArguments);
+
+    /// <summary>項目の一覧を字下げして並べた診断を、指定の重大度で 1 件足す（一覧が空なら何もしない）</summary>
+    private static void AddListDiagnostic(
+        ICollection<GenerationDiagnostic> diagnostics,
+        Func<string, GenerationDiagnostic> create,
+        string format,
+        IReadOnlyCollection<string> lines,
+        params object[] leadingArguments
     )
     {
         if (lines.Count == 0)
@@ -462,9 +481,32 @@ public sealed partial class CSharpCodeGenerationService
         var list =
             Environment.NewLine
             + string.Join(Environment.NewLine, lines.Select(line => "  " + line));
-        diagnostics.Add(
-            GenerationDiagnostic.Info(string.Format(format, [.. leadingArguments, list]))
-        );
+        diagnostics.Add(create(string.Format(format, [.. leadingArguments, list])));
+    }
+
+    /// <summary>同期の対象の表のうち、主キーが固定長の文字列の表の「表.列（型）」を並べる</summary>
+    private static List<string> BuildSyncFixedLengthKeyLines(
+        CSharpGenerationModel model,
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes
+    )
+    {
+        var syncTables = model
+            .SyncTables.Select(table => table.TableName)
+            .ToHashSet(SchemaNames.Comparer);
+
+        return diagram
+            .Entities.Where(entity => syncTables.Contains(entity.TableName))
+            .SelectMany(entity =>
+                entity
+                    .Columns.Where(column =>
+                        column.IsPrimaryKey
+                        && columnTypes.TryGetValue(column.Id, out var typeInfo)
+                        && typeInfo.IsFixedLengthString
+                    )
+                    .Select(column => $"{entity.TableName}.{column.Name} ({column.DataType})")
+            )
+            .ToList();
     }
 
     /// <summary>

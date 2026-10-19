@@ -459,6 +459,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Warning_SyncFixedLengthStringPrimaryKeys {
+            get {
+                return ResourceManager.GetString("CodeGen_Warning_SyncFixedLengthStringPrimaryKeys", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Warning_GuidKeyColumnShorterThanGuid {
             get {
                 return ResourceManager.GetString("CodeGen_Warning_GuidKeyColumnShorterThanGuid", resourceCulture);
