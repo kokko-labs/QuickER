@@ -419,6 +419,12 @@ NULL 許容の列は `.Value` 経由でも読めます（`x.ShippedAt != null &&
 インメモリも同じく断ります（保存している行はナビゲーションを持たず、評価できないため）。
 EF Core はこの述語を独自の結合へ翻訳するので、この制限はありません。
 
+**`Skip` と `Take` は、`CountAsync` と `AnyAsync` にも取得と同じ意味で効きます。**
+`CountAsync` は同じクエリで `ToListAsync` が読む行の数を、`AnyAsync` は 1 行でも読むかを返します。
+`Skip` か `Take` のあるクエリでは `ExecuteDeleteAsync` を使えません。一括削除は条件に合う行をすべて消すので、文を 1 つも流す前に `NotSupportedException` で断ります。
+条件で行を絞るか、そのページを読んでから、その行を消してください。
+リモートの面には `Query()` が無く、名前付きクエリの件数はページングを持たないので、どちらにも関係しません。
+
 **`ExecuteDeleteAsync` は、条件に合う行を消します。**
 `cascadeDelete: true` では、カスケードに沿って子孫を先に消し、戻り値は消した行の数（条件に合う行と、その子孫を合わせた数）です。
 循環するカスケードは、文を 1 つも流す前に `NotSupportedException` で断ります。

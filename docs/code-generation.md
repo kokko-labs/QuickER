@@ -416,6 +416,12 @@ A navigation has no column of its own, so filter on the foreign-key column inste
 The in-memory backend refuses it in the same way, because the rows it stores carry no navigations to evaluate.
 EF Core translates such a predicate into a join of its own, so there the limitation does not apply.
 
+**`Skip` and `Take` apply to `CountAsync` and `AnyAsync` as they do to a fetch.**
+`CountAsync` returns the number of rows `ToListAsync` would fetch for the same query, and `AnyAsync` whether it would fetch any.
+A query with `Skip` or `Take` cannot run `ExecuteDeleteAsync`: a bulk delete removes every row the conditions match, so it is refused with `NotSupportedException` before any statement runs.
+Narrow the rows with a condition instead, or fetch the page and delete those rows.
+The remote surface has no `Query()`, and a named query's count takes no paging, so neither is affected.
+
 **`ExecuteDeleteAsync` deletes the rows the conditions match.**
 With `cascadeDelete: true` it deletes their descendants along the cascade first, and the number it returns counts every row it deleted, the matching rows and their descendants together.
 A cyclic cascade is refused with `NotSupportedException` before any statement runs.

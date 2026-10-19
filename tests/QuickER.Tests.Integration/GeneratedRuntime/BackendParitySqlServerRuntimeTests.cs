@@ -268,6 +268,56 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
             .BeNull();
     }
 
+    /// <summary>
+    /// 区切り 43（外1）：SQL Server でも、Count・Any は Take・Skip を取得と同じ意味で当て（OFFSET / FETCH の副問い合わせ）、
+    /// Take・Skip つきの ExecuteDelete は NotSupportedException で断って何も消さない（QuickER 版と EF Core）
+    /// </summary>
+    [Theory(
+        DisplayName = "[Parity/SqlServer] Take・Skip つきの Count・Any は取得の件数とそろい、ExecuteDelete は断る（QuickER 版と EF Core）"
+    )]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PagedCountAnyAndDelete_FollowFetch(bool efCore)
+    {
+        await _fixture.ResetSchemaAsync(Ct);
+        await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
+        await using var provider = Build(efCore, withHooks: false);
+        var gadgets = provider.GetRequiredService<IGadgetRepository>();
+
+        foreach (var id in new[] { 1, 2, 3 })
+        {
+            await gadgets.InsertAsync(NewGadget(id, $"g{id}"), Ct);
+        }
+
+        SqlQuery<GadgetEntity> Paged(int? skip, int? take)
+        {
+            var query = gadgets.Query().OrderBy(g => g.GadgetId);
+
+            if (skip is { } s)
+            {
+                query = query.Skip(s);
+            }
+
+            if (take is { } t)
+            {
+                query = query.Take(t);
+            }
+
+            return query;
+        }
+
+        (await Paged(null, 1).CountAsync(Ct)).Should().Be(1);
+        (await Paged(1, null).CountAsync(Ct)).Should().Be(2);
+        (await Paged(1, 1).CountAsync(Ct)).Should().Be(1);
+        (await Paged(3, null).CountAsync(Ct)).Should().Be(0);
+        (await Paged(2, null).AnyAsync(Ct)).Should().BeTrue();
+        (await Paged(3, null).AnyAsync(Ct)).Should().BeFalse();
+
+        var delete = () => Paged(null, 1).ExecuteDeleteAsync(cancellationToken: Ct);
+        await delete.Should().ThrowAsync<NotSupportedException>();
+        (await StateAsync()).Should().HaveCount(3);
+    }
+
     /// <summary>1 つのケースを空のスキーマから流し、戻り値と保存先を並べて返す</summary>
     private async Task<IReadOnlyList<string>> RunAsync(string name, bool efCore)
     {

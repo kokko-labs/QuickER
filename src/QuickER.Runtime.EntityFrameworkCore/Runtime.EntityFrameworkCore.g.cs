@@ -1721,7 +1721,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         return item;
     }
 
-    /// <summary>Retrieves the number of matching records (as in the existing version, orderings, paging, and Includes are not involved).</summary>
+    /// <summary>Retrieves the number of matching records within the plan's page (Includes are not involved).</summary>
     public async Task<int> CountAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -1729,11 +1729,11 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-        return await ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan)
+        return await ApplyPaging(ApplyOrderings(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan), plan)
             .CountAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Retrieves whether any matching record exists (as in the existing version, orderings, paging, and Includes are not involved).</summary>
+    /// <summary>Retrieves whether any matching record exists within the plan's page (Includes are not involved).</summary>
     public async Task<bool> AnyAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -1741,7 +1741,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-        return await ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan)
+        return await ApplyPaging(ApplyOrderings(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan), plan)
             .AnyAsync(cancellationToken).ConfigureAwait(false);
     }
 

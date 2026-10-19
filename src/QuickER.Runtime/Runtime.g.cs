@@ -8023,11 +8023,13 @@ public sealed class SqlQuery<TEntity>
     public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
         await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
-    /// <summary>Returns the count of rows matching the conditions.</summary>
+    /// <summary>Returns the count of rows matching the conditions, within the page <see cref="Skip"/> and <see cref="Take"/> select.</summary>
+    /// <remarks>The count is the number of rows <see cref="ToListAsync"/> would fetch for the same query.</remarks>
     public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
         await _executor.CountAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
-    /// <summary>Returns whether any record matching the conditions exists.</summary>
+    /// <summary>Returns whether any record matching the conditions exists, within the page <see cref="Skip"/> and <see cref="Take"/> select.</summary>
+    /// <remarks>The answer is whether <see cref="ToListAsync"/> would fetch any row for the same query.</remarks>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         await _executor.AnyAsync(BuildPlan(), cancellationToken).ConfigureAwait(false);
 
@@ -8052,11 +8054,25 @@ public sealed class SqlQuery<TEntity>
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     /// <returns>The number of rows deleted, the matching rows and (with cascadeDelete) their descendants together.</returns>
-    /// <remarks>A cyclic cascade is refused with <see cref="NotSupportedException"/> before any statement runs.</remarks>
+    /// <remarks>
+    /// A cyclic cascade is refused with <see cref="NotSupportedException"/> before any statement runs. So is a query with
+    /// <see cref="Skip"/> or <see cref="Take"/>: a bulk delete removes every row the conditions match, so narrow the rows
+    /// with a condition, or fetch the page and delete those rows.
+    /// </remarks>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
-    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken).ConfigureAwait(false);
+    )
+    {
+        if (_take is not null || _skip is not null)
+        {
+            throw new NotSupportedException(
+                "ExecuteDeleteAsync does not take Skip or Take: it deletes every row the conditions match. Narrow the rows with a condition, or fetch the page and delete those rows."
+            );
+        }
+
+        return await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>Freezes the captured expressions, Include tree, and paging into a snapshot to pass to the executor.</summary>
     private SqlQueryPlan<TEntity> BuildPlan()

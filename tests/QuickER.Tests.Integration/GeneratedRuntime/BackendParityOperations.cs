@@ -578,6 +578,74 @@ public enum ParityOrderPredicate
     HasLines,
 }
 
+/// <summary>ページングした <c>Query()</c> の終端</summary>
+public enum ParityPagedTerminal
+{
+    /// <summary><c>ToListAsync</c>（読んだ行の数を返す）</summary>
+    Fetch,
+
+    /// <summary><c>CountAsync</c></summary>
+    Count,
+
+    /// <summary><c>AnyAsync</c></summary>
+    Any,
+
+    /// <summary><c>ExecuteDeleteAsync</c>（カスケードなし）</summary>
+    Delete,
+
+    /// <summary><c>ExecuteDeleteAsync</c>（カスケードあり）</summary>
+    CascadeDelete,
+}
+
+/// <summary>
+/// 全機能面の <c>Query()</c> に、条件（<paramref name="MinAmount"/> 以上の金額）・注文 ID の昇順・Skip・Take を当てて、
+/// 終端を呼ぶ（リモートには無い）
+/// </summary>
+public sealed record PagedOrdersOp(
+    ParityPagedTerminal Terminal,
+    int? Skip = null,
+    int? Take = null,
+    decimal? MinAmount = null
+) : ParityOp
+{
+    public override string Name =>
+        $"PagedOrders:{Terminal}:skip={Skip?.ToString() ?? "-"}:take={Take?.ToString() ?? "-"}";
+
+    public override bool Supports(ParityBackendKind kind) => kind != ParityBackendKind.Remote;
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var query = backend.FullOrders.Query();
+
+        if (MinAmount is { } min)
+        {
+            query = query.Where(o => o.Amount.Value >= min);
+        }
+
+        query = query.OrderBy(o => o.OrderId);
+
+        if (Skip is { } skip)
+        {
+            query = query.Skip(skip);
+        }
+
+        if (Take is { } take)
+        {
+            query = query.Take(take);
+        }
+
+        return Terminal switch
+        {
+            ParityPagedTerminal.Fetch => $"fetched={(await query.ToListAsync(ct)).Count}",
+            ParityPagedTerminal.Count => $"count={await query.CountAsync(ct)}",
+            ParityPagedTerminal.Any => $"any={await query.AnyAsync(ct)}",
+            ParityPagedTerminal.Delete => $"rows={await query.ExecuteDeleteAsync(false, ct)}",
+            ParityPagedTerminal.CascadeDelete => $"rows={await query.ExecuteDeleteAsync(true, ct)}",
+            _ => throw new ArgumentOutOfRangeException(nameof(Terminal)),
+        };
+    }
+}
+
 /// <summary>全機能面の <c>Query().Where(…).ExecuteDeleteAsync</c> で注文を消す（リモートには無い）</summary>
 public sealed record ExecuteDeleteOrdersOp(ParityOrderPredicate Predicate, bool CascadeDelete)
     : ParityOp

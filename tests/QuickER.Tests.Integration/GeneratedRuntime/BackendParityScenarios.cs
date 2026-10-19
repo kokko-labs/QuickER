@@ -272,6 +272,45 @@ public static class BackendParityScenarios
             "graph-updated-row-takes-deleted-unique-value-removed-first",
             ["B", "A"]
         ),
+        // 区切り 43（外1）: Count・Any は Take・Skip を、取得と同じ意味で当てる（取得の件数とそろう）。Take・Skip つきの
+        // ExecuteDelete は NotSupportedException で断り、何も消さない
+        new(
+            "paged-count-and-any-follow-fetch",
+            Basic,
+            [
+                new PagedOrdersOp(ParityPagedTerminal.Fetch, Take: 1),
+                ParityExpect.Outcome("paged-fetch-take-1", "fetched=1"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Take: 1),
+                ParityExpect.Outcome("paged-count-take-1", "count=1"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Skip: 1),
+                ParityExpect.Outcome("paged-count-skip-1", "count=2"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Skip: 1, Take: 1),
+                ParityExpect.Outcome("paged-count-skip-1-take-1", "count=1"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Skip: 3),
+                ParityExpect.Outcome("paged-count-skip-all", "count=0"),
+                new PagedOrdersOp(ParityPagedTerminal.Count, Skip: 1, MinAmount: 50m),
+                ParityExpect.Outcome("paged-count-condition-skip-1", "count=1"),
+                new PagedOrdersOp(ParityPagedTerminal.Any, Skip: 2),
+                ParityExpect.Outcome("paged-any-skip-2", "any=True"),
+                new PagedOrdersOp(ParityPagedTerminal.Any, Skip: 3),
+                ParityExpect.Outcome("paged-any-skip-all", "any=False"),
+                new PagedOrdersOp(ParityPagedTerminal.Any, Skip: 2, Take: 1, MinAmount: 50m),
+                ParityExpect.Outcome("paged-any-condition-skip-past", "any=False"),
+            ]
+        ),
+        new(
+            "paged-execute-delete-is-refused",
+            Basic,
+            [
+                new PagedOrdersOp(ParityPagedTerminal.Delete, Take: 1),
+                ParityExpect.Throws("paged-delete-take-refused", "NotSupportedException"),
+                new PagedOrdersOp(ParityPagedTerminal.Delete, Skip: 2),
+                ParityExpect.Throws("paged-delete-skip-refused", "NotSupportedException"),
+                new PagedOrdersOp(ParityPagedTerminal.CascadeDelete, Skip: 1, Take: 1),
+                ParityExpect.Throws("paged-cascade-delete-refused", "NotSupportedException"),
+                ParityExpect.StateRows("paged-delete-changes-nothing", 8),
+            ]
+        ),
         // 何も削除しない保存は、新しい行も並びどおりに保存する（後回しにするのは削除を含む保存だけ）
         new(
             "graph-save-without-deletion-keeps-order",
@@ -624,6 +663,36 @@ public static class ParityExpect
                     ? null
                     : $"children [{string.Join(",", actual)}], expected [{string.Join(",", lineIds)}]";
             }
+        );
+
+    /// <summary>直前の手の戻り値</summary>
+    public static ExpectOp Outcome(string label, string expected) =>
+        new(
+            label,
+            e =>
+                e.Previous.Outcome == expected
+                    ? null
+                    : $"outcome {e.Previous.Outcome}, expected {expected}"
+        );
+
+    /// <summary>直前の手が、指定の型の例外で終わった</summary>
+    public static ExpectOp Throws(string label, string exceptionType) =>
+        new(
+            label,
+            e =>
+                e.Previous.Outcome.StartsWith($"throws {exceptionType}", StringComparison.Ordinal)
+                    ? null
+                    : $"outcome {e.Previous.Outcome}, expected throws {exceptionType}"
+        );
+
+    /// <summary>直前の手の後の保存先が、指定の数の行を持つ</summary>
+    public static ExpectOp StateRows(string label, int count) =>
+        new(
+            label,
+            e =>
+                e.Previous.State.Count == count
+                    ? null
+                    : $"rows {e.Previous.State.Count}, expected {count}"
         );
 
     /// <summary>直前の手が例外にならずに終わった</summary>

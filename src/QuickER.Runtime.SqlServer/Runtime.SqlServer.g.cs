@@ -1328,40 +1328,56 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
         return list is { Count: > 0 } ? list[0] : null;
     }
 
-    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include are not involved).</summary>
+    /// <summary>Returns the count of rows matching the conditions within the plan's page (Include is not involved).</summary>
     public async Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
         var parameters = new List<SqlQueryParameter>();
-        var whereClause = BuildWhereClause(plan, parameters);
+        var source = BuildCountedRows(plan, parameters);
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(
             connection,
-            $"SELECT COUNT(*) FROM {TableName}{whereClause};",
+            $"SELECT COUNT(*) FROM {source};",
             parameters
         );
         var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return Convert.ToInt32(result);
     }
 
-    /// <summary>Returns whether any record matching the conditions exists (orderings, paging, and Include are not involved).</summary>
+    /// <summary>Returns whether any record matching the conditions exists within the plan's page (Include is not involved).</summary>
     public async Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
         var parameters = new List<SqlQueryParameter>();
-        var whereClause = BuildWhereClause(plan, parameters);
+        var source = BuildCountedRows(plan, parameters);
 
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = CreateCommand(
             connection,
-            $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{whereClause}) THEN 1 ELSE 0 END;",
+            $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {source}) THEN 1 ELSE 0 END;",
             parameters
         );
         var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return Convert.ToInt32(result) != 0;
+    }
+
+    /// <summary>
+    /// Builds the rows Count and Any look at: the table with the conditions, or, when the plan pages, the page those
+    /// conditions and orderings select as a derived table (the same ORDER BY and paging clauses as a fetch).
+    /// </summary>
+    private static string BuildCountedRows(SqlQueryPlan<TEntity> plan, List<SqlQueryParameter> parameters)
+    {
+        var whereClause = BuildWhereClause(plan, parameters);
+
+        if (plan.Take is null && plan.Skip is null)
+        {
+            return $"{TableName}{whereClause}";
+        }
+
+        return $"(SELECT 1 AS paged_row FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, plan.Take, plan.Skip)}) AS paged_rows";
     }
 
     /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
