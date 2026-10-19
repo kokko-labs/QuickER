@@ -353,6 +353,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                 syncTargetIds
             ),
             ReferencingTableNamesBlock = BuildSyncReferencingTableNamesBlock(entity, diagram),
+            UnlistedReferencingTableNamesBlock = BuildSyncUnlistedReferencingTableNamesBlock(
+                entity,
+                diagram
+            ),
             LocalReferencesBlock = BuildSyncLocalReferencesBlock(entity, diagram),
             LocalUniqueLookupsBlock = BuildSyncLocalUniqueLookupsBlock(
                 entity,
@@ -590,42 +594,16 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// </remarks>
     private static string BuildSyncLocalReferencesBlock(Entity entity, ErDiagram diagram)
     {
-        var columnOwners = diagram
-            .Entities.SelectMany(owner =>
-                owner.Columns.Select(column => (column.Id, Owner: owner, Column: column))
-            )
-            .ToDictionary(item => item.Id);
-        var keys = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
         var sqls = new List<string>();
 
-        if (keys.Count != 1)
+        foreach (var (child, childColumn, _) in ListedReferences(entity, diagram))
         {
-            return string.Empty;
-        }
-
-        foreach (var relationship in diagram.Relationships)
-        {
-            if (relationship.ColumnPairs.Count != 1)
-            {
-                continue;
-            }
-
-            var pair = relationship.ColumnPairs[0];
-
-            if (
-                pair.SourceColumnId != keys[0].Id
-                || !columnOwners.TryGetValue(pair.TargetColumnId, out var child)
-            )
-            {
-                continue;
-            }
-
-            var childTable = QuoteQualified(child.Owner.TableName, "\"", "\"");
-            var childColumn = QuoteIdentifier(child.Column.Name, "\"", "\"");
+            var childTable = QuoteQualified(child.TableName, "\"", "\"");
+            var quotedColumn = QuoteIdentifier(childColumn.Name, "\"", "\"");
             var sql =
-                $"new SyncLocalReference({CSharpLiteral(child.Owner.TableName)}, "
+                $"new SyncLocalReference({CSharpLiteral(child.TableName)}, "
                 + CSharpLiteral(
-                    $"SELECT DISTINCT {childColumn} FROM {childTable} WHERE {childColumn} IN (@keys)"
+                    $"SELECT DISTINCT {quotedColumn} FROM {childTable} WHERE {quotedColumn} IN (@keys)"
                 )
                 + ")";
 
@@ -640,6 +618,97 @@ internal sealed partial class CSharpGenerationModelBuilder
             : "            LocalReferences =\n            [\n"
                 + string.Join("\n", sqls.Select(sql => $"                {sql},"))
                 + "\n            ],";
+    }
+
+    /// <summary>
+    /// 記述子の、<c>LocalReferences</c> に載らない外部キーでこの表を参照するテーブル名の並び
+    /// （<c>UnlistedReferencingTableNames</c>）を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// このテーブルの列を親とする列ペアを持つリレーションのうち、<see cref="ListedReferences"/> が載せないもの
+    /// （一意制約を参照する外部キー・複数列の外部キー）の子の表。洗い替えは、範囲の外にこうした表がローカルに在れば、
+    /// 行を見ずに断る（参照している行を 1 列から照会できないため）。
+    /// </remarks>
+    private static string BuildSyncUnlistedReferencingTableNamesBlock(
+        Entity entity,
+        ErDiagram diagram
+    )
+    {
+        var columnOwners = diagram
+            .Entities.SelectMany(owner => owner.Columns.Select(column => (column.Id, owner)))
+            .ToDictionary(pair => pair.Id, pair => pair.owner);
+        var listed = ListedReferences(entity, diagram)
+            .Select(item => item.Relationship)
+            .ToHashSet();
+        var names = new List<string>();
+
+        foreach (var relationship in diagram.Relationships)
+        {
+            if (listed.Contains(relationship))
+            {
+                continue;
+            }
+
+            foreach (var pair in relationship.ColumnPairs)
+            {
+                if (
+                    columnOwners.TryGetValue(pair.SourceColumnId, out var parent)
+                    && parent.Id == entity.Id
+                    && columnOwners.TryGetValue(pair.TargetColumnId, out var child)
+                    && !names.Contains(child.TableName, SchemaNames.Comparer)
+                )
+                {
+                    names.Add(child.TableName);
+                }
+            }
+        }
+
+        return names.Count == 0
+            ? string.Empty
+            : "            UnlistedReferencingTableNames = ["
+                + string.Join(", ", names.Select(name => $"\"{EscapeNameForCSharpString(name)}\""))
+                + "],";
+    }
+
+    /// <summary>
+    /// このテーブルの主キーを列ペア 1 組で参照するリレーションを、子の表と子の列とともに列挙する
+    /// （<c>LocalReferences</c> に載る参照の正本＝載らない参照は <see cref="BuildSyncUnlistedReferencingTableNamesBlock"/> が拾う）
+    /// </summary>
+    private static IEnumerable<(
+        Entity Child,
+        Column ChildColumn,
+        Relationship Relationship
+    )> ListedReferences(Entity entity, ErDiagram diagram)
+    {
+        var columnOwners = diagram
+            .Entities.SelectMany(owner =>
+                owner.Columns.Select(column => (column.Id, Owner: owner, Column: column))
+            )
+            .ToDictionary(item => item.Id);
+        var keys = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
+
+        if (keys.Count != 1)
+        {
+            yield break;
+        }
+
+        foreach (var relationship in diagram.Relationships)
+        {
+            if (relationship.ColumnPairs.Count != 1)
+            {
+                continue;
+            }
+
+            var pair = relationship.ColumnPairs[0];
+
+            if (
+                pair.SourceColumnId == keys[0].Id
+                && columnOwners.TryGetValue(pair.TargetColumnId, out var child)
+            )
+            {
+                yield return (child.Owner, child.Column, relationship);
+            }
+        }
     }
 
     /// <summary>

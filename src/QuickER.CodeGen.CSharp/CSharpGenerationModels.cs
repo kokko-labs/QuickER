@@ -192,6 +192,15 @@ internal sealed class CSharpSyncTableModel
     public string ReferencingTableNamesBlock { get; init; } = string.Empty;
 
     /// <summary>
+    /// 記述子の初期化子へ挿入する、<c>LocalReferences</c> に載らない外部キーでこの表を参照するテーブル名
+    /// （<c>UnlistedReferencingTableNames = [...]</c>・整形済み・無ければ空文字）
+    /// </summary>
+    /// <remarks>
+    /// 一意制約を参照する外部キーと複数列の外部キー。洗い替えは、範囲の外にこうした表がローカルに在れば、行を見ずに断る。
+    /// </remarks>
+    public string UnlistedReferencingTableNamesBlock { get; init; } = string.Empty;
+
+    /// <summary>
     /// 記述子の初期化子へ挿入する、この表を参照する外部キーの並び（<c>LocalReferences = [...]</c>＝子の表の名前と、
     /// ローカルで参照されているキーを返す SELECT・整形済み・無ければ空文字）
     /// </summary>

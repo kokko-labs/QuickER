@@ -2571,6 +2571,7 @@ One topological note.
 A versionless table referencing a versioned one is kept consistent inside a single last-write-wins run by the foreign-key ordering.
 **But a foreign key between a construction-excluded table and a synchronized one is nobody's job to protect.**
 An application may legitimately maintain the excluded side by hand, so this is a documented caution rather than a block.
+A refresh is the exception: it refuses to empty a synchronized table that a local row of an excluded table refers to (see below).
 
 ### Rebuilding the local database (RefreshAsync)
 
@@ -2585,6 +2586,15 @@ var refreshed = await engine.RefreshAsync(new SyncRefreshOptions { BatchSize = 2
 // refreshed.Deleted / .Inserted are the totals, and .Elapsed is the wall time of the run
 ```
 
+Rows outside the refresh that refer to the tables it empties are refused rather than lost.
+When a local row of a table the run leaves out refers to a row of a table the run empties, the run throws `SyncRefreshScopeException` **before reading or deleting anything**, naming each referring table and the table it refers to (`References`).
+That covers a table narrowed away by `Mode` or `ExcludedEntityTypes`, one excluded with `excludeFromSync`, and one the engine does not synchronize at all.
+Emptying the table would otherwise take that row along under `ON DELETE CASCADE`, with any unsent edit of it, or fail on the local foreign key every time.
+The check looks at the rows, so a table left out that holds no such row does not stand in the way, and a table the local database does not have is not asked.
+A foreign key that refers to a unique constraint, or spans several columns, cannot be asked which rows it refers to, so such a table refuses the run whenever the local database has it.
+`Force` does not get past this refusal: bring the referring table into the refresh, or remove the referring rows first.
+A table implemented outside the generated code is not checked.
+
 Unsent local changes are refused rather than lost.
 When the journal is not empty the run throws `SyncPendingChangesException` **before deleting anything**, with a per-table breakdown (`PendingChanges`, `PendingCount`), so the caller can upload them with `SyncAsync` first and refresh afterwards.
 `SyncRefreshOptions.Force` is the explicit request to drop them instead, and `SyncRefreshResult.DiscardedChanges` reports how many went.
@@ -2595,8 +2605,8 @@ Two flags answer it, and one of them has to be set.
 
 | `SyncRefreshOptions` | Default | Meaning |
 |---|---|---|
-| `Mode` | `LastWriteWins` | Which tables the refresh covers. **The default takes everything**: a refresh rebuilds the local database as a copy of the server's, and leaving the versionless tables out would keep stale rows pointing at parents the wipe removes, a foreign-key failure whenever a versionless table references a versioned one. `Versioned` narrows it to the versioned tables, which is sound only while no versionless row references a table being rebuilt. The unsent-changes refusal and the forced discard follow the scope |
-| `ExcludedEntityTypes` | empty | Entity types this refresh leaves out (the same per-run scope as on `SyncOptions`) |
+| `Mode` | `LastWriteWins` | Which tables the refresh covers. **The default takes everything**: a refresh rebuilds the local database as a copy of the server's, and leaving the versionless tables out would keep stale rows pointing at parents the wipe removes, a foreign-key failure whenever a versionless table references a versioned one. `Versioned` narrows it to the versioned tables; while a local versionless row refers to a versioned table, the run refuses with `SyncRefreshScopeException`. The unsent-changes refusal and the forced discard follow the scope |
+| `ExcludedEntityTypes` | empty | Entity types this refresh leaves out (the same per-run scope as on `SyncOptions`). A left-out table whose local rows refer to a table the run empties makes it refuse with `SyncRefreshScopeException` |
 | `IncludeUnboundedBinary` | `false` | Copy each excluded column back down after its row has been written, making the rebuilt database a complete copy |
 | `DiscardLocalUnboundedBinaries` | `false` | Accept the loss, the right answer when the blobs are a local cache that can be rebuilt. It permits the loss; it does not reload anything |
 

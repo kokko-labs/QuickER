@@ -1135,6 +1135,9 @@ public class SyncSupportGenerationTests
         var order = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
         order.Should().NotContain("ParentReferences");
         order.Should().Contain("ReferencingTableNames = [\"sync_order_lines\", \"sync_notes\"],");
+        order
+            .Should()
+            .NotContain("UnlistedReferencingTableNames", "どの参照も LocalReferences に載る");
     }
 
     /// <summary>
@@ -1280,6 +1283,10 @@ public class SyncSupportGenerationTests
             .Contain(
                 "ReferencingTableNames = [\"sync_order_lines\", \"sync_notes\", \"sync_orders\", \"sync_tags\"],"
             );
+
+        // 一意制約の列への外部キーは LocalReferences に載らない（洗い替えは、範囲の外のその表が在るだけで断る）
+        orderDescriptor.Should().Contain("UnlistedReferencingTableNames = [\"sync_tags\"],");
+        orderDescriptor.Should().NotContain("new SyncLocalReference(\"sync_tags\"");
 
         var noteDescriptor = ExtractDescriptor(content, "SyncNoteEntity", "SyncNote");
         CountOccurrences(noteDescriptor, "new SyncParentReference<SyncNoteEntity>(")

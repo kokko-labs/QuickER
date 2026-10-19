@@ -786,6 +786,17 @@ internal static class SyncModelScenarios
                     new ModelRefreshOp(D1, SyncMode.LastWriteWins, true),
                 ]
             ),
+            // 区切り 42（型 4 #2）: 範囲外の表（Versioned の洗い替えの版なしの表）の行が範囲内の親を参照していると、
+            // 洗い替えは何も消す前に断る（断らないと、NO ACTION の外部キーで全消しが失敗して先に消した表が空のまま残る）
+            new(
+                "42-refresh-refused-by-rows-outside",
+                [Folder(SV, 90)],
+                [
+                    new AddLabelOp(D1, Direct, "L90", 90, "cap"),
+                    new ModelRefreshOp(D1, SyncMode.Versioned, true, ExpectScopeRefusal: true),
+                    Sync(D1, mode: SyncMode.LastWriteWins),
+                ]
+            ),
             // #21: 版なしの表で保留した行を飛ばすだけで打ち切らず、後ろの表の行がそれを参照して止まる（競合も返らない）
             new(
                 "21-versionless-held-row-referenced",

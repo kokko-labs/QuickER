@@ -2610,6 +2610,7 @@ services.AddGeneratedSyncSupport("server", "local", excludeFromSync: [typeof(Loc
 最後に位相の注意を 1 つ。
 版なしテーブルが版ありテーブルを FK で参照する構成は、1 回の後勝ちランの中では FK 順で自然に整合します。
 **ただし、構築時に除外したテーブルと同期テーブルの間の FK は誰も守りません**（除外した親の行をアプリが自前で維持する構成は成立し得るため、ブロックせずこの注意に留めています）。
+例外は洗い替えで、除外したテーブルのローカルの行が参照している同期テーブルは全消しせずに断ります（後述）。
 
 ### ローカル DB の作り直し（RefreshAsync）
 
@@ -2623,6 +2624,15 @@ var refreshed = await engine.RefreshAsync(new SyncRefreshOptions { BatchSize = 2
 // refreshed.Deleted / .Inserted はその合計、.Elapsed は実行時間
 ```
 
+洗い替えが全消しするテーブルを参照する、範囲外の行も、失わずに拒否します。
+洗い替えが外すテーブルのローカルの行が、全消しするテーブルの行を参照していれば、**何も読み書きする前に** `SyncRefreshScopeException` を送出し、参照する表と参照される表の組（`References`）を名指しします。
+対象は、`Mode` や `ExcludedEntityTypes` で外した表、`excludeFromSync` で除外した表、エンジンが同期しない表です。
+断らないと、全消しが `ON DELETE CASCADE` でその行を未送信の編集ごと消すか、ローカルの外部キーで毎回失敗します。
+判定は行で行うので、そうした行を持たない範囲外の表は妨げにならず、ローカル DB に無い表は照会しません。
+一意制約を参照する外部キーと複数列の外部キーは、参照している行を照会できないので、そうした表がローカル DB に在れば断ります。
+`Force` でもこの拒否は抜けません（参照する表を洗い替えの範囲へ入れるか、参照する行を先に取り除いてください）。
+生成コードの外で実装したテーブルは判定しません。
+
 未送信のローカル変更は、失わずに拒否します。
 ジャーナルが空でなければ、**何も消す前に** `SyncPendingChangesException` を送出し、テーブル別の内訳（`PendingChanges`・`PendingCount`）を添えます。
 呼び出し側は、先に `SyncAsync` で送ってから洗い替えられます。
@@ -2634,8 +2644,8 @@ var refreshed = await engine.RefreshAsync(new SyncRefreshOptions { BatchSize = 2
 
 | `SyncRefreshOptions` | 既定 | 意味 |
 |---|---|---|
-| `Mode` | `LastWriteWins` | 洗い替えが覆うテーブル。**既定は全テーブル**（洗い替えは「ローカルをサーバーの姿にする」操作で、版なしテーブルを置き去りにすると、版あり親の全消しがその FK に阻まれるためです）。`Versioned` は版ありだけへ絞る明示指定で、版なし行が作り直す親を参照していない構成でのみ健全です。未送信の拒否・`Force` の破棄も、このスコープ内のエントリだけを数えます |
-| `ExcludedEntityTypes` | 空 | この洗い替えから外すエンティティ型（`SyncOptions` と同じラン単位の除外） |
+| `Mode` | `LastWriteWins` | 洗い替えが覆うテーブル。**既定は全テーブル**（洗い替えは「ローカルをサーバーの姿にする」操作で、版なしテーブルを置き去りにすると、版あり親の全消しがその FK に阻まれるためです）。`Versioned` は版ありだけへ絞る明示指定で、ローカルの版なしの行が版ありのテーブルを参照している間は `SyncRefreshScopeException` で断ります。未送信の拒否・`Force` の破棄も、このスコープ内のエントリだけを数えます |
+| `ExcludedEntityTypes` | 空 | この洗い替えから外すエンティティ型（`SyncOptions` と同じラン単位の除外）。外した表のローカルの行が全消しするテーブルを参照していれば `SyncRefreshScopeException` で断ります |
 | `IncludeUnboundedBinary` | `false` | 行を書いたあとに除外列も降ろし直す（作り直したローカルが完全な複製になる） |
 | `DiscardLocalUnboundedBinaries` | `false` | 損失を受け入れる（blob が作り直せるローカルキャッシュのときの答え）。損失を許可するだけで、何かを降ろし直すわけではない |
 

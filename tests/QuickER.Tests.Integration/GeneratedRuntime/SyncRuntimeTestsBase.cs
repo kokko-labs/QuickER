@@ -4209,6 +4209,271 @@ public abstract class SyncRuntimeTestsBase : IAsyncLifetime
     }
 
     /// <summary>
+    /// 範囲外の表の行が範囲内の表の行を参照していると、洗い替えは何も読み書きする前に
+    /// <see cref="SyncRefreshScopeException"/> で断ることを検証する（Versioned＝版なしの子の表が範囲外）。
+    /// </summary>
+    /// <remarks>
+    /// 洗い替えは範囲内の表を全消ししてから流し込む。範囲外の子の行は、ローカルの外部キーが NO ACTION なら全消しを
+    /// 毎回失敗させ（先に消した表は空のまま残る）、CASCADE なら未送信の編集ごと黙って消える。断るのは
+    /// <see cref="SyncRefreshOptions.Force"/> でも同じ（Force が捨てるのは未送信の記録で、参照する行ではない）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/洗い替え] 範囲外の表の行が範囲内の行を参照していると、何も消す前に断る（Versioned の版なしの子）"
+    )]
+    public async Task Refresh_RefusesWhenRowsOutsideReferToRowsInside()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await SeedServerNoteAsync(101, 1, "memo");
+        await Engine.SyncAsync(new SyncOptions { Mode = SyncMode.LastWriteWins }, Ct);
+
+        // 範囲内の表の未送信の編集と受理記録も、断った後にそのまま残ることを確かめる
+        await LocalOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 2, CustomerName = "bob" },
+            Ct
+        );
+        await Engine.UploadAsync(new SyncOptions(), new List<SyncConflict>(), Ct);
+        var order = (await LocalOrdersRaw.GetByIdAsync(1, Ct))!;
+        order.CustomerName = "edited";
+        await LocalOrders.UpdateAsync(order, ConcurrencyMode.ForceOverwrite, Ct);
+        var journalBefore = (await Journal.ReadAllAsync(Ct)).Select(entry => entry.Id).ToList();
+        var acksBefore = await Journal.ReadAcksAsync("sync_orders", Ct);
+        acksBefore.Should().ContainKey("2");
+
+        var act = async () =>
+            await Engine.RefreshAsync(
+                new SyncRefreshOptions
+                {
+                    Mode = SyncMode.Versioned,
+                    DiscardLocalUnboundedBinaries = true,
+                    Force = true,
+                },
+                Ct
+            );
+
+        var refused = (await act.Should().ThrowAsync<SyncRefreshScopeException>()).Which;
+        refused
+            .References.Should()
+            .Equal(new SyncRefreshScopeReference("sync_notes", "sync_orders"));
+        (await LocalOrdersRaw.GetAllAsync(Ct))
+            .Select(o => o.OrderId)
+            .Should()
+            .BeEquivalentTo([1, 2]);
+        (await LocalOrdersRaw.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("edited");
+        (await LocalLinesRaw.GetAllAsync(Ct)).Should().ContainSingle();
+        (await LocalNotesRaw.GetAllAsync(Ct)).Should().ContainSingle();
+        (await Journal.ReadAllAsync(Ct)).Select(entry => entry.Id).Should().Equal(journalBefore);
+        (await Journal.ReadAcksAsync("sync_orders", Ct)).Should().BeEquivalentTo(acksBefore);
+    }
+
+    /// <summary>
+    /// 子の表を範囲から外した洗い替えも、ローカルの子の行が範囲内の親を参照していれば断り、ローカルの外部キーが
+    /// CASCADE でも子の行と未送信の編集が残ることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/洗い替え] 子の表を外した洗い替えは、子の行が親を参照していれば断る（CASCADE でも何も失わない）"
+    )]
+    public async Task Refresh_ExcludingReferencingChild_RefusesEvenUnderCascade()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+        await MakeLocalLinesCascadeAsync();
+        var line = (await LocalLines.GetByIdAsync(11, Ct))!;
+        line.Product = "edited-offline";
+        await LocalLines.UpdateAsync(line, cancellationToken: Ct);
+
+        var act = async () =>
+            await Engine.RefreshAsync(
+                new SyncRefreshOptions
+                {
+                    DiscardLocalUnboundedBinaries = true,
+                    ExcludedEntityTypes = [typeof(SyncOrderLineEntity)],
+                },
+                Ct
+            );
+
+        var refused = (await act.Should().ThrowAsync<SyncRefreshScopeException>()).Which;
+        refused
+            .References.Should()
+            .Equal(new SyncRefreshScopeReference("sync_order_lines", "sync_orders"));
+        (await LocalLinesRaw.GetByIdAsync(11, Ct))!.Product.Should().Be("edited-offline");
+        (await Journal.ReadAllAsync(Ct)).Should().ContainSingle();
+
+        // 送ってしまえば、範囲外の子の行が残っていても、参照されていなければ通る（行で判定する）
+        await Engine.SyncAsync(cancellationToken: Ct);
+        await LocalLinesRaw.DeleteAsync(11, Ct);
+        var refreshed = await Engine.RefreshAsync(
+            new SyncRefreshOptions
+            {
+                DiscardLocalUnboundedBinaries = true,
+                ExcludedEntityTypes = [typeof(SyncOrderLineEntity)],
+            },
+            Ct
+        );
+        refreshed
+            .Tables.Select(table => table.TableName)
+            .Should()
+            .Equal("sync_orders", "sync_notes");
+    }
+
+    /// <summary>
+    /// 範囲外の参照する表がローカル DB に無ければ照会から外し、洗い替えが通ることを検証する
+    /// （同期対象の表だけでローカル DB を組む構成で、無い表への照会が洗い替えを止めない）。
+    /// </summary>
+    [Fact(DisplayName = "[Sync/洗い替え] 範囲外の参照する表がローカルに無ければ照会せずに通る")]
+    public async Task Refresh_SkipsReferringTablesMissingLocally()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+        await LocalSql.ExecuteSqlAsync("DROP TABLE sync_notes", null, Ct);
+
+        var refreshed = await Engine.RefreshAsync(
+            new SyncRefreshOptions
+            {
+                Mode = SyncMode.Versioned,
+                DiscardLocalUnboundedBinaries = true,
+            },
+            Ct
+        );
+
+        refreshed
+            .Tables.Select(table => table.TableName)
+            .Should()
+            .Equal("sync_orders", "sync_order_lines");
+    }
+
+    /// <summary>
+    /// 全消しが失敗した洗い替えの後も受理記録が残り、上げた行の再編集が偽の競合にならないことを検証する
+    /// （受理記録は範囲内の全部の表の全消しが成功してから消す）。
+    /// </summary>
+    /// <remarks>
+    /// 受理記録を全消しの前に消すと、全消しが失敗したときに行とミラーの版が残ったまま受理記録だけが消え、
+    /// サーバーが受理した版を知る手がかりが無くなる（エコーが降りていない行の再編集は、版なしの挿入として
+    /// 送られて DuplicateOnServer になる）。全消しの失敗は SQLite の BEFORE DELETE トリガーで作る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/洗い替え] 全消しが失敗した洗い替えは受理記録を消さず、再編集は競合にならない"
+    )]
+    public async Task Refresh_FailedWipe_KeepsAcks()
+    {
+        await LocalOrders.InsertAsync(
+            new SyncOrderEntity { OrderId = 620, CustomerName = "c0" },
+            Ct
+        );
+        var conflicts = new List<SyncConflict>();
+        await Engine.UploadAsync(new SyncOptions(), conflicts, Ct);
+        conflicts.Should().BeEmpty();
+        await LocalSql.ExecuteSqlAsync(
+            "CREATE TRIGGER block_wipe BEFORE DELETE ON sync_orders BEGIN SELECT RAISE(ABORT, 'wipe blocked'); END",
+            null,
+            Ct
+        );
+
+        var refresh = async () => await Engine.RefreshAsync(RefreshDefaults, Ct);
+        await refresh.Should().ThrowAsync<SqliteException>().WithMessage("*wipe blocked*");
+
+        await LocalSql.ExecuteSqlAsync("DROP TRIGGER block_wipe", null, Ct);
+        (await Journal.ReadAcksAsync("sync_orders", Ct)).Should().ContainKey("620");
+        var order = (await LocalOrdersRaw.GetByIdAsync(620, Ct))!;
+        order.CustomerName = "c1";
+        await LocalOrders.UpdateAsync(order, ConcurrencyMode.ForceOverwrite, Ct);
+        await Engine.UploadAsync(new SyncOptions(), conflicts, Ct);
+        conflicts.Should().BeEmpty();
+        (await ServerOrders.GetByIdAsync(620, Ct))!.CustomerName.Should().Be("c1");
+    }
+
+    /// <summary>
+    /// <see cref="SyncTableDescriptor{TEntity, TKey}.LocalReferences"/> に載らない外部キー（一意制約を参照するもの・複数列の
+    /// もの）で範囲内の表を参照する範囲外の表は、ローカルに在れば行を見ずに断ることを検証する（在るだけで断り、
+    /// ローカルに無ければ通る）。
+    /// </summary>
+    /// <remarks>
+    /// SyncFixture の図にはそうした外部キーが無いので、注文の記述子を複製し、メモの表からの参照を
+    /// <c>UnlistedReferencingTableNames</c> へ移したもので組む。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Sync/洗い替え] 一覧に載らない外部キーで参照する範囲外の表は、ローカルに在れば行を見ずに断る"
+    )]
+    public async Task Refresh_UnlistedReferringTable_RefusesWhilePresentLocally()
+    {
+        await SeedServerAsync(1, "alice", 11, "widget");
+        await Engine.SyncAsync(cancellationToken: Ct);
+        var descriptor =
+            (SyncTableDescriptor<SyncOrderEntity, int>)
+                typeof(object)
+                    .GetMethod(
+                        "MemberwiseClone",
+                        System.Reflection.BindingFlags.NonPublic
+                            | System.Reflection.BindingFlags.Instance
+                    )!
+                    .Invoke(GeneratedSyncTables.SyncOrder, null)!;
+        var type = typeof(SyncTableDescriptor<SyncOrderEntity, int>);
+        type.GetProperty(nameof(descriptor.LocalReferences))!
+            .SetValue(
+                descriptor,
+                descriptor
+                    .LocalReferences.Where(reference => reference.TableName != "sync_notes")
+                    .ToList()
+            );
+        type.GetProperty(nameof(descriptor.UnlistedReferencingTableNames))!
+            .SetValue(descriptor, new List<string> { "sync_notes" });
+        var engine = CreateEngineWithOrderTable(
+            new SyncTable<SyncOrderEntity, int>(LocalOrders, LocalSql, _sources.Orders, descriptor)
+        );
+        var versioned = new SyncRefreshOptions
+        {
+            Mode = SyncMode.Versioned,
+            DiscardLocalUnboundedBinaries = true,
+        };
+
+        // メモの行は無い（行で判定すれば通る）が、照会できないので表が在るだけで断る
+        (await LocalNotesRaw.GetAllAsync(Ct))
+            .Should()
+            .BeEmpty();
+        var act = async () => await engine.RefreshAsync(versioned, Ct);
+        var refused = (await act.Should().ThrowAsync<SyncRefreshScopeException>()).Which;
+        refused
+            .References.Should()
+            .Equal(new SyncRefreshScopeReference("sync_notes", "sync_orders"));
+        (await LocalOrdersRaw.GetAllAsync(Ct)).Should().ContainSingle();
+
+        await LocalSql.ExecuteSqlAsync("DROP TABLE sync_notes", null, Ct);
+        (await engine.RefreshAsync(versioned, Ct))
+            .Tables.Select(table => table.TableName)
+            .Should()
+            .Equal("sync_orders", "sync_order_lines");
+    }
+
+    /// <summary>ローカルの明細の外部キーを ON DELETE CASCADE にし直す（行は保つ）</summary>
+    private async Task MakeLocalLinesCascadeAsync()
+    {
+        var sql = await LocalSql.ExecuteScalarSqlAsync<string>(
+            "SELECT sql FROM sqlite_master WHERE name = 'sync_order_lines'",
+            null,
+            Ct
+        );
+        var cascade = System.Text.RegularExpressions.Regex.Replace(
+            sql!,
+            "REFERENCES\\s+\"?sync_orders\"?\\s*\\(\\s*\"?order_id\"?\\s*\\)",
+            match => match.Value + " ON DELETE CASCADE"
+        );
+        cascade.Should().NotBe(sql);
+
+        await LocalSql.ExecuteSqlAsync(
+            "CREATE TABLE lines_copy AS SELECT * FROM sync_order_lines",
+            null,
+            Ct
+        );
+        await LocalSql.ExecuteSqlAsync("DROP TABLE sync_order_lines", null, Ct);
+        await LocalSql.ExecuteSqlAsync(cascade, null, Ct);
+        await LocalSql.ExecuteSqlAsync(
+            "INSERT INTO sync_order_lines SELECT * FROM lines_copy",
+            null,
+            Ct
+        );
+        await LocalSql.ExecuteSqlAsync("DROP TABLE lines_copy", null, Ct);
+    }
+
+    /// <summary>
     /// 削除は子→親・書き込みは親→子。順序が逆なら SQLite の外部キー制約がその場で拒否する。
     /// </summary>
     /// <remarks>
