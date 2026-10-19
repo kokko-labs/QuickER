@@ -71,6 +71,12 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// </summary>
     private HashSet<string>? _schemaEntityNames;
 
+    /// <summary>
+    /// 初回ターン（会話の開始）が成功したら保存するスキーマのスナップショット（控えが無ければ <c>null</c>）。
+    /// 初回ターンの完了で、成否を問わず取り除く。
+    /// </summary>
+    private string? _pendingSourceSchema;
+
     /// <summary>UI（サイドバー・プレビュー）が参照するモックフォルダのストア</summary>
     public MockFolderStore Store => _store;
 
@@ -121,8 +127,38 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     private void SubscribeEngine()
     {
         _engine.AssistantDeltaReceived += (_, delta) => AssistantDeltaReceived?.Invoke(this, delta);
-        _engine.TurnCompleted += (_, result) => TurnCompleted?.Invoke(this, result);
+        _engine.TurnCompleted += OnEngineTurnCompleted;
         _engine.StatusChanged += (_, status) => StatusChanged?.Invoke(this, status);
+    }
+
+    /// <summary>
+    /// エンジンのターン完了を転送する。初回ターンが成功で終わったときだけ、控えたスキーマのスナップショットを保存する。
+    /// </summary>
+    /// <remarks>
+    /// エンジンの多くは失敗・中断を例外でなく失敗のターン完了で返すので、送信の戻りで保存すると、
+    /// AI へ届かなかったスキーマを「伝えた」ことにしてしまう（次の再開が「変更なし」になる）。
+    /// 保存できなかったときは、そのターンを失敗として転送する（呼び出し側は初回をやり直し、次の成功で保存し直す）。
+    /// </remarks>
+    private void OnEngineTurnCompleted(object? sender, ErChatTurnResult result)
+    {
+        var pending = Interlocked.Exchange(ref _pendingSourceSchema, null);
+
+        if (result.Success && pending is not null)
+        {
+            try
+            {
+                _store.UpdateSourceSchema(pending);
+            }
+            catch (Exception ex)
+            {
+                result = new ErChatTurnResult(
+                    false,
+                    string.Format(Strings.Mock_SourceSchemaSaveFailedFormat, ex.Message)
+                );
+            }
+        }
+
+        TurnCompleted?.Invoke(this, result);
     }
 
     /// <summary>
@@ -142,7 +178,7 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
 
     /// <summary>
     /// 新規フローで会話を開始する。ER スキーマ記述＋ユーザー補足指示を初回プロンプトとして送信し、
-    /// ストアのスキーマスナップショットが空なら現在スキーマで保存する。
+    /// ストアのスキーマスナップショットが空なら、このターンが成功で終わったときに現在スキーマで保存する。
     /// </summary>
     /// <param name="diagram">モックの元になる ER 図</param>
     /// <param name="userInstructions">ユーザーからの補足指示（省略可）</param>
@@ -159,24 +195,22 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
 
         var schema = MockSchemaSerializer.Serialize(diagram);
 
-        // スキーマスナップショットが空（新規作成直後）なら、現在スキーマを保存しておく
-        if (string.IsNullOrWhiteSpace(_store.Manifest.SourceSchema))
-        {
-            _store.UpdateSourceSchema(schema);
-        }
+        // スキーマスナップショットが空（新規作成直後）なら、ターンの成功で現在スキーマを保存する
+        var pending = string.IsNullOrWhiteSpace(_store.Manifest.SourceSchema) ? schema : null;
 
         var prompt = AppendUserInstructions(
             string.Format(Strings.Mock_FolderInitialPromptTemplate, schema),
             userInstructions
         );
 
-        await SendInitialAsync(prompt, attachments, cancellationToken).ConfigureAwait(false);
+        await SendInitialAsync(prompt, pending, attachments, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
     /// 再開フローで会話を開始する。現在スキーマとマニフェストから状態再開プロンプトを組み立てて送信し、
-    /// 送信が成功した後にストアのスキーマスナップショットを現在スキーマへ更新する
-    /// （送信が失敗したときは更新しない＝次の再開でも「スキーマ変更あり」を AI へ伝える）。
+    /// このターンが成功で終わったときにストアのスキーマスナップショットを現在スキーマへ更新する
+    /// （送信の失敗・失敗や中断で終わったターンでは更新しない＝次の再開でも「スキーマ変更あり」を AI へ伝える）。
     /// </summary>
     /// <param name="diagram">モックの元になる（現在の）ER 図</param>
     /// <param name="userInstructions">ユーザーからの補足指示（省略可）</param>
@@ -200,27 +234,41 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
             userInstructions
         );
 
-        await SendInitialAsync(prompt, attachments, cancellationToken).ConfigureAwait(false);
-
-        // 送信できたら元スキーマを現在の内容へ更新する（次回の差異判定の基準になる）。
-        // 送信の前に更新すると、送信が失敗したときに「スキーマ変更あり」の印だけが消え、
-        // 変更を AI へ一度も伝えないまま次の再開が「変更なし」になる
-        _store.UpdateSourceSchema(schema);
+        // 元スキーマは、このターンが成功で終わったときに現在の内容へ更新する（次回の差異判定の基準になる）
+        await SendInitialAsync(prompt, schema, attachments, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>エンジンを初期化して会話を開始し、初回プロンプトを送信する（新規・再開で共通）</summary>
+    /// <param name="prompt">初回プロンプト</param>
+    /// <param name="pendingSourceSchema">このターンが成功で終わったら保存するスキーマ（保存しないなら <c>null</c>）</param>
+    /// <param name="attachments">同梱する添付（null なら添付なし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     private async Task SendInitialAsync(
         string prompt,
+        string? pendingSourceSchema,
         IReadOnlyList<ChatAttachment>? attachments,
         CancellationToken cancellationToken
     )
     {
-        await _engine.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        await _engine.StartConversationAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _engine.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await _engine.StartConversationAsync(cancellationToken).ConfigureAwait(false);
 
-        await _engine
-            .SendAsync(prompt, attachments ?? Array.Empty<ChatAttachment>(), cancellationToken)
-            .ConfigureAwait(false);
+            // ターンの完了は送信の戻りより先に届くことがあるので、送信の前に控える
+            _pendingSourceSchema = pendingSourceSchema;
+
+            await _engine
+                .SendAsync(prompt, attachments ?? Array.Empty<ChatAttachment>(), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            // 送信が例外で終わったら、このターンの完了は来ないので控えを捨てる
+            _pendingSourceSchema = null;
+            throw;
+        }
     }
 
     /// <summary>初回プロンプト本文へユーザー補足指示（見出し付き）を連結する</summary>

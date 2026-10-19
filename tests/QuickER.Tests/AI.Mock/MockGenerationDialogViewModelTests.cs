@@ -3136,6 +3136,59 @@ public class MockGenerationDialogViewModelTests
     }
 
     /// <summary>
+    /// 初回のターンが失敗・中断で終わったら（送信は例外にならずに戻る）、次の送信も初回としてやり直し、
+    /// 成功で終わった後の送信はフィードバックになることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// エンジンの多くは失敗を例外でなく TurnCompleted(false) で返す。送信の戻りで済みの印を立てると、
+    /// 開始のプロンプト（スキーマ）が AI へ届かなかったのに、次の送信をフィードバックとして送ってしまう。
+    /// </remarks>
+    [Theory(DisplayName = "初回のターンが失敗・中断で終わったら次の送信も初回としてやり直す")]
+    [InlineData("session failed")]
+    [InlineData(null)]
+    public async Task FirstTurnFailedOrInterrupted_RetriesAsInitialPrompt(string? error)
+    {
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.StartConversationCommand.Execute(null);
+            var engine = engineBox[0];
+            engine.HoldTurnCompletion = true;
+
+            vm.UserInput = "初回の要望";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+            engine.FailHeldTurn(error);
+
+            vm.IsTurnInProgress.Should().BeFalse();
+
+            vm.UserInput = "再送";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+            engine.CompleteHeldTurn();
+
+            engine.SentPrompts.Should().HaveCount(2);
+            engine
+                .SentPrompts[1]
+                .Should()
+                .Contain("Customer", "やり直しも開始のプロンプト（スキーマ入り）で送る");
+            engine.SentPrompts[1].Should().Contain("再送");
+
+            vm.UserInput = "列を減らして";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+            engine.CompleteHeldTurn();
+
+            engine
+                .SentPrompts[2]
+                .Should()
+                .Be("列を減らして", "初回のターンが成功した後はフィードバックとして送る");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
     /// 表示中の画面を同じ名前で保存し直したとき、選択が変わらなくてもプレビューを再要求することを検証する。
     /// </summary>
     /// <remarks>

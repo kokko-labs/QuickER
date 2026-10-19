@@ -643,6 +643,173 @@ public class MockFolderDesignSessionTests : IDisposable
             .BeTrue();
     }
 
+    // --- 初回ターンの結果とスナップショット ------------------------------------
+
+    /// <summary>
+    /// 新規の初回ターンが失敗・中断で終わったら、スキーマのスナップショットを保存せず、
+    /// 成功で終わったときだけ保存することを検証する
+    /// </summary>
+    /// <remarks>
+    /// エンジンの多くは失敗を例外でなく TurnCompleted(false) で返し、送信そのものは戻ってくる。
+    /// 送信の戻りで保存すると、AI へ届かなかったスキーマが「伝えた」ことになり、次の再開が変更なしになる。
+    /// </remarks>
+    [Theory(
+        DisplayName = "StartNewAsync の初回ターンが失敗・中断したらスナップショットを保存しない"
+    )]
+    [InlineData("session failed")]
+    [InlineData(null)]
+    public async Task StartNewAsync_TurnFails_DoesNotSnapshotUntilSuccess(string? error)
+    {
+        var store = CreateStore(schema: string.Empty);
+        var (session, engine) = CreateSession(store);
+        engine.HoldTurnCompletion = true;
+        var diagram = new ErDiagram { Entities = { new Entity { TableName = "Customer" } } };
+
+        await session.StartNewAsync(diagram, null, null, TestContext.Current.CancellationToken);
+
+        store.Manifest.SourceSchema.Should().BeEmpty("ターンが終わるまでは保存しない");
+
+        engine.FailHeldTurn(error);
+
+        store.Manifest.SourceSchema.Should().BeEmpty("失敗・中断したターンでは保存しない");
+        MockFolderStore.Open(_folder).Manifest.SourceSchema.Should().BeEmpty();
+
+        // やり直しの初回ターンが成功したら保存する
+        await session.StartNewAsync(diagram, null, null, TestContext.Current.CancellationToken);
+        engine.CompleteHeldTurn();
+
+        MockFolderStore.Open(_folder).Manifest.SourceSchema.Should().Contain("Customer");
+    }
+
+    /// <summary>
+    /// 再開の初回ターンが失敗・中断で終わったら、「スキーマ変更あり」の印（古いスナップショット）が残り、
+    /// 成功で終わったときだけ更新されることを検証する
+    /// </summary>
+    [Theory(
+        DisplayName = "StartResumeAsync の初回ターンが失敗・中断したらスナップショットを更新しない"
+    )]
+    [InlineData("session failed")]
+    [InlineData(null)]
+    public async Task StartResumeAsync_TurnFails_KeepsSchemaChangedMarker(string? error)
+    {
+        var store = CreateStore(schema: "# 旧スキーマ");
+        var (session, engine) = CreateSession(store);
+        engine.HoldTurnCompletion = true;
+        var diagram = new ErDiagram { Entities = { new Entity { TableName = "Orders" } } };
+
+        await session.StartResumeAsync(diagram, null, null, TestContext.Current.CancellationToken);
+
+        store.Manifest.SourceSchema.Should().Be("# 旧スキーマ", "ターンが終わるまでは更新しない");
+
+        engine.FailHeldTurn(error);
+
+        store.Manifest.SourceSchema.Should().Be("# 旧スキーマ");
+        MockFolderStore.Open(_folder).Manifest.SourceSchema.Should().Be("# 旧スキーマ");
+        MockResumePrompt
+            .IsSchemaChanged(MockSchemaSerializer.Serialize(diagram), store.Manifest)
+            .Should()
+            .BeTrue("変更を AI へ伝えられなかったので、次の再開でも変更ありと伝える");
+
+        await session.StartResumeAsync(diagram, null, null, TestContext.Current.CancellationToken);
+        engine.CompleteHeldTurn();
+
+        MockFolderStore.Open(_folder).Manifest.SourceSchema.Should().Contain("Orders");
+    }
+
+    /// <summary>
+    /// 初回ターンの後のフィードバックのターンは、スナップショットに触れないことを検証する
+    /// （控えた初回のスキーマを、後のターンの成功で確定しない）
+    /// </summary>
+    [Fact(
+        DisplayName = "初回ターンが失敗した後のフィードバックのターンはスナップショットを確定しない"
+    )]
+    public async Task FeedbackTurnAfterFailedInitialTurn_DoesNotSnapshot()
+    {
+        var store = CreateStore(schema: "# 旧スキーマ");
+        var (session, engine) = CreateSession(store);
+        engine.HoldTurnCompletion = true;
+        var diagram = new ErDiagram { Entities = { new Entity { TableName = "Orders" } } };
+
+        await session.StartResumeAsync(diagram, null, null, TestContext.Current.CancellationToken);
+        engine.FailHeldTurn("session failed");
+
+        await session.SendFeedbackAsync(
+            "続けて",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
+        engine.CompleteHeldTurn();
+
+        store.Manifest.SourceSchema.Should().Be("# 旧スキーマ");
+    }
+
+    /// <summary>
+    /// 初回の送信が例外で終わった後のフィードバックのターンも、スナップショットを確定しないことを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "初回の送信が例外で終わった後のフィードバックのターンはスナップショットを確定しない"
+    )]
+    public async Task FeedbackTurnAfterInitialSendException_DoesNotSnapshot()
+    {
+        var store = CreateStore(schema: "# 旧スキーマ");
+        var (session, engine) = CreateSession(store);
+        engine.SendException = new InvalidOperationException("API key is not set.");
+        var diagram = new ErDiagram { Entities = { new Entity { TableName = "Orders" } } };
+
+        var act = () =>
+            session.StartResumeAsync(diagram, null, null, TestContext.Current.CancellationToken);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        engine.SendException = null;
+        await session.SendFeedbackAsync(
+            "続けて",
+            cancellationToken: TestContext.Current.CancellationToken
+        );
+
+        store.Manifest.SourceSchema.Should().Be("# 旧スキーマ");
+    }
+
+    /// <summary>
+    /// 初回ターンが成功してもスナップショットを書けなかったら、そのターンを失敗として転送することを検証する
+    /// （VM は初回をやり直し、次の成功で保存し直す）
+    /// </summary>
+    [Fact(
+        DisplayName = "初回ターンの成功でスナップショットを書けなければ、そのターンを失敗として転送する"
+    )]
+    public async Task InitialTurnSucceeds_SnapshotWriteFails_ForwardsFailure()
+    {
+        var store = CreateStore(schema: "# 旧スキーマ");
+        var (session, engine) = CreateSession(store);
+        engine.HoldTurnCompletion = true;
+        ErChatTurnResult? completed = null;
+        session.TurnCompleted += (_, r) => completed = r;
+        var diagram = new ErDiagram { Entities = { new Entity { TableName = "Orders" } } };
+
+        await session.StartResumeAsync(diagram, null, null, TestContext.Current.CancellationToken);
+
+        var manifestPath = Path.Combine(_folder, "mock.json");
+        File.SetAttributes(
+            manifestPath,
+            File.GetAttributes(manifestPath) | FileAttributes.ReadOnly
+        );
+
+        try
+        {
+            engine.CompleteHeldTurn();
+        }
+        finally
+        {
+            File.SetAttributes(
+                manifestPath,
+                File.GetAttributes(manifestPath) & ~FileAttributes.ReadOnly
+            );
+        }
+
+        completed.Should().NotBeNull();
+        completed!.Value.Success.Should().BeFalse();
+        completed.Value.Error.Should().NotBeNullOrWhiteSpace();
+        store.Manifest.SourceSchema.Should().Be("# 旧スキーマ");
+    }
+
     // --- entities がすべて不正 ----------------------------------------------
 
     /// <summary>

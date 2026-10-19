@@ -233,6 +233,9 @@
   <data name="Mock_SendFailedFormat" xml:space="preserve">
     <value>送信に失敗しました: {0}</value>
   </data>
+  <data name="Mock_SourceSchemaSaveFailedFormat" xml:space="preserve">
+    <value>次の再開に使う ER 図の内容を保存できませんでした: {0}</value>
+  </data>
   <data name="Mock_HtmlFileFilter" xml:space="preserve">
     <value>HTML ファイル (*.html)|*.html</value>
   </data>

@@ -84,8 +84,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>会話が開始済みか（「新しい会話」で true、バックエンド切替・フォルダ変更でリセット）</summary>
     private bool _conversationStarted;
 
-    /// <summary>この会話で初回送信を済ませたか（初回=StartNew/Resume／2 回目以降=SendFeedback の分岐に使う）</summary>
+    /// <summary>
+    /// この会話で初回のターンを成功で終えたか（初回=StartNew/Resume／2 回目以降=SendFeedback の分岐に使う）。
+    /// 初回のターンが失敗・中断で終わったら立てない（次の送信も初回としてやり直す）。
+    /// </summary>
     private bool _firstMessageSent;
+
+    /// <summary>初回のターンを送り、その完了を待っているか（完了の成否で <see cref="_firstMessageSent"/> を決める）</summary>
+    private bool _firstTurnPending;
 
     /// <summary>現在の会話が「再開」フローか（既存モックフォルダを開いて始めたか）</summary>
     private bool _resumeMode;
@@ -975,6 +981,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _currentAssistantMessage = null;
         _conversationStarted = true;
         _firstMessageSent = false;
+        _firstTurnPending = false;
         AddSystemMessage(Strings.Mock_ConversationStarted);
         SendMessageCommand.NotifyCanExecuteChanged();
     }
@@ -1017,9 +1024,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             if (!_firstMessageSent)
             {
                 // 初回送信は新規（スキーマ）／再開（画面一覧＋差異）のいずれかで会話を開始する。
-                // 済みの印は送信が戻ってから立てる（失敗したら次の送信も初回としてやり直す＝
-                // 先に立てると、初期化されていないエンジンへフィードバックとして送ってしまう）
+                // 済みの印はターンが成功で終わってから立てる（ApplyTurnCompleted）。エンジンの多くは失敗・中断を
+                // 例外でなく失敗のターン完了で返すので、送信の戻りで立てると、開始のプロンプトが AI へ届かないまま
+                // 次の送信をフィードバックとして送ってしまう。完了は送信の戻りより先に届くことがあるので、送る前に控える
                 var diagram = _diagramSource.GetDiagram();
+                _firstTurnPending = true;
 
                 if (_resumeMode)
                 {
@@ -1033,8 +1042,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                         .StartNewAsync(diagram, message, attachments)
                         .ConfigureAwait(true);
                 }
-
-                _firstMessageSent = true;
             }
             else
             {
@@ -1047,6 +1054,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            // 送信が例外で終わったら、このターンの完了は来ない（次の送信も初回としてやり直す）
+            _firstTurnPending = false;
             IsTurnInProgress = false;
             StatusMessage = string.Format(Strings.Mock_SendFailedFormat, ex.Message);
         }
@@ -1863,6 +1872,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     {
         IsTurnInProgress = false;
         _currentAssistantMessage = null;
+
+        // 初回のターンは、成功で終わったときだけ済みにする（失敗・中断なら次の送信も初回としてやり直す）
+        if (_firstTurnPending)
+        {
+            _firstTurnPending = false;
+            _firstMessageSent = result.Success;
+        }
+
         NotifyReadinessChanged();
 
         if (result.Success)
@@ -2018,6 +2035,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         DetachSession();
         _conversationStarted = false;
         _firstMessageSent = false;
+        _firstTurnPending = false;
         _currentAssistantMessage = null;
         Messages.Clear();
         SendMessageCommand.NotifyCanExecuteChanged();

@@ -426,6 +426,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_SourceSchemaSaveFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_SourceSchemaSaveFailedFormat", resourceCulture);
+            }
+        }
+
         public static string Mock_HtmlFileFilter {
             get {
                 return ResourceManager.GetString("Mock_HtmlFileFilter", resourceCulture);
