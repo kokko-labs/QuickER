@@ -83,7 +83,7 @@ public sealed class SyncConstructionExclusionTests : IDisposable
             .ServiceProvider.GetServices<ISyncTable>()
             .Select(table => table.TableName)
             .Should()
-            .BeEquivalentTo(["sync_orders", "sync_order_lines"]);
+            .BeEquivalentTo(["sync_orders", "sync_order_lines", "sync_markers"]);
     }
 
     /// <summary>実際に書き込んでも除外テーブルの書き込みはジャーナルへ記録されない</summary>
@@ -147,9 +147,70 @@ public sealed class SyncConstructionExclusionTests : IDisposable
                     typeof(SyncOrderEntity),
                     typeof(SyncOrderLineEntity),
                     typeof(SyncNoteEntity),
+                    typeof(SyncMarkerEntity),
                 ]
             );
 
         act.Should().Throw<ArgumentException>().WithMessage("*every synchronised table*");
+    }
+
+    /// <summary>
+    /// 構築時に除外した表（ローカル専用の表）の行が同期対象の親を参照していると、洗い替えは何も消す前に断ることを検証する
+    /// （除外した表はどのランの範囲にも入らないので、参照する行を取り除くまで洗い替えは通らない）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Sync/除外] 構築時に除外した表の行が親を参照していると、洗い替えは何も消す前に断る"
+    )]
+    public async Task ExcludeFromSync_ReferringLocalRows_RefuseRefresh()
+    {
+        await _server.ApplyDdlAsync(SyncFixtureDefinition.BuildSqliteMirror(), Ct);
+        await _local.ApplyDdlAsync(SyncFixtureDefinition.BuildSqliteMirror(), Ct);
+
+        var services = CreateServices();
+        services.AddGeneratedSyncSupport(
+            ServerKey,
+            LocalKey,
+            excludeFromSync: [typeof(SyncNoteEntity)]
+        );
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var localSql = scope.ServiceProvider.GetRequiredKeyedService<ISqlExecutor>(LocalKey);
+        var localOrders = scope.ServiceProvider.GetRequiredKeyedService<ISyncOrderRepository>(
+            LocalKey
+        );
+        var localNotes = scope.ServiceProvider.GetRequiredKeyedService<ISyncNoteRepository>(
+            LocalKey
+        );
+        var engine = scope.ServiceProvider.GetRequiredService<SyncEngine>();
+
+        // 降りてきた行の代わりに、ジャーナルを通さずにローカルへ直接置く（サーバー役の SQLite は生成された直結の
+        // 差分ソースの SQL Server の関数を持たないので、ここでは同期しない＝断るのはサーバーへ何も問い合わせる前）
+        await localSql.ExecuteSqlAsync(
+            "INSERT INTO sync_orders (order_id, customer_name) VALUES (1, 'a')",
+            null,
+            Ct
+        );
+        await localNotes.InsertAsync(
+            new SyncNoteEntity
+            {
+                NoteId = 101,
+                OrderId = 1,
+                Body = "local only",
+            },
+            Ct
+        );
+
+        var act = async () =>
+            await engine.RefreshAsync(
+                new SyncRefreshOptions { DiscardLocalUnboundedBinaries = true },
+                Ct
+            );
+
+        var refused = (await act.Should().ThrowAsync<SyncRefreshScopeException>()).Which;
+        refused
+            .References.Should()
+            .Equal(new SyncRefreshScopeReference("sync_notes", "sync_orders"));
+        (await localOrders.GetByIdAsync(1, Ct)).Should().NotBeNull();
+        (await localNotes.GetByIdAsync(101, Ct)).Should().NotBeNull();
     }
 }

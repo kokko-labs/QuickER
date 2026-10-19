@@ -262,6 +262,9 @@
   <data name="CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase" xml:space="preserve">
     <value>The generated type names {0} differ only in case. The generated code works as it is, but this usually means that the same name is spelled differently in different places. Spell them the same way to remove this warning.</value>
   </data>
+  <data name="CodeGen_Warning_SyncFixedLengthStringPrimaryKeys" xml:space="preserve">
+    <value>The following synchronised tables have a fixed-length string primary key. SQL Server pads such a value with spaces to the declared length, so a row created locally ends up under the padded key after a sync, and a local child row that refers to the unpadded key keeps both rows apart for good. Use a variable-length type (nvarchar / varchar) for the key:{0}</value>
+  </data>
   <data name="CodeGen_Warning_GuidKeyColumnShorterThanGuid" xml:space="preserve">
     <value>The GUID key primary key column '{0}' is declared as {1} characters, which is shorter than the {2} characters produced by the parameterless Create(). Auto-numbering always fails length validation at run time; widen the column, or supply a shorter key explicitly instead of auto-numbering.</value>
   </data>

@@ -351,14 +351,15 @@ public class SyncSupportGenerationTests
     }
 
     /// <summary>
-    /// decimal 主キーのジャーナルキー文字列化がスケールを正規化（G29＝末尾ゼロなし）することを検証する。
+    /// decimal 主キーのジャーナルキー文字列化が、スケールを正規化して指数表記を使わない共有の書式
+    /// （<c>SyncKeyText.FormatDecimal</c>）を通り、読み取りと以前の形の書き直しも同じ所の関数を通ることを検証する。
     /// </summary>
     /// <remarks>
     /// SQL Server は宣言スケールへ揃えて返し（decimal(10,2) の 1.5 は 1.50）、SQLite は書き込んだ綴りを
     /// 保存する（1.5 のまま＝実測）。素の ToString だと同じ行のキー文字列がサーバーとローカルで食い違い、
-    /// 削除伝搬・ack・pending の序数照合がすべて外れる。
+    /// 削除伝搬・ack・pending の序数照合がすべて外れる。値そのものの往復は <c>SyncDecimalKeyExecutionTests</c>。
     /// </remarks>
-    [Fact(DisplayName = "decimal 主キーのキー文字列化はスケールを正規化する（G29）")]
+    [Fact(DisplayName = "decimal 主キーのキー文字列化は共有の書式を通り、読み取りと書き直しも持つ")]
     public void SyncKeyText_DecimalPrimaryKey_NormalizesScale()
     {
         var diagram = Diagram();
@@ -373,7 +374,10 @@ public class SyncSupportGenerationTests
 
         var content = string.Concat(files.Values);
 
-        content.Should().Contain(".ToString(\"G29\", CultureInfo.InvariantCulture)");
+        content.Should().Contain("FormatKey = key => SyncKeyText.FormatDecimal(key),");
+        content.Should().Contain("ParseKey = keyText => SyncKeyText.ParseDecimal(keyText),");
+        content.Should().Contain("NormalizeKeyText = SyncKeyText.WithoutDecimalExponent,");
+        content.Should().NotContain("\"G29\"");
     }
 
     /// <summary>
@@ -1135,6 +1139,9 @@ public class SyncSupportGenerationTests
         var order = ExtractDescriptor(content, "SyncOrderEntity", "SyncOrder");
         order.Should().NotContain("ParentReferences");
         order.Should().Contain("ReferencingTableNames = [\"sync_order_lines\", \"sync_notes\"],");
+        order
+            .Should()
+            .NotContain("UnlistedReferencingTableNames", "どの参照も LocalReferences に載る");
     }
 
     /// <summary>
@@ -1280,6 +1287,10 @@ public class SyncSupportGenerationTests
             .Contain(
                 "ReferencingTableNames = [\"sync_order_lines\", \"sync_notes\", \"sync_orders\", \"sync_tags\"],"
             );
+
+        // 一意制約の列への外部キーは LocalReferences に載らない（洗い替えは、範囲の外のその表が在るだけで断る）
+        orderDescriptor.Should().Contain("UnlistedReferencingTableNames = [\"sync_tags\"],");
+        orderDescriptor.Should().NotContain("new SyncLocalReference(\"sync_tags\"");
 
         var noteDescriptor = ExtractDescriptor(content, "SyncNoteEntity", "SyncNote");
         CountOccurrences(noteDescriptor, "new SyncParentReference<SyncNoteEntity>(")

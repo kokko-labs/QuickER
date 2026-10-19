@@ -427,6 +427,8 @@ internal sealed class ScribanCSharpRenderer
             // （InMemory / EF Core の固定部）では repository_dialect が RepositoryDialects[0] になり意味を持たないため、
             // このフラグを見る箇所は必ず repositories（方言エンジンを出力するスコープか）と併せて判定する。
             ["dialect_assigns_store_generated"] = dialect.AssignsStoreGeneratedValues,
+            // このスコープの方言の UNIQUE 制約が NULL を値として比べるか（重複事前チェックが共有の照合へ渡す規則）。
+            ["dialect_unique_nulls_collide"] = dialect.UniqueConstraintNullsCollide,
             // 生成物に「値を採番するエンジン」と「採番しないエンジン」が同居するか（マルチターゲットの非対称）。
             ["store_generated_dialects_differ"] = storeGeneratedDialectsDiffer,
             ["quote_open"] = dialect.QuoteOpen,
@@ -729,6 +731,7 @@ internal sealed class RepositoryDialectVariables
                 RepositoryBaseClass = "SqliteRepository";
                 SqlQueryExecutorClass = "SqliteSqlQueryExecutor";
                 DisplayName = "SQLite";
+                UniqueConstraintNullsCollide = false;
                 break;
 
             default:
@@ -744,6 +747,7 @@ internal sealed class RepositoryDialectVariables
                 RepositoryBaseClass = "SqlServerRepository";
                 SqlQueryExecutorClass = "SqlServerSqlQueryExecutor";
                 DisplayName = "SQL Server";
+                UniqueConstraintNullsCollide = true;
                 break;
         }
     }
@@ -753,6 +757,13 @@ internal sealed class RepositoryDialectVariables
 
     /// <summary>この方言の DB が store-generated 列の値を採番するか（<see cref="AssignsStoreGenerated"/> の結果）</summary>
     public bool AssignsStoreGeneratedValues { get; }
+
+    /// <summary>
+    /// この方言の UNIQUE 制約が NULL を値として比べるか（SQL Server＝true＝同じ組の 2 行目の NULL を断る・SQLite＝false＝NULL の行は
+    /// いくつでも入る）。QuickER 版 Repository の重複事前チェック（<c>CheckUniquenessAsync</c>）が、共有の照合へこの規則を渡す。
+    /// テンプレート側は <c>dialect_unique_nulls_collide</c> として受け取る
+    /// </summary>
+    public bool UniqueConstraintNullsCollide { get; }
 
     /// <summary>識別子クォート開始（C# 文字列リテラル埋め込み用。SQL Server: <c>[</c>、SQLite: <c>""</c>）</summary>
     public string QuoteOpen { get; }

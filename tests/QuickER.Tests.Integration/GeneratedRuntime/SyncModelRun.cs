@@ -311,6 +311,47 @@ internal sealed class SyncModelRun : IAsyncDisposable
                 break;
             }
 
+            case ModelRefreshOp { ExpectScopeRefusal: true } refusal:
+            {
+                var before = await _world.ReadStateAsync(refusal.Device, _ct);
+
+                try
+                {
+                    await _world.RefreshAsync(refusal, _ct);
+                    _failures.Add(new("refresh/not-refused", $"{op.Describe()} succeeded"));
+                }
+                catch (SyncRefreshScopeException ex)
+                {
+                    _log.Add($"  -> refused: {ex.Message}");
+                }
+
+                var after = await _world.ReadStateAsync(refusal.Device, _ct);
+
+                foreach (var table in ModelTables.All)
+                {
+                    var was = before.Rows(table);
+                    var now = after.Rows(table);
+
+                    if (
+                        was.Count != now.Count
+                        || was.Any(pair =>
+                            !now.TryGetValue(pair.Key, out var row)
+                            || !string.Equals(row, pair.Value, StringComparison.Ordinal)
+                        )
+                    )
+                    {
+                        _failures.Add(
+                            new(
+                                $"refresh/refused-changed:{table}",
+                                $"{op.Describe()} changed {table}"
+                            )
+                        );
+                    }
+                }
+
+                break;
+            }
+
             case ModelRefreshOp refresh:
                 try
                 {

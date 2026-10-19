@@ -146,6 +146,17 @@ public sealed record CSharpTypeInfo
     public bool IsNonUnicodeString { get; init; }
 
     /// <summary>
+    /// 列が固定長の文字列（正規型の <c>FixedString</c> / <c>AnsiFixedString</c>＝SQL Server の <c>nchar(n)</c>・<c>char(n)</c>
+    /// など）かどうか。
+    /// </summary>
+    /// <remarks>
+    /// 同期の対象の表の主キーがこの型なら、生成時の Warning で名指しする（SQL Server は値を宣言の長さまで空白で詰めて
+    /// 返すので、ローカルで作った行のキーが同期の後に空白詰めのキーへ置き換わる）。方言の型表記の文字列は見ず、
+    /// <c>CanonicalTypeTokenAttacher</c> が型カタログで解析した正規型の種類から決める。解析できない型表記の列は false のまま。
+    /// </remarks>
+    public bool IsFixedLengthString { get; init; }
+
+    /// <summary>
     /// 1 列＝1 テキスト入力として扱えない型（PostgreSQL の <c>inet</c>＝<c>System.Net.IPAddress</c>）かどうか。
     /// </summary>
     /// <remarks>

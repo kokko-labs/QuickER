@@ -262,6 +262,9 @@
   <data name="CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase" xml:space="preserve">
     <value>生成される型名 {0} は、大文字小文字だけが違います。生成物はこのままで動きますが、同じ名前を場所によって違う綴りで書いていることが多い組です。綴りをそろえると、この警告は出なくなります。</value>
   </data>
+  <data name="CodeGen_Warning_SyncFixedLengthStringPrimaryKeys" xml:space="preserve">
+    <value>次の同期の対象の表は、主キーが固定長の文字列です。SQL Server はこの値を宣言の長さまで空白で詰めるので、ローカルで作った行は同期の後に空白詰めのキーの行へ置き換わり、詰めていないキーを参照するローカルの子の行があると 2 行のまま収束しません。主キーには可変長の型（nvarchar / varchar）を使ってください:{0}</value>
+  </data>
   <data name="CodeGen_Warning_GuidKeyColumnShorterThanGuid" xml:space="preserve">
     <value>GUID キーの主キー列 '{0}' は宣言幅が {1} 文字で、引数なし Create() が採番する {2} 文字より短いため、自動採番は実行時に必ず長さ検証で失敗します。列幅を広げるか、自動採番を使わずに短いキーを明示的に与えてください。</value>
   </data>

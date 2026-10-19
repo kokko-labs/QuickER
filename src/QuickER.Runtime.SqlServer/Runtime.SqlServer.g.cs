@@ -486,12 +486,15 @@ public abstract class SqlServerRepositoryCore<TEntity, TKey>(
     )
     {
         var constraints = UniquenessConstraints;
+
+        // The rule of this store's UNIQUE constraint: SQL Server compares NULL as a value
         var violations = await UniquenessChecker
             .CheckAsync(
                 entity,
                 Query,
                 constraints.ExcludeSelf,
                 constraints.Constraints,
+                nullValuesCollide: true,
                 cancellationToken
             )
             .ConfigureAwait(false);

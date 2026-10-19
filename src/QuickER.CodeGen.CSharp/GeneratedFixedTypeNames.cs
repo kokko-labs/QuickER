@@ -199,6 +199,8 @@ public static class GeneratedFixedTypeNames
             "SyncRecordingScope",
             "SyncRefreshOptions",
             "SyncRefreshResult",
+            "SyncRefreshScopeException",
+            "SyncRefreshScopeReference",
             "SyncRefreshTableResult",
             "SyncRepositoryBinaryColumns",
             "SyncResult",

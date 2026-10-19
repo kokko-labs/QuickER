@@ -483,6 +483,26 @@ internal static class SyncTestServerSources
             LineKeysSql
         );
 
+    /// <summary>マーカーの差分取得 SQL</summary>
+    public const string MarkerChangesSql =
+        "SELECT * FROM \"sync_markers\" WHERE (@anchor IS NULL OR \"row_ver\" > @anchor) "
+        + "AND (@ceiling IS NULL OR \"row_ver\" < @ceiling) ORDER BY \"row_ver\" LIMIT @batchSize";
+
+    /// <summary>マーカーのキー取得 SQL</summary>
+    public const string MarkerKeysSql = "SELECT \"marker_id\" FROM \"sync_markers\"";
+
+    /// <summary>マーカーの差分ソースを組み立てる</summary>
+    public static ISyncServerSource<SyncMarkerEntity, int> CreateMarkers(
+        ISqlExecutor serverSql,
+        IRepository<SyncMarkerEntity, int> writer
+    ) =>
+        new SyncTestServerSource<SyncMarkerEntity, int>(
+            serverSql,
+            writer,
+            MarkerChangesSql,
+            MarkerKeysSql
+        );
+
     /// <summary>メモ（版なしテーブル）の先頭ページ取得 SQL（キー昇順＝生成される SQL Server 版と同じ意味論）</summary>
     public const string NoteFirstPageSql =
         "SELECT * FROM \"sync_notes\" ORDER BY \"note_id\" LIMIT @batchSize";

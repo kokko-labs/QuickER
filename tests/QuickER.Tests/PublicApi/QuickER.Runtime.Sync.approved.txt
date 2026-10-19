@@ -245,7 +245,10 @@ public sealed class QuickER.Runtime.Sync.SyncJournalRow
     public string UnboundedBinaryColumns { get; set; }
 
 public static class QuickER.Runtime.Sync.SyncKeyText
+    public static decimal ParseDecimal(string keyText)
+    public static string FormatDecimal(decimal value)
     public static string WithoutDateTimeKind(string keyText)
+    public static string WithoutDecimalExponent(string keyText)
 
 public sealed class QuickER.Runtime.Sync.SyncLocalReference : System.IEquatable<QuickER.Runtime.Sync.SyncLocalReference>
     public .ctor(string TableName, string Sql)
@@ -307,6 +310,15 @@ public sealed class QuickER.Runtime.Sync.SyncRefreshResult : System.IEquatable<Q
     public int Deleted { get; }
     public int DiscardedChanges { get; init; }
     public int Inserted { get; }
+
+public sealed class QuickER.Runtime.Sync.SyncRefreshScopeException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable
+    public .ctor(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncRefreshScopeReference> references)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncRefreshScopeReference> References { get; }
+
+public sealed class QuickER.Runtime.Sync.SyncRefreshScopeReference : System.IEquatable<QuickER.Runtime.Sync.SyncRefreshScopeReference>
+    public .ctor(string ReferencingTableName, string ReferencedTableName)
+    public string ReferencedTableName { get; init; }
+    public string ReferencingTableName { get; init; }
 
 public sealed class QuickER.Runtime.Sync.SyncRefreshTableResult : System.IEquatable<QuickER.Runtime.Sync.SyncRefreshTableResult>
     public .ctor(string TableName, int Deleted, int Inserted)
@@ -384,6 +396,7 @@ public sealed class QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> : Qu
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncUniqueLookup<TEntity>> LocalUniqueLookups { get; init; }
     public System.Collections.Generic.IReadOnlyList<string> ReferencingTableNames { get; init; }
     public System.Collections.Generic.IReadOnlyList<string> UnboundedBinaryColumnNames { get; init; }
+    public System.Collections.Generic.IReadOnlyList<string> UnlistedReferencingTableNames { get; init; }
     public System.Func<TEntity, TKey> ReadKey { get; init; }
     public System.Func<TEntity, byte[]> ReadRowVersion { get; init; }
     public System.Func<TKey, string> FormatKey { get; init; }

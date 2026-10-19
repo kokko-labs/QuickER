@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -148,5 +149,43 @@ public sealed class UniquenessCheckSqlServerRuntimeTests(SqlServerContainerFixtu
 
         var rows = await Orders().Query().Where(o => o.Memo != value).ToListAsync(Ct);
         return rows.Select(o => o.OrderId.Value).ToList();
+    }
+
+    /// <summary>
+    /// SQL Server の UNIQUE 制約は NULL を値として比べ、同じ組の 2 行目の NULL を断るので、事前チェックも
+    /// 既存の NULL 行と同じ NULL の値を重複と報告する
+    /// </summary>
+    protected override void AssertNullMemberOutcome(
+        IReadOnlyList<UniquenessViolationRow> violations
+    )
+    {
+        violations.Should().ContainSingle();
+        violations[0].ConstraintName.Should().Be(SingleConstraintName);
+        violations[0].PropertyNames.Should().Equal("Memo");
+    }
+
+    /// <summary>
+    /// EditModel の DB 照合（ValidateUniqueAsync）も、SQL Server では NULL の 2 件目を重複と報告し、構成列へエラーを載せる
+    /// </summary>
+    [Fact(
+        DisplayName = "[Uniqueness/SqlServer] ValidateUniqueAsync は NULL の 2 件目を重複と報告する"
+    )]
+    public async Task ValidateUnique_SecondNull_IsReported()
+    {
+        await ResetAndSeedAsync();
+        var model = new OrderEditModel
+        {
+            BindingOrderId = "99",
+            BindingCustomerId = "2",
+            BindingAmount = "12",
+        };
+        model.Memo.Should().BeNull();
+
+        (await model.ValidateUniqueAsync(Orders(), Ct)).Should().BeFalse();
+
+        ((IEnumerable)model.GetErrors(nameof(OrderEditModel.BindingMemo)))
+            .Cast<string>()
+            .Should()
+            .ContainSingle();
     }
 }

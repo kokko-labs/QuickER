@@ -352,11 +352,16 @@ internal sealed record ModelSyncOp(
 }
 
 /// <summary>端末の洗い替え 1 回（未送信のジャーナルがあれば拒否される＝Force は使わない）</summary>
+/// <param name="ExpectScopeRefusal">
+/// 範囲外の表の行が範囲内の行を参照しているので <see cref="SyncRefreshScopeException"/> で断られ、端末の DB が変わらない
+/// ことを期待するか
+/// </param>
 internal sealed record ModelRefreshOp(
     ModelActor Device,
     SyncMode Mode,
     bool IncludeBlobs,
-    int BatchSize = 2000
+    int BatchSize = 2000,
+    bool ExpectScopeRefusal = false
 ) : ModelOp
 {
     /// <summary>エンジンへ渡すオプション（blob を運ばないときは、ローカルの blob を捨てることを明示する）</summary>
@@ -370,7 +375,8 @@ internal sealed record ModelRefreshOp(
         };
 
     public override string Describe() =>
-        $"{Who(Device)} Refresh mode={Mode} blobs={IncludeBlobs} batch={BatchSize}";
+        $"{Who(Device)} Refresh mode={Mode} blobs={IncludeBlobs} batch={BatchSize}"
+        + (ExpectScopeRefusal ? " expect=scope-refusal" : "");
 }
 
 /// <summary>キーだけのスタブ（新しい実体にキーだけを入れて RowState=Removed）をグラフ保存して削除する</summary>

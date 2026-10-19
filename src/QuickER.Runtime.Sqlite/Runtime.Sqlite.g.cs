@@ -516,12 +516,15 @@ public abstract class SqliteRepositoryCore<TEntity, TKey>(
     )
     {
         var constraints = UniquenessConstraints;
+
+        // The rule of this store's UNIQUE constraint: SQLite lets any number of rows hold NULL
         var violations = await UniquenessChecker
             .CheckAsync(
                 entity,
                 Query,
                 constraints.ExcludeSelf,
                 constraints.Constraints,
+                nullValuesCollide: false,
                 cancellationToken
             )
             .ConfigureAwait(false);

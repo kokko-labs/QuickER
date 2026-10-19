@@ -110,6 +110,16 @@ public static class SyncFixtureDefinition
         "c1000000-0000-0000-0000-000000000041"
     );
     private static readonly Guid QueryGetHeadlinesId = new("c1000000-0000-0000-0000-000000000051");
+    private static readonly Guid MarkerEntityId = new("c1000000-0000-0000-0000-000000000061");
+    private static readonly Guid MarkerPkColId = new("c1000000-0000-0000-0000-000000000062");
+    private static readonly Guid MarkerCodeColId = new("c1000000-0000-0000-0000-000000000063");
+    private static readonly Guid MarkerGroupColId = new("c1000000-0000-0000-0000-000000000064");
+    private static readonly Guid MarkerSlotColId = new("c1000000-0000-0000-0000-000000000065");
+    private static readonly Guid MarkerRowVerColId = new("c1000000-0000-0000-0000-000000000066");
+    private static readonly Guid MarkerCodeUniqueId = new("c1000000-0000-0000-0000-000000000067");
+    private static readonly Guid MarkerGroupSlotUniqueId = new(
+        "c1000000-0000-0000-0000-000000000068"
+    );
 
     /// <summary>同期支援の検証用 ER 図を決定的に構築する（型は SQL Server 表記）</summary>
     public static ErDiagram Build()
@@ -236,6 +246,69 @@ public static class SyncFixtureDefinition
             },
         };
 
+        // NULL を許す列の一意制約（単一列と、NULL を許す 2 列の複合）。SQL Server の UNIQUE 制約は NULL を値として比べ、
+        // 同じ組の NULL を 2 行目から断るので、サーバーの事前チェック（CheckUniquenessAsync）が同じ規則で判定しないと、
+        // 同期は 2 行目の NULL の書き込みを毎回失敗させて止まる（区切り 42-3）。どの表からも参照されない独立の表
+        var marker = new Entity
+        {
+            Id = MarkerEntityId,
+            TableName = "sync_markers",
+            Columns =
+            {
+                new Column
+                {
+                    Id = MarkerPkColId,
+                    Name = "marker_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = MarkerCodeColId,
+                    Name = "code",
+                    DataType = "nvarchar(20)",
+                    IsNullable = true,
+                },
+                new Column
+                {
+                    Id = MarkerGroupColId,
+                    Name = "group_name",
+                    DataType = "nvarchar(20)",
+                    IsNullable = true,
+                },
+                new Column
+                {
+                    Id = MarkerSlotColId,
+                    Name = "slot",
+                    DataType = "int",
+                    IsNullable = true,
+                },
+                new Column
+                {
+                    Id = MarkerRowVerColId,
+                    Name = "row_ver",
+                    DataType = "rowversion",
+                    IsNullable = true,
+                },
+            },
+            UniqueConstraints =
+            {
+                new UniqueConstraint
+                {
+                    Id = MarkerCodeUniqueId,
+                    Name = "UQ_sync_markers_code",
+                    ColumnIds = { MarkerCodeColId },
+                },
+                new UniqueConstraint
+                {
+                    Id = MarkerGroupSlotUniqueId,
+                    Name = "UQ_sync_markers_group_name_slot",
+                    ColumnIds = { MarkerGroupColId, MarkerSlotColId },
+                },
+            },
+        };
+
         var relationship = new Relationship
         {
             Id = OrderLineRelationshipId,
@@ -259,7 +332,7 @@ public static class SyncFixtureDefinition
         var diagram = new ErDiagram
         {
             TargetDbms = "sqlserver",
-            Entities = { order, line, note },
+            Entities = { order, line, note, marker },
             Relationships = { relationship, noteRelationship },
         };
 
