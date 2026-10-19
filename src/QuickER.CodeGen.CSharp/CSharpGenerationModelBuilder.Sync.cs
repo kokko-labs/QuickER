@@ -953,11 +953,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             "DateTime" =>
                 $"DateTime.SpecifyKind({access}, DateTimeKind.Unspecified).ToString(\"o\", CultureInfo.InvariantCulture)",
             "DateTimeOffset" => $"{access}.ToString(\"o\", CultureInfo.InvariantCulture)",
-            // decimal はスケールを正規化する（G29＝末尾ゼロなし）。SQL Server は宣言スケールへ揃えて返し
-            // （decimal(10,2) の 1.5 は 1.50）、SQLite（Microsoft.Data.Sqlite）は書き込んだ綴りを保存する
-            // （1.5 のまま＝実測）ため、素の ToString だと同じ行のキー文字列がサーバーとローカルで食い違い、
-            // 削除伝搬・ack・pending の序数照合がすべて外れる
-            "decimal" => $"{access}.ToString(\"G29\", CultureInfo.InvariantCulture)",
+            // decimal はスケールを正規化し、指数表記を使わない（書式は SyncKeyText.FormatDecimal の 1 つ）
+            "decimal" => $"SyncKeyText.FormatDecimal({access})",
             // TimeSpan は書式を取る ToString(IFormatProvider) を持たない（既定の形ではコンパイルできない）。TimeOnly の既定の形は
             // 秒を落として往復しない（"HH:mm"）。どちらも不変の往復書式で書く。DateOnly は既定の形（"MM/dd/yyyy"）で往復する
             "TimeSpan" => $"{access}.ToString(\"c\", CultureInfo.InvariantCulture)",
@@ -968,13 +965,17 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>以前の版が書いたキーのテキストをいまの形へ書き直す関数の式を組み立てる（形が変わっていない型は空文字）</summary>
     /// <remarks>
-    /// DateTime の主キーは、以前は Kind つきの往復書式（<c>Z</c> やローカルのオフセット）で書いていた。ローカル DB に
-    /// 残ったジャーナル・受理記録・コピー待ちのテキストを、ランの前に Kind を落とした形へ書き直す。
+    /// DateTime の主キーは、以前は Kind つきの往復書式（<c>Z</c> やローカルのオフセット）で書いていた。decimal の主キーは、
+    /// 以前は絶対値 1e-5 未満の値を指数表記（<c>1E-06</c>）で書いていた。ローカル DB に残ったジャーナル・受理記録・
+    /// コピー待ちのテキストを、ランの前にいまの形へ書き直す。
     /// </remarks>
     private string BuildNormalizeKeyText(Column column) =>
-        _columnTypes[column.Id].TypeName.TrimEnd('?') == "DateTime"
-            ? "SyncKeyText.WithoutDateTimeKind"
-            : string.Empty;
+        _columnTypes[column.Id].TypeName.TrimEnd('?') switch
+        {
+            "DateTime" => "SyncKeyText.WithoutDateTimeKind",
+            "decimal" => "SyncKeyText.WithoutDecimalExponent",
+            _ => string.Empty,
+        };
 
     /// <summary>ジャーナルのテキスト形から主キーを復元する式を組み立てる</summary>
     private string BuildParseKey(Column column, CSharpValueObjectModel? valueObject)
@@ -991,6 +992,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 "DateTimeOffset.Parse(keyText, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)",
             "TimeSpan" => "TimeSpan.ParseExact(keyText, \"c\", CultureInfo.InvariantCulture)",
             "TimeOnly" => "TimeOnly.ParseExact(keyText, \"O\", CultureInfo.InvariantCulture)",
+            "decimal" => "SyncKeyText.ParseDecimal(keyText)",
             _ => $"{underlying}.Parse(keyText, CultureInfo.InvariantCulture)",
         };
 

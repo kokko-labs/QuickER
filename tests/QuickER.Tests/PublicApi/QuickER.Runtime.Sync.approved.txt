@@ -245,7 +245,10 @@ public sealed class QuickER.Runtime.Sync.SyncJournalRow
     public string UnboundedBinaryColumns { get; set; }
 
 public static class QuickER.Runtime.Sync.SyncKeyText
+    public static decimal ParseDecimal(string keyText)
+    public static string FormatDecimal(decimal value)
     public static string WithoutDateTimeKind(string keyText)
+    public static string WithoutDecimalExponent(string keyText)
 
 public sealed class QuickER.Runtime.Sync.SyncLocalReference : System.IEquatable<QuickER.Runtime.Sync.SyncLocalReference>
     public .ctor(string TableName, string Sql)

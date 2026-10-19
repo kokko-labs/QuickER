@@ -1788,6 +1788,50 @@ public static class SyncKeyText
 
         return keyText;
     }
+
+    /// <summary>The fixed-point pattern a <see cref="decimal"/> key is written with: no exponent, no trailing zeros, every one of the 28 decimal places a value can have.</summary>
+    private const string DecimalPattern = "0.############################";
+
+    /// <summary>Writes a <see cref="decimal"/> key in the journal's text form.</summary>
+    /// <remarks>
+    /// The scale is normalised (no trailing zeros): SQL Server returns a value at the scale the column declares
+    /// (<c>1.50</c> in a <c>decimal(10,2)</c>) while SQLite keeps the digits it was given, and the same row has to give
+    /// the same text on both sides. The text never uses an exponent, so <see cref="ParseDecimal"/> reads it back - a
+    /// general format writes a value below 1e-5 in magnitude as <c>1E-06</c>.
+    /// </remarks>
+    /// <param name="value">The key.</param>
+    public static string FormatDecimal(decimal value) =>
+        value.ToString(DecimalPattern, CultureInfo.InvariantCulture);
+
+    /// <summary>Reads a <see cref="decimal"/> key from the journal's text form, including the exponent form an earlier version wrote.</summary>
+    /// <param name="keyText">The key text.</param>
+    public static decimal ParseDecimal(string keyText)
+    {
+        ArgumentNullException.ThrowIfNull(keyText);
+
+        return decimal.Parse(keyText, NumberStyles.Float, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Rewrites a <see cref="decimal"/> key that an earlier version wrote with an exponent (<c>1E-06</c>) in the form
+    /// <see cref="FormatDecimal"/> writes; any other text comes back as it is.
+    /// </summary>
+    /// <param name="keyText">The key text.</param>
+    public static string WithoutDecimalExponent(string keyText)
+    {
+        ArgumentNullException.ThrowIfNull(keyText);
+
+        return
+            keyText.AsSpan().IndexOfAny('E', 'e') >= 0
+            && decimal.TryParse(
+                keyText,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var value
+            )
+            ? FormatDecimal(value)
+            : keyText;
+    }
 }
 
 /// <summary>One unique constraint of a synchronised table, as the local database is asked which row holds a value.</summary>

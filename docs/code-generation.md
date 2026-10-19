@@ -2683,7 +2683,7 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
 - **Writing while a run is in flight is safe only within one process.**
   The locks that make it safe are per process, so another process writing the same local database file is not covered (see [Writing while a run is in flight](#writing-while-a-run-is-in-flight)).
 - **Keys are matched as text, ordinally.**
-  The journal and the receipt table hold the key as a string (a `byte[]` key as uppercase hex, a `Guid` by `ToString()`, a `DateTime` key in round-trip form without its kind, since neither database keeps the kind), and every comparison the engine makes (pending keys, receipts, delete propagation) is ordinal and case-sensitive.
+  The journal and the receipt table hold the key as a string (a `byte[]` key as uppercase hex, a `Guid` by `ToString()`, a `DateTime` key in round-trip form without its kind, since neither database keeps the kind, and a `decimal` key in fixed-point form without trailing zeros or an exponent, since SQL Server returns a value at the scale the column declares), and every comparison the engine makes (pending keys, receipts, delete propagation) is ordinal and case-sensitive.
   The server, by contrast, looks its rows up with ordinary SQL equality on the key column, under that column's collation.
   On a case-insensitive column, then, `ABC` and `abc` are one row to the server and two separate journal and receipt entries locally.
   Keep the case of a text key stable, the same way [GUID keys](#guid-keys-for-string-primary-keys-useguidkeyforstringprimarykey) have to be.
