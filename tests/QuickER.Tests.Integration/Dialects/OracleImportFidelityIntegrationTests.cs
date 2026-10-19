@@ -530,6 +530,40 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
     }
 
     /// <summary>
+    /// 大文字小文字だけ違う列名の衝突で捨てた列の一意制約と外部キーが、採用した列へ付け替わらないことを検証する
+    /// （主キーと説明と同じく、一意制約・外部キーの構成列も綴りまで一致で引き当てる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] Oracle: 衝突で捨てた列の一意制約・外部キーは、採用した列へ付け替わらない"
+    )]
+    public async Task Import_ColumnNamesDifferingOnlyInCase_DoNotMoveConstraints()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE P (ID NUMBER(10) PRIMARY KEY, DUP NUMBER(10), "dup" NUMBER(10) UNIQUE);
+            CREATE TABLE T (ID NUMBER(10) PRIMARY KEY, DUP NUMBER(10), "dup" NUMBER(10) UNIQUE REFERENCES P (ID), R NUMBER(10) REFERENCES P ("dup"));
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        CollidedColumnImportAssertions.ShouldNotMoveConstraintsOfDroppedColumns(
+            result,
+            "P",
+            "T",
+            "ID",
+            "DUP",
+            "dup",
+            "R"
+        );
+    }
+
+    /// <summary>
     /// 仮想列が <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、
     /// 式の喪失が報告されることを検証する。
     /// </summary>
@@ -711,6 +745,53 @@ public sealed class OracleImportFidelityIntegrationTests(OracleContainerFixture 
             await fixture.ExecuteAsync("DROP VIEW V_CUSTOMERS;", Ct);
             await fixture.ExecuteAsSystemAsync("DROP DIRECTORY QER_EXT_DIR;", Ct);
         }
+    }
+
+    /// <summary>
+    /// 空文字列と括弧で包んだ NULL の既定値（<c>DEFAULT ''</c>・<c>DEFAULT (NULL)</c> など）は、既定値として告げず、
+    /// 既定値の事実にも数えないことを検証する（Oracle では空文字列は NULL）。空白 1 文字は NULL ではないので告げる
+    /// </summary>
+    /// <remarks>
+    /// 既定値の事実（<see cref="SchemaImportResult.ColumnDefaults"/>）は、同期の計画が既定値のある列の型の種類の変更を
+    /// 警告するのに使う。NULL を既定値と数えると、その警告が根拠なく出る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] Oracle: DEFAULT '' と括弧で包んだ DEFAULT NULL は既定値として告げない"
+    )]
+    public async Task Import_EmptyStringAndParenthesizedNullDefaults_AreNotDefaults()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE NULLISH (
+                ID NUMBER(10) PRIMARY KEY,
+                A VARCHAR2(10) DEFAULT '',
+                B VARCHAR2(10) DEFAULT (NULL),
+                C VARCHAR2(10) DEFAULT ( '' ),
+                D VARCHAR2(10) DEFAULT ((null)),
+                E NVARCHAR2(10) DEFAULT N'',
+                F VARCHAR2(10) DEFAULT 'a',
+                G VARCHAR2(10) DEFAULT ' '
+            );
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .BeEquivalentTo([
+                (SchemaImportWarningKind.ColumnDefaultLost, "NULLISH", "F", "'a'"),
+                (SchemaImportWarningKind.ColumnDefaultLost, "NULLISH", "G", "' '"),
+            ]);
+        result
+            .ColumnDefaults.Select(d => (d.ColumnName, d.Expression))
+            .Should()
+            .BeEquivalentTo([("F", "'a'"), ("G", "' '")]);
     }
 
     /// <summary>

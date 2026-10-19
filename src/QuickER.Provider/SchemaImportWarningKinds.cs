@@ -63,6 +63,8 @@ public static class SchemaImportWarningKinds
             SchemaImportWarningKind.IdentityColumnMarked =>
                 UnsupportedDefinitionKind.IdentityRejectingValues,
             SchemaImportWarningKind.DottedTableNameExcluded => null,
+            SchemaImportWarningKind.UndeclaredColumnType =>
+                UnsupportedDefinitionKind.UndeclaredColumnType,
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 

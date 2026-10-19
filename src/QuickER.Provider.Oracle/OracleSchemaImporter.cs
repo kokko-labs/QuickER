@@ -379,8 +379,30 @@ ORDER BY constraint_name";
         return dict;
     }
 
-    /// <summary>Oracle が <c>DEFAULT NULL</c> を <c>data_default</c> に書く表記（書いたとおりの綴りなので大文字小文字を無視して比べる）</summary>
-    private static readonly string[] NullDefaultForms = ["NULL"];
+    /// <summary>
+    /// 値が NULL になる既定値の <c>data_default</c> の表記（外側の括弧を外した後。書いたとおりの綴りなので大文字小文字を無視して比べる）
+    /// </summary>
+    /// <remarks>Oracle では空文字列（<c>''</c>・<c>N''</c>）も NULL なので、値が NULL の既定値に数える。</remarks>
+    private static readonly string[] NullDefaultForms = ["NULL", "''", "N''"];
+
+    /// <summary>
+    /// <c>data_default</c> の既定値の値が NULL か（<c>DEFAULT NULL</c>・<c>DEFAULT ''</c>・<c>DEFAULT (NULL)</c>・<c>DEFAULT ( '' )</c> など）
+    /// </summary>
+    /// <remarks>
+    /// Oracle は既定値の式を書いたとおりの文字列で持つので、外側の括弧と空白を外してから比べる。
+    /// 対になっていない括弧まで外しても、残りは NULL の表記にならないので判定は変わらない（<c>(a) || (b)</c> は既定値のまま）。
+    /// </remarks>
+    private static bool IsNullDefault(string? expression)
+    {
+        var text = expression?.Trim();
+
+        while (text is ['(', .., ')'])
+        {
+            text = text[1..^1].Trim();
+        }
+
+        return SchemaImportWarnings.IsNullDefault(text, NullDefaultForms);
+    }
 
     /// <summary>図が持たない列の属性を、列ごとの取込警告（段 1）で名指しし、既定値の事実を返す</summary>
     /// <remarks>
@@ -454,7 +476,7 @@ ORDER BY constraint_name";
                 continue;
             }
 
-            if (isVirtual || SchemaImportWarnings.IsNullDefault(expression, NullDefaultForms))
+            if (isVirtual || IsNullDefault(expression))
             {
                 continue;
             }

@@ -117,6 +117,9 @@ public enum UnsupportedDefinitionKind
     /// <summary>D2b DDL へ出せない型表記</summary>
     UnemittableTypeNotation,
 
+    /// <summary>D2c 型を宣言していない列（SQLite。BLOB として取り込む）</summary>
+    UndeclaredColumnType,
+
     /// <summary>N1 前後に空白のある表名・列名・制約名</summary>
     PaddedName,
 

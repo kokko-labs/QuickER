@@ -20,11 +20,16 @@ public sealed class SchemaTableEntry
 
     /// <summary>列名からカラムを引くための索引（後続の PK / 説明 / FK 反映に用いる）</summary>
     /// <remarks>
-    /// 採用した列だけが入る（<see cref="TryBeginColumn"/> が衝突した列を弾く）。照合は <see cref="SchemaNames.Comparer"/>。
-    /// カタログの行から引くときは、衝突で捨てた列の行が採用した列へ吸い寄せられないよう
-    /// <see cref="TryGetColumnExact"/> を使う（SQLite の外部キーの参照先のように綴りが宣言のまま返るものだけ、この索引で直接引く）
+    /// 採用した列だけが入る（<see cref="TryBeginColumn"/> が衝突した列を弾く）。照合は <see cref="SchemaNames.Comparer"/>、
+    /// キーはカタログが返した列名（綴りのまま）。カタログの行から引くときは、衝突で捨てた列の行が採用した列へ
+    /// 吸い寄せられないよう <see cref="TryGetColumnExact"/> を使う（主キー・説明・一意制約・外部キーの両端）。
+    /// カタログが列名を宣言の綴りで返すもの（SQLite の外部キーの親の列）は、先に <see cref="TryFindColumnName"/> で
+    /// その DB の照合により採用した列の綴りへ直してから引く
     /// </remarks>
-    public Dictionary<string, Column> ColumnsByName { get; } = new(SchemaNames.Comparer);
+    public IReadOnlyDictionary<string, Column> ColumnsByName => _columnsByName;
+
+    /// <summary><see cref="ColumnsByName"/> の実体（書き込みは <see cref="AddColumn"/> だけが行う）</summary>
+    private readonly Dictionary<string, Column> _columnsByName = new(SchemaNames.Comparer);
 
     /// <summary>採用した列のカタログ上の名前（綴りのまま）</summary>
     private readonly HashSet<string> _acceptedColumnNames = new(StringComparer.Ordinal);
@@ -61,7 +66,7 @@ public sealed class SchemaTableEntry
     /// <returns>採用してよければ <c>true</c>（続けて <see cref="AddColumn"/> を呼ぶ）</returns>
     public bool TryBeginColumn(string columnName, List<SchemaImportWarning> warnings)
     {
-        if (!ColumnsByName.TryGetValue(columnName, out var kept))
+        if (!_columnsByName.TryGetValue(columnName, out var kept))
         {
             return true;
         }
@@ -84,7 +89,7 @@ public sealed class SchemaTableEntry
     public void AddColumn(Column column, string columnName)
     {
         Entity.Columns.Add(column);
-        ColumnsByName[columnName] = column;
+        _columnsByName[columnName] = column;
         _acceptedColumnNames.Add(columnName);
     }
 
@@ -97,7 +102,33 @@ public sealed class SchemaTableEntry
         column = null;
 
         return _acceptedColumnNames.Contains(columnName)
-            && ColumnsByName.TryGetValue(columnName, out column);
+            && _columnsByName.TryGetValue(columnName, out column);
+    }
+
+    /// <summary>採用した列のうち条件に合うものを探し、カタログ上の名前（綴りのまま）を返す</summary>
+    /// <param name="matches">カタログ上の名前と列を受け取り、探している列なら <c>true</c> を返す条件</param>
+    /// <param name="columnName">見つかった列のカタログ上の名前</param>
+    /// <returns>条件に合う採用済みの列があれば <c>true</c></returns>
+    /// <remarks>
+    /// カタログが宣言の綴りで返す列名（SQLite の外部キーの親の列）を、その DB の照合で採用した列の綴りへ直すために使う。
+    /// 衝突で捨てた列は採用していないので、捨てた列を指す名前はどの列にも合わない（採用した列へ付け替えない）
+    /// </remarks>
+    public bool TryFindColumnName(
+        Func<string, Column, bool> matches,
+        [NotNullWhen(true)] out string? columnName
+    )
+    {
+        foreach (var (name, column) in _columnsByName)
+        {
+            if (matches(name, column))
+            {
+                columnName = name;
+                return true;
+            }
+        }
+
+        columnName = null;
+        return false;
     }
 
     /// <summary>取込対象として採用したテーブルを、大文字小文字まで一致させて引く</summary>

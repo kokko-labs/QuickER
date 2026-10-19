@@ -642,7 +642,31 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                     continue;
                 }
 
+                // 参照先が接続先 DB に無い表（FOREIGN_KEY_CHECKS = 0 で作った・参照先を後から落とした外部キー）なら、
+                // 範囲の外を参照する外部キーと同じく除外して告げる（衝突して捨てた表は辞書の照合では見つかるので、ここへ来ない）
+                if (
+                    !tables.ContainsKey(refKey)
+                    && SchemaTableEntry.TryGetExact(tables, parentKey, out _)
+                )
+                {
+                    if (reportedOutOfScope.Add(fkName))
+                    {
+                        var refSchema = reader.IsDBNull(8) ? "" : reader.GetString(8);
+                        warnings.Add(
+                            new SchemaImportWarning(
+                                SchemaImportWarningKind.ForeignKeyOutsideScope,
+                                parentKey,
+                                fkName,
+                                $"{refSchema}.{refKey}"
+                            )
+                        );
+                    }
+
+                    continue;
+                }
+
                 // 衝突して捨てたテーブルが両端のどちらかなら、そのリレーションは作らない
+                // （捨てたことは TableNameCollision が告げているので、外部キーは名指ししない）
                 if (
                     !SchemaTableEntry.TryGetExact(tables, parentKey, out _)
                     || !SchemaTableEntry.TryGetExact(tables, refKey, out _)

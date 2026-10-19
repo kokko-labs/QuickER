@@ -574,6 +574,18 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string ImportWarning_UndeclaredColumnType {
+            get {
+                return ResourceManager.GetString("ImportWarning_UndeclaredColumnType", resourceCulture);
+            }
+        }
+
+        public static string ImportWarningHeading_UndeclaredColumnType {
+            get {
+                return ResourceManager.GetString("ImportWarningHeading_UndeclaredColumnType", resourceCulture);
+            }
+        }
+
         public static string ImportWarning_NameTrimmed {
             get {
                 return ResourceManager.GetString("ImportWarning_NameTrimmed", resourceCulture);

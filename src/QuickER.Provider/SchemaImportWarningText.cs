@@ -106,6 +106,8 @@ public static class SchemaImportWarningText
                     Strings.ImportWarningHeading_IdentityColumnMarked,
                 SchemaImportWarningKind.DottedTableNameExcluded =>
                     Strings.ImportWarningHeading_DottedTableNameExcluded,
+                SchemaImportWarningKind.UndeclaredColumnType =>
+                    Strings.ImportWarningHeading_UndeclaredColumnType,
                 _ => throw new ArgumentOutOfRangeException(
                     nameof(kind),
                     kind,
@@ -228,6 +230,12 @@ public static class SchemaImportWarningText
             ),
             SchemaImportWarningKind.AliasTypeFlattened => string.Format(
                 Strings.ImportWarning_AliasTypeFlattened,
+                table,
+                subject,
+                detail
+            ),
+            SchemaImportWarningKind.UndeclaredColumnType => string.Format(
+                Strings.ImportWarning_UndeclaredColumnType,
                 table,
                 subject,
                 detail

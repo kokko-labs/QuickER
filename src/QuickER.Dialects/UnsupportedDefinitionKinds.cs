@@ -75,6 +75,7 @@ public static class UnsupportedDefinitionKinds
             { UnsupportedDefinitionKind.UserDefinedType, InDatabase("D1b") },
             { UnsupportedDefinitionKind.UnparsableType, InDatabase("D2a") },
             { UnsupportedDefinitionKind.UnemittableTypeNotation, InDatabase("D2b") },
+            { UnsupportedDefinitionKind.UndeclaredColumnType, InDatabase("D2c") },
             { UnsupportedDefinitionKind.PaddedName, InDatabase("N1") },
             { UnsupportedDefinitionKind.TableWithoutReadableColumns, InDatabase("T1") },
             // 向き 2

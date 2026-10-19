@@ -405,17 +405,31 @@ ORDER BY name;";
             // hidden = 2（VIRTUAL）/ 3（STORED）は生成列
             var isComputed = hidden is 2 or 3;
 
+            // 宣言型が空（型なし宣言）の列は BLOB アフィニティでどの型の値も入るが、図は型の無い列を表せないので
+            // BLOB として取り込み、そのことを名指しする（生成コードは byte[] で読むので、BLOB 以外の値の行は読めない）
+            var isUndeclaredType = string.IsNullOrWhiteSpace(declaredType);
+
             var col = new Column
             {
                 Name = colName,
-                // 宣言型が空（型なし宣言）の場合は SQLite の親和性上 BLOB 相当だが、
-                // 生成・型変換のため既定型としてカタログ既定を補う
-                DataType = string.IsNullOrWhiteSpace(declaredType) ? "BLOB" : declaredType,
+                DataType = isUndeclaredType ? UndeclaredColumnDataType : declaredType,
                 IsPrimaryKey = pkOrdinal > 0,
                 // PK 列は NULL 非許容へ補正する
                 IsNullable = pkOrdinal > 0 ? false : !notNull,
                 IsComputed = isComputed,
             };
+
+            if (isUndeclaredType)
+            {
+                warnings.Add(
+                    new SchemaImportWarning(
+                        SchemaImportWarningKind.UndeclaredColumnType,
+                        entry.Entity.TableName,
+                        col.Name,
+                        UndeclaredColumnDataType
+                    )
+                );
+            }
 
             if (isComputed)
             {
@@ -597,6 +611,9 @@ ORDER BY name;";
         UniqueConstraintImportBuilder.Attach(tables, builder.Build());
     }
 
+    /// <summary>型を宣言していない列を取り込む型（SQLite の型なしの列は BLOB アフィニティ）</summary>
+    private const string UndeclaredColumnDataType = "BLOB";
+
     /// <summary>SQLite が <c>DEFAULT NULL</c> を <c>dflt_value</c> に書く表記（宣言どおりの綴り）</summary>
     private static readonly string[] NullDefaultForms = ["NULL"];
 
@@ -690,8 +707,12 @@ ORDER BY name;";
                 }
 
                 // 参照先列（to）が NULL の場合は親テーブルの主キーを参照する（SQLite の暗黙参照）。
-                // 暗黙参照の構成列は seq 順に主キーの実効順と対応するため、seq で引き当てる
-                var refCol = toCol ?? ResolvePrimaryKeyColumn(refEntry, seq);
+                // 暗黙参照の構成列は seq 順に主キーの実効順と対応するため、seq で引き当てる。
+                // to は REFERENCES に書いた綴りのまま返るので、SQLite と同じ照合（ASCII だけ大文字小文字を無視）で
+                // 採用した列の綴りへ直す（衝突で捨てた列を指すなら、どの列にも合わない＝リレーションにしない）
+                var refCol = toCol is not null
+                    ? ResolveReferencedColumnName(refEntry, toCol)
+                    : ResolvePrimaryKeyColumn(refEntry, seq);
 
                 if (refCol is null)
                 {
@@ -778,13 +799,41 @@ ORDER BY name;";
     /// <c>foreign_key_list</c> の <c>seq</c>（0 始まり）で実効順
     /// （<see cref="Entity.GetPrimaryKeyColumnsInOrder"/>）の同じ位置の列を引き当てる。
     /// 範囲外（主キーの列数と FK の列数が食い違う不正なスキーマ）は解決不能として null を返す。
+    /// 返すのはカタログ上の名前（<see cref="Model.Column.Name"/> は前後の空白を除いた形なので、綴りまで一致の引き当てに使えない）。
     /// </remarks>
     private static string? ResolvePrimaryKeyColumn(SchemaTableEntry entry, long seq)
     {
         var pks = entry.Entity.GetPrimaryKeyColumnsInOrder();
 
-        return seq >= 0 && seq < pks.Count ? pks[(int)seq].Name : null;
+        if (seq < 0 || seq >= pks.Count)
+        {
+            return null;
+        }
+
+        var primaryKeyColumn = pks[(int)seq];
+
+        return entry.TryFindColumnName(
+            (_, column) => ReferenceEquals(column, primaryKeyColumn),
+            out var name
+        )
+            ? name
+            : null;
     }
+
+    /// <summary>
+    /// 外部キーの親の列（<c>REFERENCES</c> に書いた綴り）を、SQLite と同じ照合で採用した列のカタログ上の名前へ直す
+    /// </summary>
+    /// <remarks>
+    /// SQLite は列名を ASCII の英字だけ大文字小文字を無視して比べる（<c>REFERENCES P (ID)</c> は列 <c>id</c>）。
+    /// 衝突で捨てた列（<c>"ä"</c>）を指す名前は、採用した列（<c>"Ä"</c>）に合わないので null を返す。
+    /// </remarks>
+    private static string? ResolveReferencedColumnName(SchemaTableEntry entry, string declared) =>
+        entry.TryFindColumnName(
+            (catalogName, _) => SqliteNameEquals(catalogName, declared),
+            out var name
+        )
+            ? name
+            : null;
 
     /// <summary>取り込んだテーブルを、SQLite と同じ名前の照合（ASCII の大文字小文字だけを無視）で引く</summary>
     /// <remarks>

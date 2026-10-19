@@ -126,6 +126,76 @@ public sealed class SqlServerImportFidelityIntegrationTests(SqlServerContainerFi
     }
 
     /// <summary>
+    /// 大文字小文字だけ違う列名の衝突で捨てた列の一意制約と外部キーが、採用した列へ付け替わらないことを検証する
+    /// （主キーと説明と同じく、一意制約・外部キーの構成列も綴りまで一致で引き当てる）。
+    /// </summary>
+    /// <remarks>列名を共存させるため、大文字小文字を区別する照合順序の専用データベースを作る（上のテストと同じ）。</remarks>
+    [Fact(
+        DisplayName = "[Integration] SQL Server: 衝突で捨てた列の一意制約・外部キーは、採用した列へ付け替わらない"
+    )]
+    public async Task Import_ColumnNamesDifferingOnlyInCase_DoNotMoveConstraints()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+
+        const string dbName = "quicker_case_sensitive_columns_test";
+        var caseSensitiveConnectionString = new SqlConnectionStringBuilder(fixture.ConnectionString)
+        {
+            InitialCatalog = dbName,
+        }.ConnectionString;
+        var dropDatabase = $"""
+            IF DB_ID(N'{dbName}') IS NOT NULL
+            BEGIN
+                ALTER DATABASE [{dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                DROP DATABASE [{dbName}];
+            END
+            """;
+
+        try
+        {
+            await fixture.ExecuteAsync(
+                dropDatabase
+                    + Environment.NewLine
+                    + $"CREATE DATABASE [{dbName}] COLLATE Latin1_General_100_CS_AS;",
+                Ct
+            );
+
+            await using (var setupConn = new SqlConnection(caseSensitiveConnectionString))
+            {
+                await setupConn.OpenAsync(Ct);
+                await using var cmd = setupConn.CreateCommand();
+                cmd.CommandText = """
+                    CREATE TABLE p (id int NOT NULL PRIMARY KEY, Dup int NULL, dup int NULL UNIQUE);
+                    CREATE TABLE t (
+                        id int NOT NULL PRIMARY KEY,
+                        Dup int NULL,
+                        dup int NULL UNIQUE REFERENCES p (id),
+                        r int NULL REFERENCES p (dup)
+                    );
+                    """;
+                await cmd.ExecuteNonQueryAsync(Ct);
+            }
+
+            await using var conn = new SqlConnection(caseSensitiveConnectionString);
+            await conn.OpenAsync(Ct);
+            var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+            CollidedColumnImportAssertions.ShouldNotMoveConstraintsOfDroppedColumns(
+                result,
+                "p",
+                "t",
+                "id",
+                "Dup",
+                "dup",
+                "r"
+            );
+        }
+        finally
+        {
+            await fixture.ExecuteAsync(dropDatabase, Ct);
+        }
+    }
+
+    /// <summary>
     /// 計算列が <see cref="QuickER.Model.Column.IsComputed"/> つきで取り込まれ、式が落ちることが
     /// 警告として報告されることを検証する。
     /// </summary>

@@ -106,6 +106,11 @@ public sealed class ForeignKeyRelationshipBuilder
     /// 列 ID を解決できない外部キーは、劣化した定義を作らないようリレーションごとスキップする
     /// （DDL 生成・差分計算が「列ペアが正本・推測フォールバックなし」で動くのと同じ流儀）。
     /// </para>
+    /// <para>
+    /// 構成列は両端とも綴りまで一致で引く（<see cref="SchemaTableEntry.TryGetColumnExact"/>）＝大文字小文字・前後の空白だけ違う
+    /// 名前の衝突で捨てた列の外部キーを、採用した列へ付け替えない。カタログが親の列を宣言の綴りで返す方言（SQLite）は、
+    /// <see cref="Add"/> の前に採用した列の綴りへ直す（<see cref="SchemaTableEntry.TryFindColumnName"/>）。
+    /// </para>
     /// </remarks>
     public List<Relationship> Build(IReadOnlyDictionary<string, SchemaTableEntry> tables)
     {
@@ -131,12 +136,12 @@ public sealed class ForeignKeyRelationshipBuilder
                 continue;
             }
 
-            // FK を構成する子側の列に IsForeignKey フラグを立てる
-            foreach (var pc in g.ParentCols)
+            // FK を構成する子側の列（列ペアで引き当てた列）に IsForeignKey フラグを立てる
+            foreach (var column in parent.Entity.Columns)
             {
-                if (parent.ColumnsByName.TryGetValue(pc, out var pcol))
+                if (columnPairs.Any(pair => pair.TargetColumnId == column.Id))
                 {
-                    pcol.IsForeignKey = true;
+                    column.IsForeignKey = true;
                 }
             }
 
@@ -196,8 +201,8 @@ public sealed class ForeignKeyRelationshipBuilder
         for (var i = 0; i < childCols.Count; i++)
         {
             if (
-                !parent.ColumnsByName.TryGetValue(parentCols[i], out var parentColumn)
-                || !child.ColumnsByName.TryGetValue(childCols[i], out var childColumn)
+                !parent.TryGetColumnExact(parentCols[i], out var parentColumn)
+                || !child.TryGetColumnExact(childCols[i], out var childColumn)
             )
             {
                 return null;

@@ -523,6 +523,40 @@ public sealed class PostgreSqlImportFidelityIntegrationTests(PostgreSqlContainer
     }
 
     /// <summary>
+    /// 大文字小文字だけ違う列名の衝突で捨てた列の一意制約と外部キーが、採用した列へ付け替わらないことを検証する
+    /// （主キーと説明と同じく、一意制約・外部キーの構成列も綴りまで一致で引き当てる）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] PG: 衝突で捨てた列の一意制約・外部キーは、採用した列へ付け替わらない"
+    )]
+    public async Task Import_ColumnNamesDifferingOnlyInCase_DoNotMoveConstraints()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE p (id integer PRIMARY KEY, "Dup" integer, dup integer UNIQUE);
+            CREATE TABLE t (id integer PRIMARY KEY, "Dup" integer, dup integer UNIQUE REFERENCES p (id), r integer REFERENCES p (dup));
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+        CollidedColumnImportAssertions.ShouldNotMoveConstraintsOfDroppedColumns(
+            result,
+            "p",
+            "t",
+            "id",
+            "Dup",
+            "dup",
+            "r"
+        );
+    }
+
+    /// <summary>
     /// DDL へ出せない型表記を持つ列を、取込完了時に名指しで報告することを検証する。
     /// </summary>
     /// <remarks>

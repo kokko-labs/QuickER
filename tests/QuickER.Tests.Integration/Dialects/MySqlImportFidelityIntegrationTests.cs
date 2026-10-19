@@ -87,6 +87,103 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
         }
     }
 
+    /// <summary>
+    /// 接続先 DB に無い表を参照する外部キー（<c>FOREIGN_KEY_CHECKS = 0</c> で作った・参照先を後から落とした）は除外し、
+    /// 取込範囲の外を参照する外部キーと同じ警告で名指しすることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL: 存在しない表を参照する外部キーは除外し、範囲外の外部キーとして報告する"
+    )]
+    public async Task Import_ForeignKeyToMissingTable_IsExcludedWithWarning()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            SET FOREIGN_KEY_CHECKS = 0;
+            CREATE TABLE po (
+                id int NOT NULL PRIMARY KEY,
+                vendor_id int NULL,
+                CONSTRAINT FK_po_vendor FOREIGN KEY (vendor_id) REFERENCES vendor (id)
+            ) ENGINE=InnoDB;
+            SET FOREIGN_KEY_CHECKS = 1;
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().Equal("po");
+        result.Relationships.Should().BeEmpty();
+        result
+            .Warnings.Select(w => (w.Kind, w.TableName, w.Subject, w.Detail))
+            .Should()
+            .Equal(
+                (
+                    SchemaImportWarningKind.ForeignKeyOutsideScope,
+                    "po",
+                    "FK_po_vendor",
+                    $"{conn.Database}.vendor"
+                )
+            );
+    }
+
+    /// <summary>
+    /// 大文字小文字の衝突で捨てた表を参照する外部キーと、捨てた表が持つ存在しない表への外部キーは、
+    /// 存在しない表への外部キーとしては報告しないことを検証する
+    /// （捨てた表は <see cref="SchemaImportWarningKind.TableNameCollision"/> が名指しする）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL: 衝突で捨てた表を参照する・捨てた表が持つ外部キーは範囲外として報告しない"
+    )]
+    public async Task Import_ForeignKeyToCollidedTable_IsNotReportedAsMissing()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await using (var probe = await fixture.OpenConnectionAsync(Ct))
+        {
+            await using var cmd = probe.CreateCommand();
+            cmd.CommandText = "SELECT @@lower_case_table_names;";
+            var lowerCaseTableNames = Convert.ToInt32(await cmd.ExecuteScalarAsync(Ct));
+
+            Assert.SkipWhen(
+                lowerCaseTableNames != 0,
+                $"lower_case_table_names = {lowerCaseTableNames} のサーバーでは同名テーブルが共存しない"
+            );
+        }
+
+        await fixture.ExecuteAsync(
+            """
+            SET FOREIGN_KEY_CHECKS = 0;
+            CREATE TABLE `Dup` (id int NOT NULL PRIMARY KEY) ENGINE=InnoDB;
+            CREATE TABLE `dup` (
+                id int NOT NULL PRIMARY KEY,
+                missing_id int NULL,
+                CONSTRAINT FK_dup_missing FOREIGN KEY (missing_id) REFERENCES missing (id)
+            ) ENGINE=InnoDB;
+            CREATE TABLE po (
+                id int NOT NULL PRIMARY KEY,
+                dup_id int NULL,
+                CONSTRAINT FK_po_dup FOREIGN KEY (dup_id) REFERENCES `dup` (id)
+            ) ENGINE=InnoDB;
+            SET FOREIGN_KEY_CHECKS = 1;
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Relationships.Should().BeEmpty("捨てた表への外部キーを、残した表へ結ばない");
+        result
+            .Warnings.Select(w => w.Kind)
+            .Should()
+            .Equal([SchemaImportWarningKind.TableNameCollision], "捨てた表への参照は名指ししない");
+    }
+
     /// <summary>同じ DB 内の外部キーは従来どおり取り込まれる（スキーマ絞りが効きすぎていないことの対照）</summary>
     [Fact(DisplayName = "[Integration] A: 接続先 DB 内の外部キーは従来どおり取り込まれる")]
     public async Task Import_ForeignKeyWithinDatabase_IsStillImported()
@@ -110,6 +207,55 @@ public sealed class MySqlImportFidelityIntegrationTests(MySqlContainerFixture fi
         var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
 
         result.Relationships.Should().ContainSingle();
+        result.Warnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 外部キー・一意制約の列を表の列と違う大文字小文字で書いても、取り込まれることを検証する
+    /// （構成列は綴りまで一致で引き当てるので、カタログが宣言の綴りを返すなら表の列の綴りへ直してから引く）
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL: 外部キー・一意制約の列を違う大文字小文字で書いても取り込まれる"
+    )]
+    public async Task Import_ConstraintColumnsInOtherCase_AreImported()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE vendor (id int NOT NULL PRIMARY KEY, code int NOT NULL, UNIQUE KEY uq_vendor_code (CODE)) ENGINE=InnoDB;
+            CREATE TABLE po (
+                id int NOT NULL PRIMARY KEY,
+                vendor_id int NULL,
+                CONSTRAINT FK_po_vendor FOREIGN KEY (VENDOR_ID) REFERENCES vendor (ID)
+            ) ENGINE=InnoDB;
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+
+        var vendor = result.Entities.Single(e => e.TableName == "vendor");
+        var po = result.Entities.Single(e => e.TableName == "po");
+        vendor
+            .UniqueConstraints.Should()
+            .ContainSingle()
+            .Which.ColumnIds.Should()
+            .Equal(vendor.Columns.Single(c => c.Name == "code").Id);
+
+        var relationship = result.Relationships.Should().ContainSingle().Subject;
+        relationship
+            .ColumnPairs.Select(pair => (pair.SourceColumnId, pair.TargetColumnId))
+            .Should()
+            .Equal(
+                (
+                    vendor.Columns.Single(c => c.Name == "id").Id,
+                    po.Columns.Single(c => c.Name == "vendor_id").Id
+                )
+            );
+        po.Columns.Single(c => c.Name == "vendor_id").IsForeignKey.Should().BeTrue();
         result.Warnings.Should().BeEmpty();
     }
 

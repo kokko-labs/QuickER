@@ -413,6 +413,13 @@ public static class UnsupportedCoverage
             ]
         ),
         (
+            DialectNames.Sqlite,
+            UnsupportedDefinitionKind.UndeclaredColumnType,
+            [
+                "SqliteImportFidelityIntegrationTests.Import_UndeclaredColumnType_IsImportedAsBlobAndReported",
+            ]
+        ),
+        (
             DialectNames.PostgreSql,
             UnsupportedDefinitionKind.TableWithoutReadableColumns,
             ["PostgreSqlImportFidelityIntegrationTests.Import_TableWithoutColumns_IsReported"]
@@ -725,6 +732,15 @@ public static class UnsupportedCoverage
             null,
             [
                 "MySqlImportFidelityIntegrationTests.Import_ColumnAttributes_AreReported",
+                "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.UndeclaredColumnType,
+            UnsupportedFeature.Import,
+            null,
+            [
+                "SqliteImportFidelityIntegrationTests.Import_UndeclaredColumnType_IsImportedAsBlobAndReported",
                 "SchemaImportWarningTextTests.Describe_EveryKind_FormatsInBothCultures",
             ]
         ),
