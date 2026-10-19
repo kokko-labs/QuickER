@@ -311,6 +311,67 @@ public static class BackendParityScenarios
                 ParityExpect.StateRows("paged-delete-changes-nothing", 8),
             ]
         ),
+        // 区切り 43（#7・判断 B）: null のキーの GetById・Delete は、どの実装先も ArgumentNullException（ParamName = "id"）
+        new(
+            "null-key-is-refused",
+            Basic,
+            [
+                new NullKeyOp("customers", Delete: false),
+                ParityExpect.Outcome(
+                    "null-key-get-customer",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyOp("customers", Delete: true),
+                ParityExpect.Outcome(
+                    "null-key-delete-customer",
+                    "throws ArgumentNullException param=id"
+                ),
+                new NullKeyOp("orders", Delete: false),
+                ParityExpect.Outcome("null-key-get-order", "throws ArgumentNullException param=id"),
+                new NullKeyOp("orders", Delete: true),
+                ParityExpect.Outcome(
+                    "null-key-delete-order",
+                    "throws ArgumentNullException param=id"
+                ),
+                ParityExpect.StateRows("null-key-changes-nothing", 8),
+            ]
+        ),
+        // 区切り 43（#6）: 取り消し済みのトークンの操作は、どの実装先も OperationCanceledException で終わり、何も書かない
+        // （読み取りも取り消しで終わる）
+        new(
+            "canceled-token-is-honored",
+            Basic,
+            [
+                new CanceledOp(new InsertOp(new CustomerRow(3, "Carol"))),
+                ParityExpect.Outcome("canceled-insert", "throws canceled"),
+                new CanceledOp(new LoadOp(S, "orders", 10)),
+                ParityExpect.Outcome("canceled-get-by-id", "throws canceled"),
+                new LoadOp(S, "orders", 10),
+                new EditMemoOp(S, 10, "edited"),
+                new CanceledOp(new UpdateOrderOp(S)),
+                ParityExpect.Outcome("canceled-update", "throws canceled"),
+                new CanceledOp(new SaveOp(S)),
+                ParityExpect.Outcome("canceled-save", "throws canceled"),
+                new CanceledOp(new SaveManyOrdersOp([S])),
+                ParityExpect.Outcome("canceled-save-many", "throws canceled"),
+                new CanceledOp(new DeleteOp("order_lines", 100)),
+                ParityExpect.Outcome("canceled-delete", "throws canceled"),
+                new CanceledOp(
+                    new ExecuteDeleteOrdersOp(
+                        ParityOrderPredicate.AmountAtLeast100,
+                        CascadeDelete: true
+                    )
+                ),
+                ParityExpect.Outcome("canceled-execute-delete", "throws canceled"),
+                new CanceledOp(new PagedOrdersOp(ParityPagedTerminal.Fetch)),
+                ParityExpect.Outcome("canceled-fetch", "throws canceled"),
+                new CanceledOp(new PagedOrdersOp(ParityPagedTerminal.Count)),
+                ParityExpect.Outcome("canceled-count", "throws canceled"),
+                new CanceledOp(new PagedOrdersOp(ParityPagedTerminal.Any)),
+                ParityExpect.Outcome("canceled-any", "throws canceled"),
+                ParityExpect.StateRows("canceled-changes-nothing", 8),
+            ]
+        ),
         // 区切り 43（#1）: 主キー 0 の行も、アプリが決めたキーのまま挿入・グラフ保存する。同じ 0 の 2 行目は主キーの重複。
         // このフィクスチャのキーは値オブジェクト（EF Core は変換のある列の値を作らない）。素の int のキーは
         // BinaryColumnRuntimeTestsBase と SqlServerIdentityColumnRuntimeTests が見る

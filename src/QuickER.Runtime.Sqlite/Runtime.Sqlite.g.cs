@@ -332,6 +332,11 @@ public abstract class SqliteRepositoryCore<TEntity, TKey>(
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
@@ -488,6 +493,11 @@ public abstract class SqliteRepositoryCore<TEntity, TKey>(
     /// <inheritdoc />
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 

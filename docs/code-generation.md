@@ -1004,6 +1004,7 @@ The EF Core Repository and multi-target QuickER Repositories (below) cannot be c
 
 You can additionally generate an in-memory implementation for unit testing without a DB.
 It implements the same contract, and unsupported operations throw `NotSupportedException` with guidance to switch to the real-DB repository.
+It honors the cancellation token as the real-DB repositories do: an operation called with a cancelled token throws `OperationCanceledException` and changes nothing.
 
 ### Known divergences from a real database
 

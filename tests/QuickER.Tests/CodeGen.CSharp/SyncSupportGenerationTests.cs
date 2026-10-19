@@ -625,7 +625,10 @@ public class SyncSupportGenerationTests
         journalingBase.Should().Contain("GraphRecorder.CollectSave(");
         CountOccurrences(journalingBase, "return RecordAndWriteAsync(")
             .Should()
-            .Be(4, "Update・BulkInsert・SaveAsync×2 はロックの内側で記録と書き込みを 1 組にする");
+            .Be(
+                5,
+                "Update・BulkInsert・Delete・SaveAsync×2 はロックの内側で記録と書き込みを 1 組にする"
+            );
         journalingBase.Should().Contain("await RecordAndWriteAsync(", "Insert も同じ");
         journalingBase.Should().Contain("Journal.Gate.WriteExclusiveAsync(");
 

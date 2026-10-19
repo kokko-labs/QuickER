@@ -6207,6 +6207,7 @@ public interface IRemoteRepositoryCore<TEntity, TKey>
     where TEntity : EntityBaseCore, new()
 {
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null (every implementation refuses it before it reads anything).</exception>
     Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
 
     /// <summary>Gets all entities.</summary>
@@ -6234,6 +6235,7 @@ public interface IRemoteRepositoryCore<TEntity, TKey>
     /// </remarks>
     /// <param name="id">The primary key of the row to delete.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null (every implementation refuses it before it deletes anything).</exception>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
     /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
@@ -9281,8 +9283,16 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 
     /// <summary>Gets a single entity by primary key (null when not found).</summary>
-    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
-        InvokeNullableAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
+    /// <remarks>A null key is refused before the request is sent, as the direct implementations refuse it.</remarks>
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        return InvokeNullableAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
+    }
 
     /// <summary>Gets all entities.</summary>
     public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
@@ -9350,8 +9360,16 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 
     /// <inheritdoc />
-    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
-        InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
+    /// <remarks>A null key is refused before the request is sent, as the direct implementations refuse it.</remarks>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        return InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
+    }
 
     /// <summary>Saves inserts, updates, and deletes according to RowState in a single transaction (cascades to children by default).</summary>
     /// <remarks><paramref name="mode"/> travels with the request, and the response carries the row versions the save assigned so that the local graph ends up with the same versions a direct connection would leave behind. Being a mutating call it carries no idempotency key, so it must not be resent by an automatic retry policy - a resend after a lost response replays the whole graph.</remarks>

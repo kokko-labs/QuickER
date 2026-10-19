@@ -1018,6 +1018,7 @@ QuickER 版 Repository との併用生成（両方 ON）はパリティ検証用
 
 DB なしでユニットテストするためのインメモリ実装を追加生成できます。
 同一契約を実装し、サポート外の操作は実 DB の Repository へ切り替える案内付きの `NotSupportedException` を送出します。
+取り消しのトークンも実 DB の Repository と同じく扱います。取り消し済みのトークンで呼んだ操作は `OperationCanceledException` を投げ、何も変えません。
 
 ### 実 DB との既知の乖離
 

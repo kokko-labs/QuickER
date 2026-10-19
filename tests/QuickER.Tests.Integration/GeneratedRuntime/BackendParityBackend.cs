@@ -521,6 +521,13 @@ public static class ParityFormat
             return "throws store-rejected";
         }
 
+        // 取り消しの例外の型（OperationCanceledException か、その派生の TaskCanceledException）は、取り消しに気付いた場所で
+        // 決まる。比べたいのは「取り消したか」で、型の違いではない
+        if (ex is OperationCanceledException)
+        {
+            return "throws canceled";
+        }
+
         var builder = new StringBuilder("throws ").Append(ex.GetType().Name);
         switch (ex)
         {

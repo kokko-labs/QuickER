@@ -8879,12 +8879,20 @@ public abstract class JournalingRepositoryBase<TEntity, TKey> : IRepositoryCore<
     }
 
     /// <inheritdoc />
-    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
-        RecordAndWriteAsync(
+    /// <remarks>A null key is refused before anything is recorded, as the repository it wraps refuses it.</remarks>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
+        return RecordAndWriteAsync(
             () => RecordDeleteAsync(id, cancellationToken),
             () => Inner.DeleteAsync(id, cancellationToken),
             cancellationToken
         );
+    }
 
     /// <inheritdoc />
     /// <remarks>Every row is recorded in one call to <see cref="SyncJournal.RecordManyAsync"/>, not one statement per row.</remarks>

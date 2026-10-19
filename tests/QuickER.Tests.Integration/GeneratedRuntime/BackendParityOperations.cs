@@ -578,6 +578,35 @@ public enum ParityOrderPredicate
     HasLines,
 }
 
+/// <summary>リモート面の <c>GetByIdAsync</c> か <c>DeleteAsync</c> を、null のキーで呼ぶ</summary>
+public sealed record NullKeyOp(string Table, bool Delete) : ParityOp
+{
+    public override string Name => $"NullKey:{Table}:{(Delete ? "Delete" : "GetById")}";
+
+    public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct) =>
+        (Table, Delete) switch
+        {
+            ("customers", false) =>
+                $"found={await backend.Customers.GetByIdAsync(null!, ct) is not null}",
+            ("customers", true) => $"deleted={await backend.Customers.DeleteAsync(null!, ct)}",
+            ("orders", false) =>
+                $"found={await backend.Orders.GetByIdAsync(null!, ct) is not null}",
+            ("orders", true) => $"deleted={await backend.Orders.DeleteAsync(null!, ct)}",
+            _ => throw new ArgumentException(Table),
+        };
+}
+
+/// <summary>ほかの操作を、取り消し済みのトークンで流す</summary>
+public sealed record CanceledOp(ParityOp Inner) : ParityOp
+{
+    public override string Name => "Canceled:" + Inner.Name;
+
+    public override bool Supports(ParityBackendKind kind) => Inner.Supports(kind);
+
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct) =>
+        Inner.RunAsync(backend, new CancellationToken(canceled: true));
+}
+
 /// <summary>ページングした <c>Query()</c> の終端</summary>
 public enum ParityPagedTerminal
 {

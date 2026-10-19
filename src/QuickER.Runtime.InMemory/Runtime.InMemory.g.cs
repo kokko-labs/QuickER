@@ -1566,6 +1566,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
 
@@ -1601,6 +1602,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var project = QuerySelectorCache.GetOrCompile(selector);
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
@@ -1647,6 +1649,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
         var orderings = CompileOrderings(plan);
 
@@ -1673,6 +1676,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     /// <summary>Returns the count of rows matching the conditions within the plan's page (orderings and Include play no part in the count).</summary>
     public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
         return Task.FromResult(_store.Read(_ => ApplyPaging(FilterRaw(predicates), plan).Count()));
     }
@@ -1680,6 +1684,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     /// <summary>Returns whether any row matches the conditions within the plan's page.</summary>
     public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
         return Task.FromResult(_store.Read(_ => ApplyPaging(FilterRaw(predicates), plan).Any()));
     }
@@ -1719,6 +1724,7 @@ public sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var predicates = CompilePredicates(plan);
 
         if (cascadeDelete)
@@ -2679,12 +2685,19 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         "The in-memory repository cannot execute raw SQL. Switch to a real database repository.";
 
     /// <summary>Gets a single entity by primary key (null if not found).</summary>
-    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Store.Find<TEntity>(NormalizeKey(id)));
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        var key = NormalizeKey(id);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Store.Find<TEntity>(key));
+    }
 
     /// <summary>Gets all entities.</summary>
-    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(Store.Snapshot<TEntity>());
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Store.Snapshot<TEntity>());
+    }
 
     /// <summary>Inserts an entity (an existing primary key, or a value another row already holds on a UNIQUE constraint, is rejected as a real database would).</summary>
     /// <remarks>
@@ -2695,6 +2708,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
+        cancellationToken.ThrowIfCancellationRequested();
         Store.Insert(entity);
         return Task.CompletedTask;
     }
@@ -2783,6 +2797,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
 
         // As with a real database, reject updates that still carry values in unbounded binary columns (checked here individually because this path does not go through BindUpdateParameters).
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var updated = Store.Write(scope =>
         {
@@ -2809,8 +2824,12 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     }
 
     /// <inheritdoc />
-    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Store.Remove(typeof(TEntity), NormalizeKey(id)));
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        var key = NormalizeKey(id);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Store.Remove(typeof(TEntity), key));
+    }
 
     /// <summary>Starts a query that fetches entities with chained filter conditions, orderings, and Includes.</summary>
     public SqlQuery<TEntity> Query() => new(new InMemoryQueryExecutor<TEntity>(Store));
@@ -2862,6 +2881,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(destination);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var column = EntitySaveMetadata.For(typeof(TEntity)).ColumnByPropertyName(propertyName);
         var value = Store.ReadColumnValue(typeof(TEntity), NormalizeKey(id), column, out var rowExists);
@@ -2898,6 +2918,7 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var column = EntitySaveMetadata.For(typeof(TEntity)).ColumnByPropertyName(propertyName);
         object? stored;
 
@@ -3014,6 +3035,8 @@ public abstract class InMemoryRepositoryCore<TEntity, TKey>(
         CancellationToken cancellationToken
     )
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Copy-on-write staging shared by every root, so the whole call is one all-or-nothing unit: every write goes here and
         // reaches the store only once the last phase has succeeded.
         var staging = new InMemorySaveStaging();

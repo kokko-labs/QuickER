@@ -2213,6 +2213,11 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     /// <remarks>As in the existing version, only the single table is read (navigations are loaded via Include on <see cref="Query"/>).</remarks>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var entity = await context
@@ -2590,6 +2595,11 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     /// <inheritdoc />
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
+        if (id is null)
+        {
+            throw new ArgumentNullException(nameof(id));
+        }
+
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         var affected = await context
@@ -2732,6 +2742,9 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         CancellationToken cancellationToken
     )
     {
+        // A cancelled save stops before the save hooks run, as the QuickER repositories stop when they open the connection
+        cancellationToken.ThrowIfCancellationRequested();
+
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
         return await context
