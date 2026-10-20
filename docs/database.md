@@ -508,7 +508,7 @@ Table and column descriptions sync on the four dialects that have a description 
 | PostgreSQL | `obj_description` / `col_description` | `COMMENT ON` | ✅ |
 | MySQL | `TABLE_COMMENT` / `COLUMN_COMMENT` | `COMMENT` clauses | — (saved as `?`) |
 | Oracle | `user_tab_comments` / `user_col_comments` | `COMMENT ON` | ✅ |
-| SQLite | — (no description mechanism) | — (the DDL writes comment lines; not synced) | |
+| SQLite | — (no description mechanism) | — (the DDL writes comment lines; not diffed or synced) | |
 
 Where the table shows `COMMENT ON` or `COMMENT` clauses, the sync simply re-runs the statement or clause, which is idempotent in itself.
 Clearing a description in the diagram removes it.

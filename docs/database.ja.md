@@ -516,7 +516,7 @@ MySQL 8.0 系、または 8.4 で `restrict_fk_on_non_standard_key=OFF` の環�
 | PostgreSQL | `obj_description` / `col_description` | `COMMENT ON` | ✅ |
 | MySQL | `TABLE_COMMENT` / `COLUMN_COMMENT` | `COMMENT` 句 | —（`?` として保存） |
 | Oracle | `user_tab_comments` / `user_col_comments` | `COMMENT ON` | ✅ |
-| SQLite | —（説明の機構が無い） | —（DDL はコメント行で書く。同期しない） | |
+| SQLite | —（説明の機構が無い） | —（DDL はコメント行で書く。差分も同期もしない） | |
 
 表が `COMMENT ON` または `COMMENT` 句とする方言では、同期は文や句を再実行するだけで、それ自体が冪等です。
 図側で説明を空にすると削除されます。

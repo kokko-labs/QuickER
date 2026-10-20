@@ -906,8 +906,22 @@ public sealed class DialectDocsTableTests
                         where + "の BMP の外の文字"
                     );
 
+                // 日本語の語のセルは、コードスパンが英語の同じ行と一致すること（コードとの照合は英語の行が受け持つ）
                 if (ja)
                 {
+                    CodeSpans(row[1])
+                        .Should()
+                        .Equal(
+                            CodeSpans(english.Rows[i][1]),
+                            where + "の取込元（英と同じコードスパン）"
+                        );
+                    CodeSpans(row[2])
+                        .Should()
+                        .Equal(
+                            CodeSpans(english.Rows[i][2]),
+                            where + "の書き方（英と同じコードスパン）"
+                        );
+
                     continue;
                 }
 
