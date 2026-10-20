@@ -600,7 +600,7 @@ SQLite は既定で外部キーを検査しないため、親の無い子行を�
 - 変換できなかった列は元の型を保持したまま、警告ダイアログに一覧表示されます
 - 切替と型変換は 1 回の Undo でまとめて戻せます
 
-次の表の列は、一部の方言へしか変換できません。
+次の表の列は、一部の方言へしか変換できないか、セルに書いた変更を伴って変換されます。
 ✅ の列は変換し（切替先と同じ方言の列はそのまま残る）、それ以外は変換不能として一覧に載ります。
 
 <!-- dialect-table: unconvertible-types -->
@@ -610,7 +610,8 @@ SQLite は既定で外部キーを検査しないため、親の無い子行を�
 | 負のスケール（PostgreSQL の `numeric(10,-2)`、Oracle の `NUMBER(10,-2)`） | — | ✅ | — | ✅ | — |
 | 長さを書かない文字列・バイナリ（PostgreSQL の `varchar`、SQLite の `VARCHAR` / `VARBINARY`） | — | ✅ | — | — | ✅ |
 | 精度の無い `decimal`（Oracle の `NUMBER`、PostgreSQL の `numeric`） | — | ✅ | — | ✅ | ✅ |
-| 精度は上限なし・スケールあり（Oracle の `NUMBER(*,2)`、`INTEGER`） | — | — | — | ✅ | ✅ |
+| 精度は上限なし・スケールは 0 以外（Oracle の `NUMBER(*,2)`） | — | — | — | ✅ | ✅ |
+| 精度は上限なし・スケールは 0（Oracle の `INTEGER`、`SMALLINT`、`NUMBER(*,0)`） | ✅（`decimal(38,0)`・38 桁まで） | ✅（`numeric(38,0)`・38 桁まで） | ✅（`decimal(38,0)`・38 桁まで） | ✅ | ✅ |
 | 行バージョン（SQL Server の `rowversion` / `timestamp`） | ✅ | — | — | — | ✅（`BLOB`・NOT NULL を解除） |
 
 - 負のスケールは値を丸めます（`-2` なら 100 の倍数）。
@@ -618,8 +619,9 @@ SQLite は既定で外部キーを検査しないため、親の無い子行を�
 - MySQL と Oracle は長さの無い `varchar` / `VARCHAR2` を受け付けず、SQL Server は長さを省くと**黙って 1 文字の列**を作ります。
   切り替えたい場合は、元の図で長さを書いてください
 - 素の `decimal` は SQL Server では `decimal(18,0)`、MySQL では `decimal(10,0)` で、小数部を黙って丸める列になります
-- Oracle の `INTEGER` は `NUMBER(*,0)`（精度は上限なし・スケールは 0）です。
-  PostgreSQL の `numeric` は精度なしでスケールだけを宣言できず、素の `numeric` へ写すとスケールの宣言が落ちます
+- Oracle の `INTEGER` と `SMALLINT` は `NUMBER(*,0)`（精度は上限なし・スケールは 0 の整数）です。
+  精度を書かずに宣言できない方言では 38 桁の decimal になり、38 桁を超える値が入らなくなるため、確認ダイアログにその列が挙がります
+- PostgreSQL の `numeric` は精度なしでスケールだけを宣言できず、素の `numeric` へ写すとスケールの宣言が落ちます
 
 移行先の上限を超える長さ・精度は、そのまま書き出すと DDL の適用で失敗するため、変換不能として一覧に載ります。
 

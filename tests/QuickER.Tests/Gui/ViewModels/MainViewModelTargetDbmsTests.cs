@@ -6,6 +6,8 @@ using QuickER.Dialects;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Oracle;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Services;
@@ -418,6 +420,137 @@ public class MainViewModelTargetDbmsTests
         dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
         vm.CurrentProvider.Name.Should().Be(FakeProvider.FakeName);
         seq.IsIdentity.Should().BeTrue();
+    }
+
+    /// <summary>注意つきで変換した列の節の見出し</summary>
+    private static string CappedHeader =>
+        string.Format(
+            GuiStrings.TypeConversion_PrecisionCappedHeader,
+            DiagramTypeConverter.CappedPrecision
+        );
+
+    /// <summary>SQL Server・Oracle・MySQL（実プロバイダ）を登録し、図を Oracle へ切り替えた状態の VM を作る</summary>
+    private static (
+        MainViewModel Vm,
+        IDatabaseProvider SqlServer,
+        IDatabaseProvider MySql,
+        StubDialogService Dialogs
+    ) CreateOracleVm()
+    {
+        var sqlServer = new SqlServerProvider();
+        var oracle = new OracleProvider();
+        var mySql = new MySqlProvider();
+        var registry = new DatabaseProviderRegistry(
+            new IDatabaseProvider[] { sqlServer, oracle, mySql }
+        );
+        var dialogs = new StubDialogService();
+        var vm = new MainViewModel(
+            dialogs,
+            new NoopAppDialogService(),
+            new NoopFileDialogService(),
+            providers: registry
+        );
+        vm.AddEntityCommand.Execute(null); // int の PK 列を持つ NewTable
+        vm.SelectedProvider = oracle;
+        vm.CurrentProvider.Name.Should().Be(DialectNames.Oracle);
+        dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
+        return (vm, sqlServer, mySql, dialogs);
+    }
+
+    /// <summary>
+    /// Oracle の精度なしの整数は 38 桁の decimal へ注意つきで変換され、その列だけで確認が出て、
+    /// 切替ごと 1 回の Undo で元の型へ戻ることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "Oracle の精度なしの整数は 38 桁へ注意つきで変換され、その列だけで確認が出て、1 回の Undo で戻る"
+    )]
+    public void ChangeDbms_OracleUnlimitedInteger_ConfirmsCappedColumnAndUndoes()
+    {
+        var (vm, sqlServer, _, dialogs) = CreateOracleVm();
+        var amount = AddColumn(vm, "Amount", "INTEGER");
+
+        vm.SelectedProvider = sqlServer;
+
+        var entry = dialogs.WarningConfirmDetailsMessages.Should().ContainSingle().Subject;
+        entry
+            .Details.Should()
+            .Contain(CappedHeader)
+            .And.Contain(
+                string.Format(
+                    GuiStrings.TypeConversion_PrecisionCappedLine,
+                    "NewTable",
+                    "Amount",
+                    "INTEGER",
+                    "decimal(38,0)"
+                )
+            );
+        entry.Details.Should().NotContain(GuiStrings.TypeConversion_WarningHeader);
+        vm.CurrentProvider.Name.Should().Be(DialectNames.SqlServer);
+        amount.DataType.Should().Be("decimal(38,0)");
+
+        vm.UndoCommand.Execute(null);
+
+        vm.CurrentProvider.Name.Should().Be(DialectNames.Oracle);
+        amount.DataType.Should().Be("INTEGER");
+    }
+
+    /// <summary>
+    /// 確認の節は、変換できない列 → 注意つきで変換した列 → 名前 → 採番の印の順に並ぶことを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "確認の節は、変換できない列・注意つきで変換した列・名前・採番の印の順に並ぶ"
+    )]
+    public void ChangeDbms_PrecisionCappedSection_FollowsUnconvertedSection()
+    {
+        var (vm, _, mySql, dialogs) = CreateOracleVm();
+        AddColumn(vm, "Rate", "NUMBER(*,2)"); // MySQL は精度なし・スケールありを書けない＝変換できない
+        AddColumn(vm, "Amount", "INTEGER"); // 注意つきで変換する
+        AddColumn(vm, new string('n', 65), "INTEGER"); // MySQL の列名の上限（64）を超える
+        AddColumn(vm, "Seq", "NUMBER(10)").IsIdentity = true; // MySQL は採番の列を持てない
+
+        vm.SelectedProvider = mySql;
+
+        var details = dialogs
+            .WarningConfirmDetailsMessages.Should()
+            .ContainSingle()
+            .Subject.Details;
+        var headers = new[]
+        {
+            GuiStrings.TypeConversion_WarningHeader,
+            CappedHeader,
+            string.Format(GuiStrings.TypeConversion_NameLimitHeader, mySql.DisplayName),
+            string.Format(GuiStrings.TypeConversion_IdentityMarkHeader, mySql.DisplayName),
+        };
+        var positions = headers.Select(h => details.IndexOf(h, StringComparison.Ordinal)).ToArray();
+
+        positions.Should().OnlyContain(p => p >= 0, details);
+        positions.Should().BeInAscendingOrder(details);
+        details
+            .Should()
+            .Contain(
+                string.Format(
+                    GuiStrings.TypeConversion_PrecisionCappedLine,
+                    "NewTable",
+                    "Amount",
+                    "INTEGER",
+                    "decimal(38,0)"
+                )
+            );
+    }
+
+    /// <summary>注意つきで変換する列の確認をキャンセルすると、切替も型の変換も適用されないことを検証する</summary>
+    [Fact(DisplayName = "注意つきで変換する列の確認をキャンセルすると、切替も型も変わらない")]
+    public void ChangeDbms_OracleUnlimitedInteger_CancelKeepsType()
+    {
+        var (vm, sqlServer, _, dialogs) = CreateOracleVm();
+        var amount = AddColumn(vm, "Amount", "INTEGER");
+        dialogs.ConfirmResult = false;
+
+        vm.SelectedProvider = sqlServer;
+
+        dialogs.WarningConfirmDetailsMessages.Should().ContainSingle();
+        vm.CurrentProvider.Name.Should().Be(DialectNames.Oracle);
+        amount.DataType.Should().Be("INTEGER");
     }
 
     /// <summary>未知の TargetDbms を持つ図の読込相当で、SQL Server として動作することを検証する</summary>

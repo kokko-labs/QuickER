@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -41,6 +42,18 @@ public sealed class DialectDocsTableTests
     private const string No = "—";
 
     private static readonly string Root = NeutralResxFiles.FindRepositoryRoot();
+
+    /// <summary>変換できない型の表の、桁の上限を付けて変換したセルの注意の語（英）</summary>
+    private static readonly string CappedNoteEnglish = string.Create(
+        CultureInfo.InvariantCulture,
+        $"up to {DiagramTypeConverter.CappedPrecision} digits"
+    );
+
+    /// <summary>変換できない型の表の、桁の上限を付けて変換したセルの注意の語（日）</summary>
+    private static readonly string CappedNoteJapanese = string.Create(
+        CultureInfo.InvariantCulture,
+        $"{DiagramTypeConverter.CappedPrecision} 桁まで"
+    );
 
     private static readonly Regex MarkerPattern = new(
         @"^<!-- dialect-table: ([a-z0-9-]+) -->$",
@@ -1031,6 +1044,13 @@ public sealed class DialectDocsTableTests
                             row[c].Contains("NOT NULL lifted", StringComparison.Ordinal),
                             $"{where} の {c + 1} 列目の NOT NULL の解除（日）"
                         );
+                    japaneseRow[c]
+                        .Contains(CappedNoteJapanese, StringComparison.Ordinal)
+                        .Should()
+                        .Be(
+                            row[c].Contains(CappedNoteEnglish, StringComparison.Ordinal),
+                            $"{where} の {c + 1} 列目の桁の注意（日）"
+                        );
                 }
             }
 
@@ -1062,6 +1082,12 @@ public sealed class DialectDocsTableTests
                 results
                     .Should()
                     .OnlyContain(x => x.MakeNullable == lifted, cellWhere + "の NOT NULL の解除");
+
+                var capped = cell.Contains(CappedNoteEnglish, StringComparison.Ordinal);
+
+                results
+                    .Should()
+                    .OnlyContain(x => x.PrecisionCapped == capped, cellWhere + "の桁の注意");
             }
         }
     }
@@ -1290,15 +1316,16 @@ public sealed class DialectDocsTableTests
     /// 1 列の図を <see cref="DiagramTypeConverter.CreatePlan"/> へ通す（GUI の方言切替と同じ）。同じ方言はそのまま残る。
     /// 列は NOT NULL で主キーでない（行バージョンの NOT NULL の解除を見るため）
     /// </summary>
-    private static (bool Converted, string? NewType, bool MakeNullable) Convert(
-        IDatabaseProvider source,
-        string type,
-        IDatabaseProvider target
-    )
+    private static (
+        bool Converted,
+        string? NewType,
+        bool MakeNullable,
+        bool PrecisionCapped
+    ) Convert(IDatabaseProvider source, string type, IDatabaseProvider target)
     {
         if (ReferenceEquals(source, target))
         {
-            return (true, type, false);
+            return (true, type, false, false);
         }
 
         var entity = new Entity { TableName = "t" };
@@ -1328,8 +1355,8 @@ public sealed class DialectDocsTableTests
         var converted = plan.Converted.SingleOrDefault(x => x.ColumnName == "c");
 
         return converted is null
-            ? (false, null, false)
-            : (true, converted.NewType, converted.MakeNullable);
+            ? (false, null, false, false)
+            : (true, converted.NewType, converted.MakeNullable, converted.PrecisionCapped);
     }
 
     private static CanonicalType Decimal(int precision, int scale) =>

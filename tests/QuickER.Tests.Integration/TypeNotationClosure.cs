@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.Oracle;
 
 namespace QuickER.Tests.Integration;
 
@@ -65,6 +66,34 @@ internal static class TypeNotationClosure
         new(CanonicalTypeKind.Json),
         new(CanonicalTypeKind.RowVersion),
     ];
+
+    /// <summary>
+    /// Oracle の精度の上限なしの整数（<c>INTEGER</c>）を、方言切替（<see cref="DiagramTypeConverter.CreatePlan"/>）で
+    /// <paramref name="target"/> へ変換した型を返す（桁の上限を付けて変換したことも表明する）
+    /// </summary>
+    /// <remarks>
+    /// 方言切替が書く型（<c>decimal(38,0)</c> / <c>numeric(38,0)</c>）も、DDL として通り取り込み直して差分が出ないことを、
+    /// 変換の出力そのものを閉包の候補へ足して確かめるために使う（表記を写さない）
+    /// </remarks>
+    public static string ConvertedOracleInteger(IDatabaseProvider target)
+    {
+        var entity = new Entity { TableName = "t" };
+
+        entity.Columns.Add(new Column { Name = "c", DataType = "INTEGER" });
+
+        var diagram = new ErDiagram();
+
+        diagram.Entities.Add(entity);
+
+        var conversion = DiagramTypeConverter
+            .CreatePlan(diagram, new OracleTypeCatalog(), target.TypeCatalog)
+            .Converted.Should()
+            .ContainSingle()
+            .Subject;
+
+        conversion.PrecisionCapped.Should().BeTrue(target.Name);
+        return conversion.NewType!;
+    }
 
     /// <summary>型の選択肢と、代表的な正規型を <see cref="ITypeCatalog.TryFormat"/> した表記を重複なく集める</summary>
     /// <param name="catalog">方言の型カタログ</param>

@@ -1,6 +1,9 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
+using QuickER.Provider.Oracle;
+using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 
@@ -197,6 +200,152 @@ public class DiagramTypeConverterTests
 
         plan.Converted[0].NewType.Should().Be("varbinary(max)");
     }
+
+    /// <summary>
+    /// Oracle の精度なし・スケール 0 の整数（<c>INTEGER</c> / <c>SMALLINT</c> / <c>NUMBER(*,0)</c>）は、
+    /// 精度なしの decimal を書けない方言へは 38 桁の decimal として注意つきで変換されることを検証する
+    /// </summary>
+    /// <remarks>
+    /// SQLite は精度なしの <c>DECIMAL</c> をそのまま書けるので注意を付けない（桁の上限が新しく付かない）。
+    /// </remarks>
+    [Theory(
+        DisplayName = "Oracle の精度なし・スケール 0 の整数は、精度を書く方言へ 38 桁の decimal として注意つきで変換される"
+    )]
+    [InlineData("INTEGER", "sqlserver", "decimal(38,0)", true)]
+    [InlineData("SMALLINT", "sqlserver", "decimal(38,0)", true)]
+    [InlineData("NUMBER(*,0)", "sqlserver", "decimal(38,0)", true)]
+    [InlineData("INTEGER", "postgresql", "numeric(38,0)", true)]
+    [InlineData("NUMBER(*,0)", "postgresql", "numeric(38,0)", true)]
+    [InlineData("INTEGER", "mysql", "decimal(38,0)", true)]
+    [InlineData("NUMBER(*,0)", "mysql", "decimal(38,0)", true)]
+    [InlineData("INTEGER", "sqlite", "DECIMAL", false)]
+    [InlineData("NUMBER(*,0)", "sqlite", "DECIMAL", false)]
+    public void CreatePlan_OracleUnlimitedInteger_ConvertsWithPrecisionCap(
+        string oracleType,
+        string target,
+        string expectedType,
+        bool expectedCapped
+    )
+    {
+        var diagram = BuildDiagram(oracleType);
+
+        var plan = DiagramTypeConverter.CreatePlan(
+            diagram,
+            new OracleTypeCatalog(),
+            Catalog(target)
+        );
+
+        plan.Unconverted.Should().BeEmpty();
+        var conversion = plan.Converted.Should().ContainSingle().Subject;
+        conversion.NewType.Should().Be(expectedType);
+        conversion.PrecisionCapped.Should().Be(expectedCapped);
+        conversion.MakeNullable.Should().BeFalse();
+
+        DiagramTypeConverter.Apply(diagram, plan);
+        diagram.Entities[0].Columns[0].DataType.Should().Be(expectedType);
+    }
+
+    /// <summary>
+    /// 精度なし・スケールなしの <c>NUMBER</c> と、0 以外のスケールの <c>NUMBER(*,s)</c> は 38 桁へ倒さず、
+    /// 従来どおり変換できない（または注意なしで変換する）ことを検証する
+    /// </summary>
+    [Theory(DisplayName = "Oracle の NUMBER と 0 以外のスケールの NUMBER(*,s) は 38 桁へ倒さない")]
+    [InlineData("NUMBER", "sqlserver", null)]
+    [InlineData("NUMBER", "mysql", null)]
+    [InlineData("NUMBER", "postgresql", "numeric")]
+    [InlineData("NUMBER(*,2)", "sqlserver", null)]
+    [InlineData("NUMBER(*,2)", "postgresql", null)]
+    [InlineData("NUMBER(*,2)", "mysql", null)]
+    [InlineData("NUMBER(*,2)", "sqlite", "DECIMAL")]
+    public void CreatePlan_OracleNumberWithoutIntegerScale_IsNotCapped(
+        string oracleType,
+        string target,
+        string? expectedType
+    )
+    {
+        var plan = DiagramTypeConverter.CreatePlan(
+            BuildDiagram(oracleType),
+            new OracleTypeCatalog(),
+            Catalog(target)
+        );
+
+        if (expectedType is null)
+        {
+            plan.Converted.Should().BeEmpty();
+            plan.Unconverted.Should().ContainSingle();
+            return;
+        }
+
+        var conversion = plan.Converted.Should().ContainSingle().Subject;
+        conversion.NewType.Should().Be(expectedType);
+        conversion.PrecisionCapped.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 注意の印が付くのは、元の型が精度なし・スケール 0 の decimal のときだけであることを、
+    /// 5 方言の全ての組み合わせと各方言の型の選択肢で検証する
+    /// </summary>
+    [Fact(DisplayName = "注意の印は、精度なし・スケール 0 の decimal を変換したときだけ付く")]
+    public void CreatePlan_PrecisionCap_OnlyForPrecisionlessIntegerDecimal()
+    {
+        ITypeCatalog[] catalogs =
+        [
+            new SqlServerTypeCatalog(),
+            new PostgreSqlTypeCatalog(),
+            new MySqlTypeCatalog(),
+            new OracleTypeCatalog(),
+            new SqliteTypeCatalog(),
+        ];
+        var capped = 0;
+
+        foreach (var from in catalogs)
+        {
+            var types = from.DataTypes.Append("INTEGER").Append("NUMBER(*,0)").ToArray();
+
+            foreach (var to in catalogs.Where(c => !ReferenceEquals(c, from)))
+            {
+                foreach (var type in types)
+                {
+                    var plan = DiagramTypeConverter.CreatePlan(BuildDiagram(type), from, to);
+
+                    foreach (var conversion in plan.Converted.Where(c => c.PrecisionCapped))
+                    {
+                        var where = $"{from.GetType().Name} の {type} → {to.GetType().Name}";
+
+                        from.TryParse(type, out var canonical).Should().BeTrue(where);
+                        canonical
+                            .Should()
+                            .Be(
+                                new CanonicalType(
+                                    CanonicalTypeKind.Decimal,
+                                    Precision: null,
+                                    Scale: 0
+                                ),
+                                where
+                            );
+                        to.TryParse(conversion.NewType!, out var written).Should().BeTrue(where);
+                        written
+                            .Precision.Should()
+                            .Be(DiagramTypeConverter.CappedPrecision, where + "の変換後の精度");
+                        written.Scale.Should().Be(0, where + "の変換後のスケール");
+                        capped++;
+                    }
+                }
+            }
+        }
+
+        capped.Should().BePositive("Oracle の整数を精度を書く方言へ変換した組み合わせがある");
+    }
+
+    private static ITypeCatalog Catalog(string dialect) =>
+        dialect switch
+        {
+            "sqlserver" => new SqlServerTypeCatalog(),
+            "postgresql" => new PostgreSqlTypeCatalog(),
+            "mysql" => new MySqlTypeCatalog(),
+            "sqlite" => new SqliteTypeCatalog(),
+            _ => throw new ArgumentOutOfRangeException(nameof(dialect)),
+        };
 
     private static ErDiagram BuildDiagram(string dataType)
     {
