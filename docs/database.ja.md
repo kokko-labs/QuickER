@@ -119,8 +119,7 @@ OK での前回接続の記録に失敗したときも接続はそのまま進�
   FK を持つ側の列集合が、そのテーブル自身の主キーまたは一意制約と一致する場合は 1 対 1 と判定されます。
   複数列で構成される外部キーも、列同士の対応付けを宣言順にすべて取り込みます。
   SQLite は FK 制約名を永続化しないため、取込時に制約名が合成されます
-- テーブル・列の説明（SQL Server の MS_Description 拡張プロパティ、PostgreSQL の `obj_description` / `col_description`、MySQL の `TABLE_COMMENT` / `COLUMN_COMMENT`、Oracle の `user_tab_comments` / `user_col_comments`）。
-  SQLite は説明の機構がないため対象外です
+- テーブル・列の説明（方言ごとの取込元は[説明の同期](#説明の同期)の表）
 - 列の 2 つの印：計算列（生成列）と、値を指定させない自動採番の列（式と採番の定義は取り込みません）
 
 取り込まれるのはここまでです。
@@ -340,26 +339,53 @@ SQLite のテーブル再構築を除けば、これらのオブジェクトは�
 
 列の型は、データベースが保存する表記へそろえてから比較します。
 データベースは宣言の綴りをそのまま覚えるとは限らず、`numeric(18,0)` と宣言しても `numeric(18)` として返します。
-そのため `numeric(18,0)` と `numeric(18)`、`datetime2(7)` と `datetime2` のような同じ型の別の綴りは差分になりません。
-PostgreSQL の `timestamp` と `timestamp(6)`、`numeric(18,0)` と `numeric(18)`、MySQL の `decimal(12)` と `decimal(12,0)`、Oracle の `TIMESTAMP` と `TIMESTAMP(6)`、`INTEGER` と `NUMBER(*,0)` も同じ理由で差分になりません。
+そのため同じ型の別の綴りは差分になりません。
+
+<!-- dialect-table: same-type-spellings -->
+
+| 方言 | 同じ型とみなす | 差分のまま |
+| --- | --- | --- |
+| SQL Server | `numeric(18,0)` と `numeric(18)`、`datetime2(7)` と `datetime2`、`float(24)` と `real`、`float(53)` と `float`、`rowversion` と `timestamp` | `datetime2(3)` と `datetime2` |
+| PostgreSQL | `timestamp` と `timestamp(6)`、`numeric(18,0)` と `numeric(18)` | |
+| MySQL | `decimal(12)` と `decimal(12,0)`、`decimal` と `decimal(10,0)` | |
+| Oracle | `TIMESTAMP` と `TIMESTAMP(6)`、`INTEGER` と `NUMBER(*,0)` | |
+| SQLite | （宣言のまま比べる） | |
+
 そろえるのは既定値の省略と、データベースが覚えていない別名だけで、意味の違う型（`datetime2(3)` と `datetime2`）は従来どおり差分になります。
 
 PostgreSQL では、型の系統をまたぐ変更（`varchar` から `integer`、`text` から `date`、`integer` から `boolean` など）に `USING 列::新しい型` を付けて書くので、すべての値が変換できれば通ります。
 文字列型への変更には付けないので、短くした `varchar(n)` に収まらない値があると、切り詰めずに同期が失敗します。
 取込が分類できない型（PostGIS の型・ユーザー定義型）にも付けません。
 
-Oracle は外部キーの `ON UPDATE` と `ON DELETE SET DEFAULT` を持たないため、図のそれらは `NO ACTION` として比べます。
-DDL と同期スクリプトは句を省いて外部キーを作り、注意のコメントを添えます。
+<!-- dialect-table: referential-actions -->
+
+| 方言 | `ON UPDATE` | `SET DEFAULT` | 差分での比べ方 |
+| --- | --- | --- | --- |
+| SQL Server | ✅ | ✅（NOT NULL の子の列には DEFAULT 制約が要る） | 宣言のまま |
+| PostgreSQL | ✅ | ✅ | 宣言のまま |
+| MySQL | ✅ | —（受け付けるが効かない。句を省いて注記） | `SET DEFAULT` を `NO ACTION` として比べる |
+| Oracle | —（句を省いて注記） | —（句を省いて注記） | `ON UPDATE` と `SET DEFAULT` を `NO ACTION` として比べる |
+| SQLite | ✅ | ✅ | 宣言のまま |
+
+表で無い・効かないとするアクションは、差分で `NO ACTION` として比べ、DDL と同期スクリプトは句を省いて外部キーを作り、注意のコメントを添えます。
 MySQL（InnoDB）は `ON DELETE` / `ON UPDATE` の `SET DEFAULT` を受け付けますが効かせません（親の行を消すと `NO ACTION` と同じく失敗します）。
-同じ扱いで、`NO ACTION` として比べ、DDL と同期スクリプトでは句を省いて注意のコメントを添えます。
 SQL Server は、NOT NULL の子の列に DEFAULT 制約が無いと `SET DEFAULT` の外部キーを作れません（エラー 1762）。
 図は列の既定値を持たないため、DDL はそうした外部キーの前に注意のコメントを添え、同期は追加・作り直す外部キーを実行確認で名指しします。
 データベースの列に DEFAULT 制約があれば通るので、実行は止めません。
-SQL Server と PostgreSQL の列定義の変更は、実行時に列の照合順序を読み直し、新しい型が文字列型なら書き添えます（書かないとデータベースの既定の照合順序へ戻るためです。PostgreSQL は型の既定と違うときだけ書きます）。
-SQL Server で型が変わるときは、DEFAULT 制約を外して型を変え、同じ名前・同じ定義で付け直します（残したままだとエラー 5074 で断られます）。
+
+<!-- dialect-table: column-alteration -->
+
+| | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| 列の変更で照合順序を読み直して書き添える | ✅ | ✅（型の既定と違うときだけ） | ✅（実定義から） | — | —（再構築で失われる） |
+| 列の変更で `DEFAULT` を保つ | ✅（外して同じ名前で付け直す） | ✅（DB が保つ） | ✅（実定義から） | ✅（DB が保つ） | —（再構築で失われる） |
+| 既定値のある列の型の種類の変更を実行確認に表示する | ✅ | ✅ | ✅ | ✅ | — |
+
+列定義の変更で、新しい型が文字列型のときに照合順序を書き添えるのは上の表のとおりで、書かないとデータベースの既定の照合順序へ戻るためです。
+SQL Server で型が変わるときに DEFAULT 制約を外して付け直すのは、残したままだとエラー 5074 で断られるためです。
 SQL Server で列を削除するときも、同じ理由で先に DEFAULT 制約を外します。
 その列を参照する CHECK 制約や、利用者が作った索引は外しません。図がそれらを持たないためで、残っていると列の削除はエラー 5074 で断られ、同期は巻き戻ります。
-既定値のある列の型の種類を変える同期は、SQLite 以外の 4 方言（SQL Server・PostgreSQL・MySQL・Oracle）で実行確認に表示されます。
+既定値のある列の型の種類を変える同期は、上の表のとおり実行確認に表示されます。
 既定値が新しい型に合わないと、PostgreSQL と Oracle では同期が失敗し、MySQL ではエラー 1067 で同期が失敗し、SQL Server では既定値を使う行の追加が失敗します。
 MySQL と Oracle の同期の失敗では DDL が巻き戻らないので、それより前の文は適用されたまま残ります。
 外部キーの作り直しは削除と追加を 1 つにまとめた差分項目で、既定では選択されません（同じ名前の外部キーを外してから付け直すため、MySQL / Oracle では付け直しに失敗すると外部キーが外れたまま残り得ます）。
@@ -481,15 +507,23 @@ MySQL 8.0 系、または 8.4 で `restrict_fk_on_non_standard_key=OFF` の環�
 ### 説明の同期
 
 テーブル・列の説明は、説明の機構を持つ 4 方言で同期されます。
-SQL Server は MS_Description 拡張プロパティ、PostgreSQL と Oracle は `COMMENT ON`、MySQL は `COMMENT` 句を使います。
-既存の有無を判定して追加と更新を使い分けるのは SQL Server の拡張プロパティのみで、PostgreSQL と Oracle は `COMMENT ON`、MySQL は `COMMENT` 句を再実行します（いずれもそれ自体が冪等です）。
+
+<!-- dialect-table: descriptions -->
+
+| 方言 | 取込元 | 書き方 | 基本多言語面の外の文字 |
+| --- | --- | --- | --- |
+| SQL Server | `MS_Description` 拡張プロパティ | `MS_Description` 拡張プロパティ（同期は既存の有無で追加と更新を使い分ける） | ✅ |
+| PostgreSQL | `obj_description` / `col_description` | `COMMENT ON` | ✅ |
+| MySQL | `TABLE_COMMENT` / `COLUMN_COMMENT` | `COMMENT` 句 | —（`?` として保存） |
+| Oracle | `user_tab_comments` / `user_col_comments` | `COMMENT ON` | ✅ |
+| SQLite | —（説明の機構が無い） | —（DDL はコメント行で書く。同期しない） | |
+
+表が `COMMENT ON` または `COMMENT` 句とする方言では、同期は文や句を再実行するだけで、それ自体が冪等です。
 図側で説明を空にすると削除されます。
 空白だけの説明は「説明なし」として扱います（DDL は書かず、差分は空と同じとみなし、同期すると DB の説明を削除します）。
 説明を書くのは説明の項目だけなので、列を追加しても、その列の説明の項目を選ばなければ説明は入りません（MySQL を含むすべての方言で同じです）。
-MySQL は説明に BMP の外の文字（絵文字など）を保存できず、1 文字ずつ `?` として保存します。
-そのため比較は、図の説明のそうした文字を `?` にした形で DB の説明と比べ、同期や DDL の適用の後に差分が残りません。
+表で基本多言語面の外の文字（絵文字など）を `?` として保存する方言では、比較は図の説明のそうした文字を `?` にした形で DB の説明と比べるので、同期や DDL の適用の後に差分が残りません。
 同期の確認ダイアログはそうした説明を 1 つずつ名指しし、DDL はその説明の前に注記を書きます。
-SQLite は説明の機構がないため、差分検出も同期も行われません。
 
 SQL Server では、スキーマを付けないテーブル名は `CREATE TABLE` と同じく接続ユーザーの既定スキーマを指し、説明も同じテーブルに付きます（スキーマは `SCHEMA_NAME()` で求めます）。
 取込は `dbo` 以外のテーブルをスキーマ付き（`app.Widget`）で書くため、既定スキーマが `dbo` でないユーザーで使うときは、図のテーブル名にもスキーマを書いてください（書かないと、次の差分で `Widget` と `app.Widget` が別のテーブルになります）。
