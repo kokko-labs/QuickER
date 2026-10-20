@@ -225,11 +225,39 @@ public class OracleTypeCatalogTests
         canonical.Length.Should().Be(100);
     }
 
+    /// <summary>
+    /// 非推奨の LONG / LONG RAW は CLOB / BLOB と同じ無制限の型として、ANSI の INTEGER / SMALLINT は
+    /// NUMBER(*,0)（精度なし・スケール 0）として解析することを検証する（取込と差分の正規化も INTEGER を NUMBER(*,0) とみなす）。
+    /// </summary>
+    [Theory(
+        DisplayName = "LONG・LONG RAW は無制限の型、INTEGER・SMALLINT は NUMBER(*,0) として解析される"
+    )]
+    [InlineData("LONG", CanonicalTypeKind.AnsiString, -1, null, null)]
+    [InlineData("LONG RAW", CanonicalTypeKind.Binary, -1, null, null)]
+    [InlineData("INTEGER", CanonicalTypeKind.Decimal, null, null, 0)]
+    [InlineData("SMALLINT", CanonicalTypeKind.Decimal, null, null, 0)]
+    [InlineData("integer", CanonicalTypeKind.Decimal, null, null, 0)]
+    public void TryParse_LegacyAndAnsiTypes_ResolveExpectedCanonical(
+        string nativeType,
+        CanonicalTypeKind kind,
+        int? length,
+        int? precision,
+        int? scale
+    )
+    {
+        Catalog.TryParse(nativeType, out var canonical).Should().BeTrue();
+        canonical.Should().Be(new CanonicalType(kind, length, precision, scale));
+        Catalog.TryParse("NUMBER(*,0)", out var number).Should().BeTrue();
+
+        if (kind == CanonicalTypeKind.Decimal)
+        {
+            canonical.Should().Be(number, "INTEGER / SMALLINT は NUMBER(*,0) と同じ正規型");
+        }
+    }
+
     // ---------------- 変換不能 ----------------
 
     [Theory(DisplayName = "変換不能な型は TryParse が false を返す")]
-    [InlineData("LONG")]
-    [InlineData("LONG RAW")]
     [InlineData("ROWID")]
     [InlineData("UROWID")]
     [InlineData("BFILE")]

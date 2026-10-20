@@ -113,6 +113,16 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
                 );
                 return true;
 
+            // mediumint は 24 ビット（符号つき ±8,388,607・符号なし 0〜16,777,215）で、どちらも Int32 に収まる
+            case "mediumint":
+                canonical = new CanonicalType(CanonicalTypeKind.Int32);
+                return true;
+
+            // year（1901〜2155）は整数として読む。ドライバが返す CLR 型（int）・C# の型マッパーと同じ Int32
+            case "year":
+                canonical = new CanonicalType(CanonicalTypeKind.Int32);
+                return true;
+
             // bigint unsigned（0〜18,446,744,073,709,551,615＝20 桁）は Int64 に収まらないので decimal(20,0)
             case "bigint":
                 canonical = isUnsigned
@@ -135,6 +145,7 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
                 // MySQL 8 の既定 utf8mb4 は Unicode。正規型は String として扱う
                 return TryParseLength(argsRaw, CanonicalTypeKind.String, out canonical);
 
+            case "tinytext":
             case "text":
             case "mediumtext":
             case "longtext":
@@ -147,6 +158,7 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             case "varbinary":
                 return TryParseLength(argsRaw, CanonicalTypeKind.Binary, out canonical);
 
+            case "tinyblob":
             case "blob":
             case "mediumblob":
             case "longblob":
@@ -183,13 +195,28 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
                 return true;
 
             default:
-                // enum / set は上で除外済み。year / 幾何型 / 未知の型は変換不能
+                // enum / set は上で除外済み。幾何型 / 未知の型は変換不能
                 return false;
         }
     }
 
     /// <inheritdoc />
     public bool TryFormat(CanonicalType canonical, out string nativeType)
+    {
+        nativeType = string.Empty;
+
+        // MySQL の上限を超える長さ・精度・スケールは書き出さない（DDL の適用で必ず失敗するため、切替の時点で変換不能一覧に載せる）
+        if (canonical is not null && !IsWithinLimits(canonical))
+        {
+            return false;
+        }
+
+        return TryFormatParameterType(canonical!, out nativeType);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>列の上限（<see cref="IsWithinLimits"/>）だけを当てない。そのほかの規則は <see cref="TryFormat"/> と同じ。</remarks>
+    public bool TryFormatParameterType(CanonicalType canonical, out string nativeType)
     {
         nativeType = string.Empty;
 
@@ -203,12 +230,6 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
         // char / binary は黙って長さ 1 として作る。
         // 負のスケールと同じ「実行できない／意味の違う DDL を黙って作らない」線引き
         if (CanonicalTypeToken.HasLengthArgument(canonical.Kind) && canonical.Length is null)
-        {
-            return false;
-        }
-
-        // MySQL の上限を超える精度・スケールは書き出さない（DDL の適用で必ず失敗するため、切替の時点で変換不能一覧に載せる）
-        if (!IsWithinLimits(canonical))
         {
             return false;
         }
@@ -531,14 +552,34 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
     /// <summary>time / datetime / timestamp の小数秒の最大桁数</summary>
     private const int MaxFractionalSecondsPrecision = 6;
 
-    /// <summary>正規型の精度・スケールが MySQL で宣言できる範囲に収まるか</summary>
+    /// <summary>char / binary の最大長（文字数 / バイト数）</summary>
+    private const int MaxFixedLength = 255;
+
+    /// <summary>varchar の最大長（文字数）。QuickER の DDL は文字集合を書かないので、MySQL 8 の既定 utf8mb4（4 バイト / 文字）の列の上限</summary>
+    private const int MaxVarcharLength = 16383;
+
+    /// <summary>varbinary の最大長（バイト数）。行の上限 65,535 バイトから長さの 2 バイトと NULL の印の分を引いた、1 列だけの表で作れる長さ</summary>
+    private const int MaxVarbinaryLength = 65532;
+
+    /// <summary>正規型の長さ・精度・スケールが MySQL で宣言できる範囲に収まるか</summary>
     /// <remarks>
     /// 範囲外は MySQL が CREATE / ALTER の時点で拒否する値（<c>datetime(7)</c> は <c>Too-big precision 7</c>、
-    /// <c>decimal(66,2)</c> と <c>decimal(10,31)</c> も拒否）。SQL Server の <c>datetime2(7)</c> を手で書いた図などから切り替えると出る。
+    /// <c>decimal(66,2)</c> と <c>decimal(10,31)</c> も拒否、<c>char(256)</c> / <c>binary(256)</c> と utf8mb4 の
+    /// <c>varchar(16384)</c> は <c>Column length too big</c>）。SQL Server の <c>datetime2(7)</c> を手で書いた図などから切り替えると出る。
+    /// 行全体の上限（65,535 バイト）はほかの列しだいで決まるので、型 1 つでは判定しない（超えれば MySQL が適用時に
+    /// <c>Row size too large</c> で断る）。長さ <c>-1</c>（無制限）は longtext / longblob へ書くので上限の外。
     /// </remarks>
     private static bool IsWithinLimits(CanonicalType canonical) =>
         canonical.Kind switch
         {
+            CanonicalTypeKind.String or CanonicalTypeKind.AnsiString => canonical.Length
+                is null
+                    or -1
+                    or <= MaxVarcharLength,
+            CanonicalTypeKind.FixedString
+            or CanonicalTypeKind.AnsiFixedString
+            or CanonicalTypeKind.FixedBinary => canonical.Length is null or -1 or <= MaxFixedLength,
+            CanonicalTypeKind.Binary => canonical.Length is null or -1 or <= MaxVarbinaryLength,
             CanonicalTypeKind.Decimal => canonical.Precision
                 is null
                     or (>= 1 and <= MaxDecimalPrecision)

@@ -457,4 +457,77 @@ public class PostgreSqlTypeCatalogTests
 
         formatted.Should().Be(nativeType);
     }
+
+    /// <summary>
+    /// PostgreSQL が宣言を断る（または精度を黙って丸める）長さ・精度・スケールは書き出さず、対象 DBMS 切替の
+    /// 変換不能一覧に載せることを検証する。上限ちょうどは書き出せる（境界の対照）。
+    /// </summary>
+    [Theory(
+        DisplayName = "TryFormat は PostgreSQL の上限を超える長さ・精度・スケールを書き出さない"
+    )]
+    [InlineData(CanonicalTypeKind.Decimal, null, 1000, 0, true)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 1001, 0, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, 1000, true)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, 1001, false)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, -1000, true)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, -1001, false)]
+    [InlineData(CanonicalTypeKind.DateTime, null, 6, null, true)]
+    [InlineData(CanonicalTypeKind.DateTime, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.DateTimeOffset, null, 6, null, true)]
+    [InlineData(CanonicalTypeKind.DateTimeOffset, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.Time, null, 6, null, true)]
+    [InlineData(CanonicalTypeKind.Time, null, 7, null, false)]
+    [InlineData(CanonicalTypeKind.String, 10485760, null, null, true)]
+    [InlineData(CanonicalTypeKind.String, 10485761, null, null, false)]
+    [InlineData(CanonicalTypeKind.AnsiString, 10485761, null, null, false)]
+    [InlineData(CanonicalTypeKind.FixedString, 10485760, null, null, true)]
+    [InlineData(CanonicalTypeKind.FixedString, 10485761, null, null, false)]
+    [InlineData(CanonicalTypeKind.AnsiFixedString, 10485761, null, null, false)]
+    [InlineData(CanonicalTypeKind.String, -1, null, null, true)]
+    [InlineData(CanonicalTypeKind.Binary, 100000000, null, null, true)]
+    public void TryFormat_RespectsPostgreSqlLimits(
+        CanonicalTypeKind kind,
+        int? length,
+        int? precision,
+        int? scale,
+        bool expected
+    )
+    {
+        Catalog
+            .TryFormat(new CanonicalType(kind, length, precision, scale), out _)
+            .Should()
+            .Be(expected);
+    }
+
+    /// <summary>
+    /// 名前付きクエリのパラメータは列を作らないので、列の上限を超える長さ・精度も書き出す（C# 型への写像だけに使う）。
+    /// 型そのものを書けない規則（精度なし・スケールありの Decimal）は列と同じ。
+    /// </summary>
+    [Theory(
+        DisplayName = "TryFormatParameterType は列の上限を当てず、型を書けない規則だけを当てる"
+    )]
+    [InlineData(CanonicalTypeKind.Decimal, null, 1001, 0, "numeric(1001,0)")]
+    [InlineData(CanonicalTypeKind.DateTime, null, 7, null, "timestamp(7)")]
+    [InlineData(CanonicalTypeKind.String, 10485761, null, null, "varchar(10485761)")]
+    [InlineData(CanonicalTypeKind.Decimal, null, null, 2, null)]
+    public void TryFormatParameterType_IgnoresColumnLimits(
+        CanonicalTypeKind kind,
+        int? length,
+        int? precision,
+        int? scale,
+        string? expected
+    )
+    {
+        var ok = Catalog.TryFormatParameterType(
+            new CanonicalType(kind, length, precision, scale),
+            out var nativeType
+        );
+
+        ok.Should().Be(expected is not null);
+
+        if (expected is not null)
+        {
+            nativeType.Should().Be(expected);
+        }
+    }
 }

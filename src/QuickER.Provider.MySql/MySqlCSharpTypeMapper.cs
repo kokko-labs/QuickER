@@ -106,10 +106,8 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
                     isUnboundedBinary: baseType is "blob" or "mediumblob" or "longblob"
                 ),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
-            "varchar" or "char" or "text" or "mediumtext" or "longtext" or "json" => Reference(
-                "string",
-                maxLength
-            ),
+            "varchar" or "char" or "tinytext" or "text" or "mediumtext" or "longtext" or "json" =>
+                Reference("string", maxLength),
             // 未知の型は string として扱い、生成自体は継続させる
             _ => Reference("string", isFallbackType: true),
         };

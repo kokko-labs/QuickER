@@ -89,6 +89,12 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             case "number":
                 return TryParseNumber(arg1, arg2, out canonical);
 
+            // ANSI の INTEGER / SMALLINT は、Oracle では精度なし・スケール 0 の NUMBER（NUMBER(*,0)）として作られる
+            // （取込も NUMBER(*,0) で書き、差分の正規化も同じとみなす）
+            case "integer":
+            case "smallint":
+                return TryParseNumber("*", "0", out canonical);
+
             case "binary_float":
                 canonical = new CanonicalType(CanonicalTypeKind.Float32);
                 return true;
@@ -112,7 +118,9 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             case "varchar2":
                 return TryParseLength(arg1, CanonicalTypeKind.AnsiString, out canonical);
 
+            // LONG は非推奨の可変長文字列（2GB まで）で、CLOB と同じ無制限の文字列として読む
             case "clob":
+            case "long":
                 canonical = new CanonicalType(CanonicalTypeKind.AnsiString, Length: -1);
                 return true;
 
@@ -125,7 +133,9 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             case "raw":
                 return TryParseLength(arg1, CanonicalTypeKind.Binary, out canonical);
 
+            // LONG RAW は非推奨の可変長バイナリ（2GB まで）で、BLOB と同じ無制限のバイナリとして読む
             case "blob":
+            case "long raw":
                 canonical = new CanonicalType(CanonicalTypeKind.Binary, Length: -1);
                 return true;
 

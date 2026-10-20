@@ -123,4 +123,18 @@ public interface ITypeCatalog
     /// <param name="canonical">変換元の正規型</param>
     /// <param name="nativeType">生成に成功した場合のネイティブ型文字列</param>
     bool TryFormat(CanonicalType canonical, out string nativeType);
+
+    /// <summary>
+    /// 正規型から、列を作らない用途（名前付きクエリのパラメータ・スカラー戻り値・射影フィールド）のネイティブ型文字列を生成する
+    /// </summary>
+    /// <remarks>
+    /// 列を作らないので、列の長さ・精度の上限は当てない（その表記は C# 型への写像にだけ使い、DDL には書かない）。
+    /// 上限のほかの規則（長さを要する型の長さ無し・負のスケールなど、型そのものを書けない場合）は <see cref="TryFormat"/> と同じ。
+    /// 既定の実装は <see cref="TryFormat"/> と同じで、上限を持つ方言のうち MySQL と PostgreSQL がこれを分ける
+    /// （SQL Server と Oracle は、上限の判定が固定長の <c>max</c> を書かない規則と一体なので分けない）。
+    /// </remarks>
+    /// <param name="canonical">変換元の正規型</param>
+    /// <param name="nativeType">生成に成功した場合のネイティブ型文字列</param>
+    bool TryFormatParameterType(CanonicalType canonical, out string nativeType) =>
+        TryFormat(canonical, out nativeType);
 }

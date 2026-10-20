@@ -88,6 +88,10 @@ public class MySqlTypeCatalogTests
     [InlineData("INT(10) UNSIGNED", CanonicalTypeKind.Int64, null)]
     [InlineData("bigint", CanonicalTypeKind.Int64, null)]
     [InlineData("bigint unsigned", CanonicalTypeKind.Decimal, 20)]
+    [InlineData("mediumint", CanonicalTypeKind.Int32, null)]
+    [InlineData("mediumint(8)", CanonicalTypeKind.Int32, null)]
+    [InlineData("mediumint unsigned", CanonicalTypeKind.Int32, null)]
+    [InlineData("year", CanonicalTypeKind.Int32, null)]
     public void TryParse_Integer_UsesRangeOfSign(
         string nativeType,
         CanonicalTypeKind kind,
@@ -109,7 +113,8 @@ public class MySqlTypeCatalogTests
         canonical.Length.Should().Be(50);
     }
 
-    [Theory(DisplayName = "text / mediumtext / longtext は String(-1) として解析される")]
+    [Theory(DisplayName = "tinytext / text / mediumtext / longtext は String(-1) として解析される")]
+    [InlineData("tinytext")]
     [InlineData("text")]
     [InlineData("mediumtext")]
     [InlineData("longtext")]
@@ -139,7 +144,8 @@ public class MySqlTypeCatalogTests
         canonical.Length.Should().Be(255);
     }
 
-    [Theory(DisplayName = "blob / mediumblob / longblob は Binary(-1) として解析される")]
+    [Theory(DisplayName = "tinyblob / blob / mediumblob / longblob は Binary(-1) として解析される")]
+    [InlineData("tinyblob")]
     [InlineData("blob")]
     [InlineData("mediumblob")]
     [InlineData("longblob")]
@@ -210,7 +216,6 @@ public class MySqlTypeCatalogTests
     [Theory(DisplayName = "変換不能な型は TryParse が false を返す")]
     [InlineData("enum('a','b')")]
     [InlineData("set('x','y')")]
-    [InlineData("year")]
     [InlineData("bit(8)")]
     [InlineData("geometry")]
     [InlineData("point")]
@@ -447,6 +452,20 @@ public class MySqlTypeCatalogTests
     [InlineData(CanonicalTypeKind.Decimal, null, 10, 11, false)]
     [InlineData(CanonicalTypeKind.Decimal, null, null, null, false)]
     [InlineData(CanonicalTypeKind.Decimal, null, null, 2, false)]
+    [InlineData(CanonicalTypeKind.String, 16383, null, null, true)]
+    [InlineData(CanonicalTypeKind.String, 16384, null, null, false)]
+    [InlineData(CanonicalTypeKind.AnsiString, 16383, null, null, true)]
+    [InlineData(CanonicalTypeKind.AnsiString, 16384, null, null, false)]
+    [InlineData(CanonicalTypeKind.String, -1, null, null, true)]
+    [InlineData(CanonicalTypeKind.FixedString, 255, null, null, true)]
+    [InlineData(CanonicalTypeKind.FixedString, 256, null, null, false)]
+    [InlineData(CanonicalTypeKind.AnsiFixedString, 255, null, null, true)]
+    [InlineData(CanonicalTypeKind.AnsiFixedString, 256, null, null, false)]
+    [InlineData(CanonicalTypeKind.FixedBinary, 255, null, null, true)]
+    [InlineData(CanonicalTypeKind.FixedBinary, 256, null, null, false)]
+    [InlineData(CanonicalTypeKind.Binary, 65532, null, null, true)]
+    [InlineData(CanonicalTypeKind.Binary, 65533, null, null, false)]
+    [InlineData(CanonicalTypeKind.Binary, -1, null, null, true)]
     public void TryFormat_RespectsMySqlLimits(
         CanonicalTypeKind kind,
         int? length,
@@ -459,5 +478,42 @@ public class MySqlTypeCatalogTests
             .TryFormat(new CanonicalType(kind, length, precision, scale), out _)
             .Should()
             .Be(expected);
+    }
+
+    /// <summary>
+    /// 名前付きクエリのパラメータは列を作らないので、列の上限を超える長さ・精度も書き出す（C# 型への写像だけに使う）。
+    /// 型そのものを書けない規則（長さ無し・負のスケール・精度の無い Decimal）は列と同じ。
+    /// </summary>
+    [Theory(
+        DisplayName = "TryFormatParameterType は列の上限を当てず、型を書けない規則だけを当てる"
+    )]
+    [InlineData(CanonicalTypeKind.String, 20000, null, null, "varchar(20000)")]
+    [InlineData(CanonicalTypeKind.FixedString, 300, null, null, "char(300)")]
+    [InlineData(CanonicalTypeKind.FixedBinary, 300, null, null, "binary(300)")]
+    [InlineData(CanonicalTypeKind.Binary, 70000, null, null, "varbinary(70000)")]
+    [InlineData(CanonicalTypeKind.DateTime, null, 7, null, "datetime(7)")]
+    [InlineData(CanonicalTypeKind.Decimal, null, 66, 2, "decimal(66,2)")]
+    [InlineData(CanonicalTypeKind.String, null, null, null, null)]
+    [InlineData(CanonicalTypeKind.Decimal, null, 10, -2, null)]
+    [InlineData(CanonicalTypeKind.Decimal, null, null, null, null)]
+    public void TryFormatParameterType_IgnoresColumnLimits(
+        CanonicalTypeKind kind,
+        int? length,
+        int? precision,
+        int? scale,
+        string? expected
+    )
+    {
+        var ok = Catalog.TryFormatParameterType(
+            new CanonicalType(kind, length, precision, scale),
+            out var nativeType
+        );
+
+        ok.Should().Be(expected is not null);
+
+        if (expected is not null)
+        {
+            nativeType.Should().Be(expected);
+        }
     }
 }

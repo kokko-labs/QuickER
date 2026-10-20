@@ -592,8 +592,10 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - A string or binary column declared without a length (PostgreSQL's `varchar`, SQLite's `TEXT` and the like) cannot move to SQL Server, MySQL or Oracle and is listed as well.
   MySQL and Oracle reject a `varchar` / `VARCHAR2` with no length, and SQL Server quietly creates a **one-character** column when the length is omitted.
   Give the column a length in the source diagram before switching
-- A length or precision beyond the target's limit (SQL Server's `nvarchar(5000)`, `decimal(50,2)`, `datetime2(9)`, Oracle's `NVARCHAR2(4000)`, `NUMBER(39)`, MySQL's `datetime(7)`, `decimal(66,2)` and the like) is listed as unconvertible.
+- A length or precision beyond the target's limit (SQL Server's `nvarchar(5000)`, `decimal(50,2)`, `datetime2(9)`, Oracle's `NVARCHAR2(4000)`, `NUMBER(39)`, MySQL's `char(256)`, `varchar(16384)`, `datetime(7)`, `decimal(66,2)`, PostgreSQL's `numeric(1001)`, `varchar(10485761)` and the like) is listed as unconvertible.
   Writing it out as is would make the DDL fail when applied.
+  PostgreSQL accepts fractional seconds beyond 6 places (`timestamp(7)`) but rounds them to 6, so they are listed as well.
+  MySQL's `varchar` limit is that of `utf8mb4` (16,383 characters), and whether the whole row fits in 65,535 bytes is decided by MySQL when the DDL is applied.
   Oracle's limits for strings and `RAW` are those of `MAX_STRING_SIZE = STANDARD`, the default (`NVARCHAR2` 2000, `VARCHAR2` 4000, `NCHAR` 1000, `CHAR` and `RAW` 2000).
   QuickER does not know the connected database's setting, so a column beyond these limits is listed as unconvertible even for a `MAX_STRING_SIZE = EXTENDED` database
 - A `decimal` without a precision (Oracle's `NUMBER`, PostgreSQL's unconstrained `numeric`) cannot move to SQL Server or MySQL and is listed as well.

@@ -44,6 +44,9 @@ public sealed class OracleTypeNotationIntegrationTests(OracleContainerFixture fi
                 "NUMBER(10,0)",
                 "NUMBER(*)",
                 "FLOAT",
+                // 型カタログが解析する非推奨の型も、取込の表記のまま閉じること（LONG は 1 表に 1 列までで、表は型ごとに作る）
+                "LONG",
+                "LONG RAW",
             ])
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();

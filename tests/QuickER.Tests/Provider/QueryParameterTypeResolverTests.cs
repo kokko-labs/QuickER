@@ -1,6 +1,9 @@
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Provider.MySql;
+using QuickER.Provider.PostgreSql;
 using QuickER.Provider.SqlServer;
 
 namespace QuickER.Tests.Provider;
@@ -64,5 +67,39 @@ public class QueryParameterTypeResolverTests
         resolved.Should().ContainKey("string(50)");
         resolved["string(50)"].TypeName.Should().Be("string");
         resolved.Should().NotContainKey("String(50)");
+    }
+
+    /// <summary>
+    /// パラメータは列を作らないので、列の上限（MySQL の char / binary / varchar / varbinary の長さ、PostgreSQL の numeric の
+    /// 精度・小数秒・varchar の長さ）を超えるトークンも、上限の内側と同じ C# 型へ解決されることを検証する。
+    /// </summary>
+    [Theory(
+        DisplayName = "列の上限を超える長さ・精度のパラメータのトークンも、上限の内側と同じ C# 型へ解決される"
+    )]
+    [InlineData(DialectNames.MySql, "string(20000)", "string(100)")]
+    [InlineData(DialectNames.MySql, "fixedstring(300)", "fixedstring(10)")]
+    [InlineData(DialectNames.MySql, "binary(70000)", "binary(100)")]
+    [InlineData(DialectNames.MySql, "fixedbinary(300)", "fixedbinary(16)")]
+    [InlineData(DialectNames.PostgreSql, "decimal(1001,0)", "decimal(10,0)")]
+    [InlineData(DialectNames.PostgreSql, "datetime(7)", "datetime(3)")]
+    [InlineData(DialectNames.PostgreSql, "string(10485761)", "string(100)")]
+    public void Resolve_TokensBeyondColumnLimits_ResolveLikeTokensWithinLimits(
+        string dialect,
+        string beyond,
+        string within
+    )
+    {
+        IDatabaseProvider provider =
+            dialect == DialectNames.MySql ? new MySqlProvider() : new PostgreSqlProvider();
+
+        var resolved = QueryParameterTypeResolver.Resolve(
+            DiagramWithTokens(beyond, within),
+            provider.TypeMapper,
+            provider.TypeCatalog
+        );
+
+        resolved.Should().ContainKey(beyond, "列の上限はパラメータに当てない");
+        resolved[beyond].TypeName.Should().Be(resolved[within].TypeName);
+        resolved[beyond].IsFallbackType.Should().BeFalse();
     }
 }

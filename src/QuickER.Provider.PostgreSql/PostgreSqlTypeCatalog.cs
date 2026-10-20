@@ -153,6 +153,21 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
     {
         nativeType = string.Empty;
 
+        // PostgreSQL の上限を超える長さ・精度・スケールは書き出さない（切替の時点で変換不能一覧に載せる）
+        if (canonical is not null && !IsWithinLimits(canonical))
+        {
+            return false;
+        }
+
+        return TryFormatParameterType(canonical!, out nativeType);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>列の上限（<see cref="IsWithinLimits"/>）だけを当てない。そのほかの規則は <see cref="TryFormat"/> と同じ。</remarks>
+    public bool TryFormatParameterType(CanonicalType canonical, out string nativeType)
+    {
+        nativeType = string.Empty;
+
         if (canonical is null)
         {
             return false;
@@ -398,6 +413,48 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
 
         return length == -1 ? "text" : $"char({length})";
     }
+
+    /// <summary>numeric の最大精度</summary>
+    private const int MaxNumericPrecision = 1000;
+
+    /// <summary>numeric のスケールの絶対値の上限（-1000〜1000）</summary>
+    private const int MaxNumericScale = 1000;
+
+    /// <summary>timestamp / timestamptz / time の小数秒の最大桁数</summary>
+    private const int MaxFractionalSecondsPrecision = 6;
+
+    /// <summary>varchar / char の最大長（文字数）</summary>
+    private const int MaxCharacterLength = 10485760;
+
+    /// <summary>正規型の長さ・精度・スケールが PostgreSQL で宣言できる範囲に収まるか</summary>
+    /// <remarks>
+    /// 範囲外は PostgreSQL が CREATE / ALTER の時点で拒否する（<c>numeric(1001)</c> は「precision 1001 must be between 1 and
+    /// 1000」、<c>varchar(10485761)</c> は「length for type varchar cannot exceed 10485760」）か、小数秒の 7 以上のように
+    /// NOTICE だけを出して 6 へ丸める値。丸めも、変換の結果が元の型と違う精度になるので書き出さない（SQL Server の
+    /// <c>datetime2(8)</c>・MySQL の <c>datetime(7)</c> と同じ扱い）。長さ <c>-1</c>（無制限）は text へ書くので上限の外。
+    /// バイナリは長さを持たない bytea へ書くので上限を持たない。
+    /// </remarks>
+    private static bool IsWithinLimits(CanonicalType canonical) =>
+        canonical.Kind switch
+        {
+            CanonicalTypeKind.Decimal => canonical.Precision
+                is null
+                    or (>= 1 and <= MaxNumericPrecision)
+                && canonical.Scale is null or (>= -MaxNumericScale and <= MaxNumericScale),
+            CanonicalTypeKind.Time
+            or CanonicalTypeKind.DateTime
+            or CanonicalTypeKind.DateTimeOffset => canonical.Precision
+                is null
+                    or (>= 0 and <= MaxFractionalSecondsPrecision),
+            CanonicalTypeKind.String
+            or CanonicalTypeKind.AnsiString
+            or CanonicalTypeKind.FixedString
+            or CanonicalTypeKind.AnsiFixedString => canonical.Length
+                is null
+                    or -1
+                    or (>= 1 and <= MaxCharacterLength),
+            _ => true,
+        };
 
     private static string FormatPrecisionScale(string name, int? precision, int? scale)
     {
