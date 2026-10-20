@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Dialects;
+using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
 using QuickER.Provider.Oracle;
@@ -87,6 +88,10 @@ public sealed class DialectDocsTableTests
             ["import-warnings"] = ("docs/database.md", Orientation.DialectColumns),
             ["imported-type-spelling"] = ("docs/database.md", Orientation.DialectRows),
             ["modeling-fidelity"] = ("docs/database.md", Orientation.NoDialects),
+            ["same-type-spellings"] = ("docs/database.md", Orientation.DialectRows),
+            ["referential-actions"] = ("docs/database.md", Orientation.DialectRows),
+            ["column-alteration"] = ("docs/database.md", Orientation.DialectColumns),
+            ["descriptions"] = ("docs/database.md", Orientation.DialectRows),
         };
 
     /// <summary>T-E：取込の警告（英語の行見出し → 行が表す警告の種別）</summary>
@@ -196,6 +201,24 @@ public sealed class DialectDocsTableTests
             UnsupportedDefinitionKind.ConstraintClause,
         ["View"] = UnsupportedDefinitionKind.View,
         ["Stored procedure, function, sequence"] = null,
+    };
+
+    /// <summary>T-J：列の変更（英語の行見出し → 宣言）</summary>
+    private static readonly IReadOnlyDictionary<
+        string,
+        Func<IDatabaseProvider, bool>
+    > ColumnAlterationRows = new Dictionary<string, Func<IDatabaseProvider, bool>>
+    {
+        ["Altering a column reads the collation back and writes it again"] = p =>
+            UnsupportedTreatments.For(
+                UnsupportedDefinitionKind.Collation,
+                UnsupportedFeature.Sync,
+                p.Name
+            ) == UnsupportedTreatment.Preserve,
+        ["Altering a column keeps the `DEFAULT`"] = p =>
+            p.SyncCapabilities.ChecksDefaultOnColumnTypeChange,
+        ["Changing the kind of type of a column with a default is confirmed"] = p =>
+            p.SyncCapabilities.ChecksDefaultOnColumnTypeChange,
     };
 
     private static readonly Regex CodeSpan = new(@"`([^`]+)`", RegexOptions.CultureInvariant);
@@ -619,6 +642,368 @@ public sealed class DialectDocsTableTests
                     .Equal(imported, where + "の取込の表記（日）");
             }
         }
+    }
+
+    [Fact(DisplayName = "振る舞い: 同じとみなす型の綴りの表は各方言の AreSameType と一致する")]
+    public void SameTypeSpellingsTable_MatchesAreSameType()
+    {
+        const string marker = "same-type-spellings";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        english.Rows.Should().HaveCount(Providers.Length);
+
+        for (var i = 0; i < Providers.Length; i++)
+        {
+            var capabilities = Providers[i].SyncCapabilities;
+            var where = $"{marker} の {Providers[i].DisplayName} の行";
+
+            foreach (var (column, same) in new[] { (1, true), (2, false) })
+            {
+                var spans = CodeSpans(english.Rows[i][column]);
+
+                (spans.Length % 2).Should().Be(0, where + "の綴りは 2 つずつ組になる");
+
+                for (var k = 0; k < spans.Length; k += 2)
+                {
+                    capabilities
+                        .AreSameType(spans[k], spans[k + 1])
+                        .Should()
+                        .Be(same, $"{where}：`{spans[k]}` と `{spans[k + 1]}`");
+                }
+
+                if (Aligned(english, japanese))
+                {
+                    CodeSpans(japanese.Rows[i][column]).Should().Equal(spans, where + "（日）");
+                }
+            }
+        }
+    }
+
+    [Fact(
+        DisplayName = "宣言: 参照アクションの表は SyncDialectCapabilities と UnsupportedTreatments と一致する"
+    )]
+    public void ReferentialActionsTable_MatchesDeclarations()
+    {
+        const string marker = "referential-actions";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+        var languages = Aligned(english, japanese)
+            ? new[] { (english, false), (japanese, true) }
+            : new[] { (english, false) };
+
+        foreach (var (table, ja) in languages)
+        {
+            table.Rows.Should().HaveCount(Providers.Length);
+
+            for (var i = 0; i < Providers.Length; i++)
+            {
+                var provider = Providers[i];
+                var capabilities = provider.SyncCapabilities;
+                var row = table.Rows[i];
+                var where = $"{marker} の {provider.DisplayName} の行（{(ja ? "日" : "英")}）";
+
+                row.Should().HaveCount(4, where);
+
+                // ON UPDATE：持たない方言は句を省いて注記する
+                Symbol(row[1])
+                    .Should()
+                    .Be(capabilities.SupportsOnUpdateAction ? Yes : No, where + "の ON UPDATE");
+                AssertOmittedWithNote(
+                    row[1],
+                    UnsupportedDefinitionKind.OnUpdateReferentialAction,
+                    provider,
+                    ja,
+                    where + "の ON UPDATE"
+                );
+
+                // SET DEFAULT：効く方言でも、DEFAULT 制約を要する方言は括弧で告げる
+                Symbol(row[2])
+                    .Should()
+                    .Be(capabilities.SupportsSetDefaultAction ? Yes : No, where + "の SET DEFAULT");
+                AssertOmittedWithNote(
+                    row[2],
+                    UnsupportedDefinitionKind.SetDefaultReferentialAction,
+                    provider,
+                    ja,
+                    where + "の SET DEFAULT"
+                );
+
+                if (capabilities.SupportsSetDefaultAction)
+                {
+                    (row[2] != Yes)
+                        .Should()
+                        .Be(
+                            capabilities.SetDefaultRequiresColumnDefault,
+                            where + "の SET DEFAULT の括弧"
+                        );
+
+                    if (capabilities.SetDefaultRequiresColumnDefault)
+                    {
+                        row[2].Should().Contain(ja ? "DEFAULT 制約" : "DEFAULT constraint", where);
+                    }
+                }
+
+                // 差分：比較で畳むアクションだけを名指しする
+                var foldsOnUpdate =
+                    UnsupportedTreatments.For(
+                        UnsupportedDefinitionKind.OnUpdateReferentialAction,
+                        UnsupportedFeature.Diff,
+                        provider.Name
+                    ) == UnsupportedTreatment.Fold;
+                var foldsSetDefault =
+                    UnsupportedTreatments.For(
+                        UnsupportedDefinitionKind.SetDefaultReferentialAction,
+                        UnsupportedFeature.Diff,
+                        provider.Name
+                    ) == UnsupportedTreatment.Fold;
+
+                row[3]
+                    .Contains("`ON UPDATE`", StringComparison.Ordinal)
+                    .Should()
+                    .Be(foldsOnUpdate, where + "の差分");
+                row[3]
+                    .Contains("`SET DEFAULT`", StringComparison.Ordinal)
+                    .Should()
+                    .Be(foldsSetDefault, where + "の差分");
+
+                if (!foldsOnUpdate && !foldsSetDefault)
+                {
+                    row[3].Should().Be(ja ? "宣言のまま" : "As declared", where + "の差分");
+                }
+            }
+        }
+    }
+
+    [Fact(
+        DisplayName = "宣言: 列の変更の表は UnsupportedTreatments と ChecksDefaultOnColumnTypeChange と一致する"
+    )]
+    public void ColumnAlterationTable_MatchesDeclarations()
+    {
+        const string marker = "column-alteration";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        english
+            .Rows.Select(row => row[0])
+            .Should()
+            .BeEquivalentTo(
+                ColumnAlterationRows.Keys,
+                $"{marker} の行見出しは対応表のキーと一致する"
+            );
+
+        for (var r = 0; r < english.Rows.Count; r++)
+        {
+            var heading = english.Rows[r][0];
+
+            english.Rows[r].Should().HaveCount(Providers.Length + 1, heading);
+
+            for (var i = 0; i < Providers.Length; i++)
+            {
+                var expected = ColumnAlterationRows[heading](Providers[i]) ? Yes : No;
+
+                Symbol(english.Rows[r][i + 1])
+                    .Should()
+                    .Be(
+                        expected,
+                        $"{marker} の「{heading}」の {Providers[i].DisplayName}（セル: {english.Rows[r][i + 1]}）"
+                    );
+            }
+        }
+
+        // DEFAULT を保つ行：DB 自身が保つ方言（同期の扱いが型の種類の変更の確認＝Warning）と、QuickER が付け直す方言
+        // （Preserve）を括弧の語で分ける
+        var keepsDefault = english
+            .Rows.Select(row => row[0])
+            .ToList()
+            .IndexOf("Altering a column keeps the `DEFAULT`");
+        var languages = Aligned(english, japanese)
+            ? new[] { (english.Rows[keepsDefault], false), (japanese.Rows[keepsDefault], true) }
+            : new[] { (english.Rows[keepsDefault], false) };
+
+        foreach (var (row, ja) in languages)
+        {
+            for (var i = 0; i < Providers.Length; i++)
+            {
+                if (Symbol(row[i + 1]) != Yes)
+                {
+                    continue;
+                }
+
+                var treatment = UnsupportedTreatments.For(
+                    UnsupportedDefinitionKind.DefaultValue,
+                    UnsupportedFeature.Sync,
+                    Providers[i].Name
+                );
+
+                row[i + 1]
+                    .Contains(ja ? "DB が保つ" : "kept by the database", StringComparison.Ordinal)
+                    .Should()
+                    .Be(
+                        treatment == UnsupportedTreatment.Warning,
+                        $"{marker} の DEFAULT の行の {Providers[i].DisplayName}（{(ja ? "日" : "英")}・扱い {treatment}）"
+                    );
+            }
+        }
+    }
+
+    [Fact(
+        DisplayName = "宣言: 説明の表は SupportsDescriptions・扱いの表・識別子の宣言と、取込と DDL のコードに一致する"
+    )]
+    public void DescriptionsTable_MatchesDeclarationsAndCode()
+    {
+        const string marker = "descriptions";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+        var languages = Aligned(english, japanese)
+            ? new[] { (english, false), (japanese, true) }
+            : new[] { (english, false) };
+
+        foreach (var (table, ja) in languages)
+        {
+            table.Rows.Should().HaveCount(Providers.Length);
+
+            for (var i = 0; i < Providers.Length; i++)
+            {
+                var provider = Providers[i];
+                var row = table.Rows[i];
+                var where = $"{marker} の {provider.DisplayName} の行（{(ja ? "日" : "英")}）";
+
+                row.Should().HaveCount(4, where);
+
+                if (!provider.SyncCapabilities.SupportsDescriptions)
+                {
+                    // 説明の機構が無い方言だけが、取込元と書き方を — にし、BMP の列を空にする
+                    Symbol(row[1]).Should().Be(No, where + "の取込元");
+                    Symbol(row[2]).Should().Be(No, where + "の書き方");
+                    row[3].Should().BeEmpty(where + "の BMP の外の文字");
+
+                    if (
+                        UnsupportedTreatments.For(
+                            UnsupportedDefinitionKind.Description,
+                            UnsupportedFeature.Ddl,
+                            provider.Name
+                        ) == UnsupportedTreatment.Annotation
+                    )
+                    {
+                        row[2]
+                            .Should()
+                            .Contain(ja ? "コメント行" : "comment lines", where + "の書き方");
+                    }
+
+                    continue;
+                }
+
+                Symbol(row[3])
+                    .Should()
+                    .Be(
+                        provider
+                            .SyncCapabilities
+                            .IdentifierLengthLimit
+                            .RepresentsSupplementaryCharacters
+                            ? Yes
+                            : No,
+                        where + "の BMP の外の文字"
+                    );
+
+                // 日本語の語のセルは、コードスパンが英語の同じ行と一致すること（コードとの照合は英語の行が受け持つ）
+                if (ja)
+                {
+                    CodeSpans(row[1])
+                        .Should()
+                        .Equal(
+                            CodeSpans(english.Rows[i][1]),
+                            where + "の取込元（英と同じコードスパン）"
+                        );
+                    CodeSpans(row[2])
+                        .Should()
+                        .Equal(
+                            CodeSpans(english.Rows[i][2]),
+                            where + "の書き方（英と同じコードスパン）"
+                        );
+
+                    continue;
+                }
+
+                // 語のセルはコードと照合する：取込元は取込のソース、書き方は説明つきの図の DDL
+                var importer = ImporterSource(provider);
+                var ddl = DescriptionDdl(provider);
+                var imported = CodeSpans(row[1]);
+                var written = CodeSpans(row[2]);
+
+                imported.Should().NotBeEmpty(where + "の取込元");
+                written.Should().NotBeEmpty(where + "の書き方");
+                imported
+                    .Should()
+                    .OnlyContain(
+                        span => importer.Contains(span, StringComparison.Ordinal),
+                        where + "の取込元は取込のコードにある"
+                    );
+                written
+                    .Should()
+                    .OnlyContain(
+                        span => ddl.Contains(span, StringComparison.Ordinal),
+                        where + "の書き方は DDL に現れる"
+                    );
+            }
+        }
+    }
+
+    /// <summary>— のセルは、その方言で句を省いて注記する扱い（OmitWithAnnotation）のときだけ注記を名乗る</summary>
+    private static void AssertOmittedWithNote(
+        string cell,
+        UnsupportedDefinitionKind kind,
+        IDatabaseProvider provider,
+        bool ja,
+        string where
+    )
+    {
+        if (Symbol(cell) != No)
+        {
+            return;
+        }
+
+        UnsupportedTreatments
+            .For(kind, UnsupportedFeature.Ddl, provider.Name)
+            .Should()
+            .Be(UnsupportedTreatment.OmitWithAnnotation, where);
+        cell.Should().Contain(ja ? "注記" : "note", where);
+    }
+
+    /// <summary>方言の取込のソース（<c>src/QuickER.Provider.{方言}/{方言}SchemaImporter.cs</c>）</summary>
+    private static string ImporterSource(IDatabaseProvider provider)
+    {
+        var name = provider.GetType().Name[..^"Provider".Length];
+
+        return File.ReadAllText(
+            Path.Combine(Root, "src", $"QuickER.Provider.{name}", $"{name}SchemaImporter.cs")
+        );
+    }
+
+    /// <summary>テーブルと列に説明を持つ 1 表の図から、その方言の DDL を作る</summary>
+    private static string DescriptionDdl(IDatabaseProvider provider)
+    {
+        var diagram = new ErDiagram { TargetDbms = provider.Name };
+        diagram.Entities.Add(
+            new Entity
+            {
+                TableName = "t",
+                Description = "table note",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                        Description = "column note",
+                    },
+                },
+            }
+        );
+
+        return provider.DdlGenerator.Build(diagram);
     }
 
     /// <summary>種別が方言 <paramref name="dialect"/>（<see cref="Providers"/> の位置）で告げられるか</summary>

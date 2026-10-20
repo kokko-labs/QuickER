@@ -119,8 +119,7 @@ If the file turns out to be corrupted, it is moved aside once to `connections.js
   When the FK columns on the referencing side themselves form that table's primary key or a unique constraint, the relationship is classified as one-to-one.
   A foreign key made up of multiple columns is imported with every column pair, in declaration order.
   SQLite does not persist FK constraint names, so a constraint name is synthesized on import
-- Table and column descriptions (SQL Server's MS_Description extended properties, PostgreSQL's `obj_description` / `col_description`, MySQL's `TABLE_COMMENT` / `COLUMN_COMMENT`, and Oracle's `user_tab_comments` / `user_col_comments`).
-  SQLite has no description mechanism and is out of scope
+- Table and column descriptions (where each DBMS keeps them is in the table under [Description sync](#description-sync))
 - Two column marks: computed (generated) columns and identity columns that reject explicit values (the expression and the seed are not imported)
 
 Nothing else is imported.
@@ -337,26 +336,53 @@ A foreign key of an unnamed relationship is matched by the same default name the
 
 Column types are compared after bringing both sides to the spelling the database stores.
 A database does not always remember a declaration as written: a column declared `numeric(18,0)` comes back as `numeric(18)`.
-Two spellings of the same type, such as `numeric(18,0)` and `numeric(18)` or `datetime2(7)` and `datetime2`, are therefore not a difference.
-PostgreSQL's `timestamp` and `timestamp(6)` or `numeric(18,0)` and `numeric(18)`, MySQL's `decimal(12)` and `decimal(12,0)`, and Oracle's `TIMESTAMP` and `TIMESTAMP(6)` or `INTEGER` and `NUMBER(*,0)`, are not a difference for the same reason.
+Two spellings of the same type are therefore not a difference.
+
+<!-- dialect-table: same-type-spellings -->
+
+| Dialect | Treated as the same type | Still a difference |
+| --- | --- | --- |
+| SQL Server | `numeric(18,0)` = `numeric(18)`, `datetime2(7)` = `datetime2`, `float(24)` = `real`, `float(53)` = `float`, `rowversion` = `timestamp` | `datetime2(3)` and `datetime2` |
+| PostgreSQL | `timestamp` = `timestamp(6)`, `numeric(18,0)` = `numeric(18)` | |
+| MySQL | `decimal(12)` = `decimal(12,0)`, `decimal` = `decimal(10,0)` | |
+| Oracle | `TIMESTAMP` = `TIMESTAMP(6)`, `INTEGER` = `NUMBER(*,0)` | |
+| SQLite | (compared as declared) | |
+
 Only omitted defaults and aliases the database does not remember are aligned; types that differ in meaning (`datetime2(3)` and `datetime2`) are still a difference.
 
 On PostgreSQL, a type change that crosses type families (`varchar` to `integer`, `text` to `date`, `integer` to `boolean` and the like) is written with `USING column::new_type`, so it goes through when every value converts.
 A change to a string type is written without it, so a value too long for a shorter `varchar(n)` makes the sync fail instead of being cut off.
 A type the import cannot classify (PostGIS types, user-defined types) is also written without it.
 
-Oracle foreign keys have no `ON UPDATE` and no `ON DELETE SET DEFAULT`, so those settings in the diagram are compared as `NO ACTION`.
-The DDL and the sync script create the foreign key without the clause and add a comment saying so.
+<!-- dialect-table: referential-actions -->
+
+| Dialect | `ON UPDATE` | `SET DEFAULT` | In the diff |
+| --- | --- | --- | --- |
+| SQL Server | ✅ | ✅ (a NOT NULL referencing column needs a DEFAULT constraint) | As declared |
+| PostgreSQL | ✅ | ✅ | As declared |
+| MySQL | ✅ | — (accepted but not applied; left out with a note) | `SET DEFAULT` compared as `NO ACTION` |
+| Oracle | — (left out with a note) | — (left out with a note) | `ON UPDATE` and `SET DEFAULT` compared as `NO ACTION` |
+| SQLite | ✅ | ✅ | As declared |
+
+Where the table shows an action is missing or not applied, the diff compares it as `NO ACTION`, and the DDL and the sync script create the foreign key without the clause and add a comment saying so.
 MySQL (InnoDB) accepts `SET DEFAULT` in `ON DELETE` and `ON UPDATE` but does not apply it: deleting the parent row fails, as with `NO ACTION`.
-It is handled the same way: compared as `NO ACTION`, and left out of the DDL and the sync script with a comment.
 SQL Server cannot create a `SET DEFAULT` foreign key when a NOT NULL referencing column has no DEFAULT constraint (error 1762).
 The diagram does not carry column defaults, so the DDL adds a comment before such a foreign key, and the sync names the foreign keys it adds or recreates in the confirmation dialog.
 It does not stop the sync, because the foreign key is created when the database column has a DEFAULT constraint.
-On SQL Server and PostgreSQL, altering a column reads the column's collation back at execution time and writes it again when the new type is a string type (without it, the column goes back to the database's default collation; PostgreSQL writes it only when it differs from the type's default).
-On SQL Server, a type change drops the column's DEFAULT constraint, changes the type, and adds the constraint back with the same name and definition (keeping it would make the change fail with error 5074).
+
+<!-- dialect-table: column-alteration -->
+
+| | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| Altering a column reads the collation back and writes it again | ✅ | ✅ (only when it differs from the type's default) | ✅ (from the live definition) | — | — (lost in the table rebuild) |
+| Altering a column keeps the `DEFAULT` | ✅ (dropped and added back under the same name) | ✅ (kept by the database) | ✅ (from the live definition) | ✅ (kept by the database) | — (lost in the table rebuild) |
+| Changing the kind of type of a column with a default is confirmed | ✅ | ✅ | ✅ | ✅ | — |
+
+Where the table above says so, altering a column writes the collation back when the new type is a string type, because without it the column goes back to the database's default collation.
+On SQL Server, the DEFAULT constraint is dropped and added back around a type change because keeping it would make the change fail with error 5074.
 Dropping a column on SQL Server drops its DEFAULT constraint first, for the same reason.
 A CHECK constraint or an index of your own that refers to the column is not dropped: the diagram does not carry them, so the drop fails with error 5074 and the sync is rolled back.
-A sync that changes the kind of type of a column with a default value is shown in the confirmation dialog on every dialect except SQLite (SQL Server, PostgreSQL, MySQL and Oracle).
+A sync that changes the kind of type of a column with a default value is shown in the confirmation dialog where the table above says so.
 When the default does not fit the new type, the sync fails on PostgreSQL and Oracle, the sync fails with error 1067 on MySQL, and an insert that uses the default fails on SQL Server.
 When the sync fails on MySQL or Oracle, DDL is not rolled back, so the statements before it stay applied.
 Recreating a foreign key is a single diff item that combines the drop and the add, and it is unselected by default (it drops the foreign key and adds it back under the same name, so on MySQL / Oracle a failed re-add can leave the foreign key missing).
@@ -473,15 +499,23 @@ This also skips the change when the re-add would in fact succeed: on MySQL 8.0, 
 ### Description sync
 
 Table and column descriptions sync on the four dialects that have a description mechanism.
-SQL Server uses MS_Description extended properties, PostgreSQL and Oracle use `COMMENT ON`, and MySQL uses `COMMENT` clauses.
-Checking for an existing description to choose between add and update applies to SQL Server's extended properties only; PostgreSQL and Oracle simply re-run `COMMENT ON`, and MySQL re-runs the `COMMENT` clause (both idempotent in themselves).
+
+<!-- dialect-table: descriptions -->
+
+| Dialect | Imported from | Written with | Characters outside the Basic Multilingual Plane |
+| --- | --- | --- | --- |
+| SQL Server | `MS_Description` extended properties | `MS_Description` extended properties (the sync checks for an existing one to choose between add and update) | ✅ |
+| PostgreSQL | `obj_description` / `col_description` | `COMMENT ON` | ✅ |
+| MySQL | `TABLE_COMMENT` / `COLUMN_COMMENT` | `COMMENT` clauses | — (saved as `?`) |
+| Oracle | `user_tab_comments` / `user_col_comments` | `COMMENT ON` | ✅ |
+| SQLite | — (no description mechanism) | — (the DDL writes comment lines; not diffed or synced) | |
+
+Where the table shows `COMMENT ON` or `COMMENT` clauses, the sync simply re-runs the statement or clause, which is idempotent in itself.
 Clearing a description in the diagram removes it.
 A description made only of spaces counts as no description: the DDL does not write it, the diff treats it as empty, and syncing it removes the description from the database.
 A description is written only by its own description item, so adding a column does not set the column's description unless that item is selected too (on every dialect, including MySQL).
-MySQL cannot store characters outside the Basic Multilingual Plane (such as emoji) in a description, and saves each one as `?`.
-The comparison therefore compares the diagram's description with those characters turned into `?`, so syncing or applying the DDL does not leave a difference behind.
+Where the table shows a character outside the Basic Multilingual Plane (such as an emoji) is saved as `?`, the comparison turns those characters in the diagram's description into `?` first, so syncing or applying the DDL does not leave a difference behind.
 The sync confirmation names each such description, and the DDL writes a note before it.
-SQLite has no description mechanism, so descriptions are neither diffed nor synced there.
 
 On SQL Server, a table name without a schema refers to the connecting login's default schema, as it does in `CREATE TABLE`, and its description goes to the same table (the schema is taken from `SCHEMA_NAME()`).
 The import writes tables outside `dbo` with their schema (`app.Widget`), so when your login's default schema is not `dbo`, write the schema into the diagram's table names as well; otherwise the next diff sees `Widget` and `app.Widget` as two different tables.
