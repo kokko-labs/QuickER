@@ -19,7 +19,7 @@ Concurrent agents (or a single agent working on several diagrams) simply pass di
 Each call reads the file, changes what it was asked to change, and writes the whole document back.
 Within one server, calls that arrive at the same time are handled one at a time, so tool calls an agent sends in parallel never lose each other's changes.
 Statelessness has a price between processes, though: **two processes writing the same file are last-write-wins.**
-There is no lock or version check across processes, so a call that loaded the file before another process saved it overwrites that save entirely: the other side's changes are gone, and nothing reports it.
+No lock or version check spans processes, so a call that loaded the file before another process saved it overwrites that save entirely: the other side's changes are gone, and nothing reports it.
 Only `create_diagram` refuses to overwrite, and only because the file must not already exist; it creates the file without replacing one, so it fails even when another process creates the same file at the same moment.
 An editing call that changes nothing (for example, setting a value the diagram already has) does not write the file at all.
 A read that collides with another process saving the same file is retried briefly before it fails.

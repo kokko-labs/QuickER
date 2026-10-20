@@ -605,7 +605,7 @@ Each dialect caps how long a table, column or constraint name may be, and the un
 - **Names you type** are never shortened.
   DDL generation and schema-sync script generation refuse a name beyond the limit, naming the place and the limit (`TABLE 'x' is longer than the limit of 63 UTF-8 bytes`), and produce nothing.
   Without this check SQL Server, MySQL and Oracle reject the DDL when it is applied, while PostgreSQL silently cuts the name at 63 bytes and the table you import back has a different name.
-  Two names that differ only after the 63rd byte would even collapse into one
+  Two names that differ only beyond byte 63 would even collapse into one
 - **The editor and the AI tools warn when you enter such a name.**
   The status bar shows a message when you confirm a table name, column name, foreign key name or unique constraint name that the target dialect would refuse, and the AI and MCP tools add a note to their response.
   The name is accepted as typed, so you can fix it later.

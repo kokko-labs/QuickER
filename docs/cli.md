@@ -66,7 +66,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | `--command-timeout <seconds>` | | The timeout for each statement the schema import runs (default `60`; `0` means no limit) |
 
 The other options (`--out` / `--config` / `--provider` / `--force`, and the kebab-case flags named after the settings keys) are the same as for `generate`.
-There is no diagram to read the dialect from, so `--provider` defaults to `sqlserver`.
+No diagram is given to read the dialect from, so `--provider` defaults to `sqlserver`.
 
 ## quicker reverse
 
