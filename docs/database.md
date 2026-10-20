@@ -7,13 +7,16 @@ Because the diagram and the database round-trip in both directions, running an i
 
 ## Supported DBMS
 
-| DBMS | Schema import | Diff sync | DDL generation | Dialect switch | Notes |
-|---|:-:|:-:|:-:|:-:|---|
-| SQL Server | ✅ | ✅ | ✅ | ✅ | 2016 and later. Descriptions sync with extended properties (MS_Description) |
-| PostgreSQL | ✅ | ✅ | ✅ | ✅ | 13 and later. Descriptions sync with `COMMENT ON` |
-| MySQL | ✅ | ✅ | ✅ | ✅ | 8.0 and later (MariaDB is not supported). Descriptions sync with `COMMENT` clauses |
-| Oracle | ✅ | ✅ | ✅ | ✅ | 19c and later. Descriptions sync with `COMMENT ON` |
-| SQLite | ✅ | ✅ | ✅ | ✅ | File DB. Diff sync that involves column changes, drops, or FK changes uses table rebuilds. No description mechanism |
+All five dialects support schema import, diff sync, DDL generation and dialect switching.
+How diff sync differs between them is listed in [Detected differences](#detected-differences).
+
+| DBMS | Supported versions |
+|---|---|
+| SQL Server | 2016 and later |
+| PostgreSQL | 13 and later |
+| MySQL | 8.0 and later (MariaDB is not supported) |
+| Oracle | 19c and later |
+| SQLite | File DB |
 
 Import and sync against live databases have real-DB integration tests (SQL Server / PostgreSQL / MySQL / Oracle use Testcontainers containers; SQLite uses a real file DB).
 The container-based tests run only in environments where Docker is available and are skipped automatically on CI.
@@ -25,20 +28,29 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 
 ### Specifying the connection
 
-- **Server-type DBMS**: specify the target DB, host, port (leave empty for the dialect's default), database name, user name, and password.
+- **Server-type DBMS**: specify the target DB, host, port (leave empty for the default port in the table below), database name, user name, and password.
   Only an empty port means the default; a value that is not a number or is outside 1 to 65535 is rejected by OK, *Test Connection*, and saving a profile (a typo never connects to another instance on the default port).
-  For SQL Server you can also choose the authentication mode (Windows / SQL Server) and the "Trust the server certificate (TrustServerCertificate)" checkbox.
-  For Oracle, the value of the database-name field is used as the service name (the connection is built as EZConnect `host:port/service`)
+  With Azure AD authentication on SQL Server, a user name signs in interactively, and leaving it empty uses the default credential chain (environment variables, managed identity and so on).
+  The Oracle connection is built as EZConnect `host:port/service`
 - **Encryption (SSL Mode)**: for PostgreSQL and MySQL, how strongly the connection requires TLS.
   It defaults to "Unspecified" mode, which leaves the keyword off the connection string and the decision to the driver (see the note below).
   It is saved per connection profile, and profiles written before this setting existed load as "Unspecified"
-- **SQLite**: specify the file path via "Browse" (import works on existing files only)
 - **Command timeout**: how long a single schema-import or sync statement may run.
   It defaults to 60 seconds and applies to every dialect including SQLite; `0` means no limit (the ADO.NET convention).
   A blank field, a non-numeric entry, or a negative value is rejected by OK, *Test Connection*, and saving a profile, so the dialog never falls back to the default behind your back.
   It is saved per connection profile, and profiles written before this setting existed load with the default
 - **Test Connection**: runs a real schema fetch and reports the number of tables detected.
   OK is disabled while a test is running: the test cannot be cancelled, so confirming and closing would leave it holding the connection on its own
+
+<!-- dialect-table: connection-settings -->
+
+| DBMS | Where to connect | Default port | Dialect-specific settings |
+| --- | --- | --- | --- |
+| SQL Server | Host and database | — (not written: the driver's default or an instance name) | Authentication (Windows / SQL Server / Azure AD), TrustServerCertificate |
+| PostgreSQL | Host and database | 5432 | Encryption (SSL Mode) |
+| MySQL | Host and database | 3306 | Encryption (SSL Mode) |
+| Oracle | Host and service name (the database-name field) | 1521 | — (a note that the connection is not encrypted; TLS through `quicker scaffold --connection`) |
+| SQLite | File path via "Browse" (import: an existing file; sync: "Create new" also makes one) | — | — |
 
 > **Note:** "Trust the server certificate (TrustServerCertificate)" is checked by default so that local or containerized SQL Server instances with self-signed certificates work out of the box. This setting skips server certificate validation, so when connecting to a production or remote server that has a properly issued certificate, uncheck it to keep man-in-the-middle detection effective. The setting is saved per connection profile.
 
@@ -426,6 +438,7 @@ Remove that unique constraint from the diagram and select its drop as well, or d
 | Foreign key names are stored | ✅ | ✅ | ✅ | ✅ | — (synthesized on import) |
 | Descriptions are synced | ✅ | ✅ | ✅ | ✅ | — |
 | A failed script rolls back | ✅ | ✅ | — | — | ✅ |
+| Changes to an existing table run as statements | ✅ | ✅ | ✅ | ✅ | — (the table is rebuilt) |
 
 ### Safety by design
 
@@ -561,7 +574,8 @@ It records `COLUMN_DEFAULT` with different semantics, so a definition rebuilt fr
 
 ### SQLite diff sync (table rebuilds)
 
-Because SQLite's `ALTER TABLE` supports only limited changes, sync operations that involve column changes or deletions use a table-rebuild approach.
+Because SQLite's `ALTER TABLE` supports only limited changes, a table is rebuilt when the sync changes or drops one of its columns, changes its primary key, adds or drops a unique constraint or a foreign key, or reorders its columns.
+Adding a column runs as `ALTER TABLE ADD COLUMN` when nothing else in the same sync rebuilds that table, and otherwise the new column becomes part of the rebuild.
 A new table is created from the combined definition of "the database's current state + the selected differences," the data is migrated, the old table is swapped out, and auxiliary objects such as indexes are recreated.
 The rebuild runs inside a transaction, and before committing it checks foreign-key integrity (`PRAGMA foreign_key_check`); if the sync added violations it rolls back and reports the violating tables.
 SQLite does not check foreign keys by default, so databases that hold child rows without a parent are common, and violations that existed before the sync do not make it fail.
