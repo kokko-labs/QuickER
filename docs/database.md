@@ -303,8 +303,8 @@ It compares the current state of the database with the contents of the diagram, 
 - Adding, dropping, and recreating foreign keys (a foreign key whose referential actions, column pairs, or referenced table alone changed)
 - Adding, dropping, and recreating unique constraints (a named unique constraint whose columns alone changed)
 - Changing the primary key (adding or removing it, or changing its column set or column order)
-- Setting, updating, and removing table and column descriptions (SQLite is out of scope)
-- Changes to the column order (syncable on SQLite / MySQL)
+- Setting, updating, and removing table and column descriptions
+- Changes to the column order
 
 Elements with the same name are treated as the same element, so a rename is detected as "drop + add."
 A table or column whose name differs from the database's only in letter case is the same element too, as long as it is unique on both sides ignoring case, and the script then writes the database's spelling.
@@ -353,18 +353,30 @@ The DDL adds a comment before the table, and the sync lists such tables in the c
 Column order is compared as the relative order of the columns common to both sides, excluding additions and deletions.
 Adding a column in the middle is therefore not a column-order difference by itself: the new column goes to the end of the table, and the next sync shows the order difference.
 When existing columns are reordered at the same time, a single sync also puts the new column in place.
-On SQLite and MySQL it can be synced as a selectable diff item (unselected by default): SQLite folds it into the table rebuild, and MySQL uses `ALTER TABLE ... MODIFY ... AFTER`, moving as few columns as possible.
+Where the table below shows that column order can be synced, it is a selectable diff item (unselected by default), and MySQL moves as few columns as possible.
 MySQL's `MODIFY` re-specifies the column from the live catalog, so moving a column keeps its attributes and its comment (see [what MySQL's `MODIFY COLUMN` re-specifies](#what-mysqls-modify-column-re-specifies)).
-On the other three dialects it is shown for information only and is not synced.
+On the other dialects it is shown for information only and is not synced.
 
 A computed column's nullability is never compared, because the database derives it from the expression and the diagram does not hold the expression.
-A computed column's type change can be selected only on PostgreSQL, where `ALTER COLUMN ... TYPE` keeps the expression, and selecting it never changes the column's nullability.
+A computed column's type change can be selected where the table below shows it (PostgreSQL's `ALTER COLUMN ... TYPE` keeps the expression), and selecting it never changes the column's nullability.
 On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server rejects the change and a SQLite rebuild would drop the expression; MySQL is shown for information only as well).
-On SQLite and Oracle, a unique constraint on exactly the primary key's columns is not compared and does not become a diff item.
+Where the table below shows that a unique constraint on exactly the primary key's columns is not kept, such a constraint is not compared and does not become a diff item.
 SQLite does not keep such a constraint, and Oracle rejects it; the primary key already guarantees uniqueness.
 The DDL and the tables the sync creates leave that unique constraint out and add a comment saying so.
 On Oracle, a sync that moves the primary key onto the columns of a unique constraint the database already has fails with ORA-02261.
 Remove that unique constraint from the diagram and select its drop as well, or drop it in the database first.
+
+<!-- dialect-table: sync-capabilities -->
+
+| | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| Column order can be synced | — | — | ✅ (`MODIFY … AFTER`) | — | ✅ (rebuild) |
+| A computed column's type change can be selected | — | ✅ | — | — | — |
+| A unique constraint on exactly the primary key's columns is kept | ✅ | ✅ | ✅ | — (left out with a note) | — (left out with a note) |
+| A table name with a dot is a schema-qualified name | ✅ | ✅ | ✅ | ✅ | — (an attached database) |
+| Foreign key names are stored | ✅ | ✅ | ✅ | ✅ | — (synthesized on import) |
+| Descriptions are synced | ✅ | ✅ | ✅ | ✅ | — |
+| A failed script rolls back | ✅ | ✅ | — | — | ✅ |
 
 ### Safety by design
 
@@ -404,21 +416,33 @@ The old primary-key constraint is located by querying the database catalog at ru
 The script drops the old key first, applies any selected column alterations, and then adds the new key, so a change that also makes the old key column nullable succeeds in one sync.
 A column that joins the new key becomes `NOT NULL` as part of the primary-key change, even when that column's own change is not selected (its type stays as it is in the database).
 
-Foreign keys that rely on the changed primary key (they refer to the same columns as the old key; on MySQL also to its leading columns) are dropped and re-created automatically around the change, while foreign keys that refer to a unique constraint are left alone (on SQL Server and MySQL, the same drop and re-create applies when altering a column that participates in a foreign key).
+Foreign keys that rely on the changed primary key (they refer to the same columns as the old key) are dropped and re-created automatically around the change, while foreign keys that refer to a unique constraint are left alone.
+
+<!-- dialect-table: foreign-key-rebuilds -->
+
+| | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| Altering a column drops and re-adds its foreign keys | ✅ | — | ✅ | — | — (the table is rebuilt) |
+| Altering a key column drops and re-adds the primary key and unique constraints | ✅ | — | — | — | — (the table is rebuilt) |
+| A foreign key resting on the index of a dropped primary key or unique constraint is re-added | — | — | ✅ | — | — |
+| Referencing columns must follow the order of the referenced key | ✅ | — | ✅ (a change that only reorders is not run) | — | — |
+| String types differing only in length are allowed on the two ends | — (error 1753) | ✅ | ✅ | ✅ (same length unit) | ✅ |
+| A failed re-add can leave the foreign key dropped | — | — | ✅ | ✅ | — |
+
+A primary key dropped and re-added by a key column change (see the table above) is named `PK_{table}`.
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
 The same applies when dropping a unique constraint whose index is the only one supporting a foreign key (MySQL refuses with error 1553 otherwise).
-On SQL Server, altering the type of a primary key column also drops the primary key and adds it back with the same columns (the re-added key is named `PK_{table}`).
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
 Re-adding it would always fail and, on MySQL / Oracle, leave the foreign key missing.
-On every dialect but SQL Server, string types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch, because PostgreSQL, MySQL, Oracle and SQLite accept them on the two ends of a foreign key; on Oracle the length unit (`CHAR` / `BYTE`) must be the same on both ends.
+String types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch where the table above allows them on the two ends; on Oracle the length unit (`CHAR` / `BYTE`) must be the same on both ends.
 Changing the length of one end drops and re-adds the foreign key as usual.
 SQL Server cannot create a foreign key whose ends differ in length (error 1753), so the DDL adds a comment before such a foreign key.
 The confirmation dialog lists those foreign keys so that you can change both ends to the same type.
 In that case no other foreign key is dropped and re-added either, because the column change fails anyway and the re-adding would never run.
 If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.
-On SQL Server and PostgreSQL such a failure rolls the whole script back, while on MySQL / Oracle it can leave the foreign keys dropped (partially applied).
+Such a failure rolls the whole script back, or, where the table above says so, leaves the foreign keys dropped (partially applied).
 The same warning appears when a foreign key you add or change refers to columns that are not exactly a primary key or a unique constraint after the sync.
-SQL Server and MySQL also require the referencing columns to follow the order of the referenced key, so a change that only reorders a referenced composite key, or a foreign key change that only reorders its columns against the key, is warned about too.
+Where the table above says the referencing columns must follow the order of the referenced key, a change that only reorders a referenced composite key, or a foreign key change that only reorders its columns against the key, is warned about too.
 On MySQL such a change is not run at all: it would drop the foreign key and then fail to add it back, leaving it dropped.
 The confirmation dialog lists the skipped changes; to apply one, also select the removal of the foreign key so that it is dropped first, or change it by hand.
 This also skips the change when the re-add would in fact succeed: on MySQL 8.0, or on 8.4 with `restrict_fk_on_non_standard_key=OFF`, a non-unique index you created yourself on the referenced columns in the foreign key's order can support it, but QuickER does not import non-unique indexes and cannot tell.
@@ -590,13 +614,15 @@ Descriptions are not refused either, because a line break in one is legitimate a
 
 Each dialect caps how long a table, column or constraint name may be, and the unit it counts in differs.
 
-| Dialect | Limit | Counted in |
-| --- | --- | --- |
-| SQL Server | 128 | UTF-16 code units |
-| PostgreSQL | 63 | UTF-8 bytes |
-| MySQL | 64 | characters (a table name is also limited to 251 bytes as a file name, see below) |
-| Oracle | 128 | UTF-8 bytes (12.2 or later) |
-| SQLite | none | |
+<!-- dialect-table: identifier-length-limits -->
+
+| Dialect | Limit | Counted in | Characters it cannot store | A longer name is |
+| --- | --- | --- | --- | --- |
+| SQL Server | 128 | UTF-16 code units | — | Rejected |
+| PostgreSQL | 63 | UTF-8 bytes | — | Silently cut |
+| MySQL | 64 (a table name is also limited to 251 bytes as a file name, see below) | characters | Outside the Basic Multilingual Plane (replaced with `?`) | Rejected |
+| Oracle | 128 (12.2 or later) | UTF-8 bytes | — | Rejected |
+| SQLite | none | | — | |
 
 - **Names QuickER assigns** (`PK_{table}`, `FK_{child}_{parent}`, `UQ_{table}_{columns}` and the numbered names that keep them unique) are kept within the limit by the target dialect.
   A name already within the limit is unchanged.
@@ -604,14 +630,13 @@ Each dialect caps how long a table, column or constraint name may be, and the un
   The result is the same every time
 - **Names you type** are never shortened.
   DDL generation and schema-sync script generation refuse a name beyond the limit, naming the place and the limit (`TABLE 'x' is longer than the limit of 63 UTF-8 bytes`), and produce nothing.
-  Without this check SQL Server, MySQL and Oracle reject the DDL when it is applied, while PostgreSQL silently cuts the name at 63 bytes and the table you import back has a different name.
-  Two names that differ only beyond byte 63 would even collapse into one
+  Without this check the DDL either fails when it is applied or, where the table above shows the name is silently cut, the table you import back has a different name.
+  Two names that differ only beyond the cut would even collapse into one
 - **The editor and the AI tools warn when you enter such a name.**
   The status bar shows a message when you confirm a table name, column name, foreign key name or unique constraint name that the target dialect would refuse, and the AI and MCP tools add a note to their response.
   The name is accepted as typed, so you can fix it later.
   Undo and Redo, and loading a file, do not warn
 - **MySQL cannot store a character outside the Basic Multilingual Plane** (emoji and some rare kanji).
-  MySQL does not refuse such a name; it silently replaces the character with `?`.
   QuickER treats it the same as a name that is too long: the warning above, and refusal at generation
 - **A MySQL table name is limited a second time, as a file name.**
   InnoDB stores each table in its own file named after the table, with every character other than ASCII letters, digits and `_` written as an escape (3 bytes for letters such as `Ä`, 5 bytes for most others, including all kanji).
