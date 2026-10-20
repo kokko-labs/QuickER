@@ -599,31 +599,69 @@ SQLite は既定で外部キーを検査しないため、親の無い子行を�
 - 各列の型は「元方言 → 中立の正規型 → 新方言」の経路で自動変換を試みます
 - 変換できなかった列は元の型を保持したまま、警告ダイアログに一覧表示されます
 - 切替と型変換は 1 回の Undo でまとめて戻せます
-- `numeric(10,-2)` / `NUMBER(10,-2)`（100 の倍数へ丸めるスケール）の列は、PostgreSQL と Oracle の間でしか変換できません。
-  SQL Server と MySQL は負のスケールをそもそも受け付けず、SQLite の `DECIMAL` は丸めを持たないアフィニティなので、この 3 方言では実行できない DDL を書き出す代わりに変換不能として報告します
-- 長さを書かない文字列・バイナリ列（PostgreSQL の `varchar`、SQLite の `TEXT` など）は、SQL Server・MySQL・Oracle へは変換できず一覧に載ります。
-  MySQL と Oracle は長さの無い `varchar` / `VARCHAR2` を受け付けず、SQL Server は長さを省くと**黙って 1 文字の列**を作るためです。
+
+次の表の列は、一部の方言へしか変換できません。
+✅ の列は変換し（切替先と同じ方言の列はそのまま残る）、それ以外は変換不能として一覧に載ります。
+
+<!-- dialect-table: unconvertible-types -->
+
+| 元の図の列 | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| 負のスケール（PostgreSQL の `numeric(10,-2)`、Oracle の `NUMBER(10,-2)`） | — | ✅ | — | ✅ | — |
+| 長さを書かない文字列・バイナリ（PostgreSQL の `varchar`、SQLite の `VARCHAR` / `VARBINARY`） | — | ✅ | — | — | ✅ |
+| 精度の無い `decimal`（Oracle の `NUMBER`、PostgreSQL の `numeric`） | — | ✅ | — | ✅ | ✅ |
+| 精度は上限なし・スケールあり（Oracle の `NUMBER(*,2)`、`INTEGER`） | — | — | — | ✅ | ✅ |
+| 行バージョン（SQL Server の `rowversion` / `timestamp`） | ✅ | — | — | — | ✅（`BLOB`・NOT NULL を解除） |
+
+- 負のスケールは値を丸めます（`-2` なら 100 の倍数）。
+  SQL Server と MySQL はそもそも受け付けず、SQLite の `DECIMAL` は丸めを持たないアフィニティなので、実行できない DDL を書き出す代わりに変換不能として報告します
+- MySQL と Oracle は長さの無い `varchar` / `VARCHAR2` を受け付けず、SQL Server は長さを省くと**黙って 1 文字の列**を作ります。
   切り替えたい場合は、元の図で長さを書いてください
-- 移行先の上限を超える長さ・精度（SQL Server の `nvarchar(5000)`・`decimal(50,2)`・`datetime2(9)`、Oracle の `NVARCHAR2(4000)`・`NUMBER(39)`、MySQL の `char(256)`・`varchar(16384)`・`datetime(7)`・`decimal(66,2)`、PostgreSQL の `numeric(1001)`・`varchar(10485761)` など）は変換不能として一覧に載ります。
-  そのまま書き出すと、DDL の適用で失敗するためです。
-  PostgreSQL は 6 桁を超える小数秒（`timestamp(7)`）を受け付けますが 6 桁へ丸めるため、これも一覧に載ります。
-  MySQL の `varchar` の上限は `utf8mb4` の値（16,383 文字）で、行全体の上限（65,535 バイト）は適用時に MySQL が判定します。
-  Oracle の文字列と `RAW` の上限は `MAX_STRING_SIZE = STANDARD`（既定）の値です（`NVARCHAR2` 2000・`VARCHAR2` 4000・`NCHAR` 1000・`CHAR` と `RAW` 2000）。
+- 素の `decimal` は SQL Server では `decimal(18,0)`、MySQL では `decimal(10,0)` で、小数部を黙って丸める列になります
+- Oracle の `INTEGER` は `NUMBER(*,0)`（精度は上限なし・スケールは 0）です。
+  PostgreSQL の `numeric` は精度なしでスケールだけを宣言できず、素の `numeric` へ写すとスケールの宣言が落ちます
+
+移行先の上限を超える長さ・精度は、そのまま書き出すと DDL の適用で失敗するため、変換不能として一覧に載ります。
+
+<!-- dialect-table: target-limits -->
+
+| 方言 | 文字列・バイナリ | decimal の精度 | decimal のスケール | 小数秒 |
+| --- | --- | --- | --- | --- |
+| SQL Server | `nvarchar` / `nchar` 4000・`varchar` / `char` / `binary` / `varbinary` 8000 | 38 | 0〜精度 | 7 |
+| PostgreSQL | `varchar` / `char` 10,485,760 | 1000 | -1000〜1000 | 6 |
+| MySQL | `char` / `binary` 255・`varchar` 16,383・`varbinary` 65,532 | 65 | 0〜30 | 6 |
+| Oracle（`MAX_STRING_SIZE = STANDARD`） | `NVARCHAR2` 2000・`VARCHAR2` 4000・`NCHAR` 1000・`CHAR` / `RAW` 2000 | 38 | -84〜127 | 9 |
+
+- PostgreSQL は 6 桁を超える小数秒（`timestamp(7)`）を受け付けますが 6 桁へ丸めるため、これも一覧に載ります
+- MySQL の `varchar` の上限は `utf8mb4` の値（16,383 文字）で、行全体の上限（65,535 バイト）は適用時に MySQL が判定します
+- Oracle の文字列と `RAW` の上限は `MAX_STRING_SIZE = STANDARD`（既定）の値です。
   QuickER は接続先の設定を知らないため、`MAX_STRING_SIZE = EXTENDED` のデータベースでも、この上限を超える列は変換不能として一覧に出ます
-- 精度の無い `decimal`（Oracle の `NUMBER`・PostgreSQL の無制約の `numeric`）は SQL Server と MySQL へ変換できず一覧に載ります。
-  素の `decimal` は SQL Server では `decimal(18,0)`、MySQL では `decimal(10,0)` で、小数部を黙って丸める列になるためです
-- Oracle の `NUMBER(*,2)`（精度は上限なし・スケールは 2）は Oracle にしか書き出せず、SQLite を除く方言では一覧に載ります。
-  PostgreSQL の `numeric` は精度なしでスケールだけを宣言できず、素の `numeric` へ写すと 2 桁へ丸める宣言が落ちるためです
-- MySQL の整数は、符号を含めて持てる値の範囲で変換します。
-  `int unsigned` は 64 ビット整数（SQL Server では `bigint`）、`smallint unsigned` は 32 ビット整数、`bigint unsigned` は `decimal(20,0)` になります。
-  符号つきの `tinyint`（-128〜127）は 16 ビット整数になります（他の方言と共通の 8 ビット整数は SQL Server の `tinyint` と同じく符号なしの 0〜255 のため）
+
+MySQL の整数は、符号を含めて持てる値の範囲で変換します。
+符号つきの `tinyint`（-128〜127）は 16 ビット整数になります（他の方言と共通の 8 ビット整数は SQL Server の `tinyint` と同じく符号なしの 0〜255 のため）。
+`tinyint(1)` は MySQL が真偽値を宣言するときの慣習なので、真偽値として読みます。
+
+<!-- dialect-table: mysql-integers -->
+
+| MySQL | 中立の型 | SQL Server |
+| --- | --- | --- |
+| `tinyint unsigned` | 8 ビット整数（符号なし） | `tinyint` |
+| `tinyint` | 16 ビット整数 | `smallint` |
+| `smallint unsigned` | 32 ビット整数 | `int` |
+| `mediumint`、`mediumint unsigned` | 32 ビット整数 | `int` |
+| `int unsigned` | 64 ビット整数 | `bigint` |
+| `bigint unsigned` | `decimal(20,0)` | `decimal(20,0)` |
+| `tinyint(1)` | 真偽値 | `bit` |
+
 - 切替先の方言が受け付けない名前（上限より長い、保存できない文字を含む）は、切替では変わりません。
   DDL の生成と同期はそうした名前の変更まで止まるため、確認ダイアログには上のカラムと並べて、場所と理由つきで一覧に載ります。
   詳しくは[識別子の長さの上限](#識別子の長さの上限)を参照してください
-- SQL Server の `rowversion` / `timestamp` は SQLite では通常の `BLOB` になり、同時に NOT NULL が解除されます（SQLite には採番する主体がいないため、ローカルで作った行は同期が書き込むまで版を持ちません）。
+- SQLite では SQL Server の `rowversion` / `timestamp` の NOT NULL が解除されます（SQLite には採番する主体がいないため、ローカルで作った行は同期が書き込むまで版を持ちません）。
   この変換は非可逆で、その `BLOB` を SQL Server へ戻しても `varbinary(max)` にしかなりません（行バージョンには戻りません）。
-  両者で列の意味がどう変わるかは [マルチターゲット Repository](code-generation.ja.md#マルチターゲット-repositorysqlserver--sqlite) を、2 つのデータベースを同期させるコードの生成は[双方向同期の支援](code-generation.ja.md#双方向同期の支援--generate-sync-support)を参照してください。
-  他の方言には対応する型が無いため、`rowversion` 列は変換不能として警告に載ります
+  両者で列の意味がどう変わるかは [マルチターゲット Repository](code-generation.ja.md#マルチターゲット-repositorysqlserver--sqlite) を、2 つのデータベースを同期させるコードの生成は[双方向同期の支援](code-generation.ja.md#双方向同期の支援--generate-sync-support)を参照してください
+- DB が採番する列の印（値を指定させない自動採番）は、切替先の方言がその種類の列を持てないと外れます。
+  確認ダイアログにはその列が挙がり、1 回の Undo で印も戻ります。
+  詳しくは[DB が採番する列](code-generation.ja.md#db-が採番する列)を参照してください
 
 ## DDL 生成
 

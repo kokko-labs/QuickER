@@ -587,31 +587,69 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - Each column type is converted automatically along the path "source dialect → neutral canonical type → new dialect" where a mapping exists
 - Columns that could not be converted keep their original types and are listed in a warning dialog
 - The switch and the type conversions are undone together with a single Undo
-- A `numeric(10,-2)` / `NUMBER(10,-2)` column (a scale that rounds to hundreds) converts only between PostgreSQL and Oracle.
-  SQL Server and MySQL reject a negative scale outright, and SQLite's `DECIMAL` is an affinity that carries no rounding at all, so such a column is reported as unconvertible on those three rather than written out as DDL that will not run
-- A string or binary column declared without a length (PostgreSQL's `varchar`, SQLite's `TEXT` and the like) cannot move to SQL Server, MySQL or Oracle and is listed as well.
-  MySQL and Oracle reject a `varchar` / `VARCHAR2` with no length, and SQL Server quietly creates a **one-character** column when the length is omitted.
+
+The columns in this table convert only to some dialects.
+A column marked ✅ is converted (a column already in the target's dialect stays as it is), and the others are listed as unconvertible.
+
+<!-- dialect-table: unconvertible-types -->
+
+| Column in the source diagram | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| Negative scale (PostgreSQL `numeric(10,-2)`, Oracle `NUMBER(10,-2)`) | — | ✅ | — | ✅ | — |
+| String or binary without a length (PostgreSQL `varchar`, SQLite `VARCHAR` / `VARBINARY`) | — | ✅ | — | — | ✅ |
+| `decimal` without a precision (Oracle `NUMBER`, PostgreSQL `numeric`) | — | ✅ | — | ✅ | ✅ |
+| No precision limit with a scale (Oracle `NUMBER(*,2)`, `INTEGER`) | — | — | — | ✅ | ✅ |
+| Row version (SQL Server `rowversion` / `timestamp`) | ✅ | — | — | — | ✅ (`BLOB`, NOT NULL lifted) |
+
+- A negative scale rounds the value, to hundreds for `-2`.
+  SQL Server and MySQL reject it outright, and SQLite's `DECIMAL` is an affinity that carries no rounding at all, so such a column is reported as unconvertible rather than written out as DDL that will not run
+- MySQL and Oracle reject a `varchar` / `VARCHAR2` with no length, and SQL Server quietly creates a **one-character** column when the length is omitted.
   Give the column a length in the source diagram before switching
-- A length or precision beyond the target's limit (SQL Server's `nvarchar(5000)`, `decimal(50,2)`, `datetime2(9)`, Oracle's `NVARCHAR2(4000)`, `NUMBER(39)`, MySQL's `char(256)`, `varchar(16384)`, `datetime(7)`, `decimal(66,2)`, PostgreSQL's `numeric(1001)`, `varchar(10485761)` and the like) is listed as unconvertible.
-  Writing it out as is would make the DDL fail when applied.
-  PostgreSQL accepts fractional seconds beyond 6 places (`timestamp(7)`) but rounds them to 6, so they are listed as well.
-  MySQL's `varchar` limit is that of `utf8mb4` (16,383 characters), and whether the whole row fits in 65,535 bytes is decided by MySQL when the DDL is applied.
-  Oracle's limits for strings and `RAW` are those of `MAX_STRING_SIZE = STANDARD`, the default (`NVARCHAR2` 2000, `VARCHAR2` 4000, `NCHAR` 1000, `CHAR` and `RAW` 2000).
+- A bare `decimal` means `decimal(18,0)` on SQL Server and `decimal(10,0)` on MySQL, a column that quietly rounds away the fractional part
+- Oracle's `INTEGER` is a `NUMBER(*,0)`, a number with no precision limit and a scale of 0.
+  PostgreSQL's `numeric` cannot declare a scale without a precision, and a bare `numeric` would drop the scale
+
+A length or precision beyond the target's limit is listed as unconvertible, because writing it out as is would make the DDL fail when applied.
+
+<!-- dialect-table: target-limits -->
+
+| Dialect | Strings and binaries | Decimal precision | Decimal scale | Fractional seconds |
+| --- | --- | --- | --- | --- |
+| SQL Server | `nvarchar` / `nchar` 4000, `varchar` / `char` / `binary` / `varbinary` 8000 | 38 | 0 to the precision | 7 |
+| PostgreSQL | `varchar` / `char` 10,485,760 | 1000 | -1000 to 1000 | 6 |
+| MySQL | `char` / `binary` 255, `varchar` 16,383, `varbinary` 65,532 | 65 | 0 to 30 | 6 |
+| Oracle (`MAX_STRING_SIZE = STANDARD`) | `NVARCHAR2` 2000, `VARCHAR2` 4000, `NCHAR` 1000, `CHAR` / `RAW` 2000 | 38 | -84 to 127 | 9 |
+
+- PostgreSQL accepts fractional seconds beyond 6 places (`timestamp(7)`) but rounds them to 6, so they are listed as well
+- MySQL's `varchar` limit is that of `utf8mb4` (16,383 characters), and whether the whole row fits in 65,535 bytes is decided by MySQL when the DDL is applied
+- Oracle's limits for strings and `RAW` are those of `MAX_STRING_SIZE = STANDARD`, the default.
   QuickER does not know the connected database's setting, so a column beyond these limits is listed as unconvertible even for a `MAX_STRING_SIZE = EXTENDED` database
-- A `decimal` without a precision (Oracle's `NUMBER`, PostgreSQL's unconstrained `numeric`) cannot move to SQL Server or MySQL and is listed as well.
-  A bare `decimal` means `decimal(18,0)` on SQL Server and `decimal(10,0)` on MySQL, a column that quietly rounds away the fractional part
-- Oracle's `NUMBER(*,2)` (no precision limit, a scale of 2) can be written out only for Oracle and is listed for every other dialect except SQLite.
-  PostgreSQL's `numeric` cannot declare a scale without a precision, and a bare `numeric` would drop the rounding to two places
-- A MySQL integer is converted by the range of values it holds, sign included.
-  `int unsigned` becomes a 64-bit integer (`bigint` on SQL Server), `smallint unsigned` a 32-bit one, and `bigint unsigned` becomes `decimal(20,0)`.
-  A signed `tinyint` (-128 to 127) becomes a 16-bit integer, because the 8-bit integer the other dialects share is unsigned (0 to 255, like SQL Server's `tinyint`)
+
+A MySQL integer is converted by the range of values it holds, sign included.
+A signed `tinyint` (-128 to 127) becomes a 16-bit integer, because the 8-bit integer the other dialects share is unsigned (0 to 255, like SQL Server's `tinyint`).
+A `tinyint(1)` is read as a Boolean, since that is how MySQL usually declares one.
+
+<!-- dialect-table: mysql-integers -->
+
+| MySQL | Neutral type | SQL Server |
+| --- | --- | --- |
+| `tinyint unsigned` | 8-bit integer (unsigned) | `tinyint` |
+| `tinyint` | 16-bit integer | `smallint` |
+| `smallint unsigned` | 32-bit integer | `int` |
+| `mediumint`, `mediumint unsigned` | 32-bit integer | `int` |
+| `int unsigned` | 64-bit integer | `bigint` |
+| `bigint unsigned` | `decimal(20,0)` | `decimal(20,0)` |
+| `tinyint(1)` | Boolean | `bit` |
+
 - A name that the target dialect would refuse (longer than its limit, or holding a character it cannot store) is not changed by the switch.
   The confirmation dialog lists such names, with their place and the reason, together with the columns above, because DDL generation and sync stop on them until they are changed.
   See [Identifier length limits](#identifier-length-limits)
-- SQL Server's `rowversion` / `timestamp` becomes a plain `BLOB` on SQLite, and its NOT NULL is lifted at the same time (SQLite assigns nothing, so a locally created row has no version until a sync writes one).
+- On SQLite, SQL Server's `rowversion` / `timestamp` loses its NOT NULL, because SQLite assigns nothing, so a locally created row has no version until a sync writes one.
   The conversion is one-way: converting that `BLOB` back to SQL Server yields `varbinary(max)`, not a row version.
-  See [Multi-target repositories](code-generation.md#multi-target-repositories-sqlserver--sqlite) for what the column means on each side, and [Bidirectional sync support](code-generation.md#bidirectional-sync-support---generate-sync-support) for generating the code that keeps the two databases in step.
-  Other dialects have no equivalent at all, so a `rowversion` column is reported as unconvertible there
+  See [Multi-target repositories](code-generation.md#multi-target-repositories-sqlserver--sqlite) for what the column means on each side, and [Bidirectional sync support](code-generation.md#bidirectional-sync-support---generate-sync-support) for generating the code that keeps the two databases in step
+- The mark of a column the database numbers (automatic numbering that refuses given values) is removed when the target dialect cannot hold such a column.
+  The confirmation lists those columns, and the single Undo brings the marks back as well.
+  See [Columns the database numbers](code-generation.md#columns-the-database-numbers)
 
 ## DDL generation
 

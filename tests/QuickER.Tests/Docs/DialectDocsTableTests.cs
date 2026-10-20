@@ -74,6 +74,9 @@ public sealed class DialectDocsTableTests
         /// <summary>行＝方言（先頭の列は方言の名前）</summary>
         DialectRows,
 
+        /// <summary>行＝一部の方言（先頭の列は方言の名前で始まる・並びは <see cref="DialectNames.All"/> の順の一部分）</summary>
+        DialectRowSubset,
+
         /// <summary>方言の列も行も持たない（行＝話題・列＝機能）</summary>
         NoDialects,
     }
@@ -92,7 +95,35 @@ public sealed class DialectDocsTableTests
             ["referential-actions"] = ("docs/database.md", Orientation.DialectRows),
             ["column-alteration"] = ("docs/database.md", Orientation.DialectColumns),
             ["descriptions"] = ("docs/database.md", Orientation.DialectRows),
+            ["unconvertible-types"] = ("docs/database.md", Orientation.DialectColumns),
+            ["target-limits"] = ("docs/database.md", Orientation.DialectRowSubset),
+            ["mysql-integers"] = ("docs/database.md", Orientation.NoDialects),
         };
+
+    /// <summary>T-P：中立の型の語（英語・日本語）。Decimal は語でなく精度・スケールのコードスパンで書く</summary>
+    private static readonly IReadOnlyDictionary<
+        CanonicalTypeKind,
+        (string English, string Japanese)
+    > IntegerKindWords = new Dictionary<CanonicalTypeKind, (string, string)>
+    {
+        [CanonicalTypeKind.TinyInt] = ("8-bit integer (unsigned)", "8 ビット整数（符号なし）"),
+        [CanonicalTypeKind.SmallInt] = ("16-bit integer", "16 ビット整数"),
+        [CanonicalTypeKind.Int32] = ("32-bit integer", "32 ビット整数"),
+        [CanonicalTypeKind.Int64] = ("64-bit integer", "64 ビット整数"),
+        [CanonicalTypeKind.Boolean] = ("Boolean", "真偽値"),
+    };
+
+    /// <summary>T-O：上限の数（桁区切りのカンマを許す・符号つき）</summary>
+    private static readonly Regex LimitNumber = new(
+        @"-?[0-9]+(?:,[0-9]{3})*",
+        RegexOptions.CultureInvariant
+    );
+
+    /// <summary>T-O：文字列・バイナリの上限の組（`名前` / `名前` の並びと、その後ろの数）</summary>
+    private static readonly Regex LimitGroup = new(
+        @"(?<names>(?:`[^`]+`\s*/\s*)*`[^`]+`)\s*(?<n>[0-9]+(?:,[0-9]{3})*)",
+        RegexOptions.CultureInvariant
+    );
 
     /// <summary>T-E：取込の警告（英語の行見出し → 行が表す警告の種別）</summary>
     /// <remarks>
@@ -399,6 +430,19 @@ public sealed class DialectDocsTableTests
         foreach (var file in new[] { Tables[marker].File, JapaneseFile(Tables[marker].File) })
         {
             var table = ReadTable(file, marker);
+            if (Tables[marker].Shape == Orientation.DialectRowSubset)
+            {
+                var indexes = table
+                    .Rows.Select(row => Array.FindIndex(Providers, p => RowNames(row[0], p)))
+                    .ToArray();
+
+                indexes.Should().NotContain(-1, $"{file} の {marker} の行は方言の名前で始まる");
+                indexes.Should().BeInAscendingOrder($"{file} の {marker}");
+                indexes.Should().OnlyHaveUniqueItems($"{file} の {marker}");
+
+                continue;
+            }
+
             var actual =
                 Tables[marker].Shape == Orientation.DialectColumns
                     ? table.Header.Skip(1).Take(Providers.Length).ToArray()
@@ -948,6 +992,363 @@ public sealed class DialectDocsTableTests
             }
         }
     }
+
+    [Fact(
+        DisplayName = "振る舞い: 方言切替で変換できない型の表は DiagramTypeConverter.CreatePlan と一致する"
+    )]
+    public void UnconvertibleTypesTable_MatchesTypeConversion()
+    {
+        const string marker = "unconvertible-types";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        english.Rows.Should().NotBeEmpty();
+
+        for (var r = 0; r < english.Rows.Count; r++)
+        {
+            var row = english.Rows[r];
+            var samples = Samples(row[0]);
+            var where = $"{marker} の「{row[0]}」";
+
+            row.Should().HaveCount(Providers.Length + 1, where);
+            samples.Should().NotBeEmpty(where + "の見本（方言の名前とコードスパン）");
+
+            if (Aligned(english, japanese))
+            {
+                var japaneseRow = japanese.Rows[r];
+
+                Samples(japaneseRow[0]).Should().Equal(samples, where + "の見本（日）");
+
+                for (var c = 1; c < row.Count; c++)
+                {
+                    CodeSpans(japaneseRow[c])
+                        .Should()
+                        .Equal(CodeSpans(row[c]), $"{where} の {c + 1} 列目のコードスパン（日）");
+                    japaneseRow[c]
+                        .Contains("NOT NULL を解除", StringComparison.Ordinal)
+                        .Should()
+                        .Be(
+                            row[c].Contains("NOT NULL lifted", StringComparison.Ordinal),
+                            $"{where} の {c + 1} 列目の NOT NULL の解除（日）"
+                        );
+                }
+            }
+
+            for (var i = 0; i < Providers.Length; i++)
+            {
+                var cell = row[i + 1];
+                var cellWhere = $"{where} の {Providers[i].DisplayName}（セル: {cell}）";
+                var results = samples
+                    .Select(s => Convert(s.Source, s.Type, Providers[i]))
+                    .ToArray();
+
+                results
+                    .Select(x => x.Converted)
+                    .Distinct()
+                    .Should()
+                    .ContainSingle(cellWhere + "：同じ行の見本は変換の結果がそろう");
+                (Symbol(cell) == Yes).Should().Be(results[0].Converted, cellWhere);
+
+                if (CodeSpans(cell) is [var written])
+                {
+                    results
+                        .Select(x => x.NewType)
+                        .Should()
+                        .AllBe(written, cellWhere + "の変換後の型");
+                }
+
+                var lifted = cell.Contains("NOT NULL lifted", StringComparison.Ordinal);
+
+                results
+                    .Should()
+                    .OnlyContain(x => x.MakeNullable == lifted, cellWhere + "の NOT NULL の解除");
+            }
+        }
+    }
+
+    [Fact(DisplayName = "振る舞い: 移行先の上限の表は各方言の TryFormat の境界と一致する")]
+    public void TargetLimitsTable_MatchesTryFormatBoundaries()
+    {
+        const string marker = "target-limits";
+        CanonicalTypeKind[] timeKinds =
+        [
+            CanonicalTypeKind.DateTime,
+            CanonicalTypeKind.Time,
+            CanonicalTypeKind.DateTimeOffset,
+        ];
+
+        foreach (var japanese in new[] { false, true })
+        {
+            var file = japanese ? JapaneseFile(Tables[marker].File) : Tables[marker].File;
+            var table = ReadTable(file, marker);
+
+            table.Rows.Should().NotBeEmpty(file);
+
+            foreach (var row in table.Rows)
+            {
+                var provider = Providers.Single(p => RowNames(row[0], p));
+                var catalog = provider.TypeCatalog;
+                var where = $"{file} の {provider.DisplayName} の行";
+
+                row.Should().HaveCount(5, where);
+
+                // 文字列・バイナリ：上限ちょうどは書き出し、1 つ超えると書き出さない
+                var groups = LimitGroup.Matches(row[1]);
+
+                groups.Should().NotBeEmpty(where + "の文字列・バイナリ");
+
+                foreach (Match group in groups)
+                {
+                    var limit = ParseLimit(group.Groups["n"].Value);
+
+                    foreach (var name in CodeSpans(group.Groups["names"].Value))
+                    {
+                        catalog
+                            .TryParse($"{name}({limit})", out var atLimit)
+                            .Should()
+                            .BeTrue($"{where}：`{name}({limit})` を読める");
+                        AssertFormats(catalog, atLimit, true, $"{where}の `{name}` の長さ {limit}");
+                        AssertFormats(
+                            catalog,
+                            atLimit with
+                            {
+                                Length = limit + 1,
+                            },
+                            false,
+                            $"{where}の `{name}` の長さ {limit + 1}"
+                        );
+                    }
+                }
+
+                // decimal の精度
+                var precision = ParseLimit(LimitNumber.Matches(row[2]).Single().Value);
+
+                AssertFormats(catalog, Decimal(precision, 0), true, where + "の精度");
+                AssertFormats(catalog, Decimal(precision + 1, 0), false, where + "の精度 + 1");
+
+                // decimal のスケール：下限と上限（上限が精度のときは、精度を超えるスケールを書き出さない）
+                var scales = LimitNumber.Matches(row[3]).Select(m => ParseLimit(m.Value)).ToArray();
+                var toPrecision = row[3]
+                    .Contains(japanese ? "精度" : "precision", StringComparison.Ordinal);
+
+                scales.Should().HaveCount(toPrecision ? 1 : 2, where + "のスケール");
+
+                var lower = scales[0];
+                var upper = toPrecision ? precision : scales[1];
+
+                AssertFormats(catalog, Decimal(precision, lower), true, where + "のスケールの下限");
+                AssertFormats(
+                    catalog,
+                    Decimal(precision, lower - 1),
+                    false,
+                    where + "のスケールの下限 - 1"
+                );
+                AssertFormats(catalog, Decimal(precision, upper), true, where + "のスケールの上限");
+                AssertFormats(
+                    catalog,
+                    toPrecision ? Decimal(precision - 1, upper) : Decimal(precision, upper + 1),
+                    false,
+                    where + "のスケールの上限を超える"
+                );
+
+                // 小数秒：その方言が書き出せる時刻系の種類ごと
+                var fraction = ParseLimit(LimitNumber.Matches(row[4]).Single().Value);
+                var formatted = timeKinds
+                    .Where(kind => catalog.TryFormat(new CanonicalType(kind), out _))
+                    .ToArray();
+
+                formatted.Should().NotBeEmpty(where + "の時刻系の型");
+
+                foreach (var kind in formatted)
+                {
+                    AssertFormats(
+                        catalog,
+                        new CanonicalType(kind, Precision: fraction),
+                        true,
+                        $"{where}の {kind} の小数秒"
+                    );
+                    AssertFormats(
+                        catalog,
+                        new CanonicalType(kind, Precision: fraction + 1),
+                        false,
+                        $"{where}の {kind} の小数秒 + 1"
+                    );
+                }
+            }
+        }
+    }
+
+    [Fact(
+        DisplayName = "振る舞い: MySQL の整数の表は MySQL の TryParse と SQL Server への変換と一致する"
+    )]
+    public void MySqlIntegersTable_MatchesTypeConversion()
+    {
+        const string marker = "mysql-integers";
+        var mySql = Providers.Single(p => p.Name == DialectNames.MySql);
+        var sqlServer = Providers.Single(p => p.Name == DialectNames.SqlServer);
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        foreach (var (table, ja) in new[] { (english, false), (japanese, true) })
+        {
+            table.Header.Should().HaveCount(3);
+            table.Header[0].Should().Be(mySql.DisplayName, marker + "の 1 列目の見出し");
+            table.Header[2].Should().Be(sqlServer.DisplayName, marker + "の 3 列目の見出し");
+            table.Rows.Should().NotBeEmpty(marker);
+
+            foreach (var row in table.Rows)
+            {
+                var where = $"{marker} の「{row[0]}」{(ja ? "（日）" : "")}";
+                var types = CodeSpans(row[0]);
+                var target = CodeSpans(row[2]);
+
+                row.Should().HaveCount(3, where);
+                types.Should().NotBeEmpty(where);
+                target.Should().ContainSingle(where + "の SQL Server の型");
+
+                foreach (var type in types)
+                {
+                    mySql
+                        .TypeCatalog.TryParse(type, out var canonical)
+                        .Should()
+                        .BeTrue($"{where}：`{type}` を読める");
+
+                    if (canonical.Kind == CanonicalTypeKind.Decimal)
+                    {
+                        CodeSpans(row[1])
+                            .Should()
+                            .Equal(
+                                [$"decimal({canonical.Precision},{canonical.Scale})"],
+                                $"{where}：`{type}` の中立の型"
+                            );
+                    }
+                    else
+                    {
+                        IntegerKindWords.Should().ContainKey(canonical.Kind, where);
+                        row[1]
+                            .Should()
+                            .Be(
+                                ja
+                                    ? IntegerKindWords[canonical.Kind].Japanese
+                                    : IntegerKindWords[canonical.Kind].English,
+                                $"{where}：`{type}` の中立の型"
+                            );
+                    }
+
+                    Convert(mySql, type, sqlServer)
+                        .NewType.Should()
+                        .Be(target[0], $"{where}：`{type}` の SQL Server の型");
+                }
+            }
+        }
+
+        japanese.Rows.Should().HaveCount(english.Rows.Count, marker + "の行数");
+
+        for (var r = 0; r < english.Rows.Count; r++)
+        {
+            for (var c = 0; c < 3; c++)
+            {
+                CodeSpans(japanese.Rows[r][c])
+                    .Should()
+                    .Equal(
+                        CodeSpans(english.Rows[r][c]),
+                        $"{marker} の {r + 1} 行目 {c + 1} 列目（日）"
+                    );
+            }
+        }
+    }
+
+    /// <summary>行見出し（方言の表示名で始まる）がその方言を指すか</summary>
+    private static bool RowNames(string cell, IDatabaseProvider provider) =>
+        cell.StartsWith(provider.DisplayName, StringComparison.Ordinal);
+
+    /// <summary>T-N の行見出しの見本（方言の表示名の後ろのコードスパンが、その方言の型）</summary>
+    private static IReadOnlyList<(IDatabaseProvider Source, string Type)> Samples(string label)
+    {
+        var names = Providers
+            .SelectMany(p =>
+                Regex
+                    .Matches(label, Regex.Escape(p.DisplayName), RegexOptions.CultureInvariant)
+                    .Select(m => (Provider: p, m.Index, End: m.Index + m.Length))
+            )
+            .OrderBy(x => x.Index)
+            .ToArray();
+        var samples = new List<(IDatabaseProvider, string)>();
+
+        for (var k = 0; k < names.Length; k++)
+        {
+            var end = k + 1 < names.Length ? names[k + 1].Index : label.Length;
+            var segment = label[names[k].End..end];
+
+            samples.AddRange(CodeSpans(segment).Select(type => (names[k].Provider, type)));
+        }
+
+        return samples;
+    }
+
+    /// <summary>
+    /// 1 列の図を <see cref="DiagramTypeConverter.CreatePlan"/> へ通す（GUI の方言切替と同じ）。同じ方言はそのまま残る。
+    /// 列は NOT NULL で主キーでない（行バージョンの NOT NULL の解除を見るため）
+    /// </summary>
+    private static (bool Converted, string? NewType, bool MakeNullable) Convert(
+        IDatabaseProvider source,
+        string type,
+        IDatabaseProvider target
+    )
+    {
+        if (ReferenceEquals(source, target))
+        {
+            return (true, type, false);
+        }
+
+        var entity = new Entity { TableName = "t" };
+
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "c",
+                DataType = type,
+                IsNullable = false,
+            }
+        );
+
+        var diagram = new ErDiagram { TargetDbms = source.Name };
+
+        diagram.Entities.Add(entity);
+
+        var plan = DiagramTypeConverter.CreatePlan(diagram, source.TypeCatalog, target.TypeCatalog);
+        var converted = plan.Converted.SingleOrDefault(x => x.ColumnName == "c");
+
+        return converted is null
+            ? (false, null, false)
+            : (true, converted.NewType, converted.MakeNullable);
+    }
+
+    private static CanonicalType Decimal(int precision, int scale) =>
+        new(CanonicalTypeKind.Decimal, Precision: precision, Scale: scale);
+
+    /// <summary>上限の数を読む（桁区切りのカンマを外す・符号つき）</summary>
+    private static int ParseLimit(string text) =>
+        int.Parse(
+            text.Replace(",", "", StringComparison.Ordinal),
+            System.Globalization.NumberStyles.AllowLeadingSign,
+            System.Globalization.CultureInfo.InvariantCulture
+        );
+
+    private static void AssertFormats(
+        ITypeCatalog catalog,
+        CanonicalType canonical,
+        bool expected,
+        string because
+    ) => catalog.TryFormat(canonical, out _).Should().Be(expected, $"{because}（{canonical}）");
 
     /// <summary>— のセルは、その方言で句を省いて注記する扱い（OmitWithAnnotation）のときだけ注記を名乗る</summary>
     private static void AssertOmittedWithNote(
