@@ -588,7 +588,7 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 - Columns that could not be converted keep their original types and are listed in a warning dialog
 - The switch and the type conversions are undone together with a single Undo
 
-The columns in this table convert only to some dialects.
+The columns in this table convert only to some dialects, or convert with a change noted in the cell.
 A column marked ✅ is converted (a column already in the target's dialect stays as it is), and the others are listed as unconvertible.
 
 <!-- dialect-table: unconvertible-types -->
@@ -598,7 +598,8 @@ A column marked ✅ is converted (a column already in the target's dialect stays
 | Negative scale (PostgreSQL `numeric(10,-2)`, Oracle `NUMBER(10,-2)`) | — | ✅ | — | ✅ | — |
 | String or binary without a length (PostgreSQL `varchar`, SQLite `VARCHAR` / `VARBINARY`) | — | ✅ | — | — | ✅ |
 | `decimal` without a precision (Oracle `NUMBER`, PostgreSQL `numeric`) | — | ✅ | — | ✅ | ✅ |
-| No precision limit with a scale (Oracle `NUMBER(*,2)`, `INTEGER`) | — | — | — | ✅ | ✅ |
+| No precision limit with a nonzero scale (Oracle `NUMBER(*,2)`) | — | — | — | ✅ | ✅ |
+| No precision limit with a scale of 0 (Oracle `INTEGER`, `SMALLINT`, `NUMBER(*,0)`) | ✅ (`decimal(38,0)`, up to 38 digits) | ✅ (`numeric(38,0)`, up to 38 digits) | ✅ (`decimal(38,0)`, up to 38 digits) | ✅ | ✅ |
 | Row version (SQL Server `rowversion` / `timestamp`) | ✅ | — | — | — | ✅ (`BLOB`, NOT NULL lifted) |
 
 - A negative scale rounds the value, to hundreds for `-2`.
@@ -606,8 +607,9 @@ A column marked ✅ is converted (a column already in the target's dialect stays
 - MySQL and Oracle reject a `varchar` / `VARCHAR2` with no length, and SQL Server quietly creates a **one-character** column when the length is omitted.
   Give the column a length in the source diagram before switching
 - A bare `decimal` means `decimal(18,0)` on SQL Server and `decimal(10,0)` on MySQL, a column that quietly rounds away the fractional part
-- Oracle's `INTEGER` is a `NUMBER(*,0)`, a number with no precision limit and a scale of 0.
-  PostgreSQL's `numeric` cannot declare a scale without a precision, and a bare `numeric` would drop the scale
+- Oracle's `INTEGER` and `SMALLINT` are a `NUMBER(*,0)`, an integer with no precision limit.
+  A dialect that cannot declare it without a precision gets a 38-digit decimal, and the confirmation lists the column, because a value of more than 38 digits no longer fits
+- PostgreSQL's `numeric` cannot declare a scale without a precision, and a bare `numeric` would drop the scale
 
 A length or precision beyond the target's limit is listed as unconvertible, because writing it out as is would make the DDL fail when applied.
 

@@ -1459,6 +1459,18 @@ namespace QuickER.Resources {
             }
         }
 
+        public static string TypeConversion_PrecisionCappedHeader {
+            get {
+                return ResourceManager.GetString("TypeConversion_PrecisionCappedHeader", resourceCulture);
+            }
+        }
+
+        public static string TypeConversion_PrecisionCappedLine {
+            get {
+                return ResourceManager.GetString("TypeConversion_PrecisionCappedLine", resourceCulture);
+            }
+        }
+
         public static string TypeConversion_NullableWarningHeader {
             get {
                 return ResourceManager.GetString("TypeConversion_NullableWarningHeader", resourceCulture);

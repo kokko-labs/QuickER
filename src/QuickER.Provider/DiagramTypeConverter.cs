@@ -15,13 +15,19 @@ namespace QuickER.Provider;
 /// 主キー列も <c>false</c>＝DDL 生成・差分同期・列 ViewModel の 3 層が主キー列を NOT NULL へクランプするため
 /// 実害は無いが、モデル層に「NULL 許容の主キー」が一時的に載るのを避けるため、変換計画の段階で除外する。
 /// </param>
+/// <param name="PrecisionCapped">
+/// 精度の上限なしの整数（Oracle の <c>INTEGER</c> / <c>SMALLINT</c> / <c>NUMBER(*,0)</c>＝正規型は精度なし・スケール 0 の
+/// decimal）を、精度を書かないと表せない方言へ <see cref="DiagramTypeConverter.CappedPrecision"/> 桁の decimal として
+/// 変換したか。真なら、その桁を超える値は変換後の列に入らない（確認ダイアログで名指しする）。
+/// </param>
 public sealed record ColumnTypeConversion(
     Guid ColumnId,
     string TableName,
     string ColumnName,
     string OldType,
     string? NewType,
-    bool MakeNullable = false
+    bool MakeNullable = false,
+    bool PrecisionCapped = false
 );
 
 /// <summary>方言切替時の型変換計画。<see cref="Unconverted"/> が警告一覧になる</summary>
@@ -42,6 +48,11 @@ public sealed class DiagramTypeConversionPlan
 /// </remarks>
 public static class DiagramTypeConverter
 {
+    /// <summary>
+    /// 精度の上限なしの整数を、精度を書かないと表せない方言へ変換するときの精度（Oracle の <c>NUMBER</c> が宣言できる精度の上限）
+    /// </summary>
+    public const int CappedPrecision = 38;
+
     /// <summary>
     /// <paramref name="from"/> 方言の型を <paramref name="to"/> 方言の型へ変換する計画を作る。
     /// <paramref name="from"/> と <paramref name="to"/> が同一インスタンスなら空の計画を返す。
@@ -71,7 +82,7 @@ public static class DiagramTypeConverter
 
                 if (
                     from.TryParse(oldType, out var canonical)
-                    && to.TryFormat(canonical, out var newType)
+                    && TryFormat(canonical, to, out var newType, out var precisionCapped)
                 )
                 {
                     converted.Add(
@@ -85,7 +96,8 @@ public static class DiagramTypeConverter
                             // 実害は無いが、モデル層に「NULL 許容の主キー」を一時的にも載せない）
                             MakeNullable: LosesRowVersion(canonical, newType, to)
                                 && !column.IsNullable
-                                && !column.IsPrimaryKey
+                                && !column.IsPrimaryKey,
+                            PrecisionCapped: precisionCapped
                         )
                     );
                 }
@@ -105,6 +117,42 @@ public static class DiagramTypeConverter
         }
 
         return new DiagramTypeConversionPlan { Converted = converted, Unconverted = unconverted };
+    }
+
+    /// <summary>
+    /// 正規型を変換先の方言の型へ書き出す。精度の上限なしの整数（精度なし・スケール 0 の decimal）を
+    /// そのまま書けない方言では、<see cref="CappedPrecision"/> 桁の decimal として書き、<paramref name="precisionCapped"/> を立てる。
+    /// </summary>
+    /// <remarks>
+    /// 書き出し（<see cref="ITypeCatalog.TryFormat"/>）は精度なし・スケール 0 を書き出さないままにする
+    /// （型トークン・C# リバース・クエリのパラメータは桁の上限を付けずに扱う）。桁を足すのは方言切替だけで、
+    /// 変換後の列はその桁を超える値を持てないため、確認ダイアログで名指しする。
+    /// スケールが 0 以外の精度なしの decimal と、精度もスケールも無い decimal には桁を足さない。
+    /// </remarks>
+    private static bool TryFormat(
+        CanonicalType canonical,
+        ITypeCatalog to,
+        out string nativeType,
+        out bool precisionCapped
+    )
+    {
+        precisionCapped = false;
+
+        if (to.TryFormat(canonical, out nativeType))
+        {
+            return true;
+        }
+
+        if (
+            canonical is { Kind: CanonicalTypeKind.Decimal, Precision: null, Scale: 0 }
+            && to.TryFormat(canonical with { Precision = CappedPrecision }, out nativeType)
+        )
+        {
+            precisionCapped = true;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

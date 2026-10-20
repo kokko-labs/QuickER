@@ -38,6 +38,8 @@ public sealed class MySqlTypeNotationIntegrationTests(MySqlContainerFixture fixt
             .Concat(["decimal", "numeric", "decimal(12)", "numeric(12,2)"])
             // 型カタログが解析する型（mediumint・year・tinytext・tinyblob）も、取込の表記のまま閉じること
             .Concat(["mediumint", "mediumint unsigned", "year", "tinytext", "tinyblob"])
+            // 方言切替が Oracle の INTEGER から書く型も閉じること
+            .Append(TypeNotationClosure.ConvertedOracleInteger(provider))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 

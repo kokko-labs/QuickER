@@ -2034,6 +2034,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             )
             .ToList();
 
+        // 桁の上限を付けて変換するカラム（精度の上限なしの整数を、精度を書かないと表せない方言へ変換する場合）を集める。
+        // 変換後の列はその桁を超える値を持てないので、型の変換に成功しても確認で名指しする
+        var precisionCapped = plan.Converted.Where(c => c.PrecisionCapped).ToList();
+
         // 切替先の方言が受け付けない名前（識別子の長さの上限を超える・表せない文字を含む）も同じ確認で提示する。
         // 名前は変換せずそのまま残る＝切替後に DDL・同期が断る名前を、切り替える前に知らせる
         var rejectedNames = CollectNamesRejectedBy(IdentifierLengthLimits.ForDbms(target.Name));
@@ -2046,11 +2050,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 .SelectMany(entity => entity.Columns.Where(column => column.IsIdentity))
                 .ToList();
 
-        // 変換できないカラム・NOT NULL 解除を伴うカラム・切替先が受け付けない名前・外す採番の印があるときは、
+        // 変換できないカラム・桁の上限を付けて変換するカラム・NOT NULL 解除を伴うカラム・切替先が受け付けない名前・
+        // 外す採番の印があるときは、
         // 適用前に内容を提示して OK / キャンセルを選ばせる（クリーンに変換できる切替は従来どおり無確認で適用する）
         if (
             (
                 plan.Unconverted.Count > 0
+                || precisionCapped.Count > 0
                 || nullable.Count > 0
                 || rejectedNames.Count > 0
                 || identityMarks.Count > 0
@@ -2058,6 +2064,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             && !ConfirmTypeConversion(
                 target,
                 plan.Unconverted,
+                precisionCapped,
                 nullable,
                 rejectedNames,
                 identityMarks
@@ -2110,6 +2117,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </remarks>
     /// <param name="target">切替先のプロバイダ（導入文の表示名に用いる）</param>
     /// <param name="unconverted">変換できないカラム（元の型を保持する）</param>
+    /// <param name="precisionCapped">桁の上限を付けて変換するカラム（<see cref="ColumnTypeConversion.PrecisionCapped"/>）</param>
     /// <param name="nullable">NOT NULL を解除するカラム（主キー列は除外済み）</param>
     /// <param name="rejectedNames">切替先の方言が受け付けない名前の行（<see cref="CollectNamesRejectedBy"/>）</param>
     /// <param name="identityMarks">採番の印を外す列（切替先がこの種類の列を持てないとき）</param>
@@ -2117,6 +2125,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool ConfirmTypeConversion(
         IDatabaseProvider target,
         IReadOnlyList<ColumnTypeConversion> unconverted,
+        IReadOnlyList<ColumnTypeConversion> precisionCapped,
         IReadOnlyList<ColumnTypeConversion> nullable,
         IReadOnlyList<string> rejectedNames,
         IReadOnlyList<ColumnViewModel> identityMarks
@@ -2137,6 +2146,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 Strings.TypeConversion_WarningHeader
                     + Environment.NewLine
                     + BuildUnconvertedColumnList(unconverted)
+            );
+        }
+
+        if (precisionCapped.Count > 0)
+        {
+            sections.Add(
+                string.Format(
+                    Strings.TypeConversion_PrecisionCappedHeader,
+                    DiagramTypeConverter.CappedPrecision
+                )
+                    + Environment.NewLine
+                    + BuildPrecisionCappedColumnList(precisionCapped)
             );
         }
 
@@ -2299,6 +2320,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     c.TableName,
                     c.ColumnName,
                     c.OldType
+                )
+            )
+        );
+
+    /// <summary>桁の上限を付けて変換するカラムの一覧（本文のみ・見出しは含めない）を整形する（全件・畳まない）</summary>
+    /// <remarks>
+    /// 行は変換前と変換後の型を並べる（変換後の型の名前は方言ごとに違う＝<c>decimal</c> / <c>numeric</c>）。
+    /// 全件を畳まない理由は <see cref="BuildUnconvertedColumnList"/> と同じ
+    /// </remarks>
+    private static string BuildPrecisionCappedColumnList(
+        IReadOnlyList<ColumnTypeConversion> precisionCapped
+    ) =>
+        string.Join(
+            Environment.NewLine,
+            precisionCapped.Select(c =>
+                string.Format(
+                    Strings.TypeConversion_PrecisionCappedLine,
+                    c.TableName,
+                    c.ColumnName,
+                    c.OldType,
+                    c.NewType ?? c.OldType
                 )
             )
         );

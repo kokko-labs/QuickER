@@ -38,6 +38,8 @@ public sealed class PostgreSqlTypeNotationIntegrationTests(PostgreSqlContainerFi
         var types = TypeNotationClosure
             .CandidateTypes(provider.TypeCatalog, TypeNotationClosure.DefaultSamples)
             .Concat(["timestamp", "timestamptz", "time", "numeric(18,0)", "timestamp(3)"])
+            // 方言切替が Oracle の INTEGER から書く型も閉じること
+            .Append(TypeNotationClosure.ConvertedOracleInteger(provider))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 

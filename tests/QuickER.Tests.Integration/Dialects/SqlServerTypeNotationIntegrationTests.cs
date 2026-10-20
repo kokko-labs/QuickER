@@ -50,6 +50,8 @@ public sealed class SqlServerTypeNotationIntegrationTests(SqlServerContainerFixt
                 "float(25)",
                 "float(53)",
             ])
+            // 方言切替が Oracle の INTEGER から書く型も閉じること
+            .Append(TypeNotationClosure.ConvertedOracleInteger(provider))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
