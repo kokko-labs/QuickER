@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using AwesomeAssertions;
+using QuickER.Db.UI;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider;
@@ -111,7 +113,41 @@ public sealed class DialectDocsTableTests
             ["unconvertible-types"] = ("docs/database.md", Orientation.DialectColumns),
             ["target-limits"] = ("docs/database.md", Orientation.DialectRowSubset),
             ["mysql-integers"] = ("docs/database.md", Orientation.NoDialects),
+            ["connection-settings"] = ("docs/database.md", Orientation.DialectRows),
         };
+
+    /// <summary>
+    /// T-B：接続の表の語（英語・日本語・列の位置）→ 接続ダイアログがその項目を出すか（取込の画面と同期の画面）。
+    /// 列の位置は 1 が接続先、3 が方言固有の項目
+    /// </summary>
+    private static readonly (
+        string English,
+        string Japanese,
+        int Column,
+        Func<DbConnectionDialogViewModel, DbConnectionDialogViewModel, bool> Shown
+    )[] ConnectionSettingWords =
+    [
+        ("Host", "ホスト", 1, (import, _) => import.ShowServerFields),
+        ("File path", "ファイルパス", 1, (import, _) => import.ShowFilePath),
+        ("Create new", "新規作成", 1, (_, sync) => sync.ShowCreateNewFile),
+        ("Authentication", "認証方式", 3, (import, _) => import.ShowAuthMode),
+        (
+            "TrustServerCertificate",
+            "TrustServerCertificate",
+            3,
+            (import, _) => import.ShowTrustServerCertificate
+        ),
+        ("SSL Mode", "SSL Mode", 3, (import, _) => import.ShowSslMode),
+        ("not encrypted", "暗号化されない", 3, (import, _) => import.ShowOracleEncryptionNote),
+    ];
+
+    /// <summary>T-B：認証方式の括弧の名前（英語・日本語）→ 認証方式の選択肢</summary>
+    private static readonly (string English, string Japanese, DbAuthMode Mode)[] AuthModeNames =
+    [
+        ("Windows", "Windows 認証", DbAuthMode.Windows),
+        ("SQL Server", "SQL Server 認証", DbAuthMode.UsernamePassword),
+        ("Azure AD", "Azure AD 認証", DbAuthMode.AzureAd),
+    ];
 
     /// <summary>T-P：中立の型の語（英語・日本語）。Decimal は語でなく精度・スケールのコードスパンで書く</summary>
     private static readonly IReadOnlyDictionary<
@@ -289,6 +325,8 @@ public sealed class DialectDocsTableTests
         ["Foreign key names are stored"] = c => c.PersistsForeignKeyConstraintNames,
         ["Descriptions are synced"] = c => c.SupportsDescriptions,
         ["A failed script rolls back"] = c => c.TransactionalDdl,
+        ["Changes to an existing table run as statements"] = c =>
+            c.SupportsAlterColumn && c.SupportsForeignKeyAlter,
     };
 
     /// <summary>T-M：外部キーの外し直しと付け直し（英語の行見出し → 宣言）</summary>
@@ -1090,6 +1128,184 @@ public sealed class DialectDocsTableTests
                     .OnlyContain(x => x.PrecisionCapped == capped, cellWhere + "の桁の注意");
             }
         }
+    }
+
+    [Fact(
+        DisplayName = "振る舞い: 接続の指定の表は接続ダイアログの表示・既定のポート・接続文字列の組み立てと一致する"
+    )]
+    public void ConnectionSettingsTable_MatchesDialogAndFactories()
+    {
+        const string marker = "connection-settings";
+        // 接続プロファイルの保存先は一時フォルダ（AppData を使わない）
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests_" + Guid.NewGuid().ToString("N")
+        );
+
+        Directory.CreateDirectory(folder);
+
+        try
+        {
+            foreach (var japanese in new[] { false, true })
+            {
+                var file = japanese ? JapaneseFile(Tables[marker].File) : Tables[marker].File;
+                var table = ReadTable(file, marker);
+
+                table.Rows.Should().HaveCount(Providers.Length, file);
+
+                for (var r = 0; r < table.Rows.Count; r++)
+                {
+                    AssertConnectionRow(table.Rows[r], Providers[r], japanese, file, folder);
+                }
+            }
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (IOException)
+            {
+                // 後始末はベストエフォート
+            }
+        }
+    }
+
+    /// <summary>接続の表の 1 行を、接続ダイアログの表示と接続文字列の組み立てに突き合わせる</summary>
+    private static void AssertConnectionRow(
+        IReadOnlyList<string> row,
+        IDatabaseProvider provider,
+        bool japanese,
+        string file,
+        string folder
+    )
+    {
+        var where = $"{file} の {provider.DisplayName} の行";
+        var registry = new DatabaseProviderRegistry(Providers);
+        var store = new SqlConnectionProfileStore(folder, useDpapi: false);
+        var import = new DbConnectionDialogViewModel(
+            registry,
+            DbConnectionDialogMode.Import,
+            fixedProvider: provider,
+            store
+        );
+        var sync = new DbConnectionDialogViewModel(
+            registry,
+            DbConnectionDialogMode.Sync,
+            fixedProvider: provider,
+            store,
+            allowSqliteFileCreation: true
+        );
+
+        row.Should().HaveCount(4, where);
+        RowNames(row[0], provider).Should().BeTrue(where);
+
+        // 接続先・方言固有の項目：語がある ⇔ ダイアログがその項目を出す
+        foreach (var word in ConnectionSettingWords)
+        {
+            var term = japanese ? word.Japanese : word.English;
+
+            row[word.Column]
+                .Contains(term, StringComparison.Ordinal)
+                .Should()
+                .Be(word.Shown(import, sync), $"{where}の「{term}」");
+        }
+
+        // サービス名：「データベース名」欄の値を EZConnect のサービス名に使う組み立てだけが名乗る
+        var settings = new DbConnectionSettings
+        {
+            Host = "db.example",
+            Database = "svc",
+            AuthMode = DbAuthMode.UsernamePassword,
+            UserId = "u",
+            Password = "p",
+            FilePath = "quicker.db",
+        };
+        var connectionString = provider.BuildConnectionString(settings);
+
+        row[1]
+            .Contains(japanese ? "サービス名" : "service name", StringComparison.Ordinal)
+            .Should()
+            .Be(
+                DataSourceOf(connectionString)?.EndsWith("/svc", StringComparison.Ordinal) == true,
+                where + "のサービス名"
+            );
+
+        // 認証方式の括弧：名前の並び ⇔ 認証方式の選択肢（列挙値のすべて）
+        var opening = japanese ? "認証方式（" : "Authentication (";
+        var closing = japanese ? "）" : ")";
+        var at = row[3].IndexOf(opening, StringComparison.Ordinal);
+
+        if (at >= 0)
+        {
+            var start = at + opening.Length;
+            var end = row[3].IndexOf(closing, start, StringComparison.Ordinal);
+
+            row[3]
+                [start..end]
+                .Split(" / ")
+                .Should()
+                .Equal(
+                    AuthModeNames.Select(n => japanese ? n.Japanese : n.English),
+                    where + "の認証方式"
+                );
+            AuthModeNames
+                .Select(n => n.Mode)
+                .Should()
+                .Equal(Enum.GetValues<DbAuthMode>(), where + "の認証方式の選択肢");
+        }
+
+        // 既定のポート：セル ＝ DefaultPort ＝ ポートを空けたときの接続文字列の組み立て
+        DefaultPortOf(connectionString)
+            .Should()
+            .Be(provider.DefaultPort, where + "の組み立ての既定のポート");
+
+        if (provider.DefaultPort is int port)
+        {
+            ParseLimit(LimitNumber.Matches(row[2]).Single().Value)
+                .Should()
+                .Be(port, where + "の既定のポート");
+        }
+        else
+        {
+            Symbol(row[2]).Should().Be(No, where + "の既定のポート");
+        }
+    }
+
+    /// <summary>接続文字列の Data Source（無ければ null）</summary>
+    private static string? DataSourceOf(string connectionString)
+    {
+        var builder = new DbConnectionStringBuilder { ConnectionString = connectionString };
+
+        return builder.TryGetValue("Data Source", out var value) ? value as string : null;
+    }
+
+    /// <summary>
+    /// ポートを空けて組み立てた接続文字列が使う既定のポート（Port のキー、または Data Source の
+    /// <c>host:port</c> / <c>host,port</c>。どちらも無ければ null）
+    /// </summary>
+    private static int? DefaultPortOf(string connectionString)
+    {
+        var builder = new DbConnectionStringBuilder { ConnectionString = connectionString };
+
+        if (builder.TryGetValue("Port", out var port))
+        {
+            return int.Parse(
+                System.Convert.ToString(port, CultureInfo.InvariantCulture)!,
+                CultureInfo.InvariantCulture
+            );
+        }
+
+        var match = Regex.Match(
+            DataSourceOf(connectionString) ?? "",
+            @"^db\.example[:,]([0-9]+)",
+            RegexOptions.CultureInvariant
+        );
+
+        return match.Success
+            ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)
+            : null;
     }
 
     [Fact(DisplayName = "振る舞い: 移行先の上限の表は各方言の TryFormat の境界と一致する")]
