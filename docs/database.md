@@ -112,7 +112,7 @@ If the file turns out to be corrupted, it is moved aside once to `connections.js
 
 ### What gets imported
 
-- Tables (views, materialized views, external tables, partitions, temporary tables, and the container and log tables behind materialized views are excluded) and columns (type, length, precision, nullability)
+- Tables (views, materialized views, external tables, child partitions, temporary tables, and the container and log tables behind materialized views are excluded) and columns (type, length, precision, nullability)
 - Primary keys, preserving a composite key's own column order.
   `PRIMARY KEY (b, a)` imports as exactly that, and generated DDL emits the constraint's declared order rather than the order the columns happen to appear in the table, so the column order of the backing index survives the round trip
 - Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions).
@@ -121,6 +121,7 @@ If the file turns out to be corrupted, it is moved aside once to `connections.js
   SQLite does not persist FK constraint names, so a constraint name is synthesized on import
 - Table and column descriptions (SQL Server's MS_Description extended properties, PostgreSQL's `obj_description` / `col_description`, MySQL's `TABLE_COMMENT` / `COLUMN_COMMENT`, and Oracle's `user_tab_comments` / `user_col_comments`).
   SQLite has no description mechanism and is out of scope
+- Two column marks: computed (generated) columns and identity columns that reject explicit values (the expression and the seed are not imported)
 
 Nothing else is imported.
 See [Modeling fidelity](#modeling-fidelity) for the full boundary and what it means for DDL generation.
@@ -145,7 +146,7 @@ The system-generated columns a function-based index adds to the table (`SYS_NCâ€
 A foreign key that points outside this scope cannot become a relationship, because its parent table is not in the diagram.
 Such a key is skipped and reported (see below) rather than dropped silently.
 SQLite does not check that a foreign key's parent table exists when the table is created, so a database can carry keys that point at a table that is not there; those are treated the same way.
-So are MySQL keys whose parent table is not in the connected database (created with `FOREIGN_KEY_CHECKS = 0`, or left behind when the parent table was dropped that way).
+MySQL keys whose parent table is not in the connected database (created with `FOREIGN_KEY_CHECKS = 0`, or left behind when the parent table was dropped that way) are treated the same way too.
 A table whose name contains a dot is not imported, on SQLite as on the other DBMSs, because the diagram reads the first dot of a table name as a schema qualifier (on SQLite, the name of an attached database).
 See the import warnings below.
 
@@ -194,7 +195,7 @@ The list has one heading per kind with the count, followed by one line per place
 - **Objects the diagram does not hold** are left out and listed by name.
   These are views (all five DBMSs), materialized views (PostgreSQL, Oracle), external tables (PostgreSQL foreign tables, Oracle `ORGANIZATION EXTERNAL` tables, SQL Server external tables), partitions (PostgreSQL, with the parent table each belongs to; the parent itself is imported as described below) and temporary tables (Oracle).
   Objects the database or an extension owns (system tables, the container and log tables behind materialized views, tables an extension installs) are left out without a mention
-- A **foreign key that references a table the import left out** (a PostgreSQL partition, an SQLite virtual table or view, a table whose name contains a dot) is skipped and reported
+- A **foreign key that references a table the import left out** (a PostgreSQL child partition, an SQLite virtual table or view, a table whose name contains a dot) is skipped and reported
 - A SQL Server **temporal table** is imported as its current-data table only.
   The history table is an attachment the system maintains for it rather than an entity of its own.
   The current table's period columns (`GENERATED ALWAYS AS ROW START / END`) are values the database produces, so they are treated as computed columns, and a `HIDDEN` period column is imported the same way.
@@ -258,6 +259,7 @@ What it models is exactly what round-trips.
 - Foreign keys with their column pairs, constraint name, and referential actions
 - UNIQUE constraints
 - Table and column descriptions
+- Two column marks: computed (generated) columns and identity columns that reject explicit values (the expression and the seed are not modeled)
 
 Everything else is outside the model.
 It is not imported, it never appears in generated DDL, and the diff sync neither detects nor touches it.
@@ -267,11 +269,12 @@ It is not imported, it never appears in generated DDL, and the diff sync neither
 | `DEFAULT` | Not imported | Not emitted | Lost |
 | `CHECK` constraint | Not imported | Not emitted | Lost |
 | `COLLATE` | Not imported | Not emitted | Lost |
-| Generated / computed column | Imported as an ordinary column; the expression is lost | Emitted as an ordinary column | Lost |
+| Generated / computed column | Imported as a read-only column without its expression, carrying the computed mark, and reported | Emitted as an ordinary column, with a note | Lost |
 | `IDENTITY` / `AUTO_INCREMENT` / `AUTOINCREMENT` | Automatic numbering that refuses given values (SQL Server `IDENTITY`, PostgreSQL and Oracle `GENERATED ALWAYS AS IDENTITY`) is imported as the mark of a column the database numbers (the numbering definition is lost); the rest is not imported | Not emitted (a marked column gets a note) | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
 | Non-unique index | Not imported | Not emitted | Preserved (captured as its `CREATE` statement and replayed) |
 | Trigger | Not imported | Not emitted | Preserved (same) |
-| View, stored procedure, function, sequence | Not imported | Not emitted | Not applicable |
+| View | Not imported | Not emitted | Preserved (it keeps pointing at the rebuilt table) |
+| Stored procedure, function, sequence | Not imported | Not emitted | Not applicable |
 
 **The rowid alias hangs on the declared type token, not on the column being an integer.**
 SQLite treats a primary key as a rowid alias only when its declared type is spelled exactly `INTEGER`.
@@ -571,6 +574,9 @@ Both would fail as DDL anyway; you now find out at generation time with the colu
 One more edge comes from SQLite, which accepts any words as a declared type and hands them back verbatim on import.
 A SQLite database created with SQL Server-flavoured DDL can carry a declaration like `INT IDENTITY(1,1)`, whose second word is on the clause-keyword list above and is refused, again by name, at generation time.
 
+This is separate from whether QuickER *understands* a type.
+A type the dialect catalogue cannot parse is still carried as it is; it simply gets no neutral type token and does not convert on a dialect switch.
+
 ### Line breaks and control characters in names
 
 A table, column or constraint name holding a line break or a control character is refused by DDL generation and by schema-sync script generation, which name the place (`TABLE 'x'`, `COLUMN 'x'.'y'`) and produce nothing.
@@ -618,9 +624,6 @@ Each dialect caps how long a table, column or constraint name may be, and the un
 
 A PostgreSQL foreign key whose default name was longer than 63 bytes was created by earlier versions under the cut name, because PostgreSQL silently cuts it.
 Diff sync treats such a foreign key (one without a name of your own) as the same as the one in your diagram, so nothing is added or dropped.
-
-This is separate from whether QuickER *understands* a type.
-A type the dialect catalogue cannot parse is still carried as it is; it simply gets no neutral type token and does not convert on a dialect switch.
 
 ## Related pages
 

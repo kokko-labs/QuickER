@@ -26,7 +26,7 @@ Select an entity and the properties panel lets you edit the following.
 | Item | Contents |
 |---|---|
 | Table Name | The physical name of the table. Surrounding spaces are removed, and a name that matches another table's name ignoring letter case is rejected (see "Names" below) |
-| Description | The table description. On SQL Server it syncs with the extended property (MS_Description) |
+| Description | The table description. It syncs with the database's description on every DBMS except SQLite (on SQL Server, the MS_Description extended property; see [Description sync](database.md#description-sync)) |
 | Title Background | The card's title color (Blue / Green / Yellow / Purple / Pink / Gray) |
 | Columns | The column list (next section) |
 | Notes | A free-form field that goes neither to the database nor to the generated code. It is written out to the Excel and HTML definition documents, and re-importing an Excel definition document restores it |

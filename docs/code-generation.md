@@ -1886,7 +1886,7 @@ Types with a declared length, such as `rowversion`, `binary(n)`, or `varbinary(n
 | Dialect | Excluded | Not excluded (bounded) |
 |---|---|---|
 | SQL Server | `varbinary(max)` / `image` | `binary(n)` / `varbinary(n)` / `rowversion` |
-| SQLite | `BLOB` with no declared length | `BLOB(n)` |
+| SQLite | `BLOB` / `BINARY` / `VARBINARY` with no declared length, or with `(MAX)` | `BLOB(n)` / `BINARY(n)` / `VARBINARY(n)` |
 | PostgreSQL | `bytea` | — |
 | MySQL | `BLOB` / `MEDIUMBLOB` / `LONGBLOB` | `TINYBLOB` / `BINARY(n)` / `VARBINARY(n)` |
 | Oracle | `BLOB` / `LONG RAW` | `RAW(n)` |

@@ -1914,7 +1914,7 @@ ON にすると、サイズ上限のないバイナリ列の Entity プロパテ
 | 方言 | 除外対象 | 対象外（有界） |
 |---|---|---|
 | SQL Server | `varbinary(max)` / `image` | `binary(n)` / `varbinary(n)` / `rowversion` |
-| SQLite | 長さ宣言なし `BLOB` | `BLOB(n)` |
+| SQLite | 長さ宣言なし（または `(MAX)`）の `BLOB` / `BINARY` / `VARBINARY` | `BLOB(n)` / `BINARY(n)` / `VARBINARY(n)` |
 | PostgreSQL | `bytea` | — |
 | MySQL | `BLOB` / `MEDIUMBLOB` / `LONGBLOB` | `TINYBLOB` / `BINARY(n)` / `VARBINARY(n)` |
 | Oracle | `BLOB` / `LONG RAW` | `RAW(n)` |
