@@ -17,13 +17,15 @@ using Xunit;
 namespace QuickER.Tests.Docs;
 
 /// <summary>
-/// docs の方言の表が、方言の宣言（<see cref="SyncDialectCapabilities"/>・<see cref="IdentifierLengthLimit"/>）と一致することを固定する
+/// docs の方言の表が、方言の宣言（<see cref="SyncDialectCapabilities"/>・<see cref="IdentifierLengthLimit"/>・
+/// <see cref="UnsupportedTreatments"/>・<see cref="SchemaImportWarningKinds"/>）と型の表記の正規化に一致することを固定する
 /// </summary>
 /// <remarks>
 /// <para>
 /// 表は直前の HTML コメントの目印（<c>&lt;!-- dialect-table: 名前 --&gt;</c>）で探し、次の Markdown 表を読む。
 /// 英語の文書（<c>docs/*.md</c>）と日本語の文書（<c>docs/*.ja.md</c>）の同じ目印の表は、行数・列数と記号のセル
-/// （✅ と —）が一致しなければならない。語のセルは英日で比べない。
+/// （✅ と —）が一致しなければならない。語のセルは英日で比べない。記号のセルは記号だけか、記号の後ろに括弧を 1 つ
+/// 置いた形に限る（括弧は記号の判定に影響しない）。
 /// </para>
 /// <para>
 /// 宣言との照合は、英語の行見出し（行＝方言の表は方言の列の見出し）から宣言への対応表で行う。行の集合は対応表の
@@ -70,6 +72,9 @@ public sealed class DialectDocsTableTests
 
         /// <summary>行＝方言（先頭の列は方言の名前）</summary>
         DialectRows,
+
+        /// <summary>方言の列も行も持たない（行＝話題・列＝機能）</summary>
+        NoDialects,
     }
 
     /// <summary>登録された表（目印の名前 → 置き場所の英語の文書と向き）</summary>
@@ -79,7 +84,127 @@ public sealed class DialectDocsTableTests
             ["sync-capabilities"] = ("docs/database.md", Orientation.DialectColumns),
             ["foreign-key-rebuilds"] = ("docs/database.md", Orientation.DialectColumns),
             ["identifier-length-limits"] = ("docs/database.md", Orientation.DialectRows),
+            ["import-warnings"] = ("docs/database.md", Orientation.DialectColumns),
+            ["imported-type-spelling"] = ("docs/database.md", Orientation.DialectRows),
+            ["modeling-fidelity"] = ("docs/database.md", Orientation.NoDialects),
         };
+
+    /// <summary>T-E：取込の警告（英語の行見出し → 行が表す警告の種別）</summary>
+    /// <remarks>
+    /// 種別は <see cref="SchemaImportWarningKinds.DefinitionKind"/> で図で表せない定義の種類へ写し、取込の扱い
+    /// （<see cref="UnsupportedTreatments"/> の Import）が None でない方言に ✅ を付ける。種類を持たない種別は
+    /// <see cref="WarningsWithoutDefinitionKind"/> が方言ごとの有無を持つ。
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<
+        string,
+        SchemaImportWarningKind[]
+    > ImportWarningRows = new Dictionary<string, SchemaImportWarningKind[]>
+    {
+        ["Domain or alias type"] =
+        [
+            SchemaImportWarningKind.DomainTypeFlattened,
+            SchemaImportWarningKind.AliasTypeFlattened,
+        ],
+        ["Column that declares no type"] = [SchemaImportWarningKind.UndeclaredColumnType],
+        ["Default value"] = [SchemaImportWarningKind.ColumnDefaultLost],
+        ["Automatic numbering that accepts given values"] =
+        [
+            SchemaImportWarningKind.AutoIncrementLost,
+        ],
+        ["Collation, `INVISIBLE`, `ON UPDATE`, `SRID`"] =
+        [
+            SchemaImportWarningKind.ColumnCollationLost,
+            SchemaImportWarningKind.InvisibleColumnLost,
+            SchemaImportWarningKind.ColumnOnUpdateLost,
+            SchemaImportWarningKind.SpatialReferenceIdLost,
+        ],
+        ["Name with spaces around it"] = [SchemaImportWarningKind.NameTrimmed],
+        ["Foreign key outside the import scope"] = [SchemaImportWarningKind.ForeignKeyOutsideScope],
+        ["Disabled constraint"] = [SchemaImportWarningKind.DisabledConstraintExcluded],
+        ["Table with no readable column"] = [SchemaImportWarningKind.TableColumnsUnavailable],
+        ["Table names differing only in case or surrounding spaces"] =
+        [
+            SchemaImportWarningKind.TableNameCollision,
+        ],
+        ["Column names differing only in case or surrounding spaces"] =
+        [
+            SchemaImportWarningKind.ColumnNameCollision,
+        ],
+        ["Table name containing a dot"] = [SchemaImportWarningKind.DottedTableNameExcluded],
+        ["Computed or generated column"] = [SchemaImportWarningKind.ComputedColumnExpressionLost],
+        ["Automatic numbering that refuses given values"] =
+        [
+            SchemaImportWarningKind.IdentityColumnMarked,
+        ],
+        ["View"] = [SchemaImportWarningKind.ViewExcluded],
+        ["Materialized view"] = [SchemaImportWarningKind.MaterializedViewExcluded],
+        ["External table"] = [SchemaImportWarningKind.ExternalTableExcluded],
+        ["Child partition"] = [SchemaImportWarningKind.ChildPartitionExcluded],
+        ["Temporary table"] = [SchemaImportWarningKind.TemporaryTableExcluded],
+        ["Virtual table"] = [SchemaImportWarningKind.VirtualTableExcluded],
+        ["Temporal history table"] = [SchemaImportWarningKind.TemporalHistoryTableExcluded],
+        ["Foreign key to a table the import left out"] =
+        [
+            SchemaImportWarningKind.ForeignKeyToExcludedTable,
+        ],
+        ["Partitioned table"] = [SchemaImportWarningKind.PartitionDefinitionLost],
+        ["Data type that cannot be written into SQL safely"] =
+        [
+            SchemaImportWarningKind.ColumnTypeNotEmittable,
+        ],
+        ["Primary key that allows NULL"] = [SchemaImportWarningKind.PrimaryKeyNullabilityAdjusted],
+    };
+
+    /// <summary>
+    /// 図で表せない定義の種類を持たない取込警告の種別と、それを出す方言（<see cref="DialectNames.All"/> の順）
+    /// </summary>
+    /// <remarks>
+    /// 宣言が無いので、取込のコードが警告を出す箇所から決める。範囲外の外部キーは、全スキーマを取り込み、別の DB を
+    /// 参照する外部キーを作れない SQL Server だけが出さない。表名・列名の衝突（<c>SchemaTableEntry</c>）とドットを含む
+    /// 表名（<c>SchemaImportTableNames</c>）は 5 方言の取込が共有の部品で判定する。
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<
+        SchemaImportWarningKind,
+        bool[]
+    > WarningsWithoutDefinitionKind = new Dictionary<SchemaImportWarningKind, bool[]>
+    {
+        [SchemaImportWarningKind.ForeignKeyOutsideScope] = [false, true, true, true, true],
+        [SchemaImportWarningKind.TableNameCollision] = [true, true, true, true, true],
+        [SchemaImportWarningKind.ColumnNameCollision] = [true, true, true, true, true],
+        [SchemaImportWarningKind.DottedTableNameExcluded] = [true, true, true, true, true],
+    };
+
+    /// <summary>T-G：図がモデル化する範囲（英語の行見出し → 図で表せない定義の種類。種類の無い行は null）</summary>
+    private static readonly IReadOnlyDictionary<
+        string,
+        UnsupportedDefinitionKind?
+    > ModelingFidelityRows = new Dictionary<string, UnsupportedDefinitionKind?>
+    {
+        ["`DEFAULT`"] = UnsupportedDefinitionKind.DefaultValue,
+        ["`CHECK` constraint"] = UnsupportedDefinitionKind.CheckConstraint,
+        ["`COLLATE`"] = UnsupportedDefinitionKind.Collation,
+        ["Generated / computed column"] = UnsupportedDefinitionKind.ComputedColumn,
+        ["Automatic numbering that refuses given values"] =
+            UnsupportedDefinitionKind.IdentityRejectingValues,
+        ["Automatic numbering that accepts given values"] =
+            UnsupportedDefinitionKind.IdentityAcceptingValues,
+        ["Non-unique index"] = UnsupportedDefinitionKind.NonUniqueIndex,
+        ["Trigger"] = UnsupportedDefinitionKind.Trigger,
+        ["Table options after the column list (`WITHOUT ROWID`, `STRICT`)"] =
+            UnsupportedDefinitionKind.TableOption,
+        ["Constraint clauses (`ON CONFLICT`, `DEFERRABLE INITIALLY DEFERRED`)"] =
+            UnsupportedDefinitionKind.ConstraintClause,
+        ["View"] = UnsupportedDefinitionKind.View,
+        ["Stored procedure, function, sequence"] = null,
+    };
+
+    private static readonly Regex CodeSpan = new(@"`([^`]+)`", RegexOptions.CultureInvariant);
+
+    /// <summary>記号のセルの後ろに置ける括弧（英語は半角・日本語は全角）</summary>
+    private static readonly Regex SymbolCell = new(
+        @"^(?:✅|—)(?: \(.+\)|（.+）)?$",
+        RegexOptions.CultureInvariant
+    );
 
     /// <summary>T-L：同期の能力（英語の行見出し → 宣言）</summary>
     private static readonly IReadOnlyDictionary<
@@ -132,6 +257,9 @@ public sealed class DialectDocsTableTests
     };
 
     public static TheoryData<string> Markers => [.. Tables.Keys];
+
+    public static TheoryData<string> DialectMarkers =>
+        [.. Tables.Where(t => t.Value.Shape != Orientation.NoDialects).Select(t => t.Key)];
 
     [Fact(
         DisplayName = "目印: docs の方言の表の目印は英日それぞれに 1 回ずつ現れ、すべて登録されている"
@@ -215,8 +343,32 @@ public sealed class DialectDocsTableTests
         }
     }
 
-    [Theory(DisplayName = "方言: 表の方言の並びは DialectNames.All の順の表示名と一致する")]
+    [Theory(DisplayName = "記号: 記号のセルは記号だけか、記号の後ろに括弧を 1 つ置いた形")]
     [MemberData(nameof(Markers))]
+    public void SymbolCells_AreBareOrFollowedByParentheses(string marker)
+    {
+        foreach (var file in new[] { Tables[marker].File, JapaneseFile(Tables[marker].File) })
+        {
+            foreach (var cell in ReadTable(file, marker).Rows.SelectMany(row => row))
+            {
+                if (
+                    cell.StartsWith(Yes, StringComparison.Ordinal)
+                    || cell.StartsWith(No, StringComparison.Ordinal)
+                )
+                {
+                    SymbolCell
+                        .IsMatch(cell)
+                        .Should()
+                        .BeTrue(
+                            $"{file} の {marker} のセル「{cell}」は記号の判定を壊さない形にする"
+                        );
+                }
+            }
+        }
+    }
+
+    [Theory(DisplayName = "方言: 表の方言の並びは DialectNames.All の順の表示名と一致する")]
+    [MemberData(nameof(DialectMarkers))]
     public void DialectsFollowDialectNamesOrder(string marker)
     {
         var expected = Providers.Select(p => p.DisplayName).ToArray();
@@ -226,15 +378,10 @@ public sealed class DialectDocsTableTests
             var table = ReadTable(file, marker);
             var actual =
                 Tables[marker].Shape == Orientation.DialectColumns
-                    ? table.Header.Skip(1).ToArray()
+                    ? table.Header.Skip(1).Take(Providers.Length).ToArray()
                     : table.Rows.Select(row => row[0]).ToArray();
 
             actual.Should().Equal(expected, $"{file} の {marker}");
-
-            if (Tables[marker].Shape == Orientation.DialectColumns)
-            {
-                table.Header[0].Should().BeEmpty($"{file} の {marker} の左上の見出し");
-            }
         }
     }
 
@@ -311,6 +458,343 @@ public sealed class DialectDocsTableTests
             }
         }
     }
+
+    [Fact(
+        DisplayName = "宣言: 取込の警告の表は SchemaImportWarningKinds と UnsupportedTreatments の取込の扱いと一致する"
+    )]
+    public void ImportWarningTable_MatchesDeclarations()
+    {
+        const string marker = "import-warnings";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        english
+            .Rows.Select(row => row[0])
+            .Should()
+            .BeEquivalentTo(ImportWarningRows.Keys, $"{marker} の行見出しは対応表のキーと一致する");
+
+        for (var r = 0; r < english.Rows.Count; r++)
+        {
+            var row = english.Rows[r];
+            var kinds = ImportWarningRows[row[0]];
+
+            row.Should().HaveCount(Providers.Length + 2, row[0]);
+
+            for (var i = 0; i < Providers.Length; i++)
+            {
+                var occurs = kinds.Select(kind => ImportReports(kind, i)).Distinct().ToArray();
+
+                occurs
+                    .Should()
+                    .ContainSingle($"「{row[0]}」の種別は {Providers[i].DisplayName} で値がそろう");
+                Symbol(row[i + 1])
+                    .Should()
+                    .Be(
+                        occurs[0] ? Yes : No,
+                        $"{marker} の「{row[0]}」の {Providers[i].DisplayName}（セル: {row[i + 1]}）"
+                    );
+            }
+
+            // 図での扱い：まとめて告げる種別（取り込まず名前を並べる）だけがその語
+            var aggregated = kinds
+                .Select(SchemaImportWarningKinds.IsAggregated)
+                .Distinct()
+                .ToArray();
+
+            aggregated.Should().ContainSingle($"「{row[0]}」の種別はまとめて告げるかがそろう");
+            (row[^1] == "Skipped, listed by name")
+                .Should()
+                .Be(aggregated[0], $"「{row[0]}」の図での扱い（英: {row[^1]}）");
+
+            if (Aligned(english, japanese))
+            {
+                (japanese.Rows[r][^1] == "取り込まず名前を並べる")
+                    .Should()
+                    .Be(aggregated[0], $"「{row[0]}」の図での扱い（日: {japanese.Rows[r][^1]}）");
+            }
+        }
+    }
+
+    [Fact(
+        DisplayName = "網羅: 取込の警告の表は SchemaImportWarningKind の全種別を 1 回ずつ受け持つ"
+    )]
+    public void ImportWarningTable_CoversEveryWarningKind()
+    {
+        var mapped = ImportWarningRows.Values.SelectMany(kinds => kinds).ToArray();
+
+        mapped.Should().OnlyHaveUniqueItems("1 つの種別は 1 つの行だけが受け持つ");
+        mapped
+            .Should()
+            .BeEquivalentTo(
+                Enum.GetValues<SchemaImportWarningKind>(),
+                "種別を足したら表の行も足す"
+            );
+        WarningsWithoutDefinitionKind
+            .Keys.Should()
+            .BeEquivalentTo(
+                Enum.GetValues<SchemaImportWarningKind>()
+                    .Where(kind => SchemaImportWarningKinds.DefinitionKind(kind) is null),
+                "種類を持たない種別は、出す方言を定数で持つ"
+            );
+    }
+
+    [Fact(
+        DisplayName = "宣言: 図がモデル化する範囲の表は UnsupportedTreatments の取込・DDL・同期の扱いと一致する"
+    )]
+    public void ModelingFidelityTable_MatchesTreatments()
+    {
+        const string marker = "modeling-fidelity";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        english
+            .Rows.Select(row => row[0])
+            .Should()
+            .BeEquivalentTo(
+                ModelingFidelityRows.Keys,
+                $"{marker} の行見出しは対応表のキーと一致する"
+            );
+
+        for (var r = 0; r < english.Rows.Count; r++)
+        {
+            var kind = ModelingFidelityRows[english.Rows[r][0]];
+
+            var languages = Aligned(english, japanese)
+                ? new[] { (english.Rows[r], false), (japanese.Rows[r], true) }
+                : new[] { (english.Rows[r], false) };
+
+            foreach (var (row, ja) in languages)
+            {
+                var where = $"{marker} の「{english.Rows[r][0]}」（{(ja ? "日" : "英")}）";
+
+                row.Should().HaveCount(4, where);
+                AssertImportCell(row[1], kind, ja, where + "の取込");
+                AssertDdlCell(row[2], kind, ja, where + "の DDL");
+                AssertRebuildCell(row[3], kind, ja, where + "の SQLite の再構築");
+            }
+        }
+    }
+
+    [Fact(
+        DisplayName = "振る舞い: 取り込んだ型の表記の表は各方言の NormalizeTypeNotation と一致する"
+    )]
+    public void ImportedTypeSpellingTable_MatchesNormalization()
+    {
+        const string marker = "imported-type-spelling";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        english.Rows.Should().HaveCount(Providers.Length);
+
+        for (var i = 0; i < Providers.Length; i++)
+        {
+            var normalize = Providers[i].SyncCapabilities.NormalizeTypeNotation;
+            var declared = CodeSpans(english.Rows[i][1]);
+            var imported = CodeSpans(english.Rows[i][2]);
+            var where = $"{marker} の {Providers[i].DisplayName} の行";
+
+            declared.Should().NotBeEmpty(where);
+            imported.Should().NotBeEmpty(where);
+
+            if (imported.Length == 1)
+            {
+                declared
+                    .Select(normalize)
+                    .Should()
+                    .AllBe(imported[0], where + "（宣言はすべて同じ表記になる）");
+            }
+            else
+            {
+                declared
+                    .Select(normalize)
+                    .Should()
+                    .Equal(imported, where + "（宣言と取込は順に対応する）");
+            }
+
+            if (Aligned(english, japanese))
+            {
+                CodeSpans(japanese.Rows[i][1]).Should().Equal(declared, where + "の宣言（日）");
+                CodeSpans(japanese.Rows[i][2])
+                    .Should()
+                    .Equal(imported, where + "の取込の表記（日）");
+            }
+        }
+    }
+
+    /// <summary>種別が方言 <paramref name="dialect"/>（<see cref="Providers"/> の位置）で告げられるか</summary>
+    private static bool ImportReports(SchemaImportWarningKind kind, int dialect) =>
+        SchemaImportWarningKinds.DefinitionKind(kind) is { } definition
+            ? UnsupportedTreatments.For(
+                definition,
+                UnsupportedFeature.Import,
+                Providers[dialect].Name
+            ) != UnsupportedTreatment.None
+            : WarningsWithoutDefinitionKind[kind][dialect];
+
+    /// <summary>種類 × 機能の扱いを、<see cref="Providers"/> の順に並べる（種類の無い行はすべて None）</summary>
+    private static UnsupportedTreatment[] TreatmentsOf(
+        UnsupportedDefinitionKind? kind,
+        UnsupportedFeature feature
+    ) =>
+        Providers
+            .Select(p =>
+                kind is { } k
+                    ? UnsupportedTreatments.For(k, feature, p.Name)
+                    : UnsupportedTreatment.None
+            )
+            .ToArray();
+
+    private static void AssertImportCell(
+        string cell,
+        UnsupportedDefinitionKind? kind,
+        bool ja,
+        string where
+    )
+    {
+        var treatments = TreatmentsOf(kind, UnsupportedFeature.Import);
+
+        if (treatments.All(t => t == UnsupportedTreatment.None))
+        {
+            cell.Should().Be(ja ? "取り込まない" : "Not imported", where);
+        }
+        else if (treatments.Contains(UnsupportedTreatment.MarkWithNotice))
+        {
+            if (ja)
+            {
+                cell.Should().Contain("印を付けて取り込み", where);
+            }
+            else
+            {
+                cell.Should().StartWith("Imported as", where);
+            }
+        }
+        else
+        {
+            treatments
+                .Should()
+                .OnlyContain(
+                    t =>
+                        t == UnsupportedTreatment.None
+                        || t == UnsupportedTreatment.Notice
+                        || t == UnsupportedTreatment.ExcludeWithAggregatedNotice,
+                    where + "の扱いは表の語が受け持つもの"
+                );
+
+            if (ja)
+            {
+                cell.Should().StartWith("取り込まない（", where).And.Contain("告げる", where);
+            }
+            else
+            {
+                cell.Should().StartWith("Not imported (named", where);
+            }
+        }
+
+        AssertNamedDialects(cell, treatments, where);
+    }
+
+    private static void AssertDdlCell(
+        string cell,
+        UnsupportedDefinitionKind? kind,
+        bool ja,
+        string where
+    )
+    {
+        var treatments = TreatmentsOf(kind, UnsupportedFeature.Ddl);
+
+        if (treatments.All(t => t == UnsupportedTreatment.None))
+        {
+            cell.Should().Be(ja ? "出力しない" : "Not emitted", where);
+        }
+        else
+        {
+            treatments
+                .Should()
+                .OnlyContain(
+                    t => t == UnsupportedTreatment.None || t == UnsupportedTreatment.Annotation,
+                    where + "の扱いは表の語が受け持つもの"
+                );
+            cell.Should()
+                .StartWith(
+                    ja
+                        ? "普通の列として出力（注意コメント付き）"
+                        : "Emitted as an ordinary column, with a note",
+                    where
+                );
+        }
+
+        AssertNamedDialects(cell, treatments, where);
+    }
+
+    private static void AssertRebuildCell(
+        string cell,
+        UnsupportedDefinitionKind? kind,
+        bool ja,
+        string where
+    )
+    {
+        var sqlite = Array.FindIndex(Providers, p => p.Name == DialectNames.Sqlite);
+        var treatment = TreatmentsOf(kind, UnsupportedFeature.Sync)[sqlite];
+
+        switch (treatment)
+        {
+            case UnsupportedTreatment.Warning:
+                cell.Should().StartWith(ja ? "失われる" : "Lost", where);
+                break;
+            case UnsupportedTreatment.Annotation:
+                cell.Should()
+                    .StartWith(ja ? "失われる" : "Lost", where)
+                    .And.Contain(ja ? "注意コメント" : "note", where);
+                break;
+            case UnsupportedTreatment.Preserve:
+                cell.Should().StartWith(ja ? "温存" : "Preserved", where);
+                break;
+            case UnsupportedTreatment.None:
+                (kind is null || !DialectDeclarations.CanOccur(DialectNames.Sqlite, kind.Value))
+                    .Should()
+                    .BeTrue(where + "の扱いが None になるのは、SQLite にあり得ない種類だけ");
+                cell.Should().StartWith(ja ? "対象外" : "Not applicable", where);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"{where}: 表の語が受け持たない扱い {treatment}"
+                );
+        }
+    }
+
+    /// <summary>セルが方言名を挙げるなら、扱いが None でない方言とちょうど一致する</summary>
+    private static void AssertNamedDialects(
+        string cell,
+        UnsupportedTreatment[] treatments,
+        string where
+    )
+    {
+        var named = Providers
+            .Where(p => cell.Contains(p.DisplayName, StringComparison.Ordinal))
+            .ToArray();
+
+        if (named.Length > 0)
+        {
+            named
+                .Should()
+                .Equal(
+                    Providers.Where((_, i) => treatments[i] != UnsupportedTreatment.None),
+                    where + "のセルが挙げる方言"
+                );
+        }
+    }
+
+    /// <summary>
+    /// 日本語の表の行が英語の表の行と位置で対応するか（行数が違うときは英日の一致のテストが報告するので、宣言との照合は
+    /// 日本語の行を見ない）
+    /// </summary>
+    private static bool Aligned(
+        (IReadOnlyList<string> Header, IReadOnlyList<IReadOnlyList<string>> Rows) english,
+        (IReadOnlyList<string> Header, IReadOnlyList<IReadOnlyList<string>> Rows) japanese
+    ) => english.Rows.Count == japanese.Rows.Count;
+
+    private static string[] CodeSpans(string cell) =>
+        CodeSpan.Matches(cell).Select(m => m.Groups[1].Value).ToArray();
 
     /// <summary>行＝話題・列＝5 方言の表を、行見出しから宣言への対応表で照合する（英語の文書）</summary>
     private static void AssertMatchesCapabilities(

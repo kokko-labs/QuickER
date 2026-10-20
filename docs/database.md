@@ -159,12 +159,43 @@ The import always succeeds, but some parts of a schema cannot be carried into th
 When that happens the completion dialog lists what was affected (`quicker scaffold` writes the same list to standard error), so the difference is visible instead of silent.
 The list has one heading per kind with the count, followed by one line per place.
 
+<!-- dialect-table: import-warnings -->
+
+| Warning | SQL Server | PostgreSQL | MySQL | Oracle | SQLite | In the diagram |
+| --- | :-: | :-: | :-: | :-: | :-: | --- |
+| Domain or alias type | ✅ (alias type) | ✅ (domain) | — | — | — | Base type |
+| Column that declares no type | — | — | — | — | ✅ | `BLOB` |
+| Default value | ✅ | ✅ | ✅ | ✅ | ✅ | Not imported |
+| Automatic numbering that accepts given values | — | ✅ | ✅ | ✅ | ✅ | Not imported |
+| Collation, `INVISIBLE`, `ON UPDATE`, `SRID` | — | — | ✅ | — | — | Not imported |
+| Name with spaces around it | ✅ | ✅ | ✅ | ✅ | ✅ | Spaces removed |
+| Foreign key outside the import scope | — (every schema is imported) | ✅ | ✅ | ✅ | ✅ | Skipped |
+| Disabled constraint | ✅ | — | — | ✅ | — | Skipped |
+| Table with no readable column | — | ✅ | ✅ | — | — | Imported without columns |
+| Table names differing only in case or surrounding spaces | ✅ | ✅ | ✅ | ✅ | ✅ | One kept |
+| Column names differing only in case or surrounding spaces | ✅ | ✅ | ✅ | ✅ | ✅ | One kept |
+| Table name containing a dot | ✅ | ✅ | ✅ | ✅ | ✅ | Skipped |
+| Computed or generated column | ✅ | ✅ | ✅ | ✅ | ✅ | Read-only column without its expression |
+| Automatic numbering that refuses given values | ✅ | ✅ | — | ✅ | — | Marked as a column the database numbers |
+| View | ✅ | ✅ | ✅ | ✅ | ✅ | Skipped, listed by name |
+| Materialized view | — | ✅ | — | ✅ | — | Skipped, listed by name |
+| External table | ✅ | ✅ | — | ✅ | — | Skipped, listed by name |
+| Child partition | — | ✅ | — | — | — | Skipped, listed by name |
+| Temporary table | — | — | — | ✅ | — | Skipped, listed by name |
+| Virtual table | — | — | — | — | ✅ | Skipped, listed by name |
+| Temporal history table | ✅ | — | — | — | — | Skipped, listed by name |
+| Foreign key to a table the import left out | ✅ | ✅ | ✅ | ✅ | ✅ | Skipped |
+| Partitioned table | ✅ | ✅ | ✅ | ✅ | — | Imported unpartitioned |
+| Data type that cannot be written into SQL safely | ✅ | ✅ | ✅ | ✅ | ✅ | Kept; DDL and sync refuse the whole diagram |
+| Primary key that allows NULL | — | — | — | — | ✅ | Made NOT NULL |
+
+The table lists every kind; the notes below add what a cell cannot say.
+
 - A PostgreSQL **domain type** column is imported as its base type.
   The diagram has no notion of domains, so the domain's `CHECK` constraint is lost
-- A SQL Server **alias type** column (`CREATE TYPE … FROM`) is likewise imported as its base type
 - A SQLite **column that declares no type** is imported as `BLOB`, and each such column is named.
   SQLite stores values of any type in such a column, while generated code reads it as `byte[]`, so a row holding another kind of value fails to read
-- A column's **default value** is not imported, and each such column is named with its default (all five DBMSs).
+- A column's **default value** is not imported, and each such column is named with its default.
   The diagram has no notion of defaults, so generated DDL creates the column without `DEFAULT`.
   A default of `NULL` means the same as having no default and is not reported.
   On Oracle, where an empty string is `NULL`, this includes `DEFAULT ''` and a `NULL` or `''` in parentheses such as `DEFAULT (NULL)`
@@ -174,10 +205,8 @@ The list has one heading per kind with the count, followed by one line per place
 - A **name with spaces around it** (a table, column, foreign key or unique constraint name) is imported without the spaces, and each name is reported.
   MySQL does not allow trailing spaces, so only leading ones occur there
 - A **foreign key that points outside the imported scope** is skipped (on SQLite and MySQL this covers a key whose parent table does not exist)
-- A **disabled constraint** (`DISABLE` on Oracle, a foreign key turned off with `NOCHECK CONSTRAINT` on SQL Server) is not imported
-- A table whose **columns could not be read at all** is imported without columns
 - One of two tables whose **names differ only in letter case or surrounding spaces** is skipped, because the diagram cannot keep them apart (PostgreSQL and Oracle allow both through quoted identifiers, MySQL does when `lower_case_table_names` is 0, SQL Server does in a database with a case-sensitive collation, and SQLite, which folds only ASCII letters, does for names such as `Äpfel` and `äpfel`)
-- A **table whose name contains a dot** is not imported on any of the five DBMSs, and each such table is named.
+- A **table whose name contains a dot** is not imported, and each such table is named.
   The diagram reads the first dot of a table name as the separator between a schema and a table, so `Order.Lines` would be read as the table `Lines` in the schema `Order`.
   Imported as it is, the table would be another table to the rest of QuickER: the generated QuickER Repository would report that the table does not exist, and DDL and schema sync would create another table, or fail when that schema does not exist.
   On SQL Server this covers a table in `dbo` whose name contains a dot and every table in a schema whose name contains a dot.
@@ -193,9 +222,8 @@ The list has one heading per kind with the count, followed by one line per place
 - A SQLite **virtual table** (FTS5, R*Tree and the like) is not imported.
   It cannot be represented as an ordinary table; its shadow tables are excluded along with it, and each virtual table is reported once
 - **Objects the diagram does not hold** are left out and listed by name.
-  These are views (all five DBMSs), materialized views (PostgreSQL, Oracle), external tables (PostgreSQL foreign tables, Oracle `ORGANIZATION EXTERNAL` tables, SQL Server external tables), partitions (PostgreSQL, with the parent table each belongs to; the parent itself is imported as described below) and temporary tables (Oracle).
+  External tables are PostgreSQL foreign tables, Oracle `ORGANIZATION EXTERNAL` tables and SQL Server external tables, and a PostgreSQL child partition is listed with the parent table it belongs to (the parent itself is imported as described below).
   Objects the database or an extension owns (system tables, the container and log tables behind materialized views, tables an extension installs) are left out without a mention
-- A **foreign key that references a table the import left out** (a PostgreSQL child partition, an SQLite virtual table or view, a table whose name contains a dot) is skipped and reported
 - A SQL Server **temporal table** is imported as its current-data table only.
   The history table is an attachment the system maintains for it rather than an entity of its own.
   The current table's period columns (`GENERATED ALWAYS AS ROW START / END`) are values the database produces, so they are treated as computed columns, and a `HIDDEN` period column is imported the same way.
@@ -203,7 +231,7 @@ The list has one heading per kind with the count, followed by one line per place
 - A column whose **data type cannot be written into SQL safely** is named, along with the type text.
   The import keeps it, but DDL generation and schema sync refuse the *whole diagram* until it is corrected, because a type is neither an identifier nor a string literal and there is nowhere to quote it (see [What a data type may contain](#what-a-data-type-may-contain)).
   SQLite stores whatever type text a table was declared with, and PostgreSQL reports a type name that needs quoting with the quotes attached, so either can produce one
-- A **partitioned table** (SQL Server, PostgreSQL, MySQL, Oracle) is imported as its parent, and the partitioning itself is not modelled.
+- A **partitioned table** is imported as its parent, and the partitioning itself is not modelled.
   Generated DDL creates the table unpartitioned
 - A SQLite **primary key that allows NULL** is imported as NOT NULL, and the adjusted columns are named.
   In a rowid table, any primary key other than a single column declared exactly `INTEGER` can hold NULL, while the diagram and the editor always treat a primary key as NOT NULL.
@@ -215,30 +243,20 @@ When nothing is affected, the dialog is the usual one-line completion message.
 #### How imported type names are spelled
 
 The import reads each column's declared type from the database's own catalog and then writes it in QuickER's shorter vocabulary.
-PostgreSQL's canonical `character varying(50)` is written as `varchar(50)`, and `timestamp(3) with time zone` as `timestamptz(3)`.
 Only the spelling changes; the type does not.
 
-On PostgreSQL this also fixes type names that used to come back wrong, because the previous source of type information could not express certain modifiers.
-A column declared `numeric(10,-2)` was imported as `numeric(10,2046)`, a spelling PostgreSQL itself rejects, so the diagram could not even generate DDL for it.
-`bit(8)` and `bit varying(16)` lost their length, `interval day to second(3)` lost its unit, and `time(3) with time zone` lost its precision.
-An array came back as an internal name such as `_int4`, or, for `varchar(20)[]`, as `_varchar`, dropping the length.
-These columns now carry their real declared type.
+<!-- dialect-table: imported-type-spelling -->
 
-**If you import a PostgreSQL database into a diagram created by an older version, expect a one-time diff.**
-Any column of the kinds above shows up once as a column change in the diff sync, because the diagram holds the old broken spelling and the database reports the correct one.
-Healthy columns are unaffected: their spelling is unchanged.
+| Dialect | Declared as | Imported as |
+| --- | --- | --- |
+| SQL Server | `datetime2(7)` / `datetime2(3)` | `datetime2` / `datetime2(3)` |
+| PostgreSQL | `character varying(50)` / `timestamp(3) with time zone` | `varchar(50)` / `timestamptz(3)` |
+| MySQL | `decimal(12)` | `decimal(12,0)` |
+| Oracle | `INTEGER` / `SMALLINT` / `NUMBER(*,0)` | `NUMBER(*,0)` |
+| SQLite | `VARCHAR(50)` (kept as declared) | `VARCHAR(50)` |
 
-On SQL Server the import also reads the fractional-second precision of `datetime2` / `time` / `datetimeoffset`.
-The default precision of 7 is written without parentheses as `datetime2`, and any other precision is written out, as in `datetime2(3)`.
-Earlier versions did not read the precision and imported a `datetime2(3)` column as `datetime2`.
-Syncing from such a diagram could change the column's precision to 7.
-
-**In a diagram imported from SQL Server by an earlier version, columns whose fractional-second precision is not 7 show up as a type change in the next sync.**
-Import the diagram again, or change the types in the diagram to match the database's declarations.
-
-On Oracle, a `NUMBER` with no precision and a scale of 0 (a column declared `INTEGER`, `SMALLINT` or `NUMBER(*,0)`) is imported as `NUMBER(*,0)`.
-Earlier versions imported it as a bare `NUMBER`, so DDL generated from that diagram made a column that accepts fractions.
-In a diagram imported from Oracle by an earlier version, such columns show up as a type change in the next sync.
+In a diagram imported by an earlier version, columns whose spelling this changed show up once as a type change in the next diff sync.
+Import the diagram again, or change the types in the diagram to match the database.
 
 The import result is merged into the current diagram.
 Tables and columns are matched by name, and matching elements take over the identity of the current diagram's elements, so their layout, width, color, and notes are preserved, along with the named queries that reference them.
@@ -264,16 +282,21 @@ What it models is exactly what round-trips.
 Everything else is outside the model.
 It is not imported, it never appears in generated DDL, and the diff sync neither detects nor touches it.
 
+<!-- dialect-table: modeling-fidelity -->
+
 | Schema element | On import | In generated DDL | In a SQLite table rebuild |
-|---|---|---|---|
-| `DEFAULT` | Not imported | Not emitted | Lost |
+| --- | --- | --- | --- |
+| `DEFAULT` | Not imported (named) | Not emitted | Lost |
 | `CHECK` constraint | Not imported | Not emitted | Lost |
-| `COLLATE` | Not imported | Not emitted | Lost |
-| Generated / computed column | Imported as a read-only column without its expression, carrying the computed mark, and reported | Emitted as an ordinary column, with a note | Lost |
-| `IDENTITY` / `AUTO_INCREMENT` / `AUTOINCREMENT` | Automatic numbering that refuses given values (SQL Server `IDENTITY`, PostgreSQL and Oracle `GENERATED ALWAYS AS IDENTITY`) is imported as the mark of a column the database numbers (the numbering definition is lost); the rest is not imported | Not emitted (a marked column gets a note) | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
+| `COLLATE` | Not imported (named on MySQL) | Not emitted | Lost |
+| Generated / computed column | Imported as a read-only column without its expression, carrying the computed mark, and reported | Emitted as an ordinary column, with a note | Lost (rebuilt as an ordinary column, with a note) |
+| Automatic numbering that refuses given values | Imported as the mark of a column the database numbers, and reported (SQL Server, PostgreSQL, Oracle; the numbering definition is lost) | Emitted as an ordinary column, with a note | Not applicable (SQLite has none) |
+| Automatic numbering that accepts given values | Not imported (named) | Not emitted | Lost (a primary key whose declared type is `INTEGER` stays a rowid alias, so implicit auto-numbering survives; see the note below) |
 | Non-unique index | Not imported | Not emitted | Preserved (captured as its `CREATE` statement and replayed) |
 | Trigger | Not imported | Not emitted | Preserved (same) |
-| View | Not imported | Not emitted | Preserved (it keeps pointing at the rebuilt table) |
+| Table options after the column list (`WITHOUT ROWID`, `STRICT`) | Not imported | Not emitted | Lost |
+| Constraint clauses (`ON CONFLICT`, `DEFERRABLE INITIALLY DEFERRED`) | Not imported | Not emitted | Lost |
+| View | Not imported (named) | Not emitted | Preserved (it keeps pointing at the rebuilt table) |
 | Stored procedure, function, sequence | Not imported | Not emitted | Not applicable |
 
 **The rowid alias hangs on the declared type token, not on the column being an integer.**
@@ -512,9 +535,7 @@ A view that refers to a rebuilt table does not stop the rebuild, and it keeps po
 If the sync breaks a view, for example one that refers to a dropped column, it rolls back and names the view.
 
 The rebuilt table is created from the diagram's definition, so anything outside [what the diagram models](#modeling-fidelity) is **not** reproduced and is silently lost.
-That covers `AUTOINCREMENT`, `DEFAULT`, `CHECK`, `COLLATE`, and generated columns, which is exactly why the `DEFAULT` values you set outside QuickER disappear after a rebuild.
-Conflict clauses on constraints (`ON CONFLICT`), deferred foreign keys (`DEFERRABLE INITIALLY DEFERRED`), and the table options after the closing parenthesis of the column list (`WITHOUT ROWID` and `STRICT`) are lost the same way.
-Indexes and triggers are safe: they are captured as their full `CREATE` statements and replayed.
+That covers every element the table there marks as lost in a rebuild, which is exactly why the `DEFAULT` values you set outside QuickER disappear after a rebuild.
 Implicit auto-numbering is also safe as long as the diagram's declared type is `INTEGER`, because such a primary key stays a rowid alias in the rebuilt table (a key declared `INT`, which is what a diagram created in QuickER or converted through another dialect holds, was never an alias to begin with; see [what the diagram models](#modeling-fidelity)).
 
 To make the loss visible, QuickER reads the live `CREATE TABLE` statement of every table it is about to rebuild and lists the attributes it found in the execution-confirmation dialog.
