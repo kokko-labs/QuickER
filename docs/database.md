@@ -423,6 +423,7 @@ Foreign keys that rely on the changed primary key (they refer to the same column
 | | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
 | --- | :-: | :-: | :-: | :-: | :-: |
 | Altering a column drops and re-adds its foreign keys | ✅ | — | ✅ | — | — (the table is rebuilt) |
+| Altering a key column drops and re-adds the primary key and unique constraints | ✅ | — | — | — | — (the table is rebuilt) |
 | A foreign key resting on the index of a dropped primary key or unique constraint is re-added | — | — | ✅ | — | — |
 | Referencing columns must follow the order of the referenced key | ✅ | — | ✅ (a change that only reorders is not run) | — | — |
 | String types differing only in length are allowed on the two ends | — (error 1753) | ✅ | ✅ | ✅ (same length unit) | ✅ |
@@ -430,7 +431,7 @@ Foreign keys that rely on the changed primary key (they refer to the same column
 
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
 The same applies when dropping a unique constraint whose index is the only one supporting a foreign key (MySQL refuses with error 1553 otherwise).
-On SQL Server, altering the type of a primary key column also drops the primary key and adds it back with the same columns (the re-added key is named `PK_{table}`).
+The primary key re-added this way is named `PK_{table}`.
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
 Re-adding it would always fail and, on MySQL / Oracle, leave the foreign key missing.
 String types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch where the table above allows them on the two ends; on Oracle the length unit (`CHAR` / `BYTE`) must be the same on both ends.

@@ -107,6 +107,8 @@ public sealed class DialectDocsTableTests
     {
         ["Altering a column drops and re-adds its foreign keys"] = c =>
             c.AlterColumnRequiresForeignKeyRebuild,
+        ["Altering a key column drops and re-adds the primary key and unique constraints"] = c =>
+            c.AlterColumnRequiresKeyConstraintRebuild,
         [
             "A foreign key resting on the index of a dropped primary key or unique constraint is re-added"
         ] = c => c.ForeignKeyRequiresLeadingIndex,
