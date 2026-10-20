@@ -36,6 +36,8 @@ public sealed class MySqlTypeNotationIntegrationTests(MySqlContainerFixture fixt
         var types = TypeNotationClosure
             .CandidateTypes(provider.TypeCatalog, TypeNotationClosure.DefaultSamples)
             .Concat(["decimal", "numeric", "decimal(12)", "numeric(12,2)"])
+            // 型カタログが解析する型（mediumint・year・tinytext・tinyblob）も、取込の表記のまま閉じること
+            .Concat(["mediumint", "mediumint unsigned", "year", "tinytext", "tinyblob"])
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 

@@ -604,8 +604,10 @@ SQLite は既定で外部キーを検査しないため、親の無い子行を�
 - 長さを書かない文字列・バイナリ列（PostgreSQL の `varchar`、SQLite の `TEXT` など）は、SQL Server・MySQL・Oracle へは変換できず一覧に載ります。
   MySQL と Oracle は長さの無い `varchar` / `VARCHAR2` を受け付けず、SQL Server は長さを省くと**黙って 1 文字の列**を作るためです。
   切り替えたい場合は、元の図で長さを書いてください
-- 移行先の上限を超える長さ・精度（SQL Server の `nvarchar(5000)`・`decimal(50,2)`・`datetime2(9)`、Oracle の `NVARCHAR2(4000)`・`NUMBER(39)`、MySQL の `datetime(7)`・`decimal(66,2)` など）は変換不能として一覧に載ります。
+- 移行先の上限を超える長さ・精度（SQL Server の `nvarchar(5000)`・`decimal(50,2)`・`datetime2(9)`、Oracle の `NVARCHAR2(4000)`・`NUMBER(39)`、MySQL の `char(256)`・`varchar(16384)`・`datetime(7)`・`decimal(66,2)`、PostgreSQL の `numeric(1001)`・`varchar(10485761)` など）は変換不能として一覧に載ります。
   そのまま書き出すと、DDL の適用で失敗するためです。
+  PostgreSQL は 6 桁を超える小数秒（`timestamp(7)`）を受け付けますが 6 桁へ丸めるため、これも一覧に載ります。
+  MySQL の `varchar` の上限は `utf8mb4` の値（16,383 文字）で、行全体の上限（65,535 バイト）は適用時に MySQL が判定します。
   Oracle の文字列と `RAW` の上限は `MAX_STRING_SIZE = STANDARD`（既定）の値です（`NVARCHAR2` 2000・`VARCHAR2` 4000・`NCHAR` 1000・`CHAR` と `RAW` 2000）。
   QuickER は接続先の設定を知らないため、`MAX_STRING_SIZE = EXTENDED` のデータベースでも、この上限を超える列は変換不能として一覧に出ます
 - 精度の無い `decimal`（Oracle の `NUMBER`・PostgreSQL の無制約の `numeric`）は SQL Server と MySQL へ変換できず一覧に載ります。

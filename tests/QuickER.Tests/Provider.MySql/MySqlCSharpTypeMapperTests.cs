@@ -192,6 +192,15 @@ public class MySqlCSharpTypeMapperTests
         Mapper.Map(dataType).IsFallbackType.Should().BeTrue();
     }
 
+    [Fact(DisplayName = "tinytext は string へマップされる（フォールバックに落ちない）")]
+    public void Map_TinyText_IsStringWithoutFallback()
+    {
+        var info = Mapper.Map("tinytext");
+
+        info.TypeName.Should().Be("string");
+        info.IsFallbackType.Should().BeFalse();
+    }
+
     [Fact(DisplayName = "解決できる型は IsFallbackType が false になる")]
     public void Map_KnownType_IsFallbackTypeIsFalse()
     {

@@ -13,7 +13,7 @@ namespace QuickER.Provider.Oracle;
 /// 対応規則（Oracle 型 → C# 型）:
 /// <list type="bullet">
 /// <item><description>NUMBER(1) → bool、NUMBER(3) → byte、NUMBER(5) → short、NUMBER(10) → int、NUMBER(19) → long</description></item>
-/// <item><description>NUMBER(p,s)／その他の NUMBER(p)／NUMBER → decimal（精度・スケールを保持）</description></item>
+/// <item><description>NUMBER(p,s)／その他の NUMBER(p)／NUMBER／NUMBER(*,0)・INTEGER・SMALLINT → decimal（精度・スケールを保持）</description></item>
 /// <item><description>BINARY_FLOAT → float、BINARY_DOUBLE / FLOAT → double</description></item>
 /// <item><description>NVARCHAR2 / VARCHAR2 / NCHAR / CHAR / NCLOB / CLOB / XMLTYPE → string（長さ指定があれば MaxLength として保持）</description></item>
 /// <item><description>RAW / BLOB / LONG RAW → byte[]（参照型）。BLOB・LONG RAW は無制限バイナリ、RAW(n) は有界</description></item>
@@ -67,6 +67,9 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
         return baseType switch
         {
             "number" => MapNumber(precision, scale),
+            // ANSI の INTEGER / SMALLINT は NUMBER(*,0)（精度なし・スケール 0）として作られる。型カタログ・取込と同じく
+            // NUMBER(*,0) と同じ写し方にする（ODP.NET が返す CLR 型も decimal）
+            "integer" or "smallint" => Map("NUMBER(*,0)"),
             "binary_float" => Value("float"),
             "binary_double" or "float" => Value("double"),
             // 日付時刻: WITH TIME ZONE のみ DateTimeOffset、それ以外は DateTime。

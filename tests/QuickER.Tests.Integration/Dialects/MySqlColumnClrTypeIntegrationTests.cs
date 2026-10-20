@@ -279,6 +279,68 @@ public sealed class MySqlColumnClrTypeIntegrationTests(MySqlContainerFixture fix
     }
 
     /// <summary>
+    /// <c>tinytext</c> / <c>tinyblob</c> のマッパー解決結果が、ドライバが返す CLR 型と一致する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] tinytext は string、tinyblob は byte[]（ドライバの実測 CLR 型と一致する）"
+    )]
+    public async Task Map_TinyTextAndTinyBlob_MatchDriverClrTypes()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE tiny_probe (
+                id int NOT NULL PRIMARY KEY,
+                note tinytext NOT NULL,
+                data tinyblob NOT NULL
+            ) ENGINE=InnoDB;
+            INSERT INTO tiny_probe VALUES (1, 'abc', x'0102');
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var import = await new MySqlSchemaImporter().ImportAsync(conn, Ct);
+        var declaredTypes = import
+            .Entities.Should()
+            .ContainSingle()
+            .Subject.Columns.ToDictionary(c => c.Name, c => c.DataType);
+
+        declaredTypes["note"].Should().Be("tinytext");
+        declaredTypes["data"].Should().Be("tinyblob");
+
+        var driverTypes = new Dictionary<string, Type>(StringComparer.Ordinal);
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT note, data FROM tiny_probe WHERE id = 1";
+            await using var reader = await cmd.ExecuteReaderAsync(Ct);
+
+            (await reader.ReadAsync(Ct)).Should().BeTrue();
+
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                driverTypes[reader.GetName(i)] = reader.GetFieldType(i);
+            }
+        }
+
+        driverTypes["note"].Should().Be<string>();
+        driverTypes["data"].Should().Be<byte[]>();
+
+        var mapper = new MySqlCSharpTypeMapper();
+
+        foreach (var (columnName, driverType) in driverTypes)
+        {
+            var mapped = mapper.Map(declaredTypes[columnName]);
+
+            mapped.TypeName.Should().Be(CSharpKeywords[driverType], columnName);
+            mapped.IsFallbackType.Should().BeFalse(columnName);
+        }
+    }
+
+    /// <summary>
     /// 符号なし整数の上限値が、EF Core（<c>UseMySQL</c>）経由で符号なしの CLR 型として往復する（TM1）。
     /// </summary>
     /// <remarks>

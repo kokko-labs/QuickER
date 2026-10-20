@@ -48,6 +48,25 @@ public class OracleCSharpTypeMapperTests
         Mapper.Map(dataType).IsFallbackType.Should().BeTrue();
     }
 
+    /// <summary>
+    /// ANSI の INTEGER / SMALLINT は Oracle では NUMBER(*,0) として作られるので、NUMBER(*,0) と同じ decimal へ写す
+    /// （フォールバックの string にしない）ことを検証する。
+    /// </summary>
+    [Theory(DisplayName = "INTEGER・SMALLINT は NUMBER(*,0) と同じ decimal へマップされる")]
+    [InlineData("INTEGER")]
+    [InlineData("SMALLINT")]
+    [InlineData("integer")]
+    public void Map_AnsiInteger_IsDecimalLikeNumberStarZero(string dataType)
+    {
+        var info = Mapper.Map(dataType);
+        var number = Mapper.Map("NUMBER(*,0)");
+
+        info.TypeName.Should().Be("decimal");
+        info.IsFallbackType.Should().BeFalse();
+        info.Precision.Should().Be(number.Precision);
+        info.Scale.Should().Be(number.Scale);
+    }
+
     [Fact(DisplayName = "解決できる型は IsFallbackType が false になる")]
     public void Map_KnownType_IsFallbackTypeIsFalse()
     {

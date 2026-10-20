@@ -126,7 +126,7 @@ public static class QueryParameterTypeResolver
     /// 型トークンの正規型を、パラメータ用のネイティブ型表記へ整形する。
     /// </summary>
     /// <remarks>
-    /// 通常は方言の <see cref="ITypeCatalog.TryFormat"/> をそのまま使う。長さを要する型で長さが無い正規型は
+    /// 通常は方言の <see cref="ITypeCatalog.TryFormatParameterType"/>（列の上限を当てない書き出し）をそのまま使う。長さを要する型で長さが無い正規型は
     /// 「列として書き出せない」ため方言側が <c>false</c> を返すが、クエリのパラメータ・スカラー戻り値・射影
     /// フィールドは列を作らないので長さ制約が無い。可変長の 3 種別に限り「無制限（長さ <c>-1</c>）」として
     /// 整形し直し、C# 型への写像だけを成立させる（トークンが表す型の意味は変わらない）。
@@ -137,7 +137,7 @@ public static class QueryParameterTypeResolver
         out string nativeType
     )
     {
-        if (typeCatalog.TryFormat(canonical, out nativeType))
+        if (typeCatalog.TryFormatParameterType(canonical, out nativeType))
         {
             return true;
         }
@@ -147,6 +147,6 @@ public static class QueryParameterTypeResolver
             return false;
         }
 
-        return typeCatalog.TryFormat(canonical with { Length = -1 }, out nativeType);
+        return typeCatalog.TryFormatParameterType(canonical with { Length = -1 }, out nativeType);
     }
 }
