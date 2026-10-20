@@ -112,7 +112,7 @@ By default, an Entity is decorated with DataAnnotations and DB-definition metada
 The generated code therefore doubles as a self-describing document of the DB definition.
 
 A DB type the type catalog cannot parse (`geometry`, `hierarchyid`, `sql_variant` and the like) falls back to `string` so that generation keeps going.
-The generated code does not show that it happened, so generation names those columns in an information diagnostic as "table.column (original type text)".
+The generated code does not show that it happened, so generation names those columns in an information diagnostic, each written as table.column followed by its original type text in parentheses.
 Change the column's type in the diagram if `string` is not what you meant.
 
 MySQL unsigned integers (`int unsigned` and the like) are generated as unsigned C# types (`tinyint` as `byte`, `smallint` as `ushort`, `mediumint` and `int` as `uint`, `bigint` as `ulong`).
@@ -1172,7 +1172,7 @@ The generated entity property carries the marker attribute `[ComputedColumn]`, a
 - **EF Core mode adds `ValueGeneratedOnAddOrUpdate()` to the Fluent configuration.**
   The diagram has no expression, so `HasComputedColumnSql` cannot be emitted
 - **The in-memory repository computes nothing.**
-  There is no expression, so the property is an ordinary column that keeps whatever value was assigned
+  With no expression to evaluate, the property is an ordinary column that keeps whatever value was assigned
 - **The edit model does not require an input.**
   Saving without one keeps the entity's current value (the column is left out of the write either way)
 - **A diagram whose primary key is a computed column fails generation.**
@@ -1193,7 +1193,8 @@ Adding the expression by hand fixes it, and the DDL carries a note next to the c
 
 This matters for a multi-target build (SQL Server as the server, SQLite locally) and for bidirectional sync.
 The mirror database holds the ordinary column QuickER's DDL created, and for something like a SQL Server temporal table the expression **cannot** be added by hand.
-Generation warns and names the affected columns. There are two ways out.
+Generation warns and names the affected columns.
+Either of the following resolves it.
 
 - **Make the column nullable in the diagram.** The mirror keeps NULL for it and inserts succeed.
   A computed column's nullability is left out of the sync comparison, so this never produces an `ALTER COLUMN` against the database the diagram came from.
@@ -1886,7 +1887,7 @@ Types with a declared length, such as `rowversion`, `binary(n)`, or `varbinary(n
 | Dialect | Excluded | Not excluded (bounded) |
 |---|---|---|
 | SQL Server | `varbinary(max)` / `image` | `binary(n)` / `varbinary(n)` / `rowversion` |
-| SQLite | `BLOB` with no declared length | `BLOB(n)` |
+| SQLite | `BLOB` / `BINARY` / `VARBINARY` with no declared length, or with `(MAX)` | `BLOB(n)` / `BINARY(n)` / `VARBINARY(n)` |
 | PostgreSQL | `bytea` | — |
 | MySQL | `BLOB` / `MEDIUMBLOB` / `LONGBLOB` | `TINYBLOB` / `BINARY(n)` / `VARBINARY(n)` |
 | Oracle | `BLOB` / `LONG RAW` | `RAW(n)` |
@@ -2286,7 +2287,7 @@ The opposite order would lose changes outright.
 They are removed before the exception reaches the caller, still under the local write lock, and only the entries of that call go: earlier entries for the same row stay.
 Left behind, such an entry would upload content the local database never committed: a `LocalWins` or last-write-wins replay would put an older row or blob back over another writer's newer one, and a write that changed nothing would still move the server's version on and raise a conflict on another device.
 The generated repositories commit as their last step, so an exception means the write did not land; a repository of your own placed behind the decorator has to keep to that, because an exception it throws after committing takes back the entry of a write that did land.
-Should removing the entries fail as well, the write's exception still goes on, carrying that failure in `Exception.Data` under `JournalingRepositoryBase<TEntity, TKey>.JournalCleanupFailureKey`.
+Should removing the entries fail as well, the exception from the write still goes on, carrying that failure in `Exception.Data` under `JournalingRepositoryBase<TEntity, TKey>.JournalCleanupFailureKey`.
 A process that ends between recording and writing still leaves the entries behind, and the upload settles them as below.
 For an insert or an update, it re-reads the current local row, and when the row is not there, there is nothing to send and the entry is discarded.
 
@@ -2441,7 +2442,7 @@ Each column the overwrite did not send is therefore recorded as an owed copy (be
 A download writes a batch of rows and then copies their blobs, and the rows have already moved the resume point past themselves by then.
 The copies a batch owes are therefore recorded in the local table `quicker_sync_blob_pending` before the rows are written and removed once made.
 A copy that fails leaves its record, and the next run that carries the columns makes it first, before anything else of that table.
-That late copy is decided per row and column: a row that is gone here has nothing to copy into, a row the server no longer has has nothing to copy from (it is left to the delete propagation), and a column an unsent local change wrote holds a blob written here since, which the server's copy must not replace; in all three cases the owed record is dropped.
+That late copy is decided per row and column: a row that is gone here has nothing to copy into, a row no longer on the server has nothing to copy from (it is left to the delete propagation), and a column an unsent local change wrote holds a blob written here since, which the server's copy must not replace; in all three cases the owed record is dropped.
 Otherwise, including a row whose unsent change touched only its ordinary columns, the server's blob is copied down.
 A refresh drops the table's owed records, because it reloads the rows anyway.
 
@@ -2525,7 +2526,7 @@ A failure they do not explain, such as a dropped connection, is thrown as it was
 |---|---|---|
 | `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` reports it too, rather than bringing the parent back, and so does last-write-wins under any other policy | Run with `ServerWins` (in either mode), point the row at another parent, or edit the parent locally so it has a change of its own |
 | `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins` (in either mode), which brings the row back together with what now points at it |
-| `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. On a SQL Server server a NULL counts as a value, so a second row holding NULL in the same unique members is reported this way too (see [Uniqueness pre-check](#uniqueness-pre-check-checkuniquenessasync)). `LocalWins` reports it too, rather than taking the value from the other row. It is not tried again within the run, since no other write of the table frees the value | Change the value, or run with `ServerWins` (in either mode) |
+| `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. When the server is SQL Server, a NULL counts as a value, so a second row holding NULL in the same unique members is reported this way too (see [Uniqueness pre-check](#uniqueness-pre-check-checkuniquenessasync)). `LocalWins` reports it too, rather than taking the value from the other row. It is not tried again within the run, since no other write of the table frees the value | Change the value, or run with `ServerWins` (in either mode) |
 
 **`ServerWins` reads the rows back rather than leaving them to the download.**
 The download carries a row only when its version has moved since it was last mirrored, so a local edit to a row nobody else has touched would otherwise outlive the run that was told to discard it, and with its journal entry gone, no later run would correct it.

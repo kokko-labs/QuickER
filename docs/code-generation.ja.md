@@ -1210,7 +1210,8 @@ DB 取込は、計算列（SQL Server）・生成列（MySQL / PostgreSQL / SQLi
 
 これが問題になるのはマルチターゲット構成（サーバー＝SQL Server・ローカル＝SQLite）と双方向同期です。
 ミラー側のデータベースは QuickER の DDL が作る普通の列を持ち、SQL Server のテンポラルテーブルのように**式を手で足せない**こともあるためです。
-該当する列があると生成時に Warning で名指しします。直し方は 2 つです。
+該当する列があると生成時に Warning で名指しします。
+直し方は 2 つです。
 
 - **図でその列を NULL 許容にする**。ミラー側はその列を NULL のまま保ち、行の追加は成功します。
   計算列の NULL 許容は差分同期の比較対象から外れるので、取込元のデータベースへ `ALTER COLUMN` が出ることはありません。
@@ -1914,7 +1915,7 @@ ON にすると、サイズ上限のないバイナリ列の Entity プロパテ
 | 方言 | 除外対象 | 対象外（有界） |
 |---|---|---|
 | SQL Server | `varbinary(max)` / `image` | `binary(n)` / `varbinary(n)` / `rowversion` |
-| SQLite | 長さ宣言なし `BLOB` | `BLOB(n)` |
+| SQLite | 長さ宣言なし（または `(MAX)`）の `BLOB` / `BINARY` / `VARBINARY` | `BLOB(n)` / `BINARY(n)` / `VARBINARY(n)` |
 | PostgreSQL | `bytea` | — |
 | MySQL | `BLOB` / `MEDIUMBLOB` / `LONGBLOB` | `TINYBLOB` / `BINARY(n)` / `VARBINARY(n)` |
 | Oracle | `BLOB` / `LONG RAW` | `RAW(n)` |
