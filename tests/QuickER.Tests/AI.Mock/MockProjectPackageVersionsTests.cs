@@ -24,6 +24,7 @@ public class MockProjectPackageVersionsTests
         "Microsoft.Data.SqlClient",
         "Microsoft.Data.Sqlite",
         "SQLitePCLRaw.bundle_e_sqlite3",
+        "System.Security.Cryptography.Pkcs",
     ];
 
     /// <summary>Directory.Packages.props の PackageVersion（ID → 版）</summary>
@@ -43,7 +44,7 @@ public class MockProjectPackageVersionsTests
     }
 
     /// <summary>
-    /// 5 パッケージすべての版がアセンブリへ写されていて、props の版と一致することを検証する
+    /// 6 パッケージすべての版がアセンブリへ写されていて、props の版と一致することを検証する
     /// （写しが無い・props から消えた・名前を間違えた、のいずれでも赤になる）。
     /// </summary>
     [Fact(DisplayName = "生成 csproj の版は Directory.Packages.props の版と一致する")]
@@ -75,10 +76,11 @@ public class MockProjectPackageVersionsTests
 
     /// <summary>
     /// 生成する csproj（WPF / Blazor × 方言）の PackageReference がすべて正本の版で書かれ、SQLite では
-    /// 脆弱性対策の SQLitePCLRaw のピンを伴うことを検証する。
+    /// 脆弱性対策の SQLitePCLRaw のピンを、Blazor × SQL Server では System.Security.Cryptography.Pkcs のピンを
+    /// 伴うことを検証する（WPF は共有フレームワークが Pkcs を刈り込むので書かない＝書くと NU1510）。
     /// </summary>
     [Theory(
-        DisplayName = "生成 csproj の PackageReference は正本の版で書かれ、SQLite はピンを伴う"
+        DisplayName = "生成 csproj の PackageReference は正本の版で書かれ、SQLite と Blazor × SQL Server はピンを伴う"
     )]
     [InlineData("wpf", "sqlite")]
     [InlineData("wpf", "sqlserver")]
@@ -110,5 +112,9 @@ public class MockProjectPackageVersionsTests
         references.ContainsKey("SQLitePCLRaw.bundle_e_sqlite3").Should().Be(dialect == "sqlite");
         references.ContainsKey("Microsoft.Data.Sqlite").Should().Be(dialect == "sqlite");
         references.ContainsKey("Microsoft.Data.SqlClient").Should().Be(dialect == "sqlserver");
+        references
+            .ContainsKey("System.Security.Cryptography.Pkcs")
+            .Should()
+            .Be(target == "blazor" && dialect == "sqlserver");
     }
 }

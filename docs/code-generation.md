@@ -3085,7 +3085,7 @@ The required PackageReference is described in the generation header and the CLI 
 | Package | Contents | Third-party dependencies |
 |---|---|---|
 | `QuickER.Runtime` | Shared foundation and dialect-neutral contracts | None |
-| `QuickER.Runtime.SqlServer` | QuickER's SQL Server dialect engine | Microsoft.Data.SqlClient |
+| `QuickER.Runtime.SqlServer` | QuickER's SQL Server dialect engine | Microsoft.Data.SqlClient, System.Security.Cryptography.Pkcs |
 | `QuickER.Runtime.Sqlite` | QuickER's SQLite dialect engine | Microsoft.Data.Sqlite, SQLitePCLRaw.bundle_e_sqlite3 |
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core shared parts | Microsoft.EntityFrameworkCore.Relational |
 | `QuickER.Runtime.InMemory` | The in-memory engine (for tests) | None |

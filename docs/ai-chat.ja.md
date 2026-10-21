@@ -118,6 +118,7 @@ Blazor Web App はグローバルに InteractiveServer で対話動作し、各�
 ソリューション・csproj・データ層コード（Entity / EditModel / Mapper / インメモリ Repository。図の方言が対応していれば QuickER 版 Repository も）は ER モデルから QuickER が決定的に生成するため、AI が書くのは UI 層だけです。
 モックフォルダは `design/mock/` に同梱され、AI がそれを基に UI を実装します。
 生成される csproj は QuickER 本体と同じ版のパッケージを参照し、`Microsoft.Data.Sqlite` が持ち込む脆弱な版を上書きする修正済みの `SQLitePCLRaw` も含みます。
+SQL Server の Blazor のプロジェクトは、`Microsoft.Data.SqlClient` が持ち込む脆弱な版を上書きする修正済みの `System.Security.Cryptography.Pkcs` も参照します。WPF は共有フレームワークがこのパッケージを持つので参照しません。
 
 Claude Code / Codex / Copilot はエージェントがファイルを編集し、`dotnet build` が通るまで（または実行全体の時間上限に達するまで）自己修正します。
 エージェントにはソリューションを名指ししたビルド（`dotnet build <プロジェクト名>.sln`）を指示するため、出力フォルダに別のソリューションやプロジェクトがあっても妨げになりません。

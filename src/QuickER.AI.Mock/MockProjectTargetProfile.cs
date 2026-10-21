@@ -41,6 +41,26 @@ public abstract class MockProjectTargetProfile
     /// </remarks>
     internal abstract IReadOnlySet<string> AllowedEmitExtensions { get; }
 
+    /// <summary>
+    /// このターゲットの共有フレームワークが <c>System.Security.Cryptography.Pkcs</c> を刈り込むか。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SQL Server の csproj に Pkcs の明示参照を書くかは、この値だけで決める。<c>Microsoft.Data.SqlClient</c> が
+    /// 推移的に持ち込む Pkcs の版には既知の脆弱性があり、刈り込まないターゲットでは restore が NU1902 / NU1903 を出すので、
+    /// 修正済みの版を明示参照で上書きする。刈り込むターゲットでは推移的な版は解決されず警告も出ない一方、明示参照を書くと
+    /// restore が NU1510（参照は刈り込まれず不要）を出すので書かない。
+    /// </para>
+    /// <para>
+    /// 判定の基準は「そのターゲットの共有フレームワークの刈り込みの一覧に Pkcs が載っているか」で、DLL が
+    /// 共有フレームワークのフォルダにあるかではない（<c>Microsoft.AspNetCore.App</c> は DLL を持つが刈り込まない）。
+    /// ターゲットを足すときは、SqlClient を参照する最小の csproj を restore して、<c>obj/project.assets.json</c> の
+    /// <c>packagesToPrune</c> に Pkcs が載るか（あるいは NU1902 / NU1903 が出るか）で決める。WPF
+    /// （<c>Microsoft.WindowsDesktop.App</c>）は刈り込み、Blazor（<c>Microsoft.NET.Sdk.Web</c>）は刈り込まない。
+    /// </para>
+    /// </remarks>
+    internal abstract bool SharedFrameworkPrunesCryptographyPkcs { get; }
+
     // ── スキャフォールド差分（決定的な土台） ──
 
     /// <summary>csproj スケルトンを組み立てる（ターゲットの SDK・TFM・PackageReference 差分を含む）</summary>
@@ -104,11 +124,21 @@ public abstract class MockProjectTargetProfile
     /// <remarks>
     /// SQLite は <c>Microsoft.Data.Sqlite</c> が推移的に持ち込む SQLitePCLRaw の版に既知の脆弱性があるため、
     /// QuickER 本体・サンプルと同じく修正済みの版を明示参照で上書きする（無いと restore が NU1903 を出す）。
+    /// SQL Server は、共有フレームワークが Pkcs を刈り込まないターゲット（<see cref="SharedFrameworkPrunesCryptographyPkcs"/>）
+    /// でだけ、修正済みの System.Security.Cryptography.Pkcs を明示参照で上書きする。
     /// </remarks>
-    private protected static string BuildAdoPackageReferences(string? repositoryDialect) =>
+    private protected string BuildAdoPackageReferences(string? repositoryDialect) =>
         repositoryDialect switch
         {
-            "sqlserver" => PackageReferenceLine(MockProjectPackageVersions.SqlClient),
+            "sqlserver" => PackageReferenceLine(MockProjectPackageVersions.SqlClient)
+                + (
+                    SharedFrameworkPrunesCryptographyPkcs
+                        ? string.Empty
+                        : "    <!-- Microsoft.Data.SqlClient brings in a System.Security.Cryptography.Pkcs version with known "
+                            + "vulnerabilities (GHSA-846f-f764-76mx, GHSA-2fmv-rv2c-59x7), so the fixed version is referenced "
+                            + "explicitly to override it -->\n"
+                            + PackageReferenceLine(MockProjectPackageVersions.CryptographyPkcs)
+                ),
             "sqlite" => PackageReferenceLine(MockProjectPackageVersions.Sqlite)
                 + "    <!-- Microsoft.Data.Sqlite brings in an SQLitePCLRaw version with a known vulnerability "
                 + "(GHSA-2m69-gcr7-jv3q), so the fixed version is referenced explicitly to override it -->\n"

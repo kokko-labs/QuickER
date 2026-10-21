@@ -3,8 +3,8 @@ namespace QuickER.AI.Mock;
 /// <summary>Blazor Web App (.NET) ターゲットのプロファイル。csproj／README とプロンプトの Blazor 固有文面を提供する。</summary>
 /// <remarks>
 /// 技術構成は「Blazor Web App（.NET の統合テンプレート）・グローバル InteractiveServer レンダーモード・単一プロジェクト・
-/// net10.0・追加パッケージ不要」（DI・ASP.NET Core ランタイムは共有フレームワークに同梱されるため、方言 ADO 以外の
-/// PackageReference は要らない）。WPF 版（<see cref="WpfMockProjectTargetProfile"/>）と対称構造で、各フラグメントは
+/// net10.0・追加パッケージ不要」（DI・ASP.NET Core ランタイムは共有フレームワークに同梱されるため、方言 ADO と
+/// その脆弱性対策のピン以外の PackageReference は要らない）。WPF 版（<see cref="WpfMockProjectTargetProfile"/>）と対称構造で、各フラグメントは
 /// WPF 版の対応する一文と 1:1 に対応する。README とプロンプトの本文はすべて英語固定
 /// （ヘッドレス実行の機械向け指示・生成物に同梱する規約ドキュメントは UI 言語に追従させない方針）。
 /// </remarks>
@@ -17,6 +17,10 @@ internal sealed class BlazorMockProjectTargetProfile : MockProjectTargetProfile
     internal override string UiFileSearchPattern => "*.razor";
 
     /// <inheritdoc />
+    /// <remarks>Microsoft.AspNetCore.App は Pkcs の DLL を持つが刈り込まない（SqlClient の推移的な版が解決される）。</remarks>
+    internal override bool SharedFrameworkPrunesCryptographyPkcs => false;
+
+    /// <inheritdoc />
     /// <remarks>Blazor の UI 層は Razor コンポーネント・共有スタイルシート（wwwroot/style.css）・C# ソースで成り立つ。</remarks>
     internal override IReadOnlySet<string> AllowedEmitExtensions { get; } =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".razor", ".css", ".cs" };
@@ -24,7 +28,7 @@ internal sealed class BlazorMockProjectTargetProfile : MockProjectTargetProfile
     // ── スキャフォールド差分 ──
 
     /// <inheritdoc />
-    /// <remarks>Blazor Web App・net10.0（Microsoft.NET.Sdk.Web）。PackageReference は方言 ADO のみ（無ければ ItemGroup ごと省略）。</remarks>
+    /// <remarks>Blazor Web App・net10.0（Microsoft.NET.Sdk.Web）。PackageReference は方言 ADO とそのピンのみ（無ければ ItemGroup ごと省略）。</remarks>
     internal override string BuildCsproj(string rootNamespace, string? repositoryDialect)
     {
         var adoPackage = BuildAdoPackageReferences(repositoryDialect);

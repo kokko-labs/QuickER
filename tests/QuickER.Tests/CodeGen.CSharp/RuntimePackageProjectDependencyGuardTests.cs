@@ -47,11 +47,11 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             .BeEmpty(NoFrameworkReferenceReason);
     }
 
-    /// <summary>SqlServer パッケージは SqlClient のみを持ち、Sqlite / EF Core 系を持たない</summary>
+    /// <summary>SqlServer パッケージは SqlClient + Pkcs のみを持ち、Sqlite / EF Core 系を持たない</summary>
     [Fact(
-        DisplayName = "QuickER.Runtime.SqlServer は Microsoft.Data.SqlClient のみ（Sqlite / EF Core なし）"
+        DisplayName = "QuickER.Runtime.SqlServer は Microsoft.Data.SqlClient + System.Security.Cryptography.Pkcs のみ（Sqlite / EF Core なし）"
     )]
-    public void SqlServer_HasSqlClientOnly()
+    public void SqlServer_HasSqlClientAndPkcsPinOnly()
     {
         var packages = PackageReferences(
             "src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj"
@@ -60,8 +60,8 @@ public sealed class RuntimePackageProjectDependencyGuardTests
         packages
             .Should()
             .BeEquivalentTo(
-                new[] { "Microsoft.Data.SqlClient" },
-                "SqlServer パッケージの NuGet 依存は ADO（SqlClient）だけに保つ"
+                new[] { "Microsoft.Data.SqlClient", "System.Security.Cryptography.Pkcs" },
+                "SqlServer パッケージの NuGet 依存は ADO（SqlClient）＋既知脆弱性対策の System.Security.Cryptography.Pkcs ピンだけに保つ"
                     + "（Sqlite / EF Core / DI 系が混ざってはならない。DI 登録拡張はスキーマ依存物として生成側に出力される）"
             );
 
