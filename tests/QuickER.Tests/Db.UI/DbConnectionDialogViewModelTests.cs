@@ -910,6 +910,60 @@ public class DbConnectionDialogViewModelTests : IDisposable
             .NotBe(nameof(DbSslMode.Require));
     }
 
+    /// <summary>
+    /// 認証方式の選択肢が、全値を resx の表示名つきで並べることを検証する（値を足して表示名を忘れると赤）。
+    /// </summary>
+    [Fact(DisplayName = "認証方式の選択肢は全値を resx の表示名で並べる")]
+    public void AuthModes_ExposeLocalizedDisplayNames()
+    {
+        var vm = CreateVm(CreateStore());
+
+        vm.AuthModes.Select(i => i.Mode).Should().Equal(Enum.GetValues<DbAuthMode>());
+        vm.AuthModes.Should().OnlyContain(i => !string.IsNullOrWhiteSpace(i.Display));
+        vm.AuthModes.Single(i => i.Mode == DbAuthMode.Windows)
+            .Display.Should()
+            .Be(Strings.DbConnection_AuthMode_Windows);
+        vm.AuthModes.Single(i => i.Mode == DbAuthMode.UsernamePassword)
+            .Display.Should()
+            .Be(Strings.DbConnection_AuthMode_UsernamePassword);
+        vm.AuthModes.Single(i => i.Mode == DbAuthMode.AzureAd)
+            .Display.Should()
+            .Be(Strings.DbConnection_AuthMode_AzureAd);
+        // 列挙名そのままではない（Windows は表示名と列挙名が同じ綴りなので見ない）
+        vm.AuthModes.Single(i => i.Mode == DbAuthMode.UsernamePassword)
+            .Display.Should()
+            .NotBe(nameof(DbAuthMode.UsernamePassword));
+        vm.AuthModes.Single(i => i.Mode == DbAuthMode.AzureAd)
+            .Display.Should()
+            .NotBe(nameof(DbAuthMode.AzureAd));
+    }
+
+    /// <summary>
+    /// 整数で保存された既存のプロファイルの認証方式が、そのまま読めて同じ選択肢を選んだ状態になることを検証する
+    /// （表示名を変えても保存形は変わらない）。
+    /// </summary>
+    [Theory(DisplayName = "整数で保存された認証方式は、同じ選択肢を選んだ状態で読み込まれる")]
+    [InlineData(0, DbAuthMode.Windows)]
+    [InlineData(1, DbAuthMode.UsernamePassword)]
+    [InlineData(2, DbAuthMode.AzureAd)]
+    public void AuthMode_SavedAsInteger_SelectsSameOption(int saved, DbAuthMode expected)
+    {
+        var store = CreateStore();
+        var json =
+            "{\"profiles\":[{\"id\":\""
+            + Guid.NewGuid().ToString()
+            + "\",\"name\":\"Saved\",\"dbms\":\"sqlserver\",\"server\":\"srv\",\"database\":\"db\",\"authMode\":"
+            + saved.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            + ",\"userId\":\"u\",\"trustServerCertificate\":true,\"savePassword\":false}]}";
+        File.WriteAllText(store.ConnectionsPath, json);
+
+        var vm = CreateVm(store);
+        vm.SelectedProfileItem = vm.Profiles.Single();
+
+        vm.AuthMode.Should().Be(expected);
+        vm.AuthModes.Should().ContainSingle(i => i.Mode == expected);
+    }
+
     /// <summary>Oracle 選択時だけ「既定は平文接続」の注記を出すことを検証する</summary>
     [Theory(DisplayName = "Oracle の平文接続の注記は Oracle でのみ表示する")]
     [InlineData("oracle", true)]

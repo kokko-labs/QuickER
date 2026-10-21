@@ -5,8 +5,6 @@
   xmlns:vm="clr-namespace:QuickER.Db.UI"
   xmlns:local="clr-namespace:QuickER.Db.UI"
   xmlns:ui="clr-namespace:QuickER.Gui.Common;assembly=QuickER.Gui.Common"
-  xmlns:prov="clr-namespace:QuickER.Provider;assembly=QuickER.Provider"
-  xmlns:sys="clr-namespace:System;assembly=System.Runtime"
   xmlns:resources="clr-namespace:QuickER.Db.UI.Resources"
   Title="{x:Static resources:Strings.DbConnection_Title}"
   Width="520"
@@ -24,12 +22,6 @@
              （BoolToVisibilityConverter も辞書由来となり App 実行時リソース依存が外れる） -->
         <ResourceDictionary Source="pack://application:,,,/QuickER.Gui.Common;component/Themes/DialogTheme.xaml" />
       </ResourceDictionary.MergedDictionaries>
-
-      <ObjectDataProvider x:Key="AuthModes" MethodName="GetValues" ObjectType="{x:Type sys:Enum}">
-        <ObjectDataProvider.MethodParameters>
-          <x:Type TypeName="prov:DbAuthMode" />
-        </ObjectDataProvider.MethodParameters>
-      </ObjectDataProvider>
     </ResourceDictionary>
   </Window.Resources>
   <Grid Margin="14">
@@ -254,8 +246,10 @@
       Grid.Column="1"
       Margin="0,4"
       Style="{StaticResource FormComboBox}"
-      ItemsSource="{Binding Source={StaticResource AuthModes}}"
-      SelectedItem="{Binding AuthMode}"
+      ItemsSource="{Binding AuthModes}"
+      DisplayMemberPath="Display"
+      SelectedValuePath="Mode"
+      SelectedValue="{Binding AuthMode}"
       Visibility="{Binding ShowAuthMode, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 

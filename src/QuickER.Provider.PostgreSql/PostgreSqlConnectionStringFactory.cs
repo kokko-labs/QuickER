@@ -11,14 +11,16 @@ namespace QuickER.Provider.PostgreSql;
 /// </remarks>
 public static class PostgreSqlConnectionStringFactory
 {
+    /// <summary>ポートを指定しないときに使う PostgreSQL の既定ポート（<see cref="IDatabaseProvider.DefaultPort"/> もこの値を指す）</summary>
+    public const int DefaultPort = 5432;
+
     /// <summary>共通接続設定から ADO.NET の接続文字列を構築する</summary>
     public static string Build(DbConnectionSettings settings)
     {
         var b = new NpgsqlConnectionStringBuilder
         {
             Host = settings.Host,
-            // ポート未指定時は PostgreSQL の既定ポート 5432 を用いる
-            Port = settings.Port ?? 5432,
+            Port = settings.Port ?? DefaultPort,
             Database = settings.Database,
             Username = settings.UserId,
             Password = settings.Password,

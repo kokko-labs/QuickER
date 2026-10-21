@@ -300,6 +300,24 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string DbConnection_AuthMode_Windows {
+            get {
+                return ResourceManager.GetString("DbConnection_AuthMode_Windows", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_AuthMode_UsernamePassword {
+            get {
+                return ResourceManager.GetString("DbConnection_AuthMode_UsernamePassword", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_AuthMode_AzureAd {
+            get {
+                return ResourceManager.GetString("DbConnection_AuthMode_AzureAd", resourceCulture);
+            }
+        }
+
         public static string DbConnection_UserName {
             get {
                 return ResourceManager.GetString("DbConnection_UserName", resourceCulture);
