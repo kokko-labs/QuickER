@@ -11,6 +11,9 @@ namespace QuickER.Provider.MySql;
 /// </remarks>
 public static class MySqlConnectionStringFactory
 {
+    /// <summary>ポートを指定しないときに使う MySQL の既定ポート（<see cref="IDatabaseProvider.DefaultPort"/> もこの値を指す）</summary>
+    public const int DefaultPort = 3306;
+
     /// <summary>共通接続設定から ADO.NET の接続文字列を構築する</summary>
     /// <param name="settings">共通接続設定</param>
     /// <param name="allowUserVariables">
@@ -22,8 +25,7 @@ public static class MySqlConnectionStringFactory
         var b = new MySqlConnectionStringBuilder
         {
             Server = settings.Host,
-            // ポート未指定時は MySQL の既定ポート 3306 を用いる
-            Port = (uint)(settings.Port ?? 3306),
+            Port = (uint)(settings.Port ?? DefaultPort),
             Database = settings.Database,
             UserID = settings.UserId,
             Password = settings.Password,

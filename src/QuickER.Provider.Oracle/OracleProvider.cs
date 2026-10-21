@@ -16,7 +16,7 @@ public sealed class OracleProvider : IDatabaseProvider
     public string DisplayName => "Oracle";
 
     /// <inheritdoc />
-    public int? DefaultPort => 1521;
+    public int? DefaultPort => OracleConnectionStringFactory.DefaultPort;
 
     /// <inheritdoc />
     public ISchemaImporter SchemaImporter { get; } = new OracleSchemaImporter();

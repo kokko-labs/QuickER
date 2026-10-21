@@ -16,7 +16,7 @@ public sealed class MySqlProvider : IDatabaseProvider
     public string DisplayName => "MySQL";
 
     /// <inheritdoc />
-    public int? DefaultPort => 3306;
+    public int? DefaultPort => MySqlConnectionStringFactory.DefaultPort;
 
     /// <inheritdoc />
     public ISchemaImporter SchemaImporter { get; } = new MySqlSchemaImporter();

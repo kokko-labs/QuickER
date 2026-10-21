@@ -11,16 +11,19 @@ namespace QuickER.Provider.Oracle;
 /// </para>
 /// <para>
 /// <c>DataSource</c> は EZConnect 形式 <c>host:port/service</c> で組み立てる。ポート未指定時は
-/// Oracle の既定ポート 1521 を用いる。サービス名は <see cref="DbConnectionSettings.ServiceName"/> が
+/// 既定ポート（<see cref="DefaultPort"/>）を用いる。サービス名は <see cref="DbConnectionSettings.ServiceName"/> が
 /// 非空ならそれを、空なら <see cref="DbConnectionSettings.Database"/> を用いる。
 /// </para>
 /// </remarks>
 public static class OracleConnectionStringFactory
 {
+    /// <summary>ポートを指定しないときに使う Oracle の既定ポート（<see cref="IDatabaseProvider.DefaultPort"/> もこの値を指す）</summary>
+    public const int DefaultPort = 1521;
+
     /// <summary>共通接続設定から ADO.NET の接続文字列を構築する</summary>
     public static string Build(DbConnectionSettings settings)
     {
-        var port = settings.Port ?? 1521;
+        var port = settings.Port ?? DefaultPort;
         // サービス名は ServiceName 優先、空なら Database 名で代用する
         var service = string.IsNullOrWhiteSpace(settings.ServiceName)
             ? settings.Database

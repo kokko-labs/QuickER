@@ -16,7 +16,7 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
     public string DisplayName => "PostgreSQL";
 
     /// <inheritdoc />
-    public int? DefaultPort => 5432;
+    public int? DefaultPort => PostgreSqlConnectionStringFactory.DefaultPort;
 
     /// <inheritdoc />
     public ISchemaImporter SchemaImporter { get; } = new PostgreSqlSchemaImporter();
