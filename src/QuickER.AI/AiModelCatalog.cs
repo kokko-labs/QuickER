@@ -7,12 +7,13 @@ namespace QuickER.AI;
 /// </remarks>
 public static class AiModelCatalog
 {
-    /// <summary>OpenAI の既定モデル名（GPT-5.6 ファミリーの中位＝知能とコストのバランス型）</summary>
-    public const string DefaultOpenAiModel = "gpt-5.6-terra";
+    /// <summary>OpenAI の既定モデル名（GPT-6 ファミリーの中位＝知能とコストのバランス型）</summary>
+    public const string DefaultOpenAiModel = "gpt-6.1-sol";
 
     /// <summary>
-    /// OpenAI の候補モデル一覧（2026-09 時点。gpt-6-astra=最上位・GPT-5.6 ファミリーの
-    /// sol=複雑な業務向け・terra=バランス・luna=低コスト大量処理向けで、上位から順に並べる）。
+    /// OpenAI の候補モデル一覧（2026-10 時点。GPT-6 ファミリーの astra=最上位・6.1-sol=バランス・
+    /// luna=低コスト大量処理向けで、上位から順に並べる。GPT-6 には GPT-5.6 の Terra に当たる段が無いので、
+    /// 中位のバランス型は Sol）。
     /// **並び順は表示順であって既定ではない**＝既定は <see cref="DefaultOpenAiModel"/> が正本で、
     /// プロバイダー切替時もそちらが選ばれる。旧世代は API で引き続き利用可能なので、
     /// 必要なら手入力すれば MRU 履歴として候補に残る。
@@ -20,25 +21,24 @@ public static class AiModelCatalog
     public static readonly IReadOnlyList<string> OpenAiModels =
     [
         "gpt-6-astra",
-        "gpt-5.6-sol",
-        "gpt-5.6-terra", // = DefaultOpenAiModel
-        "gpt-5.6-luna",
+        "gpt-6.1-sol", // = DefaultOpenAiModel
+        "gpt-6-luna",
     ];
 
     /// <summary>Anthropic (Claude) の既定モデル名（速度と知能のバランス型）</summary>
-    public const string DefaultClaudeModel = "claude-sonnet-5";
+    public const string DefaultClaudeModel = "claude-sonnet-5-5";
 
     /// <summary>
-    /// Anthropic (Claude) の候補モデル一覧（2026-09 時点。fable-5-1=最上位・opus-5=エージェンティック
-    /// コーディング特化・sonnet-5=バランス・haiku-4-5=最速で、上位から順に並べる）。
+    /// Anthropic (Claude) の候補モデル一覧（2026-10 時点。fable-5-1=最上位・opus-5-5=長時間のエージェント作業と
+    /// コーディング向け・sonnet-5-5=速度と知能のバランス・haiku-5-5=最速で、上位から順に並べる）。
     /// 並び順と既定の関係・旧世代の扱いは <see cref="OpenAiModels"/> と同じ。
     /// </summary>
     public static readonly IReadOnlyList<string> ClaudeModels =
     [
         "claude-fable-5-1",
-        "claude-opus-5",
-        "claude-sonnet-5", // = DefaultClaudeModel
-        "claude-haiku-4-5",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5", // = DefaultClaudeModel
+        "claude-haiku-5-5",
     ];
 
     /// <summary>Claude Code（CLI）の既定モデル（空＝Claude Code の既定に従う）</summary>
