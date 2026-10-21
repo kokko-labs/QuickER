@@ -312,9 +312,9 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
-        public static string DbConnection_AuthMode_AzureAd {
+        public static string DbConnection_AuthMode_EntraId {
             get {
-                return ResourceManager.GetString("DbConnection_AuthMode_AzureAd", resourceCulture);
+                return ResourceManager.GetString("DbConnection_AuthMode_EntraId", resourceCulture);
             }
         }
 

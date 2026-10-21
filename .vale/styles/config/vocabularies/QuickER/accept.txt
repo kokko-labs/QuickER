@@ -12,6 +12,7 @@ Authenticode
 Blazor
 CSharpier
 DBNull
+Entra
 EZConnect
 MSBuild
 Npgsql

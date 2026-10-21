@@ -6,7 +6,7 @@ namespace QuickER.Provider.SqlServer;
 /// <summary>共通接続設定 <see cref="DbConnectionSettings"/> から SQL Server の接続文字列を構築する</summary>
 /// <remarks>
 /// ポート指定時は <c>Host,Port</c> 形式の DataSource を用いる（省略時はインスタンス名運用を許容する）
-/// 認証は <see cref="DbAuthMode"/> に応じて統合認証 / SQL 認証 / Azure AD 認証へ振り分ける
+/// 認証は <see cref="DbAuthMode"/> に応じて統合認証 / SQL 認証 / Microsoft Entra ID 認証へ振り分ける
 /// </remarks>
 public static class SqlServerConnectionStringFactory
 {
@@ -36,7 +36,7 @@ public static class SqlServerConnectionStringFactory
                 b.Password = settings.Password;
                 break;
 
-            case DbAuthMode.AzureAd:
+            case DbAuthMode.EntraId:
 
                 if (!string.IsNullOrWhiteSpace(settings.UserId))
                 {

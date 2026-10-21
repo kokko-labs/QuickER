@@ -7,7 +7,7 @@ namespace QuickER.Provider.Oracle;
 /// <remarks>
 /// <para>
 /// Oracle の認証は常にユーザー名 / パスワードとして扱う（<see cref="DbAuthMode.Windows"/> /
-/// <see cref="DbAuthMode.AzureAd"/> が来ても同様）。
+/// <see cref="DbAuthMode.EntraId"/> が来ても同様）。
 /// </para>
 /// <para>
 /// <c>DataSource</c> は EZConnect 形式 <c>host:port/service</c> で組み立てる。ポート未指定時は

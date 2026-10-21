@@ -193,8 +193,8 @@
   <data name="DbConnection_AuthMode_UsernamePassword" xml:space="preserve">
     <value>SQL Server</value>
   </data>
-  <data name="DbConnection_AuthMode_AzureAd" xml:space="preserve">
-    <value>Azure AD</value>
+  <data name="DbConnection_AuthMode_EntraId" xml:space="preserve">
+    <value>Microsoft Entra ID</value>
   </data>
   <data name="DbConnection_UserName" xml:space="preserve">
     <value>User Name</value>

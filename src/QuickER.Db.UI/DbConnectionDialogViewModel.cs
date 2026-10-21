@@ -205,7 +205,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [
         new(DbAuthMode.Windows, Strings.DbConnection_AuthMode_Windows),
         new(DbAuthMode.UsernamePassword, Strings.DbConnection_AuthMode_UsernamePassword),
-        new(DbAuthMode.AzureAd, Strings.DbConnection_AuthMode_AzureAd),
+        new(DbAuthMode.EntraId, Strings.DbConnection_AuthMode_EntraId),
     ];
 
     /// <summary>TLS 要求水準の選択肢（値＋ローカライズ済み表示名）</summary>
