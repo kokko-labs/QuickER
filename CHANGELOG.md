@@ -713,6 +713,12 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Reopening a minimized AI chat or mock generation window from its toolbar button now restores it to its previous size and brings it to the front** — it used to stay minimized in the taskbar. A window that was maximized before it was minimized is restored to maximized
 - **On a Turkish system, the mock checks and outputs no longer miss tags, attributes and CSS written in a different letter case** — the case-insensitive matching followed the system's culture, where `I` and `i` are not the upper and lower case of each other, so for example an external reference in `@IMPORT` was not reported
 
+### Security
+
+#### Distribution
+
+- **The SQL Server and Oracle data access no longer brings in a vulnerable `System.Security.Cryptography.Pkcs`** — `Microsoft.Data.SqlClient` and `Oracle.ManagedDataAccess.Core` bring in versions 9.0.13 and 8.0.1, which have known denial-of-service vulnerabilities (GHSA-846f-f764-76mx, GHSA-2fmv-rv2c-59x7). QuickER, its CLI, and the `QuickER.Runtime.SqlServer` package now reference the fixed version 10.0.13 to override them, and a mock project generated for SQL Server with the Blazor target references it as well. A WPF mock project does not need it, because its shared framework already provides the package
+
 ## [0.2.0] - 2026-09-24
 
 Highlights of this release:

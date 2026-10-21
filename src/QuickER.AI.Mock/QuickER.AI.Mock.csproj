@@ -27,7 +27,7 @@
 
   <!--
     モックプロジェクト生成が書き出す csproj の PackageReference の版。正本は Directory.Packages.props
-    （脆弱性対策の SQLitePCLRaw のピンを含む）で、ここではその値をアセンブリのメタデータへ写すだけ＝
+    （脆弱性対策の SQLitePCLRaw・System.Security.Cryptography.Pkcs のピンを含む）で、ここではその値をアセンブリのメタデータへ写すだけ＝
     版の数字を C# に書かない。読み出しは MockProjectPackageVersions（キーの接頭辞と ID の一覧もそちらが正本）。
     PackageVersion が消えると値が空になり、読み出しが例外で止まる（MockProjectPackageVersionsTests が検知する）。
   -->
@@ -51,6 +51,10 @@
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>QuickER.MockProjectPackageVersion:SQLitePCLRaw.bundle_e_sqlite3</_Parameter1>
       <_Parameter2>@(PackageVersion->WithMetadataValue('Identity', 'SQLitePCLRaw.bundle_e_sqlite3')->'%(Version)')</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>QuickER.MockProjectPackageVersion:System.Security.Cryptography.Pkcs</_Parameter1>
+      <_Parameter2>@(PackageVersion->WithMetadataValue('Identity', 'System.Security.Cryptography.Pkcs')->'%(Version)')</_Parameter2>
     </AssemblyAttribute>
   </ItemGroup>
 

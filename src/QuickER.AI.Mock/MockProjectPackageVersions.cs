@@ -39,9 +39,22 @@ internal static class MockProjectPackageVersions
     /// </summary>
     internal const string SqliteNativeBundle = "SQLitePCLRaw.bundle_e_sqlite3";
 
+    /// <summary>
+    /// 暗号の PKCS ライブラリ（<see cref="SqlClient"/> が推移的に持ち込む版に既知の脆弱性があるため、
+    /// 共有フレームワークが刈り込まないターゲットでは修正済みの版を明示参照する）
+    /// </summary>
+    internal const string CryptographyPkcs = "System.Security.Cryptography.Pkcs";
+
     /// <summary>このアセンブリへ版を写しているパッケージ ID の一覧（csproj の AssemblyAttribute と 1:1）</summary>
     internal static IReadOnlyList<string> PackageIds { get; } =
-    [CommunityToolkitMvvm, DependencyInjection, SqlClient, Sqlite, SqliteNativeBundle];
+    [
+        CommunityToolkitMvvm,
+        DependencyInjection,
+        SqlClient,
+        Sqlite,
+        SqliteNativeBundle,
+        CryptographyPkcs,
+    ];
 
     /// <summary>アセンブリメタデータから読み出した版（パッケージ ID → 版。空の値も含めて保持する）</summary>
     private static readonly Lazy<IReadOnlyDictionary<string, string>> Versions = new(LoadVersions);

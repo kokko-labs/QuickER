@@ -3146,7 +3146,7 @@ JSON エンベロープ（`POST` + Base64）では巨大 blob のメモリ膨張
 | パッケージ | 内容 | サードパーティ依存 |
 |---|---|---|
 | `QuickER.Runtime` | 共通基盤・方言中立の契約 | なし |
-| `QuickER.Runtime.SqlServer` | QuickER の SQL Server 方言エンジン | Microsoft.Data.SqlClient |
+| `QuickER.Runtime.SqlServer` | QuickER の SQL Server 方言エンジン | Microsoft.Data.SqlClient・System.Security.Cryptography.Pkcs |
 | `QuickER.Runtime.Sqlite` | QuickER の SQLite 方言エンジン | Microsoft.Data.Sqlite・SQLitePCLRaw.bundle_e_sqlite3 |
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品 | Microsoft.EntityFrameworkCore.Relational |
 | `QuickER.Runtime.InMemory` | インメモリエンジン（テスト用） | なし |

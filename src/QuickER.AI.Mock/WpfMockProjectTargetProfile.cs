@@ -16,6 +16,10 @@ internal sealed class WpfMockProjectTargetProfile : MockProjectTargetProfile
     internal override string UiFileSearchPattern => "*.xaml";
 
     /// <inheritdoc />
+    /// <remarks>Microsoft.WindowsDesktop.App は Pkcs を刈り込む（明示参照を書くと NU1510）。</remarks>
+    internal override bool SharedFrameworkPrunesCryptographyPkcs => true;
+
+    /// <inheritdoc />
     /// <remarks>WPF の UI 層は XAML とその分離コード／ViewModel だけで成り立つ。</remarks>
     internal override IReadOnlySet<string> AllowedEmitExtensions { get; } =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".xaml", ".cs" };
