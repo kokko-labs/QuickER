@@ -11,8 +11,8 @@ public enum DbAuthMode
     /// <summary>ユーザー名 / パスワード認証</summary>
     UsernamePassword,
 
-    /// <summary>Azure AD 認証（SQL Server のみ）</summary>
-    AzureAd,
+    /// <summary>Microsoft Entra ID 認証（SQL Server のみ）</summary>
+    EntraId,
 }
 
 /// <summary>DB 接続の TLS（通信路の暗号化）要求水準（方言横断の共通表現）</summary>
@@ -80,7 +80,7 @@ public class DbConnectionSettings
     /// <summary>データベース名</summary>
     public string Database { get; set; } = "";
 
-    /// <summary>認証方式（Windows / AzureAd は SQL Server のみ）</summary>
+    /// <summary>認証方式（Windows / EntraId は SQL Server のみ）</summary>
     public DbAuthMode AuthMode { get; set; } = DbAuthMode.Windows;
 
     /// <summary>ユーザー名（<see cref="DbAuthMode.UsernamePassword"/> 等で使用）</summary>

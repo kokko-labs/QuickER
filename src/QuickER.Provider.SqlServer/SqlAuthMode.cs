@@ -9,6 +9,6 @@ public enum SqlAuthMode
     /// <summary>SQL Server 認証（ユーザー名 / パスワード）</summary>
     SqlServer,
 
-    /// <summary>Azure AD 認証（Default / Interactive）</summary>
-    AzureAd,
+    /// <summary>Microsoft Entra ID 認証（Default / Interactive）</summary>
+    EntraId,
 }

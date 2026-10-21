@@ -94,10 +94,10 @@ public class DbConnectionDialogTests
                     .Be(nameof(DbConnectionDialogViewModel.AuthModeListItem.Mode));
                 combo.SelectedValue.Should().Be(viewModel.AuthMode);
 
-                combo.SelectedValue = DbAuthMode.AzureAd;
+                combo.SelectedValue = DbAuthMode.EntraId;
                 WpfApplicationTestSupport.DoEvents();
 
-                viewModel.AuthMode.Should().Be(DbAuthMode.AzureAd);
+                viewModel.AuthMode.Should().Be(DbAuthMode.EntraId);
             }
             catch (Exception ex)
             {

@@ -30,7 +30,7 @@ QuickER は、稼働中のデータベースからスキーマを取り込んで
 
 - **サーバー型 DBMS**：対象 DB、ホスト、ポート（空欄で下の表の既定のポート）、データベース名、ユーザー名、パスワードを指定します。
   ポートは空欄だけが既定値の意味で、数値でない値や 1〜65535 の範囲外の値は、OK・「接続テスト」・プロファイルの保存で拒否されます（打ち間違いで既定ポートの別のインスタンスへつながることはありません）。
-  SQL Server の Azure AD 認証は、ユーザー名を入れると対話式のサインインになり、空欄にすると既定の資格情報の連鎖（環境変数・マネージド ID など）を使います。
+  SQL Server の Microsoft Entra ID 認証（旧称 Azure AD）は、ユーザー名を入れると対話式のサインインになり、空欄にすると既定の資格情報の連鎖（環境変数・マネージド ID など）を使います。
   Oracle の接続は EZConnect 形式 `host:port/service` で組み立てられます
 - **暗号化 (SSL Mode)**：PostgreSQL・MySQL で、接続に TLS をどこまで要求するかを指定します。
   既定は「Unspecified」で、接続文字列へキーワードを載せずドライバ既定に委ねます（下の注意を参照）。
@@ -46,7 +46,7 @@ QuickER は、稼働中のデータベースからスキーマを取り込んで
 
 | DBMS | 接続先 | 既定のポート | 方言固有の項目 |
 | --- | --- | --- | --- |
-| SQL Server | ホストとデータベース | —（書かない：ドライバの既定かインスタンス名） | 認証方式（Windows 認証 / SQL Server 認証 / Azure AD 認証）・TrustServerCertificate |
+| SQL Server | ホストとデータベース | —（書かない：ドライバの既定かインスタンス名） | 認証方式（Windows 認証 / SQL Server 認証 / Microsoft Entra ID 認証）・TrustServerCertificate |
 | PostgreSQL | ホストとデータベース | 5432 | 暗号化 (SSL Mode) |
 | MySQL | ホストとデータベース | 3306 | 暗号化 (SSL Mode) |
 | Oracle | ホストとサービス名（「データベース名」欄） | 1521 | —（接続が暗号化されないことの注記。TLS は `quicker scaffold --connection`） |

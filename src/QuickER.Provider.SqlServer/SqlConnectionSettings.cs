@@ -14,10 +14,13 @@ public class SqlConnectionSettings
     /// <summary>認証方式</summary>
     public SqlAuthMode AuthMode { get; set; } = SqlAuthMode.Windows;
 
-    /// <summary>SQL 認証または Azure AD Password 認証時のユーザー名</summary>
+    /// <summary>
+    /// SQL 認証のユーザー名、または Microsoft Entra ID 認証の対話式サインインのユーザー名
+    /// （Microsoft Entra ID 認証で空なら既定の資格情報の連鎖を使う）
+    /// </summary>
     public string UserId { get; set; } = string.Empty;
 
-    /// <summary>SQL 認証または Azure AD Password 認証時のパスワード</summary>
+    /// <summary>SQL 認証のパスワード（Microsoft Entra ID 認証では使わない）</summary>
     public string Password { get; set; } = string.Empty;
 
     /// <summary>サーバー証明書を信頼するかどうか</summary>
@@ -53,7 +56,7 @@ public class SqlConnectionSettings
             {
                 SqlAuthMode.Windows => DbAuthMode.Windows,
                 SqlAuthMode.SqlServer => DbAuthMode.UsernamePassword,
-                SqlAuthMode.AzureAd => DbAuthMode.AzureAd,
+                SqlAuthMode.EntraId => DbAuthMode.EntraId,
                 _ => DbAuthMode.Windows,
             },
             UserId = UserId,

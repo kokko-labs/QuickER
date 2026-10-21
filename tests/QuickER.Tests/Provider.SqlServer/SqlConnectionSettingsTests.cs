@@ -41,30 +41,30 @@ public class SqlConnectionSettingsTests
         cs.Should().Contain("p@ss");
     }
 
-    /// <summary>Azure AD でユーザー ID 未指定なら Default 認証になることを検証する</summary>
-    [Fact(DisplayName = "Azure AD (UserId 空) で Default 認証になる")]
-    public void Build_AzureAd_Default()
+    /// <summary>Microsoft Entra ID でユーザー ID 未指定なら Default 認証になることを検証する</summary>
+    [Fact(DisplayName = "Microsoft Entra ID (UserId 空) で Default 認証になる")]
+    public void Build_EntraId_Default()
     {
         var s = new SqlConnectionSettings
         {
             Server = "srv",
             Database = "Db",
-            AuthMode = SqlAuthMode.AzureAd,
+            AuthMode = SqlAuthMode.EntraId,
         };
 
         var cs = s.Build();
         cs.Should().Contain("Authentication=ActiveDirectoryDefault");
     }
 
-    /// <summary>Azure AD でユーザー ID 指定時は Interactive 認証になることを検証する</summary>
-    [Fact(DisplayName = "Azure AD (UserId あり) で Interactive 認証になる")]
-    public void Build_AzureAd_Interactive()
+    /// <summary>Microsoft Entra ID でユーザー ID 指定時は Interactive 認証になることを検証する</summary>
+    [Fact(DisplayName = "Microsoft Entra ID (UserId あり) で Interactive 認証になる")]
+    public void Build_EntraId_Interactive()
     {
         var s = new SqlConnectionSettings
         {
             Server = "srv",
             Database = "Db",
-            AuthMode = SqlAuthMode.AzureAd,
+            AuthMode = SqlAuthMode.EntraId,
             UserId = "user@contoso.com",
         };
 
@@ -81,8 +81,8 @@ public class SqlConnectionSettingsTests
     [Theory(DisplayName = "Build はどの認証方式でも共通の接続文字列ファクトリと同じ文字列を返す")]
     [InlineData(SqlAuthMode.Windows, "")]
     [InlineData(SqlAuthMode.SqlServer, "sa")]
-    [InlineData(SqlAuthMode.AzureAd, "")]
-    [InlineData(SqlAuthMode.AzureAd, "user@contoso.com")]
+    [InlineData(SqlAuthMode.EntraId, "")]
+    [InlineData(SqlAuthMode.EntraId, "user@contoso.com")]
     public void Build_MatchesConnectionStringFactory(SqlAuthMode authMode, string userId)
     {
         var s = new SqlConnectionSettings

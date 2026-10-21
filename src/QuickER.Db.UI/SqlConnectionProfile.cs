@@ -29,7 +29,7 @@ public class SqlConnectionProfile
     /// <summary>データベース名</summary>
     public string Database { get; set; } = string.Empty;
 
-    /// <summary>認証方式（Windows / AzureAd は SQL Server のみ）</summary>
+    /// <summary>認証方式（Windows / EntraId は SQL Server のみ）</summary>
     public DbAuthMode AuthMode { get; set; } = DbAuthMode.Windows;
 
     /// <summary>ユーザー名（認証方式に応じて使用）</summary>

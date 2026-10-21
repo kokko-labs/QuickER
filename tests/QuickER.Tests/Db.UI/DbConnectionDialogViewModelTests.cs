@@ -926,16 +926,16 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.AuthModes.Single(i => i.Mode == DbAuthMode.UsernamePassword)
             .Display.Should()
             .Be(Strings.DbConnection_AuthMode_UsernamePassword);
-        vm.AuthModes.Single(i => i.Mode == DbAuthMode.AzureAd)
+        vm.AuthModes.Single(i => i.Mode == DbAuthMode.EntraId)
             .Display.Should()
-            .Be(Strings.DbConnection_AuthMode_AzureAd);
+            .Be(Strings.DbConnection_AuthMode_EntraId);
         // 列挙名そのままではない（Windows は表示名と列挙名が同じ綴りなので見ない）
         vm.AuthModes.Single(i => i.Mode == DbAuthMode.UsernamePassword)
             .Display.Should()
             .NotBe(nameof(DbAuthMode.UsernamePassword));
-        vm.AuthModes.Single(i => i.Mode == DbAuthMode.AzureAd)
+        vm.AuthModes.Single(i => i.Mode == DbAuthMode.EntraId)
             .Display.Should()
-            .NotBe(nameof(DbAuthMode.AzureAd));
+            .NotBe(nameof(DbAuthMode.EntraId));
     }
 
     /// <summary>
@@ -945,7 +945,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
     [Theory(DisplayName = "整数で保存された認証方式は、同じ選択肢を選んだ状態で読み込まれる")]
     [InlineData(0, DbAuthMode.Windows)]
     [InlineData(1, DbAuthMode.UsernamePassword)]
-    [InlineData(2, DbAuthMode.AzureAd)]
+    [InlineData(2, DbAuthMode.EntraId)]
     public void AuthMode_SavedAsInteger_SelectsSameOption(int saved, DbAuthMode expected)
     {
         var store = CreateStore();

@@ -30,7 +30,7 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 
 - **Server-type DBMS**: specify the target DB, host, port (leave empty for the default port in the table below), database name, user name, and password.
   Only an empty port means the default; a value that is not a number or is outside 1 to 65535 is rejected by OK, *Test Connection*, and saving a profile (a typo never connects to another instance on the default port).
-  With Azure AD authentication on SQL Server, a user name signs in interactively, and leaving it empty uses the default credential chain (environment variables, managed identity and so on).
+  With Microsoft Entra ID authentication (formerly Azure AD) on SQL Server, a user name signs in interactively, and leaving it empty uses the default credential chain (environment variables, managed identity and so on).
   The Oracle connection is built as EZConnect `host:port/service`
 - **Encryption (SSL Mode)**: for PostgreSQL and MySQL, how strongly the connection requires TLS.
   It defaults to "Unspecified" mode, which leaves the keyword off the connection string and the decision to the driver (see the note below).
@@ -46,7 +46,7 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 
 | DBMS | Where to connect | Default port | Dialect-specific settings |
 | --- | --- | --- | --- |
-| SQL Server | Host and database | — (not written: the driver's default or an instance name) | Authentication (Windows / SQL Server / Azure AD), TrustServerCertificate |
+| SQL Server | Host and database | — (not written: the driver's default or an instance name) | Authentication (Windows / SQL Server / Microsoft Entra ID), TrustServerCertificate |
 | PostgreSQL | Host and database | 5432 | Encryption (SSL Mode) |
 | MySQL | Host and database | 3306 | Encryption (SSL Mode) |
 | Oracle | Host and service name (the database-name field) | 1521 | — (a note that the connection is not encrypted; TLS through `quicker scaffold --connection`) |

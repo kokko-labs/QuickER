@@ -6,7 +6,7 @@ namespace QuickER.Provider.PostgreSql;
 /// <summary>共通接続設定 <see cref="DbConnectionSettings"/> から PostgreSQL の接続文字列を構築する</summary>
 /// <remarks>
 /// PostgreSQL の認証は常にユーザー名 / パスワードとして扱う（<see cref="DbAuthMode.Windows"/> /
-/// <see cref="DbAuthMode.AzureAd"/> が来ても同様）。SQL Server 固有の <c>TrustServerCertificate</c> /
+/// <see cref="DbAuthMode.EntraId"/> が来ても同様）。SQL Server 固有の <c>TrustServerCertificate</c> /
 /// <c>ServiceName</c> は無視する。
 /// </remarks>
 public static class PostgreSqlConnectionStringFactory
