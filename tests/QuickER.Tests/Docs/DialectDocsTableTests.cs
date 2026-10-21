@@ -156,14 +156,6 @@ public sealed class DialectDocsTableTests
         ("not encrypted", "暗号化されない", 3, (import, _) => import.ShowOracleEncryptionNote),
     ];
 
-    /// <summary>T-B：認証方式の括弧の名前（英語・日本語）→ 認証方式の選択肢</summary>
-    private static readonly (string English, string Japanese, DbAuthMode Mode)[] AuthModeNames =
-    [
-        ("Windows", "Windows 認証", DbAuthMode.Windows),
-        ("SQL Server", "SQL Server 認証", DbAuthMode.UsernamePassword),
-        ("Azure AD", "Azure AD 認証", DbAuthMode.AzureAd),
-    ];
-
     /// <summary>T-P：中立の型の語（英語・日本語）。Decimal は語でなく精度・スケールのコードスパンで書く</summary>
     private static readonly IReadOnlyDictionary<
         CanonicalTypeKind,
@@ -1219,6 +1211,33 @@ public sealed class DialectDocsTableTests
         }
     }
 
+    /// <summary>
+    /// 接続ダイアログの認証方式の選択肢の表示名を、指定の言語の resx から読む（現在のカルチャは切り替えない）。
+    /// 選択肢と resx のキーの対応は、現在のカルチャで読んだ値がダイアログの表示名と一致することで確かめる。
+    /// </summary>
+    private static List<string> AuthModeDisplayNames(
+        DbConnectionDialogViewModel dialog,
+        bool japanese
+    )
+    {
+        var resources = QuickER.Db.UI.Resources.Strings.ResourceManager;
+        var culture = japanese ? CultureInfo.GetCultureInfo("ja") : CultureInfo.InvariantCulture;
+        var names = new List<string>();
+
+        foreach (var item in dialog.AuthModes)
+        {
+            var key = "DbConnection_AuthMode_" + item.Mode;
+
+            resources
+                .GetString(key, CultureInfo.CurrentUICulture)
+                .Should()
+                .Be(item.Display, key + " がダイアログの表示名");
+            names.Add(resources.GetString(key, culture)!);
+        }
+
+        return names;
+    }
+
     /// <summary>接続の表の 1 行を、接続ダイアログの表示と接続文字列の組み立てに突き合わせる</summary>
     private static void AssertConnectionRow(
         IReadOnlyList<string> row,
@@ -1279,7 +1298,7 @@ public sealed class DialectDocsTableTests
                 where + "のサービス名"
             );
 
-        // 認証方式の括弧：名前の並び ⇔ 認証方式の選択肢（列挙値のすべて）
+        // 認証方式の括弧：名前の並び ⇔ 接続ダイアログの認証方式の表示名（英語の表は中立の resx・日本語の表は ja の resx）
         var opening = japanese ? "認証方式（" : "Authentication (";
         var closing = japanese ? "）" : ")";
         var at = row[3].IndexOf(opening, StringComparison.Ordinal);
@@ -1293,14 +1312,7 @@ public sealed class DialectDocsTableTests
                 [start..end]
                 .Split(" / ")
                 .Should()
-                .Equal(
-                    AuthModeNames.Select(n => japanese ? n.Japanese : n.English),
-                    where + "の認証方式"
-                );
-            AuthModeNames
-                .Select(n => n.Mode)
-                .Should()
-                .Equal(Enum.GetValues<DbAuthMode>(), where + "の認証方式の選択肢");
+                .Equal(AuthModeDisplayNames(import, japanese), where + "の認証方式");
         }
 
         // 既定のポート：セル ＝ DefaultPort ＝ ポートを空けたときの接続文字列の組み立て

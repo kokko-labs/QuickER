@@ -195,6 +195,19 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// <summary>サーバー証明書信頼チェックを表示するか（SQL Server 固有）</summary>
     public bool ShowTrustServerCertificate => ShowAuthMode;
 
+    /// <summary>認証方式の選択肢（値＋ローカライズ済み表示名）</summary>
+    /// <param name="Mode">認証方式</param>
+    /// <param name="Display">一覧に表示する文字列（例: SQL Server 認証）</param>
+    public sealed record AuthModeListItem(DbAuthMode Mode, string Display);
+
+    /// <summary>認証方式の選択肢一覧</summary>
+    public IReadOnlyList<AuthModeListItem> AuthModes { get; } =
+    [
+        new(DbAuthMode.Windows, Strings.DbConnection_AuthMode_Windows),
+        new(DbAuthMode.UsernamePassword, Strings.DbConnection_AuthMode_UsernamePassword),
+        new(DbAuthMode.AzureAd, Strings.DbConnection_AuthMode_AzureAd),
+    ];
+
     /// <summary>TLS 要求水準の選択肢（値＋ローカライズ済み表示名）</summary>
     /// <param name="Mode">要求水準</param>
     /// <param name="Display">一覧に表示する文字列（例: VerifyFull（CA とホスト名を検証））</param>
@@ -202,10 +215,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
     /// <summary>TLS 要求水準の選択肢一覧</summary>
     /// <remarks>
-    /// 認証方式（<see cref="AuthMode"/>）は列挙値をそのまま表示するのに対し、ここだけ表示名を翻訳するのは
-    /// 非対称だが意図的。<c>Require</c>（暗号化するが証明書を検証しない）と <c>VerifyCa</c> の差こそが
-    /// この設定の存在理由で、生の列挙名からはその差が読み取れない——選んだ水準の意味が
-    /// ツールチップを開かずに読めることを、列挙表示の対称性より優先する。
+    /// 表示名には括弧で意味を添える。<c>Require</c>（暗号化するが証明書を検証しない）と <c>VerifyCa</c> の差が
+    /// この設定の存在理由で、列挙名だけではその差が読み取れないため。
     /// </remarks>
     public IReadOnlyList<SslModeListItem> SslModes { get; } =
     [
