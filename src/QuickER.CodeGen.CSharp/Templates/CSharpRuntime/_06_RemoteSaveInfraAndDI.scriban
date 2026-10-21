@@ -2033,9 +2033,6 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 {{~ if repositories ~}}
             // Compile the expression-tree materializer for SelectColumns (the fixed SELECT set) once per type
             SelectMaterializer = BuildSelectMaterializer(entityType, selectProperties),
-{{~ else ~}}
-            // EF Core materializes its own queries, so the materializer is compiled only if a row is mapped through it
-            SelectMaterializer = CompileOnFirstUse(entityType, selectProperties),
 {{~ end ~}}
 {{~ end ~}}
 {{~ if repositories ~}}
@@ -2089,6 +2086,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 
 {{~ if repositories || ef_core ~}}
+{{~ if repositories ~}}
     // ===== Row materializer (expression-tree compiled; removes reflection from the hot path) =====
     /// <summary>Type-specialized reader accessors that avoid boxing (<c>GetInt32</c> etc.). Only the fast-path CLR types are registered.</summary>
     private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
@@ -2217,27 +2215,6 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 {{~ end ~}}
 
-{{~ if !repositories ~}}
-    /// <summary>Returns a materializer that compiles <see cref="BuildSelectMaterializer"/> on the first row it maps.</summary>
-    /// <remarks>
-    /// Without a QuickER repository nothing on the hot path maps rows through the materializer (EF Core materializes its
-    /// own queries, and raw SQL goes through the per-column mapping), so compiling it for every type the metadata is built
-    /// for would be work done for nothing. The metadata is shared by every thread, so the compilation is guarded by a
-    /// <see cref="Lazy{T}"/>, which compiles once even when two rows are mapped at the same time.
-    /// </remarks>
-    private static Func<DbDataReader, int[], EntityBaseCore> CompileOnFirstUse(
-        Type entityType,
-        IReadOnlyList<PropertyInfo> properties
-    )
-    {
-        var compiled = new Lazy<Func<DbDataReader, int[], EntityBaseCore>>(
-            () => BuildSelectMaterializer(entityType, properties)
-        );
-
-        return (reader, ordinals) => compiled.Value(reader, ordinals);
-    }
-
-{{~ end ~}}
     /// <summary>
     /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
     /// into an entity using a pre-resolved ordinal array (once per type).
@@ -2372,6 +2349,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         );
     }
 
+{{~ end ~}}
     /// <summary>Resolves each SelectColumns column name to its ordinal on this reader once (call before the row loop).</summary>
     public int[] SelectOrdinals(DbDataReader reader)
     {
@@ -2384,6 +2362,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 
         return ordinals;
     }
+{{~ if repositories ~}}
 
     /// <summary>Maps one data reader row to an entity (pre-resolved ordinal variant, for hot loops).</summary>
     public TEntity MapEntity<TEntity>(
@@ -2395,6 +2374,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     /// <summary>Maps one data reader row to an entity (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public TEntity MapEntity<TEntity>({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
         where TEntity : EntityBaseCore, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+{{~ end ~}}
 
     /// <summary>
     /// The column resolution of one raw SQL result set: the ordinal of every SELECT column, plus the ordinals of the

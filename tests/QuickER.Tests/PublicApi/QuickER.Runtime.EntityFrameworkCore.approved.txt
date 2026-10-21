@@ -56,12 +56,9 @@ public sealed class QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata
     public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> ResolveProjectionColumns(System.Collections.Generic.IReadOnlyCollection<string> propertyNames)
     public System.Collections.Generic.IReadOnlyList<System.Reflection.PropertyInfo> SelectProperties { get; init; }
     public System.Collections.Generic.IReadOnlyList<System.ValueTuple<System.Reflection.PropertyInfo, string>> SelectColumns { get; init; }
-    public System.Func<System.Data.Common.DbDataReader, int[], QuickER.Runtime.EntityBaseCore> SelectMaterializer { get; init; }
     public System.Reflection.PropertyInfo ColumnByPropertyName(string propertyName)
     public System.Reflection.PropertyInfo KeyProperty { get; init; }
     public System.Reflection.PropertyInfo RowVersionProperty { get; init; }
-    public TEntity MapEntity<TEntity>(System.Data.Common.DbDataReader reader)
-    public TEntity MapEntity<TEntity>(System.Data.Common.DbDataReader reader, int[] ordinals)
     public TEntity MapEntityFromRawSql<TEntity>(System.Data.Common.DbDataReader reader)
     public TEntity MapEntityFromRawSql<TEntity>(System.Data.Common.DbDataReader reader, QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata.RawSqlRowPlan plan)
     public int[] SelectOrdinals(System.Data.Common.DbDataReader reader)

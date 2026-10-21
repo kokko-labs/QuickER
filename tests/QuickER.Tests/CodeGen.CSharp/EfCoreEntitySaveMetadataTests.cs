@@ -1,10 +1,13 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
+using System.Reflection;
 using AwesomeAssertions;
-using Microsoft.Data.Sqlite;
+using QuickER.CodeGen.CSharp;
+using QuickER.Model;
+using QuickER.Provider;
+using QuickER.Provider.Sqlite;
 using QuickER.Runtime;
 using Xunit;
 using EfCoreMetadata = QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata;
@@ -12,15 +15,36 @@ using EfCoreMetadata = QuickER.Runtime.EntityFrameworkCore.EntitySaveMetadata;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// EF Core のランタイムパッケージの <c>EntitySaveMetadata</c> が、EF Core 単独の構成で要るものだけを用意することを
-/// 検証するテストクラス。
+/// EF Core 単独のスコープ（EF Core のランタイムパッケージを含む）の <c>EntitySaveMetadata</c> が、そのスコープで
+/// 使うものだけを持つことを検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// EF Core は自分でクエリを組み立てて行を組み立てるので、行の組み立て器（式木のコンパイル）は使われるまで作らない。
-/// 例外文に出す列の一覧も、特定の方言の引用符で囲まない。ランタイムパッケージを手書きのエンティティで直接使う。
+/// EF Core は自分でクエリを組み立てて行を組み立て、生 SQL のエンティティ取得は列ごとの写し（<c>SetColumnValue</c>）で行うので、
+/// QuickER 版 Repository の行の組み立て器（式木のコンパイル・型ごとの読み取り・値オブジェクトの速い経路・<c>MapEntity</c>）は
+/// 出さない。例外文に出す列の一覧も、特定の方言の引用符で囲まない。ランタイムパッケージを手書きのエンティティで直接使う。
 /// </remarks>
 public class EfCoreEntitySaveMetadataTests
 {
+    /// <summary>QuickER 版 Repository のスコープにだけある、行の組み立て器のメンバーの名前</summary>
+    private static readonly string[] MaterializerMemberNames =
+    [
+        "SelectMaterializer",
+        "MapEntity",
+        "BuildSelectMaterializer",
+        "BuildColumnAssign",
+        "BuildTypedReaders",
+        "ResolveValueObjectReader",
+        "ResolveValueObjectReaderCore",
+        "CompileOnFirstUse",
+        "_typedReaders",
+        "_valueObjectReaderCache",
+        "_isDbNullMethod",
+        "_getValueMethod",
+        "_setColumnValueMethod",
+        "_columnMappingFailureMethod",
+        "_rowStateProperty",
+    ];
+
     /// <summary>予約語と閉じ角括弧を名前に持つ列のテーブル</summary>
     [Table("probes")]
     private sealed class ProbeEntity : EntityBaseCore
@@ -36,7 +60,7 @@ public class EfCoreEntitySaveMetadataTests
         public int Odd { get; set; }
     }
 
-    /// <summary>引数なしのコンストラクタを持たないエンティティ（行の組み立て器は作れない）</summary>
+    /// <summary>引数なしのコンストラクタを持たないエンティティ（行の組み立て器を作ろうとすると失敗する型）</summary>
     [Table("orphans")]
     private sealed class NoDefaultConstructorEntity(int orphanId) : EntityBaseCore
     {
@@ -45,50 +69,96 @@ public class EfCoreEntitySaveMetadataTests
         public int OrphanId { get; set; } = orphanId;
     }
 
-    [Fact(DisplayName = "EF Core のメタデータは、行の組み立て器を使われるまでコンパイルしない")]
-    public void For_DoesNotCompileMaterializerUntilUsed()
+    [Fact(
+        DisplayName = "EF Core のランタイムパッケージの EntitySaveMetadata は、行の組み立て器のメンバーを持たない"
+    )]
+    public void Package_HasNoRowMaterializerMembers()
     {
-        // 組み立て器は引数なしのコンストラクタを呼ぶので、作ろうとした時点で失敗する型を使う
+        var present = typeof(EfCoreMetadata)
+            .GetMembers(
+                BindingFlags.Public
+                    | BindingFlags.NonPublic
+                    | BindingFlags.Instance
+                    | BindingFlags.Static
+                    | BindingFlags.DeclaredOnly
+            )
+            .Select(member => member.Name)
+            .Intersect(MaterializerMemberNames)
+            .ToList();
+
+        present
+            .Should()
+            .BeEmpty("EF Core のスコープは行を自分で組み立てないので、組み立て器を出さない");
+
+        // 生 SQL の列の解決は EF Core のスコープでも使うので残る
+        typeof(EfCoreMetadata)
+            .GetMethod(nameof(EfCoreMetadata.SelectOrdinals))
+            .Should()
+            .NotBeNull();
+    }
+
+    [Fact(DisplayName = "EF Core のメタデータは、引数なしのコンストラクタを持たない型でも作れる")]
+    public void For_TypeWithoutParameterlessConstructor_Builds()
+    {
         var metadata = EfCoreMetadata.For(typeof(NoDefaultConstructorEntity));
 
         metadata.KeyProperty.Name.Should().Be(nameof(NoDefaultConstructorEntity.OrphanId));
-
-        var map = () => metadata.SelectMaterializer(null!, []);
-        map.Should().Throw<ArgumentException>("使った時点で初めてコンパイルされる");
     }
 
-    [Fact(
-        DisplayName = "EF Core のメタデータの行の組み立て器は、使われた時点でコンパイルされて行を写す"
+    [Theory(
+        DisplayName = "インラインの生成物は、EF Core 単独なら行の組み立て器を出さず、QuickER 版 Repository があれば出す"
     )]
-    public void SelectMaterializer_CompilesOnFirstUse_AndMapsRows()
+    [InlineData(false, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public void InlineGeneration_EmitsMaterializerOnlyWithQuickErRepositories(
+        bool quickErRepositories,
+        bool efCore,
+        bool expected
+    )
     {
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-
-        using (var create = connection.CreateCommand())
+        var provider = new SqliteProvider();
+        var diagram = new ErDiagram
         {
-            create.CommandText =
-                "CREATE TABLE probes (probe_id INTEGER PRIMARY KEY, \"group\" TEXT, \"x]y\" INTEGER);"
-                + "INSERT INTO probes VALUES (1, 'a', 10), (2, 'b', 20);";
-            create.ExecuteNonQuery();
-        }
+            TargetDbms = "sqlite",
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "items",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "item_id",
+                            DataType = "INTEGER",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
 
-        using var query = connection.CreateCommand();
-        query.CommandText = "SELECT probe_id, \"group\", \"x]y\" FROM probes ORDER BY probe_id";
-        using var reader = query.ExecuteReader();
-        var metadata = EfCoreMetadata.For(typeof(ProbeEntity));
-        var mapped = new List<ProbeEntity>();
+        var result = DiagramCodeGenerator.Generate(
+            provider.TypeMapper,
+            provider.TypeCatalog,
+            diagram,
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Test.Materializer",
+                GenerateRepositories = quickErRepositories,
+                GenerateEfCoreRepositories = efCore,
+            }
+        );
+        result
+            .HasErrors.Should()
+            .BeFalse(string.Join(" / ", result.Diagnostics.Select(d => d.Message)));
+        var code = string.Concat(result.Files.Select(file => file.Content));
 
-        while (reader.Read())
-        {
-            mapped.Add(metadata.MapEntity<ProbeEntity>(reader));
-        }
-
-        mapped
-            .Select(probe => (probe.ProbeId, probe.Group, probe.Odd))
-            .Should()
-            .Equal((1, "a", 10), (2, "b", 20));
-        mapped.Should().OnlyContain(probe => probe.RowState == RowState.Unchanged);
+        code.Contains("BuildSelectMaterializer").Should().Be(expected);
+        code.Contains("public TEntity MapEntity<TEntity>").Should().Be(expected);
+        code.Should().NotContain("CompileOnFirstUse");
     }
 
     [Fact(DisplayName = "EF Core のメタデータの列一覧は、方言の引用符で囲まない")]
