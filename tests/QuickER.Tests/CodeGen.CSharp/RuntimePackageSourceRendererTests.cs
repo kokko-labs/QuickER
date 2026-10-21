@@ -217,23 +217,19 @@ public class RuntimePackageSourceRendererTests
     }
 
     /// <summary>
-    /// 方言／EF Core パッケージの行マテリアライザに型特殊化（<c>_typedReaders</c>）と
+    /// 方言パッケージの行マテリアライザに型特殊化（<c>_typedReaders</c>）と
     /// 値オブジェクトの <c>Create</c> 直呼びが含まれる。
     /// </summary>
     /// <remarks>
     /// パッケージソースは常に値オブジェクト有効でレンダリングされる（<see cref="RuntimePackageSourceRenderer"/>）ため、
     /// 型特殊化が値オブジェクト構成で無効化されていると、<c>UseRuntimePackages</c> の利用者は図の設定に依らず
     /// 常に <c>GetValue</c> ボックス化＋<c>PropertyInfo.SetValue</c> のフォールバックへ落ちてしまう。
+    /// EF Core のパッケージは行の組み立て器を持たない（<see cref="EfCoreEntitySaveMetadataTests"/> が固定する）。
     /// </remarks>
     [Fact]
     public void RenderedSources_KeepTypeSpecializedMaterializer()
     {
-        string[] sources =
-        [
-            _renderer.RenderSqlServer(),
-            _renderer.RenderSqlite(),
-            _renderer.RenderEfCore(),
-        ];
+        string[] sources = [_renderer.RenderSqlServer(), _renderer.RenderSqlite()];
 
         foreach (var source in sources)
         {
