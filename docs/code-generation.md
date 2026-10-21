@@ -111,16 +111,38 @@ Generation stops with an error that names both constraints; delete one of them.
 By default, an Entity is decorated with DataAnnotations and DB-definition metadata attributes (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, and so on) and a description.
 The generated code therefore doubles as a self-describing document of the DB definition.
 
-A DB type the type catalog cannot parse (`geometry`, `hierarchyid`, `sql_variant` and the like) falls back to `string` so that generation keeps going.
+Some DB types map to a C# type that the type name alone does not suggest.
+
+<!-- dialect-table: csharp-types -->
+
+| DBMS | DB type | C# type | Edit model and value object |
+|---|---|---|---|
+| SQL Server | `real`, `float(1)` to `float(24)` | `float` | As usual |
+| SQL Server | `float`, `float(25)`, `float(53)` | `double` | As usual |
+| PostgreSQL | `integer[]` and other arrays | `int[]` (an array of the element type) | Left out |
+| PostgreSQL | `interval` | `TimeSpan` | As usual |
+| PostgreSQL | `cidr` | `System.Net.IPNetwork` | As usual |
+| PostgreSQL | `inet` | `System.Net.IPAddress` | Left out |
+| PostgreSQL | `time with time zone`, `timetz` | `DateTimeOffset` | As usual |
+| MySQL | `tinyint` | `sbyte` | As usual |
+| MySQL | `tinyint unsigned` / `smallint unsigned` / `mediumint unsigned` / `int unsigned` / `bigint unsigned` | `byte` / `ushort` / `uint` / `uint` / `ulong` | As usual |
+| MySQL | `tinyint(1)`, `bit(1)`, `boolean` | `bool` | As usual |
+| MySQL | `bit(8)` and any other width above 1 | `ulong` | As usual |
+| MySQL | `year` | `int` | As usual |
+| Oracle | `NUMBER(1)` / `NUMBER(3)` / `NUMBER(5)` / `NUMBER(10)` / `NUMBER(19)` | `bool` / `byte` / `short` / `int` / `long` | As usual |
+| Oracle | `INTEGER`, `SMALLINT`, `NUMBER(*,0)` | `decimal` | As usual |
+| Oracle | `TIMESTAMP WITH LOCAL TIME ZONE` | `DateTime` | As usual |
+| SQLite | `REAL`, `FLOAT`, `DOUBLE` | `double` | As usual |
+| Any | `geometry`, `hierarchyid`, `sql_variant` | `string` | As usual |
+
+The last row is a fallback: a DB type the type catalog cannot parse becomes `string` so that generation keeps going.
 The generated code does not show that it happened, so generation names those columns in an information diagnostic, each written as table.column followed by its original type text in parentheses.
 Change the column's type in the diagram if `string` is not what you meant.
 
-MySQL unsigned integers (`int unsigned` and the like) are generated as unsigned C# types (`tinyint` as `byte`, `smallint` as `ushort`, `mediumint` and `int` as `uint`, `bigint` as `ulong`).
-This matches the CLR types the driver and the EF Core provider return, so values beyond the signed range can be read.
+MySQL's unsigned integers map to unsigned C# types because those are the CLR types the driver and the EF Core provider return, so values beyond the signed range can be read.
 The boolean convention (`tinyint(1)` as `bool`) applies to signed columns only.
 
-PostgreSQL array columns (`integer[]`, `varchar(20)[]` and the like) are generated as an array of the element type (`int[]`, `string[]`).
-They are **left out of edit models and value objects**, though.
+PostgreSQL array columns are **left out of edit models and value objects**.
 An edit model is one text input per column and has no notation for an array, and a value object would compare arrays by reference, so two arrays with the same contents would not be equal.
 **The length of an array's elements is not carried into the generated code either**: the 20 in `varchar(20)[]` is the length of an element, while `[MaxLength]` on an array means the number of elements, so no such (wrong) check is declared.
 Generation names the affected columns.
@@ -130,18 +152,15 @@ The repository still checks it before saving, and the constraint itself exists i
 Generation names those constraints too.
 Entity properties, EF Core, the in-memory repository and remote transfer handle them as usual.
 
-SQLite's `REAL` (and `FLOAT`, `DOUBLE` and the other types SQLite treats as REAL affinity) is generated as `double`.
-SQLite's REAL holds an 8-byte double, so a single-precision `float` would drop the low digits of the value on every read and write.
+SQLite's REAL affinity (`REAL`, `FLOAT`, `DOUBLE` and the other type names SQLite treats that way) holds an 8-byte double, so a single-precision `float` would drop the low digits of the value on every read and write.
 
-PostgreSQL's `interval` is generated as `TimeSpan`, `cidr` as `System.Net.IPNetwork`, and `inet` as `System.Net.IPAddress`.
-These are the types the driver (Npgsql) returns; it cannot read them as strings.
+PostgreSQL's `interval`, `cidr` and `inet` map to the types the driver (Npgsql) returns.
+It cannot read them as strings.
 **Reading an `inet` value as `IPAddress` drops its netmask** (the `/24` in `192.168.0.1/24`), as Npgsql does by default.
 **`inet` columns are left out of edit models and value objects** (an edit model is one text input per column and has no way to build an `IPAddress` from the input).
 As with array columns, generation names those columns, and a UNIQUE constraint that contains one is left out of the edit model's duplicate check.
-`interval` and `cidr` columns work in edit models as usual.
 
-PostgreSQL's `time with time zone` (`timetz`) is generated as `DateTimeOffset`.
-**Writing a value whose offset is not UTC needs the column type spelled out.**
+**Writing a `timetz` value whose offset is not UTC needs the column type spelled out.**
 QuickER does not generate EF Core's `HasColumnType` (EF Core is for connecting to an existing schema), so by default EF Core infers `timestamp with time zone` for a `DateTimeOffset` and Npgsql refuses any offset other than UTC.
 Spell the column type out in the generated `QuickErDbContext`'s `OnModelCreatingPartial` if you need it.
 Reading, and writing with a UTC offset, work as they are.
@@ -540,7 +559,7 @@ It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`
 The date parts of a `DateTimeOffset` column are taken in the offset the value carries, as C# does (`2024-01-01 05:00 +09:00` is year 2024, hour 5).
 
 `Contains` on a list expands to one bind variable per element and is not chunked.
-A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999).
+A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (SQL Server's 2100 parameters, SQLite's historical 999).
 For a large set of keys, stage them in a temporary table and join, or use raw SQL.
 
 ### Graph fetch (IncludeGraph)
@@ -1203,8 +1222,17 @@ Either of the following resolves it.
 
 ## Columns the database numbers
 
-DB import carries a column numbered by the database that refuses given values (SQL Server `IDENTITY`, PostgreSQL and Oracle `GENERATED ALWAYS AS IDENTITY`) into the diagram with a mark, as a column the database numbers, without its numbering definition (seed and increment; see [import warnings](database.md#import-warnings)).
-Automatic numbering that also accepts given values (`GENERATED BY DEFAULT AS IDENTITY`, `serial`, `AUTO_INCREMENT` and so on) gets no mark and is imported as an ordinary column.
+DB import carries a column numbered by the database that refuses given values into the diagram with a mark, as a column the database numbers, without its numbering definition (seed and increment; see [import warnings](database.md#import-warnings)).
+
+<!-- dialect-table: database-numbering -->
+
+| DBMS | Numbering that refuses given values | Numbering that also accepts given values | Note in generated DDL |
+|---|---|---|---|
+| SQL Server | ✅ (`IDENTITY`, marked) | — (cannot exist) | ✅ |
+| PostgreSQL | ✅ (`GENERATED ALWAYS AS IDENTITY`, marked) | ✅ (`GENERATED BY DEFAULT AS IDENTITY` and `serial`, imported as an ordinary column and warned) | ✅ |
+| MySQL | — (cannot exist; a switch removes the mark) | ✅ (`AUTO_INCREMENT`, imported as an ordinary column and warned) | — |
+| Oracle | ✅ (`GENERATED ALWAYS AS IDENTITY`, marked) | ✅ (`GENERATED BY DEFAULT AS IDENTITY`, imported as an ordinary column and warned) | ✅ |
+| SQLite | — (cannot exist; a switch removes the mark) | ✅ (`AUTOINCREMENT`, imported as an ordinary column and warned) | — |
 
 A marked column that is not part of the primary key carries the marker attribute `[IdentityColumn]` on the generated entity property and is treated like a computed column.
 
@@ -1229,13 +1257,12 @@ Inserting a row fails unless the database accepts explicit values (for example S
 Generation emits one Info diagnostic naming the excluded columns.
 
 The diagram has no numbering definition, so generated DDL and schema sync (adding a table or a column) create the column as an ordinary column.
-On SQL Server, PostgreSQL and Oracle a comment next to the column asks you to add the identity property by hand.
+Where the table shows a note, a comment next to the column asks you to add the identity property by hand.
 For a NOT NULL column outside the primary key, the same comment also says that generated INSERT statements fail on NOT NULL until the property is added.
 
-MySQL and SQLite cannot have such columns.
-Switching the target DBMS of a diagram with marked columns to one of them therefore lists the marked columns in the confirmation of the switch and removes the mark (a single undo brings back the switch and the marks together).
+Switching the target DBMS of a diagram with marked columns to a DBMS that cannot have such columns lists the marked columns in the confirmation of the switch and removes the mark (a single undo brings back the switch and the marks together).
 Generated code then writes those columns again, as ordinary columns.
-Generating for one of these two dialects through the CLI's `--provider` or MCP's `provider`, without switching the target DBMS, names the marked columns in a warning (DDL creates ordinary columns and generated code does not write them, so their values are never written).
+Generating for such a DBMS through the CLI's `--provider` or MCP's `provider`, without switching the target DBMS, names the marked columns in a warning (DDL creates ordinary columns and generated code does not write them, so their values are never written).
 The same holds when the QuickER Repository is generated for SQLite (as the only dialect, or locally in a multi-target build with SQL Server as the server): a NOT NULL marked column outside the primary key makes every insert into SQLite fail on NOT NULL.
 Generation names such columns in a warning; make the column nullable in the diagram or give the SQLite column a default value.
 
@@ -1884,13 +1911,15 @@ At generation time, the list of excluded columns is reported through an Info dia
 The decision is made from the column's declared type.
 Types with a declared length, such as `rowversion`, `binary(n)`, or `varbinary(n)`, are not targeted.
 
+<!-- dialect-table: unbounded-binary -->
+
 | Dialect | Excluded | Not excluded (bounded) |
 |---|---|---|
 | SQL Server | `varbinary(max)` / `image` | `binary(n)` / `varbinary(n)` / `rowversion` |
-| SQLite | `BLOB` / `BINARY` / `VARBINARY` with no declared length, or with `(MAX)` | `BLOB(n)` / `BINARY(n)` / `VARBINARY(n)` |
 | PostgreSQL | `bytea` | — |
 | MySQL | `BLOB` / `MEDIUMBLOB` / `LONGBLOB` | `TINYBLOB` / `BINARY(n)` / `VARBINARY(n)` |
 | Oracle | `BLOB` / `LONG RAW` | `RAW(n)` |
+| SQLite | `BLOB` / `BINARY` / `VARBINARY` with no declared length, or with `(MAX)` | `BLOB(n)` / `BINARY(n)` / `VARBINARY(n)` |
 
 The key behaviors are these.
 

@@ -43,6 +43,12 @@ public sealed class DialectDocsTableTests
 
     private const string No = "—";
 
+    /// <summary>方言ごとの C# 型の表の、すべての方言に当てはまる行の行見出し（英）</summary>
+    private const string AnyDialectEnglish = "Any";
+
+    /// <summary>方言ごとの C# 型の表の、すべての方言に当てはまる行の行見出し（日）</summary>
+    private const string AnyDialectJapanese = "共通";
+
     private static readonly string Root = NeutralResxFiles.FindRepositoryRoot();
 
     /// <summary>変換できない型の表の、桁の上限を付けて変換したセルの注意の語（英）</summary>
@@ -94,6 +100,12 @@ public sealed class DialectDocsTableTests
 
         /// <summary>方言の列も行も持たない（行＝話題・列＝機能）</summary>
         NoDialects,
+
+        /// <summary>
+        /// 行＝（方言・話題）。先頭の列は方言の表示名で、同じ方言の行は続けて並び、方言は <see cref="DialectNames.All"/>
+        /// の順に 1 つ残らず現れる。最後に、すべての方言に当てはまる行（<see cref="AnyDialectEnglish"/>）を 1 つ置ける
+        /// </summary>
+        DialectRowGroups,
     }
 
     /// <summary>登録された表（目印の名前 → 置き場所の英語の文書と向き）</summary>
@@ -114,6 +126,9 @@ public sealed class DialectDocsTableTests
             ["target-limits"] = ("docs/database.md", Orientation.DialectRowSubset),
             ["mysql-integers"] = ("docs/database.md", Orientation.NoDialects),
             ["connection-settings"] = ("docs/database.md", Orientation.DialectRows),
+            ["csharp-types"] = ("docs/code-generation.md", Orientation.DialectRowGroups),
+            ["unbounded-binary"] = ("docs/code-generation.md", Orientation.DialectRows),
+            ["database-numbering"] = ("docs/code-generation.md", Orientation.DialectRows),
         };
 
     /// <summary>
@@ -303,6 +318,12 @@ public sealed class DialectDocsTableTests
 
     private static readonly Regex CodeSpan = new(@"`([^`]+)`", RegexOptions.CultureInvariant);
 
+    /// <summary>方言ごとの C# 型の表の型の範囲（<c>`float(1)` to `float(24)`</c> / <c>`float(1)`〜`float(24)`</c>）</summary>
+    private static readonly Regex TypeRange = new(
+        @"`([a-z_]+)\(([0-9]+)\)`(?: to |〜)`\1\(([0-9]+)\)`",
+        RegexOptions.CultureInvariant
+    );
+
     /// <summary>記号のセルの後ろに置ける括弧（英語は半角・日本語は全角）</summary>
     private static readonly Regex SymbolCell = new(
         @"^(?:✅|—)(?: \(.+\)|（.+）)?$",
@@ -490,6 +511,32 @@ public sealed class DialectDocsTableTests
                 indexes.Should().NotContain(-1, $"{file} の {marker} の行は方言の名前で始まる");
                 indexes.Should().BeInAscendingOrder($"{file} の {marker}");
                 indexes.Should().OnlyHaveUniqueItems($"{file} の {marker}");
+
+                continue;
+            }
+
+            if (Tables[marker].Shape == Orientation.DialectRowGroups)
+            {
+                var any = file.EndsWith(".ja.md", StringComparison.Ordinal)
+                    ? AnyDialectJapanese
+                    : AnyDialectEnglish;
+                var names = table.Rows.Select(row => row[0]).ToList();
+
+                if (names.Count > 0 && names[^1] == any)
+                {
+                    names.RemoveAt(names.Count - 1);
+                }
+
+                var groups = names
+                    .Select(name => Array.FindIndex(Providers, p => p.DisplayName == name))
+                    .ToArray();
+
+                groups.Should().NotContain(-1, $"{file} の {marker} の行は方言の表示名で始まる");
+                groups.Should().BeInAscendingOrder($"{file} の {marker}");
+                groups
+                    .Distinct()
+                    .Should()
+                    .Equal(Enumerable.Range(0, Providers.Length), $"{file} の {marker} の方言");
 
                 continue;
             }
@@ -1306,6 +1353,345 @@ public sealed class DialectDocsTableTests
         return match.Success
             ? int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)
             : null;
+    }
+
+    [Fact(DisplayName = "振る舞い: 方言ごとの C# 型の表は各方言の型マッパーの写し方と一致する")]
+    public void CSharpTypesTable_MatchesTypeMappers()
+    {
+        const string marker = "csharp-types";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        for (var r = 0; r < english.Rows.Count; r++)
+        {
+            var row = english.Rows[r];
+            var where = $"{marker} の {r + 1} 行目（{string.Join(" | ", row)}）";
+
+            row.Should().HaveCount(4, where);
+
+            var any = row[0] == AnyDialectEnglish;
+            var providers = any ? Providers : [Providers.Single(p => p.DisplayName == row[0])];
+            var dbTypes = CodeSpans(row[1]);
+            var csharpTypes = CodeSpans(row[2]);
+            var leftOut = row[3] switch
+            {
+                "Left out" => true,
+                "As usual" => false,
+                _ => throw new InvalidOperationException(
+                    $"{where}: EditModel の列の語「{row[3]}」"
+                ),
+            };
+
+            dbTypes.Should().NotBeEmpty(where + "の DB の型");
+            csharpTypes.Should().NotBeEmpty(where + "の C# の型");
+
+            // C# の型が 1 つなら DB の型はその別名（すべて同じ型へ写る）。複数なら位置で組にする
+            if (csharpTypes.Length > 1)
+            {
+                dbTypes.Should().HaveCount(csharpTypes.Length, where + "の型の組");
+            }
+
+            foreach (var provider in providers)
+            {
+                for (var i = 0; i < dbTypes.Length; i++)
+                {
+                    var expected = csharpTypes.Length == 1 ? csharpTypes[0] : csharpTypes[i];
+                    var mapped = MapType(provider, dbTypes[i]);
+                    var at = $"{where}の {provider.DisplayName} の `{dbTypes[i]}`";
+
+                    mapped.TypeName.Should().Be(expected, at);
+                    mapped.IsExcludedFromEditModel.Should().Be(leftOut, at + "の EditModel");
+                    mapped.IsFallbackType.Should().Be(any, at + "の代替の型");
+                }
+            }
+
+            // 範囲（`float(1)` to `float(24)`）は、範囲のすぐ外の型が同じ C# 型へ写らないことも確かめる
+            foreach (Match range in TypeRange.Matches(row[1]))
+            {
+                var name = range.Groups[1].Value;
+                var low = int.Parse(range.Groups[2].Value, CultureInfo.InvariantCulture);
+                var high = int.Parse(range.Groups[3].Value, CultureInfo.InvariantCulture);
+                var outside = new[] { low - 1, high + 1 }.Where(n => n >= 1);
+
+                csharpTypes.Should().ContainSingle(where + "の範囲は別名の行に書く");
+
+                foreach (var provider in providers)
+                {
+                    foreach (var n in outside)
+                    {
+                        var type = string.Create(CultureInfo.InvariantCulture, $"{name}({n})");
+
+                        MapType(provider, type)
+                            .TypeName.Should()
+                            .NotBe(csharpTypes[0], $"{where}の範囲の外の `{type}`");
+                    }
+                }
+            }
+        }
+
+        if (!Aligned(english, japanese))
+        {
+            return;
+        }
+
+        for (var r = 0; r < english.Rows.Count; r++)
+        {
+            var en = english.Rows[r];
+            var ja = japanese.Rows[r];
+            var where = $"{marker} の {r + 1} 行目（日）";
+
+            ja.Should().HaveCount(4, where);
+            ja[0]
+                .Should()
+                .Be(en[0] == AnyDialectEnglish ? AnyDialectJapanese : en[0], where + "の方言");
+            CodeSpans(ja[1]).Should().Equal(CodeSpans(en[1]), where + "の DB の型（英と同じ）");
+            CodeSpans(ja[2]).Should().Equal(CodeSpans(en[2]), where + "の C# の型（英と同じ）");
+            TypeRange
+                .Matches(ja[1])
+                .Count.Should()
+                .Be(TypeRange.Matches(en[1]).Count, where + "の範囲");
+            ja[3].Should().Be(en[3] == "Left out" ? "外す" : "通常どおり", where + "の EditModel");
+        }
+    }
+
+    [Fact(
+        DisplayName = "振る舞い: 無制限バイナリ列の表は各方言の型マッパーの IsUnboundedBinary と一致する"
+    )]
+    public void UnboundedBinaryTable_MatchesTypeMappers()
+    {
+        const string marker = "unbounded-binary";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+
+        english.Rows.Should().HaveCount(Providers.Length, marker);
+
+        for (var i = 0; i < Providers.Length; i++)
+        {
+            var provider = Providers[i];
+            var row = english.Rows[i];
+            var where = $"{marker} の {provider.DisplayName} の行";
+
+            row.Should().HaveCount(3, where);
+
+            var excluded = BinaryTypes(row[1]);
+
+            excluded.Should().NotBeEmpty(where + "の除外する型");
+
+            foreach (var type in excluded)
+            {
+                var mapped = MapType(provider, type);
+
+                mapped.TypeName.Should().Be("byte[]", $"{where}の `{type}`");
+                mapped.IsUnboundedBinary.Should().BeTrue($"{where}の除外する `{type}`");
+            }
+
+            if (Symbol(row[2]) == No)
+            {
+                CodeSpans(row[2]).Should().BeEmpty(where + "の除外しない型");
+            }
+
+            foreach (var type in BinaryTypes(row[2]))
+            {
+                var mapped = MapType(provider, type);
+
+                mapped.TypeName.Should().Be("byte[]", $"{where}の `{type}`");
+                mapped.IsUnboundedBinary.Should().BeFalse($"{where}の除外しない `{type}`");
+            }
+        }
+
+        if (!Aligned(english, japanese))
+        {
+            return;
+        }
+
+        for (var i = 0; i < Providers.Length; i++)
+        {
+            var where = $"{marker} の {Providers[i].DisplayName} の行（日）";
+
+            for (var c = 1; c < 3; c++)
+            {
+                CodeSpans(japanese.Rows[i][c])
+                    .Should()
+                    .BeEquivalentTo(
+                        CodeSpans(english.Rows[i][c]),
+                        $"{where}の {c + 1} 列目（英と同じ）"
+                    );
+            }
+        }
+    }
+
+    [Fact(
+        DisplayName = "宣言: DB が採番する列の表は方言の宣言・扱いの表・方言切替の判定と、取込のコードに一致する"
+    )]
+    public void DatabaseNumberingTable_MatchesDeclarations()
+    {
+        const string marker = "database-numbering";
+        var english = ReadTable(Tables[marker].File, marker);
+        var japanese = ReadTable(JapaneseFile(Tables[marker].File), marker);
+        var languages = Aligned(english, japanese)
+            ? new[] { (english, false), (japanese, true) }
+            : new[] { (english, false) };
+
+        foreach (var (table, ja) in languages)
+        {
+            table.Rows.Should().HaveCount(Providers.Length, marker);
+
+            for (var i = 0; i < Providers.Length; i++)
+            {
+                var provider = Providers[i];
+                var row = table.Rows[i];
+                var where = $"{marker} の {provider.DisplayName} の行（{(ja ? "日" : "英")}）";
+
+                row.Should().HaveCount(4, where);
+
+                // 値を拒む採番：持てるか（宣言と方言切替の判定）・取込が印を付けるか
+                var refuses = DialectDeclarations.CanOccur(
+                    provider.Name,
+                    UnsupportedDefinitionKind.IdentityRejectingValues
+                );
+
+                IdentityColumnMarks
+                    .CanBeHeldBy(provider.Name)
+                    .Should()
+                    .Be(refuses, where + "の方言切替の判定");
+                Symbol(row[1]).Should().Be(refuses ? Yes : No, where + "の値を拒む採番");
+
+                if (refuses)
+                {
+                    UnsupportedTreatments
+                        .For(
+                            UnsupportedDefinitionKind.IdentityRejectingValues,
+                            UnsupportedFeature.Import,
+                            provider.Name
+                        )
+                        .Should()
+                        .Be(UnsupportedTreatment.MarkWithNotice, where + "の取込");
+                    row[1].Should().Contain(ja ? "印を付ける" : "marked", where);
+                }
+                else
+                {
+                    row[1].Should().Contain(ja ? "持てない" : "cannot exist", where);
+                    row[1].Should().Contain(ja ? "切替" : "switch", where);
+                }
+
+                // 値も受け付ける採番：あり得るか・取込が告げて普通の列にするか
+                var accepts = DialectDeclarations.CanOccur(
+                    provider.Name,
+                    UnsupportedDefinitionKind.IdentityAcceptingValues
+                );
+
+                Symbol(row[2]).Should().Be(accepts ? Yes : No, where + "の値も受け付ける採番");
+
+                if (accepts)
+                {
+                    UnsupportedTreatments
+                        .For(
+                            UnsupportedDefinitionKind.IdentityAcceptingValues,
+                            UnsupportedFeature.Import,
+                            provider.Name
+                        )
+                        .Should()
+                        .Be(UnsupportedTreatment.Notice, where + "の取込");
+                    row[2].Should().Contain(ja ? "普通の列" : "ordinary column", where);
+                    row[2].Should().Contain(ja ? "告げる" : "warned", where);
+                }
+                else
+                {
+                    row[2].Should().Contain(ja ? "持てない" : "cannot exist", where);
+                }
+
+                // 印の列の DDL の注記
+                Symbol(row[3])
+                    .Should()
+                    .Be(
+                        UnsupportedTreatments.For(
+                            UnsupportedDefinitionKind.IdentityRejectingValues,
+                            UnsupportedFeature.Ddl,
+                            provider.Name
+                        ) == UnsupportedTreatment.Annotation
+                            ? Yes
+                            : No,
+                        where + "の DDL の注記"
+                    );
+
+                // 括弧の綴りは取込のコードが告げる綴り（日本語は英語の同じ行と一致）
+                for (var c = 1; c < 3; c++)
+                {
+                    var spans = CodeSpans(row[c]);
+
+                    spans
+                        .Should()
+                        .HaveCount(
+                            Symbol(row[c]) == Yes ? spans.Length : 0,
+                            where + "の綴りは ✅ のセルだけに書く"
+                        );
+
+                    if (Symbol(row[c]) == Yes)
+                    {
+                        spans.Should().NotBeEmpty($"{where}の {c + 1} 列目の綴り");
+                    }
+
+                    if (ja)
+                    {
+                        spans
+                            .Should()
+                            .Equal(
+                                CodeSpans(english.Rows[i][c]),
+                                $"{where}の {c + 1} 列目（英と同じ）"
+                            );
+                    }
+                    else
+                    {
+                        var importer = ImporterSource(provider);
+
+                        spans
+                            .Should()
+                            .OnlyContain(
+                                span => importer.Contains(span, StringComparison.Ordinal),
+                                $"{where}の {c + 1} 列目の綴りは取込のコードにある"
+                            );
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>無制限バイナリの表のセルの型（<c>(n)</c> は数へ置き換え、<c>(MAX)</c> のように括弧だけのコードスパンは同じセルの各型の後ろに付けて試す）</summary>
+    private static string[] BinaryTypes(string cell)
+    {
+        var spans = CodeSpans(cell);
+        var suffixes = spans.Where(s => s.StartsWith('(')).ToArray();
+        var types = spans
+            .Where(s => !s.StartsWith('('))
+            .Select(s => s.Replace("(n)", "(16)", StringComparison.Ordinal))
+            .ToArray();
+
+        return
+        [
+            .. types,
+            .. types
+                .Where(t => !t.Contains('(', StringComparison.Ordinal))
+                .SelectMany(t => suffixes.Select(suffix => t + suffix)),
+        ];
+    }
+
+    /// <summary>1 列の図を作り、方言の型マッパーで写した C# の型を返す</summary>
+    private static global::QuickER.CodeGen.CSharp.CSharpTypeInfo MapType(
+        IDatabaseProvider provider,
+        string dataType
+    )
+    {
+        var column = new Column
+        {
+            Name = "c",
+            DataType = dataType,
+            IsNullable = true,
+        };
+        var diagram = new ErDiagram { TargetDbms = provider.Name };
+
+        diagram.Entities.Add(new Entity { TableName = "t", Columns = { column } });
+
+        return provider.TypeMapper.ResolveColumnTypes(diagram)[column.Id];
     }
 
     [Fact(DisplayName = "振る舞い: 移行先の上限の表は各方言の TryFormat の境界と一致する")]
