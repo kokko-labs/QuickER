@@ -371,7 +371,7 @@ SQLite のファクトリは、接続を開くたびに（プールから戻っ�
 この仕組みから、次の 3 つのことが言えます。
 
 - SQLite が待っている間は、キャンセルトークンを見ません。取り消した呼び出しが戻るのは、ロックが解けたときか上限に達したときです。
-- 待つのは、生成された `SqlConnectionFactory` が開いた接続だけです。自前の `ISqlConnectionFactory` を渡したリポジトリでは、そのファクトリが busy timeout を当てない限り待ちません。
+- 待つのは、生成された `SqlConnectionFactory` が開いた接続だけです。自前の `ISqlConnectionFactory` を渡したリポジトリでは、そのファクトリが busy timeout を当てない限り待ちません。EF Core 版 Repository は、インターセプターで同じように待ちます（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）。
 - 接続文字列には busy timeout のキーワードがありません。別の値にしたいときは、開いた接続で `PRAGMA busy_timeout` を実行してください。後から設定した値が、その接続を次に開くまでファクトリの値に代わります。
 
 QuickER が生成した DDL からスキーマを作る用途には、`SqliteSchemaBootstrap.ApplyDdlAsync` / `SqlServerSchemaBootstrap.ApplyDdlAsync` があります。
@@ -1026,6 +1026,14 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   グラフ保存とカスケードの `ExecuteDeleteAsync` は実行戦略の中で動き、試行のたびに最初からやり直します。
   Save フックがあると、Before と After は試行の回数だけ走ります（DB への書き込みは失敗した試行と一緒に巻き戻りますが、DB の外への副作用は繰り返されます）。
   1 行も当たらなかった文のやり直しは、これとは別で、1 回の試行の中で済みます。保存はその行を解決し（保存先の値の取り込み、または INSERT への切り替え）、新しいトランザクションで `SaveChanges` を流し直します。Before は走った後なので走り直さず、After は成功した `SaveChanges` の後に 1 回だけ走ります
+- SQLite では、書き込みは別の接続が持つロックを、QuickER 版 Repository と同じくコマンドタイムアウトまで待ちます。
+  EF Core は更新と削除を `UPDATE … RETURNING 1` / `DELETE … RETURNING 1` で流し、プロバイダがロックで待ってやり直すのは各文の最初の step だけなので、busy timeout が無いと、別の接続が読み取りを持っているだけで「database is locked」で失敗します。
+  `AddGeneratedEfCoreRepositories` は、渡した構成の後に `SqliteBusyTimeoutInterceptor` を DbContext のオプションへ足します。
+  このインターセプターは、EF Core が開いた接続の SQLite の busy timeout を、コンテキストのコマンドタイムアウトに合わせます（設定しなければ接続文字列の `Default Timeout`。指定しなければ 30 秒で、`0` は上限なし）。
+  値を合わせるのは接続を開いたときなので、接続を開いている間に `Database.SetCommandTimeout` で変えた値は、次に開く接続から効きます。
+  `DbContextOptions` を自分で組むときは、`AddInterceptors` で `SqliteBusyTimeoutInterceptor.Instance` を足してください。
+  SQLite が待っている間は、キャンセルトークンを見ません。
+  ほかのプロバイダの接続には触れません
 - 参照先（親側）列が主キーでないリレーション（UNIQUE 列参照・複合主キーの一部参照）は `HasPrincipalKey` を明示して構成され、外部キーは QuickER 版 Repository と同じくその親列へ結合します（EF Core の既定のままだと主キーへ黙って結合されます）
 - 主キーの無いテーブルは **DbContext から除外**されます（DbSet・Fluent 構成を出さず、そのテーブルへのナビゲーションも `modelBuilder.Ignore<T>()` の明示で無視・Warning 診断がテーブルを名指し）。
   EF Core はマップされる全エンティティ型にキーを要求し、キーの無い型が 1 つでもモデルに入ると DbContext 全体が初回使用時に例外になるためで、QuickER 版 Repository の生成スキップと同じ線引きです

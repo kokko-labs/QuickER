@@ -1116,6 +1116,103 @@ public sealed class ValueObjectTranslationDbContextOptionsExtension : IDbContext
     }
 }
 
+/// <summary>
+/// Connection interceptor that sets SQLite's busy timeout on every connection EF Core opens, so that a write waits for a
+/// lock held by another connection up to the command timeout instead of failing at once.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Microsoft.Data.Sqlite waits for a lock only on the first step of a statement. EF Core writes updates and deletes as
+/// <c>UPDATE … RETURNING 1</c> / <c>DELETE … RETURNING 1</c>, which commit on a later step when no transaction is open, so
+/// without a busy timeout they fail with "database is locked" as soon as another connection is reading. With the busy
+/// timeout SQLite itself waits on every step.
+/// </para>
+/// <para>
+/// The limit is the DbContext's command timeout when one is configured, otherwise the connection's <c>Default Timeout</c>
+/// (30 seconds unless the connection string sets it); <c>0</c> waits without a limit. It is set when the connection
+/// opens, so a command timeout changed on a context whose connection is open (<c>Database.SetCommandTimeout</c>) takes
+/// effect from the next connection the context opens.
+/// </para>
+/// <para>
+/// Connections of other providers are left untouched, so the interceptor can be added whatever the provider.
+/// <c>AddGeneratedEfCoreRepositories</c> adds it; when building the options yourself, add <see cref="Instance"/> with
+/// <c>AddInterceptors</c>.
+/// </para>
+/// </remarks>
+public sealed class SqliteBusyTimeoutInterceptor : DbConnectionInterceptor
+{
+    /// <summary>The full name of the connection type the interceptor applies to (Microsoft.Data.Sqlite is not referenced).</summary>
+    private const string SqliteConnectionTypeName = "Microsoft.Data.Sqlite.SqliteConnection";
+
+    private SqliteBusyTimeoutInterceptor() { }
+
+    /// <summary>The shared instance (the interceptor holds no state).</summary>
+    public static SqliteBusyTimeoutInterceptor Instance { get; } = new();
+
+    /// <summary>Sets the busy timeout on the SQLite connection that has just opened.</summary>
+    public override void ConnectionOpened(DbConnection connection, ConnectionEndEventData eventData)
+    {
+        using var command = CreateBusyTimeoutCommand(connection, eventData);
+        command?.ExecuteNonQuery();
+    }
+
+    /// <summary>Sets the busy timeout on the SQLite connection that has just opened.</summary>
+    public override async Task ConnectionOpenedAsync(
+        DbConnection connection,
+        ConnectionEndEventData eventData,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var command = CreateBusyTimeoutCommand(connection, eventData);
+
+        if (command is null)
+        {
+            return;
+        }
+
+        await using (command.ConfigureAwait(false))
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Creates the <c>PRAGMA busy_timeout</c> command for a SQLite connection, or returns <c>null</c> for any other connection.</summary>
+    private static DbCommand? CreateBusyTimeoutCommand(DbConnection connection, ConnectionEndEventData eventData)
+    {
+        if (!IsSqliteConnection(connection))
+        {
+            return null;
+        }
+
+        // A new command carries the connection's Default Timeout, the timeout a command runs with when the context sets none
+        var command = connection.CreateCommand();
+        var timeoutSeconds = eventData.Context?.Database.GetCommandTimeout() ?? command.CommandTimeout;
+        command.CommandText =
+            "PRAGMA busy_timeout = " + ResolveBusyTimeout(timeoutSeconds).ToString(CultureInfo.InvariantCulture);
+        return command;
+    }
+
+    /// <summary>Whether the connection is a Microsoft.Data.Sqlite connection (or derives from one).</summary>
+    private static bool IsSqliteConnection(DbConnection connection)
+    {
+        for (var type = connection.GetType(); type is not null; type = type.BaseType)
+        {
+            if (type.FullName == SqliteConnectionTypeName)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The busy timeout for a timeout in seconds: <c>0</c> (no timeout) and values too large for milliseconds wait without a limit.</summary>
+    private static int ResolveBusyTimeout(int timeoutSeconds) =>
+        timeoutSeconds <= 0 || timeoutSeconds > int.MaxValue / 1000
+            ? int.MaxValue
+            : timeoutSeconds * 1000;
+}
+
 /// <summary>EF Core version of the entity-agnostic raw SQL executor (runs ADO directly on the DbContext's connection).</summary>
 /// <remarks>
 /// <para>

@@ -496,13 +496,13 @@ public class RuntimeTestMatrixTests
             )
         ),
         ["BusyTimeoutDefault"] = new(
-            "生成 SqlConnectionFactory が開くたびに busy timeout を Default Timeout へ合わせること",
+            "SQLite の接続を開くたびに busy timeout を待ち時間（Default Timeout・EF Core はコマンドタイムアウト）へ合わせること",
             Row(
                 NotApplicable(
                     "SQL Server のロック待ちは CommandTimeout が決め、接続に当てる設定が無い"
                 ),
                 Covered(),
-                NotApplicable("接続の組み立ては QuickER 版 Repository の責務"),
+                Covered(),
                 NotApplicable("インメモリに接続が無い"),
                 NotApplicable("接続はサーバー側の構成")
             )
@@ -722,6 +722,7 @@ public class RuntimeTestMatrixTests
         new("SqlExecutorInjectionRuntimeTests", "SqlExecutorInjection", Backend.AdoSqlite),
         new("SqliteForeignKeyDefaultRuntimeTests", "ForeignKeyDefault", Backend.AdoSqlite),
         new("SqliteBusyTimeoutDefaultRuntimeTests", "BusyTimeoutDefault", Backend.AdoSqlite),
+        new("EfCoreSqliteBusyTimeoutRuntimeTests", "BusyTimeoutDefault", Backend.EfCore),
         new("SqliteValueConversionRuntimeTests", "ValueConversion", Backend.AdoSqlite),
     ];
 
