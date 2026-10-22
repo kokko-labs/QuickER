@@ -377,10 +377,16 @@ public class OracleSyncScriptBuilderTests
         );
 
         sql.Should().Contain("DECLARE");
-        sql.Should().Contain("user_constraints");
+        sql.Should().Contain("FROM all_constraints c");
         sql.Should().Contain("constraint_type = 'R'");
-        sql.Should().Contain("c.table_name = 'order'");
-        sql.Should().Contain("r.table_name = 'customer'");
+        sql.Should()
+            .Contain(
+                "c.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AND c.table_name = 'order'"
+            );
+        sql.Should()
+            .Contain(
+                "r.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AND r.table_name = 'customer'"
+            );
         sql.Should().Contain("EXECUTE IMMEDIATE");
         sql.Should().Contain("WHEN NO_DATA_FOUND THEN NULL");
         sql.Should().Contain("END;");
@@ -661,9 +667,12 @@ public class OracleSyncScriptBuilderTests
     {
         var sql = Build(AlterPk("orders", PkTarget("orders", "order_id", "line_no")));
 
-        // 旧主キーの制約名は差分に無いため user_constraints から逆引きして PL/SQL ブロックで外す
-        sql.Should().Contain("FROM user_constraints c");
-        sql.Should().Contain("WHERE c.constraint_type = 'P' AND c.table_name = 'orders';");
+        // 旧主キーの制約名は差分に無いため、現在のスキーマの all_constraints から逆引きして PL/SQL ブロックで外す
+        sql.Should().Contain("FROM all_constraints c");
+        sql.Should()
+            .Contain(
+                "WHERE c.constraint_type = 'P' AND c.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AND c.table_name = 'orders';"
+            );
         sql.Should()
             .Contain(
                 "EXECUTE IMMEDIATE 'ALTER TABLE \"orders\" DROP CONSTRAINT \"' || v_name || '\"';"
@@ -791,6 +800,45 @@ public class OracleSyncScriptBuilderTests
                 "EXECUTE IMMEDIATE 'ALTER TABLE \"o''rders\" DROP CONSTRAINT \"' || v_name || '\"';"
             );
         sql.Should().NotContain("EXECUTE IMMEDIATE 'ALTER TABLE \"o'rders\"");
+    }
+
+    /// <summary>
+    /// スキーマで修飾した表名の逆引きは、そのスキーマを所有者として絞り、外部キーの子と親の所有者は別々に決まることを検証する
+    /// （所有者で絞らないと、自スキーマの同じ名前の表の制約を引いた）。
+    /// </summary>
+    [Fact(
+        DisplayName = "逆引き: 修飾した表名はそのスキーマで、修飾しない表名は現在のスキーマで所有者を絞る"
+    )]
+    public void RuntimeLookup_QualifiedTableName_IsScopedByOwner()
+    {
+        var sql = Build(
+            AlterPk("OTHER.T", PkTarget("OTHER.T", "CODE")),
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = "OTHER.C",
+                ParentEntity = new Entity { TableName = "P" },
+                ChildEntity = new Entity { TableName = "OTHER.C" },
+                IsSelected = true,
+            }
+        );
+
+        sql.Should()
+            .Contain("WHERE c.constraint_type = 'P' AND c.owner = 'OTHER' AND c.table_name = 'T';");
+        sql.Should().Contain("c.owner = 'OTHER' AND c.table_name = 'C'");
+        sql.Should()
+            .Contain("r.owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AND r.table_name = 'P'");
+        sql.Should().NotContain("user_constraints");
+    }
+
+    /// <summary>逆引きの所有者のリテラルも、スキーマ名の <c>'</c> を二重化することを検証する</summary>
+    [Fact(DisplayName = "逆引き: 所有者のリテラルはスキーマ名の ' を二重化する")]
+    public void RuntimeLookup_OwnerLiteral_IsEscaped()
+    {
+        var sql = Build(AlterPk("o'ther.T", PkTarget("o'ther.T", "CODE")));
+
+        sql.Should().Contain("c.owner = 'o''ther' AND c.table_name = 'T'");
+        sql.Should().NotContain("c.owner = 'o'ther'");
     }
 
     /// <summary>制約名不明の外部キー削除でも、PL/SQL ブロックのテーブル名がリテラル用にエスケープされることを検証する</summary>

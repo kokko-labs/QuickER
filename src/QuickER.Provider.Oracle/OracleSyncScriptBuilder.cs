@@ -241,8 +241,9 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
     /// <summary>主キー変更の解除フェーズ（旧主キー制約の DROP）を PL/SQL 無名ブロックとして生成する</summary>
     /// <remarks>
-    /// 旧主キーの制約名は差分項目に含まれないため、テーブル名から <c>user_constraints</c> を逆引きする
+    /// 旧主キーの制約名は差分項目に含まれないため、テーブルの所有者と名前から <c>all_constraints</c> を逆引きする
     /// PL/SQL 無名ブロックで動的に DROP する（主キーが無ければ NO_DATA_FOUND を握り潰して何もしない）。
+    /// 所有者の絞り方は <see cref="OwnerPredicate"/>。
     /// </remarks>
     private static string BuildDropPrimaryKey(SchemaDiffItem item)
     {
@@ -255,11 +256,13 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var drop = new StringBuilder();
         drop.AppendLine("DECLARE");
-        drop.AppendLine("    v_name user_constraints.constraint_name%TYPE;");
+        drop.AppendLine("    v_name all_constraints.constraint_name%TYPE;");
         drop.AppendLine("BEGIN");
         drop.AppendLine("    SELECT c.constraint_name INTO v_name");
-        drop.AppendLine("    FROM user_constraints c");
-        drop.AppendLine($"    WHERE c.constraint_type = 'P' AND c.table_name = '{tableName}';");
+        drop.AppendLine("    FROM all_constraints c");
+        drop.AppendLine(
+            $"    WHERE c.constraint_type = 'P' AND {OwnerPredicate("c.owner", item.TableName)} AND c.table_name = '{tableName}';"
+        );
         drop.AppendLine(
             $"    EXECUTE IMMEDIATE 'ALTER TABLE {tableQuoted} DROP CONSTRAINT \"' || v_name || '\"';"
         );
@@ -393,7 +396,9 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
     /// <summary>外部キー制約を削除する文を生成する</summary>
     /// <remarks>
     /// 制約名が判明していれば <c>ALTER TABLE ... DROP CONSTRAINT</c> を直接出力する。
-    /// 不明な場合は親子テーブル名から <c>user_constraints</c> を逆引きする PL/SQL 無名ブロックで動的に削除する。
+    /// 不明な場合は親子テーブルの所有者と名前から <c>all_constraints</c> を逆引きする PL/SQL 無名ブロックで動的に削除する
+    /// （子と親の所有者はそれぞれの表名から別々に決める＝子が別のスキーマで親が自スキーマの外部キーも引ける。
+    /// 所有者の絞り方は <see cref="OwnerPredicate"/>）。
     /// </remarks>
     private static string AppendDropForeignKey(SchemaDiffItem item)
     {
@@ -412,7 +417,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
                 + $"DROP CONSTRAINT \"{OracleIdentifier.Escape(item.ForeignKeyName)}\";";
         }
 
-        // 制約名不明時は親子テーブル名から user_constraints を逆引きして PL/SQL ブロックで削除する。
+        // 制約名不明時は親子テーブルの所有者と名前から all_constraints を逆引きして PL/SQL ブロックで削除する。
         // 識別子はクォート付き作成のため、大文字小文字を保持した実名でカタログを照合する。
         var childName = OracleIdentifier.EscapeStringLiteral(
             OracleIdentifier.TableNameOnly(childTbl)
@@ -425,15 +430,18 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         var sb = new StringBuilder();
         sb.AppendLine("DECLARE");
-        sb.AppendLine("    v_name user_constraints.constraint_name%TYPE;");
+        sb.AppendLine("    v_name all_constraints.constraint_name%TYPE;");
         sb.AppendLine("BEGIN");
         sb.AppendLine("    SELECT c.constraint_name INTO v_name");
-        sb.AppendLine("    FROM user_constraints c");
+        sb.AppendLine("    FROM all_constraints c");
         sb.AppendLine(
-            "    JOIN user_constraints r ON c.r_constraint_name = r.constraint_name AND c.r_owner = r.owner"
+            "    JOIN all_constraints r ON c.r_constraint_name = r.constraint_name AND c.r_owner = r.owner"
         );
         sb.AppendLine(
-            $"    WHERE c.constraint_type = 'R' AND c.table_name = '{childName}' AND r.table_name = '{parentName}';"
+            $"    WHERE c.constraint_type = 'R' AND {OwnerPredicate("c.owner", childTbl)} AND c.table_name = '{childName}'"
+        );
+        sb.AppendLine(
+            $"        AND {OwnerPredicate("r.owner", parentTbl)} AND r.table_name = '{parentName}';"
         );
         sb.AppendLine(
             $"    EXECUTE IMMEDIATE 'ALTER TABLE {childQuoted} DROP CONSTRAINT \"' || v_name || '\"';"
@@ -442,6 +450,24 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         sb.AppendLine("    WHEN NO_DATA_FOUND THEN NULL;");
         sb.Append("END;");
         return sb.ToString();
+    }
+
+    /// <summary>実行時の逆引きで、表の所有者を絞る条件を返す</summary>
+    /// <remarks>
+    /// スキーマで修飾した表名ならそのスキーマ（引用識別子で作るので大文字小文字を保った名前）、修飾していなければ
+    /// 現在のスキーマ（<c>SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')</c>）で絞る。修飾しない <c>ALTER TABLE "T"</c> は
+    /// 現在のスキーマで名前を解決するので、逆引きも同じスキーマの表を引く（<c>ALTER SESSION SET CURRENT_SCHEMA</c> を
+    /// したセッションでも食い違わない）。所有者で絞らないと、自スキーマの同じ名前の表の制約を引いて
+    /// 別の表から外そうとする（ORA-02443）か、旧主キーを見つけられずに新しい主キーの追加が ORA-02260 で失敗する。
+    /// </remarks>
+    /// <param name="column">所有者の列（<c>c.owner</c> など）</param>
+    /// <param name="tableName">図の表名（<c>スキーマ.表</c> か素の名前）</param>
+    private static string OwnerPredicate(string column, string tableName)
+    {
+        var schema = SchemaQualifiedName.Split(tableName).Schema;
+        return schema is null
+            ? $"{column} = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')"
+            : $"{column} = '{OracleIdentifier.EscapeStringLiteral(schema)}'";
     }
 
     // ---------------- COMMENT ON (説明) ----------------
