@@ -653,12 +653,6 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
-        public static string SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch {
-            get {
-                return ResourceManager.GetString("SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch", resourceCulture);
-            }
-        }
-
         public static string SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange {
             get {
                 return ResourceManager.GetString("SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange", resourceCulture);

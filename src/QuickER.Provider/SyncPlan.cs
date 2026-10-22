@@ -121,8 +121,7 @@ public enum SyncPlanWarningKind
     SelectedItemRequiresUnselectedItem,
 
     /// <summary>
-    /// 選んだ外部キーの追加・作り直しの参照先の列が、同期後の主キーにも一意制約にもちょうど一致しない
-    /// （参照する列の並びを問う方言では並びまで）。
+    /// 選んだ外部キーの追加・作り直しの参照先の列が、同期後の主キーにも一意制約にもちょうど一致しない（列の集合で比べる）。
     /// </summary>
     /// <remarks>
     /// 主キーの変更に伴う暗黙の付け直し（<see cref="ForeignKeyRebuildMayLoseCandidateKey"/>）と同じ証明を、利用者が選んだ
@@ -131,19 +130,6 @@ public enum SyncPlanWarningKind
     /// 残り得る）。
     /// </remarks>
     ForeignKeyNotOnCandidateKey,
-
-    /// <summary>
-    /// 参照される複合キーと外部キーの列の並びだけが合わなくなる変更を、計画から外した（MySQL）。
-    /// </summary>
-    /// <remarks>
-    /// 参照する列の並びがキーの並びと一致しないと外部キーを作れず
-    /// （<see cref="SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder"/>）、DDL が巻き戻らない
-    /// （<see cref="SyncDialectCapabilities.TransactionalDdl"/> が <c>false</c>）方言では、付け直しが必ず失敗し、外した外部キーが
-    /// 消えたまま残る。対象は、参照される複合主キーの列の並びだけを入れ替える主キーの変更（その表の主キーの変更を外す）と、
-    /// 列の並びだけが参照先のキーと合わなくなる外部キーの作り直し（その作り直しを外す）。列の集合が違うなど、並び以外が
-    /// 原因の「証明できない付け直し」は従来どおり警告して実行する。
-    /// </remarks>
-    ForeignKeyKeyOrderMismatch,
 
     /// <summary>
     /// 選んだ外部キーの追加・作り直しが参照アクション <c>SET DEFAULT</c> を使い、子の列に NOT NULL の列がある（SQL Server）。
@@ -198,8 +184,7 @@ public enum SyncPlanWarningKind
 /// では一意制約を削除するテーブル（＝外部キーの参照先）、<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/>
 /// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> では
 /// 計画から外した項目のテーブル、<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
-/// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> と <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/>
-/// では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
+/// <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
 /// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
 /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）。
@@ -212,8 +197,7 @@ public enum SyncPlanWarningKind
 /// カンマ区切りで並べたもの（<c>AUTOINCREMENT, DEFAULT</c> 等）。SQL の綴りそのものなので言語中立に扱える。
 /// <see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> では「外した項目の対象 (足りないもの)」
 /// （例 <c>FK_orders_customer (customer)</c>・<c>PRIMARY KEY (orders.code)</c>・<c>code (PRIMARY KEY)</c>）。
-/// <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
-/// <see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/> では外部キーの制約名。
+/// <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> では外部キーの制約名。
 /// <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> では「外部キーの制約名 (NOT NULL の子の列, …)」。
 /// 対象は制約名・列名か <c>PRIMARY KEY</c>、足りないものは表名・<c>表.列</c>か <c>PRIMARY KEY</c>（識別子と SQL の綴り）。
 /// </param>

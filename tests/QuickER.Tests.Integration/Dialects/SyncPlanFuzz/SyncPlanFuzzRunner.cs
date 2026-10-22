@@ -203,24 +203,12 @@ internal static class SyncPlanFuzzRunner
             .Warnings.Where(w => w.Kind == SyncPlanWarningKind.SelectedItemRequiresUnselectedItem)
             .Select(w => w.TableName.Trim().ToLowerInvariant())
             .ToHashSet();
-        // 参照される複合キーと外部キーの並びだけが合わなくなる変更（主キーの変更・外部キーの作り直し）は、
-        // 警告つきで計画から外す仕様（MySQL）なので、計画に無ければ選ばなかった項目として扱う
-        var keyOrderWarned = plan.Warnings.Any(w =>
-            w.Kind == SyncPlanWarningKind.ForeignKeyKeyOrderMismatch
-        );
         var allowedToRemain = selected
             .Where(i =>
                 dependencyWarnedTables.Contains(i.TableName.Trim().ToLowerInvariant())
                 && (
                     i.Kind == SchemaDiffKind.AlterColumn
                     || !Keys(i, capabilities).Any(plannedKeys.Contains)
-                )
-            )
-            .Concat(
-                selected.Where(i =>
-                    keyOrderWarned
-                    && i.Kind is SchemaDiffKind.AlterPrimaryKey or SchemaDiffKind.AlterForeignKey
-                    && !Keys(i, capabilities).Any(plannedKeys.Contains)
                 )
             )
             .ToHashSet();
@@ -246,8 +234,8 @@ internal static class SyncPlanFuzzRunner
 
             // 表明 1b: 失敗しても、選んでいない制約は消えていない（DDL を暗黙コミットする方言の部分適用で
             // 外部キー・一意制約・主キーが消えたまま残る形）。例外は、付け直しが候補キーを証明できないと事前に警告した
-            // 外部キーだけ（並び以外が原因の付け直しは、取り込んでいない索引で通る構成があるので仕様として警告して実行する。
-            // 並びだけが原因の形は計画から外すので例外にしない＝ForeignKeyKeyOrderMismatch は含めない）
+            // 外部キーだけ（列の集合が合わない付け直しは、取り込んでいない索引で通る構成があるので仕様として警告して実行する。
+            // 並びだけの違いは計画が参照先のキーの並びへ並べ替えるので、警告の対象にならない）
             var failedState = await ImportAsync(dialect, ct).ConfigureAwait(false);
             var remaining = ConstraintKeys(failedState, capabilities);
             var warnedForeignKeys = plan
@@ -275,46 +263,11 @@ internal static class SyncPlanFuzzRunner
 
             return outcome;
 
-            // 外部キーのキー（FK|子|親|列ペア|名前|参照アクション）が、事前に警告した外部キーで、並びだけが原因の形
-            // （計画から外すべき形）でないか
+            // 外部キーのキー（FK|子|親|列ペア|名前|参照アクション）が、事前に警告した外部キーか
             bool IsWarnedForeignKey(string key)
             {
                 var parts = key.Split('|');
-                return parts[0] == "FK"
-                    && warnedForeignKeys.Contains($"{parts[1]}|{parts[4]}")
-                    && !IsKeyOrderOnlyMismatch(parts[2], parts[3]);
-            }
-
-            // 並びを問い DDL が巻き戻らない方言（MySQL）で、参照する列が図の参照先の主キーと同じ集合・違う並びか
-            bool IsKeyOrderOnlyMismatch(string parentTable, string pairs)
-            {
-                if (
-                    capabilities.TransactionalDdl
-                    || !capabilities.ReferencedKeyRequiresSameColumnOrder
-                )
-                {
-                    return false;
-                }
-
-                var parent = targetEntities.FirstOrDefault(e =>
-                    e.TableName.Trim().Equals(parentTable, StringComparison.OrdinalIgnoreCase)
-                );
-
-                if (parent is null)
-                {
-                    return false;
-                }
-
-                var referenced = pairs.Split(',').Select(p => p.Split('>')[0]).ToList();
-                var key = parent
-                    .GetPrimaryKeyColumnsInOrder()
-                    .Select(c => c.Name.Trim().ToLowerInvariant())
-                    .ToList();
-
-                return key.Count == referenced.Count
-                    && key.Order(StringComparer.Ordinal)
-                        .SequenceEqual(referenced.Order(StringComparer.Ordinal))
-                    && !key.SequenceEqual(referenced);
+                return parts[0] == "FK" && warnedForeignKeys.Contains($"{parts[1]}|{parts[4]}");
             }
         }
 

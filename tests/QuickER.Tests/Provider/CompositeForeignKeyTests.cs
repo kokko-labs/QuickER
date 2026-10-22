@@ -324,10 +324,16 @@ public sealed class CompositeForeignKeyTests
         // 被参照列集合が同期後の主キーとちょうど一致するため候補キー喪失の警告は出ない
         plan.Warnings.Should().BeEmpty();
 
-        // 参照する列の並びを問う方言（SQL Server・MySQL）では、(a, b) を参照する外部キーは (b, a) の主キーへ付け直せない
-        Plan(requiresSameOrder: true)
-            .Warnings.Should()
-            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
+        // 参照する列の並びを問う方言（SQL Server・MySQL）では、付け直しを新しい主キーの並び (b, a) で出す（警告しない）
+        var ordered = Plan(requiresSameOrder: true);
+        ordered.Warnings.Should().BeEmpty();
+        ordered
+            .Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which.ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn))
+            .Should()
+            .Equal(("b", "b_ref"), ("a", "a_ref"));
     }
 
     /// <summary>

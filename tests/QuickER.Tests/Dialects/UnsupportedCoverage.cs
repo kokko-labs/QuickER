@@ -1252,10 +1252,15 @@ public static class UnsupportedCoverage
         (
             UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder,
             UnsupportedFeature.Sync,
-            DialectNames.MySql,
+            null,
             [
-                "SyncPlannerTests.AddForeignKeyOnNewKeyOrder_WithExcludedKeyChange_IsExcluded",
-                "MySqlSyncDependencyIntegrationTests.ReorderReferencedCompositePrimaryKey_IsExcludedAndChangesNothing",
+                "ForeignKeyColumnOrderTests.Sync_AddCompositeForeignKey_IsReorderedOnlyWhereDeclared",
+                "SyncPlannerTests.ReorderReferencedCompositeKey_RebuildsForeignKeyInNewOrder",
+                "SyncPlannerTests.AlterForeignKeyInOtherOrder_IsArrangedToKey",
+                "SqlServerSyncDependencyIntegrationTests.ReorderReferencedCompositePrimaryKey_RebuildsForeignKeyInNewOrder",
+                "SqlServerSyncDependencyIntegrationTests.AlterForeignKeyInOtherOrder_IsRebuiltInKeyOrder",
+                "MySqlSyncDependencyIntegrationTests.ReorderReferencedCompositePrimaryKey_RebuildsForeignKeyInNewOrder",
+                "MySqlSyncDependencyIntegrationTests.AlterForeignKeyInOtherOrder_IsRebuiltInKeyOrder",
             ]
         ),
         (

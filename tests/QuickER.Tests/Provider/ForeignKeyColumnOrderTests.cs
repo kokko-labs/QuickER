@@ -56,6 +56,100 @@ public sealed class ForeignKeyColumnOrderTests
             .Contain(reordered ? "REFERENCESparent(a,b" : "REFERENCESparent(b,a", $"{dialect}");
     }
 
+    /// <summary>
+    /// 同期スクリプトは、参照する列の並びを問う方言（SQL Server・MySQL）でだけ、外部キーの追加を参照先の同期後のキーの
+    /// 並びへ並べ替えて出す（計画が並べ替える＝<see cref="SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder"/>）。
+    /// SQLite は再構築の方言で、外部キーを子表の作り直しで付けるので対象外。
+    /// </summary>
+    [Theory(
+        DisplayName = "同期: 複合外部キーの追加は SQL Server・MySQL だけが参照先のキーの並びへ並べ替える"
+    )]
+    [InlineData(DialectNames.SqlServer, true)]
+    [InlineData(DialectNames.PostgreSql, false)]
+    [InlineData(DialectNames.MySql, true)]
+    [InlineData(DialectNames.Oracle, false)]
+    public void Sync_AddCompositeForeignKey_IsReorderedOnlyWhereDeclared(
+        string dialect,
+        bool reordered
+    )
+    {
+        var (parent, child, _) = Scenario();
+        var provider = Providers.Single(p => p.Name == dialect);
+        var add = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddForeignKey,
+            TableName = "child",
+            ParentEntity = parent,
+            ChildEntity = child,
+            Relationship = new Relationship { ConstraintName = "FK_child_parent" },
+            ForeignKeyName = "FK_child_parent",
+            ForeignKeyColumnPairs = [new("b", "y"), new("a", "x")],
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [add],
+            provider.SyncCapabilities,
+            new SyncPlanContext { LiveEntities = [parent, child], LiveRelationships = [] }
+        );
+        var sql = provider.SyncScriptBuilder.Build(plan);
+        var flat = new string(sql.Where(c => char.IsLetter(c) || c == ',' || c == '(').ToArray());
+
+        plan.Warnings.Should().BeEmpty();
+        flat.Should()
+            .Contain(
+                reordered
+                    ? "FOREIGNKEY(x,yREFERENCESparent(a,b"
+                    : "FOREIGNKEY(y,xREFERENCESparent(b,a",
+                $"{dialect}"
+            );
+    }
+
+    /// <summary>
+    /// 並べ替える先のキーは渡した順に探し、列の集合がちょうど一致した最初のキーの並びにそろえる（名前は図の名前の規則で
+    /// 照合する）。どのキーとも一致しない・列ペアが 1 組だけなら、そのまま返す。
+    /// </summary>
+    [Fact(DisplayName = "並べ替え: 渡したキーのうち列の集合が一致する最初のキーの並びにそろえる")]
+    public void ArrangeToKey_FollowsFirstMatchingKey()
+    {
+        List<ForeignKeyColumnNamePair> pairs = [new("a", "x"), new("b", "y")];
+
+        ForeignKeyColumnOrder
+            .ArrangeToKey(
+                pairs,
+                [
+                    ["a", "c"],
+                    ["B", "A"],
+                    ["a", "b"],
+                ]
+            )
+            .Select(p => p.ParentColumn)
+            .Should()
+            .Equal("b", "a");
+        ForeignKeyColumnOrder
+            .ArrangeToKey(
+                pairs,
+                [
+                    ["a"],
+                    ["a", "b", "c"],
+                ]
+            )
+            .Should()
+            .Equal(pairs);
+        ForeignKeyColumnOrder.ArrangeToKey(pairs, []).Should().Equal(pairs);
+
+        List<ForeignKeyColumnNamePair> single = [new("a", "x")];
+        ForeignKeyColumnOrder
+            .ArrangeToKey(
+                single,
+                [
+                    ["a"],
+                ]
+            )
+            .Should()
+            .Equal(single);
+    }
+
     /// <summary>主キーの並びは実効順（主キーの順序の指定）に従い、主キーと合わなければ一意制約の宣言順に従う</summary>
     [Fact(DisplayName = "並べ替え: 主キーの実効順に従い、主キーと合わなければ一意制約の並びに従う")]
     public void Arrange_FollowsEffectivePrimaryKeyOrderThenUniqueConstraint()

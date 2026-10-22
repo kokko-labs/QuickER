@@ -18,6 +18,11 @@ namespace QuickER.Provider;
 /// 取り込み直しても差分は出ない。
 /// </para>
 /// <para>
+/// 同期は、扱いの表の同期のマスが「並べ替え」の方言で、計画（<see cref="SyncPlanner"/>）が外部キーの追加
+/// （明示の追加・作り直し・暗黙の付け直し）を参照先の同期後のキー（主キーの変更を選べば新しい主キー）の並びへ
+/// 並べ替える（<see cref="ArrangeToKey"/>）。
+/// </para>
+/// <para>
 /// 参照先の列の集合が主キーとも一意制約ともちょうど一致しないときは、並べ替えない（キーが決まらないため）。
 /// </para>
 /// </remarks>
@@ -30,6 +35,18 @@ public static class ForeignKeyColumnOrder
     public static List<ForeignKeyColumnNamePair> ArrangeToReferencedKey(
         IReadOnlyList<ForeignKeyColumnNamePair> pairs,
         Entity parent
+    ) => ArrangeToKey(pairs, CandidateKeys(parent));
+
+    /// <summary>
+    /// 列ペアを、渡したキーのうち親の列の集合がちょうど一致する最初のキーの並びへ並べ替える
+    /// （一致するキーが無い・列ペアが 1 組以下なら、そのまま返す）
+    /// </summary>
+    /// <param name="pairs">宣言順の列ペア</param>
+    /// <param name="keys">参照先のキーの列名（優先する順。主キー、続いて一意制約）</param>
+    /// <returns>キーの並びに並べ替えた列ペア</returns>
+    public static List<ForeignKeyColumnNamePair> ArrangeToKey(
+        IReadOnlyList<ForeignKeyColumnNamePair> pairs,
+        IEnumerable<IReadOnlyList<string>> keys
     )
     {
         if (pairs.Count < 2)
@@ -41,7 +58,7 @@ public static class ForeignKeyColumnOrder
             pairs.Select(p => p.ParentColumn)
         );
 
-        foreach (var key in CandidateKeys(parent))
+        foreach (var key in keys)
         {
             if (
                 key.Count != pairs.Count

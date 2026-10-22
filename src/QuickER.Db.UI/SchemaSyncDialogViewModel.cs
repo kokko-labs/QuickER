@@ -587,11 +587,6 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
-            // 参照される複合キーと外部キーの列の並びだけが合わなくなる変更を外した（MySQL）
-            SyncPlanWarningKind.ForeignKeyKeyOrderMismatch => string.Format(
-                Strings.SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch,
-                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
-            ),
             // SET DEFAULT の外部キーの NOT NULL の子の列は、DB 側に DEFAULT 制約が無いと作れない（SQL Server）
             SyncPlanWarningKind.SetDefaultOnNotNullColumn => string.Format(
                 Strings.SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn,

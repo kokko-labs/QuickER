@@ -186,9 +186,10 @@ public sealed partial record SyncDialectCapabilities
     /// <para>
     /// 差分はこの値に依らず列ペアを並びを見ずに比べる（<see cref="SchemaDiffService"/>）。<c>true</c> の方言の DDL は、
     /// 列ペアを参照先のキーの並びへ並べ替えて出す（<see cref="ForeignKeyColumnOrder"/>・扱いの表の DDL のマス）。
-    /// 計画は、候補キーの証明（<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/>）と、並びだけが合わなくなる
-    /// 変更の除外（<see cref="SyncPlanWarningKind.ForeignKeyKeyOrderMismatch"/>）で並びまで見る（同期で足す・作り直す
-    /// 外部キーは図の並びのまま出すため）。
+    /// 同期も、計画が外部キーの追加（明示の追加・作り直し・主キーの変更などに伴う暗黙の付け直し）を参照先の同期後のキーの
+    /// 並びへ並べ替える（扱いの表の同期のマス）。候補キーの証明
+    /// （<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/>・<see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/>）
+    /// は、この値に依らず列の集合で比べる。
     /// </para>
     /// </remarks>
     public required bool ReferencedKeyRequiresSameColumnOrder { get; init; }
@@ -206,10 +207,8 @@ public sealed partial record SyncDialectCapabilities
 
     /// <summary>同期スクリプトの DDL がトランザクションで巻き戻るか（MySQL・Oracle は DDL を暗黙にコミットする）。</summary>
     /// <remarks>
-    /// <c>false</c> の方言では、途中の文が失敗すると前の文が適用されたまま残る。外部キーを外した後の付け直しが
-    /// 失敗すると外部キーが消えたまま残るため、<see cref="SyncPlanner"/> は付け直しが必ず失敗する変更
-    /// （<see cref="ReferencedKeyRequiresSameColumnOrder"/> の方言で、参照される複合キーの列の並びだけが合わなくなる変更）
-    /// を計画から外して警告する。
+    /// <c>false</c> の方言では、途中の文が失敗すると前の文が適用されたまま残る（外部キーを外した後の付け直しが失敗すると、
+    /// 外部キーが消えたまま残る）。docs の外部キーの付け直しの表が、この値を方言ごとに示す。
     /// </remarks>
     public required bool TransactionalDdl { get; init; }
 

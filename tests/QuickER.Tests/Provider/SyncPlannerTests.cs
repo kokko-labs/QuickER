@@ -4337,15 +4337,14 @@ public class SyncPlannerTests
     }
 
     /// <summary>
-    /// 参照される複合主キーの並びだけの入れ替え（MySQL では並びの不一致で外す）と、新しい並びの主キーを参照する外部キーの
-    /// 追加を両方選ぶと、追加も「選んでいない主キーの変更を前提にする」として外して名指しすることを検証する
-    /// （並びの不一致の除外を依存の除外より先に掛ける＝外した主キーの変更は選んでいない扱いになる）。
-    /// 主キーの変更を選ばずに追加だけを選んだときも同じく外す。
+    /// 参照する列の並びを問う方言（SQL Server・MySQL）では、外部キーの追加を同期後の主キーの並びで出すことを検証する。
+    /// 参照される複合主キーの並びを入れ替える変更と一緒に選べば新しい並び（旧主キーを参照する外部キーの付け直しも
+    /// 新しい並び）、主キーの変更を選ばなければ live の並び。問わない方言では図の並びのまま。どれも警告しない。
     /// </summary>
     [Fact(
-        DisplayName = "依存: 外した・選んでいない主キーの変更を前提にする外部キーの追加は外して警告する"
+        DisplayName = "並べ替え: 外部キーの追加は、同期後の主キーの並びで出す（主キーの並びを変えれば新しい並び）"
     )]
-    public void AddForeignKeyOnNewKeyOrder_WithExcludedKeyChange_IsExcluded()
+    public void AddForeignKeyOnNewKeyOrder_FollowsPostSyncPrimaryKey()
     {
         var (pair, reference, _, context) = PairReferenceScenario();
         var reordered = pair.Clone(preserveId: true);
@@ -4364,40 +4363,45 @@ public class SyncPlannerTests
             IsSelected = true,
         };
 
-        var withKeyChange = new SyncPlanner().BuildPlan(
+        foreach (var caps in new[] { NonTransactionalOrderedCaps, MySqlLikeCaps })
+        {
+            var withKeyChange = new SyncPlanner().BuildPlan(
+                [AlterPk("pair", reordered), addFk],
+                caps,
+                context
+            );
+            withKeyChange.Warnings.Should().BeEmpty();
+            AddedForeignKeyPairs(withKeyChange, "FK_ref").Should().Equal(("b", "rb"), ("a", "ra"));
+            AddedForeignKeyPairs(withKeyChange, "FK_ref_new")
+                .Should()
+                .Equal(("b", "xb"), ("a", "xa"));
+
+            var addOnly = new SyncPlanner().BuildPlan([addFk], caps, context);
+            addOnly.Warnings.Should().BeEmpty();
+            AddedForeignKeyPairs(addOnly, "FK_ref_new").Should().Equal(("a", "xa"), ("b", "xb"));
+        }
+
+        var unordered = new SyncPlanner().BuildPlan(
             [AlterPk("pair", reordered), addFk],
-            NonTransactionalOrderedCaps,
+            NonTransactionalOrderedCaps with
+            {
+                ReferencedKeyRequiresSameColumnOrder = false,
+            },
             context
         );
-        withKeyChange.IsEmpty.Should().BeTrue();
-        withKeyChange
-            .Warnings.Select(w => (w.Kind, w.Detail))
-            .Should()
-            .BeEquivalentTo([
-                (SyncPlanWarningKind.ForeignKeyKeyOrderMismatch, "FK_ref"),
-                (
-                    SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
-                    "FK_ref_new (PRIMARY KEY)"
-                ),
-            ]);
-
-        var addOnly = new SyncPlanner().BuildPlan([addFk], MySqlLikeCaps, context);
-        addOnly.IsEmpty.Should().BeTrue();
-        addOnly
-            .Warnings.Should()
-            .ContainSingle()
-            .Which.Kind.Should()
-            .Be(SyncPlanWarningKind.SelectedItemRequiresUnselectedItem);
+        unordered.Warnings.Should().BeEmpty();
+        AddedForeignKeyPairs(unordered, "FK_ref").Should().Equal(("a", "ra"), ("b", "rb"));
+        AddedForeignKeyPairs(unordered, "FK_ref_new").Should().Equal(("b", "xb"), ("a", "xa"));
     }
 
     /// <summary>
-    /// 参照する列の並びを問う方言（SQL Server・MySQL）では、複合キーと違う並びで参照する外部キーの追加を警告し、
-    /// 問わない方言では警告しないことを検証する。
+    /// 参照する列の並びを問う方言では、一意制約と違う並びで参照する外部キーの追加を一意制約の並びで出し、警告しないことを
+    /// 検証する（live の一意制約と、同じ計画で追加する一意制約）。問わない方言では図の並びのまま。
     /// </summary>
     [Fact(
-        DisplayName = "候補キー: 並びを問う方言では、複合キーと違う並びで参照する外部キーの追加を警告する"
+        DisplayName = "並べ替え: 並びを問う方言では、一意制約と違う並びで参照する外部キーの追加を一意制約の並びで出す"
     )]
-    public void AddForeignKey_CompositeKeyInOtherOrder_WarnsWhereOrderMatters()
+    public void AddForeignKey_CompositeKeyInOtherOrder_IsArrangedWhereOrderMatters()
     {
         var (add, context) = AddForeignKeyScenario(
             new("kind", "customer_kind"),
@@ -4405,24 +4409,122 @@ public class SyncPlannerTests
         );
         WithUnique(context.LiveEntities[0], "UQ_customer_code_kind", "code", "kind");
 
-        new SyncPlanner()
-            .BuildPlan([add], FkRebuildCaps, context)
-            .Warnings.Should()
-            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyNotOnCandidateKey)
-            .Which.Detail.Should()
-            .Be("FK_new");
-        new SyncPlanner()
-            .BuildPlan(
-                [add],
-                FkRebuildCaps with
-                {
-                    ReferencedKeyRequiresSameColumnOrder = false,
-                },
-                context
-            )
-            .Warnings.Should()
-            .BeEmpty();
+        var ordered = new SyncPlanner().BuildPlan([add], FkRebuildCaps, context);
+        ordered.Warnings.Should().BeEmpty();
+        AddedForeignKeyPairs(ordered, "FK_new")
+            .Should()
+            .Equal(("code", "customer_code"), ("kind", "customer_kind"));
+
+        var unordered = new SyncPlanner().BuildPlan(
+            [add],
+            FkRebuildCaps with
+            {
+                ReferencedKeyRequiresSameColumnOrder = false,
+            },
+            context
+        );
+        unordered.Warnings.Should().BeEmpty();
+        AddedForeignKeyPairs(unordered, "FK_new")
+            .Should()
+            .Equal(("kind", "customer_kind"), ("code", "customer_code"));
+
+        // 同じ計画で追加する一意制約の並びにもそろえる
+        var (addToNewUnique, newUniqueContext) = AddForeignKeyScenario(
+            new("kind", "customer_kind"),
+            new("code", "customer_code")
+        );
+        var withNewUnique = new SyncPlanner().BuildPlan(
+            [
+                addToNewUnique,
+                UniqueItem(SchemaDiffKind.AddUniqueConstraint, "customer", null, ["code", "kind"]),
+            ],
+            FkRebuildCaps,
+            newUniqueContext
+        );
+        withNewUnique.Warnings.Should().BeEmpty();
+        AddedForeignKeyPairs(withNewUnique, "FK_new")
+            .Should()
+            .Equal(("code", "customer_code"), ("kind", "customer_kind"));
     }
+
+    /// <summary>
+    /// 参照先に主キーと同じ列の集合で並びの違う一意制約があるとき、並びを問う方言では外部キーの追加を主キーの並びで出すことを
+    /// 検証する（DDL の <see cref="ForeignKeyColumnOrder.ArrangeToReferencedKey"/> と同じく主キーを先に試す。一意制約を先に
+    /// 試すと、同期と DDL で同じ外部キーの並びが食い違う）。
+    /// </summary>
+    [Fact(
+        DisplayName = "並べ替え: 主キーと同じ列の集合の一意制約があっても、外部キーの追加は主キーの並びで出す"
+    )]
+    public void AddForeignKey_PrimaryKeyAndUniqueOnSameColumns_FollowsPrimaryKey()
+    {
+        var (pair, reference, _, context) = PairReferenceScenario();
+        WithUnique(pair, "UQ_pair_b_a", "b", "a");
+        reference.Columns.Add(Col("xb", "INT"));
+        reference.Columns.Add(Col("xa", "INT"));
+        var addFk = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddForeignKey,
+            TableName = "ref",
+            ParentEntity = pair,
+            ChildEntity = reference,
+            Relationship = new Relationship { ConstraintName = "FK_ref_new" },
+            ForeignKeyName = "FK_ref_new",
+            ForeignKeyColumnPairs = [new("b", "xb"), new("a", "xa")],
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan([addFk], MySqlLikeCaps, context);
+
+        plan.Warnings.Should().BeEmpty();
+        AddedForeignKeyPairs(plan, "FK_ref_new").Should().Equal(("a", "xa"), ("b", "xb"));
+        ForeignKeyColumnOrder
+            .ArrangeToReferencedKey(addFk.ForeignKeyColumnPairs, pair)
+            .Select(p => (p.ParentColumn, p.ChildColumn))
+            .Should()
+            .Equal(("a", "xa"), ("b", "xb"));
+    }
+
+    /// <summary>
+    /// 参照先の列がどのキー（同期後の主キー・一意制約）ともちょうど一致しない外部キーの追加は、並びを問う方言でも並べ替えず、
+    /// 従来どおり <see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> で名指しすることを検証する
+    /// （MySQL で一意でない索引の列を参照する形。QuickER は一意でない索引を取り込まないので、並べ替える先のキーが無い）。
+    /// </summary>
+    [Fact(
+        DisplayName = "並べ替え: 参照先がどのキーとも一致しない外部キーの追加は並べ替えず、従来どおり警告する"
+    )]
+    public void AddForeignKey_NotOnAnyKey_IsNotArrangedAndWarns()
+    {
+        var (add, context) = AddForeignKeyScenario(
+            new("kind", "customer_kind"),
+            new("code", "customer_code")
+        );
+
+        var plan = new SyncPlanner().BuildPlan([add], NonTransactionalOrderedCaps, context);
+
+        plan.Warnings.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.ForeignKeyNotOnCandidateKey,
+                    "orders",
+                    "FK_new"
+                )
+            );
+        AddedForeignKeyPairs(plan, "FK_new")
+            .Should()
+            .Equal(("kind", "customer_kind"), ("code", "customer_code"));
+    }
+
+    /// <summary>計画の AddForeignKey セクションの、指定した名前の外部キーの列ペア（親の列, 子の列）</summary>
+    private static IEnumerable<(string Parent, string Child)> AddedForeignKeyPairs(
+        SyncPlan plan,
+        string name
+    ) =>
+        plan
+            .Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+            .Items.Single(i => i.ForeignKeyName == name)
+            .ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn));
 
     /// <summary>付け直しが巻き戻らず、参照する列の並びも問う方言（MySQL 相当）</summary>
     private static readonly SyncDialectCapabilities NonTransactionalOrderedCaps = MySqlLikeCaps with
@@ -4485,14 +4587,14 @@ public class SyncPlannerTests
     }
 
     /// <summary>
-    /// 付け直しが巻き戻らず参照する列の並びも問う方言（MySQL）では、参照される複合主キーの列の並びだけを入れ替える
-    /// 主キーの変更を計画から外して警告し、巻き戻る方言（SQL Server）と並びを問わない方言では従来どおり計画に入れる
-    /// ことを検証する。
+    /// 参照される複合主キーの列の並びだけを入れ替える主キーの変更は、旧主キーに支えられた外部キーを外して付け直す
+    /// 項目を引き続き注入し（<c>DependsOnOldPrimaryKey</c>）、並びを問う方言（SQL Server・MySQL）では付け直しを
+    /// 新しい主キーの並びで出すことを検証する（どの方言も警告しない）。並びを問わない方言は live の並びのまま付け直す。
     /// </summary>
     [Fact(
-        DisplayName = "並びの不一致: MySQL では参照される複合主キーの並びだけの入れ替えを計画から外して警告する"
+        DisplayName = "並べ替え: 参照される複合主キーの並びだけを変えると、外部キーを外して新しい主キーの並びで付け直す"
     )]
-    public void ReorderReferencedCompositeKey_NonTransactional_IsExcluded()
+    public void ReorderReferencedCompositeKey_RebuildsForeignKeyInNewOrder()
     {
         var (pair, _, _, context) = PairReferenceScenario();
         var reordered = pair.Clone(preserveId: true);
@@ -4501,37 +4603,48 @@ public class SyncPlannerTests
         SyncPlan Plan(SyncDialectCapabilities capabilities) =>
             new SyncPlanner().BuildPlan([AlterPk("pair", reordered)], capabilities, context);
 
-        var mySql = Plan(NonTransactionalOrderedCaps);
-        mySql.IsEmpty.Should().BeTrue();
-        mySql
-            .Warnings.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(
-                new SyncPlanWarning(SyncPlanWarningKind.ForeignKeyKeyOrderMismatch, "ref", "FK_ref")
-            );
-
-        var sqlServer = Plan(MySqlLikeCaps);
-        sqlServer.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AlterPrimaryKey);
-        sqlServer
-            .Warnings.Should()
-            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
-
-        var unordered = Plan(
-            NonTransactionalOrderedCaps with
+        foreach (
+            var (caps, expected) in new[]
             {
-                ReferencedKeyRequiresSameColumnOrder = false,
+                (NonTransactionalOrderedCaps, new[] { ("b", "rb"), ("a", "ra") }),
+                (MySqlLikeCaps, new[] { ("b", "rb"), ("a", "ra") }),
+                (
+                    NonTransactionalOrderedCaps with
+                    {
+                        ReferencedKeyRequiresSameColumnOrder = false,
+                    },
+                    new[] { ("a", "ra"), ("b", "rb") }
+                ),
             }
-        );
-        unordered.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AlterPrimaryKey);
-        unordered.Warnings.Should().BeEmpty();
+        )
+        {
+            var plan = Plan(caps);
+
+            plan.Warnings.Should().BeEmpty();
+            plan.Sections.Select(s => s.Kind)
+                .Should()
+                .Equal(
+                    SchemaDiffKind.DropForeignKey,
+                    SchemaDiffKind.AlterPrimaryKey,
+                    SchemaDiffKind.AlterPrimaryKey,
+                    SchemaDiffKind.AddForeignKey
+                );
+            plan.Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+                .Items.Should()
+                .ContainSingle()
+                .Which.ForeignKeyName.Should()
+                .Be("FK_ref");
+            AddedForeignKeyPairs(plan, "FK_ref").Should().Equal(expected);
+        }
     }
 
     /// <summary>
-    /// 並び以外が原因の証明できない付け直し（参照する列が新しい主キーと別の列集合になる）は、MySQL でも従来どおり
-    /// 警告して計画に入れることを検証する（取り込んでいない索引で通る構成があるため止めない）。
+    /// 参照する列の集合が新しい主キーと違う付け直しは、証明できないので MySQL でも従来どおり警告して計画に入れ、
+    /// 付け直しは live の並びのまま出すことを検証する（取り込んでいない索引で通る構成があるため止めない）。
     /// </summary>
-    [Fact(DisplayName = "並びの不一致: 並び以外が原因の付け直しは MySQL でも警告して計画に入れる")]
+    [Fact(
+        DisplayName = "候補キー: 参照する列の集合が新しい主キーと違う付け直しは、MySQL でも警告して計画に入れる"
+    )]
     public void ChangeReferencedKeyColumnSet_NonTransactional_StillRuns()
     {
         var (pair, _, _, context) = PairReferenceScenario();
@@ -4549,17 +4662,18 @@ public class SyncPlannerTests
             .ContainSingle()
             .Which.Kind.Should()
             .Be(SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey);
+        AddedForeignKeyPairs(plan, "FK_ref").Should().Equal(("a", "ra"), ("b", "rb"));
     }
 
     /// <summary>
-    /// MySQL では、図の列ペアの並びが参照先のキーと合わない外部キーの作り直しを計画から外して警告することを検証する
-    /// （同期は図の並びのまま付け直すので、外して付け直すと付け直しが失敗して外部キーが消えたまま残る）。巻き戻る方言では
-    /// 警告して計画に入れる。差分は列ペアを並びを見ずに比べるので、作り直しは並び以外の変更（ここでは参照アクション）で起きる。
+    /// 図の列ペアの並びが参照先のキーと違う外部キーの作り直しを、並びを問う方言（SQL Server・MySQL）ではキーの並びで
+    /// 付け直し、警告しないことを検証する。問わない方言は図の並びのまま。差分は列ペアを並びを見ずに比べるので、作り直しは
+    /// 並び以外の変更（ここでは参照アクション）で起きる。
     /// </summary>
     [Fact(
-        DisplayName = "並びの不一致: MySQL では図の並びが参照先のキーと合わない外部キーの作り直しを外して警告する"
+        DisplayName = "並べ替え: 図の並びが参照先のキーと違う外部キーの作り直しは、キーの並びで付け直す"
     )]
-    public void AlterForeignKeyIntoOtherOrder_NonTransactional_IsExcluded()
+    public void AlterForeignKeyInOtherOrder_IsArrangedToKey()
     {
         var (_, _, fk, context) = PairReferenceScenario();
         var targetEntities = context.LiveEntities.Select(e => e.Clone(preserveId: true)).ToList();
@@ -4593,21 +4707,62 @@ public class SyncPlannerTests
             return new SyncPlanner().BuildPlan(items, capabilities, context);
         }
 
-        var mySql = Plan(NonTransactionalOrderedCaps);
-        mySql.IsEmpty.Should().BeTrue();
-        mySql
-            .Warnings.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Be(
-                new SyncPlanWarning(SyncPlanWarningKind.ForeignKeyKeyOrderMismatch, "ref", "FK_ref")
-            );
+        foreach (var caps in new[] { NonTransactionalOrderedCaps, MySqlLikeCaps })
+        {
+            var plan = Plan(caps);
 
-        var sqlServer = Plan(MySqlLikeCaps);
-        sqlServer.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.DropForeignKey);
-        sqlServer
-            .Warnings.Should()
-            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyNotOnCandidateKey);
+            plan.Warnings.Should().BeEmpty();
+            plan.Sections.Select(s => s.Kind)
+                .Should()
+                .Equal(SchemaDiffKind.DropForeignKey, SchemaDiffKind.AddForeignKey);
+            AddedForeignKeyPairs(plan, "FK_ref").Should().Equal(("a", "ra"), ("b", "rb"));
+        }
+
+        var unordered = Plan(
+            NonTransactionalOrderedCaps with
+            {
+                ReferencedKeyRequiresSameColumnOrder = false,
+            }
+        );
+        unordered.Warnings.Should().BeEmpty();
+        AddedForeignKeyPairs(unordered, "FK_ref").Should().Equal(("b", "rb"), ("a", "ra"));
+    }
+
+    /// <summary>
+    /// 一意制約の列の並びだけが違う図は作り直しにならず（差分は一意制約を列集合で比べる）、MySQL でもその一意制約に
+    /// 支えられた外部キーを外し直さないことを検証する（索引の喪失による外し直し＝<c>CollectLostIndexes</c> は、
+    /// 一意制約の削除を選んだときだけ働く）。
+    /// </summary>
+    [Fact(
+        DisplayName = "並べ替え: 一意制約の列の並びだけの違いは作り直しにならず、MySQL でも外部キーを外し直さない"
+    )]
+    public void UniqueConstraintInOtherOrder_IsNoDiffAndKeepsForeignKey()
+    {
+        var (_, orders, rel, context) = LiveFkScenario();
+        orders.Columns.Add(Col("note", "INT"));
+        WithUnique(orders, "UQ_orders_customer_note", "customer_id", "note");
+        var targetEntities = context.LiveEntities.Select(e => e.Clone(preserveId: true)).ToList();
+        var targetOrders = targetEntities.Single(e => e.TableName == "orders");
+        targetOrders.UniqueConstraints[0].ColumnIds =
+        [
+            .. targetOrders.UniqueConstraints[0].ColumnIds.AsEnumerable().Reverse(),
+        ];
+
+        var items = new SchemaDiffService()
+            .Compute(
+                context.LiveEntities,
+                context.LiveRelationships,
+                targetEntities,
+                [rel],
+                NonTransactionalOrderedCaps
+            )
+            .Items;
+        items.Should().BeEmpty();
+
+        new SyncPlanner()
+            .BuildPlan(items, NonTransactionalOrderedCaps, context)
+            .IsEmpty.Should()
+            .BeTrue();
     }
 
     /// <summary>

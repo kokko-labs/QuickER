@@ -65,8 +65,15 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
             AppendItem(sb, section, item);
         }
 
+        AppendSectionEnd(sb, section);
         sb.AppendLine();
     }
+
+    /// <summary>セクションの全項目の後に書き出す文（既定は何もしない）</summary>
+    /// <remarks>
+    /// セクションの項目をすべて書いた後でしか決まらない後始末を持つ方言（MySQL の外部キーの索引）だけが上書きする。
+    /// </remarks>
+    protected virtual void AppendSectionEnd(StringBuilder sb, SyncPlanSection section) { }
 
     /// <summary>セクション見出しに使う識別（主キー変更のみフェーズを併記する・固定文は英語が正本）</summary>
     /// <remarks>
