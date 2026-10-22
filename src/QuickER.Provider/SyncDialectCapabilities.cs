@@ -149,16 +149,14 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public required bool ChecksDefaultOnColumnTypeChange { get; init; }
 
-    /// <summary>計算列・生成列の型を、式を変えずに <c>ALTER COLUMN</c> で変えられるか（PostgreSQL だけ）。</summary>
+    /// <summary>計算列・生成列の型を、式を保ったまま変えられるか（PostgreSQL と MySQL）。</summary>
     /// <remarks>
     /// <para>
-    /// 意味モデルは計算列の式を持たないので、同期は式を書けない。PostgreSQL は <c>ALTER COLUMN ... TYPE</c> が生成列の
-    /// 式を保ったまま型だけを変える。SQL Server は計算列を <c>ALTER COLUMN</c> できずに失敗する。SQLite の再構築は式を落とし、
-    /// Oracle も式を書かない変更はできない。MySQL は列の変更を実行時のカタログから組み直すので、生成列も式と種別
-    /// （<c>VIRTUAL</c> / <c>STORED</c>）を保ったまま型を変えられる（実 DB で確認＝
-    /// <c>MySqlColumnAttributeSyncIntegrationTests.AlterColumn_GeneratedColumn_KeepsExpression</c>）が、宣言は <c>false</c>
-    /// のままにしてある（式を書かない <c>MODIFY</c> なら、<c>STORED</c> は式を落として普通の列になり、<c>VIRTUAL</c> は
-    /// エラー 3106 で断られる。<c>true</c> にするかは残件）。
+    /// 意味モデルは計算列の式を持たないので、図からは式を書けない。PostgreSQL は <c>ALTER COLUMN ... TYPE</c> が生成列の
+    /// 式を保ったまま型だけを変える。MySQL は列の変更（<c>MODIFY</c>）を実行時のカタログから組み直すので、生成列の式と種別
+    /// （<c>VIRTUAL</c> / <c>STORED</c>）を書き直して型だけを変える（式を書かない <c>MODIFY</c> なら、<c>STORED</c> は式を
+    /// 落として普通の列になり、<c>VIRTUAL</c> はエラー 3106 で断られる）。SQL Server は計算列を <c>ALTER COLUMN</c> できずに
+    /// 失敗する。SQLite の再構築は式を落とし、Oracle も式を書かない変更はできない。
     /// </para>
     /// <para>
     /// <c>false</c> の方言では、計算列の型の差分を選択できない案内項目にする（<see cref="SchemaDiffService"/>）。

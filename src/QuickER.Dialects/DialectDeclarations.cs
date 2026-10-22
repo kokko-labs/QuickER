@@ -297,7 +297,7 @@ public static class DialectDeclarations
             { Kind.PaddedName, Detected(NotApplicable) }, // N1 ○ 33 該
             { Kind.TableWithoutReadableColumns, Detected(NotApplicable) }, // T1 ○ 既 該（TRIGGER・DROP・INDEX・SHOW VIEW だけの表単位の権限では表が見えて列が 0 本。実機で確認）
             // 向き 2
-            { Kind.ComputedColumnTypeChange, NotExpressible() }, // A1b ×（?）
+            { Kind.ComputedColumnTypeChange, Expressible() }, // A1b ○（列の変更が実行時のカタログから式と種別を書き直す）
             { Kind.UniqueConstraintOnPrimaryKey, Expressible() }, // B6 ○
             { Kind.CompositeOrMissingPrimaryKey, Expressible() }, // B7a ○
             { Kind.CompositeForeignKey, Expressible() }, // B7b ○

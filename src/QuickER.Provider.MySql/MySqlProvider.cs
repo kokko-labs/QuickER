@@ -56,7 +56,7 @@ public sealed class MySqlProvider : IDatabaseProvider
             SetDefaultRequiresColumnDefault = false,
             SupportsSchemaQualifiedTableNames = true,
             ChecksDefaultOnColumnTypeChange = true,
-            SupportsComputedColumnTypeChange = false,
+            SupportsComputedColumnTypeChange = true,
             SupportsUniqueConstraintOnPrimaryKey = true,
             ReferencedKeyRequiresSameColumnOrder = true,
             ForeignKeyAllowsStringLengthDifference = true,
