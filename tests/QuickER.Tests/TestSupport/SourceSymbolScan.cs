@@ -19,7 +19,7 @@ namespace QuickER.Tests.TestSupport;
 /// </para>
 /// <para>
 /// 組み方：<c>src/</c> の <c>.csproj</c> を持つフォルダを 1 プロジェクトとし、その下の <c>.cs</c>（<c>bin</c> / <c>obj</c> を除く）に、
-/// ビルドが作った暗黙の using（<c>obj/**/{アセンブリ名}.GlobalUsings.g.cs</c>）を足す。参照はテストの実行時の
+/// ビルドが作った暗黙の using（<c>obj/**/{.csproj の名前}.GlobalUsings.g.cs</c>）を足す。参照はテストの実行時の
 /// TRUSTED_PLATFORM_ASSEMBLIES と、テストの出力フォルダの管理された DLL（自分自身のアセンブリを除く）。
 /// アセンブリ名は <c>.csproj</c> の <c>AssemblyName</c>（無ければフォルダ名）にして、<c>InternalsVisibleTo</c> を効かせる。
 /// プリプロセッサの記号は <c>DEBUG</c>・<c>TRACE</c> と、src の <c>.csproj</c> にある <c>QUICKER_*</c>（機能モジュールをすべて含む構成）。
@@ -28,6 +28,12 @@ namespace QuickER.Tests.TestSupport;
 /// ソース生成器（CommunityToolkit・<c>GeneratedRegex</c> など）と XAML が作るメンバーは含まないので、それを呼ぶ箇所は解決しない。
 /// 呼び出し側は「解決しなかった呼び出し」を数えない側へ倒さず、別の欄として照合すること。参照の組み立てが壊れると
 /// すべてが未解決になって緑のまま残るので、<see cref="SourceProject.ResolvedBclInvocationCount"/> が 0 でないことも確かめる。
+/// </para>
+/// <para>
+/// 1 通りの記号でパースすると、外れる分岐（<c>#if !DEBUG</c> の中・<c>#if QUICKER_*</c> の <c>#else</c>）がトリビアになって走査から
+/// 見えない。条件コンパイルを持つファイルがあるプロジェクトは、試す記号のすべての組み合わせの変種のコンパイル
+/// （<see cref="SourceProject.Variants"/>）も作る。走査は <see cref="SourceProject.ScanNodes"/> を通し、組み合わせをまたいで
+/// 同じ節を 1 回だけ数える（<see cref="ConditionalSourceParse"/>）。
 /// </para>
 /// </remarks>
 internal static class SourceSymbolScan
@@ -104,59 +110,203 @@ internal static class SourceSymbolScan
 
     private static SourceProject LoadProject(string root, string csproj)
     {
-        {
-            var folder = Path.GetDirectoryName(csproj)!;
-            var assemblyName = ReadAssemblyName(csproj) ?? Path.GetFileName(folder);
-            var files = Directory
-                .EnumerateFiles(folder, "*.cs", SearchOption.AllDirectories)
-                .Where(path => !IsBuildOutput(path))
-                .Select(path => new SourceFile(
-                    Path.GetRelativePath(root, path).Replace('\\', '/'),
-                    CSharpSyntaxTree.ParseText(File.ReadAllText(path), ParseOptions, path)
-                ))
-                .ToList();
-            var globalUsings = Directory
-                .EnumerateFiles(
-                    folder,
-                    assemblyName + ".GlobalUsings.g.cs",
-                    SearchOption.AllDirectories
+        var folder = Path.GetDirectoryName(csproj)!;
+        var assemblyName = ReadAssemblyName(csproj) ?? Path.GetFileName(folder);
+        var files = Directory
+            .EnumerateFiles(folder, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !IsBuildOutput(path))
+            .Select(path =>
+                (
+                    RelativePath: Path.GetRelativePath(root, path).Replace('\\', '/'),
+                    Text: File.ReadAllText(path),
+                    FullPath: path
                 )
-                .Where(path =>
-                    path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                )
-                .Take(1)
-                .Select(path =>
-                    CSharpSyntaxTree.ParseText(File.ReadAllText(path), ParseOptions, path)
-                );
-            var ownAssemblyFile = assemblyName + ".dll";
-            var references = References
-                .Where(reference =>
-                    !string.Equals(
-                        Path.GetFileName((reference as PortableExecutableReference)?.FilePath),
-                        ownAssemblyFile,
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-                .ToList();
-            var compilation = CSharpCompilation.Create(
-                assemblyName,
-                files.Select(file => file.Tree).Concat(globalUsings),
-                references,
-                new CSharpCompilationOptions(
-                    OutputKind.DynamicallyLinkedLibrary,
-                    allowUnsafe: true,
-                    nullableContextOptions: NullableContextOptions.Enable
-                )
-            );
+            )
+            .ToList();
 
-            return new SourceProject(
-                Path.GetFileName(folder),
-                compilation,
-                files,
-                CountResolvedBclInvocations(compilation, files)
+        // ビルドが作った暗黙の using（名前は AssemblyName でなく .csproj の名前で付く＝QuickER.Gui は AssemblyName が QuickER。
+        // 条件コンパイルを持たない生成物なので、組み合わせは 1 通りになる）
+        var globalUsings = Directory
+            .EnumerateFiles(
+                folder,
+                Path.GetFileNameWithoutExtension(csproj) + ".GlobalUsings.g.cs",
+                SearchOption.AllDirectories
+            )
+            .Where(path =>
+                path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+            )
+            .Take(1)
+            .Select(path =>
+                ConditionalSourceParse.Parse(File.ReadAllText(path), ParseOptions, path).Single()
+            )
+            .ToList();
+        var ownAssemblyFile = assemblyName + ".dll";
+        var references = References
+            .Where(reference =>
+                !string.Equals(
+                    Path.GetFileName((reference as PortableExecutableReference)?.FilePath),
+                    ownAssemblyFile,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            .ToList();
+
+        return BuildProject(
+            Path.GetFileName(folder),
+            assemblyName,
+            files,
+            globalUsings,
+            references
+        );
+    }
+
+    /// <summary>
+    /// 与えたソースを 1 プロジェクトとして組む（条件コンパイルの変種のコンパイルも作る。自己検査のプローブ用）
+    /// </summary>
+    /// <param name="name">プロジェクト名（アセンブリ名にも使う）</param>
+    /// <param name="files">走査の対象のソース（相対パスと本文）</param>
+    public static SourceProject CompileProbeProject(
+        string name,
+        IReadOnlyList<(string RelativePath, string Text)> files
+    ) =>
+        BuildProject(
+            name,
+            name,
+            files.Select(file => (file.RelativePath, file.Text, file.RelativePath)).ToList(),
+            [],
+            References
+        );
+
+    /// <summary>
+    /// ソースをコンパイルとして組む。基準のコンパイルは <see cref="ParseOptions"/> の記号でパースした全ファイル。
+    /// 条件コンパイルを持つファイルがあれば、それらのファイルが試す記号のすべての組み合わせ（基準と同じものを除く）ごとに、
+    /// そのファイルの構文木だけを差し替えた変種のコンパイルを作る（ほかのファイルの構文木は基準と共有する）
+    /// </summary>
+    private static SourceProject BuildProject(
+        string name,
+        string assemblyName,
+        IReadOnlyList<(string RelativePath, string Text, string FullPath)> sources,
+        IReadOnlyList<SyntaxTree> extraTrees,
+        IReadOnlyList<MetadataReference> references
+    )
+    {
+        // ソースは必ず ConditionalSourceParse でパースする（先頭が基準の設定の構文木・残りが記号の組み合わせごとの構文木）
+        var parsed = sources
+            .Select(source =>
+            {
+                var trees = ConditionalSourceParse.Parse(
+                    source.Text,
+                    ParseOptions,
+                    source.FullPath
+                );
+
+                return new ParsedSource(
+                    new SourceFile(source.RelativePath, trees[0]),
+                    trees,
+                    ConditionalSourceParse.ConditionalSymbols(trees[0])
+                );
+            })
+            .ToList();
+        var files = parsed.Select(item => item.File).ToList();
+        var compilation = CSharpCompilation.Create(
+            assemblyName,
+            files.Select(file => file.Tree).Concat(extraTrees),
+            references,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                allowUnsafe: true,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+
+        return new SourceProject(
+            name,
+            compilation,
+            files,
+            CountResolvedBclInvocations(compilation, files),
+            BuildVariants(name, compilation, [.. parsed.Where(item => item.Trees.Count > 1)])
+        );
+    }
+
+    /// <summary>
+    /// 条件コンパイルを持つファイルについて、記号の組み合わせ（基準と同じものを除く）ごとの変種のコンパイルを作る
+    /// </summary>
+    /// <remarks>
+    /// 記号は、プロジェクトの条件コンパイルを持つファイルが試すものの和集合で、上限は <see cref="ConditionalSourceParse.MaxSymbols"/>。
+    /// 各ファイルの構文木は <see cref="ConditionalSourceParse.Parse"/> が作ったもの（そのファイルが試す記号の定義が同じ組み合わせ
+    /// どうしで 1 本を共有し、基準と同じなら基準の構文木）を使う。
+    /// </remarks>
+    private static IReadOnlyList<SourceVariant> BuildVariants(
+        string name,
+        CSharpCompilation baseCompilation,
+        IReadOnlyList<ParsedSource> conditional
+    )
+    {
+        if (conditional.Count == 0)
+        {
+            return [];
+        }
+
+        var symbols = conditional
+            .SelectMany(item => item.Symbols)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        var baseDefined = ParseOptions.PreprocessorSymbolNames.ToHashSet(StringComparer.Ordinal);
+        var variants = new List<SourceVariant>();
+
+        foreach (
+            var options in ConditionalSourceParse
+                .VariantOptions(ParseOptions, symbols, name)
+                .Skip(1)
+        )
+        {
+            var defined = options.PreprocessorSymbolNames.ToHashSet(StringComparer.Ordinal);
+            var compilation = baseCompilation;
+            var files = new List<SourceFile>();
+
+            foreach (var item in conditional)
+            {
+                // ファイルの構文木の並びは「基準から定義を反転した記号のビット」の順（VariantOptions と同じ）
+                var flip = Enumerable
+                    .Range(0, item.Symbols.Count)
+                    .Where(index =>
+                        defined.Contains(item.Symbols[index])
+                        != baseDefined.Contains(item.Symbols[index])
+                    )
+                    .Sum(index => 1 << index);
+                var tree = item.Trees[flip];
+
+                if (!ReferenceEquals(tree, item.File.Tree))
+                {
+                    compilation = compilation.ReplaceSyntaxTree(item.File.Tree, tree);
+                }
+
+                files.Add(new SourceFile(item.File.RelativePath, tree));
+            }
+
+            variants.Add(
+                new SourceVariant(
+                    string.Join(
+                        " ",
+                        symbols.Select(symbol => defined.Contains(symbol) ? symbol : "!" + symbol)
+                    ),
+                    compilation,
+                    files,
+                    CountResolvedBclInvocations(compilation, files)
+                )
             );
         }
+
+        return variants;
     }
+
+    /// <summary>パースしたソース（基準の構文木と、記号の組み合わせごとの構文木）</summary>
+    private sealed record ParsedSource(
+        SourceFile File,
+        IReadOnlyList<SyntaxTree> Trees,
+        IReadOnlyList<string> Symbols
+    );
 
     private static int CountResolvedBclInvocations(
         CSharpCompilation compilation,
@@ -172,10 +322,16 @@ internal static class SourceSymbolScan
                 .OfType<InvocationExpressionSyntax>()
                 .Count(invocation =>
                     ResolveMethod(model, invocation) is { } method
-                    && ContainingTypeName(method)?.StartsWith("System.", StringComparison.Ordinal)
-                        == true
+                    && IsSystemNamespace(method.ContainingType?.ContainingNamespace)
                 );
         });
+
+    /// <summary>
+    /// 名前空間が <c>System</c> かその下か（型の表記でなく名前空間で見る＝<c>string</c> のようにキーワードで表記される型も BCL に数える）
+    /// </summary>
+    private static bool IsSystemNamespace(INamespaceSymbol? ns) =>
+        ns?.ToDisplayString() is { } name
+        && (name == "System" || name.StartsWith("System.", StringComparison.Ordinal));
 
     private static IReadOnlyList<MetadataReference> LoadReferences()
     {
@@ -248,11 +404,66 @@ internal static class SourceSymbolScan
 
 /// <summary>src の 1 プロジェクト（コンパイルと、走査の対象の自分のソース）</summary>
 /// <param name="Name">フォルダ名（<c>QuickER.Gui</c> など）</param>
-/// <param name="Compilation">シンボルの解決に使うコンパイル</param>
+/// <param name="Compilation">シンボルの解決に使うコンパイル（基準の記号でパースした全ファイル）</param>
 /// <param name="Files">自分のソース（暗黙の using のファイルを含まない）</param>
 /// <param name="ResolvedBclInvocationCount">BCL（<c>System.*</c>）のメソッドへ解決できた呼び出しの数</param>
+/// <param name="Variants">条件コンパイルの記号の組み合わせごとの変種のコンパイル（条件コンパイルが無ければ空）</param>
 internal sealed record SourceProject(
     string Name,
+    CSharpCompilation Compilation,
+    IReadOnlyList<SourceFile> Files,
+    int ResolvedBclInvocationCount,
+    IReadOnlyList<SourceVariant> Variants
+)
+{
+    /// <summary>
+    /// 自分のソースの全節を、その節の構文木の意味モデルと組にして返す。条件コンパイルを持つファイルは、変種のコンパイルの
+    /// 構文木の節も返し、組み合わせをまたいで同じ節は 1 回だけにする（分岐の外の呼び出しを組み合わせの数だけ数えない）
+    /// </summary>
+    public IEnumerable<(SourceFile File, SemanticModel Model, SyntaxNode Node)> ScanNodes(
+        CancellationToken cancellationToken = default
+    )
+    {
+        var variantUnits = Variants
+            .SelectMany(variant => variant.Files.Select(file => (file, variant.Compilation)))
+            .ToLookup(unit => unit.file.RelativePath, StringComparer.Ordinal);
+
+        foreach (var file in Files)
+        {
+            IEnumerable<(SourceFile File, CSharpCompilation Compilation)> units =
+            [
+                (file, Compilation),
+                .. variantUnits[file.RelativePath],
+            ];
+            var nodes = units.SelectMany(unit =>
+            {
+                var model = unit.Compilation.GetSemanticModel(unit.File.Tree);
+
+                return unit
+                    .File.Tree.GetRoot(cancellationToken)
+                    .DescendantNodes()
+                    .Select(node => (unit.File, Model: model, Node: node));
+            });
+
+            var distinct = variantUnits.Contains(file.RelativePath)
+                ? ConditionalSourceParse.DistinctAcrossVariants(nodes, item => item.Node)
+                : nodes;
+
+            foreach (var item in distinct)
+            {
+                yield return item;
+            }
+        }
+    }
+}
+
+/// <summary>条件コンパイルの記号の 1 つの組み合わせの変種のコンパイル</summary>
+/// <param name="Symbols">組み合わせの表記（未定義の記号は <c>!</c> を付ける）</param>
+/// <param name="Compilation">条件コンパイルを持つファイルの構文木だけを差し替えたコンパイル</param>
+/// <param name="Files">差し替えた構文木（条件コンパイルを持つファイルだけ）</param>
+/// <param name="ResolvedBclInvocationCount">差し替えた構文木で BCL のメソッドへ解決できた呼び出しの数</param>
+internal sealed record SourceVariant(
+    string Symbols,
     CSharpCompilation Compilation,
     IReadOnlyList<SourceFile> Files,
     int ResolvedBclInvocationCount

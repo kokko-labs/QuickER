@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -167,11 +168,22 @@ public sealed record IdentifierLengthLimit(
         Unit switch
         {
             IdentifierLengthUnit.Unlimited => "no limit",
-            IdentifierLengthUnit.Utf16CodeUnits => $"{Max} UTF-16 code units",
-            IdentifierLengthUnit.Utf8Bytes => $"{Max} UTF-8 bytes",
-            IdentifierLengthUnit.Characters when TableFileNameMax is { } fileMax =>
-                $"{Max} characters (table names also {fileMax} bytes as a file name)",
-            IdentifierLengthUnit.Characters => $"{Max} characters",
+            IdentifierLengthUnit.Utf16CodeUnits => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{Max} UTF-16 code units"
+            ),
+            IdentifierLengthUnit.Utf8Bytes => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{Max} UTF-8 bytes"
+            ),
+            IdentifierLengthUnit.Characters when TableFileNameMax is { } fileMax => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{Max} characters (table names also {fileMax} bytes as a file name)"
+            ),
+            IdentifierLengthUnit.Characters => string.Create(
+                CultureInfo.InvariantCulture,
+                $"{Max} characters"
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(Unit), Unit, null),
         };
 

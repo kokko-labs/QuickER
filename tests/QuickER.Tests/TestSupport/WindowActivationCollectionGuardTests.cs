@@ -46,14 +46,25 @@ public class WindowActivationCollectionGuardTests
         @"\[Collection\((TestSupport\.)?WindowActivationTestCollection\.Name\)\]"
     );
 
-    /// <summary>目印を持つテストソース（コレクションの定義そのものを除く）</summary>
+    /// <summary>
+    /// 目印を持っても検査しないソース。
+    /// コレクションの定義そのものと、失敗した瞬間の状態の記録（<see cref="GuiFailureDiagnostics"/>＝
+    /// アクティブ・フォーカスのイベントを受け身で購読して記録するだけで、テストを持たず結果も変えない）
+    /// </summary>
+    private static readonly string[] ExcludedFileNames =
+    [
+        "WindowActivationTestCollection.cs",
+        "GuiFailureDiagnostics.cs",
+    ];
+
+    /// <summary>目印を持つテストソース（<see cref="ExcludedFileNames"/> を除く）</summary>
     private static List<(string RelativePath, string Text)> FindDependentSources() =>
         Directory
             .EnumerateFiles(TestsRoot, "*.cs", SearchOption.AllDirectories)
             .Where(path =>
                 !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
                 && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-                && Path.GetFileName(path) != "WindowActivationTestCollection.cs"
+                && !ExcludedFileNames.Contains(Path.GetFileName(path))
             )
             .Select(path => (Path.GetRelativePath(TestsRoot, path), File.ReadAllText(path)))
             .Where(source => Markers.Any(marker => source.Item2.Contains(marker)))

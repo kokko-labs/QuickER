@@ -436,6 +436,41 @@ public class AtomicFileTests : IDisposable
         File.ReadAllText(path).Should().Be("after");
     }
 
+    /// <summary>CreateText が、保存先が無ければ内容どおりのファイルを作り、一時ファイルを残さないことを検証する</summary>
+    [Fact(DisplayName = "CreateText: 保存先が無ければ新規作成し .tmp を残さない")]
+    public void CreateText_NewFile_CreatesFileWithoutTemporaryLeftover()
+    {
+        var path = Path.Combine(_folder, "created.json");
+
+        AtomicFile.CreateText(path, "{ \"名前\": \"顧客\" }");
+
+        File.ReadAllText(path).Should().Be("{ \"名前\": \"顧客\" }");
+        FindTemporaryLeftovers().Should().BeEmpty("一時ファイルは置いた後に残らない");
+    }
+
+    /// <summary>
+    /// CreateText が、保存先が既にあれば置き換えずに <see cref="IOException"/> を投げ、
+    /// 既存の内容と一時ファイルの無さを保つことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 存在を確かめてから書く呼び出し側（モックフォルダの作成・MCP の create_diagram）は、その隙間に別のプロセスが
+    /// 作ったファイルをこれで上書きしない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "CreateText: 保存先が既にあれば置き換えずに IOException を投げ .tmp を残さない"
+    )]
+    public void CreateText_ExistingFile_ThrowsAndKeepsContent()
+    {
+        var path = Path.Combine(_folder, "existing.json");
+        File.WriteAllText(path, "original");
+
+        var act = () => AtomicFile.CreateText(path, "replacement");
+
+        act.Should().Throw<IOException>("置き換えない書き込みは既存のファイルで失敗する");
+        File.ReadAllText(path).Should().Be("original");
+        FindTemporaryLeftovers().Should().BeEmpty("失敗時に一時ファイルを残さない");
+    }
+
     /// <summary>一時保存先フォルダに残った AtomicFile 自身の一時ファイル（<c>{path}.{GUID}.tmp</c>）を列挙する</summary>
     /// <remarks>
     /// 一時ファイル名には GUID が挟まるため、固定名ではなくワイルドカードで探す。

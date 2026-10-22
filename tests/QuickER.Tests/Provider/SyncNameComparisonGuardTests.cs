@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -69,13 +70,16 @@ public sealed class SyncNameComparisonGuardTests
         {
             var path = Path.Combine(root, file);
             File.Exists(path).Should().BeTrue(path);
-            var tree = CSharpSyntaxTree.ParseText(
+            var variants = ConditionalSourceParse.Parse(
                 File.ReadAllText(path),
                 cancellationToken: TestContext.Current.CancellationToken
             );
 
             foreach (
-                var token in tree.GetRoot(TestContext.Current.CancellationToken).DescendantTokens()
+                var token in ConditionalSourceParse.DescendantTokens(
+                    variants,
+                    TestContext.Current.CancellationToken
+                )
             )
             {
                 if (token.IsKind(SyntaxKind.IdentifierToken) && Forbidden.Contains(token.Text))

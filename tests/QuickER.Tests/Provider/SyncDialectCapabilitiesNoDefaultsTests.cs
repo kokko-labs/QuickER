@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Provider;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -46,16 +47,17 @@ public sealed class SyncDialectCapabilitiesNoDefaultsTests
             "QuickER.Provider",
             "SyncDialectCapabilities.cs"
         );
-        var root = CSharpSyntaxTree
-            .ParseText(
-                File.ReadAllText(path),
-                cancellationToken: TestContext.Current.CancellationToken
+        var variants = ConditionalSourceParse.Parse(
+            File.ReadAllText(path),
+            cancellationToken: TestContext.Current.CancellationToken
+        );
+        var withInitializer = ConditionalSourceParse
+            .DescendantNodes(variants, TestContext.Current.CancellationToken)
+            .OfType<PropertyDeclarationSyntax>()
+            .Where(property =>
+                property.Parent is RecordDeclarationSyntax record
+                && record.Identifier.ValueText == nameof(SyncDialectCapabilities)
             )
-            .GetRoot(TestContext.Current.CancellationToken);
-        var withInitializer = root.DescendantNodes()
-            .OfType<RecordDeclarationSyntax>()
-            .Where(record => record.Identifier.ValueText == nameof(SyncDialectCapabilities))
-            .SelectMany(record => record.Members.OfType<PropertyDeclarationSyntax>())
             .Where(property => property.Initializer is not null)
             .Select(property => property.Identifier.ValueText)
             .ToList();

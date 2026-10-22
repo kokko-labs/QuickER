@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using QuickER.Dialects;
 using QuickER.Model;
@@ -58,7 +59,12 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
     /// <remarks>逐次 DDL 方言の骨格そのもの。再構築方言が特定セクションだけ描画する際にも再利用する。</remarks>
     protected void AppendSection(StringBuilder sb, SyncPlanSection section)
     {
-        sb.AppendLine($"-- ===== {SectionLabel(section)} ({section.Items.Count} items) =====");
+        sb.AppendLine(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"-- ===== {SectionLabel(section)} ({section.Items.Count} items) ====="
+            )
+        );
 
         foreach (var item in section.Items)
         {

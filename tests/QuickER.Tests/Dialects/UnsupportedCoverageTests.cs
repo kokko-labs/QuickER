@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Dialects;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Dialects;
 
@@ -126,13 +127,14 @@ public sealed class UnsupportedCoverageTests
                 !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
             )
             .SelectMany(path =>
-                CSharpSyntaxTree
-                    .ParseText(
-                        File.ReadAllText(path),
-                        cancellationToken: TestContext.Current.CancellationToken
+                ConditionalSourceParse
+                    .DescendantNodes(
+                        ConditionalSourceParse.Parse(
+                            File.ReadAllText(path),
+                            cancellationToken: TestContext.Current.CancellationToken
+                        ),
+                        TestContext.Current.CancellationToken
                     )
-                    .GetRoot(TestContext.Current.CancellationToken)
-                    .DescendantNodes()
                     .OfType<MethodDeclarationSyntax>()
                     .Where(method => method.Parent is TypeDeclarationSyntax)
                     .Select(method =>

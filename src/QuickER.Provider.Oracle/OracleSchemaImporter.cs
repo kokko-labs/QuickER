@@ -972,21 +972,27 @@ ORDER BY constraint_name";
                 }
 
                 return string.Equals(charUsed, "C", StringComparison.OrdinalIgnoreCase)
-                    ? $"{upper}({charLength} CHAR)"
-                    : $"{upper}({charLength})";
+                    ? string.Create(CultureInfo.InvariantCulture, $"{upper}({charLength} CHAR)")
+                    : string.Create(CultureInfo.InvariantCulture, $"{upper}({charLength})");
 
             case "NVARCHAR2":
             case "NCHAR":
-                return charLength is null ? upper : $"{upper}({charLength})";
+                return charLength is null
+                    ? upper
+                    : string.Create(CultureInfo.InvariantCulture, $"{upper}({charLength})");
 
             case "RAW":
                 // char_length は RAW では常に 0 のため、バイト長 data_length を用いる
-                return dataLength is null or 0 ? "RAW" : $"RAW({dataLength})";
+                return dataLength is null or 0
+                    ? "RAW"
+                    : string.Create(CultureInfo.InvariantCulture, $"RAW({dataLength})");
 
             case "FLOAT":
                 // FLOAT(b) は 2 進精度。精度があれば付与する（正規型では Float64 として解釈される）
                 return OracleTypeNotation.Normalize(
-                    dataPrecision is null ? "FLOAT" : $"FLOAT({dataPrecision})"
+                    dataPrecision is null
+                        ? "FLOAT"
+                        : string.Create(CultureInfo.InvariantCulture, $"FLOAT({dataPrecision})")
                 );
 
             default:

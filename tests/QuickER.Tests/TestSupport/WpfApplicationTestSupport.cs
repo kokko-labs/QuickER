@@ -24,11 +24,25 @@ internal static class WpfApplicationTestSupport
     {
         Exception? captured = null;
 
+        // 失敗した瞬間の状態の記録（出力先は STA スレッドへ流れないので、ここで取る）
+        var diagnostics = GuiFailureDiagnostics.BeginRun();
+
         var thread = new Thread(() =>
         {
             try
             {
-                action();
+                GuiFailureDiagnostics.Enter(diagnostics);
+
+                try
+                {
+                    action();
+                }
+                catch (Exception ex) when (GuiFailureDiagnostics.Capture(ex))
+                {
+                    // Capture は常に false を返すので入らない（例外は下の catch がそのまま捕まえる）。
+                    // フィルターは内側の finally（テストがウィンドウを閉じる処理）より前に動くので、
+                    // ウィンドウが開いたままの状態を記録できる
+                }
             }
             catch (Exception ex)
             {
@@ -126,6 +140,9 @@ internal static class WpfApplicationTestSupport
     {
         Exception? captured = null;
 
+        // 失敗した瞬間の状態の記録（出力先は STA スレッドへ流れないので、ここで取る）
+        var diagnostics = GuiFailureDiagnostics.BeginRun();
+
         var folder = Path.Combine(
             Path.GetTempPath(),
             "quicker-window-" + Guid.NewGuid().ToString("N")
@@ -140,33 +157,44 @@ internal static class WpfApplicationTestSupport
             {
                 try
                 {
-                    EnsureApplicationResources();
-
-                    var vm = new MainViewModel();
-                    vm.UsePersistenceForTests(
-                        new GuiAppSettingsStore(folder),
-                        Path.Combine(folder, "last_diagram.json")
-                    );
-                    var window = CreateMainWindow(vm);
-
-                    // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
-                    window.WindowStartupLocation = WindowStartupLocation.Manual;
-                    window.Left = -4000;
-                    window.Top = -4000;
-                    window.ShowActivated = false;
-
-                    window.Show();
-                    window.UpdateLayout();
-                    DoEvents();
+                    GuiFailureDiagnostics.Enter(diagnostics);
 
                     try
                     {
-                        assert(vm, window);
-                    }
-                    finally
-                    {
-                        window.Close();
+                        EnsureApplicationResources();
+
+                        var vm = new MainViewModel();
+                        vm.UsePersistenceForTests(
+                            new GuiAppSettingsStore(folder),
+                            Path.Combine(folder, "last_diagram.json")
+                        );
+                        var window = CreateMainWindow(vm);
+                        GuiFailureDiagnostics.Track(window);
+
+                        // 画面外・非アクティブで表示する（開発者のデスクトップを妨げない）
+                        window.WindowStartupLocation = WindowStartupLocation.Manual;
+                        window.Left = -4000;
+                        window.Top = -4000;
+                        window.ShowActivated = false;
+
+                        window.Show();
+                        window.UpdateLayout();
                         DoEvents();
+
+                        try
+                        {
+                            assert(vm, window);
+                        }
+                        finally
+                        {
+                            window.Close();
+                            DoEvents();
+                        }
+                    }
+                    catch (Exception ex) when (GuiFailureDiagnostics.Capture(ex))
+                    {
+                        // Capture は常に false を返すので入らない（例外は下の catch がそのまま捕まえる）。
+                        // フィルターは上の finally（ウィンドウを閉じる処理）より前に動く
                     }
                 }
                 catch (Exception ex)

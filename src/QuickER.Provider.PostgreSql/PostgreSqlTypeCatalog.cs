@@ -400,7 +400,9 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
             return "varchar";
         }
 
-        return length == -1 ? "text" : $"varchar({length})";
+        return length == -1
+            ? "text"
+            : string.Create(CultureInfo.InvariantCulture, $"varchar({length})");
     }
 
     /// <summary>固定長文字列を char(n) または text（max）へ整形する</summary>
@@ -411,7 +413,9 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
             return "char";
         }
 
-        return length == -1 ? "text" : $"char({length})";
+        return length == -1
+            ? "text"
+            : string.Create(CultureInfo.InvariantCulture, $"char({length})");
     }
 
     /// <summary>numeric の最大精度</summary>
@@ -470,5 +474,7 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
     }
 
     private static string FormatPrecisionOnly(string name, int? precision) =>
-        precision is null ? name : $"{name}({precision})";
+        precision is null
+            ? name
+            : string.Create(CultureInfo.InvariantCulture, $"{name}({precision})");
 }

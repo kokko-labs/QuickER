@@ -289,6 +289,10 @@ dotnet_naming_style.camel_case.capitalization = camel_case
 #   CA1311: ToUpper / ToLower にカルチャを渡していない
 # CA1305（IFormatProvider を渡していない）は入れない。画面・ログ・例外に出す文言の多くは、意図して実行環境の
 # カルチャで書式化しており、規則にすると意図した書式化まで機械的に CultureInfo.CurrentCulture を書かせることになる。
+# 実測（2026-10-22）では、src で有効にすると 762 件の診断が出る。しかも数えるのは string.Format・ToString()・Convert・
+# StringBuilder.Append / AppendLine へ渡した補間などで、文字列への素の補間（$"…"）と連結は診断しない（プロバイダと方言の
+# 宣言の数値の補間 32 か所のうち、診断が出たのは StringBuilder.AppendLine の 1 か所だけ）。素の補間は
+# NumericInterpolationCultureGuardTests が型で数える。
 # CA1307（StringComparison を渡していない）も入れない。対象の Equals / Contains / Replace などは既定が序数の比較で、
 # 結果は変わらず、明示を求めるだけの規則になるため。
 # 生成物・SQL・ファイルへ書く文字列がカルチャに依らないことは、出力の総当たり（CultureInvariant*Tests）が確かめる。

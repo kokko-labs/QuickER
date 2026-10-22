@@ -22,6 +22,10 @@ namespace QuickER.Tests.Gui.Behaviors;
 /// その間のマウスやアクティブの変化で押下が解け得る。Space の押下と解放はメッセージを処理させずに続けて流す。
 /// </para>
 /// <para>
+/// ボタンは実際のマウスのボタンが押されている間は Space の解放で Click しないので、Space の押下の前に離されるのを待つ
+/// （<see cref="TestSupport.PhysicalMouseButtons"/>。押されたままなら約 10 秒で失敗する）。
+/// </para>
+/// <para>
 /// 判断が <c>Deactivated</c> に左右されるので、ほかのテストのウィンドウにアクティブを奪われないよう
 /// 並列に走らせない（<see cref="TestSupport.WindowActivationTestCollection"/>）。
 /// </para>
@@ -68,6 +72,9 @@ public class CanvasViewportBehaviorSpaceKeyTests
         var testWindow = new TestWindow(window, canvas, button, checkBox);
         button.Click += (_, _) => testWindow.Clicks++;
 
+        // まれに全件実行でだけ落ちるので、失敗した瞬間の状態の記録へイベントを残す（観測だけで結果は変えない）
+        TestSupport.GuiFailureDiagnostics.Track(window);
+
         // 添付プロパティは表示より前に立てる（ウィンドウへの購読は ScrollViewer の Loaded で張られる）
         CanvasViewportBehavior.SetIsEnabled(canvas, enableBehavior);
         window.Show();
@@ -77,8 +84,18 @@ public class CanvasViewportBehaviorSpaceKeyTests
     }
 
     /// <summary>キーの押下か解放を、入力の経路（InputManager）へ流す</summary>
+    /// <remarks>
+    /// Space の押下の前には、実際のマウスのボタンが離されるのを待つ（押されたままだと WPF のボタンは Space の解放で
+    /// Click しない＝<see cref="TestSupport.PhysicalMouseButtons"/>）。パンを見るテストの Space も同じ経路を通す
+    /// （離されていれば待たずに進むので、結果は変わらない）
+    /// </remarks>
     private static void SendKey(Window window, Key key, bool down)
     {
+        if (key == Key.Space && down)
+        {
+            TestSupport.PhysicalMouseButtons.WaitUntilReleased();
+        }
+
         var source = PresentationSource.FromVisual(window)!;
         InputManager.Current.ProcessInput(
             new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key)

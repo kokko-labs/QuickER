@@ -1,3 +1,4 @@
+using System.Globalization;
 using Oracle.ManagedDataAccess.Client;
 using QuickER.Provider;
 
@@ -31,7 +32,10 @@ public static class OracleConnectionStringFactory
 
         var b = new OracleConnectionStringBuilder
         {
-            DataSource = $"{settings.Host}:{port}/{service}",
+            DataSource = string.Create(
+                CultureInfo.InvariantCulture,
+                $"{settings.Host}:{port}/{service}"
+            ),
             UserID = settings.UserId,
             Password = settings.Password,
             ConnectionTimeout = settings.ConnectTimeoutSeconds,

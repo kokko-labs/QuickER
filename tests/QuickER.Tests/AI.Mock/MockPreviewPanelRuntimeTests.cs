@@ -258,6 +258,95 @@ public sealed class MockPreviewPanelRuntimeTests : IDisposable
         available.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 初期化は通ったが、許可しないサブリソース要求に拒否の応答を付けられなかったときは、その場でプレビューを止めて
+    /// 使えない扱いへ切り替え、以後の表示の要求も受け付けない（その要求を黙って通し続けない）
+    /// </summary>
+    /// <remarks>
+    /// 差し替え口が null を返すと、初期化では例外にならず（初期化の時点で使えない扱いにする経路は通らない）、
+    /// 要求の途中で応答を付けられない経路（<c>OnWebResourceRequested</c> の catch → <c>StopPreview</c>）へ入る。
+    /// 要求先は閉じたばかりのループバックのポートで、要求が漏れても応答は得られない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "要求の途中で拒否の応答を付けられないときは、プレビューを止めて使えない表示へ切り替え、以後の表示を受け付けない"
+    )]
+    public void Preview_BlockedResponseMissingMidRequest_StopsPreview()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        var mock = Path.Combine(_folder, "mock");
+        Directory.CreateDirectory(mock);
+        var pageA = Path.Combine(mock, "A.html");
+        File.WriteAllText(
+            pageA,
+            $"""
+            <!DOCTYPE html><html><head><title>A</title></head><body>
+            <img src="http://127.0.0.1:{port}/x.png"></body></html>
+            """
+        );
+        File.WriteAllText(
+            Path.Combine(mock, "B.html"),
+            "<!DOCTYPE html><html><head><title>B</title></head><body>B</body></html>"
+        );
+        var initialized = false;
+        var stopped = false;
+        var webViewVisibility = Visibility.Visible;
+        var placeholderVisibility = Visibility.Visible;
+        var unavailableVisibility = Visibility.Collapsed;
+        var webViewVisibilityAfterLaterNavigate = Visibility.Visible;
+        Uri? sourceAfterLaterNavigate = null;
+        var fileChangesAfterStop = new List<string>();
+
+        WpfApplicationTestSupport.RunSta(() =>
+        {
+            WpfApplicationTestSupport.EnsureApplicationResources();
+            var panel = WpfApplicationTestSupport.LoadXamlComponent(() => new MockPreviewPanel());
+            panel.UserDataFolder = Path.Combine(_folder, "userdata");
+            panel.BlockedResponseFactory = _ => null!;
+            var window = ShowOffscreen(panel);
+
+            var init = panel.EnsureWebViewAsync();
+            Pump(() => init.IsCompleted, TimeSpan.FromSeconds(60));
+            initialized = init.IsCompletedSuccessfully && panel.IsPreviewAvailable;
+
+            if (initialized)
+            {
+                panel.Navigate(new Uri(pageA), mock);
+                Pump(() => !panel.IsPreviewAvailable, TimeSpan.FromSeconds(30));
+                stopped = !panel.IsPreviewAvailable;
+                webViewVisibility = panel.WebView.Visibility;
+                placeholderVisibility = panel.EmptyPlaceholder.Visibility;
+                unavailableVisibility = panel.UnavailablePanel.Visibility;
+
+                // 止めた後の表示の要求は無視される（遷移も現在ファイルの通知も起きない）
+                panel.CurrentFileChanged += (_, name) => fileChangesAfterStop.Add(name);
+                panel.Navigate(new Uri(Path.Combine(mock, "B.html")), mock);
+                Pump(() => false, TimeSpan.FromSeconds(1));
+                sourceAfterLaterNavigate = panel.CurrentSource;
+                webViewVisibilityAfterLaterNavigate = panel.WebView.Visibility;
+            }
+
+            window.Close();
+            WpfApplicationTestSupport.DoEvents();
+        });
+
+        initialized
+            .Should()
+            .BeTrue(
+                "WebView2 のランタイムが要り、null の応答では初期化は失敗しない（ランタイムが無い環境ではスキップせずに失敗させる）"
+            );
+        stopped.Should().BeTrue("応答を付けられなかった要求でプレビューを止める");
+        webViewVisibility.Should().Be(Visibility.Collapsed);
+        placeholderVisibility.Should().Be(Visibility.Collapsed);
+        unavailableVisibility.Should().Be(Visibility.Visible, "使えないことを案内する");
+        sourceAfterLaterNavigate.Should().Be(new Uri(pageA), "止めた後の表示の要求は受け付けない");
+        webViewVisibilityAfterLaterNavigate.Should().Be(Visibility.Collapsed);
+        fileChangesAfterStop.Should().BeEmpty();
+    }
+
     /// <summary>パネルを画面の外に出して初期化を待つ</summary>
     private static (MockPreviewPanel Panel, Window Window) ShowPanel(string userData)
     {
