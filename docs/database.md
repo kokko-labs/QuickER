@@ -407,7 +407,8 @@ Names generated for unnamed constraints are not used in the first step.
 A constraint without a name in the database (SQLite) is paired by its columns only.
 On every dialect, a composite foreign key whose column pairs differ only in their order is not a difference, because the pairs map parent columns to child columns and their order carries no meaning (Oracle does not even keep the declared order and returns the pairs in the order of the referenced key).
 SQL Server and MySQL require the referencing columns to follow the order of the referenced key, so the DDL writes the pairs in the order of the referenced key (the primary key, or else a unique constraint).
-A foreign key the sync adds or recreates is written in the diagram's order, so on SQL Server and MySQL it fails when that order differs from the referenced key (the confirmation dialog shows it).
+The sync also writes every foreign key it adds or re-adds in the order of the referenced key as it will be after the sync.
+Changing only the column order of a referenced composite primary key therefore re-adds its foreign keys in the new order.
 SQLite reads a table name with a dot such as `a.b` as table b in an attached database a, so the DDL and the sync for that table fail unless that database is attached.
 The DDL adds a comment before the table, and the sync lists such tables in the confirmation dialog.
 
@@ -454,7 +455,7 @@ Remove that unique constraint from the diagram and select its drop as well, or d
   The constraint is not re-created on the remaining columns, so add a unique constraint to the diagram if you still need one
 - A selected change that needs a change you did not select (a new table or column, or a primary key change) is left out of the script, and the confirmation names it together with what it needs.
   Dropping a column of the primary key needs the primary key change that removes the column.
-  A foreign key you add or change needs the primary key change when it refers to the parent's new primary key, and that key is neither the primary key nor a unique constraint without the change (also when the primary key change is left out on MySQL because only its column order changes).
+  A foreign key you add or change needs the primary key change when it refers to the parent's new primary key, and that key is neither the primary key nor a unique constraint without the change.
   QuickER does not select the needed change for you
 - Composite (multi-column) foreign keys are handled as first-class: a relationship holds an ordered list of column pairs, so import, DDL generation, and sync all carry every pair.
   That includes the implicit drop-and-recreate triggered by a primary-key change and SQLite's table rebuilds, and a composite foreign key is never silently narrowed to a single column
@@ -487,7 +488,7 @@ Foreign keys that rely on the changed primary key (they refer to the same column
 | Altering a column drops and re-adds its foreign keys | ✅ | — | ✅ | — | — (the table is rebuilt) |
 | Altering a key column drops and re-adds the primary key and unique constraints | ✅ | — | — | — | — (the table is rebuilt) |
 | A foreign key resting on the index of a dropped primary key or unique constraint is re-added | — | — | ✅ | — | — |
-| Referencing columns must follow the order of the referenced key | ✅ | — | ✅ (a change that only reorders is not run) | — | — |
+| Referencing columns must follow the order of the referenced key | ✅ | — | ✅ | — | — |
 | String types differing only in length are allowed on the two ends | — (error 1753) | ✅ | ✅ | ✅ (same length unit) | ✅ |
 | A failed re-add can leave the foreign key dropped | — | — | ✅ | ✅ | — |
 
@@ -504,10 +505,8 @@ In that case no other foreign key is dropped and re-added either, because the co
 If a referenced column is no longer part of the new key, the confirmation dialog warns that re-creating those foreign keys may fail.
 Such a failure rolls the whole script back, or, where the table above says so, leaves the foreign keys dropped (partially applied).
 The same warning appears when a foreign key you add or change refers to columns that are not exactly a primary key or a unique constraint after the sync.
-Where the table above says the referencing columns must follow the order of the referenced key, a change that only reorders a referenced composite key, or a foreign key change that only reorders its columns against the key, is warned about too.
-On MySQL such a change is not run at all: it would drop the foreign key and then fail to add it back, leaving it dropped.
-The confirmation dialog lists the skipped changes; to apply one, also select the removal of the foreign key so that it is dropped first, or change it by hand.
-This also skips the change when the re-add would in fact succeed: on MySQL 8.0, or on 8.4 with `restrict_fk_on_non_standard_key=OFF`, a non-unique index you created yourself on the referenced columns in the foreign key's order can support it, but QuickER does not import non-unique indexes and cannot tell.
+Such a foreign key is written in the diagram's order, because there is no key to follow.
+Only the set of referenced columns is compared, so a different column order alone is never warned about: where the table above says the referencing columns must follow the order of the referenced key, the sync writes them in that order.
 
 ### Description sync
 
@@ -553,8 +552,8 @@ QuickER therefore rebuilds the definition from `information_schema.COLUMNS` at e
   MySQL creates such an index for a foreign key that has no suitable index and keeps it after the foreign key is dropped, so re-creating a foreign key of the same name on other columns would fail (error 1061).
   An index you created yourself with the same name as the foreign key is dropped too, because the catalog cannot tell the two apart.
   A unique index is never dropped this way.
-  When two foreign keys that start with the same column are both dropped, the index they share can be left behind, because the other foreign key still uses it when the first one is dropped.
-  Re-creating a foreign key with that index's name on other columns can then fail with error 1061.
+  When two foreign keys of the same table are dropped, the index they share is checked again after both are dropped, because the other foreign key still uses it when the first one is dropped.
+  Re-adding them in another column order then does not fail with error 1061.
 
 Two things do not come through the rebuild, both because the catalog does not record them the way they were written:
 

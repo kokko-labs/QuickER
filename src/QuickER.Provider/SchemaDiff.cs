@@ -138,7 +138,13 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     /// <c>FOREIGN KEY (…) REFERENCES … (…)</c> を組み立てる。空なら FK 句を作れないためスキップする
     /// （<see cref="ColumnName"/> は表示・照合の互換のため先頭ペアの子列名が入る）。
     /// </remarks>
-    public IReadOnlyList<ForeignKeyColumnNamePair> ForeignKeyColumnPairs { get; init; } = [];
+    public IReadOnlyList<ForeignKeyColumnNamePair> ForeignKeyColumnPairs
+    {
+        get => _foreignKeyColumnPairs;
+        init => _foreignKeyColumnPairs = value;
+    }
+
+    private IReadOnlyList<ForeignKeyColumnNamePair> _foreignKeyColumnPairs = [];
 
     /// <summary>作り直す前の外部キー（DB の定義の DropForeignKey 項目。AlterForeignKey のみ）。</summary>
     /// <remarks>
@@ -222,6 +228,20 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
                 or SchemaDiffKind.AlterForeignKey
                 or SchemaDiffKind.DropUniqueConstraint
                 or SchemaDiffKind.AlterUniqueConstraint;
+
+    /// <summary>列ペアだけを差し替えた複製を返す（ほかのプロパティと選択の状態はそのまま写す）</summary>
+    /// <param name="pairs">新しい列ペア</param>
+    /// <returns>列ペアだけが違う新しい項目（変更通知の購読は写さない）</returns>
+    /// <remarks>
+    /// プロパティを 1 つずつ写すと、プロパティを足したときにその複製だけが値を落とすので、メンバーごとに複製する。
+    /// </remarks>
+    public SchemaDiffItem WithForeignKeyColumnPairs(IReadOnlyList<ForeignKeyColumnNamePair> pairs)
+    {
+        var copy = (SchemaDiffItem)MemberwiseClone();
+        copy._foreignKeyColumnPairs = pairs;
+        copy.PropertyChanged = null;
+        return copy;
+    }
 
     /// <inheritdoc/>
     public event PropertyChangedEventHandler? PropertyChanged;

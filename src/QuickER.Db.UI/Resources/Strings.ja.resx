@@ -366,11 +366,7 @@
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey" xml:space="preserve">
-    <value>注意: 以下の外部キーは、同期後の参照先の列が主キーにも一意制約にもちょうど一致しません（SQL Server と MySQL は列の並びまでの一致が必要です）。追加は失敗する可能性が高く、既存の外部キーの作り直しでは、MySQL / Oracle で外部キーが外れたまま残り得ます:
-{0}</value>
-  </data>
-  <data name="SchemaSync_ExecuteConfirmForeignKeyKeyOrderMismatch" xml:space="preserve">
-    <value>注意: 以下の変更は実行しません。外部キーの列の並びが参照先のキーの並びと合わなくなり、MySQL ではその外部キーを付け直せない（外れたまま残る）ためです。適用するには、外部キーの削除も選んで先に外すか、手で付け替えてください:
+    <value>注意: 以下の外部キーは、同期後の参照先の列が主キーにも一意制約にもちょうど一致しません。追加は失敗する可能性が高く、既存の外部キーの作り直しでは、MySQL / Oracle で外部キーが外れたまま残り得ます:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmDefaultOnColumnTypeKindChange" xml:space="preserve">

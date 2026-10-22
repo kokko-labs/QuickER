@@ -534,14 +534,74 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
     }
 
     /// <summary>
-    /// 複合主キーの列順だけを入れ替えると、その主キーを (a, b) の並びで参照する外部キーは付け直せない
-    /// （SQL Server は参照する列の並びがキーの並びと一致することを求める＝Msg 1776）ので、事前に警告し、
-    /// 実行の失敗はロールバックされて何も変わらないことを検証する（以前は警告なしに失敗していた）。
+    /// 複合主キーの列順だけを入れ替える同期が、その主キーを (a, b) の並びで参照する外部キーを外し、新しい主キーの並び
+    /// (b, a) で付け直して成功することを検証する（SQL Server は参照する列の並びがキーの並びと一致することを求める＝
+    /// Msg 1776。以前は live の並びのまま付け直して失敗した）。外部キーの外し直しは主キーの変更だけを選んでも計画に入り、
+    /// 取り込み直すと差分は出ず、行も残る。
     /// </summary>
     [Fact(
-        DisplayName = "[Integration] SQL Server 同期: 参照される複合主キーの列順だけを入れ替えると警告し、失敗しても何も変わらない"
+        DisplayName = "[Integration] SQL Server 同期: 参照される複合主キーの列順だけを入れ替えると、外部キーを新しい並びで付け直して成功する"
     )]
-    public async Task ReorderReferencedCompositePrimaryKey_WarnsAndChangesNothing()
+    public async Task ReorderReferencedCompositePrimaryKey_RebuildsForeignKeyInNewOrder()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE [sd_pair] ([a] int NOT NULL, [b] int NOT NULL, CONSTRAINT [PK_sd_pair] PRIMARY KEY ([a], [b]));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE [sd_ref] ([id] int NOT NULL, [ra] int NOT NULL, [rb] int NOT NULL, "
+                + "CONSTRAINT [PK_sd_ref] PRIMARY KEY ([id]), "
+                + "CONSTRAINT [fk_sd_ref] FOREIGN KEY ([ra], [rb]) REFERENCES [sd_pair] ([a], [b]));",
+            Ct
+        );
+        await fixture.ExecuteAsync("INSERT INTO [sd_pair] ([a], [b]) VALUES (1, 2);", Ct);
+        await fixture.ExecuteAsync("INSERT INTO [sd_ref] ([id], [ra], [rb]) VALUES (1, 1, 2);", Ct);
+
+        static void ReorderKey(List<Entity> entities, List<Relationship> _)
+        {
+            var pair = entities.Single(e => e.TableName == "sd_pair");
+            pair.PrimaryKeyColumnIds = [pair.Columns[1].Id, pair.Columns[0].Id];
+        }
+
+        var (result, script, _, plan) = await SyncAsync(
+            ReorderKey,
+            select: item => item.Kind == SchemaDiffKind.AlterPrimaryKey
+        );
+
+        plan.Warnings.Should().BeEmpty();
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .Items.Should()
+            .ContainSingle()
+            .Which.ForeignKeyName.Should()
+            .Be("fk_sd_ref");
+        script.Should().Contain("FOREIGN KEY ([rb], [ra]) REFERENCES [sd_pair] ([b], [a])");
+        result.Committed.Should().BeTrue($"{result.Error}\n{script}");
+
+        var live = await ImportAsync();
+        live.Entities.Single(e => e.TableName == "sd_pair")
+            .GetPrimaryKeyColumnsInOrder()
+            .Select(c => c.Name)
+            .Should()
+            .Equal("b", "a");
+        ForeignKeyPairNames(live, "fk_sd_ref").Should().Equal(("b", "rb"), ("a", "ra"));
+        (await CountRowsAsync("sd_ref")).Should().Be(1);
+
+        var (_, _, again, _) = await SyncAsync(ReorderKey, select: null);
+        again.Items.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 図の列ペアの並びが参照先の主キーと逆の外部キーを、参照アクションの変更で作り直す同期が、キーの並びで付け直して
+    /// 成功することを検証する（差分は列ペアを並びを見ずに比べるので、作り直しは参照アクションの変更で起きる。以前は図の
+    /// 並びのまま付け直して Msg 1776 で失敗した）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 図の並びが参照先のキーと違う外部キーの作り直しは、キーの並びで付け直して成功する"
+    )]
+    public async Task AlterForeignKeyInOtherOrder_IsRebuiltInKeyOrder()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
         await fixture.ResetSchemaAsync(Ct);
@@ -557,28 +617,59 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
             Ct
         );
 
-        var (result, _, _, plan) = await SyncAsync(
-            (entities, _) =>
-            {
-                var pair = entities.Single(e => e.TableName == "sd_pair");
-                pair.PrimaryKeyColumnIds = [pair.Columns[1].Id, pair.Columns[0].Id];
-            },
-            select: item => item.Kind == SchemaDiffKind.AlterPrimaryKey
+        static void ReverseAndCascade(List<Entity> _, List<Relationship> relationships)
+        {
+            var fk = relationships.Single();
+            fk.ColumnPairs = [.. fk.ColumnPairs.AsEnumerable().Reverse()];
+            fk.OnDelete = ForeignKeyReferentialAction.Cascade;
+        }
+
+        var (result, script, diff, plan) = await SyncAsync(
+            ReverseAndCascade,
+            select: item => item.Kind == SchemaDiffKind.AlterForeignKey
         );
 
-        plan.Warnings.Should()
-            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey)
-            .Which.Detail.Should()
-            .Be("fk_sd_ref");
-        result.Committed.Should().BeFalse();
+        diff.Items.Should().ContainSingle().Which.Kind.Should().Be(SchemaDiffKind.AlterForeignKey);
+        plan.Warnings.Should().BeEmpty();
+        script.Should().Contain("FOREIGN KEY ([ra], [rb]) REFERENCES [sd_pair] ([a], [b])");
+        result.Committed.Should().BeTrue($"{result.Error}\n{script}");
 
         var live = await ImportAsync();
-        live.Entities.Single(e => e.TableName == "sd_pair")
-            .GetPrimaryKeyColumnsInOrder()
-            .Select(c => c.Name)
-            .Should()
-            .Equal("a", "b");
-        live.Relationships.Should().ContainSingle().Which.ConstraintName.Should().Be("fk_sd_ref");
+        live.Relationships.Should()
+            .ContainSingle()
+            .Which.OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.Cascade);
+        ForeignKeyPairNames(live, "fk_sd_ref").Should().Equal(("a", "ra"), ("b", "rb"));
+
+        var (_, _, again, _) = await SyncAsync(ReverseAndCascade, select: null);
+        again.Items.Should().BeEmpty();
+    }
+
+    /// <summary>取り込んだ外部キーの列ペアを、取り込んだ並びの（親の列, 子の列）で返す</summary>
+    private static IEnumerable<(string Parent, string Child)> ForeignKeyPairNames(
+        SchemaImportResult live,
+        string constraintName
+    )
+    {
+        var fk = live.Relationships.Single(r => r.ConstraintName == constraintName);
+        var parent = live.Entities.Single(e => e.Id == fk.SourceEntityId);
+        var child = live.Entities.Single(e => e.Id == fk.TargetEntityId);
+
+        return fk.ColumnPairs.Select(p =>
+            (
+                parent.Columns.Single(c => c.Id == p.SourceColumnId).Name,
+                child.Columns.Single(c => c.Id == p.TargetColumnId).Name
+            )
+        );
+    }
+
+    /// <summary>表の行数を数える</summary>
+    private async Task<int> CountRowsAsync(string table)
+    {
+        await using var connection = await fixture.OpenConnectionAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM [{table}];";
+        return (int)(await command.ExecuteScalarAsync(Ct))!;
     }
 
     /// <summary>

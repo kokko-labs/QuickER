@@ -82,7 +82,7 @@ public enum UnsupportedTreatment
     /// <summary>同期・DDL：図全体を断る（入口の検証）</summary>
     Reject,
 
-    /// <summary>DDL：並べ替えて出す</summary>
+    /// <summary>同期・DDL：並べ替えて出す</summary>
     Reorder,
 
     /// <summary>C# 生成・出力・ツール：図の印に従う</summary>

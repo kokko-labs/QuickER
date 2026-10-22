@@ -383,6 +383,54 @@ public class MySqlSyncScriptBuilderTests
             );
     }
 
+    /// <summary>
+    /// 同じ子表の外部キーを続けて外すとき、先に外した外部キーと同じ名前の索引を、後の外部キーを外した後にもう一度確かめて
+    /// 外すことを検証する（MySQL は同じ列の外部キー 2 本に 1 つの索引を共有させるので、1 本目を外す時点ではもう 1 本が
+    /// 使っていて残し、2 本目を外した後も残ると、並びを変えた付け直しが同じ名前の索引を作ろうとしてエラー 1061 になる）。
+    /// 子表ごとに最後に外す外部キーと、子表に 1 本だけの外部キーには、確かめ直しを足さない。
+    /// </summary>
+    [Fact(
+        DisplayName = "DropForeignKey は同じ子表の後の外部キーを外した後に、先に外した外部キーの名前の索引を確かめ直す"
+    )]
+    public void DropForeignKey_RechecksLeftoverIndexAfterLaterDropOnSameTable()
+    {
+        static SchemaDiffItem Drop(string child, string name) =>
+            new()
+            {
+                Kind = SchemaDiffKind.DropForeignKey,
+                TableName = child,
+                ParentEntity = new Entity { TableName = "customer" },
+                ChildEntity = new Entity { TableName = child },
+                ForeignKeyName = name,
+                IsSelected = true,
+            };
+
+        var sql = Build(Drop("order", "fk_a"), Drop("invoice", "fk_c"), Drop("order", "fk_b"));
+
+        static int Count(string text, string value)
+        {
+            var count = 0;
+
+            for (
+                var index = text.IndexOf(value, System.StringComparison.Ordinal);
+                index >= 0;
+                index = text.IndexOf(value, index + 1, System.StringComparison.Ordinal)
+            )
+            {
+                count++;
+            }
+
+            return count;
+        }
+
+        Count(sql, "s.INDEX_NAME = 'fk_a'").Should().Be(2);
+        Count(sql, "s.INDEX_NAME = 'fk_b'").Should().Be(1);
+        Count(sql, "s.INDEX_NAME = 'fk_c'").Should().Be(1);
+        sql.LastIndexOf("s.INDEX_NAME = 'fk_a'", System.StringComparison.Ordinal)
+            .Should()
+            .BeGreaterThan(sql.IndexOf("DROP FOREIGN KEY `fk_b`", System.StringComparison.Ordinal));
+    }
+
     /// <summary>制約名不明時にプリペアド動的 SQL でカタログ逆引き削除を生成することを検証する</summary>
     [Fact(DisplayName = "DropForeignKey は制約名不明時にプリペアド動的 SQL で逆引き削除する")]
     public void DropForeignKey_UsesPreparedStatementWhenNameUnknown()

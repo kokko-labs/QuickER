@@ -445,6 +445,62 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>
+    /// 外部キーを外すセクションの後に、同じ子表で後から外した外部キーがある外部キーについて、同じ名前の索引を確かめ直す。
+    /// </summary>
+    /// <remarks>
+    /// MySQL は同じ列の外部キー 2 本に 1 つの索引を共有させ、名前は片方の外部キーの名前になる。その外部キーを先に外す
+    /// 時点ではもう 1 本が索引を使っているので残し（<see cref="AppendDropForeignKeyIndex"/>）、もう 1 本を外した後も残る。
+    /// 付け直しで参照する列の並びが変わると（参照先のキーの並びへの並べ替え）、新しい列の索引を同じ名前で作ろうとして
+    /// エラー 1061 になり、DDL が暗黙コミットされるので外部キーが消えたまま残る。そこで、同じ子表の外部キーを外し終えた後に、
+    /// 先に外した外部キーの名前の索引を同じ条件でもう一度確かめて外す。名前の分からない外部キーは、実行時に引いた名前が
+    /// 残らないので対象にしない。
+    /// </remarks>
+    protected override void AppendSectionEnd(StringBuilder sb, SyncPlanSection section)
+    {
+        if (section.Kind != SchemaDiffKind.DropForeignKey)
+        {
+            return;
+        }
+
+        var items = section.Items;
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+
+            if (
+                item.ChildEntity is null
+                || item.ParentEntity is null
+                || string.IsNullOrWhiteSpace(item.ForeignKeyName)
+            )
+            {
+                continue;
+            }
+
+            var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
+            var droppedLaterOnSameTable = items
+                .Skip(i + 1)
+                .Any(later =>
+                    later.ChildEntity is not null
+                    && later.ParentEntity is not null
+                    && SchemaNames.AreSame(
+                        SchemaDiffService.NormalizeTable(later.ChildEntity),
+                        childTbl
+                    )
+                );
+
+            if (droppedLaterOnSameTable)
+            {
+                AppendDropForeignKeyIndex(
+                    sb,
+                    childTbl,
+                    $"'{MySqlIdentifier.EscapeStringLiteral(item.ForeignKeyName)}'"
+                );
+            }
+        }
+    }
+
+    /// <summary>
     /// 外部キーを外した後に、MySQL がその外部キーのために作った同じ名前の索引が残っていれば外す文を書き出す。
     /// </summary>
     /// <param name="sb">書き出し先</param>

@@ -81,6 +81,15 @@ public sealed class CapabilityTreatmentParityTests
                     : UnsupportedTreatment.None
         ),
         (
+            nameof(SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder),
+            UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder,
+            UnsupportedFeature.Sync,
+            c =>
+                c.ReferencedKeyRequiresSameColumnOrder
+                    ? UnsupportedTreatment.Reorder
+                    : UnsupportedTreatment.None
+        ),
+        (
             nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
             UnsupportedDefinitionKind.ForeignKeyTypeMismatch,
             UnsupportedFeature.Diff,

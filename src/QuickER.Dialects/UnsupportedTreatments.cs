@@ -83,6 +83,7 @@ public static class UnsupportedTreatments
         HandledNatively,
         HandledByRebuild,
         Reject,
+        Reorder,
     ]);
 
     private static readonly FrozenSet<UnsupportedTreatment> DdlAllowed = FrozenSet.ToFrozenSet([
@@ -1192,11 +1193,11 @@ public static class UnsupportedTreatments
             cells,
             Kind.CompositeForeignKeyColumnOrder,
             import: Same(None), // なし
-            diff: Same(Fold), // 比較で畳む（列ペアを並びを見ずに比べる。並べ替えは DDL の出力で行う）
+            diff: Same(Fold), // 比較で畳む（列ペアを並びを見ずに比べる。並べ替えは DDL・同期の出力で行う）
             sync: new TreatmentCell(
-                SqlServer: None,
+                SqlServer: Reorder, // 外部キーの追加を参照先の同期後のキーの並びへ並べ替えて出す
                 PostgreSql: None,
-                MySql: ExcludeWithWarning, // 外す＋警告（ForeignKeyKeyOrderMismatch）
+                MySql: Reorder,
                 Oracle: None,
                 Sqlite: None
             ),
