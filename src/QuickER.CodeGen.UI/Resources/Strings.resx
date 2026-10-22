@@ -134,7 +134,7 @@
     <value>Generate bidirectional sync support</value>
   </data>
   <data name="CodeGen_GenerateSyncSupportToolTip" xml:space="preserve">
-    <value>Generates the sync engine, per-table descriptors, journaling decorators, direct differential sources, and DI registration for a server (SQL Server) plus local (SQLite) setup.&#xD;&#xA;Only tables with a rowversion column take part; the server gets no extra schema, and the local database gets one shared journal table created at run time.</value>
+    <value>Generates the sync engine, per-table descriptors, journaling decorators, differential sources, and DI registration for a server (SQL Server) plus local (SQLite) setup. The differential sources read changes straight from the server database; selecting "Generate HTTP client / server implementations" also generates sources that read them over HTTP.&#xD;&#xA;Every table a repository contract is generated for (a single primary-key column) takes part; a rowversion column decides the mode, not membership. A table with one syncs incrementally under version guards, and a table without one takes part only in last-write-wins runs.&#xD;&#xA;The server gets no extra schema; the local database gets three shared tables (quicker_sync_journal, quicker_sync_ack, quicker_sync_blob_pending) created at run time.</value>
   </data>
   <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
     <value>Generates DB-independent in-memory repositories for prototyping and unit tests</value>
