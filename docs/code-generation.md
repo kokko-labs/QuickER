@@ -368,7 +368,7 @@ The provider itself retries a locked database only on a statement's first step, 
 Three things follow from this:
 
 - While SQLite waits, the cancellation token is not observed; a cancelled call returns only when the lock is released or the timeout runs out.
-- The wait applies only to connections that the generated `SqlConnectionFactory` opens. A repository given your own `ISqlConnectionFactory` does not get it unless your factory sets the busy timeout itself.
+- The wait applies only to connections that the generated `SqlConnectionFactory` opens. A repository given your own `ISqlConnectionFactory` does not get it unless your factory sets the busy timeout itself. The EF Core repositories get the same wait from an interceptor (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
 - The connection string has no keyword for the busy timeout. To use another value, run `PRAGMA busy_timeout` on the opened connection; the value you set last replaces the factory's for that connection until it opens again.
 
 For creating a schema from the DDL QuickER generates, `SqliteSchemaBootstrap.ApplyDdlAsync` / `SqlServerSchemaBootstrap.ApplyDdlAsync` open a connection and run the whole script in one call.
@@ -1010,6 +1010,14 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A graph save and a cascading `ExecuteDeleteAsync` run inside the strategy, and every attempt starts over from scratch.
   With save hooks, Before and After run once per attempt: their database writes roll back with the failed attempt, but a side effect outside the database is repeated.
   A statement that matched no row is a different retry, which stays inside one attempt: the save resolves it (taking over the stored values, or switching to an INSERT) and runs `SaveChanges` again in a new transaction, while Before has already run and After runs once, after the `SaveChanges` that succeeded.
+- On SQLite, a write waits for a lock held by another connection up to the command timeout, as with the QuickER Repository.
+  EF Core writes updates and deletes as `UPDATE … RETURNING 1` / `DELETE … RETURNING 1`, and the provider retries a locked database only on a statement's first step, so without a busy timeout these writes would fail with "database is locked" whenever another connection was reading.
+  `AddGeneratedEfCoreRepositories` adds `SqliteBusyTimeoutInterceptor` to the DbContext options after your configuration.
+  On each connection EF Core opens, it sets SQLite's busy timeout to the context's command timeout, or to the connection string's `Default Timeout` when the context sets none (30 seconds unless you set it, and `0` for no limit).
+  The value is set when the connection opens, so a timeout changed with `Database.SetCommandTimeout` while the connection is open applies from the next connection.
+  When you build `DbContextOptions` yourself, add `SqliteBusyTimeoutInterceptor.Instance` with `AddInterceptors`.
+  While SQLite waits, the cancellation token is not observed.
+  Connections of other providers are left untouched.
 - A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
   The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
 - A table without a primary key is **excluded from the DbContext** (no DbSet, no Fluent configuration, and navigations to it are ignored via an explicit `modelBuilder.Ignore<T>()`), and a Warning diagnostic names the table.

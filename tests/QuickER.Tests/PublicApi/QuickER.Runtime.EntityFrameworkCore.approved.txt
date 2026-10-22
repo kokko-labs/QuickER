@@ -87,6 +87,11 @@ public sealed class QuickER.Runtime.EntityFrameworkCore.SaveHookSession
     public bool BinaryColumnWritten { get; }
     public void Skip(QuickER.Runtime.EntityBaseCore entity)
 
+public sealed class QuickER.Runtime.EntityFrameworkCore.SqliteBusyTimeoutInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.DbConnectionInterceptor, Microsoft.EntityFrameworkCore.Diagnostics.IDbConnectionInterceptor, Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor
+    public override System.Threading.Tasks.Task ConnectionOpenedAsync(System.Data.Common.DbConnection connection, Microsoft.EntityFrameworkCore.Diagnostics.ConnectionEndEventData eventData, System.Threading.CancellationToken cancellationToken = default)
+    public override void ConnectionOpened(System.Data.Common.DbConnection connection, Microsoft.EntityFrameworkCore.Diagnostics.ConnectionEndEventData eventData)
+    public static QuickER.Runtime.EntityFrameworkCore.SqliteBusyTimeoutInterceptor Instance { get; }
+
 public sealed class QuickER.Runtime.EntityFrameworkCore.ValueObjectStringMethodTranslator : Microsoft.EntityFrameworkCore.Query.IMethodCallTranslator
     public .ctor(Microsoft.EntityFrameworkCore.Query.ISqlExpressionFactory sqlExpressionFactory, Microsoft.EntityFrameworkCore.Storage.RelationalTypeMapping stringTypeMapping, Microsoft.EntityFrameworkCore.Storage.RelationalTypeMapping nonUnicodeStringTypeMapping, QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior escapeBehavior)
     public .ctor(Microsoft.EntityFrameworkCore.Query.ISqlExpressionFactory sqlExpressionFactory, Microsoft.EntityFrameworkCore.Storage.RelationalTypeMapping stringTypeMapping, QuickER.Runtime.EntityFrameworkCore.LikeEscapeBehavior escapeBehavior)

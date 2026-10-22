@@ -5745,9 +5745,8 @@ public class CSharpCodeGenerationServiceTests
             .Should()
             .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
         content.Should().Contain("Action<DbContextOptionsBuilder> configureDbContext");
-        content
-            .Should()
-            .Contain("services.AddDbContextFactory<QuickErDbContext>(configureDbContext);");
+        content.Should().Contain("services.AddDbContextFactory<QuickErDbContext>(options =>");
+        content.Should().Contain("configureDbContext(options);");
         content
             .Should()
             .Contain("services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();");
