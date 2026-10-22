@@ -368,19 +368,25 @@ A type the import cannot classify (PostGIS types, user-defined types) is also wr
 
 <!-- dialect-table: referential-actions -->
 
-| Dialect | `ON UPDATE` | `SET DEFAULT` | In the diff |
-| --- | --- | --- | --- |
-| SQL Server | ✅ | ✅ (a NOT NULL referencing column needs a DEFAULT constraint) | As declared |
-| PostgreSQL | ✅ | ✅ | As declared |
-| MySQL | ✅ | — (accepted but not applied; left out with a note) | `SET DEFAULT` compared as `NO ACTION` |
-| Oracle | — (left out with a note) | — (left out with a note) | `ON UPDATE` and `SET DEFAULT` compared as `NO ACTION` |
-| SQLite | ✅ | ✅ | As declared |
+| Dialect | `ON UPDATE` | `SET DEFAULT` | `SET NULL` on a NOT NULL referencing column | In the diff |
+| --- | --- | --- | --- | --- |
+| SQL Server | ✅ | ✅ (a NOT NULL referencing column needs a DEFAULT constraint) | — (cannot be created; error 1761) | As declared |
+| PostgreSQL | ✅ | ✅ | ✅ (deleting or updating a referenced parent row fails) | As declared |
+| MySQL | ✅ | — (accepted but not applied; left out with a note) | — (cannot be created; error 1830) | `SET DEFAULT` compared as `NO ACTION` |
+| Oracle | — (left out with a note) | — (left out with a note) | ✅ (`ON DELETE` only; deleting a referenced parent row fails) | `ON UPDATE` and `SET DEFAULT` compared as `NO ACTION` |
+| SQLite | ✅ | ✅ | ✅ (deleting or updating a referenced parent row fails) | As declared |
 
 Where the table shows an action is missing or not applied, the diff compares it as `NO ACTION`, and the DDL and the sync script create the foreign key without the clause and add a comment saying so.
 MySQL (InnoDB) accepts `SET DEFAULT` in `ON DELETE` and `ON UPDATE` but does not apply it: deleting the parent row fails, as with `NO ACTION`.
 SQL Server cannot create a `SET DEFAULT` foreign key when a NOT NULL referencing column has no DEFAULT constraint (error 1762).
 The diagram does not carry column defaults, so the DDL adds a comment before such a foreign key, and the sync names the foreign keys it adds or recreates in the confirmation dialog.
 It does not stop the sync, because the foreign key is created when the database column has a DEFAULT constraint.
+A `SET NULL` foreign key on a NOT NULL referencing column cannot set the column to NULL.
+SQL Server and MySQL refuse to create it (errors 1761 and 1830), so the sync leaves out such foreign keys that you add or recreate, and does not drop and re-add one that the database already has.
+In MySQL, a column change that makes the referencing column of such a foreign key NOT NULL then fails before any foreign key is dropped.
+In SQL Server, that column change goes through, and deleting or updating a referenced parent row then fails.
+PostgreSQL, Oracle and SQLite create the foreign key, but deleting or updating a referenced parent row fails.
+In every dialect, the DDL adds a comment before such a foreign key, and the sync names it in the confirmation dialog.
 
 <!-- dialect-table: column-alteration -->
 
@@ -497,7 +503,11 @@ A primary key dropped and re-added by a key column change (see the table above) 
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.
 The same applies when dropping a unique constraint whose index is the only one supporting a foreign key (MySQL refuses with error 1553 otherwise).
 When a change leaves the two ends of a foreign key with different types after the sync (altering the type of only one side, for example), the foreign key is not dropped and re-added, and the column change fails as it is (the database stays unchanged).
-Re-adding it would always fail and, on MySQL / Oracle, leave the foreign key missing.
+QuickER treats such a type difference as one that can make re-adding the foreign key fail, and on MySQL / Oracle a failed re-add leaves the foreign key missing.
+PostgreSQL and Oracle accept some of these combinations, such as integer types of different widths (Oracle also accepts `NUMBER` columns of different precisions).
+An addition or a recreate of a foreign key that you selected is left out of the script for the same reason, and the confirmation names it.
+A recreate is left out together with its drop, so the foreign key keeps its current definition.
+SQLite rebuilds the table and does not check the types of a foreign key, so it applies the addition or the recreate as selected.
 String types that differ only in length (`varchar(50)` and `varchar(100)`, for example) are not a mismatch where the table above allows them on the two ends; on Oracle the length unit (`CHAR` / `BYTE`) must be the same on both ends.
 Changing the length of one end drops and re-adds the foreign key as usual.
 SQL Server cannot create a foreign key whose ends differ in length (error 1753), so the DDL adds a comment before such a foreign key.
@@ -551,7 +561,8 @@ QuickER therefore rebuilds the definition from `information_schema.COLUMNS` at e
   `AUTO_INCREMENT` is not added back because the diagram cannot represent it (the comment, default, and other attributes are carried over from the live definition).
 - **Dropping a foreign key** also drops a non-unique index with the same name as the foreign key, unless another foreign key needs it.
   MySQL creates such an index for a foreign key that has no suitable index and keeps it after the foreign key is dropped, so re-creating a foreign key of the same name on other columns would fail (error 1061).
-  An index you created yourself with the same name as the foreign key is dropped too, because the catalog cannot tell the two apart.
+  When another foreign key needs the index, the index is renamed to that foreign key's name instead, unless the table already has an index of that name.
+  An index you created yourself with the same name as the foreign key is dropped or renamed too, because the catalog cannot tell the two apart.
   A unique index is never dropped this way.
   When two foreign keys of the same table are dropped, the index they share is checked again after both are dropped, because the other foreign key still uses it when the first one is dropped.
   Re-adding them in another column order then does not fail with error 1061.

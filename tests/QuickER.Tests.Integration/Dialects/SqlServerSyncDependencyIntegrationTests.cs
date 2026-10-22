@@ -405,6 +405,171 @@ public sealed class SqlServerSyncDependencyIntegrationTests(SqlServerContainerFi
     }
 
     /// <summary>
+    /// 外部キーの片側の列の型の変更と、その外部キーの作り直しを一緒に選ぶと、同期後に両端の型が食い違うので作り直しを
+    /// 計画から外して警告し、実行は列の変更で失敗して何も変わらない（外部キーは元の定義のまま残る）ことを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: 型が食い違う外部キーの作り直しは外して警告し、実行しても外部キーは元のまま"
+    )]
+    public async Task AlterForeignKeyWithTypeMismatch_IsExcludedAndChangesNothing()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ApplyDdlAsync(BuildParentChildDiagram(constraintName: null), Ct);
+
+        var (result, script, _, plan) = await SyncAsync(
+            (entities, relationships) =>
+            {
+                entities.Single(e => e.TableName == "sd_parent").Columns[0].DataType = "bigint";
+                relationships.Single().OnDelete = ForeignKeyReferentialAction.Cascade;
+            },
+            select: _ => true
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch)
+            .Which.Detail.Should()
+            .Be("FK_sd_child_sd_parent");
+        plan.Sections.Should()
+            .NotContain(s =>
+                s.Kind == SchemaDiffKind.DropForeignKey || s.Kind == SchemaDiffKind.AddForeignKey
+            );
+        result.Committed.Should().BeFalse(script);
+
+        var live = await ImportAsync();
+        live.Entities.Single(e => e.TableName == "sd_parent")
+            .Columns.Single(c => c.Name == "id")
+            .DataType.Should()
+            .Be("int");
+        live.Relationships.Should()
+            .ContainSingle()
+            .Which.OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.NoAction);
+    }
+
+    /// <summary>
+    /// DB にある SET NULL の外部キーの子の列を NOT NULL にする列の変更は、その外部キーを名指しし、その外部キーだけを外し直さない
+    /// （SQL Server は NOT NULL の子の列への SET NULL の外部キーを作れない＝付け直しがエラー 1761 で失敗する）ことを検証する。
+    /// 外部キーを張ったまま子の列を NOT NULL にはできるので同期は通り、ほかの外部キーは列の型の変更に合わせて外し直す。
+    /// 同期の後は、作れる方言と同じく SET NULL の外部キーが NOT NULL の子の列に残る。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: SET NULL の子の列を NOT NULL にする変更は名指しし、その外部キーだけ外さずに通る"
+    )]
+    public async Task AlterSetNullChildToNotNull_KeepsThatForeignKeyAndSucceeds()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSetNullChildAsync();
+
+        var (result, script, _, plan) = await SyncAsync(
+            (entities, _) =>
+            {
+                var child = entities.Single(e => e.TableName == "sd_child");
+                child.Columns.Single(c => c.Name == "parent_id").IsNullable = false;
+                child.Columns.Single(c => c.Name == "other_id").DataType = "bigint";
+                entities.Single(e => e.TableName == "sd_other").Columns[0].DataType = "bigint";
+            },
+            select: _ => true
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.SetNullOnNotNullColumn)
+            .Which.Should()
+            .Be(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.SetNullOnNotNullColumn,
+                    "sd_child",
+                    "fk_sd_parent (parent_id)"
+                )
+            );
+        plan.Sections.Where(s => s.Kind == SchemaDiffKind.DropForeignKey)
+            .SelectMany(s => s.Items)
+            .Select(i => i.ForeignKeyName)
+            .Should()
+            .Equal("fk_sd_other");
+        result.Committed.Should().BeTrue(result.Error + script);
+
+        var live = await ImportAsync();
+        var liveChild = live.Entities.Single(e => e.TableName == "sd_child");
+        liveChild.Columns.Single(c => c.Name == "parent_id").IsNullable.Should().BeFalse();
+        liveChild.Columns.Single(c => c.Name == "other_id").DataType.Should().Be("bigint");
+        live.Relationships.Single(r => r.ConstraintName == "fk_sd_parent")
+            .OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.SetNull);
+        live.Relationships.Should().Contain(r => r.ConstraintName == "fk_sd_other");
+    }
+
+    /// <summary>
+    /// SET NULL の外部キーの子の列を NOT NULL にし、型も変える列の変更は、外部キーを外さないので列の変更がエラー 5074 で
+    /// 失敗し、トランザクションが巻き戻って何も変わらないことを検証する（型の食い違いと SET NULL の両方で名指しする）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQL Server 同期: SET NULL の子の列の型も変える変更は 5074 で失敗し、何も変えない"
+    )]
+    public async Task AlterSetNullChildTypeAndNotNull_FailsAndChangesNothing()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSetNullChildAsync();
+
+        var (result, script, _, plan) = await SyncAsync(
+            (entities, _) =>
+            {
+                var parentId = entities
+                    .Single(e => e.TableName == "sd_child")
+                    .Columns.Single(c => c.Name == "parent_id");
+                parentId.IsNullable = false;
+                parentId.DataType = "bigint";
+            },
+            select: _ => true
+        );
+
+        plan.Warnings.Select(w => w.Kind)
+            .Should()
+            .BeEquivalentTo([
+                SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
+                SyncPlanWarningKind.SetNullOnNotNullColumn,
+            ]);
+        plan.Sections.Should()
+            .NotContain(s =>
+                s.Kind == SchemaDiffKind.DropForeignKey || s.Kind == SchemaDiffKind.AddForeignKey
+            );
+        result.Committed.Should().BeFalse(script);
+        result
+            .Error.Should()
+            .Contain("is dependent on column", "the column change fails with error 5074");
+
+        var live = await ImportAsync();
+        var parentIdColumn = live
+            .Entities.Single(e => e.TableName == "sd_child")
+            .Columns.Single(c => c.Name == "parent_id");
+        parentIdColumn.IsNullable.Should().BeTrue();
+        parentIdColumn.DataType.Should().Be("int");
+        live.Relationships.Single(r => r.ConstraintName == "fk_sd_parent")
+            .OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.SetNull);
+    }
+
+    /// <summary>
+    /// sd_parent(id)・sd_other(id) ← sd_child(id, parent_id NULL, other_id NULL) を作る。fk_sd_parent は ON DELETE SET NULL、
+    /// fk_sd_other は NO ACTION
+    /// </summary>
+    private async Task CreateSetNullChildAsync()
+    {
+        await fixture.ExecuteAsync(
+            "CREATE TABLE [sd_parent] ([id] int NOT NULL CONSTRAINT [PK_sd_parent] PRIMARY KEY);"
+                + "CREATE TABLE [sd_other] ([id] int NOT NULL CONSTRAINT [PK_sd_other] PRIMARY KEY);"
+                + "CREATE TABLE [sd_child] ([id] int NOT NULL CONSTRAINT [PK_sd_child] PRIMARY KEY, "
+                + "[parent_id] int NULL, [other_id] int NULL, "
+                + "CONSTRAINT [fk_sd_parent] FOREIGN KEY ([parent_id]) REFERENCES [sd_parent] ([id]) ON DELETE SET NULL, "
+                + "CONSTRAINT [fk_sd_other] FOREIGN KEY ([other_id]) REFERENCES [sd_other] ([id]));",
+            Ct
+        );
+    }
+
+    /// <summary>
     /// 参照される主キーの変更と、参照する子表の削除を同時に選んでも成功することを検証する
     /// （外部キーは外すだけで、消える子表へ付け直さない）。
     /// </summary>

@@ -449,10 +449,11 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// </summary>
     /// <remarks>
     /// MySQL は同じ列の外部キー 2 本に 1 つの索引を共有させ、名前は片方の外部キーの名前になる。その外部キーを先に外す
-    /// 時点ではもう 1 本が索引を使っているので残し（<see cref="AppendDropForeignKeyIndex"/>）、もう 1 本を外した後も残る。
+    /// 時点ではもう 1 本が索引を使っているので外さず、もう 1 本の名前へ付け替える（<see cref="AppendDropForeignKeyIndex"/>）。
+    /// 付け替える先の名前の索引が既にあると付け替えずに残し、もう 1 本を外した後も残る。
     /// 付け直しで参照する列の並びが変わると（参照先のキーの並びへの並べ替え）、新しい列の索引を同じ名前で作ろうとして
     /// エラー 1061 になり、DDL が暗黙コミットされるので外部キーが消えたまま残る。そこで、同じ子表の外部キーを外し終えた後に、
-    /// 先に外した外部キーの名前の索引を同じ条件でもう一度確かめて外す。名前の分からない外部キーは、実行時に引いた名前が
+    /// 先に外した外部キーの名前の索引を同じ条件でもう一度確かめる。名前の分からない外部キーは、実行時に引いた名前が
     /// 残らないので対象にしない。
     /// </remarks>
     protected override void AppendSectionEnd(StringBuilder sb, SyncPlanSection section)
@@ -501,7 +502,8 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     }
 
     /// <summary>
-    /// 外部キーを外した後に、MySQL がその外部キーのために作った同じ名前の索引が残っていれば外す文を書き出す。
+    /// 外部キーを外した後に、MySQL がその外部キーのために作った同じ名前の索引が残っていれば、外すか、
+    /// その索引を使うほかの外部キーの名前へ付け替える文を書き出す。
     /// </summary>
     /// <param name="sb">書き出し先</param>
     /// <param name="childTbl">子テーブル</param>
@@ -513,9 +515,18 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
     /// 作ろうとしてエラー 1061 になり、DDL が暗黙コミットされるので外部キーが消えたまま残った。
     /// </para>
     /// <para>
-    /// 外すのは、外部キーと同じ名前で、一意でなく、先頭の列をほかの外部キーが先頭に使っていない索引だけ
-    /// （一意制約の索引・ほかの外部キーを支えている索引は残す）。該当が無ければ何もしない。同じ列へ付け直す場合は
-    /// 付け直しのときに MySQL が索引を作り直す。
+    /// 対象は、外部キーと同じ名前で一意でない索引だけ（一意制約の索引は残す）。先頭の列をほかの外部キーが先頭に
+    /// 使っていなければ外す。同じ列へ付け直す場合は付け直しのときに MySQL が索引を作り直す。
+    /// </para>
+    /// <para>
+    /// 先頭の列をほかの外部キーが使っていれば、索引はその外部キーを支えているので外さず、その外部キーの名前へ付け替える
+    /// （名前順で最初の外部キー。その名前の索引が子表に既にあれば何もしない）。同じ列の外部キー 2 本は MySQL が 1 つの
+    /// 索引を共有させ、名前を後に張ったほうへ付け替えるので、その外部キーを外すと索引が外した外部キーの名前で残る。
+    /// そのままだと同じ名前の外部キーを別の列へ付け直すときエラー 1061 になる。
+    /// </para>
+    /// <para>
+    /// 外部キーのために作った索引と手で作った索引はカタログでは区別できないので、手で作った同じ名前の索引も外すか
+    /// 付け替える。該当が無ければ何もしない。
     /// </para>
     /// </remarks>
     private static void AppendDropForeignKeyIndex(
@@ -529,24 +540,36 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         );
         var childQuoted = MySqlIdentifier.QuoteForDynamicSql(childTbl);
 
-        // SELECT ... INTO は該当行が無いとユーザー変数を書き換えないため、事前に NULL で初期化する
+        // SELECT ... INTO は該当行が無いとユーザー変数を書き換えないため、事前に NULL で初期化する。
+        // @to は、索引の先頭の列を先頭に使うほかの外部キーの名前（無ければ NULL）
         sb.AppendLine("SET @ix = NULL;");
-        sb.AppendLine("SELECT s.INDEX_NAME INTO @ix");
+        sb.AppendLine("SET @to = NULL;");
+        sb.AppendLine("SELECT s.INDEX_NAME,");
+        sb.AppendLine(
+            "(SELECT k.CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE k "
+                + "WHERE k.TABLE_SCHEMA = s.TABLE_SCHEMA AND k.TABLE_NAME = s.TABLE_NAME "
+                + "AND k.REFERENCED_TABLE_NAME IS NOT NULL AND k.ORDINAL_POSITION = 1 "
+                + "AND k.COLUMN_NAME = s.COLUMN_NAME "
+                + "ORDER BY k.CONSTRAINT_NAME LIMIT 1) INTO @ix, @to"
+        );
         sb.AppendLine("FROM information_schema.STATISTICS s");
         sb.AppendLine(
             $"WHERE {SchemaPredicate("s.TABLE_SCHEMA", childTbl)} "
                 + $"AND s.TABLE_NAME = '{childName}' "
                 + $"AND s.INDEX_NAME = {nameExpression} "
                 + "AND s.SEQ_IN_INDEX = 1 AND s.NON_UNIQUE = 1 "
-                + "AND NOT EXISTS (SELECT 1 FROM information_schema.KEY_COLUMN_USAGE k "
-                + "WHERE k.TABLE_SCHEMA = s.TABLE_SCHEMA AND k.TABLE_NAME = s.TABLE_NAME "
-                + "AND k.REFERENCED_TABLE_NAME IS NOT NULL AND k.ORDINAL_POSITION = 1 "
-                + "AND k.COLUMN_NAME = s.COLUMN_NAME) "
                 + "LIMIT 1;"
         );
+        // 付け替える先の名前の索引が子表に既にあれば、付け替えずに何もしない
         sb.AppendLine(
-            $"SET @sql = IF(@ix IS NULL, 'DO 0', CONCAT('ALTER TABLE {childQuoted} "
-                + "DROP INDEX `', REPLACE(@ix, '`', '``'), '`'));"
+            "SET @sql = CASE WHEN @ix IS NULL THEN 'DO 0' "
+                + $"WHEN @to IS NULL THEN CONCAT('ALTER TABLE {childQuoted} "
+                + "DROP INDEX `', REPLACE(@ix, '`', '``'), '`') "
+                + "WHEN EXISTS (SELECT 1 FROM information_schema.STATISTICS x "
+                + $"WHERE {SchemaPredicate("x.TABLE_SCHEMA", childTbl)} "
+                + $"AND x.TABLE_NAME = '{childName}' AND x.INDEX_NAME = @to) THEN 'DO 0' "
+                + $"ELSE CONCAT('ALTER TABLE {childQuoted} RENAME INDEX `', "
+                + "REPLACE(@ix, '`', '``'), '` TO `', REPLACE(@to, '`', '``'), '`') END;"
         );
         sb.AppendLine("PREPARE stmt FROM @sql;");
         sb.AppendLine("EXECUTE stmt;");

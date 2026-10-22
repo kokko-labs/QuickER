@@ -560,7 +560,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             (3, () => DropKeyMemberColumn(entities, relationships, live)),
             (2, () => AlterType(entities, relationships, live)),
             (1, () => ToggleNullable(entities, relationships, live)),
-            (3, () => ChangePrimaryKey(entities, live)),
+            (3, () => ChangePrimaryKey(entities, relationships, live)),
             (1, () => AddForeignKey(entities, relationships, live)),
             (1, () => DropForeignKey(entities, relationships)),
             (1, () => ChangeForeignKeyAction(entities, relationships)),
@@ -807,7 +807,10 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                         && (
                             primaryKey
                                 ? c.IsPrimaryKey && CanShrinkPrimaryKey(live, e, c)
+                                // 一意制約の構成列でも主キーの列なら、主キーが縮んでも DB の行が主キーを満たす列だけ
+                                // （DropColumn と同じ条件。満たさないと DB の都合だけで失敗する）
                                 : e.UniqueConstraints.Any(u => u.ColumnIds.Contains(c.Id))
+                                    && (!c.IsPrimaryKey || CanShrinkPrimaryKey(live, e, c))
                         )
                     )
                     .Select(c => (Entity: e, Column: c))
@@ -896,11 +899,8 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         FuzzLiveSchema live
     )
     {
-        // ON DELETE SET NULL の外部キーの子列は NOT NULL にできない（DB の都合）ので対象にしない
-        var setNullChildren = relationships
-            .Where(r => r.OnDelete == ForeignKeyReferentialAction.SetNull)
-            .SelectMany(r => r.ColumnPairs.Select(p => p.TargetColumnId))
-            .ToHashSet();
+        // SET NULL の外部キーの子列は NOT NULL にできない（DB の都合）ので対象にしない
+        var setNullChildren = SetNullChildColumnIds(relationships);
         var entity = Pick(entities);
         // 計算列の式が参照する列も対象にしない（式への依存は意味モデルに無く、QuickER には見えない DB の都合）
         var column = entity
@@ -935,7 +935,11 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         return true;
     }
 
-    private bool ChangePrimaryKey(List<Entity> entities, FuzzLiveSchema live)
+    private bool ChangePrimaryKey(
+        List<Entity> entities,
+        List<Relationship> relationships,
+        FuzzLiveSchema live
+    )
     {
         var entity = Pick(entities);
 
@@ -947,11 +951,14 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         var key = entity.GetPrimaryKeyColumnsInOrder();
         var rows = RowCount(live, entity);
 
-        // 主キーへ足せる列（NULL を含まず、計算列・小数でない列）
+        // 主キーへ足せる列（NULL を含まず、計算列・小数でない列）。SET NULL の外部キーの子列は主キーにすると NOT NULL になり、
+        // 外部キーを作れない（DB の都合＝ToggleNullable と同じ）ので対象にしない。移す先・作り直しで残す列もこの中から選ぶ
+        var setNullChildren = SetNullChildColumnIds(relationships);
         var extendable = entity
             .Columns.Where(c =>
                 !c.IsPrimaryKey
                 && !c.IsComputed
+                && !setNullChildren.Contains(c.Id)
                 && !(Info(live, entity, c)?.Pinned ?? false)
                 && (rows == 0 || Info(live, entity, c)?.HasNoNull == true)
                 && Info(live, entity, c)?.Kind is FuzzTypeKind.Int or FuzzTypeKind.VarChar
@@ -1038,6 +1045,16 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
 
         return options[rng.Next(options.Count)]();
     }
+
+    /// <summary>ON DELETE / ON UPDATE が SET NULL の外部キーの子列</summary>
+    private static HashSet<Guid> SetNullChildColumnIds(List<Relationship> relationships) =>
+        relationships
+            .Where(r =>
+                r.OnDelete == ForeignKeyReferentialAction.SetNull
+                || r.OnUpdate == ForeignKeyReferentialAction.SetNull
+            )
+            .SelectMany(r => r.ColumnPairs.Select(p => p.TargetColumnId))
+            .ToHashSet();
 
     private bool AddForeignKey(
         List<Entity> entities,

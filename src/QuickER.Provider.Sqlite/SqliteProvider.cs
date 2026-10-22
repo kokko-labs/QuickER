@@ -56,6 +56,7 @@ public sealed class SqliteProvider : IDatabaseProvider
             SupportsOnUpdateAction = true,
             SupportsSetDefaultAction = true,
             SetDefaultRequiresColumnDefault = false,
+            SetNullRequiresNullableChildColumn = false,
             SupportsSchemaQualifiedTableNames = false,
             ChecksDefaultOnColumnTypeChange = false,
             SupportsComputedColumnTypeChange = false,

@@ -186,6 +186,7 @@ public static class DialectDeclarations
             { Kind.UnrepresentableType, PartlyExpressible() }, // D5 △
             { Kind.OnUpdateReferentialAction, Expressible() }, // E1 ○
             { Kind.SetDefaultReferentialAction, PartlyExpressible() }, // E2 △
+            { Kind.SetNullOnNotNullColumn, NotExpressible() }, // E3 ×（エラー 1761）
             { Kind.Description, Expressible() }, // E5 ○
             { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○
             { Kind.ColumnOrder, NotExpressible() }, // X1 ×
@@ -246,6 +247,7 @@ public static class DialectDeclarations
             { Kind.UnrepresentableType, PartlyExpressible() }, // D5 △
             { Kind.OnUpdateReferentialAction, Expressible() }, // E1 ○
             { Kind.SetDefaultReferentialAction, Expressible() }, // E2 ○
+            { Kind.SetNullOnNotNullColumn, PartlyExpressible() }, // E3 △（作れるが親の削除・更新で失敗）
             { Kind.Description, Expressible() }, // E5 ○
             { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○（逆引きは to_regclass）
             { Kind.ColumnOrder, NotExpressible() }, // X1 ×
@@ -306,6 +308,7 @@ public static class DialectDeclarations
             { Kind.UnrepresentableType, PartlyExpressible() }, // D5 △
             { Kind.OnUpdateReferentialAction, Expressible() }, // E1 ○
             { Kind.SetDefaultReferentialAction, NotExpressible() }, // E2 ×
+            { Kind.SetNullOnNotNullColumn, NotExpressible() }, // E3 ×（エラー 1830）
             { Kind.Description, Expressible() }, // E5 ○
             { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○
             { Kind.ColumnOrder, Expressible() }, // X1 ○（ネイティブ）
@@ -369,6 +372,7 @@ public static class DialectDeclarations
             { Kind.UnrepresentableType, PartlyExpressible() }, // D5 △
             { Kind.OnUpdateReferentialAction, NotExpressible() }, // E1 ×
             { Kind.SetDefaultReferentialAction, NotExpressible() }, // E2 ×
+            { Kind.SetNullOnNotNullColumn, PartlyExpressible() }, // E3 △（ON DELETE だけ。親の削除で失敗）
             { Kind.Description, Expressible() }, // E5 ○
             { Kind.SchemaQualifiedTableName, Expressible() }, // E6 ○
             { Kind.ColumnOrder, NotExpressible() }, // X1 ×
@@ -429,6 +433,7 @@ public static class DialectDeclarations
             { Kind.UnrepresentableType, PartlyExpressible() }, // D5 △
             { Kind.OnUpdateReferentialAction, Expressible() }, // E1 ○
             { Kind.SetDefaultReferentialAction, Expressible() }, // E2 ○
+            { Kind.SetNullOnNotNullColumn, PartlyExpressible() }, // E3 △（作れるが親の削除・更新で失敗）
             { Kind.Description, NotExpressible() }, // E5 ×
             { Kind.SchemaQualifiedTableName, NotExpressible() }, // E6 ×
             { Kind.ColumnOrder, Expressible() }, // X1 ○（再構築）

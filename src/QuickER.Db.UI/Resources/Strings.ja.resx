@@ -350,7 +350,7 @@
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyTypeMismatch" xml:space="preserve">
-    <value>注意: 列の変更で、以下の外部キーの両端の列の型が一致しなくなります。外部キーは外して付け直さないため、列の変更は失敗します（DB は変わりません）。両端の列を同じ型へ揃えてください:
+    <value>注意: 同期後に、以下の外部キーの両端の列の型が一致しなくなります。外部キーは外して付け直さず、選んだ追加・作り直しもしません。外部キーが張られたままでは DB が型を変えられない列の変更は失敗します（DB は変わりません）。両端の列を同じ型へ揃えてください:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmDescriptionCharactersReplaced" xml:space="preserve">
@@ -379,6 +379,14 @@
   </data>
   <data name="SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn" xml:space="preserve">
     <value>注意: 以下の外部キーは、NOT NULL の子の列（括弧内）に SET DEFAULT を使っています。SQL Server は、その列に DB 側で DEFAULT 制約があるときだけこの外部キーを作れます。図は列の既定値を持たないため、DEFAULT 制約が無ければ失敗します（エラー 1762。既にあれば通ります）:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmSetNullOnNotNullColumn" xml:space="preserve">
+    <value>注意: 以下の SET NULL の外部キーは、子の列（括弧内）が同期後に NOT NULL になります。外部キーは作れますが、列を NULL にできないため、参照される親の行の削除・更新は失敗します。子の列を NULL 許容にするか、参照アクションを変えてください:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmSetNullOnNotNullColumnExcluded" xml:space="preserve">
+    <value>注意: 以下の SET NULL の外部キーは、子の列（括弧内）が同期後に NOT NULL になります。この DB はこの外部キーを作れないので、選んだ追加・作り直しは計画から外し、DB にある外部キーは外して付け直しません。DB が断る列の変更は失敗し、通った場合は参照される親の行の削除・更新が失敗します。子の列を NULL 許容にするか、参照アクションを変えてください:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">

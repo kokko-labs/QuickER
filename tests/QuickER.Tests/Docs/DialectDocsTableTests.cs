@@ -837,7 +837,7 @@ public sealed class DialectDocsTableTests
                 var row = table.Rows[i];
                 var where = $"{marker} の {provider.DisplayName} の行（{(ja ? "日" : "英")}）";
 
-                row.Should().HaveCount(4, where);
+                row.Should().HaveCount(5, where);
 
                 // ON UPDATE：持たない方言は句を省いて注記する
                 Symbol(row[1])
@@ -878,6 +878,34 @@ public sealed class DialectDocsTableTests
                     }
                 }
 
+                // NOT NULL の子の列への SET NULL：作れない方言は —、作れる方言は ✅ で、どちらも括弧で結果を告げる
+                // （作れる方言でも参照される親の行の削除・更新が失敗する）。DDL は 5 方言とも注記する
+                Symbol(row[3])
+                    .Should()
+                    .Be(
+                        capabilities.SetNullRequiresNullableChildColumn ? No : Yes,
+                        where + "の NOT NULL の子の列への SET NULL"
+                    );
+                (row[3] != Symbol(row[3]))
+                    .Should()
+                    .BeTrue(where + "の NOT NULL の子の列への SET NULL の括弧");
+                row[3]
+                    .Should()
+                    .Contain(
+                        capabilities.SetNullRequiresNullableChildColumn
+                            ? (ja ? "作れない" : "cannot be created")
+                            : (ja ? "失敗" : "fails"),
+                        where
+                    );
+                UnsupportedTreatments
+                    .For(
+                        UnsupportedDefinitionKind.SetNullOnNotNullColumn,
+                        UnsupportedFeature.Ddl,
+                        provider.Name
+                    )
+                    .Should()
+                    .Be(UnsupportedTreatment.Annotation, where + "の DDL の注記");
+
                 // 差分：比較で畳むアクションだけを名指しする
                 var foldsOnUpdate =
                     UnsupportedTreatments.For(
@@ -892,18 +920,18 @@ public sealed class DialectDocsTableTests
                         provider.Name
                     ) == UnsupportedTreatment.Fold;
 
-                row[3]
+                row[4]
                     .Contains("`ON UPDATE`", StringComparison.Ordinal)
                     .Should()
                     .Be(foldsOnUpdate, where + "の差分");
-                row[3]
+                row[4]
                     .Contains("`SET DEFAULT`", StringComparison.Ordinal)
                     .Should()
                     .Be(foldsSetDefault, where + "の差分");
 
                 if (!foldsOnUpdate && !foldsSetDefault)
                 {
-                    row[3].Should().Be(ja ? "宣言のまま" : "As declared", where + "の差分");
+                    row[4].Should().Be(ja ? "宣言のまま" : "As declared", where + "の差分");
                 }
             }
         }

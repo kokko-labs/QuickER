@@ -535,7 +535,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
             if (warnings.Count > 0)
             {
-                sections.Add(Describe(kind, warnings));
+                sections.Add(Describe(kind, warnings, _provider.SyncCapabilities));
             }
         }
 
@@ -543,13 +543,17 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     }
 
     /// <summary>1 種別ぶんの警告を、実行確認へ追記する文言へ整形する</summary>
+    /// <param name="kind">警告の種別</param>
+    /// <param name="warnings">その種別の警告</param>
+    /// <param name="capabilities">同期する方言のケーパビリティ（方言の宣言で文言を出し分ける種別が読む）</param>
     /// <remarks>
     /// 未知の種別は <see cref="ArgumentOutOfRangeException"/>（取込警告の文言化と同じ流儀）。
     /// 黙って落とすと、新しい種別の警告が実行確認に出ないまま危険な同期が通る。
     /// </remarks>
     private static string Describe(
         SyncPlanWarningKind kind,
-        IReadOnlyList<SyncPlanWarning> warnings
+        IReadOnlyList<SyncPlanWarning> warnings,
+        SyncDialectCapabilities capabilities
     ) =>
         kind switch
         {
@@ -572,7 +576,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmRebuildDropsAttributes,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
-            // 列の変更で両端の型が食い違う外部キーは外し直さない（＝列の変更が失敗する）
+            // 同期後に両端の型が食い違う外部キーは外し直さず、選んだ追加・作り直しも計画から外した
             SyncPlanWarningKind.ForeignKeyColumnTypeMismatch => string.Format(
                 Strings.SchemaSync_ExecuteConfirmForeignKeyTypeMismatch,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
@@ -590,6 +594,14 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             // SET DEFAULT の外部キーの NOT NULL の子の列は、DB 側に DEFAULT 制約が無いと作れない（SQL Server）
             SyncPlanWarningKind.SetDefaultOnNotNullColumn => string.Format(
                 Strings.SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
+            // SET NULL の外部キーの子の列が同期後に NOT NULL になる。作れない方言は計画から外して外し直さず、作れる方言は
+            // 参照される親の行の削除・更新が失敗する（方言名でなく宣言で選ぶ）
+            SyncPlanWarningKind.SetNullOnNotNullColumn => string.Format(
+                capabilities.SetNullRequiresNullableChildColumn
+                    ? Strings.SchemaSync_ExecuteConfirmSetNullOnNotNullColumnExcluded
+                    : Strings.SchemaSync_ExecuteConfirmSetNullOnNotNullColumn,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
             // 既定値のある列の型の種類を変えると、既定値が新しい型に合わなければ失敗する

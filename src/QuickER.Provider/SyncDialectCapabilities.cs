@@ -126,6 +126,27 @@ public sealed partial record SyncDialectCapabilities
     /// </remarks>
     public required bool SetDefaultRequiresColumnDefault { get; init; }
 
+    /// <summary>
+    /// 参照アクション <c>SET NULL</c> の外部キーを作るのに、子の列が NULL を許すことが要るか（SQL Server・MySQL）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SQL Server は NOT NULL の子の列への <c>SET NULL</c> の外部キーを作れない（<c>CREATE TABLE</c>・<c>ALTER TABLE ADD</c>、
+    /// <c>ON DELETE</c>・<c>ON UPDATE</c> のどれもエラー 1761）。MySQL も作れない（同じ 4 通りがエラー 1830。外部キーを張ったまま
+    /// 子の列を NOT NULL にする <c>MODIFY</c>・主キーへ加える <c>ADD PRIMARY KEY</c> も 1830）。いずれもコンテナで確認した。
+    /// </para>
+    /// <para>
+    /// PostgreSQL・Oracle・SQLite は作れる（<c>false</c>）が、参照される親の行の削除・キーの更新が NOT NULL の違反で失敗する
+    /// （PostgreSQL は 23502・Oracle は ORA-01407・SQLite は 19。Oracle は <c>ON UPDATE</c> を持たない）。
+    /// </para>
+    /// <para>
+    /// <see cref="SyncPlanner"/> は、同期後に子の列が NOT NULL になる <c>SET NULL</c> の外部キーを
+    /// <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする。<c>true</c> の方言では、選んだ追加・作り直しを
+    /// 計画から外し、DB にある外部キーは外し直さない。
+    /// </para>
+    /// </remarks>
+    public required bool SetNullRequiresNullableChildColumn { get; init; }
+
     /// <summary>ドットを含む表名（<c>schema.table</c>）を、スキーマ付きの表として扱えるか（SQLite は扱えない）。</summary>
     /// <remarks>
     /// SQLite は <c>"a"."b"</c> を「添付したデータベース a の表 b」と読むので、a を添付していない限り、その表を触る文は

@@ -350,7 +350,7 @@ Do you want to run this against {0}?</value>
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyTypeMismatch" xml:space="preserve">
-    <value>Note: changing these columns leaves the two ends of the foreign keys below with different types, so the foreign keys are NOT dropped and re-added and the column change will fail (the database stays unchanged). Change the column on both ends to the same type:
+    <value>Note: the foreign keys below would end up with different types on their two ends, so they are NOT dropped and re-added, and a selected addition or recreate of them is left out. A column change that the database refuses while such a foreign key is in place will fail (the database stays unchanged). Change the column on both ends to the same type:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmDescriptionCharactersReplaced" xml:space="preserve">
@@ -379,6 +379,14 @@ Do you want to run this against {0}?</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmSetDefaultOnNotNullColumn" xml:space="preserve">
     <value>Note: the foreign keys below use SET DEFAULT on NOT NULL referencing columns (in parentheses). SQL Server creates them only when those columns have a DEFAULT constraint in the database; the diagram does not carry defaults, so they fail (error 1762) unless the columns already have one:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmSetNullOnNotNullColumn" xml:space="preserve">
+    <value>Note: the referencing columns (in parentheses) of the SET NULL foreign keys below are NOT NULL after the sync. The foreign keys are created, but deleting or updating a referenced parent row fails because the columns cannot be set to NULL. Make the columns nullable or change the referential action:
+{0}</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmSetNullOnNotNullColumnExcluded" xml:space="preserve">
+    <value>Note: the referencing columns (in parentheses) of the SET NULL foreign keys below are NOT NULL after the sync. This database cannot create such a foreign key, so the plan leaves out the additions and recreations you selected, and does not drop and re-add a foreign key already in the database. A column change that the database refuses then fails, and if the change goes through, deleting or updating a referenced parent row fails. Make the columns nullable or change the referential action:
 {0}</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmRebuildDropsAttributes" xml:space="preserve">
