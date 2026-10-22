@@ -420,8 +420,9 @@ MySQL's `MODIFY` re-specifies the column from the live catalog, so moving a colu
 On the other dialects it is shown for information only and is not synced.
 
 A computed column's nullability is never compared, because the database derives it from the expression and the diagram does not hold the expression.
-A computed column's type change can be selected where the table below shows it (PostgreSQL's `ALTER COLUMN ... TYPE` keeps the expression), and selecting it never changes the column's nullability.
-On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server rejects the change and a SQLite rebuild would drop the expression; MySQL is shown for information only as well).
+A computed column's type change can be selected where the table below shows it, and selecting it never changes the column's nullability.
+PostgreSQL's `ALTER COLUMN ... TYPE` keeps the expression, and MySQL's `MODIFY` writes the expression and the `VIRTUAL` or `STORED` kind back from the live catalog.
+On the other dialects it is shown for information only, because the type cannot be changed without the expression (SQL Server rejects the change and a SQLite rebuild would drop the expression).
 Where the table below shows that a unique constraint on exactly the primary key's columns is not kept, such a constraint is not compared and does not become a diff item.
 SQLite does not keep such a constraint, and Oracle rejects it; the primary key already guarantees uniqueness.
 The DDL and the tables the sync creates leave that unique constraint out and add a comment saying so.
@@ -433,7 +434,7 @@ Remove that unique constraint from the diagram and select its drop as well, or d
 | | SQL Server | PostgreSQL | MySQL | Oracle | SQLite |
 | --- | :-: | :-: | :-: | :-: | :-: |
 | Column order can be synced | — | — | ✅ (`MODIFY … AFTER`) | — | ✅ (rebuild) |
-| A computed column's type change can be selected | — | ✅ | — | — | — |
+| A computed column's type change can be selected | — | ✅ | ✅ | — | — |
 | A unique constraint on exactly the primary key's columns is kept | ✅ | ✅ | ✅ | — (left out with a note) | — (left out with a note) |
 | A table name with a dot is a schema-qualified name | ✅ | ✅ | ✅ | ✅ | — (an attached database) |
 | Foreign key names are stored | ✅ | ✅ | ✅ | ✅ | — (synthesized on import) |

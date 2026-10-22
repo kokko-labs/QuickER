@@ -562,11 +562,235 @@ public sealed class MySqlColumnAttributeSyncIntegrationTests(MySqlContainerFixtu
     }
 
     /// <summary>
+    /// 取り込んだ図で生成列（VIRTUAL・STORED・NOT NULL の STORED・索引の付いた VIRTUAL）の型を変えると、差分の項目が
+    /// 選べ、同期が式・種別・NULL 許容・索引を保ったまま型だけを変え、取り込み直すと差分が無いことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 型の種類が変わる変更（<c>int</c> → <c>bigint</c>）なので、既定値の確認（J2）の対象になり得るが、生成列は既定値を
+    /// 持たないので警告は出ない。計算列の項目は NULL 許容を DB の値のまま運ぶので、NOT NULL の列は NOT NULL のまま。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[Integration] B: 差分から選んだ生成列の型の変更は、式・種別・NULL 許容・索引を保って型だけを変える"
+    )]
+    public async Task ComputedColumnTypeChange_FromDiff_KeepsExpressionAndKind()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE `gc` (
+              `id` int NOT NULL,
+              `n` int NOT NULL,
+              `gv` int GENERATED ALWAYS AS (`n` + 1) VIRTUAL,
+              `gs` int GENERATED ALWAYS AS (`n` * 2) STORED,
+              `gnn` int GENERATED ALWAYS AS (`n` + 3) STORED NOT NULL,
+              CONSTRAINT `PK_gc` PRIMARY KEY (`id`),
+              KEY `ix_gc_gv` (`gv`)
+            );
+            INSERT INTO `gc` (`id`, `n`) VALUES (1, 5);
+            """,
+            Ct
+        );
+        var before = await ReadColumnMetadataAsync("gc");
+        string[] generated = ["gv", "gs", "gnn"];
+
+        var (plan, target, result) = await SyncTypeChangesAsync(
+            [.. generated.Select(c => ("gc", c, "bigint"))],
+            items =>
+            {
+                items
+                    .Where(i => i.Kind == SchemaDiffKind.AlterColumn)
+                    .Select(i => i.ColumnName)
+                    .Should()
+                    .BeEquivalentTo(generated);
+                items.Should().OnlyContain(i => i.IsSelectable, "MySQL は生成列の型の変更を選べる");
+                items
+                    .Single(i => i.ColumnName == "gnn")
+                    .Column!.IsNullable.Should()
+                    .BeFalse("計算列の項目は NULL 許容を DB の値のまま運ぶ");
+            }
+        );
+
+        plan.Warnings.Should().BeEmpty("生成列は既定値を持たないので J2 の警告も出ない");
+        result.Committed.Should().BeTrue();
+
+        var after = await ReadColumnMetadataAsync("gc");
+
+        foreach (var column in generated)
+        {
+            after[column]["COLUMN_TYPE"].Should().Be("bigint", column);
+            after[column]
+                ["GENERATION_EXPRESSION"]
+                .Should()
+                .Be(before[column]["GENERATION_EXPRESSION"], column);
+            after[column]["EXTRA"].Should().Be(before[column]["EXTRA"], column);
+            after[column]["IS_NULLABLE"].Should().Be(before[column]["IS_NULLABLE"], column);
+            after[column]["COLUMN_KEY"].Should().Be(before[column]["COLUMN_KEY"], column);
+        }
+
+        after["gnn"]["IS_NULLABLE"].Should().Be("NO");
+        after["gv"]["COLUMN_KEY"].Should().Be("MUL", "索引は残る");
+        (await ScalarAsync("SELECT CONCAT(`gv`, ',', `gs`, ',', `gnn`) FROM `gc` WHERE `id` = 1;"))
+            .Should()
+            .Be("6,10,8");
+        (await DiffAgainstLiveAsync(target)).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 親の主キー（<c>int</c>）を参照する外部キーの子の列が STORED の生成列のとき、両端を <c>bigint</c> へ変える同期が、
+    /// 外部キーを外して型を変え、付け直して成功することを検証する（MySQL は外部キーの両端の型の変更を断るので、計画が
+    /// 外部キーの外し直しを注入する＝<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/>）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] B: 外部キーの子の STORED の生成列と親の主キーの型の変更は、外部キーを外して付け直し成功する"
+    )]
+    public async Task ComputedForeignKeyColumnTypeChange_RebuildsForeignKey()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE `gp` (`id` int NOT NULL, CONSTRAINT `PK_gp` PRIMARY KEY (`id`));
+            CREATE TABLE `gk` (
+              `id` int NOT NULL,
+              `raw` int NOT NULL,
+              `pid` int GENERATED ALWAYS AS (`raw` + 0) STORED,
+              CONSTRAINT `PK_gk` PRIMARY KEY (`id`),
+              CONSTRAINT `FK_gk_gp` FOREIGN KEY (`pid`) REFERENCES `gp` (`id`)
+            );
+            INSERT INTO `gp` (`id`) VALUES (1);
+            INSERT INTO `gk` (`id`, `raw`) VALUES (10, 1);
+            """,
+            Ct
+        );
+        var before = await ReadColumnMetadataAsync("gk");
+
+        var (plan, target, result) = await SyncTypeChangesAsync(
+            [("gp", "id", "bigint"), ("gk", "pid", "bigint")],
+            items => items.Should().OnlyContain(i => i.IsSelectable)
+        );
+
+        plan.Warnings.Should().BeEmpty();
+        plan.Sections.Should()
+            .Contain(s =>
+                s.Kind == SchemaDiffKind.DropForeignKey
+                && s.Items.Any(i => i.ForeignKeyName == "FK_gk_gp")
+            );
+        result.Committed.Should().BeTrue();
+
+        var after = await ReadColumnMetadataAsync("gk");
+        after["pid"]["COLUMN_TYPE"].Should().Be("bigint");
+        after["pid"]["GENERATION_EXPRESSION"].Should().Be(before["pid"]["GENERATION_EXPRESSION"]);
+        after["pid"]["EXTRA"].Should().Be(before["pid"]["EXTRA"]);
+        (await ReadColumnMetadataAsync("gp"))["id"]["COLUMN_TYPE"].Should().Be("bigint");
+        (
+            await ScalarAsync(
+                "SELECT CONCAT(CONSTRAINT_NAME, ',', DELETE_RULE) FROM information_schema.REFERENTIAL_CONSTRAINTS "
+                    + "WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'gk';"
+            )
+        )
+            .Should()
+            .Be("FK_gk_gp,NO ACTION");
+        (await ScalarAsync("SELECT `pid` FROM `gk` WHERE `id` = 10;")).Should().Be("1");
+        (await DiffAgainstLiveAsync(target)).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// DB を取り込み、指定した列の型を変えた図との差分を取り、型の変更（列の変更）だけを選んで同期する。
+    /// </summary>
+    /// <param name="changes">（表, 列, 新しい型）</param>
+    /// <param name="inspectItems">選ぶ前の列の変更の項目を確かめる</param>
+    private async Task<(
+        SyncPlan Plan,
+        (List<Entity> Entities, IReadOnlyList<Relationship> Relationships) Target,
+        SchemaSyncResult Result
+    )> SyncTypeChangesAsync(
+        IReadOnlyList<(string Table, string Column, string Type)> changes,
+        System.Action<IReadOnlyList<SchemaDiffItem>> inspectItems
+    )
+    {
+        var provider = new MySqlProvider();
+        var live = await provider.SchemaImporter.ImportAsync(fixture.ConnectionString, 120, Ct);
+        var target = live.Entities.Select(e => e.Clone(preserveId: true)).ToList();
+
+        foreach (var (table, column, type) in changes)
+        {
+            target
+                .Single(e => e.TableName == table)
+                .Columns.Single(c => c.Name == column)
+                .DataType = type;
+        }
+
+        var items = new SchemaDiffService()
+            .Compute(
+                live.Entities,
+                live.Relationships,
+                target,
+                live.Relationships,
+                provider.SyncCapabilities
+            )
+            .Items;
+        inspectItems([.. items.Where(i => i.Kind == SchemaDiffKind.AlterColumn)]);
+
+        foreach (var item in items)
+        {
+            item.IsSelected = item.Kind == SchemaDiffKind.AlterColumn && item.IsSelectable;
+        }
+
+        var plan = new SyncPlanner().BuildPlan(
+            items,
+            provider.SyncCapabilities,
+            new SyncPlanContext
+            {
+                LiveEntities = live.Entities,
+                LiveRelationships = live.Relationships,
+                ColumnDefaults = live.ColumnDefaults,
+            }
+        );
+        var script = provider.SyncScriptBuilder.Build(plan);
+        var result = await provider.SyncExecutor.ExecuteAsync(
+            fixture.ToDbConnectionSettings(),
+            script,
+            Ct
+        );
+
+        return (plan, (target, live.Relationships), result);
+    }
+
+    /// <summary>DB を取り込み直し、図との差分の項目を返す</summary>
+    private async Task<IReadOnlyList<SchemaDiffItem>> DiffAgainstLiveAsync(
+        (List<Entity> Entities, IReadOnlyList<Relationship> Relationships) target
+    )
+    {
+        var provider = new MySqlProvider();
+        var live = await provider.SchemaImporter.ImportAsync(fixture.ConnectionString, 120, Ct);
+
+        return new SchemaDiffService()
+            .Compute(
+                live.Entities,
+                live.Relationships,
+                target.Entities,
+                target.Relationships,
+                provider.SyncCapabilities
+            )
+            .Items;
+    }
+
+    /// <summary>1 行 1 列の結果を文字列で返す</summary>
+    private async Task<string?> ScalarAsync(string sql)
+    {
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = new MySqlCommand(sql, conn);
+
+        return (await cmd.ExecuteScalarAsync(Ct))?.ToString();
+    }
+
+    /// <summary>
     /// 生成列（VIRTUAL・STORED）の列の変更が、ライブの再構成で式と種別を保ったまま型だけを変えることを検証する。
     /// </summary>
     /// <remarks>
-    /// 差分は MySQL の計算列の型の変更を選べない案内項目にしている（<c>SupportsComputedColumnTypeChange</c> が false）ので、
-    /// この経路には差分からは届かない。宣言を true にできるかの判断材料として、同期スクリプトの組み立てだけを固定する。
+    /// 計画を手で組み、列の変更のライブの再構成だけを固定する。差分から選ぶ経路は
+    /// <see cref="ComputedColumnTypeChange_FromDiff_KeepsExpressionAndKind"/> が固定する。
     /// </remarks>
     [Fact(DisplayName = "[Integration] B: 生成列の列の変更は式と種別を保って型だけを変える")]
     public async Task AlterColumn_GeneratedColumn_KeepsExpression()

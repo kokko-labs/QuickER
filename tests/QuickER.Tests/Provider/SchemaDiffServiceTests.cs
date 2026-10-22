@@ -193,13 +193,15 @@ public class SchemaDiffServiceTests
 
     /// <summary>
     /// 計算列の型差は AlterColumn として検出するが、NULL 許容は運ばず（項目の列は DB の NULL 許容）、式を保って型を
-    /// 変えられる方言（PostgreSQL）でだけ選べ、ほかの方言では選択できない案内項目になることを検証する（5 方言）。
+    /// 変えられる方言（PostgreSQL・MySQL）でだけ選べ、ほかの方言では選択できない案内項目になることを検証する（5 方言）。
     /// </summary>
     /// <remarks>
     /// 項目の列が図の NULL 許容を運ぶと、選んだ計画が説明に出ないまま NOT NULL を外した。式を書けない方言で選べると、
-    /// 実行が失敗する（SQL Server・MySQL）か式が消える（SQLite の再構築）。
+    /// 実行が失敗する（SQL Server）か式が消える（SQLite の再構築）。
     /// </remarks>
-    [Fact(DisplayName = "計算列の型差: NULL 許容は運ばず、PostgreSQL だけ選べる（5 方言）")]
+    [Fact(
+        DisplayName = "計算列の型差: NULL 許容は運ばず、PostgreSQL と MySQL だけ選べる（5 方言）"
+    )]
     public void ComputedColumn_TypeChange_IsSelectableOnlyWhereSupported()
     {
         foreach (var (dialect, capabilities) in DialectCapabilities)
@@ -258,7 +260,7 @@ public class SchemaDiffServiceTests
             .Where(d => d.Capabilities.SupportsComputedColumnTypeChange)
             .Select(d => d.Dialect)
             .Should()
-            .Equal("PostgreSql");
+            .Equal("PostgreSql", "MySql");
     }
 
     /// <summary>

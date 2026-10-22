@@ -910,9 +910,9 @@ public static class UnsupportedTreatments
             Kind.ComputedColumnTypeChange,
             import: Same(None), // なし
             diff: new TreatmentCell(
-                SqlServer: GuideItem, // 案内項目（PG 以外の型の差）
+                SqlServer: GuideItem, // 案内項目（PG・MySQL 以外の型の差）
                 PostgreSql: None, // PG は選択可
-                MySql: GuideItem,
+                MySql: None, // MySQL も選択可（列の変更を実行時のカタログから組み直し、式と種別を保つ）
                 Oracle: GuideItem,
                 Sqlite: GuideItem
             ),
