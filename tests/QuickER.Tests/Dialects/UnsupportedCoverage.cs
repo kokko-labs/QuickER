@@ -1228,6 +1228,37 @@ public static class UnsupportedCoverage
             ]
         ),
         (
+            UnsupportedDefinitionKind.SetNullOnNotNullColumn,
+            UnsupportedFeature.Sync,
+            null,
+            [
+                "SetNullOnNotNullColumnPlanTests.SelectedAdd_OnNotNullChild_IsExcludedWhereNotCreatable",
+                "SetNullOnNotNullColumnPlanTests.SelectedRecreate_ToSetNullOnNotNullChild_IsExcludedWithItsDrop",
+                "SetNullOnNotNullColumnPlanTests.SelectedAdd_PostSyncNullability_DecidesExclusion",
+                "SetNullOnNotNullColumnPlanTests.AlterChildToNotNull_LiveSetNullForeignKey_IsNamedAndNotRebuilt",
+                "SetNullOnNotNullColumnPlanTests.AlterChildToNotNull_WithOtherRebuild_SkipsOnlyThatForeignKeyWhereTransactional",
+                "SetNullOnNotNullColumnPlanTests.PrimaryKeyChange_MakingSetNullChildNotNull_IsNamedAndNotRebuilt",
+                "SchemaSyncWarningTextTests.SetNullOnNotNullColumn_TextFollowsCapability",
+                "MySqlSyncDependencyIntegrationTests.AlterSetNullChildToNotNull_NamesForeignKeyAndChangesNothing",
+                "SqlServerSyncDependencyIntegrationTests.AlterSetNullChildToNotNull_KeepsThatForeignKeyAndSucceeds",
+                "SqlServerSyncDependencyIntegrationTests.AlterSetNullChildTypeAndNotNull_FailsAndChangesNothing",
+            ]
+        ),
+        (
+            UnsupportedDefinitionKind.SetNullOnNotNullColumn,
+            UnsupportedFeature.Ddl,
+            null,
+            [
+                "ForeignKeyStatementNotesTests.Ddl_SetNullOnNotNullColumn_IsAnnotated",
+                "ForeignKeyStatementNotesTests.Ddl_SetNullNotApplicable_IsNotAnnotated",
+                "SqlServerSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_DdlIsRefused",
+                "MySqlSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_DdlIsRefused",
+                "PostgreSqlSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_IsCreatedButDeleteFails",
+                "OracleSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_IsCreatedButDeleteFails",
+                "SqliteSetNullOnNotNullColumnIntegrationTests.SetNullOnNotNullColumn_IsCreatedButDeleteFails",
+            ]
+        ),
+        (
             UnsupportedDefinitionKind.CompositeForeignKeyColumnOrder,
             UnsupportedFeature.Diff,
             null,

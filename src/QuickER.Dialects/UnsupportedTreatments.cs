@@ -1090,6 +1090,26 @@ public static class UnsupportedTreatments
             reverse: Same(None) // なし
         );
 
+        // E3 参照アクション SET NULL の外部キーの NOT NULL の子の列
+        Add(
+            cells,
+            Kind.SetNullOnNotNullColumn,
+            import: Same(None), // なし
+            diff: Same(None), // なし
+            sync: new TreatmentCell(
+                SqlServer: ExcludeWithWarning, // 作れない（1761）。選んだ追加・作り直しを外し、DB の外部キーは外し直さない
+                PostgreSql: Warning, // 作れるが、参照される親の行の削除・更新が失敗する
+                MySql: ExcludeWithWarning, // 作れない（1830）。選んだ追加・作り直しを外し、DB の外部キーは外し直さない
+                Oracle: Warning, // 作れるが、参照される親の行の削除が失敗する
+                Sqlite: Warning // 作れるが、参照される親の行の削除・更新が失敗する
+            ),
+            ddl: Same(Annotation), // 外部キーの文の前に、NOT NULL の子の列を名指しして注記する
+            cSharpGeneration: Same(None), // なし
+            export: Same(None), // なし
+            toolHosts: Same(None), // なし
+            reverse: Same(None) // なし
+        );
+
         // E5 説明（コメント）
         Add(
             cells,

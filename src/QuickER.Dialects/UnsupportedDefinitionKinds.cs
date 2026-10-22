@@ -88,6 +88,7 @@ public static class UnsupportedDefinitionKinds
             { UnsupportedDefinitionKind.UnrepresentableType, InDiagram("D5") },
             { UnsupportedDefinitionKind.OnUpdateReferentialAction, InDiagram("E1") },
             { UnsupportedDefinitionKind.SetDefaultReferentialAction, InDiagram("E2") },
+            { UnsupportedDefinitionKind.SetNullOnNotNullColumn, InDiagram("E3") },
             { UnsupportedDefinitionKind.Description, InDiagram("E5") },
             { UnsupportedDefinitionKind.SchemaQualifiedTableName, InDiagram("E6") },
             { UnsupportedDefinitionKind.ColumnOrder, InDiagram("X1") },

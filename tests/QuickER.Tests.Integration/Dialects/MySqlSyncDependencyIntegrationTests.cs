@@ -672,6 +672,274 @@ public sealed class MySqlSyncDependencyIntegrationTests(MySqlContainerFixture fi
     }
 
     /// <summary>
+    /// 同じ列の外部キー 2 本のうち、MySQL が共有の索引に名前を付けたほう（後に張った fk_second）を、同じ名前のまま別の列へ
+    /// 付け直す作り直しが成功し、取り込み直しても差分が出ないことを検証する。fk_second を外しても索引は fk_first が使うので
+    /// 残り、名前が fk_second のままだと、付け直しが新しい列の索引を同じ名前で作ろうとしてエラー 1061 になり、
+    /// DDL が暗黙コミットされるので fk_second が消えたまま残っていた。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL 同期: 同じ列の外部キー 2 本の片方を、同じ名前のまま別の列へ付け直せる"
+    )]
+    public async Task AlterForeignKeySharingIndexToOtherColumn_Succeeds()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_parent` (`id` int NOT NULL, PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_other` (`id` int NOT NULL, PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_child` (`id` int NOT NULL, `parent_id` int NOT NULL, `other_id` int NOT NULL, "
+                + "PRIMARY KEY (`id`), "
+                + "CONSTRAINT `fk_first` FOREIGN KEY (`parent_id`) REFERENCES `md_parent` (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "ALTER TABLE `md_child` ADD CONSTRAINT `fk_second` FOREIGN KEY (`parent_id`) REFERENCES `md_other` (`id`);",
+            Ct
+        );
+
+        void MoveSecondToOtherColumn(List<Entity> entities, List<Relationship> relationships)
+        {
+            var child = entities.Single(e => e.TableName == "md_child");
+            var second = relationships.Single(r => r.ConstraintName == "fk_second");
+            second.ColumnPairs =
+            [
+                new(
+                    second.ColumnPairs[0].SourceColumnId,
+                    child.Columns.Single(c => c.Name == "other_id").Id
+                ),
+            ];
+        }
+
+        var (result, script, _) = await SyncAsync(
+            MoveSecondToOtherColumn,
+            item => item.Kind == SchemaDiffKind.AlterForeignKey
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        var live = await ImportAsync();
+        ForeignKeyPairNames(live, "fk_first").Should().Equal(("id", "parent_id"));
+        ForeignKeyPairNames(live, "fk_second").Should().Equal(("id", "other_id"));
+
+        var (_, _, again) = await SyncAsync(MoveSecondToOtherColumn, _ => true);
+        again.IsEmpty.Should().BeTrue("取り込み直した DB は図と同じなので、差分が出ない");
+    }
+
+    /// <summary>
+    /// 共有の索引を付け替える先の名前（残る外部キー fk_first の名前）の索引が子表に既にあれば、付け替えずに残すことを
+    /// 検証する。ここでは手で作った索引 fk_first が other_id を先頭に持つので、fk_second を other_id へ付け直すときは
+    /// MySQL がその索引を使い、同じ名前の索引を作らないので成功する。付け替えるとエラー 1061 で失敗する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL 同期: 共有の索引を付け替える先の名前の索引が既にあれば、付け替えずに付け直す"
+    )]
+    public async Task AlterForeignKeySharingIndex_RenameTargetTaken_Succeeds()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_parent` (`id` int NOT NULL, PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_other` (`id` int NOT NULL, PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_child` (`id` int NOT NULL, `parent_id` int NOT NULL, `other_id` int NOT NULL, "
+                + "PRIMARY KEY (`id`), "
+                + "CONSTRAINT `fk_first` FOREIGN KEY (`parent_id`) REFERENCES `md_parent` (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "ALTER TABLE `md_child` ADD CONSTRAINT `fk_second` FOREIGN KEY (`parent_id`) REFERENCES `md_other` (`id`);",
+            Ct
+        );
+        await fixture.ExecuteAsync("ALTER TABLE `md_child` ADD INDEX `fk_first` (`other_id`);", Ct);
+
+        var (result, script, _) = await SyncAsync(
+            (entities, relationships) =>
+            {
+                var child = entities.Single(e => e.TableName == "md_child");
+                var second = relationships.Single(r => r.ConstraintName == "fk_second");
+                second.ColumnPairs =
+                [
+                    new(
+                        second.ColumnPairs[0].SourceColumnId,
+                        child.Columns.Single(c => c.Name == "other_id").Id
+                    ),
+                ];
+            },
+            item => item.Kind == SchemaDiffKind.AlterForeignKey
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        var live = await ImportAsync();
+        ForeignKeyPairNames(live, "fk_first").Should().Equal(("id", "parent_id"));
+        ForeignKeyPairNames(live, "fk_second").Should().Equal(("id", "other_id"));
+    }
+
+    /// <summary>
+    /// 外部キーを外したとき、同じ名前の索引の先頭の列を使う外部キーがほかに無ければ、同じ表の別の列の外部キーがあっても
+    /// 索引を付け替えずに外すことを検証する。付け替える先は、索引の先頭の列を先頭に使う外部キーだけ。別の列の外部キー
+    /// （fk_b）まで拾うと、fk_b の名前の索引が既にあるので何もせず、索引 fk_a が残って fk_a を別の列へ付け直せなくなる。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL 同期: 外部キーの削除は、別の列の外部キーの名前へ索引を付け替えずに外す"
+    )]
+    public async Task DropForeignKey_IndexNotUsedByOtherForeignKey_IsDropped()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_parent` (`id` int NOT NULL, PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_child` (`id` int NOT NULL, `col1` int NOT NULL, `col2` int NOT NULL, "
+                + "`col3` int NOT NULL, PRIMARY KEY (`id`), "
+                + "CONSTRAINT `fk_a` FOREIGN KEY (`col1`) REFERENCES `md_parent` (`id`), "
+                + "CONSTRAINT `fk_b` FOREIGN KEY (`col2`) REFERENCES `md_parent` (`id`));",
+            Ct
+        );
+
+        var (result, script, _) = await SyncAsync(
+            (_, relationships) => relationships.RemoveAll(r => r.ConstraintName == "fk_a"),
+            item => item.Kind == SchemaDiffKind.DropForeignKey
+        );
+
+        result.Committed.Should().BeTrue($"{result.Error}{System.Environment.NewLine}{script}");
+        (await LeadingIndexColumnsAsync("md_child"))
+            .Should()
+            .BeEquivalentTo([("PRIMARY", "id"), ("fk_b", "col2")]);
+
+        // 同じ名前の fk_a を別の列へ付け直せる（索引 fk_a が残っているとエラー 1061）
+        await fixture.ExecuteAsync(
+            "ALTER TABLE `md_child` ADD CONSTRAINT `fk_a` FOREIGN KEY (`col3`) REFERENCES `md_parent` (`id`);",
+            Ct
+        );
+    }
+
+    /// <summary>
+    /// 外部キーの片側の列の型の変更と、その外部キーの作り直しを一緒に選ぶと、同期後に両端の型が食い違うので作り直しを
+    /// 計画から外して警告し、実行は列の変更で失敗して何も変わらないことを検証する。作り直しを外さないと、外部キーを外した後の
+    /// 付け直しがエラー 3780 で失敗し、DDL が暗黙コミットされるので外部キーが消えたまま残っていた。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL 同期: 型が食い違う外部キーの作り直しは外して警告し、実行しても外部キーは元のまま"
+    )]
+    public async Task AlterForeignKeyWithTypeMismatch_IsExcludedAndChangesNothing()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateParentChildAsync();
+
+        var (result, script, plan) = await SyncAsync(
+            (entities, relationships) =>
+            {
+                entities.Single(e => e.TableName == "md_parent").Columns[0].DataType = "bigint";
+                relationships.Single().OnDelete = ForeignKeyReferentialAction.Cascade;
+            },
+            _ => true
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch)
+            .Which.Detail.Should()
+            .Be("fk_md");
+        plan.Sections.Should()
+            .NotContain(s =>
+                s.Kind == SchemaDiffKind.DropForeignKey || s.Kind == SchemaDiffKind.AddForeignKey
+            );
+        result.Committed.Should().BeFalse(script);
+
+        var live = await ImportAsync();
+        live.Entities.Single(e => e.TableName == "md_parent")
+            .Columns.Single(c => c.Name == "id")
+            .DataType.Should()
+            .Be("int");
+        var fk = live.Relationships.Should().ContainSingle().Which;
+        fk.ConstraintName.Should().Be("fk_md");
+        fk.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
+    }
+
+    /// <summary>
+    /// DB にある SET NULL の外部キーの子の列を NOT NULL にする列の変更は、その外部キーを名指しし、どの外部キーも外し直さない
+    /// （MySQL は外部キーを張ったまま子の列を NOT NULL にできずエラー 1830 になり、DDL が暗黙コミットされるので、外した
+    /// ほかの外部キーが消えたまま残っていた）。実行は列の変更で失敗し、外部キーも列も元のまま残ることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] MySQL 同期: SET NULL の子の列を NOT NULL にする変更は名指しし、どの外部キーも外さず何も変えない"
+    )]
+    public async Task AlterSetNullChildToNotNull_NamesForeignKeyAndChangesNothing()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_parent` (`id` int NOT NULL, PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_other` (`id` int NOT NULL, PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `md_child` (`id` int NOT NULL, `parent_id` int NULL, `other_id` int NULL, "
+                + "PRIMARY KEY (`id`), "
+                + "CONSTRAINT `fk_parent` FOREIGN KEY (`parent_id`) REFERENCES `md_parent` (`id`) ON DELETE SET NULL, "
+                + "CONSTRAINT `fk_other` FOREIGN KEY (`other_id`) REFERENCES `md_other` (`id`));",
+            Ct
+        );
+
+        var (result, script, plan) = await SyncAsync(
+            (entities, _) =>
+            {
+                var child = entities.Single(e => e.TableName == "md_child");
+                child.Columns.Single(c => c.Name == "parent_id").IsNullable = false;
+                child.Columns.Single(c => c.Name == "other_id").DataType = "bigint";
+                entities.Single(e => e.TableName == "md_other").Columns[0].DataType = "bigint";
+            },
+            _ => true
+        );
+
+        plan.Warnings.Should()
+            .ContainSingle(w => w.Kind == SyncPlanWarningKind.SetNullOnNotNullColumn)
+            .Which.Should()
+            .Be(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.SetNullOnNotNullColumn,
+                    "md_child",
+                    "fk_parent (parent_id)"
+                )
+            );
+        plan.Sections.Should()
+            .NotContain(s =>
+                s.Kind == SchemaDiffKind.DropForeignKey || s.Kind == SchemaDiffKind.AddForeignKey
+            );
+        result.Committed.Should().BeFalse(script);
+
+        var live = await ImportAsync();
+        var liveChild = live.Entities.Single(e => e.TableName == "md_child");
+        liveChild.Columns.Single(c => c.Name == "parent_id").IsNullable.Should().BeTrue();
+        liveChild.Columns.Single(c => c.Name == "other_id").DataType.Should().Be("int");
+        live.Relationships.Select(r => r.ConstraintName)
+            .Should()
+            .BeEquivalentTo(["fk_parent", "fk_other"]);
+        live.Relationships.Single(r => r.ConstraintName == "fk_parent")
+            .OnDelete.Should()
+            .Be(ForeignKeyReferentialAction.SetNull);
+    }
+
+    /// <summary>
     /// 同じ列に外部キーが 2 本あり、片方だけが同期後に型が食い違うとき、どの外部キーも外さず
     /// （列の型変更が必ず失敗するため）、実行しても何も変わらないことを検証する。
     /// 同じ列の外部キー（fk_parent）だけでなく、残した外部キーが参照する親の列を参照する別の表の外部キー（fk_item）も
@@ -847,6 +1115,25 @@ public sealed class MySqlSyncDependencyIntegrationTests(MySqlContainerFixture fi
                 child.Columns.Single(c => c.Id == p.TargetColumnId).Name
             )
         );
+    }
+
+    /// <summary>表の索引を、名前と先頭の列の組で返す</summary>
+    private async Task<List<(string Index, string Column)>> LeadingIndexColumnsAsync(string table)
+    {
+        await using var connection = await fixture.OpenConnectionAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT INDEX_NAME, COLUMN_NAME FROM information_schema.STATISTICS "
+            + $"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' AND SEQ_IN_INDEX = 1;";
+        var indexes = new List<(string Index, string Column)>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+
+        while (await reader.ReadAsync(Ct))
+        {
+            indexes.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return indexes;
     }
 
     /// <summary>表の行数を数える</summary>

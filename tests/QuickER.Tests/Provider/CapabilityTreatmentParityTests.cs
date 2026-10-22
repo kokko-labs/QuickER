@@ -108,6 +108,16 @@ public sealed class CapabilityTreatmentParityTests
                 : UnsupportedTreatment.OmitWithAnnotation
         ),
         (
+            // 作れない方言は計画から外して警告し、作れる方言（親の削除・更新で失敗する）は警告だけを出す
+            nameof(SyncDialectCapabilities.SetNullRequiresNullableChildColumn),
+            UnsupportedDefinitionKind.SetNullOnNotNullColumn,
+            UnsupportedFeature.Sync,
+            c =>
+                c.SetNullRequiresNullableChildColumn
+                    ? UnsupportedTreatment.ExcludeWithWarning
+                    : UnsupportedTreatment.Warning
+        ),
+        (
             nameof(SyncDialectCapabilities.SupportsSchemaQualifiedTableNames),
             UnsupportedDefinitionKind.SchemaQualifiedTableName,
             UnsupportedFeature.Sync,

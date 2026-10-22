@@ -197,6 +197,12 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
             sb.AppendLine(note);
         }
 
+        // 外部キーの注記（NOT NULL の子の列への SET NULL など）は、制約行の前に字下げして書く
+        foreach (var note in fks.SelectMany(fk => fk.Notes))
+        {
+            sb.AppendLine("    " + note);
+        }
+
         for (var i = 0; i < trailingConstraints.Count; i++)
         {
             var isLast = i == trailingConstraints.Count - 1;
@@ -366,7 +372,8 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
                     pkEntity.TableName,
                     [.. ForeignKeyColumnPairResolver.ParentColumns(columnPairs)],
                     rel.OnDelete,
-                    rel.OnUpdate
+                    rel.OnUpdate,
+                    ForeignKeyStatementNotes.Lines(rel, pkEntity, fkEntity, DialectNames.Sqlite)
                 )
             );
         }
@@ -381,12 +388,14 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     /// <param name="PkColumnNames">参照先（親）の被参照列名（宣言順。子側と同数・同順）</param>
     /// <param name="OnDelete">親行削除時の参照アクション</param>
     /// <param name="OnUpdate">親キー更新時の参照アクション</param>
+    /// <param name="Notes">外部キーの制約行の前に書く注意コメント（<see cref="ForeignKeyStatementNotes.Lines"/>）</param>
     private sealed record ResolvedForeignKey(
         string ConstraintName,
         IReadOnlyList<string> FkColumnNames,
         string ParentTableName,
         IReadOnlyList<string> PkColumnNames,
         ForeignKeyReferentialAction OnDelete,
-        ForeignKeyReferentialAction OnUpdate
+        ForeignKeyReferentialAction OnUpdate,
+        IReadOnlyList<string> Notes
     );
 }

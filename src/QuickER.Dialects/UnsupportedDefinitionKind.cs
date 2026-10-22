@@ -153,6 +153,9 @@ public enum UnsupportedDefinitionKind
     /// <summary>E2 参照アクション SET DEFAULT（MySQL は効かず、Oracle は持たない）</summary>
     SetDefaultReferentialAction,
 
+    /// <summary>E3 参照アクション SET NULL の外部キーの NOT NULL の子の列（SQL Server・MySQL は作れず、ほかの方言は親の削除で失敗する）</summary>
+    SetNullOnNotNullColumn,
+
     /// <summary>E5 説明（コメント）（SQLite が持たない）</summary>
     Description,
 

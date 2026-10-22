@@ -3333,6 +3333,249 @@ public class SyncPlannerTests
         }
     }
 
+    /// <summary>
+    /// 選んだ外部キーの作り直しが、同じ計画の列の変更で同期後に両端の型が食い違うなら、逐次 DDL の 4 方言では削除と追加を
+    /// まとめて計画から外して名指しし、ほかの外部キーも外し直さないことを、5 方言の実際の能力の宣言で検証する。
+    /// 付け直しは必ず失敗し、DDL が暗黙コミットされる方言では外部キーが消えたまま残るため、外さずに残す。
+    /// テーブル再構築の方言（SQLite）は外部キーの型を確かめないので、作り直しをそのまま再構築へ畳む。
+    /// 子の列も同じ型へ変えれば食い違わないので、作り直しを残して警告しない。
+    /// </summary>
+    [Theory(
+        DisplayName = "型の食い違い: 選んだ外部キーの作り直しも、同期後に両端の型が食い違うなら削除ごと外して警告する"
+    )]
+    [InlineData(SqlServerProvider.ProviderName, false)]
+    [InlineData(PostgreSqlProvider.ProviderName, false)]
+    [InlineData(MySqlProvider.ProviderName, false)]
+    [InlineData(OracleProvider.ProviderName, false)]
+    [InlineData(SqliteProvider.ProviderName, false)]
+    [InlineData(SqlServerProvider.ProviderName, true)]
+    [InlineData(PostgreSqlProvider.ProviderName, true)]
+    [InlineData(MySqlProvider.ProviderName, true)]
+    [InlineData(OracleProvider.ProviderName, true)]
+    [InlineData(SqliteProvider.ProviderName, true)]
+    public void SelectedForeignKeyAlter_PostSyncTypeMismatch_IsExcludedAsAWhole(
+        string dialect,
+        bool childChangedToo
+    )
+    {
+        var (customer, orders, rel, context) = LiveFkScenario();
+        // 別の表の外部キー（子の列も BIGINT へ変えるので同期後に型が揃う）。列の変更で外部キーを外し直す方言
+        // （SQL Server・MySQL）ではふだん暗黙に外して付け直すが、食い違う外部キーがあれば列の変更が必ず失敗するので外さない
+        var invoice = new Entity
+        {
+            TableName = "invoice",
+            Columns = { PkId(), Col("customer_id", "INT") },
+        };
+        var invoiceRel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = invoice.Id,
+            ColumnPairs = [new(customer.Columns[0].Id, invoice.Columns[1].Id)],
+            ConstraintName = "FK_invoice_customer",
+        };
+        context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders, invoice],
+            LiveRelationships = [rel, invoiceRel],
+        };
+
+        var target = context.LiveEntities.Select(e => e.Clone(preserveId: true)).ToList();
+        target.Single(e => e.TableName == "customer").Columns[0].DataType = "BIGINT";
+        target.Single(e => e.TableName == "invoice").Columns[1].DataType = "BIGINT";
+
+        if (childChangedToo)
+        {
+            target
+                .Single(e => e.TableName == "orders")
+                .Columns.Single(c => c.Name == "customer_id")
+                .DataType = "BIGINT";
+        }
+
+        var plan = PlanAllDiffs(
+            dialect,
+            context,
+            target,
+            [
+                new Relationship
+                {
+                    SourceEntityId = rel.SourceEntityId,
+                    TargetEntityId = rel.TargetEntityId,
+                    ColumnPairs = [.. rel.ColumnPairs.Select(p => p.Clone())],
+                    ConstraintName = rel.ConstraintName,
+                    OnDelete = ForeignKeyReferentialAction.Cascade,
+                },
+                invoiceRel,
+            ],
+            out var capabilities
+        );
+
+        var mismatchWarnings = plan.Warnings.Where(w =>
+            w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch
+        );
+
+        if (capabilities.ColumnReorder == ColumnReorderMode.Rebuild)
+        {
+            mismatchWarnings.Should().BeEmpty();
+            plan.Rebuilds.Should().NotBeEmpty();
+            return;
+        }
+
+        if (childChangedToo)
+        {
+            mismatchWarnings.Should().BeEmpty();
+            plan.Sections.Single(s => s.Kind == SchemaDiffKind.AddForeignKey)
+                .Items.Should()
+                .Contain(i =>
+                    i.ForeignKeyName == "FK_orders_customer"
+                    && i.Relationship!.OnDelete == ForeignKeyReferentialAction.Cascade
+                );
+            return;
+        }
+
+        mismatchWarnings
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
+                    "orders",
+                    "FK_orders_customer"
+                )
+            );
+        plan.Sections.Should()
+            .NotContain(s =>
+                s.Kind == SchemaDiffKind.DropForeignKey || s.Kind == SchemaDiffKind.AddForeignKey
+            );
+        plan.Sections.Single(s => s.Kind == SchemaDiffKind.AlterColumn)
+            .Items.Should()
+            .Contain(i => i.TableName == "customer" && i.ColumnName == "id");
+    }
+
+    /// <summary>
+    /// 選んだ外部キーの追加が、同じ計画の列の変更で同期後に両端の型が食い違うなら、逐次 DDL の 4 方言では追加を外して
+    /// 名指しすることを検証する（追加は必ず失敗する）。テーブル再構築の方言（SQLite）は追加をそのまま再構築へ畳む。
+    /// </summary>
+    [Theory(
+        DisplayName = "型の食い違い: 選んだ外部キーの追加も、同期後に両端の型が食い違うなら外して警告する"
+    )]
+    [InlineData(SqlServerProvider.ProviderName)]
+    [InlineData(PostgreSqlProvider.ProviderName)]
+    [InlineData(MySqlProvider.ProviderName)]
+    [InlineData(OracleProvider.ProviderName)]
+    [InlineData(SqliteProvider.ProviderName)]
+    public void SelectedForeignKeyAdd_PostSyncTypeMismatch_IsExcluded(string dialect)
+    {
+        var (customer, orders, rel, _) = LiveFkScenario();
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, orders],
+            LiveRelationships = [],
+        };
+        var target = context.LiveEntities.Select(e => e.Clone(preserveId: true)).ToList();
+        target.Single(e => e.TableName == "customer").Columns[0].DataType = "BIGINT";
+
+        var plan = PlanAllDiffs(dialect, context, target, [rel], out var capabilities);
+
+        var mismatchWarnings = plan.Warnings.Where(w =>
+            w.Kind == SyncPlanWarningKind.ForeignKeyColumnTypeMismatch
+        );
+
+        if (capabilities.ColumnReorder == ColumnReorderMode.Rebuild)
+        {
+            mismatchWarnings.Should().BeEmpty();
+            plan.Rebuilds.Should().NotBeEmpty();
+            return;
+        }
+
+        mismatchWarnings
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(
+                new SyncPlanWarning(
+                    SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
+                    "orders",
+                    "FK_orders_customer"
+                )
+            );
+        plan.Sections.Should().NotContain(s => s.Kind == SchemaDiffKind.AddForeignKey);
+        plan.Sections.Should().Contain(s => s.Kind == SchemaDiffKind.AlterColumn);
+    }
+
+    /// <summary>
+    /// 構成列の型をこの同期で変えない外部キーの作り直しは、live の両端の型が食い違って見えても外さないことを検証する
+    /// （PostgreSQL は int の列から bigint の列への外部キーを作れる。判定を live の型にまで掛けると、参照アクションだけを
+    /// 変える正当な作り直しを止める）。
+    /// </summary>
+    [Fact(
+        DisplayName = "型の食い違い: 構成列の型を変えない外部キーの作り直しは、live の型が食い違って見えても外さない"
+    )]
+    public void SelectedForeignKeyAlter_LiveTypesOnly_IsKept()
+    {
+        var (customer, _, rel, context) = LiveFkScenario();
+        customer.Columns[0].DataType = "BIGINT";
+        var target = context.LiveEntities.Select(e => e.Clone(preserveId: true)).ToList();
+
+        var plan = PlanAllDiffs(
+            PostgreSqlProvider.ProviderName,
+            context,
+            target,
+            [
+                new Relationship
+                {
+                    SourceEntityId = rel.SourceEntityId,
+                    TargetEntityId = rel.TargetEntityId,
+                    ColumnPairs = [.. rel.ColumnPairs.Select(p => p.Clone())],
+                    ConstraintName = rel.ConstraintName,
+                    OnDelete = ForeignKeyReferentialAction.Cascade,
+                },
+            ],
+            out _
+        );
+
+        plan.Warnings.Should().BeEmpty();
+        plan.Sections.Select(s => s.Kind)
+            .Should()
+            .Equal(SchemaDiffKind.DropForeignKey, SchemaDiffKind.AddForeignKey);
+    }
+
+    /// <summary>
+    /// 方言のプロバイダの能力の宣言で、live から図への差分をすべて選んで計画を組み立てる
+    /// </summary>
+    private static SyncPlan PlanAllDiffs(
+        string dialect,
+        SyncPlanContext context,
+        List<Entity> targetEntities,
+        List<Relationship> targetRelationships,
+        out SyncDialectCapabilities capabilities
+    )
+    {
+        IDatabaseProvider[] providers =
+        [
+            new SqlServerProvider(),
+            new PostgreSqlProvider(),
+            new MySqlProvider(),
+            new OracleProvider(),
+            new SqliteProvider(),
+        ];
+        capabilities = providers.Single(p => p.Name == dialect).SyncCapabilities;
+        var diff = new SchemaDiffService().Compute(
+            context.LiveEntities,
+            context.LiveRelationships,
+            targetEntities,
+            targetRelationships,
+            capabilities
+        );
+
+        foreach (var item in diff.Items)
+        {
+            item.IsSelected = true;
+        }
+
+        return new SyncPlanner().BuildPlan(diff.Items, capabilities, context);
+    }
+
     /// <summary>両端を同じ型へ変えれば外部キーを外して付け直し、警告は出さない（大文字小文字の違いは同じ型）</summary>
     [Fact(DisplayName = "型の食い違い: 両端を同じ型へ変えれば外し直して警告しない")]
     public void AlterColumn_BothSidesOfForeignKey_InjectsWithoutWarning()

@@ -23,6 +23,7 @@ public sealed class ForeignKeyStatementNotesTests
 {
     private const string SetDefaultNote = "SET DEFAULT needs a DEFAULT constraint";
     private const string LengthNote = "differ in length";
+    private const string SetNullNote = "-- Note: SET NULL on the NOT NULL referencing column(s)";
 
     private static readonly IDatabaseProvider[] Providers =
     [
@@ -236,6 +237,83 @@ public sealed class ForeignKeyStatementNotesTests
         {
             warnings.Should().BeEmpty();
         }
+    }
+
+    /// <summary>
+    /// NOT NULL の子の列への SET NULL は、5 方言とも DDL が子の列を名指しして注記する。作れない方言（宣言が「表せない」）は
+    /// 作れないことを、作れる方言は参照される親の行の削除・更新が失敗することを書く
+    /// </summary>
+    [Theory(
+        DisplayName = "DDL: NOT NULL の子の列への SET NULL は 5 方言とも注記し、作れるかで文を変える"
+    )]
+    [InlineData(DialectNames.SqlServer, true, false, false)]
+    [InlineData(DialectNames.SqlServer, false, true, false)]
+    [InlineData(DialectNames.PostgreSql, true, false, true)]
+    [InlineData(DialectNames.PostgreSql, false, true, true)]
+    [InlineData(DialectNames.MySql, true, false, false)]
+    [InlineData(DialectNames.MySql, false, true, false)]
+    [InlineData(DialectNames.Oracle, true, false, true)]
+    [InlineData(DialectNames.Sqlite, true, false, true)]
+    [InlineData(DialectNames.Sqlite, false, true, true)]
+    public void Ddl_SetNullOnNotNullColumn_IsAnnotated(
+        string dialect,
+        bool onDelete,
+        bool onUpdate,
+        bool creatable
+    )
+    {
+        var diagram = SetNullDiagram(childNullable: false, onDelete, onUpdate);
+
+        var sql = Provider(dialect).DdlGenerator.Build(diagram);
+
+        sql.Should()
+            .Contain(
+                creatable
+                    ? $"{SetNullNote} parent_id; deleting or updating a referenced parent row fails because the column cannot be set to NULL"
+                    : $"{SetNullNote} parent_id; this database cannot create this foreign key"
+            );
+        sql.Split(SetNullNote).Should().HaveCount(2, "the note is written once");
+    }
+
+    /// <summary>NULL を許す子の列への SET NULL と、Oracle が持たない ON UPDATE の SET NULL（句を省く）には注記しない</summary>
+    [Theory(
+        DisplayName = "DDL: NULL を許す子の列への SET NULL と、Oracle の ON UPDATE の SET NULL には注記しない"
+    )]
+    [InlineData(DialectNames.SqlServer, true, true, false)]
+    [InlineData(DialectNames.PostgreSql, true, true, false)]
+    [InlineData(DialectNames.MySql, true, true, false)]
+    [InlineData(DialectNames.Oracle, true, true, false)]
+    [InlineData(DialectNames.Sqlite, true, true, false)]
+    [InlineData(DialectNames.Oracle, false, false, true)]
+    public void Ddl_SetNullNotApplicable_IsNotAnnotated(
+        string dialect,
+        bool childNullable,
+        bool onDelete,
+        bool onUpdate
+    )
+    {
+        var diagram = SetNullDiagram(childNullable, onDelete, onUpdate);
+
+        Provider(dialect).DdlGenerator.Build(diagram).Should().NotContain(SetNullNote);
+    }
+
+    /// <summary>親 parent(id) ← 子 child(parent_id) の外部キーを、SET NULL の向きと子の列の NULL 許容を指定して作る</summary>
+    internal static ErDiagram SetNullDiagram(bool childNullable, bool onDelete, bool onUpdate)
+    {
+        var (diagram, relationship) = Diagram(
+            "int",
+            "int",
+            childNullable,
+            onUpdateSetDefault: false
+        );
+        relationship.OnDelete = onDelete
+            ? ForeignKeyReferentialAction.SetNull
+            : ForeignKeyReferentialAction.NoAction;
+        relationship.OnUpdate = onUpdate
+            ? ForeignKeyReferentialAction.SetNull
+            : ForeignKeyReferentialAction.NoAction;
+
+        return diagram;
     }
 
     private static IDatabaseProvider Provider(string dialect) =>

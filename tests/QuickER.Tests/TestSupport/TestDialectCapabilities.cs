@@ -32,6 +32,7 @@ public static class TestDialectCapabilities
             SupportsOnUpdateAction = true,
             SupportsSetDefaultAction = true,
             SetDefaultRequiresColumnDefault = false,
+            SetNullRequiresNullableChildColumn = false,
             SupportsSchemaQualifiedTableNames = true,
             ChecksDefaultOnColumnTypeChange = false,
             SupportsComputedColumnTypeChange = false,

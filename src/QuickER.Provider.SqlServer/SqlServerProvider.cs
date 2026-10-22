@@ -53,6 +53,7 @@ public sealed class SqlServerProvider : IDatabaseProvider
             SupportsOnUpdateAction = true,
             SupportsSetDefaultAction = true,
             SetDefaultRequiresColumnDefault = true,
+            SetNullRequiresNullableChildColumn = true,
             SupportsSchemaQualifiedTableNames = true,
             ChecksDefaultOnColumnTypeChange = true,
             SupportsComputedColumnTypeChange = false,

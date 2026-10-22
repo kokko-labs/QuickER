@@ -343,43 +343,68 @@ public class MySqlSyncScriptBuilderTests
     }
 
     /// <summary>
-    /// DropForeignKey が、外部キーを外した後に MySQL が残した同じ名前の索引を外す文を続けることを検証する
+    /// DropForeignKey が、外部キーを外した後に MySQL が残した同じ名前の索引を外すか付け替える文を続けることを検証する
     /// （残すと、同じ名前の外部キーを別の列へ付け直すときエラー 1061 になる）。名前が分かる場合も、
-    /// 逆引きする場合も同じ。外すのは一意でなく、ほかの外部キーが先頭の列に使っていない索引だけ。
+    /// 逆引きする場合も同じ。対象は一意でない索引だけで、先頭の列をほかの外部キーが先頭に使っていなければ外し、
+    /// 使っていればその外部キーの名前へ付け替え、付け替える先の名前の索引が子表に既にあれば何もしない。
     /// </summary>
-    [Theory(DisplayName = "DropForeignKey は外部キーを外した後に残る同じ名前の索引を外す")]
-    [InlineData("FK_order_customer", "s.INDEX_NAME = 'FK_order_customer'")]
-    [InlineData(null, "s.INDEX_NAME = @fk")]
-    public void DropForeignKey_DropsLeftoverIndexOfSameName(
+    [Theory(
+        DisplayName = "DropForeignKey は外部キーを外した後に残る同じ名前の索引を外すか付け替える"
+    )]
+    [InlineData("order", "FK_order_customer", "s.INDEX_NAME = 'FK_order_customer'", "DATABASE()")]
+    [InlineData("order", null, "s.INDEX_NAME = @fk", "DATABASE()")]
+    [InlineData(
+        "other.order",
+        "FK_order_customer",
+        "s.INDEX_NAME = 'FK_order_customer'",
+        "'other'"
+    )]
+    public void DropForeignKey_DropsOrRenamesLeftoverIndexOfSameName(
+        string childTable,
         string? constraintName,
-        string expectedNameMatch
+        string expectedNameMatch,
+        string expectedSchema
     )
     {
         var sql = Build(
             new SchemaDiffItem
             {
                 Kind = SchemaDiffKind.DropForeignKey,
-                TableName = "order",
+                TableName = childTable,
                 ParentEntity = new Entity { TableName = "customer" },
-                ChildEntity = new Entity { TableName = "order" },
+                ChildEntity = new Entity { TableName = childTable },
                 ForeignKeyName = constraintName,
                 IsSelected = true,
             }
         );
+        var quotedChild = childTable == "order" ? "`order`" : "`other`.`order`";
 
         var dropForeignKey = sql.IndexOf("DROP FOREIGN KEY", System.StringComparison.Ordinal);
-        var lookup = sql.IndexOf("SELECT s.INDEX_NAME INTO @ix", System.StringComparison.Ordinal);
+        var lookup = sql.IndexOf("SELECT s.INDEX_NAME,", System.StringComparison.Ordinal);
         dropForeignKey.Should().BeGreaterThanOrEqualTo(0);
         lookup.Should().BeGreaterThan(dropForeignKey);
         sql.Should().Contain("SET @ix = NULL;");
+        sql.Should().Contain("SET @to = NULL;");
         sql.Should().Contain(expectedNameMatch);
-        sql.Should().Contain("s.TABLE_SCHEMA = DATABASE()");
+        sql.Should().Contain($"s.TABLE_SCHEMA = {expectedSchema}");
         sql.Should().Contain("s.NON_UNIQUE = 1");
-        sql.Should().Contain("k.REFERENCED_TABLE_NAME IS NOT NULL AND k.ORDINAL_POSITION = 1");
+        // 付け替える先は、索引の先頭の列を先頭に使うほかの外部キーの名前（名前順で最初）
         sql.Should()
             .Contain(
-                "SET @sql = IF(@ix IS NULL, 'DO 0', CONCAT('ALTER TABLE `order` "
-                    + "DROP INDEX `', REPLACE(@ix, '`', '``'), '`'));"
+                "k.REFERENCED_TABLE_NAME IS NOT NULL AND k.ORDINAL_POSITION = 1 "
+                    + "AND k.COLUMN_NAME = s.COLUMN_NAME "
+                    + "ORDER BY k.CONSTRAINT_NAME LIMIT 1) INTO @ix, @to"
+            );
+        sql.Should()
+            .Contain(
+                "SET @sql = CASE WHEN @ix IS NULL THEN 'DO 0' "
+                    + $"WHEN @to IS NULL THEN CONCAT('ALTER TABLE {quotedChild} "
+                    + "DROP INDEX `', REPLACE(@ix, '`', '``'), '`') "
+                    + "WHEN EXISTS (SELECT 1 FROM information_schema.STATISTICS x "
+                    + $"WHERE x.TABLE_SCHEMA = {expectedSchema} "
+                    + "AND x.TABLE_NAME = 'order' AND x.INDEX_NAME = @to) THEN 'DO 0' "
+                    + $"ELSE CONCAT('ALTER TABLE {quotedChild} RENAME INDEX `', "
+                    + "REPLACE(@ix, '`', '``'), '` TO `', REPLACE(@to, '`', '``'), '`') END;"
             );
     }
 
