@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Dialects;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Dialects;
 
@@ -177,13 +178,13 @@ public sealed class DialectNameLiteralGuardTests
             .SelectMany(path =>
             {
                 var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-                var tree = CSharpSyntaxTree.ParseText(
+                var variants = ConditionalSourceParse.Parse(
                     File.ReadAllText(path),
                     cancellationToken: TestContext.Current.CancellationToken
                 );
 
-                return tree.GetRoot(TestContext.Current.CancellationToken)
-                    .DescendantNodes()
+                return ConditionalSourceParse
+                    .DescendantNodes(variants, TestContext.Current.CancellationToken)
                     .OfType<LiteralExpressionSyntax>()
                     .Where(literal => literal.IsKind(SyntaxKind.StringLiteralExpression))
                     .Select(literal => literal.Token.ValueText)

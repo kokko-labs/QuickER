@@ -9,6 +9,10 @@ namespace QuickER.Tests.CodeGen.UI;
 /// <see cref="OutputFolderNamespaceSuggester" /> の名前空間導出（csproj 探索・RootNamespace 読み取り・
 /// 相対階層連結・サニタイズ・導出不能時の null）を、一時フォルダに実 csproj を置いて検証するテストクラス
 /// </summary>
+/// <remarks>
+/// csproj の探索は親方向へ進むので、一時フォルダより上（%TEMP% やリポジトリ）にある無関係な csproj を拾わないよう、
+/// 探索の上限にテストの一時フォルダを渡す
+/// </remarks>
 public class OutputFolderNamespaceSuggesterTests
 {
     /// <summary>一時作業フォルダ（テストごとに一意）を作って返す</summary>
@@ -57,7 +61,10 @@ public class OutputFolderNamespaceSuggesterTests
             var target = Path.Combine(root, "Sub", "Folder");
             Directory.CreateDirectory(target);
 
-            OutputFolderNamespaceSuggester.TryDerive(target).Should().Be("Root.Sub.Folder");
+            OutputFolderNamespaceSuggester
+                .TryDerive(target, searchCeiling: root)
+                .Should()
+                .Be("Root.Sub.Folder");
         }
         finally
         {
@@ -79,7 +86,7 @@ public class OutputFolderNamespaceSuggesterTests
 
             // ベース "Contoso.Sales"（ドットは各セグメントに分割）＋ 相対 "Repositories"
             OutputFolderNamespaceSuggester
-                .TryDerive(target)
+                .TryDerive(target, searchCeiling: root)
                 .Should()
                 .Be("Contoso.Sales.Repositories");
         }
@@ -99,7 +106,10 @@ public class OutputFolderNamespaceSuggesterTests
         {
             WriteCsproj(root, "Acme.App.csproj", rootNamespace: "Acme.App");
 
-            OutputFolderNamespaceSuggester.TryDerive(root).Should().Be("Acme.App");
+            OutputFolderNamespaceSuggester
+                .TryDerive(root, searchCeiling: root)
+                .Should()
+                .Be("Acme.App");
         }
         finally
         {
@@ -118,7 +128,10 @@ public class OutputFolderNamespaceSuggesterTests
             var target = Path.Combine(root, "Generated");
             Directory.CreateDirectory(target);
 
-            OutputFolderNamespaceSuggester.TryDerive(target).Should().Be("Generated");
+            OutputFolderNamespaceSuggester
+                .TryDerive(target, searchCeiling: root)
+                .Should()
+                .Be("Generated");
         }
         finally
         {
@@ -141,7 +154,7 @@ public class OutputFolderNamespaceSuggesterTests
 
             // "1st-Layer" → "_1st_Layer"、"My Folder" → "My_Folder"
             OutputFolderNamespaceSuggester
-                .TryDerive(target)
+                .TryDerive(target, searchCeiling: root)
                 .Should()
                 .Be("Base._1st_Layer.My_Folder");
         }
@@ -167,7 +180,7 @@ public class OutputFolderNamespaceSuggesterTests
             var target = Path.Combine(root, "class");
             Directory.CreateDirectory(target);
 
-            var derived = OutputFolderNamespaceSuggester.TryDerive(target);
+            var derived = OutputFolderNamespaceSuggester.TryDerive(target, searchCeiling: root);
 
             derived.Should().Be("Base._class");
             CSharpNamespaceValidator.IsValid(derived).Should().BeTrue();
@@ -213,7 +226,39 @@ public class OutputFolderNamespaceSuggesterTests
             WriteCsproj(root, "Beta.csproj", rootNamespace: "BetaNamespace");
             WriteCsproj(root, "Alpha.csproj", rootNamespace: "AlphaNamespace");
 
-            OutputFolderNamespaceSuggester.TryDerive(root).Should().Be("AlphaNamespace");
+            OutputFolderNamespaceSuggester
+                .TryDerive(root, searchCeiling: root)
+                .Should()
+                .Be("AlphaNamespace");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>探索の上限より上にある csproj は使わない（上限のフォルダ自身は見る）</summary>
+    [Fact(DisplayName = "探索の上限より上にある csproj は無視し、フォルダ名のみになる")]
+    public void CsprojAboveSearchCeiling_IsIgnored()
+    {
+        var root = CreateTempRoot();
+
+        try
+        {
+            // 上限 = root/Inner。csproj は上限の 1 つ上の root にだけ置く
+            WriteCsproj(root, "Outer.csproj", rootNamespace: "Outer");
+            var ceiling = Path.Combine(root, "Inner");
+            var target = Path.Combine(ceiling, "Generated");
+            Directory.CreateDirectory(target);
+
+            OutputFolderNamespaceSuggester
+                .TryDerive(target, searchCeiling: ceiling)
+                .Should()
+                .Be("Generated", "上限より上へ探しに行かない");
+            OutputFolderNamespaceSuggester
+                .TryDerive(target, searchCeiling: root)
+                .Should()
+                .Be("Outer.Inner.Generated", "上限のフォルダ自身の csproj は見つかる（対照）");
         }
         finally
         {

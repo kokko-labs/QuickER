@@ -945,7 +945,9 @@ ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2,
                     return dt;
                 }
 
-                return maxLen == -1 ? $"{dt}(max)" : $"{dt}({maxLen})";
+                return maxLen == -1
+                    ? $"{dt}(max)"
+                    : string.Create(CultureInfo.InvariantCulture, $"{dt}({maxLen})");
 
             case "decimal":
             case "numeric":
@@ -968,7 +970,9 @@ ORDER BY s.name COLLATE Latin1_General_BIN2, t.name COLLATE Latin1_General_BIN2,
                     return dt;
                 }
 
-                return SqlServerTypeNotation.Normalize($"{dt}({datetimePrecision})");
+                return SqlServerTypeNotation.Normalize(
+                    string.Create(CultureInfo.InvariantCulture, $"{dt}({datetimePrecision})")
+                );
 
             default:
                 return dt;

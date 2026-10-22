@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Model;
 
@@ -189,10 +190,10 @@ public sealed class SchemaNamesGuardTests
                 continue;
             }
 
-            var root = CSharpSyntaxTree.ParseText(File.ReadAllText(path)).GetRoot();
-            var containers = new HashSet<SyntaxNode>();
+            var variants = ConditionalSourceParse.Parse(File.ReadAllText(path));
+            var containers = new HashSet<(int Kind, Microsoft.CodeAnalysis.Text.TextSpan Span)>();
 
-            foreach (var node in root.DescendantNodes())
+            foreach (var node in ConditionalSourceParse.DescendantNodes(variants))
             {
                 if (!IsComparisonOrConversion(node))
                 {
@@ -201,7 +202,7 @@ public sealed class SchemaNamesGuardTests
 
                 var container = ContainerOf(node);
 
-                if (container is not null && containers.Add(container))
+                if (container is not null && containers.Add((container.RawKind, container.Span)))
                 {
                     var text = string.Concat(
                         container.DescendantTokens().Select(token => token.Text)

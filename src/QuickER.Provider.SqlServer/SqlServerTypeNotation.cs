@@ -53,7 +53,9 @@ public static partial class SqlServerTypeNotation
         {
             var name = fractional.Groups["name"].Value.ToLowerInvariant();
             var precision = int.Parse(fractional.Groups["p"].Value, CultureInfo.InvariantCulture);
-            return precision == DefaultFractionalSecondsPrecision ? name : $"{name}({precision})";
+            return precision == DefaultFractionalSecondsPrecision
+                ? name
+                : string.Create(CultureInfo.InvariantCulture, $"{name}({precision})");
         }
 
         var numeric = DecimalPattern().Match(text);
@@ -64,14 +66,17 @@ public static partial class SqlServerTypeNotation
 
             if (!numeric.Groups["p"].Success)
             {
-                return $"{name}({DefaultDecimalPrecision})";
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{name}({DefaultDecimalPrecision})"
+                );
             }
 
             var precision = int.Parse(numeric.Groups["p"].Value, CultureInfo.InvariantCulture);
 
             if (!numeric.Groups["s"].Success)
             {
-                return $"{name}({precision})";
+                return string.Create(CultureInfo.InvariantCulture, $"{name}({precision})");
             }
 
             var scale = int.Parse(numeric.Groups["s"].Value, CultureInfo.InvariantCulture);

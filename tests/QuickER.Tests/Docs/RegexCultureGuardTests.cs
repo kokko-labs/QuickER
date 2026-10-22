@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Docs;
 
@@ -45,12 +46,12 @@ public sealed class RegexCultureGuardTests
         )
         {
             var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-            var tree = CSharpSyntaxTree.ParseText(
+            var variants = ConditionalSourceParse.Parse(
                 File.ReadAllText(path),
                 cancellationToken: TestContext.Current.CancellationToken
             );
-            var nodes = tree.GetRoot(TestContext.Current.CancellationToken)
-                .DescendantNodes()
+            var nodes = ConditionalSourceParse
+                .DescendantNodes(variants, TestContext.Current.CancellationToken)
                 .ToList();
 
             foreach (
@@ -122,14 +123,14 @@ public sealed class RegexCultureGuardTests
         )
         {
             var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-            var tree = CSharpSyntaxTree.ParseText(
+            var variants = ConditionalSourceParse.Parse(
                 File.ReadAllText(path),
                 cancellationToken: TestContext.Current.CancellationToken
             );
 
             foreach (
-                var literal in tree.GetRoot(TestContext.Current.CancellationToken)
-                    .DescendantNodes()
+                var literal in ConditionalSourceParse
+                    .DescendantNodes(variants, TestContext.Current.CancellationToken)
                     .OfType<LiteralExpressionSyntax>()
                     .Where(literal => literal.IsKind(SyntaxKind.StringLiteralExpression))
             )

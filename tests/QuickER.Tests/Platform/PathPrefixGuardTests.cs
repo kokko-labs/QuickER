@@ -31,17 +31,14 @@ public sealed class PathPrefixGuardTests
         var found = SourceSymbolScan
             .SrcProjects.Where(project => project.Name != "QuickER.Platform")
             .SelectMany(project =>
-                project.Files.SelectMany(file =>
-                {
-                    var model = project.Compilation.GetSemanticModel(file.Tree);
-
-                    return file
-                        .Tree.GetRoot(TestContext.Current.CancellationToken)
-                        .DescendantNodes()
-                        .Select(node => PathPrefixCalls.Describe(model, node))
-                        .OfType<string>()
-                        .Select(call => $"{file.RelativePath}: {call}");
-                })
+                project
+                    .ScanNodes(TestContext.Current.CancellationToken)
+                    .Select(item =>
+                        PathPrefixCalls.Describe(item.Model, item.Node) is { } call
+                            ? $"{item.File.RelativePath}: {call}"
+                            : null
+                    )
+                    .OfType<string>()
             )
             .ToList();
 

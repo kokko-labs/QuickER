@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -114,14 +115,12 @@ public sealed class GeneratedTypeNameDriftTests
     {
         var declared = RuntimePackageSources
             .SelectMany(relative =>
-                TopLevelTypes(
-                        CSharpSyntaxTree
-                            .ParseText(
-                                File.ReadAllText(Path.Combine(RepoRoot(), relative)),
-                                cancellationToken: Ct
-                            )
-                            .GetRoot(Ct)
+                ConditionalSourceParse
+                    .Parse(
+                        File.ReadAllText(Path.Combine(RepoRoot(), relative)),
+                        cancellationToken: Ct
                     )
+                    .SelectMany(tree => TopLevelTypes(tree.GetRoot(Ct)))
                     .Select(type => type.Name)
             )
             .ToHashSet(StringComparer.Ordinal);

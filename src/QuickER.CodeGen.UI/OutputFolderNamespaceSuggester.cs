@@ -18,8 +18,12 @@ internal static class OutputFolderNamespaceSuggester
 {
     /// <summary>出力先フォルダのパスから名前空間の候補を導出する</summary>
     /// <param name="folderPath">出力先として選択されたフォルダのパス</param>
+    /// <param name="searchCeiling">
+    /// csproj を探す上限のフォルダ（このフォルダまでは見て、それより上は見ない）。null なら上限なし（ドライブルートまで）。
+    /// 走査の道筋に無いフォルダを渡すと効かない（テストが一時フォルダの外の csproj を拾わないためのもの）
+    /// </param>
     /// <returns>導出した名前空間。導出できない場合（存在しないパス・全セグメントが空など）は null</returns>
-    public static string? TryDerive(string folderPath)
+    public static string? TryDerive(string folderPath, string? searchCeiling = null)
     {
         // 空・存在しないパスは導出不能（フォルダピッカーは通常存在するフォルダを返すが、防御的に確認する）
         if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
@@ -30,7 +34,7 @@ internal static class OutputFolderNamespaceSuggester
         try
         {
             // 生の（未サニタイズの）セグメント列を組み立てる
-            var rawSegments = BuildRawSegments(folderPath);
+            var rawSegments = BuildRawSegments(folderPath, searchCeiling);
 
             // 各セグメントを C# 識別子として妥当な形へ整え、空になったものは捨てる
             var segments = rawSegments
@@ -59,10 +63,10 @@ internal static class OutputFolderNamespaceSuggester
     /// 「ルート名前空間 ＋ プロジェクトディレクトリからの相対フォルダ階層」の生セグメント列を組み立てる。
     /// csproj が見つからなければ選択フォルダ名 1 セグメントのみを返す
     /// </summary>
-    private static List<string> BuildRawSegments(string folderPath)
+    private static List<string> BuildRawSegments(string folderPath, string? searchCeiling)
     {
         var folder = new DirectoryInfo(folderPath);
-        var projectDirectory = FindProjectDirectory(folder, out var csprojPath);
+        var projectDirectory = FindProjectDirectory(folder, searchCeiling, out var csprojPath);
 
         if (projectDirectory is null || csprojPath is null)
         {
@@ -97,18 +101,27 @@ internal static class OutputFolderNamespaceSuggester
         return segments;
     }
 
-    /// <summary>フォルダから親方向へ走査し、最初に *.csproj を含むディレクトリを返す（ドライブルートまで）</summary>
+    /// <summary>
+    /// フォルダから親方向へ走査し、最初に *.csproj を含むディレクトリを返す（ドライブルートか <paramref name="searchCeiling"/> まで）
+    /// </summary>
+    /// <param name="searchCeiling">走査の上限のフォルダ（見たうえでそれより上へ進まない）。null なら上限なし</param>
     /// <param name="csprojPath">見つかった csproj のフルパス（複数あれば名前順で最初の 1 つ）。無ければ null</param>
     /// <remarks>
     /// 読めない階層（アクセス拒否・IO エラー）は「csproj 無し」とみなして走査を続ける（契約）。
     /// 全階層が読めなければ csproj 未検出として返し、呼び出し側の
     /// 「選択フォルダ名 1 セグメント」フォールバックへ委ねる。
     /// </remarks>
-    private static DirectoryInfo? FindProjectDirectory(DirectoryInfo start, out string? csprojPath)
+    private static DirectoryInfo? FindProjectDirectory(
+        DirectoryInfo start,
+        string? searchCeiling,
+        out string? csprojPath
+    )
     {
+        var ceiling = searchCeiling is null ? null : NormalizeDirectory(searchCeiling);
+
         for (var current = start; current is not null; current = current.Parent)
         {
-            FileInfo? csproj;
+            FileInfo? csproj = null;
 
             try
             {
@@ -123,8 +136,7 @@ internal static class OutputFolderNamespaceSuggester
             {
                 // 読めない階層は「csproj 無し」とみなして親方向の走査を続ける。
                 // break（走査打ち切り）にしないのは、中間の 1 階層だけ読めないケースで
-                // その上位にある本来の csproj を取りこぼさないため
-                continue;
+                // その上位にある本来の csproj を取りこぼさないため（上限の判定は下で行う）
             }
 
             if (csproj is not null)
@@ -132,11 +144,28 @@ internal static class OutputFolderNamespaceSuggester
                 csprojPath = csproj.FullName;
                 return current;
             }
+
+            // 上限のフォルダまで見たら、それより上へは進まない
+            if (
+                ceiling is not null
+                && string.Equals(
+                    NormalizeDirectory(current.FullName),
+                    ceiling,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            {
+                break;
+            }
         }
 
         csprojPath = null;
         return null;
     }
+
+    /// <summary>フォルダのパスをフルパスにして末尾の区切りを落とす（上限のフォルダとの一致の判定用）</summary>
+    private static string NormalizeDirectory(string path) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
 
     /// <summary>csproj の &lt;RootNamespace&gt; を読む。読めない・空なら csproj ファイル名（拡張子除去）へフォールバックする</summary>
     private static string ReadRootNamespace(string csprojPath)

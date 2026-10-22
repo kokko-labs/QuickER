@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Platform;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Platform;
 
@@ -42,13 +43,13 @@ public sealed class PathValidationGuardTests
             .SelectMany(path =>
             {
                 var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-                var tree = CSharpSyntaxTree.ParseText(
+                var variants = ConditionalSourceParse.Parse(
                     File.ReadAllText(path),
                     cancellationToken: TestContext.Current.CancellationToken
                 );
 
-                return tree.GetRoot(TestContext.Current.CancellationToken)
-                    .DescendantNodes()
+                return ConditionalSourceParse
+                    .DescendantNodes(variants, TestContext.Current.CancellationToken)
                     .OfType<InvocationExpressionSyntax>()
                     .Where(invocation =>
                         invocation.Expression is MemberAccessExpressionSyntax member

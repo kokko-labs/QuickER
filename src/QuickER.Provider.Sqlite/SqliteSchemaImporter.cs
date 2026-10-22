@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -677,7 +678,10 @@ ORDER BY name;";
                 );
 
                 // SQLite の FK には制約名が無いため、テーブル名＋id で安定した合成名を作る
-                var fkName = $"FK_{entry.Key}_{refTable}_{id}";
+                var fkName = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"FK_{entry.Key}_{refTable}_{id}"
+                );
 
                 // 参照先テーブルが取込範囲に無い（実在しない／取り込めなかった）場合は
                 // リレーションにできないため、警告して除外する（参照先は宣言どおりの綴りで返るので、

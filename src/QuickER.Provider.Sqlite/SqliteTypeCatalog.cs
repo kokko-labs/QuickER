@@ -395,7 +395,9 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
             return name;
         }
 
-        return length == -1 ? $"{name}(MAX)" : $"{name}({length})";
+        return length == -1
+            ? $"{name}(MAX)"
+            : string.Create(CultureInfo.InvariantCulture, $"{name}({length})");
     }
 
     private static string FormatPrecisionScale(string name, int? precision, int? scale)
@@ -412,5 +414,7 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
     }
 
     private static string FormatPrecisionOnly(string name, int? precision) =>
-        precision is null ? name : $"{name}({precision})";
+        precision is null
+            ? name
+            : string.Create(CultureInfo.InvariantCulture, $"{name}({precision})");
 }

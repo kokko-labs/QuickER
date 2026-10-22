@@ -70,17 +70,14 @@ public sealed class ProcessLaunchGuardTests
         SourceSymbolScan
             .SrcProjects.Where(project => project.Name != "QuickER.Platform")
             .SelectMany(project =>
-                project.Files.SelectMany(file =>
-                {
-                    var model = project.Compilation.GetSemanticModel(file.Tree);
-
-                    return file
-                        .Tree.GetRoot(TestContext.Current.CancellationToken)
-                        .DescendantNodes()
-                        .Select(node => describe(model, node))
-                        .OfType<string>()
-                        .Select(launch => $"{file.RelativePath}: {launch}");
-                })
+                project
+                    .ScanNodes(TestContext.Current.CancellationToken)
+                    .Select(item =>
+                        describe(item.Model, item.Node) is { } launch
+                            ? $"{item.File.RelativePath}: {launch}"
+                            : null
+                    )
+                    .OfType<string>()
             )
             .ToList();
 

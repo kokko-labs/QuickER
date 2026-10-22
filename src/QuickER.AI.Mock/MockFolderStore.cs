@@ -73,6 +73,23 @@ public sealed class MockFolderStore
         string title,
         string sourceSchema,
         Func<DateTimeOffset>? clock = null
+    ) => CreateNew(folder, title, sourceSchema, clock, beforeManifestWrite: null);
+
+    /// <summary>
+    /// <see cref="CreateNew(string, string, string, Func{DateTimeOffset}?)"/> の本体。存在の確認と
+    /// <c>mock.json</c> の書き込みの間に処理を差し込めるようにしたもの（テストが別のプロセスの作成を再現するため）
+    /// </summary>
+    /// <param name="folder">作成先フォルダ</param>
+    /// <param name="title">モックの表題</param>
+    /// <param name="sourceSchema">元になった ER スキーマ記述テキスト</param>
+    /// <param name="clock">現在時刻の供給元（null なら <see cref="DateTimeOffset.Now"/>）</param>
+    /// <param name="beforeManifestWrite"><c>mock.json</c> を書く直前に呼ぶ処理（null なら何もしない）</param>
+    internal static MockFolderStore CreateNew(
+        string folder,
+        string title,
+        string sourceSchema,
+        Func<DateTimeOffset>? clock,
+        Action? beforeManifestWrite
     )
     {
         var manifestPath = Path.Combine(folder, MockManifest.ManifestFileName);
@@ -90,6 +107,8 @@ public sealed class MockFolderStore
             Title = title ?? string.Empty,
             SourceSchema = sourceSchema ?? string.Empty,
         };
+
+        beforeManifestWrite?.Invoke();
 
         // 置き換えない書き込みで作る。存在の確認と書き込みの間に別のプロセスが作った mock.json を上書きしない
         try

@@ -504,7 +504,9 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             return "varchar";
         }
 
-        return length == -1 ? "longtext" : $"varchar({length})";
+        return length == -1
+            ? "longtext"
+            : string.Create(CultureInfo.InvariantCulture, $"varchar({length})");
     }
 
     /// <summary>固定長文字列を char(n) または longtext（max）へ整形する</summary>
@@ -515,7 +517,9 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             return "char";
         }
 
-        return length == -1 ? "longtext" : $"char({length})";
+        return length == -1
+            ? "longtext"
+            : string.Create(CultureInfo.InvariantCulture, $"char({length})");
     }
 
     /// <summary>可変長バイナリを varbinary(n) または longblob（max）へ整形する</summary>
@@ -526,7 +530,9 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             return "varbinary";
         }
 
-        return length == -1 ? "longblob" : $"varbinary({length})";
+        return length == -1
+            ? "longblob"
+            : string.Create(CultureInfo.InvariantCulture, $"varbinary({length})");
     }
 
     /// <summary>固定長バイナリを binary(n) または longblob（max）へ整形する</summary>
@@ -537,7 +543,9 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             return "binary";
         }
 
-        return length == -1 ? "longblob" : $"binary({length})";
+        return length == -1
+            ? "longblob"
+            : string.Create(CultureInfo.InvariantCulture, $"binary({length})");
     }
 
     /// <summary>精度を省いた decimal の既定の精度</summary>
@@ -611,5 +619,7 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
     }
 
     private static string FormatPrecisionOnly(string name, int? precision) =>
-        precision is null ? name : $"{name}({precision})";
+        precision is null
+            ? name
+            : string.Create(CultureInfo.InvariantCulture, $"{name}({precision})");
 }

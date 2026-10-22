@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.AI.Mock;
+using QuickER.Platform;
 
 namespace QuickER.Tests.AI.Mock;
 
@@ -151,6 +152,53 @@ public class MockFolderStoreTests : IDisposable
         var act = () => CreateNew();
 
         act.Should().Throw<InvalidOperationException>();
+    }
+
+    /// <summary>
+    /// 存在の確認の後・書き込みの前に別のプロセスが mock.json を作っても、それを上書きせず、
+    /// 事前の確認で見つけたときと同じ例外にすることを検証する
+    /// </summary>
+    /// <remarks>
+    /// マニフェストは置き換えない書き込み（<c>AtomicFile.CreateText</c>）で作るので、作成は <see cref="IOException"/> で失敗する。
+    /// CreateNew の catch はそれを「既に mock.json がある」の <see cref="InvalidOperationException"/>（事前の確認と同じ文言）へ
+    /// 読み替えるだけで、何も消さない。一時ファイルは AtomicFile 自身が片づける。
+    /// </remarks>
+    [Fact(
+        DisplayName = "CreateNew は確認の後に別のプロセスが作った mock.json を上書きせず、既存と同じ例外にする"
+    )]
+    public void CreateNew_ManifestCreatedAfterCheck_KeepsForeignManifestAndThrows()
+    {
+        const string ForeignManifest = "{ \"title\": \"別のプロセス\" }";
+        var manifestPath = Path.Combine(_folder, "mock.json");
+
+        var act = () =>
+            MockFolderStore.CreateNew(
+                _folder,
+                "受注管理",
+                "# schema",
+                () => FixedNow,
+                beforeManifestWrite: () => File.WriteAllText(manifestPath, ForeignManifest)
+            );
+
+        var thrown = act.Should().Throw<InvalidOperationException>().Which;
+
+        File.ReadAllText(manifestPath)
+            .Should()
+            .Be(ForeignManifest, "別のプロセスの mock.json を上書きしない");
+        var names = Directory.GetFiles(_folder).Select(Path.GetFileName).ToList();
+        names.Should().Equal(["mock.json"], "作りかけのファイルを残さない");
+        names
+            .Where(name => AtomicFile.IsTemporaryFileName(name!))
+            .Should()
+            .BeEmpty("一時ファイルを残さない");
+
+        // 事前の確認で見つけたときと同じ文言（catch は失敗を同じ例外へ読み替える）
+        var precheck = () => CreateNew();
+        precheck
+            .Should()
+            .Throw<InvalidOperationException>()
+            .Which.Message.Should()
+            .Be(thrown.Message);
     }
 
     [Fact(DisplayName = "Open は mock.json 不在で明確な例外")]

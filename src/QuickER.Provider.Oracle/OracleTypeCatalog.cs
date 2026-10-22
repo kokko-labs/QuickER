@@ -525,7 +525,9 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             return varName;
         }
 
-        return length == -1 ? lobName : $"{varName}({length})";
+        return length == -1
+            ? lobName
+            : string.Create(CultureInfo.InvariantCulture, $"{varName}({length})");
     }
 
     /// <summary>固定長文字列を <c>型(n)</c> へ整形する（長さ未指定は型名のみ）</summary>
@@ -537,7 +539,7 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
         }
 
         // 固定長の max（-1）は IsWithinLimits が先に断るのでここへは来ない
-        return $"{name}({length})";
+        return string.Create(CultureInfo.InvariantCulture, $"{name}({length})");
     }
 
     /// <summary>バイナリを <c>RAW(n)</c> または <c>BLOB</c>（max）へ整形する</summary>
@@ -548,13 +550,17 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
             return "RAW";
         }
 
-        return length == -1 ? "BLOB" : $"RAW({length})";
+        return length == -1
+            ? "BLOB"
+            : string.Create(CultureInfo.InvariantCulture, $"RAW({length})");
     }
 
     /// <summary><c>TIMESTAMP</c> / <c>TIMESTAMP(p)</c>（＋ WITH TIME ZONE）へ整形する</summary>
     private static string FormatTimestamp(int? precision, bool withTimeZone)
     {
-        var head = precision is null ? "TIMESTAMP" : $"TIMESTAMP({precision})";
+        var head = precision is null
+            ? "TIMESTAMP"
+            : string.Create(CultureInfo.InvariantCulture, $"TIMESTAMP({precision})");
         return withTimeZone ? head + " WITH TIME ZONE" : head;
     }
 }

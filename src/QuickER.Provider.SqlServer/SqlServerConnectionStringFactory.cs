@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.SqlClient;
 using QuickER.Provider;
 
@@ -14,7 +15,9 @@ public static class SqlServerConnectionStringFactory
     public static string Build(DbConnectionSettings settings)
     {
         // ポートが指定された場合のみ "Host,Port" 形式にする（SQL Server はインスタンス名運用が一般的なため）
-        var dataSource = settings.Port is int port ? $"{settings.Host},{port}" : settings.Host;
+        var dataSource = settings.Port is int port
+            ? string.Create(CultureInfo.InvariantCulture, $"{settings.Host},{port}")
+            : settings.Host;
 
         var b = new SqlConnectionStringBuilder
         {

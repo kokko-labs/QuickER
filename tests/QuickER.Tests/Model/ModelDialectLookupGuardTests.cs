@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Model;
 
@@ -36,10 +37,10 @@ public sealed class ModelDialectLookupGuardTests
             )
             .SelectMany(path =>
             {
-                var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(path));
+                var variants = ConditionalSourceParse.Parse(File.ReadAllText(path));
 
-                return tree.GetRoot()
-                    .DescendantNodes()
+                return ConditionalSourceParse
+                    .DescendantNodes(variants)
                     .OfType<IdentifierNameSyntax>()
                     .Where(name => name.Identifier.ValueText == "IdentifierLengthLimits")
                     .Select(name =>

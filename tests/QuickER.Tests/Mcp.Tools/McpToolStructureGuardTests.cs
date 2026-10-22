@@ -12,8 +12,8 @@ using QuickER.Tests.TestSupport;
 namespace QuickER.Tests.Mcp.Tools;
 
 /// <summary>
-/// MCP ツールの「同じ知識を 1 か所に置く」ことを機械で見張る（方言の一覧・GUI とファイルのホストの補助関数・
-/// 図の読み込みの決まり文句）
+/// MCP ツールの「同じ知識を 1 か所に置く」ことを機械で見張る（方言の一覧・図の読み込みの決まり文句。
+/// ツール引数の読み取りとリレーションの種別の解釈は <see cref="QuickER.Tests.Mcp.ToolArgumentParsingGuardTests"/>）
 /// </summary>
 public sealed class McpToolStructureGuardTests
 {
@@ -77,36 +77,6 @@ public sealed class McpToolStructureGuardTests
                 QuickER.Provider.Oracle.OracleProvider.ProviderName,
                 QuickER.Provider.Sqlite.SqliteProvider.ProviderName,
             ]);
-
-    [Fact(
-        DisplayName = "GUI とファイルの 2 つのホストは、リレーションの種別の解釈と列ペアの比較を自前で持たない（共有の正本を呼ぶ）"
-    )]
-    public void ToolHosts_DoNotDefineSharedRelationshipHelpers() =>
-        Ledger.Run(
-            "ToolHosts_DoNotDefineSharedRelationshipHelpers",
-            ToolHosts_DoNotDefineSharedRelationshipHelpersCore
-        );
-
-    private void ToolHosts_DoNotDefineSharedRelationshipHelpersCore()
-    {
-        var files = new[]
-        {
-            Path.Combine(Root, "src", "QuickER.Mcp.Tools", "DocumentErDiagramToolHost.cs"),
-            Path.Combine(Root, "src", "QuickER.Gui", "Services", "ErDiagramDynamicTools.cs"),
-        };
-        var definition = new Regex(
-            @"private\s+static\s+[^\(\n]*\b(ParseRelationshipType|HasSameColumnPairs)\s*\("
-        );
-
-        foreach (var file in files)
-        {
-            definition
-                .Matches(File.ReadAllText(file))
-                .Select(match => match.Groups[1].Value)
-                .Should()
-                .BeEmpty($"{Path.GetFileName(file)} が写しを持たない");
-        }
-    }
 
     [Fact(
         DisplayName = "図を読むツールの「新しい版で保存された」の警告文は、ソースに 1 か所だけ書く（ER 図操作ツールとコード生成ツールで共有）"

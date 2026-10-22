@@ -50,13 +50,14 @@ public sealed class CjkPatternGuardTests
         )
         {
             var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-            var literals = CSharpSyntaxTree
-                .ParseText(
-                    File.ReadAllText(path),
-                    cancellationToken: TestContext.Current.CancellationToken
+            var literals = ConditionalSourceParse
+                .DescendantTokens(
+                    ConditionalSourceParse.Parse(
+                        File.ReadAllText(path),
+                        cancellationToken: TestContext.Current.CancellationToken
+                    ),
+                    TestContext.Current.CancellationToken
                 )
-                .GetRoot(TestContext.Current.CancellationToken)
-                .DescendantTokens()
                 .Where(token =>
                     token.IsKind(SyntaxKind.StringLiteralToken)
                     && Markers.Any(marker =>

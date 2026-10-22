@@ -96,17 +96,16 @@ public sealed class RawFileWriteGuardTests(ITestOutputHelper output)
         var found = SourceSymbolScan
             .SrcProjects.Where(project => project.Name != "QuickER.Platform")
             .SelectMany(project =>
-                project.Files.SelectMany(file =>
-                {
-                    var model = project.Compilation.GetSemanticModel(file.Tree);
-
-                    return file
-                        .Tree.GetRoot(TestContext.Current.CancellationToken)
-                        .DescendantNodes()
-                        .Select(node => FileWriteCalls.Describe(model, node))
-                        .OfType<string>()
-                        .Select(call => (File: file.RelativePath, Call: call));
-                })
+                project
+                    .ScanNodes(TestContext.Current.CancellationToken)
+                    .Select(item =>
+                        (
+                            File: item.File.RelativePath,
+                            Call: FileWriteCalls.Describe(item.Model, item.Node)
+                        )
+                    )
+                    .Where(hit => hit.Call is not null)
+                    .Select(hit => (hit.File, Call: hit.Call!))
             )
             .GroupBy(hit => hit)
             .ToDictionary(group => group.Key, group => group.Count());
@@ -136,6 +135,16 @@ public sealed class RawFileWriteGuardTests(ITestOutputHelper output)
             .Select(project => project.Name)
             .Should()
             .BeEmpty("参照の組み立てが壊れると、すべての呼び出しが未解決になって走査が空振りする");
+        SourceSymbolScan
+            .SrcProjects.SelectMany(project =>
+                project
+                    .Variants.Where(variant => variant.ResolvedBclInvocationCount == 0)
+                    .Select(variant => $"{project.Name} [{variant.Symbols}]")
+            )
+            .Should()
+            .BeEmpty(
+                "条件コンパイルの変種のコンパイルも、差し替えた構文木の BCL の呼び出しを解決できる"
+            );
         SourceSymbolScan.SrcProjects.Should().HaveCountGreaterThan(30);
         output.WriteLine(
             $"projects={SourceSymbolScan.SrcProjects.Count} load={SourceSymbolScan.LoadElapsed.TotalSeconds:F1}s"

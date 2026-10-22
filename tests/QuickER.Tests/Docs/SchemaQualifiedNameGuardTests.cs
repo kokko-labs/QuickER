@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Docs;
 
@@ -71,13 +72,14 @@ public sealed class SchemaQualifiedNameGuardTests
         )
         {
             var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-            var invocations = CSharpSyntaxTree
-                .ParseText(
-                    File.ReadAllText(path),
-                    cancellationToken: TestContext.Current.CancellationToken
+            var invocations = ConditionalSourceParse
+                .DescendantNodes(
+                    ConditionalSourceParse.Parse(
+                        File.ReadAllText(path),
+                        cancellationToken: TestContext.Current.CancellationToken
+                    ),
+                    TestContext.Current.CancellationToken
                 )
-                .GetRoot(TestContext.Current.CancellationToken)
-                .DescendantNodes()
                 .OfType<InvocationExpressionSyntax>();
 
             foreach (var invocation in invocations)

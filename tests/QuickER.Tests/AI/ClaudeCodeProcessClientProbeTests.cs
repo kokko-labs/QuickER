@@ -120,6 +120,50 @@ public class ClaudeCodeProcessClientProbeTests
         }
     }
 
+    /// <summary>ログイン確認の既定の上限時間が 60 秒であることを検証する（XmlDoc と docs の記述の値）</summary>
+    [Fact(DisplayName = "ログイン確認の既定の上限時間は 60 秒")]
+    public void DefaultProbeTimeout_IsSixtySeconds()
+    {
+        ClaudeCodeProcessClient.DefaultProbeTimeout.Should().Be(TimeSpan.FromSeconds(60));
+    }
+
+    /// <summary>
+    /// 何も出力せずにすぐ終わる claude では「確認できなかった」を返し、控えていた確認のプロセスを外すことを検証する
+    /// </summary>
+    /// <remarks>
+    /// 控えは破棄（<see cref="ClaudeCodeProcessClient.DisposeAsync"/>）で実行中の確認を止めるためのもので、
+    /// 終わった確認（破棄済みのプロセス）を残すと、後の破棄がそれを止めにいく。
+    /// </remarks>
+    [Fact(
+        DisplayName = "ログイン確認は claude がすぐ終わると確認できなかったとして返り、確認のプロセスを控えから外す"
+    )]
+    public async Task ProbeLogin_WhenClaudeExitsImmediately_ReturnsUnavailableAndReleasesProcess()
+    {
+        await using var fake = new FakeClaude(exitsImmediately: true);
+        var client = new ClaudeCodeProcessClient(
+            () => fake.ScriptPath,
+            ClaudeCodeProcessClient.DefaultProbeTimeout
+        );
+
+        try
+        {
+            var result = await client
+                .ProbeLoginAsync(TestContext.Current.CancellationToken)
+                .WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+            result.Should().Be(ClaudeLoginProbeResult.Unavailable);
+            typeof(ClaudeCodeProcessClient)
+                .GetField("_probeProcess", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .GetValue(client)
+                .Should()
+                .BeNull("終わった確認のプロセスを控えに残さない");
+        }
+        finally
+        {
+            await client.DisposeAsync();
+        }
+    }
+
     /// <summary>返らない偽の claude（.cmd）と、その生死の確かめ方</summary>
     private sealed class FakeClaude : IAsyncDisposable
     {
@@ -133,21 +177,22 @@ public class ClaudeCodeProcessClientProbeTests
         /// <summary>確認が起動したプロセス（cmd.exe）の PID と開始時刻（後始末で止めるため）</summary>
         private (int Id, DateTime StartTime)? _probeProcess;
 
-        public FakeClaude()
+        /// <param name="exitsImmediately">true なら何も出力せずにすぐ終わる偽の claude にする</param>
+        public FakeClaude(bool exitsImmediately = false)
         {
             Directory.CreateDirectory(_directory);
-            // 1 秒ごとに heartbeat を伸ばす。約 2 分で自分から終わる（テストが失敗しても残り続けない）
-            File.WriteAllLines(
-                ScriptPath,
+            // 既定は 1 秒ごとに heartbeat を伸ばす。約 2 分で自分から終わる（テストが失敗しても残り続けない）
+            string[] lines = exitsImmediately
+                ? ["@echo off", "exit /b 0"]
+                :
                 [
                     "@echo off",
                     "for /L %%i in (1,1,120) do (",
                     "  echo x>>\"%~dp0heartbeat.txt\"",
                     "  ping -n 2 127.0.0.1 >nul",
                     ")",
-                ],
-                Encoding.ASCII
-            );
+                ];
+            File.WriteAllLines(ScriptPath, lines, Encoding.ASCII);
         }
 
         public string ScriptPath => Path.Combine(_directory, "claude.cmd");

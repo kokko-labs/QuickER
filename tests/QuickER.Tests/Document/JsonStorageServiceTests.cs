@@ -794,6 +794,67 @@ public class JsonStorageServiceTests
         }
     }
 
+    /// <summary>SaveNew が、保存先が無ければ SaveAtomic と同じ JSON で新規作成し、一時ファイルを残さないことを検証する</summary>
+    [Fact(
+        DisplayName = "SaveNew: 保存先が無ければ SaveAtomic と同じ内容で新規作成し .tmp を残さない"
+    )]
+    public void SaveNew_NewFile_WritesSameJsonAsSaveAtomic()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-savenew-{Guid.NewGuid()}.json");
+        var document = BuildDocument("Customer", DiagramDocument.CurrentVersion);
+
+        try
+        {
+            JsonStorageService.SaveNew(path, document);
+
+            File.ReadAllText(path).Should().Be(JsonStorageService.ToJson(document));
+            FindTemporaryLeftovers(path).Should().BeEmpty("一時ファイルは置いた後に残らない");
+        }
+        finally
+        {
+            DeleteIfExists(path);
+            DeleteTemporaryLeftovers(path);
+        }
+    }
+
+    /// <summary>
+    /// SaveNew が、保存先が既にあれば置き換えずに <see cref="IOException"/> を投げ、既存の図を残すことを検証する
+    /// </summary>
+    /// <remarks>
+    /// MCP の create_diagram は存在を確かめてから SaveNew で書く。その隙間に別のプロセスが作った図を上書きしない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "SaveNew: 保存先が既にあれば置き換えずに IOException を投げ、既存の図を残す"
+    )]
+    public void SaveNew_ExistingFile_ThrowsAndKeepsExistingDiagram()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-savenew-existing-{Guid.NewGuid()}.json");
+
+        try
+        {
+            JsonStorageService.SaveAtomic(
+                path,
+                BuildDocument("Existing", DiagramDocument.CurrentVersion)
+            );
+            var before = File.ReadAllBytes(path);
+
+            var act = () =>
+                JsonStorageService.SaveNew(
+                    path,
+                    BuildDocument("Replacement", DiagramDocument.CurrentVersion)
+                );
+
+            act.Should().Throw<IOException>("新規作成は既存の図を置き換えない");
+            File.ReadAllBytes(path).Should().Equal(before);
+            FindTemporaryLeftovers(path).Should().BeEmpty("失敗時に一時ファイルを残さない");
+        }
+        finally
+        {
+            DeleteIfExists(path);
+            DeleteTemporaryLeftovers(path);
+        }
+    }
+
     /// <summary>指定のテーブル名・フォーマットバージョンでエンティティ 1 件の保存文書を組み立てる</summary>
     /// <remarks>エンティティ Id は固定にして、Save と SaveAtomic の出力を比較できるようにする</remarks>
     private static DiagramDocument BuildDocument(string tableName, int version) =>

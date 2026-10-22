@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace QuickER.Provider.Oracle;
@@ -114,7 +115,7 @@ internal static class OracleCommentStatement
                     segment.Clear();
                 }
 
-                yield return $"CHR({(int)c})";
+                yield return string.Create(CultureInfo.InvariantCulture, $"CHR({(int)c})");
                 continue;
             }
 

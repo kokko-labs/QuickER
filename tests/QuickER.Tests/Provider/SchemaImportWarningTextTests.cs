@@ -7,6 +7,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using QuickER.Provider;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Provider;
 
@@ -166,13 +167,14 @@ public sealed class SchemaImportWarningTextTests
                 !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
             )
             .SelectMany(path =>
-                CSharpSyntaxTree
-                    .ParseText(
-                        File.ReadAllText(path),
-                        cancellationToken: TestContext.Current.CancellationToken
+                ConditionalSourceParse
+                    .DescendantNodes(
+                        ConditionalSourceParse.Parse(
+                            File.ReadAllText(path),
+                            cancellationToken: TestContext.Current.CancellationToken
+                        ),
+                        TestContext.Current.CancellationToken
                     )
-                    .GetRoot(TestContext.Current.CancellationToken)
-                    .DescendantNodes()
                     // 種別で分岐する形（switch のアームの定数パターン・is のパターン・case ラベル・== / != の比較）だけを見る。
                     // 種別を作る式（方言のインポータの「"view" => ViewExcluded」の右辺）は分岐ではない
                     .Where(node =>

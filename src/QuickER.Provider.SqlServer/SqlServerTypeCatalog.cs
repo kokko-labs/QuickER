@@ -466,7 +466,9 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
             return name;
         }
 
-        return length == -1 ? $"{name}(max)" : $"{name}({length})";
+        return length == -1
+            ? $"{name}(max)"
+            : string.Create(CultureInfo.InvariantCulture, $"{name}({length})");
     }
 
     private static string FormatPrecisionScale(string name, int? precision, int? scale)
@@ -483,5 +485,7 @@ public sealed partial class SqlServerTypeCatalog : ITypeCatalog
     }
 
     private static string FormatPrecisionOnly(string name, int? precision) =>
-        precision is null ? name : $"{name}({precision})";
+        precision is null
+            ? name
+            : string.Create(CultureInfo.InvariantCulture, $"{name}({precision})");
 }
