@@ -13,6 +13,15 @@ To instead let an external AI agent (Claude Code, Codex, and so on) drive QuickE
 The chat window has four connection tabs.
 The API Key tab offers three providers of its own, which brings the total to six connection methods.
 
+| Tab | Connection method | Authentication | Attachments |
+|---|---|---|---|
+| API Key | OpenAI | An OpenAI API key | Images and text |
+| API Key | Claude (Anthropic) | An Anthropic API key | Images, PDFs, and text |
+| API Key | Local LLM | An API key only for a server that requires one (optional) | Images and text |
+| Codex | Codex CLI | The sign-in of an installed Codex CLI | Not supported |
+| Claude Code | Claude Code | The sign-in of an installed Claude Code | Images, PDFs, text, and other binary files |
+| Copilot | GitHub Copilot CLI | The sign-in of an installed GitHub Copilot CLI (a GitHub Copilot subscription is required) | Images only |
+
 ### 1. API key (the "API Key" tab)
 
 | Provider | What you need |
@@ -61,13 +70,7 @@ The tabs are also disabled while a new conversation is starting.
   Named-query edits are applied directly and are not part of that history.
   A single response runs at most 50 rounds of tool calls, and a response that reaches the limit is stopped as a failure.
 - **Attachments**: attach files to pass existing design materials and the like as context.
-  Each kind has its own size limit, and which kinds you can attach depends on the connection method.
-  - **OpenAI-compatible**: images and text
-  - **Anthropic API**: images, PDFs, and text
-  - **Claude Code**: images, PDFs, text, and other binary files as well
-  - **Copilot**: images only
-  - **Codex**: attachments are not supported
-
+  Each kind has its own size limit, and which kinds you can attach depends on the connection method (see the table under [Connection methods](#connection-methods)).
   Attachments are cleared when a response completes.
   They stay when the response fails or is interrupted, so you can send them again as they are.
 - **AI mock generation**: generate web mockup screens from the current ER diagram, saved as a mock folder (see below)
@@ -96,6 +99,22 @@ A short answer made only of text gets a bubble as wide as the text, and an answe
 
 "AI Mock Generation" turns the current ER diagram into web mockup screens.
 The result is saved as a **mock folder** (a `mock.json` manifest plus one HTML file per screen and a shared `style.css`), written live as you converse.
+
+```mermaid
+flowchart LR
+    diagram["ER diagram"]
+    folder["Mock folder<br/>(mock.json, screen HTML, style.css)"]
+    bundle["Single HTML file"]
+    doc["Screen design document<br/>(README.md)"]
+    project["Mock project<br/>(Blazor Web App / WPF)"]
+    diagram -- "Conversation with the AI" --> folder
+    folder --> bundle
+    folder -- "Generated without AI" --> doc
+    folder -- "Optional second step" --> project
+```
+
+### Mock folder
+
 Point the tool at an empty folder to start fresh, or at an existing mock folder to resume.
 Give the folder as a full path; a relative path such as `mock` cannot start a conversation.
 What you type in the folder field is applied when you stop typing, leave the field, or press Enter, and the folder's contents are read at that point.
@@ -103,13 +122,20 @@ No chat log is kept: resuming restores from the folder contents alone, so it wor
 When you resume, QuickER tells the AI whether the ER diagram has changed since the conversation that last succeeded.
 The diagram it compares with is recorded when the first turn of a conversation succeeds; a first turn that fails or is interrupted records nothing, and your next message starts the conversation again.
 The screen-list sidebar lets you click through the screens, and the preview follows the links between them.
+
+### Single HTML file
+
 You can export the whole mock as a single self-contained HTML file.
 In that file a link to another screen opens that screen but does not scroll to a `#section` inside it, and a link within a page keeps the current screen shown.
 A screen whose HTML contains a stray `</section>` tag can disrupt the screen boundaries in that export, letting content bleed into the screens after it.
 
+### Screen design document
+
 The mock folder also yields a screen design document (`README.md`: a screen list, a Mermaid transition diagram, a screen-by-entity CRUD table, and a per-screen item table), generated deterministically without any AI.
 Once exported it is rewritten automatically whenever a screen is saved or removed, and opening the folder on GitHub shows it as the folder's front page.
 The AI declares each screen's entity usage (CRUD) as it saves screens, and those declarations render as a screen × entity table (the table is omitted when nothing is declared).
+
+### Mock project
 
 As an optional second step, you can generate a runnable **mock project** from the mock folder with any of the four backends.
 The target is **Blazor Web App** (the default) or **WPF (.NET)**.
@@ -124,6 +150,29 @@ The agent is told to build the solution by name (`dotnet build <project name>.sl
 With an API key, the model submits the files in a single deterministic pass (no self-correction, plus one fix round if the build fails), so it may fail more often.
 Either way, QuickER verifies the result with its own final `dotnet build`.
 An additional-instructions field lets you pass extra guidance for that implementation.
+
+The figure shows the flow from generation to the final verification build.
+For the permissions and the confirmation when QuickER builds the code the AI wrote, see [Notes](#notes).
+
+```mermaid
+flowchart TD
+    scaffold["QuickER generates the solution, csproj, and data layer"]
+    record["Record the output folder (Codex, Copilot)"]
+    ui["The AI implements the UI layer"]
+    clean["Delete the project's obj / bin"]
+    diff["Compare the output folder again (Codex, Copilot)"]
+    listed{"Anything for the confirmation list?<br/>(additions or changes other than UI-layer sources and static assets, and so on)"}
+    confirm{"Confirmation with the list"}
+    build["QuickER verifies with dotnet build"]
+    stop["Ends unverified, without building"]
+    scaffold --> record --> ui --> clean
+    clean -- "Codex, Copilot" --> diff --> listed
+    clean -- "Claude Code, API key" --> build
+    listed -- "Yes" --> confirm
+    listed -- "No" --> build
+    confirm -- "OK" --> build
+    confirm -- "Cancel" --> stop
+```
 
 If the output folder already holds files or folders, you get a confirmation listing them before anything is written.
 Generation overwrites the solution, the csproj files and `README-QuickER.md` with the same names, which is how you regenerate under the same project name, and leaves every other file alone.

@@ -28,6 +28,28 @@ Second, artifacts derived from the model must be generated mechanically rather t
 When the model changes, its generated artifacts can always be rebuilt from it.
 Changes made outside the model can be brought back into it through QuickER's import features.
 
+The figure shows what connects to the ER model through conversion and generation.
+
+```mermaid
+flowchart LR
+    db[("Database<br/>(5 dialects)")]
+    text["DBML / Mermaid"]
+    excel["Excel definition document"]
+    model(["ER model<br/>(JSON file)"])
+    ddl["SQL DDL"]
+    html["HTML definition document"]
+    code["C# code"]
+    mock["Screen mockups"]
+    db -- "Schema import" --> model
+    model -- "Diff sync" --> db
+    text <-- "Import and export" --> model
+    excel <-- "Export and import" --> model
+    model --> ddl
+    model --> html
+    model -- "Code generation" --> code
+    model -- "AI mock generation" --> mock
+```
+
 QuickER's goal is to provide this model-centered development workflow.
 Teams stop writing the same schema information by hand in place after place, and build higher-quality business applications faster and at lower cost.
 
@@ -77,6 +99,24 @@ People inspect each artifact and make any necessary corrections.
 Once the ER model has passed review, QuickER generates the same code from it every time.
 As long as the ER model is sound, the quality of the generated code does not vary from one day to the next.
 The division of labor is to decide first where people inspect the results, and then use AI.
+
+The figure shows this flow.
+
+```mermaid
+flowchart LR
+    subgraph ai["AI (probabilistic steps)"]
+        draft["ER diagram draft"]
+        mock["Screen mockups"]
+    end
+    review["People inspect and correct"]
+    mockReview["People inspect and correct"]
+    model["Reviewed ER model"]
+    code["Generated code"]
+    draft --> review
+    mock --> mockReview
+    review --> model
+    model -- "QuickER generates the same code every time" --> code
+```
 
 ## What the generated code takes on
 

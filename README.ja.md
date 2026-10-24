@@ -38,14 +38,14 @@ GUI や AI チャットで ER モデルを作成・編集し、データベー�
 ### 1. QuickER をインストールする
 
 [Full 版のインストーラー](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-full-Setup.exe)をダウンロードして実行します（Portable 版と Lite 版は[インストール](#インストール)を参照）。
-ソースコードから起動する場合は `dotnet run --project src/QuickER.Gui` です。
+ソースコードから起動する場合は、次の手順でリポジトリを clone してから `dotnet run --project src/QuickER.Gui` を実行します。
 
 ここまでで ER モデルの作成と編集は始められます。
 以降は、同梱サンプルを使って生成コードの実行までを一通り試す手順です。
 
 ### 2. 同梱サンプルを開く
 
-サンプルはリポジトリに含まれているので、リポジトリをクローンします（インストーラー版を使う場合もクローンが必要です）。
+サンプルはリポジトリに含まれるため、リポジトリを clone します（インストーラー版を使う場合も必要です）。
 
 ```powershell
 git clone https://github.com/kokko-labs/QuickER.git
@@ -88,7 +88,7 @@ All scenarios succeeded.
 - 1 対 1 / 1 対多 / 多対多
 - 複合主キー
 - 一意制約（単一列・複合）
-- Cascade / SetNull / NoAction
+- NoAction / Cascade / SetNull / SetDefault
 - Undo / Redo
 - ズーム、パン、ミニマップ
 - エンティティ検索
@@ -105,13 +105,13 @@ All scenarios succeeded.
 既存データベースからスキーマを取り込み、ER モデルとして編集できます。
 ER モデルとデータベースの差分を検出し、同期用 SQL を生成することもできます。
 
-| DBMS       | スキーマ取込 | 差分同期 | DDL 生成 | 方言切替 |
-| ---------- | ------ | ---- | ------ | ---- |
-| SQL Server | ✅      | ✅    | ✅      | ✅    |
-| PostgreSQL | ✅      | ✅    | ✅      | ✅    |
-| MySQL      | ✅      | ✅    | ✅      | ✅    |
-| Oracle     | ✅      | ✅    | ✅      | ✅    |
-| SQLite     | ✅      | ✅    | ✅      | ✅    |
+| DBMS | スキーマ取込 | 差分同期 | DDL 生成 | 方言切替 |
+| --- | --- | --- | --- | --- |
+| SQL Server | ✅ | ✅ | ✅ | ✅ |
+| PostgreSQL | ✅ | ✅ | ✅ | ✅ |
+| MySQL | ✅ | ✅ | ✅ | ✅ |
+| Oracle | ✅ | ✅ | ✅ | ✅ |
+| SQLite | ✅ | ✅ | ✅ | ✅ |
 
 対象 DBMS は図ごとに保持され、途中で別の SQL 方言（DBMS ごとの型・構文の差異）へ切り替えることもできます。
 型は可能な範囲で自動変換され、変換できない型については警告が表示されます。
@@ -210,6 +210,7 @@ ER モデルから、アプリケーション開発に必要な C# コードを�
 | --- | --- |
 | QuickER 版 Repository | ADO ベースの軽量な Repository（SQL Server / SQLite） |
 | EF Core 版 Repository | DbContext と、内部で EF Core を使う Repository（対応する 5 DBMS） |
+| テスト用インメモリ Repository | DB なしでユニットテストするための、同じ契約のインメモリ実装 |
 | 値オブジェクト | 列ごとに専用の型を作り、種類の違う値の取り違えをコンパイルエラーにする |
 | 名前付きクエリ | 図に保存した検索条件・並び順・射影を、型付きの Repository メソッドにする |
 | リモート用 Repository インターフェイス | ネットワーク越しに呼べる操作だけを切り出した契約 |
@@ -236,13 +237,14 @@ EditModel と Mapper の動きは、同梱サンプルの [Program.cs](samples/e
 
 生成ダイアログでは、データアクセス層を次の 3 方式から選択できます。
 
-| 選択肢                      | 対象 DB               | 用途                                                 |
-| ------------------------ | ------------------- | -------------------------------------------------- |
-| **なし**                   | —                   | データアクセスは独自に実装する                      |
-| **QuickER 版 Repository** | SQL Server / SQLite | ADO ベースの軽量な Repository を使用する                       |
-| **EF Core 版 Repository** | 対応する 5 DBMS         | DbContext と LINQ を使用する                             |
+| 選択肢 | 対象 DB | 用途 |
+| --- | --- | --- |
+| **なし** | — | データアクセスは独自に実装する |
+| **QuickER 版 Repository** | SQL Server / SQLite | ADO ベースの軽量な Repository を使用する |
+| **EF Core 版 Repository** | 対応する 5 DBMS | DbContext と LINQ を使用する |
 
-> **前提**: Repository 生成は、主キーが単一列かつアプリケーション側で採番するテーブルが対象です。複合主キーや DB 自動採番のテーブルでは、Entity / EditModel のみを利用できます。
+> **前提**：Repository 生成は、主キーが単一列かつアプリケーション側で採番するテーブルが対象です。
+> 複合主キーや DB 自動採番のテーブルでは、Entity / EditModel のみを利用できます。
 
 QuickER 版 Repository は、次の機能を備えています。
 
@@ -250,7 +252,7 @@ QuickER 版 Repository は、次の機能を備えています。
 - `Include` / `ThenInclude`
 - グラフ保存
 - 一括操作
-- グラフ保存時の競合検出（更新対象の行が存在しない場合。`rowversion` 比較による排他制御は対象外）
+- 保存時の競合検出（行が消えていたことを報告し、`rowversion` 列があれば版が進んでいたことも区別して報告する楽観排他）
 - 生 SQL の実行
 
 QuickER 版 Repository と EF Core 版 Repository は、同じインターフェイスを実装します。
@@ -282,7 +284,8 @@ ProductIdValue productId;
 採番ロジックを書かずに、Repository 生成の前提（アプリケーション側での採番）を満たせます。
 
 最大文字数や `decimal` の桁数など、列定義から判断できる検証コードも生成されます。
-追加の検証や表示名は partial クラスで拡張できます。
+追加の検証は partial クラスの `OnValidate` で足せます。
+メッセージと表示名は、起動時に差し替える関数で変えられます。
 
 ## 名前付きクエリ
 
@@ -457,10 +460,10 @@ QuickER が生成したコードは、インラインで生成されるランタ
 QuickER 本体は、プロジェクトごとにライセンスが異なる混合ライセンスのリポジトリです。
 GitHub が表示する単一のライセンスラベルは、構成の全体を表していません。
 
-| 対象                                       | ライセンス                                               |
-| ---------------------------------------- | --------------------------------------------------- |
-| ER デザイナ、入出力、DDL 生成、DB 取込・同期、ランタイムパッケージなど | [MIT License](LICENSE)                              |
-| AI 機能・コード生成関連プロジェクトと MCP ツール実行ホスト        | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) ＋追加許諾 |
+| 対象 | ライセンス |
+| --- | --- |
+| ER デザイナ、入出力、DDL 生成、DB 取込・同期、ランタイムパッケージなど | [MIT License](LICENSE) |
+| AI 機能・コード生成関連プロジェクトと MCP ツール実行ホスト | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) ＋追加許諾 |
 
 現行リリースは、公式 GUI・CLI の商用利用を含めて全員が無料で利用できます。
 ただし、追加許諾の対象は QuickER の**利用**です。

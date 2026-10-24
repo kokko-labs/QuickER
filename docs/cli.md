@@ -11,7 +11,7 @@ The QuickER CLI provides subcommands for generating code (`generate` / `scaffold
 | `quicker reverse` | Generated C# source (a `.g.cs` produced with `IncludeDataAnnotations` enabled) | Schema-only ER diagram JSON |
 
 The CLI display language follows the OS language setting (Japanese / English).
-Interrupting a command with Ctrl+C stops it without further output and exits with code `130`.
+See [Exit codes](#exit-codes) for the exit codes.
 
 Install it with `dotnet tool install --global QuickER.Cli`.
 To run from source instead:
@@ -41,11 +41,16 @@ A flag name is the mechanical kebab-case conversion of the key; for example `roo
 Bool keys are **three-valued**: `--flag` (no value) = `true`, `--flag false` = `false`, and omitting it = the value from the settings file.
 For the meaning of each key, see the "Settings file" table below (`--repository-dialects` is a comma-separated list of dialects; omit the option to derive a single dialect from the `--provider` dialect, and note that giving it a value that names no dialect is an error).
 
-The mechanical conversion has exceptions.
+The mechanical conversion has the following exceptions.
+The three API-reference keys and the code subfolder key use shorter flags, and the canonical key `OutputFileName` has no flag of its own.
 
-- The three API-reference keys and the code subfolder key use shorter spellings.
-  `ApiDocsLanguage` → `--api-docs-lang`, `ApiDocsSubdirectory` → `--api-docs-subdir`, `ApiDocsFileName` → `--api-docs-file`, `CodeSubdirectory` → `--code-subdir`
-- The canonical key `OutputFileName` has no flag of its own; use `--output-path`, of which only the file-name part is used
+| Key | Flag |
+|---|---|
+| `ApiDocsLanguage` | `--api-docs-lang` |
+| `ApiDocsSubdirectory` | `--api-docs-subdir` |
+| `ApiDocsFileName` | `--api-docs-file` |
+| `CodeSubdirectory` | `--code-subdir` |
+| `OutputFileName` | No flag of its own; use `--output-path`, of which only the file-name part is used |
 
 If a `.g.cs` about to be replaced has been edited by hand since it was generated, `generate` writes nothing, lists the edited files on stderr and exits with code `2` (other failures exit with `1`).
 Move the edits into a separate file, such as a `partial` class, or run again with `--force` to discard them.
@@ -100,11 +105,18 @@ quicker mcp
 
 The agent launches this as a child process and communicates over stdin/stdout (JSON-RPC). For the full tool list, client setup, and notes, see [MCP server](mcp.md).
 
+## Exit codes
+
+| Code | Meaning | Commands |
+|---|---|---|
+| `1` | A failure other than `2` and `130` below | All |
+| `2` | Wrote nothing because someone edited a `.g.cs` it would replace after generation (`--force` overwrites it) | `generate` / `scaffold` |
+| `2` | Wrote nothing because `--out` names a file that already exists (`--force` overwrites it) | `reverse` |
+| `130` | Interrupted with Ctrl+C (no further output) | All |
+
 ## Settings file (quicker.json)
 
 The JSON passed via `--config` lets you specify generation options in bulk. It uses the **same schema** as the GUI's settings save file (`codegen-settings.json`) (the GUI writes it in camelCase, but the CLI reads keys case-insensitively, so you can pass it as is; the GUI reads keys the same way, so **Load Settings** in the code generation dialog also accepts a `quicker.json` written in PascalCase, except for the CLI-only `OutputFileName`). **Each key in the table below can also be specified from the CLI as a same-named kebab-case flag, which takes precedence over the settings file** (priority: CLI flag > settings file > default; bool keys are three-valued: `--flag` / `--flag false`).
-
-> **Note**: the default of `GenerateRepositories` changed from `true` to `false`. Previously, omitting the key generated a QuickER Repository; **now, generating DB-access code requires explicitly specifying `GenerateRepositories: true` (or `GenerateEfCoreRepositories: true`)** (to align with the GUI's DB-access "None" default).
 
 The keys are ordered by category (output mode → namespaces → generation targets → value objects → DB access → remote support → runtime & documentation → attributes → output path).
 
@@ -122,34 +134,94 @@ The keys are ordered by category (output mode → namespaces → generation targ
 }
 ```
 
-Main keys (the default is in parentheses; category order):
+The main keys, by category (the default is in parentheses):
+
+### Output mode
 
 | Key | Description |
 |---|---|
 | `SplitFilesByCategory` (`false`) | Output each category in a separate file and namespace. You can specify namespaces individually with `EntityNamespace` / `RepositoryNamespace`, and so on |
 | `LayeredOutput` (`false`) | Sort the split files into layer subfolders (domain / presentation / infrastructure / server) under the output directory, so each layer can be its own project. Implies `SplitFilesByCategory` (see [Using the generated code](code-generation.md#layered-folder-output---layered-output)) |
-| `DomainLayerDirectory` / `PresentationLayerDirectory` / `InfrastructureLayerDirectory` / `ServerLayerDirectory` (`Domain` / `Presentation` / `Infrastructure` / `Server`) | The per-layer folders for `LayeredOutput`, as relative paths under the output directory; several segments are allowed (`MyApp.Domain/Generated`). With `LayeredOutput`, blank namespace keys also derive their defaults from these folders, keeping folders and namespaces aligned. Absolute paths, drive letters, `.` and `..`, empty segments, characters not allowed in file names, whitespace at the start of a segment, a `.` or whitespace at the end of a segment, `~`, reserved device names (`CON` and so on), and segments longer than 255 characters are rejected as a generation error (the error names the rule); a blank value falls back to the default. `ServerLayerDirectory` is used only with `GenerateRemoteServices` |
+| `DomainLayerDirectory` / `PresentationLayerDirectory` / `InfrastructureLayerDirectory` / `ServerLayerDirectory` (`Domain` / `Presentation` / `Infrastructure` / `Server`) | The per-layer folders for `LayeredOutput`, as relative paths under the output directory; several segments are allowed (`MyApp.Domain/Generated`). `ServerLayerDirectory` is used only with `GenerateRemoteServices` |
 | `CodeSubdirectory` (unspecified = no subfolder) | Output subfolder for the generated code (`*.g.cs`): one level below the layer folder with `LayeredOutput`, otherwise below the output directory (for example `Generated`; several segments allowed). Works in every output mode and **never affects namespaces**, so it does not have to be a valid C# identifier. Absolute paths and `..` are rejected. The API reference Markdown does not follow it (corresponds to the CLI's `--code-subdir`) |
+
+- With `LayeredOutput`, blank namespace keys also derive their defaults from the layer folders, keeping folders and namespaces aligned
+- These values for a layer folder are rejected as a generation error, and the error names the rule; a blank value falls back to the default
+  - Absolute paths and drive letters
+  - `.` and `..`, and empty segments
+  - Characters not allowed in file names
+  - Whitespace at the start of a segment, and a `.` or whitespace at the end of a segment
+  - `~`
+  - Reserved device names (`CON` and so on)
+  - Segments longer than 255 characters
+
+### Namespaces
+
+| Key | Description |
+|---|---|
 | `RootNamespace` (`Generated`) | The root namespace of the generated code |
+
+### Generation targets
+
+| Key | Description |
+|---|---|
 | `GenerateEditModels` / `GenerateMappers` (both `true`) | Whether to generate each category. **Entity classes are always generated**, and there is no dedicated key for them |
+
+### Value objects
+
+| Key | Description |
+|---|---|
 | `GenerateValueObjects` (`false`) | Generate a per-column value object type (such as `CustomerIdValue`) (see [Using the generated code](code-generation.md#value-objects-generatevalueobjects)) |
 | `UseGuidKeyForStringPrimaryKey` (`false`) | Make a string primary key a GUID value object (only when `GenerateValueObjects` is enabled) |
+
+### Data access
+
+| Key | Description |
+|---|---|
 | `GenerateRepositories` (`false`) | Generate a QuickER Repository (a lightweight mini-ORM). **By default, no DB-access code is generated** (the same default as the GUI) |
-| `RepositoryDialects` (unspecified) | The multi-target dialect list for the QuickER Repository (for example `["sqlserver", "sqlite"]`). Only `sqlserver` and `sqlite` are supported; combining any other dialect with `GenerateRepositories` fails before generation. When unspecified, the effective value is resolved in this order: `--repository-dialects` > this key in the settings file > a single dialect derived from `--provider`. A null or empty array in the settings file falls through to that derivation, but passing `--repository-dialects` a value that names no dialect (commas or spaces only) is an error rather than a fallback |
+| `RepositoryDialects` (unspecified) | The multi-target dialect list for the QuickER Repository (for example `["sqlserver", "sqlite"]`). Only `sqlserver` and `sqlite` are supported; combining any other dialect with `GenerateRepositories` fails before generation |
 | `ExcludeUnboundedBinaryColumns` (`false`) | Exclude unbounded binary columns from the QuickER Repository's SELECT / UPDATE (corresponds to the CLI's `--exclude-unbounded-binary-columns`; see [Using the generated code](code-generation.md#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns)) |
 | `GenerateEfCoreRepositories` (`false`) | Generate the `QuickErDbContext` for EF Core plus EF Core Repository implementations. Cannot be combined with multi-targeting (two or more effective dialects) |
 | `GenerateInMemoryRepositories` (`false`) | Generate an in-memory Repository implementation for testing |
+| `GenerateSyncSupport` (`false`) | Generate the bidirectional sync support for a server (SQL Server) plus local (SQLite) build. Requires `GenerateRepositories` with exactly the two dialects `sqlserver` and `sqlite`, and at least one table with a single primary-key column (a `rowversion` column decides how a table is synced, not whether it is). Can be combined with `ExcludeUnboundedBinaryColumns`, in which case the excluded columns are carried only when `SyncOptions.IncludeUnboundedBinary` is set (corresponds to the CLI's `--generate-sync-support`; see [Using the generated code](code-generation.md#bidirectional-sync-support---generate-sync-support)) |
+
+- When `RepositoryDialects` is unspecified, the effective value is resolved in this order: `--repository-dialects` > this key in the settings file > a single dialect derived from `--provider`.
+  A null or empty array in the settings file falls through to that derivation, but passing `--repository-dialects` a value that names no dialect (commas or spaces only) is an error rather than a fallback
+
+### Remote support
+
+| Key | Description |
+|---|---|
 | `GenerateRemoteContracts` (`false`) | Additionally generate the remote-operation interface `I{Entity}RemoteRepository` (corresponds to the CLI's `--generate-remote-contracts`; requires a QuickER Repository, an EF Core Repository, or an in-memory Repository, that is `GenerateRepositories`, `GenerateEfCoreRepositories`, or `GenerateInMemoryRepositories`; see [Using the generated code](code-generation.md)) |
 | `GenerateRemoteServices` (`false`) | Generate HTTP client/server implementations for the remote surface (automatically implies `GenerateRemoteContracts`; corresponds to the CLI's `--generate-remote-services`; see [Using the generated code](code-generation.md)) |
-| `GenerateSyncSupport` (`false`) | Generate the bidirectional sync support for a server (SQL Server) plus local (SQLite) build. Requires `GenerateRepositories` with exactly the two dialects `sqlserver` and `sqlite`, and at least one table with a single primary-key column (a `rowversion` column decides how a table is synced, not whether it is). Can be combined with `ExcludeUnboundedBinaryColumns`, in which case the excluded columns are carried only when `SyncOptions.IncludeUnboundedBinary` is set (corresponds to the CLI's `--generate-sync-support`; see [Using the generated code](code-generation.md#bidirectional-sync-support---generate-sync-support)) |
+
+### Runtime and documentation
+
+| Key | Description |
+|---|---|
 | `UseRuntimePackages` (`false`) | Do not emit the fixed runtime code; provide it via NuGet package references instead (see [Using the generated code](code-generation.md)) |
 | `GenerateApiDocs` (`false`) | Additionally output an API reference Markdown in the language chosen by `ApiDocsLanguage` (corresponds to the CLI's `--generate-api-docs`; see [Using the generated code](code-generation.md)) |
 | `ApiDocsLanguage` (`English`) | Language of the API reference Markdown: `English` writes `{base name}.g.md`, `Japanese` writes only `{base name}.ja.g.md`, `Both` writes the two. The value is a name and is case-insensitive (requires `GenerateApiDocs`; corresponds to the CLI's `--api-docs-lang`) |
 | `ApiDocsSubdirectory` (unspecified = the output directory itself) | Output subfolder for the API reference Markdown, relative to the output directory (for example `docs`; several segments allowed; absolute paths and `..` are rejected). Requires `GenerateApiDocs`; independent of `LayeredOutput` (corresponds to the CLI's `--api-docs-subdir`) |
-| `ApiDocsFileName` (unspecified = the derived name) | File name for the API reference Markdown (the extension is normalized to `.g.md`; the Japanese version reuses the base name as `.ja.g.md`). Unspecified means the derived name as before (the output file base name, or `ApiDocs.g.md` when files are split). Only a file name is accepted; path separators are rejected (the folder is `ApiDocsSubdirectory`'s job). Requires `GenerateApiDocs` (corresponds to the CLI's `--api-docs-file`) |
+| `ApiDocsFileName` (unspecified = the derived name) | File name for the API reference Markdown (the extension is normalized to `.g.md`; the Japanese version reuses the base name as `.ja.g.md`). Unspecified means the derived name (the output file base name, or `ApiDocs.g.md` when files are split). Only a file name is accepted; path separators are rejected (the folder is `ApiDocsSubdirectory`'s job). Requires `GenerateApiDocs` (corresponds to the CLI's `--api-docs-file`) |
+
+### Attributes
+
+| Key | Description |
+|---|---|
 | `IncludeDataAnnotations` (`true`) | Apply the documentation and validation attributes (`[Table]` / `[Key]` / `[Required]` / `[MaxLength]`) and the DB-definition meta attributes (`[DbTableMeta]` / `[DbColumnMeta]`). `[Column]` is outside this key and is always applied |
 | `IncludeJsonIgnoreOnParentNavigation` (`true`) | Apply `[JsonIgnore]` to parent-reference navigations (to guard against circular references during JSON serialization) |
-| `OutputFileName` (`QuickEREntities.g.cs`; the alias `OutputPath` is also accepted) | The file name for single-file output (`.g.cs` is appended when missing; ignored when `SplitFilesByCategory` is true). The canonical key is `OutputFileName`, which is what `get_generation_config_schema` reports; `OutputPath` is its alias, and only its file-name part is used (the output directory is always `--out`). In the GUI, `OutputPath` may hold the full output path (a file when not split, a folder when split), but the CLI interprets it by the same rule. **This is the one exception to "CLI flag > settings file"**: `--output-path` only takes effect when the settings file does not already define `OutputFileName`; if it does, the settings file's `OutputFileName` wins |
+
+### Output path
+
+| Key | Description |
+|---|---|
+| `OutputFileName` (`QuickEREntities.g.cs`; the alias `OutputPath` is also accepted) | The file name for single-file output (`.g.cs` is appended when missing; ignored when `SplitFilesByCategory` is true) |
+
+- The canonical key is `OutputFileName`, which is what `get_generation_config_schema` reports.
+  `OutputPath` is its alias, and only its file-name part is used (the output directory is always `--out`).
+  In the GUI, `OutputPath` may hold the full output path (a file when not split, a folder when split), but the CLI interprets it by the same rule
+- **This is the one exception to "CLI flag > settings file"**: `--output-path` only takes effect when the settings file does not already define `OutputFileName`; if it does, the settings file's `OutputFileName` wins
 
 ## Regenerating the bundled sample
 

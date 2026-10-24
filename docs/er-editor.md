@@ -31,18 +31,6 @@ Select an entity and the properties panel lets you edit the following.
 | Columns | The column list (next section) |
 | Notes | A free-form field that goes neither to the database nor to the generated code. It is written out to the Excel and HTML definition documents, and re-importing an Excel definition document restores it |
 
-### Names
-
-The names kept in a diagram (tables, columns, constraints, named queries, their parameters and projection fields) follow one rule:
-
-- **Surrounding spaces are removed** when a name enters the diagram, from every route (the properties panel, the AI tools, imports, a diagram file you edited by hand). The spelling, including upper and lower case, is kept as typed.
-- **Two names are the same name** when they match ignoring letter case, after the surrounding spaces are removed. A diagram never holds two tables with the same name, or two columns of one table with the same name.
-- **The properties panel rejects a duplicate**: the name goes back to what it was, the status bar says which table or column already has the name, and nothing is added to Undo.
-- **The status bar warns when a name is longer than the target database allows** (or holds a character it cannot store), for tables, columns, foreign keys and unique constraints.
-  The name is accepted as typed; DDL generation and sync refuse it until it is shortened (see [Identifier length limits](database.md#identifier-length-limits))
-
-The name is not a database identifier you have to match exactly: when you [sync](database.md) with a database, a table or column whose name differs only in letter case counts as the same element (see the sync notes).
-
 ### Editing columns
 
 Columns are edited inline in the "Columns" grid of the properties panel.
@@ -51,6 +39,8 @@ Columns are edited inline in the "Columns" grid of the properties panel.
 - **Editable items**: the PK / FK / NULL checkboxes, the column name, the type (choose from the target DB's type list, or type freely), and the description
 - **Reordering**: drag rows to change the order
 - **Copy / paste**: Ctrl+C / Ctrl+V work per column on the grid
+
+### Primary key order
 
 Express a composite primary key by checking PK on several columns.
 Which columns make up the key is always the PK checkbox's business; the key's own column order is edited separately, in a "Primary key order" card that the properties panel places between the column grid and the unique constraints.
@@ -86,18 +76,28 @@ One column can be a primary key, a foreign key, and part of a unique constraint 
 
 Press "One-to-One," "One-to-Many," or "Many-to-Many" in the toolbox to enter creation mode, then click the two entities in turn to commit it.
 Clicking the same entity twice creates a self-referencing relationship.
-On creation, **every primary key column of the source is paired with a matching column on the target**, each looked up by name, and the constraint name is generated in the form `FK_<target>_<source>`.
-Dots and spaces in the table names become `_` and leading or trailing spaces are dropped, the same rule DDL generation uses for a foreign key that has no name.
-A relationship added by the AI chat or the MCP tools gets the same name.
-A source column with no matching target column stays out of the mapping (fill it in from the properties panel), and no target column is used twice.
-A target primary key column is paired only when its name is the one derived from the source table (`OrderId` / `order_id` for `Orders`), or, for a composite source key, when it has the same name as a source key column other than a lone `id`, so an identifying relationship such as order lines keyed by `(OrderId, LineNo)` gets its `OrderId` pair, while an `id` in the target's primary key is never paired with the source's `id` (each table's `id` is that table's own key, so for a source `Projects(TenantId, Id)` the source's `Id` pairs with the target's `ProjectId`).
-A self-reference never pairs a primary key column.
 
 While creation mode is active the toolbox says so and offers a "Cancel" button for it.
 Collapsing the toolbox during creation mode also cancels the mode, because neither the notice nor the cancel button is visible once the panel is gone.
 
 If a relationship with the same start and end points already exists, the new one is rejected as a duplicate, so select and edit the existing relationship instead.
 Only the direction that matches counts as a duplicate, so B → A can still be created when A → B exists.
+
+#### Column pairs and constraint name on creation
+
+On creation, **every primary key column of the source is paired with a matching column on the target**, each looked up by name.
+A source column with no matching target column stays out of the mapping (fill it in from the properties panel), and no target column is used twice.
+A target primary key column is paired only in one of these cases:
+
+- Its name is the one derived from the source table (`OrderId` / `order_id` for `Orders`)
+- The source key is composite, and it has the same name as a source key column other than a lone `id`
+
+As a result, an identifying relationship such as order lines keyed by `(OrderId, LineNo)` gets its `OrderId` pair, while an `id` in the target's primary key is never paired with the source's `id` (each table's `id` is that table's own key, so for a source `Projects(TenantId, Id)` the source's `Id` pairs with the target's `ProjectId`).
+A self-reference never pairs a primary key column.
+
+The constraint name is generated in the form `FK_<target>_<source>`.
+Dots and spaces in the table names become `_` and leading or trailing spaces are dropped, the same rule DDL generation uses for a foreign key that has no name.
+A relationship added by the AI chat or the MCP tools gets the same name.
 
 ### Editing properties
 
@@ -117,6 +117,18 @@ Select a relationship and the properties panel lets you edit the following.
   Composite (multi-column) foreign keys are represented as they are and survive import, DDL generation, and schema sync.
   Note that C# code generation (navigation properties and EF Core) targets single-column foreign keys only; a composite one is skipped there with a warning
 
+## Names
+
+The names kept in a diagram (tables, columns, constraints, named queries, their parameters and projection fields) follow one rule:
+
+- **Surrounding spaces are removed** when a name enters the diagram, from every route (the properties panel, the AI tools, imports, a diagram file you edited by hand). The spelling, including upper and lower case, is kept as typed.
+- **Two names are the same name** when they match ignoring letter case, after the surrounding spaces are removed. A diagram never holds two tables with the same name, or two columns of one table with the same name.
+- **The properties panel rejects a duplicate**: the name goes back to what it was, the status bar says which table or column already has the name, and nothing is added to Undo.
+- **The status bar warns when a name is longer than the target database allows** (or holds a character it cannot store), for tables, columns, foreign keys and unique constraints.
+  The name is accepted as typed; DDL generation and sync refuse it until it is shortened (see [Identifier length limits](database.md#identifier-length-limits))
+
+The name is not a database identifier you have to match exactly: when you [sync](database.md) with a database, a table or column whose name differs only in letter case counts as the same element (see the sync notes).
+
 ## Display and navigation
 
 - **Zoom**: the "−" and "+" on the status bar, click the percentage for 100%, and "⛶" to fit the whole diagram.
@@ -126,21 +138,39 @@ Select a relationship and the properties panel lets you edit the following.
 - **Search**: Ctrl+F searches table and column names by partial match (case-insensitive).
   Enter moves to the next match, clicking a candidate jumps to it, and Esc closes the search
 - **Relationship highlighting**: selecting an entity or relationship emphasizes the connected elements and dims the unrelated ones
-- **Display toggles**: "View" on the toolbar opens a popup with six toggles: "Toolbox," "Property panel," "Descriptions," "Nullability," "Compact" (collapses column rows other than PK / FK), and "Full screen."
-  The popup stays open as you flip them and closes when you click outside it.
-  Every state except full screen is restored on the next launch
-- **Full screen**: "Full screen" (F11) hides the window frame and fills the screen.
-  The toolbar and status bar stay, so combining it with the panel toggles below leaves you with just the canvas.
-  Exit with F11 or the same toggle in the "View" group; this is the one state that is not restored on the next launch.
+
+### Display toggles
+
+"View" on the toolbar opens a popup with six toggles.
+The popup stays open as you flip them and closes when you click outside it.
+
+| Toggle | Key | Effect | Next launch |
+|---|---|---|---|
+| Toolbox | F9 | Collapses or shows the left panel | Restored |
+| Property panel | F10 | Collapses or shows the right panel | Restored |
+| Descriptions | — | Shows column descriptions in the ER diagram | Restored |
+| Nullability | — | Shows column nullability in the ER diagram | Restored |
+| Compact | — | Collapses column rows other than PK / FK | Restored |
+| Full screen | F11 | Hides the window frame and fills the screen | Not restored |
+
+- **Panels**: the canvas takes over the space, and if you have resized the property panel by dragging, that width comes back when you show it again.
+  Selecting an entity while the panel is hidden does not reopen it
+- **Full screen**: the toolbar and status bar stay, so combining it with the panel toggles leaves you with just the canvas.
+  Exit with F11 or the same toggle in the "View" group.
   Since the title bar is hidden, an "Exit" button appears at the right end of the toolbar in its place (it closes the app exactly as the title bar's close button does: no confirmation, auto-save first)
-- **Panel visibility**: "Toolbox" (F9) and "Property panel" (F10) collapse the left and right panels.
-  The canvas takes over the space, and if you have resized the property panel by dragging, that width comes back when you show it again.
-  Selecting an entity while the panel is hidden does not reopen it.
-  Both states are restored on the next launch
-- **Auto-arrange**: the toolbar's "Grid," "Tree," and "Free" (places entities with a force-directed model, arranging them so that relationship lines come close to horizontal or vertical), plus "Auto Width" (adjusts widths so column names and types do not overlap).
-  "Grid" searches for an arrangement with fewer crossing relationship lines, but the search has a cap on how many checks it may make and **stops early on large diagrams**, so that a diagram with hundreds of tables does not keep you waiting.
-  The cap counts checks rather than time, so the same diagram always comes out the same way.
-  At sizes where it stops early (measured from around 300 tables) more crossings remain, so move things by hand afterwards or try "Tree" if that bothers you
+
+### Auto-arrange
+
+| Button | What it does |
+|---|---|
+| Grid | Places entities in a grid, searching for an arrangement with fewer crossing relationship lines |
+| Tree | Places entities as a tree |
+| Free | Places entities with a force-directed model, arranging them so that relationship lines come close to horizontal or vertical |
+| Auto Width | Adjusts widths so column names and types do not overlap |
+
+The search in "Grid" has a cap on how many checks it may make and **stops early on large diagrams**, so that a diagram with hundreds of tables does not keep you waiting.
+The cap counts checks rather than time, so the same diagram always comes out the same way.
+At sizes where it stops early (measured from around 300 tables) more crossings remain, so move things by hand afterwards or try "Tree" if that bothers you.
 
 ## Multi-select and bulk operations
 
@@ -160,10 +190,12 @@ Each of these is undone with a single Undo.
 ## Undo / Redo
 
 Ctrl+Z / Ctrl+Y ("Undo" and "Redo" on the toolbar) cover the individual editing operations on the diagram's contents.
-That means adding, deleting, and changing entities, columns, and relationships; moving; duplicating; color changes; and switching the target DB, and the AI chat's individual editing tools go into the same history.
-Operations that swap out the whole diagram (importing a file, importing from a database, and having the AI generate an entire diagram) clear the history instead, so Undo cannot bring them back.
 
-Operations that only change how things look (selection state, zoom and pan, minimap visibility) do not enter the history.
+| Operation | History |
+|---|---|
+| Adding, deleting, and changing entities, columns, and relationships; moving; duplicating; color changes; switching the target DB; the AI chat's individual edits | Recorded, so Undo brings them back |
+| Operations that swap out the whole diagram (importing a file, importing from a database, and having the AI generate an entire diagram) | Clear the history, so Undo cannot bring them back |
+| Operations that only change how things look (selection state, zoom and pan, minimap visibility) | Not recorded |
 
 ## Switching the target DB
 
@@ -174,7 +206,7 @@ See [Database round-tripping](database.md) for details.
 
 ## File operations and auto-save
 
-New (Ctrl+N), open (Ctrl+O), save (Ctrl+S).
+New (Ctrl+N), open (Ctrl+O), save (Ctrl+S), save as (Ctrl+Shift+S).
 The save format is a single JSON file that keeps the semantic model (table definitions) separate from the visual information (coordinates and colors), which makes it well suited to diff review in git.
 
 When the window is closed normally, the work in progress is auto-saved and the next launch restores it.
@@ -189,6 +221,7 @@ Only when there are unsaved changes does it ask whether to reload (discarding th
 | Key | Action |
 |---|---|
 | Ctrl+N / Ctrl+O / Ctrl+S | New / open / save |
+| Ctrl+Shift+S | Save as |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Ctrl+C / Ctrl+V | Copy / paste an entity (on the column grid, copy / paste a column) |
 | Ctrl+D | Duplicate the entity |

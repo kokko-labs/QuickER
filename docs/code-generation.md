@@ -8,26 +8,18 @@ For how to run generation, see the [CLI reference](cli.md); for a working exampl
 
 ## Contents
 
-The first eight sections are meant to be read in order.
-They cover what you need to use the generated code.
+The sections fall into six groups.
+The first group (basics) is meant to be read in order.
+It covers what you need to use the generated code.
+Read only the sections you need from the other groups.
+Value objects and the options that add capabilities or change the shape of the output are all off by default, so you can skip the sections for the options you do not turn on.
 
-- [What gets generated](#what-gets-generated)
-- [The generated file header](#the-generated-file-header)
-- [Edit model save workflow](#edit-model-save-workflow)
-- [QuickER Repository](#quicker-repository)
-- [EF Core mode](#ef-core-mode-generateefcorerepositories)
-- [In-memory repositories for tests](#in-memory-repositories-for-tests-generateinmemoryrepositories)
-- [rowversion columns and optimistic concurrency](#rowversion-columns-and-optimistic-concurrency)
-- [Computed / generated columns](#computed--generated-columns)
-- [Columns the database numbers](#columns-the-database-numbers)
-- [Extending the generated base classes](#extending-the-generated-base-classes)
-
-The rest is reference material, one section per generation option.
-None of them is on by default, so read only the sections for the options you turn on.
-
-- Adding capabilities: [value objects](#value-objects-generatevalueobjects) / [excluding unbounded binary columns](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns) / [multi-target repositories](#multi-target-repositories-sqlserver--sqlite) / [bidirectional sync support](#bidirectional-sync-support---generate-sync-support) / [remote-capable interfaces](#remote-capable-interfaces---generate-remote-contracts) / [remote services](#remote-services---generate-remote-services)
-- Changing the shape of the output: [runtime package reference mode](#runtime-package-reference-mode---use-runtime-packages) / [layered folder output](#layered-folder-output---layered-output) / [API reference](#api-reference-gmd)
-- Also: [coexisting with an existing codebase](#coexisting-with-an-existing-codebase) / [license note](#license-note)
+- **Basics (read in order)**: [what gets generated](#what-gets-generated) / [edit model save workflow](#edit-model-save-workflow) / [QuickER Repository](#quicker-repository) / [queries](#queries-expression-tree--sql) / [graph fetch](#graph-fetch-includegraph) / [graph save](#graph-save-save-parent-and-children-in-one-call) / [save hooks](#save-hooks-isavehook) / [raw SQL escape hatch](#raw-sql-escape-hatch) / [uniqueness pre-check](#uniqueness-pre-check-checkuniquenessasync) / [EF Core mode](#ef-core-mode-generateefcorerepositories) / [in-memory repositories for tests](#in-memory-repositories-for-tests-generateinmemoryrepositories)
+- **Handling each kind of column**: [comparing columns whose values the database produces](#comparing-columns-whose-values-the-database-produces) / [rowversion columns and optimistic concurrency](#rowversion-columns-and-optimistic-concurrency) / [computed / generated columns](#computed--generated-columns) / [columns the database numbers](#columns-the-database-numbers)
+- **Types and extension**: [value objects](#value-objects-generatevalueobjects) / [partial extension points](#partial-extension-points) / [extending the generated base classes](#extending-the-generated-base-classes)
+- **Options that add capabilities**: [excluding unbounded binary columns](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns) / [multi-target repositories](#multi-target-repositories-sqlserver--sqlite) / [bidirectional sync support](#bidirectional-sync-support---generate-sync-support) / [remote-capable interfaces](#remote-capable-interfaces---generate-remote-contracts) / [remote services](#remote-services---generate-remote-services)
+- **Options that change the shape of the output**: [runtime package reference mode](#runtime-package-reference-mode---use-runtime-packages) / [layered folder output](#layered-folder-output---layered-output) / [the generated-code subfolder](#the-generated-code-subfolder---code-subdir) / [API reference](#api-reference-gmd)
+- **Regeneration and coexistence**: [the generated file header](#the-generated-file-header) / [coexisting with an existing codebase](#coexisting-with-an-existing-codebase) / [license note](#license-note)
 
 ## What gets generated
 
@@ -42,9 +34,23 @@ None of them is on by default, so read only the sections for the options you tur
 | EF Core Repository | `QuickErDbContext` (including the Fluent configuration) plus the EF Core Repository plus DI-registration extensions. |
 | Runtime | The fixed code the above relies on (inlined into the output by default; a package-reference mode is also available). |
 
+```mermaid
+flowchart LR
+  ui["Screen"] <-->|BindingXxx| em["EditModel"]
+  em <--> mp["Mapper"] <--> en["Entity"]
+  en -->|fetch and save| ct["Repository shared contracts"]
+  q["QuickER Repository implementation"] -->|implements| ct
+  ef["EF Core Repository"] -->|implements| ct
+  vo["Value objects (optional)"] -.->|column types| en
+  rt["Runtime"] -.->|fixed code| q
+  rt -.->|fixed code| ef
+```
+
 > **Prerequisite**: Repository generation targets a single primary key with application-assigned keys (tables with a composite key or DB auto-numbering can only use the Entity / EditModel).
 
-> **Target framework**: The generated code is developed and verified on .NET 10. It also builds on .NET 8 as things stand, but that is not guaranteed. The runtime NuGet packages target `net10.0` only, so package-reference mode requires .NET 10.
+> **Target framework**: The generated code is developed and verified on .NET 10.
+> It also builds on .NET 8 as things stand, but that is not guaranteed.
+> The runtime NuGet packages target `net10.0` only, so package-reference mode requires .NET 10.
 
 ### Mapper loading is lossless
 
@@ -61,16 +67,20 @@ A table's types are named after the table in the singular with a suffix: `order_
 The suffix is added only when the name does not already end with it.
 Value object types are named after the column (`customer_id` gives `CustomerIdValue`), and columns spelled the same way in different tables share one type.
 
-Generation stops with an error that names the tables and columns when two of them would give the same type name.
-For example, `customer` and `customers` both give `CustomerEntity`, `order_edit_model` gives `OrderEditModel`, the edit model of `order`, and `i_order` gives `IOrderRepository`, the repository contract of `order`.
-It also stops when a table or column would give the name of a type the generated code already uses, such as `RawSqlMapper` for table `raw_sql`, or `SqlParameterValue` for column `sql_parameter`.
+When type names clash, generation reports it as follows.
+
+| Clash | Example | Generation |
+|---|---|---|
+| Two tables or columns would give the same type name | `customer` and `customers` (both give `CustomerEntity`), `order_edit_model` (gives `OrderEditModel`, the edit model of `order`), `i_order` (gives `IOrderRepository`, the repository contract of `order`) | Stops with an error that names the tables and columns |
+| A table or column would give the name of a type the generated code already uses | Table `raw_sql` (`RawSqlMapper`), column `sql_parameter` (`SqlParameterValue`) | Stops |
+| The names of the remote endpoints (the entity class name without `Entity`) differ only in case | `order_item` and `orderitem` (`OrderItem` and `Orderitem`) | Stops, whether or not remote services are generated |
+| Other generated type names differ only in case | Columns `user_id` and `userid` of two tables (`UserIdValue` and `UseridValue`) | Reports a warning; the generated code works as it is, and spelling the names the same way removes the warning |
+
 The check covers every name the generator can emit, whatever the options and the output layout, so turning on an option never breaks a diagram that generated before.
 In return, a diagram is refused even where the clash would not have come up in your configuration.
 
 Type names are compared with case, as C# compares them.
-The exception is the name of the remote endpoints, which is the entity class name without `Entity`: routing ignores case, so two tables such as `order_item` and `orderitem` (`OrderItem` and `Orderitem`) are refused, whether or not remote services are generated.
-Other generated type names that differ only in case, such as `UserIdValue` and `UseridValue` from columns `user_id` and `userid` of two tables, are reported as a warning.
-The generated code works as it is; spell the names the same way to remove the warning.
+The endpoint names are the exception because routing ignores case.
 
 ### Entity member names
 
@@ -106,10 +116,7 @@ Two one-to-many relationships in opposite directions do not clash and keep their
 Two foreign keys that join the same child column to the same parent column are the same foreign key defined twice, and role names cannot tell them apart.
 Generation stops with an error that names both constraints; delete one of them.
 
-### DB-definition metadata attributes
-
-By default, an Entity is decorated with DataAnnotations and DB-definition metadata attributes (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, and so on) and a description.
-The generated code therefore doubles as a self-describing document of the DB definition.
+### Database types and C# types
 
 Some DB types map to a C# type that the type name alone does not suggest.
 
@@ -146,9 +153,8 @@ PostgreSQL array columns are **left out of edit models and value objects**.
 An edit model is one text input per column and has no notation for an array, and a value object would compare arrays by reference, so two arrays with the same contents would not be equal.
 **The length of an array's elements is not carried into the generated code either**: the 20 in `varchar(20)[]` is the length of an element, while `[MaxLength]` on an array means the number of elements, so no such (wrong) check is declared.
 Generation names the affected columns.
-**A UNIQUE constraint that contains an array column is left out of the edit model's duplicate check** as well:
-the check reads each member as an edit-model property, and an array column is not there to read.
-The repository still checks it before saving, and the constraint itself exists in the database.
+**A UNIQUE constraint that contains an array column is left out of the edit model's duplicate check** as well: the check reads each member as an edit-model property, and an array column is not there to read.
+The repository checks it before saving, and the constraint itself exists in the database.
 Generation names those constraints too.
 Entity properties, EF Core, the in-memory repository and remote transfer handle them as usual.
 
@@ -165,6 +171,11 @@ QuickER does not generate EF Core's `HasColumnType` (EF Core is for connecting t
 Spell the column type out in the generated `QuickErDbContext`'s `OnModelCreatingPartial` if you need it.
 Reading, and writing with a UTC offset, work as they are.
 
+### DB-definition metadata attributes
+
+By default, an Entity is decorated with DataAnnotations and DB-definition metadata attributes (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, and so on) and a description.
+The generated code therefore doubles as a self-describing document of the DB definition.
+
 For some columns the token does not reproduce the DB type spelling: `numeric` collapses onto `decimal`, and `datetime` onto `datetime2`.
 For those columns, `[DbColumnMeta]` also records the original text as `NativeType`, and an information diagnostic names them at generation time.
 That record is what lets C# reverse engineering restore the column type exactly as the diagram spelled it.
@@ -174,48 +185,28 @@ It cannot be turned off in a configuration that generates the QuickER Repository
 The runtime reads `[Table]` and `[Key]` through reflection.
 `[Column]` sits outside that option and is always applied: it is the persistence mapping itself, and the generated runtime treats a property without it as not being a column.
 
-## The generated file header
-
-Every generated `.g.cs` file starts with three lines:
-
-```csharp
-// <auto-generated />
-// Generated by QuickER 0.2.0
-// Content hash: sha256:3f7a…
-```
-
-The first line tells the compiler, analyzers and formatters (CSharpier among them) to leave the file alone.
-The second records the QuickER version that produced the file, and the API reference carries the same line as an HTML comment.
-The third lets QuickER tell whether the file has been edited by hand since it was generated.
-
-### Regenerating over edited files
-
-Before writing, QuickER checks every `.g.cs` it is about to replace.
-If any of them has been edited by hand, nothing is written until you decide:
-
-| Entry point | When edited files exist | To overwrite them |
-|---|---|---|
-| GUI | A confirmation lists the edited files; Cancel writes nothing | Choose OK |
-| CLI (`generate` / `scaffold`) | The edited files are listed on stderr, nothing is written, and the exit code is `2` | Add `--force` |
-| MCP (`generate_csharp`) | The call fails and lists the edited files | Pass `force: true` |
-
-To keep a change, put it in a separate file rather than in the `.g.cs` itself: a `partial` class next to the generated one.
-
-### What counts as an edit
-
-The hash is computed over the file with whitespace, line endings, a byte-order mark, and a comma directly before `}`, `)` or `]` removed.
-The version and hash lines are left out of it as well.
-Reformatting (CSharpier, the IDE's Format Document, git's line-ending conversion) and upgrading QuickER are therefore not edits.
-It follows that a change touching only whitespace, including whitespace inside a string literal, is not detected either.
-
-A file without a hash line is not checked and is overwritten as before, such as one generated by an earlier QuickER or one whose header was removed.
-The API reference (`.g.md`) is not checked.
-The hash is there to catch accidents, not tampering: anyone can recompute it.
-
 ## Edit model save workflow
 
 An edit model is what the screen binds to; the entity is what gets saved.
 The mapper moves values between them, and the round trip is always the same four steps:
+
+```mermaid
+sequenceDiagram
+  participant App as Application
+  participant UI as Screen
+  participant EM as EditModel
+  participant Map as Mapper
+  participant Repo as Repository
+  App->>Repo: 1. GetByIdAsync
+  Repo-->>App: Entity
+  App->>Map: CreateEditModel(entity)
+  Map-->>App: EditModel
+  UI->>EM: 2. Write BindingXxx (converted to committed values)
+  App->>EM: 3. Validate()
+  App->>Map: 4. ApplyToEntity(editModel, entity, includeRemoved: true)
+  App->>Repo: SaveAsync(entity)
+  App->>Map: AcceptSaved(editModel, entity)
+```
 
 ```csharp
 var mapper = new CustomerMapper();
@@ -270,7 +261,7 @@ It looks at each entity the mapper built, and at its state after the save:
   Child collections are not rebuilt, so the screen's selection stays.
 - An excluded unbounded binary column depends on the repositories you generate.
   Without the EF Core repositories, it is read back as not fetched, and the entity's column is set back to not fetched too, so the next save of either one leaves the stored blob alone.
-  With the EF Core repositories, which read and write every column, the edit model keeps the blob it holds, and the next EF Core save writes it as before.
+  With the EF Core repositories, which read and write every column, the edit model keeps the blob it holds, and the next EF Core save writes it.
   When the QuickER repositories are generated alongside them, a QuickER save of an edit model that holds a blob is refused by the update guard; fetch the row again before that save, or write the column with raw SQL.
 - A row a Save hook skipped keeps its state and its values, so the next save tries it again.
 - A child deletion a hook skipped stays pending: a `Remove()` row stays in the deletion tracking, and a `MarkRemoved()` row stays in the collection.
@@ -353,7 +344,7 @@ var customers = provider.GetRequiredService<ICustomerRepository>();
 
 The registration also wires up `ISqlExecutor`, the entity-independent raw SQL executor, and hands it to every repository it registers.
 Registering your own implementation after the generated extension therefore makes the repositories' raw SQL methods go through it as well, which is how you add logging, metrics, or retries around raw SQL.
-A repository constructed by hand takes the executor as an optional third argument and builds the default one when it is omitted, so existing `new` calls are unaffected.
+A repository constructed by hand takes the executor as an optional third argument and builds the default one when it is omitted.
 
 ### Connections and schema bootstrapping
 
@@ -361,15 +352,6 @@ The generated `SqlConnectionFactory` is what opens every connection, and on **SQ
 SQLite checks foreign keys only when a connection asks it to, so without this the foreign keys in the generated DDL would be silently inert: a child row could reference a parent that does not exist, and deleting a parent would leave its children behind.
 Since the schema declares the constraints, enforcing them is the correct default.
 An explicit `Foreign Keys` keyword in the connection string is honored exactly as written, so `Foreign Keys=False` restores the provider's own behavior.
-
-Every time it opens a connection, including a pooled one coming back, the SQLite factory also sets SQLite's busy timeout to the connection string's `Default Timeout` (30 seconds unless you set it), so a statement that finds the database locked by another connection waits instead of failing at once.
-The provider itself retries a locked database only on a statement's first step, and a write that commits on a later step, such as an `INSERT`, `UPDATE` or `DELETE` with `RETURNING` passed to `QueryBySqlAsync` / `QueryProjectionBySqlAsync` / `ExecuteScalarSqlAsync` / `ExecuteSqlAsync` outside a transaction, would otherwise fail with "database is locked" whenever another connection was reading.
-`Default Timeout=0` means no limit, as it does for the provider's own commands.
-Three things follow from this:
-
-- While SQLite waits, the cancellation token is not observed; a cancelled call returns only when the lock is released or the timeout runs out.
-- The wait applies only to connections that the generated `SqlConnectionFactory` opens. A repository given your own `ISqlConnectionFactory` does not get it unless your factory sets the busy timeout itself. The EF Core repositories get the same wait from an interceptor (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
-- The connection string has no keyword for the busy timeout. To use another value, run `PRAGMA busy_timeout` on the opened connection; the value you set last replaces the factory's for that connection until it opens again.
 
 For creating a schema from the DDL QuickER generates, `SqliteSchemaBootstrap.ApplyDdlAsync` / `SqlServerSchemaBootstrap.ApplyDdlAsync` open a connection and run the whole script in one call.
 
@@ -384,6 +366,18 @@ await SqliteSchemaBootstrap.ApplyDdlAsync(connectionString, ddl, TimeSpan.FromMi
 This is a bootstrap convenience for development, tests, and samples, not schema management.
 It knows nothing about versions, about what already exists, or about rolling back, so anything that outlives a throwaway database wants a migration tool instead.
 EF Core mode draws the same line: it connects to an existing schema, and Migrations are out of scope.
+
+Every time it opens a connection, including a pooled one coming back, the SQLite factory also sets SQLite's busy timeout to the connection string's `Default Timeout` (30 seconds unless you set it), so a statement that finds the database locked by another connection waits instead of failing at once.
+The provider itself retries a locked database only on a statement's first step, and a write that commits on a later step, such as an `INSERT`, `UPDATE` or `DELETE` with `RETURNING` passed to `QueryBySqlAsync` / `QueryProjectionBySqlAsync` / `ExecuteScalarSqlAsync` / `ExecuteSqlAsync` outside a transaction, would otherwise fail with "database is locked" whenever another connection was reading.
+`Default Timeout=0` means no limit, as it does for the provider's own commands.
+Three things follow from this:
+
+- While SQLite waits, the cancellation token is not observed; a cancelled call returns only when the lock is released or the timeout runs out.
+- The wait applies only to connections that the generated `SqlConnectionFactory` opens.
+  A repository given your own `ISqlConnectionFactory` does not get it unless your factory sets the busy timeout itself.
+  The EF Core repositories get the same wait from an interceptor (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
+- The connection string has no keyword for the busy timeout.
+  To use another value, run `PRAGMA busy_timeout` on the opened connection; the value you set last replaces the factory's for that connection until it opens again.
 
 ### Basic operations
 
@@ -408,7 +402,7 @@ Triggers are deliberately not fired, since QuickER's DDL generates none.
 `KeepNulls` is always on as well, so a `null` is stored as NULL even in a column with a DEFAULT, as `InsertAsync` stores it.
 The copy times out after the connection string's `Command Timeout` (30 seconds unless it says otherwise).
 
-### Queries (expression tree → SQL)
+## Queries (expression tree → SQL)
 
 ```csharp
 var result = await customers.Query()
@@ -419,6 +413,10 @@ var result = await customers.Query()
         .ThenInclude(o => o.OrderLines)                         // load recursively
     .ToListAsync();
 ```
+
+`Query()` is part of the Repository shared contracts, so every repository has it: the QuickER Repository, EF Core and in-memory (the remote surface does not).
+The translation rules in this section are those of the QuickER Repository's translator.
+The EF Core Repository leaves translation to EF Core itself, and the in-memory repository evaluates the expression tree as C#.
 
 `Include` / `ThenInclude` calls naming the same navigation are merged into one node.
 The same branching idiom as EF Core therefore writes multiple branches under `Orders`: `Include(c => c.Orders).ThenInclude(o => o.OrderLines)` followed by `Include(c => c.Orders).ThenInclude(o => o.Customer)`.
@@ -446,7 +444,7 @@ With `cascadeDelete: true` it deletes their descendants along the cascade first,
 A cyclic cascade is refused with `NotSupportedException` before any statement runs.
 On EF Core, where a condition may read a navigation, the keys of the matching rows are read first and the deletes go by those keys, so a condition such as `o => o.OrderLines.Any()` deletes the matching rows together with their descendants (the conditions are not evaluated again once the descendants are gone).
 
-#### Null compensation
+### Null compensation
 
 Nulls in an equality comparison and in an IN search are compensated so that every backend agrees with C# and EF Core.
 
@@ -471,29 +469,37 @@ The relational operators (`<` `<=` `>` `>=`) still bind the null as a parameter,
 
 An IN search has a few cases the table does not cover.
 
-- A null mixed into the collection is not bound as an element; it folds into an `IS NULL` test on the column. SQL's `IN` never matches a value against `NULL`, so binding it would never reach a row whose column is `NULL`, while C# and EF Core both read a list containing null as matching such a row.
-- A list without nulls keeps the plain `col IN (...)`. Only its negation is compensated, for exactly the reason the column side of `!=` is: C# and EF Core both count null as *not* contained in a list of non-null values and so read the negation as true, while the bare `NOT IN` is UNKNOWN for those rows and drops them.
+- A null mixed into the collection is not bound as an element; it folds into an `IS NULL` test on the column.
+  SQL's `IN` never matches a value against `NULL`, so binding it would never reach a row whose column is `NULL`, while C# and EF Core both read a list containing null as matching such a row.
+- A list without nulls keeps the plain `col IN (...)`.
+  Only its negation is compensated, for exactly the reason the column side of `!=` is: C# and EF Core both count null as *not* contained in a list of non-null values and so read the negation as true, while the bare `NOT IN` is UNKNOWN for those rows and drops them.
 - A list of nothing but nulls has no value left to compare against once the nulls are folded out, so it becomes `IS NULL` / `IS NOT NULL` on its own.
-- An empty list matches no row for `IN` and every row for `NOT IN` (`IN ()` is invalid SQL, so it becomes a constant condition). Both agree with C#'s `Contains`.
+- An empty list matches no row for `IN` and every row for `NOT IN` (`IN ()` is invalid SQL, so it becomes a constant condition).
+  Both agree with C#'s `Contains`.
 
 Negation flips the operator instead of wrapping the comparison in `NOT (...)`.
 `!(a == b)` and `!(a != b)` therefore get exactly the compensation the opposite operator gets on its own.
 A negated `Contains` is folded into the IN clause the same way, emitting the `NOT IN` forms above.
 A negated negation cancels out, so `!(!(a != b))` is translated as `a != b` with its compensation intact, and any deeper stack of negations collapses the same way.
-Negating anything other than an equality or an IN search still produces `NOT (...)`.
+Negating anything other than an equality or an IN search produces `NOT (...)`.
 
-> **Known limitation**: the flip only applies when the `!` sits directly on a comparison. `!(a == b && c)` is not rewritten by De Morgan's laws: it becomes `NOT (...)` around individually compensated operands, and `NOT (UNKNOWN)` is still UNKNOWN, so a row that a `NULL` made UNKNOWN inside the parentheses is dropped where C# and the in-memory and EF Core backends would have kept it. Where a `NULL` is possible, write the negation on the comparison itself (`a != b || !c`), which takes the flip and agrees with them.
+> **Known limitation**: the flip only applies when the `!` sits directly on a comparison.
+> `!(a == b && c)` is not rewritten by De Morgan's laws: it becomes `NOT (...)` around individually compensated operands, and `NOT (UNKNOWN)` is still UNKNOWN, so a row that a `NULL` made UNKNOWN inside the parentheses is dropped where C# and the in-memory and EF Core backends would have kept it.
+> Where a `NULL` is possible, write the negation on the comparison itself (`a != b || !c`), which takes the flip and agrees with them.
 
 The mini DSL's `NOT` does not run into this limitation: the code generator pushes every `NOT` down to the individual comparisons by De Morgan's laws before it writes the C#, so `NOT (qty < 10 OR name = 'x')` is generated as `!(e.Qty < 10) && e.Name != "x"` and never reaches the translator as `!(... || ...)`.
 The rule fits in one sentence: `NOT` and `<>` mean the same as C#'s negation, so a `NULL` row matches them, and only string matching keeps a `NULL` row out in both directions.
 An ordered comparison (`<` `<=` `>` `>=`) on a nullable column is negated with an explicit "the column is `NULL`" disjunct, so `NOT qty < 10` is generated as `(e.Qty == null || !(e.Qty < 10))`, because SQL's `NOT (qty < @p)` alone would drop a `NULL` row as UNKNOWN.
 
-> **Known limitation**: a parameter typed by a value-object column can be passed `null`. A negated ordered comparison against that `null` still splits: C# reads the comparison as false and its negation as true, while SQL reads `col < NULL` as UNKNOWN and drops the row.
+> **Known limitation**: a parameter typed by a value-object column can be passed `null`.
+> A negated ordered comparison against that `null` still splits: C# reads the comparison as false and its negation as true, while SQL reads `col < NULL` as UNKNOWN and drops the row.
 
 String matching in the mini DSL (`LIKE` / `CONTAINS` / `STARTSWITH` / `ENDSWITH`) is emitted against a nullable column with an explicit "the column is not `NULL`" conjunct.
 `NOT LIKE` sits inside the same premise, so a `NULL` row matches in neither direction.
 SQL's `LIKE` already drops `NULL` rows as UNKNOWN, so nothing changes on the SQL side.
 The in-memory backend, however, compiles the expression tree and actually evaluates it, where the missing premise would raise a `NullReferenceException` on a `NULL` row.
+
+### Limits of the simple DSL and named queries
 
 In a DSL `LIKE` literal, only a leading or trailing `%` is read as a pattern (a `%` or `_` in the middle is a validation error).
 Character classes such as SQL Server's `[...]` get no special treatment: they match as strings that contain the brackets themselves.
@@ -527,7 +533,7 @@ The GUI's query definition dialog and `set_query` run the same check before savi
 > The class names depend on the diagram and the generation options, so the parameter name check does not cover them.
 > Name parameters in camelCase.
 
-#### Letter case, whitespace, and date parts
+### Letter case, whitespace, and date parts
 
 How a string match treats letter case is left to the store, because the `LIKE` is emitted unqualified: no `LOWER`, no `COLLATE`.
 And the stores disagree.
@@ -562,7 +568,7 @@ The date parts of a `DateTimeOffset` column are taken in the offset the value ca
 A very large list therefore runs into the dialect's bind-variable or IN-list limit and fails at runtime (SQL Server's 2100 parameters, SQLite's historical 999).
 For a large set of keys, stage them in a temporary table and join, or use raw SQL.
 
-### Graph fetch (IncludeGraph)
+## Graph fetch (IncludeGraph)
 
 ```csharp
 var fetched = await orders.Query()
@@ -593,18 +599,23 @@ The fetched graph comes back with `RowState = Unchanged`, so the fetch, edit, sa
   A skipped navigation comes back empty; fetch recursive structures with manual `Include` to whatever depth you need.
   Additional `Include` calls can be stacked after `IncludeGraph()` (`Query().IncludeGraph().Include(x => x.Customer).GetByIdAsync(id)`).
   Adding parent references or skipped navigations is the typical use, and re-including a child-direction navigation the closure already covers is safe: it merges into the node the closure already has, which is useful for hanging a `ThenInclude` branch below it.
-  The save side walks the instance graph, which is finite, and therefore saves to any depth. This asymmetry between fetch and save is by design.
+  The save side walks the instance graph, which is finite, and therefore saves to any depth.
+  This asymmetry between fetch and save is by design.
 - The method is generated for entities without any cascade child too, where it is a no-op that returns the query unchanged.
 - On a deep or wide diagram the fetch is correspondingly large.
   SQL Server fetches the whole graph as one nested JSON query (SQLite splits it into one query per level), so when only some children are needed, narrow the fetch with manual `Include`.
 - It cannot be combined with `WithUnboundedBinary()` (the same exclusion as `Include`).
   The remote face (`I{Entity}RemoteRepository`) has no `Query()`, so `IncludeGraph` is not available remotely either.
 
-> **Note**: the cascade is an application-side notion, independent of the database's referential actions. Every child-direction navigation belongs to the cascade closure, whether the foreign key says `ON DELETE CASCADE`, `NO ACTION`, or nothing at all. The aggregate this fetches and the aggregate `SaveAsync` cascades over are the same one, and the database's action is not consulted for either.
+> **Note**: the cascade is an application-side notion, independent of the database's referential actions.
+> Every child-direction navigation belongs to the cascade closure, whether the foreign key says `ON DELETE CASCADE`, `NO ACTION`, or nothing at all.
+> The aggregate this fetches and the aggregate `SaveAsync` cascades over are the same one, and the database's action is not consulted for either.
 >
-> `MarkRemoved()` on a root fetched with `IncludeGraph()` followed by `SaveAsync` therefore deletes every descendant with explicit DELETE statements, even where the foreign keys are `NO ACTION` and the delete would otherwise have been refused. On a diagram where a master table is the parent of transaction tables, deleting one master row that way reaches all the data below it. Fetch only what should be saved together (narrow with manual `Include`), or delete through `DeleteAsync(id)`, which is a single-row delete and lets the database's own referential action have the last word.
+> `MarkRemoved()` on a root fetched with `IncludeGraph()` followed by `SaveAsync` therefore deletes every descendant with explicit DELETE statements, even where the foreign keys are `NO ACTION` and the delete would otherwise have been refused.
+> On a diagram where a master table is the parent of transaction tables, deleting one master row that way reaches all the data below it.
+> Fetch only what should be saved together (narrow with manual `Include`), or delete through `DeleteAsync(id)`, which is a single-row delete and lets the database's own referential action have the last word.
 
-### Graph save (save parent and children in one call)
+## Graph save (save parent and children in one call)
 
 ```csharp
 var order = new OrderEntity { OrderId = 1000, CustomerId = 1 };
@@ -637,6 +648,15 @@ A save that deletes rows runs in three stages:
 2. the deletions, in the order the walk reached them, each deleting its subtree children first;
 3. the rows held back, with the rows below them, in the order the walk reached them.
 
+```mermaid
+flowchart TD
+  q{"Does the save delete rows?"}
+  q -- "No" --> g["Walk each root in graph order, writing a new or updated row before its children"]
+  q -- "Yes" --> s1["1. The new and updated rows, walking each root in graph order"]
+  s1 --> s2["2. The deletions, in the order the walk reached them (each subtree children first)"]
+  s2 --> s3["3. The rows held back, with the rows below them, in the order the walk reached them"]
+```
+
 A row is held back when it takes a value that a row the same save deletes still holds: a new row that takes the primary key or a unique value of a deleted row, or an updated row that takes a unique value (other than the primary key) of one.
 A row can therefore move away from a parent the same save deletes, and take a deleted row's value, wherever the rows sit in the collection or in the list of roots.
 Text is compared without regard to case, and a value with a null part takes nothing.
@@ -654,7 +674,7 @@ With a `NO ACTION` foreign key, writing the new row first is refused by the uniq
 Split it into three saves around a temporary value: add the new row with a temporary value and point the rows at it, then delete the old row, then give the new row its value.
 The in-memory repository accepts the single save, as it does not check foreign keys (see [In-memory repositories for tests](#in-memory-repositories-for-tests-generateinmemoryrepositories)).
 
-### Save hooks (ISaveHook)
+## Save hooks (ISaveHook)
 
 A mechanism that inserts processing before and after each operation of a graph save (`SaveAsync`).
 The main use cases are a single-row skip based on a state check in the before-step, and registering file data within the same transaction in the after-step, which makes the save and the blob write atomic.
@@ -727,7 +747,7 @@ A target with a real transaction rolls the transaction back, and in-memory never
 **Only `SaveAsync` is targeted**, in both the single and the multiple form.
 Direct calls to the low-level APIs `InsertAsync` / `UpdateAsync` / `DeleteAsync`, and `BulkInsertAsync`, bypass the hooks and do not fire them.
 
-#### Before and skip semantics
+### Before and skip semantics
 
 `false` skips only that entity's single operation; other rows proceed.
 A skipped row does not get an After call, and its `RowState` is left unchanged.
@@ -743,7 +763,7 @@ When a save deletes rows, the hooks follow its three stages: the hooks of the ne
 To stop the parent, the children's hooks must also return `false`.
 An inconsistent skip, such as skipping a new parent while saving a new child, falls to the safe side through an FK constraint violation, an exception, and a full rollback, provided the FK constraint is actually defined in the database.
 
-#### After and the context
+### After and the context
 
 After receives an `ISaveHookContext` that joins the in-flight transaction, just after the operation and before commit.
 Calling the repository's ordinary APIs from within the hook would contend for locks on a separate connection, so use the operations exposed through `context`.
@@ -765,16 +785,21 @@ SQL in After suits writes to other tables, such as an audit row; a saved row it 
 `operation` receives the operation that actually happened.
 If `insertWhenUpdateMissing: true` and no update target is found so it switches to INSERT, Before is called once with `Update` and After is called with the actual `Insert`.
 
-#### Differences by implementation target
+### Differences by implementation target
 
-| Target | Hook firing | Context support |
-|---|---|---|
-| QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
-| EF Core Repository (`GenerateEfCoreRepositories`) | Supported (After fires in a batch after `SaveChanges`). Under a retrying execution strategy, Before and After run once per attempt. Running `SaveChanges` again after a statement that matched no row does not run them again | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
-| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction). Every Before runs first, then the writes, then every After in the order the operations ran; they are not interleaved row by row as in the QuickER Repository | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. The store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure |
-| Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation. A row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection. The values a Before hook set on the rows the server saved travel back too |
+| Target | How hooks run | `WriteBinaryColumnAsync` | `ExecuteSqlAsync` |
+|---|---|---|---|
+| QuickER Repository (SQL Server / SQLite) | Full support; After fires right after each operation | Supported | Supported |
+| EF Core Repository (`GenerateEfCoreRepositories`) | Supported; After fires in a batch after `SaveChanges`. Under a retrying execution strategy, Before and After run once per attempt. Running `SaveChanges` again after a statement that matched no row does not run them again | Throws `NotSupportedException` | Supported |
+| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction). Every Before runs first, then the writes, then every After in the order the operations ran; they are not interleaved row by row as in the QuickER Repository | Writes to the store | Throws `NotSupportedException` |
+| Remote (`--generate-remote-services`) | A hook registered in the server-side DI fires | Follows the server-side real implementation | Follows the server-side real implementation |
 
-### Raw SQL escape hatch
+The in-memory store has no real transaction, but the save unit is all-or-nothing through copy-on-write: every write is staged and published as one unit only after the last phase succeeds, so nothing a failed save wrote (including a blob written by After) is ever visible, and a concurrent writer's changes cannot be trampled by the failure.
+
+With remote services, a row the server skipped in Before travels back in the save response, so the client-side `RowState` is left untouched as well (the row stays pending and is retried on the next save), exactly as on a direct connection.
+The values a Before hook set on the rows the server saved travel back too.
+
+## Raw SQL escape hatch
 
 When a query cannot be expressed with an expression tree, you can always drop down to raw SQL.
 Parameters are an anonymous object.
@@ -812,7 +837,7 @@ Two things to know about the expansion:
   It replaces `@name` anywhere in the command text, including inside a string literal or a comment, so do not write the parameter's own name in those places.
   Names that merely start the same (`@idsSuffix`, `@ids0`) and system variables that merely end the same (`@@ids`) are left alone.
 
-### Uniqueness pre-check (CheckUniquenessAsync)
+## Uniqueness pre-check (CheckUniquenessAsync)
 
 A table's UNIQUE constraints are stamped on its generated Entity class as `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]`, next to `[DbTableMeta]` / `[DbColumnMeta]`.
 Like those, it is definition metadata that makes the entity a self-describing document of the DB definition, and the checks below read none of it, being plain generated code.
@@ -832,13 +857,18 @@ For each UNIQUE constraint of the table it asks whether a row with the same valu
 Because the same-key row is excluded, the same call is correct both before an insert and before an update.
 When the primary key can be null (a value object or `string` key) and has not been assigned yet, which is the normal state of a new row, the exclusion is left out entirely and the check really does search every row.
 A value tuple that contains a `null` is checked by the rule of the store's UNIQUE constraint.
-The QuickER Repository for SQL Server compares NULL as a value, as a SQL Server UNIQUE constraint does: a row that holds NULL in the same members, with the other members equal, is reported as a duplicate, and so is a row whose members are all NULL like this entity's.
-The QuickER Repository for SQLite, EF Core and the in-memory store skip such a tuple, since SQLite and most other databases accept any number of rows holding NULL.
-EF Core skips it on SQL Server too, so with EF Core the check does not report a second NULL that SQL Server refuses.
+
+| Target | A value tuple that contains `null` |
+|---|---|
+| The QuickER Repository for SQL Server | Compares NULL as a value, as a SQL Server UNIQUE constraint does: a row that holds NULL in the same members, with the other members equal, is reported as a duplicate, and so is a row whose members are all NULL like this entity's |
+| The QuickER Repository for SQLite, EF Core and the in-memory store | Skips the tuple, since SQLite and most other databases accept any number of rows holding NULL. EF Core skips it on SQL Server too, so with EF Core the check does not report a second NULL that SQL Server refuses |
+
 A diagram that declares a UNIQUE constraint the database implements as a filtered unique index (`WHERE col IS NOT NULL`), which accepts any number of NULLs, makes the QuickER Repository for SQL Server report a second NULL that the database would accept.
 Import does not produce that diagram, since it reads only true UNIQUE constraints.
 
-> **Note**: the result is advisory. The definitive guarantee is the database's own UNIQUE constraint: a concurrent insert between the check and the save can still make the save fail (TOCTOU). Use the check to give a friendly message, and keep handling the save exception.
+> **Note**: the result is advisory.
+> The definitive guarantee is the database's own UNIQUE constraint: a concurrent insert between the check and the save can still make the save fail (TOCTOU).
+> Use the check to give a friendly message, and keep handling the save exception.
 
 The implementation lives on each backend's repository base class and runs the same expression-tree query (QuickER Repository for each dialect, EF Core, and in-memory), so all of them behave the same.
 What a generated repository adds is its constraint table and the bridge to the hook below.
@@ -854,7 +884,7 @@ foreach (var violation in violations)
 }
 ```
 
-#### User-defined checks
+### User-defined checks
 
 Rules the diagram cannot express, such as a conditional uniqueness or a cross-table rule, are added through an optional partial method generated on every repository implementation.
 While it is unimplemented the call is erased at no cost.
@@ -873,7 +903,7 @@ public sealed partial class OrderRepository
 The generated checks run first, then the collected delegates in registration order, and every non-null result joins the returned list.
 With remote services the whole check, hooks included, runs in the server-side repository; the HTTP client only forwards the call.
 
-#### Edit models: duplicates inside a collection
+### Edit models: duplicates inside a collection
 
 An edit model whose table declares UNIQUE constraints also declares them in generated code, as a `static readonly` table of `EditModelUniquenessConstraint` (constraint name, member property names, and a compiled accessor for their values) published through the `UniquenessConstraints` property.
 `EditModelCollection<T>.Validate()` reads that table and flags values duplicated among the elements themselves, registering an error on the binding property of every member of each duplicated group.
@@ -922,7 +952,7 @@ Every error is owned by the check that registered it, and a check only ever adds
 `RevertInput()` rebuilds the input strings and clears the input errors only.
 A mapper load goes further and clears the duplicate-value errors of both checks as well, because the values they judged are gone.
 
-#### Edit models: checking against the database
+### Edit models: checking against the database
 
 When edit models and a repository contract are both generated, each edit model also gets a convenience wrapper.
 
@@ -953,7 +983,7 @@ The message comes from `EditModelMessages.DuplicateValue`, a `static Func` takin
 Branch on the property names to single out one constraint.
 A `UniquenessViolation.Message` supplied by a user-defined check wins over it.
 
-#### Related pre-checks with the existing API
+### Related pre-checks with the existing API
 
 Uniqueness is the only pre-check with generated support; the neighbouring validations are one-liners over the existing API.
 
@@ -981,6 +1011,8 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 // For SQLite / PostgreSQL / MySQL / Oracle, specify the corresponding EF Core provider's Use*
 ```
 
+**Saving**
+
 - Save is a disconnected-graph save that converts `RowState` to EF Core's state.
   Like the QuickER repositories, it registers only the entities the cascade reaches from the root.
   A parent reference (such as `line.Order`) is not followed, so a parent loaded with `Include` is neither written nor deleted.
@@ -990,22 +1022,33 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - An update of a table without a rowversion column that matches no row (a trigger or row-level security discarded it) is reported as a missing row, as the QuickER Repository does: `UpdateAsync` returns `false` and a graph save fails with `SaveConflictException` (`NotFound`).
   A row whose statement keeps matching no row although the stored values were taken over (`ForceOverwrite`) is attempted at most 10 times and then fails with `SaveConflictException`.
   The limit is per row and applies after the row is found to be still there: a save of many rows that each need resolving runs to the end, and a row found gone is reported as gone however many attempts the save has made.
-- The raw-SQL APIs are at full parity, including the conversion of the values a driver returns in its own storage type (SQLite returns an `int` column as `long`, Oracle a `NUMBER` as `decimal`).
-  One rule is stricter: with [unbounded binary columns excluded](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns), a raw SQL entity query (`QueryBySqlAsync`) must select the excluded columns too.
-  EF Core writes every column when it saves an entity, so an entity read without them would have the stored values overwritten by its next save; a result set that leaves one out is refused with `InvalidOperationException` naming the column.
-- A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
-- A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters and literals are sent as non-Unicode text and the database can compare the column without converting it.
-  The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
 - Each unique constraint of the diagram is declared as a unique index (`HasIndex(...).IsUnique()`) in the generated `DbContext`.
   EF Core orders the statements of one `SaveChanges` itself, and the index lets it run a deletion that frees a unique value before the update or insert that takes the value.
   Nothing is created in the database: the schema comes from DDL generation, and Migrations and `EnsureCreated` are not used.
 - A graph save that deletes rows reads the stored foreign keys of the rows it updates before each `SaveChanges`, in the same transaction.
   EF Core then knows that a row moved away from a parent the save deletes, and updates it before the deletion.
   Without the read, an entity built outside the context looks as if it had always pointed at its new parent.
+
+**Column and type configuration**
+
+- A value-object column carries its length and precision (`HasMaxLength` / `HasPrecision`) like any other column, so its parameters and a condition on `.Value` use the column's own type rather than EF Core's defaults (`nvarchar(max)`, `decimal(18,2)`).
+- A non-Unicode string column (`varchar`, `char` or `text` on SQL Server, `VARCHAR2`, `CHAR` or `CLOB` on Oracle) is configured with `IsUnicode(false)`, so its parameters and literals are sent as non-Unicode text and the database can compare the column without converting it.
+  The configuration follows the diagram's dialect, so a diagram meant to run on several databases keeps its string columns Unicode (`nvarchar` and the like).
 - A single-column integer primary key, or another single-column key EF Core cannot generate a value for, is configured with `ValueGeneratedNever()`, so EF Core sends the key the application set, `0` included, as the QuickER Repository does.
   Without it, EF Core treats an integer key as one the database generates, and leaves out a key of `0`.
   A primary key marked as an identity column keeps EF Core's convention, so the database assigns it.
   A `Guid` primary key keeps EF Core's convention too: EF Core generates a value when the key is `Guid.Empty`, where the QuickER Repository writes `Guid.Empty` as it is.
+- A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
+  The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
+
+**Raw SQL**
+
+- The raw-SQL APIs are at full parity, including the conversion of the values a driver returns in its own storage type (SQLite returns an `int` column as `long`, Oracle a `NUMBER` as `decimal`).
+  One rule is stricter: with [unbounded binary columns excluded](#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns), a raw SQL entity query (`QueryBySqlAsync`) must select the excluded columns too.
+  EF Core writes every column when it saves an entity, so an entity read without them would have the stored values overwritten by its next save; a result set that leaves one out is refused with `InvalidOperationException` naming the column.
+
+**Connections and retries**
+
 - A retrying execution strategy (such as SQL Server's `EnableRetryOnFailure`) is supported.
   A graph save and a cascading `ExecuteDeleteAsync` run inside the strategy, and every attempt starts over from scratch.
   With save hooks, Before and After run once per attempt: their database writes roll back with the failed attempt, but a side effect outside the database is repeated.
@@ -1018,8 +1061,9 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   When you build `DbContextOptions` yourself, add `SqliteBusyTimeoutInterceptor.Instance` with `AddInterceptors`.
   While SQLite waits, the cancellation token is not observed.
   Connections of other providers are left untouched.
-- A relationship whose referenced (principal) column is not the primary key, such as a UNIQUE column or one column of a composite primary key, is configured with an explicit `HasPrincipalKey`.
-  The foreign key then joins to that column just as the QuickER Repository does, where EF Core's default would silently join it to the primary key.
+
+**Tables left out of the DbContext**
+
 - A table without a primary key is **excluded from the DbContext** (no DbSet, no Fluent configuration, and navigations to it are ignored via an explicit `modelBuilder.Ignore<T>()`), and a Warning diagnostic names the table.
   EF Core requires a key on every mapped entity type, and one keyless type in the model makes the whole DbContext throw on first use.
   This is the same line the QuickER Repository draws, whose generation skips such tables too.
@@ -1073,11 +1117,31 @@ They are worth knowing when a test passes in memory and fails against the real t
   If another writer deletes the row after that, the save is left holding a staged update, and the publish verification reports `SaveConflictException` (`SaveConflictReason.NotFound`) instead of turning the write into an insert.
   A real database has no such window, since its statement sees the row's absence at the moment it writes, so a test that relies on `insertWhenUpdateMissing` surviving a concurrent delete is testing this backend only.
 
+## Comparing columns whose values the database produces
+
+The database produces the values of three kinds of columns, and the generated code handles them as follows.
+The three sections after this one describe each kind in detail.
+
+| Item | [rowversion columns](#rowversion-columns-and-optimistic-concurrency) | [Computed / generated columns](#computed--generated-columns) | [Columns the database numbers](#columns-the-database-numbers) |
+|---|---|---|---|
+| Columns covered | SQL Server `rowversion` / `timestamp` | Computed, generated and virtual columns that DB import brings back | Columns with automatic numbering that refuses given values, marked by DB import |
+| Marker attribute | `[StoreGeneratedColumn]` | `[ComputedColumn]` | `[IdentityColumn]` (non-key columns only) |
+| QuickER Repository INSERT / BulkInsert / UPDATE | Left out by the SQL Server engine only | Left out on every dialect | Left out on every dialect, except a primary key column |
+| SELECT | Read | Read; right after a save the entity keeps its value from before the save | Read; right after a save the entity keeps its value from before the save |
+| EF Core mode | `IsRowVersion()` | `ValueGeneratedOnAddOrUpdate()`; read back after the save | `ValueGeneratedOnAddOrUpdate()`; read back after the save |
+| In-memory repository | Mimicked with a monotonically increasing 8-byte pseudo version | Not computed (an ordinary column) | Not numbered (an ordinary column) |
+| Edit model | Not required | Not required | Not required |
+| Primary key | A diagram that makes it the primary key is a generation error | A diagram that makes it the primary key is a generation error | Not left out of writes; a warning names it when you generate repositories |
+| C# reverse engineering | Not restored (no `[DbColumnMeta]` token) | Round-trips through `[ComputedColumn]` | Round-trips through `[IdentityColumn]` |
+| SQLite mirror in a multi-target build | The SQLite engine writes it as an ordinary binary column | Values are not carried | Values are not carried |
+| Optimistic concurrency | Doubles as the concurrency token | — | — |
+
 ## rowversion columns and optimistic concurrency
 
 A table with a rowversion column (SQL Server's `rowversion` / `timestamp`) is written differently in two respects.
 The database assigns the value, so the repository never writes the column, and the assigned value serves as the concurrency token the save compares against.
-Neither has anything to turn on, and a table without such a column keeps exactly the behaviour it had.
+Neither has anything to turn on.
+A table without such a column gets neither.
 
 ### Store-generated columns (rowversion / timestamp)
 
@@ -1093,6 +1157,10 @@ The attribute is applied to any column the type mapper recognizes as a row-versi
   The Fluent configuration's `IsRowVersion()` already treats them as store-generated.
 - **They double as the table's concurrency token.**
   Saves compare the version the entity was read with against the current row (see the next section).
+- **Not required in edit models.**
+  The DB assigns the value, so a new row leaving it empty is normal; saving without input keeps the entity's current value
+- **A diagram whose primary key is a rowversion column is a generation error.**
+  The column is always left out of INSERT / UPDATE, so the generated INSERT could not send the key, and the row's identity would rest on a value that changes on every update
 - **The write exclusion is SQL Server's alone.**
   Only SQL Server assigns the value, so only its engine excludes the column.
   In a multi-target build (`--repository-dialects sqlserver,sqlite`) the SQLite engine writes the same column with INSERT / BulkInsert / UPDATE like any other binary column, which is how a local copy mirrors the version the server assigned.
@@ -1144,7 +1212,7 @@ Reload-and-reapply is the honest answer when the two edits can be merged.
 `ForceOverwrite` is for when they cannot and this write is meant to win regardless: it skips the guard on the first attempt, so nothing is read back and nothing is merged.
 
 - **A missing row and a stale version are different outcomes.**
-  A single `UpdateAsync` returns `false` when the row no longer exists, which is the pre-existing contract, and throws `SaveConflictException` when the row is still there but its version moved on.
+  A single `UpdateAsync` returns `false` when the row no longer exists, and throws `SaveConflictException` when the row is still there but its version moved on.
   `insertWhenUpdateMissing: true` draws the same line: a missing row switches to an INSERT, while a stale version is reported as a conflict, because switching that to an INSERT would turn the conflict into a primary-key violation.
 - **A graph save guards deletes as well**, and a single conflict rolls the whole save unit back.
   The in-memory repository reaches the same result differently: it stages its writes and publishes them in one go, so a failed save simply never reaches the store.
@@ -1176,7 +1244,7 @@ Reload-and-reapply is the honest answer when the two edits can be merged.
   Re-read them when a later update needs the version.
 - The version is read back through an `OUTPUT` clause, which SQL Server rejects on a table that has a trigger.
   QuickER's DDL generation never emits triggers, so this only affects tables whose triggers were added outside QuickER.
-- Deleting a row that is already gone stays asymmetric between the backends, as it always has.
+- Deleting a row that is already gone is asymmetric between the backends.
   The QuickER Repository tolerates it silently, while a graph save on EF Core reports it as `SaveConflictException`.
 - A rowversion column carries no `[DbColumnMeta]` token, so C# reverse engineering does not restore it; declare it in the diagram.
 - **Deleting by key is not guarded.**
@@ -1274,6 +1342,491 @@ Generating for such a DBMS through the CLI's `--provider` or MCP's `provider`, w
 The same holds when the QuickER Repository is generated for SQLite (as the only dialect, or locally in a multi-target build with SQL Server as the server): a NOT NULL marked column outside the primary key makes every insert into SQLite fail on NOT NULL.
 Generation names such columns in a warning; make the column nullable in the diagram or give the SQLite column a default value.
 
+## Value objects (GenerateValueObjects)
+
+This option generates columns as a per-column value-object type (`CustomerIdValue` / `NameValue`, and so on) instead of a raw type such as `int` or `string` (default OFF; CLI `--generate-value-objects` / `GenerateValueObjects` in quicker.json / the "Turn all columns into value objects" checkbox in the "Value Objects" row of the GUI).
+It can be chosen regardless of the DB-access selection (None / QuickER Repository / EF Core Repository), and it combines with multi-target, in-memory, and remote.
+
+When ON, the columns of every table are grouped globally by column name, and one value-object type is generated per column name.
+A foreign-key column that shares a name with a primary key shares the same type, so mixing up IDs becomes a compile error.
+Entity properties and repository key types also become value objects.
+
+```csharp
+// ICustomerRepository : IRepository<CustomerEntity, CustomerIdValue>
+var customer = await customers.GetByIdAsync(CustomerIdValue.Create(1));
+
+// orders.GetByIdAsync(customer.CustomerId) is a compile error because it is not an OrderIdValue
+```
+
+The types of same-named columns and foreign-key columns are decided as follows.
+
+| Case | Result |
+|---|---|
+| Same-named columns disagree on length or precision | A Warning diagnostic, and the definitions are unified into a single type by preferring the primary key's definition, or the widest definition when there is no primary key |
+| Same-named columns disagree on the underlying C# type itself (a `varbinary` column and a `varchar` column, for example) | A generation-time error |
+| A foreign-key column's name differs from the referenced column's | It shares the referenced (principal) column's value-object type, so `orders.ship_customer_id` becomes `CustomerIdValue` rather than `ShipCustomerIdValue`; columns whose type was shared are listed in an Info diagnostic at generation time |
+| A foreign key of a foreign key | It resolves to the type at the end of the reference chain |
+| A column caught in a mutual-reference cycle | It keeps its own name-derived type |
+| One column references multiple principals that resolve to different types | A generation-time error |
+| A pair whose underlying C# types disagree | Not shared: the column keeps its name-derived type |
+
+A difference in the underlying C# type is an error because different value types cannot fold into one value object.
+Align the column types in the ER diagram or rename the columns so they stay apart.
+A foreign-key column shares the referenced type because the rule expresses "the same identifier is the same value type" in the type system, and it also satisfies EF Core's requirement that a foreign key and the principal key have matching CLR types.
+A differently named foreign key, inevitable in a self-referencing table's `parent_node_id → node_id`, would fail EF Core's model validation under per-column-name typing.
+Columns whose type was shared are listed because their name-derived type name changes.
+
+### Generated types and validation
+
+Each value object is a `sealed partial class` whose constructor is private and which can only be created through a static factory.
+Validation code is generated automatically from the column definition in the diagram: maximum length for strings, and precision and scale for `decimal`, where out-of-range values are rejected rather than rounded.
+
+A column with a **negative scale** (`numeric(10,-2)` on PostgreSQL, `NUMBER(10,-2)` on Oracle) is the exception: it gets no digit validation.
+Such a column is written to make the database round to hundreds, and rejecting the values it rounds would block that very use.
+Generation lists these columns as a note (Info); `[SqlColumnType]` carries no Precision / Scale for them and the EF Core model no `HasPrecision`.
+The database rounds the value (`numeric(10,-2)` stores 1234 as 1200).
+
+```csharp
+var name = NameValue.Create("Alice");   // A validation violation throws ValueObjectValidationException
+
+if (NameValue.TryCreate(input, out var vo, out var errors))   // Validate without throwing
+{
+    entity.Name = vo!;
+}
+
+var errorList = new List<string>();
+NameValue.Validate(input, errorList);      // Validate without creating the value object
+```
+
+`Validate` adds any violations to the collection you pass, so it suits collecting the errors of several values in one place.
+It returns true when *that call* found no violation, which stays meaningful even when the collection already holds errors from earlier values.
+
+The base class is chosen according to the value type.
+In addition to value-based equality (`==` / `Equals`), numeric and date/time types get comparison operators (`<` / `>=`, and so on), and strings get `Contains` / `StartsWith` / `EndsWith`.
+
+### Integration with each feature (transparent support)
+
+Value objects can be handled transparently throughout the generated code.
+You rarely need to unwrap them to the raw value by hand.
+
+| Feature | Behavior |
+|---|---|
+| QuickER Repository | SQL parameters are automatically converted to the wrapped value before binding, and reads restore the value object via `Create`. |
+| `Query()` (expression tree) | Value-object comparisons, string `Contains`, and so on are translated directly to SQL. |
+| EF Core mode | The Fluent configuration automatically applies a value conversion (`HasConversion`) and a translation plugin (server-side translation of string methods and `.Value` references). |
+| Named query | Method parameters stay the raw type. The generated condition expression is converted to value-object comparisons automatically (IN lifts the list). |
+| EditModel | The committed-value property is a value object such as `NameValue?`. The screen-binding property `BindingXxx` (string) validates with `TryCreate` and surfaces errors through `INotifyDataErrorInfo`. |
+| JSON (`ToJson` / `Clone` / remote transfer) | Serialized **as the wrapped value** (`{"customerId": 1}`. The value object's wrapper structure does not appear in the JSON). |
+
+> **Note**: reads from the DB or from JSON are also validated through `Create`.
+> If existing data holds a value that does not pass validation, a read from the DB throws `InvalidOperationException` naming the column (the `ValueObjectValidationException` is its inner exception) and a read from JSON throws `ValueObjectValidationException`, so keep the extra validation you add in `OnValidate` consistent with existing data.
+
+### GUID keys for string primary keys (UseGuidKeyForStringPrimaryKey)
+
+Turning on `UseGuidKeyForStringPrimaryKey` (CLI `--use-guid-key-for-string-primary-key` / the GUI's "Use GuidKey for string primary keys") together with `GenerateValueObjects` makes the value object of a string primary key derive from a GUID-generating base class (`ValueObjectGuidKeyBase`).
+A parameterless `Create()` then mints a new key.
+
+```csharp
+// When document_id is a string primary key
+var id = DocumentIdValue.Create();   // A new key wrapping Guid.NewGuid() as a string
+```
+
+This lets you satisfy the "primary keys are application-assigned" prerequisite of repository generation without writing any key-generation logic.
+
+Length validation still applies, exactly as it does for any other string value object.
+The value object carries the column's declared width, so `Create` and `TryCreate` reject a value longer than it.
+The generator leaves `[MaxLength]` off the entity property precisely because the value object owns that check.
+
+The parameterless `Create()` always mints 36 characters (`Guid.NewGuid().ToString()`).
+The option applies to every string primary key in the diagram, so it also turns a deliberately short key into a GUID key, a five-character code column for instance.
+Generation warns by name for any such column narrower than 36 characters and then continues.
+Auto-numbering on that column always fails length validation at run time, while assigning a short key explicitly keeps working.
+
+Keys compare ordinally, so the comparison is case-sensitive.
+QuickER never generates a `DEFAULT` clause, but if you add `DEFAULT NEWID()` to the column outside QuickER, SQL Server stores uppercase GUIDs while the application mints lowercase ones.
+Mixing the two breaks key matching.
+
+### Hand-written value objects
+
+The bodies of `Create` / `TryCreate` / `Validate` live once on `ValueObjectBaseCore<TSelf, TValue>`, because an inherited static method satisfies a `static abstract` interface member.
+A value object with no diagram column behind it, such as a mail address, a period, or a unit, is therefore written with three members: a private constructor, `New`, and `ValidateCore`.
+
+```csharp
+public sealed class ContactMailValue
+    : ValueObjectStringBase<ContactMailValue>,
+        IValueObject<ContactMailValue, string>
+{
+    private ContactMailValue(string value) : base(value) { }
+
+    static ContactMailValue IValueObject<ContactMailValue, string>.New(string value) => new(value);
+
+    static void IValueObject<ContactMailValue, string>.ValidateCore(
+        string value, ref List<string>? errors)
+    {
+        if (!value.Contains('@'))
+        {
+            (errors ??= new List<string>()).Add("Mail address must contain '@'.");
+        }
+    }
+}
+```
+
+- The shape is exactly what the generator emits, so `ContactMailValue.Create(...)` / `TryCreate` / `Validate` work as usual, and JSON conversion, SQL parameter binding, and row materialization treat the type like any generated value object.
+- A value object without rules can omit `ValidateCore` entirely and needs only two members (the interface's default implementation validates nothing).
+- `ValidateCore` receives the error list by reference and unallocated.
+  Allocate it only when adding the first violation (`(errors ??= new List<string>()).Add(...)`), so creating a valid value allocates nothing.
+- For a reference-typed value (`string` / `byte[]`), reject `null` in `ValidateCore` when the input is not trusted.
+  A value object never wraps null, since a nullable column keeps the property itself null, and the generated ones report a null input as a validation error.
+  `ValueObjectRules.ValidateRequired(value, DisplayName, ref errors)`, the very call the generated ones make, does it for you and returns false when the rules that follow must be skipped.
+- `New` and `ValidateCore` are explicit implementations, so they stay off the type's public surface.
+  Calling `TVo.New` through a generic type parameter would skip validation, so never call `New` yourself: validation belongs to `Create` / `TryCreate`.
+- Pick the base by value type: `ValueObjectStringBase` (string), `ValueObjectOrderedBase<TSelf, TValue>` (numbers and date/time), `ValueObjectBooleanBase`, `ValueObjectBinaryBase`, `ValueObjectGuidKeyBase` (GUID-as-string keys), or `ValueObjectBase<TSelf, TValue>` directly for anything else.
+
+### Creating from a raw value (CSV and spreadsheet imports)
+
+`TryCreateFrom` and `CreateFrom` build a value object from a value that is not already the underlying type, such as a CSV field, a spreadsheet cell, or a form field.
+
+```csharp
+// Read the cell (a string, a double, a DateTime - whatever it holds) in a given culture
+if (QuantityValue.TryCreateFrom(cell, culture, out var quantity, out var errors))
+{
+    entity.Quantity = quantity;      // a blank cell leaves quantity null, and that is not an error
+}
+
+var amount = AmountValue.CreateFrom(cell, culture);   // throwing version; a blank cell returns null
+```
+
+`IValueObject<TSelf>` does not name the underlying type, so import code needs no branch per value object.
+
+```csharp
+private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? culture, List<string> errors)
+    where T : class, IValueObject<T>
+{
+    if (T.TryCreateFrom(row.Cell(column).Value, culture, out var value, out var messages))
+    {
+        return value;
+    }
+
+    errors.Add(BuildCellErrorMessage(row, column, messages));
+
+    return null;
+}
+```
+
+- **A blank cell is not a violation.**
+  `null`, `DBNull`, and an empty string mean "not filled in": the call returns `true` with a null result and adds no errors, matching the rule that a nullable column keeps the property itself null.
+  Whether the field is required is the edit model's required check to decide.
+  A type can claim absent inputs as a value of its own through the `ConvertAbsentInput` hook described below, in which case the result is that instance instead of null.
+  A whitespace-only string is not absent and goes through the ordinary conversion.
+- **The culture is the caller's.**
+  `null` means the invariant culture.
+  To read a date a person wrote (`28/08/2026`), pass the culture it was written in.
+- **Numeric text may carry group separators.**
+  A spreadsheet hands back `1,234` for a column formatted that way, so numeric targets are parsed with an explicit `NumberStyles`.
+  An integral target still rejects a decimal point, so `1,234.5` does not pass as an `int`.
+- **Binary text is read as Base64**, the same notation the edit models' binding input accepts, so the screen and an import never disagree on the spelling.
+  A `byte[]` value passes through as is.
+- Past the conversion this is the ordinary `TryCreate`, so the type's own validation applies unchanged: maximum length, precision, and `OnValidate`.
+- The message for a value that could not be converted is `ValueObjectValidationMessages.InputNotConvertible`.
+- Overloads without the culture (`TryCreateFrom(raw, out var value, out var errors)` and `CreateFrom(raw)`) use the invariant culture, which is what machine-produced data wants, such as a serialized payload or a fixed export format.
+  Text a person wrote or a spreadsheet formatted belongs to a culture, so pass one: `CreateFrom(raw, provider)` / `TryCreateFrom(raw, provider, ...)`.
+
+### Accepting only declared instances (enumeration-like value objects)
+
+A concept whose values are a closed set, such as a mode, a category, or a status, can be a value object that only ever hands back the instances it declares as `static readonly`.
+
+#### Declaring instances with attributes
+
+The declarative form is an attribute on the fields.
+
+```csharp
+// Extend the generated StatusValue (an int column) into an enumeration - no other code needed
+public sealed partial class StatusValue
+{
+    [DeclaredInstance, Display(Name = "Preparing")]
+    public static readonly StatusValue Preparing = new(1);
+
+    [DeclaredInstance, Display(Name = "In progress")]
+    public static readonly StatusValue InProgress = new(2);
+
+    [DeclaredInstance, Display(Name = "Completed")]
+    public static readonly StatusValue Completed = new(9);
+
+    public override string DisplayValue => DeclaredDisplayName ?? base.DisplayValue;
+}
+```
+
+The marked fields form the type's whole set of values.
+
+- **Every creation path returns the declared instance itself**, whether through `Create` / `TryCreate`, a database read, or a JSON restore.
+- **Any other value is rejected as a validation error.**
+  The wording is replaceable through `ValueObjectValidationMessages.ValueNotDeclared`, where the display name and the rejected value arrive as arguments like every other message.
+- `StatusValue.GetDeclaredInstances()` lists the instances in declaration order, a ready-made source for a selection list.
+- A `[Display(Name = ...)]` on the field is available as the protected `DeclaredDisplayName`, which makes the `DisplayValue` override above a one-liner.
+- A convenience constant the set should not contain is simply left unmarked.
+
+The fields have to take a particular shape.
+Each one must be `public static readonly` of the declaring type, and it must be initialized with the private constructor (`new(...)`, which the partial class can reach) rather than `Create`.
+`Create` validates, and validation consults the declared set that is still being built at that point.
+A field of any other shape, and a duplicate value, are reported on first use.
+
+One shape cannot be detected, though.
+**A field left without an initializer, and therefore permanently null, cannot be told apart from a field whose initialization is still running**, so the set silently stays inactive and every creation rescans.
+The compiler flags such a field (CS8618 / CS0649); do not leave those warnings unresolved.
+
+The attribute works on a hand-written value object the same way, and it is not supported on a binary (`byte[]`) value object.
+
+A declared instance can also claim its input notation.
+`InputText` reads that exact string input as the instance, and `ClaimsAbsent` claims the absent input (null, `DBNull`, an empty string).
+A notation like "a mark or a blank cell" therefore closes in two declarations, reading (input) and display (`[Display]`) together.
+
+```csharp
+// A flag column written as "○" or a blank cell: ○ → Marked, blank → Unmarked, display via [Display]
+public sealed partial class MarkValue
+{
+    [DeclaredInstance(InputText = "○"), Display(Name = "○")]
+    public static readonly MarkValue Marked = new(true);
+
+    [DeclaredInstance(ClaimsAbsent = true), Display(Name = "")]
+    public static readonly MarkValue Unmarked = new(false);
+
+    public override string DisplayValue => DeclaredDisplayName ?? base.DisplayValue;
+}
+```
+
+- Matching is exact and ordinal (no trimming, no case folding, no culture) and applies to string inputs only, ahead of the ordinary conversion.
+  A non-string input (`true`, `9`) and a convertible string (`"True"` / `"9"`) take the ordinary conversion and resolve to the same declared instance.
+- The notations apply to `TryCreateFrom` / `CreateFrom` only; an edit model's blank input and a database NULL are unchanged.
+- A `[Display]` name is display-only and is never read as input, since an accepted notation is declared explicitly with `InputText`.
+- At most one field may declare `ClaimsAbsent`.
+  A duplicate `InputText`, and an empty `InputText`, are reported on first use.
+  An empty one can never match, because an empty input is absent first, and `ClaimsAbsent` is what was meant.
+- The hooks below (`ConvertCustomInput` / `ConvertAbsentInput`) win over the declared notations.
+  Normalization, aliases, and anything an exact match cannot express stay their territory.
+
+#### Extending with hooks
+
+The hooks in this section remain for the shapes the attribute cannot express, such as a lookup with logic of its own (normalization, aliases) or a per-type error wording, and they compose with it.
+`GetDefinedInstance` is consulted ahead of the declared set, and an `OnValidate` runs in addition to the membership check.
+A generated type's `New` cannot be replaced and its `TryGetDefined` is already emitted as a bridge, so the extension goes into the partial methods the bridges consult.
+That keeps it self-contained in the user's partial, with no generator option involved.
+
+```csharp
+// Extend the generated ModeValue (an int column) into an enumeration through the hooks alone
+// (the table, the lookup and the rejection are all yours)
+public sealed partial class ModeValue
+{
+    public static readonly ModeValue List = new(1) { ModeName = "List" };
+    public static readonly ModeValue Edit = new(2) { ModeName = "Edit" };
+
+    // Built once: the hooks below run on every creation (per column per row when rows are read), so keep them allocation-free
+    private static readonly Dictionary<int, ModeValue> Defined =
+        new[] { List, Edit }.ToDictionary(x => x.Value);
+
+    public string ModeName { get; private init; } = string.Empty;
+
+    public static IEnumerable<ModeValue> GetList() => Defined.Values;
+
+    static partial void GetDefinedInstance(int value, ref ModeValue? defined) =>
+        defined = Defined.GetValueOrDefault(value);
+
+    // GetDefinedInstance alone does not reject an undefined value - it only falls through to New. Write the pair
+    static partial void OnValidate(int value, ref List<string>? errors)
+    {
+        if (!Defined.ContainsKey(value))
+        {
+            (errors ??= new List<string>()).Add($"Screen mode {value} is not defined.");
+        }
+    }
+}
+```
+
+> **Note**: built from hooks, the rejection does not come for free.
+> `GetDefinedInstance` only decides what to return for a value that already passed validation, so without the `OnValidate` above a value outside the set quietly falls through to `New` and "only declared instances" no longer holds.
+> And never call `Create` / `TryCreate` / `TryCreateFrom` from inside a hook: every creation path runs through it, so the call recurses with no way to catch the resulting stack overflow.
+
+Like the attribute, the hooks sit on the `Create` / `TryCreate` side.
+A row read from the database and a value restored from JSON therefore return the declared instance too, and an instance missing its extra state (`ModeName` here) never gets into circulation.
+
+A hand-written value object has no partial hooks; it implements the corresponding interface hooks directly.
+`GetDefinedInstance` maps to `TryGetDefined`, `OnValidate` to `ValidateCore` (that one is the validation body itself), and, below, `ConvertCustomInput` to `TryConvertCustomInput` and `ConvertAbsentInput` to `TryConvertAbsentInput`.
+Only the hook names differ; the content and the warnings are the same.
+
+To create from a name instead of the value, implement the `ConvertCustomInput` partial hook.
+`TryCreateFrom` / `CreateFrom` consult it ahead of the ordinary conversion, on every call shape: the generic import path and a call spelled with the concrete type name alike.
+Set the result to claim the value; anything left null falls through to the ordinary conversion, which keeps `2` working.
+For the fixed one-string-per-instance case, the declarative `InputText` above does the same without a hook, and the hook is for matching that needs logic.
+
+```csharp
+static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref ModeValue? result)
+{
+    if (raw is string name)
+    {
+        result = GetList().FirstOrDefault(x => x.ModeName == name);
+    }
+}
+```
+
+The generic import code from [Creating from a raw value](#creating-from-a-raw-value-csv-and-spreadsheet-imports) (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`.
+A hand-written value object implements the interface hook `TryConvertCustomInput` directly, per the mapping above.
+In either form, do not call `TryCreateFrom` / `CreateFrom` from inside, because they consult the hook and the call would recurse.
+Do not throw either: `TryCreateFrom` reports failures through its return value, so an exception would ride straight through that contract.
+
+Implement the hook only, never `TryCreateFrom` itself, on generated and hand-written types alike.
+Re-implementing `TryCreateFrom` compiles, but a call spelled with the concrete type name binds to the shared base implementation and silently skips it on that call shape, which is exactly why the extension point is the hook.
+
+An absent input (`null`, `DBNull`, an empty string) never reaches `ConvertCustomInput`, because `TryCreateFrom` answers "success with a null result" before consulting it.
+A type whose notation writes one of its values as a blank, such as a flag written as a mark or nothing, claims the blank half of that notation through the `ConvertAbsentInput` partial hook instead.
+A hand-written type implements the interface hook `TryConvertAbsentInput` directly, the same split as above, and for a fixed blank-means-this-instance rule the declarative `ClaimsAbsent` above does the same, with the hook winning when both are present.
+The culture is passed for symmetry, but an absent input carries no text, so implementations usually ignore it.
+
+```csharp
+// The notation writes the flag as "○" or a blank cell: ConvertCustomInput claims the mark,
+// and ConvertAbsentInput claims the blank - imported as False instead of null
+static partial void ConvertAbsentInput(IFormatProvider? provider, ref MarkValue? result) =>
+    result = False;
+```
+
+The hook applies to `TryCreateFrom` / `CreateFrom` only.
+An edit model's blank input leaves the confirmed value null and is reported by its required check, and a database NULL reads back as a null property.
+The hook decides what a blank import cell means, not what null means everywhere.
+The warnings above apply unchanged: never call `TryCreateFrom` / `CreateFrom` from inside, and do not let an exception escape.
+
+`TryCreateFrom` / `CreateFrom` consult the input in this order:
+
+```mermaid
+flowchart TD
+  raw["The value passed to TryCreateFrom / CreateFrom"] --> blank{"Is it absent (null / DBNull / an empty string)?"}
+  blank -- "Yes" --> ab{"Does ConvertAbsentInput (hook) claim it?"}
+  ab -- "Claims it" --> r1["The instance the hook returned"]
+  ab -- "Does not" --> ca{"Is a field declared with ClaimsAbsent?"}
+  ca -- "Yes" --> r2["That instance"]
+  ca -- "No" --> nul["Success with null"]
+  blank -- "No" --> cu{"Does ConvertCustomInput (hook) handle it?"}
+  cu -- "Handles it" --> r3["The instance the hook set"]
+  cu -- "Does not" --> it{"Is it a string that exactly matches an InputText?"}
+  it -- "Yes" --> r4["That instance"]
+  it -- "No" --> conv["Ordinary conversion, then the same validation as TryCreate"]
+```
+
+### Validation rules you can call yourself
+
+The rules the generated `ValidateCore` runs are public static methods on the fixed infra, and so are four more that no column declaration can express.
+Call them from `OnValidate`.
+Each one takes the error list by reference and possibly unallocated, so a value that passes still allocates nothing.
+
+```csharp
+public sealed partial class ContactMailValue
+{
+    static partial void OnValidate(string value, ref List<string>? errors) =>
+        ValueObjectStringRules.ValidateEmailAddress(value, DisplayName, ref errors);
+}
+
+public sealed partial class ProductCodeValue
+{
+    static partial void OnValidate(string value, ref List<string>? errors)
+    {
+        // ASCII letters and digits, plus the two symbols this code allows
+        ValueObjectStringRules.ValidateAsciiAlphanumeric(value, "-_", DisplayName, ref errors);
+    }
+}
+
+public sealed partial class QuantityValue
+{
+    static partial void OnValidate(int value, ref List<string>? errors)
+    {
+        ValueObjectNumberRules.ValidateRange(value, 1, 999, DisplayName, ref errors);   // closed interval
+        ValueObjectNumberRules.ValidateMaxDigits(value, 3, DisplayName, ref errors);    // sign not counted; 0 is one digit
+    }
+}
+```
+
+| Rule | What it rejects |
+|---|---|
+| `ValueObjectRules.ValidateRequired(value, displayName, ref errors)` | `null`. Returns false so the caller can stop, because every rule after it dereferences the value |
+| `ValueObjectStringRules.ValidateMaxLength(value, maxLength, displayName, ref errors)` | Longer than the limit in UTF-16 code units (`string.Length`). A database may count differently, as Oracle's BYTE semantics do |
+| `ValueObjectStringRules.ValidateAsciiAlphanumeric(value, allowedSymbols, displayName, ref errors)` | Anything but ASCII letters and digits, plus the characters in `allowedSymbols` (pass `""` for none). A full-width letter or digit is rejected |
+| `ValueObjectStringRules.ValidateEmailAddress(value, displayName, ref errors)` | Text that is not shaped like an address: exactly one `@`, a non-empty part on each side, no whitespace. Deliberately not RFC 5322. `MailAddress` is not used either, because it also parses the `Name <a@b>` form |
+| `ValueObjectNumberRules.ValidateMaxDigits(value, maxDigits, displayName, ref errors)` | An integer written with more digits than the limit (the sign does not count; zero is one digit) |
+| `ValueObjectNumberRules.ValidateRange(value, minimum, maximum, displayName, ref errors)` | A value outside the closed interval; any `IComparable<T>`, so dates work too |
+| `ValueObjectDecimalRules.Validate(value, precision, scale, displayName, ref errors)` | More decimal places than `scale`, or more integer digits than `precision - scale`. Never rounds; trailing zeros count toward the scale |
+
+## partial extension points
+
+Every generated class offers two ways to customize messages and display names, and the rule is the same across every static class and every generation mode (inline or package-reference).
+
+- **Bulk**: replace a static settable `Func` on the fixed infra at app startup.
+  It applies everywhere.
+- **Per-type**: branch inside the replacement you installed.
+  Every value object message takes the value object's display name as its first argument, every edit model message takes the confirmed-value property name, and `GeneratedDisplayNames.Resolve` takes the member name, so one replacement covers both the "all types" case and the "this type only" case.
+
+```csharp
+// Bulk, at startup: localize messages, and stop using descriptions for display names
+ValueObjectValidationMessages.ValueRequired = static _ => "値を入力してください。";
+EditModelMessages.Required = static (_, displayName) => $"{displayName}は必須です。";
+GeneratedDisplayNames.Resolve = static (name, _) => name;   // ignore descriptions; use the member name
+```
+
+```csharp
+// Per-type display name: branch on the member name the resolver is given.
+// nameof keeps the branch compiling against the generated code, so a renamed column is a build error.
+GeneratedDisplayNames.Resolve = static (memberName, description) =>
+    memberName == nameof(CustomerEntity.Name) ? "Full name" : description ?? memberName;
+
+// Per-type message: branch on that type's own DisplayName, which follows the resolver above.
+ValueObjectValidationMessages.MaxLengthExceeded = static (displayName, maxLength, actualLength) =>
+    displayName == NameValue.DisplayName
+        ? $"A name is at most {maxLength} characters ({actualLength} given)."
+        : $"Enter at most {maxLength} characters. (currently {actualLength} characters)";
+```
+
+```csharp
+public sealed partial class NameValue
+{
+    // Additional validation (called after the auto-generated validation). The list arrives unallocated;
+    // allocate it only when adding the first violation, so a value that passes allocates nothing.
+    static partial void OnValidate(string value, ref List<string>? errors)
+    {
+        if (value.Contains(' '))
+        {
+            (errors ??= new List<string>()).Add("Whitespace is not allowed.");
+        }
+    }
+}
+```
+
+```csharp
+// Per-property message tweak: the resolver receives the confirmed-value property name first,
+// so a branch can be written with nameof and stops compiling if that property is renamed away.
+EditModelMessages.ParseFailed = static (propertyName, displayName, inputValue, typeName) =>
+    propertyName == nameof(CustomerEditModel.Age)
+        ? $"'{inputValue}' is not a valid age."
+        : $"'{inputValue}' cannot be converted to {typeName}.";
+```
+
+The replacements live on three static classes.
+In package-reference mode, all three ship inside the `QuickER.Runtime` package.
+
+| Static class | Members | First argument |
+|---|---|---|
+| `ValueObjectValidationMessages` | `MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible` / `ValueNotDeclared` | The display name |
+| `EditModelMessages` | `Required` / `ParseFailed` / `DuplicateValue` / `JoinValueObjectErrors` | The confirmed-value property name, or the list of them, on the first three |
+| `GeneratedDisplayNames` | `Resolve` | The member name (it resolves the display name of entities, edit-model properties, and value objects alike) |
+
+The per-type partials are `OnValidate` on a value object, plus `GetDefinedInstance` / `ConvertCustomInput` covered above.
+An edit model has the semantic hooks only (`OnValidate`, `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit`, `On{Property}Changing` / `Changed`), since wording and display names are resolved centrally.
+An entity has none, for the same reason.
+
+An entity's `DisplayName` is resolved through `GeneratedDisplayNames.Resolve`, which receives the runtime class name and the table description, so branch on the class name there to substitute one (`static (memberName, description) => memberName == nameof(CustomerEntity) ? "Customer" : description ?? memberName;`).
+The default resolver prefers the table description, so writing the display name into the diagram is often all it takes.
+
+A value object's display string `DisplayValue` (virtual) can also be overridden.
+Value objects implement `IFormattable` as well: `price.ToString("N2")`, and the culture-taking overload, formats the underlying value.
+A format specifier in string interpolation, `string.Format`, or a WPF binding's StringFormat reaches the underlying value the same way.
+Without a format specifier the result is always `ToString()`, so an override of `ToString()` (a handwritten one, or the Base64 form of binary value objects) also governs unformatted interpolation.
+The same applies when the underlying value is not formattable (a string, a byte array, a bool): the format is ignored.
+`DisplayValue` is the type's own display form, and `ToString(format)` renders whatever format the caller asks for.
+
 ## Extending the generated base classes
 
 Every base the generated code inherits or implements comes in two layers, across entities, edit models, value objects, repository contracts, backend implementations, and mappers.
@@ -1320,6 +1873,20 @@ MapperBaseCore<TEntity, TEditModel>   runtime
 Because the extension surface is always source, the same `partial` compiles whether the runtime is inlined or referenced as a package.
 **Turning `--use-runtime-packages` on or off never makes you rewrite an extension.**
 Writing a `partial` against a `*Core` type is the one thing that does not carry over, since those are compiled assembly types in package-reference mode.
+
+What each extension surface reaches and what you can add to it:
+
+| Extension surface | Reaches | What you can add | Kind |
+|---|---|---|---|
+| `EntityBase` | Every entity | Members and interfaces (an added property is not a column) | Class |
+| `EditModelBase<TSelf>` | Every edit model | Members and interfaces (can refer to `TSelf`) | Class |
+| `ValueObjectBase<TSelf, TValue>` | Every value object | Members (can refer to `Value` and `TSelf`) | Class |
+| The class for each value shape (`ValueObjectStringBase<TSelf>` and so on) | The value objects of that shape | Members | Class |
+| `IValueObject` | Every value object | Members with a default implementation, and interfaces | Interface (marker) |
+| `IRepository<TEntity, TKey>` | Every repository (the full surface) | Members with a default implementation only | Interface |
+| `IRemoteRepository<TEntity, TKey>` | Every repository (the remote surface) | Members with a default implementation only | Interface |
+| The backend implementation bases (five) | The repositories of that engine only | Shared `protected` helpers and the like | Class |
+| `MapperBase<TEntity, TEditModel>` | Every mapper | Members | Class |
 
 ### Adding members to every entity or edit model
 
@@ -1457,459 +2024,6 @@ Among the extension surfaces, only the repository contracts (`IRepository` / `IR
 Repositories are reached through an interface to begin with, and value objects need one non-generic type to gather an open generic root (`ValueObjectBase<TSelf, TValue>`) under.
 Entities, edit models, and mappers are single implementations held as concrete classes, so QuickER declares no interface for them; extend the class `partial` instead.
 
-## Value objects (GenerateValueObjects)
-
-This option generates columns as a per-column value-object type (`CustomerIdValue` / `NameValue`, and so on) instead of a raw type such as `int` or `string` (default OFF; CLI `--generate-value-objects` / `GenerateValueObjects` in quicker.json / the "Turn all columns into value objects" checkbox in the "Value Objects" row of the GUI).
-It can be chosen regardless of the DB-access selection (None / QuickER Repository / EF Core Repository), and it combines with multi-target, in-memory, and remote.
-
-When ON, the columns of every table are grouped globally by column name, and one value-object type is generated per column name.
-A foreign-key column that shares a name with a primary key shares the same type, so mixing up IDs becomes a compile error.
-Entity properties and repository key types also become value objects.
-
-```csharp
-// ICustomerRepository : IRepository<CustomerEntity, CustomerIdValue>
-var customer = await customers.GetByIdAsync(CustomerIdValue.Create(1));
-
-// orders.GetByIdAsync(customer.CustomerId) is a compile error because it is not an OrderIdValue
-```
-
-When same-named columns disagree on length or precision, a Warning diagnostic is emitted, and the definitions are unified into a single type by preferring the primary key's definition, or the widest definition when there is no primary key.
-**When they disagree on the underlying C# type itself it is a generation-time error**, as a `varbinary` column and a `varchar` column do.
-Different value types cannot fold into one value object, so align the column types in the ER diagram or rename the columns so they stay apart.
-
-A foreign-key column shares the referenced (principal) column's value-object type even when the column names differ, so `orders.ship_customer_id` becomes `CustomerIdValue` rather than `ShipCustomerIdValue`.
-The rule expresses "the same identifier is the same value type" in the type system, and it also satisfies EF Core's requirement that a foreign key and the principal key have matching CLR types.
-A differently named foreign key, inevitable in a self-referencing table's `parent_node_id → node_id`, would fail EF Core's model validation under per-column-name typing.
-A foreign key of a foreign key resolves to the type at the end of the reference chain, and a column caught in a mutual-reference cycle keeps its own name-derived type.
-Columns whose type was shared are listed in an Info diagnostic at generation time, because their name-derived type name changes.
-A diagram where one column references multiple principals that resolve to different types is a generation-time error, and a pair whose underlying C# types disagree is not shared: the column keeps its name-derived type.
-
-### Generated types and validation
-
-Each value object is a `sealed partial class` whose constructor is private and which can only be created through a static factory.
-Validation code is generated automatically from the column definition in the diagram: maximum length for strings, and precision and scale for `decimal`, where out-of-range values are rejected rather than rounded.
-
-A column with a **negative scale** (`numeric(10,-2)` on PostgreSQL, `NUMBER(10,-2)` on Oracle) is the exception: it gets no digit validation.
-Such a column is written to make the database round to hundreds, and rejecting the values it rounds would block that very use.
-Generation lists these columns as a note (Info); `[SqlColumnType]` carries no Precision / Scale for them and the EF Core model no `HasPrecision`.
-The database rounds as it always did (`numeric(10,-2)` stores 1234 as 1200).
-
-```csharp
-var name = NameValue.Create("Alice");   // A validation violation throws ValueObjectValidationException
-
-if (NameValue.TryCreate(input, out var vo, out var errors))   // Validate without throwing
-{
-    entity.Name = vo!;
-}
-
-var errorList = new List<string>();
-NameValue.Validate(input, errorList);      // Validate without creating the value object
-```
-
-`Validate` adds any violations to the collection you pass, so it suits collecting the errors of several values in one place.
-It returns true when *that call* found no violation, which stays meaningful even when the collection already holds errors from earlier values.
-
-The base class is chosen according to the value type.
-In addition to value-based equality (`==` / `Equals`), numeric and date/time types get comparison operators (`<` / `>=`, and so on), and strings get `Contains` / `StartsWith` / `EndsWith`.
-
-### Hand-written value objects
-
-The bodies of `Create` / `TryCreate` / `Validate` live once on `ValueObjectBaseCore<TSelf, TValue>`, because an inherited static method satisfies a `static abstract` interface member.
-A value object with no diagram column behind it, such as a mail address, a period, or a unit, is therefore written with three members: a private constructor, `New`, and `ValidateCore`.
-
-```csharp
-public sealed class ContactMailValue
-    : ValueObjectStringBase<ContactMailValue>,
-        IValueObject<ContactMailValue, string>
-{
-    private ContactMailValue(string value) : base(value) { }
-
-    static ContactMailValue IValueObject<ContactMailValue, string>.New(string value) => new(value);
-
-    static void IValueObject<ContactMailValue, string>.ValidateCore(
-        string value, ref List<string>? errors)
-    {
-        if (!value.Contains('@'))
-        {
-            (errors ??= new List<string>()).Add("Mail address must contain '@'.");
-        }
-    }
-}
-```
-
-- The shape is exactly what the generator emits, so `ContactMailValue.Create(...)` / `TryCreate` / `Validate` work as usual, and JSON conversion, SQL parameter binding, and row materialization treat the type like any generated value object.
-- A value object without rules can omit `ValidateCore` entirely and needs only two members (the interface's default implementation validates nothing).
-- `ValidateCore` receives the error list by reference and unallocated.
-  Allocate it only when adding the first violation (`(errors ??= new List<string>()).Add(...)`), so creating a valid value allocates nothing.
-- For a reference-typed value (`string` / `byte[]`), reject `null` in `ValidateCore` when the input is not trusted.
-  A value object never wraps null, since a nullable column keeps the property itself null, and the generated ones report a null input as a validation error.
-  `ValueObjectRules.ValidateRequired(value, DisplayName, ref errors)`, the very call the generated ones make, does it for you and returns false when the rules that follow must be skipped.
-- `New` and `ValidateCore` are explicit implementations, so they stay off the type's public surface.
-  Calling `TVo.New` through a generic type parameter would skip validation, so never call `New` yourself: validation belongs to `Create` / `TryCreate`.
-- Pick the base by value type: `ValueObjectStringBase` (string), `ValueObjectOrderedBase<TSelf, TValue>` (numbers and date/time), `ValueObjectBooleanBase`, `ValueObjectBinaryBase`, `ValueObjectGuidKeyBase` (GUID-as-string keys), or `ValueObjectBase<TSelf, TValue>` directly for anything else.
-
-### Creating from a raw value (CSV and spreadsheet imports)
-
-`TryCreateFrom` and `CreateFrom` build a value object from a value that is not already the underlying type, such as a CSV field, a spreadsheet cell, or a form field.
-
-```csharp
-// Read the cell (a string, a double, a DateTime - whatever it holds) in a given culture
-if (QuantityValue.TryCreateFrom(cell, culture, out var quantity, out var errors))
-{
-    entity.Quantity = quantity;      // a blank cell leaves quantity null, and that is not an error
-}
-
-var amount = AmountValue.CreateFrom(cell, culture);   // throwing version; a blank cell returns null
-```
-
-`IValueObject<TSelf>` does not name the underlying type, so import code needs no branch per value object.
-
-```csharp
-private static T? ReadCell<T>(IXLTableRow row, int column, IFormatProvider? culture, List<string> errors)
-    where T : class, IValueObject<T>
-{
-    if (T.TryCreateFrom(row.Cell(column).Value, culture, out var value, out var messages))
-    {
-        return value;
-    }
-
-    errors.Add(BuildCellErrorMessage(row, column, messages));
-
-    return null;
-}
-```
-
-- **A blank cell is not a violation.**
-  `null`, `DBNull`, and an empty string mean "not filled in": the call returns `true` with a null result and adds no errors, matching the rule that a nullable column keeps the property itself null.
-  Whether the field is required is the edit model's required check to decide.
-  A type can claim absent inputs as a value of its own through the `ConvertAbsentInput` hook described below, in which case the result is that instance instead of null.
-  A whitespace-only string is not absent and goes through the ordinary conversion.
-- **The culture is the caller's.**
-  `null` means the invariant culture.
-  To read a date a person wrote (`28/08/2026`), pass the culture it was written in.
-- **Numeric text may carry group separators.**
-  A spreadsheet hands back `1,234` for a column formatted that way, so numeric targets are parsed with an explicit `NumberStyles`.
-  An integral target still rejects a decimal point, so `1,234.5` does not pass as an `int`.
-- **Binary text is read as Base64**, the same notation the edit models' binding input accepts, so the screen and an import never disagree on the spelling.
-  A `byte[]` value passes through as is.
-- Past the conversion this is the ordinary `TryCreate`, so the type's own validation applies unchanged: maximum length, precision, and `OnValidate`.
-- The message for a value that could not be converted is `ValueObjectValidationMessages.InputNotConvertible`.
-- Overloads without the culture (`TryCreateFrom(raw, out var value, out var errors)` and `CreateFrom(raw)`) use the invariant culture, which is what machine-produced data wants, such as a serialized payload or a fixed export format.
-  Text a person wrote or a spreadsheet formatted belongs to a culture, so pass one: `CreateFrom(raw, provider)` / `TryCreateFrom(raw, provider, ...)`.
-
-### Accepting only declared instances (enumeration-like value objects)
-
-A concept whose values are a closed set, such as a mode, a category, or a status, can be a value object that only ever hands back the instances it declares as `static readonly`.
-The declarative form is an attribute on the fields.
-
-```csharp
-// Extend the generated StatusValue (an int column) into an enumeration - no other code needed
-public sealed partial class StatusValue
-{
-    [DeclaredInstance, Display(Name = "Preparing")]
-    public static readonly StatusValue Preparing = new(1);
-
-    [DeclaredInstance, Display(Name = "In progress")]
-    public static readonly StatusValue InProgress = new(2);
-
-    [DeclaredInstance, Display(Name = "Completed")]
-    public static readonly StatusValue Completed = new(9);
-
-    public override string DisplayValue => DeclaredDisplayName ?? base.DisplayValue;
-}
-```
-
-The marked fields form the type's whole set of values.
-
-- **Every creation path returns the declared instance itself**, whether through `Create` / `TryCreate`, a database read, or a JSON restore.
-- **Any other value is rejected as a validation error.**
-  The wording is replaceable through `ValueObjectValidationMessages.ValueNotDeclared`, where the display name and the rejected value arrive as arguments like every other message.
-- `StatusValue.GetDeclaredInstances()` lists the instances in declaration order, a ready-made source for a selection list.
-- A `[Display(Name = ...)]` on the field is available as the protected `DeclaredDisplayName`, which makes the `DisplayValue` override above a one-liner.
-- A convenience constant the set should not contain is simply left unmarked.
-
-The fields have to take a particular shape.
-Each one must be `public static readonly` of the declaring type, and it must be initialized with the private constructor (`new(...)`, which the partial class can reach) rather than `Create`.
-`Create` validates, and validation consults the declared set that is still being built at that point.
-A field of any other shape, and a duplicate value, are reported on first use.
-
-One shape cannot be detected, though.
-**A field left without an initializer, and therefore permanently null, cannot be told apart from a field whose initialization is still running**, so the set silently stays inactive and every creation rescans.
-The compiler flags such a field (CS8618 / CS0649); do not leave those warnings unresolved.
-
-The attribute works on a hand-written value object the same way, and it is not supported on a binary (`byte[]`) value object.
-
-A declared instance can also claim its input notation.
-`InputText` reads that exact string input as the instance, and `ClaimsAbsent` claims the absent input (null, `DBNull`, an empty string).
-A notation like "a mark or a blank cell" therefore closes in two declarations, reading (input) and display (`[Display]`) together.
-
-```csharp
-// A flag column written as "○" or a blank cell: ○ → Marked, blank → Unmarked, display via [Display]
-public sealed partial class MarkValue
-{
-    [DeclaredInstance(InputText = "○"), Display(Name = "○")]
-    public static readonly MarkValue Marked = new(true);
-
-    [DeclaredInstance(ClaimsAbsent = true), Display(Name = "")]
-    public static readonly MarkValue Unmarked = new(false);
-
-    public override string DisplayValue => DeclaredDisplayName ?? base.DisplayValue;
-}
-```
-
-- Matching is exact and ordinal (no trimming, no case folding, no culture) and applies to string inputs only, ahead of the ordinary conversion.
-  A non-string input (`true`, `9`) and a convertible string (`"True"` / `"9"`) take the ordinary conversion as before, and still resolve to the same declared instance.
-- The notations apply to `TryCreateFrom` / `CreateFrom` only; an edit model's blank input and a database NULL are unchanged.
-- A `[Display]` name is display-only and is never read as input, since an accepted notation is declared explicitly with `InputText`.
-- At most one field may declare `ClaimsAbsent`.
-  A duplicate `InputText`, and an empty `InputText`, are reported on first use.
-  An empty one can never match, because an empty input is absent first, and `ClaimsAbsent` is what was meant.
-- The hooks below (`ConvertCustomInput` / `ConvertAbsentInput`) win over the declared notations.
-  Normalization, aliases, and anything an exact match cannot express stay their territory.
-
-Those hooks remain for the shapes the attribute cannot express, such as a lookup with logic of its own (normalization, aliases) or a per-type error wording, and they compose with it.
-`GetDefinedInstance` is consulted ahead of the declared set, and an `OnValidate` runs in addition to the membership check.
-A generated type's `New` cannot be replaced and its `TryGetDefined` is already emitted as a bridge, so the extension goes into the partial methods the bridges consult.
-That keeps it self-contained in the user's partial, with no generator option involved.
-
-```csharp
-// Extend the generated ModeValue (an int column) into an enumeration through the hooks alone
-// (the table, the lookup and the rejection are all yours)
-public sealed partial class ModeValue
-{
-    public static readonly ModeValue List = new(1) { ModeName = "List" };
-    public static readonly ModeValue Edit = new(2) { ModeName = "Edit" };
-
-    // Built once: the hooks below run on every creation (per column per row when rows are read), so keep them allocation-free
-    private static readonly Dictionary<int, ModeValue> Defined =
-        new[] { List, Edit }.ToDictionary(x => x.Value);
-
-    public string ModeName { get; private init; } = string.Empty;
-
-    public static IEnumerable<ModeValue> GetList() => Defined.Values;
-
-    static partial void GetDefinedInstance(int value, ref ModeValue? defined) =>
-        defined = Defined.GetValueOrDefault(value);
-
-    // GetDefinedInstance alone does not reject an undefined value - it only falls through to New. Write the pair
-    static partial void OnValidate(int value, ref List<string>? errors)
-    {
-        if (!Defined.ContainsKey(value))
-        {
-            (errors ??= new List<string>()).Add($"Screen mode {value} is not defined.");
-        }
-    }
-}
-```
-
-> **Note**: built from hooks, the rejection does not come for free. `GetDefinedInstance` only decides what to return for a value that already passed validation, so without the `OnValidate` above a value outside the set quietly falls through to `New` and "only declared instances" no longer holds. And never call `Create` / `TryCreate` / `TryCreateFrom` from inside a hook: every creation path runs through it, so the call recurses with no way to catch the resulting stack overflow.
-
-Like the attribute, the hooks sit on the `Create` / `TryCreate` side.
-A row read from the database and a value restored from JSON therefore return the declared instance too, and an instance missing its extra state (`ModeName` here) never gets into circulation.
-
-A hand-written value object has no partial hooks; it implements the corresponding interface hooks directly.
-`GetDefinedInstance` maps to `TryGetDefined`, `OnValidate` to `ValidateCore` (that one is the validation body itself), and, below, `ConvertCustomInput` to `TryConvertCustomInput` and `ConvertAbsentInput` to `TryConvertAbsentInput`.
-Only the hook names differ; the content and the warnings are the same.
-
-To create from a name instead of the value, implement the `ConvertCustomInput` partial hook.
-`TryCreateFrom` / `CreateFrom` consult it ahead of the ordinary conversion, on every call shape: the generic import path and a call spelled with the concrete type name alike.
-Set the result to claim the value; anything left null falls through to the ordinary conversion, which keeps `2` working.
-For the fixed one-string-per-instance case, the declarative `InputText` above does the same without a hook, and the hook is for matching that needs logic.
-
-```csharp
-static partial void ConvertCustomInput(object raw, IFormatProvider? provider, ref ModeValue? result)
-{
-    if (raw is string name)
-    {
-        result = GetList().FirstOrDefault(x => x.ModeName == name);
-    }
-}
-```
-
-The generic import code from the previous section (`ReadCell<ModeValue>`) now accepts both `"Edit"` and `2`.
-A hand-written value object implements the interface hook `TryConvertCustomInput` directly, per the mapping above.
-In either form, do not call `TryCreateFrom` / `CreateFrom` from inside, because they consult the hook and the call would recurse.
-Do not throw either: `TryCreateFrom` reports failures through its return value, so an exception would ride straight through that contract.
-
-Implement the hook only, never `TryCreateFrom` itself, on generated and hand-written types alike.
-Re-implementing `TryCreateFrom` compiles, but a call spelled with the concrete type name binds to the shared base implementation and silently skips it on that call shape, which is exactly why the extension point is the hook.
-
-An absent input (`null`, `DBNull`, an empty string) never reaches `ConvertCustomInput`, because `TryCreateFrom` answers "success with a null result" before consulting it.
-A type whose notation writes one of its values as a blank, such as a flag written as a mark or nothing, claims the blank half of that notation through the `ConvertAbsentInput` partial hook instead.
-A hand-written type implements the interface hook `TryConvertAbsentInput` directly, the same split as above, and for a fixed blank-means-this-instance rule the declarative `ClaimsAbsent` above does the same, with the hook winning when both are present.
-The culture is passed for symmetry, but an absent input carries no text, so implementations usually ignore it.
-
-```csharp
-// The notation writes the flag as "○" or a blank cell: ConvertCustomInput claims the mark,
-// and ConvertAbsentInput claims the blank - imported as False instead of null
-static partial void ConvertAbsentInput(IFormatProvider? provider, ref MarkValue? result) =>
-    result = False;
-```
-
-The hook applies to `TryCreateFrom` / `CreateFrom` only.
-An edit model's blank input still leaves the confirmed value null and is reported by its required check, and a database NULL still reads back as a null property.
-The hook decides what a blank import cell means, not what null means everywhere.
-The warnings above apply unchanged: never call `TryCreateFrom` / `CreateFrom` from inside, and do not let an exception escape.
-
-### partial extension points
-
-Every generated class offers two ways to customize messages and display names, and the rule is the same across every static class and every generation mode (inline or package-reference).
-
-- **Bulk**: replace a static settable `Func` on the fixed infra at app startup.
-  It applies everywhere.
-- **Per-type**: branch inside the replacement you installed.
-  Every value object message takes the value object's display name as its first argument, every edit model message takes the confirmed-value property name, and `GeneratedDisplayNames.Resolve` takes the member name, so one replacement covers both the "all types" case and the "this type only" case.
-
-```csharp
-// Bulk, at startup: localize messages, and stop using descriptions for display names
-ValueObjectValidationMessages.ValueRequired = static _ => "値を入力してください。";
-EditModelMessages.Required = static (_, displayName) => $"{displayName}は必須です。";
-GeneratedDisplayNames.Resolve = static (name, _) => name;   // ignore descriptions; use the member name
-```
-
-```csharp
-// Per-type display name: branch on the member name the resolver is given.
-// nameof keeps the branch compiling against the generated code, so a renamed column is a build error.
-GeneratedDisplayNames.Resolve = static (memberName, description) =>
-    memberName == nameof(CustomerEntity.Name) ? "Full name" : description ?? memberName;
-
-// Per-type message: branch on that type's own DisplayName, which follows the resolver above.
-ValueObjectValidationMessages.MaxLengthExceeded = static (displayName, maxLength, actualLength) =>
-    displayName == NameValue.DisplayName
-        ? $"A name is at most {maxLength} characters ({actualLength} given)."
-        : $"Enter at most {maxLength} characters. (currently {actualLength} characters)";
-```
-
-```csharp
-public sealed partial class NameValue
-{
-    // Additional validation (called after the auto-generated validation). The list arrives unallocated;
-    // allocate it only when adding the first violation, so a value that passes allocates nothing.
-    static partial void OnValidate(string value, ref List<string>? errors)
-    {
-        if (value.Contains(' '))
-        {
-            (errors ??= new List<string>()).Add("Whitespace is not allowed.");
-        }
-    }
-}
-```
-
-```csharp
-// Per-property message tweak: the resolver receives the confirmed-value property name first,
-// so a branch can be written with nameof and stops compiling if that property is renamed away.
-EditModelMessages.ParseFailed = static (propertyName, displayName, inputValue, typeName) =>
-    propertyName == nameof(CustomerEditModel.Age)
-        ? $"'{inputValue}' is not a valid age."
-        : $"'{inputValue}' cannot be converted to {typeName}.";
-```
-
-The replacements live on three static classes.
-In package-reference mode, all three ship inside the `QuickER.Runtime` package.
-
-| Static class | Members | First argument |
-|---|---|---|
-| `ValueObjectValidationMessages` | `MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired` / `DigitsExceeded` / `OutOfRange` / `InvalidCharacters` / `InvalidEmailAddress` / `InputNotConvertible` / `ValueNotDeclared` | The display name |
-| `EditModelMessages` | `Required` / `ParseFailed` / `DuplicateValue` / `JoinValueObjectErrors` | The confirmed-value property name, or the list of them, on the first three |
-| `GeneratedDisplayNames` | `Resolve` | The member name (it resolves the display name of entities, edit-model properties, and value objects alike) |
-
-The per-type partials are `OnValidate` on a value object, plus `GetDefinedInstance` / `ConvertCustomInput` covered above.
-An edit model has the semantic hooks only (`OnValidate`, `OnBeginEdit` / `OnEndEdit` / `OnCancelEdit`, `On{Property}Changing` / `Changed`), since wording and display names are resolved centrally.
-An entity has none, for the same reason.
-
-An entity's `DisplayName` is resolved through `GeneratedDisplayNames.Resolve`, which receives the runtime class name and the table description, so branch on the class name there to substitute one (`static (memberName, description) => memberName == nameof(CustomerEntity) ? "Customer" : description ?? memberName;`).
-The default resolver prefers the table description, so writing the display name into the diagram is often all it takes.
-
-A value object's display string `DisplayValue` (virtual) can also be overridden.
-Value objects implement `IFormattable` as well: `price.ToString("N2")`, and the culture-taking overload, formats the underlying value.
-A format specifier in string interpolation, `string.Format`, or a WPF binding's StringFormat reaches the underlying value the same way.
-Without a format specifier the result is always `ToString()`, so an override of `ToString()` (a handwritten one, or the Base64 form of binary value objects) also governs unformatted interpolation.
-The same applies when the underlying value is not formattable (a string, a byte array, a bool): the format is ignored.
-`DisplayValue` is the type's own display form, and `ToString(format)` renders whatever format the caller asks for.
-
-### Validation rules you can call yourself
-
-The rules the generated `ValidateCore` runs are public static methods on the fixed infra, and so are four more that no column declaration can express.
-Call them from `OnValidate`.
-Each one takes the error list by reference and possibly unallocated, so a value that passes still allocates nothing.
-
-```csharp
-public sealed partial class ContactMailValue
-{
-    static partial void OnValidate(string value, ref List<string>? errors) =>
-        ValueObjectStringRules.ValidateEmailAddress(value, DisplayName, ref errors);
-}
-
-public sealed partial class ProductCodeValue
-{
-    static partial void OnValidate(string value, ref List<string>? errors)
-    {
-        // ASCII letters and digits, plus the two symbols this code allows
-        ValueObjectStringRules.ValidateAsciiAlphanumeric(value, "-_", DisplayName, ref errors);
-    }
-}
-
-public sealed partial class QuantityValue
-{
-    static partial void OnValidate(int value, ref List<string>? errors)
-    {
-        ValueObjectNumberRules.ValidateRange(value, 1, 999, DisplayName, ref errors);   // closed interval
-        ValueObjectNumberRules.ValidateMaxDigits(value, 3, DisplayName, ref errors);    // sign not counted; 0 is one digit
-    }
-}
-```
-
-| Rule | What it rejects |
-|---|---|
-| `ValueObjectRules.ValidateRequired(value, displayName, ref errors)` | `null`. Returns false so the caller can stop, because every rule after it dereferences the value |
-| `ValueObjectStringRules.ValidateMaxLength(value, maxLength, displayName, ref errors)` | Longer than the limit in UTF-16 code units (`string.Length`). A database may count differently, as Oracle's BYTE semantics do |
-| `ValueObjectStringRules.ValidateAsciiAlphanumeric(value, allowedSymbols, displayName, ref errors)` | Anything but ASCII letters and digits, plus the characters in `allowedSymbols` (pass `""` for none). A full-width letter or digit is rejected |
-| `ValueObjectStringRules.ValidateEmailAddress(value, displayName, ref errors)` | Text that is not shaped like an address: exactly one `@`, a non-empty part on each side, no whitespace. Deliberately not RFC 5322. `MailAddress` is not used either, because it also parses the `Name <a@b>` form |
-| `ValueObjectNumberRules.ValidateMaxDigits(value, maxDigits, displayName, ref errors)` | An integer written with more digits than the limit (the sign does not count; zero is one digit) |
-| `ValueObjectNumberRules.ValidateRange(value, minimum, maximum, displayName, ref errors)` | A value outside the closed interval; any `IComparable<T>`, so dates work too |
-| `ValueObjectDecimalRules.Validate(value, precision, scale, displayName, ref errors)` | More decimal places than `scale`, or more integer digits than `precision - scale`. Never rounds; trailing zeros count toward the scale |
-
-### Integration with each feature (transparent support)
-
-Value objects can be handled transparently throughout the generated code.
-You rarely need to unwrap them to the raw value by hand.
-
-| Feature | Behavior |
-|---|---|
-| QuickER Repository | SQL parameters are automatically converted to the wrapped value before binding, and reads restore the value object via `Create`. |
-| `Query()` (expression tree) | Value-object comparisons, string `Contains`, and so on are translated directly to SQL. |
-| EF Core mode | The Fluent configuration automatically applies a value conversion (`HasConversion`) and a translation plugin (server-side translation of string methods and `.Value` references). |
-| Named query | Method parameters stay the raw type. The generated condition expression is converted to value-object comparisons automatically (IN lifts the list). |
-| EditModel | The committed-value property is a value object such as `NameValue?`. The screen-binding property `BindingXxx` (string) validates with `TryCreate` and surfaces errors through `INotifyDataErrorInfo`. |
-| JSON (`ToJson` / `Clone` / remote transfer) | Serialized **as the wrapped value** (`{"customerId": 1}`. The value object's wrapper structure does not appear in the JSON). |
-
-> **Note**: reads from the DB or from JSON are also validated through `Create`. If existing data holds a value that does not pass validation, a read from the DB throws `InvalidOperationException` naming the column (the `ValueObjectValidationException` is its inner exception) and a read from JSON throws `ValueObjectValidationException`, so keep the extra validation you add in `OnValidate` consistent with existing data.
-
-### GUID keys for string primary keys (UseGuidKeyForStringPrimaryKey)
-
-Turning on `UseGuidKeyForStringPrimaryKey` (CLI `--use-guid-key-for-string-primary-key` / the GUI's "Use GuidKey for string primary keys") together with `GenerateValueObjects` makes the value object of a string primary key derive from a GUID-generating base class (`ValueObjectGuidKeyBase`).
-A parameterless `Create()` then mints a new key.
-
-```csharp
-// When document_id is a string primary key
-var id = DocumentIdValue.Create();   // A new key wrapping Guid.NewGuid() as a string
-```
-
-This lets you satisfy the "primary keys are application-assigned" prerequisite of repository generation without writing any key-generation logic.
-
-Length validation still applies, exactly as it does for any other string value object.
-The value object carries the column's declared width, so `Create` and `TryCreate` reject a value longer than it.
-The generator leaves `[MaxLength]` off the entity property precisely because the value object owns that check.
-
-The parameterless `Create()` always mints 36 characters (`Guid.NewGuid().ToString()`).
-The option applies to every string primary key in the diagram, so it also turns a deliberately short key into a GUID key, a five-character code column for instance.
-Generation warns by name for any such column narrower than 36 characters and then continues.
-Auto-numbering on that column always fails length validation at run time, while assigning a short key explicitly keeps working.
-
-Keys compare ordinally, so the comparison is case-sensitive.
-QuickER never generates a `DEFAULT` clause, but if you add `DEFAULT NEWID()` to the column outside QuickER, SQL Server stores uppercase GUIDs while the application mints lowercase ones.
-Mixing the two breaks key matching.
-
 ## Excluding unbounded binary columns (ExcludeUnboundedBinaryColumns)
 
 This option avoids round-tripping a huge BLOB on every list fetch or update, which protects memory (default OFF; CLI `--exclude-unbounded-binary-columns` / the "Do not fetch unbounded binary columns (varbinary(max) / BLOB)" checkbox in the GUI, shown only when the DB-access selection is QuickER Repository / `ExcludeUnboundedBinaryColumns` in quicker.json).
@@ -1941,7 +2055,7 @@ The key behaviors are these.
 - **Edit models and mappers read an absent value as "keep what is there" rather than as a null.**
   An excluded column is left out of the required-input check, and the mapper writes it to the entity only when the edit model actually holds a value.
   An ordinary fetch leaves the column unfetched, so the usual round trip (fetch, edit the other columns, `ApplyToEntity`, save) passes validation, leaves the column out of the UPDATE, and keeps the stored blob.
-  Fetching with `WithUnboundedBinary()` and then saving through the mapper still throws: the entity holds a real value, which is exactly what the UPDATE guard is there to catch.
+  Fetching with `WithUnboundedBinary()` and then saving through the mapper throws: the entity holds a real value, which is exactly what the UPDATE guard is there to catch.
 - **A NOT NULL excluded column is required input while the row is new.**
   "Keep what is there" has nothing to keep on a row that does not exist yet, and INSERT keeps every column, so a missing value goes in as `NULL` and the database rejects it.
   While the edit model is `RowState.Added`, such a column is therefore checked for missing input like any required field, and the error names the column.
@@ -1974,7 +2088,12 @@ await documents.ExecuteSqlAsync(
     new { payload = bytes, id = 1 });
 ```
 
-> **Note**: copying data between databases needs care. `GetAllAsync` followed by `BulkInsertAsync` writes the excluded columns exactly as the fetch left them, which is `null`, or an empty array for a non-nullable column. Since INSERT keeps every column, nothing throws and the blobs are quietly gone at the destination. The UPDATE guard does not cover this: it fires on an excluded column that still holds a value, which is the opposite of what a copy carries. Read with `Query().WithUnboundedBinary()` instead, or copy the rows first and then move each blob separately with the `Read/Write{Column}Async` stream accessors. The latter is also the only way that does not hold a whole blob in memory.
+> **Note**: copying data between databases needs care.
+> `GetAllAsync` followed by `BulkInsertAsync` writes the excluded columns exactly as the fetch left them, which is `null`, or an empty array for a non-nullable column.
+> Since INSERT keeps every column, nothing throws and the blobs are quietly gone at the destination.
+> The UPDATE guard does not cover this: it fires on an excluded column that still holds a value, which is the opposite of what a copy carries.
+> Read with `Query().WithUnboundedBinary()` instead, or copy the rows first and then move each blob separately with the `Read/Write{Column}Async` stream accessors.
+> The latter is also the only way that does not hold a whole blob in memory.
 
 ### Read opt-in: `WithUnboundedBinary()`
 
@@ -2090,10 +2209,26 @@ That makes the column the natural place for a local copy to mirror the server's 
 Read a row from the server, version included, store it locally as-is, and later send the mirrored version back as the guard value of the server-side update.
 A row created locally simply has no version yet, which is why the dialect switch also lifts NOT NULL on that column (see [Dialect switching](database.md#dialect-switching)).
 
+```mermaid
+sequenceDiagram
+  participant App as Application
+  participant S as SQL Server (server)
+  participant L as SQLite (local)
+  App->>S: Read a row, version included
+  S-->>App: The row (with its version)
+  App->>L: Store it as-is (the version too)
+  App->>L: Later, read the row
+  L-->>App: The row (the mirrored version)
+  App->>S: Update with that version as the guard
+  alt The version is stale
+    S-->>App: Refused as a conflict (SaveConflictException)
+  end
+```
+
 #### Known limitations
 
 - **The local side is not protected.**
-  SQLite runs no version guard, so two local writers still overwrite each other.
+  SQLite runs no version guard, so two local writers overwrite each other.
   The version is data there, not a lock.
 - **Nothing keeps the mirror fresh.**
   The column holds whatever was written last.
@@ -2119,6 +2254,44 @@ A table with the column syncs incrementally under version guards, which is the d
 A table without one takes part only in [last-write-wins runs](#versionless-tables-and-last-write-wins-syncmodelastwritewins).
 The tables picked up are listed in an Info diagnostic at generation time, with the versionless ones named as such.
 What the column means on each of the two sides is described under [Row version columns in a multi-target build](#row-version-columns-in-a-multi-target-build); this section is about the machinery built on top of it.
+
+### Overview
+
+What sits on the local and server sides, and what flows between them (see [What it puts where](#what-it-puts-where) for details):
+
+```mermaid
+flowchart LR
+  app["Application (local repositories)"]
+  subgraph loc["Local (SQLite)"]
+    rows["Rows of the synced tables and their mirror versions (the highest is the resume point)"]
+    jr["quicker_sync_journal (offline edits)"]
+    ack["quicker_sync_ack (versions the server accepted)"]
+    bp["quicker_sync_blob_pending (blob copies not done yet)"]
+  end
+  subgraph srv["Server (SQL Server): no extra schema"]
+    st["Synced tables"]
+  end
+  app -->|writes| rows
+  app -->|records the writes| jr
+  jr -->|upload| st
+  st -->|"assigned version (never written to the mirror)"| ack
+  st -->|download: ascending version order, the only path that writes mirror versions| rows
+  ack -.->|echo detection, original for replays| rows
+```
+
+One `SyncAsync` run goes like this (see [Wiring it up](#wiring-it-up) and [Conflicts](#conflicts) for details):
+
+```mermaid
+flowchart TD
+  up["1. Upload (upserts from parent tables, deletes from child tables)"]
+  pre["2. Delete propagation before the download (with PropagateDeletes, from child tables)"]
+  subgraph per["3. Table by table, parents first"]
+    direction TB
+    dl["The table's download (ascending version order)"] --> sw["The table's ServerWins re-read (only with ServerWins)"]
+  end
+  post["4. Delete propagation after the download (with PropagateDeletes, from child tables)"]
+  up --> pre --> per --> post
+```
 
 ### What it puts where
 
@@ -2204,7 +2377,7 @@ A run uploads first and downloads second, and visits tables in foreign-key order
 
 | Option | Default | Meaning |
 |---|---|---|
-| `Mode` | `Versioned` | The run's semantics. The default syncs the versioned tables incrementally under version guards and leaves the versionless ones alone (the pre-existing behaviour); `LastWriteWins` is [last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins) |
+| `Mode` | `Versioned` | The run's semantics. The default syncs the versioned tables incrementally under version guards and leaves the versionless ones alone; `LastWriteWins` is [last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins) |
 | `ExcludedEntityTypes` | empty | Entity types this run leaves out. Recording continues, and the next run that covers them replays what accumulated (excluding a table permanently is the construction-time `excludeFromSync` instead). A type the engine does not synchronize is rejected with `ArgumentException` |
 | `DownloadBatchSize` | 500 | How many rows one download batch fetches and applies in a single local transaction |
 | `PropagateDeletes` | `true` | Whether to delete local rows whose key no longer exists on the server. The check compares the full key set, which costs one key-only pass over each server table; turn it off and run it on a slower schedule when the tables are large. A key the journal still holds an unsent entry for is spared, and so is a row a local row refers to, as described below |
@@ -2243,7 +2416,7 @@ Settling them together at the end would leave entries for changes that did, and 
 **Delete propagation spares the rows the journal still speaks for.**
 Before it removes anything it reads the journal, and a key with an unsent entry is left alone, including one this same run has just reported as a conflict.
 That is what keeps `Collect` from resolving a "the server no longer has this row" conflict in the server's favour by deleting the row.
-Once the entry is settled, whether uploaded, discarded as a stale intent, or dropped by `ServerWins`, a later run propagates the deletion as usual.
+Once the entry is settled, whether uploaded, discarded as a stale intent, or dropped by `ServerWins`, a later run propagates the deletion for that key too.
 The protection reaches exactly as far as the journal does: a row written into a synchronized table by some other route has no entry, and while propagation is on it is deleted (see [Known limitations](#known-limitations)).
 
 A row it spares keeps what it points at.
@@ -2280,7 +2453,7 @@ Combining `--generate-sync-support` with [`--generate-remote-services`](#remote-
 Swapping one for the other is a change of one registration line and of nothing else, because the engine resolves the same `ISyncServerSource<TEntity, TKey>` either way.
 
 ```csharp
-// Client: local repositories as before, but the server half now speaks HTTP
+// Client: the local half is the same as with a DB connection; only the server half speaks HTTP
 services.AddGeneratedSqliteRepositories(serviceKey: "local", sqliteConn);
 services.AddGeneratedHttpSyncSources("https://example.com/quicker");   // or an HttpClient factory
 services.AddGeneratedSyncEngine(localServiceKey: "local");
@@ -2349,7 +2522,7 @@ A graph save may delete a stub that carries nothing but the key, or an object he
 The local row is read for its mirrored version before it goes (one SELECT for each such delete in a versioned table), and the later of the two is recorded, so the delete reaches the server instead of being dropped as a row the server never had.
 The same version lets a row deleted here and created again under the same key go to the server as an update: the server still has the row the delete removed, and inserting the new one there would be refused as a duplicate.
 A later change on the server makes that update a conflict, as for any other edit.
-A row created, deleted and created again without ever reaching the server records no version and is inserted as before.
+A row created, deleted and created again without ever reaching the server records no version and is inserted.
 A conflict reports the operation decided here.
 
 **Raw SQL is not recorded.**
@@ -2360,7 +2533,7 @@ A row *created* that way fares worse than that: with no journal entry to spare i
 A row the local database is meant to keep to itself belongs in a table excluded from sync where the engine is put together, through the `excludeFromSync` argument of `AddGeneratedSyncEngine`.
 
 **Save hooks are unaffected.**
-The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires exactly as it did before, including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else.
+The decorator delegates to the repository it wraps, so `ISaveHook<T>` fires, including for the rows the engine itself applies during a download, since a sync run suppresses journaling and nothing else.
 A refresh (below) writes through `BulkInsertAsync`, which is outside the save pipeline and fires no hooks, in keeping with the ordinary contract.
 
 **A row a local save hook skips stops its table's download.**
@@ -2373,6 +2546,8 @@ A refresh that brings a parent in fails when a hook skips that parent.
 To tell the skipped row from the rows after it, the engine applies the downloaded rows of a table one at a time, each in its own local transaction, when the local repository runs a save hook for the table's entity, so such a table downloads several times slower than a table without one.
 The generated registration (`AddGeneratedSyncEngine`) gives the tables the hooks the local repositories run; a table built by hand takes them as its `localSaveHooks` argument.
 A hook that skips a row of a table built without them makes the run throw, because the rows after the skipped one have been written by then and the resume point has moved past it.
+
+**A graph save's entries are checked against what the save did.**
 The entries of a graph save are written before its hooks run, so they are checked against what the save did once it has succeeded, under the same lock.
 A row a `BeforeSaveAsync` returned `false` for was not written, and its entry is taken back; the save leaves such a row in its old state rather than marking it unchanged, which is how it is told apart.
 Without that, its entry would upload the row's current content, over another writer's newer row or as a write that changes nothing yet moves the server's version on.
@@ -2483,6 +2658,19 @@ That late copy is decided per row and column: a row that is gone here has nothin
 Otherwise, including a row whose unsent change touched only its ordinary columns, the server's blob is copied down.
 A refresh drops the table's owed records, because it reloads the rows anyway.
 
+How a run that carries the columns settles an owed copy:
+
+```mermaid
+flowchart TD
+  rec["An owed copy left in quicker_sync_blob_pending (per row and column; a run that carries the columns decides it first, before anything else of that table)"] --> here{"Is the row here?"}
+  here -- "No" --> d1["Drop the record (nothing to copy into)"]
+  here -- "Yes" --> srv{"Is the row on the server?"}
+  srv -- "No" --> d2["Drop the record (the row is left to the delete propagation)"]
+  srv -- "Yes" --> pend{"Did an unsent local change write that column?"}
+  pend -- "Yes" --> d3["Drop the record (the blob written here since stays)"]
+  pend -- "No (including a change to ordinary columns only)" --> cp["Copy the server's blob down and remove the record"]
+```
+
 On the way up, the row's own write is accepted before the blobs are sent, and the receipt is recorded with the version that write returned.
 A blob copy that fails therefore leaves the entry in the journal but not a stale original: the next run replays it against the version the server took, not as a conflict with this device's own write.
 
@@ -2557,13 +2745,23 @@ When the run propagates deletes, `ServerWins` first removes the local rows it is
 Three more reasons come from the server refusing a write, two for its foreign keys and one for its unique constraints, and no policy resolves them by writing rows this device did not change.
 `ServerWins` settles them by giving up the local change, in a last-write-wins run as well.
 They are reported only after a write to the server has failed, by looking up the state the failure would follow from, so a run where nothing goes wrong makes no extra call.
-A failure they do not explain, such as a dropped connection, is thrown as it was.
+A failure they do not explain, such as a dropped connection, is thrown back to the caller unchanged.
 
 | `SyncConflictReason` | When | Ways out |
 |---|---|---|
 | `ParentMissingOnServer` | Writing the row failed and a parent it points at is gone from the server (deleted there while the row was edited here). `LocalWins` reports it too, rather than bringing the parent back, and so does last-write-wins under any other policy | Run with `ServerWins` (in either mode), point the row at another parent, or edit the parent locally so it has a change of its own |
 | `DeleteRefusedOnServer` | Deleting the row failed while the server still holds it and some table of the diagram refers to its table, typically because another device has added a row that points at it. The cause itself is not looked up, so a passing failure of another kind can show up this way; the entry stays and the next run tries again | Run with `ServerWins` (in either mode), which brings the row back together with what now points at it |
 | `UniqueValueTakenOnServer` | Writing the row failed and the server's uniqueness check, asked with the local row, finds another row holding one of its unique values: another device took the value meanwhile, or the row deleted here to free it is still there because the delete did not go through. When the server is SQL Server, a NULL counts as a value, so a second row holding NULL in the same unique members is reported this way too (see [Uniqueness pre-check](#uniqueness-pre-check-checkuniquenessasync)). `LocalWins` reports it too, rather than taking the value from the other row. It is not tried again within the run, since no other write of the table frees the value | Change the value, or run with `ServerWins` (in either mode) |
+
+Put together, the two tables above settle each combination of policy and kind of conflict as follows.
+The three columns from `Collect` to `LocalWins` are default `Versioned` runs, and the last column is a last-write-wins run.
+
+| Kind of conflict | `Collect` | `ServerWins` | `LocalWins` | `LastWriteWins` |
+|---|---|---|---|---|
+| The row changed on the server meanwhile (`ModifiedOnServer`) | Keeps the entry and reports it | Discards the entry, reads the row back from the server and writes it over the local row | Sends it again with `ConcurrencyMode.ForceOverwrite`, overwriting the server row | Does not occur (overwrites without reading the version) |
+| The row to update is gone from the server (`MissingOnServer`) | Keeps the entry and reports it | Discards the entry (nothing to apply; left to the delete propagation) | Inserts it again (the row comes back) | Does not occur (inserts when the row is missing, so the row comes back) |
+| A row created locally has a key the server already holds (`DuplicateOnServer`) | Keeps the entry and reports it | Discards the entry, reads the row back from the server and writes it over the local row | Settles it by overwriting | Does not occur (updates with `ForceOverwrite`) |
+| The server refused the write (`ParentMissingOnServer` / `DeleteRefusedOnServer` / `UniqueValueTakenOnServer`) | Keeps the entry and reports it | Discards the entry and puts the row back from the server's content | Reports it (does not write a row this device did not change to settle it) | Settles it under `ServerWins`; reports it under any other policy |
 
 **`ServerWins` reads the rows back rather than leaving them to the download.**
 The download carries a row only when its version has moved since it was last mirrored, so a local edit to a row nobody else has touched would otherwise outlive the run that was told to discard it, and with its journal entry gone, no later run would correct it.
@@ -2599,7 +2797,7 @@ var result = await engine.SyncAsync(new SyncOptions { Mode = SyncMode.LastWriteW
 
 **A default (`Versioned`) run never touches a versionless table**: no download, no upload, no delete propagation.
 Recording continues, and a last-write-wins run collects what accumulated.
-Adding a versionless table to a diagram therefore changes nothing about what the default runs do.
+Adding a versionless table to a diagram therefore leaves the default runs syncing the versioned tables only.
 
 A `LastWriteWins` run covers every table and gives the whole run one semantics.
 
@@ -2622,7 +2820,7 @@ A `LastWriteWins` run covers every table and gives the whole run one semantics.
   Columns of one row are not merged.
 - **A versionless table downloads as a full key-ordered scan on every run** (`SELECT TOP … WHERE key > @afterKey ORDER BY key` paging, plus the ordinary delete propagation).
   The cost is O(table) per run, which is why this mode is meant for small, rarely changing tables, and why a large or busy table is better served by adding a rowversion column and riding the incremental side.
-  Versioned tables still download incrementally in this mode; the result is the same, the transfer just smaller.
+  Versioned tables download incrementally in this mode too; the result is the same, the transfer just smaller.
   A row the scan skips, for an unsent change or a parent it cannot have, does not stop the scan, but the table is reported as truncated at the first such row once the scan is through.
 
 A table that should never sync, holding local-only data, is declared where the engine is put together rather than per run.
@@ -2686,7 +2884,7 @@ Two flags answer it, and one of them has to be set.
 A versionless table reloads in ascending key order rather than version order, the same paging its download uses.
 The resume property holds in the same shape, so a refresh cut short is still repaired by running it again.
 
-A generated setup without such columns never sees this exception, so nothing changes for it.
+A generated setup without such columns never sees this exception.
 
 `BatchSize` defaults to 2000, several times the download batch of an ordinary run.
 Each batch is one local transaction, a refresh gains most of its speed there, and an interrupted run is repaired by running it again, so a fine resume granularity is worth less here.
@@ -2733,7 +2931,7 @@ Nothing is lost by it, and local writes wait until the refresh is over, but a sc
 - **The HTTP transport requires `--generate-remote-services`.**
   Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.
 - **The local side has no version guard**, as under [Row version columns in a multi-target build](#row-version-columns-in-a-multi-target-build).
-  Two local writers still overwrite each other, and the engine's conflict detection is about the server's version, not theirs.
+  Two local writers overwrite each other, and the engine's conflict detection is about the server's version, not theirs.
 - **A crash can still fall into one window**: between the server accepting an upload and the receipt being written for it.
   The journal entry survives, and the next run replays it as a version-guarded update against a mirrored version the server has already moved past.
   It is reported as a conflict, with the row this device itself wrote on the other side of it.
@@ -2774,11 +2972,11 @@ Specifying `--generate-remote-contracts` additionally generates an interface for
 | Surface | Interface | Operations included |
 |---|---|---|
 | Remote surface (additionally generated) | `I{Entity}RemoteRepository` | CRUD (GetById / GetAll / Insert / Update / Delete), graph save (Save), named queries |
-| Full-featured surface (as before) | `I{Entity}Repository` (inherits the remote surface) | The above plus `Query()` (expression tree), the three raw-SQL variants, bulk insert |
+| Full-featured surface | `I{Entity}Repository` (inherits the remote surface) | The above plus `Query()` (expression tree), the three raw-SQL variants, bulk insert |
 
 Every method of the remote surface has arguments and return values composed purely of data (entities, primary keys, counts), so it can in principle cross a network boundary.
 If you keep the application body dependent only on the remote surface, the compiler catches any use of an operation that cannot cross the boundary, even when you later swap the repository's implementation for a web-service-backed remote one.
-Processing that needs an expression tree or raw SQL just uses `I{Entity}Repository` as before, so "this part needs a direct DB connection" is readable from the type.
+Processing that needs an expression tree or raw SQL just uses `I{Entity}Repository`, so "this part needs a direct DB connection" is readable from the type.
 
 ```csharp
 // The application body depends only on the remote surface (the part that can later be swapped for a remote implementation)
@@ -2788,7 +2986,7 @@ public sealed class OrderService(IOrderRemoteRepository orders)
         orders.GetByCustomerAsync(customerId, ct);   // A named query is on the remote surface
 }
 
-// Processing that needs raw SQL or an expression-tree query requests the full-featured surface as before (the type makes the direct-DB requirement explicit)
+// Processing that needs raw SQL or an expression-tree query requests the full-featured surface (the type makes the direct-DB requirement explicit)
 public sealed class OrderMaintenance(IOrderRepository orders)
 {
     public Task<int> ArchiveAsync(CancellationToken ct) =>
@@ -2889,10 +3087,25 @@ A Save response matches the values to the rows by their position in the graph as
 The server lists the rows before the save, so what the save does to the collections (taking deleted children out, or EF Core moving a child into its parent's collection) does not shift the positions.
 Where the version list and the values disagree, the values win.
 A row a hook skipped gets nothing back, and an excluded unbounded binary column is never carried, so the client's update guard keeps applying.
-A response without the values, from a server generated before they were carried, is settled the way it was before: by the version list and the skipped rows alone.
+A response without the values, from a server generated before they were carried, is settled by the version list and the skipped rows alone.
 Because a Save response carries every column of every saved row, a large SaveMany gets a response roughly as large as its request.
 
 ### How errors are classified
+
+Each kind of response is handled as follows; the paragraphs after the table give the details.
+
+| Response | When | On the client |
+|---|---|---|
+| 400 | The request cannot be interpreted (malformed JSON, a missing required field, an undefined `ConcurrencyMode`, paging arguments, a binary endpoint's `?id=`, and so on) | `RemoteRepositoryException` with `StatusCode` 400, carrying the request-reading failure verbatim; the server neither logs it nor raises `OnServerError` |
+| 404 | A binary endpoint finds no row or a NULL (with a `RemoteError` body of type `"NotFound"`) | `false` |
+| A bare 404 | A base address or prefix that does not match the server's, a route that no longer exists, or a proxy answering on its own | `RemoteRepositoryException` |
+| 409 | The server threw `SaveConflictException` | `SaveConflictException`, with `Reason` / `EntityType` / `Key` |
+| 411 | A binary PUT without `Content-Length` (chunked) | Does not occur: the generated client always sends `Content-Length` |
+| 413 | A binary PUT declares a length over the effective limit, or the server infrastructure rejects the body for exceeding its size limit (`BadHttpRequestException`) | `RemoteRepositoryException` with status 413 (a binary PUT gets it before sending the body) |
+| 500 | Any other server exception | `RemoteRepositoryException`; by default a fixed message and a `CorrelationId` (the message passes through with `exposeErrorDetails: true`); the server logs it and raises `OnServerError` |
+| The timeout status code (504 by default) | The host's request timeout (`RequestTimeouts`) cut the request off | `RemoteRepositoryException` with that status code |
+| No response | The client has gone | Nothing reaches the client; the server records one Debug line, with no Error log and no `OnServerError` |
+| A success status whose body is not the expected JSON | Most often a proxy's or a portal's 200 page; includes a `null` body on an operation whose result is never null | `RemoteRepositoryException` |
 
 **Exception types are restored.**
 The server's `SaveConflictException` is thrown on the client as `SaveConflictException` too, via HTTP 409, so the same catch as in the direct case works.
@@ -2905,7 +3118,7 @@ Two more cases are classified the same way.
   It therefore belongs in the same catch as every other remote failure rather than surfacing as a raw `JsonException`.
 - **A body that is the JSON literal `null`**, on every operation whose result is never null (`GetAll`, the save operations, the list and count queries).
   `null` is valid JSON, so without the check it would slip through and surface later as an obscure `NullReferenceException` far from the call.
-  A 200 carrying `null` from an operation whose result is legitimately null (`GetById`, a single-row query, a nullable scalar query) stays what it always was: no such row.
+  A 200 carrying `null` from an operation whose result is legitimately null (`GetById`, a single-row query, a nullable scalar query) means no such row.
 
 **A request the server cannot interpret is answered with 400, not 500.**
 Anything that fails while the request itself is being read is a fault in what the client sent, so it returns HTTP 400 with a `RemoteError` of type `"BadRequest"`, and the client throws `RemoteRepositoryException` with `StatusCode` 400.
@@ -2936,7 +3149,7 @@ The body carries a fixed message (`An unexpected error occurred on the server.`)
 The full exception, including the stack trace, always goes to the server side through `ILoggerFactory` (category `QuickER.RemoteServer`, a no-op when the host has no logging provider), with the same correlation id in the log line.
 A caller who reports the id therefore lets you find the complete record without the internal message, such as table and column names, connection strings, or file paths, ever crossing the trust boundary.
 
-Pass `MapGeneratedRemoteEndpoints(exposeErrorDetails: true)` to send the message verbatim instead, in which case `CorrelationId` is null and the body is exactly what earlier versions sent.
+Pass `MapGeneratedRemoteEndpoints(exposeErrorDetails: true)` to send the message verbatim instead, in which case `CorrelationId` is null.
 The idiomatic form is `exposeErrorDetails: app.Environment.IsDevelopment()`, which is why it is a runtime argument rather than a generation-time option: one set of generated code covers both environments.
 The switch changes only what the client sees on a 500.
 Server-side logging and the `OnServerError` hook always receive the exception itself, and the classified responses are unaffected: a 400 carries the request-reading failure verbatim, as above, and the conflict detail on a 409 (`Reason` / `EntityType` / `Key`) is the material a reload-and-retry loop is built on, so both keep their own messages in either mode.
@@ -2977,7 +3190,7 @@ If you would rather have a finite client-wide deadline, use the factory overload
 It deliberately does not touch the database, so it says only that the process is up and the endpoints are mapped.
 
 On the client, `Http{Entity}RemoteRepository.PingAsync` calls it and returns `false`, rather than throwing, for every flavor of "not reachable": connection refused, DNS or TLS failure, the HttpClient's own timeout, any non-success status.
-That makes it usable as the condition of a wait-for-startup loop, and cancelling the token you pass still throws, so your own timeout stays distinguishable from a server that is down.
+That makes it usable as the condition of a wait-for-startup loop, and cancelling the token you pass throws, so your own timeout stays distinguishable from a server that is down.
 
 "The HttpClient's own timeout" is not a path the default registration reaches, though.
 The client the base-address overload builds has `Timeout.InfiniteTimeSpan` (above), so a host that accepts the connection and then never answers leaves `PingAsync` waiting rather than returning `false`.
@@ -3082,7 +3295,7 @@ The following three endpoints are generated per excluded column, where `{column}
   Behind a proxy that does not answer `100 Continue`, each upload therefore waits up to that long.
   To change the wait, register the client with the `HttpClient` factory overload and set the timeout on its `SocketsHttpHandler`.
   Behind a proxy that rejects the `Expect` header with 417, the upload fails with a `RemoteRepositoryException` of status 417.
-- **Making `WithUnboundedBinary()` / `Query()` / raw SQL remote is out of scope**, as before.
+- **Making `WithUnboundedBinary()` / `Query()` / raw SQL remote is out of scope**.
 
 ## Runtime package reference mode (--use-runtime-packages)
 
@@ -3131,7 +3344,7 @@ Because of this layout, `--use-runtime-packages` means exactly one thing.
 The `Repositories*` files are the same either way, since turning the mode on or off does not change their contents.
 
 Note that the file and namespace suffix `EntityFrameworkCore` is about matching the package name.
-The C# type names are unchanged: `EfCore{Entity}Repository`, `QuickErDbContext`, `AddGeneratedEfCoreRepositories`.
+The C# type names are not aligned with it: `EfCore{Entity}Repository`, `QuickErDbContext`, `AddGeneratedEfCoreRepositories`.
 
 `Entities.g.cs`, `ValueObjects.g.cs`, `EditModels.g.cs`, and `Mappers.g.cs` are schema-dependent in their entirety and are unchanged by this mode.
 `RemoteServer.g.cs` is schema-dependent too.
@@ -3170,12 +3383,36 @@ The buckets hang under it as `{root}.{suffix}`.
 | Infrastructure | `MyApp.Infrastructure.SqlServer` / `.Sqlite` / `.EntityFrameworkCore` / `.InMemory` / `.Sync` / `.Http`, where the fixed-infrastructure file (`Runtime.SqlServer.g.cs` etc.) and the per-entity file (`Repositories.SqlServer.g.cs` etc.) of each family share one namespace |
 | Server | `MyApp.Server.RemoteServer` / `.AspNetCore` |
 
-The explicit namespace options (`EntityNamespace`, `RepositoryNamespace`, and so on) still win over the derivation, exactly as before.
+The explicit namespace options (`EntityNamespace`, `RepositoryNamespace`, and so on) win over the derivation.
 A layer folder that cannot form a C# namespace, one with a hyphen for instance, is a generation error, unless every namespace in that layer is set explicitly.
-This also untangles the plain-split quirk where the dialect implementations hung under the contract namespace (`{contracts}.SqlServer`) even though they live in another project; with layered output they sit under the infrastructure root instead.
-`RootNamespace` no longer appears in the derived defaults, since the layer folders take its place.
+In plain split output the dialect implementations hang under the contract namespace (`{contracts}.SqlServer`), a domain namespace, even when they live in another project.
+With layered output they sit under the infrastructure root instead.
+In layered output, `RootNamespace` does not appear in the derived defaults, since the layer folders take its place.
 
-### The generated-code subfolder (--code-subdir)
+Points worth knowing about layered output:
+
+- **Only namespaces, file placement, and the fixed runtime's visibility change.**
+  Apart from the `namespace` declarations and `using` directives, the schema-dependent code is identical to plain split output, and the API reference (`.g.md`) shows the actual, derived namespaces.
+  The fixed runtime (`Runtime*.g.cs`) is emitted with `public` visibility, because the layers are separate assemblies, so the runtime surface follows the same rule as the NuGet packages, which publish the same types as `public` for the same reason.
+  The generated projects therefore build with plain project references, and no `InternalsVisibleTo` is needed.
+- The repository contracts sit in the domain layer as DDD-style ports.
+  The presentation project, where edit models check uniqueness through `I{Entity}Repository`, only needs a reference to the domain project, and infrastructure implements the domain's contracts.
+  The resulting project references are `presentation → domain ← infrastructure ← server`, and the server project also references infrastructure to wire up DI.
+- The inline runtime (`Runtime.g.cs`) goes into the domain layer, mirroring package mode.
+  With `--use-runtime-packages` the domain project references `QuickER.Runtime` instead, and the other layers see the runtime transitively either way.
+- Switching the mode, or renaming a layer folder or the subfolder, does not delete files written to the previous location; remove them yourself.
+
+The project references between the layers run like this:
+
+```mermaid
+flowchart LR
+  pres["Presentation (edit models, mappers)"] --> dom["Domain (entities, value objects, repository contracts, inline runtime)"]
+  infra["Infrastructure (repository implementations and fixed infrastructure)"] --> dom
+  srv["Server (RemoteServer.g.cs, Runtime.AspNetCore.g.cs)"] --> infra
+  srv --> dom
+```
+
+## The generated-code subfolder (--code-subdir)
 
 `--code-subdir` (config key `CodeSubdirectory`, unset by default) puts the generated code (`.g.cs`) one level deeper: below the layer folder with layered output, and below the output directory without it.
 It works in every output mode (single file, split, layered) and exists to keep generated and hand-written code apart inside one project.
@@ -3206,19 +3443,6 @@ The API reference (`.g.md`) does not follow it, because the only thing that deci
 
 In the GUI it sits in the generation dialog's "Output destination" card, on the row right below the output path, as the "Subfolder" box.
 It is independent of the output mode and the layered-output checkbox.
-
-Points worth knowing about layered output:
-
-- **Only namespaces, file placement, and the fixed runtime's visibility change.**
-  Apart from the `namespace` declarations and `using` directives, the schema-dependent code is identical to plain split output, and the API reference (`.g.md`) shows the actual, derived namespaces.
-  The fixed runtime (`Runtime*.g.cs`) is emitted with `public` visibility, because the layers are separate assemblies, so the runtime surface follows the same rule as the NuGet packages, which publish the same types as `public` for the same reason.
-  The generated projects therefore build with plain project references, and no `InternalsVisibleTo` is needed.
-- The repository contracts sit in the domain layer as DDD-style ports.
-  The presentation project, where edit models check uniqueness through `I{Entity}Repository`, only needs a reference to the domain project, and infrastructure implements the domain's contracts.
-  The resulting project references are `presentation → domain ← infrastructure ← server`, and the server project also references infrastructure to wire up DI.
-- The inline runtime (`Runtime.g.cs`) goes into the domain layer, mirroring package mode.
-  With `--use-runtime-packages` the domain project references `QuickER.Runtime` instead, and the other layers see the runtime transitively either way.
-- Switching the mode, or renaming a layer folder or the subfolder, does not delete files written to the previous location; remove them yourself.
 
 ## API reference (.g.md)
 
@@ -3253,12 +3477,54 @@ This works in every output mode, and with layered output it keeps the documentat
 
 The file name can be changed with `--api-docs-file` (config key `ApiDocsFileName`), so `--api-docs-file Api.md` yields `Api.g.md`, and `Api.ja.g.md` for the Japanese version.
 The extension is normalized to `.g.md`, so `Api`, `Api.md`, and `Api.g.md` all give the same result; overwriting is restricted to `.g.md` / `.g.cs`, so the extension is not left to the input.
-An explicit name wins in every output mode, and when it is blank you get the derived name as before: the output file base name, or `ApiDocs.g.md` when files are split.
+An explicit name wins in every output mode, and when it is blank you get the derived name: the output file base name, or `ApiDocs.g.md` when files are split.
 Only a file name is accepted, and a value containing path separators is a generation error, because choosing the folder is `--api-docs-subdir`'s job.
 In the GUI it is the "Output file name" box below the "Output subfolder" box, and when that box is empty, the name that will actually be used is shown in grey, following the output file name, the output mode, and the language.
 
 `.g.md` / `.ja.g.md` are auto-generated files.
 They are overwritten on regeneration, so do not edit them directly.
+
+## The generated file header
+
+Every generated `.g.cs` file starts with three lines:
+
+```csharp
+// <auto-generated />
+// Generated by QuickER 0.2.0
+// Content hash: sha256:3f7a…
+```
+
+The first line tells the compiler, analyzers and formatters (CSharpier among them) to leave the file alone.
+The second records the QuickER version that produced the file, and the API reference carries the same line as an HTML comment.
+The third lets QuickER tell whether the file has been edited by hand since it was generated.
+
+### Regenerating over edited files
+
+Before writing, QuickER checks every `.g.cs` it is about to replace.
+If any of them has been edited by hand, nothing is written until you decide:
+
+| Entry point | When edited files exist | To overwrite them |
+|---|---|---|
+| GUI | A confirmation lists the edited files; Cancel writes nothing | Choose OK |
+| CLI (`generate` / `scaffold`) | The edited files are listed on stderr, nothing is written, and the exit code is `2` | Add `--force` |
+| MCP (`generate_csharp`) | The call fails and lists the edited files | Pass `force: true` |
+
+To keep a change, put it in a separate file rather than in the `.g.cs` itself: a `partial` class next to the generated one.
+
+### What counts as an edit
+
+The hash is computed over the file with three things removed:
+
+1. The version and hash lines
+2. Whitespace, line endings, and a byte-order mark
+3. A comma directly before `}`, `)` or `]`
+
+Reformatting (CSharpier, the IDE's Format Document, git's line-ending conversion) and upgrading QuickER are therefore not edits.
+It follows that a change touching only whitespace, including whitespace inside a string literal, is not detected either.
+
+A file without a hash line is not checked and is overwritten, such as one generated by an earlier QuickER or one whose header was removed.
+The API reference (`.g.md`) is not checked.
+The hash is there to catch accidents, not tampering: anyone can recompute it.
 
 ## Coexisting with an existing codebase
 

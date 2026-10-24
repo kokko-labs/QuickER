@@ -5,32 +5,48 @@
 Using the bundled EC order sample, this tutorial walks through one full loop: edit the diagram → output the DDL → generate the code → run the app.
 It uses a SQLite file database, so you need no external database.
 
+The figure shows which file each step updates and how the sample app uses it.
+
+```mermaid
+flowchart LR
+    diagram["EcOrder.json<br/>(ER diagram, edited in 5.)"]
+    ddl["EcOrder.sql<br/>(DDL)"]
+    code["Generated/EcOrder.g.cs<br/>(C# code)"]
+    app["EcOrderSample<br/>(sample app)"]
+    diagram -- "6. Export in the GUI" --> ddl
+    diagram -- "7. CLI generate" --> code
+    ddl -- "Recreates the DB at every start" --> app
+    code -- "Compiled into the build" --> app
+```
+
 ## Prerequisites
 
 - Windows
 - The [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (needed to run the sample and the CLI)
 
-## 1. Install QuickER
+## 1. Clone the repository
+
+The sample lives in the repository, so clone it first (you need this even if you install with the installer).
+
+```powershell
+git clone https://github.com/kokko-labs/QuickER.git
+cd QuickER
+```
+
+Run the later commands in this repository folder.
+
+## 2. Install QuickER
 
 Get the Setup.exe (installer) or the Portable zip (extract and run `QuickER.exe`) from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases).
 For the difference between the channels, see [the Install section of the README](../README.md#install).
 
-To run from source:
+To run from source instead of installing:
 
 ```powershell
-git clone https://github.com/kokko-labs/QuickER.git
-cd QuickER
 dotnet run --project src/QuickER.Gui
 ```
 
-## 2. Run the sample as-is first
-
-The sample lives in the repository, so clone it first (you need this even if you installed with the installer).
-
-```powershell
-git clone https://github.com/kokko-labs/QuickER.git
-cd QuickER
-```
+## 3. Run the sample as-is first
 
 The repository contains the DDL and the C# code generated from the diagram (`EcOrder.json`), already checked in.
 Run it first without changing anything.
@@ -42,12 +58,12 @@ dotnet run --project samples/ec-order/EcOrderSample
 At startup the sample recreates the SQLite file DB from the DDL, then runs scenarios such as registration, graph save, and querying in order.
 It worked if the run ends with "All scenarios succeeded."
 
-## 3. Open the diagram
+## 4. Open the diagram
 
 Launch QuickER and open `samples/ec-order/EcOrder.json` with Ctrl+O.
 The ER diagram holds four tables: customers, products, orders, and order_lines.
 
-## 4. Edit the diagram
+## 5. Edit the diagram
 
 As an experiment, add one column to the products table.
 
@@ -58,12 +74,12 @@ As an experiment, add one column to the products table.
 
 For the editing operations in detail, see [ER diagram editing](er-editor.md).
 
-## 5. Output the DDL
+## 6. Output the DDL
 
 Choose the DDL from "Export" on the toolbar and save it over `samples/ec-order/EcOrder.sql`.
 The sample app recreates the database from this DDL every time it starts, so this alone propagates the schema change to the DB.
 
-## 6. Generate the code
+## 7. Generate the code
 
 Regenerate the C# code from the diagram with the CLI.
 
@@ -78,7 +94,7 @@ dotnet run --project src/QuickER.Cli -- generate `
 `Generated/EcOrder.g.cs` changes, and the `products` Entity and EditModel gain a property for `stock`.
 For generating from the GUI's code-generation dialog and for the generation options in detail, see the [CLI reference](cli.md) and [Using the generated code](code-generation.md).
 
-## 7. Run it again
+## 8. Run it again
 
 ```powershell
 dotnet run --project samples/ec-order/EcOrderSample

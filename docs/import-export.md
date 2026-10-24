@@ -18,18 +18,66 @@ Importing from a live database is the one exception, on its own "DB Import" butt
 | PNG / SVG | — | ✅ |
 | Print / PDF | — | ✅ |
 
+## Information each format carries
+
+The table shows whether each piece of the diagram survives an export followed by a re-import.
+For C# code, see [C# code](#c-code-cs).
+
+| Diagram information | DBML | Mermaid | Excel definition document | Schema JSON |
+|---|---|---|---|---|
+| Table and column descriptions | ✅ | Dropped with a notice | ✅ | ✅ |
+| Table memos | Dropped with a notice | Dropped with a notice | ✅ | ✅ |
+| Nullability | ✅ | Dropped with a notice | ✅ | ✅ |
+| Primary keys | ✅ | ✅ | ✅ | ✅ |
+| Composite primary key order | ✅ | Dropped with a notice (back in column order) | Taken over by the merge import | ✅ |
+| Single-column unique constraints | ✅ | ✅ (one on a foreign key column is dropped with a notice) | ✅ | ✅ |
+| Composite unique constraints | ✅ | Dropped with a notice | ✅ (the column order is taken over by the merge import) | ✅ |
+| Unique constraint names | ✅ | Dropped with a notice | Taken over by the merge import | ✅ |
+| Foreign key column mappings | ✅ (a relationship without a column mapping is not written, with a notice) | Dropped with a notice (the import infers them from the parent's primary key) | ✅ | ✅ |
+| Referential actions | ✅ (`restrict` becomes `NO ACTION`) | Dropped with a notice | ✅ | ✅ |
+| Foreign key constraint names | ✅ | Kept only for labels that qualify (the rest with a notice) | ✅ | ✅ |
+| Computed column setting | Dropped with a notice (becomes an ordinary column) | Dropped with a notice | Taken over by the merge import | ✅ |
+| Settings of columns the database numbers (identity columns) | Dropped with a notice (becomes an ordinary column) | Dropped with a notice | Taken over by the merge import | ✅ |
+| Named queries | Dropped with a notice | Dropped with a notice | Preserved by the merge import | ✅ |
+| Target DBMS | Kept as before the import | Kept as before the import | ✅ | ✅ |
+| Layout (coordinates and colors) | Dropped (auto-arranged) | Dropped (auto-arranged) | Preserved by the merge import | Dropped (auto-arranged on open) |
+
+- ✅: round-trips through export and import
+- Dropped with a notice: the export completion dialog reports it (see [Information a format cannot carry](#information-a-format-cannot-carry))
+- Taken over or preserved by the merge import: the document does not carry it, and the value in the current diagram you import into stays (see [Excel definition documents](#excel-definition-documents-xlsx))
+
 ## Import
 
 Choosing a file from the "Import" button brings the contents into the diagram.
-DBML and Mermaid replace the whole diagram and auto-arrange it afterwards.
-**Excel definition documents are merge-imported**: matching tables and columns take over the identity of the current diagram's elements, so the named-query definitions and hand-placed layout are preserved and no auto-arrange runs.
-DBML and Mermaid ask before replacing a diagram that is not empty: the replacement re-creates the tables and arranges them again, so the hand-placed layout, colors, memos (and, for Mermaid, descriptions) and the undo history are lost even when the structure is identical.
-An Excel definition document continues without asking when the current diagram is empty, or when its structure is identical and the import overwrites no description or memo and breaks no named query.
+
+| Format | Effect on the diagram | Auto-arrange | Confirmation |
+|---|---|---|---|
+| DBML, Mermaid | Replaces the whole diagram | Runs after the import | Asks before replacing a diagram that is not empty |
+| Excel definition document | **Merge import** (matching tables and columns take over the identity of the current diagram's elements) | Does not run | Continues without asking when the current diagram is empty, or when its structure is identical and the import overwrites no description or memo and breaks no named query |
+
+DBML and Mermaid ask because the replacement re-creates the tables and arranges them again, so the hand-placed layout, colors, memos (and, for Mermaid, descriptions) and the undo history are lost even when the structure is identical.
+The merge import of an Excel definition document preserves the named-query definitions and the hand-placed layout.
+
+### Rules shared by the formats
+
+In DBML, Mermaid and the Excel definition document, two tables with the same name, or two columns of one table with the same name, are an import error that names the table (and column).
+Names are compared ignoring letter case and surrounding spaces.
+
+A relationship without a name stays without one and gets the default `FK_{child}_{parent}` from the DDL.
+When that name is already taken, for example by a second unnamed relationship between the same two tables (a second row in an Excel definition document), the import gives it the child's foreign key column names appended, or a number when that is taken too.
+What each format imports as a relationship without a name:
+
+- DBML: a `Ref` without a name (an inline reference has no name either)
+- Mermaid: a relationship whose label is not taken as its constraint name (see [Mermaid](#mermaid-mmd--mermaid) for when it is)
+- Excel definition document: a relationship whose constraint name cell is empty
+- C# code: an unnamed foreign key (see [C# code](#c-code-cs) for when the code writes a name)
 
 ### DBML (.dbml)
 
 Imports DBML consisting of `Table` blocks and `Ref` lines.
 The supported syntax is the subset that QuickER's DBML export writes, and both the syntax and the relationships' column mapping round-trip: the column names written on a `Ref` line are taken as they are, so a relationship comes back connecting exactly the columns the file names.
+
+#### What is read
 
 - Column settings: `pk` (or `primary key`) / `unique` / `null` / `not null` / `note: '...'`, and an inline reference (`ref: > users.id`, see below).
   Other settings, including a `ref` without a target, are skipped; a column is marked as a foreign key by being on the child side of a relationship, not by a setting
@@ -48,23 +96,37 @@ The supported syntax is the subset that QuickER's DBML export writes, and both t
   A line whose two endpoints list a different number of columns, or that names a column the table does not have, keeps the relationship but drops its column mapping (it can be completed in the properties panel)
 - Constraint name and referential actions: the constraint name is the name of a named `Ref` (`Ref FK_name: …`, or `Ref "FK name": …` when it needs quotes), and the referential actions come from the settings block after the endpoints (`[delete: cascade, update: set null]`).
   DBML's `restrict` has no counterpart in QuickER, so it is imported as `NO ACTION`.
-  A `Ref` without a name stays without one and gets the default `FK_{child}_{parent}` from the DDL, unless that name is already taken, for example by a second unnamed `Ref` between the same two tables; then it gets the child's foreign key column names appended, or a number
+  For a `Ref` without a name, see [Rules shared by the formats](#rules-shared-by-the-formats)
 - Inline references: a column setting `ref: <symbol> table.column` is read as the `Ref` line with that column on the left (`user_id integer [ref: > users.id]` is the same as `Ref: posts.user_id > users.id`).
   The exception is one-to-one (`-`): following DBML's rule, the column that carries the `ref` is the foreign key, which is the opposite of a `Ref` line.
   An inline reference has no name and no referential actions.
   A reference that cannot be read, such as a schema-qualified `ref: > public.users.id`, is reported with its line number
-- Quoted identifiers: a table or column name written as `"Order Details"` is read with the quotes removed, and a type written the same way (`"double precision"`, `"integer[]"`) likewise. `\"` and `\` inside the quotes are unescaped
-- Comments: `//` to the end of the line, and `/* ... */` including across several lines. Neither is treated as a comment inside a string, so a description may contain a URL
+- Quoted identifiers: a table or column name written as `"Order Details"` is read with the quotes removed, and a type written the same way (`"double precision"`, `"integer[]"`) likewise.
+  `\"` and `\` inside the quotes are unescaped
+- Comments: `//` to the end of the line, and `/* ... */` including across several lines.
+  Neither is treated as a comment inside a string, so a description may contain a URL
 - Keywords are not case-sensitive (`Table` and `table`, `Ref:` and `ref:` are both read)
-- Skipped: the `Project` / `Enum` / `TableGroup` / `TablePartial` / `Note` / `records` blocks, and table settings written after a table name (`Table users [owner: 'x'] {`). These carry only information QuickER cannot represent, so the block is passed over and the rest of the file is imported
-- Not supported, and reported with the line number rather than skipped: a relationship written as the block form `Ref { ... }` or `Ref name { ... }`, or as a `Ref` line whose settings block comes before the endpoints (skipping either would lose the relationship), a table alias (`Table t as U {`), a `~partial` injection, a `Note` spanning several lines inside a `Table` block, and any other line that cannot be interpreted
 
 A `Ref` line or an inline reference may appear before the `Table` block it points at; they are resolved once every table has been read, and the relationships keep the order they are written in.
-A line that references a table defined nowhere is still an import error reported with its line number.
-
 Tables with no columns get a default PK column (`ID int`).
-Two tables with the same name, or two columns of one table with the same name, are an import error that names the table (and column); names are compared ignoring letter case and surrounding spaces. The same applies to Mermaid and the Excel definition document.
 DBML carries no dialect information, so the diagram's target DB stays as it was before the import.
+
+#### What is skipped
+
+The `Project` / `Enum` / `TableGroup` / `TablePartial` / `Note` / `records` blocks, and table settings written after a table name (`Table users [owner: 'x'] {`), are skipped.
+These carry only information QuickER cannot represent, so the block is passed over and the rest of the file is imported.
+
+#### What is an import error
+
+These are reported with the line number rather than skipped:
+
+- A relationship written as the block form `Ref { ... }` or `Ref name { ... }`, or as a `Ref` line whose settings block comes before the endpoints (skipping either would lose the relationship)
+- A table alias (`Table t as U {`)
+- A `~partial` injection
+- A `Note` spanning several lines inside a `Table` block
+- Any other line that cannot be interpreted
+- A line that references a table defined nowhere
+- Tables or columns with the same name (see [Rules shared by the formats](#rules-shared-by-the-formats))
 
 ### Mermaid (.mmd / .mermaid)
 
@@ -79,26 +141,28 @@ A type is written as a Mermaid type word: spaces and symbols other than `-`, `[`
 A type the import cannot restore, such as `nvarchar(max)` or `double precision`, is reported.
 A column without a type is written with the type `_`, which the import reads back as no type.
 A `UK` key marker is imported as a unique constraint over that single column (Mermaid has no syntax for grouping several columns, so composite unique constraints cannot be expressed).
+Mermaid has no syntax for a foreign key's column mapping, so the import infers it: for every primary key column of the parent it pairs a child column found by name and marks that column as a foreign key, the same rule the GUI uses when you create a relationship.
+A many-to-many relationship carries no column mapping.
 A relationship line must carry a label, so export writes the constraint name there, or `relates` for a relationship without a name.
 A name Mermaid cannot write bare, such as one with a space or a symbol, is written in double quotes, with a `"` folded to `_`.
 On import, a label becomes the constraint name only when it is a single word without quotes, is not `relates`, appears on no other relationship, and is not the name of a primary key or unique constraint.
 Labels such as `has` that other tools repeat are therefore not taken as names, and neither is a constraint that is actually named `relates`.
 Export reports any relationship constraint name that would not come back this way.
-A relationship whose label is not taken stays without a name and gets the default `FK_{child}_{parent}` from the DDL.
-When that name is already taken, for example by a second relationship between the same two tables, it gets the child's foreign key column names appended, or a number.
+For a relationship whose label is not taken, see [Rules shared by the formats](#rules-shared-by-the-formats).
 
 ### Excel definition documents (.xlsx)
 
 Definition documents exported by QuickER can be re-imported.
 In the key column, `UQ{n}` marks unique constraints and the same number means the same constraint, so the columns sharing a number are restored as one constraint (the constraint name is not carried by the document, so it is left unset and synthesized at DDL generation time).
-The document carries neither the order of a constraint's columns, nor which columns are computed, nor the order of a composite primary key, so the merge import takes them from the current diagram: a unique constraint over the same set of columns as one in the current diagram keeps that constraint's column order and, if it has one, its name, and a matching column keeps its computed setting.
+The document carries neither the order of a constraint's columns, nor which columns are computed or numbered by the database, nor the order of a composite primary key, so the merge import takes them from the current diagram: a unique constraint over the same set of columns as one in the current diagram keeps that constraint's column order and, if it has one, its name, and a matching column keeps its computed setting and its setting as a column the database numbers.
 When the primary key has the same set of column names as in the current diagram, the key keeps the order the current diagram set explicitly (the same rule as the merge import of C# code).
-A relationship whose constraint name cell is empty stays without a name and gets the default `FK_{child}_{parent}` from the DDL, unless that name is already taken, for example by a second such row between the same two tables; then it gets the child's foreign key column names appended, or a number.
+For a relationship whose constraint name cell is empty, see [Rules shared by the formats](#rules-shared-by-the-formats).
 Sheet roles are identified by hidden definition tags, so the sheets can be renamed or translated and still import.
 **Excel files created by other applications cannot be imported directly**, though: to migrate definition documents you already have, transcribe them into QuickER's document format once.
 The target DBMS is embedded in the document and restored, dialect and all, on import.
 A document that has lost it (another application that saves the workbook again can drop it) keeps the current diagram's target DBMS.
-The format version is embedded too, and a document written in a newer format than this version supports is reported instead of imported, so information this version cannot read is never silently dropped. Older documents that carry no version are imported as before.
+The format version is embedded too, and a document written in a newer format than this version supports is reported instead of imported, so information this version cannot read is never silently dropped.
+Older documents that carry no version are imported.
 Count mismatches, duplicates, and references to undefined tables are import errors.
 A relationship row counts as a duplicate only when another row has the same pair of tables **and the same columns**, so a diagram with more than one foreign key between the same two tables (a shipping address and a billing address both pointing at the same table, say) round-trips.
 A one-to-one or one-to-many row whose referencing and referenced column cells are both empty is a relationship without a column mapping (the export writes such rows), is never counted as a duplicate, and a row with only one of the two cells empty is an import error.
@@ -117,15 +181,19 @@ Only classes that carry `[Table]` are considered; infrastructure classes such as
 
 Each part of the diagram comes from a specific attribute.
 
-- **Table name**: `[Table]`
-- **Column name**: `[Column]`
-- **Column type and description**: `[DbColumnMeta]`
-- **Table description**: `[DbTableMeta]`
-- **Primary key**: `[Key]`
-- **Composite primary key order**: `PrimaryKeyOrder` of `[DbTableMeta]` (written only when it differs from the declaration order)
-- **Nullability**: whether the property type is `?` (`[Required]` is not used at all)
-- **UNIQUE constraints**: the class-level `[UniqueConstraint]`
-- **Relationships**: `[NavigationReference]`
+| Diagram information | Source |
+|---|---|
+| Table name | `[Table]` |
+| Column name | `[Column]` |
+| Column type and description | `[DbColumnMeta]` |
+| Table description | `[DbTableMeta]` |
+| Primary key | `[Key]` |
+| Composite primary key order | `PrimaryKeyOrder` of `[DbTableMeta]` (written only when it differs from the declaration order) |
+| Nullability | Whether the property type is `?` (`[Required]` is not used at all) |
+| UNIQUE constraints | The class-level `[UniqueConstraint]` |
+| Computed column setting | `[ComputedColumn]` |
+| Setting of a column the database numbers | `[IdentityColumn]` |
+| Relationships | `[NavigationReference]` |
 
 **Everything that is lost or changed is reported as a warning**, listed after the import completes.
 A column property without `[DbColumnMeta]` is skipped, with a dedicated warning when it is the primary key, because the table then comes back without one.
@@ -137,6 +205,7 @@ When one class is split into several `partial` declarations **inside the same fi
 
 **UNIQUE constraints and FK metadata round-trip.**
 A constraint is restored from `[UniqueConstraint("PropA", "PropB", Name = "UQ_...")]` by mapping each property name back to its `[Column]`; the member order is the declaration order, and a missing `Name` means "synthesize at DDL generation time" instead.
+Code generation writes the synthesized name into `Name` even for a constraint without a name, though, so a constraint imported from generated code has that synthesized name as its name.
 A constraint that refers to a property which could not be restored (or that declares no member) is skipped **as a whole**, never narrowed into a different constraint, and reported as a warning.
 The FK constraint name and the referential actions are restored from the named arguments `ConstraintName` / `OnDelete` / `OnUpdate` of `[NavigationReference]`; they are only written out when they differ from the defaults, and an unrecognized action token is warned about and treated as unspecified.
 
@@ -165,7 +234,9 @@ As with the other imports, a replacement confirmation appears when there are str
 **What code cannot say.**
 A description that spans several lines is folded into single spaces when the code is generated (a `///` summary and an attribute literal cannot carry the line breaks), so the import restores the folded text and the original layout of the description is gone.
 The FK constraint name and the referential actions are written out only when they differ from the defaults, so an unnamed constraint with `NO ACTION` on both sides is indistinguishable from "not stated": a merge import keeps whatever the current diagram holds for those fields, and the CLI reverse leaves them at their defaults.
-When two unnamed foreign keys connect the same two tables, their default names would be the same, so the import names the one whose default name is taken, as the other imports do: the child's foreign key column names appended, or a number when that is taken too.
+When two unnamed foreign keys connect the same two tables, their default names would be the same, so the import names the one whose default name is taken, as the other imports do (see [Rules shared by the formats](#rules-shared-by-the-formats)).
+Code generation skips a composite foreign key (two or more column pairs), so it does not appear in the generated code.
+The merge import keeps only many-to-many relationships from the current diagram, so importing C# code drops composite foreign keys from the diagram.
 Entities declared as `record` are not analysed (generated entities are always `class`), and the `Schema` argument of `[Table]` is not read (generation does not write it; a schema-qualified table name lives in the table name itself).
 
 The CLI's `quicker reverse` writes a fresh, merge-free diagram (schema-only JSON) using the same analysis, and creates the parent directory of `--out` when it is missing (see the [CLI reference](cli.md)).
@@ -192,6 +263,9 @@ Use it, separately from a normal save (a `.json` with layout), when you want to 
 ### DBML / Mermaid
 
 Writes out the text formats.
+
+#### DBML
+
 The DBML output is the same subset as the import above (`Table` blocks + `Ref` lines), uses only standard DBML syntax, and the written file can be re-imported with the relationships' column mapping intact.
 That includes composite foreign keys, which are written with DBML's composite Ref syntax (`Ref: Parent.(a, b) < Child.(x, y)`; single-column foreign keys keep the plain `Parent.a < Child.x` form).
 A constraint name is written as the name of a named `Ref` (`Ref FK_Child_Parent: Parent.a < Child.x`), and referential actions other than `NO ACTION` as a settings block after the endpoints (`[delete: cascade]`).
@@ -199,19 +273,23 @@ A column's foreign key marker is carried only by the `Ref` line it is the child 
 A one-to-one or one-to-many relationship without a column mapping, or whose mapping names a column the table no longer has, is not written: DBML expresses a relationship only through its columns, and placeholder columns would come back on import as a foreign key that was never defined.
 A many-to-many relationship is written with each table's first column, which the import does not read, unless one of the tables has no columns, in which case it is not written either.
 Unique constraints are written as the `unique` column setting for unnamed single-column constraints, and as an `Indexes` block (`(col, …) [unique, name: '…']`) for composite and named ones.
-When a composite primary key's own column order differs from the table's column order, the key is written as a `(col, …) [pk]` index at the top of the `Indexes` block instead of the `pk` column setting, so the order round-trips (a table whose key follows the column order is written as before).
+When a composite primary key's own column order differs from the table's column order, the key is written as a `(col, …) [pk]` index at the top of the `Indexes` block instead of the `pk` column setting, so the order round-trips (a table whose key follows the column order uses the `pk` column setting).
 A table, column or constraint name that is not made only of ASCII letters, digits and underscores is written as a DBML quoted identifier (`"Order Details"`, and likewise a Japanese name), as is a type that contains a space, brackets or a double quote (`"double precision"`, `"integer[]"`, `"\"MyType\""`).
 Without the quotes such a name or type cannot be read back, and DBML tools reject a bare name with other characters, Japanese included.
-Mermaid's key column holds a single marker per column, so it is folded to `PK` > `FK` > `UK`, and **`UK` is written only for the columns of single-column constraints** (splitting a composite constraint per column would come back on import as N separate single-column constraints, which means something else, so composite ones are not written).
+DBML also writes table descriptions as `Note:` lines and foreign key referential actions in the settings block of the `Ref:` line (`delete` / `update`; the default `NO ACTION` is not written), so those round-trip as well.
+DBML is useful for working with DBML tools such as dbdiagram.org.
 
-Both formats are useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.
+#### Mermaid
+
+Mermaid's key column holds a single marker per column, so it is folded to `PK` > `FK` > `UK`, and **`UK` is written only for the columns of single-column constraints** (splitting a composite constraint per column would come back on import as N separate single-column constraints, which means something else, so composite ones are not written).
+Mermaid is useful for working with GitHub and documentation tools that render it.
 Mermaid has no syntax for a composite primary key's own column order, since each key column simply carries its `PK` marker, so a key whose order differs from the table's column order comes back in column order on re-import.
 
-DBML also writes table descriptions as `Note:` lines and foreign key referential actions in the settings block of the `Ref:` line (`delete` / `update`; the default `NO ACTION` is not written), so those round-trip as well.
+#### Information a format cannot carry
 
 Information the chosen format cannot represent is listed in the completion dialog (once per format per session, so it does not become noise).
-Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, named queries, computed columns, a single-column unique constraint on a foreign key column (the column's one marker is `FK`), or a composite primary key order that differs from the column order, so it reports whichever of those the diagram actually contains, along with column names, types and table names it had to rewrite and relationship constraint names the import would not read back.
-For DBML only table memos, named queries, computed columns (they come back as ordinary columns), foreign key markers on columns that are not the child side of any relationship, and relationships left out because their columns cannot be written are reported (`Note` is used for the description, so carrying a memo would need a non-standard extension, and interoperability with other tools was given priority).
+Mermaid cannot express descriptions, memos, nullability, composite unique constraints, unique constraint names, foreign key column mappings, referential actions, named queries, computed columns, settings of columns the database numbers (identity columns), a single-column unique constraint on a foreign key column (the column's one marker is `FK`), or a composite primary key order that differs from the column order, so it reports whichever of those the diagram actually contains, along with column names, types and table names it had to rewrite and relationship constraint names the import would not read back.
+For DBML only table memos, named queries, computed columns and settings of columns the database numbers (both come back as ordinary columns), foreign key markers on columns that are not the child side of any relationship, and relationships left out because their columns cannot be written are reported (`Note` is used for the description, so carrying a memo would need a non-standard extension, and interoperability with other tools was given priority).
 SQL DDL and the definition documents report nothing, because the only things they drop are the ones that format is not meant to carry.
 
 ### Excel definition documents (.xlsx)
@@ -250,8 +328,13 @@ Build the re-export into your workflow and the state where "only the documentati
 
 Outputs the whole diagram as an image.
 Neither format is affected by the on-screen zoom level.
-SVG is drawn directly from the diagram's model, so it contains no selection frames or grid background.
-PNG rasterizes the canvas as it is drawn, so the selection state (selection frames and the dimming from relationship highlighting) and the grid background are captured as well.
+
+| Item | PNG | SVG |
+|---|---|---|
+| How it is drawn | Rasterizes the canvas as it is drawn | Drawn directly from the diagram's model |
+| Selection state (selection frames and the dimming from relationship highlighting) and grid background | Captured | Not included |
+| Size cap | 100 million pixels in total (see below) | None |
+
 Clear the selection before exporting a PNG.
 
 Very large diagrams are scaled down before they are rasterized.

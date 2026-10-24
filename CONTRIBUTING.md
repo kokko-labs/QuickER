@@ -2,69 +2,93 @@
 
 *English | [日本語](CONTRIBUTING.ja.md)*
 
-QuickER is a solo-developed OSS project. Issues and pull requests are welcome, but support is **best-effort** (no promised response times) and covers **the latest version only**.
+QuickER is a solo-developed OSS project.
+Issues and pull requests are welcome, but support is **best-effort** (no promised response times) and covers **the latest version only**.
 
 ## Issues (bug reports / feature requests)
 
-- Please use the issue templates (bug report / feature request). For questions or discussions that don't fit the templates, a blank issue is fine
+- Please use the issue templates (bug report / feature request).
+  For questions or discussions that don't fit the templates, a blank issue is fine
 - Japanese and English are both welcome
 - For bug reports, environment information (version, how you installed it, OS, .NET runtime) and reproduction steps are prerequisites for investigation
-- **Do not report vulnerabilities in public Issues.** Follow the private reporting procedure in [SECURITY.md](SECURITY.md)
+- **Do not report vulnerabilities in public Issues.**
+  Follow the private reporting procedure in [SECURITY.md](SECURITY.md)
 
 ## Pull requests
 
-- **Before opening a PR, please discuss your plan in an Issue first** (discussion-first policy). Small fixes such as typo corrections don't need prior discussion
+- **Before opening a PR, please discuss your plan in an Issue first** (discussion-first policy).
+  Small fixes such as typo corrections don't need prior discussion
 - Large PRs without prior discussion may be closed if they don't fit the project direction
 
 ### Development conventions
 
-- Development environment: Windows + .NET 10 SDK (the tests depend on WPF). With Docker running, the real-DB integration tests also run (they are skipped automatically otherwise)
+- Development environment: Windows + .NET 10 SDK (the tests depend on WPF).
+  With Docker running, the real-DB integration tests also run (they are skipped automatically otherwise)
 - Comments and commit messages are written in Japanese
 - Run `csharpier format .` after code changes (global tool)
 - Make sure `dotnet test QuickER.slnx` is green
-- English documents are checked with [Vale](https://vale.sh). Run `vale sync` once, then `vale --glob='*.md' .` (Japanese documents are out of scope; the settings live in [.vale.ini](.vale.ini))
-- If you change the generation templates (`src/QuickER.CodeGen.CSharp/Templates/**/*.scriban`), the checked-in fixtures etc. must be regenerated. The following script performs regenerate → verify → show diff:
+- English documents are checked with [Vale](https://vale.sh).
+  Run `vale sync` once, then `vale --glob='*.md' .` (Japanese documents are out of scope; the settings live in [.vale.ini](.vale.ini))
+- If you change the generation templates (`src/QuickER.CodeGen.CSharp/Templates/**/*.scriban`), the checked-in fixtures etc. must be regenerated.
+  The following script regenerates them, verifies the result, and shows the diff.
 
   ```powershell
   ./scripts/regen-fixtures.ps1
   ```
 
-  Without the script, regenerate with the following one-liner, then run the same tests again without the environment variable and confirm they are green:
+  Without the script, regenerate with the following one-liner, then run the same tests again without the environment variable and confirm they are green.
 
   ```powershell
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
   ```
 
-- For changes that affect users, add an entry to the Unreleased section of the changelog, in **both** [CHANGELOG.md](CHANGELOG.md) (English) and [CHANGELOG.ja.md](CHANGELOG.ja.md) (Japanese). Internal refactoring and test-only changes need no entry, so the section is often empty, which is expected. How to write an entry:
+- For changes that affect users, add an entry to the Unreleased section of the changelog, in **both** [CHANGELOG.md](CHANGELOG.md) (English) and [CHANGELOG.ja.md](CHANGELOG.ja.md) (Japanese).
+  Internal refactoring and test-only changes need no entry, so the section is often empty, which is expected.
+  Write an entry as follows
   - **Headings**: under the type heading (`### Breaking changes` / `### Added` / `### Changed` / `### Security` / `### Fixed` / `### Removed`; the Japanese file keeps these in English), group entries by area with a sub-heading (`#### Diagram editing & files` / `#### DB import` / `#### DB sync & DDL` / `#### C# code import` / `#### Code generation dialog` / `#### Generated code` / `#### Bidirectional sync` / `#### AI chat & mock generation` / `#### CLI & MCP` / `#### Distribution & settings` / `#### License`, and so on), adding the heading if it is not there yet
-  - **Length**: a bold summary followed by one to three sentences. Say what changed and what the user needs to do, nothing more; the reasoning and the internals belong in the docs (for users) or CLAUDE.md (for developers), linked if needed
+  - **Length**: a bold summary followed by one to three sentences.
+    Say what changed and what the user needs to do, nothing more; the reasoning and the internals belong in the docs (for users) or CLAUDE.md (for developers), linked if needed
   - **Breaking changes**: write them under `### Breaking changes` only (not repeated in another section), with a one- or two-sentence migration step
-  - **Consolidation**: fold a change into the existing entry on the same topic. A fix to a feature added during the same Unreleased period gets no entry, since no user ever saw the bug
+  - **Consolidation**: fold a change into the existing entry on the same topic.
+    A fix to a feature added during the same Unreleased period gets no entry, since no user ever saw the bug
   - **Highlights**: at release time, open the section with a three-to-five-line list of highlights
 
 The architecture and the invariants that break silently (not caught by the build or the type checker) are documented in [CLAUDE.md](CLAUDE.md).
 
 ## License and rights handling for contributions
 
-- This repository uses **MIT** and **PolyForm Noncommercial 1.0.0 with Additional Grants** on a per-project basis: most of it is MIT, while the AI features, the code generation, the CLI, and the MCP tool-execution host (8 projects) are PolyForm NC plus the additional grants (see [LICENSE-NC.md](LICENSE-NC.md) for the covered projects and the formal terms, and [LICENSING.md](LICENSING.md) / [LICENSING.ja.md](LICENSING.ja.md) for a plain-language guide)
+- This repository uses **MIT** and **PolyForm Noncommercial 1.0.0 with Additional Grants** on a per-project basis.
+  Most of it is MIT, while the AI features, the code generation, the CLI, and the MCP tool-execution host (8 projects) are PolyForm NC plus the additional grants (see [LICENSE-NC.md](LICENSE-NC.md) for the covered projects and the formal terms, and [LICENSING.md](LICENSING.md) / [LICENSING.ja.md](LICENSING.ja.md) for a plain-language guide)
 - By submitting code, you agree that it will be published under the current license of the project it is merged into
-- For contributions to the PolyForm NC projects, you additionally grant the author (the repository owner) the right to offer commercial licenses for software containing your code, and to change its license in the future (including making it free of charge). This arrangement keeps external contributions from blocking future changes to the licensing and distribution policy
+- For contributions to the PolyForm NC projects, you additionally grant the author (the repository owner) the right to offer commercial licenses for software containing your code, and to change its license in the future (including making it free of charge).
+  This arrangement keeps external contributions from blocking future changes to the licensing and distribution policy
 
 ## Versioning
 
-- We follow [Semantic Versioning](https://semver.org/). All distributables (the GUI, the CLI, and the runtime packages) are versioned in lockstep, managed via `VersionPrefix` in `Directory.Build.props`
-- Version bump rules during 0.x:
+- We follow [Semantic Versioning](https://semver.org/).
+  All distributables (the GUI, the CLI, and the runtime packages) are versioned in lockstep, managed via `VersionPrefix` in `Directory.Build.props`
+- The version bump rules during 0.x are as follows
   - **minor** (0.2.0 → 0.3.0): new features and breaking changes (changes to the Repository API or to the signatures/structure of the generated code, package dependency changes)
-  - **patch** (0.2.0 → 0.2.1): bug fixes only. A fix that doesn't break calling code counts as a patch, even if the internals of the generated code change
+  - **patch** (0.2.0 → 0.2.1): bug fixes only.
+    A fix that doesn't break calling code counts as a patch, even if the internals of the generated code change
 - 1.0.0 will be declared when we judge that compatibility of the generated code and the Repository API can be promised
 
 ## Release procedure (for maintainers)
 
-Releases always ship **all distributables together** (the NuGet packages, the GUI distributables (Velopack: full / lite × Setup.exe / Portable zip), and the git tag `v{version}`). Timing is discretionary; no cadence is promised.
+Releases always ship **all distributables together** (the NuGet packages, the GUI distributables (Velopack: full / lite × Setup.exe / Portable zip), and the git tag `v{version}`).
+Timing is discretionary; no cadence is promised.
 
-1. Review the Unreleased section of the changelog and decide the version number (minor / patch per the rules above). Rename that section to the version with a release date (`## [0.2.0] - 2026-09-01`) and open a fresh empty `## [Unreleased]` above it, in **both [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.ja.md](CHANGELOG.ja.md)**
+1. Review the Unreleased section of the changelog and decide the version number (minor / patch per the rules above).
+   Rename that section to the version with a release date (`## [0.2.0] - 2026-09-01`) and open a fresh empty `## [Unreleased]` above it, in **both [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.ja.md](CHANGELOG.ja.md)**
 2. Update `VersionPrefix` in `Directory.Build.props` and commit it together with the changelog finalization as a single commit
-3. Push the commit. The workflows below run on GitHub against the pushed ref, so an unpushed commit would publish the previous version
-4. Run publish.yml (the NuGet packages) via workflow_dispatch. `dry_run` defaults to true and goes as far as packing and verifying, without pushing to NuGet.org: that every package declares its README and icon, that no `.pdb` leaks into the tool package, and that all versions match. Check that run, then run it again with `dry_run=false`. Before pushing, that run fails if every package is already published at this version (a forgotten `VersionPrefix` bump); if only some are, it treats the run as a retry of an interrupted publish, lists those packages, and skips them. Symbol packages (`.snupkg`) are pushed alongside the main packages and are validated separately by NuGet.org, which reports any failure by email
-5. Run release.yml (publishes the GUI distributables and creates the git tag) via workflow_dispatch. Its `dry_run` input also defaults to true, so check the artifacts of the dry run first, then run it for real with `dry_run=false`
+3. Push the commit.
+   The workflows below run on GitHub against the pushed ref, so an unpushed commit would publish the previous version
+4. Run publish.yml (the NuGet packages) via workflow_dispatch.
+   `dry_run` defaults to true and goes as far as packing and verifying, without pushing to NuGet.org.
+   The verification checks that every package declares its README and icon, that no `.pdb` leaks into the tool package, and that all versions match.
+   Check that run, then run it again with `dry_run=false`.
+   Before pushing, that run fails if every package is already published at this version (a forgotten `VersionPrefix` bump); if only some are, it treats the run as a retry of an interrupted publish, lists those packages, and skips them.
+   Symbol packages (`.snupkg`) are pushed alongside the main packages and are validated separately by NuGet.org, which reports any failure by email
+5. Run release.yml (publishes the GUI distributables and creates the git tag) via workflow_dispatch.
+   Its `dry_run` input also defaults to true, so check the artifacts of the dry run first, then run it for real with `dry_run=false`
 6. Copy the changelog content for the version into the GitHub Release notes (release.yml creates the release with an empty body on purpose, so the curated changelog stays the single source for what shipped)
