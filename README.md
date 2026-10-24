@@ -38,7 +38,7 @@ The background and a walkthrough with screenshots are in an [introductory articl
 ### 1. Install QuickER
 
 Download and run the [Full installer](https://github.com/kokko-labs/QuickER/releases/latest/download/QuickER-win-full-Setup.exe) (see [Install](#install) for the portable and lite builds).
-To run from source, use `dotnet run --project src/QuickER.Gui`.
+To run from source, clone the repository as in the next step, then run `dotnet run --project src/QuickER.Gui`.
 
 That is all you need to start creating and editing ER models.
 The steps below use the bundled sample to go all the way to running the generated code.
@@ -88,7 +88,7 @@ Design tables, columns, primary keys, foreign keys, unique constraints, and rela
 - One-to-one / one-to-many / many-to-many
 - Composite primary keys
 - Unique constraints (single-column and composite)
-- Cascade / SetNull / NoAction
+- NoAction / Cascade / SetNull / SetDefault
 - Undo / Redo
 - Zoom, pan, and minimap
 - Entity search
@@ -105,13 +105,13 @@ See [ER diagram editing](docs/er-editor.md) for details.
 Import the schema from an existing database and edit it as an ER model.
 You can also detect the differences between the ER model and the database and generate a sync SQL script.
 
-| DBMS       | Schema import | Diff sync | DDL generation | Dialect switch |
-| ---------- | :-: | :-: | :-: | :-: |
+| DBMS | Schema import | Diff sync | DDL generation | Dialect switch |
+| --- | --- | --- | --- | --- |
 | SQL Server | ✅ | ✅ | ✅ | ✅ |
 | PostgreSQL | ✅ | ✅ | ✅ | ✅ |
-| MySQL      | ✅ | ✅ | ✅ | ✅ |
-| Oracle     | ✅ | ✅ | ✅ | ✅ |
-| SQLite     | ✅ | ✅ | ✅ | ✅ |
+| MySQL | ✅ | ✅ | ✅ | ✅ |
+| Oracle | ✅ | ✅ | ✅ | ✅ |
+| SQLite | ✅ | ✅ | ✅ | ✅ |
 
 Each diagram keeps its target DBMS, and you can switch to another SQL dialect (each database's own types and syntax) at any time.
 Types are converted automatically where possible, and types that cannot be converted are flagged with a warning.
@@ -210,6 +210,7 @@ Optionally generated:
 | --- | --- |
 | QuickER Repository | A lightweight, ADO-based Repository (SQL Server / SQLite) |
 | EF Core Repository | A DbContext and a Repository backed by EF Core (all five supported databases) |
+| In-memory Repository for tests | An in-memory implementation of the same contract, for unit tests without a database |
 | Value objects | A dedicated type per column, so passing the wrong kind of value fails to compile |
 | Named queries | Turns the search conditions, ordering, and projections saved in the diagram into typed Repository methods |
 | Remote Repository interfaces | A contract limited to the operations that can cross a network boundary |
@@ -237,12 +238,13 @@ See [Using the generated code](docs/code-generation.md) for details.
 The generation dialog lets you choose the data-access layer from three options.
 
 | Option | Target DB | Use |
-|---|---|---|
+| --- | --- | --- |
 | **None** | — | Implement data access yourself |
 | **QuickER Repository** | SQL Server / SQLite | Use a lightweight ADO-based Repository |
 | **EF Core Repository** | The 5 supported DBMS | Use a DbContext and LINQ |
 
-> **Prerequisite**: Repository generation targets tables whose primary key is a single, application-assigned column. Tables with a composite primary key or DB auto-numbering can use the Entity / EditModel only.
+> **Prerequisite**: Repository generation targets tables whose primary key is a single, application-assigned column.
+> Tables with a composite primary key or DB auto-numbering can use the Entity / EditModel only.
 
 The QuickER Repository ships with:
 
@@ -250,7 +252,7 @@ The QuickER Repository ships with:
 - `Include` / `ThenInclude`
 - Graph save
 - Bulk operations
-- Conflict detection on graph save (when the target row no longer exists; concurrency control by `rowversion` comparison is out of scope)
+- Conflict detection on save (reports a row that has vanished; with a `rowversion` column, optimistic concurrency also reports a row whose version moved on, told apart from a vanished one)
 - Raw SQL execution
 
 The QuickER Repository and the EF Core Repository implement the same interfaces.
@@ -281,7 +283,8 @@ Passing the wrong kind of ID by mistake becomes a compile-time error.
 For a value object representing a string primary key, enabling `UseGuidKeyForStringPrimaryKey` mints new keys as GUIDs, which satisfies the application-assigned key prerequisite without any numbering logic of your own.
 
 Validation code that the column definitions imply, such as maximum lengths and `decimal` precision, is generated as well.
-Add custom validation and display names through partial classes.
+Add custom validation through the partial `OnValidate` hook.
+To change messages and display names, replace the functions that produce them at startup.
 
 ## Named queries
 
@@ -456,7 +459,7 @@ QuickER itself is a mixed-license repository.
 The licenses apply per project, so the single license label GitHub displays does not tell the whole story.
 
 | Scope | License |
-| ---------------------------------------- | --------------------------------------------------- |
+| --- | --- |
 | The ER designer, import/export, DDL generation, DB import/sync, the runtime packages, and so on | [MIT License](LICENSE) |
 | The AI features, the code-generation projects, and the MCP tool-execution host | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) + additional grants |
 

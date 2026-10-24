@@ -11,10 +11,10 @@ QuickER の CLI は、コード生成用のサブコマンド（`generate` / `sc
 | `quicker reverse` | 生成 C# ソース（`IncludeDataAnnotations` 有効で生成した `.g.cs`） | スキーマのみの ER 図 JSON |
 
 CLI の表示言語は OS の言語設定に従います（日本語 / 英語）。
-Ctrl+C でコマンドを中断すると、それ以上何も出さずに終了コード `130` で終わります。
+終了コードは[終了コード](#終了コード)にまとめています。
 
 `dotnet tool install --global QuickER.Cli` でインストールできます。
-ソースから実行する場合:
+ソースから実行する場合は次のとおりです。
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate --schema diagram.json --out ./Generated
@@ -41,11 +41,16 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。
 各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、オプションごと省略すると `--provider` の方言から単一導出します。値を書いて方言が 1 つも含まれない場合はエラーです）。
 
-機械的変換には例外があります。
+機械的変換には次の例外があります。
+API リファレンス関連の 3 キーと生成コードのサブフォルダは短い綴りのフラグを使い、正準キー `OutputFileName` には専用フラグがありません。
 
-- API リファレンス関連の 3 キーと生成コードのサブフォルダは短い綴りです。
-  `ApiDocsLanguage` → `--api-docs-lang`・`ApiDocsSubdirectory` → `--api-docs-subdir`・`ApiDocsFileName` → `--api-docs-file`・`CodeSubdirectory` → `--code-subdir`
-- 正準キー `OutputFileName` には専用フラグがなく、`--output-path`（そのファイル名部分のみが使われる）を使います
+| キー | フラグ |
+|---|---|
+| `ApiDocsLanguage` | `--api-docs-lang` |
+| `ApiDocsSubdirectory` | `--api-docs-subdir` |
+| `ApiDocsFileName` | `--api-docs-file` |
+| `CodeSubdirectory` | `--code-subdir` |
+| `OutputFileName` | 専用フラグはなく、`--output-path`（そのファイル名部分のみが使われる）を使う |
 
 置き換え対象の `.g.cs` が生成後に手で編集されていると、`generate` は何も書かず、編集されたファイルの一覧を標準エラーへ出して終了コード `2` で終わります（その他の失敗は `1`）。
 編集内容を `partial` クラスなどの別ファイルへ移すか、破棄してよければ `--force` を付けて再実行してください。
@@ -71,7 +76,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 ## quicker reverse
 
 QuickER が生成した C# コードから ER 図を復元し、スキーマのみの図 JSON として書き出します。
-入力は、生成されたエンティティを含む `.g.cs`（分割出力・層別出力では `Entities.g.cs`、非分割ではその出力ファイル）を `IncludeDataAnnotations` を有効にして生成したものである必要があります。
+入力は生成されたエンティティを含む `.g.cs`（分割出力・層別出力では `Entities.g.cs`、非分割ではその出力ファイル）を `IncludeDataAnnotations` を有効にして生成したものである必要があります。
 エンティティクラスだけが `[Table]` を持ち、DB 定義メタ属性 `[DbTableMeta]` / `[DbColumnMeta]` がスキーマ情報を担うためです。
 手書きの POCO は対象外です。
 
@@ -104,13 +109,20 @@ quicker mcp
 エージェントはこれを子プロセスとして起動し、標準入出力（JSON-RPC）で通信します。
 ツールの全一覧・クライアント設定・注意事項は [MCP サーバ](mcp.ja.md)を参照してください。
 
+## 終了コード
+
+| コード | 意味 | コマンド |
+|---|---|---|
+| `1` | 下の `2` と `130` 以外の失敗 | すべて |
+| `2` | 置き換え対象の `.g.cs` が生成後に手で編集されていたため、何も書かなかった（`--force` で上書き） | `generate` / `scaffold` |
+| `2` | `--out` が既にあるファイルを指していたため、何も書かなかった（`--force` で上書き） | `reverse` |
+| `130` | Ctrl+C で中断した（それ以上何も出さない） | すべて |
+
 ## 設定ファイル（quicker.json）
 
 `--config` で渡す JSON で、生成オプションをまとめて指定できます。
 これは GUI の設定保存ファイル（`codegen-settings.json`）と**同一スキーマ**です（GUI は camelCase で書き出しますが、CLI はキーの大文字小文字を区別せず読むためそのまま渡せます。GUI も同じ規則で読むので、PascalCase で書いた `quicker.json` もコード生成ダイアログの「設定読込」で読めます。ただし CLI だけのキー `OutputFileName` は読みません）。
 **下表の各キーは同名の kebab-case フラグとして CLI からも指定でき、設定ファイルより優先されます**（優先順位: CLI フラグ ＞ 設定ファイル ＞ 既定値。bool は `--flag` / `--flag false` の三値）。
-
-> **注意**: `GenerateRepositories` の既定が `true` → `false` になりました。以前はキーを省略すると QuickER 版 Repository が生成されましたが、**現在は DB アクセスコードを生成するには `GenerateRepositories: true`（または `GenerateEfCoreRepositories: true`）の明示指定が必要**です（GUI の DB アクセス「なし」既定と揃えるため）。
 
 キーはカテゴリ順（出力モード → 名前空間 → 生成対象 → 値オブジェクト → DB アクセス → リモート対応 → ランタイム・ドキュメント → 属性 → 出力先）に並べています。
 
@@ -128,34 +140,95 @@ quicker mcp
 }
 ```
 
-主なキー（かっこ内は既定値・カテゴリ順）:
+主なキーをカテゴリごとに挙げます（かっこ内は既定値）。
+
+### 出力モード
 
 | キー | 説明 |
 |---|---|
 | `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
 | `LayeredOutput`（`false`） | 分割ファイルを出力ディレクトリ配下の層別サブフォルダ（ドメイン／プレゼンテーション／インフラ／サーバー）へ振り分け、各層を独立プロジェクトにできるようにする。`SplitFilesByCategory` を自動含意（[生成コードの使い方](code-generation.ja.md#層別フォルダ出力--layered-output) 参照） |
-| `DomainLayerDirectory` / `PresentationLayerDirectory` / `InfrastructureLayerDirectory` / `ServerLayerDirectory`（`Domain` / `Presentation` / `Infrastructure` / `Server`） | `LayeredOutput` の層別フォルダ（出力ディレクトリからの相対パス）。複数階層（`MyApp.Domain/Generated`）も可。`LayeredOutput` では空の名前空間キーの既定もこのフォルダから導出され、フォルダと名前空間が揃う。絶対パス・ドライブ指定・`.` と `..`・空の区間・ファイル名に使えない文字・区間の先頭の空白・区間の末尾の `.` と空白・`~`・予約されたデバイス名（`CON` など）・255 文字を超える区間は生成時エラーで拒否され（エラーに当たった規則が出る）、空の値は既定へフォールバックする。`ServerLayerDirectory` は `GenerateRemoteServices` のときのみ使われる |
+| `DomainLayerDirectory` / `PresentationLayerDirectory` / `InfrastructureLayerDirectory` / `ServerLayerDirectory`（`Domain` / `Presentation` / `Infrastructure` / `Server`） | `LayeredOutput` の層別フォルダ（出力ディレクトリからの相対パス）。複数階層（`MyApp.Domain/Generated`）も可。`ServerLayerDirectory` は `GenerateRemoteServices` のときのみ使われる |
 | `CodeSubdirectory`（未指定＝サブフォルダなし） | 生成コード（`*.g.cs`）の出力先サブフォルダ。`LayeredOutput` では層フォルダの下、そうでなければ出力ディレクトリの下へ 1 段（例: `Generated`・複数階層可）。全出力モードで有効で、**名前空間には影響しない**ため C# 識別子である必要もない。絶対パスと `..` は拒否。API リファレンス Markdown は追随しない（CLI の `--code-subdir` に対応） |
+
+- `LayeredOutput` では、空の名前空間キーの既定も層別フォルダから導出され、フォルダと名前空間が揃う
+- 層別フォルダの次の値は生成時エラーで拒否され、エラーに当たった規則が出る。空の値は既定へフォールバックする
+  - 絶対パス・ドライブ指定
+  - `.` と `..`・空の区間
+  - ファイル名に使えない文字
+  - 区間の先頭の空白・区間の末尾の `.` と空白
+  - `~`
+  - 予約されたデバイス名（`CON` など）
+  - 255 文字を超える区間
+
+### 名前空間
+
+| キー | 説明 |
+|---|---|
 | `RootNamespace`（`Generated`） | 生成コードのルート名前空間 |
+
+### 生成対象
+
+| キー | 説明 |
+|---|---|
 | `GenerateEditModels` / `GenerateMappers`（ともに `true`） | 各カテゴリの生成有無。**Entity クラスは常時生成**され、専用キーはない |
+
+### 値オブジェクト
+
+| キー | 説明 |
+|---|---|
 | `GenerateValueObjects`（`false`） | 列ごとの値オブジェクト型（`CustomerIdValue` など）を生成する（[生成コードの使い方](code-generation.ja.md#値オブジェクトgeneratevalueobjects) 参照） |
 | `UseGuidKeyForStringPrimaryKey`（`false`） | string 主キーを GUID 値オブジェクトにする（`GenerateValueObjects` が有効な場合のみ） |
+
+### DB アクセス
+
+| キー | 説明 |
+|---|---|
 | `GenerateRepositories`（`false`） | QuickER 版 Repository（軽量ミニ ORM）を生成する。**既定では DB アクセスコードを生成しない**（GUI と同じ既定） |
-| `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。対応方言は `sqlserver` と `sqlite` のみで、それ以外を `GenerateRepositories` と併用すると生成前にエラーになる。未指定時の実効値は `--repository-dialects` ＞ 設定ファイルの本キー ＞ `--provider` からの単一導出、の順で決まる。設定ファイルの本キーが null・空配列なら導出へ回るが、`--repository-dialects` に「方言を 1 つも含まない値」（カンマや空白だけ）を渡した場合は導出せずエラーにする |
+| `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。対応方言は `sqlserver` と `sqlite` のみで、それ以外を `GenerateRepositories` と併用すると生成前にエラーになる |
 | `ExcludeUnboundedBinaryColumns`（`false`） | 無制限バイナリ列を QuickER 版 Repository の SELECT / UPDATE から除外する（CLI の `--exclude-unbounded-binary-columns` に対応。[生成コードの使い方](code-generation.ja.md#無制限バイナリ列の除外excludeunboundedbinarycolumns) 参照） |
 | `GenerateEfCoreRepositories`（`false`） | EF Core 用の `QuickErDbContext` ＋ EF Core 版 Repository 実装を生成する。マルチターゲット（実効方言 2 つ以上）とは併用不可 |
 | `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する |
+| `GenerateSyncSupport`（`false`） | サーバー（SQL Server）＋ローカル（SQLite）構成の双方向同期支援を生成する。`GenerateRepositories` が有効で実効方言が `sqlserver` と `sqlite` のちょうど 2 つ、かつ単一の主キー列を持つテーブルが 1 つ以上あることが前提（`rowversion` 列の有無は、同期の対象かどうかではなくモードを決める）（`ExcludeUnboundedBinaryColumns` とは併用可能で、除外列は `SyncOptions.IncludeUnboundedBinary` を指定したときだけ運ばれる）。CLI の `--generate-sync-support` に対応。[生成コードの使い方](code-generation.ja.md#双方向同期の支援--generate-sync-support) 参照 |
+
+- `RepositoryDialects` が未指定のときの実効値は、`--repository-dialects` ＞ 設定ファイルの本キー ＞ `--provider` からの単一導出、の順で決まる。
+  設定ファイルの本キーが null・空配列なら導出へ回るが、`--repository-dialects` に「方言を 1 つも含まない値」（カンマや空白だけ）を渡した場合は導出せずエラーにする
+
+### リモート対応
+
+| キー | 説明 |
+|---|---|
 | `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--generate-remote-contracts` に対応。QuickER 版 Repository・EF Core 版 Repository・インメモリ Repository のいずれか＝`GenerateRepositories` / `GenerateEfCoreRepositories` / `GenerateInMemoryRepositories` のいずれかが前提。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateRemoteServices`（`false`） | リモート面の HTTP クライアント／サーバー実装を生成する（`GenerateRemoteContracts` を自動的に含意。CLI の `--generate-remote-services` に対応。[生成コードの使い方](code-generation.ja.md) 参照） |
-| `GenerateSyncSupport`（`false`） | サーバー（SQL Server）＋ローカル（SQLite）構成の双方向同期支援を生成する。`GenerateRepositories` が有効で実効方言が `sqlserver` と `sqlite` のちょうど 2 つ、かつ単一の主キー列を持つテーブルが 1 つ以上あることが前提（`rowversion` 列の有無は、同期の対象かどうかではなくモードを決める）（`ExcludeUnboundedBinaryColumns` とは併用可能で、除外列は `SyncOptions.IncludeUnboundedBinary` を指定したときだけ運ばれる）。CLI の `--generate-sync-support` に対応。[生成コードの使い方](code-generation.ja.md#双方向同期の支援--generate-sync-support) 参照 |
+
+### ランタイム・ドキュメント
+
+| キー | 説明 |
+|---|---|
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.ja.md) 参照） |
 | `GenerateApiDocs`（`false`） | API リファレンス Markdown を `ApiDocsLanguage` の言語で追加出力する（CLI の `--generate-api-docs` に対応。[生成コードの使い方](code-generation.ja.md) 参照） |
 | `ApiDocsLanguage`（`English`） | API リファレンス Markdown の言語。`English` は `{ベース名}.g.md`、`Japanese` は `{ベース名}.ja.g.md` だけ、`Both` は両方を出力する。値は名前で書き、大文字小文字は区別しない（`GenerateApiDocs` が前提。CLI の `--api-docs-lang` に対応） |
 | `ApiDocsSubdirectory`（未指定＝出力ディレクトリ直下） | API リファレンス Markdown の出力先サブフォルダ（出力ディレクトリからの相対パス。例: `docs`・複数階層可・絶対パスと `..` は拒否）。`GenerateApiDocs` が前提で `LayeredOutput` とは独立（CLI の `--api-docs-subdir` に対応） |
-| `ApiDocsFileName`（未指定＝導出名） | API リファレンス Markdown の出力ファイル名（拡張子は `.g.md` へ正規化・日本語版は同じベース名の `.ja.g.md`）。未指定なら従来どおりの導出名（非分割＝出力ファイル名のベース名／分割＝`ApiDocs.g.md`）。指定できるのはファイル名だけでパス区切りは拒否（置き場は `ApiDocsSubdirectory`）。`GenerateApiDocs` が前提（CLI の `--api-docs-file` に対応） |
+| `ApiDocsFileName`（未指定＝導出名） | API リファレンス Markdown の出力ファイル名（拡張子は `.g.md` へ正規化・日本語版は同じベース名の `.ja.g.md`）。未指定なら導出名（非分割＝出力ファイル名のベース名／分割＝`ApiDocs.g.md`）。指定できるのはファイル名だけでパス区切りは拒否（置き場は `ApiDocsSubdirectory`）。`GenerateApiDocs` が前提（CLI の `--api-docs-file` に対応） |
+
+### 属性
+
+| キー | 説明 |
+|---|---|
 | `IncludeDataAnnotations`（`true`） | 文書・検証系の属性（`[Table]` / `[Key]` / `[Required]` / `[MaxLength]`）と DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）を付与する。`[Column]` はこのキーの対象外で常時付与される |
 | `IncludeJsonIgnoreOnParentNavigation`（`true`） | 親参照ナビゲーションへ `[JsonIgnore]` を付与する（JSON シリアライズ時の循環参照対策） |
-| `OutputFileName`（`QuickEREntities.g.cs`・別名 `OutputPath` も受け付ける） | 単一ファイル出力のファイル名（`.g.cs` が無ければ補われる。`SplitFilesByCategory` が真のときは無視）。正準キーは `OutputFileName` で、`get_generation_config_schema` が返すのもこの名前。`OutputPath` はその別名で、ファイル名部分のみが使われる（出力先ディレクトリは常に `--out`）。GUI では `OutputPath` に出力先のフルパス（非分割時はファイル・分割時はフォルダ）が入ることがあるが、CLI は同じ規則で解釈する。**ここだけは「CLI フラグ ＞ 設定ファイル」の例外**で、`--output-path` が効くのは設定ファイルに `OutputFileName` が無い場合のみ。設定ファイルに `OutputFileName` があるときはそちらが優先される |
+
+### 出力先
+
+| キー | 説明 |
+|---|---|
+| `OutputFileName`（`QuickEREntities.g.cs`・別名 `OutputPath` も受け付ける） | 単一ファイル出力のファイル名（`.g.cs` が無ければ補われる。`SplitFilesByCategory` が真のときは無視） |
+
+- 正準キーは `OutputFileName` で、`get_generation_config_schema` が返すのもこの名前。
+  `OutputPath` はその別名で、ファイル名部分のみが使われる（出力先ディレクトリは常に `--out`）。
+  GUI では `OutputPath` に出力先のフルパス（非分割時はファイル・分割時はフォルダ）が入ることがあるが、CLI は同じ規則で解釈する
+- **ここだけは「CLI フラグ ＞ 設定ファイル」の例外**で、`--output-path` が効くのは設定ファイルに `OutputFileName` が無い場合のみ。
+  設定ファイルに `OutputFileName` があるときはそちらが優先される
 
 ## 同梱サンプルを再生成する
 

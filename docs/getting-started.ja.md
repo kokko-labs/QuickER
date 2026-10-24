@@ -5,25 +5,26 @@
 同梱の EC 注文サンプルで、「図を編集する → DDL を出す → コードを生成する → アプリを動かす」の一巡をたどります。
 SQLite のファイルデータベースを使うため、外部データベースの準備は要りません。
 
+各手順で更新するファイルと、そのファイルがサンプルアプリで使われるまでの流れは次のとおりです。
+
+```mermaid
+flowchart LR
+    diagram["EcOrder.json<br/>（ER 図・5. で編集）"]
+    ddl["EcOrder.sql<br/>（DDL）"]
+    code["Generated/EcOrder.g.cs<br/>（C# コード）"]
+    app["EcOrderSample<br/>（サンプルアプリ）"]
+    diagram -- "6. GUI の「出力」" --> ddl
+    diagram -- "7. CLI の generate" --> code
+    ddl -- "起動のたびに DB を作り直す" --> app
+    code -- "ビルドに含まれる" --> app
+```
+
 ## 前提
 
 - Windows
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)（サンプルの実行と CLI に必要）
 
-## 1. QuickER をインストールする
-
-[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe（インストーラー）または Portable zip（展開して `QuickER.exe` を実行）を入手します。
-チャンネルの違いは [README のインストール節](../README.ja.md#インストール)を参照してください。
-
-ソースコードから起動する場合は次のとおりです。
-
-```powershell
-git clone https://github.com/kokko-labs/QuickER.git
-cd QuickER
-dotnet run --project src/QuickER.Gui
-```
-
-## 2. まずサンプルをそのまま動かす
+## 1. リポジトリを clone する
 
 サンプルはリポジトリに含まれるため、まず clone します（インストーラー版を使う場合も必要です）。
 
@@ -31,6 +32,21 @@ dotnet run --project src/QuickER.Gui
 git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
 ```
+
+以降のコマンドはこのリポジトリのフォルダで実行します。
+
+## 2. QuickER をインストールする
+
+[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe（インストーラー）または Portable zip（展開して `QuickER.exe` を実行）を入手します。
+チャンネルの違いは [README のインストール節](../README.ja.md#インストール)を参照してください。
+
+ソースコードから起動する場合は、インストールせずに次を実行します。
+
+```powershell
+dotnet run --project src/QuickER.Gui
+```
+
+## 3. まずサンプルをそのまま動かす
 
 リポジトリには、図（`EcOrder.json`）から生成した DDL と C# コードがチェックイン済みで含まれています。
 まずは何も変更せずに動かします。
@@ -42,12 +58,12 @@ dotnet run --project samples/ec-order/EcOrderSample
 起動時に DDL から SQLite ファイル DB が作り直され、登録・グラフ保存・検索などのシナリオが順に実行されます。
 最後に「All scenarios succeeded.」と表示されれば成功です（サンプルの出力は英語です）。
 
-## 3. 図を開く
+## 4. 図を開く
 
 QuickER を起動し、Ctrl+O で `samples/ec-order/EcOrder.json` を開きます。
 顧客（customers）、商品（products）、注文（orders）、注文明細（order_lines）の 4 テーブルからなる ER 図が表示されます。
 
-## 4. 図を編集する
+## 5. 図を編集する
 
 試しに、商品テーブルへ列を 1 つ追加してみます。
 
@@ -58,12 +74,12 @@ QuickER を起動し、Ctrl+O で `samples/ec-order/EcOrder.json` を開きま�
 
 編集操作の詳細は [ER 図の編集](er-editor.ja.md) を参照してください。
 
-## 5. DDL を出力する
+## 6. DDL を出力する
 
 ツールバーの「出力」から DDL を選び、`samples/ec-order/EcOrder.sql` へ上書き保存します。
 サンプルアプリは起動のたびにこの DDL でデータベースを作り直すため、これだけで DB スキーマの変更が反映されます。
 
-## 6. コードを生成する
+## 7. コードを生成する
 
 CLI で、図から C# コードを再生成します。
 
@@ -78,7 +94,7 @@ dotnet run --project src/QuickER.Cli -- generate `
 `Generated/EcOrder.g.cs` が更新され、`products` の Entity と EditModel に `stock` に対応するプロパティが増えます。
 GUI のコード生成ダイアログから生成する方法や、生成オプションの詳細は [CLI リファレンス](cli.ja.md)と[生成コードの使い方](code-generation.ja.md)を参照してください。
 
-## 7. もう一度実行する
+## 8. もう一度実行する
 
 ```powershell
 dotnet run --project samples/ec-order/EcOrderSample

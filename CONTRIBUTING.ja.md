@@ -2,69 +2,93 @@
 
 *[English](CONTRIBUTING.md) | 日本語*
 
-QuickER は個人開発の OSS です。Issue・Pull Request を歓迎しますが、対応は**ベストエフォート**（対応期限の約束なし）で、**サポート対象は最新版のみ**です。
+QuickER は個人開発の OSS です。
+Issue・Pull Request を歓迎しますが、対応は**ベストエフォート**（対応期限の約束なし）で、**サポート対象は最新版のみ**です。
 
 ## Issue（バグ報告・機能要望）
 
-- テンプレート（バグ報告・機能要望）を使ってください。テンプレートに合わない相談・質問は空 Issue で構いません
+- テンプレート（バグ報告・機能要望）を使ってください。
+  テンプレートに合わない相談・質問は空 Issue で構いません
 - 日本語・英語どちらでも歓迎します（Issues in English are welcome）
 - バグ報告では環境情報（バージョン・入手方法・OS・.NET Runtime）と再現手順が調査の前提になります
-- **脆弱性の報告は公開 Issue に書かないでください**。[SECURITY.ja.md](SECURITY.ja.md) の手順で非公開に報告してください
+- **脆弱性の報告は公開 Issue に書かないでください**。
+  [SECURITY.ja.md](SECURITY.ja.md) の手順で非公開に報告してください
 
 ## Pull Request
 
-- **PR を作る前に、まず Issue で方針を相談してください**（事前相談制）。typo 修正などの小さな修正は相談不要です
+- **PR を作る前に、まず Issue で方針を相談してください**（事前相談制）。
+  typo 修正などの小さな修正は相談不要です
 - 事前相談のない大きな PR は、方針に合わない場合クローズすることがあります
 
 ### 開発規約の要点
 
-- 開発環境は Windows ＋ .NET 10 SDK（テストが WPF 依存のため）。Docker があれば実 DB 統合テストも実行されます（無ければ自動スキップ）
+- 開発環境は Windows ＋ .NET 10 SDK（テストが WPF 依存のため）。
+  Docker があれば実 DB 統合テストも実行されます（無ければ自動スキップ）
 - コメント・コミットメッセージは日本語で書きます
 - コード修正後は `csharpier format .` を実行してください（グローバルツール）
 - `dotnet test QuickER.slnx` が緑であることを確認してください
-- 英語の文書は [Vale](https://vale.sh) で検査します。初回だけ `vale sync` を実行し、以降は `vale --glob='*.md' .` で確認してください（日本語の文書は対象外です。設定は [.vale.ini](.vale.ini)）
-- 生成テンプレート（`src/QuickER.CodeGen.CSharp/Templates/**/*.scriban`）を変更した場合は、固定フィクスチャ等の再生成が必要です。再生成 → 検証 → 差分表示までを次のスクリプトが行います:
+- 英語の文書は [Vale](https://vale.sh) で検査します。
+  初回だけ `vale sync` を実行し、以降は `vale --glob='*.md' .` で確認してください（日本語の文書は対象外です。設定は [.vale.ini](.vale.ini)）
+- 生成テンプレート（`src/QuickER.CodeGen.CSharp/Templates/**/*.scriban`）を変更した場合は、固定フィクスチャ等の再生成が必要です。
+  再生成 → 検証 → 差分表示までは、次のスクリプトが行います。
 
   ```powershell
   ./scripts/regen-fixtures.ps1
   ```
 
-  スクリプトを使わない場合は、次の 1 コマンドで再生成し、そのあと環境変数なしで同じテストを流して緑を確認してください:
+  スクリプトを使わない場合は、次の 1 コマンドで再生成し、そのあと環境変数なしで同じテストを流して緑を確認してください。
 
   ```powershell
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
   ```
 
-- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください。[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**です。内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）。書き方は次のとおりです
-  - **見出し**: 種類の見出し（`### Breaking changes` / `### Added` / `### Changed` / `### Security` / `### Fixed` / `### Removed`。見出しは日本語版も英語のまま）の下を、分野の小見出し（`#### 図の編集・ファイル` / `#### DB 取込` / `#### DB 同期・DDL` / `#### C# コード取込` / `#### コード生成ダイアログ` / `#### 生成コード` / `#### 双方向同期` / `#### AI チャット・モック生成` / `#### CLI・MCP` / `#### 配布・設定` / `#### ライセンス` など）で分けます。無ければ作成します
-  - **1 エントリの長さ**: 太字の要約と、1〜3 文の本文です。本文に書くのは「何が変わったか」と「利用者が何をすればよいか」だけで、理由や内部の仕組みは docs（利用者向け）か CLAUDE.md（開発者向け）へ書き、必要ならリンクします
-  - **破壊的変更**: `### Breaking changes` にだけ書き（他の節へ重ねて書かない）、移行手順を 1〜2 文で添えます
-  - **まとめ方**: 同じ話題の変更は既存のエントリへ統合します。Unreleased の期間中に入れた機能をその期間中に直した場合は、利用者はその不具合を見ていないのでエントリにしません
-  - **要点**: リリース時、欄の先頭に 3〜5 行の要点を置きます
+- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください。
+  [CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**です。
+  内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）。
+  書き方は次のとおりです
+  - **見出し**：種類の見出し（`### Breaking changes` / `### Added` / `### Changed` / `### Security` / `### Fixed` / `### Removed`。見出しは日本語版も英語のまま）の下を、分野の小見出し（`#### 図の編集・ファイル` / `#### DB 取込` / `#### DB 同期・DDL` / `#### C# コード取込` / `#### コード生成ダイアログ` / `#### 生成コード` / `#### 双方向同期` / `#### AI チャット・モック生成` / `#### CLI・MCP` / `#### 配布・設定` / `#### ライセンス` など）で分けます。
+    無ければ作成します
+  - **1 エントリの長さ**：太字の要約と、1〜3 文の本文です。
+    本文に書くのは「何が変わったか」と「利用者が何をすればよいか」だけで、理由や内部の仕組みは docs（利用者向け）か CLAUDE.md（開発者向け）へ書き、必要ならリンクします
+  - **破壊的変更**：`### Breaking changes` にだけ書き（他の節へ重ねて書かない）、移行手順を 1〜2 文で添えます
+  - **まとめ方**：同じ話題の変更は既存のエントリへ統合します。
+    Unreleased の期間中に入れた機能をその期間中に直した場合は、利用者はその不具合を見ていないのでエントリにしません
+  - **要点**：リリース時、欄の先頭に 3〜5 行の要点を置きます
 
 アーキテクチャと「壊すと静かに回帰する不変条件」は [CLAUDE.md](CLAUDE.md) にまとまっています。
 
 ## ライセンスと貢献時の権利処理
 
-- 本リポジトリはプロジェクトごとに **MIT** と **PolyForm Noncommercial 1.0.0＋追加許諾** を使い分けています。大半は MIT で、AI 機能群・コード生成系・CLI・MCP ツール実行ホストの 8 プロジェクトが PolyForm NC＋追加許諾です（対象一覧と正式な条件は [LICENSE-NC.md](LICENSE-NC.md)、平易な解説は [LICENSING.md](LICENSING.md) / [LICENSING.ja.md](LICENSING.ja.md) を参照）
+- 本リポジトリはプロジェクトごとに **MIT** と **PolyForm Noncommercial 1.0.0＋追加許諾** を使い分けています。
+  大半は MIT で、AI 機能群・コード生成系・CLI・MCP ツール実行ホストの 8 プロジェクトが PolyForm NC＋追加許諾です（対象一覧と正式な条件は [LICENSE-NC.md](LICENSE-NC.md)、平易な解説は [LICENSING.md](LICENSING.md) / [LICENSING.ja.md](LICENSING.ja.md) を参照）
 - 提出されたコードは、**取り込み先プロジェクトの現行ライセンスで公開されること**に同意したものとみなします
 - PolyForm NC 対象プロジェクトへの貢献では、あわせて**作者（リポジトリオーナー）が当該コードを含むソフトウェアに商用ライセンスを提供し、または将来ライセンスを変更（無料開放を含む）する権利**を許諾したものとみなします（将来の提供方針の変更を外部貢献が阻害しないための取り決めです）
 
 ## バージョニング
 
-- [Semantic Versioning](https://semver.org/lang/ja/) に従います。全配布物（GUI・CLI・ランタイムパッケージ）はロックステップ＝`Directory.Build.props` の `VersionPrefix` で共通管理です
-- 0.x の間の版上げルール:
-  - **minor**（0.2.0 → 0.3.0）: 新機能、非互換変更（Repository API や生成コードのシグネチャ・構造の変化、パッケージの依存変更）
-  - **patch**（0.2.0 → 0.2.1）: バグ修正のみ。利用側の呼び出しコードが壊れない修正は、生成コードの内部実装が変わっても patch とします
+- [Semantic Versioning](https://semver.org/lang/ja/) に従います。
+  全配布物（GUI・CLI・ランタイムパッケージ）はロックステップ＝`Directory.Build.props` の `VersionPrefix` で共通管理です
+- 0.x の間の版上げルールは次のとおりです
+  - **minor**（0.2.0 → 0.3.0）：新機能、非互換変更（Repository API や生成コードのシグネチャ・構造の変化、パッケージの依存変更）
+  - **patch**（0.2.0 → 0.2.1）：バグ修正のみ。
+    利用側の呼び出しコードが壊れない修正は、生成コードの内部実装が変わっても patch とします
 - 1.0.0 は「生成コードと Repository API の互換性を約束できる」と判断した時点で宣言します
 
 ## リリース手順（メンテナ向け）
 
-リリースは**常に全配布物同時**（NuGet パッケージ＋GUI 配布物（Velopack: full / lite × Setup.exe / Portable zip）＋git タグ `v{版}`）。時期は任意で、頻度は約束しません。
+リリースは**常に全配布物同時**です（NuGet パッケージ＋GUI 配布物（Velopack: full / lite × Setup.exe / Portable zip）＋git タグ `v{版}`）。
+時期は任意で、頻度は約束しません。
 
-1. CHANGELOG の Unreleased 欄を確認し、版番号（上記ルールで minor / patch を判断）を決める。欄の見出しを版番号＋リリース日（`## [0.2.0] - 2026-09-01`）へ書き換え、その上に空の `## [Unreleased]` を新設する（**[CHANGELOG.md](CHANGELOG.md) と [CHANGELOG.ja.md](CHANGELOG.ja.md) の両方**）
+1. CHANGELOG の Unreleased 欄を確認し、版番号（上記ルールで minor / patch を判断）を決める。
+   欄の見出しを版番号＋リリース日（`## [0.2.0] - 2026-09-01`）へ書き換え、その上に空の `## [Unreleased]` を新設する（**[CHANGELOG.md](CHANGELOG.md) と [CHANGELOG.ja.md](CHANGELOG.ja.md) の両方**）
 2. `Directory.Build.props` の `VersionPrefix` を更新し、CHANGELOG の確定と合わせて 1 コミットにする
-3. コミットを push する。以降のワークフローは GitHub 上で push 済みの ref に対して動くため、push していないと 1 つ前の版が公開される
-4. publish.yml（NuGet パッケージ）を workflow_dispatch で実行する。`dry_run` の既定は true で、pack と検証（各パッケージが README とアイコンを宣言しているか・ツールパッケージへ `.pdb` が混入していないか・全パッケージの版が一致しているか）まで行い NuGet.org への push はしない。その実行を確認してから `dry_run=false` で本番実行する。本番実行は push の前に、全パッケージがこの版ですでに公開済みなら失敗する（`VersionPrefix` の上げ忘れ）。一部だけが公開済みなら、途中で失敗した公開のやり直しとみなし、公開済みのものを表示して飛ばす。シンボルパッケージ（`.snupkg`）は本体と同時に push され、NuGet.org 側で別途検証される（失敗はメールで通知される）
+3. コミットを push する。
+   以降のワークフローは GitHub 上で push 済みの ref に対して動くため、push していないと 1 つ前の版が公開される
+4. publish.yml（NuGet パッケージ）を workflow_dispatch で実行する。
+   `dry_run` の既定は true で、pack と検証（各パッケージが README とアイコンを宣言しているか・ツールパッケージへ `.pdb` が混入していないか・全パッケージの版が一致しているか）まで行い NuGet.org への push はしない。
+   その実行を確認してから `dry_run=false` で本番実行する。
+   本番実行は push の前に、全パッケージがこの版ですでに公開済みなら失敗する（`VersionPrefix` の上げ忘れ）。
+   一部だけが公開済みなら、途中で失敗した公開のやり直しとみなし、公開済みのものを表示して飛ばす。
+   シンボルパッケージ（`.snupkg`）は本体と同時に push され、NuGet.org 側で別途検証される（失敗はメールで通知される）
 5. release.yml（GUI 配布物の発行と git タグ作成）を workflow_dispatch で実行する（`dry_run` の既定は true。まず dry_run で成果物を確認してから `dry_run=false` で本番実行する）
 6. GitHub Release のノートへ CHANGELOG の該当版の内容を転記する（release.yml は意図的に本文を空で作成する。何がリリースされたかの正本は、整理された CHANGELOG に一本化するため）
