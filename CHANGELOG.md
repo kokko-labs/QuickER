@@ -6,13 +6,15 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-25
+
 Highlights of this release:
 
 - Names in a diagram (surrounding spaces and letter case) and identifier length limits are now handled the same way across import, editing, DDL and generated code
 - DB sync no longer fails on changes you did not select or on foreign keys whose types do not match, and no longer loses foreign keys
 - Fixed bidirectional sync stopping again and again on foreign keys and unique values, and losing changes
 - The backends of the generated code (QuickER Repository, EF Core repository, in-memory and remote) now give the same results
-- Check "Breaking changes" and "Known issues" before upgrading
+- Check "Breaking changes" before upgrading
 
 ### Breaking changes
 
@@ -358,27 +360,6 @@ Highlights of this release:
 
 - **The mock project's final build no longer runs build settings the AI wrote without asking, the preview blocks downloads and external resources in embedded frames, and files outside the mock folder are no longer read**
 
-### Known issues
-
-#### Bidirectional sync
-
-- **Combining `LastWriteWins` with `ServerWins` can, in rare cases, discard a local delete or change** — when the server refuses a write temporarily, for example, the write is discarded as settled. Other combinations report it as a conflict and keep the entry. To avoid this, do not combine `ServerWins` with `LastWriteWins`
-- **If a row was deleted and re-created, deleting it again during a sync upload can leave the row on the server** — do not delete the same row while a sync runs
-- **When a parent row missing locally cannot be brought in, the sync can stop on every run as its child alone tries to go in** — while another local row still holds a unique value of the parent row, the download or the `ServerWins` restore stops with a local foreign key error. If the unsent changes may be discarded, a refresh (`RefreshAsync`) gets out of it
-- **When the local repositories are registered without a key, `AddGeneratedSyncEngine(null)` and `AddGeneratedSyncSupport(key, null)` always throw** — register the local repositories with a key as well
-- **A new row whose value-object primary key is set by a Before hook throws `NullReferenceException` in a graph save that goes through the sync journal** — set the primary key before saving
-
-#### Generated code
-
-- **The EF Core repository does not save a change to a UNIQUE column that a foreign key references** — `UpdateAsync` / `SaveAsync` report success, but the column does not change (the QuickER Repository saves it)
-- **The EF Core repository handles a save hook's refusal and NO ACTION relationships differently from the QuickER Repository** — a delete that a Before hook refuses after changing values is saved as an update, and a refused update reverts the in-memory changes. With an optional NO ACTION relationship, a graph save that deletes a referenced row succeeds by setting to null the foreign key of a child saved with it (the QuickER Repository rolls back with a foreign key violation). A refusing hook that does not change values keeps a delete from turning into an update
-
-#### DB sync & DDL
-
-- **A sync that includes a column change after which the two ends of a foreign key no longer match in type can leave the foreign key dropped (a primary key change on Oracle, a foreign key rebuild on MySQL)** — if the sync confirmation warns that a foreign key's types do not match, do not run that sync
-- **On SQL Server, a sync that changes the type of a column covered by two unique constraints on the same set of columns and drops one of them fails and rolls back** — change the column and drop the unique constraint in separate syncs
-- **On a PostgreSQL database created with QuickER 0.2.0 or earlier, when a table with a long name (59 bytes or more) has two or more unnamed foreign keys, adding a foreign key in a sync fails and rolls back**
-
 ## [0.2.0] - 2026-09-24
 
 Highlights of this release:
@@ -623,6 +604,7 @@ Distributed as a GUI (Setup.exe and Portable zip, in a full self-contained chann
 
 The repository is mixed-license: the core is MIT, while the AI features, the code generation, the CLI, and the MCP tool-execution host (8 projects) are PolyForm Noncommercial 1.0.0 plus additional grants — currently free for everyone including commercial use, with commercial use of the basic code generation granted permanently. The terms are in [LICENSE-NC.md](LICENSE-NC.md); [LICENSING.md](LICENSING.md) explains them in plain language.
 
-[Unreleased]: https://github.com/kokko-labs/QuickER/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kokko-labs/QuickER/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.3.0
 [0.2.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.2.0
 [0.1.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.1.0
