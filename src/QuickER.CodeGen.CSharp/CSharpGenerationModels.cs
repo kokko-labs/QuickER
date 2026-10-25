@@ -692,7 +692,7 @@ internal sealed class CSharpMappingPropertyPair
     public required bool EditModelIsNullable { get; init; }
 
     /// <summary>
-    /// 「入力があるときだけ代入」へ倒す列（行バージョン・計算列・除外された無制限バイナリ）で、
+    /// 「入力があるときだけ代入」へ倒す列（行バージョン・計算列・主キーでない採番列・除外された無制限バイナリ）で、
     /// Entity へ書き戻すときに <c>.Value</c> による取り出しが要るかどうか。
     /// </summary>
     /// <remarks>
