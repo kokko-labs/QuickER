@@ -76,7 +76,7 @@ public class MockProjectPackageVersionsTests
 
     /// <summary>
     /// 生成する csproj（WPF / Blazor × 方言）の PackageReference がすべて正本の版で書かれ、SQLite では
-    /// 脆弱性対策の SQLitePCLRaw のピンを、Blazor × SQL Server では System.Security.Cryptography.Pkcs のピンを
+    /// SQLite の版をそろえる SQLitePCLRaw のピンを、Blazor × SQL Server では System.Security.Cryptography.Pkcs のピンを
     /// 伴うことを検証する（WPF は共有フレームワークが Pkcs を刈り込むので書かない＝書くと NU1510）。
     /// </summary>
     [Theory(

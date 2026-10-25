@@ -122,8 +122,8 @@ public abstract class MockProjectTargetProfile
     /// <see cref="MockProjectPackageVersions"/>（正本は <c>Directory.Packages.props</c>）から取る。
     /// </summary>
     /// <remarks>
-    /// SQLite は <c>Microsoft.Data.Sqlite</c> が推移的に持ち込む SQLitePCLRaw の版に既知の脆弱性があるため、
-    /// QuickER 本体・サンプルと同じく修正済みの版を明示参照で上書きする（無いと restore が NU1903 を出す）。
+    /// SQLite は、QuickER 本体・サンプルと同じく、<c>Microsoft.Data.Sqlite</c> が推移的に持ち込む SQLitePCLRaw（2.1 系）でなく
+    /// 3.0 系の版を明示参照して、同梱の SQLite を QuickER が確かめた版にそろえる。
     /// SQL Server は、共有フレームワークが Pkcs を刈り込まないターゲット（<see cref="SharedFrameworkPrunesCryptographyPkcs"/>）
     /// でだけ、修正済みの System.Security.Cryptography.Pkcs を明示参照で上書きする。
     /// </remarks>
@@ -140,8 +140,9 @@ public abstract class MockProjectTargetProfile
                             + PackageReferenceLine(MockProjectPackageVersions.CryptographyPkcs)
                 ),
             "sqlite" => PackageReferenceLine(MockProjectPackageVersions.Sqlite)
-                + "    <!-- Microsoft.Data.Sqlite brings in an SQLitePCLRaw version with a known vulnerability "
-                + "(GHSA-2m69-gcr7-jv3q), so the fixed version is referenced explicitly to override it -->\n"
+                + "    <!-- SQLitePCLRaw 3.0 is referenced explicitly in place of the 2.1 version Microsoft.Data.Sqlite "
+                + "brings in, so the bundled SQLite is the version QuickER is tested with. SQLitePCLRaw 2.1.11 and earlier "
+                + "also have a known vulnerability (GHSA-2m69-gcr7-jv3q) -->\n"
                 + PackageReferenceLine(MockProjectPackageVersions.SqliteNativeBundle),
             _ => string.Empty,
         };

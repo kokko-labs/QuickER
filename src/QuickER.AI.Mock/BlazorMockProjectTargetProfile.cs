@@ -4,7 +4,7 @@ namespace QuickER.AI.Mock;
 /// <remarks>
 /// 技術構成は「Blazor Web App（.NET の統合テンプレート）・グローバル InteractiveServer レンダーモード・単一プロジェクト・
 /// net10.0・追加パッケージ不要」（DI・ASP.NET Core ランタイムは共有フレームワークに同梱されるため、方言 ADO と
-/// その脆弱性対策のピン以外の PackageReference は要らない）。WPF 版（<see cref="WpfMockProjectTargetProfile"/>）と対称構造で、各フラグメントは
+/// そのピン（SQLite の版をそろえる SQLitePCLRaw・脆弱性対策の Pkcs）以外の PackageReference は要らない）。WPF 版（<see cref="WpfMockProjectTargetProfile"/>）と対称構造で、各フラグメントは
 /// WPF 版の対応する一文と 1:1 に対応する。README とプロンプトの本文はすべて英語固定
 /// （ヘッドレス実行の機械向け指示・生成物に同梱する規約ドキュメントは UI 言語に追従させない方針）。
 /// </remarks>

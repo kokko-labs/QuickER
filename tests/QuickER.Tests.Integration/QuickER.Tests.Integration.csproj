@@ -47,8 +47,6 @@
     <!-- SQLite 方言ランタイムテスト用の EF Core プロバイダ（インプロセス・Docker 不要） -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <!-- Testcontainers の推移的依存の脆弱性上書き（理由は Directory.Packages.props のコメントを参照） -->
-    <PackageReference Include="SSH.NET" />
     <PackageReference Include="Testcontainers.MsSql" />
     <PackageReference Include="Testcontainers.MySql" />
     <PackageReference Include="Testcontainers.Oracle" />

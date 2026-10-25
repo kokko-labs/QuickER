@@ -16,11 +16,12 @@
       To mimic a consumer project, this references NuGet packages only and never the QuickER projects themselves.
       The Microsoft.Data.Sqlite / SQLitePCLRaw versions match the pins used by src/QuickER.Runtime.Sqlite.
     -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
-    <!-- SQLitePCLRaw, which Microsoft.Data.Sqlite brings in transitively, has a known vulnerability
-         (GHSA-2m69-gcr7-jv3q), so the fixed version is referenced explicitly to override it -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+    <!-- SQLitePCLRaw 3.0 is referenced explicitly in place of the 2.1 version Microsoft.Data.Sqlite brings in
+         transitively, so the bundled SQLite is the version QuickER is tested with. SQLitePCLRaw 2.1.11 and
+         earlier also have a known vulnerability (GHSA-2m69-gcr7-jv3q) -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>

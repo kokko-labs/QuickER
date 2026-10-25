@@ -35,7 +35,7 @@ internal static class MockProjectPackageVersions
     internal const string Sqlite = "Microsoft.Data.Sqlite";
 
     /// <summary>
-    /// SQLite のネイティブ層（<see cref="Sqlite"/> が推移的に持ち込む版に既知の脆弱性があるため、修正済みの版を明示参照する）
+    /// SQLite のネイティブ層（<see cref="Sqlite"/> が推移的に持ち込む 2.1 系でなく、QuickER と同じ 3.0 系の版を明示参照して SQLite の版をそろえる）
     /// </summary>
     internal const string SqliteNativeBundle = "SQLitePCLRaw.bundle_e_sqlite3";
 

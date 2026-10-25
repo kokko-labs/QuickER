@@ -235,6 +235,11 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **Choosing the display language that is already shown no longer asks to restart** — after choosing another language and declining the restart, choosing the original language again asked for a restart that changed nothing. The menu check still shows the language used at the next start
 
+#### Dependencies
+
+- **The runtime packages require newer versions of their database libraries** — `QuickER.Runtime.SqlServer` now depends on `Microsoft.Data.SqlClient` 7.1.1 (was 7.0.3), `QuickER.Runtime.Sqlite` on `Microsoft.Data.Sqlite` 10.0.13 (was 10.0.12), and `QuickER.Runtime.EntityFrameworkCore` on `Microsoft.EntityFrameworkCore.Relational` 10.0.13 (was 10.0.12). A project that pins an older version of one of these needs to raise it. The versions of `System.Security.Cryptography.Pkcs` and `SQLitePCLRaw.bundle_e_sqlite3` that the packages pin are unchanged
+- **Mock projects reference the same newer versions** — a generated mock project now references `Microsoft.Data.SqlClient` 7.1.1, `Microsoft.Data.Sqlite` 10.0.13 and `Microsoft.Extensions.DependencyInjection` 10.0.13, the versions QuickER builds with. The samples reference `Microsoft.Data.Sqlite` and `Microsoft.Extensions.DependencyInjection` 10.0.13 too
+
 ### Fixed
 
 #### DB sync & DDL
@@ -683,7 +688,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **Codex's `config.toml` is read correctly when a section header has a trailing comment or a quoted value contains `#`** — `[model_providers.ollama] # local` listed a provider named `ollama] # local`, and `model = "a#b"` was cut at the `#`
 - **Finding the Codex, Claude Code and Copilot CLIs on `PATH` now handles two more cases** — a quoted `PATH` entry such as `"C:\Program Files\nodejs"` is now searched, and on Windows a file without an extension (the shell script npm puts next to `claude.cmd`) is no longer taken for the CLI, because Windows cannot start it; the search goes on to the next folder instead of stopping at a file that then fails to launch. Claude Code is also looked up again on every check, so a CLI installed into a folder already on `PATH` is found by "Recheck" without restarting QuickER
 - **A Codex timeout message after reconnecting no longer includes the previous connection's error output** — the last lines of the app server's error output are added to a timeout message, and they used to be kept across connections
-- **The Copilot chat recovers after the Copilot runtime stops** — QuickER kept treating the connection as alive, so every later message failed and "Recheck" did not help until the window was reopened. A call that finds the connection lost now drops it: that call still fails, and the next message starts the runtime again and opens a new conversation. The previous conversation's context is not carried over
+- **The Copilot chat recovers after the Copilot runtime stops** — QuickER kept treating the connection as alive, so every later message failed and "Recheck" did not help until the window was reopened. A call that finds the connection lost now drops it: that call still fails, and the next message starts the runtime again and opens a new conversation. The previous conversation's context is not carried over. When the runtime stops in the middle of a response, the response ends with an error within a few seconds, and "Stop" also ends it
 - **A failed Copilot start no longer leaves an empty folder in `%TEMP%\QuickER\copilot`** — each attempt creates a working folder for the runtime, and a failed attempt left it behind
 - **The Codex connection tab now shows "not signed in" after you sign out** — after signing out with `codex logout` in a terminal, "Recheck" kept showing the previous sign-in and the sign-in panel did not appear. Signing out from QuickER now also resets the sign-in state on its own
 - **A Codex turn that fails without a reason is now shown as a failure** — it used to end as if it had succeeded. It now ends with "An unknown error occurred."

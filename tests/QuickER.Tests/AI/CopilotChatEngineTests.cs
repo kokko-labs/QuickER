@@ -237,6 +237,247 @@ public class CopilotChatEngineTests
         await engine.DisposeAsync();
     }
 
+    /// <summary>
+    /// 送信の途中で接続が切れて（クライアントが接続を捨てて）ターンが失敗しても、送信できる状態を保つことを検証する。
+    /// 接続し直すのは次の送信なので、ここで送信できなくすると接続し直す経路に届かない。
+    /// </summary>
+    [Fact(DisplayName = "送信中に接続が切れて失敗したターンの後も IsReady は true のまま")]
+    public async Task SendAsync_ConnectionLostDuringSend_StaysReady()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.FailNextSendWithConnectionLost();
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed.Should().NotBeNull();
+        completed!.Value.Success.Should().BeFalse();
+        client.IsStarted.Should().BeFalse("接続が切れた失敗でクライアントは接続を捨てる");
+        engine.IsReady.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>接続が切れた後の送信で起動し直せなかったら、送信できない状態（未接続）へ落ちることを検証する</summary>
+    [Fact(
+        DisplayName = "接続が切れた後の接続し直しで起動に失敗したら IsReady は false で NeedsAction"
+    )]
+    public async Task SendAsync_ReconnectStartFails_IsNotReady()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.FailNextSendWithConnectionLost();
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+        engine.IsReady.Should().BeTrue();
+
+        client.StartError = new InvalidOperationException("restart fails");
+        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
+
+        engine.IsReady.Should().BeFalse();
+        engine.StatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+        engine.StatusSummary.Should().Be(Strings.Copilot_Status_NotConnected);
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>接続が切れた後の送信で copilot CLI が見つからなくなっていたら、送信できない状態へ落ちることを検証する</summary>
+    [Fact(DisplayName = "接続が切れた後の接続し直しで CLI が見つからなければ IsReady は false")]
+    public async Task SendAsync_ReconnectCliMissing_IsNotReady()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        client.FailNextSendWithConnectionLost();
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+        engine.IsReady.Should().BeTrue();
+
+        client.Available = false;
+        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
+
+        engine.IsReady.Should().BeFalse();
+        engine.IsCliMissing.Should().BeTrue();
+        engine.StatusSummary.Should().Be(Strings.Copilot_Status_NotFound);
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>接続の見張りの間隔を指定してエンジンを作る（見張りのテストは短く、それ以外は見張りが走らない長さにする）</summary>
+    private static CopilotChatEngine CreateEngine(
+        FakeCopilotRuntimeClient client,
+        TimeSpan connectionCheckInterval
+    ) =>
+        new(
+            client,
+            null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign,
+            connectionCheckInterval
+        );
+
+    /// <summary>見張りのテストで使う短い間隔</summary>
+    private static readonly TimeSpan ShortCheckInterval = TimeSpan.FromMilliseconds(10);
+
+    /// <summary>完了の通知を待つ上限（全件実行の負荷でも十分に長くし、時間そのものは表明しない）</summary>
+    private static readonly TimeSpan CompletionWaitLimit = TimeSpan.FromSeconds(30);
+
+    /// <summary>次の <see cref="CopilotChatEngine.TurnCompleted"/> を受け取る（届いた回数も数える）</summary>
+    private sealed class TurnCompletionProbe
+    {
+        private readonly TaskCompletionSource<ErChatTurnResult> _first = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        private int _count;
+
+        public TurnCompletionProbe(CopilotChatEngine engine) =>
+            engine.TurnCompleted += (_, result) =>
+            {
+                Interlocked.Increment(ref _count);
+                _first.TrySetResult(result);
+            };
+
+        /// <summary>届いた回数</summary>
+        public int Count => Volatile.Read(ref _count);
+
+        /// <summary>最初の完了の通知を待つ（上限までに届かなければ失敗）</summary>
+        public Task<ErChatTurnResult> WaitAsync() =>
+            _first.Task.WaitAsync(CompletionWaitLimit, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// 応答の途中で copilot ランタイムが止まる（以後のイベントが来ない）と、ターンの実行中の見張りが接続断を見つけて
+    /// ターンを失敗で終えることを検証する。接続し直すのは次の送信なので、送信できる状態は保つ。
+    /// </summary>
+    [Fact(
+        DisplayName = "応答の途中で接続が切れると、見張りがターンを失敗で終え、IsReady は true のまま"
+    )]
+    public async Task ConnectionWatch_ConnectionLostMidStream_CompletesTurnAsFailure()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client, ShortCheckInterval);
+        var probe = new TurnCompletionProbe(engine);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("長い応答を", TestContext.Current.CancellationToken);
+        client.RaiseDelta("途中まで");
+        client.FailPingsWithConnectionLost();
+
+        var result = await probe.WaitAsync();
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("The JSON-RPC connection was lost.");
+        client.IsStarted.Should().BeFalse("接続が切れた失敗でクライアントは接続を捨てる");
+        engine.IsReady.Should().BeTrue("次の送信で接続し直す");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>接続が生きたままの Ping の失敗では、ターンを終えずに次の回へ進むことを検証する</summary>
+    [Fact(DisplayName = "接続が生きたままの Ping の失敗では、見張りはターンを終えない")]
+    public async Task ConnectionWatch_PingFailsWithLiveConnection_KeepsTurn()
+    {
+        var client = new FakeCopilotRuntimeClient
+        {
+            PingError = new InvalidOperationException("transient"),
+        };
+        var engine = CreateEngine(client, ShortCheckInterval);
+        var probe = new TurnCompletionProbe(engine);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        SpinWait
+            .SpinUntil(() => client.PingCallCount >= 3, CompletionWaitLimit)
+            .Should()
+            .BeTrue("見張りは失敗の後も次の回へ進む");
+        probe.Count.Should().Be(0);
+
+        client.RaiseIdle();
+        (await probe.WaitAsync()).Success.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 見張りがターンの終わり（アイドル）とエンジンの破棄で止まること、見張りが終えたターンへ後からアイドルが来ても
+    /// 完了の通知が 1 回だけであることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "見張りはターンの終わりと破棄で止まり、完了の通知は 1 回だけ")]
+    public async Task ConnectionWatch_StopsWithTurnAndDispose_AndCompletesOnce()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client, ShortCheckInterval);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+
+        // アイドルで終わったターンの見張りは止まる
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+        var firstWatch = engine.ConnectionWatchTask;
+        client.RaiseIdle();
+        await firstWatch.WaitAsync(CompletionWaitLimit, TestContext.Current.CancellationToken);
+
+        // 見張りが接続断で終えたターンへ、後からアイドルが来ても 2 回目の通知は出ない
+        var probe = new TurnCompletionProbe(engine);
+        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
+        client.FailPingsWithConnectionLost();
+        await probe.WaitAsync();
+        client.RaiseIdle();
+        probe.Count.Should().Be(1);
+
+        // 実行中のターンの見張りは、エンジンの破棄で止まる
+        await engine.SendAsync("3 回目", TestContext.Current.CancellationToken);
+        var lastWatch = engine.ConnectionWatchTask;
+        lastWatch.IsCompleted.Should().BeFalse("ターンの実行中は見張っている");
+        await engine.DisposeAsync();
+        lastWatch.IsCompleted.Should().BeTrue("破棄は見張りの終わりを待つ");
+    }
+
+    /// <summary>
+    /// 中断がランタイムとの接続断で失敗したら、ランタイムがターンを終えることはもう無いので、ターンを失敗で終えることを検証する。
+    /// 接続が生きたままの中断の失敗では、従来どおり状態文だけでターンは終えない（ランタイムが後でアイドルを返す）。
+    /// </summary>
+    [Fact(DisplayName = "中断が接続断で失敗したらターンを失敗で終え、接続が生きていれば終えない")]
+    public async Task InterruptAsync_ConnectionLost_CompletesTurnAsFailure()
+    {
+        var client = new FakeCopilotRuntimeClient
+        {
+            AbortError = new InvalidOperationException("runtime busy"),
+        };
+        var engine = CreateEngine(client, Timeout.InfiniteTimeSpan);
+        var probe = new TurnCompletionProbe(engine);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("長い応答を", TestContext.Current.CancellationToken);
+
+        // 接続が生きたままの失敗：ターンは終えない
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
+        probe.Count.Should().Be(0);
+
+        // 接続断の失敗：ターンを失敗で終える
+        client.FailNextAbortWithConnectionLost();
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
+
+        probe.Count.Should().Be(1);
+        var result = await probe.WaitAsync();
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("The JSON-RPC connection was lost.");
+        engine.IsReady.Should().BeTrue("次の送信で接続し直す");
+
+        await engine.DisposeAsync();
+    }
+
     /// <summary>差分がそのまま流れ、アイドル復帰で成功完了することを検証する</summary>
     [Fact(DisplayName = "差分を流しアイドルで成功完了する")]
     public async Task SendAsync_StreamsAndCompletesOnIdle()

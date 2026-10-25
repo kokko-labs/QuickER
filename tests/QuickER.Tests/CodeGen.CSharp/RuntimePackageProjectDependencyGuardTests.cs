@@ -90,7 +90,7 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             .Should()
             .BeEquivalentTo(
                 new[] { "Microsoft.Data.Sqlite", "SQLitePCLRaw.bundle_e_sqlite3" },
-                "Sqlite パッケージの NuGet 依存は ADO（Microsoft.Data.Sqlite）＋既知脆弱性対策の SQLitePCLRaw ピンだけに保つ"
+                "Sqlite パッケージの NuGet 依存は ADO（Microsoft.Data.Sqlite）＋SQLite の版をそろえる SQLitePCLRaw ピンだけに保つ"
                     + "（SqlClient / EF Core / DI 系が混ざってはならない。DI 登録拡張はスキーマ依存物として生成側に出力される）"
             );
 

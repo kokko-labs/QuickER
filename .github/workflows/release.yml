@@ -79,7 +79,7 @@ jobs:
         # パッケージングだけ最新版が使われると、配布物のフォーマットとアプリ内自動更新機構が
         # 食い違う可能性があり、その破損はリリース後の自動更新まで発見できない。
         # Velopack を更新するときは csproj とここを同時に上げる
-        run: dotnet tool install --global vpk --version 1.2.0
+        run: dotnet tool install --global vpk --version 1.2.161
 
       # 差分更新パッケージの生成に使う既存リリースの有無を、チャンネルの更新メタ
       # （releases.win-*.json）が既存リリースの資産に存在するかで明示判定する。

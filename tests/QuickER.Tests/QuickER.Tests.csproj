@@ -53,13 +53,6 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Moq" />
-    <!--
-      SSH.NET は Testcontainers の推移的依存（下限指定 [2025.1.0, )）だが、既定で解決される版には
-      GHSA-q939-rpr3-3284（ScpClient の再帰ダウンロードにおけるパストラバーサル・High）がある。
-      修正版（Directory.Packages.props）を直接参照して推移的解決を上書きし、NU1903 を発生源から消す
-      （Testcontainers 側の要求は下限のみのため、上書きしても依存の整合は崩れない）。
-    -->
-    <PackageReference Include="SSH.NET" />
     <PackageReference Include="Testcontainers.MsSql" />
     <PackageReference Include="Testcontainers.MySql" />
     <PackageReference Include="Testcontainers.Oracle" />

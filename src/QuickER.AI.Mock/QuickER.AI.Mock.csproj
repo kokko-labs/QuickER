@@ -27,7 +27,7 @@
 
   <!--
     モックプロジェクト生成が書き出す csproj の PackageReference の版。正本は Directory.Packages.props
-    （脆弱性対策の SQLitePCLRaw・System.Security.Cryptography.Pkcs のピンを含む）で、ここではその値をアセンブリのメタデータへ写すだけ＝
+    （SQLite の版をそろえる SQLitePCLRaw・脆弱性対策の System.Security.Cryptography.Pkcs のピンを含む）で、ここではその値をアセンブリのメタデータへ写すだけ＝
     版の数字を C# に書かない。読み出しは MockProjectPackageVersions（キーの接頭辞と ID の一覧もそちらが正本）。
     PackageVersion が消えると値が空になり、読み出しが例外で止まる（MockProjectPackageVersionsTests が検知する）。
   -->

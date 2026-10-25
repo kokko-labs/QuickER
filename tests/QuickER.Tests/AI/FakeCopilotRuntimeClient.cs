@@ -1,3 +1,4 @@
+using System.IO;
 using QuickER.AI;
 
 namespace QuickER.Tests.AI;
@@ -103,6 +104,9 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
 
         StartCallCount++;
 
+        // 起動し直したランタイムとの接続は生きている
+        _failPingsWithConnectionLost = false;
+
         if (StartGate is null)
         {
             IsStarted = true;
@@ -175,6 +179,13 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
         CancellationToken cancellationToken = default
     )
     {
+        if (_failNextSendWithConnectionLost)
+        {
+            _failNextSendWithConnectionLost = false;
+            SimulateConnectionLost();
+            return Task.FromException(CreateConnectionLostException());
+        }
+
         Sends.Add((prompt, attachments.Count));
 
         if (AutoIdleAfterSend)
@@ -191,8 +202,60 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     public Task AbortAsync(CancellationToken cancellationToken = default)
     {
         AbortCallCount++;
-        return Task.CompletedTask;
+
+        if (_failNextAbortWithConnectionLost)
+        {
+            _failNextAbortWithConnectionLost = false;
+            SimulateConnectionLost();
+            return Task.FromException(CreateConnectionLostException());
+        }
+
+        return AbortError is not null ? Task.FromException(AbortError) : Task.CompletedTask;
     }
+
+    /// <summary><see cref="AbortAsync"/> が投げる例外（null なら成功）。接続は捨てない＝ランタイムは生きている失敗</summary>
+    public Exception? AbortError { get; set; }
+
+    /// <inheritdoc />
+    public Task PingAsync(CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref _pingCallCount);
+
+        if (_failPingsWithConnectionLost)
+        {
+            SimulateConnectionLost();
+            return Task.FromException(CreateConnectionLostException());
+        }
+
+        return PingError is not null ? Task.FromException(PingError) : Task.CompletedTask;
+    }
+
+    /// <summary><see cref="PingAsync"/> が呼ばれた回数</summary>
+    public int PingCallCount => Volatile.Read(ref _pingCallCount);
+
+    /// <summary><see cref="PingCallCount"/> の数</summary>
+    private int _pingCallCount;
+
+    /// <summary><see cref="PingAsync"/> が投げる例外（null なら成功）。接続は捨てない＝ランタイムは生きている失敗</summary>
+    public Exception? PingError { get; set; }
+
+    /// <summary>以後の <see cref="PingAsync"/> を、接続が切れた失敗にする（応答の途中でランタイムが止まった状態を模す）</summary>
+    /// <remarks>実装と同じく、接続とセッションを捨ててから型がちょうど <see cref="IOException"/> の例外を投げる</remarks>
+    public void FailPingsWithConnectionLost() => _failPingsWithConnectionLost = true;
+
+    /// <summary><see cref="FailPingsWithConnectionLost"/> の印</summary>
+    private volatile bool _failPingsWithConnectionLost;
+
+    /// <summary>次の中断 1 回を、接続が切れた失敗にする</summary>
+    /// <remarks>実装と同じく、接続とセッションを捨ててから型がちょうど <see cref="IOException"/> の例外を投げる</remarks>
+    public void FailNextAbortWithConnectionLost() => _failNextAbortWithConnectionLost = true;
+
+    /// <summary><see cref="FailNextAbortWithConnectionLost"/> の印</summary>
+    private bool _failNextAbortWithConnectionLost;
+
+    /// <summary>実装が接続断で投げるのと同じ形の例外（型がちょうど <see cref="IOException"/>）を作る</summary>
+    private static IOException CreateConnectionLostException() =>
+        new("Communication error with Copilot CLI: The JSON-RPC connection was lost.");
 
     /// <inheritdoc />
     public Task RespondToToolCallAsync(
@@ -220,6 +283,16 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
         IsStarted = false;
         HasSession = false;
     }
+
+    /// <summary>次の送信 1 回を、接続が切れた失敗にする</summary>
+    /// <remarks>
+    /// 実装と同じく、接続とセッションを捨ててから（<see cref="IsStarted"/> と <see cref="HasSession"/> を false にしてから）
+    /// 型がちょうど <see cref="IOException"/> の例外を投げる。送信は届かないので <see cref="Sends"/> には積まない
+    /// </remarks>
+    public void FailNextSendWithConnectionLost() => _failNextSendWithConnectionLost = true;
+
+    /// <summary><see cref="FailNextSendWithConnectionLost"/> の印</summary>
+    private bool _failNextSendWithConnectionLost;
 
     /// <summary>アシスタント応答の差分を発火する</summary>
     public void RaiseDelta(string delta) => AssistantDeltaReceived?.Invoke(this, delta);
