@@ -23,7 +23,6 @@ samples/ec-order/EcOrder.json text eol=crlf
 samples/ec-order/EcOrder.sql text eol=crlf
 samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs text eol=crlf
 samples/ec-order/EcOrderSample/Generated/EcOrder.g.md text eol=crlf
-samples/ec-order/EcOrderSample/Generated/EcOrder.ja.g.md text eol=crlf
 
 ###############################################################################
 # samples/ec-order-remote（3 階層構成サンプル）のチェックイン済み生成物・図 JSON も
@@ -35,7 +34,7 @@ samples/ec-order-remote/Generated/EcOrderRemote.g.cs text eol=crlf
 samples/ec-order-remote/Generated/EcOrderRemote.RemoteServer.g.cs text eol=crlf
 
 ###############################################################################
-# ランタイム 6 パッケージの公開 API 面スナップショット（承認ファイル）は、リフレクションからの
+# ランタイム 7 パッケージの公開 API 面スナップショット（承認ファイル）は、リフレクションからの
 # レンダリング結果（CRLF）との完全一致で判定するため CRLF に固定する。
 ###############################################################################
 tests/QuickER.Tests/PublicApi/*.approved.txt text eol=crlf
