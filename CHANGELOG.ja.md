@@ -6,13 +6,15 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-25
+
 このリリースの要点:
 
 - 図の名前（前後の空白・大文字小文字）と識別子の長さの上限の扱いを、取込・編集・DDL・生成コードでそろえました
 - DB 同期が、選んでいない変更や型の合わない外部キーで失敗したり、外部キーを失ったりしなくなりました
 - 双方向同期が、外部キーや一意な値で止まり続けたり、変更を失ったりする不具合を直しました
 - 生成コードの実装先（QuickER 版 Repository・EF Core 版 Repository・インメモリ・リモート）で、結果がそろうようにしました
-- アップグレードの前に「Breaking changes」と「Known issues」を確認してください
+- アップグレードの前に「Breaking changes」を確認してください
 
 ### Breaking changes
 
@@ -358,27 +360,6 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 - **モックの最終ビルドが AI の書いたビルド設定を確認なしに実行せず、プレビューがダウンロードと埋め込みフレームの外部リソースを遮断し、フォルダの外のファイルを読まなくなりました**
 
-### Known issues
-
-#### 双方向同期
-
-- **`LastWriteWins` と `ServerWins` を組み合わせると、ローカルの削除や変更がまれに捨てられる** — サーバーが書き込みを一時的に断ったときなどに、その書き込みを決着済みとして捨てます。ほかの組み合わせでは競合として報告され、記録は残ります。避けるには `ServerWins` を `LastWriteWins` と組み合わせないでください
-- **同期のアップロードの最中に、削除して作り直した行をもう一度削除すると、サーバーに行が残ることがある** — 同期の実行中は、同じ行を削除しないでください
-- **ローカルに無い親の行を取り込めないと、その子だけが入ろうとして同期が毎回止まることがある** — 親の行の一意な値をローカルのほかの行がまだ持っているとき、ダウンロードや `ServerWins` の取り戻しがローカルの外部キーのエラーで止まります。未送信の変更を捨ててよければ、洗い替え（`RefreshAsync`）で抜けられます
-- **ローカルのリポジトリをキーなしで登録すると、`AddGeneratedSyncEngine(null)` と `AddGeneratedSyncSupport(key, null)` が必ず例外になる** — ローカルのリポジトリもキーつきで登録してください
-- **値オブジェクトの主キーを Before フックで決める新しい行は、同期の記録を通したグラフ保存で `NullReferenceException` になる** — 主キーは保存の前に入れてください
-
-#### 生成コード
-
-- **EF Core 版 Repository は、外部キーに参照される UNIQUE 列の変更を保存しない** — `UpdateAsync` / `SaveAsync` は成功を返しますが、その列は変わりません（QuickER 版 Repository は保存します）
-- **EF Core 版 Repository は、Save フックの拒否と NO ACTION のリレーションの扱いが QuickER 版 Repository と違う** — Before フックが値を書き換えてから拒否した削除は更新として保存され、拒否した更新ではメモリ上の変更が元に戻ります。任意の NO ACTION のリレーションでは、参照される行を削除するグラフ保存が、一緒に保存する子の外部キーを null にして通ります（QuickER 版は外部キー違反で戻ります）。拒否するフックで値を書き換えなければ、削除が更新になることは避けられます
-
-#### DB 同期・DDL
-
-- **外部キーの両端の型が合わなくなる列の変更を含む同期で、外部キーが外れたまま残ることがある（Oracle の主キーの変更・MySQL の外部キーの作り直し）** — 実行確認に外部キーの型の食い違いの警告が出たら、その同期を実行しないでください
-- **SQL Server で、同じ列の組に一意制約が 2 つある列の型を変え、片方の一意制約を外す同期は、失敗して元に戻る** — 列の変更と一意制約の削除を別々の同期で行ってください
-- **0.2.0 以前の QuickER で作った PostgreSQL の DB で、名前の長い（59 バイト以上の）表に名前の無い外部キーが 2 本以上あると、同期の外部キーの追加が失敗して元に戻る**
-
 ## [0.2.0] - 2026-09-24
 
 このリリースの要点:
@@ -623,6 +604,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 本リポジトリは混合ライセンスです。コアは MIT、AI 機能・コード生成・CLI・MCP ツール実行ホストの 8 プロジェクトは PolyForm Noncommercial 1.0.0 ＋追加許諾で、現在は商用利用を含め全員無料、基本コード生成の商用利用は恒久的に許諾されています。条文は [LICENSE-NC.md](LICENSE-NC.md)、平易な解説は [LICENSING.ja.md](LICENSING.ja.md) にあります。
 
-[Unreleased]: https://github.com/kokko-labs/QuickER/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kokko-labs/QuickER/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.3.0
 [0.2.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.2.0
 [0.1.0]: https://github.com/kokko-labs/QuickER/releases/tag/v0.1.0
