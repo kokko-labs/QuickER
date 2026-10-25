@@ -7,8 +7,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" />
-    <!-- Microsoft.Data.Sqlite が推移的に持ち込む SQLitePCLRaw には既知の脆弱性
-         (GHSA-2m69-gcr7-jv3q) があるため、修正済みの版（Directory.Packages.props）を明示参照して上書きする -->
+    <!-- Microsoft.Data.Sqlite が推移的に持ち込む SQLitePCLRaw（2.1 系）でなく、3.0 系の版（Directory.Packages.props）を
+         明示参照して SQLite の版をそろえる（理由は Directory.Packages.props のコメントを参照） -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
   </ItemGroup>
 

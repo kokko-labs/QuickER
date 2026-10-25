@@ -235,6 +235,11 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 - **表示言語を、いま表示中の言語へ選び直しただけのときは、再起動を尋ねなくなりました** — 別の言語を選んで再起動を断ったあと元の言語を選び直すと、何も変わらない再起動を尋ねていました。メニューのチェックは、これまでどおり次の起動で使う言語を示します
 
+#### 依存パッケージ
+
+- **ランタイムパッケージが求めるデータベースのライブラリの版が上がりました** — `QuickER.Runtime.SqlServer` は `Microsoft.Data.SqlClient` 7.1.1（以前は 7.0.3）、`QuickER.Runtime.Sqlite` は `Microsoft.Data.Sqlite` 10.0.13（以前は 10.0.12）、`QuickER.Runtime.EntityFrameworkCore` は `Microsoft.EntityFrameworkCore.Relational` 10.0.13（以前は 10.0.12）に依存します。これらのどれかを古い版に固定しているプロジェクトは、版を上げる必要があります。パッケージが固定する `System.Security.Cryptography.Pkcs` と `SQLitePCLRaw.bundle_e_sqlite3` の版は変わりません
+- **モックプロジェクトも同じ新しい版を参照します** — 生成されるモックプロジェクトは、QuickER 自身のビルドと同じ `Microsoft.Data.SqlClient` 7.1.1・`Microsoft.Data.Sqlite` 10.0.13・`Microsoft.Extensions.DependencyInjection` 10.0.13 を参照します。サンプルも `Microsoft.Data.Sqlite` と `Microsoft.Extensions.DependencyInjection` の 10.0.13 を参照します
+
 ### Fixed
 
 #### DB 同期・DDL

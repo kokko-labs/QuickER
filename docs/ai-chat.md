@@ -142,7 +142,7 @@ The target is **Blazor Web App** (the default) or **WPF (.NET)**.
 Blazor Web App is globally interactive with InteractiveServer, and reproduces the mock natively for the web by porting the screens' HTML and shared `style.css` as faithfully as possible.
 QuickER generates the solution, the csproj files, and the data-layer code (Entity / EditModel / Mapper / an in-memory Repository, plus the QuickER Repository when the diagram's dialect supports it) deterministically from the ER model, so the AI only has to write the UI layer.
 The mock folder is bundled under `design/mock/`, and the AI implements the UI from it.
-The generated csproj references the same package versions as QuickER itself, including the fixed `SQLitePCLRaw` that overrides the vulnerable version `Microsoft.Data.Sqlite` brings in.
+The generated csproj references the same package versions as QuickER itself, including `SQLitePCLRaw` 3.0, which replaces the 2.1 version `Microsoft.Data.Sqlite` brings in so that the bundled SQLite is the version QuickER is tested with.
 A Blazor project for SQL Server also references the fixed `System.Security.Cryptography.Pkcs` that overrides the vulnerable version `Microsoft.Data.SqlClient` brings in; WPF does not need it, because its shared framework already provides the package.
 
 With Claude Code, Codex, or Copilot, the agent edits files and iterates on `dotnet build` until it passes or the run hits its overall time limit.

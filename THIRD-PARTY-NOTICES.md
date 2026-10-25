@@ -48,7 +48,7 @@ The following components are licensed under the MIT License.
 - **Microsoft.IdentityModel.\*** and **System.IdentityModel.Tokens.Jwt** — Copyright © Microsoft Corporation — https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet — *GUI, CLI*
 - **System.ClientModel** — Copyright © Microsoft Corporation — https://github.com/Azure/azure-sdk-for-net — *GUI*
 - **System.CommandLine** — Copyright © Microsoft Corporation — https://github.com/dotnet/command-line-api — *CLI*
-- **System.\*** out-of-band libraries (`System.Configuration.ConfigurationManager`, `System.Diagnostics.EventLog`, `System.Diagnostics.PerformanceCounter`, `System.DirectoryServices.Protocols`, `System.Memory.Data`, `System.Security.Cryptography.Pkcs`, `System.Security.Cryptography.ProtectedData`) — Copyright © Microsoft Corporation — https://github.com/dotnet/runtime — *GUI, CLI*
+- **System.\*** out-of-band libraries (`System.Configuration.ConfigurationManager`, `System.Diagnostics.EventLog`, `System.Diagnostics.PerformanceCounter`, `System.DirectoryServices.Protocols`, `System.Memory.Data`, `System.Security.Cryptography.Pkcs`, `System.Security.Cryptography.ProtectedData`, `System.Threading.RateLimiting`) — Copyright © Microsoft Corporation — https://github.com/dotnet/runtime — *GUI, CLI*
 
 ### MIT License text
 

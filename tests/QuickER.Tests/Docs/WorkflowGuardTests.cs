@@ -244,6 +244,34 @@ public sealed class WorkflowGuardTests
             );
     }
 
+    /// <summary>配布物を作る vpk は、アプリが参照する Velopack と同じ版を入れる</summary>
+    /// <remarks>
+    /// 版が食い違うと、配布物の形式とアプリ内の自動更新の仕組みが合わなくなり得る。
+    /// その破損はリリース後の自動更新まで分からないので、Directory.Packages.props と並べて照合する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "release.yml が入れる vpk の版は Directory.Packages.props の Velopack の版と同じ"
+    )]
+    public void ReleaseVpk_MatchesVelopackPackageVersion()
+    {
+        var velopack = Regex.Match(
+            File.ReadAllText(Path.Combine(Root, "Directory.Packages.props")),
+            @"<PackageVersion\s+Include=""Velopack""\s+Version=""(?<version>[^""]+)""\s*/>"
+        );
+        velopack.Success.Should().BeTrue("Directory.Packages.props に Velopack の版がある");
+
+        Regex
+            .Matches(
+                ReadWorkflow("release.yml"),
+                @"dotnet tool install --global vpk --version (?<version>\S+)"
+            )
+            .Select(match => match.Groups["version"].Value)
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(velopack.Groups["version"].Value);
+    }
+
     /// <summary>公開済みの版の確認は本番の公開だけで push の前に走り、push は --skip-duplicate を残す</summary>
     [Fact(
         DisplayName = "publish.yml は push の前に公開済みの版を確認し、push は --skip-duplicate のまま"

@@ -235,6 +235,11 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **Choosing the display language that is already shown no longer asks to restart** — after choosing another language and declining the restart, choosing the original language again asked for a restart that changed nothing. The menu check still shows the language used at the next start
 
+#### Dependencies
+
+- **The runtime packages require newer versions of their database libraries** — `QuickER.Runtime.SqlServer` now depends on `Microsoft.Data.SqlClient` 7.1.1 (was 7.0.3), `QuickER.Runtime.Sqlite` on `Microsoft.Data.Sqlite` 10.0.13 (was 10.0.12), and `QuickER.Runtime.EntityFrameworkCore` on `Microsoft.EntityFrameworkCore.Relational` 10.0.13 (was 10.0.12). A project that pins an older version of one of these needs to raise it. The versions of `System.Security.Cryptography.Pkcs` and `SQLitePCLRaw.bundle_e_sqlite3` that the packages pin are unchanged
+- **Mock projects reference the same newer versions** — a generated mock project now references `Microsoft.Data.SqlClient` 7.1.1, `Microsoft.Data.Sqlite` 10.0.13 and `Microsoft.Extensions.DependencyInjection` 10.0.13, the versions QuickER builds with. The samples reference `Microsoft.Data.Sqlite` and `Microsoft.Extensions.DependencyInjection` 10.0.13 too
+
 ### Fixed
 
 #### DB sync & DDL
