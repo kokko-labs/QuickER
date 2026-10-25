@@ -32,6 +32,32 @@ public sealed class CopilotChatEngine : IErChatEngine
 
     private bool _sessionStarted;
 
+    /// <summary>copilot ランタイムとの接続を確立したか</summary>
+    /// <remarks>
+    /// 接続が切れてクライアントが接続を捨てても（<see cref="ICopilotRuntimeClient.IsStarted"/> が false に戻っても）落とさない。
+    /// 次の送信で <see cref="SendAsync(string, IReadOnlyList{ChatAttachment}, CancellationToken)"/> が接続し直すので、
+    /// 送信できる状態（<see cref="IsReady"/>）を保つ（Codex のエンジンの IsStarted と同じ考え方）。
+    /// クライアントの <see cref="ICopilotRuntimeClient.IsStarted"/> から作ると、接続を捨てた時点で送信ボタンが押せなくなり、
+    /// 接続し直す経路に届かない。落とすのは接続（し直し）に失敗したとき（CLI の未検出・起動の失敗）だけ
+    /// </remarks>
+    private volatile bool _connected;
+
+    /// <summary>ターンの実行中に接続を確かめる既定の間隔</summary>
+    internal static readonly TimeSpan DefaultConnectionCheckInterval = TimeSpan.FromSeconds(3);
+
+    /// <summary>ターンの実行中に接続を確かめる間隔</summary>
+    private readonly TimeSpan _connectionCheckInterval;
+
+    /// <summary>接続の見張りの開始・停止を 1 本ずつにするロック</summary>
+    private readonly object _watchLock = new();
+
+    /// <summary>実行中のターンの接続の見張りを止める取り消し（見張りが無ければ null）</summary>
+    /// <remarks>CancelAfter も WaitHandle も使わないので、破棄しなくても資源は残らない（止めたら参照を捨てるだけ）</remarks>
+    private CancellationTokenSource? _watchCancellation;
+
+    /// <summary>最後に始めた接続の見張り（エンジンの破棄で終わりを待つ）</summary>
+    private Task _watchTask = Task.CompletedTask;
+
     /// <summary>ターン実行中フラグ（1=実行中・0=非実行。<see cref="TryCompleteTurn"/> と対で Interlocked 操作する）</summary>
     private int _turnInProgress;
 
@@ -88,7 +114,23 @@ public sealed class CopilotChatEngine : IErChatEngine
         IUiDispatcher dispatcher,
         ErChatProfile profile
     )
+        : this(client, toolHost, dispatcher, profile, DefaultConnectionCheckInterval) { }
+
+    /// <summary>接続の見張りの間隔を指定して生成する（テストで間隔を短くするための入口）</summary>
+    /// <param name="client">Copilot ランタイムクライアント</param>
+    /// <param name="toolHost">ER 図操作ツールの実行ホスト（null ならツール無効）</param>
+    /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
+    /// <param name="profile">用途プロファイル</param>
+    /// <param name="connectionCheckInterval">ターンの実行中に接続を確かめる間隔</param>
+    internal CopilotChatEngine(
+        ICopilotRuntimeClient client,
+        IErDiagramToolHost? toolHost,
+        IUiDispatcher dispatcher,
+        ErChatProfile profile,
+        TimeSpan connectionCheckInterval
+    )
     {
+        _connectionCheckInterval = connectionCheckInterval;
         _client = client;
         _toolHost = toolHost;
         _dispatcher = dispatcher;
@@ -101,7 +143,7 @@ public sealed class CopilotChatEngine : IErChatEngine
     }
 
     /// <inheritdoc />
-    public bool IsReady => _client.IsStarted && IsLoggedIn;
+    public bool IsReady => _connected && IsLoggedIn;
 
     /// <inheritdoc />
     /// <remarks>Copilot の添付 API は画像を対象とするため、画像のみ受け付ける。</remarks>
@@ -136,6 +178,7 @@ public sealed class CopilotChatEngine : IErChatEngine
     {
         if (!EnsureCliAvailable())
         {
+            _connected = false;
             return;
         }
 
@@ -147,6 +190,7 @@ public sealed class CopilotChatEngine : IErChatEngine
             }
             catch (Exception ex)
             {
+                _connected = false;
                 var message = string.Format(Strings.Copilot_ConnectFailed, ex.Message);
                 UpdateStatus(
                     Strings.Copilot_Status_NotConnected,
@@ -158,6 +202,7 @@ public sealed class CopilotChatEngine : IErChatEngine
             }
         }
 
+        _connected = true;
         await ReadAuthStateAsync(cancellationToken).ConfigureAwait(false);
         await ReadModelsAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -226,6 +271,7 @@ public sealed class CopilotChatEngine : IErChatEngine
         }
 
         Interlocked.Exchange(ref _turnInProgress, 1);
+        StartConnectionWatch();
         StatusChanged?.Invoke(this, Strings.Copilot_Processing);
 
         try
@@ -267,7 +313,101 @@ public sealed class CopilotChatEngine : IErChatEngine
     /// <see cref="TurnCompleted"/> が二重に届くため、Interlocked の交換で勝者を 1 つに絞る。
     /// ターンを完了させる全経路はこのメソッドを通ること（Codex のエンジンと同じ形）。
     /// </remarks>
-    private bool TryCompleteTurn() => Interlocked.Exchange(ref _turnInProgress, 0) == 1;
+    private bool TryCompleteTurn()
+    {
+        if (Interlocked.Exchange(ref _turnInProgress, 0) != 1)
+        {
+            return false;
+        }
+
+        StopConnectionWatch();
+        return true;
+    }
+
+    /// <summary>ターンの実行中だけ、接続が生きているかを一定の間隔で確かめる見張りを始める</summary>
+    /// <remarks>
+    /// SDK は接続断を知らせるイベントを持たず、応答の途中で copilot ランタイムが止まると、アイドルもエラーも来ないまま
+    /// ターンが終わらない（SDK 1.0.14・1.0.26 の実機で確認）。止まった後の <see cref="ICopilotRuntimeClient.PingAsync"/> は
+    /// すぐに失敗するので、それでターンを失敗として終える。見張りはターンの終わり（<see cref="TryCompleteTurn"/>）と破棄で止める
+    /// </remarks>
+    private void StartConnectionWatch()
+    {
+        lock (_watchLock)
+        {
+            _watchCancellation?.Cancel();
+            var cancellation = new CancellationTokenSource();
+            _watchCancellation = cancellation;
+            _watchTask = WatchConnectionAsync(cancellation.Token);
+        }
+    }
+
+    /// <summary>最後に始めた接続の見張り（テストで、見張りが止まったことを確かめる）</summary>
+    internal Task ConnectionWatchTask
+    {
+        get
+        {
+            lock (_watchLock)
+            {
+                return _watchTask;
+            }
+        }
+    }
+
+    /// <summary>接続の見張りを止める（見張りが無ければ何もしない）</summary>
+    private void StopConnectionWatch()
+    {
+        lock (_watchLock)
+        {
+            _watchCancellation?.Cancel();
+            _watchCancellation = null;
+        }
+    }
+
+    /// <summary>止められるまで、一定の間隔で接続を確かめ、接続が切れていたらターンを失敗で終える</summary>
+    /// <param name="cancellationToken">見張りを止める取り消し</param>
+    private async Task WatchConnectionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(_connectionCheckInterval, cancellationToken).ConfigureAwait(false);
+
+                try
+                {
+                    await _client.PingAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        // ターンが終わった・エンジンを破棄した（Ping の失敗はもう関係ない）
+                        return;
+                    }
+
+                    // 接続が切れていなければ（クライアントが接続を捨てていなければ）、次の回にもう一度確かめる
+                    if (_client.IsStarted)
+                    {
+                        continue;
+                    }
+
+                    if (TryCompleteTurn())
+                    {
+                        TurnCompleted?.Invoke(
+                            this,
+                            new ErChatTurnResult(false, BuildTurnFailedMessage(ex.Message))
+                        );
+                    }
+
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // ターンが終わった・エンジンを破棄した
+        }
+    }
 
     /// <inheritdoc />
     public async Task InterruptAsync(CancellationToken cancellationToken = default)
@@ -284,6 +424,16 @@ public sealed class CopilotChatEngine : IErChatEngine
         catch (Exception ex)
         {
             StatusChanged?.Invoke(this, string.Format(Strings.Copilot_InterruptFailed, ex.Message));
+
+            // 接続が切れていて中断できなかったなら、ランタイムがターンを終えることはもう無いので、ここで失敗として終える
+            // （接続が生きていれば、ランタイムが後でアイドルを返してターンを終える）
+            if (!_client.IsStarted && TryCompleteTurn())
+            {
+                TurnCompleted?.Invoke(
+                    this,
+                    new ErChatTurnResult(false, BuildTurnFailedMessage(ex.Message))
+                );
+            }
         }
     }
 
@@ -560,13 +710,33 @@ public sealed class CopilotChatEngine : IErChatEngine
         );
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _client.AssistantDeltaReceived -= OnAssistantDelta;
         _client.ToolCallRequested -= OnToolCallRequested;
         _client.SessionIdle -= OnSessionIdle;
         _client.SessionErrorReceived -= OnSessionError;
         _client.PermissionDeclined -= OnPermissionDeclined;
-        return _client.DisposeAsync();
+
+        // 見張りを止め、終わるのを待ってからクライアントを破棄する（破棄の後に見張りが Ping を送らないため）
+        Task watch;
+
+        lock (_watchLock)
+        {
+            _watchCancellation?.Cancel();
+            _watchCancellation = null;
+            watch = _watchTask;
+        }
+
+        try
+        {
+            await watch.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // 見張りの失敗（完了の通知の購読側の例外など）より、クライアントの破棄を優先する
+        }
+
+        await _client.DisposeAsync().ConfigureAwait(false);
     }
 }

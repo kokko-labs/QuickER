@@ -106,6 +106,13 @@ public interface ICopilotRuntimeClient : IAsyncDisposable
     /// <summary>実行中のターンを中断する</summary>
     Task AbortAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>copilot ランタイムとの接続が生きているかを確かめる（切れていれば接続を捨てて例外を投げる）</summary>
+    /// <remarks>
+    /// SDK は接続断を知らせるイベントを持たず、応答の途中でランタイムが止まると以後のイベントが来ないだけになる。
+    /// エンジンはターンの実行中にこれを定期的に呼び、失敗して <see cref="IsStarted"/> が false になっていたらターンを終える
+    /// </remarks>
+    Task PingAsync(CancellationToken cancellationToken = default);
+
     /// <summary>ツール呼び出し要求へ結果を返す</summary>
     /// <param name="requestId"><see cref="CopilotToolCallRequest.RequestId"/></param>
     /// <param name="result">結果テキスト（失敗時はエラー内容）</param>

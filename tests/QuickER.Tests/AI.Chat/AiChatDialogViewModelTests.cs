@@ -1065,6 +1065,139 @@ public class AiChatDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// Copilot の接続が切れてターンが失敗した後も送信ボタンが押せ、次の送信で接続し直して新しい会話で送ることを検証する
+    /// （エンジンの送信できる状態を接続の有無から作ると、接続を捨てた時点で送信できなくなり、接続し直す経路に届かない）。
+    /// </summary>
+    [Fact(DisplayName = "Copilot の接続が切れて失敗したターンの後も送信でき、次の送信で接続し直す")]
+    public async Task CopilotConnectionLost_CanSendAgainAndReconnects()
+    {
+        var (vm, copilot, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.StartConversationCommand.Execute(null);
+            copilot.AutoIdleAfterSend = true;
+            vm.UserInput = "1 回目";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            copilot.FailNextSendWithConnectionLost();
+            vm.UserInput = "2 回目";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            copilot.IsStarted.Should().BeFalse("接続が切れた失敗でクライアントは接続を捨てる");
+            vm.UserInput = "3 回目";
+            vm.CanSendMessage.Should().BeTrue("次の送信で接続し直すので、送信ボタンは押せる");
+
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            copilot.StartCallCount.Should().Be(2);
+            copilot.StartSessionCallCount.Should().Be(2);
+            copilot.Sends.Select(send => send.Prompt).Should().Equal("1 回目", "3 回目");
+            vm.IsTurnInProgress.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>VM の <see cref="AiChatDialogViewModel.IsTurnInProgress"/> が false になるのを待つ（上限は長く、時間そのものは表明しない）</summary>
+    private static Task WaitTurnEndedAsync(AiChatDialogViewModel vm)
+    {
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (
+                e.PropertyName == nameof(AiChatDialogViewModel.IsTurnInProgress)
+                && !vm.IsTurnInProgress
+            )
+            {
+                ended.TrySetResult();
+            }
+        };
+
+        if (!vm.IsTurnInProgress)
+        {
+            ended.TrySetResult();
+        }
+
+        return ended.Task.WaitAsync(
+            TimeSpan.FromSeconds(60),
+            TestContext.Current.CancellationToken
+        );
+    }
+
+    /// <summary>
+    /// Copilot の応答の途中でランタイムが止まると（以後のイベントが来ない）、ターンの実行中の見張りがターンを終え、
+    /// 送信ボタンが押せるようになり、次の送信で接続し直すことを検証する（見張りの間隔は既定のまま）。
+    /// </summary>
+    [Fact(DisplayName = "Copilot の応答の途中で接続が切れると、見張りがターンを終えて送信できる")]
+    public async Task CopilotConnectionLostMidStream_WatchEndsTurnAndCanSendAgain()
+    {
+        var (vm, copilot, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "長い応答を";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+            copilot.RaiseDelta("途中まで");
+            vm.IsTurnInProgress.Should().BeTrue();
+
+            copilot.FailPingsWithConnectionLost();
+            await WaitTurnEndedAsync(vm);
+
+            copilot.IsStarted.Should().BeFalse("接続が切れた失敗でクライアントは接続を捨てる");
+            vm.UserInput = "もう一度";
+            vm.CanSendMessage.Should().BeTrue();
+
+            copilot.AutoIdleAfterSend = true;
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            copilot.StartCallCount.Should().Be(2);
+            copilot.Sends.Select(send => send.Prompt).Should().Equal("長い応答を", "もう一度");
+            vm.IsTurnInProgress.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Copilot の応答の途中でランタイムが止まった状態で「中断」を押すと、中断の失敗でターンが終わり、
+    /// 送信ボタンが押せるようになることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "Copilot の接続が切れた状態の「中断」でターンが終わり送信できる")]
+    public async Task CopilotConnectionLost_InterruptEndsTurnAndCanSendAgain()
+    {
+        var (vm, copilot, folder) = CreateVmWithCopilot();
+
+        try
+        {
+            vm.Connection.SelectedBackend = ErChatBackendKind.Copilot;
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "長い応答を";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+            copilot.RaiseDelta("途中まで");
+
+            copilot.FailNextAbortWithConnectionLost();
+            await vm.InterruptCommand.ExecuteAsync(null);
+
+            vm.IsTurnInProgress.Should().BeFalse();
+            vm.UserInput = "もう一度";
+            vm.CanSendMessage.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>接続タブのモデル選択が Copilot エンジンへ伝わり、セッション生成オプションへ載ることを検証する</summary>
     [Fact(DisplayName = "Copilot のモデル選択がセッション生成へ渡る")]
     public void CopilotModelSelection_FlowsIntoSessionOptions()

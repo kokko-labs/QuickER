@@ -277,6 +277,13 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             : Task.CompletedTask;
 
     /// <inheritdoc />
+    public Task PingAsync(CancellationToken cancellationToken = default)
+    {
+        var client = RequireClient();
+        return InvokeAsync(() => client.PingAsync(cancellationToken: cancellationToken));
+    }
+
+    /// <inheritdoc />
     public async Task RespondToToolCallAsync(
         string requestId,
         string result,
