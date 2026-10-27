@@ -73,7 +73,7 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
                 ),
             ]
         );
-        var ledger = new FuzzFailureLedger(DslFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
         var seeds = Environment.GetEnvironmentVariable("QUICKER_FUZZ_SEEDS") is { Length: > 0 }
             ? NameFuzz.Seeds
             : [NameFuzz.Seeds[0]];

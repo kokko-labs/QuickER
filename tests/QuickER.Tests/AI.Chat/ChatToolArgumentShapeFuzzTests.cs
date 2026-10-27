@@ -5,6 +5,7 @@ using QuickER.AI.Chat;
 using QuickER.Mcp;
 using QuickER.Services;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.ViewModels;
 using GuiStrings = QuickER.Resources.Strings;
 
@@ -28,7 +29,8 @@ namespace QuickER.Tests.AI.Chat;
 public sealed class ChatToolArgumentShapeFuzzTests
 {
     /// <summary>既知の失敗（直す前の現状）。直したら外す</summary>
-    private static readonly KnownFailureLedger Ledger = new(
+    private static readonly KnownCaseLedger Ledger = new(
+        "ToolArgumentShapeFuzz.chat",
         ToolArgumentShapeFuzzKnownFailures.Chat
     );
 
@@ -74,13 +76,13 @@ public sealed class ChatToolArgumentShapeFuzzTests
             }
         }
 
-        foreach (var stale in Ledger.Known.Keys.Except(_seenIds))
+        foreach (var stale in Ledger.Ids.Except(_seenIds))
         {
             problems.Add($"[{stale}] 台帳にあるが、どのケースにも当たらない。台帳から外す。");
         }
 
-        caseCount.Should().BeGreaterThan(300, "総当たりのケースが組み立てられている");
-        KnownFailureLedger.ThrowIfAny(problems);
+        CoverageGuard.AtLeast("総当たりで組み立てたケース", caseCount, 301);
+        KnownCaseLedger.ThrowIfAny(problems);
     }
 
     /// <summary>崩したケース 1 件を新しい図で実行して 3 つの表明を確かめる</summary>

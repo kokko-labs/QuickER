@@ -2,6 +2,7 @@ using System.Windows;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;
@@ -15,12 +16,12 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// ミニマップを作り直す側が先に受け、リレーションが端点を計算し直すのはその後になるため、
 /// 端点をそのまま読むと 1 つ前の位置の線が残る。
 /// </para>
-/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。</para>
+/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</para>
 /// </remarks>
 public class MiniMapFreshnessTests
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string>());
+    private static readonly KnownCaseLedger Known = new("MiniMapFreshnessTests", []);
 
     /// <summary>親子 2 テーブルをリレーションで結び、離して置いた図を読み込む</summary>
     private static MainViewModel Build(int extraTables = 0)

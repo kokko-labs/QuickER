@@ -7,6 +7,7 @@ using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -65,7 +66,7 @@ public abstract class NameFuzzDdlRoundTripTestsBase
         Assert.SkipUnless(IsAvailable, UnavailableReason);
 
         var ct = TestContext.Current.CancellationToken;
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
         var dialect = Provider.Name;
         var executed = 0;
 
@@ -117,10 +118,10 @@ public abstract class NameFuzzDdlRoundTripTestsBase
         TestContext.Current.TestOutputHelper?.WriteLine($"{dialect}: {executed} ケースを流した");
 
         // 図を作れずに流れなかった組ばかりで緑にならないよう、代表の名前の半分以上 × 置き場所の数は流す
-        Assert.True(
-            executed
-                >= NameFuzzDiagrams.Representative.Count / 2 * Enum.GetValues<NameRole>().Length,
-            $"流したケースが少なすぎる: {executed}"
+        CoverageGuard.AtLeast(
+            $"{dialect}: 流したケース",
+            executed,
+            NameFuzzDiagrams.Representative.Count / 2 * Enum.GetValues<NameRole>().Length
         );
         ledger.AssertMatchesKnown($"ddl:{dialect}:");
     }
@@ -133,7 +134,7 @@ public abstract class NameFuzzDdlRoundTripTestsBase
     /// 試す名前を方言が受け付けるか（Model の宣言）。受け付けないなら DDL 生成の入口で断られることだけを確かめる
     /// </param>
     private async Task RoundTripAsync(
-        FuzzFailureLedger ledger,
+        FuzzFailureLog ledger,
         string entrance,
         string shape,
         ErDiagram diagram,

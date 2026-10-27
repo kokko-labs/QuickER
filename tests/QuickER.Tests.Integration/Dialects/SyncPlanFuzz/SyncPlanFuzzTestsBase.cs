@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
@@ -48,6 +48,11 @@ public abstract class SyncPlanFuzzTestsBase
     /// <summary>この方言で流す種の数の既定値</summary>
     protected abstract int DefaultSeedCount { get; }
 
+    /// <summary>方言の既定の種の数から、流す種の決め方を作る（1 から・単独の種は <see cref="SeedVariable"/>）</summary>
+    /// <param name="defaultSeedCount">方言の既定の種の数（夜間も同じ）</param>
+    public static SeedSettings SeedSettingsFor(int defaultSeedCount) =>
+        new(SeedCountVariable, defaultSeedCount, defaultSeedCount, singleVariable: SeedVariable);
+
     /// <summary>方言（DB）が使えないときのスキップ理由（使えるなら null）</summary>
     protected abstract string? UnavailableReason { get; }
 
@@ -61,10 +66,9 @@ public abstract class SyncPlanFuzzTestsBase
     {
         Assert.SkipWhen(UnavailableReason is not null, UnavailableReason ?? string.Empty);
 
-        var single = Environment.GetEnvironmentVariable(SeedVariable);
-        var seeds = single is { Length: > 0 }
-            ? [int.Parse(single, CultureInfo.InvariantCulture)]
-            : Enumerable.Range(1, SeedCount()).ToList();
+        var plan = SeedSource.Resolve(SeedSettingsFor(DefaultSeedCount));
+        plan.WriteWarnings();
+        var seeds = plan.Seeds;
 
         var dialect = CreateDialect();
         var outcomes = new List<FuzzSeedOutcome>();
@@ -96,49 +100,48 @@ public abstract class SyncPlanFuzzTestsBase
         }
 
         // 必須の形の表明は種が十分に多い方言だけ（少ない種では確率的に出ない形がある）
-        if (single is not { Length: > 0 } && seeds.Count >= ShapeCoverageMinimumSeeds)
+        if (!plan.IsSingle && seeds.Count >= ShapeCoverageMinimumSeeds)
         {
-            var shapes = outcomes.SelectMany(o => o.Shapes).ToHashSet();
-            FuzzShape
-                .Required.Where(s => !shapes.Contains(s))
-                .Should()
-                .BeEmpty("the generator must produce every required shape across the seeds");
+            CoverageGuard.ContainsAll(
+                $"{dialect.Name}: 種の集合全体に出た図の形",
+                outcomes.SelectMany(o => o.Shapes),
+                FuzzShape.Required
+            );
         }
 
         // 既知の失敗（形で名指しする）を除いた失敗だけを赤にする。一覧に載っているのに起きなかった項目も、
         // 既定の種の数で流したときは赤にする（直ったなら一覧から外す）
-        var (unexpected, notObserved) = SyncPlanFuzzKnownFailures.Classify(
-            dialect.Name,
-            failures,
-            checkNotObserved: single is not { Length: > 0 }
-                && Environment.GetEnvironmentVariable(SeedCountVariable) is not { Length: > 0 }
-        );
+        var report = new EngineReport($"SyncPlan.{dialect.Name}", DetailedFailures);
 
-        notObserved
-            .Should()
-            .BeEmpty("a known failure that no longer occurs must be removed from the list");
-        unexpected
-            .Should()
-            .BeEmpty(
-                "every plan must either succeed or warn beforehand, and apply exactly the selected items. "
-                    + $"Failed seeds: {string.Join(", ", unexpected.Select(f => f.Seed))}\n"
-                    + string.Join("\n", unexpected.Take(DetailedFailures).Select(f => f.Describe()))
+        foreach (var failure in failures)
+        {
+            report.Add(
+                SyncPlanFuzzKnownFailures.ToFailure(failure),
+                plan.ReproductionFor(failure.Seed)
             );
-    }
+        }
 
-    private int SeedCount()
-    {
-        var text = Environment.GetEnvironmentVariable(SeedCountVariable);
-        return text is { Length: > 0 }
-            ? int.Parse(text, CultureInfo.InvariantCulture)
-            : DefaultSeedCount;
+        var known = SyncPlanFuzzKnownFailures.Set.Classify(
+            report.Failures,
+            plan,
+            scope => scope == dialect.Name
+        );
+        report.WriteSummary(output, known);
+        known.AssertClean(
+            "every plan must either succeed or warn beforehand, and apply exactly the selected items. "
+                + $"Failed seeds: {string.Join(", ", known.Unknown.Select(f => f.Seed))}",
+            report
+        );
     }
 }
 
 /// <summary>SQLite（実ファイル・Docker 不要＝CI の両ジョブで常時実行）</summary>
 public sealed class SqliteSyncPlanFuzzTests : SyncPlanFuzzTestsBase
 {
-    protected override int DefaultSeedCount => 2000;
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 2000;
+
+    protected override int DefaultSeedCount => DefaultSeeds;
 
     protected override string? UnavailableReason => null;
 
@@ -150,7 +153,10 @@ public sealed class SqliteSyncPlanFuzzTests : SyncPlanFuzzTestsBase
 [Trait("RequiresDocker", "true")]
 public sealed class MySqlSyncPlanFuzzTests(MySqlContainerFixture fixture) : SyncPlanFuzzTestsBase
 {
-    protected override int DefaultSeedCount => 150;
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 150;
+
+    protected override int DefaultSeedCount => DefaultSeeds;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
@@ -164,7 +170,10 @@ public sealed class MySqlSyncPlanFuzzTests(MySqlContainerFixture fixture) : Sync
 public sealed class SqlServerSyncPlanFuzzTests(SqlServerContainerFixture fixture)
     : SyncPlanFuzzTestsBase
 {
-    protected override int DefaultSeedCount => 100;
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 100;
+
+    protected override int DefaultSeedCount => DefaultSeeds;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
@@ -179,7 +188,10 @@ public sealed class SqlServerSyncPlanFuzzTests(SqlServerContainerFixture fixture
 public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixture)
     : SyncPlanFuzzTestsBase
 {
-    protected override int DefaultSeedCount => 15;
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 15;
+
+    protected override int DefaultSeedCount => DefaultSeeds;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;

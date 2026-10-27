@@ -21,7 +21,7 @@ public sealed class NameIdentityViewModelFuzzTests
     [Fact(DisplayName = "プロパティパネルの名前の書き換えは名前の規則と同じ重複の判定になる")]
     public void PropertySetters_AgreeWithNameRule()
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
 
         NameFuzzRunner.Run(
             ledger,

@@ -12,7 +12,16 @@ namespace QuickER.Tests.TestSupport.Engines;
 /// <param name="Signature">エンジンが正規化した失敗の署名</param>
 /// <param name="Detail">失敗の詳細（理由の断片の照合と報告に使う）</param>
 /// <param name="Seed">乱数の種（決定的なシナリオなら null）</param>
-public sealed record EngineFailure(string Scope, string Signature, string Detail, int? Seed = null);
+/// <param name="Source">
+/// エンジンが持つ元の結果（述語の項目が、文字列にしていない構造で判定するため。照合と報告はこれを読まない）
+/// </param>
+public sealed record EngineFailure(
+    string Scope,
+    string Signature,
+    string Detail,
+    int? Seed = null,
+    object? Source = null
+);
 
 /// <summary>既知の失敗の項目が、観測した失敗に当たるかの決め方</summary>
 public enum KnownMatch
@@ -104,9 +113,20 @@ public sealed record KnownReport(
     /// <param name="report">新しい失敗を打ち切りと再現の手順つきで書く報告（無ければ失敗をそのまま並べる）</param>
     public void AssertClean(string title, EngineReport? report = null)
     {
+        if (Problem(title, report) is { } problem)
+        {
+            throw new XunitException(problem);
+        }
+    }
+
+    /// <summary>問題があれば、<see cref="AssertClean"/> が失敗にする文を返す（問題が無ければ null）</summary>
+    /// <param name="title">何の照合か（エンジン・テストの名前）</param>
+    /// <param name="report">新しい失敗を打ち切りと再現の手順つきで書く報告（無ければ失敗をそのまま並べる）</param>
+    public string? Problem(string title, EngineReport? report = null)
+    {
         if (IsClean)
         {
-            return;
+            return null;
         }
 
         var text = new StringBuilder();
@@ -166,7 +186,7 @@ public sealed record KnownReport(
             }
         }
 
-        throw new XunitException(text.ToString());
+        return text.ToString();
     }
 }
 
@@ -190,6 +210,16 @@ public sealed record KnownReport(
 /// </remarks>
 public sealed class KnownFailureSet
 {
+    /// <summary>種を持たない照合に渡す計画（乱数の項目が無いので、種の数の判定には使われない）</summary>
+    private static readonly SeedPlan NoSeeds = new(
+        [],
+        IsSingle: false,
+        IsDefaultCount: true,
+        EngineProfile.Regular,
+        new SeedSettings("QUICKER_NO_SEEDS", 1, 1),
+        []
+    );
+
     private readonly IReadOnlyList<KnownEntry> _entries;
     private readonly Func<string, string>? _family;
 
@@ -232,6 +262,24 @@ public sealed class KnownFailureSet
     /// <param name="plan">流した種</param>
     public KnownReport Classify(IEnumerable<EngineFailure> observed, SeedPlan plan) =>
         Classify(observed, plan, _ => true);
+
+    /// <summary>種を持たないエンジン（決定的なケースだけ）として、受け持つ範囲の項目だけで照合する</summary>
+    /// <param name="observed">観測した失敗（種を持たない）</param>
+    /// <param name="ownsScope">このテストが受け持つ範囲か</param>
+    /// <exception cref="InvalidOperationException">受け持つ範囲に乱数の項目がある（流した種が無いと「起きない」を決められない）</exception>
+    public KnownReport Classify(IEnumerable<EngineFailure> observed, Func<string, bool> ownsScope)
+    {
+        ArgumentNullException.ThrowIfNull(ownsScope);
+
+        if (_entries.FirstOrDefault(e => e.RandomSeeds && ownsScope(e.Scope)) is { } random)
+        {
+            throw new InvalidOperationException(
+                $"{EngineId}: 乱数の項目（{random.Describe()}）は流した種と照合する（SeedPlan を渡す）"
+            );
+        }
+
+        return Classify(observed, NoSeeds, ownsScope);
+    }
 
     /// <summary>このテストが受け持つ範囲の項目だけで照合する</summary>
     /// <param name="observed">観測した失敗（受け持つ範囲の外の失敗も新しい失敗として数える）</param>

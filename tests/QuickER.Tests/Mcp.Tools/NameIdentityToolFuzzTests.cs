@@ -43,7 +43,7 @@ public sealed class NameIdentityToolFuzzTests
     [InlineData(Host.Mcp)]
     public void DiagramTools_AgreeWithNameRule(Host host)
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
         var prefix = host == Host.Gui ? "gui-tool:" : "mcp-tool:";
 
         NameFuzzRunner.Run(
@@ -115,7 +115,7 @@ public sealed class NameIdentityToolFuzzTests
     [Fact(DisplayName = "名前付きクエリのツールの重複の判定は名前の規則と同じ答えになる")]
     public void QueryTool_AgreesWithNameRule()
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
 
         NameFuzzRunner.Run(
             ledger,

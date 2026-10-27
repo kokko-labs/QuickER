@@ -4,6 +4,7 @@ using QuickER.AI.Chat;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.AI.Chat;
 
@@ -12,7 +13,10 @@ namespace QuickER.Tests.AI.Chat;
 public sealed class QueryToolLocalizedFormatterLineEndingTests
 {
     /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
-    private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
+    private static readonly KnownCaseLedger Ledger = new(
+        "QueryToolLocalizedFormatterLineEndingTests",
+        []
+    );
 
     [Fact(
         DisplayName = "set_query・list_queries のチャットの応答は、成否や警告の有無に依らず改行を LF にそろえる"

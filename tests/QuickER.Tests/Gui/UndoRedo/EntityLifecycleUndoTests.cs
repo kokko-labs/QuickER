@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
 
@@ -10,11 +11,11 @@ namespace QuickER.Tests.Gui.UndoRedo;
 /// テーブルの追加・複製・削除の Undo / Redo が、主選択と名前付きクエリを図と食い違わせないこと、
 /// 連動変更のスナップショットを決まった順で当てることを固定するテストクラス。
 /// </summary>
-/// <remarks>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。</remarks>
+/// <remarks>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</remarks>
 public class EntityLifecycleUndoTests
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string>());
+    private static readonly KnownCaseLedger Known = new("EntityLifecycleUndoTests", []);
 
     /// <summary>2 つのテーブル（それぞれ主キー 1 列）を読み込む</summary>
     private static MainViewModel Build()

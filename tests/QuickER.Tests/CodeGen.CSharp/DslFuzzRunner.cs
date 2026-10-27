@@ -155,7 +155,7 @@ internal static class DslFuzzRunner
 
     /// <summary>1 単位を生成→コンパイル→実行する</summary>
     public static async Task RunAsync(
-        FuzzFailureLedger ledger,
+        FuzzFailureLog ledger,
         DslFuzzUnit unit,
         DslFuzzTarget target,
         CancellationToken ct
@@ -300,7 +300,7 @@ internal static class DslFuzzRunner
 
     /// <summary>生成時に断られた（警告で飛ばされた）クエリを記録し、その名前を返す</summary>
     private static HashSet<string> RecordGenerationDiagnostics(
-        FuzzFailureLedger ledger,
+        FuzzFailureLog ledger,
         string suite,
         DslFuzzUnit unit,
         CodeGenerationResult generated
@@ -367,7 +367,7 @@ internal static class DslFuzzRunner
 
     /// <summary>コンパイラの診断を記録し、エラーの出たクエリの名前を返す</summary>
     private static HashSet<string> RecordCompileDiagnostics(
-        FuzzFailureLedger ledger,
+        FuzzFailureLog ledger,
         string suite,
         DslFuzzUnit unit,
         GeneratedCodeCompilationResult compiled

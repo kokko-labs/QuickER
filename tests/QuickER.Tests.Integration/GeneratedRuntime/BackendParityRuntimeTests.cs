@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -37,33 +38,24 @@ public sealed class BackendParityRuntimeTests
     {
         var scenario = BackendParityScenarios.Get(name);
         var result = await scenario.RunAsync(Ct);
-        var known = BackendParityKnownDifferences
-            .All.Where(e => e.Scenario == name)
-            .Select(e => (e.Backend, e.Aspect))
-            .ToHashSet();
 
-        var unexpected = result
-            .Violations.Where(v => !known.Contains((v.Backend, v.Aspect)))
-            .ToList();
-        var nowPassing = known.Where(k => !result.Groups.Contains(k)).ToList();
+        // 実装先と観点の組ごとに最初の 1 手を失敗にする（一覧は組で当たり、期待・実際の中身は見ない）
+        var report = new EngineReport("BackendParity");
 
-        unexpected
-            .Should()
-            .BeEmpty(
-                "載っていない違いは無いはず:\n"
-                    + string.Join(
-                        "\n",
-                        unexpected
-                            .GroupBy(v => (v.Backend, v.Aspect))
-                            .Select(g => g.First().Describe())
-                    )
+        foreach (var group in result.Violations.GroupBy(v => (v.Backend, v.Aspect)))
+        {
+            report.Add(
+                BackendParityKnownDifferences.ToFailure(name, group.First()),
+                EngineReport.ScenarioReproduction(name)
             );
-        nowPassing
-            .Should()
-            .BeEmpty(
-                "既知の違いの一覧に載っているのに違いが出なかった（直ったなら一覧から外す）:\n"
-                    + string.Join("\n", nowPassing)
-            );
+        }
+
+        var known = BackendParityKnownDifferences.Set.Classify(
+            report.Failures,
+            scope => scope == name
+        );
+        report.WriteSummary(known: known);
+        known.AssertClean($"[Parity] シナリオ {name}", report);
     }
 
     [Fact(
@@ -71,36 +63,29 @@ public sealed class BackendParityRuntimeTests
     )]
     public void KnownDifferences_NameExistingScenariosAndBackends()
     {
+        // 指摘の番号・直す区切りか受け入れた理由・重複は、一覧（KnownFailureSet）が構築時に検査する
+        BackendParityKnownDifferences.Set.Entries.Should().NotBeNull();
+
         foreach (var entry in BackendParityKnownDifferences.All)
         {
-            var scenario = BackendParityScenarios.All.SingleOrDefault(s =>
-                s.Name == entry.Scenario
-            );
-            scenario.Should().NotBeNull(entry.Scenario);
-            scenario!.Backends.Should().Contain(entry.Backend, entry.ToString());
+            var scenario = BackendParityScenarios.All.SingleOrDefault(s => s.Name == entry.Scope);
+            scenario.Should().NotBeNull(entry.Scope);
+            entry.Match.Should().Be(KnownMatch.ExactSignature, entry.Describe());
+            var (backend, aspect) = BackendParityKnownDifferences.Split(entry.Signature!);
+            scenario!.Backends.Should().Contain(backend, entry.Describe());
 
-            if (entry.Aspect == ParityStep.ExpectAspect)
+            if (aspect == ParityStep.ExpectAspect)
             {
                 // 期待は基準の QuickER 版にも掛かる（決定へ基準自身が追いついていないことがある）
-                scenario.Ops.Should().Contain(op => op is ExpectOp, entry.ToString());
+                scenario.Ops.Should().Contain(op => op is ExpectOp, entry.Describe());
             }
             else
             {
-                entry.Backend.Should().NotBe(ParityBackendKind.Ado, "QuickER 版は基準");
-                ParityStep.Aspects.Should().Contain(entry.Aspect);
-                scenario.CompareWithBaseline.Should().BeTrue(entry.ToString());
+                backend.Should().NotBe(ParityBackendKind.Ado, "QuickER 版は基準");
+                ParityStep.Aspects.Should().Contain(aspect);
+                scenario.CompareWithBaseline.Should().BeTrue(entry.Describe());
             }
-
-            entry.Finding.Should().NotBeNullOrWhiteSpace();
-
-            // 0 は直さないと決めた差（受容）＝一覧に残り続ける
-            entry.Section.Should().BeGreaterThanOrEqualTo(0);
         }
-
-        BackendParityKnownDifferences
-            .All.Select(e => (e.Scenario, e.Backend, e.Aspect))
-            .Should()
-            .OnlyHaveUniqueItems();
     }
 
     /// <summary>
@@ -114,48 +99,61 @@ public sealed class BackendParityRuntimeTests
     [Fact(DisplayName = "[Parity] 乱数の操作の列は、全実装先で QuickER 版とそろう")]
     public async Task RandomSequences_MatchBaseline()
     {
-        var seeds = SeedsToRun();
-        var failures = new List<string>();
+        var plan = SeedSource.Resolve(Seeds);
+        plan.WriteWarnings();
+        var seeds = plan.Seeds;
+        // 違いのあった種を 3 つまで詳しく書き、3 つ目で打ち切る（1 種の操作の列が長いため）
+        var report = new EngineReport("BackendParity", MaxFailedSeeds);
         var tolerated = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var seed in seeds)
         {
             var scenario = BackendParityGenerator.Create(seed);
             var result = await scenario.RunAsync(Ct);
-            var unexplained = new List<ParityViolation>();
+            var known = BackendParityKnownDifferences.Set.Classify(
+                result.Violations.Select(v =>
+                    BackendParityKnownDifferences.ToFailure(
+                        BackendParityKnownDifferences.RandomScope,
+                        v,
+                        seed
+                    )
+                ),
+                plan,
+                scope => scope == BackendParityKnownDifferences.RandomScope
+            );
+            var unexplained = known.Unknown.Select(f => (ParityViolation)f.Source!).ToList();
 
-            foreach (var violation in result.Violations)
+            foreach (var match in known.Matched)
             {
-                var tolerance = BackendParityKnownDifferences.RandomTolerances.FirstOrDefault(t =>
-                    t.Covers(violation)
-                );
-
-                if (tolerance is null)
-                {
-                    unexplained.Add(violation);
-                }
-                else
-                {
-                    tolerated[tolerance.Finding] =
-                        tolerated.GetValueOrDefault(tolerance.Finding) + 1;
-                }
+                tolerated[match.Entry.Finding] =
+                    tolerated.GetValueOrDefault(match.Entry.Finding) + 1;
             }
 
             if (unexplained.Count > 0)
             {
-                failures.Add(
-                    $"seed {seed} ({scenario.Name}):\n"
-                        + string.Join("\n", scenario.Ops.Select((op, i) => $"  {i, 2} {op}"))
-                        + "\n"
-                        + string.Join(
-                            "\n",
-                            unexplained
-                                .GroupBy(v => (v.Backend, v.Aspect))
-                                .Select(g => g.First().Describe())
-                        )
+                var groups = unexplained.GroupBy(v => (v.Backend, v.Aspect)).ToList();
+                report.Add(
+                    new EngineFailure(
+                        BackendParityKnownDifferences.RandomScope,
+                        string.Join(
+                            ", ",
+                            groups.Select(g =>
+                                BackendParityKnownDifferences.SignatureOf(
+                                    g.Key.Backend,
+                                    g.Key.Aspect
+                                )
+                            )
+                        ),
+                        $"{scenario.Name}:\n"
+                            + string.Join("\n", scenario.Ops.Select((op, i) => $"  {i, 2} {op}"))
+                            + "\n"
+                            + string.Join("\n", groups.Select(g => g.First().Describe())),
+                        seed
+                    ),
+                    plan.ReproductionFor(seed)
                 );
 
-                if (failures.Count >= 3)
+                if (report.Failures.Count >= MaxFailedSeeds)
                 {
                     break;
                 }
@@ -165,8 +163,11 @@ public sealed class BackendParityRuntimeTests
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"seeds={seeds.Count} tolerated=[{string.Join(", ", tolerated.Select(kv => $"{kv.Key}:{kv.Value}"))}]"
         );
-        failures.Should().BeEmpty(string.Join("\n\n", failures));
+        report.Failures.Should().BeEmpty(report.Render());
     }
+
+    /// <summary>乱数の列で、違いのあった種をいくつまで流して報告するか（それ以上は流さない）</summary>
+    private const int MaxFailedSeeds = 3;
 
     [Fact(
         DisplayName = "[Parity] 乱数の列の見逃しは、決まった形の一覧に同じ指摘が残っている間だけ"
@@ -178,7 +179,7 @@ public sealed class BackendParityRuntimeTests
             BackendParityKnownDifferences
                 .All.Should()
                 .Contain(
-                    e => e.Finding == tolerance.Finding && e.Section == tolerance.Section,
+                    e => e.Finding == tolerance.Finding && e.FixedIn == tolerance.FixedIn,
                     $"{tolerance.Finding} が直ったら（決まった形の一覧から外したら）、乱数の列の見逃しも外す"
                 );
         }
@@ -194,30 +195,18 @@ public sealed class BackendParityRuntimeTests
             .Should()
             .Equal(second.Ops.Select(op => op.ToString()));
 
-        Enumerable
-            .Range(0, 3)
-            .Select(seed => BackendParityGenerator.Create(seed).Name.Split('-')[^1])
-            .Should()
-            .BeEquivalentTo(Enum.GetNames<ParityGeneratorMode>());
+        CoverageGuard.ContainsAll(
+            "種 0〜2 の範囲",
+            Enumerable
+                .Range(0, 3)
+                .Select(seed => BackendParityGenerator.Create(seed).Name.Split('-')[^1]),
+            Enum.GetNames<ParityGeneratorMode>()
+        );
     }
 
-    /// <summary>流す種（<c>QUICKER_PARITY_SEED</c> が 1 つの種、<c>QUICKER_PARITY_SEEDS</c> が数）</summary>
-    private static IReadOnlyList<int> SeedsToRun()
-    {
-        if (int.TryParse(Environment.GetEnvironmentVariable("QUICKER_PARITY_SEED"), out var single))
-        {
-            return [single];
-        }
-
-        var count = int.TryParse(
-            Environment.GetEnvironmentVariable("QUICKER_PARITY_SEEDS"),
-            out var configured
-        )
-            ? configured
-            : 200;
-
-        return [.. Enumerable.Range(1, count)];
-    }
+    /// <summary>乱数の種（<c>QUICKER_PARITY_SEED</c> が 1 つの種、<c>QUICKER_PARITY_SEEDS</c> が数・既定 200・1 から）</summary>
+    public static SeedSettings Seeds { get; } =
+        new("QUICKER_PARITY_SEEDS", 200, 200, singleVariable: "QUICKER_PARITY_SEED");
 
     [Fact(DisplayName = "[Parity] シナリオの名前は重複せず、どれも QuickER 版（基準）で流れる")]
     public void Scenarios_HaveUniqueNamesAndRunOnTheBaseline()

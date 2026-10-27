@@ -967,7 +967,7 @@ internal static class SyncPlanFuzzRunner
     }
 
     /// <summary>取り込んだ図を新しい Guid 空間へ写す（リレーションの列ペアも張り替える）</summary>
-    private static (List<Entity>, List<Relationship>) CloneWithFreshIds(SchemaImportResult live)
+    internal static (List<Entity>, List<Relationship>) CloneWithFreshIds(SchemaImportResult live)
     {
         var entityIdMap = new Dictionary<Guid, Guid>();
         var columnIdMap = new Dictionary<Guid, Guid>();

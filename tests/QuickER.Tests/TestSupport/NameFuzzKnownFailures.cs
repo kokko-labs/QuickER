@@ -1,3 +1,5 @@
+using QuickER.Tests.TestSupport.Engines;
+
 namespace QuickER.Tests.TestSupport;
 
 /// <summary>
@@ -18,6 +20,6 @@ namespace QuickER.Tests.TestSupport;
 /// </remarks>
 public static class NameFuzzKnownFailures
 {
-    /// <summary>一覧</summary>
-    public static readonly IReadOnlyList<KnownFuzzFailure> All = [];
+    /// <summary>一覧（項目は <see cref="FuzzFailureKey.Known"/> で作る）</summary>
+    public static KnownFailureSet Set { get; } = new("Name", []);
 }

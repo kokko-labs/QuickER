@@ -25,7 +25,7 @@ internal static class DslFuzzExecution
 {
     /// <summary>単位を各実装先で実行し、食い違いを記録する（実装先ごとに、結果を照合したクエリの数を返す）</summary>
     public static async Task<IReadOnlyDictionary<string, int>> RunAsync(
-        FuzzFailureLedger ledger,
+        FuzzFailureLog ledger,
         DslFuzzUnit unit,
         DslFuzzTarget target,
         Assembly assembly,
@@ -59,7 +59,7 @@ internal static class DslFuzzExecution
     }
 
     private static async Task<int> RunBackendAsync(
-        FuzzFailureLedger ledger,
+        FuzzFailureLog ledger,
         string entrance,
         DslFuzzUnit unit,
         DslFuzzBackend backend,

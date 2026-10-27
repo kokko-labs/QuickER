@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -16,7 +17,10 @@ namespace QuickER.Tests.Mcp.Tools;
 public sealed class ErDiagramToolUnnamedRelationshipTests : TwoHostToolTestBase
 {
     /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
-    private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
+    private static readonly KnownCaseLedger Ledger = new(
+        "ErDiagramToolUnnamedRelationshipTests",
+        []
+    );
 
     [Theory(
         DisplayName = "同じ向きのテーブル対に名前の無いリレーションが 2 本あっても、DDL が付ける名前で 1 本を選んで消せる"

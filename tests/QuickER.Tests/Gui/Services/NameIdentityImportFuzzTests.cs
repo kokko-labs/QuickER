@@ -42,7 +42,7 @@ public sealed class NameIdentityImportFuzzTests
     [InlineData(Format.Excel)]
     public void Import_AgreesWithNameRule(Format format)
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
         var prefix = $"import:{format.ToString().ToLowerInvariant()}:";
 
         NameFuzzRunner.Run(

@@ -23,7 +23,7 @@ public sealed class NameIdentitySqliteImportFuzzTests
     [Fact(DisplayName = "SQLite の DB 取込の重複の判定は名前の規則と同じ答えになる")]
     public void Import_AgreesWithNameRule()
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
 
         NameFuzzRunner.Run(
             ledger,

@@ -9,6 +9,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -25,12 +26,12 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <para>
 /// 値は生成物を構文解析して、文字列リテラルのトークンの値（コンパイラが使う値と同じ）で読む。コンパイルはしない。
 /// </para>
-/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。</para>
+/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</para>
 /// </remarks>
 public class QueryLiteralEscapeScanTests(ITestOutputHelper output)
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string> { });
+    private static readonly KnownCaseLedger Known = new("QueryLiteralEscapeScanTests", []);
 
     /// <summary>
     /// 全コード単位を 1 本の文字列に並べる。上位サロゲートは上位サロゲートの直前に、下位サロゲートは

@@ -19,7 +19,7 @@ public sealed class NameIdentityQueryDialogFuzzTests
     [Fact(DisplayName = "クエリ定義ダイアログの重複の判定は名前の規則と同じ答えになる")]
     public void Dialog_AgreesWithNameRule()
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
 
         NameFuzzRunner.Run(
             ledger,

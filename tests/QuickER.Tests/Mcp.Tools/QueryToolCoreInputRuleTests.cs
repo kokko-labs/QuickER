@@ -3,6 +3,7 @@ using AwesomeAssertions;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -14,7 +15,7 @@ namespace QuickER.Tests.Mcp.Tools;
 public sealed class QueryToolCoreInputRuleTests
 {
     /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
-    private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
+    private static readonly KnownCaseLedger Ledger = new("QueryToolCoreInputRuleTests", []);
 
     /// <summary>orders（order_id PK・customer_id・amount）だけを持つ図</summary>
     private static ErDiagram BuildOrders()

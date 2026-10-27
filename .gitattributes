@@ -110,3 +110,6 @@ samples/**/*.g.md linguist-generated=true
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# テストのエンジンの種の指紋の記録（FingerprintFile が LF で書く）
+tests/**/engine-fingerprints.json text eol=lf

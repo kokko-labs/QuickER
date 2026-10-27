@@ -6,6 +6,7 @@ using QuickER.Model;
 using QuickER.Provider.MySql;
 using QuickER.Provider.Sqlite;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -80,9 +81,12 @@ public class DslConditionFuzzTests
     )]
     public async Task DslConditions_MatchDocumentedSemantics()
     {
-        var ledger = new FuzzFailureLedger(DslFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
 
-        foreach (var seed in NameFuzz.Seeds)
+        var plan = SeedSource.Resolve(NameFuzz.SeedSettings);
+        plan.WriteWarnings();
+
+        foreach (var seed in plan.Seeds)
         {
             foreach (var unit in DslFuzzUnits.Sqlite(seed))
             {

@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.Documents;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Cli;
 
@@ -28,7 +29,8 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
     private const string RawExceptionPrefix = "Error: ";
 
     /// <summary>既知の失敗（直す前の現状）。直したら外す</summary>
-    private static readonly KnownFailureLedger Ledger = new(
+    private static readonly KnownCaseLedger Ledger = new(
+        "ToolArgumentShapeFuzz.codegen",
         ToolArgumentShapeFuzzKnownFailures.CodeGen
     );
 
@@ -121,13 +123,13 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
             }
         }
 
-        foreach (var stale in Ledger.Known.Keys.Except(_seenIds))
+        foreach (var stale in Ledger.Ids.Except(_seenIds))
         {
             problems.Add($"[{stale}] 台帳にあるが、どのケースにも当たらない。台帳から外す。");
         }
 
-        caseCount.Should().BeGreaterThan(40, "総当たりのケースが組み立てられている");
-        KnownFailureLedger.ThrowIfAny(problems);
+        CoverageGuard.AtLeast("総当たりで組み立てたケース", caseCount, 41);
+        KnownCaseLedger.ThrowIfAny(problems);
     }
 
     /// <summary>崩したケース 1 件を実行して 3 つの表明を確かめる</summary>
