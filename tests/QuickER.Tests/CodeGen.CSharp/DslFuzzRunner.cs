@@ -9,6 +9,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -55,8 +56,36 @@ internal sealed record DslFuzzTarget(
         );
 }
 
+/// <summary>
+/// 実装先の名前の正本（実装先の軸の値。各構成の実装先は <see cref="Axis"/> で、正本の値ごとにアダプタか理由つきの除外を持つ）
+/// </summary>
+internal static class DslFuzzBackends
+{
+    /// <summary>QuickER 版 Repository</summary>
+    public const string Ado = "ado";
+
+    /// <summary>EF Core 版 Repository</summary>
+    public const string EfCore = "efcore";
+
+    /// <summary>インメモリ Repository</summary>
+    public const string InMemory = "inmemory";
+
+    /// <summary>実装先の名前（構成の実装先はこの並びで流す）</summary>
+    public static IReadOnlyList<string> Names { get; } = [Ado, EfCore, InMemory];
+
+    /// <summary>構成（図の対象 DBMS）の実装先の軸を作る（正本の値にアダプタも除外の理由も無ければ断る）</summary>
+    /// <param name="dbms">図の対象 DBMS（軸の名前に使う）</param>
+    /// <param name="adapters">流す実装先</param>
+    /// <param name="excluded">流さない実装先と、その理由</param>
+    public static MatrixAxis<DslFuzzBackend> Axis(
+        string dbms,
+        IReadOnlyList<DslFuzzBackend> adapters,
+        IReadOnlyDictionary<string, string>? excluded = null
+    ) => new($"dsl-backend:{dbms}", Names, adapters, excluded);
+}
+
 /// <summary>1 つの実装先</summary>
-/// <param name="Name">名前（失敗のキーに使う）</param>
+/// <param name="Name">名前（失敗のキーに使う・実装先の軸の値＝<see cref="DslFuzzBackends.Names"/>）</param>
 /// <param name="Rule">文字列の大文字小文字・末尾の空白の扱い（docs の表から写す）</param>
 /// <param name="OpenAsync">検証コードの型と図から、空のテーブルを用意した DI のコンテナを開く</param>
 /// <param name="Excludes">この実装先で流さないクエリ（理由は判定を定義した側の XmlDoc に書く）</param>
@@ -65,12 +94,15 @@ internal sealed record DslFuzzBackend(
     DslCaseRule Rule,
     Func<Type, ErDiagram, CancellationToken, Task<DslFuzzSession>> OpenAsync,
     Func<DslQuery, bool>? Excludes = null
-)
+) : IMatrixAdapter
 {
+    /// <summary>実装先の軸の値（名前）</summary>
+    public string AxisValue => Name;
+
     /// <summary>インメモリ Repository（序数で比べる）</summary>
     public static DslFuzzBackend InMemory { get; } =
         new(
-            "inmemory",
+            DslFuzzBackends.InMemory,
             DslCaseRule.Ordinal,
             (probe, _, _) => Task.FromResult(new DslFuzzSession(DslFuzzProbe.InMemory(probe)))
         );
@@ -154,11 +186,17 @@ internal static class DslFuzzRunner
     public const int MinimumCheckedQueries = 100;
 
     /// <summary>1 単位を生成→コンパイル→実行する</summary>
+    /// <param name="ledger">失敗の記録先</param>
+    /// <param name="unit">単位</param>
+    /// <param name="target">方言の構成</param>
+    /// <param name="ct">取り消し</param>
+    /// <param name="coverage">実装先が照合したクエリを数える先（数えないなら null）</param>
     public static async Task RunAsync(
         FuzzFailureLog ledger,
         DslFuzzUnit unit,
         DslFuzzTarget target,
-        CancellationToken ct
+        CancellationToken ct,
+        DslFuzzCoverage? coverage = null
     )
     {
         var queries = unit.Queries.ToList();
@@ -249,7 +287,8 @@ internal static class DslFuzzRunner
             target,
             assembly,
             executable.BuildDiagram(target.Dbms),
-            ct
+            ct,
+            coverage
         );
 
         // 実装先ごとに照合したクエリが少なすぎれば失敗にする（引き当て・実行の不具合で黙って空振りしない）

@@ -7,6 +7,7 @@ using Microsoft.Data.Sqlite;
 using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
+using QuickER.Dialects;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
 using QuickER.Provider.Oracle;
@@ -41,7 +42,7 @@ internal enum FuzzTypeKind
 /// </remarks>
 internal abstract class SyncPlanFuzzDialect
 {
-    /// <summary>報告に出す方言名</summary>
+    /// <summary>報告に出す方言名（<see cref="DialectNames"/> の値）</summary>
     public abstract string Name { get; }
 
     /// <summary>方言のプロバイダ（取込・差分の能力・DDL・同期スクリプト・実行器）</summary>
@@ -106,7 +107,7 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
 {
     private SqliteTempDatabase _db = SqliteTempDatabase.Create();
 
-    public override string Name => "sqlite";
+    public override string Name => DialectNames.Sqlite;
 
     public override IDatabaseProvider Provider { get; } = new SqliteProvider();
 
@@ -150,7 +151,7 @@ internal sealed class SqliteSyncPlanFuzzDialect : SyncPlanFuzzDialect, IDisposab
 /// <summary>MySQL 8.4（Testcontainers）</summary>
 internal sealed class MySqlSyncPlanFuzzDialect(MySqlContainerFixture fixture) : SyncPlanFuzzDialect
 {
-    public override string Name => "mysql";
+    public override string Name => DialectNames.MySql;
 
     public override IDatabaseProvider Provider { get; } = new MySqlProvider();
 
@@ -183,7 +184,7 @@ internal sealed class MySqlSyncPlanFuzzDialect(MySqlContainerFixture fixture) : 
 internal sealed class SqlServerSyncPlanFuzzDialect(SqlServerContainerFixture fixture)
     : SyncPlanFuzzDialect
 {
-    public override string Name => "sqlserver";
+    public override string Name => DialectNames.SqlServer;
 
     public override IDatabaseProvider Provider { get; } = new SqlServerProvider();
 
@@ -219,7 +220,7 @@ internal sealed class SqlServerSyncPlanFuzzDialect(SqlServerContainerFixture fix
 internal sealed class PostgreSqlSyncPlanFuzzDialect(PostgreSqlContainerFixture fixture)
     : SyncPlanFuzzDialect
 {
-    public override string Name => "postgresql";
+    public override string Name => DialectNames.PostgreSql;
 
     public override IDatabaseProvider Provider { get; } = new PostgreSqlProvider();
 
@@ -252,7 +253,7 @@ internal sealed class PostgreSqlSyncPlanFuzzDialect(PostgreSqlContainerFixture f
 internal sealed class OracleSyncPlanFuzzDialect(OracleContainerFixture fixture)
     : SyncPlanFuzzDialect
 {
-    public override string Name => "oracle";
+    public override string Name => DialectNames.Oracle;
 
     public override bool AllowDuplicateForeignKeys => false;
 

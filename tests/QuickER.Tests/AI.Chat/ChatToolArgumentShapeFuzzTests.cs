@@ -52,6 +52,7 @@ public sealed class ChatToolArgumentShapeFuzzTests
 
         var problems = new List<string>();
         var caseCount = 0;
+        var coverage = new CoverageCounter(ToolArgumentFuzzDimensions.Table);
 
         foreach (var tool in tools)
         {
@@ -71,6 +72,7 @@ public sealed class ChatToolArgumentShapeFuzzTests
                 foreach (var fuzzCase in ToolArgumentFuzz.Generate(prefix, schema, baseline))
                 {
                     caseCount++;
+                    ToolArgumentFuzzDimensions.Observe(coverage, fuzzCase);
                     Ledger.Run(fuzzCase.Id, () => Check(tool.Name, fuzzCase), problems);
                 }
             }
@@ -81,8 +83,22 @@ public sealed class ChatToolArgumentShapeFuzzTests
             problems.Add($"[{stale}] 台帳にあるが、どのケースにも当たらない。台帳から外す。");
         }
 
+        // 網羅の宣言の誤りはケースの結果より先に赤にする
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary();
+        coverageReport.WriteGapUsage(
+            ToolArgumentFuzzDimensions.Gaps,
+            ToolArgumentFuzzDimensions.ChatScope
+        );
+
         CoverageGuard.AtLeast("総当たりで組み立てたケース", caseCount, 301);
         KnownCaseLedger.ThrowIfAny(problems);
+
+        // 網羅しない組は、ケースの結果を表明してから照合する（網羅の赤がケースの失敗を隠さない）
+        coverageReport.AssertGaps(
+            ToolArgumentFuzzDimensions.Gaps,
+            ToolArgumentFuzzDimensions.ChatScope
+        );
     }
 
     /// <summary>崩したケース 1 件を新しい図で実行して 3 つの表明を確かめる</summary>

@@ -105,10 +105,13 @@ public sealed class BackendParityRuntimeTests
         // 違いのあった種を 3 つまで詳しく書き、3 つ目で打ち切る（1 種の操作の列が長いため）
         var report = new EngineReport("BackendParity", MaxFailedSeeds);
         var tolerated = new Dictionary<string, int>(StringComparer.Ordinal);
+        var coverage = new CoverageCounter(BackendParityDimensions.Table);
+        var ranAllSeeds = true;
 
         foreach (var seed in seeds)
         {
             var scenario = BackendParityGenerator.Create(seed);
+            BackendParityDimensions.Observe(coverage, scenario);
             var result = await scenario.RunAsync(Ct);
             var known = BackendParityKnownDifferences.Set.Classify(
                 result.Violations.Select(v =>
@@ -155,6 +158,7 @@ public sealed class BackendParityRuntimeTests
 
                 if (report.Failures.Count >= MaxFailedSeeds)
                 {
+                    ranAllSeeds = false;
                     break;
                 }
             }
@@ -163,7 +167,25 @@ public sealed class BackendParityRuntimeTests
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"seeds={seeds.Count} tolerated=[{string.Join(", ", tolerated.Select(kv => $"{kv.Key}:{kv.Value}"))}]"
         );
+
+        // 網羅の宣言の誤りは種の結果より先に赤にする
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary();
+        coverageReport.WriteGapUsage(
+            BackendParityDimensions.Gaps,
+            BackendParityDimensions.RandomScope
+        );
         report.Failures.Should().BeEmpty(report.Render());
+
+        // 網羅しない組は、種の結果を表明してから、すべての種を流したときだけ照合する（打ち切ったときは上で赤）
+        if (ranAllSeeds)
+        {
+            coverageReport.AssertGaps(
+                BackendParityDimensions.Gaps,
+                BackendParityDimensions.RandomScope,
+                plan
+            );
+        }
     }
 
     /// <summary>乱数の列で、違いのあった種をいくつまで流して報告するか（それ以上は流さない）</summary>

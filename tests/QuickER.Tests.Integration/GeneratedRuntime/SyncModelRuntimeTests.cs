@@ -31,10 +31,14 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
-public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
+[MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Direct))]
+public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
 {
     /// <summary>1 つの種の操作の数</summary>
     public const int StepsPerSeed = 40;
+
+    /// <summary>世界の組み方（既定＝直結・SQLite のサーバー役。種もシナリオも組み方を渡さずに流す）</summary>
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => SyncModelWorldOptions.Direct;
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
@@ -56,10 +60,21 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
     }
 
     /// <summary>種 1 つを流す（操作の列と違反を返す）</summary>
+    /// <param name="seed">種</param>
+    /// <param name="ct">取り消し</param>
+    /// <param name="options">世界の作り方（転送経路・サーバー役）</param>
+    /// <param name="coverage">
+    /// 操作を次元表のケースとして数える先（null なら数えない）。生成器が返した操作を実行の前に読むだけで、乱数を引かない
+    /// </param>
     internal static async Task<(
         IReadOnlyList<ModelFailure> Failures,
         IReadOnlyList<string> Log
-    )> RunSeedAsync(int seed, CancellationToken ct, SyncModelWorldOptions? options = null)
+    )> RunSeedAsync(
+        int seed,
+        CancellationToken ct,
+        SyncModelWorldOptions? options = null,
+        CoverageCounter? coverage = null
+    )
     {
         var generator = new SyncModelGenerator(seed);
         await using var run = await SyncModelRun.StartAsync(generator.Setup(), ct, options);
@@ -74,7 +89,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
                 states[actor] = await run.World.ReadStateAsync(actor, ct);
             }
 
-            foreach (var op in generator.Next(states))
+            var ops = generator.Next(states);
+
+            if (coverage is not null)
+            {
+                SyncModelDimensions.Observe(coverage, generator, ops);
+            }
+
+            foreach (var op in ops)
             {
                 if (!await run.ExecuteAsync(op))
                 {
@@ -103,21 +125,35 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
         var elapsed = new ConcurrentDictionary<int, TimeSpan>();
         var plan = SeedSource.Resolve(Seeds);
         plan.WriteWarnings(output);
+        var coverage = new CoverageCounter(SyncModelDimensions.Table);
 
         // 種ごとに世界（SQLite の DB 3 つ）を作るので、種どうしは何も共有しない。並列度は CPU 数で抑える
-        await Parallel.ForEachAsync(
-            plan.Seeds,
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
-                CancellationToken = Ct,
-            },
-            async (seed, ct) =>
-            {
-                var watch = Stopwatch.StartNew();
-                results[seed] = await RunSeedAsync(seed, ct);
-                elapsed[seed] = watch.Elapsed;
-            }
+        await RunObservedAsync(
+            coverage,
+            () =>
+                Parallel.ForEachAsync(
+                    plan.Seeds,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
+                        CancellationToken = Ct,
+                    },
+                    async (seed, ct) =>
+                    {
+                        var watch = Stopwatch.StartNew();
+                        results[seed] = await RunSeedAsync(seed, ct, coverage: coverage);
+                        elapsed[seed] = watch.Elapsed;
+                    }
+                )
+        );
+
+        // 宣言の誤りは種の失敗より先に赤にする（Report が Observe の誤りを投げ直す）
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary(output);
+        coverageReport.WriteGapUsage(
+            SyncModelDimensions.Gaps,
+            SyncModelDimensions.DirectScope,
+            output
         );
 
         var report = new EngineReport("SyncModel");
@@ -174,6 +210,29 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
             .BeEmpty(
                 "every failure of a random seed must be on the known list:\n" + report.Render()
             );
+
+        // エンジンの結果を表明してから網羅を照合する（網羅の赤がエンジンの失敗を隠さない）
+        coverageReport.AssertGaps(SyncModelDimensions.Gaps, SyncModelDimensions.DirectScope, plan);
+    }
+
+    /// <summary>
+    /// 種を流す本体を実行し、本体が例外で終わったときは先に網羅の宣言の誤りを確かめる（並列の種のどれかの
+    /// <see cref="CoverageDeclarationException"/> が別の種の例外に隠れても、宣言の誤りとして赤にする）
+    /// </summary>
+    /// <param name="coverage">数える先</param>
+    /// <param name="body">種を流す本体</param>
+    internal static async Task RunObservedAsync(CoverageCounter coverage, Func<Task> body)
+    {
+        try
+        {
+            await body();
+        }
+        catch
+        {
+            // 宣言の誤りがあれば Report がそれを投げる（無ければ元の例外を投げ直す）
+            _ = coverage.Report();
+            throw;
+        }
     }
 
     /// <summary>

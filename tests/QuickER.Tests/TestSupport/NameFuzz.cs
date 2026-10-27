@@ -1,4 +1,5 @@
 using QuickER.Tests.TestSupport.Engines;
+using Xunit.Sdk;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -335,6 +336,10 @@ public static class NameFuzzRunner
 
         var plan = SeedSource.Resolve(NameFuzz.SeedSettings);
         plan.WriteWarnings();
+        var coverage = new CoverageCounter(
+            NameFuzzDimensions.Table,
+            NameFuzzDimensions.FixedLevelsFor(kind)
+        );
 
         foreach (var seed in plan.Seeds)
         {
@@ -360,6 +365,8 @@ public static class NameFuzzRunner
                     continue;
                 }
 
+                // 実際に流す組だけを数える（組の記録を読むだけで乱数を引かない）
+                NameFuzzDimensions.Observe(coverage, kind, pair);
                 var outcome = run(pair);
                 var difference = pair.Difference.ToString();
                 var example = $"seed {seed}: {pair} \u2192 {outcome.Detail}";
@@ -375,10 +382,7 @@ public static class NameFuzzRunner
                 }
 
                 // 受け付けた後の性質（後の名前で引けるか・保存形）は、組の違いでなく名前が前後に空白を持つかで分ける
-                var shape =
-                    pair.First.Trim() == pair.First && pair.Second.Trim() == pair.Second
-                        ? "Plain"
-                        : "WithWhitespace";
+                var shape = NameFuzzDimensions.ShapeOf(pair);
 
                 foreach (var violation in outcome.Violations)
                 {
@@ -386,6 +390,15 @@ public static class NameFuzzRunner
                 }
             }
         }
+
+        // 網羅の宣言の誤りはここで赤にし、網羅しない組の照合は既知の失敗の照合の後へ回す
+        // （入口を続けて流すテストで、網羅の赤が後の入口の結果と失敗の照合を隠さない）
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary();
+        coverageReport.WriteGapUsage(NameFuzzDimensions.Gaps, entrance);
+        ledger.DeferCoverageCheck(() =>
+            coverageReport.AssertGaps(NameFuzzDimensions.Gaps, entrance, plan)
+        );
     }
 }
 
@@ -420,6 +433,19 @@ public sealed class FuzzFailureLog(KnownFailureSet known)
     private const int MaxExamplesPerKey = 3;
 
     private readonly Dictionary<FuzzFailureKey, List<string>> _observed = [];
+
+    private readonly List<Action> _deferredCoverageChecks = [];
+
+    /// <summary>
+    /// 網羅しない組の照合を、<see cref="AssertMatchesKnown"/> の既知の失敗の照合の後へ回す
+    /// （網羅の赤が失敗の照合を隠さない）
+    /// </summary>
+    /// <param name="check">網羅しない組の照合（<see cref="CoverageReport.AssertGaps"/>）</param>
+    public void DeferCoverageCheck(Action check)
+    {
+        ArgumentNullException.ThrowIfNull(check);
+        _deferredCoverageChecks.Add(check);
+    }
 
     /// <summary>失敗を記録する（同じキーは最初の 3 つの例を残す）</summary>
     /// <param name="key">失敗のキー</param>
@@ -456,5 +482,27 @@ public sealed class FuzzFailureLog(KnownFailureSet known)
             ));
 
         known.Classify(failures, Owned).AssertClean($"{known.EngineId} の総当たり");
+
+        // 回しておいた網羅しない組の照合（入口ごと）。表明の失敗はすべて並べ、宣言の誤りはそのまま投げる
+        var coverageProblems = new List<string>();
+
+        foreach (var check in _deferredCoverageChecks)
+        {
+            try
+            {
+                check();
+            }
+            catch (XunitException ex)
+            {
+                coverageProblems.Add(ex.Message);
+            }
+        }
+
+        if (coverageProblems.Count > 0)
+        {
+            throw new XunitException(
+                string.Join(Environment.NewLine + Environment.NewLine, coverageProblems)
+            );
+        }
     }
 }

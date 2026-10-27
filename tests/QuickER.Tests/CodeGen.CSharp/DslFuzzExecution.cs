@@ -5,6 +5,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -30,7 +31,8 @@ internal static class DslFuzzExecution
         DslFuzzTarget target,
         Assembly assembly,
         ErDiagram diagram,
-        CancellationToken ct
+        CancellationToken ct,
+        DslFuzzCoverage? coverage = null
     )
     {
         var executed = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -51,6 +53,9 @@ internal static class DslFuzzExecution
                 session.Services.GetRequiredService(repositoryType),
                 repositoryType,
                 shape,
+                coverage is null
+                    ? null
+                    : query => coverage.Observe(target.Dbms, backend.Name, query),
                 ct
             );
         }
@@ -66,6 +71,7 @@ internal static class DslFuzzExecution
         object repository,
         Type repositoryType,
         EntityShape shape,
+        Action<DslQuery>? observeChecked,
         CancellationToken ct
     )
     {
@@ -138,6 +144,9 @@ internal static class DslFuzzExecution
                 var problem = Check(query, result, rows, rule, shape);
                 checkedCount++;
 
+                // 照合したクエリの原子を網羅として数える（宣言の誤りは下の catch で受け止めずにそのまま投げる）
+                observeChecked?.Invoke(query);
+
                 if (problem is null)
                 {
                     continue;
@@ -156,7 +165,7 @@ internal static class DslFuzzExecution
                     );
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not CoverageDeclarationException)
             {
                 if (query.IsAtomQuery)
                 {

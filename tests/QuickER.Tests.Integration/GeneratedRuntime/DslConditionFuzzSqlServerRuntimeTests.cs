@@ -3,9 +3,11 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.CodeGen.CSharp;
+using QuickER.Dialects;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.CodeGen.CSharp;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -45,7 +47,7 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
 
         var target = new DslFuzzTarget(
             Suite,
-            "sqlserver",
+            DialectNames.SqlServer,
             new SqlServerProvider(),
             unit => new CodeGenerationOptions
             {
@@ -61,36 +63,69 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
             "AddGeneratedSqlServerRepositories",
             EfCore: true,
             InMemory: false,
+            BackendAxis(fixture).Adapters
+        );
+        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
+        var seedsSpecified =
+            Environment.GetEnvironmentVariable("QUICKER_FUZZ_SEEDS") is { Length: > 0 };
+        var seeds = seedsSpecified ? NameFuzz.Seeds : [NameFuzz.Seeds[0]];
+        var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqlServerScopes);
+
+        foreach (var seed in seeds)
+        {
+            foreach (var unit in DslFuzzUnits.SqlServer(seed))
+            {
+                await DslFuzzRunner.RunAsync(ledger, unit, target, Ct, coverage);
+            }
+        }
+
+        // 網羅の宣言の誤りは照合の結果より先に赤にする
+        var coverageReports = coverage.Reports();
+        DslFuzzCoverage.WriteSummaries(coverageReports);
+
+        ledger.AssertMatchesKnown($"{Suite}-");
+
+        // 網羅しない組は、照合の結果を表明してから照合する。このテストの既定（QUICKER_FUZZ_SEEDS を指定しない＝先頭の種 1 つ）
+        // のときだけ照合する（種の数で欠けが変わるため）
+        if (!seedsSpecified)
+        {
+            DslFuzzCoverage.AssertGaps(coverageReports, plan: null);
+        }
+    }
+
+    /// <summary>
+    /// SQL Server の構成の実装先の軸（QuickER 版 Repository と EF Core）。コンテナには実装先を開くときにだけ触れるので、
+    /// 軸を作るだけなら Docker は要らない（<see cref="MatrixAxisGuardTests"/> が Docker なしで作れることを確かめる）
+    /// </summary>
+    /// <param name="fixture">SQL Server のコンテナ（実装先を開くときにだけ使う）</param>
+    internal static MatrixAxis<DslFuzzBackend> BackendAxis(SqlServerContainerFixture fixture) =>
+        DslFuzzBackends.Axis(
+            DialectNames.SqlServer,
             [
-                Database("ado", (probe, cs) => DslFuzzProbe.Ado(probe, cs)),
+                Database(fixture, DslFuzzBackends.Ado, (probe, cs) => DslFuzzProbe.Ado(probe, cs)),
                 Database(
-                    "efcore",
+                    fixture,
+                    DslFuzzBackends.EfCore,
                     (probe, cs) =>
                         DslFuzzProbe.EfCore(
                             probe,
                             options => options.UseSqlServer(cs).IgnoreServiceProviderCacheLimit()
                         )
                 ),
-            ]
-        );
-        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
-        var seeds = Environment.GetEnvironmentVariable("QUICKER_FUZZ_SEEDS") is { Length: > 0 }
-            ? NameFuzz.Seeds
-            : [NameFuzz.Seeds[0]];
-
-        foreach (var seed in seeds)
-        {
-            foreach (var unit in DslFuzzUnits.SqlServer(seed))
+            ],
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                await DslFuzzRunner.RunAsync(ledger, unit, target, Ct);
+                [DslFuzzBackends.InMemory] =
+                    "インメモリ Repository は方言に依らず式木を評価するので、SQLite の構成（QuickER.Tests の DslConditionFuzzTests）で流す",
             }
-        }
-
-        ledger.AssertMatchesKnown($"{Suite}-");
-    }
+        );
 
     /// <summary>単位ごとに新しいデータベースを作り、DDL を当てて開く実装先（閉じるときにデータベースを捨てる）</summary>
-    private DslFuzzBackend Database(string name, Func<Type, string, ServiceProvider> build) =>
+    private static DslFuzzBackend Database(
+        SqlServerContainerFixture fixture,
+        string name,
+        Func<Type, string, ServiceProvider> build
+    ) =>
         new(
             name,
             DslCaseRule.Collation,

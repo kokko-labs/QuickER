@@ -5,6 +5,7 @@ using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
 
@@ -632,6 +633,7 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
         var problems = new List<string>();
         var actions = Enum.GetValues<ForeignKeyReferentialAction>();
         var types = Enum.GetValues<RelationshipType>();
+        var coverage = new CoverageCounter(RelationshipTypeChangeDimensions.Table);
 
         foreach (var from in types)
         {
@@ -647,6 +649,14 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
                 {
                     foreach (var onUpdate in values)
                     {
+                        // 組み合わせを数えるのは検証本体の外（台帳は本体の例外を受け止めるので、宣言の誤りを混ぜない）
+                        RelationshipTypeChangeDimensions.Observe(
+                            coverage,
+                            from,
+                            to,
+                            onDelete,
+                            onUpdate
+                        );
                         UndoKnownFailures.Run(
                             $"RelationshipType:{from}->{to}(delete={onDelete},update={onUpdate})",
                             () =>
@@ -684,7 +694,21 @@ public class TrackedPropertyUndoExhaustiveTests : IDisposable
             }
         }
 
+        // 網羅の宣言の誤りは組み合わせの結果より先に赤にする
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary();
+        coverageReport.WriteGapUsage(
+            RelationshipTypeChangeDimensions.Gaps,
+            RelationshipTypeChangeDimensions.Scope
+        );
+
         UndoKnownFailures.ThrowIfAny(problems);
+
+        // 網羅しない組は、組み合わせの結果を表明してから照合する（網羅の赤が組み合わせの失敗を隠さない）
+        coverageReport.AssertGaps(
+            RelationshipTypeChangeDimensions.Gaps,
+            RelationshipTypeChangeDimensions.Scope
+        );
     }
 
     [Fact(

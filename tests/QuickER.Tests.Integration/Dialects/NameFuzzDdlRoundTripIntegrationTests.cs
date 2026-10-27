@@ -36,8 +36,14 @@ namespace QuickER.Tests.Integration.Dialects;
 /// </remarks>
 public abstract class NameFuzzDdlRoundTripTestsBase
 {
-    /// <summary>方言のプロバイダ</summary>
+    /// <summary>派生クラスが受け持つ方言の軸の名前（値は <see cref="DialectNames"/>）</summary>
+    public const string DialectAxis = "dialect";
+
+    /// <summary>方言のプロバイダ（DB には触れない）</summary>
     protected abstract IDatabaseProvider Provider { get; }
+
+    /// <summary>方言の名前（プロバイダの名前。DB に触れないので、Docker なしで読める）</summary>
+    internal string DialectName => Provider.Name;
 
     /// <summary>DB が使えるか（Docker の無い環境では false）</summary>
     protected abstract bool IsAvailable { get; }
@@ -69,6 +75,8 @@ public abstract class NameFuzzDdlRoundTripTestsBase
         var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
         var dialect = Provider.Name;
         var executed = 0;
+        var plan = SeedSource.Resolve(NameFuzz.SeedSettings);
+        var coverage = new CoverageCounter(NameFuzzDdlRoundTripDimensions.Table);
 
         foreach (var name in NameFuzzDiagrams.NamesForRun())
         {
@@ -83,6 +91,9 @@ public abstract class NameFuzzDdlRoundTripTestsBase
                 }
 
                 executed++;
+
+                // 実際に流す名前と置き場所だけを数える（読むだけ）
+                NameFuzzDdlRoundTripDimensions.Observe(coverage, name, role);
                 await RoundTripAsync(
                     ledger,
                     $"ddl:{dialect}:{role}",
@@ -117,6 +128,11 @@ public abstract class NameFuzzDdlRoundTripTestsBase
 
         TestContext.Current.TestOutputHelper?.WriteLine($"{dialect}: {executed} ケースを流した");
 
+        // 網羅の宣言の誤りは往復の結果より先に赤にする
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary();
+        coverageReport.WriteGapUsage(NameFuzzDdlRoundTripDimensions.Gaps, dialect);
+
         // 図を作れずに流れなかった組ばかりで緑にならないよう、代表の名前の半分以上 × 置き場所の数は流す
         CoverageGuard.AtLeast(
             $"{dialect}: 流したケース",
@@ -124,6 +140,9 @@ public abstract class NameFuzzDdlRoundTripTestsBase
             NameFuzzDiagrams.Representative.Count / 2 * Enum.GetValues<NameRole>().Length
         );
         ledger.AssertMatchesKnown($"ddl:{dialect}:");
+
+        // 網羅しない組は、往復の結果を表明してから照合する（既定の種の数のときだけ）
+        coverageReport.AssertGaps(NameFuzzDdlRoundTripDimensions.Gaps, dialect, plan);
     }
 
     /// <summary>この方言の識別子の長さの上限（入口が断る名前の判定）</summary>
@@ -218,6 +237,7 @@ public abstract class NameFuzzDdlRoundTripTestsBase
 
 /// <summary>SQLite（実ファイル・Docker 不要）の名前の総当たりの DDL の往復</summary>
 [Trait("Category", "Integration")]
+[MatrixAxisValue(NameFuzzDdlRoundTripTestsBase.DialectAxis, DialectNames.Sqlite)]
 public sealed class SqliteNameFuzzDdlRoundTripIntegrationTests
     : NameFuzzDdlRoundTripTestsBase,
         IDisposable
@@ -242,6 +262,7 @@ public sealed class SqliteNameFuzzDdlRoundTripIntegrationTests
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(SqlServerContainerCollection.Name)]
+[MatrixAxisValue(NameFuzzDdlRoundTripTestsBase.DialectAxis, DialectNames.SqlServer)]
 public sealed class SqlServerNameFuzzDdlRoundTripIntegrationTests(SqlServerContainerFixture fixture)
     : NameFuzzDdlRoundTripTestsBase
 {
@@ -263,6 +284,7 @@ public sealed class SqlServerNameFuzzDdlRoundTripIntegrationTests(SqlServerConta
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(PostgreSqlContainerCollection.Name)]
+[MatrixAxisValue(NameFuzzDdlRoundTripTestsBase.DialectAxis, DialectNames.PostgreSql)]
 public sealed class PostgreSqlNameFuzzDdlRoundTripIntegrationTests(
     PostgreSqlContainerFixture fixture
 ) : NameFuzzDdlRoundTripTestsBase
@@ -285,6 +307,7 @@ public sealed class PostgreSqlNameFuzzDdlRoundTripIntegrationTests(
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(MySqlContainerCollection.Name)]
+[MatrixAxisValue(NameFuzzDdlRoundTripTestsBase.DialectAxis, DialectNames.MySql)]
 public sealed class MySqlNameFuzzDdlRoundTripIntegrationTests(MySqlContainerFixture fixture)
     : NameFuzzDdlRoundTripTestsBase
 {
@@ -306,6 +329,7 @@ public sealed class MySqlNameFuzzDdlRoundTripIntegrationTests(MySqlContainerFixt
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(OracleContainerCollection.Name)]
+[MatrixAxisValue(NameFuzzDdlRoundTripTestsBase.DialectAxis, DialectNames.Oracle)]
 public sealed class OracleNameFuzzDdlRoundTripIntegrationTests(OracleContainerFixture fixture)
     : NameFuzzDdlRoundTripTestsBase
 {

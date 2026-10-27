@@ -24,7 +24,41 @@ internal static class ToolArgumentFuzz
     /// <param name="Id">ケース ID（<c>ツール#ベースライン.引数.崩し方</c>）</param>
     /// <param name="Arguments">崩した引数</param>
     /// <param name="MustFail">ツールが断らなければならないか</param>
-    internal sealed record Case(string Id, JsonObject Arguments, bool MustFail);
+    /// <param name="Breakage">崩し方（<see cref="Breakages"/> のどれか。網羅の数え上げに使う）</param>
+    /// <param name="ArgumentType">崩した引数のスキーマの型（<c>type</c> が無ければ空）</param>
+    /// <param name="Required">崩した引数が必須か</param>
+    /// <param name="Depth">崩した引数の深さ（0＝ツールの引数・1＝オブジェクトの配列の要素の中の引数）</param>
+    internal sealed record Case(
+        string Id,
+        JsonObject Arguments,
+        bool MustFail,
+        string Breakage,
+        string ArgumentType,
+        bool Required,
+        int Depth = 0
+    );
+
+    /// <summary>崩し方の名前（<see cref="Case.Breakage"/>）</summary>
+    internal static class Breakages
+    {
+        /// <summary>必須の引数の欠落</summary>
+        public const string Missing = "missing";
+
+        /// <summary>引数の <c>null</c></summary>
+        public const string Null = "null";
+
+        /// <summary>スキーマの型と違う種類の値</summary>
+        public const string WrongType = "wrong-type";
+
+        /// <summary>配列の要素の種類違い（要素 1 つだけの配列）</summary>
+        public const string Element = "element";
+
+        /// <summary>正しい要素の後ろに 1 つだけ混ぜた種類違いの要素</summary>
+        public const string ElementAfterOk = "element-after-ok";
+
+        /// <summary>文字列を値に持つ辞書の値の種類違い（<c>null</c> を含む）</summary>
+        public const string DictionaryValue = "dictionary-value";
+    }
 
     /// <summary>型違いとして試す値（スキーマの型と同じ種類のものは除いて使う）</summary>
     private static readonly (string Kind, Func<JsonNode?> Value)[] Kinds =
@@ -59,19 +93,42 @@ internal static class ToolArgumentFuzz
 
             if (isRequired && baseline.ContainsKey(name))
             {
-                yield return new($"{prefix}.{name}.missing", Without(baseline, name), true);
+                yield return new(
+                    $"{prefix}.{name}.missing",
+                    Without(baseline, name),
+                    true,
+                    Breakages.Missing,
+                    type,
+                    isRequired
+                );
             }
 
-            yield return new($"{prefix}.{name}.null", With(baseline, name, null), isRequired);
+            yield return new(
+                $"{prefix}.{name}.null",
+                With(baseline, name, null),
+                isRequired,
+                Breakages.Null,
+                type,
+                isRequired
+            );
 
             foreach (var (kind, value) in Kinds.Where(candidate => candidate.Kind != type))
             {
-                yield return new($"{prefix}.{name}.{kind}", With(baseline, name, value()), true);
+                yield return new(
+                    $"{prefix}.{name}.{kind}",
+                    With(baseline, name, value()),
+                    true,
+                    Breakages.WrongType,
+                    type,
+                    isRequired
+                );
             }
 
             if (type == "array" && propertySchema["items"] is JsonObject items)
             {
-                foreach (var nested in ArrayCases($"{prefix}.{name}", name, items, baseline))
+                foreach (
+                    var nested in ArrayCases($"{prefix}.{name}", name, items, baseline, isRequired)
+                )
                 {
                     yield return nested;
                 }
@@ -94,7 +151,14 @@ internal static class ToolArgumentFuzz
                         : [];
                     var key = map.Select(pair => pair.Key).FirstOrDefault() ?? "sqlserver";
                     map[key] = value();
-                    yield return new($"{prefix}.{name}{{{kind}}}", With(baseline, name, map), true);
+                    yield return new(
+                        $"{prefix}.{name}{{{kind}}}",
+                        With(baseline, name, map),
+                        true,
+                        Breakages.DictionaryValue,
+                        type,
+                        isRequired
+                    );
                 }
             }
         }
@@ -105,7 +169,8 @@ internal static class ToolArgumentFuzz
         string prefix,
         string name,
         JsonObject items,
-        JsonObject baseline
+        JsonObject baseline,
+        bool isRequired
     )
     {
         var itemType = TypeOf(items);
@@ -119,7 +184,10 @@ internal static class ToolArgumentFuzz
             yield return new(
                 $"{prefix}[{kind}]",
                 With(baseline, name, new JsonArray(element())),
-                true
+                true,
+                Breakages.Element,
+                "array",
+                isRequired
             );
 
             // 正しい要素の後ろに 1 つだけ混ぜる（途中まで処理してから落ちる形を拾う）
@@ -127,7 +195,14 @@ internal static class ToolArgumentFuzz
             {
                 var mixed = (JsonArray)existing.DeepClone();
                 mixed.Add(element());
-                yield return new($"{prefix}[ok,{kind}]", With(baseline, name, mixed), true);
+                yield return new(
+                    $"{prefix}[ok,{kind}]",
+                    With(baseline, name, mixed),
+                    true,
+                    Breakages.ElementAfterOk,
+                    "array",
+                    isRequired
+                );
             }
         }
 
@@ -147,6 +222,7 @@ internal static class ToolArgumentFuzz
             yield return nested with
             {
                 Arguments = With(baseline, name, replaced),
+                Depth = nested.Depth + 1,
             };
         }
     }

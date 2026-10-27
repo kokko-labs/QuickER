@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Dialects;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
@@ -28,6 +29,9 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 [Trait("Category", "Integration")]
 public abstract class SyncPlanFuzzTestsBase
 {
+    /// <summary>派生クラスが受け持つ方言の軸の名前（値は <see cref="DialectNames"/>）</summary>
+    public const string DialectAxis = "dialect";
+
     /// <summary>1 つの種だけを流す環境変数</summary>
     public const string SeedVariable = "QUICKER_SYNC_FUZZ_SEED";
 
@@ -56,7 +60,7 @@ public abstract class SyncPlanFuzzTestsBase
     /// <summary>方言（DB）が使えないときのスキップ理由（使えるなら null）</summary>
     protected abstract string? UnavailableReason { get; }
 
-    /// <summary>方言の部品を作る</summary>
+    /// <summary>方言の部品を作る（DB には触れない＝方言の名前は Docker なしで読める）</summary>
     internal abstract SyncPlanFuzzDialect CreateDialect();
 
     [Fact(
@@ -72,12 +76,15 @@ public abstract class SyncPlanFuzzTestsBase
 
         var dialect = CreateDialect();
         var outcomes = new List<FuzzSeedOutcome>();
+        var coverage = new CoverageCounter(SyncPlanFuzzDimensions.Table);
 
         try
         {
             foreach (var seed in seeds)
             {
-                outcomes.Add(await SyncPlanFuzzRunner.RunAsync(dialect, seed, Ct));
+                var outcome = await SyncPlanFuzzRunner.RunAsync(dialect, seed, Ct);
+                outcomes.Add(outcome);
+                SyncPlanFuzzDimensions.Observe(coverage, outcome);
             }
         }
         finally
@@ -97,6 +104,16 @@ public abstract class SyncPlanFuzzTestsBase
         if (Environment.GetEnvironmentVariable(LogVariable) is { Length: > 0 } log)
         {
             await System.IO.File.AppendAllLinesAsync(log, outcomes.Select(o => o.Describe()), Ct);
+        }
+
+        // 網羅の宣言の誤りは種の結果より先に赤にする。要約はどの方言でも書く
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary(output);
+        var checksGaps = !plan.IsSingle && seeds.Count >= ShapeCoverageMinimumSeeds;
+
+        if (checksGaps)
+        {
+            coverageReport.WriteGapUsage(SyncPlanFuzzDimensions.Gaps, dialect.Name, output);
         }
 
         // 必須の形の表明は種が十分に多い方言だけ（少ない種では確率的に出ない形がある）
@@ -132,10 +149,18 @@ public abstract class SyncPlanFuzzTestsBase
                 + $"Failed seeds: {string.Join(", ", known.Unknown.Select(f => f.Seed))}",
             report
         );
+
+        // 網羅しない組は、種の結果を表明してから照合する（網羅の赤が種の失敗を隠さない）。照合は種が十分に多い方言だけ
+        // （SyncPlanFuzzDimensions の説明を参照）
+        if (checksGaps)
+        {
+            coverageReport.AssertGaps(SyncPlanFuzzDimensions.Gaps, dialect.Name, plan);
+        }
     }
 }
 
 /// <summary>SQLite（実ファイル・Docker 不要＝CI の両ジョブで常時実行）</summary>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.Sqlite)]
 public sealed class SqliteSyncPlanFuzzTests : SyncPlanFuzzTestsBase
 {
     /// <summary>既定の種の数</summary>
@@ -149,6 +174,7 @@ public sealed class SqliteSyncPlanFuzzTests : SyncPlanFuzzTestsBase
 }
 
 /// <summary>MySQL 8.4（Testcontainers）</summary>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.MySql)]
 [Collection(MySqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class MySqlSyncPlanFuzzTests(MySqlContainerFixture fixture) : SyncPlanFuzzTestsBase
@@ -165,6 +191,7 @@ public sealed class MySqlSyncPlanFuzzTests(MySqlContainerFixture fixture) : Sync
 }
 
 /// <summary>SQL Server 2022（Testcontainers）</summary>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.SqlServer)]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class SqlServerSyncPlanFuzzTests(SqlServerContainerFixture fixture)
@@ -183,6 +210,7 @@ public sealed class SqlServerSyncPlanFuzzTests(SqlServerContainerFixture fixture
 }
 
 /// <summary>PostgreSQL（Testcontainers・主キー・外部キーの逆引きの DO ブロックを通すため少ない種で流す）</summary>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.PostgreSql)]
 [Collection(PostgreSqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixture)
@@ -207,6 +235,7 @@ public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixtu
 /// 環境変数 <c>QUICKER_SYNC_FUZZ_ORACLE=1</c> のときに <see cref="ExtendedOracleSeedCount"/> 種へ増やす。
 /// コンテナは Oracle のほかの統合テストと共有する。
 /// </remarks>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.Oracle)]
 [Collection(OracleContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class OracleSyncPlanFuzzTests(OracleContainerFixture fixture) : SyncPlanFuzzTestsBase

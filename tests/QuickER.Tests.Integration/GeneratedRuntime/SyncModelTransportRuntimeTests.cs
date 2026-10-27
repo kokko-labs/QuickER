@@ -72,24 +72,51 @@ internal static class SyncModelSignatures
         new("QUICKER_SYNC_MODEL_TRANSPORT_SEEDS", 10, 10, firstSeed: 0);
 
     /// <summary>種を並列に流し、既知の失敗（正規化）に当たらない失敗のある種を報告する</summary>
+    /// <param name="plan">流す種の決め方</param>
+    /// <param name="seeds">流す種</param>
+    /// <param name="options">世界の作り方</param>
+    /// <param name="known">既知の失敗の一覧</param>
+    /// <param name="parallelism">並列度</param>
+    /// <param name="ct">取り消し</param>
+    /// <param name="coverage">操作を次元表のケースとして数える先（観測と要約だけ＝網羅しない組は照合しない）</param>
     public static async Task<string> RunSeedsAsync(
         SeedPlan plan,
         IEnumerable<int> seeds,
         SyncModelWorldOptions options,
         KnownFailureSet known,
         int parallelism,
-        CancellationToken ct
+        CancellationToken ct,
+        CoverageCounter? coverage = null
     )
     {
         var results =
             new ConcurrentDictionary<int, (IReadOnlyList<ModelFailure>, IReadOnlyList<string>)>();
 
-        await Parallel.ForEachAsync(
-            seeds,
-            new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = ct },
-            async (seed, token) =>
-                results[seed] = await SyncModelRuntimeTests.RunSeedAsync(seed, token, options)
-        );
+        async Task RunAllAsync() =>
+            await Parallel.ForEachAsync(
+                seeds,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = parallelism,
+                    CancellationToken = ct,
+                },
+                async (seed, token) =>
+                    results[seed] = await SyncModelRuntimeTests.RunSeedAsync(
+                        seed,
+                        token,
+                        options,
+                        coverage
+                    )
+            );
+
+        if (coverage is null)
+        {
+            await RunAllAsync();
+        }
+        else
+        {
+            await SyncModelRuntimeTests.RunObservedAsync(coverage, RunAllAsync);
+        }
 
         var report = new EngineReport($"SyncModel.{options.Name}");
 
@@ -132,11 +159,14 @@ internal static class SyncModelSignatures
 /// 列の組み合わせの中で直結と同じ結果になることを見る。サーバー側の失敗の注入は 500 として届く。
 /// </remarks>
 [Trait("Category", "Integration")]
-public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output)
+[MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Http))]
+public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
     private static readonly SyncModelWorldOptions Http = new() { Http = true, Name = "http" };
+
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Http;
 
     public static TheoryData<string> ScenarioNames() => SyncModelRuntimeTests.ScenarioNames();
 
@@ -167,15 +197,19 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output)
     {
         var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
         plan.WriteWarnings(output);
+        var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var report = await SyncModelSignatures.RunSeedsAsync(
             plan,
             plan.Seeds,
             Http,
             SyncModelSignatures.Known([]),
             Math.Clamp(Environment.ProcessorCount, 1, 4),
-            Ct
+            Ct,
+            coverage
         );
 
+        // 網羅は観測と要約だけ（種が少なく、網羅しない組は直結の乱数の種で照合する）
+        coverage.Report().WriteSummary(output);
         output.WriteLine(report);
         report.Should().BeEmpty();
     }
@@ -197,10 +231,11 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output)
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(SqlServerContainerCollection.Name)]
+[MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.SqlServer))]
 public sealed class SyncModelSqlServerRuntimeTests(
     SqlServerContainerFixture fixture,
     ITestOutputHelper output
-)
+) : ISyncModelTransportTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
@@ -214,6 +249,9 @@ public sealed class SyncModelSqlServerRuntimeTests(
                 await SyncModelSqlServerServer.CreateAsync(fixture.ConnectionString, ct),
             Name = "sqlserver",
         };
+
+    /// <summary>世界の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Options;
 
     public static TheoryData<string> ScenarioNames()
     {
@@ -292,15 +330,19 @@ public sealed class SyncModelSqlServerRuntimeTests(
             .Range(0, plan.Seeds.Count * 4)
             .Where(seed => seed % 4 is 0 or 1)
             .Take(plan.Seeds.Count);
+        var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var report = await SyncModelSignatures.RunSeedsAsync(
             plan,
             seeds,
             Options,
             SyncModelSignatures.Known(SqlServerOnly),
             2,
-            Ct
+            Ct,
+            coverage
         );
 
+        // 網羅は観測と要約だけ（失敗の注入の組を流さず、網羅しない組は直結の乱数の種で照合する）
+        coverage.Report().WriteSummary(output);
         output.WriteLine(report);
         report.Should().BeEmpty();
     }

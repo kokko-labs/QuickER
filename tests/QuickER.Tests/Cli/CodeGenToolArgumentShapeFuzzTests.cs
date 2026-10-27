@@ -96,6 +96,7 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
 
         var problems = new List<string>();
         var caseCount = 0;
+        var coverage = new CoverageCounter(ToolArgumentFuzzDimensions.Table);
 
         foreach (var (toolName, baseline) in baselines)
         {
@@ -114,6 +115,7 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
             )
             {
                 caseCount++;
+                ToolArgumentFuzzDimensions.Observe(coverage, fuzzCase);
                 File.WriteAllBytes(file, seed);
                 Ledger.Run(
                     fuzzCase.Id,
@@ -128,8 +130,22 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
             problems.Add($"[{stale}] 台帳にあるが、どのケースにも当たらない。台帳から外す。");
         }
 
+        // 網羅の宣言の誤りはケースの結果より先に赤にする
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary();
+        coverageReport.WriteGapUsage(
+            ToolArgumentFuzzDimensions.Gaps,
+            ToolArgumentFuzzDimensions.CodegenScope
+        );
+
         CoverageGuard.AtLeast("総当たりで組み立てたケース", caseCount, 41);
         KnownCaseLedger.ThrowIfAny(problems);
+
+        // 網羅しない組は、ケースの結果を表明してから照合する（網羅の赤がケースの失敗を隠さない）
+        coverageReport.AssertGaps(
+            ToolArgumentFuzzDimensions.Gaps,
+            ToolArgumentFuzzDimensions.CodegenScope
+        );
     }
 
     /// <summary>崩したケース 1 件を実行して 3 つの表明を確かめる</summary>

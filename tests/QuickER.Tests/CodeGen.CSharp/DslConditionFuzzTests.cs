@@ -2,6 +2,7 @@ using System.IO;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using QuickER.CodeGen.CSharp;
+using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Provider.MySql;
 using QuickER.Provider.Sqlite;
@@ -37,44 +38,65 @@ public class DslConditionFuzzTests
     /// <summary>SQLite の 3 実装先</summary>
     private static readonly DslFuzzTarget SqliteTarget = new(
         Suite,
-        "sqlite",
+        DialectNames.Sqlite,
         new SqliteProvider(),
         unit => Options(unit, ado: true),
         "AddGeneratedSqliteRepositories",
         EfCore: true,
         InMemory: true,
-        [
-            SqliteFile(
-                "ado",
-                DslCaseRule.AsciiFold,
-                (probe, cs) => DslFuzzProbe.Ado(probe, cs),
-                excludes: null
-            ),
-            SqliteFile(
-                "efcore",
-                DslCaseRule.Indeterminate,
-                (probe, cs) =>
-                    DslFuzzProbe.EfCore(
-                        probe,
-                        options => options.UseSqlite(cs).IgnoreServiceProviderCacheLimit()
-                    ),
-                ExcludedOnEfCoreSqlite
-            ),
-            DslFuzzBackend.InMemory,
-        ]
+        SqliteBackendAxis().Adapters
     );
 
     /// <summary>MySQL の図（インメモリだけ）</summary>
     private static readonly DslFuzzTarget MySqlTarget = new(
         Suite,
-        "mysql",
+        DialectNames.MySql,
         new MySqlProvider(),
         unit => Options(unit, ado: false),
         AdoRegistration: null,
         EfCore: false,
         InMemory: true,
-        [DslFuzzBackend.InMemory]
+        MySqlBackendAxis().Adapters
     );
+
+    /// <summary>SQLite の構成の実装先の軸（3 実装先とも流す）</summary>
+    internal static MatrixAxis<DslFuzzBackend> SqliteBackendAxis() =>
+        DslFuzzBackends.Axis(
+            DialectNames.Sqlite,
+            [
+                SqliteFile(
+                    DslFuzzBackends.Ado,
+                    DslCaseRule.AsciiFold,
+                    (probe, cs) => DslFuzzProbe.Ado(probe, cs),
+                    excludes: null
+                ),
+                SqliteFile(
+                    DslFuzzBackends.EfCore,
+                    DslCaseRule.Indeterminate,
+                    (probe, cs) =>
+                        DslFuzzProbe.EfCore(
+                            probe,
+                            options => options.UseSqlite(cs).IgnoreServiceProviderCacheLimit()
+                        ),
+                    ExcludedOnEfCoreSqlite
+                ),
+                DslFuzzBackend.InMemory,
+            ]
+        );
+
+    /// <summary>MySQL の構成の実装先の軸（インメモリだけ）</summary>
+    internal static MatrixAxis<DslFuzzBackend> MySqlBackendAxis() =>
+        DslFuzzBackends.Axis(
+            DialectNames.MySql,
+            [DslFuzzBackend.InMemory],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [DslFuzzBackends.Ado] =
+                    "QuickER 版 Repository は SQL Server と SQLite の方言しか生成しない（MySQL の方言を RepositoryDialects に指定すると生成時の検証エラー）ので、MySQL の構成は GenerateRepositories を立てない",
+                [DslFuzzBackends.EfCore] =
+                    "EF Core 版 Repository は実 DB へ接続して流す実装先で、このテストは実 MySQL（Docker）を使わない。MySQL の構成は MySQL だけの列の型（符号なし整数・sbyte）の生成・型の検査と、インメモリでの意味を見るためのもの",
+            }
+        );
 
     [Fact(
         DisplayName = "簡易 DSL の条件の総当たり: 生成→実コンパイル（警告 0）→3 実装先の結果が docs の意味と一致する（既知の失敗の一覧と厳密に一致）"
@@ -85,26 +107,34 @@ public class DslConditionFuzzTests
 
         var plan = SeedSource.Resolve(NameFuzz.SeedSettings);
         plan.WriteWarnings();
+        var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqliteMySqlScopes);
 
         foreach (var seed in plan.Seeds)
         {
             foreach (var unit in DslFuzzUnits.Sqlite(seed))
             {
-                await DslFuzzRunner.RunAsync(ledger, unit, SqliteTarget, Ct);
+                await DslFuzzRunner.RunAsync(ledger, unit, SqliteTarget, Ct, coverage);
             }
 
             foreach (var unit in DslFuzzUnits.MySql(seed))
             {
-                await DslFuzzRunner.RunAsync(ledger, unit, MySqlTarget, Ct);
+                await DslFuzzRunner.RunAsync(ledger, unit, MySqlTarget, Ct, coverage);
             }
         }
 
         foreach (var unit in DslFuzzUnits.Collisions())
         {
-            await DslFuzzRunner.RunAsync(ledger, unit, SqliteTarget, Ct);
+            await DslFuzzRunner.RunAsync(ledger, unit, SqliteTarget, Ct, coverage);
         }
 
+        // 網羅の宣言の誤りは照合の結果より先に赤にする
+        var coverageReports = coverage.Reports();
+        DslFuzzCoverage.WriteSummaries(coverageReports);
+
         ledger.AssertMatchesKnown($"{Suite}-generate:", $"{Suite}-compile:", $"{Suite}-exec:");
+
+        // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ）
+        DslFuzzCoverage.AssertGaps(coverageReports, plan);
     }
 
     /// <summary>
