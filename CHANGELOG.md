@@ -6,6 +6,12 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+#### Diagram files
+
+- **A diagram file in which two relationships share an identifier is now refused, naming where** — this happens only in a hand-edited file. The message names the constraint names, or the parent and child tables
+
 ### Fixed
 
 #### AI chat & MCP

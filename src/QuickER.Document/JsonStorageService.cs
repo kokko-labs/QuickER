@@ -29,10 +29,10 @@ public enum DocumentLoadError
     NotDiagramDocument,
 
     /// <summary>
-    /// 保存形式としては妥当だが、エンティティ Id または列 Id が重複しており図として扱えなかった
+    /// 保存形式としては妥当だが、エンティティ Id・列 Id・リレーション Id のいずれかが重複しており図として扱えなかった
     /// </summary>
     /// <remarks>
-    /// 重複箇所（テーブル名・列名・重複した Id）は <c>exception</c> のメッセージが名指しする。
+    /// 重複箇所（テーブル名・列名・リレーションの名前・重複した Id）は <c>exception</c> のメッセージが名指しする。
     /// 手で直す以外に復旧手段が無いため、表示側は必ずその内容まで見せること。
     /// </remarks>
     DuplicateId,
@@ -373,7 +373,7 @@ public static class JsonStorageService
         return null;
     }
 
-    /// <summary>エンティティ Id・列 Id の重複を探し、最初に見つかった重複の説明を返す（無ければ null）</summary>
+    /// <summary>エンティティ Id・列 Id・リレーション Id の重複を探し、最初に見つかった重複の説明を返す（無ければ null）</summary>
     /// <remarks>
     /// <para>
     /// <b>修復はしない。</b>重複 Id を持つ図ファイルを作る経路はアプリ側に無く（GUI・MCP ツール・
@@ -381,14 +381,13 @@ public static class JsonStorageService
     /// 張り替えて意味を推測するより、どこが重複しているかを名指しして読込を断るほうが直せる。
     /// </para>
     /// <para>
-    /// 検査対象はエンティティ Id と列 Id の 2 つだけ（列 Id は同一テーブル内とテーブル間の双方を見る）。
-    /// この 2 つは辞書のキーにされ、リレーション・一意制約・主キー順・クエリからの参照先にもなるため、
+    /// 検査対象はエンティティ Id・列 Id・リレーション Id の 3 つ（列 Id は同一テーブル内とテーブル間の双方を見る）。
+    /// エンティティ Id と列 Id は辞書のキーにされ、リレーション・一意制約・主キー順・クエリからの参照先にもなるため、
     /// 重複したまま読み込むと上書き保存（レイアウト辞書の構築）が毎回失敗し、例外を握り潰す自動保存も
-    /// 一度も成功しない＝作業内容を保存する手段が両方とも消える。一意制約・クエリの Id は参照も辞書化も
-    /// されない。リレーションの Id は辞書のキーに使われる（<c>ConstraintNames.ResolveForeignKeyNamesById</c>
-    /// の <c>ToDictionary</c>＝重複すると MCP・内蔵チャットのツールが例外・コード生成のナビゲーション名の
-    /// 辞書＝黙って上書き・C# リバースの関係のメタデータ）が、重複は JSON の手編集でしか起きないため、
-    /// 今は検査しない。
+    /// 一度も成功しない＝作業内容を保存する手段が両方とも消える。リレーションの Id も辞書のキーに使われる
+    /// （<c>ConstraintNames.ResolveForeignKeyNamesById</c> の <c>ToDictionary</c>＝重複すると MCP・内蔵チャットの
+    /// ツールが例外・コード生成のナビゲーション名の辞書＝黙って上書き・C# リバースの関係のメタデータ）。
+    /// 一意制約・クエリの Id は参照も辞書化もされないので検査しない。
     /// </para>
     /// <para>
     /// 説明文は例外メッセージと同じ扱いで英語固定とし、利用者向けの見出しは表示側（GUI の resx・
@@ -431,7 +430,40 @@ public static class JsonStorageService
             }
         }
 
+        var relationshipById = new Dictionary<Guid, string>();
+
+        foreach (var relationship in schema.Relationships)
+        {
+            var described = DescribeRelationship(relationship, tableByEntityId);
+
+            if (relationshipById.TryGetValue(relationship.Id, out var existingRelationship))
+            {
+                return $"Duplicate relationship Id '{relationship.Id}' is used by {existingRelationship} and {described}.";
+            }
+
+            relationshipById.Add(relationship.Id, described);
+        }
+
         return null;
+    }
+
+    /// <summary>重複の説明に使うリレーションの呼び名（制約名があれば制約名、無ければ親と子のテーブル名）</summary>
+    /// <param name="relationship">名指しするリレーション</param>
+    /// <param name="tableByEntityId">エンティティ Id からテーブル名への対応（引けない Id はそのまま書く）</param>
+    private static string DescribeRelationship(
+        Relationship relationship,
+        Dictionary<Guid, string> tableByEntityId
+    )
+    {
+        if (!string.IsNullOrEmpty(relationship.ConstraintName))
+        {
+            return $"relationship '{relationship.ConstraintName}'";
+        }
+
+        string TableOf(Guid id) =>
+            tableByEntityId.TryGetValue(id, out var table) ? table : id.ToString();
+
+        return $"relationship from table '{TableOf(relationship.SourceEntityId)}' to table '{TableOf(relationship.TargetEntityId)}'";
     }
 
     /// <summary>ファイルの保存フォーマット版（ルートの <c>Version</c>）だけを読み取る</summary>

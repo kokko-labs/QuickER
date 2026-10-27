@@ -161,10 +161,10 @@ public sealed class JsonStorageServiceIdIntegrityTests : IDisposable
     }
 
     /// <summary>
-    /// リレーション・一意制約・クエリの Id 重複は拒否しないことを検証する
+    /// 一意制約・クエリの Id 重複は拒否しないことを検証する
     /// （参照も辞書化も無く実害が無いため、検査対象を広げない判断の固定）
     /// </summary>
-    [Fact(DisplayName = "TryLoad: リレーション・一意制約・クエリの Id 重複は拒否しない")]
+    [Fact(DisplayName = "TryLoad: 一意制約・クエリの Id 重複は拒否しない")]
     public void TryLoad_DuplicateNonKeyIds_AreAccepted()
     {
         var source = CreateEntity(Guid.NewGuid(), "Orders", Guid.NewGuid(), "OrderId");
@@ -190,12 +190,6 @@ public sealed class JsonStorageServiceIdIntegrityTests : IDisposable
                         SourceEntityId = source.Id,
                         TargetEntityId = target.Id,
                     },
-                    new Relationship
-                    {
-                        Id = duplicated,
-                        SourceEntityId = source.Id,
-                        TargetEntityId = target.Id,
-                    },
                 },
                 Queries =
                 {
@@ -208,6 +202,105 @@ public sealed class JsonStorageServiceIdIntegrityTests : IDisposable
         JsonStorageService.TryLoad(path, out var document, out var error, out _).Should().BeTrue();
 
         error.Should().Be(DocumentLoadError.None);
-        document!.Schema.Relationships.Should().HaveCount(2);
+        document!.Schema.Entities[0].UniqueConstraints.Should().HaveCount(2);
+        document.Schema.Queries.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// 同じ Id のリレーションが 2 本ある図は、制約名と重複した Id を名指しして拒否されることを検証する
+    /// （リレーションの Id は辞書のキーに使われ、重複すると MCP・内蔵チャットのツールが例外になる）
+    /// </summary>
+    [Fact(
+        DisplayName = "TryLoad: 制約名のあるリレーションの Id 重複を、制約名を名指しして拒否する"
+    )]
+    public void TryLoad_DuplicateRelationshipIdWithConstraintNames_IsRejected()
+    {
+        var source = CreateEntity(Guid.NewGuid(), "Orders", Guid.NewGuid(), "OrderId");
+        var target = CreateEntity(Guid.NewGuid(), "OrderLines", Guid.NewGuid(), "LineId");
+        var duplicated = Guid.NewGuid();
+        var path = WriteSchema(
+            new ErDiagram
+            {
+                Entities = { source, target },
+                Relationships =
+                {
+                    new Relationship
+                    {
+                        Id = duplicated,
+                        SourceEntityId = source.Id,
+                        TargetEntityId = target.Id,
+                        ConstraintName = "FK_OrderLines_Orders",
+                    },
+                    new Relationship
+                    {
+                        Id = duplicated,
+                        SourceEntityId = source.Id,
+                        TargetEntityId = target.Id,
+                        ConstraintName = "FK_OrderLines_Orders_Backup",
+                    },
+                },
+            }
+        );
+
+        JsonStorageService
+            .TryLoad(path, out var document, out var error, out var exception)
+            .Should()
+            .BeFalse();
+
+        document.Should().BeNull();
+        error.Should().Be(DocumentLoadError.DuplicateId);
+        exception!.Message.Should().Contain(duplicated.ToString());
+        exception
+            .Message.Should()
+            .Contain("relationship 'FK_OrderLines_Orders'")
+            .And.Contain("relationship 'FK_OrderLines_Orders_Backup'");
+    }
+
+    /// <summary>
+    /// 制約名の無いリレーションの Id 重複は、親と子のテーブル名で名指しして拒否されることを検証する
+    /// （図に無いエンティティ Id はテーブル名の代わりに Id のまま書く）
+    /// </summary>
+    [Fact(
+        DisplayName = "TryLoad: 制約名の無いリレーションの Id 重複を、親と子のテーブル名で名指しして拒否する"
+    )]
+    public void TryLoad_DuplicateRelationshipIdWithoutConstraintNames_IsRejected()
+    {
+        var source = CreateEntity(Guid.NewGuid(), "Orders", Guid.NewGuid(), "OrderId");
+        var target = CreateEntity(Guid.NewGuid(), "OrderLines", Guid.NewGuid(), "LineId");
+        var missing = Guid.NewGuid();
+        var duplicated = Guid.NewGuid();
+        var path = WriteSchema(
+            new ErDiagram
+            {
+                Entities = { source, target },
+                Relationships =
+                {
+                    new Relationship
+                    {
+                        Id = duplicated,
+                        SourceEntityId = source.Id,
+                        TargetEntityId = target.Id,
+                    },
+                    new Relationship
+                    {
+                        Id = duplicated,
+                        SourceEntityId = source.Id,
+                        TargetEntityId = missing,
+                    },
+                },
+            }
+        );
+
+        JsonStorageService
+            .TryLoad(path, out _, out var error, out var exception)
+            .Should()
+            .BeFalse();
+
+        error.Should().Be(DocumentLoadError.DuplicateId);
+        exception!.Message.Should().Contain(duplicated.ToString());
+        exception
+            .Message.Should()
+            .Contain("relationship from table 'Orders' to table 'OrderLines'")
+            .And.Contain($"relationship from table 'Orders' to table '{missing}'");
     }
 }
