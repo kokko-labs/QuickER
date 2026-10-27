@@ -189,8 +189,8 @@
       "quicker.codegen.csharp": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Model": "[0.2.0, )",
-          "QuickER.Platform": "[0.2.0, )",
+          "QuickER.Model": "[0.3.0, )",
+          "QuickER.Platform": "[0.3.0, )",
           "Scriban": "[7.5.3, )"
         }
       },
@@ -198,8 +198,8 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.CodeAnalysis.CSharp": "[5.9.0, )",
-          "QuickER.Model": "[0.2.0, )",
-          "QuickER.Provider": "[0.2.0, )"
+          "QuickER.Model": "[0.3.0, )",
+          "QuickER.Provider": "[0.3.0, )"
         }
       },
       "quicker.dialects": {
@@ -209,8 +209,8 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.13, )",
-          "QuickER.Model": "[0.2.0, )",
-          "QuickER.Provider": "[0.2.0, )"
+          "QuickER.Model": "[0.3.0, )",
+          "QuickER.Provider": "[0.3.0, )"
         }
       },
       "quicker.gui.abstractions": {
@@ -219,13 +219,13 @@
       "quicker.gui.common": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Gui.Abstractions": "[0.2.0, )"
+          "QuickER.Gui.Abstractions": "[0.3.0, )"
         }
       },
       "quicker.model": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Dialects": "[0.2.0, )"
+          "QuickER.Dialects": "[0.3.0, )"
         }
       },
       "quicker.platform": {
@@ -234,17 +234,17 @@
       "quicker.provider": {
         "type": "Project",
         "dependencies": {
-          "QuickER.CodeGen.CSharp": "[0.2.0, )",
-          "QuickER.Model": "[0.2.0, )"
+          "QuickER.CodeGen.CSharp": "[0.3.0, )",
+          "QuickER.Model": "[0.3.0, )"
         }
       },
       "quicker.provider.sqlite": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.13, )",
-          "QuickER.CodeGen.CSharp": "[0.2.0, )",
-          "QuickER.Model": "[0.2.0, )",
-          "QuickER.Provider": "[0.2.0, )",
+          "QuickER.CodeGen.CSharp": "[0.3.0, )",
+          "QuickER.Model": "[0.3.0, )",
+          "QuickER.Provider": "[0.3.0, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )"
         }
       },
@@ -252,15 +252,15 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.SqlClient": "[7.1.1, )",
-          "QuickER.CodeGen.CSharp": "[0.2.0, )",
-          "QuickER.Model": "[0.2.0, )",
-          "QuickER.Provider": "[0.2.0, )"
+          "QuickER.CodeGen.CSharp": "[0.3.0, )",
+          "QuickER.Model": "[0.3.0, )",
+          "QuickER.Provider": "[0.3.0, )"
         }
       },
       "quicker.settings": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Platform": "[0.2.0, )"
+          "QuickER.Platform": "[0.3.0, )"
         }
       },
       "Microsoft.CodeAnalysis.CSharp": {

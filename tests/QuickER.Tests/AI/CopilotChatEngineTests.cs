@@ -256,6 +256,7 @@ public class CopilotChatEngineTests
 
         completed.Should().NotBeNull();
         completed!.Value.Success.Should().BeFalse();
+        completed!.Value.Error.Should().StartWith(Strings.Copilot_Disconnected);
         client.IsStarted.Should().BeFalse("接続が切れた失敗でクライアントは接続を捨てる");
         engine.IsReady.Should().BeTrue();
 
@@ -374,6 +375,7 @@ public class CopilotChatEngineTests
         var result = await probe.WaitAsync();
 
         result.Success.Should().BeFalse();
+        result.Error.Should().StartWith(Strings.Copilot_Disconnected);
         result.Error.Should().Contain("The JSON-RPC connection was lost.");
         client.IsStarted.Should().BeFalse("接続が切れた失敗でクライアントは接続を捨てる");
         engine.IsReady.Should().BeTrue("次の送信で接続し直す");
@@ -401,6 +403,37 @@ public class CopilotChatEngineTests
             .Should()
             .BeTrue("見張りは失敗の後も次の回へ進む");
         probe.Count.Should().Be(0);
+
+        client.RaiseIdle();
+        (await probe.WaitAsync()).Success.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 見張りの Ping にランタイムが通常のエラー応答を返しても（SDK が IOException に包んでも）、接続を捨てずに
+    /// 次の回へ進むことを検証する
+    /// </summary>
+    [Fact(DisplayName = "見張りの Ping が通常のエラー応答を返しても、接続を捨てずに次の回へ進む")]
+    public async Task ConnectionWatch_PingReturnsErrorResponse_KeepsConnectionAndTurn()
+    {
+        var client = new FakeCopilotRuntimeClient
+        {
+            PingError = FakeCopilotRuntimeClient.ErrorResponse("ping not allowed"),
+        };
+        var engine = CreateEngine(client, ShortCheckInterval);
+        var probe = new TurnCompletionProbe(engine);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        SpinWait
+            .SpinUntil(() => client.PingCallCount >= 3, CompletionWaitLimit)
+            .Should()
+            .BeTrue("見張りは通常のエラー応答の後も次の回へ進む");
+        probe.Count.Should().Be(0);
+        client.IsStarted.Should().BeTrue("通常のエラー応答では接続を捨てない");
 
         client.RaiseIdle();
         (await probe.WaitAsync()).Success.Should().BeTrue();
@@ -472,6 +505,7 @@ public class CopilotChatEngineTests
         probe.Count.Should().Be(1);
         var result = await probe.WaitAsync();
         result.Success.Should().BeFalse();
+        result.Error.Should().StartWith(Strings.Copilot_Disconnected);
         result.Error.Should().Contain("The JSON-RPC connection was lost.");
         engine.IsReady.Should().BeTrue("次の送信で接続し直す");
 
@@ -596,6 +630,41 @@ public class CopilotChatEngineTests
         completions.Should().ContainSingle();
         completions[0].Success.Should().BeFalse();
         completions[0].Error.Should().Be(ExpectedTurnFailed("session lost"));
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 送信にランタイムが通常のエラー応答を返したら（SDK が IOException に包んでも）、接続を捨てずに通常の失敗の文言で
+    /// 終え、次の送信は同じ会話のまま続くことを検証する
+    /// </summary>
+    [Fact(DisplayName = "送信が通常のエラー応答で失敗しても接続を捨てず、次の送信は同じ会話で続く")]
+    public async Task SendFailure_ErrorResponse_KeepsConnectionAndConversation()
+    {
+        var client = new FakeCopilotRuntimeClient();
+        var engine = CreateEngine(client);
+
+        var completions = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => completions.Add(r);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        var error = FakeCopilotRuntimeClient.ErrorResponse("model not available");
+        client.SendError = error;
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+
+        completions.Should().ContainSingle();
+        completions[0].Error.Should().Be(ExpectedTurnFailed(error.Message));
+        client.IsStarted.Should().BeTrue("通常のエラー応答では接続を捨てない");
+
+        client.SendError = null;
+        client.AutoIdleAfterSend = true;
+        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
+
+        client.StartSessionCallCount.Should().Be(1, "会話を開き直さない＝文脈を保つ");
+        client.Sends.Select(send => send.Prompt).Should().Equal("2 回目");
+        completions.Should().HaveCount(2);
+        completions[1].Success.Should().BeTrue();
 
         await engine.DisposeAsync();
     }

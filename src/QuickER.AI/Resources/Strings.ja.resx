@@ -157,6 +157,12 @@
   <data name="Chat_ToolLoopLimitReached" xml:space="preserve">
     <value>1 回の応答でのツール実行の往復が上限（{0} 回）に達したため、応答を打ち切りました。</value>
   </data>
+  <data name="Chat_ResponseCutAtOutputLimit" xml:space="preserve">
+    <value>ツールの呼び出しを書き終える前に応答が出力の上限に達したため、ツールを実行しませんでした。</value>
+  </data>
+  <data name="Chat_EmptyResponseFormat" xml:space="preserve">
+    <value>AI がテキストもツールの呼び出しも無い応答で終わりました（終了理由: {0}）。</value>
+  </data>
   <data name="ClaudeCode_Guidance_Pending" xml:space="preserve">
     <value>「再確認」を押すとログイン状態を確認できます。</value>
   </data>
@@ -450,6 +456,9 @@
   </data>
   <data name="Copilot_CouldNotStartConversation" xml:space="preserve">
     <value>会話を開始できませんでした。</value>
+  </data>
+  <data name="Copilot_Disconnected" xml:space="preserve">
+    <value>GitHub Copilot ランタイムとの接続が失われました。会話の文脈は失われ、次の送信からは新しい会話になります。</value>
   </data>
   <data name="Copilot_Processing" xml:space="preserve">
     <value>GitHub Copilot が処理中です...</value>

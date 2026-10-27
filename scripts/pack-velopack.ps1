@@ -32,8 +32,16 @@
     ./scripts/pack-velopack.ps1 -Version 0.1.1        # 自動更新 E2E 用に仮バージョンで生成
 
 .NOTES
-    自動更新の E2E 検証手順: v(現行) を生成して Setup.exe をインストール → -Version で新バージョンを
-    同じ出力先へ生成 → 環境変数 QUICKER_UPDATE_FEED に出力先パスを入れてインストール版を起動する。
+    配布ビルド（Release）の更新元は GitHub 固定で、環境変数 QUICKER_UPDATE_FEED は Debug ビルドでしか効かない。
+    そのため、インストール版をローカルの出力先から更新させることはできない。
+    自動更新の確かめ方（インストールせず、アプリも起動しない）:
+      1. 公開済みの版の Portable zip を一時フォルダへ展開する（そのフォルダが更新される側になる）
+      2. 公開済みの版の full nupkg を出力先の releases-{full|lite} へ置き、-Version で新しい版を生成する
+         （差分パッケージも作られる）
+      3. 展開した Update.exe を、新しい版の full nupkg の中の Squirrel.exe で置き換える
+         （アプリが更新をダウンロードし終えたときに Velopack が行うことと同じ）
+      4. 展開した Update.exe で apply --package <新しい版の full nupkg> --norestart --silent を実行する
+      5. current\sq.version の版と、起動用の QuickER.exe・Update.exe を確かめる
 #>
 [CmdletBinding()]
 param(
@@ -104,7 +112,7 @@ try {
 
         # --- 3. vpk pack（Setup.exe / Portable zip / 更新パッケージ・メタを生成する） ---
         Write-Host "[$target 3/3] vpk pack しています（channel=win-$target / version=$Version）..." -ForegroundColor Cyan
-        vpk pack --packId QuickER --packVersion $Version --packDir $publishDir --mainExe QuickER.exe --channel "win-$target" --outputDir $releaseDir
+        vpk pack --packId QuickER --packVersion $Version --packDir $publishDir --mainExe QuickER.exe --runtime win-x64 --channel "win-$target" --outputDir $releaseDir
 
         if ($LASTEXITCODE -ne 0) {
             throw "vpk pack に失敗しました（exit $LASTEXITCODE）"

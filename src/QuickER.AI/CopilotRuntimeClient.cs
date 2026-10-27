@@ -340,14 +340,23 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
 
     /// <summary>SDK の呼び出しの失敗が、copilot ランタイムとの接続が切れたことを表すか</summary>
     /// <remarks>
-    /// 実機（GitHub.Copilot.SDK 1.0.14・copilot.exe）でランタイムを止めて確かめた形だけに絞る。呼び出し中に止まると
-    /// <c>Communication error with Copilot CLI</c>（内側は SDK 内部の接続断の例外）、止まった後の呼び出しはパイプが
-    /// 閉じた旨のメッセージで、どちらも型がちょうど <see cref="IOException"/> になる。派生型（ファイルの不在など）や、
-    /// ランタイムが返した通常のエラー応答では接続を捨てない（会話の文脈を失うため）
+    /// SDK は JSON-RPC の呼び出しの失敗を、型がちょうど <see cref="IOException"/> の例外に包み、元の例外を
+    /// InnerException に入れる。接続断は内側が SDK 内部の <c>ConnectionLostException</c>（GitHub.Copilot.SDK 1.0.26）で、
+    /// 止まった後の呼び出しなどは内側を持たない（1.0.14 の実機で確かめた形）。この 2 つだけを接続断とする。
+    /// ランタイムが返した通常のエラー応答（内側が <see cref="RemoteRpcException"/>）や派生型（ファイルの不在など）では
+    /// 接続を捨てない（会話の文脈を失うため）
     /// </remarks>
     /// <param name="exception">SDK の呼び出しが投げた例外</param>
     internal static bool IsConnectionLost(Exception exception) =>
-        exception.GetType() == typeof(IOException);
+        exception.GetType() == typeof(IOException)
+        && (
+            exception.InnerException is null
+            || exception.InnerException.GetType() == ConnectionLostExceptionType
+        );
+
+    /// <summary>SDK 内部の接続断の例外の型（internal なので名前で引く。見つからなければ null）</summary>
+    internal static readonly Type? ConnectionLostExceptionType =
+        typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.ConnectionLostException");
 
     /// <summary>セッションで使わせるツールの許可リストを決める（null＝絞らない）</summary>
     /// <remarks>

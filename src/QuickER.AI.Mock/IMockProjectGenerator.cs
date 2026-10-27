@@ -274,8 +274,11 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
                 LogPath: result.LogPath,
                 // ユーザー自身の中断（タイムアウトは含めない）を VM へ伝える
                 Interrupted: result.Canceled,
-                // 最終ビルドの確認取り消しも利用者自身の選択＝VM の提示先の選択に使う
+                // 最終ビルドの確認取り消しも利用者自身の選択＝VM の提示先の選択に使う。
+                // 実行器の失敗・画面の不足があれば、取り消しが無くても失敗なので、利用者自身の選択としては伝えない
                 BuildDeclined: result.BuildDeclined
+                    && result.ClientSucceeded
+                    && !result.ScreensMissing
             );
         }
         finally

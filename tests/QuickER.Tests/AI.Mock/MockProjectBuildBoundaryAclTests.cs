@@ -62,6 +62,8 @@ public class MockProjectBuildBoundaryAclTests
     {
         public bool IsAvailable() => true;
 
+        public string BackendName => "FakeBackend";
+
         public bool FinalBuildEscapesSandbox => true;
 
         public Task<MockProjectAgentOutcome> RunAsync(

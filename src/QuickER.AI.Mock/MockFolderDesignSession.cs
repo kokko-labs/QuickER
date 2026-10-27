@@ -487,17 +487,8 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost, IAsyncDisposab
     /// <summary>会話開始時の ER 図から、宣言照合用のエンティティ名集合（<see cref="SchemaNames"/> の規則）を取り込む</summary>
     private void CaptureSchemaEntities(ErDiagram diagram)
     {
-        var names = new HashSet<string>(SchemaNames.Comparer);
-
-        foreach (var entity in diagram.Entities)
-        {
-            if (!string.IsNullOrWhiteSpace(entity.TableName))
-            {
-                names.Add(entity.TableName);
-            }
-        }
-
-        _schemaEntityNames = names;
+        // 生成の前の食い違いの確認（MockSchemaMismatch）と同じ作り方を使う
+        _schemaEntityNames = MockSchemaMismatch.SchemaTableNames(diagram);
     }
 
     /// <summary>

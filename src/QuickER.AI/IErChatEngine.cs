@@ -25,7 +25,30 @@ public readonly record struct ErChatToolActivity(string ToolName, string Result,
 /// <summary>ターン（1 回の応答処理）の完了結果</summary>
 /// <param name="Success">成功したかどうか</param>
 /// <param name="Error">失敗時のエラーメッセージ（成功時は null）</param>
-public readonly record struct ErChatTurnResult(bool Success, string? Error);
+/// <param name="Diagnostics">
+/// ターンの中の LLM の応答の終わり方（API キー接続のエンジンだけが埋める。ほかのエンジンと、応答が 1 回も無かったターンは null）
+/// </param>
+public readonly record struct ErChatTurnResult(
+    bool Success,
+    string? Error,
+    ErChatTurnDiagnostics? Diagnostics = null
+);
+
+/// <summary>
+/// 1 ターンの中の LLM の応答の終わり方の要約（診断のログ用。プロンプト・応答の本文と接続情報は持たない）
+/// </summary>
+/// <param name="Responses">ターンの中で受け取った応答の回数（ツールの往復ごとに 1 回）</param>
+/// <param name="LastStopReason">最後の応答の終了理由（プロバイダーの値。分からなければ null）</param>
+/// <param name="OutputTokens">出力のトークン数の合計（どの応答でも分からなければ null）</param>
+/// <param name="OmittedBlockKinds">捨てた応答のブロックの種類（全応答の和・初出順）</param>
+/// <param name="MaxOutputTokens">最後の応答を求めたときに送った出力の上限（max_tokens。分からなければ null）</param>
+public sealed record ErChatTurnDiagnostics(
+    int Responses,
+    string? LastStopReason,
+    long? OutputTokens,
+    IReadOnlyList<string> OmittedBlockKinds,
+    long? MaxOutputTokens = null
+);
 
 /// <summary>
 /// AI チャットのエンジン抽象。OpenAI SDK の自前制御と Codex App Server の双方を

@@ -46,6 +46,9 @@ public interface IMockProjectAgent
     /// <summary>このエージェント（バックエンド）が利用可能か</summary>
     bool IsAvailable();
 
+    /// <summary>実行ログに出すバックエンドの名前（生成画面のタブと同じ表記）</summary>
+    string BackendName { get; }
+
     /// <summary>
     /// 最終ビルドをサンドボックスの外で実行することが、この実行器にとって新しい境界越えになるか。
     /// </summary>

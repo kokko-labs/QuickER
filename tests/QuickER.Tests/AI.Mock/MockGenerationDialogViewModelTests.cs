@@ -3638,4 +3638,118 @@ public class MockGenerationDialogViewModelTests
             Cleanup(baseFolder);
         }
     }
+
+    /// <summary>
+    /// 設計を作った後で図のテーブルが入れ替わっていれば、生成の前に内訳つきで確認し、キャンセルなら生成しないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "設計と図のテーブルが食い違えば確認し、キャンセルなら生成しない")]
+    public async Task GenerateMockProject_SchemaMismatchCanceled_DoesNotGenerate()
+    {
+        var diagram = NonEmptyDiagram();
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            diagram,
+            dialogs
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            // 設計（Customer）を作った後で、図のテーブルを入れ替える
+            diagram.Entities[0].TableName = "Product";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            generator.GenerateCallCount.Should().Be(0);
+            var (message, details, _) = dialogs
+                .WarningConfirmDetailsMessages.Should()
+                .ContainSingle()
+                .Subject;
+            message.Should().Be(MockStrings.Mock_SchemaMismatch_Message);
+            details.Should().Contain("Customer").And.Contain("Product");
+            Directory.Exists(Path.Combine(baseFolder, "out")).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>食い違いを確認して続けたら生成へ進み、続けたことと内訳をログに残すことを検証する</summary>
+    [Fact(DisplayName = "設計と図の食い違いを確認して続けたら生成し、ログに残す")]
+    public async Task GenerateMockProject_SchemaMismatchConfirmed_GeneratesAndLogs()
+    {
+        var diagram = NonEmptyDiagram();
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            diagram,
+            dialogs
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+            diagram.Entities[0].TableName = "Product";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            generator.GenerateCallCount.Should().Be(1);
+            vm.MockGenLog.Should().Contain(MockStrings.Mock_SchemaMismatch_ContinuedLog);
+            vm.MockGenLog.Should()
+                .Contain(
+                    string.Format(
+                        MockStrings.Mock_SchemaMismatch_TablesOnlyInDesignFormat,
+                        "Customer"
+                    )
+                );
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// 列や説明だけの違い（テーブルの有無は同じ）では確認を出さずに生成し、内容の違いをログに 1 行残すことを検証する
+    /// </summary>
+    [Fact(DisplayName = "列や説明だけの違いでは確認を出さず、ログに残して生成する")]
+    public async Task GenerateMockProject_ContentOnlyMismatch_DoesNotConfirm()
+    {
+        var diagram = NonEmptyDiagram();
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            diagram,
+            dialogs
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+            diagram.Entities[0].Description = "得意先";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            dialogs.WarningConfirmDetailsMessages.Should().BeEmpty();
+            generator.GenerateCallCount.Should().Be(1);
+            vm.MockGenLog.Should().Contain(MockStrings.Mock_SchemaMismatch_ContentChangedLog);
+            vm.MockGenLog.Should()
+                .Contain(
+                    string.Format(MockStrings.Mock_SchemaMismatch_ChangedTablesFormat, "Customer")
+                );
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
 }

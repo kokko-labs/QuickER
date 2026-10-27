@@ -145,7 +145,6 @@ public sealed class MockProjectScaffoldService
 
         // ルート名前空間はプロジェクト名を C# 識別子として妥当な形へ正規化して使う
         var rootNamespace = SanitizeNamespace(projectName);
-        var generatedNamespace = $"{rootNamespace}.Generated";
 
         // 図の方言が対応方言（sqlserver/sqlite）ならQuickER 版 Repository も出力する（対称に InMemory も出す）
         var repositoryDialect = ResolveRepositoryDialect(diagram.TargetDbms);
@@ -153,7 +152,7 @@ public sealed class MockProjectScaffoldService
         // Visual Studio 標準構成: プロジェクト一式はプロジェクトフォルダ配下、ソリューションは出力フォルダ直下へ出す
         Directory.CreateDirectory(projectDirectory);
 
-        var options = BuildOptions(generatedNamespace, repositoryDialect);
+        var options = BuildOptions(rootNamespace, repositoryDialect);
         WriteGeneratedCode(diagram, options, repositoryDialect, generatedDirectory, written);
 
         var projectFilePath = Path.Combine(projectDirectory, $"{projectName}.csproj");
@@ -162,7 +161,11 @@ public sealed class MockProjectScaffoldService
         var readmePath = Path.Combine(projectDirectory, ReadmeFileName);
         WriteText(
             readmePath,
-            profile.BuildReadme(projectName, rootNamespace, repositoryDialect),
+            profile.BuildReadme(
+                projectName,
+                MockProjectNamespaces.FromPlan(options, repositoryDialect),
+                repositoryDialect
+            ),
             written
         );
 
@@ -202,14 +205,31 @@ public sealed class MockProjectScaffoldService
         return match;
     }
 
+    /// <summary>
+    /// 生成されるデータ層の名前空間を、スキャフォールドと同じ生成オプションの計画から求める
+    /// （README の using の案内と同じ値）。
+    /// </summary>
+    /// <param name="rootNamespace">プロジェクトのルート名前空間（データ層は <c>{rootNamespace}.Generated</c> の下に出る）</param>
+    /// <param name="repositoryDialect">QuickER 版 Repository の方言（出さない図は null）</param>
+    internal static MockProjectNamespaces ResolveNamespaces(
+        string rootNamespace,
+        string? repositoryDialect
+    ) =>
+        MockProjectNamespaces.FromPlan(
+            BuildOptions(rootNamespace, repositoryDialect),
+            repositoryDialect
+        );
+
     /// <summary>スキャフォールドのコード生成オプションを組み立てる（Split 出力・InMemory 必須・対応方言ならQuickER 版 Repository）</summary>
+    /// <param name="rootNamespace">プロジェクトのルート名前空間（データ層は <c>{rootNamespace}.Generated</c> の下に出る）</param>
+    /// <param name="repositoryDialect">QuickER 版 Repository の方言（出さない図は null）</param>
     private static CodeGenerationOptions BuildOptions(
-        string generatedNamespace,
+        string rootNamespace,
         string? repositoryDialect
     ) =>
         new()
         {
-            RootNamespace = generatedNamespace,
+            RootNamespace = $"{rootNamespace}.Generated",
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateInMemoryRepositories = true,

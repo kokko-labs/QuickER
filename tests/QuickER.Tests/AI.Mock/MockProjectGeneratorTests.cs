@@ -70,4 +70,131 @@ public class MockProjectGeneratorTests
             }
         }
     }
+
+    /// <summary>
+    /// 画面のページを書き、ビルドの確認が要るファイル（csproj.user）も書く偽の実行器（成否は指定どおり）
+    /// </summary>
+    private sealed class DeclineProbeAgent(bool succeeds) : IMockProjectAgent
+    {
+        public bool IsAvailable() => true;
+
+        public string BackendName => "Probe";
+
+        public bool FinalBuildEscapesSandbox => true;
+
+        public Task<MockProjectAgentOutcome> RunAsync(
+            MockProjectAgentRequest request,
+            Action<string> onProgress,
+            CancellationToken cancellationToken
+        )
+        {
+            var project = Path.Combine(request.WorkingDirectory, request.ProjectName);
+            var pages = Path.Combine(project, "Components", "Pages");
+            Directory.CreateDirectory(pages);
+            File.WriteAllText(Path.Combine(pages, "CustomerList.razor"), "@page \"/\"\n<h1/>");
+            File.WriteAllText(
+                Path.Combine(project, $"{request.ProjectName}.csproj.user"),
+                "<Project/>"
+            );
+
+            return Task.FromResult(
+                new MockProjectAgentOutcome(succeeds, succeeds ? null : "boom", false)
+            );
+        }
+
+        public Task InterruptAsync() => Task.CompletedTask;
+    }
+
+    /// <summary>何もしないビルド検証器（呼ばれない想定）</summary>
+    private sealed class NoBuildRunner : IBuildRunner
+    {
+        public Task<BuildRunResult> BuildAsync(
+            string solutionFilePath,
+            CancellationToken cancellationToken = default
+        ) => Task.FromResult(new BuildRunResult(true, string.Empty));
+
+        public Task<bool> IsDotnetAvailableAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// 最終ビルドの確認を取り消したとき、利用者自身の選択として伝えるのは実行器が成功していたときだけで、
+    /// 実行器が失敗していれば取り消しがあっても失敗として伝えることを検証する
+    /// </summary>
+    [Theory(
+        DisplayName = "ビルドの確認の取り消しは、実行器が成功したときだけ利用者の選択として伝える"
+    )]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task GenerateAsync_BuildDeclined_ReportedOnlyWhenAgentSucceeded(
+        bool agentSucceeds,
+        bool expectedDeclined
+    )
+    {
+        var output = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var mock = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var store = MockFolderStore.CreateNew(mock, "AcmeMock", "# schema");
+            store.SaveScreen(
+                "CustomerList.html",
+                "Customer List",
+                "role",
+                "<!DOCTYPE html><html><body></body></html>",
+                Array.Empty<MockTransition>(),
+                "init"
+            );
+            var generator = new MockProjectGenerator(
+                new MockProjectScaffoldService(BuildRegistry()),
+                new NoBuildRunner(),
+                _ => new DeclineProbeAgent(agentSucceeds)
+            );
+
+            var result = await generator.GenerateAsync(
+                new ErDiagram
+                {
+                    TargetDbms = "sqlite",
+                    Entities =
+                    [
+                        new Entity
+                        {
+                            Id = Guid.NewGuid(),
+                            TableName = "customers",
+                            Columns =
+                            [
+                                new Column
+                                {
+                                    Id = Guid.NewGuid(),
+                                    Name = "customer_id",
+                                    DataType = "INTEGER",
+                                    IsPrimaryKey = true,
+                                    IsNullable = false,
+                                },
+                            ],
+                        },
+                    ],
+                },
+                mock,
+                additionalInstructions: null,
+                output,
+                "AcmeMock",
+                MockProjectTarget.Blazor,
+                ErChatBackendKind.Codex,
+                model: string.Empty,
+                modelProvider: string.Empty,
+                onProgress: _ => { },
+                confirmBuild: _ => false,
+                cancellationToken: TestContext.Current.CancellationToken
+            );
+
+            result.Success.Should().BeFalse();
+            result.BuildDeclined.Should().Be(expectedDeclined);
+        }
+        finally
+        {
+            ReparsePointTestHelper.DeleteTree(output);
+            ReparsePointTestHelper.DeleteTree(mock);
+        }
+    }
 }

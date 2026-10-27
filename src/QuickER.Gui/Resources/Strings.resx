@@ -759,7 +759,7 @@
     <value>Failed to open '{0}'. The file is not a QuickER diagram, or it is corrupted or unreadable. The current diagram was kept.</value>
   </data>
   <data name="Open_DuplicateId" xml:space="preserve">
-    <value>Failed to open '{0}'. The file uses the same identifier for more than one table or column, which makes the diagram impossible to save. Edit the JSON by hand to give each one its own identifier. The current diagram was kept.</value>
+    <value>Failed to open '{0}'. The file uses the same identifier for more than one table, column or relationship, so the diagram cannot be used as it is. Edit the JSON by hand to give each one its own identifier. The current diagram was kept.</value>
   </data>
   <data name="Open_MissingRequiredText" xml:space="preserve">
     <value>Failed to open '{0}'. A required name or type is empty (null), so the diagram cannot be loaded. Edit the JSON by hand to fill it in. The current diagram was kept.</value>

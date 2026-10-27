@@ -37,6 +37,9 @@ public sealed class ClaudeCodeMockProjectAgent : IMockProjectAgent
     public bool IsAvailable() => _client.IsAvailable();
 
     /// <inheritdoc />
+    public string BackendName => "Claude Code";
+
+    /// <inheritdoc />
     /// <remarks>
     /// 許可ツールに無制限の <c>Bash</c> を含むため、この実行器は自分でビルドも任意コマンド実行もできる。
     /// 最終ビルドをサンドボックスの外で走らせても新しく越える境界が無いので false。

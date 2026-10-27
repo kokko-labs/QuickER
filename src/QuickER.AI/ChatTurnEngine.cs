@@ -44,7 +44,45 @@ public sealed record ChatHistoryItem(
 /// <summary>アシスタント 1 ターンの応答（テキストと要求されたツール呼び出し）</summary>
 /// <param name="Text">応答テキスト</param>
 /// <param name="ToolCalls">要求されたツール呼び出し（空なら応答完了）</param>
-public sealed record ChatAssistantTurn(string Text, IReadOnlyList<ChatToolCallRequest> ToolCalls);
+/// <param name="End">応答の終わり方（ドライバが分からなければ null）</param>
+public sealed record ChatAssistantTurn(
+    string Text,
+    IReadOnlyList<ChatToolCallRequest> ToolCalls,
+    ChatResponseEnd? End = null
+);
+
+/// <summary>LLM の応答が終わった理由の分類（プロバイダーの値を中立に読み替えたもの）</summary>
+public enum ChatStopKind
+{
+    /// <summary>応答を書き終えた・ツールを呼んだ（Anthropic の end_turn / tool_use / stop_sequence、OpenAI の stop / tool_calls）</summary>
+    Normal,
+
+    /// <summary>出力の上限で切れた（Anthropic の max_tokens、OpenAI の length）</summary>
+    OutputLimit,
+
+    /// <summary>応答を断った・止められた（Anthropic の refusal、OpenAI の content_filter）</summary>
+    Refused,
+
+    /// <summary>文脈の上限を超えた（Anthropic の model_context_window_exceeded）</summary>
+    ContextWindowExceeded,
+
+    /// <summary>上のどれでもない（Anthropic の pause_turn や、この版が知らない値）</summary>
+    Other,
+}
+
+/// <summary>LLM の応答 1 回の終わり方（診断用。本文は持たない）</summary>
+/// <param name="StopReason">プロバイダーが返した終了理由の値（例: <c>max_tokens</c>。分からなければ null）</param>
+/// <param name="Kind">終了理由の分類</param>
+/// <param name="OutputTokens">出力のトークン数（分からなければ null）</param>
+/// <param name="OmittedBlockKinds">テキストとツール呼び出し以外で、ドライバが捨てた応答のブロックの種類（例: <c>thinking</c>）</param>
+/// <param name="MaxOutputTokens">この応答を求めたときに送った出力の上限（max_tokens。送らない・分からなければ null）</param>
+public sealed record ChatResponseEnd(
+    string? StopReason,
+    ChatStopKind Kind,
+    long? OutputTokens,
+    IReadOnlyList<string> OmittedBlockKinds,
+    long? MaxOutputTokens = null
+);
 
 /// <summary>会話履歴を入力に LLM を 1 回呼び出し、アシスタント応答を返す抽象（LLM 呼び出しの seam）</summary>
 /// <remarks>
@@ -83,6 +121,9 @@ public sealed class ChatTurnEngine : IErChatEngine
     private readonly Func<AttachmentSupport> _attachmentSupport;
     private readonly List<ChatHistoryItem> _history = new();
     private CancellationTokenSource? _turnCts;
+
+    /// <summary>実行中のターンで受け取った応答の終わり方（ターンの完了結果の診断に使う）</summary>
+    private readonly List<ChatResponseEnd?> _responseEnds = new();
 
     /// <summary>
     /// 1 ターン（<see cref="SendAsync(string, CancellationToken)"/> 1 回）内で許容するツール往復回数の上限。
@@ -218,30 +259,38 @@ public sealed class ChatTurnEngine : IErChatEngine
 
         _turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _turnCts.Token;
+        _responseEnds.Clear();
         StatusChanged?.Invoke(this, Strings.Chat_Generating);
 
         try
         {
             await RunAgenticLoopAsync(token).ConfigureAwait(false);
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null, BuildDiagnostics()));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             // 利用者の中断（InterruptAsync・呼び出し側トークン）だけを無音の中断として扱う。
             // HttpClient のタイムアウトのような取り消しはトークンが立っていないので、下の失敗へ落とす
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null));
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, null, BuildDiagnostics()));
         }
         catch (TurnAbortedException ex)
         {
             // エンジン自身が打ち切った失敗は、文言が既に表示用なのでそのまま出す
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, ex.Message, BuildDiagnostics())
+            );
         }
         catch (Exception ex)
         {
             // SDK・通信の失敗は生の例外文でなく表示言語の文言へ変換する
             TurnCompleted?.Invoke(
                 this,
-                new ErChatTurnResult(false, AiErrorMessageLocalizer.ToUserMessage(ex))
+                new ErChatTurnResult(
+                    false,
+                    AiErrorMessageLocalizer.ToUserMessage(ex),
+                    BuildDiagnostics()
+                )
             );
         }
         finally
@@ -296,6 +345,30 @@ public sealed class ChatTurnEngine : IErChatEngine
             var turn = await _driver
                 .RunAsync(_history, delta => AssistantDeltaReceived?.Invoke(this, delta), token)
                 .ConfigureAwait(false);
+            _responseEnds.Add(turn.End);
+
+            // 出力の上限で切れた応答のツール呼び出しは、最後の引数が途中までしか届いていない。
+            // 実行すると不完全な引数で動くので、履歴へ積まずにターンを失敗にする（履歴は直前の整合した状態のまま）
+            if (turn.End is { Kind: ChatStopKind.OutputLimit } && turn.ToolCalls.Count > 0)
+            {
+                throw new TurnAbortedException(Strings.Chat_ResponseCutAtOutputLimit);
+            }
+
+            // テキストもツール呼び出しも無い応答が正常でない理由（上限・拒否など）で終わったら、成功として扱わずに理由を名指しする
+            if (
+                turn.ToolCalls.Count == 0
+                && string.IsNullOrWhiteSpace(turn.Text)
+                && turn.End is { Kind: not ChatStopKind.Normal } end
+            )
+            {
+                throw new TurnAbortedException(
+                    string.Format(
+                        Strings.Chat_EmptyResponseFormat,
+                        end.StopReason ?? end.Kind.ToString()
+                    )
+                );
+            }
+
             _history.Add(new ChatHistoryItem(ChatHistoryRole.Assistant, turn.Text, turn.ToolCalls));
 
             if (turn.ToolCalls.Count == 0)
@@ -359,6 +432,29 @@ public sealed class ChatTurnEngine : IErChatEngine
                 throw;
             }
         }
+    }
+
+    /// <summary>実行中のターンで受け取った応答の終わり方を要約する（応答が 1 回も無ければ null）</summary>
+    private ErChatTurnDiagnostics? BuildDiagnostics()
+    {
+        if (_responseEnds.Count == 0)
+        {
+            return null;
+        }
+
+        var known = _responseEnds.Where(end => end is not null).Select(end => end!).ToList();
+        var tokens = known.Where(end => end.OutputTokens is not null).ToList();
+
+        return new ErChatTurnDiagnostics(
+            _responseEnds.Count,
+            _responseEnds[^1]?.StopReason,
+            tokens.Count == 0 ? null : tokens.Sum(end => end.OutputTokens!.Value),
+            known
+                .SelectMany(end => end.OmittedBlockKinds)
+                .Distinct(StringComparer.Ordinal)
+                .ToList(),
+            _responseEnds[^1]?.MaxOutputTokens
+        );
     }
 
     /// <inheritdoc />

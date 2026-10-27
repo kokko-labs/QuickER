@@ -3,6 +3,10 @@ using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
+using QuickER.Model;
+using QuickER.Provider;
+using QuickER.Provider.Sqlite;
+using QuickER.Provider.SqlServer;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
 
 namespace QuickER.Tests.AI.Mock;
@@ -131,7 +135,10 @@ public class ApiKeyMockProjectAgentTests
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> Factory,
         FakeChatEngine[] EngineBox,
         ErChatProfile[] ProfileBox
-    ) BuildFactory(IReadOnlyList<IReadOnlyList<(string Tool, string Args)>> scriptedTurns)
+    ) BuildFactory(
+        IReadOnlyList<IReadOnlyList<(string Tool, string Args)>> scriptedTurns,
+        IReadOnlyList<ErChatTurnDiagnostics?>? diagnostics = null
+    )
     {
         var engineBox = new FakeChatEngine[1];
         var profileBox = new ErChatProfile[1];
@@ -144,6 +151,11 @@ public class ApiKeyMockProjectAgentTests
             foreach (var batch in scriptedTurns)
             {
                 engine.ScriptedTurns.Enqueue(batch);
+            }
+
+            foreach (var item in diagnostics ?? [])
+            {
+                engine.ScriptedDiagnostics.Enqueue(item);
             }
 
             engineBox[0] = engine;
@@ -465,16 +477,28 @@ public class ApiKeyMockProjectAgentTests
         }
     }
 
-    /// <summary>emit が 1 度も無いターンはログ（NoEmit）に記録され、次へ進むことを検証する（最終判定はビルド）</summary>
-    [Fact(DisplayName = "emit なしターンはログして続行")]
-    public async Task RunAsync_EmitlessTurn_LogsAndContinues()
+    /// <summary>
+    /// emit が 1 度も無い画面のターンはログ（NoEmit）に記録して残りの画面と中間ビルドを続け、
+    /// 実行の最後に失敗にしてそのターンを名指しすることを検証する（やり直しはしない）
+    /// </summary>
+    [Fact(DisplayName = "emit なしの画面のターンは続行し、最後に失敗にして名指しする")]
+    public async Task RunAsync_EmitlessTurn_ContinuesThenFails()
     {
         var work = NewWork();
-        SetupScaffold(work, ("OrderList.html", "Order List", "MARKER_S1"));
+        SetupScaffold(
+            work,
+            ("OrderList.html", "Order List", "MARKER_S1"),
+            ("OrderEdit.html", "Order Edit", "MARKER_S2")
+        );
 
-        // 共通部だけ emit・画面ターンは batch 無し（emit なし）
+        // 共通部と 2 つ目の画面だけ emit・1 つ目の画面は emit なし
         var (factory, engineBox, _) = BuildFactory(
-            new IReadOnlyList<(string, string)>[] { new[] { Emit("MockApp/App.xaml") } }
+            new IReadOnlyList<(string, string)>[]
+            {
+                new[] { Emit("MockApp/App.xaml") },
+                Array.Empty<(string, string)>(),
+                new[] { Emit("MockApp/Views/OrderEditView.xaml") },
+            }
         );
         var build = new QueueBuildRunner();
         build.Results.Enqueue(true);
@@ -490,8 +514,19 @@ public class ApiKeyMockProjectAgentTests
                 TestContext.Current.CancellationToken
             );
 
-            outcome.Success.Should().BeTrue();
-            engineBox[0].SentPrompts.Should().HaveCount(2);
+            outcome.Success.Should().BeFalse();
+            outcome
+                .Error.Should()
+                .Be(
+                    string.Format(
+                        MockStrings.Mock_ApiRun_ErrorTurnsWithoutFilesFormat,
+                        string.Format(MockStrings.Mock_ApiRun_ScreenTurnLabelFormat, "Order List")
+                    )
+                );
+
+            // 残りの画面と中間ビルドは続ける（やり直しのターンは無い）
+            engineBox[0].SentPrompts.Should().HaveCount(3);
+            build.BuildCallCount.Should().Be(1);
             string.Concat(progress).Should().Contain(MockStrings.Mock_ApiRun_NoEmit);
         }
         finally
@@ -538,5 +573,372 @@ public class ApiKeyMockProjectAgentTests
 
         agent.IsAvailable().Should().BeTrue();
         await agent.InterruptAsync();
+    }
+
+    /// <summary>
+    /// 実際のスキャフォールドの上で走らせると、共通部のリクエストに書き出したファイルの実際の名前空間と登録メソッドの所在が入り、
+    /// システムプロンプトに using を書く規約（ターゲットの流儀）が入ることを検証する。
+    /// </summary>
+    [Theory(
+        DisplayName = "実スキャフォールドでは共通部のリクエストに名前空間と using の規約が入る"
+    )]
+    [InlineData("blazor")]
+    [InlineData("wpf")]
+    public async Task RunAsync_RealScaffold_CommonPromptNamesNamespaces(string target)
+    {
+        var work = NewWork();
+        var mock = NewWork();
+
+        try
+        {
+            var store = MockFolderStore.CreateNew(mock, Project, "# schema");
+            store.SaveScreen(
+                "CustomerList.html",
+                "Customer List",
+                "role",
+                ScreenHtml("MARKER_S1"),
+                Array.Empty<MockTransition>(),
+                "init"
+            );
+            var profile =
+                target == "blazor" ? MockProjectTargetProfile.Blazor : MockProjectTargetProfile.Wpf;
+            var diagram = new ErDiagram
+            {
+                TargetDbms = SqlServerProvider.ProviderName,
+                Entities =
+                [
+                    new Entity
+                    {
+                        Id = Guid.NewGuid(),
+                        TableName = "customers",
+                        Columns =
+                        [
+                            new Column
+                            {
+                                Id = Guid.NewGuid(),
+                                Name = "customer_id",
+                                DataType = "int",
+                                IsPrimaryKey = true,
+                                IsNullable = false,
+                            },
+                        ],
+                    },
+                ],
+            };
+            var scaffold = new MockProjectScaffoldService(
+                new DatabaseProviderRegistry([new SqlServerProvider(), new SqliteProvider()])
+            ).Scaffold(diagram, work, Project, mock, profile);
+
+            var (factory, engineBox, profileBox) = BuildFactory(
+                new IReadOnlyList<(string, string)>[]
+                {
+                    new[] { Emit("MockApp/Program.cs", "class P {}") },
+                    new[] { Emit("MockApp/CustomerList.cs", "class C {}") },
+                }
+            );
+            var build = new QueueBuildRunner();
+            build.Results.Enqueue(true);
+            var request = target == "blazor" ? BlazorRequest(work) : Request(work);
+
+            var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+                request,
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            outcome.Success.Should().BeTrue();
+            var generated = scaffold.GeneratedDirectory;
+            var entities = GeneratedNamespaceDeclarations.OfFileContaining(
+                generated,
+                "class CustomerEntity"
+            );
+            var contracts = GeneratedNamespaceDeclarations.OfFileContaining(
+                generated,
+                "interface ICustomerRepository"
+            );
+            var inMemory = GeneratedNamespaceDeclarations.OfFileContaining(
+                generated,
+                "IServiceCollection AddGeneratedInMemoryRepositories("
+            );
+
+            var common = engineBox[0].SentPrompts[0];
+            common.Should().Contain($"- {entities}: Entities.g.cs");
+            common.Should().Contain($"- {contracts}: Repositories.g.cs");
+            common.Should().Contain($"- AddGeneratedInMemoryRepositories (namespace {inMemory})");
+
+            var system = profileBox[0].BuildSystemPrompt();
+            system.Should().Contain("the parent namespace ending in .Generated declares no types");
+
+            if (target == "blazor")
+            {
+                system.Should().Contain("In Components/_Imports.razor, add `@using` lines");
+            }
+            else
+            {
+                system.Should().Contain("In App.xaml.cs, add a `using`");
+            }
+        }
+        finally
+        {
+            Cleanup(work);
+            Cleanup(mock);
+        }
+    }
+
+    /// <summary>
+    /// ターンごとに、番号・種類（共通部・画面・修正）・応答の回数・終了理由・出力のトークン数・捨てたブロックの種類を
+    /// 1 行ログに残し、分からない値は「不明」、診断の無いターンは行を出さないことを検証する。
+    /// 診断の行にプロンプトの本文（スキーマ・CSS・画面の HTML の目印）と接続情報が入らないことも確かめる。
+    /// </summary>
+    [Fact(
+        DisplayName = "ターンごとの診断の行は終了理由とトークン数だけを出し、本文と接続情報を出さない"
+    )]
+    public async Task RunAsync_LogsTurnDiagnostics()
+    {
+        var work = NewWork();
+        SetupScaffold(
+            work,
+            ("OrderList.html", "Order List", "MARKER_S1"),
+            ("OrderEdit.html", "Order Edit", "MARKER_S2")
+        );
+
+        var (factory, _, _) = BuildFactory(
+            new IReadOnlyList<(string, string)>[]
+            {
+                new[] { Emit("MockApp/App.xaml") },
+                new[] { Emit("MockApp/Views/OrderListView.xaml") },
+                new[] { Emit("MockApp/Views/OrderEditView.xaml") },
+                new[] { Emit("MockApp/Views/OrderListView.xaml", "<fixed/>") },
+            },
+            new ErChatTurnDiagnostics?[]
+            {
+                new(1, "end_turn", 100, [], 64_000),
+                new(2, null, null, []),
+                null,
+                new(1, "max_tokens", 8192, ["thinking", "redacted_thinking"], 8_192),
+            }
+        );
+        var build = new QueueBuildRunner();
+        build.Results.Enqueue(false);
+        build.Results.Enqueue(true);
+        var progress = new List<string>();
+        var previous = System.Globalization.CultureInfo.CurrentUICulture;
+        System.Globalization.CultureInfo.CurrentUICulture = new System.Globalization.CultureInfo(
+            "en"
+        );
+
+        try
+        {
+            var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+                Request(work),
+                progress.Add,
+                TestContext.Current.CancellationToken
+            );
+
+            outcome.Success.Should().BeTrue();
+            var lines = string.Concat(progress)
+                .Split('\n')
+                .Where(line => line.StartsWith("Turn ", StringComparison.Ordinal))
+                .ToList();
+
+            lines
+                .Should()
+                .Equal(
+                    "Turn 1 (shared parts): 1 response(s), stop reason end_turn, 100 output tokens (limit 64000), omitted blocks: none",
+                    "Turn 2 (screen): 2 response(s), stop reason unknown, unknown output tokens (limit unknown), omitted blocks: none",
+                    "Turn 4 (fix): 1 response(s), stop reason max_tokens, 8192 output tokens (limit 8192), omitted blocks: thinking, redacted_thinking"
+                );
+
+            foreach (
+                var marker in new[]
+                {
+                    "SCHEMA-TEXT",
+                    "CSS-MARKER",
+                    "MARKER_S1",
+                    "MARKER_S2",
+                    "gpt-4o",
+                    "了解",
+                }
+            )
+            {
+                lines.Should().NotContain(line => line.Contains(marker, StringComparison.Ordinal));
+            }
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = previous;
+            Cleanup(work);
+        }
+    }
+
+    /// <summary>
+    /// 内容が空の提出（出力の上限で切れたツール呼び出しはこの形で届く）は、AI へ失敗を返すだけでなくログにも残すことを検証する
+    /// </summary>
+    [Fact(DisplayName = "内容が空の提出の拒否はログに残す")]
+    public async Task RunAsync_EmptyEmit_IsLogged()
+    {
+        var work = NewWork();
+        SetupScaffold(work, ("OrderList.html", "Order List", "MARKER_S1"));
+
+        var (factory, engineBox, _) = BuildFactory(
+            new IReadOnlyList<(string, string)>[]
+            {
+                new[] { Emit("MockApp/App.xaml", string.Empty) },
+                new[] { Emit("MockApp/Views/OrderListView.xaml") },
+            }
+        );
+        var build = new QueueBuildRunner();
+        build.Results.Enqueue(true);
+        var progress = new List<string>();
+
+        try
+        {
+            await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+                Request(work),
+                progress.Add,
+                TestContext.Current.CancellationToken
+            );
+
+            engineBox[0].LastToolResult.Should().NotBeNull();
+            string.Concat(progress)
+                .Should()
+                .Contain(
+                    string.Format(
+                        MockStrings.Mock_ApiRun_EmitRejectedFormat,
+                        "content is empty. Submit the complete file content."
+                    )
+                );
+            File.Exists(Path.Combine(work, "MockApp", "App.xaml")).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(work);
+        }
+    }
+
+    /// <summary>
+    /// AI の応答の断片が改行で終わらなくても、次の「[2/…」の行と診断の行は新しい行から始まることを検証する
+    /// （フェイクのエンジンは断片「了解しました。」を改行なしで流す）
+    /// </summary>
+    [Fact(DisplayName = "改行で終わらない応答の後の行は新しい行から始まる")]
+    public async Task RunAsync_LinesAfterUnterminatedDelta_StartOnNewLine()
+    {
+        var work = NewWork();
+        SetupScaffold(work, ("OrderList.html", "Order List", "MARKER_S1"));
+
+        var (factory, _, _) = BuildFactory(
+            new IReadOnlyList<(string, string)>[]
+            {
+                new[] { Emit("MockApp/App.xaml") },
+                new[] { Emit("MockApp/Views/OrderListView.xaml") },
+            },
+            new ErChatTurnDiagnostics?[] { new(1, "end_turn", 10, []), null }
+        );
+        var build = new QueueBuildRunner();
+        build.Results.Enqueue(true);
+        var progress = new List<string>();
+
+        try
+        {
+            await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+                Request(work),
+                progress.Add,
+                TestContext.Current.CancellationToken
+            );
+
+            var log = string.Concat(progress);
+
+            // 「了解しました。」の直後に続く文字は改行だけ（行が AI の文章の末尾へ続かない）
+            var index = 0;
+
+            while ((index = log.IndexOf("了解しました。", index, StringComparison.Ordinal)) >= 0)
+            {
+                index += "了解しました。".Length;
+                log[index].Should().Be('\n');
+            }
+
+            // 診断の行と「[2/2]」の行は、どちらも行の先頭から始まる
+            log.Should().Contain("了解しました。\n").And.Contain("\n[2/2]");
+        }
+        finally
+        {
+            Cleanup(work);
+        }
+    }
+
+    /// <summary>修正のターンでファイルを出さなくても、再ビルドが通れば失敗にしないことを検証する（修正のターンは数えない）</summary>
+    [Fact(DisplayName = "修正のターンで emit が無くても、再ビルドが通れば成功")]
+    public async Task RunAsync_EmitlessFixTurn_DoesNotFail()
+    {
+        var work = NewWork();
+        SetupScaffold(work, ("OrderList.html", "Order List", "MARKER_S1"));
+
+        var (factory, _, _) = BuildFactory(
+            new IReadOnlyList<(string, string)>[]
+            {
+                new[] { Emit("MockApp/App.xaml") },
+                new[] { Emit("MockApp/Views/OrderListView.xaml") },
+                Array.Empty<(string, string)>(),
+            }
+        );
+        var build = new QueueBuildRunner();
+        build.Results.Enqueue(false);
+        build.Results.Enqueue(true);
+
+        try
+        {
+            var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+                Request(work),
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            outcome.Success.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(work);
+        }
+    }
+
+    /// <summary>共通部のターンでファイルを出さなかったときも、最後に失敗にして名指しすることを検証する</summary>
+    [Fact(DisplayName = "共通部のターンで emit が無ければ最後に失敗にして名指しする")]
+    public async Task RunAsync_EmitlessCommonTurn_Fails()
+    {
+        var work = NewWork();
+        SetupScaffold(work, ("OrderList.html", "Order List", "MARKER_S1"));
+
+        var (factory, _, _) = BuildFactory(
+            new IReadOnlyList<(string, string)>[]
+            {
+                Array.Empty<(string, string)>(),
+                new[] { Emit("MockApp/Views/OrderListView.xaml") },
+            }
+        );
+        var build = new QueueBuildRunner();
+        build.Results.Enqueue(true);
+
+        try
+        {
+            var outcome = await new ApiKeyMockProjectAgent(factory, build).RunAsync(
+                Request(work),
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            outcome.Success.Should().BeFalse();
+            outcome
+                .Error.Should()
+                .Be(
+                    string.Format(
+                        MockStrings.Mock_ApiRun_ErrorTurnsWithoutFilesFormat,
+                        MockStrings.Mock_ApiRun_TurnKindCommon
+                    )
+                );
+        }
+        finally
+        {
+            Cleanup(work);
+        }
     }
 }

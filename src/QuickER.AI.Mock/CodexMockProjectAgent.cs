@@ -56,6 +56,9 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
     public bool IsAvailable() => CodexCliLocator.IsAvailable();
 
     /// <inheritdoc />
+    public string BackendName => "Codex";
+
+    /// <inheritdoc />
     /// <remarks>
     /// <c>sandbox=workspace-write</c> で動くため、出力フォルダの csproj などビルド設定を書ける一方、
     /// サンドボックスの外でコマンドを実行する権限は持たない。最終ビルドはその外側で走るので true。

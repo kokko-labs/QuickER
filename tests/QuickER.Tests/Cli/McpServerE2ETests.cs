@@ -29,6 +29,14 @@ public class McpServerE2ETests
         .CjkText
         .Pattern;
 
+    /// <summary>テストのクライアントの設定（server/discover の probe の上限を延ばす）</summary>
+    /// <remarks>
+    /// 既定の 5 秒では、負荷の下でサーバーの起動が間に合わず initialize へ切り替わり、遅れて届いた discover で
+    /// 新しいプロトコルに決めたサーバーがその initialize を断る（MCP SDK 2.3.0）。
+    /// </remarks>
+    private static McpClientOptions ClientOptions =>
+        new() { DiscoverProbeTimeout = TimeSpan.FromSeconds(60) };
+
     /// <summary>
     /// QuickER.Cli 自身のビルド出力（<c>src/QuickER.Cli/bin/&lt;Config&gt;/net10.0/QuickER.Cli.dll</c>）の絶対パス。
     /// </summary>
@@ -104,7 +112,11 @@ public class McpServerE2ETests
             }
         );
 
-        McpClient client = await McpClient.CreateAsync(transport, cancellationToken: cts.Token);
+        McpClient client = await McpClient.CreateAsync(
+            transport,
+            ClientOptions,
+            cancellationToken: cts.Token
+        );
 
         try
         {
@@ -481,7 +493,11 @@ public class McpServerE2ETests
 
             try
             {
-                client = await McpClient.CreateAsync(transport, cancellationToken: cts.Token);
+                client = await McpClient.CreateAsync(
+                    transport,
+                    ClientOptions,
+                    cancellationToken: cts.Token
+                );
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

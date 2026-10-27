@@ -59,7 +59,14 @@ public class MockProjectTargetProfileTests
 
         MockProjectPromptBuilder.BuildSystemPrompt(profile, "AcmeMock").Should().Contain(expected);
         MockProjectPromptBuilder.BuildPrompt(profile, "AcmeMock", null).Should().Contain(expected);
-        profile.BuildReadme("AcmeMock", "AcmeMock", "sqlite").Should().Contain(expected);
+        profile
+            .BuildReadme(
+                "AcmeMock",
+                MockProjectScaffoldService.ResolveNamespaces("AcmeMock", "sqlite"),
+                "sqlite"
+            )
+            .Should()
+            .Contain(expected);
         MockProjectPromptBuilder
             .BuildSystemPrompt(profile, "AcmeMock")
             .Should()

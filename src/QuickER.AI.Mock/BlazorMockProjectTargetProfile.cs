@@ -16,6 +16,38 @@ internal sealed class BlazorMockProjectTargetProfile : MockProjectTargetProfile
     /// <inheritdoc />
     internal override string UiFileSearchPattern => "*.razor";
 
+    /// <summary>ルートの宣言（<c>@page</c> ディレクティブの行）を拾う正規表現</summary>
+    private static readonly System.Text.RegularExpressions.Regex PageDirective = new(
+        @"^[ \t]*@page\b",
+        System.Text.RegularExpressions.RegexOptions.Multiline
+            | System.Text.RegularExpressions.RegexOptions.CultureInvariant
+    );
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 画面は <c>@page</c> のルートを持つコンポーネントなので、<c>@page</c> の行を数える（1 つのファイルに複数あればその数だけ）。
+    /// App.razor・Routes.razor・レイアウトは <c>@page</c> を持たないので数えない。読めないファイルは数えない。
+    /// </remarks>
+    internal override int CountScreenArtifacts(string projectDirectory) =>
+        MockProjectFiles
+            .Enumerate(projectDirectory, UiFileSearchPattern)
+            .Sum(path =>
+            {
+                try
+                {
+                    return PageDirective.Matches(System.IO.File.ReadAllText(path)).Count;
+                }
+                catch (Exception ex)
+                    when (ex is System.IO.IOException or UnauthorizedAccessException)
+                {
+                    return 0;
+                }
+            });
+
+    /// <inheritdoc />
+    /// <remarks>画面は必ず <c>@page</c> のルートを持つので、数が足りなければ画面が作られていない。</remarks>
+    internal override bool ScreenShortfallFailsRun => true;
+
     /// <inheritdoc />
     /// <remarks>Microsoft.AspNetCore.App は Pkcs の DLL を持つが刈り込まない（SqlClient の推移的な版が解決される）。</remarks>
     internal override bool SharedFrameworkPrunesCryptographyPkcs => false;
@@ -56,11 +88,11 @@ internal sealed class BlazorMockProjectTargetProfile : MockProjectTargetProfile
     /// <remarks>AI・人間の双方向けの規約ドキュメント（Blazor 実装規約・起動時 DI・実 DB 切り替え手順）。</remarks>
     internal override string BuildReadme(
         string projectName,
-        string rootNamespace,
+        MockProjectNamespaces namespaces,
         string? repositoryDialect
     )
     {
-        var dialectSwitchGuide = BuildDialectSwitchGuide(repositoryDialect);
+        var dialectSwitchGuide = BuildDialectSwitchGuide(repositoryDialect, namespaces);
 
         return $@"# {projectName}
 
@@ -97,11 +129,14 @@ folder, and the project itself lives under the `{projectName}/` folder.
 
 ## Dependency injection at startup
 
-In `Program.cs`, register the Blazor Web App services and **`AddGeneratedInMemoryRepositories()`** from
-`{rootNamespace}.Generated`, then map the components with the InteractiveServer render mode (this registers the
-in-memory implementation seeded with sample data, so the app runs without a real database).
+In `Program.cs`, register the Blazor Web App services and **`AddGeneratedInMemoryRepositories()`**, then map the
+components with the InteractiveServer render mode (this registers the in-memory implementation seeded with sample data,
+so the app runs without a real database). `AddGeneratedInMemoryRepositories()` is declared in the
+`{namespaces.InMemoryRegistration}` namespace.
 
 ```csharp
+using {namespaces.InMemoryRegistration};
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddGeneratedInMemoryRepositories(seedSampleData: true);
@@ -112,7 +147,17 @@ app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.Run();
 ```
 
+Add the namespaces of the entities and the `I{{Entity}}Repository` contracts to `Components/_Imports.razor`, so every
+page can use them:
+
+```razor
+@using {namespaces.Entities}
+@using {namespaces.Repositories}
+```
+
 Start the app with `dotnet run` (open the localhost URL it prints in a browser).
+
+{BuildNamespaceSection(namespaces)}
 
 ## Switching to a real database
 
@@ -162,6 +207,10 @@ Start the app with `dotnet run` (open the localhost URL it prints in a browser).
     internal override string ApiKeyUiFrameworkRules =>
         "- Implement the UI as a Blazor Web App in the global InteractiveServer render mode. Declare `<Routes @rendermode=\"InteractiveServer\" />` in App.razor so that interactive screens (buttons and forms) work through server-side rendering.\r\n"
         + "- Every screen must be defined as a Razor component (.razor) with an `@page` route. Hand-building a RenderTreeBuilder / RenderFragment from C# code alone is forbidden.";
+
+    /// <inheritdoc />
+    internal override string ApiKeyNamespaceRule =>
+        "- The data-layer types are declared in the namespaces listed under \"Namespaces\" in the data-layer summary, and the parent namespace ending in .Generated declares no types. In Program.cs, add a `using` for the namespace that declares AddGeneratedInMemoryRepositories. In Components/_Imports.razor, add `@using` lines for the namespaces of the entities and the I{Entity}Repository contracts.";
 
     /// <inheritdoc />
     internal override string ApiKeyScreenReproductionRule =>

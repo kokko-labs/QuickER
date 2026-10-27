@@ -636,9 +636,9 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
-        public static string Mock_Run_ClientCompleted {
+        public static string Mock_Run_ClientCompletedFormat {
             get {
-                return ResourceManager.GetString("Mock_Run_ClientCompleted", resourceCulture);
+                return ResourceManager.GetString("Mock_Run_ClientCompletedFormat", resourceCulture);
             }
         }
 
@@ -648,15 +648,93 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
-        public static string Mock_Run_ArtifactsFound {
+        public static string Mock_Run_ArtifactsFoundFormat {
             get {
-                return ResourceManager.GetString("Mock_Run_ArtifactsFound", resourceCulture);
+                return ResourceManager.GetString("Mock_Run_ArtifactsFoundFormat", resourceCulture);
             }
         }
 
-        public static string Mock_Run_ArtifactsMissing {
+        public static string Mock_Run_ArtifactsMissingFormat {
             get {
-                return ResourceManager.GetString("Mock_Run_ArtifactsMissing", resourceCulture);
+                return ResourceManager.GetString("Mock_Run_ArtifactsMissingFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_Message {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_Message", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_TablesOnlyInDesignFormat {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_TablesOnlyInDesignFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_TablesOnlyInDiagramFormat {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_TablesOnlyInDiagramFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_ScreenTableFormat {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_ScreenTableFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_ChangedTablesFormat {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_ChangedTablesFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_RelationshipsChanged {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_RelationshipsChanged", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_TargetChanged {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_TargetChanged", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_ContinuedLog {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_ContinuedLog", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_ContentChangedLog {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_ContentChangedLog", resourceCulture);
+            }
+        }
+
+        public static string Mock_SchemaMismatch_NotRecordedLog {
+            get {
+                return ResourceManager.GetString("Mock_SchemaMismatch_NotRecordedLog", resourceCulture);
+            }
+        }
+
+        public static string Mock_Run_ScreensMissingFormat {
+            get {
+                return ResourceManager.GetString("Mock_Run_ScreensMissingFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_Run_ScreensMissingWarningFormat {
+            get {
+                return ResourceManager.GetString("Mock_Run_ScreensMissingWarningFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_Result_ScreensMissingFormat {
+            get {
+                return ResourceManager.GetString("Mock_Result_ScreensMissingFormat", resourceCulture);
             }
         }
 
@@ -1010,6 +1088,54 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_ApiRun_NoEmit {
             get {
                 return ResourceManager.GetString("Mock_ApiRun_NoEmit", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_ScreenTurnLabelFormat {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_ScreenTurnLabelFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_ErrorTurnsWithoutFilesFormat {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_ErrorTurnsWithoutFilesFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_TurnDiagnosticsFormat {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_TurnDiagnosticsFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_TurnKindCommon {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_TurnKindCommon", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_TurnKindScreen {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_TurnKindScreen", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_TurnKindFix {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_TurnKindFix", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_DiagnosticsUnknown {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_DiagnosticsUnknown", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_DiagnosticsNone {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_DiagnosticsNone", resourceCulture);
             }
         }
 

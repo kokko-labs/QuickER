@@ -295,7 +295,7 @@ Have one writing process at a time on a given diagram.
 - **DiagramDocument validation.**
   The editing tools refuse a file that does not exist, JSON that is not a `DiagramDocument` (an object with `Version` and `Schema`), and documents saved in a newer format version than this tool supports (to avoid discarding unknown data).
   A file that declares a newer version and contains data this version cannot read (a new kind of value, for example) is reported as saved by a newer version of QuickER, not as broken JSON, and a `Version` below 1 is reported with its value.
-  It also refuses two kinds of damage that only a hand-edited diagram can carry: the same identifier (`Id`) used by more than one table or column, and an explicit `null` where a required string belongs (a table name, a column name, a column type, a query name).
+  It also refuses two kinds of damage that only a hand-edited diagram can carry: the same identifier (`Id`) used by more than one table, column or relationship, and an explicit `null` where a required string belongs (a table name, a column name, a column type, a query name).
   Both are refused by name and location; neither is repaired, because guessing a value would change what the diagram means.
   A `null` in an optional string such as a description or a memo is read as empty text.
   `get_diagram_summary` still reads a newer-format document, with a warning.

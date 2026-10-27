@@ -251,6 +251,18 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Chat_ResponseCutAtOutputLimit {
+            get {
+                return ResourceManager.GetString("Chat_ResponseCutAtOutputLimit", resourceCulture);
+            }
+        }
+
+        public static string Chat_EmptyResponseFormat {
+            get {
+                return ResourceManager.GetString("Chat_EmptyResponseFormat", resourceCulture);
+            }
+        }
+
         public static string ClaudeCode_Guidance_Pending {
             get {
                 return ResourceManager.GetString("ClaudeCode_Guidance_Pending", resourceCulture);
@@ -837,6 +849,12 @@ namespace QuickER.AI.Resources {
         public static string Copilot_CouldNotStartConversation {
             get {
                 return ResourceManager.GetString("Copilot_CouldNotStartConversation", resourceCulture);
+            }
+        }
+
+        public static string Copilot_Disconnected {
+            get {
+                return ResourceManager.GetString("Copilot_Disconnected", resourceCulture);
             }
         }
 

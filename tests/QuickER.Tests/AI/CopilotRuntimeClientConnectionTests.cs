@@ -12,15 +12,38 @@ namespace QuickER.Tests.AI;
 /// </summary>
 public class CopilotRuntimeClientConnectionTests
 {
-    /// <summary>接続断として扱うのは、実機で確かめた形（型がちょうど IOException）だけであることを検証する</summary>
-    [Fact(DisplayName = "接続断として扱うのは型がちょうど IOException の失敗だけ")]
-    public void IsConnectionLost_OnlyExactIOException()
+    /// <summary>
+    /// 接続断として扱うのは、型がちょうど IOException で、内側が無いか SDK の接続断の例外のものだけであることを検証する。
+    /// ランタイムが返した通常のエラー応答（内側が RemoteRpcException）は、同じ IOException に包まれていても接続断ではない
+    /// </summary>
+    [Fact(
+        DisplayName = "接続断として扱うのは、内側が無いか SDK の接続断の例外を包んだ IOException だけ"
+    )]
+    public void IsConnectionLost_OnlyConnectionLostShapes()
     {
+        CopilotRuntimeClient
+            .ConnectionLostExceptionType.Should()
+            .NotBeNull(
+                "SDK の接続断の例外を名前で引けること（SDK を上げて名前が変わったら気づく）"
+            );
+        typeof(IOException)
+            .IsAssignableFrom(CopilotRuntimeClient.ConnectionLostExceptionType)
+            .Should()
+            .BeTrue();
+
         CopilotRuntimeClient.IsConnectionLost(new IOException("pipe")).Should().BeTrue();
+        CopilotRuntimeClient
+            .IsConnectionLost(FakeCopilotRuntimeClient.ConnectionLostError())
+            .Should()
+            .BeTrue();
+        CopilotRuntimeClient
+            .IsConnectionLost(FakeCopilotRuntimeClient.ErrorResponse("model not available"))
+            .Should()
+            .BeFalse("ランタイムが返した通常のエラー応答では接続を捨てない");
         CopilotRuntimeClient
             .IsConnectionLost(new IOException("wrap", new IOException("inner")))
             .Should()
-            .BeTrue();
+            .BeFalse();
         CopilotRuntimeClient.IsConnectionLost(new FileNotFoundException()).Should().BeFalse();
         CopilotRuntimeClient
             .IsConnectionLost(new InvalidOperationException("not connected"))
@@ -40,6 +63,50 @@ public class CopilotRuntimeClientConnectionTests
 
         var call = async () =>
             await client.InvokeAsync(() => Task.FromException(new IOException("pipe closed")));
+
+        await call.Should().ThrowAsync<IOException>();
+        client.IsStarted.Should().BeFalse();
+        Directory.Exists(workingDirectory).Should().BeFalse("捨てた接続の一時作業フォルダは消す");
+    }
+
+    /// <summary>
+    /// ランタイムが返した通常のエラー応答（SDK が IOException に包む）では、例外を投げ直すだけで接続を捨てない
+    /// （会話の文脈を失わない）ことを検証する
+    /// </summary>
+    [Fact(DisplayName = "ランタイムが返した通常のエラー応答では接続を捨てない")]
+    public async Task Invoke_WhenRuntimeReturnsErrorResponse_KeepsConnection()
+    {
+        var (client, workingDirectory) = CreateStartedClient();
+
+        try
+        {
+            var call = async () =>
+                await client.InvokeAsync(() =>
+                    Task.FromException(
+                        FakeCopilotRuntimeClient.ErrorResponse("model not available")
+                    )
+                );
+
+            await call.Should().ThrowAsync<IOException>();
+            client.IsStarted.Should().BeTrue();
+        }
+        finally
+        {
+            await client.DisposeAsync();
+            Directory.Exists(workingDirectory).Should().BeFalse();
+        }
+    }
+
+    /// <summary>SDK の接続断の例外を包んだ失敗では接続を捨てる（1.0.26 の形）ことを検証する</summary>
+    [Fact(DisplayName = "SDK の接続断の例外を包んだ失敗では接続を捨てる")]
+    public async Task Invoke_WhenSdkReportsConnectionLost_ResetsConnection()
+    {
+        var (client, workingDirectory) = CreateStartedClient();
+
+        var call = async () =>
+            await client.InvokeAsync(() =>
+                Task.FromException(FakeCopilotRuntimeClient.ConnectionLostError())
+            );
 
         await call.Should().ThrowAsync<IOException>();
         client.IsStarted.Should().BeFalse();

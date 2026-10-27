@@ -33,6 +33,20 @@ public abstract class MockProjectTargetProfile
     internal abstract string UiFileSearchPattern { get; }
 
     /// <summary>
+    /// プロジェクトフォルダの中の、画面として数える UI 成果物の数を返す（成果物検証で設計の画面の数と比べる）。
+    /// </summary>
+    /// <remarks>走査は <see cref="MockProjectFiles"/>（obj / bin を数えない・範囲はプロジェクトフォルダ配下）。</remarks>
+    internal abstract int CountScreenArtifacts(string projectDirectory);
+
+    /// <summary>
+    /// 画面として数えた成果物が設計の画面の数に届かないとき、実行全体を失敗にするか（false なら警告の行だけを出す）。
+    /// </summary>
+    /// <remarks>
+    /// 数え方が画面の作り方に左右されないターゲットだけが true を宣言する。ランナーはターゲットの名前で分岐せず、この値だけを見る。
+    /// </remarks>
+    internal abstract bool ScreenShortfallFailsRun { get; }
+
+    /// <summary>
     /// <c>emit_file</c> での提出を許可するファイル拡張子（先頭ドット付き・大文字小文字を無視して照合する集合）。
     /// </summary>
     /// <remarks>
@@ -67,9 +81,12 @@ public abstract class MockProjectTargetProfile
     internal abstract string BuildCsproj(string rootNamespace, string? repositoryDialect);
 
     /// <summary>規約ドキュメント（README）を組み立てる（ターゲット固有の実装規約・起動手順を含む）</summary>
+    /// <param name="projectName">プロジェクト名</param>
+    /// <param name="namespaces">生成されるデータ層の名前空間（生成の計画から求めた値）</param>
+    /// <param name="repositoryDialect">QuickER 版 Repository の方言（出さない図は null）</param>
     internal abstract string BuildReadme(
         string projectName,
-        string rootNamespace,
+        MockProjectNamespaces namespaces,
         string? repositoryDialect
     );
 
@@ -115,6 +132,15 @@ public abstract class MockProjectTargetProfile
     /// <summary>API キー型 system プロンプトの emit_file パス例（英語の "and" で連ねたターゲット代表例 2 つ）</summary>
     internal abstract string ApiKeyEmitPathExamples(string projectName);
 
+    /// <summary>
+    /// API キー型 system プロンプトの「データ層の名前空間を using する」規約（1 項目）。
+    /// </summary>
+    /// <remarks>
+    /// データ層は分割出力で型ごとに別の名前空間へ出るので、どのファイルにどの using を書くかをターゲットの流儀で示す。
+    /// 名前空間そのものは共通部のリクエストに添えるデータ層の要約が名指しする。
+    /// </remarks>
+    internal abstract string ApiKeyNamespaceRule { get; }
+
     // ── ターゲット共通のスキャフォールド部品 ──
 
     /// <summary>
@@ -147,20 +173,41 @@ public abstract class MockProjectTargetProfile
             _ => string.Empty,
         };
 
+    /// <summary>
+    /// README の「データ層の名前空間」の節を返す（生成するファイルごとの名前空間の一覧。末尾改行なし）。
+    /// </summary>
+    private protected static string BuildNamespaceSection(MockProjectNamespaces namespaces) =>
+        "## Namespaces of the data layer\n\n"
+        + "Each file under `Generated/` declares its own namespace, and the parent namespace "
+        + $"`{ParentNamespace(namespaces.Entities)}` declares no types, so add a `using` for every namespace you use.\n\n"
+        + string.Join(
+            "\n",
+            namespaces.Files.Select(file => $"- `Generated/{file.FileName}`: `{file.Namespace}`")
+        );
+
+    /// <summary>名前空間の親（最後の <c>.</c> より前）を返す</summary>
+    private static string ParentNamespace(string name) =>
+        name.LastIndexOf('.') is var dot and > 0 ? name[..dot] : name;
+
     /// <summary>csproj の PackageReference 1 行（字下げ 4・末尾改行つき）を返す</summary>
     private protected static string PackageReferenceLine(string packageId) =>
         $"    <PackageReference Include=\"{packageId}\" Version=\"{MockProjectPackageVersions.Get(packageId)}\" />\n";
 
-    /// <summary>README の「実 DB への切り替え」手順 3 を返す（DI 登録は方言別の拡張メソッド名で案内する）</summary>
-    private protected static string BuildDialectSwitchGuide(string? repositoryDialect) =>
+    /// <summary>README の「実 DB への切り替え」手順 3 を返す（DI 登録は方言別の拡張メソッド名と、その名前空間で案内する）</summary>
+    private protected static string BuildDialectSwitchGuide(
+        string? repositoryDialect,
+        MockProjectNamespaces namespaces
+    ) =>
         repositoryDialect switch
         {
             "sqlserver" =>
                 "3. To switch to a real database (SQL Server), replace `AddGeneratedInMemoryRepositories()` with "
-                    + "`AddGeneratedSqlServerRepositories(connectionString)`.",
+                    + $"`AddGeneratedSqlServerRepositories(connectionString)`, which is declared in the "
+                    + $"`{namespaces.DatabaseRegistration}` namespace (add `using {namespaces.DatabaseRegistration};`).",
             "sqlite" =>
                 "3. To switch to a real database (SQLite), replace `AddGeneratedInMemoryRepositories()` with "
-                    + "`AddGeneratedSqliteRepositories(connectionString)`.",
+                    + $"`AddGeneratedSqliteRepositories(connectionString)`, which is declared in the "
+                    + $"`{namespaces.DatabaseRegistration}` namespace (add `using {namespaces.DatabaseRegistration};`).",
             _ =>
                 "3. To switch to a real database, regenerate the QuickER repositories for a supported dialect "
                     + "(SQL Server / SQLite) with QuickER, then replace `AddGeneratedInMemoryRepositories()` with "

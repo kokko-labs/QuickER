@@ -45,6 +45,12 @@ public readonly record struct BuildRunResult(bool Success, string Output);
 /// <param name="BuildDeclined">
 /// 最終ビルド直前の確認を利用者が取り消したため、ビルドを実行しなかったか（＝成果物は未検証のまま完了）
 /// </param>
+/// <param name="ScreensExpected">設計（同梱した <c>mock.json</c>）の画面の数（読めなければ null）</param>
+/// <param name="ScreenArtifactsFound">画面として数えた UI 成果物の数（数えなかったときは null）</param>
+/// <param name="ScreensMissing">
+/// 画面として数えた成果物が設計の画面の数に届かず、ターゲットの宣言（<see cref="MockProjectTargetProfile.ScreenShortfallFailsRun"/>）
+/// により全体を失敗にしたか
+/// </param>
 public sealed record MockProjectAgentResult(
     bool Success,
     bool ClientSucceeded,
@@ -54,7 +60,10 @@ public sealed record MockProjectAgentResult(
     bool Canceled,
     string Message,
     string LogPath,
-    bool BuildDeclined = false
+    bool BuildDeclined = false,
+    int? ScreensExpected = null,
+    int? ScreenArtifactsFound = null,
+    bool ScreensMissing = false
 );
 
 /// <summary>
@@ -270,18 +279,16 @@ public sealed class MockProjectAgentRunner
         CancellationToken cancellationToken
     )
     {
-        // 進捗はログへも蓄積しつつ UI へ転送する
-        void Emit(string text)
+        // 進捗はログへも蓄積しつつ UI へ転送する。実行器の断片が改行で終わらなくても、行は新しい行から書く
+        var progress = new MockProgressWriter(text =>
         {
             log.Append(text);
             onProgress(text);
-        }
+        });
 
-        void EmitLine(string line)
-        {
-            log.Append(line).Append('\n');
-            onProgress(line + "\n");
-        }
+        void Emit(string text) => progress.Write(text);
+
+        void EmitLine(string line) => progress.WriteLine(line);
 
         // 利用者自身の中断か（外部トークン・InterruptAsync のどちらでも）
         bool IsCanceledByUser() => cancellationToken.IsCancellationRequested || _interruptRequested;
@@ -368,13 +375,14 @@ public sealed class MockProjectAgentRunner
         }
         else if (outcome.Success)
         {
-            EmitLine(Strings.Mock_Run_ClientCompleted);
+            EmitLine(string.Format(Strings.Mock_Run_ClientCompletedFormat, _agent.BackendName));
         }
         else
         {
             EmitLine(
                 string.Format(
                     Strings.Mock_Run_ClientFailedFormat,
+                    _agent.BackendName,
                     outcome.Error ?? Strings.Mock_ErrorUnknown
                 )
             );
@@ -391,11 +399,41 @@ public sealed class MockProjectAgentRunner
 
         if (!timedOut && !canceled)
         {
+            // UI 成果物の種類はターゲットの検索パターンの拡張子で示す（WPF は .xaml・Blazor は .razor）
+            var uiExtension = _profile.UiFileSearchPattern.TrimStart('*');
             EmitLine(
-                artifactsPresent
-                    ? Strings.Mock_Run_ArtifactsFound
-                    : Strings.Mock_Run_ArtifactsMissing
+                string.Format(
+                    artifactsPresent
+                        ? Strings.Mock_Run_ArtifactsFoundFormat
+                        : Strings.Mock_Run_ArtifactsMissingFormat,
+                    uiExtension
+                )
             );
+        }
+
+        // 画面の数の確認（設計の画面の数と、画面として数えた成果物の数を比べる）。
+        // 足りないときに失敗にするかはターゲットの宣言で決め、ターゲットの名前では分岐しない
+        var screensExpected = artifactsPresent ? ReadScreenCount(projectDirectory) : null;
+        int? screenArtifactsFound = null;
+        var screensMissing = false;
+
+        if (screensExpected is > 0)
+        {
+            screenArtifactsFound = _profile.CountScreenArtifacts(projectDirectory);
+
+            if (screenArtifactsFound < screensExpected)
+            {
+                screensMissing = _profile.ScreenShortfallFailsRun;
+                EmitLine(
+                    string.Format(
+                        screensMissing
+                            ? Strings.Mock_Run_ScreensMissingFormat
+                            : Strings.Mock_Run_ScreensMissingWarningFormat,
+                        screensExpected,
+                        screenArtifactsFound
+                    )
+                );
+            }
         }
 
         // 最終ビルドを独立に実行して検証する（エージェントの自己申告を信じない）。
@@ -500,6 +538,7 @@ public sealed class MockProjectAgentRunner
             && !canceled
             && outcome.Success
             && artifactsPresent
+            && !screensMissing
             && buildSucceeded;
 
         var message = BuildResultMessage(
@@ -510,6 +549,13 @@ public sealed class MockProjectAgentRunner
             buildDeclined,
             outcome,
             artifactsPresent,
+            screensMissing
+                ? string.Format(
+                    Strings.Mock_Result_ScreensMissingFormat,
+                    screensExpected,
+                    screenArtifactsFound
+                )
+                : null,
             buildSucceeded
         );
         EmitLine("\n" + message);
@@ -524,8 +570,35 @@ public sealed class MockProjectAgentRunner
             Canceled: canceled,
             Message: message,
             LogPath: logPath,
-            BuildDeclined: buildDeclined
+            BuildDeclined: buildDeclined,
+            ScreensExpected: screensExpected,
+            ScreenArtifactsFound: screenArtifactsFound,
+            ScreensMissing: screensMissing
         );
+    }
+
+    /// <summary>
+    /// スキャフォールドが同梱した設計（<c>design/mock/mock.json</c>）の画面の数を読む（読めなければ null＝画面の数の確認をしない）。
+    /// </summary>
+    private static int? ReadScreenCount(string projectDirectory)
+    {
+        var designFolder = Path.Combine(
+            projectDirectory,
+            MockProjectScaffoldService.DesignFolderRelativePath.Replace(
+                '/',
+                Path.DirectorySeparatorChar
+            )
+        );
+
+        try
+        {
+            return MockFolderStore.Open(designFolder).Manifest.Screens.Count;
+        }
+        catch (Exception ex)
+            when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>実行中のランを中断する（エージェント実行中・最終ビルド中のどちらでも効く）</summary>
@@ -650,6 +723,7 @@ public sealed class MockProjectAgentRunner
         bool buildDeclined,
         MockProjectAgentOutcome outcome,
         bool artifactsPresent,
+        string? screensMissingMessage,
         bool buildSucceeded
     )
     {
@@ -689,6 +763,11 @@ public sealed class MockProjectAgentRunner
         if (!artifactsPresent)
         {
             return Strings.Mock_Result_ArtifactsMissing;
+        }
+
+        if (screensMissingMessage is not null)
+        {
+            return screensMissingMessage;
         }
 
         // 確認の取り消しはエージェント自身の失敗より後に見る（実行が失敗していればそちらが原因）
