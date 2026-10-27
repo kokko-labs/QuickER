@@ -16,6 +16,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **A diagram file in which two relationships share an identifier is now refused, naming where** — this happens only in a hand-edited file. The message names the constraint names, or the parent and child tables
 
+#### Distribution
+
+- **The launcher `QuickER.exe` and `Update.exe` that the installer and the portable zip place next to the app are now x64 instead of x86** — the app itself was already x64. An installed QuickER switches to them when it updates to this version
+
 ### Fixed
 
 #### AI chat & MCP

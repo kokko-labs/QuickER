@@ -272,6 +272,42 @@ public sealed class WorkflowGuardTests
             .Be(velopack.Groups["version"].Value);
     }
 
+    /// <summary>vpk pack は、同じファイルの dotnet publish と同じランタイムを宣言する</summary>
+    /// <remarks>
+    /// vpk は <c>--runtime</c> が無いと x86 と見なし、配布物に入る Velopack の実行ファイル（起動用の実行ファイルと
+    /// Update.exe）を x86 にする。アプリは x64 で publish しているので、publish の <c>-r</c> と並べて照合する。
+    /// </remarks>
+    [Theory(
+        DisplayName = "release.yml と pack-velopack.ps1 の vpk pack は、dotnet publish の -r と同じ --runtime を持つ"
+    )]
+    [InlineData(".github/workflows/release.yml")]
+    [InlineData("scripts/pack-velopack.ps1")]
+    public void VpkPack_DeclaresPublishRuntime(string relativePath)
+    {
+        var text = File.ReadAllText(Path.Combine(Root, relativePath));
+        var publishRuntimes = Regex
+            .Matches(text, @"dotnet publish [^\r\n]*?-r (?<runtime>\S+)")
+            .Select(match => match.Groups["runtime"].Value)
+            .Distinct()
+            .ToList();
+        var packLines = Regex
+            .Matches(text, @"vpk pack --[^\r\n]*")
+            .Select(match => match.Value)
+            .ToList();
+
+        publishRuntimes.Should().ContainSingle("publish は 1 つのランタイムで行う");
+        packLines.Should().NotBeEmpty("vpk pack を実行する行がある");
+
+        foreach (var line in packLines)
+        {
+            Regex
+                .Match(line, @"--runtime (?<runtime>\S+)")
+                .Groups["runtime"]
+                .Value.Should()
+                .Be(publishRuntimes[0], $"vpk pack の行: {line}");
+        }
+    }
+
     /// <summary>公開済みの版の確認は本番の公開だけで push の前に走り、push は --skip-duplicate を残す</summary>
     [Fact(
         DisplayName = "publish.yml は push の前に公開済みの版を確認し、push は --skip-duplicate のまま"
