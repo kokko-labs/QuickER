@@ -63,11 +63,8 @@ public partial class EfCoreServiceProviderLimitGuardTests
             var file in Directory.EnumerateFiles(testsRoot, "*.cs", SearchOption.AllDirectories)
         )
         {
-            var segments = file[testsRoot.Length..].Split(Path.DirectorySeparatorChar);
-
             if (
-                segments.Contains("bin")
-                || segments.Contains("obj")
+                SourceFiles.IsBuildOutput(file[testsRoot.Length..])
                 || file.EndsWith(".g.cs", StringComparison.Ordinal)
                 || Path.GetFileName(file) == "EfCoreTestOptions.cs"
                 || Path.GetFileName(file) == "EfCoreServiceProviderLimitGuardTests.cs"

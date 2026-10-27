@@ -88,20 +88,19 @@ public sealed class AppDataPathGuardTests
     )]
     public void FolderLookups_OutsidePlatform_AreOnlyKnown()
     {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
-        var platform = Path.Combine(src, "QuickER.Platform") + Path.DirectorySeparatorChar;
-        var found = Directory
-            .EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
-            .Where(path => !path.StartsWith(platform, StringComparison.OrdinalIgnoreCase))
-            .Where(path =>
-                !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
+        var found = SourceFiles
+            .Enumerate("src")
+            .Where(file =>
+                !file.AreaRelativePath.StartsWith(
+                    "QuickER.Platform/",
+                    StringComparison.OrdinalIgnoreCase
+                )
             )
-            .SelectMany(path =>
+            .SelectMany(file =>
             {
-                var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+                var relative = file.RelativePath;
                 var variants = ConditionalSourceParse.Parse(
-                    File.ReadAllText(path),
+                    File.ReadAllText(file.FullPath),
                     cancellationToken: TestContext.Current.CancellationToken
                 );
 
@@ -115,23 +114,12 @@ public sealed class AppDataPathGuardTests
             .GroupBy(hit => hit)
             .ToDictionary(group => group.Key, group => group.Count());
 
-        var expected = Known.ToDictionary(known => (known.File, known.Call), known => known.Count);
-
-        var unexpected = found
-            .Where(pair => !expected.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key.File}: {pair.Key.Call} x{pair.Value}")
-            .ToList();
-        var stale = expected
-            .Where(pair => !found.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key.File}: {pair.Key.Call} x{pair.Value}")
-            .ToList();
-
-        unexpected
-            .Should()
-            .BeEmpty(
-                "保存先・一時フォルダの算出は AppDataPaths を使い、例外は理由つきで一覧に載せる"
-            );
-        stale.Should().BeEmpty("無くなった出現は一覧から消す");
+        GuardKnownList.AssertMatches(
+            found,
+            Known.Select(known => ((known.File, known.Call), known.Count)),
+            (key, count) => $"{key.File}: {key.Call} x{count}",
+            "保存先・一時フォルダの算出は AppDataPaths を使い、例外は理由つきで一覧に載せる"
+        );
     }
 
     /// <summary>数える呼び出しなら、その表記（例 <c>GetFolderPath(UserProfile)</c>）を返す</summary>

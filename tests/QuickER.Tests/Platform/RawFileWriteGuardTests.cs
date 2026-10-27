@@ -110,21 +110,12 @@ public sealed class RawFileWriteGuardTests(ITestOutputHelper output)
             .GroupBy(hit => hit)
             .ToDictionary(group => group.Key, group => group.Count());
 
-        var expected = Known.ToDictionary(known => (known.File, known.Call), known => known.Count);
-
-        var unexpected = found
-            .Where(pair => !expected.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key.File}: {pair.Key.Call} x{pair.Value}")
-            .ToList();
-        var stale = expected
-            .Where(pair => !found.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key.File}: {pair.Key.Call} x{pair.Value}")
-            .ToList();
-
-        string.Join(Environment.NewLine, unexpected)
-            .Should()
-            .BeEmpty("ファイルへの書き込みは AtomicFile を通し、例外は理由つきで一覧に載せる");
-        string.Join(Environment.NewLine, stale).Should().BeEmpty("無くなった出現は一覧から消す");
+        GuardKnownList.AssertMatches(
+            found,
+            Known.Select(known => ((known.File, known.Call), known.Count)),
+            (key, count) => $"{key.File}: {key.Call} x{count}",
+            "ファイルへの書き込みは AtomicFile を通し、例外は理由つきで一覧に載せる"
+        );
     }
 
     [Fact(DisplayName = "走査の土台は、どのプロジェクトでも BCL の呼び出しを解決できている")]

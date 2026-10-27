@@ -1,7 +1,6 @@
 using System.IO;
 using AwesomeAssertions;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using QuickER.CodeGen.CSharp;
 
 namespace QuickER.Tests.CodeGen.CSharp;
@@ -314,142 +313,38 @@ public class RuntimePackageSourceRendererTests
         bool allowDependencyInjection = false
     )
     {
-        var syntaxTrees = sources
-            .Select(
-                (source, index) =>
-                    CSharpSyntaxTree.ParseText(
-                        source,
-                        new CSharpParseOptions(LanguageVersion.Latest),
-                        path: $"Package{index}.g.cs"
-                    )
-            )
-            .ToArray();
-
-        var references = BuildReferences(
-            allowSqlClient,
-            allowSqlite,
-            allowEfCore,
-            allowDependencyInjection
-        );
-
-        var compilation = CSharpCompilation.Create(
+        var emit = GeneratedCodeCompiler.Emit(
+            sources.Select((source, index) => ($"Package{index}.g.cs", source)),
             $"QuickER.RuntimePackage.Tests.{Guid.NewGuid():N}",
-            syntaxTrees,
-            references,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+            References(allowSqlClient, allowSqlite, allowEfCore, allowDependencyInjection)
         );
 
-        using var peStream = new MemoryStream();
-        var emitResult = compilation.Emit(peStream);
-
-        var errors = emitResult
-            .Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .ToArray();
-
-        return new CompileResult
-        {
-            Success = emitResult.Success && errors.Length == 0,
-            Errors = errors,
-        };
+        return new CompileResult { Success = emit.Success, Errors = emit.Errors };
     }
 
-    /// <summary>除外対象アセンブリのファイル名（拡張子なし・小文字比較）。許可されない限り参照へ含めない</summary>
-    private static readonly IReadOnlyList<string> ExclusiveAssemblyFileNames =
-    [
-        "Microsoft.Data.SqlClient",
-        "Microsoft.Data.Sqlite",
-        "Microsoft.EntityFrameworkCore",
-        "Microsoft.EntityFrameworkCore.Relational",
-        "Microsoft.EntityFrameworkCore.Abstractions",
-        "Microsoft.Extensions.DependencyInjection",
-        "Microsoft.Extensions.DependencyInjection.Abstractions",
-    ];
-
-    /// <summary>許可依存だけを含む参照集合を構築する</summary>
-    private static IReadOnlyList<MetadataReference> BuildReferences(
+    /// <summary>許可依存だけを含む参照集合</summary>
+    /// <remarks>
+    /// DI（登録拡張）を必要とするのは EF Core 部品（AddGeneratedEfCoreRepositories）と、
+    /// サーバー固定エンジン（リポジトリ・ILoggerFactory を DI から解決する）だけ。
+    /// 方言パッケージは DI 非依存（DI 登録拡張はスキーマ依存物として生成側に出力される）のため戻さない。
+    /// パッケージのソースは Core と方言を 1 つのコンパイルに束ね、そのアセンブリをほかのコンパイルの参照に足さないので、
+    /// 配布ランタイムのアセンブリ（<c>QuickER.Runtime*</c>）は TPA から外さない（従来の参照集合のまま）。
+    /// </remarks>
+    private static IReadOnlyList<MetadataReference> References(
         bool allowSqlClient,
         bool allowSqlite,
         bool allowEfCore,
         bool allowDependencyInjection
-    )
-    {
-        var referencesByPath = new Dictionary<string, MetadataReference>(
-            StringComparer.OrdinalIgnoreCase
-        );
-
-        void AddPath(string? path)
-        {
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                return;
-            }
-
-            referencesByPath.TryAdd(path, MetadataReference.CreateFromFile(path));
-        }
-
-        // TPA（BCL 全体）をベースにするが、排他対象アセンブリはファイル名で除外する。
-        var trustedAssembliesPaths = (
-            AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string
-        )?.Split(Path.PathSeparator);
-
-        if (trustedAssembliesPaths is not null)
-        {
-            foreach (var path in trustedAssembliesPaths)
-            {
-                var fileName = Path.GetFileNameWithoutExtension(path);
-
-                if (ExclusiveAssemblyFileNames.Contains(fileName, StringComparer.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                AddPath(path);
-            }
-        }
-
-        // DI（登録拡張）を必要とするのは EF Core 部品（AddGeneratedEfCoreRepositories）と、
-        // サーバー固定エンジン（リポジトリ・ILoggerFactory を DI から解決する）だけ。
-        // 方言パッケージは DI 非依存（DI 登録拡張はスキーマ依存物として生成側に出力される）のため戻さない。
-        if (allowEfCore || allowDependencyInjection)
-        {
-            AddPath(
-                typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection)
-                    .Assembly
-                    .Location
-            );
-            AddPath(
-                typeof(Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions)
-                    .Assembly
-                    .Location
-            );
-        }
-
-        if (allowSqlClient)
-        {
-            AddPath(typeof(Microsoft.Data.SqlClient.SqlConnection).Assembly.Location);
-        }
-
-        if (allowSqlite)
-        {
-            AddPath(typeof(Microsoft.Data.Sqlite.SqliteConnection).Assembly.Location);
-        }
-
-        if (allowEfCore)
-        {
-            AddPath(typeof(Microsoft.EntityFrameworkCore.DbContext).Assembly.Location);
-            AddPath(
-                typeof(Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions)
-                    .Assembly
-                    .Location
-            );
-            AddPath(typeof(Microsoft.EntityFrameworkCore.DeleteBehavior).Assembly.Location);
-        }
-
-        return referencesByPath.Values.ToArray();
-    }
+    ) =>
+        RuntimeReferenceSet
+            .Create(
+                sqlClient: allowSqlClient,
+                sqlite: allowSqlite,
+                efCore: allowEfCore,
+                di: allowEfCore || allowDependencyInjection,
+                excludeRuntimePackages: false
+            )
+            .Build();
 
     /// <summary>コンパイル結果（成功可否とエラー診断）</summary>
     private sealed class CompileResult
@@ -460,13 +355,6 @@ public class RuntimePackageSourceRendererTests
 
         /// <summary>エラー診断を読みやすい文字列にまとめる（テスト失敗メッセージ用）</summary>
         public string Describe() =>
-            string.Join(
-                Environment.NewLine,
-                Errors.Select(diagnostic =>
-                {
-                    var lineSpan = diagnostic.Location.GetLineSpan();
-                    return $"[{diagnostic.Id}] {lineSpan.Path}:{lineSpan.StartLinePosition.Line + 1} {diagnostic.GetMessage()}";
-                })
-            );
+            string.Join(Environment.NewLine, Errors.Select(GeneratedCodeDiagnostics.Describe));
     }
 }

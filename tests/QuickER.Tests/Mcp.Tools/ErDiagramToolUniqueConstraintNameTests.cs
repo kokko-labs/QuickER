@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using QuickER.Model;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -17,14 +18,14 @@ public sealed class ErDiagramToolUniqueConstraintNameTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "set_unique_constraint: 同じ列集合・同じ名前（大文字小文字違いも）で呼び直しても成功し、制約は 1 つのまま"
     )]
-    [InlineData(HostKind.Gui, "UQ_Customer_Name", "UQ_Customer_Name")]
-    [InlineData(HostKind.Gui, "UQ_Customer_Name", "uq_customer_name")]
-    [InlineData(HostKind.Gui, "UQ_Customer_Name", "  UQ_Customer_Name  ")]
-    [InlineData(HostKind.File, "UQ_Customer_Name", "UQ_Customer_Name")]
-    [InlineData(HostKind.File, "UQ_Customer_Name", "uq_customer_name")]
-    [InlineData(HostKind.File, "UQ_Customer_Name", "  UQ_Customer_Name  ")]
+    [InlineData(ToolHostKind.Gui, "UQ_Customer_Name", "UQ_Customer_Name")]
+    [InlineData(ToolHostKind.Gui, "UQ_Customer_Name", "uq_customer_name")]
+    [InlineData(ToolHostKind.Gui, "UQ_Customer_Name", "  UQ_Customer_Name  ")]
+    [InlineData(ToolHostKind.File, "UQ_Customer_Name", "UQ_Customer_Name")]
+    [InlineData(ToolHostKind.File, "UQ_Customer_Name", "uq_customer_name")]
+    [InlineData(ToolHostKind.File, "UQ_Customer_Name", "  UQ_Customer_Name  ")]
     public void SetUniqueConstraint_RepeatedWithOwnName_Succeeds(
-        HostKind host,
+        ToolHostKind host,
         string firstName,
         string secondName
     )
@@ -59,9 +60,9 @@ public sealed class ErDiagramToolUniqueConstraintNameTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "set_unique_constraint: 別の制約が使っている名前は拒否し、図を変えない")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void SetUniqueConstraint_NameOfAnotherConstraint_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void SetUniqueConstraint_NameOfAnotherConstraint_IsRejected(ToolHostKind host)
     {
         Setup(host);
         Arrange(

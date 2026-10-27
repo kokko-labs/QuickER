@@ -38,8 +38,7 @@ public class WpfTestScaffoldGuardTests
         var offenders = Directory
             .EnumerateFiles(TestsRoot, "*.cs", SearchOption.AllDirectories)
             .Where(path =>
-                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                !SourceFiles.IsBuildOutput(Path.GetRelativePath(TestsRoot, path))
                 && Path.GetFileName(path) != GateFileName
             )
             // 検索語を分割するのは、このガード自身のソースが検出対象に写り込まないようにするため

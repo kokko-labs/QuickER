@@ -43,23 +43,19 @@ public class ConstraintNamesGuardTests
 
     private static IEnumerable<(string Path, string Text)> SourceFiles()
     {
-        var src = Path.Combine(NeutralResxFiles.FindRepositoryRoot(), "src");
-
-        foreach (var path in Directory.EnumerateFiles(src, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in TestSupport.SourceFiles.Enumerate("src"))
         {
-            var relative = Path.GetRelativePath(src, path).Replace('\\', '/');
-            var segments = relative.Split('/');
+            var relative = file.AreaRelativePath;
 
             if (
-                segments.Any(segment => segment is "bin" or "obj")
-                || relative.EndsWith(".g.cs", StringComparison.Ordinal)
+                relative.EndsWith(".g.cs", StringComparison.Ordinal)
                 || relative.EndsWith(".Designer.cs", StringComparison.Ordinal)
             )
             {
                 continue;
             }
 
-            yield return (relative, File.ReadAllText(path));
+            yield return (relative, File.ReadAllText(file.FullPath));
         }
     }
 

@@ -1,6 +1,5 @@
 using System.IO;
 using System.Text.Json.Nodes;
-using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.Documents;
 using QuickER.Tests.TestSupport;
@@ -15,6 +14,7 @@ namespace QuickER.Tests.Cli;
 /// <remarks>
 /// 入口は MCP サーバが呼ぶのと同じ <see cref="QuickER.Mcp.McpToolSet.Execute"/>。表明は ER 図操作ツールの
 /// 総当たり（<c>ToolArgumentShapeFuzzTests</c>）と同じ 3 つで、「失敗で何も変えない」には出力先を作らないことも含める。
+/// 流れと表明は <see cref="ToolArgumentShapeFuzzRunner"/> が持ち、ここはこの入口に固有の部分だけを渡す。
 /// 引数を取らない <c>get_generation_config_schema</c> には崩す引数が無いので対象外。
 /// </remarks>
 public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
@@ -39,9 +39,6 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
         Path.GetTempPath(),
         "quicker-codegen-arg-fuzz-" + Guid.NewGuid().ToString("N")
     );
-
-    /// <summary>この実行で通ったケース ID（台帳の古い項目を見つけるため）</summary>
-    private readonly HashSet<string> _seenIds = [];
 
     public CodeGenToolArgumentShapeFuzzTests()
     {
@@ -94,138 +91,108 @@ public sealed class CodeGenToolArgumentShapeFuzzTests : IDisposable
             },
         };
 
-        var problems = new List<string>();
-        var caseCount = 0;
-        var coverage = new CoverageCounter(ToolArgumentFuzzDimensions.Table);
+        var tools = baselines
+            .Select(pair => new ToolArgumentShapeFuzzRunner.Tool(
+                pair.Key,
+                toolSet.Tools.Single(candidate => candidate.Name == pair.Key).InputSchema,
+                [("base", pair.Value)]
+            ))
+            .ToList();
 
-        foreach (var (toolName, baseline) in baselines)
-        {
-            var tool = toolSet.Tools.Single(candidate => candidate.Name == toolName);
-            var schema = ToolArgumentFuzz.SchemaOf(tool.InputSchema);
-            var (baseResult, baseSuccess) = Run(toolSet, toolName, baseline, out _);
-
-            if (!baseSuccess)
-            {
-                problems.Add($"[{toolName}#base] ベースラインが失敗した: {baseResult}");
-                continue;
-            }
-
-            foreach (
-                var fuzzCase in ToolArgumentFuzz.Generate($"{toolName}#base", schema, baseline)
-            )
-            {
-                caseCount++;
-                ToolArgumentFuzzDimensions.Observe(coverage, fuzzCase);
-                File.WriteAllBytes(file, seed);
-                Ledger.Run(
-                    fuzzCase.Id,
-                    () => Check(toolSet, toolName, fuzzCase, file, seed),
-                    problems
-                );
-            }
-        }
-
-        foreach (var stale in Ledger.Ids.Except(_seenIds))
-        {
-            problems.Add($"[{stale}] 台帳にあるが、どのケースにも当たらない。台帳から外す。");
-        }
-
-        // 網羅の宣言の誤りはケースの結果より先に赤にする
-        var coverageReport = coverage.Report();
-        coverageReport.WriteSummary();
-        coverageReport.WriteGapUsage(
-            ToolArgumentFuzzDimensions.Gaps,
-            ToolArgumentFuzzDimensions.CodegenScope
-        );
-
-        CoverageGuard.AtLeast("総当たりで組み立てたケース", caseCount, 41);
-        KnownCaseLedger.ThrowIfAny(problems);
-
-        // 網羅しない組は、ケースの結果を表明してから照合する（網羅の赤がケースの失敗を隠さない）
-        coverageReport.AssertGaps(
-            ToolArgumentFuzzDimensions.Gaps,
-            ToolArgumentFuzzDimensions.CodegenScope
-        );
+        ToolArgumentShapeFuzzRunner.Run(new Entrance(toolSet, tools, file, seed, _dir));
     }
 
-    /// <summary>崩したケース 1 件を実行して 3 つの表明を確かめる</summary>
-    private void Check(
+    /// <summary>MCP のコード生成ツールの入口（図ファイルをケースごとに種へ戻し、出力先の目印を未使用のパスへ置き換える）</summary>
+    private sealed class Entrance(
         QuickER.Mcp.McpToolSet toolSet,
-        string toolName,
-        ToolArgumentFuzz.Case fuzzCase,
+        IReadOnlyList<ToolArgumentShapeFuzzRunner.Tool> tools,
         string file,
-        byte[] seed
-    )
+        byte[] seed,
+        string dir
+    ) : ToolArgumentShapeFuzzRunner.Entrance
     {
-        _seenIds.Add(fuzzCase.Id);
-        var (result, success) = Run(toolSet, toolName, fuzzCase.Arguments, out var output);
+        public override string Scope => ToolArgumentFuzzDimensions.CodegenScope;
 
-        if (result.StartsWith(RawExceptionPrefix, StringComparison.Ordinal))
-        {
-            throw new Xunit.Sdk.XunitException($"生の例外: {result}");
-        }
+        public override KnownCaseLedger Ledger => CodeGenToolArgumentShapeFuzzTests.Ledger;
 
-        if (fuzzCase.MustFail && success)
-        {
-            throw new Xunit.Sdk.XunitException($"成功した（断るべき）: {result}");
-        }
+        public override int MinimumCases => 41;
 
-        if (success)
-        {
-            return;
-        }
+        public override IReadOnlyList<ToolArgumentShapeFuzzRunner.Tool> Tools() => tools;
 
-        if (!File.ReadAllBytes(file).AsSpan().SequenceEqual(seed))
-        {
-            throw new Xunit.Sdk.XunitException($"失敗したのに図が変わった: {result}");
-        }
+        public override (string Result, bool Success) RunBaseline(
+            string toolName,
+            JsonObject args
+        ) => Run(toolName, args, out _);
 
-        if (output is not null && (File.Exists(output) || Directory.Exists(output)))
-        {
-            throw new Xunit.Sdk.XunitException($"失敗したのに出力先へ書いた: {result}");
-        }
-    }
+        public override void PrepareCase() => File.WriteAllBytes(file, seed);
 
-    /// <summary>MCP サーバと同じ入口でツールを実行する（出力先の目印は未使用のパスへ置き換える）</summary>
-    private (string Result, bool Success) Run(
-        QuickER.Mcp.McpToolSet toolSet,
-        string toolName,
-        JsonObject arguments,
-        out string? output
-    )
-    {
-        output = null;
-        var args = (JsonObject)arguments.DeepClone();
-
-        foreach (
-            var (name, marker, extension) in new[]
-            {
-                ("out_dir", OutDirMarker, string.Empty),
-                ("out_file", OutSqlMarker, ".sql"),
-            }
+        public override ToolArgumentShapeFuzzRunner.CaseOutcome RunCase(
+            string toolName,
+            JsonObject args
         )
         {
-            if (
-                args[name] is JsonValue value
-                && value.TryGetValue<string>(out var text)
-                && text == marker
-            )
-            {
-                output = Path.Combine(_dir, Guid.NewGuid().ToString("N") + extension);
-                args[name] = output;
-            }
+            var (result, success) = Run(toolName, args, out var output);
+
+            return new(
+                result,
+                success,
+                () =>
+                {
+                    if (!File.ReadAllBytes(file).AsSpan().SequenceEqual(seed))
+                    {
+                        return "失敗したのに図が変わった";
+                    }
+
+                    return output is not null && (File.Exists(output) || Directory.Exists(output))
+                        ? "失敗したのに出力先へ書いた"
+                        : null;
+                }
+            );
         }
 
-        try
+        public override bool IsRawException(string result) =>
+            result.StartsWith(RawExceptionPrefix, StringComparison.Ordinal);
+
+        /// <summary>MCP サーバと同じ入口でツールを実行する（出力先の目印は未使用のパスへ置き換える）</summary>
+        private (string Result, bool Success) Run(
+            string toolName,
+            JsonObject arguments,
+            out string? output
+        )
         {
-            return toolSet.Execute(toolName, args.ToJsonString());
-        }
-        catch (Exception ex)
-        {
-            return (
-                $"{RawExceptionPrefix}（入口から漏れた {ex.GetType().Name}）{ex.Message}",
-                false
-            );
+            output = null;
+            var args = (JsonObject)arguments.DeepClone();
+
+            foreach (
+                var (name, marker, extension) in new[]
+                {
+                    ("out_dir", OutDirMarker, string.Empty),
+                    ("out_file", OutSqlMarker, ".sql"),
+                }
+            )
+            {
+                if (
+                    args[name] is JsonValue value
+                    && value.TryGetValue<string>(out var text)
+                    && text == marker
+                )
+                {
+                    output = Path.Combine(dir, Guid.NewGuid().ToString("N") + extension);
+                    args[name] = output;
+                }
+            }
+
+            try
+            {
+                return toolSet.Execute(toolName, args.ToJsonString());
+            }
+            catch (Exception ex)
+            {
+                return (
+                    $"{RawExceptionPrefix}（入口から漏れた {ex.GetType().Name}）{ex.Message}",
+                    false
+                );
+            }
         }
     }
 }

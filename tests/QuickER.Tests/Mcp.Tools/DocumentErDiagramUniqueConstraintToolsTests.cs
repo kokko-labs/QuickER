@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -45,9 +46,7 @@ public sealed class DocumentErDiagramUniqueConstraintToolsTests : IDisposable
     private string CreateCustomerFile()
     {
         var file = Path.Combine(_dir, "diagram.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
-            .Success.Should()
-            .BeTrue();
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Customer" });
         Exec(
             "add_column",

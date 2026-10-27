@@ -20,6 +20,7 @@ namespace QuickER.Tests.AI.Chat;
 /// 入口は全チャットエンジンが共有する <see cref="QuickER.AI.IErDiagramToolHost.Execute"/>。名前付きクエリの 3 ツールは
 /// アダプタが共有コアで処理し、それ以外は GUI の <see cref="ErDiagramDynamicTools"/> へ渡る。ケースは
 /// <see cref="ErDiagramToolCatalog"/> の入力スキーマから <see cref="ToolArgumentFuzz"/> が作る。
+/// 流れと表明は <see cref="ToolArgumentShapeFuzzRunner"/> が持ち、ここはこの入口に固有の部分だけを渡す。
 /// </para>
 /// <para>
 /// 表明は MCP 側（<c>ToolArgumentShapeFuzzTests</c>）と同じ 3 つ：生の例外にならない（GUI の例外の文で返らない・
@@ -34,9 +35,6 @@ public sealed class ChatToolArgumentShapeFuzzTests
         ToolArgumentShapeFuzzKnownFailures.Chat
     );
 
-    /// <summary>この実行で通ったケース ID（台帳の古い項目を見つけるため）</summary>
-    private readonly HashSet<string> _seenIds = [];
-
     [Fact(
         DisplayName = "内蔵チャットのツールは、形の崩れた引数で生の例外にならず、断るべきものは断り、失敗で図を変えない"
     )]
@@ -50,80 +48,57 @@ public sealed class ChatToolArgumentShapeFuzzTests
             .Should()
             .BeEquivalentTo(baselines.Keys, "公開しているツールすべてにベースラインを持つ");
 
-        var problems = new List<string>();
-        var caseCount = 0;
-        var coverage = new CoverageCounter(ToolArgumentFuzzDimensions.Table);
-
-        foreach (var tool in tools)
-        {
-            var schema = ToolArgumentFuzz.SchemaOf(tool.InputSchema);
-
-            foreach (var (label, baseline) in baselines[tool.Name])
-            {
-                var prefix = $"{tool.Name}#{label}";
-                var (baseResult, baseSuccess) = Run(NewHost(out _), tool.Name, baseline);
-
-                if (!baseSuccess)
-                {
-                    problems.Add($"[{prefix}] ベースラインが失敗した: {baseResult}");
-                    continue;
-                }
-
-                foreach (var fuzzCase in ToolArgumentFuzz.Generate(prefix, schema, baseline))
-                {
-                    caseCount++;
-                    ToolArgumentFuzzDimensions.Observe(coverage, fuzzCase);
-                    Ledger.Run(fuzzCase.Id, () => Check(tool.Name, fuzzCase), problems);
-                }
-            }
-        }
-
-        foreach (var stale in Ledger.Ids.Except(_seenIds))
-        {
-            problems.Add($"[{stale}] 台帳にあるが、どのケースにも当たらない。台帳から外す。");
-        }
-
-        // 網羅の宣言の誤りはケースの結果より先に赤にする
-        var coverageReport = coverage.Report();
-        coverageReport.WriteSummary();
-        coverageReport.WriteGapUsage(
-            ToolArgumentFuzzDimensions.Gaps,
-            ToolArgumentFuzzDimensions.ChatScope
-        );
-
-        CoverageGuard.AtLeast("総当たりで組み立てたケース", caseCount, 301);
-        KnownCaseLedger.ThrowIfAny(problems);
-
-        // 網羅しない組は、ケースの結果を表明してから照合する（網羅の赤がケースの失敗を隠さない）
-        coverageReport.AssertGaps(
-            ToolArgumentFuzzDimensions.Gaps,
-            ToolArgumentFuzzDimensions.ChatScope
+        ToolArgumentShapeFuzzRunner.Run(
+            new Entrance(
+                tools
+                    .Select(tool => new ToolArgumentShapeFuzzRunner.Tool(
+                        tool.Name,
+                        tool.InputSchema,
+                        baselines[tool.Name]
+                    ))
+                    .ToList()
+            )
         );
     }
 
-    /// <summary>崩したケース 1 件を新しい図で実行して 3 つの表明を確かめる</summary>
-    private void Check(string toolName, ToolArgumentFuzz.Case fuzzCase)
+    /// <summary>内蔵チャットの入口（ケースごとに種の図を読み込んだ新しい GUI の図で実行する）</summary>
+    private sealed class Entrance(IReadOnlyList<ToolArgumentShapeFuzzRunner.Tool> tools)
+        : ToolArgumentShapeFuzzRunner.Entrance
     {
-        _seenIds.Add(fuzzCase.Id);
-        var host = NewHost(out var viewModel);
-        var before = Snapshot(viewModel);
-        var (result, success) = Run(host, toolName, fuzzCase.Arguments);
-        var rawPrefix = string.Format(GuiStrings.Tool_Error, string.Empty);
+        public override string Scope => ToolArgumentFuzzDimensions.ChatScope;
 
-        if (result.StartsWith(rawPrefix, StringComparison.Ordinal))
+        public override KnownCaseLedger Ledger => ChatToolArgumentShapeFuzzTests.Ledger;
+
+        public override int MinimumCases => 301;
+
+        public override IReadOnlyList<ToolArgumentShapeFuzzRunner.Tool> Tools() => tools;
+
+        public override (string Result, bool Success) RunBaseline(
+            string toolName,
+            JsonObject args
+        ) => Run(NewHost(out _), toolName, args);
+
+        public override ToolArgumentShapeFuzzRunner.CaseOutcome RunCase(
+            string toolName,
+            JsonObject args
+        )
         {
-            throw new Xunit.Sdk.XunitException($"生の例外: {result}");
+            var host = NewHost(out var viewModel);
+            var before = Snapshot(viewModel);
+            var (result, success) = Run(host, toolName, args);
+
+            return new(
+                result,
+                success,
+                () => Snapshot(viewModel) != before ? "失敗したのに図が変わった" : null
+            );
         }
 
-        if (fuzzCase.MustFail && success)
-        {
-            throw new Xunit.Sdk.XunitException($"成功した（断るべき）: {result}");
-        }
-
-        if (!success && Snapshot(viewModel) != before)
-        {
-            throw new Xunit.Sdk.XunitException($"失敗したのに図が変わった: {result}");
-        }
+        public override bool IsRawException(string result) =>
+            result.StartsWith(
+                string.Format(GuiStrings.Tool_Error, string.Empty),
+                StringComparison.Ordinal
+            );
     }
 
     /// <summary>種の図を読み込んだ GUI の図と、それを操作するチャットのツール実行口を作る</summary>

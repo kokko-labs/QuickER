@@ -123,6 +123,10 @@
       Include="..\QuickER.Tests\CodeGen.CSharp\GeneratedCodeCompiler.cs"
       LinkBase="CodeGen.CSharp"
     />
+    <Compile
+      Include="..\QuickER.Tests\CodeGen.CSharp\RuntimeReferenceSet.cs"
+      LinkBase="CodeGen.CSharp"
+    />
   </ItemGroup>
 
   <ItemGroup>

@@ -69,10 +69,7 @@ public sealed class SourceInvisibleCharacterGuardTests
                     SearchOption.AllDirectories
                 )
             )
-            .Where(path =>
-                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-            )
+            .Where(path => !TestSupport.SourceFiles.IsBuildOutput(Path.GetRelativePath(Root, path)))
             .SelectMany(path =>
                 FindViolations(Path.GetRelativePath(Root, path), File.ReadAllText(path))
             )

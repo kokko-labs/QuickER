@@ -29,7 +29,7 @@ public sealed class FactorInventoryGuardTests
         InventoryAxis.Properties(
             "CodeGenerationOptions",
             typeof(global::QuickER.CodeGen.CSharp.CodeGenerationOptions),
-            property => property.PropertyType == typeof(bool) && property.CanWrite
+            property => property.PropertyType == typeof(bool) && OptionKeys.IsWritable(property)
         ),
         InventoryAxis.Enum<global::QuickER.Provider.CanonicalTypeKind>("CanonicalTypeKind"),
     ];

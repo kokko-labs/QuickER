@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -46,9 +47,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     private string CreateParentChildFile()
     {
         var file = PathFor("diagram.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
-            .Success.Should()
-            .BeTrue();
+        DiagramFiles.Create(file, "sqlite");
 
         Exec("add_entity", file, new { table_name = "Customer" });
         Exec(
@@ -299,7 +298,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void AddEntity_AddsTableWithoutColumns()
     {
         var file = PathFor("d.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
 
         var (result, success) = Exec(
             "add_entity",
@@ -319,7 +318,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void AddColumn_SetsFlags()
     {
         var file = PathFor("d.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Book" });
 
         Exec(
@@ -345,7 +344,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void AddColumn_PrimaryKeyWithoutNullableFlag_IsNotNullable()
     {
         var file = PathFor("d.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Book" });
 
         // is_nullable 省略の既定は「NULL 許容」だが、主キー列では NULL 不可が優先される
@@ -371,7 +370,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void AddColumn_UnknownTable_ReturnsError()
     {
         var file = PathFor("d.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
 
         var (_, success) = Exec(
             "add_column",
@@ -391,7 +390,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void SetEntityProperty_UpdatesSpecifiedOnly()
     {
         var file = PathFor("d.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Book" });
 
         var (_, success) = Exec(
@@ -416,7 +415,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void SetEntityProperty_NoChange_ReturnsError()
     {
         var file = PathFor("d.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Book" });
 
         var (_, success) = Exec("set_entity_property", file, new { table_name = "Book" });
@@ -428,7 +427,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void SetColumnProperty_UpdatesDataTypeAndNullable()
     {
         var file = PathFor("d.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Book" });
         Exec(
             "add_column",
@@ -474,7 +473,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void SetColumnProperty_PrimaryKeyColumn_StaysNotNullable()
     {
         var file = PathFor("d.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Book" });
         Exec(
             "add_column",
@@ -849,7 +848,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void Mutation_PreservesExistingLayout()
     {
         var file = PathFor("layout.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Book" });
 
         var document = JsonStorageService.Load(file);
@@ -879,7 +878,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     public void Mutation_PreservesQueries()
     {
         var file = PathFor("queries.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" });
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Book" });
 
         var document = JsonStorageService.Load(file);
@@ -906,9 +905,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     private string CreateCompositeKeyFile(string name, bool reversePrimaryKeyOrder)
     {
         var file = PathFor(name);
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
-            .Success.Should()
-            .BeTrue();
+        DiagramFiles.Create(file, "sqlite");
 
         Exec("add_entity", file, new { table_name = "TenantRegion" });
         Exec(
@@ -1031,9 +1028,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     )
     {
         var file = PathFor($"composite-auto-pairs-{parentTable}.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
-            .Success.Should()
-            .BeTrue();
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = parentTable });
         Exec("add_entity", file, new { table_name = "Child" });
 
@@ -1100,9 +1095,7 @@ public sealed class DocumentErDiagramToolHostTests : IDisposable
     private string CreateBillingAndShippingFile()
     {
         var file = PathFor($"billing-shipping-{Guid.NewGuid():N}.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
-            .Success.Should()
-            .BeTrue();
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "Customers" });
         Exec("add_entity", file, new { table_name = "Orders" });
 

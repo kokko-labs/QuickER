@@ -112,6 +112,7 @@ internal static class ToolArgumentFuzzDimensions
                 "tests/QuickER.Tests/TestSupport/ToolArgumentFuzzDimensions.cs",
                 "tests/QuickER.Tests/TestSupport/ToolArgumentFuzzSeed.cs",
                 "tests/QuickER.Tests/TestSupport/ToolArgumentShapeFuzzKnownFailures.cs",
+                "tests/QuickER.Tests/TestSupport/ToolArgumentShapeFuzzRunner.cs",
                 "tests/QuickER.Tests/Mcp.Tools/ToolArgumentShapeFuzzTests.cs",
                 "tests/QuickER.Tests/AI.Chat/ChatToolArgumentShapeFuzzTests.cs",
                 "tests/QuickER.Tests/Cli/CodeGenToolArgumentShapeFuzzTests.cs",

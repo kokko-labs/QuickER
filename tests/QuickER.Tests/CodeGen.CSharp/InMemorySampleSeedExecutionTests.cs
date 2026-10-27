@@ -7,8 +7,6 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
@@ -31,7 +29,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// （旧値 <c>301.50</c> は整数部で違反）・整数部 0 桁の <c>decimal(1,1)</c>。
 /// </para>
 /// <para>
-/// コンパイルとロードは <see cref="GuidKeyValueObjectExecutionTests"/> と同型（TPA 参照＋実行まで踏み込むため自前）。
+/// コンパイルとロードは <see cref="GeneratedCodeCompiler.CompileAndLoad"/> で行う。
 /// DI 拡張を呼ぶため Microsoft.Extensions.DependencyInjection（本体＋Abstractions）を参照へ加える。
 /// </para>
 /// </remarks>
@@ -177,7 +175,10 @@ public sealed class InMemorySampleSeedExecutionTests
     [InlineData(true)]
     public async Task シード値は制約を守る(bool valueObjects)
     {
-        var assembly = CompileAndLoad(GenerateConstraintDiagram(valueObjects), []);
+        var assembly = GeneratedCodeCompiler.CompileAndLoad(
+            GenerateConstraintDiagram(valueObjects),
+            $"QuickER.InMemorySeed.Tests.{Guid.NewGuid():N}"
+        );
 
         var (violations, rowCounts) = SeededSampleDataInvariants.Check(assembly, "Sample.Domain");
 
@@ -514,70 +515,10 @@ public sealed class InMemorySampleSeedExecutionTests
                     )
             );
 
-        return CompileAndLoad(result, extraSources);
-    }
-
-    /// <summary>生成結果（＋追加ソース）を TPA＋DI 参照集合でコンパイルし、成功時にロードしたアセンブリを返す。</summary>
-    private static Assembly CompileAndLoad(CodeGenerationResult result, string[] extraSources)
-    {
-        var syntaxTrees = result
-            .Files.Select(file =>
-                CSharpSyntaxTree.ParseText(
-                    file.Content,
-                    new CSharpParseOptions(LanguageVersion.Latest),
-                    path: file.FileName
-                )
-            )
-            .Concat(
-                extraSources.Select(
-                    (source, i) =>
-                        CSharpSyntaxTree.ParseText(
-                            source,
-                            new CSharpParseOptions(LanguageVersion.Latest),
-                            path: $"UserPartial{i}.cs"
-                        )
-                )
-            )
-            .ToArray();
-
-        var trustedAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(
-            Path.PathSeparator
-        );
-        var references = trustedAssemblies
-            .Where(File.Exists)
-            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
-            // DI 拡張（AddGeneratedInMemoryRepositories）のため本体＋Abstractions を明示追加
-            .Append(MetadataReference.CreateFromFile(typeof(ServiceCollection).Assembly.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(IServiceCollection).Assembly.Location))
-            .ToArray();
-
-        var compilation = CSharpCompilation.Create(
+        return GeneratedCodeCompiler.CompileAndLoad(
+            result,
             $"QuickER.InMemorySeed.Tests.{Guid.NewGuid():N}",
-            syntaxTrees,
-            references,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+            extraSources
         );
-
-        using var peStream = new MemoryStream();
-        var emitResult = compilation.Emit(peStream);
-
-        emitResult
-            .Success.Should()
-            .BeTrue(
-                "生成コードのコンパイルに失敗:"
-                    + Environment.NewLine
-                    + string.Join(
-                        Environment.NewLine,
-                        emitResult
-                            .Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)
-                            .Select(d => d.ToString())
-                    )
-            );
-
-        peStream.Seek(0, SeekOrigin.Begin);
-        return Assembly.Load(peStream.ToArray());
     }
 }

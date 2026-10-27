@@ -3,6 +3,7 @@ using System.Reflection;
 using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.UI;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.CodeGen.UI;
 
@@ -33,11 +34,13 @@ public sealed class GenerationSettingsParityTests
     [Fact(DisplayName = "設定のキーと生成オプションのキーは 1:1 に対応する（出力先の 1 組を除く）")]
     public void SettingsAndOptions_HaveTheSameKeys()
     {
-        var settings = WritableProperties(typeof(CSharpGenerationSettings))
+        var settings = OptionKeys
+            .Writable(typeof(CSharpGenerationSettings))
             .Select(property => property.Name)
             .Where(name => name != SettingsOnly)
             .Order(StringComparer.Ordinal);
-        var options = WritableProperties(typeof(CodeGenerationOptions))
+        var options = OptionKeys
+            .Writable(typeof(CodeGenerationOptions))
             .Select(property => property.Name)
             .Where(name => name != OptionsOnly)
             .Order(StringComparer.Ordinal);
@@ -91,7 +94,7 @@ public sealed class GenerationSettingsParityTests
             var written = (CSharpGenerationSettings)Invoke(vm, "ToSettings")!;
             var failures = new List<string>();
 
-            foreach (var property in WritableProperties(typeof(CSharpGenerationSettings)))
+            foreach (var property in OptionKeys.Writable(typeof(CSharpGenerationSettings)))
             {
                 var expected = property.GetValue(settings);
                 var actual = property.GetValue(written);
@@ -119,7 +122,8 @@ public sealed class GenerationSettingsParityTests
     public void DialogVariants_CoverEveryKeyWithANonDefaultValue()
     {
         var defaults = new CSharpGenerationSettings();
-        var uncovered = WritableProperties(typeof(CSharpGenerationSettings))
+        var uncovered = OptionKeys
+            .Writable(typeof(CSharpGenerationSettings))
             .Where(property =>
                 Variants.All(variant =>
                     SameValue(
@@ -134,14 +138,10 @@ public sealed class GenerationSettingsParityTests
         uncovered.Should().BeEmpty("既定のままでは、書き戻しで値が落ちても気づけない");
     }
 
-    /// <summary>公開の読み書きできるインスタンスのプロパティ（init を含む）</summary>
-    private static IEnumerable<PropertyInfo> WritableProperties(Type type) =>
-        type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.SetMethod is { IsPublic: true });
-
     /// <summary>設定とオプションの両方にあるキー（設定のプロパティで返す）</summary>
     private static IEnumerable<PropertyInfo> SharedProperties() =>
-        WritableProperties(typeof(CSharpGenerationSettings))
+        OptionKeys
+            .Writable(typeof(CSharpGenerationSettings))
             .Where(property => property.Name != SettingsOnly);
 
     /// <summary>全キーを型から作った既定と違う値にした設定（両方の DB アクセスを ON にする＝制約は見ない）</summary>
@@ -150,7 +150,7 @@ public sealed class GenerationSettingsParityTests
         var defaults = new CSharpGenerationSettings();
         var settings = new CSharpGenerationSettings();
 
-        foreach (var property in WritableProperties(typeof(CSharpGenerationSettings)))
+        foreach (var property in OptionKeys.Writable(typeof(CSharpGenerationSettings)))
         {
             property.SetValue(settings, NonDefaultValue(property, property.GetValue(defaults)));
         }

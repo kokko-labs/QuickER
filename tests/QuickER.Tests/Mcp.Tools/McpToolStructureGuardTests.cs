@@ -90,10 +90,9 @@ public sealed class McpToolStructureGuardTests
         var sources = Directory
             .EnumerateFiles(Path.Combine(Root, "src"), "*.cs", SearchOption.AllDirectories)
             .Where(path =>
-                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-            )
-            .Where(path =>
-                !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                !TestSupport.SourceFiles.IsBuildOutput(
+                    Path.GetRelativePath(Path.Combine(Root, "src"), path)
+                )
             );
         var hits = sources
             .SelectMany(path =>

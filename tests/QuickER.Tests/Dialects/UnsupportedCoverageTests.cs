@@ -120,12 +120,9 @@ public sealed class UnsupportedCoverageTests
     [Fact(DisplayName = "登録したテストの名前は tests/ に実在する（クラス名とメソッド名の組）")]
     public void RegisteredTests_Exist()
     {
-        var root = Path.Combine(NeutralResxFiles.FindRepositoryRoot(), "tests");
-        var declared = Directory
-            .EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-            .Where(path =>
-                !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
-            )
+        var declared = SourceFiles
+            .Enumerate("tests")
+            .Select(file => file.FullPath)
             .SelectMany(path =>
                 ConditionalSourceParse
                     .DescendantNodes(

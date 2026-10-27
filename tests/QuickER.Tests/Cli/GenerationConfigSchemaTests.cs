@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.CodeGen.CSharp;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Cli;
 
@@ -28,10 +29,7 @@ public sealed class GenerationConfigSchemaTests
 
     /// <summary>設定ローダーが認識する正となるキー集合＝init 設定可能なインスタンスプロパティ</summary>
     private static IReadOnlyList<PropertyInfo> RecognizedProperties =>
-        typeof(CodeGenerationOptions)
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.CanWrite) // init セッター有り＝設定 JSON からデシリアライズされる。計算 get-only は除外
-            .ToList();
+        OptionKeys.Writable(typeof(CodeGenerationOptions));
 
     /// <summary>カタログのキー集合が正となるキー集合と完全一致する（過不足の両方向を検知）</summary>
     [Fact(DisplayName = "カタログのキー集合は CodeGenerationOptions のプロパティと完全一致する")]

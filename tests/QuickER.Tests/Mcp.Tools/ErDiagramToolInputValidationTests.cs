@@ -5,6 +5,7 @@ using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Services;
+using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Mcp.Tools;
@@ -22,11 +23,11 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     // ---------------- テーブル名 ----------------
 
     [Theory(DisplayName = "add_entity は空・空白だけのテーブル名を拒否する")]
-    [InlineData(HostKind.Gui, "")]
-    [InlineData(HostKind.Gui, "   ")]
-    [InlineData(HostKind.File, "")]
-    [InlineData(HostKind.File, "   ")]
-    public void AddEntity_BlankName_IsRejected(HostKind host, string tableName)
+    [InlineData(ToolHostKind.Gui, "")]
+    [InlineData(ToolHostKind.Gui, "   ")]
+    [InlineData(ToolHostKind.File, "")]
+    [InlineData(ToolHostKind.File, "   ")]
+    public void AddEntity_BlankName_IsRejected(ToolHostKind host, string tableName)
     {
         Setup(host);
 
@@ -36,9 +37,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "add_entity は既存テーブルと大文字小文字だけ違う名前を拒否する")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddEntity_NameDifferingOnlyInCase_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddEntity_NameDifferingOnlyInCase_IsRejected(ToolHostKind host)
     {
         Setup(host);
 
@@ -52,9 +53,11 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "set_entity_property は他のテーブルと同じ名前への改名を拒否し、同時に指定した変更も反映しない"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void SetEntityProperty_RenameToOtherTable_IsRejectedWithoutPartialChange(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void SetEntityProperty_RenameToOtherTable_IsRejectedWithoutPartialChange(
+        ToolHostKind host
+    )
     {
         Setup(host);
 
@@ -74,9 +77,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "set_entity_property は空白だけの new_table_name を拒否する")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void SetEntityProperty_BlankNewName_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void SetEntityProperty_BlankNewName_IsRejected(ToolHostKind host)
     {
         Setup(host);
 
@@ -88,9 +91,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "set_entity_property は自分自身の大文字小文字だけを変える改名を許す")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void SetEntityProperty_CaseOnlyRenameOfItself_IsAllowed(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void SetEntityProperty_CaseOnlyRenameOfItself_IsAllowed(ToolHostKind host)
     {
         Setup(host);
 
@@ -104,9 +107,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     // ---------------- 列名・データ型 ----------------
 
     [Theory(DisplayName = "add_column は同じテーブルの列と大文字小文字だけ違う名前を拒否する")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddColumn_NameDifferingOnlyInCase_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddColumn_NameDifferingOnlyInCase_IsRejected(ToolHostKind host)
     {
         Setup(host);
 
@@ -129,9 +132,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "add_column は別のテーブルにある同名の列を妨げない")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddColumn_SameNameInAnotherTable_IsAllowed(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddColumn_SameNameInAnotherTable_IsAllowed(ToolHostKind host)
     {
         Setup(host);
 
@@ -151,9 +154,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "add_column は data_type の省略と空・空白だけの値を拒否する（既定の型で黙って列を作らない）"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddColumn_BlankDataType_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddColumn_BlankDataType_IsRejected(ToolHostKind host)
     {
         Setup(host);
 
@@ -180,9 +183,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "set_column_property は空の data_type を拒否し、同時に指定した説明も反映しない"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void SetColumnProperty_BlankDataType_IsRejectedBeforeAnyChange(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void SetColumnProperty_BlankDataType_IsRejectedBeforeAnyChange(ToolHostKind host)
     {
         Setup(host);
 
@@ -207,12 +210,12 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     // ---------------- relationship_type ----------------
 
     [Theory(DisplayName = "add_relationship の relationship_type は大文字小文字を無視して受ける")]
-    [InlineData(HostKind.Gui, "onetoone", RelationshipType.OneToOne)]
-    [InlineData(HostKind.Gui, "ONETOMANY", RelationshipType.OneToMany)]
-    [InlineData(HostKind.File, "onetoone", RelationshipType.OneToOne)]
-    [InlineData(HostKind.File, "ONETOMANY", RelationshipType.OneToMany)]
+    [InlineData(ToolHostKind.Gui, "onetoone", RelationshipType.OneToOne)]
+    [InlineData(ToolHostKind.Gui, "ONETOMANY", RelationshipType.OneToMany)]
+    [InlineData(ToolHostKind.File, "onetoone", RelationshipType.OneToOne)]
+    [InlineData(ToolHostKind.File, "ONETOMANY", RelationshipType.OneToMany)]
     public void AddRelationship_RelationshipType_IsParsedIgnoringCase(
-        HostKind host,
+        ToolHostKind host,
         string? relationshipType,
         RelationshipType expected
     )
@@ -239,9 +242,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "add_relationship は relationship_type の省略を、無効な値でなく必須の欠落として断る"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_MissingRelationshipType_IsReportedAsRequired(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_MissingRelationshipType_IsReportedAsRequired(ToolHostKind host)
     {
         Setup(host);
 
@@ -258,7 +261,7 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
 
         success.Should().BeFalse();
         var expected =
-            host == HostKind.Gui
+            host == ToolHostKind.Gui
                 ? string.Format(
                     QuickER.Resources.Strings.Tool_RelationshipTypeRequired,
                     "OneToOne, OneToMany, ManyToMany"
@@ -270,16 +273,16 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "add_relationship は省略・未知の relationship_type を一対多へ落とさず拒否する"
     )]
-    [InlineData(HostKind.Gui, null)]
-    [InlineData(HostKind.Gui, "one_to_many")]
-    [InlineData(HostKind.Gui, "")]
-    [InlineData(HostKind.Gui, "1")]
-    [InlineData(HostKind.File, null)]
-    [InlineData(HostKind.File, "one_to_many")]
-    [InlineData(HostKind.File, "")]
-    [InlineData(HostKind.File, "1")]
+    [InlineData(ToolHostKind.Gui, null)]
+    [InlineData(ToolHostKind.Gui, "one_to_many")]
+    [InlineData(ToolHostKind.Gui, "")]
+    [InlineData(ToolHostKind.Gui, "1")]
+    [InlineData(ToolHostKind.File, null)]
+    [InlineData(ToolHostKind.File, "one_to_many")]
+    [InlineData(ToolHostKind.File, "")]
+    [InlineData(ToolHostKind.File, "1")]
     public void AddRelationship_UnknownRelationshipType_IsRejected(
-        HostKind host,
+        ToolHostKind host,
         string? relationshipType
     )
     {
@@ -305,9 +308,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     // ---------------- 外部キーの重複 ----------------
 
     [Theory(DisplayName = "add_relationship は同じ親子・同じ列ペアの外部キーの重複を拒否する")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_SameColumnPairsTwice_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_SameColumnPairsTwice_IsRejected(ToolHostKind host)
     {
         Setup(host);
         Arrange(
@@ -344,9 +347,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "add_relationship は列ペアの並びだけが違う複合外部キーも重複として拒否する"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_SameColumnPairsInOtherOrder_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_SameColumnPairsInOtherOrder_IsRejected(ToolHostKind host)
     {
         Setup(host);
         Arrange(
@@ -379,9 +382,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "add_relationship は同じ親子でも列ペアが違えば 2 本目を許す")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_DifferentColumnPairs_IsAllowed(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_DifferentColumnPairs_IsAllowed(ToolHostKind host)
     {
         Setup(host);
         Arrange(
@@ -414,9 +417,9 @@ public sealed class ErDiagramToolInputValidationTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "add_relationship は列ペアを持たない多対多の 2 本目を重複として扱わない")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_ManyToManyTwice_IsAllowed(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_ManyToManyTwice_IsAllowed(ToolHostKind host)
     {
         Setup(host);
         var args = new

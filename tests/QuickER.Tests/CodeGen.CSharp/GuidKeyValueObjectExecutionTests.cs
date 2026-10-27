@@ -4,8 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using AwesomeAssertions;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using Xunit;
@@ -23,8 +21,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// </para>
 /// <para>
 /// 生成カテゴリは Entity＋値オブジェクトのみ（EditModel / Mapper / Repository / EF Core は無効）に絞り、依存を
-/// BCL（TPA）だけに閉じる。<see cref="GeneratedCodeCompiler"/> はコンパイル可否のみを返すため、実行（Invoke）まで
-/// 踏み込む本テストは同一方針の参照集合（TRUSTED_PLATFORM_ASSEMBLIES）で自前にコンパイル・ロードする。
+/// BCL だけに閉じる。コンパイルとロードは <see cref="GeneratedCodeCompiler.CompileAndLoad"/> で行う。
 /// </para>
 /// </remarks>
 public sealed class GuidKeyValueObjectExecutionTests
@@ -277,7 +274,10 @@ public sealed class GuidKeyValueObjectExecutionTests
                     )
             );
 
-        var assembly = CompileAndLoad(result);
+        var assembly = GeneratedCodeCompiler.CompileAndLoad(
+            result,
+            $"QuickER.GuidKey.Tests.{Guid.NewGuid():N}"
+        );
 
         // 基底が ValueObjectGuidKeyBase<> の具象型を探す（型名の命名規約に依存しない）
         return assembly
@@ -286,56 +286,5 @@ public sealed class GuidKeyValueObjectExecutionTests
                 t.BaseType is { IsGenericType: true }
                 && t.BaseType.GetGenericTypeDefinition().Name == "ValueObjectGuidKeyBase`1"
             );
-    }
-
-    /// <summary>生成結果を TPA 参照集合でコンパイルし、成功時にロードしたアセンブリを返す。</summary>
-    private static Assembly CompileAndLoad(CodeGenerationResult result)
-    {
-        var syntaxTrees = result
-            .Files.Select(file =>
-                CSharpSyntaxTree.ParseText(
-                    file.Content,
-                    new CSharpParseOptions(LanguageVersion.Latest),
-                    path: file.FileName
-                )
-            )
-            .ToArray();
-
-        var trustedAssemblies = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(
-            Path.PathSeparator
-        );
-        var references = trustedAssemblies
-            .Where(File.Exists)
-            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
-            .ToArray();
-
-        var compilation = CSharpCompilation.Create(
-            $"QuickER.GuidKey.Tests.{Guid.NewGuid():N}",
-            syntaxTrees,
-            references,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
-        );
-
-        using var peStream = new MemoryStream();
-        var emitResult = compilation.Emit(peStream);
-
-        emitResult
-            .Success.Should()
-            .BeTrue(
-                "GuidKey 生成コードのコンパイルに失敗:"
-                    + Environment.NewLine
-                    + string.Join(
-                        Environment.NewLine,
-                        emitResult
-                            .Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)
-                            .Select(d => d.ToString())
-                    )
-            );
-
-        peStream.Seek(0, SeekOrigin.Begin);
-        return Assembly.Load(peStream.ToArray());
     }
 }

@@ -31,20 +31,19 @@ public sealed class PathValidationGuardTests
     [Fact(DisplayName = "パスの名前の判定は QuickER.Platform の外に持たない")]
     public void PathNameChecks_OutsidePlatform_AreNone()
     {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
-        var platform = Path.Combine(src, "QuickER.Platform") + Path.DirectorySeparatorChar;
-        var found = Directory
-            .EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
-            .Where(path => !path.StartsWith(platform, StringComparison.OrdinalIgnoreCase))
-            .Where(path =>
-                !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
+        var found = SourceFiles
+            .Enumerate("src")
+            .Where(file =>
+                !file.AreaRelativePath.StartsWith(
+                    "QuickER.Platform/",
+                    StringComparison.OrdinalIgnoreCase
+                )
             )
-            .SelectMany(path =>
+            .SelectMany(file =>
             {
-                var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+                var relative = file.RelativePath;
                 var variants = ConditionalSourceParse.Parse(
-                    File.ReadAllText(path),
+                    File.ReadAllText(file.FullPath),
                     cancellationToken: TestContext.Current.CancellationToken
                 );
 

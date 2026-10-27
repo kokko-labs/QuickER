@@ -17,7 +17,7 @@ namespace QuickER.Tests.AI.Mock;
 /// ヘッドレス実行の機械向け指示は英語固定（UI 言語に追従させない）が確定方針。和文が混入すると回答言語が意図せず
 /// 引きずられるうえ、生成物に同梱する README-QuickER.md まで言語が割れる。入力はすべて ASCII のフィクスチャに
 /// 揃えており（ユーザーデータ由来の日本語を混ぜない）、検出されれば固定文そのものの回帰である。
-/// 走査範囲は <c>MockToolDefinitionEnglishGuardTests</c> / <c>ErDiagramToolCatalogEnglishGuardTests</c> と同じ CJK 範囲。
+/// 走査範囲は <c>ToolDefinitionEnglishGuardTests</c> と同じ CJK 範囲。
 /// </remarks>
 public class MockProjectPromptEnglishGuardTests
 {

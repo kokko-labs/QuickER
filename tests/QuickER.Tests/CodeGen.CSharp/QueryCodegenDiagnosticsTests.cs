@@ -602,12 +602,7 @@ public class QueryCodegenDiagnosticsTests
                 var files = Directory
                     .EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
                     .Where(path =>
-                        !path.Contains(
-                            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"
-                        )
-                        && !path.Contains(
-                            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"
-                        )
+                        !TestSupport.SourceFiles.IsBuildOutput(Path.GetRelativePath(root, path))
                     )
                     .Where(path =>
                     {

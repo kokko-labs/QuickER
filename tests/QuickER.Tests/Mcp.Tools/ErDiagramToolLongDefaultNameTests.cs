@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Dialects;
 using QuickER.Model;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -56,9 +57,9 @@ public sealed class ErDiagramToolLongDefaultNameTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "add_relationship: 名前を省くと、図の対象 DBMS の上限に収めた既定名を保存する"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_StoresShortenedDefaultName(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_StoresShortenedDefaultName(ToolHostKind host)
     {
         Setup(host);
         ArrangeLongTables();
@@ -87,9 +88,9 @@ public sealed class ErDiagramToolLongDefaultNameTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "get_diagram_summary: 一意制約の合成名は、図の対象 DBMS の上限に収めた名前（DDL と同じ）を見せる"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void Summary_ShowsShortenedSynthesizedUniqueName(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void Summary_ShowsShortenedSynthesizedUniqueName(ToolHostKind host)
     {
         Setup(host);
         ArrangeLongTables();
@@ -145,9 +146,9 @@ public sealed class ErDiagramToolLongDefaultNameTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "add_relationship: 名前の無い外部キーが持つ、上限で縮めた既定名と同じ constraint_name は断る"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_NameEqualToShortenedDefaultOfUnnamed_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_NameEqualToShortenedDefaultOfUnnamed_IsRejected(ToolHostKind host)
     {
         Setup(host);
         ArrangeUnnamedRelationship();
@@ -183,9 +184,9 @@ public sealed class ErDiagramToolLongDefaultNameTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "set_unique_constraint: 主キーの、上限で縮めた既定名と同じ name は断る")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void SetUniqueConstraint_NameEqualToShortenedPrimaryKeyName_IsRejected(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void SetUniqueConstraint_NameEqualToShortenedPrimaryKeyName_IsRejected(ToolHostKind host)
     {
         Setup(host);
         ArrangeLongTables();
@@ -209,9 +210,9 @@ public sealed class ErDiagramToolLongDefaultNameTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "名前の無い外部キーは、上限で縮めた既定名（DDL と同じ）で要約に出て、その名前で消せる"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void UnnamedRelationship_IsShownAndRemovedByShortenedDefaultName(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void UnnamedRelationship_IsShownAndRemovedByShortenedDefaultName(ToolHostKind host)
     {
         Setup(host);
         ArrangeUnnamedRelationship();
@@ -245,9 +246,9 @@ public sealed class ErDiagramToolLongDefaultNameTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "add_relationship: 名前の無い外部キーと同じ列ペアの重複は、上限で縮めた既定名でその外部キーを名指しして断る"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_DuplicateOfUnnamed_NamesItByShortenedDefaultName(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_DuplicateOfUnnamed_NamesItByShortenedDefaultName(ToolHostKind host)
     {
         Setup(host);
         ArrangeUnnamedRelationship();

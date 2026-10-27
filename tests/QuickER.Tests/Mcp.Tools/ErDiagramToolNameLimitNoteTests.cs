@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using QuickER.Model;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -18,9 +19,9 @@ public sealed class ErDiagramToolNameLimitNoteTests : TwoHostToolTestBase
     private static readonly string Long = new('a', 129);
 
     [Theory(DisplayName = "add_entity: 上限を超えるテーブル名は保存したうえで注意文を添える")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddEntity_OverLimit_AppendsNote(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddEntity_OverLimit_AppendsNote(ToolHostKind host)
     {
         Setup(host);
 
@@ -32,9 +33,9 @@ public sealed class ErDiagramToolNameLimitNoteTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "add_column: 上限を超えるカラム名に注意文を添える")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddColumn_OverLimit_AppendsNote(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddColumn_OverLimit_AppendsNote(ToolHostKind host)
     {
         Setup(host);
 
@@ -53,9 +54,9 @@ public sealed class ErDiagramToolNameLimitNoteTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "set_entity_property: 上限を超えるテーブル名への変更に注意文を添える")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void RenameTable_OverLimit_AppendsNote(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void RenameTable_OverLimit_AppendsNote(ToolHostKind host)
     {
         Setup(host);
 
@@ -69,9 +70,9 @@ public sealed class ErDiagramToolNameLimitNoteTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "add_relationship: 上限を超える constraint_name に注意文を添える")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void AddRelationship_OverLimitConstraintName_AppendsNote(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void AddRelationship_OverLimitConstraintName_AppendsNote(ToolHostKind host)
     {
         Setup(host);
 
@@ -93,9 +94,9 @@ public sealed class ErDiagramToolNameLimitNoteTests : TwoHostToolTestBase
     }
 
     [Theory(DisplayName = "set_unique_constraint: 上限を超える name に注意文を添える")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void SetUniqueConstraint_OverLimitName_AppendsNote(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void SetUniqueConstraint_OverLimitName_AppendsNote(ToolHostKind host)
     {
         Setup(host);
 
@@ -120,9 +121,9 @@ public sealed class ErDiagramToolNameLimitNoteTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "上限内の名前には注意文を添えず、すでにある違反を次の呼び出しで繰り返さない"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void WithinLimit_NoNote_AndExistingViolationIsNotRepeated(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void WithinLimit_NoNote_AndExistingViolationIsNotRepeated(ToolHostKind host)
     {
         Setup(host);
 

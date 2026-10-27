@@ -29,14 +29,11 @@ public sealed class ModelDialectLookupGuardTests
     )]
     public void ModelSources_DoNotReferenceIdentifierLengthLimits()
     {
-        var model = Path.Combine(NeutralResxFiles.FindRepositoryRoot(), "src", "QuickER.Model");
-        var hits = Directory
-            .EnumerateFiles(model, "*.cs", SearchOption.AllDirectories)
-            .Where(path =>
-                !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
-            )
-            .SelectMany(path =>
+        var hits = SourceFiles
+            .Enumerate("src/QuickER.Model")
+            .SelectMany(file =>
             {
+                var path = file.FullPath;
                 var variants = ConditionalSourceParse.Parse(File.ReadAllText(path));
 
                 return ConditionalSourceParse

@@ -49,33 +49,25 @@ public sealed class SchemaQualifiedNameGuardTests
     [Fact(DisplayName = "テーブル名を . で分ける処理は SchemaQualifiedName の外に写さない")]
     public void DotSplitting_IsOnlyInSchemaQualifiedName()
     {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
         var found = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (
-            var path in Directory
-                .EnumerateDirectories(src)
-                .Where(directory =>
-                    Projects.Any(project =>
-                        Path.GetFileName(directory).StartsWith(project, StringComparison.Ordinal)
+            var file in SourceFiles
+                .Enumerate("src")
+                .Where(file =>
+                    file.AreaRelativePath.Split('/') is [var directory, _, ..]
+                    && Projects.Any(project =>
+                        directory.StartsWith(project, StringComparison.Ordinal)
                     )
                 )
-                .SelectMany(directory =>
-                    Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories)
-                )
-                .Where(path =>
-                    !path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
-                    && !path.Split(Path.DirectorySeparatorChar)
-                        .Any(segment => segment is "bin" or "obj")
-                )
+                .Where(file => !file.FullPath.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
         )
         {
-            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            var relative = file.RelativePath;
             var invocations = ConditionalSourceParse
                 .DescendantNodes(
                     ConditionalSourceParse.Parse(
-                        File.ReadAllText(path),
+                        File.ReadAllText(file.FullPath),
                         cancellationToken: TestContext.Current.CancellationToken
                     ),
                     TestContext.Current.CancellationToken

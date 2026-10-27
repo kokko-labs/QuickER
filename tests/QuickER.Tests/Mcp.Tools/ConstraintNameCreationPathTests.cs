@@ -7,6 +7,7 @@ using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Provider.SqlServer;
 using QuickER.Services;
+using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Mcp.Tools;
@@ -31,25 +32,14 @@ public sealed class ConstraintNameCreationPathTests : IDisposable
     private const string Parent = "dbo.Customer";
     private const string Child = "dbo.Order";
 
-    private readonly string _dir = Path.Combine(
-        Path.GetTempPath(),
-        "quicker-constraint-name-" + Guid.NewGuid().ToString("N")
-    );
-
-    public ConstraintNameCreationPathTests()
-    {
-        Directory.CreateDirectory(_dir);
-    }
+    /// <summary>このテストで開いた MCP 側のセッション（図ファイルはテストの終わりまで使うので、後始末は Dispose で）</summary>
+    private readonly List<FileToolHostSession> _fileSessions = [];
 
     public void Dispose()
     {
-        try
+        foreach (var session in _fileSessions)
         {
-            Directory.Delete(_dir, recursive: true);
-        }
-        catch (IOException)
-        {
-            // 後始末の失敗はテスト結果に影響させない
+            session.Dispose();
         }
     }
 
@@ -123,41 +113,28 @@ public sealed class ConstraintNameCreationPathTests : IDisposable
     /// <summary>内蔵チャットのツールを実行した ViewModel を返す</summary>
     private static MainViewModel RunGuiTools(params (string Tool, object Args)[] steps)
     {
-        var vm = new MainViewModel();
+        var session = TwoHostToolHarness.OpenGui();
 
         foreach (var (tool, args) in steps)
         {
-            ErDiagramDynamicTools
-                .Execute(tool, Json(args), vm)
-                .Success.Should()
-                .BeTrue($"GUI: {tool}");
+            session.Execute(tool, Json(args)).Success.Should().BeTrue($"GUI: {tool}");
         }
 
-        return vm;
+        return session.ViewModel;
     }
 
     /// <summary>MCP のツールを実行したファイルのパスを返す</summary>
     private string RunDocumentTools(params (string Tool, object Args)[] steps)
     {
-        var file = Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".json");
-        DocumentErDiagramToolHost
-            .Execute(
-                DocumentErDiagramToolHost.CreateDiagramToolName,
-                file,
-                Json(new { target_dbms = "sqlserver" })
-            )
-            .Success.Should()
-            .BeTrue();
+        var session = TwoHostToolHarness.OpenFile("sqlserver");
+        _fileSessions.Add(session);
 
         foreach (var (tool, args) in steps)
         {
-            DocumentErDiagramToolHost
-                .Execute(tool, file, Json(args))
-                .Success.Should()
-                .BeTrue($"MCP: {tool}");
+            session.Execute(tool, Json(args)).Success.Should().BeTrue($"MCP: {tool}");
         }
 
-        return file;
+        return session.FilePath;
     }
 
     [Fact(

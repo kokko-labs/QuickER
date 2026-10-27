@@ -42,35 +42,15 @@ public sealed class SourceParseEntryGuardTests
     /// <summary>既知の出現（ファイル・件数・理由）</summary>
     private static readonly (string File, int Count, string Reason)[] Known =
     [
-        ("tests/QuickER.Tests/CodeGen.CSharp/GeneratedCodeCompiler.cs", 4, GeneratedCompiler),
+        ("tests/QuickER.Tests/CodeGen.CSharp/GeneratedCodeCompiler.cs", 1, GeneratedCompiler),
         (
             "tests/QuickER.Tests/CodeGen.CSharp/GeneratedFixedMemberDriftTests.cs",
             1,
             GeneratedOutput
         ),
-        (
-            "tests/QuickER.Tests/CodeGen.CSharp/GuidKeyValueObjectExecutionTests.cs",
-            1,
-            GeneratedOutput
-        ),
-        (
-            "tests/QuickER.Tests/CodeGen.CSharp/InMemorySampleSeedExecutionTests.cs",
-            2,
-            GeneratedOutput + "（と、テストの検証コードの文字列）"
-        ),
         ("tests/QuickER.Tests/CodeGen.CSharp/QueryCodegenDiagnosticsTests.cs", 1, ComposedSource),
         ("tests/QuickER.Tests/CodeGen.CSharp/QueryGenerationTests.cs", 1, GeneratedOutput),
         ("tests/QuickER.Tests/CodeGen.CSharp/QueryLiteralEscapeScanTests.cs", 1, GeneratedOutput),
-        (
-            "tests/QuickER.Tests/CodeGen.CSharp/RuntimePackageModeCompilationTests.cs",
-            2,
-            GeneratedOutput
-        ),
-        (
-            "tests/QuickER.Tests/CodeGen.CSharp/RuntimePackageSourceRendererTests.cs",
-            1,
-            GeneratedOutput
-        ),
         (
             "tests/QuickER.Tests/TestSupport/ConditionalSourceParse.cs",
             2,
@@ -94,18 +74,15 @@ public sealed class SourceParseEntryGuardTests
     public void DirectParses_AreOnlyKnown()
     {
         var root = NeutralResxFiles.FindRepositoryRoot();
-        var found = Directory
-            .EnumerateFiles(Path.Combine(root, "tests"), "*.cs", SearchOption.AllDirectories)
-            .Where(path =>
-                !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
-            )
-            .Select(path =>
+        var found = SourceFiles
+            .Enumerate("tests")
+            .Select(file =>
                 (
-                    File: Path.GetRelativePath(root, path).Replace('\\', '/'),
+                    File: file.RelativePath,
                     Count: ConditionalSourceParse
                         .DescendantNodes(
                             ConditionalSourceParse.Parse(
-                                File.ReadAllText(path),
+                                File.ReadAllText(file.FullPath),
                                 cancellationToken: TestContext.Current.CancellationToken
                             ),
                             TestContext.Current.CancellationToken
@@ -116,23 +93,12 @@ public sealed class SourceParseEntryGuardTests
             .Where(hit => hit.Count > 0)
             .ToDictionary(hit => hit.File, hit => hit.Count);
 
-        var expected = Known.ToDictionary(known => known.File, known => known.Count);
-
-        var unexpected = found
-            .Where(pair => !expected.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key} x{pair.Value}")
-            .ToList();
-        var stale = expected
-            .Where(pair => !found.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key} x{pair.Value}")
-            .ToList();
-
-        string.Join(Environment.NewLine, unexpected)
-            .Should()
-            .BeEmpty(
-                "ソースファイルの走査は ConditionalSourceParse を通し（#if のどの分岐も読む）、例外は理由つきで一覧に載せる"
-            );
-        string.Join(Environment.NewLine, stale).Should().BeEmpty("無くなった出現は一覧から消す");
+        GuardKnownList.AssertMatches(
+            found,
+            Known.Select(known => (known.File, known.Count)),
+            (file, count) => $"{file} x{count}",
+            "ソースファイルの走査は ConditionalSourceParse を通し（#if のどの分岐も読む）、例外は理由つきで一覧に載せる"
+        );
     }
 
     /// <summary>ガードが拾うべき書き方と、拾わない書き方</summary>

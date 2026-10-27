@@ -1,7 +1,6 @@
 ﻿using System.IO;
 using AwesomeAssertions;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider.Sqlite;
@@ -767,41 +766,19 @@ public class RuntimePackageModeCompilationTests
             references = [.. references, MetadataReference.CreateFromImage(corePeImage)];
         }
 
-        var syntaxTrees = sources
-            .Select(
-                (source, index) =>
-                    CSharpSyntaxTree.ParseText(
-                        source,
-                        new CSharpParseOptions(LanguageVersion.Latest),
-                        path: $"{assemblyName}.{index}.g.cs"
-                    )
-            )
-            .ToArray();
-
-        var compilation = CSharpCompilation.Create(
+        var emit = GeneratedCodeCompiler.Emit(
+            sources.Select((source, index) => ($"{assemblyName}.{index}.g.cs", source)),
             $"{assemblyName}.{Guid.NewGuid():N}",
-            syntaxTrees,
-            references,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+            references
         );
-
-        using var peStream = new MemoryStream();
-        var emit = compilation.Emit(peStream);
 
         emit.Success.Should()
             .BeTrue(
                 $"ランタイムパッケージ '{assemblyName}' のアセンブリ化に失敗:{Environment.NewLine}"
-                    + string.Join(
-                        Environment.NewLine,
-                        emit.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)
-                            .Select(d => d.GetMessage())
-                    )
+                    + string.Join(Environment.NewLine, emit.Errors.Select(d => d.GetMessage()))
             );
 
-        return peStream.ToArray();
+        return emit.Image!;
     }
 
     /// <summary>生成コードを「案内されたパッケージ参照＋BCL＋DI（＋EF Core 生成時のみ EF Core）」だけでコンパイルする</summary>
@@ -823,36 +800,13 @@ public class RuntimePackageModeCompilationTests
         var references = new List<MetadataReference>(referenceSet.Build());
         references.AddRange(packageReferences);
 
-        var syntaxTrees = result
-            .Files.Select(file =>
-                CSharpSyntaxTree.ParseText(
-                    file.Content,
-                    new CSharpParseOptions(LanguageVersion.Latest),
-                    path: file.FileName
-                )
-            )
-            .ToArray();
-
-        var compilation = CSharpCompilation.Create(
+        var emit = GeneratedCodeCompiler.Emit(
+            result.Files.Select(file => (file.FileName, file.Content)),
             $"QuickER.PackageMode.Tests.{Guid.NewGuid():N}",
-            syntaxTrees,
-            references,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+            references
         );
 
-        using var peStream = new MemoryStream();
-        var emit = compilation.Emit(peStream);
-
-        var errors = emit.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
-
-        return new GeneratedCompileResult
-        {
-            Success = emit.Success && errors.Length == 0,
-            Errors = errors,
-        };
+        return new GeneratedCompileResult { Success = emit.Success, Errors = emit.Errors };
     }
 
     private sealed class GeneratedCompileResult
@@ -862,166 +816,6 @@ public class RuntimePackageModeCompilationTests
         public required IReadOnlyList<Diagnostic> Errors { get; init; }
 
         public string Describe() =>
-            string.Join(
-                Environment.NewLine,
-                Errors.Select(d =>
-                {
-                    var span = d.Location.GetLineSpan();
-                    return $"[{d.Id}] {span.Path}:{span.StartLinePosition.Line + 1} {d.GetMessage()}";
-                })
-            );
-    }
-}
-
-/// <summary>
-/// パッケージ／生成コードのコンパイルに渡す参照集合を、許可依存だけを含めて構築するヘルパー。
-/// </summary>
-/// <remarks>
-/// TPA（BCL 全体）をベースに、排他対象アセンブリ（SqlClient / Sqlite / EF Core / DI）をファイル名で除外し、
-/// 各構成が許すものだけを明示的に戻す（<see cref="RuntimePackageSourceRendererTests"/> と同じ流儀）。
-/// </remarks>
-internal sealed class RuntimeReferenceSet
-{
-    private readonly bool _sqlClient;
-    private readonly bool _sqlite;
-    private readonly bool _efCore;
-    private readonly bool _di;
-
-    private RuntimeReferenceSet(bool sqlClient, bool sqlite, bool efCore, bool di)
-    {
-        _sqlClient = sqlClient;
-        _sqlite = sqlite;
-        _efCore = efCore;
-        _di = di;
-    }
-
-    /// <summary>Core パッケージ: BCL のみ（ADO / EF Core / DI なし）</summary>
-    public static RuntimeReferenceSet CoreOnly { get; } = new(false, false, false, false);
-
-    /// <summary>SqlServer パッケージ: BCL＋SqlClient＋DI</summary>
-    public static RuntimeReferenceSet SqlServer { get; } = new(true, false, false, true);
-
-    /// <summary>Sqlite パッケージ: BCL＋Microsoft.Data.Sqlite＋DI</summary>
-    public static RuntimeReferenceSet Sqlite { get; } = new(false, true, false, true);
-
-    /// <summary>EfCore パッケージ: BCL＋EF Core＋DI</summary>
-    public static RuntimeReferenceSet EfCore { get; } = new(false, false, true, true);
-
-    /// <summary>InMemory パッケージ: BCL のみ（ADO / EF Core / DI なし＝DB 非依存を参照集合で証明する）</summary>
-    public static RuntimeReferenceSet InMemory { get; } = new(false, false, false, false);
-
-    /// <summary>Sync パッケージ: BCL のみ（ADO / EF Core / DI なし＝依存ゼロを参照集合で証明する）</summary>
-    public static RuntimeReferenceSet Sync { get; } = new(false, false, false, false);
-
-    /// <summary>
-    /// AspNetCore パッケージ: BCL（ASP.NET Core 共有フレームワークを含む）＋DI。ADO / EF Core は参照しない
-    /// </summary>
-    /// <remarks>
-    /// ASP.NET Core のアセンブリはテストホストの共有フレームワーク経由で TPA に含まれるため除外対象に入れていない。
-    /// DI はサーバー固定エンジンがリポジトリ・<c>ILoggerFactory</c> を解決するために必要（実プロジェクトでは
-    /// <c>Microsoft.AspNetCore.App</c> の FrameworkReference が推移的に提供する）。
-    /// </remarks>
-    public static RuntimeReferenceSet AspNetCore { get; } = new(false, false, false, true);
-
-    /// <summary>生成コード: BCL＋DI（登録拡張）のみ。方言 ADO / EF Core はパッケージ側だけが参照する</summary>
-    public static RuntimeReferenceSet GeneratedCode { get; } = new(false, false, false, true);
-
-    /// <summary>生成コード（EF Core 生成時）: BCL＋DI＋EF Core。生成側の QuickErDbContext / DI 拡張が EF Core 型を直接参照する</summary>
-    public static RuntimeReferenceSet GeneratedCodeWithEfCore { get; } =
-        new(false, false, true, true);
-
-    private static readonly IReadOnlyList<string> ExclusiveAssemblyFileNames =
-    [
-        "Microsoft.Data.SqlClient",
-        "Microsoft.Data.Sqlite",
-        "Microsoft.EntityFrameworkCore",
-        "Microsoft.EntityFrameworkCore.Relational",
-        "Microsoft.EntityFrameworkCore.Abstractions",
-        "Microsoft.Extensions.DependencyInjection",
-        "Microsoft.Extensions.DependencyInjection.Abstractions",
-        // 配布ランタイム 7 パッケージ。テストプロジェクトは公開 API 面のスナップショット検証
-        // （PublicApi/）のためだけにこれらを参照しており、その実アセンブリが TPA に載る。
-        // 本テストは同じ型をソースからその場でコンパイルするため、混ざると同名型が 2 アセンブリに
-        // 存在して CS0433（型があいまい）になる。参照集合からは常に外す。
-        "QuickER.Runtime",
-        "QuickER.Runtime.SqlServer",
-        "QuickER.Runtime.Sqlite",
-        "QuickER.Runtime.EntityFrameworkCore",
-        "QuickER.Runtime.InMemory",
-        "QuickER.Runtime.AspNetCore",
-        "QuickER.Runtime.Sync",
-    ];
-
-    public IReadOnlyList<MetadataReference> Build()
-    {
-        var referencesByPath = new Dictionary<string, MetadataReference>(
-            StringComparer.OrdinalIgnoreCase
-        );
-
-        void AddPath(string? path)
-        {
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            {
-                return;
-            }
-
-            referencesByPath.TryAdd(path, MetadataReference.CreateFromFile(path));
-        }
-
-        var trustedAssembliesPaths = (
-            AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string
-        )?.Split(Path.PathSeparator);
-
-        if (trustedAssembliesPaths is not null)
-        {
-            foreach (var path in trustedAssembliesPaths)
-            {
-                var fileName = Path.GetFileNameWithoutExtension(path);
-
-                if (ExclusiveAssemblyFileNames.Contains(fileName, StringComparer.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                AddPath(path);
-            }
-        }
-
-        if (_di)
-        {
-            AddPath(
-                typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection)
-                    .Assembly
-                    .Location
-            );
-            AddPath(
-                typeof(Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions)
-                    .Assembly
-                    .Location
-            );
-        }
-
-        if (_sqlClient)
-        {
-            AddPath(typeof(Microsoft.Data.SqlClient.SqlConnection).Assembly.Location);
-        }
-
-        if (_sqlite)
-        {
-            AddPath(typeof(Microsoft.Data.Sqlite.SqliteConnection).Assembly.Location);
-        }
-
-        if (_efCore)
-        {
-            AddPath(typeof(Microsoft.EntityFrameworkCore.DbContext).Assembly.Location);
-            AddPath(
-                typeof(Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions)
-                    .Assembly
-                    .Location
-            );
-            AddPath(typeof(Microsoft.EntityFrameworkCore.DeleteBehavior).Assembly.Location);
-        }
-
-        return referencesByPath.Values.ToArray();
+            string.Join(Environment.NewLine, Errors.Select(GeneratedCodeDiagnostics.Describe));
     }
 }
