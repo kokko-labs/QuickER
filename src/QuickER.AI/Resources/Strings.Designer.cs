@@ -840,6 +840,12 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Copilot_Disconnected {
+            get {
+                return ResourceManager.GetString("Copilot_Disconnected", resourceCulture);
+            }
+        }
+
         public static string Copilot_Processing {
             get {
                 return ResourceManager.GetString("Copilot_Processing", resourceCulture);

@@ -6,6 +6,12 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+#### AI chat & MCP
+
+- **GitHub Copilot no longer loses the conversation when the runtime returns an ordinary error** — only a lost connection ends the conversation, and then the message says the connection was lost and the next message starts a new conversation
+
 ## [0.3.0] - 2026-10-25
 
 Highlights of this release:

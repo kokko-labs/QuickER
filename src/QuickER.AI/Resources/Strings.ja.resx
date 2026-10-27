@@ -451,6 +451,9 @@
   <data name="Copilot_CouldNotStartConversation" xml:space="preserve">
     <value>会話を開始できませんでした。</value>
   </data>
+  <data name="Copilot_Disconnected" xml:space="preserve">
+    <value>GitHub Copilot ランタイムとの接続が失われました。会話の文脈は失われ、次の送信からは新しい会話になります。</value>
+  </data>
   <data name="Copilot_Processing" xml:space="preserve">
     <value>GitHub Copilot が処理中です...</value>
   </data>

@@ -1,4 +1,5 @@
 using System.IO;
+using GitHub.Copilot;
 using QuickER.AI;
 
 namespace QuickER.Tests.AI;
@@ -186,6 +187,11 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
             return Task.FromException(CreateConnectionLostException());
         }
 
+        if (SendError is not null)
+        {
+            return Fail(SendError);
+        }
+
         Sends.Add((prompt, attachments.Count));
 
         if (AutoIdleAfterSend)
@@ -210,11 +216,21 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
             return Task.FromException(CreateConnectionLostException());
         }
 
-        return AbortError is not null ? Task.FromException(AbortError) : Task.CompletedTask;
+        return AbortError is not null ? Fail(AbortError) : Task.CompletedTask;
     }
 
-    /// <summary><see cref="AbortAsync"/> が投げる例外（null なら成功）。接続は捨てない＝ランタイムは生きている失敗</summary>
+    /// <summary>
+    /// <see cref="AbortAsync"/> が投げる例外（null なら成功）。実装と同じく
+    /// <see cref="CopilotRuntimeClient.IsConnectionLost"/> が接続断と判定する例外なら接続を捨てる
+    /// </summary>
     public Exception? AbortError { get; set; }
+
+    /// <summary>
+    /// <see cref="SendAsync(string, IReadOnlyList{ChatAttachment}, CancellationToken)"/> が投げる例外（null なら成功）。
+    /// 実装と同じく <see cref="CopilotRuntimeClient.IsConnectionLost"/> が接続断と判定する例外なら接続を捨てる。
+    /// 送信は届かないので <see cref="Sends"/> には積まない
+    /// </summary>
+    public Exception? SendError { get; set; }
 
     /// <inheritdoc />
     public Task PingAsync(CancellationToken cancellationToken = default)
@@ -227,7 +243,7 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
             return Task.FromException(CreateConnectionLostException());
         }
 
-        return PingError is not null ? Task.FromException(PingError) : Task.CompletedTask;
+        return PingError is not null ? Fail(PingError) : Task.CompletedTask;
     }
 
     /// <summary><see cref="PingAsync"/> が呼ばれた回数</summary>
@@ -236,7 +252,10 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     /// <summary><see cref="PingCallCount"/> の数</summary>
     private int _pingCallCount;
 
-    /// <summary><see cref="PingAsync"/> が投げる例外（null なら成功）。接続は捨てない＝ランタイムは生きている失敗</summary>
+    /// <summary>
+    /// <see cref="PingAsync"/> が投げる例外（null なら成功）。実装と同じく
+    /// <see cref="CopilotRuntimeClient.IsConnectionLost"/> が接続断と判定する例外なら接続を捨てる
+    /// </summary>
     public Exception? PingError { get; set; }
 
     /// <summary>以後の <see cref="PingAsync"/> を、接続が切れた失敗にする（応答の途中でランタイムが止まった状態を模す）</summary>
@@ -253,9 +272,45 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     /// <summary><see cref="FailNextAbortWithConnectionLost"/> の印</summary>
     private bool _failNextAbortWithConnectionLost;
 
-    /// <summary>実装が接続断で投げるのと同じ形の例外（型がちょうど <see cref="IOException"/>）を作る</summary>
-    private static IOException CreateConnectionLostException() =>
-        new("Communication error with Copilot CLI: The JSON-RPC connection was lost.");
+    /// <summary>実装と同じく、接続断と判定される例外なら接続を捨ててから、例外で終わるタスクを返す</summary>
+    /// <param name="error">投げる例外</param>
+    private Task Fail(Exception error)
+    {
+        if (CopilotRuntimeClient.IsConnectionLost(error))
+        {
+            SimulateConnectionLost();
+        }
+
+        return Task.FromException(error);
+    }
+
+    /// <summary>実装が接続断で投げるのと同じ形の例外を作る</summary>
+    private static IOException CreateConnectionLostException() => ConnectionLostError();
+
+    /// <summary>
+    /// SDK（GitHub.Copilot.SDK 1.0.26）が接続断で投げる形の例外を作る（型がちょうど <see cref="IOException"/> で、
+    /// 内側が SDK 内部の接続断の例外）
+    /// </summary>
+    public static IOException ConnectionLostError()
+    {
+        var inner = (Exception)
+            Activator.CreateInstance(
+                CopilotRuntimeClient.ConnectionLostExceptionType!,
+                nonPublic: true
+            )!;
+        return new IOException("Communication error with Copilot CLI: " + inner.Message, inner);
+    }
+
+    /// <summary>
+    /// SDK（GitHub.Copilot.SDK 1.0.26）が、ランタイムが返した通常のエラー応答で投げる形の例外を作る
+    /// （型がちょうど <see cref="IOException"/> で、内側が <see cref="RemoteRpcException"/>）
+    /// </summary>
+    /// <param name="message">ランタイムが返したエラーの文言</param>
+    public static IOException ErrorResponse(string message)
+    {
+        var inner = new RemoteRpcException(message, -32603);
+        return new IOException("Communication error with Copilot CLI: " + inner.Message, inner);
+    }
 
     /// <inheritdoc />
     public Task RespondToToolCallAsync(

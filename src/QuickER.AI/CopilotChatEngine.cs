@@ -301,10 +301,17 @@ public sealed class CopilotChatEngine : IErChatEngine
     }
 
     /// <summary>ターンの失敗としてチャットへ表示する文言を組み立てる</summary>
+    /// <remarks>
+    /// 接続が切れてクライアントが接続を捨てていたら（送信の失敗・見張り・中断の失敗のどの経路でも）、会話の文脈が
+    /// 失われ次の送信から新しい会話になることを伝える文言にする
+    /// </remarks>
     /// <param name="detail">原因（例外の文言、または copilot ランタイムが報告した文）。無ければ null または空</param>
     /// <returns>何が起きたかと次に何をするかの要約（UI 言語に追従）に、原因を「詳細: …」の行で添えた文言</returns>
-    private static string BuildTurnFailedMessage(string? detail) =>
-        AiErrorMessageLocalizer.WithDetail(Strings.Copilot_TurnFailed, detail);
+    private string BuildTurnFailedMessage(string? detail) =>
+        AiErrorMessageLocalizer.WithDetail(
+            _client.IsStarted ? Strings.Copilot_TurnFailed : Strings.Copilot_Disconnected,
+            detail
+        );
 
     /// <summary>実行中フラグを 1→0 へ落とせた（＝このターンの完了通知の権利を勝ち取った）ときだけ true を返す</summary>
     /// <remarks>

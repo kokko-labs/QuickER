@@ -451,6 +451,9 @@
   <data name="Copilot_CouldNotStartConversation" xml:space="preserve">
     <value>Could not start the conversation.</value>
   </data>
+  <data name="Copilot_Disconnected" xml:space="preserve">
+    <value>The connection to the GitHub Copilot runtime was lost. The conversation context is gone; the next message starts a new conversation.</value>
+  </data>
   <data name="Copilot_Processing" xml:space="preserve">
     <value>GitHub Copilot is processing...</value>
   </data>
