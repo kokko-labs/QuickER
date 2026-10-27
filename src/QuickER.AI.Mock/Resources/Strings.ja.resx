@@ -283,6 +283,36 @@
 
 続行しますか？</value>
   </data>
+  <data name="Mock_SchemaMismatch_Message" xml:space="preserve">
+    <value>モックの設計は、今の図と違うスキーマから作られています。画面が図に無いテーブルを使っていると、その画面は作られないことがあります。続けますか？</value>
+  </data>
+  <data name="Mock_SchemaMismatch_TablesOnlyInDesignFormat" xml:space="preserve">
+    <value>設計にあって図に無いテーブル: {0}</value>
+  </data>
+  <data name="Mock_SchemaMismatch_TablesOnlyInDiagramFormat" xml:space="preserve">
+    <value>図にあって設計に無いテーブル: {0}</value>
+  </data>
+  <data name="Mock_SchemaMismatch_ScreenTableFormat" xml:space="preserve">
+    <value>画面 {0} が使うテーブル {1} が図にありません</value>
+  </data>
+  <data name="Mock_SchemaMismatch_ChangedTablesFormat" xml:space="preserve">
+    <value>列や説明が違うテーブル: {0}</value>
+  </data>
+  <data name="Mock_SchemaMismatch_RelationshipsChanged" xml:space="preserve">
+    <value>リレーションが違います</value>
+  </data>
+  <data name="Mock_SchemaMismatch_TargetChanged" xml:space="preserve">
+    <value>対象 DBMS が違います</value>
+  </data>
+  <data name="Mock_SchemaMismatch_ContinuedLog" xml:space="preserve">
+    <value>※ モックの設計と今の図の食い違いを承知で続行しました。</value>
+  </data>
+  <data name="Mock_SchemaMismatch_ContentChangedLog" xml:space="preserve">
+    <value>※ モックの設計と今の図の内容が違います。</value>
+  </data>
+  <data name="Mock_SchemaMismatch_NotRecordedLog" xml:space="preserve">
+    <value>※ 設計の元のスキーマが記録されていないため、画面が宣言したテーブルだけを図と照合しました。</value>
+  </data>
   <data name="Mock_BuildConfirm_Message" xml:space="preserve">
     <value>生成したプロジェクトを検証するため、QuickER は AI の CLI のサンドボックスの外側で、あなたの権限で `dotnet build` を実行します。
 
@@ -379,19 +409,28 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
     <value>
 == 中断されました ==</value>
   </data>
-  <data name="Mock_Run_ClientCompleted" xml:space="preserve">
+  <data name="Mock_Run_ClientCompletedFormat" xml:space="preserve">
     <value>
-== Claude Code の実行が完了しました ==</value>
+== {0} の実行が完了しました ==</value>
   </data>
   <data name="Mock_Run_ClientFailedFormat" xml:space="preserve">
     <value>
-== Claude Code の実行が失敗しました: {0} ==</value>
+== {0} の実行が失敗しました: {1} ==</value>
   </data>
-  <data name="Mock_Run_ArtifactsFound" xml:space="preserve">
-    <value>成果物チェック: csproj と xaml を確認しました。</value>
+  <data name="Mock_Run_ArtifactsFoundFormat" xml:space="preserve">
+    <value>成果物チェック: .csproj と {0} のファイルを確認しました。</value>
   </data>
-  <data name="Mock_Run_ArtifactsMissing" xml:space="preserve">
-    <value>成果物チェック: csproj または xaml が見つかりません。</value>
+  <data name="Mock_Run_ArtifactsMissingFormat" xml:space="preserve">
+    <value>成果物チェック: .csproj または {0} のファイルが見つかりません。</value>
+  </data>
+  <data name="Mock_Run_ScreensMissingFormat" xml:space="preserve">
+    <value>成果物チェック: 設計の画面は {0} つですが、見つかった画面は {1} つでした。</value>
+  </data>
+  <data name="Mock_Run_ScreensMissingWarningFormat" xml:space="preserve">
+    <value>成果物チェック（警告）: 設計の画面は {0} つですが、画面のファイルは {1} つでした。すべての画面が作られたか確かめてください。</value>
+  </data>
+  <data name="Mock_Result_ScreensMissingFormat" xml:space="preserve">
+    <value>設計の {0} 画面のうち、作られたのは {1} 画面だけでした。</value>
   </data>
   <data name="Mock_Run_BuildVerify" xml:space="preserve">
     <value>
@@ -596,6 +635,30 @@ AI が次のファイルを書きました（UI 層のソース・静的資産�
   </data>
   <data name="Mock_ApiRun_NoEmit" xml:space="preserve">
     <value>（このターンではファイルが提出されませんでした）</value>
+  </data>
+  <data name="Mock_ApiRun_ScreenTurnLabelFormat" xml:space="preserve">
+    <value>画面 '{0}'</value>
+  </data>
+  <data name="Mock_ApiRun_ErrorTurnsWithoutFilesFormat" xml:space="preserve">
+    <value>次のターンでファイルが提出されませんでした: {0}</value>
+  </data>
+  <data name="Mock_ApiRun_TurnDiagnosticsFormat" xml:space="preserve">
+    <value>ターン {0}（{1}）: 応答 {2} 回・終了理由 {3}・出力 {4} トークン（上限 {5}）・捨てたブロック {6}</value>
+  </data>
+  <data name="Mock_ApiRun_TurnKindCommon" xml:space="preserve">
+    <value>共通部</value>
+  </data>
+  <data name="Mock_ApiRun_TurnKindScreen" xml:space="preserve">
+    <value>画面</value>
+  </data>
+  <data name="Mock_ApiRun_TurnKindFix" xml:space="preserve">
+    <value>修正</value>
+  </data>
+  <data name="Mock_ApiRun_DiagnosticsUnknown" xml:space="preserve">
+    <value>不明</value>
+  </data>
+  <data name="Mock_ApiRun_DiagnosticsNone" xml:space="preserve">
+    <value>なし</value>
   </data>
   <data name="Mock_ApiRun_Build" xml:space="preserve">
     <value>== 中間ビルドを検証します（dotnet build） ==</value>

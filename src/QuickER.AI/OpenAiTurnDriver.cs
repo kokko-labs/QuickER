@@ -74,6 +74,8 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
 
         var textBuilder = new StringBuilder();
         var toolCalls = new SortedDictionary<int, ToolCallAccumulator>();
+        ChatFinishReason? finishReason = null;
+        long? outputTokens = null;
 
         await foreach (
             var update in client
@@ -81,6 +83,10 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
                 .ConfigureAwait(false)
         )
         {
+            // 終了理由は最後のチャンクに、使用量はサーバーが返すときだけ最後のチャンクに載る
+            finishReason = update.FinishReason ?? finishReason;
+            outputTokens = update.Usage?.OutputTokenCount ?? outputTokens;
+
             foreach (var part in update.ContentUpdate)
             {
                 if (!string.IsNullOrEmpty(part.Text))
@@ -115,7 +121,33 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
             }
         }
 
-        return new ChatAssistantTurn(textBuilder.ToString(), BuildToolCalls(toolCalls.Values));
+        return new ChatAssistantTurn(
+            textBuilder.ToString(),
+            BuildToolCalls(toolCalls.Values),
+            ToResponseEnd(finishReason, outputTokens)
+        );
+    }
+
+    /// <summary>
+    /// OpenAI の finish_reason を中立な終わり方へ読み替える（値が無いときは正常とみなし、応答を止める理由にしない）
+    /// </summary>
+    internal static ChatResponseEnd ToResponseEnd(
+        ChatFinishReason? finishReason,
+        long? outputTokens
+    )
+    {
+        var (raw, kind) = finishReason switch
+        {
+            ChatFinishReason.Stop => ("stop", ChatStopKind.Normal),
+            ChatFinishReason.ToolCalls => ("tool_calls", ChatStopKind.Normal),
+            ChatFinishReason.FunctionCall => ("function_call", ChatStopKind.Normal),
+            ChatFinishReason.Length => ("length", ChatStopKind.OutputLimit),
+            ChatFinishReason.ContentFilter => ("content_filter", ChatStopKind.Refused),
+            null => ((string?)null, ChatStopKind.Normal),
+            _ => (finishReason.ToString(), ChatStopKind.Other),
+        };
+
+        return new ChatResponseEnd(raw, kind, outputTokens, Array.Empty<string>());
     }
 
     /// <summary>index 順に組み立てたツール呼び出しを、中立なツール呼び出し要求へ変換する</summary>

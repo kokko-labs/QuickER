@@ -9,6 +9,16 @@ namespace QuickER.AI.Mock;
 /// </summary>
 public static class MockSchemaSerializer
 {
+    /// <summary><see cref="Split"/> の結果（見出し・テーブル名と節の本文の並び・リレーションの節）</summary>
+    /// <param name="Header">テーブルより前の部分（対象 DBMS の行など）</param>
+    /// <param name="Tables">テーブル名と、その節の本文（見出しを含む・書き出した順）</param>
+    /// <param name="Relationships">リレーションの節の本文（無ければ空）</param>
+    internal sealed record SchemaSections(
+        string Header,
+        IReadOnlyList<KeyValuePair<string, string>> Tables,
+        string Relationships
+    );
+
     /// <summary>ER 図をスキーマ記述テキストへ直列化する</summary>
     /// <param name="diagram">対象の ER 図（意味モデル）</param>
     /// <returns>テーブル・列・リレーションを列挙した Markdown 風テキスト</returns>
@@ -170,6 +180,83 @@ public static class MockSchemaSerializer
             RelationshipType.ManyToMany => "many-to-many",
             _ => type.ToString(),
         };
+
+    /// <summary>
+    /// <see cref="Serialize"/> の出力を、見出し（対象 DBMS）・テーブルごとの節・リレーションの節に分ける
+    /// （書き出しと同じ型に置く＝書式を変えたら読み方も一緒に変わる）。
+    /// </summary>
+    /// <param name="serialized"><see cref="Serialize"/> の出力（モックの <c>mock.json</c> に保存したものを含む）</param>
+    /// <remarks>
+    /// テーブルの節は <c>### テーブル名</c>（表示名があれば <c>### テーブル名 (表示名)</c>）の見出しから次の見出しまでで、
+    /// テーブル名は見出しから表示名の括弧を外したもの。改行の違いは吸収し、各節は前後の空白を除く。
+    /// </remarks>
+    internal static SchemaSections Split(string serialized)
+    {
+        var header = new StringBuilder();
+        var relationships = new StringBuilder();
+        var tables = new List<KeyValuePair<string, string>>();
+        string? currentTable = null;
+        var currentBody = new StringBuilder();
+        var inRelationships = false;
+
+        void FlushTable()
+        {
+            if (currentTable is not null)
+            {
+                tables.Add(new(currentTable, currentBody.ToString().Trim()));
+            }
+
+            currentTable = null;
+            currentBody.Clear();
+        }
+
+        foreach (var line in (serialized ?? string.Empty).ReplaceLineEndings("\n").Split('\n'))
+        {
+            if (line.StartsWith("### ", StringComparison.Ordinal) && !inRelationships)
+            {
+                FlushTable();
+                currentTable = TableNameOfHeading(line[4..]);
+                currentBody.AppendLine(line);
+            }
+            else if (line == "## Relationships")
+            {
+                FlushTable();
+                inRelationships = true;
+            }
+            else if (line == "## Tables")
+            {
+                FlushTable();
+            }
+            else if (inRelationships)
+            {
+                relationships.AppendLine(line);
+            }
+            else if (currentTable is not null)
+            {
+                currentBody.AppendLine(line);
+            }
+            else
+            {
+                header.AppendLine(line);
+            }
+        }
+
+        FlushTable();
+
+        return new SchemaSections(
+            header.ToString().Trim(),
+            tables,
+            relationships.ToString().Trim()
+        );
+    }
+
+    /// <summary>テーブルの見出しからテーブル名を取り出す（末尾の「 (表示名)」を外す）</summary>
+    private static string TableNameOfHeading(string heading)
+    {
+        var open = heading.IndexOf(" (", StringComparison.Ordinal);
+
+        return open > 0 && heading.EndsWith(')') ? heading[..open] : heading;
+    }
 
     /// <summary>表示名を解決する（説明があればそれ、無ければ識別子そのもの）</summary>
     private static string ResolveDisplayName(string name, string? description) =>

@@ -153,9 +153,11 @@ public class ApiKeyMockProjectAgentSummaryTests
             var summary = ApiKeyMockProjectAgent.SummarizeGeneratedContracts(folder);
             var publicTypes = summary
                 .Split('\n')
-                .Single(line => line.StartsWith("Public types: ", StringComparison.Ordinal));
+                .Single(line => line.StartsWith("Public types in ", StringComparison.Ordinal));
 
-            publicTypes.Should().Be("Public types: OrderKey, CustomerSnapshot");
+            publicTypes
+                .Should()
+                .Be("Public types in (global namespace): OrderKey, CustomerSnapshot");
         }
         finally
         {
@@ -216,6 +218,56 @@ public class ApiKeyMockProjectAgentSummaryTests
             summary.Should().Contain("GetByIdAsync(");
             summary.Should().Contain("SaveAsync(");
             summary.Contains("was truncated", StringComparison.Ordinal).Should().Be(truncated);
+
+            // 名前空間の節は先頭にあり、上限で切られても全ファイルの実際の名前空間と登録メソッドの所在が残る
+            summary.Should().StartWith("Namespaces (");
+            var declared = GeneratedNamespaceDeclarations.Read(result.GeneratedDirectory);
+            declared.Should().NotBeEmpty();
+
+            foreach (var (file, declaredNamespace) in declared)
+            {
+                summary
+                    .Split('\n')
+                    .Should()
+                    .Contain(line =>
+                        line.StartsWith($"- {declaredNamespace}: ", StringComparison.Ordinal)
+                        && line.Contains(file, StringComparison.Ordinal)
+                    );
+            }
+
+            summary
+                .Should()
+                .Contain(
+                    $"- AddGeneratedInMemoryRepositories (namespace {declared["Repositories.InMemory.g.cs"]})"
+                );
+            summary
+                .Should()
+                .Contain(
+                    $"- AddGeneratedSqliteRepositories (namespace {declared["Repositories.Sqlite.g.cs"]})"
+                );
+            summary.Should().NotContain("- AcmeMock.Generated:");
+
+            if (!truncated)
+            {
+                // per-entity の契約は署名を持たない（基底を継承するだけ）ので、名前空間ごとの公開型の行で名前空間が分かる
+                var lines = summary.Split('\n');
+                lines
+                    .Should()
+                    .Contain(line =>
+                        line.StartsWith(
+                            $"Public types in {declared["Entities.g.cs"]}: ",
+                            StringComparison.Ordinal
+                        ) && line.Contains("Table0Entity", StringComparison.Ordinal)
+                    );
+                lines
+                    .Should()
+                    .Contain(line =>
+                        line.StartsWith(
+                            $"Public types in {declared["Repositories.g.cs"]}: ",
+                            StringComparison.Ordinal
+                        ) && line.Contains("ITable0Repository", StringComparison.Ordinal)
+                    );
+            }
         }
         finally
         {

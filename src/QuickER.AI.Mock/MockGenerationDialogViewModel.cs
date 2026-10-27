@@ -1262,6 +1262,23 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         var diagram = _diagramSource.GetDiagram();
         var projectName = ProjectName.Trim();
 
+        // 今の図とモックの設計（元のスキーマ・画面が宣言したテーブル）が食い違っていれば、内訳を見せて確認する。
+        // 確認を出すのはテーブルの有無と、画面が使うのに図に無いテーブル（画面が作れない原因になる）だけで、
+        // 内容だけの違いはログに残す。キャンセルなら何も書かない（4 つのバックエンドのどれでも同じ）
+        var mismatch = MockSchemaMismatch.Compare(diagram, _store.Manifest);
+
+        if (
+            mismatch.RequiresConfirmation
+            && !_dialogs.ConfirmWarningDetails(
+                Strings.Mock_SchemaMismatch_Message,
+                mismatch.Describe(),
+                Strings.Mock_WindowTitle
+            )
+        )
+        {
+            return;
+        }
+
         // 出力フォルダに既存のファイル・フォルダがあれば、何が上書きされるかを一覧で見せて確認する。
         // キャンセルなら出力フォルダには一切書き込まない（スキャフォールドへ入らない）。
         var scan = MockProjectOverwriteScanner.Scan(outputFolder, projectName);
@@ -1303,6 +1320,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             AppendMockGenLog(Strings.Mock_OutputFolderNotEmpty);
         }
+
+        AppendSchemaMismatchLog(mismatch);
 
         _mockGenCts = new CancellationTokenSource();
 
@@ -1397,6 +1416,28 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 ),
                 Strings.Mock_WindowTitle
             );
+        }
+    }
+
+    /// <summary>
+    /// 設計と図の食い違いをログに残す（確認して続けた・内容だけ違う・元のスキーマが記録されていない）。
+    /// </summary>
+    private void AppendSchemaMismatchLog(MockSchemaMismatch mismatch)
+    {
+        if (mismatch.RequiresConfirmation)
+        {
+            AppendMockGenLog(Strings.Mock_SchemaMismatch_ContinuedLog + "\n");
+            AppendMockGenLog(mismatch.Describe() + "\n");
+        }
+        else if (mismatch.HasContentDifferences)
+        {
+            AppendMockGenLog(Strings.Mock_SchemaMismatch_ContentChangedLog + "\n");
+            AppendMockGenLog(mismatch.Describe() + "\n");
+        }
+
+        if (!mismatch.SourceSchemaRecorded)
+        {
+            AppendMockGenLog(Strings.Mock_SchemaMismatch_NotRecordedLog + "\n");
         }
     }
 

@@ -283,6 +283,36 @@ Generation overwrites the solution, the csproj, README-QuickER.md, Generated/ an
 
 Do you want to continue?</value>
   </data>
+  <data name="Mock_SchemaMismatch_Message" xml:space="preserve">
+    <value>The mock design was made from a schema that differs from the current diagram. A screen that uses a table that is not in the diagram may not be made. Continue?</value>
+  </data>
+  <data name="Mock_SchemaMismatch_TablesOnlyInDesignFormat" xml:space="preserve">
+    <value>Tables in the design but not in the diagram: {0}</value>
+  </data>
+  <data name="Mock_SchemaMismatch_TablesOnlyInDiagramFormat" xml:space="preserve">
+    <value>Tables in the diagram but not in the design: {0}</value>
+  </data>
+  <data name="Mock_SchemaMismatch_ScreenTableFormat" xml:space="preserve">
+    <value>Screen {0} uses table {1}, which is not in the diagram</value>
+  </data>
+  <data name="Mock_SchemaMismatch_ChangedTablesFormat" xml:space="preserve">
+    <value>Tables whose columns or descriptions differ: {0}</value>
+  </data>
+  <data name="Mock_SchemaMismatch_RelationshipsChanged" xml:space="preserve">
+    <value>The relationships differ</value>
+  </data>
+  <data name="Mock_SchemaMismatch_TargetChanged" xml:space="preserve">
+    <value>The target DBMS differs</value>
+  </data>
+  <data name="Mock_SchemaMismatch_ContinuedLog" xml:space="preserve">
+    <value>Note: The mock design differs from the current diagram, and generation continued anyway.</value>
+  </data>
+  <data name="Mock_SchemaMismatch_ContentChangedLog" xml:space="preserve">
+    <value>Note: The mock design and the current diagram differ in content.</value>
+  </data>
+  <data name="Mock_SchemaMismatch_NotRecordedLog" xml:space="preserve">
+    <value>Note: The schema the mock design was made from is not recorded, so only the tables the screens declare were checked against the diagram.</value>
+  </data>
   <data name="Mock_BuildConfirm_Message" xml:space="preserve">
     <value>Before verifying the generated project, QuickER runs `dotnet build` outside the AI CLI's sandbox, with your own permissions.
 
@@ -379,19 +409,28 @@ See the log for details:
     <value>
 == Canceled ==</value>
   </data>
-  <data name="Mock_Run_ClientCompleted" xml:space="preserve">
+  <data name="Mock_Run_ClientCompletedFormat" xml:space="preserve">
     <value>
-== Claude Code execution completed ==</value>
+== {0} execution completed ==</value>
   </data>
   <data name="Mock_Run_ClientFailedFormat" xml:space="preserve">
     <value>
-== Claude Code execution failed: {0} ==</value>
+== {0} execution failed: {1} ==</value>
   </data>
-  <data name="Mock_Run_ArtifactsFound" xml:space="preserve">
-    <value>Artifact check: found csproj and xaml.</value>
+  <data name="Mock_Run_ArtifactsFoundFormat" xml:space="preserve">
+    <value>Artifact check: found the .csproj file and the {0} files.</value>
   </data>
-  <data name="Mock_Run_ArtifactsMissing" xml:space="preserve">
-    <value>Artifact check: csproj or xaml not found.</value>
+  <data name="Mock_Run_ArtifactsMissingFormat" xml:space="preserve">
+    <value>Artifact check: the .csproj file or the {0} files were not found.</value>
+  </data>
+  <data name="Mock_Run_ScreensMissingFormat" xml:space="preserve">
+    <value>Artifact check: the design has {0} screens, but only {1} screens were found.</value>
+  </data>
+  <data name="Mock_Run_ScreensMissingWarningFormat" xml:space="preserve">
+    <value>Artifact check (warning): the design has {0} screens, but only {1} screen files were found. Check that every screen was made.</value>
+  </data>
+  <data name="Mock_Result_ScreensMissingFormat" xml:space="preserve">
+    <value>Only {1} of the {0} screens in the design were made.</value>
   </data>
   <data name="Mock_Run_BuildVerify" xml:space="preserve">
     <value>
@@ -596,6 +635,30 @@ Default to English for all responses (the language of the app UI). Switch only i
   </data>
   <data name="Mock_ApiRun_NoEmit" xml:space="preserve">
     <value>(No file was submitted this turn.)</value>
+  </data>
+  <data name="Mock_ApiRun_ScreenTurnLabelFormat" xml:space="preserve">
+    <value>screen '{0}'</value>
+  </data>
+  <data name="Mock_ApiRun_ErrorTurnsWithoutFilesFormat" xml:space="preserve">
+    <value>No file was submitted in these turns: {0}.</value>
+  </data>
+  <data name="Mock_ApiRun_TurnDiagnosticsFormat" xml:space="preserve">
+    <value>Turn {0} ({1}): {2} response(s), stop reason {3}, {4} output tokens (limit {5}), omitted blocks: {6}</value>
+  </data>
+  <data name="Mock_ApiRun_TurnKindCommon" xml:space="preserve">
+    <value>shared parts</value>
+  </data>
+  <data name="Mock_ApiRun_TurnKindScreen" xml:space="preserve">
+    <value>screen</value>
+  </data>
+  <data name="Mock_ApiRun_TurnKindFix" xml:space="preserve">
+    <value>fix</value>
+  </data>
+  <data name="Mock_ApiRun_DiagnosticsUnknown" xml:space="preserve">
+    <value>unknown</value>
+  </data>
+  <data name="Mock_ApiRun_DiagnosticsNone" xml:space="preserve">
+    <value>none</value>
   </data>
   <data name="Mock_ApiRun_Build" xml:space="preserve">
     <value>== Verifying the intermediate build (dotnet build) ==</value>

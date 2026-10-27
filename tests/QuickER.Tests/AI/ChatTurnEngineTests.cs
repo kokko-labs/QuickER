@@ -975,4 +975,195 @@ public class ChatTurnEngineTests
         result.Error.Should().Be(AiErrorMessageLocalizer.ToUserMessage(failure));
         result.Error.Should().Contain(AiStrings.Ai_ConnectionFailed);
     }
+
+    /// <summary>終わり方つきの応答を作る</summary>
+    private static ChatAssistantTurn Turn(
+        string text,
+        IReadOnlyList<ChatToolCallRequest> toolCalls,
+        string? stopReason,
+        ChatStopKind kind,
+        long? outputTokens = null,
+        params string[] omitted
+    ) => new(text, toolCalls, new ChatResponseEnd(stopReason, kind, outputTokens, omitted));
+
+    /// <summary>
+    /// 出力の上限で切れた応答のツール呼び出しは実行せずにターンを失敗にし、その応答を履歴へ積まないこと
+    /// （次のターンの履歴に、途中までの引数のツール呼び出しが残らないこと）を検証する
+    /// </summary>
+    [Fact(DisplayName = "上限で切れたツール呼び出しは実行せず、履歴に積まずに失敗にする")]
+    public async Task SendAsync_ToolCallCutAtOutputLimit_IsNotRunAndFails()
+    {
+        var driver = new ScriptedTurnDriver([
+            Turn(
+                string.Empty,
+                [new ChatToolCallRequest("call_1", "add_entity", "{}")],
+                "max_tokens",
+                ChatStopKind.OutputLimit,
+                8192
+            ),
+            new ChatAssistantTurn("次の応答", []),
+        ]);
+        var host = new RecordingToolHost();
+        var engine = CreateEngine(driver, host);
+        var results = new List<ErChatTurnResult>();
+        engine.TurnCompleted += (_, r) => results.Add(r);
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("最初", TestContext.Current.CancellationToken);
+        await engine.SendAsync("次", TestContext.Current.CancellationToken);
+
+        host.Calls.Should().BeEmpty();
+        results[0].Success.Should().BeFalse();
+        results[0].Error.Should().Be(AiStrings.Chat_ResponseCutAtOutputLimit);
+        results[0].Diagnostics.Should().NotBeNull();
+        results[0].Diagnostics!.Responses.Should().Be(1);
+        results[0].Diagnostics!.LastStopReason.Should().Be("max_tokens");
+        results[0].Diagnostics!.OutputTokens.Should().Be(8192);
+
+        // 2 回目の呼び出しの履歴に、切れた応答（ツール呼び出しを持つ assistant）が無い
+        driver
+            .HistoriesAtCall[1]
+            .Should()
+            .NotContain(item => item.Role == ChatHistoryRole.Assistant)
+            .And.NotContain(item => item.Role == ChatHistoryRole.Tool);
+        results[1].Success.Should().BeTrue();
+    }
+
+    /// <summary>テキストもツールも無い応答が正常でない理由で終わったら、終了理由を名指しして失敗にすることを検証する</summary>
+    [Theory(DisplayName = "空の応答が正常でない理由で終わったら終了理由を名指しして失敗にする")]
+    [InlineData("refusal", ChatStopKind.Refused)]
+    [InlineData("max_tokens", ChatStopKind.OutputLimit)]
+    [InlineData("model_context_window_exceeded", ChatStopKind.ContextWindowExceeded)]
+    [InlineData("pause_turn", ChatStopKind.Other)]
+    public async Task SendAsync_EmptyAbnormalEnd_Fails(string stopReason, ChatStopKind kind)
+    {
+        var driver = new ScriptedTurnDriver([
+            Turn(string.Empty, [], stopReason, kind, 0, "thinking"),
+        ]);
+        var engine = CreateEngine(driver, new RecordingToolHost());
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeFalse();
+        completed
+            .Value.Error.Should()
+            .Be(string.Format(AiStrings.Chat_EmptyResponseFormat, stopReason));
+        completed.Value.Diagnostics!.OmittedBlockKinds.Should().Equal("thinking");
+    }
+
+    /// <summary>
+    /// 空でも正常に終わった応答と、テキストを持つ上限で切れた応答は、従来どおり成功として扱うことを検証する
+    /// （上限で切れたテキストは画面に途中まで出ているので、そのまま会話を続ける）
+    /// </summary>
+    [Theory(DisplayName = "空の正常な終わりと、テキストつきの上限の終わりは成功のまま")]
+    [InlineData("", "end_turn", ChatStopKind.Normal)]
+    [InlineData("途中まで", "max_tokens", ChatStopKind.OutputLimit)]
+    public async Task SendAsync_NormalEmptyOrTruncatedText_Succeeds(
+        string text,
+        string stopReason,
+        ChatStopKind kind
+    )
+    {
+        var driver = new ScriptedTurnDriver([Turn(text, [], stopReason, kind, 5)]);
+        var engine = CreateEngine(driver, new RecordingToolHost());
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!.Value.Success.Should().BeTrue();
+        completed.Value.Diagnostics!.LastStopReason.Should().Be(stopReason);
+    }
+
+    /// <summary>
+    /// ターンの診断は応答の回数・最後の終了理由・出力のトークン数の合計・捨てたブロックの種類（和）をまとめ、
+    /// 終わり方の分からない応答（ほかのドライバ）が混ざっても数え方を崩さないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "ターンの診断は応答ごとの終わり方をまとめる")]
+    public async Task SendAsync_Diagnostics_AggregateResponses()
+    {
+        var driver = new ScriptedTurnDriver([
+            Turn(
+                string.Empty,
+                [new ChatToolCallRequest("call_1", "add_entity", "{\"table_name\":\"Book\"}")],
+                "tool_use",
+                ChatStopKind.Normal,
+                100,
+                "thinking"
+            ),
+            new ChatAssistantTurn(
+                string.Empty,
+                [new ChatToolCallRequest("call_2", "add_entity", "{\"table_name\":\"Author\"}")]
+            ),
+            new ChatAssistantTurn(
+                "できました",
+                [],
+                new ChatResponseEnd(
+                    "end_turn",
+                    ChatStopKind.Normal,
+                    50,
+                    ["redacted_thinking", "thinking"],
+                    8_192
+                )
+            ),
+        ]);
+        var engine = CreateEngine(driver, new RecordingToolHost());
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        var diagnostics = completed!.Value.Diagnostics!;
+        diagnostics.Responses.Should().Be(3);
+        diagnostics.LastStopReason.Should().Be("end_turn");
+        diagnostics.OutputTokens.Should().Be(150);
+        diagnostics.OmittedBlockKinds.Should().Equal("thinking", "redacted_thinking");
+
+        // 送った上限は最後の応答の値（最初の応答は上限を持たない）
+        diagnostics.MaxOutputTokens.Should().Be(8_192);
+    }
+
+    /// <summary>終わり方を返さないドライバの応答だけのターンは、回数だけを数え、終了理由とトークン数は不明のままにすることを検証する</summary>
+    [Fact(DisplayName = "終わり方を返さないドライバでも診断は回数だけを数える")]
+    public async Task SendAsync_DriverWithoutEnd_CountsResponsesOnly()
+    {
+        var driver = new ScriptedTurnDriver([new ChatAssistantTurn("こんにちは", [])]);
+        var engine = CreateEngine(driver, new RecordingToolHost());
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
+
+        completed!
+            .Value.Diagnostics.Should()
+            .BeEquivalentTo(new ErChatTurnDiagnostics(1, null, null, Array.Empty<string>()));
+    }
+
+    /// <summary>OpenAI の finish_reason の読み替えを表で検証する（値が無いときは正常）</summary>
+    [Theory(DisplayName = "OpenAI の finish_reason は中立な分類へ読み替える")]
+    [InlineData(ChatFinishReason.Stop, "stop", ChatStopKind.Normal)]
+    [InlineData(ChatFinishReason.ToolCalls, "tool_calls", ChatStopKind.Normal)]
+    [InlineData(ChatFinishReason.FunctionCall, "function_call", ChatStopKind.Normal)]
+    [InlineData(ChatFinishReason.Length, "length", ChatStopKind.OutputLimit)]
+    [InlineData(ChatFinishReason.ContentFilter, "content_filter", ChatStopKind.Refused)]
+    [InlineData(null, null, ChatStopKind.Normal)]
+    public void OpenAiToResponseEnd_MapsFinishReasons(
+        ChatFinishReason? finishReason,
+        string? raw,
+        ChatStopKind kind
+    )
+    {
+        var end = OpenAiTurnDriver.ToResponseEnd(finishReason, 12);
+
+        end.StopReason.Should().Be(raw);
+        end.Kind.Should().Be(kind);
+        end.OutputTokens.Should().Be(12);
+        end.OmittedBlockKinds.Should().BeEmpty();
+    }
 }

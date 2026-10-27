@@ -41,6 +41,9 @@ public sealed class CopilotMockProjectAgent : IMockProjectAgent
     public bool IsAvailable() => _client.IsAvailable();
 
     /// <inheritdoc />
+    public string BackendName => "Copilot";
+
+    /// <inheritdoc />
     /// <remarks>
     /// 自動承認するのは出力フォルダ配下のファイル操作と、パスを伴わない <c>dotnet</c> コマンドだけ
     /// （<see cref="CopilotWorkspacePermissionPolicy"/>）。出力フォルダの csproj などビルド設定は書ける一方、

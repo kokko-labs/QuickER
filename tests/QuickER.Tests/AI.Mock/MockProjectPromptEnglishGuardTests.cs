@@ -154,7 +154,11 @@ public class MockProjectPromptEnglishGuardTests
         foreach (var dialect in new string?[] { "sqlserver", "sqlite", null })
         {
             AssertNoCjk(
-                profile.BuildReadme("MockApp", "MockApp", dialect),
+                profile.BuildReadme(
+                    "MockApp",
+                    MockProjectScaffoldService.ResolveNamespaces("MockApp", dialect),
+                    dialect
+                ),
                 $"{targetId}: BuildReadme ({dialect ?? "(no dialect)"})"
             );
         }

@@ -25,6 +25,17 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 #### AI chat & MCP
 
 - **GitHub Copilot no longer loses the conversation when the runtime returns an ordinary error** — only a lost connection ends the conversation, and then the message says the connection was lost and the next message starts a new conversation
+- **With an API key, a response cut off at the output limit no longer runs its unfinished tool call, and a response that ends without any text or tool call now says why** — the tool call ran with incomplete arguments, and the empty response looked like a success
+- **With an API key, Claude's output limit is now the model's own limit, up to 64,000 tokens, instead of 8,192** — Claude 5 models think before they answer and the thinking counts toward the limit, so a long answer such as a mock project page could stop before any text. If the model's limit cannot be read, 8,192 is used as before
+
+#### AI chat & mock generation
+
+- **Mock project generation with an API key now tells the AI the namespaces of the generated data layer, and `README-QuickER.md` names them correctly** — the README pointed to `<project>.Generated`, which declares no types, so the generated pages did not compile
+- **The mock generation log names the backend that ran and the UI files of the target** — it said Claude Code and `xaml` for every backend and target
+- **Mock project generation with an API key logs how each turn ended (the stop reason, the output tokens and their limit, and the omitted blocks), and logs a submission it refused for empty content**
+- **Before generating a mock project, QuickER warns when the tables in the diagram differ from the tables the mock design was made from** — a screen that uses a table no longer in the diagram was not made, but generation still reported success. Differences only in columns, descriptions or relationships are written to the log without a warning
+- **Mock project generation no longer reports success when screens were not made** — with an API key, a turn that submitted no files fails the run, and for Blazor the final check counts the `@page` routes against the screens in the design. For WPF a shortfall is only logged as a warning
+- **Lines in the mock generation log no longer run on from the end of the AI's text**
 
 ## [0.3.0] - 2026-10-25
 

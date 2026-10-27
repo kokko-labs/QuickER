@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using Anthropic;
@@ -18,12 +19,32 @@ public sealed record AnthropicChatConnection(string ApiKey, string Model);
 /// </summary>
 public sealed class AnthropicChatTurnDriver : IChatTurnDriver
 {
-    /// <summary>1 応答あたりの最大出力トークン数</summary>
-    private const int MaxOutputTokens = 8192;
+    /// <summary>
+    /// 1 応答あたりに求める出力トークン数の上限（モデルの上限がこれより小さければモデルの上限を送る）
+    /// </summary>
+    /// <remarks>
+    /// 考えるモデル（Claude 5 系は thinking を省くと adaptive で考える）では、思考のトークンも max_tokens に数える。
+    /// 小さいと、ファイル全体を提出するような応答が思考だけで上限に届いて何も返さない。
+    /// ストリーミングで受けるので、大きな値でも HTTP のタイムアウトの問題は無い。
+    /// </remarks>
+    internal const long DefaultMaxOutputTokens = 64_000;
+
+    /// <summary>モデルの出力の上限を Models API から取れなかったときに送る max_tokens（古いモデルでも 400 にならない値）</summary>
+    internal const long FallbackMaxOutputTokens = 8_192;
+
+    /// <summary>Models API の 1 回の呼び出しの待ち時間の上限（失敗している間に送信を長く待たせない）</summary>
+    private static readonly TimeSpan ModelLookupTimeout = TimeSpan.FromSeconds(10);
 
     private readonly Func<AnthropicChatConnection> _connectionProvider;
     private readonly IReadOnlyList<ToolUnion> _tools;
     private readonly Func<AnthropicChatConnection, AnthropicClient> _clientFactory;
+
+    /// <summary>
+    /// 接続（API キー）とモデルごとに求めた、送る max_tokens（Models API から取れた値だけを覚える）。
+    /// API キーは照合のキーにだけ使い、ログ・例外・診断には出さない
+    /// </summary>
+    private readonly ConcurrentDictionary<(string ApiKey, string Model), long> _maxOutputTokens =
+        new();
 
     /// <summary>接続設定プロバイダからドライバを生成する（設定変更を毎ターン反映するため遅延取得する）</summary>
     /// <param name="connectionProvider">接続設定を返す関数</param>
@@ -70,10 +91,16 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
         // 破棄しないと、ツール往復のたびに作るクライアントの接続が積み上がる
         using var client = _clientFactory(connection);
 
+        var maxOutputTokens = await ResolveMaxOutputTokensAsync(
+                client,
+                connection,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
         var systemText = ExtractSystemPrompt(history);
         var parameters = new MessageCreateParams
         {
-            MaxTokens = MaxOutputTokens,
+            MaxTokens = maxOutputTokens,
             Model = connection.Model,
             System = string.IsNullOrEmpty(systemText)
                 ? null
@@ -102,7 +129,62 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
             }
         }
 
-        return ToAssistantTurn(aggregator.Message());
+        return ToAssistantTurn(aggregator.Message(), maxOutputTokens);
+    }
+
+    /// <summary>
+    /// 送る max_tokens を求める（<see cref="DefaultMaxOutputTokens"/> とモデルの上限の小さいほう）。
+    /// </summary>
+    /// <remarks>
+    /// モデルの上限は Models API（<c>GET /v1/models/{id}</c> の <c>max_tokens</c>）から取り、接続とモデルごとに覚えて
+    /// ターンごとに取り直さない。取れなかったとき（権限・通信・タイムアウト・知らないモデル・値なし）は、
+    /// そのターンを <see cref="FallbackMaxOutputTokens"/> で送って会話を続け、失敗は覚えずに次の呼び出しで取り直す
+    /// （一時的な失敗でその会話の間ずっと小さい上限に固定しない）。呼び出し側の取り消しはそのまま投げる。
+    /// </remarks>
+    private async Task<long> ResolveMaxOutputTokensAsync(
+        AnthropicClient client,
+        AnthropicChatConnection connection,
+        CancellationToken cancellationToken
+    )
+    {
+        var key = (connection.ApiKey, connection.Model);
+
+        if (_maxOutputTokens.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var model = await client
+                .Models.WithOptions(options =>
+                    options with
+                    {
+                        MaxRetries = 0,
+                        Timeout = ModelLookupTimeout,
+                    }
+                )
+                .Retrieve(connection.Model, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            if (model.MaxTokens is not > 0)
+            {
+                return FallbackMaxOutputTokens;
+            }
+
+            var resolved = Math.Min(DefaultMaxOutputTokens, model.MaxTokens.Value);
+            _maxOutputTokens[key] = resolved;
+            return resolved;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // 上限が分からないだけで会話は続けられるので、例外の文言は出さずに既定の小さい上限で送る
+            return FallbackMaxOutputTokens;
+        }
     }
 
     /// <summary>履歴中の System 役割項目を結合し、Anthropic の system パラメータ文字列を組み立てる</summary>
@@ -260,11 +342,17 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
         return new AssistantMessageParam { Content = blocks };
     }
 
-    /// <summary>応答メッセージからテキストとツール呼び出しを取り出し、中立な 1 ターンへ変換する</summary>
-    internal static ChatAssistantTurn ToAssistantTurn(Message message)
+    /// <summary>
+    /// 応答メッセージからテキストとツール呼び出しを取り出し、中立な 1 ターンへ変換する
+    /// （終了理由・出力のトークン数・捨てたブロックの種類も添える）
+    /// </summary>
+    /// <param name="message">集約した応答メッセージ</param>
+    /// <param name="maxOutputTokens">この応答を求めたときに送った max_tokens（分からなければ null）</param>
+    internal static ChatAssistantTurn ToAssistantTurn(Message message, long? maxOutputTokens = null)
     {
         var textBuilder = new StringBuilder();
         var toolCalls = new List<ChatToolCallRequest>();
+        var omitted = new List<string>();
 
         foreach (var block in message.Content)
         {
@@ -282,10 +370,49 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
                     )
                 );
             }
+            else
+            {
+                // テキストとツール呼び出し以外（思考のブロックなど）は会話へ渡さないが、診断のために種類だけ残す
+                var kind =
+                    block.TryPickThinking(out _) ? "thinking"
+                    : block.TryPickRedactedThinking(out _) ? "redacted_thinking"
+                    : "other";
+
+                if (!omitted.Contains(kind))
+                {
+                    omitted.Add(kind);
+                }
+            }
         }
 
-        return new ChatAssistantTurn(textBuilder.ToString(), toolCalls);
+        var stopReason = message.StopReason?.Raw();
+
+        return new ChatAssistantTurn(
+            textBuilder.ToString(),
+            toolCalls,
+            new ChatResponseEnd(
+                stopReason,
+                ToStopKind(stopReason),
+                message.Usage?.OutputTokens,
+                omitted,
+                maxOutputTokens
+            )
+        );
     }
+
+    /// <summary>
+    /// Anthropic の stop_reason を中立な分類へ読み替える（知らない値は <see cref="ChatStopKind.Other"/>。
+    /// 値が無いときは正常とみなし、応答を止める理由にしない）
+    /// </summary>
+    internal static ChatStopKind ToStopKind(string? stopReason) =>
+        stopReason switch
+        {
+            null or "end_turn" or "tool_use" or "stop_sequence" => ChatStopKind.Normal,
+            "max_tokens" => ChatStopKind.OutputLimit,
+            "refusal" => ChatStopKind.Refused,
+            "model_context_window_exceeded" => ChatStopKind.ContextWindowExceeded,
+            _ => ChatStopKind.Other,
+        };
 
     /// <summary>ツール引数 JSON を Anthropic の input 用辞書へ変換する（空・不正は空辞書）</summary>
     private static IReadOnlyDictionary<string, JsonElement> ParseArguments(string argumentsJson)

@@ -157,6 +157,12 @@
   <data name="Chat_ToolLoopLimitReached" xml:space="preserve">
     <value>The response was stopped because the tool round trips in one turn reached the limit ({0}).</value>
   </data>
+  <data name="Chat_ResponseCutAtOutputLimit" xml:space="preserve">
+    <value>The response reached the output limit before its tool call was complete, so the tool was not run.</value>
+  </data>
+  <data name="Chat_EmptyResponseFormat" xml:space="preserve">
+    <value>The AI ended its response without any text or tool call (stop reason: {0}).</value>
+  </data>
   <data name="ClaudeCode_Guidance_Pending" xml:space="preserve">
     <value>Press "Recheck" to verify the login status.</value>
   </data>

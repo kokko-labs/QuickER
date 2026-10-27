@@ -16,6 +16,26 @@ internal sealed class WpfMockProjectTargetProfile : MockProjectTargetProfile
     internal override string UiFileSearchPattern => "*.xaml";
 
     /// <inheritdoc />
+    /// <remarks>App.xaml を除いた .xaml を数える（MainWindow が画面を兼ねることもあるので数える）。</remarks>
+    internal override int CountScreenArtifacts(string projectDirectory) =>
+        MockProjectFiles
+            .Enumerate(projectDirectory, UiFileSearchPattern)
+            .Count(path =>
+                !string.Equals(
+                    System.IO.Path.GetFileName(path),
+                    "App.xaml",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            );
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 1 つの Window の中で画面を切り替える作り方（DataTemplate・UserControl を使わない）もあり、ファイルの数は画面の数に
+    /// 届かないことがある。誤って失敗にしないよう、警告の行だけにする。
+    /// </remarks>
+    internal override bool ScreenShortfallFailsRun => false;
+
+    /// <inheritdoc />
     /// <remarks>Microsoft.WindowsDesktop.App は Pkcs を刈り込む（明示参照を書くと NU1510）。</remarks>
     internal override bool SharedFrameworkPrunesCryptographyPkcs => true;
 
@@ -54,11 +74,11 @@ internal sealed class WpfMockProjectTargetProfile : MockProjectTargetProfile
     /// <remarks>AI・人間の双方向けの規約ドキュメント（WPF 実装規約・起動時 DI・実 DB 切り替え手順）。</remarks>
     internal override string BuildReadme(
         string projectName,
-        string rootNamespace,
+        MockProjectNamespaces namespaces,
         string? repositoryDialect
     )
     {
-        var dialectSwitchGuide = BuildDialectSwitchGuide(repositoryDialect);
+        var dialectSwitchGuide = BuildDialectSwitchGuide(repositoryDialect, namespaces);
 
         return $@"# {projectName}
 
@@ -93,15 +113,24 @@ folder, and the project itself lives under the `{projectName}/` folder.
 ## Dependency injection at startup
 
 In the startup of `App`, configure a `Microsoft.Extensions.DependencyInjection` container and call
-**`AddGeneratedInMemoryRepositories()`** from `{rootNamespace}.Generated` (this registers the in-memory implementation
-seeded with sample data, so the app runs without a real database).
+**`AddGeneratedInMemoryRepositories()`** (this registers the in-memory implementation seeded with sample data, so the
+app runs without a real database). `AddGeneratedInMemoryRepositories()` is declared in the
+`{namespaces.InMemoryRegistration}` namespace.
 
 ```csharp
+using Microsoft.Extensions.DependencyInjection;
+using {namespaces.InMemoryRegistration};
+
 var services = new ServiceCollection();
 services.AddGeneratedInMemoryRepositories(seedSampleData: true);
 // Register the views and view models
 var provider = services.BuildServiceProvider();
 ```
+
+In the view models and code-behind files that use the data layer, add `using {namespaces.Entities};` and
+`using {namespaces.Repositories};` for the entities and the `I{{Entity}}Repository` contracts.
+
+{BuildNamespaceSection(namespaces)}
 
 ## Switching to a real database
 
@@ -151,6 +180,10 @@ var provider = services.BuildServiceProvider();
     internal override string ApiKeyUiFrameworkRules =>
         "- Implement the UI with MVVM based on CommunityToolkit.Mvvm (ObservableObject / RelayCommand / [ObservableProperty]).\r\n"
         + "- Every screen must be defined as a XAML view (a .xaml Window / Page / UserControl plus its code-behind). Building the control tree from C# code alone (newing up controls and arranging them in code) is forbidden.";
+
+    /// <inheritdoc />
+    internal override string ApiKeyNamespaceRule =>
+        "- The data-layer types are declared in the namespaces listed under \"Namespaces\" in the data-layer summary, and the parent namespace ending in .Generated declares no types. In App.xaml.cs, add a `using` for the namespace that declares AddGeneratedInMemoryRepositories, and add `using` lines for the namespaces of the entities and the I{Entity}Repository contracts to every view model and code-behind file that uses them.";
 
     /// <inheritdoc />
     internal override string ApiKeyScreenReproductionRule =>

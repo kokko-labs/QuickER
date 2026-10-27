@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -56,11 +57,14 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
     /// <summary>生成ターゲットのプロファイル（emit_file の許可拡張子の宣言元）</summary>
     private MockProjectTargetProfile? _targetProfile;
 
-    /// <summary>進捗（emit のパス等）の転送先</summary>
-    private Action<string>? _onProgress;
+    /// <summary>進捗（AI の応答の断片と、emit のパス等の行）の書き手</summary>
+    private MockProgressWriter? _progress;
 
     /// <summary>これまでに提出済みのファイル相対パス（提出順・重複はしない）</summary>
     private readonly List<string> _emittedFiles = new();
+
+    /// <summary>ファイルを 1 つも提出しなかった共通部・画面のターン（実行の最後に失敗として名指しする）</summary>
+    private readonly List<string> _turnsWithoutFiles = new();
 
     /// <summary>現在のターンで emit_file が受理された回数（0 なら emit なしターン）</summary>
     private int _emitCountThisTurn;
@@ -88,6 +92,9 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
     public bool IsAvailable() => true;
 
     /// <inheritdoc />
+    public string BackendName => Strings.Mock_TabApiKey;
+
+    /// <inheritdoc />
     /// <remarks>
     /// 提出できるのは拡張子ホワイトリスト（<see cref="MockProjectEmitTools.ResolveEmitPath"/>）を通った
     /// UI 層のソースだけで、csproj・<c>global.json</c> のようなビルド設定は構造的に書けない。
@@ -111,8 +118,9 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             request.WorkingDirectory,
             request.ProjectName
         );
-        _onProgress = onProgress;
+        _progress = new MockProgressWriter(onProgress);
         _emittedFiles.Clear();
+        _turnsWithoutFiles.Clear();
         _lastTurnResult = new ErChatTurnResult(true, null);
 
         // スキャフォールド済みフォルダから素材（README/mock.json/画面 HTML/style.css/契約要約）を読む
@@ -153,6 +161,9 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             // リクエスト 1: 共通部（App / MainWindow / ナビゲーション骨格 / DI）
             EmitLine(string.Format(Strings.Mock_ApiRun_CommonPart, 1, total));
             var commonFailure = await SendTurnAsync(
+                    1,
+                    Strings.Mock_ApiRun_TurnKindCommon,
+                    Strings.Mock_ApiRun_TurnKindCommon,
                     MockProjectPromptBuilder.BuildApiKeyCommonPrompt(
                         targetProfile,
                         request.ProjectName,
@@ -189,6 +200,12 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
                 var transitions = DescribeTransitionsFrom(materials.Transitions, screen.File);
 
                 var screenFailure = await SendTurnAsync(
+                        index,
+                        Strings.Mock_ApiRun_TurnKindScreen,
+                        string.Format(
+                            Strings.Mock_ApiRun_ScreenTurnLabelFormat,
+                            string.IsNullOrWhiteSpace(screen.Name) ? screen.File : screen.Name
+                        ),
                         MockProjectPromptBuilder.BuildApiKeyScreenPrompt(
                             targetProfile,
                             request.ProjectName,
@@ -216,12 +233,15 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             if (build.Success)
             {
                 EmitLine(Strings.Mock_ApiRun_BuildOk);
-                return new MockProjectAgentOutcome(true, null, false);
+                return CompleteOutcome();
             }
 
             // 修正ターン（固定 1 回）: ビルドエラー全文を添えて修正版の再提出を求める
             EmitLine(Strings.Mock_ApiRun_BuildFailedFixing);
             var fixFailure = await SendTurnAsync(
+                    total + 1,
+                    Strings.Mock_ApiRun_TurnKindFix,
+                    null,
                     MockProjectPromptBuilder.BuildApiKeyFixPrompt(
                         ExcerptBuildOutput(build.Output, BuildOutputMaxChars),
                         _emittedFiles.ToArray()
@@ -244,7 +264,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             if (rebuild.Success)
             {
                 EmitLine(Strings.Mock_ApiRun_BuildOk);
-                return new MockProjectAgentOutcome(true, null, false);
+                return CompleteOutcome();
             }
 
             EmitLine(Strings.Mock_ApiRun_BuildFail);
@@ -262,14 +282,45 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         }
     }
 
+    /// <summary>
+    /// ビルドが通った実行の結果を返す。ファイルを 1 つも提出しなかった共通部・画面のターンがあれば、失敗にして名指しする。
+    /// </summary>
+    /// <remarks>
+    /// やり直しはしない。ファイルを出さないのはたいてい材料が足りないため（設計の画面が図に無いエンティティを使う、など）で、
+    /// 同じ材料でやり直しても同じになりやすい。残りの画面と中間ビルドは続けて、できた分は調べられるように残す。
+    /// </remarks>
+    private MockProjectAgentOutcome CompleteOutcome() =>
+        _turnsWithoutFiles.Count == 0
+            ? new MockProjectAgentOutcome(true, null, false)
+            : new MockProjectAgentOutcome(
+                false,
+                string.Format(
+                    Strings.Mock_ApiRun_ErrorTurnsWithoutFilesFormat,
+                    string.Join(", ", _turnsWithoutFiles)
+                ),
+                false
+            );
+
     /// <inheritdoc />
     public Task InterruptAsync() => _engine?.InterruptAsync() ?? Task.CompletedTask;
 
     /// <summary>
     /// 1 ターンを送信し、キャンセル・ターン失敗を検査する。失敗なら失敗 Outcome を、続行可能なら null を返す。
     /// emit なしターンはログのみで続行する（最終判定は中間ビルドに委ねる）。
+    /// エンジンが応答の終わり方を返したら、ターンの番号と種類を添えて 1 行ログに残す（<see cref="EmitTurnDiagnostics"/>）。
     /// </summary>
+    /// <param name="turnNumber">ターンの番号（共通部が 1・画面が 2 から・修正が最後）</param>
+    /// <param name="turnKind">ターンの種類の表示名（共通部・画面・修正）</param>
+    /// <param name="requiredFilesLabel">
+    /// ファイルを提出すべきターンの名前（共通部・画面 'X'）。ファイルが無ければ実行の最後に失敗として名指しする。
+    /// 修正のターンは null（出し直さなくても再ビルドが成否を決める）
+    /// </param>
+    /// <param name="prompt">送るプロンプト</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     private async Task<MockProjectAgentOutcome?> SendTurnAsync(
+        int turnNumber,
+        string turnKind,
+        string? requiredFilesLabel,
         string prompt,
         CancellationToken cancellationToken
     )
@@ -283,6 +334,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             .SendAsync(prompt, Array.Empty<ChatAttachment>(), cancellationToken)
             .ConfigureAwait(false);
 
+        EmitTurnDiagnostics(turnNumber, turnKind, _lastTurnResult.Diagnostics);
         cancellationToken.ThrowIfCancellationRequested();
 
         // ターンがエンジン側のエラー（API 失敗等）で失敗したら、そこで打ち切る
@@ -295,17 +347,58 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             );
         }
 
-        // このターンで 1 度も emit されなかった場合はログのみ（失敗扱いにせず次へ進む）
+        // このターンで 1 度も emit されなかった場合は、ログに残して次へ進み、実行の最後に失敗にする（CompleteOutcome）
         if (_emitCountThisTurn == 0)
         {
             EmitLine(Strings.Mock_ApiRun_NoEmit);
+
+            if (requiredFilesLabel is not null)
+            {
+                _turnsWithoutFiles.Add(requiredFilesLabel);
+            }
         }
 
         return null;
     }
 
+    /// <summary>
+    /// ターンの中の応答の終わり方を 1 行ログに残す（ターンの番号と種類・応答の回数・終了理由・出力のトークン数と送った上限・捨てたブロックの種類）。
+    /// </summary>
+    /// <remarks>
+    /// 出すのは <see cref="ErChatTurnDiagnostics"/> の値だけで、プロンプト・応答の本文と接続情報（API キー）は出さない
+    /// （診断の型がそれらを持たない）。エンジンが診断を返さないとき（応答が 1 回も無かった）は何も出さない。
+    /// </remarks>
+    private void EmitTurnDiagnostics(
+        int turnNumber,
+        string turnKind,
+        ErChatTurnDiagnostics? diagnostics
+    )
+    {
+        if (diagnostics is null)
+        {
+            return;
+        }
+
+        EmitLine(
+            string.Format(
+                Strings.Mock_ApiRun_TurnDiagnosticsFormat,
+                turnNumber.ToString(CultureInfo.InvariantCulture),
+                turnKind,
+                diagnostics.Responses.ToString(CultureInfo.InvariantCulture),
+                diagnostics.LastStopReason ?? Strings.Mock_ApiRun_DiagnosticsUnknown,
+                diagnostics.OutputTokens?.ToString(CultureInfo.InvariantCulture)
+                    ?? Strings.Mock_ApiRun_DiagnosticsUnknown,
+                diagnostics.MaxOutputTokens?.ToString(CultureInfo.InvariantCulture)
+                    ?? Strings.Mock_ApiRun_DiagnosticsUnknown,
+                diagnostics.OmittedBlockKinds.Count == 0
+                    ? Strings.Mock_ApiRun_DiagnosticsNone
+                    : string.Join(", ", diagnostics.OmittedBlockKinds)
+            )
+        );
+    }
+
     /// <summary>アシスタントのストリーミング断片を進捗として転送する</summary>
-    private void OnAssistantDelta(object? sender, string delta) => _onProgress?.Invoke(delta);
+    private void OnAssistantDelta(object? sender, string delta) => _progress?.Write(delta);
 
     /// <summary>ターン完了を記録する（ターン失敗検出用）</summary>
     private void OnTurnCompleted(object? sender, ErChatTurnResult result) =>
@@ -339,12 +432,13 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         }
         catch (JsonException ex)
         {
-            return ($"Could not parse the tool arguments (JSON): {ex.Message}", false);
+            return RejectEmit($"Could not parse the tool arguments (JSON): {ex.Message}");
         }
 
+        // 出力の上限で切れた提出は content が空のまま届く。ログに残さないと、提出が無かったようにしか見えない
         if (string.IsNullOrWhiteSpace(content))
         {
-            return ("content is empty. Submit the complete file content.", false);
+            return RejectEmit("content is empty. Submit the complete file content.");
         }
 
         if (_targetProfile is null)
@@ -394,8 +488,15 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         return ($"Saved '{resolved.RelativePath}'.", true);
     }
 
+    /// <summary>提出を断り、理由をログにも残す（AI へ返す結果と同じ文言）</summary>
+    private (string Result, bool Success) RejectEmit(string reason)
+    {
+        EmitLine(string.Format(Strings.Mock_ApiRun_EmitRejectedFormat, reason));
+        return (reason, false);
+    }
+
     /// <summary>進捗として 1 行（改行付き）を転送する</summary>
-    private void EmitLine(string line) => _onProgress?.Invoke(line + "\n");
+    private void EmitLine(string line) => _progress?.WriteLine(line);
 
     // ── 素材の読み取り ──
 
@@ -598,15 +699,36 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         RegexOptions.Compiled
     );
 
+    /// <summary>名前空間の宣言（ファイルスコープ <c>namespace X;</c> とブロック <c>namespace X {</c>）を拾う正規表現</summary>
+    private static readonly Regex NamespaceDeclarationRegex = new(
+        @"^[ \t]*namespace[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*[;{\r\n]",
+        RegexOptions.Compiled | RegexOptions.Multiline
+    );
+
+    /// <summary>
+    /// 起動時の登録に使う拡張メソッド（<c>public static … Add…(this IServiceCollection …)</c>）の名前を拾う正規表現
+    /// </summary>
+    private static readonly Regex ServiceRegistrationRegex = new(
+        @"\bpublic\s+static\s+[A-Za-z_][A-Za-z0-9_.<>]*\s+(Add[A-Za-z0-9_]*)\s*\(\s*this\s+IServiceCollection\b",
+        RegexOptions.Compiled
+    );
+
+    /// <summary>名前空間の宣言を持たないファイルの型を示す表記</summary>
+    private const string GlobalNamespaceLabel = "(global namespace)";
+
     /// <summary>
     /// <c>Generated/</c> 配下のデータ層コードを、トークンを浪費しない範囲で要約する
-    /// （ファイル名一覧＋公開型名＋リポジトリ契約のメンバーシグネチャ）。
+    /// （名前空間とファイル・起動時の登録メソッド・リポジトリ契約のメンバーシグネチャ・名前空間ごとの公開型名）。
     /// </summary>
     /// <remarks>
-    /// 詳細な規約は README に書かれている前提で、UI から使う「名前とシグネチャ」だけを渡す。
+    /// 詳細な規約は README に書かれている前提で、UI から使う「名前空間・名前・シグネチャ」だけを渡す。
+    /// データ層は分割出力で型ごとに別の名前空間（<c>…Generated.Entities</c> / <c>…Generated.Repositories</c> など）に
+    /// 分かれ、親の <c>…Generated</c> には型が無い。名前空間を渡さないとモデルは using を推測で書くので、
+    /// 名前空間の節を先頭に置く（上限で切られても、名前空間と登録メソッドの所在は必ず残る）。
     /// リポジトリ契約は <c>I{Entity}Repository</c> だけでなく、CRUD（GetAll / GetById / Insert / Update /
     /// Delete / Save）を宣言している共有の基底契約 <c>IRemoteRepositoryCore</c> / <c>IRepositoryCore</c> も含める
     /// （per-entity の契約は基底を継承するだけで、CRUD の署名を自分では持たない）。
+    /// 公開型の一覧は、図から決まる名前空間を先に、固定の基盤（<c>Runtime*.g.cs</c>）だけの名前空間を最後に並べる。
     /// </remarks>
     internal static string SummarizeGeneratedContracts(string generatedDir)
     {
@@ -625,19 +747,30 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             return "(no data-layer files could be found)";
         }
 
-        var builder = new StringBuilder();
-        builder.AppendLine("Generated files:");
-
-        foreach (var file in files)
-        {
-            builder
-                .Append("- ")
-                .AppendLine(Path.GetRelativePath(generatedDir, file).Replace('\\', '/'));
-        }
-
-        var publicTypes = new List<string>();
+        // 名前空間 → 所属ファイル・公開型（どちらも初出順）
+        var namespaceOrder = new List<string>();
+        var filesByNamespace = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var typesByNamespace = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var registrations = new List<(string Method, string Namespace)>();
         var repositoryContracts = new List<string>();
         var coreContractCount = 0;
+
+        // 名前空間を一覧へ登録する（既にあればファイルだけを足す）
+        void AddNamespace(string name, string relativePath)
+        {
+            if (!filesByNamespace.TryGetValue(name, out var namespaceFiles))
+            {
+                namespaceFiles = new List<string>();
+                filesByNamespace[name] = namespaceFiles;
+                typesByNamespace[name] = new List<string>();
+                namespaceOrder.Add(name);
+            }
+
+            if (!namespaceFiles.Contains(relativePath))
+            {
+                namespaceFiles.Add(relativePath);
+            }
+        }
 
         foreach (var file in files)
         {
@@ -652,13 +785,49 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
                 continue;
             }
 
+            var relativePath = Path.GetRelativePath(generatedDir, file).Replace('\\', '/');
+            var declarations = NamespaceDeclarationRegex
+                .Matches(text)
+                .Select(match => (match.Index, Name: match.Groups[1].Value))
+                .ToList();
+
+            // 位置にある宣言が属する名前空間（直前の namespace 宣言。無ければグローバル名前空間）
+            string NamespaceAt(int index) =>
+                declarations
+                    .Where(declaration => declaration.Index < index)
+                    .Select(d => d.Name)
+                    .LastOrDefault()
+                ?? GlobalNamespaceLabel;
+
+            if (declarations.Count == 0)
+            {
+                AddNamespace(GlobalNamespaceLabel, relativePath);
+            }
+
+            foreach (var declaration in declarations)
+            {
+                AddNamespace(declaration.Name, relativePath);
+            }
+
+            foreach (Match match in ServiceRegistrationRegex.Matches(text))
+            {
+                var registration = (match.Groups[1].Value, NamespaceAt(match.Index));
+
+                if (!registrations.Contains(registration))
+                {
+                    registrations.Add(registration);
+                }
+            }
+
             foreach (Match match in PublicTypeRegex.Matches(text))
             {
                 var name = match.Groups[2].Value;
+                var typeNamespace = NamespaceAt(match.Index);
+                AddNamespace(typeNamespace, relativePath);
 
-                if (!publicTypes.Contains(name))
+                if (!typesByNamespace[typeNamespace].Contains(name))
                 {
-                    publicTypes.Add(name);
+                    typesByNamespace[typeNamespace].Add(name);
                 }
 
                 // リポジトリ契約（I{Entity}Repository と共有の基底 I*RepositoryCore）はメンバーシグネチャも
@@ -684,10 +853,54 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
                             name.EndsWith("RepositoryCore", StringComparison.Ordinal)
                                 ? coreContractCount++
                                 : repositoryContracts.Count,
-                            $"{name}{match.Groups[3].Value}\n{string.Join("\n", members.Select(m => "  " + m))}"
+                            $"{name}{match.Groups[3].Value} (namespace {typeNamespace})\n{string.Join("\n", members.Select(m => "  " + m))}"
                         );
                     }
                 }
+            }
+        }
+
+        // 固定の基盤（Runtime*.g.cs）だけを持つ名前空間は後ろへ回す（安定ソート＝それ以外は初出順のまま）
+        var orderedNamespaces = namespaceOrder
+            .OrderBy(name =>
+                filesByNamespace[name]
+                    .All(path =>
+                        Path.GetFileName(path).StartsWith("Runtime", StringComparison.Ordinal)
+                    )
+            )
+            .ToList();
+
+        var builder = new StringBuilder();
+
+        // 名前空間の節を先頭に置く（上限で切られても残す）
+        builder.AppendLine(
+            "Namespaces (each file under Generated/ declares its own namespace, and the parent namespace ending in .Generated declares no types, so add a using for every namespace you use):"
+        );
+
+        foreach (var name in orderedNamespaces)
+        {
+            builder
+                .Append("- ")
+                .Append(name)
+                .Append(": ")
+                .AppendLine(string.Join(", ", filesByNamespace[name]));
+        }
+
+        if (registrations.Count > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine(
+                "Startup registration methods (extension methods on IServiceCollection):"
+            );
+
+            foreach (var (method, registrationNamespace) in registrations)
+            {
+                builder
+                    .Append("- ")
+                    .Append(method)
+                    .Append(" (namespace ")
+                    .Append(registrationNamespace)
+                    .AppendLine(")");
             }
         }
 
@@ -699,10 +912,22 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             builder.AppendLine(string.Join("\n", repositoryContracts));
         }
 
-        if (publicTypes.Count > 0)
+        var typedNamespaces = orderedNamespaces
+            .Where(name => typesByNamespace[name].Count > 0)
+            .ToList();
+
+        if (typedNamespaces.Count > 0)
         {
             builder.AppendLine();
-            builder.Append("Public types: ").AppendLine(string.Join(", ", publicTypes));
+
+            foreach (var name in typedNamespaces)
+            {
+                builder
+                    .Append("Public types in ")
+                    .Append(name)
+                    .Append(": ")
+                    .AppendLine(string.Join(", ", typesByNamespace[name]));
+            }
         }
 
         var summary = builder.ToString().TrimEnd();

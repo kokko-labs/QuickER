@@ -1,5 +1,6 @@
 using System.IO;
 using AwesomeAssertions;
+using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Tests.TestSupport;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
@@ -31,6 +32,9 @@ public class MockProjectAgentRunnerTests
         /// </summary>
         public bool WaitForCancellation { get; set; }
 
+        /// <summary>RunAsync の始めに流す進捗の文章</summary>
+        public string ProgressText { get; set; } = "作業を開始します。\n";
+
         /// <summary>RunAsync が呼ばれたスレッド</summary>
         public int? RunThreadId { get; private set; }
 
@@ -45,6 +49,9 @@ public class MockProjectAgentRunnerTests
 
         public bool IsAvailable() => Available;
 
+        /// <summary>実行ログに出すバックエンド名</summary>
+        public string BackendName { get; set; } = "FakeBackend";
+
         public bool FinalBuildEscapesSandbox => EscapesSandbox;
 
         public async Task<MockProjectAgentOutcome> RunAsync(
@@ -55,7 +62,7 @@ public class MockProjectAgentRunnerTests
         {
             RunThreadId = Environment.CurrentManagedThreadId;
             CapturedRequest = request;
-            onProgress("作業を開始します。\n");
+            onProgress(ProgressText);
             OnRun?.Invoke(request.WorkingDirectory);
 
             if (ThrowOnRun is not null)
@@ -1038,5 +1045,333 @@ public class MockProjectAgentRunnerTests
         (await runner.IsDotnetAvailableAsync(TestContext.Current.CancellationToken))
             .Should()
             .BeTrue();
+    }
+
+    /// <summary>
+    /// 実行の完了・失敗の行は実行器のバックエンド名を、成果物チェックの行はターゲットの UI ファイルの拡張子を出し、
+    /// 「Claude Code」「xaml」を固定で出さないことを、英語と日本語の文言で検証する。
+    /// </summary>
+    [Theory(DisplayName = "実行ログはバックエンド名と UI ファイルの拡張子を出す")]
+    [InlineData("en", "Codex", "blazor", true, true)]
+    [InlineData("en", "API Key", "blazor", false, true)]
+    [InlineData("en", "Copilot", "wpf", true, false)]
+    [InlineData("en", "Claude Code", "wpf", false, false)]
+    [InlineData("ja", "Codex", "blazor", false, false)]
+    [InlineData("ja", "API キー", "wpf", true, true)]
+    public async Task RunAsync_LogNamesBackendAndUiExtension(
+        string uiCulture,
+        string backendName,
+        string target,
+        bool agentSucceeds,
+        bool writeArtifacts
+    )
+    {
+        var folder = NewTempFolder();
+        var profile =
+            target == "blazor" ? MockProjectTargetProfile.Blazor : MockProjectTargetProfile.Wpf;
+        var uiFile = target == "blazor" ? "Home.razor" : "MainWindow.xaml";
+        var agent = new FakeMockProjectAgent
+        {
+            BackendName = backendName,
+            Outcome = new MockProjectAgentOutcome(
+                agentSucceeds,
+                agentSucceeds ? null : "boom",
+                false
+            ),
+            OnRun = writeArtifacts
+                ? dir =>
+                {
+                    var project = ProjectDirectory(dir);
+                    Directory.CreateDirectory(project);
+                    File.WriteAllText(Path.Combine(project, $"{ProjectName}.csproj"), "<Project/>");
+                    File.WriteAllText(Path.Combine(project, uiFile), "<x/>");
+                }
+                : null,
+        };
+        var runner = new MockProjectAgentRunner(
+            agent,
+            new FakeBuildRunner(),
+            timeout: null,
+            profile: profile
+        );
+        var progress = new List<string>();
+        var previous = System.Globalization.CultureInfo.CurrentUICulture;
+        System.Globalization.CultureInfo.CurrentUICulture = new System.Globalization.CultureInfo(
+            uiCulture
+        );
+
+        try
+        {
+            await runner.RunAsync(
+                folder,
+                ProjectName,
+                additionalInstructions: null,
+                string.Empty,
+                progress.Add,
+                TestContext.Current.CancellationToken
+            );
+
+            var log = string.Concat(progress);
+            var extension = target == "blazor" ? ".razor" : ".xaml";
+            var (clientLine, artifactLine) = (uiCulture, agentSucceeds, writeArtifacts) switch
+            {
+                ("en", true, true) => (
+                    $"== {backendName} execution completed ==",
+                    $"Artifact check: found the .csproj file and the {extension} files."
+                ),
+                ("en", false, true) => (
+                    $"== {backendName} execution failed: boom ==",
+                    $"Artifact check: found the .csproj file and the {extension} files."
+                ),
+                ("en", true, false) => (
+                    $"== {backendName} execution completed ==",
+                    $"Artifact check: the .csproj file or the {extension} files were not found."
+                ),
+                ("en", false, false) => (
+                    $"== {backendName} execution failed: boom ==",
+                    $"Artifact check: the .csproj file or the {extension} files were not found."
+                ),
+                ("ja", true, true) => (
+                    $"== {backendName} の実行が完了しました ==",
+                    $"成果物チェック: .csproj と {extension} のファイルを確認しました。"
+                ),
+                _ => (
+                    $"== {backendName} の実行が失敗しました: boom ==",
+                    $"成果物チェック: .csproj または {extension} のファイルが見つかりません。"
+                ),
+            };
+
+            log.Should().Contain(clientLine).And.Contain(artifactLine);
+
+            if (backendName != "Claude Code")
+            {
+                log.Should().NotContain("Claude Code");
+            }
+
+            if (target == "blazor")
+            {
+                log.Should().NotContain("xaml");
+            }
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = previous;
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>実行器 4 つのバックエンド名が生成画面のタブの表記と同じことを検証する</summary>
+    [Fact(DisplayName = "実行器のバックエンド名はタブの表記と同じ")]
+    public void Agents_BackendNames_MatchTabHeaders()
+    {
+        new ClaudeCodeMockProjectAgent(new ClaudeCodeProcessClient())
+            .BackendName.Should()
+            .Be("Claude Code");
+        new CodexMockProjectAgent(new CodexAppServerClient()).BackendName.Should().Be("Codex");
+        new CopilotMockProjectAgent(new CopilotRuntimeClient()).BackendName.Should().Be("Copilot");
+        new ApiKeyMockProjectAgent(
+            (_, _) => throw new InvalidOperationException(),
+            new FakeBuildRunner()
+        )
+            .BackendName.Should()
+            .Be(MockStrings.Mock_TabApiKey);
+    }
+
+    /// <summary>
+    /// プロジェクトフォルダに、画面を <paramref name="screenCount"/> 個持つ設計（design/mock/mock.json）を置き、
+    /// csproj と <paramref name="uiFiles"/> の UI ファイルを書く副作用を返す
+    /// </summary>
+    private static Action<string> WriteProjectWithScreens(
+        int screenCount,
+        params (string Path, string Content)[] uiFiles
+    ) =>
+        dir =>
+        {
+            var project = ProjectDirectory(dir);
+            var design = Path.Combine(project, "design", "mock");
+            Directory.CreateDirectory(design);
+            var store = MockFolderStore.CreateNew(design, ProjectName, "# schema");
+
+            for (var i = 0; i < screenCount; i++)
+            {
+                store.SaveScreen(
+                    $"Screen{i}.html",
+                    $"Screen {i}",
+                    "role",
+                    "<!DOCTYPE html><html><body></body></html>",
+                    Array.Empty<MockTransition>(),
+                    "init"
+                );
+            }
+
+            File.WriteAllText(Path.Combine(project, $"{ProjectName}.csproj"), "<Project/>");
+
+            foreach (var (path, content) in uiFiles)
+            {
+                var full = Path.Combine(project, path);
+                Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                File.WriteAllText(full, content);
+            }
+        };
+
+    /// <summary>決まった進捗の副作用でランナーを 1 回走らせる</summary>
+    private static async Task<(MockProjectAgentResult Result, string Log)> RunWithAsync(
+        MockProjectTargetProfile profile,
+        Action<string> onRun
+    )
+    {
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent { OnRun = onRun };
+        var runner = new MockProjectAgentRunner(
+            agent,
+            new FakeBuildRunner(),
+            timeout: null,
+            profile: profile
+        );
+        var progress = new List<string>();
+
+        try
+        {
+            var result = await runner.RunAsync(
+                folder,
+                ProjectName,
+                additionalInstructions: null,
+                string.Empty,
+                progress.Add,
+                TestContext.Current.CancellationToken
+            );
+
+            return (result, string.Concat(progress));
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Blazor では @page の行の数が設計の画面の数に届かなければ、ビルドが通っても全体を失敗にし、数を名指しすることを検証する
+    /// （App.razor・Routes.razor・レイアウトは @page を持たないので数えない）
+    /// </summary>
+    [Fact(DisplayName = "Blazor は @page の数が画面の数に届かなければ失敗にする")]
+    public async Task RunAsync_BlazorScreensMissing_Fails()
+    {
+        var (result, log) = await RunWithAsync(
+            MockProjectTargetProfile.Blazor,
+            WriteProjectWithScreens(
+                3,
+                ("Components/App.razor", "<html></html>"),
+                ("Components/Routes.razor", "<Router />"),
+                ("Components/Layout/MainLayout.razor", "@inherits LayoutComponentBase"),
+                ("Components/Pages/Index.razor", "@page \"/\"\n<h1>Home</h1>")
+            )
+        );
+
+        result.Success.Should().BeFalse();
+        result.ScreensMissing.Should().BeTrue();
+        result.ScreensExpected.Should().Be(3);
+        result.ScreenArtifactsFound.Should().Be(1);
+        result.BuildSucceeded.Should().BeTrue();
+        result
+            .Message.Should()
+            .Be(string.Format(MockStrings.Mock_Result_ScreensMissingFormat, 3, 1));
+        log.Should().Contain(string.Format(MockStrings.Mock_Run_ScreensMissingFormat, 3, 1));
+    }
+
+    /// <summary>
+    /// Blazor では 1 つのファイルに複数の @page があればその数だけ数え、画面の数に届けば合格することを検証する
+    /// </summary>
+    [Fact(DisplayName = "Blazor は 1 ファイルの複数の @page も数え、届けば合格")]
+    public async Task RunAsync_BlazorMultiplePageDirectives_Pass()
+    {
+        var (result, log) = await RunWithAsync(
+            MockProjectTargetProfile.Blazor,
+            WriteProjectWithScreens(
+                3,
+                ("Components/App.razor", "<html></html>"),
+                (
+                    "Components/Pages/Products.razor",
+                    "@page \"/products\"\n@page \"/products/{Id:int}\"\n<h1/>"
+                ),
+                ("Components/Pages/Index.razor", "  @page \"/\"\n<h1/>")
+            )
+        );
+
+        result.Success.Should().BeTrue();
+        result.ScreensMissing.Should().BeFalse();
+        result.ScreenArtifactsFound.Should().Be(3);
+        log.Should().NotContain(string.Format(MockStrings.Mock_Run_ScreensMissingFormat, 3, 3));
+    }
+
+    /// <summary>
+    /// WPF では App.xaml を除いた .xaml が画面の数に届かなくても失敗にせず、警告の行だけを出すことを検証する
+    /// （1 つの Window の中で画面を切り替える作り方を誤って失敗にしない）
+    /// </summary>
+    [Fact(DisplayName = "WPF は画面のファイルが足りなくても警告だけで失敗にしない")]
+    public async Task RunAsync_WpfScreensMissing_WarnsOnly()
+    {
+        var (result, log) = await RunWithAsync(
+            MockProjectTargetProfile.Wpf,
+            WriteProjectWithScreens(
+                3,
+                ("App.xaml", "<Application/>"),
+                ("MainWindow.xaml", "<Window/>")
+            )
+        );
+
+        result.Success.Should().BeTrue();
+        result.ScreensMissing.Should().BeFalse();
+        result.ScreensExpected.Should().Be(3);
+        result.ScreenArtifactsFound.Should().Be(1);
+        log.Should().Contain(string.Format(MockStrings.Mock_Run_ScreensMissingWarningFormat, 3, 1));
+    }
+
+    /// <summary>設計（mock.json）が無ければ、画面の数は確かめず従来どおりの判定にすることを検証する</summary>
+    [Fact(DisplayName = "設計が無ければ画面の数は確かめない")]
+    public async Task RunAsync_NoDesign_SkipsScreenCount()
+    {
+        var (result, _) = await RunWithAsync(MockProjectTargetProfile.Blazor, WriteArtifacts());
+
+        result.ScreensExpected.Should().BeNull();
+        result.ScreenArtifactsFound.Should().BeNull();
+        result.ScreensMissing.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 実行器の文章が改行で終わらなくても、ランナーの次の行は新しい行から始まることを検証する
+    /// </summary>
+    [Fact(DisplayName = "実行器の文章が改行で終わらなくても、ランナーの行は新しい行から始まる")]
+    public async Task RunAsync_RunnerLinesAfterUnterminatedAgentText_StartOnNewLine()
+    {
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent
+        {
+            OnRun = WriteArtifacts(),
+            ProgressText = "書きかけ",
+        };
+        var runner = new MockProjectAgentRunner(agent, new FakeBuildRunner());
+        var progress = new List<string>();
+
+        try
+        {
+            await runner.RunAsync(
+                folder,
+                ProjectName,
+                additionalInstructions: null,
+                string.Empty,
+                progress.Add,
+                TestContext.Current.CancellationToken
+            );
+
+            var log = string.Concat(progress);
+            var after = log[
+                (log.IndexOf("書きかけ", StringComparison.Ordinal) + "書きかけ".Length)..
+            ];
+            after.Should().StartWith("\n");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
     }
 }
