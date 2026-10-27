@@ -11,8 +11,8 @@
       "quicker.codegen.csharp": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Model": "[0.2.0, )",
-          "QuickER.Platform": "[0.2.0, )",
+          "QuickER.Model": "[0.3.0, )",
+          "QuickER.Platform": "[0.3.0, )",
           "Scriban": "[7.5.3, )"
         }
       },
@@ -22,7 +22,7 @@
       "quicker.model": {
         "type": "Project",
         "dependencies": {
-          "QuickER.Dialects": "[0.2.0, )"
+          "QuickER.Dialects": "[0.3.0, )"
         }
       },
       "quicker.platform": {
@@ -31,8 +31,8 @@
       "quicker.provider": {
         "type": "Project",
         "dependencies": {
-          "QuickER.CodeGen.CSharp": "[0.2.0, )",
-          "QuickER.Model": "[0.2.0, )"
+          "QuickER.CodeGen.CSharp": "[0.3.0, )",
+          "QuickER.Model": "[0.3.0, )"
         }
       },
       "Scriban": {

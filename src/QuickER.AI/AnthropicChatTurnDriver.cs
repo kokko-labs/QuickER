@@ -142,9 +142,8 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
                     break;
                 case ChatHistoryRole.Tool:
                     messages.Add(
-                        new MessageParam
+                        new UserMessageParam
                         {
-                            Role = Role.User,
                             Content = new List<ContentBlockParam>
                             {
                                 new ToolResultBlockParam
@@ -181,7 +180,7 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
 
         if (mediaAttachments.Count == 0)
         {
-            return new MessageParam { Role = Role.User, Content = effectiveText };
+            return new UserMessageParam { Content = effectiveText };
         }
 
         var blocks = new List<ContentBlockParam>();
@@ -197,7 +196,7 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
             blocks.Add(new TextBlockParam { Text = effectiveText });
         }
 
-        return new MessageParam { Role = Role.User, Content = blocks };
+        return new UserMessageParam { Content = blocks };
     }
 
     /// <summary>添付 1 件を Anthropic のコンテンツブロック（image base64 / document PDF base64）へ変換する</summary>
@@ -235,7 +234,7 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
     {
         if (item.ToolCalls is not { Count: > 0 })
         {
-            return new MessageParam { Role = Role.Assistant, Content = item.Text };
+            return new AssistantMessageParam { Content = item.Text };
         }
 
         var blocks = new List<ContentBlockParam>();
@@ -258,7 +257,7 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
             );
         }
 
-        return new MessageParam { Role = Role.Assistant, Content = blocks };
+        return new AssistantMessageParam { Content = blocks };
     }
 
     /// <summary>応答メッセージからテキストとツール呼び出しを取り出し、中立な 1 ターンへ変換する</summary>

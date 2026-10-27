@@ -8,6 +8,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ### Changed
 
+#### AI chat & MCP
+
+- **The API key connection to Claude (Anthropic) now uses API version 2026-10-21 instead of 2023-06-01** — the Anthropic SDK moved to 13.3.0
+
 #### Diagram files
 
 - **A diagram file in which two relationships share an identifier is now refused, naming where** — this happens only in a hand-edited file. The message names the constraint names, or the parent and child tables

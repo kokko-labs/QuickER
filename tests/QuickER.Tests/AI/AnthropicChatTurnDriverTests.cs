@@ -85,7 +85,7 @@ public class AnthropicChatTurnDriverTests
         var messages = AnthropicChatTurnDriver.ToMessageParams(history);
 
         messages.Should().HaveCount(2);
-        messages.Should().OnlyContain(m => m.Role.Value() == Role.User);
+        messages.Should().OnlyContain(m => m.Role.Value() == MessageParamRole.User);
     }
 
     /// <summary>

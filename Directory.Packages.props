@@ -16,7 +16,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Anthropic" Version="12.60.0" />
+    <PackageVersion Include="Anthropic" Version="13.3.0" />
     <PackageVersion Include="AwesomeAssertions" Version="9.6.0" />
     <PackageVersion Include="ClosedXML" Version="0.105.1" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
