@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using AwesomeAssertions;
 using QuickER.Tests.TestSupport.Engines;
@@ -59,6 +60,60 @@ public sealed class SeedFingerprintTests : IDisposable
         SeedFingerprint.Of("a\r\nb").Should().Be(lf);
         SeedFingerprint.Of("a\rb").Should().Be(lf);
         SeedFingerprint.Of("a\nc").Should().NotBe(lf);
+    }
+
+    [Fact(
+        DisplayName = "Local の日時は機械の時差を付けずに書き、Utc・Unspecified は往復の書式のまま"
+    )]
+    public void SummaryOfDateTime_WritesLocalWithoutUtcOffset()
+    {
+        var ticks = new DateTime(2026, 2, 1, 8, 0, 0).AddTicks(7654321).Ticks;
+
+        SeedSummary
+            .Object(new DateTime(ticks, DateTimeKind.Local))
+            .Should()
+            .Be("DateTime:Local:2026-02-01T08:00:00.7654321");
+        SeedSummary
+            .Object(new DateTime(ticks, DateTimeKind.Utc))
+            .Should()
+            .Be("DateTime:2026-02-01T08:00:00.7654321Z");
+        SeedSummary
+            .Object(new DateTime(ticks, DateTimeKind.Unspecified))
+            .Should()
+            .Be("DateTime:2026-02-01T08:00:00.7654321");
+    }
+
+    [Fact(
+        DisplayName = "要約は外側のカルチャに依らずインバリアントの中で作られ、終われば外側のカルチャへ戻る"
+    )]
+    public void UnderInvariantCulture_PinsCultureAndRestores()
+    {
+        var culture = CultureInfo.CurrentCulture;
+        var uiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("ja-JP");
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("ja-JP");
+
+            SeedSummary
+                .UnderInvariantCulture(() =>
+                    $"{CultureInfo.CurrentCulture.Name}|{CultureInfo.CurrentUICulture.Name}"
+                )
+                .Should()
+                .Be("|");
+            CultureInfo.CurrentCulture.Name.Should().Be("ja-JP");
+            CultureInfo.CurrentUICulture.Name.Should().Be("ja-JP");
+            SeedFingerprint
+                .Compute([1], _ => CultureInfo.CurrentUICulture.Name)
+                .Should()
+                .Equal(new Dictionary<int, string> { [1] = SeedFingerprint.Of("") });
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = uiCulture;
+        }
     }
 
     [Fact(
