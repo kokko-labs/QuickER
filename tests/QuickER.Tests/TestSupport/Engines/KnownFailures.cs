@@ -49,6 +49,22 @@ public enum KnownKind
     Accepted,
 }
 
+/// <summary>乱数の項目が、どの既定の種の数で流せば必ず起きるか（「起きない」を数えるのはそのときだけ）</summary>
+/// <remarks>
+/// 夜間の種は普段の種を先頭に含むので、普段の既定の種で起きる項目は夜間の既定の種でも起きる（<see cref="RegularSeeds"/> は両方で数える）。
+/// </remarks>
+public enum KnownReproduction
+{
+    /// <summary>普段の既定の種の数で必ず起きる（普段と夜間の既定の種の数で「起きない」を数える）</summary>
+    RegularSeeds,
+
+    /// <summary>夜間の既定の種の数でだけ必ず起きる（夜間の既定の種の数でだけ「起きない」を数える）</summary>
+    NightlySeeds,
+
+    /// <summary>既定の種の数でも起きるとは限らない（「起きない」を数えない）</summary>
+    NotGuaranteed,
+}
+
 /// <summary>既知の失敗の一覧の 1 項目</summary>
 /// <param name="Finding">指摘の番号</param>
 /// <param name="Kind">一時的な項目か、受け入れた差か</param>
@@ -60,8 +76,8 @@ public enum KnownKind
 /// <param name="Predicate">述語（Predicate のとき必須）</param>
 /// <param name="ReasonContains">失敗の詳細に含まれるべき理由の断片（無ければ見ない）</param>
 /// <param name="RandomSeeds">乱数の種の失敗に当たる項目か（偽なら決定的なシナリオの失敗にだけ当たる）</param>
-/// <param name="ReproducibleAtDefaultSeeds">
-/// 既定の種の数で流せば必ず起きるか（乱数の項目だけが偽にできる。偽なら「起きない」を数えない）
+/// <param name="Reproduction">
+/// どの既定の種の数で流せば必ず起きるか（乱数の項目だけが <see cref="KnownReproduction.RegularSeeds"/> 以外にできる）
 /// </param>
 public sealed record KnownEntry(
     string Finding,
@@ -74,7 +90,7 @@ public sealed record KnownEntry(
     Func<EngineFailure, bool>? Predicate = null,
     string? ReasonContains = null,
     bool RandomSeeds = false,
-    bool ReproducibleAtDefaultSeeds = true
+    KnownReproduction Reproduction = KnownReproduction.RegularSeeds
 )
 {
     /// <summary>報告に出す短い表記</summary>
@@ -200,8 +216,9 @@ public sealed record KnownReport(
 /// 鍵だけ当たって理由の断片を含まない失敗は「理由の食い違い」とし、その項目は起きたものとして数える（二重に赤にしない）。
 /// </para>
 /// <para>
-/// 「起きなかった」の規則：決定的なシナリオの項目は常に数える。乱数の項目は、既定の種の数で必ず起きる項目
-/// （<see cref="KnownEntry.ReproducibleAtDefaultSeeds"/>）を既定の種の数で流したとき（<see cref="SeedPlan.IsDefaultCount"/>）だけ数える
+/// 「起きなかった」の規則：決定的なシナリオの項目は常に数える。乱数の項目は、既定の種の数で流したとき
+/// （<see cref="SeedPlan.IsDefaultCount"/>）だけ、<see cref="KnownEntry.Reproduction"/> が
+/// <see cref="KnownReproduction.RegularSeeds"/> なら普段と夜間の両方で、<see cref="KnownReproduction.NightlySeeds"/> なら夜間でだけ数える
 /// （種を絞ると、その形が出ないことがある）。
 /// </para>
 /// <para>
@@ -332,7 +349,17 @@ public sealed class KnownFailureSet
 
     /// <summary>「起きなかった」をこの実行で数える項目か</summary>
     private static bool ChecksNotObserved(KnownEntry entry, SeedPlan plan) =>
-        !entry.RandomSeeds || (entry.ReproducibleAtDefaultSeeds && plan.IsDefaultCount);
+        !entry.RandomSeeds
+        || (
+            plan.IsDefaultCount
+            && (
+                entry.Reproduction == KnownReproduction.RegularSeeds
+                || (
+                    entry.Reproduction == KnownReproduction.NightlySeeds
+                    && plan.Profile == EngineProfile.Nightly
+                )
+            )
+        );
 
     /// <summary>項目の鍵（範囲・種の有無・署名）が失敗に当たるか</summary>
     private bool KeyMatches(KnownEntry entry, EngineFailure failure)
@@ -458,11 +485,16 @@ public sealed class KnownFailureSet
                     break;
             }
 
-            if (!entry.ReproducibleAtDefaultSeeds && !entry.RandomSeeds)
+            if (entry.Reproduction != KnownReproduction.RegularSeeds && !entry.RandomSeeds)
             {
                 problems.Add(
-                    $"{name}: 決定的なシナリオの項目は ReproducibleAtDefaultSeeds を偽にできない（必ず確かめる）"
+                    $"{name}: 決定的なシナリオの項目は Reproduction を {KnownReproduction.RegularSeeds} 以外にできない（必ず確かめる）"
                 );
+            }
+
+            if (!Enum.IsDefined(entry.Reproduction))
+            {
+                problems.Add($"{name}: 知らない Reproduction {entry.Reproduction}");
             }
 
             if (

@@ -42,9 +42,12 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>乱数の種（環境変数 QUICKER_SYNC_MODEL_SEEDS・既定 60・0 から）</summary>
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 1200;
+
+    /// <summary>乱数の種（環境変数 QUICKER_SYNC_MODEL_SEEDS・既定 60・夜間は <see cref="NightlySeedCount"/>・0 から）</summary>
     public static SeedSettings Seeds { get; } =
-        new("QUICKER_SYNC_MODEL_SEEDS", 60, 60, firstSeed: 0);
+        new("QUICKER_SYNC_MODEL_SEEDS", 60, NightlySeedCount, firstSeed: 0);
 
     /// <summary>決定的なシナリオの名前（HTTP の派生も使う）</summary>
     public static TheoryData<string> ScenarioNames()
@@ -113,6 +116,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     [Fact(
         DisplayName = "[Sync/モデル] 乱数の操作の列で、止まらず・収束し・消えない（既知の失敗の署名は除く）"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomSeeds_ConvergeWithoutLoss()
     {
         // 乱数の種では、途中の同期で起きたか静止化で起きたか、どの表で起きたかを区別しない（Family を参照）

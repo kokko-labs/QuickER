@@ -76,7 +76,7 @@ internal static class SyncModelKnownFailures
                             Match = KnownMatch.Family,
                             Signature = group.Key,
                             RandomSeeds = true,
-                            ReproducibleAtDefaultSeeds = false,
+                            Reproduction = KnownReproduction.NotGuaranteed,
                         }
                     ),
             ],

@@ -98,14 +98,24 @@ public class DslConditionFuzzTests
             }
         );
 
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 80;
+
+    /// <summary>
+    /// 種の決め方（<c>QUICKER_FUZZ_SEEDS</c> を名前の総当たりと共有する。普段の数は名前と同じ 2・夜間の数はこのテストのもの）
+    /// </summary>
+    public static SeedSettings Seeds { get; } =
+        new(NameFuzz.SeedCountVariable, NameFuzz.DefaultSeedCount, NightlySeedCount);
+
     [Fact(
         DisplayName = "簡易 DSL の条件の総当たり: 生成→実コンパイル（警告 0）→3 実装先の結果が docs の意味と一致する（既知の失敗の一覧と厳密に一致）"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task DslConditions_MatchDocumentedSemantics()
     {
         var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
 
-        var plan = SeedSource.Resolve(NameFuzz.SeedSettings);
+        var plan = SeedSource.Resolve(Seeds);
         plan.WriteWarnings();
         var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqliteMySqlScopes);
 

@@ -183,9 +183,17 @@ public static class NameFuzz
     /// <summary>既定のシードの数</summary>
     public const int DefaultSeedCount = 2;
 
-    /// <summary>総当たりで回すシードの決め方（<c>QUICKER_FUZZ_SEEDS</c> で数を変えられる・1 から・簡易 DSL の総当たりと共有）</summary>
+    /// <summary>夜間の既定のシードの数</summary>
+    public const int NightlySeedCount = 80;
+
+    /// <summary>
+    /// シードの数を変える環境変数（名前の入口・名前の DDL の往復・簡易 DSL の総当たりで共有する。夜間の数はエンジンごとに違う）
+    /// </summary>
+    public const string SeedCountVariable = "QUICKER_FUZZ_SEEDS";
+
+    /// <summary>総当たりで回すシードの決め方（<c>QUICKER_FUZZ_SEEDS</c> で数を変えられる・1 から・名前の入口と C# 生成のコンパイル）</summary>
     public static SeedSettings SeedSettings { get; } =
-        new("QUICKER_FUZZ_SEEDS", DefaultSeedCount, DefaultSeedCount);
+        new(SeedCountVariable, DefaultSeedCount, NightlySeedCount);
 
     /// <summary>総当たりで回すシード（<see cref="SeedSettings"/> から決める）</summary>
     public static IReadOnlyList<int> Seeds => SeedSource.Resolve(SeedSettings).Seeds;

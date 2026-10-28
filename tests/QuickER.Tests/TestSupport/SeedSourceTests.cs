@@ -243,4 +243,55 @@ public sealed class SeedSourceTests
             .Should()
             .Throw<ArgumentException>();
     }
+
+    private static Dictionary<string, IReadOnlyCollection<string>> Traits(
+        params (string Name, string[] Values)[] traits
+    ) => traits.ToDictionary(t => t.Name, t => (IReadOnlyCollection<string>)t.Values);
+
+    [Theory(DisplayName = "夜間の目印を true か false で宣言したテストは通る")]
+    [InlineData(NightlyEngineTrait.Selected)]
+    [InlineData(NightlyEngineTrait.NotSelected)]
+    public void NightlyTrait_Declared_IsAccepted(string value) =>
+        NightlyEngineTrait
+            .Problem("T", Traits(("Category", ["Integration"]), (NightlyEngineTrait.Name, [value])))
+            .Should()
+            .BeNull();
+
+    [Fact(DisplayName = "夜間の目印の無いテストは、テストの名前と直し方を添えて赤になる")]
+    public void NightlyTrait_Missing_IsProblem() =>
+        NightlyEngineTrait
+            .Problem("簡易 DSL の総当たり", Traits(("Category", ["Integration"])))
+            .Should()
+            .Contain("テスト「簡易 DSL の総当たり」")
+            .And.Contain("NightlyEngine が 無し")
+            .And.Contain("[Trait(\"NightlyEngine\", \"true\")]")
+            .And.Contain("\"false\" と理由のコメント");
+
+    [Theory(DisplayName = "夜間の目印の値が true・false の 1 つでなければ赤になる")]
+    [InlineData("yes")]
+    [InlineData("")]
+    [InlineData("true", "false")]
+    public void NightlyTrait_UnknownOrAmbiguous_IsProblem(params string[] values) =>
+        NightlyEngineTrait
+            .Problem("T", Traits((NightlyEngineTrait.Name, values)))
+            .Should()
+            .Contain("テスト「T」");
+
+    [Fact(DisplayName = "テストの外（テストケースが無い）では夜間の目印を検査しない")]
+    public void NightlyTrait_OutsideTest_IsNotChecked() =>
+        NightlyEngineTrait.Problem(null, null).Should().BeNull();
+
+    [Fact(DisplayName = "目印の無いテストでも、環境変数の読み取りを渡せば検査しない")]
+    public void Resolve_WithEnvironment_DoesNotCheckTrait() =>
+        FluentActions.Invoking(() => SeedSource.Resolve(Settings, Env())).Should().NotThrow();
+
+    [Fact(DisplayName = "目印の無いテストがプロセスの環境変数で種を決めると赤になる")]
+    public void Resolve_FromProcessWithoutTrait_IsRed() =>
+        FluentActions
+            .Invoking(() => SeedSource.Resolve(Settings))
+            .Should()
+            .Throw<Xunit.Sdk.XunitException>()
+            .WithMessage(
+                "*テスト「目印の無いテストがプロセスの環境変数で種を決めると赤になる」*NightlyEngine*"
+            );
 }

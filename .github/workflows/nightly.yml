@@ -1,0 +1,68 @@
+# QuickER Nightly: テストのエンジンを夜間の種の数で深く流す
+#
+# - 普段の CI（ci.yml）は変えない。ここで流すのは [Trait("NightlyEngine", "true")] を付けたテストだけで、
+#   QUICKER_ENGINE_PROFILE=nightly により各エンジンが夜間の既定の種の数（SeedSettings の NightlyCount）を流す。
+#   種を使うテストが目印を付け忘れると、SeedSource.Resolve が普段の CI で赤にする（選び漏れを防ぐ）
+# - integration-nightly（ubuntu-latest）: QuickER.Tests.Integration の夜間のエンジン（実 DB コンテナ・厳格モード）
+# - unit-nightly（windows-latest）: QuickER.Tests の夜間のエンジン（WPF 依存のため Windows）
+# - schedule はリポジトリの既定のブランチ（main）にあるこのファイルでだけ動く。リポジトリに 60 日間活動が無いと
+#   GitHub が schedule を止めるので、止まったら Actions の画面から有効に戻す（workflow_dispatch で手でも流せる）
+# - 決まり（アクションの SHA 固定・トリガー・権限・夜間のプロファイルと絞り込み・時間の上限）は WorkflowGuardTests が固定する
+name: Nightly
+
+on:
+  schedule:
+    # 毎日 18:00 UTC（日本時間 3:00）
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 前の実行が終わっていなければ待つ（取り消さない＝夜間の結果を途中で捨てない）
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  # 実 DB の夜間のエンジン（同期計画の総当たり・同期のモデル・実装先の一致・名前の DDL の往復・簡易 DSL の SQL Server）
+  integration-nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: リポジトリを取得
+        # アクションは ci.yml と同じ commit SHA で固定する（更新は Dependabot が両方まとめて持ってくる）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: 夜間のエンジン（実 DB コンテナ・厳格モード）
+        # QUICKER_REQUIRE_DOCKER=1: コンテナ起動の失敗をスキップへ変換せず失敗させる（ci.yml と同じ）
+        env:
+          QUICKER_ENGINE_PROFILE: nightly
+          QUICKER_REQUIRE_DOCKER: "1"
+        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --filter "NightlyEngine=true" --logger "console;verbosity=normal"
+
+  # Docker を使わない夜間のエンジン（簡易 DSL・名前の総当たり・生成コードのコンパイル）
+  unit-nightly:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: 夜間のエンジン
+        # 一時ファイルはランナーの一時領域（D: ドライブ）へ置く（理由は ci.yml のテストの手順と同じ）
+        env:
+          QUICKER_ENGINE_PROFILE: nightly
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "NightlyEngine=true" --logger "console;verbosity=normal"

@@ -39,6 +39,15 @@ public abstract class NameFuzzDdlRoundTripTestsBase
     /// <summary>派生クラスが受け持つ方言の軸の名前（値は <see cref="DialectNames"/>）</summary>
     public const string DialectAxis = "dialect";
 
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 40;
+
+    /// <summary>
+    /// 種の決め方（<c>QUICKER_FUZZ_SEEDS</c> を名前の総当たりと共有する。普段の数は名前と同じ 2・夜間の数は 5 方言で共通のこのテストのもの）
+    /// </summary>
+    public static SeedSettings Seeds { get; } =
+        new(NameFuzz.SeedCountVariable, NameFuzz.DefaultSeedCount, NightlySeedCount);
+
     /// <summary>方言のプロバイダ（DB には触れない）</summary>
     protected abstract IDatabaseProvider Provider { get; }
 
@@ -67,6 +76,7 @@ public abstract class NameFuzzDdlRoundTripTestsBase
     [Fact(
         DisplayName = "[Integration] 名前の総当たり: DDL を適用して取り込み直すと図との差分が空になる"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task NamesRoundTripThroughDdl()
     {
         Assert.SkipUnless(IsAvailable, UnavailableReason);
@@ -75,10 +85,10 @@ public abstract class NameFuzzDdlRoundTripTestsBase
         var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
         var dialect = Provider.Name;
         var executed = 0;
-        var plan = SeedSource.Resolve(NameFuzz.SeedSettings);
+        var plan = SeedSource.Resolve(Seeds);
         var coverage = new CoverageCounter(NameFuzzDdlRoundTripDimensions.Table);
 
-        foreach (var name in NameFuzzDiagrams.NamesForRun())
+        foreach (var name in NameFuzzDiagrams.NamesForRun(plan))
         {
             foreach (var role in Enum.GetValues<NameRole>())
             {

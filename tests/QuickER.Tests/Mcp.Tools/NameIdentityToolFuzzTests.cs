@@ -6,6 +6,7 @@ using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Mcp.Tools;
@@ -31,6 +32,7 @@ public sealed class NameIdentityToolFuzzTests
     [Theory(DisplayName = "図のツールの重複の判定は名前の規則と同じ答えになる（両ホスト）")]
     [InlineData(ToolHostKind.Gui)]
     [InlineData(ToolHostKind.File)]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void DiagramTools_AgreeWithNameRule(ToolHostKind host)
     {
         var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
@@ -101,6 +103,7 @@ public sealed class NameIdentityToolFuzzTests
     }
 
     [Fact(DisplayName = "名前付きクエリのツールの重複の判定は名前の規則と同じ答えになる")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void QueryTool_AgreesWithNameRule()
     {
         var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);

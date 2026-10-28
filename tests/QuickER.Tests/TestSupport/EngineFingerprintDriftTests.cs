@@ -21,6 +21,9 @@ namespace QuickER.Tests.TestSupport;
 /// 書き直しを並べて走らせない。
 /// </para>
 /// </remarks>
+// 種を使うが夜間に流さない: 普段の CI が記録の全種を照合し、夜間に増える種は記録に無いので照合の対象が増えない
+// （流すと、増えた種の入力の生成の時間だけが掛かる）
+[Trait(NightlyEngineTrait.Name, NightlyEngineTrait.NotSelected)]
 public sealed class EngineFingerprintDriftTests
 {
     /// <summary>記録のファイル（リポジトリ直下からの相対パス）</summary>

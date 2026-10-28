@@ -25,8 +25,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 照合順序で結果が変わる行だけを判定せず、NULL の行と照合順序に依らず決まる行は判定する。
 /// </para>
 /// <para>
-/// 単位ごと・実装先ごとに新しいデータベースを作って捨てる。シードは既定で 1 つ（<c>QUICKER_FUZZ_SEEDS</c> を指定したときだけ
-/// その数）。
+/// 単位ごと・実装先ごとに新しいデータベースを作って捨てる。シードは普段の既定で 1 つ・夜間は <see cref="NightlySeedCount"/>
+/// （<c>QUICKER_FUZZ_SEEDS</c> を指定したときはその数）。
 /// </para>
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
@@ -38,9 +38,19 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 16;
+
+    /// <summary>
+    /// 種の決め方（<c>QUICKER_FUZZ_SEEDS</c> を名前の総当たりと共有する。普段の既定は先頭の種 1 つ＝1 種でも実コンテナで時間が掛かるため）
+    /// </summary>
+    public static SeedSettings Seeds { get; } =
+        new(NameFuzz.SeedCountVariable, 1, NightlySeedCount);
+
     [Fact(
         DisplayName = "簡易 DSL の条件の総当たり（SQL Server）: 生成→実コンパイル→QuickER 版 Repository と EF Core の結果が docs の意味と一致する（既知の失敗の一覧と厳密に一致）"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task DslConditions_MatchDocumentedSemanticsOnSqlServer()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
@@ -66,12 +76,11 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
             BackendAxis(fixture).Adapters
         );
         var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
-        var seedsSpecified =
-            Environment.GetEnvironmentVariable("QUICKER_FUZZ_SEEDS") is { Length: > 0 };
-        var seeds = seedsSpecified ? NameFuzz.Seeds : [NameFuzz.Seeds[0]];
+        var plan = SeedSource.Resolve(Seeds);
+        plan.WriteWarnings();
         var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqlServerScopes);
 
-        foreach (var seed in seeds)
+        foreach (var seed in plan.Seeds)
         {
             foreach (var unit in DslFuzzUnits.SqlServer(seed))
             {
@@ -85,12 +94,8 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
 
         ledger.AssertMatchesKnown($"{Suite}-");
 
-        // 網羅しない組は、照合の結果を表明してから照合する。このテストの既定（QUICKER_FUZZ_SEEDS を指定しない＝先頭の種 1 つ）
-        // のときだけ照合する（種の数で欠けが変わるため）
-        if (!seedsSpecified)
-        {
-            DslFuzzCoverage.AssertGaps(coverageReports, plan: null);
-        }
+        // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ＝種の数で欠けが変わるため）
+        DslFuzzCoverage.AssertGaps(coverageReports, plan);
     }
 
     /// <summary>

@@ -37,6 +37,7 @@ public sealed class NameFuzzCompilationTests
     )]
     [InlineData(Config.SqlServerFull)]
     [InlineData(Config.SqlitePlain)]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void GeneratedCode_CompilesWithoutWarnings(Config config)
     {
         var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
@@ -44,7 +45,9 @@ public sealed class NameFuzzCompilationTests
         var (dialect, provider, options) = Configure(config);
         var (diagram, names) = NameFuzzDiagrams.BuildAll(
             dialect,
-            NameFuzzDiagrams.NamesForRun().Concat(CaseOnlyNames)
+            NameFuzzDiagrams
+                .NamesForRun(SeedSource.Resolve(NameFuzz.SeedSettings))
+                .Concat(CaseOnlyNames)
         );
         AddQueries(diagram, names);
 

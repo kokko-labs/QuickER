@@ -2,6 +2,7 @@ using System.Text.Json;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;
@@ -19,6 +20,7 @@ namespace QuickER.Tests.Gui.ViewModels;
 public sealed class NameIdentityViewModelFuzzTests
 {
     [Fact(DisplayName = "プロパティパネルの名前の書き換えは名前の規則と同じ重複の判定になる")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void PropertySetters_AgreeWithNameRule()
     {
         var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);

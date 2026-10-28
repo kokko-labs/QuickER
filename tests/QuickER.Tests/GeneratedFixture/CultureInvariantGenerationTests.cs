@@ -1,6 +1,7 @@
 using System.Reflection;
 using AwesomeAssertions;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.GeneratedFixture;
 
@@ -35,6 +36,9 @@ public sealed class CultureInvariantGenerationTests
 
     [Theory(DisplayName = "コード生成の出力は、書式のカルチャに依らずコミット済みの生成物と同じ")]
     [MemberData(nameof(Cultures))]
+    // 種の指紋（EngineFingerprintDriftTests）を流し直すので種を使うが、夜間に流さない: 指紋と同じく、夜間に増える種は記録に無く
+    // 照合の対象が増えない（ほかのドリフトテストは種を使わない）
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.NotSelected)]
     public async Task DriftTests_PassUnderCulture(string culture)
     {
         if (FixtureDriftHarness.IsRegenerationRequested())

@@ -32,7 +32,7 @@ public sealed class KnownFailureSetTests
         string? signature,
         KnownMatch match = KnownMatch.ExactSignature,
         bool random = false,
-        bool reproducible = true,
+        KnownReproduction reproduction = KnownReproduction.RegularSeeds,
         string? reasonContains = null
     ) =>
         new(
@@ -45,7 +45,7 @@ public sealed class KnownFailureSetTests
             Signature: signature,
             ReasonContains: reasonContains,
             RandomSeeds: random,
-            ReproducibleAtDefaultSeeds: reproducible
+            Reproduction: reproduction
         );
 
     private static KnownFailureSet Set(params KnownEntry[] entries) => new("TestEngine", entries);
@@ -160,9 +160,36 @@ public sealed class KnownFailureSetTests
     [Fact(DisplayName = "既定の種の数で必ず起きるとは限らない乱数の項目は、起きないを数えない")]
     public void NonReproducibleRandomEntry_IsNeverNotObserved()
     {
-        var entry = Pending("random", "sig", random: true, reproducible: false);
+        var entry = Pending(
+            "random",
+            "sig",
+            random: true,
+            reproduction: KnownReproduction.NotGuaranteed
+        );
 
         Set(entry).Classify([], DefaultPlan()).NotObserved.Should().BeEmpty();
+    }
+
+    [Fact(
+        DisplayName = "夜間の既定の種の数でだけ起きる乱数の項目は、夜間の既定の種の数でだけ起きないを数え、起きれば既知として当たる"
+    )]
+    public void NightlyOnlyRandomEntry_NotObservedOnlyAtNightlyDefaultCount()
+    {
+        var entry = Pending(
+            "random",
+            "sig",
+            random: true,
+            reproduction: KnownReproduction.NightlySeeds
+        );
+        var set = Set(entry);
+
+        set.Classify([], DefaultPlan()).NotObserved.Should().BeEmpty();
+        set.Classify([], DefaultPlan(EngineProfile.Nightly)).NotObserved.Should().Equal(entry);
+        set.Classify([], CountPlan()).NotObserved.Should().BeEmpty();
+
+        var failure = new EngineFailure("random", "sig", "", Seed: 1191);
+        set.Classify([failure], DefaultPlan()).IsClean.Should().BeTrue();
+        set.Classify([failure], DefaultPlan(EngineProfile.Nightly)).IsClean.Should().BeTrue();
     }
 
     [Fact(DisplayName = "乱数の項目は種のある失敗にだけ、シナリオの項目は種の無い失敗にだけ当たる")]
@@ -307,6 +334,7 @@ public sealed class KnownFailureSetTests
     [InlineData("predicate-with-signature")]
     [InlineData("keyonly-with-signature")]
     [InlineData("scenario-not-reproducible")]
+    [InlineData("scenario-nightly-only")]
     [InlineData("duplicate")]
     [InlineData("empty-finding")]
     [InlineData("empty-scope")]
@@ -335,7 +363,20 @@ public sealed class KnownFailureSetTests
                 },
             ],
             "keyonly-with-signature" => [baseEntry with { Match = KnownMatch.KeyOnly }],
-            "scenario-not-reproducible" => [baseEntry with { ReproducibleAtDefaultSeeds = false }],
+            "scenario-not-reproducible" =>
+            [
+                baseEntry with
+                {
+                    Reproduction = KnownReproduction.NotGuaranteed,
+                },
+            ],
+            "scenario-nightly-only" =>
+            [
+                baseEntry with
+                {
+                    Reproduction = KnownReproduction.NightlySeeds,
+                },
+            ],
             "duplicate" => [baseEntry, baseEntry with { Finding = "F-9" }],
             "empty-finding" => [baseEntry with { Finding = "" }],
             "empty-scope" => [baseEntry with { Scope = "" }],

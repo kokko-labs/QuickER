@@ -3,6 +3,7 @@ using System.Text.Json;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -64,12 +65,14 @@ public static class NameFuzzDiagrams
         new string(NameFuzz.BaseNames[15][0], 43),
     ];
 
-    /// <summary>流す名前（代表の名前＋既定を超えたシードごとにランダムな名前 6 つ）</summary>
-    public static IReadOnlyList<string> NamesForRun()
+    /// <summary>流す名前（代表の名前＋普段の既定の数を超えたシードごとにランダムな名前 6 つ）</summary>
+    /// <param name="plan">流すシード（普段の既定の数までのシードは代表の名前で足りるので、名前を足さない）</param>
+    public static IReadOnlyList<string> NamesForRun(SeedPlan plan)
     {
         var names = new List<string>(Representative);
+        var firstExtra = plan.Settings.FirstSeed + plan.Settings.RegularCount;
 
-        foreach (var seed in NameFuzz.Seeds.Where(seed => seed > NameFuzz.DefaultSeedCount))
+        foreach (var seed in plan.Seeds.Where(seed => seed >= firstExtra))
         {
             var random = new Random(seed);
 

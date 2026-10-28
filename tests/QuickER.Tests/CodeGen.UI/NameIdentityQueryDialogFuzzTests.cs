@@ -2,6 +2,7 @@ using QuickER.CodeGen.CSharp.Queries;
 using QuickER.CodeGen.UI;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.UI;
 
@@ -17,6 +18,7 @@ namespace QuickER.Tests.CodeGen.UI;
 public sealed class NameIdentityQueryDialogFuzzTests
 {
     [Fact(DisplayName = "クエリ定義ダイアログの重複の判定は名前の規則と同じ答えになる")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void Dialog_AgreesWithNameRule()
     {
         var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);

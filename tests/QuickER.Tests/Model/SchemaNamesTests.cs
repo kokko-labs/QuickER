@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Model;
 
@@ -22,6 +23,7 @@ public sealed class SchemaNamesTests
         SchemaNames.AreSame(first, second).Should().Be(expected);
 
     [Fact(DisplayName = "AreSame は名前の総当たりの規則と同じ答えになる")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void AreSame_AgreesWithFuzzRule()
     {
         foreach (var seed in NameFuzz.Seeds)

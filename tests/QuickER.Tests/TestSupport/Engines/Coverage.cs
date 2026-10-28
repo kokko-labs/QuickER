@@ -319,8 +319,20 @@ public sealed record CoverageReport(
     /// 流した種（null なら常に照合する）。既定の種の数で流したときだけ照合する
     /// （種を絞ると欠けが増え、増やすと欠けが減るので、一覧は既定の種の数での網羅に合わせて書く）
     /// </param>
+    /// <param name="output">夜間に埋まった組を書く出力先（null なら現在のテストの出力）</param>
+    /// <remarks>
+    /// 夜間の既定の種の数（<see cref="EngineProfile.Nightly"/> かつ <see cref="SeedPlan.IsDefaultCount"/>）では、
+    /// 「一覧に無い欠け」と理由の食い違いだけを赤にし、「一覧にあるのに網羅した」項目は赤にせず「夜間なら埋まる組」として
+    /// 出力へ書く。一覧は普段の既定の種の数での網羅に合わせて書いてあり、夜間の種は普段の種を先頭に含むので、夜間に新しい欠けは
+    /// 出ず、埋まる向きにだけずれる。
+    /// </remarks>
     /// <exception cref="CoverageDeclarationException">一覧の項目が、この次元表の網羅すべき組を指していない（種の数に依らず検査する）</exception>
-    public void AssertGaps(CoverageGapSet gaps, string scope, SeedPlan? plan = null)
+    public void AssertGaps(
+        CoverageGapSet gaps,
+        string scope,
+        SeedPlan? plan = null,
+        ITestOutputHelper? output = null
+    )
     {
         ArgumentNullException.ThrowIfNull(gaps);
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
@@ -336,7 +348,42 @@ public sealed record CoverageReport(
             MissingAsFailures(scope),
             ownsScope: s => string.Equals(s, scope, StringComparison.Ordinal)
         );
-        known.AssertClean($"{EngineId} の網羅しない組（{scope}）");
+        var title = $"{EngineId} の網羅しない組（{scope}）";
+
+        if (plan?.Profile == EngineProfile.Nightly)
+        {
+            WriteFilledAtNightly(known.NotObserved, scope, output);
+            known = known with { NotObserved = [] };
+        }
+
+        known.AssertClean(title);
+    }
+
+    /// <summary>夜間の種の数で網羅した、一覧に載っている組をテストの出力へ書く</summary>
+    private void WriteFilledAtNightly(
+        IReadOnlyList<KnownEntry> filled,
+        string scope,
+        ITestOutputHelper? output
+    )
+    {
+        output ??= TestContext.Current.TestOutputHelper;
+
+        if (output is null || filled.Count == 0)
+        {
+            return;
+        }
+
+        output.WriteLine(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"[{EngineId}] 夜間なら埋まる組（{scope}）: {filled.Count} 項目（普段の既定の種の数では欠けるので一覧に残す）"
+            )
+        );
+
+        foreach (var entry in filled)
+        {
+            output.WriteLine($"[{EngineId}]   {entry.Describe()}");
+        }
     }
 
     /// <summary>網羅しない組の一覧の、範囲の項目ごとの当たり方（報告に使う）</summary>

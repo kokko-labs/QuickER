@@ -136,7 +136,7 @@ public static class BackendParityKnownDifferences
             KnownMatch.Predicate,
             Predicate: failure => failure.Source is ParityViolation violation && covers(violation),
             RandomSeeds: true,
-            ReproducibleAtDefaultSeeds: false
+            Reproduction: KnownReproduction.NotGuaranteed
         );
 
     /// <summary>違いを照合に渡す失敗にする（元の違いを持つ）</summary>

@@ -32,6 +32,9 @@ namespace QuickER.Tests.Integration;
 /// 1 つのクラスにまとめてあるので、xUnit は同じ記録の書き直しを並べて走らせない。
 /// </para>
 /// </remarks>
+// 種を使うが夜間に流さない: 普段の CI が記録の全種を照合し、夜間に増える種は記録に無いので照合の対象が増えない
+// （流すと、増えた種の入力の生成の時間だけが掛かる）
+[Trait(NightlyEngineTrait.Name, NightlyEngineTrait.NotSelected)]
 public sealed class EngineFingerprintDriftTests
 {
     /// <summary>記録のファイル（リポジトリ直下からの相対パス）</summary>
@@ -71,7 +74,7 @@ public sealed class EngineFingerprintDriftTests
         {
             Verify(
                 $"SyncPlan.{dialectName}",
-                SyncPlanFuzzTestsBase.SeedSettingsFor(DefaultSyncPlanSeeds(dialectName)),
+                SyncPlanSeeds(dialectName),
                 seed => SyncPlanSummary(dialect, seed)
             );
         }
@@ -179,14 +182,14 @@ public sealed class EngineFingerprintDriftTests
 
     // ---------------- 同期計画の総当たり ----------------
 
-    private static int DefaultSyncPlanSeeds(string dialect) =>
+    private static SeedSettings SyncPlanSeeds(string dialect) =>
         dialect switch
         {
-            "sqlite" => SqliteSyncPlanFuzzTests.DefaultSeeds,
-            "mysql" => MySqlSyncPlanFuzzTests.DefaultSeeds,
-            "sqlserver" => SqlServerSyncPlanFuzzTests.DefaultSeeds,
-            "postgresql" => PostgreSqlSyncPlanFuzzTests.DefaultSeeds,
-            "oracle" => OracleSyncPlanFuzzTests.DefaultOracleSeedCount,
+            "sqlite" => SqliteSyncPlanFuzzTests.Seeds,
+            "mysql" => MySqlSyncPlanFuzzTests.Seeds,
+            "sqlserver" => SqlServerSyncPlanFuzzTests.Seeds,
+            "postgresql" => PostgreSqlSyncPlanFuzzTests.Seeds,
+            "oracle" => OracleSyncPlanFuzzTests.SeedsFor(extended: false),
             _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, null),
         };
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -12,6 +13,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.Resources;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
 namespace QuickER.Tests.Docs;
@@ -206,14 +208,127 @@ public sealed class WorkflowGuardTests
                 .TakeWhile(line => !line.TrimStart().StartsWith("- ", StringComparison.Ordinal))
         );
         body.Should().Contain("dotnet test QuickER.slnx --no-build");
-        Regex
-            .IsMatch(body, @"(?m)^\s+TEMP: \$\{\{ runner\.temp \}\}$")
+        AssertTempOnRunnerTemp(body);
+    }
+
+    /// <summary>夜間のワークフローのアクションは ci.yml と同じ commit SHA で固定する</summary>
+    /// <remarks>
+    /// タグは可変で、上流の付け替えで実行内容が黙って差し替わる。Dependabot は SHA とバージョンコメントを両方書き換えるので、
+    /// 2 つのワークフローの行が同じなら、更新の PR も両方をまとめて持ってくる。
+    /// </remarks>
+    [Fact(DisplayName = "nightly.yml のアクションは ci.yml と同じ commit SHA で固定する")]
+    public void Nightly_PinsActionsToSameShasAsCi()
+    {
+        var uses = UsesLines(ReadWorkflow("nightly.yml"));
+        var ciUses = UsesLines(ReadWorkflow("ci.yml")).ToHashSet(StringComparer.Ordinal);
+
+        uses.Should().NotBeEmpty("nightly.yml から uses を読み取れなかった");
+
+        foreach (var line in uses)
+        {
+            line.Should()
+                .MatchRegex(
+                    @"^[\w.-]+/[\w.-]+@[0-9a-f]{40} # v\S+$",
+                    "アクションは 40 桁の commit SHA とバージョンコメントで固定する"
+                );
+            ciUses.Should().Contain(line, "ci.yml と同じ SHA・同じバージョンコメントにする");
+        }
+    }
+
+    /// <summary>夜間のワークフローは定時と手動でだけ動く</summary>
+    /// <remarks>
+    /// push・pull_request で動くと、夜間の種の数（1 ジョブ 30〜60 分）が普段の変更のたびに走る。
+    /// </remarks>
+    [Fact(DisplayName = "nightly.yml のトリガーは schedule と workflow_dispatch だけ")]
+    public void Nightly_RunsOnlyOnScheduleAndDispatch()
+    {
+        var workflow = ReadWorkflow("nightly.yml");
+
+        TopLevelBlockKeys(workflow, "on")
             .Should()
-            .BeTrue("TEMP はランナーの一時領域を指す");
-        Regex
-            .IsMatch(body, @"(?m)^\s+TMP: \$\{\{ runner\.temp \}\}$")
+            .BeEquivalentTo(
+                ["schedule", "workflow_dispatch"],
+                "push・pull_request などで動かさない"
+            );
+        workflow.Should().Contain("- cron: \"0 18 * * *\"");
+    }
+
+    /// <summary>夜間のワークフローの GITHUB_TOKEN は読み取り専用</summary>
+    [Fact(DisplayName = "nightly.yml の permissions は contents: read だけ")]
+    public void Nightly_PermissionsAreReadOnly()
+    {
+        TopLevelBlock(ReadWorkflow("nightly.yml"), "permissions")
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0 && !line.StartsWith('#'))
             .Should()
-            .BeTrue("TMP はランナーの一時領域を指す");
+            .Equal("contents: read");
+    }
+
+    /// <summary>夜間のワークフローは 2 つのジョブで、夜間のプロファイルと目印の絞り込みでエンジンを流す</summary>
+    /// <remarks>
+    /// プロファイルが消えると普段の種の数で流れ（夜間に何も深く流さないのに緑）、絞り込みが消えるとエンジン以外の全テストが
+    /// 流れて時間の上限を超える。どちらも手元のテストでは気付けない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "nightly.yml の 2 つのジョブは夜間のプロファイルと NightlyEngine の絞り込みでテストを流す"
+    )]
+    public void Nightly_JobsRunNightlyEngines()
+    {
+        var jobs = Jobs(ReadWorkflow("nightly.yml"));
+
+        jobs.Keys.Should().BeEquivalentTo(NightlyJobs.Keys);
+
+        foreach (var (job, project) in NightlyJobs)
+        {
+            var step = NightlyTestStep(jobs[job]);
+            step.Should()
+                .Contain(
+                    $"dotnet test {project} --filter \"{NightlyEngineTrait.Name}={NightlyEngineTrait.Selected}\"",
+                    $"{job} は {project} の目印のテストだけを流す"
+                );
+            Regex
+                .IsMatch(step, $@"(?m)^\s+{SeedSource.ProfileVariable}: {SeedSource.NightlyValue}$")
+                .Should()
+                .BeTrue(
+                    $"{job} の手順は {SeedSource.ProfileVariable} を {SeedSource.NightlyValue} にする"
+                );
+        }
+    }
+
+    /// <summary>夜間の実 DB のジョブは厳格モードで流す</summary>
+    [Fact(DisplayName = "nightly.yml の Ubuntu のジョブは QUICKER_REQUIRE_DOCKER=1 で流す")]
+    public void Nightly_IntegrationJob_IsStrict()
+    {
+        var step = NightlyTestStep(Jobs(ReadWorkflow("nightly.yml"))["integration-nightly"]);
+
+        Regex
+            .IsMatch(step, @"(?m)^\s+QUICKER_REQUIRE_DOCKER: ""1""$")
+            .Should()
+            .BeTrue("コンテナ起動の失敗をスキップ緑にしない");
+    }
+
+    /// <summary>夜間の Windows のジョブも一時ファイルをランナーの一時領域へ置く</summary>
+    [Fact(
+        DisplayName = "nightly.yml の Windows のジョブは TEMP と TMP をランナーの一時領域へ向ける"
+    )]
+    public void Nightly_WindowsJob_PutsTempFilesOnRunnerTemp()
+    {
+        AssertTempOnRunnerTemp(NightlyTestStep(Jobs(ReadWorkflow("nightly.yml"))["unit-nightly"]));
+    }
+
+    /// <summary>夜間のジョブは時間の上限（60 分）を持つ</summary>
+    [Fact(DisplayName = "nightly.yml の各ジョブは timeout-minutes を 60 以下に持つ")]
+    public void Nightly_JobsTimeOutWithinBudget()
+    {
+        foreach (var (job, body) in Jobs(ReadWorkflow("nightly.yml")))
+        {
+            var match = Regex.Match(body, @"(?m)^    timeout-minutes: (?<minutes>\d+)\s*$");
+
+            match.Success.Should().BeTrue($"{job} に timeout-minutes がある");
+            int.Parse(match.Groups["minutes"].Value, CultureInfo.InvariantCulture)
+                .Should()
+                .BeInRange(1, 60, $"{job} は夜間の予算（1 ジョブ 60 分）に収める");
+        }
     }
 
     /// <summary>リリースのタグはビルドしたコミットに付ける</summary>
@@ -391,6 +506,106 @@ public sealed class WorkflowGuardTests
             // 公開済みの名前を出してから続ける（push で飛ばされるものが分かる）
             run.Output.Should().Contain("やり直し").And.Contain("QuickER.Alpha 1.2.0");
         }
+    }
+
+    /// <summary>夜間のワークフローのジョブと、それが流すテストのプロジェクト</summary>
+    private static readonly IReadOnlyDictionary<string, string> NightlyJobs = new Dictionary<
+        string,
+        string
+    >
+    {
+        ["integration-nightly"] =
+            "tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj",
+        ["unit-nightly"] = "tests/QuickER.Tests/QuickER.Tests.csproj",
+    };
+
+    /// <summary>手順の本文が TEMP と TMP をランナーの一時領域へ向けていることを表明する（ci.yml と nightly.yml で共有）</summary>
+    private static void AssertTempOnRunnerTemp(string stepBody)
+    {
+        Regex
+            .IsMatch(stepBody, @"(?m)^\s+TEMP: \$\{\{ runner\.temp \}\}$")
+            .Should()
+            .BeTrue("TEMP はランナーの一時領域を指す");
+        Regex
+            .IsMatch(stepBody, @"(?m)^\s+TMP: \$\{\{ runner\.temp \}\}$")
+            .Should()
+            .BeTrue("TMP はランナーの一時領域を指す");
+    }
+
+    /// <summary>ワークフローの uses の値（出てくる順）</summary>
+    private static List<string> UsesLines(string workflow) =>
+        Regex
+            .Matches(workflow, @"(?m)^\s*(?:-\s+)?uses:\s*(?<value>\S[^\r\n]*?)\s*$")
+            .Select(match => match.Groups["value"].Value)
+            .ToList();
+
+    /// <summary>最上位のキーの本文の行（次の最上位のキーの手前まで）</summary>
+    private static List<string> TopLevelBlock(string workflow, string key)
+    {
+        var lines = workflow.ReplaceLineEndings("\n").Split('\n');
+        var start = Array.FindIndex(lines, line => line == key + ":");
+
+        start.Should().BeGreaterThanOrEqualTo(0, $"最上位のキー {key} がある");
+
+        return lines
+            .Skip(start + 1)
+            .TakeWhile(line => line.Length == 0 || line[0] == ' ' || line[0] == '#')
+            .ToList();
+    }
+
+    /// <summary>最上位のキーの直下（字下げ 2）のキー</summary>
+    private static List<string> TopLevelBlockKeys(string workflow, string key) =>
+        TopLevelBlock(workflow, key)
+            .Select(line => Regex.Match(line, @"^  (?<key>[\w-]+):"))
+            .Where(match => match.Success)
+            .Select(match => match.Groups["key"].Value)
+            .ToList();
+
+    /// <summary>jobs のジョブごとの本文（ジョブ名 → 本文）</summary>
+    private static Dictionary<string, string> Jobs(string workflow)
+    {
+        var jobs = new Dictionary<string, string>(StringComparer.Ordinal);
+        string? current = null;
+        var body = new StringBuilder();
+
+        foreach (var line in TopLevelBlock(workflow, "jobs"))
+        {
+            var header = Regex.Match(line, @"^  (?<job>[\w-]+):\s*$");
+
+            if (header.Success)
+            {
+                if (current is not null)
+                {
+                    jobs[current] = body.ToString();
+                }
+
+                current = header.Groups["job"].Value;
+                body.Clear();
+                continue;
+            }
+
+            body.Append(line).Append('\n');
+        }
+
+        if (current is not null)
+        {
+            jobs[current] = body.ToString();
+        }
+
+        return jobs;
+    }
+
+    /// <summary>ジョブの中の dotnet test の手順（ちょうど 1 つ）の本文</summary>
+    private static string NightlyTestStep(string jobBody)
+    {
+        var steps = Regex
+            .Split(jobBody, @"(?m)^(?=      - )")
+            .Where(step => step.Contains("dotnet test", StringComparison.Ordinal))
+            .ToList();
+
+        steps.Should().ContainSingle("ジョブの dotnet test の手順はちょうど 1 つ");
+
+        return steps[0];
     }
 
     /// <summary>ワークフローの本文を読む</summary>

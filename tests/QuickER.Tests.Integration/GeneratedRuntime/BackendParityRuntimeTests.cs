@@ -97,6 +97,7 @@ public sealed class BackendParityRuntimeTests
     /// 一時的に見逃し、見逃した種の数を出力する。
     /// </remarks>
     [Fact(DisplayName = "[Parity] 乱数の操作の列は、全実装先で QuickER 版とそろう")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomSequences_MatchBaseline()
     {
         var plan = SeedSource.Resolve(Seeds);
@@ -226,9 +227,15 @@ public sealed class BackendParityRuntimeTests
         );
     }
 
-    /// <summary>乱数の種（<c>QUICKER_PARITY_SEED</c> が 1 つの種、<c>QUICKER_PARITY_SEEDS</c> が数・既定 200・1 から）</summary>
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 2000;
+
+    /// <summary>
+    /// 乱数の種（<c>QUICKER_PARITY_SEED</c> が 1 つの種、<c>QUICKER_PARITY_SEEDS</c> が数・既定 200・夜間は
+    /// <see cref="NightlySeedCount"/>・1 から）
+    /// </summary>
     public static SeedSettings Seeds { get; } =
-        new("QUICKER_PARITY_SEEDS", 200, 200, singleVariable: "QUICKER_PARITY_SEED");
+        new("QUICKER_PARITY_SEEDS", 200, NightlySeedCount, singleVariable: "QUICKER_PARITY_SEED");
 
     [Fact(DisplayName = "[Parity] シナリオの名前は重複せず、どれも QuickER 版（基準）で流れる")]
     public void Scenarios_HaveUniqueNamesAndRunOnTheBaseline()

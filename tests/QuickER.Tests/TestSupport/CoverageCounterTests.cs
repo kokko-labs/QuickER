@@ -34,12 +34,15 @@ public sealed class CoverageCounterTests
             ["C"] = c,
         };
 
-    private static SeedPlan Plan(bool isDefaultCount) =>
+    private static SeedPlan Plan(
+        bool isDefaultCount,
+        EngineProfile profile = EngineProfile.Regular
+    ) =>
         new(
             [1],
             IsSingle: false,
             IsDefaultCount: isDefaultCount,
-            EngineProfile.Regular,
+            profile,
             new SeedSettings("QUICKER_TEST_SEEDS", 1, 1),
             []
         );
@@ -268,6 +271,87 @@ public sealed class CoverageCounterTests
             .Invoking(() => report.AssertGaps(empty, Scope, Plan(isDefaultCount: true)))
             .Should()
             .Throw<XunitException>();
+    }
+
+    [Fact(
+        DisplayName = "夜間の既定の種の数では、一覧に載っているのに網羅した組を赤にせず「夜間なら埋まる組」として出力へ書く"
+    )]
+    public void AssertGaps_NightlyListedButCovered_IsWrittenNotRed()
+    {
+        var report = PartialReport();
+        var entries = AllMissing(report);
+        entries.Add(Gap(("A", "a1"), ("B", "b1")));
+        var output = new RecordingOutput();
+
+        FluentActions
+            .Invoking(() =>
+                report.AssertGaps(
+                    CoverageGap.Set("E", entries),
+                    Scope,
+                    Plan(isDefaultCount: true, EngineProfile.Nightly),
+                    output
+                )
+            )
+            .Should()
+            .NotThrow();
+        output.Output.Should().Contain("[E] 夜間なら埋まる組（entrance）: 1 項目");
+        output.Output.Should().Contain("A=a1 × B=b1");
+    }
+
+    [Fact(DisplayName = "夜間の既定の種の数でも、一覧に無い欠けは赤になる")]
+    public void AssertGaps_NightlyUnlistedMissing_IsRed()
+    {
+        var report = PartialReport();
+        var entries = AllMissing(report, "A=a2 × B=b2");
+        entries.Add(Gap(("A", "a1"), ("B", "b1")));
+
+        FluentActions
+            .Invoking(() =>
+                report.AssertGaps(
+                    CoverageGap.Set("E", entries),
+                    Scope,
+                    Plan(isDefaultCount: true, EngineProfile.Nightly),
+                    new RecordingOutput()
+                )
+            )
+            .Should()
+            .Throw<XunitException>()
+            .WithMessage("*新しい失敗 1 件*A=a2 × B=b2*")
+            .Which.Message.Should()
+            .NotContain("起きなかった項目 1 件");
+    }
+
+    [Fact(DisplayName = "夜間でも、一覧が欠けとちょうど一致すれば何も書かずに通る")]
+    public void AssertGaps_NightlyExactList_WritesNothing()
+    {
+        var report = PartialReport();
+        var output = new RecordingOutput();
+
+        report.AssertGaps(
+            CoverageGap.Set("E", AllMissing(report)),
+            Scope,
+            Plan(isDefaultCount: true, EngineProfile.Nightly),
+            output
+        );
+
+        output.Output.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "夜間でも、個別に指定した種の数で流したときは照合しない")]
+    public void AssertGaps_NightlyNonDefaultSeedCount_IsNotChecked()
+    {
+        var report = PartialReport();
+
+        FluentActions
+            .Invoking(() =>
+                report.AssertGaps(
+                    CoverageGap.Set("E", []),
+                    Scope,
+                    Plan(isDefaultCount: false, EngineProfile.Nightly)
+                )
+            )
+            .Should()
+            .NotThrow();
     }
 
     [Fact(DisplayName = "網羅すべき組でない項目は宣言の誤りとして断る（因子の並び・水準の綴り）")]

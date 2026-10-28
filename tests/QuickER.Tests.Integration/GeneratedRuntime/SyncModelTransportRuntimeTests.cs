@@ -67,9 +67,15 @@ internal static class SyncModelSignatures
             Normalize
         );
 
-    /// <summary>派生（HTTP・実 SQL Server）で流す乱数の種（環境変数 QUICKER_SYNC_MODEL_TRANSPORT_SEEDS・既定 10・0 から）</summary>
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 200;
+
+    /// <summary>
+    /// 派生（HTTP・実 SQL Server）で流す乱数の種（環境変数 QUICKER_SYNC_MODEL_TRANSPORT_SEEDS・既定 10・夜間は
+    /// <see cref="NightlySeedCount"/>・0 から）
+    /// </summary>
     public static SeedSettings Seeds { get; } =
-        new("QUICKER_SYNC_MODEL_TRANSPORT_SEEDS", 10, 10, firstSeed: 0);
+        new("QUICKER_SYNC_MODEL_TRANSPORT_SEEDS", 10, NightlySeedCount, firstSeed: 0);
 
     /// <summary>種を並列に流し、既知の失敗（正規化）に当たらない失敗のある種を報告する</summary>
     /// <param name="plan">流す種の決め方</param>
@@ -193,6 +199,7 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
     }
 
     [Fact(DisplayName = "[Sync/モデル/HTTP] 乱数の操作の列で、既知の失敗の外の違反が出ない")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomSeeds_OnlyKnownFailures()
     {
         var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
@@ -319,6 +326,7 @@ public sealed class SyncModelSqlServerRuntimeTests(
     [Fact(
         DisplayName = "[Sync/モデル/SqlServer] 乱数の操作の列（失敗の注入なしの組）で、既知の失敗の外の違反が出ない"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomSeeds_OnlyKnownFailures()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);

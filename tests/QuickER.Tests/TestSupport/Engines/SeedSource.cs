@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Xunit;
+using Xunit.Sdk;
 
 namespace QuickER.Tests.TestSupport.Engines;
 
@@ -124,6 +125,60 @@ public sealed record SeedPlan(
     }
 }
 
+/// <summary>夜間の実行で選ぶテストの目印（<c>[Trait("NightlyEngine", "true")]</c>）</summary>
+/// <remarks>
+/// <para>
+/// 夜間のワークフロー（<c>.github/workflows/nightly.yml</c>）は <c>--filter "NightlyEngine=true"</c> で種を流すテストだけを選ぶ。
+/// 選び漏れを防ぐため、<see cref="SeedSource.Resolve"/> はプロセスの環境変数で種を決めるとき、いま走っているテストが
+/// この目印を <see cref="Selected"/> か <see cref="NotSelected"/> で宣言していなければ例外にする（普段の CI で赤になる）。
+/// どのテストが種を使うかを人が一覧で持たないので、補助（<c>NameFuzz.Seeds</c> など）を経由する使い方も拾える。
+/// </para>
+/// <para>
+/// <see cref="NotSelected"/> は「種を使うが夜間に流さない」の明示で、付けるときは理由のコメントを添える。
+/// テストの外（テストケースが無い）では検査しない。
+/// </para>
+/// </remarks>
+public static class NightlyEngineTrait
+{
+    /// <summary>trait の名前</summary>
+    public const string Name = "NightlyEngine";
+
+    /// <summary>夜間に流す</summary>
+    public const string Selected = "true";
+
+    /// <summary>種を使うが夜間に流さない（理由のコメントを添える）</summary>
+    public const string NotSelected = "false";
+
+    /// <summary>テストの目印に問題があれば、直し方を添えた文を返す（問題が無い・テストの外なら null）</summary>
+    /// <param name="testName">テストの名前（表示名）</param>
+    /// <param name="traits">テストケースの trait（テストの外なら null）</param>
+    public static string? Problem(
+        string? testName,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? traits
+    )
+    {
+        if (traits is null)
+        {
+            return null;
+        }
+
+        if (
+            traits.TryGetValue(Name, out var values)
+            && values.Count == 1
+            && values.Single() is Selected or NotSelected
+        )
+        {
+            return null;
+        }
+
+        var declared = values is null ? "無し" : $"\"{string.Join("\", \"", values)}\"";
+        return $"テスト「{testName}」は環境変数で乱数の種を決めるのに、夜間の目印 {Name} が {declared}。"
+            + $"テストのメソッドに [Trait(\"{Name}\", \"{Selected}\")] を付ける"
+            + $"（種を使うが夜間に流さないなら \"{NotSelected}\" と理由のコメント）。"
+            + "夜間のワークフローはこの目印でエンジンのテストを選ぶ";
+    }
+}
+
 /// <summary>環境変数から流す種を決める（解析の規則を全エンジンで 1 つにする）</summary>
 /// <remarks>
 /// <para>
@@ -147,10 +202,27 @@ public static class SeedSource
     /// <summary>流す種を決める</summary>
     /// <param name="settings">決め方</param>
     /// <param name="environment">環境変数の読み取り（null ならプロセスの環境変数）</param>
+    /// <exception cref="XunitException">
+    /// プロセスの環境変数で決めるのに、いま走っているテストが夜間の目印（<see cref="NightlyEngineTrait"/>）を宣言していない
+    /// </exception>
     public static SeedPlan Resolve(SeedSettings settings, Func<string, string?>? environment = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        environment ??= Environment.GetEnvironmentVariable;
+
+        if (environment is null)
+        {
+            var testCase = TestContext.Current.TestCase;
+
+            if (
+                NightlyEngineTrait.Problem(testCase?.TestCaseDisplayName, testCase?.Traits) is
+                { } problem
+            )
+            {
+                throw new XunitException(problem);
+            }
+
+            environment = Environment.GetEnvironmentVariable;
+        }
 
         var warnings = new List<string>();
         var profile = ResolveProfile(environment(ProfileVariable), warnings);
