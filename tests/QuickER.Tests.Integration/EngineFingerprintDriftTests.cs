@@ -92,10 +92,7 @@ public sealed class EngineFingerprintDriftTests
     private static void Verify(string engineId, SeedSettings settings, Func<int, string> summary)
     {
         var plan = SeedSource.Resolve(settings);
-        var actual = plan.Seeds.ToDictionary(
-            seed => seed,
-            seed => SeedFingerprint.Of(summary(seed))
-        );
+        var actual = SeedFingerprint.Compute(plan.Seeds, summary);
         FingerprintFile.Verify(
             Path.Combine(RepositoryRoot(), RecordPath),
             engineId,
@@ -182,7 +179,7 @@ public sealed class EngineFingerprintDriftTests
 
     // ---------------- 同期計画の総当たり ----------------
 
-    private static SeedSettings SyncPlanSeeds(string dialect) =>
+    internal static SeedSettings SyncPlanSeeds(string dialect) =>
         dialect switch
         {
             "sqlite" => SqliteSyncPlanFuzzTests.Seeds,
@@ -196,7 +193,7 @@ public sealed class EngineFingerprintDriftTests
     /// <summary>
     /// 方言の部品を作る（Docker の方言は fixture を渡さない＝生成が使うメンバーは fixture に触れず、接続を開くメンバーは呼ばない）
     /// </summary>
-    private static SyncPlanFuzzDialect CreateDialect(string name) =>
+    internal static SyncPlanFuzzDialect CreateDialect(string name) =>
         name switch
         {
             "sqlite" => new SqliteSyncPlanFuzzDialect(),

@@ -13,7 +13,7 @@ namespace QuickER.Tests.TestSupport.Engines;
 /// <remarks>
 /// <para>
 /// 値は型の名前つきで、カルチャに依らない書式で書く（<c>1</c> の int と long、空白の有無を見分ける）。
-/// 文字列は引用符で囲み、ASCII の印字できる文字以外を <c>\uXXXX</c> で書く。日時は往復の書式（Kind を含む）、
+/// 文字列は引用符で囲み、ASCII の印字できる文字以外を <c>\uXXXX</c> で書く。日時は往復の書式（Kind を含む。Local は機械の時差を付けず <c>Local:</c> と時差なしの時刻を書く）、
 /// バイト列は 16 進、一覧は要素を並べて展開する（<c>ToString</c> が型の名前しか出さない一覧の中身を見落とさない）。
 /// </para>
 /// <para>
@@ -26,6 +26,41 @@ public static class SeedSummary
 {
     /// <summary>展開する入れ子の深さの上限（循環する参照で止まらなくならないように）</summary>
     private const int MaxDepth = 12;
+
+    /// <summary>要約を作る間だけ、CurrentCulture と CurrentUICulture をインバリアントに固定する</summary>
+    /// <remarks>
+    /// 指紋の記録は日本語の機械で作り、CI は英語で動く。要約に resx の文（差分の説明など）や、カルチャに従う書式が入っても、
+    /// 機械の言語で指紋が変わらないようにする。指紋のドリフトテストは <see cref="SeedFingerprint.Compute"/> を通して必ずこの中で作る。
+    /// </remarks>
+    /// <param name="build">要約を作る処理</param>
+    public static string UnderInvariantCulture(Func<string> build)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        var culture = CultureInfo.CurrentCulture;
+        var uiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+            CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
+            return build();
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = uiCulture;
+        }
+    }
+
+    /// <summary>日時の書き方（Local は機械の時差を付けない＝タイムゾーンの違う機械で同じ要約になる）</summary>
+    /// <param name="value">日時</param>
+    public static string DateTimeText(DateTime value) =>
+        value.Kind == DateTimeKind.Local
+            ? "Local:"
+                + DateTime
+                    .SpecifyKind(value, DateTimeKind.Unspecified)
+                    .ToString("o", CultureInfo.InvariantCulture)
+            : value.ToString("o", CultureInfo.InvariantCulture);
 
     /// <summary>値を 1 つ書く（オブジェクトはプロパティを展開する）</summary>
     /// <param name="value">値</param>
@@ -82,7 +117,7 @@ public static class SeedSummary
                 text.Append(e.GetType().Name).Append('.').Append(e.ToString());
                 return;
             case DateTime dt:
-                text.Append("DateTime:").Append(dt.ToString("o", CultureInfo.InvariantCulture));
+                text.Append("DateTime:").Append(DateTimeText(dt));
                 return;
             case DateTimeOffset dto:
                 text.Append("DateTimeOffset:")

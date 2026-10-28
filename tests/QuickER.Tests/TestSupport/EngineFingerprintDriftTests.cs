@@ -40,10 +40,7 @@ public sealed class EngineFingerprintDriftTests
     private static void Verify(string engineId, SeedSettings settings, Func<int, string> summary)
     {
         var plan = SeedSource.Resolve(settings);
-        var actual = plan.Seeds.ToDictionary(
-            seed => seed,
-            seed => SeedFingerprint.Of(summary(seed))
-        );
+        var actual = SeedFingerprint.Compute(plan.Seeds, summary);
         FingerprintFile.Verify(
             Path.Combine(NeutralResxFiles.FindRepositoryRoot(), RecordPath),
             engineId,

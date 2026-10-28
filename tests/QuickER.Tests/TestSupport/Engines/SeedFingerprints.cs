@@ -31,6 +31,19 @@ public static class SeedFingerprint
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
         return Convert.ToHexStringLower(hash)[..Length];
     }
+
+    /// <summary>種ごとの要約の指紋（要約は <see cref="SeedSummary.UnderInvariantCulture"/> の中で作る）</summary>
+    /// <param name="seeds">種</param>
+    /// <param name="summary">種から要約を作る処理</param>
+    public static Dictionary<int, string> Compute(IEnumerable<int> seeds, Func<int, string> summary)
+    {
+        ArgumentNullException.ThrowIfNull(seeds);
+        ArgumentNullException.ThrowIfNull(summary);
+        return seeds.ToDictionary(
+            seed => seed,
+            seed => Of(SeedSummary.UnderInvariantCulture(() => summary(seed)))
+        );
+    }
 }
 
 /// <summary>指紋の照合でどこまでを見るか</summary>
