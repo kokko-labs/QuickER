@@ -1,4 +1,5 @@
-using System.Globalization;
+using QuickER.Tests.TestSupport.Engines;
+using Xunit.Sdk;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -182,21 +183,20 @@ public static class NameFuzz
     /// <summary>既定のシードの数</summary>
     public const int DefaultSeedCount = 2;
 
-    /// <summary>総当たりで回すシード（<c>QUICKER_FUZZ_SEEDS</c> で数を増やせる）</summary>
-    public static IReadOnlyList<int> Seeds
-    {
-        get
-        {
-            var text = Environment.GetEnvironmentVariable("QUICKER_FUZZ_SEEDS");
-            var count =
-                int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
-                && parsed > DefaultSeedCount
-                    ? parsed
-                    : DefaultSeedCount;
+    /// <summary>夜間の既定のシードの数</summary>
+    public const int NightlySeedCount = 80;
 
-            return Enumerable.Range(1, count).ToList();
-        }
-    }
+    /// <summary>
+    /// シードの数を変える環境変数（名前の入口・名前の DDL の往復・簡易 DSL の総当たりで共有する。夜間の数はエンジンごとに違う）
+    /// </summary>
+    public const string SeedCountVariable = "QUICKER_FUZZ_SEEDS";
+
+    /// <summary>総当たりで回すシードの決め方（<c>QUICKER_FUZZ_SEEDS</c> で数を変えられる・1 から・名前の入口と C# 生成のコンパイル）</summary>
+    public static SeedSettings SeedSettings { get; } =
+        new(SeedCountVariable, DefaultSeedCount, NightlySeedCount);
+
+    /// <summary>総当たりで回すシード（<see cref="SeedSettings"/> から決める）</summary>
+    public static IReadOnlyList<int> Seeds => SeedSource.Resolve(SeedSettings).Seeds;
 
     /// <summary>基底の名前の変形（空白・大文字小文字）</summary>
     public static IReadOnlyList<string> Variants(string baseName) =>
@@ -272,7 +272,7 @@ public sealed record PairOutcome(
 }
 
 /// <summary>
-/// 名前の組を入口へ流し、<see cref="NameIdentityRule"/> の答えと照合して失敗を <see cref="FuzzFailureLedger"/> へ記録する
+/// 名前の組を入口へ流し、<see cref="NameIdentityRule"/> の答えと照合して失敗を <see cref="FuzzFailureLog"/> へ記録する
 /// </summary>
 public static class NameFuzzRunner
 {
@@ -321,7 +321,7 @@ public static class NameFuzzRunner
     /// 作る識別子が大文字小文字を無視して同じなら生成コードが衝突するので、断ってよい（組ごと流さない）。null は識別子を作らない入口
     /// </param>
     public static void Run(
-        FuzzFailureLedger ledger,
+        FuzzFailureLog ledger,
         string entrance,
         NameKind kind,
         Func<string, bool> acceptsAlone,
@@ -342,7 +342,14 @@ public static class NameFuzzRunner
             return accepted;
         }
 
-        foreach (var seed in NameFuzz.Seeds)
+        var plan = SeedSource.Resolve(NameFuzz.SeedSettings);
+        plan.WriteWarnings();
+        var coverage = new CoverageCounter(
+            NameFuzzDimensions.Table,
+            NameFuzzDimensions.FixedLevelsFor(kind)
+        );
+
+        foreach (var seed in plan.Seeds)
         {
             foreach (var pair in NameFuzz.Pairs(seed, RandomPairsPerSeed))
             {
@@ -366,6 +373,8 @@ public static class NameFuzzRunner
                     continue;
                 }
 
+                // 実際に流す組だけを数える（組の記録を読むだけで乱数を引かない）
+                NameFuzzDimensions.Observe(coverage, kind, pair);
                 var outcome = run(pair);
                 var difference = pair.Difference.ToString();
                 var example = $"seed {seed}: {pair} \u2192 {outcome.Detail}";
@@ -381,10 +390,7 @@ public static class NameFuzzRunner
                 }
 
                 // 受け付けた後の性質（後の名前で引けるか・保存形）は、組の違いでなく名前が前後に空白を持つかで分ける
-                var shape =
-                    pair.First.Trim() == pair.First && pair.Second.Trim() == pair.Second
-                        ? "Plain"
-                        : "WithWhitespace";
+                var shape = NameFuzzDimensions.ShapeOf(pair);
 
                 foreach (var violation in outcome.Violations)
                 {
@@ -392,6 +398,15 @@ public static class NameFuzzRunner
                 }
             }
         }
+
+        // 網羅の宣言の誤りはここで赤にし、網羅しない組の照合は既知の失敗の照合の後へ回す
+        // （入口を続けて流すテストで、網羅の赤が後の入口の結果と失敗の照合を隠さない）
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary();
+        coverageReport.WriteGapUsage(NameFuzzDimensions.Gaps, entrance);
+        ledger.DeferCoverageCheck(() =>
+            coverageReport.AssertGaps(NameFuzzDimensions.Gaps, entrance, plan)
+        );
     }
 }
 
@@ -403,28 +418,42 @@ public sealed record FuzzFailureKey(string Entrance, string Property, string? Di
 {
     /// <inheritdoc/>
     public override string ToString() => $"{Entrance} | {Property} | {Difference ?? "-"}";
+
+    /// <summary>このキーの既知の失敗の項目を作る（範囲＝キーの表記・<see cref="KnownMatch.KeyOnly"/>）</summary>
+    /// <param name="finding">対応する指摘（summary の番号・記録の番号）</param>
+    /// <param name="fixedIn">空にする区切り</param>
+    public KnownEntry Known(string finding, string fixedIn) =>
+        new(finding, KnownKind.Pending, fixedIn, null, ToString(), KnownMatch.KeyOnly);
 }
 
-/// <summary>既知の失敗の一覧の 1 項目</summary>
-/// <param name="Key">失敗のキー</param>
-/// <param name="Finding">対応する指摘（summary の番号・記録の番号）</param>
-/// <param name="FixedIn">空にする区切り</param>
-public sealed record KnownFuzzFailure(FuzzFailureKey Key, string Finding, string FixedIn);
-
 /// <summary>
-/// 総当たりの失敗を集め、既知の失敗の一覧と厳密に照合する
+/// 総当たりの失敗をキーごとに集め、既知の失敗の一覧（<see cref="KnownFailureSet"/>）と照合する
 /// </summary>
 /// <remarks>
-/// 一覧に無い失敗があれば赤、一覧に載っているのに観測されなかった失敗も赤（修正したら一覧から外す）。
-/// 照合は入口ごとに行う（<paramref name="entrancePrefix"/> で始まる一覧の項目だけを見る）ので、
-/// 1 つのテストが受け持つ入口の分だけを判定できる。
+/// 照合の規則（一覧に無い失敗も、一覧に載っているのに観測されなかった失敗も赤）は <see cref="KnownFailureSet"/> が持つ。
+/// この記録は、キーの表記を範囲にした失敗（詳細＝最初の 3 つの例）を渡すだけ。照合は入口ごとに行う
+/// （入口の接頭辞で始まる範囲だけを受け持つ）ので、1 つのテストが受け持つ入口の分だけを判定できる。
 /// </remarks>
-public sealed class FuzzFailureLedger(IReadOnlyList<KnownFuzzFailure> known)
+/// <param name="known">既知の失敗の一覧（項目は <see cref="FuzzFailureKey.Known"/> で作る）</param>
+public sealed class FuzzFailureLog(KnownFailureSet known)
 {
     /// <summary>キーごとに残す例の数（同じキーの失敗が別の原因でないかを見分けられるだけ残す）</summary>
     private const int MaxExamplesPerKey = 3;
 
     private readonly Dictionary<FuzzFailureKey, List<string>> _observed = [];
+
+    private readonly List<Action> _deferredCoverageChecks = [];
+
+    /// <summary>
+    /// 網羅しない組の照合を、<see cref="AssertMatchesKnown"/> の既知の失敗の照合の後へ回す
+    /// （網羅の赤が失敗の照合を隠さない）
+    /// </summary>
+    /// <param name="check">網羅しない組の照合（<see cref="CoverageReport.AssertGaps"/>）</param>
+    public void DeferCoverageCheck(Action check)
+    {
+        ArgumentNullException.ThrowIfNull(check);
+        _deferredCoverageChecks.Add(check);
+    }
 
     /// <summary>失敗を記録する（同じキーは最初の 3 つの例を残す）</summary>
     /// <param name="key">失敗のキー</param>
@@ -444,38 +473,43 @@ public sealed class FuzzFailureLedger(IReadOnlyList<KnownFuzzFailure> known)
     }
 
     /// <summary>入口の接頭辞に属する観測と一覧を厳密に照合する</summary>
-    /// <param name="entrancePrefix">このテストが受け持つ入口の接頭辞</param>
+    /// <param name="entrancePrefixes">このテストが受け持つ入口の接頭辞</param>
     public void AssertMatchesKnown(params string[] entrancePrefixes)
     {
-        bool Owned(FuzzFailureKey key) =>
-            entrancePrefixes.Any(prefix =>
-                key.Entrance.StartsWith(prefix, StringComparison.Ordinal)
-            );
+        // 範囲（キーの表記）は入口から始まるので、入口の接頭辞はそのまま範囲の接頭辞になる
+        bool Owned(string scope) =>
+            entrancePrefixes.Any(prefix => scope.StartsWith(prefix, StringComparison.Ordinal));
 
-        var knownKeys = known.Where(item => Owned(item.Key)).ToDictionary(item => item.Key);
-        var unexpected = _observed
-            .Where(pair => Owned(pair.Key) && !knownKeys.ContainsKey(pair.Key))
-            .Select(pair =>
-                $"  新しい失敗: {pair.Key}"
-                + string.Concat(
-                    pair.Value.Select(example => $"{Environment.NewLine}    例: {example}")
-                )
-            )
-            .ToList();
-        var fixedButListed = knownKeys
-            .Values.Where(item => !_observed.ContainsKey(item.Key))
-            .Select(item =>
-                $"  一覧に載っているのに起きなかった（直ったなら一覧から外す）: {item.Key}（{item.Finding}・{item.FixedIn}）"
-            )
-            .ToList();
-        var problems = unexpected.Concat(fixedButListed).ToList();
+        var failures = _observed
+            .Where(pair => Owned(pair.Key.ToString()))
+            .Select(pair => new EngineFailure(
+                pair.Key.ToString(),
+                pair.Key.Property,
+                string.Join("\n", pair.Value.Select(example => $"例: {example}")),
+                Source: pair.Key
+            ));
 
-        if (problems.Count > 0)
+        known.Classify(failures, Owned).AssertClean($"{known.EngineId} の総当たり");
+
+        // 回しておいた網羅しない組の照合（入口ごと）。表明の失敗はすべて並べ、宣言の誤りはそのまま投げる
+        var coverageProblems = new List<string>();
+
+        foreach (var check in _deferredCoverageChecks)
         {
-            throw new Xunit.Sdk.XunitException(
-                "名前の総当たりの結果が既知の失敗の一覧と一致しない:"
-                    + Environment.NewLine
-                    + string.Join(Environment.NewLine, problems)
+            try
+            {
+                check();
+            }
+            catch (XunitException ex)
+            {
+                coverageProblems.Add(ex.Message);
+            }
+        }
+
+        if (coverageProblems.Count > 0)
+        {
+            throw new XunitException(
+                string.Join(Environment.NewLine + Environment.NewLine, coverageProblems)
             );
         }
     }

@@ -24,9 +24,9 @@ public sealed record ParityScenario(
     bool CompareWithBaseline = true
 )
 {
-    /// <summary>全操作がある実装先（QuickER 版を必ず含む＝基準）</summary>
+    /// <summary>全操作がある実装先（QuickER 版を必ず含む＝基準。並びは実装先の軸の正本＝<see cref="BackendParityAxis"/>）</summary>
     public IReadOnlyList<ParityBackendKind> Backends =>
-        Enum.GetValues<ParityBackendKind>().Where(k => Ops.All(op => op.Supports(k))).ToList();
+        BackendParityAxis.Kinds.Where(k => Ops.All(op => op.Supports(k))).ToList();
 
     /// <summary>
     /// 全実装先で流し、QuickER 版と比べた違いを返す（実装先ごとに空の保存先から始める）。
@@ -38,7 +38,7 @@ public sealed record ParityScenario(
     {
         var backends = Backends;
 
-        if (!backends.Contains(ParityBackendKind.Ado))
+        if (!backends.Contains(BackendParityAxis.Baseline))
         {
             throw new InvalidOperationException(
                 $"Scenario '{Name}' must run on the QuickER backend, the baseline."
@@ -47,7 +47,10 @@ public sealed record ParityScenario(
 
         if (only is not null)
         {
-            backends = [.. backends.Where(k => k == ParityBackendKind.Ado || only.Contains(k))];
+            backends =
+            [
+                .. backends.Where(k => k == BackendParityAxis.Baseline || only.Contains(k)),
+            ];
         }
 
         var traces = new Dictionary<ParityBackendKind, IReadOnlyList<ParityStep>>();
@@ -57,12 +60,12 @@ public sealed record ParityScenario(
             traces[kind] = await RunOnAsync(kind, ct);
         }
 
-        var baseline = traces[ParityBackendKind.Ado];
+        var baseline = traces[BackendParityAxis.Baseline];
         var violations = new List<ParityViolation>();
 
         foreach (var (kind, trace) in traces)
         {
-            if (CompareWithBaseline && kind != ParityBackendKind.Ado)
+            if (CompareWithBaseline && kind != BackendParityAxis.Baseline)
             {
                 violations.AddRange(ParityStep.Compare(baseline, trace, kind));
             }

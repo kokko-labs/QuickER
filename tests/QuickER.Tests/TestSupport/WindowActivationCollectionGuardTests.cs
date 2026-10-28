@@ -62,8 +62,7 @@ public class WindowActivationCollectionGuardTests
         Directory
             .EnumerateFiles(TestsRoot, "*.cs", SearchOption.AllDirectories)
             .Where(path =>
-                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                !SourceFiles.IsBuildOutput(Path.GetRelativePath(TestsRoot, path))
                 && !ExcludedFileNames.Contains(Path.GetFileName(path))
             )
             .Select(path => (Path.GetRelativePath(TestsRoot, path), File.ReadAllText(path)))

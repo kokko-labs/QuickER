@@ -4,6 +4,7 @@ using QuickER.Provider;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -36,21 +37,25 @@ public sealed class NameFuzzCompilationTests
     )]
     [InlineData(Config.SqlServerFull)]
     [InlineData(Config.SqlitePlain)]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void GeneratedCode_CompilesWithoutWarnings(Config config)
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
         var entrance = $"compile:{config}";
         var (dialect, provider, options) = Configure(config);
         var (diagram, names) = NameFuzzDiagrams.BuildAll(
             dialect,
-            NameFuzzDiagrams.NamesForRun().Concat(CaseOnlyNames)
+            NameFuzzDiagrams
+                .NamesForRun(SeedSource.Resolve(NameFuzz.SeedSettings))
+                .Concat(CaseOnlyNames)
         );
         AddQueries(diagram, names);
 
         // 図を作れずに名前が入らないまま緑にならないよう、代表の名前の半分以上は入っていること
-        Assert.True(
-            names.Count >= NameFuzzDiagrams.Representative.Count / 2,
-            $"図に入った名前が少なすぎる: {names.Count}"
+        CoverageGuard.AtLeast(
+            "図に入った名前",
+            names.Count,
+            NameFuzzDiagrams.Representative.Count / 2
         );
 
         var (result, removed) = GenerateDroppingNamedCollisions(provider, diagram, options);
@@ -125,7 +130,7 @@ public sealed class NameFuzzCompilationTests
     /// リモートのエンドポイントの大文字小文字だけ違うパターンを確かめる
     /// </summary>
     private static void RecordRuntimeProblems(
-        FuzzFailureLedger ledger,
+        FuzzFailureLog ledger,
         string entrance,
         CodeGenerationResult result,
         Config config,

@@ -4,6 +4,7 @@ using System.Reflection;
 using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.CodeGen.CSharp;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Cli;
 
@@ -43,9 +44,8 @@ public sealed class GenerationOptionSetParityTests
 
     /// <summary>設定 JSON の正となるキー集合＝init 設定可能なインスタンスプロパティ（計算 get-only・static は除外）</summary>
     private static HashSet<string> RecognizedPropertyNames =>
-        typeof(CodeGenerationOptions)
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.CanWrite)
+        OptionKeys
+            .Writable(typeof(CodeGenerationOptions))
             .Select(property => property.Name)
             .ToHashSet();
 

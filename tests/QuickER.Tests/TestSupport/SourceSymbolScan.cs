@@ -397,9 +397,7 @@ internal static class SourceSymbolScan
         return match.Success ? match.Groups[1].Value.Trim() : null;
     }
 
-    private static bool IsBuildOutput(string path) =>
-        path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .Any(segment => segment is "bin" or "obj");
+    private static bool IsBuildOutput(string path) => SourceFiles.IsBuildOutput(path);
 }
 
 /// <summary>src の 1 プロジェクト（コンパイルと、走査の対象の自分のソース）</summary>

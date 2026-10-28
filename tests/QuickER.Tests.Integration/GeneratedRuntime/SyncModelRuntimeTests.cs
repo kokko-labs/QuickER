@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Tests.GeneratedSyncModelFixture;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -30,24 +31,23 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
-public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
+[MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Direct))]
+public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
 {
     /// <summary>1 つの種の操作の数</summary>
     public const int StepsPerSeed = 40;
 
+    /// <summary>世界の組み方（既定＝直結・SQLite のサーバー役。種もシナリオも組み方を渡さずに流す）</summary>
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => SyncModelWorldOptions.Direct;
+
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>種の数（環境変数 QUICKER_SYNC_MODEL_SEEDS・既定 60）</summary>
-    private static int SeedCount =>
-        int.TryParse(
-            Environment.GetEnvironmentVariable("QUICKER_SYNC_MODEL_SEEDS"),
-            NumberStyles.None,
-            CultureInfo.InvariantCulture,
-            out var count
-        )
-        && count > 0
-            ? count
-            : 60;
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 1200;
+
+    /// <summary>乱数の種（環境変数 QUICKER_SYNC_MODEL_SEEDS・既定 60・夜間は <see cref="NightlySeedCount"/>・0 から）</summary>
+    public static SeedSettings Seeds { get; } =
+        new("QUICKER_SYNC_MODEL_SEEDS", 60, NightlySeedCount, firstSeed: 0);
 
     /// <summary>決定的なシナリオの名前（HTTP の派生も使う）</summary>
     public static TheoryData<string> ScenarioNames()
@@ -63,10 +63,21 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
     }
 
     /// <summary>種 1 つを流す（操作の列と違反を返す）</summary>
+    /// <param name="seed">種</param>
+    /// <param name="ct">取り消し</param>
+    /// <param name="options">世界の作り方（転送経路・サーバー役）</param>
+    /// <param name="coverage">
+    /// 操作を次元表のケースとして数える先（null なら数えない）。生成器が返した操作を実行の前に読むだけで、乱数を引かない
+    /// </param>
     internal static async Task<(
         IReadOnlyList<ModelFailure> Failures,
         IReadOnlyList<string> Log
-    )> RunSeedAsync(int seed, CancellationToken ct, SyncModelWorldOptions? options = null)
+    )> RunSeedAsync(
+        int seed,
+        CancellationToken ct,
+        SyncModelWorldOptions? options = null,
+        CoverageCounter? coverage = null
+    )
     {
         var generator = new SyncModelGenerator(seed);
         await using var run = await SyncModelRun.StartAsync(generator.Setup(), ct, options);
@@ -81,7 +92,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
                 states[actor] = await run.World.ReadStateAsync(actor, ct);
             }
 
-            foreach (var op in generator.Next(states))
+            var ops = generator.Next(states);
+
+            if (coverage is not null)
+            {
+                SyncModelDimensions.Observe(coverage, generator, ops);
+            }
+
+            foreach (var op in ops)
             {
                 if (!await run.ExecuteAsync(op))
                 {
@@ -98,78 +116,88 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
     [Fact(
         DisplayName = "[Sync/モデル] 乱数の操作の列で、止まらず・収束し・消えない（既知の失敗の署名は除く）"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomSeeds_ConvergeWithoutLoss()
     {
         // 乱数の種では、途中の同期で起きたか静止化で起きたか、どの表で起きたかを区別しない（Family を参照）
-        var known = SyncModelKnownFailures
-            .All.Select(k => Family(k.Signature))
-            .ToHashSet(StringComparer.Ordinal);
+        var known = SyncModelKnownFailures.Set;
         var results =
             new ConcurrentDictionary<
                 int,
                 (IReadOnlyList<ModelFailure> Failures, IReadOnlyList<string> Log)
             >();
         var elapsed = new ConcurrentDictionary<int, TimeSpan>();
+        var plan = SeedSource.Resolve(Seeds);
+        plan.WriteWarnings(output);
+        var coverage = new CoverageCounter(SyncModelDimensions.Table);
 
         // 種ごとに世界（SQLite の DB 3 つ）を作るので、種どうしは何も共有しない。並列度は CPU 数で抑える
-        await Parallel.ForEachAsync(
-            Enumerable.Range(0, SeedCount),
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
-                CancellationToken = Ct,
-            },
-            async (seed, ct) =>
-            {
-                var watch = Stopwatch.StartNew();
-                results[seed] = await RunSeedAsync(seed, ct);
-                elapsed[seed] = watch.Elapsed;
-            }
+        await RunObservedAsync(
+            coverage,
+            () =>
+                Parallel.ForEachAsync(
+                    plan.Seeds,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
+                        CancellationToken = Ct,
+                    },
+                    async (seed, ct) =>
+                    {
+                        var watch = Stopwatch.StartNew();
+                        results[seed] = await RunSeedAsync(seed, ct, coverage: coverage);
+                        elapsed[seed] = watch.Elapsed;
+                    }
+                )
         );
 
-        var report = new StringBuilder();
+        // 宣言の誤りは種の失敗より先に赤にする（Report が Observe の誤りを投げ直す）
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary(output);
+        coverageReport.WriteGapUsage(
+            SyncModelDimensions.Gaps,
+            SyncModelDimensions.DirectScope,
+            output
+        );
+
+        var report = new EngineReport("SyncModel");
         var knownCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
-        var failed = 0;
 
         foreach (var (seed, (failures, log)) in results.OrderBy(p => p.Key))
         {
+            var classified = known.Classify(
+                failures.Select(f => new EngineFailure(
+                    SyncModelKnownFailures.RandomScope,
+                    f.Signature,
+                    f.Detail,
+                    seed,
+                    f
+                )),
+                plan,
+                scope => scope == SyncModelKnownFailures.RandomScope
+            );
+
             foreach (
-                var signature in failures
-                    .Select(f => Family(f.Signature))
+                var signature in classified
+                    .Matched.Select(m => Family(m.Failure.Signature))
                     .Distinct()
-                    .Where(known.Contains)
             )
             {
                 knownCounts[signature] = knownCounts.GetValueOrDefault(signature) + 1;
             }
 
-            if (failures.All(f => known.Contains(Family(f.Signature))))
+            if (classified.Unknown.Count == 0)
             {
                 continue;
             }
 
-            failed++;
-            report.AppendLine(CultureInfo.InvariantCulture, $"seed {seed}:");
-
-            foreach (var failure in failures)
-            {
-                var mark = known.Contains(Family(failure.Signature)) ? "known" : "NEW";
-                report.AppendLine(CultureInfo.InvariantCulture, $"  [{mark}] {failure.Signature}");
-                report.AppendLine(
-                    CultureInfo.InvariantCulture,
-                    $"         {FirstLine(failure.Detail)}"
-                );
-            }
-
-            report.AppendLine("  ops:");
-
-            foreach (var line in log)
-            {
-                report.AppendLine(CultureInfo.InvariantCulture, $"    {line}");
-            }
+            report.Add(
+                SeedFailure(seed, failures, classified, log, normalize: null),
+                plan.ReproductionFor(seed)
+            );
         }
 
-        output.WriteLine($"seeds: {SeedCount}");
+        output.WriteLine($"seeds: {plan.Seeds.Count}");
 
         foreach (var (seed, time) in elapsed.OrderByDescending(p => p.Value).Take(5))
         {
@@ -181,9 +209,81 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
             output.WriteLine($"known {signature}: {count} seed(s)");
         }
 
-        failed
-            .Should()
-            .Be(0, "every failure of a random seed must be on the known list:\n" + report);
+        report
+            .Failures.Should()
+            .BeEmpty(
+                "every failure of a random seed must be on the known list:\n" + report.Render()
+            );
+
+        // エンジンの結果を表明してから網羅を照合する（網羅の赤がエンジンの失敗を隠さない）
+        coverageReport.AssertGaps(SyncModelDimensions.Gaps, SyncModelDimensions.DirectScope, plan);
+    }
+
+    /// <summary>
+    /// 種を流す本体を実行し、本体が例外で終わったときは先に網羅の宣言の誤りを確かめる（並列の種のどれかの
+    /// <see cref="CoverageDeclarationException"/> が別の種の例外に隠れても、宣言の誤りとして赤にする）
+    /// </summary>
+    /// <param name="coverage">数える先</param>
+    /// <param name="body">種を流す本体</param>
+    internal static async Task RunObservedAsync(CoverageCounter coverage, Func<Task> body)
+    {
+        try
+        {
+            await body();
+        }
+        catch
+        {
+            // 宣言の誤りがあれば Report がそれを投げる（無ければ元の例外を投げ直す）
+            _ = coverage.Report();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 既知の失敗に当たらない失敗のあった種を、報告の 1 件にする（その種の全失敗の [known|NEW] と操作の列）
+    /// </summary>
+    /// <param name="seed">種</param>
+    /// <param name="failures">その種の失敗</param>
+    /// <param name="classified">その種の失敗の照合の結果</param>
+    /// <param name="log">その種の操作の列</param>
+    /// <param name="normalize">照合に使った署名の正規化（書き添えるとき。直結は null）</param>
+    internal static EngineFailure SeedFailure(
+        int seed,
+        IReadOnlyList<ModelFailure> failures,
+        KnownReport classified,
+        IReadOnlyList<string> log,
+        Func<string, string>? normalize
+    )
+    {
+        var unknown = classified
+            .Unknown.Select(f => f.Source)
+            .ToHashSet(ReferenceEqualityComparer.Instance);
+        var detail = new StringBuilder();
+
+        foreach (var failure in failures)
+        {
+            var mark = unknown.Contains(failure) ? "NEW" : "known";
+            var normalized = normalize is null ? "" : $" -> {normalize(failure.Signature)}";
+            detail.AppendLine(
+                CultureInfo.InvariantCulture,
+                $"[{mark}] {failure.Signature}{normalized}"
+            );
+            detail.AppendLine(CultureInfo.InvariantCulture, $"       {FirstLine(failure.Detail)}");
+        }
+
+        detail.AppendLine("ops:");
+
+        foreach (var line in log)
+        {
+            detail.AppendLine(CultureInfo.InvariantCulture, $"  {line}");
+        }
+
+        return new EngineFailure(
+            SyncModelKnownFailures.RandomScope,
+            string.Join(", ", classified.Unknown.Select(f => f.Signature).Distinct()),
+            detail.ToString().TrimEnd(),
+            seed
+        );
     }
 
     [Theory(
@@ -193,29 +293,23 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
     public async Task Scenario_FailsExactlyAsListed(string name)
     {
         var (failures, log) = await SyncModelScenarios.Get(name).RunAsync(Ct);
-        var expected = SyncModelKnownFailures
-            .All.Where(k => k.Scenario == name)
-            .Select(k => k.Signature)
-            .Order(StringComparer.Ordinal)
-            .ToList();
-        var actual = failures
-            .Select(f => f.Signature)
-            .Distinct()
-            .Order(StringComparer.Ordinal)
-            .ToList();
 
-        actual
-            .Should()
-            .Equal(
-                expected,
-                "the scenario must fail with exactly the listed signatures.\nfailures:\n"
-                    + string.Join(
-                        "\n",
-                        failures.Select(f => $"  {f.Signature}\n    {FirstLine(f.Detail)}")
-                    )
-                    + "\nops:\n"
-                    + string.Join("\n", log.Select(l => "  " + l))
+        // 署名の組が一覧のそのシナリオの組と等しいこと（載っていない署名も、載っているのに出ない署名も赤）
+        var problem = SyncModelKnownFailures
+            .Set.Classify(
+                failures
+                    .GroupBy(f => f.Signature, StringComparer.Ordinal)
+                    .Select(g => new EngineFailure(name, g.Key, FirstLine(g.First().Detail))),
+                scope => scope == name
+            )
+            .Problem($"[Sync/モデル] シナリオ {name}");
+
+        if (problem is not null)
+        {
+            throw new Xunit.Sdk.XunitException(
+                problem + "\nops:\n" + string.Join("\n", log.Select(l => "  " + l))
             );
+        }
     }
 
     /// <summary>
@@ -332,20 +426,16 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output)
     )]
     public void KnownFailures_AreWellFormed()
     {
+        // 指摘の番号・署名の有無・重複は、一覧（KnownFailureSet）が構築時に検査する
+        SyncModelKnownFailures.Set.Entries.Should().NotBeNull();
         var names = SyncModelScenarios.All.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
 
-        foreach (var known in SyncModelKnownFailures.All)
+        foreach (var known in SyncModelKnownFailures.Scenarios)
         {
-            names.Should().Contain(known.Scenario);
-            known.Finding.Should().NotBeNullOrWhiteSpace();
-            known.Section.Should().BeOneOf(30, 31);
-            known.Signature.Should().NotBeNullOrWhiteSpace();
+            names.Should().Contain(known.Scope);
+            known.Match.Should().Be(KnownMatch.ExactSignature);
+            known.FixedIn.Should().BeOneOf("区切り 30", "区切り 31");
         }
-
-        SyncModelKnownFailures
-            .All.Select(k => (k.Scenario, k.Signature))
-            .Should()
-            .OnlyHaveUniqueItems();
     }
 
     [Fact(

@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using QuickER.Mcp.Tools;
 using QuickER.Services;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -18,9 +19,9 @@ public sealed class ErDiagramToolRemoveEntityQueryTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "remove_entity はそのテーブルの名前付きクエリも取り除き、応答で名指しする"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void RemoveEntity_RemovesQueriesOfThatTable(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void RemoveEntity_RemovesQueriesOfThatTable(ToolHostKind host)
     {
         Setup(host);
         SeedQuery("Order", "FindByCustomer");
@@ -37,9 +38,9 @@ public sealed class ErDiagramToolRemoveEntityQueryTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "remove_entity は他のテーブルのクエリを残し、クエリが無ければ従来の応答のまま"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void RemoveEntity_WithoutQueries_KeepsOtherTablesQueries(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void RemoveEntity_WithoutQueries_KeepsOtherTablesQueries(ToolHostKind host)
     {
         Setup(host);
         SeedQuery("Customer", "FindByName");
@@ -54,7 +55,7 @@ public sealed class ErDiagramToolRemoveEntityQueryTests : TwoHostToolTestBase
     [Fact(DisplayName = "remove_entity（MCP）はクエリが無いとき従来と同じ文言を返す")]
     public void RemoveEntity_File_WithoutQueries_KeepsPreviousMessage()
     {
-        Setup(HostKind.File);
+        Setup(ToolHostKind.File);
 
         Exec("remove_entity", new { table_name = "Order" })
             .Result.Should()

@@ -31,23 +31,14 @@ public sealed class RegexCultureGuardTests
     [Fact(DisplayName = "大文字小文字を無視する正規表現には、必ず CultureInvariant を付ける")]
     public void IgnoreCaseRegexes_AreCultureInvariant()
     {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
         var found = new List<string>();
         var scanned = 0;
 
-        foreach (
-            var path in Directory
-                .EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
-                .Where(path =>
-                    !path.Split(Path.DirectorySeparatorChar)
-                        .Any(segment => segment is "bin" or "obj")
-                )
-        )
+        foreach (var file in SourceFiles.Enumerate("src"))
         {
-            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            var relative = file.RelativePath;
             var variants = ConditionalSourceParse.Parse(
-                File.ReadAllText(path),
+                File.ReadAllText(file.FullPath),
                 cancellationToken: TestContext.Current.CancellationToken
             );
             var nodes = ConditionalSourceParse
@@ -108,23 +99,14 @@ public sealed class RegexCultureGuardTests
     [Fact(DisplayName = "正規表現の数字は [0-9] で書く（\\d は ECMAScript を付けたときだけ）")]
     public void DigitClasses_AreAsciiOnly()
     {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
         var found = new List<string>();
         var scanned = 0;
 
-        foreach (
-            var path in Directory
-                .EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
-                .Where(path =>
-                    !path.Split(Path.DirectorySeparatorChar)
-                        .Any(segment => segment is "bin" or "obj")
-                )
-        )
+        foreach (var file in SourceFiles.Enumerate("src"))
         {
-            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            var relative = file.RelativePath;
             var variants = ConditionalSourceParse.Parse(
-                File.ReadAllText(path),
+                File.ReadAllText(file.FullPath),
                 cancellationToken: TestContext.Current.CancellationToken
             );
 

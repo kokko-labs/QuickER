@@ -9,6 +9,7 @@ using QuickER.Provider;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -24,12 +25,12 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// 同じ名前のパラメータはメンバーを隠すか、record が合成するメンバーとぶつかる。
 /// 1 つの図に全部の名前を載せて 1 回だけコンパイルし、エラー・警告の行に現れる名前で失敗を名前へ割り当てる。
 /// </para>
-/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。</para>
+/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</para>
 /// </remarks>
 public class QueryParameterNameSafetyTests(ITestOutputHelper output)
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string>());
+    private static readonly KnownCaseLedger Known = new("QueryParameterNameSafetyTests", []);
 
     /// <summary>
     /// 試す名前。生成本体が単純名で呼ぶメンバーと、record が持つ・合成するメンバーの名前（先頭の大小の両方）
@@ -340,6 +341,6 @@ public class QueryParameterNameSafetyTests(ITestOutputHelper output)
             .ToList();
         unassigned.Should().BeEmpty("どの名前にも割り当てられないコンパイルエラーがある");
 
-        KnownFailureLedger.ThrowIfAny(problems);
+        KnownCaseLedger.ThrowIfAny(problems);
     }
 }

@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedConcurrencyFixture;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 using GF = QuickER.Tests.GeneratedFixture;
 
@@ -35,13 +36,15 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>今わかっている違い（ケース → 指摘・直す区切り）</summary>
-    private static readonly IReadOnlyDictionary<string, (string Finding, int Section)> Known =
-        new Dictionary<string, (string, int)>(StringComparer.Ordinal)
-        {
-            // #33・#34・F7 は区切り 25 で直した（やり直しの上限は行ごと・分類の後、フックありの経路は試行ごとに
-            // トランザクションを張り直す）
-        };
+    /// <summary>今わかっている違い（範囲＝ケースの名前・<see cref="KnownMatch.KeyOnly"/>＝一致しないことだけを見る）</summary>
+    /// <remarks>
+    /// #33・#34・F7 は区切り 25 で直した（やり直しの上限は行ごと・分類の後、フックありの経路は試行ごとに
+    /// トランザクションを張り直す）。
+    /// </remarks>
+    private static readonly IReadOnlyList<KnownEntry> Known = [];
+
+    /// <summary>今わかっている違いの一覧（照合の規則は <see cref="KnownFailureSet"/> が持つ）</summary>
+    private static readonly KnownFailureSet KnownSet = new("BackendParity.sqlserver", Known);
 
     private readonly SqlServerContainerFixture _fixture = fixture;
 
@@ -80,26 +83,20 @@ public sealed class BackendParitySqlServerRuntimeTests(SqlServerContainerFixture
         var report =
             $"QuickER:\n  {string.Join("\n  ", baseline)}\nEF Core:\n  {string.Join("\n  ", efCore)}";
 
-        if (Known.TryGetValue(name, out var known))
-        {
-            efCore
-                .Should()
-                .NotEqual(
-                    baseline,
-                    $"{known.Finding}（区切り {known.Section}）として既知の違いに載っているのに一致した（直ったなら Known から外す）:\n{report}"
-                );
-        }
-        else
-        {
-            efCore.Should().Equal(baseline, report);
-        }
+        // 一致しなければ失敗 1 件（載っていれば既知・載っているのに一致すれば「起きなかった」で赤）
+        EngineFailure[] observed = efCore.SequenceEqual(baseline, StringComparer.Ordinal)
+            ? []
+            : [new EngineFailure(name, "differs", report)];
+        KnownSet
+            .Classify(observed, scope => scope == name)
+            .AssertClean($"[Parity/SqlServer] ケース {name}");
     }
 
     [Fact(DisplayName = "[Parity/SqlServer] 既知の違いは、存在するケースを名指しする")]
     public void Known_NamesExistingCases()
     {
         var cases = Cases().Select(row => (string)row.Data).ToHashSet();
-        Known.Keys.Should().BeSubsetOf(cases);
+        KnownSet.Entries.Select(entry => entry.Scope).Should().BeSubsetOf(cases);
     }
 
     /// <summary>

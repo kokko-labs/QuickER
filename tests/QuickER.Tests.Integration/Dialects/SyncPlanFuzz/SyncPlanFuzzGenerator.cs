@@ -603,7 +603,8 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             return false;
         }
 
-        if (rng.Next(2) == 0)
+        // 列を持たない表（列をすべて消した表）は表の名前を変える（乱数の引き方は変えない＝種の指紋を保つ）
+        if (rng.Next(2) == 0 || entity.Columns.Count == 0)
         {
             var renamed = FlipCase(entity.TableName);
             Mutations.Add($"rename table case {entity.TableName} -> {renamed}");

@@ -6,6 +6,7 @@ using QuickER.Model;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;
@@ -14,11 +15,11 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 設定メニューの小さな ViewModel の保存先・言語の選び直しと、Ctrl+クリックとリレーションの作成モードの関係を
 /// 固定するテストクラス。
 /// </summary>
-/// <remarks>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。</remarks>
+/// <remarks>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</remarks>
 public class SettingsAndSelectionConsistencyTests
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string>());
+    private static readonly KnownCaseLedger Known = new("SettingsAndSelectionConsistencyTests", []);
 
     /// <summary>再起動サービスのスタブ（呼び出し回数だけ記録する）</summary>
     private sealed class FakeRestartService : IApplicationRestartService

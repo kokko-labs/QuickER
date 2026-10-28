@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -57,74 +58,100 @@ internal static class SyncModelSignatures
     public static IReadOnlySet<string> Normalize(IEnumerable<ModelFailure> failures) =>
         failures.Select(f => Normalize(f.Signature)).ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>既知の失敗の一覧を正規化した集合（乱数の種の照合用）</summary>
-    public static IReadOnlySet<string> Known(IEnumerable<string> extra) =>
-        SyncModelKnownFailures
-            .All.Select(k => Normalize(k.Signature))
-            .Concat(extra.Select(Normalize))
-            .ToHashSet(StringComparer.Ordinal);
+    /// <summary>既知の失敗の一覧（乱数の種の照合用＝署名を <see cref="Normalize(string)"/> で正規化して照合する）</summary>
+    /// <param name="extra">直結の一覧に足す決定的なシナリオの項目（SQL Server だけの既知の失敗）</param>
+    public static KnownFailureSet Known(IReadOnlyList<KnownEntry> extra) =>
+        SyncModelKnownFailures.Build(
+            "SyncModel.transport",
+            [.. SyncModelKnownFailures.Scenarios, .. extra],
+            Normalize
+        );
 
-    /// <summary>派生（HTTP・実 SQL Server）で流す乱数の種の数（環境変数 QUICKER_SYNC_MODEL_TRANSPORT_SEEDS・既定 10）</summary>
-    public static int SeedCount =>
-        int.TryParse(
-            Environment.GetEnvironmentVariable("QUICKER_SYNC_MODEL_TRANSPORT_SEEDS"),
-            System.Globalization.NumberStyles.None,
-            System.Globalization.CultureInfo.InvariantCulture,
-            out var count
-        )
-        && count > 0
-            ? count
-            : 10;
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 200;
+
+    /// <summary>
+    /// 派生（HTTP・実 SQL Server）で流す乱数の種（環境変数 QUICKER_SYNC_MODEL_TRANSPORT_SEEDS・既定 10・夜間は
+    /// <see cref="NightlySeedCount"/>・0 から）
+    /// </summary>
+    public static SeedSettings Seeds { get; } =
+        new("QUICKER_SYNC_MODEL_TRANSPORT_SEEDS", 10, NightlySeedCount, firstSeed: 0);
 
     /// <summary>種を並列に流し、既知の失敗（正規化）に当たらない失敗のある種を報告する</summary>
+    /// <param name="plan">流す種の決め方</param>
+    /// <param name="seeds">流す種</param>
+    /// <param name="options">世界の作り方</param>
+    /// <param name="known">既知の失敗の一覧</param>
+    /// <param name="parallelism">並列度</param>
+    /// <param name="ct">取り消し</param>
+    /// <param name="coverage">操作を次元表のケースとして数える先（観測と要約だけ＝網羅しない組は照合しない）</param>
     public static async Task<string> RunSeedsAsync(
+        SeedPlan plan,
         IEnumerable<int> seeds,
         SyncModelWorldOptions options,
-        IReadOnlySet<string> known,
+        KnownFailureSet known,
         int parallelism,
-        CancellationToken ct
+        CancellationToken ct,
+        CoverageCounter? coverage = null
     )
     {
         var results =
             new ConcurrentDictionary<int, (IReadOnlyList<ModelFailure>, IReadOnlyList<string>)>();
 
-        await Parallel.ForEachAsync(
-            seeds,
-            new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = ct },
-            async (seed, token) =>
-                results[seed] = await SyncModelRuntimeTests.RunSeedAsync(seed, token, options)
-        );
+        async Task RunAllAsync() =>
+            await Parallel.ForEachAsync(
+                seeds,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = parallelism,
+                    CancellationToken = ct,
+                },
+                async (seed, token) =>
+                    results[seed] = await SyncModelRuntimeTests.RunSeedAsync(
+                        seed,
+                        token,
+                        options,
+                        coverage
+                    )
+            );
 
-        var report = new System.Text.StringBuilder();
+        if (coverage is null)
+        {
+            await RunAllAsync();
+        }
+        else
+        {
+            await SyncModelRuntimeTests.RunObservedAsync(coverage, RunAllAsync);
+        }
+
+        var report = new EngineReport($"SyncModel.{options.Name}");
 
         foreach (var (seed, (failures, log)) in results.OrderBy(p => p.Key))
         {
-            var unknown = failures.Where(f => !known.Contains(Normalize(f.Signature))).ToList();
+            var classified = known.Classify(
+                failures.Select(f => new EngineFailure(
+                    SyncModelKnownFailures.RandomScope,
+                    f.Signature,
+                    f.Detail,
+                    seed,
+                    f
+                )),
+                plan,
+                scope => scope == SyncModelKnownFailures.RandomScope
+            );
 
-            if (unknown.Count == 0)
+            if (classified.Unknown.Count == 0)
             {
                 continue;
             }
 
-            report.AppendLine($"seed {seed} ({options.Name}):");
-
-            foreach (var failure in failures)
-            {
-                var mark = known.Contains(Normalize(failure.Signature)) ? "known" : "NEW";
-                report.AppendLine(
-                    $"  [{mark}] {failure.Signature} -> {Normalize(failure.Signature)}"
-                );
-            }
-
-            report.AppendLine("  ops:");
-
-            foreach (var line in log)
-            {
-                report.AppendLine($"    {line}");
-            }
+            report.Add(
+                SyncModelRuntimeTests.SeedFailure(seed, failures, classified, log, Normalize),
+                plan.ReproductionFor(seed)
+            );
         }
 
-        return report.ToString();
+        return report.Failures.Count == 0 ? "" : $"{options.Name}:\n{report.Render()}";
     }
 }
 
@@ -138,11 +165,14 @@ internal static class SyncModelSignatures
 /// 列の組み合わせの中で直結と同じ結果になることを見る。サーバー側の失敗の注入は 500 として届く。
 /// </remarks>
 [Trait("Category", "Integration")]
-public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output)
+[MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Http))]
+public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
     private static readonly SyncModelWorldOptions Http = new() { Http = true, Name = "http" };
+
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Http;
 
     public static TheoryData<string> ScenarioNames() => SyncModelRuntimeTests.ScenarioNames();
 
@@ -169,16 +199,24 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output)
     }
 
     [Fact(DisplayName = "[Sync/モデル/HTTP] 乱数の操作の列で、既知の失敗の外の違反が出ない")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomSeeds_OnlyKnownFailures()
     {
+        var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
+        plan.WriteWarnings(output);
+        var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var report = await SyncModelSignatures.RunSeedsAsync(
-            Enumerable.Range(0, SyncModelSignatures.SeedCount),
+            plan,
+            plan.Seeds,
             Http,
             SyncModelSignatures.Known([]),
             Math.Clamp(Environment.ProcessorCount, 1, 4),
-            Ct
+            Ct,
+            coverage
         );
 
+        // 網羅は観測と要約だけ（種が少なく、網羅しない組は直結の乱数の種で照合する）
+        coverage.Report().WriteSummary(output);
         output.WriteLine(report);
         report.Should().BeEmpty();
     }
@@ -200,15 +238,16 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output)
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
 [Collection(SqlServerContainerCollection.Name)]
+[MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.SqlServer))]
 public sealed class SyncModelSqlServerRuntimeTests(
     SqlServerContainerFixture fixture,
     ITestOutputHelper output
-)
+) : ISyncModelTransportTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>SQL Server でだけ起きる既知の失敗（指摘の番号・直す区切り・シナリオ・署名）</summary>
-    internal static IReadOnlyList<KnownSyncModelFailure> SqlServerOnly { get; } = [];
+    /// <summary>SQL Server でだけ起きる既知の失敗（<see cref="SyncModelKnownFailures.Entry"/> で作る＝指摘の番号・直す区切り・シナリオ・署名）</summary>
+    internal static IReadOnlyList<KnownEntry> SqlServerOnly { get; } = [];
 
     private SyncModelWorldOptions Options =>
         new()
@@ -217,6 +256,9 @@ public sealed class SyncModelSqlServerRuntimeTests(
                 await SyncModelSqlServerServer.CreateAsync(fixture.ConnectionString, ct),
             Name = "sqlserver",
         };
+
+    /// <summary>世界の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Options;
 
     public static TheoryData<string> ScenarioNames()
     {
@@ -245,8 +287,8 @@ public sealed class SyncModelSqlServerRuntimeTests(
             .Normalize(direct)
             .Concat(
                 SqlServerOnly
-                    .Where(k => k.Scenario == name)
-                    .Select(k => SyncModelSignatures.Normalize(k.Signature))
+                    .Where(k => k.Scope == name)
+                    .Select(k => SyncModelSignatures.Normalize(k.Signature ?? ""))
             )
             .ToHashSet(StringComparer.Ordinal);
 
@@ -268,32 +310,47 @@ public sealed class SyncModelSqlServerRuntimeTests(
     )]
     public void SqlServerOnly_AreWellFormed()
     {
+        // 指摘の番号・署名の有無・重複は、一覧（KnownFailureSet）が構築時に検査する
+        new KnownFailureSet("SyncModel.sqlserver-only", SqlServerOnly)
+            .Entries.Should()
+            .NotBeNull();
+
         foreach (var known in SqlServerOnly)
         {
-            SyncModelScenarios.All.Should().Contain(s => s.Name == known.Scenario);
-            known.Section.Should().BeOneOf(30, 31);
+            SyncModelScenarios.All.Should().Contain(s => s.Name == known.Scope);
+            known.Match.Should().Be(KnownMatch.ExactSignature);
+            known.FixedIn.Should().BeOneOf("区切り 30", "区切り 31");
         }
     }
 
     [Fact(
         DisplayName = "[Sync/モデル/SqlServer] 乱数の操作の列（失敗の注入なしの組）で、既知の失敗の外の違反が出ない"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomSeeds_OnlyKnownFailures()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
+        // 失敗の注入なしの組（余り 0・1）から、種の数だけ（0 から順に）
+        var plan = SeedSource.Resolve(SyncModelSignatures.Seeds);
+        plan.WriteWarnings(output);
         var seeds = Enumerable
-            .Range(0, SyncModelSignatures.SeedCount * 4)
+            .Range(0, plan.Seeds.Count * 4)
             .Where(seed => seed % 4 is 0 or 1)
-            .Take(SyncModelSignatures.SeedCount);
+            .Take(plan.Seeds.Count);
+        var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var report = await SyncModelSignatures.RunSeedsAsync(
+            plan,
             seeds,
             Options,
-            SyncModelSignatures.Known(SqlServerOnly.Select(k => k.Signature)),
+            SyncModelSignatures.Known(SqlServerOnly),
             2,
-            Ct
+            Ct,
+            coverage
         );
 
+        // 網羅は観測と要約だけ（失敗の注入の組を流さず、網羅しない組は直結の乱数の種で照合する）
+        coverage.Report().WriteSummary(output);
         output.WriteLine(report);
         report.Should().BeEmpty();
     }

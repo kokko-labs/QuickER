@@ -3,9 +3,11 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.CodeGen.CSharp;
+using QuickER.Dialects;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.CodeGen.CSharp;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -23,8 +25,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 照合順序で結果が変わる行だけを判定せず、NULL の行と照合順序に依らず決まる行は判定する。
 /// </para>
 /// <para>
-/// 単位ごと・実装先ごとに新しいデータベースを作って捨てる。シードは既定で 1 つ（<c>QUICKER_FUZZ_SEEDS</c> を指定したときだけ
-/// その数）。
+/// 単位ごと・実装先ごとに新しいデータベースを作って捨てる。シードは普段の既定で 1 つ・夜間は <see cref="NightlySeedCount"/>
+/// （<c>QUICKER_FUZZ_SEEDS</c> を指定したときはその数）。
 /// </para>
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
@@ -36,16 +38,26 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeedCount = 16;
+
+    /// <summary>
+    /// 種の決め方（<c>QUICKER_FUZZ_SEEDS</c> を名前の総当たりと共有する。普段の既定は先頭の種 1 つ＝1 種でも実コンテナで時間が掛かるため）
+    /// </summary>
+    public static SeedSettings Seeds { get; } =
+        new(NameFuzz.SeedCountVariable, 1, NightlySeedCount);
+
     [Fact(
         DisplayName = "簡易 DSL の条件の総当たり（SQL Server）: 生成→実コンパイル→QuickER 版 Repository と EF Core の結果が docs の意味と一致する（既知の失敗の一覧と厳密に一致）"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task DslConditions_MatchDocumentedSemanticsOnSqlServer()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
 
         var target = new DslFuzzTarget(
             Suite,
-            "sqlserver",
+            DialectNames.SqlServer,
             new SqlServerProvider(),
             unit => new CodeGenerationOptions
             {
@@ -61,36 +73,64 @@ public sealed class DslConditionFuzzSqlServerRuntimeTests(SqlServerContainerFixt
             "AddGeneratedSqlServerRepositories",
             EfCore: true,
             InMemory: false,
+            BackendAxis(fixture).Adapters
+        );
+        var ledger = new FuzzFailureLog(DslFuzzKnownFailures.Set);
+        var plan = SeedSource.Resolve(Seeds);
+        plan.WriteWarnings();
+        var coverage = new DslFuzzCoverage(DslFuzzDimensions.SqlServerScopes);
+
+        foreach (var seed in plan.Seeds)
+        {
+            foreach (var unit in DslFuzzUnits.SqlServer(seed))
+            {
+                await DslFuzzRunner.RunAsync(ledger, unit, target, Ct, coverage);
+            }
+        }
+
+        // 網羅の宣言の誤りは照合の結果より先に赤にする
+        var coverageReports = coverage.Reports();
+        DslFuzzCoverage.WriteSummaries(coverageReports);
+
+        ledger.AssertMatchesKnown($"{Suite}-");
+
+        // 網羅しない組は、照合の結果を表明してから照合する（既定の種の数のときだけ＝種の数で欠けが変わるため）
+        DslFuzzCoverage.AssertGaps(coverageReports, plan);
+    }
+
+    /// <summary>
+    /// SQL Server の構成の実装先の軸（QuickER 版 Repository と EF Core）。コンテナには実装先を開くときにだけ触れるので、
+    /// 軸を作るだけなら Docker は要らない（<see cref="MatrixAxisGuardTests"/> が Docker なしで作れることを確かめる）
+    /// </summary>
+    /// <param name="fixture">SQL Server のコンテナ（実装先を開くときにだけ使う）</param>
+    internal static MatrixAxis<DslFuzzBackend> BackendAxis(SqlServerContainerFixture fixture) =>
+        DslFuzzBackends.Axis(
+            DialectNames.SqlServer,
             [
-                Database("ado", (probe, cs) => DslFuzzProbe.Ado(probe, cs)),
+                Database(fixture, DslFuzzBackends.Ado, (probe, cs) => DslFuzzProbe.Ado(probe, cs)),
                 Database(
-                    "efcore",
+                    fixture,
+                    DslFuzzBackends.EfCore,
                     (probe, cs) =>
                         DslFuzzProbe.EfCore(
                             probe,
                             options => options.UseSqlServer(cs).IgnoreServiceProviderCacheLimit()
                         )
                 ),
-            ]
-        );
-        var ledger = new FuzzFailureLedger(DslFuzzKnownFailures.All);
-        var seeds = Environment.GetEnvironmentVariable("QUICKER_FUZZ_SEEDS") is { Length: > 0 }
-            ? NameFuzz.Seeds
-            : [NameFuzz.Seeds[0]];
-
-        foreach (var seed in seeds)
-        {
-            foreach (var unit in DslFuzzUnits.SqlServer(seed))
+            ],
+            new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                await DslFuzzRunner.RunAsync(ledger, unit, target, Ct);
+                [DslFuzzBackends.InMemory] =
+                    "インメモリ Repository は方言に依らず式木を評価するので、SQLite の構成（QuickER.Tests の DslConditionFuzzTests）で流す",
             }
-        }
-
-        ledger.AssertMatchesKnown($"{Suite}-");
-    }
+        );
 
     /// <summary>単位ごとに新しいデータベースを作り、DDL を当てて開く実装先（閉じるときにデータベースを捨てる）</summary>
-    private DslFuzzBackend Database(string name, Func<Type, string, ServiceProvider> build) =>
+    private static DslFuzzBackend Database(
+        SqlServerContainerFixture fixture,
+        string name,
+        Func<Type, string, ServiceProvider> build
+    ) =>
         new(
             name,
             DslCaseRule.Collation,

@@ -34,8 +34,7 @@ public class DataGridRowEditGuardTests
         var dataGrids = Directory
             .EnumerateFiles(SourceRoot, "*.xaml", SearchOption.AllDirectories)
             .Where(path =>
-                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                !TestSupport.SourceFiles.IsBuildOutput(Path.GetRelativePath(SourceRoot, path))
             )
             .SelectMany(path =>
                 XDocument

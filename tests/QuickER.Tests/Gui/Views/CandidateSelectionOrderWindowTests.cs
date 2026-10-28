@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.ViewModels;
 using static QuickER.Tests.TestSupport.WpfApplicationTestSupport;
 
@@ -21,12 +22,12 @@ namespace QuickER.Tests.Gui.Views;
 /// 画面外（Left/Top=-4000）・非アクティブで表示した実ウィンドウ上で確かめる。順序そのものは
 /// <c>CandidateRowReconcileTests</c> が VM の段で数える。
 /// </para>
-/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。</para>
+/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</para>
 /// </remarks>
 public class CandidateSelectionOrderWindowTests
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string>());
+    private static readonly KnownCaseLedger Known = new("CandidateSelectionOrderWindowTests", []);
 
     [Fact(
         DisplayName = "外部キーの先頭の行を外すと、画面の残りの行は繰り上がった列を示し、履歴は 1 回だけ進む"

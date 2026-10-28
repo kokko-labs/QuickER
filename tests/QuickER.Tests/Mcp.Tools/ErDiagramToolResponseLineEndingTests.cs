@@ -1,4 +1,5 @@
 using AwesomeAssertions;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -14,9 +15,9 @@ namespace QuickER.Tests.Mcp.Tools;
 public sealed class ErDiagramToolResponseLineEndingTests : TwoHostToolTestBase
 {
     [Theory(DisplayName = "get_diagram_summary の応答は、どちらのホストでも改行が LF だけ")]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void Summary_UsesLfOnly(HostKind host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void Summary_UsesLfOnly(ToolHostKind host)
     {
         Setup(host);
         Arrange(

@@ -173,16 +173,15 @@ public sealed class SchemaNamesGuardTests
     /// <summary>素の比較・変換を含み、モデルの名前に触れる文を集める</summary>
     private static List<(string Path, int Line, string Text)> FindHits()
     {
-        var src = Path.Combine(NeutralResxFiles.FindRepositoryRoot(), "src");
         var hits = new List<(string Path, int Line, string Text)>();
 
-        foreach (var path in Directory.EnumerateFiles(src, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in SourceFiles.Enumerate("src"))
         {
-            var relative = Path.GetRelativePath(src, path).Replace('\\', '/');
+            var relative = file.AreaRelativePath;
+            var path = file.FullPath;
 
             if (
-                relative.Split('/').Any(segment => segment is "bin" or "obj")
-                || relative.EndsWith(".g.cs", StringComparison.Ordinal)
+                relative.EndsWith(".g.cs", StringComparison.Ordinal)
                 || relative.EndsWith(".Designer.cs", StringComparison.Ordinal)
                 || relative.EndsWith("/SchemaNames.cs", StringComparison.Ordinal)
             )

@@ -2,6 +2,7 @@ using System.IO;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Gui.Services;
 
@@ -40,9 +41,10 @@ public sealed class NameIdentityImportFuzzTests
     [InlineData(Format.Dbml)]
     [InlineData(Format.Mermaid)]
     [InlineData(Format.Excel)]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void Import_AgreesWithNameRule(Format format)
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
         var prefix = $"import:{format.ToString().ToLowerInvariant()}:";
 
         NameFuzzRunner.Run(

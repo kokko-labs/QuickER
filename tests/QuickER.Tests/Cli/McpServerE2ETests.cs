@@ -8,6 +8,7 @@ using AwesomeAssertions;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Cli;
 
@@ -22,9 +23,9 @@ namespace QuickER.Tests.Cli;
 public class McpServerE2ETests
 {
     /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
-    private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
+    private static readonly KnownCaseLedger Ledger = new("McpServerE2ETests", []);
 
-    /// <summary>CJK 文字の検出パターン（CodeGenToolSetEnglishGuardTests と同じ範囲）</summary>
+    /// <summary>CJK 文字の検出パターン（ToolDefinitionEnglishGuardTests と同じ範囲）</summary>
     private static readonly System.Text.RegularExpressions.Regex CjkPattern = TestSupport
         .CjkText
         .Pattern;

@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -16,20 +17,23 @@ namespace QuickER.Tests.Mcp.Tools;
 public sealed class ErDiagramToolUnnamedRelationshipTests : TwoHostToolTestBase
 {
     /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
-    private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
+    private static readonly KnownCaseLedger Ledger = new(
+        "ErDiagramToolUnnamedRelationshipTests",
+        []
+    );
 
     [Theory(
         DisplayName = "同じ向きのテーブル対に名前の無いリレーションが 2 本あっても、DDL が付ける名前で 1 本を選んで消せる"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void RemoveRelationship_SelectsUnnamedByItsDdlName(HostKind host) =>
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void RemoveRelationship_SelectsUnnamedByItsDdlName(ToolHostKind host) =>
         Ledger.Run(
             $"RemoveRelationship_SelectsUnnamedByItsDdlName.{host}",
             () => RemoveRelationship_SelectsUnnamedByItsDdlNameCore(host)
         );
 
-    private void RemoveRelationship_SelectsUnnamedByItsDdlNameCore(HostKind host)
+    private void RemoveRelationship_SelectsUnnamedByItsDdlNameCore(ToolHostKind host)
     {
         ArrangeTwoUnnamedRelationships(host);
         var names = DdlNames();
@@ -58,15 +62,15 @@ public sealed class ErDiagramToolUnnamedRelationshipTests : TwoHostToolTestBase
     [Theory(
         DisplayName = "get_diagram_summary は、名前の無いリレーションにも DDL が付ける名前を示す"
     )]
-    [InlineData(HostKind.Gui)]
-    [InlineData(HostKind.File)]
-    public void Summary_ShowsDdlNameOfUnnamedRelationships(HostKind host) =>
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    public void Summary_ShowsDdlNameOfUnnamedRelationships(ToolHostKind host) =>
         Ledger.Run(
             $"Summary_ShowsDdlNameOfUnnamedRelationships.{host}",
             () => Summary_ShowsDdlNameOfUnnamedRelationshipsCore(host)
         );
 
-    private void Summary_ShowsDdlNameOfUnnamedRelationshipsCore(HostKind host)
+    private void Summary_ShowsDdlNameOfUnnamedRelationshipsCore(ToolHostKind host)
     {
         ArrangeTwoUnnamedRelationships(host);
         var names = DdlNames();
@@ -84,7 +88,7 @@ public sealed class ErDiagramToolUnnamedRelationshipTests : TwoHostToolTestBase
     }
 
     /// <summary>Customer → Order に、CustomerId と ShipToCustomerId の 2 本の名前の無いリレーションを用意する</summary>
-    private void ArrangeTwoUnnamedRelationships(HostKind host)
+    private void ArrangeTwoUnnamedRelationships(ToolHostKind host)
     {
         Setup(host);
 

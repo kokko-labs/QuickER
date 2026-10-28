@@ -5,6 +5,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.Sqlite;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -23,9 +24,10 @@ namespace QuickER.Tests.CodeGen.CSharp;
 public sealed class NameIdentityGenerationFuzzTests
 {
     [Fact(DisplayName = "C# 生成の重複の判定は名前の規則と同じ答えになる")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void Generation_AgreesWithNameRule()
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
 
         NameFuzzRunner.Run(
             ledger,

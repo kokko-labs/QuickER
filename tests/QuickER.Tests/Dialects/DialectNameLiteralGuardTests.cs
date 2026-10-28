@@ -166,20 +166,19 @@ public sealed class DialectNameLiteralGuardTests
     )]
     public void DialectNameLiterals_OutsideDialects_AreOnlyKnown()
     {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
-        var dialects = Path.Combine(src, "QuickER.Dialects") + Path.DirectorySeparatorChar;
-        var found = Directory
-            .EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
-            .Where(path => !path.StartsWith(dialects, StringComparison.OrdinalIgnoreCase))
-            .Where(path =>
-                !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
+        var found = SourceFiles
+            .Enumerate("src")
+            .Where(file =>
+                !file.AreaRelativePath.StartsWith(
+                    "QuickER.Dialects/",
+                    StringComparison.OrdinalIgnoreCase
+                )
             )
-            .SelectMany(path =>
+            .SelectMany(file =>
             {
-                var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+                var relative = file.RelativePath;
                 var variants = ConditionalSourceParse.Parse(
-                    File.ReadAllText(path),
+                    File.ReadAllText(file.FullPath),
                     cancellationToken: TestContext.Current.CancellationToken
                 );
 
@@ -194,27 +193,14 @@ public sealed class DialectNameLiteralGuardTests
             .GroupBy(hit => hit)
             .ToDictionary(group => group.Key, group => group.Count());
 
-        var expected = Known.ToDictionary(known => (known.File, known.Value), known => known.Count);
-
-        var unexpected = found
-            .Where(pair => !expected.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key.File}: \"{pair.Key.Value}\" x{pair.Value}")
-            .OrderBy(line => line, StringComparer.Ordinal)
-            .ToList();
-        var missing = expected
-            .Where(pair => !found.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key.File}: \"{pair.Key.Value}\" x{pair.Value}")
-            .OrderBy(line => line, StringComparer.Ordinal)
-            .ToList();
-
-        string.Join(Environment.NewLine, unexpected)
-            .Should()
-            .BeEmpty(
-                "方言名の文字列は QuickER.Dialects に置き、機能は方言の宣言に問い合わせる（規則 1・3）"
-            );
-        string.Join(Environment.NewLine, missing)
-            .Should()
-            .BeEmpty("既知の一覧は実際の出現と厳密に一致させる（直したら一覧から消す）");
+        GuardKnownList.AssertMatches(
+            found,
+            Known.Select(known => ((known.File, known.Value), known.Count)),
+            (key, count) => $"{key.File}: \"{key.Value}\" x{count}",
+            "方言名の文字列は QuickER.Dialects に置き、機能は方言の宣言に問い合わせる（規則 1・3）",
+            staleBecause: "既知の一覧は実際の出現と厳密に一致させる（直したら一覧から消す）",
+            sortLines: true
+        );
     }
 
     [Fact(DisplayName = "既知の一覧の各行は理由を持ち、同じファイル・値を 2 度載せない")]

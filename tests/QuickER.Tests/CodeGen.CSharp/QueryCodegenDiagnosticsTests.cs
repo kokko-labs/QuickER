@@ -7,6 +7,7 @@ using QuickER.Provider;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.SqlServer;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.CodeGen.CSharp;
 
@@ -14,11 +15,11 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// 名前付きクエリの生成で、診断が利用者の書いたものを正しく名指しすること、使われない SQL がクエリ全体を止めないこと、
 /// 生成すればコンパイルできない条件を生成前に断ること、識別子・型名の規則が C# の実際と合うことを固定するテストクラス。
 /// </summary>
-/// <remarks>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。</remarks>
+/// <remarks>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</remarks>
 public class QueryCodegenDiagnosticsTests
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string>());
+    private static readonly KnownCaseLedger Known = new("QueryCodegenDiagnosticsTests", []);
 
     /// <summary>Orders（OrderId・status・customer_id〔NULL 許容〕・memo〔NULL 許容〕・seen_at）を作る</summary>
     private static Entity CreateOrders()
@@ -601,12 +602,7 @@ public class QueryCodegenDiagnosticsTests
                 var files = Directory
                     .EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
                     .Where(path =>
-                        !path.Contains(
-                            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"
-                        )
-                        && !path.Contains(
-                            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"
-                        )
+                        !TestSupport.SourceFiles.IsBuildOutput(Path.GetRelativePath(root, path))
                     )
                     .Where(path =>
                     {

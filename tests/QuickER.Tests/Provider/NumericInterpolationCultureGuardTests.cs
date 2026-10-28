@@ -73,34 +73,19 @@ public sealed class NumericInterpolationCultureGuardTests
 
         var found = hits.GroupBy(hit => hit.RelativePath)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-        var expected = Known.ToDictionary(
-            known => known.File,
-            known => known.Count,
-            StringComparer.Ordinal
-        );
-
-        var unexpected = found
-            .Where(pair => !expected.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair =>
-                $"{pair.Key} x{pair.Value}: "
+        GuardKnownList.AssertMatches(
+            found,
+            Known.Select(known => (known.File, known.Count)),
+            (file, count) => $"{file} x{count}",
+            "数値・日時を文字列へ埋めるときは string.Create(CultureInfo.InvariantCulture, …) を通し、例外は理由つきで一覧に載せる",
+            describeUnexpected: (file, count) =>
+                $"{file} x{count}: "
                 + string.Join(
                     " / ",
-                    hits.Where(hit => hit.RelativePath == pair.Key)
+                    hits.Where(hit => hit.RelativePath == file)
                         .Select(hit => $"{hit.Line} 行 {hit.Text}")
                 )
-            )
-            .ToList();
-        var stale = expected
-            .Where(pair => !found.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key} x{pair.Value}")
-            .ToList();
-
-        string.Join(Environment.NewLine, unexpected)
-            .Should()
-            .BeEmpty(
-                "数値・日時を文字列へ埋めるときは string.Create(CultureInfo.InvariantCulture, …) を通し、例外は理由つきで一覧に載せる"
-            );
-        string.Join(Environment.NewLine, stale).Should().BeEmpty("無くなった出現は一覧から消す");
+        );
     }
 
     /// <summary>ガードが拾うべき書き方と、拾ってはいけない書き方</summary>

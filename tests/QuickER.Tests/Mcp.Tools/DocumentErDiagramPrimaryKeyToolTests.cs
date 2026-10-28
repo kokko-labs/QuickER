@@ -4,6 +4,7 @@ using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -48,9 +49,7 @@ public sealed class DocumentErDiagramPrimaryKeyToolTests : IDisposable
     private string CreateOrderLineFile()
     {
         var file = Path.Combine(_dir, "diagram.json");
-        Exec(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
-            .Success.Should()
-            .BeTrue();
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "OrderLine" });
         Exec(
             "add_column",

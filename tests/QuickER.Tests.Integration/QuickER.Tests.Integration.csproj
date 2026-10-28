@@ -123,6 +123,21 @@
       Include="..\QuickER.Tests\CodeGen.CSharp\GeneratedCodeCompiler.cs"
       LinkBase="CodeGen.CSharp"
     />
+    <Compile
+      Include="..\QuickER.Tests\CodeGen.CSharp\RuntimeReferenceSet.cs"
+      LinkBase="CodeGen.CSharp"
+    />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      テストのエンジンの共通の枠組み（種・既知の失敗・報告・空振りのガード・種の指紋。実体は QuickER.Tests の
+      TestSupport/Engines。BCL と xUnit だけに依存するので、WPF に依存するとこのプロジェクトのビルドが止まる）
+    -->
+    <Compile
+      Include="..\QuickER.Tests\TestSupport\Engines\**\*.cs"
+      LinkBase="TestSupport\Engines"
+    />
   </ItemGroup>
 
   <ItemGroup>

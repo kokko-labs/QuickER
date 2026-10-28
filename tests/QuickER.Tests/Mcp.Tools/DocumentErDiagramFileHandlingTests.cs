@@ -7,6 +7,7 @@ using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Tests.Resources;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -17,10 +18,13 @@ namespace QuickER.Tests.Mcp.Tools;
 public sealed class DocumentErDiagramFileHandlingTests : IDisposable
 {
     /// <summary>既知の失敗（32-4-P1 の現状）。直したら外し、区切りの最後に空にする</summary>
-    private static readonly KnownFailureLedger Ledger = new(new Dictionary<string, string> { });
+    private static readonly KnownCaseLedger Ledger = new("DocumentErDiagramFileHandlingTests", []);
 
     /// <summary>変更の無い呼び出しの既知の失敗（直す前の現状）。直したら外す</summary>
-    private static readonly KnownFailureLedger NoOpLedger = new(new Dictionary<string, string> { });
+    private static readonly KnownCaseLedger NoOpLedger = new(
+        "DocumentErDiagramFileHandlingTests",
+        []
+    );
 
     /// <summary>各テスト専用の一時ディレクトリ</summary>
     private readonly string _dir = Path.Combine(
@@ -140,7 +144,7 @@ public sealed class DocumentErDiagramFileHandlingTests : IDisposable
             );
         }
 
-        KnownFailureLedger.ThrowIfAny(problems);
+        KnownCaseLedger.ThrowIfAny(problems);
     }
 
     [Fact(

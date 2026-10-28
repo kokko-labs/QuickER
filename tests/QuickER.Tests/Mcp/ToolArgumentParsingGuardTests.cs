@@ -74,23 +74,12 @@ public sealed class ToolArgumentParsingGuardTests
             .GroupBy(hit => hit)
             .ToDictionary(group => group.Key, group => group.Count());
 
-        var expected = Known.ToDictionary(known => (known.File, known.Hit), known => known.Count);
-
-        var unexpected = found
-            .Where(pair => !expected.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key.File}: {pair.Key.Hit} x{pair.Value}")
-            .ToList();
-        var stale = expected
-            .Where(pair => !found.TryGetValue(pair.Key, out var count) || count != pair.Value)
-            .Select(pair => $"{pair.Key.File}: {pair.Key.Hit} x{pair.Value}")
-            .ToList();
-
-        string.Join(Environment.NewLine, unexpected)
-            .Should()
-            .BeEmpty(
-                "JSON の引数は ToolArguments・種別の名前は RelationshipTypeNames.TryParse を通し、例外は理由つきで一覧に載せる"
-            );
-        string.Join(Environment.NewLine, stale).Should().BeEmpty("無くなった出現は一覧から消す");
+        GuardKnownList.AssertMatches(
+            found,
+            Known.Select(known => ((known.File, known.Hit), known.Count)),
+            (key, count) => $"{key.File}: {key.Hit} x{count}",
+            "JSON の引数は ToolArguments・種別の名前は RelationshipTypeNames.TryParse を通し、例外は理由つきで一覧に載せる"
+        );
     }
 
     [Fact(DisplayName = "正本自身の宣言と呼び出しは拾える（走査が空振りしていない）")]

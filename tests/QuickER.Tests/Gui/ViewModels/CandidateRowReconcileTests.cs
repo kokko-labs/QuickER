@@ -4,6 +4,7 @@ using System.ComponentModel;
 using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Gui.ViewModels;
@@ -20,12 +21,12 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 「選択が変わる瞬間にその値が候補にある」「候補から外れる瞬間にそれが選択中でない」の 2 つを
 /// 観測点（<see cref="SelectionCandidateProbe"/>）で数える（WPF が無くても順序の誤りを捉えられる）。
 /// </para>
-/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。</para>
+/// <para>既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。</para>
 /// </remarks>
 public class CandidateRowReconcileTests
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string>());
+    private static readonly KnownCaseLedger Known = new("CandidateRowReconcileTests", []);
 
     /// <summary>
     /// 親（Id＝主キー・Code＝一意制約）と子（ChildId＝主キー・ParentId・ParentCode）を、

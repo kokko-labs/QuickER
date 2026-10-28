@@ -112,6 +112,41 @@ internal sealed class FuzzSeedOutcome
 /// </remarks>
 internal static class SyncPlanFuzzRunner
 {
+    /// <summary>予期しない例外を記録した違反の文の頭</summary>
+    public const string SeedThrewPrefix = "seed threw:";
+
+    /// <summary>
+    /// 1 つの種を流す。生成器・ランナーの予期しない例外はその種の違反（<see cref="SeedThrewPrefix"/>）として記録し、
+    /// ほかの種の結果を止めない（例外でテストごと止まると、それより前の種の違反が報告されずに隠れる）。取り消しは止める
+    /// </summary>
+    /// <param name="dialect">方言名</param>
+    /// <param name="seed">種</param>
+    /// <param name="run">1 つの種を流す本体（普段は <see cref="RunAsync"/>）</param>
+    public static async Task<FuzzSeedOutcome> RunGuardedAsync(
+        string dialect,
+        int seed,
+        Func<Task<FuzzSeedOutcome>> run
+    )
+    {
+        try
+        {
+            return await run().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var outcome = new FuzzSeedOutcome
+            {
+                Seed = seed,
+                Dialect = dialect,
+                Error = ex.ToString(),
+            };
+            outcome.Violations.Add(
+                $"{SeedThrewPrefix} {ex.GetType().Name}: {FirstLine(ex.Message)}"
+            );
+            return outcome;
+        }
+    }
+
     /// <summary>1 つの種を流して結果を返す（表明の違反は <see cref="FuzzSeedOutcome.Violations"/> に入る）</summary>
     public static async Task<FuzzSeedOutcome> RunAsync(
         SyncPlanFuzzDialect dialect,
@@ -967,7 +1002,7 @@ internal static class SyncPlanFuzzRunner
     }
 
     /// <summary>取り込んだ図を新しい Guid 空間へ写す（リレーションの列ペアも張り替える）</summary>
-    private static (List<Entity>, List<Relationship>) CloneWithFreshIds(SchemaImportResult live)
+    internal static (List<Entity>, List<Relationship>) CloneWithFreshIds(SchemaImportResult live)
     {
         var entityIdMap = new Dictionary<Guid, Guid>();
         var columnIdMap = new Dictionary<Guid, Guid>();

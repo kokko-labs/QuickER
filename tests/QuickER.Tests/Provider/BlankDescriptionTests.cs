@@ -174,8 +174,7 @@ public class BlankDescriptionTests
             .GetDirectories(src, "QuickER.Provider*")
             .SelectMany(d => Directory.GetFiles(d, "*.cs", SearchOption.AllDirectories))
             .Where(f =>
-                !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                !TestSupport.SourceFiles.IsBuildOutput(Path.GetRelativePath(src, f))
                 && Path.GetFileName(f) != "DescriptionText.cs"
             )
             .SelectMany(f =>

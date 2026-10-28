@@ -4,6 +4,7 @@ using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.Mcp.Tools;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Cli;
 
@@ -47,9 +48,7 @@ public sealed class McpQueryGenerationIntegrationTests : IDisposable
         var file = Path.Combine(_dir, "diagram.json");
 
         // --- set_query 相当の図を組み立てる（QueryFixture の GetByCustomer / CountByCustomer 相当） ---
-        Tool(DocumentErDiagramToolHost.CreateDiagramToolName, file, new { target_dbms = "sqlite" })
-            .Success.Should()
-            .BeTrue();
+        DiagramFiles.Create(file, "sqlite");
         Tool("add_entity", file, new { table_name = "orders" });
         AddColumn(file, "order_id", "int", isPrimaryKey: true);
         AddColumn(file, "customer_id", "int");

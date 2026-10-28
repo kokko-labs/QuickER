@@ -5,6 +5,7 @@ using AwesomeAssertions;
 using QuickER.Behaviors;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
 
@@ -22,13 +23,13 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// 変わらないことも見る。
 /// </para>
 /// <para>
-/// 既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownFailureLedger"/>。
+/// 既知の失敗は台帳（<see cref="Known"/>）に載せる。突き合わせの規則は <see cref="KnownCaseLedger"/>。
 /// </para>
 /// </remarks>
 public class LayoutRefreshCountTests
 {
     /// <summary>既知の失敗（ケース ID → 期待する失敗の理由の断片）</summary>
-    private static readonly KnownFailureLedger Known = new(new Dictionary<string, string>());
+    private static readonly KnownCaseLedger Known = new("LayoutRefreshCountTests", []);
 
     /// <summary>テーブル数（親子の鎖と余分なリレーションを持つ）の図を読み込む</summary>
     private static MainViewModel Build(int tables)

@@ -6,6 +6,7 @@ using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Mcp.Tools;
@@ -28,54 +29,43 @@ namespace QuickER.Tests.Mcp.Tools;
 /// </remarks>
 public sealed class NameIdentityToolFuzzTests
 {
-    /// <summary>ツールを実行するホスト</summary>
-    public enum Host
-    {
-        /// <summary>GUI 側（<see cref="ErDiagramDynamicTools"/>＋<see cref="MainViewModel"/>）</summary>
-        Gui,
-
-        /// <summary>MCP 側（<see cref="DocumentErDiagramToolHost"/>＋一時ファイル）</summary>
-        Mcp,
-    }
-
     [Theory(DisplayName = "図のツールの重複の判定は名前の規則と同じ答えになる（両ホスト）")]
-    [InlineData(Host.Gui)]
-    [InlineData(Host.Mcp)]
-    public void DiagramTools_AgreeWithNameRule(Host host)
+    [InlineData(ToolHostKind.Gui)]
+    [InlineData(ToolHostKind.File)]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
+    public void DiagramTools_AgreeWithNameRule(ToolHostKind host)
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
-        var prefix = host == Host.Gui ? "gui-tool:" : "mcp-tool:";
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
+        var prefix = host == ToolHostKind.Gui ? "gui-tool:" : "mcp-tool:";
 
         NameFuzzRunner.Run(
             ledger,
             prefix + "add_entity",
             NameKind.Table,
-            name =>
-                Session.With(host, s => s.Exec("add_entity", new { table_name = name }).Success),
-            pair => Session.With(host, s => AddTwoTables(s, pair))
+            name => With(host, s => s.Exec("add_entity", new { table_name = name }).Success),
+            pair => With(host, s => AddTwoTables(s, pair))
         );
         NameFuzzRunner.Run(
             ledger,
             prefix + "set_entity_property",
             NameKind.Table,
-            name =>
-                Session.With(host, s => s.Exec("add_entity", new { table_name = name }).Success),
-            pair => Session.With(host, s => RenameTable(s, pair))
+            name => With(host, s => s.Exec("add_entity", new { table_name = name }).Success),
+            pair => With(host, s => RenameTable(s, pair))
         );
         NameFuzzRunner.Run(
             ledger,
             prefix + "add_column",
             NameKind.Column,
-            name => Session.With(host, s => AddColumns(s, name).Last().Success),
-            pair => Session.With(host, s => AddTwoColumns(s, pair))
+            name => With(host, s => AddColumns(s, name).Last().Success),
+            pair => With(host, s => AddTwoColumns(s, pair))
         );
         NameFuzzRunner.Run(
             ledger,
             prefix + "set_unique_constraint",
             NameKind.Constraint,
-            name => Session.With(host, s => AddUniqueConstraints(s, name).Last().Success),
+            name => With(host, s => AddUniqueConstraints(s, name).Last().Success),
             pair =>
-                Session.With(
+                With(
                     host,
                     s =>
                     {
@@ -93,9 +83,9 @@ public sealed class NameIdentityToolFuzzTests
             ledger,
             prefix + "add_relationship",
             NameKind.Constraint,
-            name => Session.With(host, s => AddRelationships(s, name).Last().Success),
+            name => With(host, s => AddRelationships(s, name).Last().Success),
             pair =>
-                Session.With(
+                With(
                     host,
                     s =>
                     {
@@ -113,9 +103,10 @@ public sealed class NameIdentityToolFuzzTests
     }
 
     [Fact(DisplayName = "名前付きクエリのツールの重複の判定は名前の規則と同じ答えになる")]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void QueryTool_AgreesWithNameRule()
     {
-        var ledger = new FuzzFailureLedger(NameFuzzKnownFailures.All);
+        var ledger = new FuzzFailureLog(NameFuzzKnownFailures.Set);
 
         NameFuzzRunner.Run(
             ledger,
@@ -245,7 +236,7 @@ public sealed class NameIdentityToolFuzzTests
     }
 
     /// <summary>テーブルを 2 つ足し、後のテーブル名で列を足して後のテーブルへ届くかを見る</summary>
-    private static PairOutcome AddTwoTables(Session s, NamePair pair)
+    private static PairOutcome AddTwoTables(ToolHostSession s, NamePair pair)
     {
         s.Exec("add_entity", new { table_name = pair.First });
         var second = s.Exec("add_entity", new { table_name = pair.Second });
@@ -256,7 +247,7 @@ public sealed class NameIdentityToolFuzzTests
     }
 
     /// <summary>テーブルを 2 つ足し、2 つめを後の名前へ改名する</summary>
-    private static PairOutcome RenameTable(Session s, NamePair pair)
+    private static PairOutcome RenameTable(ToolHostSession s, NamePair pair)
     {
         s.Exec("add_entity", new { table_name = pair.First });
         s.Exec("add_entity", new { table_name = "Zz" });
@@ -274,7 +265,7 @@ public sealed class NameIdentityToolFuzzTests
     /// 受け付けたテーブル名で列を足し、その名前で受け付けたテーブル（空白を除いた名前が序数一致するもの）へ届くかを見る
     /// </summary>
     private static PairOutcome WithLookup(
-        Session s,
+        ToolHostSession s,
         (string Result, bool Success) accepted,
         string name
     )
@@ -302,7 +293,10 @@ public sealed class NameIdentityToolFuzzTests
     }
 
     /// <summary>テーブル T を作り、列を順に足す（結果は足した列ごと）</summary>
-    private static List<(string Result, bool Success)> AddColumns(Session s, params string[] names)
+    private static List<(string Result, bool Success)> AddColumns(
+        ToolHostSession s,
+        params string[] names
+    )
     {
         s.Exec("add_entity", new { table_name = "T" });
 
@@ -322,7 +316,7 @@ public sealed class NameIdentityToolFuzzTests
     }
 
     /// <summary>列を 2 つ足し、後の列名で列の説明を変えて後の列へ届くかを見る</summary>
-    private static PairOutcome AddTwoColumns(Session s, NamePair pair)
+    private static PairOutcome AddTwoColumns(ToolHostSession s, NamePair pair)
     {
         var results = AddColumns(s, pair.First, pair.Second);
 
@@ -363,7 +357,7 @@ public sealed class NameIdentityToolFuzzTests
 
     /// <summary>列 C1・C2 を持つテーブル T に、名前を指定した一意制約を列ごとに足す</summary>
     private static List<(string Result, bool Success)> AddUniqueConstraints(
-        Session s,
+        ToolHostSession s,
         params string[] names
     )
     {
@@ -387,7 +381,7 @@ public sealed class NameIdentityToolFuzzTests
 
     /// <summary>P(Id) を参照する列 C1・C2 を持つ T に、名前を指定した外部キーを列ごとに足す</summary>
     private static List<(string Result, bool Success)> AddRelationships(
-        Session s,
+        ToolHostSession s,
         params string[] names
     )
     {
@@ -485,73 +479,10 @@ public sealed class NameIdentityToolFuzzTests
             fields = names.Select(name => new { name, source_column = "A" }).ToArray(),
         };
 
-    /// <summary>1 つの図に対してツールを流すセッション（ホストごと）</summary>
-    private sealed class Session : IDisposable
+    /// <summary>新しい図でホストのセッションを開き、処理の結果を返す（MCP 側の図は sqlite）</summary>
+    private static T With<T>(ToolHostKind host, Func<ToolHostSession, T> body)
     {
-        private readonly Host _host;
-        private readonly MainViewModel? _vm;
-        private readonly string? _dir;
-        private readonly string? _file;
-
-        private Session(Host host)
-        {
-            _host = host;
-
-            if (host == Host.Gui)
-            {
-                _vm = new MainViewModel();
-                return;
-            }
-
-            _dir = Path.Combine(
-                Path.GetTempPath(),
-                "quicker-name-fuzz-" + Guid.NewGuid().ToString("N")
-            );
-            Directory.CreateDirectory(_dir);
-            _file = Path.Combine(_dir, "diagram.json");
-            DocumentErDiagramToolHost.Execute(
-                DocumentErDiagramToolHost.CreateDiagramToolName,
-                _file,
-                JsonSerializer.SerializeToElement(new { target_dbms = "sqlite" })
-            );
-        }
-
-        /// <summary>新しい図でセッションを作り、処理の結果を返す</summary>
-        public static T With<T>(Host host, Func<Session, T> body)
-        {
-            using var session = new Session(host);
-            return body(session);
-        }
-
-        /// <summary>ツールを実行する</summary>
-        public (string Result, bool Success) Exec(string tool, object args)
-        {
-            var element = JsonSerializer.SerializeToElement(args);
-
-            return _host == Host.Gui
-                ? ErDiagramDynamicTools.Execute(tool, element, _vm!)
-                : DocumentErDiagramToolHost.Execute(tool, _file!, element);
-        }
-
-        /// <summary>現在の図</summary>
-        public ErDiagram Schema =>
-            _host == Host.Gui ? _vm!.ToDiagramModel() : JsonStorageService.Load(_file!).Schema;
-
-        public void Dispose()
-        {
-            if (_dir is null)
-            {
-                return;
-            }
-
-            try
-            {
-                Directory.Delete(_dir, recursive: true);
-            }
-            catch (IOException)
-            {
-                // 後始末の失敗はテストの結果に影響させない
-            }
-        }
+        using var session = TwoHostToolHarness.Open(host, fileTargetDbms: "sqlite");
+        return body(session);
     }
 }

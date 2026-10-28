@@ -30,20 +30,19 @@ public sealed class Utf8EncodingGuardTests
     [Fact(DisplayName = "UTF8Encoding のインスタンスを QuickER.Platform の外で作らない")]
     public void Utf8EncodingCreations_OutsidePlatform_AreNone()
     {
-        var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
-        var platform = Path.Combine(src, "QuickER.Platform") + Path.DirectorySeparatorChar;
-        var found = Directory
-            .EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
-            .Where(path => !path.StartsWith(platform, StringComparison.OrdinalIgnoreCase))
-            .Where(path =>
-                !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
+        var found = SourceFiles
+            .Enumerate("src")
+            .Where(file =>
+                !file.AreaRelativePath.StartsWith(
+                    "QuickER.Platform/",
+                    StringComparison.OrdinalIgnoreCase
+                )
             )
-            .SelectMany(path =>
+            .SelectMany(file =>
             {
-                var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+                var relative = file.RelativePath;
                 var variants = ConditionalSourceParse.Parse(
-                    File.ReadAllText(path),
+                    File.ReadAllText(file.FullPath),
                     cancellationToken: TestContext.Current.CancellationToken
                 );
 

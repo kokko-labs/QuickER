@@ -40,16 +40,10 @@ public sealed class CjkPatternGuardTests
         var found = new List<string>();
         var sharedHasMarker = false;
 
-        foreach (
-            var path in Directory
-                .EnumerateFiles(tests, "*.cs", SearchOption.AllDirectories)
-                .Where(path =>
-                    !path.Split(Path.DirectorySeparatorChar)
-                        .Any(segment => segment is "bin" or "obj")
-                )
-        )
+        foreach (var file in SourceFiles.Enumerate("tests"))
         {
-            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            var path = file.FullPath;
+            var relative = file.RelativePath;
             var literals = ConditionalSourceParse
                 .DescendantTokens(
                     ConditionalSourceParse.Parse(

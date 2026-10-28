@@ -11,21 +11,23 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// 「生成 C# コードがコンパイル可能である」ことを検証するためのテストヘルパー
 /// </summary>
 /// <remarks>
+/// <para>
 /// 生成コードが依存する型（<c>Microsoft.Data.SqlClient.SqlConnection</c> など）を解決できるよう、
-/// 実行時の Trusted Platform Assemblies に加えて明示的な参照アセンブリを合成する。
-/// 参照アセンブリの収集はプロセス内で不変なため <see cref="MetadataReferences"/> に一度だけキャッシュし、
-/// 全テストケースで使い回すことで実行時間を抑える。
+/// 実行時の Trusted Platform Assemblies に加えて明示的な参照アセンブリを合成した <see cref="RuntimeReferenceSet.Full"/> を使う。
+/// 参照集合はプロセス内で不変なため一度だけ作り、全テストケースで使い回すことで実行時間を抑える。
+/// </para>
+/// <para>
+/// 構文木のパースは <see cref="Parse"/> の 1 か所だけで行う（テストが Roslyn のパースを直接呼ぶ箇所は
+/// <c>SourceParseEntryGuardTests</c> の一覧で数えている）。依存を絞った参照集合でコンパイルする検証は <see cref="Emit"/> を使う。
+/// </para>
 /// </remarks>
 internal static class GeneratedCodeCompiler
 {
     /// <summary>
-    /// 生成コードのコンパイルに用いる参照アセンブリ一覧。
-    /// TPA（Trusted Platform Assemblies）に加え、生成コードが利用するがテストホストでは
-    /// 遅延ロードされ得るアセンブリ（Microsoft.Data.SqlClient 等）を明示的に追加する。
+    /// 生成コードのコンパイルに用いる参照アセンブリ一覧（TPA＋生成コードが直接依存し得るアセンブリ）
     /// </summary>
-    private static readonly Lazy<IReadOnlyList<MetadataReference>> MetadataReferences = new(
-        BuildMetadataReferences
-    );
+    private static IReadOnlyList<MetadataReference> MetadataReferences =>
+        RuntimeReferenceSet.Full.Build();
 
     /// <summary>
     /// 生成結果の全ファイルを 1 コンパイル単位としてコンパイルし、診断（エラー・警告）を返す
@@ -56,24 +58,11 @@ internal static class GeneratedCodeCompiler
         // DocumentationMode.Diagnose: XmlDoc の整合診断（CS1573=param 欠落・CS1574=cref 解決不能・
         // CS1591=公開メンバーの XmlDoc 欠落など）を警告として拾う＝GenerateDocumentationFile=true の
         // 利用者ビルドで初めて出る警告を、ここで先に検出する（テストが合成する利用例ソースは internal にして対象外へ）
-        var syntaxTrees = files
-            .Select(file =>
-                CSharpSyntaxTree.ParseText(
-                    file.Content,
-                    new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.Diagnose),
-                    path: file.FileName
-                )
-            )
-            .ToArray();
-
-        var compilation = CSharpCompilation.Create(
+        var compilation = CreateCompilationCore(
+            files.Select(file => (file.FileName, file.Content)),
             assemblyName,
-            syntaxTrees,
-            MetadataReferences.Value.Concat(projectReferences),
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+            MetadataReferences.Concat(projectReferences),
+            DocumentationMode.Diagnose
         );
 
         using var peStream = new MemoryStream();
@@ -117,22 +106,7 @@ internal static class GeneratedCodeCompiler
     public static CSharpCompilation CreateCompilation(
         IEnumerable<(string FileName, string Content)> sources,
         string assemblyName
-    ) =>
-        CSharpCompilation.Create(
-            assemblyName,
-            sources.Select(source =>
-                CSharpSyntaxTree.ParseText(
-                    source.Content,
-                    new CSharpParseOptions(LanguageVersion.Latest),
-                    path: source.FileName
-                )
-            ),
-            MetadataReferences.Value,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
-        );
+    ) => CreateCompilationCore(sources, assemblyName, MetadataReferences, DocumentationMode.Parse);
 
     /// <summary>
     /// 生成結果をコンパイルし、成功時にロード済みアセンブリを返す（生成コードを実際に動かす検証用）
@@ -150,34 +124,13 @@ internal static class GeneratedCodeCompiler
         params string[] extraSources
     )
     {
-        var syntaxTrees = result
-            .Files.Select(file =>
-                CSharpSyntaxTree.ParseText(
-                    file.Content,
-                    new CSharpParseOptions(LanguageVersion.Latest),
-                    path: file.FileName
-                )
-            )
-            .Concat(
-                extraSources.Select(
-                    (source, index) =>
-                        CSharpSyntaxTree.ParseText(
-                            source,
-                            new CSharpParseOptions(LanguageVersion.Latest),
-                            path: $"Extra{index}.cs"
-                        )
-                )
-            )
-            .ToArray();
-
-        var compilation = CSharpCompilation.Create(
+        var compilation = CreateCompilationCore(
+            result
+                .Files.Select(file => (file.FileName, file.Content))
+                .Concat(extraSources.Select((source, index) => ($"Extra{index}.cs", source))),
             assemblyName,
-            syntaxTrees,
-            MetadataReferences.Value,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+            MetadataReferences,
+            DocumentationMode.Parse
         );
 
         using var peStream = new MemoryStream();
@@ -202,65 +155,69 @@ internal static class GeneratedCodeCompiler
         return Assembly.Load(peStream.ToArray());
     }
 
-    private static IReadOnlyList<MetadataReference> BuildMetadataReferences()
+    /// <summary>
+    /// ソース群を、指定した参照集合だけでコンパイルしてエラー診断と PE イメージを返す
+    /// （依存を絞った参照集合でコンパイルが通ることを確かめる検証用。<see cref="RuntimeReferenceSet"/> と組み合わせる）
+    /// </summary>
+    /// <param name="sources">ファイル名と内容の組</param>
+    /// <param name="assemblyName">アセンブリ名</param>
+    /// <param name="references">参照集合（ここに無いアセンブリの型は解決できない）</param>
+    public static GeneratedCodeEmitResult Emit(
+        IEnumerable<(string FileName, string Content)> sources,
+        string assemblyName,
+        IEnumerable<MetadataReference> references
+    )
     {
-        var referencesByPath = new Dictionary<string, MetadataReference>(
-            StringComparer.OrdinalIgnoreCase
+        var compilation = CreateCompilationCore(
+            sources,
+            assemblyName,
+            references,
+            DocumentationMode.Parse
         );
 
-        void AddPath(string? path)
+        using var peStream = new MemoryStream();
+        var emitResult = compilation.Emit(peStream);
+
+        var errors = emitResult
+            .Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+
+        return new GeneratedCodeEmitResult
         {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return;
-            }
-
-            if (!File.Exists(path))
-            {
-                return;
-            }
-
-            referencesByPath.TryAdd(path, MetadataReference.CreateFromFile(path));
-        }
-
-        // 実行時の Trusted Platform Assemblies（BCL 全体）をベースにする
-        var trustedAssembliesPaths = (
-            AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string
-        )?.Split(Path.PathSeparator);
-        if (trustedAssembliesPaths is not null)
-        {
-            foreach (var path in trustedAssembliesPaths)
-            {
-                AddPath(path);
-            }
-        }
-
-        // TPA に含まれない可能性がある、生成コードが直接依存するアセンブリを明示的に追加する
-        // （テストホストでは遅延ロードのため未ロード＝TPA 未列挙のことがある）
-        AddPath(typeof(Microsoft.Data.SqlClient.SqlConnection).Assembly.Location);
-        // SQLite 方言の Repository 生成コード検証用（Microsoft.Data.Sqlite の Sqlite 系 ADO 型）
-        AddPath(typeof(Microsoft.Data.Sqlite.SqliteConnection).Assembly.Location);
-        AddPath(
-            typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection).Assembly.Location
-        );
-        AddPath(
-            typeof(Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions)
-                .Assembly
-                .Location
-        );
-
-        // EF Core（DbContext・Fluent 構成）を含む生成コードの検証用。
-        // Microsoft.EntityFrameworkCore（DbContext / DbSet）・.Relational（ToTable）・.Abstractions（DeleteBehavior 等）
-        AddPath(typeof(Microsoft.EntityFrameworkCore.DbContext).Assembly.Location);
-        AddPath(
-            typeof(Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions)
-                .Assembly
-                .Location
-        );
-        AddPath(typeof(Microsoft.EntityFrameworkCore.DeleteBehavior).Assembly.Location);
-
-        return referencesByPath.Values.ToArray();
+            Success = emitResult.Success && errors.Length == 0,
+            Errors = errors,
+            Image = emitResult.Success ? peStream.ToArray() : null,
+        };
     }
+
+    /// <summary>ソース群を構文木にしてコンパイルを作る（オプションは全入口で共通）</summary>
+    private static CSharpCompilation CreateCompilationCore(
+        IEnumerable<(string FileName, string Content)> sources,
+        string assemblyName,
+        IEnumerable<MetadataReference> references,
+        DocumentationMode documentationMode
+    ) =>
+        CSharpCompilation.Create(
+            assemblyName,
+            sources.Select(source => Parse(source.Content, source.FileName, documentationMode)),
+            references,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+
+    /// <summary>ソース 1 つを最新の言語版でパースする（テストが生成物をパースする唯一の場所）</summary>
+    private static SyntaxTree Parse(
+        string content,
+        string path,
+        DocumentationMode documentationMode
+    ) =>
+        CSharpSyntaxTree.ParseText(
+            content,
+            new CSharpParseOptions(LanguageVersion.Latest, documentationMode),
+            path: path
+        );
 }
 
 /// <summary>
@@ -278,12 +235,38 @@ internal sealed class GeneratedCodeCompilationResult
     public required IReadOnlyList<Diagnostic> Warnings { get; init; }
 
     /// <summary>診断一覧を改行区切りの読みやすい文字列にまとめる（テスト失敗メッセージ用）</summary>
-    public string DescribeErrors() => string.Join(Environment.NewLine, Errors.Select(Describe));
+    public string DescribeErrors() =>
+        string.Join(Environment.NewLine, Errors.Select(GeneratedCodeDiagnostics.Describe));
 
     /// <summary>診断一覧を改行区切りの読みやすい文字列にまとめる（テスト失敗メッセージ用）</summary>
-    public string DescribeWarnings() => string.Join(Environment.NewLine, Warnings.Select(Describe));
+    public string DescribeWarnings() =>
+        string.Join(Environment.NewLine, Warnings.Select(GeneratedCodeDiagnostics.Describe));
+}
 
-    private static string Describe(Diagnostic diagnostic)
+/// <summary>
+/// <see cref="GeneratedCodeCompiler.Emit"/> の結果
+/// </summary>
+internal sealed class GeneratedCodeEmitResult
+{
+    /// <summary>コンパイルエラーが 0 件かどうか</summary>
+    public required bool Success { get; init; }
+
+    /// <summary>コンパイルエラー診断の一覧</summary>
+    public required IReadOnlyList<Diagnostic> Errors { get; init; }
+
+    /// <summary>成功時の PE イメージ（失敗時は null）</summary>
+    public required byte[]? Image { get; init; }
+
+    /// <summary>エラー診断を改行区切りの読みやすい文字列にまとめる（テスト失敗メッセージ用）</summary>
+    public string DescribeErrors() =>
+        string.Join(Environment.NewLine, Errors.Select(GeneratedCodeDiagnostics.Describe));
+}
+
+/// <summary>診断の表記（<c>[ID] パス:行 メッセージ</c>）</summary>
+internal static class GeneratedCodeDiagnostics
+{
+    /// <summary>診断を 1 行の表記にする</summary>
+    public static string Describe(Diagnostic diagnostic)
     {
         var lineSpan = diagnostic.Location.GetLineSpan();
         return $"[{diagnostic.Id}] {lineSpan.Path}:{lineSpan.StartLinePosition.Line + 1} {diagnostic.GetMessage()}";

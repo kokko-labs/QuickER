@@ -158,14 +158,15 @@ public sealed class SchemaImportWarningTextTests
     public void NoSwitchOnWarningKind_OutsideProvider()
     {
         var root = NeutralResxFiles.FindRepositoryRoot();
-        var src = Path.Combine(root, "src");
-        var provider = Path.Combine(src, "QuickER.Provider") + Path.DirectorySeparatorChar;
-        var hits = Directory
-            .EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
-            .Where(path => !path.StartsWith(provider, StringComparison.OrdinalIgnoreCase))
-            .Where(path =>
-                !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj")
+        var hits = SourceFiles
+            .Enumerate("src")
+            .Where(file =>
+                !file.AreaRelativePath.StartsWith(
+                    "QuickER.Provider/",
+                    StringComparison.OrdinalIgnoreCase
+                )
             )
+            .Select(file => file.FullPath)
             .SelectMany(path =>
                 ConditionalSourceParse
                     .DescendantNodes(

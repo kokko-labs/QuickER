@@ -3,6 +3,7 @@ using System.Text.Json;
 using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -139,13 +140,7 @@ public sealed class DocumentErDiagramForeignKeyMarkTests : IDisposable
     private string CreateFile()
     {
         var file = Path.Combine(_dir, "diagram.json");
-        Exec(
-            DocumentErDiagramToolHost.CreateDiagramToolName,
-            file,
-            new { target_dbms = "sqlserver" }
-        )
-            .Success.Should()
-            .BeTrue();
+        DiagramFiles.Create(file, "sqlserver");
 
         foreach (var (tool, args) in SetupSteps)
         {

@@ -4,6 +4,7 @@ using System.Threading;
 using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -82,13 +83,7 @@ public sealed class DocumentErDiagramToolConcurrencyTests : IDisposable
         for (var round = 0; round < Rounds; round++)
         {
             var file = Path.Combine(_dir, $"round{round}.json");
-            Exec(
-                DocumentErDiagramToolHost.CreateDiagramToolName,
-                file,
-                new { target_dbms = "sqlite" }
-            )
-                .Success.Should()
-                .BeTrue();
+            DiagramFiles.Create(file, "sqlite");
             Exec("add_entity", file, new { table_name = "Item" }).Success.Should().BeTrue();
 
             var results = RunConcurrently(
@@ -153,13 +148,7 @@ public sealed class DocumentErDiagramToolConcurrencyTests : IDisposable
         for (var round = 0; round < Rounds; round++)
         {
             var file = Path.Combine(_dir, $"summary{round}.json");
-            Exec(
-                DocumentErDiagramToolHost.CreateDiagramToolName,
-                file,
-                new { target_dbms = "sqlite" }
-            )
-                .Success.Should()
-                .BeTrue();
+            DiagramFiles.Create(file, "sqlite");
             Exec("add_entity", file, new { table_name = "Item" }).Success.Should().BeTrue();
 
             // 偶数番は列を足し続け、奇数番は要約を読み続ける（読みと保存の差し替えを何度も重ねる。

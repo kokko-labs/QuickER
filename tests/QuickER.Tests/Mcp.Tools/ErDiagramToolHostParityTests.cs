@@ -5,6 +5,7 @@ using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Services;
+using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Mcp.Tools;
@@ -16,30 +17,8 @@ namespace QuickER.Tests.Mcp.Tools;
 /// リレーションの端点/種別）と各呼び出しの成否が
 /// 一致することを検証するパリティテスト。Guid は両経路で新規生成されるため突合には使わず、名前で対応付ける。
 /// </summary>
-public sealed class ErDiagramToolHostParityTests : IDisposable
+public sealed class ErDiagramToolHostParityTests
 {
-    private readonly string _dir = Path.Combine(
-        Path.GetTempPath(),
-        "quicker-mcp-parity-" + Guid.NewGuid().ToString("N")
-    );
-
-    public ErDiagramToolHostParityTests()
-    {
-        Directory.CreateDirectory(_dir);
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            Directory.Delete(_dir, recursive: true);
-        }
-        catch (IOException)
-        {
-            // クリーンアップ失敗は無視
-        }
-    }
-
     /// <summary>比較用の列スナップショット（PK/NULL/FK 印/説明を含む）</summary>
     /// <remarks>
     /// FK 印も比べる＝リレーションを外したときに子列の印を落とす規則（GUI の <c>ApplyRelationshipColumnRules</c>）が
@@ -760,24 +739,19 @@ public sealed class ErDiagramToolHostParityTests : IDisposable
             ("remove_entity", new { table_name = "Supplier" }),
         };
 
-        var vm = new MainViewModel();
-        var file = Path.Combine(_dir, "parity.json");
-        DocumentErDiagramToolHost
-            .Execute(
-                DocumentErDiagramToolHost.CreateDiagramToolName,
-                file,
-                JsonSerializer.SerializeToElement(new { target_dbms = "sqlserver" })
-            )
-            .Success.Should()
-            .BeTrue();
+        // 2 つのホストを同時に持ち、1 手ずつ両方へ流して成否を比べる
+        var gui = TwoHostToolHarness.OpenGui();
+        using var host = TwoHostToolHarness.OpenFile("sqlserver");
+        var vm = gui.ViewModel;
+        var file = host.FilePath;
 
         for (var step = 0; step < scenario.Length; step++)
         {
             var (tool, args) = scenario[step];
             var element = JsonSerializer.SerializeToElement(args);
 
-            var guiResult = ErDiagramDynamicTools.Execute(tool, element, vm);
-            var hostResult = DocumentErDiagramToolHost.Execute(tool, file, element);
+            var guiResult = gui.Execute(tool, element);
+            var hostResult = host.Execute(tool, element);
 
             hostResult
                 .Success.Should()

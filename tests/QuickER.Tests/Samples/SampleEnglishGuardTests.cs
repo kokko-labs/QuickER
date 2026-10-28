@@ -69,7 +69,7 @@ public sealed class SampleEnglishGuardTests
 
             // ビルド生成物と日本語版 README は対象外
             if (
-                relative.Split('/').Any(segment => segment is "bin" or "obj")
+                TestSupport.SourceFiles.IsBuildOutput(relative)
                 || Path.GetFileName(path) == "README.ja.md"
             )
             {

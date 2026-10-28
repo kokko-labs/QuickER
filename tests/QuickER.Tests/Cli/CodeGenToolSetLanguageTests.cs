@@ -26,7 +26,7 @@ namespace QuickER.Tests.Cli;
 /// </remarks>
 public class CodeGenToolSetLanguageTests
 {
-    /// <summary>CJK 文字の検出パターン（CodeGenToolSetEnglishGuardTests と同じ範囲）</summary>
+    /// <summary>CJK 文字の検出パターン（ToolDefinitionEnglishGuardTests と同じ範囲）</summary>
     private static readonly Regex CjkPattern = TestSupport.CjkText.Pattern;
 
     private static readonly CultureInfo Japanese = CultureInfo.GetCultureInfo("ja-JP");

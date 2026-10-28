@@ -6,6 +6,7 @@ using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
+using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Mcp.Tools;
 
@@ -15,7 +16,6 @@ namespace QuickER.Tests.Mcp.Tools;
 /// </summary>
 public sealed class DocumentErDiagramQueryToolsTests : IDisposable
 {
-    private const string Create = DocumentErDiagramToolHost.CreateDiagramToolName;
     private const string SetQuery = DocumentErDiagramToolHost.SetQueryToolName;
     private const string ListQueries = DocumentErDiagramToolHost.ListQueriesToolName;
     private const string RemoveQuery = DocumentErDiagramToolHost.RemoveQueryToolName;
@@ -54,7 +54,7 @@ public sealed class DocumentErDiagramQueryToolsTests : IDisposable
     private string CreateOrdersFile()
     {
         var file = PathFor("diagram.json");
-        Exec(Create, file, new { target_dbms = "sqlite" }).Success.Should().BeTrue();
+        DiagramFiles.Create(file, "sqlite");
         Exec("add_entity", file, new { table_name = "orders" });
         AddColumn(file, "order_id", "int", isPrimaryKey: true);
         AddColumn(file, "customer_id", "int");

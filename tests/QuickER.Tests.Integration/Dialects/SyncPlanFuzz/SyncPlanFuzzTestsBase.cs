@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
+using QuickER.Dialects;
+using QuickER.Tests.TestSupport.Engines;
+using Xunit.Sdk;
 
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
@@ -20,14 +22,17 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// 種の集合全体でそれらが全部出たことも表明する（生成器が形を作らなくなったら赤）。
 /// </para>
 /// <para>
-/// 乱数の種は固定（1 から <see cref="DefaultSeedCount"/> まで）。既知の失敗（<see cref="SyncPlanFuzzKnownFailures"/>）は形で除き、失敗した種は種・方言・変更・選んだ項目・スクリプトを
-/// まとめて報告する。環境変数 <c>QUICKER_SYNC_FUZZ_SEED</c> に種を書くとその種だけを流し（形の表明はしない）、
+/// 乱数の種は固定（1 から方言の既定の種の数まで。夜間はその方言の夜間の数まで）。既知の失敗（<see cref="SyncPlanFuzzKnownFailures"/>）は形で除き、失敗した種は種・方言・変更・選んだ項目・スクリプトを
+/// まとめて報告する。生成器・ランナーの予期しない例外も、その種の失敗として記録して次の種へ進む（<see cref="SyncPlanFuzzRunner.RunGuardedAsync"/>）。環境変数 <c>QUICKER_SYNC_FUZZ_SEED</c> に種を書くとその種だけを流し（形の表明はしない）、
 /// <c>QUICKER_SYNC_FUZZ_SEEDS</c> に数を書くと種の数を変えられる。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
 public abstract class SyncPlanFuzzTestsBase
 {
+    /// <summary>派生クラスが受け持つ方言の軸の名前（値は <see cref="DialectNames"/>）</summary>
+    public const string DialectAxis = "dialect";
+
     /// <summary>1 つの種だけを流す環境変数</summary>
     public const string SeedVariable = "QUICKER_SYNC_FUZZ_SEED";
 
@@ -45,35 +50,48 @@ public abstract class SyncPlanFuzzTestsBase
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>この方言で流す種の数の既定値</summary>
-    protected abstract int DefaultSeedCount { get; }
+    /// <summary>この方言で流す種の決め方（普段と夜間の既定の種の数）</summary>
+    internal abstract SeedSettings SeedSettings { get; }
+
+    /// <summary>方言の既定の種の数から、流す種の決め方を作る（1 から・単独の種は <see cref="SeedVariable"/>）</summary>
+    /// <param name="regularCount">方言の普段の既定の種の数</param>
+    /// <param name="nightlyCount">方言の夜間の既定の種の数</param>
+    public static SeedSettings SeedSettingsFor(int regularCount, int nightlyCount) =>
+        new(SeedCountVariable, regularCount, nightlyCount, singleVariable: SeedVariable);
 
     /// <summary>方言（DB）が使えないときのスキップ理由（使えるなら null）</summary>
     protected abstract string? UnavailableReason { get; }
 
-    /// <summary>方言の部品を作る</summary>
+    /// <summary>方言の部品を作る（DB には触れない＝方言の名前は Docker なしで読める）</summary>
     internal abstract SyncPlanFuzzDialect CreateDialect();
 
     [Fact(
         DisplayName = "[Integration] 同期計画の総当たり: 成功か事前の警告・選んだ差分だけが消える"
     )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public async Task RandomPlans_SucceedOrWarn_AndApplyOnlySelectedItems()
     {
         Assert.SkipWhen(UnavailableReason is not null, UnavailableReason ?? string.Empty);
 
-        var single = Environment.GetEnvironmentVariable(SeedVariable);
-        var seeds = single is { Length: > 0 }
-            ? [int.Parse(single, CultureInfo.InvariantCulture)]
-            : Enumerable.Range(1, SeedCount()).ToList();
+        var plan = SeedSource.Resolve(SeedSettings);
+        plan.WriteWarnings();
+        var seeds = plan.Seeds;
 
         var dialect = CreateDialect();
         var outcomes = new List<FuzzSeedOutcome>();
+        var coverage = new CoverageCounter(SyncPlanFuzzDimensions.Table);
 
         try
         {
             foreach (var seed in seeds)
             {
-                outcomes.Add(await SyncPlanFuzzRunner.RunAsync(dialect, seed, Ct));
+                var outcome = await SyncPlanFuzzRunner.RunGuardedAsync(
+                    dialect.Name,
+                    seed,
+                    () => SyncPlanFuzzRunner.RunAsync(dialect, seed, Ct)
+                );
+                outcomes.Add(outcome);
+                SyncPlanFuzzDimensions.Observe(coverage, outcome);
             }
         }
         finally
@@ -95,50 +113,105 @@ public abstract class SyncPlanFuzzTestsBase
             await System.IO.File.AppendAllLinesAsync(log, outcomes.Select(o => o.Describe()), Ct);
         }
 
-        // 必須の形の表明は種が十分に多い方言だけ（少ない種では確率的に出ない形がある）
-        if (single is not { Length: > 0 } && seeds.Count >= ShapeCoverageMinimumSeeds)
+        // 網羅の宣言の誤りは種の結果より先に赤にする。要約はどの方言でも書く
+        var coverageReport = coverage.Report();
+        coverageReport.WriteSummary(output);
+        // 網羅しない組の一覧は、普段の既定の種の数が十分に多い方言だけに書いてある。夜間に種が増えて閾値を超えた方言
+        // （PostgreSQL・Oracle）は一覧が無いので照合しない
+        var checksGaps =
+            !plan.IsSingle
+            && seeds.Count >= ShapeCoverageMinimumSeeds
+            && plan.Settings.RegularCount >= ShapeCoverageMinimumSeeds;
+
+        if (checksGaps)
         {
-            var shapes = outcomes.SelectMany(o => o.Shapes).ToHashSet();
-            FuzzShape
-                .Required.Where(s => !shapes.Contains(s))
-                .Should()
-                .BeEmpty("the generator must produce every required shape across the seeds");
+            coverageReport.WriteGapUsage(SyncPlanFuzzDimensions.Gaps, dialect.Name, output);
+        }
+
+        // 既知の失敗の照合と必須の形の表明は、両方を集めてから 1 つの失敗にする（どちらかの赤がもう一方を隠さない）
+        var problems = new List<string>();
+
+        // 必須の形の表明は、普段の既定の種の数が十分に多い方言だけ（少ない種では確率的に出ない形がある。夜間に種が増えた
+        // 方言でも表明しない＝普段の CI で確かめていない形の欠けで夜間だけ赤にしない）
+        if (
+            !plan.IsSingle
+            && seeds.Count >= ShapeCoverageMinimumSeeds
+            && plan.Settings.RegularCount >= ShapeCoverageMinimumSeeds
+        )
+        {
+            try
+            {
+                CoverageGuard.ContainsAll(
+                    $"{dialect.Name}: 種の集合全体に出た図の形",
+                    outcomes.SelectMany(o => o.Shapes),
+                    FuzzShape.Required
+                );
+            }
+            catch (XunitException ex)
+            {
+                problems.Add(ex.Message);
+            }
         }
 
         // 既知の失敗（形で名指しする）を除いた失敗だけを赤にする。一覧に載っているのに起きなかった項目も、
         // 既定の種の数で流したときは赤にする（直ったなら一覧から外す）
-        var (unexpected, notObserved) = SyncPlanFuzzKnownFailures.Classify(
-            dialect.Name,
-            failures,
-            checkNotObserved: single is not { Length: > 0 }
-                && Environment.GetEnvironmentVariable(SeedCountVariable) is not { Length: > 0 }
-        );
+        var report = new EngineReport($"SyncPlan.{dialect.Name}", DetailedFailures);
 
-        notObserved
-            .Should()
-            .BeEmpty("a known failure that no longer occurs must be removed from the list");
-        unexpected
-            .Should()
-            .BeEmpty(
-                "every plan must either succeed or warn beforehand, and apply exactly the selected items. "
-                    + $"Failed seeds: {string.Join(", ", unexpected.Select(f => f.Seed))}\n"
-                    + string.Join("\n", unexpected.Take(DetailedFailures).Select(f => f.Describe()))
+        foreach (var failure in failures)
+        {
+            report.Add(
+                SyncPlanFuzzKnownFailures.ToFailure(failure),
+                plan.ReproductionFor(failure.Seed)
             );
-    }
+        }
 
-    private int SeedCount()
-    {
-        var text = Environment.GetEnvironmentVariable(SeedCountVariable);
-        return text is { Length: > 0 }
-            ? int.Parse(text, CultureInfo.InvariantCulture)
-            : DefaultSeedCount;
+        var known = SyncPlanFuzzKnownFailures.Set.Classify(
+            report.Failures,
+            plan,
+            scope => scope == dialect.Name
+        );
+        report.WriteSummary(output, known);
+
+        if (
+            known.Problem(
+                "every plan must either succeed or warn beforehand, and apply exactly the selected items. "
+                    + $"Failed seeds: {string.Join(", ", known.Unknown.Select(f => f.Seed))}",
+                report
+            ) is
+            { } knownProblem
+        )
+        {
+            problems.Add(knownProblem);
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new XunitException(string.Join("\n\n", problems));
+        }
+
+        // 網羅しない組は、種の結果を表明してから照合する（網羅の赤が種の失敗を隠さない）。照合は種が十分に多い方言だけ
+        // （SyncPlanFuzzDimensions の説明を参照）
+        if (checksGaps)
+        {
+            coverageReport.AssertGaps(SyncPlanFuzzDimensions.Gaps, dialect.Name, plan);
+        }
     }
 }
 
 /// <summary>SQLite（実ファイル・Docker 不要＝CI の両ジョブで常時実行）</summary>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.Sqlite)]
 public sealed class SqliteSyncPlanFuzzTests : SyncPlanFuzzTestsBase
 {
-    protected override int DefaultSeedCount => 2000;
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 2000;
+
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeeds = 20000;
+
+    /// <summary>種の決め方</summary>
+    public static SeedSettings Seeds { get; } = SeedSettingsFor(DefaultSeeds, NightlySeeds);
+
+    internal override SeedSettings SeedSettings => Seeds;
 
     protected override string? UnavailableReason => null;
 
@@ -146,11 +219,21 @@ public sealed class SqliteSyncPlanFuzzTests : SyncPlanFuzzTestsBase
 }
 
 /// <summary>MySQL 8.4（Testcontainers）</summary>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.MySql)]
 [Collection(MySqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class MySqlSyncPlanFuzzTests(MySqlContainerFixture fixture) : SyncPlanFuzzTestsBase
 {
-    protected override int DefaultSeedCount => 150;
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 150;
+
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeeds = 1500;
+
+    /// <summary>種の決め方</summary>
+    public static SeedSettings Seeds { get; } = SeedSettingsFor(DefaultSeeds, NightlySeeds);
+
+    internal override SeedSettings SeedSettings => Seeds;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
@@ -159,12 +242,22 @@ public sealed class MySqlSyncPlanFuzzTests(MySqlContainerFixture fixture) : Sync
 }
 
 /// <summary>SQL Server 2022（Testcontainers）</summary>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.SqlServer)]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class SqlServerSyncPlanFuzzTests(SqlServerContainerFixture fixture)
     : SyncPlanFuzzTestsBase
 {
-    protected override int DefaultSeedCount => 100;
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 100;
+
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeeds = 1000;
+
+    /// <summary>種の決め方</summary>
+    public static SeedSettings Seeds { get; } = SeedSettingsFor(DefaultSeeds, NightlySeeds);
+
+    internal override SeedSettings SeedSettings => Seeds;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
@@ -174,12 +267,22 @@ public sealed class SqlServerSyncPlanFuzzTests(SqlServerContainerFixture fixture
 }
 
 /// <summary>PostgreSQL（Testcontainers・主キー・外部キーの逆引きの DO ブロックを通すため少ない種で流す）</summary>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.PostgreSql)]
 [Collection(PostgreSqlContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixture)
     : SyncPlanFuzzTestsBase
 {
-    protected override int DefaultSeedCount => 15;
+    /// <summary>既定の種の数</summary>
+    public const int DefaultSeeds = 15;
+
+    /// <summary>夜間の既定の種の数</summary>
+    public const int NightlySeeds = 600;
+
+    /// <summary>種の決め方</summary>
+    public static SeedSettings Seeds { get; } = SeedSettingsFor(DefaultSeeds, NightlySeeds);
+
+    internal override SeedSettings SeedSettings => Seeds;
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
@@ -195,6 +298,7 @@ public sealed class PostgreSqlSyncPlanFuzzTests(PostgreSqlContainerFixture fixtu
 /// 環境変数 <c>QUICKER_SYNC_FUZZ_ORACLE=1</c> のときに <see cref="ExtendedOracleSeedCount"/> 種へ増やす。
 /// コンテナは Oracle のほかの統合テストと共有する。
 /// </remarks>
+[MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.Oracle)]
 [Collection(OracleContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class OracleSyncPlanFuzzTests(OracleContainerFixture fixture) : SyncPlanFuzzTestsBase
@@ -208,10 +312,16 @@ public sealed class OracleSyncPlanFuzzTests(OracleContainerFixture fixture) : Sy
     /// <summary><see cref="ExtendVariable"/> を立てたときの種の数</summary>
     public const int ExtendedOracleSeedCount = 30;
 
-    protected override int DefaultSeedCount =>
-        Environment.GetEnvironmentVariable(ExtendVariable) == "1"
-            ? ExtendedOracleSeedCount
-            : DefaultOracleSeedCount;
+    /// <summary>夜間の既定の種の数（<see cref="ExtendedOracleSeedCount"/> 以上＝夜間は <see cref="ExtendVariable"/> に依らずこの数）</summary>
+    public const int NightlySeeds = 120;
+
+    /// <summary>種の決め方（<paramref name="extended"/> なら普段の数を <see cref="ExtendedOracleSeedCount"/> にする）</summary>
+    /// <param name="extended"><see cref="ExtendVariable"/> を立てたか</param>
+    public static SeedSettings SeedsFor(bool extended) =>
+        SeedSettingsFor(extended ? ExtendedOracleSeedCount : DefaultOracleSeedCount, NightlySeeds);
+
+    internal override SeedSettings SeedSettings =>
+        SeedsFor(Environment.GetEnvironmentVariable(ExtendVariable) == "1");
 
     protected override string? UnavailableReason =>
         fixture.IsAvailable ? null : fixture.UnavailableReason;
