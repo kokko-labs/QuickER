@@ -608,6 +608,227 @@ public sealed class CoverageCounterTests
         text.Should().Contain("A × B 3 件");
     }
 
+    /// <summary>索引で数えた結果と素朴な数え方を比べる種（種の下位 4 ビットで、3 因子の集まり・固定・isValid・宣言の誤りの有無を決める）</summary>
+    public static TheoryData<int> ParitySeeds() => new(Enumerable.Range(0, 48));
+
+    [Theory(DisplayName = "索引で数えた結果が、網羅すべき組を全部なめる素朴な数え方と一致する")]
+    [MemberData(nameof(ParitySeeds))]
+    public void IndexedCounting_MatchesNaiveScan(int seed)
+    {
+        var random = new Random(seed);
+        var hasGroups = (seed & 1) != 0;
+        var hasFixed = (seed & 2) != 0;
+        var hasRules = (seed & 4) != 0;
+        var withErrors = (seed & 8) != 0;
+
+        // 因子 4〜6・水準 2〜4（種の 3 つに 1 つは先頭の因子を 1 水準にする）
+        var factorCount = random.Next(4, 7);
+        var factors = Enumerable
+            .Range(0, factorCount)
+            .Select(f =>
+            {
+                var levelCount = f == 0 && seed % 3 == 0 ? 1 : random.Next(2, 5);
+                return F(
+                    $"F{f}",
+                    Enumerable.Range(0, levelCount).Select(l => $"f{f}l{l}").ToArray()
+                );
+            })
+            .ToList();
+
+        var groups = new List<FactorGroup>();
+
+        if (hasGroups)
+        {
+            for (var g = random.Next(1, 3); g > 0; g--)
+            {
+                var size = random.Next(3, Math.Min(4, factorCount) + 1);
+                groups.Add(
+                    new FactorGroup(
+                        factors.Select(f => f.Name).OrderBy(_ => random.Next()).Take(size).ToArray()
+                    )
+                );
+            }
+        }
+
+        // 固定は 2 水準以上の因子から選び、固定しない因子を 3 つ以上残す
+        var fixedLevels = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        if (hasFixed)
+        {
+            var candidates = factors.Where(f => f.Levels.Count >= 2).OrderBy(_ => random.Next());
+
+            foreach (var factor in candidates.Take(Math.Min(2, factorCount - 3)))
+            {
+                fixedLevels[factor.Name] = factor.Levels[random.Next(factor.Levels.Count)].Name;
+            }
+        }
+
+        // isValid は固定しない 2 水準以上の因子の水準の組を禁じる（最初の規則は 2 因子＝必ず組を除く）
+        var rules = new List<(string Factor, string Level)[]>();
+
+        if (hasRules)
+        {
+            var candidates = factors
+                .Where(f => f.Levels.Count >= 2 && !fixedLevels.ContainsKey(f.Name))
+                .ToList();
+
+            for (var r = random.Next(1, 4); r > 0; r--)
+            {
+                var size = rules.Count == 0 ? 2 : Math.Min(random.Next(2, 4), candidates.Count);
+                rules.Add(
+                    candidates
+                        .OrderBy(_ => random.Next())
+                        .Take(size)
+                        .Select(f => (f.Name, f.Levels[random.Next(f.Levels.Count)].Name))
+                        .ToArray()
+                );
+            }
+        }
+
+        bool IsValid(IReadOnlyDictionary<string, string> d) =>
+            !rules.Any(rule =>
+                rule.All(item =>
+                    d.TryGetValue(item.Factor, out var level)
+                    && string.Equals(level, item.Level, StringComparison.Ordinal)
+                )
+            );
+
+        var table = new DimensionTable("P", factors, groups, hasRules ? IsValid : null);
+
+        // 素朴な数え方の宣言の検査（本物の Check とは独立に書く）
+        bool NaiveAccepts(IReadOnlyDictionary<string, string> assignment) =>
+            factors.All(f =>
+                assignment.TryGetValue(f.Name, out var level)
+                && f.Levels.Any(l => string.Equals(l.Name, level, StringComparison.Ordinal))
+                && (
+                    !fixedLevels.TryGetValue(f.Name, out var fixedLevel)
+                    || string.Equals(fixedLevel, level, StringComparison.Ordinal)
+                )
+            )
+            && assignment.Keys.All(key => factors.Any(f => f.Name == key))
+            && table.IsValid(assignment);
+
+        Dictionary<string, string> RandomAssignment(bool corrupt)
+        {
+            var assignment = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            foreach (var factor in factors)
+            {
+                assignment[factor.Name] =
+                    !corrupt && fixedLevels.TryGetValue(factor.Name, out var fixedLevel)
+                        ? fixedLevel
+                        : factor.Levels[random.Next(factor.Levels.Count)].Name;
+            }
+
+            if (corrupt)
+            {
+                switch (random.Next(4))
+                {
+                    case 0:
+                        assignment.Remove(factors[random.Next(factorCount)].Name);
+                        break;
+                    case 1:
+                        assignment[factors[random.Next(factorCount)].Name] = "undeclared";
+                        break;
+                    case 2:
+                        assignment["Extra"] = "x";
+                        break;
+                }
+            }
+
+            return assignment;
+        }
+
+        var observations = Enumerable
+            .Range(0, random.Next(40, 151))
+            .Select(_ => RandomAssignment(withErrors && random.Next(3) == 0))
+            .ToList();
+        var accepted = observations.Where(NaiveAccepts).ToList();
+
+        // 宣言の誤りを含む列：観測ごとに投げるかが一致し、Report も投げ直す
+        if (withErrors)
+        {
+            accepted.Count.Should().BeLessThan(observations.Count, "宣言の誤りを含む列を作る");
+
+            var withRejects = new CoverageCounter(table, fixedLevels);
+
+            foreach (var assignment in observations)
+            {
+                var observe = () => withRejects.Observe(assignment);
+
+                if (NaiveAccepts(assignment))
+                {
+                    observe.Should().NotThrow();
+                }
+                else
+                {
+                    observe.Should().Throw<CoverageDeclarationException>();
+                }
+            }
+
+            var rethrow = () => withRejects.Report();
+            rethrow.Should().Throw<CoverageDeclarationException>();
+        }
+
+        accepted.Should().NotBeEmpty("宣言どおりの割り当てを数える");
+
+        // 素朴な数え方：網羅すべき組を全部なめ、割り当てに含まれる組を数える
+        var naivePairs = table.RequiredPairs(fixedLevels);
+        var naiveTriples = table.RequiredTriples(fixedLevels);
+        var naiveRequired = naivePairs.Concat(naiveTriples).Distinct().ToList();
+        var naiveCounts = naiveRequired.ToDictionary(
+            tuple => tuple,
+            tuple => accepted.Count(tuple.IsContainedIn)
+        );
+
+        var counter = new CoverageCounter(table, fixedLevels);
+        accepted.ForEach(counter.Observe);
+        var report = counter.Report();
+
+        report.Cases.Should().Be(accepted.Count);
+        report
+            .PairCounts.Select(pair => (pair.Key.Key, pair.Value))
+            .Should()
+            .Equal(naivePairs.Select(tuple => (tuple.Key, naiveCounts[tuple])));
+        report
+            .TripleCounts.Select(pair => (pair.Key.Key, pair.Value))
+            .Should()
+            .Equal(naiveTriples.Select(tuple => (tuple.Key, naiveCounts[tuple])));
+        report
+            .Missing.Select(tuple => tuple.Key)
+            .Should()
+            .Equal(naiveRequired.Where(tuple => naiveCounts[tuple] == 0).Select(t => t.Key));
+        report
+            .LevelCounts.Select(pair => (pair.Key.Factor, pair.Key.Level, pair.Value))
+            .Should()
+            .Equal(
+                factors.SelectMany(f =>
+                    f.Levels.Select(l => (f.Name, l.Name, accepted.Count(a => a[f.Name] == l.Name)))
+                )
+            );
+
+        // 種が決めた観点を実際に通ったか（黙って空振りしない）
+        if (hasGroups)
+        {
+            naiveTriples.Should().NotBeEmpty();
+            report.TripleCounts.Values.Should().Contain(count => count > 0);
+        }
+
+        if (hasFixed)
+        {
+            fixedLevels.Should().NotBeEmpty();
+            naivePairs.Count.Should().BeLessThan(table.RequiredPairs().Count, "固定が組を減らす");
+        }
+
+        if (hasRules)
+        {
+            var unruled = new DimensionTable("P", factors, groups);
+            naivePairs
+                .Count.Should()
+                .BeLessThan(unruled.RequiredPairs(fixedLevels).Count, "isValid が組を除く");
+        }
+    }
+
     private sealed class RecordingOutput : ITestOutputHelper
     {
         public List<string> Lines { get; } = [];
