@@ -694,6 +694,9 @@ public class RuntimeTestMatrixTests
         new("SyncConstructionExclusionTests", "SyncSupport", Backend.AdoSqlite),
         new("SyncNullKeyRuntimeTests", "SyncSupport", Backend.AdoSqlite),
         new("SyncLocalSaveHookRegistrationTests", "SyncSupport", Backend.AdoSqlite),
+        // 同期の構成の行列（DI の登録の形・転送経路・キーの型）＝サーバーは実 SQL Server（直結の行）と HTTP 越し（HTTP の行）
+        new("SyncConfigMatrixRuntimeTests", "SyncSupport", Backend.AdoSqlServer),
+        new("SyncConfigMatrixRuntimeTests", "SyncSupport", Backend.Remote),
         new("SyncSqliteRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
         new("SyncRefreshBenchmarkRuntimeTests", "SyncRefresh", Backend.AdoSqlite),
         new("SyncSqlServerRuntimeTests", "SyncRefresh", Backend.AdoSqlServer),

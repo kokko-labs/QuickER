@@ -228,9 +228,23 @@ internal sealed class SyncModelDevice : IDisposable
 
         // 失敗の注入の口（Save フック）。キーを決めるフックは整数キーの表だけ（挿入する行の主キーを別の値へ変える）
         var hooks = new SaveHookRegistry()
-            .Add(new SyncModelHook<ModelFolderEntity>(faults, e => e.FolderId += RekeyOffset))
+            .Add(
+                new SyncModelHook<ModelFolderEntity>(
+                    faults,
+                    e => e.FolderId += RekeyOffset,
+                    e => e.FolderId == 0,
+                    (e, key) => e.FolderId = key
+                )
+            )
             .Add(new SyncModelHook<ModelLabelEntity>(faults, null))
-            .Add(new SyncModelHook<ModelItemEntity>(faults, e => e.ItemId += RekeyOffset))
+            .Add(
+                new SyncModelHook<ModelItemEntity>(
+                    faults,
+                    e => e.ItemId += RekeyOffset,
+                    e => e.ItemId == 0,
+                    (e, key) => e.ItemId = key
+                )
+            )
             .Add(new SyncModelHook<ModelEventEntity>(faults, null));
 
         device.Folders = new JournalingModelFolderRepository(
@@ -612,7 +626,24 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         finally
         {
             Faults.Writing = null;
+            Faults.KeyToAssign = null;
         }
+    }
+
+    /// <summary>
+    /// HookAssignKey が仕掛けてあり、グラフ保存の挿入なら、キーを入れずに（0 で）実体を作り、フックが入れるキーを控える
+    /// （直接の挿入はフックが走らないので、そのままのキーで作る）
+    /// </summary>
+    private int KeyFor(ModelWriteOp op, int key)
+    {
+        if (op.Via == ModelWriteVia.Graph && Faults.IsArmed(ModelFaultKind.HookAssignKey, op.Actor))
+        {
+            Faults.KeyToAssign = key;
+
+            return 0;
+        }
+
+        return key;
     }
 
     private async Task ApplyOnDeviceAsync(ModelWriteOp op, CancellationToken ct)
@@ -627,7 +658,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                     device.Folders,
                     new ModelFolderEntity
                     {
-                        FolderId = add.Id,
+                        FolderId = KeyFor(op, add.Id),
                         ParentId = add.ParentId,
                         Name = add.Name,
                     },
@@ -683,7 +714,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                     device.Items,
                     new ModelItemEntity
                     {
-                        ItemId = add.Id,
+                        ItemId = KeyFor(op, add.Id),
                         FolderId = add.FolderId,
                         LabelCode = add.LabelCode,
                         Code = add.Code,

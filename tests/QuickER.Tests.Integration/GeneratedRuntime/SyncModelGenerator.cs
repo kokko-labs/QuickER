@@ -50,14 +50,25 @@ internal sealed class SyncModelGenerator
     /// 外部の ISyncTable 実装の代役は乱数の種では使わない（エンジンの内部の面を持たない実装は、外部キーで断られた書き込みの
     /// 報告などを持たず、公開の面どおりに例外を投げる＝その差は不具合ではない）。代役は決定的なシナリオだけが使う。
     /// </summary>
+    /// <remarks>
+    /// モードとポリシーは種の中で固定し、乱数でなく種の番号から決める（種を 4 で割った商を、モード×ポリシーの 6 組へ順に
+    /// 配る）。種の組と合わせて、続いた 24 種ごとにモード×ポリシー×種の組の全部の組が 1 回ずつ出る（乱数で選ぶと、既定の
+    /// 60 種で特定の組がたまたま出ないことがあった）。
+    /// </remarks>
     public SyncModelGenerator(int seed)
     {
         _random = new Random(seed);
-        Mode = _random.NextDouble() < 0.6 ? SyncMode.Versioned : SyncMode.LastWriteWins;
-        Policy = (SyncConflictPolicy)_random.Next(3);
+        var modes = Enum.GetValues<SyncMode>();
+        var policies = Enum.GetValues<SyncConflictPolicy>();
+        var settings = seed / 4 % (modes.Length * policies.Length);
+        Mode = modes[settings / policies.Length];
+        Policy = policies[settings % policies.Length];
         Extras = seed % 4 is 1 or 3;
         Faults = seed % 4 is 2 or 3;
     }
+
+    /// <summary>同期の操作で削除伝搬を切る割合</summary>
+    public const double PropagateDeletesOffRate = 0.25;
 
     /// <summary>キーだけのスタブ・持っていた実体での削除・同じキーでの作り直し・失敗する書き込みを足すか</summary>
     public bool Extras { get; }
@@ -182,6 +193,9 @@ internal sealed class SyncModelGenerator
         return [NextSync()];
     }
 
+    /// <summary>同期の操作のダウンロードのバッチの大きさ</summary>
+    public static readonly int[] Batches = [1, 2, 3, 500];
+
     private ModelSyncOp NextSync()
     {
         var device = _random.Next(2) == 0 ? ModelActor.Device1 : ModelActor.Device2;
@@ -192,19 +206,12 @@ internal sealed class SyncModelGenerator
             : ModelSyncKind.Download;
         IReadOnlyList<string> excluded =
             _random.NextDouble() < 0.15 ? [Pick(ModelTables.All.ToList())] : [];
-        int[] batches = [1, 2, 3, 500];
+        var batch = Batches[_random.Next(Batches.Length)];
+        var propagateDeletes = _random.NextDouble() >= PropagateDeletesOffRate;
 
         // blob は常に運ぶ。運ばないランを挟むと、そのランで降りた行・上がった行の blob はその後の運ぶランでも動かない
-        // （文書どおりの割り切り）ため、収束の表明が成り立たない。運ぶ／運ばないの混在は失敗の注入の段で別に扱う
-        return new ModelSyncOp(
-            device,
-            kind,
-            Mode,
-            Policy,
-            excluded,
-            true,
-            batches[_random.Next(batches.Length)]
-        );
+        // （文書どおりの割り切り＝運ぶかは端末ごとにそろえる）ため、収束の表明が成り立たない
+        return new ModelSyncOp(device, kind, Mode, Policy, excluded, true, batch, propagateDeletes);
     }
 
     private IReadOnlyList<ModelOp>? TryWrite(ModelActor actor, ModelDbState state)
@@ -422,9 +429,14 @@ internal sealed class SyncModelGenerator
         var items = state.Items.Keys.Order().ToList();
         var events = state.Events.Keys.Order(StringComparer.Ordinal).ToList();
 
-        switch (_random.Next(15))
+        switch (_random.Next(16))
         {
-            case 0 or 1:
+            case 15:
+                // 一意な値の付け替え（品目の code・フォルダーの name）
+                return TryUniqueShape(actor, via, state);
+
+            case 0
+            or 1:
             {
                 int? parent = folders.Count == 0 || _random.Next(3) == 0 ? null : Pick(folders);
 
@@ -614,6 +626,284 @@ internal sealed class SyncModelGenerator
         }
     }
 
+    /// <summary>形：更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）</summary>
+    public const string ReleaseTakeShape = "release-take";
+
+    /// <summary>形：空けた値を取った行の値を、さらに別の行が取る（3 行の連鎖。循環＝入れ替えは作らない）</summary>
+    public const string ReleaseTakeChainShape = "release-take-chain";
+
+    /// <summary>形：行を消して一意な値を空け、別の行がその値を更新で取る（4m-B3 の材料）</summary>
+    public const string DeleteTakeShape = "delete-take";
+
+    /// <summary>形：消す行の一意な値を別の行が取って別の親へ付け替え、元の親（葉になる）を消す（4m-D4）</summary>
+    public const string DeleteTakeReparentShape = "delete-take-reparent";
+
+    /// <summary>
+    /// 一意な値の付け替えの形（品目の code かフォルダーの name）を 1 つ作る。どれも書き手の DB で各手が成り立つ順に並べ、
+    /// 値を取る手は、それより前の手が値を空けた後に置く（2 行の入れ替えは作らない＝同じバッチの入れ替えは docs の既知の割り切り）。
+    /// </summary>
+    private ModelShapeStep? TryUniqueShape(ModelActor actor, ModelWriteVia via, ModelDbState state)
+    {
+        var items = _random.Next(2) == 0;
+        var table = items ? ModelTables.Items : ModelTables.Folders;
+        var shape = _random.Next(4) switch
+        {
+            0 => ReleaseTakeShape,
+            1 => ReleaseTakeChainShape,
+            2 => DeleteTakeShape,
+            _ => DeleteTakeReparentShape,
+        };
+        var ops = shape switch
+        {
+            ReleaseTakeShape => ReleaseTake(actor, via, state, items, 2),
+            ReleaseTakeChainShape => ReleaseTake(actor, via, state, items, 3),
+            DeleteTakeShape => DeleteTake(actor, via, state, items),
+            _ => DeleteTakeReparent(actor, via, state, items),
+        };
+
+        return ops is null ? null : new ModelShapeStep(shape, table, ops);
+    }
+
+    /// <summary>
+    /// <paramref name="length"/> 行の連鎖：先頭の行の値を新しい値へ、続く行はそれぞれ直前の行の元の値へ更新する。
+    /// 半分の確率で、2 番目の行（最初に値を取る行）を先に別の更新で触る（取る側の記録を先にする＝4m-D3 の記録の順）
+    /// </summary>
+    private List<ModelOp>? ReleaseTake(
+        ModelActor actor,
+        ModelWriteVia via,
+        ModelDbState state,
+        bool items,
+        int length
+    )
+    {
+        var keys = items ? state.Items.Keys.Order().ToList() : state.Folders.Keys.Order().ToList();
+
+        if (keys.Count < length)
+        {
+            return null;
+        }
+
+        var chain = new List<int>();
+
+        for (var i = 0; i < length; i++)
+        {
+            var rest = keys.Except(chain).ToList();
+            chain.Add(Pick(rest));
+        }
+
+        var ops = new List<ModelOp>();
+
+        if (_random.Next(2) == 0)
+        {
+            ops.Add(Touch(actor, via, state, items, chain[1]));
+        }
+
+        ops.Add(WithValue(actor, via, state, items, chain[0], items ? Value("c") : Value("f")));
+
+        for (var i = 1; i < length; i++)
+        {
+            ops.Add(
+                WithValue(actor, via, state, items, chain[i], UniqueOf(state, items, chain[i - 1]))
+            );
+        }
+
+        return ops;
+    }
+
+    /// <summary>葉の行を消して値を空け、別の行がその値を更新で取る</summary>
+    private List<ModelOp>? DeleteTake(
+        ModelActor actor,
+        ModelWriteVia via,
+        ModelDbState state,
+        bool items
+    )
+    {
+        var leaves = items ? FreeItems(state) : LeafFolders(state);
+
+        if (leaves.Count == 0)
+        {
+            return null;
+        }
+
+        var deleted = Pick(leaves);
+        var takers = (items ? state.Items.Keys.ToList() : state.Folders.Keys.ToList())
+            .Where(k => k != deleted)
+            .Order()
+            .ToList();
+
+        if (takers.Count == 0)
+        {
+            return null;
+        }
+
+        var taker = Pick(takers);
+
+        return
+        [
+            Delete(actor, via, items, deleted),
+            WithValue(actor, via, state, items, taker, UniqueOf(state, items, deleted)),
+        ];
+    }
+
+    /// <summary>
+    /// 親 P の子 X を消し、P のほかの子を全部別の親 Q へ付け替え（最初の子が X の値を取る）、葉になった P を消す
+    /// </summary>
+    private List<ModelOp>? DeleteTakeReparent(
+        ModelActor actor,
+        ModelWriteVia via,
+        ModelDbState state,
+        bool items
+    )
+    {
+        var folders = state.Folders.Keys.Order().ToList();
+
+        // P：付け替える表の子（品目ならその品目、フォルダーなら子のフォルダー）が 2 つ以上あり、そのうち X が消せる子。
+        // P を参照するほかの行（ラベル・もう一方の種類の子）も Q へ付け替えてから P を消す
+        var candidates = folders
+            .Select(p => (Parent: p, Children: Children(state, items, p)))
+            .Where(c =>
+                c.Children.Count >= 2 && c.Children.Any(child => IsLeafChild(state, items, child))
+            )
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var (parent, children) = Pick(candidates);
+        var deleted = Pick(children.Where(child => IsLeafChild(state, items, child)).ToList());
+        var targets = folders.Where(q => !IsDescendantOrSelf(state, q, parent)).ToList();
+
+        if (targets.Count == 0)
+        {
+            return null;
+        }
+
+        var target = Pick(targets);
+        var moved = children.Where(child => child != deleted).ToList();
+        var ops = new List<ModelOp> { Delete(actor, via, items, deleted) };
+
+        for (var i = 0; i < moved.Count; i++)
+        {
+            var value = i == 0 ? UniqueOf(state, items, deleted) : UniqueOf(state, items, moved[i]);
+            ops.Add(WithValue(actor, via, state, items, moved[i], value, target));
+        }
+
+        // もう一方の種類の子とラベルも Q へ付け替える（一意な値は変えない）
+        foreach (var other in Children(state, !items, parent))
+        {
+            ops.Add(
+                WithValue(actor, via, state, !items, other, UniqueOf(state, !items, other), target)
+            );
+        }
+
+        foreach (
+            var label in state
+                .Labels.Where(l => l.Value.FolderId == parent)
+                .Select(l => l.Key)
+                .Order(StringComparer.Ordinal)
+        )
+        {
+            ops.Add(new UpdateLabelOp(actor, via, label, target, Value("l")));
+        }
+
+        ops.Add(new DeleteFolderOp(actor, via, parent));
+
+        return ops;
+    }
+
+    /// <summary>親のフォルダーの子（品目ならそのフォルダーの品目・フォルダーなら子のフォルダー）</summary>
+    private static List<int> Children(ModelDbState state, bool items, int parent) =>
+        items
+            ? state.Items.Where(p => p.Value.FolderId == parent).Select(p => p.Key).Order().ToList()
+            : state
+                .Folders.Where(p => p.Value.ParentId == parent)
+                .Select(p => p.Key)
+                .Order()
+                .ToList();
+
+    /// <summary>消せる子か（品目はイベントが参照しない・フォルダーは葉）</summary>
+    private static bool IsLeafChild(ModelDbState state, bool items, int key) =>
+        items ? !state.Events.Values.Any(e => e.ItemId == key) : LeafFolders(state).Contains(key);
+
+    /// <summary>イベントが参照しない品目</summary>
+    private static List<int> FreeItems(ModelDbState state) =>
+        state.Items.Keys.Order().Where(i => !state.Events.Values.Any(v => v.ItemId == i)).ToList();
+
+    /// <summary>葉のフォルダー（子のフォルダー・ラベル・品目のどれからも参照されない）</summary>
+    private static List<int> LeafFolders(ModelDbState state) =>
+        state
+            .Folders.Keys.Order()
+            .Where(f =>
+                !state.Folders.Values.Any(v => v.ParentId == f)
+                && !state.Labels.Values.Any(v => v.FolderId == f)
+                && !state.Items.Values.Any(v => v.FolderId == f)
+            )
+            .ToList();
+
+    /// <summary>行の一意な値（品目の code・フォルダーの name）</summary>
+    private static string UniqueOf(ModelDbState state, bool items, int key) =>
+        items ? state.Items[key].Code : state.Folders[key].Name;
+
+    /// <summary>行の一意な値を <paramref name="value"/> へ（品目は題名も新しくする・<paramref name="parent"/> があれば付け替える）</summary>
+    private ModelWriteOp WithValue(
+        ModelActor actor,
+        ModelWriteVia via,
+        ModelDbState state,
+        bool items,
+        int key,
+        string value,
+        int? parent = null
+    )
+    {
+        if (items)
+        {
+            var row = state.Items[key];
+
+            return new UpdateItemOp(
+                actor,
+                via,
+                key,
+                parent ?? row.FolderId,
+                row.LabelCode,
+                value,
+                Value("t")
+            );
+        }
+
+        return new UpdateFolderOp(actor, via, key, parent ?? state.Folders[key].ParentId, value);
+    }
+
+    /// <summary>一意な値を変えない更新（品目は題名を新しく・フォルダーは同じ内容で書き直す＝記録だけが付く）</summary>
+    private ModelWriteOp Touch(
+        ModelActor actor,
+        ModelWriteVia via,
+        ModelDbState state,
+        bool items,
+        int key
+    ) =>
+        items
+            ? new UpdateItemOp(
+                actor,
+                via,
+                key,
+                state.Items[key].FolderId,
+                state.Items[key].LabelCode,
+                state.Items[key].Code,
+                Value("t")
+            )
+            : new UpdateFolderOp(
+                actor,
+                via,
+                key,
+                state.Folders[key].ParentId,
+                state.Folders[key].Name
+            );
+
+    private static ModelWriteOp Delete(ModelActor actor, ModelWriteVia via, bool items, int key) =>
+        items ? new DeleteItemOp(actor, via, key) : new DeleteFolderOp(actor, via, key);
+
     private static bool IsDescendantOrSelf(ModelDbState state, int candidate, int ancestor)
     {
         int? current = candidate;
@@ -672,4 +962,24 @@ internal sealed class SyncModelGenerator
 
         return DateTime.SpecifyKind(value, kind);
     }
+}
+
+/// <summary>
+/// 生成器が一意な値の付け替えの形として返した 1 歩（操作の列と、形の名前・対象の表）。次元表の観測が形を数えるのに使う
+/// （観測は返した値を読むだけで乱数を引かない）
+/// </summary>
+/// <param name="Shape">形の名前（<see cref="SyncModelGenerator.ReleaseTakeShape"/> など）</param>
+/// <param name="Table">一意な値を付け替える表</param>
+/// <param name="Ops">操作の列</param>
+internal sealed record ModelShapeStep(string Shape, string Table, IReadOnlyList<ModelOp> Ops)
+    : IReadOnlyList<ModelOp>
+{
+    public ModelOp this[int index] => Ops[index];
+
+    public int Count => Ops.Count;
+
+    public IEnumerator<ModelOp> GetEnumerator() => Ops.GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+        GetEnumerator();
 }

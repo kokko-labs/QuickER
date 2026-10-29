@@ -32,6 +32,12 @@ internal enum ModelFaultKind
     /// <summary>端末のグラフ保存の Before フックが挿入する行の主キーを変える（キーを決めるフック）</summary>
     HookRekey,
 
+    /// <summary>
+    /// 端末のグラフ保存の Before フックが、キーの無い（0 の）新しい行にキーを決める（整数のキーの表だけ。挿入する実体はキーを
+    /// 入れずに作り、フックが操作のキーを入れる＝記録はキーの無い形で付き、保存の後に新しいキーへ書き直される）
+    /// </summary>
+    HookAssignKey,
+
     /// <summary>端末の同期中の、エンジンがローカルへ行を適用するときの Before フックが false を返す（その行を飛ばす）</summary>
     /// <remarks>乱数の操作の列には混ぜない（既存の種の操作の列を変えないため）。決定的なシナリオだけが使う。</remarks>
     ApplySkip,
@@ -88,6 +94,12 @@ internal sealed class SyncModelFaults
 
     /// <summary>失敗を仕掛ける</summary>
     public void Arm(ModelFaultKind kind, ModelActor device) => _armed.Add((kind, device));
+
+    /// <summary>失敗が仕掛けてあるか（起こさずに見る）</summary>
+    public bool IsArmed(ModelFaultKind kind, ModelActor device) => _armed.Contains((kind, device));
+
+    /// <summary><see cref="ModelFaultKind.HookAssignKey"/> のフックが決めるキー（書き込みの間だけ）</summary>
+    public int? KeyToAssign { get; set; }
 
     /// <summary>仕掛けた失敗をすべて外す（静止化の前）</summary>
     public void Clear() => _armed.Clear();
@@ -165,8 +177,12 @@ internal sealed class SyncModelFaults
 
 /// <summary>端末のローカルのリポジトリへ渡す Save フック（失敗の注入の口）</summary>
 /// <typeparam name="TEntity">エンティティ型</typeparam>
-internal sealed class SyncModelHook<TEntity>(SyncModelFaults faults, Action<TEntity>? rekey)
-    : ISaveHook<TEntity>
+internal sealed class SyncModelHook<TEntity>(
+    SyncModelFaults faults,
+    Action<TEntity>? rekey,
+    Func<TEntity, bool>? keyless = null,
+    Action<TEntity, int>? assign = null
+) : ISaveHook<TEntity>
     where TEntity : EntityBaseCore
 {
     public Task<bool> BeforeSaveAsync(
@@ -181,6 +197,19 @@ internal sealed class SyncModelHook<TEntity>(SyncModelFaults faults, Action<TEnt
         )
         {
             return Task.FromResult(false);
+        }
+
+        // キーの無い新しい行にキーを決める（世界がキーを入れずに作った実体だけ）
+        if (
+            operation == SaveOperation.Insert
+            && keyless is not null
+            && assign is not null
+            && keyless(entity)
+            && faults.KeyToAssign is { } key
+            && faults.TryFire(ModelFaultKind.HookAssignKey, faults.Writing)
+        )
+        {
+            assign(entity, key);
         }
 
         if (

@@ -44,6 +44,36 @@ internal static class SyncModelDimensions
     /// <summary>端末の書き込みの経路</summary>
     public const string Via = "Via";
 
+    /// <summary>一意な値を付け替える表（一意な値の形の操作だけ）</summary>
+    public const string UniqueTable = "UniqueTable";
+
+    /// <summary>同期の操作の削除伝搬</summary>
+    public const string PropagateDeletes = "PropagateDeletes";
+
+    /// <summary>同期の操作で除外した表</summary>
+    public const string Excluded = "Excluded";
+
+    /// <summary>同期の操作のダウンロードのバッチの大きさ</summary>
+    public const string Batch = "Batch";
+
+    /// <summary>同期の操作で blob を運ぶか</summary>
+    public const string Blobs = "Blobs";
+
+    /// <summary>仕掛けた失敗の種類</summary>
+    public const string FaultKind = "FaultKind";
+
+    // 失敗の仕掛けでない操作の、失敗の種類の水準
+    private const string NotFault = "not-fault";
+
+    // 同期の操作でない操作の、同期の設定の因子の水準
+    private const string NotSync = "not-sync";
+
+    // 同期の操作の、除外する表が無い水準
+    private const string NoExclusion = "none";
+
+    // 一意な値の形でない操作の、表の水準
+    private const string NoUniqueTable = "none";
+
     // 操作の種類の水準
     private const string Write = "write";
     private const string UniqueReuse = "unique-reuse";
@@ -56,6 +86,22 @@ internal static class SyncModelDimensions
     private const string Upload = "upload";
     private const string Download = "download";
     private const string Fault = "fault";
+    private const string ReleaseTake = SyncModelGenerator.ReleaseTakeShape;
+    private const string ReleaseTakeChain = SyncModelGenerator.ReleaseTakeChainShape;
+    private const string DeleteTake = SyncModelGenerator.DeleteTakeShape;
+    private const string DeleteTakeReparent = SyncModelGenerator.DeleteTakeReparentShape;
+
+    /// <summary>一意な値の付け替えの形（<see cref="SyncModelGenerator"/> の TryUniqueShape）</summary>
+    private static readonly string[] UniqueShapeFamilies =
+    [
+        ReleaseTake,
+        ReleaseTakeChain,
+        DeleteTake,
+        DeleteTakeReparent,
+    ];
+
+    /// <summary>同期の呼び出しの操作の種類</summary>
+    private static readonly string[] SyncFamilies = [Sync, Upload, Download];
 
     // 経路の水準（書き込みの経路を持たない操作と、経路を使わないサーバーの他者の書き込み）
     private const string NoVia = "None";
@@ -88,7 +134,7 @@ internal static class SyncModelDimensions
                     Enum.GetValues<SyncMode>()
                         .Select(value => new Level(value.ToString(), AxisMember.Of(value)))
                         .ToList(),
-                    "種ごとに生成器が決める同期のモード（種の中で固定）",
+                    "種の番号から決める同期のモード（種の中で固定。種を 4 で割った商をモード×ポリシーの 6 組へ順に配る）",
                     AxisMember.Property(typeof(SyncOptions), nameof(SyncOptions.Mode))
                 ),
                 new Factor(
@@ -96,7 +142,7 @@ internal static class SyncModelDimensions
                     Enum.GetValues<SyncConflictPolicy>()
                         .Select(value => new Level(value.ToString(), AxisMember.Of(value)))
                         .ToList(),
-                    "種ごとに生成器が決める競合ポリシー（種の中で固定）",
+                    "種の番号から決める競合ポリシー（種の中で固定。モードと同じ配り方）",
                     AxisMember.Property(typeof(SyncOptions), nameof(SyncOptions.ConflictPolicy))
                 ),
                 new Factor(
@@ -130,8 +176,12 @@ internal static class SyncModelDimensions
                         new Level(Upload),
                         new Level(Download),
                         new Level(Fault),
+                        new Level(ReleaseTake),
+                        new Level(ReleaseTakeChain),
+                        new Level(DeleteTake),
+                        new Level(DeleteTakeReparent),
                     ],
-                    "操作の種類（write＝行の追加・更新・削除 1 つ／unique-reuse＝一意な値を手放す削除と、同じ値の別のキーの挿入の組／reinsert＝同じキーで消して作り直す組／payload＝blob の書き込み／failing-write＝業務の書き込みが失敗する形／delete-stub・delete-held＝キーだけのスタブ・持っていた実体のグラフ保存での削除／sync・upload・download＝同期の呼び方／fault＝失敗の仕掛け）"
+                    "操作の種類（write＝行の追加・更新・削除 1 つ／unique-reuse＝一意な値を手放す削除と、同じ値の別のキーの挿入の組／reinsert＝同じキーで消して作り直す組／payload＝blob の書き込み／failing-write＝業務の書き込みが失敗する形／delete-stub・delete-held＝キーだけのスタブ・持っていた実体のグラフ保存での削除／sync・upload・download＝同期の呼び方／fault＝失敗の仕掛け／release-take＝更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）／release-take-chain＝その 3 行の連鎖／delete-take＝行を消して値を空け、別の行がその値を更新で取る（4m-B3 の材料）／delete-take-reparent＝消す行の値を別の行が取って別の親へ付け替え、元の親を消す（4m-D4））"
                 ),
                 new Factor(
                     Via,
@@ -142,8 +192,70 @@ internal static class SyncModelDimensions
                     ],
                     "端末の書き込みの経路（直接の CRUD かグラフ保存か。経路を持たない操作とサーバーの他者の書き込みは None）"
                 ),
+                new Factor(
+                    UniqueTable,
+                    [
+                        new Level(ModelTables.Items),
+                        new Level(ModelTables.Folders),
+                        new Level(NoUniqueTable),
+                    ],
+                    "一意な値の形の操作が付け替える表（品目の code・フォルダーの name。unique-reuse は品目。それ以外の操作は none）"
+                ),
+                new Factor(
+                    PropagateDeletes,
+                    [new Level("True"), new Level("False"), new Level(NotSync)],
+                    "同期の操作の削除伝搬（同期の操作ごとに乱数で選ぶ。false は SyncModelGenerator.PropagateDeletesOffRate の割合。同期でない操作は not-sync）",
+                    AxisMember.Property(typeof(SyncOptions), nameof(SyncOptions.PropagateDeletes))
+                ),
+                new Factor(
+                    Excluded,
+                    [
+                        new Level(NoExclusion),
+                        .. ModelTables.All.Select(table => new Level(table)),
+                        new Level(NotSync),
+                    ],
+                    "同期の操作で実行の範囲から外した表（同期の 15% で 1 つ。同期でない操作は not-sync）",
+                    AxisMember.Property(
+                        typeof(SyncOptions),
+                        nameof(SyncOptions.ExcludedEntityTypes)
+                    )
+                ),
+                new Factor(
+                    Batch,
+                    [
+                        .. SyncModelGenerator.Batches.Select(size => new Level(
+                            size.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        )),
+                        new Level(NotSync),
+                    ],
+                    "同期の操作のダウンロードのバッチの大きさ（SyncModelGenerator.Batches から選ぶ。同期でない操作は not-sync）",
+                    AxisMember.Property(typeof(SyncOptions), nameof(SyncOptions.DownloadBatchSize))
+                ),
+                new Factor(
+                    Blobs,
+                    [new Level("True"), new Level("False"), new Level(NotSync)],
+                    "同期の操作で除外した blob を運ぶか（乱数の同期は常に運ぶ。運ばない水準は網羅しない組に受け入れる。同期でない操作は not-sync）",
+                    AxisMember.Property(
+                        typeof(SyncOptions),
+                        nameof(SyncOptions.IncludeUnboundedBinary)
+                    )
+                ),
+                new Factor(
+                    FaultKind,
+                    [
+                        .. Enum.GetValues<ModelFaultKind>()
+                            .Where(kind => kind != ModelFaultKind.ApplySkip)
+                            .Select(kind => new Level(kind.ToString())),
+                        new Level(NotFault),
+                    ],
+                    "仕掛けた失敗の種類（ApplySkip は乱数に混ぜない＝決定的なシナリオだけが使うので水準にしない。失敗の仕掛けでない操作は not-fault）"
+                ),
             ],
-            [new FactorGroup(Mode, Policy, OpFamily)],
+            [
+                new FactorGroup(Mode, Policy, OpFamily),
+                new FactorGroup(Policy, OpFamily, PropagateDeletes),
+                new FactorGroup(Actor, OpFamily, UniqueTable),
+            ],
             IsValid
         );
 
@@ -179,15 +291,39 @@ internal static class SyncModelDimensions
                     (OpFamily, FailingWrite),
                     (Via, nameof(ModelWriteVia.Graph))
                 ),
-                CoverageGap.Tuple(
-                    DirectScope,
-                    "P1-3",
-                    "P2",
-                    "キーだけのスタブでの削除は Extras の組の端末の書き込みの 25%×1/5 でしか選ばれず、既定の 60 種では LastWriteWins×Collect の種（Mode と Policy は種ごとに 1 つ）にたまたま現れない（3 因子の組を狙って作る生成をしていない）",
-                    (Mode, nameof(SyncMode.LastWriteWins)),
-                    (Policy, nameof(SyncConflictPolicy.Collect)),
-                    (OpFamily, DeleteStub)
+                .. ExtraFamilies.Select(family =>
+                    CoverageGap.Tuple(
+                        DirectScope,
+                        "P2-3",
+                        "P2",
+                        "Extras の操作は生成器の TryExtra が端末の書き手のときだけ選ぶ（上の Actor × OpFamily の欠けと同じ原因。3 因子の組 Actor × OpFamily × UniqueTable にも同じ欠けが出る）",
+                        (Actor, nameof(ModelActor.Server)),
+                        (OpFamily, family),
+                        (UniqueTable, NoUniqueTable)
+                    )
                 ),
+                .. new[] { ModelTables.Folders, ModelTables.Events }.Select(table =>
+                    CoverageGap.Tuple(
+                        DirectScope,
+                        "P2-3",
+                        "P2",
+                        "ダウンロードだけの同期は同期の 10%、表の除外はその 15% で、既定の 60 種ではこの表を除外したダウンロードがたまたま出ない（組を狙って作る生成をしていない）",
+                        (OpFamily, Download),
+                        (Excluded, table)
+                    )
+                ),
+                .. Table
+                    .Factors.Where(factor => factor.Name != Blobs)
+                    .Select(factor =>
+                        CoverageGap.AcceptedMatching(
+                            DirectScope,
+                            "P2-3",
+                            "blob を運ぶかは端末ごとに一貫させる製品の割り切り（docs/code-generation.md の「Unbounded binary columns」の節の「Choose once per device whether to carry the columns, and keep to it.」）。運ばない実行を挟むと、その間に動いた行の blob は後の運ぶ実行でも動かず、収束の表明が成り立たないので、乱数の同期は常に運ぶ（運ばない実行は決定的なシナリオ n12-* が受け持つ）",
+                            factor.Name,
+                            Blobs,
+                            (_, blobs) => blobs == "False"
+                        )
+                    ),
             ]
         );
 
@@ -249,10 +385,36 @@ internal static class SyncModelDimensions
                     [Actor] = ActorOf(ops[i]),
                     [OpFamily] = families[i],
                     [Via] = ViaOf(ops[i]),
+                    [UniqueTable] = UniqueTableOf(ops, families[i]),
+                    [PropagateDeletes] = ops[i] is ModelSyncOp sync
+                        ? sync.PropagateDeletes.ToString()
+                        : NotSync,
+                    [Excluded] = ops[i] switch
+                    {
+                        ModelSyncOp { Excluded.Count: 0 } => NoExclusion,
+                        ModelSyncOp { Excluded: [var table] } => table,
+                        ModelSyncOp other => string.Join(",", other.Excluded),
+                        _ => NotSync,
+                    },
+                    [Batch] = ops[i] is ModelSyncOp batched
+                        ? batched.BatchSize.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture
+                        )
+                        : NotSync,
+                    [FaultKind] = ops[i] is ArmFaultOp armed ? armed.Kind.ToString() : NotFault,
+                    [Blobs] = ops[i] is ModelSyncOp carried
+                        ? carried.IncludeBlobs.ToString()
+                        : NotSync,
                 }
             );
         }
     }
+
+    /// <summary>一意な値の形の操作が付け替える表（形でない操作は none。unique-reuse は品目の code を使う）</summary>
+    private static string UniqueTableOf(IReadOnlyList<ModelOp> ops, string family) =>
+        ops is ModelShapeStep step ? step.Table
+        : family == UniqueReuse ? ModelTables.Items
+        : NoUniqueTable;
 
     /// <summary>
     /// 歩の操作ごとの種類。削除と挿入の 2 つの組は、同じキーなら作り直し、違うキーなら一意な値の付け替えとして 2 つとも数える
@@ -260,6 +422,11 @@ internal static class SyncModelDimensions
     /// </summary>
     private static string[] Families(IReadOnlyList<ModelOp> ops)
     {
+        if (ops is ModelShapeStep step)
+        {
+            return [.. ops.Select(_ => step.Shape)];
+        }
+
         if (
             ops.Count == 2
             && ops[0] is ModelWriteOp first
@@ -390,6 +557,82 @@ internal static class SyncModelDimensions
         if (family is DeleteStub or DeleteHeld && via == nameof(ModelWriteVia.Direct))
         {
             return false;
+        }
+
+        // 同期の設定（削除伝搬・除外・バッチ・blob）は同期の操作だけが持つ（同期でない操作は not-sync と定義した水準）。
+        // 同期の操作は端末のもので、書き込みの経路も付け替える表も持たないので、それらを持つ割り当ても not-sync だけ
+        var settings = new[] { PropagateDeletes, Excluded, Batch, Blobs }
+            .Where(assignment.ContainsKey)
+            .Select(setting => assignment[setting] == NotSync)
+            .Distinct()
+            .ToList();
+
+        if (settings.Count > 1)
+        {
+            return false;
+        }
+
+        if (settings.Count == 1)
+        {
+            var notSync = settings[0];
+
+            if (family is not null && SyncFamilies.Contains(family) == notSync)
+            {
+                return false;
+            }
+
+            if (
+                !notSync
+                && (
+                    actor == nameof(ModelActor.Server)
+                    || (via is not null && via != NoVia)
+                    || (
+                        assignment.TryGetValue(UniqueTable, out var table) && table != NoUniqueTable
+                    )
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        // 失敗の種類は失敗の仕掛けだけが持つ（仕掛けは端末のもので、経路も同期の設定も付け替える表も持たない）
+        if (assignment.TryGetValue(FaultKind, out var faultKind) && faultKind != NotFault)
+        {
+            if (
+                (family is not null && family != Fault)
+                || actor == nameof(ModelActor.Server)
+                || (via is not null && via != NoVia)
+                || settings is [false]
+                || (
+                    assignment.TryGetValue(UniqueTable, out var faultTable)
+                    && faultTable != NoUniqueTable
+                )
+                || (group is Plain or Extras)
+            )
+            {
+                return false;
+            }
+        }
+        else if (faultKind == NotFault && family == Fault)
+        {
+            return false;
+        }
+
+        // 付け替える表は一意な値の形の操作だけが持つ（unique-reuse は品目の code の削除と挿入と定義した操作）
+        if (family is not null && assignment.TryGetValue(UniqueTable, out var uniqueTable))
+        {
+            var shaped = UniqueShapeFamilies.Contains(family);
+
+            if (shaped == (uniqueTable == NoUniqueTable) && family != UniqueReuse)
+            {
+                return false;
+            }
+
+            if (family == UniqueReuse && uniqueTable != ModelTables.Items)
+            {
+                return false;
+            }
         }
 
         return true;

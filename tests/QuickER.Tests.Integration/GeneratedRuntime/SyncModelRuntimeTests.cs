@@ -78,6 +78,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// <param name="coverage">
     /// 操作を次元表のケースとして数える先（null なら数えない）。生成器が返した操作を実行の前に読むだけで、乱数を引かない
     /// </param>
+    /// <param name="outcomes">同期が返した結果（競合・自分から変えた行の理由）を数える先（null なら数えない）</param>
     /// <param name="basisTally">
     /// 理由ごとの、根拠を確かめた件数と根拠のあった件数を足し込む先（null なら数えない。空振りしていないかを出力で確かめる）
     /// </param>
@@ -89,7 +90,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         CancellationToken ct,
         SyncModelWorldOptions? options = null,
         CoverageCounter? coverage = null,
-        ConcurrentDictionary<string, (int Checked, int WithBasis)>? basisTally = null
+        ConcurrentDictionary<string, (int Checked, int WithBasis)>? basisTally = null,
+        CoverageCounter? outcomes = null
     )
     {
         var generator = new SyncModelGenerator(seed);
@@ -123,6 +125,11 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
         await run.FinishAsync();
 
+        if (outcomes is not null)
+        {
+            SyncModelOutcomeDimensions.Observe(outcomes, run.Outcomes);
+        }
+
         if (basisTally is not null)
         {
             foreach (var (reason, (count, withBasis)) in run.BasisChecks)
@@ -155,13 +162,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         var plan = SeedSource.Resolve(Seeds);
         plan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
+        var outcomes = new CoverageCounter(SyncModelOutcomeDimensions.Table);
         var basisTally = new ConcurrentDictionary<string, (int Checked, int WithBasis)>(
             StringComparer.Ordinal
         );
 
         // 種ごとに世界（SQLite の DB 3 つ）を作るので、種どうしは何も共有しない。並列度は CPU 数で抑える
         await RunObservedAsync(
-            coverage,
+            [coverage, outcomes],
             () =>
                 Parallel.ForEachAsync(
                     plan.Seeds,
@@ -177,7 +185,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                             seed,
                             ct,
                             coverage: coverage,
-                            basisTally: basisTally
+                            basisTally: basisTally,
+                            outcomes: outcomes
                         );
                         elapsed[seed] = watch.Elapsed;
                     }
@@ -186,9 +195,16 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
         // 宣言の誤りは種の失敗より先に赤にする（Report が Observe の誤りを投げ直す）
         var coverageReport = coverage.Report();
+        var outcomeReport = outcomes.Report();
         coverageReport.WriteSummary(output);
         coverageReport.WriteGapUsage(
             SyncModelDimensions.Gaps,
+            SyncModelDimensions.DirectScope,
+            output
+        );
+        outcomeReport.WriteSummary(output);
+        outcomeReport.WriteGapUsage(
+            SyncModelOutcomeDimensions.Gaps,
             SyncModelDimensions.DirectScope,
             output
         );
@@ -259,8 +275,33 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 "every failure of a random seed must be on the known list:\n" + report.Render()
             );
 
+        // 既定の種の数で必ず起きる乱数の項目（Reproduction＝RegularSeeds）が、どの種でも起きなかったら赤（種ごとの照合は
+        // 載っていない失敗だけを見るので、起きないことは全部の種をまとめて照合する）
+        known
+            .Classify(
+                results.SelectMany(p =>
+                    p.Value.Failures.Select(f => new EngineFailure(
+                        SyncModelKnownFailures.RandomScope,
+                        f.Signature,
+                        f.Detail,
+                        p.Key,
+                        f
+                    ))
+                ),
+                plan,
+                scope => scope == SyncModelKnownFailures.RandomScope
+            )
+            .NotObserved.Select(entry => entry.Describe())
+            .Should()
+            .BeEmpty("a random-seed entry reproduced at the default seed count must still occur");
+
         // エンジンの結果を表明してから網羅を照合する（網羅の赤がエンジンの失敗を隠さない）
         coverageReport.AssertGaps(SyncModelDimensions.Gaps, SyncModelDimensions.DirectScope, plan);
+        outcomeReport.AssertGaps(
+            SyncModelOutcomeDimensions.Gaps,
+            SyncModelDimensions.DirectScope,
+            plan
+        );
 
         // 理由の根拠の確認が空振りしていない（既定の種の数で、どの理由も 1 回以上確かめ、根拠のある形を 1 回以上見る）
         if (plan.IsDefaultCount)
@@ -280,7 +321,16 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// </summary>
     /// <param name="coverage">数える先</param>
     /// <param name="body">種を流す本体</param>
-    internal static async Task RunObservedAsync(CoverageCounter coverage, Func<Task> body)
+    internal static Task RunObservedAsync(CoverageCounter coverage, Func<Task> body) =>
+        RunObservedAsync([coverage], body);
+
+    /// <summary>数える先が複数のとき（どれかの宣言の誤りを先に赤にする）</summary>
+    /// <param name="counters">数える先</param>
+    /// <param name="body">種を流す本体</param>
+    internal static async Task RunObservedAsync(
+        IReadOnlyList<CoverageCounter> counters,
+        Func<Task> body
+    )
     {
         try
         {
@@ -289,7 +339,11 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         catch
         {
             // 宣言の誤りがあれば Report がそれを投げる（無ければ元の例外を投げ直す）
-            _ = coverage.Report();
+            foreach (var counter in counters)
+            {
+                _ = counter.Report();
+            }
+
             throw;
         }
     }
@@ -489,7 +543,11 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         {
             names.Should().Contain(known.Scope);
             known.Match.Should().Be(KnownMatch.ExactSignature);
-            known.FixedIn.Should().BeOneOf("区切り 30", "区切り 31", "修正 C");
+
+            if (known.Kind == KnownKind.Pending)
+            {
+                known.FixedIn.Should().BeOneOf("区切り 30", "区切り 31", "修正 C");
+            }
         }
     }
 

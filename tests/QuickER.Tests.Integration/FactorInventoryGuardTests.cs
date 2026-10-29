@@ -108,61 +108,6 @@ public sealed class FactorInventoryGuardTests
                 IdentifierLimitReason
             )
         ),
-        .. new[]
-        {
-            "ModifiedOnServer",
-            "MissingOnServer",
-            "DuplicateOnServer",
-            "ParentMissingOnServer",
-            "DeleteRefusedOnServer",
-            "UniqueValueTakenOnServer",
-        }.Select(member => new InventoryExclusion(
-            "SyncConflictReason",
-            member,
-            EngineIds.SyncModel,
-            "P2",
-            "同期のモデルは競合の理由を実行の結果（SyncResult.Conflicts）として表明に使うだけで、理由ごとにそれを起こす操作を次元表の水準として観測していない（理由ごとの形は決定的なシナリオ n7-*・n5-* などが個別に固定）"
-        )),
-        .. new[]
-        {
-            "DiscardedByServerWins",
-            "ReloadedForUniqueValue",
-            "RemovedBeforeDownload",
-        }.Select(member => new InventoryExclusion(
-            "SyncLocalRowChangeReason",
-            member,
-            EngineIds.SyncModel,
-            "P2",
-            "同期のモデルは実行が自分から変えた行の理由を実行の結果（SyncResult.LocalRowChanges）として表明に使うだけで、理由を次元表の水準として観測していない（理由ごとの形は決定的なシナリオ n2-*・n8-* などが個別に固定）"
-        )),
-        new InventoryExclusion(
-            "SyncOptions",
-            "ExcludedEntityTypes",
-            EngineIds.SyncModel,
-            "P2",
-            "乱数の操作の列は SyncModelGenerator.NextSync が同期の 15% で 1 つの表を除外するが、除外の有無と表を次元表の因子にしておらず網羅を数えない"
-        ),
-        new InventoryExclusion(
-            "SyncOptions",
-            "DownloadBatchSize",
-            EngineIds.SyncModel,
-            "P2",
-            "乱数の操作の列は SyncModelGenerator.NextSync がバッチの大きさを {1, 2, 3, 500} から引くが、次元表の因子にしておらず網羅を数えない"
-        ),
-        new InventoryExclusion(
-            "SyncOptions",
-            "PropagateDeletes",
-            EngineIds.SyncModel,
-            "P2",
-            "乱数の操作の列は ModelSyncOp の既定（true）のままで削除伝搬を切るランを作らない（false は決定的なシナリオ n1-*・n2-* だけ）"
-        ),
-        new InventoryExclusion(
-            "SyncOptions",
-            "IncludeUnboundedBinary",
-            EngineIds.SyncModel,
-            "P2",
-            "乱数の操作の列は blob を常に運ぶ（SyncModelGenerator.NextSync が IncludeBlobs を true に固定＝運ばないランを挟むと収束の表明が成り立たない）ので false を作らず、次元表の因子にもしていない"
-        ),
         .. new[] { "Insert", "Update", "Delete" }.Select(member => new InventoryExclusion(
             "SaveOperation",
             member,

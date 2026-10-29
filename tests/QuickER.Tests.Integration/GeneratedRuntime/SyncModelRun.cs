@@ -525,6 +525,7 @@ internal sealed class SyncModelRun : IAsyncDisposable
             _lastLocalRowChanges[op.Device] =
                 ex.Data[SyncEngine.LocalRowChangesDataKey] as IReadOnlyList<SyncLocalRowChange>
                 ?? [];
+            RecordOutcomes(op, quiescing, [], _lastLocalRowChanges[op.Device]);
 
             // 例外で終わった後勝ち＋ServerWins の実行も、例外の前に決着させた変更を捨てている（結果は返らない）。
             // 実行の前の未送信の記録と突き合わせ、記録が消えた行を捨てた行とみなす（N11 の案 1）。決着の理由の根拠も確かめる
@@ -559,6 +560,7 @@ internal sealed class SyncModelRun : IAsyncDisposable
         }
 
         _lastLocalRowChanges[op.Device] = outcome.LocalRowChanges;
+        RecordOutcomes(op, quiescing, outcome.Conflicts, outcome.LocalRowChanges);
         await RecordRecreatorsAsync(op.Device, serverItemsBefore);
 
         foreach (var change in outcome.LocalRowChanges)
@@ -626,8 +628,70 @@ internal sealed class SyncModelRun : IAsyncDisposable
 
         await CheckForeignKeysAsync(op.Device, op.Describe());
 
+        if (quiescing)
+        {
+            foreach (var conflict in outcome.Conflicts)
+            {
+                _quiesceConflicts.Add(
+                    (
+                        op.Device,
+                        conflict.TableName,
+                        CanonicalKey(conflict.TableName, conflict.KeyText),
+                        conflict.Reason
+                    )
+                );
+            }
+
+            foreach (var truncation in outcome.Truncations)
+            {
+                _quiesceTruncations.Add(
+                    (
+                        op.Device,
+                        truncation.TableName,
+                        truncation.PendingKeyText is { } key
+                            ? CanonicalKey(truncation.TableName, key)
+                            : null
+                    )
+                );
+            }
+        }
+
         return outcome.Conflicts.Count == 0 && outcome.Truncations.Count == 0;
     }
+
+    /// <summary>
+    /// 静止化でない同期（生成器・シナリオの操作）が返した競合と、自分から変えた行の理由を、その同期のモードとポリシーと一緒に
+    /// 控える（結果の次元表 <see cref="SyncModelOutcomeDimensions"/> が数える。静止化は決まったモードとポリシーで流すので数えない）
+    /// </summary>
+    private void RecordOutcomes(
+        ModelSyncOp op,
+        bool quiescing,
+        IReadOnlyList<SyncConflict> conflicts,
+        IReadOnlyList<SyncLocalRowChange> changes
+    )
+    {
+        if (quiescing)
+        {
+            return;
+        }
+
+        foreach (var conflict in conflicts)
+        {
+            _outcomes.Add((op.Mode, op.Policy, conflict.Reason.ToString()));
+        }
+
+        foreach (var change in changes)
+        {
+            _outcomes.Add((op.Mode, op.Policy, change.Reason.ToString()));
+        }
+    }
+
+    private readonly List<(SyncMode Mode, SyncConflictPolicy Policy, string Outcome)> _outcomes =
+    [];
+
+    /// <summary>静止化でない同期が返した競合・自分から変えた行の理由（モード・ポリシーつき）</summary>
+    public IReadOnlyList<(SyncMode Mode, SyncConflictPolicy Policy, string Outcome)> Outcomes =>
+        _outcomes;
 
     /// <summary>消された品目のうち、この同期の前にサーバーに無く、後にあるもの＝この端末が上げ直したものを控える。</summary>
     private async Task RecordRecreatorsAsync(ModelActor device, HashSet<string>? serverItemsBefore)
@@ -1047,6 +1111,8 @@ internal sealed class SyncModelRun : IAsyncDisposable
         for (var round = 0; round < QuiesceRounds; round++)
         {
             var clean = true;
+            _quiesceConflicts.Clear();
+            _quiesceTruncations.Clear();
 
             foreach (var (mode, policy) in QuiescePasses)
             {
@@ -1093,14 +1159,195 @@ internal sealed class SyncModelRun : IAsyncDisposable
             settled = true;
         }
 
-        _failures.Add(
-            new(
-                $"1/no-quiesce:{reason}",
-                $"The run did not settle within {QuiesceRounds} rounds ({reason})."
-            )
-        );
+        var classified =
+            reason == "conflicts-or-truncations" ? await ClassifyStuckTruncationsAsync() : null;
+
+        foreach (var signature in classified?.Signatures ?? [])
+        {
+            _failures.Add(
+                new(
+                    signature,
+                    $"The run did not settle within {QuiesceRounds} rounds ({signature})."
+                )
+            );
+        }
+
+        if (classified is null || classified.Unclassified)
+        {
+            _failures.Add(
+                new(
+                    $"1/no-quiesce:{reason}",
+                    $"The run did not settle within {QuiesceRounds} rounds ({reason})."
+                )
+            );
+        }
 
         return false;
+    }
+
+    // 静止化の最後の周で返った競合と打ち切り（端末・表・行のキー）
+    private readonly List<(
+        ModelActor Device,
+        string Table,
+        string Key,
+        SyncConflictReason Reason
+    )> _quiesceConflicts = [];
+    private readonly List<(ModelActor Device, string Table, string? Key)> _quiesceTruncations = [];
+
+    /// <summary>静止化の失敗の分類（分類できた署名と、分類できないものが残ったか）</summary>
+    private sealed record StuckClassification(IReadOnlyList<string> Signatures, bool Unclassified);
+
+    /// <summary>
+    /// 静止化の最後の周に残った打ち切りを 1 件ずつ分類する。(a) 一意な値の厳密な入れ替え（打ち切った行 R のサーバーの値を
+    /// ローカルの別の行 H が持ち、H のサーバーの値を R がローカルで持つ）＝<c>1/no-quiesce:unique-swap:{表}</c>。
+    /// (b) R のサーバーの値をローカルで持つ H がサーバーに無く、R のローカルの行が H を参照する（値を取る行自身の古い参照が
+    /// 持ち主を残す）＝<c>1/no-quiesce:holder-referenced-by-taker:{表}</c>。続いて、説明の付いていない競合の行を端末・表ごとに集め、
+    /// (c) 端末側の一意な値の循環（どの行もローカルの値を、集まりの別の行がサーバーで持つ）＝<c>1/no-quiesce:pending-unique-cycle:{表}</c>
+    /// に分ける。どれにも当たらない打ち切りか、説明の付かない競合が最後の周に残ったら、分類できないものがある（呼び出し側が粗い署名もあわせて出す＝分類できた分が隠さない）。
+    /// </summary>
+    private async Task<StuckClassification> ClassifyStuckTruncationsAsync()
+    {
+        var server = await _world.ReadStateAsync(ModelActor.Server, _ct);
+        var signatures = new SortedSet<string>(StringComparer.Ordinal);
+        var unclassified = _quiesceTruncations.Count == 0 && _quiesceConflicts.Count == 0;
+        var explained = new HashSet<(ModelActor, string, string)>();
+        var leftTruncations = new List<(ModelActor Device, string Table, string? Key)>();
+
+        // (a)・(b)：打ち切りを 1 件ずつ分類する（打ち切った行と、その形の持ち主の行は説明済み）
+        foreach (var (device, table, key) in _quiesceTruncations.Distinct())
+        {
+            var local = await _world.ReadStateAsync(device, _ct);
+            var stuck = key is null ? null : StuckShape(server, local, table, key);
+
+            if (stuck is not { } found)
+            {
+                leftTruncations.Add((device, table, key));
+                continue;
+            }
+
+            signatures.Add($"1/no-quiesce:{found.Shape}:{table}");
+            explained.Add((device, table, key!));
+            explained.Add((device, table, found.Holder));
+        }
+
+        // (c) 端末側の一意な値の循環：説明の付いていない競合の行を端末・表ごとに集め、どの行もローカルの値を、集まりの別の行が
+        // サーバーで持つ（値はどれも別々。2 行の入れ替えも 3 行以上の循環も同じ形＝未送信の値の並べ替えを、行ごとの書き込みでは
+        // 上げられない）＝<c>1/no-quiesce:pending-unique-cycle:{表}</c>。集まりの行の競合・打ち切りは説明済み
+        foreach (
+            var group in _quiesceConflicts
+                .Where(c => !explained.Contains((c.Device, c.Table, c.Key)))
+                .GroupBy(c => (c.Device, c.Table))
+        )
+        {
+            var local = await _world.ReadStateAsync(group.Key.Device, _ct);
+            var rows = group.Select(c => c.Key).Distinct(StringComparer.Ordinal).ToList();
+
+            if (
+                rows.Count >= 2
+                && group.Any(c => c.Reason == SyncConflictReason.UniqueValueTakenOnServer)
+                && IsPendingCycle(server, local, group.Key.Table, rows)
+            )
+            {
+                signatures.Add($"1/no-quiesce:pending-unique-cycle:{group.Key.Table}");
+
+                foreach (var row in rows)
+                {
+                    explained.Add((group.Key.Device, group.Key.Table, row));
+                }
+            }
+        }
+
+        // 分類できない打ち切りか、説明の付かない競合が残れば、分類できないものがある
+        if (
+            leftTruncations.Any(t =>
+                t.Key is null || !explained.Contains((t.Device, t.Table, t.Key))
+            ) || _quiesceConflicts.Any(c => !explained.Contains((c.Device, c.Table, c.Key)))
+        )
+        {
+            unclassified = true;
+        }
+
+        return new([.. signatures], unclassified);
+    }
+
+    /// <summary>
+    /// 行の集まりが端末側の一意な値の循環か：どの行もローカルの値を持ち、その値を集まりの別の行がサーバーで持つ（値はどれも
+    /// 別々）
+    /// </summary>
+    private static bool IsPendingCycle(
+        ModelDbState server,
+        ModelDbState local,
+        string table,
+        IReadOnlyList<string> rows
+    )
+    {
+        var localValues = rows.Select(row => UniqueValue(local, table, row)).ToList();
+
+        if (
+            localValues.Any(value => value is null)
+            || localValues.Distinct(StringComparer.Ordinal).Count() != rows.Count
+        )
+        {
+            return false;
+        }
+
+        return rows.All(row =>
+            rows.Any(other =>
+                other != row
+                && string.Equals(
+                    UniqueValue(server, table, other),
+                    UniqueValue(local, table, row),
+                    StringComparison.Ordinal
+                )
+            )
+        );
+    }
+
+    /// <summary>打ち切った行の形（unique-swap・holder-referenced-by-taker）と、その形の持ち主の行（どちらでもなければ null）</summary>
+    private static (string Shape, string Holder)? StuckShape(
+        ModelDbState server,
+        ModelDbState local,
+        string table,
+        string key
+    )
+    {
+        if (UniqueValue(server, table, key) is not { } wanted)
+        {
+            return null;
+        }
+
+        var holders = local
+            .Rows(table)
+            .Keys.Where(k =>
+                k != key
+                && string.Equals(UniqueValue(local, table, k), wanted, StringComparison.Ordinal)
+            )
+            .ToList();
+
+        foreach (var holder in holders)
+        {
+            // (a) 厳密な入れ替え：持ち主のサーバーの値が、打ち切った行のローカルの値と同じ（片側だけの一致は数えない）
+            if (
+                UniqueValue(server, table, holder) is { } given
+                && string.Equals(given, UniqueValue(local, table, key), StringComparison.Ordinal)
+            )
+            {
+                return ("unique-swap", holder);
+            }
+
+            // (b) 持ち主がサーバーに無く、打ち切った行のローカルの行が持ち主を参照する
+            if (
+                server.Row(table, holder) is null
+                && References
+                    .Where(r => r.Child == table && r.Parent == table)
+                    .Any(r => r.Read(local).Any(p => p.Key == key && p.ParentKey == holder))
+            )
+            {
+                return ("holder-referenced-by-taker", holder);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>端末 2 台がサーバーと一致しているか（表明 2 の判定の本体）</summary>
