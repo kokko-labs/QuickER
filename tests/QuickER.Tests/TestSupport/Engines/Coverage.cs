@@ -41,6 +41,12 @@ public sealed class CoverageDeclarationException : Exception
 /// <see cref="Report"/> はそれを投げ直す。エンジンが種ごとの例外を種の失敗として受け止める作りでも、宣言の誤りは
 /// 既知の失敗の照合に混ざらず、宣言の誤りとして必ずテストを赤にする。
 /// </para>
+/// <para>
+/// 網羅すべき組は、構築時に因子の組（2 つか 3 つ）ごとの索引へ入れる。索引は水準の番号の直積を平らにした配列で、
+/// 観測した割り当ての水準の番号から、その因子の組で当たる組（あればちょうど 1 つ）を直接引く。
+/// 宣言の検査を通った割り当ては表の全因子を持つので、これは網羅すべき組を全部なめて
+/// <see cref="CoverageTuple.IsContainedIn"/> で数えるのと同じ結果になる。
+/// </para>
 /// </remarks>
 public sealed class CoverageCounter
 {
@@ -50,10 +56,18 @@ public sealed class CoverageCounter
     private readonly IReadOnlyList<CoverageTuple> _requiredPairs;
     private readonly IReadOnlyList<CoverageTuple> _requiredTriples;
     private readonly IReadOnlyList<CoverageTuple> _required;
-    private readonly Dictionary<CoverageTuple, int> _tupleCounts = new();
-    private readonly Dictionary<(string Factor, string Level), int> _levelCounts = new();
+    private readonly Dictionary<CoverageTuple, int> _tupleIds = new();
+    private readonly Dictionary<string, int>[] _levelIndexes;
+    private readonly TupleSlot[] _slots;
+    private readonly int[] _tupleCounts;
+    private readonly int[][] _levelCounts;
     private int _cases;
     private CoverageDeclarationException? _declarationError;
+
+    /// <summary>
+    /// 1 つの因子の組の索引（因子の番号・平らな位置の重み・位置ごとの組の番号＝網羅すべきでない位置は -1）
+    /// </summary>
+    private sealed record TupleSlot(int[] Factors, int[] Strides, int[] TupleIds);
 
     /// <summary>数え始める</summary>
     /// <param name="table">次元表</param>
@@ -71,18 +85,63 @@ public sealed class CoverageCounter
 
         _required = _requiredPairs.Concat(_requiredTriples).Distinct().ToList();
 
-        foreach (var tuple in _required)
+        _levelIndexes = table
+            .Factors.Select(factor =>
+            {
+                var index = new Dictionary<string, int>(StringComparer.Ordinal);
+
+                for (var i = 0; i < factor.Levels.Count; i++)
+                {
+                    index[factor.Levels[i].Name] = i;
+                }
+
+                return index;
+            })
+            .ToArray();
+        _levelCounts = table.Factors.Select(factor => new int[factor.Levels.Count]).ToArray();
+        _tupleCounts = new int[_required.Count];
+        _slots = BuildSlots();
+    }
+
+    /// <summary>網羅すべき組を、因子の組ごとの索引へ入れる（組の番号は <c>_required</c> の位置）</summary>
+    private TupleSlot[] BuildSlots()
+    {
+        var slots = new Dictionary<string, TupleSlot>(StringComparer.Ordinal);
+        var order = new List<TupleSlot>();
+
+        for (var id = 0; id < _required.Count; id++)
         {
-            _tupleCounts[tuple] = 0;
+            var tuple = _required[id];
+            _tupleIds[tuple] = id;
+
+            if (!slots.TryGetValue(tuple.FactorKey, out var slot))
+            {
+                var factors = tuple.Items.Select(item => _table.IndexOf(item.Factor)).ToArray();
+                var strides = new int[factors.Length];
+                var size = 1;
+
+                for (var k = factors.Length - 1; k >= 0; k--)
+                {
+                    strides[k] = size;
+                    size *= _levelIndexes[factors[k]].Count;
+                }
+
+                slot = new TupleSlot(factors, strides, Enumerable.Repeat(-1, size).ToArray());
+                slots[tuple.FactorKey] = slot;
+                order.Add(slot);
+            }
+
+            var position = 0;
+
+            for (var k = 0; k < slot.Factors.Length; k++)
+            {
+                position += _levelIndexes[slot.Factors[k]][tuple.Items[k].Level] * slot.Strides[k];
+            }
+
+            slot.TupleIds[position] = id;
         }
 
-        foreach (var factor in table.Factors)
-        {
-            foreach (var level in factor.Levels)
-            {
-                _levelCounts[(factor.Name, level.Name)] = 0;
-            }
-        }
+        return order.ToArray();
     }
 
     /// <summary>観測したケースの数</summary>
@@ -121,20 +180,38 @@ public sealed class CoverageCounter
             throw error;
         }
 
-        var contained = _required.Where(tuple => tuple.IsContainedIn(assignment)).ToList();
+        // 宣言の検査を通ったので、割り当ては表の全因子に宣言した水準を持つ
+        var levels = new int[_levelIndexes.Length];
+
+        for (var f = 0; f < levels.Length; f++)
+        {
+            levels[f] = _levelIndexes[f][assignment[_table.Factors[f].Name]];
+        }
 
         lock (_lock)
         {
             _cases++;
 
-            foreach (var factor in _table.Factors)
+            for (var f = 0; f < levels.Length; f++)
             {
-                _levelCounts[(factor.Name, assignment[factor.Name])]++;
+                _levelCounts[f][levels[f]]++;
             }
 
-            foreach (var tuple in contained)
+            foreach (var slot in _slots)
             {
-                _tupleCounts[tuple]++;
+                var position = 0;
+
+                for (var k = 0; k < slot.Factors.Length; k++)
+                {
+                    position += levels[slot.Factors[k]] * slot.Strides[k];
+                }
+
+                var id = slot.TupleIds[position];
+
+                if (id >= 0)
+                {
+                    _tupleCounts[id]++;
+                }
             }
         }
     }
@@ -153,13 +230,21 @@ public sealed class CoverageCounter
                 );
             }
 
-            var pairs = _requiredPairs.ToDictionary(tuple => tuple, tuple => _tupleCounts[tuple]);
-            var triples = _requiredTriples.ToDictionary(
-                tuple => tuple,
-                tuple => _tupleCounts[tuple]
-            );
-            var missing = _required.Where(tuple => _tupleCounts[tuple] == 0).ToList();
-            var levels = new Dictionary<(string Factor, string Level), int>(_levelCounts);
+            var pairs = _requiredPairs.ToDictionary(tuple => tuple, CountOf);
+            var triples = _requiredTriples.ToDictionary(tuple => tuple, CountOf);
+            var missing = _required.Where(tuple => CountOf(tuple) == 0).ToList();
+            var levels = new Dictionary<(string Factor, string Level), int>();
+
+            for (var f = 0; f < _table.Factors.Count; f++)
+            {
+                var factor = _table.Factors[f];
+
+                for (var l = 0; l < factor.Levels.Count; l++)
+                {
+                    levels[(factor.Name, factor.Levels[l].Name)] = _levelCounts[f][l];
+                }
+            }
+
             return new CoverageReport(
                 _table.EngineId,
                 _table.Factors,
@@ -171,6 +256,8 @@ public sealed class CoverageCounter
             );
         }
     }
+
+    private int CountOf(CoverageTuple tuple) => _tupleCounts[_tupleIds[tuple]];
 
     private List<string> Check(IReadOnlyDictionary<string, string> assignment)
     {
