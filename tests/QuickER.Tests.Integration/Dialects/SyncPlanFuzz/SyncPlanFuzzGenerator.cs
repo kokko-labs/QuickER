@@ -43,7 +43,23 @@ internal static class FuzzShape
     /// <summary>一意制約の構成列の削除を、その一意制約の削除を選ばずに選んだ</summary>
     public const string DropUniqueMemberAlone = "drop-unique-member-alone";
 
-    /// <summary>種の集合全体で必ず出ていなければならない形</summary>
+    /// <summary>同じ列の並びに一意制約が 2 つ（別の名前）</summary>
+    public const string SameSetTwoUniques = "same-set-two-uniques";
+
+    /// <summary>同じ列の並びの一意制約 2 つの片方の削除と、その列の型の変更を一緒に選んだ</summary>
+    public const string DropDuplicatedUniqueWithTypeChange =
+        "drop-duplicated-unique-with-type-change";
+
+    /// <summary>同じ親の表を、別の子の列から 2 本以上の外部キーが参照する（兄弟の外部キー）</summary>
+    public const string SiblingForeignKeys = "sibling-fks";
+
+    /// <summary>名前に識別子の引用の中で特別な扱いが要る文字（<see cref="SyncPlanFuzzDialect.SymbolCharacter"/>）を含む列</summary>
+    public const string SymbolName = "symbol-name";
+
+    /// <summary>既定と別のスキーマにある、同じ名前の表（<see cref="SyncPlanFuzzDialect.OtherSchema"/>）</summary>
+    public const string OtherSchemaSameName = "other-schema-same-name";
+
+    /// <summary>種の集合全体で必ず出ていなければならない形（方言が作れない形は除く＝<see cref="RequiredFor"/>）</summary>
     public static readonly IReadOnlyList<string> Required =
     [
         SelfReference,
@@ -57,7 +73,42 @@ internal static class FuzzShape
         StringPrimaryKey,
         DropPrimaryKeyColumnAlone,
         DropUniqueMemberAlone,
+        SameSetTwoUniques,
+        DropDuplicatedUniqueWithTypeChange,
+        SiblingForeignKeys,
+        SymbolName,
+        OtherSchemaSameName,
     ];
+
+    /// <summary>
+    /// 方言の必須の形（DB が作らせない形＝Oracle の同じ列ペアの外部キー 2 本・同じ列の並びの一意制約 2 つと、別のスキーマを
+    /// 使わない方言の別のスキーマの表を除く）
+    /// </summary>
+    /// <param name="dialect">方言</param>
+    /// <param name="realDatabase">
+    /// 実 DB の総当たりか（偽なら能力の組の網）。実 DB では <see cref="DropDuplicatedUniqueWithTypeChange"/> を求めない：
+    /// (1) SQLite は取込が一意制約の名前を持たない（sqlite_autoindex）ので、同じ列の並びの一意制約 2 つの片方だけを名前で
+    /// 選ぶ形が原理的に出ない (2) SQL Server は普段の 100 種で出ない（形・変更・選び方の 3 つが重なる確率が低い）
+    /// (3) 実 DB では形の行（D4・<see cref="SyncPlanShapeRows"/>）の Q6 の 3 つ組（一意制約 2 つ × 一意制約の削除 × 一意制約の列の
+    /// 型の変更）が決定的に担う。網は 5 方言とも 5000 種で出るので網で表明する
+    /// </param>
+    public static IReadOnlyList<string> RequiredFor(
+        SyncPlanFuzzDialect dialect,
+        bool realDatabase
+    ) =>
+        Required
+            .Where(shape =>
+                shape switch
+                {
+                    SamePairTwoForeignKeys => dialect.AllowDuplicateForeignKeys,
+                    SameSetTwoUniques => dialect.AllowDuplicateUniqueConstraints,
+                    DropDuplicatedUniqueWithTypeChange => dialect.AllowDuplicateUniqueConstraints
+                        && !realDatabase,
+                    OtherSchemaSameName => dialect.OtherSchema is not null,
+                    _ => true,
+                }
+            )
+            .ToList();
 }
 
 /// <summary>差分の選び方</summary>
@@ -138,6 +189,30 @@ internal sealed class FuzzLiveSchema
 }
 
 /// <summary>
+/// 同期計画の総当たりの 1 ケースの作り方（DB 側の図・目標の図への変更・差分の選び方）。乱数の生成器
+/// （<see cref="SyncPlanFuzzGenerator"/>）と、手で書いた決定的な行が実装し、どちらも同じランナー
+/// （<see cref="SyncPlanFuzzRunner.RunCaseAsync"/>）と同じ表明を通る。
+/// </summary>
+internal interface ISyncPlanFuzzCase
+{
+    /// <summary>このケースで目標の図へ加えた変更の記録（報告用）</summary>
+    List<string> Mutations { get; }
+
+    /// <summary>DB 側の図・データ・計算列の文を作る</summary>
+    FuzzLiveSchema BuildLive();
+
+    /// <summary>取り込んだ DB の図（新しい Guid 空間へ写したもの）に変更を加える</summary>
+    /// <param name="entities">目標の図の表</param>
+    /// <param name="relationships">目標の図のリレーション</param>
+    /// <param name="live">DB 側の図（<see cref="BuildLive"/> の結果）</param>
+    void Mutate(List<Entity> entities, List<Relationship> relationships, FuzzLiveSchema live);
+
+    /// <summary>差分の選び方を決めて、項目の選択を書き換える</summary>
+    /// <param name="items">差分の項目</param>
+    FuzzSelection Select(IReadOnlyList<SchemaDiffItem> items);
+}
+
+/// <summary>
 /// 同期計画の総当たりの生成器。DB 側の図（とデータ）・目標の図への変更・差分の選び方を 1 つの乱数から作る。
 /// </summary>
 /// <remarks>
@@ -149,6 +224,7 @@ internal sealed class FuzzLiveSchema
 /// </para>
 /// </remarks>
 internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dialect)
+    : ISyncPlanFuzzCase
 {
     /// <summary>表の名前の部品</summary>
     private static readonly string[] TableWords =
@@ -188,12 +264,64 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             BuildTable(live, name, i);
         }
 
+        AddOtherSchemaTable(live);
         AddSameColumnTwoForeignKeys(live);
         AddSamePairTwoForeignKeys(live);
         AddUniqueConstraints(live);
-        BuildInserts(live);
+        BuildInserts(live, dialect);
         AddComputedColumn(live);
+
+        if (HasSiblingForeignKeys(live.Diagram.Relationships))
+        {
+            live.Shapes.Add(FuzzShape.SiblingForeignKeys);
+        }
+
         return live;
+    }
+
+    /// <summary>
+    /// 既定と別のスキーマに、既存の表と同じ名前の表を置く（行なし。名前の逆引きが表の所有者で絞られているかの相手）
+    /// </summary>
+    private void AddOtherSchemaTable(FuzzLiveSchema live)
+    {
+        if (dialect.OtherSchema is not { } schema || rng.Next(10) >= 3)
+        {
+            return;
+        }
+
+        var source = live.Diagram.Entities[rng.Next(live.Diagram.Entities.Count)];
+        var name = $"{schema}.{source.TableName}";
+        live.Shapes.Add(FuzzShape.OtherSchemaSameName);
+        var entity = new Entity { TableName = name };
+        live.RowCounts[name] = 0;
+        AddColumn(live, entity, "id", FuzzTypeKind.Int, 0, false, r => Int(r), pk: true);
+        AddColumn(live, entity, "n0", FuzzTypeKind.Int, 0, true, r => Int(r));
+        live.Diagram.Entities.Add(entity);
+    }
+
+    /// <summary>同じ親の表を、別の子の列から 2 本以上の外部キーが参照するか（自己参照は数えない）</summary>
+    internal static bool HasSiblingForeignKeys(IEnumerable<Relationship> relationships) =>
+        relationships
+            .Where(r => r.SourceEntityId != r.TargetEntityId)
+            .GroupBy(r => r.SourceEntityId)
+            .Any(g =>
+                g.Select(r =>
+                        (
+                            r.TargetEntityId,
+                            string.Join(",", r.ColumnPairs.Select(p => p.TargetColumnId))
+                        )
+                    )
+                    .Distinct()
+                    .Count() >= 2
+            );
+
+    /// <summary>主キーを変えた表を参照する外部キーの数の札（自己参照は数えない）</summary>
+    private static string ReferencingTag(Entity entity, List<Relationship> relationships)
+    {
+        var count = relationships.Count(r =>
+            r.SourceEntityId == entity.Id && r.TargetEntityId != entity.Id
+        );
+        return $" {{refs={(count >= 2 ? "2+" : Int(count))}}}";
     }
 
     /// <summary>1 表を作る（主キー・普通の列・前の表への外部キー・自己参照）</summary>
@@ -232,14 +360,14 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             );
         }
 
-        // 普通の列（整数・文字列・小数）
+        // 普通の列（整数・文字列・小数・日時・固定長の文字列・バイト列）
         var extra = rng.Next(1, 4);
 
         for (var j = 0; j < extra; j++)
         {
             var nullable = rng.Next(2) == 0;
 
-            switch (rng.Next(3))
+            switch (rng.Next(6))
             {
                 case 0:
                     AddColumn(
@@ -253,17 +381,25 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                     );
                     break;
                 case 1:
+                    // ときどき、識別子の引用の中で特別な扱いが要る文字を名前に含める
+                    var symbol = rng.Next(4) == 0;
+
+                    if (symbol)
+                    {
+                        live.Shapes.Add(FuzzShape.SymbolName);
+                    }
+
                     AddColumn(
                         live,
                         entity,
-                        $"s{j}",
+                        symbol ? $"s{dialect.SymbolCharacter}{j}" : $"s{j}",
                         FuzzTypeKind.VarChar,
                         new[] { 20, 40 }[rng.Next(2)],
                         nullable,
                         r => dialect.StringLiteral($"s{r}{j}")
                     );
                     break;
-                default:
+                case 2:
                     AddColumn(
                         live,
                         entity,
@@ -274,15 +410,63 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                         r => $"{r}.5"
                     );
                     break;
+                case 3:
+                    AddColumn(
+                        live,
+                        entity,
+                        $"t{j}",
+                        FuzzTypeKind.DateTime,
+                        rng.Next(2) == 0 ? 3 : dialect.DefaultDateTimePrecision,
+                        nullable,
+                        r => dialect.DateTimeLiteral(r)
+                    );
+                    break;
+                case 4:
+                    AddColumn(
+                        live,
+                        entity,
+                        $"f{j}",
+                        FuzzTypeKind.FixedChar,
+                        new[] { 10, 20 }[rng.Next(2)],
+                        nullable,
+                        r => dialect.StringLiteral($"f{r}{j}")
+                    );
+                    break;
+                default:
+                    AddColumn(
+                        live,
+                        entity,
+                        $"b{j}",
+                        FuzzTypeKind.Binary,
+                        new[] { 16, 32 }[rng.Next(2)],
+                        nullable,
+                        r =>
+                            dialect.BinaryLiteral(
+                                r.ToString("X2", CultureInfo.InvariantCulture)
+                                    + j.ToString("X2", CultureInfo.InvariantCulture)
+                            )
+                    );
+                    break;
             }
         }
 
         live.Diagram.Entities.Add(entity);
 
-        // 前の表への外部キー
+        // 前の表への外部キー（半々で、もう参照されている親を選ぶ＝兄弟の外部キーの形を作る）
         if (index > 0 && rng.Next(10) < 7)
         {
-            var parent = live.Diagram.Entities[rng.Next(index)];
+            var referenced = live
+                .Diagram.Entities.Take(index)
+                .Where(e =>
+                    live.Diagram.Relationships.Any(r =>
+                        r.SourceEntityId == e.Id && r.TargetEntityId != e.Id
+                    )
+                )
+                .ToList();
+            var parent =
+                referenced.Count > 0 && rng.Next(2) == 0
+                    ? referenced[rng.Next(referenced.Count)]
+                    : live.Diagram.Entities[rng.Next(index)];
             AddForeignKeyColumns(live, entity, parent, $"{BaseName(parent)}_ref");
         }
 
@@ -346,9 +530,11 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             parent,
             child,
             pairs,
-            name: rng.Next(2) == 0 ? $"FK_{child.TableName}_{baseName}" : null
+            name: rng.Next(2) == 0 ? $"FK_{NamePart(child.TableName)}_{baseName}" : null
         );
         relationship.OnDelete = PickAction(nullable);
+        relationship.OnUpdate =
+            rng.Next(2) == 0 ? PickAction(nullable) : ForeignKeyReferentialAction.NoAction;
         live.Diagram.Relationships.Add(relationship);
     }
 
@@ -397,7 +583,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                     other,
                     child,
                     [(otherKey, childColumn)],
-                    name: $"FK_{child.TableName}_{BaseName(other)}_also"
+                    name: $"FK_{NamePart(child.TableName)}_{BaseName(other)}_also"
                 )
             );
             return;
@@ -424,7 +610,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
 
         live.Shapes.Add(FuzzShape.SamePairTwoForeignKeys);
         var child = EntityOf(live, source.TargetEntityId);
-        source.ConstraintName ??= $"FK_{child.TableName}_first";
+        source.ConstraintName ??= $"FK_{NamePart(child.TableName)}_first";
         live.Diagram.Relationships.Add(
             new Relationship
             {
@@ -432,7 +618,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 TargetEntityId = source.TargetEntityId,
                 Type = RelationshipType.OneToMany,
                 ColumnPairs = [.. source.ColumnPairs.Select(p => p.Clone())],
-                ConstraintName = $"FK_{child.TableName}_second",
+                ConstraintName = $"FK_{NamePart(child.TableName)}_second",
                 OnDelete = ForeignKeyReferentialAction.NoAction,
             }
         );
@@ -452,6 +638,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 .Columns.Where(c =>
                     !c.IsPrimaryKey
                     && live.Find(entity.TableName, c.Name) is { } info
+                    && IsUniqueKind(info.Kind)
                     && (live.RowCounts[entity.TableName] == 0 || info.IsDistinct)
                 )
                 .ToList();
@@ -477,12 +664,32 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             entity.UniqueConstraints.Add(
                 new UniqueConstraint
                 {
-                    Name = named ? $"UQ_{entity.TableName}_{column.Name}_named" : null,
+                    Name = named ? $"UQ_{NamePart(entity.TableName)}_{column.Name}_named" : null,
                     ColumnIds = [column.Id],
                 }
             );
+
+            // ときどき、同じ列の並びに別の名前の一意制約をもう 1 つ張る（片方だけを外して型を変える形の相手）
+            if (named && dialect.AllowDuplicateUniqueConstraints && rng.Next(3) == 0)
+            {
+                live.Shapes.Add(FuzzShape.SameSetTwoUniques);
+                entity.UniqueConstraints.Add(
+                    new UniqueConstraint
+                    {
+                        Name = $"UQ_{NamePart(entity.TableName)}_{column.Name}_twin",
+                        ColumnIds = [column.Id],
+                    }
+                );
+            }
         }
     }
+
+    /// <summary>
+    /// 一意制約を張る列の型の種類（日時・バイト列は張らない＝これらの型を混ぜる目的は列の型の変更と綴りで、一意制約の形として
+    /// 足すものが無い）
+    /// </summary>
+    private static bool IsUniqueKind(FuzzTypeKind kind) =>
+        kind is not (FuzzTypeKind.DateTime or FuzzTypeKind.Binary);
 
     /// <summary>計算列を 1 本足す（整数の普通の列を参照する。参照される列は以後変更しない）</summary>
     private void AddComputedColumn(FuzzLiveSchema live)
@@ -519,8 +726,8 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         }
     }
 
-    /// <summary>データを入れる文を親→子の順（＝表の作成順）で組み立てる</summary>
-    private void BuildInserts(FuzzLiveSchema live)
+    /// <summary>データを入れる文を親→子の順（＝表の作成順）で組み立てる（決定的な行も使う）</summary>
+    internal static void BuildInserts(FuzzLiveSchema live, SyncPlanFuzzDialect dialect)
     {
         foreach (var entity in live.Diagram.Entities)
         {
@@ -535,7 +742,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                     columns.Select(c => live.Find(entity.TableName, c.Name)!.Values[r] ?? "NULL")
                 );
                 live.InsertStatements.Add(
-                    $"INSERT INTO {dialect.Quote(entity.TableName)} ({columnList}) VALUES ({values});"
+                    $"INSERT INTO {dialect.QuoteTable(entity.TableName)} ({columnList}) VALUES ({values});"
                 );
             }
         }
@@ -572,6 +779,8 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             (1, () => ReorderReferencedCompositeKey(entities, relationships)),
             (1, () => RetargetForeignKey(entities, relationships, live)),
             (1, () => AlterDuplicatedForeignKeyColumn(entities, relationships, live)),
+            (1, () => DropDuplicatedUniqueWithTypeChange(entities, live)),
+            (1, () => RespellType(entities, live)),
         ];
         var total = kinds.Sum(k => k.Weight);
         var count = rng.Next(1, 6);
@@ -871,6 +1080,18 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         var info = Info(live, entity, column)!;
         var (kind, length) = NextType(info);
 
+        // データのある日時の列の精度を下げる変更を DB が断る方言（Oracle の ORA-30082）では作らない
+        if (
+            kind == FuzzTypeKind.DateTime
+            && info.Kind == FuzzTypeKind.DateTime
+            && length < info.Length
+            && RowCount(live, entity) > 0
+            && !dialect.AllowsDateTimePrecisionDecreaseWithData
+        )
+        {
+            return false;
+        }
+
         // 外部キーの両端は半々の確率でそろえて変える（そろえない形は型の食い違いの警告の相手）
         var partners = new List<(Entity Entity, Column Column)> { (entity, column) };
 
@@ -888,10 +1109,105 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         foreach (var (owner, partner) in partners)
         {
             partner.DataType = dialect.TypeName(kind, length);
-            Mutations.Add($"alter type {owner.TableName}.{partner.Name} -> {partner.DataType}");
+            Mutations.Add(
+                $"alter type {owner.TableName}.{partner.Name} -> {partner.DataType}{TypeTag(kind, length)}"
+            );
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// 型の変更の行き先の札（網の因子 AlteredType の水準＝型の種類か、方言の上限ちょうどの型なら <c>AtLimit</c>）
+    /// </summary>
+    private string TypeTag(FuzzTypeKind kind, int length) =>
+        $" {{type={(dialect.LimitType == (kind, length) ? "AtLimit" : kind.ToString())}}}";
+
+    /// <summary>
+    /// 同じ列の並びの一意制約 2 つの片方を消し、その列の型を変える（残る一意制約が型の変更を阻む形＝SQL Server の Msg 5074）
+    /// </summary>
+    private bool DropDuplicatedUniqueWithTypeChange(List<Entity> entities, FuzzLiveSchema live)
+    {
+        foreach (var entity in entities.OrderBy(_ => rng.Next()))
+        {
+            var pair = entity
+                .UniqueConstraints.GroupBy(u => string.Join(",", u.ColumnIds))
+                .FirstOrDefault(g => g.Count() >= 2);
+
+            if (pair is null || pair.First().ColumnIds.Count != 1)
+            {
+                continue;
+            }
+
+            var column = entity.Columns.FirstOrDefault(c => c.Id == pair.First().ColumnIds[0]);
+
+            if (
+                column is null
+                || column.IsPrimaryKey
+                || column.IsForeignKey
+                || Info(live, entity, column) is not { Pinned: false, Computed: false } info
+            )
+            {
+                continue;
+            }
+
+            var dropped = pair.ElementAt(rng.Next(2));
+            entity.UniqueConstraints.Remove(dropped);
+            var (kind, length) = NextType(info);
+            column.DataType = dialect.TypeName(kind, length);
+            Mutations.Add(
+                $"alter type {entity.TableName}.{column.Name} -> {column.DataType}{TypeTag(kind, length)} (duplicated unique)"
+            );
+            Mutations.Add(
+                $"drop one of duplicated uniques {entity.TableName} ({dropped.Name ?? "unnamed"})"
+            );
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 日時の列の型を、同じ型の別の綴り（既定の精度を明示した綴りと書かない綴り）へ書き換える（差分を出してはいけない）
+    /// </summary>
+    private bool RespellType(List<Entity> entities, FuzzLiveSchema live)
+    {
+        foreach (var entity in entities.OrderBy(_ => rng.Next()))
+        {
+            foreach (var column in entity.Columns)
+            {
+                if (
+                    Info(live, entity, column)
+                        is not { Kind: FuzzTypeKind.DateTime, Computed: false } info
+                    || info.Length != dialect.DefaultDateTimePrecision
+                    || dialect.RespelledTypeName(info.Kind, info.Length) is not { } respelled
+                )
+                {
+                    continue;
+                }
+
+                // 同じ種で型を変えた列（既定の精度でない綴り）は書き換えない（型の変更を取り消してしまう）
+                var plain = dialect.TypeName(info.Kind, info.Length);
+
+                if (
+                    !DbTypeText.AreEquivalent(column.DataType, plain)
+                    && !DbTypeText.AreEquivalent(column.DataType, respelled)
+                )
+                {
+                    continue;
+                }
+
+                column.DataType = DbTypeText.AreEquivalent(column.DataType, plain)
+                    ? respelled
+                    : plain;
+                Mutations.Add(
+                    $"respell type {entity.TableName}.{column.Name} -> {column.DataType}"
+                );
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool ToggleNullable(
@@ -974,18 +1290,28 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             options.Add(() =>
             {
                 SetPrimaryKey(entity, [key[1], key[0], .. key.Skip(2)]);
-                Mutations.Add($"reorder pk {entity.TableName}");
+                Mutations.Add(
+                    $"reorder pk {entity.TableName}{ReferencingTag(entity, relationships)}"
+                );
                 return true;
             });
         }
 
-        // 列を主キーへ足す
-        if (extendable.Count > 0)
+        // 列を主キーへ足す（主キーが空なら、足した列だけが主キーになるので、行のある表では一意な値の列だけ。一意でない値の列への
+        // 主キーは DB がデータで断る＝計画は値を知らない）
+        var extension =
+            key.Count > 0 || rows == 0
+                ? extendable.FirstOrDefault()
+                : extendable.FirstOrDefault(c => Info(live, entity, c)?.IsDistinct == true);
+
+        if (extension is not null)
         {
             options.Add(() =>
             {
-                SetPrimaryKey(entity, [.. key, extendable[0]]);
-                Mutations.Add($"extend pk {entity.TableName} + {extendable[0].Name}");
+                SetPrimaryKey(entity, [.. key, extension]);
+                Mutations.Add(
+                    $"extend pk {entity.TableName} + {extension.Name}{ReferencingTag(entity, relationships)}"
+                );
                 return true;
             });
         }
@@ -996,7 +1322,9 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             options.Add(() =>
             {
                 SetPrimaryKey(entity, [key[0]]);
-                Mutations.Add($"shrink pk {entity.TableName} -> {key[0].Name}");
+                Mutations.Add(
+                    $"shrink pk {entity.TableName} -> {key[0].Name}{ReferencingTag(entity, relationships)}"
+                );
                 return true;
             });
         }
@@ -1011,7 +1339,9 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             options.Add(() =>
             {
                 SetPrimaryKey(entity, [movable]);
-                Mutations.Add($"move pk {entity.TableName} -> {movable.Name}");
+                Mutations.Add(
+                    $"move pk {entity.TableName} -> {movable.Name}{ReferencingTag(entity, relationships)}"
+                );
                 return true;
             });
         }
@@ -1031,7 +1361,9 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 var keep = extendable.Take(1).ToList();
                 entity.Columns.Add(column);
                 SetPrimaryKey(entity, [.. keep, column]);
-                Mutations.Add($"replace pk {entity.TableName} with new column {column.Name}");
+                Mutations.Add(
+                    $"replace pk {entity.TableName} with new column {column.Name}{ReferencingTag(entity, relationships)}"
+                );
                 return true;
             });
         }
@@ -1040,7 +1372,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         options.Add(() =>
         {
             SetPrimaryKey(entity, []);
-            Mutations.Add($"remove pk {entity.TableName}");
+            Mutations.Add($"remove pk {entity.TableName}{ReferencingTag(entity, relationships)}");
             return true;
         });
 
@@ -1086,7 +1418,13 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 && Info(live, child, c) is { Kind: FuzzTypeKind.Int } info
                 && info.Values.All(v => v is null || parentIds.Contains(v))
                 && (RowCount(live, child) == 0 || RowCount(live, parent) > 0)
-                && (dialect.AllowDuplicateForeignKeys || !HasForeignKey(relationships, parent, c))
+                && CanAddForeignKey(
+                    relationships,
+                    parent,
+                    c,
+                    ForeignKeyReferentialAction.NoAction,
+                    ForeignKeyReferentialAction.NoAction
+                )
             )
             .OrderBy(_ => rng.Next())
             .FirstOrDefault();
@@ -1103,7 +1441,9 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 parent,
                 child,
                 [(parentKey, column)],
-                name: rng.Next(2) == 0 ? $"FK_added_{rng.Next(1000)}" : null
+                name: rng.Next(2) == 0
+                    ? UnusedConstraintName($"FK_added_{rng.Next(1000)}", entities, relationships)
+                    : null
             )
         );
         Mutations.Add($"add fk {child.TableName}.{column.Name} -> {parent.TableName}");
@@ -1148,12 +1488,40 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             return false;
         }
 
-        relationship.OnDelete =
-            relationship.OnDelete == ForeignKeyReferentialAction.Cascade
-                ? ForeignKeyReferentialAction.NoAction
-                : ForeignKeyReferentialAction.Cascade;
+        // ON UPDATE も変える（Oracle は ON UPDATE を持たず、MySQL は SET DEFAULT を効かせない＝差分は方言の実効値へ畳む）。
+        // SET NULL・SET DEFAULT は子の列がすべて NULL を許すときだけ
+        var onUpdate = rng.Next(3) == 0;
+        var current = onUpdate ? relationship.OnUpdate : relationship.OnDelete;
+        var nullable = relationship.ColumnPairs.All(p =>
+            entities.SelectMany(e => e.Columns).FirstOrDefault(c => c.Id == p.TargetColumnId)
+                is { IsNullable: true }
+        );
+        ForeignKeyReferentialAction[] choices =
+        [
+            ForeignKeyReferentialAction.NoAction,
+            ForeignKeyReferentialAction.Cascade,
+            .. nullable
+                ? new[]
+                {
+                    ForeignKeyReferentialAction.SetNull,
+                    ForeignKeyReferentialAction.SetDefault,
+                }
+                : [],
+        ];
+        var others = choices.Where(a => a != current).ToList();
+        var action = others[rng.Next(others.Count)];
+
+        if (onUpdate)
+        {
+            relationship.OnUpdate = action;
+        }
+        else
+        {
+            relationship.OnDelete = action;
+        }
+
         Mutations.Add(
-            $"fk action {Name(entities, relationship.TargetEntityId)} -> {Name(entities, relationship.SourceEntityId)} ON DELETE {relationship.OnDelete}"
+            $"fk action {Name(entities, relationship.TargetEntityId)} -> {Name(entities, relationship.SourceEntityId)} {(onUpdate ? "ON UPDATE" : "ON DELETE")} {action}"
         );
         return true;
     }
@@ -1167,8 +1535,13 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 && !c.IsComputed
                 && Info(live, entity!, c) is { } info
                 && info.Kind != FuzzTypeKind.Decimal
+                && IsUniqueKind(info.Kind)
                 && (RowCount(live, entity!) == 0 || info.IsDistinct)
-                && !entity!.UniqueConstraints.Any(u => u.ColumnIds.SequenceEqual([c.Id]))
+                && (
+                    dialect.AllowDuplicateUniqueConstraints
+                        && dialect.DistinguishesSameSetConstraints
+                    || !entity!.UniqueConstraints.Any(u => u.ColumnIds.SequenceEqual([c.Id]))
+                )
             )
             .OrderBy(_ => rng.Next())
             .FirstOrDefault();
@@ -1178,11 +1551,15 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             return false;
         }
 
-        var named = rng.Next(2) == 0;
+        // 同じ列の並びにもう一意制約があるなら名前を付ける（名前なしの 2 つは同じ合成名になる＝製品の入口は作らない図）
+        var duplicate = entity.UniqueConstraints.Any(u => u.ColumnIds.SequenceEqual([column.Id]));
+        var named = rng.Next(2) == 0 || duplicate;
         entity.UniqueConstraints.Add(
             new UniqueConstraint
             {
-                Name = named ? $"UQ_added_{rng.Next(1000)}" : null,
+                Name = named
+                    ? UnusedConstraintName($"UQ_added_{rng.Next(1000)}", entities, [])
+                    : null,
                 ColumnIds = [column.Id],
             }
         );
@@ -1227,6 +1604,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 && !unique.ColumnIds.Contains(c.Id)
                 && Info(live, entity, c) is { } info
                 && info.Kind != FuzzTypeKind.Decimal
+                && IsUniqueKind(info.Kind)
                 && (RowCount(live, entity) == 0 || info.IsDistinct)
             )
             .OrderBy(_ => rng.Next())
@@ -1337,7 +1715,13 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 && string.Equals(c.DataType, parentKey.DataType, StringComparison.OrdinalIgnoreCase)
                 && Info(live, child, c) is { } info
                 && info.Values.All(v => v is null || parentIds.Contains(v))
-                && (dialect.AllowDuplicateForeignKeys || !HasForeignKey(relationships, parent, c))
+                && CanAddForeignKey(
+                    relationships,
+                    parent,
+                    c,
+                    relationship.OnDelete,
+                    relationship.OnUpdate
+                )
             );
 
             if (column is null)
@@ -1345,7 +1729,11 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
                 continue;
             }
 
-            relationship.ConstraintName ??= $"FK_{child.TableName}_retarget";
+            relationship.ConstraintName ??= UnusedConstraintName(
+                $"FK_{NamePart(child.TableName)}_retarget",
+                entities,
+                relationships
+            );
             relationship.ColumnPairs = [new RelationshipColumnPair(parentKey.Id, column.Id)];
             Mutations.Add(
                 $"retarget fk {relationship.ConstraintName} {child.TableName} -> {column.Name}"
@@ -1354,6 +1742,30 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 図の制約名（外部キー・一意制約）と重ならない名前（重なれば番号を足す。乱数を引かない＝ほかの種の入力を変えない）
+    /// </summary>
+    private static string UnusedConstraintName(
+        string name,
+        List<Entity> entities,
+        List<Relationship> relationships
+    )
+    {
+        var taken = relationships
+            .Select(r => r.ConstraintName)
+            .Concat(entities.SelectMany(e => e.UniqueConstraints).Select(u => u.Name))
+            .OfType<string>()
+            .ToHashSet(SchemaNames.Comparer);
+        var candidate = name;
+
+        for (var n = 2; taken.Contains(candidate); n++)
+        {
+            candidate = $"{name}{n}";
+        }
+
+        return candidate;
     }
 
     /// <summary>
@@ -1398,7 +1810,7 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             {
                 partner.DataType = dialect.TypeName(kind, length);
                 Mutations.Add(
-                    $"alter type {owner.TableName}.{partner.Name} -> {partner.DataType} (duplicated fk)"
+                    $"alter type {owner.TableName}.{partner.Name} -> {partner.DataType}{TypeTag(kind, length)} (duplicated fk)"
                 );
             }
 
@@ -1433,7 +1845,9 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
 
         var key = entity.GetPrimaryKeyColumnsInOrder();
         SetPrimaryKey(entity, [key[1], key[0], .. key.Skip(2)]);
-        Mutations.Add($"reorder referenced pk {entity.TableName}");
+        Mutations.Add(
+            $"reorder referenced pk {entity.TableName}{ReferencingTag(entity, relationships)}"
+        );
         return true;
     }
 
@@ -1504,17 +1918,41 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
         return column;
     }
 
-    private (FuzzTypeKind Kind, int Length) NextType(FuzzColumnInfo info) =>
-        info.Kind switch
+    /// <summary>
+    /// 型の変更の行き先（長さを変える型は、ときどき方言の上限ちょうど＝<see cref="SyncPlanFuzzDialect.LimitType"/> にする。
+    /// 縮める長さは投入した値より短くしない）
+    /// </summary>
+    private (FuzzTypeKind Kind, int Length) NextType(FuzzColumnInfo info)
+    {
+        if (
+            info.Kind is FuzzTypeKind.VarChar or FuzzTypeKind.FixedChar
+            && dialect.LimitType is { } limit
+            && limit.Kind == info.Kind
+            && rng.Next(4) == 0
+        )
+        {
+            return limit;
+        }
+
+        return info.Kind switch
         {
             FuzzTypeKind.Int => (FuzzTypeKind.BigInt, 0),
             FuzzTypeKind.BigInt => (FuzzTypeKind.BigInt, 0),
-            FuzzTypeKind.VarChar => (
-                FuzzTypeKind.VarChar,
+            FuzzTypeKind.VarChar or FuzzTypeKind.FixedChar => (
+                info.Kind,
                 rng.Next(2) == 0 ? info.Length * 2 : Math.Max(info.Length / 2, 10)
+            ),
+            FuzzTypeKind.DateTime => (
+                FuzzTypeKind.DateTime,
+                info.Length == 3 ? dialect.DefaultDateTimePrecision : 3
+            ),
+            FuzzTypeKind.Binary => (
+                FuzzTypeKind.Binary,
+                rng.Next(2) == 0 ? info.Length * 2 : Math.Max(info.Length / 2, 8)
             ),
             _ => (FuzzTypeKind.Decimal, info.Length + 4),
         };
+    }
 
     private static void CollectForeignKeyPartners(
         List<Entity> entities,
@@ -1555,6 +1993,31 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
     }
 
     /// <summary>その子列から親への外部キーが既にあるか（同じ列から同じ親へ 2 本張れない方言のため）</summary>
+    /// <summary>
+    /// 子の列から親へ外部キーを（もう 1 本）張ってよいか。同じ列ペアに 2 本を許さない方言では張らない。同じ列の並びの制約を名前で
+    /// 見分けない方言（SQLite）では、参照アクションまで同じ 2 本目を張らない（名前の無い制約は同じ列集合の DB の制約で満たされる
+    /// という製品の仕様では、2 本は 1 本と区別できない）
+    /// </summary>
+    private bool CanAddForeignKey(
+        List<Relationship> relationships,
+        Entity parent,
+        Column column,
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate
+    ) =>
+        !HasForeignKey(relationships, parent, column)
+        || dialect.AllowDuplicateForeignKeys
+            && (
+                dialect.DistinguishesSameSetConstraints
+                || !relationships.Any(r =>
+                    r.SourceEntityId == parent.Id
+                    && r.ColumnPairs.Count == 1
+                    && r.ColumnPairs[0].TargetColumnId == column.Id
+                    && r.OnDelete == onDelete
+                    && r.OnUpdate == onUpdate
+                )
+            );
+
     private static bool HasForeignKey(
         List<Relationship> relationships,
         Entity parent,
@@ -1566,7 +2029,8 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             && r.ColumnPairs[0].TargetColumnId == column.Id
         );
 
-    private static void SetPrimaryKey(Entity entity, List<Column> key)
+    /// <summary>主キーを列の並びで置き換える（主キーの列は NOT NULL にする。決定的な行も使う）</summary>
+    internal static void SetPrimaryKey(Entity entity, List<Column> key)
     {
         foreach (var column in entity.Columns)
         {
@@ -1606,10 +2070,12 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             return ForeignKeyReferentialAction.NoAction;
         }
 
-        return rng.Next(3) switch
+        // SET NULL・SET DEFAULT は NULL を許す子の列だけ（SET DEFAULT の既定値は NULL＝NOT NULL の列では親の行を消すと DB が断る）
+        return rng.Next(4) switch
         {
             0 => ForeignKeyReferentialAction.Cascade,
             1 when nullable => ForeignKeyReferentialAction.SetNull,
+            2 when nullable => ForeignKeyReferentialAction.SetDefault,
             _ => ForeignKeyReferentialAction.NoAction,
         };
     }
@@ -1652,6 +2118,12 @@ internal sealed class SyncPlanFuzzGenerator(Random rng, SyncPlanFuzzDialect dial
             : char.ToUpperInvariant(chars[index]);
         return new string(chars);
     }
+
+    /// <summary>
+    /// 制約名に使う表の名前（別のスキーマの表の <c>.</c> を <c>_</c> にする＝製品の既定名と同じく、制約名をスキーマで修飾した
+    /// 名前に見せない）
+    /// </summary>
+    private static string NamePart(string table) => table.Replace('.', '_');
 
     private static string Int(int value) => value.ToString(CultureInfo.InvariantCulture);
 }

@@ -54,6 +54,14 @@ internal static class TypeNotationClosure
         new(CanonicalTypeKind.Binary, Length: 16),
         new(CanonicalTypeKind.Binary, Length: -1),
         new(CanonicalTypeKind.FixedBinary, Length: 16),
+        // 方言の上限ちょうどの長さ（TryFormat が上限を超える長さを断る方言では、超えない側の表記として閉じているかを見る）。
+        // SQL Server：nvarchar 4000・varchar / varbinary 8000。Oracle：NVARCHAR2 2000・VARCHAR2 4000・RAW 2000
+        new(CanonicalTypeKind.String, Length: 4000),
+        new(CanonicalTypeKind.String, Length: 2000),
+        new(CanonicalTypeKind.AnsiString, Length: 8000),
+        new(CanonicalTypeKind.AnsiString, Length: 4000),
+        new(CanonicalTypeKind.Binary, Length: 8000),
+        new(CanonicalTypeKind.Binary, Length: 2000),
         new(CanonicalTypeKind.Date),
         new(CanonicalTypeKind.Time),
         new(CanonicalTypeKind.Time, Precision: 3),

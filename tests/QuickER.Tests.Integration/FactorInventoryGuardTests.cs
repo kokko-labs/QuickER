@@ -42,17 +42,9 @@ public sealed class FactorInventoryGuardTests
         ),
     ];
 
-    /// <summary>同期計画の形を変える方言の能力の除外の理由</summary>
-    private const string SyncPlanCapabilityReason =
-        "同期計画の総当たり（SyncPlanFuzzTestsBase）は方言の派生ごとに能力の値を固定して流すだけで、能力を次元表の水準として観測していない（方言の名前の範囲に畳まれ、能力の値ごとの網羅を数えない）";
-
     /// <summary>差分の比較を変える方言の能力の除外の理由</summary>
     private const string DiffCapabilityReason =
         "差分の比較の正規化は SchemaDiffDialectNormalizationTests・方言ごとの *TypeNotationTests・DialectDocsTableTests の単体のテストが方言ごとに固定しているだけで、方言のエンジン（Dialect）の次元表がまだ無い（単体のテストをエンジンへ移すときに水準にする）";
-
-    /// <summary>識別子の上限の能力の除外の理由</summary>
-    private const string IdentifierLimitReason =
-        "名前の総当たりの DDL の往復（NameFuzzDdlRoundTripTestsBase）は方言の派生ごとに上限を固定して流すだけで、上限と切り詰めを次元表の水準として観測していない（LongDefaultConstraintNameTests・IdentifierLengthLimitDeclarationTests が単体で固定）";
 
     /// <summary>取込の警告の種別の除外の理由</summary>
     private const string ImportWarningReason =
@@ -61,32 +53,6 @@ public sealed class FactorInventoryGuardTests
     /// <summary>まだどのエンジンの次元表にも載っていない項目（軸・項目・受け持つエンジン・区切り・理由）</summary>
     private static IReadOnlyList<InventoryExclusion> Exclusions { get; } =
     [
-        .. new[]
-        {
-            "SupportsAlterColumn",
-            "SupportsForeignKeyAlter",
-            "SupportsDescriptions",
-            "AlterColumnRequiresForeignKeyRebuild",
-            "AlterColumnRequiresKeyConstraintRebuild",
-            "ForeignKeyRequiresLeadingIndex",
-            "PersistsForeignKeyConstraintNames",
-            "ColumnReorder",
-            "SetDefaultRequiresColumnDefault",
-            "SetNullRequiresNullableChildColumn",
-            "SupportsSchemaQualifiedTableNames",
-            "ChecksDefaultOnColumnTypeChange",
-            "SupportsComputedColumnTypeChange",
-            "SupportsUniqueConstraintOnPrimaryKey",
-            "ReferencedKeyRequiresSameColumnOrder",
-            "ForeignKeyAllowsStringLengthDifference",
-            "TransactionalDdl",
-        }.Select(member => new InventoryExclusion(
-            "SyncDialectCapabilities",
-            member,
-            EngineIds.SyncPlan,
-            "P2",
-            SyncPlanCapabilityReason
-        )),
         .. new[]
         {
             "NormalizeTypeNotation",
@@ -99,15 +65,6 @@ public sealed class FactorInventoryGuardTests
             "P3",
             DiffCapabilityReason
         )),
-        .. new[] { "IdentifierLengthLimit", "TruncatesLongIdentifiers" }.Select(
-            member => new InventoryExclusion(
-                "SyncDialectCapabilities",
-                member,
-                EngineIds.Name,
-                "P2",
-                IdentifierLimitReason
-            )
-        ),
         .. new[] { "Insert", "Update", "Delete" }.Select(member => new InventoryExclusion(
             "SaveOperation",
             member,
