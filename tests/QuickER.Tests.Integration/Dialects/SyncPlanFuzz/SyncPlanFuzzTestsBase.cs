@@ -51,18 +51,6 @@ public abstract class SyncPlanFuzzTestsBase
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>
-    /// 失敗を予告しない種類の警告（項目を計画から外した・再構築の属性の喪失・列の削除に伴う一意制約の削除・説明の文字の置き換え。
-    /// 実行が失敗しうることを言っていない）
-    /// </summary>
-    private static readonly HashSet<SyncPlanWarningKind> NonPredictingWarnings =
-    [
-        SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
-        SyncPlanWarningKind.TableRebuildDropsColumnAttribute,
-        SyncPlanWarningKind.UniqueConstraintDroppedWithColumn,
-        SyncPlanWarningKind.DescriptionCharactersReplaced,
-    ];
-
     /// <summary>この方言で流す種の決め方（普段と夜間の既定の種の数）</summary>
     internal abstract SeedSettings SeedSettings { get; }
 
@@ -92,10 +80,43 @@ public abstract class SyncPlanFuzzTestsBase
 
         var dialect = CreateDialect();
         var outcomes = new List<FuzzSeedOutcome>();
+        var scenarioOutcomes = new List<FuzzSeedOutcome>();
         var coverage = new CoverageCounter(SyncPlanFuzzDimensions.Table);
 
         try
         {
+            // 決定的な行（SyncPlanScenarios）を乱数の種の前に流す（種を 1 つだけ流すときは流さない）。行は網羅の計数に入れない
+            if (!plan.IsSingle)
+            {
+                // 形の行（D4）のうち 2 因子の網羅に要らない行は、夜間の実行でだけ流す
+                foreach (
+                    var row in SyncPlanScenarios
+                        .For(dialect.Name)
+                        .Where(row => row.Input.RegularRun || plan.Profile == EngineProfile.Nightly)
+                )
+                {
+                    scenarioOutcomes.Add(
+                        await SyncPlanFuzzRunner.RunGuardedAsync(
+                            dialect.Name,
+                            0,
+                            () =>
+                                SyncPlanFuzzRunner.RunCaseAsync(
+                                    dialect,
+                                    row.Input.Create(dialect),
+                                    new FuzzSeedOutcome
+                                    {
+                                        Seed = 0,
+                                        Dialect = dialect.Name,
+                                        ScenarioId = row.Id,
+                                    },
+                                    Ct
+                                ),
+                            row.Id
+                        )
+                    );
+                }
+            }
+
             foreach (var seed in seeds)
             {
                 var outcome = await SyncPlanFuzzRunner.RunGuardedAsync(
@@ -119,6 +140,14 @@ public abstract class SyncPlanFuzzTestsBase
                 + $"failed with a warning {outcomes.Count(o => !o.Committed && o.Violations.Count == 0)}, "
                 + $"violations {failures.Count}"
         );
+
+        foreach (var scenario in scenarioOutcomes)
+        {
+            output?.WriteLine(
+                $"{dialect.Name}: scenario {scenario.ScenarioId}: committed {scenario.Committed}, "
+                    + $"violations {scenario.Violations.Count} ({SyncPlanScenarios.Table[scenario.ScenarioId!].Description})"
+            );
+        }
 
         // 表明 1b の例外の当たり方と、失敗した種の警告の内訳（警告の中身は測るだけ＝失敗を予告しない種類の警告しか無いのに
         // 失敗した種を数える。強めるかは件数を見て決める）
@@ -150,7 +179,9 @@ public abstract class SyncPlanFuzzTestsBase
         var nonPredicting = failedRuns
             .Where(o =>
                 o.Plan!.Warnings.Count > 0
-                && o.Plan.Warnings.All(w => NonPredictingWarnings.Contains(w.Kind))
+                && o.Plan.Warnings.All(w =>
+                    SyncPlanStaticRules.NonPredictingWarnings.Contains(w.Kind)
+                )
             )
             .Select(o => o.Seed)
             .ToList();
@@ -161,7 +192,11 @@ public abstract class SyncPlanFuzzTestsBase
         // 調べるとき用: 全種の結果をファイルへ書き出す（違反の無い種も含む）
         if (Environment.GetEnvironmentVariable(LogVariable) is { Length: > 0 } log)
         {
-            await System.IO.File.AppendAllLinesAsync(log, outcomes.Select(o => o.Describe()), Ct);
+            await System.IO.File.AppendAllLinesAsync(
+                log,
+                scenarioOutcomes.Concat(outcomes).Select(o => o.Describe()),
+                Ct
+            );
         }
 
         // 網羅の宣言の誤りは種の結果より先に赤にする。要約はどの方言でも書く
@@ -195,7 +230,7 @@ public abstract class SyncPlanFuzzTestsBase
                 CoverageGuard.ContainsAll(
                     $"{dialect.Name}: 種の集合全体に出た図の形",
                     outcomes.SelectMany(o => o.Shapes),
-                    FuzzShape.Required
+                    FuzzShape.RequiredFor(dialect, realDatabase: true)
                 );
             }
             catch (XunitException ex)
@@ -208,6 +243,7 @@ public abstract class SyncPlanFuzzTestsBase
         // 既定の種の数で流したときは赤にする（直ったなら一覧から外す）
         var report = new EngineReport($"SyncPlan.{dialect.Name}", DetailedFailures);
 
+        // 乱数の種の失敗を先に、決定的な行の失敗を後に並べる（報告の詳細は先頭から書く）
         foreach (var failure in failures)
         {
             report.Add(
@@ -216,10 +252,26 @@ public abstract class SyncPlanFuzzTestsBase
             );
         }
 
+        foreach (var failure in scenarioOutcomes.Where(o => o.Violations.Count > 0))
+        {
+            report.Add(
+                SyncPlanFuzzKnownFailures.ToFailure(failure),
+                $"{dialect.Name} の同期計画の総当たりのテストを流す（行 `{failure.ScenarioId}` は種の前に必ず流れる。行だけを流す手段は無い）"
+            );
+        }
+
+        var scenarioScope = SyncPlanScenarios.ScopeOf(dialect.Name);
         var known = SyncPlanFuzzKnownFailures.Set.Classify(
             report.Failures,
             plan,
-            scope => scope == dialect.Name
+            scope =>
+                scope == dialect.Name
+                || (!plan.IsSingle && scope == scenarioScope)
+                || (
+                    !plan.IsSingle
+                    && plan.Profile == EngineProfile.Nightly
+                    && scope == scenarioScope + SyncPlanScenarios.NightlyScopeSuffix
+                )
         );
         report.WriteSummary(output, known);
 
@@ -234,6 +286,9 @@ public abstract class SyncPlanFuzzTestsBase
         {
             problems.Add(knownProblem);
         }
+
+        // 合格側の行は、規則が失敗を予言し（偽陽性の守りが空振りしていない）、違反が 0
+        problems.AddRange(SyncPlanScenarios.PassRowProblems(scenarioOutcomes));
 
         if (problems.Count > 0)
         {

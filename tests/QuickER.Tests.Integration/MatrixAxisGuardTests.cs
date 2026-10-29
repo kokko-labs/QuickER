@@ -34,6 +34,31 @@ public sealed class MatrixAxisGuardTests
             DialectNames.All
         );
 
+    [Fact(DisplayName = "同期計画の能力の組の網の派生クラスは、方言の名前の正本と一対一に対応する")]
+    public void SyncPlanCapabilityNetDialects_CoverDialectNames() =>
+        MatrixAxisGuard.DerivedClassesCover(
+            typeof(SyncPlanCapabilityNetTestsBase),
+            SyncPlanCapabilityNetTestsBase.DialectAxis,
+            DialectNames.All
+        );
+
+    [Fact(
+        DisplayName = "同期計画の能力の組の網の派生クラスが名乗る方言は、作る方言の部品の名前とプロバイダの名前に一致する"
+    )]
+    public void SyncPlanCapabilityNetDialects_DeclareTheirRealDialect()
+    {
+        MatrixAxisGuard.DeclaredValuesMatch(
+            typeof(SyncPlanCapabilityNetTestsBase),
+            SyncPlanCapabilityNetTestsBase.DialectAxis,
+            type => WithCapabilityNetDialect(type, dialect => dialect.Name)
+        );
+        MatrixAxisGuard.DeclaredValuesMatch(
+            typeof(SyncPlanCapabilityNetTestsBase),
+            SyncPlanCapabilityNetTestsBase.DialectAxis,
+            type => WithCapabilityNetDialect(type, dialect => dialect.Provider.Name)
+        );
+    }
+
     [Fact(
         DisplayName = "同期計画の総当たりの派生クラスが名乗る方言は、作る方言の部品の名前とプロバイダの名前に一致する（Docker なし）"
     )]
@@ -172,6 +197,28 @@ public sealed class MatrixAxisGuardTests
     /// <summary>同期計画の総当たりの派生クラスが作る方言の部品から値を読む（部品が破棄できれば破棄する）</summary>
     private static string WithDialect(Type type, Func<SyncPlanFuzzDialect, string> read) =>
         WithInstance<SyncPlanFuzzTestsBase, string>(
+            type,
+            test =>
+            {
+                var dialect = test.CreateDialect();
+
+                try
+                {
+                    return read(dialect);
+                }
+                finally
+                {
+                    (dialect as IDisposable)?.Dispose();
+                }
+            }
+        );
+
+    /// <summary>能力の組の網の派生クラスが作る方言の部品から値を読む（部品が破棄できれば破棄する）</summary>
+    private static string WithCapabilityNetDialect(
+        Type type,
+        Func<SyncPlanFuzzDialect, string> read
+    ) =>
+        WithInstance<SyncPlanCapabilityNetTestsBase, string>(
             type,
             test =>
             {

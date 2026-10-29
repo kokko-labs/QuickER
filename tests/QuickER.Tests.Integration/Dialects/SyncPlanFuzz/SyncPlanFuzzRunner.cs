@@ -20,6 +20,9 @@ internal sealed class FuzzSeedOutcome
     /// <summary>方言名</summary>
     public required string Dialect { get; init; }
 
+    /// <summary>決定的な行の Id（乱数の種なら null。そのとき <see cref="Seed"/> は使わない）</summary>
+    public string? ScenarioId { get; init; }
+
     /// <summary>差分の選び方</summary>
     public FuzzSelection Selection { get; set; }
 
@@ -65,7 +68,7 @@ internal sealed class FuzzSeedOutcome
         var text = new StringBuilder();
         text.AppendLine(
             CultureInfo.InvariantCulture,
-            $"--- {Dialect} seed {Seed} (selection {Selection}, committed {Committed}) ---"
+            $"--- {Dialect} {(ScenarioId is null ? $"seed {Seed}" : $"scenario {ScenarioId}")} (selection {Selection}, committed {Committed}) ---"
         );
         text.AppendLine("violations:");
         Violations.ForEach(v => text.AppendLine("  " + v));
@@ -121,6 +124,19 @@ internal static class SyncPlanFuzzRunner
     /// <summary>予期しない例外を記録した違反の文の頭</summary>
     public const string SeedThrewPrefix = "seed threw:";
 
+    /// <summary>静的な規則が失敗を予言したのにコミットした違反の文の頭</summary>
+    public const string StaticRuleCommittedPrefix =
+        "static rule predicted a failure but the sync committed:";
+
+    /// <summary>静的な規則が予言し、実際に失敗した注</summary>
+    public const string StaticRulePredictedNote = "static-rule-predicted";
+
+    /// <summary>静的な規則が予言せず、実際に失敗した注</summary>
+    public const string StaticRuleMissedNote = "static-rule-missed";
+
+    /// <summary>静的な規則が D9（失敗の前に外して後ろで付け直す制約）を予言した注（実 DB で消失が出たかを添える）</summary>
+    public const string StaticD9Note = "static-d9";
+
     /// <summary>
     /// 1 つの種を流す。生成器・ランナーの予期しない例外はその種の違反（<see cref="SeedThrewPrefix"/>）として記録し、
     /// ほかの種の結果を止めない（例外でテストごと止まると、それより前の種の違反が報告されずに隠れる）。取り消しは止める
@@ -128,10 +144,12 @@ internal static class SyncPlanFuzzRunner
     /// <param name="dialect">方言名</param>
     /// <param name="seed">種</param>
     /// <param name="run">1 つの種を流す本体（普段は <see cref="RunAsync"/>）</param>
+    /// <param name="scenarioId">決定的な行の Id（乱数の種なら null）</param>
     public static async Task<FuzzSeedOutcome> RunGuardedAsync(
         string dialect,
         int seed,
-        Func<Task<FuzzSeedOutcome>> run
+        Func<Task<FuzzSeedOutcome>> run,
+        string? scenarioId = null
     )
     {
         try
@@ -144,6 +162,7 @@ internal static class SyncPlanFuzzRunner
             {
                 Seed = seed,
                 Dialect = dialect,
+                ScenarioId = scenarioId,
                 Error = ex.ToString(),
             };
             outcome.Violations.Add(
@@ -154,14 +173,32 @@ internal static class SyncPlanFuzzRunner
     }
 
     /// <summary>1 つの種を流して結果を返す（表明の違反は <see cref="FuzzSeedOutcome.Violations"/> に入る）</summary>
-    public static async Task<FuzzSeedOutcome> RunAsync(
+    public static Task<FuzzSeedOutcome> RunAsync(
         SyncPlanFuzzDialect dialect,
         int seed,
         CancellationToken ct
+    ) =>
+        RunCaseAsync(
+            dialect,
+            new SyncPlanFuzzGenerator(new Random(seed), dialect),
+            new FuzzSeedOutcome { Seed = seed, Dialect = dialect.Name },
+            ct
+        );
+
+    /// <summary>
+    /// 1 つのケース（乱数の種か決定的な行）を流して結果を返す（表明の違反は <see cref="FuzzSeedOutcome.Violations"/> に入る）
+    /// </summary>
+    /// <param name="dialect">方言</param>
+    /// <param name="generator">ケースの作り方</param>
+    /// <param name="outcome">結果を書き込む先（種・方言・行の Id を入れて渡す）</param>
+    /// <param name="ct">取り消し</param>
+    public static async Task<FuzzSeedOutcome> RunCaseAsync(
+        SyncPlanFuzzDialect dialect,
+        ISyncPlanFuzzCase generator,
+        FuzzSeedOutcome outcome,
+        CancellationToken ct
     )
     {
-        var outcome = new FuzzSeedOutcome { Seed = seed, Dialect = dialect.Name };
-        var generator = new SyncPlanFuzzGenerator(new Random(seed), dialect);
         var provider = dialect.Provider;
         var capabilities = provider.SyncCapabilities;
 
@@ -260,11 +297,44 @@ internal static class SyncPlanFuzzRunner
         selected = [.. selected.Except(excluded)];
         unselected = [.. unselected, .. excluded];
 
+        // 静的な規則（SyncPlanStaticRules）を取り込んだ DB の図と実際の計画に当てる（規則の正しさの突き合わせ）
+        var staticVerdict = SyncPlanStaticRules.Evaluate(
+            dialect.Name,
+            before.Entities,
+            before.Relationships,
+            selected,
+            plan,
+            capabilities
+        );
+
         var result = await provider
             .SyncExecutor.ExecuteAsync(dialect.Settings, outcome.Script, ct)
             .ConfigureAwait(false);
         outcome.Committed = result.Committed;
         outcome.Error = result.Error;
+
+        // 突き合わせ：規則が DB の断る文を予言したのにコミットしたら、規則か計画の読み方が誤っている（違反にする）。
+        // 予言せずに失敗した種は注として数えるだけ（規則が見ない失敗は多い）
+        if (staticVerdict.PredictedFailure is { } predicted)
+        {
+            if (result.Committed)
+            {
+                outcome.Violations.Add($"{StaticRuleCommittedPrefix} {predicted}");
+            }
+            else
+            {
+                outcome.Notes.Add(StaticRulePredictedNote);
+            }
+        }
+        else if (
+            !result.Committed
+            && capabilities.SupportsAlterColumn
+            && capabilities.SupportsForeignKeyAlter
+        )
+        {
+            // 再構築の方言（SQLite）は規則が文の並びを判定しないので数えない
+            outcome.Notes.Add(StaticRuleMissedNote);
+        }
 
         // 表明 1: 失敗するなら事前に警告が出ている
         if (!result.Committed)
@@ -287,6 +357,19 @@ internal static class SyncPlanFuzzRunner
             );
             outcome.Violations.AddRange(losses);
             outcome.Notes.AddRange(notes);
+
+            // 突き合わせ（D9）：静的な規則が「失敗の文より前に外し、後ろで付け直す制約」を予言したら、実 DB でも表明 1b の消失が
+            // 出ているかを数える（測るだけ）
+            if (
+                staticVerdict.Violations.Any(v =>
+                    v.StartsWith("static D9", StringComparison.Ordinal)
+                )
+            )
+            {
+                outcome.Notes.Add(
+                    losses.Count > 0 ? $"{StaticD9Note}:observed" : $"{StaticD9Note}:not-observed"
+                );
+            }
 
             return outcome;
         }
@@ -472,6 +555,19 @@ internal static class SyncPlanFuzzRunner
         }
     }
 
+    /// <summary>
+    /// 外部キーの列ペアの対応の集合の文（「親の列&gt;子の列」の組を並べ替えて連ねる）。製品の差分は複合外部キーの列ペアを並びを見ずに
+    /// 比べ、参照先のキーの並びを要する方言は付け直しをキーの並びにする（CLAUDE.md）ので、キーは並びでなく対応の集合で比べる。
+    /// 親の列の集合と子の列の集合を別々に比べると対応の取り違えを見逃すので、組のまま並べ替える
+    /// </summary>
+    internal static string PairSetText(IEnumerable<(string Parent, string Child)> pairs) =>
+        string.Join(
+            ",",
+            pairs
+                .Select(p => $"{p.Parent.ToLowerInvariant()}>{p.Child.ToLowerInvariant()}")
+                .Order(StringComparer.Ordinal)
+        );
+
     private static string ForeignKeyKey(
         string side,
         SchemaDiffItem item,
@@ -480,11 +576,8 @@ internal static class SyncPlanFuzzRunner
     {
         var child = item.ChildEntity!.TableName.Trim();
         var parent = item.ParentEntity!.TableName.Trim();
-        var pairs = string.Join(
-            ",",
-            item.ForeignKeyColumnPairs.Select(p =>
-                $"{p.ParentColumn.ToLowerInvariant()}>{p.ChildColumn.ToLowerInvariant()}"
-            )
+        var pairs = PairSetText(
+            item.ForeignKeyColumnPairs.Select(p => (p.ParentColumn, p.ChildColumn))
         );
         var name = capabilities.PersistsForeignKeyConstraintNames
             ? ConstraintNames
@@ -540,12 +633,7 @@ internal static class SyncPlanFuzzRunner
                 : string.Empty;
             keys.Add(
                 $"FK|{child.TableName.Trim().ToLowerInvariant()}|{parent.TableName.Trim().ToLowerInvariant()}|"
-                    + string.Join(
-                        ",",
-                        pairs.Select(p =>
-                            $"{p.ParentColumn.ToLowerInvariant()}>{p.ChildColumn.ToLowerInvariant()}"
-                        )
-                    )
+                    + PairSetText(pairs.Select(p => (p.ParentColumn, p.ChildColumn)))
                     + $"|{name}|{capabilities.EffectiveOnDelete(relationship.OnDelete)}/{capabilities.EffectiveOnUpdate(relationship.OnUpdate)}"
             );
         }
@@ -848,9 +936,10 @@ internal static class SyncPlanFuzzRunner
             );
 
     /// <summary>
-    /// 選び方の形（主キー・一意制約の構成列の削除を、それを前提にする変更を選ばずに選んだか）を返す
+    /// 選び方の形（主キー・一意制約の構成列の削除を、それを前提にする変更を選ばずに選んだか・同じ列の並びの一意制約 2 つの
+    /// 片方の削除と、その列の型の変更を一緒に選んだか）を返す（網も使う）
     /// </summary>
-    private static IEnumerable<string> SelectionShapes(
+    internal static IEnumerable<string> SelectionShapes(
         SchemaImportResult before,
         List<SchemaDiffItem> selected
     )
@@ -894,6 +983,35 @@ internal static class SyncPlanFuzzRunner
             )
             {
                 yield return FuzzShape.DropUniqueMemberAlone;
+            }
+        }
+
+        foreach (var drop in selected.Where(i => i.Kind == SchemaDiffKind.DropUniqueConstraint))
+        {
+            var table = before.Entities.FirstOrDefault(e =>
+                e.TableName.Trim().Equals(drop.TableName.Trim(), StringComparison.OrdinalIgnoreCase)
+            );
+            var members = drop.UniqueConstraintColumns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var sameSet = table
+                ?.UniqueConstraints.Select(u =>
+                    u.ColumnIds.Select(id => table.Columns.FirstOrDefault(c => c.Id == id)?.Name)
+                        .OfType<string>()
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                )
+                .Count(set => set.SetEquals(members));
+
+            if (
+                table is not null
+                && sameSet >= 2
+                && selected.Any(s =>
+                    s.Kind == SchemaDiffKind.AlterColumn
+                    && s.TableName.Trim()
+                        .Equals(table.TableName.Trim(), StringComparison.OrdinalIgnoreCase)
+                    && members.Contains(s.ColumnName ?? string.Empty)
+                )
+            )
+            {
+                yield return FuzzShape.DropDuplicatedUniqueWithTypeChange;
             }
         }
     }
@@ -1186,7 +1304,7 @@ internal static class SyncPlanFuzzRunner
         foreach (var entity in schema.Entities)
         {
             await using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT COUNT(*) FROM {dialect.Quote(entity.TableName)}";
+            command.CommandText = $"SELECT COUNT(*) FROM {dialect.QuoteTable(entity.TableName)}";
             var value = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
             counts[entity.TableName.Trim()] = Convert.ToInt64(value, CultureInfo.InvariantCulture);
         }

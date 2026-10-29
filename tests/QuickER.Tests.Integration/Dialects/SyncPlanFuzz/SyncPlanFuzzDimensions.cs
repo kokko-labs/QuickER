@@ -63,6 +63,9 @@ internal static class SyncPlanFuzzDimensions
         "reorder referenced pk",
         "retarget fk",
         "drop one of duplicated fks",
+        "alter type duplicated unique",
+        "drop one of duplicated uniques",
+        "respell type",
     ];
 
     /// <summary>次元表</summary>
@@ -86,7 +89,7 @@ internal static class SyncPlanFuzzDimensions
         );
 
     /// <summary>
-    /// 出現の少ない変更の、出にくい理由（前提の形）。前提の無い変更は、重み 1（全 26）の抽選だけで出にくい
+    /// 出現の少ない変更の、出にくい理由（前提の形）。前提の無い変更は、重み 1（全 29）の抽選だけで出にくい
     /// </summary>
     private static readonly Dictionary<string, string> RareMutationPremises = new(
         StringComparer.Ordinal
@@ -105,6 +108,9 @@ internal static class SyncPlanFuzzDimensions
         ["retarget fk"] = "外部キーを付け替えられる別の列が要る",
         ["alter type duplicated fk"] = "同じ列ペアに外部キーが 2 本ある形が要る",
         ["drop one of duplicated fks"] = "同じ列ペアに外部キーが 2 本ある形が要る",
+        ["alter type duplicated unique"] = "同じ列の並びに一意制約が 2 つある形が要る",
+        ["drop one of duplicated uniques"] = "同じ列の並びに一意制約が 2 つある形が要る",
+        ["respell type"] = "既定の精度の日時の列が要る",
     };
 
     /// <summary>網羅しない組の一覧（範囲は方言の名前＝sqlite・mysql・sqlserver）</summary>
@@ -116,23 +122,101 @@ internal static class SyncPlanFuzzDimensions
         CoverageGap.Set(
             EngineIds.SyncPlan,
             [
-                CoverageGap.Matching(
+                // 変更の種類を作らない方言の欠け（選び方の 5 通りの全部）
+                MissingMutationGap(
                     "sqlite",
-                    "P1-3",
-                    "P2",
-                    "SQLite の取込は UNIQUE 制約の名前を持ち帰らない（sqlite_autoindex_*＝名前 null）ので、名前付きの一意制約を前提にする change unique は、同じ種の変更で名前付きの一意制約を足した後にしか選べず、既定の 2000 種で 7 回しか出ない（差分の選び方 5 通りの全部と組まない）",
-                    Selection,
-                    Mutation,
-                    (selection, mutation) =>
-                        mutation == "change unique"
-                        && selection is nameof(FuzzSelection.All) or nameof(FuzzSelection.Default)
+                    "respell type",
+                    null,
+                    "SQLite は宣言の型をそのまま覚え、型の正規化を持たない（製品の事実＝NormalizeTypeNotation が恒等）ので、同じ型の別の綴りが無い"
+                ),
+                // SQLite の DB は同じ列の並びの UNIQUE 制約を 1 つの索引にまとめ（取り込むと 1 つ）、目標の図の変更でも重ねない
+                // （SyncPlanFuzzDialect.DistinguishesSameSetConstraints）ので、同じ列の並びの一意制約 2 つを前提にする変更は作れない
+                MissingMutationGap(
+                    "sqlite",
+                    "alter type duplicated unique",
+                    null,
+                    "SQLite は同じ列の並びの UNIQUE 制約を 1 つの索引にまとめ（DB の事実）、製品は名前の無い制約を同じ列集合の DB の制約で満たされるとみなす（製品の事実）ので、同じ列の並びの一意制約 2 つの形が無い"
+                ),
+                MissingMutationGap(
+                    "sqlite",
+                    "drop one of duplicated uniques",
+                    null,
+                    "SQLite は同じ列の並びの UNIQUE 制約を 1 つの索引にまとめ（DB の事実）、製品は名前の無い制約を同じ列集合の DB の制約で満たされるとみなす（製品の事実）ので、同じ列の並びの一意制約 2 つの形が無い"
+                ),
+                MissingMutationGap(
+                    "sqlserver",
+                    "fk action",
+                    "P2-末",
+                    "生成器は SQL Server で参照アクションを変えない（SyncPlanFuzzDialect.AllowCascade が偽：連鎖の経路の重なりを CREATE で断る DB の制約に当たらないよう、参照アクションの変更をまとめて作らない。重ならない経路だけで変える生成はエンジンの側で作れる）"
                 ),
                 .. SamplingGaps(
                     "mysql",
                     MySqlSyncPlanFuzzTests.DefaultSeeds,
                     new()
                     {
-                        ["computed nullable"] = [FuzzSelection.ByKinds, FuzzSelection.Single],
+                        ["alter type duplicated fk"] = [FuzzSelection.Random],
+                        ["alter type duplicated unique"] =
+                        [
+                            FuzzSelection.Default,
+                            FuzzSelection.Random,
+                            FuzzSelection.ByKinds,
+                        ],
+                        ["computed nullable"] = [FuzzSelection.Random, FuzzSelection.Single],
+                        ["computed type"] = [FuzzSelection.All, FuzzSelection.ByKinds],
+                        ["drop one of duplicated fks"] = [FuzzSelection.Random],
+                        ["drop one of duplicated uniques"] =
+                        [
+                            FuzzSelection.Default,
+                            FuzzSelection.Random,
+                            FuzzSelection.ByKinds,
+                        ],
+                        ["drop tables"] = [FuzzSelection.Random],
+                        ["extend pk"] = [FuzzSelection.Single, FuzzSelection.ByKinds],
+                        ["fk action"] = [FuzzSelection.Single],
+                        ["move pk"] = [FuzzSelection.ByKinds],
+                        ["rename table case"] = [FuzzSelection.Single],
+                        ["reorder pk"] =
+                        [
+                            FuzzSelection.Random,
+                            FuzzSelection.Single,
+                            FuzzSelection.ByKinds,
+                        ],
+                        ["replace pk"] =
+                        [
+                            FuzzSelection.All,
+                            FuzzSelection.Default,
+                            FuzzSelection.Random,
+                            FuzzSelection.Single,
+                            FuzzSelection.ByKinds,
+                        ],
+                        ["respell type"] = [FuzzSelection.Default],
+                        ["retarget fk"] = [FuzzSelection.All, FuzzSelection.Single],
+                        ["shrink pk"] = [FuzzSelection.Default, FuzzSelection.Single],
+                    }
+                ),
+                .. SamplingGaps(
+                    "sqlserver",
+                    SqlServerSyncPlanFuzzTests.DefaultSeeds,
+                    new()
+                    {
+                        ["add table"] = [FuzzSelection.ByKinds],
+                        ["add unique"] = [FuzzSelection.Single],
+                        ["alter type duplicated fk"] = [FuzzSelection.Random],
+                        ["alter type duplicated unique"] =
+                        [
+                            FuzzSelection.All,
+                            FuzzSelection.Default,
+                            FuzzSelection.Random,
+                            FuzzSelection.ByKinds,
+                        ],
+                        ["computed nullable"] =
+                        [
+                            FuzzSelection.All,
+                            FuzzSelection.Default,
+                            FuzzSelection.Random,
+                            FuzzSelection.Single,
+                            FuzzSelection.ByKinds,
+                        ],
                         ["computed type"] =
                         [
                             FuzzSelection.All,
@@ -141,91 +225,85 @@ internal static class SyncPlanFuzzDimensions
                             FuzzSelection.Single,
                             FuzzSelection.ByKinds,
                         ],
-                        ["drop fk"] = [FuzzSelection.ByKinds],
-                        ["fk action"] = [FuzzSelection.Default, FuzzSelection.Single],
-                        ["move pk"] = [FuzzSelection.Default, FuzzSelection.Single],
-                        ["rename table case"] = [FuzzSelection.ByKinds],
-                        ["reorder columns"] = [FuzzSelection.Single],
-                        ["reorder pk"] =
+                        ["drop fk"] = [FuzzSelection.Random, FuzzSelection.Single],
+                        ["drop one of duplicated fks"] = [FuzzSelection.Random],
+                        ["drop one of duplicated uniques"] =
                         [
                             FuzzSelection.All,
                             FuzzSelection.Default,
                             FuzzSelection.Random,
-                            FuzzSelection.Single,
+                            FuzzSelection.ByKinds,
                         ],
-                        ["reorder referenced pk"] =
+                        ["drop unique"] = [FuzzSelection.ByKinds],
+                        ["extend pk"] =
                         [
                             FuzzSelection.Default,
+                            FuzzSelection.Random,
+                            FuzzSelection.Single,
+                        ],
+                        ["move pk"] = [FuzzSelection.All],
+                        ["rename column case"] = [FuzzSelection.Single],
+                        ["rename table case"] = [FuzzSelection.Single],
+                        ["reorder columns"] = [FuzzSelection.Random],
+                        ["reorder pk"] = [FuzzSelection.Random, FuzzSelection.Single],
+                        ["reorder referenced pk"] =
+                        [
+                            FuzzSelection.All,
+                            FuzzSelection.Default,
+                            FuzzSelection.Random,
                             FuzzSelection.Single,
                             FuzzSelection.ByKinds,
                         ],
                         ["replace pk"] =
                         [
                             FuzzSelection.All,
-                            FuzzSelection.Single,
-                            FuzzSelection.ByKinds,
+                            FuzzSelection.Default,
+                            FuzzSelection.Random,
                         ],
-                        ["retarget fk"] = [FuzzSelection.Random, FuzzSelection.ByKinds],
+                        ["respell type"] = [FuzzSelection.Default],
+                        ["retarget fk"] =
+                        [
+                            FuzzSelection.All,
+                            FuzzSelection.Default,
+                            FuzzSelection.Random,
+                            FuzzSelection.Single,
+                        ],
                         ["shrink pk"] =
                         [
                             FuzzSelection.All,
                             FuzzSelection.Default,
-                            FuzzSelection.Single,
-                            FuzzSelection.ByKinds,
-                        ],
-                    }
-                ),
-                .. SamplingGaps(
-                    "sqlserver",
-                    SqlServerSyncPlanFuzzTests.DefaultSeeds,
-                    new()
-                    {
-                        ["add table"] = [FuzzSelection.Single],
-                        ["alter type duplicated fk"] = [FuzzSelection.All, FuzzSelection.Single],
-                        ["computed nullable"] =
-                        [
-                            FuzzSelection.All,
-                            FuzzSelection.Default,
-                            FuzzSelection.Random,
-                            FuzzSelection.ByKinds,
-                        ],
-                        ["computed type"] = [FuzzSelection.All, FuzzSelection.Default],
-                        ["drop fk"] = [FuzzSelection.Random],
-                        ["drop one of duplicated fks"] = [FuzzSelection.All, FuzzSelection.Single],
-                        ["drop tables"] = [FuzzSelection.ByKinds],
-                        ["extend pk"] = [FuzzSelection.Single],
-                        ["fk action"] =
-                        [
-                            FuzzSelection.All,
-                            FuzzSelection.Default,
                             FuzzSelection.Random,
                             FuzzSelection.Single,
                             FuzzSelection.ByKinds,
                         ],
-                        ["move pk"] = [FuzzSelection.All],
-                        ["rename column case"] = [FuzzSelection.Single],
-                        ["rename table case"] = [FuzzSelection.All],
-                        ["reorder columns"] = [FuzzSelection.ByKinds],
-                        ["reorder pk"] =
-                        [
-                            FuzzSelection.Random,
-                            FuzzSelection.Single,
-                            FuzzSelection.ByKinds,
-                        ],
-                        ["reorder referenced pk"] = [FuzzSelection.Random, FuzzSelection.Single],
-                        ["replace pk"] = [FuzzSelection.All, FuzzSelection.Single],
-                        ["retarget fk"] =
-                        [
-                            FuzzSelection.All,
-                            FuzzSelection.Random,
-                            FuzzSelection.Single,
-                            FuzzSelection.ByKinds,
-                        ],
-                        ["shrink pk"] = [FuzzSelection.ByKinds],
                     }
                 ),
             ]
         );
+
+    /// <summary>
+    /// 変更の種類が一度も出ない方言の欠け（選び方の 5 通りの全部）。<paramref name="fixedIn"/> が null なら受け入れ（製品か DB の事実）
+    /// </summary>
+    private static CoverageGapEntry MissingMutationGap(
+        string dialect,
+        string mutation,
+        string? fixedIn,
+        string reason
+    )
+    {
+        Func<string, string, bool> predicate = (_, kind) => kind == mutation;
+        return fixedIn is null
+            ? CoverageGap.AcceptedMatching(dialect, "P2-4", reason, Selection, Mutation, predicate)
+            : CoverageGap.Matching(
+                dialect,
+                "P2-4",
+                fixedIn,
+                reason,
+                Selection,
+                Mutation,
+                predicate
+            );
+    }
 
     /// <summary>
     /// 種の数が足りずに出揃わない組を、変更の種類ごとに 1 項目にする（項目は名指しした選び方の組だけに当たる）
@@ -243,12 +321,12 @@ internal static class SyncPlanFuzzDimensions
             var selections = pair.Value.Select(s => s.ToString()).ToHashSet(StringComparer.Ordinal);
             var premise = RareMutationPremises.TryGetValue(pair.Key, out var text)
                 ? text
-                : "前提の形は要らないが、重み 1（全 26）の抽選でしか選ばれない";
+                : "前提の形は要らないが、重み 1（全 29）の抽選でしか選ばれない";
 
             return CoverageGap.Matching(
                 dialect,
                 "P1-3",
-                "P2",
+                "P2-末",
                 $"{pair.Key} は出にくい（{premise}）。差分の選び方は種ごとに 1 つを 5 通りから引くので、既定の {seeds} 種では {string.Join("・", pair.Value)} と組む種がたまたま無い（選び方を変更の種類に割り付けて組を作る生成をしていない）",
                 Selection,
                 Mutation,
@@ -265,7 +343,7 @@ internal static class SyncPlanFuzzDimensions
             "Fuzz",
             "同期計画の総当たり（5 方言の実 DB）",
             Table,
-            0,
+            SyncPlanScenarios.Table.Count,
             [
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzDialect.cs",
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzDimensions.cs",
@@ -273,6 +351,7 @@ internal static class SyncPlanFuzzDimensions
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzKnownFailures.cs",
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzRunner.cs",
                 "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzTestsBase.cs",
+                "tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs",
             ],
             [
                 "src/QuickER.Provider/SchemaDiffService.cs",
@@ -309,12 +388,17 @@ internal static class SyncPlanFuzzDimensions
     /// <summary>変更の文の種類（知らない頭は文の頭の 2 語を返す＝宣言していない水準）</summary>
     internal static string KindOf(string mutation)
     {
-        if (
-            mutation.StartsWith("alter type ", StringComparison.Ordinal)
-            && mutation.EndsWith(" (duplicated fk)", StringComparison.Ordinal)
-        )
+        if (mutation.StartsWith("alter type ", StringComparison.Ordinal))
         {
-            return "alter type duplicated fk";
+            if (mutation.EndsWith(" (duplicated fk)", StringComparison.Ordinal))
+            {
+                return "alter type duplicated fk";
+            }
+
+            if (mutation.EndsWith(" (duplicated unique)", StringComparison.Ordinal))
+            {
+                return "alter type duplicated unique";
+            }
         }
 
         var kind = MutationKinds

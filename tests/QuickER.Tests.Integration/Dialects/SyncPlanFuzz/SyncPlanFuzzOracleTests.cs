@@ -29,7 +29,8 @@ public sealed class SyncPlanFuzzOracleTests
         int[] Rules,
         string[] Notes,
         SyncPlanWarning? Warning = null,
-        string Error = "statement failed"
+        string Error = "statement failed",
+        Shape? Before = null
     )
     {
         public override string ToString() => Name;
@@ -43,8 +44,35 @@ public sealed class SyncPlanFuzzOracleTests
         bool UniquePresent = true,
         string[]? PrimaryKey = null,
         bool DPresent = true,
-        bool DcPresent = true
+        bool DcPresent = true,
+        CompositeForeignKey Composite = CompositeForeignKey.None
     );
+
+    /// <summary>
+    /// fk_c_p を複合外部キー（p の主キー (id, code) を c の (p_id, p_code) が参照する）にするときの列ペアの書き方
+    /// </summary>
+    public enum CompositeForeignKey
+    {
+        /// <summary>単一列（p.id ← c.p_id）</summary>
+        None,
+
+        /// <summary>id&gt;p_id, code&gt;p_code の並び</summary>
+        Straight,
+
+        /// <summary>同じ対応を逆の並びで（code&gt;p_code, id&gt;p_id）</summary>
+        Reordered,
+
+        /// <summary>対応を入れ替える（id&gt;p_code, code&gt;p_id）</summary>
+        Swapped,
+    }
+
+    /// <summary>複合外部キーの形の同期の前の DB</summary>
+    private static readonly Shape CompositeLive = new()
+    {
+        PrimaryKey = ["id", "code"],
+        UniqueColumns = ["id"],
+        Composite = CompositeForeignKey.Straight,
+    };
 
     private static readonly Shape Live = new();
 
@@ -216,6 +244,40 @@ public sealed class SyncPlanFuzzOracleTests
                 [5],
                 []
             ),
+            // 列ペアの対応の集合で照合する：同じ対応を並びだけ変えて付け直した複合外部キーは消えていない（参照先のキーの並びを要する
+            // 方言の付け直しはキーの並びになる＝製品の仕様）。対応を入れ替えた外部キーは別の外部キーで、元の外部キーは消えた（規則 5）
+            new Case(
+                "rule5-composite-foreign-key-reordered-pairs-remain",
+                CompositeLive with
+                {
+                    UniqueColumns = ["code"],
+                },
+                [SchemaDiffKind.AlterUniqueConstraint],
+                CompositeLive with
+                {
+                    UniqueColumns = ["code"],
+                    Composite = CompositeForeignKey.Reordered,
+                },
+                [],
+                [],
+                Before: CompositeLive
+            ),
+            new Case(
+                "rule5-composite-foreign-key-swapped-pairs-lost",
+                CompositeLive with
+                {
+                    UniqueColumns = ["code"],
+                },
+                [SchemaDiffKind.AlterUniqueConstraint],
+                CompositeLive with
+                {
+                    UniqueColumns = ["code"],
+                    Composite = CompositeForeignKey.Swapped,
+                },
+                [5],
+                [],
+                Before: CompositeLive
+            ),
             // 例外：候補キーを証明できないと警告した外部キー自身の消失は受け入れる（作り直しに重なれば注として数える）
             new Case(
                 "warned-rebuild-own-failure-is-a-note",
@@ -258,7 +320,7 @@ public sealed class SyncPlanFuzzOracleTests
     public void FailedSyncConstraintLosses_FollowsRules(Case c)
     {
         var capabilities = new MySqlProvider().SyncCapabilities;
-        var before = Build(Live);
+        var before = Build(c.Before ?? Live);
         var target = Build(c.Target);
         var diff = new SchemaDiffService().Compute(
             before.Entities,
@@ -305,7 +367,11 @@ public sealed class SyncPlanFuzzOracleTests
     {
         var primaryKey = shape.PrimaryKey ?? ["id"];
         var p = Table("p", ["id", "code"], primaryKey);
-        var c = Table("c", ["id", "p_id"], ["id"]);
+        var c = Table(
+            "c",
+            shape.Composite == CompositeForeignKey.None ? ["id", "p_id"] : ["id", "p_id", "p_code"],
+            ["id"]
+        );
         var entities = new List<Entity> { p, c };
         var relationships = new List<Relationship>();
 
@@ -327,7 +393,25 @@ public sealed class SyncPlanFuzzOracleTests
 
         if (shape.CpPresent)
         {
-            relationships.Add(Reference("fk_c_p", p, "id", c, "p_id", shape.CpOnDelete));
+            var reference = Reference("fk_c_p", p, "id", c, "p_id", shape.CpOnDelete);
+
+            if (shape.Composite != CompositeForeignKey.None)
+            {
+                RelationshipColumnPair Pair(string parent, string child) =>
+                    new(
+                        p.Columns.Single(col => col.Name == parent).Id,
+                        c.Columns.Single(col => col.Name == child).Id
+                    );
+
+                reference.ColumnPairs = shape.Composite switch
+                {
+                    CompositeForeignKey.Straight => [Pair("id", "p_id"), Pair("code", "p_code")],
+                    CompositeForeignKey.Reordered => [Pair("code", "p_code"), Pair("id", "p_id")],
+                    _ => [Pair("id", "p_code"), Pair("code", "p_id")],
+                };
+            }
+
+            relationships.Add(reference);
         }
 
         if (shape.DPresent)
@@ -356,7 +440,7 @@ public sealed class SyncPlanFuzzOracleTests
                 new Column
                 {
                     Name = column,
-                    DataType = column == "code" ? "varchar(20)" : "int",
+                    DataType = column is "code" or "p_code" ? "varchar(20)" : "int",
                     IsNullable = false,
                     IsPrimaryKey = primaryKey.Contains(column),
                 }

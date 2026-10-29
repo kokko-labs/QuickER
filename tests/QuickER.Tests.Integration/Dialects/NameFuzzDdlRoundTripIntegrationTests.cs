@@ -86,7 +86,10 @@ public abstract class NameFuzzDdlRoundTripTestsBase
         var dialect = Provider.Name;
         var executed = 0;
         var plan = SeedSource.Resolve(Seeds);
-        var coverage = new CoverageCounter(NameFuzzDdlRoundTripDimensions.Table);
+        var coverage = new CoverageCounter(
+            NameFuzzDdlRoundTripDimensions.Table,
+            NameFuzzDdlRoundTripDimensions.DeclaredLevels[dialect]
+        );
 
         foreach (var name in NameFuzzDiagrams.NamesForRun(plan))
         {
@@ -103,7 +106,12 @@ public abstract class NameFuzzDdlRoundTripTestsBase
                 executed++;
 
                 // 実際に流す名前と置き場所だけを数える（読むだけ）
-                NameFuzzDdlRoundTripDimensions.Observe(coverage, name, role);
+                NameFuzzDdlRoundTripDimensions.Observe(
+                    coverage,
+                    name,
+                    role,
+                    Provider.SyncCapabilities
+                );
                 await RoundTripAsync(
                     ledger,
                     $"ddl:{dialect}:{role}",
