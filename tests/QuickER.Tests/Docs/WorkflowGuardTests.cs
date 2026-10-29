@@ -211,16 +211,20 @@ public sealed class WorkflowGuardTests
         AssertTempOnRunnerTemp(body);
     }
 
-    /// <summary>夜間のワークフローのアクションは ci.yml と同じ commit SHA で固定する</summary>
+    /// <summary>夜間のワークフローのアクションは、ほかのワークフロー（ci.yml か release.yml）と同じ commit SHA で固定する</summary>
     /// <remarks>
     /// タグは可変で、上流の付け替えで実行内容が黙って差し替わる。Dependabot は SHA とバージョンコメントを両方書き換えるので、
-    /// 2 つのワークフローの行が同じなら、更新の PR も両方をまとめて持ってくる。
+    /// ワークフローどうしの行が同じなら、更新の PR もまとめて持ってくる。夜間のワークフローで初めて使うアクションを足さない。
     /// </remarks>
-    [Fact(DisplayName = "nightly.yml のアクションは ci.yml と同じ commit SHA で固定する")]
-    public void Nightly_PinsActionsToSameShasAsCi()
+    [Fact(
+        DisplayName = "nightly.yml のアクションは ci.yml か release.yml と同じ commit SHA で固定する"
+    )]
+    public void Nightly_PinsActionsToSameShasAsOtherWorkflows()
     {
         var uses = UsesLines(ReadWorkflow("nightly.yml"));
-        var ciUses = UsesLines(ReadWorkflow("ci.yml")).ToHashSet(StringComparer.Ordinal);
+        var otherUses = UsesLines(ReadWorkflow("ci.yml"))
+            .Concat(UsesLines(ReadWorkflow("release.yml")))
+            .ToHashSet(StringComparer.Ordinal);
 
         uses.Should().NotBeEmpty("nightly.yml から uses を読み取れなかった");
 
@@ -231,7 +235,9 @@ public sealed class WorkflowGuardTests
                     @"^[\w.-]+/[\w.-]+@[0-9a-f]{40} # v\S+$",
                     "アクションは 40 桁の commit SHA とバージョンコメントで固定する"
                 );
-            ciUses.Should().Contain(line, "ci.yml と同じ SHA・同じバージョンコメントにする");
+            otherUses
+                .Should()
+                .Contain(line, "ci.yml か release.yml と同じ SHA・同じバージョンコメントにする");
         }
     }
 
@@ -329,6 +335,76 @@ public sealed class WorkflowGuardTests
                 .Should()
                 .BeInRange(1, 60, $"{job} は夜間の予算（1 ジョブ 60 分）に収める");
         }
+    }
+
+    /// <summary>夜間のジョブはテストの結果（TRX）を書き、失敗した夜にも成果物として残す</summary>
+    /// <remarks>
+    /// コンソールのログにはテストの出力（網羅の要約・夜間なら埋まる組・種の数の警告）が出ず、方言の派生は同じ表示名なので、
+    /// TRX が無いと夜間に何が深く流れたのかを読めない。<c>if: always()</c> が無いと、確かめたい失敗の夜にだけ結果が残らない。
+    /// </remarks>
+    [Fact(
+        DisplayName = "nightly.yml の各ジョブは TRX を書き、if: always() の upload-artifact で保存する"
+    )]
+    public void Nightly_JobsKeepTestResultsAsArtifacts()
+    {
+        var jobs = Jobs(ReadWorkflow("nightly.yml"));
+        var artifactNames = new List<string>();
+
+        foreach (var job in NightlyJobs.Keys)
+        {
+            var testStep = NightlyTestStep(jobs[job]);
+
+            testStep
+                .Should()
+                .Contain(
+                    $"--logger \"trx;LogFileName={job}.trx\"",
+                    $"{job} はテストの結果を TRX で書く"
+                )
+                .And.Contain(
+                    $"--results-directory \"{NightlyResultsDirectory}\"",
+                    $"{job} は TRX をランナーの一時領域へ書く"
+                )
+                .And.Contain(
+                    "--logger \"console;verbosity=normal\"",
+                    $"{job} はコンソールのログも残す"
+                );
+
+            var uploads = JobSteps(jobs[job])
+                .Where(step =>
+                    step.Contains("uses: actions/upload-artifact@", StringComparison.Ordinal)
+                )
+                .ToList();
+
+            uploads.Should().ContainSingle($"{job} に TRX を保存する手順がちょうど 1 つある");
+
+            var upload = uploads[0];
+
+            Regex
+                .IsMatch(upload, @"(?m)^\s+if: always\(\)\s*$")
+                .Should()
+                .BeTrue($"{job} は失敗した夜にも結果を残す");
+            Regex
+                .IsMatch(
+                    upload,
+                    $@"(?m)^\s+path: {Regex.Escape(NightlyResultsDirectory)}/\*\.trx\s*$"
+                )
+                .Should()
+                .BeTrue($"{job} はテストの手順が書いた TRX を保存する");
+
+            var retention = Regex.Match(upload, @"(?m)^\s+retention-days: (?<days>\d+)\s*$");
+
+            retention.Success.Should().BeTrue($"{job} は保持日数を持つ");
+            int.Parse(retention.Groups["days"].Value, CultureInfo.InvariantCulture)
+                .Should()
+                .BeGreaterThanOrEqualTo(1);
+
+            var name = Regex.Match(upload, @"(?m)^\s+name: (?<name>\S+)\s*$");
+
+            name.Success.Should().BeTrue($"{job} の成果物に名前がある");
+            artifactNames.Add(name.Groups["name"].Value);
+        }
+
+        artifactNames.Should().OnlyHaveUniqueItems("ジョブごとに別の成果物の名前にする");
     }
 
     /// <summary>リリースのタグはビルドしたコミットに付ける</summary>
@@ -519,6 +595,9 @@ public sealed class WorkflowGuardTests
         ["unit-nightly"] = "tests/QuickER.Tests/QuickER.Tests.csproj",
     };
 
+    /// <summary>夜間のジョブが TRX を書くフォルダ（テストの手順と保存の手順で同じ値）</summary>
+    private const string NightlyResultsDirectory = "${{ runner.temp }}/nightly-results";
+
     /// <summary>手順の本文が TEMP と TMP をランナーの一時領域へ向けていることを表明する（ci.yml と nightly.yml で共有）</summary>
     private static void AssertTempOnRunnerTemp(string stepBody)
     {
@@ -595,11 +674,14 @@ public sealed class WorkflowGuardTests
         return jobs;
     }
 
+    /// <summary>ジョブの steps を手順ごとの本文に分ける（字下げ 6 の <c>- </c> で始まる行から次の手順の手前まで）</summary>
+    private static List<string> JobSteps(string jobBody) =>
+        Regex.Split(jobBody, @"(?m)^(?=      - )").Skip(1).ToList();
+
     /// <summary>ジョブの中の dotnet test の手順（ちょうど 1 つ）の本文</summary>
     private static string NightlyTestStep(string jobBody)
     {
-        var steps = Regex
-            .Split(jobBody, @"(?m)^(?=      - )")
+        var steps = JobSteps(jobBody)
             .Where(step => step.Contains("dotnet test", StringComparison.Ordinal))
             .ToList();
 

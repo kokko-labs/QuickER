@@ -7,7 +7,10 @@
 # - unit-nightly（windows-latest）: QuickER.Tests の夜間のエンジン（WPF 依存のため Windows）
 # - schedule はリポジトリの既定のブランチ（main）にあるこのファイルでだけ動く。リポジトリに 60 日間活動が無いと
 #   GitHub が schedule を止めるので、止まったら Actions の画面から有効に戻す（workflow_dispatch で手でも流せる）
-# - 決まり（アクションの SHA 固定・トリガー・権限・夜間のプロファイルと絞り込み・時間の上限）は WorkflowGuardTests が固定する
+# - テストの結果は TRX でランナーの一時領域へ書き、ジョブごとの成果物として 14 日残す（失敗した夜も残す）。
+#   コンソールのログに出ないテストの出力（網羅の要約・夜間なら埋まる組・種の数の警告）と、方言の派生ごとの時間
+#   （派生は同じ表示名なのでクラス名で見分ける）は TRX で読む
+# - 決まり（アクションの SHA 固定・トリガー・権限・夜間のプロファイルと絞り込み・時間の上限・結果の保存）は WorkflowGuardTests が固定する
 name: Nightly
 
 on:
@@ -31,7 +34,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: リポジトリを取得
-        # アクションは ci.yml と同じ commit SHA で固定する（更新は Dependabot が両方まとめて持ってくる）
+        # アクションはほかのワークフロー（ci.yml か release.yml）と同じ commit SHA で固定する（更新は Dependabot がまとめて持ってくる）
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: .NET SDK をセットアップ
@@ -44,7 +47,16 @@ jobs:
         env:
           QUICKER_ENGINE_PROFILE: nightly
           QUICKER_REQUIRE_DOCKER: "1"
-        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --filter "NightlyEngine=true" --logger "console;verbosity=normal"
+        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --filter "NightlyEngine=true" --logger "console;verbosity=normal" --logger "trx;LogFileName=integration-nightly.trx" --results-directory "${{ runner.temp }}/nightly-results"
+
+      - name: テストの結果を保存
+        # 失敗した夜にも残す（確かめたいのは失敗の夜の結果）
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-nightly-trx
+          path: ${{ runner.temp }}/nightly-results/*.trx
+          retention-days: 14
 
   # Docker を使わない夜間のエンジン（簡易 DSL・名前の総当たり・生成コードのコンパイル）
   unit-nightly:
@@ -65,4 +77,12 @@ jobs:
           QUICKER_ENGINE_PROFILE: nightly
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "NightlyEngine=true" --logger "console;verbosity=normal"
+        run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "NightlyEngine=true" --logger "console;verbosity=normal" --logger "trx;LogFileName=unit-nightly.trx" --results-directory "${{ runner.temp }}/nightly-results"
+
+      - name: テストの結果を保存
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-nightly-trx
+          path: ${{ runner.temp }}/nightly-results/*.trx
+          retention-days: 14
