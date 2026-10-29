@@ -508,6 +508,20 @@ public sealed record UpdateOrderOp(string Slot, ConcurrencyMode Mode = Concurren
         $"updated={await backend.Orders.UpdateAsync((OrderEntity)Root(backend, Slot), Mode, ct)}";
 }
 
+/// <summary>
+/// 受け入れた手の差（<see cref="BackendParityKnownDifferences.AcceptedDeviations"/>）を持つ手の印。中の手をそのまま流し、
+/// 名前・流せる実装先も中の手のもの（印を付けた手だけが種の指紋の要約で変わる）
+/// </summary>
+public sealed record DeviatingOp(ParityOp Inner, ParityDeviation Deviation) : ParityOp
+{
+    public override string Name => Inner.Name;
+
+    public override bool Supports(ParityBackendKind kind) => Inner.Supports(kind);
+
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct) =>
+        Inner.RunAsync(backend, ct);
+}
+
 /// <summary>リモート面の <c>DeleteAsync(id)</c></summary>
 public sealed record DeleteOp(string Table, int Id) : ParityOp
 {

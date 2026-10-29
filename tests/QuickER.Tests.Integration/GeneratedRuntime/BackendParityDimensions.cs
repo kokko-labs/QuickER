@@ -36,6 +36,12 @@ internal static class BackendParityDimensions
     /// <summary>並行性の扱いの引数を持たない操作</summary>
     private const string NotApplicable = "NotApplicable";
 
+    /// <summary>因子：受け入れた手の差を持つ手か</summary>
+    public const string Deviation = "Deviation";
+
+    /// <summary>受け入れた手の差を持たない手の水準</summary>
+    private const string NoDeviation = "None";
+
     /// <summary>並行性の扱いの引数を渡す操作（グラフ保存の単数・複数と UpdateAsync）</summary>
     private static readonly string[] ModeTakingKinds = ["Save", "SaveManyOrders", "UpdateOrder"];
 
@@ -100,6 +106,15 @@ internal static class BackendParityDimensions
                         new Level(NotApplicable),
                     ],
                     "保存・更新に渡す並行性の扱い（引数を持たない操作は NotApplicable）"
+                ),
+                new Factor(
+                    Deviation,
+                    [
+                        new Level(NoDeviation),
+                        .. Enum.GetValues<ParityDeviation>()
+                            .Select(value => new Level(value.ToString())),
+                    ],
+                    "受け入れた手の差を持つ手か（BackendParityKnownDifferences.AcceptedDeviations・列の末尾にだけ置く。宣言した実装先はその手から後を比べない）"
                 ),
             ],
             isValid: IsValid
@@ -182,6 +197,9 @@ internal static class BackendParityDimensions
                     [Mode] = mode,
                     [OpKind] = KindOf(op),
                     [Concurrency] = ConcurrencyOf(op),
+                    [Deviation] = op is DeviatingOp deviating
+                        ? deviating.Deviation.ToString()
+                        : NoDeviation,
                 }
             );
         }
@@ -191,6 +209,7 @@ internal static class BackendParityDimensions
     private static string KindOf(ParityOp op) =>
         op switch
         {
+            DeviatingOp deviating => KindOf(deviating.Inner),
             InsertOp { Row: CustomerRow } => "InsertCustomer",
             InsertOp { Row: OrderRow } => "InsertOrder",
             InsertOp { Row: LineRow } => "InsertLine",
@@ -222,6 +241,7 @@ internal static class BackendParityDimensions
     private static string ConcurrencyOf(ParityOp op) =>
         op switch
         {
+            DeviatingOp deviating => ConcurrencyOf(deviating.Inner),
             SaveOp save => (save.Options ?? new()).Mode.ToString(),
             SaveManyOrdersOp many => (many.Options ?? new()).Mode.ToString(),
             UpdateOrderOp update => update.Mode.ToString(),
@@ -234,6 +254,34 @@ internal static class BackendParityDimensions
         assignment.TryGetValue(Mode, out var mode);
         assignment.TryGetValue(OpKind, out var kind);
         assignment.TryGetValue(Concurrency, out var concurrency);
+        assignment.TryGetValue(Deviation, out var deviation);
+
+        // 受け入れた手の差の印は、その差を持つ手の種類にだけ付く（子を持つ親の削除＝DeleteAsync(id)・親の無い行の挿入＝
+        // 明細か注文の挿入。どちらも並行性の扱いの引数を持たない）
+        if (deviation is not null && deviation != NoDeviation)
+        {
+            if (concurrency is not null && concurrency != NotApplicable)
+            {
+                return false;
+            }
+
+            if (
+                kind is not null
+                && !(
+                    (
+                        deviation == nameof(ParityDeviation.ParentDeleteWithChildren)
+                        && kind == "Delete"
+                    )
+                    || (
+                        deviation == nameof(ParityDeviation.OrphanInsert)
+                        && kind is "InsertOrder" or "InsertLine"
+                    )
+                )
+            )
+            {
+                return false;
+            }
+        }
 
         // Common はリモート面にある操作だけの範囲として定義した（4 つの実装先すべてで流す）ので、リモート面に無い操作は含まない
         if (

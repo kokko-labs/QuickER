@@ -25,7 +25,28 @@ internal static class SyncModelKnownFailures
     public const string RandomScope = "random";
 
     /// <summary>決定的なシナリオの項目（<see cref="Entry"/> で作る）</summary>
-    public static IReadOnlyList<KnownEntry> Scenarios { get; } = [];
+    public static IReadOnlyList<KnownEntry> Scenarios { get; } =
+    [
+        // 4m-D2（修正 C で直す）: 参照する行の無いフォルダーの削除が一時的な失敗で落ちると、エンジンは「参照する表がある」
+        // ことだけで DeleteRefusedOnServer と判定する。Collect・LocalWins は偽の競合を報告し（次の同期で届く）、
+        // 後勝ち＋ServerWins は決着させて利用者の削除を捨てる（届かない）
+        Entry("4m-D2", "修正 C", "repro-d2-versioned-collect", D2Spurious),
+        Entry("4m-D2", "修正 C", "repro-d2-lww-serverwins", D2Spurious),
+        Entry("4m-D2", "修正 C", "reach-after-fault-delete-versioned-collect", D2Spurious),
+        Entry("4m-D2", "修正 C", "reach-after-fault-delete-versioned-localwins", D2Spurious),
+        Entry("4m-D2", "修正 C", "reach-after-fault-delete-lww-collect", D2Spurious),
+        Entry("4m-D2", "修正 C", "reach-after-fault-delete-lww-localwins", D2Spurious),
+        Entry("4m-D2", "修正 C", "reach-after-fault-delete-lww-serverwins", D2Spurious),
+        Entry(
+            "4m-D2",
+            "修正 C",
+            "reach-after-fault-delete-lww-serverwins",
+            "5/expect-local:model_folders"
+        ),
+    ];
+
+    /// <summary>4m-D2 の署名（根拠の無い DeleteRefusedOnServer・そのキーに注入した失敗が当たった形）</summary>
+    private const string D2Spurious = "3/spurious:model_folders:DeleteRefusedOnServer:after-fault";
 
     /// <summary>一覧（決定的なシナリオの項目と、その正規形から作った乱数の項目）</summary>
     public static KnownFailureSet Set { get; } =

@@ -62,17 +62,35 @@ public sealed record ParityScenario(
 
         var baseline = traces[BackendParityAxis.Baseline];
         var violations = new List<ParityViolation>();
+        var cuts = new List<ParityCut>();
 
         foreach (var (kind, trace) in traces)
         {
+            // 受け入れた手の差を持つ手を流した実装先は、その手から後を比べない（外したことは Cuts に残す）
+            var cut = CutIndex(Ops, kind);
+
+            if (cut is { } at)
+            {
+                cuts.Add(
+                    new ParityCut(
+                        kind,
+                        at,
+                        Ops[at].Name,
+                        ((DeviatingOp)Ops[at]).Deviation,
+                        Ops.Count - at
+                    )
+                );
+            }
+
             if (CompareWithBaseline && kind != BackendParityAxis.Baseline)
             {
-                violations.AddRange(ParityStep.Compare(baseline, trace, kind));
+                violations.AddRange(ParityStep.Compare(baseline, trace, kind, cut));
             }
 
             // 期待は基準も含めて実装先ごとに見る（決定した振る舞いへ、基準の QuickER 版自身が追いついていないことがある）
             violations.AddRange(
                 trace
+                    .Where(s => cut is null || s.Index < cut)
                     .Where(s => s.IsExpectation && s.Outcome != ParityStep.ExpectationMet)
                     .Select(s => new ParityViolation(
                         kind,
@@ -85,7 +103,27 @@ public sealed record ParityScenario(
             );
         }
 
-        return new ParityRunResult(this, traces, violations);
+        return new ParityRunResult(this, traces, violations, cuts);
+    }
+
+    /// <summary>
+    /// その実装先で受け入れた手の差（<see cref="BackendParityKnownDifferences.AcceptedDeviations"/>）を持つ最初の手の位置
+    /// （無ければ null）。その手から後は、その実装先を比べない
+    /// </summary>
+    internal static int? CutIndex(IReadOnlyList<ParityOp> ops, ParityBackendKind kind)
+    {
+        for (var i = 0; i < ops.Count; i++)
+        {
+            if (
+                ops[i] is DeviatingOp deviating
+                && BackendParityKnownDifferences.Accepts(kind, deviating.Deviation)
+            )
+            {
+                return i;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>1 つの実装先で種まきと操作を流し、手ごとの記録を返す</summary>
@@ -231,15 +269,21 @@ public sealed record ParityStep(
             _ => throw new ArgumentOutOfRangeException(nameof(aspect)),
         };
 
-    /// <summary>基準の記録と比べ、手・観点ごとの違いを返す</summary>
+    /// <summary>基準の記録と比べ、手・観点ごとの違いを返す（<paramref name="cutAt"/> の手から後は比べない）</summary>
     public static IEnumerable<ParityViolation> Compare(
         IReadOnlyList<ParityStep> baseline,
         IReadOnlyList<ParityStep> trace,
-        ParityBackendKind backend
+        ParityBackendKind backend,
+        int? cutAt = null
     )
     {
         for (var i = 0; i < baseline.Count; i++)
         {
+            if (cutAt is { } at && baseline[i].Index >= at)
+            {
+                break;
+            }
+
             foreach (var aspect in Aspects)
             {
                 if (aspect == "outcome" && baseline[i].IsExpectation)
@@ -298,11 +342,26 @@ public sealed record ParityViolation(
         + $"  actual:\n    {Actual.Replace("\n", "\n    ", StringComparison.Ordinal)}";
 }
 
-/// <summary>シナリオを全実装先で流した結果</summary>
+/// <summary>受け入れた手の差で、ある実装先の比較を打ち切った位置</summary>
+/// <param name="Backend">比較を打ち切った実装先</param>
+/// <param name="StepIndex">打ち切った手の位置（この手から後を比べない）</param>
+/// <param name="OpName">その手の名前</param>
+/// <param name="Deviation">受け入れた手の差</param>
+/// <param name="SkippedSteps">比べなかった手の数</param>
+public sealed record ParityCut(
+    ParityBackendKind Backend,
+    int StepIndex,
+    string OpName,
+    ParityDeviation Deviation,
+    int SkippedSteps
+);
+
+/// <summary>シナリオを全実装先で流した結果（<see cref="Cuts"/>＝受け入れた手の差で比較を打ち切った位置）</summary>
 public sealed record ParityRunResult(
     ParityScenario Scenario,
     IReadOnlyDictionary<ParityBackendKind, IReadOnlyList<ParityStep>> Traces,
-    IReadOnlyList<ParityViolation> Violations
+    IReadOnlyList<ParityViolation> Violations,
+    IReadOnlyList<ParityCut> Cuts
 )
 {
     /// <summary>実装先と観点の組（既知の違いの一覧が名指しする単位）</summary>

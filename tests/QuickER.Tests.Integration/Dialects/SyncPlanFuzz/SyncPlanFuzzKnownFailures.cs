@@ -23,18 +23,63 @@ internal static partial class SyncPlanFuzzKnownFailures
     /// <summary>項目（<see cref="Entry"/> で作る）</summary>
     public static readonly IReadOnlyList<KnownEntry> Entries =
     [
-        // 夜間の実行（MySQL 種 1191）で見つけた。参照される表の主キーを外す変更（remove pk）を選ぶと、外し直した外部キーの
-        // 付け直しが「Missing unique key for constraint」で失敗し（候補キー喪失の警告は出る）、DDL が暗黙コミットされるため、
-        // 同じ計画で外していた選んでいない外部キーが消えたまま残る
+        // 夜間の実行（MySQL 種 1191）で見つけた。参照される表の主キーを変える変更を選ぶと、候補キーを証明できない付け直し
+        // （候補キーの警告は出る）が「Missing unique key for constraint」で失敗し、DDL が暗黙コミットされるため、同じ計画で先に
+        // 外していた、警告を出していない制約が巻き添えで消えたまま残る（消えるのは警告を出した外部キー自身ではない）
+        // - 種 1191：参照される表の主キーを外す（remove pk）→ 外し直した外部キーの付け直しが失敗 → 選んでいない外部キーが消える
+        // - 種 358（P2-2 で表明 1b を強めて見つけた・選んだ作り直しの版）：主キーの付け替え 2 つ（move pk・replace pk）と、
+        //   自己参照の外部キー・別の外部キーの ON DELETE の作り直しを選ぶ → FK_T1_notes_t0_items の付け直しが失敗 →
+        //   先に外した、選んだ自己参照の作り直し（fk_t2_groups_t2_groups）が消える
         .. Entry(
             "nightly-mysql-1191",
             [DialectNames.MySql],
             "P2",
             o =>
-                OnlyViolations(o, "constraint lost after a failed sync:")
+                OnlyViolations(o, SyncPlanFuzzRunner.ConstraintLostPrefix)
                 && o.Error?.Contains("Missing unique key", StringComparison.Ordinal) == true
-                && o.Mutations.Any(m => m.StartsWith("remove pk ", StringComparison.Ordinal)),
+                && o.Warnings.Any(w =>
+                    w.StartsWith("ForeignKeyRebuildMayLoseCandidateKey", StringComparison.Ordinal)
+                    || w.StartsWith("ForeignKeyNotOnCandidateKey", StringComparison.Ordinal)
+                ),
             KnownReproduction.NightlySeeds
+        ),
+        // 4m-P6（P2-2 で表明 1b を強めて既定の種で見つけた）。計画が列の変更の失敗を前もって分かっている
+        // （ForeignKeyColumnTypeMismatch＝doomed）のに、選んだ作り直しの DROP が失敗より前に走り、付け直しは失敗の後ろにあって
+        // 走らないので、DDL が暗黙コミットされる MySQL で制約が消えたまま残る。doomed の扱いは暗黙の外し直しだけを止め、選んだ
+        // 作り直し・主キーの変更を止めない（同じ根）。修正 A の受け入れ条件は「計画が doomed を判定したとき、選んだ作り直しと主キーの
+        // 変更（外部キー・一意制約・主キー）の DROP を、失敗より前に置かない」。規則 2（作り直し）は普段の種で、規則 3（主キーの変更）は
+        // 夜間の種でだけ出る
+        // - 種 44（4m-P6 そのもの）：自己参照の外部キーの ON DELETE の作り直し（AlterForeignKey）・参照される表の主キーの解除・
+        //   別の表の列の型の変更を選ぶ → 型の食い違いで外部キーを外し直さないまま主キーの解除が
+        //   「Cannot drop index 'PRIMARY': needed in a foreign key constraint」で失敗 → 作り直した外部キーが消える
+        // - 種 19（一意制約の作り直し版）：一意制約の構成列の変更（AlterUniqueConstraint）・参照される主キー列と別の表の列の型の変更を
+        //   選ぶ → 外部キーの両端の型が incompatible で列の変更が失敗 → 作り直した一意制約が消える
+        // - 種 107（一意制約の作り直し版）：主キーの付け替え・外部キーの片側の列の型の変更・一意制約の構成列の変更を選ぶ →
+        //   外部キーの両端の型が incompatible で失敗 → 作り直した一意制約が消える
+        // 規則 3（主キーの変更の版・夜間の種だけ）：
+        // - 種 447：複合主キーへ列を足す（id,k → id,k,n0）を選ぶ → 自己参照の外部キーの両端が incompatible で列の変更が失敗 →
+        //   外した主キーが付かずに消える
+        // - 種 463：主キーへ列を足す（code → code,n1）と外部キーの削除を選ぶ → 自己参照の外部キーが incompatible で失敗 →
+        //   主キーが消える
+        // - 種 797：複合主キーを縮める（id,k → id）と外部キーの削除を選ぶ → 別の外部キーが incompatible で失敗 → 主キーが消える
+        // - 種 1355：主キーへ列を足す（code → code,n1）・一意制約の構成列の変更・外部キーの削除を選ぶ → 外部キーが incompatible で
+        //   失敗 → 主キーと作り直した一意制約の両方が消える
+        .. Entry(
+            "4m-p6-doomed-rebuild",
+            [DialectNames.MySql],
+            "修正 A",
+            o =>
+                OnlyViolations(o, SyncPlanFuzzRunner.ConstraintLostPrefix)
+                && o.Violations.All(v =>
+                    (
+                        v.Contains("(rule 2;", StringComparison.Ordinal)
+                        || v.Contains("(rule 3;", StringComparison.Ordinal)
+                    ) && v.Contains("dropped-before-failure=yes", StringComparison.Ordinal)
+                )
+                && o.Warnings.Any(w =>
+                    w.StartsWith("ForeignKeyColumnTypeMismatch", StringComparison.Ordinal)
+                ),
+            KnownReproduction.RegularSeeds
         ),
         // 夜間の実行（PostgreSQL 種 512）で見つけた。自己参照の外部キーの参照アクションの変更（AlterForeignKey）と、参照先の
         // 主キー列の型の変更を一緒に選ぶと、計画は型の食い違い（ForeignKeyColumnTypeMismatch）を警告して作り直しを外すが、
@@ -52,13 +97,24 @@ internal static partial class SyncPlanFuzzKnownFailures
             KnownReproduction.NightlySeeds
         ),
         // 夜間の実行（Oracle 種 100・111）で見つけた。DB にある一意制約と同じ列へ主キーを付け替える変更（AlterPrimaryKey）は
-        // ORA-02261 で失敗するのに、計画が警告を出さない（CLAUDE.md の既知の残件を、警告なしの失敗として名指しする）
+        // ORA-02261 で失敗するのに、計画が警告を出さない（CLAUDE.md の既知の残件を、警告なしの失敗として名指しする）。
+        // 主キーの DROP が成功した後で ADD が失敗し、Oracle の DDL は暗黙コミットなので主キーが消えたまま残る。P2-2 で強めた
+        // 表明 1b の規則 3（主キーの変更を選んだ表の主キーは旧か新の形で残る）がそれを名指しするので、その表の規則 3 の違反も
+        // この項目に含める（両方がそろっていることを求める＝夜間の実行で規則 3 を戻すと「起きない」で赤になる。ほかの表の規則 3 が
+        // 混ざったら当たらない）
         .. Entry(
             "nightly-oracle-100-111",
             [DialectNames.Oracle],
             "P2",
             o =>
-                OnlyViolations(o, "failed without a warning: ORA-02261")
+                o.Violations.Any(v =>
+                    v.StartsWith("failed without a warning: ORA-02261", StringComparison.Ordinal)
+                )
+                && o.Violations.Any(v => IsPrimaryKeyLossOfAlteredTable(o, v))
+                && o.Violations.All(v =>
+                    v.StartsWith("failed without a warning: ORA-02261", StringComparison.Ordinal)
+                    || IsPrimaryKeyLossOfAlteredTable(o, v)
+                )
                 && o.Selected.Any(s => s.StartsWith("AlterPrimaryKey", StringComparison.Ordinal)),
             KnownReproduction.NightlySeeds
         ),
@@ -124,6 +180,38 @@ internal static partial class SyncPlanFuzzKnownFailures
     /// <summary>列が 0 本の再構築の表の作成文</summary>
     [GeneratedRegex(@"_quicker_rebuild"" \(\s*\);")]
     private static partial Regex EmptyRebuildTable();
+
+    /// <summary>選んだ AlterPrimaryKey の説明から表名を取り出す（例「AlterPrimaryKey: …: [t3_notes] (code) → …」）</summary>
+    [GeneratedRegex(@"^AlterPrimaryKey: [^\[]*\[([^\]]+)\]", RegexOptions.CultureInvariant)]
+    private static partial Regex AlteredPrimaryKeyTable();
+
+    /// <summary>違反が、AlterPrimaryKey を選んだ表の主キーの表明 1b・規則 3 の消失か</summary>
+    private static bool IsPrimaryKeyLossOfAlteredTable(FuzzSeedOutcome outcome, string violation)
+    {
+        if (
+            !violation.StartsWith(SyncPlanFuzzRunner.ConstraintLostPrefix, StringComparison.Ordinal)
+            || !violation.Contains("(rule 3;", StringComparison.Ordinal)
+        )
+        {
+            return false;
+        }
+
+        var key = violation[SyncPlanFuzzRunner.ConstraintLostPrefix.Length..].TrimStart();
+        var parts = key.Split('|');
+
+        return parts.Length >= 2
+            && parts[0] == "PK"
+            && outcome
+                .Selected.Select(s => AlteredPrimaryKeyTable().Match(s))
+                .Any(m =>
+                    m.Success
+                    && string.Equals(
+                        m.Groups[1].Value.Trim(),
+                        parts[1],
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                );
+    }
 
     /// <summary>一覧</summary>
     public static KnownFailureSet Set { get; } = new("SyncPlan", Entries);

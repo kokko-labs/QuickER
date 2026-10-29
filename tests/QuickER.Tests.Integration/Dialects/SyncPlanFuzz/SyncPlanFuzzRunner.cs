@@ -53,6 +53,12 @@ internal sealed class FuzzSeedOutcome
     /// <summary>この種に出た図の形</summary>
     public HashSet<string> Shapes { get; } = [];
 
+    /// <summary>計画（計画を作れたときだけ。警告の内訳を数えるのに使う）</summary>
+    public SyncPlan? Plan { get; set; }
+
+    /// <summary>違反ではないが数えておく注（表明の例外が当たった回数など）</summary>
+    public List<string> Notes { get; } = [];
+
     /// <summary>報告用の 1 件分の文</summary>
     public string Describe()
     {
@@ -223,6 +229,7 @@ internal static class SyncPlanFuzzRunner
             return outcome;
         }
 
+        outcome.Plan = plan;
         outcome.Warnings.AddRange(plan.Warnings.Select(w => $"{w.Kind}({w.TableName})"));
 
         // 計画が「選んでいない変更に依存する」と名指しして外した項目は、選ばなかった項目として扱う（警告が出ているので
@@ -267,43 +274,21 @@ internal static class SyncPlanFuzzRunner
                 outcome.Violations.Add($"failed without a warning: {FirstLine(result.Error)}");
             }
 
-            // 表明 1b: 失敗しても、選んでいない制約は消えていない（DDL を暗黙コミットする方言の部分適用で
-            // 外部キー・一意制約・主キーが消えたまま残る形）。例外は、付け直しが候補キーを証明できないと事前に警告した
-            // 外部キーだけ（列の集合が合わない付け直しは、取り込んでいない索引で通る構成があるので仕様として警告して実行する。
-            // 並びだけの違いは計画が参照先のキーの並びへ並べ替えるので、警告の対象にならない）
+            // 表明 1b: 失敗しても、制約は消えてよい理由のあるものだけが消えている（DDL を暗黙コミットする方言の部分適用で
+            // 外部キー・一意制約・主キーが消えたまま残る形）。規則は FailedSyncConstraintLosses
             var failedState = await ImportAsync(dialect, ct).ConfigureAwait(false);
-            var remaining = ConstraintKeys(failedState, capabilities);
-            var warnedForeignKeys = plan
-                .Warnings.Where(w =>
-                    w.Kind
-                        is SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey
-                            or SyncPlanWarningKind.ForeignKeyNotOnCandidateKey
-                )
-                .Select(w =>
-                    $"{w.TableName.Trim().ToLowerInvariant()}|{w.Detail.Trim().ToLowerInvariant()}"
-                )
-                .ToHashSet();
-
-            foreach (
-                var key in ConstraintKeys(before, capabilities)
-                    .Where(k => !IsConstraintRemovalSelected(k, selected, capabilities))
-                    .Where(k => !IsWarnedForeignKey(k))
-            )
-            {
-                if (!remaining.Remove(key))
-                {
-                    outcome.Violations.Add($"constraint lost after a failed sync: {key}");
-                }
-            }
+            var (losses, notes) = FailedSyncConstraintLosses(
+                before,
+                failedState,
+                selected,
+                plan,
+                capabilities,
+                result
+            );
+            outcome.Violations.AddRange(losses);
+            outcome.Notes.AddRange(notes);
 
             return outcome;
-
-            // 外部キーのキー（FK|子|親|列ペア|名前|参照アクション）が、事前に警告した外部キーか
-            bool IsWarnedForeignKey(string key)
-            {
-                var parts = key.Split('|');
-                return parts[0] == "FK" && warnedForeignKeys.Contains($"{parts[1]}|{parts[4]}");
-            }
         }
 
         var after = await ImportAsync(dialect, ct).ConfigureAwait(false);
@@ -591,14 +576,220 @@ internal static class SyncPlanFuzzRunner
         return keys;
     }
 
+    /// <summary>違反の文の頭（表明 1b）</summary>
+    public const string ConstraintLostPrefix = "constraint lost after a failed sync:";
+
+    /// <summary>作り直しを選んだ外部キーに、候補キーの警告の例外が重なった注</summary>
+    public const string WarnedAlterForeignKeyNote = "warned-alter-foreign-key-exempt";
+
     /// <summary>
-    /// 制約の照合キーが、選んだ項目で消えてよいものか（その制約の削除・作り直し・主キー変更を選んだ、または
-    /// その制約の表・列の削除を選んだ）
+    /// 表明 1b：失敗した実行の後で取り込み直した DB について、同期の前にあった制約（外部キー・一意制約・主キー）のうち、
+    /// 消えてよい理由の無いまま消えたものを違反の文にする。
     /// </summary>
-    private static bool IsConstraintRemovalSelected(
+    /// <remarks>
+    /// <para>制約ごとの規則（番号は違反の文に書く）：</para>
+    /// <list type="number">
+    ///   <item>その制約の削除（DropForeignKey・DropUniqueConstraint）を選んだ制約は、消えていてよい。</item>
+    ///   <item>作り直し（AlterForeignKey・AlterUniqueConstraint）を選んだ制約は、旧か新の形のどちらかで残っている。</item>
+    ///   <item>主キーの変更を選んだ表の主キーは、旧か新の形のどちらかで残っている（目標が主キーなしなら、無いのも新の形）。</item>
+    ///   <item>表・列の削除（DropTable・DropColumn）でしか消えてよい理由の無い制約は、その表・列が失敗の後の DB から
+    ///   実際に消えているときだけ、消えていてよい。</item>
+    ///   <item>それ以外の制約は残っている。</item>
+    /// </list>
+    /// <para>
+    /// 例外は、付け直しが候補キーを証明できないと事前に警告した外部キーだけ（列の集合が合わない付け直しは、取り込んでいない
+    /// 索引で通る構成があるので仕様として警告して実行する。並びだけの違いは計画が参照先のキーの並びへ並べ替えるので、警告の
+    /// 対象にならない）。この例外が作り直しを選んだ外部キー（規則 2）に重なったものは、違反にせず
+    /// <see cref="WarnedAlterForeignKeyNote"/> の注として数える（消えた理由＝失敗の文がその外部キー自身を名指ししたか
+    /// 〔own-failure〕、別の失敗の巻き添えか〔collateral〕を添える）。P2-2 の夜間の MySQL 1,500 種で重なりは 7 種
+    /// （172・358・708・719・764・1091・1301）で、すべて own-failure＝受け入れた部分適用の範囲なので、規則 2 は掛けない
+    /// （扱いの見直しは修正 A のときに判断する）。
+    /// </para>
+    /// <para>
+    /// 違反の文には、計画の警告がその制約の表を名指ししていたか（<c>warned</c>）と、失敗した文より前に成功した文が
+    /// その制約の名前（外部キー）か表（それ以外）を DROP していたか（<c>dropped-before-failure</c>）を添える
+    /// （部分適用で消えた形を、失敗すると前もって分かっている文が先に DROP を走らせた形＝4m-P6 と見分けるため）。
+    /// </para>
+    /// </remarks>
+    internal static (List<string> Violations, List<string> Notes) FailedSyncConstraintLosses(
+        SchemaImportResult before,
+        SchemaImportResult failedState,
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncPlan plan,
+        SyncDialectCapabilities capabilities,
+        SchemaSyncResult result
+    )
+    {
+        var violations = new List<string>();
+        var notes = new List<string>();
+        var remaining = ConstraintKeys(failedState, capabilities);
+        var remainingSet = remaining.ToHashSet(StringComparer.Ordinal);
+        var warnedForeignKeys = plan
+            .Warnings.Where(w =>
+                w.Kind
+                    is SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey
+                        or SyncPlanWarningKind.ForeignKeyNotOnCandidateKey
+            )
+            .Select(w =>
+                $"{w.TableName.Trim().ToLowerInvariant()}|{w.Detail.Trim().ToLowerInvariant()}"
+            )
+            .ToHashSet();
+        var warnedTables = plan
+            .Warnings.Select(w => w.TableName.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        var tablesAfter = failedState
+            .Entities.Select(e => e.TableName.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        var columnsAfter = failedState
+            .Entities.SelectMany(e =>
+                e.Columns.Select(c =>
+                    $"{e.TableName.Trim().ToLowerInvariant()}|{c.Name.ToLowerInvariant()}"
+                )
+            )
+            .ToHashSet(StringComparer.Ordinal);
+        var succeededSql = result.Batches.TakeWhile(b => b.Success).Select(b => b.Sql).ToList();
+
+        foreach (var key in ConstraintKeys(before, capabilities))
+        {
+            // 残っていれば、どの規則でも違反にならない（同じキーの 2 本は 1 本ずつ消費する）
+            if (remaining.Remove(key))
+            {
+                continue;
+            }
+
+            var rule = RuleFor(key, selected, capabilities, out var newForm);
+            var allowed = rule switch
+            {
+                1 => true,
+                2 => newForm is not null && remainingSet.Contains(newForm),
+                3 => newForm is not null
+                    ? remainingSet.Contains(newForm)
+                    : !remainingSet.Any(k =>
+                        k.StartsWith(PrimaryKeyPrefix(key), StringComparison.Ordinal)
+                    ),
+                4 => RemovalApplied(key, selected, tablesAfter, columnsAfter),
+                _ => false,
+            };
+
+            if (allowed)
+            {
+                continue;
+            }
+
+            if (IsWarnedForeignKey(key))
+            {
+                if (rule == 2)
+                {
+                    // 消えた理由：失敗の文がその外部キー自身（警告を出した付け直し）を名指ししているか、別の失敗の巻き添えか
+                    var name = key.Split('|')[4];
+                    var cause =
+                        name.Length == 0 ? "unnamed"
+                        : result.Error?.Contains(name, StringComparison.OrdinalIgnoreCase) == true
+                            ? "own-failure"
+                        : "collateral";
+                    notes.Add($"{WarnedAlterForeignKeyNote}:{cause}");
+                }
+
+                continue;
+            }
+
+            var parts = key.Split('|');
+            // 名前の部分一致で見る（`t0_items` は `t0_items_ref` にも当たる）。違反の注記と既知の失敗の述語の補助なので、厳密には照合しない
+            var dropTarget = parts[0] == "FK" && parts[4].Length > 0 ? parts[4] : parts[1];
+            var dropped = succeededSql.Any(sql =>
+                sql.Contains("DROP", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains(dropTarget, StringComparison.OrdinalIgnoreCase)
+            );
+            violations.Add(
+                $"{ConstraintLostPrefix} {key} (rule {rule}; "
+                    + $"warned={(warnedTables.Contains(parts[1]) ? "yes" : "no")}; "
+                    + $"dropped-before-failure={(dropped ? "yes" : "no")})"
+            );
+        }
+
+        return (violations, notes);
+
+        // 外部キーのキー（FK|子|親|列ペア|名前|参照アクション）が、事前に警告した外部キーか
+        bool IsWarnedForeignKey(string key)
+        {
+            var parts = key.Split('|');
+            return parts[0] == "FK" && warnedForeignKeys.Contains($"{parts[1]}|{parts[4]}");
+        }
+    }
+
+    /// <summary>主キーのキー（PK|表|列）の、表までの頭</summary>
+    private static string PrimaryKeyPrefix(string key) =>
+        string.Join('|', key.Split('|').Take(2)) + "|";
+
+    /// <summary>
+    /// 制約の照合キーに当てる表明 1b の規則の番号（<see cref="FailedSyncConstraintLosses"/>）。作り直し・主キーの変更なら
+    /// 新しい形のキー（主キーを外す変更なら null）を返す
+    /// </summary>
+    private static int RuleFor(
         string key,
-        List<SchemaDiffItem> selected,
-        SyncDialectCapabilities capabilities
+        IReadOnlyList<SchemaDiffItem> selected,
+        SyncDialectCapabilities capabilities,
+        out string? newForm
+    )
+    {
+        newForm = null;
+        var parts = key.Split('|');
+        var rebuild = 0;
+
+        foreach (var item in selected)
+        {
+            var table = item.TableName.Trim().ToLowerInvariant();
+            var keys = Keys(item, capabilities).ToList();
+
+            switch (item.Kind)
+            {
+                case SchemaDiffKind.DropUniqueConstraint
+                    when parts[0] == "UQ"
+                        && keys.Contains($"DropUniqueConstraint|{parts[1]}|{parts[2]}"):
+                    return 1;
+                case SchemaDiffKind.DropForeignKey
+                    when parts[0] == "FK" && keys.Contains("FK-" + key[2..]):
+                    return 1;
+                case SchemaDiffKind.AlterUniqueConstraint
+                    when parts[0] == "UQ"
+                        && keys.Contains($"DropUniqueConstraint|{parts[1]}|{parts[2]}"):
+                    newForm =
+                        "UQ|"
+                        + keys.First(k =>
+                            k.StartsWith("AddUniqueConstraint|", StringComparison.Ordinal)
+                        )["AddUniqueConstraint|".Length..];
+                    rebuild = 2;
+                    break;
+                case SchemaDiffKind.AlterForeignKey
+                    when parts[0] == "FK" && keys.Contains("FK-" + key[2..]):
+                    newForm =
+                        "FK" + keys.First(k => k.StartsWith("FK+", StringComparison.Ordinal))[3..];
+                    rebuild = 2;
+                    break;
+                case SchemaDiffKind.AlterPrimaryKey
+                    when parts[0] == "PK" && parts[1] == table && rebuild == 0:
+                    var columns = item.Entity?.GetPrimaryKeyColumnsInOrder() ?? [];
+                    newForm =
+                        columns.Count == 0
+                            ? null
+                            : $"PK|{table}|{string.Join(",", columns.Select(c => c.Name.ToLowerInvariant()))}";
+                    rebuild = 3;
+                    break;
+            }
+        }
+
+        if (rebuild != 0)
+        {
+            return rebuild;
+        }
+
+        return RemovalTargets(key, selected).Any() ? 4 : 5;
+    }
+
+    /// <summary>選んだ表・列の削除のうち、その制約の表・列に当たるもの（表＝「表」・列＝「表|列」）</summary>
+    private static IEnumerable<string> RemovalTargets(
+        string key,
+        IReadOnlyList<SchemaDiffItem> selected
     )
     {
         var parts = key.Split('|');
@@ -628,31 +819,33 @@ internal static class SyncPlanFuzzRunner
         {
             var table = item.TableName.Trim().ToLowerInvariant();
 
-            switch (item.Kind)
+            if (item.Kind == SchemaDiffKind.DropTable && tables.Contains(table))
             {
-                case SchemaDiffKind.DropTable when tables.Contains(table):
-                    return true;
-                case SchemaDiffKind.DropColumn
-                    when columns.Contains($"{table}|{item.ColumnName!.Trim().ToLowerInvariant()}"):
-                    return true;
-                case SchemaDiffKind.AlterPrimaryKey when parts[0] == "PK" && parts[1] == table:
-                    return true;
-                case SchemaDiffKind.DropUniqueConstraint
-                or SchemaDiffKind.AlterUniqueConstraint
-                    when parts[0] == "UQ"
-                        && Keys(item, capabilities)
-                            .Any(k => k == $"DropUniqueConstraint|{parts[1]}|{parts[2]}"):
-                    return true;
-                case SchemaDiffKind.DropForeignKey
-                or SchemaDiffKind.AlterForeignKey
-                    when parts[0] == "FK"
-                        && Keys(item, capabilities).Any(k => k == "FK-" + key[2..]):
-                    return true;
+                yield return table;
+            }
+            else if (
+                item.Kind == SchemaDiffKind.DropColumn
+                && columns.Contains($"{table}|{item.ColumnName!.Trim().ToLowerInvariant()}")
+            )
+            {
+                yield return $"{table}|{item.ColumnName!.Trim().ToLowerInvariant()}";
             }
         }
-
-        return false;
     }
+
+    /// <summary>その制約に当たる選んだ表・列の削除が、失敗の後の DB で 1 つでも実際に消えているか</summary>
+    private static bool RemovalApplied(
+        string key,
+        IReadOnlyList<SchemaDiffItem> selected,
+        HashSet<string> tablesAfter,
+        HashSet<string> columnsAfter
+    ) =>
+        RemovalTargets(key, selected)
+            .Any(target =>
+                target.Contains('|', StringComparison.Ordinal)
+                    ? !columnsAfter.Contains(target)
+                    : !tablesAfter.Contains(target)
+            );
 
     /// <summary>
     /// 選び方の形（主キー・一意制約の構成列の削除を、それを前提にする変更を選ばずに選んだか）を返す

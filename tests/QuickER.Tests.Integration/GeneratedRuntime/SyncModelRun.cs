@@ -36,7 +36,11 @@ internal sealed record ModelFailure(string Signature, string Detail);
 ///   （削除も値として扱う。誰も書いていないキーは初期値のまま。blob だけの書き込みも行の書き手に数える＝再生は行を
 ///   丸ごと送り、行の単位で勝ち負けが決まるため）。blob も同じ規則で、空や NULL へ戻ったら違反。
 ///   さらに、書き手がその端末だけのキーへの版の競合（ModifiedOnServer / MissingOnServer / DuplicateOnServer）は
-///   根拠の無い競合として違反にする（偽の競合はポリシーによって黙って値を捨てさせるため）。</item>
+///   根拠の無い競合として違反にする（偽の競合はポリシーによって黙って値を捨てさせるため）。サーバーが書き込みを断った
+///   理由の競合（DeleteRefusedOnServer / UniqueValueTakenOnServer / ParentMissingOnServer）と後勝ち＋ServerWins の
+///   決着も、実行の直後のサーバーの状態に根拠が無ければ違反にする（<see cref="CheckRefusalBasisAsync"/>。注入した失敗は
+///   根拠にならない）。Versioned＋ServerWins の実行が捨てた記録は確かめない（理由で分類せず範囲の未送信をすべて捨てる、
+///   利用者が頼んだ操作のため）。</item>
 ///   <item><b>外部キー</b>: どの DB でも <c>PRAGMA foreign_key_check</c> が空（SQLite は書き込み時に検査するので、
 ///   これが崩れるのはエンジンが外部キーの検査を切ったまま書いたときだけ）。</item>
 /// </list>
@@ -487,24 +491,23 @@ internal sealed class SyncModelRun : IAsyncDisposable
             await RecordServerWinsDiscardsAsync(op);
         }
 
-        // 後勝ち＋ServerWins の実行は、外部キーに由来する競合だけを競合として返さずに捨てる（どれを捨てたかは返らない）。
-        // 実行の前の未送信の記録を控え、実行の後で突き合わせる（RecordLastWriteWinsSettlementsAsync）
-        var pendingBefore =
+        // アップロードする実行の前の状態（サーバー・その端末のローカル・未送信の記録・注入した失敗の控えの位置）。
+        // 後勝ち＋ServerWins の決着（どれを捨てたかは返らない）の推定と、競合・決着の理由の根拠の確認が使う
+        var before = op.Kind != ModelSyncKind.Download ? await SnapshotAsync(op.Device) : null;
+
+        // 後勝ち＋ServerWins の実行は、外部キー・一意な値に由来する競合だけを競合として返さずに捨てる。実行の前の未送信の
+        // 記録と、実行の後で突き合わせる（RecordLastWriteWinsSettlementsAsync）
+        var settles =
             op is { Mode: SyncMode.LastWriteWins, Policy: SyncConflictPolicy.ServerWins }
-            && op.Kind != ModelSyncKind.Download
-                ? await _world.Device(op.Device).Journal.ReadAllAsync(_ct)
-                : null;
+            && before is not null;
 
         ModelSyncOutcome outcome;
         var fired = _world.Faults.Fired;
 
         // 消された品目をこの同期が上げ直したか（挿入の経路になった）を、サーバーの行の有無の前後で見る
-        var serverItemsBefore =
-            op.Kind != ModelSyncKind.Download
-                ? (await _world.ReadStateAsync(ModelActor.Server, _ct))
-                    .Rows(ModelTables.Items)
-                    .Keys.ToHashSet(StringComparer.Ordinal)
-                : null;
+        var serverItemsBefore = before
+            ?.Server.Rows(ModelTables.Items)
+            .Keys.ToHashSet(StringComparer.Ordinal);
 
         try
         {
@@ -524,10 +527,19 @@ internal sealed class SyncModelRun : IAsyncDisposable
                 ?? [];
 
             // 例外で終わった後勝ち＋ServerWins の実行も、例外の前に決着させた変更を捨てている（結果は返らない）。
-            // 実行の前の未送信の記録と突き合わせ、記録が消えた行を捨てた行とみなす（N11 の案 1）
-            if (pendingBefore is not null)
+            // 実行の前の未送信の記録と突き合わせ、記録が消えた行を捨てた行とみなす（N11 の案 1）。決着の理由の根拠も確かめる
+            if (settles)
             {
-                await RecordLastWriteWinsSettlementsAsync(op, pendingBefore);
+                await CheckRefusalBasisAsync(
+                    op,
+                    before!,
+                    await RecordLastWriteWinsSettlementsAsync(
+                        op,
+                        before!,
+                        _lastLocalRowChanges[op.Device]
+                    ),
+                    []
+                );
             }
 
             return false;
@@ -583,9 +595,33 @@ internal sealed class SyncModelRun : IAsyncDisposable
             );
         }
 
-        if (pendingBefore is not null)
+        if (before is not null)
         {
-            await RecordLastWriteWinsSettlementsAsync(op, pendingBefore);
+            // 外部キー・一意な値に由来する競合と、後勝ち＋ServerWins の決着は、理由の根拠を実行の直後のサーバーで確かめる
+            var refusals = outcome
+                .Conflicts.Where(c => RefusalReasons.Contains(c.Reason))
+                .Select(c =>
+                    (
+                        c.TableName,
+                        CanonicalKey(c.TableName, c.KeyText),
+                        (SyncConflictReason?)c.Reason
+                    )
+                )
+                .ToList();
+
+            if (settles)
+            {
+                refusals.AddRange(
+                    await RecordLastWriteWinsSettlementsAsync(op, before, outcome.LocalRowChanges)
+                );
+            }
+
+            await CheckRefusalBasisAsync(
+                op,
+                before,
+                refusals,
+                outcome.Conflicts.Select(c => (c.TableName, CanonicalKey(c.TableName, c.KeyText)))
+            );
         }
 
         await CheckForeignKeysAsync(op.Device, op.Describe());
@@ -649,15 +685,33 @@ internal sealed class SyncModelRun : IAsyncDisposable
     /// 後勝ち＋ServerWins の実行が捨てた変更を、競合を報告された行と同じく、その端末の書き込みを期待値から外す。
     /// </summary>
     /// <remarks>
-    /// 捨てた行はエンジンが返さないので、実行の前に未送信だったキーのうち、記録が全部消えたのに、サーバーの行がその端末の
-    /// 書いた最後の値になっていないものを、捨てた行とみなす（後勝ちのランは版で弾かないので、送った変更はそのまま
-    /// サーバーの値になる＝同じ実行の中でほかの書き手は動かない）。
+    /// <para>
+    /// 捨てた行は単独のアップロードでは返らないので、実行の前に未送信だったキーのうち、記録が全部消えたのに、サーバーの行が
+    /// 実行の前のその端末のローカルの行（送った値）になっていないものを、捨てた行とみなす（後勝ちのランは版で弾かないので、
+    /// 送った変更はそのままサーバーの値になる＝同じ実行の中でほかの書き手は動かない）。
+    /// </para>
+    /// <para>
+    /// 送った値を書き込みの履歴の最後の値で代えてはいけない（blob だけを書いた品目は行の履歴に書き手が無く、「削除を書いた」と
+    /// 取り違える）。送るものが無くて記録を捨てた行（行ありで削除だけ・行なしで削除なし）は決着ではない。
+    /// </para>
     /// </remarks>
-    private async Task RecordLastWriteWinsSettlementsAsync(
+    /// <returns>捨てたとみなしたキー（理由はエンジンが返さないので null。根拠の確認へ渡す）</returns>
+    private async Task<
+        List<(string Table, string Key, SyncConflictReason? Reason)>
+    > RecordLastWriteWinsSettlementsAsync(
         ModelSyncOp op,
-        IReadOnlyList<SyncJournalRow> pendingBefore
+        RunSnapshot before,
+        IReadOnlyList<SyncLocalRowChange> reported
     )
     {
+        var pendingBefore = before.Pending;
+        var localBefore = before.Local;
+        var localAfter = await _world.ReadStateAsync(op.Device, _ct);
+        var discarded = reported
+            .Where(c => c.Reason == SyncLocalRowChangeReason.DiscardedByServerWins)
+            .Select(c => (c.TableName, CanonicalKey(c.TableName, c.KeyText)))
+            .ToHashSet();
+        var settled = new List<(string Table, string Key, SyncConflictReason? Reason)>();
         var remaining = (await _world.Device(op.Device).Journal.ReadAllAsync(_ct))
             .Select(entry => entry.Id)
             .ToHashSet();
@@ -674,15 +728,30 @@ internal sealed class SyncModelRun : IAsyncDisposable
                 continue;
             }
 
-            var history = _rows.GetValueOrDefault((row.Key.TableName, row.Key.Key)) ?? [];
-            var written = history.LastOrDefault(change => change.Actor == op.Device);
+            var serverRow = server.Row(row.Key.TableName, row.Key.Key);
+            var localRow = localBefore.Row(row.Key.TableName, row.Key.Key);
+            var upserts = row.Any(e => e.Operation == nameof(SyncJournalOperation.Upsert));
+            var deletes = row.Any(e => e.Operation == nameof(SyncJournalOperation.Delete));
 
+            // 送るものが無い記録（行ありで削除だけ・行なしで削除なし）は、エンジンが送らずに捨てる（決着ではない）
+            if ((localRow is not null && !upserts) || (localRow is null && !deletes))
+            {
+                continue;
+            }
+
+            // 送った値（実行の前のローカルの行）がサーバーの値になっていれば届いた。届かなかった行のうち、ServerWins が
+            // サーバーの行でローカルを戻した行（実行の後のローカルの行がサーバーの行と一致する）・サーバーに行が無い upsert
+            // （ServerWins は戻す行が無いのでローカルを変えない）・実行が捨てたと報告した行だけを捨てた行とみなす
             if (
-                written.Actor != op.Device
-                || string.Equals(
-                    server.Row(row.Key.TableName, row.Key.Key),
-                    written.Row,
-                    StringComparison.Ordinal
+                string.Equals(serverRow, localRow, StringComparison.Ordinal)
+                || (
+                    !string.Equals(
+                        serverRow,
+                        localAfter.Row(row.Key.TableName, row.Key.Key),
+                        StringComparison.Ordinal
+                    )
+                    && serverRow is not null
+                    && !discarded.Contains((row.Key.TableName, row.Key.Key))
                 )
             )
             {
@@ -697,8 +766,256 @@ internal sealed class SyncModelRun : IAsyncDisposable
             }
 
             set.Add(op.Device);
+            settled.Add((row.Key.TableName, row.Key.Key, null));
+        }
+
+        return settled;
+    }
+
+    /// <summary>後勝ち＋ServerWins の upsert の決着（理由はエンジンが返さない）を数え・名指しするときの理由の名前</summary>
+    public const string SettledUpsertKind = "settled-upsert";
+
+    /// <summary>根拠を確かめる競合の理由（サーバーが書き込みを断った理由＝外部キー・一意な値）</summary>
+    private static readonly HashSet<SyncConflictReason> RefusalReasons =
+    [
+        SyncConflictReason.DeleteRefusedOnServer,
+        SyncConflictReason.UniqueValueTakenOnServer,
+        SyncConflictReason.ParentMissingOnServer,
+    ];
+
+    /// <summary>アップロードする実行の前の状態（根拠の確認と決着の推定が使う）</summary>
+    private sealed record RunSnapshot(
+        ModelDbState Server,
+        ModelDbState Local,
+        IReadOnlyList<SyncJournalRow> Pending,
+        int HitIndex
+    );
+
+    private async Task<RunSnapshot> SnapshotAsync(ModelActor device) =>
+        new(
+            await _world.ReadStateAsync(ModelActor.Server, _ct),
+            await _world.ReadStateAsync(device, _ct),
+            await _world.Device(device).Journal.ReadAllAsync(_ct),
+            _world.Faults.WriteHitCount
+        );
+
+    /// <summary>理由ごとの、根拠を確かめた件数と根拠のあった件数（空振りしていないかを出力で確かめる）</summary>
+    public IReadOnlyDictionary<string, (int Checked, int WithBasis)> BasisChecks => _basisChecks;
+
+    private readonly Dictionary<string, (int Checked, int WithBasis)> _basisChecks = new(
+        StringComparer.Ordinal
+    );
+
+    // 根拠の無い競合・決着の違反（静止化の成否に依らず最後に足す＝静止化の中で見つけても静止化を打ち切らない）
+    private readonly List<ModelFailure> _basisFailures = [];
+
+    /// <summary>
+    /// サーバーが書き込みを断った理由（外部キー・一意な値）で分類された競合と、後勝ち＋ServerWins の決着に、実行の直後の
+    /// サーバーの状態で根拠があるかを確かめ、無ければ違反 <c>3/spurious:{表}:{理由}:{形}</c> にする。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 根拠はサーバーの状態からだけ取る（注入した失敗は根拠にならない。同じ実行の中でサーバーを変えるのはこの端末の
+    /// アップロードだけなので、実行の直後のサーバーは、その実行が最後に見たサーバー）。送った値は実行の前のこの端末の
+    /// ローカルの行（アップロードはダウンロードより前に走り、そのときのローカルの行を送る）。
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>DeleteRefusedOnServer：サーバーに、そのキーを参照する行がある。ただし、その行がこの端末で未送信の付け替え
+    ///   （ローカルの行がもうそのキーを参照しない）で、その表がこの実行の範囲にあり、この実行で断られていないなら数えない
+    ///   （その付け替えは同じ実行で届くはずなので、削除を先に断るのは順序の誤り）。</item>
+    ///   <item>UniqueValueTakenOnServer：サーバーに、送った行と同じ一意な値を持つ別の行がある。ただし、その持ち主が
+    ///   この端末で未送信で値を手放し（ローカルの行がもうその値を持たない）、この実行で断られていないなら数えない。</item>
+    ///   <item>ParentMissingOnServer：送った行が参照する親のどれかがサーバーに無い。</item>
+    ///   <item>後勝ち＋ServerWins の決着（理由は返らない）：削除なら DeleteRefusedOnServer、upsert なら
+    ///   ParentMissingOnServer か UniqueValueTakenOnServer の根拠のどちらか。</item>
+    /// </list>
+    /// <para>
+    /// 根拠の無いものは形で分ける：その実行で注入した失敗がそのキーに当たった（<c>after-fault</c>）・実行の前にそのキーを
+    /// 参照していた行がこの端末の未送信で付け替わる（<c>pending-reparent</c>）・実行の前に同じ値を持っていた行がこの端末の
+    /// 未送信で値を手放す（<c>pending-release</c>）・それ以外（<c>no-basis</c>）。根拠の無いものも消失なしの期待からは
+    /// 外したままにする（消失の違反を重ねない＝1 つの形に 1 つの署名。版の競合の根拠の無い違反と同じ扱い）。
+    /// </para>
+    /// </remarks>
+    private async Task CheckRefusalBasisAsync(
+        ModelSyncOp op,
+        RunSnapshot before,
+        IReadOnlyList<(string Table, string Key, SyncConflictReason? Reason)> refusals,
+        IEnumerable<(string Table, string Key)> conflicted
+    )
+    {
+        if (refusals.Count == 0)
+        {
+            return;
+        }
+
+        var server = await _world.ReadStateAsync(ModelActor.Server, _ct);
+        var hits = _world
+            .Faults.WriteHitsSince(before.HitIndex)
+            .Where(h => h.Device == op.Device)
+            .Select(h => (h.Table, h.Key))
+            .ToHashSet();
+        var pending = before
+            .Pending.Select(e => (e.TableName, CanonicalKey(e.TableName, e.KeyText)))
+            .ToHashSet();
+        // この実行で届かなかった行（理由を問わず競合になった行と決着させた行）。その行の付け替え・値の手放しは届いて
+        // いないので、根拠を打ち消さない
+        var refused = refusals.Select(r => (r.Table, r.Key)).Concat(conflicted).ToHashSet();
+
+        // その実行が送る表（Versioned は版なしの表を送らない・除外した表も送らない）。範囲外の表の未送信の付け替え・
+        // 値の手放しはその実行では届かないので、根拠を打ち消さない
+        var inScope = ModelTables
+            .All.Where(t =>
+                !op.Excluded.Contains(t)
+                && !(op.Mode == SyncMode.Versioned && t == ModelTables.Labels)
+            )
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var (table, key, reason) in refusals)
+        {
+            var deleting = before.Local.Row(table, key) is null;
+            var kind =
+                reason?.ToString()
+                ?? (
+                    deleting ? nameof(SyncConflictReason.DeleteRefusedOnServer) : SettledUpsertKind
+                );
+            var basis = reason switch
+            {
+                SyncConflictReason.DeleteRefusedOnServer => HasReferrer(server),
+                SyncConflictReason.UniqueValueTakenOnServer => HasHolder(server),
+                SyncConflictReason.ParentMissingOnServer => ParentMissing(),
+                _ => deleting ? HasReferrer(server) : ParentMissing() || HasHolder(server),
+            };
+
+            var (count, withBasis) = _basisChecks.GetValueOrDefault(kind);
+            _basisChecks[kind] = (count + 1, withBasis + (basis ? 1 : 0));
+
+            if (basis)
+            {
+                continue;
+            }
+
+            var shape =
+                hits.Contains((table, key)) ? "after-fault"
+                : deleting && Referrers(before.Server, table, key).Any(IsReparented)
+                    ? "pending-reparent"
+                : !deleting && Holders(before.Server).Any(IsReleased) ? "pending-release"
+                : "no-basis";
+            _basisFailures.Add(
+                new(
+                    $"3/spurious:{table}:{kind}:{shape}",
+                    $"{op.Device} got {kind} on {key} with no basis on the server after {op.Describe()} "
+                        + $"(sent: {before.Local.Row(table, key) ?? "(deleted)"}; "
+                        + $"server: {server.Row(table, key) ?? "(none)"}; journal: "
+                        + string.Join(
+                            ",",
+                            before
+                                .Pending.Where(e =>
+                                    e.TableName == table && CanonicalKey(table, e.KeyText) == key
+                                )
+                                .Select(e => e.Operation)
+                        )
+                        + ")"
+                )
+            );
+
+            continue;
+
+            // サーバーにそのキーを参照する行がある（この端末の未送信の付け替えで、この実行で断られていない行は除く）
+            bool HasReferrer(ModelDbState state) =>
+                Referrers(state, table, key).Any(r => !IsReparented(r));
+
+            // サーバーに同じ一意な値を持つ別の行がある（この端末の未送信で値を手放し、この実行で断られていない行は除く）
+            bool HasHolder(ModelDbState state) => Holders(state).Any(h => !IsReleased(h));
+
+            // 送った行が参照する親のどれかがサーバーに無い
+            bool ParentMissing() =>
+                References
+                    .Where(r => r.Child == table)
+                    .Any(r =>
+                        r.Read(before.Local).FirstOrDefault(p => p.Key == key).ParentKey
+                            is { } parentKey
+                        && server.Row(r.Parent, parentKey) is null
+                    );
+
+            IEnumerable<string> Holders(ModelDbState state) =>
+                UniqueValue(before.Local, table, key) is { } value
+                    ? state
+                        .Rows(table)
+                        .Keys.Where(k =>
+                            k != key
+                            && string.Equals(
+                                UniqueValue(state, table, k),
+                                value,
+                                StringComparison.Ordinal
+                            )
+                        )
+                    : [];
+
+            // 持ち主 h がこの端末の未送信で値を手放した（ローカルの行がまだあり、値が違う）
+            bool IsReleased(string holder) =>
+                inScope.Contains(table)
+                && pending.Contains((table, holder))
+                && !refused.Contains((table, holder))
+                && before.Local.Row(table, holder) is not null
+                && !string.Equals(
+                    UniqueValue(before.Local, table, holder),
+                    UniqueValue(before.Local, table, key),
+                    StringComparison.Ordinal
+                );
+
+            // 参照する行 r がこの端末の未送信で付け替わった（ローカルの行がまだあり、もうこのキーを参照しない）
+            bool IsReparented((string Table, string Key, int Reference) referrer)
+            {
+                if (
+                    !inScope.Contains(referrer.Table)
+                    || !pending.Contains((referrer.Table, referrer.Key))
+                    || refused.Contains((referrer.Table, referrer.Key))
+                )
+                {
+                    return false;
+                }
+
+                var local = References[referrer.Reference]
+                    .Read(before.Local)
+                    .Where(p => p.Key == referrer.Key)
+                    .ToList();
+
+                return local.Count > 0 && local[0].ParentKey != key;
+            }
         }
     }
+
+    /// <summary>その状態で、表 <paramref name="table"/> のキー <paramref name="key"/> を参照する行（表・キー・外部キーの番号）</summary>
+    private static IEnumerable<(string Table, string Key, int Reference)> Referrers(
+        ModelDbState state,
+        string table,
+        string key
+    ) =>
+        References
+            .Select((reference, index) => (reference, index))
+            .Where(r => r.reference.Parent == table)
+            .SelectMany(r =>
+                r.reference.Read(state)
+                    .Where(p => p.ParentKey == key)
+                    .Select(p => (r.reference.Child, p.Key, r.index))
+            );
+
+    /// <summary>行の一意な値（フォルダーの name・品目の code。それ以外の表と、行が無ければ null）</summary>
+    private static string? UniqueValue(ModelDbState state, string table, string key) =>
+        table switch
+        {
+            ModelTables.Folders
+                when state.Folders.TryGetValue(
+                    int.Parse(key, CultureInfo.InvariantCulture),
+                    out var folder
+                ) => folder.Name,
+            ModelTables.Items
+                when state.Items.TryGetValue(
+                    int.Parse(key, CultureInfo.InvariantCulture),
+                    out var item
+                ) => item.Code,
+            _ => null,
+        };
 
     /// <summary>
     /// 静止化してから、収束と消失なしを確かめる（静止化が失敗したら、その失敗だけを報告する＝後段の表明は
@@ -708,8 +1025,12 @@ internal sealed class SyncModelRun : IAsyncDisposable
     {
         // 仕掛けたまま起きなかった失敗は外す（静止化は失敗の無い世界で行う）
         _world.Faults.Clear();
+        var quiesced = await QuiesceAsync();
 
-        if (!await QuiesceAsync())
+        // 根拠の無い競合・決着は、静止化の成否に依らず報告する（静止化の中で見つけたものを含む）
+        _failures.AddRange(Distinct(_basisFailures));
+
+        if (!quiesced)
         {
             return;
         }
