@@ -68,7 +68,7 @@ public sealed class FactorInventoryGuardTests
             "CodeGenerationOptions",
             member,
             EngineIds.CodegenConfig,
-            "P2",
+            "P3",
             CodegenOptionReason
         )),
         .. new[]
