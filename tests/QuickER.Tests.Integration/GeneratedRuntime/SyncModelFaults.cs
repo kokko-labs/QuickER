@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using QuickER.Tests.GeneratedSyncModelFixture;
@@ -113,6 +114,51 @@ internal sealed class SyncModelFaults
         if (TryFire(kind, Syncing))
         {
             throw new InjectedFaultException(kind);
+        }
+    }
+
+    private readonly List<(ModelActor Device, string Table, string Key)> _writeHits = [];
+
+    /// <summary>
+    /// サーバーへの行の書き込みの入口で呼ぶ（同期中の端末に ServerWrite が仕掛けてあれば、当たった（端末・表・キー）を
+    /// 控えてから例外）。控えは、競合・決着の理由の根拠を確かめる表明が、根拠の無い違反の形を分けるのに使う
+    /// （注入した失敗そのものは根拠にしない）
+    /// </summary>
+    public void ThrowOnServerWrite(Type entityType, object key)
+    {
+        var device = Syncing;
+
+        if (TryFire(ModelFaultKind.ServerWrite, device))
+        {
+            lock (_writeHits)
+            {
+                _writeHits.Add(
+                    (device!.Value, ModelTables.TableOf(entityType), ModelTables.KeyText(key))
+                );
+            }
+
+            throw new InjectedFaultException(ModelFaultKind.ServerWrite);
+        }
+    }
+
+    /// <summary>これまでに ServerWrite の失敗が当たった（端末・表・キー）の数</summary>
+    public int WriteHitCount
+    {
+        get
+        {
+            lock (_writeHits)
+            {
+                return _writeHits.Count;
+            }
+        }
+    }
+
+    /// <summary><paramref name="from"/> 番目から後に ServerWrite の失敗が当たった（端末・表・キー）</summary>
+    public IReadOnlyList<(ModelActor Device, string Table, string Key)> WriteHitsSince(int from)
+    {
+        lock (_writeHits)
+        {
+            return [.. _writeHits.Skip(from)];
         }
     }
 }

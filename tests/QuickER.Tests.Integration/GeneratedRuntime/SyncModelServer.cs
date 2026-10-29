@@ -70,7 +70,7 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
 
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
-        faults.ThrowOnServer(ModelFaultKind.ServerWrite);
+        faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
         Stamp(entity);
         await inner.InsertAsync(entity, cancellationToken).ConfigureAwait(false);
     }
@@ -81,7 +81,7 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
-        faults.ThrowOnServer(ModelFaultKind.ServerWrite);
+        faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
         var key = readKey(entity);
 
         if (await inner.GetByIdAsync(key, cancellationToken).ConfigureAwait(false) is null)
@@ -103,7 +103,7 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
 
     public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        faults.ThrowOnServer(ModelFaultKind.ServerWrite);
+        faults.ThrowOnServerWrite(typeof(TEntity), id!);
 
         return inner.DeleteAsync(id, cancellationToken);
     }
@@ -117,7 +117,7 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     )
     {
-        faults.ThrowOnServer(ModelFaultKind.ServerWrite);
+        faults.ThrowOnServerWrite(typeof(TEntity), readKey(entity)!);
 
         // 同期エンジンが使うのは「版ガード付きの削除」だけ（RowState=Removed のスタブ 1 件）
         if (entity.RowState == RowState.Removed)

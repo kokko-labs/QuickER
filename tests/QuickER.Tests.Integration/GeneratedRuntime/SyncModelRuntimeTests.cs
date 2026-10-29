@@ -49,6 +49,15 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     public static SeedSettings Seeds { get; } =
         new("QUICKER_SYNC_MODEL_SEEDS", 60, NightlySeedCount, firstSeed: 0);
 
+    /// <summary>根拠を確かめる競合・決着の種類（<see cref="SyncModelRun.BasisChecks"/> の鍵）</summary>
+    private static readonly string[] RefusalBasisKinds =
+    [
+        nameof(SyncConflictReason.DeleteRefusedOnServer),
+        nameof(SyncConflictReason.UniqueValueTakenOnServer),
+        nameof(SyncConflictReason.ParentMissingOnServer),
+        SyncModelRun.SettledUpsertKind,
+    ];
+
     /// <summary>決定的なシナリオの名前（HTTP の派生も使う）</summary>
     public static TheoryData<string> ScenarioNames()
     {
@@ -69,6 +78,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     /// <param name="coverage">
     /// 操作を次元表のケースとして数える先（null なら数えない）。生成器が返した操作を実行の前に読むだけで、乱数を引かない
     /// </param>
+    /// <param name="basisTally">
+    /// 理由ごとの、根拠を確かめた件数と根拠のあった件数を足し込む先（null なら数えない。空振りしていないかを出力で確かめる）
+    /// </param>
     internal static async Task<(
         IReadOnlyList<ModelFailure> Failures,
         IReadOnlyList<string> Log
@@ -76,7 +88,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         int seed,
         CancellationToken ct,
         SyncModelWorldOptions? options = null,
-        CoverageCounter? coverage = null
+        CoverageCounter? coverage = null,
+        ConcurrentDictionary<string, (int Checked, int WithBasis)>? basisTally = null
     )
     {
         var generator = new SyncModelGenerator(seed);
@@ -110,6 +123,18 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
         await run.FinishAsync();
 
+        if (basisTally is not null)
+        {
+            foreach (var (reason, (count, withBasis)) in run.BasisChecks)
+            {
+                basisTally.AddOrUpdate(
+                    reason,
+                    (count, withBasis),
+                    (_, sum) => (sum.Checked + count, sum.WithBasis + withBasis)
+                );
+            }
+        }
+
         return (run.Failures, run.Log);
     }
 
@@ -130,6 +155,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         var plan = SeedSource.Resolve(Seeds);
         plan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
+        var basisTally = new ConcurrentDictionary<string, (int Checked, int WithBasis)>(
+            StringComparer.Ordinal
+        );
 
         // 種ごとに世界（SQLite の DB 3 つ）を作るので、種どうしは何も共有しない。並列度は CPU 数で抑える
         await RunObservedAsync(
@@ -145,7 +173,12 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                     async (seed, ct) =>
                     {
                         var watch = Stopwatch.StartNew();
-                        results[seed] = await RunSeedAsync(seed, ct, coverage: coverage);
+                        results[seed] = await RunSeedAsync(
+                            seed,
+                            ct,
+                            coverage: coverage,
+                            basisTally: basisTally
+                        );
                         elapsed[seed] = watch.Elapsed;
                     }
                 )
@@ -199,6 +232,17 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
         output.WriteLine($"seeds: {plan.Seeds.Count}");
 
+        // 理由ごとの根拠の確認の件数（0 件の理由は確かめが一度も走っていない）
+        foreach (
+            var (reason, (count, withBasis)) in basisTally.OrderBy(
+                p => p.Key,
+                StringComparer.Ordinal
+            )
+        )
+        {
+            output.WriteLine($"refusal basis {reason}: checked {count}, with basis {withBasis}");
+        }
+
         foreach (var (seed, time) in elapsed.OrderByDescending(p => p.Value).Take(5))
         {
             output.WriteLine($"slowest seed {seed}: {time.TotalSeconds:F1} s");
@@ -217,6 +261,17 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
         // エンジンの結果を表明してから網羅を照合する（網羅の赤がエンジンの失敗を隠さない）
         coverageReport.AssertGaps(SyncModelDimensions.Gaps, SyncModelDimensions.DirectScope, plan);
+
+        // 理由の根拠の確認が空振りしていない（既定の種の数で、どの理由も 1 回以上確かめ、根拠のある形を 1 回以上見る）
+        if (plan.IsDefaultCount)
+        {
+            foreach (var reason in RefusalBasisKinds)
+            {
+                var (count, withBasis) = basisTally.GetValueOrDefault(reason);
+                CoverageGuard.AtLeast($"refusal basis checks of {reason}", count, 1);
+                CoverageGuard.AtLeast($"refusal basis found for {reason}", withBasis, 1);
+            }
+        }
     }
 
     /// <summary>
@@ -434,7 +489,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
         {
             names.Should().Contain(known.Scope);
             known.Match.Should().Be(KnownMatch.ExactSignature);
-            known.FixedIn.Should().BeOneOf("区切り 30", "区切り 31");
+            known.FixedIn.Should().BeOneOf("区切り 30", "区切り 31", "修正 C");
         }
     }
 

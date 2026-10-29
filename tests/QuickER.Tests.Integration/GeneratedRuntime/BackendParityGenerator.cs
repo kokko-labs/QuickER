@@ -30,7 +30,8 @@ public enum ParityGeneratorMode
 /// <list type="bullet">
 ///   <item>既存の行を組み立て直した UPDATE（EF Core は全列を書くので除外 blob を上書きする＝docs）。UPDATE は読み込んだ行だけ</item>
 ///   <item>insertWhenUpdateMissing・生 SQL・ナビゲーションの条件（#33・#36・#37 は決まった形のシナリオが受け持つ）</item>
-///   <item>子を持つ親の <c>DeleteAsync(id)</c>・親の無い行の挿入（P1・P2＝インメモリは外部キーを検査せず、参照動作も再現しない。受容した差で、docs に書く）。
+///   <item>列の途中の、子を持つ親の <c>DeleteAsync(id)</c>・親の無い行の挿入（P1・P2＝インメモリは外部キーを検査せず、参照動作も
+///   再現しない。受容した差で、docs に書く）。この 2 つは列の末尾にだけ置く（<see cref="AppendAcceptedDeviationTail"/>）。
 ///   グラフの根を消すのは、その子をすべてグラフに持っているときだけ</item>
 ///   <item>他者が消した行・まだ挿入していない（Added の）行への削除（行なし削除の非対称＝受容した差）。
 ///   スロットの行が消されたら、そのスロットは読み直すまで使わない</item>
@@ -74,6 +75,8 @@ public sealed class BackendParityGenerator
         {
             generator.Next();
         }
+
+        generator.AppendAcceptedDeviationTail();
 
         return new ParityScenario($"seed-{seed}-{generator._mode}", seeds, generator._ops);
     }
@@ -162,6 +165,119 @@ public sealed class BackendParityGenerator
             }
 
             pick -= weight;
+        }
+    }
+
+    // ---- 受け入れた手の差（列の末尾） ----
+
+    /// <summary>
+    /// 種の半分で、列の末尾に受け入れた手の差を持つ手（子を持つ親の <c>DeleteAsync(id)</c> か親の無い行の挿入）を 1 つ置き、
+    /// 続けて普通の手を 0〜2 回足す。
+    /// </summary>
+    /// <remarks>
+    /// 受け入れた差（<see cref="BackendParityKnownDifferences.AcceptedDeviations"/>）の実装先は、この手から後を比べない
+    /// （インメモリは外部キーを検査しないので、この手の後の保存先がずっと食い違う）。ほかの実装先はこの手と後の手も比べる。
+    /// 末尾にだけ置くのは、外す比較を少なくするためと、列の先頭（いままでの手）の乱数の引き方を変えないため
+    /// （種の指紋が変わるのは末尾を足した種だけになる）。
+    /// </remarks>
+    private void AppendAcceptedDeviationTail()
+    {
+        if (_random.Next(2) != 0)
+        {
+            return;
+        }
+
+        // 子を持つ親が無ければ親の無い行の挿入にする
+        if (!(_random.Next(2) == 0 && ParentDeleteWithChildren()))
+        {
+            OrphanInsert();
+        }
+
+        var follow = _random.Next(3);
+
+        for (var i = 0; i < follow; i++)
+        {
+            Next();
+        }
+    }
+
+    /// <summary>子を持つ親（明細のある注文・注文のある顧客）を DeleteAsync(id) で消す（DB は ON DELETE CASCADE で子も消す）</summary>
+    private bool ParentDeleteWithChildren()
+    {
+        var parents = new List<(string Table, int Id)>();
+        parents.AddRange(
+            _orders.Keys.Where(id => _lines.Any(l => l.Value == id)).Select(id => ("orders", id))
+        );
+        parents.AddRange(
+            _customers
+                .Keys.Where(id => _orders.Any(o => o.Value.Customer == id))
+                .Select(id => ("customers", id))
+        );
+
+        if (parents.Count == 0)
+        {
+            return false;
+        }
+
+        var (table, key) = PickFrom(parents);
+        _ops.Add(
+            new DeviatingOp(new DeleteOp(table, key), ParityDeviation.ParentDeleteWithChildren)
+        );
+        var orders =
+            table == "orders"
+                ? [key]
+                : _orders.Where(o => o.Value.Customer == key).Select(o => o.Key).ToList();
+
+        foreach (var order in orders)
+        {
+            foreach (var line in _lines.Where(l => l.Value == order).Select(l => l.Key).ToList())
+            {
+                _lines.Remove(line);
+                MarkStaleHolding(line, except: null);
+            }
+
+            _orders.Remove(order);
+            MarkStaleHoldingOrder(order);
+        }
+
+        if (table == "customers")
+        {
+            _customers.Remove(key);
+        }
+
+        return true;
+    }
+
+    /// <summary>親の無い明細（注文 99）か、無い顧客（9）を指す注文を挿入する（DB は外部キーで断る＝モデルは変えない）</summary>
+    private void OrphanInsert()
+    {
+        if (_random.Next(2) == 0)
+        {
+            var line = Fresh(100, 150, k => _lines.ContainsKey(k) || _reservedLines.Contains(k));
+
+            if (line is not null)
+            {
+                _ops.Add(
+                    new DeviatingOp(
+                        new InsertOp(new LineRow(line.Value, 99, $"o{_step}", 1)),
+                        ParityDeviation.OrphanInsert
+                    )
+                );
+            }
+
+            return;
+        }
+
+        var order = Fresh(10, 30, _orders.ContainsKey);
+
+        if (order is not null)
+        {
+            _ops.Add(
+                new DeviatingOp(
+                    new InsertOp(new OrderRow(order.Value, 9, 1m)),
+                    ParityDeviation.OrphanInsert
+                )
+            );
         }
     }
 

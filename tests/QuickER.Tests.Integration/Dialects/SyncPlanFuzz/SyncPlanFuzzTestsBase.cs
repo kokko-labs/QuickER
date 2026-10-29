@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using QuickER.Dialects;
+using QuickER.Provider;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit.Sdk;
 
@@ -49,6 +50,18 @@ public abstract class SyncPlanFuzzTestsBase
     private const int ShapeCoverageMinimumSeeds = 50;
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
+
+    /// <summary>
+    /// 失敗を予告しない種類の警告（項目を計画から外した・再構築の属性の喪失・列の削除に伴う一意制約の削除・説明の文字の置き換え。
+    /// 実行が失敗しうることを言っていない）
+    /// </summary>
+    private static readonly HashSet<SyncPlanWarningKind> NonPredictingWarnings =
+    [
+        SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
+        SyncPlanWarningKind.TableRebuildDropsColumnAttribute,
+        SyncPlanWarningKind.UniqueConstraintDroppedWithColumn,
+        SyncPlanWarningKind.DescriptionCharactersReplaced,
+    ];
 
     /// <summary>この方言で流す種の決め方（普段と夜間の既定の種の数）</summary>
     internal abstract SeedSettings SeedSettings { get; }
@@ -105,6 +118,44 @@ public abstract class SyncPlanFuzzTestsBase
             $"{dialect.Name}: seeds {outcomes.Count}, committed {outcomes.Count(o => o.Committed)}, "
                 + $"failed with a warning {outcomes.Count(o => !o.Committed && o.Violations.Count == 0)}, "
                 + $"violations {failures.Count}"
+        );
+
+        // 表明 1b の例外の当たり方と、失敗した種の警告の内訳（警告の中身は測るだけ＝失敗を予告しない種類の警告しか無いのに
+        // 失敗した種を数える。強めるかは件数を見て決める）
+        foreach (
+            var note in outcomes
+                .SelectMany(o => o.Notes.Distinct())
+                .GroupBy(n => n)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+        )
+        {
+            output?.WriteLine(
+                $"note {note.Key}: {note.Count()} seed(s) "
+                    + $"[{string.Join(", ", outcomes.Where(o => o.Notes.Contains(note.Key)).Select(o => o.Seed))}]"
+            );
+        }
+
+        var failedRuns = outcomes.Where(o => !o.Committed && o.Plan is not null).ToList();
+
+        foreach (
+            var kind in failedRuns
+                .SelectMany(o => o.Plan!.Warnings.Select(w => w.Kind).Distinct())
+                .GroupBy(k => k)
+                .OrderBy(g => g.Key)
+        )
+        {
+            output?.WriteLine($"failed run warned {kind.Key}: {kind.Count()} seed(s)");
+        }
+
+        var nonPredicting = failedRuns
+            .Where(o =>
+                o.Plan!.Warnings.Count > 0
+                && o.Plan.Warnings.All(w => NonPredictingWarnings.Contains(w.Kind))
+            )
+            .Select(o => o.Seed)
+            .ToList();
+        output?.WriteLine(
+            $"failed runs warned only with non-predicting kinds: {nonPredicting.Count} [{string.Join(", ", nonPredicting)}]"
         );
 
         // 調べるとき用: 全種の結果をファイルへ書き出す（違反の無い種も含む）

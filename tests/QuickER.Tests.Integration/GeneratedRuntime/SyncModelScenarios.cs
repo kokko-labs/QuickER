@@ -1538,8 +1538,93 @@ internal static class SyncModelScenarios
 
         list.AddRange(PolicyScenarios());
         list.AddRange(UniqueValueTakenScenarios());
+        list.AddRange(TransientFaultScenarios());
 
         return list;
+    }
+
+    /// <summary>
+    /// 4m-D2: サーバーへの書き込みの一時的な失敗の後で、利用者の意図が届くか（参照される表＝フォルダーの更新・削除）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>repro-d2-*</c>（期待の手を持たない＝オラクルだけが見る形）：参照する行の無いフォルダーの削除が一時的な失敗で
+    /// 落ちる。エンジンは「参照する表がある」ことだけで DeleteRefusedOnServer と判定する。根拠の確認（サーバーに参照する行が
+    /// 無い）が <c>3/spurious:…:after-fault</c> で名指しする。
+    /// </para>
+    /// <para>
+    /// <c>reach-after-fault-*</c>：操作（更新・削除）×（Versioned＋Collect・Versioned＋LocalWins・後勝ち＋Collect・
+    /// 後勝ち＋LocalWins・後勝ち＋ServerWins）。失敗を仕掛けた同期の後、失敗の無い同期でサーバーに利用者の意図が届く
+    /// （Versioned＋ServerWins は端末の変更を捨てる操作なので入れない）。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<SyncModelScenario> TransientFaultScenarios()
+    {
+        foreach (
+            var (name, mode, policy) in new (string, SyncMode, SyncConflictPolicy)[]
+            {
+                ("versioned-collect", SyncMode.Versioned, SyncConflictPolicy.Collect),
+                ("lww-serverwins", SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins),
+            }
+        )
+        {
+            yield return new(
+                $"repro-d2-{name}",
+                [Folder(SV, 720)],
+                [
+                    new DeleteFolderOp(D1, Direct, 720),
+                    new ArmFaultOp(D1, ModelFaultKind.ServerWrite),
+                    Sync(D1, mode, policy),
+                    Sync(D1),
+                ]
+            );
+        }
+
+        var cases = new (string Name, SyncMode Mode, SyncConflictPolicy Policy)[]
+        {
+            ("versioned-collect", SyncMode.Versioned, SyncConflictPolicy.Collect),
+            ("versioned-localwins", SyncMode.Versioned, SyncConflictPolicy.LocalWins),
+            ("lww-collect", SyncMode.LastWriteWins, SyncConflictPolicy.Collect),
+            ("lww-localwins", SyncMode.LastWriteWins, SyncConflictPolicy.LocalWins),
+            ("lww-serverwins", SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins),
+        };
+        var index = 0;
+
+        foreach (var (name, mode, policy) in cases)
+        {
+            var updated = 740 + (2 * index);
+            var deleted = updated + 1;
+            index++;
+
+            yield return new(
+                $"reach-after-fault-update-{name}",
+                [Folder(SV, updated)],
+                [
+                    new UpdateFolderOp(D1, Direct, updated, null, "d1"),
+                    new ArmFaultOp(D1, ModelFaultKind.ServerWrite),
+                    Sync(D1, mode, policy),
+                    Sync(D1),
+                    new ExpectLocalOp(
+                        SV,
+                        ModelTables.Folders,
+                        ModelDbState.Key(updated),
+                        "parent=null name=d1"
+                    ),
+                ]
+            );
+
+            yield return new(
+                $"reach-after-fault-delete-{name}",
+                [Folder(SV, deleted)],
+                [
+                    new DeleteFolderOp(D1, Direct, deleted),
+                    new ArmFaultOp(D1, ModelFaultKind.ServerWrite),
+                    Sync(D1, mode, policy),
+                    Sync(D1),
+                    new ExpectLocalOp(SV, ModelTables.Folders, ModelDbState.Key(deleted), null),
+                ]
+            );
+        }
     }
 
     /// <summary>

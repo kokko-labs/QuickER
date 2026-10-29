@@ -530,27 +530,56 @@ public static class BackendParityScenarios
                 new ReadBlobOp(99, "payload"),
             ]
         ),
-        // 制約違反：親の無い明細・無い顧客を指す注文（外部キー）・主キーの重複・一意な名前の重複・グラフ保存の途中の主キーの
-        // 重複。どの実装先も断り、何も書かない（例外の型の違いは比べ方がまとめる）
+        // 制約違反：主キーの重複・一意な名前の重複・グラフ保存の途中の主キーの重複・親の無い明細・無い顧客を指す注文（外部キー）。
+        // どの実装先も断り、何も書かない（例外の型の違いは比べ方がまとめる）。外部キーの 2 手はインメモリの受け入れた差（P2）
+        // なので末尾に置き、インメモリはその手から後を比べない（重複の手はインメモリでも比べる）
         new(
             "constraint-violations",
             Basic,
             [
-                new InsertOp(new LineRow(150, 99, "orphan", 1)),
-                new InsertOp(new OrderRow(50, 9, 1m)),
                 new InsertOp(new CustomerRow(1, "Dup")),
                 new InsertOp(new CustomerRow(5, "Alice")),
                 new NewRootOp("x", new OrderRow(60, 1, 1m), RowState.Added),
                 new AddLineOp("x", new LineRow(160, 60, "a", 1)),
                 new AddLineOp("x", new LineRow(100, 60, "dupkey", 1)),
                 new SaveOp("x"),
+                new DeviatingOp(
+                    new InsertOp(new LineRow(150, 99, "orphan", 1)),
+                    ParityDeviation.OrphanInsert
+                ),
+                new DeviatingOp(
+                    new InsertOp(new OrderRow(50, 9, 1m)),
+                    ParityDeviation.OrphanInsert
+                ),
             ]
         ),
-        // 親を DeleteAsync(id) で消す（DB の ON DELETE CASCADE が子を消す）
+        // 親を DeleteAsync(id) で消す（DB の ON DELETE CASCADE が子を消す。インメモリの受け入れた差＝P1）
         new(
             "delete-parent-by-id",
             Basic,
-            [new DeleteOp("orders", 10), new DeleteOp("customers", 2)]
+            [
+                new DeviatingOp(
+                    new DeleteOp("orders", 10),
+                    ParityDeviation.ParentDeleteWithChildren
+                ),
+                new DeviatingOp(
+                    new DeleteOp("customers", 2),
+                    ParityDeviation.ParentDeleteWithChildren
+                ),
+            ]
+        ),
+        // 紹介者として参照されている顧客を DeleteAsync(id) で消す（紹介者の外部キーは NO ACTION＝DB は断り、何も消さない。
+        // インメモリの受け入れた差＝P1 なので、インメモリはこの手から後を比べず、EF Core・リモートを比べる）
+        new(
+            "delete-referrer-by-id",
+            [.. Basic, new SeedOp(new CustomerRow(6, "Fay", Referrer: 1))],
+            [
+                new DeviatingOp(
+                    new DeleteOp("customers", 1),
+                    ParityDeviation.ParentDeleteWithChildren
+                ),
+                new LoadOp("A", "orders", 10),
+            ]
         ),
     ];
 

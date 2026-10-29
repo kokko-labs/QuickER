@@ -5,6 +5,24 @@ using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
+/// <summary>受け入れた手の差を持つ手の種類（<see cref="DeviatingOp"/> が印を付ける）</summary>
+public enum ParityDeviation
+{
+    /// <summary>子を持つ親の <c>DeleteAsync(id)</c>（DB は ON DELETE の参照動作どおり・外部キーを検査しない実装先は親だけを消す）</summary>
+    ParentDeleteWithChildren,
+
+    /// <summary>親の無い行の挿入（DB は外部キーで断る・外部キーを検査しない実装先は挿入する）</summary>
+    OrphanInsert,
+}
+
+/// <summary>受け入れた手の差の 1 項目（実装先・手の種類・指摘・受け入れた理由）</summary>
+public sealed record AcceptedDeviation(
+    ParityBackendKind Backend,
+    ParityDeviation Deviation,
+    string Finding,
+    string Reason
+);
+
 /// <summary>
 /// 今わかっている実装先の違い（基準の QuickER 版と食い違うシナリオ・実装先・観点）。
 /// </summary>
@@ -47,13 +65,35 @@ public static class BackendParityKnownDifferences
             "区切り 39",
             SameKeyReplaceReason
         ),
+    ];
+
+    /// <summary>
+    /// 受け入れた手の差（実装先×手の種類）。宣言した手を流すと、その実装先だけを、その手から後の比較から外す
+    /// （<see cref="ParityScenario.RunAsync"/>。外した位置と手の数は <see cref="ParityRunResult.Cuts"/> に残る）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 手を全実装先から作らないと、その手でほかの実装先を見る機会まで消える（H5：インメモリの P1・P2 のために子を持つ親の
+    /// <c>DeleteAsync(id)</c> を作らなかったので、EF Core の削除の違いが網の外にあった）。宣言は実装先を名指しし、手は
+    /// 生成器・シナリオが <see cref="DeviatingOp"/> で印を付ける（実装先の結果からは推測しない）。
+    /// </para>
+    /// <para>
+    /// 外した後を比べないのは、外部キーを検査しない実装先の保存先がその手の後ずっと食い違い、後の手を比べても同じ差を
+    /// 繰り返すだけになるため。
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<AcceptedDeviation> AcceptedDeviations { get; } =
+    [
         // P1・P2（受容・直さない）: インメモリは外部キーを検査せず、参照動作（ON DELETE CASCADE など）も再現しない。
         // DeleteAsync(id) で親を消しても子は残り（P1）、親の無い明細・無い顧客を指す注文も挿入する（P2）。
         // インメモリの振る舞いは変えず、docs の「実 DB との既知の違い」に書く（決定 2026-10-13・docs は区切り 25）
-        Accepted("delete-parent-by-id", InMemory, "state", "P1", InMemoryForeignKeyReason),
-        Accepted("constraint-violations", InMemory, "outcome", "P2", InMemoryForeignKeyReason),
-        Accepted("constraint-violations", InMemory, "state", "P2", InMemoryForeignKeyReason),
+        new(InMemory, ParityDeviation.ParentDeleteWithChildren, "P1", InMemoryForeignKeyReason),
+        new(InMemory, ParityDeviation.OrphanInsert, "P2", InMemoryForeignKeyReason),
     ];
+
+    /// <summary>その実装先で、その手の差を受け入れたか</summary>
+    public static bool Accepts(ParityBackendKind backend, ParityDeviation deviation) =>
+        AcceptedDeviations.Any(d => d.Backend == backend && d.Deviation == deviation);
 
     /// <summary>乱数の操作の列で一時的に見逃す違い（<see cref="Tolerance"/> で作る）</summary>
     public static IReadOnlyList<KnownEntry> RandomTolerances { get; } = [];

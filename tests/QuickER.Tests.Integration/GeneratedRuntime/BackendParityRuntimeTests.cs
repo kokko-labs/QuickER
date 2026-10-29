@@ -109,11 +109,42 @@ public sealed class BackendParityRuntimeTests
         var coverage = new CoverageCounter(BackendParityDimensions.Table);
         var ranAllSeeds = true;
 
+        // 受け入れた手の差で比べなかったインメモリの手（黙って比較が減らないよう、件数を出力して下限を表明する）
+        var inMemorySteps = 0;
+        var inMemorySkipped = 0;
+        var cutCounts = new SortedDictionary<string, int>(StringComparer.Ordinal);
+
         foreach (var seed in seeds)
         {
             var scenario = BackendParityGenerator.Create(seed);
             BackendParityDimensions.Observe(coverage, scenario);
             var result = await scenario.RunAsync(Ct);
+
+            if (scenario.Backends.Contains(ParityBackendKind.InMemory))
+            {
+                inMemorySteps += scenario.Ops.Count;
+            }
+
+            foreach (var cut in result.Cuts)
+            {
+                var key = $"{cut.Backend}:{cut.Deviation}";
+                cutCounts[key] = cutCounts.GetValueOrDefault(key) + 1;
+
+                // 打ち切りは宣言の一覧の（実装先・手の種類）にだけ起きる（判定の Accepts が実装先を見なくなると、EF Core・
+                // リモートの比較まで黙って打ち切られる）
+                BackendParityKnownDifferences
+                    .AcceptedDeviations.Should()
+                    .Contain(
+                        d => d.Backend == cut.Backend && d.Deviation == cut.Deviation,
+                        $"seed {seed} cut {key}, which is not declared"
+                    );
+
+                if (cut.Backend == ParityBackendKind.InMemory)
+                {
+                    inMemorySkipped += cut.SkippedSteps;
+                }
+            }
+
             var known = BackendParityKnownDifferences.Set.Classify(
                 result.Violations.Select(v =>
                     BackendParityKnownDifferences.ToFailure(
@@ -168,6 +199,11 @@ public sealed class BackendParityRuntimeTests
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"seeds={seeds.Count} tolerated=[{string.Join(", ", tolerated.Select(kv => $"{kv.Key}:{kv.Value}"))}]"
         );
+        TestContext.Current.TestOutputHelper?.WriteLine(
+            $"accepted deviations cut=[{string.Join(", ", cutCounts.Select(kv => $"{kv.Key}:{kv.Value} seed(s)"))}] "
+                + $"in-memory steps compared {inMemorySteps - inMemorySkipped} of {inMemorySteps} "
+                + $"(skipped {inMemorySkipped})"
+        );
 
         // 網羅の宣言の誤りは種の結果より先に赤にする
         var coverageReport = coverage.Report();
@@ -177,6 +213,16 @@ public sealed class BackendParityRuntimeTests
             BackendParityDimensions.RandomScope
         );
         report.Failures.Should().BeEmpty(report.Render());
+
+        // 受け入れた手の差で外したインメモリの比較が、全体の 1 割を超えない（列の末尾にだけ置く前提が崩れていない）
+        if (ranAllSeeds && plan.IsDefaultCount)
+        {
+            CoverageGuard.AtLeast(
+                "in-memory steps compared after accepted-deviation cuts",
+                inMemorySteps - inMemorySkipped,
+                inMemorySteps * 9 / 10
+            );
+        }
 
         // 網羅しない組は、種の結果を表明してから、すべての種を流したときだけ照合する（打ち切ったときは上で赤）
         if (ranAllSeeds)
@@ -304,6 +350,47 @@ public sealed class BackendParityRuntimeTests
             .Groups.Should()
             .BeEquivalentTo(
                 new[] { (ParityBackendKind.InMemory, "slots"), (ParityBackendKind.Remote, "state") }
+            );
+    }
+
+    /// <summary>
+    /// 受け入れた手の差の仕組み：宣言した実装先（インメモリ）だけが、印の付いた手から後の比較から外れ、外れたことが
+    /// <see cref="ParityRunResult.Cuts"/> に残る。同じ手の後のほかの実装先の違いは、違いのまま検出される。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Parity] 受け入れた手の差は、宣言した実装先だけをその手から後の比較から外し、ほかの実装先の違いは残す"
+    )]
+    public async Task AcceptedDeviation_CutsOnlyTheDeclaredBackend()
+    {
+        var scenario = new ParityScenario(
+            "control-accepted-deviation",
+            [new SeedOp(new CustomerRow(1, "Alice")), new SeedOp(new OrderRow(10, 1, 1m))],
+            [
+                new LoadOp("A", "orders", 10),
+                new DeviatingOp(
+                    new DivergeOp(ParityBackendKind.InMemory, DivergeKind.StoredRow),
+                    ParityDeviation.OrphanInsert
+                ),
+                new DivergeOp(ParityBackendKind.EfCore, DivergeKind.StoredRow),
+            ]
+        );
+
+        var result = await scenario.RunAsync(Ct);
+
+        result.Groups.Should().BeEquivalentTo(new[] { (ParityBackendKind.EfCore, "state") });
+        result
+            .Cuts.Should()
+            .BeEquivalentTo(
+                new[]
+                {
+                    new ParityCut(
+                        ParityBackendKind.InMemory,
+                        1,
+                        "Diverge",
+                        ParityDeviation.OrphanInsert,
+                        2
+                    ),
+                }
             );
     }
 

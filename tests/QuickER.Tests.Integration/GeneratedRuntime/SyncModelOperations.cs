@@ -64,6 +64,24 @@ internal static class ModelTables
             _ => throw new ArgumentOutOfRangeException(nameof(table), table, null),
         };
 
+    /// <summary>エンティティ型から表名を引く</summary>
+    public static string TableOf(Type entityType) =>
+        entityType == typeof(ModelFolderEntity) ? Folders
+        : entityType == typeof(ModelLabelEntity) ? Labels
+        : entityType == typeof(ModelItemEntity) ? Items
+        : entityType == typeof(ModelEventEntity) ? Events
+        : throw new ArgumentOutOfRangeException(nameof(entityType), entityType, null);
+
+    /// <summary>主キーの値を、モデルの照合に使う格納値の文字列へそろえる（日時は <see cref="EventKeyText"/>）</summary>
+    public static string KeyText(object key) =>
+        key switch
+        {
+            int value => ModelDbState.Key(value),
+            DateTime value => EventKeyText(value),
+            string value => value,
+            _ => throw new ArgumentOutOfRangeException(nameof(key), key, null),
+        };
+
     /// <summary>表の短い名前（操作の記録用）</summary>
     public static string Short(string table) =>
         table switch
