@@ -13,6 +13,8 @@ internal static class EngineRegistry
     public static IReadOnlyList<EngineDescriptor> All { get; } =
     [
         SyncModelDimensions.Descriptor,
+        SyncModelOutcomeDimensions.Descriptor,
+        SyncConfigDimensions.Descriptor,
         SyncPlanFuzzDimensions.Descriptor,
         BackendParityDimensions.Descriptor,
         DslFuzzDimensions.SqlServerDescriptor,

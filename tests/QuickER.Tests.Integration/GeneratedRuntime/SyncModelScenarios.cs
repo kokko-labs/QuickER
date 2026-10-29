@@ -1539,8 +1539,311 @@ internal static class SyncModelScenarios
         list.AddRange(PolicyScenarios());
         list.AddRange(UniqueValueTakenScenarios());
         list.AddRange(TransientFaultScenarios());
+        list.AddRange(UniqueValueReassignScenarios());
 
         return list;
+    }
+
+    /// <summary>
+    /// 4m-B3・4m-D3・4m-D4: 一意な値の付け替え（更新で空ける・削除で空ける・空いた値を別の行の更新で取る）と、付け替え・
+    /// 親の削除・削除伝搬を切った ServerWins の組。効果測定の再現（review-repro-4m）を書き写したもの。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>repro-b3</c>：サーバーでフォルダー 600 を消し、その名前をフォルダー 601 が更新で取る（601 の子 602 も更新）。端末は
+    /// 602 と 601 を消してある。ServerWins＋削除伝搬なしの同期は、名前がぶつかって外した親 601（ローカルに無い）の子 602
+    /// だけを戻し、ローカルの外部キーで毎回止まる。
+    /// </para>
+    /// <para>
+    /// <c>repro-d3-*</c>：同じ表の別の行の更新が一意な値を空け、先に記録のある行がその値を更新で取る。取る更新はサーバーで
+    /// 空く前に送られて UniqueValueTakenOnServer で断られ、空けた更新が届いた後もやり直されない（品目の code とフォルダーの name）。
+    /// </para>
+    /// <para>
+    /// <c>repro-d4-*</c>：消す品目の code を別の品目が取り、同時に別のフォルダーへ付け替え、元のフォルダーを消す。取る更新は
+    /// 後回しの段へ回り、元のフォルダーの削除はその付け替えを待たずに送られて DeleteRefusedOnServer で断られ、やり直されない。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<SyncModelScenario> UniqueValueReassignScenarios()
+    {
+        // P2-3-N13（乱数の種 13 の形を縮めたもの）：サーバーでフォルダー 772 を別の親へ移し、フォルダー 771 を消して、その名前を
+        // 772 が取る。端末のフォルダー 772 はまだ 771 の下にあるので、名前の持ち主 771（サーバーに無い）を、値を取る 772 自身の
+        // 古い参照が残す。削除伝搬も持ち主の読み直しも 771 を消せず、772 は名前がぶつかって降りない（静止化しない）
+        yield return new(
+            "n13-holder-referenced-by-taker",
+            [
+                Folder(SV, 771, name: "h771"),
+                Folder(SV, 772, 771, "c772"),
+                Folder(SV, 773, name: "q773"),
+            ],
+            [
+                new UpdateFolderOp(SV, Direct, 772, 773, "c772"),
+                new DeleteFolderOp(SV, Direct, 771),
+                new UpdateFolderOp(SV, Direct, 772, 773, "h771"),
+                Sync(D1),
+            ]
+        );
+
+        // 乱数の種 14 の形を縮めたもの：サーバーで品目 775・776 の code を入れ替え、端末は入れ替える前の値のまま（洗い替えを
+        // 挟まない n8-true-swap-stops）。docs の既知の割り切りで、静止化しない（受け入れ）。ダウンロードは版の小さい 776 で
+        // 打ち切り、端末は持ち主の行 775 に未送信の更新を持つ（種 14 と同じく、静止化の Collect の周で毎回競合になる）＝持ち主の
+        // 行の競合を、分類できないものに数えないことをこのシナリオが固定する（打ち切った行の競合は swap-folder-names-*）
+        yield return new(
+            "swap-without-refresh-does-not-settle",
+            [Folder(SV, 774), Item(SV, 775, 774, code: "w1"), Item(SV, 776, 774, code: "w2")],
+            [
+                new UpdateItemOp(SV, Direct, 775, 774, null, "wtmp", "t775"),
+                new UpdateItemOp(SV, Direct, 776, 774, null, "w1", "t776"),
+                new UpdateItemOp(SV, Direct, 775, 774, null, "w2", "t775"),
+                Sync(D1),
+                new UpdateItemOp(D1, Direct, 775, 774, null, "w1", "t775d1"),
+            ]
+        );
+
+        // 乱数の夜間の種 786 の形を縮めたもの：端末 2 がフォルダー 781 の下に品目を足す。端末 1 がフォルダー 781 を消して上げる。
+        // 端末 2 の後勝ち＋ServerWins の同期は、親の無い品目をダウンロードの前の削除伝搬でローカルから消し（RemovedBeforeDownload）、
+        // その後の blob のコピーで失敗する（記録は残る）。次の同期は「行なし＋追加だけ」の記録を送るものが無いとして捨てる
+        yield return new(
+            "n786-thrown-serverwins-removal-then-record-dropped",
+            [Folder(SV, 781), Folder(SV, 782), Item(SV, 783, 782)],
+            [
+                Item(D2, 784, 781),
+                new DeleteFolderOp(D1, Direct, 781),
+                Sync(D1),
+                new WritePayloadOp(SV, 783, "0F0F0F0F"),
+                new ArmFaultOp(D2, ModelFaultKind.BlobDownload),
+                Sync(D2, SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins),
+                new ExpectLocalOp(D2, ModelTables.Items, "784", null),
+                new ExpectLocalRowChangeOp(
+                    D2,
+                    ModelTables.Items,
+                    "784",
+                    SyncLocalRowChangeReason.RemovedBeforeDownload
+                ),
+                Sync(
+                    D2,
+                    SyncMode.LastWriteWins,
+                    SyncConflictPolicy.ServerWins,
+                    propagateDeletes: false
+                ),
+            ]
+        );
+
+        // 4m-D2 の upsert の形（夜間の種 667 を縮めたもの）：取る側の記録が先の付け替え（4m-D3 の形）で、取る更新にサーバーへの
+        // 書き込みの一時的な失敗が当たる。持ち主がまだ値を持つので UniqueValueTakenOnServer と判定し、後勝ち＋ServerWins は
+        // 決着させて利用者の更新を捨てる（届かない）。一時的な失敗をサーバーが断った理由と取り違える根は 4m-D2 の削除と同じ
+        yield return new(
+            "repro-d2-upsert-unique-lww-serverwins",
+            [Folder(SV, 791, name: "a791"), Folder(SV, 792, name: "b792")],
+            [
+                new UpdateFolderOp(D1, Direct, 792, null, "b792"),
+                new UpdateFolderOp(D1, Direct, 791, null, "y791"),
+                new UpdateFolderOp(D1, Direct, 792, null, "a791"),
+                new ArmFaultOp(D1, ModelFaultKind.ServerWrite),
+                Sync(D1, SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins),
+                Sync(D1),
+                new ExpectLocalOp(SV, ModelTables.Folders, "792", "parent=null name=a791"),
+            ]
+        );
+
+        // 同じ形を後勝ち＋LocalWins で（夜間の種 958）。決着させずに根拠の無い UniqueValueTakenOnServer を報告する（次の同期で届く）
+        yield return new(
+            "repro-d2-upsert-unique-lww-localwins",
+            [Folder(SV, 795, name: "a795"), Folder(SV, 796, name: "b796")],
+            [
+                new UpdateFolderOp(D1, Direct, 796, null, "b796"),
+                new UpdateFolderOp(D1, Direct, 795, null, "y795"),
+                new UpdateFolderOp(D1, Direct, 796, null, "a795"),
+                new ArmFaultOp(D1, ModelFaultKind.ServerWrite),
+                Sync(D1, SyncMode.LastWriteWins, SyncConflictPolicy.LocalWins),
+                Sync(D1),
+                new ExpectLocalOp(SV, ModelTables.Folders, "796", "parent=null name=a795"),
+            ]
+        );
+
+        // P2-3-N14（夜間の種 132・146 を縮めたもの）：サーバーでフォルダー 803 が名前を手放し、802 がその名前を取り、その後 803 を
+        // 新しく作ったフォルダー 804 の下へ移す。端末のダウンロードは 802 の適用が一意な名前でぶつかり、持ち主 803 を読み直す
+        // （親の 804 も読み直して先に入れる）。見立て（根本原因の切り分けは修正 C）：読み直しの後でバッチをやり直すと、読み直しで
+        // 入れた 804 をバッチがもう一度挿入して一意制約の例外になり、どの行もローカルでぶつからない（持ち主はもう値を手放した）ので、
+        // ぶつかりの検出が元の例外を投げ直す＝打ち切りでなく例外で止まる
+        yield return new(
+            "n14-holder-moved-under-new-parent-in-batch",
+            [
+                Folder(SV, 801, name: "p801"),
+                Folder(SV, 802, 801, "f802"),
+                Folder(SV, 803, name: "f803"),
+            ],
+            [
+                new UpdateFolderOp(SV, Direct, 803, null, "f805"),
+                new UpdateFolderOp(SV, Direct, 802, 801, "f803"),
+                Folder(SV, 804),
+                new UpdateFolderOp(SV, Direct, 803, 804, "f806"),
+                Sync(D2),
+            ]
+        );
+
+        // N14 の対照：持ち主の移り先が初めからあるフォルダーなら、読み直しとやり直しで通る
+        yield return new(
+            "n14-control-holder-moved-under-existing-parent",
+            [
+                Folder(SV, 811, name: "p811"),
+                Folder(SV, 812, 811, "f812"),
+                Folder(SV, 813, name: "f813"),
+                Folder(SV, 814),
+            ],
+            [
+                new UpdateFolderOp(SV, Direct, 813, null, "f815"),
+                new UpdateFolderOp(SV, Direct, 812, 811, "f813"),
+                new UpdateFolderOp(SV, Direct, 813, 814, "f816"),
+                Sync(D2),
+            ]
+        );
+
+        // 受け入れ（フォルダーの name）：swap-without-refresh-does-not-settle と同じ形（夜間の種 255）。こちらは端末が打ち切った行
+        // 832（版の小さいほう）に未送信の更新を持つ＝打ち切った行の競合を、分類できないものに数えないことをこのシナリオが固定する
+        yield return new(
+            "swap-folder-names-without-refresh-does-not-settle",
+            [Folder(SV, 831, name: "w831"), Folder(SV, 832, name: "w832")],
+            [
+                new UpdateFolderOp(SV, Direct, 831, null, "wtmp831"),
+                new UpdateFolderOp(SV, Direct, 832, null, "w831"),
+                new UpdateFolderOp(SV, Direct, 831, null, "w832"),
+                Sync(D1),
+                new UpdateFolderOp(D1, Direct, 832, null, "w832"),
+            ]
+        );
+
+        // P2-3-N15（夜間の種 366・331 を縮めたもの）：端末で 2 つのフォルダーの名前を（仮の名前を挟んで）入れ替えた。上げる記録は
+        // 行ごとの最後の値なので、どちらの更新もサーバーで相手が持つ名前とぶつかって UniqueValueTakenOnServer で断られ、
+        // ServerWins の読み直しもローカルの相手とぶつかって戻せない（静止化しない）。3 行以上の循環も同じ形（種 331 は品目の 3 行）
+        yield return new(
+            "n15-pending-unique-cycle",
+            [Folder(SV, 841, name: "v841"), Folder(SV, 842, name: "v842")],
+            [
+                new UpdateFolderOp(D1, Direct, 841, null, "vtmp841"),
+                new UpdateFolderOp(D1, Direct, 842, null, "v841"),
+                new UpdateFolderOp(D1, Direct, 841, null, "v842"),
+                Sync(D1),
+            ]
+        );
+
+        // N15 の 3 行の循環（品目の code・夜間の種 331 の形）：端末で 846→847→848→846 の順に code を回す
+        yield return new(
+            "n15-pending-unique-cycle-three-items",
+            [
+                Folder(SV, 845),
+                Item(SV, 846, 845, code: "r846"),
+                Item(SV, 847, 845, code: "r847"),
+                Item(SV, 848, 845, code: "r848"),
+            ],
+            [
+                new UpdateItemOp(D1, Direct, 846, 845, null, "rtmp", "t846"),
+                new UpdateItemOp(D1, Direct, 848, 845, null, "r846", "t848"),
+                new UpdateItemOp(D1, Direct, 847, 845, null, "r848", "t847"),
+                new UpdateItemOp(D1, Direct, 846, 845, null, "r847", "t846"),
+                Sync(D1),
+            ]
+        );
+        // 修正 C で消える条件：ServerWins の読み直しで、ぶつかって外した親の子を戻さない（親と一緒に保留する）
+        yield return new(
+            "repro-b3",
+            [
+                Folder(SV, 600, name: "h600"),
+                Folder(SV, 601, name: "p601"),
+                Folder(SV, 602, 601, "c602"),
+            ],
+            [
+                new DeleteFolderOp(D1, Direct, 602),
+                new DeleteFolderOp(D1, Direct, 601),
+                new DeleteFolderOp(SV, Direct, 600),
+                new UpdateFolderOp(SV, Direct, 601, null, "h600"),
+                new UpdateFolderOp(SV, Direct, 602, 601, "c602x"),
+                Sync(D1, policy: SyncConflictPolicy.ServerWins, propagateDeletes: false),
+                Sync(D1, policy: SyncConflictPolicy.ServerWins, propagateDeletes: false),
+            ]
+        );
+
+        foreach (
+            var (name, mode, policy) in new (string, SyncMode, SyncConflictPolicy)[]
+            {
+                ("versioned-collect", SyncMode.Versioned, SyncConflictPolicy.Collect),
+                ("lww-serverwins", SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins),
+            }
+        )
+        {
+            yield return new(
+                $"repro-d3-{name}",
+                [Folder(SV, 700), Item(SV, 701, 700, code: "x"), Item(SV, 702, 700, code: "b")],
+                [
+                    new UpdateItemOp(D1, Direct, 702, 700, null, "b", "edited"),
+                    new UpdateItemOp(D1, Direct, 701, 700, null, "y", "t701"),
+                    new UpdateItemOp(D1, Direct, 702, 700, null, "x", "edited"),
+                    Sync(D1, mode, policy),
+                    new ExpectLocalOp(
+                        SV,
+                        ModelTables.Items,
+                        "702",
+                        "folder=700 label=null code=x title=edited"
+                    ),
+                    new ExpectLocalOp(
+                        SV,
+                        ModelTables.Items,
+                        "701",
+                        "folder=700 label=null code=y title=t701"
+                    ),
+                    Sync(D1),
+                    new ExpectLocalOp(
+                        SV,
+                        ModelTables.Items,
+                        "702",
+                        "folder=700 label=null code=x title=edited"
+                    ),
+                    new ExpectLocalOp(
+                        D1,
+                        ModelTables.Items,
+                        "702",
+                        "folder=700 label=null code=x title=edited"
+                    ),
+                ]
+            );
+
+            // 同じ形をフォルダーの name で（自己参照の表）。取る側は親の付け替えで先に記録を持つ
+            yield return new(
+                $"repro-d3-folder-name-{name}",
+                [Folder(SV, 760, name: "x"), Folder(SV, 761, name: "b"), Folder(SV, 763)],
+                [
+                    new UpdateFolderOp(D1, Direct, 761, 763, "b"),
+                    new UpdateFolderOp(D1, Direct, 760, null, "y"),
+                    new UpdateFolderOp(D1, Direct, 761, 763, "x"),
+                    Sync(D1, mode, policy),
+                    new ExpectLocalOp(SV, ModelTables.Folders, "761", "parent=763 name=x"),
+                    new ExpectLocalOp(SV, ModelTables.Folders, "760", "parent=null name=y"),
+                    Sync(D1),
+                    new ExpectLocalOp(SV, ModelTables.Folders, "761", "parent=763 name=x"),
+                    new ExpectLocalOp(D1, ModelTables.Folders, "761", "parent=763 name=x"),
+                ]
+            );
+
+            yield return new(
+                $"repro-d4-{name}",
+                [
+                    Folder(SV, 710),
+                    Folder(SV, 712),
+                    Item(SV, 711, 710, code: "c1"),
+                    Item(SV, 713, 710, code: "k"),
+                ],
+                [
+                    new DeleteItemOp(D1, Direct, 713),
+                    new UpdateItemOp(D1, Direct, 711, 712, null, "k", "t711"),
+                    new DeleteFolderOp(D1, Direct, 710),
+                    Sync(D1, mode, policy),
+                    new ExpectLocalOp(SV, ModelTables.Folders, "710", null),
+                    new ExpectLocalOp(D1, ModelTables.Folders, "710", null),
+                    Sync(D1),
+                    new ExpectLocalOp(SV, ModelTables.Folders, "710", null),
+                    new ExpectLocalOp(D1, ModelTables.Folders, "710", null),
+                ]
+            );
+        }
     }
 
     /// <summary>
