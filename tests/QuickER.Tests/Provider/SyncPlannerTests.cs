@@ -3818,9 +3818,18 @@ public class SyncPlannerTests
         List<SchemaDiffItem> items = [drop];
         List<SchemaDiffKind> expected = [SchemaDiffKind.DropForeignKey, drop.Kind];
 
-        // 親の主キーの列の削除は、その列を外す主キーの変更（主キーを外すだけ）と一緒に選ぶ
+        // 親の主キーの列の削除は、その列を外す主キーの変更（主キーを外すだけ）と一緒に選ぶ。親の表にはほかの列を
+        // 持たせる（id だけの表から id を消すと、表に列が残らないので列の削除そのものを外す＝TableLeftWithoutColumns）
         if (table == "customer" && column == "id")
         {
+            customer.Columns.Add(
+                new Column
+                {
+                    Name = "name",
+                    DataType = "nvarchar(50)",
+                    IsNullable = true,
+                }
+            );
             var keyless = customer.Clone(preserveId: true);
             keyless.Columns.Single(c => c.Name == "id").IsPrimaryKey = false;
             items.Add(

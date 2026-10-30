@@ -552,26 +552,16 @@ internal static class SyncPlanScenarios
                         target.SetType("orders", "customer_id", FuzzTypeKind.BigInt);
                     }
                 ),
-                // ---- nightly-sqlite-*（SQLite・P2）----
-                // 実 DB の種 2301・2667・7088・7411・7898・15266・18203：表の列をすべて消す（主キーの解除と列の削除）→ 列が 0 本の再構築
-                Row(
-                    "sqlite-empty-rebuild",
-                    "nightly-sqlite-empty-rebuild",
-                    "表の列をすべて消すと、列が 0 本の再構築の表が構文エラーになる（実 DB の種 2301 ほか）",
-                    DialectNames.Sqlite,
-                    live =>
-                    {
-                        var t = live.Table("t_codes");
-                        live.Int(t, "id", pk: true);
-                        var s0 = live.VarChar(t, "s0", 20);
-                        live.Unique(t, null, s0);
-                    },
-                    target =>
-                    {
-                        target.DropColumn("t_codes", "id");
-                        target.DropColumn("t_codes", "s0");
-                    }
-                ),
+                // ---- nightly-sqlite-empty-rebuild（5 方言・修正 B で直した。行は回帰の網）：表の列をすべて消す（主キーの解除・一意制約の
+                // 削除と列の削除）と、SQLite は列が 0 本の再構築の表が構文エラー、SQL Server・MySQL・Oracle は最後の列の削除を DB が断り
+                // （MySQL・Oracle は前の文が暗黙コミットで残る）、PostgreSQL は列の無い表を作って取り込み直すと列を読めない表になっていた。
+                // 修正 B で、同期後に列の残らない表の列の削除を計画から外して名指しする（TableLeftWithoutColumns）ようにした ----
+                // SQLite の実 DB の種 2301・2667・7088・7411・7898・15266・18203、網の SQL Server の種 383・4972 ほか・Oracle の種 2600 ほか
+                DropAllColumnsRow("sqlite-empty-rebuild", DialectNames.Sqlite),
+                DropAllColumnsRow("sqlserver-drop-all-columns", DialectNames.SqlServer),
+                DropAllColumnsRow("mysql-drop-all-columns", DialectNames.MySql),
+                DropAllColumnsRow("oracle-drop-all-columns", DialectNames.Oracle),
+                DropAllColumnsRow("postgresql-drop-all-columns", DialectNames.PostgreSql),
                 // 旧い実 DB の種 12503・18316：主キーへ列を足してから元の主キーの列を消す（残る主キーの列の値が一意でない）
                 Row(
                     "sqlite-pk-nonunique",
@@ -674,13 +664,14 @@ internal static class SyncPlanScenarios
                         target.SetDataType("r_events", "stamped", "timestamp(0)");
                     }
                 ),
-                // ---- sqlite-rebuild-replace-all-columns（SQLite・修正 B）：表の元の列をすべて消して（主キーの解除と列の削除）新しい列を
-                // 足すと、再構築に写す列が無く INSERT … SELECT が出ず、行がすべて消える（警告なし・コミット。逐次 DDL の方言では行が残る）。
+                // ---- sqlite-rebuild-replace-all-columns（SQLite・修正 B で直した。行は回帰の網）：表の元の列をすべて消して（主キーの解除と
+                // 列の削除）新しい列を足すと、再構築に写す列が無く INSERT … SELECT が出ず、行がすべて消えていた（警告なし・コミット。逐次 DDL の
+                // 方言では行が残る）。修正 B で、写す列が無くても最初の列へ NULL を入れて行を写すようにした。
                 // nightly-sqlite-empty-rebuild（列が 0 本の再構築）の隣の形。実 DB の種 795 で見つけた ----
                 Row(
                     "sqlite-795-replace-all-columns",
                     "sqlite-rebuild-replace-all-columns",
-                    "表の元の列をすべて消して新しい列を足すと、再構築が行を写さずに消す",
+                    "表の元の列をすべて消して新しい列を足しても、再構築は行を残す（新しい列は NULL）",
                     DialectNames.Sqlite,
                     live =>
                     {
@@ -880,6 +871,30 @@ internal static class SyncPlanScenarios
                 dialect,
                 fuzzDialect => new SyncPlanScenarioCase(fuzzDialect, build, mutate, select)
             )
+        );
+
+    /// <summary>表の列をすべて消す行（主キーの解除・一意制約の削除・列 2 本の削除を選ぶ）</summary>
+    private static ScenarioRow<SyncPlanScenarioInput> DropAllColumnsRow(
+        string id,
+        string dialect
+    ) =>
+        Row(
+            id,
+            "nightly-sqlite-empty-rebuild",
+            "表の列をすべて消す変更は、列の削除を計画から外して名指しし、主キーの解除・一意制約の削除だけを行う",
+            dialect,
+            live =>
+            {
+                var t = live.Table("t_codes");
+                live.Int(t, "id", pk: true);
+                var s0 = live.VarChar(t, "s0", 20);
+                live.Unique(t, null, s0);
+            },
+            target =>
+            {
+                target.DropColumn("t_codes", "id");
+                target.DropColumn("t_codes", "s0");
+            }
         );
 
     /// <summary>その種類の選べる項目のうち最初の 1 つだけを選ぶ</summary>

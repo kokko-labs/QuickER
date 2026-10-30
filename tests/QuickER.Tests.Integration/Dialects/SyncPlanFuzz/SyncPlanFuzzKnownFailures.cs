@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using QuickER.Dialects;
 using QuickER.Tests.TestSupport.Engines;
 
@@ -18,7 +17,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// <see cref="KnownEntry.Reproduction"/> が言う既定の種の数で流したときだけ行う（種を絞ると、その形が出ないことがある。
 /// 夜間に見つけた形は夜間の既定の種の数でだけ数える）。照合の規則は <see cref="KnownFailureSet"/> が持つ。
 /// </remarks>
-internal static partial class SyncPlanFuzzKnownFailures
+internal static class SyncPlanFuzzKnownFailures
 {
     /// <summary>項目（<see cref="Entry"/> で作る）</summary>
     public static readonly IReadOnlyList<KnownEntry> Entries =
@@ -40,24 +39,6 @@ internal static partial class SyncPlanFuzzKnownFailures
             "修正 E",
             ["mysql-77-respell-datetime"],
             IsZeroPrecisionRespelling
-        ),
-        // sqlite-rebuild-replace-all-columns（SQLite・修正 B・P2-4）：表の元の列をすべて消して（主キーの解除と列の削除）新しい列を
-        // 足すと、再構築に写す列が無く INSERT … SELECT が出ず、行がすべて消える（警告なし・コミット。逐次 DDL の方言では行は残り、
-        // 新しい列は NULL になる）。表明 5（行数）の「row count changed」で出る。nightly-sqlite-empty-rebuild の隣の形
-        // - 実 DB の種 795：主キーの解除・一意制約の削除・列 2 本の削除と列 2 本の追加を選ぶ → 行が 3 → 0
-        .. Entry(
-            "sqlite-rebuild-replace-all-columns",
-            [DialectNames.Sqlite],
-            "修正 B",
-            IsRebuildReplacingAllColumns,
-            KnownReproduction.RegularSeeds
-        ),
-        .. Scenario(
-            "sqlite-rebuild-replace-all-columns",
-            DialectNames.Sqlite,
-            "修正 B",
-            ["sqlite-795-replace-all-columns"],
-            IsRebuildReplacingAllColumns
         ),
         // synthesized-unique-name-collision（修正 E・P2-4）：名前付きの一意制約の列を変え（名前は保つ）、元の列に名前の無い一意制約を
         // 足すと、名前の無い一意制約の合成名（UniqueConstraint.SynthesizeName＝UQ_{表}_{列}）が既存の名前と同じになり、MySQL
@@ -95,23 +76,6 @@ internal static partial class SyncPlanFuzzKnownFailures
             "修正 E",
             [SyncPlanHistoryRows.F1Id],
             IsLegacyForeignKeyNameCollision
-        ),
-        // 夜間の実行（SQLite の実 DB の種 2301・2667・7088・7411・7898・15266・18203）で見つけた。表の列をすべて消す変更（主キーの解除と
-        // 列の削除）を選ぶと、再構築の合成で列が 0 本の表になり、`CREATE TABLE "…_quicker_rebuild" ();` が構文エラーで失敗する。
-        // 計画は警告も拒否もしない（利用者の図でも起き得る製品の欠け）
-        .. Entry(
-            "nightly-sqlite-empty-rebuild",
-            [DialectNames.Sqlite],
-            "P2",
-            IsEmptyRebuild,
-            KnownReproduction.NightlySeeds
-        ),
-        .. Scenario(
-            "nightly-sqlite-empty-rebuild",
-            DialectNames.Sqlite,
-            "P2",
-            ["sqlite-empty-rebuild"],
-            IsEmptyRebuild
         ),
         // nightly-sqlite-pk-nonunique（受け入れ・P2-4 で切り分けた）：値が一意でない列への主キーの付け替えは、DB がデータで断る
         // （SQLite は再構築のデータの移送で UNIQUE constraint failed になり、トランザクションを巻き戻して何も変えない）。計画は列の値を
@@ -162,29 +126,10 @@ internal static partial class SyncPlanFuzzKnownFailures
             && m.EndsWith("(0)", StringComparison.Ordinal)
         );
 
-    /// <summary>sqlite-rebuild-replace-all-columns：警告なしのコミットで行数が減る（再構築が行を写さない）</summary>
-    private static bool IsRebuildReplacingAllColumns(FuzzSeedOutcome o) =>
-        o.Committed
-        && o.Warnings.Count == 0
-        && o.Violations.Count > 0
-        && o.Violations.All(v =>
-            v.StartsWith("row count changed:", StringComparison.Ordinal)
-            && v.EndsWith("-> 0", StringComparison.Ordinal)
-        );
-
-    /// <summary>nightly-sqlite-empty-rebuild：列が 0 本の再構築の表が構文エラー</summary>
-    private static bool IsEmptyRebuild(FuzzSeedOutcome o) =>
-        OnlyViolations(o, "failed without a warning: SQLite Error 1: 'near \")\": syntax error'")
-        && EmptyRebuildTable().IsMatch(o.Script);
-
     /// <summary>nightly-sqlite-pk-nonunique：一意でない列への主キーの付け替えが UNIQUE 違反</summary>
     private static bool IsNonUniquePrimaryKey(FuzzSeedOutcome o) =>
         OnlyViolations(o, "failed without a warning: SQLite Error 19: 'UNIQUE constraint failed:")
         && o.Selected.Any(s => s.StartsWith("AlterPrimaryKey", StringComparison.Ordinal));
-
-    /// <summary>列が 0 本の再構築の表の作成文</summary>
-    [GeneratedRegex(@"_quicker_rebuild"" \(\s*\);")]
-    private static partial Regex EmptyRebuildTable();
 
     /// <summary>一覧</summary>
     public static KnownFailureSet Set { get; } = new("SyncPlan", Entries);

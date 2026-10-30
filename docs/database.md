@@ -552,6 +552,9 @@ SQLite rebuilds tables and uses its own order.
   Dropping a column of the primary key needs the primary key change that removes the column.
   A foreign key you add or change needs the primary key change when it refers to the parent's new primary key, and that key is neither the primary key nor a unique constraint without the change.
   QuickER does not select the needed change for you
+- When the selected column drops would leave a table without any column, those column drops are left out of the script, and the confirmation names the table and the columns.
+  A database table needs at least one column (SQL Server, MySQL and Oracle refuse to drop the last one, and a PostgreSQL table without columns cannot be imported back), so delete the table from the diagram and select dropping the table instead.
+  Removing the primary key and dropping unique constraints of that table still run
 - Composite (multi-column) foreign keys are handled as first-class: a relationship holds an ordered list of column pairs, so import, DDL generation, and sync all carry every pair.
   That includes the implicit drop-and-recreate triggered by a primary-key change and SQLite's table rebuilds, and a composite foreign key is never silently narrowed to a single column
 
@@ -685,6 +688,8 @@ It records `COLUMN_DEFAULT` with different semantics, so a definition rebuilt fr
 Because SQLite's `ALTER TABLE` supports only limited changes, a table is rebuilt when the sync changes or drops one of its columns, changes its primary key, adds or drops a unique constraint or a foreign key, or reorders its columns.
 Adding a column runs as `ALTER TABLE ADD COLUMN` when nothing else in the same sync rebuilds that table, and otherwise the new column becomes part of the rebuild.
 A new table is created from the combined definition of "the database's current state + the selected differences," the data is migrated, the old table is swapped out, and auxiliary objects such as indexes are recreated.
+The rows are kept even when none of the old columns remain (all of them are dropped and new columns are added): the new columns are NULL, as on the other dialects.
+A new `NOT NULL` column makes the rebuild fail on a table with rows, and the sync rolls back; a new `INTEGER PRIMARY KEY` column is filled with row numbers instead, where the other dialects refuse to add a `NOT NULL` key column to a table with rows.
 The rebuild runs inside a transaction, and before committing it checks foreign-key integrity (`PRAGMA foreign_key_check`); if the sync added violations it rolls back and reports the violating tables.
 SQLite does not check foreign keys by default, so databases that hold child rows without a parent are common, and violations that existed before the sync do not make it fail.
 A view that refers to a rebuilt table does not stop the rebuild, and it keeps pointing at the rebuilt table (`PRAGMA legacy_alter_table` is turned on for the duration).

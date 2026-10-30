@@ -161,6 +161,16 @@ public sealed class SqliteSyncScriptBuilder : SyncScriptBuilderBase
                 $"INSERT INTO {quotedTemp} ({cols}) SELECT {cols} FROM {SqliteIdentifier.Quote(table)};"
             );
         }
+        else if (rebuild.NewDefinition.Columns.Count > 0)
+        {
+            // 写す列が無くても（元の列をすべて消して新しい列を足す）行の数は保つ＝逐次 DDL の方言と同じく行は残り、新しい列は
+            // NULL になる。最初の列へ NULL を入れ、ほかの列は既定（NULL・INTEGER PRIMARY KEY は採番）に任せる。NOT NULL の
+            // 新しい列は SQLite が断ってトランザクションごと巻き戻る（逐次 DDL の方言が行のある表への NOT NULL の列の追加を断るのと同じ）
+            var first = SqliteIdentifier.QuoteSimple(rebuild.NewDefinition.Columns[0].Name);
+            sb.AppendLine(
+                $"INSERT INTO {quotedTemp} ({first}) SELECT NULL FROM {SqliteIdentifier.Quote(table)};"
+            );
+        }
 
         sb.AppendLine($"DROP TABLE {SqliteIdentifier.Quote(table)};");
         sb.AppendLine($"ALTER TABLE {quotedTemp} RENAME TO {SqliteIdentifier.QuoteSimple(table)};");

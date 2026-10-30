@@ -44,6 +44,8 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **On SQL Server, dropping one of two unique constraints on the same columns and changing the type of those columns no longer fails** — the other unique constraint is dropped and re-added around the change
 - **On Oracle, moving the primary key onto the columns of an existing unique constraint no longer fails with ORA-02261 and leaves the table without a primary key** — the sync drops that unique constraint and names it in the confirmation, and a foreign key that refers to it is re-created on the new primary key
 - **On SQLite, after a sync that changes only one of two foreign keys on the same columns, the diff shows the other one as a change** — it showed only a drop, so the next sync left a single foreign key
+- **A sync whose selected column drops would leave a table without any column now leaves those drops out and names the table and the columns in the confirmation** — SQL Server refused the sync, MySQL and Oracle refused it after dropping the constraints and some columns, PostgreSQL created a table without columns that could not be imported back, and SQLite failed with a syntax error
+- **On SQLite, a sync that drops all the old columns of a table and adds new ones no longer deletes every row** — the rows are kept and the new columns are NULL, as on the other dialects
 
 ## [0.3.0] - 2026-10-25
 

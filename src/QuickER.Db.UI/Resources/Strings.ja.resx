@@ -369,6 +369,10 @@
     <value>注意: 以下の選んだ変更は、選んでいない変更（表・列の追加か主キーの変更。括弧内）を前提にするため実行しません。適用するには、その変更も選んでください:
 {0}</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmTableLeftWithoutColumns" xml:space="preserve">
+    <value>注意: 以下の列の削除は、表の列が 1 本も残らなくなるため実行しません。DB の表は列を少なくとも 1 本持つ必要があります。表ごと消すには、図から表を削除して表の削除を選んでください:
+{0}</value>
+  </data>
   <data name="SchemaSync_ExecuteConfirmForeignKeyNotOnCandidateKey" xml:space="preserve">
     <value>注意: 以下の外部キーは、同期後の参照先の列が主キーにも一意制約にもちょうど一致しません。追加は失敗する可能性が高く、既存の外部キーの作り直しでは、MySQL / Oracle で外部キーが外れたまま残り得ます:
 {0}</value>

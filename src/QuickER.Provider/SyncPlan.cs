@@ -201,6 +201,16 @@ public enum SyncPlanWarningKind
     /// 外して名指しする（付け直さない）。その一意制約を参照する外部キーは外して、新しい主キーへ付け直す。
     /// </remarks>
     UniqueConstraintReplacedByPrimaryKey,
+
+    /// <summary>
+    /// 選んだ列の削除で、同期後に残る表の列が 1 本も無くなるので、その表の選んだ列の削除をすべて計画から外した（方言に依らない）。
+    /// </summary>
+    /// <remarks>
+    /// 表の列をすべて消す変更は、どの方言でも正しく扱えない（SQL Server・MySQL・Oracle は最後の列の削除を断り、MySQL・Oracle は
+    /// それより前の文が暗黙コミットで残る。PostgreSQL は列の無い表を作り、取り込み直すと列を読めない表になる。SQLite は再構築の
+    /// 表を作れない）。主キーの解除・一意制約の削除は単独で正しいので残す。表ごとに 1 件。
+    /// </remarks>
+    TableLeftWithoutColumns,
 }
 
 /// <summary>
@@ -216,7 +226,8 @@ public enum SyncPlanWarningKind
 /// <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> と <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
 /// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
 /// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> と <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
-/// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）。
+/// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）、
+/// <see cref="SyncPlanWarningKind.TableLeftWithoutColumns"/> では列を消す表（Detail は計画から外した列の削除の列名をカンマ区切りで並べたもの）。
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
@@ -316,6 +327,10 @@ public sealed class TableRebuildPlan
     /// <summary>
     /// データ移送（<c>INSERT ... SELECT</c>）の対象列名（live と <see cref="NewDefinition"/> の両方に存在する列）。
     /// </summary>
+    /// <remarks>
+    /// 空でも（元の列をすべて消して新しい列を足す）再構築は行の数を保つ（新しい列は NULL。NOT NULL の新しい列があれば
+    /// DB が断って巻き戻る）。
+    /// </remarks>
     public IReadOnlyList<string> CopyColumns { get; init; } = [];
 
     /// <summary>再構築後に再現する補助オブジェクト（インデックス・トリガー）。</summary>

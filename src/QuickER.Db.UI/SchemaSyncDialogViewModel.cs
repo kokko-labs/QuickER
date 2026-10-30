@@ -629,6 +629,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmDescriptionCharactersReplaced,
                 BulletList(warnings.Select(w => w.Detail))
             ),
+            // 選んだ列の削除で表の列が 1 本も残らなくなるので、その表の列の削除を計画から外した
+            SyncPlanWarningKind.TableLeftWithoutColumns => string.Format(
+                Strings.SchemaSync_ExecuteConfirmTableLeftWithoutColumns,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
         };
 
