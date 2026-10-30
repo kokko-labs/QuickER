@@ -69,6 +69,7 @@ internal static class SyncPlanStaticRules
             SyncPlanWarningKind.SelectedItemRequiresUnselectedItem,
             SyncPlanWarningKind.TableRebuildDropsColumnAttribute,
             SyncPlanWarningKind.UniqueConstraintDroppedWithColumn,
+            SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey,
             SyncPlanWarningKind.DescriptionCharactersReplaced,
         };
 

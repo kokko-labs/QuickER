@@ -619,6 +619,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 Strings.SchemaSync_ExecuteConfirmUniqueConstraintDroppedWithColumn,
                 BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
             ),
+            // 主キーと同じ列集合の一意制約を持てない方言（Oracle）では、同じ列へ主キーを付け替えると一意制約を外す
+            SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey => string.Format(
+                Strings.SchemaSync_ExecuteConfirmUniqueConstraintReplacedByPrimaryKey,
+                BulletList(warnings.Select(w => $"{w.TableName} / {w.Detail}"))
+            ),
             // 説明の BMP の外の文字は、保存できない方言（MySQL）では ? として保存される
             SyncPlanWarningKind.DescriptionCharactersReplaced => string.Format(
                 Strings.SchemaSync_ExecuteConfirmDescriptionCharactersReplaced,

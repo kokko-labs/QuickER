@@ -726,31 +726,119 @@ public class SchemaDiffServiceTests
 
     /// <summary>
     /// 外部キー名を保存しない方言（SQLite）でも、同じ子列に張る外部キーの参照アクションだけが変われば
-    /// AlterForeignKey になることを検証する（2 項目のままだと再構築で旧と新が同じ列に並ぶ）。
+    /// AlterForeignKey になることと、同じシグネチャ（列ペア・参照アクション）の外部キーが何本あっても本数で組むことを検証する
+    /// （集合で比べると、DB の 2 本のうち 1 本だけを変えた図との差分が「削除 1 本」になり、作り直しが消えていた）。
+    /// 作り直しへの畳み込みは削除と追加を 1 対 1 で組む。
     /// </summary>
-    [Fact(
-        DisplayName = "名前を保存しない方言でも同じ子列の外部キーの変更は AlterForeignKey になる"
+    /// <param name="live">DB の外部キーの ON DELETE（同じ子列・同じ親列に並べる）</param>
+    /// <param name="target">図の外部キーの ON DELETE（同上）</param>
+    /// <param name="alters">期待する AlterForeignKey の数</param>
+    /// <param name="adds">期待する AddForeignKey の数</param>
+    /// <param name="drops">期待する DropForeignKey の数</param>
+    [Theory(
+        DisplayName = "名前を保存しない方言でも同じ子列の外部キーの変更は AlterForeignKey になる（同じシグネチャは本数で組む）"
     )]
-    public void ForeignKeyChange_WithoutPersistedNames_EmitsSingleAlter()
+    [InlineData(
+        new[] { ForeignKeyReferentialAction.NoAction },
+        new[] { ForeignKeyReferentialAction.Cascade },
+        1,
+        0,
+        0
+    )]
+    [InlineData(
+        new[] { ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.Cascade },
+        new[] { ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.Cascade },
+        1,
+        0,
+        0
+    )]
+    [InlineData(
+        new[] { ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.NoAction },
+        new[] { ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.Cascade },
+        2,
+        0,
+        0
+    )]
+    [InlineData(
+        new[] { ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.Cascade },
+        new[] { ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.Cascade },
+        0,
+        0,
+        0
+    )]
+    [InlineData(
+        new[] { ForeignKeyReferentialAction.Cascade },
+        new[] { ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.Cascade },
+        0,
+        1,
+        0
+    )]
+    [InlineData(
+        new[] { ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.Cascade },
+        new[] { ForeignKeyReferentialAction.Cascade },
+        0,
+        0,
+        1
+    )]
+    [InlineData(
+        new[] { ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.NoAction },
+        new[] { ForeignKeyReferentialAction.Cascade },
+        1,
+        0,
+        1
+    )]
+    public void ForeignKeyChange_WithoutPersistedNames_EmitsSingleAlter(
+        ForeignKeyReferentialAction[] live,
+        ForeignKeyReferentialAction[] target,
+        int alters,
+        int adds,
+        int drops
+    )
     {
-        var (live, liveRels, target, targetRels) = ForeignKeyPair(
+        var (liveEntities, liveRels, targetEntities, targetRels) = ForeignKeyPair(
             liveName: "FK_Child_Parent_0",
             targetName: null
         );
-        targetRels[0].OnDelete = ForeignKeyReferentialAction.Cascade;
+        liveRels = WithActions(liveEntities, liveRels, live);
+        targetRels = WithActions(targetEntities, targetRels, target);
 
         var diff = new SchemaDiffService().Compute(
-            live,
+            liveEntities,
             liveRels,
-            target,
+            targetEntities,
             targetRels,
             new SqliteProvider().SyncCapabilities
         );
 
-        diff.Items.Should()
-            .ContainSingle(i => IsForeignKeyDiff(i))
-            .Which.Kind.Should()
-            .Be(SchemaDiffKind.AlterForeignKey);
+        var items = diff.Items.Where(IsForeignKeyDiff).ToList();
+        items.Count(i => i.Kind == SchemaDiffKind.AlterForeignKey).Should().Be(alters);
+        items.Count(i => i.Kind == SchemaDiffKind.AddForeignKey).Should().Be(adds);
+        items.Count(i => i.Kind == SchemaDiffKind.DropForeignKey).Should().Be(drops);
+        items.Should().HaveCount(alters + adds + drops);
+
+        // 同じ子列・親列の外部キーを参照アクションごとに並べる（1 本目は ForeignKeyPair の外部キーの名前を引き継ぐ）
+        static List<Relationship> WithActions(
+            List<Entity> entities,
+            List<Relationship> relationships,
+            ForeignKeyReferentialAction[] actions
+        ) =>
+            [
+                .. actions.Select(
+                    (action, index) =>
+                        new Relationship
+                        {
+                            SourceEntityId = entities[0].Id,
+                            TargetEntityId = entities[1].Id,
+                            Type = RelationshipType.OneToMany,
+                            ColumnPairs =
+                            [
+                                new(entities[0].Columns[0].Id, entities[1].Columns[1].Id),
+                            ],
+                            ConstraintName = index == 0 ? relationships[0].ConstraintName : null,
+                            OnDelete = action,
+                        }
+                ),
+            ];
     }
 
     /// <summary>名前の違う外部キー同士は作り直しとみなさず、削除と追加のまま残すことを検証する</summary>

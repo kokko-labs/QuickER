@@ -66,7 +66,8 @@ internal static class SyncPlanScenarios
             EngineIds.SyncPlan,
             [
                 // ---- 4m-p6-doomed-rebuild（MySQL・修正 A）：計画が失敗を前もって分かっている（ForeignKeyColumnTypeMismatch）のに、
-                // 選んだ作り直し・主キーの変更の DROP が失敗の文より前に走り、付け直しが走らずに消える ----
+                // 選んだ作り直し・主キーの変更の DROP が失敗の文より前に走り、付け直しが走らずに消えていた。修正 A で、DDL が暗黙コミット
+                // される方言では必ず断られる文を計画の先頭へ移して直した（何も変えずに失敗する）。行は回帰の網 ----
                 // 実 DB の種 44：自己参照の外部キーの ON DELETE の作り直し・参照される表の主キーの解除・別の表の主キーの片側だけの型の変更
                 // → 外し直しを止めたまま主キーの解除が「needed in a foreign key constraint」で失敗 → 作り直した外部キーが消える
                 Row(
@@ -214,7 +215,8 @@ internal static class SyncPlanScenarios
                     }
                 ),
                 // ---- nightly-mysql-1191（MySQL・P2）：候補キーを証明できない付け直しが「Missing unique key」で失敗し、
-                // 同じ計画で先に外した制約が消えたまま残る ----
+                // 同じ計画で先に外した制約が消えたまま残っていた（candidate-key-re-add-collateral）。修正 A で、DDL が暗黙コミットされる
+                // 方言では証明できない外部キーの追加を外部キーの追加の最後へ回して直した。行は回帰の網 ----
                 // 実 DB の種 1191：参照される表の主キーを外す（付け直しが失敗）と、別の外部キーの子列の一意制約の削除（MySQL は外部キーを
                 // 外して付け直す）→ 選んでいない外部キーが消える
                 Row(
@@ -327,7 +329,8 @@ internal static class SyncPlanScenarios
                         );
                     }
                 ),
-                // ---- warned-removal-not-named（PostgreSQL・修正 A。旧名 nightly-postgresql-512）----
+                // ---- warned-removal-not-named（PostgreSQL・修正 A で直した＝外した項目を SyncPlan.ExcludedItems に記録し、総当たりは
+                // それで引く。旧名 nightly-postgresql-512。行は回帰の網）----
                 // 実 DB の種 512：自己参照の外部キーの参照アクションの変更（AlterForeignKey）と参照先の主キー列の型の変更を一緒に選ぶ
                 // → 型の食い違いの警告で作り直しを外すが、外した作り直しを名指ししない（選んだ項目が同期の後も残る）
                 Row(
@@ -353,7 +356,8 @@ internal static class SyncPlanScenarios
                 // ---- nightly-oracle-100-111（Oracle・P2）----
                 // 旧い実 DB の種 100：一意制約のある列へ主キーを付け替える（同じ種で一意制約の削除・表の削除も作るが選ばない）
                 // 実 DB の種 111：一意制約のある列へ主キーを付け替える（ほかの変更は選ばない）
-                // → ORA-02261 で失敗（警告なし）・主キーが消えたまま残る
+                // → ORA-02261 で失敗（警告なし）・主キーが消えたまま残っていた。修正 A で、新しい主キーと同じ列集合の一意制約を
+                // 暗黙に外して名指しする（UniqueConstraintReplacedByPrimaryKey）よう直した。行は回帰の網
                 Row(
                     "oracle-100-111-move-pk-onto-unique",
                     "nightly-oracle-100-111",
@@ -369,8 +373,29 @@ internal static class SyncPlanScenarios
                     target => target.SetPrimaryKey("t_items", "s0"),
                     item => item.Kind == SchemaDiffKind.AlterPrimaryKey
                 ),
+                // 同じ形で、その一意制約を別の表の外部キーが参照している（修正 A：一意制約を外す前に外部キーを外し、新しい主キーへ
+                // 付け直す。外さないと一意制約の削除が ORA-02273 で断られる）
+                Row(
+                    "oracle-move-pk-onto-referenced-unique",
+                    "nightly-oracle-100-111",
+                    "外部キーが参照する一意制約の列へ主キーを付け替えると、外部キーを外して新しい主キーへ付け直す",
+                    DialectNames.Oracle,
+                    live =>
+                    {
+                        var t = live.Table("t_items");
+                        live.Int(t, "id", pk: true);
+                        var s0 = live.VarChar(t, "s0", 20);
+                        live.Unique(t, "UQ_t_items_s0", s0);
+                        var c = live.Table("c_notes");
+                        live.Int(c, "id", pk: true);
+                        live.Ref(c, t, "item_s0", "fk_c_t", referenced: [s0]);
+                    },
+                    target => target.SetPrimaryKey("t_items", "s0"),
+                    item => item.Kind == SchemaDiffKind.AlterPrimaryKey
+                ),
                 // ---- 4m-P1（Oracle・修正 A）：主キーの変更で、型が食い違う外部キーだけを残し兄弟の外部キーは外す → 主キーの解除が
-                // ORA-02273 で失敗し、外した兄弟の外部キーが消えたまま残る（再現パッチ Repro4mOracleTests.P1） ----
+                // ORA-02273 で失敗し、外した兄弟の外部キーが消えたまま残っていた（再現パッチ Repro4mOracleTests.P1）。修正 A で、主キーの
+                // 解除を計画の先頭へ移して直した。行は回帰の網 ----
                 Row(
                     "4m-p1-sibling-foreign-key",
                     "4m-p1",
@@ -395,8 +420,8 @@ internal static class SyncPlanScenarios
                         target.SetType("r_orders", "customer_id", FuzzTypeKind.VarChar, 20);
                     }
                 ),
-                // ---- 4m-Q6（SQL Server・修正 A）：同じ列集合の一意制約 2 つの片方を明示的に外し、その列の型を変えると、もう片方が
-                // 外されず Msg 5074（再現パッチ Repro4mSqlServerTests.Q6） ----
+                // ---- 4m-Q6（SQL Server・修正 A で直した）：同じ列集合の一意制約 2 つの片方を明示的に外し、その列の型を変えると、もう片方が
+                // 外されず Msg 5074 だった（再現パッチ Repro4mSqlServerTests.Q6）。一意制約の照合キーに名前を入れて直した。行は回帰の網 ----
                 Row(
                     "4m-q6-duplicate-unique",
                     "4m-q6",
@@ -566,6 +591,9 @@ internal static class SyncPlanScenarios
                     }
                 ),
                 // 旧い実 DB の種 16938：外部キーの付け替え先が、選んでいない新しい表（AddTable）
+                // 計画は SelectedItemRequiresUnselectedItem で名指しして外していた（製品は正しい）。表の削除に伴う暗黙の外部キーの削除が
+                // 付け替えの旧い側と同じキーを計画に入れ、総当たりの数え方が付け替えを「計画に入っている」と取り違えていた。修正 A で
+                // ランナーの数え方を直した（外した項目を SyncPlan.ExcludedItems で引く）。行は回帰の網
                 Row(
                     "sqlite-alterfk-unselected-target",
                     "nightly-sqlite-alterfk-unselected-target",
@@ -587,7 +615,8 @@ internal static class SyncPlanScenarios
                     },
                     item => item.Kind != SchemaDiffKind.AddTable
                 ),
-                // 旧い実 DB の種 17592：同じ列ペアの外部キー 2 本の参照アクションをどちらも変え、片方の作り直しだけを選ぶ
+                // 旧い実 DB の種 17592：同じ列ペアの外部キー 2 本の参照アクションをどちらも変え、片方の作り直しだけを選ぶ（修正 A で直した：
+                // 計画は正しく、同期の後の差分が外部キーを集合で比べて 2 本目の作り直しを落としていた。差分を本数で比べて直した。行は回帰の網）
                 Row(
                     "sqlite-twin-fk-rebuild",
                     "nightly-sqlite-twin-fk-rebuild",
@@ -669,7 +698,7 @@ internal static class SyncPlanScenarios
                         target.AddColumn("r_nodes", "added_b", FuzzTypeKind.Int);
                     }
                 ),
-                // ---- warned-removal-not-named（SQL Server・修正 A）：実 DB の種 753 の形＝親の列の型を変えずに（変更は選ばない）、
+                // ---- warned-removal-not-named（SQL Server・修正 A で直した。行は回帰の網）：実 DB の種 753 の形＝親の列の型を変えずに（変更は選ばない）、
                 // 子に型の違う列と外部キーを足す → ForeignKeyColumnTypeMismatch で外部キーの追加を外すが名指ししない ----
                 Row(
                     "sqlserver-753-warned-type-mismatch",
@@ -696,7 +725,7 @@ internal static class SyncPlanScenarios
                     },
                     item => item.Kind != SchemaDiffKind.AlterColumn
                 ),
-                // ---- warned-removal-not-named（MySQL・修正 A）：実 DB の種 997 の形＝NOT NULL の子の列の外部キーを SET NULL へ作り直し、
+                // ---- warned-removal-not-named（MySQL・修正 A で直した。行は回帰の網）：実 DB の種 997 の形＝NOT NULL の子の列の外部キーを SET NULL へ作り直し、
                 // NULL 許容化は選ばない → SetNullOnNotNullColumn で作り直しを外すが名指ししない ----
                 Row(
                     "mysql-997-warned-set-null",
@@ -981,8 +1010,8 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
         );
 
     /// <summary>
-    /// 親の主キーを参照する列と外部キーを足す（親の主キーが複数列なら列名に _0・_1 を付ける。値は親の行を指す。
-    /// 自己参照は 1 行目を NULL にして前の行を指す）
+    /// 親の主キー（<paramref name="referenced"/> を渡せばその列＝一意制約の列）を参照する列と外部キーを足す（参照する列が
+    /// 複数なら列名に _0・_1 を付ける。値は親の行を指す。自己参照は 1 行目を NULL にして前の行を指す）
     /// </summary>
     public Column Ref(
         Entity child,
@@ -990,10 +1019,11 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
         string name,
         string? constraintName,
         ForeignKeyReferentialAction onDelete = ForeignKeyReferentialAction.NoAction,
-        bool nullable = false
+        bool nullable = false,
+        IReadOnlyList<Column>? referenced = null
     )
     {
-        var key = parent.GetPrimaryKeyColumnsInOrder();
+        var key = referenced ?? parent.GetPrimaryKeyColumnsInOrder();
         var self = ReferenceEquals(child, parent);
         var parentRows = live.RowCounts[parent.TableName];
         var pairs = new List<RelationshipColumnPair>();

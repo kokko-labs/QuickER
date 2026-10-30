@@ -102,7 +102,7 @@ internal sealed class FuzzSeedOutcome
 /// <item>コミットしたら取り込み直し、同じ目標の図で差分を取り直す。選んだ項目は消えている。
 /// 同期の前の差分に無かった項目は現れない（変えていない外部キー・制約が巻き添えで消える・変わる形）。
 /// ただし列を足した表の列順の差分は除く（足した列は末尾に付き、次の同期で列順の差分になるのが仕様）。
-/// 計画が <see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/> で名指しして外した項目は、選ばなかった項目
+/// 計画が名指しして外した項目（<see cref="SyncPlan.ExcludedItems"/>＝警告と一緒に積む。項目そのもので引く）は、選ばなかった項目
 /// として扱う（残ってよい。列の変更は NULL 許容化だけを外して型の変更を残すことがあるので、残ってよいが選んだ項目のまま）。
 /// 警告なしに計画から消えた項目は、選んだのに残った違反になる。選択できない案内項目（同期できない差分を知らせるだけ）は
 /// 表明 2・2b・3 のどれでも差分として数えない。</item>
@@ -269,27 +269,17 @@ internal static class SyncPlanFuzzRunner
         outcome.Plan = plan;
         outcome.Warnings.AddRange(plan.Warnings.Select(w => $"{w.Kind}({w.TableName})"));
 
-        // 計画が「選んでいない変更に依存する」と名指しして外した項目は、選ばなかった項目として扱う（警告が出ているので
-        // 残ってよい）。警告なしに計画から消えた項目は従来どおり「選んだのに残った」違反になる。列の変更は NULL 許容化だけを
-        // 外して型の変更を残すことがあるので、残ってよい側にだけ入れる（型の変更は選んだ変更として表明 4 で見る）
+        // 計画が名指しして外した項目（SyncPlan.ExcludedItems＝外す箇所は警告と一緒に積む）は、選ばなかった項目として扱う
+        // （警告が出ているので残ってよい）。警告なしに計画から消えた項目は従来どおり「選んだのに残った」違反になる。列の変更は
+        // NULL 許容化だけを外して型の変更を残すことがあるので、残ってよい側にだけ入れる（型の変更は選んだ変更として表明 4 で見る）
         var plannedKeys = plan
             .Sections.SelectMany(s => s.Items)
             .Concat(plan.Rebuilds.SelectMany(r => r.SourceItems))
             .Concat(plan.Reorders.SelectMany(r => r.SourceItems))
             .SelectMany(i => Keys(i, capabilities))
             .ToHashSet();
-        var dependencyWarnedTables = plan
-            .Warnings.Where(w => w.Kind == SyncPlanWarningKind.SelectedItemRequiresUnselectedItem)
-            .Select(w => w.TableName.Trim().ToLowerInvariant())
-            .ToHashSet();
         var allowedToRemain = selected
-            .Where(i =>
-                dependencyWarnedTables.Contains(i.TableName.Trim().ToLowerInvariant())
-                && (
-                    i.Kind == SchemaDiffKind.AlterColumn
-                    || !Keys(i, capabilities).Any(plannedKeys.Contains)
-                )
-            )
+            .Where(i => plan.ExcludedItems.Contains(i, ReferenceEqualityComparer.Instance))
             .ToHashSet();
         var excluded = allowedToRemain
             .Where(i => !Keys(i, capabilities).Any(plannedKeys.Contains))

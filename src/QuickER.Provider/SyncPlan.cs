@@ -190,6 +190,17 @@ public enum SyncPlanWarningKind
     /// 同期した後に差分は出ないが、DB の説明は図と違う文字になる。表・列ごとに 1 件。
     /// </remarks>
     DescriptionCharactersReplaced,
+
+    /// <summary>
+    /// 選んだ主キーの変更の新しい主キーと同じ列集合の一意制約を、削除を選んでいなくても外した（主キーと同じ列集合の一意制約を
+    /// 持てない方言＝<see cref="SyncDialectCapabilities.SupportsUniqueConstraintOnPrimaryKey"/> が偽の逐次 DDL の方言＝Oracle）。
+    /// </summary>
+    /// <remarks>
+    /// Oracle は同じ列に主キーと一意制約を両方は持てず、主キーの付与が ORA-02261 で断られる。差分は図の主キーと同じ列集合の
+    /// 一意制約を比較から外すので、利用者は一意制約の削除を選べない。値の一意性は主キーが保ち、図からの DDL もその一意制約を省くので、
+    /// 外して名指しする（付け直さない）。その一意制約を参照する外部キーは外して、新しい主キーへ付け直す。
+    /// </remarks>
+    UniqueConstraintReplacedByPrimaryKey,
 }
 
 /// <summary>
@@ -204,7 +215,7 @@ public enum SyncPlanWarningKind
 /// 計画から外した項目のテーブル、<see cref="SyncPlanWarningKind.ForeignKeyNotOnCandidateKey"/> と
 /// <see cref="SyncPlanWarningKind.SetDefaultOnNotNullColumn"/> と <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> では外部キーを保有する子テーブル、<see cref="SyncPlanWarningKind.SchemaQualifiedTableName"/> ではドットを含む表名（Detail は空）、
 /// <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> では列のテーブル（Detail は「列名 (旧の型 → 新しい型)」）、
-/// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
+/// <see cref="SyncPlanWarningKind.UniqueConstraintDroppedWithColumn"/> と <see cref="SyncPlanWarningKind.UniqueConstraintReplacedByPrimaryKey"/> では一意制約のテーブル（Detail は「制約名 (構成列, …)」）、
 /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> では説明のテーブル（Detail は「表」または「表.列」）。
 /// </param>
 /// <param name="Detail">
@@ -257,6 +268,18 @@ public sealed class SyncPlan
     /// 分かっているだけ）。表示層は実行確認の文言へ織り込む。
     /// </remarks>
     public IReadOnlyList<SyncPlanWarning> Warnings { get; init; } = [];
+
+    /// <summary>
+    /// 利用者が選んだのに、計画が外した項目（選んだ元の項目そのもの）。外した理由はそれぞれ警告（<see cref="Warnings"/>）で名指しする。
+    /// </summary>
+    /// <remarks>
+    /// 外す理由は、選んでいない変更を前提にする（<see cref="SyncPlanWarningKind.SelectedItemRequiresUnselectedItem"/>）・
+    /// 同期後に両端の型が食い違う外部キーの追加と作り直し（<see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/>）・
+    /// 作れない方言の、子の列が NOT NULL になる SET NULL の外部キーの追加と作り直し
+    /// （<see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/>）。型の変更も含む列の変更で NULL 許容化だけを外した項目も
+    /// ここに入る（型の変更は計画に残る）。警告と一覧は同じ箇所で必ず一緒に積む。
+    /// </remarks>
+    public IReadOnlyList<SchemaDiffItem> ExcludedItems { get; init; } = [];
 
     /// <summary>生成対象のセクション・再構築・並べ替えが 1 件も無いか。</summary>
     public bool IsEmpty => Sections.Count == 0 && Rebuilds.Count == 0 && Reorders.Count == 0;
